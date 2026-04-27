@@ -35,6 +35,16 @@ docker compose --env-file .env.prod -f ops/compose.yml -p avg up -d
 
 For the first VPS smoke, follow [docs/VPS_SMOKE.md](docs/VPS_SMOKE.md).
 
+## Hermes Pin
+
+The runtime image is pinned in [ops/.env.example](ops/.env.example):
+
+```text
+nousresearch/hermes-agent:dafe443beba74384871e2c79d5b17db8bc51880e
+```
+
+Do not use `latest` in production. Test a new Hermes tag in a branch, run the smoke flow, then update the pin deliberately.
+
 Run the reference prompt:
 
 ```bash
