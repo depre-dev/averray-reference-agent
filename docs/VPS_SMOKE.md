@@ -26,6 +26,7 @@ scripts/bootstrap-wallet.sh
 # - set OLLAMA_API_KEY
 # - set SLACK_WEBHOOK_URL
 # - confirm AVERRAY_API_BASE_URL points at testnet
+# - keep HERMES_IMAGE pinned; do not use latest for production smoke
 chmod 600 .env.prod
 
 docker compose --env-file .env.prod -f ops/compose.yml -f ops/compose.prod.yml -p avg up -d --build
@@ -72,6 +73,16 @@ Look for:
 - Skills observer started.
 - Postgres migrations applied.
 
+## Runtime Pin
+
+The default Hermes image is pinned to:
+
+```text
+nousresearch/hermes-agent:dafe443beba74384871e2c79d5b17db8bc51880e
+```
+
+Before changing that pin, test the new tag on a branch and re-run the safe first prompt.
+
 ## Kill Switch
 
 Create the halt file to stop mutating tools:
@@ -95,4 +106,3 @@ docker compose --env-file .env.prod -f ops/compose.yml -f ops/compose.prod.yml -
 ```
 
 Use `down -v` only when you explicitly want to delete Postgres/Hermes data.
-
