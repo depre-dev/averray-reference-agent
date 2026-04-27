@@ -78,7 +78,7 @@ Look for:
 The default Hermes image is pinned to:
 
 ```text
-nousresearch/hermes-agent:dafe443beba74384871e2c79d5b17db8bc51880e
+nousresearch/hermes-agent@sha256:8811f1809971ac558f8d5e311e22fe73dc2944616dda7295c98acb6028f9df08
 ```
 
 Before changing that pin, test the new tag on a branch and re-run the safe first prompt.
