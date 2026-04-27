@@ -16,7 +16,7 @@ import { randomUUID } from "node:crypto";
 const privateKey = generatePrivateKey();
 const account = privateKeyToAccount(privateKey);
 
-console.log(`HERMES_IMAGE=nousresearch/hermes-agent:latest`);
+console.log(`HERMES_IMAGE=nousresearch/hermes-agent@sha256:8811f1809971ac558f8d5e311e22fe73dc2944616dda7295c98acb6028f9df08`);
 console.log(`POSTGRES_USER=avg_agent`);
 console.log(`POSTGRES_PASSWORD=${randomUUID().replaceAll("-", "")}`);
 console.log(`POSTGRES_DB=avg_agent`);
