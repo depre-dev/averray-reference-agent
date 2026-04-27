@@ -1,0 +1,40 @@
+{
+  "name": "averray-reference-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "External Hermes + MCP reference agent for testing Averray as a future consumer agent.",
+  "workspaces": [
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "build": "tsc -b packages/* services/*",
+    "typecheck": "tsc -b --pretty false packages/* services/*",
+    "test": "vitest run",
+    "dev:trace": "tsx packages/trace-mcp/src/index.ts",
+    "dev:policy": "tsx packages/policy-mcp/src/index.ts",
+    "dev:observer": "tsx services/skills-observer/src/index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.13.3",
+    "chokidar": "^4.0.3",
+    "dotenv": "^16.4.7",
+    "pg": "^8.13.1",
+    "pino": "^9.6.0",
+    "viem": "^2.23.7",
+    "yaml": "^2.7.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
+

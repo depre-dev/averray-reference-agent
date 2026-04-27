@@ -1,0 +1,17 @@
+{
+  "name": "@avg/skills-observer",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@avg/mcp-common": "0.1.0",
+    "chokidar": "^4.0.3"
+  }
+}
+

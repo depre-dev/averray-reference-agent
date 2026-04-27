@@ -1,0 +1,19 @@
+{
+  "name": "@avg/wallet-mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@avg/mcp-common": "0.1.0",
+    "@modelcontextprotocol/sdk": "^1.13.3",
+    "viem": "^2.23.7",
+    "zod": "^3.24.1"
+  }
+}
+

@@ -1,0 +1,20 @@
+{
+  "name": "@avg/mcp-common",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.13.3",
+    "pg": "^8.13.1",
+    "pino": "^9.6.0",
+    "viem": "^2.23.7",
+    "yaml": "^2.7.0",
+    "zod": "^3.24.1"
+  }
+}
+

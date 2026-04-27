@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+.env.prod
+coverage/
+data/
+reports/
+*.tsbuildinfo
+

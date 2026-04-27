@@ -1,0 +1,14 @@
+claim:
+  allowed_task_types:
+    - citation_repair
+    - freshness_check
+  reject_verifier_modes:
+    - human_fallback
+  min_reward_usd: 0.0
+submit:
+  require_approval_if_confidence_lt: 0.7
+budget:
+  per_run_usd_max: 0.5
+  per_day_usd_max: 1.0
+  max_browser_steps: 80
+

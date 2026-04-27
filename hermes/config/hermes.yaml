@@ -1,0 +1,30 @@
+# Copied into /opt/data/config.yaml by the operator after `hermes setup`.
+# Keep this file declarative; Hermes owns its runtime data under /opt/data.
+model:
+  provider: ollama
+  base_url: ${OLLAMA_BASE_URL}
+  api_key_env: OLLAMA_API_KEY
+  default: ${HERMES_DEFAULT_MODEL}
+
+mcp_servers:
+  averray:
+    command: node
+    args: ["/app/packages/averray-mcp/dist/index.js"]
+  wallet:
+    command: node
+    args: ["/app/packages/wallet-mcp/dist/index.js"]
+  receipt:
+    command: node
+    args: ["/app/packages/receipt-mcp/dist/index.js"]
+  trace:
+    command: node
+    args: ["/app/packages/trace-mcp/dist/index.js"]
+  policy:
+    command: node
+    args: ["/app/packages/policy-mcp/dist/index.js"]
+
+paths:
+  skills: /opt/data/skills
+  memory: /opt/data/memory.db
+  plugins: /opt/data/plugins
+
