@@ -40,7 +40,7 @@ For the first VPS smoke, follow [docs/VPS_SMOKE.md](docs/VPS_SMOKE.md).
 The runtime image is pinned in [ops/.env.example](ops/.env.example):
 
 ```text
-nousresearch/hermes-agent:dafe443beba74384871e2c79d5b17db8bc51880e
+nousresearch/hermes-agent@sha256:8811f1809971ac558f8d5e311e22fe73dc2944616dda7295c98acb6028f9df08
 ```
 
 Do not use `latest` in production. Test a new Hermes tag in a branch, run the smoke flow, then update the pin deliberately.
