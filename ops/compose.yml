@@ -28,12 +28,32 @@ services:
     entrypoint: ["/bin/sh", "/migrate.sh"]
     networks: [avg-internal]
 
+  hermes-permissions:
+    image: alpine:3.20
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command:
+      [
+        "/bin/sh",
+        "-lc",
+        "mkdir -p /opt/data/skills /opt/data/browser-profiles /data && chmod -R 0777 /opt/data /data"
+      ]
+    volumes:
+      - avg-hermes:/opt/data
+      - avg-data:/data
+      - ../hermes/profiles:/opt/data/browser-profiles
+      - avg-hermes-skills:/opt/data/skills
+    networks: [avg-internal]
+
   skills-observer:
     build:
       context: ..
       dockerfile: ops/Dockerfile.node
     restart: unless-stopped
-    depends_on: [migrate]
+    depends_on:
+      hermes-permissions:
+        condition: service_completed_successfully
     command: ["node", "services/skills-observer/dist/index.js"]
     environment:
       DATABASE_URL: ${DATABASE_URL}
@@ -49,8 +69,10 @@ services:
     image: ${HERMES_IMAGE}
     restart: unless-stopped
     depends_on:
-      - migrate
-      - skills-observer
+      hermes-permissions:
+        condition: service_completed_successfully
+      skills-observer:
+        condition: service_started
     environment:
       OLLAMA_API_KEY: ${OLLAMA_API_KEY}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
@@ -77,7 +99,7 @@ services:
       - avg-hermes-skills:/opt/data/skills
     networks: [avg-internal]
     # Keep dashboard internal. Use Tailscale/SSH tunnel to reach 127.0.0.1:9119 on the VPS.
-    command: ["web", "--host", "127.0.0.1", "--port", "9119"]
+    command: ["dashboard", "--host", "127.0.0.1", "--port", "9119"]
 
 volumes:
   avg-postgres:
