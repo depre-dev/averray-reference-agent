@@ -46,10 +46,30 @@ services:
       - avg-hermes-skills:/opt/data/skills
     networks: [avg-internal]
 
+  mcp-bundle:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.node
+    image: avg-node-runtime
+    depends_on:
+      hermes-permissions:
+        condition: service_completed_successfully
+    user: root
+    command:
+      [
+        "/bin/sh",
+        "-lc",
+        "rm -rf /runtime-app/* && cp -a /app/. /runtime-app/ && chmod -R a+rX /runtime-app"
+      ]
+    volumes:
+      - avg-app:/runtime-app
+    networks: [avg-internal]
+
   skills-observer:
     build:
       context: ..
       dockerfile: ops/Dockerfile.node
+    image: avg-node-runtime
     restart: unless-stopped
     depends_on:
       hermes-permissions:
@@ -71,6 +91,8 @@ services:
     depends_on:
       hermes-permissions:
         condition: service_completed_successfully
+      mcp-bundle:
+        condition: service_completed_successfully
       skills-observer:
         condition: service_started
     environment:
@@ -90,7 +112,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - avg-hermes:/opt/data
-      - ..:/app:ro
+      - avg-app:/app:ro
       - avg-data:/data
       - ../hermes/config/hermes.yaml:/opt/data/config.yaml:ro
       - ../hermes/config/policy.yaml:/config/policy.yaml:ro
@@ -104,6 +126,7 @@ services:
 volumes:
   avg-postgres:
   avg-data:
+  avg-app:
   avg-hermes:
   avg-hermes-skills:
 
