@@ -46,7 +46,9 @@ docker compose --env-file .env.prod -f ops/compose.yml -f ops/compose.prod.yml -
 
 Hermes dashboard is not exposed publicly. Docker binds it to
 `127.0.0.1:9119` on the VPS, so open the SSH tunnel from your laptop, not from
-inside the VPS shell.
+inside the VPS shell. The Hermes dashboard command uses `--insecure` because
+Hermes requires it for the container-internal `0.0.0.0` bind; Docker still
+limits host access to VPS loopback.
 
 SSH tunnel:
 

@@ -122,8 +122,9 @@ services:
     networks: [avg-internal]
     ports:
       - "127.0.0.1:9119:9119"
-    # Bound to VPS localhost only by the port mapping above. Use Tailscale/SSH tunnel.
-    command: ["dashboard", "--host", "0.0.0.0", "--port", "9119"]
+    # Hermes requires --insecure for non-loopback container binds. The Docker
+    # port mapping above keeps this reachable only from VPS localhost.
+    command: ["dashboard", "--host", "0.0.0.0", "--port", "9119", "--insecure"]
 
 volumes:
   avg-postgres:

@@ -66,6 +66,8 @@ Then open `http://127.0.0.1:9119`.
 - One wallet.
 - No public dashboard port.
 - The dashboard is bound to `127.0.0.1:9119` on the VPS for SSH/Tailscale access.
+- Hermes runs dashboard mode with `--insecure` only because Docker publishes it
+  to VPS loopback, not to the public interface.
 - No Averray admin token.
 - No shared Averray DB, Redis, Docker network, or volumes.
 - No Docker socket.
