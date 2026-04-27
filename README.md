@@ -33,6 +33,8 @@ Start the isolated stack:
 docker compose --env-file .env.prod -f ops/compose.yml -p avg up -d
 ```
 
+For the first VPS smoke, follow [docs/VPS_SMOKE.md](docs/VPS_SMOKE.md).
+
 Run the reference prompt:
 
 ```bash
