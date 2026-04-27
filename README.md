@@ -51,7 +51,8 @@ Run the reference prompt:
 docker compose -p avg exec hermes hermes "Find a Wikipedia citation-repair task on app.averray.com testnet, claim it, complete it, get paid. Use my wallet."
 ```
 
-Access Hermes dashboard through an SSH tunnel:
+Access Hermes dashboard through an SSH tunnel. Run this from your laptop, not
+from inside the VPS shell:
 
 ```bash
 ssh -L 9119:localhost:9119 ubuntu@YOUR_VPS
@@ -64,6 +65,7 @@ Then open `http://127.0.0.1:9119`.
 - Testnet only.
 - One wallet.
 - No public dashboard port.
+- The dashboard is bound to `127.0.0.1:9119` on the VPS for SSH/Tailscale access.
 - No Averray admin token.
 - No shared Averray DB, Redis, Docker network, or volumes.
 - No Docker socket.

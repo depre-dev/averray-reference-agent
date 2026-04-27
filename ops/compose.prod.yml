@@ -1,5 +1,3 @@
 services:
   postgres:
     ports: []
-  hermes:
-    ports: []

@@ -44,7 +44,9 @@ docker compose --env-file .env.prod -f ops/compose.yml -f ops/compose.prod.yml -
 
 ## Dashboard Access
 
-Hermes dashboard is not exposed publicly.
+Hermes dashboard is not exposed publicly. Docker binds it to
+`127.0.0.1:9119` on the VPS, so open the SSH tunnel from your laptop, not from
+inside the VPS shell.
 
 SSH tunnel:
 
@@ -79,7 +81,7 @@ Look for:
 
 - Hermes dashboard started.
 - MCP servers discovered.
-- No public ports published.
+- No public ports published; dashboard is bound only to VPS localhost.
 - Skills observer started.
 - Postgres migrations applied.
 
