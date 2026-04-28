@@ -33,7 +33,7 @@ cp ops/.env.example .env.prod
 
 # Edit .env.prod:
 # - set OLLAMA_API_KEY
-# - keep OLLAMA_BASE_URL as https://ollama.com/api
+# - keep OLLAMA_BASE_URL as https://ollama.com/v1
 # - set SLACK_WEBHOOK_URL
 # - set AGENT_WALLET_PRIVATE_KEY if you did not use bootstrap-wallet.sh
 # - confirm AVERRAY_API_BASE_URL points at testnet
