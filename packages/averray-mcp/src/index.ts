@@ -18,11 +18,17 @@ const server = new McpServer({
 
 const baseUrl = trimTrailingSlash(optionalEnv("AVERRAY_API_BASE_URL", "https://api.averray.com"));
 
-server.tool("averray_list_jobs", "List Averray jobs and recommendations for fallback/API control mode.", {
-  recommendations: z.boolean().default(false)
-}, async ({ recommendations }) => {
+server.tool("averray_list_jobs", "List Averray jobs in compact form. Use search/source/category/state filters to find specific jobs without flooding context.", {
+  recommendations: z.boolean().default(false),
+  search: z.string().optional(),
+  source: z.string().optional(),
+  category: z.string().optional(),
+  state: z.string().optional(),
+  limit: z.number().int().min(1).max(100).default(25)
+}, async ({ recommendations, search, source, category, state, limit }) => {
   const path = recommendations ? "/jobs/recommendations" : "/jobs";
-  return jsonContent(await request(path));
+  const payload = await request(path);
+  return jsonContent(compactJobsPayload(payload, { recommendations, search, source, category, state, limit }));
 });
 
 server.tool("averray_get_definition", "Get the canonical job definition for a job id.", {
@@ -133,4 +139,96 @@ async function completeSubmission(key: string, response: unknown) {
      where idempotency_key = $1`,
     [key, JSON.stringify(response)]
   ).catch(() => undefined);
+}
+
+function compactJobsPayload(
+  payload: unknown,
+  filters: {
+    recommendations: boolean;
+    search?: string;
+    source?: string;
+    category?: string;
+    state?: string;
+    limit: number;
+  }
+) {
+  const jobs = extractJobArray(payload);
+  const filtered = jobs.filter((job) => matchesJob(job, filters));
+  const limited = filtered.slice(0, filters.limit).map(compactJob);
+  return {
+    total: jobs.length,
+    matched: filtered.length,
+    returned: limited.length,
+    filters: {
+      recommendations: filters.recommendations,
+      search: filters.search ?? null,
+      source: filters.source ?? null,
+      category: filters.category ?? null,
+      state: filters.state ?? null,
+      limit: filters.limit
+    },
+    jobs: limited,
+    note:
+      filtered.length > limited.length
+        ? "Result was truncated. Re-run with a narrower search/source/category/state filter or a higher limit."
+        : "Use averray_get_definition(jobId) for full details before planning work."
+  };
+}
+
+function extractJobArray(payload: unknown): unknown[] {
+  if (Array.isArray(payload)) return payload;
+  if (!isRecord(payload)) return [];
+  for (const key of ["jobs", "items", "data", "recommendations", "results", "rows"]) {
+    const value = payload[key];
+    if (Array.isArray(value)) return value;
+  }
+  return [];
+}
+
+function matchesJob(
+  job: unknown,
+  filters: { search?: string; source?: string; category?: string; state?: string }
+): boolean {
+  const haystack = JSON.stringify(job).toLowerCase();
+  if (filters.search && !haystack.includes(filters.search.toLowerCase())) return false;
+  if (filters.source && !haystack.includes(filters.source.toLowerCase())) return false;
+  if (filters.category && !haystack.includes(filters.category.toLowerCase())) return false;
+  if (filters.state && !hasFieldValue(job, ["state", "status"], filters.state)) return false;
+  return true;
+}
+
+function compactJob(job: unknown) {
+  if (!isRecord(job)) return job;
+  const metadata = isRecord(job.metadata) ? job.metadata : {};
+  const source = isRecord(job.source) ? job.source : {};
+  return {
+    id: firstString(job.id, job.jobId, job.externalTaskId),
+    title: firstString(job.title, job.name, metadata.title),
+    state: firstString(job.state, job.status),
+    source: firstString(job.source, job.kind, source.type, source.kind, metadata.source, metadata.platform),
+    category: firstString(job.category, job.type, metadata.category, metadata.taskType),
+    stake: firstPresent(job.stake, job.reward, job.rewardAmount, metadata.stake, metadata.reward),
+    createdAt: firstString(job.createdAt, job.created_at, metadata.createdAt),
+    sessionId: firstString(job.sessionId, job.session_id),
+    summary: firstString(job.description, job.summary, metadata.description)
+  };
+}
+
+function hasFieldValue(job: unknown, keys: string[], expected: string): boolean {
+  if (!isRecord(job)) return false;
+  const normalizedExpected = expected.toLowerCase();
+  return keys.some((key) => String(job[key] ?? "").toLowerCase() === normalizedExpected);
+}
+
+function firstString(...values: unknown[]): string | null {
+  const value = values.find((candidate) => typeof candidate === "string" && candidate.length > 0);
+  return typeof value === "string" ? value : null;
+}
+
+function firstPresent(...values: unknown[]): unknown {
+  return values.find((candidate) => candidate !== undefined && candidate !== null) ?? null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
