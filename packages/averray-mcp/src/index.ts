@@ -21,16 +21,14 @@ const baseUrl = trimTrailingSlash(optionalEnv("AVERRAY_API_BASE_URL", "https://a
 server.tool("averray_list_jobs", "List Averray jobs and recommendations for fallback/API control mode.", {
   recommendations: z.boolean().default(false)
 }, async ({ recommendations }) => {
-  const session = await authSession();
   const path = recommendations ? "/jobs/recommendations" : "/jobs";
-  return jsonContent(await request(path, { token: session.token }));
+  return jsonContent(await request(path));
 });
 
 server.tool("averray_get_definition", "Get the canonical job definition for a job id.", {
   jobId: z.string().min(1)
 }, async ({ jobId }) => {
-  const session = await authSession();
-  return jsonContent(await request(`/jobs/definition?jobId=${encodeURIComponent(jobId)}`, { token: session.token }));
+  return jsonContent(await request(`/jobs/definition?jobId=${encodeURIComponent(jobId)}`));
 });
 
 server.tool("averray_claim", "Claim a job through Averray's public API fallback path.", {
