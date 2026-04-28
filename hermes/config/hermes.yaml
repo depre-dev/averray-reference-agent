@@ -1,7 +1,7 @@
 # Copied into /opt/data/config.yaml by the operator after `hermes setup`.
 # Keep this file declarative; Hermes owns its runtime data under /opt/data.
 model:
-  provider: ollama
+  provider: ollama-cloud
   base_url: ${OLLAMA_BASE_URL}
   api_key_env: OLLAMA_API_KEY
   default: ${HERMES_DEFAULT_MODEL}
@@ -27,4 +27,3 @@ paths:
   skills: /opt/data/skills
   memory: /opt/data/memory.db
   plugins: /opt/data/plugins
-

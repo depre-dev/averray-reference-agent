@@ -29,6 +29,9 @@ fi
 IFS=',' read -r -a model_array <<< "${MODELS}"
 for model in "${model_array[@]}"; do
   echo "== Running Hermes with model ${model}"
-  docker compose -p avg exec -e HERMES_DEFAULT_MODEL="${model}" hermes hermes "${TASK}"
+  docker compose --env-file .env.prod -f ops/compose.yml -f ops/compose.prod.yml -p avg \
+    exec hermes /opt/hermes/.venv/bin/hermes chat \
+    --provider ollama-cloud \
+    -m "${model}" \
+    -q "${TASK}"
 done
-

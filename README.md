@@ -48,7 +48,11 @@ Do not use `latest` in production. Test a new Hermes tag in a branch, run the sm
 Run the reference prompt:
 
 ```bash
-docker compose -p avg exec hermes hermes "Find a Wikipedia citation-repair task on app.averray.com testnet, claim it, complete it, get paid. Use my wallet."
+docker compose --env-file .env.prod -f ops/compose.yml -f ops/compose.prod.yml -p avg \
+  exec hermes /opt/hermes/.venv/bin/hermes chat \
+  --provider ollama-cloud \
+  -m qwen3.5:cloud \
+  -q "Find a Wikipedia citation-repair task on app.averray.com testnet, claim it, complete it, get paid. Use my wallet."
 ```
 
 Access Hermes dashboard through an SSH tunnel. Run this from your laptop, not

@@ -68,7 +68,10 @@ Do not claim or submit during the first smoke.
 
 ```bash
 docker compose --env-file .env.prod -f ops/compose.yml -f ops/compose.prod.yml -p avg \
-  exec hermes hermes "Open app.averray.com testnet, find a Wikipedia job, inspect it, and write what you learned. Do not claim or submit."
+  exec hermes /opt/hermes/.venv/bin/hermes chat \
+  --provider ollama-cloud \
+  -m qwen3.5:cloud \
+  -q "Open app.averray.com testnet, find a Wikipedia job, inspect it, and write what you learned. Do not claim or submit."
 ```
 
 ## Tool Smoke
