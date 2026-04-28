@@ -71,7 +71,7 @@ Do not claim or submit during the first smoke.
 docker compose --env-file .env.prod -f ops/compose.yml -f ops/compose.prod.yml -p avg \
   exec hermes /opt/hermes/.venv/bin/hermes chat \
   --provider ollama-cloud \
-  -m qwen3.5:cloud \
+  -m deepseek-v4-pro:cloud \
   -q "Open app.averray.com testnet, find a Wikipedia job, inspect it, and write what you learned. Do not claim or submit."
 ```
 

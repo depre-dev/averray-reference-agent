@@ -7,8 +7,8 @@ This project is intentionally separate from the Averray deploy/runtime. Hermes o
 ## v1 Shape
 
 - Hermes Agent pinned Docker runtime.
-- Default brain: Ollama Cloud `qwen3.5:cloud`.
-- Comparison brain: Ollama Cloud `kimi-k2.5:cloud`.
+- Default brain: Ollama Cloud `deepseek-v4-pro:cloud`.
+- Comparison brain: Ollama Cloud `qwen3.5:cloud`.
 - Five TypeScript MCP servers: Averray, wallet, receipt, trace, policy.
 - One tiny Hermes Python plugin for trace events.
 - Skills observer sidecar that ingests Hermes-generated skill files.
@@ -51,7 +51,7 @@ Run the reference prompt:
 docker compose --env-file .env.prod -f ops/compose.yml -f ops/compose.prod.yml -p avg \
   exec hermes /opt/hermes/.venv/bin/hermes chat \
   --provider ollama-cloud \
-  -m qwen3.5:cloud \
+  -m deepseek-v4-pro:cloud \
   -q "Find a Wikipedia citation-repair task on app.averray.com testnet, claim it, complete it, get paid. Use my wallet."
 ```
 
