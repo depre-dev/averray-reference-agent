@@ -9,12 +9,17 @@ const server = new McpServer({
 });
 
 server.tool("wallet_status", "Return wallet status and configured signing modes.", {}, async () => {
-  const account = accountFromEnv();
+  const configuredKey = optionalEnv("AGENT_WALLET_PRIVATE_KEY");
+  const account = configuredKey ? tryAccountFromPrivateKey(configuredKey) : null;
   return jsonContent({
-    address: account.address,
+    address: account?.address ?? null,
+    configured: Boolean(account),
     extensionMode: Boolean(optionalEnv("BROWSER_CDP_URL")),
-    siweFallbackMode: true,
-    network: optionalEnv("WALLET_NETWORK", "testnet")
+    siweFallbackMode: Boolean(account),
+    network: optionalEnv("WALLET_NETWORK", "testnet"),
+    message: account
+      ? "Wallet key is configured for SIWE fallback."
+      : "No usable AGENT_WALLET_PRIVATE_KEY is configured. Read-only tools still work; claiming/submitting requires a testnet wallet key."
   });
 });
 
@@ -60,3 +65,10 @@ function accountFromEnv() {
   return privateKeyToAccount(requiredEnv("AGENT_WALLET_PRIVATE_KEY") as `0x${string}`);
 }
 
+function tryAccountFromPrivateKey(privateKey: string) {
+  try {
+    return privateKeyToAccount(privateKey as `0x${string}`);
+  } catch {
+    return null;
+  }
+}
