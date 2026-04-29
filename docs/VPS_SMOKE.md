@@ -75,6 +75,36 @@ docker compose --env-file .env.prod -f ops/compose.yml -f ops/compose.prod.yml -
   -q "Open app.averray.com testnet, find a Wikipedia job, inspect it, and write what you learned. Do not claim or submit."
 ```
 
+## Claim Readiness Smoke
+
+Run this only after `.env.prod` contains a real testnet-only
+`AGENT_WALLET_PRIVATE_KEY`. The script validates that the key has the expected
+shape without printing it. It may print `AGENT_WALLET_ADDRESS`, which is safe.
+
+This smoke checks wallet status, policy budget, compact Wikipedia discovery,
+one job definition, and `policy_check_claim`. It explicitly forbids
+`averray_claim`, `averray_submit`, approvals, and Wikipedia edits.
+
+```bash
+scripts/claim-readiness-smoke.sh
+```
+
+To compare a second model without changing `.env.prod`:
+
+```bash
+scripts/claim-readiness-smoke.sh --model qwen3.5:cloud
+```
+
+Expected result:
+
+- `wallet_status.configured` is true.
+- `wallet_export_address` returns the same testnet wallet address you expect.
+- `policy_get_budget` returns current per-run/per-day budget limits.
+- `averray_list_jobs` returns a compact Wikipedia subset.
+- `averray_get_definition` returns one Wikipedia definition.
+- `policy_check_claim` returns `pass` or a clear blocker.
+- No session is claimed and no work is submitted.
+
 ## Tool Smoke
 
 After Hermes boots, verify the MCP tools from a shell inside the Hermes container when Hermes MCP config is loaded:

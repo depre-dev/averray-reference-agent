@@ -35,6 +35,16 @@ docker compose --env-file .env.prod -f ops/compose.yml -p avg up -d
 
 For the first VPS smoke, follow [docs/VPS_SMOKE.md](docs/VPS_SMOKE.md).
 
+After the read-only smoke passes and `.env.prod` contains a real testnet-only
+wallet key, run the non-mutating claim-readiness smoke:
+
+```bash
+scripts/claim-readiness-smoke.sh
+```
+
+It checks wallet status, policy budget, compact Wikipedia discovery, one job
+definition, and claim policy. It must not claim or submit.
+
 ## Hermes Pin
 
 The runtime image is pinned in [ops/.env.example](ops/.env.example):
