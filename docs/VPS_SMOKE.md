@@ -45,9 +45,10 @@ docker compose --env-file .env.prod -f ops/compose.yml -f ops/compose.prod.yml -
 
 If you add or change `AGENT_WALLET_PRIVATE_KEY` after Hermes is already
 running, force-recreate the Hermes service so Docker injects the new
-environment. Hermes also passes secrets into each stdio MCP server through
-`mcp_servers.<name>.env`, so the MCP servers are reloaded when the service
-starts from this config:
+environment. The stack also writes selected env values into an internal
+Docker volume at `/config-runtime/reference-agent.env`; the MCP launcher
+sources that file before starting each Node MCP server so Hermes does not
+need to write secrets into `config.yaml`:
 
 ```bash
 docker compose --env-file .env.prod -f ops/compose.yml -f ops/compose.prod.yml -p avg \
@@ -96,7 +97,9 @@ This smoke checks wallet status, policy budget, compact Wikipedia discovery,
 one job definition, and `policy_check_claim`. It explicitly forbids
 `averray_claim`, `averray_submit`, approvals, and Wikipedia edits.
 Before launching Hermes, it also verifies that the running Hermes container can
-see `AGENT_WALLET_PRIVATE_KEY`; if that fails, force-recreate `hermes`.
+see `AGENT_WALLET_PRIVATE_KEY` and that the MCP launcher can read
+`/config-runtime/reference-agent.env`; if either fails, force-recreate
+`hermes`.
 
 ```bash
 scripts/claim-readiness-smoke.sh

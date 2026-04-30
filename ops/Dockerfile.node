@@ -14,5 +14,6 @@ COPY --from=build /app/package.json /app/package-lock.json* ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages ./packages
 COPY --from=build /app/services ./services
+COPY --from=build /app/scripts ./scripts
 USER appuser
 CMD ["node", "packages/trace-mcp/dist/index.js"]

@@ -65,6 +65,32 @@ services:
       - avg-app:/runtime-app
     networks: [avg-internal]
 
+  mcp-env:
+    image: alpine:3.20
+    depends_on:
+      hermes-permissions:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      AVERRAY_API_BASE_URL: ${AVERRAY_API_BASE_URL}
+      AGENT_WALLET_PRIVATE_KEY: ${AGENT_WALLET_PRIVATE_KEY}
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
+      HERMES_DEFAULT_MODEL: ${HERMES_DEFAULT_MODEL:-deepseek-v4-pro:cloud}
+      HERMES_COMPARISON_MODEL: ${HERMES_COMPARISON_MODEL:-qwen3.5:cloud}
+      TRACE_HTTP_PORT: ${TRACE_HTTP_PORT:-8789}
+      TRACE_HTTP_URL: http://127.0.0.1:${TRACE_HTTP_PORT:-8789}/hermes-event
+      POLICY_CONFIG_PATH: /config/policy.yaml
+      HALT_FILE: ${HALT_FILE:-/data/HALT}
+      WALLET_NETWORK: testnet
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - avg-mcp-env:/mcp-env
+      - ./write-mcp-env.sh:/write-mcp-env.sh:ro
+    entrypoint: ["/bin/sh", "/write-mcp-env.sh", "/mcp-env/reference-agent.env"]
+    networks: [avg-internal]
+
   skills-observer:
     build:
       context: ..
@@ -93,6 +119,8 @@ services:
         condition: service_completed_successfully
       mcp-bundle:
         condition: service_completed_successfully
+      mcp-env:
+        condition: service_completed_successfully
       skills-observer:
         condition: service_started
     environment:
@@ -114,6 +142,7 @@ services:
       - avg-hermes:/opt/data
       - avg-app:/app:ro
       - avg-data:/data
+      - avg-mcp-env:/config-runtime:ro
       - ../hermes/config/hermes.yaml:/opt/data/config.yaml:ro
       - ../hermes/config/policy.yaml:/config/policy.yaml:ro
       - ../hermes/plugins:/opt/data/plugins:ro
@@ -130,6 +159,7 @@ volumes:
   avg-postgres:
   avg-data:
   avg-app:
+  avg-mcp-env:
   avg-hermes:
   avg-hermes-skills:
 
