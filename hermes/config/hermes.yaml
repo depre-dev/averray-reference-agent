@@ -10,18 +10,45 @@ mcp_servers:
   averray:
     command: node
     args: ["/app/packages/averray-mcp/dist/index.js"]
+    env:
+      DATABASE_URL: ${DATABASE_URL}
+      AVERRAY_API_BASE_URL: ${AVERRAY_API_BASE_URL}
+      AGENT_WALLET_PRIVATE_KEY: ${AGENT_WALLET_PRIVATE_KEY}
+      HALT_FILE: ${HALT_FILE}
+      LOG_LEVEL: ${LOG_LEVEL}
   wallet:
     command: node
     args: ["/app/packages/wallet-mcp/dist/index.js"]
+    env:
+      AGENT_WALLET_PRIVATE_KEY: ${AGENT_WALLET_PRIVATE_KEY}
+      AVERRAY_API_BASE_URL: ${AVERRAY_API_BASE_URL}
+      BROWSER_CDP_URL: ${BROWSER_CDP_URL}
+      HALT_FILE: ${HALT_FILE}
+      WALLET_NETWORK: ${WALLET_NETWORK}
+      LOG_LEVEL: ${LOG_LEVEL}
   receipt:
     command: node
     args: ["/app/packages/receipt-mcp/dist/index.js"]
+    env:
+      DATABASE_URL: ${DATABASE_URL}
+      AGENT_WALLET_PRIVATE_KEY: ${AGENT_WALLET_PRIVATE_KEY}
+      LOG_LEVEL: ${LOG_LEVEL}
   trace:
     command: node
     args: ["/app/packages/trace-mcp/dist/index.js"]
+    env:
+      DATABASE_URL: ${DATABASE_URL}
+      TRACE_HTTP_PORT: ${TRACE_HTTP_PORT}
+      LOG_LEVEL: ${LOG_LEVEL}
   policy:
     command: node
     args: ["/app/packages/policy-mcp/dist/index.js"]
+    env:
+      DATABASE_URL: ${DATABASE_URL}
+      POLICY_CONFIG_PATH: ${POLICY_CONFIG_PATH}
+      HALT_FILE: ${HALT_FILE}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+      LOG_LEVEL: ${LOG_LEVEL}
 
 paths:
   skills: /opt/data/skills

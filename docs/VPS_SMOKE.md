@@ -45,7 +45,9 @@ docker compose --env-file .env.prod -f ops/compose.yml -f ops/compose.prod.yml -
 
 If you add or change `AGENT_WALLET_PRIVATE_KEY` after Hermes is already
 running, force-recreate the Hermes service so Docker injects the new
-environment:
+environment. Hermes also passes secrets into each stdio MCP server through
+`mcp_servers.<name>.env`, so the MCP servers are reloaded when the service
+starts from this config:
 
 ```bash
 docker compose --env-file .env.prod -f ops/compose.yml -f ops/compose.prod.yml -p avg \
