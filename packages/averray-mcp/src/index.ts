@@ -10,6 +10,7 @@ import {
   siweLogin,
   trimTrailingSlash
 } from "@avg/mcp-common";
+import { evaluateClaimMutationPolicy, isUuid } from "./mutation-policy.js";
 
 const server = new McpServer({
   name: "averray-mcp",
@@ -43,16 +44,26 @@ server.tool("averray_claim", "Claim a job through Averray's public API fallback 
   idempotencyKey: z.string().optional()
 }, async ({ runId, jobId, idempotencyKey: providedKey }) => {
   await assertNoKillSwitch("averray_claim");
-  const session = await authSession();
   const key = providedKey ?? idempotencyKey(["averray", jobId, "claim"]);
-  await upsertSubmission({ runId, kind: "claim", key, request: { jobId } });
-  const response = await request("/jobs/claim", {
-    method: "POST",
-    token: session.token,
-    body: { jobId, idempotencyKey: key }
-  });
-  await completeSubmission(key, response);
-  return jsonContent({ idempotencyKey: key, response });
+  const policy = await evaluateClaimMutationPolicy({ runId, jobId, idempotencyKey: key }, query);
+  if (!policy.allowed) {
+    return jsonContent({ blocked: true, tool: "averray_claim", policy });
+  }
+
+  const session = await authSession();
+  await upsertSubmission({ runId, kind: "claim", key, request: { jobId, policyRunId: policy.runId } });
+  try {
+    const response = await request("/jobs/claim", {
+      method: "POST",
+      token: session.token,
+      body: { jobId, idempotencyKey: key }
+    });
+    await completeSubmission(key, response);
+    return jsonContent({ idempotencyKey: key, policy, response });
+  } catch (error) {
+    await failSubmission(key, error);
+    throw error;
+  }
 });
 
 server.tool("averray_submit", "Submit work through Averray's public API fallback path.", {
@@ -129,7 +140,7 @@ async function upsertSubmission(input: { runId?: string; kind: "claim" | "submit
      values ($1, $2, $3, $4::jsonb, 'started', 1)
      on conflict(idempotency_key) do update
      set attempts = submissions.attempts + 1, updated_at = now()`,
-    [input.runId ?? null, input.kind, input.key, JSON.stringify(input.request)]
+    [isUuid(input.runId) ? input.runId : null, input.kind, input.key, JSON.stringify(input.request)]
   ).catch(() => undefined);
 }
 
@@ -138,6 +149,14 @@ async function completeSubmission(key: string, response: unknown) {
     `update submissions set response = $2::jsonb, status = 'completed', updated_at = now()
      where idempotency_key = $1`,
     [key, JSON.stringify(response)]
+  ).catch(() => undefined);
+}
+
+async function failSubmission(key: string, error: unknown) {
+  await query(
+    `update submissions set last_error = $2, status = 'failed', updated_at = now()
+     where idempotency_key = $1`,
+    [key, error instanceof Error ? error.message : String(error)]
   ).catch(() => undefined);
 }
 

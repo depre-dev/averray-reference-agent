@@ -88,4 +88,7 @@ Then open `http://127.0.0.1:9119`.
 - No shared Averray DB, Redis, Docker network, or volumes.
 - No Docker socket.
 - No direct Wikipedia edits.
-- Mutating MCP tools check policy and kill switches.
+- Mutating MCP tools check policy, kill switches, and framework-enforced
+  mutation budgets. `averray_claim` requires a run id by default, allows one
+  claim attempt per run, blocks fresh idempotency-key retries unless explicitly
+  enabled, and can be narrowed with `AVERRAY_CLAIM_JOB_ALLOWLIST`.

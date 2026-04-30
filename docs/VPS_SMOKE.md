@@ -101,6 +101,13 @@ see `AGENT_WALLET_PRIVATE_KEY` and that the MCP launcher can read
 `/config-runtime/reference-agent.env`; if either fails, force-recreate
 `hermes`.
 
+Controlled smokes that do call `averray_claim` must set an explicit run id and
+let the MCP mutation guard enforce the boundary outside the model prompt. The
+default guard requires `AVERRAY_REQUIRE_CLAIM_RUN_ID=true`, allows only
+`AVERRAY_MAX_CLAIM_ATTEMPTS=1`, blocks fresh idempotency-key retries with
+`AVERRAY_ALLOW_FRESH_CLAIM_RETRY=false`, and can restrict a run to specific
+jobs through `AVERRAY_CLAIM_JOB_ALLOWLIST`.
+
 ```bash
 scripts/claim-readiness-smoke.sh
 ```
