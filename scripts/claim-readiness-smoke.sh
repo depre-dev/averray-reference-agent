@@ -43,6 +43,14 @@ else
   echo "AGENT_WALLET_ADDRESS is not set; wallet_status should still derive the address from the private key."
 fi
 
+if ! docker compose --env-file "${ENV_FILE}" -f ops/compose.yml -f ops/compose.prod.yml -p avg \
+  exec -T hermes sh -lc 'printf "%s" "${AGENT_WALLET_PRIVATE_KEY:-}" | grep -Eq "^0x[0-9a-fA-F]{64}$"'; then
+  echo "Hermes container does not see AGENT_WALLET_PRIVATE_KEY." >&2
+  echo "Recreate Hermes after env changes, then rerun this smoke:" >&2
+  echo "  docker compose --env-file ${ENV_FILE} -f ops/compose.yml -f ops/compose.prod.yml -p avg up -d --build --force-recreate hermes" >&2
+  exit 1
+fi
+
 PROMPT=$(cat <<'PROMPT'
 Use the configured Averray reference MCP tools only for this claim-readiness smoke. Do not use browser, shell, or Python fallback tools.
 
@@ -51,7 +59,10 @@ Goal:
 2. Check policy readiness with policy_get_budget.
 3. List open Wikipedia jobs compactly with averray_list_jobs using category/source/state filters and a small limit.
 4. Inspect one Wikipedia job definition with averray_get_definition.
-5. Run policy_check_claim for that job using the job definition fields.
+5. Run policy_check_claim for that job using:
+   - taskType: job.agentContext.taskType if present, otherwise job.source.taskType.
+   - verifierMode: job.verifierMode.
+   - rewardUsd/estimatedCostUsd: 0 unless the definition provides USD estimates.
 6. Report whether this agent appears ready to claim a Wikipedia job, and list any blockers or uncertainties.
 
 Safety boundary:

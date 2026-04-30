@@ -43,6 +43,15 @@ chmod 600 .env.prod
 docker compose --env-file .env.prod -f ops/compose.yml -f ops/compose.prod.yml -p avg up -d --build
 ```
 
+If you add or change `AGENT_WALLET_PRIVATE_KEY` after Hermes is already
+running, force-recreate the Hermes service so Docker injects the new
+environment:
+
+```bash
+docker compose --env-file .env.prod -f ops/compose.yml -f ops/compose.prod.yml -p avg \
+  up -d --build --force-recreate hermes
+```
+
 ## Dashboard Access
 
 Hermes dashboard is not exposed publicly. Docker binds it to
@@ -84,6 +93,8 @@ shape without printing it. It may print `AGENT_WALLET_ADDRESS`, which is safe.
 This smoke checks wallet status, policy budget, compact Wikipedia discovery,
 one job definition, and `policy_check_claim`. It explicitly forbids
 `averray_claim`, `averray_submit`, approvals, and Wikipedia edits.
+Before launching Hermes, it also verifies that the running Hermes container can
+see `AGENT_WALLET_PRIVATE_KEY`; if that fails, force-recreate `hermes`.
 
 ```bash
 scripts/claim-readiness-smoke.sh

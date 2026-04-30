@@ -44,6 +44,8 @@ scripts/claim-readiness-smoke.sh
 
 It checks wallet status, policy budget, compact Wikipedia discovery, one job
 definition, and claim policy. It must not claim or submit.
+If the wallet key was added after Hermes was already running, recreate the
+Hermes service first so the container sees the updated environment.
 
 ## Hermes Pin
 
