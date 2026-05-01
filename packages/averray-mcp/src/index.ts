@@ -10,7 +10,7 @@ import {
   siweLogin,
   trimTrailingSlash
 } from "@avg/mcp-common";
-import { evaluateClaimMutationPolicy, isUuid } from "./mutation-policy.js";
+import { evaluateClaimMutationPolicy, evaluateSubmitMutationPolicy, isUuid } from "./mutation-policy.js";
 
 const server = new McpServer({
   name: "averray-mcp",
@@ -74,24 +74,34 @@ server.tool("averray_submit", "Submit work through Averray's public API fallback
   outputHash: z.string().optional()
 }, async ({ runId, sessionId, jobId, output, outputHash }) => {
   await assertNoKillSwitch("averray_submit");
-  const session = await authSession();
   const key = idempotencyKey(["averray", runId ?? sessionId, "submit", outputHash ?? JSON.stringify(output)]);
-  await upsertSubmission({ runId, kind: "submit", key, request: { sessionId, jobId, outputHash } });
-  const response = await request("/jobs/submit", {
-    method: "POST",
-    token: session.token,
-    body: {
-      sessionId,
-      submission: {
-        jobId,
-        output,
-        submittedAt: new Date().toISOString(),
-        idempotencyKey: key
+  const policy = await evaluateSubmitMutationPolicy({ runId, sessionId, jobId, idempotencyKey: key }, query);
+  if (!policy.allowed) {
+    return jsonContent({ blocked: true, tool: "averray_submit", policy });
+  }
+
+  const session = await authSession();
+  await upsertSubmission({ runId, kind: "submit", key, request: { sessionId, jobId, outputHash, policyRunId: policy.runId } });
+  try {
+    const response = await request("/jobs/submit", {
+      method: "POST",
+      token: session.token,
+      body: {
+        sessionId,
+        submission: {
+          jobId,
+          output,
+          submittedAt: new Date().toISOString(),
+          idempotencyKey: key
+        }
       }
-    }
-  });
-  await completeSubmission(key, response);
-  return jsonContent({ idempotencyKey: key, response });
+    });
+    await completeSubmission(key, response);
+    return jsonContent({ idempotencyKey: key, policy, response });
+  } catch (error) {
+    await failSubmission(key, error);
+    throw error;
+  }
 });
 
 server.tool("averray_observe_session", "Read the current Averray session state after claim/submit.", {
@@ -141,7 +151,7 @@ async function upsertSubmission(input: { runId?: string; kind: "claim" | "submit
      on conflict(idempotency_key) do update
      set attempts = submissions.attempts + 1, updated_at = now()`,
     [isUuid(input.runId) ? input.runId : null, input.kind, input.key, JSON.stringify(input.request)]
-  ).catch(() => undefined);
+  );
 }
 
 async function completeSubmission(key: string, response: unknown) {
