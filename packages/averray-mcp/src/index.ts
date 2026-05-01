@@ -11,6 +11,7 @@ import {
   trimTrailingSlash
 } from "@avg/mcp-common";
 import { evaluateClaimMutationPolicy, evaluateSubmitMutationPolicy, isUuid } from "./mutation-policy.js";
+import { buildSubmitRequestBody } from "./submit-payload.js";
 
 const server = new McpServer({
   name: "averray-mcp",
@@ -86,15 +87,7 @@ server.tool("averray_submit", "Submit work through Averray's public API fallback
     const response = await request("/jobs/submit", {
       method: "POST",
       token: session.token,
-      body: {
-        sessionId,
-        submission: {
-          jobId,
-          output,
-          submittedAt: new Date().toISOString(),
-          idempotencyKey: key
-        }
-      }
+      body: buildSubmitRequestBody({ sessionId, output })
     });
     await completeSubmission(key, response);
     return jsonContent({ idempotencyKey: key, policy, response });
