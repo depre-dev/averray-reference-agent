@@ -108,6 +108,15 @@ default guard requires `AVERRAY_REQUIRE_CLAIM_RUN_ID=true`, allows only
 `AVERRAY_ALLOW_FRESH_CLAIM_RETRY=false`, and can restrict a run to specific
 jobs through `AVERRAY_CLAIM_JOB_ALLOWLIST`.
 
+Controlled smokes that call `averray_submit` must also configure the mutation
+boundary outside the prompt. The default guard requires
+`AVERRAY_REQUIRE_SUBMIT_RUN_ID=true`, allows only
+`AVERRAY_MAX_SUBMIT_ATTEMPTS=1`, blocks retries with
+`AVERRAY_ALLOW_SUBMIT_RETRY=false`, and can restrict the run to exact session
+and job identifiers with `AVERRAY_SUBMIT_SESSION_ALLOWLIST` and
+`AVERRAY_SUBMIT_JOB_ALLOWLIST`. A session id that differs by one character is
+blocked before any `/jobs/submit` network call.
+
 ```bash
 scripts/claim-readiness-smoke.sh
 ```

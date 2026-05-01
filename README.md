@@ -92,3 +92,7 @@ Then open `http://127.0.0.1:9119`.
   mutation budgets. `averray_claim` requires a run id by default, allows one
   claim attempt per run, blocks fresh idempotency-key retries unless explicitly
   enabled, and can be narrowed with `AVERRAY_CLAIM_JOB_ALLOWLIST`.
+  `averray_submit` also requires a run id by default, allows one submit attempt
+  per run, blocks retries unless explicitly enabled, and can be narrowed with
+  exact `AVERRAY_SUBMIT_SESSION_ALLOWLIST` and `AVERRAY_SUBMIT_JOB_ALLOWLIST`
+  values.
