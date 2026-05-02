@@ -23,6 +23,13 @@ published only to VPS localhost.
 - Use SSH or Tailscale tunnels to reach the UI.
 - Set strong `HERMES_WORKSPACE_PASSWORD` and `HERMES_GATEWAY_API_KEY`
   values before starting the workspace.
+- The Workspace image still checks legacy `CLAUDE_API_TOKEN` and
+  `CLAUDE_DASHBOARD_TOKEN` names for some enhanced gateway/dashboard calls.
+  The Compose overlay maps them to `HERMES_GATEWAY_API_KEY`; keep all three
+  token aliases aligned.
+- Workspace writes session and Kanban metadata below `$HOME/.hermes`. The
+  Compose overlay sets `HOME=/tmp/workspace-home` because the upstream image's
+  default `/home/workspace` path is not writable in this deployment mode.
 - Do not mount the Docker socket.
 - Do not give the Workspace container the Averray wallet private key or MCP
   runtime env volume. The gateway owns agent execution; the UI only talks to
@@ -127,9 +134,49 @@ In the Workspace UI, verify:
 
 - it detects the gateway URL `http://hermes-gateway:8642`
 - it detects the dashboard URL `http://hermes:9119`
+- settings show model `hermes-agent` and chat can answer a tiny prompt such as
+  `say ok`
 - chat can reach the configured Hermes provider
 - sessions/tool activity are visible, if supported by the pinned Hermes image
 - terminal/file/memory panes are either usable or clearly marked unsupported
+
+If chat returns `model "${HERMES_DEFAULT_MODEL}" not found`, the mounted
+Hermes config is still using an unexpanded placeholder. The checked-in
+`hermes/config/hermes.yaml` intentionally uses concrete Ollama Cloud defaults
+for the gateway process:
+
+```yaml
+model:
+  provider: ollama-cloud
+  base_url: https://ollama.com/v1
+  api_key_env: OLLAMA_API_KEY
+  default: deepseek-v4-pro:cloud
+```
+
+If the Workspace UI shows `Authentication required — Hermes Agent rejected the
+connection token` while `/v1/chat/completions` works, clear the Workspace
+server-side and browser-side saved state after confirming the token aliases are
+present:
+
+```bash
+docker compose --env-file .env.prod \
+  -f ops/compose.yml \
+  -f ops/compose.prod.yml \
+  -f ops/compose.command-center.yml \
+  -p avg \
+  --profile command-center \
+  exec hermes-workspace env | grep -E 'HERMES_API|CLAUDE_API|CLAUDE_DASHBOARD|HOME'
+
+docker compose --env-file .env.prod \
+  -f ops/compose.yml \
+  -f ops/compose.prod.yml \
+  -f ops/compose.command-center.yml \
+  -p avg \
+  --profile command-center \
+  exec hermes-workspace sh -lc 'rm -rf /tmp/workspace-home/.hermes && mkdir -p /tmp/workspace-home/.hermes'
+```
+
+Then clear site data for `127.0.0.1:3000` in the browser and reconnect.
 
 ## Shut Down
 

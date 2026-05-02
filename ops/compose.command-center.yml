@@ -75,9 +75,12 @@ services:
       HERMES_API_URL: http://hermes-gateway:8642
       HERMES_DASHBOARD_URL: http://hermes:9119
       HERMES_API_TOKEN: ${HERMES_GATEWAY_API_KEY:?Set HERMES_GATEWAY_API_KEY in .env.prod before enabling the command center}
+      CLAUDE_API_TOKEN: ${HERMES_GATEWAY_API_KEY:?Set HERMES_GATEWAY_API_KEY in .env.prod before enabling the command center}
+      CLAUDE_DASHBOARD_TOKEN: ${HERMES_GATEWAY_API_KEY:?Set HERMES_GATEWAY_API_KEY in .env.prod before enabling the command center}
       CLAUDE_PASSWORD: ${HERMES_WORKSPACE_PASSWORD:?Set HERMES_WORKSPACE_PASSWORD in .env.prod before enabling the command center}
       COOKIE_SECURE: ${HERMES_WORKSPACE_COOKIE_SECURE:-0}
       TRUST_PROXY: ${HERMES_WORKSPACE_TRUST_PROXY:-0}
+      HOME: /tmp/workspace-home
     networks: [avg-internal]
     ports:
       - "127.0.0.1:${HERMES_WORKSPACE_PORT:-3000}:3000"
