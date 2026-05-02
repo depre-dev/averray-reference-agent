@@ -111,6 +111,9 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   `draftId` into `averray_validate_submission` / `averray_submit` so validation
   and submit use the exact same structured JSON object instead of reconstructed
   chat text.
+- Wikipedia citation evidence helpers are read-only. They fetch pinned
+  revisions, extract citation/source/archive evidence, check source URLs, and
+  look up Wayback snapshots without editing Wikipedia or mutating Averray state.
 - Optional Slack operational alerts can be enabled with `SLACK_WEBHOOK_URL`.
   They cover claim prechecks, claim/submit outcomes, local validation failures,
   TTL warnings, and inventory exhaustion/replenishment. See
