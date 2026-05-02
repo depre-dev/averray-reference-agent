@@ -81,6 +81,52 @@ Local submission validation alerts fire before `averray_submit` touches the
 submit mutation budget, so schema mistakes are visible without burning the
 one-shot submit attempt.
 
+## Slack Operator Commands
+
+Slack alerts are outbound-only. To make Slack messages call the Averray
+operator command router, enable the `slack-operator` service with either Slack
+Socket Mode or signed HTTP slash/events endpoints. The service accepts only the
+short operator commands below and routes them to `averray_handle_operator_command`
+semantics directly, not through a free-form Hermes prompt:
+
+```text
+run one wikipedia citation repair if safe
+run wikipedia citation repair for wiki-en-... if safe
+status last wikipedia citation repair
+```
+
+Recommended VPS mode is Slack Socket Mode because it uses outbound WebSocket
+traffic and does not require exposing a public HTTP port:
+
+```env
+SLACK_OPERATOR_ENABLED=1
+SLACK_APP_TOKEN=xapp-...
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_OPERATOR_CHANNEL_ID=C...
+SLACK_ALLOWED_USER_IDS=U...
+```
+
+Slack app requirements:
+
+- Enable Socket Mode and create an app-level token with `connections:write`.
+- Add a bot token with `chat:write`.
+- Subscribe to `app_mention` events, or configure a slash command that reaches
+  the service through your preferred tunnel/proxy.
+- Invite the app to the operator channel.
+
+The service also exposes signed HTTP endpoints on VPS loopback by default:
+
+```text
+GET  http://127.0.0.1:8790/health
+POST http://127.0.0.1:8790/slack/commands
+POST http://127.0.0.1:8790/slack/events
+```
+
+If you use HTTP endpoints, set `SLACK_SIGNING_SECRET` and terminate/expose the
+route with your chosen tunnel or reverse proxy. Keep
+`SLACK_OPERATOR_CHANNEL_ID`/`SLACK_OPERATOR_CHANNEL_IDS` and
+`SLACK_ALLOWED_USER_IDS` narrow.
+
 Inbound Slack or command-center messages should be routed to the direct MCP
 operator command tool, not rephrased as free-form Hermes prompts. The supported
 commands are:
@@ -109,6 +155,15 @@ Check the running Hermes container after boot or force-recreate:
 ```bash
 docker compose --env-file .env.prod -f ops/compose.yml -f ops/compose.prod.yml -p avg \
   exec hermes sh -lc 'test -n "$SLACK_WEBHOOK_URL" && echo "SLACK_WEBHOOK_URL configured"'
+```
+
+Check the Slack operator service:
+
+```bash
+docker compose --env-file .env.prod -f ops/compose.yml -f ops/compose.prod.yml -p avg \
+  ps slack-operator
+
+curl -sS http://127.0.0.1:8790/health
 ```
 
 ## Dashboard Access

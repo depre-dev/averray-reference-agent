@@ -111,6 +111,42 @@ services:
       - avg-hermes-skills:/hermes-skills:ro
     networks: [avg-internal]
 
+  slack-operator:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.node
+    image: avg-node-runtime
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mcp-bundle:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
+    command: ["node", "services/slack-operator/dist/index.js"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      AVERRAY_API_BASE_URL: ${AVERRAY_API_BASE_URL}
+      AGENT_WALLET_PRIVATE_KEY: ${AGENT_WALLET_PRIVATE_KEY}
+      HALT_FILE: ${HALT_FILE:-/data/HALT}
+      WALLET_NETWORK: testnet
+      SLACK_OPERATOR_ENABLED: ${SLACK_OPERATOR_ENABLED:-0}
+      SLACK_OPERATOR_HTTP_PORT: ${SLACK_OPERATOR_HTTP_PORT:-8790}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_OPERATOR_CHANNEL_ID: ${SLACK_OPERATOR_CHANNEL_ID:-}
+      SLACK_OPERATOR_CHANNEL_IDS: ${SLACK_OPERATOR_CHANNEL_IDS:-}
+      SLACK_ALLOWED_USER_IDS: ${SLACK_ALLOWED_USER_IDS:-}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - avg-data:/data
+    networks: [avg-internal]
+    ports:
+      - "127.0.0.1:${SLACK_OPERATOR_HTTP_PORT:-8790}:${SLACK_OPERATOR_HTTP_PORT:-8790}"
+
   hermes:
     image: ${HERMES_IMAGE}
     restart: unless-stopped

@@ -39,8 +39,8 @@ import {
 } from "./job-workflows.js";
 import {
   getLastWikipediaCitationRepairStatus,
-  parseOperatorCommand,
 } from "./operator-commands.js";
+import { handleOperatorCommandText } from "./operator-handler.js";
 
 const server = new McpServer({
   name: "averray-mcp",
@@ -140,22 +140,10 @@ server.tool(
     confidenceThreshold: z.number().min(0).max(1).default(0.7)
   },
   async ({ text, source, expectedWallet, defaultDryRun, maxEvidenceUrls, confidenceThreshold }) => {
-    const command = parseOperatorCommand(text, {
-      source,
-      defaultDryRun,
-      maxEvidenceUrls,
-      confidenceThreshold,
-    });
-    if (!command.handled) return jsonContent(command);
-    if (command.kind === "status_last_wikipedia_citation_repair") {
-      const status = await getLastWikipediaCitationRepairStatus(query);
-      return jsonContent({ ...command, status });
-    }
-    const result = await runWikipediaCitationRepairWorkflow(
-      { ...command.input, expectedWallet },
-      workflowDeps()
-    );
-    return jsonContent({ ...command, result });
+    return jsonContent(await handleOperatorCommandText(
+      { text, source, expectedWallet, defaultDryRun, maxEvidenceUrls, confidenceThreshold },
+      { query, workflowDeps: workflowDeps() }
+    ));
   }
 );
 
