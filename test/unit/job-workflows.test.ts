@@ -99,6 +99,10 @@ describe("runWikipediaCitationRepairWorkflow", () => {
       sessionId,
       draftId: "draft-1",
       confidence: 0.72,
+      proposalSummary: {
+        citationFindings: 1,
+        proposedChanges: 1,
+      },
     });
     expect(calls).toEqual([
       "walletStatus",

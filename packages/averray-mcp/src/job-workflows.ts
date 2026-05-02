@@ -195,6 +195,7 @@ export async function runWikipediaCitationRepairWorkflow(
         jobId: selected.jobId,
         wallet,
         evidenceSummary: summarizeEvidence(evidence),
+        proposalSummary: summarizeProposal(proposal.output),
         proposalPreview: proposal.output,
         confidence: proposal.confidence,
         validation,
@@ -259,6 +260,7 @@ export async function runWikipediaCitationRepairWorkflow(
         sessionId: claim.sessionId,
         draftId: draft.draftId,
         evidenceSummary: summarizeEvidence(evidence),
+        proposalSummary: summarizeProposal(proposal.output),
         validation,
         confidence: proposal.confidence,
         reason: "validation_failed",
@@ -276,6 +278,7 @@ export async function runWikipediaCitationRepairWorkflow(
         sessionId: claim.sessionId,
         draftId: draft.draftId,
         evidenceSummary: summarizeEvidence(evidence),
+        proposalSummary: summarizeProposal(proposal.output),
         validation,
         confidence: proposal.confidence,
         reason: "confidence_below_threshold",
@@ -302,6 +305,7 @@ export async function runWikipediaCitationRepairWorkflow(
         sessionId: claim.sessionId,
         draftId: draft.draftId,
         evidenceSummary: summarizeEvidence(evidence),
+        proposalSummary: summarizeProposal(proposal.output),
         validation,
         confidence: proposal.confidence,
         reason: submit.reason ?? "submit_blocked",
@@ -318,6 +322,7 @@ export async function runWikipediaCitationRepairWorkflow(
       sessionId: claim.sessionId,
       draftId: draft.draftId,
       evidenceSummary: summarizeEvidence(evidence),
+      proposalSummary: summarizeProposal(proposal.output),
       validation,
       confidence: proposal.confidence,
       submit,
@@ -486,6 +491,17 @@ function summarizeEvidence(evidence: WikipediaEvidenceBundle) {
     citationCount: evidence.citations.length,
     checkedSourceCount: evidence.sourceChecks.length,
     sourceUrls: evidence.sourceChecks.map((source) => source.url),
+  };
+}
+
+function summarizeProposal(output: Record<string, unknown>) {
+  const citationFindings = Array.isArray(output.citation_findings) ? output.citation_findings : [];
+  const proposedChanges = Array.isArray(output.proposed_changes) ? output.proposed_changes : [];
+  return {
+    pageTitle: typeof output.page_title === "string" ? output.page_title : undefined,
+    revisionId: typeof output.revision_id === "string" ? output.revision_id : undefined,
+    citationFindings: citationFindings.length,
+    proposedChanges: proposedChanges.length,
   };
 }
 

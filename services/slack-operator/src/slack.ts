@@ -105,6 +105,7 @@ export function formatOperatorResultForSlack(result: unknown): string {
     const workflow = isRecord(result.result) ? result.result : {};
     const validation = isRecord(workflow.validation) ? workflow.validation : {};
     const evidence = isRecord(workflow.evidenceSummary) ? workflow.evidenceSummary : {};
+    const proposal = isRecord(workflow.proposalSummary) ? workflow.proposalSummary : {};
     return [
       "*Wikipedia citation repair workflow*",
       `• status: \`${stringField(workflow, "status") ?? "unknown"}\``,
@@ -115,7 +116,8 @@ export function formatOperatorResultForSlack(result: unknown): string {
       `• confidence: \`${numberField(workflow, "confidence") ?? "n/a"}\``,
       `• validation: \`${validation.valid === true ? "valid" : validation.valid === false ? "invalid" : "n/a"}\``,
       `• citations reviewed: \`${numberField(evidence, "totalCitations") ?? "n/a"}\``,
-      `• issues flagged: \`${numberField(evidence, "flaggedCitations") ?? "n/a"}\``,
+      `• issues proposed: \`${numberField(proposal, "citationFindings") ?? "n/a"}\``,
+      `• changes proposed: \`${numberField(proposal, "proposedChanges") ?? "n/a"}\``,
       `• reason: \`${stringField(workflow, "reason") ?? "n/a"}\``,
     ].join("\n");
   }

@@ -125,14 +125,17 @@ describe("slack operator bridge", () => {
         draftId: "draft-2",
         confidence: 0.72,
         validation: { valid: true },
-        evidenceSummary: { totalCitations: 45, flaggedCitations: 5 },
+        evidenceSummary: { totalCitations: 45, flaggedCitations: 45 },
+        proposalSummary: { citationFindings: 5, proposedChanges: 5 },
       },
     });
 
     expect(text).toContain("status: `submitted`");
     expect(text).toContain("validation: `valid`");
     expect(text).toContain("citations reviewed: `45`");
-    expect(text).toContain("issues flagged: `5`");
+    expect(text).toContain("issues proposed: `5`");
+    expect(text).toContain("changes proposed: `5`");
+    expect(text).not.toContain("issues flagged");
   });
 
   it("persists workflow run context but does not attach status commands to the run", async () => {
