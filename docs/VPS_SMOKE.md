@@ -81,6 +81,23 @@ Local submission validation alerts fire before `averray_submit` touches the
 submit mutation budget, so schema mistakes are visible without burning the
 one-shot submit attempt.
 
+Inbound Slack or command-center messages should be routed to the direct MCP
+operator command tool, not rephrased as free-form Hermes prompts. The supported
+commands are:
+
+```text
+run one wikipedia citation repair if safe
+run wikipedia citation repair for wiki-en-... if safe
+status last wikipedia citation repair
+```
+
+`averray_handle_operator_command` parses those messages. Repair commands call
+`averray_run_wikipedia_citation_repair` directly with the workflow's wallet,
+policy, draft, validation, submit, and Slack alert gates. Status commands are
+read-only and return the latest `runId`, `jobId`, `sessionId`, submitted/failed
+state, `draftId`, and Slack permalink when one is available. Add `dry run only`
+to a repair command when you want a proposal preview without claim or submit.
+
 Check the host env file:
 
 ```bash

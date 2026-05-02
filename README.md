@@ -118,3 +118,8 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   They cover claim prechecks, claim/submit outcomes, local validation failures,
   TTL warnings, and inventory exhaustion/replenishment. See
   [docs/VPS_SMOKE.md](docs/VPS_SMOKE.md#slack-operational-alerts).
+- Slack and command-center operators can route short commands through
+  `averray_handle_operator_command` instead of a free-form Hermes prompt. It
+  recognizes `run one wikipedia citation repair if safe` and calls the
+  Wikipedia workflow tool directly; `status last wikipedia citation repair`
+  returns the latest run/session/draft/submit status without mutating anything.
