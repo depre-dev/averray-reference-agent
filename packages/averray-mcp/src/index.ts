@@ -37,6 +37,10 @@ import {
   type WikipediaEvidenceBundle,
   type WorkflowJob,
 } from "./job-workflows.js";
+import {
+  getLastWikipediaCitationRepairStatus,
+  parseOperatorCommand,
+} from "./operator-commands.js";
 
 const server = new McpServer({
   name: "averray-mcp",
@@ -121,6 +125,46 @@ server.tool(
   },
   async ({ url, timestampHint, timeoutMs }) => {
     return jsonContent(await findArchiveSnapshot({ url, timestampHint, timeoutMs }));
+  }
+);
+
+server.tool(
+  "averray_handle_operator_command",
+  "Direct router for trusted Slack/operator/command-center messages. Use this for short commands like 'run one wikipedia citation repair if safe' and 'status last wikipedia citation repair' instead of sending them through a free-form Hermes prompt. Recognized run commands call averray_run_wikipedia_citation_repair directly; recognized status commands are read-only.",
+  {
+    text: z.string().min(1),
+    source: z.enum(["slack", "operator", "command_center", "hermes"]).default("operator"),
+    expectedWallet: z.string().optional(),
+    defaultDryRun: z.boolean().default(false),
+    maxEvidenceUrls: z.number().int().min(1).max(20).default(5),
+    confidenceThreshold: z.number().min(0).max(1).default(0.7)
+  },
+  async ({ text, source, expectedWallet, defaultDryRun, maxEvidenceUrls, confidenceThreshold }) => {
+    const command = parseOperatorCommand(text, {
+      source,
+      defaultDryRun,
+      maxEvidenceUrls,
+      confidenceThreshold,
+    });
+    if (!command.handled) return jsonContent(command);
+    if (command.kind === "status_last_wikipedia_citation_repair") {
+      const status = await getLastWikipediaCitationRepairStatus(query);
+      return jsonContent({ ...command, status });
+    }
+    const result = await runWikipediaCitationRepairWorkflow(
+      { ...command.input, expectedWallet },
+      workflowDeps()
+    );
+    return jsonContent({ ...command, result });
+  }
+);
+
+server.tool(
+  "averray_status_last_wikipedia_citation_repair",
+  "Read-only status command for Slack/operator use. Returns the latest Wikipedia citation-repair runId, jobId, sessionId, submitted/failed state, draftId, and Slack permalink when available.",
+  {},
+  async () => {
+    return jsonContent(await getLastWikipediaCitationRepairStatus(query));
   }
 );
 
