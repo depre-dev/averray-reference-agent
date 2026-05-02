@@ -55,6 +55,45 @@ docker compose --env-file .env.prod -f ops/compose.yml -f ops/compose.prod.yml -
   up -d --build --force-recreate hermes
 ```
 
+## Slack Operational Alerts
+
+Slack alerts are opt-in. If `SLACK_WEBHOOK_URL` is unset, the reference agent
+continues normally and alert delivery is skipped. When configured, alerts are
+short, redacted, and include safe identifiers such as `jobId`, `runId`,
+`sessionId`, wallet address, claim deadline, and whether a mutation budget was
+consumed.
+
+Configured events:
+
+- `claim_precheck_passed`
+- `claim_blocked`
+- `claim_succeeded`
+- `claim_failed`
+- `submit_validation_failed`
+- `submit_blocked`
+- `submit_succeeded`
+- `submit_failed`
+- `ttl_nearing_expiry`
+- `inventory_exhausted`
+- `inventory_replenished`
+
+Local submission validation alerts fire before `averray_submit` touches the
+submit mutation budget, so schema mistakes are visible without burning the
+one-shot submit attempt.
+
+Check the host env file:
+
+```bash
+grep -E '^SLACK_WEBHOOK_URL=.+$' .env.prod >/dev/null && echo "SLACK_WEBHOOK_URL configured"
+```
+
+Check the running Hermes container after boot or force-recreate:
+
+```bash
+docker compose --env-file .env.prod -f ops/compose.yml -f ops/compose.prod.yml -p avg \
+  exec hermes sh -lc 'test -n "$SLACK_WEBHOOK_URL" && echo "SLACK_WEBHOOK_URL configured"'
+```
+
 ## Dashboard Access
 
 Hermes dashboard is not exposed publicly. Docker binds it to
