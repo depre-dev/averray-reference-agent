@@ -36,6 +36,26 @@ create table if not exists submissions (
   updated_at timestamptz default now()
 );
 
+create table if not exists draft_submissions (
+  draft_id text primary key,
+  run_id text,
+  job_id text not null,
+  session_id text,
+  output jsonb not null,
+  output_hash text not null,
+  output_bytes integer not null check (output_bytes >= 2),
+  proposal_only boolean not null default true,
+  no_wikipedia_edit boolean not null default true,
+  validation_status text not null default 'unvalidated'
+    check (validation_status in ('unvalidated', 'valid', 'invalid')),
+  validation_result jsonb not null default '{}'::jsonb,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  check (run_id is not null or session_id is not null),
+  check (proposal_only = true),
+  check (no_wikipedia_edit = true)
+);
+
 create table if not exists receipts (
   id uuid primary key default gen_random_uuid(),
   run_id uuid unique references runs(id) on delete cascade,
@@ -87,3 +107,5 @@ create table if not exists auth_sessions (
 
 create index if not exists tool_calls_run_idx on tool_calls(run_id, idx);
 create index if not exists skills_observed_file_idx on skills_observed(file_path);
+create index if not exists draft_submissions_lookup_idx on draft_submissions(job_id, run_id, session_id, updated_at desc);
+create index if not exists draft_submissions_session_idx on draft_submissions(session_id, updated_at desc);

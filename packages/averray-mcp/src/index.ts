@@ -14,6 +14,15 @@ import { evaluateClaimMutationPolicy, evaluateSubmitMutationPolicy, isUuid } fro
 import { postSlackAlert, validationFailureDetails } from "./slack-alerts.js";
 import { buildSubmitRequestBody } from "./submit-payload.js";
 import { validateSubmissionLocally } from "./validate-submission.js";
+import {
+  getDraftSubmission,
+  listDraftSubmissions,
+  markDraftValidation,
+  normalizeDraftOutput,
+  saveDraftSubmission,
+  summarizeDraft,
+  type DraftSubmission,
+} from "./draft-submissions.js";
 
 const server = new McpServer({
   name: "averray-mcp",
@@ -126,28 +135,95 @@ server.tool("averray_claim", "Claim a job through Averray's public API fallback 
 });
 
 server.tool(
-  "averray_validate_submission",
-  "Validate a structured submission output locally against the job's output schema. Read-only — does NOT consume the submit attempt budget and never calls the backend. Use this BEFORE averray_submit when an output schema is defined for the job source. Returns { valid, validator, errors[], message } where errors carry actionable JSON paths (e.g. citation_findings.0.citation_number is not allowed).",
+  "averray_save_draft_submission",
+  "Persist a structured proposal object before local validation or submit. Use this once the proposal is assembled so an interrupted Hermes session can resume with the exact JSON object. Drafts are keyed by runId/jobId/sessionId, size-limited, secret-key scanned, and always marked proposal-only/no Wikipedia edit.",
   {
+    runId: z.string().optional(),
     jobId: z.string().min(1),
-    output: z.unknown()
+    sessionId: z.string().optional(),
+    output: z.unknown(),
+    proposalOnly: z.boolean().default(true),
+    noWikipediaEdit: z.boolean().default(true)
   },
-  async ({ jobId, output }) => {
+  async ({ runId, jobId, sessionId, output, proposalOnly, noWikipediaEdit }) => {
+    const draft = await saveDraftSubmission(
+      { runId, jobId, sessionId, output, proposalOnly, noWikipediaEdit },
+      query
+    );
+    return jsonContent({
+      saved: true,
+      draft: summarizeDraft(draft),
+      note: "Load this draft with averray_get_draft_submission or pass draftId to averray_validate_submission/averray_submit after resume."
+    });
+  }
+);
+
+server.tool(
+  "averray_get_draft_submission",
+  "Load a previously persisted structured proposal object. Use this after Hermes resume instead of reconstructing JSON from chat history. If draftId plus jobId/sessionId/runId are supplied, mismatches fail closed.",
+  {
+    draftId: z.string().optional(),
+    runId: z.string().optional(),
+    jobId: z.string().optional(),
+    sessionId: z.string().optional()
+  },
+  async ({ draftId, runId, jobId, sessionId }) => {
+    const draft = await getDraftSubmission({ draftId, runId, jobId, sessionId }, query);
+    return jsonContent({ draft: { ...summarizeDraft(draft), output: draft.output } });
+  }
+);
+
+server.tool(
+  "averray_list_draft_submissions",
+  "List recent persisted draft submissions without returning the proposal body. Use this to recover draftId/runId/jobId/sessionId after interruption.",
+  {
+    runId: z.string().optional(),
+    jobId: z.string().optional(),
+    sessionId: z.string().optional(),
+    limit: z.number().int().min(1).max(50).default(20)
+  },
+  async ({ runId, jobId, sessionId, limit }) => {
+    const drafts = await listDraftSubmissions({ runId, jobId, sessionId, limit }, query);
+    return jsonContent({ count: drafts.length, drafts });
+  }
+);
+
+server.tool(
+  "averray_validate_submission",
+  "Validate a structured submission output locally against the job's output schema. Read-only — does NOT consume the submit attempt budget and never calls the backend. Save the proposal first with averray_save_draft_submission, or pass draftId/runId/sessionId so resume loads the exact object. Returns { valid, validator, errors[], message } where errors carry actionable JSON paths (e.g. citation_findings.0.citation_number is not allowed).",
+  {
+    runId: z.string().optional(),
+    jobId: z.string().min(1),
+    sessionId: z.string().optional(),
+    draftId: z.string().optional(),
+    output: z.unknown().optional()
+  },
+  async ({ runId, jobId, sessionId, draftId, output }) => {
+    const resolved = await resolveSubmissionOutput({ runId, jobId, sessionId, draftId, output });
     const definition = await request(`/jobs/definition?jobId=${encodeURIComponent(jobId)}`);
-    const validation = validateSubmissionLocally(definition, output);
+    const validation = validateSubmissionLocally(definition, resolved.output);
+    if (resolved.draft) {
+      await markDraftValidation(resolved.draft.draftId, validation.valid, validation, query);
+    }
     if (!validation.valid) {
       await postSlackAlert({
         kind: "submit_validation_failed",
         title: "local submission validation failed",
-        identifiers: { jobId },
+        identifiers: { jobId, runId, sessionId },
         details: {
           mutationBudgetConsumed: false,
+          draftId: resolved.draft?.draftId,
           ...validationFailureDetails(validation),
           ...jobDefinitionDetails(definition),
         },
       });
     }
-    return jsonContent({ jobId, ...validation });
+    return jsonContent({
+      jobId,
+      ...(resolved.warning ? { warning: resolved.warning } : {}),
+      ...(resolved.draft ? { draft: summarizeDraft(resolved.draft) } : {}),
+      ...validation
+    });
   }
 );
 
@@ -155,10 +231,14 @@ server.tool("averray_submit", "Submit work through Averray's public API fallback
   runId: z.string().optional(),
   sessionId: z.string().min(1),
   jobId: z.string().optional(),
-  output: z.unknown(),
+  draftId: z.string().optional(),
+  output: z.unknown().optional(),
   outputHash: z.string().optional()
-}, async ({ runId, sessionId, jobId, output, outputHash }) => {
+}, async ({ runId, sessionId, jobId, draftId, output, outputHash }) => {
   await assertNoKillSwitch("averray_submit");
+  const resolved = await resolveSubmissionOutput({ runId, jobId, sessionId, draftId, output });
+  const effectiveJobId = jobId ?? resolved.draft?.jobId;
+  const effectiveOutputHash = outputHash ?? resolved.draft?.outputHash ?? resolved.outputHash;
 
   // Pre-flight schema validation — runs BEFORE the mutation policy
   // check and BEFORE any HTTP call. The reference agent has
@@ -168,10 +248,10 @@ server.tool("averray_submit", "Submit work through Averray's public API fallback
   // the corrected payload. We need a jobId to pull the right schema;
   // when the agent omits it (legacy path) we skip validation rather
   // than refusing the submit.
-  if (typeof jobId === "string" && jobId.length > 0) {
+  if (typeof effectiveJobId === "string" && effectiveJobId.length > 0) {
     let definition: unknown;
     try {
-      definition = await request(`/jobs/definition?jobId=${encodeURIComponent(jobId)}`);
+      definition = await request(`/jobs/definition?jobId=${encodeURIComponent(effectiveJobId)}`);
     } catch (error) {
       // Couldn't reach the definition endpoint — surface the error to
       // the agent rather than silently skipping validation. The
@@ -179,7 +259,7 @@ server.tool("averray_submit", "Submit work through Averray's public API fallback
       await postSlackAlert({
         kind: "submit_blocked",
         title: "submit blocked before mutation",
-        identifiers: { jobId, runId, sessionId },
+        identifiers: { jobId: effectiveJobId, runId, sessionId },
         details: {
           reason: "definition_fetch_failed",
           message: error instanceof Error ? error.message : String(error),
@@ -193,14 +273,18 @@ server.tool("averray_submit", "Submit work through Averray's public API fallback
         message: error instanceof Error ? error.message : String(error)
       });
     }
-    const validation = validateSubmissionLocally(definition, output);
+    const validation = validateSubmissionLocally(definition, resolved.output);
+    if (resolved.draft) {
+      await markDraftValidation(resolved.draft.draftId, validation.valid, validation, query);
+    }
     if (!validation.valid) {
       await postSlackAlert({
         kind: "submit_validation_failed",
         title: "local submission validation failed",
-        identifiers: { jobId, runId, sessionId },
+        identifiers: { jobId: effectiveJobId, runId, sessionId },
         details: {
           mutationBudgetConsumed: false,
+          draftId: resolved.draft?.draftId,
           ...validationFailureDetails(validation),
           ...jobDefinitionDetails(definition),
         },
@@ -214,8 +298,8 @@ server.tool("averray_submit", "Submit work through Averray's public API fallback
     }
   }
 
-  const key = idempotencyKey(["averray", runId ?? sessionId, "submit", outputHash ?? JSON.stringify(output)]);
-  const policy = await evaluateSubmitMutationPolicy({ runId, sessionId, jobId, idempotencyKey: key }, query);
+  const key = idempotencyKey(["averray", runId ?? sessionId, "submit", effectiveOutputHash]);
+  const policy = await evaluateSubmitMutationPolicy({ runId, sessionId, jobId: effectiveJobId, idempotencyKey: key }, query);
   if (!policy.allowed) {
     await postSlackAlert({
       kind: "submit_blocked",
@@ -232,22 +316,28 @@ server.tool("averray_submit", "Submit work through Averray's public API fallback
   }
 
   const session = await authSession();
-  await upsertSubmission({ runId, kind: "submit", key, request: { sessionId, jobId, outputHash, policyRunId: policy.runId } });
+  await upsertSubmission({
+    runId,
+    kind: "submit",
+    key,
+    request: { sessionId, jobId: effectiveJobId, draftId: resolved.draft?.draftId, outputHash: effectiveOutputHash, policyRunId: policy.runId }
+  });
   try {
     const response = await request("/jobs/submit", {
       method: "POST",
       token: session.token,
-      body: buildSubmitRequestBody({ sessionId, output })
+      body: buildSubmitRequestBody({ sessionId, output: resolved.output })
     });
     await completeSubmission(key, response);
     await postSlackAlert({
       kind: "submit_succeeded",
       title: "submit succeeded",
-      identifiers: { jobId, runId: policy.runId, sessionId, wallet: session.wallet },
+      identifiers: { jobId: effectiveJobId, runId: policy.runId, sessionId, wallet: session.wallet },
       details: {
         mutationBudgetConsumed: true,
         idempotencyKey: key,
-        outputHash,
+        draftId: resolved.draft?.draftId,
+        outputHash: effectiveOutputHash,
         ...submitResponseDetails(response),
       },
     });
@@ -257,12 +347,13 @@ server.tool("averray_submit", "Submit work through Averray's public API fallback
     await postSlackAlert({
       kind: "submit_failed",
       title: "submit failed after mutation attempt",
-      identifiers: { jobId, runId: policy.runId, sessionId, wallet: session.wallet },
+      identifiers: { jobId: effectiveJobId, runId: policy.runId, sessionId, wallet: session.wallet },
       details: {
         error: error instanceof Error ? error.message : String(error),
         mutationBudgetConsumed: true,
         idempotencyKey: key,
-        outputHash,
+        draftId: resolved.draft?.draftId,
+        outputHash: effectiveOutputHash,
       },
     });
     throw error;
@@ -279,6 +370,53 @@ server.tool("averray_observe_session", "Read the current Averray session state a
 });
 
 await runStdioServer(server);
+
+async function resolveSubmissionOutput(input: {
+  runId?: string;
+  jobId?: string;
+  sessionId?: string;
+  draftId?: string;
+  output?: unknown;
+}): Promise<{
+  output: Record<string, unknown>;
+  outputHash: string;
+  warning?: string;
+  draft?: DraftSubmission;
+}> {
+  if (input.output !== undefined) {
+    if (input.jobId && (input.runId || input.sessionId)) {
+      const draft = await saveDraftSubmission(
+        {
+          runId: input.runId,
+          jobId: input.jobId,
+          sessionId: input.sessionId,
+          output: input.output,
+          proposalOnly: true,
+          noWikipediaEdit: true
+        },
+        query
+      );
+      return { output: draft.output, outputHash: draft.outputHash, draft };
+    }
+    const normalized = normalizeDraftOutput(input.output);
+    return {
+      output: normalized.output,
+      outputHash: normalized.outputHash,
+      ...(normalized.warning ? { warning: normalized.warning } : {})
+    };
+  }
+
+  const draft = await getDraftSubmission(
+    {
+      draftId: input.draftId,
+      runId: input.runId,
+      jobId: input.jobId,
+      sessionId: input.sessionId
+    },
+    query
+  );
+  return { output: draft.output, outputHash: draft.outputHash, draft };
+}
 
 async function authSession() {
   const cached = await query<{ wallet: string; jwt: string; expires_at: string | null }>(
