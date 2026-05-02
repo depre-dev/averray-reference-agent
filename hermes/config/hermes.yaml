@@ -2,9 +2,9 @@
 # Keep this file declarative; Hermes owns its runtime data under /opt/data.
 model:
   provider: ollama-cloud
-  base_url: ${OLLAMA_BASE_URL}
+  base_url: https://ollama.com/v1
   api_key_env: OLLAMA_API_KEY
-  default: ${HERMES_DEFAULT_MODEL}
+  default: deepseek-v4-pro:cloud
 
 mcp_servers:
   averray:
