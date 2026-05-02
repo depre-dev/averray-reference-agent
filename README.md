@@ -126,4 +126,5 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   `averray_handle_operator_command` instead of a free-form Hermes prompt. It
   recognizes `run one wikipedia citation repair if safe` and calls the
   Wikipedia workflow tool directly; `status last wikipedia citation repair`
-  returns the latest run/session/draft/submit status without mutating anything.
+  returns the latest run/session/draft/submit status, including persisted Slack
+  context when available, without mutating anything.

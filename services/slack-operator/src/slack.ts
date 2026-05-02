@@ -7,6 +7,7 @@ export interface SlackAuthConfig {
 
 export interface SlackCommandEnvelope {
   text: string;
+  teamId?: string;
   userId?: string;
   channelId?: string;
   responseUrl?: string;
@@ -48,7 +49,7 @@ export function isAuthorizedSlackCommand(
   return true;
 }
 
-export function textFromSlackEvent(event: unknown): SlackCommandEnvelope | null {
+export function textFromSlackEvent(event: unknown, teamId?: string): SlackCommandEnvelope | null {
   if (!isRecord(event)) return null;
   const eventType = stringField(event, "type");
   if (eventType !== "message" && eventType !== "app_mention") return null;
@@ -59,9 +60,10 @@ export function textFromSlackEvent(event: unknown): SlackCommandEnvelope | null 
   if (!text) return null;
   return {
     text,
+    teamId,
     userId: stringField(event, "user"),
     channelId: stringField(event, "channel"),
-    permalink: slackPermalinkFromEvent(event),
+    permalink: slackPermalinkFromParts(teamId, stringField(event, "channel"), stringField(event, "ts")),
   };
 }
 
@@ -71,6 +73,7 @@ export function textFromSlashCommand(rawBody: string): SlackCommandEnvelope {
   const text = form.get("text")?.trim() || command.replace(/^\//, "").trim();
   return {
     text,
+    teamId: form.get("team_id") ?? undefined,
     userId: form.get("user_id") ?? undefined,
     channelId: form.get("channel_id") ?? undefined,
     responseUrl: form.get("response_url") ?? undefined,
@@ -95,11 +98,13 @@ export function formatOperatorResultForSlack(result: unknown): string {
       `• submittedAt: \`${stringField(status, "submittedAt") ?? "n/a"}\``,
       `• draftId: \`${stringField(status, "draftId") ?? "n/a"}\``,
       `• submit_succeeded: \`${String(Boolean(status.submitSucceeded))}\``,
-      `• slackPermalink: ${stringField(status, "slackPermalink") ?? "n/a"}`,
+      `• slack: ${stringField(status, "slackPermalink") ?? "n/a"}`,
     ].join("\n");
   }
   if (result.kind === "run_wikipedia_citation_repair") {
     const workflow = isRecord(result.result) ? result.result : {};
+    const validation = isRecord(workflow.validation) ? workflow.validation : {};
+    const evidence = isRecord(workflow.evidenceSummary) ? workflow.evidenceSummary : {};
     return [
       "*Wikipedia citation repair workflow*",
       `• status: \`${stringField(workflow, "status") ?? "unknown"}\``,
@@ -108,17 +113,20 @@ export function formatOperatorResultForSlack(result: unknown): string {
       `• sessionId: \`${stringField(workflow, "sessionId") ?? "n/a"}\``,
       `• draftId: \`${stringField(workflow, "draftId") ?? "n/a"}\``,
       `• confidence: \`${numberField(workflow, "confidence") ?? "n/a"}\``,
+      `• validation: \`${validation.valid === true ? "valid" : validation.valid === false ? "invalid" : "n/a"}\``,
+      `• citations reviewed: \`${numberField(evidence, "totalCitations") ?? "n/a"}\``,
+      `• issues flagged: \`${numberField(evidence, "flaggedCitations") ?? "n/a"}\``,
       `• reason: \`${stringField(workflow, "reason") ?? "n/a"}\``,
     ].join("\n");
   }
   return `Averray operator command completed:\n\`\`\`${JSON.stringify(result, null, 2).slice(0, 2500)}\`\`\``;
 }
 
-function slackPermalinkFromEvent(event: Record<string, unknown>): string | undefined {
-  const channel = stringField(event, "channel");
-  const ts = stringField(event, "ts");
-  if (!channel || !ts) return undefined;
-  return `slack://${channel}/${ts}`;
+export function slackPermalinkFromParts(teamId: string | undefined, channelId: string | undefined, ts: string | undefined): string | undefined {
+  if (!channelId || !ts) return undefined;
+  const compactTs = ts.replace(".", "");
+  if (teamId) return `https://app.slack.com/client/${teamId}/${channelId}/p${compactTs}`;
+  return `slack://${channelId}/${ts}`;
 }
 
 function timingSafeStringEqual(a: string, b: string): boolean {

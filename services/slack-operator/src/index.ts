@@ -10,8 +10,10 @@ import {
   textFromSlackEvent,
   textFromSlashCommand,
   verifySlackSignature,
+  slackPermalinkFromParts,
   type SlackCommandEnvelope,
 } from "./slack.js";
+import { recordOperatorCommandEvent } from "./persistence.js";
 
 const enabled = optionalEnv("SLACK_OPERATOR_ENABLED", "0") === "1";
 const httpPort = Number.parseInt(optionalEnv("SLACK_OPERATOR_HTTP_PORT", "8790"), 10);
@@ -85,7 +87,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       writeJson(response, 200, { challenge: payload.challenge });
       return;
     }
-    const envelope = isRecord(payload) ? textFromSlackEvent(payload.event) : null;
+    const envelope = isRecord(payload) ? textFromSlackEvent(payload.event, stringField(payload, "team_id")) : null;
     writeJson(response, 200, { ok: true });
     if (envelope && isAuthorizedSlackCommand(envelope, authConfig)) void handleCommand(envelope);
     return;
@@ -141,6 +143,7 @@ async function handleSocketMessage(socket: WebSocket, rawMessage: string) {
     const text = stringField(payload, "text") || command;
     const commandEnvelope: SlackCommandEnvelope = {
       text,
+      teamId: stringField(payload, "team_id"),
       userId: stringField(payload, "user_id"),
       channelId: stringField(payload, "channel_id"),
       responseUrl: stringField(payload, "response_url"),
@@ -151,7 +154,7 @@ async function handleSocketMessage(socket: WebSocket, rawMessage: string) {
 
   if (envelope.type === "events_api") {
     const payload = isRecord(envelope.payload) ? envelope.payload : {};
-    const commandEnvelope = textFromSlackEvent(payload.event);
+    const commandEnvelope = textFromSlackEvent(payload.event, stringField(payload, "team_id"));
     if (commandEnvelope && isAuthorizedSlackCommand(commandEnvelope, authConfig)) void handleCommand(commandEnvelope);
   }
 }
@@ -169,21 +172,31 @@ async function handleCommand(envelope: SlackCommandEnvelope) {
       },
       { query, workflowDeps: createDefaultWorkflowDeps() }
     );
-    await postSlack(envelope, formatOperatorResultForSlack(result));
+    const replyPermalink = await postSlack(envelope, formatOperatorResultForSlack(result));
+    await recordOperatorCommandEvent({
+      source: "slack",
+      commandText: envelope.text,
+      teamId: envelope.teamId,
+      userId: envelope.userId,
+      channelId: envelope.channelId,
+      slackPermalink: envelope.permalink,
+      replyPermalink,
+      result,
+    }, query);
   } catch (error) {
     logger.error({ err: error }, "slack_operator_command_failed");
     await postSlack(envelope, `Averray command failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
-async function postSlack(envelope: SlackCommandEnvelope, text: string) {
+async function postSlack(envelope: SlackCommandEnvelope, text: string): Promise<string | undefined> {
   if (envelope.responseUrl) {
     await fetch(envelope.responseUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ response_type: "in_channel", text }),
     }).catch((error) => logger.warn({ err: error }, "slack_response_url_failed"));
-    return;
+    return envelope.permalink;
   }
   if (!botToken || !envelope.channelId) {
     logger.warn({ hasBotToken: Boolean(botToken), channelId: envelope.channelId }, "slack_operator_no_reply_route");
@@ -200,7 +213,13 @@ async function postSlack(envelope: SlackCommandEnvelope, text: string) {
   const payload = await response.json().catch(() => undefined);
   if (!response.ok || !isRecord(payload) || payload.ok !== true) {
     logger.warn({ status: response.status, payload }, "slack_chat_post_failed");
+    return envelope.permalink;
   }
+  return slackPermalinkFromParts(
+    envelope.teamId,
+    stringField(payload, "channel") ?? envelope.channelId,
+    stringField(payload, "ts")
+  ) ?? envelope.permalink;
 }
 
 function verifyHttpSignature(request: http.IncomingMessage, rawBody: string): boolean {
