@@ -86,9 +86,10 @@ describe("runWikipediaCitationRepairWorkflow", () => {
 
   it("claims, saves, validates, and submits on the happy path", async () => {
     const calls: string[] = [];
+    const records = callRecords();
     const result = await runWikipediaCitationRepairWorkflow(
       { jobId, dryRun: false, runId: "run-1" },
-      deps({ calls })
+      deps({ calls, records })
     );
 
     expect(result).toMatchObject({
@@ -109,6 +110,44 @@ describe("runWikipediaCitationRepairWorkflow", () => {
       "validate",
       "submit",
     ]);
+    expect(records.claim[0]).toMatchObject({ runId: "run-1", jobId });
+    expect(records.saveDraft[0]).toMatchObject({ runId: "run-1", jobId, sessionId });
+    expect(records.validate[0]).toMatchObject({ runId: "run-1", jobId, sessionId, draftId: "draft-1" });
+    expect(records.submit[0]).toMatchObject({ runId: "run-1", jobId, sessionId, draftId: "draft-1" });
+  });
+
+  it("generates a runId before mutations and carries it through submit", async () => {
+    const calls: string[] = [];
+    const records = callRecords();
+    const result = await runWikipediaCitationRepairWorkflow(
+      { jobId, dryRun: false },
+      deps({ calls, records, generatedRunId: "generated-run-1" })
+    );
+
+    expect(result.status).toBe("submitted");
+    expect(result.runId).toBe("generated-run-1");
+    expect(records.policyCheckClaim[0]).toMatchObject({ runId: "generated-run-1", jobId });
+    expect(records.claim[0]).toMatchObject({ runId: "generated-run-1", jobId });
+    expect(records.saveDraft[0]).toMatchObject({ runId: "generated-run-1", jobId, sessionId });
+    expect(records.validate[0]).toMatchObject({ runId: "generated-run-1", jobId, sessionId, draftId: "draft-1" });
+    expect(records.submit[0]).toMatchObject({ runId: "generated-run-1", jobId, sessionId, draftId: "draft-1" });
+  });
+
+  it("fails closed before submit when an explicit runId is blank", async () => {
+    const calls: string[] = [];
+    const records = callRecords();
+    const result = await runWikipediaCitationRepairWorkflow(
+      { jobId, dryRun: false, runId: "   " },
+      deps({ calls, records })
+    );
+
+    expect(result).toMatchObject({
+      status: "blocked",
+      reason: "invalid_run_id",
+      runId: null,
+    });
+    expect(calls).toEqual([]);
+    expect(records.submit).toHaveLength(0);
   });
 
   it("re-saves and re-validates after a schema-only validation failure", async () => {
@@ -172,6 +211,8 @@ describe("runWikipediaCitationRepairWorkflow", () => {
 
 function deps(options: {
   calls: string[];
+  records?: WorkflowCallRecords;
+  generatedRunId?: string;
   jobs?: Array<{ jobId: string; definition?: unknown }>;
   policyAllowed?: boolean;
   validationSequence?: boolean[];
@@ -179,7 +220,7 @@ function deps(options: {
 }): WorkflowDeps {
   let draftCounter = 0;
   const validationSequence = [...(options.validationSequence ?? [true])];
-  return {
+  const workflowDeps: WorkflowDeps = {
     async listJobs() {
       options.calls.push("listJobs");
       return options.jobs ?? [{ jobId, definition }];
@@ -192,27 +233,31 @@ function deps(options: {
       options.calls.push("walletStatus");
       return { configured: true, address: "0x30BC468dA4E95a8FA4b3f2043c86687a57CdeE05" };
     },
-    async policyCheckClaim() {
+    async policyCheckClaim(input) {
       options.calls.push("policyCheckClaim");
+      options.records?.policyCheckClaim.push(input);
       return options.policyAllowed === false
         ? { allowed: false, reason: "policy_rejected_claim" }
         : { allowed: true };
     },
-    async claim() {
+    async claim(input) {
       options.calls.push("claim");
+      options.records?.claim.push(input);
       return { sessionId, claimDeadline: "2026-05-02T13:36:37.224Z" };
     },
     async fetchEvidence() {
       options.calls.push("fetchEvidence");
       return evidence;
     },
-    async saveDraft() {
+    async saveDraft(input) {
       options.calls.push("saveDraft");
+      options.records?.saveDraft.push(input);
       draftCounter += 1;
       return { draftId: `draft-${draftCounter}`, outputHash: `hash-${draftCounter}` };
     },
-    async validate() {
+    async validate(input) {
       options.calls.push("validate");
+      options.records?.validate.push(input);
       const valid = validationSequence.length > 1 ? validationSequence.shift()! : validationSequence[0] ?? true;
       return valid
         ? { valid: true, validator: "wikipedia", taskType: "citation_repair" }
@@ -223,11 +268,34 @@ function deps(options: {
             errors: [{ path: "citation_findings.0.extra", code: "unrecognized_keys", message: "extra" }],
           };
     },
-    async submit() {
+    async submit(input) {
       options.calls.push("submit");
+      options.records?.submit.push(input);
       return options.submitBlocked
         ? { blocked: true, reason: "max_submit_attempts_exceeded" }
         : { response: { status: "submitted" } };
     },
+  };
+  if (options.generatedRunId) {
+    workflowDeps.generateRunId = () => options.generatedRunId!;
+  }
+  return workflowDeps;
+}
+
+interface WorkflowCallRecords {
+  policyCheckClaim: Array<Parameters<WorkflowDeps["policyCheckClaim"]>[0]>;
+  claim: Array<Parameters<WorkflowDeps["claim"]>[0]>;
+  saveDraft: Array<Parameters<WorkflowDeps["saveDraft"]>[0]>;
+  validate: Array<Parameters<WorkflowDeps["validate"]>[0]>;
+  submit: Array<Parameters<WorkflowDeps["submit"]>[0]>;
+}
+
+function callRecords(): WorkflowCallRecords {
+  return {
+    policyCheckClaim: [],
+    claim: [],
+    saveDraft: [],
+    validate: [],
+    submit: [],
   };
 }

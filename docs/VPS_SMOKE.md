@@ -196,7 +196,7 @@ run Wikipedia citation repair for wiki-en-... if safe, dry run only
 Mutation run, only after allowlists are set for the exact job/session boundary:
 
 ```text
-run Wikipedia citation repair for wiki-en-... if safe with dryRun=false
+run Wikipedia citation repair for wiki-en-... with runId controlled-wikipedia-onecommand-r1-001 if safe with dryRun=false
 ```
 
 The workflow tool is `averray_run_wikipedia_citation_repair`. Its default is
@@ -204,7 +204,10 @@ The workflow tool is `averray_run_wikipedia_citation_repair`. Its default is
 a proposal preview but must not call `averray_claim` or `averray_submit`.
 With `dryRun=false`, claim and submit still go through the same one-shot
 mutation guards, draft persistence, local schema validation, confidence gate,
-and Slack lifecycle alerts.
+and Slack lifecycle alerts. If a mutation run omits `runId`, the workflow
+generates one before claim and carries that same value through claim, draft
+persistence, validation, submit, and Slack context. A blank explicit `runId`
+fails closed before any wallet check or mutation.
 
 ## Tool Smoke
 
