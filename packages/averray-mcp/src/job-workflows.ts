@@ -258,6 +258,7 @@ export async function runWikipediaCitationRepairWorkflow(
         jobId: selected.jobId,
         sessionId: claim.sessionId,
         draftId: draft.draftId,
+        evidenceSummary: summarizeEvidence(evidence),
         validation,
         confidence: proposal.confidence,
         reason: "validation_failed",
@@ -274,6 +275,7 @@ export async function runWikipediaCitationRepairWorkflow(
         jobId: selected.jobId,
         sessionId: claim.sessionId,
         draftId: draft.draftId,
+        evidenceSummary: summarizeEvidence(evidence),
         validation,
         confidence: proposal.confidence,
         reason: "confidence_below_threshold",
@@ -299,6 +301,7 @@ export async function runWikipediaCitationRepairWorkflow(
         jobId: selected.jobId,
         sessionId: claim.sessionId,
         draftId: draft.draftId,
+        evidenceSummary: summarizeEvidence(evidence),
         validation,
         confidence: proposal.confidence,
         reason: submit.reason ?? "submit_blocked",
@@ -314,6 +317,7 @@ export async function runWikipediaCitationRepairWorkflow(
       jobId: selected.jobId,
       sessionId: claim.sessionId,
       draftId: draft.draftId,
+      evidenceSummary: summarizeEvidence(evidence),
       validation,
       confidence: proposal.confidence,
       submit,
@@ -470,9 +474,15 @@ function blocked(input: {
 }
 
 function summarizeEvidence(evidence: WikipediaEvidenceBundle) {
+  const flaggedCitations = evidence.citations.filter(
+    (citation) => citation.urls.length > 0 || citation.archiveUrls.length > 0 || citation.deadLinkMarkers.length > 0
+  );
   return {
     pageTitle: evidence.pageTitle,
     revisionId: evidence.revisionId,
+    totalCitations: evidence.citations.length,
+    flaggedCitations: flaggedCitations.length,
+    deadLinkCitations: evidence.citations.filter((citation) => citation.deadLinkMarkers.length > 0).length,
     citationCount: evidence.citations.length,
     checkedSourceCount: evidence.sourceChecks.length,
     sourceUrls: evidence.sourceChecks.map((source) => source.url),

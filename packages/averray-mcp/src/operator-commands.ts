@@ -107,9 +107,18 @@ export async function getLastWikipediaCitationRepairStatus(
        d.run_id as draft_run_id,
        d.job_id as draft_job_id,
        d.session_id as draft_session_id,
-       d.validation_status as draft_validation_status
+       d.validation_status as draft_validation_status,
+       e.slack_permalink,
+       e.reply_permalink
      from submissions s
      left join draft_submissions d on d.draft_id = s.request->>'draftId'
+     left join lateral (
+       select slack_permalink, reply_permalink
+       from operator_command_events
+       where run_id = coalesce(s.request->>'policyRunId', s.request->>'runId', d.run_id)
+       order by updated_at desc
+       limit 1
+     ) e on true
      where s.kind = 'submit'
        and coalesce(s.request->>'jobId', d.job_id, '') like 'wiki-en-%citation-repair%'
      order by s.updated_at desc
@@ -151,7 +160,10 @@ function statusFromSubmissionRow(row: SubmissionStatusRow): LastWikipediaCitatio
     draftId: stringField(request, "draftId") ?? stringField(row, "draft_id"),
     draftValidationStatus: stringField(row, "draft_validation_status"),
     submitSucceeded,
-    slackPermalink: firstDeepString(response, ["slackPermalink", "slack_permalink", "permalink"]) ?? null,
+    slackPermalink: stringField(row, "reply_permalink")
+      ?? stringField(row, "slack_permalink")
+      ?? firstDeepString(response, ["slackPermalink", "slack_permalink", "permalink"])
+      ?? null,
     source: "submissions",
     ...(stringField(row, "last_error") ? { lastError: stringField(row, "last_error") } : {}),
     ...(updatedAt ? { updatedAt } : {}),
@@ -236,6 +248,8 @@ interface SubmissionStatusRow {
   draft_job_id?: string | null;
   draft_session_id?: string | null;
   draft_validation_status?: string | null;
+  slack_permalink?: string | null;
+  reply_permalink?: string | null;
 }
 
 interface DraftStatusRow {

@@ -5,10 +5,12 @@ import {
   formatOperatorResultForSlack,
   isAuthorizedSlackCommand,
   parseCsvSet,
+  slackPermalinkFromParts,
   textFromSlackEvent,
   textFromSlashCommand,
   verifySlackSignature,
 } from "../../services/slack-operator/src/slack.js";
+import { recordOperatorCommandEvent } from "../../services/slack-operator/src/persistence.js";
 
 describe("slack operator bridge", () => {
   it("verifies Slack signatures and rejects stale timestamps", () => {
@@ -37,11 +39,12 @@ describe("slack operator bridge", () => {
 
   it("parses slash command bodies into operator text", () => {
     const command = textFromSlashCommand(
-      "command=%2Faverray&text=status+last+wikipedia+citation+repair&user_id=U1&channel_id=C1&response_url=https%3A%2F%2Fhooks.slack.com%2Fcommands%2F1"
+      "command=%2Faverray&text=status+last+wikipedia+citation+repair&team_id=T1&user_id=U1&channel_id=C1&response_url=https%3A%2F%2Fhooks.slack.com%2Fcommands%2F1"
     );
 
     expect(command).toEqual({
       text: "status last wikipedia citation repair",
+      teamId: "T1",
       userId: "U1",
       channelId: "C1",
       responseUrl: "https://hooks.slack.com/commands/1",
@@ -49,20 +52,31 @@ describe("slack operator bridge", () => {
   });
 
   it("extracts app mentions without the bot mention", () => {
-    const command = textFromSlackEvent({
-      type: "app_mention",
-      user: "U1",
-      channel: "C1",
-      ts: "1777740000.123",
-      text: "<@B123> run one wikipedia citation repair if safe",
-    });
+    const command = textFromSlackEvent(
+      {
+        type: "app_mention",
+        user: "U1",
+        channel: "C1",
+        ts: "1777740000.123",
+        text: "<@B123> run one wikipedia citation repair if safe",
+      },
+      "T1"
+    );
 
     expect(command).toEqual({
       text: "run one wikipedia citation repair if safe",
+      teamId: "T1",
       userId: "U1",
       channelId: "C1",
-      permalink: "slack://C1/1777740000.123",
+      permalink: "https://app.slack.com/client/T1/C1/p1777740000123",
     });
+  });
+
+  it("builds Slack permalinks when a team id is available", () => {
+    expect(slackPermalinkFromParts("T1", "C1", "1777740000.123")).toBe(
+      "https://app.slack.com/client/T1/C1/p1777740000123"
+    );
+    expect(slackPermalinkFromParts(undefined, "C1", "1777740000.123")).toBe("slack://C1/1777740000.123");
   });
 
   it("enforces optional user and channel allowlists", () => {
@@ -97,5 +111,77 @@ describe("slack operator bridge", () => {
     expect(text).toContain("jobId: `wiki-en-1-citation-repair`");
     expect(text).toContain("submit_succeeded: `true`");
     expect(text).toContain("https://slack.example/archives/C/p123");
+  });
+
+  it("formats workflow replies with compact validation and evidence summary", () => {
+    const text = formatOperatorResultForSlack({
+      handled: true,
+      kind: "run_wikipedia_citation_repair",
+      result: {
+        status: "submitted",
+        runId: "run-2",
+        jobId: "wiki-en-2-citation-repair",
+        sessionId: "session-2",
+        draftId: "draft-2",
+        confidence: 0.72,
+        validation: { valid: true },
+        evidenceSummary: { totalCitations: 45, flaggedCitations: 5 },
+      },
+    });
+
+    expect(text).toContain("status: `submitted`");
+    expect(text).toContain("validation: `valid`");
+    expect(text).toContain("citations reviewed: `45`");
+    expect(text).toContain("issues flagged: `5`");
+  });
+
+  it("persists workflow run context but does not attach status commands to the run", async () => {
+    const calls: unknown[][] = [];
+    await recordOperatorCommandEvent({
+      source: "slack",
+      commandText: "run one wikipedia citation repair if safe",
+      teamId: "T1",
+      userId: "U1",
+      channelId: "C1",
+      slackPermalink: "https://app.slack.com/client/T1/C1/p1",
+      replyPermalink: "https://app.slack.com/client/T1/C1/p2",
+      result: {
+        handled: true,
+        kind: "run_wikipedia_citation_repair",
+        result: {
+          status: "submitted",
+          runId: "run-1",
+          jobId: "wiki-en-1-citation-repair",
+          sessionId: "session-1",
+          draftId: "draft-1",
+        },
+      },
+    }, async (_sql, values) => {
+      calls.push(values ?? []);
+      return [];
+    });
+
+    expect(calls[0]).toContain("run-1");
+    expect(calls[0]).toContain("wiki-en-1-citation-repair");
+
+    const statusCalls: unknown[][] = [];
+    await recordOperatorCommandEvent({
+      source: "slack",
+      commandText: "status last wikipedia citation repair",
+      result: {
+        handled: true,
+        kind: "status_last_wikipedia_citation_repair",
+        status: {
+          runId: "run-1",
+          jobId: "wiki-en-1-citation-repair",
+          status: "submitted",
+        },
+      },
+    }, async (_sql, values) => {
+      statusCalls.push(values ?? []);
+      return [];
+    });
+
+    expect(statusCalls[0]).not.toContain("run-1");
   });
 });

@@ -127,6 +127,11 @@ route with your chosen tunnel or reverse proxy. Keep
 `SLACK_OPERATOR_CHANNEL_ID`/`SLACK_OPERATOR_CHANNEL_IDS` and
 `SLACK_ALLOWED_USER_IDS` narrow.
 
+Operator command events are persisted in Postgres with their Slack channel,
+user, triggering message permalink, reply permalink, and workflow identifiers
+when a run command produces a run. The read-only status command uses that
+context so `slackPermalink` points back to Slack when available.
+
 Inbound Slack or command-center messages should be routed to the direct MCP
 operator command tool, not rephrased as free-form Hermes prompts. The supported
 commands are:
