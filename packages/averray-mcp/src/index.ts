@@ -23,6 +23,12 @@ import {
   summarizeDraft,
   type DraftSubmission,
 } from "./draft-submissions.js";
+import {
+  checkSourceUrl,
+  extractWikipediaCitations,
+  fetchWikipediaRevision,
+  findArchiveSnapshot,
+} from "./wiki-evidence.js";
 
 const server = new McpServer({
   name: "averray-mcp",
@@ -53,6 +59,62 @@ server.tool("averray_get_definition", "Get the canonical job definition for a jo
 }, async ({ jobId }) => {
   return jsonContent(await request(`/jobs/definition?jobId=${encodeURIComponent(jobId)}`));
 });
+
+server.tool(
+  "averray_fetch_wikipedia_revision",
+  "Read-only helper for pinned Wikipedia revisions. Fetches an exact oldid through MediaWiki APIs and returns bounded wikitext/html, or parsed references. Does not edit Wikipedia and does not mutate Averray state.",
+  {
+    title: z.string().min(1),
+    revisionId: z.string().min(1),
+    format: z.enum(["wikitext", "html", "references"]).default("wikitext"),
+    maxBytes: z.number().int().min(1_000).max(500_000).optional()
+  },
+  async ({ title, revisionId, format, maxBytes }) => {
+    return jsonContent(await fetchWikipediaRevision({ title, revisionId, format, maxBytes }));
+  }
+);
+
+server.tool(
+  "averray_extract_wikipedia_citations",
+  "Read-only helper that fetches a pinned Wikipedia revision and extracts structured citation/reference evidence: ref ids, citation template names, source URLs, archive URLs, dead-link markers, access dates, and bounded surrounding context.",
+  {
+    title: z.string().min(1),
+    revisionId: z.string().min(1),
+    maxCitations: z.number().int().min(1).max(200).default(80),
+    maxContextChars: z.number().int().min(80).max(1_000).default(240)
+  },
+  async ({ title, revisionId, maxCitations, maxContextChars }) => {
+    return jsonContent(await extractWikipediaCitations({ title, revisionId, maxCitations, maxContextChars }));
+  }
+);
+
+server.tool(
+  "averray_check_source_url",
+  "Read-only helper for source URL evidence. Fetches a URL with redirects and timeout, returning status, final URL, content type, host match, archive hints, and a short safe title/snippet when text-like.",
+  {
+    url: z.string().url(),
+    expectedHost: z.string().optional(),
+    userAgent: z.string().optional(),
+    timeoutMs: z.number().int().min(1_000).max(30_000).optional(),
+    maxSnippetChars: z.number().int().min(0).max(2_000).default(280)
+  },
+  async ({ url, expectedHost, userAgent, timeoutMs, maxSnippetChars }) => {
+    return jsonContent(await checkSourceUrl({ url, expectedHost, userAgent, timeoutMs, maxSnippetChars }));
+  }
+);
+
+server.tool(
+  "averray_find_archive_snapshot",
+  "Read-only helper for Wayback evidence. Looks up an archived snapshot candidate for a source URL, optionally near a citation access/archive date hint. Does not fetch or edit Wikipedia.",
+  {
+    url: z.string().url(),
+    timestampHint: z.string().optional(),
+    timeoutMs: z.number().int().min(1_000).max(30_000).optional()
+  },
+  async ({ url, timestampHint, timeoutMs }) => {
+    return jsonContent(await findArchiveSnapshot({ url, timestampHint, timeoutMs }));
+  }
+);
 
 server.tool("averray_claim", "Claim a job through Averray's public API fallback path.", {
   runId: z.string().optional(),
