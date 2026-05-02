@@ -176,6 +176,36 @@ Expected result:
 - `policy_check_claim` returns `pass` or a clear blocker.
 - No session is claimed and no work is submitted.
 
+## One-Command Wikipedia Workflow Smoke
+
+The reference agent exposes a first-class workflow so operators do not need to
+paste the full claim/evidence/draft/validate/submit sequence each time.
+
+Safe dry run:
+
+```text
+run one Wikipedia citation repair if safe, dry run only
+```
+
+Specific job dry run:
+
+```text
+run Wikipedia citation repair for wiki-en-... if safe, dry run only
+```
+
+Mutation run, only after allowlists are set for the exact job/session boundary:
+
+```text
+run Wikipedia citation repair for wiki-en-... if safe with dryRun=false
+```
+
+The workflow tool is `averray_run_wikipedia_citation_repair`. Its default is
+`dryRun=true`, which may fetch read-only Wikipedia/source evidence and validate
+a proposal preview but must not call `averray_claim` or `averray_submit`.
+With `dryRun=false`, claim and submit still go through the same one-shot
+mutation guards, draft persistence, local schema validation, confidence gate,
+and Slack lifecycle alerts.
+
 ## Tool Smoke
 
 After Hermes boots, verify the MCP tools from a shell inside the Hermes container when Hermes MCP config is loaded:

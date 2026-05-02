@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { privateKeyToAccount } from "viem/accounts";
 import { z } from "zod";
 import {
   assertNoKillSwitch,
@@ -29,6 +30,13 @@ import {
   fetchWikipediaRevision,
   findArchiveSnapshot,
 } from "./wiki-evidence.js";
+import {
+  readPageTitle,
+  readRevisionId,
+  runWikipediaCitationRepairWorkflow,
+  type WikipediaEvidenceBundle,
+  type WorkflowJob,
+} from "./job-workflows.js";
 
 const server = new McpServer({
   name: "averray-mcp",
@@ -113,6 +121,25 @@ server.tool(
   },
   async ({ url, timestampHint, timeoutMs }) => {
     return jsonContent(await findArchiveSnapshot({ url, timestampHint, timeoutMs }));
+  }
+);
+
+server.tool(
+  "averray_run_wikipedia_citation_repair",
+  "Run the reference agent's safe Wikipedia citation-repair workflow from one short command. It uses the generic Averray lifecycle skeleton plus the Wikipedia citation-repair adapter: wallet check, job discovery/definition, claimability/policy checks, optional claim, deterministic read-only evidence gathering, draft persistence, local validation, and guarded submit. dryRun defaults to true and never calls claim or submit.",
+  {
+    runId: z.string().optional(),
+    jobId: z.string().optional(),
+    dryRun: z.boolean().default(true),
+    expectedWallet: z.string().optional(),
+    maxEvidenceUrls: z.number().int().min(1).max(20).default(5),
+    confidenceThreshold: z.number().min(0).max(1).default(0.7)
+  },
+  async ({ runId, jobId, dryRun, expectedWallet, maxEvidenceUrls, confidenceThreshold }) => {
+    return jsonContent(await runWikipediaCitationRepairWorkflow(
+      { runId, jobId, dryRun, expectedWallet, maxEvidenceUrls, confidenceThreshold },
+      workflowDeps()
+    ));
   }
 );
 
@@ -432,6 +459,275 @@ server.tool("averray_observe_session", "Read the current Averray session state a
 });
 
 await runStdioServer(server);
+
+function workflowDeps() {
+  return {
+    async listJobs(): Promise<WorkflowJob[]> {
+      const payload = await request("/jobs");
+      const jobs: WorkflowJob[] = [];
+      for (const job of extractJobArray(payload)) {
+        if (isRecord(job)) {
+          const jobId = firstString(job.id, job.jobId, job.externalTaskId);
+          if (jobId) jobs.push({ jobId, definition: job });
+        }
+      }
+      return jobs;
+    },
+    async getDefinition(jobId: string) {
+      return request(`/jobs/definition?jobId=${encodeURIComponent(jobId)}`);
+    },
+    async walletStatus() {
+      const privateKey = optionalEnv("AGENT_WALLET_PRIVATE_KEY");
+      if (!privateKey) return { configured: false, address: null };
+      try {
+        const account = privateKeyToAccount(privateKey as `0x${string}`);
+        return { configured: true, address: account.address };
+      } catch {
+        return { configured: false, address: null };
+      }
+    },
+    async policyCheckClaim(input: {
+      runId: string;
+      jobId: string;
+      taskType?: string;
+      verifierMode?: string;
+      rewardUsd: number;
+    }) {
+      const reasons: string[] = [];
+      if (input.taskType && input.taskType !== "citation_repair") {
+        reasons.push(`task_type_not_allowed:${input.taskType}`);
+      }
+      if (input.verifierMode === "human_fallback") {
+        reasons.push("verifier_mode_rejected:human_fallback");
+      }
+      if (reasons.length > 0) {
+        return { allowed: false, reason: reasons.join(","), details: { reasons } };
+      }
+      const key = idempotencyKey(["averray", input.jobId, "claim"]);
+      const policy = await evaluateClaimMutationPolicy({ runId: input.runId, jobId: input.jobId, idempotencyKey: key }, query);
+      return {
+        allowed: policy.allowed,
+        reason: policy.allowed ? undefined : policy.reason ?? undefined,
+        details: policy
+      };
+    },
+    async claim(input: { runId: string; jobId: string }) {
+      return claimOnceForWorkflow(input);
+    },
+    async fetchEvidence(input: { definition: unknown; maxEvidenceUrls: number }): Promise<WikipediaEvidenceBundle> {
+      return fetchWikipediaEvidenceForWorkflow(input.definition, input.maxEvidenceUrls);
+    },
+    async saveDraft(input: { runId: string; jobId: string; sessionId?: string; output: Record<string, unknown> }) {
+      const draft = await saveDraftSubmission(
+        { ...input, proposalOnly: true, noWikipediaEdit: true },
+        query
+      );
+      return { draftId: draft.draftId, outputHash: draft.outputHash };
+    },
+    async validate(input: { jobId: string; draftId?: string; output?: Record<string, unknown> }) {
+      const definition = await request(`/jobs/definition?jobId=${encodeURIComponent(input.jobId)}`);
+      if (input.draftId) {
+        const draft = await getDraftSubmission({ draftId: input.draftId, jobId: input.jobId }, query);
+        const validation = validateSubmissionLocally(definition, draft.output);
+        await markDraftValidation(draft.draftId, validation.valid, validation, query);
+        return validation;
+      }
+      return validateSubmissionLocally(definition, input.output);
+    },
+    async submit(input: { runId: string; jobId: string; sessionId: string; draftId: string; outputHash?: string }) {
+      return submitDraftOnceForWorkflow(input);
+    }
+  };
+}
+
+async function claimOnceForWorkflow(input: { runId: string; jobId: string }) {
+  await assertNoKillSwitch("averray_claim");
+  const key = idempotencyKey(["averray", input.jobId, "claim"]);
+  const definition = await safeGetDefinition(input.jobId);
+  const policy = await evaluateClaimMutationPolicy(
+    { runId: input.runId, jobId: input.jobId, idempotencyKey: key },
+    query
+  );
+  if (!policy.allowed) {
+    await postSlackAlert({
+      kind: "claim_blocked",
+      title: "workflow claim blocked before mutation",
+      identifiers: { jobId: input.jobId, runId: policy.runId },
+      details: {
+        reason: policy.reason,
+        mutationBudgetConsumed: false,
+        maxClaimAttempts: policy.maxClaimAttempts,
+        previousAttempts: policy.previousAttempts,
+        ...jobDefinitionDetails(definition),
+      },
+    });
+    throw new Error(`claim_blocked:${policy.reason}`);
+  }
+
+  const session = await authSession();
+  await upsertSubmission({ runId: input.runId, kind: "claim", key, request: { jobId: input.jobId, policyRunId: policy.runId } });
+  try {
+    const response = await request("/jobs/claim", {
+      method: "POST",
+      token: session.token,
+      body: { jobId: input.jobId, idempotencyKey: key }
+    });
+    await completeSubmission(key, response);
+    const details = sessionResponseDetails(response);
+    await postSlackAlert({
+      kind: "claim_succeeded",
+      title: "workflow claim succeeded",
+      identifiers: { jobId: input.jobId, runId: policy.runId, sessionId: details.sessionId, wallet: session.wallet },
+      details: {
+        claimDeadline: details.claimDeadline,
+        mutationBudgetConsumed: true,
+        idempotencyKey: key,
+        ...jobDefinitionDetails(definition),
+      },
+    });
+    if (!details.sessionId) throw new Error("claim_response_missing_session_id");
+    return { sessionId: details.sessionId, claimDeadline: details.claimDeadline, response };
+  } catch (error) {
+    await failSubmission(key, error);
+    await postSlackAlert({
+      kind: "claim_failed",
+      title: "workflow claim failed after mutation attempt",
+      identifiers: { jobId: input.jobId, runId: policy.runId, wallet: session.wallet },
+      details: {
+        error: error instanceof Error ? error.message : String(error),
+        mutationBudgetConsumed: true,
+        idempotencyKey: key,
+      },
+    });
+    throw error;
+  }
+}
+
+async function submitDraftOnceForWorkflow(input: {
+  runId: string;
+  jobId: string;
+  sessionId: string;
+  draftId: string;
+  outputHash?: string;
+}) {
+  await assertNoKillSwitch("averray_submit");
+  const definition = await request(`/jobs/definition?jobId=${encodeURIComponent(input.jobId)}`);
+  const draft = await getDraftSubmission({ draftId: input.draftId, jobId: input.jobId, sessionId: input.sessionId }, query);
+  const validation = validateSubmissionLocally(definition, draft.output);
+  await markDraftValidation(draft.draftId, validation.valid, validation, query);
+  if (!validation.valid) {
+    return { blocked: true, reason: "local_schema_validation_failed", validation };
+  }
+
+  const outputHash = input.outputHash ?? draft.outputHash;
+  const key = idempotencyKey(["averray", input.runId, "submit", outputHash]);
+  const policy = await evaluateSubmitMutationPolicy({
+    runId: input.runId,
+    sessionId: input.sessionId,
+    jobId: input.jobId,
+    idempotencyKey: key
+  }, query);
+  if (!policy.allowed) {
+    await postSlackAlert({
+      kind: "submit_blocked",
+      title: "workflow submit blocked before mutation",
+      identifiers: { jobId: policy.jobId, runId: policy.runId, sessionId: input.sessionId },
+      details: {
+        reason: policy.reason,
+        mutationBudgetConsumed: false,
+        maxSubmitAttempts: policy.maxSubmitAttempts,
+        previousAttempts: policy.previousAttempts,
+      },
+    });
+    return { blocked: true, reason: policy.reason ?? undefined, policy };
+  }
+
+  const session = await authSession();
+  await upsertSubmission({
+    runId: input.runId,
+    kind: "submit",
+    key,
+    request: { sessionId: input.sessionId, jobId: input.jobId, draftId: input.draftId, outputHash, policyRunId: policy.runId }
+  });
+  try {
+    const response = await request("/jobs/submit", {
+      method: "POST",
+      token: session.token,
+      body: buildSubmitRequestBody({ sessionId: input.sessionId, output: draft.output })
+    });
+    await completeSubmission(key, response);
+    await postSlackAlert({
+      kind: "submit_succeeded",
+      title: "workflow submit succeeded",
+      identifiers: { jobId: input.jobId, runId: policy.runId, sessionId: input.sessionId, wallet: session.wallet },
+      details: {
+        mutationBudgetConsumed: true,
+        idempotencyKey: key,
+        draftId: input.draftId,
+        outputHash,
+        ...submitResponseDetails(response),
+      },
+    });
+    return { response };
+  } catch (error) {
+    await failSubmission(key, error);
+    await postSlackAlert({
+      kind: "submit_failed",
+      title: "workflow submit failed after mutation attempt",
+      identifiers: { jobId: input.jobId, runId: policy.runId, sessionId: input.sessionId, wallet: session.wallet },
+      details: {
+        error: error instanceof Error ? error.message : String(error),
+        mutationBudgetConsumed: true,
+        idempotencyKey: key,
+        draftId: input.draftId,
+        outputHash,
+      },
+    });
+    throw error;
+  }
+}
+
+async function fetchWikipediaEvidenceForWorkflow(definition: unknown, maxEvidenceUrls: number): Promise<WikipediaEvidenceBundle> {
+  const pageTitle = readPageTitle(definition);
+  const revisionId = readRevisionId(definition);
+  if (!pageTitle || !revisionId) {
+    throw new Error("wikipedia_definition_missing_page_title_or_revision_id");
+  }
+  const revision = await fetchWikipediaRevision({ title: pageTitle, revisionId, format: "references" });
+  const citations = "references" in revision && Array.isArray(revision.references) ? revision.references : [];
+  const urls = [...new Set(citations.flatMap((citation) => citation.urls).filter(Boolean))].slice(0, maxEvidenceUrls);
+  const sourceChecks = [];
+  for (const url of urls) {
+    const check = await checkSourceUrl({ url }).catch((error) => ({
+      url,
+      ok: false,
+      status: 0,
+      finalUrl: url,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    const archive = await findArchiveSnapshot({ url }).catch(() => undefined);
+    sourceChecks.push({
+      url,
+      status: isRecord(check) && typeof check.status === "number" ? check.status : undefined,
+      ok: isRecord(check) && typeof check.ok === "boolean" ? check.ok : undefined,
+      finalUrl: isRecord(check) && typeof check.finalUrl === "string" ? check.finalUrl : url,
+      archiveUrl: firstArchiveUrl(archive),
+    });
+  }
+  return {
+    pageTitle: revision.title,
+    revisionId: revision.revisionId,
+    revisionUrl: revision.revisionUrl,
+    citations,
+    sourceChecks,
+  };
+}
+
+function firstArchiveUrl(value: unknown): string | null {
+  if (!isRecord(value) || !Array.isArray(value.candidates)) return null;
+  const first = value.candidates.find(isRecord);
+  return typeof first?.archiveUrl === "string" ? first.archiveUrl : null;
+}
 
 async function resolveSubmissionOutput(input: {
   runId?: string;
