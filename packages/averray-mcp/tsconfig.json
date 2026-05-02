@@ -5,7 +5,7 @@
     "outDir": "dist",
     "composite": true
   },
-  "references": [{ "path": "../mcp-common" }],
+  "references": [{ "path": "../mcp-common" }, { "path": "../schemas" }],
   "include": ["src/**/*.ts"]
 }
 
