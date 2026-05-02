@@ -203,6 +203,12 @@ run Wikipedia citation repair for wiki-en-... with runId controlled-wikipedia-on
 The workflow tool is `averray_run_wikipedia_citation_repair`. Its default is
 `dryRun=true`, which may fetch read-only Wikipedia/source evidence and validate
 a proposal preview but must not call `averray_claim` or `averray_submit`.
+For short operator intents such as `Run one Wikipedia citation repair if safe.`
+or `Run Wikipedia citation repair for <jobId> if safe.`, including Slack and
+command-center requests, Hermes should call
+`averray_run_wikipedia_citation_repair` first. Lower-level tools such as
+`averray_list_jobs` and `averray_claim` are fallback primitives, not the
+preferred route for this intent.
 With `dryRun=false`, claim and submit still go through the same one-shot
 mutation guards, draft persistence, local schema validation, confidence gate,
 and Slack lifecycle alerts. If a mutation run omits `runId`, the workflow

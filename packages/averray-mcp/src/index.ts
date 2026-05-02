@@ -126,7 +126,7 @@ server.tool(
 
 server.tool(
   "averray_run_wikipedia_citation_repair",
-  "Run the reference agent's safe Wikipedia citation-repair workflow from one short command. It uses the generic Averray lifecycle skeleton plus the Wikipedia citation-repair adapter: wallet check, job discovery/definition, claimability/policy checks, optional claim, deterministic read-only evidence gathering, draft persistence, local validation, and guarded submit. dryRun defaults to true and never calls claim or submit.",
+  "Preferred first tool for short operator intents like 'Run one Wikipedia citation repair if safe' or 'Run Wikipedia citation repair for <jobId> if safe'. Run the reference agent's safe Wikipedia citation-repair workflow from one short command. It uses the generic Averray lifecycle skeleton plus the Wikipedia citation-repair adapter: wallet check, job discovery/definition, claimability/policy checks, optional claim, deterministic read-only evidence gathering, draft persistence, local validation, and guarded submit. dryRun defaults to true and never calls claim or submit. Use this workflow before lower-level tools such as averray_list_jobs or averray_claim for Wikipedia citation-repair requests.",
   {
     runId: z.string().optional(),
     jobId: z.string().optional(),
@@ -143,7 +143,7 @@ server.tool(
   }
 );
 
-server.tool("averray_claim", "Claim a job through Averray's public API fallback path.", {
+server.tool("averray_claim", "Low-level claim primitive for explicit claim operations. Do not use this directly for short Wikipedia citation-repair operator intents; prefer averray_run_wikipedia_citation_repair so runId generation, evidence helpers, draft persistence, validation, submit limits, and Slack alerts are handled together.", {
   runId: z.string().optional(),
   jobId: z.string().min(1),
   idempotencyKey: z.string().optional()
