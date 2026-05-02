@@ -47,6 +47,7 @@ export interface WorkflowSubmitResult {
 }
 
 export interface WorkflowDeps {
+  generateRunId?(): string;
   listJobs(): Promise<WorkflowJob[]>;
   getDefinition(jobId: string): Promise<unknown>;
   walletStatus(): Promise<WorkflowWallet>;
@@ -69,7 +70,9 @@ export interface WorkflowDeps {
     output: Record<string, unknown>;
   }): Promise<WorkflowDraft>;
   validate(input: {
+    runId: string;
     jobId: string;
+    sessionId?: string;
     draftId?: string;
     output?: Record<string, unknown>;
   }): Promise<SubmissionValidationResult>;
@@ -100,13 +103,26 @@ export async function runWikipediaCitationRepairWorkflow(
   input: WikipediaCitationRepairWorkflowInput,
   deps: WorkflowDeps
 ) {
-  const runId = input.runId ?? `wikipedia-citation-repair-${randomUUID()}`;
+  const explicitRunId = input.runId === undefined ? undefined : normalizeRunId(input.runId);
+  let runId = explicitRunId;
   const dryRun = input.dryRun ?? true;
   const maxEvidenceUrls = input.maxEvidenceUrls ?? 5;
   const confidenceThreshold = input.confidenceThreshold ?? 0.7;
   const events: string[] = [];
 
   try {
+    if (input.runId !== undefined && !explicitRunId) {
+      return {
+        status: "blocked" as WorkflowStatus,
+        dryRun,
+        runId: null,
+        reason: "invalid_run_id",
+        slack: slackSummary(events),
+      };
+    }
+    runId = runId
+      ?? normalizeRunId(deps.generateRunId?.())
+      ?? `wikipedia-citation-repair-${randomUUID()}`;
     const wallet = await deps.walletStatus();
     events.push("wallet_checked");
     if (!wallet.configured) {
@@ -170,7 +186,7 @@ export async function runWikipediaCitationRepairWorkflow(
     const proposal = buildWikipediaCitationRepairProposal(definition, evidence);
 
     if (dryRun) {
-      const validation = await deps.validate({ jobId: selected.jobId, output: proposal.output });
+      const validation = await deps.validate({ runId, jobId: selected.jobId, output: proposal.output });
       events.push("validated_without_mutation");
       return {
         status: "needs_review" as WorkflowStatus,
@@ -190,6 +206,7 @@ export async function runWikipediaCitationRepairWorkflow(
       };
     }
 
+    assertMutationRunId(runId, "claim");
     const claim = await deps.claim({ runId, jobId: selected.jobId });
     events.push("claimed");
     if (!claim.sessionId) {
@@ -204,6 +221,7 @@ export async function runWikipediaCitationRepairWorkflow(
       };
     }
 
+    assertMutationRunId(runId, "draft");
     const draft = await deps.saveDraft({
       runId,
       jobId: selected.jobId,
@@ -212,7 +230,7 @@ export async function runWikipediaCitationRepairWorkflow(
     });
     events.push("draft_saved");
 
-    let validation = await deps.validate({ jobId: selected.jobId, draftId: draft.draftId });
+    let validation = await deps.validate({ runId, jobId: selected.jobId, sessionId: claim.sessionId, draftId: draft.draftId });
     events.push("validated");
     if (!validation.valid) {
       const fixed = fixSchemaOnlyWikipediaProposal(proposal.output);
@@ -224,7 +242,7 @@ export async function runWikipediaCitationRepairWorkflow(
           output: fixed,
         });
         events.push("schema_fixed_and_resaved");
-        validation = await deps.validate({ jobId: selected.jobId, draftId: fixedDraft.draftId });
+        validation = await deps.validate({ runId, jobId: selected.jobId, sessionId: claim.sessionId, draftId: fixedDraft.draftId });
         if (validation.valid) {
           draft.draftId = fixedDraft.draftId;
           draft.outputHash = fixedDraft.outputHash;
@@ -264,6 +282,7 @@ export async function runWikipediaCitationRepairWorkflow(
       };
     }
 
+    assertMutationRunId(runId, "submit");
     const submit = await deps.submit({
       runId,
       jobId: selected.jobId,
@@ -309,6 +328,18 @@ export async function runWikipediaCitationRepairWorkflow(
       reason: error instanceof Error ? error.message : String(error),
       slack: slackSummary(events),
     };
+  }
+}
+
+function normalizeRunId(value: string | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function assertMutationRunId(runId: string | undefined, phase: string): asserts runId is string {
+  if (!normalizeRunId(runId)) {
+    throw new Error(`workflow_missing_run_id_before_${phase}`);
   }
 }
 

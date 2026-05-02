@@ -524,10 +524,13 @@ function workflowDeps() {
       );
       return { draftId: draft.draftId, outputHash: draft.outputHash };
     },
-    async validate(input: { jobId: string; draftId?: string; output?: Record<string, unknown> }) {
+    async validate(input: { runId: string; jobId: string; sessionId?: string; draftId?: string; output?: Record<string, unknown> }) {
       const definition = await request(`/jobs/definition?jobId=${encodeURIComponent(input.jobId)}`);
       if (input.draftId) {
-        const draft = await getDraftSubmission({ draftId: input.draftId, jobId: input.jobId }, query);
+        const draft = await getDraftSubmission(
+          { draftId: input.draftId, runId: input.runId, jobId: input.jobId, sessionId: input.sessionId },
+          query
+        );
         const validation = validateSubmissionLocally(definition, draft.output);
         await markDraftValidation(draft.draftId, validation.valid, validation, query);
         return validation;
