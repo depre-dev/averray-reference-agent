@@ -105,6 +105,12 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   per run, blocks retries unless explicitly enabled, and can be narrowed with
   exact `AVERRAY_SUBMIT_SESSION_ALLOWLIST` and `AVERRAY_SUBMIT_JOB_ALLOWLIST`
   values.
+- Submission proposals should be persisted before validation with
+  `averray_save_draft_submission`. Resumed sessions can use
+  `averray_get_draft_submission`, `averray_list_draft_submissions`, or pass
+  `draftId` into `averray_validate_submission` / `averray_submit` so validation
+  and submit use the exact same structured JSON object instead of reconstructed
+  chat text.
 - Optional Slack operational alerts can be enabled with `SLACK_WEBHOOK_URL`.
   They cover claim prechecks, claim/submit outcomes, local validation failures,
   TTL warnings, and inventory exhaustion/replenishment. See
