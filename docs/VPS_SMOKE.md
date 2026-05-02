@@ -130,7 +130,8 @@ docker compose --env-file .env.prod -f ops/compose.yml -f ops/compose.prod.yml -
 
 Run this only after `.env.prod` contains a real testnet-only
 `AGENT_WALLET_PRIVATE_KEY`. The script validates that the key has the expected
-shape without printing it. It may print `AGENT_WALLET_ADDRESS`, which is safe.
+shape and is not the all-zero placeholder without printing it. It may print
+`AGENT_WALLET_ADDRESS`, which is safe.
 
 This smoke checks wallet status, policy budget, compact Wikipedia discovery,
 one job definition, and `policy_check_claim`. It explicitly forbids

@@ -37,6 +37,13 @@ if ! grep -Eq '^AGENT_WALLET_PRIVATE_KEY=0x[0-9a-fA-F]{64}$' "${ENV_FILE}"; then
   exit 1
 fi
 
+WALLET_KEY="$(grep '^AGENT_WALLET_PRIVATE_KEY=' "${ENV_FILE}" | tail -n 1 | cut -d= -f2-)"
+if [[ "${WALLET_KEY}" =~ ^0x0{64}$ ]]; then
+  echo "AGENT_WALLET_PRIVATE_KEY is still the all-zero placeholder in ${ENV_FILE}." >&2
+  echo "Generate a real testnet-only key with scripts/bootstrap-wallet.sh or replace the placeholder manually." >&2
+  exit 1
+fi
+
 if grep -q '^AGENT_WALLET_ADDRESS=' "${ENV_FILE}"; then
   grep '^AGENT_WALLET_ADDRESS=' "${ENV_FILE}"
 else
@@ -44,7 +51,7 @@ else
 fi
 
 if ! docker compose --env-file "${ENV_FILE}" -f ops/compose.yml -f ops/compose.prod.yml -p avg \
-  exec -T hermes sh -lc 'printf "%s" "${AGENT_WALLET_PRIVATE_KEY:-}" | grep -Eq "^0x[0-9a-fA-F]{64}$"'; then
+  exec -T hermes sh -lc 'printf "%s" "${AGENT_WALLET_PRIVATE_KEY:-}" | grep -Eq "^0x[0-9a-fA-F]{64}$" && ! printf "%s" "${AGENT_WALLET_PRIVATE_KEY:-}" | grep -Eq "^0x0{64}$"'; then
   echo "Hermes container does not see AGENT_WALLET_PRIVATE_KEY." >&2
   echo "Recreate Hermes after env changes, then rerun this smoke:" >&2
   echo "  docker compose --env-file ${ENV_FILE} -f ops/compose.yml -f ops/compose.prod.yml -p avg up -d --build --force-recreate hermes" >&2
@@ -52,7 +59,7 @@ if ! docker compose --env-file "${ENV_FILE}" -f ops/compose.yml -f ops/compose.p
 fi
 
 if ! docker compose --env-file "${ENV_FILE}" -f ops/compose.yml -f ops/compose.prod.yml -p avg \
-  exec -T hermes sh -lc 'set -a && . /config-runtime/reference-agent.env && set +a && printf "%s" "${AGENT_WALLET_PRIVATE_KEY:-}" | grep -Eq "^0x[0-9a-fA-F]{64}$"'; then
+  exec -T hermes sh -lc 'set -a && . /config-runtime/reference-agent.env && set +a && printf "%s" "${AGENT_WALLET_PRIVATE_KEY:-}" | grep -Eq "^0x[0-9a-fA-F]{64}$" && ! printf "%s" "${AGENT_WALLET_PRIVATE_KEY:-}" | grep -Eq "^0x0{64}$"'; then
   echo "Hermes MCP launcher cannot read a valid AGENT_WALLET_PRIVATE_KEY from /config-runtime/reference-agent.env." >&2
   echo "Recreate Hermes after pulling the latest compose/config changes, then rerun this smoke:" >&2
   echo "  docker compose --env-file ${ENV_FILE} -f ops/compose.yml -f ops/compose.prod.yml -p avg up -d --build --force-recreate hermes" >&2
