@@ -76,6 +76,15 @@ ssh -L 9119:localhost:9119 ubuntu@YOUR_VPS
 
 Then open `http://127.0.0.1:9119`.
 
+## Optional Command Center
+
+Hermes Workspace can be evaluated as a richer operator UI through an opt-in
+Compose overlay. It is disabled by default and keeps the workspace UI and
+gateway bound to VPS localhost for SSH/Tailscale access.
+
+Start with [docs/COMMAND_CENTER.md](docs/COMMAND_CENTER.md). Do not install
+Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
+
 ## Safety Defaults
 
 - Testnet only.
