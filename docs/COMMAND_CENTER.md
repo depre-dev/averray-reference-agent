@@ -21,7 +21,8 @@ published only to VPS localhost.
 - Do not install Hermes Workspace with `curl | bash` on the VPS.
 - Do not bind the command center to a public interface.
 - Use SSH or Tailscale tunnels to reach the UI.
-- Set a strong `HERMES_WORKSPACE_PASSWORD` before starting the workspace.
+- Set strong `HERMES_WORKSPACE_PASSWORD` and `HERMES_GATEWAY_API_KEY`
+  values before starting the workspace.
 - Do not mount the Docker socket.
 - Do not give the Workspace container the Averray wallet private key or MCP
   runtime env volume. The gateway owns agent execution; the UI only talks to
@@ -38,8 +39,9 @@ HERMES_WORKSPACE_IMAGE=ghcr.io/outsourc-e/hermes-workspace:latest
 HERMES_WORKSPACE_PORT=3000
 HERMES_GATEWAY_PORT=8642
 
-# Optional. If set, the Workspace passes this token to the gateway.
-HERMES_GATEWAY_API_KEY=
+# Required because the gateway binds 0.0.0.0 inside Docker so the Workspace
+# container can reach it. Use a long random value.
+HERMES_GATEWAY_API_KEY=change-this-to-a-long-random-token
 
 # Required by the compose overlay. Use a long random value.
 HERMES_WORKSPACE_PASSWORD=change-this-to-a-long-random-password
@@ -47,6 +49,16 @@ HERMES_WORKSPACE_PASSWORD=change-this-to-a-long-random-password
 # Keep 0 for plain HTTP over SSH/Tailscale localhost tunnels.
 HERMES_WORKSPACE_COOKIE_SECURE=0
 HERMES_WORKSPACE_TRUST_PROXY=0
+```
+
+To generate both secrets on the VPS:
+
+```bash
+grep -q '^HERMES_GATEWAY_API_KEY=' .env.prod || \
+  printf '\nHERMES_GATEWAY_API_KEY=%s\n' "$(openssl rand -base64 32)" >> .env.prod
+
+grep -q '^HERMES_WORKSPACE_PASSWORD=' .env.prod || \
+  printf '\nHERMES_WORKSPACE_PASSWORD=%s\n' "$(openssl rand -base64 32)" >> .env.prod
 ```
 
 ## Start
