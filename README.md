@@ -96,3 +96,7 @@ Then open `http://127.0.0.1:9119`.
   per run, blocks retries unless explicitly enabled, and can be narrowed with
   exact `AVERRAY_SUBMIT_SESSION_ALLOWLIST` and `AVERRAY_SUBMIT_JOB_ALLOWLIST`
   values.
+- Optional Slack operational alerts can be enabled with `SLACK_WEBHOOK_URL`.
+  They cover claim prechecks, claim/submit outcomes, local validation failures,
+  TTL warnings, and inventory exhaustion/replenishment. See
+  [docs/VPS_SMOKE.md](docs/VPS_SMOKE.md#slack-operational-alerts).

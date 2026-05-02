@@ -11,6 +11,7 @@ import {
   trimTrailingSlash
 } from "@avg/mcp-common";
 import { evaluateClaimMutationPolicy, evaluateSubmitMutationPolicy, isUuid } from "./mutation-policy.js";
+import { postSlackAlert, validationFailureDetails } from "./slack-alerts.js";
 import { buildSubmitRequestBody } from "./submit-payload.js";
 import { validateSubmissionLocally } from "./validate-submission.js";
 
@@ -20,6 +21,8 @@ const server = new McpServer({
 });
 
 const baseUrl = trimTrailingSlash(optionalEnv("AVERRAY_API_BASE_URL", "https://api.averray.com"));
+const ttlAlertedSessions = new Set<string>();
+const inventoryStateByScope = new Map<string, boolean>();
 
 server.tool("averray_list_jobs", "List Averray jobs in compact form. Use search/source/category/state filters to find specific jobs without flooding context.", {
   recommendations: z.boolean().default(false),
@@ -31,7 +34,9 @@ server.tool("averray_list_jobs", "List Averray jobs in compact form. Use search/
 }, async ({ recommendations, search, source, category, state, limit }) => {
   const path = recommendations ? "/jobs/recommendations" : "/jobs";
   const payload = await request(path);
-  return jsonContent(compactJobsPayload(payload, { recommendations, search, source, category, state, limit }));
+  const compact = compactJobsPayload(payload, { recommendations, search, source, category, state, limit });
+  await maybePostInventoryAlert(compact, { recommendations, search, source, category, state, limit });
+  return jsonContent(compact);
 });
 
 server.tool("averray_get_definition", "Get the canonical job definition for a job id.", {
@@ -47,10 +52,34 @@ server.tool("averray_claim", "Claim a job through Averray's public API fallback 
 }, async ({ runId, jobId, idempotencyKey: providedKey }) => {
   await assertNoKillSwitch("averray_claim");
   const key = providedKey ?? idempotencyKey(["averray", jobId, "claim"]);
+  const definition = await safeGetDefinition(jobId);
   const policy = await evaluateClaimMutationPolicy({ runId, jobId, idempotencyKey: key }, query);
   if (!policy.allowed) {
+    await postSlackAlert({
+      kind: "claim_blocked",
+      title: "claim blocked before mutation",
+      identifiers: { jobId, runId: policy.runId },
+      details: {
+        reason: policy.reason,
+        mutationBudgetConsumed: false,
+        maxClaimAttempts: policy.maxClaimAttempts,
+        previousAttempts: policy.previousAttempts,
+        ...jobDefinitionDetails(definition),
+      },
+    });
     return jsonContent({ blocked: true, tool: "averray_claim", policy });
   }
+  await postSlackAlert({
+    kind: "claim_precheck_passed",
+    title: "claim precheck passed",
+    identifiers: { jobId, runId: policy.runId },
+    details: {
+      mutationBudgetConsumed: false,
+      maxClaimAttempts: policy.maxClaimAttempts,
+      previousAttempts: policy.previousAttempts,
+      ...jobDefinitionDetails(definition),
+    },
+  });
 
   const session = await authSession();
   await upsertSubmission({ runId, kind: "claim", key, request: { jobId, policyRunId: policy.runId } });
@@ -61,9 +90,37 @@ server.tool("averray_claim", "Claim a job through Averray's public API fallback 
       body: { jobId, idempotencyKey: key }
     });
     await completeSubmission(key, response);
+    const sessionDetails = sessionResponseDetails(response);
+    await postSlackAlert({
+      kind: "claim_succeeded",
+      title: "claim succeeded",
+      identifiers: {
+        jobId,
+        runId: policy.runId,
+        sessionId: sessionDetails.sessionId,
+        wallet: session.wallet,
+      },
+      details: {
+        claimDeadline: sessionDetails.claimDeadline,
+        mutationBudgetConsumed: true,
+        idempotencyKey: key,
+        ...jobDefinitionDetails(definition),
+      },
+    });
     return jsonContent({ idempotencyKey: key, policy, response });
   } catch (error) {
     await failSubmission(key, error);
+    await postSlackAlert({
+      kind: "claim_failed",
+      title: "claim failed after mutation attempt",
+      identifiers: { jobId, runId: policy.runId, wallet: session.wallet },
+      details: {
+        error: error instanceof Error ? error.message : String(error),
+        mutationBudgetConsumed: true,
+        idempotencyKey: key,
+        ...jobDefinitionDetails(definition),
+      },
+    });
     throw error;
   }
 });
@@ -78,6 +135,18 @@ server.tool(
   async ({ jobId, output }) => {
     const definition = await request(`/jobs/definition?jobId=${encodeURIComponent(jobId)}`);
     const validation = validateSubmissionLocally(definition, output);
+    if (!validation.valid) {
+      await postSlackAlert({
+        kind: "submit_validation_failed",
+        title: "local submission validation failed",
+        identifiers: { jobId },
+        details: {
+          mutationBudgetConsumed: false,
+          ...validationFailureDetails(validation),
+          ...jobDefinitionDetails(definition),
+        },
+      });
+    }
     return jsonContent({ jobId, ...validation });
   }
 );
@@ -107,6 +176,16 @@ server.tool("averray_submit", "Submit work through Averray's public API fallback
       // Couldn't reach the definition endpoint — surface the error to
       // the agent rather than silently skipping validation. The
       // mutation budget is untouched.
+      await postSlackAlert({
+        kind: "submit_blocked",
+        title: "submit blocked before mutation",
+        identifiers: { jobId, runId, sessionId },
+        details: {
+          reason: "definition_fetch_failed",
+          message: error instanceof Error ? error.message : String(error),
+          mutationBudgetConsumed: false,
+        },
+      });
       return jsonContent({
         blocked: true,
         tool: "averray_submit",
@@ -116,6 +195,16 @@ server.tool("averray_submit", "Submit work through Averray's public API fallback
     }
     const validation = validateSubmissionLocally(definition, output);
     if (!validation.valid) {
+      await postSlackAlert({
+        kind: "submit_validation_failed",
+        title: "local submission validation failed",
+        identifiers: { jobId, runId, sessionId },
+        details: {
+          mutationBudgetConsumed: false,
+          ...validationFailureDetails(validation),
+          ...jobDefinitionDetails(definition),
+        },
+      });
       return jsonContent({
         blocked: true,
         tool: "averray_submit",
@@ -128,6 +217,17 @@ server.tool("averray_submit", "Submit work through Averray's public API fallback
   const key = idempotencyKey(["averray", runId ?? sessionId, "submit", outputHash ?? JSON.stringify(output)]);
   const policy = await evaluateSubmitMutationPolicy({ runId, sessionId, jobId, idempotencyKey: key }, query);
   if (!policy.allowed) {
+    await postSlackAlert({
+      kind: "submit_blocked",
+      title: "submit blocked before mutation",
+      identifiers: { jobId: policy.jobId, runId: policy.runId, sessionId },
+      details: {
+        reason: policy.reason,
+        mutationBudgetConsumed: false,
+        maxSubmitAttempts: policy.maxSubmitAttempts,
+        previousAttempts: policy.previousAttempts,
+      },
+    });
     return jsonContent({ blocked: true, tool: "averray_submit", policy });
   }
 
@@ -140,9 +240,31 @@ server.tool("averray_submit", "Submit work through Averray's public API fallback
       body: buildSubmitRequestBody({ sessionId, output })
     });
     await completeSubmission(key, response);
+    await postSlackAlert({
+      kind: "submit_succeeded",
+      title: "submit succeeded",
+      identifiers: { jobId, runId: policy.runId, sessionId, wallet: session.wallet },
+      details: {
+        mutationBudgetConsumed: true,
+        idempotencyKey: key,
+        outputHash,
+        ...submitResponseDetails(response),
+      },
+    });
     return jsonContent({ idempotencyKey: key, policy, response });
   } catch (error) {
     await failSubmission(key, error);
+    await postSlackAlert({
+      kind: "submit_failed",
+      title: "submit failed after mutation attempt",
+      identifiers: { jobId, runId: policy.runId, sessionId, wallet: session.wallet },
+      details: {
+        error: error instanceof Error ? error.message : String(error),
+        mutationBudgetConsumed: true,
+        idempotencyKey: key,
+        outputHash,
+      },
+    });
     throw error;
   }
 });
@@ -151,7 +273,9 @@ server.tool("averray_observe_session", "Read the current Averray session state a
   sessionId: z.string().min(1)
 }, async ({ sessionId }) => {
   const session = await authSession();
-  return jsonContent(await request(`/session?sessionId=${encodeURIComponent(sessionId)}`, { token: session.token }));
+  const payload = await request(`/session?sessionId=${encodeURIComponent(sessionId)}`, { token: session.token });
+  await maybePostTtlAlert(sessionId, payload, session.wallet);
+  return jsonContent(payload);
 });
 
 await runStdioServer(server);
@@ -185,6 +309,14 @@ async function request(path: string, options: { method?: string; token?: string;
     throw new Error(`${path} failed ${response.status}: ${payload?.message ?? "unknown_error"}`);
   }
   return payload;
+}
+
+async function safeGetDefinition(jobId: string): Promise<unknown> {
+  try {
+    return await request(`/jobs/definition?jobId=${encodeURIComponent(jobId)}`);
+  } catch {
+    return undefined;
+  }
 }
 
 async function upsertSubmission(input: { runId?: string; kind: "claim" | "submit"; key: string; request: unknown }) {
@@ -245,6 +377,114 @@ function compactJobsPayload(
         ? "Result was truncated. Re-run with a narrower search/source/category/state filter or a higher limit."
         : "Use averray_get_definition(jobId) for full details before planning work."
   };
+}
+
+async function maybePostInventoryAlert(
+  compact: ReturnType<typeof compactJobsPayload>,
+  filters: { recommendations: boolean; search?: string; source?: string; category?: string; state?: string; limit: number }
+) {
+  const scope = JSON.stringify({
+    recommendations: filters.recommendations,
+    search: filters.search ?? null,
+    source: filters.source ?? null,
+    category: filters.category ?? null,
+    state: filters.state ?? null,
+  });
+  const hasInventory = compact.matched > 0;
+  const previous = inventoryStateByScope.get(scope);
+  inventoryStateByScope.set(scope, hasInventory);
+  if (previous === undefined && hasInventory) return;
+  if (previous === hasInventory) return;
+  if (hasInventory) {
+    await postSlackAlert({
+      kind: "inventory_replenished",
+      title: "job inventory replenished",
+      identifiers: { scope },
+      details: { matched: compact.matched, total: compact.total, returned: compact.returned },
+    });
+    return;
+  }
+  await postSlackAlert({
+    kind: "inventory_exhausted",
+    title: "job inventory exhausted",
+    identifiers: { scope },
+    details: { matched: compact.matched, total: compact.total, returned: compact.returned },
+  });
+}
+
+async function maybePostTtlAlert(sessionId: string, payload: unknown, wallet: string) {
+  const deadline = firstDeepString(payload, ["claimExpiresAt", "claim_expires_at", "claimDeadline", "deadline"]);
+  if (!deadline) return;
+  const deadlineMs = Date.parse(deadline);
+  if (!Number.isFinite(deadlineMs)) return;
+  const ttlMs = deadlineMs - Date.now();
+  const thresholdMs = Number.parseInt(optionalEnv("AVERRAY_SLACK_TTL_WARNING_MS", "600000"), 10);
+  if (ttlMs <= 0 || ttlMs > thresholdMs) return;
+  const state = firstDeepString(payload, ["status", "state"]);
+  if (state && !["claimed", "active", "open"].includes(state.toLowerCase())) return;
+  const key = `${sessionId}:${deadline}`;
+  if (ttlAlertedSessions.has(key)) return;
+  ttlAlertedSessions.add(key);
+  await postSlackAlert({
+    kind: "ttl_nearing_expiry",
+    title: "claim TTL nearing expiry",
+    identifiers: {
+      jobId: firstDeepString(payload, ["jobId", "job_id"]),
+      runId: firstDeepString(payload, ["runId", "run_id"]),
+      sessionId,
+      wallet,
+    },
+    details: {
+      claimDeadline: deadline,
+      ttlSecondsRemaining: Math.max(0, Math.round(ttlMs / 1000)),
+      state,
+      mutationBudgetConsumed: false,
+    },
+  });
+}
+
+function jobDefinitionDetails(definition: unknown) {
+  if (!isRecord(definition)) return {};
+  const source = isRecord(definition.source) ? definition.source : {};
+  const reward = isRecord(definition.reward) ? definition.reward : {};
+  return {
+    title: firstString(definition.title, definition.name, definition.summary),
+    source: firstString(source.type, source.kind, definition.sourceType, definition.source),
+    taskType: firstString(source.taskType, definition.taskType),
+    verifierMode: firstString(definition.verifierMode, definition.verifier),
+    reward: firstPresent(definition.rewardAmount, reward.amount, definition.reward),
+    rewardAsset: firstString(definition.rewardAsset, reward.asset),
+  };
+}
+
+function sessionResponseDetails(response: unknown) {
+  return {
+    sessionId: firstDeepString(response, ["sessionId", "session_id"]),
+    claimDeadline: firstDeepString(response, ["claimExpiresAt", "claim_expires_at", "claimDeadline", "deadline"]),
+  };
+}
+
+function submitResponseDetails(response: unknown) {
+  return {
+    verifierMode: firstDeepString(response, ["verifierMode", "verifier_mode"]),
+    reward: firstDeepString(response, ["reward", "rewardAmount", "reward_amount"]),
+    state: firstDeepString(response, ["state", "status"]),
+  };
+}
+
+function firstDeepString(value: unknown, keys: string[], depth = 0): string | undefined {
+  if (depth > 5 || !isRecord(value)) return undefined;
+  for (const key of keys) {
+    const direct = value[key];
+    if (typeof direct === "string" && direct.length > 0) return direct;
+  }
+  for (const nested of Object.values(value)) {
+    if (isRecord(nested)) {
+      const match = firstDeepString(nested, keys, depth + 1);
+      if (match) return match;
+    }
+  }
+  return undefined;
 }
 
 function extractJobArray(payload: unknown): unknown[] {
