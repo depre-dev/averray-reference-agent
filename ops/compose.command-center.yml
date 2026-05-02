@@ -1,0 +1,83 @@
+# Optional Hermes Workspace evaluation overlay.
+#
+# This file is intentionally not part of the default VPS smoke path. Start it
+# only with `--profile command-center` after reading docs/COMMAND_CENTER.md.
+services:
+  hermes-gateway:
+    image: ${HERMES_IMAGE}
+    profiles: ["command-center"]
+    restart: unless-stopped
+    depends_on:
+      hermes-permissions:
+        condition: service_completed_successfully
+      mcp-bundle:
+        condition: service_completed_successfully
+      mcp-env:
+        condition: service_completed_successfully
+      skills-observer:
+        condition: service_started
+    environment:
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
+      HERMES_DEFAULT_MODEL: ${HERMES_DEFAULT_MODEL:-deepseek-v4-pro:cloud}
+      HERMES_COMPARISON_MODEL: ${HERMES_COMPARISON_MODEL:-qwen3.5:cloud}
+      TRACE_HTTP_PORT: ${TRACE_HTTP_PORT:-8789}
+      TRACE_HTTP_URL: http://127.0.0.1:${TRACE_HTTP_PORT:-8789}/hermes-event
+      DATABASE_URL: ${DATABASE_URL}
+      AVERRAY_API_BASE_URL: ${AVERRAY_API_BASE_URL}
+      AGENT_WALLET_PRIVATE_KEY: ${AGENT_WALLET_PRIVATE_KEY}
+      POLICY_CONFIG_PATH: /config/policy.yaml
+      HALT_FILE: ${HALT_FILE:-/data/HALT}
+      WALLET_NETWORK: testnet
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      API_SERVER_ENABLED: "true"
+      API_SERVER_HOST: 0.0.0.0
+      API_SERVER_KEY: ${HERMES_GATEWAY_API_KEY:-}
+    volumes:
+      - avg-hermes:/opt/data
+      - avg-app:/app:ro
+      - avg-data:/data
+      - avg-mcp-env:/config-runtime:ro
+      - ../hermes/config/hermes.yaml:/opt/data/config.yaml:ro
+      - ../hermes/config/policy.yaml:/config/policy.yaml:ro
+      - ../hermes/plugins:/opt/data/plugins:ro
+      - ../hermes/profiles:/opt/data/browser-profiles
+      - avg-hermes-skills:/opt/data/skills
+    networks: [avg-internal]
+    ports:
+      - "127.0.0.1:${HERMES_GATEWAY_PORT:-8642}:8642"
+    command: ["gateway", "run"]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/hermes/.venv/bin/python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8642/health', timeout=2).read()\""
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  hermes-workspace:
+    image: ${HERMES_WORKSPACE_IMAGE:-ghcr.io/outsourc-e/hermes-workspace:latest}
+    profiles: ["command-center"]
+    restart: unless-stopped
+    depends_on:
+      hermes:
+        condition: service_started
+      hermes-gateway:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      HERMES_API_URL: http://hermes-gateway:8642
+      HERMES_DASHBOARD_URL: http://hermes:9119
+      HERMES_API_TOKEN: ${HERMES_GATEWAY_API_KEY:-}
+      CLAUDE_PASSWORD: ${HERMES_WORKSPACE_PASSWORD:?Set HERMES_WORKSPACE_PASSWORD in .env.prod before enabling the command center}
+      COOKIE_SECURE: ${HERMES_WORKSPACE_COOKIE_SECURE:-0}
+      TRUST_PROXY: ${HERMES_WORKSPACE_TRUST_PROXY:-0}
+    networks: [avg-internal]
+    ports:
+      - "127.0.0.1:${HERMES_WORKSPACE_PORT:-3000}:3000"
