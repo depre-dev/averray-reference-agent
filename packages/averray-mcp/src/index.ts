@@ -12,6 +12,7 @@ import {
 } from "@avg/mcp-common";
 import { evaluateClaimMutationPolicy, evaluateSubmitMutationPolicy, isUuid } from "./mutation-policy.js";
 import { buildSubmitRequestBody } from "./submit-payload.js";
+import { validateSubmissionLocally } from "./validate-submission.js";
 
 const server = new McpServer({
   name: "averray-mcp",
@@ -67,7 +68,21 @@ server.tool("averray_claim", "Claim a job through Averray's public API fallback 
   }
 });
 
-server.tool("averray_submit", "Submit work through Averray's public API fallback path.", {
+server.tool(
+  "averray_validate_submission",
+  "Validate a structured submission output locally against the job's output schema. Read-only — does NOT consume the submit attempt budget and never calls the backend. Use this BEFORE averray_submit when an output schema is defined for the job source. Returns { valid, validator, errors[], message } where errors carry actionable JSON paths (e.g. citation_findings.0.citation_number is not allowed).",
+  {
+    jobId: z.string().min(1),
+    output: z.unknown()
+  },
+  async ({ jobId, output }) => {
+    const definition = await request(`/jobs/definition?jobId=${encodeURIComponent(jobId)}`);
+    const validation = validateSubmissionLocally(definition, output);
+    return jsonContent({ jobId, ...validation });
+  }
+);
+
+server.tool("averray_submit", "Submit work through Averray's public API fallback path. Runs the same local schema validation as averray_validate_submission BEFORE the mutation policy check, so an invalid payload (e.g. extra structured fields) is rejected without consuming the one-shot submit attempt.", {
   runId: z.string().optional(),
   sessionId: z.string().min(1),
   jobId: z.string().optional(),
@@ -75,6 +90,41 @@ server.tool("averray_submit", "Submit work through Averray's public API fallback
   outputHash: z.string().optional()
 }, async ({ runId, sessionId, jobId, output, outputHash }) => {
   await assertNoKillSwitch("averray_submit");
+
+  // Pre-flight schema validation — runs BEFORE the mutation policy
+  // check and BEFORE any HTTP call. The reference agent has
+  // `maxSubmitAttempts=1`; without this gate a single field-shape
+  // mistake (the citation_number bug from the reference run) burns
+  // the only attempt and then `max_submit_attempts_exceeded` blocks
+  // the corrected payload. We need a jobId to pull the right schema;
+  // when the agent omits it (legacy path) we skip validation rather
+  // than refusing the submit.
+  if (typeof jobId === "string" && jobId.length > 0) {
+    let definition: unknown;
+    try {
+      definition = await request(`/jobs/definition?jobId=${encodeURIComponent(jobId)}`);
+    } catch (error) {
+      // Couldn't reach the definition endpoint — surface the error to
+      // the agent rather than silently skipping validation. The
+      // mutation budget is untouched.
+      return jsonContent({
+        blocked: true,
+        tool: "averray_submit",
+        reason: "definition_fetch_failed",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+    const validation = validateSubmissionLocally(definition, output);
+    if (!validation.valid) {
+      return jsonContent({
+        blocked: true,
+        tool: "averray_submit",
+        reason: "local_schema_validation_failed",
+        validation
+      });
+    }
+  }
+
   const key = idempotencyKey(["averray", runId ?? sessionId, "submit", outputHash ?? JSON.stringify(output)]);
   const policy = await evaluateSubmitMutationPolicy({ runId, sessionId, jobId, idempotencyKey: key }, query);
   if (!policy.allowed) {
