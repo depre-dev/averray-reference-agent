@@ -23,10 +23,12 @@ published only to VPS localhost.
 - Use SSH or Tailscale tunnels to reach the UI.
 - Set strong `HERMES_WORKSPACE_PASSWORD` and `HERMES_GATEWAY_API_KEY`
   values before starting the workspace.
-- The Workspace image still checks legacy `CLAUDE_API_TOKEN` and
-  `CLAUDE_DASHBOARD_TOKEN` names for some enhanced gateway/dashboard calls.
-  The Compose overlay maps them to `HERMES_GATEWAY_API_KEY`; keep all three
-  token aliases aligned.
+- The Workspace image still checks the legacy `CLAUDE_API_TOKEN` name for
+  OpenAI-compatible gateway calls. The Compose overlay maps that gateway alias
+  to `HERMES_GATEWAY_API_KEY`.
+- Do not set `CLAUDE_DASHBOARD_TOKEN` to the gateway bearer. The dashboard
+  session path is separate from the OpenAI-compatible gateway API and a stale
+  or mismatched dashboard token can produce `401 Unauthorized` session calls.
 - Workspace writes session and Kanban metadata below `$HOME/.hermes`. The
   Compose overlay sets `HOME=/tmp/workspace-home` because the upstream image's
   default `/home/workspace` path is not writable in this deployment mode.
@@ -155,8 +157,8 @@ model:
 
 If the Workspace UI shows `Authentication required — Hermes Agent rejected the
 connection token` while `/v1/chat/completions` works, clear the Workspace
-server-side and browser-side saved state after confirming the token aliases are
-present:
+server-side and browser-side saved state after confirming only gateway token
+aliases are present:
 
 ```bash
 docker compose --env-file .env.prod \
@@ -166,7 +168,14 @@ docker compose --env-file .env.prod \
   -p avg \
   --profile command-center \
   exec hermes-workspace env | grep -E 'HERMES_API|CLAUDE_API|CLAUDE_DASHBOARD|HOME'
+```
 
+The expected state is that `HERMES_API_TOKEN` and `CLAUDE_API_TOKEN` are set,
+while `CLAUDE_DASHBOARD_TOKEN` is absent.
+
+Then clear Workspace server-side state and recreate the container:
+
+```bash
 docker compose --env-file .env.prod \
   -f ops/compose.yml \
   -f ops/compose.prod.yml \
@@ -174,6 +183,14 @@ docker compose --env-file .env.prod \
   -p avg \
   --profile command-center \
   exec hermes-workspace sh -lc 'rm -rf /tmp/workspace-home/.hermes && mkdir -p /tmp/workspace-home/.hermes'
+
+docker compose --env-file .env.prod \
+  -f ops/compose.yml \
+  -f ops/compose.prod.yml \
+  -f ops/compose.command-center.yml \
+  -p avg \
+  --profile command-center \
+  up -d --force-recreate hermes-workspace
 ```
 
 Then clear site data for `127.0.0.1:3000` in the browser and reconnect.
