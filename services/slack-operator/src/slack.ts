@@ -101,6 +101,27 @@ export function formatOperatorResultForSlack(result: unknown): string {
       `• slack: ${stringField(status, "slackPermalink") ?? "n/a"}`,
     ].join("\n");
   }
+  if (result.kind === "operator_status") {
+    const status = isRecord(result.status) ? result.status : {};
+    const agent = isRecord(status.agent) ? status.agent : {};
+    const policy = isRecord(status.policy) ? status.policy : {};
+    const budget = isRecord(policy.budget) ? policy.budget : {};
+    const workflows = isRecord(status.workflows) ? status.workflows : {};
+    const wikipedia = isRecord(workflows.wikipediaCitationRepair) ? workflows.wikipediaCitationRepair : {};
+    const latestRun = isRecord(wikipedia.latestRun) ? wikipedia.latestRun : {};
+    const commands = Array.isArray(wikipedia.safeCommands)
+      ? wikipedia.safeCommands.slice(0, 4).map((entry) => `• \`${String(entry)}\``).join("\n")
+      : "";
+    return [
+      "*Averray operator status*",
+      `• wallet: \`${agent.walletReady === true ? "ready" : "not_ready"}\``,
+      `• address: \`${stringField(agent, "walletAddress") ?? "n/a"}\``,
+      `• budget today: \`${numberField(budget, "todayUsdSpent") ?? "n/a"} / ${numberField(budget, "perDayUsdMax") ?? "n/a"} USD\``,
+      `• wikipedia jobs: \`${numberField(wikipedia, "openJobs") ?? "n/a"} open / ${numberField(wikipedia, "discoveredJobs") ?? "n/a"} discovered\``,
+      `• latest run: \`${stringField(latestRun, "status") ?? "none"}\``,
+      commands ? `*Safe commands*\n${commands}` : "",
+    ].filter(Boolean).join("\n");
+  }
   if (result.kind === "run_wikipedia_citation_repair") {
     const workflow = isRecord(result.result) ? result.result : {};
     const validation = isRecord(workflow.validation) ? workflow.validation : {};

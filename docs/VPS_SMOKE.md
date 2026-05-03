@@ -137,17 +137,22 @@ operator command tool, not rephrased as free-form Hermes prompts. The supported
 commands are:
 
 ```text
+operator status
 run one wikipedia citation repair if safe
 run wikipedia citation repair for wiki-en-... if safe
 status last wikipedia citation repair
 ```
 
-`averray_handle_operator_command` parses those messages. Repair commands call
-`averray_run_wikipedia_citation_repair` directly with the workflow's wallet,
-policy, draft, validation, submit, and Slack alert gates. Status commands are
-read-only and return the latest `runId`, `jobId`, `sessionId`, submitted/failed
-state, `draftId`, and Slack permalink when one is available. Add `dry run only`
-to a repair command when you want a proposal preview without claim or submit.
+`averray_handle_operator_command` parses those messages. `operator status`
+calls the canonical read-only `averray_operator_status` MCP tool, returning
+wallet readiness, policy budget, open Wikipedia job counts, latest run state,
+safety guarantees, and safe command suggestions as structured JSON. Repair
+commands call `averray_run_wikipedia_citation_repair` directly with the
+workflow's wallet, policy, draft, validation, submit, and Slack alert gates.
+Latest-run status commands are read-only and return the latest `runId`,
+`jobId`, `sessionId`, submitted/failed state, `draftId`, and Slack permalink
+when one is available. Add `dry run only` to a repair command when you want a
+proposal preview without claim or submit.
 
 Check the host env file:
 

@@ -113,6 +113,44 @@ describe("slack operator bridge", () => {
     expect(text).toContain("https://slack.example/archives/C/p123");
   });
 
+  it("formats canonical operator status replies", () => {
+    const text = formatOperatorResultForSlack({
+      handled: true,
+      kind: "operator_status",
+      status: {
+        agent: {
+          walletReady: true,
+          walletAddress: "0xWallet",
+        },
+        policy: {
+          budget: {
+            todayUsdSpent: 0.25,
+            perDayUsdMax: 1,
+          },
+        },
+        workflows: {
+          wikipediaCitationRepair: {
+            openJobs: 2,
+            discoveredJobs: 3,
+            latestRun: { status: "submitted" },
+            safeCommands: [
+              "operator status",
+              "status last wikipedia citation repair",
+            ],
+          },
+        },
+      },
+    });
+
+    expect(text).toContain("*Averray operator status*");
+    expect(text).toContain("wallet: `ready`");
+    expect(text).toContain("address: `0xWallet`");
+    expect(text).toContain("budget today: `0.25 / 1 USD`");
+    expect(text).toContain("wikipedia jobs: `2 open / 3 discovered`");
+    expect(text).toContain("latest run: `submitted`");
+    expect(text).toContain("`operator status`");
+  });
+
   it("formats workflow replies with compact validation and evidence summary", () => {
     const text = formatOperatorResultForSlack({
       handled: true,

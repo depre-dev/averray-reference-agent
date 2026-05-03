@@ -15,6 +15,11 @@ export type ParsedOperatorCommand =
       source: OperatorCommandSource;
     }
   | {
+      handled: true;
+      kind: "operator_status";
+      source: OperatorCommandSource;
+    }
+  | {
       handled: false;
       kind: "unknown";
       source: OperatorCommandSource;
@@ -45,6 +50,7 @@ export interface LastWikipediaCitationRepairStatus {
 }
 
 const EXAMPLES = [
+  "operator status",
   "run one wikipedia citation repair if safe",
   "run wikipedia citation repair for wiki-en-... if safe",
   "status last wikipedia citation repair",
@@ -64,6 +70,15 @@ export function parseOperatorCommand(
 
   if (normalizedText === "status last wikipedia citation repair") {
     return { handled: true, kind: "status_last_wikipedia_citation_repair", source };
+  }
+
+  if (
+    normalizedText === "operator status" ||
+    normalizedText === "averray operator status" ||
+    normalizedText === "averray status" ||
+    normalizedText === "help"
+  ) {
+    return { handled: true, kind: "operator_status", source };
   }
 
   if (
