@@ -78,9 +78,11 @@ Then open `http://127.0.0.1:9119`.
 
 ## Optional Command Center
 
-Hermes Workspace can be evaluated as a richer operator UI through an opt-in
-Compose overlay. It is disabled by default and keeps the workspace UI and
-gateway bound to VPS localhost for SSH/Tailscale access.
+Hermes Workspace can run as a richer operator UI through an opt-in Compose
+overlay. It is disabled by default and keeps the workspace UI and gateway bound
+to VPS localhost for SSH/Tailscale access. The current baseline supports
+Workspace chat, Averray MCP tools, status checks, dry-run previews, and guarded
+Wikipedia citation-repair execution.
 
 Start with [docs/COMMAND_CENTER.md](docs/COMMAND_CENTER.md). Do not install
 Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.

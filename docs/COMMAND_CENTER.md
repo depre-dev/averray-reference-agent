@@ -1,12 +1,13 @@
-# Command Center Evaluation
+# Command Center Baseline
 
-This runbook evaluates Hermes Workspace as an optional operator command center
-for the Averray reference agent. It is not part of the default smoke path.
+This runbook operates Hermes Workspace as the optional command center for the
+Averray reference agent. It is not part of the default smoke path, but the
+baseline below has been verified on the reference VPS.
 
 ## Decision Snapshot
 
-Hermes Workspace is worth evaluating as a companion UI, not a replacement yet.
-It can attach to an existing Hermes gateway and Hermes dashboard pair:
+Hermes Workspace is now a working companion command center. It attaches to an
+existing Hermes gateway and Hermes dashboard pair:
 
 - gateway API on `:8642`
 - dashboard API on `:9119`
@@ -15,6 +16,27 @@ It can attach to an existing Hermes gateway and Hermes dashboard pair:
 The reference stack already runs the built-in Hermes dashboard on `9119`. This
 overlay adds a separate Hermes gateway process and the Workspace UI, both
 published only to VPS localhost.
+
+Use the surfaces this way:
+
+- Slack is the durable operator/audit channel. Prefer it for mutating production
+  commands that should leave a channel-visible trail.
+- Hermes Workspace is the richer inspection and guided execution UI. It is good
+  for status checks, dry-run previews, tool activity inspection, and controlled
+  execution when the operator is actively watching the session.
+- Both surfaces route short Averray commands through the same MCP operator
+  command handler and workflow tools, so they share run/session/draft state.
+
+Verified golden path:
+
+- Workspace: `status last wikipedia citation repair` returns the latest
+  submitted run.
+- Workspace: `run one wikipedia citation repair if safe` performs a dry run
+  preview first, then can complete claim, draft, validation, and submit when the
+  operator explicitly asks to run with `dryRun: false`.
+- Slack: `@Averray Reference Agent status last wikipedia citation repair`
+  returns the same latest run, including Slack permalink when the run was
+  initiated from Slack.
 
 ## Safety Model
 
@@ -111,6 +133,13 @@ The existing built-in Hermes dashboard remains available at:
 http://127.0.0.1:9119
 ```
 
+If you only need Workspace and the gateway-backed chat/tools, this shorter
+tunnel is enough:
+
+```bash
+ssh -N -L 3000:127.0.0.1:3000 ubuntu@YOUR_VPS
+```
+
 ## Verify
 
 Check the command-center services:
@@ -134,12 +163,13 @@ curl -fsS http://127.0.0.1:9119/api/status
 
 In the Workspace UI, verify:
 
-- it detects the gateway URL `http://hermes-gateway:8642`
-- it detects the dashboard URL `http://hermes:9119`
-- settings show model `hermes-agent` and chat can answer a tiny prompt such as
-  `say ok`
-- chat can reach the configured Hermes provider
-- sessions/tool activity are visible, if supported by the pinned Hermes image
+- no yellow `Authentication required` banner appears
+- the left sidebar session list loads without `/api/sessions` `401`
+- chat can answer a tiny prompt such as `say ok`
+- `status last wikipedia citation repair` uses the Averray MCP status tool and
+  returns the same latest run that Slack returns
+- `run one wikipedia citation repair if safe` gives a dry-run preview before
+  any claim/submit mutation
 - terminal/file/memory panes are either usable or clearly marked unsupported
 
 If chat returns `model "${HERMES_DEFAULT_MODEL}" not found`, the mounted
@@ -207,13 +237,26 @@ docker compose --env-file .env.prod \
   stop hermes-workspace hermes-gateway
 ```
 
-## Findings To Record
+## Current Findings
 
-After the evaluation, record:
+- The pinned `nousresearch/hermes-agent` gateway image exposes enough gateway
+  and dashboard APIs for Workspace chat, MCP tool activity, sessions, skills,
+  memory, config, and jobs in this deployment mode.
+- Hermes Workspace is useful for Averray operations without terminal logs,
+  especially for dry-run previews and interactive inspection.
+- Slack remains the preferred durable audit channel for operator-triggered
+  mutations; Workspace-created runs are still visible to Slack status commands,
+  but their Slack permalink is `n/a` because Slack did not initiate them.
+- The command center should stay as an optional companion to Slack rather than
+  replace Slack yet.
+- Do not broaden network exposure. Keep Workspace and gateway bound to VPS
+  localhost and reach them through SSH/Tailscale tunnels.
 
-- whether the pinned `nousresearch/hermes-agent` image exposes enough gateway
-  and dashboard APIs for Hermes Workspace enhanced mode
-- whether the UI is useful for Averray operations without terminal logs
-- whether the Workspace should stay as an optional companion, replace the
-  built-in dashboard, or give way to a small custom Averray operator UI
-- any security gaps before broader use
+## Future Work
+
+- Add a small Averray-specific operator dashboard if Workspace proves too broad
+  for day-to-day operations.
+- Add richer run detail views that show budget, open jobs, evidence summary,
+  proposal counts, validation status, and Slack permalink in one place.
+- Revisit public or team-wide access only after authentication, audit logging,
+  and command allowlists are explicitly reviewed.
