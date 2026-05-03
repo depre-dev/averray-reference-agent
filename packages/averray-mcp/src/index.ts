@@ -41,6 +41,7 @@ import {
   getLastWikipediaCitationRepairStatus,
 } from "./operator-commands.js";
 import { handleOperatorCommandText } from "./operator-handler.js";
+import { getOperatorStatus } from "./operator-status.js";
 
 const server = new McpServer({
   name: "averray-mcp",
@@ -129,8 +130,17 @@ server.tool(
 );
 
 server.tool(
+  "averray_operator_status",
+  "Canonical read-only operator status contract for agents and UIs. Returns wallet readiness, policy budget, open Wikipedia citation-repair jobs, latest run/session/draft status, safe command suggestions, and safety guarantees. Does not claim, submit, request approval, edit Wikipedia, or mutate Averray state.",
+  {},
+  async () => {
+    return jsonContent(await getOperatorStatus({ query, workflowDeps: workflowDeps() }));
+  }
+);
+
+server.tool(
   "averray_handle_operator_command",
-  "Direct router for trusted Slack/operator/command-center messages. Use this for short commands like 'run one wikipedia citation repair if safe' and 'status last wikipedia citation repair' instead of sending them through a free-form Hermes prompt. Recognized run commands call averray_run_wikipedia_citation_repair directly; recognized status commands are read-only.",
+  "Direct router for trusted Slack/operator/command-center messages. Use this for short commands like 'operator status', 'run one wikipedia citation repair if safe', and 'status last wikipedia citation repair' instead of sending them through a free-form Hermes prompt. Recognized run commands call averray_run_wikipedia_citation_repair directly; recognized status/help commands are read-only.",
   {
     text: z.string().min(1),
     source: z.enum(["slack", "operator", "command_center", "hermes"]).default("operator"),

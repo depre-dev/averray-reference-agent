@@ -50,6 +50,19 @@ describe("operator commands", () => {
     });
   });
 
+  it("routes operator status and help to the canonical read-only status", () => {
+    expect(parseOperatorCommand("operator status", { source: "operator" })).toEqual({
+      handled: true,
+      kind: "operator_status",
+      source: "operator",
+    });
+    expect(parseOperatorCommand("help", { source: "slack" })).toEqual({
+      handled: true,
+      kind: "operator_status",
+      source: "slack",
+    });
+  });
+
   it("returns latest submit status with draft id and Slack permalink when stored", async () => {
     const status = await getLastWikipediaCitationRepairStatus(async (text) => {
       if (text.includes("from submissions")) {
