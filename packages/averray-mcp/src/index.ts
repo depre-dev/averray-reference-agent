@@ -140,7 +140,7 @@ server.tool(
 
 server.tool(
   "averray_handle_operator_command",
-  "Direct router for trusted Slack/operator/command-center messages. Use this for short commands like 'operator status', 'run one wikipedia citation repair if safe', and 'status last wikipedia citation repair' instead of sending them through a free-form Hermes prompt. Recognized run commands call averray_run_wikipedia_citation_repair directly; recognized status/help commands are read-only.",
+  "Direct router for trusted Slack/operator/command-center messages. Use this for short commands like 'operator status', 'operator status details', 'run one wikipedia citation repair if safe', and 'status last wikipedia citation repair' instead of sending them through a free-form Hermes prompt. Recognized run commands call averray_run_wikipedia_citation_repair directly; recognized status/help commands are read-only. Human surfaces may compact identifiers by default; add 'details' for full audit identifiers.",
   {
     text: z.string().min(1),
     source: z.enum(["slack", "operator", "command_center", "hermes"]).default("operator"),

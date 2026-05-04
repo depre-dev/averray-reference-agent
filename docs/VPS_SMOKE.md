@@ -138,9 +138,11 @@ commands are:
 
 ```text
 operator status
+operator status details
 run one wikipedia citation repair if safe
 run wikipedia citation repair for wiki-en-... if safe
 status last wikipedia citation repair
+status last wikipedia citation repair details
 ```
 
 `averray_handle_operator_command` parses those messages. `operator status`
@@ -151,8 +153,11 @@ commands call `averray_run_wikipedia_citation_repair` directly with the
 workflow's wallet, policy, draft, validation, submit, and Slack alert gates.
 Latest-run status commands are read-only and return the latest `runId`,
 `jobId`, `sessionId`, submitted/failed state, `draftId`, and Slack permalink
-when one is available. Add `dry run only` to a repair command when you want a
-proposal preview without claim or submit.
+when one is available. Human-facing Slack/Workspace renderers should compact
+long identifiers by default and preserve full identifiers in structured MCP
+JSON. Add `details`, `full`, or `audit` to a status command when a human
+operator needs full run/session/draft IDs. Add `dry run only` to a repair
+command when you want a proposal preview without claim or submit.
 
 Check the host env file:
 

@@ -87,21 +87,24 @@ export function formatOperatorResultForSlack(result: unknown): string {
     return [`I did not recognize that Averray command.`, examples].filter(Boolean).join("\n");
   }
   if (result.kind === "status_last_wikipedia_citation_repair") {
+    const detailed = result.detailed === true;
     const status = isRecord(result.status) ? result.status : {};
     if (status.found === false) return "No Wikipedia citation-repair run was found yet.";
     return [
-      "*Last Wikipedia citation repair*",
-      `• runId: \`${stringField(status, "runId") ?? "unknown"}\``,
-      `• jobId: \`${stringField(status, "jobId") ?? "unknown"}\``,
-      `• sessionId: \`${stringField(status, "sessionId") ?? "unknown"}\``,
+      detailed ? "*Last Wikipedia citation repair - details*" : "*Last Wikipedia citation repair*",
+      `• runId: \`${formatId(stringField(status, "runId"), detailed) ?? "unknown"}\``,
+      `• jobId: \`${formatId(stringField(status, "jobId"), detailed) ?? "unknown"}\``,
+      `• sessionId: \`${formatId(stringField(status, "sessionId"), detailed) ?? "unknown"}\``,
       `• status: \`${stringField(status, "status") ?? "unknown"}\``,
       `• submittedAt: \`${stringField(status, "submittedAt") ?? "n/a"}\``,
-      `• draftId: \`${stringField(status, "draftId") ?? "n/a"}\``,
+      `• draftId: \`${formatId(stringField(status, "draftId"), detailed) ?? "n/a"}\``,
       `• submit_succeeded: \`${String(Boolean(status.submitSucceeded))}\``,
       `• slack: ${stringField(status, "slackPermalink") ?? "n/a"}`,
+      detailed ? `• source: \`${stringField(status, "source") ?? "n/a"}\`` : "Use `status last wikipedia citation repair details` for full IDs.",
     ].join("\n");
   }
   if (result.kind === "operator_status") {
+    const detailed = result.detailed === true;
     const status = isRecord(result.status) ? result.status : {};
     const agent = isRecord(status.agent) ? status.agent : {};
     const policy = isRecord(status.policy) ? status.policy : {};
@@ -109,17 +112,41 @@ export function formatOperatorResultForSlack(result: unknown): string {
     const workflows = isRecord(status.workflows) ? status.workflows : {};
     const wikipedia = isRecord(workflows.wikipediaCitationRepair) ? workflows.wikipediaCitationRepair : {};
     const latestRun = isRecord(wikipedia.latestRun) ? wikipedia.latestRun : {};
+    const candidateJobs = Array.isArray(wikipedia.candidateJobs) ? wikipedia.candidateJobs : [];
     const commands = Array.isArray(wikipedia.safeCommands)
       ? wikipedia.safeCommands.slice(0, 4).map((entry) => `• \`${String(entry)}\``).join("\n")
       : "";
+    if (detailed) {
+      return [
+        "*Averray operator status - details*",
+        `• generatedAt: \`${stringField(status, "generatedAt") ?? "n/a"}\``,
+        `• mutates: \`${String(status.mutates === true)}\``,
+        `• wallet: \`${agent.walletReady === true ? "ready" : "not_ready"}\``,
+        `• address: \`${formatId(stringField(agent, "walletAddress"), true) ?? "n/a"}\``,
+        `• network: \`${stringField(agent, "network") ?? "n/a"}\``,
+        `• budget today: \`${numberField(budget, "todayUsdSpent") ?? "n/a"} / ${numberField(budget, "perDayUsdMax") ?? "n/a"} USD\``,
+        `• wikipedia jobs: \`${numberField(wikipedia, "openJobs") ?? "n/a"} open / ${numberField(wikipedia, "discoveredJobs") ?? "n/a"} discovered\``,
+        "*Latest run*",
+        `• runId: \`${formatId(stringField(latestRun, "runId"), true) ?? "n/a"}\``,
+        `• jobId: \`${formatId(stringField(latestRun, "jobId"), true) ?? "n/a"}\``,
+        `• sessionId: \`${formatId(stringField(latestRun, "sessionId"), true) ?? "n/a"}\``,
+        `• status: \`${stringField(latestRun, "status") ?? "none"}\``,
+        `• draftId: \`${formatId(stringField(latestRun, "draftId"), true) ?? "n/a"}\``,
+        `• slack: ${stringField(latestRun, "slackPermalink") ?? "n/a"}`,
+        candidateJobs.length > 0 ? `*Open jobs*\n${candidateJobs.slice(0, 5).map(formatCandidateJob).join("\n")}` : "",
+        commands ? `*Safe commands*\n${commands}` : "",
+      ].filter(Boolean).join("\n");
+    }
     return [
       "*Averray operator status*",
       `• wallet: \`${agent.walletReady === true ? "ready" : "not_ready"}\``,
-      `• address: \`${stringField(agent, "walletAddress") ?? "n/a"}\``,
+      `• address: \`${formatId(stringField(agent, "walletAddress"), false) ?? "n/a"}\``,
       `• budget today: \`${numberField(budget, "todayUsdSpent") ?? "n/a"} / ${numberField(budget, "perDayUsdMax") ?? "n/a"} USD\``,
       `• wikipedia jobs: \`${numberField(wikipedia, "openJobs") ?? "n/a"} open / ${numberField(wikipedia, "discoveredJobs") ?? "n/a"} discovered\``,
       `• latest run: \`${stringField(latestRun, "status") ?? "none"}\``,
+      `• latest job: \`${formatId(stringField(latestRun, "jobId"), false) ?? "n/a"}\``,
       commands ? `*Safe commands*\n${commands}` : "",
+      "Use `operator status details` for full IDs.",
     ].filter(Boolean).join("\n");
   }
   if (result.kind === "run_wikipedia_citation_repair") {
@@ -130,10 +157,10 @@ export function formatOperatorResultForSlack(result: unknown): string {
     return [
       "*Wikipedia citation repair workflow*",
       `• status: \`${stringField(workflow, "status") ?? "unknown"}\``,
-      `• runId: \`${stringField(workflow, "runId") ?? "unknown"}\``,
-      `• jobId: \`${stringField(workflow, "jobId") ?? "unknown"}\``,
-      `• sessionId: \`${stringField(workflow, "sessionId") ?? "n/a"}\``,
-      `• draftId: \`${stringField(workflow, "draftId") ?? "n/a"}\``,
+      `• runId: \`${formatId(stringField(workflow, "runId"), false) ?? "unknown"}\``,
+      `• jobId: \`${formatId(stringField(workflow, "jobId"), false) ?? "unknown"}\``,
+      `• sessionId: \`${formatId(stringField(workflow, "sessionId"), false) ?? "n/a"}\``,
+      `• draftId: \`${formatId(stringField(workflow, "draftId"), false) ?? "n/a"}\``,
       `• confidence: \`${numberField(workflow, "confidence") ?? "n/a"}\``,
       `• validation: \`${validation.valid === true ? "valid" : validation.valid === false ? "invalid" : "n/a"}\``,
       `• citations reviewed: \`${numberField(evidence, "totalCitations") ?? "n/a"}\``,
@@ -167,6 +194,29 @@ function stringField(value: unknown, key: string): string | undefined {
   if (!isRecord(value)) return undefined;
   const field = value[key];
   return typeof field === "string" && field.length > 0 ? field : undefined;
+}
+
+function formatCandidateJob(value: unknown): string {
+  if (!isRecord(value)) return "• unknown";
+  const jobId = formatId(stringField(value, "jobId"), true) ?? "unknown";
+  const title = stringField(value, "title") ?? stringField(value, "pageTitle") ?? "untitled";
+  const revisionId = stringField(value, "revisionId") ?? "n/a";
+  return `• \`${jobId}\` - ${title} (rev ${revisionId})`;
+}
+
+function formatId(value: string | undefined, detailed: boolean): string | undefined {
+  if (!value) return undefined;
+  return detailed ? value : compactId(value);
+}
+
+function compactId(value: string): string {
+  if (value.length <= 32) return value;
+  if (value.startsWith("0x") && value.length > 14) return `${value.slice(0, 6)}...${value.slice(-4)}`;
+  if (value.includes(":0x")) return `${value.slice(0, 16)}...${value.slice(-9)}`;
+  if (value.startsWith("wiki-en-")) return `${value.slice(0, 16)}...${value.slice(-9)}`;
+  if (value.startsWith("wikipedia-citation")) return `${value.slice(0, 16)}...${value.slice(-10)}`;
+  if (/^[a-f0-9]{48,}$/i.test(value)) return `${value.slice(0, 12)}...${value.slice(-10)}`;
+  return `${value.slice(0, 16)}...${value.slice(-8)}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

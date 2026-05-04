@@ -13,11 +13,13 @@ export type ParsedOperatorCommand =
       handled: true;
       kind: "status_last_wikipedia_citation_repair";
       source: OperatorCommandSource;
+      detailed: boolean;
     }
   | {
       handled: true;
       kind: "operator_status";
       source: OperatorCommandSource;
+      detailed: boolean;
     }
   | {
       handled: false;
@@ -51,9 +53,11 @@ export interface LastWikipediaCitationRepairStatus {
 
 const EXAMPLES = [
   "operator status",
+  "operator status details",
   "run one wikipedia citation repair if safe",
   "run wikipedia citation repair for wiki-en-... if safe",
   "status last wikipedia citation repair",
+  "status last wikipedia citation repair details",
 ];
 
 export function parseOperatorCommand(
@@ -68,17 +72,14 @@ export function parseOperatorCommand(
   const source = options.source ?? "operator";
   const normalizedText = normalizeCommandText(text);
 
-  if (normalizedText === "status last wikipedia citation repair") {
-    return { handled: true, kind: "status_last_wikipedia_citation_repair", source };
+  const detailed = wantsDetailedOutput(normalizedText);
+
+  if (isLatestWikipediaCitationRepairStatusCommand(normalizedText)) {
+    return { handled: true, kind: "status_last_wikipedia_citation_repair", source, detailed };
   }
 
-  if (
-    normalizedText === "operator status" ||
-    normalizedText === "averray operator status" ||
-    normalizedText === "averray status" ||
-    normalizedText === "help"
-  ) {
-    return { handled: true, kind: "operator_status", source };
+  if (isOperatorStatusCommand(normalizedText)) {
+    return { handled: true, kind: "operator_status", source, detailed };
   }
 
   if (
@@ -204,6 +205,19 @@ function statusFromDraftRow(row: DraftStatusRow): LastWikipediaCitationRepairSta
 
 function normalizeCommandText(text: string): string {
   return text.trim().toLowerCase().replace(/[.!?]+$/g, "").replace(/\s+/g, " ");
+}
+
+function isLatestWikipediaCitationRepairStatusCommand(text: string): boolean {
+  return /^status last wikipedia citation repair( details?| full| audit)?$/.test(text);
+}
+
+function isOperatorStatusCommand(text: string): boolean {
+  return /^(operator status|averray operator status|averray status)( details?| full| audit)?$/.test(text)
+    || text === "help";
+}
+
+function wantsDetailedOutput(text: string): boolean {
+  return /\b(details?|full|audit)\b/.test(text);
 }
 
 function extractToken(text: string, pattern: RegExp): string | undefined {
