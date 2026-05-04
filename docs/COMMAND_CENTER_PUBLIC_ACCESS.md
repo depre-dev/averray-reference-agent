@@ -53,6 +53,19 @@ HERMES_WORKSPACE_COOKIE_SECURE=1
 HERMES_WORKSPACE_TRUST_PROXY=1
 ```
 
+Cloudflare Access can be the only browser-facing login gate. Use this only when
+the Access application allows explicit operator emails and the Workspace port
+remains localhost-only on the VPS:
+
+```dotenv
+HERMES_WORKSPACE_ALLOW_INSECURE_REMOTE=1
+HERMES_WORKSPACE_PASSWORD=
+```
+
+If you prefer defense in depth, leave `HERMES_WORKSPACE_ALLOW_INSECURE_REMOTE=0`
+and set a strong `HERMES_WORKSPACE_PASSWORD`; Workspace will ask for that
+password after Cloudflare Access login.
+
 Keep these existing bindings as localhost-only:
 
 ```dotenv
@@ -107,8 +120,10 @@ From a browser:
 
 1. Open `https://command.example.com`.
 2. Confirm Cloudflare Access asks for your approved login.
-3. Confirm Workspace still asks for `HERMES_WORKSPACE_PASSWORD` if it is not
-   already stored.
+3. If `HERMES_WORKSPACE_ALLOW_INSECURE_REMOTE=0`, confirm Workspace also asks
+   for `HERMES_WORKSPACE_PASSWORD`. If
+   `HERMES_WORKSPACE_ALLOW_INSECURE_REMOTE=1`, confirm Workspace opens without a
+   second password prompt.
 4. Run `operator status`.
 5. Run `operator status details`.
 

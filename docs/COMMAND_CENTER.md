@@ -47,8 +47,11 @@ Verified golden path:
   Cloudflare Access plus the optional `cloudflared` overlay instead of opening
   Workspace directly. See
   [COMMAND_CENTER_PUBLIC_ACCESS.md](COMMAND_CENTER_PUBLIC_ACCESS.md).
-- Set strong `HERMES_WORKSPACE_PASSWORD` and `HERMES_GATEWAY_API_KEY`
-  values before starting the workspace.
+- Set a strong `HERMES_GATEWAY_API_KEY` before starting the workspace.
+- For SSH/Tailscale access, also set a strong `HERMES_WORKSPACE_PASSWORD`.
+  When Workspace is protected by Cloudflare Access with explicit operator
+  emails, you may instead set `HERMES_WORKSPACE_ALLOW_INSECURE_REMOTE=1` and
+  leave `HERMES_WORKSPACE_PASSWORD` empty to avoid a second browser login.
 - The Workspace image still checks the legacy `CLAUDE_API_TOKEN` name for
   OpenAI-compatible gateway calls. The Compose overlay maps that gateway alias
   to `HERMES_GATEWAY_API_KEY`.
@@ -78,8 +81,9 @@ HERMES_GATEWAY_PORT=8642
 # container can reach it. Use a long random value.
 HERMES_GATEWAY_API_KEY=change-this-to-a-long-random-token
 
-# Required by the compose overlay. Use a long random value.
+# Required for SSH/Tailscale-only access. Use a long random value.
 HERMES_WORKSPACE_PASSWORD=change-this-to-a-long-random-password
+HERMES_WORKSPACE_ALLOW_INSECURE_REMOTE=0
 
 # Keep 0 for plain HTTP over SSH/Tailscale localhost tunnels.
 HERMES_WORKSPACE_COOKIE_SECURE=0
