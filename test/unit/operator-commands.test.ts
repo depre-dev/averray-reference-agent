@@ -47,6 +47,7 @@ describe("operator commands", () => {
       handled: true,
       kind: "status_last_wikipedia_citation_repair",
       source: "operator",
+      detailed: false,
     });
   });
 
@@ -55,11 +56,25 @@ describe("operator commands", () => {
       handled: true,
       kind: "operator_status",
       source: "operator",
+      detailed: false,
+    });
+    expect(parseOperatorCommand("operator status details", { source: "operator" })).toEqual({
+      handled: true,
+      kind: "operator_status",
+      source: "operator",
+      detailed: true,
+    });
+    expect(parseOperatorCommand("status last wikipedia citation repair full", { source: "slack" })).toEqual({
+      handled: true,
+      kind: "status_last_wikipedia_citation_repair",
+      source: "slack",
+      detailed: true,
     });
     expect(parseOperatorCommand("help", { source: "slack" })).toEqual({
       handled: true,
       kind: "operator_status",
       source: "slack",
+      detailed: false,
     });
   });
 

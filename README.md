@@ -126,10 +126,14 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   localhost. See [docs/VPS_SMOKE.md](docs/VPS_SMOKE.md#slack-operator-commands).
 - Slack and command-center operators can route short commands through
   `averray_handle_operator_command` instead of a free-form Hermes prompt. It
-  recognizes `operator status`, `run one wikipedia citation repair if safe`,
-  and `status last wikipedia citation repair`. `operator status` calls the
+  recognizes `operator status`, `operator status details`,
+  `run one wikipedia citation repair if safe`, and
+  `status last wikipedia citation repair`. `operator status` calls the
   canonical read-only `averray_operator_status` MCP tool and returns wallet,
   budget, open-job, latest-run, safety, and safe-command metadata for any MCP
-  client. Repair commands call the Wikipedia workflow tool directly; latest-run
-  status returns the current run/session/draft/submit state, including
-  persisted Slack context when available, without mutating anything.
+  client. Human surfaces can show compact identifiers by default while keeping
+  full identifiers in the structured MCP JSON; add `details`, `full`, or
+  `audit` to a status command when an operator needs the full run/session/draft
+  audit trail. Repair commands call the Wikipedia workflow tool directly;
+  latest-run status returns the current run/session/draft/submit state,
+  including persisted Slack context when available, without mutating anything.

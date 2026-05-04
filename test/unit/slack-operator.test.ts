@@ -94,9 +94,10 @@ describe("slack operator bridge", () => {
     const text = formatOperatorResultForSlack({
       handled: true,
       kind: "status_last_wikipedia_citation_repair",
+      detailed: false,
       status: {
         found: true,
-        runId: "run-1",
+        runId: "wikipedia-citation-repair-035bee96-0d62-45a0-a800-eb7f5316b09f",
         jobId: "wiki-en-1-citation-repair",
         sessionId: "wiki-en-1-citation-repair:0xWallet",
         status: "submitted",
@@ -107,20 +108,49 @@ describe("slack operator bridge", () => {
       },
     });
 
-    expect(text).toContain("runId: `run-1`");
+    expect(text).toContain("runId: `wikipedia-citati...7f5316b09f`");
     expect(text).toContain("jobId: `wiki-en-1-citation-repair`");
     expect(text).toContain("submit_succeeded: `true`");
     expect(text).toContain("https://slack.example/archives/C/p123");
+    expect(text).toContain("Use `status last wikipedia citation repair details` for full IDs.");
+  });
+
+  it("formats detailed status replies with full identifiers", () => {
+    const fullRunId = "wikipedia-citation-repair-035bee96-0d62-45a0-a800-eb7f5316b09f";
+    const fullDraftId = "c9f24fbfd21cb081af2feac8ef5acf77d65d247889f4fd91706cc516925c1fc1";
+    const text = formatOperatorResultForSlack({
+      handled: true,
+      kind: "status_last_wikipedia_citation_repair",
+      detailed: true,
+      status: {
+        found: true,
+        runId: fullRunId,
+        jobId: "wiki-en-58158792-citation-repair-r7",
+        sessionId: "wiki-en-58158792-citation-repair-r7:0x30BC468dA4E95a8FA4b3f2043c86687a57CdeE05",
+        status: "submitted",
+        submittedAt: "2026-05-03T11:43:23.872Z",
+        draftId: fullDraftId,
+        submitSucceeded: true,
+        source: "submissions",
+      },
+    });
+
+    expect(text).toContain("*Last Wikipedia citation repair - details*");
+    expect(text).toContain(fullRunId);
+    expect(text).toContain(fullDraftId);
+    expect(text).toContain("source: `submissions`");
+    expect(text).not.toContain("for full IDs");
   });
 
   it("formats canonical operator status replies", () => {
     const text = formatOperatorResultForSlack({
       handled: true,
       kind: "operator_status",
+      detailed: false,
       status: {
         agent: {
           walletReady: true,
-          walletAddress: "0xWallet",
+          walletAddress: "0x30BC468dA4E95a8FA4b3f2043c86687a57CdeE05",
         },
         policy: {
           budget: {
@@ -132,7 +162,10 @@ describe("slack operator bridge", () => {
           wikipediaCitationRepair: {
             openJobs: 2,
             discoveredJobs: 3,
-            latestRun: { status: "submitted" },
+            latestRun: {
+              status: "submitted",
+              jobId: "wiki-en-58158792-citation-repair-r7",
+            },
             safeCommands: [
               "operator status",
               "status last wikipedia citation repair",
@@ -144,11 +177,61 @@ describe("slack operator bridge", () => {
 
     expect(text).toContain("*Averray operator status*");
     expect(text).toContain("wallet: `ready`");
-    expect(text).toContain("address: `0xWallet`");
+    expect(text).toContain("address: `0x30BC...eE05`");
     expect(text).toContain("budget today: `0.25 / 1 USD`");
     expect(text).toContain("wikipedia jobs: `2 open / 3 discovered`");
     expect(text).toContain("latest run: `submitted`");
+    expect(text).toContain("latest job: `wiki-en-58158792...repair-r7`");
     expect(text).toContain("`operator status`");
+    expect(text).toContain("Use `operator status details` for full IDs.");
+  });
+
+  it("formats detailed operator status replies with full audit identifiers", () => {
+    const text = formatOperatorResultForSlack({
+      handled: true,
+      kind: "operator_status",
+      detailed: true,
+      status: {
+        schemaVersion: 1,
+        generatedAt: "2026-05-03T12:00:00.000Z",
+        mutates: false,
+        agent: {
+          walletReady: true,
+          walletAddress: "0x30BC468dA4E95a8FA4b3f2043c86687a57CdeE05",
+          network: "testnet",
+        },
+        policy: {
+          budget: { todayUsdSpent: 0, perDayUsdMax: 1 },
+        },
+        workflows: {
+          wikipediaCitationRepair: {
+            openJobs: 1,
+            discoveredJobs: 1,
+            latestRun: {
+              runId: "wikipedia-citation-repair-run-1",
+              jobId: "wiki-en-58158792-citation-repair-r7",
+              sessionId: "wiki-en-58158792-citation-repair-r7:0x30BC468dA4E95a8FA4b3f2043c86687a57CdeE05",
+              status: "submitted",
+              draftId: "draft-1",
+            },
+            candidateJobs: [
+              {
+                jobId: "wiki-en-58158792-citation-repair-r8",
+                title: "Wikipedia citation repair: (+ +)",
+                revisionId: "1351905437",
+              },
+            ],
+            safeCommands: ["operator status"],
+          },
+        },
+      },
+    });
+
+    expect(text).toContain("*Averray operator status - details*");
+    expect(text).toContain("0x30BC468dA4E95a8FA4b3f2043c86687a57CdeE05");
+    expect(text).toContain("wiki-en-58158792-citation-repair-r7");
+    expect(text).toContain("wiki-en-58158792-citation-repair-r8");
+    expect(text).toContain("*Open jobs*");
   });
 
   it("formats workflow replies with compact validation and evidence summary", () => {
@@ -157,10 +240,10 @@ describe("slack operator bridge", () => {
       kind: "run_wikipedia_citation_repair",
       result: {
         status: "submitted",
-        runId: "run-2",
-        jobId: "wiki-en-2-citation-repair",
-        sessionId: "session-2",
-        draftId: "draft-2",
+        runId: "wikipedia-citation-repair-035bee96-0d62-45a0-a800-eb7f5316b09f",
+        jobId: "wiki-en-58158792-citation-repair-r7",
+        sessionId: "wiki-en-58158792-citation-repair-r7:0x30BC468dA4E95a8FA4b3f2043c86687a57CdeE05",
+        draftId: "c9f24fbfd21cb081af2feac8ef5acf77d65d247889f4fd91706cc516925c1fc1",
         confidence: 0.72,
         validation: { valid: true },
         evidenceSummary: { totalCitations: 45, flaggedCitations: 45 },
@@ -169,6 +252,8 @@ describe("slack operator bridge", () => {
     });
 
     expect(text).toContain("status: `submitted`");
+    expect(text).toContain("runId: `wikipedia-citati...7f5316b09f`");
+    expect(text).toContain("sessionId: `wiki-en-58158792...a57CdeE05`");
     expect(text).toContain("validation: `valid`");
     expect(text).toContain("citations reviewed: `45`");
     expect(text).toContain("issues proposed: `5`");
