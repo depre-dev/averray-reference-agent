@@ -43,6 +43,10 @@ Verified golden path:
 - Do not install Hermes Workspace with `curl | bash` on the VPS.
 - Do not bind the command center to a public interface.
 - Use SSH or Tailscale tunnels to reach the UI.
+- If browser access without SSH is required, publish Workspace through
+  Cloudflare Access plus the optional `cloudflared` overlay instead of opening
+  Workspace directly. See
+  [COMMAND_CENTER_PUBLIC_ACCESS.md](COMMAND_CENTER_PUBLIC_ACCESS.md).
 - Set strong `HERMES_WORKSPACE_PASSWORD` and `HERMES_GATEWAY_API_KEY`
   values before starting the workspace.
 - The Workspace image still checks the legacy `CLAUDE_API_TOKEN` name for
@@ -249,8 +253,9 @@ docker compose --env-file .env.prod \
   but their Slack permalink is `n/a` because Slack did not initiate them.
 - The command center should stay as an optional companion to Slack rather than
   replace Slack yet.
-- Do not broaden network exposure. Keep Workspace and gateway bound to VPS
-  localhost and reach them through SSH/Tailscale tunnels.
+- Do not broaden direct network exposure. Keep Workspace and gateway bound to
+  VPS localhost. For browser access without SSH, use Cloudflare Access/Tunnel
+  as described in `docs/COMMAND_CENTER_PUBLIC_ACCESS.md`.
 
 ## Future Work
 
