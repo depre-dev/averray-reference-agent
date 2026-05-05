@@ -22,6 +22,18 @@ export type ParsedOperatorCommand =
       detailed: boolean;
     }
   | {
+      handled: true;
+      kind: "daily_operator_brief";
+      source: OperatorCommandSource;
+      detailed: boolean;
+    }
+  | {
+      handled: true;
+      kind: "find_safe_work";
+      source: OperatorCommandSource;
+      detailed: boolean;
+    }
+  | {
       handled: false;
       kind: "unknown";
       source: OperatorCommandSource;
@@ -52,6 +64,8 @@ export interface LastWikipediaCitationRepairStatus {
 }
 
 const EXAMPLES = [
+  "daily operator brief",
+  "find safe work",
   "operator status",
   "operator status details",
   "run one wikipedia citation repair if safe",
@@ -73,6 +87,14 @@ export function parseOperatorCommand(
   const normalizedText = normalizeCommandText(text);
 
   const detailed = wantsDetailedOutput(normalizedText);
+
+  if (isDailyOperatorBriefCommand(normalizedText)) {
+    return { handled: true, kind: "daily_operator_brief", source, detailed };
+  }
+
+  if (isFindSafeWorkCommand(normalizedText)) {
+    return { handled: true, kind: "find_safe_work", source, detailed };
+  }
 
   if (isLatestWikipediaCitationRepairStatusCommand(normalizedText)) {
     return { handled: true, kind: "status_last_wikipedia_citation_repair", source, detailed };
@@ -214,6 +236,14 @@ function isLatestWikipediaCitationRepairStatusCommand(text: string): boolean {
 function isOperatorStatusCommand(text: string): boolean {
   return /^(operator status|averray operator status|averray status)( details?| full| audit)?$/.test(text)
     || text === "help";
+}
+
+function isDailyOperatorBriefCommand(text: string): boolean {
+  return /^(daily operator brief|operator brief|daily brief|morning brief|brief me|what is my brief)( details?| full| audit)?$/.test(text);
+}
+
+function isFindSafeWorkCommand(text: string): boolean {
+  return /^(find safe work|safe work|next safe work|find work|what should i do next|what can you do|operator todo)( details?| full| audit)?$/.test(text);
 }
 
 function wantsDetailedOutput(text: string): boolean {

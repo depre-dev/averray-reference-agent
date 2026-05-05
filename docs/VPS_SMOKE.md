@@ -137,6 +137,8 @@ operator command tool, not rephrased as free-form Hermes prompts. The supported
 commands are:
 
 ```text
+daily operator brief
+find safe work
 operator status
 operator status details
 run one wikipedia citation repair if safe
@@ -145,12 +147,15 @@ status last wikipedia citation repair
 status last wikipedia citation repair details
 ```
 
-`averray_handle_operator_command` parses those messages. `operator status`
-calls the canonical read-only `averray_operator_status` MCP tool, returning
-wallet readiness, policy budget, open Wikipedia job counts, latest run state,
-safety guarantees, and safe command suggestions as structured JSON. Repair
-commands call `averray_run_wikipedia_citation_repair` directly with the
-workflow's wallet, policy, draft, validation, submit, and Slack alert gates.
+`averray_handle_operator_command` parses those messages. `daily operator brief`
+and `find safe work` are read-only views for humans and agents: they summarize
+wallet/budget readiness, latest run state, candidate jobs, blockers, and the
+next dry-run or guarded mutation command. `operator status` calls the canonical
+read-only `averray_operator_status` MCP tool, returning wallet readiness, policy
+budget, open Wikipedia job counts, latest run state, safety guarantees, and safe
+command suggestions as structured JSON. Repair commands call
+`averray_run_wikipedia_citation_repair` directly with the workflow's wallet,
+policy, draft, validation, submit, and Slack alert gates.
 Latest-run status commands are read-only and return the latest `runId`,
 `jobId`, `sessionId`, submitted/failed state, `draftId`, and Slack permalink
 when one is available. Human-facing Slack/Workspace renderers should compact

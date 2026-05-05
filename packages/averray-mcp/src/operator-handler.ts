@@ -5,7 +5,7 @@ import {
   type OperatorCommandSource,
   type OperatorQueryFn,
 } from "./operator-commands.js";
-import { getOperatorStatus } from "./operator-status.js";
+import { getDailyOperatorBrief, getOperatorStatus, getSafeWorkReport } from "./operator-status.js";
 import { runWikipediaCitationRepairWorkflow } from "./job-workflows.js";
 
 export interface HandleOperatorCommandInput {
@@ -40,6 +40,14 @@ export async function handleOperatorCommandText(
   if (command.kind === "operator_status") {
     const status = await getOperatorStatus({ query: deps.query, workflowDeps: deps.workflowDeps });
     return { ...command, status };
+  }
+  if (command.kind === "daily_operator_brief") {
+    const brief = await getDailyOperatorBrief({ query: deps.query, workflowDeps: deps.workflowDeps });
+    return { ...command, brief };
+  }
+  if (command.kind === "find_safe_work") {
+    const safeWork = await getSafeWorkReport({ query: deps.query, workflowDeps: deps.workflowDeps });
+    return { ...command, safeWork };
   }
   const result = await runWikipediaCitationRepairWorkflow(
     { ...command.input, expectedWallet: input.expectedWallet },
