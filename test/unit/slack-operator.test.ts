@@ -296,6 +296,88 @@ describe("slack operator bridge", () => {
     expect(text).toContain("Discovery is read-only.");
   });
 
+  it("formats agent usefulness replies across surfaces", () => {
+    const text = formatOperatorResultForSlack({
+      handled: true,
+      kind: "agent_usefulness_plan",
+      plan: {
+        headline: "I can already brief, inspect, and run guarded work.",
+        immediate: {
+          safeWorkAvailable: true,
+          recommendedCommand: "run one wikipedia citation repair dry run only",
+          nextMutationCommand: "run one wikipedia citation repair if safe",
+        },
+        surfaces: {
+          slack: { status: "enabled" },
+          commandCenter: { status: "enabled", publicAccess: "cloudflare_access_configured" },
+          mcp: { status: "enabled" },
+        },
+        useCases: [
+          { id: "slack_work_assistant", status: "enabled", value: "Posts compact operator answers." },
+          { id: "github_helper", status: "next_integration", value: "Summarize CI and draft replies." },
+        ],
+        nextImplementationTracks: ["GitHub PR/issue digest and CI failure explainer"],
+      },
+    });
+
+    expect(text).toContain("*Averray agent usefulness plan*");
+    expect(text).toContain("safe work: `true`");
+    expect(text).toContain("Slack: `enabled`");
+    expect(text).toContain("Command Center/mobile: `enabled`");
+    expect(text).toContain("`slack_work_assistant`");
+    expect(text).toContain("GitHub PR/issue digest");
+  });
+
+  it("formats business ledger and ops health replies", () => {
+    const ledger = formatOperatorResultForSlack({
+      handled: true,
+      kind: "business_ledger",
+      ledger: {
+        summary: {
+          latestWikipediaCitationRepair: {
+            status: "submitted",
+            jobId: "wiki-en-58158792-citation-repair-r7",
+            submittedAt: "2026-05-03T11:43:23.872Z",
+          },
+          openWikipediaCitationRepairJobs: 2,
+          budget: { todayUsdSpent: 0.1, perDayUsdMax: 1 },
+          sevenDaySubmissions: { total: 4, completed: 3, failed: 1 },
+          sevenDayDrafts: { total: 5, valid: 4, invalid: 1 },
+          sevenDayOperatorCommands: { total: 8, slackRouted: 6 },
+        },
+      },
+    });
+    expect(ledger).toContain("*Averray business ledger*");
+    expect(ledger).toContain("3 completed / 1 failed / 4 total");
+    expect(ledger).toContain("open wiki repair jobs: `2`");
+
+    const health = formatOperatorResultForSlack({
+      handled: true,
+      kind: "ops_health",
+      health: {
+        health: "ready",
+        wallet: { walletReady: true },
+        budget: { todayUsdRemaining: 0.9 },
+        controlPlane: {
+          tables: {
+            submissions: 4,
+            drafts: 5,
+            operatorEvents: 8,
+            lastOperatorEventAt: "2026-05-03T11:50:00.000Z",
+          },
+          recentErrors: [],
+          recentOperatorEvents: [
+            { command: "status last wikipedia citation repair", source: "slack", status: "submitted" },
+          ],
+        },
+      },
+    });
+    expect(health).toContain("*Averray ops health*");
+    expect(health).toContain("health: `ready`");
+    expect(health).toContain("operator events: `8`");
+    expect(health).toContain("none recorded");
+  });
+
   it("formats workflow replies with compact validation and evidence summary", () => {
     const text = formatOperatorResultForSlack({
       handled: true,

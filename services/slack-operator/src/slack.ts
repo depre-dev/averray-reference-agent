@@ -143,6 +143,83 @@ export function formatOperatorResultForSlack(result: unknown): string {
       "Discovery is read-only. Start with the dry-run command.",
     ].filter(Boolean).join("\n");
   }
+  if (result.kind === "agent_usefulness_plan") {
+    const plan = isRecord(result.plan) ? result.plan : {};
+    const immediate = isRecord(plan.immediate) ? plan.immediate : {};
+    const surfaces = isRecord(plan.surfaces) ? plan.surfaces : {};
+    const slack = isRecord(surfaces.slack) ? surfaces.slack : {};
+    const commandCenter = isRecord(surfaces.commandCenter) ? surfaces.commandCenter : {};
+    const mcp = isRecord(surfaces.mcp) ? surfaces.mcp : {};
+    const useCases = Array.isArray(plan.useCases) ? plan.useCases : [];
+    const tracks = Array.isArray(plan.nextImplementationTracks) ? plan.nextImplementationTracks : [];
+    const useCaseLines = useCases.slice(0, 6).map(formatUseCase).join("\n");
+    const trackLines = tracks.slice(0, 4).map((entry) => `• ${String(entry)}`).join("\n");
+    return [
+      "*Averray agent usefulness plan*",
+      stringField(plan, "headline") ?? "I can help through Slack, Command Center, and MCP tools.",
+      "",
+      "*Right now*",
+      `• safe work: \`${String(immediate.safeWorkAvailable === true)}\``,
+      `• recommended: \`${stringField(immediate, "recommendedCommand") ?? "operator status"}\``,
+      stringField(immediate, "nextMutationCommand") ? `• guarded mutation: \`${stringField(immediate, "nextMutationCommand")}\`` : "",
+      "*Surfaces*",
+      `• Slack: \`${stringField(slack, "status") ?? "unknown"}\``,
+      `• Command Center/mobile: \`${stringField(commandCenter, "status") ?? "unknown"}\` (${stringField(commandCenter, "publicAccess") ?? "unknown"})`,
+      `• MCP: \`${stringField(mcp, "status") ?? "unknown"}\``,
+      useCaseLines ? `*Use cases*\n${useCaseLines}` : "",
+      trackLines ? `*Next tracks*\n${trackLines}` : "",
+      "Read-only plan. Use `what can you do for us details` in MCP/Workspace for the full structured JSON.",
+    ].filter(Boolean).join("\n");
+  }
+  if (result.kind === "business_ledger") {
+    const ledger = isRecord(result.ledger) ? result.ledger : {};
+    const summary = isRecord(ledger.summary) ? ledger.summary : {};
+    const latestRun = isRecord(summary.latestWikipediaCitationRepair) ? summary.latestWikipediaCitationRepair : {};
+    const budget = isRecord(summary.budget) ? summary.budget : {};
+    const submissions = isRecord(summary.sevenDaySubmissions) ? summary.sevenDaySubmissions : {};
+    const drafts = isRecord(summary.sevenDayDrafts) ? summary.sevenDayDrafts : {};
+    const commands = isRecord(summary.sevenDayOperatorCommands) ? summary.sevenDayOperatorCommands : {};
+    return [
+      "*Averray business ledger*",
+      "*Latest Wikipedia repair*",
+      `• status: \`${stringField(latestRun, "status") ?? "none"}\``,
+      `• jobId: \`${formatId(stringField(latestRun, "jobId"), false) ?? "n/a"}\``,
+      `• submittedAt: \`${stringField(latestRun, "submittedAt") ?? "n/a"}\``,
+      "*7-day work*",
+      `• submissions: \`${numberField(submissions, "completed") ?? 0} completed / ${numberField(submissions, "failed") ?? 0} failed / ${numberField(submissions, "total") ?? 0} total\``,
+      `• drafts: \`${numberField(drafts, "valid") ?? 0} valid / ${numberField(drafts, "invalid") ?? 0} invalid / ${numberField(drafts, "total") ?? 0} total\``,
+      `• operator commands: \`${numberField(commands, "total") ?? 0} total (${numberField(commands, "slackRouted") ?? 0} via Slack)\``,
+      "*Today*",
+      `• budget: \`${numberField(budget, "todayUsdSpent") ?? "n/a"} / ${numberField(budget, "perDayUsdMax") ?? "n/a"} USD\``,
+      `• open wiki repair jobs: \`${numberField(summary, "openWikipediaCitationRepairJobs") ?? "n/a"}\``,
+      "Read-only ledger.",
+    ].join("\n");
+  }
+  if (result.kind === "ops_health") {
+    const ops = isRecord(result.health) ? result.health : {};
+    const wallet = isRecord(ops.wallet) ? ops.wallet : {};
+    const budget = isRecord(ops.budget) ? ops.budget : {};
+    const controlPlane = isRecord(ops.controlPlane) ? ops.controlPlane : {};
+    const tables = isRecord(controlPlane.tables) ? controlPlane.tables : {};
+    const recentErrors = Array.isArray(controlPlane.recentErrors) ? controlPlane.recentErrors : [];
+    const recentEvents = Array.isArray(controlPlane.recentOperatorEvents) ? controlPlane.recentOperatorEvents : [];
+    const errorLines = recentErrors.slice(0, 3).map(formatRecentEvent).join("\n");
+    const eventLines = recentEvents.slice(0, 3).map(formatRecentEvent).join("\n");
+    return [
+      "*Averray ops health*",
+      `• health: \`${stringField(ops, "health") ?? "unknown"}\``,
+      `• wallet: \`${wallet.walletReady === true ? "ready" : "not_ready"}\``,
+      `• budget remaining: \`${numberField(budget, "todayUsdRemaining") ?? "n/a"} USD\``,
+      "*Control plane*",
+      `• submissions: \`${numberField(tables, "submissions") ?? 0}\``,
+      `• drafts: \`${numberField(tables, "drafts") ?? 0}\``,
+      `• operator events: \`${numberField(tables, "operatorEvents") ?? 0}\``,
+      `• last operator event: \`${stringField(tables, "lastOperatorEventAt") ?? "n/a"}\``,
+      errorLines ? `*Recent errors*\n${errorLines}` : "*Recent errors*\n• none recorded",
+      eventLines ? `*Recent events*\n${eventLines}` : "",
+      "Read-only health. Host disk/log/WAL checks still need the VPS ops script.",
+    ].filter(Boolean).join("\n");
+  }
   if (result.kind === "operator_status") {
     const detailed = result.detailed === true;
     const status = isRecord(result.status) ? result.status : {};
@@ -251,6 +328,22 @@ function formatSafeWorkItem(value: unknown): string {
   const jobId = formatId(stringField(job, "jobId"), true) ?? "unknown";
   const dryRunCommand = stringField(value, "dryRunCommand") ?? "run one wikipedia citation repair dry run only";
   return `• ${rank}. \`${jobId}\` - dry run: \`${dryRunCommand}\``;
+}
+
+function formatUseCase(value: unknown): string {
+  if (!isRecord(value)) return "• unknown";
+  const id = stringField(value, "id") ?? "unknown";
+  const status = stringField(value, "status") ?? "unknown";
+  const summary = stringField(value, "value") ?? "";
+  return `• \`${id}\` - ${status}${summary ? `: ${summary}` : ""}`;
+}
+
+function formatRecentEvent(value: unknown): string {
+  if (!isRecord(value)) return "• unknown";
+  const command = stringField(value, "command") ?? "unknown";
+  const source = stringField(value, "source") ?? "unknown";
+  const status = stringField(value, "status") ?? "n/a";
+  return `• \`${command}\` (${source}, ${status})`;
 }
 
 function formatId(value: string | undefined, detailed: boolean): string | undefined {
