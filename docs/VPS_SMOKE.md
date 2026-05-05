@@ -106,6 +106,27 @@ SLACK_OPERATOR_CHANNEL_ID=C...
 SLACK_ALLOWED_USER_IDS=U...
 ```
 
+Optional proactive routines can make the agent useful without waiting for an
+operator prompt. They are disabled by default:
+
+```env
+# Posts one read-only `daily operator brief` each UTC day after the configured time.
+SLACK_OPERATOR_DAILY_BRIEF_ENABLED=1
+SLACK_OPERATOR_DAILY_BRIEF_TIME_UTC=08:00
+
+# Polls read-only `find safe work` and posts only when available work changes.
+SLACK_OPERATOR_SAFE_WORK_SCAN_INTERVAL_MINUTES=60
+SLACK_OPERATOR_SAFE_WORK_NOTIFY_ONLY_ON_AVAILABLE=1
+
+# Optional override. Defaults to the first allowed operator channel.
+SLACK_OPERATOR_ROUTINE_CHANNEL_ID=C...
+```
+
+These routines use the same safe operator-command path as manual Slack
+messages. The daily brief is read-only. The safe-work scan is also read-only and
+only recommends the guarded dry-run or mutation command; it does not claim,
+submit, or edit Wikipedia by itself.
+
 Slack app requirements:
 
 - Enable Socket Mode and create an app-level token with `connections:write`.
