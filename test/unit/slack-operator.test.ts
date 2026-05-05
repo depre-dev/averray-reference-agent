@@ -234,6 +234,68 @@ describe("slack operator bridge", () => {
     expect(text).toContain("*Open jobs*");
   });
 
+  it("formats daily operator brief replies", () => {
+    const text = formatOperatorResultForSlack({
+      handled: true,
+      kind: "daily_operator_brief",
+      brief: {
+        headline: "2 Wikipedia citation-repair jobs available; start with a dry run.",
+        readiness: {
+          wallet: "ready",
+          wikipediaCitationRepair: "ready",
+        },
+        budget: {
+          todayUsdRemaining: 1,
+          perDayUsdMax: 1,
+        },
+        latestWikipediaCitationRepair: {
+          status: "submitted",
+          jobId: "wiki-en-58158792-citation-repair-r7",
+        },
+        candidateJobs: [
+          {
+            jobId: "wiki-en-58158792-citation-repair-r8",
+            title: "Wikipedia citation repair: (+ +)",
+            revisionId: "1351905437",
+          },
+        ],
+        recommendedNextActions: ["Use: run one wikipedia citation repair dry run only"],
+      },
+    });
+
+    expect(text).toContain("*Daily Averray operator brief*");
+    expect(text).toContain("wallet: `ready`");
+    expect(text).toContain("budget remaining: `1 / 1 USD`");
+    expect(text).toContain("wiki-en-58158792-citation-repair-r8");
+    expect(text).toContain("This brief is read-only.");
+  });
+
+  it("formats safe work discovery replies", () => {
+    const text = formatOperatorResultForSlack({
+      handled: true,
+      kind: "find_safe_work",
+      safeWork: {
+        available: true,
+        blockers: [],
+        recommendedCommand: "run one wikipedia citation repair dry run only",
+        nextMutationCommand: "run one wikipedia citation repair if safe",
+        safeWorkItems: [
+          {
+            rank: 1,
+            job: { jobId: "wiki-en-58158792-citation-repair-r8" },
+            dryRunCommand: "run wikipedia citation repair for wiki-en-58158792-citation-repair-r8 if safe, dry run only",
+          },
+        ],
+      },
+    });
+
+    expect(text).toContain("*Safe work finder*");
+    expect(text).toContain("available: `true`");
+    expect(text).toContain("recommended: `run one wikipedia citation repair dry run only`");
+    expect(text).toContain("submit command: `run one wikipedia citation repair if safe`");
+    expect(text).toContain("Discovery is read-only.");
+  });
+
   it("formats workflow replies with compact validation and evidence summary", () => {
     const text = formatOperatorResultForSlack({
       handled: true,

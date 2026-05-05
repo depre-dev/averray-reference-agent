@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { getOperatorStatus } from "../../packages/averray-mcp/src/operator-status.js";
+import {
+  getDailyOperatorBrief,
+  getOperatorStatus,
+  getSafeWorkReport,
+} from "../../packages/averray-mcp/src/operator-status.js";
 
 describe("operator status", () => {
   it("returns a canonical read-only status for agents and UIs", async () => {
@@ -143,5 +147,65 @@ describe("operator status", () => {
       expect.stringContaining("budget_query_failed"),
       expect.stringContaining("latest_run_failed"),
     ]));
+  });
+
+  it("returns daily brief and safe work views without mutating", async () => {
+    const deps = {
+      now: new Date("2026-05-03T12:00:00.000Z"),
+      policyConfig: {
+        budget: { per_run_usd_max: 0.5, per_day_usd_max: 1, max_browser_steps: 80 },
+      },
+      async query(text: string) {
+        if (text.includes("from budgets")) return [{ usd_spent: "0" }];
+        if (text.includes("from submissions")) return [];
+        if (text.includes("from draft_submissions")) return [];
+        return [];
+      },
+      workflowDeps: {
+        async walletStatus() {
+          return { configured: true, address: "0x30BC468dA4E95a8FA4b3f2043c86687a57CdeE05" };
+        },
+        async listJobs() {
+          return [
+            {
+              jobId: "wiki-en-58158792-citation-repair-r8",
+              definition: {
+                source: { type: "wikipedia_article", taskType: "citation_repair", pageTitle: "(+ +)", revisionId: "1351905437" },
+                publicDetails: { title: "Wikipedia citation repair: (+ +)" },
+                state: "open",
+                claimStatus: { claimable: true },
+              },
+            },
+          ];
+        },
+      },
+    };
+
+    const brief = await getDailyOperatorBrief(deps);
+    expect(brief).toMatchObject({
+      kind: "daily_operator_brief",
+      mutates: false,
+      readiness: {
+        wallet: "ready",
+        budget: "ready",
+        wikipediaCitationRepair: "ready",
+      },
+      openWikipediaCitationRepairJobs: 1,
+    });
+    expect(brief.suggestedCommands).toContain("find safe work");
+
+    const safeWork = await getSafeWorkReport(deps);
+    expect(safeWork).toMatchObject({
+      kind: "find_safe_work",
+      mutates: false,
+      available: true,
+      blockers: [],
+      recommendedCommand: "run one wikipedia citation repair dry run only",
+    });
+    expect(safeWork.safeWorkItems[0]).toMatchObject({
+      workflow: "wikipedia_citation_repair",
+      dryRunCommand: "run wikipedia citation repair for wiki-en-58158792-citation-repair-r8 if safe, dry run only",
+      mutates: false,
+    });
   });
 });

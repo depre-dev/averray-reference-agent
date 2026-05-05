@@ -103,6 +103,46 @@ export function formatOperatorResultForSlack(result: unknown): string {
       detailed ? `• source: \`${stringField(status, "source") ?? "n/a"}\`` : "Use `status last wikipedia citation repair details` for full IDs.",
     ].join("\n");
   }
+  if (result.kind === "daily_operator_brief") {
+    const brief = isRecord(result.brief) ? result.brief : {};
+    const readiness = isRecord(brief.readiness) ? brief.readiness : {};
+    const budget = isRecord(brief.budget) ? brief.budget : {};
+    const latestRun = isRecord(brief.latestWikipediaCitationRepair) ? brief.latestWikipediaCitationRepair : {};
+    const candidateJobs = Array.isArray(brief.candidateJobs) ? brief.candidateJobs : [];
+    const actions = Array.isArray(brief.recommendedNextActions)
+      ? brief.recommendedNextActions.slice(0, 4).map((entry) => `• ${String(entry)}`).join("\n")
+      : "";
+    return [
+      "*Daily Averray operator brief*",
+      stringField(brief, "headline") ?? "No headline available.",
+      "",
+      "*Readiness*",
+      `• wallet: \`${stringField(readiness, "wallet") ?? "unknown"}\``,
+      `• budget remaining: \`${numberField(budget, "todayUsdRemaining") ?? "n/a"} / ${numberField(budget, "perDayUsdMax") ?? "n/a"} USD\``,
+      `• wikipedia repair: \`${stringField(readiness, "wikipediaCitationRepair") ?? "unknown"}\``,
+      "*Latest run*",
+      `• status: \`${stringField(latestRun, "status") ?? "none"}\``,
+      `• jobId: \`${formatId(stringField(latestRun, "jobId"), false) ?? "n/a"}\``,
+      candidateJobs.length > 0 ? `*Candidate jobs*\n${candidateJobs.slice(0, 3).map(formatCandidateJob).join("\n")}` : "",
+      actions ? `*Recommended next actions*\n${actions}` : "",
+      "This brief is read-only.",
+    ].filter(Boolean).join("\n");
+  }
+  if (result.kind === "find_safe_work") {
+    const safeWork = isRecord(result.safeWork) ? result.safeWork : {};
+    const items = Array.isArray(safeWork.safeWorkItems) ? safeWork.safeWorkItems : [];
+    const blockers = Array.isArray(safeWork.blockers) ? safeWork.blockers : [];
+    const itemLines = items.slice(0, 5).map(formatSafeWorkItem).join("\n");
+    return [
+      "*Safe work finder*",
+      `• available: \`${String(safeWork.available === true)}\``,
+      blockers.length > 0 ? `• blockers: \`${blockers.map(String).join(", ")}\`` : "",
+      `• recommended: \`${stringField(safeWork, "recommendedCommand") ?? "operator status"}\``,
+      stringField(safeWork, "nextMutationCommand") ? `• submit command: \`${stringField(safeWork, "nextMutationCommand")}\`` : "",
+      itemLines ? `*Work items*\n${itemLines}` : "No safe work items are currently available.",
+      "Discovery is read-only. Start with the dry-run command.",
+    ].filter(Boolean).join("\n");
+  }
   if (result.kind === "operator_status") {
     const detailed = result.detailed === true;
     const status = isRecord(result.status) ? result.status : {};
@@ -202,6 +242,15 @@ function formatCandidateJob(value: unknown): string {
   const title = stringField(value, "title") ?? stringField(value, "pageTitle") ?? "untitled";
   const revisionId = stringField(value, "revisionId") ?? "n/a";
   return `• \`${jobId}\` - ${title} (rev ${revisionId})`;
+}
+
+function formatSafeWorkItem(value: unknown): string {
+  if (!isRecord(value)) return "• unknown";
+  const job = isRecord(value.job) ? value.job : {};
+  const rank = numberField(value, "rank") ?? "?";
+  const jobId = formatId(stringField(job, "jobId"), true) ?? "unknown";
+  const dryRunCommand = stringField(value, "dryRunCommand") ?? "run one wikipedia citation repair dry run only";
+  return `• ${rank}. \`${jobId}\` - dry run: \`${dryRunCommand}\``;
 }
 
 function formatId(value: string | undefined, detailed: boolean): string | undefined {

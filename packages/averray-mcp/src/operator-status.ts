@@ -125,6 +125,95 @@ export async function getOperatorStatus(deps: OperatorStatusDeps) {
   };
 }
 
+export async function getDailyOperatorBrief(deps: OperatorStatusDeps) {
+  const status = await getOperatorStatus(deps);
+  const wikipedia = status.workflows.wikipediaCitationRepair;
+  const latestRun = wikipedia.latestRun;
+  const budget = status.policy.budget;
+  return {
+    schemaVersion: 1,
+    kind: "daily_operator_brief",
+    generatedAt: status.generatedAt,
+    mutates: false,
+    headline: dailyBriefHeadline(status.agent.walletReady, wikipedia.openJobs, latestRun),
+    readiness: {
+      wallet: status.agent.walletReady ? "ready" : "not_ready",
+      budget: budget.todayUsdRemaining > 0 ? "ready" : "depleted",
+      wikipediaCitationRepair: wikipedia.ready ? "ready" : "not_ready",
+    },
+    wallet: {
+      ready: status.agent.walletReady,
+      address: status.agent.walletAddress,
+      network: status.agent.network,
+    },
+    budget: {
+      todayUsdSpent: budget.todayUsdSpent,
+      todayUsdRemaining: budget.todayUsdRemaining,
+      perRunUsdMax: budget.perRunUsdMax,
+      perDayUsdMax: budget.perDayUsdMax,
+    },
+    latestWikipediaCitationRepair: latestRun,
+    openWikipediaCitationRepairJobs: wikipedia.openJobs,
+    candidateJobs: wikipedia.candidateJobs.slice(0, 3),
+    recommendedNextActions: status.recommendedNextActions,
+    suggestedCommands: [
+      "find safe work",
+      "run one wikipedia citation repair dry run only",
+      "run one wikipedia citation repair if safe",
+      "status last wikipedia citation repair",
+    ],
+    safety: {
+      mutatesByDefault: false,
+      statusCommandsAreReadOnly: true,
+      editsWikipedia: false,
+    },
+    ...(status.errors ? { errors: status.errors } : {}),
+  };
+}
+
+export async function getSafeWorkReport(deps: OperatorStatusDeps) {
+  const status = await getOperatorStatus(deps);
+  const wikipedia = status.workflows.wikipediaCitationRepair;
+  const budget = status.policy.budget;
+  const blockers = safeWorkBlockers(status.agent.walletReady, budget.todayUsdRemaining, wikipedia.openJobs);
+  const available = blockers.length === 0;
+  return {
+    schemaVersion: 1,
+    kind: "find_safe_work",
+    generatedAt: status.generatedAt,
+    mutates: false,
+    available,
+    blockers,
+    recommendedCommand: available
+      ? "run one wikipedia citation repair dry run only"
+      : "operator status",
+    nextMutationCommand: available
+      ? "run one wikipedia citation repair if safe"
+      : null,
+    safeWorkItems: wikipedia.candidateJobs.slice(0, 5).map((job, index) => ({
+      rank: index + 1,
+      workflow: "wikipedia_citation_repair",
+      job,
+      dryRunCommand: job.jobId
+        ? `run wikipedia citation repair for ${job.jobId} if safe, dry run only`
+        : "run one wikipedia citation repair dry run only",
+      mutationCommand: job.jobId
+        ? `run wikipedia citation repair for ${job.jobId} if safe`
+        : "run one wikipedia citation repair if safe",
+      mutates: false,
+      note: "Start with the dry run. Submit still requires validation and confidence >= threshold.",
+    })),
+    latestWikipediaCitationRepair: wikipedia.latestRun,
+    safety: {
+      dryRunMutates: false,
+      mutationRequiresExplicitCommand: true,
+      validatesBeforeSubmit: true,
+      editsWikipedia: false,
+    },
+    ...(status.errors ? { errors: status.errors } : {}),
+  };
+}
+
 function loadPolicyConfig(): OperatorPolicyConfig {
   return readYamlFile(optionalEnv("POLICY_CONFIG_PATH", "/config/policy.yaml"), defaultPolicyConfig);
 }
@@ -209,6 +298,23 @@ function recommendedNextActions(
     "Use: run one wikipedia citation repair dry run only",
     "If the dry run validates and confidence is sufficient, use: run one wikipedia citation repair if safe",
   ];
+}
+
+function dailyBriefHeadline(walletReady: boolean, openJobs: number, latestRun: LastWikipediaCitationRepairStatus): string {
+  if (!walletReady) return "Wallet is not ready; keep to read-only status checks.";
+  if (latestRun.found && latestRun.status && latestRun.status !== "submitted") {
+    return `Latest Wikipedia citation repair is ${latestRun.status}; inspect it before starting another run.`;
+  }
+  if (openJobs > 0) return `${openJobs} Wikipedia citation-repair job${openJobs === 1 ? "" : "s"} available; start with a dry run.`;
+  return "No claimable Wikipedia citation-repair jobs are open right now.";
+}
+
+function safeWorkBlockers(walletReady: boolean, todayUsdRemaining: number, openJobs: number): string[] {
+  const blockers: string[] = [];
+  if (!walletReady) blockers.push("wallet_not_ready");
+  if (todayUsdRemaining <= 0) blockers.push("budget_depleted");
+  if (openJobs < 1) blockers.push("no_claimable_wikipedia_citation_repair_jobs");
+  return blockers;
 }
 
 function errorMessage(error: unknown): string {

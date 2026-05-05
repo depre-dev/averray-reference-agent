@@ -78,6 +78,27 @@ describe("operator commands", () => {
     });
   });
 
+  it("routes daily brief and safe work discovery read-only", () => {
+    expect(parseOperatorCommand("daily operator brief", { source: "slack" })).toEqual({
+      handled: true,
+      kind: "daily_operator_brief",
+      source: "slack",
+      detailed: false,
+    });
+    expect(parseOperatorCommand("find safe work details", { source: "command_center" })).toEqual({
+      handled: true,
+      kind: "find_safe_work",
+      source: "command_center",
+      detailed: true,
+    });
+    expect(parseOperatorCommand("what should I do next?", { source: "operator" })).toEqual({
+      handled: true,
+      kind: "find_safe_work",
+      source: "operator",
+      detailed: false,
+    });
+  });
+
   it("returns latest submit status with draft id and Slack permalink when stored", async () => {
     const status = await getLastWikipediaCitationRepairStatus(async (text) => {
       if (text.includes("from submissions")) {
