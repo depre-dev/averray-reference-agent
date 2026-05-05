@@ -123,7 +123,9 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
 - Optional Slack inbound operator commands can be enabled with the
   `slack-operator` service. Socket Mode is supported for outbound-only VPS
   connectivity; signed HTTP slash/events endpoints are also available on
-  localhost. See [docs/VPS_SMOKE.md](docs/VPS_SMOKE.md#slack-operator-commands).
+  localhost. The same service can optionally post a daily operator brief and
+  safe-work availability notices to Slack. See
+  [docs/VPS_SMOKE.md](docs/VPS_SMOKE.md#slack-operator-commands).
 - Optional public command-center access can be enabled with Cloudflare Access
   and the `cloudflared` overlay. This keeps Workspace and Hermes gateway ports
   private while publishing an Access-protected HTTPS hostname. See

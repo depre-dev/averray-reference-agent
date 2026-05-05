@@ -14,6 +14,11 @@ import {
   type SlackCommandEnvelope,
 } from "./slack.js";
 import { recordOperatorCommandEvent } from "./persistence.js";
+import {
+  parseSlackRoutineConfig,
+  shouldPostSafeWorkResult,
+  shouldRunDailyBrief,
+} from "./routines.js";
 
 const enabled = optionalEnv("SLACK_OPERATOR_ENABLED", "0") === "1";
 const httpPort = Number.parseInt(optionalEnv("SLACK_OPERATOR_HTTP_PORT", "8790"), 10);
@@ -25,6 +30,7 @@ const authConfig = {
   allowedChannelIds: parseCsvSet(allowedChannelIds),
   allowedUserIds: parseCsvSet(optionalEnv("SLACK_ALLOWED_USER_IDS")),
 };
+const routineConfig = parseSlackRoutineConfig(process.env, authConfig.allowedChannelIds);
 
 logger.info({
   enabled,
@@ -34,6 +40,12 @@ logger.info({
   botToken: Boolean(botToken),
   allowedChannels: authConfig.allowedChannelIds.size,
   allowedUsers: authConfig.allowedUserIds.size,
+  routines: {
+    channelConfigured: Boolean(routineConfig.channelId),
+    dailyBrief: routineConfig.dailyBrief.enabled,
+    dailyBriefTimeUtc: `${String(routineConfig.dailyBrief.timeUtc.hour).padStart(2, "0")}:${String(routineConfig.dailyBrief.timeUtc.minute).padStart(2, "0")}`,
+    safeWorkScanIntervalMs: routineConfig.safeWorkScan.enabled ? routineConfig.safeWorkScan.intervalMs : 0,
+  },
 }, "slack_operator_starting");
 
 const server = http.createServer((request, response) => {
@@ -50,6 +62,7 @@ if (!enabled) {
   if (!appToken && !signingSecret) {
     logger.warn("slack_operator_enabled_without_socket_or_signing_secret");
   }
+  startOperatorRoutines();
 }
 
 async function handleHttpRequest(request: http.IncomingMessage, response: http.ServerResponse) {
@@ -186,6 +199,127 @@ async function handleCommand(envelope: SlackCommandEnvelope) {
   } catch (error) {
     logger.error({ err: error }, "slack_operator_command_failed");
     await postSlack(envelope, `Averray command failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function startOperatorRoutines() {
+  if (!routineConfig.channelId) {
+    if (routineConfig.dailyBrief.enabled || routineConfig.safeWorkScan.enabled) {
+      logger.warn("slack_operator_routines_no_channel");
+    }
+    return;
+  }
+
+  let lastDailyBriefDateKey: string | undefined;
+  let lastSafeWorkSignature: string | undefined;
+  let dailyBriefRunning = false;
+  let safeWorkRunning = false;
+
+  const checkDailyBrief = async () => {
+    if (dailyBriefRunning) return;
+    const decision = shouldRunDailyBrief(new Date(), routineConfig, lastDailyBriefDateKey);
+    if (!decision.shouldRun) return;
+    dailyBriefRunning = true;
+    try {
+      if (await routineAlreadyRecordedToday("daily operator brief", decision.dateKey)) {
+        lastDailyBriefDateKey = decision.dateKey;
+        return;
+      }
+      await runRoutineCommand("daily operator brief", "slack_operator_daily_brief_posted");
+      lastDailyBriefDateKey = decision.dateKey;
+    } catch (error) {
+      logger.error({ err: error }, "slack_operator_daily_brief_failed");
+    } finally {
+      dailyBriefRunning = false;
+    }
+  };
+
+  const checkSafeWork = async () => {
+    if (safeWorkRunning || !routineConfig.safeWorkScan.enabled) return;
+    safeWorkRunning = true;
+    try {
+      const result = await executeOperatorText("find safe work");
+      const decision = shouldPostSafeWorkResult(
+        result,
+        lastSafeWorkSignature,
+        routineConfig.safeWorkScan.notifyOnlyOnAvailable
+      );
+      if (!decision.shouldPost) return;
+      const replyPermalink = await postSlack(routineEnvelope("find safe work"), formatOperatorResultForSlack(result));
+      await recordOperatorCommandEvent({
+        source: "slack_routine",
+        commandText: "find safe work",
+        channelId: routineConfig.channelId,
+        replyPermalink,
+        result,
+      }, query);
+      lastSafeWorkSignature = decision.signature;
+      logger.info({ signature: decision.signature }, "slack_operator_safe_work_posted");
+    } catch (error) {
+      logger.error({ err: error }, "slack_operator_safe_work_failed");
+    } finally {
+      safeWorkRunning = false;
+    }
+  };
+
+  if (routineConfig.dailyBrief.enabled) {
+    setTimeout(() => void checkDailyBrief(), 5_000);
+    setInterval(() => void checkDailyBrief(), 60_000);
+  }
+  if (routineConfig.safeWorkScan.enabled) {
+    setTimeout(() => void checkSafeWork(), 10_000);
+    setInterval(() => void checkSafeWork(), routineConfig.safeWorkScan.intervalMs);
+  }
+}
+
+async function runRoutineCommand(text: string, successLog: string) {
+  const envelope = routineEnvelope(text);
+  const result = await executeOperatorText(text);
+  const replyPermalink = await postSlack(envelope, formatOperatorResultForSlack(result));
+  await recordOperatorCommandEvent({
+    source: "slack_routine",
+    commandText: text,
+    channelId: envelope.channelId,
+    replyPermalink,
+    result,
+  }, query);
+  logger.info({ text, replyPermalink }, successLog);
+}
+
+function executeOperatorText(text: string) {
+  return handleOperatorCommandText(
+    {
+      text,
+      source: "slack",
+      defaultDryRun: false,
+      maxEvidenceUrls: 5,
+      confidenceThreshold: 0.7,
+    },
+    { query, workflowDeps: createDefaultWorkflowDeps() }
+  );
+}
+
+function routineEnvelope(text: string): SlackCommandEnvelope {
+  return routineConfig.channelId ? { text, channelId: routineConfig.channelId } : { text };
+}
+
+async function routineAlreadyRecordedToday(commandText: string, dateKey: string): Promise<boolean> {
+  const start = `${dateKey}T00:00:00.000Z`;
+  const end = `${dateKey}T23:59:59.999Z`;
+  try {
+    const rows = await query<{ count?: string | number }>(
+      `select count(*)::int as count
+       from operator_command_events
+       where source = 'slack_routine'
+         and normalized_text = $1
+         and updated_at >= $2::timestamptz
+         and updated_at <= $3::timestamptz`,
+      [commandText, start, end]
+    );
+    return Number(rows[0]?.count ?? 0) > 0;
+  } catch (error) {
+    logger.warn({ err: error }, "slack_operator_routine_dedupe_failed");
+    return false;
   }
 }
 
