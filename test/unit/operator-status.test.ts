@@ -5,6 +5,8 @@ import {
   getOperatorStatus,
   getSafeWorkReport,
 } from "../../packages/averray-mcp/src/operator-status.js";
+import { getBusinessLedger, getOpsHealth } from "../../packages/averray-mcp/src/operator-insights.js";
+import { getAgentUsefulnessPlan } from "../../packages/averray-mcp/src/operator-usefulness.js";
 
 describe("operator status", () => {
   it("returns a canonical read-only status for agents and UIs", async () => {
@@ -206,6 +208,140 @@ describe("operator status", () => {
       workflow: "wikipedia_citation_repair",
       dryRunCommand: "run wikipedia citation repair for wiki-en-58158792-citation-repair-r8 if safe, dry run only",
       mutates: false,
+    });
+
+    const usefulness = await getAgentUsefulnessPlan(deps);
+    expect(usefulness).toMatchObject({
+      kind: "agent_usefulness_plan",
+      mutates: false,
+      immediate: {
+        safeWorkAvailable: true,
+        recommendedCommand: "run one wikipedia citation repair dry run only",
+      },
+      surfaces: {
+        mcp: {
+          status: "enabled",
+        },
+      },
+    });
+    expect(usefulness.useCases.map((entry) => entry.id)).toEqual(expect.arrayContaining([
+      "slack_work_assistant",
+      "mobile_agent",
+      "github_helper",
+      "ops_caretaker",
+      "averray_business_agent",
+      "knowledge_memory",
+    ]));
+    expect(usefulness.useCases.find((entry) => entry.id === "ops_caretaker")).toMatchObject({
+      status: "enabled",
+      commands: expect.arrayContaining(["ops health"]),
+    });
+    expect(usefulness.safety.mutatesByDefault).toBe(false);
+  });
+
+  it("returns read-only business ledger and ops health insights", async () => {
+    const deps = {
+      now: new Date("2026-05-03T12:00:00.000Z"),
+      policyConfig: {
+        budget: { per_run_usd_max: 0.5, per_day_usd_max: 1, max_browser_steps: 80 },
+      },
+      async query(text: string) {
+        if (text.includes("last_operator_event_at")) {
+          return [{
+            runs: 2,
+            submissions: 4,
+            drafts: 5,
+            operator_events: 8,
+            budgets: 1,
+            last_operator_event_at: "2026-05-03T11:50:00.000Z",
+            last_submission_at: "2026-05-03T11:43:23.872Z",
+          }];
+        }
+        if (text.includes("from budgets")) return [{ usd_spent: "0.10" }];
+        if (text.includes("from submissions") && text.includes("left join")) {
+          return [
+            {
+              request: {
+                policyRunId: "wikipedia-citation-repair-run-1",
+                jobId: "wiki-en-58158792-citation-repair-r7",
+                sessionId: "wiki-en-58158792-citation-repair-r7:0xWallet",
+                draftId: "draft-1",
+              },
+              response: { state: "submitted" },
+              status: "completed",
+              updated_at: "2026-05-03T11:43:23.872Z",
+              draft_validation_status: "valid",
+            },
+          ];
+        }
+        if (text.includes("from submissions") && text.includes("count(*)")) {
+          return [{ total: 4, completed: 3, failed: 1, other: 0 }];
+        }
+        if (text.includes("from draft_submissions") && text.includes("count(*)")) {
+          return [{ total: 5, completed: 4, failed: 1, other: 0 }];
+        }
+        if (text.includes("from operator_command_events") && text.includes("count(distinct normalized_text)")) {
+          return [{ total: 8, completed: 6, failed: 0, other: 4 }];
+        }
+        if (text.includes("where status = 'failed'")) return [];
+        if (text.includes("select normalized_text, source, status, updated_at")) {
+          return [
+            {
+              normalized_text: "status last wikipedia citation repair",
+              source: "slack",
+              status: "submitted",
+              updated_at: "2026-05-03T11:50:00.000Z",
+            },
+          ];
+        }
+        if (text.includes("from draft_submissions")) return [];
+        return [];
+      },
+      workflowDeps: {
+        async walletStatus() {
+          return { configured: true, address: "0x30BC468dA4E95a8FA4b3f2043c86687a57CdeE05" };
+        },
+        async listJobs() {
+          return [
+            {
+              jobId: "wiki-en-58158792-citation-repair-r8",
+              definition: {
+                source: { type: "wikipedia_article", taskType: "citation_repair", pageTitle: "(+ +)", revisionId: "1351905437" },
+                publicDetails: { title: "Wikipedia citation repair: (+ +)" },
+                state: "open",
+                claimStatus: { claimable: true },
+              },
+            },
+          ];
+        },
+      },
+    };
+
+    const ledger = await getBusinessLedger(deps);
+    expect(ledger).toMatchObject({
+      kind: "business_ledger",
+      mutates: false,
+      summary: {
+        openWikipediaCitationRepairJobs: 1,
+        sevenDaySubmissions: { total: 4, completed: 3, failed: 1 },
+        sevenDayDrafts: { total: 5, valid: 4, invalid: 1 },
+        sevenDayOperatorCommands: { total: 8, slackRouted: 6, distinctCommands: 4 },
+      },
+    });
+
+    const health = await getOpsHealth(deps);
+    expect(health).toMatchObject({
+      kind: "ops_health",
+      mutates: false,
+      health: "ready",
+      controlPlane: {
+        tables: {
+          submissions: 4,
+          drafts: 5,
+          operatorEvents: 8,
+        },
+        recentErrors: [],
+      },
     });
   });
 });

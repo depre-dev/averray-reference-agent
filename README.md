@@ -132,18 +132,25 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   [docs/COMMAND_CENTER_PUBLIC_ACCESS.md](docs/COMMAND_CENTER_PUBLIC_ACCESS.md).
 - Slack and command-center operators can route short commands through
   `averray_handle_operator_command` instead of a free-form Hermes prompt. It
-  recognizes `daily operator brief`, `find safe work`, `operator status`,
-  `operator status details`,
-  `run one wikipedia citation repair if safe`, and
-  `status last wikipedia citation repair`. `daily operator brief` and
-  `find safe work` are read-only summaries that turn the current wallet,
-  budget, latest-run, and open-job state into practical next actions for any
-  MCP client, not just Slack or Hermes Workspace. `operator status` calls the
-  canonical read-only `averray_operator_status` MCP tool and returns wallet,
-  budget, open-job, latest-run, safety, and safe-command metadata. Human
-  surfaces can show compact identifiers by default while keeping full
-  identifiers in the structured MCP JSON; add `details`, `full`, or `audit` to
-  a status command when an operator needs the full run/session/draft audit
-  trail. Repair commands call the Wikipedia workflow tool directly; latest-run
-  status returns the current run/session/draft/submit state, including
-  persisted Slack context when available, without mutating anything.
+  recognizes `what can you do for us`, `business ledger`, `ops health`,
+  `daily operator brief`, `find safe work`, `operator status`,
+  `operator status details`, `run one wikipedia citation repair if safe`, and
+  `status last wikipedia citation repair`. `what can you do for us` calls the
+  read-only `averray_agent_usefulness_plan` MCP tool and explains the useful
+  surfaces and use cases across Slack, Command Center/mobile, MCP clients,
+  GitHub-helper planning, ops care, Averray business tracking, and durable
+  memory. `business ledger` calls `averray_business_ledger` for recent
+  submissions, drafts, operator commands, budget, and open work. `ops health`
+  calls `averray_ops_health` for wallet/budget readiness, latest-run state, and
+  Postgres control-plane counts. `daily operator brief` and `find safe work`
+  are read-only summaries that turn the current wallet, budget, latest-run, and
+  open-job state into practical next actions for any MCP client, not just Slack
+  or Hermes Workspace. `operator status` calls the canonical read-only
+  `averray_operator_status` MCP tool and returns wallet, budget, open-job,
+  latest-run, safety, and safe-command metadata. Human surfaces can show
+  compact identifiers by default while keeping full identifiers in the
+  structured MCP JSON; add `details`, `full`, or `audit` to a status command
+  when an operator needs the full run/session/draft audit trail. Repair
+  commands call the Wikipedia workflow tool directly; latest-run status returns
+  the current run/session/draft/submit state, including persisted Slack context
+  when available, without mutating anything.

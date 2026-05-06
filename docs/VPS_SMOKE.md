@@ -159,6 +159,9 @@ commands are:
 
 ```text
 daily operator brief
+what can you do for us
+business ledger
+ops health
 find safe work
 operator status
 operator status details
@@ -168,13 +171,20 @@ status last wikipedia citation repair
 status last wikipedia citation repair details
 ```
 
-`averray_handle_operator_command` parses those messages. `daily operator brief`
-and `find safe work` are read-only views for humans and agents: they summarize
+`averray_handle_operator_command` parses those messages. `what can you do for
+us` calls `averray_agent_usefulness_plan`, a read-only cross-surface plan for
+Slack, Command Center/mobile, MCP clients, future GitHub helper work, ops care,
+Averray business tracking, and durable memory. `business ledger` calls
+`averray_business_ledger` for recent submissions, drafts, operator commands,
+budget, and open work. `ops health` calls `averray_ops_health` for
+wallet/budget readiness, latest-run state, recent operator events, recent
+failures, and Postgres control-plane counts. `daily operator brief` and
+`find safe work` are read-only views for humans and agents: they summarize
 wallet/budget readiness, latest run state, candidate jobs, blockers, and the
 next dry-run or guarded mutation command. `operator status` calls the canonical
-read-only `averray_operator_status` MCP tool, returning wallet readiness, policy
-budget, open Wikipedia job counts, latest run state, safety guarantees, and safe
-command suggestions as structured JSON. Repair commands call
+read-only `averray_operator_status` MCP tool, returning wallet readiness,
+policy budget, open Wikipedia job counts, latest run state, safety guarantees,
+and safe command suggestions as structured JSON. Repair commands call
 `averray_run_wikipedia_citation_repair` directly with the workflow's wallet,
 policy, draft, validation, submit, and Slack alert gates.
 Latest-run status commands are read-only and return the latest `runId`,

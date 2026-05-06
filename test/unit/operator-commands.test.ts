@@ -97,6 +97,30 @@ describe("operator commands", () => {
       source: "operator",
       detailed: false,
     });
+    expect(parseOperatorCommand("what can you do for us?", { source: "operator" })).toEqual({
+      handled: true,
+      kind: "agent_usefulness_plan",
+      source: "operator",
+      detailed: false,
+    });
+    expect(parseOperatorCommand("how can you help details", { source: "command_center" })).toEqual({
+      handled: true,
+      kind: "agent_usefulness_plan",
+      source: "command_center",
+      detailed: true,
+    });
+    expect(parseOperatorCommand("business ledger", { source: "slack" })).toEqual({
+      handled: true,
+      kind: "business_ledger",
+      source: "slack",
+      detailed: false,
+    });
+    expect(parseOperatorCommand("ops health details", { source: "operator" })).toEqual({
+      handled: true,
+      kind: "ops_health",
+      source: "operator",
+      detailed: true,
+    });
   });
 
   it("returns latest submit status with draft id and Slack permalink when stored", async () => {

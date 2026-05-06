@@ -34,6 +34,24 @@ export type ParsedOperatorCommand =
       detailed: boolean;
     }
   | {
+      handled: true;
+      kind: "agent_usefulness_plan";
+      source: OperatorCommandSource;
+      detailed: boolean;
+    }
+  | {
+      handled: true;
+      kind: "business_ledger";
+      source: OperatorCommandSource;
+      detailed: boolean;
+    }
+  | {
+      handled: true;
+      kind: "ops_health";
+      source: OperatorCommandSource;
+      detailed: boolean;
+    }
+  | {
       handled: false;
       kind: "unknown";
       source: OperatorCommandSource;
@@ -65,6 +83,9 @@ export interface LastWikipediaCitationRepairStatus {
 
 const EXAMPLES = [
   "daily operator brief",
+  "what can you do for us",
+  "business ledger",
+  "ops health",
   "find safe work",
   "operator status",
   "operator status details",
@@ -94,6 +115,18 @@ export function parseOperatorCommand(
 
   if (isFindSafeWorkCommand(normalizedText)) {
     return { handled: true, kind: "find_safe_work", source, detailed };
+  }
+
+  if (isAgentUsefulnessPlanCommand(normalizedText)) {
+    return { handled: true, kind: "agent_usefulness_plan", source, detailed };
+  }
+
+  if (isBusinessLedgerCommand(normalizedText)) {
+    return { handled: true, kind: "business_ledger", source, detailed };
+  }
+
+  if (isOpsHealthCommand(normalizedText)) {
+    return { handled: true, kind: "ops_health", source, detailed };
   }
 
   if (isLatestWikipediaCitationRepairStatusCommand(normalizedText)) {
@@ -243,7 +276,19 @@ function isDailyOperatorBriefCommand(text: string): boolean {
 }
 
 function isFindSafeWorkCommand(text: string): boolean {
-  return /^(find safe work|safe work|next safe work|find work|what should i do next|what can you do|operator todo)( details?| full| audit)?$/.test(text);
+  return /^(find safe work|safe work|next safe work|find work|what should i do next|operator todo)( details?| full| audit)?$/.test(text);
+}
+
+function isAgentUsefulnessPlanCommand(text: string): boolean {
+  return /^(what can you do|what can you do for us|how can you help|how can you work for us|work for us|agent usefulness|agent usefulness plan|agent plan|usefulness plan|show use cases|show agent use cases)( details?| full| audit)?$/.test(text);
+}
+
+function isBusinessLedgerCommand(text: string): boolean {
+  return /^(business ledger|averray business ledger|business status|business report|work ledger|reward ledger|run ledger)( details?| full| audit)?$/.test(text);
+}
+
+function isOpsHealthCommand(text: string): boolean {
+  return /^(ops health|operator health|agent health|stack health|health check|control plane health|mcp health)( details?| full| audit)?$/.test(text);
 }
 
 function wantsDetailedOutput(text: string): boolean {
