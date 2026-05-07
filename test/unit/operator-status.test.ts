@@ -7,6 +7,7 @@ import {
 } from "../../packages/averray-mcp/src/operator-status.js";
 import { getBusinessLedger, getOpsHealth } from "../../packages/averray-mcp/src/operator-insights.js";
 import { getAgentUsefulnessPlan } from "../../packages/averray-mcp/src/operator-usefulness.js";
+import { getAdminReadiness } from "../../packages/averray-mcp/src/operator-admin.js";
 
 describe("operator status", () => {
   it("returns a canonical read-only status for agents and UIs", async () => {
@@ -228,6 +229,7 @@ describe("operator status", () => {
       "slack_work_assistant",
       "mobile_agent",
       "github_helper",
+      "project_admin_copilot",
       "ops_caretaker",
       "averray_business_agent",
       "knowledge_memory",
@@ -237,6 +239,33 @@ describe("operator status", () => {
       commands: expect.arrayContaining(["ops health"]),
     });
     expect(usefulness.safety.mutatesByDefault).toBe(false);
+
+    const admin = await getAdminReadiness(deps);
+    expect(admin).toMatchObject({
+      kind: "admin_readiness",
+      mutates: false,
+      currentRole: {
+        level: "operator_copilot",
+        canAdministerAutomatically: false,
+      },
+      readiness: {
+        overall: "ready_but_low_activity",
+        walletReady: true,
+      },
+      safety: {
+        projectAdminEnabled: false,
+        broadAdminDeniedByDefault: true,
+      },
+    });
+    expect(admin.adminLadder.map((entry) => entry.name)).toEqual(expect.arrayContaining([
+      "Observe and brief",
+      "Approval-gated execution",
+      "Scoped project admin",
+    ]));
+    expect(admin.shouldNotDoYet).toEqual(expect.arrayContaining([
+      expect.stringContaining("Merge PRs"),
+      expect.stringContaining("Change DNS"),
+    ]));
   });
 
   it("returns read-only business ledger and ops health insights", async () => {

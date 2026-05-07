@@ -171,6 +171,31 @@ export function formatOperatorResultForSlack(result: unknown): string {
       "Read-only plan. Use `what can you do for us details` in MCP/Workspace for the full structured JSON.",
     ].filter(Boolean).join("\n");
   }
+  if (result.kind === "admin_readiness") {
+    const readiness = isRecord(result.readiness) ? result.readiness : {};
+    const currentRole = isRecord(readiness.currentRole) ? readiness.currentRole : {};
+    const state = isRecord(readiness.readiness) ? readiness.readiness : {};
+    const ladder = Array.isArray(readiness.adminLadder) ? readiness.adminLadder : [];
+    const canDoNow = Array.isArray(readiness.canDoNow) ? readiness.canDoNow : [];
+    const notYet = Array.isArray(readiness.shouldNotDoYet) ? readiness.shouldNotDoYet : [];
+    const required = Array.isArray(readiness.requiredBeforeProjectAdmin) ? readiness.requiredBeforeProjectAdmin : [];
+    return [
+      "*Averray admin readiness*",
+      stringField(readiness, "headline") ?? "I can be an operator copilot now; broad admin needs staged controls.",
+      "",
+      "*Current role*",
+      `• level: \`${stringField(currentRole, "level") ?? "operator_copilot"}\``,
+      `• auto-admin: \`${String(currentRole.canAdministerAutomatically === true)}\``,
+      `• overall: \`${stringField(state, "overall") ?? "unknown"}\``,
+      `• access: Slack \`${stringField(state, "slackOperator") ?? "unknown"}\`, Command Center \`${stringField(state, "commandCenter") ?? "unknown"}\`, public \`${stringField(state, "publicAccess") ?? "unknown"}\``,
+      "*Admin ladder*",
+      ladder.slice(0, 5).map(formatAdminStage).join("\n"),
+      canDoNow.length > 0 ? `*Can do now*\n${canDoNow.slice(0, 4).map((entry) => `• ${String(entry)}`).join("\n")}` : "",
+      notYet.length > 0 ? `*Not yet*\n${notYet.slice(0, 4).map((entry) => `• ${String(entry)}`).join("\n")}` : "",
+      required.length > 0 ? `*Before project admin*\n${required.slice(0, 3).map((entry) => `• ${String(entry)}`).join("\n")}` : "",
+      "Read-only. Broad project-admin actions are denied by default until an approval policy exists.",
+    ].filter(Boolean).join("\n");
+  }
   if (result.kind === "business_ledger") {
     const ledger = isRecord(result.ledger) ? result.ledger : {};
     const summary = isRecord(ledger.summary) ? ledger.summary : {};
@@ -336,6 +361,14 @@ function formatUseCase(value: unknown): string {
   const status = stringField(value, "status") ?? "unknown";
   const summary = stringField(value, "value") ?? "";
   return `• \`${id}\` - ${status}${summary ? `: ${summary}` : ""}`;
+}
+
+function formatAdminStage(value: unknown): string {
+  if (!isRecord(value)) return "• unknown";
+  const stage = numberField(value, "stage") ?? "?";
+  const name = stringField(value, "name") ?? "unknown";
+  const status = stringField(value, "status") ?? "unknown";
+  return `• ${stage}. ${name}: \`${status}\``;
 }
 
 function formatRecentEvent(value: unknown): string {

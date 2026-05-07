@@ -41,6 +41,12 @@ export type ParsedOperatorCommand =
     }
   | {
       handled: true;
+      kind: "admin_readiness";
+      source: OperatorCommandSource;
+      detailed: boolean;
+    }
+  | {
+      handled: true;
       kind: "business_ledger";
       source: OperatorCommandSource;
       detailed: boolean;
@@ -84,6 +90,7 @@ export interface LastWikipediaCitationRepairStatus {
 const EXAMPLES = [
   "daily operator brief",
   "what can you do for us",
+  "admin readiness",
   "business ledger",
   "ops health",
   "find safe work",
@@ -119,6 +126,10 @@ export function parseOperatorCommand(
 
   if (isAgentUsefulnessPlanCommand(normalizedText)) {
     return { handled: true, kind: "agent_usefulness_plan", source, detailed };
+  }
+
+  if (isAdminReadinessCommand(normalizedText)) {
+    return { handled: true, kind: "admin_readiness", source, detailed };
   }
 
   if (isBusinessLedgerCommand(normalizedText)) {
@@ -281,6 +292,10 @@ function isFindSafeWorkCommand(text: string): boolean {
 
 function isAgentUsefulnessPlanCommand(text: string): boolean {
   return /^(what can you do|what can you do for us|how can you help|how can you work for us|work for us|agent usefulness|agent usefulness plan|agent plan|usefulness plan|show use cases|show agent use cases)( details?| full| audit)?$/.test(text);
+}
+
+function isAdminReadinessCommand(text: string): boolean {
+  return /^(admin readiness|project admin readiness|admin plan|project admin plan|can you be admin|can you admin my projects|how can you admin my projects|admin mode|future admin plan)( details?| full| audit)?$/.test(text);
 }
 
 function isBusinessLedgerCommand(text: string): boolean {

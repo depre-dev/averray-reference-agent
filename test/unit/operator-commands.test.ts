@@ -109,6 +109,18 @@ describe("operator commands", () => {
       source: "command_center",
       detailed: true,
     });
+    expect(parseOperatorCommand("can you admin my projects?", { source: "operator" })).toEqual({
+      handled: true,
+      kind: "admin_readiness",
+      source: "operator",
+      detailed: false,
+    });
+    expect(parseOperatorCommand("admin readiness details", { source: "slack" })).toEqual({
+      handled: true,
+      kind: "admin_readiness",
+      source: "slack",
+      detailed: true,
+    });
     expect(parseOperatorCommand("business ledger", { source: "slack" })).toEqual({
       handled: true,
       kind: "business_ledger",

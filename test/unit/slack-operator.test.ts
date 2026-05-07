@@ -328,6 +328,42 @@ describe("slack operator bridge", () => {
     expect(text).toContain("GitHub PR/issue digest");
   });
 
+  it("formats admin readiness replies with staged guardrails", () => {
+    const text = formatOperatorResultForSlack({
+      handled: true,
+      kind: "admin_readiness",
+      readiness: {
+        headline: "I am ready to be an operator copilot now.",
+        currentRole: {
+          level: "operator_copilot",
+          canAdministerAutomatically: false,
+        },
+        readiness: {
+          overall: "ready_for_operator_copilot",
+          slackOperator: "enabled",
+          commandCenter: "enabled",
+          publicAccess: "cloudflare_access_configured",
+        },
+        adminLadder: [
+          { stage: 1, name: "Observe and brief", status: "enabled" },
+          { stage: 2, name: "Draft and recommend", status: "enabled" },
+          { stage: 3, name: "Approval-gated execution", status: "partially_enabled" },
+          { stage: 4, name: "Scoped project admin", status: "not_enabled" },
+        ],
+        canDoNow: ["Summarize current Averray work and budget."],
+        shouldNotDoYet: ["Merge PRs or push code without a project-specific approval policy."],
+        requiredBeforeProjectAdmin: ["Define a project registry with owners, environments, and allowed actions."],
+      },
+    });
+
+    expect(text).toContain("*Averray admin readiness*");
+    expect(text).toContain("level: `operator_copilot`");
+    expect(text).toContain("auto-admin: `false`");
+    expect(text).toContain("Observe and brief: `enabled`");
+    expect(text).toContain("Scoped project admin: `not_enabled`");
+    expect(text).toContain("Broad project-admin actions are denied by default");
+  });
+
   it("formats business ledger and ops health replies", () => {
     const ledger = formatOperatorResultForSlack({
       handled: true,
