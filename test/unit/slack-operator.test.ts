@@ -414,6 +414,71 @@ describe("slack operator bridge", () => {
     expect(health).toContain("none recorded");
   });
 
+  it("formats GitHub helper replies", () => {
+    const text = formatOperatorResultForSlack({
+      handled: true,
+      kind: "github_status",
+      view: "digest",
+      detailed: false,
+      github: {
+        configured: true,
+        health: "attention",
+        repoCount: 1,
+        totals: {
+          openPullRequests: 1,
+          openIssues: 1,
+          failingWorkflowRuns: 1,
+          activeWorkflowRuns: 0,
+        },
+        selectedView: {
+          name: "digest",
+          items: [
+            {
+              kind: "digest_item",
+              severity: "blocked",
+              repo: "averray-agent/agent",
+              title: "CI failure: CI",
+            },
+            {
+              kind: "digest_item",
+              severity: "attention",
+              repo: "averray-agent/agent",
+              title: "PR #182: Add GitHub operator digest views",
+            },
+          ],
+        },
+        warnings: [],
+        recommendations: ["Start with `github ci failures` and inspect the failing run logs."],
+      },
+    });
+
+    expect(text).toContain("*GitHub digest*");
+    expect(text).toContain("health: `attention`");
+    expect(text).toContain("open PRs: `1`");
+    expect(text).toContain("CI failing/active: `1/0`");
+    expect(text).toContain("CI failure: CI");
+    expect(text).toContain("github ci failures");
+    expect(text).toContain("Use `github status details`");
+  });
+
+  it("formats unconfigured GitHub helper replies with setup guidance", () => {
+    const text = formatOperatorResultForSlack({
+      handled: true,
+      kind: "github_status",
+      github: {
+        configured: false,
+        warnings: [
+          { severity: "high", code: "github_token_missing", message: "GITHUB_TOKEN is not configured." },
+        ],
+      },
+    });
+
+    expect(text).toContain("*GitHub operator status*");
+    expect(text).toContain("not configured yet");
+    expect(text).toContain("GITHUB_TOKEN");
+    expect(text).toContain("GITHUB_DEFAULT_REPO");
+  });
+
   it("formats workflow replies with compact validation and evidence summary", () => {
     const text = formatOperatorResultForSlack({
       handled: true,

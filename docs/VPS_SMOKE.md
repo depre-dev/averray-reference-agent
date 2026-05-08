@@ -163,6 +163,10 @@ what can you do for us
 admin readiness
 business ledger
 ops health
+github status
+github open prs
+github ci failures
+github issue digest
 find safe work
 operator status
 operator status details
@@ -182,6 +186,11 @@ by default. `business ledger` calls `averray_business_ledger` for recent
 submissions, drafts, operator commands, budget, and open work. `ops health`
 calls `averray_ops_health` for wallet/budget readiness, latest-run state,
 recent operator events, recent failures, and Postgres control-plane counts.
+GitHub commands call `averray_github_status`, a read-only helper configured
+with `GITHUB_TOKEN` and either `GITHUB_DEFAULT_REPO` or `GITHUB_HELPER_REPOS`.
+It reports open PRs, open issues, and recent GitHub Actions failures without
+merging PRs, editing issues, rerunning workflows, deploying, or mutating
+GitHub state.
 `daily operator brief` and
 `find safe work` are read-only views for humans and agents: they summarize
 wallet/budget readiness, latest run state, candidate jobs, blockers, and the

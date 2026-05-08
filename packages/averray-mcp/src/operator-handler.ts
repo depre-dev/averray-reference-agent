@@ -7,6 +7,7 @@ import {
 } from "./operator-commands.js";
 import { getAdminReadiness } from "./operator-admin.js";
 import { getBusinessLedger, getOpsHealth } from "./operator-insights.js";
+import { getGithubOperatorStatus } from "./operator-github.js";
 import { getDailyOperatorBrief, getOperatorStatus, getSafeWorkReport } from "./operator-status.js";
 import { getAgentUsefulnessPlan } from "./operator-usefulness.js";
 import { runWikipediaCitationRepairWorkflow } from "./job-workflows.js";
@@ -67,6 +68,10 @@ export async function handleOperatorCommandText(
   if (command.kind === "ops_health") {
     const health = await getOpsHealth({ query: deps.query, workflowDeps: deps.workflowDeps });
     return { ...command, health };
+  }
+  if (command.kind === "github_status") {
+    const github = await getGithubOperatorStatus({ view: command.view });
+    return { ...command, github };
   }
   const result = await runWikipediaCitationRepairWorkflow(
     { ...command.input, expectedWallet: input.expectedWallet },

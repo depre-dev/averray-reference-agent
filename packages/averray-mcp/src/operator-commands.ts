@@ -1,4 +1,5 @@
 import type { WikipediaCitationRepairWorkflowInput } from "./job-workflows.js";
+import type { GithubOperatorView } from "./operator-github.js";
 
 export type OperatorCommandSource = "slack" | "operator" | "command_center" | "hermes";
 
@@ -58,6 +59,13 @@ export type ParsedOperatorCommand =
       detailed: boolean;
     }
   | {
+      handled: true;
+      kind: "github_status";
+      source: OperatorCommandSource;
+      view: GithubOperatorView;
+      detailed: boolean;
+    }
+  | {
       handled: false;
       kind: "unknown";
       source: OperatorCommandSource;
@@ -93,6 +101,10 @@ const EXAMPLES = [
   "admin readiness",
   "business ledger",
   "ops health",
+  "github status",
+  "github open prs",
+  "github ci failures",
+  "github issue digest",
   "find safe work",
   "operator status",
   "operator status details",
@@ -138,6 +150,11 @@ export function parseOperatorCommand(
 
   if (isOpsHealthCommand(normalizedText)) {
     return { handled: true, kind: "ops_health", source, detailed };
+  }
+
+  const githubView = githubOperatorView(normalizedText);
+  if (githubView) {
+    return { handled: true, kind: "github_status", source, view: githubView, detailed };
   }
 
   if (isLatestWikipediaCitationRepairStatusCommand(normalizedText)) {
@@ -304,6 +321,16 @@ function isBusinessLedgerCommand(text: string): boolean {
 
 function isOpsHealthCommand(text: string): boolean {
   return /^(ops health|operator health|agent health|stack health|health check|control plane health|mcp health)( details?| full| audit)?$/.test(text);
+}
+
+function githubOperatorView(text: string): GithubOperatorView | undefined {
+  const compact = text.replace(/\b(details?|full|audit)\b/g, "").replace(/\s+/g, " ").trim();
+  if (/^(github status|github repo status|github repositories|github repos)$/.test(compact)) return "status";
+  if (/^(github open prs|github prs|github pull requests|github open pull requests|open prs)$/.test(compact)) return "prs";
+  if (/^(github ci|github ci failures|github failures|github checks|github actions|ci failures)$/.test(compact)) return "ci";
+  if (/^(github issues|github issue digest|github open issues|issue digest)$/.test(compact)) return "issues";
+  if (/^(github digest|github attention|github needs attention|github work digest)$/.test(compact)) return "digest";
+  return undefined;
 }
 
 function wantsDetailedOutput(text: string): boolean {
