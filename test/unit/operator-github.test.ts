@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getGithubOperatorStatus } from "../../packages/averray-mcp/src/operator-github.js";
+import { getGithubOperatorBrief, getGithubOperatorStatus } from "../../packages/averray-mcp/src/operator-github.js";
 
 describe("github operator status", () => {
   it("reports setup blockers when token or repo config is missing", async () => {
@@ -145,6 +145,109 @@ describe("github operator status", () => {
     });
     expect(seenAuthByRepo.get("averray-agent/agent")).toBe("Bearer token-averray-agent");
     expect(seenAuthByRepo.get("depre-dev/averray-reference-agent")).toBe("Bearer token-depre-dev");
+  });
+
+  it("builds a since-last-time brief and persists a local checkpoint", async () => {
+    const writes: unknown[][] = [];
+    const query = async <T = Record<string, unknown>>(text: string, values?: unknown[]): Promise<T[]> => {
+      if (text.includes("select value from operator_state_snapshots")) {
+        return [{ value: { generatedAt: "2026-05-08T10:00:00.000Z", repos: ["averray-agent/agent"] } } as T];
+      }
+      if (text.includes("insert into operator_state_snapshots")) {
+        writes.push(values ?? []);
+        return [];
+      }
+      return [];
+    };
+    const fetchFn = async (url: string | URL | Request) => {
+      const text = String(url);
+      if (text.endsWith("/repos/averray-agent/agent")) return githubRepoResponse("averray-agent/agent");
+      if (text.includes("/pulls?state=open")) {
+        return jsonResponse([
+          {
+            number: 185,
+            title: "Record testnet deployment manifest",
+            html_url: "https://github.com/averray-agent/agent/pull/185",
+            user: { login: "depre-dev" },
+            draft: false,
+            updated_at: "2026-05-08T11:30:00.000Z",
+            state: "open",
+          },
+        ]);
+      }
+      if (text.includes("/pulls?state=closed")) {
+        return jsonResponse([
+          {
+            number: 184,
+            title: "Reconcile testnet checklists",
+            html_url: "https://github.com/averray-agent/agent/pull/184",
+            user: { login: "codex" },
+            draft: false,
+            merged_at: "2026-05-08T11:00:00.000Z",
+            updated_at: "2026-05-08T11:00:00.000Z",
+            state: "closed",
+          },
+        ]);
+      }
+      if (text.includes("/issues?state=open")) return jsonResponse([]);
+      if (text.includes("/issues?state=closed")) return jsonResponse([]);
+      if (text.includes("/actions/runs?")) {
+        return jsonResponse({
+          workflow_runs: [
+            {
+              id: 2,
+              name: "Deploy Production",
+              status: "completed",
+              conclusion: "success",
+              head_branch: "main",
+              event: "push",
+              html_url: "https://github.com/averray-agent/agent/actions/runs/2",
+              updated_at: "2026-05-08T11:15:00.000Z",
+            },
+            {
+              id: 3,
+              name: "CI",
+              status: "completed",
+              conclusion: "failure",
+              head_branch: "feature",
+              event: "pull_request",
+              html_url: "https://github.com/averray-agent/agent/actions/runs/3",
+              updated_at: "2026-05-08T11:20:00.000Z",
+            },
+          ],
+        });
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const brief = await getGithubOperatorBrief({
+      env: {
+        GITHUB_TOKEN: "ghp_readonly",
+        GITHUB_DEFAULT_REPO: "averray-agent/agent",
+      },
+      fetchFn,
+      query,
+      now: new Date("2026-05-08T12:00:00.000Z"),
+    });
+
+    expect(brief).toMatchObject({
+      configured: true,
+      authConfigured: true,
+      since: "2026-05-08T10:00:00.000Z",
+      isFirstBrief: false,
+      summary: {
+        changed: 1,
+        merged: 1,
+        deployed: 1,
+        failed: 1,
+        attention: 2,
+      },
+      persistsLocalSnapshot: true,
+    });
+    expect(brief.sections.merged[0]).toMatchObject({ title: "PR #184: Reconcile testnet checklists" });
+    expect(brief.sections.deployed[0]).toMatchObject({ title: "Deploy Production" });
+    expect(brief.sections.failed[0]).toMatchObject({ title: "CI" });
+    expect(writes).toHaveLength(1);
   });
 });
 

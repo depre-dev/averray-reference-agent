@@ -248,6 +248,9 @@ export function formatOperatorResultForSlack(result: unknown): string {
   if (result.kind === "github_status") {
     return formatGithubStatusForSlack(result);
   }
+  if (result.kind === "github_brief") {
+    return formatGithubBriefForSlack(result);
+  }
   if (result.kind === "operator_status") {
     const detailed = result.detailed === true;
     const status = isRecord(result.status) ? result.status : {};
@@ -420,6 +423,50 @@ function formatGithubStatusForSlack(result: Record<string, unknown>): string {
   ].filter(Boolean).join("\n");
 }
 
+function formatGithubBriefForSlack(result: Record<string, unknown>): string {
+  const github = isRecord(result.github) ? result.github : {};
+  const summary = isRecord(github.summary) ? github.summary : {};
+  const sections = isRecord(github.sections) ? github.sections : {};
+  const warnings = Array.isArray(github.warnings) ? github.warnings : [];
+  const recommendations = Array.isArray(github.recommendations) ? github.recommendations : [];
+  const configured = github.configured === true;
+
+  if (!configured) {
+    const warningLines = warnings.slice(0, 4).map(formatGithubWarning).join("\n");
+    return [
+      "*GitHub brief*",
+      "GitHub read-only helper is not configured yet.",
+      warningLines ? `*Missing setup*\n${warningLines}` : "",
+      "*Needed*",
+      "• `GITHUB_TOKEN` with read-only access to the target repo, or owner/repo-specific token maps",
+      "• `GITHUB_DEFAULT_REPO=owner/repo` or `GITHUB_HELPER_REPOS=owner/repo,owner/repo`",
+    ].filter(Boolean).join("\n");
+  }
+
+  const changed = arrayField(sections, "changed");
+  const merged = arrayField(sections, "merged");
+  const deployed = arrayField(sections, "deployed");
+  const failed = arrayField(sections, "failed");
+  const attention = arrayField(sections, "attention");
+  return [
+    "*GitHub brief*",
+    github.isFirstBrief === true
+      ? "Baseline saved. Future briefs will compare against this one."
+      : `Since: \`${stringField(github, "since") ?? "previous brief"}\``,
+    `• repos: \`${numberField(github, "repoCount") ?? 0}\``,
+    `• changed/merged/deployed/failed/attention: \`${numberField(summary, "changed") ?? 0}/${numberField(summary, "merged") ?? 0}/${numberField(summary, "deployed") ?? 0}/${numberField(summary, "failed") ?? 0}/${numberField(summary, "attention") ?? 0}\``,
+    changed.length > 0 ? `*Changed*\n${changed.slice(0, 5).map(formatGithubBriefItem).join("\n")}` : "*Changed*\n• none",
+    merged.length > 0 ? `*Merged*\n${merged.slice(0, 5).map(formatGithubBriefItem).join("\n")}` : "*Merged*\n• none",
+    deployed.length > 0 ? `*Deployed*\n${deployed.slice(0, 5).map(formatGithubBriefItem).join("\n")}` : "*Deployed*\n• none",
+    failed.length > 0 ? `*Failed*\n${failed.slice(0, 5).map(formatGithubBriefItem).join("\n")}` : "*Failed*\n• none",
+    attention.length > 0 ? `*Needs attention*\n${attention.slice(0, 5).map(formatGithubBriefItem).join("\n")}` : "*Needs attention*\n• none",
+    recommendations.length > 0 ? `*Next*\n${recommendations.slice(0, 3).map((entry) => `• ${String(entry)}`).join("\n")}` : "",
+    github.persistsLocalSnapshot === true
+      ? "GitHub was not mutated; only the local brief checkpoint was updated."
+      : "GitHub was not mutated. Local brief checkpoint was not saved.",
+  ].filter(Boolean).join("\n");
+}
+
 function githubViewTitle(view: string): string {
   if (view === "prs") return "Open PRs";
   if (view === "ci") return "Workflow runs";
@@ -459,6 +506,20 @@ function formatGithubWarning(value: unknown): string {
   if (!isRecord(value)) return "• unknown warning";
   const repo = stringField(value, "repo");
   return `• \`${stringField(value, "severity") ?? "warning"}\`${repo ? ` ${repo}` : ""}: ${stringField(value, "message") ?? stringField(value, "code") ?? "unknown"}`;
+}
+
+function formatGithubBriefItem(value: unknown): string {
+  if (!isRecord(value)) return "• unknown";
+  const repo = stringField(value, "repo");
+  const detail = stringField(value, "detail");
+  const occurredAt = stringField(value, "occurredAt");
+  const meta = [repo, detail, occurredAt].filter(Boolean).join(" - ");
+  return `• ${meta ? `\`${meta}\` ` : ""}${stringField(value, "title") ?? "unknown"}${linkSuffix(value)}`;
+}
+
+function arrayField(value: Record<string, unknown>, key: string): unknown[] {
+  const field = value[key];
+  return Array.isArray(field) ? field : [];
 }
 
 function linkSuffix(value: Record<string, unknown>): string {
