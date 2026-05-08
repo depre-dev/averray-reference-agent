@@ -245,6 +245,9 @@ export function formatOperatorResultForSlack(result: unknown): string {
       "Read-only health. Host disk/log/WAL checks still need the VPS ops script.",
     ].filter(Boolean).join("\n");
   }
+  if (result.kind === "github_status") {
+    return formatGithubStatusForSlack(result);
+  }
   if (result.kind === "operator_status") {
     const detailed = result.detailed === true;
     const status = isRecord(result.status) ? result.status : {};
@@ -377,6 +380,89 @@ function formatRecentEvent(value: unknown): string {
   const source = stringField(value, "source") ?? "unknown";
   const status = stringField(value, "status") ?? "n/a";
   return `• \`${command}\` (${source}, ${status})`;
+}
+
+function formatGithubStatusForSlack(result: Record<string, unknown>): string {
+  const github = isRecord(result.github) ? result.github : {};
+  const detailed = result.detailed === true;
+  const totals = isRecord(github.totals) ? github.totals : {};
+  const selectedView = isRecord(github.selectedView) ? github.selectedView : {};
+  const items = Array.isArray(selectedView.items) ? selectedView.items : [];
+  const warnings = Array.isArray(github.warnings) ? github.warnings : [];
+  const recommendations = Array.isArray(github.recommendations) ? github.recommendations : [];
+  const configured = github.configured === true;
+  const view = stringField(selectedView, "name") ?? stringField(result, "view") ?? "status";
+
+  if (!configured) {
+    const warningLines = warnings.slice(0, 4).map(formatGithubWarning).join("\n");
+    return [
+      "*GitHub operator status*",
+      "GitHub read-only helper is not configured yet.",
+      warningLines ? `*Missing setup*\n${warningLines}` : "",
+      "*Needed*",
+      "• `GITHUB_TOKEN` with read-only access to the target repo",
+      "• `GITHUB_DEFAULT_REPO=owner/repo` or `GITHUB_HELPER_REPOS=owner/repo,owner/repo`",
+    ].filter(Boolean).join("\n");
+  }
+
+  return [
+    `*GitHub ${view}*`,
+    `• health: \`${stringField(github, "health") ?? "unknown"}\``,
+    `• repos: \`${numberField(github, "repoCount") ?? 0}\``,
+    `• open PRs: \`${numberField(totals, "openPullRequests") ?? 0}\``,
+    `• open issues: \`${numberField(totals, "openIssues") ?? 0}\``,
+    `• CI failing/active: \`${numberField(totals, "failingWorkflowRuns") ?? 0}/${numberField(totals, "activeWorkflowRuns") ?? 0}\``,
+    items.length > 0 ? `*${githubViewTitle(view)}*\n${items.slice(0, detailed ? 10 : 5).map((item) => formatGithubItem(item, detailed)).join("\n")}` : "*Items*\n• none",
+    warnings.length > 0 ? `*Warnings*\n${warnings.slice(0, 3).map(formatGithubWarning).join("\n")}` : "",
+    recommendations.length > 0 ? `*Next*\n${recommendations.slice(0, 3).map((entry) => `• ${String(entry)}`).join("\n")}` : "",
+    detailed ? "Read-only GitHub digest. No PRs, issues, workflows, or repo settings were changed." : "Use `github status details` for fuller IDs and more items.",
+  ].filter(Boolean).join("\n");
+}
+
+function githubViewTitle(view: string): string {
+  if (view === "prs") return "Open PRs";
+  if (view === "ci") return "Workflow runs";
+  if (view === "issues") return "Open issues";
+  if (view === "digest") return "Needs attention";
+  return "Repositories";
+}
+
+function formatGithubItem(value: unknown, detailed: boolean): string {
+  if (!isRecord(value)) return "• unknown";
+  const kind = stringField(value, "kind");
+  const repo = stringField(value, "repo") ?? "unknown";
+  if (kind === "repo_status") {
+    return `• \`${repo}\` - PRs ${numberField(value, "openPullRequests") ?? 0}, issues ${numberField(value, "openIssues") ?? 0}, CI fail/active ${numberField(value, "failingWorkflowRuns") ?? 0}/${numberField(value, "activeWorkflowRuns") ?? 0}`;
+  }
+  if (kind === "pull_request") {
+    const draft = value.draft === true ? " draft" : "";
+    return `• \`${repo}#${numberField(value, "number") ?? "?"}\`${draft} - ${stringField(value, "title") ?? "untitled"}${detailed ? linkSuffix(value) : ""}`;
+  }
+  if (kind === "issue") {
+    const labels = Array.isArray(value.labels) && value.labels.length > 0 ? ` [${value.labels.map(String).join(", ")}]` : "";
+    return `• \`${repo}#${numberField(value, "number") ?? "?"}\` - ${stringField(value, "title") ?? "untitled"}${labels}${detailed ? linkSuffix(value) : ""}`;
+  }
+  if (kind === "workflow_run") {
+    const status = stringField(value, "conclusion") ?? stringField(value, "status") ?? "unknown";
+    const branch = stringField(value, "branch") ? ` (${stringField(value, "branch")})` : "";
+    return `• \`${repo}\` - ${stringField(value, "name") ?? "workflow"}: \`${status}\`${branch}${detailed ? linkSuffix(value) : ""}`;
+  }
+  if (kind === "digest_item") {
+    const severity = stringField(value, "severity") ?? "info";
+    return `• \`${severity}\`${repo !== "unknown" ? ` ${repo}` : ""} - ${stringField(value, "title") ?? "unknown"}${detailed ? linkSuffix(value) : ""}`;
+  }
+  return `• \`${repo}\` - ${stringField(value, "title") ?? kind ?? "unknown"}`;
+}
+
+function formatGithubWarning(value: unknown): string {
+  if (!isRecord(value)) return "• unknown warning";
+  const repo = stringField(value, "repo");
+  return `• \`${stringField(value, "severity") ?? "warning"}\`${repo ? ` ${repo}` : ""}: ${stringField(value, "message") ?? stringField(value, "code") ?? "unknown"}`;
+}
+
+function linkSuffix(value: Record<string, unknown>): string {
+  const url = stringField(value, "url");
+  return url ? ` - ${url}` : "";
 }
 
 function formatId(value: string | undefined, detailed: boolean): string | undefined {

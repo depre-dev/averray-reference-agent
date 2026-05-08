@@ -135,6 +135,37 @@ describe("operator commands", () => {
     });
   });
 
+  it("routes GitHub helper commands read-only", () => {
+    expect(parseOperatorCommand("github status", { source: "operator" })).toEqual({
+      handled: true,
+      kind: "github_status",
+      source: "operator",
+      view: "status",
+      detailed: false,
+    });
+    expect(parseOperatorCommand("github open prs details", { source: "slack" })).toEqual({
+      handled: true,
+      kind: "github_status",
+      source: "slack",
+      view: "prs",
+      detailed: true,
+    });
+    expect(parseOperatorCommand("github ci failures", { source: "command_center" })).toEqual({
+      handled: true,
+      kind: "github_status",
+      source: "command_center",
+      view: "ci",
+      detailed: false,
+    });
+    expect(parseOperatorCommand("github issue digest", { source: "operator" })).toEqual({
+      handled: true,
+      kind: "github_status",
+      source: "operator",
+      view: "issues",
+      detailed: false,
+    });
+  });
+
   it("returns latest submit status with draft id and Slack permalink when stored", async () => {
     const status = await getLastWikipediaCitationRepairStatus(async (text) => {
       if (text.includes("from submissions")) {
