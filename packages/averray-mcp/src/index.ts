@@ -198,7 +198,7 @@ server.tool(
 
 server.tool(
   "averray_github_status",
-  "Canonical read-only GitHub operator status for humans, Slack, Command Center, and other agents. Uses GITHUB_TOKEN plus GITHUB_DEFAULT_REPO or GITHUB_HELPER_REPOS to summarize open PRs, open issues, and recent CI failures. Does not merge PRs, edit issues, rerun workflows, deploy, push code, or mutate GitHub.",
+  "Canonical read-only GitHub operator status for humans, Slack, Command Center, and other agents. Uses GITHUB_TOKEN plus GITHUB_DEFAULT_REPO or GITHUB_HELPER_REPOS to summarize open PRs, open issues, and recent CI failures; GITHUB_OWNER_TOKENS or GITHUB_REPO_TOKENS can provide read-only tokens for repositories under different owners. Does not merge PRs, edit issues, rerun workflows, deploy, push code, or mutate GitHub.",
   {
     view: z.enum(["status", "prs", "ci", "issues", "digest"]).default("status")
   },

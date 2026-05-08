@@ -108,6 +108,44 @@ describe("github operator status", () => {
     expect(status.views.issues[0]).toMatchObject({ repo: "averray-agent/agent", number: 10 });
     expect(status.views.digest.some((item) => item.title.includes("CI failure"))).toBe(true);
   });
+
+  it("uses owner-specific tokens for repositories under different owners", async () => {
+    const seenAuthByRepo = new Map<string, string | undefined>();
+    const fetchFn = async (url: string | URL | Request, init?: RequestInit) => {
+      const text = String(url);
+      const auth = headersObject(init?.headers).authorization;
+      if (text.endsWith("/repos/averray-agent/agent")) {
+        seenAuthByRepo.set("averray-agent/agent", auth);
+        return githubRepoResponse("averray-agent/agent");
+      }
+      if (text.endsWith("/repos/depre-dev/averray-reference-agent")) {
+        seenAuthByRepo.set("depre-dev/averray-reference-agent", auth);
+        return githubRepoResponse("depre-dev/averray-reference-agent");
+      }
+      if (text.includes("/pulls?") || text.includes("/issues?")) return jsonResponse([]);
+      if (text.includes("/actions/runs?")) return jsonResponse({ workflow_runs: [] });
+      return new Response("not found", { status: 404 });
+    };
+
+    const status = await getGithubOperatorStatus({
+      env: {
+        GITHUB_TOKEN: "token-averray-agent",
+        GITHUB_OWNER_TOKENS: "depre-dev=token-depre-dev",
+        GITHUB_HELPER_REPOS: "averray-agent/agent,depre-dev/averray-reference-agent",
+      },
+      fetchFn,
+      now: new Date("2026-05-08T12:00:00.000Z"),
+    });
+
+    expect(status).toMatchObject({
+      configured: true,
+      authConfigured: true,
+      health: "ok",
+      repoCount: 2,
+    });
+    expect(seenAuthByRepo.get("averray-agent/agent")).toBe("Bearer token-averray-agent");
+    expect(seenAuthByRepo.get("depre-dev/averray-reference-agent")).toBe("Bearer token-depre-dev");
+  });
 });
 
 function jsonResponse(value: unknown): Response {
@@ -115,4 +153,20 @@ function jsonResponse(value: unknown): Response {
     status: 200,
     headers: { "content-type": "application/json" },
   });
+}
+
+function githubRepoResponse(fullName: string): Response {
+  return jsonResponse({
+    full_name: fullName,
+    default_branch: "main",
+    private: true,
+    html_url: `https://github.com/${fullName}`,
+  });
+}
+
+function headersObject(headers: HeadersInit | undefined): Record<string, string> {
+  if (!headers) return {};
+  if (headers instanceof Headers) return Object.fromEntries(headers.entries());
+  if (Array.isArray(headers)) return Object.fromEntries(headers);
+  return headers as Record<string, string>;
 }
