@@ -479,6 +479,81 @@ describe("slack operator bridge", () => {
     expect(text).toContain("GITHUB_DEFAULT_REPO");
   });
 
+  it("formats GitHub brief replies", () => {
+    const text = formatOperatorResultForSlack({
+      handled: true,
+      kind: "github_brief",
+      detailed: false,
+      github: {
+        configured: true,
+        repoCount: 1,
+        since: "2026-05-08T10:00:00.000Z",
+        isFirstBrief: false,
+        persistsLocalSnapshot: true,
+        summary: {
+          changed: 1,
+          merged: 1,
+          deployed: 1,
+          failed: 1,
+          attention: 1,
+        },
+        sections: {
+          changed: [
+            {
+              kind: "pull_request",
+              repo: "averray-agent/agent",
+              title: "PR #185: Record testnet deployment manifest",
+              detail: "Opened or updated PR",
+              occurredAt: "2026-05-08T11:30:00.000Z",
+            },
+          ],
+          merged: [
+            {
+              kind: "pull_request",
+              repo: "averray-agent/agent",
+              title: "PR #184: Reconcile testnet checklists",
+              detail: "Merged PR",
+            },
+          ],
+          deployed: [
+            {
+              kind: "workflow_run",
+              repo: "averray-agent/agent",
+              title: "Deploy Production",
+              detail: "Successful deploy/publish workflow",
+            },
+          ],
+          failed: [
+            {
+              kind: "workflow_run",
+              repo: "averray-agent/agent",
+              title: "CI",
+              detail: "Workflow failure",
+            },
+          ],
+          attention: [
+            {
+              kind: "pull_request",
+              repo: "averray-agent/agent",
+              title: "PR #185: Record testnet deployment manifest",
+              detail: "Open PR needs review/merge decision",
+            },
+          ],
+        },
+        warnings: [],
+        recommendations: ["Start with failed workflow runs before merging or deploying more work."],
+      },
+    });
+
+    expect(text).toContain("*GitHub brief*");
+    expect(text).toContain("Since: `2026-05-08T10:00:00.000Z`");
+    expect(text).toContain("changed/merged/deployed/failed/attention: `1/1/1/1/1`");
+    expect(text).toContain("*Merged*");
+    expect(text).toContain("Deploy Production");
+    expect(text).toContain("Workflow failure");
+    expect(text).toContain("local brief checkpoint was updated");
+  });
+
   it("formats workflow replies with compact validation and evidence summary", () => {
     const text = formatOperatorResultForSlack({
       handled: true,

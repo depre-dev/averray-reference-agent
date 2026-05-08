@@ -66,6 +66,12 @@ export type ParsedOperatorCommand =
       detailed: boolean;
     }
   | {
+      handled: true;
+      kind: "github_brief";
+      source: OperatorCommandSource;
+      detailed: boolean;
+    }
+  | {
       handled: false;
       kind: "unknown";
       source: OperatorCommandSource;
@@ -102,6 +108,9 @@ const EXAMPLES = [
   "business ledger",
   "ops health",
   "github status",
+  "github brief",
+  "daily github brief",
+  "what changed since last time",
   "github open prs",
   "github ci failures",
   "github issue digest",
@@ -155,6 +164,10 @@ export function parseOperatorCommand(
   const githubView = githubOperatorView(normalizedText);
   if (githubView) {
     return { handled: true, kind: "github_status", source, view: githubView, detailed };
+  }
+
+  if (isGithubBriefCommand(normalizedText)) {
+    return { handled: true, kind: "github_brief", source, detailed };
   }
 
   if (isLatestWikipediaCitationRepairStatusCommand(normalizedText)) {
@@ -331,6 +344,11 @@ function githubOperatorView(text: string): GithubOperatorView | undefined {
   if (/^(github issues|github issue digest|github open issues|issue digest)$/.test(compact)) return "issues";
   if (/^(github digest|github attention|github needs attention|github work digest)$/.test(compact)) return "digest";
   return undefined;
+}
+
+function isGithubBriefCommand(text: string): boolean {
+  const compact = text.replace(/\b(details?|full|audit)\b/g, "").replace(/\s+/g, " ").trim();
+  return /^(github brief|daily github brief|github daily brief|github changes|github changed|what changed since last time|what changed in github since last time|what merged|what deployed|what failed|what needs attention)$/.test(compact);
 }
 
 function wantsDetailedOutput(text: string): boolean {

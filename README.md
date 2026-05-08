@@ -134,13 +134,18 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   `averray_handle_operator_command` instead of a free-form Hermes prompt. It
   recognizes `what can you do for us`, `admin readiness`, `business ledger`,
   `ops health`, `github status`, `github open prs`, `github ci failures`,
-  `github issue digest`, `daily operator brief`, `find safe work`,
+  `github issue digest`, `github brief`, `daily github brief`,
+  `what changed since last time`, `daily operator brief`, `find safe work`,
   `operator status`, `operator status details`,
   `run one wikipedia citation repair if safe`, and
   `status last wikipedia citation repair`. GitHub commands call
   `averray_github_status`, a read-only helper configured with `GITHUB_TOKEN`
   plus `GITHUB_DEFAULT_REPO` or `GITHUB_HELPER_REPOS`; it summarizes open PRs,
-  open issues, and recent CI failures without mutating GitHub. When configured
+  open issues, and recent CI failures without mutating GitHub. `github brief`
+  and `daily github brief` call `averray_github_brief`, which answers what
+  changed since the last brief, what merged, what deployed, what failed, and
+  what needs attention. It mutates no GitHub state; it only stores a local
+  checkpoint timestamp so the next brief can compare against it. When configured
   repositories live under different GitHub owners, use `GITHUB_OWNER_TOKENS` or
   `GITHUB_REPO_TOKENS` for owner/repo-specific read-only tokens. `what can you do for us` calls the
   read-only `averray_agent_usefulness_plan` MCP tool and explains the useful

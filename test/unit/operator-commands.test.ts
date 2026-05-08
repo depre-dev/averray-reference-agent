@@ -164,6 +164,18 @@ describe("operator commands", () => {
       view: "issues",
       detailed: false,
     });
+    expect(parseOperatorCommand("daily github brief", { source: "slack" })).toEqual({
+      handled: true,
+      kind: "github_brief",
+      source: "slack",
+      detailed: false,
+    });
+    expect(parseOperatorCommand("what changed since last time details", { source: "command_center" })).toEqual({
+      handled: true,
+      kind: "github_brief",
+      source: "command_center",
+      detailed: true,
+    });
   });
 
   it("returns latest submit status with draft id and Slack permalink when stored", async () => {

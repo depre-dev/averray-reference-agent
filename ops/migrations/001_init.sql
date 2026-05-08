@@ -125,9 +125,17 @@ create table if not exists operator_command_events (
   updated_at timestamptz default now()
 );
 
+create table if not exists operator_state_snapshots (
+  scope text primary key,
+  value jsonb not null default '{}'::jsonb,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
 create index if not exists tool_calls_run_idx on tool_calls(run_id, idx);
 create index if not exists skills_observed_file_idx on skills_observed(file_path);
 create index if not exists draft_submissions_lookup_idx on draft_submissions(job_id, run_id, session_id, updated_at desc);
 create index if not exists draft_submissions_session_idx on draft_submissions(session_id, updated_at desc);
 create index if not exists operator_command_events_run_idx on operator_command_events(run_id, updated_at desc);
 create index if not exists operator_command_events_source_idx on operator_command_events(source, updated_at desc);
+create index if not exists operator_state_snapshots_updated_idx on operator_state_snapshots(updated_at desc);
