@@ -140,7 +140,9 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   `status last wikipedia citation repair`. GitHub commands call
   `averray_github_status`, a read-only helper configured with `GITHUB_TOKEN`
   plus `GITHUB_DEFAULT_REPO` or `GITHUB_HELPER_REPOS`; it summarizes open PRs,
-  open issues, and recent CI failures without mutating GitHub. `what can you do for us` calls the
+  open issues, and recent CI failures without mutating GitHub. When configured
+  repositories live under different GitHub owners, use `GITHUB_OWNER_TOKENS` or
+  `GITHUB_REPO_TOKENS` for owner/repo-specific read-only tokens. `what can you do for us` calls the
   read-only `averray_agent_usefulness_plan` MCP tool and explains the useful
   surfaces and use cases across Slack, Command Center/mobile, MCP clients,
   GitHub-helper planning, ops care, Averray business tracking, and durable

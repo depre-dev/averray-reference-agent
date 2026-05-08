@@ -190,7 +190,10 @@ GitHub commands call `averray_github_status`, a read-only helper configured
 with `GITHUB_TOKEN` and either `GITHUB_DEFAULT_REPO` or `GITHUB_HELPER_REPOS`.
 It reports open PRs, open issues, and recent GitHub Actions failures without
 merging PRs, editing issues, rerunning workflows, deploying, or mutating
-GitHub state. These variables must be visible to the `hermes` container and to
+GitHub state. If configured repositories live under different GitHub owners,
+set `GITHUB_OWNER_TOKENS` (`owner=token`) or `GITHUB_REPO_TOKENS`
+(`owner/repo=token`) for the owners or repos that cannot use the global token.
+These variables must be visible to the `hermes` container and to
 `/config-runtime/reference-agent.env`; after changing them in `.env.prod`,
 force-recreate `mcp-env`, `hermes`, `hermes-gateway`, `hermes-workspace`, and
 `slack-operator`.

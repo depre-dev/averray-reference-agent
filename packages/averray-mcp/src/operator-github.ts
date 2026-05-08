@@ -156,16 +156,16 @@ export async function getGithubOperatorStatus(
   const env = options.env ?? process.env;
   const view = options.view ?? "status";
   const generatedAt = (options.now ?? new Date()).toISOString();
-  const token = env.GITHUB_TOKEN?.trim();
   const repos = parseGithubRepos(env);
+  const tokenConfig = buildGithubTokenConfig(env);
   const warnings: GithubWarning[] = [];
 
-  if (!token || repos.length === 0) {
-    if (!token) {
+  if (!tokenConfig.hasAnyToken || repos.length === 0) {
+    if (!tokenConfig.hasAnyToken) {
       warnings.push({
         severity: "high",
         code: "github_token_missing",
-        message: "GITHUB_TOKEN is not configured, so GitHub status is unavailable.",
+        message: "No GitHub token is configured, so GitHub status is unavailable.",
       });
     }
     if (repos.length === 0) {
@@ -175,14 +175,27 @@ export async function getGithubOperatorStatus(
         message: "Set GITHUB_HELPER_REPOS or GITHUB_DEFAULT_REPO to enable GitHub status.",
       });
     }
-    return emptyStatus({ generatedAt, view, authConfigured: Boolean(token), warnings });
+    return emptyStatus({ generatedAt, view, authConfigured: tokenConfig.hasAnyToken, warnings });
   }
 
   const fetchFn = options.fetchFn ?? fetch;
   const baseUrl = (env.GITHUB_API_BASE_URL ?? "https://api.github.com").replace(/\/+$/g, "");
   const limit = clampLimit(env.GITHUB_HELPER_LIMIT);
+  const repoInputs = repos.flatMap((repo) => {
+    const token = resolveGithubTokenForRepo(repo, tokenConfig);
+    if (!token) {
+      warnings.push({
+        severity: "high",
+        code: "github_repo_token_missing",
+        repo,
+        message: `No GitHub token is configured for ${repo}.`,
+      });
+      return [];
+    }
+    return [{ repo, token }];
+  });
   const repoResults = await Promise.all(
-    repos.map((repo) => collectRepoStatus({ repo, baseUrl, token, limit, fetchFn }))
+    repoInputs.map(({ repo, token }) => collectRepoStatus({ repo, baseUrl, token, limit, fetchFn }))
   );
 
   const repositoryStatuses: GithubRepositoryStatus[] = [];
@@ -218,7 +231,7 @@ export async function getGithubOperatorStatus(
     schemaVersion: 1,
     generatedAt,
     mutates: false,
-    configured: true,
+    configured: repoInputs.length > 0,
     authConfigured: true,
     view,
     health,
@@ -279,10 +292,68 @@ function emptyStatus(input: {
     selectedView: { name: input.view, items: input.view === "digest" ? digest : [] },
     warnings: input.warnings,
     recommendations: [
-      "Set GITHUB_TOKEN with read-only access to the target repository.",
+      "Set GITHUB_TOKEN with read-only access to all target repositories, or use owner/repo token maps.",
       "Set GITHUB_DEFAULT_REPO=owner/repo or GITHUB_HELPER_REPOS=owner/repo,owner/repo.",
     ],
   };
+}
+
+interface GithubTokenConfig {
+  globalToken?: string;
+  ownerTokens: Map<string, string>;
+  repoTokens: Map<string, string>;
+  envTokens: NodeJS.ProcessEnv;
+  hasAnyToken: boolean;
+}
+
+function buildGithubTokenConfig(env: NodeJS.ProcessEnv): GithubTokenConfig {
+  const globalToken = env.GITHUB_TOKEN?.trim();
+  const ownerTokens = parseGithubTokenMap(env.GITHUB_OWNER_TOKENS, "owner");
+  const repoTokens = parseGithubTokenMap(env.GITHUB_REPO_TOKENS, "repo");
+  const hasAnyToken = Boolean(globalToken) || ownerTokens.size > 0 || repoTokens.size > 0 || hasGithubTokenEnv(env);
+  return {
+    ...(globalToken ? { globalToken } : {}),
+    ownerTokens,
+    repoTokens,
+    envTokens: env,
+    hasAnyToken,
+  };
+}
+
+function resolveGithubTokenForRepo(repo: string, config: GithubTokenConfig): string | undefined {
+  const [owner, name] = repo.split("/");
+  if (!owner || !name) return config.globalToken;
+
+  const repoKey = `${owner}/${name}`;
+  const envRepoToken = config.envTokens[`GITHUB_TOKEN_${toEnvKey(owner)}_${toEnvKey(name)}`]?.trim();
+  const envOwnerToken = config.envTokens[`GITHUB_TOKEN_${toEnvKey(owner)}`]?.trim();
+
+  return config.repoTokens.get(repoKey)
+    ?? config.ownerTokens.get(owner)
+    ?? envRepoToken
+    ?? envOwnerToken
+    ?? config.globalToken;
+}
+
+function parseGithubTokenMap(value: string | undefined, mode: "owner" | "repo"): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const entry of (value ?? "").split(/[\n,;]+/)) {
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+    const separator = trimmed.includes("=") ? "=" : ":";
+    const separatorIndex = trimmed.indexOf(separator);
+    if (separatorIndex <= 0) continue;
+    const key = trimmed.slice(0, separatorIndex).trim();
+    const token = trimmed.slice(separatorIndex + 1).trim();
+    if (!token) continue;
+    const normalizedKey = mode === "repo" ? normalizeRepo(key) : normalizeOwner(key);
+    if (normalizedKey) map.set(normalizedKey, token);
+  }
+  return map;
+}
+
+function hasGithubTokenEnv(env: NodeJS.ProcessEnv): boolean {
+  return Object.entries(env).some(([key, value]) => key.startsWith("GITHUB_TOKEN_") && Boolean(value?.trim()));
 }
 
 async function collectRepoStatus(input: {
@@ -419,6 +490,16 @@ function normalizeRepo(value: string): string | undefined {
   const [owner, repo] = trimmed.split("/");
   if (!owner || !repo) return undefined;
   return `${owner}/${repo}`;
+}
+
+function normalizeOwner(value: string): string | undefined {
+  const trimmed = value.trim().replace(/^https:\/\/github\.com\//i, "").replace(/^\/+|\/+$/g, "");
+  const [owner] = trimmed.split("/");
+  return owner || undefined;
+}
+
+function toEnvKey(value: string): string {
+  return value.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
 function encodeRepoPath(repo: string): string {

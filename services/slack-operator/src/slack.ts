@@ -400,8 +400,9 @@ function formatGithubStatusForSlack(result: Record<string, unknown>): string {
       "GitHub read-only helper is not configured yet.",
       warningLines ? `*Missing setup*\n${warningLines}` : "",
       "*Needed*",
-      "• `GITHUB_TOKEN` with read-only access to the target repo",
+      "• `GITHUB_TOKEN` with read-only access to the target repo, or owner/repo-specific token maps",
       "• `GITHUB_DEFAULT_REPO=owner/repo` or `GITHUB_HELPER_REPOS=owner/repo,owner/repo`",
+      "• Optional for multiple owners: `GITHUB_OWNER_TOKENS=owner=token` or `GITHUB_REPO_TOKENS=owner/repo=token`",
     ].filter(Boolean).join("\n");
   }
 
