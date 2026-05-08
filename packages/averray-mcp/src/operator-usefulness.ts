@@ -38,6 +38,7 @@ export async function getAgentUsefulnessPlan(deps: OperatorStatusDeps) {
         commands: [
           "brief me",
           "what can you do for us",
+          "admin readiness",
           "what should i do next",
           "run one wikipedia citation repair dry run only",
           "run one wikipedia citation repair if safe",
@@ -55,6 +56,7 @@ export async function getAgentUsefulnessPlan(deps: OperatorStatusDeps) {
           "operator status",
           "daily operator brief",
           "what can you do for us",
+          "admin readiness",
           "find safe work",
         ],
       },
@@ -63,6 +65,7 @@ export async function getAgentUsefulnessPlan(deps: OperatorStatusDeps) {
         use: "Canonical structured contract any compatible agent can call without learning Slack or Workspace.",
         tools: [
           "averray_agent_usefulness_plan",
+          "averray_admin_readiness",
           "averray_business_ledger",
           "averray_ops_health",
           "averray_operator_status",
@@ -88,8 +91,15 @@ export async function getAgentUsefulnessPlan(deps: OperatorStatusDeps) {
       {
         id: "github_helper",
         status: "next_integration",
-        value: "Useful next track: watch PR/issue comments, summarize CI failures, and draft replies from GitHub context.",
+        value: "Useful next track: watch PR/issue comments, summarize CI failures, and draft replies from GitHub context before any admin-grade GitHub actions.",
+        commands: ["admin readiness"],
         nextStep: "Add a read-only GitHub digest command before allowing any write actions.",
+      },
+      {
+        id: "project_admin_copilot",
+        status: "readiness_enabled",
+        value: "Can explain the staged path from operator copilot to approval-gated project admin, including denied actions and required controls.",
+        commands: ["admin readiness", "what can you do for us"],
       },
       {
         id: "ops_caretaker",
@@ -112,6 +122,7 @@ export async function getAgentUsefulnessPlan(deps: OperatorStatusDeps) {
     ],
     nextImplementationTracks: [
       "GitHub PR/issue digest and CI failure explainer",
+      "Admin action registry with project allowlists, approvals, audit receipts, and rollback notes",
       "Host-level ops routine for disk/log/WAL checks and stale sessions",
       "Reward ledger with chain/accounting reconciliation once payout data is exposed",
       "Portable command schema so Slack, Command Center, mobile, and future agents share the same intents",

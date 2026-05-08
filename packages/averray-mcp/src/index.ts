@@ -41,6 +41,7 @@ import {
   getLastWikipediaCitationRepairStatus,
 } from "./operator-commands.js";
 import { handleOperatorCommandText } from "./operator-handler.js";
+import { getAdminReadiness } from "./operator-admin.js";
 import { getBusinessLedger, getOpsHealth } from "./operator-insights.js";
 import { getDailyOperatorBrief, getOperatorStatus, getSafeWorkReport } from "./operator-status.js";
 import { getAgentUsefulnessPlan } from "./operator-usefulness.js";
@@ -168,6 +169,15 @@ server.tool(
 );
 
 server.tool(
+  "averray_admin_readiness",
+  "Canonical read-only admin-readiness plan for humans, Slack, Command Center, mobile surfaces, and other agents. Returns the current operator-copilot role, admin maturity ladder, guardrails, allowed/denied actions, and required controls before project-admin powers. Does not claim, submit, deploy, edit code, edit Wikipedia, request approval, or mutate Averray state.",
+  {},
+  async () => {
+    return jsonContent(await getAdminReadiness({ query, workflowDeps: workflowDeps() }));
+  }
+);
+
+server.tool(
   "averray_business_ledger",
   "Canonical read-only Averray business ledger for humans, Slack, Command Center, and other agents. Summarizes recent Wikipedia citation-repair submissions, drafts, operator commands, latest run, open jobs, and budget. Does not claim, submit, request approval, edit Wikipedia, or mutate Averray state.",
   {},
@@ -187,7 +197,7 @@ server.tool(
 
 server.tool(
   "averray_handle_operator_command",
-  "Direct router for trusted Slack/operator/command-center messages. Use this for short commands like 'what can you do for us', 'business ledger', 'ops health', 'daily operator brief', 'find safe work', 'operator status', 'operator status details', 'run one wikipedia citation repair if safe', and 'status last wikipedia citation repair' instead of sending them through a free-form Hermes prompt. Recognized run commands call averray_run_wikipedia_citation_repair directly; recognized status/help/brief/work-discovery/usefulness/ledger/health commands are read-only. Human surfaces may compact identifiers by default; add 'details' for full audit identifiers.",
+  "Direct router for trusted Slack/operator/command-center messages. Use this for short commands like 'what can you do for us', 'admin readiness', 'business ledger', 'ops health', 'daily operator brief', 'find safe work', 'operator status', 'operator status details', 'run one wikipedia citation repair if safe', and 'status last wikipedia citation repair' instead of sending them through a free-form Hermes prompt. Recognized run commands call averray_run_wikipedia_citation_repair directly; recognized status/help/brief/work-discovery/usefulness/admin-readiness/ledger/health commands are read-only. Human surfaces may compact identifiers by default; add 'details' for full audit identifiers.",
   {
     text: z.string().min(1),
     source: z.enum(["slack", "operator", "command_center", "hermes"]).default("operator"),

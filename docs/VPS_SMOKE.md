@@ -160,6 +160,7 @@ commands are:
 ```text
 daily operator brief
 what can you do for us
+admin readiness
 business ledger
 ops health
 find safe work
@@ -174,11 +175,14 @@ status last wikipedia citation repair details
 `averray_handle_operator_command` parses those messages. `what can you do for
 us` calls `averray_agent_usefulness_plan`, a read-only cross-surface plan for
 Slack, Command Center/mobile, MCP clients, future GitHub helper work, ops care,
-Averray business tracking, and durable memory. `business ledger` calls
-`averray_business_ledger` for recent submissions, drafts, operator commands,
-budget, and open work. `ops health` calls `averray_ops_health` for
-wallet/budget readiness, latest-run state, recent operator events, recent
-failures, and Postgres control-plane counts. `daily operator brief` and
+Averray business tracking, and durable memory. `admin readiness` calls
+`averray_admin_readiness`, a read-only staged plan for growing from operator
+copilot to approval-gated project admin without granting broad mutation powers
+by default. `business ledger` calls `averray_business_ledger` for recent
+submissions, drafts, operator commands, budget, and open work. `ops health`
+calls `averray_ops_health` for wallet/budget readiness, latest-run state,
+recent operator events, recent failures, and Postgres control-plane counts.
+`daily operator brief` and
 `find safe work` are read-only views for humans and agents: they summarize
 wallet/budget readiness, latest run state, candidate jobs, blockers, and the
 next dry-run or guarded mutation command. `operator status` calls the canonical
