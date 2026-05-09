@@ -16,6 +16,10 @@ export interface TestbedE2eReadOnlyRunDeps {
   env?: Record<string, string | undefined>;
 }
 
+export interface TestbedE2eReadOnlyRunOptions {
+  testCaseIds?: string[];
+}
+
 export async function getTestbedE2eSuite(deps: TestbedE2eSuiteDeps) {
   const [status, safeWork] = await Promise.all([
     getOperatorStatus(deps),
@@ -219,12 +223,23 @@ export async function getTestbedE2eSuite(deps: TestbedE2eSuiteDeps) {
   };
 }
 
-export async function runTestbedE2eReadOnly(deps: TestbedE2eReadOnlyRunDeps) {
+export async function runTestbedE2eReadOnly(
+  deps: TestbedE2eReadOnlyRunDeps,
+  options: TestbedE2eReadOnlyRunOptions = {}
+) {
   const suite = await getTestbedE2eSuite(deps);
-  const runnable = suite.testCases.filter(isReadOnlyRunnableCase);
-  const skipped = suite.testCases
+  const requestedIds = normalizeTestCaseIds(options.testCaseIds);
+  const selectedCases = requestedIds.length > 0
+    ? suite.testCases.filter((entry) => requestedIds.includes(entry.id))
+    : suite.testCases;
+  const unknownCases = requestedIds
+    .filter((id) => !suite.testCases.some((entry) => entry.id === id))
+    .map((id) => unknownSkippedCase(id));
+  const runnable = selectedCases.filter(isReadOnlyRunnableCase);
+  const skipped = selectedCases
     .filter((entry) => !isReadOnlyRunnableCase(entry))
-    .map((entry) => skippedCase(entry, skipReason(entry)));
+    .map((entry) => skippedCase(entry, skipReason(entry)))
+    .concat(unknownCases);
   const startedAt = new Date();
   const executed = [];
 
@@ -242,8 +257,9 @@ export async function runTestbedE2eReadOnly(deps: TestbedE2eReadOnlyRunDeps) {
     mutates: false,
     status: failed === 0 ? "passed" : "failed",
     suiteGeneratedAt: suite.generatedAt,
+    requestedCaseIds: requestedIds,
     summary: {
-      totalCases: suite.testCases.length,
+      totalCases: selectedCases.length + unknownCases.length,
       executed: executed.length,
       passed,
       failed,
@@ -450,11 +466,29 @@ function skippedCase(test: TestbedCase, reason: string) {
   };
 }
 
+function unknownSkippedCase(id: string) {
+  return {
+    id,
+    phase: "unknown",
+    name: "Unknown testbed case",
+    command: "",
+    status: "skipped" as const,
+    mutates: false,
+    reason: "unknown_test_case",
+  };
+}
+
 function skipReason(test: TestbedCase): string {
   if (test.mutationScope === "local_brief_checkpoint_only") return "writes_local_github_brief_checkpoint";
   if (test.mutates) return "requires_explicit_mutation_command";
   if (test.status === "manual") return "requires_manual_surface_or_human_action";
   return "not_read_only_runnable";
+}
+
+function normalizeTestCaseIds(ids: string[] | undefined): string[] {
+  return Array.from(new Set((ids ?? [])
+    .map((id) => id.trim().toUpperCase())
+    .filter(Boolean)));
 }
 
 function assertFalse(value: boolean | undefined, message: string) {

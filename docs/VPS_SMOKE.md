@@ -228,6 +228,30 @@ policy budget, open Wikipedia job counts, latest run state, safety guarantees,
 and safe command suggestions as structured JSON. Repair commands call
 `averray_run_wikipedia_citation_repair` directly with the workflow's wallet,
 policy, draft, validation, submit, and Slack alert gates.
+
+Trusted deploy scripts, backend agents, Codex, and other operator agents should
+use `averray_invoke_agent_task` as the stable agent-to-agent hook. It records
+`requester`, optional `correlationId`, and optional `reason`, then runs one of
+three structured paths without sending a free-form Hermes prompt:
+
+```json
+{"requester":"deploy-agent","intent":"testbed_e2e_read_only","correlationId":"deploy-20260509","reason":"post-deploy smoke"}
+```
+
+```json
+{"requester":"backend-agent","intent":"testbed_case","testCaseId":"TBE2E-004","correlationId":"ci-123"}
+```
+
+```json
+{"requester":"codex","command":"operator status","correlationId":"deploy-20260509"}
+```
+
+The hook fails closed for unknown commands. It blocks the guarded live repair
+case unless `allowMutations: true` is passed, and blocks `github brief` or
+`TBE2E-010` unless `allowLocalCheckpoint: true` is passed. Responses include
+the original invocation metadata plus safety fields for whether the action would
+mutate Averray, write a local checkpoint, or use a free-form Hermes prompt.
+
 Latest-run status commands are read-only and return the latest `runId`,
 `jobId`, `sessionId`, submitted/failed state, `draftId`, and Slack permalink
 when one is available. Human-facing Slack/Workspace renderers should compact
