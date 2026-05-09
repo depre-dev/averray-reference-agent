@@ -554,6 +554,58 @@ describe("slack operator bridge", () => {
     expect(text).toContain("local brief checkpoint was updated");
   });
 
+  it("formats testbed E2E suite replies", () => {
+    const text = formatOperatorResultForSlack({
+      handled: true,
+      kind: "testbed_e2e_suite",
+      suite: {
+        headline: "Platform testbed is ready for read-only and dry-run E2E checks.",
+        readiness: {
+          overall: "ready",
+          canRunReadOnly: true,
+          canRunDryRun: true,
+          canRunGuardedLive: true,
+          blockers: [],
+          warnings: [],
+        },
+        testCases: [
+          {
+            id: "TBE2E-001",
+            name: "Operator readiness",
+            status: "ready",
+            mutates: false,
+            surfaces: { operatorCommand: "operator status" },
+          },
+          {
+            id: "TBE2E-005",
+            name: "Guarded live Wikipedia citation repair",
+            status: "manual",
+            mutates: true,
+            surfaces: { operatorCommand: "run one wikipedia citation repair if safe" },
+          },
+        ],
+        nextCommands: {
+          readOnly: "testbed e2e suite",
+          dryRun: "run one wikipedia citation repair dry run only",
+          guardedLive: "run one wikipedia citation repair if safe",
+        },
+        safety: {
+          suiteGeneratorMutates: false,
+          guardedLiveCaseMutates: true,
+          editsWikipedia: false,
+        },
+      },
+    });
+
+    expect(text).toContain("*Averray testbed E2E suite*");
+    expect(text).toContain("overall: `ready`");
+    expect(text).toContain("dry run: `true`");
+    expect(text).toContain("mutating/manual: `1`");
+    expect(text).toContain("`TBE2E-005` Guarded live Wikipedia citation repair: `manual mutates`");
+    expect(text).toContain("suite mutates: `false`");
+    expect(text).toContain("edits Wikipedia: `false`");
+  });
+
   it("formats workflow replies with compact validation and evidence summary", () => {
     const text = formatOperatorResultForSlack({
       handled: true,

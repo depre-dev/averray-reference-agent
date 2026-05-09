@@ -251,6 +251,9 @@ export function formatOperatorResultForSlack(result: unknown): string {
   if (result.kind === "github_brief") {
     return formatGithubBriefForSlack(result);
   }
+  if (result.kind === "testbed_e2e_suite") {
+    return formatTestbedE2eSuiteForSlack(result);
+  }
   if (result.kind === "operator_status") {
     const detailed = result.detailed === true;
     const status = isRecord(result.status) ? result.status : {};
@@ -467,12 +470,61 @@ function formatGithubBriefForSlack(result: Record<string, unknown>): string {
   ].filter(Boolean).join("\n");
 }
 
+function formatTestbedE2eSuiteForSlack(result: Record<string, unknown>): string {
+  const suite = isRecord(result.suite) ? result.suite : {};
+  const readiness = isRecord(suite.readiness) ? suite.readiness : {};
+  const safety = isRecord(suite.safety) ? suite.safety : {};
+  const commands = isRecord(suite.nextCommands) ? suite.nextCommands : {};
+  const cases = arrayField(suite, "testCases");
+  const blockers = arrayField(readiness, "blockers");
+  const warnings = arrayField(readiness, "warnings");
+  const readyCases = cases.filter((entry) => isRecord(entry) && stringField(entry, "status") === "ready").length;
+  const mutatingCases = cases.filter((entry) => isRecord(entry) && entry.mutates === true).length;
+
+  return [
+    "*Averray testbed E2E suite*",
+    stringField(suite, "headline") ?? "Canonical platform E2E test suite.",
+    "",
+    "*Readiness*",
+    `• overall: \`${stringField(readiness, "overall") ?? "unknown"}\``,
+    `• read-only: \`${String(readiness.canRunReadOnly === true)}\``,
+    `• dry run: \`${String(readiness.canRunDryRun === true)}\``,
+    `• guarded live: \`${String(readiness.canRunGuardedLive === true)}\``,
+    blockers.length > 0 ? `• blockers: \`${blockers.map(String).join(", ")}\`` : "",
+    warnings.length > 0 ? `• warnings: \`${warnings.slice(0, 3).map(String).join(", ")}\`` : "",
+    "*Cases*",
+    `• total: \`${cases.length}\``,
+    `• ready: \`${readyCases}\``,
+    `• mutating/manual: \`${mutatingCases}\``,
+    cases.length > 0 ? cases.slice(0, 6).map(formatTestbedCase).join("\n") : "• none",
+    "*Next commands*",
+    `• suite: \`${stringField(commands, "readOnly") ?? "testbed e2e suite"}\``,
+    `• dry run: \`${stringField(commands, "dryRun") ?? "run one wikipedia citation repair dry run only"}\``,
+    `• guarded live: \`${stringField(commands, "guardedLive") ?? "run one wikipedia citation repair if safe"}\``,
+    "*Safety*",
+    `• suite mutates: \`${String(safety.suiteGeneratorMutates === true)}\``,
+    `• live case mutates: \`${String(safety.guardedLiveCaseMutates === true)}\``,
+    `• edits Wikipedia: \`${String(safety.editsWikipedia === true)}\``,
+  ].filter(Boolean).join("\n");
+}
+
 function githubViewTitle(view: string): string {
   if (view === "prs") return "Open PRs";
   if (view === "ci") return "Workflow runs";
   if (view === "issues") return "Open issues";
   if (view === "digest") return "Needs attention";
   return "Repositories";
+}
+
+function formatTestbedCase(value: unknown): string {
+  if (!isRecord(value)) return "• unknown";
+  const surfaces = isRecord(value.surfaces) ? value.surfaces : {};
+  const id = stringField(value, "id") ?? "unknown";
+  const name = stringField(value, "name") ?? "untitled";
+  const status = stringField(value, "status") ?? "unknown";
+  const command = stringField(surfaces, "operatorCommand") ?? "operator status";
+  const mutates = value.mutates === true ? " mutates" : "";
+  return `• \`${id}\` ${name}: \`${status}${mutates}\` - \`${command}\``;
 }
 
 function formatGithubItem(value: unknown, detailed: boolean): string {

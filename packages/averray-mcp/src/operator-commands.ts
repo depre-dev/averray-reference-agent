@@ -72,6 +72,12 @@ export type ParsedOperatorCommand =
       detailed: boolean;
     }
   | {
+      handled: true;
+      kind: "testbed_e2e_suite";
+      source: OperatorCommandSource;
+      detailed: boolean;
+    }
+  | {
       handled: false;
       kind: "unknown";
       source: OperatorCommandSource;
@@ -114,6 +120,8 @@ const EXAMPLES = [
   "github open prs",
   "github ci failures",
   "github issue digest",
+  "testbed e2e suite",
+  "platform e2e suite",
   "find safe work",
   "operator status",
   "operator status details",
@@ -170,6 +178,10 @@ export function parseOperatorCommand(
     return { handled: true, kind: "github_brief", source, detailed };
   }
 
+  if (isTestbedE2eSuiteCommand(normalizedText)) {
+    return { handled: true, kind: "testbed_e2e_suite", source, detailed };
+  }
+
   if (isLatestWikipediaCitationRepairStatusCommand(normalizedText)) {
     return { handled: true, kind: "status_last_wikipedia_citation_repair", source, detailed };
   }
@@ -181,11 +193,11 @@ export function parseOperatorCommand(
   if (
     normalizedText.startsWith("run ") &&
     normalizedText.includes("wikipedia citation repair") &&
-    normalizedText.includes("if safe")
+    (normalizedText.includes("if safe") || wantsDryRunOnly(normalizedText))
   ) {
     const jobId = extractToken(text, /\bfor\s+([A-Za-z0-9_.:-]+)/i);
     const runId = extractToken(text, /\brun\s*id\s*[:=]?\s*([A-Za-z0-9_.:-]+)/i);
-    const dryRun = /\b(dry\s*run|preview|read[-\s]*only|no\s+submit)\b/i.test(text)
+    const dryRun = wantsDryRunOnly(text)
       ? true
       : options.defaultDryRun ?? false;
     return {
@@ -351,8 +363,17 @@ function isGithubBriefCommand(text: string): boolean {
   return /^(github brief|daily github brief|github daily brief|github changes|github changed|what changed since last time|what changed in github since last time|what merged|what deployed|what failed|what needs attention)$/.test(compact);
 }
 
+function isTestbedE2eSuiteCommand(text: string): boolean {
+  const compact = text.replace(/\b(details?|full|audit)\b/g, "").replace(/\s+/g, " ").trim();
+  return /^(testbed e2e|testbed e2e suite|platform e2e|platform e2e suite|e2e test suite|full e2e suite|testbed full suite|run testbed e2e|run platform e2e)$/.test(compact);
+}
+
 function wantsDetailedOutput(text: string): boolean {
   return /\b(details?|full|audit)\b/.test(text);
+}
+
+function wantsDryRunOnly(text: string): boolean {
+  return /\b(dry\s*run|preview|read[-\s]*only|no\s+submit)\b/i.test(text);
 }
 
 function extractToken(text: string, pattern: RegExp): string | undefined {
