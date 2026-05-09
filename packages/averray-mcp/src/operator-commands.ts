@@ -78,6 +78,12 @@ export type ParsedOperatorCommand =
       detailed: boolean;
     }
   | {
+      handled: true;
+      kind: "run_testbed_e2e_read_only";
+      source: OperatorCommandSource;
+      detailed: boolean;
+    }
+  | {
       handled: false;
       kind: "unknown";
       source: OperatorCommandSource;
@@ -122,6 +128,7 @@ const EXAMPLES = [
   "github issue digest",
   "testbed e2e suite",
   "platform e2e suite",
+  "run testbed e2e read-only",
   "find safe work",
   "operator status",
   "operator status details",
@@ -176,6 +183,10 @@ export function parseOperatorCommand(
 
   if (isGithubBriefCommand(normalizedText)) {
     return { handled: true, kind: "github_brief", source, detailed };
+  }
+
+  if (isRunTestbedE2eReadOnlyCommand(normalizedText)) {
+    return { handled: true, kind: "run_testbed_e2e_read_only", source, detailed };
   }
 
   if (isTestbedE2eSuiteCommand(normalizedText)) {
@@ -366,6 +377,13 @@ function isGithubBriefCommand(text: string): boolean {
 function isTestbedE2eSuiteCommand(text: string): boolean {
   const compact = text.replace(/\b(details?|full|audit)\b/g, "").replace(/\s+/g, " ").trim();
   return /^(testbed e2e|testbed e2e suite|platform e2e|platform e2e suite|e2e test suite|full e2e suite|testbed full suite|run testbed e2e|run platform e2e)$/.test(compact);
+}
+
+function isRunTestbedE2eReadOnlyCommand(text: string): boolean {
+  const compact = text.replace(/\b(details?|full|audit)\b/g, "").replace(/\s+/g, " ").trim();
+  return /^(run )?(testbed|platform)?\s*e2e read[-\s]*only$/.test(compact)
+    || /^(run )?(testbed|platform) e2e suite read[-\s]*only$/.test(compact)
+    || /^(run )?read[-\s]*only testbed e2e$/.test(compact);
 }
 
 function wantsDetailedOutput(text: string): boolean {

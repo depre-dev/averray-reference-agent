@@ -9,7 +9,7 @@ import { getAdminReadiness } from "./operator-admin.js";
 import { getBusinessLedger, getOpsHealth } from "./operator-insights.js";
 import { getGithubOperatorBrief, getGithubOperatorStatus } from "./operator-github.js";
 import { getDailyOperatorBrief, getOperatorStatus, getSafeWorkReport } from "./operator-status.js";
-import { getTestbedE2eSuite } from "./operator-testbed.js";
+import { getTestbedE2eSuite, runTestbedE2eReadOnly } from "./operator-testbed.js";
 import { getAgentUsefulnessPlan } from "./operator-usefulness.js";
 import { runWikipediaCitationRepairWorkflow } from "./job-workflows.js";
 
@@ -77,6 +77,10 @@ export async function handleOperatorCommandText(
   if (command.kind === "github_brief") {
     const github = await getGithubOperatorBrief({ query: deps.query });
     return { ...command, github };
+  }
+  if (command.kind === "run_testbed_e2e_read_only") {
+    const run = await runTestbedE2eReadOnly({ query: deps.query, workflowDeps: deps.workflowDeps });
+    return { ...command, run };
   }
   if (command.kind === "testbed_e2e_suite") {
     const suite = await getTestbedE2eSuite({ query: deps.query, workflowDeps: deps.workflowDeps });

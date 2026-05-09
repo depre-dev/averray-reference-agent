@@ -1,7 +1,18 @@
+import type { WorkflowDeps } from "./job-workflows.js";
+import { runWikipediaCitationRepairWorkflow } from "./job-workflows.js";
+import { getLastWikipediaCitationRepairStatus } from "./operator-commands.js";
+import { getGithubOperatorStatus } from "./operator-github.js";
+import { getBusinessLedger, getOpsHealth } from "./operator-insights.js";
 import type { OperatorStatusDeps } from "./operator-status.js";
-import { getOperatorStatus, getSafeWorkReport } from "./operator-status.js";
+import { getDailyOperatorBrief, getOperatorStatus, getSafeWorkReport } from "./operator-status.js";
 
 export interface TestbedE2eSuiteDeps extends OperatorStatusDeps {
+  env?: Record<string, string | undefined>;
+}
+
+export interface TestbedE2eReadOnlyRunDeps {
+  query: OperatorStatusDeps["query"];
+  workflowDeps: WorkflowDeps;
   env?: Record<string, string | undefined>;
 }
 
@@ -208,6 +219,57 @@ export async function getTestbedE2eSuite(deps: TestbedE2eSuiteDeps) {
   };
 }
 
+export async function runTestbedE2eReadOnly(deps: TestbedE2eReadOnlyRunDeps) {
+  const suite = await getTestbedE2eSuite(deps);
+  const runnable = suite.testCases.filter(isReadOnlyRunnableCase);
+  const skipped = suite.testCases
+    .filter((entry) => !isReadOnlyRunnableCase(entry))
+    .map((entry) => skippedCase(entry, skipReason(entry)));
+  const startedAt = new Date();
+  const executed = [];
+
+  for (const test of runnable) {
+    executed.push(await runReadOnlyCase(test, deps));
+  }
+
+  const cases = [...executed, ...skipped];
+  const failed = executed.filter((entry) => entry.status === "failed").length;
+  const passed = executed.filter((entry) => entry.status === "passed").length;
+  return {
+    schemaVersion: 1,
+    kind: "testbed_e2e_read_only_run",
+    generatedAt: new Date().toISOString(),
+    mutates: false,
+    status: failed === 0 ? "passed" : "failed",
+    suiteGeneratedAt: suite.generatedAt,
+    summary: {
+      totalCases: suite.testCases.length,
+      executed: executed.length,
+      passed,
+      failed,
+      skipped: skipped.length,
+    },
+    cases,
+    skippedMutationBoundaries: skipped
+      .filter((entry) => entry.mutationScope)
+      .map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        mutationScope: entry.mutationScope,
+        reason: entry.reason,
+      })),
+    safety: {
+      mutates: false,
+      skippedGuardedLiveWorkflow: true,
+      skippedGithubBriefCheckpoint: true,
+      skippedManualSurfaceParity: true,
+      dryRunWorkflowAllowed: true,
+      editsWikipedia: false,
+    },
+    durationMs: Date.now() - startedAt.getTime(),
+  };
+}
+
 function testCase(input: {
   id: string;
   phase: string;
@@ -238,6 +300,178 @@ function testCase(input: {
     expectedEvidence: input.expectedEvidence,
     successCriteria: input.successCriteria,
   };
+}
+
+type TestbedCase = ReturnType<typeof testCase>;
+
+async function runReadOnlyCase(test: TestbedCase, deps: TestbedE2eReadOnlyRunDeps) {
+  const startedAt = Date.now();
+  try {
+    const evidence = await evidenceForCase(test.id, deps);
+    return {
+      id: test.id,
+      phase: test.phase,
+      name: test.name,
+      command: test.surfaces.operatorCommand,
+      status: "passed" as const,
+      mutates: false,
+      evidence,
+      durationMs: Date.now() - startedAt,
+    };
+  } catch (error) {
+    return {
+      id: test.id,
+      phase: test.phase,
+      name: test.name,
+      command: test.surfaces.operatorCommand,
+      status: "failed" as const,
+      mutates: false,
+      error: errorMessage(error),
+      durationMs: Date.now() - startedAt,
+    };
+  }
+}
+
+async function evidenceForCase(id: string, deps: TestbedE2eReadOnlyRunDeps) {
+  if (id === "TBE2E-001") {
+    const status = await getOperatorStatus(deps);
+    assertFalse(status.mutates, "operator status must not mutate");
+    return {
+      walletReady: status.agent.walletReady,
+      openJobs: status.workflows.wikipediaCitationRepair.openJobs,
+      latestRunStatus: status.workflows.wikipediaCitationRepair.latestRun.found
+        ? status.workflows.wikipediaCitationRepair.latestRun.status ?? "none"
+        : "none",
+    };
+  }
+  if (id === "TBE2E-002") {
+    const brief = await getDailyOperatorBrief(deps);
+    assertFalse(brief.mutates, "daily operator brief must not mutate");
+    return {
+      headline: brief.headline,
+      openJobs: brief.openWikipediaCitationRepairJobs,
+      suggestedCommands: brief.suggestedCommands.length,
+    };
+  }
+  if (id === "TBE2E-003") {
+    const safeWork = await getSafeWorkReport(deps);
+    assertFalse(safeWork.mutates, "safe work report must not mutate");
+    return {
+      available: safeWork.available,
+      blockers: safeWork.blockers,
+      safeWorkItems: safeWork.safeWorkItems.length,
+      recommendedCommand: safeWork.recommendedCommand,
+    };
+  }
+  if (id === "TBE2E-004") {
+    const result = await runWikipediaCitationRepairWorkflow(
+      { dryRun: true, maxEvidenceUrls: 5, confidenceThreshold: 0.7 },
+      deps.workflowDeps
+    );
+    const resultRecord: Record<string, unknown> = isRecord(result) ? result : {};
+    const validation = isRecord(resultRecord.validation) ? resultRecord.validation : {};
+    const evidenceSummary = isRecord(resultRecord.evidenceSummary) ? resultRecord.evidenceSummary : {};
+    const proposalSummary = isRecord(resultRecord.proposalSummary) ? resultRecord.proposalSummary : {};
+    assertFalse(result.dryRun === false, "citation repair preview must be dryRun=true");
+    return {
+      status: result.status,
+      runId: result.runId,
+      jobId: result.jobId,
+      confidence: numberField(resultRecord, "confidence") ?? null,
+      validation: validation.valid === true ? "valid" : validation.valid === false ? "invalid" : "n/a",
+      citationsReviewed: numberField(evidenceSummary, "totalCitations") ?? null,
+      proposedFindings: numberField(proposalSummary, "citationFindings") ?? null,
+    };
+  }
+  if (id === "TBE2E-006") {
+    const status = await getLastWikipediaCitationRepairStatus(deps.query);
+    return {
+      found: status.found,
+      runId: status.runId ?? null,
+      jobId: status.jobId ?? null,
+      status: status.status ?? "none",
+      draftId: status.draftId ?? null,
+      submitSucceeded: status.submitSucceeded,
+    };
+  }
+  if (id === "TBE2E-007") {
+    const ledger = await getBusinessLedger(deps);
+    assertFalse(ledger.mutates, "business ledger must not mutate");
+    return {
+      openJobs: ledger.summary.openWikipediaCitationRepairJobs,
+      submissions7d: ledger.summary.sevenDaySubmissions.total,
+      drafts7d: ledger.summary.sevenDayDrafts.total,
+      operatorCommands7d: ledger.summary.sevenDayOperatorCommands.total,
+    };
+  }
+  if (id === "TBE2E-008") {
+    const health = await getOpsHealth(deps);
+    assertFalse(health.mutates, "ops health must not mutate");
+    return {
+      health: health.health,
+      walletReady: health.wallet.walletReady,
+      recentErrors: health.controlPlane.recentErrors.length,
+      operatorEvents: health.controlPlane.tables.operatorEvents,
+    };
+  }
+  if (id === "TBE2E-009") {
+    const github = await getGithubOperatorStatus({ env: deps.env as NodeJS.ProcessEnv | undefined });
+    assertFalse(github.mutates, "GitHub status must not mutate");
+    return {
+      configured: github.configured,
+      health: github.health,
+      repos: github.repoCount,
+      openPullRequests: github.totals.openPullRequests,
+      openIssues: github.totals.openIssues,
+      failingWorkflowRuns: github.totals.failingWorkflowRuns,
+      activeWorkflowRuns: github.totals.activeWorkflowRuns,
+      warnings: github.warnings.map((entry) => entry.code),
+    };
+  }
+  throw new Error(`No read-only runner registered for ${id}`);
+}
+
+function isReadOnlyRunnableCase(test: TestbedCase): boolean {
+  return test.status !== "manual"
+    && test.mutates !== true
+    && test.mutationScope !== "local_brief_checkpoint_only";
+}
+
+function skippedCase(test: TestbedCase, reason: string) {
+  return {
+    id: test.id,
+    phase: test.phase,
+    name: test.name,
+    command: test.surfaces.operatorCommand,
+    status: "skipped" as const,
+    mutates: test.mutates,
+    ...(test.mutationScope ? { mutationScope: test.mutationScope } : {}),
+    reason,
+  };
+}
+
+function skipReason(test: TestbedCase): string {
+  if (test.mutationScope === "local_brief_checkpoint_only") return "writes_local_github_brief_checkpoint";
+  if (test.mutates) return "requires_explicit_mutation_command";
+  if (test.status === "manual") return "requires_manual_surface_or_human_action";
+  return "not_read_only_runnable";
+}
+
+function assertFalse(value: boolean | undefined, message: string) {
+  if (value === true) throw new Error(message);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function numberField(value: Record<string, unknown>, key: string): number | undefined {
+  const field = value[key];
+  return typeof field === "number" && Number.isFinite(field) ? field : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function hasAny(env: Record<string, string | undefined>, keys: string[]): boolean {
