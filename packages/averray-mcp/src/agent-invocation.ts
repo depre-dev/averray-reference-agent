@@ -4,19 +4,27 @@ import {
   type OperatorQueryFn,
   type ParsedOperatorCommand,
 } from "./operator-commands.js";
+import { getGithubPullRequestReview } from "./operator-github.js";
 import { handleOperatorCommandText } from "./operator-handler.js";
 import { runTestbedE2eReadOnly } from "./operator-testbed.js";
 
 export type AgentInvocationIntent =
   | "operator_command"
   | "testbed_e2e_read_only"
-  | "testbed_case";
+  | "testbed_case"
+  | "pr_handoff";
 
 export interface AgentInvocationInput {
   requester: string;
   intent?: AgentInvocationIntent;
   command?: string;
   testCaseId?: string;
+  testCaseIds?: string[];
+  runReadOnlySuite?: boolean;
+  postReviewCommand?: string;
+  repo?: string;
+  pullRequestNumber?: number;
+  pullRequestUrl?: string;
   correlationId?: string;
   reason?: string;
   allowMutations?: boolean;
@@ -30,6 +38,9 @@ export interface AgentInvocationInput {
 export interface AgentInvocationDeps {
   query: OperatorQueryFn;
   workflowDeps: WorkflowDeps;
+  githubEnv?: NodeJS.ProcessEnv;
+  githubFetchFn?: typeof fetch;
+  now?: Date;
 }
 
 const READ_ONLY_TEST_CASES = new Set([
@@ -43,7 +54,7 @@ const READ_ONLY_TEST_CASES = new Set([
   "TBE2E-009",
 ]);
 
-export async function invokeAgentTask(input: AgentInvocationInput, deps: AgentInvocationDeps) {
+export async function invokeAgentTask(input: AgentInvocationInput, deps: AgentInvocationDeps): Promise<unknown> {
   const startedAt = new Date();
   const intent = input.intent ?? (input.testCaseId ? "testbed_case" : "operator_command");
   const invocation = {
@@ -51,6 +62,12 @@ export async function invokeAgentTask(input: AgentInvocationInput, deps: AgentIn
     intent,
     ...(input.command ? { command: input.command } : {}),
     ...(input.testCaseId ? { testCaseId: normalizeTestCaseId(input.testCaseId) } : {}),
+    ...(input.testCaseIds?.length ? { testCaseIds: normalizeTestCaseIds(input.testCaseIds) } : {}),
+    ...(input.runReadOnlySuite ? { runReadOnlySuite: true } : {}),
+    ...(input.postReviewCommand ? { postReviewCommand: input.postReviewCommand } : {}),
+    ...(input.repo ? { repo: input.repo } : {}),
+    ...(input.pullRequestNumber ? { pullRequestNumber: input.pullRequestNumber } : {}),
+    ...(input.pullRequestUrl ? { pullRequestUrl: input.pullRequestUrl } : {}),
     ...(input.correlationId ? { correlationId: input.correlationId } : {}),
     ...(input.reason ? { reason: input.reason } : {}),
   };
@@ -65,6 +82,10 @@ export async function invokeAgentTask(input: AgentInvocationInput, deps: AgentIn
       mutates: false,
       localCheckpoint: false,
     });
+  }
+
+  if (intent === "pr_handoff") {
+    return invokePullRequestHandoff(input, deps, invocation, startedAt);
   }
 
   if (intent === "testbed_case") {
@@ -98,6 +119,117 @@ export async function invokeAgentTask(input: AgentInvocationInput, deps: AgentIn
   const command = input.command?.trim();
   if (!command) return blockedInvocation(invocation, startedAt, "command_required");
   return invokeOperatorCommand(command, input, deps, invocation, startedAt);
+}
+
+async function invokePullRequestHandoff(
+  input: AgentInvocationInput,
+  deps: AgentInvocationDeps,
+  invocation: Record<string, unknown>,
+  startedAt: Date
+): Promise<unknown> {
+  const review = await getGithubPullRequestReview({
+    ...(input.repo ? { repo: input.repo } : {}),
+    ...(input.pullRequestNumber ? { pullRequestNumber: input.pullRequestNumber } : {}),
+    ...(input.pullRequestUrl ? { pullRequestUrl: input.pullRequestUrl } : {}),
+    ...(deps.githubEnv ? { env: deps.githubEnv } : {}),
+    ...(deps.githubFetchFn ? { fetchFn: deps.githubFetchFn } : {}),
+    ...(deps.now ? { now: deps.now } : {}),
+  });
+  const requestedTestCaseIds = normalizeTestCaseIds([
+    ...(input.testCaseId ? [input.testCaseId] : []),
+    ...(input.testCaseIds ?? []),
+  ]);
+  const requestedActions = {
+    runReadOnlySuite: input.runReadOnlySuite === true,
+    testCaseIds: requestedTestCaseIds,
+    ...(input.postReviewCommand ? { postReviewCommand: input.postReviewCommand } : {}),
+  };
+
+  if (!review.configured || review.health === "degraded") {
+    return completedInvocation(invocation, startedAt, {
+      schemaVersion: 1,
+      kind: "agent_pr_handoff",
+      status: "blocked",
+      github: review,
+      requestedActions,
+      tests: [],
+      finalVerdict: "hold",
+      finalReason: "github_pr_review_unavailable",
+      safety: prHandoffSafety(false, false),
+    }, { mutates: false, localCheckpoint: false });
+  }
+
+  if (review.mergeRecommendation === "hold") {
+    return completedInvocation(invocation, startedAt, {
+      schemaVersion: 1,
+      kind: "agent_pr_handoff",
+      status: "completed",
+      github: review,
+      requestedActions,
+      tests: [],
+      finalVerdict: "hold",
+      finalReason: "pr_review_hold",
+      safety: prHandoffSafety(false, false),
+    }, { mutates: false, localCheckpoint: false });
+  }
+
+  const tests: unknown[] = [];
+  let wouldMutate = false;
+  let wouldWriteLocalCheckpoint = false;
+
+  if (input.runReadOnlySuite) {
+    const run = await runTestbedE2eReadOnly(deps);
+    tests.push(run);
+  }
+
+  for (const testCaseId of requestedTestCaseIds) {
+    const {
+      command: _command,
+      testCaseIds: _testCaseIds,
+      runReadOnlySuite: _runReadOnlySuite,
+      postReviewCommand: _postReviewCommand,
+      ...nestedInput
+    } = input;
+    const result: unknown = await invokeAgentTask(
+      {
+        ...nestedInput,
+        intent: "testbed_case",
+        testCaseId,
+      },
+      deps
+    );
+    tests.push(result);
+    const safety: Record<string, unknown> = isRecord(result) && isRecord(result.safety) ? result.safety : {};
+    wouldMutate = wouldMutate || safety.wouldMutate === true;
+    wouldWriteLocalCheckpoint = wouldWriteLocalCheckpoint || safety.wouldWriteLocalCheckpoint === true;
+  }
+
+  if (input.postReviewCommand) {
+    const result: unknown = await invokeOperatorCommand(input.postReviewCommand, input, deps, invocation, startedAt);
+    tests.push(result);
+    const safety: Record<string, unknown> = isRecord(result) && isRecord(result.safety) ? result.safety : {};
+    wouldMutate = wouldMutate || safety.wouldMutate === true;
+    wouldWriteLocalCheckpoint = wouldWriteLocalCheckpoint || safety.wouldWriteLocalCheckpoint === true;
+  }
+
+  const failedTests = tests.filter(testFailed).length;
+  const finalVerdict = failedTests > 0
+    ? "hold"
+    : review.mergeRecommendation === "ok_to_merge"
+      ? "ok_to_merge"
+      : "needs_review";
+
+  return completedInvocation(invocation, startedAt, {
+    schemaVersion: 1,
+    kind: "agent_pr_handoff",
+    status: "completed",
+    github: review,
+    requestedActions,
+    tests,
+    finalVerdict,
+    finalReason: failedTests > 0 ? "requested_tests_failed_or_blocked" : `github_${review.mergeRecommendation}`,
+    safety: prHandoffSafety(wouldMutate, wouldWriteLocalCheckpoint),
+  }, { mutates: wouldMutate, localCheckpoint: wouldWriteLocalCheckpoint });
 }
 
 async function invokeOperatorCommand(
@@ -202,4 +334,35 @@ function blockedInvocation(
 
 function normalizeTestCaseId(id: string): string {
   return id.trim().toUpperCase();
+}
+
+function normalizeTestCaseIds(ids: string[]): string[] {
+  return [...new Set(ids.map(normalizeTestCaseId).filter(Boolean))];
+}
+
+function prHandoffSafety(wouldMutate: boolean, wouldWriteLocalCheckpoint: boolean) {
+  return {
+    source: "agent",
+    githubMutated: false,
+    mergePerformed: false,
+    mergeRecommendationOnly: true,
+    wouldMutate,
+    wouldWriteLocalCheckpoint,
+    freeFormHermesPromptUsed: false,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function testFailed(test: unknown): boolean {
+  if (!isRecord(test)) return false;
+  if (test.status === "blocked") return true;
+  const summary = isRecord(test.summary)
+    ? test.summary
+    : isRecord(test.result) && isRecord(test.result.summary)
+      ? test.result.summary
+      : undefined;
+  return typeof summary?.failed === "number" && summary.failed > 0;
 }

@@ -177,8 +177,11 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   Other trusted agents and deploy scripts should call `averray_invoke_agent_task`
   when they need Hermes/Averray to run a post-deploy smoke or E2E check. The
   hook accepts structured requester metadata, an optional `correlationId`, and
-  either a safe operator command, the full read-only E2E suite, or a single
-  testcase ID. Example payloads:
+  either a safe operator command, the full read-only E2E suite, a single
+  testcase ID, or a PR handoff workflow. PR handoff is the normal path for an
+  agent that has opened a PR and wants Hermes to review it, recommend whether it
+  is merge-ready, run the requested testbed checks, and report the result back
+  to the calling agent.
 
   ```json
   {"requester":"codex","intent":"testbed_e2e_read_only","correlationId":"deploy-20260509","reason":"post-deploy smoke"}
@@ -189,6 +192,14 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   ```
 
   ```json
+  {"requester":"deploy-agent","intent":"pr_handoff","repo":"averray-agent/agent","pullRequestNumber":185,"testCaseIds":["TBE2E-004"],"correlationId":"deploy-20260509","reason":"pre-merge smoke"}
+  ```
+
+  ```json
+  {"requester":"codex","intent":"pr_handoff","pullRequestUrl":"https://github.com/averray-agent/agent/pull/185","runReadOnlySuite":true,"postReviewCommand":"github status","correlationId":"handoff-123"}
+  ```
+
+  ```json
   {"requester":"codex","command":"operator status","correlationId":"deploy-20260509"}
   ```
 
@@ -196,9 +207,13 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   prompt. Unknown commands are blocked. Live repair cases require
   `allowMutations: true`; `github brief` and testcase `TBE2E-010` require
   `allowLocalCheckpoint: true` because they write the local comparison
-  checkpoint. The response always reports whether free-form prompts were avoided
-  and whether the requested action would mutate Averray or write a local
-  checkpoint.
+  checkpoint. PR handoff reads GitHub PR metadata, changed-file summaries, and
+  check-run state, then returns `mergeRecommendation` and `finalVerdict`
+  (`ok_to_merge`, `needs_review`, or `hold`). It never merges the PR, pushes
+  commits, reruns workflows, deploys, edits GitHub, or edits Wikipedia; the
+  recommendation is evidence for the upstream agent or human operator to act
+  on. The response always reports whether free-form prompts were avoided and
+  whether the requested action would mutate Averray or write a local checkpoint.
   `operator status` calls the canonical read-only
   `averray_operator_status` MCP tool and returns wallet, budget, open-job,
   latest-run, safety, and safe-command metadata. Human surfaces can show

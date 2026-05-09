@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { getGithubOperatorBrief, getGithubOperatorStatus } from "../../packages/averray-mcp/src/operator-github.js";
+import {
+  getGithubOperatorBrief,
+  getGithubOperatorStatus,
+  getGithubPullRequestReview,
+} from "../../packages/averray-mcp/src/operator-github.js";
 
 describe("github operator status", () => {
   it("reports setup blockers when token or repo config is missing", async () => {
@@ -248,6 +252,127 @@ describe("github operator status", () => {
     expect(brief.sections.deployed[0]).toMatchObject({ title: "Deploy Production" });
     expect(brief.sections.failed[0]).toMatchObject({ title: "CI" });
     expect(writes).toHaveLength(1);
+  });
+
+  it("reviews a pull request and recommends merge when checks are green", async () => {
+    const fetchFn = async (url: string | URL | Request) => {
+      const text = String(url);
+      if (text.endsWith("/repos/averray-agent/agent/pulls/185")) {
+        return jsonResponse({
+          number: 185,
+          title: "Record testnet deployment manifest",
+          html_url: "https://github.com/averray-agent/agent/pull/185",
+          user: { login: "codex" },
+          draft: false,
+          state: "open",
+          base: { ref: "main" },
+          head: { ref: "codex/testnet", sha: "abc123" },
+          additions: 24,
+          deletions: 2,
+          changed_files: 2,
+          mergeable_state: "clean",
+          updated_at: "2026-05-08T12:00:00.000Z",
+        });
+      }
+      if (text.includes("/pulls/185/files")) {
+        return jsonResponse([
+          { filename: "docs/testnet.md", status: "modified", additions: 10, deletions: 0, changes: 10 },
+          { filename: "scripts/verify-testnet.js", status: "modified", additions: 14, deletions: 2, changes: 16 },
+        ]);
+      }
+      if (text.includes("/commits/abc123/check-runs")) {
+        return jsonResponse({
+          check_runs: [
+            { name: "CI", status: "completed", conclusion: "success", html_url: "https://github.com/checks/1" },
+          ],
+        });
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const review = await getGithubPullRequestReview({
+      repo: "averray-agent/agent",
+      pullRequestNumber: 185,
+      env: { GITHUB_TOKEN: "ghp_readonly" },
+      fetchFn,
+      now: new Date("2026-05-08T12:30:00.000Z"),
+    });
+
+    expect(review).toMatchObject({
+      configured: true,
+      authConfigured: true,
+      health: "ok",
+      pullRequest: {
+        repo: "averray-agent/agent",
+        number: 185,
+        draft: false,
+        headSha: "abc123",
+      },
+      checks: {
+        total: 1,
+        passed: 1,
+        failed: 0,
+        active: 0,
+      },
+      mergeRecommendation: "ok_to_merge",
+    });
+  });
+
+  it("holds a pull request with failing checks or active checks", async () => {
+    const fetchFn = async (url: string | URL | Request) => {
+      const text = String(url);
+      if (text.endsWith("/repos/averray-agent/agent/pulls/186")) {
+        return jsonResponse({
+          number: 186,
+          title: "Risky deploy change",
+          html_url: "https://github.com/averray-agent/agent/pull/186",
+          user: { login: "codex" },
+          draft: false,
+          state: "open",
+          head: { ref: "codex/risky", sha: "def456" },
+          changed_files: 1,
+        });
+      }
+      if (text.includes("/pulls/186/files")) {
+        return jsonResponse([
+          { filename: "ops/compose.yml", status: "modified", additions: 3, deletions: 1, changes: 4 },
+        ]);
+      }
+      if (text.includes("/commits/def456/check-runs")) {
+        return jsonResponse({
+          check_runs: [
+            { name: "CI", status: "completed", conclusion: "failure" },
+            { name: "Deploy preview", status: "in_progress" },
+          ],
+        });
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const review = await getGithubPullRequestReview({
+      pullRequestUrl: "https://github.com/averray-agent/agent/pull/186",
+      env: { GITHUB_TOKEN: "ghp_readonly" },
+      fetchFn,
+      now: new Date("2026-05-08T12:30:00.000Z"),
+    });
+
+    expect(review).toMatchObject({
+      configured: true,
+      health: "attention",
+      checks: {
+        total: 2,
+        failed: 1,
+        active: 1,
+      },
+      files: {
+        highRisk: [expect.objectContaining({ filename: "ops/compose.yml" })],
+      },
+      mergeRecommendation: "hold",
+    });
+    expect(review.riskFindings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "pr_checks_failed" }),
+      expect.objectContaining({ code: "pr_checks_active" }),
+    ]));
   });
 });
 
