@@ -223,6 +223,21 @@ describe("operator commands", () => {
     });
   });
 
+  it("routes Hermes handoff monitor commands read-only", () => {
+    expect(parseOperatorCommand("handoff monitor", { source: "operator" })).toEqual({
+      handled: true,
+      kind: "handoff_monitor",
+      source: "operator",
+      detailed: false,
+    });
+    expect(parseOperatorCommand("what is Hermes doing details", { source: "command_center" })).toEqual({
+      handled: true,
+      kind: "handoff_monitor",
+      source: "command_center",
+      detailed: true,
+    });
+  });
+
   it("returns latest submit status with draft id and Slack permalink when stored", async () => {
     const status = await getLastWikipediaCitationRepairStatus(async (text) => {
       if (text.includes("from submissions")) {

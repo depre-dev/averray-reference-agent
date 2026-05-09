@@ -12,6 +12,7 @@ import { getDailyOperatorBrief, getOperatorStatus, getSafeWorkReport } from "./o
 import { getTestbedE2eSuite, runTestbedE2eReadOnly } from "./operator-testbed.js";
 import { getAgentUsefulnessPlan } from "./operator-usefulness.js";
 import { runWikipediaCitationRepairWorkflow } from "./job-workflows.js";
+import { getHandoffMonitor } from "./handoff-events.js";
 
 export interface HandleOperatorCommandInput {
   text: string;
@@ -81,6 +82,10 @@ export async function handleOperatorCommandText(
   if (command.kind === "run_testbed_e2e_read_only") {
     const run = await runTestbedE2eReadOnly({ query: deps.query, workflowDeps: deps.workflowDeps });
     return { ...command, run };
+  }
+  if (command.kind === "handoff_monitor") {
+    const monitor = await getHandoffMonitor();
+    return { ...command, monitor };
   }
   if (command.kind === "testbed_e2e_suite") {
     const suite = await getTestbedE2eSuite({ query: deps.query, workflowDeps: deps.workflowDeps });

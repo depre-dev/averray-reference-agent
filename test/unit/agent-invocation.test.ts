@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { invokeAgentTask } from "../../packages/averray-mcp/src/agent-invocation.js";
+import type { HandoffEventInput } from "../../packages/averray-mcp/src/handoff-events.js";
 import type { WorkflowDeps } from "../../packages/averray-mcp/src/job-workflows.js";
 
 const jobId = "wiki-en-58158792-citation-repair-r9";
@@ -17,6 +18,53 @@ const definition = {
 };
 
 describe("agent invocation hook", () => {
+  it("records handoff monitor events around an invocation", async () => {
+    const calls: string[] = [];
+    const events: HandoffEventInput[] = [];
+    const result = await invokeAgentTask(
+      {
+        requester: "github-actions",
+        intent: "testbed_case",
+        testCaseId: "TBE2E-004",
+        correlationId: "github-pr-123",
+        reason: "post-CI PR handoff",
+      },
+      deps(calls, undefined, events)
+    );
+
+    expect(result).toMatchObject({ status: "completed" });
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      correlationId: "github-pr-123",
+      requester: "github-actions",
+      intent: "testbed_case",
+      phase: "started",
+      status: "running",
+      testCaseId: "TBE2E-004",
+      reason: "post-CI PR handoff",
+    });
+    expect(events[1]).toMatchObject({
+      correlationId: "github-pr-123",
+      phase: "completed",
+      status: "completed",
+      summary: {
+        kind: "agent_invocation",
+        status: "completed",
+        summary: {
+          totalCases: 1,
+          executed: 1,
+          passed: 1,
+          failed: 0,
+          skipped: 0,
+        },
+      },
+      safety: {
+        wouldMutate: false,
+        wouldWriteLocalCheckpoint: false,
+      },
+    });
+  });
+
   it("runs one read-only testbed testcase with agent metadata", async () => {
     const calls: string[] = [];
     const result = await invokeAgentTask(
@@ -67,6 +115,50 @@ describe("agent invocation hook", () => {
     ]));
     expect(calls).not.toContain("claim");
     expect(calls).not.toContain("saveDraft");
+    expect(calls).not.toContain("submit");
+  });
+
+  it("accepts the post-deploy testbed_suite intent and skips mutation-bound cases", async () => {
+    const calls: string[] = [];
+    const result = await invokeAgentTask(
+      {
+        requester: "github-actions",
+        intent: "testbed_suite",
+        testCaseIds: ["TBE2E-001", "TBE2E-004", "TBE2E-010"],
+        correlationId: "github-deploy-123",
+      },
+      deps(calls)
+    );
+
+    expect(result).toMatchObject({
+      kind: "agent_invocation",
+      status: "completed",
+      invocation: {
+        requester: "github-actions",
+        intent: "testbed_suite",
+        testCaseIds: ["TBE2E-001", "TBE2E-004", "TBE2E-010"],
+        correlationId: "github-deploy-123",
+      },
+      result: {
+        kind: "testbed_e2e_read_only_run",
+        requestedCaseIds: ["TBE2E-001", "TBE2E-004", "TBE2E-010"],
+        summary: {
+          totalCases: 3,
+          executed: 2,
+          passed: 2,
+          failed: 0,
+          skipped: 1,
+        },
+      },
+    });
+    expect(calls).toEqual(expect.arrayContaining([
+      "walletStatus",
+      "listJobs",
+      "policyCheckClaim",
+      "fetchEvidence",
+      "validate",
+    ]));
+    expect(calls).not.toContain("claim");
     expect(calls).not.toContain("submit");
   });
 
@@ -230,10 +322,11 @@ describe("agent invocation hook", () => {
   });
 });
 
-function deps(calls: string[], githubFetchFn?: typeof fetch) {
+function deps(calls: string[], githubFetchFn?: typeof fetch, events?: HandoffEventInput[]) {
   return {
     githubEnv: { GITHUB_TOKEN: "ghp_readonly" },
     ...(githubFetchFn ? { githubFetchFn } : {}),
+    handoffEventRecorder: async (event: HandoffEventInput) => { events?.push(event); },
     now: new Date("2026-05-09T12:00:00.000Z"),
     async query(text: string) {
       if (text.includes("from budgets")) return [{ usd_spent: "0" }];
