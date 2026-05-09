@@ -136,7 +136,8 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   `ops health`, `github status`, `github open prs`, `github ci failures`,
   `github issue digest`, `github brief`, `daily github brief`,
   `what changed since last time`, `testbed e2e suite`,
-  `platform e2e suite`, `daily operator brief`, `find safe work`,
+  `platform e2e suite`, `run testbed e2e read-only`,
+  `daily operator brief`, `find safe work`,
   `operator status`, `operator status details`,
   `run one wikipedia citation repair if safe`, and
   `status last wikipedia citation repair`. GitHub commands call
@@ -167,6 +168,12 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   commands, expected evidence, readiness blockers, and mutation boundaries for
   exercising the platform like a normal operator without accidentally claiming,
   submitting, deploying, editing GitHub, or editing Wikipedia.
+  `run testbed e2e read-only` calls `averray_run_testbed_e2e_read_only` and
+  executes the automatable non-mutating cases in order: status, daily brief,
+  safe-work discovery, one citation-repair dry run, latest-run verification,
+  business ledger, ops health, and GitHub status. It intentionally skips the
+  guarded live repair case, the local GitHub brief checkpoint, and manual
+  surface parity checks.
   `operator status` calls the canonical read-only
   `averray_operator_status` MCP tool and returns wallet, budget, open-job,
   latest-run, safety, and safe-command metadata. Human surfaces can show

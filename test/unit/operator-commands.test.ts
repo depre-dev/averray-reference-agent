@@ -208,6 +208,21 @@ describe("operator commands", () => {
     });
   });
 
+  it("routes the executable read-only testbed E2E run separately from the suite", () => {
+    expect(parseOperatorCommand("run testbed e2e read-only", { source: "operator" })).toEqual({
+      handled: true,
+      kind: "run_testbed_e2e_read_only",
+      source: "operator",
+      detailed: false,
+    });
+    expect(parseOperatorCommand("platform e2e read only details", { source: "slack" })).toEqual({
+      handled: true,
+      kind: "run_testbed_e2e_read_only",
+      source: "slack",
+      detailed: true,
+    });
+  });
+
   it("returns latest submit status with draft id and Slack permalink when stored", async () => {
     const status = await getLastWikipediaCitationRepairStatus(async (text) => {
       if (text.includes("from submissions")) {

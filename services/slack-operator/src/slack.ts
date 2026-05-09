@@ -251,6 +251,9 @@ export function formatOperatorResultForSlack(result: unknown): string {
   if (result.kind === "github_brief") {
     return formatGithubBriefForSlack(result);
   }
+  if (result.kind === "run_testbed_e2e_read_only") {
+    return formatTestbedE2eReadOnlyRunForSlack(result);
+  }
   if (result.kind === "testbed_e2e_suite") {
     return formatTestbedE2eSuiteForSlack(result);
   }
@@ -508,6 +511,34 @@ function formatTestbedE2eSuiteForSlack(result: Record<string, unknown>): string 
   ].filter(Boolean).join("\n");
 }
 
+function formatTestbedE2eReadOnlyRunForSlack(result: Record<string, unknown>): string {
+  const run = isRecord(result.run) ? result.run : {};
+  const summary = isRecord(run.summary) ? run.summary : {};
+  const safety = isRecord(run.safety) ? run.safety : {};
+  const cases = arrayField(run, "cases");
+  const skippedBoundaries = arrayField(run, "skippedMutationBoundaries");
+  const failedCases = cases.filter((entry) => isRecord(entry) && stringField(entry, "status") === "failed");
+  const skippedCases = cases.filter((entry) => isRecord(entry) && stringField(entry, "status") === "skipped");
+
+  return [
+    "*Averray testbed E2E read-only run*",
+    `• status: \`${stringField(run, "status") ?? "unknown"}\``,
+    `• executed/passed/failed/skipped: \`${numberField(summary, "executed") ?? 0}/${numberField(summary, "passed") ?? 0}/${numberField(summary, "failed") ?? 0}/${numberField(summary, "skipped") ?? 0}\``,
+    `• duration: \`${numberField(run, "durationMs") ?? "n/a"} ms\``,
+    "",
+    "*Cases*",
+    cases.length > 0 ? cases.slice(0, 11).map(formatTestbedRunCase).join("\n") : "• none",
+    failedCases.length > 0 ? `*Failed*\n${failedCases.slice(0, 5).map(formatTestbedRunCase).join("\n")}` : "",
+    skippedCases.length > 0 ? `*Skipped intentionally*\n${skippedCases.slice(0, 5).map(formatTestbedRunCase).join("\n")}` : "",
+    skippedBoundaries.length > 0 ? `*Mutation boundaries skipped*\n${skippedBoundaries.slice(0, 5).map(formatMutationBoundary).join("\n")}` : "",
+    "*Safety*",
+    `• run mutates: \`${String(safety.mutates === true)}\``,
+    `• guarded live skipped: \`${String(safety.skippedGuardedLiveWorkflow === true)}\``,
+    `• GitHub brief checkpoint skipped: \`${String(safety.skippedGithubBriefCheckpoint === true)}\``,
+    `• edits Wikipedia: \`${String(safety.editsWikipedia === true)}\``,
+  ].filter(Boolean).join("\n");
+}
+
 function githubViewTitle(view: string): string {
   if (view === "prs") return "Open PRs";
   if (view === "ci") return "Workflow runs";
@@ -525,6 +556,22 @@ function formatTestbedCase(value: unknown): string {
   const command = stringField(surfaces, "operatorCommand") ?? "operator status";
   const mutates = value.mutates === true ? " mutates" : "";
   return `• \`${id}\` ${name}: \`${status}${mutates}\` - \`${command}\``;
+}
+
+function formatTestbedRunCase(value: unknown): string {
+  if (!isRecord(value)) return "• unknown";
+  const id = stringField(value, "id") ?? "unknown";
+  const name = stringField(value, "name") ?? "untitled";
+  const status = stringField(value, "status") ?? "unknown";
+  const reason = stringField(value, "reason");
+  const error = stringField(value, "error");
+  const suffix = error ? ` - ${error}` : reason ? ` - ${reason}` : "";
+  return `• \`${id}\` ${name}: \`${status}\`${suffix}`;
+}
+
+function formatMutationBoundary(value: unknown): string {
+  if (!isRecord(value)) return "• unknown";
+  return `• \`${stringField(value, "id") ?? "unknown"}\` ${stringField(value, "name") ?? "untitled"} - \`${stringField(value, "mutationScope") ?? "mutation"}\` (${stringField(value, "reason") ?? "skipped"})`;
 }
 
 function formatGithubItem(value: unknown, detailed: boolean): string {

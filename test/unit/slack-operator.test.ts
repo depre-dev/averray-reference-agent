@@ -606,6 +606,77 @@ describe("slack operator bridge", () => {
     expect(text).toContain("edits Wikipedia: `false`");
   });
 
+  it("formats executable read-only testbed E2E run replies", () => {
+    const text = formatOperatorResultForSlack({
+      handled: true,
+      kind: "run_testbed_e2e_read_only",
+      run: {
+        status: "passed",
+        durationMs: 1234,
+        summary: {
+          totalCases: 11,
+          executed: 8,
+          passed: 8,
+          failed: 0,
+          skipped: 3,
+        },
+        cases: [
+          {
+            id: "TBE2E-001",
+            name: "Operator readiness",
+            status: "passed",
+            mutates: false,
+          },
+          {
+            id: "TBE2E-005",
+            name: "Guarded live Wikipedia citation repair",
+            status: "skipped",
+            mutates: true,
+            mutationScope: "averray_claim_draft_validate_submit_only",
+            reason: "requires_explicit_mutation_command",
+          },
+          {
+            id: "TBE2E-010",
+            name: "GitHub delta brief",
+            status: "skipped",
+            mutates: true,
+            mutationScope: "local_brief_checkpoint_only",
+            reason: "writes_local_github_brief_checkpoint",
+          },
+        ],
+        skippedMutationBoundaries: [
+          {
+            id: "TBE2E-005",
+            name: "Guarded live Wikipedia citation repair",
+            mutationScope: "averray_claim_draft_validate_submit_only",
+            reason: "requires_explicit_mutation_command",
+          },
+          {
+            id: "TBE2E-010",
+            name: "GitHub delta brief",
+            mutationScope: "local_brief_checkpoint_only",
+            reason: "writes_local_github_brief_checkpoint",
+          },
+        ],
+        safety: {
+          mutates: false,
+          skippedGuardedLiveWorkflow: true,
+          skippedGithubBriefCheckpoint: true,
+          editsWikipedia: false,
+        },
+      },
+    });
+
+    expect(text).toContain("*Averray testbed E2E read-only run*");
+    expect(text).toContain("status: `passed`");
+    expect(text).toContain("executed/passed/failed/skipped: `8/8/0/3`");
+    expect(text).toContain("`TBE2E-001` Operator readiness: `passed`");
+    expect(text).toContain("`TBE2E-005` Guarded live Wikipedia citation repair: `skipped`");
+    expect(text).toContain("writes_local_github_brief_checkpoint");
+    expect(text).toContain("GitHub brief checkpoint skipped: `true`");
+    expect(text).toContain("edits Wikipedia: `false`");
+  });
+
   it("formats workflow replies with compact validation and evidence summary", () => {
     const text = formatOperatorResultForSlack({
       handled: true,

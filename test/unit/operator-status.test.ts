@@ -8,7 +8,7 @@ import {
 import { getBusinessLedger, getOpsHealth } from "../../packages/averray-mcp/src/operator-insights.js";
 import { getAgentUsefulnessPlan } from "../../packages/averray-mcp/src/operator-usefulness.js";
 import { getAdminReadiness } from "../../packages/averray-mcp/src/operator-admin.js";
-import { getTestbedE2eSuite } from "../../packages/averray-mcp/src/operator-testbed.js";
+import { getTestbedE2eSuite, runTestbedE2eReadOnly } from "../../packages/averray-mcp/src/operator-testbed.js";
 
 describe("operator status", () => {
   it("returns a canonical read-only status for agents and UIs", async () => {
@@ -182,6 +182,58 @@ describe("operator status", () => {
             },
           ];
         },
+        async getDefinition() {
+          return {
+            source: { type: "wikipedia_article", taskType: "citation_repair", pageTitle: "(+ +)", revisionId: "1351905437" },
+            publicDetails: { title: "Wikipedia citation repair: (+ +)" },
+            state: "open",
+            claimStatus: { claimable: true },
+          };
+        },
+        async policyCheckClaim() {
+          return { allowed: true };
+        },
+        async claim() {
+          throw new Error("read-only testbed run must not claim");
+        },
+        async fetchEvidence() {
+          return {
+            pageTitle: "(+ +)",
+            revisionId: "1351905437",
+            revisionUrl: "https://en.wikipedia.org/w/index.php?title=%28%2B_%2B%29&oldid=1351905437",
+            citations: [
+              {
+                index: 1,
+                referenceId: "review",
+                templateNames: ["cite web"],
+                urls: ["https://dead.example/review"],
+                archiveUrls: ["https://web.archive.org/web/20200101000000/https://dead.example/review"],
+                deadLinkMarkers: ["url_status_dead"],
+                accessDates: ["2020-01-02"],
+                title: "Review",
+                context: "A review citation with a dead source.",
+              },
+            ],
+            sourceChecks: [
+              {
+                url: "https://dead.example/review",
+                status: 404,
+                ok: false,
+                finalUrl: "https://dead.example/review",
+                archiveUrl: "https://web.archive.org/web/20200101000000/https://dead.example/review",
+              },
+            ],
+          };
+        },
+        async saveDraft() {
+          throw new Error("read-only testbed run must not save drafts");
+        },
+        async validate() {
+          return { valid: true, validator: "wikipedia", taskType: "citation_repair" };
+        },
+        async submit() {
+          throw new Error("read-only testbed run must not submit");
+        },
       },
     };
 
@@ -317,6 +369,45 @@ describe("operator status", () => {
       status: "ready",
       mutates: true,
       mutationScope: "local_brief_checkpoint_only",
+    });
+
+    const run = await runTestbedE2eReadOnly({
+      ...deps,
+      env: {},
+    });
+    expect(run).toMatchObject({
+      kind: "testbed_e2e_read_only_run",
+      mutates: false,
+      status: "passed",
+      summary: {
+        totalCases: 11,
+        executed: 8,
+        passed: 8,
+        failed: 0,
+        skipped: 3,
+      },
+      safety: {
+        skippedGuardedLiveWorkflow: true,
+        skippedGithubBriefCheckpoint: true,
+        skippedManualSurfaceParity: true,
+        editsWikipedia: false,
+      },
+    });
+    expect(run.cases.find((entry) => entry.id === "TBE2E-004")).toMatchObject({
+      status: "passed",
+      mutates: false,
+      evidence: {
+        validation: "valid",
+        proposedFindings: 1,
+      },
+    });
+    expect(run.cases.find((entry) => entry.id === "TBE2E-005")).toMatchObject({
+      status: "skipped",
+      reason: "requires_explicit_mutation_command",
+    });
+    expect(run.cases.find((entry) => entry.id === "TBE2E-010")).toMatchObject({
+      status: "skipped",
+      reason: "writes_local_github_brief_checkpoint",
     });
   });
 

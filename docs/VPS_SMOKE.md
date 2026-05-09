@@ -172,6 +172,7 @@ daily github brief
 what changed since last time
 testbed e2e suite
 platform e2e suite
+run testbed e2e read-only
 find safe work
 operator status
 operator status details
@@ -216,7 +217,12 @@ returns ordered E2E cases, exact operator commands, MCP tools, expected
 evidence, readiness blockers, and mutation boundaries. The suite generator does
 not claim, submit, deploy, edit GitHub, or edit Wikipedia; it marks the live
 workflow case and the local GitHub-brief checkpoint case separately so agents
-can decide what to run safely. `operator status` calls the canonical
+can decide what to run safely. `run testbed e2e read-only` calls
+`averray_run_testbed_e2e_read_only` and executes the automatable non-mutating
+cases in order: status, daily brief, safe-work discovery, one citation-repair
+dry run, latest-run verification, business ledger, ops health, and GitHub
+status. It skips the guarded live workflow, local GitHub brief checkpoint, and
+manual surface parity checks. `operator status` calls the canonical
 read-only `averray_operator_status` MCP tool, returning wallet readiness,
 policy budget, open Wikipedia job counts, latest run state, safety guarantees,
 and safe command suggestions as structured JSON. Repair commands call

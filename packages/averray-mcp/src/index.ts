@@ -46,7 +46,7 @@ import { getBusinessLedger, getOpsHealth } from "./operator-insights.js";
 import { getDailyOperatorBrief, getOperatorStatus, getSafeWorkReport } from "./operator-status.js";
 import { getAgentUsefulnessPlan } from "./operator-usefulness.js";
 import { getGithubOperatorBrief, getGithubOperatorStatus } from "./operator-github.js";
-import { getTestbedE2eSuite } from "./operator-testbed.js";
+import { getTestbedE2eSuite, runTestbedE2eReadOnly } from "./operator-testbed.js";
 
 const server = new McpServer({
   name: "averray-mcp",
@@ -227,8 +227,17 @@ server.tool(
 );
 
 server.tool(
+  "averray_run_testbed_e2e_read_only",
+  "Run the canonical non-mutating Averray testbed E2E checks in order and return a combined pass/fail report. Executes operator status, daily brief, safe-work discovery, one Wikipedia citation-repair dry run, latest-run status, business ledger, ops health, and GitHub status. Skips guarded live repair, GitHub brief checkpointing, and manual surface parity. Does not claim, submit, deploy, edit GitHub, edit Wikipedia, or mutate Averray state.",
+  {},
+  async () => {
+    return jsonContent(await runTestbedE2eReadOnly({ query, workflowDeps: workflowDeps() }));
+  }
+);
+
+server.tool(
   "averray_handle_operator_command",
-  "Direct router for trusted Slack/operator/command-center messages. Use this for short commands like 'what can you do for us', 'admin readiness', 'business ledger', 'ops health', 'github status', 'github brief', 'daily github brief', 'what changed since last time', 'github open prs', 'github ci failures', 'testbed e2e suite', 'platform e2e suite', 'daily operator brief', 'find safe work', 'operator status', 'operator status details', 'run one wikipedia citation repair if safe', and 'status last wikipedia citation repair' instead of sending them through a free-form Hermes prompt. Recognized run commands call averray_run_wikipedia_citation_repair directly; recognized status/help/brief/work-discovery/usefulness/admin-readiness/ledger/health/github/testbed commands are read-only against external systems. GitHub brief persists a local checkpoint timestamp. Human surfaces may compact identifiers by default; add 'details' for full audit identifiers.",
+  "Direct router for trusted Slack/operator/command-center messages. Use this for short commands like 'what can you do for us', 'admin readiness', 'business ledger', 'ops health', 'github status', 'github brief', 'daily github brief', 'what changed since last time', 'github open prs', 'github ci failures', 'testbed e2e suite', 'platform e2e suite', 'run testbed e2e read-only', 'daily operator brief', 'find safe work', 'operator status', 'operator status details', 'run one wikipedia citation repair if safe', and 'status last wikipedia citation repair' instead of sending them through a free-form Hermes prompt. Recognized repair run commands call averray_run_wikipedia_citation_repair directly; recognized read-only E2E run commands call averray_run_testbed_e2e_read_only directly. Recognized status/help/brief/work-discovery/usefulness/admin-readiness/ledger/health/github/testbed commands are read-only against external systems except GitHub brief, which persists a local checkpoint timestamp. Human surfaces may compact identifiers by default; add 'details' for full audit identifiers.",
   {
     text: z.string().min(1),
     source: z.enum(["slack", "operator", "command_center", "hermes"]).default("operator"),
