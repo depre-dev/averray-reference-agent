@@ -134,6 +134,80 @@ export interface GithubOperatorBrief {
   recommendations: string[];
 }
 
+export type GithubPullRequestMergeRecommendation = "ok_to_merge" | "needs_review" | "hold";
+
+export interface GithubPullRequestReview {
+  schemaVersion: 1;
+  generatedAt: string;
+  mutatesGithub: false;
+  configured: boolean;
+  authConfigured: boolean;
+  repo?: string;
+  pullRequestNumber?: number;
+  health: "ok" | "attention" | "degraded";
+  pullRequest?: {
+    repo: string;
+    number: number;
+    title: string;
+    url?: string;
+    author?: string;
+    state: string;
+    draft: boolean;
+    baseBranch?: string;
+    headBranch?: string;
+    headSha?: string;
+    additions?: number;
+    deletions?: number;
+    changedFiles?: number;
+    mergeableState?: string;
+    updatedAt?: string;
+  };
+  files: {
+    total: number;
+    highRisk: GithubPullRequestFileRisk[];
+    sample: GithubPullRequestFileSummary[];
+  };
+  checks: {
+    total: number;
+    passed: number;
+    failed: number;
+    active: number;
+    neutral: number;
+    skipped: number;
+    sample: GithubPullRequestCheckSummary[];
+  };
+  riskFindings: GithubPullRequestRiskFinding[];
+  mergeRecommendation: GithubPullRequestMergeRecommendation;
+  recommendations: string[];
+  warnings: GithubWarning[];
+}
+
+export interface GithubPullRequestFileSummary {
+  filename: string;
+  status?: string;
+  additions?: number;
+  deletions?: number;
+  changes?: number;
+}
+
+export interface GithubPullRequestFileRisk extends GithubPullRequestFileSummary {
+  risk: "high" | "medium";
+  reason: string;
+}
+
+export interface GithubPullRequestCheckSummary {
+  name: string;
+  status: string;
+  conclusion?: string;
+  url?: string;
+}
+
+export interface GithubPullRequestRiskFinding {
+  severity: "low" | "medium" | "high";
+  code: string;
+  message: string;
+}
+
 export interface GithubOperatorStatusOptions {
   view?: GithubOperatorView;
   env?: NodeJS.ProcessEnv;
@@ -146,6 +220,15 @@ export interface GithubOperatorBriefOptions {
   fetchFn?: typeof fetch;
   now?: Date;
   query?: GithubBriefQueryFn;
+}
+
+export interface GithubPullRequestReviewOptions {
+  repo?: string;
+  pullRequestNumber?: number;
+  pullRequestUrl?: string;
+  env?: NodeJS.ProcessEnv;
+  fetchFn?: typeof fetch;
+  now?: Date;
 }
 
 type GithubBriefQueryFn = <T = Record<string, unknown>>(
@@ -175,6 +258,27 @@ interface GithubApiPullRequest {
   updated_at?: string;
   merged_at?: string | null;
   state?: string;
+  base?: { ref?: string } | null;
+  head?: { ref?: string; sha?: string } | null;
+  additions?: number;
+  deletions?: number;
+  changed_files?: number;
+  mergeable_state?: string | null;
+}
+
+interface GithubApiPullRequestFile {
+  filename?: string;
+  status?: string;
+  additions?: number;
+  deletions?: number;
+  changes?: number;
+}
+
+interface GithubApiCheckRun {
+  name?: string;
+  status?: string;
+  conclusion?: string | null;
+  html_url?: string;
 }
 
 interface GithubApiIssue {
@@ -430,6 +534,145 @@ export async function getGithubOperatorBrief(
   };
 }
 
+export async function getGithubPullRequestReview(
+  options: GithubPullRequestReviewOptions = {}
+): Promise<GithubPullRequestReview> {
+  const env = options.env ?? process.env;
+  const generatedAt = (options.now ?? new Date()).toISOString();
+  const tokenConfig = buildGithubTokenConfig(env);
+  const configuredRepos = parseGithubRepos(env);
+  const warnings: GithubWarning[] = [];
+  const urlTarget = parsePullRequestUrl(options.pullRequestUrl);
+  const repo = normalizeRepo(options.repo ?? urlTarget?.repo ?? (configuredRepos.length === 1 ? configuredRepos[0] : ""));
+  const pullRequestNumber = options.pullRequestNumber ?? urlTarget?.pullRequestNumber;
+
+  if (!tokenConfig.hasAnyToken || !repo || !pullRequestNumber) {
+    if (!tokenConfig.hasAnyToken) {
+      warnings.push({
+        severity: "high",
+        code: "github_token_missing",
+        message: "No GitHub token is configured, so PR handoff review is unavailable.",
+      });
+    }
+    if (!repo) {
+      warnings.push({
+        severity: "high",
+        code: "github_pr_repo_missing",
+        message: "Set repo=owner/repo, pass a GitHub pull request URL, or configure exactly one GitHub helper repo.",
+      });
+    }
+    if (!pullRequestNumber) {
+      warnings.push({
+        severity: "high",
+        code: "github_pr_number_missing",
+        message: "Set pullRequestNumber or pass a GitHub pull request URL.",
+      });
+    }
+    return emptyPullRequestReview({
+      generatedAt,
+      authConfigured: tokenConfig.hasAnyToken,
+      repo,
+      pullRequestNumber,
+      warnings,
+    });
+  }
+
+  const token = resolveGithubTokenForRepo(repo, tokenConfig);
+  if (!token) {
+    warnings.push({
+      severity: "high",
+      code: "github_repo_token_missing",
+      repo,
+      message: `No GitHub token is configured for ${repo}.`,
+    });
+    return emptyPullRequestReview({
+      generatedAt,
+      authConfigured: true,
+      repo,
+      pullRequestNumber,
+      warnings,
+    });
+  }
+
+  const fetchFn = options.fetchFn ?? fetch;
+  const baseUrl = (env.GITHUB_API_BASE_URL ?? "https://api.github.com").replace(/\/+$/g, "");
+  const repoPath = encodeRepoPath(repo);
+
+  try {
+    const [pullRequest, files] = await Promise.all([
+      githubGet<GithubApiPullRequest>(`${baseUrl}/repos/${repoPath}/pulls/${pullRequestNumber}`, token, fetchFn),
+      githubGet<GithubApiPullRequestFile[]>(
+        `${baseUrl}/repos/${repoPath}/pulls/${pullRequestNumber}/files?per_page=100`,
+        token,
+        fetchFn
+      ),
+    ]);
+    const headSha = pullRequest.head?.sha;
+    const checks = headSha
+      ? await readPullRequestChecks({ baseUrl, repoPath, headSha, token, fetchFn, warnings, repo })
+      : [];
+    const fileSummaries = files.map(fileSummary).filter((file): file is GithubPullRequestFileSummary => Boolean(file));
+    const highRiskFiles = fileSummaries
+      .map(fileRisk)
+      .filter((file): file is GithubPullRequestFileRisk => Boolean(file));
+    const checkSummaries = checks.map(checkSummary);
+    const checkTotals = summarizeChecks(checkSummaries);
+    const pullRequestSummary = summarizePullRequest(repo, pullRequest);
+    const riskFindings = buildPullRequestRiskFindings({
+      pullRequest: pullRequestSummary,
+      files: fileSummaries,
+      highRiskFiles,
+      checks: checkTotals,
+      warnings,
+    });
+    const mergeRecommendation = chooseMergeRecommendation(riskFindings);
+    const health = warnings.some((warning) => warning.severity === "high")
+      ? "degraded"
+      : mergeRecommendation === "ok_to_merge"
+        ? "ok"
+        : "attention";
+
+    return {
+      schemaVersion: 1,
+      generatedAt,
+      mutatesGithub: false,
+      configured: true,
+      authConfigured: true,
+      repo,
+      pullRequestNumber,
+      health,
+      pullRequest: pullRequestSummary,
+      files: {
+        total: fileSummaries.length,
+        highRisk: highRiskFiles.slice(0, 20),
+        sample: fileSummaries.slice(0, 20),
+      },
+      checks: {
+        ...checkTotals,
+        sample: checkSummaries.slice(0, 20),
+      },
+      riskFindings,
+      mergeRecommendation,
+      recommendations: buildPullRequestReviewRecommendations({ mergeRecommendation, riskFindings }),
+      warnings,
+    };
+  } catch (error) {
+    warnings.push({
+      severity: "high",
+      code: "github_pr_fetch_failed",
+      repo,
+      message: error instanceof Error ? error.message : `Failed to fetch PR #${pullRequestNumber} for ${repo}.`,
+    });
+    return emptyPullRequestReview({
+      generatedAt,
+      authConfigured: true,
+      repo,
+      pullRequestNumber,
+      warnings,
+    });
+  }
+}
+
 function emptyStatus(input: {
   generatedAt: string;
   view: GithubOperatorView;
@@ -519,6 +762,242 @@ function emptyBrief(input: {
       "Set GITHUB_DEFAULT_REPO=owner/repo or GITHUB_HELPER_REPOS=owner/repo,owner/repo.",
     ],
   };
+}
+
+function emptyPullRequestReview(input: {
+  generatedAt: string;
+  authConfigured: boolean;
+  repo?: string;
+  pullRequestNumber?: number;
+  warnings: GithubWarning[];
+}): GithubPullRequestReview {
+  const configured = Boolean(input.authConfigured && input.repo && input.pullRequestNumber);
+  return {
+    schemaVersion: 1,
+    generatedAt: input.generatedAt,
+    mutatesGithub: false,
+    configured,
+    authConfigured: input.authConfigured,
+    ...(input.repo ? { repo: input.repo } : {}),
+    ...(input.pullRequestNumber ? { pullRequestNumber: input.pullRequestNumber } : {}),
+    health: "degraded",
+    files: { total: 0, highRisk: [], sample: [] },
+    checks: { total: 0, passed: 0, failed: 0, active: 0, neutral: 0, skipped: 0, sample: [] },
+    riskFindings: input.warnings.map((warning) => ({
+      severity: warning.severity,
+      code: warning.code,
+      message: warning.message,
+    })),
+    mergeRecommendation: "hold",
+    recommendations: [
+      "Configure a read-only GitHub token and pass repo plus pullRequestNumber before using PR handoff.",
+    ],
+    warnings: input.warnings,
+  };
+}
+
+async function readPullRequestChecks(input: {
+  baseUrl: string;
+  repoPath: string;
+  headSha: string;
+  token: string;
+  fetchFn: typeof fetch;
+  warnings: GithubWarning[];
+  repo: string;
+}): Promise<GithubApiCheckRun[]> {
+  try {
+    const checks = await githubGet<{ check_runs?: GithubApiCheckRun[] }>(
+      `${input.baseUrl}/repos/${input.repoPath}/commits/${encodeURIComponent(input.headSha)}/check-runs?per_page=100`,
+      input.token,
+      input.fetchFn
+    );
+    return checks.check_runs ?? [];
+  } catch (error) {
+    input.warnings.push({
+      severity: "medium",
+      code: "github_pr_checks_unavailable",
+      repo: input.repo,
+      message: error instanceof Error ? error.message : "Failed to fetch PR check runs.",
+    });
+    return [];
+  }
+}
+
+function parsePullRequestUrl(value: string | undefined): { repo: string; pullRequestNumber: number } | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    if (!/github\.com$/i.test(url.hostname)) return undefined;
+    const [, owner, repo, marker, number] = url.pathname.split("/");
+    if (!owner || !repo || marker !== "pull") return undefined;
+    const pullRequestNumber = Number.parseInt(number ?? "", 10);
+    if (!Number.isFinite(pullRequestNumber) || pullRequestNumber <= 0) return undefined;
+    return { repo: `${owner}/${repo}`, pullRequestNumber };
+  } catch {
+    return undefined;
+  }
+}
+
+function summarizePullRequest(repo: string, pull: GithubApiPullRequest): NonNullable<GithubPullRequestReview["pullRequest"]> {
+  const number = numberField(pull.number);
+  return {
+    repo,
+    number,
+    title: pull.title ?? "Untitled pull request",
+    ...(pull.html_url ? { url: pull.html_url } : {}),
+    ...(pull.user?.login ? { author: pull.user.login } : {}),
+    state: pull.state ?? "unknown",
+    draft: pull.draft === true,
+    ...(pull.base?.ref ? { baseBranch: pull.base.ref } : {}),
+    ...(pull.head?.ref ? { headBranch: pull.head.ref } : {}),
+    ...(pull.head?.sha ? { headSha: pull.head.sha } : {}),
+    ...(typeof pull.additions === "number" ? { additions: pull.additions } : {}),
+    ...(typeof pull.deletions === "number" ? { deletions: pull.deletions } : {}),
+    ...(typeof pull.changed_files === "number" ? { changedFiles: pull.changed_files } : {}),
+    ...(pull.mergeable_state ? { mergeableState: pull.mergeable_state } : {}),
+    ...(pull.updated_at ? { updatedAt: pull.updated_at } : {}),
+  };
+}
+
+function fileSummary(file: GithubApiPullRequestFile): GithubPullRequestFileSummary | undefined {
+  if (!file.filename) return undefined;
+  return {
+    filename: file.filename,
+    ...(file.status ? { status: file.status } : {}),
+    ...(typeof file.additions === "number" ? { additions: file.additions } : {}),
+    ...(typeof file.deletions === "number" ? { deletions: file.deletions } : {}),
+    ...(typeof file.changes === "number" ? { changes: file.changes } : {}),
+  };
+}
+
+function fileRisk(file: GithubPullRequestFileSummary): GithubPullRequestFileRisk | undefined {
+  const path = file.filename.toLowerCase();
+  const highRiskPatterns = [
+    /^\.env/,
+    /(^|\/)\.env/,
+    /(^|\/)secrets?\b/,
+    /(^|\/)contracts?\//,
+    /(^|\/)migrations?\//,
+    /(^|\/)ops\//,
+    /(^|\/)deploy/,
+    /compose.*\.ya?ml$/,
+    /caddyfile$/,
+    /package-lock\.json$/,
+  ];
+  if (highRiskPatterns.some((pattern) => pattern.test(path))) {
+    return { ...file, risk: "high", reason: "touches deploy, secret, contract, lockfile, or infrastructure surface" };
+  }
+  if ((file.changes ?? 0) >= 400) {
+    return { ...file, risk: "medium", reason: "large single-file change" };
+  }
+  return undefined;
+}
+
+function checkSummary(check: GithubApiCheckRun): GithubPullRequestCheckSummary {
+  return {
+    name: check.name ?? "Unnamed check",
+    status: check.status ?? "unknown",
+    ...(check.conclusion ? { conclusion: check.conclusion } : {}),
+    ...(check.html_url ? { url: check.html_url } : {}),
+  };
+}
+
+function summarizeChecks(checks: GithubPullRequestCheckSummary[]) {
+  return {
+    total: checks.length,
+    passed: checks.filter((check) => check.status === "completed" && check.conclusion === "success").length,
+    failed: checks.filter((check) => isFailedCheck(check)).length,
+    active: checks.filter((check) => check.status !== "completed").length,
+    neutral: checks.filter((check) => check.status === "completed" && (check.conclusion === "neutral" || check.conclusion === "success_with_warnings")).length,
+    skipped: checks.filter((check) => check.status === "completed" && check.conclusion === "skipped").length,
+  };
+}
+
+function isFailedCheck(check: GithubPullRequestCheckSummary): boolean {
+  return check.status === "completed"
+    && (check.conclusion === "failure"
+      || check.conclusion === "cancelled"
+      || check.conclusion === "timed_out"
+      || check.conclusion === "action_required");
+}
+
+function buildPullRequestRiskFindings(input: {
+  pullRequest: NonNullable<GithubPullRequestReview["pullRequest"]>;
+  files: GithubPullRequestFileSummary[];
+  highRiskFiles: GithubPullRequestFileRisk[];
+  checks: ReturnType<typeof summarizeChecks>;
+  warnings: GithubWarning[];
+}): GithubPullRequestRiskFinding[] {
+  const findings: GithubPullRequestRiskFinding[] = input.warnings.map((warning) => ({
+    severity: warning.severity,
+    code: warning.code,
+    message: warning.message,
+  }));
+  if (input.pullRequest.state !== "open") {
+    findings.push({ severity: "high", code: "pr_not_open", message: `PR state is ${input.pullRequest.state}.` });
+  }
+  if (input.pullRequest.draft) {
+    findings.push({ severity: "high", code: "pr_is_draft", message: "PR is still marked as draft." });
+  }
+  if (input.checks.failed > 0) {
+    findings.push({ severity: "high", code: "pr_checks_failed", message: `${input.checks.failed} PR check(s) failed.` });
+  }
+  if (input.checks.active > 0) {
+    findings.push({ severity: "high", code: "pr_checks_active", message: `${input.checks.active} PR check(s) are still running.` });
+  }
+  if (input.checks.total === 0) {
+    findings.push({ severity: "medium", code: "pr_checks_missing", message: "No PR check runs were found for the head commit." });
+  }
+  const highRisk = input.highRiskFiles.filter((file) => file.risk === "high");
+  if (highRisk.length > 0) {
+    findings.push({
+      severity: "medium",
+      code: "pr_high_risk_files",
+      message: `${highRisk.length} changed file(s) touch deploy, secret, contract, lockfile, or infrastructure surfaces.`,
+    });
+  }
+  if (input.files.length > 25) {
+    findings.push({ severity: "medium", code: "pr_large_file_count", message: `PR changes ${input.files.length} files.` });
+  }
+  const totalChanges = input.files.reduce((sum, file) => sum + (file.changes ?? 0), 0);
+  if (totalChanges > 1_000) {
+    findings.push({ severity: "medium", code: "pr_large_diff", message: `PR changes ${totalChanges} lines.` });
+  }
+  if (input.pullRequest.mergeableState && ["dirty", "blocked", "unknown"].includes(input.pullRequest.mergeableState)) {
+    findings.push({
+      severity: input.pullRequest.mergeableState === "dirty" ? "high" : "medium",
+      code: "pr_mergeable_state_attention",
+      message: `GitHub mergeable_state is ${input.pullRequest.mergeableState}.`,
+    });
+  }
+  if (findings.length === 0) {
+    findings.push({ severity: "low", code: "pr_review_green", message: "PR metadata, files, and checks look merge-ready." });
+  }
+  return findings;
+}
+
+function chooseMergeRecommendation(findings: GithubPullRequestRiskFinding[]): GithubPullRequestMergeRecommendation {
+  if (findings.some((finding) => finding.severity === "high")) return "hold";
+  if (findings.some((finding) => finding.severity === "medium")) return "needs_review";
+  return "ok_to_merge";
+}
+
+function buildPullRequestReviewRecommendations(input: {
+  mergeRecommendation: GithubPullRequestMergeRecommendation;
+  riskFindings: GithubPullRequestRiskFinding[];
+}): string[] {
+  if (input.mergeRecommendation === "ok_to_merge") {
+    return ["PR looks merge-ready from read-only GitHub metadata and checks. Run the requested testbed case before merging."];
+  }
+  if (input.mergeRecommendation === "hold") {
+    return ["Do not merge yet. Resolve high-severity findings such as draft state, failing checks, active checks, or merge conflicts first."];
+  }
+  const mediumCodes = input.riskFindings
+    .filter((finding) => finding.severity === "medium")
+    .map((finding) => finding.code);
+  return [
+    `Human review recommended before merge${mediumCodes.length > 0 ? ` (${[...new Set(mediumCodes)].join(", ")})` : ""}.`,
+  ];
 }
 
 interface GithubTokenConfig {

@@ -238,12 +238,18 @@ server.tool(
 
 server.tool(
   "averray_invoke_agent_task",
-  "Stable agent-to-agent hook for trusted deploy scripts, backend agents, Codex, and other operator agents. Runs a named safe operator command, the full read-only testbed E2E suite, or one testbed testcase by ID with requester/correlation metadata. Uses structured operator/MCP workflows instead of free-form Hermes prompts. Fails closed for unknown commands, live mutation cases, and local checkpoint writes unless the caller explicitly opts into that class of action.",
+  "Stable agent-to-agent hook for trusted deploy scripts, backend agents, Codex, and other operator agents. Runs a named safe operator command, the full read-only testbed E2E suite, one testbed testcase by ID, or a PR handoff workflow that reviews GitHub PR metadata/checks/files and then runs requested tests with requester/correlation metadata. Uses structured operator/MCP workflows instead of free-form Hermes prompts. Fails closed for unknown commands, live mutation cases, local checkpoint writes, and PRs that are not merge-ready unless the caller explicitly opts into that class of action. PR handoff only recommends merge state; it never merges.",
   {
     requester: z.string().min(1),
-    intent: z.enum(["operator_command", "testbed_e2e_read_only", "testbed_case"]).default("operator_command"),
+    intent: z.enum(["operator_command", "testbed_e2e_read_only", "testbed_case", "pr_handoff"]).default("operator_command"),
     command: z.string().min(1).optional(),
     testCaseId: z.string().min(1).optional(),
+    testCaseIds: z.array(z.string().min(1)).max(20).optional(),
+    runReadOnlySuite: z.boolean().default(false),
+    postReviewCommand: z.string().min(1).optional(),
+    repo: z.string().min(1).optional(),
+    pullRequestNumber: z.number().int().min(1).optional(),
+    pullRequestUrl: z.string().url().optional(),
     correlationId: z.string().optional(),
     reason: z.string().optional(),
     allowMutations: z.boolean().default(false),

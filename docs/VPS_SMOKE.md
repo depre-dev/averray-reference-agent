@@ -232,7 +232,10 @@ policy, draft, validation, submit, and Slack alert gates.
 Trusted deploy scripts, backend agents, Codex, and other operator agents should
 use `averray_invoke_agent_task` as the stable agent-to-agent hook. It records
 `requester`, optional `correlationId`, and optional `reason`, then runs one of
-three structured paths without sending a free-form Hermes prompt:
+the structured paths below without sending a free-form Hermes prompt. Use the
+PR handoff path when another agent has opened a PR and needs Hermes/Averray to
+inspect the PR, recommend merge readiness, run the requested testbed check, and
+return a machine-readable report.
 
 ```json
 {"requester":"deploy-agent","intent":"testbed_e2e_read_only","correlationId":"deploy-20260509","reason":"post-deploy smoke"}
@@ -243,6 +246,14 @@ three structured paths without sending a free-form Hermes prompt:
 ```
 
 ```json
+{"requester":"deploy-agent","intent":"pr_handoff","repo":"averray-agent/agent","pullRequestNumber":185,"testCaseIds":["TBE2E-004"],"correlationId":"deploy-20260509","reason":"pre-merge smoke"}
+```
+
+```json
+{"requester":"codex","intent":"pr_handoff","pullRequestUrl":"https://github.com/averray-agent/agent/pull/185","runReadOnlySuite":true,"postReviewCommand":"github status","correlationId":"handoff-123"}
+```
+
+```json
 {"requester":"codex","command":"operator status","correlationId":"deploy-20260509"}
 ```
 
@@ -250,7 +261,12 @@ The hook fails closed for unknown commands. It blocks the guarded live repair
 case unless `allowMutations: true` is passed, and blocks `github brief` or
 `TBE2E-010` unless `allowLocalCheckpoint: true` is passed. Responses include
 the original invocation metadata plus safety fields for whether the action would
-mutate Averray, write a local checkpoint, or use a free-form Hermes prompt.
+mutate Averray, write a local checkpoint, or use a free-form Hermes prompt. PR
+handoff reads GitHub PR metadata, changed files, and check runs, then returns
+`mergeRecommendation` and `finalVerdict` (`ok_to_merge`, `needs_review`, or
+`hold`) plus any requested test results. It is recommendation-only: it never
+merges PRs, pushes commits, reruns workflows, deploys, edits GitHub, or edits
+Wikipedia.
 
 Latest-run status commands are read-only and return the latest `runId`,
 `jobId`, `sessionId`, submitted/failed state, `draftId`, and Slack permalink

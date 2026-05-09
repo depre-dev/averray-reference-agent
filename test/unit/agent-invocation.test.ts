@@ -136,10 +136,105 @@ describe("agent invocation hook", () => {
     });
     expect(calls).toEqual([]);
   });
+
+  it("runs a PR handoff review and requested read-only testcase", async () => {
+    const calls: string[] = [];
+    const result = await invokeAgentTask(
+      {
+        requester: "codex",
+        intent: "pr_handoff",
+        repo: "averray-agent/agent",
+        pullRequestNumber: 185,
+        testCaseIds: ["TBE2E-004"],
+        correlationId: "handoff-789",
+        reason: "pre-merge check",
+      },
+      deps(calls, githubFetch())
+    );
+
+    expect(result).toMatchObject({
+      kind: "agent_invocation",
+      status: "completed",
+      invocation: {
+        requester: "codex",
+        intent: "pr_handoff",
+        repo: "averray-agent/agent",
+        pullRequestNumber: 185,
+        testCaseIds: ["TBE2E-004"],
+        correlationId: "handoff-789",
+      },
+      safety: {
+        source: "agent",
+        wouldMutate: false,
+        wouldWriteLocalCheckpoint: false,
+        freeFormHermesPromptUsed: false,
+      },
+      result: {
+        kind: "agent_pr_handoff",
+        finalVerdict: "ok_to_merge",
+        github: {
+          mergeRecommendation: "ok_to_merge",
+          checks: { failed: 0, active: 0 },
+        },
+        tests: [
+          expect.objectContaining({
+            kind: "agent_invocation",
+            status: "completed",
+            result: expect.objectContaining({
+              kind: "testbed_e2e_read_only_run",
+              requestedCaseIds: ["TBE2E-004"],
+            }),
+          }),
+        ],
+        safety: {
+          githubMutated: false,
+          mergePerformed: false,
+          mergeRecommendationOnly: true,
+        },
+      },
+    });
+    expect(calls).toEqual(expect.arrayContaining([
+      "walletStatus",
+      "listJobs",
+      "policyCheckClaim",
+      "fetchEvidence",
+      "validate",
+    ]));
+  });
+
+  it("holds PR handoff and skips tests when GitHub checks are not merge-ready", async () => {
+    const calls: string[] = [];
+    const result = await invokeAgentTask(
+      {
+        requester: "codex",
+        intent: "pr_handoff",
+        pullRequestUrl: "https://github.com/averray-agent/agent/pull/186",
+        testCaseIds: ["TBE2E-004"],
+      },
+      deps(calls, githubFetch({ failing: true }))
+    );
+
+    expect(result).toMatchObject({
+      status: "completed",
+      result: {
+        kind: "agent_pr_handoff",
+        finalVerdict: "hold",
+        finalReason: "pr_review_hold",
+        github: {
+          mergeRecommendation: "hold",
+        },
+        tests: [],
+      },
+    });
+    expect(calls).toEqual([]);
+  });
 });
 
-function deps(calls: string[]) {
+function deps(calls: string[], githubFetchFn?: typeof fetch) {
   return {
+    githubEnv: { GITHUB_TOKEN: "ghp_readonly" },
+    ...(githubFetchFn ? { githubFetchFn } : {}),
+    now: new Date("2026-05-09T12:00:00.000Z"),
     async query(text: string) {
       if (text.includes("from budgets")) return [{ usd_spent: "0" }];
       if (text.includes("from submissions")) return [];
@@ -148,6 +243,53 @@ function deps(calls: string[]) {
     },
     workflowDeps: workflowDeps(calls),
   };
+}
+
+function githubFetch(options: { failing?: boolean } = {}): typeof fetch {
+  return (async (url: string | URL | Request) => {
+    const text = String(url);
+    const prNumber = options.failing ? 186 : 185;
+    const sha = options.failing ? "def456" : "abc123";
+    if (text.endsWith(`/repos/averray-agent/agent/pulls/${prNumber}`)) {
+      return jsonResponse({
+        number: prNumber,
+        title: options.failing ? "Risky PR" : "Safe PR",
+        html_url: `https://github.com/averray-agent/agent/pull/${prNumber}`,
+        user: { login: "codex" },
+        draft: false,
+        state: "open",
+        base: { ref: "main" },
+        head: { ref: "codex/pr", sha },
+        additions: 10,
+        deletions: 1,
+        changed_files: 1,
+        mergeable_state: "clean",
+        updated_at: "2026-05-09T11:00:00.000Z",
+      });
+    }
+    if (text.includes(`/pulls/${prNumber}/files`)) {
+      return jsonResponse([
+        { filename: "docs/change.md", status: "modified", additions: 10, deletions: 1, changes: 11 },
+      ]);
+    }
+    if (text.includes(`/commits/${sha}/check-runs`)) {
+      return jsonResponse({
+        check_runs: [
+          options.failing
+            ? { name: "CI", status: "completed", conclusion: "failure" }
+            : { name: "CI", status: "completed", conclusion: "success" },
+        ],
+      });
+    }
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+}
+
+function jsonResponse(value: unknown): Response {
+  return new Response(JSON.stringify(value), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
 }
 
 function workflowDeps(calls: string[]): WorkflowDeps {
