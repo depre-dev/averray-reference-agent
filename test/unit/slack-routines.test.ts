@@ -5,6 +5,7 @@ import {
   safeWorkResultSignature,
   shouldPostSafeWorkResult,
   shouldRunDailyBrief,
+  shouldRunDailyGithubBrief,
 } from "../../services/slack-operator/src/routines.js";
 
 describe("slack operator routines", () => {
@@ -12,12 +13,18 @@ describe("slack operator routines", () => {
     const config = parseSlackRoutineConfig({
       SLACK_OPERATOR_DAILY_BRIEF_ENABLED: "1",
       SLACK_OPERATOR_DAILY_BRIEF_TIME_UTC: "06:30",
+      SLACK_OPERATOR_DAILY_BRIEF_INCLUDE_GITHUB: "1",
+      SLACK_OPERATOR_DAILY_GITHUB_BRIEF_ENABLED: "1",
+      SLACK_OPERATOR_DAILY_GITHUB_BRIEF_TIME_UTC: "06:45",
       SLACK_OPERATOR_SAFE_WORK_SCAN_INTERVAL_MINUTES: "15",
     }, new Set(["C1"]));
 
     expect(config.channelId).toBe("C1");
     expect(config.dailyBrief.enabled).toBe(true);
     expect(config.dailyBrief.timeUtc).toEqual({ hour: 6, minute: 30 });
+    expect(config.dailyBrief.includeGithub).toBe(true);
+    expect(config.dailyGithubBrief.enabled).toBe(true);
+    expect(config.dailyGithubBrief.timeUtc).toEqual({ hour: 6, minute: 45 });
     expect(config.safeWorkScan.enabled).toBe(true);
     expect(config.safeWorkScan.intervalMs).toBe(15 * 60_000);
     expect(config.safeWorkScan.notifyOnlyOnAvailable).toBe(true);
@@ -47,6 +54,40 @@ describe("slack operator routines", () => {
       dateKey: "2026-05-05",
     });
     expect(shouldRunDailyBrief(new Date("2026-05-05T09:00:00.000Z"), config, "2026-05-05")).toEqual({
+      shouldRun: false,
+      dateKey: "2026-05-05",
+    });
+  });
+
+  it("runs the standalone daily GitHub brief after its target time", () => {
+    const config = parseSlackRoutineConfig({
+      SLACK_OPERATOR_DAILY_GITHUB_BRIEF_ENABLED: "1",
+      SLACK_OPERATOR_DAILY_GITHUB_BRIEF_TIME_UTC: "08:05",
+    }, new Set(["C1"]));
+
+    expect(shouldRunDailyGithubBrief(new Date("2026-05-05T08:04:00.000Z"), config, undefined)).toEqual({
+      shouldRun: false,
+      dateKey: "2026-05-05",
+    });
+    expect(shouldRunDailyGithubBrief(new Date("2026-05-05T08:05:00.000Z"), config, undefined)).toEqual({
+      shouldRun: true,
+      dateKey: "2026-05-05",
+    });
+    expect(shouldRunDailyGithubBrief(new Date("2026-05-05T09:00:00.000Z"), config, "2026-05-05")).toEqual({
+      shouldRun: false,
+      dateKey: "2026-05-05",
+    });
+  });
+
+  it("does not run a duplicate standalone GitHub brief when included in the daily operator brief", () => {
+    const config = parseSlackRoutineConfig({
+      SLACK_OPERATOR_DAILY_BRIEF_ENABLED: "1",
+      SLACK_OPERATOR_DAILY_BRIEF_INCLUDE_GITHUB: "1",
+      SLACK_OPERATOR_DAILY_GITHUB_BRIEF_ENABLED: "1",
+      SLACK_OPERATOR_DAILY_GITHUB_BRIEF_TIME_UTC: "08:05",
+    }, new Set(["C1"]));
+
+    expect(shouldRunDailyGithubBrief(new Date("2026-05-05T09:00:00.000Z"), config, undefined)).toEqual({
       shouldRun: false,
       dateKey: "2026-05-05",
     });

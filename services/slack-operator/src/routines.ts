@@ -3,6 +3,11 @@ export interface SlackRoutineConfig {
   dailyBrief: {
     enabled: boolean;
     timeUtc: { hour: number; minute: number };
+    includeGithub: boolean;
+  };
+  dailyGithubBrief: {
+    enabled: boolean;
+    timeUtc: { hour: number; minute: number };
   };
   safeWorkScan: {
     enabled: boolean;
@@ -24,6 +29,11 @@ export function parseSlackRoutineConfig(
     dailyBrief: {
       enabled: env.SLACK_OPERATOR_DAILY_BRIEF_ENABLED === "1",
       timeUtc: parseUtcTime(env.SLACK_OPERATOR_DAILY_BRIEF_TIME_UTC ?? "08:00"),
+      includeGithub: env.SLACK_OPERATOR_DAILY_BRIEF_INCLUDE_GITHUB === "1",
+    },
+    dailyGithubBrief: {
+      enabled: env.SLACK_OPERATOR_DAILY_GITHUB_BRIEF_ENABLED === "1",
+      timeUtc: parseUtcTime(env.SLACK_OPERATOR_DAILY_GITHUB_BRIEF_TIME_UTC ?? env.SLACK_OPERATOR_DAILY_BRIEF_TIME_UTC ?? "08:05"),
     },
     safeWorkScan: {
       enabled: safeWorkMinutes > 0,
@@ -38,12 +48,22 @@ export function shouldRunDailyBrief(
   config: SlackRoutineConfig,
   lastPostedDateKey: string | undefined
 ): { shouldRun: boolean; dateKey: string } {
-  const dateKey = utcDateKey(now);
-  if (!config.dailyBrief.enabled || !config.channelId) return { shouldRun: false, dateKey };
-  if (lastPostedDateKey === dateKey) return { shouldRun: false, dateKey };
-  const minutesNow = now.getUTCHours() * 60 + now.getUTCMinutes();
-  const minutesTarget = config.dailyBrief.timeUtc.hour * 60 + config.dailyBrief.timeUtc.minute;
-  return { shouldRun: minutesNow >= minutesTarget, dateKey };
+  return shouldRunDailyRoutine(now, config.channelId, config.dailyBrief.enabled, config.dailyBrief.timeUtc, lastPostedDateKey);
+}
+
+export function shouldRunDailyGithubBrief(
+  now: Date,
+  config: SlackRoutineConfig,
+  lastPostedDateKey: string | undefined
+): { shouldRun: boolean; dateKey: string } {
+  const includedInDailyBrief = config.dailyBrief.enabled && config.dailyBrief.includeGithub;
+  return shouldRunDailyRoutine(
+    now,
+    config.channelId,
+    config.dailyGithubBrief.enabled && !includedInDailyBrief,
+    config.dailyGithubBrief.timeUtc,
+    lastPostedDateKey
+  );
 }
 
 export function safeWorkResultSignature(result: unknown): string | undefined {
@@ -76,6 +96,21 @@ function parseUtcTime(value: string): { hour: number; minute: number } {
     return { hour: 8, minute: 0 };
   }
   return { hour, minute };
+}
+
+function shouldRunDailyRoutine(
+  now: Date,
+  channelId: string | undefined,
+  enabled: boolean,
+  timeUtc: { hour: number; minute: number },
+  lastPostedDateKey: string | undefined
+): { shouldRun: boolean; dateKey: string } {
+  const dateKey = utcDateKey(now);
+  if (!enabled || !channelId) return { shouldRun: false, dateKey };
+  if (lastPostedDateKey === dateKey) return { shouldRun: false, dateKey };
+  const minutesNow = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const minutesTarget = timeUtc.hour * 60 + timeUtc.minute;
+  return { shouldRun: minutesNow >= minutesTarget, dateKey };
 }
 
 function positiveNumber(value: string | undefined): number {

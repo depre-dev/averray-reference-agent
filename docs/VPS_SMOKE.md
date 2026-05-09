@@ -114,6 +114,14 @@ operator prompt. They are disabled by default:
 SLACK_OPERATOR_DAILY_BRIEF_ENABLED=1
 SLACK_OPERATOR_DAILY_BRIEF_TIME_UTC=08:00
 
+# Optionally append `daily github brief` to the same morning post.
+SLACK_OPERATOR_DAILY_BRIEF_INCLUDE_GITHUB=1
+
+# Or post one standalone read-only `daily github brief` each UTC day.
+# If the daily operator brief includes GitHub, this standalone post is skipped.
+SLACK_OPERATOR_DAILY_GITHUB_BRIEF_ENABLED=0
+SLACK_OPERATOR_DAILY_GITHUB_BRIEF_TIME_UTC=08:05
+
 # Polls read-only `find safe work` and posts only when available work changes.
 SLACK_OPERATOR_SAFE_WORK_SCAN_INTERVAL_MINUTES=60
 SLACK_OPERATOR_SAFE_WORK_NOTIFY_ONLY_ON_AVAILABLE=1
@@ -123,9 +131,10 @@ SLACK_OPERATOR_ROUTINE_CHANNEL_ID=C...
 ```
 
 These routines use the same safe operator-command path as manual Slack
-messages. The daily brief is read-only. The safe-work scan is also read-only and
-only recommends the guarded dry-run or mutation command; it does not claim,
-submit, or edit Wikipedia by itself.
+messages. The daily operator and GitHub briefs are read-only. The GitHub brief
+stores only a local checkpoint timestamp so later briefs can show deltas. The
+safe-work scan is also read-only and only recommends the guarded dry-run or
+mutation command; it does not claim, submit, or edit Wikipedia by itself.
 
 Slack app requirements:
 
