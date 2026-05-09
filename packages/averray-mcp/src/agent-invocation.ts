@@ -7,10 +7,17 @@ import {
 import { getGithubPullRequestReview } from "./operator-github.js";
 import { handleOperatorCommandText } from "./operator-handler.js";
 import { runTestbedE2eReadOnly } from "./operator-testbed.js";
+import {
+  recordHandoffEvent,
+  summarizeHandoffError,
+  summarizeHandoffResult,
+  type HandoffEventInput,
+} from "./handoff-events.js";
 
 export type AgentInvocationIntent =
   | "operator_command"
   | "testbed_e2e_read_only"
+  | "testbed_suite"
   | "testbed_case"
   | "pr_handoff";
 
@@ -40,6 +47,7 @@ export interface AgentInvocationDeps {
   workflowDeps: WorkflowDeps;
   githubEnv?: NodeJS.ProcessEnv;
   githubFetchFn?: typeof fetch;
+  handoffEventRecorder?: (event: HandoffEventInput) => Promise<unknown>;
   now?: Date;
 }
 
@@ -57,12 +65,13 @@ const READ_ONLY_TEST_CASES = new Set([
 export async function invokeAgentTask(input: AgentInvocationInput, deps: AgentInvocationDeps): Promise<unknown> {
   const startedAt = new Date();
   const intent = input.intent ?? (input.testCaseId ? "testbed_case" : "operator_command");
+  const normalizedTestCaseIds = normalizeTestCaseIds(input.testCaseIds ?? []);
   const invocation = {
     requester: input.requester,
     intent,
     ...(input.command ? { command: input.command } : {}),
     ...(input.testCaseId ? { testCaseId: normalizeTestCaseId(input.testCaseId) } : {}),
-    ...(input.testCaseIds?.length ? { testCaseIds: normalizeTestCaseIds(input.testCaseIds) } : {}),
+    ...(normalizedTestCaseIds.length ? { testCaseIds: normalizedTestCaseIds } : {}),
     ...(input.runReadOnlySuite ? { runReadOnlySuite: true } : {}),
     ...(input.postReviewCommand ? { postReviewCommand: input.postReviewCommand } : {}),
     ...(input.repo ? { repo: input.repo } : {}),
@@ -71,13 +80,53 @@ export async function invokeAgentTask(input: AgentInvocationInput, deps: AgentIn
     ...(input.correlationId ? { correlationId: input.correlationId } : {}),
     ...(input.reason ? { reason: input.reason } : {}),
   };
+  const correlationId = input.correlationId?.trim() || localCorrelationId(startedAt, input.requester, intent);
+  await recordInvocationEvent(deps, input, invocation, correlationId, {
+    phase: "started",
+    status: "running",
+    summary: {
+      requestedCaseIds: normalizedTestCaseIds,
+      ...(input.testCaseId ? { requestedCaseId: normalizeTestCaseId(input.testCaseId) } : {}),
+    },
+  });
 
+  try {
+    const result = await invokeAgentTaskInner(input, deps, invocation, startedAt, intent);
+    const resultRecord = isRecord(result) ? result : {};
+    await recordInvocationEvent(deps, input, invocation, correlationId, {
+      phase: resultRecord.status === "blocked" ? "blocked" : "completed",
+      status: resultRecord.status === "blocked" ? "blocked" : "completed",
+      summary: summarizeHandoffResult(result),
+      safety: isRecord(resultRecord.safety) ? resultRecord.safety : undefined,
+    });
+    return result;
+  } catch (error) {
+    await recordInvocationEvent(deps, input, invocation, correlationId, {
+      phase: "failed",
+      status: "failed",
+      summary: summarizeHandoffError(error),
+    });
+    throw error;
+  }
+}
+
+async function invokeAgentTaskInner(
+  input: AgentInvocationInput,
+  deps: AgentInvocationDeps,
+  invocation: Record<string, unknown>,
+  startedAt: Date,
+  intent: AgentInvocationIntent
+): Promise<unknown> {
   if (!input.requester.trim()) {
     return blockedInvocation(invocation, startedAt, "requester_required");
   }
 
-  if (intent === "testbed_e2e_read_only") {
-    const run = await runTestbedE2eReadOnly(deps);
+  if (intent === "testbed_e2e_read_only" || intent === "testbed_suite") {
+    const testCaseIds = normalizeTestCaseIds(input.testCaseIds ?? []);
+    const run = await runTestbedE2eReadOnly(
+      deps,
+      testCaseIds.length > 0 ? { testCaseIds } : {}
+    );
     return completedInvocation(invocation, startedAt, run, {
       mutates: false,
       localCheckpoint: false,
@@ -365,4 +414,38 @@ function testFailed(test: unknown): boolean {
       ? test.result.summary
       : undefined;
   return typeof summary?.failed === "number" && summary.failed > 0;
+}
+
+async function recordInvocationEvent(
+  deps: AgentInvocationDeps,
+  input: AgentInvocationInput,
+  invocation: Record<string, unknown>,
+  correlationId: string,
+  event: Pick<HandoffEventInput, "phase" | "status" | "summary" | "safety">
+) {
+  const recorder = deps.handoffEventRecorder ?? recordHandoffEvent;
+  try {
+    await recorder({
+      correlationId,
+      requester: input.requester,
+      intent: String(invocation.intent ?? "operator_command"),
+      phase: event.phase,
+      status: event.status,
+      ...(input.repo ? { repo: input.repo } : {}),
+      ...(input.pullRequestNumber ? { pullRequestNumber: input.pullRequestNumber } : {}),
+      ...(input.pullRequestUrl ? { pullRequestUrl: input.pullRequestUrl } : {}),
+      ...(input.testCaseId ? { testCaseId: normalizeTestCaseId(input.testCaseId) } : {}),
+      ...(Array.isArray(invocation.testCaseIds) ? { testCaseIds: invocation.testCaseIds as string[] } : {}),
+      ...(input.reason ? { reason: input.reason } : {}),
+      ...(event.summary ? { summary: event.summary } : {}),
+      ...(event.safety ? { safety: event.safety } : {}),
+    });
+  } catch {
+    // Monitoring must never change the safety behavior of the invoked task.
+  }
+}
+
+function localCorrelationId(startedAt: Date, requester: string, intent: string): string {
+  const safeRequester = requester.trim().toLowerCase().replace(/[^a-z0-9_.:-]+/g, "-") || "unknown";
+  return `local-${safeRequester}-${intent}-${startedAt.toISOString().replace(/[^0-9]/g, "")}`;
 }

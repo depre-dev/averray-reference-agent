@@ -84,6 +84,12 @@ export type ParsedOperatorCommand =
       detailed: boolean;
     }
   | {
+      handled: true;
+      kind: "handoff_monitor";
+      source: OperatorCommandSource;
+      detailed: boolean;
+    }
+  | {
       handled: false;
       kind: "unknown";
       source: OperatorCommandSource;
@@ -129,6 +135,9 @@ const EXAMPLES = [
   "testbed e2e suite",
   "platform e2e suite",
   "run testbed e2e read-only",
+  "handoff monitor",
+  "hermes handoff monitor",
+  "what is hermes doing",
   "find safe work",
   "operator status",
   "operator status details",
@@ -187,6 +196,10 @@ export function parseOperatorCommand(
 
   if (isRunTestbedE2eReadOnlyCommand(normalizedText)) {
     return { handled: true, kind: "run_testbed_e2e_read_only", source, detailed };
+  }
+
+  if (isHandoffMonitorCommand(normalizedText)) {
+    return { handled: true, kind: "handoff_monitor", source, detailed };
   }
 
   if (isTestbedE2eSuiteCommand(normalizedText)) {
@@ -357,6 +370,10 @@ function isBusinessLedgerCommand(text: string): boolean {
 
 function isOpsHealthCommand(text: string): boolean {
   return /^(ops health|operator health|agent health|stack health|health check|control plane health|mcp health)( details?| full| audit)?$/.test(text);
+}
+
+function isHandoffMonitorCommand(text: string): boolean {
+  return /^(handoff monitor|agent handoff monitor|hermes handoff monitor|hermes monitor|what is hermes doing|what is the agent doing|current handoffs|active handoffs|handoff status)( details?| full| audit)?$/.test(text);
 }
 
 function githubOperatorView(text: string): GithubOperatorView | undefined {

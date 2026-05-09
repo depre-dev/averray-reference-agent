@@ -241,6 +241,14 @@ return a machine-readable report.
 {"requester":"deploy-agent","intent":"testbed_e2e_read_only","correlationId":"deploy-20260509","reason":"post-deploy smoke"}
 ```
 
+Post-deploy workflows may also use `intent: "testbed_suite"` when they want to
+pass an explicit set of case IDs. The suite runner still executes only
+read-only cases and reports mutation-bound cases as skipped.
+
+```json
+{"requester":"github-actions","intent":"testbed_suite","repo":"averray-agent/agent","testCaseIds":["TBE2E-001","TBE2E-004","TBE2E-009"],"correlationId":"github-deploy-25608715158-22beb11","reason":"post-production-deploy verification"}
+```
+
 ```json
 {"requester":"backend-agent","intent":"testbed_case","testCaseId":"TBE2E-004","correlationId":"ci-123"}
 ```
@@ -267,6 +275,14 @@ handoff reads GitHub PR metadata, changed files, and check runs, then returns
 `hold`) plus any requested test results. It is recommendation-only: it never
 merges PRs, pushes commits, reruns workflows, deploys, edits GitHub, or edits
 Wikipedia.
+
+Each agent-to-agent invocation appends a local handoff event with the same
+`correlationId`. Humans and agents can inspect the current/recent handoffs with
+the read-only `averray_handoff_monitor` MCP tool or the operator command
+`handoff monitor` / `what is Hermes doing`. The monitor groups events by
+correlation ID and surfaces requester, repo/PR, requested tests, phase, status,
+summary, and safety metadata. It is observability only: it does not touch
+GitHub, Wikipedia, deployments, or Averray mutations.
 
 Latest-run status commands are read-only and return the latest `runId`,
 `jobId`, `sessionId`, submitted/failed state, `draftId`, and Slack permalink
