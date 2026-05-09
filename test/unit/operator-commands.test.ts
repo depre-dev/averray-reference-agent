@@ -40,6 +40,21 @@ describe("operator commands", () => {
     });
   });
 
+  it("accepts dry-run repair wording without a live safety phrase", () => {
+    const parsed = parseOperatorCommand("run one wikipedia citation repair dry run only", {
+      source: "operator",
+    });
+
+    expect(parsed).toMatchObject({
+      handled: true,
+      kind: "run_wikipedia_citation_repair",
+      source: "operator",
+      input: {
+        dryRun: true,
+      },
+    });
+  });
+
   it("routes the latest status command read-only", () => {
     const parsed = parseOperatorCommand("status last wikipedia citation repair.", { source: "operator" });
 
@@ -174,6 +189,21 @@ describe("operator commands", () => {
       handled: true,
       kind: "github_brief",
       source: "command_center",
+      detailed: true,
+    });
+  });
+
+  it("routes the platform testbed E2E suite read-only", () => {
+    expect(parseOperatorCommand("testbed e2e suite", { source: "operator" })).toEqual({
+      handled: true,
+      kind: "testbed_e2e_suite",
+      source: "operator",
+      detailed: false,
+    });
+    expect(parseOperatorCommand("platform e2e suite details", { source: "slack" })).toEqual({
+      handled: true,
+      kind: "testbed_e2e_suite",
+      source: "slack",
       detailed: true,
     });
   });

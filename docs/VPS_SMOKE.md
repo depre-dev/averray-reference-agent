@@ -170,6 +170,8 @@ github issue digest
 github brief
 daily github brief
 what changed since last time
+testbed e2e suite
+platform e2e suite
 find safe work
 operator status
 operator status details
@@ -207,7 +209,14 @@ force-recreate `mcp-env`, `hermes`, `hermes-gateway`, `hermes-workspace`, and
 `daily operator brief` and
 `find safe work` are read-only views for humans and agents: they summarize
 wallet/budget readiness, latest run state, candidate jobs, blockers, and the
-next dry-run or guarded mutation command. `operator status` calls the canonical
+next dry-run or guarded mutation command. `testbed e2e suite` and
+`platform e2e suite` call `averray_testbed_e2e_suite`, a read-only suite
+generator for backend agents, Slack, Command Center, and MCP clients. It
+returns ordered E2E cases, exact operator commands, MCP tools, expected
+evidence, readiness blockers, and mutation boundaries. The suite generator does
+not claim, submit, deploy, edit GitHub, or edit Wikipedia; it marks the live
+workflow case and the local GitHub-brief checkpoint case separately so agents
+can decide what to run safely. `operator status` calls the canonical
 read-only `averray_operator_status` MCP tool, returning wallet readiness,
 policy budget, open Wikipedia job counts, latest run state, safety guarantees,
 and safe command suggestions as structured JSON. Repair commands call

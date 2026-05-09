@@ -8,6 +8,7 @@ import {
 import { getBusinessLedger, getOpsHealth } from "../../packages/averray-mcp/src/operator-insights.js";
 import { getAgentUsefulnessPlan } from "../../packages/averray-mcp/src/operator-usefulness.js";
 import { getAdminReadiness } from "../../packages/averray-mcp/src/operator-admin.js";
+import { getTestbedE2eSuite } from "../../packages/averray-mcp/src/operator-testbed.js";
 
 describe("operator status", () => {
   it("returns a canonical read-only status for agents and UIs", async () => {
@@ -266,6 +267,57 @@ describe("operator status", () => {
       expect.stringContaining("Merge PRs"),
       expect.stringContaining("Change DNS"),
     ]));
+
+    const suite = await getTestbedE2eSuite({
+      ...deps,
+      env: {
+        GITHUB_TOKEN: "ghp_readonly",
+        GITHUB_HELPER_REPOS: "depre-dev/averray-reference-agent",
+      },
+    });
+    expect(suite).toMatchObject({
+      kind: "testbed_e2e_suite",
+      mutates: false,
+      readiness: {
+        overall: "ready",
+        canRunReadOnly: true,
+        canRunDryRun: true,
+        canRunGuardedLive: true,
+      },
+      context: {
+        githubConfigured: true,
+        openWikipediaCitationRepairJobs: 1,
+      },
+      safety: {
+        suiteGeneratorMutates: false,
+        guardedLiveCaseMutates: true,
+        githubBriefWritesLocalCheckpoint: true,
+        editsWikipedia: false,
+      },
+    });
+    expect(suite.testCases.map((entry) => entry.id)).toEqual([
+      "TBE2E-001",
+      "TBE2E-002",
+      "TBE2E-003",
+      "TBE2E-004",
+      "TBE2E-005",
+      "TBE2E-006",
+      "TBE2E-007",
+      "TBE2E-008",
+      "TBE2E-009",
+      "TBE2E-010",
+      "TBE2E-011",
+    ]);
+    expect(suite.testCases.find((entry) => entry.id === "TBE2E-005")).toMatchObject({
+      status: "manual",
+      mutates: true,
+      mutationScope: "averray_claim_draft_validate_submit_only",
+    });
+    expect(suite.testCases.find((entry) => entry.id === "TBE2E-010")).toMatchObject({
+      status: "ready",
+      mutates: true,
+      mutationScope: "local_brief_checkpoint_only",
+    });
   });
 
   it("returns read-only business ledger and ops health insights", async () => {

@@ -135,7 +135,8 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   recognizes `what can you do for us`, `admin readiness`, `business ledger`,
   `ops health`, `github status`, `github open prs`, `github ci failures`,
   `github issue digest`, `github brief`, `daily github brief`,
-  `what changed since last time`, `daily operator brief`, `find safe work`,
+  `what changed since last time`, `testbed e2e suite`,
+  `platform e2e suite`, `daily operator brief`, `find safe work`,
   `operator status`, `operator status details`,
   `run one wikipedia citation repair if safe`, and
   `status last wikipedia citation repair`. GitHub commands call
@@ -160,6 +161,12 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   `daily operator brief` and `find safe work` are read-only summaries that turn
   the current wallet, budget, latest-run, and open-job state into practical next
   actions for any MCP client, not just Slack or Hermes Workspace.
+  `testbed e2e suite` and `platform e2e suite` call
+  `averray_testbed_e2e_suite`, a read-only E2E checklist for backend agents,
+  Slack, Command Center, and MCP clients. It returns ordered test cases,
+  commands, expected evidence, readiness blockers, and mutation boundaries for
+  exercising the platform like a normal operator without accidentally claiming,
+  submitting, deploying, editing GitHub, or editing Wikipedia.
   `operator status` calls the canonical read-only
   `averray_operator_status` MCP tool and returns wallet, budget, open-job,
   latest-run, safety, and safe-command metadata. Human surfaces can show
