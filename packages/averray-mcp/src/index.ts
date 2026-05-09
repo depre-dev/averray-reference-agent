@@ -47,6 +47,7 @@ import { getDailyOperatorBrief, getOperatorStatus, getSafeWorkReport } from "./o
 import { getAgentUsefulnessPlan } from "./operator-usefulness.js";
 import { getGithubOperatorBrief, getGithubOperatorStatus } from "./operator-github.js";
 import { getTestbedE2eSuite, runTestbedE2eReadOnly } from "./operator-testbed.js";
+import { invokeAgentTask } from "./agent-invocation.js";
 
 const server = new McpServer({
   name: "averray-mcp",
@@ -236,11 +237,33 @@ server.tool(
 );
 
 server.tool(
+  "averray_invoke_agent_task",
+  "Stable agent-to-agent hook for trusted deploy scripts, backend agents, Codex, and other operator agents. Runs a named safe operator command, the full read-only testbed E2E suite, or one testbed testcase by ID with requester/correlation metadata. Uses structured operator/MCP workflows instead of free-form Hermes prompts. Fails closed for unknown commands, live mutation cases, and local checkpoint writes unless the caller explicitly opts into that class of action.",
+  {
+    requester: z.string().min(1),
+    intent: z.enum(["operator_command", "testbed_e2e_read_only", "testbed_case"]).default("operator_command"),
+    command: z.string().min(1).optional(),
+    testCaseId: z.string().min(1).optional(),
+    correlationId: z.string().optional(),
+    reason: z.string().optional(),
+    allowMutations: z.boolean().default(false),
+    allowLocalCheckpoint: z.boolean().default(false),
+    expectedWallet: z.string().optional(),
+    defaultDryRun: z.boolean().default(false),
+    maxEvidenceUrls: z.number().int().min(1).max(20).default(5),
+    confidenceThreshold: z.number().min(0).max(1).default(0.7)
+  },
+  async (input) => {
+    return jsonContent(await invokeAgentTask(input, { query, workflowDeps: workflowDeps() }));
+  }
+);
+
+server.tool(
   "averray_handle_operator_command",
   "Direct router for trusted Slack/operator/command-center messages. Use this for short commands like 'what can you do for us', 'admin readiness', 'business ledger', 'ops health', 'github status', 'github brief', 'daily github brief', 'what changed since last time', 'github open prs', 'github ci failures', 'testbed e2e suite', 'platform e2e suite', 'run testbed e2e read-only', 'daily operator brief', 'find safe work', 'operator status', 'operator status details', 'run one wikipedia citation repair if safe', and 'status last wikipedia citation repair' instead of sending them through a free-form Hermes prompt. Recognized repair run commands call averray_run_wikipedia_citation_repair directly; recognized read-only E2E run commands call averray_run_testbed_e2e_read_only directly. Recognized status/help/brief/work-discovery/usefulness/admin-readiness/ledger/health/github/testbed commands are read-only against external systems except GitHub brief, which persists a local checkpoint timestamp. Human surfaces may compact identifiers by default; add 'details' for full audit identifiers.",
   {
     text: z.string().min(1),
-    source: z.enum(["slack", "operator", "command_center", "hermes"]).default("operator"),
+    source: z.enum(["slack", "operator", "command_center", "hermes", "agent"]).default("operator"),
     expectedWallet: z.string().optional(),
     defaultDryRun: z.boolean().default(false),
     maxEvidenceUrls: z.number().int().min(1).max(20).default(5),

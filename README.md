@@ -174,6 +174,31 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   business ledger, ops health, and GitHub status. It intentionally skips the
   guarded live repair case, the local GitHub brief checkpoint, and manual
   surface parity checks.
+  Other trusted agents and deploy scripts should call `averray_invoke_agent_task`
+  when they need Hermes/Averray to run a post-deploy smoke or E2E check. The
+  hook accepts structured requester metadata, an optional `correlationId`, and
+  either a safe operator command, the full read-only E2E suite, or a single
+  testcase ID. Example payloads:
+
+  ```json
+  {"requester":"codex","intent":"testbed_e2e_read_only","correlationId":"deploy-20260509","reason":"post-deploy smoke"}
+  ```
+
+  ```json
+  {"requester":"backend-agent","intent":"testbed_case","testCaseId":"TBE2E-004","correlationId":"ci-123"}
+  ```
+
+  ```json
+  {"requester":"codex","command":"operator status","correlationId":"deploy-20260509"}
+  ```
+
+  The hook uses structured MCP/operator workflows instead of a free-form Hermes
+  prompt. Unknown commands are blocked. Live repair cases require
+  `allowMutations: true`; `github brief` and testcase `TBE2E-010` require
+  `allowLocalCheckpoint: true` because they write the local comparison
+  checkpoint. The response always reports whether free-form prompts were avoided
+  and whether the requested action would mutate Averray or write a local
+  checkpoint.
   `operator status` calls the canonical read-only
   `averray_operator_status` MCP tool and returns wallet, budget, open-job,
   latest-run, safety, and safe-command metadata. Human surfaces can show

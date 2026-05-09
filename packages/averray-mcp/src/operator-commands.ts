@@ -1,7 +1,7 @@
 import type { WikipediaCitationRepairWorkflowInput } from "./job-workflows.js";
 import type { GithubOperatorView } from "./operator-github.js";
 
-export type OperatorCommandSource = "slack" | "operator" | "command_center" | "hermes";
+export type OperatorCommandSource = "slack" | "operator" | "command_center" | "hermes" | "agent";
 
 export type ParsedOperatorCommand =
   | {
