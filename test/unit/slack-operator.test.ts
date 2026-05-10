@@ -677,6 +677,79 @@ describe("slack operator bridge", () => {
     expect(text).toContain("edits Wikipedia: `false`");
   });
 
+  it("formats handoff monitor replies with active and recent work", () => {
+    const text = formatOperatorResultForSlack({
+      handled: true,
+      kind: "handoff_monitor",
+      monitor: {
+        status: "active",
+        counts: {
+          events: 5,
+          correlations: 2,
+          active: 1,
+          recent: 2,
+        },
+        active: [
+          {
+            correlationId: "github-pr-218-dc3e4e60104582e987dd53398fdb7c9676e25d67-25607150732",
+            requester: "github-actions",
+            intent: "pr_handoff",
+            repo: "averray-agent/agent",
+            pullRequestNumber: 218,
+            pullRequestUrl: "https://github.com/averray-agent/agent/pull/218",
+            testCaseIds: ["TBE2E-004"],
+            reason: "post-CI PR handoff",
+            status: "running",
+            phase: "testbed",
+            active: true,
+            updatedAt: "2026-05-09T17:24:30.000Z",
+            summary: {
+              finalVerdict: "PASS",
+              mergeRecommendation: "Wait for merge group CI.",
+              codeReviewVerdict: "ok",
+            },
+          },
+        ],
+        recent: [
+          {
+            correlationId: "github-pr-218-dc3e4e60104582e987dd53398fdb7c9676e25d67-25607150732",
+            status: "running",
+          },
+          {
+            correlationId: "github-deploy-25608715158-22beb113398569d4bd5d0bf85373777486f8b70c",
+            requester: "github-actions",
+            intent: "post_deploy",
+            repo: "averray-agent/agent",
+            status: "completed",
+            phase: "completed",
+            updatedAt: "2026-05-09T20:36:00.000Z",
+            summary: {
+              finalVerdict: "PASS",
+              mergeRecommendation: "n/a",
+            },
+          },
+        ],
+        safety: {
+          readOnly: true,
+          githubMutated: false,
+          wikipediaEdited: false,
+          freeFormHermesPromptUsed: false,
+        },
+      },
+    });
+
+    expect(text).toContain("*Hermes handoff monitor*");
+    expect(text).toContain("status: `active`");
+    expect(text).toContain("*Active now*");
+    expect(text).toContain("<https://github.com/averray-agent/agent/pull/218|averray-agent/agent#218>");
+    expect(text).toContain("tests: `TBE2E-004`");
+    expect(text).toContain("verdict: `PASS`");
+    expect(text).toContain("code review: `ok`");
+    expect(text).toContain("*Recent handoffs*");
+    expect(text).toContain("post_deploy");
+    expect(text).toContain("GitHub mutated: `false`");
+  });
+
   it("formats workflow replies with compact validation and evidence summary", () => {
     const text = formatOperatorResultForSlack({
       handled: true,
