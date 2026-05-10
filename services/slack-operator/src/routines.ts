@@ -4,6 +4,10 @@ export interface SlackRoutineConfig {
     enabled: boolean;
     timeUtc: { hour: number; minute: number };
   };
+  opsHealth: {
+    enabled: boolean;
+    timeUtc: { hour: number; minute: number };
+  };
   safeWorkScan: {
     enabled: boolean;
     intervalMs: number;
@@ -25,6 +29,10 @@ export function parseSlackRoutineConfig(
       enabled: env.SLACK_OPERATOR_DAILY_BRIEF_ENABLED === "1",
       timeUtc: parseUtcTime(env.SLACK_OPERATOR_DAILY_BRIEF_TIME_UTC ?? "08:00"),
     },
+    opsHealth: {
+      enabled: env.SLACK_OPERATOR_OPS_HEALTH_ENABLED === "1",
+      timeUtc: parseUtcTime(env.SLACK_OPERATOR_OPS_HEALTH_TIME_UTC ?? "08:05"),
+    },
     safeWorkScan: {
       enabled: safeWorkMinutes > 0,
       intervalMs: Math.max(60_000, safeWorkMinutes * 60_000),
@@ -38,12 +46,15 @@ export function shouldRunDailyBrief(
   config: SlackRoutineConfig,
   lastPostedDateKey: string | undefined
 ): { shouldRun: boolean; dateKey: string } {
-  const dateKey = utcDateKey(now);
-  if (!config.dailyBrief.enabled || !config.channelId) return { shouldRun: false, dateKey };
-  if (lastPostedDateKey === dateKey) return { shouldRun: false, dateKey };
-  const minutesNow = now.getUTCHours() * 60 + now.getUTCMinutes();
-  const minutesTarget = config.dailyBrief.timeUtc.hour * 60 + config.dailyBrief.timeUtc.minute;
-  return { shouldRun: minutesNow >= minutesTarget, dateKey };
+  return shouldRunDailySchedule(now, config.channelId, config.dailyBrief, lastPostedDateKey);
+}
+
+export function shouldRunOpsHealth(
+  now: Date,
+  config: SlackRoutineConfig,
+  lastPostedDateKey: string | undefined
+): { shouldRun: boolean; dateKey: string } {
+  return shouldRunDailySchedule(now, config.channelId, config.opsHealth, lastPostedDateKey);
 }
 
 export function safeWorkResultSignature(result: unknown): string | undefined {
@@ -81,6 +92,20 @@ function parseUtcTime(value: string): { hour: number; minute: number } {
 function positiveNumber(value: string | undefined): number {
   const parsed = Number.parseFloat(value ?? "0");
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function shouldRunDailySchedule(
+  now: Date,
+  channelId: string | undefined,
+  schedule: { enabled: boolean; timeUtc: { hour: number; minute: number } },
+  lastPostedDateKey: string | undefined
+): { shouldRun: boolean; dateKey: string } {
+  const dateKey = utcDateKey(now);
+  if (!schedule.enabled || !channelId) return { shouldRun: false, dateKey };
+  if (lastPostedDateKey === dateKey) return { shouldRun: false, dateKey };
+  const minutesNow = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const minutesTarget = schedule.timeUtc.hour * 60 + schedule.timeUtc.minute;
+  return { shouldRun: minutesNow >= minutesTarget, dateKey };
 }
 
 function utcDateKey(now: Date): string {

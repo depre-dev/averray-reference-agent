@@ -257,6 +257,9 @@ export function formatOperatorResultForSlack(result: unknown): string {
   if (result.kind === "testbed_e2e_suite") {
     return formatTestbedE2eSuiteForSlack(result);
   }
+  if (result.kind === "handoff_monitor") {
+    return formatHandoffMonitorForSlack(result);
+  }
   if (result.kind === "operator_status") {
     const detailed = result.detailed === true;
     const status = isRecord(result.status) ? result.status : {};
@@ -537,6 +540,71 @@ function formatTestbedE2eReadOnlyRunForSlack(result: Record<string, unknown>): s
     `• GitHub brief checkpoint skipped: \`${String(safety.skippedGithubBriefCheckpoint === true)}\``,
     `• edits Wikipedia: \`${String(safety.editsWikipedia === true)}\``,
   ].filter(Boolean).join("\n");
+}
+
+function formatHandoffMonitorForSlack(result: Record<string, unknown>): string {
+  const monitor = isRecord(result.monitor) ? result.monitor : {};
+  const counts = isRecord(monitor.counts) ? monitor.counts : {};
+  const safety = isRecord(monitor.safety) ? monitor.safety : {};
+  const active = arrayField(monitor, "active");
+  const recent = arrayField(monitor, "recent");
+  const activeIds = new Set(active.map((entry) => stringField(entry, "correlationId")).filter(Boolean));
+  const recentCompleted = recent.filter((entry) => !activeIds.has(stringField(entry, "correlationId")));
+
+  return [
+    "*Hermes handoff monitor*",
+    `• status: \`${stringField(monitor, "status") ?? "unknown"}\``,
+    `• active/recent/events: \`${numberField(counts, "active") ?? active.length}/${numberField(counts, "recent") ?? recent.length}/${numberField(counts, "events") ?? 0}\``,
+    "",
+    "*Active now*",
+    active.length > 0 ? active.slice(0, 5).map((entry) => formatHandoffSummary(entry, true)).join("\n") : "• none",
+    "",
+    "*Recent handoffs*",
+    recentCompleted.length > 0
+      ? recentCompleted.slice(0, 6).map((entry) => formatHandoffSummary(entry, false)).join("\n")
+      : "• none in the monitor window",
+    "",
+    "*Safety*",
+    `• read-only: \`${String(safety.readOnly !== false)}\``,
+    `• GitHub mutated: \`${String(safety.githubMutated === true)}\``,
+    `• Wikipedia edited: \`${String(safety.wikipediaEdited === true)}\``,
+    `• free-form prompt: \`${String(safety.freeFormHermesPromptUsed === true)}\``,
+  ].join("\n");
+}
+
+function formatHandoffSummary(value: unknown, includePhase: boolean): string {
+  if (!isRecord(value)) return "• unknown handoff";
+  const summary = isRecord(value.summary) ? value.summary : {};
+  const status = stringField(value, "status") ?? "unknown";
+  const phase = includePhase ? ` / ${stringField(value, "phase") ?? "unknown"}` : "";
+  const target = formatHandoffTarget(value);
+  const correlationId = formatId(stringField(value, "correlationId"), false) ?? "n/a";
+  const intent = stringField(value, "intent") ?? "unknown";
+  const tests = Array.isArray(value.testCaseIds) && value.testCaseIds.length > 0
+    ? `\n  tests: \`${value.testCaseIds.map(String).join(", ")}\``
+    : "";
+  const verdict = stringField(summary, "finalVerdict") ?? stringField(summary, "status");
+  const merge = stringField(summary, "mergeRecommendation");
+  const review = stringField(summary, "codeReviewVerdict");
+  const reason = stringField(value, "reason");
+  const updatedAt = stringField(value, "updatedAt") ?? stringField(value, "startedAt");
+  return [
+    `• \`${status}${phase}\` ${target} - \`${intent}\` - \`${correlationId}\``,
+    updatedAt ? `  updated: \`${updatedAt}\`` : "",
+    verdict ? `  verdict: \`${verdict}\`` : "",
+    review ? `  code review: \`${review}\`` : "",
+    merge ? `  merge: ${merge}` : "",
+    reason ? `  reason: ${reason}` : "",
+    tests,
+  ].filter(Boolean).join("\n");
+}
+
+function formatHandoffTarget(value: Record<string, unknown>): string {
+  const repo = stringField(value, "repo");
+  const pr = numberField(value, "pullRequestNumber");
+  const url = stringField(value, "pullRequestUrl");
+  const label = repo && pr ? `${repo}#${pr}` : repo ?? "no repo";
+  return url ? `<${url}|${label}>` : label;
 }
 
 function githubViewTitle(view: string): string {

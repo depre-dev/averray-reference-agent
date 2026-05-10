@@ -18,6 +18,7 @@ import {
   parseSlackRoutineConfig,
   shouldPostSafeWorkResult,
   shouldRunDailyBrief,
+  shouldRunOpsHealth,
 } from "./routines.js";
 
 const enabled = optionalEnv("SLACK_OPERATOR_ENABLED", "0") === "1";
@@ -44,6 +45,8 @@ logger.info({
     channelConfigured: Boolean(routineConfig.channelId),
     dailyBrief: routineConfig.dailyBrief.enabled,
     dailyBriefTimeUtc: `${String(routineConfig.dailyBrief.timeUtc.hour).padStart(2, "0")}:${String(routineConfig.dailyBrief.timeUtc.minute).padStart(2, "0")}`,
+    opsHealth: routineConfig.opsHealth.enabled,
+    opsHealthTimeUtc: `${String(routineConfig.opsHealth.timeUtc.hour).padStart(2, "0")}:${String(routineConfig.opsHealth.timeUtc.minute).padStart(2, "0")}`,
     safeWorkScanIntervalMs: routineConfig.safeWorkScan.enabled ? routineConfig.safeWorkScan.intervalMs : 0,
   },
 }, "slack_operator_starting");
@@ -67,7 +70,26 @@ if (!enabled) {
 
 async function handleHttpRequest(request: http.IncomingMessage, response: http.ServerResponse) {
   if (request.method === "GET" && request.url === "/health") {
-    writeJson(response, 200, { status: "ok", enabled });
+    writeJson(response, 200, {
+      status: "ok",
+      enabled,
+      routines: {
+        channelConfigured: Boolean(routineConfig.channelId),
+        dailyBrief: {
+          enabled: routineConfig.dailyBrief.enabled,
+          timeUtc: formatUtcTime(routineConfig.dailyBrief.timeUtc),
+        },
+        opsHealth: {
+          enabled: routineConfig.opsHealth.enabled,
+          timeUtc: formatUtcTime(routineConfig.opsHealth.timeUtc),
+        },
+        safeWorkScan: {
+          enabled: routineConfig.safeWorkScan.enabled,
+          intervalMs: routineConfig.safeWorkScan.enabled ? routineConfig.safeWorkScan.intervalMs : 0,
+          notifyOnlyOnAvailable: routineConfig.safeWorkScan.notifyOnlyOnAvailable,
+        },
+      },
+    });
     return;
   }
   if (!enabled) {
@@ -204,15 +226,17 @@ async function handleCommand(envelope: SlackCommandEnvelope) {
 
 function startOperatorRoutines() {
   if (!routineConfig.channelId) {
-    if (routineConfig.dailyBrief.enabled || routineConfig.safeWorkScan.enabled) {
+    if (routineConfig.dailyBrief.enabled || routineConfig.opsHealth.enabled || routineConfig.safeWorkScan.enabled) {
       logger.warn("slack_operator_routines_no_channel");
     }
     return;
   }
 
   let lastDailyBriefDateKey: string | undefined;
+  let lastOpsHealthDateKey: string | undefined;
   let lastSafeWorkSignature: string | undefined;
   let dailyBriefRunning = false;
+  let opsHealthRunning = false;
   let safeWorkRunning = false;
 
   const checkDailyBrief = async () => {
@@ -231,6 +255,25 @@ function startOperatorRoutines() {
       logger.error({ err: error }, "slack_operator_daily_brief_failed");
     } finally {
       dailyBriefRunning = false;
+    }
+  };
+
+  const checkOpsHealth = async () => {
+    if (opsHealthRunning) return;
+    const decision = shouldRunOpsHealth(new Date(), routineConfig, lastOpsHealthDateKey);
+    if (!decision.shouldRun) return;
+    opsHealthRunning = true;
+    try {
+      if (await routineAlreadyRecordedToday("ops health", decision.dateKey)) {
+        lastOpsHealthDateKey = decision.dateKey;
+        return;
+      }
+      await runRoutineCommand("ops health", "slack_operator_ops_health_posted");
+      lastOpsHealthDateKey = decision.dateKey;
+    } catch (error) {
+      logger.error({ err: error }, "slack_operator_ops_health_failed");
+    } finally {
+      opsHealthRunning = false;
     }
   };
 
@@ -265,6 +308,10 @@ function startOperatorRoutines() {
   if (routineConfig.dailyBrief.enabled) {
     setTimeout(() => void checkDailyBrief(), 5_000);
     setInterval(() => void checkDailyBrief(), 60_000);
+  }
+  if (routineConfig.opsHealth.enabled) {
+    setTimeout(() => void checkOpsHealth(), 7_000);
+    setInterval(() => void checkOpsHealth(), 60_000);
   }
   if (routineConfig.safeWorkScan.enabled) {
     setTimeout(() => void checkSafeWork(), 10_000);
@@ -386,6 +433,10 @@ function stringField(value: unknown, key: string): string | undefined {
   if (!isRecord(value)) return undefined;
   const field = value[key];
   return typeof field === "string" && field.length > 0 ? field : undefined;
+}
+
+function formatUtcTime(time: { hour: number; minute: number }): string {
+  return `${String(time.hour).padStart(2, "0")}:${String(time.minute).padStart(2, "0")}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
