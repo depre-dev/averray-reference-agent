@@ -1,0 +1,53 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  isMonitorAuthorized,
+  parseMonitorConfig,
+  renderMonitorHtml,
+} from "../../services/slack-operator/src/monitor.js";
+
+describe("slack operator personal monitor", () => {
+  it("is opt-in and supports optional token protection", () => {
+    expect(parseMonitorConfig({})).toEqual({ enabled: false, token: undefined });
+    expect(parseMonitorConfig({
+      SLACK_OPERATOR_MONITOR_ENABLED: "1",
+      SLACK_OPERATOR_MONITOR_TOKEN: "secret",
+    })).toEqual({ enabled: true, token: "secret" });
+  });
+
+  it("authorizes local monitor requests when no token is configured", () => {
+    expect(isMonitorAuthorized(
+      { enabled: true },
+      {},
+      new URL("http://localhost/monitor")
+    )).toBe(true);
+  });
+
+  it("requires bearer or query token when configured", () => {
+    const config = { enabled: true, token: "secret" };
+    expect(isMonitorAuthorized(config, {}, new URL("http://localhost/monitor"))).toBe(false);
+    expect(isMonitorAuthorized(
+      config,
+      { authorization: "Bearer secret" },
+      new URL("http://localhost/monitor")
+    )).toBe(true);
+    expect(isMonitorAuthorized(
+      config,
+      {},
+      new URL("http://localhost/monitor?token=secret")
+    )).toBe(true);
+  });
+
+  it("renders a self-refreshing monitor shell without executing operator commands", () => {
+    const html = renderMonitorHtml({
+      title: "Pascal Monitor",
+      eventsPath: "/monitor/events",
+    });
+
+    expect(html).toContain("<title>Pascal Monitor</title>");
+    expect(html).toContain("Live private view of agent-to-agent handoffs.");
+    expect(html).toContain("const eventsPath = \"/monitor/events\";");
+    expect(html).toContain("auto-refresh 5s");
+    expect(html).not.toContain("handleOperatorCommand");
+  });
+});

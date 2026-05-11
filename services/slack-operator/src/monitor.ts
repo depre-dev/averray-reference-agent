@@ -1,0 +1,307 @@
+export interface MonitorConfig {
+  enabled: boolean;
+  token?: string;
+}
+
+export function parseMonitorConfig(env: NodeJS.ProcessEnv): MonitorConfig {
+  return {
+    enabled: env.SLACK_OPERATOR_MONITOR_ENABLED === "1",
+    token: nonEmpty(env.SLACK_OPERATOR_MONITOR_TOKEN),
+  };
+}
+
+export function isMonitorAuthorized(
+  config: MonitorConfig,
+  headers: Record<string, string | string[] | undefined>,
+  url: URL
+): boolean {
+  if (!config.token) return true;
+  const authorization = headerValue(headers.authorization);
+  if (authorization === `Bearer ${config.token}`) return true;
+  return url.searchParams.get("token") === config.token;
+}
+
+export function renderMonitorHtml(options: { title?: string; eventsPath?: string } = {}): string {
+  const title = escapeHtml(options.title ?? "Hermes Handoff Monitor");
+  const eventsPath = JSON.stringify(options.eventsPath ?? "/monitor/events");
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${title}</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #041d1a;
+      --panel: #0a302c;
+      --panel-2: #0d3b36;
+      --line: #4d766f;
+      --text: #f5ead3;
+      --muted: #a7b5aa;
+      --accent: #ffb02e;
+      --ok: #52d273;
+      --bad: #ff6b6b;
+      --warn: #ffd166;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at top left, #123a35, var(--bg) 34rem);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 24px auto 48px;
+    }
+    header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: clamp(1.5rem, 2vw, 2rem);
+      letter-spacing: 0;
+    }
+    p { color: var(--muted); margin: 0; }
+    button {
+      min-height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 0 14px;
+      cursor: pointer;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(10, 48, 44, 0.9);
+      padding: 14px;
+      box-shadow: 0 14px 48px rgba(0, 0, 0, 0.24);
+    }
+    .metric {
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+    .value {
+      display: block;
+      margin-top: 8px;
+      font-size: 1.6rem;
+      font-weight: 700;
+    }
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 22px 0 10px;
+    }
+    .section-title h2 {
+      margin: 0;
+      font-size: 1rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+    .list {
+      display: grid;
+      gap: 10px;
+    }
+    .handoff {
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--accent);
+      border-radius: 8px;
+      background: rgba(10, 48, 44, 0.92);
+      padding: 14px;
+    }
+    .handoff[data-status="completed"],
+    .handoff[data-status="passed"] { border-left-color: var(--ok); }
+    .handoff[data-status="failed"],
+    .handoff[data-status="blocked"] { border-left-color: var(--bad); }
+    .handoff[data-status="needs_review"] { border-left-color: var(--warn); }
+    .handoff-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .handoff-title {
+      min-width: 0;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 2px 8px;
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.05);
+      font-size: 0.82rem;
+      white-space: nowrap;
+    }
+    dl {
+      display: grid;
+      grid-template-columns: 150px minmax(0, 1fr);
+      gap: 8px 12px;
+      margin: 0;
+    }
+    dt { color: var(--muted); }
+    dd {
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+    code {
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      padding: 1px 5px;
+      background: rgba(0, 0, 0, 0.24);
+      color: var(--text);
+    }
+    a { color: var(--accent); }
+    .empty {
+      color: var(--muted);
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      padding: 22px;
+      text-align: center;
+    }
+    .error {
+      border-color: var(--bad);
+      color: var(--bad);
+    }
+    @media (max-width: 760px) {
+      main { width: min(100vw - 20px, 1180px); margin-top: 14px; }
+      header { flex-direction: column; }
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      dl { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>${title}</h1>
+        <p id="subtitle">Live private view of agent-to-agent handoffs.</p>
+      </div>
+      <button id="refresh" type="button">Refresh</button>
+    </header>
+    <section class="grid" aria-label="Monitor summary">
+      <div class="card"><span class="metric">Status</span><span id="status" class="value">...</span></div>
+      <div class="card"><span class="metric">Active</span><span id="active-count" class="value">0</span></div>
+      <div class="card"><span class="metric">Recent</span><span id="recent-count" class="value">0</span></div>
+      <div class="card"><span class="metric">Events</span><span id="event-count" class="value">0</span></div>
+    </section>
+    <div class="section-title"><h2>Active Now</h2><span id="generated" class="pill">waiting</span></div>
+    <section id="active" class="list"><div class="empty">No active handoffs.</div></section>
+    <div class="section-title"><h2>Recent Handoffs</h2><span class="pill">auto-refresh 5s</span></div>
+    <section id="recent" class="list"><div class="empty">Loading recent handoffs...</div></section>
+  </main>
+  <script>
+    const eventsPath = ${eventsPath};
+    const token = new URLSearchParams(location.search).get("token");
+    const withToken = token ? eventsPath + "?token=" + encodeURIComponent(token) : eventsPath;
+
+    document.getElementById("refresh").addEventListener("click", () => load());
+    load();
+    setInterval(load, 5000);
+
+    async function load() {
+      try {
+        const response = await fetch(withToken, { cache: "no-store" });
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        render(await response.json());
+      } catch (error) {
+        document.getElementById("recent").innerHTML = '<div class="empty error">Monitor unavailable: ' + escapeHtml(String(error.message || error)) + '</div>';
+      }
+    }
+
+    function render(payload) {
+      const counts = payload.counts || {};
+      document.getElementById("status").textContent = payload.status || "unknown";
+      document.getElementById("active-count").textContent = counts.active || 0;
+      document.getElementById("recent-count").textContent = counts.recent || 0;
+      document.getElementById("event-count").textContent = counts.events || 0;
+      document.getElementById("generated").textContent = payload.generatedAt ? new Date(payload.generatedAt).toLocaleString() : "unknown";
+      renderList("active", payload.active || [], "No active handoffs.");
+      renderList("recent", payload.recent || [], "No recent handoffs in the monitor window.");
+    }
+
+    function renderList(id, entries, emptyText) {
+      const target = document.getElementById(id);
+      if (!entries.length) {
+        target.innerHTML = '<div class="empty">' + escapeHtml(emptyText) + '</div>';
+        return;
+      }
+      target.innerHTML = entries.map(renderHandoff).join("");
+    }
+
+    function renderHandoff(item) {
+      const summary = item.summary || {};
+      const title = [item.repo, item.pullRequestNumber ? "#" + item.pullRequestNumber : "", item.intent].filter(Boolean).join(" ");
+      const pr = item.pullRequestUrl ? '<a href="' + escapeAttr(item.pullRequestUrl) + '" target="_blank" rel="noreferrer">open PR</a>' : "n/a";
+      const tests = Array.isArray(item.testCaseIds) && item.testCaseIds.length ? item.testCaseIds.map((id) => "<code>" + escapeHtml(id) + "</code>").join(" ") : "n/a";
+      return '<article class="handoff" data-status="' + escapeAttr(item.status || "unknown") + '">' +
+        '<div class="handoff-head"><div class="handoff-title">' + escapeHtml(title || item.correlationId || "handoff") + '</div><span class="pill">' + escapeHtml(item.status || "unknown") + '</span></div>' +
+        '<dl>' +
+        row("Correlation", "<code>" + escapeHtml(item.correlationId || "unknown") + "</code>") +
+        row("Requester", escapeHtml(item.requester || "n/a")) +
+        row("Phase", escapeHtml(item.phase || "unknown")) +
+        row("Reason", escapeHtml(item.reason || "n/a")) +
+        row("Tests", tests) +
+        row("PR", pr) +
+        row("Verdict", escapeHtml(summary.finalVerdict || summary.status || "n/a")) +
+        row("Merge", escapeHtml(summary.mergeRecommendation || "n/a")) +
+        row("Updated", escapeHtml(item.updatedAt ? new Date(item.updatedAt).toLocaleString() : "unknown")) +
+        '</dl></article>';
+    }
+
+    function row(label, value) {
+      return "<dt>" + escapeHtml(label) + "</dt><dd>" + value + "</dd>";
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+    }
+
+    function escapeAttr(value) {
+      return escapeHtml(value).replace(new RegExp(String.fromCharCode(96), "g"), "&#96;");
+    }
+  </script>
+</body>
+</html>`;
+}
+
+function nonEmpty(value: string | undefined): string | undefined {
+  return value && value.length > 0 ? value : undefined;
+}
+
+function headerValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[char] ?? char);
+}
