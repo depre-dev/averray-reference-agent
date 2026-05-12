@@ -25,12 +25,20 @@ In Cloudflare One:
 1. Go to **Networks > Connectors > Cloudflare Tunnels**.
 2. Create a tunnel named `averray-command-center`.
 3. Choose the Docker connector option and copy the tunnel token.
-4. Add a public hostname, for example:
+4. Add a public hostname for Command Center, for example:
    - hostname: `command.example.com`
    - service: `http://hermes-workspace:3000`
-5. Go to **Access controls > Applications**.
-6. Add a **Self-hosted** application for the same hostname.
-7. Add an Allow policy for explicit operator email addresses only.
+5. Optional but recommended: add a second public hostname for the private
+   Hermes handoff monitor:
+   - hostname: `monitor.example.com`
+   - service: `http://slack-operator:8790`
+6. Go to **Access controls > Applications**.
+7. Add **Self-hosted** applications for the hostname(s).
+8. Add an Allow policy for explicit operator email addresses only.
+
+With the monitor hostname in place, open `https://monitor.example.com`. The
+Slack operator redirects `/` to `/monitor` when the monitor is enabled, so the
+hostname itself is bookmarkable.
 
 Do not create policies that include `Everyone` or all One-Time PIN users. If
 you use One-Time PIN, pair it with an explicit email list or tightly scoped
@@ -43,6 +51,17 @@ Add the tunnel token to `.env.prod`:
 ```dotenv
 CLOUDFLARED_IMAGE=cloudflare/cloudflared:latest
 CLOUDFLARED_TUNNEL_TOKEN=paste-cloudflare-tunnel-token-here
+```
+
+If you expose the private handoff monitor through Cloudflare Access, enable the
+monitor too. Cloudflare Access is the browser-facing gate; the local monitor
+token is optional defense in depth.
+
+```dotenv
+SLACK_OPERATOR_MONITOR_ENABLED=1
+# Optional: require ?token=... or Authorization: Bearer ... after Access login.
+SLACK_OPERATOR_MONITOR_TOKEN=
+AVERRAY_HANDOFF_EVENTS_PATH=/data/handoff-events.jsonl
 ```
 
 When accessing Workspace through HTTPS via Cloudflare, use secure cookies and
@@ -85,7 +104,7 @@ docker compose --env-file .env.prod \
   -f ops/compose.cloudflare-access.yml \
   -p avg \
   --profile command-center \
-  up -d hermes hermes-gateway hermes-workspace cloudflared
+  up -d hermes hermes-gateway hermes-workspace slack-operator cloudflared
 ```
 
 ## Verify
@@ -126,9 +145,11 @@ From a browser:
    second password prompt.
 4. Run `operator status`.
 5. Run `operator status details`.
+6. If you configured the monitor hostname, open `https://monitor.example.com`
+   and confirm it shows the Hermes Handoff Monitor without an SSH tunnel.
 
 From a machine that is not authenticated with Access, the hostname should show
-the Cloudflare Access login screen, not Hermes Workspace.
+the Cloudflare Access login screen, not Hermes Workspace or the handoff monitor.
 
 ## Safety Checks
 
@@ -137,8 +158,8 @@ From outside the VPS, these ports should not be reachable directly:
 - `3000` Workspace UI
 - `8642` Hermes gateway
 - `9119` Hermes dashboard
+- `8790` Slack operator and handoff monitor
 - Postgres
-- Slack operator HTTP port
 
 On the VPS, the local checks should still work:
 
@@ -146,6 +167,7 @@ On the VPS, the local checks should still work:
 curl -fsS http://127.0.0.1:3000 >/dev/null
 curl -fsS http://127.0.0.1:8642/health
 curl -fsS http://127.0.0.1:9119/api/status
+curl -fsS http://127.0.0.1:8790/monitor/events
 ```
 
 ## Stop Public Access
