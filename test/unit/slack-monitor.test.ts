@@ -48,6 +48,8 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Live private view of agent-to-agent handoffs.");
     expect(html).toContain("const eventsPath = \"/monitor/events\";");
     expect(html).toContain("auto-refresh 5s");
+    expect(html).toContain("derivePullRequestUrl(item)");
+    expect(html).toContain("https://github.com/");
     expect(html).not.toContain("handleOperatorCommand");
   });
 });
