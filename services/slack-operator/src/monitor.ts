@@ -288,6 +288,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         row("PR", pr) +
         row("Verdict", escapeHtml(summary.finalVerdict || summary.status || "n/a")) +
         row("Merge", escapeHtml(summary.mergeRecommendation || "n/a")) +
+        reviewReasonRows(summary) +
         row("Updated", escapeHtml(item.updatedAt ? new Date(item.updatedAt).toLocaleString() : "unknown")) +
         '</dl></article>';
     }
@@ -311,7 +312,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const status = normalize(item.status);
       const finalVerdict = normalize(summary.finalVerdict || summary.status);
       const mergeRecommendation = normalize(summary.mergeRecommendation);
-      const reason = String(summary.reason || item.reason || item.phase || "No reason recorded.");
+      const reason = releaseReason(summary, item);
 
       if (status === "running") {
         return { level: "running", label: "RUNNING", why: reason };
@@ -336,6 +337,28 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return { level: "needs-review", label: "NEEDS REVIEW", why: reason };
       }
       return { level: "pass", label: "PASS", why: reason };
+    }
+
+    function releaseReason(summary, item) {
+      const reviewReasons = Array.isArray(summary.reviewReasons) ? summary.reviewReasons : [];
+      const first = reviewReasons.find(Boolean);
+      if (first) {
+        const code = String(first.code || "review");
+        const message = String(first.message || "Human review recommended.");
+        return code + ": " + message;
+      }
+      return String(summary.finalReason || summary.reason || item.reason || item.phase || "No reason recorded.");
+    }
+
+    function reviewReasonRows(summary) {
+      const reviewReasons = Array.isArray(summary.reviewReasons) ? summary.reviewReasons : [];
+      if (!reviewReasons.length) return "";
+      return reviewReasons.slice(0, 3).map((reason, index) => {
+        const code = reason && reason.code ? String(reason.code) : "review";
+        const severity = reason && reason.severity ? String(reason.severity) : "unknown";
+        const message = reason && reason.message ? String(reason.message) : "Human review recommended.";
+        return row(index === 0 ? "Review why" : "", escapeHtml(severity + " / " + code + " - " + message));
+      }).join("");
     }
 
     function normalize(value) {

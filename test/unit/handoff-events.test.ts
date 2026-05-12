@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   getHandoffMonitor,
   recordHandoffEvent,
+  summarizeHandoffResult,
 } from "../../packages/averray-mcp/src/handoff-events.js";
 
 describe("handoff event monitor", () => {
@@ -166,5 +167,46 @@ describe("handoff event monitor", () => {
       }
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it("preserves GitHub review reasons in handoff summaries", () => {
+    const summary = summarizeHandoffResult({
+      result: {
+        kind: "agent_pr_handoff",
+        status: "completed",
+        finalVerdict: "needs_review",
+        finalReason: "GitHub review found medium risk.",
+        github: {
+          mergeRecommendation: "needs_review",
+          riskFindings: [
+            {
+              severity: "info",
+              code: "pr_review_green",
+              message: "Branch CI is green.",
+            },
+            {
+              severity: "medium",
+              code: "high_risk_files",
+              message: "PR touches deployment scripts; human review recommended.",
+            },
+          ],
+        },
+      },
+    });
+
+    expect(summary).toMatchObject({
+      kind: "agent_pr_handoff",
+      status: "completed",
+      finalVerdict: "needs_review",
+      finalReason: "GitHub review found medium risk.",
+      mergeRecommendation: "needs_review",
+      reviewReasons: [
+        {
+          severity: "medium",
+          code: "high_risk_files",
+          message: "PR touches deployment scripts; human review recommended.",
+        },
+      ],
+    });
   });
 });
