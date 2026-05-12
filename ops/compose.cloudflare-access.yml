@@ -1,11 +1,15 @@
 # Optional Cloudflare Access/Tunnel overlay for the Hermes Workspace command
-# center. This publishes Workspace through Cloudflare Zero Trust without
-# opening public inbound ports on the VPS.
+# center and private handoff monitor. This publishes selected internal HTTP
+# services through Cloudflare Zero Trust without opening public inbound ports on
+# the VPS.
 #
 # Cloudflare dashboard settings:
 # - Tunnel public hostname: command.example.com
 # - Tunnel service URL: http://hermes-workspace:3000
-# - Access app: self-hosted, same hostname, allow only explicit operator emails.
+# - Optional monitor hostname: monitor.example.com
+# - Optional monitor service URL: http://slack-operator:8790
+# - Access apps: self-hosted, same hostnames, allow only explicit operator
+#   emails.
 services:
   cloudflared:
     image: ${CLOUDFLARED_IMAGE:-cloudflare/cloudflared:latest}

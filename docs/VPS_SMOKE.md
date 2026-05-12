@@ -174,8 +174,8 @@ SLACK_OPERATOR_MONITOR_TOKEN=
 AVERRAY_HANDOFF_EVENTS_PATH=/data/handoff-events.jsonl
 ```
 
-After recreating `slack-operator`, open the page through a trusted tunnel or on
-the VPS itself:
+After recreating `slack-operator`, open the page through Cloudflare Access, a
+trusted tunnel, or on the VPS itself:
 
 ```bash
 curl -sS http://127.0.0.1:8790/health
@@ -187,6 +187,12 @@ The monitor page is `GET /monitor`; the live JSON endpoint is
 run tests, claim jobs, submit work, edit GitHub, or edit Wikipedia.
 The event path must be on the shared `avg-data` volume so handoffs recorded by
 Hermes are visible to the Slack operator monitor.
+
+For no-tunnel browser access, add a Cloudflare Tunnel public hostname such as
+`monitor.averray.com` with service URL `http://slack-operator:8790`, then protect
+that hostname with a Cloudflare Access self-hosted app that allows only explicit
+operator emails. The Slack operator redirects `/` to `/monitor` when the monitor
+is enabled, so the public hostname itself can be bookmarked.
 
 If you use HTTP endpoints, set `SLACK_SIGNING_SECRET` and terminate/expose the
 route with your chosen tunnel or reverse proxy. Keep

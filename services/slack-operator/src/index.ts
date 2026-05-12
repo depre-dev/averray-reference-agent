@@ -109,6 +109,10 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
     return;
   }
   const url = new URL(request.url ?? "/", "http://localhost");
+  if (request.method === "GET" && url.pathname === "/" && monitorConfig.enabled) {
+    writeRedirect(response, "/monitor");
+    return;
+  }
   if (request.method === "GET" && (url.pathname === "/monitor" || url.pathname === "/monitor/events")) {
     if (!monitorConfig.enabled) {
       writeJson(response, 404, { error: "monitor_disabled" });
@@ -466,6 +470,11 @@ function writeJson(response: http.ServerResponse, status: number, payload: unkno
 function writeHtml(response: http.ServerResponse, status: number, html: string) {
   response.writeHead(status, { "content-type": "text/html; charset=utf-8" });
   response.end(html);
+}
+
+function writeRedirect(response: http.ServerResponse, location: string) {
+  response.writeHead(302, { location });
+  response.end();
 }
 
 function headerValue(value: string | string[] | undefined): string | undefined {
