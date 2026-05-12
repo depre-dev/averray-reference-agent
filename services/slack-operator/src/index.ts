@@ -2,6 +2,7 @@ import http from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import { logger, optionalEnv, query } from "@avg/mcp-common";
 import { createDefaultWorkflowDeps } from "@avg/averray-mcp/default-workflow-runtime";
+import { getHandoffMonitor } from "@avg/averray-mcp/handoff-events";
 import { handleOperatorCommandText } from "@avg/averray-mcp/operator-handler";
 import {
   formatOperatorResultForSlack,
@@ -20,6 +21,11 @@ import {
   shouldRunDailyBrief,
   shouldRunOpsHealth,
 } from "./routines.js";
+import {
+  isMonitorAuthorized,
+  parseMonitorConfig,
+  renderMonitorHtml,
+} from "./monitor.js";
 
 const enabled = optionalEnv("SLACK_OPERATOR_ENABLED", "0") === "1";
 const httpPort = Number.parseInt(optionalEnv("SLACK_OPERATOR_HTTP_PORT", "8790"), 10);
@@ -32,6 +38,7 @@ const authConfig = {
   allowedUserIds: parseCsvSet(optionalEnv("SLACK_ALLOWED_USER_IDS")),
 };
 const routineConfig = parseSlackRoutineConfig(process.env, authConfig.allowedChannelIds);
+const monitorConfig = parseMonitorConfig(process.env);
 
 logger.info({
   enabled,
@@ -48,6 +55,10 @@ logger.info({
     opsHealth: routineConfig.opsHealth.enabled,
     opsHealthTimeUtc: `${String(routineConfig.opsHealth.timeUtc.hour).padStart(2, "0")}:${String(routineConfig.opsHealth.timeUtc.minute).padStart(2, "0")}`,
     safeWorkScanIntervalMs: routineConfig.safeWorkScan.enabled ? routineConfig.safeWorkScan.intervalMs : 0,
+  },
+  monitor: {
+    enabled: monitorConfig.enabled,
+    tokenProtected: Boolean(monitorConfig.token),
   },
 }, "slack_operator_starting");
 
@@ -89,7 +100,34 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
           notifyOnlyOnAvailable: routineConfig.safeWorkScan.notifyOnlyOnAvailable,
         },
       },
+      monitor: {
+        enabled: monitorConfig.enabled,
+        tokenProtected: Boolean(monitorConfig.token),
+        paths: monitorConfig.enabled ? ["/monitor", "/monitor/events"] : [],
+      },
     });
+    return;
+  }
+  const url = new URL(request.url ?? "/", "http://localhost");
+  if (request.method === "GET" && (url.pathname === "/monitor" || url.pathname === "/monitor/events")) {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    if (url.pathname === "/monitor") {
+      writeHtml(response, 200, renderMonitorHtml());
+      return;
+    }
+    const monitor = await getHandoffMonitor({
+      correlationId: url.searchParams.get("correlationId") ?? undefined,
+      limit: parseOptionalInteger(url.searchParams.get("limit")),
+      activeWindowMinutes: parseOptionalInteger(url.searchParams.get("activeWindowMinutes")),
+    });
+    writeJson(response, 200, monitor);
     return;
   }
   if (!enabled) {
@@ -425,6 +463,11 @@ function writeJson(response: http.ServerResponse, status: number, payload: unkno
   response.end(JSON.stringify(payload));
 }
 
+function writeHtml(response: http.ServerResponse, status: number, html: string) {
+  response.writeHead(status, { "content-type": "text/html; charset=utf-8" });
+  response.end(html);
+}
+
 function headerValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -437,6 +480,12 @@ function stringField(value: unknown, key: string): string | undefined {
 
 function formatUtcTime(time: { hour: number; minute: number }): string {
   return `${String(time.hour).padStart(2, "0")}:${String(time.minute).padStart(2, "0")}`;
+}
+
+function parseOptionalInteger(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

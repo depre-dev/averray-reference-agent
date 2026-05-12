@@ -159,6 +159,32 @@ POST http://127.0.0.1:8790/slack/commands
 POST http://127.0.0.1:8790/slack/events
 ```
 
+### Personal Handoff Monitor
+
+For a private human view of what Hermes is currently doing for other agents,
+the Slack operator can expose a tiny read-only monitor on the same loopback
+HTTP port. It is disabled by default and reads the local handoff JSONL event
+log used by `averray_handoff_monitor`.
+
+```env
+SLACK_OPERATOR_MONITOR_ENABLED=1
+# Optional. If set, /monitor and /monitor/events require either
+# Authorization: Bearer <token> or ?token=<token>.
+SLACK_OPERATOR_MONITOR_TOKEN=
+```
+
+After recreating `slack-operator`, open the page through a trusted tunnel or on
+the VPS itself:
+
+```bash
+curl -sS http://127.0.0.1:8790/health
+curl -sS http://127.0.0.1:8790/monitor/events
+```
+
+The monitor page is `GET /monitor`; the live JSON endpoint is
+`GET /monitor/events`. Both are observability-only. They do not call Hermes,
+run tests, claim jobs, submit work, edit GitHub, or edit Wikipedia.
+
 If you use HTTP endpoints, set `SLACK_SIGNING_SECRET` and terminate/expose the
 route with your chosen tunnel or reverse proxy. Keep
 `SLACK_OPERATOR_CHANNEL_ID`/`SLACK_OPERATOR_CHANNEL_IDS` and
@@ -189,6 +215,7 @@ what changed since last time
 testbed e2e suite
 platform e2e suite
 run testbed e2e read-only
+handoff monitor
 find safe work
 operator status
 operator status details

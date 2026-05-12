@@ -16,6 +16,10 @@
     "./operator-handler": {
       "types": "./dist/operator-handler.d.ts",
       "import": "./dist/operator-handler.js"
+    },
+    "./handoff-events": {
+      "types": "./dist/handoff-events.d.ts",
+      "import": "./dist/handoff-events.js"
     }
   },
   "scripts": {
