@@ -79,7 +79,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
     .grid {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: 12px;
       margin-bottom: 16px;
     }
@@ -127,10 +127,18 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       padding: 14px;
     }
     .handoff[data-status="completed"],
-    .handoff[data-status="passed"] { border-left-color: var(--ok); }
+    .handoff[data-status="passed"],
+    .handoff[data-verdict="pass"] { border-left-color: var(--ok); }
     .handoff[data-status="failed"],
-    .handoff[data-status="blocked"] { border-left-color: var(--bad); }
-    .handoff[data-status="needs_review"] { border-left-color: var(--warn); }
+    .handoff[data-status="blocked"],
+    .handoff[data-verdict="block"] { border-left-color: var(--bad); }
+    .handoff[data-status="needs_review"],
+    .handoff[data-verdict="needs-review"] { border-left-color: var(--warn); }
+    .handoff-why {
+      margin: 0 0 12px;
+      color: var(--text);
+      line-height: 1.4;
+    }
     .handoff-head {
       display: flex;
       align-items: flex-start;
@@ -205,18 +213,21 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     <section class="grid" aria-label="Monitor summary">
       <div class="card"><span class="metric">Status</span><span id="status" class="value">...</span></div>
       <div class="card"><span class="metric">Active</span><span id="active-count" class="value">0</span></div>
+      <div class="card"><span class="metric">Needs Attention</span><span id="attention-count" class="value">0</span></div>
       <div class="card"><span class="metric">Recent</span><span id="recent-count" class="value">0</span></div>
       <div class="card"><span class="metric">Events</span><span id="event-count" class="value">0</span></div>
     </section>
     <div class="section-title"><h2>Active Now</h2><span id="generated" class="pill">waiting</span></div>
     <section id="active" class="list"><div class="empty">No active handoffs.</div></section>
-    <div class="section-title"><h2>Recent Handoffs</h2><span class="pill">auto-refresh 5s</span></div>
+    <div class="section-title"><h2>Needs Attention</h2><span class="pill">release gate</span></div>
+    <section id="attention" class="list"><div class="empty">No handoffs need attention.</div></section>
+    <div class="section-title"><h2>Release Timeline</h2><span class="pill">auto-refresh 5s</span></div>
     <section id="recent" class="list"><div class="empty">Loading recent handoffs...</div></section>
   </main>
   <script>
     const eventsPath = ${eventsPath};
     const token = new URLSearchParams(location.search).get("token");
-    const withToken = token ? eventsPath + "?token=" + encodeURIComponent(token) : eventsPath;
+    const withToken = buildEventsUrl();
 
     document.getElementById("refresh").addEventListener("click", () => load());
     load();
@@ -234,13 +245,17 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function render(payload) {
       const counts = payload.counts || {};
+      const recent = payload.recent || [];
+      const attention = recent.filter(needsAttention);
       document.getElementById("status").textContent = payload.status || "unknown";
       document.getElementById("active-count").textContent = counts.active || 0;
+      document.getElementById("attention-count").textContent = attention.length;
       document.getElementById("recent-count").textContent = counts.recent || 0;
       document.getElementById("event-count").textContent = counts.events || 0;
       document.getElementById("generated").textContent = payload.generatedAt ? new Date(payload.generatedAt).toLocaleString() : "unknown";
       renderList("active", payload.active || [], "No active handoffs.");
-      renderList("recent", payload.recent || [], "No recent handoffs in the monitor window.");
+      renderList("attention", attention, "No handoffs need attention.");
+      renderList("recent", recent, "No recent handoffs in the monitor window.");
     }
 
     function renderList(id, entries, emptyText) {
@@ -255,12 +270,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function renderHandoff(item) {
       const summary = item.summary || {};
       const title = [item.repo, item.pullRequestNumber ? "#" + item.pullRequestNumber : "", item.intent].filter(Boolean).join(" ");
+      const verdict = releaseVerdict(item);
       const prUrl = item.pullRequestUrl || derivePullRequestUrl(item);
       const prLabel = item.pullRequestNumber ? "#" + escapeHtml(String(item.pullRequestNumber)) : "open PR";
       const pr = prUrl ? '<a href="' + escapeAttr(prUrl) + '" target="_blank" rel="noreferrer">' + prLabel + '</a>' : "n/a";
       const tests = Array.isArray(item.testCaseIds) && item.testCaseIds.length ? item.testCaseIds.map((id) => "<code>" + escapeHtml(id) + "</code>").join(" ") : "n/a";
-      return '<article class="handoff" data-status="' + escapeAttr(item.status || "unknown") + '">' +
-        '<div class="handoff-head"><div class="handoff-title">' + escapeHtml(title || item.correlationId || "handoff") + '</div><span class="pill">' + escapeHtml(item.status || "unknown") + '</span></div>' +
+      return '<article class="handoff" data-status="' + escapeAttr(item.status || "unknown") + '" data-verdict="' + escapeAttr(verdict.level) + '">' +
+        '<div class="handoff-head"><div class="handoff-title">' + escapeHtml(title || item.correlationId || "handoff") + '</div><span class="pill">' + escapeHtml(verdict.label) + '</span></div>' +
+        '<p class="handoff-why">' + escapeHtml(verdict.why) + '</p>' +
         '<dl>' +
         row("Correlation", "<code>" + escapeHtml(item.correlationId || "unknown") + "</code>") +
         row("Requester", escapeHtml(item.requester || "n/a")) +
@@ -272,6 +289,48 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         row("Merge", escapeHtml(summary.mergeRecommendation || "n/a")) +
         row("Updated", escapeHtml(item.updatedAt ? new Date(item.updatedAt).toLocaleString() : "unknown")) +
         '</dl></article>';
+    }
+
+    function buildEventsUrl() {
+      const separator = eventsPath.includes("?") ? "&" : "?";
+      const params = new URLSearchParams({
+        limit: "50",
+        activeWindowMinutes: "240"
+      });
+      if (token) params.set("token", token);
+      return eventsPath + separator + params.toString();
+    }
+
+    function needsAttention(item) {
+      return releaseVerdict(item).level !== "pass";
+    }
+
+    function releaseVerdict(item) {
+      const summary = item.summary || {};
+      const status = normalize(item.status);
+      const finalVerdict = normalize(summary.finalVerdict || summary.status);
+      const mergeRecommendation = normalize(summary.mergeRecommendation);
+      const reason = String(summary.reason || item.reason || item.phase || "No reason recorded.");
+
+      if (status === "running") {
+        return { level: "running", label: "RUNNING", why: reason };
+      }
+      if (status === "failed" || status === "blocked" || finalVerdict.includes("block")) {
+        return { level: "block", label: "BLOCK", why: reason };
+      }
+      if (
+        status === "needs_review"
+        || finalVerdict.includes("review")
+        || mergeRecommendation.includes("review")
+        || mergeRecommendation.includes("wait")
+      ) {
+        return { level: "needs-review", label: "NEEDS REVIEW", why: reason };
+      }
+      return { level: "pass", label: "PASS", why: reason };
+    }
+
+    function normalize(value) {
+      return String(value || "").trim().toLowerCase().replace(/[\\s-]+/g, "_");
     }
 
     function derivePullRequestUrl(item) {
