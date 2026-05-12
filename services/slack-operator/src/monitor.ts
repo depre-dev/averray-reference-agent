@@ -255,7 +255,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function renderHandoff(item) {
       const summary = item.summary || {};
       const title = [item.repo, item.pullRequestNumber ? "#" + item.pullRequestNumber : "", item.intent].filter(Boolean).join(" ");
-      const pr = item.pullRequestUrl ? '<a href="' + escapeAttr(item.pullRequestUrl) + '" target="_blank" rel="noreferrer">open PR</a>' : "n/a";
+      const prUrl = item.pullRequestUrl || derivePullRequestUrl(item);
+      const prLabel = item.pullRequestNumber ? "#" + escapeHtml(String(item.pullRequestNumber)) : "open PR";
+      const pr = prUrl ? '<a href="' + escapeAttr(prUrl) + '" target="_blank" rel="noreferrer">' + prLabel + '</a>' : "n/a";
       const tests = Array.isArray(item.testCaseIds) && item.testCaseIds.length ? item.testCaseIds.map((id) => "<code>" + escapeHtml(id) + "</code>").join(" ") : "n/a";
       return '<article class="handoff" data-status="' + escapeAttr(item.status || "unknown") + '">' +
         '<div class="handoff-head"><div class="handoff-title">' + escapeHtml(title || item.correlationId || "handoff") + '</div><span class="pill">' + escapeHtml(item.status || "unknown") + '</span></div>' +
@@ -270,6 +272,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         row("Merge", escapeHtml(summary.mergeRecommendation || "n/a")) +
         row("Updated", escapeHtml(item.updatedAt ? new Date(item.updatedAt).toLocaleString() : "unknown")) +
         '</dl></article>';
+    }
+
+    function derivePullRequestUrl(item) {
+      const repo = String(item.repo || "");
+      const prNumber = Number(item.pullRequestNumber);
+      if (!/^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$/.test(repo)) return "";
+      if (!Number.isInteger(prNumber) || prNumber < 1) return "";
+      return "https://github.com/" + repo + "/pull/" + prNumber;
     }
 
     function row(label, value) {
