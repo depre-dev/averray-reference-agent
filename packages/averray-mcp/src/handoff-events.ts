@@ -43,6 +43,7 @@ export interface HandoffMonitorOptions {
 
 const DEFAULT_LIMIT = 20;
 const DEFAULT_ACTIVE_WINDOW_MINUTES = 120;
+const ACTIVE_LINGER_MINUTES = 3;
 
 export async function recordHandoffEvent(input: HandoffEventInput): Promise<HandoffEvent> {
   const event: HandoffEvent = {
@@ -75,16 +76,15 @@ export async function getHandoffMonitor(options: HandoffMonitorOptions = {}) {
     24 * 60
   ) * 60_000;
   const summaries = Array.from(grouped.values()).map((group) => summarizeCorrelation(group, now));
-  const active = summaries.filter((summary) => (
-    summary.active === true
-    && now.getTime() - Date.parse(summary.updatedAt) <= activeWindowMs
-  ));
+  const active = summaries.filter((summary) => isVisibleActive(summary, now, activeWindowMs));
+  const running = active.filter((summary) => summary.activeState === "running").length;
+  const justFinished = active.filter((summary) => summary.activeState === "just_finished").length;
 
   return {
     schemaVersion: 1,
     kind: "agent_handoff_monitor",
     generatedAt: now.toISOString(),
-    status: active.length > 0 ? "active" : "idle",
+    status: running > 0 ? "active" : justFinished > 0 ? "recently_active" : "idle",
     source: "local_handoff_event_log",
     filter: {
       correlationId: options.correlationId ?? null,
@@ -95,6 +95,8 @@ export async function getHandoffMonitor(options: HandoffMonitorOptions = {}) {
       events: filtered.length,
       correlations: summaries.length,
       active: active.length,
+      running,
+      justFinished,
       recent: Math.min(summaries.length, limit),
     },
     active: active.slice(0, limit),
@@ -190,6 +192,9 @@ function summarizeCorrelation(eventsNewestFirst: HandoffEvent[], now: Date) {
   const latest = eventsNewestFirst[0];
   const oldest = eventsNewestFirst[eventsNewestFirst.length - 1];
   const status = latest?.status ?? "completed";
+  const sawRunning = eventsNewestFirst.some((event) => event.status === "running");
+  const active = status === "running";
+  const updatedAt = latest?.timestamp ?? now.toISOString();
   return {
     correlationId: latest?.correlationId ?? "unknown",
     requester: latest?.requester ?? oldest?.requester ?? null,
@@ -201,13 +206,36 @@ function summarizeCorrelation(eventsNewestFirst: HandoffEvent[], now: Date) {
     reason: latest?.reason ?? oldest?.reason ?? null,
     status,
     phase: latest?.phase ?? "unknown",
-    active: status === "running",
+    active,
+    activeState: active
+      ? "running"
+      : sawRunning && isTerminalStatus(status) && now.getTime() - Date.parse(updatedAt) <= ACTIVE_LINGER_MINUTES * 60_000
+        ? "just_finished"
+        : "inactive",
     startedAt: oldest?.timestamp ?? now.toISOString(),
-    updatedAt: latest?.timestamp ?? now.toISOString(),
+    updatedAt,
     eventCount: eventsNewestFirst.length,
     summary: latest?.summary ?? null,
     safety: latest?.safety ?? null,
   };
+}
+
+function isVisibleActive(
+  summary: { activeState?: string; updatedAt: string },
+  now: Date,
+  activeWindowMs: number
+): boolean {
+  const ageMs = now.getTime() - Date.parse(summary.updatedAt);
+  if (ageMs > activeWindowMs) return false;
+  return summary.activeState === "running" || summary.activeState === "just_finished";
+}
+
+function isTerminalStatus(status: string): boolean {
+  return status === "completed"
+    || status === "passed"
+    || status === "blocked"
+    || status === "failed"
+    || status === "needs_review";
 }
 
 function handoffEventLogPath(): string {
