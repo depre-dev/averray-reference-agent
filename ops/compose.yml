@@ -85,6 +85,7 @@ services:
       GITHUB_HELPER_REPOS: ${GITHUB_HELPER_REPOS:-}
       GITHUB_API_BASE_URL: ${GITHUB_API_BASE_URL:-https://api.github.com}
       GITHUB_HELPER_LIMIT: ${GITHUB_HELPER_LIMIT:-5}
+      AVERRAY_HANDOFF_EVENTS_PATH: ${AVERRAY_HANDOFF_EVENTS_PATH:-/data/handoff-events.jsonl}
       TRACE_HTTP_PORT: ${TRACE_HTTP_PORT:-8789}
       TRACE_HTTP_URL: http://127.0.0.1:${TRACE_HTTP_PORT:-8789}/hermes-event
       POLICY_CONFIG_PATH: /config/policy.yaml
@@ -163,6 +164,7 @@ services:
       GITHUB_HELPER_REPOS: ${GITHUB_HELPER_REPOS:-}
       GITHUB_API_BASE_URL: ${GITHUB_API_BASE_URL:-https://api.github.com}
       GITHUB_HELPER_LIMIT: ${GITHUB_HELPER_LIMIT:-5}
+      AVERRAY_HANDOFF_EVENTS_PATH: ${AVERRAY_HANDOFF_EVENTS_PATH:-/data/handoff-events.jsonl}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - avg-data:/data
@@ -199,6 +201,7 @@ services:
       GITHUB_HELPER_REPOS: ${GITHUB_HELPER_REPOS:-}
       GITHUB_API_BASE_URL: ${GITHUB_API_BASE_URL:-https://api.github.com}
       GITHUB_HELPER_LIMIT: ${GITHUB_HELPER_LIMIT:-5}
+      AVERRAY_HANDOFF_EVENTS_PATH: ${AVERRAY_HANDOFF_EVENTS_PATH:-/data/handoff-events.jsonl}
       POLICY_CONFIG_PATH: /config/policy.yaml
       HALT_FILE: ${HALT_FILE:-/data/HALT}
       WALLET_NETWORK: testnet

@@ -171,6 +171,7 @@ SLACK_OPERATOR_MONITOR_ENABLED=1
 # Optional. If set, /monitor and /monitor/events require either
 # Authorization: Bearer <token> or ?token=<token>.
 SLACK_OPERATOR_MONITOR_TOKEN=
+AVERRAY_HANDOFF_EVENTS_PATH=/data/handoff-events.jsonl
 ```
 
 After recreating `slack-operator`, open the page through a trusted tunnel or on
@@ -184,6 +185,8 @@ curl -sS http://127.0.0.1:8790/monitor/events
 The monitor page is `GET /monitor`; the live JSON endpoint is
 `GET /monitor/events`. Both are observability-only. They do not call Hermes,
 run tests, claim jobs, submit work, edit GitHub, or edit Wikipedia.
+The event path must be on the shared `avg-data` volume so handoffs recorded by
+Hermes are visible to the Slack operator monitor.
 
 If you use HTTP endpoints, set `SLACK_SIGNING_SECRET` and terminate/expose the
 route with your chosen tunnel or reverse proxy. Keep
