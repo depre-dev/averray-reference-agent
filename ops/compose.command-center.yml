@@ -28,6 +28,7 @@ services:
       AGENT_WALLET_PRIVATE_KEY: ${AGENT_WALLET_PRIVATE_KEY}
       POLICY_CONFIG_PATH: /config/policy.yaml
       HALT_FILE: ${HALT_FILE:-/data/HALT}
+      AVERRAY_HANDOFF_EVENTS_PATH: ${AVERRAY_HANDOFF_EVENTS_PATH:-/data/handoff-events.jsonl}
       WALLET_NETWORK: testnet
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
       LOG_LEVEL: ${LOG_LEVEL:-info}
