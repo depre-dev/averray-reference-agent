@@ -78,6 +78,7 @@ describe("handoff event monitor", () => {
             intent: "testbed_suite",
             status: "running",
             active: true,
+            activeState: "running",
             testCaseIds: ["TBE2E-001", "TBE2E-002"],
           },
         ],
@@ -91,6 +92,70 @@ describe("handoff event monitor", () => {
               mergeRecommendation: "ok_to_merge",
             },
           }),
+        ],
+      });
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AVERRAY_HANDOFF_EVENTS_PATH;
+      } else {
+        process.env.AVERRAY_HANDOFF_EVENTS_PATH = previous;
+      }
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps just-finished handoffs visible briefly in the active lane", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "averray-handoff-events-"));
+    const previous = process.env.AVERRAY_HANDOFF_EVENTS_PATH;
+    process.env.AVERRAY_HANDOFF_EVENTS_PATH = join(dir, "events.jsonl");
+    try {
+      await recordHandoffEvent({
+        correlationId: "github-pr-240-sha-run",
+        requester: "github-actions",
+        intent: "pr_handoff",
+        phase: "started",
+        status: "running",
+        repo: "averray-agent/agent",
+        pullRequestNumber: 240,
+        testCaseIds: ["TBE2E-004"],
+        timestamp: "2026-05-12T14:36:00.000Z",
+      });
+      await recordHandoffEvent({
+        correlationId: "github-pr-240-sha-run",
+        requester: "github-actions",
+        intent: "pr_handoff",
+        phase: "completed",
+        status: "completed",
+        repo: "averray-agent/agent",
+        pullRequestNumber: 240,
+        testCaseIds: ["TBE2E-004"],
+        summary: {
+          finalVerdict: "needs_review",
+          mergeRecommendation: "needs_review",
+        },
+        timestamp: "2026-05-12T14:36:58.000Z",
+      });
+
+      const monitor = await getHandoffMonitor({
+        now: new Date("2026-05-12T14:37:30.000Z"),
+        activeWindowMinutes: 60,
+        limit: 10,
+      });
+
+      expect(monitor).toMatchObject({
+        status: "recently_active",
+        counts: {
+          active: 1,
+          running: 0,
+          justFinished: 1,
+        },
+        active: [
+          {
+            correlationId: "github-pr-240-sha-run",
+            status: "completed",
+            active: false,
+            activeState: "just_finished",
+          },
         ],
       });
     } finally {

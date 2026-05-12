@@ -212,13 +212,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     </header>
     <section class="grid" aria-label="Monitor summary">
       <div class="card"><span class="metric">Status</span><span id="status" class="value">...</span></div>
-      <div class="card"><span class="metric">Active</span><span id="active-count" class="value">0</span></div>
+      <div class="card"><span class="metric">Active / Just Finished</span><span id="active-count" class="value">0</span></div>
       <div class="card"><span class="metric">Needs Attention</span><span id="attention-count" class="value">0</span></div>
       <div class="card"><span class="metric">Recent</span><span id="recent-count" class="value">0</span></div>
       <div class="card"><span class="metric">Events</span><span id="event-count" class="value">0</span></div>
     </section>
-    <div class="section-title"><h2>Active Now</h2><span id="generated" class="pill">waiting</span></div>
-    <section id="active" class="list"><div class="empty">No active handoffs.</div></section>
+    <div class="section-title"><h2>Live Lane</h2><span id="generated" class="pill">waiting</span></div>
+    <section id="active" class="list"><div class="empty">No running or just-finished handoffs.</div></section>
     <div class="section-title"><h2>Needs Attention</h2><span class="pill">release gate</span></div>
     <section id="attention" class="list"><div class="empty">No handoffs need attention.</div></section>
     <div class="section-title"><h2>Release Timeline</h2><span class="pill">auto-refresh 5s</span></div>
@@ -253,7 +253,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       document.getElementById("recent-count").textContent = counts.recent || 0;
       document.getElementById("event-count").textContent = counts.events || 0;
       document.getElementById("generated").textContent = payload.generatedAt ? new Date(payload.generatedAt).toLocaleString() : "unknown";
-      renderList("active", payload.active || [], "No active handoffs.");
+      renderList("active", payload.active || [], "No running or just-finished handoffs.");
       renderList("attention", attention, "No handoffs need attention.");
       renderList("recent", recent, "No recent handoffs in the monitor window.");
     }
@@ -282,6 +282,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         row("Correlation", "<code>" + escapeHtml(item.correlationId || "unknown") + "</code>") +
         row("Requester", escapeHtml(item.requester || "n/a")) +
         row("Phase", escapeHtml(item.phase || "unknown")) +
+        row("Live state", escapeHtml(liveStateLabel(item.activeState))) +
         row("Reason", escapeHtml(item.reason || "n/a")) +
         row("Tests", tests) +
         row("PR", pr) +
@@ -315,6 +316,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (status === "running") {
         return { level: "running", label: "RUNNING", why: reason };
       }
+      if (item.activeState === "just_finished") {
+        const label = finalVerdict.includes("review") || mergeRecommendation.includes("review")
+          ? "JUST FINISHED - REVIEW"
+          : finalVerdict.includes("block") || status === "blocked" || status === "failed"
+            ? "JUST FINISHED - BLOCK"
+            : "JUST FINISHED";
+        return { level: "running", label, why: reason };
+      }
       if (status === "failed" || status === "blocked" || finalVerdict.includes("block")) {
         return { level: "block", label: "BLOCK", why: reason };
       }
@@ -331,6 +340,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function normalize(value) {
       return String(value || "").trim().toLowerCase().replace(/[\\s-]+/g, "_");
+    }
+
+    function liveStateLabel(value) {
+      const state = normalize(value);
+      if (state === "running") return "running";
+      if (state === "just_finished") return "just finished";
+      return "inactive";
     }
 
     function derivePullRequestUrl(item) {
