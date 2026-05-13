@@ -19,6 +19,7 @@ import {
   parseSlackRoutineConfig,
   shouldPostSafeWorkResult,
   shouldRunDailyBrief,
+  shouldRunDailyGithubBrief,
   shouldRunOpsHealth,
 } from "./routines.js";
 import {
@@ -51,7 +52,10 @@ logger.info({
   routines: {
     channelConfigured: Boolean(routineConfig.channelId),
     dailyBrief: routineConfig.dailyBrief.enabled,
+    dailyBriefIncludeGithub: routineConfig.dailyBrief.includeGithub,
     dailyBriefTimeUtc: `${String(routineConfig.dailyBrief.timeUtc.hour).padStart(2, "0")}:${String(routineConfig.dailyBrief.timeUtc.minute).padStart(2, "0")}`,
+    dailyGithubBrief: routineConfig.dailyGithubBrief.enabled,
+    dailyGithubBriefTimeUtc: `${String(routineConfig.dailyGithubBrief.timeUtc.hour).padStart(2, "0")}:${String(routineConfig.dailyGithubBrief.timeUtc.minute).padStart(2, "0")}`,
     opsHealth: routineConfig.opsHealth.enabled,
     opsHealthTimeUtc: `${String(routineConfig.opsHealth.timeUtc.hour).padStart(2, "0")}:${String(routineConfig.opsHealth.timeUtc.minute).padStart(2, "0")}`,
     safeWorkScanIntervalMs: routineConfig.safeWorkScan.enabled ? routineConfig.safeWorkScan.intervalMs : 0,
@@ -89,6 +93,11 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
         dailyBrief: {
           enabled: routineConfig.dailyBrief.enabled,
           timeUtc: formatUtcTime(routineConfig.dailyBrief.timeUtc),
+          includeGithub: routineConfig.dailyBrief.includeGithub,
+        },
+        dailyGithubBrief: {
+          enabled: routineConfig.dailyGithubBrief.enabled,
+          timeUtc: formatUtcTime(routineConfig.dailyGithubBrief.timeUtc),
         },
         opsHealth: {
           enabled: routineConfig.opsHealth.enabled,
@@ -268,16 +277,23 @@ async function handleCommand(envelope: SlackCommandEnvelope) {
 
 function startOperatorRoutines() {
   if (!routineConfig.channelId) {
-    if (routineConfig.dailyBrief.enabled || routineConfig.opsHealth.enabled || routineConfig.safeWorkScan.enabled) {
+    if (
+      routineConfig.dailyBrief.enabled
+      || routineConfig.dailyGithubBrief.enabled
+      || routineConfig.opsHealth.enabled
+      || routineConfig.safeWorkScan.enabled
+    ) {
       logger.warn("slack_operator_routines_no_channel");
     }
     return;
   }
 
   let lastDailyBriefDateKey: string | undefined;
+  let lastDailyGithubBriefDateKey: string | undefined;
   let lastOpsHealthDateKey: string | undefined;
   let lastSafeWorkSignature: string | undefined;
   let dailyBriefRunning = false;
+  let dailyGithubBriefRunning = false;
   let opsHealthRunning = false;
   let safeWorkRunning = false;
 
@@ -291,12 +307,34 @@ function startOperatorRoutines() {
         lastDailyBriefDateKey = decision.dateKey;
         return;
       }
-      await runRoutineCommand("daily operator brief", "slack_operator_daily_brief_posted");
+      const commandTexts = routineConfig.dailyBrief.includeGithub
+        ? ["daily operator brief", "daily github brief"]
+        : ["daily operator brief"];
+      await runRoutineCommands(commandTexts, "slack_operator_daily_brief_posted");
       lastDailyBriefDateKey = decision.dateKey;
     } catch (error) {
       logger.error({ err: error }, "slack_operator_daily_brief_failed");
     } finally {
       dailyBriefRunning = false;
+    }
+  };
+
+  const checkDailyGithubBrief = async () => {
+    if (dailyGithubBriefRunning) return;
+    const decision = shouldRunDailyGithubBrief(new Date(), routineConfig, lastDailyGithubBriefDateKey);
+    if (!decision.shouldRun) return;
+    dailyGithubBriefRunning = true;
+    try {
+      if (await routineAlreadyRecordedToday("daily github brief", decision.dateKey)) {
+        lastDailyGithubBriefDateKey = decision.dateKey;
+        return;
+      }
+      await runRoutineCommand("daily github brief", "slack_operator_daily_github_brief_posted");
+      lastDailyGithubBriefDateKey = decision.dateKey;
+    } catch (error) {
+      logger.error({ err: error }, "slack_operator_daily_github_brief_failed");
+    } finally {
+      dailyGithubBriefRunning = false;
     }
   };
 
@@ -351,6 +389,10 @@ function startOperatorRoutines() {
     setTimeout(() => void checkDailyBrief(), 5_000);
     setInterval(() => void checkDailyBrief(), 60_000);
   }
+  if (routineConfig.dailyGithubBrief.enabled) {
+    setTimeout(() => void checkDailyGithubBrief(), 7_500);
+    setInterval(() => void checkDailyGithubBrief(), 60_000);
+  }
   if (routineConfig.opsHealth.enabled) {
     setTimeout(() => void checkOpsHealth(), 7_000);
     setInterval(() => void checkOpsHealth(), 60_000);
@@ -362,17 +404,29 @@ function startOperatorRoutines() {
 }
 
 async function runRoutineCommand(text: string, successLog: string) {
-  const envelope = routineEnvelope(text);
-  const result = await executeOperatorText(text);
-  const replyPermalink = await postSlack(envelope, formatOperatorResultForSlack(result));
-  await recordOperatorCommandEvent({
-    source: "slack_routine",
-    commandText: text,
-    channelId: envelope.channelId,
-    replyPermalink,
-    result,
-  }, query);
-  logger.info({ text, replyPermalink }, successLog);
+  await runRoutineCommands([text], successLog);
+}
+
+async function runRoutineCommands(commandTexts: string[], successLog: string) {
+  const envelope = routineEnvelope(commandTexts.join(" + "));
+  const results: Array<{ text: string; result: Awaited<ReturnType<typeof executeOperatorText>> }> = [];
+  for (const text of commandTexts) {
+    results.push({ text, result: await executeOperatorText(text) });
+  }
+  const replyPermalink = await postSlack(
+    envelope,
+    results.map(({ result }) => formatOperatorResultForSlack(result)).join("\n\n---\n\n")
+  );
+  for (const { text, result } of results) {
+    await recordOperatorCommandEvent({
+      source: "slack_routine",
+      commandText: text,
+      channelId: envelope.channelId,
+      replyPermalink,
+      result,
+    }, query);
+  }
+  logger.info({ text: commandTexts.join(" + "), replyPermalink }, successLog);
 }
 
 function executeOperatorText(text: string) {

@@ -3,6 +3,11 @@ export interface SlackRoutineConfig {
   dailyBrief: {
     enabled: boolean;
     timeUtc: { hour: number; minute: number };
+    includeGithub: boolean;
+  };
+  dailyGithubBrief: {
+    enabled: boolean;
+    timeUtc: { hour: number; minute: number };
   };
   opsHealth: {
     enabled: boolean;
@@ -28,6 +33,15 @@ export function parseSlackRoutineConfig(
     dailyBrief: {
       enabled: env.SLACK_OPERATOR_DAILY_BRIEF_ENABLED === "1",
       timeUtc: parseUtcTime(env.SLACK_OPERATOR_DAILY_BRIEF_TIME_UTC ?? "08:00"),
+      includeGithub: env.SLACK_OPERATOR_DAILY_BRIEF_INCLUDE_GITHUB === "1",
+    },
+    dailyGithubBrief: {
+      enabled: env.SLACK_OPERATOR_DAILY_GITHUB_BRIEF_ENABLED === "1",
+      timeUtc: parseUtcTime(
+        env.SLACK_OPERATOR_DAILY_GITHUB_BRIEF_TIME_UTC
+        ?? env.SLACK_OPERATOR_DAILY_BRIEF_TIME_UTC
+        ?? "08:05"
+      ),
     },
     opsHealth: {
       enabled: env.SLACK_OPERATOR_OPS_HEALTH_ENABLED === "1",
@@ -47,6 +61,20 @@ export function shouldRunDailyBrief(
   lastPostedDateKey: string | undefined
 ): { shouldRun: boolean; dateKey: string } {
   return shouldRunDailySchedule(now, config.channelId, config.dailyBrief, lastPostedDateKey);
+}
+
+export function shouldRunDailyGithubBrief(
+  now: Date,
+  config: SlackRoutineConfig,
+  lastPostedDateKey: string | undefined
+): { shouldRun: boolean; dateKey: string } {
+  const includedInDailyBrief = config.dailyBrief.enabled && config.dailyBrief.includeGithub;
+  return shouldRunDailySchedule(
+    now,
+    config.channelId,
+    { ...config.dailyGithubBrief, enabled: config.dailyGithubBrief.enabled && !includedInDailyBrief },
+    lastPostedDateKey
+  );
 }
 
 export function shouldRunOpsHealth(
