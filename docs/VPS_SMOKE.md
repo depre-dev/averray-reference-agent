@@ -113,6 +113,12 @@ operator prompt. They are disabled by default:
 # Posts one read-only `daily operator brief` each UTC day after the configured time.
 SLACK_OPERATOR_DAILY_BRIEF_ENABLED=1
 SLACK_OPERATOR_DAILY_BRIEF_TIME_UTC=08:00
+# Optional: append `daily github brief` to the same morning Slack post.
+SLACK_OPERATOR_DAILY_BRIEF_INCLUDE_GITHUB=1
+
+# Optional standalone read-only GitHub brief, deduped if included above.
+SLACK_OPERATOR_DAILY_GITHUB_BRIEF_ENABLED=1
+SLACK_OPERATOR_DAILY_GITHUB_BRIEF_TIME_UTC=08:05
 
 # Posts one read-only `ops health` check each UTC day after the configured time.
 SLACK_OPERATOR_OPS_HEALTH_ENABLED=1
@@ -127,9 +133,9 @@ SLACK_OPERATOR_ROUTINE_CHANNEL_ID=C...
 ```
 
 These routines use the same safe operator-command path as manual Slack
-messages. The daily brief and ops-health check are read-only. The safe-work scan
-is also read-only and only recommends the guarded dry-run or mutation command;
-it does not claim, submit, or edit Wikipedia by itself.
+messages. The daily brief, GitHub brief, and ops-health check are read-only. The
+safe-work scan is also read-only and only recommends the guarded dry-run or
+mutation command; it does not claim, submit, or edit Wikipedia by itself.
 
 After changing routine settings, recreate the Slack operator:
 
