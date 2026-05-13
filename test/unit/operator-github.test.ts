@@ -318,6 +318,176 @@ describe("github operator status", () => {
     });
   });
 
+  it("keeps frontend, docs, and tests PRs merge-ready when CI is green", async () => {
+    const fetchFn = async (url: string | URL | Request) => {
+      const text = String(url);
+      if (text.endsWith("/repos/averray-agent/agent/pulls/187")) {
+        return jsonResponse({
+          number: 187,
+          title: "Polish dashboard empty states",
+          html_url: "https://github.com/averray-agent/agent/pull/187",
+          user: { login: "codex" },
+          draft: false,
+          state: "open",
+          base: { ref: "main" },
+          head: { ref: "codex/ui-polish", sha: "ui123" },
+          additions: 42,
+          deletions: 8,
+          changed_files: 3,
+          mergeable_state: "clean",
+        });
+      }
+      if (text.includes("/pulls/187/files")) {
+        return jsonResponse([
+          { filename: "app/(authed)/overview/page.tsx", status: "modified", additions: 24, deletions: 3, changes: 27 },
+          { filename: "test/unit/overview-empty-state.test.ts", status: "modified", additions: 14, deletions: 5, changes: 19 },
+          { filename: "docs/operator-dashboard.md", status: "modified", additions: 4, deletions: 0, changes: 4 },
+        ]);
+      }
+      if (text.includes("/commits/ui123/check-runs")) {
+        return jsonResponse({
+          check_runs: [
+            { name: "CI", status: "completed", conclusion: "success" },
+          ],
+        });
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const review = await getGithubPullRequestReview({
+      repo: "averray-agent/agent",
+      pullRequestNumber: 187,
+      env: { GITHUB_TOKEN: "ghp_readonly" },
+      fetchFn,
+      now: new Date("2026-05-08T12:30:00.000Z"),
+    });
+
+    expect(review).toMatchObject({
+      health: "ok",
+      files: {
+        highRisk: [],
+      },
+      mergeRecommendation: "ok_to_merge",
+    });
+    expect(review.riskFindings).toEqual([
+      expect.objectContaining({ severity: "low", code: "pr_review_green" }),
+    ]);
+  });
+
+  it("asks for human review on deploy and workflow-only risk", async () => {
+    const fetchFn = async (url: string | URL | Request) => {
+      const text = String(url);
+      if (text.endsWith("/repos/averray-agent/agent/pulls/188")) {
+        return jsonResponse({
+          number: 188,
+          title: "Tune production deploy workflow",
+          html_url: "https://github.com/averray-agent/agent/pull/188",
+          user: { login: "codex" },
+          draft: false,
+          state: "open",
+          head: { ref: "codex/deploy-workflow", sha: "deploy123" },
+          changed_files: 1,
+          mergeable_state: "clean",
+        });
+      }
+      if (text.includes("/pulls/188/files")) {
+        return jsonResponse([
+          { filename: ".github/workflows/deploy-production.yml", status: "modified", additions: 6, deletions: 2, changes: 8 },
+        ]);
+      }
+      if (text.includes("/commits/deploy123/check-runs")) {
+        return jsonResponse({
+          check_runs: [
+            { name: "CI", status: "completed", conclusion: "success" },
+          ],
+        });
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const review = await getGithubPullRequestReview({
+      repo: "averray-agent/agent",
+      pullRequestNumber: 188,
+      env: { GITHUB_TOKEN: "ghp_readonly" },
+      fetchFn,
+      now: new Date("2026-05-08T12:30:00.000Z"),
+    });
+
+    expect(review).toMatchObject({
+      health: "attention",
+      files: {
+        highRisk: [
+          expect.objectContaining({
+            filename: ".github/workflows/deploy-production.yml",
+            risk: "medium",
+            category: "workflow",
+          }),
+        ],
+      },
+      mergeRecommendation: "needs_review",
+    });
+    expect(review.riskFindings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ severity: "medium", code: "pr_review_risk_files" }),
+    ]));
+  });
+
+  it("holds PRs that touch secrets or contract surfaces even when CI is green", async () => {
+    const fetchFn = async (url: string | URL | Request) => {
+      const text = String(url);
+      if (text.endsWith("/repos/averray-agent/agent/pulls/189")) {
+        return jsonResponse({
+          number: 189,
+          title: "Update settlement contract",
+          html_url: "https://github.com/averray-agent/agent/pull/189",
+          user: { login: "codex" },
+          draft: false,
+          state: "open",
+          head: { ref: "codex/settlement-contract", sha: "contract123" },
+          changed_files: 1,
+          mergeable_state: "clean",
+        });
+      }
+      if (text.includes("/pulls/189/files")) {
+        return jsonResponse([
+          { filename: "contracts/Settlement.sol", status: "modified", additions: 12, deletions: 4, changes: 16 },
+        ]);
+      }
+      if (text.includes("/commits/contract123/check-runs")) {
+        return jsonResponse({
+          check_runs: [
+            { name: "CI", status: "completed", conclusion: "success" },
+          ],
+        });
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const review = await getGithubPullRequestReview({
+      repo: "averray-agent/agent",
+      pullRequestNumber: 189,
+      env: { GITHUB_TOKEN: "ghp_readonly" },
+      fetchFn,
+      now: new Date("2026-05-08T12:30:00.000Z"),
+    });
+
+    expect(review).toMatchObject({
+      health: "attention",
+      files: {
+        highRisk: [
+          expect.objectContaining({
+            filename: "contracts/Settlement.sol",
+            risk: "high",
+            category: "contracts",
+          }),
+        ],
+      },
+      mergeRecommendation: "hold",
+    });
+    expect(review.riskFindings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ severity: "high", code: "pr_critical_files" }),
+    ]));
+  });
+
   it("holds a pull request with failing checks or active checks", async () => {
     const fetchFn = async (url: string | URL | Request) => {
       const text = String(url);

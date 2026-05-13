@@ -192,6 +192,7 @@ export interface GithubPullRequestFileSummary {
 
 export interface GithubPullRequestFileRisk extends GithubPullRequestFileSummary {
   risk: "high" | "medium";
+  category: "secrets" | "contracts" | "database" | "ops" | "deploy" | "workflow" | "lockfile" | "large_file";
   reason: string;
 }
 
@@ -872,23 +873,29 @@ function fileSummary(file: GithubApiPullRequestFile): GithubPullRequestFileSumma
 
 function fileRisk(file: GithubPullRequestFileSummary): GithubPullRequestFileRisk | undefined {
   const path = file.filename.toLowerCase();
-  const highRiskPatterns = [
-    /^\.env/,
-    /(^|\/)\.env/,
-    /(^|\/)secrets?\b/,
-    /(^|\/)contracts?\//,
-    /(^|\/)migrations?\//,
-    /(^|\/)ops\//,
-    /(^|\/)deploy/,
-    /compose.*\.ya?ml$/,
-    /caddyfile$/,
-    /package-lock\.json$/,
+  const criticalPatterns: Array<Pick<GithubPullRequestFileRisk, "category" | "reason"> & { pattern: RegExp }> = [
+    { pattern: /^\.env/, category: "secrets", reason: "touches environment or secret material" },
+    { pattern: /(^|\/)\.env/, category: "secrets", reason: "touches environment or secret material" },
+    { pattern: /(^|\/)secrets?\b/, category: "secrets", reason: "touches secret material" },
+    { pattern: /(^|\/)contracts?\//, category: "contracts", reason: "touches smart contract code" },
+    { pattern: /(^|\/)migrations?\//, category: "database", reason: "touches database migration code" },
   ];
-  if (highRiskPatterns.some((pattern) => pattern.test(path))) {
-    return { ...file, risk: "high", reason: "touches deploy, secret, contract, lockfile, or infrastructure surface" };
+  for (const match of criticalPatterns) {
+    if (match.pattern.test(path)) return { ...file, risk: "high", category: match.category, reason: match.reason };
+  }
+  const reviewPatterns: Array<Pick<GithubPullRequestFileRisk, "category" | "reason"> & { pattern: RegExp }> = [
+    { pattern: /^\.github\/workflows\//, category: "workflow", reason: "touches GitHub workflow automation" },
+    { pattern: /(^|\/)ops\//, category: "ops", reason: "touches operator or infrastructure configuration" },
+    { pattern: /(^|\/)deploy/, category: "deploy", reason: "touches deploy automation" },
+    { pattern: /compose.*\.ya?ml$/, category: "ops", reason: "touches container compose configuration" },
+    { pattern: /caddyfile$/, category: "ops", reason: "touches edge/proxy configuration" },
+    { pattern: /package-lock\.json$/, category: "lockfile", reason: "touches dependency lockfile" },
+  ];
+  for (const match of reviewPatterns) {
+    if (match.pattern.test(path)) return { ...file, risk: "medium", category: match.category, reason: match.reason };
   }
   if ((file.changes ?? 0) >= 400) {
-    return { ...file, risk: "medium", reason: "large single-file change" };
+    return { ...file, risk: "medium", category: "large_file", reason: "large single-file change" };
   }
   return undefined;
 }
@@ -948,12 +955,21 @@ function buildPullRequestRiskFindings(input: {
   if (input.checks.total === 0) {
     findings.push({ severity: "medium", code: "pr_checks_missing", message: "No PR check runs were found for the head commit." });
   }
-  const highRisk = input.highRiskFiles.filter((file) => file.risk === "high");
-  if (highRisk.length > 0) {
+  const criticalRisk = input.highRiskFiles.filter((file) => file.risk === "high");
+  if (criticalRisk.length > 0) {
+    findings.push({
+      severity: "high",
+      code: "pr_critical_files",
+      message: `${criticalRisk.length} changed file(s) touch secrets, contracts, or database migrations.`,
+    });
+  }
+  const reviewRisk = input.highRiskFiles.filter((file) => file.risk === "medium");
+  if (reviewRisk.length > 0) {
+    const categories = [...new Set(reviewRisk.map((file) => file.category))].join(", ");
     findings.push({
       severity: "medium",
-      code: "pr_high_risk_files",
-      message: `${highRisk.length} changed file(s) touch deploy, secret, contract, lockfile, or infrastructure surfaces.`,
+      code: "pr_review_risk_files",
+      message: `${reviewRisk.length} changed file(s) touch review-gated surfaces${categories ? ` (${categories})` : ""}.`,
     });
   }
   if (input.files.length > 25) {
