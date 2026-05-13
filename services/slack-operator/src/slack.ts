@@ -109,6 +109,7 @@ export function formatOperatorResultForSlack(result: unknown): string {
     const budget = isRecord(brief.budget) ? brief.budget : {};
     const latestRun = isRecord(brief.latestWikipediaCitationRepair) ? brief.latestWikipediaCitationRepair : {};
     const candidateJobs = Array.isArray(brief.candidateJobs) ? brief.candidateJobs : [];
+    const decisionSummary = formatDailyBriefDecisionSummary(brief);
     const actions = Array.isArray(brief.recommendedNextActions)
       ? brief.recommendedNextActions.slice(0, 4).map((entry) => `• ${String(entry)}`).join("\n")
       : "";
@@ -120,6 +121,7 @@ export function formatOperatorResultForSlack(result: unknown): string {
       `• wallet: \`${stringField(readiness, "wallet") ?? "unknown"}\``,
       `• budget remaining: \`${numberField(budget, "todayUsdRemaining") ?? "n/a"} / ${numberField(budget, "perDayUsdMax") ?? "n/a"} USD\``,
       `• wikipedia repair: \`${stringField(readiness, "wikipediaCitationRepair") ?? "unknown"}\``,
+      decisionSummary,
       "*Latest run*",
       `• status: \`${stringField(latestRun, "status") ?? "none"}\``,
       `• jobId: \`${formatId(stringField(latestRun, "jobId"), false) ?? "n/a"}\``,
@@ -605,6 +607,37 @@ function formatHandoffTarget(value: Record<string, unknown>): string {
   const url = stringField(value, "pullRequestUrl");
   const label = repo && pr ? `${repo}#${pr}` : repo ?? "no repo";
   return url ? `<${url}|${label}>` : label;
+}
+
+function formatDailyBriefDecisionSummary(brief: Record<string, unknown>): string {
+  const decisionSummary = isRecord(brief.decisionSummary) ? brief.decisionSummary : {};
+  if (Object.keys(decisionSummary).length === 0) return "";
+  const health = stringField(decisionSummary, "health") ?? "unknown";
+  const attentionItems = arrayField(decisionSummary, "attentionItems");
+  const suggestedActions = arrayField(decisionSummary, "suggestedActions");
+  const attention = attentionItems.length > 0
+    ? attentionItems.slice(0, 5).map(formatDailyBriefAttentionItem).join("\n")
+    : "• none";
+  const actions = suggestedActions.length > 0
+    ? suggestedActions.slice(0, 4).map((entry) => `• \`${String(entry)}\``).join("\n")
+    : "";
+  return [
+    "*Decision summary*",
+    `• health: \`${health}\``,
+    `*Needs attention*\n${attention}`,
+    actions ? `*Suggested actions*\n${actions}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function formatDailyBriefAttentionItem(value: unknown): string {
+  if (!isRecord(value)) return "• unknown";
+  const severity = stringField(value, "severity") ?? "info";
+  const source = stringField(value, "source") ?? "operator";
+  const title = stringField(value, "title") ?? "needs attention";
+  const detail = stringField(value, "detail");
+  const url = stringField(value, "url");
+  const suffix = [detail, url].filter(Boolean).join(" - ");
+  return `• \`${severity}\` ${source}: ${title}${suffix ? ` — ${suffix}` : ""}`;
 }
 
 function githubViewTitle(view: string): string {

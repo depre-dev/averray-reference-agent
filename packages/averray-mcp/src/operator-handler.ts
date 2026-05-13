@@ -49,7 +49,8 @@ export async function handleOperatorCommandText(
   }
   if (command.kind === "daily_operator_brief") {
     const brief = await getDailyOperatorBrief({ query: deps.query, workflowDeps: deps.workflowDeps });
-    return { ...command, brief };
+    const decisionSummary = await getDailyOperatorDecisionSummary(deps, brief);
+    return { ...command, brief: { ...brief, decisionSummary } };
   }
   if (command.kind === "find_safe_work") {
     const safeWork = await getSafeWorkReport({ query: deps.query, workflowDeps: deps.workflowDeps });
@@ -96,4 +97,255 @@ export async function handleOperatorCommandText(
     deps.workflowDeps
   );
   return { ...command, result };
+}
+
+async function getDailyOperatorDecisionSummary(
+  deps: HandleOperatorCommandDeps,
+  brief: Record<string, unknown>
+) {
+  const [opsHealth, github, handoffMonitor] = await Promise.all([
+    getOpsHealth({ query: deps.query, workflowDeps: deps.workflowDeps }).catch((error) => ({
+      error: `ops_health_unavailable:${errorMessage(error)}`,
+    })),
+    getGithubOperatorStatus({ view: "digest" }).catch((error) => ({
+      error: `github_status_unavailable:${errorMessage(error)}`,
+    })),
+    getHandoffMonitor().catch((error) => ({
+      error: `handoff_monitor_unavailable:${errorMessage(error)}`,
+    })),
+  ]);
+  return buildDailyOperatorDecisionSummary({ brief, opsHealth, github, handoffMonitor });
+}
+
+function buildDailyOperatorDecisionSummary(input: {
+  brief: Record<string, unknown>;
+  opsHealth: unknown;
+  github: unknown;
+  handoffMonitor: unknown;
+}) {
+  const opsHealth = toRecord(input.opsHealth);
+  const github = toRecord(input.github);
+  const githubTotals = toRecord(github.totals);
+  const handoffMonitor = toRecord(input.handoffMonitor);
+  const handoffCounts = toRecord(handoffMonitor.counts);
+  const budget = toRecord(input.brief.budget);
+  const attentionItems: Array<Record<string, unknown>> = [];
+  const suggestedActions = new Set<string>();
+
+  addErrorAttention(attentionItems, opsHealth, "Ops health");
+  addErrorAttention(attentionItems, github, "GitHub");
+  addErrorAttention(attentionItems, handoffMonitor, "Handoff monitor");
+
+  const opsState = stringField(opsHealth, "health");
+  if (opsState && opsState !== "ok") {
+    attentionItems.push({
+      severity: opsState === "blocked" ? "high" : "medium",
+      source: "ops",
+      title: `Ops health is ${opsState}`,
+      detail: firstString(arrayField(opsHealth, "recommendedNextActions")),
+    });
+    suggestedActions.add("ops health");
+  }
+
+  const githubHealth = stringField(github, "health");
+  const failingWorkflowRuns = numberField(githubTotals, "failingWorkflowRuns");
+  const activeWorkflowRuns = numberField(githubTotals, "activeWorkflowRuns");
+  const openPullRequests = numberField(githubTotals, "openPullRequests");
+  const openIssues = numberField(githubTotals, "openIssues");
+  if (githubHealth && githubHealth !== "ok") {
+    attentionItems.push({
+      severity: githubHealth === "degraded" || failingWorkflowRuns > 0 ? "high" : "medium",
+      source: "github",
+      title: githubAttentionTitle({ failingWorkflowRuns, activeWorkflowRuns, openPullRequests, openIssues }),
+      detail: firstString(arrayField(github, "recommendations")),
+    });
+    suggestedActions.add("github status");
+  }
+
+  const recentHandoffs = arrayField(handoffMonitor, "recent").filter(isReviewWorthyHandoff).slice(0, 3);
+  for (const handoff of recentHandoffs) {
+    const summary = toRecord(handoff.summary);
+    attentionItems.push({
+      severity: isBlockingVerdict(stringField(summary, "finalVerdict")) || isBlockingVerdict(stringField(summary, "mergeRecommendation")) ? "high" : "medium",
+      source: "handoff",
+      title: handoffTitle(handoff),
+      detail: handoffDetail(handoff),
+      url: stringField(handoff, "pullRequestUrl"),
+    });
+    suggestedActions.add("handoff monitor");
+  }
+
+  const activeHandoffs = numberField(handoffCounts, "active");
+  const runningHandoffs = numberField(handoffCounts, "running");
+  if (activeHandoffs > 0 || runningHandoffs > 0) {
+    attentionItems.push({
+      severity: "medium",
+      source: "handoff",
+      title: `${Math.max(activeHandoffs, runningHandoffs)} handoff${Math.max(activeHandoffs, runningHandoffs) === 1 ? "" : "s"} currently active`,
+      detail: "Open the handoff monitor for live status.",
+    });
+    suggestedActions.add("handoff monitor");
+  }
+
+  const openJobs = numberField(input.brief, "openWikipediaCitationRepairJobs");
+  const todayUsdRemaining = numberField(budget, "todayUsdRemaining");
+  if (todayUsdRemaining <= 0) {
+    attentionItems.push({
+      severity: "high",
+      source: "budget",
+      title: "Daily budget is depleted",
+      detail: "Wait for the next budget window before running guarded workflows.",
+    });
+    suggestedActions.add("business ledger");
+  } else if (openJobs > 0) {
+    attentionItems.push({
+      severity: "low",
+      source: "work",
+      title: `${openJobs} claimable citation-repair job${openJobs === 1 ? "" : "s"} available`,
+      detail: "Start with a dry run before any guarded mutation.",
+    });
+    suggestedActions.add("run one wikipedia citation repair dry run only");
+  }
+
+  const health = attentionItems.some((item) => stringField(item, "severity") === "high")
+    ? "blocked"
+    : attentionItems.length > 0
+      ? "attention"
+      : "ok";
+
+  if (attentionItems.length === 0) suggestedActions.add("No action needed.");
+
+  return {
+    kind: "daily_operator_decision_summary",
+    generatedAt: new Date().toISOString(),
+    health,
+    attentionItems: attentionItems.slice(0, 6),
+    suggestedActions: [...suggestedActions].slice(0, 5),
+    signals: {
+      ops: {
+        health: opsState ?? (stringField(opsHealth, "error") ? "unavailable" : "unknown"),
+      },
+      github: {
+        health: githubHealth ?? (stringField(github, "error") ? "unavailable" : "unknown"),
+        openPullRequests,
+        openIssues,
+        failingWorkflowRuns,
+        activeWorkflowRuns,
+      },
+      handoffs: {
+        active: activeHandoffs,
+        running: runningHandoffs,
+        recent: numberField(handoffCounts, "recent"),
+        needsAttention: recentHandoffs.length,
+      },
+      work: {
+        openWikipediaCitationRepairJobs: openJobs,
+      },
+      budget: {
+        todayUsdRemaining,
+        perDayUsdMax: numberField(budget, "perDayUsdMax"),
+      },
+    },
+    safety: {
+      readOnly: true,
+      mutates: false,
+      githubMutated: false,
+      githubCheckpointWritten: false,
+      editsWikipedia: false,
+    },
+  };
+}
+
+function addErrorAttention(items: Array<Record<string, unknown>>, record: Record<string, unknown>, source: string): void {
+  const error = stringField(record, "error");
+  if (!error) return;
+  items.push({
+    severity: "medium",
+    source: source.toLowerCase().replace(/\s+/g, "_"),
+    title: `${source} unavailable`,
+    detail: error,
+  });
+}
+
+function githubAttentionTitle(input: {
+  failingWorkflowRuns: number;
+  activeWorkflowRuns: number;
+  openPullRequests: number;
+  openIssues: number;
+}): string {
+  const parts = [
+    input.failingWorkflowRuns > 0 ? `${input.failingWorkflowRuns} failing workflow${input.failingWorkflowRuns === 1 ? "" : "s"}` : "",
+    input.activeWorkflowRuns > 0 ? `${input.activeWorkflowRuns} active workflow${input.activeWorkflowRuns === 1 ? "" : "s"}` : "",
+    input.openPullRequests > 0 ? `${input.openPullRequests} open PR${input.openPullRequests === 1 ? "" : "s"}` : "",
+    input.openIssues > 0 ? `${input.openIssues} open issue${input.openIssues === 1 ? "" : "s"}` : "",
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(", ") : "GitHub needs attention";
+}
+
+function isReviewWorthyHandoff(value: unknown): value is Record<string, unknown> {
+  const record = toRecord(value);
+  const summary = toRecord(record.summary);
+  const status = stringField(record, "status");
+  const finalVerdict = stringField(summary, "finalVerdict");
+  const mergeRecommendation = stringField(summary, "mergeRecommendation");
+  const reason = stringField(summary, "reason") ?? stringField(record, "reason");
+  return (
+    status === "failed" ||
+    status === "blocked" ||
+    isBlockingVerdict(finalVerdict) ||
+    isBlockingVerdict(mergeRecommendation) ||
+    finalVerdict === "needs_review" ||
+    mergeRecommendation === "needs_review" ||
+    reason === "github_needs_review" ||
+    reason === "pr_review_hold"
+  );
+}
+
+function isBlockingVerdict(value: string | undefined): boolean {
+  return value === "block" || value === "blocked" || value === "hold" || value === "failed";
+}
+
+function handoffTitle(value: Record<string, unknown>): string {
+  const repo = stringField(value, "repo") ?? "unknown repo";
+  const pr = numberField(value, "pullRequestNumber");
+  const intent = stringField(value, "intent") ?? "handoff";
+  return `${repo}${pr > 0 ? ` #${pr}` : ""} ${intent} needs attention`;
+}
+
+function handoffDetail(value: Record<string, unknown>): string | undefined {
+  const summary = toRecord(value.summary);
+  return stringField(summary, "reason")
+    ?? stringField(summary, "finalVerdict")
+    ?? stringField(summary, "mergeRecommendation")
+    ?? stringField(value, "reason");
+}
+
+function firstString(values: unknown[]): string | undefined {
+  const value = values.find((entry) => typeof entry === "string" && entry.length > 0);
+  return typeof value === "string" ? value : undefined;
+}
+
+function arrayField(value: Record<string, unknown>, key: string): unknown[] {
+  const field = value[key];
+  return Array.isArray(field) ? field : [];
+}
+
+function numberField(value: Record<string, unknown>, key: string): number {
+  const field = value[key];
+  const parsed = typeof field === "number" ? field : Number(field);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function stringField(value: unknown, key: string): string | undefined {
+  const record = toRecord(value);
+  const field = record[key];
+  return typeof field === "string" && field.length > 0 ? field : undefined;
+}
+
+function toRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
