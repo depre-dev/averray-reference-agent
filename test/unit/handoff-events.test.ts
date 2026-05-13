@@ -178,6 +178,14 @@ describe("handoff event monitor", () => {
         finalReason: "GitHub review found medium risk.",
         github: {
           mergeRecommendation: "needs_review",
+          review: {
+            touchedAreas: ["workflow", "config"],
+            testFilesChanged: false,
+            testSignals: ["check:CI"],
+            missingTestSignals: [],
+            rolloutNotesRequired: true,
+            rolloutNotesPresent: false,
+          },
           riskFindings: [
             {
               severity: "info",
@@ -200,6 +208,14 @@ describe("handoff event monitor", () => {
       finalVerdict: "needs_review",
       finalReason: "GitHub review found medium risk.",
       mergeRecommendation: "needs_review",
+      reviewSignals: {
+        touchedAreas: ["workflow", "config"],
+        testFilesChanged: false,
+        testSignals: ["check:CI"],
+        missingTestSignals: [],
+        rolloutNotesRequired: true,
+        rolloutNotesPresent: false,
+      },
       reviewReasons: [
         {
           severity: "medium",

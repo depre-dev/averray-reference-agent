@@ -61,7 +61,11 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("limit: \"50\"");
     expect(html).toContain("releaseVerdict(item)");
     expect(html).toContain("classifyReleaseGate(status, finalVerdict, mergeRecommendation, reason, reviewReasons)");
+    expect(html).toContain("reviewSignalRows(summary)");
     expect(html).toContain("reviewReasonRows(summary)");
+    expect(html).toContain("Missing tests");
+    expect(html).toContain("Rollout notes");
+    expect(html).toContain("Touched");
     expect(html).toContain("Review why");
     expect(html).toContain("releaseReason(summary, item, terminal.level)");
     expect(html).toContain("derivePullRequestUrl(item)");

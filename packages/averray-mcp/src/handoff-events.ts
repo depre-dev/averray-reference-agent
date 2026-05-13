@@ -134,6 +134,7 @@ export function summarizeHandoffResult(result: unknown): Record<string, unknown>
       ["github", "mergeRecommendation"],
       ["github", "merge_recommendation"],
     ]),
+    reviewSignals: githubReviewSignals(nestedResult),
     reviewReasons: githubReviewReasons(nestedResult),
     requestedCaseIds: arrayField(nestedResult, "requestedCaseIds"),
     summary,
@@ -291,9 +292,29 @@ function githubReviewReasons(record: Record<string, unknown>): Record<string, un
   return reviewReasons.length > 0 ? reviewReasons : undefined;
 }
 
+function githubReviewSignals(record: Record<string, unknown>): Record<string, unknown> | undefined {
+  const github = isRecord(record.github) ? record.github : undefined;
+  const review = isRecord(github?.review) ? github.review : undefined;
+  if (!review) return undefined;
+  const signals = compactRecord({
+    touchedAreas: arrayField(review, "touchedAreas"),
+    testFilesChanged: booleanField(review, "testFilesChanged"),
+    testSignals: arrayField(review, "testSignals"),
+    missingTestSignals: arrayField(review, "missingTestSignals"),
+    rolloutNotesRequired: booleanField(review, "rolloutNotesRequired"),
+    rolloutNotesPresent: booleanField(review, "rolloutNotesPresent"),
+  });
+  return Object.keys(signals).length > 0 ? signals : undefined;
+}
+
 function stringField(record: Record<string, unknown>, key: string): string | undefined {
   const value = record[key];
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function booleanField(record: Record<string, unknown>, key: string): boolean | undefined {
+  const value = record[key];
+  return typeof value === "boolean" ? value : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

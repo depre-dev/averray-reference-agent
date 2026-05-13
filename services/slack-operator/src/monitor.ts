@@ -144,6 +144,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       color: var(--text);
       line-height: 1.4;
     }
+    .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 0 0 12px;
+    }
     .handoff-head {
       display: flex;
       align-items: flex-start;
@@ -321,6 +327,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         row("PR", pr) +
         row("Verdict", escapeHtml(summary.finalVerdict || summary.status || "n/a")) +
         row("Merge", escapeHtml(summary.mergeRecommendation || "n/a")) +
+        reviewSignalRows(summary) +
         reviewReasonRows(summary) +
         row("Updated", escapeHtml(item.updatedAt ? new Date(item.updatedAt).toLocaleString() : "unknown")) +
         '</dl></article>';
@@ -416,6 +423,25 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         const message = reason && reason.message ? String(reason.message) : "Human review recommended.";
         return row(index === 0 ? "Review why" : "", escapeHtml(severity + " / " + code + " - " + message));
       }).join("");
+    }
+
+    function reviewSignalRows(summary) {
+      const signals = summary.reviewSignals || {};
+      const rows = [];
+      const touchedAreas = Array.isArray(signals.touchedAreas) ? signals.touchedAreas : [];
+      const missingTests = Array.isArray(signals.missingTestSignals) ? signals.missingTestSignals : [];
+      const testSignals = Array.isArray(signals.testSignals) ? signals.testSignals : [];
+      if (touchedAreas.length) rows.push(row("Touched", chips(touchedAreas)));
+      if (missingTests.length) rows.push(row("Missing tests", chips(missingTests)));
+      if (testSignals.length) rows.push(row("Test signal", chips(testSignals.slice(0, 4))));
+      if (signals.rolloutNotesRequired === true) {
+        rows.push(row("Rollout notes", escapeHtml(signals.rolloutNotesPresent === true ? "present" : "missing")));
+      }
+      return rows.join("");
+    }
+
+    function chips(values) {
+      return '<span class="tags">' + values.map((value) => '<code>' + escapeHtml(String(value)) + '</code>').join("") + '</span>';
     }
 
     function normalize(value) {
