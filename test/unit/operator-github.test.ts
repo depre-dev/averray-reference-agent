@@ -367,6 +367,12 @@ describe("github operator status", () => {
       files: {
         highRisk: [],
       },
+      review: {
+        touchedAreas: expect.arrayContaining(["frontend", "tests", "docs"]),
+        testFilesChanged: true,
+        missingTestSignals: [],
+        rolloutNotesRequired: false,
+      },
       mergeRecommendation: "ok_to_merge",
     });
     expect(review.riskFindings).toEqual([
@@ -424,10 +430,71 @@ describe("github operator status", () => {
           }),
         ],
       },
+      review: {
+        touchedAreas: expect.arrayContaining(["workflow", "config"]),
+        missingTestSignals: [],
+        rolloutNotesRequired: true,
+        rolloutNotesPresent: false,
+      },
       mergeRecommendation: "needs_review",
     });
     expect(review.riskFindings).toEqual(expect.arrayContaining([
       expect.objectContaining({ severity: "medium", code: "pr_review_risk_files" }),
+      expect.objectContaining({ severity: "medium", code: "pr_rollout_notes_missing" }),
+    ]));
+  });
+
+  it("flags backend changes that have no changed tests or matching check names", async () => {
+    const fetchFn = async (url: string | URL | Request) => {
+      const text = String(url);
+      if (text.endsWith("/repos/averray-agent/agent/pulls/190")) {
+        return jsonResponse({
+          number: 190,
+          title: "Adjust operator command parsing",
+          html_url: "https://github.com/averray-agent/agent/pull/190",
+          user: { login: "codex" },
+          draft: false,
+          state: "open",
+          head: { ref: "codex/operator-parser", sha: "backend123" },
+          changed_files: 1,
+          mergeable_state: "clean",
+        });
+      }
+      if (text.includes("/pulls/190/files")) {
+        return jsonResponse([
+          { filename: "packages/averray-mcp/src/operator-handler.ts", status: "modified", additions: 34, deletions: 12, changes: 46 },
+        ]);
+      }
+      if (text.includes("/commits/backend123/check-runs")) {
+        return jsonResponse({
+          check_runs: [
+            { name: "Docs", status: "completed", conclusion: "success" },
+          ],
+        });
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const review = await getGithubPullRequestReview({
+      repo: "averray-agent/agent",
+      pullRequestNumber: 190,
+      env: { GITHUB_TOKEN: "ghp_readonly" },
+      fetchFn,
+      now: new Date("2026-05-08T12:30:00.000Z"),
+    });
+
+    expect(review).toMatchObject({
+      health: "attention",
+      review: {
+        touchedAreas: expect.arrayContaining(["backend"]),
+        testFilesChanged: false,
+        testSignals: [],
+        missingTestSignals: ["backend"],
+      },
+      mergeRecommendation: "needs_review",
+    });
+    expect(review.riskFindings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ severity: "medium", code: "pr_test_signal_missing" }),
     ]));
   });
 
