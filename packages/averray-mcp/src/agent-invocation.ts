@@ -4,7 +4,7 @@ import {
   type OperatorQueryFn,
   type ParsedOperatorCommand,
 } from "./operator-commands.js";
-import { getGithubPullRequestReview } from "./operator-github.js";
+import { getGithubOperatorStatus, getGithubPullRequestReview } from "./operator-github.js";
 import { handleOperatorCommandText } from "./operator-handler.js";
 import { runTestbedE2eReadOnly } from "./operator-testbed.js";
 import {
@@ -19,7 +19,8 @@ export type AgentInvocationIntent =
   | "testbed_e2e_read_only"
   | "testbed_suite"
   | "testbed_case"
-  | "pr_handoff";
+  | "pr_handoff"
+  | "post_deploy_verification";
 
 export interface AgentInvocationInput {
   requester: string;
@@ -30,10 +31,12 @@ export interface AgentInvocationInput {
   runReadOnlySuite?: boolean;
   postReviewCommand?: string;
   repo?: string;
+  sha?: string;
   pullRequestNumber?: number;
   pullRequestUrl?: string;
   correlationId?: string;
   reason?: string;
+  healthUrls?: string[];
   allowMutations?: boolean;
   allowLocalCheckpoint?: boolean;
   expectedWallet?: string;
@@ -47,9 +50,21 @@ export interface AgentInvocationDeps {
   workflowDeps: WorkflowDeps;
   githubEnv?: NodeJS.ProcessEnv;
   githubFetchFn?: typeof fetch;
+  healthFetchFn?: typeof fetch;
   handoffEventRecorder?: (event: HandoffEventInput) => Promise<unknown>;
   now?: Date;
 }
+
+const POST_DEPLOY_TEST_CASES = [
+  "TBE2E-001",
+  "TBE2E-002",
+  "TBE2E-003",
+  "TBE2E-006",
+  "TBE2E-007",
+  "TBE2E-008",
+  "TBE2E-009",
+  "TBE2E-010",
+];
 
 const READ_ONLY_TEST_CASES = new Set([
   "TBE2E-001",
@@ -75,6 +90,7 @@ export async function invokeAgentTask(input: AgentInvocationInput, deps: AgentIn
     ...(input.runReadOnlySuite ? { runReadOnlySuite: true } : {}),
     ...(input.postReviewCommand ? { postReviewCommand: input.postReviewCommand } : {}),
     ...(input.repo ? { repo: input.repo } : {}),
+    ...(input.sha ? { sha: input.sha } : {}),
     ...(input.pullRequestNumber ? { pullRequestNumber: input.pullRequestNumber } : {}),
     ...(input.pullRequestUrl ? { pullRequestUrl: input.pullRequestUrl } : {}),
     ...(input.correlationId ? { correlationId: input.correlationId } : {}),
@@ -137,6 +153,10 @@ async function invokeAgentTaskInner(
     return invokePullRequestHandoff(input, deps, invocation, startedAt);
   }
 
+  if (intent === "post_deploy_verification") {
+    return invokePostDeployVerification(input, deps, invocation, startedAt);
+  }
+
   if (intent === "testbed_case") {
     const testCaseId = normalizeTestCaseId(input.testCaseId ?? "");
     if (!testCaseId) return blockedInvocation(invocation, startedAt, "test_case_id_required");
@@ -168,6 +188,81 @@ async function invokeAgentTaskInner(
   const command = input.command?.trim();
   if (!command) return blockedInvocation(invocation, startedAt, "command_required");
   return invokeOperatorCommand(command, input, deps, invocation, startedAt);
+}
+
+async function invokePostDeployVerification(
+  input: AgentInvocationInput,
+  deps: AgentInvocationDeps,
+  invocation: Record<string, unknown>,
+  startedAt: Date
+): Promise<unknown> {
+  const requestedTestCaseIds = normalizeTestCaseIds(
+    input.testCaseIds && input.testCaseIds.length > 0 ? input.testCaseIds : POST_DEPLOY_TEST_CASES
+  );
+  const [suiteRun, github, hostedHealth] = await Promise.all([
+    runTestbedE2eReadOnly(deps, { testCaseIds: requestedTestCaseIds }),
+    getGithubOperatorStatus({
+      view: "ci",
+      env: githubEnvForInvocation(input, deps.githubEnv),
+      ...(deps.githubFetchFn ? { fetchFn: deps.githubFetchFn } : {}),
+      ...(deps.now ? { now: deps.now } : {}),
+    }),
+    checkHostedHealth({
+      urls: input.healthUrls ?? configuredHealthUrls(deps.githubEnv ?? process.env),
+      fetchFn: deps.healthFetchFn ?? fetch,
+    }),
+  ]);
+  const suiteSummary = suiteSummaryRecord(suiteRun);
+  const opsSignals = opsSignalsFromSuite(suiteRun);
+  const failedSuiteCases = typeof suiteSummary.failed === "number" ? suiteSummary.failed : 0;
+  const hostedFailures = hostedHealth.checks.filter((check) => check.status === "failed").length;
+  const githubFailures = github.totals.failingWorkflowRuns;
+  const finalVerdict = failedSuiteCases > 0 || hostedFailures > 0 || githubFailures > 0
+    ? "block"
+    : "pass";
+  const finalReason = finalVerdict === "block"
+    ? firstPresent([
+      failedSuiteCases > 0 ? "testbed_cases_failed" : undefined,
+      hostedFailures > 0 ? "hosted_health_failed" : undefined,
+      githubFailures > 0 ? "github_workflow_failed" : undefined,
+    ]) ?? "post_deploy_attention"
+    : "post_deploy_healthy";
+
+  return completedInvocation(invocation, startedAt, {
+    schemaVersion: 1,
+    kind: "agent_post_deploy_verification",
+    status: "completed",
+    repo: input.repo ?? null,
+    sha: input.sha ?? null,
+    requestedCaseIds: requestedTestCaseIds,
+    suite: suiteRun,
+    deploymentHealth: {
+      finalVerdict,
+      finalReason,
+      suite: suiteSummary,
+      hosted: hostedHealth,
+      github: {
+        configured: github.configured,
+        health: github.health,
+        totals: github.totals,
+        failingWorkflowRuns: github.views.ci
+          .filter((run) => run.conclusion === "failure" || run.conclusion === "cancelled")
+          .slice(0, 5),
+        activeWorkflowRuns: github.views.ci
+          .filter((run) => run.status !== "completed")
+          .slice(0, 5),
+      },
+      ops: opsSignals,
+    },
+    finalVerdict,
+    finalReason,
+    safety: {
+      source: "agent",
+      wouldMutate: false,
+      wouldWriteLocalCheckpoint: false,
+      freeFormHermesPromptUsed: false,
+    },
+  }, { mutates: false, localCheckpoint: false });
 }
 
 async function invokePullRequestHandoff(
@@ -330,6 +425,109 @@ function mutationRisk(command: ParsedOperatorCommand) {
   return { mutates: false, localCheckpoint: false };
 }
 
+interface HostedHealthCheck {
+  url: string;
+  status: "ok" | "failed";
+  httpStatus?: number;
+  durationMs: number;
+  error?: string;
+}
+
+async function checkHostedHealth(options: {
+  urls: string[];
+  fetchFn: typeof fetch;
+}) {
+  const startedAt = Date.now();
+  if (options.urls.length === 0) {
+    return {
+      configured: false,
+      status: "not_configured",
+      checks: [] as HostedHealthCheck[],
+      warnings: ["post_deploy_health_urls_not_configured"],
+      durationMs: 0,
+    };
+  }
+  const checks = await Promise.all(options.urls.map((url) => checkOneHealthUrl(url, options.fetchFn)));
+  return {
+    configured: true,
+    status: checks.every((check) => check.status === "ok") ? "ok" : "failed",
+    checks,
+    warnings: [] as string[],
+    durationMs: Date.now() - startedAt,
+  };
+}
+
+async function checkOneHealthUrl(url: string, fetchFn: typeof fetch): Promise<HostedHealthCheck> {
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8_000);
+  try {
+    const response = await fetchFn(url, { method: "GET", signal: controller.signal });
+    return {
+      url,
+      status: response.ok ? "ok" : "failed",
+      httpStatus: response.status,
+      durationMs: Date.now() - startedAt,
+    };
+  } catch (error) {
+    return {
+      url,
+      status: "failed",
+      durationMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function configuredHealthUrls(env: NodeJS.ProcessEnv): string[] {
+  const raw = env.AVERRAY_POST_DEPLOY_HEALTH_URLS
+    ?? env.AVERRAY_HOSTED_HEALTH_URLS
+    ?? "";
+  return raw
+    .split(",")
+    .map((url) => url.trim())
+    .filter(Boolean)
+    .slice(0, 10);
+}
+
+function githubEnvForInvocation(
+  input: AgentInvocationInput,
+  env: NodeJS.ProcessEnv | undefined
+): NodeJS.ProcessEnv {
+  if (!input.repo) return env ?? process.env;
+  return {
+    ...(env ?? process.env),
+    GITHUB_DEFAULT_REPO: env?.GITHUB_DEFAULT_REPO ?? input.repo,
+  };
+}
+
+function suiteSummaryRecord(run: unknown): Record<string, unknown> {
+  if (!isRecord(run) || !isRecord(run.summary)) return {};
+  return run.summary;
+}
+
+function opsSignalsFromSuite(run: unknown) {
+  if (!isRecord(run) || !Array.isArray(run.cases)) {
+    return { status: "unknown", recentErrors: null, source: "testbed_suite" };
+  }
+  const opsCase = run.cases
+    .filter(isRecord)
+    .find((entry) => entry.id === "TBE2E-008");
+  const evidence = isRecord(opsCase?.evidence) ? opsCase.evidence : {};
+  return {
+    status: stringField(evidence, "health") ?? "unknown",
+    recentErrors: numberField(evidence, "recentErrors") ?? null,
+    operatorEvents: numberField(evidence, "operatorEvents") ?? null,
+    source: "testbed_suite",
+  };
+}
+
+function firstPresent(values: Array<string | undefined>): string | undefined {
+  return values.find((value): value is string => typeof value === "string" && value.length > 0);
+}
+
 function completedInvocation(
   invocation: Record<string, unknown>,
   startedAt: Date,
@@ -403,6 +601,16 @@ function prHandoffSafety(wouldMutate: boolean, wouldWriteLocalCheckpoint: boolea
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringField(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function numberField(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function testFailed(test: unknown): boolean {

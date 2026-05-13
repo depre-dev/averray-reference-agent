@@ -327,6 +327,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         row("PR", pr) +
         row("Verdict", escapeHtml(summary.finalVerdict || summary.status || "n/a")) +
         row("Merge", escapeHtml(summary.mergeRecommendation || "n/a")) +
+        deploymentHealthRows(summary) +
         reviewSignalRows(summary) +
         reviewReasonRows(summary) +
         row("Updated", escapeHtml(item.updatedAt ? new Date(item.updatedAt).toLocaleString() : "unknown")) +
@@ -408,10 +409,42 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (reason === "github_needs_review") return "GitHub still has a review signal open.";
       if (reason === "pr_review_hold") return "PR risk gate held this for human review.";
       if (reason === "deploy_failure" || reason === "deploy_failed") return "Deploy failed; investigate before release.";
+      if (reason === "post_deploy_healthy") return "Post-deploy suite, GitHub workflows, and configured health checks are clean.";
+      if (reason === "hosted_health_failed") return "Hosted health check failed after deploy.";
+      if (reason === "testbed_cases_failed") return "One or more read-only post-deploy checks failed.";
+      if (reason === "github_workflow_failed") return "GitHub has a failed workflow after deploy.";
       if (reason === "ci_failed") return "CI failed; fix before merge.";
       if (reason === "ci_in_progress") return "CI is still running; wait for the result.";
       if (level === "pass") return "No blocking release signals recorded.";
       return String(summary.finalReason || summary.reason || item.reason || item.phase || "No reason recorded.");
+    }
+
+    function deploymentHealthRows(summary) {
+      const health = summary.deploymentHealth || {};
+      if (!health.finalVerdict && !health.hostedStatus && !health.githubHealth) return "";
+      const rows = [];
+      const suite = [
+        health.suitePassed !== undefined ? "pass " + health.suitePassed : "",
+        health.suiteFailed !== undefined ? "fail " + health.suiteFailed : "",
+        health.suiteSkipped !== undefined ? "skip " + health.suiteSkipped : "",
+      ].filter(Boolean).join(" / ");
+      if (suite) rows.push(row("Deploy suite", escapeHtml(suite)));
+      if (health.hostedStatus) {
+        const checks = health.hostedChecks !== undefined ? " (" + health.hostedChecks + " checks)" : "";
+        rows.push(row("Hosted health", escapeHtml(String(health.hostedStatus) + checks)));
+      }
+      if (health.githubHealth) {
+        const workflowBits = [
+          health.githubFailingWorkflowRuns !== undefined ? "failed " + health.githubFailingWorkflowRuns : "",
+          health.githubActiveWorkflowRuns !== undefined ? "active " + health.githubActiveWorkflowRuns : "",
+        ].filter(Boolean).join(" / ");
+        rows.push(row("GitHub workflows", escapeHtml(String(health.githubHealth) + (workflowBits ? " - " + workflowBits : ""))));
+      }
+      if (health.opsStatus) {
+        const recentErrors = health.opsRecentErrors !== undefined ? " - recent errors " + health.opsRecentErrors : "";
+        rows.push(row("Ops signal", escapeHtml(String(health.opsStatus) + recentErrors)));
+      }
+      return rows.join("");
     }
 
     function reviewReasonRows(summary) {
