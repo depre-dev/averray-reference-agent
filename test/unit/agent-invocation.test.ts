@@ -162,6 +162,110 @@ describe("agent invocation hook", () => {
     expect(calls).not.toContain("submit");
   });
 
+  it("runs post-deploy verification with suite, hosted health, GitHub, and ops signals", async () => {
+    const calls: string[] = [];
+    const events: HandoffEventInput[] = [];
+    const result = await invokeAgentTask(
+      {
+        requester: "github-actions",
+        intent: "post_deploy_verification",
+        repo: "averray-agent/agent",
+        sha: "abc1234",
+        testCaseIds: ["TBE2E-001", "TBE2E-008", "TBE2E-009"],
+        healthUrls: ["https://app.averray.test/health"],
+        correlationId: "github-deploy-123",
+        reason: "post-production-deploy verification",
+      },
+      deps(calls, githubStatusFetch(), events, healthFetch({ ok: true }))
+    );
+
+    expect(result).toMatchObject({
+      kind: "agent_invocation",
+      status: "completed",
+      invocation: {
+        requester: "github-actions",
+        intent: "post_deploy_verification",
+        repo: "averray-agent/agent",
+        sha: "abc1234",
+        testCaseIds: ["TBE2E-001", "TBE2E-008", "TBE2E-009"],
+      },
+      result: {
+        kind: "agent_post_deploy_verification",
+        finalVerdict: "pass",
+        finalReason: "post_deploy_healthy",
+        deploymentHealth: {
+          suite: { failed: 0 },
+          hosted: {
+            status: "ok",
+            checks: [expect.objectContaining({ status: "ok", httpStatus: 200 })],
+          },
+          github: {
+            health: "ok",
+            totals: {
+              failingWorkflowRuns: 0,
+              activeWorkflowRuns: 0,
+            },
+          },
+          ops: {
+            recentErrors: 0,
+          },
+        },
+      },
+    });
+    expect(events.at(-1)).toMatchObject({
+      correlationId: "github-deploy-123",
+      phase: "completed",
+      summary: {
+        finalVerdict: "pass",
+        finalReason: "post_deploy_healthy",
+        deploymentHealth: {
+          hostedStatus: "ok",
+          githubFailingWorkflowRuns: 0,
+          opsRecentErrors: 0,
+        },
+      },
+    });
+    expect(calls).toEqual(expect.arrayContaining(["walletStatus", "listJobs"]));
+    expect(calls).not.toContain("claim");
+    expect(calls).not.toContain("submit");
+  });
+
+  it("blocks the post-deploy verdict when hosted health fails", async () => {
+    const calls: string[] = [];
+    const result = await invokeAgentTask(
+      {
+        requester: "github-actions",
+        intent: "post_deploy_verification",
+        repo: "averray-agent/agent",
+        sha: "abc1234",
+        testCaseIds: ["TBE2E-001"],
+        healthUrls: ["https://app.averray.test/health"],
+      },
+      deps(calls, githubStatusFetch(), undefined, healthFetch({ ok: false }))
+    );
+
+    expect(result).toMatchObject({
+      status: "completed",
+      result: {
+        kind: "agent_post_deploy_verification",
+        finalVerdict: "block",
+        finalReason: "hosted_health_failed",
+        deploymentHealth: {
+          hosted: {
+            status: "failed",
+            checks: [expect.objectContaining({ status: "failed", httpStatus: 503 })],
+          },
+        },
+      },
+      safety: {
+        wouldMutate: false,
+        wouldWriteLocalCheckpoint: false,
+      },
+    });
+    expect(calls).not.toContain("claim");
+    expect(calls).not.toContain("submit");
+  });
+
   it("blocks mutation-bound testcase invocations unless explicitly allowed", async () => {
     const calls: string[] = [];
     const result = await invokeAgentTask(
@@ -322,10 +426,16 @@ describe("agent invocation hook", () => {
   });
 });
 
-function deps(calls: string[], githubFetchFn?: typeof fetch, events?: HandoffEventInput[]) {
+function deps(
+  calls: string[],
+  githubFetchFn?: typeof fetch,
+  events?: HandoffEventInput[],
+  healthFetchFn?: typeof fetch
+) {
   return {
     githubEnv: { GITHUB_TOKEN: "ghp_readonly" },
     ...(githubFetchFn ? { githubFetchFn } : {}),
+    ...(healthFetchFn ? { healthFetchFn } : {}),
     handoffEventRecorder: async (event: HandoffEventInput) => { events?.push(event); },
     now: new Date("2026-05-09T12:00:00.000Z"),
     async query(text: string) {
@@ -378,9 +488,52 @@ function githubFetch(options: { failing?: boolean } = {}): typeof fetch {
   }) as typeof fetch;
 }
 
-function jsonResponse(value: unknown): Response {
+function githubStatusFetch(options: { failing?: boolean; active?: boolean } = {}): typeof fetch {
+  return (async (url: string | URL | Request) => {
+    const text = String(url);
+    if (text.endsWith("/repos/averray-agent/agent")) {
+      return jsonResponse({
+        default_branch: "main",
+        private: true,
+        html_url: "https://github.com/averray-agent/agent",
+      });
+    }
+    if (text.includes("/repos/averray-agent/agent/pulls?")) {
+      return jsonResponse([]);
+    }
+    if (text.includes("/repos/averray-agent/agent/issues?")) {
+      return jsonResponse([]);
+    }
+    if (text.includes("/repos/averray-agent/agent/actions/runs?")) {
+      return jsonResponse({
+        workflow_runs: [
+          {
+            id: 123,
+            name: "Deploy Production",
+            status: options.active ? "in_progress" : "completed",
+            conclusion: options.failing ? "failure" : "success",
+            head_branch: "main",
+            event: "push",
+            html_url: "https://github.com/averray-agent/agent/actions/runs/123",
+            updated_at: "2026-05-09T11:30:00.000Z",
+          },
+        ],
+      });
+    }
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+}
+
+function healthFetch(options: { ok: boolean }): typeof fetch {
+  return (async () => jsonResponse(
+    { status: options.ok ? "ok" : "unavailable" },
+    options.ok ? 200 : 503
+  )) as typeof fetch;
+}
+
+function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
-    status: 200,
+    status,
     headers: { "content-type": "application/json" },
   });
 }

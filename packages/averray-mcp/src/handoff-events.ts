@@ -130,6 +130,7 @@ export function summarizeHandoffResult(result: unknown): Record<string, unknown>
     reason: stringField(record, "reason") ?? stringField(nestedResult, "finalReason"),
     finalReason: stringField(nestedResult, "finalReason"),
     finalVerdict: stringField(nestedResult, "finalVerdict"),
+    deploymentHealth: deploymentHealthSummary(nestedResult),
     mergeRecommendation: firstDeepString(nestedResult, [
       ["github", "mergeRecommendation"],
       ["github", "merge_recommendation"],
@@ -307,6 +308,30 @@ function githubReviewSignals(record: Record<string, unknown>): Record<string, un
   return Object.keys(signals).length > 0 ? signals : undefined;
 }
 
+function deploymentHealthSummary(record: Record<string, unknown>): Record<string, unknown> | undefined {
+  const deployment = isRecord(record.deploymentHealth) ? record.deploymentHealth : undefined;
+  if (!deployment) return undefined;
+  const suite = isRecord(deployment.suite) ? deployment.suite : {};
+  const hosted = isRecord(deployment.hosted) ? deployment.hosted : {};
+  const github = isRecord(deployment.github) ? deployment.github : {};
+  const githubTotals = isRecord(github.totals) ? github.totals : {};
+  const ops = isRecord(deployment.ops) ? deployment.ops : {};
+  return compactRecord({
+    finalVerdict: stringField(deployment, "finalVerdict"),
+    finalReason: stringField(deployment, "finalReason"),
+    suitePassed: numberField(suite, "passed"),
+    suiteFailed: numberField(suite, "failed"),
+    suiteSkipped: numberField(suite, "skipped"),
+    hostedStatus: stringField(hosted, "status"),
+    hostedChecks: Array.isArray(hosted.checks) ? hosted.checks.length : undefined,
+    githubHealth: stringField(github, "health"),
+    githubFailingWorkflowRuns: numberField(githubTotals, "failingWorkflowRuns"),
+    githubActiveWorkflowRuns: numberField(githubTotals, "activeWorkflowRuns"),
+    opsStatus: stringField(ops, "status"),
+    opsRecentErrors: numberField(ops, "recentErrors"),
+  });
+}
+
 function stringField(record: Record<string, unknown>, key: string): string | undefined {
   const value = record[key];
   return typeof value === "string" && value.length > 0 ? value : undefined;
@@ -315,6 +340,11 @@ function stringField(record: Record<string, unknown>, key: string): string | und
 function booleanField(record: Record<string, unknown>, key: string): boolean | undefined {
   const value = record[key];
   return typeof value === "boolean" ? value : undefined;
+}
+
+function numberField(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
