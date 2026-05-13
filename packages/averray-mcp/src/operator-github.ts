@@ -176,10 +176,33 @@ export interface GithubPullRequestReview {
     skipped: number;
     sample: GithubPullRequestCheckSummary[];
   };
+  review: GithubPullRequestReviewSignals;
   riskFindings: GithubPullRequestRiskFinding[];
   mergeRecommendation: GithubPullRequestMergeRecommendation;
   recommendations: string[];
   warnings: GithubWarning[];
+}
+
+export type GithubPullRequestTouchedArea =
+  | "frontend"
+  | "backend"
+  | "indexer"
+  | "contracts"
+  | "ops"
+  | "deploy"
+  | "workflow"
+  | "docs"
+  | "tests"
+  | "dependencies"
+  | "config";
+
+export interface GithubPullRequestReviewSignals {
+  touchedAreas: GithubPullRequestTouchedArea[];
+  testFilesChanged: boolean;
+  testSignals: string[];
+  missingTestSignals: GithubPullRequestTouchedArea[];
+  rolloutNotesRequired: boolean;
+  rolloutNotesPresent: boolean;
 }
 
 export interface GithubPullRequestFileSummary {
@@ -252,6 +275,7 @@ interface GithubApiUser {
 interface GithubApiPullRequest {
   number?: number;
   title?: string;
+  body?: string | null;
   html_url?: string;
   user?: GithubApiUser | null;
   draft?: boolean;
@@ -619,11 +643,17 @@ export async function getGithubPullRequestReview(
     const checkSummaries = checks.map(checkSummary);
     const checkTotals = summarizeChecks(checkSummaries);
     const pullRequestSummary = summarizePullRequest(repo, pullRequest);
+    const reviewSignals = buildPullRequestReviewSignals({
+      body: pullRequest.body,
+      files: fileSummaries,
+      checks: checkSummaries,
+    });
     const riskFindings = buildPullRequestRiskFindings({
       pullRequest: pullRequestSummary,
       files: fileSummaries,
       highRiskFiles,
       checks: checkTotals,
+      review: reviewSignals,
       warnings,
     });
     const mergeRecommendation = chooseMergeRecommendation(riskFindings);
@@ -652,6 +682,7 @@ export async function getGithubPullRequestReview(
         ...checkTotals,
         sample: checkSummaries.slice(0, 20),
       },
+      review: reviewSignals,
       riskFindings,
       mergeRecommendation,
       recommendations: buildPullRequestReviewRecommendations({ mergeRecommendation, riskFindings }),
@@ -784,6 +815,14 @@ function emptyPullRequestReview(input: {
     health: "degraded",
     files: { total: 0, highRisk: [], sample: [] },
     checks: { total: 0, passed: 0, failed: 0, active: 0, neutral: 0, skipped: 0, sample: [] },
+    review: {
+      touchedAreas: [],
+      testFilesChanged: false,
+      testSignals: [],
+      missingTestSignals: [],
+      rolloutNotesRequired: false,
+      rolloutNotesPresent: false,
+    },
     riskFindings: input.warnings.map((warning) => ({
       severity: warning.severity,
       code: warning.code,
@@ -900,6 +939,85 @@ function fileRisk(file: GithubPullRequestFileSummary): GithubPullRequestFileRisk
   return undefined;
 }
 
+function buildPullRequestReviewSignals(input: {
+  body?: string | null;
+  files: GithubPullRequestFileSummary[];
+  checks: GithubPullRequestCheckSummary[];
+}): GithubPullRequestReviewSignals {
+  const touchedAreas = unique(input.files.flatMap((file) => touchedAreasForPath(file.filename)));
+  const testFilesChanged = input.files.some((file) => touchedAreasForPath(file.filename).includes("tests"));
+  const checkNames = input.checks.map((check) => check.name.toLowerCase());
+  const testSignals = unique([
+    ...(testFilesChanged ? ["test files changed"] : []),
+    ...input.checks
+      .filter((check) => isTestSignalCheck(check.name))
+      .map((check) => `check:${check.name}`),
+  ]);
+  const codeAreas = touchedAreas.filter((area) => isCodeArea(area));
+  const missingTestSignals = testFilesChanged
+    ? []
+    : codeAreas.filter((area) => !areaHasCheckSignal(area, checkNames));
+  const rolloutNotesRequired = touchedAreas.some((area) => requiresRolloutNotes(area));
+  const rolloutNotesPresent = rolloutNotesRequired && hasRolloutNotes(input.body);
+
+  return {
+    touchedAreas,
+    testFilesChanged,
+    testSignals,
+    missingTestSignals,
+    rolloutNotesRequired,
+    rolloutNotesPresent,
+  };
+}
+
+function touchedAreasForPath(filename: string): GithubPullRequestTouchedArea[] {
+  const path = filename.toLowerCase();
+  const areas: GithubPullRequestTouchedArea[] = [];
+  if (/(\btest\b|__tests__|\.test\.|\.spec\.|\/tests?\/)/.test(path)) areas.push("tests");
+  if (/^docs?\//.test(path) || /\.mdx?$/.test(path)) areas.push("docs");
+  if (/^app\//.test(path) || /^frontend\//.test(path) || /^site\//.test(path) || /\.(tsx|jsx|css|scss)$/.test(path)) {
+    areas.push("frontend");
+  }
+  if (/^mcp-server\//.test(path) || /^packages\//.test(path) || /^services\//.test(path)) areas.push("backend");
+  if (/^indexer\//.test(path)) areas.push("indexer");
+  if (/^contracts?\//.test(path)) areas.push("contracts");
+  if (/^ops\//.test(path) || /compose.*\.ya?ml$/.test(path) || /caddyfile$/.test(path)) areas.push("ops");
+  if (/(^|\/)deploy/.test(path)) areas.push("deploy");
+  if (/^\.github\/workflows\//.test(path)) areas.push("workflow");
+  if (/package-lock\.json$|pnpm-lock\.yaml$|yarn\.lock$/.test(path)) areas.push("dependencies");
+  if (/\.json$|\.ya?ml$|\.toml$|\.ini$/.test(path)) areas.push("config");
+  return areas.length > 0 ? areas : ["config"];
+}
+
+function isCodeArea(area: GithubPullRequestTouchedArea): boolean {
+  return area === "frontend" || area === "backend" || area === "indexer" || area === "contracts";
+}
+
+function requiresRolloutNotes(area: GithubPullRequestTouchedArea): boolean {
+  return area === "ops" || area === "deploy" || area === "workflow" || area === "contracts" || area === "indexer";
+}
+
+function hasRolloutNotes(body: string | null | undefined): boolean {
+  if (!body) return false;
+  return /(deploy|deployment|rollback|roll back|rollout|operator|vps|secret|env|migration|contract)/i.test(body);
+}
+
+function isTestSignalCheck(name: string): boolean {
+  return /(test|typecheck|build|ci|lint|forge|vitest|playwright)/i.test(name);
+}
+
+function areaHasCheckSignal(area: GithubPullRequestTouchedArea, checkNames: string[]): boolean {
+  if (checkNames.some((name) => /\bci\b/.test(name))) return true;
+  const patterns: Partial<Record<GithubPullRequestTouchedArea, RegExp>> = {
+    frontend: /(frontend|app|typecheck|build|playwright|ui)/,
+    backend: /(backend|mcp|server|service|test|typecheck)/,
+    indexer: /(indexer|typecheck|test)/,
+    contracts: /(contract|forge|solidity|test)/,
+  };
+  const pattern = patterns[area];
+  return pattern ? checkNames.some((name) => pattern.test(name)) : false;
+}
+
 function checkSummary(check: GithubApiCheckRun): GithubPullRequestCheckSummary {
   return {
     name: check.name ?? "Unnamed check",
@@ -933,6 +1051,7 @@ function buildPullRequestRiskFindings(input: {
   files: GithubPullRequestFileSummary[];
   highRiskFiles: GithubPullRequestFileRisk[];
   checks: ReturnType<typeof summarizeChecks>;
+  review: GithubPullRequestReviewSignals;
   warnings: GithubWarning[];
 }): GithubPullRequestRiskFinding[] {
   const findings: GithubPullRequestRiskFinding[] = input.warnings.map((warning) => ({
@@ -972,6 +1091,20 @@ function buildPullRequestRiskFindings(input: {
       message: `${reviewRisk.length} changed file(s) touch review-gated surfaces${categories ? ` (${categories})` : ""}.`,
     });
   }
+  if (input.review.missingTestSignals.length > 0) {
+    findings.push({
+      severity: "medium",
+      code: "pr_test_signal_missing",
+      message: `No changed test files or matching check names found for ${input.review.missingTestSignals.join(", ")} changes.`,
+    });
+  }
+  if (input.review.rolloutNotesRequired && !input.review.rolloutNotesPresent) {
+    findings.push({
+      severity: "medium",
+      code: "pr_rollout_notes_missing",
+      message: "Deploy, ops, workflow, contract, or indexer changes should include rollout or rollback notes in the PR body.",
+    });
+  }
   if (input.files.length > 25) {
     findings.push({ severity: "medium", code: "pr_large_file_count", message: `PR changes ${input.files.length} files.` });
   }
@@ -990,6 +1123,10 @@ function buildPullRequestRiskFindings(input: {
     findings.push({ severity: "low", code: "pr_review_green", message: "PR metadata, files, and checks look merge-ready." });
   }
   return findings;
+}
+
+function unique<T>(values: T[]): T[] {
+  return [...new Set(values)];
 }
 
 function chooseMergeRecommendation(findings: GithubPullRequestRiskFinding[]): GithubPullRequestMergeRecommendation {
