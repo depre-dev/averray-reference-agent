@@ -43,6 +43,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       --ok: #52d273;
       --bad: #ff6b6b;
       --warn: #ffd166;
+      --ok-bg: rgba(82, 210, 115, 0.12);
+      --bad-bg: rgba(255, 107, 107, 0.12);
+      --warn-bg: rgba(255, 209, 102, 0.12);
+      --accent-bg: rgba(255, 176, 46, 0.12);
     }
     * { box-sizing: border-box; }
     body {
@@ -134,6 +138,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .handoff[data-verdict="block"] { border-left-color: var(--bad); }
     .handoff[data-status="needs_review"],
     .handoff[data-verdict="needs-review"] { border-left-color: var(--warn); }
+    .handoff[data-verdict="running"] { border-left-color: var(--accent); }
     .handoff-why {
       margin: 0 0 12px;
       color: var(--text);
@@ -162,6 +167,31 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       background: rgba(255, 255, 255, 0.05);
       font-size: 0.82rem;
       white-space: nowrap;
+    }
+    .state-pill {
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .state-pill[data-level="pass"] {
+      border-color: var(--ok);
+      background: var(--ok-bg);
+      color: var(--ok);
+    }
+    .state-pill[data-level="block"] {
+      border-color: var(--bad);
+      background: var(--bad-bg);
+      color: var(--bad);
+    }
+    .state-pill[data-level="needs-review"] {
+      border-color: var(--warn);
+      background: var(--warn-bg);
+      color: var(--warn);
+    }
+    .state-pill[data-level="running"] {
+      border-color: var(--accent);
+      background: var(--accent-bg);
+      color: var(--accent);
     }
     dl {
       display: grid;
@@ -213,13 +243,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     <section class="grid" aria-label="Monitor summary">
       <div class="card"><span class="metric">Status</span><span id="status" class="value">...</span></div>
       <div class="card"><span class="metric">Active / Just Finished</span><span id="active-count" class="value">0</span></div>
-      <div class="card"><span class="metric">Needs Attention</span><span id="attention-count" class="value">0</span></div>
+      <div class="card"><span class="metric">Blocked / Review</span><span id="gate-count" class="value">0 / 0</span></div>
       <div class="card"><span class="metric">Recent</span><span id="recent-count" class="value">0</span></div>
       <div class="card"><span class="metric">Events</span><span id="event-count" class="value">0</span></div>
     </section>
     <div class="section-title"><h2>Live Lane</h2><span id="generated" class="pill">waiting</span></div>
     <section id="active" class="list"><div class="empty">No running or just-finished handoffs.</div></section>
-    <div class="section-title"><h2>Needs Attention</h2><span class="pill">release gate</span></div>
+    <div class="section-title"><h2>Release Gate</h2><span class="pill">block + review</span></div>
     <section id="attention" class="list"><div class="empty">No handoffs need attention.</div></section>
     <div class="section-title"><h2>Release Timeline</h2><span class="pill">auto-refresh 5s</span></div>
     <section id="recent" class="list"><div class="empty">Loading recent handoffs...</div></section>
@@ -246,10 +276,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function render(payload) {
       const counts = payload.counts || {};
       const recent = payload.recent || [];
+      const verdicts = recent.map(releaseVerdict);
       const attention = recent.filter(needsAttention);
+      const blocked = verdicts.filter((verdict) => verdict.level === "block").length;
+      const review = verdicts.filter((verdict) => verdict.level === "needs-review").length;
       document.getElementById("status").textContent = payload.status || "unknown";
       document.getElementById("active-count").textContent = counts.active || 0;
-      document.getElementById("attention-count").textContent = attention.length;
+      document.getElementById("gate-count").textContent = blocked + " / " + review;
       document.getElementById("recent-count").textContent = counts.recent || 0;
       document.getElementById("event-count").textContent = counts.events || 0;
       document.getElementById("generated").textContent = payload.generatedAt ? new Date(payload.generatedAt).toLocaleString() : "unknown";
@@ -276,7 +309,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const pr = prUrl ? '<a href="' + escapeAttr(prUrl) + '" target="_blank" rel="noreferrer">' + prLabel + '</a>' : "n/a";
       const tests = Array.isArray(item.testCaseIds) && item.testCaseIds.length ? item.testCaseIds.map((id) => "<code>" + escapeHtml(id) + "</code>").join(" ") : "n/a";
       return '<article class="handoff" data-status="' + escapeAttr(item.status || "unknown") + '" data-verdict="' + escapeAttr(verdict.level) + '">' +
-        '<div class="handoff-head"><div class="handoff-title">' + escapeHtml(title || item.correlationId || "handoff") + '</div><span class="pill">' + escapeHtml(verdict.label) + '</span></div>' +
+        '<div class="handoff-head"><div class="handoff-title">' + escapeHtml(title || item.correlationId || "handoff") + '</div><span class="pill state-pill" data-level="' + escapeAttr(verdict.level) + '">' + escapeHtml(verdict.label) + '</span></div>' +
         '<p class="handoff-why">' + escapeHtml(verdict.why) + '</p>' +
         '<dl>' +
         row("Correlation", "<code>" + escapeHtml(item.correlationId || "unknown") + "</code>") +
@@ -304,7 +337,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function needsAttention(item) {
-      return releaseVerdict(item).level !== "pass";
+      const level = releaseVerdict(item).level;
+      return level === "block" || level === "needs-review";
     }
 
     function releaseVerdict(item) {
@@ -312,34 +346,50 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const status = normalize(item.status);
       const finalVerdict = normalize(summary.finalVerdict || summary.status);
       const mergeRecommendation = normalize(summary.mergeRecommendation);
-      const reason = releaseReason(summary, item);
+      const reason = normalize(summary.finalReason || summary.reason || item.reason);
+      const reviewReasons = Array.isArray(summary.reviewReasons) ? summary.reviewReasons : [];
 
       if (status === "running") {
-        return { level: "running", label: "RUNNING", why: reason };
+        return { level: "running", label: "RUNNING", why: releaseReason(summary, item, "running") };
       }
+      const terminal = classifyReleaseGate(status, finalVerdict, mergeRecommendation, reason, reviewReasons);
       if (item.activeState === "just_finished") {
-        const label = finalVerdict.includes("review") || mergeRecommendation.includes("review")
-          ? "JUST FINISHED - REVIEW"
-          : finalVerdict.includes("block") || status === "blocked" || status === "failed"
-            ? "JUST FINISHED - BLOCK"
-            : "JUST FINISHED";
-        return { level: "running", label, why: reason };
+        return {
+          level: terminal.level,
+          label: "JUST FINISHED - " + terminal.label,
+          why: releaseReason(summary, item, terminal.level),
+        };
       }
-      if (status === "failed" || status === "blocked" || finalVerdict.includes("block")) {
-        return { level: "block", label: "BLOCK", why: reason };
+      return {
+        level: terminal.level,
+        label: terminal.label,
+        why: releaseReason(summary, item, terminal.level),
+      };
+    }
+
+    function classifyReleaseGate(status, finalVerdict, mergeRecommendation, reason, reviewReasons) {
+      if (
+        status === "failed"
+        || status === "blocked"
+        || includesAny(finalVerdict, ["block", "blocked", "failed", "failure", "hold"])
+        || includesAny(mergeRecommendation, ["block", "blocked", "failed", "failure", "hold", "do_not_merge"])
+        || includesAny(reason, ["deploy_failure", "deploy_failed", "ci_failed"])
+      ) {
+        return { level: "block", label: "BLOCK" };
       }
       if (
         status === "needs_review"
-        || finalVerdict.includes("review")
-        || mergeRecommendation.includes("review")
-        || mergeRecommendation.includes("wait")
+        || includesAny(finalVerdict, ["review", "needs_review"])
+        || includesAny(mergeRecommendation, ["review", "wait", "needs_review"])
+        || includesAny(reason, ["github_needs_review", "pr_review_hold", "needs_review"])
+        || reviewReasons.length > 0
       ) {
-        return { level: "needs-review", label: "NEEDS REVIEW", why: reason };
+        return { level: "needs-review", label: "NEEDS REVIEW" };
       }
-      return { level: "pass", label: "PASS", why: reason };
+      return { level: "pass", label: "PASS" };
     }
 
-    function releaseReason(summary, item) {
+    function releaseReason(summary, item, level) {
       const reviewReasons = Array.isArray(summary.reviewReasons) ? summary.reviewReasons : [];
       const first = reviewReasons.find(Boolean);
       if (first) {
@@ -347,6 +397,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         const message = String(first.message || "Human review recommended.");
         return code + ": " + message;
       }
+      const reason = normalize(summary.finalReason || summary.reason || item.reason);
+      if (reason === "github_needs_review") return "GitHub still has a review signal open.";
+      if (reason === "pr_review_hold") return "PR risk gate held this for human review.";
+      if (reason === "deploy_failure" || reason === "deploy_failed") return "Deploy failed; investigate before release.";
+      if (reason === "ci_failed") return "CI failed; fix before merge.";
+      if (reason === "ci_in_progress") return "CI is still running; wait for the result.";
+      if (level === "pass") return "No blocking release signals recorded.";
       return String(summary.finalReason || summary.reason || item.reason || item.phase || "No reason recorded.");
     }
 
@@ -363,6 +420,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function normalize(value) {
       return String(value || "").trim().toLowerCase().replace(/[\\s-]+/g, "_");
+    }
+
+    function includesAny(value, needles) {
+      return needles.some((needle) => value.includes(needle));
     }
 
     function liveStateLabel(value) {
