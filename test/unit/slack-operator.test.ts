@@ -259,6 +259,18 @@ describe("slack operator bridge", () => {
             revisionId: "1351905437",
           },
         ],
+        decisionSummary: {
+          health: "attention",
+          attentionItems: [
+            {
+              severity: "medium",
+              source: "github",
+              title: "1 open PR",
+              detail: "Review the open PR before merging.",
+            },
+          ],
+          suggestedActions: ["github status", "handoff monitor"],
+        },
         recommendedNextActions: ["Use: run one wikipedia citation repair dry run only"],
       },
     });
@@ -266,6 +278,11 @@ describe("slack operator bridge", () => {
     expect(text).toContain("*Daily Averray operator brief*");
     expect(text).toContain("wallet: `ready`");
     expect(text).toContain("budget remaining: `1 / 1 USD`");
+    expect(text).toContain("*Decision summary*");
+    expect(text).toContain("health: `attention`");
+    expect(text).toContain("*Needs attention*");
+    expect(text).toContain("github: 1 open PR");
+    expect(text).toContain("`github status`");
     expect(text).toContain("wiki-en-58158792-citation-repair-r8");
     expect(text).toContain("This brief is read-only.");
   });
