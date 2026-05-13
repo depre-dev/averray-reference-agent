@@ -57,6 +57,9 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("activeWindowMinutes: \"240\"");
     expect(html).toContain("limit: \"50\"");
     expect(html).toContain("releaseVerdict(item)");
+    expect(html).toContain("reviewReasonRows(summary)");
+    expect(html).toContain("Review why");
+    expect(html).toContain("releaseReason(summary, item)");
     expect(html).toContain("derivePullRequestUrl(item)");
     expect(html).toContain("https://github.com/");
     expect(html).not.toContain("handleOperatorCommand");

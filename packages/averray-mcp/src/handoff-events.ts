@@ -128,11 +128,13 @@ export function summarizeHandoffResult(result: unknown): Record<string, unknown>
     kind: stringField(record, "kind") ?? stringField(nestedResult, "kind"),
     status: stringField(record, "status") ?? stringField(nestedResult, "status"),
     reason: stringField(record, "reason") ?? stringField(nestedResult, "finalReason"),
+    finalReason: stringField(nestedResult, "finalReason"),
     finalVerdict: stringField(nestedResult, "finalVerdict"),
     mergeRecommendation: firstDeepString(nestedResult, [
       ["github", "mergeRecommendation"],
       ["github", "merge_recommendation"],
     ]),
+    reviewReasons: githubReviewReasons(nestedResult),
     requestedCaseIds: arrayField(nestedResult, "requestedCaseIds"),
     summary,
     safety,
@@ -272,6 +274,21 @@ function firstDeepString(record: Record<string, unknown>, paths: string[][]): st
     if (typeof value === "string" && value.length > 0) return value;
   }
   return undefined;
+}
+
+function githubReviewReasons(record: Record<string, unknown>): Record<string, unknown>[] | undefined {
+  const github = isRecord(record.github) ? record.github : undefined;
+  const findings = Array.isArray(github?.riskFindings) ? github.riskFindings : [];
+  const reviewReasons = findings
+    .filter(isRecord)
+    .filter((finding) => stringField(finding, "code") !== "pr_review_green")
+    .slice(0, 5)
+    .map((finding) => compactRecord({
+      severity: stringField(finding, "severity"),
+      code: stringField(finding, "code"),
+      message: stringField(finding, "message"),
+    }));
+  return reviewReasons.length > 0 ? reviewReasons : undefined;
 }
 
 function stringField(record: Record<string, unknown>, key: string): string | undefined {
