@@ -640,6 +640,7 @@ async function recordInvocationEvent(
       phase: event.phase,
       status: event.status,
       ...(input.repo ? { repo: input.repo } : {}),
+      ...(input.sha ? { sha: input.sha } : {}),
       ...(input.pullRequestNumber ? { pullRequestNumber: input.pullRequestNumber } : {}),
       ...(input.pullRequestUrl ? { pullRequestUrl: input.pullRequestUrl } : {}),
       ...(input.testCaseId ? { testCaseId: normalizeTestCaseId(input.testCaseId) } : {}),

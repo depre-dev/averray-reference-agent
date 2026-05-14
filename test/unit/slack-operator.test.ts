@@ -737,12 +737,22 @@ describe("slack operator bridge", () => {
             requester: "github-actions",
             intent: "post_deploy",
             repo: "averray-agent/agent",
+            sha: "22beb113398569d4bd5d0bf85373777486f8b70c",
             status: "completed",
             phase: "completed",
             updatedAt: "2026-05-09T20:36:00.000Z",
             summary: {
-              finalVerdict: "PASS",
+              finalVerdict: "pass",
+              finalReason: "post_deploy_healthy",
               mergeRecommendation: "n/a",
+              deploymentHealth: {
+                suitePassed: 7,
+                suiteFailed: 0,
+                suiteSkipped: 1,
+                hostedStatus: "ok",
+                githubHealth: "ok",
+                opsStatus: "ok",
+              },
             },
           },
         ],
@@ -764,6 +774,11 @@ describe("slack operator bridge", () => {
     expect(text).toContain("code review: `ok`");
     expect(text).toContain("*Recent handoffs*");
     expect(text).toContain("post_deploy");
+    expect(text).toContain("*PASS* averray-agent/agent");
+    expect(text).toContain("why: post-deploy suite, GitHub workflows, and hosted health are clean");
+    expect(text).toContain("<https://github.com/averray-agent/agent/commit/22beb113398569d4bd5d0bf85373777486f8b70c|22beb113398569d4...86f8b70c>");
+    expect(text).toContain("<https://github.com/averray-agent/agent/actions/runs/25608715158|workflow run>");
+    expect(text).toContain("deploy health: `suite pass 7 / fail 0 / skip 1 · hosted ok · github ok · ops ok`");
     expect(text).toContain("GitHub mutated: `false`");
   });
 

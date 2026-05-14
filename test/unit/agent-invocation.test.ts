@@ -214,6 +214,7 @@ describe("agent invocation hook", () => {
     });
     expect(events.at(-1)).toMatchObject({
       correlationId: "github-deploy-123",
+      sha: "abc1234",
       phase: "completed",
       summary: {
         finalVerdict: "pass",

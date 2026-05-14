@@ -16,6 +16,7 @@ export interface HandoffEventInput {
   phase: string;
   status: HandoffEventStatus;
   repo?: string;
+  sha?: string;
   pullRequestNumber?: number;
   pullRequestUrl?: string;
   testCaseId?: string;
@@ -204,6 +205,7 @@ function summarizeCorrelation(eventsNewestFirst: HandoffEvent[], now: Date) {
     requester: latest?.requester ?? oldest?.requester ?? null,
     intent: latest?.intent ?? oldest?.intent ?? null,
     repo: latest?.repo ?? oldest?.repo ?? null,
+    sha: latest?.sha ?? oldest?.sha ?? null,
     pullRequestNumber: latest?.pullRequestNumber ?? oldest?.pullRequestNumber ?? null,
     pullRequestUrl: latest?.pullRequestUrl ?? oldest?.pullRequestUrl ?? null,
     testCaseIds: latest?.testCaseIds ?? oldest?.testCaseIds ?? [],
@@ -324,12 +326,26 @@ function deploymentHealthSummary(record: Record<string, unknown>): Record<string
     suiteSkipped: numberField(suite, "skipped"),
     hostedStatus: stringField(hosted, "status"),
     hostedChecks: Array.isArray(hosted.checks) ? hosted.checks.length : undefined,
+    hostedFailedUrls: urlsFromRecords(hosted.checks, (check) => check.status === "failed"),
     githubHealth: stringField(github, "health"),
     githubFailingWorkflowRuns: numberField(githubTotals, "failingWorkflowRuns"),
     githubActiveWorkflowRuns: numberField(githubTotals, "activeWorkflowRuns"),
+    githubFailingWorkflowRunUrls: urlsFromRecords(github.failingWorkflowRuns),
+    githubActiveWorkflowRunUrls: urlsFromRecords(github.activeWorkflowRuns),
     opsStatus: stringField(ops, "status"),
     opsRecentErrors: numberField(ops, "recentErrors"),
   });
+}
+
+function urlsFromRecords(value: unknown, predicate: (record: Record<string, unknown>) => boolean = () => true): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const urls = value
+    .filter(isRecord)
+    .filter(predicate)
+    .map((record) => stringField(record, "url"))
+    .filter((url): url is string => Boolean(url))
+    .slice(0, 3);
+  return urls.length > 0 ? urls : undefined;
 }
 
 function stringField(record: Record<string, unknown>, key: string): string | undefined {
