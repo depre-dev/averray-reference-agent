@@ -46,6 +46,7 @@ import { getBusinessLedger, getOpsHealth } from "./operator-insights.js";
 import { getDailyOperatorBrief, getOperatorStatus, getSafeWorkReport } from "./operator-status.js";
 import { getAgentUsefulnessPlan } from "./operator-usefulness.js";
 import { getProjectMemory } from "./operator-project-memory.js";
+import { getProjectRunbook } from "./operator-project-runbook.js";
 import { getGithubOperatorBrief, getGithubOperatorStatus } from "./operator-github.js";
 import { getTestbedE2eSuite, runTestbedE2eReadOnly } from "./operator-testbed.js";
 import { invokeAgentTask } from "./agent-invocation.js";
@@ -186,6 +187,19 @@ server.tool(
 );
 
 server.tool(
+  "averray_project_runbook",
+  "Read-only project admin runbooks for humans, Slack, Command Center, and other agents. Returns action-specific evidence, stop conditions, verification steps, and rollback notes for merge, deploy, rollback, restart, and secret-rotation decisions. It never approves, merges, deploys, restarts, rotates secrets, SSHes to production, edits GitHub, or mutates Averray state.",
+  {
+    action: z.enum(["merge", "deploy", "rollback", "secret_rotation", "restart", "unknown"]).default("unknown"),
+    project: z.string().min(1).optional(),
+    query: z.string().min(1).optional()
+  },
+  async ({ action, project, query: projectQuery }) => {
+    return jsonContent(getProjectRunbook({ action, project, query: projectQuery }));
+  }
+);
+
+server.tool(
   "averray_admin_readiness",
   "Canonical read-only admin-readiness plan for humans, Slack, Command Center, mobile surfaces, and other agents. Returns the current operator-copilot role, admin maturity ladder, guardrails, allowed/denied actions, and required controls before project-admin powers. Does not claim, submit, deploy, edit code, edit Wikipedia, request approval, or mutate Averray state.",
   {},
@@ -311,7 +325,7 @@ server.tool(
 
 server.tool(
   "averray_handle_operator_command",
-  "Direct router for trusted Slack/operator/command-center messages. Use this for short commands like 'what can you do for us', 'project memory', 'known projects', 'how do we deploy averray-agent/agent', 'admin readiness', 'admin proposal', 'propose merge for averray-agent/agent#123', 'propose deploy for averray-agent/agent sha abc1234', 'business ledger', 'ops health', 'github status', 'github brief', 'daily github brief', 'what changed since last time', 'github open prs', 'github ci failures', 'testbed e2e suite', 'platform e2e suite', 'run testbed e2e read-only', 'handoff monitor', 'what is Hermes doing', 'daily operator brief', 'find safe work', 'operator status', 'operator status details', 'run one wikipedia citation repair if safe', and 'status last wikipedia citation repair' instead of sending them through a free-form Hermes prompt. Recognized repair run commands call averray_run_wikipedia_citation_repair directly; recognized read-only E2E run commands call averray_run_testbed_e2e_read_only directly. Recognized status/help/brief/work-discovery/usefulness/project-memory/admin-readiness/admin-proposal/ledger/health/github/testbed/handoff-monitor commands are read-only against external systems except GitHub brief, which persists a local checkpoint timestamp. Human surfaces may compact identifiers by default; add 'details' for full audit identifiers.",
+  "Direct router for trusted Slack/operator/command-center messages. Use this for short commands like 'what can you do for us', 'project memory', 'known projects', 'how do we deploy averray-agent/agent', 'runbook for deploy averray-agent/agent', 'merge runbook for averray-agent/agent', 'secret rotation runbook', 'admin readiness', 'admin proposal', 'propose merge for averray-agent/agent#123', 'propose deploy for averray-agent/agent sha abc1234', 'business ledger', 'ops health', 'github status', 'github brief', 'daily github brief', 'what changed since last time', 'github open prs', 'github ci failures', 'testbed e2e suite', 'platform e2e suite', 'run testbed e2e read-only', 'handoff monitor', 'what is Hermes doing', 'daily operator brief', 'find safe work', 'operator status', 'operator status details', 'run one wikipedia citation repair if safe', and 'status last wikipedia citation repair' instead of sending them through a free-form Hermes prompt. Recognized repair run commands call averray_run_wikipedia_citation_repair directly; recognized read-only E2E run commands call averray_run_testbed_e2e_read_only directly. Recognized status/help/brief/work-discovery/usefulness/project-memory/project-runbook/admin-readiness/admin-proposal/ledger/health/github/testbed/handoff-monitor commands are read-only against external systems except GitHub brief, which persists a local checkpoint timestamp. Human surfaces may compact identifiers by default; add 'details' for full audit identifiers.",
   {
     text: z.string().min(1),
     source: z.enum(["slack", "operator", "command_center", "hermes", "agent"]).default("operator"),

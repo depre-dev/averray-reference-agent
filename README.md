@@ -136,7 +136,10 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   recognizes `what can you do for us`, `project memory`, `known projects`,
   `how do we deploy averray-agent/agent`, `admin readiness`, `admin proposal`,
   `propose merge for averray-agent/agent#123`,
-  `propose deploy for averray-agent/agent sha abc1234`, `business ledger`,
+  `propose deploy for averray-agent/agent sha abc1234`,
+  `runbook for deploy averray-agent/agent`,
+  `merge runbook for averray-agent/agent`, `secret rotation runbook`,
+  `business ledger`,
   `ops health`, `github status`, `github open prs`, `github ci failures`,
   `github issue digest`, `github brief`, `daily github brief`,
   `what changed since last time`, `testbed e2e suite`,
@@ -158,6 +161,12 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   of known projects, repos, deploy surfaces, useful commands, handoff
   expectations, safety notes, and open questions. It stores no secrets and does
   not merge, deploy, SSH, edit GitHub, edit Wikipedia, or mutate Averray state.
+  Project runbook commands call `averray_project_runbook`, a read-only
+  project-admin checklist for merge, deploy, rollback, restart, and
+  secret-rotation work. It returns required evidence, operator steps, stop
+  conditions, verification, rollback notes, and suggested Hermes commands. It
+  never approves, merges, deploys, restarts, rotates secrets, SSHes, or mutates
+  GitHub.
   `what can you do for us` calls the
   read-only `averray_agent_usefulness_plan` MCP tool and explains the useful
   surfaces and use cases across Slack, Command Center/mobile, MCP clients,

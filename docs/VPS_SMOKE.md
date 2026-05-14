@@ -240,6 +240,9 @@ operator status details
 admin proposal
 propose merge for averray-agent/agent#123
 propose deploy for averray-agent/agent sha abc1234
+runbook for deploy averray-agent/agent
+merge runbook for averray-agent/agent
+secret rotation runbook
 run one wikipedia citation repair if safe
 run wikipedia citation repair for wiki-en-... if safe
 status last wikipedia citation repair
@@ -254,6 +257,12 @@ Averray business tracking, and durable memory. `project memory` and
 known projects, repos, deploy surfaces, useful commands, handoff expectations,
 safety notes, and open questions. It stores no secrets and does not merge,
 deploy, SSH, edit GitHub, edit Wikipedia, or mutate Averray state.
+Project runbook commands call `averray_project_runbook`, a read-only
+project-admin checklist for merge, deploy, rollback, restart, and
+secret-rotation work. It returns required evidence, operator steps, stop
+conditions, verification, rollback notes, and suggested Hermes commands. It
+never approves, merges, deploys, restarts, rotates secrets, SSHes, or mutates
+GitHub.
 `admin readiness` calls
 `averray_admin_readiness`, a read-only staged plan for growing from operator
 copilot to approval-gated project admin without granting broad mutation powers

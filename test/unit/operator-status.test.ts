@@ -9,6 +9,7 @@ import { getBusinessLedger, getOpsHealth } from "../../packages/averray-mcp/src/
 import { getAgentUsefulnessPlan } from "../../packages/averray-mcp/src/operator-usefulness.js";
 import { getAdminReadiness } from "../../packages/averray-mcp/src/operator-admin.js";
 import { getProjectMemory } from "../../packages/averray-mcp/src/operator-project-memory.js";
+import { getProjectRunbook } from "../../packages/averray-mcp/src/operator-project-runbook.js";
 import { getTestbedE2eSuite, runTestbedE2eReadOnly } from "../../packages/averray-mcp/src/operator-testbed.js";
 
 describe("operator status", () => {
@@ -340,6 +341,28 @@ describe("operator status", () => {
       },
     });
     expect(memory.commands).toContain("how do we deploy averray-agent/agent");
+
+    const runbook = getProjectRunbook({ query: "runbook for deploy averray-agent/agent" });
+    expect(runbook).toMatchObject({
+      kind: "project_admin_runbook",
+      mutates: false,
+      action: "deploy",
+      target: {
+        project: "averray-platform",
+        repos: ["averray-agent/agent"],
+      },
+      safety: {
+        readOnly: true,
+        approvalRequired: true,
+        mutates: false,
+      },
+    });
+    expect(runbook.runbook.requiredEvidence).toEqual(expect.arrayContaining([
+      expect.stringContaining("CI is green"),
+    ]));
+    expect(runbook.suggestedHermesCommands).toEqual(expect.arrayContaining([
+      "run testbed e2e read-only",
+    ]));
 
     const suite = await getTestbedE2eSuite({
       ...deps,

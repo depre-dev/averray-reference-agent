@@ -143,6 +143,23 @@ describe("operator commands", () => {
       detailed: true,
       project: "averray-agent/agent",
     });
+    expect(parseOperatorCommand("runbook for deploy averray-agent/agent", { source: "operator" })).toEqual({
+      handled: true,
+      kind: "project_runbook",
+      source: "operator",
+      detailed: false,
+      action: "deploy",
+      project: "averray-agent/agent",
+      query: "runbook for deploy averray-agent/agent",
+    });
+    expect(parseOperatorCommand("secret rotation runbook details", { source: "slack" })).toEqual({
+      handled: true,
+      kind: "project_runbook",
+      source: "slack",
+      detailed: true,
+      action: "secret_rotation",
+      query: "secret rotation runbook details",
+    });
     expect(parseOperatorCommand("can you admin my projects?", { source: "operator" })).toEqual({
       handled: true,
       kind: "admin_readiness",
