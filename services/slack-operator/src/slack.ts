@@ -173,6 +173,43 @@ export function formatOperatorResultForSlack(result: unknown): string {
       "Read-only plan. Use `what can you do for us details` in MCP/Workspace for the full structured JSON.",
     ].filter(Boolean).join("\n");
   }
+  if (result.kind === "project_memory") {
+    const memory = isRecord(result.memory) ? result.memory : {};
+    const selected = isRecord(memory.selectedProject) ? memory.selectedProject : undefined;
+    const projects = Array.isArray(memory.projects) ? memory.projects : [];
+    if (selected) {
+      const deploy = isRecord(selected.deploy) ? selected.deploy : {};
+      const safety = isRecord(selected.safety) ? selected.safety : {};
+      const commands = Array.isArray(selected.routineCommands) ? selected.routineCommands : [];
+      const envs = Array.isArray(selected.environments) ? selected.environments : [];
+      const questions = Array.isArray(selected.openQuestions) ? selected.openQuestions : [];
+      return [
+        `*Project memory - ${stringField(selected, "name") ?? stringField(selected, "id") ?? "unknown"}*`,
+        stringField(selected, "role") ?? "No role recorded.",
+        "",
+        `• repos: ${arrayField(selected, "repos").map((entry) => `\`${String(entry)}\``).join(", ") || "`n/a`"}`,
+        `• owner: \`${stringField(selected, "owner") ?? "unknown"}\``,
+        envs.length > 0 ? `*Surfaces*\n${envs.slice(0, 4).map(formatProjectEnvironment).join("\n")}` : "",
+        "*Deploy memory*",
+        `• trigger: \`${stringField(deploy, "trigger") ?? "unknown"}\``,
+        stringField(deploy, "workflow") ? `• workflow: \`${stringField(deploy, "workflow")}\`` : "",
+        stringField(deploy, "script") ? `• script: \`${stringField(deploy, "script")}\`` : "",
+        stringField(deploy, "command") ? `• command: \`${stringField(deploy, "command")}\`` : "",
+        commands.length > 0 ? `*Useful commands*\n${commands.slice(0, 5).map((entry) => `• \`${String(entry)}\``).join("\n")}` : "",
+        questions.length > 0 ? `*Open questions*\n${questions.slice(0, 3).map((entry) => `• ${String(entry)}`).join("\n")}` : "",
+        `*Safety*\n• secrets stored: \`${String(safety.secretsInMemory === true)}\`\n• auto-admin: \`${String(safety.autoAdminEnabled === true || safety.autoMergeEnabled === true || safety.autoDeployEnabled === true)}\``,
+        "Read-only project memory.",
+      ].filter(Boolean).join("\n");
+    }
+    const lines = projects.slice(0, 6).map(formatProjectSummary).join("\n");
+    return [
+      "*Known project memory*",
+      lines || "No projects are known yet.",
+      "",
+      "Try `project memory for averray-agent/agent` or `how do we deploy averray-agent/agent`.",
+      "Read-only. No secrets are stored.",
+    ].join("\n");
+  }
   if (result.kind === "admin_readiness") {
     const readiness = isRecord(result.readiness) ? result.readiness : {};
     const currentRole = isRecord(readiness.currentRole) ? readiness.currentRole : {};
@@ -794,6 +831,19 @@ function formatAdminProposalEvidence(value: unknown): string {
 function formatAdminProposalRisk(value: unknown): string {
   if (!isRecord(value)) return "• unknown risk";
   return `• \`${stringField(value, "severity") ?? "info"}\` ${stringField(value, "code") ?? "risk"} - ${stringField(value, "message") ?? "no detail"}`;
+}
+
+function formatProjectSummary(value: unknown): string {
+  if (!isRecord(value)) return "• unknown project";
+  const repos = arrayField(value, "repos").map((entry) => String(entry)).join(", ");
+  return `• *${stringField(value, "name") ?? stringField(value, "id") ?? "unknown"}* - ${repos ? `\`${repos}\` ` : ""}${stringField(value, "role") ?? "no role recorded"}`;
+}
+
+function formatProjectEnvironment(value: unknown): string {
+  if (!isRecord(value)) return "• unknown";
+  const label = stringField(value, "name") ?? "surface";
+  const target = stringField(value, "url") ?? stringField(value, "path") ?? stringField(value, "purpose") ?? "n/a";
+  return `• ${label}: ${target}`;
 }
 
 function githubViewTitle(view: string): string {

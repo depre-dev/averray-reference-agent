@@ -124,6 +124,25 @@ describe("operator commands", () => {
       source: "command_center",
       detailed: true,
     });
+    expect(parseOperatorCommand("project memory", { source: "operator" })).toEqual({
+      handled: true,
+      kind: "project_memory",
+      source: "operator",
+      detailed: false,
+    });
+    expect(parseOperatorCommand("known projects details", { source: "slack" })).toEqual({
+      handled: true,
+      kind: "project_memory",
+      source: "slack",
+      detailed: true,
+    });
+    expect(parseOperatorCommand("how do we deploy averray-agent/agent details", { source: "command_center" })).toEqual({
+      handled: true,
+      kind: "project_memory",
+      source: "command_center",
+      detailed: true,
+      project: "averray-agent/agent",
+    });
     expect(parseOperatorCommand("can you admin my projects?", { source: "operator" })).toEqual({
       handled: true,
       kind: "admin_readiness",

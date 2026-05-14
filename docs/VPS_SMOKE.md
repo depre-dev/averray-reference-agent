@@ -217,6 +217,9 @@ commands are:
 ```text
 daily operator brief
 what can you do for us
+project memory
+known projects
+how do we deploy averray-agent/agent
 admin readiness
 business ledger
 ops health
@@ -246,7 +249,12 @@ status last wikipedia citation repair details
 `averray_handle_operator_command` parses those messages. `what can you do for
 us` calls `averray_agent_usefulness_plan`, a read-only cross-surface plan for
 Slack, Command Center/mobile, MCP clients, future GitHub helper work, ops care,
-Averray business tracking, and durable memory. `admin readiness` calls
+Averray business tracking, and durable memory. `project memory` and
+`known projects` call `averray_project_memory`, a read-only curated memory of
+known projects, repos, deploy surfaces, useful commands, handoff expectations,
+safety notes, and open questions. It stores no secrets and does not merge,
+deploy, SSH, edit GitHub, edit Wikipedia, or mutate Averray state.
+`admin readiness` calls
 `averray_admin_readiness`, a read-only staged plan for growing from operator
 copilot to approval-gated project admin without granting broad mutation powers
 by default. Admin proposal commands call `averray_admin_action_proposal`, a

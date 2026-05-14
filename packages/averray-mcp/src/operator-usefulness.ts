@@ -38,6 +38,7 @@ export async function getAgentUsefulnessPlan(deps: OperatorStatusDeps) {
         commands: [
           "brief me",
           "what can you do for us",
+          "project memory",
           "admin readiness",
           "what should i do next",
           "run one wikipedia citation repair dry run only",
@@ -56,6 +57,7 @@ export async function getAgentUsefulnessPlan(deps: OperatorStatusDeps) {
           "operator status",
           "daily operator brief",
           "what can you do for us",
+          "project memory",
           "admin readiness",
           "find safe work",
         ],
@@ -65,6 +67,7 @@ export async function getAgentUsefulnessPlan(deps: OperatorStatusDeps) {
         use: "Canonical structured contract any compatible agent can call without learning Slack or Workspace.",
         tools: [
           "averray_agent_usefulness_plan",
+          "averray_project_memory",
           "averray_admin_readiness",
           "averray_business_ledger",
           "averray_ops_health",
@@ -115,9 +118,9 @@ export async function getAgentUsefulnessPlan(deps: OperatorStatusDeps) {
       },
       {
         id: "knowledge_memory",
-        status: "partially_enabled",
-        value: "Keeps durable operator events in Postgres; next track is a human-readable runbook/memory export for setup decisions and commands.",
-        commands: ["operator status details", "status last wikipedia citation repair details"],
+        status: "enabled",
+        value: "Provides curated non-secret project memory: repos, deploy surfaces, useful commands, handoff expectations, safety notes, and open questions.",
+        commands: ["project memory", "known projects", "how do we deploy averray-agent/agent"],
       },
     ],
     nextImplementationTracks: [

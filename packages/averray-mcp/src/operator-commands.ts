@@ -43,6 +43,13 @@ export type ParsedOperatorCommand =
     }
   | {
       handled: true;
+      kind: "project_memory";
+      source: OperatorCommandSource;
+      detailed: boolean;
+      project?: string;
+    }
+  | {
+      handled: true;
       kind: "admin_readiness";
       source: OperatorCommandSource;
       detailed: boolean;
@@ -130,6 +137,10 @@ export interface LastWikipediaCitationRepairStatus {
 const EXAMPLES = [
   "daily operator brief",
   "what can you do for us",
+  "project memory",
+  "known projects",
+  "project memory for averray-agent/agent",
+  "how do we deploy averray-agent/agent",
   "admin readiness",
   "admin proposal",
   "propose merge for averray-agent/agent#123",
@@ -183,6 +194,11 @@ export function parseOperatorCommand(
 
   if (isAgentUsefulnessPlanCommand(normalizedText)) {
     return { handled: true, kind: "agent_usefulness_plan", source, detailed };
+  }
+
+  const projectMemory = projectMemoryTarget(text, normalizedText);
+  if (projectMemory.handled) {
+    return { handled: true, kind: "project_memory", source, detailed, ...projectMemory.target };
   }
 
   if (isAdminReadinessCommand(normalizedText)) {
@@ -375,6 +391,22 @@ function isFindSafeWorkCommand(text: string): boolean {
 
 function isAgentUsefulnessPlanCommand(text: string): boolean {
   return /^(what can you do|what can you do for us|how can you help|how can you work for us|work for us|agent usefulness|agent usefulness plan|agent plan|usefulness plan|show use cases|show agent use cases)( details?| full| audit)?$/.test(text);
+}
+
+function projectMemoryTarget(
+  originalText: string,
+  text: string
+): { handled: true; target: { project?: string } } | { handled: false } {
+  const compact = text.replace(/\b(details?|full|audit)\b/g, "").replace(/\s+/g, " ").trim();
+  if (/^(project memory|known projects|project registry|what projects do you know|what do you know about my projects)$/.test(compact)) {
+    return { handled: true, target: {} };
+  }
+  if (/^(project memory|project registry|known project|how do we deploy|how to deploy|deploy memory)\b/.test(compact)) {
+    const project = extractToken(originalText, /\b(?:for|deploy)\s+([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/i)
+      ?? extractToken(originalText, /\b(?:for|about)\s+(.+)$/i);
+    return { handled: true, target: project ? { project } : {} };
+  }
+  return { handled: false };
 }
 
 function isAdminReadinessCommand(text: string): boolean {
