@@ -345,6 +345,58 @@ describe("slack operator bridge", () => {
     expect(text).toContain("GitHub PR/issue digest");
   });
 
+  it("formats project memory replies", () => {
+    const list = formatOperatorResultForSlack({
+      handled: true,
+      kind: "project_memory",
+      memory: {
+        projects: [
+          {
+            id: "averray-platform",
+            name: "Averray Platform",
+            repos: ["averray-agent/agent"],
+            role: "Primary product platform.",
+          },
+        ],
+      },
+    });
+
+    expect(list).toContain("*Known project memory*");
+    expect(list).toContain("*Averray Platform*");
+    expect(list).toContain("`averray-agent/agent`");
+    expect(list).toContain("No secrets are stored");
+
+    const selected = formatOperatorResultForSlack({
+      handled: true,
+      kind: "project_memory",
+      memory: {
+        selectedProject: {
+          id: "averray-platform",
+          name: "Averray Platform",
+          repos: ["averray-agent/agent"],
+          owner: "Pascal / Averray",
+          role: "Primary product platform.",
+          environments: [{ name: "production app", url: "https://app.averray.com" }],
+          deploy: {
+            trigger: "Merge to main after CI passes.",
+            workflow: "Deploy Production",
+            script: "/srv/agent-stack/app/scripts/ops/deploy-production.sh",
+          },
+          routineCommands: ["github status", "github brief"],
+          safety: { secretsInMemory: false, autoMergeEnabled: false, autoDeployEnabled: false },
+          openQuestions: ["Document token rotation owner."],
+        },
+      },
+    });
+
+    expect(selected).toContain("*Project memory - Averray Platform*");
+    expect(selected).toContain("production app: https://app.averray.com");
+    expect(selected).toContain("trigger: `Merge to main after CI passes.`");
+    expect(selected).toContain("workflow: `Deploy Production`");
+    expect(selected).toContain("secrets stored: `false`");
+    expect(selected).toContain("Read-only project memory");
+  });
+
   it("formats admin readiness replies with staged guardrails", () => {
     const text = formatOperatorResultForSlack({
       handled: true,

@@ -133,7 +133,8 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   [docs/COMMAND_CENTER_PUBLIC_ACCESS.md](docs/COMMAND_CENTER_PUBLIC_ACCESS.md).
 - Slack and command-center operators can route short commands through
   `averray_handle_operator_command` instead of a free-form Hermes prompt. It
-  recognizes `what can you do for us`, `admin readiness`, `admin proposal`,
+  recognizes `what can you do for us`, `project memory`, `known projects`,
+  `how do we deploy averray-agent/agent`, `admin readiness`, `admin proposal`,
   `propose merge for averray-agent/agent#123`,
   `propose deploy for averray-agent/agent sha abc1234`, `business ledger`,
   `ops health`, `github status`, `github open prs`, `github ci failures`,
@@ -152,7 +153,12 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   what needs attention. It mutates no GitHub state; it only stores a local
   checkpoint timestamp so the next brief can compare against it. When configured
   repositories live under different GitHub owners, use `GITHUB_OWNER_TOKENS` or
-  `GITHUB_REPO_TOKENS` for owner/repo-specific read-only tokens. `what can you do for us` calls the
+  `GITHUB_REPO_TOKENS` for owner/repo-specific read-only tokens. `project memory`
+  and `known projects` call `averray_project_memory`, a read-only curated memory
+  of known projects, repos, deploy surfaces, useful commands, handoff
+  expectations, safety notes, and open questions. It stores no secrets and does
+  not merge, deploy, SSH, edit GitHub, edit Wikipedia, or mutate Averray state.
+  `what can you do for us` calls the
   read-only `averray_agent_usefulness_plan` MCP tool and explains the useful
   surfaces and use cases across Slack, Command Center/mobile, MCP clients,
   GitHub-helper planning, ops care, Averray business tracking, and durable

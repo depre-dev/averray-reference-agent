@@ -8,6 +8,7 @@ import {
 import { getBusinessLedger, getOpsHealth } from "../../packages/averray-mcp/src/operator-insights.js";
 import { getAgentUsefulnessPlan } from "../../packages/averray-mcp/src/operator-usefulness.js";
 import { getAdminReadiness } from "../../packages/averray-mcp/src/operator-admin.js";
+import { getProjectMemory } from "../../packages/averray-mcp/src/operator-project-memory.js";
 import { getTestbedE2eSuite, runTestbedE2eReadOnly } from "../../packages/averray-mcp/src/operator-testbed.js";
 
 describe("operator status", () => {
@@ -319,6 +320,26 @@ describe("operator status", () => {
       expect.stringContaining("Merge PRs"),
       expect.stringContaining("Change DNS"),
     ]));
+
+    const memory = getProjectMemory({ query: "how do we deploy averray-agent/agent?" });
+    expect(memory).toMatchObject({
+      kind: "project_admin_memory",
+      mutates: false,
+      selectedProject: {
+        id: "averray-platform",
+        repos: ["averray-agent/agent"],
+        deploy: {
+          workflow: "Deploy Production",
+          postDeployVerification: "Hermes post-deploy read-only testbed suite",
+        },
+      },
+      safety: {
+        readOnly: true,
+        secretsIncluded: false,
+        autoAdminEnabled: false,
+      },
+    });
+    expect(memory.commands).toContain("how do we deploy averray-agent/agent");
 
     const suite = await getTestbedE2eSuite({
       ...deps,

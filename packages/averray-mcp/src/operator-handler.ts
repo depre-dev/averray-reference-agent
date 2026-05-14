@@ -9,6 +9,7 @@ import { getAdminActionProposal, getAdminReadiness } from "./operator-admin.js";
 import { getBusinessLedger, getOpsHealth } from "./operator-insights.js";
 import { getGithubOperatorBrief, getGithubOperatorStatus } from "./operator-github.js";
 import { getDailyOperatorBrief, getOperatorStatus, getSafeWorkReport } from "./operator-status.js";
+import { getProjectMemory } from "./operator-project-memory.js";
 import { getTestbedE2eSuite, runTestbedE2eReadOnly } from "./operator-testbed.js";
 import { getAgentUsefulnessPlan } from "./operator-usefulness.js";
 import { runWikipediaCitationRepairWorkflow } from "./job-workflows.js";
@@ -59,6 +60,10 @@ export async function handleOperatorCommandText(
   if (command.kind === "agent_usefulness_plan") {
     const plan = await getAgentUsefulnessPlan({ query: deps.query, workflowDeps: deps.workflowDeps });
     return { ...command, plan };
+  }
+  if (command.kind === "project_memory") {
+    const memory = getProjectMemory({ project: command.project });
+    return { ...command, memory };
   }
   if (command.kind === "admin_readiness") {
     const readiness = await getAdminReadiness({ query: deps.query, workflowDeps: deps.workflowDeps });
