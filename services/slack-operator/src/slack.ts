@@ -210,6 +210,30 @@ export function formatOperatorResultForSlack(result: unknown): string {
       "Read-only. No secrets are stored.",
     ].join("\n");
   }
+  if (result.kind === "project_runbook") {
+    const runbookEnvelope = isRecord(result.runbook) ? result.runbook : {};
+    const runbook = isRecord(runbookEnvelope.runbook) ? runbookEnvelope.runbook : {};
+    const project = isRecord(runbookEnvelope.project) ? runbookEnvelope.project : {};
+    const target = isRecord(runbookEnvelope.target) ? runbookEnvelope.target : {};
+    const safety = isRecord(runbookEnvelope.safety) ? runbookEnvelope.safety : {};
+    const commands = arrayField(runbookEnvelope, "suggestedHermesCommands");
+    const projectName = stringField(project, "name") ?? stringField(target, "name") ?? "unknown project";
+    return [
+      `*${stringField(runbookEnvelope, "title") ?? "Project admin runbook"}*`,
+      stringField(runbook, "goal") ?? "Prepare a project-admin action safely.",
+      "",
+      `• action: \`${stringField(runbookEnvelope, "action") ?? "unknown"}\``,
+      `• project: \`${projectName}\``,
+      `• trigger: ${stringField(runbook, "trigger") ?? "n/a"}`,
+      formatRunbookSection("Required evidence", arrayField(runbook, "requiredEvidence"), 5),
+      formatRunbookSection("Operator steps", arrayField(runbook, "operatorSteps"), 5),
+      formatRunbookSection("Stop if", arrayField(runbook, "stopConditions"), 4),
+      formatRunbookSection("Verify after", arrayField(runbook, "postActionVerification"), 4),
+      commands.length > 0 ? `*Suggested Hermes commands*\n${commands.slice(0, 4).map((entry) => `• \`${String(entry)}\``).join("\n")}` : "",
+      `*Safety*\n• read-only: \`${String(safety.readOnly !== false)}\`\n• approval required: \`${String(safety.approvalRequired === true)}\`\n• mutates: \`${String(safety.mutates === true)}\`\n• secrets included: \`${String(safety.secretsIncluded === true)}\``,
+      "Runbook-only. Hermes did not approve, merge, deploy, restart, rotate secrets, or mutate GitHub.",
+    ].filter(Boolean).join("\n");
+  }
   if (result.kind === "admin_readiness") {
     const readiness = isRecord(result.readiness) ? result.readiness : {};
     const currentRole = isRecord(readiness.currentRole) ? readiness.currentRole : {};
@@ -844,6 +868,11 @@ function formatProjectEnvironment(value: unknown): string {
   const label = stringField(value, "name") ?? "surface";
   const target = stringField(value, "url") ?? stringField(value, "path") ?? stringField(value, "purpose") ?? "n/a";
   return `• ${label}: ${target}`;
+}
+
+function formatRunbookSection(title: string, values: unknown[], limit: number): string {
+  if (values.length === 0) return "";
+  return `*${title}*\n${values.slice(0, limit).map((entry) => `• ${String(entry)}`).join("\n")}`;
 }
 
 function githubViewTitle(view: string): string {

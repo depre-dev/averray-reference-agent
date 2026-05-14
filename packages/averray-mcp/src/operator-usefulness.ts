@@ -39,6 +39,7 @@ export async function getAgentUsefulnessPlan(deps: OperatorStatusDeps) {
           "brief me",
           "what can you do for us",
           "project memory",
+          "runbook for deploy averray-agent/agent",
           "admin readiness",
           "what should i do next",
           "run one wikipedia citation repair dry run only",
@@ -58,6 +59,7 @@ export async function getAgentUsefulnessPlan(deps: OperatorStatusDeps) {
           "daily operator brief",
           "what can you do for us",
           "project memory",
+          "merge runbook for averray-agent/agent",
           "admin readiness",
           "find safe work",
         ],
@@ -68,6 +70,7 @@ export async function getAgentUsefulnessPlan(deps: OperatorStatusDeps) {
         tools: [
           "averray_agent_usefulness_plan",
           "averray_project_memory",
+          "averray_project_runbook",
           "averray_admin_readiness",
           "averray_business_ledger",
           "averray_ops_health",
@@ -119,8 +122,8 @@ export async function getAgentUsefulnessPlan(deps: OperatorStatusDeps) {
       {
         id: "knowledge_memory",
         status: "enabled",
-        value: "Provides curated non-secret project memory: repos, deploy surfaces, useful commands, handoff expectations, safety notes, and open questions.",
-        commands: ["project memory", "known projects", "how do we deploy averray-agent/agent"],
+        value: "Provides curated non-secret project memory and read-only runbooks: repos, deploy surfaces, merge/deploy/rollback evidence, handoff expectations, safety notes, and open questions.",
+        commands: ["project memory", "known projects", "how do we deploy averray-agent/agent", "runbook for deploy averray-agent/agent"],
       },
     ],
     nextImplementationTracks: [

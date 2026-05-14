@@ -397,6 +397,42 @@ describe("slack operator bridge", () => {
     expect(selected).toContain("Read-only project memory");
   });
 
+  it("formats project runbook replies", () => {
+    const text = formatOperatorResultForSlack({
+      handled: true,
+      kind: "project_runbook",
+      runbook: {
+        title: "Deploy runbook - Averray Platform",
+        action: "deploy",
+        target: { name: "Averray Platform" },
+        project: { name: "Averray Platform" },
+        runbook: {
+          goal: "Ship a known commit safely.",
+          trigger: "Merge to main after CI passes.",
+          requiredEvidence: ["CI is green", "Rollback path is known"],
+          operatorSteps: ["Watch deploy workflow", "Run post-deploy suite"],
+          stopConditions: ["CI is failing"],
+          postActionVerification: ["Check hosted health"],
+        },
+        suggestedHermesCommands: ["run testbed e2e read-only"],
+        safety: {
+          readOnly: true,
+          approvalRequired: true,
+          mutates: false,
+          secretsIncluded: false,
+        },
+      },
+    });
+
+    expect(text).toContain("*Deploy runbook - Averray Platform*");
+    expect(text).toContain("action: `deploy`");
+    expect(text).toContain("*Required evidence*");
+    expect(text).toContain("CI is green");
+    expect(text).toContain("*Operator steps*");
+    expect(text).toContain("run testbed e2e read-only");
+    expect(text).toContain("Runbook-only");
+  });
+
   it("formats admin readiness replies with staged guardrails", () => {
     const text = formatOperatorResultForSlack({
       handled: true,

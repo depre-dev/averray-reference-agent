@@ -1,5 +1,5 @@
 import type { WikipediaCitationRepairWorkflowInput } from "./job-workflows.js";
-import type { AdminActionProposalInput } from "./operator-admin.js";
+import type { AdminActionKind, AdminActionProposalInput } from "./operator-admin.js";
 import type { GithubOperatorView } from "./operator-github.js";
 
 export type OperatorCommandSource = "slack" | "operator" | "command_center" | "hermes" | "agent";
@@ -47,6 +47,15 @@ export type ParsedOperatorCommand =
       source: OperatorCommandSource;
       detailed: boolean;
       project?: string;
+    }
+  | {
+      handled: true;
+      kind: "project_runbook";
+      source: OperatorCommandSource;
+      detailed: boolean;
+      action: AdminActionKind;
+      project?: string;
+      query?: string;
     }
   | {
       handled: true;
@@ -141,6 +150,9 @@ const EXAMPLES = [
   "known projects",
   "project memory for averray-agent/agent",
   "how do we deploy averray-agent/agent",
+  "runbook for deploy averray-agent/agent",
+  "merge runbook for averray-agent/agent",
+  "secret rotation runbook",
   "admin readiness",
   "admin proposal",
   "propose merge for averray-agent/agent#123",
@@ -199,6 +211,11 @@ export function parseOperatorCommand(
   const projectMemory = projectMemoryTarget(text, normalizedText);
   if (projectMemory.handled) {
     return { handled: true, kind: "project_memory", source, detailed, ...projectMemory.target };
+  }
+
+  const projectRunbook = projectRunbookTarget(text, normalizedText);
+  if (projectRunbook.handled) {
+    return { handled: true, kind: "project_runbook", source, detailed, ...projectRunbook.target };
   }
 
   if (isAdminReadinessCommand(normalizedText)) {
@@ -407,6 +424,41 @@ function projectMemoryTarget(
     return { handled: true, target: project ? { project } : {} };
   }
   return { handled: false };
+}
+
+function projectRunbookTarget(
+  originalText: string,
+  text: string
+): { handled: true; target: { action: AdminActionKind; project?: string; query: string } } | { handled: false } {
+  const compact = text.replace(/\b(details?|full|audit)\b/g, "").replace(/\s+/g, " ").trim();
+  if (
+    !/\brunbook\b/.test(compact)
+    && !/^(what evidence do i need|what evidence is needed|before i approve|before approving)\b/.test(compact)
+  ) {
+    return { handled: false };
+  }
+
+  const action: AdminActionKind = compact.includes("secret") || compact.includes("token") || compact.includes("credential")
+    ? "secret_rotation"
+    : compact.includes("rollback") || compact.includes("roll back") || compact.includes("revert")
+      ? "rollback"
+      : compact.includes("restart") || compact.includes("recreate")
+        ? "restart"
+        : compact.includes("deploy") || compact.includes("release") || compact.includes("ship")
+          ? "deploy"
+          : compact.includes("merge") || compact.includes("pull request") || /\bpr\b/.test(compact)
+            ? "merge"
+            : "unknown";
+  const project = extractToken(originalText, /\b(?:for|about|deploy|merge|rollback|restart)\s+([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/i)
+    ?? extractToken(originalText, /([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/i);
+  return {
+    handled: true,
+    target: {
+      action,
+      ...(project ? { project } : {}),
+      query: originalText.trim(),
+    },
+  };
 }
 
 function isAdminReadinessCommand(text: string): boolean {
