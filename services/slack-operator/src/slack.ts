@@ -198,6 +198,34 @@ export function formatOperatorResultForSlack(result: unknown): string {
       "Read-only. Broad project-admin actions are denied by default until an approval policy exists.",
     ].filter(Boolean).join("\n");
   }
+  if (result.kind === "admin_proposal") {
+    const proposal = isRecord(result.proposal) ? result.proposal : {};
+    const action = isRecord(proposal.action) ? proposal.action : {};
+    const target = isRecord(action.target) ? action.target : {};
+    const recommendation = isRecord(proposal.recommendation) ? proposal.recommendation : {};
+    const approval = isRecord(proposal.approval) ? proposal.approval : {};
+    const evidence = arrayField(proposal, "evidence");
+    const risks = arrayField(proposal, "risks");
+    const blocked = arrayField(proposal, "blockedActions");
+    return [
+      `*Admin proposal - ${stringField(action, "type") ?? "unknown"}*`,
+      stringField(recommendation, "summary") ?? "Proposal generated.",
+      "",
+      "*Target*",
+      `• repo: \`${stringField(target, "repo") ?? "n/a"}\``,
+      `• PR: \`${numberField(target, "pullRequestNumber") ?? "n/a"}\``,
+      `• sha: \`${formatId(stringField(target, "sha"), false) ?? "n/a"}\``,
+      "*Recommendation*",
+      `• status: \`${stringField(recommendation, "status") ?? "unknown"}\``,
+      `• reason: \`${stringField(recommendation, "reason") ?? "unknown"}\``,
+      `• approval required: \`${String(approval.required === true)}\``,
+      evidence.length > 0 ? `*Evidence*\n${evidence.slice(0, 3).map(formatAdminProposalEvidence).join("\n")}` : "",
+      risks.length > 0 ? `*Risks*\n${risks.slice(0, 4).map(formatAdminProposalRisk).join("\n")}` : "",
+      blocked.length > 0 ? `*Blocked here*\n${blocked.slice(0, 5).map((entry) => `• \`${String(entry)}\``).join("\n")}` : "",
+      stringField(proposal, "nextHumanStep") ? `*Next human step*\n${stringField(proposal, "nextHumanStep")}` : "",
+      "Proposal-only. Hermes did not approve, merge, deploy, restart, rotate secrets, or mutate GitHub.",
+    ].filter(Boolean).join("\n");
+  }
   if (result.kind === "business_ledger") {
     const ledger = isRecord(result.ledger) ? result.ledger : {};
     const summary = isRecord(ledger.summary) ? ledger.summary : {};
@@ -756,6 +784,16 @@ function formatDailyBriefAttentionItem(value: unknown): string {
   const url = stringField(value, "url");
   const suffix = [detail, url].filter(Boolean).join(" - ");
   return `• \`${severity}\` ${source}: ${title}${suffix ? ` — ${suffix}` : ""}`;
+}
+
+function formatAdminProposalEvidence(value: unknown): string {
+  if (!isRecord(value)) return "• unknown evidence";
+  return `• \`${stringField(value, "source") ?? "unknown"}\`: \`${stringField(value, "status") ?? "unknown"}\` - ${stringField(value, "detail") ?? "no detail"}`;
+}
+
+function formatAdminProposalRisk(value: unknown): string {
+  if (!isRecord(value)) return "• unknown risk";
+  return `• \`${stringField(value, "severity") ?? "info"}\` ${stringField(value, "code") ?? "risk"} - ${stringField(value, "message") ?? "no detail"}`;
 }
 
 function githubViewTitle(view: string): string {

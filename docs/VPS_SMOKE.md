@@ -234,6 +234,9 @@ handoff monitor
 find safe work
 operator status
 operator status details
+admin proposal
+propose merge for averray-agent/agent#123
+propose deploy for averray-agent/agent sha abc1234
 run one wikipedia citation repair if safe
 run wikipedia citation repair for wiki-en-... if safe
 status last wikipedia citation repair
@@ -246,7 +249,11 @@ Slack, Command Center/mobile, MCP clients, future GitHub helper work, ops care,
 Averray business tracking, and durable memory. `admin readiness` calls
 `averray_admin_readiness`, a read-only staged plan for growing from operator
 copilot to approval-gated project admin without granting broad mutation powers
-by default. `business ledger` calls `averray_business_ledger` for recent
+by default. Admin proposal commands call `averray_admin_action_proposal`, a
+proposal-only planner for merge, deploy, rollback, restart, and secret-rotation
+recommendations. It gathers read-only evidence and required approval notes, but
+does not approve, merge, deploy, SSH, restart, rotate secrets, or mutate GitHub.
+`business ledger` calls `averray_business_ledger` for recent
 submissions, drafts, operator commands, budget, and open work. `ops health`
 calls `averray_ops_health` for wallet/budget readiness, latest-run state,
 recent operator events, recent failures, and Postgres control-plane counts.
