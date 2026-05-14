@@ -313,6 +313,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const prUrl = item.pullRequestUrl || derivePullRequestUrl(item);
       const prLabel = item.pullRequestNumber ? "#" + escapeHtml(String(item.pullRequestNumber)) : "open PR";
       const pr = prUrl ? '<a href="' + escapeAttr(prUrl) + '" target="_blank" rel="noreferrer">' + prLabel + '</a>' : "n/a";
+      const commit = deriveCommitUrl(item);
+      const workflowRun = deriveWorkflowRunUrl(item);
       const tests = Array.isArray(item.testCaseIds) && item.testCaseIds.length ? item.testCaseIds.map((id) => "<code>" + escapeHtml(id) + "</code>").join(" ") : "n/a";
       return '<article class="handoff" data-status="' + escapeAttr(item.status || "unknown") + '" data-verdict="' + escapeAttr(verdict.level) + '">' +
         '<div class="handoff-head"><div class="handoff-title">' + escapeHtml(title || item.correlationId || "handoff") + '</div><span class="pill state-pill" data-level="' + escapeAttr(verdict.level) + '">' + escapeHtml(verdict.label) + '</span></div>' +
@@ -325,6 +327,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         row("Reason", escapeHtml(item.reason || "n/a")) +
         row("Tests", tests) +
         row("PR", pr) +
+        row("Commit", commit ? '<a href="' + escapeAttr(commit) + '" target="_blank" rel="noreferrer">' + escapeHtml(compactSha(item.sha)) + '</a>' : "n/a") +
+        row("Workflow run", workflowRun ? '<a href="' + escapeAttr(workflowRun) + '" target="_blank" rel="noreferrer">open run</a>' : "n/a") +
         row("Verdict", escapeHtml(summary.finalVerdict || summary.status || "n/a")) +
         row("Merge", escapeHtml(summary.mergeRecommendation || "n/a")) +
         deploymentHealthRows(summary) +
@@ -433,12 +437,21 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         const checks = health.hostedChecks !== undefined ? " (" + health.hostedChecks + " checks)" : "";
         rows.push(row("Hosted health", escapeHtml(String(health.hostedStatus) + checks)));
       }
+      if (Array.isArray(health.hostedFailedUrls) && health.hostedFailedUrls.length) {
+        rows.push(row("Health failures", links(health.hostedFailedUrls)));
+      }
       if (health.githubHealth) {
         const workflowBits = [
           health.githubFailingWorkflowRuns !== undefined ? "failed " + health.githubFailingWorkflowRuns : "",
           health.githubActiveWorkflowRuns !== undefined ? "active " + health.githubActiveWorkflowRuns : "",
         ].filter(Boolean).join(" / ");
         rows.push(row("GitHub workflows", escapeHtml(String(health.githubHealth) + (workflowBits ? " - " + workflowBits : ""))));
+      }
+      if (Array.isArray(health.githubFailingWorkflowRunUrls) && health.githubFailingWorkflowRunUrls.length) {
+        rows.push(row("Failed runs", links(health.githubFailingWorkflowRunUrls)));
+      }
+      if (Array.isArray(health.githubActiveWorkflowRunUrls) && health.githubActiveWorkflowRunUrls.length) {
+        rows.push(row("Active runs", links(health.githubActiveWorkflowRunUrls)));
       }
       if (health.opsStatus) {
         const recentErrors = health.opsRecentErrors !== undefined ? " - recent errors " + health.opsRecentErrors : "";
@@ -477,6 +490,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return '<span class="tags">' + values.map((value) => '<code>' + escapeHtml(String(value)) + '</code>').join("") + '</span>';
     }
 
+    function links(values) {
+      return '<span class="tags">' + values.map((value, index) => '<a class="pill" href="' + escapeAttr(String(value)) + '" target="_blank" rel="noreferrer">open ' + String(index + 1) + '</a>').join("") + '</span>';
+    }
+
     function normalize(value) {
       return String(value || "").trim().toLowerCase().replace(/[\\s-]+/g, "_");
     }
@@ -498,6 +515,27 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (!/^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$/.test(repo)) return "";
       if (!Number.isInteger(prNumber) || prNumber < 1) return "";
       return "https://github.com/" + repo + "/pull/" + prNumber;
+    }
+
+    function deriveCommitUrl(item) {
+      const repo = String(item.repo || "");
+      const sha = String(item.sha || "");
+      if (!/^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$/.test(repo)) return "";
+      if (!/^[a-f0-9]{7,40}$/i.test(sha)) return "";
+      return "https://github.com/" + repo + "/commit/" + sha;
+    }
+
+    function deriveWorkflowRunUrl(item) {
+      const repo = String(item.repo || "");
+      const correlationId = String(item.correlationId || "");
+      if (!/^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$/.test(repo)) return "";
+      const match = correlationId.match(/github-(?:pr|deploy)-(\\d+)/);
+      return match ? "https://github.com/" + repo + "/actions/runs/" + match[1] : "";
+    }
+
+    function compactSha(value) {
+      const sha = String(value || "");
+      return sha ? sha.slice(0, 12) : "commit";
     }
 
     function row(label, value) {

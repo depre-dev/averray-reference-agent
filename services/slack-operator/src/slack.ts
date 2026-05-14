@@ -577,6 +577,7 @@ function formatHandoffMonitorForSlack(result: Record<string, unknown>): string {
 function formatHandoffSummary(value: unknown, includePhase: boolean): string {
   if (!isRecord(value)) return "• unknown handoff";
   const summary = isRecord(value.summary) ? value.summary : {};
+  const release = handoffReleaseVerdict(value, summary);
   const status = stringField(value, "status") ?? "unknown";
   const phase = includePhase ? ` / ${stringField(value, "phase") ?? "unknown"}` : "";
   const target = formatHandoffTarget(value);
@@ -590,15 +591,100 @@ function formatHandoffSummary(value: unknown, includePhase: boolean): string {
   const review = stringField(summary, "codeReviewVerdict");
   const reason = stringField(value, "reason");
   const updatedAt = stringField(value, "updatedAt") ?? stringField(value, "startedAt");
+  const links = formatHandoffLinks(value);
+  const deployHealth = formatDeploymentHealthForSlack(summary);
   return [
-    `• \`${status}${phase}\` ${target} - \`${intent}\` - \`${correlationId}\``,
+    `• *${release.label}* ${target} - \`${intent}\` - \`${correlationId}\``,
+    `  why: ${release.why}`,
+    `  state: \`${status}${phase}\``,
     updatedAt ? `  updated: \`${updatedAt}\`` : "",
+    links ? `  links: ${links}` : "",
     verdict ? `  verdict: \`${verdict}\`` : "",
     review ? `  code review: \`${review}\`` : "",
     merge ? `  merge: ${merge}` : "",
     reason ? `  reason: ${reason}` : "",
+    deployHealth,
     tests,
   ].filter(Boolean).join("\n");
+}
+
+function handoffReleaseVerdict(value: Record<string, unknown>, summary: Record<string, unknown>): { label: string; why: string } {
+  const status = normalizeToken(stringField(value, "status"));
+  const finalVerdict = normalizeToken(stringField(summary, "finalVerdict") ?? stringField(summary, "status"));
+  const mergeRecommendation = normalizeToken(stringField(summary, "mergeRecommendation"));
+  const finalReason = normalizeToken(stringField(summary, "finalReason") ?? stringField(summary, "reason") ?? stringField(value, "reason"));
+  const reviewReasons = Array.isArray(summary.reviewReasons) ? summary.reviewReasons.filter(isRecord) : [];
+  if (status === "running") return { label: "RUNNING", why: "Hermes is still working." };
+  if (
+    status === "failed" ||
+    status === "blocked" ||
+    includesToken(finalVerdict, ["block", "blocked", "failed", "failure", "hold"]) ||
+    includesToken(mergeRecommendation, ["block", "blocked", "failed", "failure", "hold", "do_not_merge"]) ||
+    includesToken(finalReason, ["deploy_failure", "deploy_failed", "ci_failed"])
+  ) {
+    return { label: "BLOCK", why: handoffWhy(summary, value, "block") };
+  }
+  if (
+    status === "needs_review" ||
+    includesToken(finalVerdict, ["review", "needs_review"]) ||
+    includesToken(mergeRecommendation, ["review", "wait", "needs_review"]) ||
+    includesToken(finalReason, ["github_needs_review", "pr_review_hold", "needs_review"]) ||
+    reviewReasons.length > 0
+  ) {
+    return { label: "NEEDS REVIEW", why: handoffWhy(summary, value, "needs_review") };
+  }
+  return { label: "PASS", why: handoffWhy(summary, value, "pass") };
+}
+
+function handoffWhy(summary: Record<string, unknown>, value: Record<string, unknown>, level: string): string {
+  const reviewReasons = Array.isArray(summary.reviewReasons) ? summary.reviewReasons.filter(isRecord) : [];
+  const firstReviewReason = reviewReasons[0];
+  if (firstReviewReason) {
+    const code = stringField(firstReviewReason, "code") ?? "review";
+    const message = stringField(firstReviewReason, "message") ?? "Human review recommended.";
+    return `${code}: ${message}`;
+  }
+  const reason = normalizeToken(stringField(summary, "finalReason") ?? stringField(summary, "reason") ?? stringField(value, "reason"));
+  if (reason === "post_deploy_healthy") return "post-deploy suite, GitHub workflows, and hosted health are clean";
+  if (reason === "hosted_health_failed") return "hosted health failed after deploy";
+  if (reason === "github_workflow_failed") return "GitHub has a failed workflow";
+  if (reason === "testbed_cases_failed") return "one or more read-only testbed cases failed";
+  if (reason === "github_needs_review") return "GitHub still has a review signal open";
+  if (reason === "pr_review_hold") return "PR risk gate held this for human review";
+  if (reason === "ci_failed") return "CI failed";
+  if (level === "pass") return "no blocking release signals recorded";
+  return stringField(summary, "finalReason") ?? stringField(summary, "reason") ?? stringField(value, "reason") ?? "no reason recorded";
+}
+
+function formatHandoffLinks(value: Record<string, unknown>): string {
+  const links: string[] = [];
+  const prUrl = stringField(value, "pullRequestUrl") ?? derivePullRequestUrl(value);
+  if (prUrl) links.push(`<${prUrl}|PR>`);
+  const commitUrl = deriveCommitUrl(value);
+  if (commitUrl) links.push(`<${commitUrl}|${formatId(stringField(value, "sha"), false) ?? "commit"}>`);
+  const runUrl = deriveWorkflowRunUrl(value);
+  if (runUrl) links.push(`<${runUrl}|workflow run>`);
+  return links.join(" · ");
+}
+
+function formatDeploymentHealthForSlack(summary: Record<string, unknown>): string {
+  const health = isRecord(summary.deploymentHealth) ? summary.deploymentHealth : {};
+  if (Object.keys(health).length === 0) return "";
+  const suite = [
+    numberField(health, "suitePassed") !== undefined ? `pass ${numberField(health, "suitePassed")}` : "",
+    numberField(health, "suiteFailed") !== undefined ? `fail ${numberField(health, "suiteFailed")}` : "",
+    numberField(health, "suiteSkipped") !== undefined ? `skip ${numberField(health, "suiteSkipped")}` : "",
+  ].filter(Boolean).join(" / ");
+  const hosted = stringField(health, "hostedStatus");
+  const github = stringField(health, "githubHealth");
+  const ops = stringField(health, "opsStatus");
+  const parts = [
+    suite ? `suite ${suite}` : "",
+    hosted ? `hosted ${hosted}` : "",
+    github ? `github ${github}` : "",
+    ops ? `ops ${ops}` : "",
+  ].filter(Boolean);
+  return parts.length > 0 ? `  deploy health: \`${parts.join(" · ")}\`` : "";
 }
 
 function formatHandoffTarget(value: Record<string, unknown>): string {
@@ -607,6 +693,38 @@ function formatHandoffTarget(value: Record<string, unknown>): string {
   const url = stringField(value, "pullRequestUrl");
   const label = repo && pr ? `${repo}#${pr}` : repo ?? "no repo";
   return url ? `<${url}|${label}>` : label;
+}
+
+function derivePullRequestUrl(value: Record<string, unknown>): string | undefined {
+  const repo = stringField(value, "repo");
+  const pr = numberField(value, "pullRequestNumber");
+  if (!repo || !pr || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) return undefined;
+  return `https://github.com/${repo}/pull/${pr}`;
+}
+
+function deriveCommitUrl(value: Record<string, unknown>): string | undefined {
+  const repo = stringField(value, "repo");
+  const sha = stringField(value, "sha");
+  if (!repo || !sha || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || !/^[a-f0-9]{7,40}$/i.test(sha)) {
+    return undefined;
+  }
+  return `https://github.com/${repo}/commit/${sha}`;
+}
+
+function deriveWorkflowRunUrl(value: Record<string, unknown>): string | undefined {
+  const repo = stringField(value, "repo");
+  const correlationId = stringField(value, "correlationId");
+  if (!repo || !correlationId || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) return undefined;
+  const match = correlationId.match(/github-(?:pr|deploy)-(\d+)/);
+  return match ? `https://github.com/${repo}/actions/runs/${match[1]}` : undefined;
+}
+
+function normalizeToken(value: string | undefined): string {
+  return String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function includesToken(value: string, needles: string[]): boolean {
+  return needles.some((needle) => value.includes(needle));
 }
 
 function formatDailyBriefDecisionSummary(brief: Record<string, unknown>): string {

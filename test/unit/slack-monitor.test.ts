@@ -69,6 +69,11 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Review why");
     expect(html).toContain("releaseReason(summary, item, terminal.level)");
     expect(html).toContain("derivePullRequestUrl(item)");
+    expect(html).toContain("deriveCommitUrl(item)");
+    expect(html).toContain("deriveWorkflowRunUrl(item)");
+    expect(html).toContain("Health failures");
+    expect(html).toContain("Failed runs");
+    expect(html).toContain("Active runs");
     expect(html).toContain("https://github.com/");
     expect(html).not.toContain("handleOperatorCommand");
   });
