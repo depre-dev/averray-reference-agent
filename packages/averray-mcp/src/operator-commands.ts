@@ -1,4 +1,5 @@
 import type { WikipediaCitationRepairWorkflowInput } from "./job-workflows.js";
+import type { AdminActionProposalInput } from "./operator-admin.js";
 import type { GithubOperatorView } from "./operator-github.js";
 
 export type OperatorCommandSource = "slack" | "operator" | "command_center" | "hermes" | "agent";
@@ -45,6 +46,13 @@ export type ParsedOperatorCommand =
       kind: "admin_readiness";
       source: OperatorCommandSource;
       detailed: boolean;
+    }
+  | {
+      handled: true;
+      kind: "admin_proposal";
+      source: OperatorCommandSource;
+      detailed: boolean;
+      input: AdminActionProposalInput;
     }
   | {
       handled: true;
@@ -123,6 +131,10 @@ const EXAMPLES = [
   "daily operator brief",
   "what can you do for us",
   "admin readiness",
+  "admin proposal",
+  "propose merge for averray-agent/agent#123",
+  "propose deploy for averray-agent/agent sha abc1234",
+  "propose secret rotation",
   "business ledger",
   "ops health",
   "github status",
@@ -175,6 +187,11 @@ export function parseOperatorCommand(
 
   if (isAdminReadinessCommand(normalizedText)) {
     return { handled: true, kind: "admin_readiness", source, detailed };
+  }
+
+  const adminProposal = adminActionProposalInput(text, normalizedText, source);
+  if (adminProposal) {
+    return { handled: true, kind: "admin_proposal", source, detailed, input: adminProposal };
   }
 
   if (isBusinessLedgerCommand(normalizedText)) {
@@ -364,6 +381,47 @@ function isAdminReadinessCommand(text: string): boolean {
   return /^(admin readiness|project admin readiness|admin plan|project admin plan|can you be admin|can you admin my projects|how can you admin my projects|admin mode|future admin plan)( details?| full| audit)?$/.test(text);
 }
 
+function adminActionProposalInput(
+  originalText: string,
+  text: string,
+  source: OperatorCommandSource
+): AdminActionProposalInput | undefined {
+  const compact = text.replace(/\b(details?|full|audit)\b/g, "").replace(/\s+/g, " ").trim();
+  if (!/\b(propose|proposal|approval|approve|admin action)\b/.test(compact)) return undefined;
+  const action = compact.includes("secret") || compact.includes("token") || compact.includes("credential")
+    ? "secret_rotation"
+    : compact.includes("rollback") || compact.includes("roll back")
+      ? "rollback"
+      : compact.includes("restart")
+        ? "restart"
+        : compact.includes("deploy")
+          ? "deploy"
+          : compact.includes("merge") || compact.includes("pr ")
+            ? "merge"
+            : "unknown";
+  return {
+    action,
+    requester: source,
+    reason: originalText.trim(),
+    ...adminProposalTarget(originalText),
+  };
+}
+
+function adminProposalTarget(text: string): Pick<AdminActionProposalInput, "repo" | "pullRequestNumber" | "sha"> {
+  const repoWithPr = text.match(/\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#(\d+)\b/);
+  const repo = repoWithPr?.[1]
+    ?? extractToken(text, /\b(?:repo|repository|for)\s+([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/i);
+  const pullRequestNumber = repoWithPr?.[2]
+    ? Number.parseInt(repoWithPr[2], 10)
+    : numberToken(text, /\b(?:pr|pull request|pull-request|#)\s*#?(\d+)\b/i);
+  const sha = extractToken(text, /\b(?:sha|commit)\s+([a-f0-9]{7,40})\b/i);
+  return {
+    ...(repo ? { repo } : {}),
+    ...(pullRequestNumber ? { pullRequestNumber } : {}),
+    ...(sha ? { sha } : {}),
+  };
+}
+
 function isBusinessLedgerCommand(text: string): boolean {
   return /^(business ledger|averray business ledger|business status|business report|work ledger|reward ledger|run ledger)( details?| full| audit)?$/.test(text);
 }
@@ -414,6 +472,13 @@ function wantsDryRunOnly(text: string): boolean {
 function extractToken(text: string, pattern: RegExp): string | undefined {
   const match = text.match(pattern);
   return match?.[1]?.replace(/[.,!?]+$/g, "");
+}
+
+function numberToken(text: string, pattern: RegExp): number | undefined {
+  const token = extractToken(text, pattern);
+  if (!token) return undefined;
+  const value = Number.parseInt(token, 10);
+  return Number.isFinite(value) ? value : undefined;
 }
 
 function toRecord(value: unknown): Record<string, unknown> {

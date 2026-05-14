@@ -136,6 +136,32 @@ describe("operator commands", () => {
       source: "slack",
       detailed: true,
     });
+    expect(parseOperatorCommand("propose merge for averray-agent/agent#123", { source: "operator" })).toEqual({
+      handled: true,
+      kind: "admin_proposal",
+      source: "operator",
+      detailed: false,
+      input: {
+        action: "merge",
+        repo: "averray-agent/agent",
+        pullRequestNumber: 123,
+        requester: "operator",
+        reason: "propose merge for averray-agent/agent#123",
+      },
+    });
+    expect(parseOperatorCommand("propose deploy for averray-agent/agent sha abc1234 details", { source: "slack" })).toEqual({
+      handled: true,
+      kind: "admin_proposal",
+      source: "slack",
+      detailed: true,
+      input: {
+        action: "deploy",
+        repo: "averray-agent/agent",
+        sha: "abc1234",
+        requester: "slack",
+        reason: "propose deploy for averray-agent/agent sha abc1234 details",
+      },
+    });
     expect(parseOperatorCommand("business ledger", { source: "slack" })).toEqual({
       handled: true,
       kind: "business_ledger",

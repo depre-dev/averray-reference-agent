@@ -133,7 +133,9 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   [docs/COMMAND_CENTER_PUBLIC_ACCESS.md](docs/COMMAND_CENTER_PUBLIC_ACCESS.md).
 - Slack and command-center operators can route short commands through
   `averray_handle_operator_command` instead of a free-form Hermes prompt. It
-  recognizes `what can you do for us`, `admin readiness`, `business ledger`,
+  recognizes `what can you do for us`, `admin readiness`, `admin proposal`,
+  `propose merge for averray-agent/agent#123`,
+  `propose deploy for averray-agent/agent sha abc1234`, `business ledger`,
   `ops health`, `github status`, `github open prs`, `github ci failures`,
   `github issue digest`, `github brief`, `daily github brief`,
   `what changed since last time`, `testbed e2e suite`,
@@ -156,7 +158,11 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   GitHub-helper planning, ops care, Averray business tracking, and durable
   memory. `admin readiness` calls `averray_admin_readiness`, a read-only staged
   plan for growing from operator copilot to approval-gated project admin without
-  granting broad mutation powers by default. `business ledger` calls
+  granting broad mutation powers by default. Admin proposal commands call
+  `averray_admin_action_proposal`, which can recommend whether a merge, deploy,
+  rollback, restart, or secret rotation is ready for human approval. It never
+  records approval, merges, deploys, restarts, rotates secrets, SSHes, or
+  mutates GitHub. `business ledger` calls
   `averray_business_ledger` for recent submissions, drafts, operator commands,
   budget, and open work. `ops health` calls `averray_ops_health` for
   wallet/budget readiness, latest-run state, and Postgres control-plane counts.

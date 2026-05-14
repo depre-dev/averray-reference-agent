@@ -381,6 +381,47 @@ describe("slack operator bridge", () => {
     expect(text).toContain("Broad project-admin actions are denied by default");
   });
 
+  it("formats admin proposal replies as proposal-only", () => {
+    const text = formatOperatorResultForSlack({
+      handled: true,
+      kind: "admin_proposal",
+      proposal: {
+        kind: "admin_action_proposal",
+        action: {
+          type: "merge",
+          target: {
+            repo: "averray-agent/agent",
+            pullRequestNumber: 123,
+            sha: null,
+          },
+        },
+        recommendation: {
+          status: "ready_for_human_approval",
+          reason: "read_only_signals_clear",
+          summary: "Read-only signals are clear.",
+        },
+        approval: {
+          required: true,
+        },
+        evidence: [
+          { source: "github", status: "ok", detail: "0 failing workflows" },
+        ],
+        risks: [
+          { severity: "low", code: "proposal_only", message: "Execution is manual." },
+        ],
+        blockedActions: ["merge_pull_request", "push_code"],
+        nextHumanStep: "Review the PR, CI, and handoff monitor.",
+      },
+    });
+
+    expect(text).toContain("*Admin proposal - merge*");
+    expect(text).toContain("status: `ready_for_human_approval`");
+    expect(text).toContain("approval required: `true`");
+    expect(text).toContain("`github`: `ok`");
+    expect(text).toContain("`merge_pull_request`");
+    expect(text).toContain("Hermes did not approve, merge, deploy");
+  });
+
   it("formats business ledger and ops health replies", () => {
     const ledger = formatOperatorResultForSlack({
       handled: true,

@@ -41,7 +41,7 @@ import {
   getLastWikipediaCitationRepairStatus,
 } from "./operator-commands.js";
 import { handleOperatorCommandText } from "./operator-handler.js";
-import { getAdminReadiness } from "./operator-admin.js";
+import { getAdminActionProposal, getAdminReadiness } from "./operator-admin.js";
 import { getBusinessLedger, getOpsHealth } from "./operator-insights.js";
 import { getDailyOperatorBrief, getOperatorStatus, getSafeWorkReport } from "./operator-status.js";
 import { getAgentUsefulnessPlan } from "./operator-usefulness.js";
@@ -182,6 +182,22 @@ server.tool(
 );
 
 server.tool(
+  "averray_admin_action_proposal",
+  "Proposal-only admin action planner for humans, Slack, Command Center, and other agents. Produces read-only evidence, risks, required human approval, and a merge/deploy/rollback/restart/secret-rotation recommendation. It never records approval, merges PRs, deploys, restarts services, changes secrets, SSHes to production, edits GitHub, edits Wikipedia, or mutates Averray state.",
+  {
+    action: z.enum(["merge", "deploy", "rollback", "secret_rotation", "restart", "unknown"]).default("unknown"),
+    repo: z.string().min(1).optional(),
+    pullRequestNumber: z.number().int().min(1).optional(),
+    sha: z.string().min(7).optional(),
+    requester: z.string().min(1).optional(),
+    reason: z.string().optional()
+  },
+  async (input) => {
+    return jsonContent(await getAdminActionProposal(input, { query, workflowDeps: workflowDeps() }));
+  }
+);
+
+server.tool(
   "averray_business_ledger",
   "Canonical read-only Averray business ledger for humans, Slack, Command Center, and other agents. Summarizes recent Wikipedia citation-repair submissions, drafts, operator commands, latest run, open jobs, and budget. Does not claim, submit, request approval, edit Wikipedia, or mutate Averray state.",
   {},
@@ -282,7 +298,7 @@ server.tool(
 
 server.tool(
   "averray_handle_operator_command",
-  "Direct router for trusted Slack/operator/command-center messages. Use this for short commands like 'what can you do for us', 'admin readiness', 'business ledger', 'ops health', 'github status', 'github brief', 'daily github brief', 'what changed since last time', 'github open prs', 'github ci failures', 'testbed e2e suite', 'platform e2e suite', 'run testbed e2e read-only', 'handoff monitor', 'what is Hermes doing', 'daily operator brief', 'find safe work', 'operator status', 'operator status details', 'run one wikipedia citation repair if safe', and 'status last wikipedia citation repair' instead of sending them through a free-form Hermes prompt. Recognized repair run commands call averray_run_wikipedia_citation_repair directly; recognized read-only E2E run commands call averray_run_testbed_e2e_read_only directly. Recognized status/help/brief/work-discovery/usefulness/admin-readiness/ledger/health/github/testbed/handoff-monitor commands are read-only against external systems except GitHub brief, which persists a local checkpoint timestamp. Human surfaces may compact identifiers by default; add 'details' for full audit identifiers.",
+  "Direct router for trusted Slack/operator/command-center messages. Use this for short commands like 'what can you do for us', 'admin readiness', 'admin proposal', 'propose merge for averray-agent/agent#123', 'propose deploy for averray-agent/agent sha abc1234', 'business ledger', 'ops health', 'github status', 'github brief', 'daily github brief', 'what changed since last time', 'github open prs', 'github ci failures', 'testbed e2e suite', 'platform e2e suite', 'run testbed e2e read-only', 'handoff monitor', 'what is Hermes doing', 'daily operator brief', 'find safe work', 'operator status', 'operator status details', 'run one wikipedia citation repair if safe', and 'status last wikipedia citation repair' instead of sending them through a free-form Hermes prompt. Recognized repair run commands call averray_run_wikipedia_citation_repair directly; recognized read-only E2E run commands call averray_run_testbed_e2e_read_only directly. Recognized status/help/brief/work-discovery/usefulness/admin-readiness/admin-proposal/ledger/health/github/testbed/handoff-monitor commands are read-only against external systems except GitHub brief, which persists a local checkpoint timestamp. Human surfaces may compact identifiers by default; add 'details' for full audit identifiers.",
   {
     text: z.string().min(1),
     source: z.enum(["slack", "operator", "command_center", "hermes", "agent"]).default("operator"),

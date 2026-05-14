@@ -5,7 +5,7 @@ import {
   type OperatorCommandSource,
   type OperatorQueryFn,
 } from "./operator-commands.js";
-import { getAdminReadiness } from "./operator-admin.js";
+import { getAdminActionProposal, getAdminReadiness } from "./operator-admin.js";
 import { getBusinessLedger, getOpsHealth } from "./operator-insights.js";
 import { getGithubOperatorBrief, getGithubOperatorStatus } from "./operator-github.js";
 import { getDailyOperatorBrief, getOperatorStatus, getSafeWorkReport } from "./operator-status.js";
@@ -63,6 +63,10 @@ export async function handleOperatorCommandText(
   if (command.kind === "admin_readiness") {
     const readiness = await getAdminReadiness({ query: deps.query, workflowDeps: deps.workflowDeps });
     return { ...command, readiness };
+  }
+  if (command.kind === "admin_proposal") {
+    const proposal = await getAdminActionProposal(command.input, { query: deps.query, workflowDeps: deps.workflowDeps });
+    return { ...command, proposal };
   }
   if (command.kind === "business_ledger") {
     const ledger = await getBusinessLedger({ query: deps.query, workflowDeps: deps.workflowDeps });
