@@ -47,14 +47,14 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("<title>Pascal Monitor</title>");
     expect(html).toContain("Live private view of agent-to-agent handoffs.");
     expect(html).toContain("Active / Just Finished");
-    expect(html).toContain("Blocked / Review");
+    expect(html).toContain("Blocked / Human Review");
     expect(html).toContain("Live Lane");
     expect(html).toContain("Live state");
     expect(html).toContain("JUST FINISHED");
     expect(html).toContain("state-pill");
     expect(html).toContain("const eventsPath = \"/monitor/events\";");
     expect(html).toContain("Release Gate");
-    expect(html).toContain("block + review");
+    expect(html).toContain("blocks + human review");
     expect(html).toContain("Release Timeline");
     expect(html).toContain("auto-refresh 5s");
     expect(html).toContain("activeWindowMinutes: \"240\"");

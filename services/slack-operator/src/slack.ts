@@ -720,7 +720,7 @@ function handoffReleaseVerdict(value: Record<string, unknown>, summary: Record<s
     includesToken(finalReason, ["github_needs_review", "pr_review_hold", "needs_review"]) ||
     reviewReasons.length > 0
   ) {
-    return { label: "NEEDS REVIEW", why: handoffWhy(summary, value, "needs_review") };
+    return { label: "HUMAN REVIEW", why: handoffWhy(summary, value, "needs_review") };
   }
   return { label: "PASS", why: handoffWhy(summary, value, "pass") };
 }
@@ -738,7 +738,7 @@ function handoffWhy(summary: Record<string, unknown>, value: Record<string, unkn
   if (reason === "hosted_health_failed") return "hosted health failed after deploy";
   if (reason === "github_workflow_failed") return "GitHub has a failed workflow";
   if (reason === "testbed_cases_failed") return "one or more read-only testbed cases failed";
-  if (reason === "github_needs_review") return "GitHub still has a review signal open";
+  if (reason === "github_needs_review") return "human review recommended by the GitHub risk gate";
   if (reason === "pr_review_hold") return "PR risk gate held this for human review";
   if (reason === "ci_failed") return "CI failed";
   if (level === "pass") return "no blocking release signals recorded";
