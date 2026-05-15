@@ -234,6 +234,10 @@ export function formatOperatorResultForSlack(result: unknown): string {
       "Runbook-only. Hermes did not approve, merge, deploy, restart, rotate secrets, or mutate GitHub.",
     ].filter(Boolean).join("\n");
   }
+  if (result.kind === "codex_handoff_protocol") {
+    const protocol = isRecord(result.protocol) ? result.protocol : {};
+    return formatCodexHandoffProtocolForSlack(protocol);
+  }
   if (result.kind === "admin_readiness") {
     const readiness = isRecord(result.readiness) ? result.readiness : {};
     const currentRole = isRecord(readiness.currentRole) ? readiness.currentRole : {};
@@ -909,6 +913,47 @@ function formatProjectEnvironment(value: unknown): string {
 function formatRunbookSection(title: string, values: unknown[], limit: number): string {
   if (values.length === 0) return "";
   return `*${title}*\n${values.slice(0, limit).map((entry) => `• ${String(entry)}`).join("\n")}`;
+}
+
+function formatCodexHandoffProtocolForSlack(protocol: Record<string, unknown>): string {
+  const roles = isRecord(protocol.roles) ? protocol.roles : {};
+  const contracts = isRecord(protocol.contracts) ? protocol.contracts : {};
+  const safety = isRecord(protocol.safety) ? protocol.safety : {};
+  const verdicts = arrayField(protocol, "verdicts")
+    .filter(isRecord)
+    .slice(0, 3)
+    .map((entry) => {
+      const label = stringField(entry, "label") ?? "UNKNOWN";
+      const meaning = stringField(entry, "meaning") ?? "No meaning recorded.";
+      const codexAction = stringField(entry, "codexAction") ?? "Follow normal human review policy.";
+      return `• *${label}*: ${meaning} Codex: ${codexAction}`;
+    })
+    .join("\n");
+  const flow = arrayField(protocol, "flow").slice(0, 5).map((entry) => `• ${String(entry)}`).join("\n");
+  const prCodeReview = isRecord(contracts.prCodeReview) ? contracts.prCodeReview : {};
+  const prHandoff = isRecord(contracts.prHandoff) ? contracts.prHandoff : {};
+  const postDeploy = isRecord(contracts.postDeploy) ? contracts.postDeploy : {};
+
+  return [
+    `*${stringField(protocol, "title") ?? "Codex Handoff Protocol"}*`,
+    stringField(protocol, "summary") ?? "Codex builds. Hermes reviews and operates.",
+    "",
+    "*Roles*",
+    `• Codex: ${stringField(roles, "builder") ?? "builds in branches/worktrees and opens PRs."}`,
+    `• Hermes: ${stringField(roles, "reviewerOperator") ?? "reviews risk and runs read-only checks."}`,
+    `• Human: ${stringField(roles, "approver") ?? "approves merge, deploy, rollback, and overrides."}`,
+    flow ? `*Flow*\n${flow}` : "",
+    verdicts ? `*Verdicts*\n${verdicts}` : "",
+    "*Contracts*",
+    `• PR review: \`intent=${stringField(prCodeReview, "intent") ?? "pr_code_review"}\``,
+    `• PR handoff: \`intent=${stringField(prHandoff, "intent") ?? "pr_handoff"}\` + \`TBE2E-004\``,
+    `• post-deploy: \`intent=${stringField(postDeploy, "intent") ?? "post_deploy_verification"}\``,
+    "*Safety*",
+    `• read-only: \`${String(safety.readOnly !== false)}\``,
+    `• mutates: \`${String(safety.mutates === true)}\``,
+    `• email required: \`${String(safety.emailProviderRequired === true)}\``,
+    `See \`${stringField(protocol, "document") ?? "docs/CODEX_HANDOFF_PROTOCOL.md"}\` for the full runbook.`,
+  ].filter(Boolean).join("\n");
 }
 
 function githubViewTitle(view: string): string {

@@ -11,6 +11,7 @@ import {
   verifySlackSignature,
 } from "../../services/slack-operator/src/slack.js";
 import { recordOperatorCommandEvent } from "../../services/slack-operator/src/persistence.js";
+import { getCodexHandoffProtocol } from "../../packages/averray-mcp/src/codex-handoff-protocol.js";
 
 describe("slack operator bridge", () => {
   it("verifies Slack signatures and rejects stale timestamps", () => {
@@ -431,6 +432,22 @@ describe("slack operator bridge", () => {
     expect(text).toContain("*Operator steps*");
     expect(text).toContain("run testbed e2e read-only");
     expect(text).toContain("Runbook-only");
+  });
+
+  it("formats Codex handoff protocol replies", () => {
+    const text = formatOperatorResultForSlack({
+      handled: true,
+      kind: "codex_handoff_protocol",
+      protocol: getCodexHandoffProtocol(),
+    });
+
+    expect(text).toContain("*Codex Handoff Protocol*");
+    expect(text).toContain("Codex remains the builder");
+    expect(text).toContain("*HUMAN REVIEW*");
+    expect(text).toContain("intent=pr_code_review");
+    expect(text).toContain("intent=pr_handoff");
+    expect(text).toContain("email required: `false`");
+    expect(text).toContain("docs/CODEX_HANDOFF_PROTOCOL.md");
   });
 
   it("formats admin readiness replies with staged guardrails", () => {

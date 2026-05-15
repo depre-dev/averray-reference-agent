@@ -59,6 +59,12 @@ export type ParsedOperatorCommand =
     }
   | {
       handled: true;
+      kind: "codex_handoff_protocol";
+      source: OperatorCommandSource;
+      detailed: boolean;
+    }
+  | {
+      handled: true;
       kind: "admin_readiness";
       source: OperatorCommandSource;
       detailed: boolean;
@@ -155,6 +161,8 @@ const EXAMPLES = [
   "project memory",
   "known projects",
   "project memory for averray-agent/agent",
+  "codex handoff protocol",
+  "what should Codex do when Hermes blocks",
   "how do we deploy averray-agent/agent",
   "runbook for deploy averray-agent/agent",
   "merge runbook for averray-agent/agent",
@@ -219,6 +227,10 @@ export function parseOperatorCommand(
   const projectMemory = projectMemoryTarget(text, normalizedText);
   if (projectMemory.handled) {
     return { handled: true, kind: "project_memory", source, detailed, ...projectMemory.target };
+  }
+
+  if (isCodexHandoffProtocolCommand(normalizedText)) {
+    return { handled: true, kind: "codex_handoff_protocol", source, detailed };
   }
 
   const projectRunbook = projectRunbookTarget(text, normalizedText);
@@ -436,6 +448,10 @@ function projectMemoryTarget(
     return { handled: true, target: project ? { project } : {} };
   }
   return { handled: false };
+}
+
+function isCodexHandoffProtocolCommand(text: string): boolean {
+  return /^(codex handoff protocol|codex hermes protocol|hermes codex protocol|codex handoff|builder reviewer protocol|what should codex do when hermes blocks|what does human review mean|what does hermes block mean|how should codex hand off prs)( details?| full| audit)?$/.test(text);
 }
 
 function projectRunbookTarget(

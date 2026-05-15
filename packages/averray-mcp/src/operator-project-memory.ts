@@ -17,6 +17,7 @@ export interface ProjectMemoryEntry {
   deploy: Record<string, unknown>;
   routineCommands: string[];
   handoff: Record<string, unknown>;
+  codexHandoffProtocol?: Record<string, unknown>;
   safety: Record<string, unknown>;
   openQuestions: string[];
 }
@@ -56,9 +57,25 @@ const CURATED_PROJECTS: ProjectMemoryEntry[] = [
       "propose deploy for averray-agent/agent sha <SHA>",
     ],
     handoff: {
-      pr: "Hermes PR handoff runs after CI, reviews GitHub metadata/checks/files, and recommends ok_to_merge / needs_review / hold.",
+      pr: "Hermes PR handoff runs after CI, reviews GitHub metadata/checks/files, runs requested testbed checks, and reports PASS / HUMAN REVIEW / BLOCK.",
+      protocol: "Codex builds; Hermes reviews and operates. See docs/CODEX_HANDOFF_PROTOCOL.md.",
       deploy: "Post-deploy verification runs the read-only testbed suite and reports deploy health.",
       mutates: false,
+    },
+    codexHandoffProtocol: {
+      doc: "docs/CODEX_HANDOFF_PROTOCOL.md",
+      builder: "Codex",
+      reviewerOperator: "Hermes",
+      transport: "GitHub Actions -> averray_invoke_agent_task -> handoff monitor / Slack / PR comment",
+      prIntents: ["pr_code_review", "pr_handoff"],
+      deployIntent: "post_deploy_verification",
+      verdicts: {
+        PASS: "No blocking or review-gated release signal; continue normal human/merge policy.",
+        HUMAN_REVIEW: "Not necessarily broken; a human should inspect the review-gated area before merge.",
+        BLOCK: "Do not merge/deploy until fixed or explicitly overridden outside Hermes.",
+      },
+      codexOnBlock: "Stop, fix the PR or missing evidence, wait for CI, then let Hermes re-run. Do not ask Hermes to override.",
+      currentProofChannel: "Hermes Slack, GitHub PR comment, and handoff monitor; email/Resend is optional deferred.",
     },
     safety: {
       secretsInMemory: false,
@@ -111,7 +128,23 @@ const CURATED_PROJECTS: ProjectMemoryEntry[] = [
     handoff: {
       hook: "averray_invoke_agent_task",
       monitor: "averray_handoff_monitor and https://monitor.averray.com",
+      protocol: "Codex builds; Hermes reviews and operates. See docs/CODEX_HANDOFF_PROTOCOL.md.",
       mutates: false,
+    },
+    codexHandoffProtocol: {
+      doc: "docs/CODEX_HANDOFF_PROTOCOL.md",
+      builder: "Codex",
+      reviewerOperator: "Hermes",
+      transport: "Averray MCP invocation events, Slack operator, and private monitor.",
+      prIntents: ["pr_code_review", "pr_handoff"],
+      deployIntent: "post_deploy_verification",
+      verdicts: {
+        PASS: "Normal release path may continue.",
+        HUMAN_REVIEW: "Human owner should inspect the risk signal.",
+        BLOCK: "Stop until fixed or explicitly overridden outside Hermes.",
+      },
+      codexOnBlock: "Fix or add evidence; do not bypass Hermes by retrying blindly.",
+      currentProofChannel: "Slack/operator reports and handoff monitor.",
     },
     safety: {
       secretsInMemory: false,
