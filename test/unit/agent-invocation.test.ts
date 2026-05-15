@@ -369,6 +369,27 @@ describe("agent invocation hook", () => {
       result: {
         kind: "agent_pr_handoff",
         finalVerdict: "ok_to_merge",
+        codeReview: {
+          mode: "read_only_recommendation",
+          verifierLane: {
+            currentRuntime: "structured_github_review",
+            plannedRuntime: "codex_app_server",
+            codexRuntimeUsed: false,
+          },
+          finalVerdict: "ok_to_merge",
+          mergeRecommendation: "ok_to_merge",
+          riskCategory: "docs",
+          highestRisk: "low",
+          tests: {
+            matchedTouchedAreas: true,
+          },
+          safety: {
+            githubMutated: false,
+            mergePerformed: false,
+            deployTriggered: false,
+            codexRuntimeUsed: false,
+          },
+        },
         github: {
           mergeRecommendation: "ok_to_merge",
           checks: { failed: 0, active: 0 },
@@ -421,6 +442,71 @@ describe("agent invocation hook", () => {
           mergeRecommendation: "hold",
         },
         tests: [],
+      },
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("runs a standalone read-only PR code review verifier", async () => {
+    const calls: string[] = [];
+    const result = await invokeAgentTask(
+      {
+        requester: "codex",
+        intent: "pr_code_review",
+        repo: "averray-agent/agent",
+        pullRequestNumber: 185,
+        correlationId: "review-123",
+      },
+      deps(calls, githubFetch())
+    );
+
+    expect(result).toMatchObject({
+      kind: "agent_invocation",
+      status: "completed",
+      invocation: {
+        requester: "codex",
+        intent: "pr_code_review",
+        repo: "averray-agent/agent",
+        pullRequestNumber: 185,
+        correlationId: "review-123",
+      },
+      result: {
+        kind: "agent_pr_code_review",
+        status: "completed",
+        repo: "averray-agent/agent",
+        pullRequestNumber: 185,
+        finalVerdict: "ok_to_merge",
+        finalReason: "github_ok_to_merge",
+        mergeRecommendation: "ok_to_merge",
+        codeReview: {
+          mode: "read_only_recommendation",
+          riskCategory: "docs",
+          highestRisk: "low",
+          changedFiles: 1,
+          checks: {
+            total: 1,
+            failed: 0,
+            active: 0,
+          },
+          tests: {
+            matchedTouchedAreas: true,
+            missingTestSignals: [],
+          },
+          verifierLane: {
+            purpose: "independent_pr_verification",
+            currentRuntime: "structured_github_review",
+            plannedRuntime: "codex_app_server",
+            codexRuntimeUsed: false,
+          },
+          safety: {
+            readOnly: true,
+            githubMutated: false,
+            mergePerformed: false,
+            deployTriggered: false,
+            freeFormHermesPromptUsed: false,
+            codexRuntimeUsed: false,
+          },
+        },
       },
     });
     expect(calls).toEqual([]);

@@ -314,10 +314,13 @@ policy, draft, validation, submit, and Slack alert gates.
 Trusted deploy scripts, backend agents, Codex, and other operator agents should
 use `averray_invoke_agent_task` as the stable agent-to-agent hook. It records
 `requester`, optional `correlationId`, and optional `reason`, then runs one of
-the structured paths below without sending a free-form Hermes prompt. Use the
-PR handoff path when another agent has opened a PR and needs Hermes/Averray to
-inspect the PR, recommend merge readiness, run the requested testbed check, and
-return a machine-readable report.
+the structured paths below without sending a free-form Hermes prompt. Use
+`intent: "pr_code_review"` for the narrow independent verifier lane: Hermes
+inspects PR metadata, changed files, checks, rollout notes, and test signals,
+then returns a read-only merge recommendation. Use the PR handoff path when
+another agent has opened a PR and needs Hermes/Averray to inspect the PR,
+recommend merge readiness, run the requested testbed check, and return a
+machine-readable report.
 
 ```json
 {"requester":"deploy-agent","intent":"testbed_e2e_read_only","correlationId":"deploy-20260509","reason":"post-deploy smoke"}
@@ -337,6 +340,10 @@ read-only cases and reports mutation-bound cases as skipped.
 
 ```json
 {"requester":"deploy-agent","intent":"pr_handoff","repo":"averray-agent/agent","pullRequestNumber":185,"testCaseIds":["TBE2E-004"],"correlationId":"deploy-20260509","reason":"pre-merge smoke"}
+```
+
+```json
+{"requester":"codex","intent":"pr_code_review","repo":"averray-agent/agent","pullRequestNumber":185,"correlationId":"review-20260509","reason":"independent verifier lane"}
 ```
 
 ```json

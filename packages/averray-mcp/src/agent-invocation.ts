@@ -4,7 +4,13 @@ import {
   type OperatorQueryFn,
   type ParsedOperatorCommand,
 } from "./operator-commands.js";
-import { getGithubOperatorStatus, getGithubPullRequestReview } from "./operator-github.js";
+import {
+  getGithubOperatorStatus,
+  getGithubPullRequestReview,
+  type GithubPullRequestMergeRecommendation,
+  type GithubPullRequestReview,
+  type GithubPullRequestTouchedArea,
+} from "./operator-github.js";
 import { handleOperatorCommandText } from "./operator-handler.js";
 import { runTestbedE2eReadOnly } from "./operator-testbed.js";
 import {
@@ -19,6 +25,7 @@ export type AgentInvocationIntent =
   | "testbed_e2e_read_only"
   | "testbed_suite"
   | "testbed_case"
+  | "pr_code_review"
   | "pr_handoff"
   | "post_deploy_verification";
 
@@ -153,6 +160,10 @@ async function invokeAgentTaskInner(
     return invokePullRequestHandoff(input, deps, invocation, startedAt);
   }
 
+  if (intent === "pr_code_review") {
+    return invokePullRequestCodeReview(input, deps, invocation, startedAt);
+  }
+
   if (intent === "post_deploy_verification") {
     return invokePostDeployVerification(input, deps, invocation, startedAt);
   }
@@ -265,6 +276,38 @@ async function invokePostDeployVerification(
   }, { mutates: false, localCheckpoint: false });
 }
 
+async function invokePullRequestCodeReview(
+  input: AgentInvocationInput,
+  deps: AgentInvocationDeps,
+  invocation: Record<string, unknown>,
+  startedAt: Date
+): Promise<unknown> {
+  const review = await getGithubPullRequestReview({
+    ...(input.repo ? { repo: input.repo } : {}),
+    ...(input.pullRequestNumber ? { pullRequestNumber: input.pullRequestNumber } : {}),
+    ...(input.pullRequestUrl ? { pullRequestUrl: input.pullRequestUrl } : {}),
+    ...(deps.githubEnv ? { env: deps.githubEnv } : {}),
+    ...(deps.githubFetchFn ? { fetchFn: deps.githubFetchFn } : {}),
+    ...(deps.now ? { now: deps.now } : {}),
+  });
+  const codeReview = buildPullRequestCodeReview(review);
+
+  return completedInvocation(invocation, startedAt, {
+    schemaVersion: 1,
+    kind: "agent_pr_code_review",
+    status: review.configured && review.health !== "degraded" ? "completed" : "blocked",
+    repo: review.repo ?? input.repo ?? null,
+    pullRequestNumber: review.pullRequestNumber ?? input.pullRequestNumber ?? null,
+    pullRequestUrl: review.pullRequest?.url ?? input.pullRequestUrl ?? null,
+    github: review,
+    codeReview,
+    finalVerdict: codeReview.finalVerdict,
+    finalReason: codeReview.finalReason,
+    mergeRecommendation: codeReview.mergeRecommendation,
+    safety: prHandoffSafety(false, false),
+  }, { mutates: false, localCheckpoint: false });
+}
+
 async function invokePullRequestHandoff(
   input: AgentInvocationInput,
   deps: AgentInvocationDeps,
@@ -279,6 +322,7 @@ async function invokePullRequestHandoff(
     ...(deps.githubFetchFn ? { fetchFn: deps.githubFetchFn } : {}),
     ...(deps.now ? { now: deps.now } : {}),
   });
+  const codeReview = buildPullRequestCodeReview(review);
   const requestedTestCaseIds = normalizeTestCaseIds([
     ...(input.testCaseId ? [input.testCaseId] : []),
     ...(input.testCaseIds ?? []),
@@ -295,6 +339,7 @@ async function invokePullRequestHandoff(
       kind: "agent_pr_handoff",
       status: "blocked",
       github: review,
+      codeReview,
       requestedActions,
       tests: [],
       finalVerdict: "hold",
@@ -309,6 +354,7 @@ async function invokePullRequestHandoff(
       kind: "agent_pr_handoff",
       status: "completed",
       github: review,
+      codeReview,
       requestedActions,
       tests: [],
       finalVerdict: "hold",
@@ -368,12 +414,100 @@ async function invokePullRequestHandoff(
     kind: "agent_pr_handoff",
     status: "completed",
     github: review,
+    codeReview,
     requestedActions,
     tests,
     finalVerdict,
     finalReason: failedTests > 0 ? "requested_tests_failed_or_blocked" : `github_${review.mergeRecommendation}`,
     safety: prHandoffSafety(wouldMutate, wouldWriteLocalCheckpoint),
   }, { mutates: wouldMutate, localCheckpoint: wouldWriteLocalCheckpoint });
+}
+
+function buildPullRequestCodeReview(review: GithubPullRequestReview) {
+  const finalVerdict: GithubPullRequestMergeRecommendation = !review.configured || review.health === "degraded"
+    ? "hold"
+    : review.mergeRecommendation;
+  const finalReason = !review.configured || review.health === "degraded"
+    ? "github_pr_review_unavailable"
+    : `github_${review.mergeRecommendation}`;
+  const riskCategory = classifyPullRequestRiskCategory(review.review.touchedAreas);
+  const highestRisk = review.riskFindings.some((finding) => finding.severity === "high")
+    ? "high"
+    : review.riskFindings.some((finding) => finding.severity === "medium")
+      ? "medium"
+      : "low";
+  const why = review.riskFindings[0]?.message
+    ?? (finalVerdict === "ok_to_merge"
+      ? "PR metadata, changed files, and checks look merge-ready."
+      : "PR needs human review before merge.");
+
+  return {
+    schemaVersion: 1,
+    kind: "agent_pr_code_review",
+    mode: "read_only_recommendation",
+    verifierLane: {
+      purpose: "independent_pr_verification",
+      currentRuntime: "structured_github_review",
+      plannedRuntime: "codex_app_server",
+      codexRuntimeUsed: false,
+    },
+    finalVerdict,
+    finalReason,
+    mergeRecommendation: finalVerdict,
+    riskCategory,
+    highestRisk,
+    why,
+    changedFiles: review.files.total,
+    touchedAreas: review.review.touchedAreas,
+    highRiskFiles: review.files.highRisk,
+    checks: {
+      total: review.checks.total,
+      failed: review.checks.failed,
+      active: review.checks.active,
+      passed: review.checks.passed,
+    },
+    tests: {
+      matchedTouchedAreas: review.review.missingTestSignals.length === 0,
+      testFilesChanged: review.review.testFilesChanged,
+      testSignals: review.review.testSignals,
+      missingTestSignals: review.review.missingTestSignals,
+    },
+    rollout: {
+      notesRequired: review.review.rolloutNotesRequired,
+      notesPresent: review.review.rolloutNotesPresent,
+    },
+    reasons: review.riskFindings,
+    recommendations: review.recommendations,
+    safety: {
+      source: "agent",
+      readOnly: true,
+      githubMutated: false,
+      mergePerformed: false,
+      deployTriggered: false,
+      freeFormHermesPromptUsed: false,
+      codexRuntimeUsed: false,
+    },
+  };
+}
+
+function classifyPullRequestRiskCategory(touchedAreas: GithubPullRequestTouchedArea[]): string {
+  if (touchedAreas.length === 0) return "unknown";
+  const highPriorityAreas: GithubPullRequestTouchedArea[] = [
+    "contracts",
+    "deploy",
+    "workflow",
+    "ops",
+    "backend",
+    "indexer",
+    "frontend",
+    "dependencies",
+    "config",
+    "tests",
+    "docs",
+  ];
+  const matched = highPriorityAreas.filter((area) => touchedAreas.includes(area));
+  if (matched.length === 0) return "mixed";
+  return matched.length === 1 ? matched[0] : "mixed";
 }
 
 async function invokeOperatorCommand(

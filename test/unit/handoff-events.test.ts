@@ -176,6 +176,23 @@ describe("handoff event monitor", () => {
         status: "completed",
         finalVerdict: "needs_review",
         finalReason: "GitHub review found medium risk.",
+        codeReview: {
+          finalVerdict: "needs_review",
+          finalReason: "github_needs_review",
+          mergeRecommendation: "needs_review",
+          riskCategory: "workflow",
+          highestRisk: "medium",
+          why: "PR touches deployment scripts; human review recommended.",
+          changedFiles: 2,
+          tests: {
+            matchedTouchedAreas: true,
+            missingTestSignals: [],
+          },
+          verifierLane: {
+            currentRuntime: "structured_github_review",
+            plannedRuntime: "codex_app_server",
+          },
+        },
         github: {
           mergeRecommendation: "needs_review",
           review: {
@@ -208,6 +225,19 @@ describe("handoff event monitor", () => {
       finalVerdict: "needs_review",
       finalReason: "GitHub review found medium risk.",
       mergeRecommendation: "needs_review",
+      codeReview: {
+        finalVerdict: "needs_review",
+        finalReason: "github_needs_review",
+        mergeRecommendation: "needs_review",
+        riskCategory: "workflow",
+        highestRisk: "medium",
+        why: "PR touches deployment scripts; human review recommended.",
+        changedFiles: 2,
+        testsMatchedTouchedAreas: true,
+        missingTestSignals: [],
+        currentRuntime: "structured_github_review",
+        plannedRuntime: "codex_app_server",
+      },
       reviewSignals: {
         touchedAreas: ["workflow", "config"],
         testFilesChanged: false,

@@ -295,10 +295,10 @@ server.tool(
 
 server.tool(
   "averray_invoke_agent_task",
-  "Stable agent-to-agent hook for trusted deploy scripts, backend agents, Codex, and other operator agents. Runs a named safe operator command, the full read-only testbed E2E suite, one testbed testcase by ID, a post-deploy verification workflow, or a PR handoff workflow that reviews GitHub PR metadata/checks/files and then runs requested tests with requester/correlation metadata. Uses structured operator/MCP workflows instead of free-form Hermes prompts. Fails closed for unknown commands, live mutation cases, local checkpoint writes, and PRs that are not merge-ready unless the caller explicitly opts into that class of action. PR handoff only recommends merge state; it never merges.",
+  "Stable agent-to-agent hook for trusted deploy scripts, backend agents, Codex, and other operator agents. Runs a named safe operator command, the full read-only testbed E2E suite, one testbed testcase by ID, a post-deploy verification workflow, a read-only PR code-review verifier, or a PR handoff workflow that reviews GitHub PR metadata/checks/files and then runs requested tests with requester/correlation metadata. Uses structured operator/MCP workflows instead of free-form Hermes prompts. Fails closed for unknown commands, live mutation cases, local checkpoint writes, and PRs that are not merge-ready unless the caller explicitly opts into that class of action. PR handoff and PR code review only recommend merge state; they never merge.",
   {
     requester: z.string().min(1),
-    intent: z.enum(["operator_command", "testbed_e2e_read_only", "testbed_suite", "testbed_case", "pr_handoff", "post_deploy_verification"]).default("operator_command"),
+    intent: z.enum(["operator_command", "testbed_e2e_read_only", "testbed_suite", "testbed_case", "pr_code_review", "pr_handoff", "post_deploy_verification"]).default("operator_command"),
     command: z.string().min(1).optional(),
     testCaseId: z.string().min(1).optional(),
     testCaseIds: z.array(z.string().min(1)).max(20).optional(),

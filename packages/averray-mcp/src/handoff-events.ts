@@ -133,9 +133,11 @@ export function summarizeHandoffResult(result: unknown): Record<string, unknown>
     finalVerdict: stringField(nestedResult, "finalVerdict"),
     deploymentHealth: deploymentHealthSummary(nestedResult),
     mergeRecommendation: firstDeepString(nestedResult, [
+      ["codeReview", "mergeRecommendation"],
       ["github", "mergeRecommendation"],
       ["github", "merge_recommendation"],
     ]),
+    codeReview: codeReviewSummary(nestedResult),
     reviewSignals: githubReviewSignals(nestedResult),
     reviewReasons: githubReviewReasons(nestedResult),
     requestedCaseIds: arrayField(nestedResult, "requestedCaseIds"),
@@ -293,6 +295,27 @@ function githubReviewReasons(record: Record<string, unknown>): Record<string, un
       message: stringField(finding, "message"),
     }));
   return reviewReasons.length > 0 ? reviewReasons : undefined;
+}
+
+function codeReviewSummary(record: Record<string, unknown>): Record<string, unknown> | undefined {
+  const codeReview = isRecord(record.codeReview) ? record.codeReview : undefined;
+  if (!codeReview) return undefined;
+  const tests = isRecord(codeReview.tests) ? codeReview.tests : undefined;
+  const verifierLane = isRecord(codeReview.verifierLane) ? codeReview.verifierLane : undefined;
+  const summary = compactRecord({
+    finalVerdict: stringField(codeReview, "finalVerdict"),
+    finalReason: stringField(codeReview, "finalReason"),
+    mergeRecommendation: stringField(codeReview, "mergeRecommendation"),
+    riskCategory: stringField(codeReview, "riskCategory"),
+    highestRisk: stringField(codeReview, "highestRisk"),
+    why: stringField(codeReview, "why"),
+    changedFiles: numberField(codeReview, "changedFiles"),
+    testsMatchedTouchedAreas: tests ? booleanField(tests, "matchedTouchedAreas") : undefined,
+    missingTestSignals: tests ? arrayField(tests, "missingTestSignals") : undefined,
+    currentRuntime: verifierLane ? stringField(verifierLane, "currentRuntime") : undefined,
+    plannedRuntime: verifierLane ? stringField(verifierLane, "plannedRuntime") : undefined,
+  });
+  return Object.keys(summary).length > 0 ? summary : undefined;
 }
 
 function githubReviewSignals(record: Record<string, unknown>): Record<string, unknown> | undefined {
