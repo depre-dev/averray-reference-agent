@@ -220,6 +220,8 @@ what can you do for us
 project memory
 known projects
 how do we deploy averray-agent/agent
+codex handoff protocol
+what should Codex do when Hermes blocks
 admin readiness
 business ledger
 ops health
@@ -265,6 +267,11 @@ secret-rotation work. It returns required evidence, operator steps, stop
 conditions, verification, rollback notes, and suggested Hermes commands. It
 never approves, merges, deploys, restarts, rotates secrets, SSHes, or mutates
 GitHub.
+`codex handoff protocol` returns the read-only builder/reviewer contract from
+`docs/CODEX_HANDOFF_PROTOCOL.md`: Codex builds in branches and PRs, Hermes
+reviews PR risk and runs read-only checks, humans approve merge/deploy/override
+decisions, and Codex responds to PASS, HUMAN REVIEW, or BLOCK without adding a
+new chat or email integration.
 `admin readiness` calls
 `averray_admin_readiness`, a read-only staged plan for growing from operator
 copilot to approval-gated project admin without granting broad mutation powers
@@ -380,6 +387,12 @@ the read-only `averray_handoff_monitor` MCP tool or the operator command
 correlation ID and surfaces requester, repo/PR, requested tests, phase, status,
 summary, and safety metadata. It is observability only: it does not touch
 GitHub, Wikipedia, deployments, or Averray mutations.
+
+For the expected Codex-to-Hermes workflow, use `codex handoff protocol` or read
+`docs/CODEX_HANDOFF_PROTOCOL.md`. That protocol defines the PR metadata Codex
+should provide, the PR/deploy checks Hermes performs after CI, what PASS/HUMAN
+REVIEW/BLOCK mean, and how correlation IDs connect GitHub Actions, Hermes,
+Slack, and the handoff monitor.
 
 Latest-run status commands are read-only and return the latest `runId`,
 `jobId`, `sessionId`, submitted/failed state, `draftId`, and Slack permalink

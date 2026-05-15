@@ -11,6 +11,7 @@ import { getGithubMergeSteward, getGithubOperatorBrief, getGithubOperatorStatus 
 import { getDailyOperatorBrief, getOperatorStatus, getSafeWorkReport } from "./operator-status.js";
 import { getProjectMemory } from "./operator-project-memory.js";
 import { getProjectRunbook } from "./operator-project-runbook.js";
+import { getCodexHandoffProtocol } from "./codex-handoff-protocol.js";
 import { getTestbedE2eSuite, runTestbedE2eReadOnly } from "./operator-testbed.js";
 import { getAgentUsefulnessPlan } from "./operator-usefulness.js";
 import { runWikipediaCitationRepairWorkflow } from "./job-workflows.js";
@@ -65,6 +66,10 @@ export async function handleOperatorCommandText(
   if (command.kind === "project_memory") {
     const memory = getProjectMemory({ project: command.project });
     return { ...command, memory };
+  }
+  if (command.kind === "codex_handoff_protocol") {
+    const protocol = getCodexHandoffProtocol();
+    return { ...command, protocol };
   }
   if (command.kind === "project_runbook") {
     const runbook = getProjectRunbook({

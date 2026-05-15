@@ -160,6 +160,18 @@ describe("operator commands", () => {
       action: "secret_rotation",
       query: "secret rotation runbook details",
     });
+    expect(parseOperatorCommand("codex handoff protocol", { source: "operator" })).toEqual({
+      handled: true,
+      kind: "codex_handoff_protocol",
+      source: "operator",
+      detailed: false,
+    });
+    expect(parseOperatorCommand("what should Codex do when Hermes blocks details", { source: "slack" })).toEqual({
+      handled: true,
+      kind: "codex_handoff_protocol",
+      source: "slack",
+      detailed: true,
+    });
     expect(parseOperatorCommand("can you admin my projects?", { source: "operator" })).toEqual({
       handled: true,
       kind: "admin_readiness",
