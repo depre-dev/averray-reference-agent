@@ -231,6 +231,45 @@ export interface GithubMergeSteward {
   recommendations: string[];
 }
 
+export interface GithubMergeStewardApprovalInput {
+  repo?: string;
+  pullRequestNumber?: number;
+  approvalText?: string;
+  env?: NodeJS.ProcessEnv;
+  fetchFn?: typeof fetch;
+  now?: Date;
+}
+
+export interface GithubMergeStewardApproval {
+  schemaVersion: 1;
+  generatedAt: string;
+  mutatesGithub: boolean;
+  executionEnabled: boolean;
+  configured: boolean;
+  authConfigured: boolean;
+  status: "merged" | "blocked" | "failed";
+  repo?: string;
+  pullRequestNumber?: number;
+  finalVerdict?: GithubMergeStewardVerdict;
+  mergeRecommendation?: GithubPullRequestMergeRecommendation;
+  reason: string;
+  reviewReasons: GithubPullRequestRiskFinding[];
+  merge?: {
+    merged?: boolean;
+    sha?: string;
+    message?: string;
+  };
+  safety: {
+    requiresExplicitCommand: true;
+    requiresEnvFlag: true;
+    onlyLowRiskDependabot: true;
+    githubMutated: boolean;
+    wikipediaEdited: false;
+  };
+  warnings: GithubWarning[];
+  recommendations: string[];
+}
+
 export type GithubPullRequestTouchedArea =
   | "frontend"
   | "backend"
@@ -858,6 +897,162 @@ export async function getGithubMergeSteward(
   };
 }
 
+export async function approveGithubMergeStewardCandidate(
+  options: GithubMergeStewardApprovalInput = {}
+): Promise<GithubMergeStewardApproval> {
+  const env = options.env ?? process.env;
+  const generatedAt = (options.now ?? new Date()).toISOString();
+  const repo = normalizeRepo(options.repo ?? "");
+  const pullRequestNumber = options.pullRequestNumber;
+  const executionEnabled = isTruthy(env.GITHUB_MERGE_STEWARD_EXECUTION_ENABLED);
+  const warnings: GithubWarning[] = [];
+
+  if (!repo || !pullRequestNumber) {
+    warnings.push({
+      severity: "high",
+      code: "github_merge_target_missing",
+      message: "Set an explicit target like merge steward approve owner/repo#123.",
+    });
+    return mergeApprovalBlocked({
+      generatedAt,
+      executionEnabled,
+      repo,
+      pullRequestNumber,
+      reason: "target_missing",
+      warnings,
+      recommendations: ["Use `merge steward approve owner/repo#123` with the exact PR target."],
+    });
+  }
+
+  const review = await getGithubPullRequestReview({
+    repo,
+    pullRequestNumber,
+    env,
+    fetchFn: options.fetchFn,
+    now: options.now,
+  });
+  const stewardItem = stewardItemFromReview(review);
+  warnings.push(...review.warnings);
+
+  if (!executionEnabled) {
+    return mergeApprovalBlocked({
+      generatedAt,
+      executionEnabled,
+      repo,
+      pullRequestNumber,
+      review,
+      stewardItem,
+      reason: "merge_execution_disabled",
+      warnings,
+      recommendations: ["Set GITHUB_MERGE_STEWARD_EXECUTION_ENABLED=1 only when you want explicit steward merge commands to mutate GitHub."],
+    });
+  }
+
+  if (!stewardItem.canAutoMergeIfEnabled) {
+    return mergeApprovalBlocked({
+      generatedAt,
+      executionEnabled,
+      repo,
+      pullRequestNumber,
+      review,
+      stewardItem,
+      reason: stewardItem.reason,
+      warnings,
+      recommendations: ["Do not merge. Resolve the steward finding, then rerun the merge steward before asking for approval again."],
+    });
+  }
+
+  if (!review.riskFindings.some((finding) => finding.code === "dependabot_low_risk")) {
+    return mergeApprovalBlocked({
+      generatedAt,
+      executionEnabled,
+      repo,
+      pullRequestNumber,
+      review,
+      stewardItem,
+      reason: "not_low_risk_dependabot",
+      warnings,
+      recommendations: ["This first execution phase only merges low-risk Dependabot patch/minor dependency candidates."],
+    });
+  }
+
+  const tokenConfig = buildGithubTokenConfig(env);
+  const token = resolveGithubTokenForRepo(repo, tokenConfig);
+  if (!token) {
+    warnings.push({
+      severity: "high",
+      code: "github_repo_token_missing",
+      repo,
+      message: `No GitHub token is configured for ${repo}.`,
+    });
+    return mergeApprovalBlocked({
+      generatedAt,
+      executionEnabled,
+      repo,
+      pullRequestNumber,
+      review,
+      stewardItem,
+      reason: "github_repo_token_missing",
+      warnings,
+      recommendations: ["Configure a GitHub token with pull-request write permission for the target repository."],
+    });
+  }
+
+  try {
+    const baseUrl = (env.GITHUB_API_BASE_URL ?? "https://api.github.com").replace(/\/+$/g, "");
+    const mergeMethod = githubMergeMethod(env.GITHUB_MERGE_STEWARD_METHOD);
+    const merge = await githubRequest<{ merged?: boolean; sha?: string; message?: string }>({
+      url: `${baseUrl}/repos/${encodeRepoPath(repo)}/pulls/${pullRequestNumber}/merge`,
+      token,
+      fetchFn: options.fetchFn ?? fetch,
+      method: "PUT",
+      body: {
+        merge_method: mergeMethod,
+        commit_title: `${review.pullRequest?.title ?? `PR #${pullRequestNumber}`} (#${pullRequestNumber})`,
+        commit_message: "Merged by Averray merge steward after explicit operator approval.",
+      },
+    });
+    return {
+      schemaVersion: 1,
+      generatedAt,
+      mutatesGithub: true,
+      executionEnabled,
+      configured: review.configured,
+      authConfigured: true,
+      status: merge.merged === false ? "failed" : "merged",
+      repo,
+      pullRequestNumber,
+      finalVerdict: stewardItem.finalVerdict,
+      mergeRecommendation: stewardItem.mergeRecommendation,
+      reason: merge.merged === false ? "github_merge_not_confirmed" : "merged_low_risk_dependabot",
+      reviewReasons: stewardItem.reviewReasons,
+      merge,
+      safety: mergeApprovalSafety(true),
+      warnings,
+      recommendations: ["Watch CI and the production deploy workflow after the merge lands on main."],
+    };
+  } catch (error) {
+    warnings.push({
+      severity: "high",
+      code: "github_merge_failed",
+      repo,
+      message: error instanceof Error ? error.message : `Failed to merge ${repo}#${pullRequestNumber}.`,
+    });
+    return mergeApprovalBlocked({
+      generatedAt,
+      executionEnabled,
+      repo,
+      pullRequestNumber,
+      review,
+      stewardItem,
+      reason: "github_merge_failed",
+      warnings,
+      recommendations: ["Do not retry blindly. Check the GitHub merge error, branch protection, and merge queue state first."],
+      status: "failed",
+    });
+  }
+}
+
 function emptyStatus(input: {
   generatedAt: string;
   view: GithubOperatorView;
@@ -1396,6 +1591,48 @@ function stewardItemFromReview(review: GithubPullRequestReview): GithubMergeStew
   };
 }
 
+function mergeApprovalBlocked(input: {
+  generatedAt: string;
+  executionEnabled: boolean;
+  repo?: string;
+  pullRequestNumber?: number;
+  review?: GithubPullRequestReview;
+  stewardItem?: GithubMergeStewardItem;
+  reason: string;
+  warnings: GithubWarning[];
+  recommendations: string[];
+  status?: "blocked" | "failed";
+}): GithubMergeStewardApproval {
+  return {
+    schemaVersion: 1,
+    generatedAt: input.generatedAt,
+    mutatesGithub: false,
+    executionEnabled: input.executionEnabled,
+    configured: input.review?.configured ?? false,
+    authConfigured: input.review?.authConfigured ?? false,
+    status: input.status ?? "blocked",
+    ...(input.repo ? { repo: input.repo } : {}),
+    ...(input.pullRequestNumber ? { pullRequestNumber: input.pullRequestNumber } : {}),
+    ...(input.stewardItem ? { finalVerdict: input.stewardItem.finalVerdict } : {}),
+    ...(input.stewardItem ? { mergeRecommendation: input.stewardItem.mergeRecommendation } : {}),
+    reason: input.reason,
+    reviewReasons: input.stewardItem?.reviewReasons ?? [],
+    safety: mergeApprovalSafety(false),
+    warnings: input.warnings,
+    recommendations: input.recommendations,
+  };
+}
+
+function mergeApprovalSafety(githubMutated: boolean): GithubMergeStewardApproval["safety"] {
+  return {
+    requiresExplicitCommand: true,
+    requiresEnvFlag: true,
+    onlyLowRiskDependabot: true,
+    githubMutated,
+    wikipediaEdited: false,
+  };
+}
+
 function buildMergeStewardRecommendations(input: {
   autoMergeCandidates: GithubMergeStewardItem[];
   humanReview: GithubMergeStewardItem[];
@@ -1721,17 +1958,30 @@ function mapWorkflowRuns(runs: GithubApiWorkflowRun[], repo: string, limit: numb
 }
 
 async function githubGet<T>(url: string, token: string, fetchFn: typeof fetch): Promise<T> {
-  const response = await fetchFn(url, {
+  return await githubRequest<T>({ url, token, fetchFn });
+}
+
+async function githubRequest<T>(input: {
+  url: string;
+  token: string;
+  fetchFn: typeof fetch;
+  method?: string;
+  body?: unknown;
+}): Promise<T> {
+  const response = await input.fetchFn(input.url, {
+    ...(input.method ? { method: input.method } : {}),
     headers: {
       accept: "application/vnd.github+json",
-      authorization: `Bearer ${token}`,
+      authorization: `Bearer ${input.token}`,
+      ...(input.body === undefined ? {} : { "content-type": "application/json" }),
       "user-agent": "averray-reference-agent-github-helper",
       "x-github-api-version": "2022-11-28",
     },
+    ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(`GitHub API ${response.status} for ${url}${text ? `: ${text.slice(0, 180)}` : ""}`);
+    throw new Error(`GitHub API ${response.status} for ${input.url}${text ? `: ${text.slice(0, 180)}` : ""}`);
   }
   return await response.json() as T;
 }
@@ -1764,6 +2014,14 @@ function toEnvKey(value: string): string {
 function encodeRepoPath(repo: string): string {
   const [owner, name] = repo.split("/");
   return `${encodeURIComponent(owner ?? "")}/${encodeURIComponent(name ?? "")}`;
+}
+
+function githubMergeMethod(value: string | undefined): "merge" | "squash" | "rebase" {
+  return value === "merge" || value === "rebase" ? value : "squash";
+}
+
+function isTruthy(value: string | undefined): boolean {
+  return value === "1" || value?.toLowerCase() === "true" || value?.toLowerCase() === "yes";
 }
 
 function clampLimit(value: string | undefined): number {

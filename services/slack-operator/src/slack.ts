@@ -349,6 +349,9 @@ export function formatOperatorResultForSlack(result: unknown): string {
   if (result.kind === "github_merge_steward") {
     return formatGithubMergeStewardForSlack(result);
   }
+  if (result.kind === "github_merge_steward_approval") {
+    return formatGithubMergeStewardApprovalForSlack(result);
+  }
   if (result.kind === "run_testbed_e2e_read_only") {
     return formatTestbedE2eReadOnlyRunForSlack(result);
   }
@@ -604,6 +607,33 @@ function formatGithubMergeStewardForSlack(result: Record<string, unknown>): stri
     blocked.length > 0 ? `*Blocked*\n${blocked.slice(0, 5).map(formatGithubStewardItem).join("\n")}` : "",
     recommendations.length > 0 ? `*Next*\n${recommendations.slice(0, 3).map((entry) => `• ${String(entry)}`).join("\n")}` : "",
     "Read-only steward. Hermes did not merge, approve, rerun CI, or mutate GitHub.",
+  ].filter(Boolean).join("\n");
+}
+
+function formatGithubMergeStewardApprovalForSlack(result: Record<string, unknown>): string {
+  const approval = isRecord(result.approval) ? result.approval : {};
+  const warnings = arrayField(approval, "warnings");
+  const recommendations = arrayField(approval, "recommendations");
+  const repo = stringField(approval, "repo") ?? "unknown";
+  const pullRequestNumber = numberField(approval, "pullRequestNumber") ?? 0;
+  const status = stringField(approval, "status") ?? "unknown";
+  const reason = stringField(approval, "reason") ?? "no_reason";
+  const target = pullRequestNumber > 0 ? `${repo}#${pullRequestNumber}` : repo;
+
+  return [
+    "*GitHub merge steward approval*",
+    `• target: \`${target}\``,
+    `• status: \`${status}\``,
+    `• reason: \`${reason}\``,
+    `• execution enabled: \`${String(approval.executionEnabled === true)}\``,
+    `• mutated GitHub: \`${String(approval.mutatesGithub === true)}\``,
+    stringField(approval, "finalVerdict") ? `• steward verdict: \`${stringField(approval, "finalVerdict")}\`` : "",
+    stringField(approval, "mergeRecommendation") ? `• merge recommendation: \`${stringField(approval, "mergeRecommendation")}\`` : "",
+    warnings.length > 0 ? `*Warnings*\n${warnings.slice(0, 3).map(formatGithubWarning).join("\n")}` : "",
+    recommendations.length > 0 ? `*Next*\n${recommendations.slice(0, 3).map((entry) => `• ${String(entry)}`).join("\n")}` : "",
+    approval.mutatesGithub === true
+      ? "GitHub was mutated only through the explicit merge approval path."
+      : "No GitHub mutation was performed.",
   ].filter(Boolean).join("\n");
 }
 

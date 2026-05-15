@@ -1,6 +1,6 @@
 import type { WikipediaCitationRepairWorkflowInput } from "./job-workflows.js";
 import type { AdminActionKind, AdminActionProposalInput } from "./operator-admin.js";
-import type { GithubOperatorView } from "./operator-github.js";
+import type { GithubMergeStewardApprovalInput, GithubOperatorView } from "./operator-github.js";
 
 export type OperatorCommandSource = "slack" | "operator" | "command_center" | "hermes" | "agent";
 
@@ -109,6 +109,13 @@ export type ParsedOperatorCommand =
     }
   | {
       handled: true;
+      kind: "github_merge_steward_approval";
+      source: OperatorCommandSource;
+      detailed: boolean;
+      input: GithubMergeStewardApprovalInput;
+    }
+  | {
+      handled: true;
       kind: "testbed_e2e_suite";
       source: OperatorCommandSource;
       detailed: boolean;
@@ -179,6 +186,7 @@ const EXAMPLES = [
   "daily github brief",
   "github steward",
   "merge steward",
+  "merge steward approve averray-agent/agent#123",
   "what changed since last time",
   "github open prs",
   "github ci failures",
@@ -240,6 +248,11 @@ export function parseOperatorCommand(
 
   if (isAdminReadinessCommand(normalizedText)) {
     return { handled: true, kind: "admin_readiness", source, detailed };
+  }
+
+  const mergeStewardApproval = githubMergeStewardApprovalInput(text, normalizedText);
+  if (mergeStewardApproval) {
+    return { handled: true, kind: "github_merge_steward_approval", source, detailed, input: mergeStewardApproval };
   }
 
   const adminProposal = adminActionProposalInput(text, normalizedText, source);
@@ -564,6 +577,26 @@ function isGithubBriefCommand(text: string): boolean {
 function isGithubMergeStewardCommand(text: string): boolean {
   const compact = text.replace(/\b(details?|full|audit)\b/g, "").replace(/\s+/g, " ").trim();
   return /^(github steward|merge steward|pr steward|pull request steward|github merge steward|take care of open prs|drain open prs|review open prs)$/.test(compact);
+}
+
+function githubMergeStewardApprovalInput(
+  originalText: string,
+  text: string
+): Pick<GithubMergeStewardApprovalInput, "repo" | "pullRequestNumber" | "approvalText"> | undefined {
+  const compact = text.replace(/\b(details?|full|audit)\b/g, "").replace(/\s+/g, " ").trim();
+  if (!/\bmerge steward\b/.test(compact) || !/\b(approve|approved|execute|merge)\b/.test(compact)) return undefined;
+  const repoWithPr = originalText.match(/\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#(\d+)\b/);
+  const repo = repoWithPr?.[1]
+    ?? extractToken(originalText, /\b(?:repo|repository|for)\s+([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/i);
+  const pullRequestNumber = repoWithPr?.[2]
+    ? Number.parseInt(repoWithPr[2], 10)
+    : numberToken(originalText, /\b(?:pr|pull request|pull-request|#)\s*#?(\d+)\b/i);
+  if (!repo || !pullRequestNumber) return undefined;
+  return {
+    repo,
+    pullRequestNumber,
+    approvalText: originalText.trim(),
+  };
 }
 
 function isTestbedE2eSuiteCommand(text: string): boolean {
