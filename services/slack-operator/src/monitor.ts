@@ -249,13 +249,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     <section class="grid" aria-label="Monitor summary">
       <div class="card"><span class="metric">Status</span><span id="status" class="value">...</span></div>
       <div class="card"><span class="metric">Active / Just Finished</span><span id="active-count" class="value">0</span></div>
-      <div class="card"><span class="metric">Blocked / Review</span><span id="gate-count" class="value">0 / 0</span></div>
+      <div class="card"><span class="metric">Blocked / Human Review</span><span id="gate-count" class="value">0 / 0</span></div>
       <div class="card"><span class="metric">Recent</span><span id="recent-count" class="value">0</span></div>
       <div class="card"><span class="metric">Events</span><span id="event-count" class="value">0</span></div>
     </section>
     <div class="section-title"><h2>Live Lane</h2><span id="generated" class="pill">waiting</span></div>
     <section id="active" class="list"><div class="empty">No running or just-finished handoffs.</div></section>
-    <div class="section-title"><h2>Release Gate</h2><span class="pill">block + review</span></div>
+    <div class="section-title"><h2>Release Gate</h2><span class="pill">blocks + human review</span></div>
     <section id="attention" class="list"><div class="empty">No handoffs need attention.</div></section>
     <div class="section-title"><h2>Release Timeline</h2><span class="pill">auto-refresh 5s</span></div>
     <section id="recent" class="list"><div class="empty">Loading recent handoffs...</div></section>
@@ -396,7 +396,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         || includesAny(reason, ["github_needs_review", "pr_review_hold", "needs_review"])
         || reviewReasons.length > 0
       ) {
-        return { level: "needs-review", label: "NEEDS REVIEW" };
+        return { level: "needs-review", label: "HUMAN REVIEW" };
       }
       return { level: "pass", label: "PASS" };
     }
@@ -410,7 +410,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return code + ": " + message;
       }
       const reason = normalize(summary.finalReason || summary.reason || item.reason);
-      if (reason === "github_needs_review") return "GitHub still has a review signal open.";
+      if (reason === "github_needs_review") return "Human review recommended by the GitHub risk gate.";
       if (reason === "pr_review_hold") return "PR risk gate held this for human review.";
       if (reason === "deploy_failure" || reason === "deploy_failed") return "Deploy failed; investigate before release.";
       if (reason === "post_deploy_healthy") return "Post-deploy suite, GitHub workflows, and configured health checks are clean.";
