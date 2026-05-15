@@ -227,6 +227,8 @@ github status
 github open prs
 github ci failures
 github issue digest
+github steward
+merge steward
 github brief
 daily github brief
 what changed since last time
@@ -276,6 +278,12 @@ calls `averray_ops_health` for wallet/budget readiness, latest-run state,
 recent operator events, recent failures, and Postgres control-plane counts.
 GitHub commands call `averray_github_status`, a read-only helper configured
 with `GITHUB_TOKEN` and either `GITHUB_DEFAULT_REPO` or `GITHUB_HELPER_REPOS`.
+`github steward` / `merge steward` reviews all open PRs across the configured
+repos and groups them into clean merge candidates, human-review items, and
+blocked PRs. It reuses the same PR metadata, changed-file, check-run,
+rollout-note, and test-signal risk gate as PR handoff. It is read-only:
+Hermes does not merge, approve, rerun CI, deploy, or mutate GitHub from this
+command.
 Brief commands call `averray_github_brief`, which reports what changed since
 the last brief, what merged, what deployed, what failed, and what needs
 attention. It does not mutate GitHub; it only persists a local checkpoint so

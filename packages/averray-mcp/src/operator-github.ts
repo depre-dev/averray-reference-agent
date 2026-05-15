@@ -135,6 +135,7 @@ export interface GithubOperatorBrief {
 }
 
 export type GithubPullRequestMergeRecommendation = "ok_to_merge" | "needs_review" | "hold";
+export type GithubMergeStewardVerdict = "pass" | "human_review" | "block";
 
 export interface GithubPullRequestReview {
   schemaVersion: 1;
@@ -181,6 +182,53 @@ export interface GithubPullRequestReview {
   mergeRecommendation: GithubPullRequestMergeRecommendation;
   recommendations: string[];
   warnings: GithubWarning[];
+}
+
+export interface GithubMergeStewardItem {
+  repo: string;
+  pullRequestNumber: number;
+  title: string;
+  url?: string;
+  author?: string;
+  finalVerdict: GithubMergeStewardVerdict;
+  mergeRecommendation: GithubPullRequestMergeRecommendation;
+  reason: string;
+  canAutoMergeIfEnabled: boolean;
+  checks: {
+    total: number;
+    passed: number;
+    failed: number;
+    active: number;
+  };
+  touchedAreas: GithubPullRequestTouchedArea[];
+  testSignals: string[];
+  reviewReasons: GithubPullRequestRiskFinding[];
+}
+
+export interface GithubMergeSteward {
+  schemaVersion: 1;
+  generatedAt: string;
+  mutatesGithub: false;
+  mergeExecutionEnabled: false;
+  configured: boolean;
+  authConfigured: boolean;
+  health: "ok" | "attention" | "degraded";
+  repoCount: number;
+  counts: {
+    openPullRequests: number;
+    pass: number;
+    humanReview: number;
+    block: number;
+    autoMergeCandidates: number;
+  };
+  items: GithubMergeStewardItem[];
+  groups: {
+    autoMergeCandidates: GithubMergeStewardItem[];
+    humanReview: GithubMergeStewardItem[];
+    blocked: GithubMergeStewardItem[];
+  };
+  warnings: GithubWarning[];
+  recommendations: string[];
 }
 
 export type GithubPullRequestTouchedArea =
@@ -250,6 +298,12 @@ export interface GithubPullRequestReviewOptions {
   repo?: string;
   pullRequestNumber?: number;
   pullRequestUrl?: string;
+  env?: NodeJS.ProcessEnv;
+  fetchFn?: typeof fetch;
+  now?: Date;
+}
+
+export interface GithubMergeStewardOptions {
   env?: NodeJS.ProcessEnv;
   fetchFn?: typeof fetch;
   now?: Date;
@@ -705,6 +759,98 @@ export async function getGithubPullRequestReview(
   }
 }
 
+export async function getGithubMergeSteward(
+  options: GithubMergeStewardOptions = {}
+): Promise<GithubMergeSteward> {
+  const env = options.env ?? process.env;
+  const now = options.now ?? new Date();
+  const generatedAt = now.toISOString();
+  const status = await getGithubOperatorStatus({
+    view: "prs",
+    env,
+    fetchFn: options.fetchFn,
+    now,
+  });
+  const openPullRequests = status.views.prs;
+
+  if (!status.configured || openPullRequests.length === 0) {
+    return {
+      schemaVersion: 1,
+      generatedAt,
+      mutatesGithub: false,
+      mergeExecutionEnabled: false,
+      configured: status.configured,
+      authConfigured: status.authConfigured,
+      health: status.configured ? "ok" : "degraded",
+      repoCount: status.repoCount,
+      counts: {
+        openPullRequests: openPullRequests.length,
+        pass: 0,
+        humanReview: 0,
+        block: 0,
+        autoMergeCandidates: 0,
+      },
+      items: [],
+      groups: {
+        autoMergeCandidates: [],
+        humanReview: [],
+        blocked: [],
+      },
+      warnings: status.warnings,
+      recommendations: status.configured
+        ? ["No open PRs need steward review."]
+        : status.recommendations,
+    };
+  }
+
+  const reviews = await Promise.all(
+    openPullRequests.map((pullRequest) => getGithubPullRequestReview({
+      repo: pullRequest.repo,
+      pullRequestNumber: pullRequest.number,
+      env,
+      fetchFn: options.fetchFn,
+      now,
+    }))
+  );
+  const items = reviews.map(stewardItemFromReview);
+  const autoMergeCandidates = items.filter((item) => item.canAutoMergeIfEnabled);
+  const humanReview = items.filter((item) => item.finalVerdict === "human_review");
+  const blocked = items.filter((item) => item.finalVerdict === "block");
+  const pass = items.filter((item) => item.finalVerdict === "pass");
+  const warnings = [...status.warnings, ...reviews.flatMap((review) => review.warnings)];
+  const health = warnings.some((warning) => warning.severity === "high") || blocked.length > 0
+    ? "degraded"
+    : humanReview.length > 0 || pass.length > 0
+      ? "attention"
+      : "ok";
+
+  return {
+    schemaVersion: 1,
+    generatedAt,
+    mutatesGithub: false,
+    mergeExecutionEnabled: false,
+    configured: true,
+    authConfigured: status.authConfigured,
+    health,
+    repoCount: status.repoCount,
+    counts: {
+      openPullRequests: items.length,
+      pass: pass.length,
+      humanReview: humanReview.length,
+      block: blocked.length,
+      autoMergeCandidates: autoMergeCandidates.length,
+    },
+    items,
+    groups: {
+      autoMergeCandidates,
+      humanReview,
+      blocked,
+    },
+    warnings,
+    recommendations: buildMergeStewardRecommendations({ autoMergeCandidates, humanReview, blocked }),
+  };
+}
+
 function emptyStatus(input: {
   generatedAt: string;
   view: GithubOperatorView;
@@ -1151,6 +1297,65 @@ function buildPullRequestReviewRecommendations(input: {
   return [
     `Human review recommended before merge${mediumCodes.length > 0 ? ` (${[...new Set(mediumCodes)].join(", ")})` : ""}.`,
   ];
+}
+
+function stewardItemFromReview(review: GithubPullRequestReview): GithubMergeStewardItem {
+  const finalVerdict: GithubMergeStewardVerdict = review.mergeRecommendation === "ok_to_merge"
+    ? "pass"
+    : review.mergeRecommendation === "needs_review"
+      ? "human_review"
+      : "block";
+  const relevantReasons = review.riskFindings.filter((finding) => finding.code !== "pr_review_green");
+  const reason = relevantReasons[0]?.code ?? (finalVerdict === "pass" ? "github_ok_to_merge" : `github_${review.mergeRecommendation}`);
+  const pullRequest = review.pullRequest;
+  const canAutoMergeIfEnabled = finalVerdict === "pass"
+    && review.configured
+    && review.checks.failed === 0
+    && review.checks.active === 0
+    && review.files.highRisk.length === 0
+    && pullRequest?.state === "open"
+    && pullRequest?.draft === false;
+
+  return {
+    repo: review.repo ?? pullRequest?.repo ?? "unknown",
+    pullRequestNumber: review.pullRequestNumber ?? pullRequest?.number ?? 0,
+    title: pullRequest?.title ?? "Unknown pull request",
+    ...(pullRequest?.url ? { url: pullRequest.url } : {}),
+    ...(pullRequest?.author ? { author: pullRequest.author } : {}),
+    finalVerdict,
+    mergeRecommendation: review.mergeRecommendation,
+    reason,
+    canAutoMergeIfEnabled,
+    checks: {
+      total: review.checks.total,
+      passed: review.checks.passed,
+      failed: review.checks.failed,
+      active: review.checks.active,
+    },
+    touchedAreas: review.review.touchedAreas,
+    testSignals: review.review.testSignals,
+    reviewReasons: relevantReasons,
+  };
+}
+
+function buildMergeStewardRecommendations(input: {
+  autoMergeCandidates: GithubMergeStewardItem[];
+  humanReview: GithubMergeStewardItem[];
+  blocked: GithubMergeStewardItem[];
+}): string[] {
+  const recommendations: string[] = [];
+  if (input.autoMergeCandidates.length > 0) {
+    recommendations.push(`${input.autoMergeCandidates.length} PR(s) are clean merge candidates. Merge execution is still disabled in this read-only steward.`);
+  }
+  if (input.humanReview.length > 0) {
+    recommendations.push(`${input.humanReview.length} PR(s) need a human review before merge.`);
+  }
+  if (input.blocked.length > 0) {
+    recommendations.push(`${input.blocked.length} PR(s) are blocked. Fix high-severity findings before merge.`);
+  }
+  if (recommendations.length === 0) recommendations.push("No open PRs need steward action.");
+  recommendations.push("Next phase: enable narrow auto-merge only for clean candidates after an explicit allowlist and audit policy.");
+  return recommendations;
 }
 
 interface GithubTokenConfig {

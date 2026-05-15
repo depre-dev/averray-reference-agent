@@ -253,6 +253,18 @@ describe("operator commands", () => {
       source: "command_center",
       detailed: true,
     });
+    expect(parseOperatorCommand("merge steward details", { source: "slack" })).toEqual({
+      handled: true,
+      kind: "github_merge_steward",
+      source: "slack",
+      detailed: true,
+    });
+    expect(parseOperatorCommand("take care of open prs", { source: "operator" })).toEqual({
+      handled: true,
+      kind: "github_merge_steward",
+      source: "operator",
+      detailed: false,
+    });
   });
 
   it("routes the platform testbed E2E suite read-only", () => {
