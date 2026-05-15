@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  getGithubMergeSteward,
   getGithubOperatorBrief,
   getGithubOperatorStatus,
   getGithubPullRequestReview,
@@ -378,6 +379,115 @@ describe("github operator status", () => {
     expect(review.riskFindings).toEqual([
       expect.objectContaining({ severity: "low", code: "pr_review_green" }),
     ]);
+  });
+
+  it("classifies open PRs for a read-only merge steward", async () => {
+    const fetchFn = async (url: string | URL | Request) => {
+      const text = String(url);
+      if (text.endsWith("/repos/averray-agent/agent")) {
+        return githubRepoResponse("averray-agent/agent");
+      }
+      if (text.includes("/pulls?")) {
+        return jsonResponse([
+          {
+            number: 187,
+            title: "Polish dashboard empty states",
+            html_url: "https://github.com/averray-agent/agent/pull/187",
+            user: { login: "codex" },
+            draft: false,
+            updated_at: "2026-05-08T10:00:00.000Z",
+            state: "open",
+          },
+          {
+            number: 189,
+            title: "Update settlement contract",
+            html_url: "https://github.com/averray-agent/agent/pull/189",
+            user: { login: "codex" },
+            draft: false,
+            updated_at: "2026-05-08T10:05:00.000Z",
+            state: "open",
+          },
+        ]);
+      }
+      if (text.includes("/issues?")) return jsonResponse([]);
+      if (text.includes("/actions/runs?")) return jsonResponse({ workflow_runs: [] });
+      if (text.endsWith("/repos/averray-agent/agent/pulls/187")) {
+        return jsonResponse({
+          number: 187,
+          title: "Polish dashboard empty states",
+          html_url: "https://github.com/averray-agent/agent/pull/187",
+          user: { login: "codex" },
+          draft: false,
+          state: "open",
+          head: { ref: "codex/ui-polish", sha: "ui123" },
+          changed_files: 2,
+          mergeable_state: "clean",
+        });
+      }
+      if (text.includes("/pulls/187/files")) {
+        return jsonResponse([
+          { filename: "app/overview/page.tsx", status: "modified", additions: 12, deletions: 2, changes: 14 },
+          { filename: "test/unit/overview.test.ts", status: "modified", additions: 8, deletions: 0, changes: 8 },
+        ]);
+      }
+      if (text.includes("/commits/ui123/check-runs")) {
+        return jsonResponse({ check_runs: [{ name: "CI", status: "completed", conclusion: "success" }] });
+      }
+      if (text.endsWith("/repos/averray-agent/agent/pulls/189")) {
+        return jsonResponse({
+          number: 189,
+          title: "Update settlement contract",
+          html_url: "https://github.com/averray-agent/agent/pull/189",
+          user: { login: "codex" },
+          draft: false,
+          state: "open",
+          head: { ref: "codex/settlement-contract", sha: "contract123" },
+          changed_files: 1,
+          mergeable_state: "clean",
+        });
+      }
+      if (text.includes("/pulls/189/files")) {
+        return jsonResponse([
+          { filename: "contracts/Settlement.sol", status: "modified", additions: 12, deletions: 4, changes: 16 },
+        ]);
+      }
+      if (text.includes("/commits/contract123/check-runs")) {
+        return jsonResponse({ check_runs: [{ name: "CI", status: "completed", conclusion: "success" }] });
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const steward = await getGithubMergeSteward({
+      env: {
+        GITHUB_TOKEN: "ghp_readonly",
+        GITHUB_DEFAULT_REPO: "averray-agent/agent",
+      },
+      fetchFn,
+      now: new Date("2026-05-08T12:30:00.000Z"),
+    });
+
+    expect(steward).toMatchObject({
+      mutatesGithub: false,
+      mergeExecutionEnabled: false,
+      counts: {
+        openPullRequests: 2,
+        pass: 1,
+        humanReview: 0,
+        block: 1,
+        autoMergeCandidates: 1,
+      },
+    });
+    expect(steward.groups.autoMergeCandidates[0]).toMatchObject({
+      pullRequestNumber: 187,
+      finalVerdict: "pass",
+      canAutoMergeIfEnabled: true,
+    });
+    expect(steward.groups.blocked[0]).toMatchObject({
+      pullRequestNumber: 189,
+      finalVerdict: "block",
+      reason: "pr_critical_files",
+      canAutoMergeIfEnabled: false,
+    });
   });
 
   it("asks for human review on deploy and workflow-only risk", async () => {

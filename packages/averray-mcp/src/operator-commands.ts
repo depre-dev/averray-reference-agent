@@ -97,6 +97,12 @@ export type ParsedOperatorCommand =
     }
   | {
       handled: true;
+      kind: "github_merge_steward";
+      source: OperatorCommandSource;
+      detailed: boolean;
+    }
+  | {
+      handled: true;
       kind: "testbed_e2e_suite";
       source: OperatorCommandSource;
       detailed: boolean;
@@ -163,6 +169,8 @@ const EXAMPLES = [
   "github status",
   "github brief",
   "daily github brief",
+  "github steward",
+  "merge steward",
   "what changed since last time",
   "github open prs",
   "github ci failures",
@@ -242,6 +250,10 @@ export function parseOperatorCommand(
 
   if (isGithubBriefCommand(normalizedText)) {
     return { handled: true, kind: "github_brief", source, detailed };
+  }
+
+  if (isGithubMergeStewardCommand(normalizedText)) {
+    return { handled: true, kind: "github_merge_steward", source, detailed };
   }
 
   if (isRunTestbedE2eReadOnlyCommand(normalizedText)) {
@@ -531,6 +543,11 @@ function githubOperatorView(text: string): GithubOperatorView | undefined {
 function isGithubBriefCommand(text: string): boolean {
   const compact = text.replace(/\b(details?|full|audit)\b/g, "").replace(/\s+/g, " ").trim();
   return /^(github brief|daily github brief|github daily brief|github changes|github changed|what changed since last time|what changed in github since last time|what merged|what deployed|what failed|what needs attention)$/.test(compact);
+}
+
+function isGithubMergeStewardCommand(text: string): boolean {
+  const compact = text.replace(/\b(details?|full|audit)\b/g, "").replace(/\s+/g, " ").trim();
+  return /^(github steward|merge steward|pr steward|pull request steward|github merge steward|take care of open prs|drain open prs|review open prs)$/.test(compact);
 }
 
 function isTestbedE2eSuiteCommand(text: string): boolean {

@@ -7,7 +7,7 @@ import {
 } from "./operator-commands.js";
 import { getAdminActionProposal, getAdminReadiness } from "./operator-admin.js";
 import { getBusinessLedger, getOpsHealth } from "./operator-insights.js";
-import { getGithubOperatorBrief, getGithubOperatorStatus } from "./operator-github.js";
+import { getGithubMergeSteward, getGithubOperatorBrief, getGithubOperatorStatus } from "./operator-github.js";
 import { getDailyOperatorBrief, getOperatorStatus, getSafeWorkReport } from "./operator-status.js";
 import { getProjectMemory } from "./operator-project-memory.js";
 import { getProjectRunbook } from "./operator-project-runbook.js";
@@ -96,6 +96,10 @@ export async function handleOperatorCommandText(
   }
   if (command.kind === "github_brief") {
     const github = await getGithubOperatorBrief({ query: deps.query });
+    return { ...command, github };
+  }
+  if (command.kind === "github_merge_steward") {
+    const github = await getGithubMergeSteward();
     return { ...command, github };
   }
   if (command.kind === "run_testbed_e2e_read_only") {

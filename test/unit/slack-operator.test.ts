@@ -700,6 +700,61 @@ describe("slack operator bridge", () => {
     expect(text).toContain("local brief checkpoint was updated");
   });
 
+  it("formats GitHub merge steward replies", () => {
+    const text = formatOperatorResultForSlack({
+      handled: true,
+      kind: "github_merge_steward",
+      github: {
+        configured: true,
+        health: "degraded",
+        mergeExecutionEnabled: false,
+        counts: {
+          openPullRequests: 2,
+          pass: 1,
+          humanReview: 0,
+          block: 1,
+          autoMergeCandidates: 1,
+        },
+        groups: {
+          autoMergeCandidates: [
+            {
+              repo: "averray-agent/agent",
+              pullRequestNumber: 187,
+              title: "Polish dashboard empty states",
+              url: "https://github.com/averray-agent/agent/pull/187",
+              finalVerdict: "pass",
+              reason: "github_ok_to_merge",
+              checks: { total: 1, passed: 1, failed: 0, active: 0 },
+              touchedAreas: ["frontend", "tests"],
+            },
+          ],
+          humanReview: [],
+          blocked: [
+            {
+              repo: "averray-agent/agent",
+              pullRequestNumber: 189,
+              title: "Update settlement contract",
+              finalVerdict: "block",
+              reason: "pr_critical_files",
+              checks: { total: 1, passed: 1, failed: 0, active: 0 },
+              touchedAreas: ["contracts"],
+            },
+          ],
+        },
+        recommendations: ["1 PR(s) are clean merge candidates. Merge execution is still disabled in this read-only steward."],
+      },
+    });
+
+    expect(text).toContain("*GitHub merge steward*");
+    expect(text).toContain("open/pass/human/block: `2/1/0/1`");
+    expect(text).toContain("merge execution enabled: `false`");
+    expect(text).toContain("*Clean candidates*");
+    expect(text).toContain("github_ok_to_merge");
+    expect(text).toContain("*Blocked*");
+    expect(text).toContain("pr_critical_files");
+    expect(text).toContain("Hermes did not merge");
+  });
+
   it("formats testbed E2E suite replies", () => {
     const text = formatOperatorResultForSlack({
       handled: true,

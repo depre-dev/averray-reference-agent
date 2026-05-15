@@ -342,6 +342,9 @@ export function formatOperatorResultForSlack(result: unknown): string {
   if (result.kind === "github_brief") {
     return formatGithubBriefForSlack(result);
   }
+  if (result.kind === "github_merge_steward") {
+    return formatGithubMergeStewardForSlack(result);
+  }
   if (result.kind === "run_testbed_e2e_read_only") {
     return formatTestbedE2eReadOnlyRunForSlack(result);
   }
@@ -564,6 +567,39 @@ function formatGithubBriefForSlack(result: Record<string, unknown>): string {
     github.persistsLocalSnapshot === true
       ? "GitHub was not mutated; only the local brief checkpoint was updated."
       : "GitHub was not mutated. Local brief checkpoint was not saved.",
+  ].filter(Boolean).join("\n");
+}
+
+function formatGithubMergeStewardForSlack(result: Record<string, unknown>): string {
+  const github = isRecord(result.github) ? result.github : {};
+  const counts = isRecord(github.counts) ? github.counts : {};
+  const groups = isRecord(github.groups) ? github.groups : {};
+  const candidates = arrayField(groups, "autoMergeCandidates");
+  const humanReview = arrayField(groups, "humanReview");
+  const blocked = arrayField(groups, "blocked");
+  const recommendations = arrayField(github, "recommendations");
+  const configured = github.configured === true;
+
+  if (!configured) {
+    return [
+      "*GitHub merge steward*",
+      "GitHub read-only helper is not configured yet.",
+      recommendations.length > 0 ? `*Needed*\n${recommendations.slice(0, 3).map((entry) => `• ${String(entry)}`).join("\n")}` : "",
+      "Read-only. Hermes did not merge anything.",
+    ].filter(Boolean).join("\n");
+  }
+
+  return [
+    "*GitHub merge steward*",
+    `• health: \`${stringField(github, "health") ?? "unknown"}\``,
+    `• open/pass/human/block: \`${numberField(counts, "openPullRequests") ?? 0}/${numberField(counts, "pass") ?? 0}/${numberField(counts, "humanReview") ?? 0}/${numberField(counts, "block") ?? 0}\``,
+    `• auto-merge candidates: \`${numberField(counts, "autoMergeCandidates") ?? 0}\``,
+    `• merge execution enabled: \`${String(github.mergeExecutionEnabled === true)}\``,
+    candidates.length > 0 ? `*Clean candidates*\n${candidates.slice(0, 5).map(formatGithubStewardItem).join("\n")}` : "*Clean candidates*\n• none",
+    humanReview.length > 0 ? `*Human review*\n${humanReview.slice(0, 5).map(formatGithubStewardItem).join("\n")}` : "",
+    blocked.length > 0 ? `*Blocked*\n${blocked.slice(0, 5).map(formatGithubStewardItem).join("\n")}` : "",
+    recommendations.length > 0 ? `*Next*\n${recommendations.slice(0, 3).map((entry) => `• ${String(entry)}`).join("\n")}` : "",
+    "Read-only steward. Hermes did not merge, approve, rerun CI, or mutate GitHub.",
   ].filter(Boolean).join("\n");
 }
 
@@ -950,6 +986,20 @@ function formatGithubBriefItem(value: unknown): string {
   const occurredAt = stringField(value, "occurredAt");
   const meta = [repo, detail, occurredAt].filter(Boolean).join(" - ");
   return `• ${meta ? `\`${meta}\` ` : ""}${stringField(value, "title") ?? "unknown"}${linkSuffix(value)}`;
+}
+
+function formatGithubStewardItem(value: unknown): string {
+  if (!isRecord(value)) return "• unknown";
+  const repo = stringField(value, "repo") ?? "unknown";
+  const number = numberField(value, "pullRequestNumber") ?? 0;
+  const title = stringField(value, "title") ?? "untitled";
+  const url = stringField(value, "url");
+  const verdict = stringField(value, "finalVerdict") ?? "unknown";
+  const reason = stringField(value, "reason") ?? "no_reason";
+  const checks = isRecord(value.checks) ? value.checks : {};
+  const areas = arrayField(value, "touchedAreas").slice(0, 5).map(String).join(", ");
+  const target = url ? `<${url}|${repo}#${number}>` : `${repo}#${number}`;
+  return `• *${verdict}* ${target} ${title} - ${reason}; checks \`${numberField(checks, "passed") ?? 0}/${numberField(checks, "total") ?? 0}\`${areas ? `; areas \`${areas}\`` : ""}`;
 }
 
 function arrayField(value: Record<string, unknown>, key: string): unknown[] {
