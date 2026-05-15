@@ -702,13 +702,20 @@ export async function getGithubPullRequestReview(
       files: fileSummaries,
       checks: checkSummaries,
     });
-    const riskFindings = buildPullRequestRiskFindings({
+    const initialRiskFindings = buildPullRequestRiskFindings({
       pullRequest: pullRequestSummary,
       files: fileSummaries,
       highRiskFiles,
       checks: checkTotals,
       review: reviewSignals,
       warnings,
+    });
+    const riskFindings = applyDependabotLowRiskPolicy({
+      pullRequest: pullRequestSummary,
+      files: fileSummaries,
+      highRiskFiles,
+      checks: checkTotals,
+      riskFindings: initialRiskFindings,
     });
     const mergeRecommendation = chooseMergeRecommendation(riskFindings);
     const health = warnings.some((warning) => warning.severity === "high")
@@ -1271,6 +1278,56 @@ function buildPullRequestRiskFindings(input: {
   return findings;
 }
 
+function applyDependabotLowRiskPolicy(input: {
+  pullRequest: NonNullable<GithubPullRequestReview["pullRequest"]>;
+  files: GithubPullRequestFileSummary[];
+  highRiskFiles: GithubPullRequestFileRisk[];
+  checks: ReturnType<typeof summarizeChecks>;
+  riskFindings: GithubPullRequestRiskFinding[];
+}): GithubPullRequestRiskFinding[] {
+  if (!isDependabotPullRequest(input.pullRequest)) return input.riskFindings;
+  if (!isPatchOrMinorDependencyBump(input.pullRequest.title)) return input.riskFindings;
+  if (!input.files.every((file) => isDependencyManifestOrLockfile(file.filename))) return input.riskFindings;
+  if (input.checks.total === 0 || input.checks.failed > 0 || input.checks.active > 0) return input.riskFindings;
+  if (input.pullRequest.state !== "open" || input.pullRequest.draft) return input.riskFindings;
+  if (input.pullRequest.mergeableState && ["dirty", "blocked", "unknown"].includes(input.pullRequest.mergeableState)) {
+    return input.riskFindings;
+  }
+  if (input.highRiskFiles.some((file) => file.risk === "high")) return input.riskFindings;
+
+  const remainingFindings = input.riskFindings.filter((finding) => finding.code !== "pr_review_risk_files");
+  if (remainingFindings.some((finding) => finding.severity !== "low")) return input.riskFindings;
+
+  return [
+    ...remainingFindings.filter((finding) => finding.code !== "pr_review_green"),
+    {
+      severity: "low",
+      code: "dependabot_low_risk",
+      message: "Dependabot patch/minor dependency-only PR with green checks.",
+    },
+  ];
+}
+
+function isDependabotPullRequest(pullRequest: NonNullable<GithubPullRequestReview["pullRequest"]>): boolean {
+  return pullRequest.author === "dependabot[bot]" || pullRequest.author === "dependabot";
+}
+
+function isPatchOrMinorDependencyBump(title: string): boolean {
+  const match = title.match(/\bfrom\s+v?(\d+)\.(\d+)\.(\d+)(?:[-+\w.]*)?\s+to\s+v?(\d+)\.(\d+)\.(\d+)(?:[-+\w.]*)?/i)
+    ?? title.match(/\bv?(\d+)\.(\d+)\.(\d+)(?:[-+\w.]*)?\s*(?:->|→|to)\s*v?(\d+)\.(\d+)\.(\d+)(?:[-+\w.]*)?/i);
+  if (!match) return false;
+  const [, fromMajor, fromMinor, fromPatch, toMajor, toMinor, toPatch] = match.map(Number);
+  if (![fromMajor, fromMinor, fromPatch, toMajor, toMinor, toPatch].every(Number.isFinite)) return false;
+  if (toMajor !== fromMajor) return false;
+  if (toMinor > fromMinor) return true;
+  return toMinor === fromMinor && toPatch >= fromPatch;
+}
+
+function isDependencyManifestOrLockfile(filename: string): boolean {
+  const path = filename.toLowerCase();
+  return /(^|\/)(package\.json|package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb)$/.test(path);
+}
+
 function unique<T>(values: T[]): T[] {
   return [...new Set(values)];
 }
@@ -1312,7 +1369,8 @@ function stewardItemFromReview(review: GithubPullRequestReview): GithubMergeStew
     && review.configured
     && review.checks.failed === 0
     && review.checks.active === 0
-    && review.files.highRisk.length === 0
+    && !review.files.highRisk.some((file) => file.risk === "high")
+    && review.riskFindings.every((finding) => finding.severity === "low")
     && pullRequest?.state === "open"
     && pullRequest?.draft === false;
 

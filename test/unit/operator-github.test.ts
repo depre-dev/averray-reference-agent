@@ -490,6 +490,115 @@ describe("github operator status", () => {
     });
   });
 
+  it("treats green Dependabot patch and minor dependency bumps as clean steward candidates", async () => {
+    const fetchFn = async (url: string | URL | Request) => {
+      const text = String(url);
+      if (text.endsWith("/repos/averray-agent/agent")) {
+        return githubRepoResponse("averray-agent/agent");
+      }
+      if (text.includes("/pulls?")) {
+        return jsonResponse([
+          {
+            number: 191,
+            title: "Bump next from 15.5.15 to 15.5.18",
+            html_url: "https://github.com/averray-agent/agent/pull/191",
+            user: { login: "dependabot[bot]" },
+            draft: false,
+            updated_at: "2026-05-08T10:10:00.000Z",
+            state: "open",
+          },
+          {
+            number: 192,
+            title: "Bump next from 15.5.18 to 16.0.0",
+            html_url: "https://github.com/averray-agent/agent/pull/192",
+            user: { login: "dependabot[bot]" },
+            draft: false,
+            updated_at: "2026-05-08T10:15:00.000Z",
+            state: "open",
+          },
+        ]);
+      }
+      if (text.includes("/issues?")) return jsonResponse([]);
+      if (text.includes("/actions/runs?")) return jsonResponse({ workflow_runs: [] });
+      if (text.endsWith("/repos/averray-agent/agent/pulls/191")) {
+        return jsonResponse({
+          number: 191,
+          title: "Bump next from 15.5.15 to 15.5.18",
+          html_url: "https://github.com/averray-agent/agent/pull/191",
+          user: { login: "dependabot[bot]" },
+          draft: false,
+          state: "open",
+          head: { ref: "dependabot/npm_and_yarn/next-15.5.18", sha: "depPatch123" },
+          changed_files: 2,
+          mergeable_state: "clean",
+        });
+      }
+      if (text.includes("/pulls/191/files")) {
+        return jsonResponse([
+          { filename: "app/package.json", status: "modified", additions: 1, deletions: 1, changes: 2 },
+          { filename: "app/package-lock.json", status: "modified", additions: 20, deletions: 18, changes: 38 },
+        ]);
+      }
+      if (text.includes("/commits/depPatch123/check-runs")) {
+        return jsonResponse({ check_runs: [{ name: "CI", status: "completed", conclusion: "success" }] });
+      }
+      if (text.endsWith("/repos/averray-agent/agent/pulls/192")) {
+        return jsonResponse({
+          number: 192,
+          title: "Bump next from 15.5.18 to 16.0.0",
+          html_url: "https://github.com/averray-agent/agent/pull/192",
+          user: { login: "dependabot[bot]" },
+          draft: false,
+          state: "open",
+          head: { ref: "dependabot/npm_and_yarn/next-16.0.0", sha: "depMajor123" },
+          changed_files: 2,
+          mergeable_state: "clean",
+        });
+      }
+      if (text.includes("/pulls/192/files")) {
+        return jsonResponse([
+          { filename: "app/package.json", status: "modified", additions: 1, deletions: 1, changes: 2 },
+          { filename: "app/package-lock.json", status: "modified", additions: 20, deletions: 18, changes: 38 },
+        ]);
+      }
+      if (text.includes("/commits/depMajor123/check-runs")) {
+        return jsonResponse({ check_runs: [{ name: "CI", status: "completed", conclusion: "success" }] });
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const steward = await getGithubMergeSteward({
+      env: {
+        GITHUB_TOKEN: "ghp_readonly",
+        GITHUB_DEFAULT_REPO: "averray-agent/agent",
+      },
+      fetchFn,
+      now: new Date("2026-05-08T12:30:00.000Z"),
+    });
+
+    expect(steward).toMatchObject({
+      counts: {
+        openPullRequests: 2,
+        pass: 1,
+        humanReview: 1,
+        block: 0,
+        autoMergeCandidates: 1,
+      },
+    });
+    expect(steward.groups.autoMergeCandidates[0]).toMatchObject({
+      pullRequestNumber: 191,
+      finalVerdict: "pass",
+      reason: "dependabot_low_risk",
+      canAutoMergeIfEnabled: true,
+    });
+    expect(steward.groups.humanReview[0]).toMatchObject({
+      pullRequestNumber: 192,
+      finalVerdict: "human_review",
+      reason: "pr_review_risk_files",
+      canAutoMergeIfEnabled: false,
+    });
+  });
+
   it("asks for human review on deploy and workflow-only risk", async () => {
     const fetchFn = async (url: string | URL | Request) => {
       const text = String(url);
