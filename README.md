@@ -200,10 +200,13 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   when they need Hermes/Averray to run a post-deploy smoke or E2E check. The
   hook accepts structured requester metadata, an optional `correlationId`, and
   either a safe operator command, the full read-only E2E suite, a single
-  testcase ID, or a PR handoff workflow. PR handoff is the normal path for an
-  agent that has opened a PR and wants Hermes to review it, recommend whether it
-  is merge-ready, run the requested testbed checks, and report the result back
-  to the calling agent.
+  testcase ID, a read-only PR code-review verifier, or a PR handoff workflow.
+  `pr_code_review` is the narrow independent-verifier lane: it inspects PR
+  metadata, changed files, check status, rollout notes, and test signals, then
+  returns an `ok_to_merge`, `needs_review`, or `hold` recommendation without
+  mutating GitHub. PR handoff is the normal path for an agent that has opened a
+  PR and wants Hermes to review it, recommend whether it is merge-ready, run the
+  requested testbed checks, and report the result back to the calling agent.
 
   ```json
   {"requester":"codex","intent":"testbed_e2e_read_only","correlationId":"deploy-20260509","reason":"post-deploy smoke"}
@@ -215,6 +218,10 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
 
   ```json
   {"requester":"deploy-agent","intent":"pr_handoff","repo":"averray-agent/agent","pullRequestNumber":185,"testCaseIds":["TBE2E-004"],"correlationId":"deploy-20260509","reason":"pre-merge smoke"}
+  ```
+
+  ```json
+  {"requester":"codex","intent":"pr_code_review","repo":"averray-agent/agent","pullRequestNumber":185,"correlationId":"review-20260509","reason":"independent verifier lane"}
   ```
 
   ```json
