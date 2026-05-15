@@ -47,7 +47,7 @@ import { getDailyOperatorBrief, getOperatorStatus, getSafeWorkReport } from "./o
 import { getAgentUsefulnessPlan } from "./operator-usefulness.js";
 import { getProjectMemory } from "./operator-project-memory.js";
 import { getProjectRunbook } from "./operator-project-runbook.js";
-import { getGithubOperatorBrief, getGithubOperatorStatus } from "./operator-github.js";
+import { approveGithubMergeStewardCandidate, getGithubOperatorBrief, getGithubOperatorStatus } from "./operator-github.js";
 import { getTestbedE2eSuite, runTestbedE2eReadOnly } from "./operator-testbed.js";
 import { invokeAgentTask } from "./agent-invocation.js";
 import { getHandoffMonitor } from "./handoff-events.js";
@@ -259,6 +259,19 @@ server.tool(
   {},
   async () => {
     return jsonContent(await getGithubOperatorBrief({ query }));
+  }
+);
+
+server.tool(
+  "averray_approve_github_merge_steward_candidate",
+  "Approval-gated GitHub merge executor for the narrow merge-steward path. Requires GITHUB_MERGE_STEWARD_EXECUTION_ENABLED=1, an explicit repo and PR number, green checks, and a low-risk Dependabot patch/minor dependency-only steward verdict. It mutates GitHub only by merging that eligible PR; it never edits code, deploys directly, edits Wikipedia, or merges human-review/block PRs.",
+  {
+    repo: z.string().min(1),
+    pullRequestNumber: z.number().int().min(1),
+    approvalText: z.string().min(1).optional()
+  },
+  async (input) => {
+    return jsonContent(await approveGithubMergeStewardCandidate(input));
   }
 );
 

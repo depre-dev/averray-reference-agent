@@ -772,6 +772,32 @@ describe("slack operator bridge", () => {
     expect(text).toContain("Hermes did not merge");
   });
 
+  it("formats GitHub merge steward approval replies", () => {
+    const text = formatOperatorResultForSlack({
+      handled: true,
+      kind: "github_merge_steward_approval",
+      approval: {
+        status: "blocked",
+        repo: "averray-agent/agent",
+        pullRequestNumber: 191,
+        executionEnabled: false,
+        mutatesGithub: false,
+        finalVerdict: "pass",
+        mergeRecommendation: "ok_to_merge",
+        reason: "merge_execution_disabled",
+        warnings: [],
+        recommendations: ["Set GITHUB_MERGE_STEWARD_EXECUTION_ENABLED=1."],
+      },
+    });
+
+    expect(text).toContain("*GitHub merge steward approval*");
+    expect(text).toContain("target: `averray-agent/agent#191`");
+    expect(text).toContain("status: `blocked`");
+    expect(text).toContain("reason: `merge_execution_disabled`");
+    expect(text).toContain("mutated GitHub: `false`");
+    expect(text).toContain("No GitHub mutation was performed.");
+  });
+
   it("formats testbed E2E suite replies", () => {
     const text = formatOperatorResultForSlack({
       handled: true,

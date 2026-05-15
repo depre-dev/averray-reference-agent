@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  approveGithubMergeStewardCandidate,
   getGithubMergeSteward,
   getGithubOperatorBrief,
   getGithubOperatorStatus,
@@ -599,6 +600,79 @@ describe("github operator status", () => {
     });
   });
 
+  it("blocks merge steward approvals unless execution is enabled", async () => {
+    const approval = await approveGithubMergeStewardCandidate({
+      repo: "averray-agent/agent",
+      pullRequestNumber: 191,
+      env: { GITHUB_TOKEN: "ghp_readonly" },
+      fetchFn: dependabotPatchFetchFn,
+      now: new Date("2026-05-08T12:30:00.000Z"),
+    });
+
+    expect(approval).toMatchObject({
+      mutatesGithub: false,
+      executionEnabled: false,
+      status: "blocked",
+      repo: "averray-agent/agent",
+      pullRequestNumber: 191,
+      finalVerdict: "pass",
+      mergeRecommendation: "ok_to_merge",
+      reason: "merge_execution_disabled",
+      safety: {
+        requiresExplicitCommand: true,
+        requiresEnvFlag: true,
+        onlyLowRiskDependabot: true,
+        githubMutated: false,
+        wikipediaEdited: false,
+      },
+    });
+  });
+
+  it("merges only approved low-risk Dependabot steward candidates when execution is enabled", async () => {
+    let mergeRequest: { method?: string; body?: unknown } | undefined;
+    const fetchFn = async (url: string | URL | Request, init?: RequestInit) => {
+      const text = String(url);
+      if (text.endsWith("/repos/averray-agent/agent/pulls/191/merge")) {
+        mergeRequest = { method: init?.method, body: init?.body ? JSON.parse(String(init.body)) : undefined };
+        return jsonResponse({ merged: true, sha: "merge-sha", message: "Pull Request successfully merged" });
+      }
+      return dependabotPatchFetchFn(url, init);
+    };
+
+    const approval = await approveGithubMergeStewardCandidate({
+      repo: "averray-agent/agent",
+      pullRequestNumber: 191,
+      env: {
+        GITHUB_TOKEN: "ghp_write",
+        GITHUB_MERGE_STEWARD_EXECUTION_ENABLED: "1",
+      },
+      fetchFn,
+      now: new Date("2026-05-08T12:30:00.000Z"),
+    });
+
+    expect(approval).toMatchObject({
+      mutatesGithub: true,
+      executionEnabled: true,
+      status: "merged",
+      reason: "merged_low_risk_dependabot",
+      merge: {
+        merged: true,
+        sha: "merge-sha",
+      },
+      safety: {
+        githubMutated: true,
+        wikipediaEdited: false,
+      },
+    });
+    expect(mergeRequest).toMatchObject({
+      method: "PUT",
+      body: {
+        merge_method: "squash",
+        commit_title: "Bump next from 15.5.15 to 15.5.18 (#191)",
+      },
+    });
+  });
+
   it("asks for human review on deploy and workflow-only risk", async () => {
     const fetchFn = async (url: string | URL | Request) => {
       const text = String(url);
@@ -846,6 +920,33 @@ function githubRepoResponse(fullName: string): Response {
     private: true,
     html_url: `https://github.com/${fullName}`,
   });
+}
+
+async function dependabotPatchFetchFn(url: string | URL | Request, _init?: RequestInit): Promise<Response> {
+  const text = String(url);
+  if (text.endsWith("/repos/averray-agent/agent/pulls/191")) {
+    return jsonResponse({
+      number: 191,
+      title: "Bump next from 15.5.15 to 15.5.18",
+      html_url: "https://github.com/averray-agent/agent/pull/191",
+      user: { login: "dependabot[bot]" },
+      draft: false,
+      state: "open",
+      head: { ref: "dependabot/npm_and_yarn/next-15.5.18", sha: "depPatch123" },
+      changed_files: 2,
+      mergeable_state: "clean",
+    });
+  }
+  if (text.includes("/pulls/191/files")) {
+    return jsonResponse([
+      { filename: "app/package.json", status: "modified", additions: 1, deletions: 1, changes: 2 },
+      { filename: "app/package-lock.json", status: "modified", additions: 20, deletions: 18, changes: 38 },
+    ]);
+  }
+  if (text.includes("/commits/depPatch123/check-runs")) {
+    return jsonResponse({ check_runs: [{ name: "CI", status: "completed", conclusion: "success" }] });
+  }
+  return new Response("not found", { status: 404 });
 }
 
 function headersObject(headers: HeadersInit | undefined): Record<string, string> {

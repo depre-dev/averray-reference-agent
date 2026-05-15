@@ -7,7 +7,12 @@ import {
 } from "./operator-commands.js";
 import { getAdminActionProposal, getAdminReadiness } from "./operator-admin.js";
 import { getBusinessLedger, getOpsHealth } from "./operator-insights.js";
-import { getGithubMergeSteward, getGithubOperatorBrief, getGithubOperatorStatus } from "./operator-github.js";
+import {
+  approveGithubMergeStewardCandidate,
+  getGithubMergeSteward,
+  getGithubOperatorBrief,
+  getGithubOperatorStatus,
+} from "./operator-github.js";
 import { getDailyOperatorBrief, getOperatorStatus, getSafeWorkReport } from "./operator-status.js";
 import { getProjectMemory } from "./operator-project-memory.js";
 import { getProjectRunbook } from "./operator-project-runbook.js";
@@ -106,6 +111,10 @@ export async function handleOperatorCommandText(
   if (command.kind === "github_merge_steward") {
     const github = await getGithubMergeSteward();
     return { ...command, github };
+  }
+  if (command.kind === "github_merge_steward_approval") {
+    const approval = await approveGithubMergeStewardCandidate(command.input);
+    return { ...command, approval };
   }
   if (command.kind === "run_testbed_e2e_read_only") {
     const run = await runTestbedE2eReadOnly({ query: deps.query, workflowDeps: deps.workflowDeps });

@@ -277,6 +277,17 @@ describe("operator commands", () => {
       source: "operator",
       detailed: false,
     });
+    expect(parseOperatorCommand("merge steward approve averray-agent/agent#191", { source: "slack" })).toEqual({
+      handled: true,
+      kind: "github_merge_steward_approval",
+      source: "slack",
+      detailed: false,
+      input: {
+        repo: "averray-agent/agent",
+        pullRequestNumber: 191,
+        approvalText: "merge steward approve averray-agent/agent#191",
+      },
+    });
   });
 
   it("routes the platform testbed E2E suite read-only", () => {
