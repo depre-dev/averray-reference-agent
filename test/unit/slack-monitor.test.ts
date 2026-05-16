@@ -42,10 +42,13 @@ describe("slack operator personal monitor", () => {
     const html = renderMonitorHtml({
       title: "Pascal Monitor",
       eventsPath: "/monitor/events",
+      streamPath: "/monitor/stream",
     });
 
     expect(html).toContain("<title>Pascal Monitor</title>");
     expect(html).toContain("Live private view of agent-to-agent handoffs.");
+    expect(html).toContain("live-status");
+    expect(html).toContain("connecting");
     expect(html).toContain("Active / Just Finished");
     expect(html).toContain("Blocked / Human Review");
     expect(html).toContain("Live Lane");
@@ -102,6 +105,10 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Gate");
     expect(html).toContain("Deploy");
     expect(html).toContain("const eventsPath = \"/monitor/events\";");
+    expect(html).toContain("const streamPath = \"/monitor/stream\";");
+    expect(html).toContain("new EventSource(streamUrl)");
+    expect(html).toContain("addEventListener(\"monitor\"");
+    expect(html).toContain("startPolling(\"polling fallback 5s\")");
     expect(html).toContain("Release Gate");
     expect(html).toContain("blocks + human review");
     expect(html).toContain("Release Timeline");
@@ -125,6 +132,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("ownerLaneSortScore(item)");
     expect(html).toContain("isCurrentPipelineItem(item)");
     expect(html).toContain("updatePipelineFilterButtons()");
+    expect(html).toContain("buildMonitorUrl(path)");
     expect(html).toContain("pipelineStage(item, verdict)");
     expect(html).toContain("nextPipelineAction(item, verdict)");
     expect(html).toContain("renderFixRequest(item, summary, verdict, action)");
