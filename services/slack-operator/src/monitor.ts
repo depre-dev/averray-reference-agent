@@ -154,6 +154,39 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       display: grid;
       gap: 10px;
     }
+    .pr-board {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .filter-button {
+      min-height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(10, 48, 44, 0.86);
+      color: var(--text);
+      padding: 10px 12px;
+      text-align: left;
+    }
+    .filter-button[aria-pressed="true"] {
+      border-color: var(--accent);
+      background: var(--accent-bg);
+    }
+    .filter-label {
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .filter-count {
+      font-size: 1.35rem;
+      font-weight: 700;
+    }
     .pipeline-card {
       border: 1px solid var(--line);
       border-left: 5px solid var(--accent);
@@ -329,6 +362,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       main { width: min(100vw - 20px, 1180px); margin-top: 14px; }
       header { flex-direction: column; }
       .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .pr-board { grid-template-columns: 1fr; }
       .pipeline-steps,
       .pipeline-meta { grid-template-columns: 1fr; }
       dl { grid-template-columns: 1fr; }
@@ -353,6 +387,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     </section>
     <div class="section-title"><h2>Live Lane</h2><span id="generated" class="pill">waiting</span></div>
     <section id="active" class="list"><div class="empty">No running or just-finished handoffs.</div></section>
+    <div class="section-title"><h2>PR Board</h2><span class="pill">release queue</span></div>
+    <section class="pr-board" aria-label="PR board filters">
+      <button class="filter-button" type="button" data-pipeline-filter="all" aria-pressed="true"><span class="filter-label">All</span><span id="board-all" class="filter-count">0</span></button>
+      <button class="filter-button" type="button" data-pipeline-filter="block" aria-pressed="false"><span class="filter-label">Blocked</span><span id="board-block" class="filter-count">0</span></button>
+      <button class="filter-button" type="button" data-pipeline-filter="needs-review" aria-pressed="false"><span class="filter-label">Review</span><span id="board-review" class="filter-count">0</span></button>
+      <button class="filter-button" type="button" data-pipeline-filter="pass" aria-pressed="false"><span class="filter-label">Ready</span><span id="board-ready" class="filter-count">0</span></button>
+      <button class="filter-button" type="button" data-pipeline-filter="running" aria-pressed="false"><span class="filter-label">Running</span><span id="board-running" class="filter-count">0</span></button>
+    </section>
     <div class="section-title"><h2>PR Pipeline</h2><span class="pill">stage view</span></div>
     <section id="pipeline" class="pipeline-list"><div class="empty">No PR handoffs in the monitor window.</div></section>
     <div class="section-title"><h2>Release Gate</h2><span class="pill">blocks + human review</span></div>
@@ -364,8 +406,17 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     const eventsPath = ${eventsPath};
     const token = new URLSearchParams(location.search).get("token");
     const withToken = buildEventsUrl();
+    let pipelineFilter = "all";
+    let latestPipelineItems = [];
 
     document.getElementById("refresh").addEventListener("click", () => load());
+    document.querySelectorAll("[data-pipeline-filter]").forEach((button) => {
+      button.addEventListener("click", () => {
+        pipelineFilter = String(button.getAttribute("data-pipeline-filter") || "all");
+        updatePipelineFilterButtons();
+        renderPipeline(latestPipelineItems);
+      });
+    });
     load();
     setInterval(load, 5000);
 
@@ -393,7 +444,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       document.getElementById("event-count").textContent = counts.events || 0;
       document.getElementById("generated").textContent = payload.generatedAt ? new Date(payload.generatedAt).toLocaleString() : "unknown";
       renderList("active", payload.active || [], "No running or just-finished handoffs.");
-      renderPipeline(collectPipelineItems(payload));
+      latestPipelineItems = collectPipelineItems(payload);
+      renderPipelineBoard(latestPipelineItems);
+      renderPipeline(latestPipelineItems);
       renderList("attention", attention, "No handoffs need attention.");
       renderList("recent", recent, "No recent handoffs in the monitor window.");
     }
@@ -407,13 +460,35 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       target.innerHTML = entries.map(renderHandoff).join("");
     }
 
+    function renderPipelineBoard(entries) {
+      const verdicts = entries.map(releaseVerdict);
+      document.getElementById("board-all").textContent = String(entries.length);
+      document.getElementById("board-block").textContent = String(verdicts.filter((verdict) => verdict.level === "block").length);
+      document.getElementById("board-review").textContent = String(verdicts.filter((verdict) => verdict.level === "needs-review").length);
+      document.getElementById("board-ready").textContent = String(verdicts.filter((verdict) => verdict.level === "pass").length);
+      document.getElementById("board-running").textContent = String(verdicts.filter((verdict) => verdict.level === "running").length);
+      updatePipelineFilterButtons();
+    }
+
+    function updatePipelineFilterButtons() {
+      document.querySelectorAll("[data-pipeline-filter]").forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.getAttribute("data-pipeline-filter") === pipelineFilter));
+      });
+    }
+
     function renderPipeline(entries) {
       const target = document.getElementById("pipeline");
-      if (!entries.length) {
+      const filtered = filterPipelineItems(entries);
+      if (!filtered.length) {
         target.innerHTML = '<div class="empty">No PR handoffs in the monitor window.</div>';
         return;
       }
-      target.innerHTML = entries.slice(0, 12).map(renderPipelineItem).join("");
+      target.innerHTML = filtered.slice(0, 12).map(renderPipelineItem).join("");
+    }
+
+    function filterPipelineItems(entries) {
+      if (pipelineFilter === "all") return entries;
+      return entries.filter((item) => releaseVerdict(item).level === pipelineFilter);
     }
 
     function renderPipelineItem(item) {
