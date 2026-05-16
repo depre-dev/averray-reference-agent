@@ -78,25 +78,34 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
   <style>
     :root {
       color-scheme: dark;
-      --bg: #041d1a;
-      --panel: #0a302c;
-      --panel-2: #0d3b36;
-      --line: #4d766f;
-      --text: #f5ead3;
-      --muted: #a7b5aa;
-      --accent: #ffb02e;
-      --ok: #52d273;
-      --bad: #ff6b6b;
-      --warn: #ffd166;
-      --ok-bg: rgba(82, 210, 115, 0.12);
-      --bad-bg: rgba(255, 107, 107, 0.12);
-      --warn-bg: rgba(255, 209, 102, 0.12);
-      --accent-bg: rgba(255, 176, 46, 0.12);
+      --bg: #050d0b;
+      --panel: #0c1713;
+      --panel-2: #101f19;
+      --surface: rgba(11, 24, 19, 0.92);
+      --surface-soft: rgba(10, 22, 18, 0.72);
+      --surface-strong: rgba(16, 31, 25, 0.96);
+      --line: #29473d;
+      --line-soft: rgba(84, 121, 108, 0.28);
+      --text: #f3ead7;
+      --muted: #8d9b91;
+      --faint: #5f7169;
+      --accent: #d89a2b;
+      --ok: #63c789;
+      --bad: #ee6260;
+      --warn: #d9ad42;
+      --cyan: #56cce4;
+      --violet: #928eff;
+      --ok-bg: rgba(99, 199, 137, 0.12);
+      --bad-bg: rgba(238, 98, 96, 0.12);
+      --warn-bg: rgba(217, 173, 66, 0.12);
+      --accent-bg: rgba(216, 154, 43, 0.12);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      background: radial-gradient(circle at top left, #123a35, var(--bg) 34rem);
+      background:
+        radial-gradient(circle at top left, rgba(24, 49, 40, 0.82), transparent 31rem),
+        linear-gradient(90deg, #06110e, var(--bg) 38rem);
       color: var(--text);
       font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
@@ -157,7 +166,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .card {
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: rgba(10, 48, 44, 0.9);
+      background: var(--surface);
       padding: 14px;
       box-shadow: 0 14px 48px rgba(0, 0, 0, 0.24);
     }
@@ -415,7 +424,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
-      margin: 0 0 8px;
+      margin: 0;
     }
     .pipeline-card {
       border: 1px solid var(--line);
@@ -683,13 +692,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .pill {
       display: inline-flex;
       align-items: center;
-      min-height: 24px;
+      min-height: 22px;
       border: 1px solid var(--line);
       border-radius: 999px;
-      padding: 2px 8px;
+      padding: 2px 7px;
       color: var(--text);
-      background: rgba(255, 255, 255, 0.05);
-      font-size: 0.82rem;
+      background: rgba(255, 255, 255, 0.035);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.72rem;
       white-space: nowrap;
     }
     .state-pill {
@@ -732,8 +742,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       border: 1px solid var(--line);
       border-radius: 5px;
       padding: 1px 5px;
-      background: rgba(0, 0, 0, 0.24);
+      background: rgba(255, 255, 255, 0.035);
       color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.72rem;
     }
     a { color: var(--accent); }
     .empty {
@@ -750,22 +762,23 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .command-shell {
       width: 100vw;
       height: 100vh;
+      min-width: 0;
       display: grid;
       grid-template-rows: auto auto minmax(0, 1fr) auto;
       overflow: hidden;
       background:
-        radial-gradient(1400px 640px at 85% -16%, rgba(82, 210, 115, 0.08), transparent 58%),
-        radial-gradient(800px 520px at -8% 18%, rgba(100, 210, 255, 0.07), transparent 54%),
+        radial-gradient(1200px 560px at 12% -18%, rgba(73, 114, 97, 0.13), transparent 58%),
+        linear-gradient(90deg, rgba(15, 34, 27, 0.96) 0, rgba(5, 13, 11, 0.98) 24rem, #050d0b 100%),
         var(--bg);
     }
     .cmdbar {
       display: grid;
-      grid-template-columns: minmax(260px, auto) 1fr auto;
+      grid-template-columns: minmax(210px, 0.72fr) minmax(0, 1.45fr) minmax(250px, auto);
       align-items: center;
       gap: 18px;
       padding: 10px 18px;
-      border-bottom: 1px solid rgba(77, 118, 111, 0.55);
-      background: rgba(3, 19, 17, 0.92);
+      border-bottom: 1px solid var(--line-soft);
+      background: rgba(3, 12, 10, 0.94);
       backdrop-filter: blur(10px);
     }
     .brand {
@@ -782,7 +795,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       border-radius: 7px;
       border: 1px solid var(--line);
       color: var(--accent);
-      background: rgba(255, 176, 46, 0.08);
+      background: rgba(216, 154, 43, 0.08);
       font-weight: 800;
     }
     .brand-name {
@@ -807,7 +820,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       border-radius: 999px;
       padding: 6px 10px;
       color: var(--text);
-      background: rgba(10, 48, 44, 0.72);
+      background: var(--surface-soft);
       white-space: nowrap;
     }
     .cmd-status::before {
@@ -836,6 +849,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       gap: 8px;
       justify-content: center;
       min-width: 0;
+      flex-wrap: wrap;
     }
     .counter-chip {
       display: inline-flex;
@@ -845,7 +859,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       padding: 0 10px;
       border: 1px solid var(--line);
       border-radius: 7px;
-      background: rgba(10, 48, 44, 0.74);
+      background: var(--surface-soft);
       white-space: nowrap;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     }
@@ -893,9 +907,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       align-items: center;
       justify-content: space-between;
       gap: 14px;
+      min-width: 0;
       padding: 8px 18px;
-      border-bottom: 1px solid rgba(77, 118, 111, 0.48);
-      background: rgba(3, 19, 17, 0.72);
+      border-bottom: 1px solid var(--line-soft);
+      background: rgba(4, 13, 11, 0.78);
     }
     .filter-left,
     .filter-right {
@@ -904,13 +919,20 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       gap: 10px;
       min-width: 0;
     }
+    .fb-pill-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      white-space: nowrap;
+    }
     .monitor-search {
       width: min(320px, 32vw);
       min-height: 34px;
       border: 1px solid var(--line);
       border-radius: 7px;
       color: var(--text);
-      background: rgba(10, 48, 44, 0.72);
+      background: var(--surface-soft);
       padding: 0 12px;
       outline: none;
     }
@@ -920,7 +942,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       padding: 0 10px;
       border-radius: 7px;
       font-size: 0.78rem;
-      background: rgba(10, 48, 44, 0.72);
+      background: var(--surface-soft);
     }
     .toggle-pill[aria-pressed="true"] {
       border-color: var(--accent);
@@ -928,10 +950,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
     .board-shell {
       min-height: 0;
+      min-width: 0;
       display: grid;
       grid-template-rows: auto minmax(0, 1fr);
       gap: 12px;
-      padding: 14px 18px 96px;
+      padding: 12px 14px 88px;
       overflow: hidden;
     }
     .live-lane {
@@ -943,7 +966,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       border: 1px dashed var(--line);
       border-radius: 10px;
       color: var(--muted);
-      background: rgba(10, 48, 44, 0.42);
+      background: rgba(12, 24, 19, 0.46);
       padding: 8px 12px;
     }
     .live-lane strong {
@@ -954,28 +977,41 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
     .kanban-board {
       min-height: 0;
+      min-width: 0;
       display: grid;
-      grid-template-columns: repeat(6, minmax(245px, 1fr)) minmax(52px, 64px);
+      grid-template-columns:
+        minmax(190px, 1.08fr)
+        minmax(186px, 1fr)
+        minmax(186px, 1fr)
+        minmax(190px, 1fr)
+        minmax(190px, 1fr)
+        minmax(186px, 0.96fr)
+        44px;
       gap: 12px;
-      overflow-x: auto;
+      overflow-x: hidden;
       overflow-y: hidden;
       align-items: stretch;
       padding-bottom: 8px;
     }
+    .kanban-board[data-done-expanded="true"] {
+      grid-template-columns: repeat(7, minmax(220px, 1fr));
+      overflow-x: auto;
+    }
     .lane {
       min-height: 0;
+      min-width: 0;
       display: grid;
       grid-template-rows: auto minmax(0, 1fr);
       border: 1px solid rgba(77, 118, 111, 0.5);
       border-radius: 10px;
-      background: rgba(2, 15, 13, 0.66);
+      background: rgba(4, 12, 10, 0.74);
       overflow: hidden;
       --lane-accent: var(--muted);
     }
     .lane[data-lane="attention"] { --lane-accent: var(--bad); }
-    .lane[data-lane="codex"] { --lane-accent: #a99bff; }
+    .lane[data-lane="codex"] { --lane-accent: var(--violet); }
     .lane[data-lane="hermes"],
-    .lane[data-lane="deploy"] { --lane-accent: #64d2ff; }
+    .lane[data-lane="deploy"] { --lane-accent: var(--cyan); }
     .lane[data-lane="operator"] { --lane-accent: var(--warn); }
     .lane[data-lane="queue"] { --lane-accent: var(--ok); }
     .lane[data-lane="done"] { --lane-accent: #6da58e; }
@@ -984,11 +1020,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       align-items: center;
       justify-content: space-between;
       gap: 8px;
+      min-width: 0;
       min-height: 44px;
-      border-bottom: 1px solid rgba(77, 118, 111, 0.44);
+      border-bottom: 1px solid var(--line-soft);
       border-top: 2px solid var(--lane-accent);
       padding: 10px 12px;
-      background: rgba(10, 48, 44, 0.68);
+      background: rgba(12, 24, 19, 0.84);
     }
     .lane-title {
       display: flex;
@@ -996,6 +1033,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       gap: 8px;
       font-weight: 800;
       min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .lane-title::before {
       content: "";
@@ -1014,6 +1054,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
     .lane-body {
       min-height: 0;
+      min-width: 0;
       overflow-y: auto;
       display: grid;
       align-content: start;
@@ -1037,11 +1078,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       position: relative;
       display: grid;
       gap: 8px;
+      min-width: 0;
       border: 1px solid var(--line);
       border-left: 3px solid var(--lane-accent);
       border-radius: 8px;
-      background: rgba(10, 48, 44, 0.9);
-      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+      background: var(--surface-strong);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
       padding: 10px;
       cursor: pointer;
       text-align: left;
@@ -1063,6 +1105,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       align-items: center;
       justify-content: space-between;
       gap: 8px;
+      min-width: 0;
+    }
+    .card-head > *,
+    .card-foot > *,
+    .card-meta-row > * {
       min-width: 0;
     }
     .card-title {
@@ -1097,7 +1144,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       background: rgba(167, 181, 170, 0.28);
     }
     .mini-step[data-state="done"] { background: var(--ok); }
-    .mini-step[data-state="active"] { background: #64d2ff; }
+    .mini-step[data-state="active"] { background: var(--cyan); }
     .mini-step[data-state="review"] { background: var(--warn); }
     .mini-step[data-state="blocked"] { background: var(--bad); }
     .card-actions {
@@ -1106,13 +1153,39 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       gap: 6px;
       justify-content: flex-end;
     }
+    .done-rail {
+      min-width: 44px;
+      width: 44px;
+      cursor: pointer;
+      border-style: dashed;
+      background: rgba(2, 15, 13, 0.5);
+    }
+    .done-rail .lane-head {
+      min-height: 100%;
+      height: 100%;
+      justify-content: center;
+      padding: 8px 4px;
+      border-top-width: 0;
+      border-left: 2px solid var(--lane-accent);
+    }
+    .done-rail .lane-title {
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      gap: 8px;
+      overflow: visible;
+    }
+    .done-rail .lane-title::before,
+    .done-rail .lane-body,
+    .done-rail .lane-subtitle {
+      display: none;
+    }
     .soft-button {
       min-height: 28px;
       padding: 0 9px;
       border-radius: 6px;
       font-size: 0.78rem;
       color: var(--text);
-      background: rgba(255, 255, 255, 0.04);
+      background: rgba(255, 255, 255, 0.035);
     }
     .soft-button[data-action="primary"] {
       border-color: var(--lane-accent);
@@ -1122,12 +1195,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .drawer {
       position: fixed;
       inset: 0 0 0 auto;
-      width: min(640px, 100vw);
+      width: clamp(420px, 31vw, 640px);
       z-index: 20;
       display: grid;
       grid-template-rows: auto minmax(0, 1fr) auto;
       border-left: 1px solid var(--line);
-      background: rgba(4, 29, 26, 0.97);
+      background: rgba(7, 15, 12, 0.985);
       box-shadow: -30px 0 80px rgba(0, 0, 0, 0.46);
       transform: translateX(104%);
       transition: transform 0.2s ease;
@@ -1138,7 +1211,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       gap: 10px;
       border-bottom: 1px solid var(--line);
       padding: 16px 18px;
-      background: rgba(10, 48, 44, 0.74);
+      background: var(--surface-strong);
     }
     .drawer-topline,
     .drawer-links,
@@ -1164,9 +1237,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       padding: 16px 18px 22px;
     }
     .drawer-section {
-      border: 1px solid rgba(77, 118, 111, 0.48);
+      border: 1px solid var(--line-soft);
       border-radius: 8px;
-      background: rgba(10, 48, 44, 0.46);
+      background: rgba(12, 24, 19, 0.62);
       padding: 12px;
     }
     .drawer-section h3 {
@@ -1185,25 +1258,28 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       position: sticky;
       bottom: 0;
       border-top: 1px solid var(--line);
-      background: rgba(4, 29, 26, 0.96);
+      background: rgba(7, 15, 12, 0.97);
       padding: 12px 18px;
     }
     .command-console {
       position: fixed;
-      left: 18px;
-      right: 18px;
-      bottom: 14px;
+      left: 14px;
+      right: 14px;
+      bottom: 10px;
       z-index: 18;
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-columns: minmax(0, 1fr) minmax(240px, auto);
       gap: 10px;
       align-items: end;
       border: 1px solid var(--line);
       border-radius: 12px;
-      background: rgba(4, 29, 26, 0.96);
+      background: rgba(7, 15, 12, 0.97);
       box-shadow: 0 18px 60px rgba(0, 0, 0, 0.34);
       padding: 10px;
       backdrop-filter: blur(14px);
+    }
+    .command-shell.has-selection .command-console {
+      right: calc(clamp(420px, 31vw, 640px) + 18px);
     }
     .console-main {
       display: grid;
@@ -1227,7 +1303,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       min-height: 40px;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: rgba(10, 48, 44, 0.68);
+      background: var(--surface-soft);
       color: var(--text);
       padding: 0 12px;
       outline: none;
@@ -1252,7 +1328,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       padding: 0 10px;
       border-radius: 999px;
       font-size: 0.78rem;
-      background: rgba(10, 48, 44, 0.72);
+      background: var(--surface-soft);
     }
     .hidden { display: none !important; }
     @media (max-width: 760px) {
@@ -1278,7 +1354,25 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       .filter-left,
       .filter-right,
       .suggestions { justify-content: flex-start; overflow-x: auto; }
-      .kanban-board { grid-template-columns: repeat(7, minmax(250px, 82vw)); }
+      .kanban-board,
+      .kanban-board[data-done-expanded="true"] {
+        grid-template-columns: repeat(7, minmax(250px, 82vw));
+        overflow-x: auto;
+      }
+      .done-rail {
+        min-width: 250px;
+        width: auto;
+      }
+      .done-rail .lane-head {
+        justify-content: space-between;
+        border-left: 0;
+        border-top: 2px solid var(--lane-accent);
+      }
+      .done-rail .lane-title {
+        writing-mode: horizontal-tb;
+        transform: none;
+      }
+      .command-shell.has-selection .command-console { right: 14px; }
       .drawer { width: 100vw; }
     }
   </style>
@@ -1370,6 +1464,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     let searchText = "";
     let showDone = false;
     let selectedKey = "";
+    let autoFocusPending = true;
     let latestPipelineItems = [];
     let latestPayload = null;
     let monitorDecisions = loadMonitorDecisions();
@@ -1391,6 +1486,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const interactive = event.target && event.target.closest ? event.target.closest("button,a,input") : null;
       if (card && !interactive) {
         selectedKey = String(card.getAttribute("data-select-card") || "");
+        autoFocusPending = false;
         renderBoard(latestPipelineItems);
         renderDrawer(selectedItem());
         renderCommandContext();
@@ -1399,6 +1495,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const closeDrawer = event.target && event.target.closest ? event.target.closest("[data-close-drawer]") : null;
       if (closeDrawer) {
         selectedKey = "";
+        autoFocusPending = false;
         renderBoard(latestPipelineItems);
         renderDrawer(null);
         renderCommandContext();
@@ -1560,7 +1657,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const target = document.getElementById("owner-lanes");
       if (!target) return;
       const filtered = filterCommandBoardItems(entries);
-      if (selectedKey && !entries.some((item) => boardItemKey(item) === selectedKey)) selectedKey = "";
+      if (selectedKey && !filtered.some((item) => boardItemKey(item) === selectedKey)) selectedKey = "";
+      if (!selectedKey && autoFocusPending) {
+        const focusItem = defaultFocusItem(filtered);
+        if (focusItem) selectedKey = boardItemKey(focusItem);
+      }
+      target.dataset.doneExpanded = String(showDone);
       document.getElementById("monitor-shell")?.classList.toggle("has-selection", Boolean(selectedKey));
       const lanes = boardLaneDefinitions();
       target.innerHTML = lanes
@@ -1621,7 +1723,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function renderDoneStub(entries) {
       const done = entries.filter((item) => boardLaneForItem(item, releaseVerdict(item)).key === "done");
       setText("done-count", String(done.length));
-      return '<button class="lane" data-lane="done" type="button" id="done-stub" aria-label="Show done lane" onclick="document.getElementById(\\'toggle-done\\').click()">' +
+      return '<button class="lane done-rail" data-lane="done" type="button" id="done-stub" aria-label="Show done lane" onclick="document.getElementById(\\'toggle-done\\').click()">' +
         '<div class="lane-head"><div class="lane-title">Done <span class="pill">' + escapeHtml(String(done.length)) + '</span></div></div>' +
         '<div class="lane-body"><div class="lane-empty">click to show release history</div></div>' +
         '</button>';
@@ -1642,6 +1744,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '<div class="card-head"><span class="pill state-pill" data-level="' + escapeAttr(verdict.level) + '">' + escapeHtml(verdict.label) + '</span><span class="card-subtitle">' + escapeHtml(age.label + " " + age.duration) + '</span></div>' +
         '<div class="card-subtitle">' + escapeHtml(item.repo || "unknown repo") + (item.pullRequestNumber ? " #" + escapeHtml(String(item.pullRequestNumber)) : "") + '</div>' +
         '<h3 class="card-title">' + escapeHtml(title.replace(/^.*?#\\d+\\s*/, "")) + '</h3>' +
+        renderGroupBadges(item) +
         renderMiniSteps(stage, verdict) +
         '<p class="card-why">' + escapeHtml(verdict.why) + '</p>' +
         '<div class="card-meta-row"><span class="tags">' + touchedAreas.slice(0, 3).map((value) => '<code>' + escapeHtml(String(value)) + '</code>').join("") + '</span><span class="card-subtitle">' + escapeHtml(testSummaryText(tests)) + '</span></div>' +
@@ -1704,6 +1807,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return prIdentityKey(item) + ":" + String(item.intent || "handoff");
     }
 
+    function defaultFocusItem(entries) {
+      const sorted = [...entries]
+        .filter((item) => boardLaneForItem(item, releaseVerdict(item)).key !== "done")
+        .sort((a, b) => boardSortScore(b) - boardSortScore(a) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+      return sorted[0] || null;
+    }
+
     function selectedItem() {
       if (!selectedKey) return null;
       return latestPipelineItems.find((item) => boardItemKey(item) === selectedKey) || null;
@@ -1764,7 +1874,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '<div class="card-actions">' +
         (prUrl ? '<a class="pill" href="' + escapeAttr(prUrl) + '" target="_blank" rel="noreferrer">Open PR</a>' : "") +
         (workflowRunUrl ? '<a class="pill" href="' + escapeAttr(workflowRunUrl) + '" target="_blank" rel="noreferrer">Workflow Run</a>' : "") +
-        '<button class="soft-button" type="button" data-command-suggestion="handoff monitor details">Re-check with Hermes</button>' +
+        '<button class="soft-button" type="button" data-command-suggestion="handoff monitor details">Ask Hermes</button>' +
         '<button class="soft-button" type="button" data-copy-text="' + escapeAttr(item.correlationId || "") + '">copy correlation</button>' +
         (verdict.level === "needs-review" ? '<button class="soft-button" data-action="primary" type="button" data-monitor-decision="approve" data-decision-key="' + escapeAttr(decisionKeyForItem(item)) + '">Approve locally</button>' : "") +
         '</div></div>';
@@ -2252,9 +2362,17 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function renderGroupBadges(item) {
-      const labels = groupPhaseLabels(item);
+      const labels = groupPhaseBadges(item);
       if (!labels.length) return "";
       return '<div class="phase-badges">' + labels.map((label) => '<span class="pill">' + escapeHtml(label) + '</span>').join("") + '</div>';
+    }
+
+    function groupPhaseBadges(item) {
+      if (!Array.isArray(item.groupItems)) return [];
+      return uniqueStrings(item.groupItems.map((entry) => {
+        const verdict = baseReleaseVerdict(entry);
+        return handoffKindLabel(entry.intent) + " " + verdict.label.toLowerCase();
+      }));
     }
 
     function groupPhaseLabels(item) {
