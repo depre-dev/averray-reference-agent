@@ -488,6 +488,66 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       border-left-color: var(--warn);
       background: var(--warn-bg);
     }
+    .operator-decision {
+      border-left: 4px solid var(--warn);
+    }
+    .operator-brief {
+      display: grid;
+      gap: 10px;
+    }
+    .operator-brief-line {
+      margin: 0;
+      color: var(--text);
+      line-height: 1.42;
+    }
+    .operator-evidence {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .operator-evidence-item {
+      border: 1px solid var(--line-soft);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.025);
+      padding: 8px;
+    }
+    .operator-evidence-label {
+      display: block;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.62rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .operator-evidence-value {
+      display: block;
+      margin-top: 4px;
+      color: var(--text);
+      overflow-wrap: anywhere;
+    }
+    .operator-checklist {
+      display: grid;
+      gap: 7px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .operator-checklist li {
+      display: grid;
+      grid-template-columns: 14px minmax(0, 1fr);
+      gap: 8px;
+      color: var(--text);
+      line-height: 1.35;
+    }
+    .operator-checklist li::before {
+      content: "";
+      width: 10px;
+      height: 10px;
+      margin-top: 4px;
+      border: 1px solid var(--warn);
+      border-radius: 3px;
+      background: rgba(217, 173, 66, 0.1);
+    }
     .fix-request-title {
       margin: 0 0 8px;
       font-weight: 700;
@@ -1345,6 +1405,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       .pr-timeline,
       .fix-request-meta,
       .pipeline-meta,
+      .operator-evidence,
       .pipeline-detail { grid-template-columns: 1fr; }
       dl { grid-template-columns: 1fr; }
       .cmdbar,
@@ -1498,6 +1559,15 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         autoFocusPending = false;
         renderBoard(latestPipelineItems);
         renderDrawer(null);
+        renderCommandContext();
+        return;
+      }
+      const reviewCard = event.target && event.target.closest ? event.target.closest("[data-review-card]") : null;
+      if (reviewCard) {
+        selectedKey = String(reviewCard.getAttribute("data-review-card") || "");
+        autoFocusPending = false;
+        renderBoard(latestPipelineItems);
+        renderDrawer(selectedItem());
         renderCommandContext();
         return;
       }
@@ -1740,13 +1810,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const signals = (item.summary || {}).reviewSignals || {};
       const touchedAreas = Array.isArray(signals.touchedAreas) ? signals.touchedAreas : [];
       const tests = Array.isArray(signals.testSignals) ? signals.testSignals : [];
+      const cardWhy = lane.key === "operator" && verdict.level === "needs-review" ? operatorDecisionShort(item, verdict) : verdict.why;
       return '<article class="handoff-card" data-select-card="' + escapeAttr(key) + '" data-selected="' + escapeAttr(String(selected)) + '">' +
         '<div class="card-head"><span class="pill state-pill" data-level="' + escapeAttr(verdict.level) + '">' + escapeHtml(verdict.label) + '</span><span class="card-subtitle">' + escapeHtml(age.label + " " + age.duration) + '</span></div>' +
         '<div class="card-subtitle">' + escapeHtml(item.repo || "unknown repo") + (item.pullRequestNumber ? " #" + escapeHtml(String(item.pullRequestNumber)) : "") + '</div>' +
         '<h3 class="card-title">' + escapeHtml(title.replace(/^.*?#\\d+\\s*/, "")) + '</h3>' +
         renderGroupBadges(item) +
         renderMiniSteps(stage, verdict) +
-        '<p class="card-why">' + escapeHtml(verdict.why) + '</p>' +
+        '<p class="card-why">' + escapeHtml(cardWhy) + '</p>' +
         '<div class="card-meta-row"><span class="tags">' + touchedAreas.slice(0, 3).map((value) => '<code>' + escapeHtml(String(value)) + '</code>').join("") + '</span><span class="card-subtitle">' + escapeHtml(testSummaryText(tests)) + '</span></div>' +
         '<div class="card-foot"><span class="card-next">Next <strong>' + escapeHtml(action.owner) + '</strong></span><span class="card-actions">' + primaryActionButton(item, verdict, action, lane) + '</span></div>' +
         '</article>';
@@ -1762,7 +1833,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function primaryActionButton(item, verdict, action, lane) {
       if (verdict.level === "block") return '<button class="soft-button" data-action="primary" type="button" data-command-suggestion="merge steward details">Codex Fix -></button>';
-      if (verdict.level === "needs-review") return '<button class="soft-button" data-action="primary" type="button" data-monitor-decision="approve" data-decision-key="' + escapeAttr(decisionKeyForItem(item)) + '">Approve</button>';
+      if (verdict.level === "needs-review") return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '">Review</button>';
       if (verdict.level === "running") return '<button class="soft-button" data-action="primary" type="button" data-command-suggestion="handoff monitor details">Ask Hermes</button>';
       if (verdict.level === "pass" && lane.key === "queue") return '<button class="soft-button" data-action="primary" type="button" data-command-suggestion="merge steward details">Queue Merge</button>';
       return '<button class="soft-button" type="button" data-command-suggestion="handoff monitor details">Inspect</button>';
@@ -1882,16 +1953,116 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function operatorChecklistSection(item, verdict, action) {
       if (verdict.level !== "needs-review") return "";
+      const brief = operatorDecisionBrief(item, verdict, action);
+      return '<section class="drawer-section operator-decision"><h3>Operator decision</h3>' +
+        '<div class="operator-brief">' +
+        '<p class="operator-brief-line">' + escapeHtml(brief.summary) + '</p>' +
+        '<div class="operator-evidence">' + brief.evidence.map((entry) => {
+          return '<div class="operator-evidence-item"><span class="operator-evidence-label">' + escapeHtml(entry.label) + '</span><span class="operator-evidence-value">' + entry.value + '</span></div>';
+        }).join("") + '</div>' +
+        '<div><h3>Approve only if</h3><ul class="operator-checklist">' + brief.approveIf.map((value) => '<li>' + escapeHtml(value) + '</li>').join("") + '</ul></div>' +
+        '<div><h3>Send back to Codex if</h3><ul class="operator-checklist">' + brief.sendBackIf.map((value) => '<li>' + escapeHtml(value) + '</li>').join("") + '</ul></div>' +
+        '</div></section>';
+    }
+
+    function operatorDecisionShort(item, verdict) {
+      return operatorDecisionBrief(item, verdict, nextPipelineAction(item, verdict)).summary;
+    }
+
+    function operatorDecisionBrief(item, verdict, action) {
       const summary = item.summary || {};
+      const signals = summary.reviewSignals || {};
       const request = buildFixRequest(item, summary, verdict, action);
-      return '<section class="drawer-section"><h3>Operator sign-off</h3>' +
-        '<p>Hermes has already checked CI, touched areas, test signals, rollout notes, and PR state. Your job is not line-by-line code review; decide whether the project intent, architecture, and release risk are acceptable.</p>' +
-        '<dl class="pipeline-detail">' +
-        row("Decision needed", escapeHtml(request.reason)) +
-        row("Review surfaces", request.surfaces.length ? chips(request.surfaces) : "n/a") +
-        row("Ask Codex if", escapeHtml("the intent is wrong, rollout risk is unclear, or the architecture should change")) +
-        row("Proceed if", escapeHtml("the change matches the project direction and the recorded checks are enough for this risk")) +
-        '</dl></section>';
+      const reviewReasons = Array.isArray(summary.reviewReasons) ? summary.reviewReasons : [];
+      const touchedAreas = Array.isArray(signals.touchedAreas) ? signals.touchedAreas.map(String).filter(Boolean) : [];
+      const surfaces = request.surfaces.length ? request.surfaces : touchedAreas;
+      const testSignals = Array.isArray(signals.testSignals) ? signals.testSignals.map(String).filter(Boolean) : [];
+      const missingTests = Array.isArray(signals.missingTestSignals) ? signals.missingTestSignals.map(String).filter(Boolean) : [];
+      const rollout = signals.rolloutNotesRequired === true
+        ? signals.rolloutNotesPresent === true ? "present" : "missing"
+        : "not required";
+      const reasonCodes = reviewReasons.map((reason) => String((reason && reason.code) || "")).filter(Boolean);
+      return {
+        summary: operatorDecisionSummary(request, surfaces, reasonCodes),
+        evidence: [
+          { label: "Hermes checked", value: escapeHtml("CI, PR state, touched areas, test signals, rollout notes") },
+          { label: "Review gate", value: escapeHtml(request.reason) },
+          { label: "Touched", value: surfaces.length ? chips(surfaces.slice(0, 8)) : escapeHtml("n/a") },
+          { label: "Tests", value: escapeHtml(operatorTestEvidence(testSignals, missingTests)) },
+          { label: "Rollout notes", value: escapeHtml(rollout) },
+          { label: "Correlation", value: '<code>' + escapeHtml(item.correlationId || "unknown") + '</code>' },
+        ],
+        approveIf: operatorApproveChecklist(surfaces, reasonCodes, missingTests),
+        sendBackIf: operatorSendBackChecklist(surfaces, reasonCodes, missingTests, rollout),
+      };
+    }
+
+    function operatorDecisionSummary(request, surfaces, reasonCodes) {
+      const surfaceText = surfaces.length ? surfaces.join(", ") : "the gated surface";
+      if (hasSurfaceSignal(surfaces, reasonCodes, ["blockchain", "xcm", "settlement", "escrow", "claim", "submit"])) {
+        return "Hermes has already done the code-level pre-check. Operator decision: confirm the blockchain/XCM settlement intent, metadata semantics, and rollout risk for " + surfaceText + ".";
+      }
+      if (hasSurfaceSignal(surfaces, reasonCodes, ["contract", "solidity", "router", "migration"])) {
+        return "Hermes has already done the code-level pre-check. Operator decision: confirm the contract or schema architecture is intentional and acceptable for release.";
+      }
+      if (hasSurfaceSignal(surfaces, reasonCodes, ["secret", "deploy", "ops", "workflow", "infra"])) {
+        return "Hermes has already done the code-level pre-check. Operator decision: confirm the operational change, secret boundary, and rollback story are acceptable.";
+      }
+      if (hasSurfaceSignal(surfaces, reasonCodes, ["lockfile", "dependency", "deps"])) {
+        return "Hermes has already done the code-level pre-check. Operator decision: confirm this dependency or lockfile change is expected and low-risk.";
+      }
+      return "Hermes has already done the code-level pre-check. Operator decision: confirm project intent, architecture direction, and release risk; do not re-review the implementation line by line.";
+    }
+
+    function operatorApproveChecklist(surfaces, reasonCodes, missingTests) {
+      const items = [
+        "The PR intent matches the project direction and no architecture question remains open.",
+        "Hermes and CI evidence are enough for this risk level; you are not being asked for line-by-line code review.",
+      ];
+      if (hasSurfaceSignal(surfaces, reasonCodes, ["blockchain", "xcm", "settlement", "escrow", "claim", "submit"])) {
+        items.push("Request metadata preservation, claim/submit routing, settlement IDs, and proof semantics match the intended platform contract.");
+        items.push("Rollback or retry notes are acceptable for stuck settlement, chain/indexer mismatch, or failed submit paths.");
+      } else if (hasSurfaceSignal(surfaces, reasonCodes, ["contract", "solidity", "router", "migration"])) {
+        items.push("The contract/schema change is intentionally part of the release, with compatible callers and migration expectations.");
+      } else if (hasSurfaceSignal(surfaces, reasonCodes, ["secret", "deploy", "ops", "workflow", "infra"])) {
+        items.push("The operational boundary is right: no plaintext secrets, no accidental mutation path, and rollback/deploy notes are clear.");
+      } else if (hasSurfaceSignal(surfaces, reasonCodes, ["lockfile", "dependency", "deps"])) {
+        items.push("The dependency bump is expected, scoped, and compatible with the touched package area.");
+      }
+      if (missingTests.length) {
+        items.push("Missing test signals are acceptable for this PR, or the PR explains why the existing coverage is enough.");
+      } else {
+        items.push("Recorded tests cover the touched surface well enough for merge.");
+      }
+      return items;
+    }
+
+    function operatorSendBackChecklist(surfaces, reasonCodes, missingTests, rollout) {
+      const items = [
+        "The intended product behavior or architecture is unclear, surprising, or not what you want shipped.",
+        "Hermes evidence is missing, stale, contradictory, or does not match the PR risk.",
+      ];
+      if (hasSurfaceSignal(surfaces, reasonCodes, ["blockchain", "xcm", "settlement", "escrow", "claim", "submit"])) {
+        items.push("Codex did not clearly preserve request metadata, settlement IDs, claim/submit routing, or failure semantics.");
+      }
+      if (rollout === "missing") {
+        items.push("Rollout or rollback notes are required but missing.");
+      }
+      if (missingTests.length) {
+        items.push("Missing tests should be added or explicitly justified before you sign off.");
+      }
+      return items;
+    }
+
+    function operatorTestEvidence(testSignals, missingTests) {
+      const seen = testSignals.length ? testSignals.length + " recorded" : "none recorded";
+      const missing = missingTests.length ? ", " + missingTests.length + " missing" : ", none missing";
+      return seen + missing;
+    }
+
+    function hasSurfaceSignal(surfaces, reasonCodes, needles) {
+      const haystack = surfaces.concat(reasonCodes).join(" ").toLowerCase();
+      return needles.some((needle) => haystack.includes(needle));
     }
 
     function renderCommandContext() {
@@ -2254,7 +2425,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         ? fixRequest.checks.map(String).filter(Boolean)
         : missingTests.length ? missingTests : testSignals.slice(0, 5);
       return {
-        title: fixRequest.title || (verdict.level === "block" ? "Fix request for Codex" : "Operator sign-off request"),
+        title: fixRequest.title || (verdict.level === "block" ? "Fix request for Codex" : "Operator decision request"),
         owner: fixRequest.owner || action.owner,
         instruction: fixRequest.instruction || fixRequestInstruction(verdict, action),
         reason,
