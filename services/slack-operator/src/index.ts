@@ -125,7 +125,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       monitor: {
         enabled: monitorConfig.enabled,
         tokenProtected: Boolean(monitorConfig.token),
-        paths: monitorConfig.enabled ? ["/monitor", "/monitor/events"] : [],
+        paths: monitorConfig.enabled ? ["/monitor", "/monitor/events", "/monitor/stream"] : [],
       },
     });
     return;
@@ -135,7 +135,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
     writeRedirect(response, "/monitor");
     return;
   }
-  if (request.method === "GET" && (url.pathname === "/monitor" || url.pathname === "/monitor/events")) {
+  if (request.method === "GET" && (url.pathname === "/monitor" || url.pathname === "/monitor/events" || url.pathname === "/monitor/stream")) {
     if (!monitorConfig.enabled) {
       writeJson(response, 404, { error: "monitor_disabled" });
       return;
@@ -148,12 +148,11 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       writeHtml(response, 200, renderMonitorHtml());
       return;
     }
-    const monitor = await getHandoffMonitor({
-      correlationId: url.searchParams.get("correlationId") ?? undefined,
-      limit: parseOptionalInteger(url.searchParams.get("limit")),
-      activeWindowMinutes: parseOptionalInteger(url.searchParams.get("activeWindowMinutes")),
-    });
-    writeJson(response, 200, await enrichMonitorWithGithubPrState(monitor));
+    if (url.pathname === "/monitor/stream") {
+      await writeMonitorStream(request, response, url);
+      return;
+    }
+    writeJson(response, 200, await loadMonitorSnapshot(url));
     return;
   }
   if (!enabled) {
@@ -590,6 +589,65 @@ function writeHtml(response: http.ServerResponse, status: number, html: string) 
 function writeRedirect(response: http.ServerResponse, location: string) {
   response.writeHead(302, { location });
   response.end();
+}
+
+async function loadMonitorSnapshot(url: URL): Promise<unknown> {
+  const monitor = await getHandoffMonitor({
+    correlationId: url.searchParams.get("correlationId") ?? undefined,
+    limit: parseOptionalInteger(url.searchParams.get("limit")),
+    activeWindowMinutes: parseOptionalInteger(url.searchParams.get("activeWindowMinutes")),
+  });
+  return enrichMonitorWithGithubPrState(monitor);
+}
+
+async function writeMonitorStream(
+  request: http.IncomingMessage,
+  response: http.ServerResponse,
+  url: URL
+): Promise<void> {
+  const intervalMs = Math.max(1_000, parseOptionalInteger(url.searchParams.get("intervalMs")) ?? 5_000);
+  let closed = false;
+  let inFlight = false;
+  let timer: ReturnType<typeof setInterval> | undefined;
+
+  response.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+    "x-accel-buffering": "no",
+  });
+  response.write(`retry: ${intervalMs}\n\n`);
+
+  const send = async () => {
+    if (closed || inFlight) return;
+    inFlight = true;
+    try {
+      writeSseEvent(response, "monitor", await loadMonitorSnapshot(url));
+    } catch (error) {
+      writeSseEvent(response, "error", {
+        error: "monitor_snapshot_failed",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      inFlight = false;
+    }
+  };
+
+  request.on("close", () => {
+    closed = true;
+    if (timer) clearInterval(timer);
+  });
+
+  await send();
+  if (!closed) timer = setInterval(() => void send(), intervalMs);
+}
+
+function writeSseEvent(response: http.ServerResponse, event: string, payload: unknown) {
+  const data = JSON.stringify(payload)
+    .split(/\r?\n/)
+    .map((line) => `data: ${line}`)
+    .join("\n");
+  response.write(`event: ${event}\n${data}\n\n`);
 }
 
 function headerValue(value: string | string[] | undefined): string | undefined {

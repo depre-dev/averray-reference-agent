@@ -21,9 +21,10 @@ export function isMonitorAuthorized(
   return url.searchParams.get("token") === config.token;
 }
 
-export function renderMonitorHtml(options: { title?: string; eventsPath?: string } = {}): string {
+export function renderMonitorHtml(options: { title?: string; eventsPath?: string; streamPath?: string } = {}): string {
   const title = escapeHtml(options.title ?? "Hermes Handoff Monitor");
   const eventsPath = JSON.stringify(options.eventsPath ?? "/monitor/events");
+  const streamPath = JSON.stringify(options.streamPath ?? "/monitor/stream");
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -72,6 +73,28 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       letter-spacing: 0;
     }
     p { color: var(--muted); margin: 0; }
+    .live-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-left: 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 2px 8px;
+      color: var(--muted);
+      font-size: 0.78rem;
+      white-space: nowrap;
+    }
+    .live-status::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--warn);
+    }
+    .live-status[data-state="live"]::before { background: var(--ok); }
+    .live-status[data-state="polling"]::before { background: #64d2ff; }
+    .live-status[data-state="error"]::before { background: var(--bad); }
     button {
       min-height: 38px;
       border: 1px solid var(--line);
@@ -698,7 +721,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     <header>
       <div>
         <h1>${title}</h1>
-        <p id="subtitle">Live private view of agent-to-agent handoffs.</p>
+        <p id="subtitle">Live private view of agent-to-agent handoffs.<span id="live-status" class="live-status" data-state="connecting">connecting</span></p>
       </div>
       <button id="refresh" type="button">Refresh</button>
     </header>
@@ -741,13 +764,17 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
   </main>
   <script>
     const eventsPath = ${eventsPath};
+    const streamPath = ${streamPath};
     const token = new URLSearchParams(location.search).get("token");
-    const withToken = buildEventsUrl();
+    const withToken = buildMonitorUrl(eventsPath);
+    const streamUrl = buildMonitorUrl(streamPath);
     const decisionStorageKey = "averray-monitor-human-decisions:v1";
     let pipelineFilter = "all";
     let latestPipelineItems = [];
     let latestPayload = null;
     let monitorDecisions = loadMonitorDecisions();
+    let pollTimer = null;
+    let streamSource = null;
 
     document.getElementById("refresh").addEventListener("click", () => load());
     document.addEventListener("click", (event) => {
@@ -768,7 +795,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       });
     });
     load();
-    setInterval(load, 5000);
+    startLiveUpdates();
 
     async function load() {
       try {
@@ -776,8 +803,46 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         if (!response.ok) throw new Error("HTTP " + response.status);
         render(await response.json());
       } catch (error) {
+        updateLiveStatus("error", "update failed");
         document.getElementById("recent").innerHTML = '<div class="empty error">Monitor unavailable: ' + escapeHtml(String(error.message || error)) + '</div>';
       }
+    }
+
+    function startLiveUpdates() {
+      if ("EventSource" in window) {
+        connectMonitorStream();
+        return;
+      }
+      startPolling("polling 5s");
+    }
+
+    function connectMonitorStream() {
+      updateLiveStatus("connecting", "connecting");
+      streamSource = new EventSource(streamUrl);
+      streamSource.addEventListener("open", () => updateLiveStatus("live", "live"));
+      streamSource.addEventListener("monitor", (event) => {
+        updateLiveStatus("live", "live");
+        render(JSON.parse(event.data));
+      });
+      streamSource.addEventListener("error", () => {
+        updateLiveStatus("error", "reconnecting");
+        if (streamSource) streamSource.close();
+        streamSource = null;
+        startPolling("polling fallback 5s");
+      });
+    }
+
+    function startPolling(label) {
+      updateLiveStatus("polling", label || "polling 5s");
+      if (pollTimer) return;
+      pollTimer = setInterval(load, 5000);
+    }
+
+    function updateLiveStatus(state, label) {
+      const target = document.getElementById("live-status");
+      if (!target) return;
+      target.dataset.state = state;
+      target.textContent = label;
     }
 
     function render(payload) {
@@ -1365,14 +1430,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '</dl></article>';
     }
 
-    function buildEventsUrl() {
-      const separator = eventsPath.includes("?") ? "&" : "?";
+    function buildMonitorUrl(path) {
+      const separator = path.includes("?") ? "&" : "?";
       const params = new URLSearchParams({
         limit: "50",
         activeWindowMinutes: "240"
       });
       if (token) params.set("token", token);
-      return eventsPath + separator + params.toString();
+      return path + separator + params.toString();
     }
 
     function needsAttention(item) {
