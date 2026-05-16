@@ -9,7 +9,7 @@ export function getCodexHandoffProtocol() {
     document: "docs/CODEX_HANDOFF_PROTOCOL.md",
     roles: {
       builder: "Codex edits code, works in branches/worktrees, opens PRs, and fixes failures.",
-      reviewerOperator: "Hermes reviews PR risk, runs read-only checks, reports to Slack/monitor/PR comments, and proposes actions without executing merge/deploy.",
+      reviewerOperator: "Hermes reviews PR risk, runs read-only checks, reports to PR comments/Slack/monitor, and proposes actions without broad merge/deploy execution.",
       approver: "Human owner approves merge, deploy, override, rollback, or secret rotation.",
     },
     flow: [
@@ -17,7 +17,7 @@ export function getCodexHandoffProtocol() {
       "GitHub CI runs.",
       "GitHub Actions calls averray_invoke_agent_task with intent=pr_code_review.",
       "GitHub Actions calls averray_invoke_agent_task with intent=pr_handoff and requested read-only testbed cases.",
-      "Hermes records handoff events and reports through PR comment, Slack, and monitor.",
+      "Hermes records handoff events and, when enabled, upserts one PR verdict comment alongside Slack and monitor reports.",
       "Codex responds to PASS / HUMAN REVIEW / BLOCK.",
       "After merge/deploy, Hermes runs post_deploy_verification.",
     ],
@@ -92,6 +92,7 @@ export function getCodexHandoffProtocol() {
     safety: {
       readOnly: true,
       mutates: false,
+      optionalPrCommentMutatesGithub: true,
       secretsIncluded: false,
       githubMutated: false,
       mergePerformed: false,

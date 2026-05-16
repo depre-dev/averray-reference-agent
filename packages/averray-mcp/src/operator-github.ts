@@ -270,6 +270,30 @@ export interface GithubMergeStewardApproval {
   recommendations: string[];
 }
 
+export interface GithubPullRequestCommentInput {
+  repo?: string;
+  pullRequestNumber?: number;
+  body: string;
+  marker?: string;
+  env?: NodeJS.ProcessEnv;
+  fetchFn?: typeof fetch;
+}
+
+export interface GithubPullRequestCommentResult {
+  schemaVersion: 1;
+  generatedAt: string;
+  mutatesGithub: boolean;
+  enabled: boolean;
+  configured: boolean;
+  authConfigured: boolean;
+  status: "posted" | "updated" | "skipped" | "failed";
+  repo?: string;
+  pullRequestNumber?: number;
+  commentUrl?: string;
+  reason?: string;
+  warnings: GithubWarning[];
+}
+
 export type GithubPullRequestTouchedArea =
   | "frontend"
   | "backend"
@@ -410,6 +434,12 @@ interface GithubApiIssue {
   state?: string;
   labels?: Array<{ name?: string }>;
   pull_request?: unknown;
+}
+
+interface GithubApiIssueComment {
+  id?: number;
+  body?: string;
+  html_url?: string;
 }
 
 interface GithubApiWorkflowRun {
@@ -1050,6 +1080,156 @@ export async function approveGithubMergeStewardCandidate(
       recommendations: ["Do not retry blindly. Check the GitHub merge error, branch protection, and merge queue state first."],
       status: "failed",
     });
+  }
+}
+
+export async function upsertGithubPullRequestComment(
+  options: GithubPullRequestCommentInput
+): Promise<GithubPullRequestCommentResult> {
+  const env = options.env ?? process.env;
+  const generatedAt = new Date().toISOString();
+  const enabled = isTruthy(env.GITHUB_PR_HANDOFF_COMMENTS_ENABLED);
+  const repo = normalizeRepo(options.repo ?? "");
+  const pullRequestNumber = options.pullRequestNumber;
+  const marker = options.marker ?? "<!-- averray-hermes-pr-handoff -->";
+  const warnings: GithubWarning[] = [];
+
+  if (!enabled) {
+    return {
+      schemaVersion: 1,
+      generatedAt,
+      mutatesGithub: false,
+      enabled,
+      configured: Boolean(repo && pullRequestNumber),
+      authConfigured: buildGithubTokenConfig(env).hasAnyToken,
+      status: "skipped",
+      ...(repo ? { repo } : {}),
+      ...(pullRequestNumber ? { pullRequestNumber } : {}),
+      reason: "pr_comments_disabled",
+      warnings,
+    };
+  }
+
+  if (!repo || !pullRequestNumber) {
+    warnings.push({
+      severity: "high",
+      code: "github_pr_comment_target_missing",
+      message: "Cannot post a PR comment without repo and pullRequestNumber.",
+    });
+    return {
+      schemaVersion: 1,
+      generatedAt,
+      mutatesGithub: false,
+      enabled,
+      configured: false,
+      authConfigured: buildGithubTokenConfig(env).hasAnyToken,
+      status: "skipped",
+      ...(repo ? { repo } : {}),
+      ...(pullRequestNumber ? { pullRequestNumber } : {}),
+      reason: "target_missing",
+      warnings,
+    };
+  }
+
+  const tokenConfig = buildGithubTokenConfig(env);
+  const token = resolveGithubTokenForRepo(repo, tokenConfig);
+  if (!token) {
+    warnings.push({
+      severity: "high",
+      code: "github_repo_token_missing",
+      repo,
+      message: `No GitHub token is configured for ${repo}.`,
+    });
+    return {
+      schemaVersion: 1,
+      generatedAt,
+      mutatesGithub: false,
+      enabled,
+      configured: true,
+      authConfigured: tokenConfig.hasAnyToken,
+      status: "failed",
+      repo,
+      pullRequestNumber,
+      reason: "github_repo_token_missing",
+      warnings,
+    };
+  }
+
+  const fetchFn = options.fetchFn ?? fetch;
+  const baseUrl = (env.GITHUB_API_BASE_URL ?? "https://api.github.com").replace(/\/+$/g, "");
+  const repoPath = encodeRepoPath(repo);
+  const body = options.body.includes(marker) ? options.body : `${marker}\n${options.body}`;
+
+  try {
+    const comments = await githubGet<GithubApiIssueComment[]>(
+      `${baseUrl}/repos/${repoPath}/issues/${pullRequestNumber}/comments?per_page=100`,
+      token,
+      fetchFn
+    );
+    const existing = comments.find((comment) => comment.body?.includes(marker) && comment.id);
+    if (existing?.id) {
+      const updated = await githubRequest<GithubApiIssueComment>({
+        url: `${baseUrl}/repos/${repoPath}/issues/comments/${existing.id}`,
+        token,
+        fetchFn,
+        method: "PATCH",
+        body: { body },
+      });
+      return {
+        schemaVersion: 1,
+        generatedAt,
+        mutatesGithub: true,
+        enabled,
+        configured: true,
+        authConfigured: true,
+        status: "updated",
+        repo,
+        pullRequestNumber,
+        ...(updated.html_url ? { commentUrl: updated.html_url } : {}),
+        warnings,
+      };
+    }
+
+    const created = await githubRequest<GithubApiIssueComment>({
+      url: `${baseUrl}/repos/${repoPath}/issues/${pullRequestNumber}/comments`,
+      token,
+      fetchFn,
+      method: "POST",
+      body: { body },
+    });
+    return {
+      schemaVersion: 1,
+      generatedAt,
+      mutatesGithub: true,
+      enabled,
+      configured: true,
+      authConfigured: true,
+      status: "posted",
+      repo,
+      pullRequestNumber,
+      ...(created.html_url ? { commentUrl: created.html_url } : {}),
+      warnings,
+    };
+  } catch (error) {
+    warnings.push({
+      severity: "high",
+      code: "github_pr_comment_failed",
+      repo,
+      message: error instanceof Error ? error.message : `Failed to comment on ${repo}#${pullRequestNumber}.`,
+    });
+    return {
+      schemaVersion: 1,
+      generatedAt,
+      mutatesGithub: false,
+      enabled,
+      configured: true,
+      authConfigured: true,
+      status: "failed",
+      repo,
+      pullRequestNumber,
+      reason: "github_pr_comment_failed",
+      warnings,
+    };
   }
 }
 

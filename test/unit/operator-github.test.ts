@@ -6,6 +6,7 @@ import {
   getGithubOperatorBrief,
   getGithubOperatorStatus,
   getGithubPullRequestReview,
+  upsertGithubPullRequestComment,
 } from "../../packages/averray-mcp/src/operator-github.js";
 
 describe("github operator status", () => {
@@ -670,6 +671,53 @@ describe("github operator status", () => {
         merge_method: "squash",
         commit_title: "Bump next from 15.5.15 to 15.5.18 (#191)",
       },
+    });
+  });
+
+  it("updates an existing Hermes PR handoff comment by marker", async () => {
+    const requests: Array<{ url: string; method?: string; body?: unknown }> = [];
+    const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
+      const text = String(url);
+      requests.push({ url: text, method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (text.endsWith("/repos/averray-agent/agent/issues/191/comments?per_page=100")) {
+        return jsonResponse([
+          {
+            id: 77,
+            body: "<!-- averray-hermes-pr-handoff -->\nold verdict",
+            html_url: "https://github.com/averray-agent/agent/pull/191#issuecomment-77",
+          },
+        ]);
+      }
+      if (text.endsWith("/repos/averray-agent/agent/issues/comments/77")) {
+        return jsonResponse({
+          id: 77,
+          body: "<!-- averray-hermes-pr-handoff -->\nnew verdict",
+          html_url: "https://github.com/averray-agent/agent/pull/191#issuecomment-77",
+        });
+      }
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+
+    const result = await upsertGithubPullRequestComment({
+      repo: "averray-agent/agent",
+      pullRequestNumber: 191,
+      body: "new verdict",
+      env: {
+        GITHUB_TOKEN: "ghp_comment",
+        GITHUB_PR_HANDOFF_COMMENTS_ENABLED: "1",
+      },
+      fetchFn,
+    });
+
+    expect(result).toMatchObject({
+      mutatesGithub: true,
+      enabled: true,
+      status: "updated",
+      commentUrl: "https://github.com/averray-agent/agent/pull/191#issuecomment-77",
+    });
+    expect(requests.map((request) => request.method)).toEqual(["GET", "PATCH"]);
+    expect(requests[1]?.body).toMatchObject({
+      body: expect.stringContaining("<!-- averray-hermes-pr-handoff -->"),
     });
   });
 

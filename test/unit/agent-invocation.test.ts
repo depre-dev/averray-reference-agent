@@ -420,6 +420,62 @@ describe("agent invocation hook", () => {
     ]));
   });
 
+  it("posts an idempotent PR handoff comment when enabled", async () => {
+    const calls: string[] = [];
+    const commentRequests: Array<{ method?: string; body?: string }> = [];
+    const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
+      const text = String(url);
+      if (text.includes("/repos/averray-agent/agent/issues/185/comments")) {
+        commentRequests.push({ method: init?.method ?? "GET", body: init?.body ? String(init.body) : undefined });
+        if (init?.method === "POST") {
+          return jsonResponse({ id: 10, html_url: "https://github.com/averray-agent/agent/pull/185#issuecomment-10" });
+        }
+        return jsonResponse([]);
+      }
+      return githubFetch()(url, init);
+    }) as typeof fetch;
+
+    const result = await invokeAgentTask(
+      {
+        requester: "github-actions",
+        intent: "pr_handoff",
+        repo: "averray-agent/agent",
+        pullRequestNumber: 185,
+        testCaseIds: ["TBE2E-004"],
+        correlationId: "handoff-comment-123",
+      },
+      deps(calls, fetchFn, undefined, undefined, {
+        GITHUB_TOKEN: "ghp_comment",
+        GITHUB_PR_HANDOFF_COMMENTS_ENABLED: "1",
+      })
+    );
+
+    expect(result).toMatchObject({
+      status: "completed",
+      safety: {
+        wouldMutate: true,
+      },
+      result: {
+        kind: "agent_pr_handoff",
+        safety: {
+          githubMutated: true,
+          mergePerformed: false,
+        },
+        prComment: {
+          status: "posted",
+          mutatesGithub: true,
+          commentUrl: "https://github.com/averray-agent/agent/pull/185#issuecomment-10",
+        },
+      },
+    });
+    expect(commentRequests.map((request) => request.method)).toEqual(["GET", "POST"]);
+    const postedBody = JSON.parse(commentRequests[1]?.body ?? "{}").body as string;
+    expect(postedBody).toContain("<!-- averray-hermes-pr-handoff -->");
+    expect(postedBody).toContain("**Verdict:** PASS");
+    expect(postedBody).toContain("Correlation: `handoff-comment-123`");
+    expect(postedBody).toContain("Hermes did not merge, deploy, rerun CI, or edit Wikipedia");
+  });
+
   it("holds PR handoff and skips tests when GitHub checks are not merge-ready", async () => {
     const calls: string[] = [];
     const result = await invokeAgentTask(
@@ -517,10 +573,11 @@ function deps(
   calls: string[],
   githubFetchFn?: typeof fetch,
   events?: HandoffEventInput[],
-  healthFetchFn?: typeof fetch
+  healthFetchFn?: typeof fetch,
+  githubEnv: NodeJS.ProcessEnv = { GITHUB_TOKEN: "ghp_readonly" }
 ) {
   return {
-    githubEnv: { GITHUB_TOKEN: "ghp_readonly" },
+    githubEnv,
     ...(githubFetchFn ? { githubFetchFn } : {}),
     ...(healthFetchFn ? { healthFetchFn } : {}),
     handoffEventRecorder: async (event: HandoffEventInput) => { events?.push(event); },
