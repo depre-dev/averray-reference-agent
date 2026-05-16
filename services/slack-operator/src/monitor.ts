@@ -150,6 +150,102 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       gap: 6px;
       margin: 0 0 12px;
     }
+    .pipeline-list {
+      display: grid;
+      gap: 10px;
+    }
+    .pipeline-card {
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--accent);
+      border-radius: 8px;
+      background: rgba(10, 48, 44, 0.92);
+      padding: 14px;
+    }
+    .pipeline-card[data-verdict="pass"] { border-left-color: var(--ok); }
+    .pipeline-card[data-verdict="block"] { border-left-color: var(--bad); }
+    .pipeline-card[data-verdict="needs-review"] { border-left-color: var(--warn); }
+    .pipeline-card[data-verdict="running"] { border-left-color: var(--accent); }
+    .pipeline-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .pipeline-title {
+      min-width: 0;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .pipeline-why {
+      margin: 0 0 12px;
+      color: var(--text);
+      line-height: 1.4;
+    }
+    .pipeline-steps {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .pipeline-step {
+      min-height: 30px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 8px;
+      color: var(--muted);
+      background: rgba(255, 255, 255, 0.04);
+      font-size: 0.78rem;
+      white-space: nowrap;
+    }
+    .pipeline-step[data-state="done"] {
+      border-color: var(--ok);
+      color: var(--ok);
+      background: var(--ok-bg);
+    }
+    .pipeline-step[data-state="active"] {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--accent-bg);
+      font-weight: 700;
+    }
+    .pipeline-step[data-state="blocked"] {
+      border-color: var(--bad);
+      color: var(--bad);
+      background: var(--bad-bg);
+      font-weight: 700;
+    }
+    .pipeline-step[data-state="review"] {
+      border-color: var(--warn);
+      color: var(--warn);
+      background: var(--warn-bg);
+      font-weight: 700;
+    }
+    .pipeline-meta {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px 12px;
+      margin: 0;
+    }
+    .pipeline-meta dt {
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .pipeline-meta dd {
+      margin: 2px 0 0;
+      overflow-wrap: anywhere;
+    }
+    .pipeline-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 12px;
+    }
     .handoff-head {
       display: flex;
       align-items: flex-start;
@@ -233,6 +329,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       main { width: min(100vw - 20px, 1180px); margin-top: 14px; }
       header { flex-direction: column; }
       .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .pipeline-steps,
+      .pipeline-meta { grid-template-columns: 1fr; }
       dl { grid-template-columns: 1fr; }
     }
   </style>
@@ -255,6 +353,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     </section>
     <div class="section-title"><h2>Live Lane</h2><span id="generated" class="pill">waiting</span></div>
     <section id="active" class="list"><div class="empty">No running or just-finished handoffs.</div></section>
+    <div class="section-title"><h2>PR Pipeline</h2><span class="pill">stage view</span></div>
+    <section id="pipeline" class="pipeline-list"><div class="empty">No PR handoffs in the monitor window.</div></section>
     <div class="section-title"><h2>Release Gate</h2><span class="pill">blocks + human review</span></div>
     <section id="attention" class="list"><div class="empty">No handoffs need attention.</div></section>
     <div class="section-title"><h2>Release Timeline</h2><span class="pill">auto-refresh 5s</span></div>
@@ -293,6 +393,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       document.getElementById("event-count").textContent = counts.events || 0;
       document.getElementById("generated").textContent = payload.generatedAt ? new Date(payload.generatedAt).toLocaleString() : "unknown";
       renderList("active", payload.active || [], "No running or just-finished handoffs.");
+      renderPipeline(collectPipelineItems(payload));
       renderList("attention", attention, "No handoffs need attention.");
       renderList("recent", recent, "No recent handoffs in the monitor window.");
     }
@@ -304,6 +405,121 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return;
       }
       target.innerHTML = entries.map(renderHandoff).join("");
+    }
+
+    function renderPipeline(entries) {
+      const target = document.getElementById("pipeline");
+      if (!entries.length) {
+        target.innerHTML = '<div class="empty">No PR handoffs in the monitor window.</div>';
+        return;
+      }
+      target.innerHTML = entries.slice(0, 12).map(renderPipelineItem).join("");
+    }
+
+    function renderPipelineItem(item) {
+      const summary = item.summary || {};
+      const verdict = releaseVerdict(item);
+      const stage = pipelineStage(item, verdict);
+      const actor = nextPipelineActor(item, verdict);
+      const prUrl = item.pullRequestUrl || derivePullRequestUrl(item);
+      const commitUrl = deriveCommitUrl(item);
+      const workflowRunUrl = deriveWorkflowRunUrl(item);
+      const title = pipelineTitle(item);
+      const links = [
+        prUrl ? '<a class="pill" href="' + escapeAttr(prUrl) + '" target="_blank" rel="noreferrer">open PR</a>' : "",
+        workflowRunUrl ? '<a class="pill" href="' + escapeAttr(workflowRunUrl) + '" target="_blank" rel="noreferrer">open run</a>' : "",
+        commitUrl ? '<a class="pill" href="' + escapeAttr(commitUrl) + '" target="_blank" rel="noreferrer">open commit</a>' : "",
+      ].filter(Boolean).join("");
+      return '<article class="pipeline-card" data-verdict="' + escapeAttr(verdict.level) + '">' +
+        '<div class="pipeline-head"><div class="pipeline-title">' + escapeHtml(title) + '</div><span class="pill state-pill" data-level="' + escapeAttr(verdict.level) + '">' + escapeHtml(verdict.label) + '</span></div>' +
+        '<p class="pipeline-why">' + escapeHtml(releaseReason(summary, item, verdict.level)) + '</p>' +
+        renderPipelineSteps(stage, verdict) +
+        '<dl class="pipeline-meta">' +
+        row("Stage", escapeHtml(stage.label)) +
+        row("Next actor", escapeHtml(actor)) +
+        row("Updated", escapeHtml(item.updatedAt ? new Date(item.updatedAt).toLocaleString() : "unknown")) +
+        row("Correlation", "<code>" + escapeHtml(item.correlationId || "unknown") + "</code>") +
+        '</dl>' +
+        (links ? '<div class="pipeline-links">' + links + '</div>' : "") +
+        '</article>';
+    }
+
+    function collectPipelineItems(payload) {
+      const seen = new Set();
+      const entries = []
+        .concat(payload.active || [])
+        .concat(payload.recent || [])
+        .filter(isPrPipelineItem)
+        .filter((item) => {
+          const key = String(item.correlationId || item.repo + "#" + item.pullRequestNumber);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      return entries.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+    }
+
+    function isPrPipelineItem(item) {
+      const intent = normalize(item.intent);
+      const correlationId = String(item.correlationId || "");
+      return Boolean(
+        item.pullRequestNumber
+        || intent === "pr_handoff"
+        || intent === "pr_code_review"
+        || correlationId.startsWith("github-pr-")
+      );
+    }
+
+    function pipelineTitle(item) {
+      const repo = item.repo || "unknown repo";
+      const prNumber = item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId);
+      const intent = item.intent || "pr_handoff";
+      return [repo, prNumber ? "#" + prNumber : "", intent].filter(Boolean).join(" ");
+    }
+
+    function pipelineStage(item, verdict) {
+      const status = normalize(item.status);
+      if (item.active === true || item.activeState === "running" || status === "running") {
+        return { key: "hermes", label: "Hermes reviewing" };
+      }
+      if (verdict.level === "block") return { key: "gate", label: "Blocked at gate" };
+      if (verdict.level === "needs-review") return { key: "gate", label: "Human review" };
+      if (verdict.level === "pass") return { key: "gate", label: "Ready for merge" };
+      return { key: "ci", label: "CI / handoff" };
+    }
+
+    function nextPipelineActor(item, verdict) {
+      const status = normalize(item.status);
+      if (item.active === true || item.activeState === "running" || status === "running") return "Hermes";
+      if (verdict.level === "block") return "Codex";
+      if (verdict.level === "needs-review") return "Human owner";
+      if (verdict.level === "pass") return "Merge queue";
+      return "GitHub Actions";
+    }
+
+    function renderPipelineSteps(stage, verdict) {
+      const steps = [
+        { key: "pr", label: "PR" },
+        { key: "ci", label: "CI" },
+        { key: "hermes", label: "Hermes" },
+        { key: "testbed", label: "Testbed" },
+        { key: "gate", label: "Gate" },
+        { key: "deploy", label: "Deploy" },
+      ];
+      const activeIndex = Math.max(0, steps.findIndex((step) => step.key === stage.key));
+      return '<div class="pipeline-steps" aria-label="PR pipeline stages">' + steps.map((step, index) => {
+        const state = pipelineStepState(index, activeIndex, step.key, verdict.level);
+        return '<span class="pipeline-step" data-state="' + escapeAttr(state) + '">' + escapeHtml(step.label) + '</span>';
+      }).join("") + '</div>';
+    }
+
+    function pipelineStepState(index, activeIndex, key, level) {
+      if (index < activeIndex) return "done";
+      if (index > activeIndex) return "waiting";
+      if (key === "gate" && level === "block") return "blocked";
+      if (key === "gate" && level === "needs-review") return "review";
+      if (key === "gate" && level === "pass") return "done";
+      return "active";
     }
 
     function renderHandoff(item) {
@@ -531,6 +747,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (!/^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$/.test(repo)) return "";
       const match = correlationId.match(/github-(?:pr|deploy)-(\\d+)/);
       return match ? "https://github.com/" + repo + "/actions/runs/" + match[1] : "";
+    }
+
+    function pullRequestNumberFromCorrelation(value) {
+      const match = String(value || "").match(/github-pr-(\\d+)/);
+      return match ? match[1] : "";
     }
 
     function compactSha(value) {

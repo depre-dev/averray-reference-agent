@@ -52,6 +52,15 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Live state");
     expect(html).toContain("JUST FINISHED");
     expect(html).toContain("state-pill");
+    expect(html).toContain("PR Pipeline");
+    expect(html).toContain("stage view");
+    expect(html).toContain("Next actor");
+    expect(html).toContain("PR");
+    expect(html).toContain("CI");
+    expect(html).toContain("Hermes");
+    expect(html).toContain("Testbed");
+    expect(html).toContain("Gate");
+    expect(html).toContain("Deploy");
     expect(html).toContain("const eventsPath = \"/monitor/events\";");
     expect(html).toContain("Release Gate");
     expect(html).toContain("blocks + human review");
@@ -60,6 +69,10 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("activeWindowMinutes: \"240\"");
     expect(html).toContain("limit: \"50\"");
     expect(html).toContain("releaseVerdict(item)");
+    expect(html).toContain("renderPipeline(collectPipelineItems(payload))");
+    expect(html).toContain("pipelineStage(item, verdict)");
+    expect(html).toContain("nextPipelineActor(item, verdict)");
+    expect(html).toContain("renderPipelineSteps(stage, verdict)");
     expect(html).toContain("classifyReleaseGate(status, finalVerdict, mergeRecommendation, reason, reviewReasons)");
     expect(html).toContain("reviewSignalRows(summary)");
     expect(html).toContain("reviewReasonRows(summary)");
