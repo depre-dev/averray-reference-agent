@@ -7,6 +7,7 @@ import {
 import {
   getGithubOperatorStatus,
   getGithubPullRequestReview,
+  upsertGithubPullRequestComment,
   type GithubPullRequestMergeRecommendation,
   type GithubPullRequestReview,
   type GithubPullRequestTouchedArea,
@@ -334,10 +335,13 @@ async function invokePullRequestHandoff(
   };
 
   if (!review.configured || review.health === "degraded") {
-    return completedInvocation(invocation, startedAt, {
+    const handoff = {
       schemaVersion: 1,
       kind: "agent_pr_handoff",
       status: "blocked",
+      repo: review.repo ?? input.repo ?? null,
+      pullRequestNumber: review.pullRequestNumber ?? input.pullRequestNumber ?? null,
+      pullRequestUrl: review.pullRequest?.url ?? input.pullRequestUrl ?? null,
       github: review,
       codeReview,
       requestedActions,
@@ -345,14 +349,22 @@ async function invokePullRequestHandoff(
       finalVerdict: "hold",
       finalReason: "github_pr_review_unavailable",
       safety: prHandoffSafety(false, false),
-    }, { mutates: false, localCheckpoint: false });
+    };
+    const prComment = await maybePostPrHandoffComment(input, deps, handoff);
+    return completedInvocation(invocation, startedAt, withOptionalPrComment(handoff, prComment), {
+      mutates: prComment?.mutatesGithub === true,
+      localCheckpoint: false,
+    });
   }
 
   if (review.mergeRecommendation === "hold") {
-    return completedInvocation(invocation, startedAt, {
+    const handoff = {
       schemaVersion: 1,
       kind: "agent_pr_handoff",
       status: "completed",
+      repo: review.repo ?? input.repo ?? null,
+      pullRequestNumber: review.pullRequestNumber ?? input.pullRequestNumber ?? null,
+      pullRequestUrl: review.pullRequest?.url ?? input.pullRequestUrl ?? null,
       github: review,
       codeReview,
       requestedActions,
@@ -360,7 +372,12 @@ async function invokePullRequestHandoff(
       finalVerdict: "hold",
       finalReason: "pr_review_hold",
       safety: prHandoffSafety(false, false),
-    }, { mutates: false, localCheckpoint: false });
+    };
+    const prComment = await maybePostPrHandoffComment(input, deps, handoff);
+    return completedInvocation(invocation, startedAt, withOptionalPrComment(handoff, prComment), {
+      mutates: prComment?.mutatesGithub === true,
+      localCheckpoint: false,
+    });
   }
 
   const tests: unknown[] = [];
@@ -409,10 +426,13 @@ async function invokePullRequestHandoff(
       ? "ok_to_merge"
       : "needs_review";
 
-  return completedInvocation(invocation, startedAt, {
+  const handoff = {
     schemaVersion: 1,
     kind: "agent_pr_handoff",
     status: "completed",
+    repo: review.repo ?? input.repo ?? null,
+    pullRequestNumber: review.pullRequestNumber ?? input.pullRequestNumber ?? null,
+    pullRequestUrl: review.pullRequest?.url ?? input.pullRequestUrl ?? null,
     github: review,
     codeReview,
     requestedActions,
@@ -420,7 +440,12 @@ async function invokePullRequestHandoff(
     finalVerdict,
     finalReason: failedTests > 0 ? "requested_tests_failed_or_blocked" : `github_${review.mergeRecommendation}`,
     safety: prHandoffSafety(wouldMutate, wouldWriteLocalCheckpoint),
-  }, { mutates: wouldMutate, localCheckpoint: wouldWriteLocalCheckpoint });
+  };
+  const prComment = await maybePostPrHandoffComment(input, deps, handoff);
+  return completedInvocation(invocation, startedAt, withOptionalPrComment(handoff, prComment), {
+    mutates: wouldMutate || prComment?.mutatesGithub === true,
+    localCheckpoint: wouldWriteLocalCheckpoint,
+  });
 }
 
 function buildPullRequestCodeReview(review: GithubPullRequestReview) {
@@ -488,6 +513,92 @@ function buildPullRequestCodeReview(review: GithubPullRequestReview) {
       codexRuntimeUsed: false,
     },
   };
+}
+
+async function maybePostPrHandoffComment(
+  input: AgentInvocationInput,
+  deps: AgentInvocationDeps,
+  handoff: Record<string, unknown>
+) {
+  const env = deps.githubEnv ?? process.env;
+  if (!truthyEnv(env.GITHUB_PR_HANDOFF_COMMENTS_ENABLED)) return undefined;
+  const repo = stringField(handoff, "repo") ?? input.repo;
+  const pullRequestNumber = numberField(handoff, "pullRequestNumber") ?? input.pullRequestNumber;
+  if (!repo || !pullRequestNumber) return undefined;
+  return await upsertGithubPullRequestComment({
+    repo,
+    pullRequestNumber,
+    body: buildPrHandoffCommentBody(input, handoff),
+    env,
+    ...(deps.githubFetchFn ? { fetchFn: deps.githubFetchFn } : {}),
+  });
+}
+
+function withOptionalPrComment<T extends Record<string, unknown>>(handoff: T, prComment: unknown): T {
+  if (!prComment) return handoff;
+  const safety = isRecord(handoff.safety)
+    ? { ...handoff.safety, githubMutated: isRecord(prComment) ? prComment.mutatesGithub === true : false }
+    : undefined;
+  return {
+    ...handoff,
+    prComment,
+    ...(safety ? { safety } : {}),
+  };
+}
+
+function buildPrHandoffCommentBody(input: AgentInvocationInput, handoff: Record<string, unknown>): string {
+  const codeReview = isRecord(handoff.codeReview) ? handoff.codeReview : {};
+  const checks = isRecord(codeReview.checks) ? codeReview.checks : {};
+  const tests = isRecord(codeReview.tests) ? codeReview.tests : {};
+  const finalVerdict = stringField(handoff, "finalVerdict") ?? stringField(codeReview, "finalVerdict") ?? "unknown";
+  const finalReason = stringField(handoff, "finalReason") ?? stringField(codeReview, "finalReason") ?? "unknown";
+  const mergeRecommendation = stringField(codeReview, "mergeRecommendation") ?? finalVerdict;
+  const touchedAreas = arrayField(codeReview, "touchedAreas").map(String);
+  const missingTestSignals = arrayField(tests, "missingTestSignals").map(String);
+  const requestedActions = isRecord(handoff.requestedActions) ? handoff.requestedActions : {};
+  const requestedTests = arrayField(requestedActions, "testCaseIds").map(String);
+  const commentVerdict = humanPrVerdict(finalVerdict);
+  const nextAction = nextCodexAction(commentVerdict);
+
+  return [
+    "<!-- averray-hermes-pr-handoff -->",
+    "## Hermes PR handoff",
+    "",
+    `**Verdict:** ${commentVerdict}`,
+    `**Reason:** ${finalReason}`,
+    `**Merge recommendation:** ${mergeRecommendation}`,
+    `**Next for Codex:** ${nextAction}`,
+    "",
+    "| Signal | Value |",
+    "| --- | --- |",
+    `| Checks | ${numberField(checks, "passed") ?? 0}/${numberField(checks, "total") ?? 0} passed; ${numberField(checks, "failed") ?? 0} failed; ${numberField(checks, "active") ?? 0} active |`,
+    `| Touched areas | ${touchedAreas.length ? touchedAreas.join(", ") : "n/a"} |`,
+    `| Requested tests | ${requestedTests.length ? requestedTests.join(", ") : "none"} |`,
+    `| Missing test signal | ${missingTestSignals.length ? missingTestSignals.join(", ") : "none"} |`,
+    `| Rollout notes | ${rolloutNotesValue(codeReview)} |`,
+    "",
+    `Correlation: \`${input.correlationId ?? "n/a"}\``,
+    "",
+    "_Hermes did not merge, deploy, rerun CI, or edit Wikipedia. This comment is the only GitHub mutation in this handoff._",
+  ].join("\n");
+}
+
+function humanPrVerdict(value: string): "PASS" | "HUMAN REVIEW" | "BLOCK" {
+  if (value === "ok_to_merge" || value === "pass") return "PASS";
+  if (value === "needs_review" || value === "human_review") return "HUMAN REVIEW";
+  return "BLOCK";
+}
+
+function nextCodexAction(verdict: "PASS" | "HUMAN REVIEW" | "BLOCK"): string {
+  if (verdict === "PASS") return "Continue normal merge queue or ask the human owner for final approval.";
+  if (verdict === "HUMAN REVIEW") return "Explain the review-gated surface and wait for the human owner.";
+  return "Fix the blocking issue, push an update, and rerun CI before handing off again.";
+}
+
+function rolloutNotesValue(codeReview: Record<string, unknown>): string {
+  const rollout = isRecord(codeReview.rollout) ? codeReview.rollout : {};
+  if (rollout.notesRequired !== true) return "not required";
+  return rollout.notesPresent === true ? "present" : "missing";
 }
 
 function classifyPullRequestRiskCategory(touchedAreas: GithubPullRequestTouchedArea[]): string {
@@ -745,6 +856,15 @@ function stringField(record: Record<string, unknown>, key: string): string | und
 function numberField(record: Record<string, unknown>, key: string): number | undefined {
   const value = record[key];
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function arrayField(record: Record<string, unknown>, key: string): unknown[] {
+  const value = record[key];
+  return Array.isArray(value) ? value : [];
+}
+
+function truthyEnv(value: string | undefined): boolean {
+  return value === "1" || value?.toLowerCase() === "true" || value?.toLowerCase() === "yes";
 }
 
 function testFailed(test: unknown): boolean {

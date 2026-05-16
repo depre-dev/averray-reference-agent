@@ -5,7 +5,7 @@ This protocol keeps Averray's agent loop simple: Codex builds; Hermes reviews an
 ## Roles
 
 - **Codex is the builder.** Codex works in Git branches/worktrees, edits code, opens PRs, responds to review, and fixes failures.
-- **Hermes is the reviewer/operator.** Hermes observes GitHub, reviews PR risk signals, runs read-only testbed checks, reports to Slack/monitor, and proposes operator actions without merging or deploying by itself.
+- **Hermes is the reviewer/operator.** Hermes observes GitHub, reviews PR risk signals, runs read-only testbed checks, reports to PR comments/Slack/monitor, and proposes operator actions without broad merging or deploying by itself.
 - **Humans own approval.** PASS can enter the normal merge path, HUMAN REVIEW needs a human decision, and BLOCK must be fixed or explicitly overridden outside Hermes.
 
 ## Transport
@@ -17,8 +17,9 @@ The default transport is GitHub Actions calling Averray MCP through Hermes:
 3. After successful CI, GitHub Actions calls `averray_invoke_agent_task` with `intent: "pr_code_review"`.
 4. GitHub Actions then calls `averray_invoke_agent_task` with `intent: "pr_handoff"` and the requested testbed case, usually `TBE2E-004`.
 5. Hermes writes handoff events with the same correlation family.
-6. Humans and agents inspect the PR comment, Slack, and `https://monitor.averray.com`.
-7. After merge/deploy, Hermes runs post-deploy verification and records a deploy handoff.
+6. When `GITHUB_PR_HANDOFF_COMMENTS_ENABLED=1`, Hermes upserts one compact verdict comment on the PR.
+7. Humans and agents inspect the PR comment, Slack, and `https://monitor.averray.com`.
+8. After merge/deploy, Hermes runs post-deploy verification and records a deploy handoff.
 
 ## Required PR Notes From Codex
 
@@ -44,7 +45,7 @@ Hermes PR review is read-only and recommendation-only. It checks:
 - Rollout/rollback note presence for deploy-sensitive changes.
 - Requested read-only testbed cases, especially the dry-run citation repair safety case `TBE2E-004`.
 
-Hermes must not merge PRs, deploy, edit GitHub state, submit work, or run guarded live mutation during this handoff.
+Hermes must not merge PRs, deploy, submit work, or run guarded live mutation during this handoff. The only allowed PR-handoff GitHub mutation is the optional idempotent Hermes verdict comment.
 
 ## Verdicts
 
@@ -71,7 +72,7 @@ Use stable metadata so all surfaces connect:
 - `testCaseIds`: requested read-only testbed cases.
 - `reason`: short source phrase such as `post-CI PR handoff` or `post-production-deploy verification`.
 
-The handoff monitor groups events by `correlationId`; PR comments and Slack summaries should include it.
+The handoff monitor groups events by `correlationId`; PR comments and Slack summaries include it.
 
 ## Current Contract
 
@@ -97,6 +98,7 @@ Post-deploy verification:
 
 - No new chat surface just for Codex/Hermes coordination.
 - No autonomous merge or deploy.
+- No broad GitHub mutation from PR handoff. The verdict comment is optional, idempotent, and marked with `<!-- averray-hermes-pr-handoff -->`.
 - No secret values in PRs, Slack, Hermes, or monitor output.
 - No direct Wikipedia edits from the handoff path.
 - No dependence on Resend/email for bootstrap self-report proof; Hermes Slack, GitHub, and monitor reports are the current proof channel.
