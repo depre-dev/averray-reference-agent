@@ -187,6 +187,39 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       font-size: 1.35rem;
       font-weight: 700;
     }
+    .staleness-summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .staleness-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(10, 48, 44, 0.7);
+      padding: 12px;
+    }
+    .staleness-card[data-age="stale"] {
+      border-color: var(--bad);
+      background: var(--bad-bg);
+    }
+    .staleness-card[data-age="waiting"] {
+      border-color: var(--warn);
+      background: var(--warn-bg);
+    }
+    .age-label {
+      display: block;
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .age-count {
+      display: block;
+      margin-top: 6px;
+      font-size: 1.35rem;
+      font-weight: 700;
+    }
     .owner-summary {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -223,6 +256,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .pipeline-card[data-verdict="block"] { border-left-color: var(--bad); }
     .pipeline-card[data-verdict="needs-review"] { border-left-color: var(--warn); }
     .pipeline-card[data-verdict="running"] { border-left-color: var(--accent); }
+    .pipeline-card[data-age="stale"] {
+      border-color: var(--bad);
+      box-shadow: 0 0 0 1px rgba(255, 107, 107, 0.22);
+    }
+    .pipeline-card[data-age="waiting"] {
+      box-shadow: 0 0 0 1px rgba(255, 209, 102, 0.16);
+    }
     .pipeline-head {
       display: flex;
       align-items: flex-start;
@@ -251,6 +291,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .next-action strong {
       color: var(--text);
     }
+    .age-line {
+      color: var(--muted);
+      margin: -4px 0 12px;
+      line-height: 1.4;
+    }
+    .age-line[data-age="stale"] { color: var(--bad); }
+    .age-line[data-age="waiting"] { color: var(--warn); }
     .pipeline-steps {
       display: grid;
       grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -399,6 +446,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       header { flex-direction: column; }
       .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .pr-board { grid-template-columns: 1fr; }
+      .staleness-summary { grid-template-columns: 1fr; }
       .owner-summary { grid-template-columns: 1fr; }
       .pipeline-steps,
       .pipeline-meta { grid-template-columns: 1fr; }
@@ -431,6 +479,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       <button class="filter-button" type="button" data-pipeline-filter="needs-review" aria-pressed="false"><span class="filter-label">Review</span><span id="board-review" class="filter-count">0</span></button>
       <button class="filter-button" type="button" data-pipeline-filter="pass" aria-pressed="false"><span class="filter-label">Ready</span><span id="board-ready" class="filter-count">0</span></button>
       <button class="filter-button" type="button" data-pipeline-filter="running" aria-pressed="false"><span class="filter-label">Running</span><span id="board-running" class="filter-count">0</span></button>
+    </section>
+    <section class="staleness-summary" aria-label="PR staleness summary">
+      <div class="staleness-card" data-age="fresh"><span class="age-label">Fresh</span><span id="age-fresh" class="age-count">0</span></div>
+      <div class="staleness-card" data-age="waiting"><span class="age-label">Waiting</span><span id="age-waiting" class="age-count">0</span></div>
+      <div class="staleness-card" data-age="stale"><span class="age-label">Stale</span><span id="age-stale" class="age-count">0</span></div>
     </section>
     <section class="owner-summary" aria-label="Next action owners">
       <div class="owner-card"><span class="owner-label">Codex needs</span><span id="owner-codex" class="owner-count">0</span></div>
@@ -511,7 +564,15 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       document.getElementById("board-ready").textContent = String(verdicts.filter((verdict) => verdict.level === "pass").length);
       document.getElementById("board-running").textContent = String(verdicts.filter((verdict) => verdict.level === "running").length);
       renderOwnerSummary(entries);
+      renderStalenessSummary(entries);
       updatePipelineFilterButtons();
+    }
+
+    function renderStalenessSummary(entries) {
+      const ages = entries.map(handoffAge);
+      document.getElementById("age-fresh").textContent = String(ages.filter((age) => age.state === "fresh").length);
+      document.getElementById("age-waiting").textContent = String(ages.filter((age) => age.state === "waiting").length);
+      document.getElementById("age-stale").textContent = String(ages.filter((age) => age.state === "stale").length);
     }
 
     function renderOwnerSummary(entries) {
@@ -548,6 +609,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const verdict = releaseVerdict(item);
       const stage = pipelineStage(item, verdict);
       const action = nextPipelineAction(item, verdict);
+      const age = handoffAge(item);
       const prUrl = item.pullRequestUrl || derivePullRequestUrl(item);
       const commitUrl = deriveCommitUrl(item);
       const workflowRunUrl = deriveWorkflowRunUrl(item);
@@ -557,9 +619,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         workflowRunUrl ? '<a class="pill" href="' + escapeAttr(workflowRunUrl) + '" target="_blank" rel="noreferrer">open run</a>' : "",
         commitUrl ? '<a class="pill" href="' + escapeAttr(commitUrl) + '" target="_blank" rel="noreferrer">open commit</a>' : "",
       ].filter(Boolean).join("");
-      return '<article class="pipeline-card" data-verdict="' + escapeAttr(verdict.level) + '">' +
+      return '<article class="pipeline-card" data-verdict="' + escapeAttr(verdict.level) + '" data-age="' + escapeAttr(age.state) + '">' +
         '<div class="pipeline-head"><div class="pipeline-title">' + escapeHtml(title) + '</div><span class="pill state-pill" data-level="' + escapeAttr(verdict.level) + '">' + escapeHtml(verdict.label) + '</span></div>' +
         '<p class="pipeline-why">' + escapeHtml(releaseReason(summary, item, verdict.level)) + '</p>' +
+        '<p class="age-line" data-age="' + escapeAttr(age.state) + '">' + escapeHtml(age.label + " - " + action.owner + " for " + age.duration) + '</p>' +
         '<div class="next-action"><strong>Next action:</strong> ' + escapeHtml(action.owner + " - " + action.text) + '</div>' +
         renderPipelineSteps(stage, verdict) +
         '<dl class="pipeline-meta">' +
@@ -640,6 +703,23 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return { owner: "Merge queue", text: "merge when branch protection and queue checks are green" };
       }
       return { owner: "GitHub Actions", text: "finish CI before Hermes can make a release-gate recommendation" };
+    }
+
+    function handoffAge(item) {
+      const updated = Date.parse(String(item.updatedAt || ""));
+      if (!Number.isFinite(updated)) return { state: "waiting", label: "Waiting", duration: "unknown age" };
+      const minutes = Math.max(0, Math.floor((Date.now() - updated) / 60000));
+      const state = minutes >= 120 ? "stale" : minutes >= 30 ? "waiting" : "fresh";
+      const label = state === "stale" ? "Stale" : state === "waiting" ? "Waiting" : "Fresh";
+      return { state, label, duration: formatDuration(minutes) };
+    }
+
+    function formatDuration(minutes) {
+      if (minutes < 1) return "under 1m";
+      if (minutes < 60) return minutes + "m";
+      const hours = Math.floor(minutes / 60);
+      const rest = minutes % 60;
+      return rest ? hours + "h " + rest + "m" : hours + "h";
     }
 
     function renderPipelineSteps(stage, verdict) {
