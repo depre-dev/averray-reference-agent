@@ -50,7 +50,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("live-status");
     expect(html).toContain("connecting");
     expect(html).toContain("Active / Just Finished");
-    expect(html).toContain("Blocked / Human Review");
+    expect(html).toContain("Blocked / Operator Review");
     expect(html).toContain("Live Lane");
     expect(html).toContain("Live state");
     expect(html).toContain("JUST FINISHED");
@@ -64,14 +64,14 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("data-pipeline-filter=\"running\"");
     expect(html).toContain("Next action owners");
     expect(html).toContain("Codex needs");
-    expect(html).toContain("Human needs");
+    expect(html).toContain("Operator needs");
     expect(html).toContain("Merge queue");
     expect(html).toContain("Hermes active");
     expect(html).toContain("Owner Lanes");
     expect(html).toContain("who acts next");
     expect(html).toContain("Nothing waiting on Codex.");
     expect(html).toContain("Hermes has no active PR checks.");
-    expect(html).toContain("No human review needed.");
+    expect(html).toContain("No operator review needed.");
     expect(html).toContain("Nothing ready to merge.");
     expect(html).toContain("No completed PRs in view.");
     expect(html).toContain("PR staleness summary");
@@ -86,8 +86,8 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Next actor");
     expect(html).toContain("Fix request");
     expect(html).toContain("Fix request for Codex");
-    expect(html).toContain("Review request for owner");
-    expect(html).toContain("Human approved");
+    expect(html).toContain("Operator decision request");
+    expect(html).toContain("Operator approved");
     expect(html).toContain("Reset approval");
     expect(html).toContain("private monitor decision only");
     expect(html).toContain("PR timeline");
@@ -110,7 +110,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("addEventListener(\"monitor\"");
     expect(html).toContain("startPolling(\"polling fallback 5s\")");
     expect(html).toContain("Release Gate");
-    expect(html).toContain("blocks + human review");
+    expect(html).toContain("blocks + operator review");
     expect(html).toContain("Release Timeline");
     expect(html).toContain("auto-refresh 5s");
     expect(html).toContain("activeWindowMinutes: \"240\"");

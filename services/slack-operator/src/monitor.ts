@@ -728,7 +728,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     <section class="grid" aria-label="Monitor summary">
       <div class="card"><span class="metric">Status</span><span id="status" class="value">...</span></div>
       <div class="card"><span class="metric">Active / Just Finished</span><span id="active-count" class="value">0</span></div>
-      <div class="card"><span class="metric">Blocked / Human Review</span><span id="gate-count" class="value">0 / 0</span></div>
+      <div class="card"><span class="metric">Blocked / Operator Review</span><span id="gate-count" class="value">0 / 0</span></div>
       <div class="card"><span class="metric">Recent</span><span id="recent-count" class="value">0</span></div>
       <div class="card"><span class="metric">Events</span><span id="event-count" class="value">0</span></div>
     </section>
@@ -749,7 +749,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     </section>
     <section class="owner-summary" aria-label="Next action owners">
       <div class="owner-card"><span class="owner-label">Codex needs</span><span id="owner-codex" class="owner-count">0</span></div>
-      <div class="owner-card"><span class="owner-label">Human needs</span><span id="owner-human" class="owner-count">0</span></div>
+      <div class="owner-card"><span class="owner-label">Operator needs</span><span id="owner-human" class="owner-count">0</span></div>
       <div class="owner-card"><span class="owner-label">Merge queue</span><span id="owner-merge" class="owner-count">0</span></div>
       <div class="owner-card"><span class="owner-label">Hermes active</span><span id="owner-hermes" class="owner-count">0</span></div>
     </section>
@@ -757,7 +757,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     <section id="owner-lanes" class="owner-lanes" aria-label="Owner lanes"><div class="empty">No PR handoffs in the monitor window.</div></section>
     <div class="section-title"><h2>PR Pipeline</h2><span class="pill">grouped by repo</span></div>
     <section id="pipeline" class="pipeline-list"><div class="empty">No PR handoffs in the monitor window.</div></section>
-    <div class="section-title"><h2>Release Gate</h2><span class="pill">blocks + human review</span></div>
+    <div class="section-title"><h2>Release Gate</h2><span class="pill">blocks + operator review</span></div>
     <section id="attention" class="list"><div class="empty">No handoffs need attention.</div></section>
     <div class="section-title"><h2>Release Timeline</h2><span class="pill">auto-refresh 5s</span></div>
     <section id="recent" class="list"><div class="empty">Loading recent handoffs...</div></section>
@@ -899,7 +899,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function renderOwnerSummary(entries) {
       const owners = entries.map((item) => nextPipelineAction(item, releaseVerdict(item)).owner);
       document.getElementById("owner-codex").textContent = String(owners.filter((owner) => owner === "Codex").length);
-      document.getElementById("owner-human").textContent = String(owners.filter((owner) => owner === "Human owner").length);
+      document.getElementById("owner-human").textContent = String(owners.filter((owner) => owner === "Operator").length);
       document.getElementById("owner-merge").textContent = String(owners.filter((owner) => owner === "Merge queue").length);
       document.getElementById("owner-hermes").textContent = String(owners.filter((owner) => owner === "Hermes").length);
     }
@@ -918,7 +918,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return [
         { key: "codex", title: "Codex", owner: "Codex", empty: "Nothing waiting on Codex." },
         { key: "hermes", title: "Hermes", owner: "Hermes", empty: "Hermes has no active PR checks." },
-        { key: "human", title: "Human", owner: "Human owner", empty: "No human review needed." },
+        { key: "operator", title: "Operator", owner: "Operator", empty: "No operator review needed." },
         { key: "merge", title: "Merge Queue", owner: "Merge queue", empty: "Nothing ready to merge." },
         { key: "done", title: "Done", owner: "Done", empty: "No completed PRs in view." },
       ];
@@ -1146,7 +1146,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function renderDecisionActions(item) {
       const key = decisionKeyForItem(item);
       return '<div class="decision-actions">' +
-        '<button class="decision-button" type="button" data-monitor-decision="approve" data-decision-key="' + escapeAttr(key) + '">Human approved</button>' +
+        '<button class="decision-button" type="button" data-monitor-decision="approve" data-decision-key="' + escapeAttr(key) + '">Operator approved</button>' +
         '</div>';
     }
 
@@ -1155,8 +1155,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (decision.status !== "approved") return "";
       const key = decisionKeyForItem(item);
       const at = decision.at ? " at " + new Date(decision.at).toLocaleString() : "";
-      return '<section class="decision-note" aria-label="Human decision">' +
-        '<strong>Human approved</strong>' + escapeHtml(at) + '. This is a private monitor decision only; GitHub was not mutated. ' +
+      return '<section class="decision-note" aria-label="Operator decision">' +
+        '<strong>Operator approved</strong>' + escapeHtml(at) + '. This is a private monitor decision only; GitHub was not mutated. ' +
         '<button class="decision-button" type="button" data-monitor-decision="reset" data-decision-key="' + escapeAttr(key) + '">Reset approval</button>' +
         '</section>';
     }
@@ -1173,7 +1173,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         ? fixRequest.checks.map(String).filter(Boolean)
         : missingTests.length ? missingTests : testSignals.slice(0, 5);
       return {
-        title: fixRequest.title || (verdict.level === "block" ? "Fix request for Codex" : "Review request for owner"),
+        title: fixRequest.title || (verdict.level === "block" ? "Fix request for Codex" : "Operator decision request"),
         owner: fixRequest.owner || action.owner,
         instruction: fixRequest.instruction || fixRequestInstruction(verdict, action),
         reason,
@@ -1188,7 +1188,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return "Codex should fix the blocking signal, push the PR branch, and wait for CI plus Hermes to re-run.";
       }
       if (verdict.level === "needs-review") {
-        return "Human owner should review the gated surface, then tell Codex whether to adjust the PR or proceed.";
+        return "Hermes/Codex should provide the code-level pre-check evidence. Operator should decide whether the project intent, architecture, and rollout risk are acceptable.";
       }
       return action.text;
     }
@@ -1197,7 +1197,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const first = reviewReasons.find(Boolean);
       if (!first) return "";
       const code = first.code ? String(first.code) : "review";
-      const message = first.message ? String(first.message) : "Human review recommended.";
+      const message = first.message ? String(first.message) : "Operator review recommended.";
       return code + ": " + message;
     }
 
@@ -1242,7 +1242,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return { key: "hermes", label: "Hermes reviewing" };
       }
       if (verdict.level === "block") return { key: "gate", label: "Blocked at gate" };
-      if (verdict.level === "needs-review") return { key: "gate", label: "Human review" };
+      if (verdict.level === "needs-review") return { key: "gate", label: "Operator review" };
       if (verdict.level === "pass") return { key: "gate", label: "Ready for merge" };
       return { key: "ci", label: "CI / handoff" };
     }
@@ -1251,7 +1251,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const status = normalize(item.status);
       if (item.active === true || item.activeState === "running" || status === "running") return "Hermes";
       if (verdict.level === "block") return "Codex";
-      if (verdict.level === "needs-review") return "Human owner";
+      if (verdict.level === "needs-review") return "Operator";
       if (verdict.level === "pass") return "Merge queue";
       return "GitHub Actions";
     }
@@ -1269,7 +1269,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return { owner: "Codex", text: "fix the blocking signal, push the PR branch, and wait for CI/Hermes to re-run" };
       }
       if (verdict.level === "needs-review") {
-        return { owner: "Human owner", text: "review the gated surface and decide whether Codex should adjust or the PR can proceed" };
+        return { owner: "Operator", text: "use the agent pre-check evidence to decide project intent, architecture, and rollout risk" };
       }
       if (verdict.level === "pass") {
         return { owner: "Merge queue", text: "merge when branch protection and queue checks are green" };
@@ -1452,7 +1452,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return {
           level: "pass",
           label: "APPROVED",
-          why: "Human owner approved this review gate in the private monitor; merge only if GitHub branch protection is green.",
+          why: "Operator approved this review gate in the private monitor; merge only if GitHub branch protection is green.",
         };
       }
       return verdict;
@@ -1540,7 +1540,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         || includesAny(reason, ["github_needs_review", "pr_review_hold", "needs_review"])
         || reviewReasons.length > 0
       ) {
-        return { level: "needs-review", label: "HUMAN REVIEW" };
+        return { level: "needs-review", label: "OPERATOR REVIEW" };
       }
       return { level: "pass", label: "PASS" };
     }
@@ -1550,12 +1550,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const first = reviewReasons.find(Boolean);
       if (first) {
         const code = String(first.code || "review");
-        const message = String(first.message || "Human review recommended.");
+        const message = String(first.message || "Operator review recommended.");
         return code + ": " + message;
       }
       const reason = normalize(summary.finalReason || summary.reason || item.reason);
-      if (reason === "github_needs_review") return "Human review recommended by the GitHub risk gate.";
-      if (reason === "pr_review_hold") return "PR risk gate held this for human review.";
+      if (reason === "github_needs_review") return "Operator review recommended by the GitHub risk gate; agent pre-check evidence should be attached.";
+      if (reason === "pr_review_hold") return "PR risk gate held this for operator review.";
       if (reason === "deploy_failure" || reason === "deploy_failed") return "Deploy failed; investigate before release.";
       if (reason === "post_deploy_healthy") return "Post-deploy suite, GitHub workflows, and configured health checks are clean.";
       if (reason === "hosted_health_failed") return "Hosted health check failed after deploy.";
@@ -1632,7 +1632,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return reviewReasons.slice(0, 3).map((reason, index) => {
         const code = reason && reason.code ? String(reason.code) : "review";
         const severity = reason && reason.severity ? String(reason.severity) : "unknown";
-        const message = reason && reason.message ? String(reason.message) : "Human review recommended.";
+        const message = reason && reason.message ? String(reason.message) : "Operator review recommended.";
         return row(index === 0 ? "Review why" : "", escapeHtml(severity + " / " + code + " - " + message));
       }).join("");
     }

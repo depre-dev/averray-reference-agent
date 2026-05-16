@@ -79,7 +79,7 @@ describe("stale PR handoff alerts", () => {
     });
 
     expect(items).toHaveLength(1);
-    expect(items[0]?.owner).toBe("Human owner");
+    expect(items[0]?.owner).toBe("Operator");
   });
 
   it("only posts when stale handoffs exist and signature changes", () => {
@@ -116,17 +116,17 @@ describe("stale PR handoff alerts", () => {
         repo: "depre-dev/averray-reference-agent",
         pullRequestNumber: 14,
         pullRequestUrl: "https://github.com/depre-dev/averray-reference-agent/pull/14",
-        owner: "Human owner",
+        owner: "Operator",
         ageMinutes: 180,
         ageLabel: "3h",
-        nextAction: "review the gated surface",
-        reason: "Human review recommended.",
+        nextAction: "use the agent pre-check evidence to decide project intent, architecture, and rollout risk",
+        reason: "Operator review recommended.",
       },
     ], "https://monitor.averray.com/monitor");
 
     expect(text).toContain("*Hermes stale PR handoffs*");
     expect(text).toContain("<https://github.com/depre-dev/averray-reference-agent/pull/14|depre-dev/averray-reference-agent #14>");
-    expect(text).toContain("owner: `Human owner`");
+    expect(text).toContain("owner: `Operator`");
     expect(text).toContain("age: `3h`");
     expect(text).toContain("Open monitor: https://monitor.averray.com/monitor");
   });

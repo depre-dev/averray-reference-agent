@@ -132,7 +132,7 @@ function nextOwner(item: Record<string, unknown>, verdict: ReturnType<typeof rel
   const status = normalize(stringField(item, "status"));
   if (item.active === true || stringField(item, "activeState") === "running" || status === "running") return "Hermes";
   if (verdict === "block") return "Codex";
-  if (verdict === "needs-review") return "Human owner";
+  if (verdict === "needs-review") return "Operator";
   if (verdict === "pass") return "Merge queue";
   return "GitHub Actions";
 }
@@ -140,7 +140,7 @@ function nextOwner(item: Record<string, unknown>, verdict: ReturnType<typeof rel
 function nextActionText(owner: string, verdict: ReturnType<typeof releaseVerdict>): string {
   if (owner === "Hermes") return "finish checks and publish a verdict";
   if (owner === "Codex") return "fix the blocking signal and push an update";
-  if (owner === "Human owner") return "review the gated surface and decide whether it can proceed";
+  if (owner === "Operator") return "use the agent pre-check evidence to decide project intent, architecture, and rollout risk";
   if (owner === "Merge queue") return "merge when branch protection and queue checks are green";
   if (verdict === "unknown") return "wait for CI/Hermes metadata";
   return "finish CI before release-gate recommendation";
@@ -150,14 +150,14 @@ function releaseReason(item: Record<string, unknown>, verdict: ReturnType<typeof
   const summary = toRecord(item.summary);
   const reviewReasons = Array.isArray(summary.reviewReasons) ? summary.reviewReasons : [];
   const first = toRecord(reviewReasons.find(Boolean));
-  if (stringField(first, "message")) return stringField(first, "message") ?? "Human review recommended.";
+  if (stringField(first, "message")) return stringField(first, "message") ?? "Operator review recommended.";
   const reason = normalize(stringField(summary, "finalReason") ?? stringField(summary, "reason") ?? stringField(item, "reason"));
-  if (reason === "github_needs_review") return "Human review recommended by the GitHub risk gate.";
-  if (reason === "pr_review_hold") return "PR risk gate held this for human review.";
+  if (reason === "github_needs_review") return "Operator review recommended by the GitHub risk gate; agent pre-check evidence should be attached.";
+  if (reason === "pr_review_hold") return "PR risk gate held this for operator review.";
   if (reason === "ci_failed") return "CI failed; fix before merge.";
   if (reason === "ci_in_progress") return "CI is still running.";
   if (verdict === "block") return "Blocked by release gate.";
-  if (verdict === "needs-review") return "Human review recommended.";
+  if (verdict === "needs-review") return "Operator review recommended.";
   if (verdict === "pass") return "No blocking release signals recorded.";
   return "No reason recorded.";
 }

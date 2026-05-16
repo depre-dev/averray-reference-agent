@@ -1652,7 +1652,7 @@ function buildPullRequestRiskFindings(input: {
     findings.push({
       severity: "medium",
       code: "pr_blockchain_settlement_review",
-      message: `${settlementRisk.length} changed file(s) touch blockchain/XCM settlement flow. Human should verify request metadata preservation, claim/submit routing, settlement IDs, and rollback notes before merge.`,
+      message: `${settlementRisk.length} changed file(s) touch blockchain/XCM settlement flow. Agent pre-checks own code-level verification; operator sign-off should confirm the architecture intent, accepted rollout/rollback risk, and whether Codex should adjust before merge.`,
     });
   }
   if (reviewRisk.length > 0) {
@@ -1770,8 +1770,13 @@ function buildPullRequestReviewRecommendations(input: {
   const mediumCodes = input.riskFindings
     .filter((finding) => finding.severity === "medium")
     .map((finding) => finding.code);
+  if (mediumCodes.includes("pr_blockchain_settlement_review")) {
+    return [
+      "Operator review recommended before merge: Hermes/Codex should provide the technical pre-check evidence, and the operator should decide whether the blockchain/XCM settlement behavior and rollout risk are acceptable.",
+    ];
+  }
   return [
-    `Human review recommended before merge${mediumCodes.length > 0 ? ` (${[...new Set(mediumCodes)].join(", ")})` : ""}.`,
+    `Operator review recommended before merge${mediumCodes.length > 0 ? ` (${[...new Set(mediumCodes)].join(", ")})` : ""}. Hermes/Codex should provide code-level evidence; the operator decides project intent, rollout risk, or approval.`,
   ];
 }
 
@@ -1867,7 +1872,7 @@ function buildMergeStewardRecommendations(input: {
     recommendations.push(`${input.autoMergeCandidates.length} PR(s) are clean merge candidates. Merge execution is still disabled in this read-only steward.`);
   }
   if (input.humanReview.length > 0) {
-    recommendations.push(`${input.humanReview.length} PR(s) need a human review before merge.`);
+    recommendations.push(`${input.humanReview.length} PR(s) need operator review before merge; code-level evidence should already be provided by Hermes/Codex.`);
   }
   if (input.blocked.length > 0) {
     recommendations.push(`${input.blocked.length} PR(s) are blocked. Fix high-severity findings before merge.`);
