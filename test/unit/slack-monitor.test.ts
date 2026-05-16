@@ -67,6 +67,8 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("cmdbar");
     expect(html).toContain("filterbar");
     expect(html).toContain("kanban-board");
+    expect(html).toContain("data-done-expanded");
+    expect(html).toContain("done-rail");
     expect(html).toContain("detail-drawer");
     expect(html).toContain("command-console");
     expect(html).toContain("Ask Hermes");
@@ -92,10 +94,13 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("fetch(commandUrl");
     expect(html).toContain("submitMonitorCommand(text)");
     expect(html).toContain("selectedKey");
+    expect(html).toContain("autoFocusPending");
+    expect(html).toContain("defaultFocusItem(filtered)");
     expect(html).toContain("renderBoard(latestPipelineItems)");
     expect(html).toContain("renderDrawer(selectedItem())");
     expect(html).toContain("renderCommandContext()");
     expect(html).toContain("operatorChecklistSection(item, verdict, action)");
+    expect(html).toContain("groupPhaseBadges(item)");
     expect(html).toContain("groupPrPipelineItems(entries)");
     expect(html).toContain("finalizePrGroup(items)");
     expect(html).toContain("prIdentityKey(item)");
