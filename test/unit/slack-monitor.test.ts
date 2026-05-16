@@ -95,6 +95,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("submitMonitorCommand(text)");
     expect(html).toContain("selectedKey");
     expect(html).toContain("autoFocusPending");
+    expect(html).toContain("data-review-card");
     expect(html).toContain("defaultFocusItem(filtered)");
     expect(html).toContain("renderBoard(latestPipelineItems)");
     expect(html).toContain("renderDrawer(selectedItem())");
@@ -108,7 +109,13 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("renderPrTimeline(item, stage, verdict, action)");
     expect(html).toContain("renderDecisionActions(item)");
     expect(html).toContain("buildFixRequest(item, summary, verdict, action)");
-    expect(html).toContain("Operator sign-off");
+    expect(html).toContain("Operator decision");
+    expect(html).toContain("Operator decision request");
+    expect(html).toContain("Approve only if");
+    expect(html).toContain("Send back to Codex if");
+    expect(html).toContain("Hermes has already done the code-level pre-check");
+    expect(html).toContain("Request metadata preservation");
+    expect(html).toContain("you are not being asked for line-by-line code review");
     expect(html).toContain("Operator approved");
     expect(html).toContain("No operator sign-off needed.");
     expect(html).toContain("private monitor decision only");
