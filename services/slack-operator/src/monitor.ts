@@ -430,6 +430,31 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       margin: 0;
       overflow-wrap: anywhere;
     }
+    .decision-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .decision-button {
+      min-height: 32px;
+      border-radius: 6px;
+      padding: 0 10px;
+      font-size: 0.82rem;
+    }
+    .decision-button[data-monitor-decision="approve"] {
+      border-color: var(--ok);
+      background: var(--ok-bg);
+      color: var(--ok);
+    }
+    .decision-note {
+      border: 1px solid var(--ok);
+      border-radius: 8px;
+      background: var(--ok-bg);
+      padding: 10px 12px;
+      margin-bottom: 12px;
+      line-height: 1.4;
+    }
     .age-line {
       color: var(--muted);
       margin: -4px 0 12px;
@@ -718,10 +743,23 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     const eventsPath = ${eventsPath};
     const token = new URLSearchParams(location.search).get("token");
     const withToken = buildEventsUrl();
+    const decisionStorageKey = "averray-monitor-human-decisions:v1";
     let pipelineFilter = "all";
     let latestPipelineItems = [];
+    let latestPayload = null;
+    let monitorDecisions = loadMonitorDecisions();
 
     document.getElementById("refresh").addEventListener("click", () => load());
+    document.addEventListener("click", (event) => {
+      const button = event.target && event.target.closest ? event.target.closest("[data-monitor-decision]") : null;
+      if (!button) return;
+      const key = String(button.getAttribute("data-decision-key") || "");
+      const decision = String(button.getAttribute("data-monitor-decision") || "");
+      if (!key) return;
+      if (decision === "approve") setMonitorDecision(key, { status: "approved", at: new Date().toISOString() });
+      if (decision === "reset") setMonitorDecision(key, null);
+      if (latestPayload) render(latestPayload);
+    });
     document.querySelectorAll("[data-pipeline-filter]").forEach((button) => {
       button.addEventListener("click", () => {
         pipelineFilter = String(button.getAttribute("data-pipeline-filter") || "all");
@@ -743,6 +781,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function render(payload) {
+      latestPayload = payload;
       const counts = payload.counts || {};
       const recent = payload.recent || [];
       const verdicts = recent.map(releaseVerdict);
@@ -847,7 +886,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '<div class="lane-card-title">' + titleMarkup + '</div>' +
         '<div class="lane-card-meta">' + escapeHtml(verdict.label + " - " + age.label + " " + age.duration) + '</div>' +
         '<div class="lane-card-action">' + escapeHtml(action.text) + '</div>' +
-        '<div class="lane-card-meta">' + escapeHtml(releaseReason(summary, item, verdict.level)) + '</div>' +
+        '<div class="lane-card-meta">' + escapeHtml(verdict.why) + '</div>' +
         '</article>';
     }
 
@@ -976,9 +1015,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       ].filter(Boolean).join("");
       return '<article class="pipeline-card" data-verdict="' + escapeAttr(verdict.level) + '" data-age="' + escapeAttr(age.state) + '">' +
         '<div class="pipeline-head"><div class="pipeline-title">' + escapeHtml(title) + '</div><span class="pill state-pill" data-level="' + escapeAttr(verdict.level) + '">' + escapeHtml(verdict.label) + '</span></div>' +
-        '<p class="pipeline-why">' + escapeHtml(releaseReason(summary, item, verdict.level)) + '</p>' +
+        '<p class="pipeline-why">' + escapeHtml(verdict.why) + '</p>' +
         '<p class="age-line" data-age="' + escapeAttr(age.state) + '">' + escapeHtml(age.label + " - " + action.owner + " for " + age.duration) + '</p>' +
         '<div class="next-action"><strong>Next action:</strong> ' + escapeHtml(action.owner + " - " + action.text) + '</div>' +
+        renderHumanDecisionNote(item) +
         renderFixRequest(item, summary, verdict, action) +
         renderPipelineSteps(stage, verdict) +
         renderPrTimeline(item, stage, verdict, action) +
@@ -1016,13 +1056,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return '<div class="pipeline-detail-title">PR detail</div><dl class="pipeline-detail">' +
         rows.join("") +
         reviewRows +
-        row("Why", escapeHtml(releaseReason(summary, item, verdict.level))) +
+        row("Why", escapeHtml(verdict.why)) +
         '</dl>';
     }
 
     function renderFixRequest(item, summary, verdict, action) {
       if (verdict.level !== "block" && verdict.level !== "needs-review") return "";
       const request = buildFixRequest(item, summary, verdict, action);
+      const actions = verdict.level === "needs-review" ? renderDecisionActions(item) : "";
       return '<section class="fix-request" data-level="' + escapeAttr(verdict.level) + '" aria-label="Fix request">' +
         '<p class="fix-request-title">' + escapeHtml(request.title) + '</p>' +
         '<p class="fix-request-copy">' + escapeHtml(request.instruction) + '</p>' +
@@ -1033,6 +1074,25 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         row("Checks", request.checks.length ? chips(request.checks) : escapeHtml("run relevant local checks and wait for CI")) +
         row("Re-run", escapeHtml(request.rerun)) +
         '</dl>' +
+        actions +
+        '</section>';
+    }
+
+    function renderDecisionActions(item) {
+      const key = decisionKeyForItem(item);
+      return '<div class="decision-actions">' +
+        '<button class="decision-button" type="button" data-monitor-decision="approve" data-decision-key="' + escapeAttr(key) + '">Human approved</button>' +
+        '</div>';
+    }
+
+    function renderHumanDecisionNote(item) {
+      const decision = decisionForItem(item);
+      if (decision.status !== "approved") return "";
+      const key = decisionKeyForItem(item);
+      const at = decision.at ? " at " + new Date(decision.at).toLocaleString() : "";
+      return '<section class="decision-note" aria-label="Human decision">' +
+        '<strong>Human approved</strong>' + escapeHtml(at) + '. This is a private monitor decision only; GitHub was not mutated. ' +
+        '<button class="decision-button" type="button" data-monitor-decision="reset" data-decision-key="' + escapeAttr(key) + '">Reset approval</button>' +
         '</section>';
     }
 
@@ -1321,6 +1381,19 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function releaseVerdict(item) {
+      const verdict = baseReleaseVerdict(item);
+      const decision = decisionForItem(item);
+      if (verdict.level === "needs-review" && decision.status === "approved") {
+        return {
+          level: "pass",
+          label: "APPROVED",
+          why: "Human owner approved this review gate in the private monitor; merge only if GitHub branch protection is green.",
+        };
+      }
+      return verdict;
+    }
+
+    function baseReleaseVerdict(item) {
       const summary = item.summary || {};
       const status = normalize(item.status);
       const prState = pullRequestState(item, summary);
@@ -1357,6 +1430,32 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         label: terminal.label,
         why: releaseReason(summary, item, terminal.level),
       };
+    }
+
+    function loadMonitorDecisions() {
+      try {
+        return JSON.parse(localStorage.getItem(decisionStorageKey) || "{}") || {};
+      } catch {
+        return {};
+      }
+    }
+
+    function setMonitorDecision(key, value) {
+      if (value) monitorDecisions[key] = value;
+      else delete monitorDecisions[key];
+      try {
+        localStorage.setItem(decisionStorageKey, JSON.stringify(monitorDecisions));
+      } catch {
+        // Ignore private browser storage failures; monitor data remains read-only.
+      }
+    }
+
+    function decisionForItem(item) {
+      return monitorDecisions[decisionKeyForItem(item)] || {};
+    }
+
+    function decisionKeyForItem(item) {
+      return String(item.correlationId || [item.repo, item.pullRequestNumber].filter(Boolean).join("#") || "unknown");
     }
 
     function classifyReleaseGate(status, finalVerdict, mergeRecommendation, reason, reviewReasons) {

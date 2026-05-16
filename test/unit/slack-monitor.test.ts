@@ -84,6 +84,9 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Fix request");
     expect(html).toContain("Fix request for Codex");
     expect(html).toContain("Review request for owner");
+    expect(html).toContain("Human approved");
+    expect(html).toContain("Reset approval");
+    expect(html).toContain("private monitor decision only");
     expect(html).toContain("PR timeline");
     expect(html).toContain("pr-timeline-item");
     expect(html).toContain("PR detail");
@@ -125,9 +128,16 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("pipelineStage(item, verdict)");
     expect(html).toContain("nextPipelineAction(item, verdict)");
     expect(html).toContain("renderFixRequest(item, summary, verdict, action)");
+    expect(html).toContain("renderDecisionActions(item)");
+    expect(html).toContain("renderHumanDecisionNote(item)");
     expect(html).toContain("buildFixRequest(item, summary, verdict, action)");
     expect(html).toContain("fixRequestInstruction(verdict, action)");
     expect(html).toContain("firstReviewReason(reviewReasons)");
+    expect(html).toContain("loadMonitorDecisions()");
+    expect(html).toContain("setMonitorDecision(key, value)");
+    expect(html).toContain("decisionForItem(item)");
+    expect(html).toContain("decisionKeyForItem(item)");
+    expect(html).toContain("baseReleaseVerdict(item)");
     expect(html).toContain("renderPipelineDetails(item, summary, verdict, action)");
     expect(html).toContain("handoffAge(item)");
     expect(html).toContain("pullRequestState(item, summary)");
