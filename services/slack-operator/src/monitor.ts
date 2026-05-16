@@ -1708,9 +1708,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .verdict-box .vb-head .vb-age { color: var(--muted); }
     .verdict-box .vb-text { color: var(--text); line-height: 1.4; }
 
-    /* Human checklist with real checkboxes */
-    .human-checklist { display: grid; gap: 6px; }
-    .human-checklist-head {
+    /* Operator checklist with real checkboxes */
+    .operator-checklist { display: grid; gap: 6px; }
+    .operator-checklist-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -2374,7 +2374,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         { key: "attention", title: "Needs Attention", kicker: "urgent · operator", empty: "No blockers waiting." },
         { key: "codex", title: "Codex Working", kicker: "agent · writing", empty: "Nothing waiting on Codex." },
         { key: "hermes", title: "Hermes Checking", kicker: "agent · reviewing", empty: "Hermes has no active PR checks." },
-        { key: "operator", title: "Human Review", kicker: "human · sign-off", empty: "No human sign-off needed." },
+        { key: "operator", title: "Operator Review", kicker: "operator · sign-off", empty: "No operator sign-off needed." },
         { key: "queue", title: "Release Queue", kicker: "cleared to merge", empty: "Nothing ready to merge." },
         { key: "deploy", title: "Deploying", kicker: "post-deploy verify", empty: "No deploy verification active." },
         { key: "done", title: "Done", kicker: "release history", empty: "No completed PRs in view." },
@@ -2585,7 +2585,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '<div class="drawer-body">' +
         (verdict.level === "block" ? '<section class="drawer-section">' + renderFailureCallout(verdict, summary) + '</section>' : "") +
         '<section class="drawer-section"><h3>Hermes verdict</h3>' + renderHermesVerdictBox(verdict, age) + '<dl class="pipeline-detail" style="margin-top:8px">' + reviewWhy + '</dl></section>' +
-        (verdict.level === "needs-review" ? '<section class="drawer-section">' + renderHumanChecklistSection(item, verdict, action) + '</section>' : "") +
+        (verdict.level === "needs-review" ? '<section class="drawer-section">' + renderOperatorChecklistPanel(item, verdict, action) + '</section>' : "") +
         '<section class="drawer-section"><h3>Agent pre-check</h3>' + renderAgentPrecheckList(item, summary, verdict, stage) + '</section>' +
         '<section class="drawer-section"><h3>Checks</h3>' + renderCheckMatrix(summary, testSignals) + '</section>' +
         ((touchedFiles.length || touchedAreas.length) ? '<section class="drawer-section"><h3>Touched files</h3>' + renderTouchedFiles(touchedFiles, touchedAreas) + '</section>' : "") +
@@ -2616,12 +2616,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '</div>';
     }
 
-    function renderHumanChecklistSection(item, verdict, action) {
+    function renderOperatorChecklistPanel(item, verdict, action) {
       const decision = decisionForItem(item);
-      const items = humanChecklistItems(item, verdict, action);
+      const items = operatorChecklistItems(item, verdict, action);
       const ticked = (decision.checklist || {});
       const tickCount = items.filter((entry) => ticked[entry.id] === true).length;
-      const head = '<div class="human-checklist-head"><span>Human checklist</span><span>' + tickCount + ' / ' + items.length + '</span></div>';
+      const head = '<div class="operator-checklist-head"><span>Operator checklist</span><span>' + tickCount + ' / ' + items.length + '</span></div>';
       const rows = items.map((entry) => {
         const checked = ticked[entry.id] === true;
         return '<label class="hc-item" data-checked="' + (checked ? "true" : "false") + '">' +
@@ -2629,10 +2629,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           '<span>' + escapeHtml(entry.label) + '</span>' +
           '</label>';
       }).join("");
-      return '<div class="human-checklist">' + head + rows + '</div>';
+      return '<div class="operator-checklist">' + head + rows + '</div>';
     }
 
-    function humanChecklistItems(item, verdict, action) {
+    function operatorChecklistItems(item, verdict, action) {
       const summary = item.summary || {};
       const signals = summary.reviewSignals || {};
       const touchedAreas = Array.isArray(signals.touchedAreas) ? signals.touchedAreas : [];

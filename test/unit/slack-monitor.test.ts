@@ -76,7 +76,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Needs Attention");
     expect(html).toContain("Codex Working");
     expect(html).toContain("Hermes Checking");
-    expect(html).toContain("Human Review");
+    expect(html).toContain("Operator Review");
     expect(html).toContain("Release Queue");
     expect(html).toContain("Deploying");
     expect(html).toContain("done lane");
@@ -88,7 +88,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("id=\"pause\"");
     expect(html).toContain("renderFailureCallout(verdict, summary)");
     expect(html).toContain("renderHermesVerdictBox(verdict, age)");
-    expect(html).toContain("renderHumanChecklistSection(item, verdict, action)");
+    expect(html).toContain("renderOperatorChecklistPanel(item, verdict, action)");
     expect(html).toContain("renderAgentPrecheckList(item, summary, verdict, stage)");
     expect(html).toContain("renderCheckMatrix(summary, testSignals)");
     expect(html).toContain("renderTouchedFiles(touchedFiles, touchedAreas)");
