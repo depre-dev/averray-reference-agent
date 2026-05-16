@@ -187,6 +187,31 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       font-size: 1.35rem;
       font-weight: 700;
     }
+    .owner-summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .owner-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(10, 48, 44, 0.7);
+      padding: 12px;
+    }
+    .owner-label {
+      display: block;
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .owner-count {
+      display: block;
+      margin-top: 6px;
+      font-size: 1.35rem;
+      font-weight: 700;
+    }
     .pipeline-card {
       border: 1px solid var(--line);
       border-left: 5px solid var(--accent);
@@ -214,6 +239,17 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       margin: 0 0 12px;
       color: var(--text);
       line-height: 1.4;
+    }
+    .next-action {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.04);
+      padding: 10px 12px;
+      margin-bottom: 12px;
+      line-height: 1.4;
+    }
+    .next-action strong {
+      color: var(--text);
     }
     .pipeline-steps {
       display: grid;
@@ -363,6 +399,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       header { flex-direction: column; }
       .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .pr-board { grid-template-columns: 1fr; }
+      .owner-summary { grid-template-columns: 1fr; }
       .pipeline-steps,
       .pipeline-meta { grid-template-columns: 1fr; }
       dl { grid-template-columns: 1fr; }
@@ -394,6 +431,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       <button class="filter-button" type="button" data-pipeline-filter="needs-review" aria-pressed="false"><span class="filter-label">Review</span><span id="board-review" class="filter-count">0</span></button>
       <button class="filter-button" type="button" data-pipeline-filter="pass" aria-pressed="false"><span class="filter-label">Ready</span><span id="board-ready" class="filter-count">0</span></button>
       <button class="filter-button" type="button" data-pipeline-filter="running" aria-pressed="false"><span class="filter-label">Running</span><span id="board-running" class="filter-count">0</span></button>
+    </section>
+    <section class="owner-summary" aria-label="Next action owners">
+      <div class="owner-card"><span class="owner-label">Codex needs</span><span id="owner-codex" class="owner-count">0</span></div>
+      <div class="owner-card"><span class="owner-label">Human needs</span><span id="owner-human" class="owner-count">0</span></div>
+      <div class="owner-card"><span class="owner-label">Merge queue</span><span id="owner-merge" class="owner-count">0</span></div>
+      <div class="owner-card"><span class="owner-label">Hermes active</span><span id="owner-hermes" class="owner-count">0</span></div>
     </section>
     <div class="section-title"><h2>PR Pipeline</h2><span class="pill">stage view</span></div>
     <section id="pipeline" class="pipeline-list"><div class="empty">No PR handoffs in the monitor window.</div></section>
@@ -467,7 +510,16 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       document.getElementById("board-review").textContent = String(verdicts.filter((verdict) => verdict.level === "needs-review").length);
       document.getElementById("board-ready").textContent = String(verdicts.filter((verdict) => verdict.level === "pass").length);
       document.getElementById("board-running").textContent = String(verdicts.filter((verdict) => verdict.level === "running").length);
+      renderOwnerSummary(entries);
       updatePipelineFilterButtons();
+    }
+
+    function renderOwnerSummary(entries) {
+      const owners = entries.map((item) => nextPipelineAction(item, releaseVerdict(item)).owner);
+      document.getElementById("owner-codex").textContent = String(owners.filter((owner) => owner === "Codex").length);
+      document.getElementById("owner-human").textContent = String(owners.filter((owner) => owner === "Human owner").length);
+      document.getElementById("owner-merge").textContent = String(owners.filter((owner) => owner === "Merge queue").length);
+      document.getElementById("owner-hermes").textContent = String(owners.filter((owner) => owner === "Hermes").length);
     }
 
     function updatePipelineFilterButtons() {
@@ -495,7 +547,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const summary = item.summary || {};
       const verdict = releaseVerdict(item);
       const stage = pipelineStage(item, verdict);
-      const actor = nextPipelineActor(item, verdict);
+      const action = nextPipelineAction(item, verdict);
       const prUrl = item.pullRequestUrl || derivePullRequestUrl(item);
       const commitUrl = deriveCommitUrl(item);
       const workflowRunUrl = deriveWorkflowRunUrl(item);
@@ -508,10 +560,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return '<article class="pipeline-card" data-verdict="' + escapeAttr(verdict.level) + '">' +
         '<div class="pipeline-head"><div class="pipeline-title">' + escapeHtml(title) + '</div><span class="pill state-pill" data-level="' + escapeAttr(verdict.level) + '">' + escapeHtml(verdict.label) + '</span></div>' +
         '<p class="pipeline-why">' + escapeHtml(releaseReason(summary, item, verdict.level)) + '</p>' +
+        '<div class="next-action"><strong>Next action:</strong> ' + escapeHtml(action.owner + " - " + action.text) + '</div>' +
         renderPipelineSteps(stage, verdict) +
         '<dl class="pipeline-meta">' +
         row("Stage", escapeHtml(stage.label)) +
-        row("Next actor", escapeHtml(actor)) +
+        row("Next actor", escapeHtml(action.owner)) +
         row("Updated", escapeHtml(item.updatedAt ? new Date(item.updatedAt).toLocaleString() : "unknown")) +
         row("Correlation", "<code>" + escapeHtml(item.correlationId || "unknown") + "</code>") +
         '</dl>' +
@@ -570,6 +623,23 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (verdict.level === "needs-review") return "Human owner";
       if (verdict.level === "pass") return "Merge queue";
       return "GitHub Actions";
+    }
+
+    function nextPipelineAction(item, verdict) {
+      const status = normalize(item.status);
+      if (item.active === true || item.activeState === "running" || status === "running") {
+        return { owner: "Hermes", text: "finish the current handoff checks and publish a verdict" };
+      }
+      if (verdict.level === "block") {
+        return { owner: "Codex", text: "fix the blocking signal, push the PR branch, and wait for CI/Hermes to re-run" };
+      }
+      if (verdict.level === "needs-review") {
+        return { owner: "Human owner", text: "review the gated surface and decide whether Codex should adjust or the PR can proceed" };
+      }
+      if (verdict.level === "pass") {
+        return { owner: "Merge queue", text: "merge when branch protection and queue checks are green" };
+      }
+      return { owner: "GitHub Actions", text: "finish CI before Hermes can make a release-gate recommendation" };
     }
 
     function renderPipelineSteps(stage, verdict) {
