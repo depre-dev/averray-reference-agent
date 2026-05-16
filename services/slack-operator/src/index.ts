@@ -27,6 +27,11 @@ import {
   parseMonitorConfig,
   renderMonitorHtml,
 } from "./monitor.js";
+import {
+  formatStalePrAlertForSlack,
+  shouldPostStalePrAlert,
+  stalePrAlertItems,
+} from "./stale-pr-alerts.js";
 
 const enabled = optionalEnv("SLACK_OPERATOR_ENABLED", "0") === "1";
 const httpPort = Number.parseInt(optionalEnv("SLACK_OPERATOR_HTTP_PORT", "8790"), 10);
@@ -59,6 +64,8 @@ logger.info({
     opsHealth: routineConfig.opsHealth.enabled,
     opsHealthTimeUtc: `${String(routineConfig.opsHealth.timeUtc.hour).padStart(2, "0")}:${String(routineConfig.opsHealth.timeUtc.minute).padStart(2, "0")}`,
     safeWorkScanIntervalMs: routineConfig.safeWorkScan.enabled ? routineConfig.safeWorkScan.intervalMs : 0,
+    stalePrAlertIntervalMs: routineConfig.stalePrAlerts.enabled ? routineConfig.stalePrAlerts.intervalMs : 0,
+    stalePrAlertAfterMinutes: routineConfig.stalePrAlerts.staleAfterMinutes,
   },
   monitor: {
     enabled: monitorConfig.enabled,
@@ -107,6 +114,11 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
           enabled: routineConfig.safeWorkScan.enabled,
           intervalMs: routineConfig.safeWorkScan.enabled ? routineConfig.safeWorkScan.intervalMs : 0,
           notifyOnlyOnAvailable: routineConfig.safeWorkScan.notifyOnlyOnAvailable,
+        },
+        stalePrAlerts: {
+          enabled: routineConfig.stalePrAlerts.enabled,
+          intervalMs: routineConfig.stalePrAlerts.enabled ? routineConfig.stalePrAlerts.intervalMs : 0,
+          staleAfterMinutes: routineConfig.stalePrAlerts.staleAfterMinutes,
         },
       },
       monitor: {
@@ -282,6 +294,7 @@ function startOperatorRoutines() {
       || routineConfig.dailyGithubBrief.enabled
       || routineConfig.opsHealth.enabled
       || routineConfig.safeWorkScan.enabled
+      || routineConfig.stalePrAlerts.enabled
     ) {
       logger.warn("slack_operator_routines_no_channel");
     }
@@ -292,10 +305,12 @@ function startOperatorRoutines() {
   let lastDailyGithubBriefDateKey: string | undefined;
   let lastOpsHealthDateKey: string | undefined;
   let lastSafeWorkSignature: string | undefined;
+  let lastStalePrSignature: string | undefined;
   let dailyBriefRunning = false;
   let dailyGithubBriefRunning = false;
   let opsHealthRunning = false;
   let safeWorkRunning = false;
+  let stalePrAlertsRunning = false;
 
   const checkDailyBrief = async () => {
     if (dailyBriefRunning) return;
@@ -385,6 +400,47 @@ function startOperatorRoutines() {
     }
   };
 
+  const checkStalePrAlerts = async () => {
+    if (stalePrAlertsRunning || !routineConfig.stalePrAlerts.enabled) return;
+    stalePrAlertsRunning = true;
+    try {
+      const monitor = await getHandoffMonitor({ limit: 100, activeWindowMinutes: 24 * 60 });
+      const items = stalePrAlertItems({
+        monitor,
+        staleAfterMinutes: routineConfig.stalePrAlerts.staleAfterMinutes,
+      });
+      const decision = shouldPostStalePrAlert(items, lastStalePrSignature);
+      if (!decision.shouldPost) return;
+      const text = formatStalePrAlertForSlack(items, optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor"));
+      const replyPermalink = await postSlack(routineEnvelope("stale PR handoff alert"), text);
+      const result = {
+        kind: "stale_pr_handoff_alert",
+        staleCount: items.length,
+        staleAfterMinutes: routineConfig.stalePrAlerts.staleAfterMinutes,
+        items,
+        safety: {
+          readOnly: true,
+          mutatesGithub: false,
+          mutatesAverray: false,
+          editsWikipedia: false,
+        },
+      };
+      await recordOperatorCommandEvent({
+        source: "slack_routine",
+        commandText: "stale PR handoff alert",
+        channelId: routineConfig.channelId,
+        replyPermalink,
+        result,
+      }, query);
+      lastStalePrSignature = decision.signature;
+      logger.info({ staleCount: items.length, signature: decision.signature }, "slack_operator_stale_pr_alert_posted");
+    } catch (error) {
+      logger.error({ err: error }, "slack_operator_stale_pr_alert_failed");
+    } finally {
+      stalePrAlertsRunning = false;
+    }
+  };
+
   if (routineConfig.dailyBrief.enabled) {
     setTimeout(() => void checkDailyBrief(), 5_000);
     setInterval(() => void checkDailyBrief(), 60_000);
@@ -400,6 +456,10 @@ function startOperatorRoutines() {
   if (routineConfig.safeWorkScan.enabled) {
     setTimeout(() => void checkSafeWork(), 10_000);
     setInterval(() => void checkSafeWork(), routineConfig.safeWorkScan.intervalMs);
+  }
+  if (routineConfig.stalePrAlerts.enabled) {
+    setTimeout(() => void checkStalePrAlerts(), 12_000);
+    setInterval(() => void checkStalePrAlerts(), routineConfig.stalePrAlerts.intervalMs);
   }
 }
 

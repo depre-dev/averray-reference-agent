@@ -18,6 +18,11 @@ export interface SlackRoutineConfig {
     intervalMs: number;
     notifyOnlyOnAvailable: boolean;
   };
+  stalePrAlerts: {
+    enabled: boolean;
+    intervalMs: number;
+    staleAfterMinutes: number;
+  };
 }
 
 export function parseSlackRoutineConfig(
@@ -28,6 +33,7 @@ export function parseSlackRoutineConfig(
     || firstSetValue(allowedChannelIds)
     || env.SLACK_OPERATOR_CHANNEL_ID;
   const safeWorkMinutes = positiveNumber(env.SLACK_OPERATOR_SAFE_WORK_SCAN_INTERVAL_MINUTES);
+  const stalePrMinutes = positiveNumber(env.SLACK_OPERATOR_STALE_PR_ALERT_INTERVAL_MINUTES);
   return {
     channelId,
     dailyBrief: {
@@ -51,6 +57,11 @@ export function parseSlackRoutineConfig(
       enabled: safeWorkMinutes > 0,
       intervalMs: Math.max(60_000, safeWorkMinutes * 60_000),
       notifyOnlyOnAvailable: env.SLACK_OPERATOR_SAFE_WORK_NOTIFY_ONLY_ON_AVAILABLE !== "0",
+    },
+    stalePrAlerts: {
+      enabled: stalePrMinutes > 0,
+      intervalMs: Math.max(60_000, stalePrMinutes * 60_000),
+      staleAfterMinutes: positiveNumber(env.SLACK_OPERATOR_STALE_PR_ALERT_AFTER_MINUTES) || 120,
     },
   };
 }
