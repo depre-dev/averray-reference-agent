@@ -52,6 +52,13 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Live state");
     expect(html).toContain("JUST FINISHED");
     expect(html).toContain("state-pill");
+    expect(html).toContain("PR Board");
+    expect(html).toContain("release queue");
+    expect(html).toContain("data-pipeline-filter=\"all\"");
+    expect(html).toContain("data-pipeline-filter=\"block\"");
+    expect(html).toContain("data-pipeline-filter=\"needs-review\"");
+    expect(html).toContain("data-pipeline-filter=\"pass\"");
+    expect(html).toContain("data-pipeline-filter=\"running\"");
     expect(html).toContain("PR Pipeline");
     expect(html).toContain("stage view");
     expect(html).toContain("Next actor");
@@ -69,7 +76,10 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("activeWindowMinutes: \"240\"");
     expect(html).toContain("limit: \"50\"");
     expect(html).toContain("releaseVerdict(item)");
-    expect(html).toContain("renderPipeline(collectPipelineItems(payload))");
+    expect(html).toContain("renderPipelineBoard(latestPipelineItems)");
+    expect(html).toContain("latestPipelineItems = collectPipelineItems(payload)");
+    expect(html).toContain("filterPipelineItems(entries)");
+    expect(html).toContain("updatePipelineFilterButtons()");
     expect(html).toContain("pipelineStage(item, verdict)");
     expect(html).toContain("nextPipelineActor(item, verdict)");
     expect(html).toContain("renderPipelineSteps(stage, verdict)");
