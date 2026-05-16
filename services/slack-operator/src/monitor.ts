@@ -154,6 +154,44 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       display: grid;
       gap: 10px;
     }
+    .repo-group {
+      display: grid;
+      gap: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(10, 48, 44, 0.5);
+      padding: 12px;
+    }
+    .repo-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .repo-title {
+      min-width: 0;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .repo-summary {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 6px;
+    }
+    .repo-empty {
+      color: var(--muted);
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      text-align: center;
+    }
+    .repo-history-label {
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
     .pr-board {
       display: grid;
       grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -445,6 +483,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       main { width: min(100vw - 20px, 1180px); margin-top: 14px; }
       header { flex-direction: column; }
       .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .repo-head { flex-direction: column; }
+      .repo-summary { justify-content: flex-start; }
       .pr-board { grid-template-columns: 1fr; }
       .staleness-summary { grid-template-columns: 1fr; }
       .owner-summary { grid-template-columns: 1fr; }
@@ -491,7 +531,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       <div class="owner-card"><span class="owner-label">Merge queue</span><span id="owner-merge" class="owner-count">0</span></div>
       <div class="owner-card"><span class="owner-label">Hermes active</span><span id="owner-hermes" class="owner-count">0</span></div>
     </section>
-    <div class="section-title"><h2>PR Pipeline</h2><span class="pill">stage view</span></div>
+    <div class="section-title"><h2>PR Pipeline</h2><span class="pill">grouped by repo</span></div>
     <section id="pipeline" class="pipeline-list"><div class="empty">No PR handoffs in the monitor window.</div></section>
     <div class="section-title"><h2>Release Gate</h2><span class="pill">blocks + human review</span></div>
     <section id="attention" class="list"><div class="empty">No handoffs need attention.</div></section>
@@ -596,12 +636,82 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         target.innerHTML = '<div class="empty">No PR handoffs in the monitor window.</div>';
         return;
       }
-      target.innerHTML = filtered.slice(0, 12).map(renderPipelineItem).join("");
+      target.innerHTML = renderRepoGroups(filtered);
     }
 
     function filterPipelineItems(entries) {
       if (pipelineFilter === "all") return entries;
       return entries.filter((item) => releaseVerdict(item).level === pipelineFilter);
+    }
+
+    function renderRepoGroups(entries) {
+      const groups = new Map();
+      entries.forEach((item) => {
+        const repo = item.repo || "unknown repo";
+        const current = groups.get(repo) || [];
+        current.push(item);
+        groups.set(repo, current);
+      });
+      return Array.from(groups.entries())
+        .sort((a, b) => repoSortScore(b[1]) - repoSortScore(a[1]) || String(a[0]).localeCompare(String(b[0])))
+        .map(([repo, items]) => renderRepoGroup(repo, items))
+        .join("");
+    }
+
+    function renderRepoGroup(repo, items) {
+      const current = items.filter(isCurrentPipelineItem);
+      const history = items.filter((item) => !isCurrentPipelineItem(item));
+      const currentMarkup = current.length
+        ? current.map(renderPipelineItem).join("")
+        : '<div class="repo-empty">No current work for this repo.</div>';
+      const historyMarkup = history.length
+        ? '<div class="repo-history-label">Recent history</div>' + history.slice(0, 4).map(renderPipelineItem).join("")
+        : "";
+      return '<section class="repo-group" data-repo="' + escapeAttr(repo) + '">' +
+        '<div class="repo-head"><div class="repo-title">' + escapeHtml(repo) + '</div><div class="repo-summary">' + repoSummaryChips(items, current) + '</div></div>' +
+        currentMarkup +
+        historyMarkup +
+        '</section>';
+    }
+
+    function repoSummaryChips(items, current) {
+      const verdicts = items.map(releaseVerdict);
+      const stale = items.map(handoffAge).filter((age) => age.state === "stale").length;
+      const chips = [
+        { label: "Current", value: current.length },
+        { label: "Blocked", value: verdicts.filter((verdict) => verdict.level === "block").length },
+        { label: "Review", value: verdicts.filter((verdict) => verdict.level === "needs-review").length },
+        { label: "Ready", value: verdicts.filter((verdict) => verdict.level === "pass").length },
+        { label: "Stale", value: stale },
+      ];
+      return chips.map((chip) => '<span class="pill">' + escapeHtml(chip.label + " " + chip.value) + '</span>').join("");
+    }
+
+    function repoSortScore(items) {
+      return items.reduce((score, item) => {
+        const verdict = releaseVerdict(item);
+        const age = handoffAge(item);
+        if (verdict.level === "block") return score + 1000;
+        if (age.state === "stale") return score + 400;
+        if (verdict.level === "needs-review") return score + 300;
+        if (verdict.level === "running") return score + 200;
+        if (verdict.level === "pass") return score + 100;
+        return score + 10;
+      }, 0);
+    }
+
+    function isCurrentPipelineItem(item) {
+      const verdict = releaseVerdict(item);
+      const age = handoffAge(item);
+      const status = normalize(item.status);
+      return Boolean(
+        item.active === true
+        || item.activeState === "running"
+        || status === "running"
+        || verdict.level === "block"
+        || verdict.level === "needs-review"
+        || age.state !== "fresh"
+      );
     }
 
     function renderPipelineItem(item) {

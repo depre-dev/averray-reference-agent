@@ -69,7 +69,9 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Waiting");
     expect(html).toContain("Stale");
     expect(html).toContain("PR Pipeline");
-    expect(html).toContain("stage view");
+    expect(html).toContain("grouped by repo");
+    expect(html).toContain("No current work for this repo.");
+    expect(html).toContain("Recent history");
     expect(html).toContain("Next action:");
     expect(html).toContain("Next actor");
     expect(html).toContain("PR");
@@ -91,6 +93,11 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("renderStalenessSummary(entries)");
     expect(html).toContain("latestPipelineItems = collectPipelineItems(payload)");
     expect(html).toContain("filterPipelineItems(entries)");
+    expect(html).toContain("renderRepoGroups(filtered)");
+    expect(html).toContain("renderRepoGroup(repo, items)");
+    expect(html).toContain("repoSummaryChips(items, current)");
+    expect(html).toContain("repoSortScore(b[1])");
+    expect(html).toContain("isCurrentPipelineItem(item)");
     expect(html).toContain("updatePipelineFilterButtons()");
     expect(html).toContain("pipelineStage(item, verdict)");
     expect(html).toContain("nextPipelineAction(item, verdict)");
