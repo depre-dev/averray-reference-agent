@@ -74,6 +74,8 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("No human review needed.");
     expect(html).toContain("Nothing ready to merge.");
     expect(html).toContain("No completed PRs in view.");
+    expect(html).toContain("code review");
+    expect(html).toContain("handoff");
     expect(html).toContain("PR staleness summary");
     expect(html).toContain("Fresh");
     expect(html).toContain("Waiting");
@@ -120,7 +122,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("renderOwnerLanes(latestPipelineItems)");
     expect(html).toContain("renderOwnerSummary(entries)");
     expect(html).toContain("renderStalenessSummary(entries)");
-    expect(html).toContain("latestPipelineItems = collectPipelineItems(payload)");
+    expect(html).toContain("latestPipelineItems = groupPrPipelineItems(collectPipelineItems(payload))");
     expect(html).toContain("filterPipelineItems(entries)");
     expect(html).toContain("renderRepoGroups(filtered)");
     expect(html).toContain("renderRepoGroup(repo, items)");
@@ -130,6 +132,14 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("renderOwnerLane(lane, filtered)");
     expect(html).toContain("renderOwnerLaneCard(item)");
     expect(html).toContain("ownerLaneSortScore(item)");
+    expect(html).toContain("groupPrPipelineItems(entries)");
+    expect(html).toContain("finalizePrGroup(items)");
+    expect(html).toContain("groupedReleaseVerdict(item)");
+    expect(html).toContain("groupPhaseLabels(item)");
+    expect(html).toContain("renderGroupBadges(item)");
+    expect(html).toContain("prIdentityKey(item)");
+    expect(html).toContain("verdictSortScore(verdict)");
+    expect(html).toContain("uniqueStrings(values)");
     expect(html).toContain("isCurrentPipelineItem(item)");
     expect(html).toContain("updatePipelineFilterButtons()");
     expect(html).toContain("buildMonitorUrl(path)");

@@ -367,6 +367,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       font-size: 0.9rem;
       line-height: 1.35;
     }
+    .phase-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 0 0 8px;
+    }
     .pipeline-card {
       border: 1px solid var(--line);
       border-left: 5px solid var(--accent);
@@ -849,18 +855,18 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       latestPayload = payload;
       const counts = payload.counts || {};
       const recent = payload.recent || [];
-      const verdicts = recent.map(releaseVerdict);
-      const attention = recent.filter(needsAttention);
-      const blocked = verdicts.filter((verdict) => verdict.level === "block").length;
-      const review = verdicts.filter((verdict) => verdict.level === "needs-review").length;
       document.getElementById("status").textContent = payload.status || "unknown";
       document.getElementById("active-count").textContent = counts.active || 0;
-      document.getElementById("gate-count").textContent = blocked + " / " + review;
       document.getElementById("recent-count").textContent = counts.recent || 0;
       document.getElementById("event-count").textContent = counts.events || 0;
       document.getElementById("generated").textContent = payload.generatedAt ? new Date(payload.generatedAt).toLocaleString() : "unknown";
       renderList("active", payload.active || [], "No running or just-finished handoffs.");
-      latestPipelineItems = collectPipelineItems(payload);
+      latestPipelineItems = groupPrPipelineItems(collectPipelineItems(payload));
+      const attention = latestPipelineItems.filter(needsAttention);
+      const verdicts = latestPipelineItems.map(releaseVerdict);
+      const blocked = verdicts.filter((verdict) => verdict.level === "block").length;
+      const review = verdicts.filter((verdict) => verdict.level === "needs-review").length;
+      document.getElementById("gate-count").textContent = blocked + " / " + review;
       renderPipelineBoard(latestPipelineItems);
       renderOwnerLanes(latestPipelineItems);
       renderPipeline(latestPipelineItems);
@@ -949,6 +955,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         : escapeHtml(title);
       return '<article class="lane-card" data-verdict="' + escapeAttr(verdict.level) + '">' +
         '<div class="lane-card-title">' + titleMarkup + '</div>' +
+        renderGroupBadges(item) +
         '<div class="lane-card-meta">' + escapeHtml(verdict.label + " - " + age.label + " " + age.duration) + '</div>' +
         '<div class="lane-card-action">' + escapeHtml(action.text) + '</div>' +
         '<div class="lane-card-meta">' + escapeHtml(verdict.why) + '</div>' +
@@ -1080,6 +1087,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       ].filter(Boolean).join("");
       return '<article class="pipeline-card" data-verdict="' + escapeAttr(verdict.level) + '" data-age="' + escapeAttr(age.state) + '">' +
         '<div class="pipeline-head"><div class="pipeline-title">' + escapeHtml(title) + '</div><span class="pill state-pill" data-level="' + escapeAttr(verdict.level) + '">' + escapeHtml(verdict.label) + '</span></div>' +
+        renderGroupBadges(item) +
         '<p class="pipeline-why">' + escapeHtml(verdict.why) + '</p>' +
         '<p class="age-line" data-age="' + escapeAttr(age.state) + '">' + escapeHtml(age.label + " - " + action.owner + " for " + age.duration) + '</p>' +
         '<div class="next-action"><strong>Next action:</strong> ' + escapeHtml(action.owner + " - " + action.text) + '</div>' +
@@ -1216,6 +1224,47 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return entries.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
     }
 
+    function groupPrPipelineItems(entries) {
+      const groups = new Map();
+      entries.forEach((item) => {
+        const key = prIdentityKey(item);
+        const current = groups.get(key) || [];
+        current.push(item);
+        groups.set(key, current);
+      });
+      return Array.from(groups.values())
+        .map(finalizePrGroup)
+        .sort((a, b) => ownerLaneSortScore(b) - ownerLaneSortScore(a) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+    }
+
+    function finalizePrGroup(items) {
+      const sorted = items.slice().sort((a, b) => verdictSortScore(baseReleaseVerdict(b)) - verdictSortScore(baseReleaseVerdict(a)) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+      const lead = sorted[0] || {};
+      const groupItems = items.slice().sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+      const testCaseIds = uniqueStrings(groupItems.flatMap((item) => Array.isArray(item.testCaseIds) ? item.testCaseIds : []));
+      return {
+        ...lead,
+        intent: "pr_group",
+        groupItems,
+        groupIntents: uniqueStrings(groupItems.map((item) => item.intent || "pr_handoff")),
+        pullRequestNumber: lead.pullRequestNumber || pullRequestNumberFromCorrelation(lead.correlationId),
+        updatedAt: groupItems[0]?.updatedAt || lead.updatedAt,
+        testCaseIds,
+      };
+    }
+
+    function verdictSortScore(verdict) {
+      if (verdict.level === "block") return 500;
+      if (verdict.level === "needs-review") return 400;
+      if (verdict.level === "running") return 300;
+      if (verdict.level === "pass") return 100;
+      return 0;
+    }
+
+    function uniqueStrings(values) {
+      return Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean)));
+    }
+
     function isPrPipelineItem(item) {
       const intent = normalize(item.intent);
       const correlationId = String(item.correlationId || "");
@@ -1230,8 +1279,28 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function pipelineTitle(item) {
       const repo = item.repo || "unknown repo";
       const prNumber = item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId);
+      if (Array.isArray(item.groupItems)) return [repo, prNumber ? "#" + prNumber : ""].filter(Boolean).join(" ");
       const intent = item.intent || "pr_handoff";
       return [repo, prNumber ? "#" + prNumber : "", intent].filter(Boolean).join(" ");
+    }
+
+    function renderGroupBadges(item) {
+      const labels = groupPhaseLabels(item);
+      if (!labels.length) return "";
+      return '<div class="phase-badges">' + labels.map((label) => '<span class="pill">' + escapeHtml(label) + '</span>').join("") + '</div>';
+    }
+
+    function groupPhaseLabels(item) {
+      if (!Array.isArray(item.groupItems)) return [];
+      const labels = uniqueStrings(item.groupItems.map((entry) => handoffKindLabel(entry.intent)));
+      return labels.length > 1 ? labels : [];
+    }
+
+    function handoffKindLabel(intent) {
+      const kind = normalize(intent);
+      if (kind === "pr_code_review") return "code review";
+      if (kind === "pr_handoff") return "handoff";
+      return String(intent || "handoff").replace(/_/g, " ");
     }
 
     function pipelineStage(item, verdict) {
@@ -1400,7 +1469,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function renderHandoff(item) {
       const summary = item.summary || {};
-      const title = [item.repo, item.pullRequestNumber ? "#" + item.pullRequestNumber : "", item.intent].filter(Boolean).join(" ");
+      const title = Array.isArray(item.groupItems)
+        ? pipelineTitle(item)
+        : [item.repo, item.pullRequestNumber ? "#" + item.pullRequestNumber : "", item.intent].filter(Boolean).join(" ");
       const verdict = releaseVerdict(item);
       const prUrl = item.pullRequestUrl || derivePullRequestUrl(item);
       const prLabel = item.pullRequestNumber ? "#" + escapeHtml(String(item.pullRequestNumber)) : "open PR";
@@ -1446,7 +1517,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function releaseVerdict(item) {
-      const verdict = baseReleaseVerdict(item);
+      const verdict = Array.isArray(item.groupItems) ? groupedReleaseVerdict(item) : baseReleaseVerdict(item);
       const decision = decisionForItem(item);
       if (verdict.level === "needs-review" && decision.status === "approved") {
         return {
@@ -1456,6 +1527,17 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         };
       }
       return verdict;
+    }
+
+    function groupedReleaseVerdict(item) {
+      const verdicts = item.groupItems.map(baseReleaseVerdict);
+      const winner = verdicts.sort((a, b) => verdictSortScore(b) - verdictSortScore(a))[0] || baseReleaseVerdict(item);
+      const labels = groupPhaseLabels(item);
+      if (labels.length <= 1) return winner;
+      return {
+        ...winner,
+        why: "Strictest result across " + labels.join(" + ") + ": " + winner.why,
+      };
     }
 
     function baseReleaseVerdict(item) {
@@ -1516,11 +1598,18 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function decisionForItem(item) {
-      return monitorDecisions[decisionKeyForItem(item)] || {};
+      return monitorDecisions[decisionKeyForItem(item)] || (item.correlationId ? monitorDecisions[String(item.correlationId)] : {}) || {};
     }
 
     function decisionKeyForItem(item) {
-      return String(item.correlationId || [item.repo, item.pullRequestNumber].filter(Boolean).join("#") || "unknown");
+      return prIdentityKey(item);
+    }
+
+    function prIdentityKey(item) {
+      const repo = String(item.repo || "");
+      const prNumber = item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId);
+      if (repo && prNumber) return repo + "#" + prNumber;
+      return String(item.correlationId || "unknown");
     }
 
     function classifyReleaseGate(status, finalVerdict, mergeRecommendation, reason, reviewReasons) {
