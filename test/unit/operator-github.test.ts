@@ -785,6 +785,86 @@ describe("github operator status", () => {
     ]));
   });
 
+  it("asks for human review on blockchain and XCM settlement changes even when CI is green", async () => {
+    const fetchFn = async (url: string | URL | Request) => {
+      const text = String(url);
+      if (text.endsWith("/repos/averray-agent/agent/pulls/342")) {
+        return jsonResponse({
+          number: 342,
+          title: "Preserve exact XCM request metadata",
+          body: "Rollout: no deploy notes beyond normal backend release. Rollback: revert this PR if XCM metadata parity fails.",
+          html_url: "https://github.com/averray-agent/agent/pull/342",
+          user: { login: "depre-dev" },
+          draft: false,
+          state: "open",
+          head: { ref: "codex/blockchain-audit-xcm-indexer-parity", sha: "xcm123" },
+          changed_files: 6,
+          mergeable_state: "clean",
+        });
+      }
+      if (text.includes("/pulls/342/files")) {
+        return jsonResponse([
+          { filename: "mcp-server/src/blockchain/gateway.js", status: "modified", additions: 15, deletions: 3, changes: 18 },
+          { filename: "mcp-server/src/blockchain/gateway.test.js", status: "modified", additions: 47, deletions: 0, changes: 47 },
+          { filename: "mcp-server/src/services/xcm-observation-relay.js", status: "modified", additions: 7, deletions: 0, changes: 7 },
+          { filename: "mcp-server/src/services/xcm-observation-relay.test.js", status: "modified", additions: 11, deletions: 1, changes: 12 },
+          { filename: "mcp-server/src/services/xcm-settlement-watcher.js", status: "modified", additions: 12, deletions: 0, changes: 12 },
+          { filename: "mcp-server/src/services/xcm-settlement-watcher.test.js", status: "modified", additions: 13, deletions: 0, changes: 13 },
+        ]);
+      }
+      if (text.includes("/commits/xcm123/check-runs")) {
+        return jsonResponse({
+          check_runs: [
+            { name: "Backend — node --test", status: "completed", conclusion: "success" },
+            { name: "Indexer — typecheck", status: "completed", conclusion: "success" },
+            { name: "Solidity — forge test", status: "completed", conclusion: "success" },
+          ],
+        });
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const review = await getGithubPullRequestReview({
+      repo: "averray-agent/agent",
+      pullRequestNumber: 342,
+      env: { GITHUB_TOKEN: "ghp_readonly" },
+      fetchFn,
+      now: new Date("2026-05-16T15:00:00.000Z"),
+    });
+
+    expect(review).toMatchObject({
+      health: "attention",
+      files: {
+        highRisk: expect.arrayContaining([
+          expect.objectContaining({
+            filename: "mcp-server/src/blockchain/gateway.js",
+            risk: "medium",
+            category: "blockchain",
+          }),
+          expect.objectContaining({
+            filename: "mcp-server/src/services/xcm-settlement-watcher.js",
+            risk: "medium",
+            category: "settlement",
+          }),
+        ]),
+      },
+      review: {
+        touchedAreas: expect.arrayContaining(["backend", "blockchain", "settlement", "tests"]),
+        rolloutNotesRequired: true,
+        rolloutNotesPresent: true,
+      },
+      mergeRecommendation: "needs_review",
+    });
+    expect(review.riskFindings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        severity: "medium",
+        code: "pr_blockchain_settlement_review",
+        message: expect.stringContaining("request metadata preservation"),
+      }),
+      expect.objectContaining({ severity: "medium", code: "pr_review_risk_files" }),
+    ]));
+  });
+
   it("flags backend changes that have no changed tests or matching check names", async () => {
     const fetchFn = async (url: string | URL | Request) => {
       const text = String(url);

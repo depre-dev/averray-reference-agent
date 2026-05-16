@@ -299,6 +299,8 @@ export type GithubPullRequestTouchedArea =
   | "backend"
   | "indexer"
   | "contracts"
+  | "blockchain"
+  | "settlement"
   | "ops"
   | "deploy"
   | "workflow"
@@ -326,7 +328,17 @@ export interface GithubPullRequestFileSummary {
 
 export interface GithubPullRequestFileRisk extends GithubPullRequestFileSummary {
   risk: "high" | "medium";
-  category: "secrets" | "contracts" | "database" | "ops" | "deploy" | "workflow" | "lockfile" | "large_file";
+  category:
+    | "secrets"
+    | "contracts"
+    | "database"
+    | "ops"
+    | "deploy"
+    | "workflow"
+    | "lockfile"
+    | "blockchain"
+    | "settlement"
+    | "large_file";
   reason: string;
 }
 
@@ -1452,6 +1464,9 @@ function fileRisk(file: GithubPullRequestFileSummary): GithubPullRequestFileRisk
   }
   const reviewPatterns: Array<Pick<GithubPullRequestFileRisk, "category" | "reason"> & { pattern: RegExp }> = [
     { pattern: /^\.github\/workflows\//, category: "workflow", reason: "touches GitHub workflow automation" },
+    { pattern: /^mcp-server\/src\/blockchain\//, category: "blockchain", reason: "touches blockchain gateway or chain integration logic" },
+    { pattern: /^mcp-server\/src\/services\/xcm-/, category: "settlement", reason: "touches XCM observation or settlement routing logic" },
+    { pattern: /(^|\/)(settlement|escrow|liquidity|payment|usdc|product-proof)/, category: "settlement", reason: "touches settlement, escrow, payment, or proof flow logic" },
     { pattern: /(^|\/)ops\//, category: "ops", reason: "touches operator or infrastructure configuration" },
     { pattern: /(^|\/)deploy/, category: "deploy", reason: "touches deploy automation" },
     { pattern: /compose.*\.ya?ml$/, category: "ops", reason: "touches container compose configuration" },
@@ -1509,6 +1524,13 @@ function touchedAreasForPath(filename: string): GithubPullRequestTouchedArea[] {
   if (/^mcp-server\//.test(path) || /^packages\//.test(path) || /^services\//.test(path)) areas.push("backend");
   if (/^indexer\//.test(path)) areas.push("indexer");
   if (/^contracts?\//.test(path)) areas.push("contracts");
+  if (/^mcp-server\/src\/blockchain\//.test(path)) areas.push("blockchain");
+  if (
+    /^mcp-server\/src\/services\/xcm-/.test(path)
+    || /(^|\/)(settlement|escrow|liquidity|payment|usdc|product-proof)/.test(path)
+  ) {
+    areas.push("settlement");
+  }
   if (/^ops\//.test(path) || /compose.*\.ya?ml$/.test(path) || /caddyfile$/.test(path)) areas.push("ops");
   if (/(^|\/)deploy/.test(path)) areas.push("deploy");
   if (/^\.github\/workflows\//.test(path)) areas.push("workflow");
@@ -1518,16 +1540,28 @@ function touchedAreasForPath(filename: string): GithubPullRequestTouchedArea[] {
 }
 
 function isCodeArea(area: GithubPullRequestTouchedArea): boolean {
-  return area === "frontend" || area === "backend" || area === "indexer" || area === "contracts";
+  return area === "frontend"
+    || area === "backend"
+    || area === "indexer"
+    || area === "contracts"
+    || area === "blockchain"
+    || area === "settlement";
 }
 
 function requiresRolloutNotes(area: GithubPullRequestTouchedArea): boolean {
-  return area === "ops" || area === "deploy" || area === "workflow" || area === "contracts" || area === "indexer";
+  return area === "ops"
+    || area === "deploy"
+    || area === "workflow"
+    || area === "contracts"
+    || area === "indexer"
+    || area === "blockchain"
+    || area === "settlement";
 }
 
 function hasRolloutNotes(body: string | null | undefined): boolean {
   if (!body) return false;
-  return /(deploy|deployment|rollback|roll back|rollout|operator|vps|secret|env|migration|contract)/i.test(body);
+  const rolloutKeywords = /(deploy|deployment|rollback|roll back|rollout|operator|vps|secret|env|migration|contract|blockchain|xcm|settlement|escrow|liquidity|payment)/i;
+  return rolloutKeywords.test(body);
 }
 
 function isTestSignalCheck(name: string): boolean {
@@ -1541,6 +1575,8 @@ function areaHasCheckSignal(area: GithubPullRequestTouchedArea, checkNames: stri
     backend: /(backend|mcp|server|service|test|typecheck)/,
     indexer: /(indexer|typecheck|test)/,
     contracts: /(contract|forge|solidity|test)/,
+    blockchain: /(backend|blockchain|gateway|mcp|server|test|typecheck)/,
+    settlement: /(backend|xcm|settlement|watcher|relay|mcp|server|test|typecheck)/,
   };
   const pattern = patterns[area];
   return pattern ? checkNames.some((name) => pattern.test(name)) : false;
@@ -1611,6 +1647,14 @@ function buildPullRequestRiskFindings(input: {
     });
   }
   const reviewRisk = input.highRiskFiles.filter((file) => file.risk === "medium");
+  const settlementRisk = reviewRisk.filter((file) => file.category === "blockchain" || file.category === "settlement");
+  if (settlementRisk.length > 0) {
+    findings.push({
+      severity: "medium",
+      code: "pr_blockchain_settlement_review",
+      message: `${settlementRisk.length} changed file(s) touch blockchain/XCM settlement flow. Human should verify request metadata preservation, claim/submit routing, settlement IDs, and rollback notes before merge.`,
+    });
+  }
   if (reviewRisk.length > 0) {
     const categories = [...new Set(reviewRisk.map((file) => file.category))].join(", ");
     findings.push({
@@ -1630,7 +1674,7 @@ function buildPullRequestRiskFindings(input: {
     findings.push({
       severity: "medium",
       code: "pr_rollout_notes_missing",
-      message: "Deploy, ops, workflow, contract, or indexer changes should include rollout or rollback notes in the PR body.",
+      message: "Deploy, ops, workflow, contract, indexer, blockchain, or settlement changes should include rollout or rollback notes in the PR body.",
     });
   }
   if (input.files.length > 25) {
