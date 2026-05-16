@@ -74,6 +74,11 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Recent history");
     expect(html).toContain("Next action:");
     expect(html).toContain("Next actor");
+    expect(html).toContain("PR detail");
+    expect(html).toContain("PR state");
+    expect(html).toContain("Suggested owner");
+    expect(html).toContain("Changed areas");
+    expect(html).toContain("Test coverage");
     expect(html).toContain("PR");
     expect(html).toContain("CI");
     expect(html).toContain("Hermes");
@@ -101,6 +106,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("updatePipelineFilterButtons()");
     expect(html).toContain("pipelineStage(item, verdict)");
     expect(html).toContain("nextPipelineAction(item, verdict)");
+    expect(html).toContain("renderPipelineDetails(item, summary, verdict, action)");
     expect(html).toContain("handoffAge(item)");
     expect(html).toContain("formatDuration(minutes)");
     expect(html).toContain("nextPipelineActor(item, verdict)");
