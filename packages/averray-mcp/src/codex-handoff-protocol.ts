@@ -10,7 +10,7 @@ export function getCodexHandoffProtocol() {
     roles: {
       builder: "Codex edits code, works in branches/worktrees, opens PRs, and fixes failures.",
       reviewerOperator: "Hermes reviews PR risk, runs read-only checks, reports to PR comments/Slack/monitor, and proposes actions without broad merge/deploy execution.",
-      approver: "Human owner approves merge, deploy, override, rollback, or secret rotation.",
+      approver: "Operator approves merge, deploy, override, rollback, or secret rotation after agent pre-check evidence is attached.",
     },
     flow: [
       "Codex opens or updates a PR.",
@@ -18,7 +18,7 @@ export function getCodexHandoffProtocol() {
       "GitHub Actions calls averray_invoke_agent_task with intent=pr_code_review.",
       "GitHub Actions calls averray_invoke_agent_task with intent=pr_handoff and requested read-only testbed cases.",
       "Hermes records handoff events and, when enabled, upserts one PR verdict comment alongside Slack and monitor reports.",
-      "Codex responds to PASS / HUMAN REVIEW / BLOCK.",
+      "Codex responds to PASS / OPERATOR REVIEW / BLOCK.",
       "After merge/deploy, Hermes runs post_deploy_verification.",
     ],
     codexPrRequirements: [
@@ -40,16 +40,16 @@ export function getCodexHandoffProtocol() {
       {
         label: "PASS",
         meaning: "No blocking or review-gated release signal was found.",
-        codexAction: "Continue normal merge queue or ask the human owner for final approval.",
+        codexAction: "Continue normal merge queue or ask the operator for final approval.",
       },
       {
-        label: "HUMAN REVIEW",
-        meaning: "Not necessarily broken; review-gated surface or incomplete automated proof needs a human look.",
-        codexAction: "Explain the risk, tests, and rollout/rollback plan in the PR, then ask the human owner to review.",
+        label: "OPERATOR REVIEW",
+        meaning: "Not necessarily broken; agents should provide code-level pre-check evidence, and the operator decides project intent, architecture, or rollout risk.",
+        codexAction: "Attach the risk, tests, rollout/rollback plan, and agent pre-check evidence, then ask the operator for sign-off.",
       },
       {
         label: "BLOCK",
-        meaning: "Do not merge or deploy until fixed or explicitly overridden by a human owner outside Hermes.",
+        meaning: "Do not merge or deploy until fixed or explicitly overridden by the operator outside Hermes.",
         codexAction: "Stop, fix the PR or missing evidence, wait for CI, and let Hermes re-run.",
       },
     ],

@@ -182,7 +182,7 @@ describe("handoff event monitor", () => {
           mergeRecommendation: "needs_review",
           riskCategory: "workflow",
           highestRisk: "medium",
-          why: "PR touches deployment scripts; human review recommended.",
+          why: "PR touches deployment scripts; operator review recommended.",
           changedFiles: 2,
           tests: {
             matchedTouchedAreas: true,
@@ -212,7 +212,7 @@ describe("handoff event monitor", () => {
             {
               severity: "medium",
               code: "high_risk_files",
-              message: "PR touches deployment scripts; human review recommended.",
+              message: "PR touches deployment scripts; operator review recommended.",
             },
           ],
         },
@@ -231,7 +231,7 @@ describe("handoff event monitor", () => {
         mergeRecommendation: "needs_review",
         riskCategory: "workflow",
         highestRisk: "medium",
-        why: "PR touches deployment scripts; human review recommended.",
+        why: "PR touches deployment scripts; operator review recommended.",
         changedFiles: 2,
         testsMatchedTouchedAreas: true,
         missingTestSignals: [],
@@ -250,7 +250,7 @@ describe("handoff event monitor", () => {
         {
           severity: "medium",
           code: "high_risk_files",
-          message: "PR touches deployment scripts; human review recommended.",
+          message: "PR touches deployment scripts; operator review recommended.",
         },
       ],
     });

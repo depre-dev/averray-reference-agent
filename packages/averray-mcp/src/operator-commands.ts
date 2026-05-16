@@ -464,7 +464,7 @@ function projectMemoryTarget(
 }
 
 function isCodexHandoffProtocolCommand(text: string): boolean {
-  return /^(codex handoff protocol|codex hermes protocol|hermes codex protocol|codex handoff|builder reviewer protocol|what should codex do when hermes blocks|what does human review mean|what does hermes block mean|how should codex hand off prs)( details?| full| audit)?$/.test(text);
+  return /^(codex handoff protocol|codex hermes protocol|hermes codex protocol|codex handoff|builder reviewer protocol|what should codex do when hermes blocks|what does operator review mean|what does human review mean|what does hermes block mean|how should codex hand off prs)( details?| full| audit)?$/.test(text);
 }
 
 function projectRunbookTarget(

@@ -105,7 +105,7 @@ export async function getAdminReadiness(deps: OperatorStatusDeps) {
       "Deploy, restart, or reconfigure production services automatically.",
       "Change DNS, Cloudflare Access, Slack app scopes, or secrets.",
       "Spend money, move funds, or change wallet configuration.",
-      "Override confidence gates without a separate human review path.",
+      "Override confidence gates without a separate operator review path.",
     ],
     requiredBeforeProjectAdmin: [
       "Define a project registry with owners, environments, and allowed actions.",

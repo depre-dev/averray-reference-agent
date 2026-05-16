@@ -84,11 +84,11 @@ function runbookForAction(action: AdminActionKind, project: ProjectMemoryEntry |
 function mergeRunbook(project: ProjectMemoryEntry | undefined): RunbookTemplate {
   const repo = primaryRepo(project);
   return {
-    goal: "Decide whether a pull request is ready for a human merge approval.",
+    goal: "Decide whether a pull request is ready for operator merge approval.",
     trigger: "A PR has green CI and the author asks for review, merge, or release readiness.",
     requiredEvidence: [
       "GitHub CI and merge queue checks are green.",
-      "Hermes PR handoff verdict is ok_to_merge, or every needs_review / hold reason has a human resolution.",
+      "Hermes PR handoff verdict is ok_to_merge, or every needs_review / hold reason has an operator resolution based on attached agent pre-check evidence.",
       "Changed files match the stated PR scope and required tests.",
       "PR notes mention affected surfaces: backend, frontend, indexer, Caddy, contracts, public site, or docs.",
       "Rollback/deploy notes are present when deployment or ops files changed.",
@@ -96,9 +96,9 @@ function mergeRunbook(project: ProjectMemoryEntry | undefined): RunbookTemplate 
     operatorSteps: [
       repo ? `Run \`github status\` and inspect ${repo} PR status.` : "Run `github status` and inspect PR status.",
       "Open the handoff monitor and read the latest PR handoff card.",
-      "If high-risk files changed, ask for explicit human review before merge.",
+      "If high-risk files changed, ask for explicit operator review before merge.",
       "Use `propose merge for owner/repo#PR` to get a proposal-only admin recommendation.",
-      "Merge manually only after the human owner approves the evidence.",
+      "Merge manually only after the operator approves the attached agent pre-check evidence.",
     ],
     stopConditions: [
       "Any required CI or merge queue check is failing, cancelled, or still running.",
@@ -121,7 +121,7 @@ function deployRunbook(project: ProjectMemoryEntry | undefined): RunbookTemplate
   const deploy = project?.deploy ?? {};
   return {
     goal: "Ship a known commit and verify production is healthy afterward.",
-    trigger: stringField(deploy, "trigger") ?? "A human owner decides a commit or PR should be released.",
+    trigger: stringField(deploy, "trigger") ?? "An operator decides a commit or PR should be released.",
     requiredEvidence: [
       "Target commit is known and points at the intended branch or release.",
       "CI is green for the target commit.",
@@ -157,7 +157,7 @@ function deployRunbook(project: ProjectMemoryEntry | undefined): RunbookTemplate
       "Verify public app/API URLs listed in project memory if applicable.",
     ],
     rollbackNotes: [
-      "Rollback requires explicit human approval.",
+      "Rollback requires explicit operator approval.",
       "Prefer the project’s rollback workflow or redeploying a known-good commit.",
       "Capture failure command/logs before rollback so the cause is not lost.",
     ],
@@ -167,12 +167,12 @@ function deployRunbook(project: ProjectMemoryEntry | undefined): RunbookTemplate
 function rollbackRunbook(project: ProjectMemoryEntry | undefined): RunbookTemplate {
   return {
     goal: "Return production to a known-good state with an audit trail.",
-    trigger: "A deploy is unhealthy, customer-facing behavior regressed, or a human owner requests rollback.",
+    trigger: "A deploy is unhealthy, customer-facing behavior regressed, or an operator requests rollback.",
     requiredEvidence: [
       "Current bad deploy SHA/run is identified.",
       "Known-good SHA/run is identified.",
       "Failure symptom and first failing check/log are captured.",
-      "Human owner explicitly approves rollback.",
+      "Operator explicitly approves rollback.",
       project ? `Project memory reviewed for ${project.name}.` : "Project memory reviewed for the target project.",
     ],
     operatorSteps: [
@@ -268,13 +268,13 @@ function restartRunbook(project: ProjectMemoryEntry | undefined): RunbookTemplat
 
 function genericRunbook(project: ProjectMemoryEntry | undefined): RunbookTemplate {
   return {
-    goal: "Prepare a safe admin action with human approval.",
-    trigger: "A human or agent asks whether a project-admin action is ready.",
+    goal: "Prepare a safe admin action with operator approval.",
+    trigger: "An operator or agent asks whether a project-admin action is ready.",
     requiredEvidence: [
       "Action type is explicit: merge, deploy, rollback, secret_rotation, or restart.",
       "Target project/repo/environment is identified.",
       "Read-only health/GitHub/handoff evidence has been checked.",
-      "Human owner approval path is known.",
+      "Operator approval path is known.",
     ],
     operatorSteps: [
       project ? `Start from project memory for ${project.name}.` : "Run `project memory` to identify the target project.",

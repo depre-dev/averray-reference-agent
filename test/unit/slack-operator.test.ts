@@ -443,7 +443,7 @@ describe("slack operator bridge", () => {
 
     expect(text).toContain("*Codex Handoff Protocol*");
     expect(text).toContain("Codex remains the builder");
-    expect(text).toContain("*HUMAN REVIEW*");
+    expect(text).toContain("*OPERATOR REVIEW*");
     expect(text).toContain("intent=pr_code_review");
     expect(text).toContain("intent=pr_handoff");
     expect(text).toContain("email required: `false`");
@@ -763,7 +763,7 @@ describe("slack operator bridge", () => {
     });
 
     expect(text).toContain("*GitHub merge steward*");
-    expect(text).toContain("open/pass/human/block: `2/1/0/1`");
+    expect(text).toContain("open/pass/operator/block: `2/1/0/1`");
     expect(text).toContain("merge execution enabled: `false`");
     expect(text).toContain("*Clean candidates*");
     expect(text).toContain("github_ok_to_merge");

@@ -721,7 +721,7 @@ describe("github operator status", () => {
     });
   });
 
-  it("asks for human review on deploy and workflow-only risk", async () => {
+  it("asks for operator review on deploy and workflow-only risk", async () => {
     const fetchFn = async (url: string | URL | Request) => {
       const text = String(url);
       if (text.endsWith("/repos/averray-agent/agent/pulls/188")) {
@@ -785,7 +785,7 @@ describe("github operator status", () => {
     ]));
   });
 
-  it("asks for human review on blockchain and XCM settlement changes even when CI is green", async () => {
+  it("asks for operator review on blockchain and XCM settlement changes even when CI is green", async () => {
     const fetchFn = async (url: string | URL | Request) => {
       const text = String(url);
       if (text.endsWith("/repos/averray-agent/agent/pulls/342")) {
@@ -859,7 +859,7 @@ describe("github operator status", () => {
       expect.objectContaining({
         severity: "medium",
         code: "pr_blockchain_settlement_review",
-        message: expect.stringContaining("request metadata preservation"),
+        message: expect.stringContaining("Agent pre-checks own code-level verification"),
       }),
       expect.objectContaining({ severity: "medium", code: "pr_review_risk_files" }),
     ]));

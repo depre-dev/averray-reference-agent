@@ -57,7 +57,7 @@ const CURATED_PROJECTS: ProjectMemoryEntry[] = [
       "propose deploy for averray-agent/agent sha <SHA>",
     ],
     handoff: {
-      pr: "Hermes PR handoff runs after CI, reviews GitHub metadata/checks/files, runs requested testbed checks, and reports PASS / HUMAN REVIEW / BLOCK.",
+      pr: "Hermes PR handoff runs after CI, reviews GitHub metadata/checks/files, runs requested testbed checks, and reports PASS / OPERATOR REVIEW / BLOCK.",
       protocol: "Codex builds; Hermes reviews and operates. See docs/CODEX_HANDOFF_PROTOCOL.md.",
       deploy: "Post-deploy verification runs the read-only testbed suite and reports deploy health.",
       mutates: false,
@@ -71,7 +71,7 @@ const CURATED_PROJECTS: ProjectMemoryEntry[] = [
       deployIntent: "post_deploy_verification",
       verdicts: {
         PASS: "No blocking or review-gated release signal; continue normal human/merge policy.",
-        HUMAN_REVIEW: "Not necessarily broken; a human should inspect the review-gated area before merge.",
+        OPERATOR_REVIEW: "Not necessarily broken; agents should provide code-level pre-check evidence, and the operator decides project intent, architecture, or rollout risk.",
         BLOCK: "Do not merge/deploy until fixed or explicitly overridden outside Hermes.",
       },
       codexOnBlock: "Stop, fix the PR or missing evidence, wait for CI, then let Hermes re-run. Do not ask Hermes to override.",
@@ -140,7 +140,7 @@ const CURATED_PROJECTS: ProjectMemoryEntry[] = [
       deployIntent: "post_deploy_verification",
       verdicts: {
         PASS: "Normal release path may continue.",
-        HUMAN_REVIEW: "Human owner should inspect the risk signal.",
+        OPERATOR_REVIEW: "Operator should inspect the agent pre-check evidence and decide project/architecture sign-off.",
         BLOCK: "Stop until fixed or explicitly overridden outside Hermes.",
       },
       codexOnBlock: "Fix or add evidence; do not bypass Hermes by retrying blindly.",

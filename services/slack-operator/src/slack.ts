@@ -287,7 +287,7 @@ export function formatOperatorResultForSlack(result: unknown): string {
       evidence.length > 0 ? `*Evidence*\n${evidence.slice(0, 3).map(formatAdminProposalEvidence).join("\n")}` : "",
       risks.length > 0 ? `*Risks*\n${risks.slice(0, 4).map(formatAdminProposalRisk).join("\n")}` : "",
       blocked.length > 0 ? `*Blocked here*\n${blocked.slice(0, 5).map((entry) => `• \`${String(entry)}\``).join("\n")}` : "",
-      stringField(proposal, "nextHumanStep") ? `*Next human step*\n${stringField(proposal, "nextHumanStep")}` : "",
+      stringField(proposal, "nextHumanStep") ? `*Next operator step*\n${stringField(proposal, "nextHumanStep")}` : "",
       "Proposal-only. Hermes did not approve, merge, deploy, restart, rotate secrets, or mutate GitHub.",
     ].filter(Boolean).join("\n");
   }
@@ -599,11 +599,11 @@ function formatGithubMergeStewardForSlack(result: Record<string, unknown>): stri
   return [
     "*GitHub merge steward*",
     `• health: \`${stringField(github, "health") ?? "unknown"}\``,
-    `• open/pass/human/block: \`${numberField(counts, "openPullRequests") ?? 0}/${numberField(counts, "pass") ?? 0}/${numberField(counts, "humanReview") ?? 0}/${numberField(counts, "block") ?? 0}\``,
+    `• open/pass/operator/block: \`${numberField(counts, "openPullRequests") ?? 0}/${numberField(counts, "pass") ?? 0}/${numberField(counts, "humanReview") ?? 0}/${numberField(counts, "block") ?? 0}\``,
     `• auto-merge candidates: \`${numberField(counts, "autoMergeCandidates") ?? 0}\``,
     `• merge execution enabled: \`${String(github.mergeExecutionEnabled === true)}\``,
     candidates.length > 0 ? `*Clean candidates*\n${candidates.slice(0, 5).map(formatGithubStewardItem).join("\n")}` : "*Clean candidates*\n• none",
-    humanReview.length > 0 ? `*Human review*\n${humanReview.slice(0, 5).map(formatGithubStewardItem).join("\n")}` : "",
+    humanReview.length > 0 ? `*Operator review*\n${humanReview.slice(0, 5).map(formatGithubStewardItem).join("\n")}` : "",
     blocked.length > 0 ? `*Blocked*\n${blocked.slice(0, 5).map(formatGithubStewardItem).join("\n")}` : "",
     recommendations.length > 0 ? `*Next*\n${recommendations.slice(0, 3).map((entry) => `• ${String(entry)}`).join("\n")}` : "",
     "Read-only steward. Hermes did not merge, approve, rerun CI, or mutate GitHub.",
@@ -790,7 +790,7 @@ function handoffReleaseVerdict(value: Record<string, unknown>, summary: Record<s
     includesToken(finalReason, ["github_needs_review", "pr_review_hold", "needs_review"]) ||
     reviewReasons.length > 0
   ) {
-    return { label: "HUMAN REVIEW", why: handoffWhy(summary, value, "needs_review") };
+    return { label: "OPERATOR REVIEW", why: handoffWhy(summary, value, "needs_review") };
   }
   return { label: "PASS", why: handoffWhy(summary, value, "pass") };
 }
@@ -800,7 +800,7 @@ function handoffWhy(summary: Record<string, unknown>, value: Record<string, unkn
   const firstReviewReason = reviewReasons[0];
   if (firstReviewReason) {
     const code = stringField(firstReviewReason, "code") ?? "review";
-    const message = stringField(firstReviewReason, "message") ?? "Human review recommended.";
+    const message = stringField(firstReviewReason, "message") ?? "Operator review recommended.";
     return `${code}: ${message}`;
   }
   const reason = normalizeToken(stringField(summary, "finalReason") ?? stringField(summary, "reason") ?? stringField(value, "reason"));
@@ -808,8 +808,8 @@ function handoffWhy(summary: Record<string, unknown>, value: Record<string, unkn
   if (reason === "hosted_health_failed") return "hosted health failed after deploy";
   if (reason === "github_workflow_failed") return "GitHub has a failed workflow";
   if (reason === "testbed_cases_failed") return "one or more read-only testbed cases failed";
-  if (reason === "github_needs_review") return "human review recommended by the GitHub risk gate";
-  if (reason === "pr_review_hold") return "PR risk gate held this for human review";
+  if (reason === "github_needs_review") return "operator review recommended by the GitHub risk gate; agent pre-check evidence should be attached";
+  if (reason === "pr_review_hold") return "PR risk gate held this for operator review";
   if (reason === "ci_failed") return "CI failed";
   if (level === "pass") return "no blocking release signals recorded";
   return stringField(summary, "finalReason") ?? stringField(summary, "reason") ?? stringField(value, "reason") ?? "no reason recorded";
@@ -955,7 +955,7 @@ function formatCodexHandoffProtocolForSlack(protocol: Record<string, unknown>): 
     .map((entry) => {
       const label = stringField(entry, "label") ?? "UNKNOWN";
       const meaning = stringField(entry, "meaning") ?? "No meaning recorded.";
-      const codexAction = stringField(entry, "codexAction") ?? "Follow normal human review policy.";
+      const codexAction = stringField(entry, "codexAction") ?? "Follow normal operator review policy.";
       return `• *${label}*: ${meaning} Codex: ${codexAction}`;
     })
     .join("\n");
@@ -971,7 +971,7 @@ function formatCodexHandoffProtocolForSlack(protocol: Record<string, unknown>): 
     "*Roles*",
     `• Codex: ${stringField(roles, "builder") ?? "builds in branches/worktrees and opens PRs."}`,
     `• Hermes: ${stringField(roles, "reviewerOperator") ?? "reviews risk and runs read-only checks."}`,
-    `• Human: ${stringField(roles, "approver") ?? "approves merge, deploy, rollback, and overrides."}`,
+    `• Operator: ${stringField(roles, "approver") ?? "approves merge, deploy, rollback, and overrides."}`,
     flow ? `*Flow*\n${flow}` : "",
     verdicts ? `*Verdicts*\n${verdicts}` : "",
     "*Contracts*",

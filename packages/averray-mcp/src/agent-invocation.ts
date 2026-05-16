@@ -464,7 +464,7 @@ function buildPullRequestCodeReview(review: GithubPullRequestReview) {
   const why = review.riskFindings[0]?.message
     ?? (finalVerdict === "ok_to_merge"
       ? "PR metadata, changed files, and checks look merge-ready."
-      : "PR needs human review before merge.");
+      : "PR needs operator review before merge.");
 
   return {
     schemaVersion: 1,
@@ -557,7 +557,7 @@ function buildPrHandoffCommentBody(input: AgentInvocationInput, handoff: Record<
   const missingTestSignals = arrayField(tests, "missingTestSignals").map(String);
   const requestedActions = isRecord(handoff.requestedActions) ? handoff.requestedActions : {};
   const requestedTests = arrayField(requestedActions, "testCaseIds").map(String);
-  const commentVerdict = humanPrVerdict(finalVerdict);
+  const commentVerdict = prVerdictLabel(finalVerdict);
   const nextAction = nextCodexAction(commentVerdict);
 
   return [
@@ -583,15 +583,15 @@ function buildPrHandoffCommentBody(input: AgentInvocationInput, handoff: Record<
   ].join("\n");
 }
 
-function humanPrVerdict(value: string): "PASS" | "HUMAN REVIEW" | "BLOCK" {
+function prVerdictLabel(value: string): "PASS" | "OPERATOR REVIEW" | "BLOCK" {
   if (value === "ok_to_merge" || value === "pass") return "PASS";
-  if (value === "needs_review" || value === "human_review") return "HUMAN REVIEW";
+  if (value === "needs_review" || value === "human_review") return "OPERATOR REVIEW";
   return "BLOCK";
 }
 
-function nextCodexAction(verdict: "PASS" | "HUMAN REVIEW" | "BLOCK"): string {
-  if (verdict === "PASS") return "Continue normal merge queue or ask the human owner for final approval.";
-  if (verdict === "HUMAN REVIEW") return "Explain the review-gated surface and wait for the human owner.";
+function nextCodexAction(verdict: "PASS" | "OPERATOR REVIEW" | "BLOCK"): string {
+  if (verdict === "PASS") return "Continue normal merge queue or ask the operator for final approval.";
+  if (verdict === "OPERATOR REVIEW") return "Attach the code-level pre-check evidence, then ask the operator for project/architecture sign-off.";
   return "Fix the blocking issue, push an update, and rerun CI before handing off again.";
 }
 
