@@ -390,6 +390,46 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .next-action strong {
       color: var(--text);
     }
+    .fix-request {
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--warn);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.04);
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    .fix-request[data-level="block"] {
+      border-left-color: var(--bad);
+      background: var(--bad-bg);
+    }
+    .fix-request[data-level="needs-review"] {
+      border-left-color: var(--warn);
+      background: var(--warn-bg);
+    }
+    .fix-request-title {
+      margin: 0 0 8px;
+      font-weight: 700;
+    }
+    .fix-request-copy {
+      margin: 0 0 10px;
+      line-height: 1.4;
+    }
+    .fix-request-meta {
+      display: grid;
+      grid-template-columns: 130px minmax(0, 1fr);
+      gap: 6px 10px;
+      margin: 0;
+    }
+    .fix-request-meta dt {
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .fix-request-meta dd {
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
     .age-line {
       color: var(--muted);
       margin: -4px 0 12px;
@@ -621,6 +661,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       .owner-lanes { grid-template-columns: 1fr; }
       .pipeline-steps,
       .pr-timeline,
+      .fix-request-meta,
       .pipeline-meta,
       .pipeline-detail { grid-template-columns: 1fr; }
       dl { grid-template-columns: 1fr; }
@@ -938,6 +979,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '<p class="pipeline-why">' + escapeHtml(releaseReason(summary, item, verdict.level)) + '</p>' +
         '<p class="age-line" data-age="' + escapeAttr(age.state) + '">' + escapeHtml(age.label + " - " + action.owner + " for " + age.duration) + '</p>' +
         '<div class="next-action"><strong>Next action:</strong> ' + escapeHtml(action.owner + " - " + action.text) + '</div>' +
+        renderFixRequest(item, summary, verdict, action) +
         renderPipelineSteps(stage, verdict) +
         renderPrTimeline(item, stage, verdict, action) +
         '<dl class="pipeline-meta">' +
@@ -976,6 +1018,62 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         reviewRows +
         row("Why", escapeHtml(releaseReason(summary, item, verdict.level))) +
         '</dl>';
+    }
+
+    function renderFixRequest(item, summary, verdict, action) {
+      if (verdict.level !== "block" && verdict.level !== "needs-review") return "";
+      const request = buildFixRequest(item, summary, verdict, action);
+      return '<section class="fix-request" data-level="' + escapeAttr(verdict.level) + '" aria-label="Fix request">' +
+        '<p class="fix-request-title">' + escapeHtml(request.title) + '</p>' +
+        '<p class="fix-request-copy">' + escapeHtml(request.instruction) + '</p>' +
+        '<dl class="fix-request-meta">' +
+        row("Owner", escapeHtml(request.owner)) +
+        row("Reason", escapeHtml(request.reason)) +
+        row("Surfaces", request.surfaces.length ? chips(request.surfaces) : "n/a") +
+        row("Checks", request.checks.length ? chips(request.checks) : escapeHtml("run relevant local checks and wait for CI")) +
+        row("Re-run", escapeHtml(request.rerun)) +
+        '</dl>' +
+        '</section>';
+    }
+
+    function buildFixRequest(item, summary, verdict, action) {
+      const signals = summary.reviewSignals || {};
+      const fixRequest = summary.fixRequest && typeof summary.fixRequest === "object" ? summary.fixRequest : {};
+      const reviewReasons = Array.isArray(summary.reviewReasons) ? summary.reviewReasons : [];
+      const touchedAreas = Array.isArray(signals.touchedAreas) ? signals.touchedAreas.map(String).filter(Boolean) : [];
+      const missingTests = Array.isArray(signals.missingTestSignals) ? signals.missingTestSignals.map(String).filter(Boolean) : [];
+      const testSignals = Array.isArray(signals.testSignals) ? signals.testSignals.map(String).filter(Boolean) : [];
+      const reason = firstReviewReason(reviewReasons) || releaseReason(summary, item, verdict.level);
+      const checks = Array.isArray(fixRequest.checks)
+        ? fixRequest.checks.map(String).filter(Boolean)
+        : missingTests.length ? missingTests : testSignals.slice(0, 5);
+      return {
+        title: fixRequest.title || (verdict.level === "block" ? "Fix request for Codex" : "Review request for owner"),
+        owner: fixRequest.owner || action.owner,
+        instruction: fixRequest.instruction || fixRequestInstruction(verdict, action),
+        reason,
+        surfaces: Array.isArray(fixRequest.surfaces) ? fixRequest.surfaces.map(String).filter(Boolean) : touchedAreas,
+        checks,
+        rerun: fixRequest.rerun || "push an update, then let CI and Hermes handoff run again",
+      };
+    }
+
+    function fixRequestInstruction(verdict, action) {
+      if (verdict.level === "block") {
+        return "Codex should fix the blocking signal, push the PR branch, and wait for CI plus Hermes to re-run.";
+      }
+      if (verdict.level === "needs-review") {
+        return "Human owner should review the gated surface, then tell Codex whether to adjust the PR or proceed.";
+      }
+      return action.text;
+    }
+
+    function firstReviewReason(reviewReasons) {
+      const first = reviewReasons.find(Boolean);
+      if (!first) return "";
+      const code = first.code ? String(first.code) : "review";
+      const message = first.message ? String(first.message) : "Human review recommended.";
+      return code + ": " + message;
     }
 
     function collectPipelineItems(payload) {
