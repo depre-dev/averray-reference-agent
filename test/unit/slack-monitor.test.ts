@@ -64,6 +64,10 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Human needs");
     expect(html).toContain("Merge queue");
     expect(html).toContain("Hermes active");
+    expect(html).toContain("PR staleness summary");
+    expect(html).toContain("Fresh");
+    expect(html).toContain("Waiting");
+    expect(html).toContain("Stale");
     expect(html).toContain("PR Pipeline");
     expect(html).toContain("stage view");
     expect(html).toContain("Next action:");
@@ -84,11 +88,14 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("releaseVerdict(item)");
     expect(html).toContain("renderPipelineBoard(latestPipelineItems)");
     expect(html).toContain("renderOwnerSummary(entries)");
+    expect(html).toContain("renderStalenessSummary(entries)");
     expect(html).toContain("latestPipelineItems = collectPipelineItems(payload)");
     expect(html).toContain("filterPipelineItems(entries)");
     expect(html).toContain("updatePipelineFilterButtons()");
     expect(html).toContain("pipelineStage(item, verdict)");
     expect(html).toContain("nextPipelineAction(item, verdict)");
+    expect(html).toContain("handoffAge(item)");
+    expect(html).toContain("formatDuration(minutes)");
     expect(html).toContain("nextPipelineActor(item, verdict)");
     expect(html).toContain("renderPipelineSteps(stage, verdict)");
     expect(html).toContain("classifyReleaseGate(status, finalVerdict, mergeRecommendation, reason, reviewReasons)");
