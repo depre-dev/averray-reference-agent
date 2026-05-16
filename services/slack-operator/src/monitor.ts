@@ -703,12 +703,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function repoSummaryChips(items, current) {
       const verdicts = items.map(releaseVerdict);
       const stale = items.map(handoffAge).filter((age) => age.state === "stale").length;
+      const done = items.map((item) => pullRequestState(item, item.summary || {})).filter(isDonePullRequestState).length;
       const chips = [
         { label: "Current", value: current.length },
         { label: "Blocked", value: verdicts.filter((verdict) => verdict.level === "block").length },
         { label: "Review", value: verdicts.filter((verdict) => verdict.level === "needs-review").length },
         { label: "Ready", value: verdicts.filter((verdict) => verdict.level === "pass").length },
         { label: "Stale", value: stale },
+        { label: "Done", value: done },
       ];
       return chips.map((chip) => '<span class="pill">' + escapeHtml(chip.label + " " + chip.value) + '</span>').join("");
     }
@@ -730,6 +732,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const verdict = releaseVerdict(item);
       const age = handoffAge(item);
       const status = normalize(item.status);
+      const prState = pullRequestState(item, item.summary || {});
+      if (isDonePullRequestState(prState)) return false;
       return Boolean(
         item.active === true
         || item.activeState === "running"
@@ -774,6 +778,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function renderPipelineDetails(item, summary, verdict, action) {
       const signals = summary.reviewSignals || {};
+      const prState = pullRequestState(item, summary);
       const touchedAreas = Array.isArray(signals.touchedAreas) ? signals.touchedAreas : [];
       const missingTests = Array.isArray(signals.missingTestSignals) ? signals.missingTestSignals : [];
       const testSignals = Array.isArray(signals.testSignals) ? signals.testSignals : [];
@@ -783,7 +788,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const rows = [
         row("Verdict", escapeHtml(verdict.label)),
         row("Merge", escapeHtml(summary.mergeRecommendation || summary.finalVerdict || summary.status || "n/a")),
-        row("PR state", escapeHtml([item.status, item.phase, liveStateLabel(item.activeState)].filter(Boolean).join(" / ") || "n/a")),
+        row("PR state", escapeHtml(pullRequestStateLabel(prState) || [item.status, item.phase, liveStateLabel(item.activeState)].filter(Boolean).join(" / ") || "n/a")),
         row("Suggested owner", escapeHtml(action.owner)),
         row("Changed areas", touchedAreas.length ? chips(touchedAreas) : "n/a"),
         row("Test coverage", testSignals.length ? chips(testSignals.slice(0, 5)) : "n/a"),
@@ -833,6 +838,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function pipelineStage(item, verdict) {
       const status = normalize(item.status);
+      const prState = pullRequestState(item, item.summary || {});
+      if (isDonePullRequestState(prState)) return { key: "deploy", label: pullRequestStateLabel(prState) };
       if (item.active === true || item.activeState === "running" || status === "running") {
         return { key: "hermes", label: "Hermes reviewing" };
       }
@@ -853,6 +860,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function nextPipelineAction(item, verdict) {
       const status = normalize(item.status);
+      const prState = pullRequestState(item, item.summary || {});
+      if (isDonePullRequestState(prState)) {
+        return { owner: "Done", text: "PR is no longer open in GitHub; keep this handoff as release history" };
+      }
       if (item.active === true || item.activeState === "running" || status === "running") {
         return { owner: "Hermes", text: "finish the current handoff checks and publish a verdict" };
       }
@@ -960,6 +971,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function releaseVerdict(item) {
       const summary = item.summary || {};
       const status = normalize(item.status);
+      const prState = pullRequestState(item, summary);
       const finalVerdict = normalize(summary.finalVerdict || summary.status);
       const mergeRecommendation = normalize(summary.mergeRecommendation);
       const reason = normalize(summary.finalReason || summary.reason || item.reason);
@@ -967,6 +979,18 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
       if (status === "running") {
         return { level: "running", label: "RUNNING", why: releaseReason(summary, item, "running") };
+      }
+      if (prState && prState.merged === true) {
+        return { level: "pass", label: "MERGED", why: "GitHub reports this PR is merged; this handoff is history." };
+      }
+      if (prState && normalize(prState.state) === "closed") {
+        return { level: "pass", label: "CLOSED", why: "GitHub reports this PR is closed; this handoff is history." };
+      }
+      if (prState && prState.draft === true) {
+        return { level: "needs-review", label: "DRAFT", why: "GitHub reports this PR is still a draft." };
+      }
+      if (prState && normalize(prState.mergeableState) === "dirty") {
+        return { level: "block", label: "CONFLICT", why: "GitHub reports this PR has merge conflicts." };
       }
       const terminal = classifyReleaseGate(status, finalVerdict, mergeRecommendation, reason, reviewReasons);
       if (item.activeState === "just_finished") {
@@ -1025,6 +1049,28 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (reason === "ci_in_progress") return "CI is still running; wait for the result.";
       if (level === "pass") return "No blocking release signals recorded.";
       return String(summary.finalReason || summary.reason || item.reason || item.phase || "No reason recorded.");
+    }
+
+    function pullRequestState(item, summary) {
+      if (summary && typeof summary.currentPullRequest === "object" && summary.currentPullRequest !== null) return summary.currentPullRequest;
+      if (summary && typeof summary.pullRequest === "object" && summary.pullRequest !== null) return summary.pullRequest;
+      return null;
+    }
+
+    function isDonePullRequestState(prState) {
+      return Boolean(prState && (prState.merged === true || normalize(prState.state) === "closed"));
+    }
+
+    function pullRequestStateLabel(prState) {
+      if (!prState) return "";
+      const parts = [];
+      if (prState.merged === true) parts.push("merged");
+      else if (prState.state) parts.push(String(prState.state));
+      if (prState.draft === true) parts.push("draft");
+      if (prState.mergeableState) parts.push("mergeable:" + String(prState.mergeableState));
+      if (prState.source === "github_live") parts.push("live");
+      else if (prState.source) parts.push(String(prState.source));
+      return parts.join(" / ");
     }
 
     function deploymentHealthRows(summary) {

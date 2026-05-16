@@ -137,6 +137,7 @@ export function summarizeHandoffResult(result: unknown): Record<string, unknown>
       ["github", "mergeRecommendation"],
       ["github", "merge_recommendation"],
     ]),
+    pullRequest: githubPullRequestSummary(nestedResult),
     codeReview: codeReviewSummary(nestedResult),
     reviewSignals: githubReviewSignals(nestedResult),
     reviewReasons: githubReviewReasons(nestedResult),
@@ -331,6 +332,29 @@ function githubReviewSignals(record: Record<string, unknown>): Record<string, un
     rolloutNotesPresent: booleanField(review, "rolloutNotesPresent"),
   });
   return Object.keys(signals).length > 0 ? signals : undefined;
+}
+
+function githubPullRequestSummary(record: Record<string, unknown>): Record<string, unknown> | undefined {
+  const github = isRecord(record.github) ? record.github : undefined;
+  const pullRequest = isRecord(github?.pullRequest) ? github.pullRequest : undefined;
+  if (!pullRequest) return undefined;
+  const summary = compactRecord({
+    repo: stringField(pullRequest, "repo"),
+    number: numberField(pullRequest, "number"),
+    title: stringField(pullRequest, "title"),
+    url: stringField(pullRequest, "url"),
+    author: stringField(pullRequest, "author"),
+    state: stringField(pullRequest, "state"),
+    draft: booleanField(pullRequest, "draft"),
+    baseBranch: stringField(pullRequest, "baseBranch"),
+    headBranch: stringField(pullRequest, "headBranch"),
+    headSha: stringField(pullRequest, "headSha"),
+    changedFiles: numberField(pullRequest, "changedFiles"),
+    mergeableState: stringField(pullRequest, "mergeableState"),
+    updatedAt: stringField(pullRequest, "updatedAt"),
+    source: "github_review",
+  });
+  return Object.keys(summary).length > 0 ? summary : undefined;
 }
 
 function deploymentHealthSummary(record: Record<string, unknown>): Record<string, unknown> | undefined {

@@ -32,6 +32,7 @@ import {
   shouldPostStalePrAlert,
   stalePrAlertItems,
 } from "./stale-pr-alerts.js";
+import { enrichMonitorWithGithubPrState } from "./github-pr-state.js";
 
 const enabled = optionalEnv("SLACK_OPERATOR_ENABLED", "0") === "1";
 const httpPort = Number.parseInt(optionalEnv("SLACK_OPERATOR_HTTP_PORT", "8790"), 10);
@@ -152,7 +153,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       limit: parseOptionalInteger(url.searchParams.get("limit")),
       activeWindowMinutes: parseOptionalInteger(url.searchParams.get("activeWindowMinutes")),
     });
-    writeJson(response, 200, monitor);
+    writeJson(response, 200, await enrichMonitorWithGithubPrState(monitor));
     return;
   }
   if (!enabled) {

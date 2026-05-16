@@ -336,6 +336,7 @@ describe("agent invocation hook", () => {
 
   it("runs a PR handoff review and requested read-only testcase", async () => {
     const calls: string[] = [];
+    const events: HandoffEventInput[] = [];
     const result = await invokeAgentTask(
       {
         requester: "codex",
@@ -346,7 +347,7 @@ describe("agent invocation hook", () => {
         correlationId: "handoff-789",
         reason: "pre-merge check",
       },
-      deps(calls, githubFetch())
+      deps(calls, githubFetch(), events)
     );
 
     expect(result).toMatchObject({
@@ -418,6 +419,15 @@ describe("agent invocation hook", () => {
       "fetchEvidence",
       "validateDirectSubmission",
     ]));
+    expect(events.at(-1)?.summary).toMatchObject({
+      pullRequest: {
+        repo: "averray-agent/agent",
+        number: 185,
+        state: "open",
+        draft: false,
+        mergeableState: "clean",
+      },
+    });
   });
 
   it("posts an idempotent PR handoff comment when enabled", async () => {
