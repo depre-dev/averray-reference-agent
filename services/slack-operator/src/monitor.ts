@@ -439,6 +439,50 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       background: var(--warn-bg);
       font-weight: 700;
     }
+    .pr-timeline {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .pr-timeline-item {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.04);
+      padding: 8px;
+    }
+    .pr-timeline-item[data-state="done"] {
+      border-color: var(--ok);
+      background: var(--ok-bg);
+    }
+    .pr-timeline-item[data-state="active"] {
+      border-color: var(--accent);
+      background: var(--accent-bg);
+    }
+    .pr-timeline-item[data-state="blocked"] {
+      border-color: var(--bad);
+      background: var(--bad-bg);
+    }
+    .pr-timeline-item[data-state="review"] {
+      border-color: var(--warn);
+      background: var(--warn-bg);
+    }
+    .pr-timeline-label {
+      display: block;
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .pr-timeline-meta {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1.3;
+      overflow-wrap: anywhere;
+    }
     .pipeline-meta {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -576,6 +620,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       .owner-summary { grid-template-columns: 1fr; }
       .owner-lanes { grid-template-columns: 1fr; }
       .pipeline-steps,
+      .pr-timeline,
       .pipeline-meta,
       .pipeline-detail { grid-template-columns: 1fr; }
       dl { grid-template-columns: 1fr; }
@@ -894,6 +939,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '<p class="age-line" data-age="' + escapeAttr(age.state) + '">' + escapeHtml(age.label + " - " + action.owner + " for " + age.duration) + '</p>' +
         '<div class="next-action"><strong>Next action:</strong> ' + escapeHtml(action.owner + " - " + action.text) + '</div>' +
         renderPipelineSteps(stage, verdict) +
+        renderPrTimeline(item, stage, verdict, action) +
         '<dl class="pipeline-meta">' +
         row("Stage", escapeHtml(stage.label)) +
         row("Next actor", escapeHtml(action.owner)) +
@@ -1048,6 +1094,85 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (key === "gate" && level === "needs-review") return "review";
       if (key === "gate" && level === "pass") return "done";
       return "active";
+    }
+
+    function renderPrTimeline(item, stage, verdict, action) {
+      const summary = item.summary || {};
+      const prState = pullRequestState(item, summary);
+      return '<div class="pr-timeline" aria-label="PR timeline">' +
+        prTimelineItems(item, stage, verdict, action, prState).map(renderPrTimelineItem).join("") +
+        '</div>';
+    }
+
+    function prTimelineItems(item, stage, verdict, action, prState) {
+      const summary = item.summary || {};
+      const status = normalize(item.status);
+      const reason = normalize(summary.finalReason || summary.reason || item.reason);
+      const tests = Array.isArray(item.testCaseIds) ? item.testCaseIds : [];
+      const prNumber = item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId);
+      const workflowRunUrl = deriveWorkflowRunUrl(item);
+      const hermesRunning = item.active === true || item.activeState === "running" || status === "running";
+      const ciActive = stage.key === "ci" || reason === "ci_in_progress";
+      const ciBlocked = verdict.level === "block" && includesAny(reason, ["ci_failed", "github_workflow_failed"]);
+      return [
+        {
+          key: "pr",
+          label: "PR",
+          state: prNumber || prState ? "done" : "active",
+          meta: prNumber ? "#" + prNumber : pullRequestStateLabel(prState) || "detected",
+        },
+        {
+          key: "ci",
+          label: "CI",
+          state: ciBlocked ? "blocked" : ciActive ? "active" : "done",
+          meta: workflowRunUrl ? "run linked" : ciActive ? "waiting for CI" : "signal recorded",
+        },
+        {
+          key: "hermes",
+          label: "Hermes",
+          state: hermesRunning ? "active" : item.updatedAt ? "done" : "waiting",
+          meta: hermesRunning ? "reviewing now" : "verdict recorded",
+        },
+        {
+          key: "testbed",
+          label: "Testbed",
+          state: tests.length ? "done" : stage.key === "testbed" ? "active" : "waiting",
+          meta: tests.length ? compactTestList(tests) : "not requested",
+        },
+        {
+          key: "gate",
+          label: "Gate",
+          state: prTimelineStateForGate(verdict),
+          meta: verdict.label,
+        },
+        {
+          key: "done",
+          label: "Done",
+          state: isDonePullRequestState(prState) ? "done" : verdict.level === "pass" ? "active" : "waiting",
+          meta: isDonePullRequestState(prState) ? pullRequestStateLabel(prState) : action.owner,
+        },
+      ];
+    }
+
+    function renderPrTimelineItem(item) {
+      return '<div class="pr-timeline-item" data-state="' + escapeAttr(item.state) + '">' +
+        '<span class="pr-timeline-label">' + escapeHtml(item.label) + '</span>' +
+        '<span class="pr-timeline-meta">' + escapeHtml(item.meta) + '</span>' +
+        '</div>';
+    }
+
+    function prTimelineStateForGate(verdict) {
+      if (verdict.level === "block") return "blocked";
+      if (verdict.level === "needs-review") return "review";
+      if (verdict.level === "pass") return "done";
+      if (verdict.level === "running") return "active";
+      return "waiting";
+    }
+
+    function compactTestList(values) {
+      const ids = values.map((value) => String(value)).filter(Boolean);
+      if (ids.length <= 3) return ids.join(", ");
+      return ids.slice(0, 3).join(", ") + " +" + String(ids.length - 3);
     }
 
     function renderHandoff(item) {
