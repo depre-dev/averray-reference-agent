@@ -394,6 +394,31 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       margin: 2px 0 0;
       overflow-wrap: anywhere;
     }
+    .pipeline-detail-title {
+      margin: 12px 0 8px;
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .pipeline-detail {
+      display: grid;
+      grid-template-columns: 170px minmax(0, 1fr);
+      gap: 8px 12px;
+      margin: 0;
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+    }
+    .pipeline-detail dt {
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .pipeline-detail dd {
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
     .pipeline-links {
       display: flex;
       flex-wrap: wrap;
@@ -489,7 +514,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       .staleness-summary { grid-template-columns: 1fr; }
       .owner-summary { grid-template-columns: 1fr; }
       .pipeline-steps,
-      .pipeline-meta { grid-template-columns: 1fr; }
+      .pipeline-meta,
+      .pipeline-detail { grid-template-columns: 1fr; }
       dl { grid-template-columns: 1fr; }
     }
   </style>
@@ -741,8 +767,35 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         row("Updated", escapeHtml(item.updatedAt ? new Date(item.updatedAt).toLocaleString() : "unknown")) +
         row("Correlation", "<code>" + escapeHtml(item.correlationId || "unknown") + "</code>") +
         '</dl>' +
+        renderPipelineDetails(item, summary, verdict, action) +
         (links ? '<div class="pipeline-links">' + links + '</div>' : "") +
         '</article>';
+    }
+
+    function renderPipelineDetails(item, summary, verdict, action) {
+      const signals = summary.reviewSignals || {};
+      const touchedAreas = Array.isArray(signals.touchedAreas) ? signals.touchedAreas : [];
+      const missingTests = Array.isArray(signals.missingTestSignals) ? signals.missingTestSignals : [];
+      const testSignals = Array.isArray(signals.testSignals) ? signals.testSignals : [];
+      const rollout = signals.rolloutNotesRequired === true
+        ? signals.rolloutNotesPresent === true ? "present" : "missing"
+        : "not required";
+      const rows = [
+        row("Verdict", escapeHtml(verdict.label)),
+        row("Merge", escapeHtml(summary.mergeRecommendation || summary.finalVerdict || summary.status || "n/a")),
+        row("PR state", escapeHtml([item.status, item.phase, liveStateLabel(item.activeState)].filter(Boolean).join(" / ") || "n/a")),
+        row("Suggested owner", escapeHtml(action.owner)),
+        row("Changed areas", touchedAreas.length ? chips(touchedAreas) : "n/a"),
+        row("Test coverage", testSignals.length ? chips(testSignals.slice(0, 5)) : "n/a"),
+        row("Missing tests", missingTests.length ? chips(missingTests) : "none recorded"),
+        row("Rollout notes", escapeHtml(rollout)),
+      ];
+      const reviewRows = reviewReasonRows(summary);
+      return '<div class="pipeline-detail-title">PR detail</div><dl class="pipeline-detail">' +
+        rows.join("") +
+        reviewRows +
+        row("Why", escapeHtml(releaseReason(summary, item, verdict.level))) +
+        '</dl>';
     }
 
     function collectPipelineItems(payload) {
