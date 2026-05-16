@@ -58,6 +58,30 @@ export interface WorkflowDeps {
     verifierMode?: string;
     rewardUsd: number;
   }): Promise<{ allowed: boolean; reason?: string; details?: unknown }>;
+  /**
+   * Schema-native readiness gate. Validates the exact `payload.submission`
+   * object we *intend* to send against the platform's
+   * `/jobs/validate-submission`, **before** any claim. The result is
+   * recorded in the workflow's readiness report; an invalid result fails
+   * closed without calling `claim`.
+   */
+  validateDirectSubmission(input: {
+    runId: string;
+    jobId: string;
+    output: Record<string, unknown>;
+  }): Promise<SubmissionValidationResult>;
+  /**
+   * Read-only schema-bypass probe. Sends an obviously-wrong wrapped
+   * payload (`{ output: { wrapped_under_submission_output: true } }`)
+   * to `/jobs/validate-submission` and expects the platform to reject
+   * it. A `valid: true` response means the schema-native enforcement is
+   * not actually gating this job, and the workflow fails closed before
+   * claim instead of trusting the direct-validation pass.
+   */
+  probeInvalidWrapperSubmission(input: {
+    runId: string;
+    jobId: string;
+  }): Promise<SubmissionValidationResult>;
   claim(input: { runId: string; jobId: string }): Promise<WorkflowClaimResult>;
   fetchEvidence(input: {
     definition: unknown;
@@ -83,6 +107,31 @@ export interface WorkflowDeps {
     draftId: string;
     outputHash?: string;
   }): Promise<WorkflowSubmitResult>;
+}
+
+export const SCHEMA_VALIDATES_PATH = "payload.submission" as const;
+export const INVALID_WRAPPER_PROBE_SHAPE: Readonly<{
+  output: { wrapped_under_submission_output: true };
+}> = Object.freeze({ output: { wrapped_under_submission_output: true } });
+
+/**
+ * Per-job, per-run snapshot of the schema-native readiness gate. Surfaces
+ * in the workflow return value and in the Slack summary so an operator
+ * (or a future audit) can answer "did we actually check `payload.submission`
+ * against the platform schema before claim, and did the invalid-wrapper
+ * probe really fail the way it has to."
+ */
+export interface SchemaReadinessReport {
+  jobId: string;
+  schemaRef: string | null;
+  schemaValidates: typeof SCHEMA_VALIDATES_PATH;
+  validatedBeforeClaim: boolean;
+  invalidWrappedOutput: {
+    checkedBeforeClaim: boolean;
+    probeShape: typeof INVALID_WRAPPER_PROBE_SHAPE;
+    probeResult: SubmissionValidationResult | null;
+  };
+  claimAttempted: boolean;
 }
 
 export interface WikipediaEvidenceBundle {
@@ -185,8 +234,87 @@ export async function runWikipediaCitationRepairWorkflow(
     events.push("evidence_fetched");
     const proposal = buildWikipediaCitationRepairProposal(definition, evidence);
 
+    // Schema-native readiness gate — runs on every path (including
+    // dry-run) so the readiness report shape never depends on whether
+    // the caller wired up `dryRun: true`. The platform's
+    // `/jobs/validate-submission` route is the source of truth; local
+    // Zod is preserved for the post-claim flow as a fast secondary
+    // check but is no longer the only line of defense.
+    const schemaRef = readOutputSchemaRef(definition);
+    const directValidation = await deps.validateDirectSubmission({
+      runId,
+      jobId: selected.jobId,
+      output: proposal.output,
+    });
+    events.push("validated_direct_before_claim");
+    const wrapperProbe = await deps.probeInvalidWrapperSubmission({
+      runId,
+      jobId: selected.jobId,
+    });
+    events.push("probed_invalid_wrapper_before_claim");
+
+    const readiness: SchemaReadinessReport = {
+      jobId: selected.jobId,
+      schemaRef,
+      schemaValidates: SCHEMA_VALIDATES_PATH,
+      validatedBeforeClaim: directValidation.valid === true,
+      invalidWrappedOutput: {
+        checkedBeforeClaim: true,
+        probeShape: INVALID_WRAPPER_PROBE_SHAPE,
+        probeResult: wrapperProbe,
+      },
+      claimAttempted: false,
+    };
+
+    // Fail closed BEFORE claim if either:
+    //   - the exact direct submission object is not `valid: true`
+    //     against the schema-native endpoint, or
+    //   - the invalid-wrapper probe passed (which would mean the
+    //     schema-native enforcement is not actually gating this job).
+    if (directValidation.valid !== true) {
+      return {
+        status: "blocked" as WorkflowStatus,
+        dryRun,
+        runId,
+        jobId: selected.jobId,
+        wallet,
+        evidenceSummary: summarizeEvidence(evidence),
+        proposalSummary: summarizeProposal(proposal.output),
+        proposalPreview: proposal.output,
+        confidence: proposal.confidence,
+        validation: directValidation,
+        readiness,
+        reason: "pre_claim_validation_failed",
+        reviewNotes: [
+          "Platform schema-native validation rejected the proposed payload.submission before claim.",
+          "No averray_claim was attempted. Fix the highlighted JSON path and re-run.",
+        ],
+        slack: slackSummary(events, readiness),
+      };
+    }
+    if (wrapperProbe.valid === true) {
+      return {
+        status: "blocked" as WorkflowStatus,
+        dryRun,
+        runId,
+        jobId: selected.jobId,
+        wallet,
+        evidenceSummary: summarizeEvidence(evidence),
+        proposalSummary: summarizeProposal(proposal.output),
+        proposalPreview: proposal.output,
+        confidence: proposal.confidence,
+        validation: directValidation,
+        readiness,
+        reason: "invalid_wrapper_probe_unexpectedly_valid",
+        reviewNotes: [
+          "Read-only invalid-wrapper probe was unexpectedly accepted by the platform.",
+          "Schema-native enforcement is not actually gating this job; refusing to claim until the platform is fixed.",
+        ],
+        slack: slackSummary(events, readiness),
+      };
+    }
+
     if (dryRun) {
-      const validation = await deps.validate({ runId, jobId: selected.jobId, output: proposal.output });
       events.push("validated_without_mutation");
       return {
         status: "needs_review" as WorkflowStatus,
@@ -198,16 +326,18 @@ export async function runWikipediaCitationRepairWorkflow(
         proposalSummary: summarizeProposal(proposal.output),
         proposalPreview: proposal.output,
         confidence: proposal.confidence,
-        validation,
+        validation: directValidation,
+        readiness,
         reviewNotes: [
           "Dry run only: no Averray claim or submit was attempted.",
           "Review proposalPreview before running with dryRun=false.",
         ],
-        slack: slackSummary(events),
+        slack: slackSummary(events, readiness),
       };
     }
 
     assertMutationRunId(runId, "claim");
+    readiness.claimAttempted = true;
     const claim = await deps.claim({ runId, jobId: selected.jobId });
     events.push("claimed");
     if (!claim.sessionId) {
@@ -218,7 +348,8 @@ export async function runWikipediaCitationRepairWorkflow(
         jobId: selected.jobId,
         reason: "claim_missing_session_id",
         wallet,
-        slack: slackSummary(events),
+        readiness,
+        slack: slackSummary(events, readiness),
       };
     }
 
@@ -263,9 +394,10 @@ export async function runWikipediaCitationRepairWorkflow(
         proposalSummary: summarizeProposal(proposal.output),
         validation,
         confidence: proposal.confidence,
+        readiness,
         reason: "validation_failed",
         reviewNotes: ["Draft saved, but local schema validation failed. No submit attempted."],
-        slack: slackSummary(events),
+        slack: slackSummary(events, readiness),
       };
     }
 
@@ -281,9 +413,10 @@ export async function runWikipediaCitationRepairWorkflow(
         proposalSummary: summarizeProposal(proposal.output),
         validation,
         confidence: proposal.confidence,
+        readiness,
         reason: "confidence_below_threshold",
         reviewNotes: ["Draft validated, but evidence confidence is below submit threshold. No submit attempted."],
-        slack: slackSummary(events),
+        slack: slackSummary(events, readiness),
       };
     }
 
@@ -308,9 +441,10 @@ export async function runWikipediaCitationRepairWorkflow(
         proposalSummary: summarizeProposal(proposal.output),
         validation,
         confidence: proposal.confidence,
+        readiness,
         reason: submit.reason ?? "submit_blocked",
         submit,
-        slack: slackSummary(events),
+        slack: slackSummary(events, readiness),
       };
     }
 
@@ -325,9 +459,10 @@ export async function runWikipediaCitationRepairWorkflow(
       proposalSummary: summarizeProposal(proposal.output),
       validation,
       confidence: proposal.confidence,
+      readiness,
       submit,
       reviewNotes: ["Submitted exactly once using the validated persisted draft."],
-      slack: slackSummary(events),
+      slack: slackSummary(events, readiness),
     };
   } catch (error) {
     return {
@@ -505,11 +640,52 @@ function summarizeProposal(output: Record<string, unknown>) {
   };
 }
 
-function slackSummary(events: string[]) {
+function slackSummary(events: string[], readiness?: SchemaReadinessReport) {
+  // Surface schema-native readiness explicitly in the Slack
+  // summary. Readiness carries no secrets — schemaRef, validate /
+  // probe outcomes, and a single claimAttempted boolean. We
+  // deliberately omit raw validation `details`/`errors` from the
+  // summary; the full validation result lives on the workflow
+  // return value for log inspection.
   return {
     configured: Boolean(process.env.SLACK_WEBHOOK_URL),
     events,
+    ...(readiness
+      ? {
+          schemaReadiness: {
+            jobId: readiness.jobId,
+            schemaRef: readiness.schemaRef,
+            schemaValidates: readiness.schemaValidates,
+            validatedBeforeClaim: readiness.validatedBeforeClaim,
+            invalidWrappedOutputCheckedBeforeClaim:
+              readiness.invalidWrappedOutput.checkedBeforeClaim,
+            invalidWrappedOutputProbeValid:
+              readiness.invalidWrappedOutput.probeResult?.valid ?? null,
+            claimAttempted: readiness.claimAttempted,
+          },
+        }
+      : {}),
   };
+}
+
+/**
+ * Walk a `/jobs/definition` payload looking for the platform's
+ * declared output schema reference. The platform's
+ * `submissionContract.outputSchemaRef` is the canonical source; we
+ * also accept the top-level `outputSchemaRef` and verifier-side
+ * `evidenceSchemaRef` for older / alternate definition shapes. Returns
+ * `null` when no schema ref is declared rather than guessing.
+ */
+function readOutputSchemaRef(definition: unknown): string | null {
+  const submissionContract = recordField(definition, "submissionContract");
+  const verifier = recordField(definition, "verifier");
+  const verification = recordField(definition, "verification");
+  const candidate =
+    stringField(submissionContract, "outputSchemaRef") ??
+    stringField(definition, "outputSchemaRef") ??
+    stringField(verifier, "evidenceSchemaRef") ??
+    stringField(verification, "evidenceSchemaRef");
+  return candidate ?? null;
 }
 
 function isWikipediaDefinition(definition: unknown): boolean {

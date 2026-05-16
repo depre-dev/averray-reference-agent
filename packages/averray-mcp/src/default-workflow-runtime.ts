@@ -22,12 +22,14 @@ import {
   findArchiveSnapshot,
 } from "./wiki-evidence.js";
 import {
+  INVALID_WRAPPER_PROBE_SHAPE,
   readPageTitle,
   readRevisionId,
   type WikipediaEvidenceBundle,
   type WorkflowDeps,
   type WorkflowJob,
 } from "./job-workflows.js";
+import type { SubmissionValidationResult } from "./validate-submission.js";
 
 const baseUrl = trimTrailingSlash(optionalEnv("AVERRAY_API_BASE_URL", "https://api.averray.com"));
 
@@ -81,6 +83,12 @@ export function createDefaultWorkflowDeps(): WorkflowDeps {
     },
     async fetchEvidence(input): Promise<WikipediaEvidenceBundle> {
       return fetchWikipediaEvidenceForWorkflow(input.definition, input.maxEvidenceUrls);
+    },
+    async validateDirectSubmission(input) {
+      return platformValidateSubmission(input.jobId, input.output);
+    },
+    async probeInvalidWrapperSubmission(input) {
+      return platformValidateSubmission(input.jobId, INVALID_WRAPPER_PROBE_SHAPE);
     },
     async saveDraft(input) {
       const draft = await saveDraftSubmission(
@@ -427,4 +435,64 @@ function firstPresent(...values: unknown[]): unknown {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Read-only call to the platform's `/jobs/validate-submission` route.
+ * Used by `validateDirectSubmission` and `probeInvalidWrapperSubmission`
+ * as the schema-native readiness gate before claim. Hits the platform
+ * authoritatively rather than relying on local Zod — local Zod cannot
+ * tell whether the platform is actually enforcing the schema, which
+ * is exactly what the invalid-wrapper probe is for.
+ *
+ * The route returns at minimum `{ valid: boolean, ... }`. We map a
+ * non-2xx response or a missing `valid` field to `valid: false` so the
+ * workflow fails closed rather than treating a transport error as a
+ * pass.
+ */
+export async function platformValidateSubmission(
+  jobId: string,
+  output: unknown
+): Promise<SubmissionValidationResult> {
+  try {
+    const response = await request("/jobs/validate-submission", {
+      method: "POST",
+      body: { jobId, submission: output },
+    });
+    if (isRecord(response) && response.valid === true) {
+      return { valid: true, validator: "permissive" };
+    }
+    const errors = Array.isArray((response as Record<string, unknown>)?.errors)
+      ? ((response as Record<string, unknown>).errors as Array<{
+          path?: unknown;
+          code?: unknown;
+          message?: unknown;
+        }>).map((entry) => ({
+          path: typeof entry?.path === "string" ? entry.path : "(root)",
+          code: typeof entry?.code === "string" ? entry.code : "invalid",
+          message:
+            typeof entry?.message === "string"
+              ? entry.message
+              : "platform validation rejected the submission",
+        }))
+      : [];
+    return {
+      valid: false,
+      validator: "permissive",
+      errors,
+      message:
+        typeof (response as Record<string, unknown>)?.message === "string"
+          ? ((response as Record<string, unknown>).message as string)
+          : "platform validation rejected the submission",
+    };
+  } catch (error) {
+    return {
+      valid: false,
+      validator: "permissive",
+      message:
+        error instanceof Error
+          ? `validation_request_failed:${error.message}`
+          : "validation_request_failed",
+    };
+  }
 }
