@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  guardMonitorCommand,
   isMonitorAuthorized,
   parseMonitorConfig,
   renderMonitorHtml,
@@ -38,152 +39,84 @@ describe("slack operator personal monitor", () => {
     )).toBe(true);
   });
 
-  it("renders a self-refreshing monitor shell without executing operator commands", () => {
+  it("guards the monitor command console to read-only and proposal commands", () => {
+    expect(guardMonitorCommand("merge steward details")).toMatchObject({ allowed: true });
+    expect(guardMonitorCommand("ops health")).toMatchObject({ allowed: true });
+    expect(guardMonitorCommand("propose deploy for averray-agent/agent sha abc1234")).toMatchObject({ allowed: true });
+    expect(guardMonitorCommand("merge steward approve averray-agent/agent#123")).toMatchObject({
+      allowed: false,
+      reason: "mutation_command_blocked",
+    });
+    expect(guardMonitorCommand("run one wikipedia citation repair if safe")).toMatchObject({
+      allowed: false,
+      reason: "mutation_command_blocked",
+    });
+  });
+
+  it("renders the command-center monitor shell without executing operator commands", () => {
     const html = renderMonitorHtml({
       title: "Pascal Monitor",
       eventsPath: "/monitor/events",
       streamPath: "/monitor/stream",
+      commandPath: "/monitor/command",
     });
 
     expect(html).toContain("<title>Pascal Monitor</title>");
-    expect(html).toContain("Live private view of agent-to-agent handoffs.");
-    expect(html).toContain("live-status");
-    expect(html).toContain("connecting");
-    expect(html).toContain("Active / Just Finished");
-    expect(html).toContain("Blocked / Operator Review");
-    expect(html).toContain("Live Lane");
-    expect(html).toContain("Live state");
-    expect(html).toContain("JUST FINISHED");
-    expect(html).toContain("state-pill");
-    expect(html).toContain("PR Board");
-    expect(html).toContain("release queue");
-    expect(html).toContain("data-pipeline-filter=\"all\"");
-    expect(html).toContain("data-pipeline-filter=\"block\"");
-    expect(html).toContain("data-pipeline-filter=\"needs-review\"");
-    expect(html).toContain("data-pipeline-filter=\"pass\"");
-    expect(html).toContain("data-pipeline-filter=\"running\"");
-    expect(html).toContain("Next action owners");
-    expect(html).toContain("Codex needs");
-    expect(html).toContain("Operator needs");
-    expect(html).toContain("Merge queue");
-    expect(html).toContain("Hermes active");
-    expect(html).toContain("Owner Lanes");
-    expect(html).toContain("who acts next");
-    expect(html).toContain("Nothing waiting on Codex.");
-    expect(html).toContain("Hermes has no active PR checks.");
-    expect(html).toContain("No operator review needed.");
-    expect(html).toContain("Nothing ready to merge.");
-    expect(html).toContain("No completed PRs in view.");
-    expect(html).toContain("code review");
-    expect(html).toContain("handoff");
-    expect(html).toContain("PR staleness summary");
-    expect(html).toContain("Fresh");
-    expect(html).toContain("Waiting");
-    expect(html).toContain("Stale");
-    expect(html).toContain("PR Pipeline");
-    expect(html).toContain("grouped by repo");
-    expect(html).toContain("No current work for this repo.");
-    expect(html).toContain("Recent history");
-    expect(html).toContain("Next action:");
-    expect(html).toContain("Next actor");
-    expect(html).toContain("Fix request");
-    expect(html).toContain("Fix request for Codex");
-    expect(html).toContain("Operator decision request");
-    expect(html).toContain("Operator approved");
-    expect(html).toContain("Reset approval");
-    expect(html).toContain("private monitor decision only");
-    expect(html).toContain("PR timeline");
-    expect(html).toContain("pr-timeline-item");
-    expect(html).toContain("PR detail");
-    expect(html).toContain("PR state");
-    expect(html).toContain("Suggested owner");
-    expect(html).toContain("Changed areas");
-    expect(html).toContain("Test coverage");
-    expect(html).toContain("Done");
-    expect(html).toContain("PR");
-    expect(html).toContain("CI");
-    expect(html).toContain("Hermes");
-    expect(html).toContain("Testbed");
-    expect(html).toContain("Gate");
-    expect(html).toContain("Deploy");
+    expect(html).toContain("handoff monitor · averray");
+    expect(html).toContain("command-shell");
+    expect(html).toContain("cmdbar");
+    expect(html).toContain("filterbar");
+    expect(html).toContain("kanban-board");
+    expect(html).toContain("detail-drawer");
+    expect(html).toContain("command-console");
+    expect(html).toContain("Ask Hermes");
+    expect(html).toContain("Read-only command console");
+    expect(html).toContain("Needs Attention");
+    expect(html).toContain("Codex Working");
+    expect(html).toContain("Hermes Checking");
+    expect(html).toContain("Operator Review");
+    expect(html).toContain("Release Queue");
+    expect(html).toContain("Deploying");
+    expect(html).toContain("done lane");
+    expect(html).toContain("data-command-suggestion=\"handoff monitor details\"");
+    expect(html).toContain("data-command-suggestion=\"merge steward details\"");
+    expect(html).toContain("data-command-suggestion=\"github status\"");
+    expect(html).toContain("data-command-suggestion=\"ops health\"");
+    expect(html).toContain("data-command-suggestion=\"codex handoff protocol\"");
     expect(html).toContain("const eventsPath = \"/monitor/events\";");
     expect(html).toContain("const streamPath = \"/monitor/stream\";");
+    expect(html).toContain("const commandPath = \"/monitor/command\";");
     expect(html).toContain("new EventSource(streamUrl)");
     expect(html).toContain("addEventListener(\"monitor\"");
     expect(html).toContain("startPolling(\"polling fallback 5s\")");
-    expect(html).toContain("Release Gate");
-    expect(html).toContain("blocks + operator review");
-    expect(html).toContain("Release Timeline");
-    expect(html).toContain("auto-refresh 5s");
-    expect(html).toContain("activeWindowMinutes: \"240\"");
-    expect(html).toContain("limit: \"50\"");
-    expect(html).toContain("releaseVerdict(item)");
-    expect(html).toContain("renderPipelineBoard(latestPipelineItems)");
-    expect(html).toContain("renderOwnerLanes(latestPipelineItems)");
-    expect(html).toContain("renderOwnerSummary(entries)");
-    expect(html).toContain("renderStalenessSummary(entries)");
-    expect(html).toContain("latestPipelineItems = groupPrPipelineItems(collectPipelineItems(payload))");
-    expect(html).toContain("filterPipelineItems(entries)");
-    expect(html).toContain("renderRepoGroups(filtered)");
-    expect(html).toContain("renderRepoGroup(repo, items)");
-    expect(html).toContain("repoSummaryChips(items, current)");
-    expect(html).toContain("repoSortScore(b[1])");
-    expect(html).toContain("ownerLaneDefinitions()");
-    expect(html).toContain("renderOwnerLane(lane, filtered)");
-    expect(html).toContain("renderOwnerLaneCard(item)");
-    expect(html).toContain("ownerLaneSortScore(item)");
+    expect(html).toContain("fetch(commandUrl");
+    expect(html).toContain("submitMonitorCommand(text)");
+    expect(html).toContain("selectedKey");
+    expect(html).toContain("renderBoard(latestPipelineItems)");
+    expect(html).toContain("renderDrawer(selectedItem())");
+    expect(html).toContain("renderCommandContext()");
+    expect(html).toContain("operatorChecklistSection(item, verdict, action)");
     expect(html).toContain("groupPrPipelineItems(entries)");
     expect(html).toContain("finalizePrGroup(items)");
-    expect(html).toContain("groupedReleaseVerdict(item)");
-    expect(html).toContain("groupPhaseLabels(item)");
-    expect(html).toContain("renderGroupBadges(item)");
     expect(html).toContain("prIdentityKey(item)");
-    expect(html).toContain("verdictSortScore(verdict)");
-    expect(html).toContain("uniqueStrings(values)");
-    expect(html).toContain("isCurrentPipelineItem(item)");
-    expect(html).toContain("updatePipelineFilterButtons()");
-    expect(html).toContain("buildMonitorUrl(path)");
-    expect(html).toContain("pipelineStage(item, verdict)");
-    expect(html).toContain("nextPipelineAction(item, verdict)");
-    expect(html).toContain("renderFixRequest(item, summary, verdict, action)");
-    expect(html).toContain("renderDecisionActions(item)");
-    expect(html).toContain("renderHumanDecisionNote(item)");
-    expect(html).toContain("buildFixRequest(item, summary, verdict, action)");
-    expect(html).toContain("fixRequestInstruction(verdict, action)");
-    expect(html).toContain("firstReviewReason(reviewReasons)");
-    expect(html).toContain("loadMonitorDecisions()");
-    expect(html).toContain("setMonitorDecision(key, value)");
-    expect(html).toContain("decisionForItem(item)");
-    expect(html).toContain("decisionKeyForItem(item)");
-    expect(html).toContain("baseReleaseVerdict(item)");
-    expect(html).toContain("renderPipelineDetails(item, summary, verdict, action)");
-    expect(html).toContain("handoffAge(item)");
-    expect(html).toContain("pullRequestState(item, summary)");
-    expect(html).toContain("isDonePullRequestState(prState)");
-    expect(html).toContain("pullRequestStateLabel(prState)");
-    expect(html).toContain("formatDuration(minutes)");
-    expect(html).toContain("nextPipelineActor(item, verdict)");
     expect(html).toContain("renderPipelineSteps(stage, verdict)");
     expect(html).toContain("renderPrTimeline(item, stage, verdict, action)");
-    expect(html).toContain("prTimelineItems(item, stage, verdict, action, prState)");
-    expect(html).toContain("renderPrTimelineItem(item)");
-    expect(html).toContain("prTimelineStateForGate(verdict)");
-    expect(html).toContain("compactTestList(tests)");
-    expect(html).toContain("classifyReleaseGate(status, finalVerdict, mergeRecommendation, reason, reviewReasons)");
-    expect(html).toContain("reviewSignalRows(summary)");
-    expect(html).toContain("reviewReasonRows(summary)");
+    expect(html).toContain("renderDecisionActions(item)");
+    expect(html).toContain("buildFixRequest(item, summary, verdict, action)");
+    expect(html).toContain("Operator sign-off");
+    expect(html).toContain("Operator approved");
+    expect(html).toContain("No operator sign-off needed.");
+    expect(html).toContain("private monitor decision only");
     expect(html).toContain("Missing tests");
     expect(html).toContain("Rollout notes");
     expect(html).toContain("Touched");
     expect(html).toContain("Review why");
-    expect(html).toContain("releaseReason(summary, item, terminal.level)");
-    expect(html).toContain("derivePullRequestUrl(item)");
-    expect(html).toContain("deriveCommitUrl(item)");
-    expect(html).toContain("deriveWorkflowRunUrl(item)");
     expect(html).toContain("Health failures");
     expect(html).toContain("Failed runs");
     expect(html).toContain("Active runs");
     expect(html).toContain("https://github.com/");
-    expect(html).not.toContain("handleOperatorCommand");
+    expect(html).not.toContain("Blocked / Human Review");
+    expect(html).not.toContain("Human needs");
+    expect(html).not.toContain("handleOperatorCommandText");
   });
 });

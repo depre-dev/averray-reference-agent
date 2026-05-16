@@ -23,6 +23,7 @@ import {
   shouldRunOpsHealth,
 } from "./routines.js";
 import {
+  guardMonitorCommand,
   isMonitorAuthorized,
   parseMonitorConfig,
   renderMonitorHtml,
@@ -125,7 +126,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       monitor: {
         enabled: monitorConfig.enabled,
         tokenProtected: Boolean(monitorConfig.token),
-        paths: monitorConfig.enabled ? ["/monitor", "/monitor/events", "/monitor/stream"] : [],
+        paths: monitorConfig.enabled ? ["/monitor", "/monitor/events", "/monitor/stream", "/monitor/command"] : [],
       },
     });
     return;
@@ -153,6 +154,18 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       return;
     }
     writeJson(response, 200, await loadMonitorSnapshot(url));
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/monitor/command") {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    await handleMonitorCommandRequest(request, response);
     return;
   }
   if (!enabled) {
@@ -284,6 +297,50 @@ async function handleCommand(envelope: SlackCommandEnvelope) {
   } catch (error) {
     logger.error({ err: error }, "slack_operator_command_failed");
     await postSlack(envelope, `Averray command failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function handleMonitorCommandRequest(request: http.IncomingMessage, response: http.ServerResponse) {
+  try {
+    const rawBody = await readBody(request);
+    const payload = rawBody ? JSON.parse(rawBody) as unknown : {};
+    const text = isRecord(payload) && typeof payload.text === "string" ? payload.text.trim() : "";
+    const guard = guardMonitorCommand(text);
+    if (!guard.allowed) {
+      writeJson(response, 400, {
+        error: guard.reason ?? "command_blocked",
+        message: "This monitor console only runs read-only status/proposal commands. Use Slack or the MCP operator tools for explicit admin mutations.",
+        normalizedText: guard.normalizedText,
+      });
+      return;
+    }
+    logger.info({ text, normalizedText: guard.normalizedText }, "monitor_operator_command_received");
+    const result = await handleOperatorCommandText(
+      {
+        text,
+        source: "command_center",
+        defaultDryRun: true,
+        maxEvidenceUrls: 5,
+        confidenceThreshold: 0.7,
+      },
+      { query, workflowDeps: createDefaultWorkflowDeps() }
+    );
+    await recordOperatorCommandEvent({
+      source: "monitor",
+      commandText: text,
+      result,
+    }, query).catch((error) => logger.warn({ err: error }, "monitor_operator_command_record_failed"));
+    writeJson(response, 200, {
+      ok: true,
+      text: formatOperatorResultForSlack(result),
+      result,
+    });
+  } catch (error) {
+    logger.error({ err: error }, "monitor_operator_command_failed");
+    writeJson(response, 500, {
+      error: "monitor_command_failed",
+      message: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 

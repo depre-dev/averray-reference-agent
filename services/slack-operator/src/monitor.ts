@@ -21,10 +21,54 @@ export function isMonitorAuthorized(
   return url.searchParams.get("token") === config.token;
 }
 
-export function renderMonitorHtml(options: { title?: string; eventsPath?: string; streamPath?: string } = {}): string {
+export interface MonitorCommandGuard {
+  allowed: boolean;
+  normalizedText: string;
+  reason?: string;
+}
+
+export function guardMonitorCommand(text: string): MonitorCommandGuard {
+  const normalizedText = normalizeMonitorCommandText(text);
+  if (!normalizedText) return { allowed: false, normalizedText, reason: "empty_command" };
+  if (isBlockedMonitorCommand(normalizedText)) {
+    return { allowed: false, normalizedText, reason: "mutation_command_blocked" };
+  }
+  if (isAllowedMonitorCommand(normalizedText)) return { allowed: true, normalizedText };
+  return { allowed: false, normalizedText, reason: "command_not_allowed_from_monitor" };
+}
+
+export function normalizeMonitorCommandText(text: string): string {
+  return text.trim().toLowerCase().replace(/[.!?]+$/g, "").replace(/\s+/g, " ");
+}
+
+function isBlockedMonitorCommand(text: string): boolean {
+  return Boolean(
+    /\b(approve|execute|merge)\b.*\b(merge steward|github merge steward)\b/.test(text)
+    || /\b(merge steward|github merge steward)\b.*\b(approve|execute|merge)\b/.test(text)
+    || /\b(merge\s+(pr|#|now)|deploy(?! for)|rollback(?! for)|restart|rotate|set secret|secret set|ssh|claim|submit)\b/.test(text)
+    || /\bwikipedia citation repair\b/.test(text)
+    || /\b(if safe|live|guarded live|mutation|mutate|write)\b/.test(text)
+  );
+}
+
+function isAllowedMonitorCommand(text: string): boolean {
+  return Boolean(
+    /^(handoff monitor|agent handoff monitor|hermes handoff monitor|hermes monitor|what is hermes doing|current handoffs|active handoffs|handoff status)( details?| full| audit)?$/.test(text)
+    || /^(github status|github open prs|github ci failures|github issue digest|merge steward|take care of open prs)( details?| full| audit)?$/.test(text)
+    || /^(operator status|ops health|business ledger|daily operator brief|find safe work|admin readiness|project memory|known projects|codex handoff protocol)( details?| full| audit)?$/.test(text)
+    || /^what (can|should) (i|we) do next( details?| full| audit)?$/.test(text)
+    || /^what can you do for us( details?| full| audit)?$/.test(text)
+    || /^(how do we deploy|runbook for|secret rotation runbook)( .*)?$/.test(text)
+    || /^propose (merge|deploy|secret rotation|rollback)\b/.test(text)
+    || /^run testbed e2e read[ -]?only( details?| full| audit)?$/.test(text)
+  );
+}
+
+export function renderMonitorHtml(options: { title?: string; eventsPath?: string; streamPath?: string; commandPath?: string } = {}): string {
   const title = escapeHtml(options.title ?? "Hermes Handoff Monitor");
   const eventsPath = JSON.stringify(options.eventsPath ?? "/monitor/events");
   const streamPath = JSON.stringify(options.streamPath ?? "/monitor/stream");
+  const commandPath = JSON.stringify(options.commandPath ?? "/monitor/command");
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -703,6 +747,514 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       border-color: var(--bad);
       color: var(--bad);
     }
+    .command-shell {
+      width: 100vw;
+      height: 100vh;
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      overflow: hidden;
+      background:
+        radial-gradient(1400px 640px at 85% -16%, rgba(82, 210, 115, 0.08), transparent 58%),
+        radial-gradient(800px 520px at -8% 18%, rgba(100, 210, 255, 0.07), transparent 54%),
+        var(--bg);
+    }
+    .cmdbar {
+      display: grid;
+      grid-template-columns: minmax(260px, auto) 1fr auto;
+      align-items: center;
+      gap: 18px;
+      padding: 10px 18px;
+      border-bottom: 1px solid rgba(77, 118, 111, 0.55);
+      background: rgba(3, 19, 17, 0.92);
+      backdrop-filter: blur(10px);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+    .brand-mark {
+      width: 32px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      border-radius: 7px;
+      border: 1px solid var(--line);
+      color: var(--accent);
+      background: rgba(255, 176, 46, 0.08);
+      font-weight: 800;
+    }
+    .brand-name {
+      font-size: 0.9rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .brand-sub {
+      margin-top: 4px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+    .cmd-status {
+      display: inline-flex;
+      align-items: center;
+      justify-self: center;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 6px 10px;
+      color: var(--text);
+      background: rgba(10, 48, 44, 0.72);
+      white-space: nowrap;
+    }
+    .cmd-status::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--warn);
+      box-shadow: 0 0 0 0 rgba(255, 209, 102, 0.55);
+    }
+    .cmd-status[data-state="live"]::before {
+      background: var(--ok);
+      animation: pulse 1.8s ease-out infinite;
+    }
+    .cmd-status[data-state="polling"]::before,
+    .cmd-status[data-state="connecting"]::before { background: #64d2ff; }
+    .cmd-status[data-state="error"]::before { background: var(--bad); }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(82, 210, 115, 0.5); }
+      70% { box-shadow: 0 0 0 9px rgba(82, 210, 115, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(82, 210, 115, 0); }
+    }
+    .cmd-counters {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      justify-content: center;
+      min-width: 0;
+    }
+    .counter-chip {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 6px;
+      min-height: 30px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: rgba(10, 48, 44, 0.74);
+      white-space: nowrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .counter-chip[data-tone="warn"] {
+      border-color: rgba(255, 209, 102, 0.66);
+      background: rgba(255, 209, 102, 0.1);
+    }
+    .counter-chip[data-tone="bad"] {
+      border-color: rgba(255, 107, 107, 0.68);
+      background: rgba(255, 107, 107, 0.1);
+    }
+    .counter-chip[data-tone="ok"] {
+      border-color: rgba(82, 210, 115, 0.62);
+      background: rgba(82, 210, 115, 0.1);
+    }
+    .counter-number {
+      color: var(--text);
+      font-weight: 800;
+      font-size: 0.95rem;
+    }
+    .counter-label {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.62rem;
+    }
+    .refresh-cluster {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+    .refresh-meta {
+      display: grid;
+      gap: 2px;
+      text-align: right;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.68rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .filterbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 8px 18px;
+      border-bottom: 1px solid rgba(77, 118, 111, 0.48);
+      background: rgba(3, 19, 17, 0.72);
+    }
+    .filter-left,
+    .filter-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+    .monitor-search {
+      width: min(320px, 32vw);
+      min-height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--text);
+      background: rgba(10, 48, 44, 0.72);
+      padding: 0 12px;
+      outline: none;
+    }
+    .monitor-search::placeholder { color: var(--muted); }
+    .toggle-pill {
+      min-height: 32px;
+      padding: 0 10px;
+      border-radius: 7px;
+      font-size: 0.78rem;
+      background: rgba(10, 48, 44, 0.72);
+    }
+    .toggle-pill[aria-pressed="true"] {
+      border-color: var(--accent);
+      background: var(--accent-bg);
+    }
+    .board-shell {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      gap: 12px;
+      padding: 14px 18px 96px;
+      overflow: hidden;
+    }
+    .live-lane {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 12px;
+      min-height: 42px;
+      border: 1px dashed var(--line);
+      border-radius: 10px;
+      color: var(--muted);
+      background: rgba(10, 48, 44, 0.42);
+      padding: 8px 12px;
+    }
+    .live-lane strong {
+      color: var(--text);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-size: 0.74rem;
+    }
+    .kanban-board {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: repeat(6, minmax(245px, 1fr)) minmax(52px, 64px);
+      gap: 12px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      align-items: stretch;
+      padding-bottom: 8px;
+    }
+    .lane {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      border: 1px solid rgba(77, 118, 111, 0.5);
+      border-radius: 10px;
+      background: rgba(2, 15, 13, 0.66);
+      overflow: hidden;
+      --lane-accent: var(--muted);
+    }
+    .lane[data-lane="attention"] { --lane-accent: var(--bad); }
+    .lane[data-lane="codex"] { --lane-accent: #a99bff; }
+    .lane[data-lane="hermes"],
+    .lane[data-lane="deploy"] { --lane-accent: #64d2ff; }
+    .lane[data-lane="operator"] { --lane-accent: var(--warn); }
+    .lane[data-lane="queue"] { --lane-accent: var(--ok); }
+    .lane[data-lane="done"] { --lane-accent: #6da58e; }
+    .lane-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 44px;
+      border-bottom: 1px solid rgba(77, 118, 111, 0.44);
+      border-top: 2px solid var(--lane-accent);
+      padding: 10px 12px;
+      background: rgba(10, 48, 44, 0.68);
+    }
+    .lane-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 800;
+      min-width: 0;
+    }
+    .lane-title::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--lane-accent);
+    }
+    .lane-subtitle {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      white-space: nowrap;
+    }
+    .lane-body {
+      min-height: 0;
+      overflow-y: auto;
+      display: grid;
+      align-content: start;
+      gap: 10px;
+      padding: 10px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--line) transparent;
+    }
+    .lane-empty {
+      min-height: 84px;
+      display: grid;
+      place-items: center;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      color: var(--muted);
+      text-align: center;
+      padding: 12px;
+      font-size: 0.86rem;
+    }
+    .handoff-card {
+      position: relative;
+      display: grid;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--lane-accent);
+      border-radius: 8px;
+      background: rgba(10, 48, 44, 0.9);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+      padding: 10px;
+      cursor: pointer;
+      text-align: left;
+      color: var(--text);
+      transition: transform 0.14s ease, border-color 0.14s ease, opacity 0.14s ease;
+    }
+    .handoff-card:hover,
+    .handoff-card[data-selected="true"] {
+      transform: translateY(-1px);
+      border-color: var(--lane-accent);
+    }
+    .command-shell.has-selection .handoff-card:not([data-selected="true"]) {
+      opacity: 0.42;
+    }
+    .card-head,
+    .card-foot,
+    .card-meta-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+    }
+    .card-title {
+      margin: 0;
+      font-size: 0.9rem;
+      line-height: 1.25;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+    .card-subtitle,
+    .card-why,
+    .card-next {
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1.35;
+    }
+    .card-why {
+      color: var(--text);
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .mini-steps {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 4px;
+    }
+    .mini-step {
+      height: 4px;
+      border-radius: 999px;
+      background: rgba(167, 181, 170, 0.28);
+    }
+    .mini-step[data-state="done"] { background: var(--ok); }
+    .mini-step[data-state="active"] { background: #64d2ff; }
+    .mini-step[data-state="review"] { background: var(--warn); }
+    .mini-step[data-state="blocked"] { background: var(--bad); }
+    .card-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: flex-end;
+    }
+    .soft-button {
+      min-height: 28px;
+      padding: 0 9px;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.04);
+    }
+    .soft-button[data-action="primary"] {
+      border-color: var(--lane-accent);
+      color: var(--lane-accent);
+      background: color-mix(in srgb, var(--lane-accent) 12%, transparent);
+    }
+    .drawer {
+      position: fixed;
+      inset: 0 0 0 auto;
+      width: min(640px, 100vw);
+      z-index: 20;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      border-left: 1px solid var(--line);
+      background: rgba(4, 29, 26, 0.97);
+      box-shadow: -30px 0 80px rgba(0, 0, 0, 0.46);
+      transform: translateX(104%);
+      transition: transform 0.2s ease;
+    }
+    .drawer[data-open="true"] { transform: translateX(0); }
+    .drawer-head {
+      display: grid;
+      gap: 10px;
+      border-bottom: 1px solid var(--line);
+      padding: 16px 18px;
+      background: rgba(10, 48, 44, 0.74);
+    }
+    .drawer-topline,
+    .drawer-links,
+    .drawer-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .drawer-title {
+      margin: 0;
+      font-size: 1.3rem;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+    .drawer-body {
+      min-height: 0;
+      overflow: auto;
+      display: grid;
+      align-content: start;
+      gap: 12px;
+      padding: 16px 18px 22px;
+    }
+    .drawer-section {
+      border: 1px solid rgba(77, 118, 111, 0.48);
+      border-radius: 8px;
+      background: rgba(10, 48, 44, 0.46);
+      padding: 12px;
+    }
+    .drawer-section h3 {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.68rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .drawer-section p {
+      color: var(--text);
+      line-height: 1.45;
+    }
+    .drawer-footer {
+      position: sticky;
+      bottom: 0;
+      border-top: 1px solid var(--line);
+      background: rgba(4, 29, 26, 0.96);
+      padding: 12px 18px;
+    }
+    .command-console {
+      position: fixed;
+      left: 18px;
+      right: 18px;
+      bottom: 14px;
+      z-index: 18;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: end;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(4, 29, 26, 0.96);
+      box-shadow: 0 18px 60px rgba(0, 0, 0, 0.34);
+      padding: 10px;
+      backdrop-filter: blur(14px);
+    }
+    .console-main {
+      display: grid;
+      gap: 8px;
+      min-width: 0;
+    }
+    .console-context {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+    .console-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+    }
+    .console-input {
+      min-height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(10, 48, 44, 0.68);
+      color: var(--text);
+      padding: 0 12px;
+      outline: none;
+    }
+    .console-output {
+      max-height: 96px;
+      overflow: auto;
+      color: var(--muted);
+      font-size: 0.82rem;
+      line-height: 1.4;
+      white-space: pre-wrap;
+    }
+    .suggestions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .suggestion {
+      min-height: 30px;
+      padding: 0 10px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      background: rgba(10, 48, 44, 0.72);
+    }
+    .hidden { display: none !important; }
     @media (max-width: 760px) {
       main { width: min(100vw - 20px, 1180px); margin-top: 14px; }
       header { flex-direction: column; }
@@ -719,63 +1271,105 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       .pipeline-meta,
       .pipeline-detail { grid-template-columns: 1fr; }
       dl { grid-template-columns: 1fr; }
+      .cmdbar,
+      .filterbar,
+      .command-console { grid-template-columns: 1fr; }
+      .cmd-counters,
+      .filter-left,
+      .filter-right,
+      .suggestions { justify-content: flex-start; overflow-x: auto; }
+      .kanban-board { grid-template-columns: repeat(7, minmax(250px, 82vw)); }
+      .drawer { width: 100vw; }
     }
   </style>
 </head>
 <body>
-  <main>
-    <header>
-      <div>
-        <h1>${title}</h1>
-        <p id="subtitle">Live private view of agent-to-agent handoffs.<span id="live-status" class="live-status" data-state="connecting">connecting</span></p>
+  <main id="monitor-shell" class="command-shell">
+    <header class="cmdbar">
+      <div class="brand">
+        <div class="brand-mark">A</div>
+        <div>
+          <div class="brand-name">Hermes</div>
+          <div class="brand-sub">handoff monitor · averray</div>
+        </div>
       </div>
-      <button id="refresh" type="button">Refresh</button>
+      <div class="cmd-counters" aria-label="Release counters">
+        <span class="counter-chip" data-tone="warn"><span id="attention-chip" class="counter-number">0</span><span class="counter-label">needs attention</span></span>
+        <span class="counter-chip" data-tone="bad"><span id="blocked-chip" class="counter-number">0</span><span class="counter-label">blocked</span></span>
+        <span class="counter-chip"><span id="review-chip" class="counter-number">0</span><span class="counter-label">operator</span></span>
+        <span class="counter-chip" data-tone="ok"><span id="ready-chip" class="counter-number">0</span><span class="counter-label">ready</span></span>
+        <span class="counter-chip"><span id="running-chip" class="counter-number">0</span><span class="counter-label">in flight</span></span>
+      </div>
+      <div class="refresh-cluster">
+        <span id="live-status" class="cmd-status" data-state="connecting">connecting</span>
+        <span class="refresh-meta"><span>last refresh</span><span id="generated">waiting</span></span>
+        <button id="refresh" type="button">Refresh</button>
+      </div>
     </header>
-    <section class="grid" aria-label="Monitor summary">
-      <div class="card"><span class="metric">Status</span><span id="status" class="value">...</span></div>
-      <div class="card"><span class="metric">Active / Just Finished</span><span id="active-count" class="value">0</span></div>
-      <div class="card"><span class="metric">Blocked / Operator Review</span><span id="gate-count" class="value">0 / 0</span></div>
-      <div class="card"><span class="metric">Recent</span><span id="recent-count" class="value">0</span></div>
-      <div class="card"><span class="metric">Events</span><span id="event-count" class="value">0</span></div>
+    <section class="filterbar" aria-label="Monitor filters">
+      <div class="filter-left">
+        <input id="monitor-search" class="monitor-search" type="search" placeholder="search PR, repo, correlation id..." autocomplete="off">
+        <span class="fb-pill-group">
+          <span class="filter-label">Repo</span>
+          <button class="toggle-pill" type="button" data-repo-filter="all" aria-pressed="true">all</button>
+          <button class="toggle-pill" type="button" data-repo-filter="averray-agent/agent" aria-pressed="false">agent</button>
+        </span>
+        <span class="fb-pill-group">
+          <span class="filter-label">Agent</span>
+          <button class="toggle-pill" type="button" data-agent-filter="all" aria-pressed="true">all</button>
+          <button class="toggle-pill" type="button" data-agent-filter="codex" aria-pressed="false">codex</button>
+          <button class="toggle-pill" type="button" data-agent-filter="hermes" aria-pressed="false">hermes</button>
+        </span>
+      </div>
+      <div class="filter-right">
+        <span class="fb-pill-group" aria-label="Pipeline filters">
+          <button class="toggle-pill" type="button" data-pipeline-filter="all" aria-pressed="true">all <span id="board-all">0</span></button>
+          <button class="toggle-pill" type="button" data-pipeline-filter="block" aria-pressed="false">blocked <span id="board-block">0</span></button>
+          <button class="toggle-pill" type="button" data-pipeline-filter="needs-review" aria-pressed="false">operator <span id="board-review">0</span></button>
+          <button class="toggle-pill" type="button" data-pipeline-filter="pass" aria-pressed="false">ready <span id="board-ready">0</span></button>
+          <button class="toggle-pill" type="button" data-pipeline-filter="running" aria-pressed="false">running <span id="board-running">0</span></button>
+        </span>
+        <button id="toggle-done" class="toggle-pill" type="button" aria-pressed="false">done lane <span id="done-count">0</span></button>
+      </div>
     </section>
-    <div class="section-title"><h2>Live Lane</h2><span id="generated" class="pill">waiting</span></div>
-    <section id="active" class="list"><div class="empty">No running or just-finished handoffs.</div></section>
-    <div class="section-title"><h2>PR Board</h2><span class="pill">release queue</span></div>
-    <section class="pr-board" aria-label="PR board filters">
-      <button class="filter-button" type="button" data-pipeline-filter="all" aria-pressed="true"><span class="filter-label">All</span><span id="board-all" class="filter-count">0</span></button>
-      <button class="filter-button" type="button" data-pipeline-filter="block" aria-pressed="false"><span class="filter-label">Blocked</span><span id="board-block" class="filter-count">0</span></button>
-      <button class="filter-button" type="button" data-pipeline-filter="needs-review" aria-pressed="false"><span class="filter-label">Review</span><span id="board-review" class="filter-count">0</span></button>
-      <button class="filter-button" type="button" data-pipeline-filter="pass" aria-pressed="false"><span class="filter-label">Ready</span><span id="board-ready" class="filter-count">0</span></button>
-      <button class="filter-button" type="button" data-pipeline-filter="running" aria-pressed="false"><span class="filter-label">Running</span><span id="board-running" class="filter-count">0</span></button>
+    <section class="board-shell">
+      <div id="active" class="live-lane"><strong>Live lane</strong><span>No running or just-finished handoffs.</span><span class="pill">SSE + polling</span></div>
+      <section id="owner-lanes" class="kanban-board" aria-label="Release command board"><div class="empty">Loading command board...</div></section>
     </section>
-    <section class="staleness-summary" aria-label="PR staleness summary">
-      <div class="staleness-card" data-age="fresh"><span class="age-label">Fresh</span><span id="age-fresh" class="age-count">0</span></div>
-      <div class="staleness-card" data-age="waiting"><span class="age-label">Waiting</span><span id="age-waiting" class="age-count">0</span></div>
-      <div class="staleness-card" data-age="stale"><span class="age-label">Stale</span><span id="age-stale" class="age-count">0</span></div>
-    </section>
-    <section class="owner-summary" aria-label="Next action owners">
-      <div class="owner-card"><span class="owner-label">Codex needs</span><span id="owner-codex" class="owner-count">0</span></div>
-      <div class="owner-card"><span class="owner-label">Operator needs</span><span id="owner-human" class="owner-count">0</span></div>
-      <div class="owner-card"><span class="owner-label">Merge queue</span><span id="owner-merge" class="owner-count">0</span></div>
-      <div class="owner-card"><span class="owner-label">Hermes active</span><span id="owner-hermes" class="owner-count">0</span></div>
-    </section>
-    <div class="section-title"><h2>Owner Lanes</h2><span class="pill">who acts next</span></div>
-    <section id="owner-lanes" class="owner-lanes" aria-label="Owner lanes"><div class="empty">No PR handoffs in the monitor window.</div></section>
-    <div class="section-title"><h2>PR Pipeline</h2><span class="pill">grouped by repo</span></div>
-    <section id="pipeline" class="pipeline-list"><div class="empty">No PR handoffs in the monitor window.</div></section>
-    <div class="section-title"><h2>Release Gate</h2><span class="pill">blocks + operator review</span></div>
-    <section id="attention" class="list"><div class="empty">No handoffs need attention.</div></section>
-    <div class="section-title"><h2>Release Timeline</h2><span class="pill">auto-refresh 5s</span></div>
-    <section id="recent" class="list"><div class="empty">Loading recent handoffs...</div></section>
+    <aside id="detail-drawer" class="drawer" data-open="false" aria-label="Selected handoff detail"></aside>
+    <form id="command-console" class="command-console" autocomplete="off">
+      <div class="console-main">
+        <div class="console-context"><strong>Ask Hermes</strong><span id="console-context">global monitor context</span></div>
+        <div class="console-row">
+          <input id="command-input" class="console-input" name="text" placeholder="Ask for status, merge steward, why this PR is here..." autocomplete="off">
+          <button id="command-submit" type="submit">Send</button>
+        </div>
+        <div id="command-output" class="console-output">Read-only command console. It will refuse merge, deploy, claim, submit, and secret commands.</div>
+      </div>
+      <div class="suggestions" aria-label="Suggested Hermes commands">
+        <button class="suggestion" type="button" data-command-suggestion="handoff monitor details">handoff monitor</button>
+        <button class="suggestion" type="button" data-command-suggestion="merge steward details">merge steward</button>
+        <button class="suggestion" type="button" data-command-suggestion="github status">github status</button>
+        <button class="suggestion" type="button" data-command-suggestion="ops health">ops health</button>
+        <button class="suggestion" type="button" data-command-suggestion="codex handoff protocol">protocol</button>
+      </div>
+    </form>
   </main>
   <script>
     const eventsPath = ${eventsPath};
     const streamPath = ${streamPath};
+    const commandPath = ${commandPath};
     const token = new URLSearchParams(location.search).get("token");
     const withToken = buildMonitorUrl(eventsPath);
     const streamUrl = buildMonitorUrl(streamPath);
-    const decisionStorageKey = "averray-monitor-human-decisions:v1";
+    const commandUrl = buildCommandUrl(commandPath);
+    const decisionStorageKey = "averray-monitor-operator-decisions:v1";
     let pipelineFilter = "all";
+    let repoFilter = "all";
+    let agentFilter = "all";
+    let searchText = "";
+    let showDone = false;
+    let selectedKey = "";
     let latestPipelineItems = [];
     let latestPayload = null;
     let monitorDecisions = loadMonitorDecisions();
@@ -783,7 +1377,46 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     let streamSource = null;
 
     document.getElementById("refresh").addEventListener("click", () => load());
+    document.getElementById("monitor-search").addEventListener("input", (event) => {
+      searchText = String(event.target.value || "").trim().toLowerCase();
+      renderBoard(latestPipelineItems);
+    });
+    document.getElementById("toggle-done").addEventListener("click", () => {
+      showDone = !showDone;
+      document.getElementById("toggle-done").setAttribute("aria-pressed", String(showDone));
+      renderBoard(latestPipelineItems);
+    });
     document.addEventListener("click", (event) => {
+      const card = event.target && event.target.closest ? event.target.closest("[data-select-card]") : null;
+      const interactive = event.target && event.target.closest ? event.target.closest("button,a,input") : null;
+      if (card && !interactive) {
+        selectedKey = String(card.getAttribute("data-select-card") || "");
+        renderBoard(latestPipelineItems);
+        renderDrawer(selectedItem());
+        renderCommandContext();
+        return;
+      }
+      const closeDrawer = event.target && event.target.closest ? event.target.closest("[data-close-drawer]") : null;
+      if (closeDrawer) {
+        selectedKey = "";
+        renderBoard(latestPipelineItems);
+        renderDrawer(null);
+        renderCommandContext();
+        return;
+      }
+      const copyButton = event.target && event.target.closest ? event.target.closest("[data-copy-text]") : null;
+      if (copyButton) {
+        const value = String(copyButton.getAttribute("data-copy-text") || "");
+        void navigator.clipboard?.writeText(value);
+        return;
+      }
+      const suggestion = event.target && event.target.closest ? event.target.closest("[data-command-suggestion]") : null;
+      if (suggestion) {
+        const value = String(suggestion.getAttribute("data-command-suggestion") || "");
+        document.getElementById("command-input").value = contextualCommand(value);
+        document.getElementById("command-input").focus();
+        return;
+      }
       const button = event.target && event.target.closest ? event.target.closest("[data-monitor-decision]") : null;
       if (!button) return;
       const key = String(button.getAttribute("data-decision-key") || "");
@@ -797,8 +1430,29 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       button.addEventListener("click", () => {
         pipelineFilter = String(button.getAttribute("data-pipeline-filter") || "all");
         updatePipelineFilterButtons();
-        renderPipeline(latestPipelineItems);
+        renderBoard(latestPipelineItems);
       });
+    });
+    document.querySelectorAll("[data-repo-filter]").forEach((button) => {
+      button.addEventListener("click", () => {
+        repoFilter = String(button.getAttribute("data-repo-filter") || "all");
+        updateToggleGroup("[data-repo-filter]", repoFilter);
+        renderBoard(latestPipelineItems);
+      });
+    });
+    document.querySelectorAll("[data-agent-filter]").forEach((button) => {
+      button.addEventListener("click", () => {
+        agentFilter = String(button.getAttribute("data-agent-filter") || "all");
+        updateToggleGroup("[data-agent-filter]", agentFilter);
+        renderBoard(latestPipelineItems);
+      });
+    });
+    document.getElementById("command-console").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const input = document.getElementById("command-input");
+      const text = String(input.value || "").trim();
+      if (!text) return;
+      void submitMonitorCommand(text);
     });
     load();
     startLiveUpdates();
@@ -855,27 +1509,29 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       latestPayload = payload;
       const counts = payload.counts || {};
       const recent = payload.recent || [];
-      document.getElementById("status").textContent = payload.status || "unknown";
-      document.getElementById("active-count").textContent = counts.active || 0;
-      document.getElementById("recent-count").textContent = counts.recent || 0;
-      document.getElementById("event-count").textContent = counts.events || 0;
-      document.getElementById("generated").textContent = payload.generatedAt ? new Date(payload.generatedAt).toLocaleString() : "unknown";
-      renderList("active", payload.active || [], "No running or just-finished handoffs.");
+      setText("generated", payload.generatedAt ? new Date(payload.generatedAt).toLocaleTimeString() : "unknown");
       latestPipelineItems = groupPrPipelineItems(collectPipelineItems(payload));
       const attention = latestPipelineItems.filter(needsAttention);
       const verdicts = latestPipelineItems.map(releaseVerdict);
       const blocked = verdicts.filter((verdict) => verdict.level === "block").length;
       const review = verdicts.filter((verdict) => verdict.level === "needs-review").length;
-      document.getElementById("gate-count").textContent = blocked + " / " + review;
+      const ready = verdicts.filter((verdict) => verdict.level === "pass").length;
+      const running = verdicts.filter((verdict) => verdict.level === "running").length;
+      setText("attention-chip", String(blocked + review));
+      setText("blocked-chip", String(blocked));
+      setText("review-chip", String(review));
+      setText("ready-chip", String(ready));
+      setText("running-chip", String(running));
       renderPipelineBoard(latestPipelineItems);
-      renderOwnerLanes(latestPipelineItems);
-      renderPipeline(latestPipelineItems);
-      renderList("attention", attention, "No handoffs need attention.");
-      renderList("recent", recent, "No recent handoffs in the monitor window.");
+      renderLiveLane(payload.active || []);
+      renderBoard(latestPipelineItems);
+      renderDrawer(selectedItem());
+      renderCommandContext();
     }
 
     function renderList(id, entries, emptyText) {
       const target = document.getElementById(id);
+      if (!target) return;
       if (!entries.length) {
         target.innerHTML = '<div class="empty">' + escapeHtml(emptyText) + '</div>';
         return;
@@ -883,13 +1539,320 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       target.innerHTML = entries.map(renderHandoff).join("");
     }
 
+    function renderLiveLane(entries) {
+      const target = document.getElementById("active");
+      if (!target) return;
+      const running = entries.filter((item) => item.active === true || item.activeState === "running" || normalize(item.status) === "running");
+      const justFinished = entries.filter((item) => item.activeState === "just_finished");
+      if (!running.length && !justFinished.length) {
+        target.innerHTML = '<strong>Live lane</strong><span>No running or just-finished handoffs.</span><span class="pill">idle</span>';
+        return;
+      }
+      const lead = running[0] || justFinished[0];
+      const parts = [
+        running.length ? running.length + " running" : "",
+        justFinished.length ? justFinished.length + " just finished" : "",
+      ].filter(Boolean).join(" · ");
+      target.innerHTML = '<strong>Live lane</strong><span>' + escapeHtml(pipelineTitle(lead) + " - " + releaseReason(lead.summary || {}, lead, "running")) + '</span><span class="pill">' + escapeHtml(parts) + '</span>';
+    }
+
+    function renderBoard(entries) {
+      const target = document.getElementById("owner-lanes");
+      if (!target) return;
+      const filtered = filterCommandBoardItems(entries);
+      if (selectedKey && !entries.some((item) => boardItemKey(item) === selectedKey)) selectedKey = "";
+      document.getElementById("monitor-shell")?.classList.toggle("has-selection", Boolean(selectedKey));
+      const lanes = boardLaneDefinitions();
+      target.innerHTML = lanes
+        .filter((lane) => lane.key !== "done" || showDone)
+        .map((lane) => renderBoardLane(lane, filtered))
+        .join("") + (showDone ? "" : renderDoneStub(filtered));
+    }
+
+    function filterCommandBoardItems(entries) {
+      return entries.filter((item) => {
+        const verdict = releaseVerdict(item);
+        const lane = boardLaneForItem(item, verdict);
+        if (pipelineFilter !== "all" && verdict.level !== pipelineFilter) return false;
+        if (repoFilter !== "all" && String(item.repo || "") !== repoFilter) return false;
+        if (agentFilter === "codex" && lane.key !== "codex" && nextPipelineAction(item, verdict).owner !== "Codex") return false;
+        if (agentFilter === "hermes" && lane.key !== "hermes" && nextPipelineAction(item, verdict).owner !== "Hermes") return false;
+        if (searchText) {
+          const haystack = [
+            item.repo,
+            item.pullRequestNumber,
+            item.correlationId,
+            item.sha,
+            item.intent,
+            pipelineTitle(item),
+            verdict.why,
+          ].join(" ").toLowerCase();
+          if (!haystack.includes(searchText)) return false;
+        }
+        return true;
+      });
+    }
+
+    function boardLaneDefinitions() {
+      return [
+        { key: "attention", title: "Needs Attention", kicker: "urgent · operator", empty: "No blockers waiting." },
+        { key: "codex", title: "Codex Working", kicker: "agent · writing", empty: "Nothing waiting on Codex." },
+        { key: "hermes", title: "Hermes Checking", kicker: "agent · reviewing", empty: "Hermes has no active PR checks." },
+        { key: "operator", title: "Operator Review", kicker: "operator · sign-off", empty: "No operator sign-off needed." },
+        { key: "queue", title: "Release Queue", kicker: "cleared to merge", empty: "Nothing ready to merge." },
+        { key: "deploy", title: "Deploying", kicker: "post-deploy verify", empty: "No deploy verification active." },
+        { key: "done", title: "Done", kicker: "release history", empty: "No completed PRs in view." },
+      ];
+    }
+
+    function renderBoardLane(lane, entries) {
+      const items = entries
+        .filter((item) => boardLaneForItem(item, releaseVerdict(item)).key === lane.key)
+        .sort((a, b) => boardSortScore(b) - boardSortScore(a) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+      const cards = items.length
+        ? items.slice(0, lane.key === "done" ? 10 : 8).map((item) => renderBoardCard(item, lane)).join("")
+        : '<div class="lane-empty">' + escapeHtml(lane.empty) + '</div>';
+      return '<section class="lane" data-lane="' + escapeAttr(lane.key) + '">' +
+        '<div class="lane-head"><div class="lane-title">' + escapeHtml(lane.title) + ' <span class="pill">' + escapeHtml(String(items.length)) + '</span></div><span class="lane-subtitle">' + escapeHtml(lane.kicker) + '</span></div>' +
+        '<div class="lane-body">' + cards + '</div>' +
+        '</section>';
+    }
+
+    function renderDoneStub(entries) {
+      const done = entries.filter((item) => boardLaneForItem(item, releaseVerdict(item)).key === "done");
+      setText("done-count", String(done.length));
+      return '<button class="lane" data-lane="done" type="button" id="done-stub" aria-label="Show done lane" onclick="document.getElementById(\\'toggle-done\\').click()">' +
+        '<div class="lane-head"><div class="lane-title">Done <span class="pill">' + escapeHtml(String(done.length)) + '</span></div></div>' +
+        '<div class="lane-body"><div class="lane-empty">click to show release history</div></div>' +
+        '</button>';
+    }
+
+    function renderBoardCard(item, lane) {
+      const verdict = releaseVerdict(item);
+      const action = nextPipelineAction(item, verdict);
+      const stage = pipelineStage(item, verdict);
+      const age = handoffAge(item);
+      const title = pipelineTitle(item);
+      const key = boardItemKey(item);
+      const selected = key === selectedKey;
+      const signals = (item.summary || {}).reviewSignals || {};
+      const touchedAreas = Array.isArray(signals.touchedAreas) ? signals.touchedAreas : [];
+      const tests = Array.isArray(signals.testSignals) ? signals.testSignals : [];
+      return '<article class="handoff-card" data-select-card="' + escapeAttr(key) + '" data-selected="' + escapeAttr(String(selected)) + '">' +
+        '<div class="card-head"><span class="pill state-pill" data-level="' + escapeAttr(verdict.level) + '">' + escapeHtml(verdict.label) + '</span><span class="card-subtitle">' + escapeHtml(age.label + " " + age.duration) + '</span></div>' +
+        '<div class="card-subtitle">' + escapeHtml(item.repo || "unknown repo") + (item.pullRequestNumber ? " #" + escapeHtml(String(item.pullRequestNumber)) : "") + '</div>' +
+        '<h3 class="card-title">' + escapeHtml(title.replace(/^.*?#\\d+\\s*/, "")) + '</h3>' +
+        renderMiniSteps(stage, verdict) +
+        '<p class="card-why">' + escapeHtml(verdict.why) + '</p>' +
+        '<div class="card-meta-row"><span class="tags">' + touchedAreas.slice(0, 3).map((value) => '<code>' + escapeHtml(String(value)) + '</code>').join("") + '</span><span class="card-subtitle">' + escapeHtml(testSummaryText(tests)) + '</span></div>' +
+        '<div class="card-foot"><span class="card-next">Next <strong>' + escapeHtml(action.owner) + '</strong></span><span class="card-actions">' + primaryActionButton(item, verdict, action, lane) + '</span></div>' +
+        '</article>';
+    }
+
+    function renderMiniSteps(stage, verdict) {
+      const steps = ["pr", "ci", "hermes", "testbed", "gate", "deploy"];
+      const activeIndex = Math.max(0, steps.indexOf(stage.key));
+      return '<div class="mini-steps" aria-label="Pipeline progress">' + steps.map((key, index) => {
+        return '<span class="mini-step" data-state="' + escapeAttr(pipelineStepState(index, activeIndex, key, verdict.level)) + '"></span>';
+      }).join("") + '</div>';
+    }
+
+    function primaryActionButton(item, verdict, action, lane) {
+      if (verdict.level === "block") return '<button class="soft-button" data-action="primary" type="button" data-command-suggestion="merge steward details">Codex Fix -></button>';
+      if (verdict.level === "needs-review") return '<button class="soft-button" data-action="primary" type="button" data-monitor-decision="approve" data-decision-key="' + escapeAttr(decisionKeyForItem(item)) + '">Approve</button>';
+      if (verdict.level === "running") return '<button class="soft-button" data-action="primary" type="button" data-command-suggestion="handoff monitor details">Ask Hermes</button>';
+      if (verdict.level === "pass" && lane.key === "queue") return '<button class="soft-button" data-action="primary" type="button" data-command-suggestion="merge steward details">Queue Merge</button>';
+      return '<button class="soft-button" type="button" data-command-suggestion="handoff monitor details">Inspect</button>';
+    }
+
+    function boardLaneForItem(item, verdict) {
+      const summary = item.summary || {};
+      const status = normalize(item.status);
+      const reason = normalize(summary.finalReason || summary.reason || item.reason);
+      const prState = pullRequestState(item, summary);
+      if (isDonePullRequestState(prState)) return { key: "done" };
+      if (isDeployItem(item)) {
+        if (item.active === true || item.activeState === "running" || status === "running") return { key: "deploy" };
+        return verdict.level === "pass" ? { key: "done" } : { key: "attention" };
+      }
+      if (item.active === true || item.activeState === "running" || status === "running") return { key: "hermes" };
+      if (reason === "ci_in_progress") return { key: "codex" };
+      if (verdict.level === "block") return { key: "attention" };
+      if (verdict.level === "needs-review") return { key: "operator" };
+      if (verdict.level === "pass") return { key: "queue" };
+      return { key: "hermes" };
+    }
+
+    function isDeployItem(item) {
+      const intent = normalize(item.intent);
+      const correlationId = String(item.correlationId || "");
+      return intent.includes("deploy") || intent === "testbed_suite" || correlationId.startsWith("github-deploy-");
+    }
+
+    function boardSortScore(item) {
+      const verdict = releaseVerdict(item);
+      const age = handoffAge(item);
+      if (verdict.level === "block") return 900;
+      if (age.state === "stale") return 700;
+      if (verdict.level === "needs-review") return 600;
+      if (verdict.level === "running") return 500;
+      if (verdict.level === "pass") return 300;
+      return 100;
+    }
+
+    function boardItemKey(item) {
+      return prIdentityKey(item) + ":" + String(item.intent || "handoff");
+    }
+
+    function selectedItem() {
+      if (!selectedKey) return null;
+      return latestPipelineItems.find((item) => boardItemKey(item) === selectedKey) || null;
+    }
+
+    function renderDrawer(item) {
+      const target = document.getElementById("detail-drawer");
+      if (!target) return;
+      if (!item) {
+        target.dataset.open = "false";
+        target.innerHTML = "";
+        return;
+      }
+      const summary = item.summary || {};
+      const verdict = releaseVerdict(item);
+      const action = nextPipelineAction(item, verdict);
+      const stage = pipelineStage(item, verdict);
+      const age = handoffAge(item);
+      const prUrl = item.pullRequestUrl || derivePullRequestUrl(item);
+      const workflowRunUrl = deriveWorkflowRunUrl(item);
+      const commitUrl = deriveCommitUrl(item);
+      const title = pipelineTitle(item);
+      const signals = summary.reviewSignals || {};
+      const touchedAreas = Array.isArray(signals.touchedAreas) ? signals.touchedAreas : [];
+      const testSignals = Array.isArray(signals.testSignals) ? signals.testSignals : [];
+      const missingTests = Array.isArray(signals.missingTestSignals) ? signals.missingTestSignals : [];
+      const rollout = signals.rolloutNotesRequired === true
+        ? signals.rolloutNotesPresent === true ? "present" : "missing"
+        : "not required";
+      const reviewWhy = reviewReasonRows(summary) || row("Why", escapeHtml(verdict.why));
+      const links = [
+        prUrl ? '<a class="pill" href="' + escapeAttr(prUrl) + '" target="_blank" rel="noreferrer">open PR</a>' : "",
+        workflowRunUrl ? '<a class="pill" href="' + escapeAttr(workflowRunUrl) + '" target="_blank" rel="noreferrer">workflow run</a>' : "",
+        commitUrl ? '<a class="pill" href="' + escapeAttr(commitUrl) + '" target="_blank" rel="noreferrer">commit</a>' : "",
+      ].filter(Boolean).join("");
+      target.dataset.open = "true";
+      target.innerHTML = '<div class="drawer-head">' +
+        '<div class="drawer-topline"><span class="pill state-pill" data-level="' + escapeAttr(verdict.level) + '">' + escapeHtml(verdict.label) + '</span><button class="soft-button" type="button" data-close-drawer>Close</button></div>' +
+        '<h2 class="drawer-title">' + escapeHtml(title) + '</h2>' +
+        '<div class="drawer-links">' + (links || '<span class="pill">no external links</span>') + '<span class="pill">' + escapeHtml(age.label + " " + age.duration) + '</span></div>' +
+        '</div>' +
+        '<div class="drawer-body">' +
+        '<section class="drawer-section"><h3>Next action</h3><p><strong>' + escapeHtml(action.owner) + ':</strong> ' + escapeHtml(action.text) + '</p></section>' +
+        '<section class="drawer-section"><h3>Pipeline</h3>' + renderPipelineSteps(stage, verdict) + '</section>' +
+        '<section class="drawer-section"><h3>Hermes verdict</h3><p>' + escapeHtml(verdict.why) + '</p><dl class="pipeline-detail">' + reviewWhy + '</dl></section>' +
+        operatorChecklistSection(item, verdict, action) +
+        '<section class="drawer-section"><h3>Agent pre-check</h3><dl class="pipeline-detail">' +
+        row("Changed areas", touchedAreas.length ? chips(touchedAreas) : "n/a") +
+        row("Tests seen", testSignals.length ? chips(testSignals.slice(0, 8)) : "n/a") +
+        row("Missing tests", missingTests.length ? chips(missingTests) : "none recorded") +
+        row("Rollout notes", escapeHtml(rollout)) +
+        row("Correlation", '<code>' + escapeHtml(item.correlationId || "unknown") + '</code>') +
+        row("Commit", escapeHtml(item.sha ? compactSha(item.sha) : "n/a")) +
+        '</dl></section>' +
+        renderOperatorDecisionNote(item) +
+        '</div>' +
+        '<div class="drawer-footer">' +
+        '<div class="card-actions">' +
+        (prUrl ? '<a class="pill" href="' + escapeAttr(prUrl) + '" target="_blank" rel="noreferrer">Open PR</a>' : "") +
+        (workflowRunUrl ? '<a class="pill" href="' + escapeAttr(workflowRunUrl) + '" target="_blank" rel="noreferrer">Workflow Run</a>' : "") +
+        '<button class="soft-button" type="button" data-command-suggestion="handoff monitor details">Re-check with Hermes</button>' +
+        '<button class="soft-button" type="button" data-copy-text="' + escapeAttr(item.correlationId || "") + '">copy correlation</button>' +
+        (verdict.level === "needs-review" ? '<button class="soft-button" data-action="primary" type="button" data-monitor-decision="approve" data-decision-key="' + escapeAttr(decisionKeyForItem(item)) + '">Approve locally</button>' : "") +
+        '</div></div>';
+    }
+
+    function operatorChecklistSection(item, verdict, action) {
+      if (verdict.level !== "needs-review") return "";
+      const summary = item.summary || {};
+      const request = buildFixRequest(item, summary, verdict, action);
+      return '<section class="drawer-section"><h3>Operator sign-off</h3>' +
+        '<p>Hermes has already checked CI, touched areas, test signals, rollout notes, and PR state. Your job is not line-by-line code review; decide whether the project intent, architecture, and release risk are acceptable.</p>' +
+        '<dl class="pipeline-detail">' +
+        row("Decision needed", escapeHtml(request.reason)) +
+        row("Review surfaces", request.surfaces.length ? chips(request.surfaces) : "n/a") +
+        row("Ask Codex if", escapeHtml("the intent is wrong, rollout risk is unclear, or the architecture should change")) +
+        row("Proceed if", escapeHtml("the change matches the project direction and the recorded checks are enough for this risk")) +
+        '</dl></section>';
+    }
+
+    function renderCommandContext() {
+      const target = document.getElementById("console-context");
+      if (!target) return;
+      const item = selectedItem();
+      if (!item) {
+        target.textContent = "global monitor context";
+        return;
+      }
+      target.textContent = pipelineTitle(item) + " · " + (item.correlationId || "no correlation");
+    }
+
+    async function submitMonitorCommand(text) {
+      const output = document.getElementById("command-output");
+      const submit = document.getElementById("command-submit");
+      const input = document.getElementById("command-input");
+      const item = selectedItem();
+      output.textContent = "Hermes is checking: " + text;
+      submit.disabled = true;
+      try {
+        const response = await fetch(commandUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            text,
+            correlationId: item?.correlationId,
+            repo: item?.repo,
+            pullRequestNumber: item?.pullRequestNumber,
+          }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.message || payload.error || "HTTP " + response.status);
+        output.textContent = payload.text || "Hermes command completed.";
+        input.value = "";
+      } catch (error) {
+        output.textContent = "Command refused or failed: " + String(error.message || error);
+      } finally {
+        submit.disabled = false;
+      }
+    }
+
+    function contextualCommand(command) {
+      const item = selectedItem();
+      if (!item) return command;
+      if (command === "handoff monitor details") return "handoff monitor details";
+      if (command === "merge steward details") return "merge steward details";
+      return command;
+    }
+
+    function updateToggleGroup(selector, value) {
+      const attr = selector.startsWith("[") && selector.endsWith("]") ? selector.slice(1, -1) : selector;
+      document.querySelectorAll(selector).forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.getAttribute(attr) === value));
+      });
+    }
+
+    function testSummaryText(values) {
+      const tests = Array.isArray(values) ? values.filter(Boolean) : [];
+      if (!tests.length) return "no test signal";
+      if (tests.length === 1) return "1 check";
+      return String(tests.length) + " checks";
+    }
+
     function renderPipelineBoard(entries) {
       const verdicts = entries.map(releaseVerdict);
-      document.getElementById("board-all").textContent = String(entries.length);
-      document.getElementById("board-block").textContent = String(verdicts.filter((verdict) => verdict.level === "block").length);
-      document.getElementById("board-review").textContent = String(verdicts.filter((verdict) => verdict.level === "needs-review").length);
-      document.getElementById("board-ready").textContent = String(verdicts.filter((verdict) => verdict.level === "pass").length);
-      document.getElementById("board-running").textContent = String(verdicts.filter((verdict) => verdict.level === "running").length);
+      setText("board-all", String(entries.length));
+      setText("board-block", String(verdicts.filter((verdict) => verdict.level === "block").length));
+      setText("board-review", String(verdicts.filter((verdict) => verdict.level === "needs-review").length));
+      setText("board-ready", String(verdicts.filter((verdict) => verdict.level === "pass").length));
+      setText("board-running", String(verdicts.filter((verdict) => verdict.level === "running").length));
       renderOwnerSummary(entries);
       renderStalenessSummary(entries);
       updatePipelineFilterButtons();
@@ -897,17 +1860,17 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function renderStalenessSummary(entries) {
       const ages = entries.map(handoffAge);
-      document.getElementById("age-fresh").textContent = String(ages.filter((age) => age.state === "fresh").length);
-      document.getElementById("age-waiting").textContent = String(ages.filter((age) => age.state === "waiting").length);
-      document.getElementById("age-stale").textContent = String(ages.filter((age) => age.state === "stale").length);
+      setText("age-fresh", String(ages.filter((age) => age.state === "fresh").length));
+      setText("age-waiting", String(ages.filter((age) => age.state === "waiting").length));
+      setText("age-stale", String(ages.filter((age) => age.state === "stale").length));
     }
 
     function renderOwnerSummary(entries) {
       const owners = entries.map((item) => nextPipelineAction(item, releaseVerdict(item)).owner);
-      document.getElementById("owner-codex").textContent = String(owners.filter((owner) => owner === "Codex").length);
-      document.getElementById("owner-human").textContent = String(owners.filter((owner) => owner === "Operator").length);
-      document.getElementById("owner-merge").textContent = String(owners.filter((owner) => owner === "Merge queue").length);
-      document.getElementById("owner-hermes").textContent = String(owners.filter((owner) => owner === "Hermes").length);
+      setText("owner-codex", String(owners.filter((owner) => owner === "Codex").length));
+      setText("owner-operator", String(owners.filter((owner) => owner === "Operator").length));
+      setText("owner-merge", String(owners.filter((owner) => owner === "Merge queue").length));
+      setText("owner-hermes", String(owners.filter((owner) => owner === "Hermes").length));
     }
 
     function renderOwnerLanes(entries) {
@@ -924,7 +1887,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return [
         { key: "codex", title: "Codex", owner: "Codex", empty: "Nothing waiting on Codex." },
         { key: "hermes", title: "Hermes", owner: "Hermes", empty: "Hermes has no active PR checks." },
-        { key: "operator", title: "Operator", owner: "Operator", empty: "No operator review needed." },
+        { key: "operator", title: "Operator Review", owner: "Operator", empty: "No operator sign-off needed." },
         { key: "merge", title: "Merge Queue", owner: "Merge queue", empty: "Nothing ready to merge." },
         { key: "done", title: "Done", owner: "Done", empty: "No completed PRs in view." },
       ];
@@ -1091,7 +2054,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '<p class="pipeline-why">' + escapeHtml(verdict.why) + '</p>' +
         '<p class="age-line" data-age="' + escapeAttr(age.state) + '">' + escapeHtml(age.label + " - " + action.owner + " for " + age.duration) + '</p>' +
         '<div class="next-action"><strong>Next action:</strong> ' + escapeHtml(action.owner + " - " + action.text) + '</div>' +
-        renderHumanDecisionNote(item) +
+        renderOperatorDecisionNote(item) +
         renderFixRequest(item, summary, verdict, action) +
         renderPipelineSteps(stage, verdict) +
         renderPrTimeline(item, stage, verdict, action) +
@@ -1158,7 +2121,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '</div>';
     }
 
-    function renderHumanDecisionNote(item) {
+    function renderOperatorDecisionNote(item) {
       const decision = decisionForItem(item);
       if (decision.status !== "approved") return "";
       const key = decisionKeyForItem(item);
@@ -1181,7 +2144,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         ? fixRequest.checks.map(String).filter(Boolean)
         : missingTests.length ? missingTests : testSignals.slice(0, 5);
       return {
-        title: fixRequest.title || (verdict.level === "block" ? "Fix request for Codex" : "Operator decision request"),
+        title: fixRequest.title || (verdict.level === "block" ? "Fix request for Codex" : "Operator sign-off request"),
         owner: fixRequest.owner || action.owner,
         instruction: fixRequest.instruction || fixRequestInstruction(verdict, action),
         reason,
@@ -1272,13 +2235,17 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         item.pullRequestNumber
         || intent === "pr_handoff"
         || intent === "pr_code_review"
+        || intent === "testbed_suite"
+        || intent.includes("deploy")
         || correlationId.startsWith("github-pr-")
+        || correlationId.startsWith("github-deploy-")
       );
     }
 
     function pipelineTitle(item) {
       const repo = item.repo || "unknown repo";
       const prNumber = item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId);
+      if (isDeployItem(item)) return [repo, "post-deploy"].filter(Boolean).join(" ");
       if (Array.isArray(item.groupItems)) return [repo, prNumber ? "#" + prNumber : ""].filter(Boolean).join(" ");
       const intent = item.intent || "pr_handoff";
       return [repo, prNumber ? "#" + prNumber : "", intent].filter(Boolean).join(" ");
@@ -1509,6 +2476,17 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       });
       if (token) params.set("token", token);
       return path + separator + params.toString();
+    }
+
+    function buildCommandUrl(path) {
+      if (!token) return path;
+      const separator = path.includes("?") ? "&" : "?";
+      return path + separator + "token=" + encodeURIComponent(token);
+    }
+
+    function setText(id, value) {
+      const target = document.getElementById(id);
+      if (target) target.textContent = String(value);
     }
 
     function needsAttention(item) {
