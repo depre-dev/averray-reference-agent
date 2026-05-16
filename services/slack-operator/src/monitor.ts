@@ -1436,27 +1436,523 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       .command-shell.has-selection .command-console { right: 14px; }
       .drawer { width: 100vw; }
     }
+
+    /* ── Mockup-parity additions ─────────────────────────────────────────── */
+
+    /* Topbar — system block + sys-agents */
+    .cmd-left {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      min-width: 0;
+    }
+    .sys {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface-soft);
+      white-space: nowrap;
+    }
+    .sys-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--faint);
+    }
+    .sys.running .sys-dot { background: var(--ok); animation: pulse 1.8s ease-out infinite; }
+    .sys-label {
+      font-size: 0.78rem;
+      letter-spacing: 0.005em;
+      font-weight: 700;
+    }
+    .sys-agents {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding-left: 8px;
+      margin-left: 2px;
+      border-left: 1px solid var(--line);
+    }
+    .sys-agent {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.72rem;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: nowrap;
+    }
+    .sa-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 999px;
+      background: var(--cyan);
+    }
+    .sys-agent[data-agent="codex"] .sa-dot { background: var(--violet); }
+    .sys-agent[data-agent="hermes"] .sa-dot { background: var(--cyan); }
+    .sys-agent[data-agent="deploy"] .sa-dot { background: var(--ok); }
+    .sys-agent.empty { opacity: 0.55; }
+
+    /* Topbar — deploy-health pill (6th chip) */
+    .counter-chip.cc-health {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0;
+      padding: 4px 10px;
+      min-height: 36px;
+      border-color: var(--line);
+    }
+    .counter-chip.cc-health .counter-number {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.78rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .counter-chip.cc-health .counter-number::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--faint);
+    }
+    .counter-chip.cc-health[data-state="ok"]      { border-color: rgba(82, 210, 115, 0.62); background: var(--ok-bg); color: var(--ok); }
+    .counter-chip.cc-health[data-state="ok"] .counter-number::before { background: var(--ok); }
+    .counter-chip.cc-health[data-state="verifying"] { border-color: rgba(86, 204, 228, 0.55); background: rgba(86, 204, 228, 0.10); color: var(--cyan); }
+    .counter-chip.cc-health[data-state="verifying"] .counter-number::before { background: var(--cyan); animation: pulse 1.4s ease-out infinite; }
+    .counter-chip.cc-health[data-state="fail"]    { border-color: rgba(238, 98, 96, 0.68); background: var(--bad-bg); color: var(--bad); }
+    .counter-chip.cc-health[data-state="fail"] .counter-number::before { background: var(--bad); }
+    .counter-chip.cc-health .counter-label { color: var(--muted); }
+
+    /* Topbar — richer live indicator + pause button */
+    .cmd-status.cmd-status-rich {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0;
+      padding: 4px 12px;
+    }
+    .cmd-status-rich .cmd-status-state {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.005em;
+    }
+    .cmd-status-rich .cmd-status-state::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--ok);
+    }
+    .cmd-status-rich .cmd-status-sub {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.62rem;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+    .cmd-status-rich[data-state="live"] .cmd-status-state::before { background: var(--ok); animation: pulse 1.8s ease-out infinite; }
+    .cmd-status-rich[data-state="polling"] .cmd-status-state::before,
+    .cmd-status-rich[data-state="reconnecting"] .cmd-status-state::before,
+    .cmd-status-rich[data-state="connecting"] .cmd-status-state::before { background: var(--cyan); }
+    .cmd-status-rich[data-state="paused"] .cmd-status-state::before { background: var(--faint); }
+    .cmd-status-rich[data-state="stale"] .cmd-status-state::before { background: var(--warn); }
+    .cmd-status-rich[data-state="error"] .cmd-status-state::before { background: var(--bad); }
+    .cmd-status::before { display: none; }
+    .cmd-pause {
+      min-height: 30px;
+      width: 30px;
+      padding: 0;
+      border-radius: 7px;
+      background: var(--surface-soft);
+      color: var(--muted);
+      display: inline-grid;
+      place-items: center;
+    }
+    .cmd-pause:hover { border-color: var(--line); color: var(--text); }
+    .cmd-pause[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+
+    /* Filterbar sort hint */
+    .fb-hint {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      white-space: nowrap;
+      padding-right: 6px;
+    }
+
+    /* KanbanCard — active-agent dot, stale dot, local approved badge, restructured head */
+    .card-head { align-items: center; }
+    .kc-head-l { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+    .kc-head-r { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+    .active-agent {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface-soft);
+      font-size: 0.7rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .active-agent .aa-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--cyan);
+      animation: pulse 1.4s ease-out infinite;
+    }
+    .active-agent[data-agent="codex"] .aa-dot  { background: var(--violet); }
+    .active-agent[data-agent="hermes"] .aa-dot { background: var(--cyan); }
+    .active-agent[data-agent="deploy"] .aa-dot { background: var(--ok); }
+    .stale-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--ok);
+      box-shadow: 0 0 0 0 rgba(82, 210, 115, 0.35);
+    }
+    .stale-dot[data-stale="waiting"] { background: var(--warn); }
+    .stale-dot[data-stale="stale"]   { background: var(--bad); animation: pulse 1.6s ease-out infinite; }
+    .card-age {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.7rem;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .kc-id {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.72rem;
+      color: var(--muted);
+      letter-spacing: 0.02em;
+    }
+    .kc-id .kc-repo { color: var(--muted); }
+    .kc-id .kc-num  { color: var(--text); font-weight: 700; }
+    .kc-local {
+      margin-left: 4px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      border: 1px solid rgba(82, 210, 115, 0.45);
+      background: var(--ok-bg);
+      color: var(--ok);
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .kc-local::before { content: "● "; font-size: 0.5rem; }
+
+    /* Drawer — rich body sections */
+    .failure-callout {
+      display: grid;
+      grid-template-columns: 22px 1fr;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid rgba(238, 98, 96, 0.5);
+      background: var(--bad-bg);
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+    .failure-callout .fc-icon {
+      display: grid;
+      place-items: center;
+      width: 22px;
+      height: 22px;
+      border-radius: 999px;
+      background: var(--bad);
+      color: #fff;
+      font-weight: 800;
+    }
+    .failure-callout .fc-text {
+      color: var(--text);
+      line-height: 1.4;
+    }
+    .verdict-box {
+      display: grid;
+      gap: 6px;
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--accent);
+      background: var(--accent-bg);
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+    .verdict-box[data-level="block"]        { border-left-color: var(--bad);  background: var(--bad-bg); }
+    .verdict-box[data-level="needs-review"] { border-left-color: var(--warn); background: var(--warn-bg); }
+    .verdict-box[data-level="pass"]         { border-left-color: var(--ok);   background: var(--ok-bg); }
+    .verdict-box[data-level="running"]      { border-left-color: var(--cyan); background: rgba(86, 204, 228, 0.10); }
+    .verdict-box .vb-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.66rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .verdict-box .vb-head .vb-age { color: var(--muted); }
+    .verdict-box .vb-text { color: var(--text); line-height: 1.4; }
+
+    /* Operator checklist with real checkboxes */
+    .operator-checklist { display: grid; gap: 6px; }
+    .operator-checklist-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.66rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .hc-item {
+      display: grid;
+      grid-template-columns: 18px 1fr;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 0;
+      cursor: pointer;
+    }
+    .hc-item input {
+      width: 14px;
+      height: 14px;
+      accent-color: var(--ok);
+    }
+    .hc-item span { color: var(--text); line-height: 1.35; }
+    .hc-item[data-checked="true"] span { color: var(--muted); text-decoration: line-through; }
+
+    /* Agent pre-check ledger */
+    .precheck-list { display: grid; gap: 5px; }
+    .pc-item {
+      display: grid;
+      grid-template-columns: 14px 1fr auto;
+      align-items: center;
+      gap: 8px;
+    }
+    .pc-tick {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      background: var(--ok);
+      display: grid;
+      place-items: center;
+    }
+    .pc-tick[data-state="warn"] { background: var(--warn); }
+    .pc-tick[data-state="bad"]  { background: var(--bad); }
+    .pc-tick::before {
+      content: "✓";
+      color: #08120e;
+      font-size: 10px;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .pc-tick[data-state="bad"]::before { content: "✕"; }
+    .pc-label { color: var(--text); font-size: 0.84rem; }
+    .pc-note { color: var(--muted); font-size: 0.74rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    /* Check matrix */
+    .check-matrix { display: grid; gap: 4px; }
+    .cm-row {
+      display: grid;
+      grid-template-columns: 10px 1fr auto;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 6px;
+      border-radius: 6px;
+      background: rgba(12, 24, 19, 0.46);
+    }
+    .cm-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--ok);
+    }
+    .cm-row[data-state="fail"] .cm-dot { background: var(--bad); }
+    .cm-row[data-state="pending"] .cm-dot { background: var(--warn); }
+    .cm-name { color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
+    .cm-state {
+      color: var(--ok);
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .cm-row[data-state="fail"] .cm-state    { color: var(--bad); }
+    .cm-row[data-state="pending"] .cm-state { color: var(--warn); }
+    .cm-summary {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.72rem;
+      padding-top: 4px;
+    }
+
+    /* Touched files grouped by area */
+    .touched-files { display: grid; gap: 8px; }
+    .tf-group {
+      display: grid;
+      gap: 4px;
+      padding: 8px 10px;
+      border: 1px solid var(--line-soft);
+      border-radius: 6px;
+      background: rgba(12, 24, 19, 0.46);
+    }
+    .tf-group-head {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+    .tf-area {
+      color: var(--accent);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.74rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+    .tf-count {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.66rem;
+    }
+    .tf-path {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.74rem;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+
+    /* Timeline list */
+    .timeline-list { display: grid; gap: 4px; }
+    .tl-row {
+      display: grid;
+      grid-template-columns: 8px 1fr auto;
+      align-items: center;
+      gap: 10px;
+      padding: 3px 0;
+    }
+    .tl-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--line);
+    }
+    .tl-row[data-state="pass"] .tl-dot { background: var(--ok); }
+    .tl-row[data-state="fail"] .tl-dot { background: var(--bad); }
+    .tl-row[data-state="review"] .tl-dot { background: var(--warn); }
+    .tl-row[data-state="running"] .tl-dot { background: var(--cyan); animation: pulse 1.6s ease-out infinite; }
+    .tl-label { color: var(--text); font-size: 0.86rem; }
+    .tl-row[data-state="pending"] .tl-label { color: var(--muted); }
+    .tl-state {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .tl-row[data-state="pass"]    .tl-state { color: var(--ok); }
+    .tl-row[data-state="fail"]    .tl-state { color: var(--bad); }
+    .tl-row[data-state="review"]  .tl-state { color: var(--warn); }
+    .tl-row[data-state="running"] .tl-state { color: var(--cyan); }
+
+    /* References KV block */
+    .ref-kv {
+      display: grid;
+      grid-template-columns: 110px 1fr;
+      gap: 4px 12px;
+      align-items: baseline;
+    }
+    .ref-kv dt {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.66rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .ref-kv dd {
+      margin: 0;
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.78rem;
+      overflow-wrap: anywhere;
+    }
+
+    /* Phase history */
+    .phase-history { display: grid; gap: 4px; }
+    .ph-row {
+      display: grid;
+      grid-template-columns: 70px 8px 1fr;
+      align-items: center;
+      gap: 8px;
+      padding: 2px 0;
+      font-size: 0.78rem;
+      color: var(--text);
+    }
+    .ph-row .ph-time {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.7rem;
+    }
+    .ph-row .ph-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--cyan);
+    }
+    .ph-row[data-state="pass"] .ph-dot { background: var(--ok); }
+    .ph-row[data-state="fail"] .ph-dot { background: var(--bad); }
+    .ph-row[data-state="review"] .ph-dot { background: var(--warn); }
   </style>
 </head>
 <body>
   <main id="monitor-shell" class="command-shell">
     <header class="cmdbar">
-      <div class="brand">
-        <div class="brand-mark">A</div>
-        <div>
-          <div class="brand-name">Hermes</div>
-          <div class="brand-sub">handoff monitor · averray</div>
+      <div class="cmd-left">
+        <div class="brand">
+          <div class="brand-mark">A</div>
+          <div>
+            <div class="brand-name">Hermes</div>
+            <div class="brand-sub">handoff monitor · averray</div>
+          </div>
+        </div>
+        <div id="sys-block" class="sys" data-state="idle">
+          <span class="sys-dot"></span>
+          <span id="sys-label" class="sys-label">system idle</span>
+          <span id="sys-agents" class="sys-agents hidden" aria-label="Active agents"></span>
         </div>
       </div>
       <div class="cmd-counters" aria-label="Release counters">
         <span class="counter-chip" data-tone="warn"><span id="attention-chip" class="counter-number">0</span><span class="counter-label">needs attention</span></span>
         <span class="counter-chip" data-tone="bad"><span id="blocked-chip" class="counter-number">0</span><span class="counter-label">blocked</span></span>
-        <span class="counter-chip"><span id="review-chip" class="counter-number">0</span><span class="counter-label">operator</span></span>
+        <span class="counter-chip"><span id="review-chip" class="counter-number">0</span><span class="counter-label">review</span></span>
         <span class="counter-chip" data-tone="ok"><span id="ready-chip" class="counter-number">0</span><span class="counter-label">ready</span></span>
         <span class="counter-chip"><span id="running-chip" class="counter-number">0</span><span class="counter-label">in flight</span></span>
+        <span id="deploy-health-chip" class="counter-chip cc-health" data-state="idle"><span class="counter-number" id="deploy-health-state">IDLE</span><span class="counter-label">deploy health</span></span>
       </div>
       <div class="refresh-cluster">
-        <span id="live-status" class="cmd-status" data-state="connecting">connecting</span>
+        <span id="live-status" class="cmd-status cmd-status-rich" data-state="connecting" title="connecting to monitor stream">
+          <span class="cmd-status-state" id="live-status-state">connecting</span>
+          <span class="cmd-status-sub" id="live-status-sub">auto 5s</span>
+        </span>
+        <button id="pause" class="cmd-pause" type="button" aria-pressed="false" title="Pause live updates">❚❚</button>
         <span class="refresh-meta"><span>last refresh</span><span id="generated">waiting</span></span>
         <button id="refresh" type="button">Refresh</button>
       </div>
@@ -1477,10 +1973,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         </span>
       </div>
       <div class="filter-right">
+        <span class="fb-hint">sorted by next-action urgency</span>
         <span class="fb-pill-group" aria-label="Pipeline filters">
           <button class="toggle-pill" type="button" data-pipeline-filter="all" aria-pressed="true">all <span id="board-all">0</span></button>
           <button class="toggle-pill" type="button" data-pipeline-filter="block" aria-pressed="false">blocked <span id="board-block">0</span></button>
-          <button class="toggle-pill" type="button" data-pipeline-filter="needs-review" aria-pressed="false">operator <span id="board-review">0</span></button>
+          <button class="toggle-pill" type="button" data-pipeline-filter="needs-review" aria-pressed="false">review <span id="board-review">0</span></button>
           <button class="toggle-pill" type="button" data-pipeline-filter="pass" aria-pressed="false">ready <span id="board-ready">0</span></button>
           <button class="toggle-pill" type="button" data-pipeline-filter="running" aria-pressed="false">running <span id="board-running">0</span></button>
         </span>
@@ -1533,6 +2030,21 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     let streamSource = null;
 
     document.getElementById("refresh").addEventListener("click", () => load());
+    document.getElementById("pause").addEventListener("click", () => {
+      const btn = document.getElementById("pause");
+      const wasPaused = btn.getAttribute("aria-pressed") === "true";
+      setMonitorPaused(!wasPaused);
+    });
+    document.addEventListener("change", (event) => {
+      const target = event.target;
+      if (!target || target.getAttribute("data-checklist-id") == null) return;
+      const id = String(target.getAttribute("data-checklist-id") || "");
+      const key = String(target.getAttribute("data-decision-key") || "");
+      if (!id || !key) return;
+      toggleChecklistItem(key, id, target.checked === true);
+      const label = target.closest(".hc-item");
+      if (label) label.setAttribute("data-checked", target.checked ? "true" : "false");
+    });
     document.getElementById("monitor-search").addEventListener("input", (event) => {
       searchText = String(event.target.value || "").trim().toLowerCase();
       renderBoard(latestPipelineItems);
@@ -1669,7 +2181,97 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const target = document.getElementById("live-status");
       if (!target) return;
       target.dataset.state = state;
-      target.textContent = label;
+      const stateEl = document.getElementById("live-status-state");
+      const subEl = document.getElementById("live-status-sub");
+      if (stateEl) stateEl.textContent = liveStateLabel(state);
+      if (subEl) subEl.textContent = liveStateSub(state, label);
+      target.setAttribute("title", liveStateTitle(state));
+    }
+
+    function liveStateLabel(state) {
+      if (state === "live") return "Live";
+      if (state === "polling") return "Polling";
+      if (state === "connecting") return "Connecting";
+      if (state === "reconnecting") return "Reconnecting";
+      if (state === "paused") return "Paused";
+      if (state === "stale") return "Stale";
+      if (state === "error") return "Error";
+      return state;
+    }
+
+    function liveStateSub(state, label) {
+      if (state === "paused") return "click ▶ to resume";
+      if (state === "stale") return "no updates · refresh";
+      return String(label || "auto 5s");
+    }
+
+    function liveStateTitle(state) {
+      if (state === "live") return "Connected via SSE · /monitor/stream";
+      if (state === "polling") return "Polling fallback · /monitor/events";
+      if (state === "reconnecting") return "Reconnecting to event stream…";
+      if (state === "paused") return "Live updates paused";
+      if (state === "stale") return "No recent events — possibly stale";
+      if (state === "error") return "Error fetching events";
+      return "Connecting…";
+    }
+
+    function setMonitorPaused(paused) {
+      const btn = document.getElementById("pause");
+      if (btn) {
+        btn.setAttribute("aria-pressed", paused ? "true" : "false");
+        btn.textContent = paused ? "▶" : "❚❚";
+        btn.setAttribute("title", paused ? "Resume live updates" : "Pause live updates");
+      }
+      if (paused) {
+        if (streamSource) { streamSource.close(); streamSource = null; }
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        updateLiveStatus("paused", "paused");
+      } else {
+        startLiveUpdates();
+        load();
+      }
+    }
+
+    function updateDeployHealth(items) {
+      const chip = document.getElementById("deploy-health-chip");
+      const state = document.getElementById("deploy-health-state");
+      if (!chip || !state) return;
+      const deployItems = items.filter(isDeployItem);
+      let next = "idle";
+      let label = "IDLE";
+      if (deployItems.some((d) => releaseVerdict(d).level === "block")) { next = "fail"; label = "FAIL"; }
+      else if (deployItems.some((d) => d.active === true || d.activeState === "running" || normalize(d.status) === "running")) { next = "verifying"; label = "VERIFYING"; }
+      else if (deployItems.some((d) => releaseVerdict(d).level === "pass")) { next = "ok"; label = "OK"; }
+      chip.dataset.state = next;
+      state.textContent = label;
+    }
+
+    function updateSysAgents(items) {
+      const block = document.getElementById("sys-block");
+      const labelEl = document.getElementById("sys-label");
+      const agentsEl = document.getElementById("sys-agents");
+      if (!block || !labelEl || !agentsEl) return;
+      const codex = items.filter((it) => boardLaneForItem(it, releaseVerdict(it)).key === "codex").length;
+      const hermes = items.filter((it) => boardLaneForItem(it, releaseVerdict(it)).key === "hermes").length;
+      const deploy = items.filter(isDeployItem).filter((it) => it.active === true || it.activeState === "running" || normalize(it.status) === "running").length;
+      const total = codex + hermes + deploy;
+      block.classList.toggle("running", total > 0);
+      block.dataset.state = total > 0 ? "running" : "idle";
+      labelEl.textContent = total > 0 ? "system running" : "system idle";
+      const parts = [];
+      if (codex > 0) parts.push('<span class="sys-agent" data-agent="codex"><span class="sa-dot"></span>codex ' + codex + '</span>');
+      if (hermes > 0) parts.push('<span class="sys-agent" data-agent="hermes"><span class="sa-dot"></span>hermes ' + hermes + '</span>');
+      if (deploy > 0) parts.push('<span class="sys-agent" data-agent="deploy"><span class="sa-dot"></span>deploy ' + deploy + '</span>');
+      agentsEl.innerHTML = parts.join("");
+      agentsEl.classList.toggle("hidden", parts.length === 0);
+    }
+
+    function toggleChecklistItem(decisionKey, itemId, checked) {
+      const existing = monitorDecisions[decisionKey] || {};
+      const checklist = Object.assign({}, existing.checklist || {});
+      checklist[itemId] = !!checked;
+      monitorDecisions[decisionKey] = Object.assign({}, existing, { checklist });
+      try { localStorage.setItem(decisionStorageKey, JSON.stringify(monitorDecisions)); } catch {}
     }
 
     function render(payload) {
@@ -1689,6 +2291,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       setText("review-chip", String(review));
       setText("ready-chip", String(ready));
       setText("running-chip", String(running));
+      updateSysAgents(latestPipelineItems);
+      updateDeployHealth(latestPipelineItems);
       renderPipelineBoard(latestPipelineItems);
       renderLiveLane(payload.active || []);
       renderBoard(latestPipelineItems);
@@ -1794,8 +2398,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const done = entries.filter((item) => boardLaneForItem(item, releaseVerdict(item)).key === "done");
       setText("done-count", String(done.length));
       return '<button class="lane done-rail" data-lane="done" type="button" id="done-stub" aria-label="Show done lane" onclick="document.getElementById(\\'toggle-done\\').click()">' +
-        '<div class="lane-head"><div class="lane-title">Done <span class="pill">' + escapeHtml(String(done.length)) + '</span></div></div>' +
-        '<div class="lane-body"><div class="lane-empty">click to show release history</div></div>' +
+        '<div class="lane-head"><div class="lane-title">Done ▾ <span class="pill">' + escapeHtml(String(done.length)) + '</span></div></div>' +
+        '<div class="lane-body"><div class="lane-empty">last 24h · click</div></div>' +
         '</button>';
     }
 
@@ -1811,16 +2415,63 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const touchedAreas = Array.isArray(signals.touchedAreas) ? signals.touchedAreas : [];
       const tests = Array.isArray(signals.testSignals) ? signals.testSignals : [];
       const cardWhy = lane.key === "operator" && verdict.level === "needs-review" ? operatorDecisionShort(item, verdict) : verdict.why;
+      const repo = item.repo || "unknown repo";
+      const repoShort = String(repo).split("/")[1] || repo;
+      const prNumber = item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId);
+      const idLabel = prNumber ? "#" + prNumber : (isDeployItem(item) ? "deploy" : "handoff");
+      const activeAgent = activeAgentForItem(item, lane, stage);
+      const locallyApproved = decisionForItem(item).status === "approved";
+      const staleState = age.state || "fresh";
       return '<article class="handoff-card" data-select-card="' + escapeAttr(key) + '" data-selected="' + escapeAttr(String(selected)) + '">' +
-        '<div class="card-head"><span class="pill state-pill" data-level="' + escapeAttr(verdict.level) + '">' + escapeHtml(verdict.label) + '</span><span class="card-subtitle">' + escapeHtml(age.label + " " + age.duration) + '</span></div>' +
-        '<div class="card-subtitle">' + escapeHtml(item.repo || "unknown repo") + (item.pullRequestNumber ? " #" + escapeHtml(String(item.pullRequestNumber)) : "") + '</div>' +
-        '<h3 class="card-title">' + escapeHtml(title.replace(/^.*?#\\d+\\s*/, "")) + '</h3>' +
+        '<div class="card-head">' +
+          '<div class="kc-head-l">' +
+            '<span class="pill state-pill" data-level="' + escapeAttr(verdict.level) + '">' + escapeHtml(verdict.label) + '</span>' +
+            (activeAgent ? '<span class="active-agent" data-agent="' + escapeAttr(activeAgent.id) + '"><span class="aa-dot"></span>' + escapeHtml(activeAgent.label) + '</span>' : "") +
+          '</div>' +
+          '<div class="kc-head-r">' +
+            '<span class="stale-dot" data-stale="' + escapeAttr(staleState) + '" title="' + escapeAttr(staleState) + '"></span>' +
+            '<span class="card-age">' + escapeHtml(age.label + " " + age.duration) + '</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="kc-id">' +
+          '<span class="kc-repo">' + escapeHtml(repoShort) + '</span>' +
+          '<span class="kc-num">' + escapeHtml(idLabel) + '</span>' +
+          (locallyApproved ? '<span class="kc-local" title="Locally marked operator-approved">local</span>' : "") +
+        '</div>' +
+        '<h3 class="card-title">' + escapeHtml(cardTitleText(title, prNumber)) + '</h3>' +
         renderGroupBadges(item) +
         renderMiniSteps(stage, verdict) +
         '<p class="card-why">' + escapeHtml(cardWhy) + '</p>' +
         '<div class="card-meta-row"><span class="tags">' + touchedAreas.slice(0, 3).map((value) => '<code>' + escapeHtml(String(value)) + '</code>').join("") + '</span><span class="card-subtitle">' + escapeHtml(testSummaryText(tests)) + '</span></div>' +
         '<div class="card-foot"><span class="card-next">Next <strong>' + escapeHtml(action.owner) + '</strong></span><span class="card-actions">' + primaryActionButton(item, verdict, action, lane) + '</span></div>' +
         '</article>';
+    }
+
+    // Compact card title — drops repo + #PR prefix if the kc-id row already shows it.
+    function cardTitleText(title, prNumber) {
+      if (prNumber) {
+        return String(title || "").replace(/^[^#]*#\\d+\\s*/, "").trim() || String(title || "");
+      }
+      return String(title || "");
+    }
+
+    // Decide which agent is actively working on this item right now.
+    // Returns { id, label } or null if no agent is active.
+    function activeAgentForItem(item, lane, stage) {
+      const status = normalize(item.status);
+      const stageKey = (stage && stage.key) || "";
+      if (isDeployItem(item) && (item.active === true || status === "running" || stageKey === "deploy")) {
+        return { id: "deploy", label: "Deploy verifying" };
+      }
+      if (lane && lane.key === "codex") return { id: "codex", label: "Codex writing" };
+      if (lane && lane.key === "hermes") return { id: "hermes", label: "Hermes reviewing" };
+      if (item.activeState === "running" || item.active === true) {
+        if (stageKey === "hermes" || stageKey === "review") return { id: "hermes", label: "Hermes reviewing" };
+        if (stageKey === "ci" || stageKey === "pr") return { id: "codex", label: "Codex writing" };
+        if (stageKey === "deploy") return { id: "deploy", label: "Deploy verifying" };
+        return { id: "hermes", label: "Hermes reviewing" };
+      }
+      return null;
     }
 
     function renderMiniSteps(stage, verdict) {
@@ -1909,12 +2560,15 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const title = pipelineTitle(item);
       const signals = summary.reviewSignals || {};
       const touchedAreas = Array.isArray(signals.touchedAreas) ? signals.touchedAreas : [];
+      const touchedFiles = Array.isArray(signals.touchedFiles) ? signals.touchedFiles : [];
       const testSignals = Array.isArray(signals.testSignals) ? signals.testSignals : [];
       const missingTests = Array.isArray(signals.missingTestSignals) ? signals.missingTestSignals : [];
       const rollout = signals.rolloutNotesRequired === true
         ? signals.rolloutNotesPresent === true ? "present" : "missing"
         : "not required";
       const reviewWhy = reviewReasonRows(summary) || row("Why", escapeHtml(verdict.why));
+      const decision = decisionForItem(item);
+      const locallyApproved = decision.status === "approved";
       const links = [
         prUrl ? '<a class="pill" href="' + escapeAttr(prUrl) + '" target="_blank" rel="noreferrer">open PR</a>' : "",
         workflowRunUrl ? '<a class="pill" href="' + escapeAttr(workflowRunUrl) + '" target="_blank" rel="noreferrer">workflow run</a>' : "",
@@ -1922,23 +2576,22 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       ].filter(Boolean).join("");
       target.dataset.open = "true";
       target.innerHTML = '<div class="drawer-head">' +
-        '<div class="drawer-topline"><span class="pill state-pill" data-level="' + escapeAttr(verdict.level) + '">' + escapeHtml(verdict.label) + '</span><button class="soft-button" type="button" data-close-drawer>Close</button></div>' +
+        '<div class="drawer-topline"><span class="pill state-pill" data-level="' + escapeAttr(verdict.level) + '">' + escapeHtml(verdict.label) + '</span>' +
+          (locallyApproved ? '<span class="kc-local" title="Locally marked operator-approved">local</span>' : "") +
+          '<button class="soft-button" type="button" data-close-drawer>Close</button></div>' +
         '<h2 class="drawer-title">' + escapeHtml(title) + '</h2>' +
         '<div class="drawer-links">' + (links || '<span class="pill">no external links</span>') + '<span class="pill">' + escapeHtml(age.label + " " + age.duration) + '</span></div>' +
         '</div>' +
         '<div class="drawer-body">' +
-        '<section class="drawer-section"><h3>Next action</h3><p><strong>' + escapeHtml(action.owner) + ':</strong> ' + escapeHtml(action.text) + '</p></section>' +
-        '<section class="drawer-section"><h3>Pipeline</h3>' + renderPipelineSteps(stage, verdict) + '</section>' +
-        '<section class="drawer-section"><h3>Hermes verdict</h3><p>' + escapeHtml(verdict.why) + '</p><dl class="pipeline-detail">' + reviewWhy + '</dl></section>' +
-        operatorChecklistSection(item, verdict, action) +
-        '<section class="drawer-section"><h3>Agent pre-check</h3><dl class="pipeline-detail">' +
-        row("Changed areas", touchedAreas.length ? chips(touchedAreas) : "n/a") +
-        row("Tests seen", testSignals.length ? chips(testSignals.slice(0, 8)) : "n/a") +
-        row("Missing tests", missingTests.length ? chips(missingTests) : "none recorded") +
-        row("Rollout notes", escapeHtml(rollout)) +
-        row("Correlation", '<code>' + escapeHtml(item.correlationId || "unknown") + '</code>') +
-        row("Commit", escapeHtml(item.sha ? compactSha(item.sha) : "n/a")) +
-        '</dl></section>' +
+        (verdict.level === "block" ? '<section class="drawer-section">' + renderFailureCallout(verdict, summary) + '</section>' : "") +
+        '<section class="drawer-section"><h3>Hermes verdict</h3>' + renderHermesVerdictBox(verdict, age) + '<dl class="pipeline-detail" style="margin-top:8px">' + reviewWhy + '</dl></section>' +
+        (verdict.level === "needs-review" ? '<section class="drawer-section">' + renderOperatorChecklistPanel(item, verdict, action) + '</section>' : "") +
+        '<section class="drawer-section"><h3>Agent pre-check</h3>' + renderAgentPrecheckList(item, summary, verdict, stage) + '</section>' +
+        '<section class="drawer-section"><h3>Checks</h3>' + renderCheckMatrix(summary, testSignals) + '</section>' +
+        ((touchedFiles.length || touchedAreas.length) ? '<section class="drawer-section"><h3>Touched files</h3>' + renderTouchedFiles(touchedFiles, touchedAreas) + '</section>' : "") +
+        '<section class="drawer-section"><h3>Timeline</h3>' + renderTimelineList(stage, verdict, item) + '</section>' +
+        '<section class="drawer-section"><h3>References</h3>' + renderReferencesKv(item, prUrl, workflowRunUrl, commitUrl, rollout, action) + '</section>' +
+        renderPhaseHistorySection(item) +
         renderOperatorDecisionNote(item) +
         '</div>' +
         '<div class="drawer-footer">' +
@@ -1947,8 +2600,256 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         (workflowRunUrl ? '<a class="pill" href="' + escapeAttr(workflowRunUrl) + '" target="_blank" rel="noreferrer">Workflow Run</a>' : "") +
         '<button class="soft-button" type="button" data-command-suggestion="handoff monitor details">Ask Hermes</button>' +
         '<button class="soft-button" type="button" data-copy-text="' + escapeAttr(item.correlationId || "") + '">copy correlation</button>' +
-        (verdict.level === "needs-review" ? '<button class="soft-button" data-action="primary" type="button" data-monitor-decision="approve" data-decision-key="' + escapeAttr(decisionKeyForItem(item)) + '">Approve locally</button>' : "") +
+        (verdict.level === "needs-review" && !locallyApproved ? '<button class="soft-button" data-action="primary" type="button" data-monitor-decision="approve" data-decision-key="' + escapeAttr(decisionKeyForItem(item)) + '">Approve locally</button>' : "") +
         '</div></div>';
+    }
+
+    function renderFailureCallout(verdict, summary) {
+      const text = String(verdict.why || (summary && summary.finalReason) || "Build is blocked.").trim();
+      return '<div class="failure-callout"><span class="fc-icon">!</span><span class="fc-text">' + escapeHtml(text) + '</span></div>';
+    }
+
+    function renderHermesVerdictBox(verdict, age) {
+      return '<div class="verdict-box" data-level="' + escapeAttr(verdict.level) + '">' +
+        '<div class="vb-head"><span>' + escapeHtml(verdict.label) + '</span><span class="vb-age">' + escapeHtml(age.label + " " + age.duration) + '</span></div>' +
+        '<div class="vb-text">' + escapeHtml(verdict.why) + '</div>' +
+        '</div>';
+    }
+
+    function renderOperatorChecklistPanel(item, verdict, action) {
+      const decision = decisionForItem(item);
+      const items = operatorChecklistItems(item, verdict, action);
+      const ticked = (decision.checklist || {});
+      const tickCount = items.filter((entry) => ticked[entry.id] === true).length;
+      const head = '<div class="operator-checklist-head"><span>Operator checklist</span><span>' + tickCount + ' / ' + items.length + '</span></div>';
+      const rows = items.map((entry) => {
+        const checked = ticked[entry.id] === true;
+        return '<label class="hc-item" data-checked="' + (checked ? "true" : "false") + '">' +
+          '<input type="checkbox" data-checklist-id="' + escapeAttr(entry.id) + '" data-decision-key="' + escapeAttr(decisionKeyForItem(item)) + '"' + (checked ? " checked" : "") + ">" +
+          '<span>' + escapeHtml(entry.label) + '</span>' +
+          '</label>';
+      }).join("");
+      return '<div class="operator-checklist">' + head + rows + '</div>';
+    }
+
+    function operatorChecklistItems(item, verdict, action) {
+      const summary = item.summary || {};
+      const signals = summary.reviewSignals || {};
+      const touchedAreas = Array.isArray(signals.touchedAreas) ? signals.touchedAreas : [];
+      const items = [];
+      items.push({ id: "intent", label: "Project intent and architecture are right for this change." });
+      items.push({ id: "scope", label: "Rollout scope and feature-flag plan are recorded." });
+      const rolloutNeeded = signals.rolloutNotesRequired === true && signals.rolloutNotesPresent !== true;
+      items.push({ id: "rollout", label: rolloutNeeded ? "Rollout notes attached or risk is acceptable without them." : "Rollout notes match the change risk." });
+      if (touchedAreas.some((a) => /contract|solidity/i.test(String(a)))) {
+        items.push({ id: "abi", label: "ABI / on-chain compat verified for downstream consumers." });
+      } else if (touchedAreas.some((a) => /indexer/i.test(String(a)))) {
+        items.push({ id: "indexer", label: "Indexer schema/migration impact reviewed." });
+      } else {
+        items.push({ id: "blast", label: "Blast radius for affected surfaces is bounded." });
+      }
+      return items;
+    }
+
+    function renderAgentPrecheckList(item, summary, verdict, stage) {
+      const signals = summary.reviewSignals || {};
+      const stageKey = (stage && stage.key) || "";
+      const tests = Array.isArray(signals.testSignals) ? signals.testSignals : [];
+      const missing = Array.isArray(signals.missingTestSignals) ? signals.missingTestSignals : [];
+      const ciState = verdict.level === "block" ? "bad" : (stageKey === "ci" ? "warn" : "ok");
+      const reviewState = stageKey === "hermes" ? "warn" : (verdict.level === "needs-review" ? "warn" : "ok");
+      const abiState = signals.abiCompatible === false ? "bad" : (signals.abiCompatChecked === true ? "ok" : "warn");
+      const staticState = signals.staticAnalysisHigh > 0 ? "bad" : (Number(signals.staticAnalysisHigh || 0) > 0 ? "warn" : "ok");
+      const rolloutState = signals.rolloutNotesRequired === true
+        ? (signals.rolloutNotesPresent === true ? "ok" : "warn")
+        : "ok";
+      const rows = [
+        { state: ciState, label: "CI green (forge, node, typecheck, lint)", note: ciState === "ok" ? "all required jobs green" : (ciState === "warn" ? "ci running" : "ci has failures") },
+        { state: reviewState, label: "Hermes code review", note: reviewState === "ok" ? "no blocking signals" : "review in progress" },
+        { state: abiState, label: "ABI / contract compat scan", note: abiState === "ok" ? "no breaking ABI changes" : (abiState === "warn" ? "scan pending" : "breaking change detected") },
+        { state: staticState, label: "Static analysis (slither / lint)", note: signals.staticAnalysisHigh > 0 ? Number(signals.staticAnalysisHigh) + " high" : "0 high · " + Number(signals.staticAnalysisInfo || 0) + " informational" },
+        { state: missing.length ? "warn" : "ok", label: "Tests cover changed areas", note: tests.length ? tests.length + " signals" : (missing.length ? missing.length + " missing" : "no tests recorded") },
+        { state: rolloutState, label: "Rollout notes", note: signals.rolloutNotesRequired === true ? (signals.rolloutNotesPresent ? "present" : "missing") : "not required" },
+      ];
+      return '<div class="precheck-list">' + rows.map((r) => (
+        '<div class="pc-item">' +
+          '<span class="pc-tick" data-state="' + escapeAttr(r.state) + '"></span>' +
+          '<span class="pc-label">' + escapeHtml(r.label) + '</span>' +
+          '<span class="pc-note">' + escapeHtml(r.note) + '</span>' +
+        '</div>'
+      )).join("") + '</div>';
+    }
+
+    function renderCheckMatrix(summary, testSignals) {
+      const checks = collectCheckMatrix(summary, testSignals);
+      if (!checks.length) return '<div class="empty">No checks reported.</div>';
+      const pass = checks.filter((c) => c.state === "pass").length;
+      const fail = checks.filter((c) => c.state === "fail").length;
+      const pending = checks.length - pass - fail;
+      return '<div class="check-matrix">' +
+        checks.map((c) => '<div class="cm-row" data-state="' + escapeAttr(c.state) + '">' +
+          '<span class="cm-dot"></span>' +
+          '<span class="cm-name">' + escapeHtml(c.name) + '</span>' +
+          '<span class="cm-state">' + escapeHtml(c.state) + '</span>' +
+        '</div>').join("") +
+        '</div>' +
+        '<div class="cm-summary">' + pass + ' pass · ' + fail + ' fail · ' + pending + ' pending</div>';
+    }
+
+    function collectCheckMatrix(summary, testSignals) {
+      const explicit = Array.isArray(summary && summary.checks) ? summary.checks : [];
+      if (explicit.length) {
+        return explicit.map((c) => ({
+          name: String(c.name || c.id || "check"),
+          state: normalizeCheckState(c.state || c.conclusion || c.status),
+        }));
+      }
+      const signals = Array.isArray(testSignals) ? testSignals : [];
+      return signals.slice(0, 8).map((value) => {
+        const text = String(value || "");
+        const state = /fail/i.test(text) ? "fail" : (/pend|wait|run/i.test(text) ? "pending" : "pass");
+        return { name: text, state };
+      });
+    }
+
+    function normalizeCheckState(value) {
+      const v = normalize(value);
+      if (["success", "pass", "passed", "ok", "green"].indexOf(v) >= 0) return "pass";
+      if (["failure", "failed", "fail", "blocked", "red", "error"].indexOf(v) >= 0) return "fail";
+      return "pending";
+    }
+
+    function renderTouchedFiles(files, areas) {
+      const groups = groupTouchedFilesByArea(files, areas);
+      if (!groups.length) return '<div class="empty">No file paths recorded.</div>';
+      return '<div class="touched-files">' + groups.map((g) => (
+        '<div class="tf-group">' +
+          '<div class="tf-group-head"><span class="tf-area">' + escapeHtml(g.area) + '</span><span class="tf-count">' + g.paths.length + '</span></div>' +
+          (g.paths.length ? g.paths.slice(0, 6).map((p) => '<div class="tf-path">' + escapeHtml(p) + '</div>').join("") + (g.paths.length > 6 ? '<div class="tf-path">+' + (g.paths.length - 6) + " more</div>" : "") : '<div class="tf-path">no files listed</div>') +
+        '</div>'
+      )).join("") + '</div>';
+    }
+
+    function groupTouchedFilesByArea(files, areas) {
+      const byArea = {};
+      const order = [];
+      const seed = Array.isArray(areas) ? areas : [];
+      seed.forEach((a) => { if (!byArea[a]) { byArea[a] = []; order.push(a); } });
+      const list = Array.isArray(files) ? files : [];
+      list.forEach((f) => {
+        const path = typeof f === "string" ? f : (f && f.path) || "";
+        if (!path) return;
+        const area = (typeof f === "object" && f && f.area) ? f.area : inferAreaFromPath(path);
+        if (!byArea[area]) { byArea[area] = []; order.push(area); }
+        byArea[area].push(path);
+      });
+      return order.map((area) => ({ area, paths: byArea[area] || [] }));
+    }
+
+    function inferAreaFromPath(path) {
+      const p = String(path || "").toLowerCase();
+      if (p.startsWith("contracts/") || p.endsWith(".sol")) return "solidity";
+      if (p.startsWith("indexer/")) return "indexer";
+      if (p.startsWith("mcp-server/") || p.startsWith("backend/") || p.startsWith("services/")) return "backend";
+      if (p.startsWith("app/") || p.startsWith("frontend/") || p.endsWith(".tsx")) return "frontend";
+      if (p.startsWith("scripts/") || p.startsWith("ops/")) return "ops";
+      if (p.startsWith("docs/") || p.endsWith(".md")) return "docs";
+      if (p.startsWith("test/") || p.startsWith("tests/")) return "tests";
+      return "other";
+    }
+
+    function renderTimelineList(stage, verdict, item) {
+      const phases = [
+        { key: "pr", label: "PR opened" },
+        { key: "ci", label: "CI" },
+        { key: "codex", label: "Codex" },
+        { key: "hermes", label: "Hermes" },
+        { key: "gate", label: "Human / Gate" },
+        { key: "deploy", label: "Deploy" },
+      ];
+      const activeIndex = Math.max(0, phases.findIndex((p) => p.key === stage.key));
+      const rows = phases.map((p, i) => {
+        let rowState = "pending";
+        let rowLabel = "—";
+        if (i < activeIndex) { rowState = "pass"; rowLabel = "PASS"; }
+        else if (i === activeIndex) {
+          if (verdict.level === "block") { rowState = "fail"; rowLabel = "FAIL"; }
+          else if (verdict.level === "needs-review") { rowState = "review"; rowLabel = "REVIEW"; }
+          else if (verdict.level === "running") { rowState = "running"; rowLabel = "RUNNING"; }
+          else { rowState = "pass"; rowLabel = "PASS"; }
+        }
+        if (p.key === "deploy" && isDeployItem(item) && (item.active === true || item.activeState === "running")) {
+          rowState = "running";
+          rowLabel = "RUNNING";
+        }
+        return '<div class="tl-row" data-state="' + escapeAttr(rowState) + '">' +
+          '<span class="tl-dot"></span>' +
+          '<span class="tl-label">' + escapeHtml(p.label) + '</span>' +
+          '<span class="tl-state">' + escapeHtml(rowLabel) + '</span>' +
+        '</div>';
+      }).join("");
+      return '<div class="timeline-list">' + rows + '</div>';
+    }
+
+    function renderReferencesKv(item, prUrl, workflowRunUrl, commitUrl, rollout, action) {
+      const sha = item.sha ? compactSha(item.sha) : "n/a";
+      const branch = item.branch || (item.summary && item.summary.branch) || (item.summary && item.summary.ref) || "";
+      const requester = item.requester || (item.summary && item.summary.requester) || (item.summary && item.summary.actor) || "";
+      const correlation = item.correlationId || "";
+      return '<dl class="ref-kv">' +
+        '<dt>commit</dt><dd>' + (commitUrl ? '<a class="pill" href="' + escapeAttr(commitUrl) + '" target="_blank" rel="noreferrer">' + escapeHtml(sha) + '</a>' : escapeHtml(sha)) + '</dd>' +
+        (branch ? '<dt>branch</dt><dd>' + escapeHtml(String(branch)) + '</dd>' : "") +
+        (requester ? '<dt>requester</dt><dd>' + escapeHtml(String(requester)) + '</dd>' : "") +
+        '<dt>workflow</dt><dd>' + (workflowRunUrl ? '<a class="pill" href="' + escapeAttr(workflowRunUrl) + '" target="_blank" rel="noreferrer">open run</a>' : "n/a") + '</dd>' +
+        '<dt>rollout</dt><dd>' + escapeHtml(String(rollout)) + '</dd>' +
+        '<dt>correlation</dt><dd><code>' + escapeHtml(correlation || "unknown") + '</code></dd>' +
+        '<dt>next action</dt><dd>' + escapeHtml(action.text) + '</dd>' +
+        (prUrl ? '<dt>github</dt><dd><a class="pill" href="' + escapeAttr(prUrl) + '" target="_blank" rel="noreferrer">open PR</a></dd>' : "") +
+        '</dl>';
+    }
+
+    function renderPhaseHistorySection(item) {
+      const entries = collectPhaseHistory(item);
+      if (!entries.length) return "";
+      const rows = entries.map((e) => (
+        '<div class="ph-row" data-state="' + escapeAttr(e.state) + '">' +
+          '<span class="ph-time">' + escapeHtml(e.time) + '</span>' +
+          '<span class="ph-dot"></span>' +
+          '<span>' + escapeHtml(e.label) + '</span>' +
+        '</div>'
+      )).join("");
+      return '<section class="drawer-section"><h3>Phase history</h3><div class="phase-history">' + rows + '</div></section>';
+    }
+
+    function collectPhaseHistory(item) {
+      const entries = [];
+      if (Array.isArray(item.groupItems)) {
+        item.groupItems.forEach((entry) => {
+          const t = entry.updatedAt || entry.createdAt;
+          if (!t) return;
+          const verdict = baseReleaseVerdict(entry);
+          entries.push({
+            time: new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            state: stateForLevel(verdict.level),
+            label: handoffKindLabel(entry.intent) + " · " + String(verdict.label).toLowerCase(),
+          });
+        });
+      } else if (item.updatedAt) {
+        const verdict = baseReleaseVerdict(item);
+        entries.push({
+          time: new Date(item.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          state: stateForLevel(verdict.level),
+          label: handoffKindLabel(item.intent) + " · " + String(verdict.label).toLowerCase(),
+        });
+      }
+      return entries.slice(-6);
+    }
+
+    function stateForLevel(level) {
+      if (level === "block") return "fail";
+      if (level === "needs-review") return "review";
+      if (level === "running") return "running";
+      return "pass";
     }
 
     function operatorChecklistSection(item, verdict, action) {
