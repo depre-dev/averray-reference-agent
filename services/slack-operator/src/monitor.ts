@@ -283,6 +283,67 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       font-size: 1.35rem;
       font-weight: 700;
     }
+    .owner-lanes {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      align-items: start;
+    }
+    .owner-lane {
+      display: grid;
+      gap: 8px;
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(10, 48, 44, 0.5);
+      padding: 10px;
+    }
+    .owner-lane-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 28px;
+    }
+    .owner-lane-title {
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .owner-lane-items {
+      display: grid;
+      gap: 8px;
+    }
+    .owner-lane-empty {
+      color: var(--muted);
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      padding: 14px 10px;
+      text-align: center;
+      font-size: 0.9rem;
+    }
+    .lane-card {
+      display: grid;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent);
+      border-radius: 8px;
+      background: rgba(10, 48, 44, 0.86);
+      padding: 10px;
+    }
+    .lane-card[data-verdict="pass"] { border-left-color: var(--ok); }
+    .lane-card[data-verdict="block"] { border-left-color: var(--bad); }
+    .lane-card[data-verdict="needs-review"] { border-left-color: var(--warn); }
+    .lane-card[data-verdict="running"] { border-left-color: var(--accent); }
+    .lane-card-title {
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .lane-card-meta,
+    .lane-card-action {
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.35;
+    }
     .pipeline-card {
       border: 1px solid var(--line);
       border-left: 5px solid var(--accent);
@@ -513,6 +574,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       .pr-board { grid-template-columns: 1fr; }
       .staleness-summary { grid-template-columns: 1fr; }
       .owner-summary { grid-template-columns: 1fr; }
+      .owner-lanes { grid-template-columns: 1fr; }
       .pipeline-steps,
       .pipeline-meta,
       .pipeline-detail { grid-template-columns: 1fr; }
@@ -557,6 +619,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       <div class="owner-card"><span class="owner-label">Merge queue</span><span id="owner-merge" class="owner-count">0</span></div>
       <div class="owner-card"><span class="owner-label">Hermes active</span><span id="owner-hermes" class="owner-count">0</span></div>
     </section>
+    <div class="section-title"><h2>Owner Lanes</h2><span class="pill">who acts next</span></div>
+    <section id="owner-lanes" class="owner-lanes" aria-label="Owner lanes"><div class="empty">No PR handoffs in the monitor window.</div></section>
     <div class="section-title"><h2>PR Pipeline</h2><span class="pill">grouped by repo</span></div>
     <section id="pipeline" class="pipeline-list"><div class="empty">No PR handoffs in the monitor window.</div></section>
     <div class="section-title"><h2>Release Gate</h2><span class="pill">blocks + human review</span></div>
@@ -608,6 +672,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       renderList("active", payload.active || [], "No running or just-finished handoffs.");
       latestPipelineItems = collectPipelineItems(payload);
       renderPipelineBoard(latestPipelineItems);
+      renderOwnerLanes(latestPipelineItems);
       renderPipeline(latestPipelineItems);
       renderList("attention", attention, "No handoffs need attention.");
       renderList("recent", recent, "No recent handoffs in the monitor window.");
@@ -647,6 +712,70 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       document.getElementById("owner-human").textContent = String(owners.filter((owner) => owner === "Human owner").length);
       document.getElementById("owner-merge").textContent = String(owners.filter((owner) => owner === "Merge queue").length);
       document.getElementById("owner-hermes").textContent = String(owners.filter((owner) => owner === "Hermes").length);
+    }
+
+    function renderOwnerLanes(entries) {
+      const target = document.getElementById("owner-lanes");
+      const filtered = filterPipelineItems(entries);
+      if (!filtered.length) {
+        target.innerHTML = '<div class="empty">No PR handoffs in the monitor window.</div>';
+        return;
+      }
+      target.innerHTML = ownerLaneDefinitions().map((lane) => renderOwnerLane(lane, filtered)).join("");
+    }
+
+    function ownerLaneDefinitions() {
+      return [
+        { key: "codex", title: "Codex", owner: "Codex", empty: "Nothing waiting on Codex." },
+        { key: "hermes", title: "Hermes", owner: "Hermes", empty: "Hermes has no active PR checks." },
+        { key: "human", title: "Human", owner: "Human owner", empty: "No human review needed." },
+        { key: "merge", title: "Merge Queue", owner: "Merge queue", empty: "Nothing ready to merge." },
+        { key: "done", title: "Done", owner: "Done", empty: "No completed PRs in view." },
+      ];
+    }
+
+    function renderOwnerLane(lane, entries) {
+      const items = entries
+        .filter((item) => nextPipelineAction(item, releaseVerdict(item)).owner === lane.owner)
+        .sort((a, b) => ownerLaneSortScore(b) - ownerLaneSortScore(a) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+      const cards = items.length
+        ? items.slice(0, 6).map(renderOwnerLaneCard).join("")
+        : '<div class="owner-lane-empty">' + escapeHtml(lane.empty) + '</div>';
+      return '<section class="owner-lane" data-owner="' + escapeAttr(lane.key) + '">' +
+        '<div class="owner-lane-head"><div class="owner-lane-title">' + escapeHtml(lane.title) + '</div><span class="pill">' + escapeHtml(String(items.length)) + '</span></div>' +
+        '<div class="owner-lane-items">' + cards + '</div>' +
+        '</section>';
+    }
+
+    function renderOwnerLaneCard(item) {
+      const summary = item.summary || {};
+      const verdict = releaseVerdict(item);
+      const action = nextPipelineAction(item, verdict);
+      const age = handoffAge(item);
+      const title = pipelineTitle(item);
+      const prUrl = item.pullRequestUrl || derivePullRequestUrl(item);
+      const titleMarkup = prUrl
+        ? '<a href="' + escapeAttr(prUrl) + '" target="_blank" rel="noreferrer">' + escapeHtml(title) + '</a>'
+        : escapeHtml(title);
+      return '<article class="lane-card" data-verdict="' + escapeAttr(verdict.level) + '">' +
+        '<div class="lane-card-title">' + titleMarkup + '</div>' +
+        '<div class="lane-card-meta">' + escapeHtml(verdict.label + " - " + age.label + " " + age.duration) + '</div>' +
+        '<div class="lane-card-action">' + escapeHtml(action.text) + '</div>' +
+        '<div class="lane-card-meta">' + escapeHtml(releaseReason(summary, item, verdict.level)) + '</div>' +
+        '</article>';
+    }
+
+    function ownerLaneSortScore(item) {
+      const verdict = releaseVerdict(item);
+      const age = handoffAge(item);
+      const prState = pullRequestState(item, item.summary || {});
+      if (isDonePullRequestState(prState)) return 10;
+      if (verdict.level === "block") return 500;
+      if (age.state === "stale") return 400;
+      if (verdict.level === "needs-review") return 300;
+      if (verdict.level === "running") return 200;
+      if (verdict.level === "pass") return 100;
+      return 0;
     }
 
     function updatePipelineFilterButtons() {
