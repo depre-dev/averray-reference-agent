@@ -109,6 +109,8 @@ describe("runWikipediaCitationRepairWorkflow", () => {
       "getDefinition",
       "policyCheckClaim",
       "fetchEvidence",
+      "validateDirectSubmission",
+      "probeInvalidWrapperSubmission",
       "claim",
       "saveDraft",
       "validate",
@@ -194,8 +196,110 @@ describe("runWikipediaCitationRepairWorkflow", () => {
       "getDefinition",
       "policyCheckClaim",
       "fetchEvidence",
-      "validate",
+      "validateDirectSubmission",
+      "probeInvalidWrapperSubmission",
     ]);
+  });
+
+  // Schema-native readiness gate (pre-claim) — exercises the four
+  // acceptance properties from the work item: valid → claim, invalid
+  // → no claim, wrapper-probe-leak → no claim, and the first mutation
+  // call after validation is always exactly the intended claim call.
+
+  it("schema-native readiness: valid direct schema object leads to claim", async () => {
+    const calls: string[] = [];
+    const records = callRecords();
+    const result = await runWikipediaCitationRepairWorkflow(
+      { jobId, dryRun: false, runId: "run-readiness-valid" },
+      deps({ calls, records, directValidationValid: true, wrapperProbeValid: false })
+    );
+
+    expect(result.status).toBe("submitted");
+    expect(records.claim).toHaveLength(1);
+    expect(records.claim[0]).toMatchObject({ runId: "run-readiness-valid", jobId });
+    expect(result.readiness).toMatchObject({
+      jobId,
+      schemaValidates: "payload.submission",
+      validatedBeforeClaim: true,
+      invalidWrappedOutput: { checkedBeforeClaim: true },
+      claimAttempted: true,
+    });
+    expect(result.readiness.invalidWrappedOutput.probeResult?.valid).toBe(false);
+  });
+
+  it("schema-native readiness: invalid direct object never calls claim", async () => {
+    const calls: string[] = [];
+    const records = callRecords();
+    const result = await runWikipediaCitationRepairWorkflow(
+      { jobId, dryRun: false, runId: "run-readiness-invalid" },
+      deps({ calls, records, directValidationValid: false, wrapperProbeValid: false })
+    );
+
+    expect(result.status).toBe("blocked");
+    expect(result.reason).toBe("pre_claim_validation_failed");
+    expect(records.claim).toHaveLength(0);
+    expect(records.saveDraft).toHaveLength(0);
+    expect(records.submit).toHaveLength(0);
+    expect(calls).not.toContain("claim");
+    expect(result.readiness).toMatchObject({
+      jobId,
+      validatedBeforeClaim: false,
+      claimAttempted: false,
+    });
+  });
+
+  it("schema-native readiness: wrapper probe passing unexpectedly never calls claim", async () => {
+    const calls: string[] = [];
+    const records = callRecords();
+    const result = await runWikipediaCitationRepairWorkflow(
+      { jobId, dryRun: false, runId: "run-readiness-wrapper-leak" },
+      // direct submission validates clean, but the invalid-wrapper
+      // probe is also accepted by the platform — that means schema
+      // enforcement is off, so we must NOT trust the direct pass.
+      deps({ calls, records, directValidationValid: true, wrapperProbeValid: true })
+    );
+
+    expect(result.status).toBe("blocked");
+    expect(result.reason).toBe("invalid_wrapper_probe_unexpectedly_valid");
+    expect(records.claim).toHaveLength(0);
+    expect(calls).not.toContain("claim");
+    expect(result.readiness).toMatchObject({
+      jobId,
+      validatedBeforeClaim: true,
+      claimAttempted: false,
+    });
+    expect(result.readiness.invalidWrappedOutput.probeResult?.valid).toBe(true);
+  });
+
+  it("schema-native readiness: first mutation call after validation is exactly the intended claim call", async () => {
+    const calls: string[] = [];
+    const records = callRecords();
+    await runWikipediaCitationRepairWorkflow(
+      { jobId, dryRun: false, runId: "run-readiness-order" },
+      deps({ calls, records, directValidationValid: true, wrapperProbeValid: false })
+    );
+
+    // Find the first mutation call in the recorded sequence.
+    // Mutations are: claim, saveDraft, submit. validateDirectSubmission
+    // and probeInvalidWrapperSubmission are read-only by contract.
+    const mutationIndex = calls.findIndex(
+      (call) => call === "claim" || call === "saveDraft" || call === "submit"
+    );
+    expect(mutationIndex).toBeGreaterThanOrEqual(0);
+    expect(calls[mutationIndex]).toBe("claim");
+
+    // Both readiness gates must have run before the first mutation.
+    const directIndex = calls.indexOf("validateDirectSubmission");
+    const wrapperIndex = calls.indexOf("probeInvalidWrapperSubmission");
+    expect(directIndex).toBeGreaterThanOrEqual(0);
+    expect(wrapperIndex).toBeGreaterThanOrEqual(0);
+    expect(directIndex).toBeLessThan(mutationIndex);
+    expect(wrapperIndex).toBeLessThan(mutationIndex);
+
+    // And the intended claim call carries the run id and job id the
+    // workflow committed to before validation.
+    expect(records.claim).toHaveLength(1);
+    expect(records.claim[0]).toMatchObject({ runId: "run-readiness-order", jobId });
   });
 
   it("reads page title and pinned revision id from Wikipedia URLs", () => {
@@ -221,9 +325,13 @@ function deps(options: {
   policyAllowed?: boolean;
   validationSequence?: boolean[];
   submitBlocked?: boolean;
+  directValidationValid?: boolean;
+  wrapperProbeValid?: boolean;
 }): WorkflowDeps {
   let draftCounter = 0;
   const validationSequence = [...(options.validationSequence ?? [true])];
+  const directValid = options.directValidationValid ?? true;
+  const wrapperProbeValid = options.wrapperProbeValid ?? false;
   const workflowDeps: WorkflowDeps = {
     async listJobs() {
       options.calls.push("listJobs");
@@ -243,6 +351,30 @@ function deps(options: {
       return options.policyAllowed === false
         ? { allowed: false, reason: "policy_rejected_claim" }
         : { allowed: true };
+    },
+    async validateDirectSubmission(input) {
+      options.calls.push("validateDirectSubmission");
+      options.records?.validateDirectSubmission.push(input);
+      return directValid
+        ? { valid: true, validator: "permissive", taskType: "citation_repair" }
+        : {
+            valid: false,
+            validator: "permissive",
+            taskType: "citation_repair",
+            message: "platform validation rejected the submission",
+            errors: [{ path: "citation_findings.0.problem", code: "invalid_enum_value", message: "unknown problem" }],
+          };
+    },
+    async probeInvalidWrapperSubmission(input) {
+      options.calls.push("probeInvalidWrapperSubmission");
+      options.records?.probeInvalidWrapperSubmission.push(input);
+      return wrapperProbeValid
+        ? { valid: true, validator: "permissive" }
+        : {
+            valid: false,
+            validator: "permissive",
+            message: "platform rejected the invalid-wrapper probe (expected)",
+          };
     },
     async claim(input) {
       options.calls.push("claim");
@@ -288,6 +420,8 @@ function deps(options: {
 
 interface WorkflowCallRecords {
   policyCheckClaim: Array<Parameters<WorkflowDeps["policyCheckClaim"]>[0]>;
+  validateDirectSubmission: Array<Parameters<WorkflowDeps["validateDirectSubmission"]>[0]>;
+  probeInvalidWrapperSubmission: Array<Parameters<WorkflowDeps["probeInvalidWrapperSubmission"]>[0]>;
   claim: Array<Parameters<WorkflowDeps["claim"]>[0]>;
   saveDraft: Array<Parameters<WorkflowDeps["saveDraft"]>[0]>;
   validate: Array<Parameters<WorkflowDeps["validate"]>[0]>;
@@ -297,6 +431,8 @@ interface WorkflowCallRecords {
 function callRecords(): WorkflowCallRecords {
   return {
     policyCheckClaim: [],
+    validateDirectSubmission: [],
+    probeInvalidWrapperSubmission: [],
     claim: [],
     saveDraft: [],
     validate: [],

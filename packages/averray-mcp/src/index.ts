@@ -31,12 +31,14 @@ import {
   findArchiveSnapshot,
 } from "./wiki-evidence.js";
 import {
+  INVALID_WRAPPER_PROBE_SHAPE,
   readPageTitle,
   readRevisionId,
   runWikipediaCitationRepairWorkflow,
   type WikipediaEvidenceBundle,
   type WorkflowJob,
 } from "./job-workflows.js";
+import { platformValidateSubmission } from "./default-workflow-runtime.js";
 import {
   getLastWikipediaCitationRepairStatus,
 } from "./operator-commands.js";
@@ -756,6 +758,16 @@ function workflowDeps() {
     },
     async fetchEvidence(input: { definition: unknown; maxEvidenceUrls: number }): Promise<WikipediaEvidenceBundle> {
       return fetchWikipediaEvidenceForWorkflow(input.definition, input.maxEvidenceUrls);
+    },
+    async validateDirectSubmission(input: {
+      runId: string;
+      jobId: string;
+      output: Record<string, unknown>;
+    }) {
+      return platformValidateSubmission(input.jobId, input.output);
+    },
+    async probeInvalidWrapperSubmission(input: { runId: string; jobId: string }) {
+      return platformValidateSubmission(input.jobId, INVALID_WRAPPER_PROBE_SHAPE);
     },
     async saveDraft(input: { runId: string; jobId: string; sessionId?: string; output: Record<string, unknown> }) {
       const draft = await saveDraftSubmission(

@@ -111,7 +111,7 @@ describe("agent invocation hook", () => {
       "listJobs",
       "policyCheckClaim",
       "fetchEvidence",
-      "validate",
+      "validateDirectSubmission",
     ]));
     expect(calls).not.toContain("claim");
     expect(calls).not.toContain("saveDraft");
@@ -156,7 +156,7 @@ describe("agent invocation hook", () => {
       "listJobs",
       "policyCheckClaim",
       "fetchEvidence",
-      "validate",
+      "validateDirectSubmission",
     ]));
     expect(calls).not.toContain("claim");
     expect(calls).not.toContain("submit");
@@ -416,7 +416,7 @@ describe("agent invocation hook", () => {
       "listJobs",
       "policyCheckClaim",
       "fetchEvidence",
-      "validate",
+      "validateDirectSubmission",
     ]));
   });
 
@@ -737,6 +737,14 @@ function workflowDeps(calls: string[]): WorkflowDeps {
     async saveDraft() {
       calls.push("saveDraft");
       throw new Error("agent invocation test must not save drafts");
+    },
+    async validateDirectSubmission() {
+      calls.push("validateDirectSubmission");
+      return { valid: true, validator: "permissive", taskType: "citation_repair" };
+    },
+    async probeInvalidWrapperSubmission() {
+      calls.push("probeInvalidWrapperSubmission");
+      return { valid: false, validator: "permissive" };
     },
     async validate() {
       calls.push("validate");

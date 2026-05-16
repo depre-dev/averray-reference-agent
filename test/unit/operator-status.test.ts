@@ -230,6 +230,12 @@ describe("operator status", () => {
         async saveDraft() {
           throw new Error("read-only testbed run must not save drafts");
         },
+        async validateDirectSubmission() {
+          return { valid: true, validator: "permissive", taskType: "citation_repair" };
+        },
+        async probeInvalidWrapperSubmission() {
+          return { valid: false, validator: "permissive" };
+        },
         async validate() {
           return { valid: true, validator: "wikipedia", taskType: "citation_repair" };
         },
