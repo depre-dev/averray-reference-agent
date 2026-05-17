@@ -92,6 +92,9 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("renderHermesVerdictBox(verdict, age)");
     expect(html).toContain("renderHandoffOwnerContract(item, verdict, action)");
     expect(html).toContain("ownerContractForItem(item, verdict, action)");
+    expect(html).toContain("renderActionRecipe(item, summary, verdict, action)");
+    expect(html).toContain("actionRecipeForItem(item, summary, verdict, action)");
+    expect(html).toContain("verdict.level === \"needs-review\" && !isDraftPullRequest(item) && !locallyApproved");
     expect(html).toContain("renderOperatorChecklistPanel(item, verdict, action)");
     expect(html).toContain("renderAgentPrecheckList(item, summary, verdict, stage)");
     expect(html).toContain("renderCheckMatrix(summary, testSignals)");
@@ -128,6 +131,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("groupPhaseBadges(item)");
     expect(html).toContain("groupPrPipelineItems(entries)");
     expect(html).toContain("finalizePrGroup(items)");
+    expect(html).toContain("keepCurrentDeployItems(entries)");
     expect(html).toContain("prIdentityKey(item)");
     expect(html).toContain("renderPipelineSteps(stage, verdict)");
     expect(html).toContain("renderPrTimeline(item, stage, verdict, action)");
@@ -135,6 +139,8 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("buildFixRequest(item, summary, verdict, action)");
     expect(html).toContain("Fix this block");
     expect(html).toContain("Handoff owner");
+    expect(html).toContain("Action recipe");
+    expect(html).toContain("Clears when");
     expect(html).toContain("Codex owns finishing it or marking it ready");
     expect(html).toContain("finish the draft or mark it ready for review");
     expect(html).toContain("Codex draft");

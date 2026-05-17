@@ -1801,6 +1801,34 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       line-height: 1.35;
     }
     .oc-role strong { color: var(--text); }
+    .action-recipe {
+      display: grid;
+      gap: 10px;
+    }
+    .recipe-grid {
+      display: grid;
+      grid-template-columns: 96px minmax(0, 1fr);
+      gap: 8px 12px;
+      margin: 0;
+    }
+    .recipe-grid dt {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.68rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .recipe-grid dd {
+      margin: 0;
+      color: var(--text);
+      line-height: 1.4;
+      min-width: 0;
+    }
+    .recipe-proof {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
 
     /* ActorPill — coloured dot + arrow + actor name for "next" handoff display */
     .card-next {
@@ -3078,6 +3106,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         (verdict.level === "block" ? '<section class="drawer-section">' + renderFailureCallout(verdict, summary) + '</section>' : "") +
         '<section class="drawer-section"><h3>Hermes verdict</h3>' + renderHermesVerdictBox(verdict, age) + (richReviewWhy ? '<div class="review-why">' + richReviewWhy + '</div>' : "") + '</section>' +
         '<section class="drawer-section">' + renderHandoffOwnerContract(item, verdict, action) + '</section>' +
+        '<section class="drawer-section">' + renderActionRecipe(item, summary, verdict, action) + '</section>' +
         (verdict.level === "block" ? renderBlockResolutionPanel(item, summary, verdict, action) : "") +
         (verdict.level === "needs-review" && !isDraftPullRequest(item) ? '<section class="drawer-section">' + renderOperatorChecklistPanel(item, verdict, action) + '</section>' : "") +
         '<section class="drawer-section"><h3>Agent pre-check</h3>' + renderAgentPrecheckList(item, summary, verdict, stage) + '</section>' +
@@ -3094,7 +3123,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         (workflowRunUrl ? '<a class="pill" href="' + escapeAttr(workflowRunUrl) + '" target="_blank" rel="noreferrer">Workflow Run</a>' : "") +
         '<button class="soft-button" type="button" data-command-suggestion="handoff monitor details">Ask Hermes</button>' +
         '<button class="soft-button" type="button" data-copy-text="' + escapeAttr(item.correlationId || "") + '">copy correlation</button>' +
-        (verdict.level === "needs-review" && !locallyApproved ? '<button class="soft-button" data-action="primary" type="button" data-monitor-decision="approve" data-decision-key="' + escapeAttr(decisionKeyForItem(item)) + '">Approve locally</button>' : "") +
+        (verdict.level === "needs-review" && !isDraftPullRequest(item) && !locallyApproved ? '<button class="soft-button" data-action="primary" type="button" data-monitor-decision="approve" data-decision-key="' + escapeAttr(decisionKeyForItem(item)) + '">Approve locally</button>' : "") +
         '</div></div>';
     }
 
@@ -3145,6 +3174,75 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return {
         owner: action.owner,
         action: action.text,
+      };
+    }
+
+    function renderActionRecipe(item, summary, verdict, action) {
+      const recipe = actionRecipeForItem(item, summary, verdict, action);
+      return '<h3>Action recipe</h3><div class="action-recipe">' +
+        '<dl class="recipe-grid">' +
+          row("Owner", escapeHtml(recipe.owner)) +
+          row("Why here", escapeHtml(recipe.why)) +
+          row("Ask", escapeHtml(recipe.ask)) +
+          row("Clears when", escapeHtml(recipe.clearsWhen)) +
+          row("Proof", recipe.proof.length ? '<span class="recipe-proof">' + recipe.proof.map((value) => '<code>' + escapeHtml(value) + '</code>').join("") + '</span>' : escapeHtml("No proof recorded yet")) +
+        '</dl>' +
+      '</div>';
+    }
+
+    function actionRecipeForItem(item, summary, verdict, action) {
+      if (isDraftPullRequest(item)) {
+        return {
+          owner: "Codex",
+          why: "The PR is still a draft, so it is not ready for Hermes/operator release judgment.",
+          ask: "Finish the draft work or mark the PR ready for review.",
+          clearsWhen: "GitHub reports draft=false and CI/Hermes run on the ready PR.",
+          proof: ["draft=false", "CI green", "Hermes verdict"],
+        };
+      }
+      if (verdict.level === "block") {
+        const plan = blockResolutionPlan(item, summary, verdict, action);
+        return {
+          owner: plan.owner,
+          why: plan.reason,
+          ask: plan.steps[0] || action.text,
+          clearsWhen: plan.clearsWhen,
+          proof: plan.evidence.length ? plan.evidence : ["new commit", "CI/Hermes re-run"],
+        };
+      }
+      if (verdict.level === "needs-review") {
+        return {
+          owner: "Operator",
+          why: "Hermes/Codex completed the code-level pre-check, but project intent, architecture, or rollout risk needs sign-off.",
+          ask: "Read the operator checklist, approve locally only if the project-level risk is acceptable, otherwise send it back to Codex.",
+          clearsWhen: "Operator approves locally or Codex updates the PR so Hermes no longer asks for sign-off.",
+          proof: ["agent pre-check", "operator checklist", "rollout decision"],
+        };
+      }
+      if (verdict.level === "running") {
+        return {
+          owner: "Hermes",
+          why: "A handoff or deploy verification is still in flight.",
+          ask: "Wait for Hermes to finish checks and publish a final verdict.",
+          clearsWhen: "The live handoff emits PASS, BLOCK, or OPERATOR REVIEW.",
+          proof: ["live event", "final verdict"],
+        };
+      }
+      if (verdict.level === "pass") {
+        return {
+          owner: action.owner,
+          why: "No blocking release signal is recorded for this item.",
+          ask: action.text,
+          clearsWhen: "The PR is merged or the deploy verification is recorded as healthy.",
+          proof: ["branch protection green", "Hermes PASS"],
+        };
+      }
+      return {
+        owner: action.owner,
+        why: "The monitor has not received enough metadata to assign a stronger action.",
+        ask: action.text,
+        clearsWhen: "CI and Hermes metadata arrive.",
+        proof: ["CI metadata", "Hermes metadata"],
       };
     }
 
@@ -4106,7 +4204,32 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           seen.add(key);
           return true;
         });
-      return entries.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+      return keepCurrentDeployItems(entries)
+        .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+    }
+
+    function keepCurrentDeployItems(entries) {
+      const latestByRepo = new Map();
+      entries.forEach((item) => {
+        if (!isDeployItem(item)) return;
+        const key = deployRepoKey(item);
+        const current = latestByRepo.get(key);
+        if (!current || itemUpdatedMs(item) > itemUpdatedMs(current)) latestByRepo.set(key, item);
+      });
+      return entries.filter((item) => {
+        if (!isDeployItem(item)) return true;
+        if (item.active === true || item.activeState === "running" || normalize(item.status) === "running") return true;
+        return latestByRepo.get(deployRepoKey(item)) === item;
+      });
+    }
+
+    function deployRepoKey(item) {
+      return String(item.repo || "unknown-deploy-repo");
+    }
+
+    function itemUpdatedMs(item) {
+      const parsed = Date.parse(String(item.updatedAt || ""));
+      return Number.isFinite(parsed) ? parsed : 0;
     }
 
     function groupPrPipelineItems(entries) {
