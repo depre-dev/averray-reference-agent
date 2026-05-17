@@ -1140,12 +1140,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
     .agent-activity {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(260px, 1.25fr);
+      grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr) minmax(320px, 1.1fr);
       gap: 10px;
       min-width: 0;
     }
     .agent-status-card,
-    .activity-stream {
+    .handoff-radar {
       min-width: 0;
       border: 1px solid var(--line);
       border-radius: 10px;
@@ -1154,7 +1154,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
     .agent-status-card {
       display: grid;
-      gap: 8px;
+      gap: 9px;
       padding: 10px 12px;
       border-left: 3px solid var(--muted);
     }
@@ -1168,7 +1168,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       opacity: 0.78;
     }
     .agent-status-head,
-    .activity-stream-head {
+    .handoff-radar-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -1219,67 +1219,129 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .agent-status-line strong {
       color: var(--cream);
     }
+    .agent-status-focus {
+      display: grid;
+      gap: 4px;
+      padding: 8px;
+      border: 1px solid rgba(122, 174, 151, 0.16);
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.13);
+      color: var(--text);
+      font-size: 0.76rem;
+      line-height: 1.35;
+    }
+    .agent-status-focus strong {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.58rem;
+      letter-spacing: 0.11em;
+      text-transform: uppercase;
+    }
+    .agent-status-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 6px;
+    }
+    .agent-mini {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+      padding: 7px;
+      border: 1px solid rgba(122, 174, 151, 0.12);
+      border-radius: 7px;
+      background: rgba(0, 0, 0, 0.1);
+    }
+    .agent-mini span {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.55rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .agent-mini strong {
+      min-width: 0;
+      color: var(--text);
+      font-size: 0.7rem;
+      line-height: 1.25;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .agent-status-meta {
       display: flex;
       gap: 6px;
       flex-wrap: wrap;
       min-width: 0;
     }
-    .activity-stream {
+    .handoff-radar {
       display: grid;
       grid-template-rows: auto minmax(0, 1fr);
       gap: 6px;
       padding: 10px 12px;
     }
-    .activity-stream-head strong {
+    .handoff-radar-head strong {
       color: var(--cream);
       font-size: 0.84rem;
     }
-    .activity-stream-head span {
+    .handoff-radar-head span {
       color: var(--muted);
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 0.62rem;
       letter-spacing: 0.1em;
       text-transform: uppercase;
     }
-    .activity-stream-list {
+    .handoff-radar-list {
       display: grid;
-      gap: 5px;
+      gap: 6px;
       min-width: 0;
       margin: 0;
       padding: 0;
       list-style: none;
     }
-    .activity-stream-list li {
+    .handoff-radar-list li {
       display: grid;
       grid-template-columns: auto minmax(0, 1fr) auto;
-      align-items: center;
+      align-items: start;
       gap: 8px;
       min-width: 0;
       color: var(--text);
       font-size: 0.73rem;
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(122, 174, 151, 0.08);
+    }
+    .handoff-radar-list li:last-child {
+      border-bottom: none;
     }
     .activity-dot {
       width: 7px;
       height: 7px;
+      margin-top: 5px;
       border-radius: 999px;
       background: var(--muted);
     }
-    .activity-stream-list li[data-actor="Codex"] .activity-dot { background: var(--violet); }
-    .activity-stream-list li[data-actor="Hermes"] .activity-dot { background: var(--cyan); }
-    .activity-stream-list li[data-actor="Operator"] .activity-dot { background: var(--amber); }
-    .activity-stream-list li[data-actor="Merge queue"] .activity-dot { background: var(--ok); }
-    .activity-main {
+    .handoff-radar-list li[data-owner="Codex"] .activity-dot { background: var(--violet); }
+    .handoff-radar-list li[data-owner="Hermes"] .activity-dot { background: var(--cyan); }
+    .handoff-radar-list li[data-owner="Operator"] .activity-dot { background: var(--amber); }
+    .handoff-radar-list li[data-owner="Merge queue"] .activity-dot { background: var(--ok); }
+    .radar-main {
       min-width: 0;
+      display: grid;
+      gap: 2px;
+    }
+    .radar-main strong {
+      color: var(--cream);
+      font-weight: 800;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .activity-main strong {
-      color: var(--cream);
-      font-weight: 800;
+    .radar-main span {
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
-    .activity-age {
+    .radar-age {
       color: var(--muted);
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 0.62rem;
@@ -2847,14 +2909,17 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         gap: 8px;
       }
       .agent-status-card,
-      .activity-stream {
+      .handoff-radar {
         border-radius: 8px;
         padding: 9px 10px;
       }
-      .activity-stream-list li {
+      .agent-status-grid {
+        grid-template-columns: 1fr;
+      }
+      .handoff-radar-list li {
         grid-template-columns: auto minmax(0, 1fr);
       }
-      .activity-age {
+      .radar-age {
         display: none;
       }
       .live-lane {
@@ -3176,15 +3241,15 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       <section id="agent-activity" class="agent-activity" aria-label="Live agent activity">
         <div class="agent-status-card" data-agent="codex" data-state="idle">
           <div class="agent-status-head"><span class="agent-status-title">Codex</span><span class="agent-status-state">loading</span></div>
-          <div class="agent-status-line">Waiting for monitor data.</div>
+          <div class="agent-status-focus"><strong>Focus</strong><span>Waiting for monitor data.</span></div>
         </div>
         <div class="agent-status-card" data-agent="hermes" data-state="idle">
           <div class="agent-status-head"><span class="agent-status-title">Hermes</span><span class="agent-status-state">loading</span></div>
-          <div class="agent-status-line">Waiting for monitor data.</div>
+          <div class="agent-status-focus"><strong>Focus</strong><span>Waiting for monitor data.</span></div>
         </div>
-        <div class="activity-stream">
-          <div class="activity-stream-head"><strong>Activity stream</strong><span>SSE</span></div>
-          <ul class="activity-stream-list"><li><span class="activity-dot"></span><span class="activity-main">Waiting for live monitor events.</span></li></ul>
+        <div class="handoff-radar">
+          <div class="handoff-radar-head"><strong>Agent handoff radar</strong><span>SSE</span></div>
+          <ul class="handoff-radar-list"><li><span class="activity-dot"></span><span class="radar-main"><strong>Waiting for monitor data.</strong><span>Codex/Hermes state will appear here once the first snapshot arrives.</span></span></li></ul>
         </div>
       </section>
       <section id="owner-lanes" class="kanban-board" aria-label="Release command board"><div class="empty">Loading command board...</div></section>
@@ -3521,16 +3586,15 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         render(await response.json());
       } catch (error) {
         updateLiveStatus("error", "update failed");
-        document.getElementById("recent").innerHTML = '<div class="empty error">Monitor unavailable: ' + escapeHtml(String(error.message || error)) + '</div>';
+        renderMonitorLoadError(error);
       }
     }
 
     function startLiveUpdates() {
+      startPolling("polling 5s");
       if ("EventSource" in window) {
         connectMonitorStream();
-        return;
       }
-      startPolling("polling 5s");
     }
 
     function connectMonitorStream() {
@@ -3550,9 +3614,35 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function startPolling(label) {
-      updateLiveStatus("polling", label || "polling 5s");
+      if (!streamSource) updateLiveStatus("polling", label || "polling 5s");
       if (pollTimer) return;
       pollTimer = setInterval(load, 5000);
+    }
+
+    function renderMonitorLoadError(error) {
+      const message = String(error && error.message || error || "unknown error");
+      const board = document.getElementById("owner-lanes");
+      if (board) {
+        board.innerHTML = '<div class="empty error">Monitor data unavailable: ' + escapeHtml(message) + '</div>';
+      }
+      const active = document.getElementById("active");
+      if (active) {
+        active.innerHTML = '<strong>Live lane</strong><span>Monitor data unavailable: ' + escapeHtml(message) + '</span><span class="pill">error</span>';
+      }
+      const activity = document.getElementById("agent-activity");
+      if (activity) {
+        activity.innerHTML =
+          '<article class="agent-status-card" data-agent="codex" data-state="waiting">' +
+            '<div class="agent-status-head"><span class="agent-status-title">Codex</span><span class="agent-status-state">unknown</span></div>' +
+            '<div class="agent-status-focus"><strong>Focus</strong><span>Waiting for monitor data to recover.</span></div>' +
+          '</article>' +
+          '<article class="agent-status-card" data-agent="hermes" data-state="waiting">' +
+            '<div class="agent-status-head"><span class="agent-status-title">Hermes</span><span class="agent-status-state">unknown</span></div>' +
+            '<div class="agent-status-focus"><strong>Focus</strong><span>Waiting for monitor data to recover.</span></div>' +
+          '</article>' +
+          '<section class="handoff-radar"><div class="handoff-radar-head"><strong>Agent handoff radar</strong><span>error</span></div>' +
+            '<ul class="handoff-radar-list"><li><span class="activity-dot"></span><span class="radar-main"><strong>Snapshot fetch failed.</strong><span>' + escapeHtml(message) + '</span></span></li></ul></section>';
+      }
     }
 
     function updateLiveStatus(state, label) {
@@ -3724,16 +3814,24 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (!target) return;
       const codex = codexAgentSnapshot(items);
       const hermes = hermesAgentSnapshot(items, activeEntries);
-      target.innerHTML = renderAgentStatusCard(codex) + renderAgentStatusCard(hermes) + renderActivityStream(items, activeEntries, recentEntries);
+      target.innerHTML = renderAgentStatusCard(codex) + renderAgentStatusCard(hermes) + renderHandoffRadar(items, activeEntries, recentEntries, codex, hermes);
     }
 
     function renderAgentStatusCard(snapshot) {
       const tags = snapshot.tags.length
         ? '<div class="agent-status-meta">' + snapshot.tags.map((tag) => '<span class="pill">' + escapeHtml(tag) + '</span>').join("") + '</div>'
         : "";
+      const focus = snapshot.detail
+        ? '<span><strong>' + escapeHtml(snapshot.title) + '</strong> ' + escapeHtml(snapshot.detail) + '</span>'
+        : '<span><strong>' + escapeHtml(snapshot.title) + '</strong></span>';
       return '<article class="agent-status-card" data-agent="' + escapeAttr(snapshot.agent.toLowerCase()) + '" data-state="' + escapeAttr(snapshot.state) + '">' +
         '<div class="agent-status-head"><span class="agent-status-title">' + escapeHtml(snapshot.agent) + '</span><span class="agent-status-state">' + escapeHtml(snapshot.stateLabel) + '</span></div>' +
-        '<div class="agent-status-line"><strong>' + escapeHtml(snapshot.title) + '</strong> ' + escapeHtml(snapshot.detail) + '</div>' +
+        '<div class="agent-status-focus"><strong>Now</strong>' + focus + '</div>' +
+        '<div class="agent-status-grid">' +
+          '<span class="agent-mini"><span>Waiting on</span><strong>' + escapeHtml(snapshot.waitingOn) + '</strong></span>' +
+          '<span class="agent-mini"><span>Next handoff</span><strong>' + escapeHtml(snapshot.nextHandoff) + '</strong></span>' +
+          '<span class="agent-mini"><span>Updated</span><strong>' + escapeHtml(snapshot.updated) + '</strong></span>' +
+        '</div>' +
         tags +
       '</article>';
     }
@@ -3752,6 +3850,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           stateLabel: "active",
           title: codexTaskTitle(runningTask),
           detail: runningTask.progressMessage || "task runner is working now.",
+          waitingOn: "Codex CLI worker",
+          nextHandoff: "push branch -> CI -> Hermes",
+          updated: taskAgeLabel(runningTask),
           tags: ["runner active", normalize(runningTask.status), taskAgeLabel(runningTask)],
         };
       }
@@ -3762,6 +3863,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           stateLabel: "active",
           title: pipelineTitle(ciItem),
           detail: nextPipelineAction(ciItem, releaseVerdict(ciItem)).text,
+          waitingOn: "GitHub checks",
+          nextHandoff: "Hermes re-check",
+          updated: handoffAge(ciItem).duration,
           tags: ["ci / commit flow", handoffAge(ciItem).duration],
         };
       }
@@ -3772,6 +3876,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           stateLabel: "queued",
           title: codexTaskTitle(approvedTask),
           detail: "approved task is waiting for the Codex runner to claim it.",
+          waitingOn: "runner pickup",
+          nextHandoff: "Codex starts",
+          updated: taskAgeLabel(approvedTask),
           tags: ["approved", "waiting runner"],
         };
       }
@@ -3782,6 +3889,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           stateLabel: "needs approval",
           title: codexTaskTitle(proposedTask),
           detail: "task is proposed but not approved yet.",
+          waitingOn: "operator approval",
+          nextHandoff: "Codex runner",
+          updated: taskAgeLabel(proposedTask),
           tags: ["proposed", "operator gate"],
         };
       }
@@ -3792,6 +3902,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           stateLabel: "needed",
           title: pipelineTitle(codexOwned),
           detail: nextPipelineAction(codexOwned, releaseVerdict(codexOwned)).text,
+          waitingOn: "Codex assignment",
+          nextHandoff: "commit + CI",
+          updated: handoffAge(codexOwned).duration,
           tags: [handoffAge(codexOwned).label.toLowerCase(), "no active run"],
         };
       }
@@ -3801,6 +3914,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         stateLabel: "idle",
         title: "No Codex work active.",
         detail: "No proposed, approved, or running Codex task is visible.",
+        waitingOn: "new task",
+        nextHandoff: "none",
+        updated: "now",
         tags: [],
       };
     }
@@ -3817,6 +3933,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           stateLabel: "active",
           title: pipelineTitle(active),
           detail: "handoff or verification is running now.",
+          waitingOn: "Hermes tools",
+          nextHandoff: "publish verdict",
+          updated: handoffAge(active).duration,
           tags: ["stream event", handoffAge(active).duration],
         };
       }
@@ -3827,6 +3946,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           stateLabel: "queued",
           title: pipelineTitle(waiting),
           detail: nextPipelineAction(waiting, releaseVerdict(waiting)).text,
+          waitingOn: "Hermes invocation",
+          nextHandoff: "operator / queue",
+          updated: handoffAge(waiting).duration,
           tags: [pipelineStage(waiting, releaseVerdict(waiting)).label, handoffAge(waiting).duration],
         };
       }
@@ -3836,19 +3958,52 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         stateLabel: "idle",
         title: "No Hermes check active.",
         detail: "No PR re-check, handoff, or deploy verification is waiting on Hermes.",
+        waitingOn: "GitHub / operator",
+        nextHandoff: "none",
+        updated: "now",
         tags: [],
       };
     }
 
-    function renderActivityStream(items, activeEntries, recentEntries) {
-      const streamItems = buildActivityStreamItems(items, activeEntries, recentEntries).slice(0, 5);
-      const list = streamItems.length
-        ? streamItems.map((entry) => '<li data-actor="' + escapeAttr(entry.actor) + '"><span class="activity-dot"></span><span class="activity-main"><strong>' + escapeHtml(entry.actor) + '</strong> ' + escapeHtml(entry.text) + '</span><span class="activity-age">' + escapeHtml(entry.age) + '</span></li>').join("")
-        : '<li><span class="activity-dot"></span><span class="activity-main">No live agent activity in the current window.</span></li>';
-      return '<section class="activity-stream" aria-label="Agent activity stream">' +
-        '<div class="activity-stream-head"><strong>Activity stream</strong><span>auto-updating</span></div>' +
-        '<ul class="activity-stream-list">' + list + '</ul>' +
+    function renderHandoffRadar(items, activeEntries, recentEntries, codex, hermes) {
+      const radarItems = buildAgentRadarItems(items, activeEntries, recentEntries, codex, hermes).slice(0, 5);
+      const list = radarItems.length
+        ? radarItems.map((entry) => '<li data-owner="' + escapeAttr(entry.owner) + '"><span class="activity-dot"></span><span class="radar-main"><strong>' + escapeHtml(entry.title) + '</strong><span>' + escapeHtml(entry.text) + '</span></span><span class="radar-age">' + escapeHtml(entry.age) + '</span></li>').join("")
+        : '<li><span class="activity-dot"></span><span class="radar-main"><strong>All quiet.</strong><span>Codex and Hermes are idle; no owner is currently blocked.</span></span></li>';
+      return '<section class="handoff-radar" aria-label="Agent handoff radar">' +
+        '<div class="handoff-radar-head"><strong>Agent handoff radar</strong><span>auto-updating</span></div>' +
+        '<ul class="handoff-radar-list">' + list + '</ul>' +
       '</section>';
+    }
+
+    function buildAgentRadarItems(items, activeEntries, recentEntries, codex, hermes) {
+      const rows = buildActivityStreamItems(items, activeEntries, recentEntries);
+      return [
+        {
+          owner: "Codex",
+          title: "Codex is " + codex.stateLabel,
+          text: codex.title + " - " + codex.detail + " Next: " + codex.nextHandoff + ".",
+          age: codex.updated,
+          ts: Date.now(),
+          priority: codex.state === "active" ? 500 : codex.state === "waiting" ? 360 : 120,
+        },
+        {
+          owner: "Hermes",
+          title: "Hermes is " + hermes.stateLabel,
+          text: hermes.title + " - " + hermes.detail + " Next: " + hermes.nextHandoff + ".",
+          age: hermes.updated,
+          ts: Date.now() - 1,
+          priority: hermes.state === "active" ? 490 : hermes.state === "waiting" ? 350 : 110,
+        },
+        ...rows.map((row) => ({
+          owner: row.actor,
+          title: row.actor,
+          text: row.text,
+          age: row.age,
+          ts: row.ts,
+          priority: row.priority,
+        })),
+      ].sort((a, b) => b.priority - a.priority || b.ts - a.ts);
     }
 
     function buildActivityStreamItems(items, activeEntries, recentEntries) {
