@@ -30,6 +30,13 @@ import {
   renderMonitorManifest,
 } from "./monitor.js";
 import {
+  approveCodexTask,
+  cancelCodexTask,
+  listCodexTasks,
+  proposeCodexTask,
+  summarizeCodexTasks,
+} from "./codex-task-queue.js";
+import {
   formatStalePrAlertForSlack,
   shouldPostStalePrAlert,
   stalePrAlertItems,
@@ -127,7 +134,14 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       monitor: {
         enabled: monitorConfig.enabled,
         tokenProtected: Boolean(monitorConfig.token),
-        paths: monitorConfig.enabled ? ["/monitor", "/monitor/events", "/monitor/stream", "/monitor/command", "/monitor/manifest.webmanifest"] : [],
+        paths: monitorConfig.enabled ? [
+          "/monitor",
+          "/monitor/events",
+          "/monitor/stream",
+          "/monitor/command",
+          "/monitor/codex-tasks",
+          "/monitor/manifest.webmanifest",
+        ] : [],
       },
     });
     return;
@@ -163,6 +177,30 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       return;
     }
     writeJson(response, 200, await loadMonitorSnapshot(url));
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/monitor/codex-tasks") {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    writeJson(response, 200, summarizeCodexTasks(await listCodexTasks(), 100));
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/monitor/codex-tasks") {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    await handleMonitorCodexTaskRequest(request, response);
     return;
   }
   if (request.method === "POST" && url.pathname === "/monitor/command") {
@@ -348,6 +386,95 @@ async function handleMonitorCommandRequest(request: http.IncomingMessage, respon
     logger.error({ err: error }, "monitor_operator_command_failed");
     writeJson(response, 500, {
       error: "monitor_command_failed",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function handleMonitorCodexTaskRequest(request: http.IncomingMessage, response: http.ServerResponse) {
+  try {
+    const rawBody = await readBody(request);
+    const payload = rawBody ? JSON.parse(rawBody) as unknown : {};
+    if (!isRecord(payload)) {
+      writeJson(response, 400, { error: "invalid_payload" });
+      return;
+    }
+    const action = stringField(payload, "action") ?? "propose";
+    if (action === "propose") {
+      const repo = stringField(payload, "repo");
+      const pullRequestNumber = numberField(payload, "pullRequestNumber");
+      const prompt = stringField(payload, "prompt");
+      if (!repo || typeof pullRequestNumber !== "number" || !Number.isInteger(pullRequestNumber) || pullRequestNumber < 1 || !prompt) {
+        writeJson(response, 400, {
+          error: "invalid_codex_task",
+          message: "repo, pullRequestNumber, and prompt are required to propose Codex work.",
+        });
+        return;
+      }
+      const result = await proposeCodexTask({
+        repo,
+        pullRequestNumber,
+        prompt,
+        ...(stringField(payload, "correlationId") ? { correlationId: stringField(payload, "correlationId") } : {}),
+        ...(stringField(payload, "title") ? { title: stringField(payload, "title") } : {}),
+        ...(stringField(payload, "reason") ? { reason: stringField(payload, "reason") } : {}),
+        requester: stringField(payload, "requester") ?? "monitor",
+      });
+      writeJson(response, 200, {
+        ok: true,
+        action,
+        created: result.created,
+        task: result.task,
+        queue: summarizeCodexTasks(await listCodexTasks(), 100),
+      });
+      return;
+    }
+
+    if (action === "approve") {
+      const id = stringField(payload, "id");
+      if (!id) {
+        writeJson(response, 400, { error: "missing_task_id" });
+        return;
+      }
+      const task = await approveCodexTask(id, { approvedBy: "operator" });
+      if (!task) {
+        writeJson(response, 404, { error: "codex_task_not_found" });
+        return;
+      }
+      writeJson(response, 200, {
+        ok: true,
+        action,
+        task,
+        queue: summarizeCodexTasks(await listCodexTasks(), 100),
+      });
+      return;
+    }
+
+    if (action === "cancel") {
+      const id = stringField(payload, "id");
+      if (!id) {
+        writeJson(response, 400, { error: "missing_task_id" });
+        return;
+      }
+      const task = await cancelCodexTask(id, { cancelledBy: "operator" });
+      if (!task) {
+        writeJson(response, 404, { error: "codex_task_not_found" });
+        return;
+      }
+      writeJson(response, 200, {
+        ok: true,
+        action,
+        task,
+        queue: summarizeCodexTasks(await listCodexTasks(), 100),
+      });
+      return;
+    }
+
+    writeJson(response, 400, { error: "unsupported_codex_task_action", action });
+  } catch (error) {
+    logger.error({ err: error }, "monitor_codex_task_failed");
+    writeJson(response, 500, {
+      error: "monitor_codex_task_failed",
       message: error instanceof Error ? error.message : String(error),
     });
   }
@@ -663,7 +790,11 @@ async function loadMonitorSnapshot(url: URL): Promise<unknown> {
     limit: parseOptionalInteger(url.searchParams.get("limit")),
     activeWindowMinutes: parseOptionalInteger(url.searchParams.get("activeWindowMinutes")),
   });
-  return enrichMonitorWithGithubPrState(monitor);
+  const enriched = await enrichMonitorWithGithubPrState(monitor);
+  return {
+    ...enriched,
+    codexTasks: summarizeCodexTasks(await listCodexTasks(), 100),
+  };
 }
 
 async function writeMonitorStream(
@@ -724,6 +855,17 @@ function stringField(value: unknown, key: string): string | undefined {
   if (!isRecord(value)) return undefined;
   const field = value[key];
   return typeof field === "string" && field.length > 0 ? field : undefined;
+}
+
+function numberField(value: unknown, key: string): number | undefined {
+  if (!isRecord(value)) return undefined;
+  const field = value[key];
+  if (typeof field === "number" && Number.isFinite(field)) return field;
+  if (typeof field === "string" && field.trim().length > 0) {
+    const parsed = Number.parseInt(field, 10);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
 }
 
 function formatUtcTime(time: { hour: number; minute: number }): string {
