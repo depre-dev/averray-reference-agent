@@ -76,6 +76,9 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("command-console");
     expect(html).toContain("Ask Hermes");
     expect(html).toContain("what is happening now");
+    expect(html).toContain("agent-activity");
+    expect(html).toContain("Live agent activity");
+    expect(html).toContain("Activity stream");
     expect(html).toContain("Needs Attention");
     expect(html).toContain("Codex Needed");
     expect(html).toContain("Hermes Checking");
@@ -136,6 +139,12 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("activeAgentForItem(item, lane, stage)");
     expect(html).toContain("updateDeployHealth(latestPipelineItems)");
     expect(html).toContain("updateSysAgents(latestPipelineItems)");
+    expect(html).toContain("renderAgentActivity(latestPipelineItems");
+    expect(html).toContain("codexAgentSnapshot(items)");
+    expect(html).toContain("hermesAgentSnapshot(items, activeEntries)");
+    expect(html).toContain("renderActivityStream(items, activeEntries, recentEntries)");
+    expect(html).toContain("buildActivityStreamItems(items, activeEntries, recentEntries)");
+    expect(html).toContain("Codex task runner is actively working on this task");
     expect(html).toContain("setMonitorPaused");
     expect(html).toContain("toggleChecklistItem(decisionKey, itemId, checked)");
     expect(html).toContain("data-command-suggestion=\"what is happening now\"");
