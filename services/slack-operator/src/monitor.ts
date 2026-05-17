@@ -64,16 +64,65 @@ function isAllowedMonitorCommand(text: string): boolean {
   );
 }
 
-export function renderMonitorHtml(options: { title?: string; eventsPath?: string; streamPath?: string; commandPath?: string } = {}): string {
+// Inline SVG used for the PWA icon and apple-touch-icon. The brand mark
+// is the same wedge that appears in the topbar — render once, ship as a
+// data URL so we don't add another HTTP round-trip and don't need a
+// favicon hosting setup.
+const MONITOR_BRAND_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#0c1713"/><path d="M16 50 L32 14 L48 50 L32 36 Z" fill="none" stroke="#d89a2b" stroke-width="3.2" stroke-linejoin="round"/><circle cx="32" cy="38" r="3.4" fill="#d89a2b"/></svg>`;
+
+function svgDataUrl(svg: string): string {
+  return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
+}
+
+/**
+ * Web App Manifest served at `/monitor/manifest.webmanifest`. Lets the
+ * monitor install as a PWA on mobile (Add to Home Screen on iOS Safari,
+ * the install prompt on Chrome) so on-call operators get a fast launch
+ * point. Same origin as `/monitor`, same auth boundary.
+ */
+export function renderMonitorManifest(options: { name?: string; shortName?: string } = {}): string {
+  const name = options.name ?? "Hermes Handoff Monitor";
+  const shortName = options.shortName ?? "Hermes";
+  return JSON.stringify(
+    {
+      name,
+      short_name: shortName,
+      description: "On-call view of the Averray PR handoff pipeline.",
+      start_url: "/monitor",
+      scope: "/monitor",
+      display: "standalone",
+      orientation: "portrait",
+      background_color: "#050d0b",
+      theme_color: "#0c1713",
+      icons: [
+        { src: svgDataUrl(MONITOR_BRAND_SVG), sizes: "any", type: "image/svg+xml", purpose: "any" },
+        { src: svgDataUrl(MONITOR_BRAND_SVG), sizes: "any", type: "image/svg+xml", purpose: "maskable" },
+      ],
+    },
+    null,
+    2,
+  );
+}
+
+export function renderMonitorHtml(options: { title?: string; eventsPath?: string; streamPath?: string; commandPath?: string; manifestPath?: string } = {}): string {
   const title = escapeHtml(options.title ?? "Hermes Handoff Monitor");
   const eventsPath = JSON.stringify(options.eventsPath ?? "/monitor/events");
   const streamPath = JSON.stringify(options.streamPath ?? "/monitor/stream");
   const commandPath = JSON.stringify(options.commandPath ?? "/monitor/command");
+  const manifestPath = options.manifestPath ?? "/monitor/manifest.webmanifest";
+  const brandIcon = svgDataUrl(MONITOR_BRAND_SVG);
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0c1713">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Hermes">
+  <link rel="manifest" href="${manifestPath}">
+  <link rel="icon" type="image/svg+xml" href="${brandIcon}">
+  <link rel="apple-touch-icon" href="${brandIcon}">
   <title>${title}</title>
   <style>
     :root {
@@ -2367,6 +2416,347 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .ph-row[data-state="pass"] .ph-dot { background: var(--ok); }
     .ph-row[data-state="fail"] .ph-dot { background: var(--bad); }
     .ph-row[data-state="review"] .ph-dot { background: var(--warn); }
+
+    /* ── Mobile (≤640px) ───────────────────────────────────────────────── */
+
+    /* Default: hide mobile-only chrome on desktop. */
+    .mobile-only { display: none !important; }
+    .mobile-tabs { display: none; }
+    .lane-chip   { display: none; }
+    #fab-ask, #ask-sheet, #ask-sheet-scrim { display: none; }
+    #pull-indicator { display: none; }
+
+    @media (max-width: 640px) {
+      :root { --topbar-pad: 8px; }
+      .mobile-only { display: revert !important; }
+      .desktop-only { display: none !important; }
+
+      /* Topbar: single row, compact brand, status pill, "..." menu. */
+      .cmdbar {
+        grid-template-columns: auto 1fr auto;
+        gap: 8px;
+        padding: 8px 12px;
+      }
+      .brand .brand-sub { display: none; }
+      .brand-name { font-size: 0.8rem; }
+      .brand-mark { width: 28px; height: 28px; }
+      .cmd-left { gap: 8px; }
+      .cmd-left .sys-agents { display: none; }
+      .cmd-left .sys-label { font-size: 0.74rem; }
+      .cmd-counters {
+        order: 3;
+        grid-column: 1 / -1;
+        margin-top: 2px;
+        flex-wrap: nowrap;
+        justify-content: flex-start;
+        gap: 6px;
+        overflow-x: auto;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 2px;
+      }
+      .cmd-counters::-webkit-scrollbar { display: none; }
+      .counter-chip { flex-shrink: 0; height: 28px; padding: 0 8px; }
+      .counter-chip .counter-number { font-size: 0.84rem; }
+      .counter-chip .counter-label { font-size: 0.58rem; }
+      .refresh-cluster { gap: 6px; }
+      .refresh-cluster .refresh-meta,
+      .refresh-cluster #refresh { display: none; }
+      .cmd-status.cmd-status-rich { padding: 4px 8px; min-height: 28px; }
+      .cmd-status-rich .cmd-status-sub { display: none; }
+      .cmd-pause { width: 28px; min-height: 28px; }
+
+      /* Filter bar: collapse + replace with horizontal mobile tabs. */
+      .filterbar { display: none; }
+      .mobile-tabs {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 10px;
+        overflow-x: auto;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        border-bottom: 1px solid var(--line-soft);
+        background: rgba(4, 13, 11, 0.78);
+        scroll-snap-type: x mandatory;
+      }
+      .mobile-tabs::-webkit-scrollbar { display: none; }
+      .mobile-tab {
+        flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        min-height: 34px;
+        padding: 0 12px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--surface-soft);
+        color: var(--text);
+        font-size: 0.82rem;
+        font-weight: 600;
+        white-space: nowrap;
+        cursor: pointer;
+        scroll-snap-align: start;
+      }
+      .mobile-tab .mt-count {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.7rem;
+        color: var(--muted);
+        padding: 1px 6px;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.04);
+      }
+      .mobile-tab[aria-pressed="true"] {
+        border-color: var(--accent);
+        background: var(--accent-bg);
+        color: var(--accent);
+      }
+      .mobile-tab[aria-pressed="true"] .mt-count { color: inherit; }
+
+      /* Board: stacked single-column flat list. */
+      .board-shell {
+        padding: 8px 10px 88px;
+        gap: 8px;
+      }
+      .live-lane {
+        display: none;
+      }
+      .kanban-board,
+      .kanban-board[data-done-expanded="true"] {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        overflow-x: hidden;
+        overflow-y: auto;
+        padding-bottom: 12px;
+      }
+      .lane {
+        background: transparent;
+        border: none;
+        border-radius: 0;
+      }
+      .lane-head { display: none; }
+      .lane-body {
+        padding: 0;
+        gap: 8px;
+        overflow: visible;
+      }
+      .done-rail { display: none; }
+
+      /* Cards: keep all content; add the lane chip; bump touch sizes. */
+      .handoff-card {
+        padding: 12px;
+        gap: 9px;
+      }
+      .lane-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: var(--surface-soft);
+        color: var(--muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.62rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        --lc-accent: var(--muted);
+      }
+      .lane-chip[data-lane="attention"] { --lc-accent: var(--bad); }
+      .lane-chip[data-lane="codex"]     { --lc-accent: var(--violet); }
+      .lane-chip[data-lane="hermes"]    { --lc-accent: var(--cyan); }
+      .lane-chip[data-lane="operator"]  { --lc-accent: var(--warn); }
+      .lane-chip[data-lane="queue"]     { --lc-accent: var(--ok); }
+      .lane-chip[data-lane="deploy"]    { --lc-accent: var(--cyan); }
+      .lane-chip[data-lane="done"]      { --lc-accent: var(--muted); }
+      .lane-chip {
+        color: var(--lc-accent);
+        border-color: color-mix(in srgb, var(--lc-accent) 40%, var(--line));
+        background: color-mix(in srgb, var(--lc-accent) 10%, transparent);
+      }
+      .lane-chip::before {
+        content: "";
+        width: 5px;
+        height: 5px;
+        border-radius: 999px;
+        background: var(--lc-accent);
+      }
+      .handoff-card .soft-button {
+        min-height: 36px;
+        padding: 0 12px;
+        font-size: 0.84rem;
+      }
+      .card-foot { flex-wrap: wrap; gap: 6px; }
+
+      /* Drawer becomes a bottom sheet. */
+      .drawer {
+        top: auto;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100vw;
+        height: 90vh;
+        max-height: 90vh;
+        border-left: none;
+        border-top: 1px solid var(--line);
+        border-top-left-radius: 16px;
+        border-top-right-radius: 16px;
+        transform: translateY(102%);
+        transition: transform 0.22s ease;
+        grid-template-rows: auto auto minmax(0, 1fr) auto;
+        box-shadow: 0 -30px 80px rgba(0, 0, 0, 0.46);
+      }
+      .drawer[data-open="true"] { transform: translateY(0); }
+      .drawer-handle {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 6px 0 2px;
+        cursor: grab;
+        touch-action: none;
+      }
+      .drawer-handle::before {
+        content: "";
+        width: 36px;
+        height: 4px;
+        border-radius: 999px;
+        background: var(--line);
+      }
+      .drawer-handle.dragging { cursor: grabbing; }
+      .drawer-head { padding: 6px 16px 10px; }
+      .drawer-title { font-size: 1.05rem; }
+      .drawer-body { padding: 12px 16px 16px; }
+      .drawer-footer {
+        padding: 10px 14px;
+        padding-bottom: max(10px, env(safe-area-inset-bottom));
+      }
+
+      /* Bottom Ask Hermes console gets folded into a FAB + sheet. */
+      .command-console { display: none; }
+      .command-shell.has-selection .command-console { display: none; }
+      #fab-ask {
+        display: inline-flex;
+        position: fixed;
+        right: 14px;
+        bottom: max(14px, env(safe-area-inset-bottom));
+        z-index: 25;
+        width: 52px;
+        height: 52px;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+        background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 24%, var(--panel-2)), var(--panel-2));
+        color: var(--accent);
+        font-size: 1.2rem;
+        box-shadow: 0 14px 40px rgba(0,0,0,0.42);
+      }
+      #fab-ask:active { transform: scale(0.97); }
+      #ask-sheet-scrim {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.42);
+        opacity: 0;
+        pointer-events: none;
+        z-index: 24;
+        transition: opacity 0.18s ease;
+      }
+      #ask-sheet-scrim[data-open="true"] {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      #ask-sheet {
+        display: grid;
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 26;
+        max-height: 70vh;
+        background: rgba(7, 15, 12, 0.985);
+        border-top: 1px solid var(--line);
+        border-top-left-radius: 16px;
+        border-top-right-radius: 16px;
+        transform: translateY(102%);
+        transition: transform 0.22s ease;
+        padding: 14px 14px max(14px, env(safe-area-inset-bottom));
+        gap: 10px;
+        grid-template-rows: auto auto auto auto;
+        box-shadow: 0 -20px 60px rgba(0,0,0,0.46);
+      }
+      #ask-sheet[data-open="true"] { transform: translateY(0); }
+      #ask-sheet .ask-handle {
+        justify-self: center;
+        width: 36px;
+        height: 4px;
+        border-radius: 999px;
+        background: var(--line);
+      }
+      #ask-sheet .console-context {
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+      #ask-sheet .console-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+      }
+      #ask-sheet .console-input {
+        min-height: 42px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface-soft);
+        color: var(--text);
+        padding: 0 12px;
+      }
+      #ask-sheet button[type="submit"] { min-height: 42px; }
+      #ask-sheet .console-output {
+        color: var(--muted);
+        font-size: 0.78rem;
+        max-height: 28vh;
+        overflow: auto;
+      }
+      #ask-sheet .suggestions {
+        display: flex;
+        gap: 6px;
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+      #ask-sheet .suggestions::-webkit-scrollbar { display: none; }
+      #ask-sheet .suggestion { flex-shrink: 0; min-height: 32px; }
+
+      /* Pull-to-refresh indicator. */
+      #pull-indicator {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        height: 0;
+        overflow: hidden;
+        color: var(--muted);
+        font-size: 0.78rem;
+        transition: height 0.18s ease;
+      }
+      #pull-indicator[data-state="pulling"] { height: 32px; }
+      #pull-indicator[data-state="ready"] { height: 32px; color: var(--accent); }
+      #pull-indicator[data-state="refreshing"] {
+        height: 32px;
+        color: var(--cyan);
+      }
+      #pull-indicator .pi-spinner {
+        width: 12px;
+        height: 12px;
+        border-radius: 999px;
+        border: 2px solid var(--line);
+        border-top-color: var(--accent);
+        animation: spin 0.8s linear infinite;
+      }
+      #pull-indicator:not([data-state="refreshing"]) .pi-spinner { display: none; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+    }
   </style>
 </head>
 <body>
@@ -2431,7 +2821,18 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         <button id="toggle-done" class="toggle-pill" type="button" aria-pressed="false">done lane <span id="done-count">0</span></button>
       </div>
     </section>
+    <nav id="mobile-tabs" class="mobile-tabs" aria-label="Mobile lane filters">
+      <button class="mobile-tab" type="button" data-mobile-tab="all" aria-pressed="true">All <span class="mt-count" id="mt-all">0</span></button>
+      <button class="mobile-tab" type="button" data-mobile-tab="attention" aria-pressed="false">Attention <span class="mt-count" id="mt-attention">0</span></button>
+      <button class="mobile-tab" type="button" data-mobile-tab="codex" aria-pressed="false">Codex <span class="mt-count" id="mt-codex">0</span></button>
+      <button class="mobile-tab" type="button" data-mobile-tab="hermes" aria-pressed="false">Hermes <span class="mt-count" id="mt-hermes">0</span></button>
+      <button class="mobile-tab" type="button" data-mobile-tab="operator" aria-pressed="false">Review <span class="mt-count" id="mt-operator">0</span></button>
+      <button class="mobile-tab" type="button" data-mobile-tab="queue" aria-pressed="false">Ready <span class="mt-count" id="mt-queue">0</span></button>
+      <button class="mobile-tab" type="button" data-mobile-tab="deploy" aria-pressed="false">Deploy <span class="mt-count" id="mt-deploy">0</span></button>
+      <button class="mobile-tab" type="button" data-mobile-tab="done" aria-pressed="false">Done <span class="mt-count" id="mt-done">0</span></button>
+    </nav>
     <section class="board-shell">
+      <div id="pull-indicator" data-state="idle" aria-hidden="true"><span class="pi-spinner"></span><span class="pi-label">Pull to refresh</span></div>
       <div id="active" class="live-lane"><strong>Live lane</strong><span>No running or just-finished handoffs.</span><span class="pill">SSE + polling</span></div>
       <section id="owner-lanes" class="kanban-board" aria-label="Release command board"><div class="empty">Loading command board...</div></section>
     </section>
@@ -2446,6 +2847,24 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         <div id="command-output" class="console-output">Read-only command console. It will refuse merge, deploy, claim, submit, and secret commands.</div>
       </div>
       <div class="suggestions" aria-label="Suggested Hermes commands">
+        <button class="suggestion" type="button" data-command-suggestion="handoff monitor details">handoff monitor</button>
+        <button class="suggestion" type="button" data-command-suggestion="merge steward details">merge steward</button>
+        <button class="suggestion" type="button" data-command-suggestion="github status">github status</button>
+        <button class="suggestion" type="button" data-command-suggestion="ops health">ops health</button>
+        <button class="suggestion" type="button" data-command-suggestion="codex handoff protocol">protocol</button>
+      </div>
+    </form>
+    <button id="fab-ask" type="button" aria-label="Ask Hermes" title="Ask Hermes">💬</button>
+    <div id="ask-sheet-scrim" data-open="false"></div>
+    <form id="ask-sheet" data-open="false" autocomplete="off" aria-label="Ask Hermes (mobile)">
+      <span class="ask-handle"></span>
+      <div class="console-context"><strong>Ask Hermes</strong> · <span id="ask-context">global monitor context</span></div>
+      <div class="console-row">
+        <input id="ask-input" class="console-input" name="text" placeholder="Ask for status, merge steward, why this PR is here..." autocomplete="off">
+        <button id="ask-submit" type="submit">Send</button>
+      </div>
+      <div id="ask-output" class="console-output">Read-only command console. It will refuse merge, deploy, claim, submit, and secret commands.</div>
+      <div class="suggestions" aria-label="Suggested Hermes commands (mobile)">
         <button class="suggestion" type="button" data-command-suggestion="handoff monitor details">handoff monitor</button>
         <button class="suggestion" type="button" data-command-suggestion="merge steward details">merge steward</button>
         <button class="suggestion" type="button" data-command-suggestion="github status">github status</button>
@@ -2468,6 +2887,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     let agentFilter = "all";
     let searchText = "";
     let showDone = false;
+    let mobileLaneTab = "all"; // mobile-only lane filter (matches boardLaneForItem keys + "all")
+    const isMobileViewport = () => window.matchMedia("(max-width: 640px)").matches;
     let selectedKey = "";
     let autoFocusPending = true;
     let latestPipelineItems = [];
@@ -2583,6 +3004,131 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (!text) return;
       void submitMonitorCommand(text);
     });
+
+    // ── Mobile-only wiring (no-ops on desktop because the elements are hidden) ──
+
+    // Mobile lane-tab strip — clicking a tab filters the flat list to that lane.
+    document.querySelectorAll("[data-mobile-tab]").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        mobileLaneTab = String(tab.getAttribute("data-mobile-tab") || "all");
+        document.querySelectorAll("[data-mobile-tab]").forEach((t) => {
+          t.setAttribute("aria-pressed", t === tab ? "true" : "false");
+        });
+        renderBoard(latestPipelineItems);
+      });
+    });
+
+    // Ask Hermes FAB + bottom sheet (mobile).
+    const askFab = document.getElementById("fab-ask");
+    const askSheet = document.getElementById("ask-sheet");
+    const askScrim = document.getElementById("ask-sheet-scrim");
+    function setAskSheetOpen(open) {
+      if (!askSheet || !askScrim) return;
+      askSheet.setAttribute("data-open", open ? "true" : "false");
+      askScrim.setAttribute("data-open", open ? "true" : "false");
+      if (open) {
+        const item = selectedItem();
+        const ctx = document.getElementById("ask-context");
+        if (ctx) ctx.textContent = item ? pipelineTitle(item) + " · " + (item.correlationId || "no correlation") : "global monitor context";
+        setTimeout(() => document.getElementById("ask-input")?.focus(), 0);
+      }
+    }
+    askFab?.addEventListener("click", () => setAskSheetOpen(askSheet?.getAttribute("data-open") !== "true"));
+    askScrim?.addEventListener("click", () => setAskSheetOpen(false));
+    askSheet?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const input = document.getElementById("ask-input");
+      const text = String((input && input.value) || "").trim();
+      if (!text) return;
+      void submitMonitorCommandFrom(text, document.getElementById("ask-output"));
+    });
+
+    // Pull-to-refresh on the board container (mobile).
+    const boardEl = document.querySelector(".board-shell");
+    const pullIndicator = document.getElementById("pull-indicator");
+    let pullStartY = 0;
+    let pullDelta = 0;
+    let pullActive = false;
+    const PULL_THRESHOLD = 64;
+    if (boardEl && pullIndicator) {
+      boardEl.addEventListener("touchstart", (event) => {
+        if (!isMobileViewport()) return;
+        if (boardEl.scrollTop > 4) return;
+        pullStartY = event.touches[0]?.clientY ?? 0;
+        pullDelta = 0;
+        pullActive = true;
+      }, { passive: true });
+      boardEl.addEventListener("touchmove", (event) => {
+        if (!pullActive) return;
+        const y = event.touches[0]?.clientY ?? 0;
+        pullDelta = y - pullStartY;
+        if (pullDelta <= 0) {
+          pullIndicator.setAttribute("data-state", "idle");
+          return;
+        }
+        pullIndicator.setAttribute("data-state", pullDelta >= PULL_THRESHOLD ? "ready" : "pulling");
+        const label = pullIndicator.querySelector(".pi-label");
+        if (label) label.textContent = pullDelta >= PULL_THRESHOLD ? "Release to refresh" : "Pull to refresh";
+      }, { passive: true });
+      boardEl.addEventListener("touchend", () => {
+        if (!pullActive) return;
+        pullActive = false;
+        if (pullDelta >= PULL_THRESHOLD) {
+          pullIndicator.setAttribute("data-state", "refreshing");
+          const label = pullIndicator.querySelector(".pi-label");
+          if (label) label.textContent = "Refreshing…";
+          load().finally(() => {
+            setTimeout(() => { pullIndicator.setAttribute("data-state", "idle"); }, 400);
+          });
+        } else {
+          pullIndicator.setAttribute("data-state", "idle");
+        }
+        pullDelta = 0;
+      });
+    }
+
+    // Bottom-sheet drawer drag-to-dismiss (mobile).
+    const drawerEl = document.getElementById("detail-drawer");
+    let drawerDragStartY = 0;
+    let drawerDragDelta = 0;
+    let drawerDragging = false;
+    function attachDrawerDragHandle() {
+      const handle = drawerEl?.querySelector(".drawer-handle");
+      if (!handle || handle.dataset.bound === "1") return;
+      handle.dataset.bound = "1";
+      handle.addEventListener("touchstart", (event) => {
+        if (!isMobileViewport()) return;
+        drawerDragStartY = event.touches[0]?.clientY ?? 0;
+        drawerDragDelta = 0;
+        drawerDragging = true;
+        handle.classList.add("dragging");
+      }, { passive: true });
+      handle.addEventListener("touchmove", (event) => {
+        if (!drawerDragging || !drawerEl) return;
+        const y = event.touches[0]?.clientY ?? 0;
+        drawerDragDelta = Math.max(0, y - drawerDragStartY);
+        drawerEl.style.transform = "translateY(" + drawerDragDelta + "px)";
+      }, { passive: true });
+      handle.addEventListener("touchend", () => {
+        if (!drawerDragging || !drawerEl) return;
+        drawerDragging = false;
+        handle.classList.remove("dragging");
+        drawerEl.style.transform = "";
+        if (drawerDragDelta > 80) {
+          selectedKey = "";
+          renderBoard(latestPipelineItems);
+          renderDrawer(null);
+          renderCommandContext();
+        }
+        drawerDragDelta = 0;
+      });
+    }
+    // The handle lives inside the drawer body which is rebuilt by
+    // renderDrawer(); rebind after every render via a small MutationObserver.
+    if (drawerEl) {
+      new MutationObserver(() => attachDrawerDragHandle()).observe(drawerEl, { childList: true });
+    }
+
     load();
     startLiveUpdates();
 
@@ -2801,10 +3347,36 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       target.dataset.doneExpanded = String(showDone);
       document.getElementById("monitor-shell")?.classList.toggle("has-selection", Boolean(selectedKey));
       const lanes = boardLaneDefinitions();
-      target.innerHTML = lanes
-        .filter((lane) => lane.key !== "done" || showDone)
-        .map((lane) => renderBoardLane(lane, filtered))
-        .join("") + (showDone ? "" : renderDoneStub(filtered));
+      // Mobile-tab filter narrows the set to a single lane (or all). The
+      // mobile board renders lanes in order, with empty lanes suppressed
+      // — empty placeholders are visual noise on a phone.
+      const mobile = isMobileViewport();
+      const visibleLanes = lanes.filter((lane) => {
+        if (mobile) {
+          if (mobileLaneTab !== "all" && lane.key !== mobileLaneTab) return false;
+          // Hide the Done lane unless the operator explicitly picked it.
+          if (lane.key === "done" && mobileLaneTab !== "done") return false;
+        } else if (lane.key === "done" && !showDone) {
+          return false;
+        }
+        return true;
+      });
+      target.innerHTML = visibleLanes
+        .map((lane) => renderBoardLane(lane, filtered, { mobile }))
+        .join("") + (!mobile && !showDone ? renderDoneStub(filtered) : "");
+      updateMobileTabCounts(filtered);
+    }
+
+    function updateMobileTabCounts(entries) {
+      const counts = { all: entries.length, attention: 0, codex: 0, hermes: 0, operator: 0, queue: 0, deploy: 0, done: 0 };
+      entries.forEach((item) => {
+        const key = boardLaneForItem(item, releaseVerdict(item)).key;
+        if (counts[key] !== undefined) counts[key] += 1;
+      });
+      Object.keys(counts).forEach((key) => {
+        const el = document.getElementById("mt-" + key);
+        if (el) el.textContent = String(counts[key]);
+      });
     }
 
     function filterCommandBoardItems(entries) {
@@ -2843,10 +3415,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       ];
     }
 
-    function renderBoardLane(lane, entries) {
+    function renderBoardLane(lane, entries, options) {
+      const mobile = Boolean(options && options.mobile);
       const items = entries
         .filter((item) => boardLaneForItem(item, releaseVerdict(item)).key === lane.key)
         .sort((a, b) => boardSortScore(b) - boardSortScore(a) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+      // On mobile, suppress empty lanes entirely — the lane header is hidden
+      // by CSS but a "Nothing waiting on Codex." card would still take up space.
+      if (mobile && items.length === 0) return "";
       const renderer = lane.key === "done" ? renderDoneRow : renderBoardCard;
       const cards = items.length
         ? items.slice(0, lane.key === "done" ? 12 : 8).map((item) => renderer(item, lane)).join("")
@@ -2905,7 +3481,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const codexState = lane.key === "codex" ? codexWorkState(item, stage) : null;
       const locallyApproved = decisionForItem(item).status === "approved";
       const staleState = age.state || "fresh";
-      return '<article class="handoff-card" data-select-card="' + escapeAttr(key) + '" data-selected="' + escapeAttr(String(selected)) + '" data-verdict="' + escapeAttr(verdict.level) + '">' +
+      return '<article class="handoff-card" data-select-card="' + escapeAttr(key) + '" data-selected="' + escapeAttr(String(selected)) + '" data-verdict="' + escapeAttr(verdict.level) + '" data-lane="' + escapeAttr(lane.key) + '">' +
+        '<span class="lane-chip" data-lane="' + escapeAttr(lane.key) + '">' + escapeHtml(lane.title) + '</span>' +
         '<div class="card-head">' +
           '<div class="kc-head-l">' +
             '<span class="pill state-pill" data-level="' + escapeAttr(verdict.level) + '">' + escapeHtml(verdict.label) + '</span>' +
@@ -3220,7 +3797,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const drawerTitle = pipelineTitle(item);
       const drawerTitleShort = cardTitleText(drawerTitle, item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
       const richReviewWhy = renderReviewReasonsRich(summary) || (verdict.why ? '<div class="rw-note">' + escapeHtml(verdict.why) + '</div>' : "");
-      target.innerHTML = '<div class="drawer-head">' +
+      target.innerHTML = '<div class="drawer-handle" aria-label="Drag to close"></div>' +
+        '<div class="drawer-head">' +
         '<div class="drawer-topline">' +
           '<span class="pill state-pill" data-level="' + escapeAttr(verdict.level) + '">' + escapeHtml(verdict.label) + '</span>' +
           (locallyApproved ? '<span class="kc-local" title="Locally marked operator-approved">local</span>' : "") +
@@ -3809,9 +4387,24 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const output = document.getElementById("command-output");
       const submit = document.getElementById("command-submit");
       const input = document.getElementById("command-input");
+      await submitMonitorCommandInner(text, output, submit, input);
+    }
+
+    // Same as submitMonitorCommand but writes to the mobile ask-sheet
+    // surface (separate output/submit/input elements). Kept as a thin
+    // wrapper so the mobile sheet doesn't compete with the desktop console
+    // for DOM ids.
+    async function submitMonitorCommandFrom(text, output) {
+      const submit = document.getElementById("ask-submit");
+      const input = document.getElementById("ask-input");
+      await submitMonitorCommandInner(text, output, submit, input);
+    }
+
+    async function submitMonitorCommandInner(text, output, submit, input) {
+      if (!output) return;
       const item = selectedItem();
       output.textContent = "Hermes is checking: " + text;
-      submit.disabled = true;
+      if (submit) submit.disabled = true;
       try {
         const response = await fetch(commandUrl, {
           method: "POST",
@@ -3826,11 +4419,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.message || payload.error || "HTTP " + response.status);
         output.textContent = payload.text || "Hermes command completed.";
-        input.value = "";
+        if (input) input.value = "";
       } catch (error) {
         output.textContent = "Command refused or failed: " + String(error.message || error);
       } finally {
-        submit.disabled = false;
+        if (submit) submit.disabled = false;
       }
     }
 

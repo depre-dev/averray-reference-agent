@@ -5,6 +5,7 @@ import {
   isMonitorAuthorized,
   parseMonitorConfig,
   renderMonitorHtml,
+  renderMonitorManifest,
 } from "../../services/slack-operator/src/monitor.js";
 
 describe("slack operator personal monitor", () => {
@@ -175,5 +176,36 @@ describe("slack operator personal monitor", () => {
     expect(html).not.toContain("Blocked / Human Review");
     expect(html).not.toContain("Human needs");
     expect(html).not.toContain("handleOperatorCommandText");
+
+    // Mobile surface — PWA, lane tabs, FAB, bottom-sheet drawer, pull-to-refresh.
+    expect(html).toContain('<link rel="manifest" href="/monitor/manifest.webmanifest">');
+    expect(html).toContain('<meta name="theme-color" content="#0c1713">');
+    expect(html).toContain('apple-touch-icon');
+    expect(html).toContain('id="mobile-tabs"');
+    expect(html).toContain('data-mobile-tab="attention"');
+    expect(html).toContain('data-mobile-tab="operator"');
+    expect(html).toContain('id="fab-ask"');
+    expect(html).toContain('id="ask-sheet"');
+    expect(html).toContain('id="ask-sheet-scrim"');
+    expect(html).toContain('id="pull-indicator"');
+    expect(html).toContain('@media (max-width: 640px)');
+    expect(html).toContain('isMobileViewport');
+    expect(html).toContain('updateMobileTabCounts(filtered)');
+    expect(html).toContain('submitMonitorCommandFrom(text');
+    expect(html).toContain('drawer-handle');
+  });
+
+  it("serves a PWA manifest with the canonical name + scope", () => {
+    const manifestJson = renderMonitorManifest();
+    const manifest = JSON.parse(manifestJson);
+    expect(manifest.name).toBe("Hermes Handoff Monitor");
+    expect(manifest.short_name).toBe("Hermes");
+    expect(manifest.start_url).toBe("/monitor");
+    expect(manifest.scope).toBe("/monitor");
+    expect(manifest.display).toBe("standalone");
+    expect(manifest.theme_color).toBe("#0c1713");
+    expect(Array.isArray(manifest.icons)).toBe(true);
+    expect(manifest.icons.length).toBeGreaterThan(0);
+    expect(manifest.icons[0].type).toBe("image/svg+xml");
   });
 });
