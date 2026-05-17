@@ -82,6 +82,39 @@ describe("stale PR handoff alerts", () => {
     expect(items[0]?.owner).toBe("Operator");
   });
 
+  it("routes stale draft PRs back to Codex instead of operator review", () => {
+    const items = stalePrAlertItems({
+      now,
+      staleAfterMinutes: 120,
+      monitor: {
+        recent: [{
+          correlationId: "github-pr-15-run-1",
+          intent: "pr_handoff",
+          repo: "depre-dev/averray-reference-agent",
+          pullRequestNumber: 15,
+          updatedAt: "2026-05-16T08:00:00.000Z",
+          status: "completed",
+          summary: {
+            finalVerdict: "needs_review",
+            mergeRecommendation: "needs_review",
+            currentPullRequest: {
+              state: "open",
+              draft: true,
+              merged: false,
+            },
+          },
+        }],
+      },
+    });
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      owner: "Codex",
+      nextAction: "finish the draft or mark it ready for review so CI and Hermes can run",
+      reason: "PR is still draft; Codex must finish it or mark it ready before Hermes/operator can proceed.",
+    });
+  });
+
   it("only posts when stale handoffs exist and signature changes", () => {
     const items = stalePrAlertItems({
       now,

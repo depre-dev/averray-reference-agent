@@ -87,7 +87,11 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("sorted by next-action urgency");
     expect(html).toContain("id=\"pause\"");
     expect(html).toContain("renderFailureCallout(verdict, summary)");
+    expect(html).toContain("renderBlockResolutionPanel(item, summary, verdict, action)");
+    expect(html).toContain("blockResolutionPlan(item, summary, verdict, action)");
     expect(html).toContain("renderHermesVerdictBox(verdict, age)");
+    expect(html).toContain("renderHandoffOwnerContract(item, verdict, action)");
+    expect(html).toContain("ownerContractForItem(item, verdict, action)");
     expect(html).toContain("renderOperatorChecklistPanel(item, verdict, action)");
     expect(html).toContain("renderAgentPrecheckList(item, summary, verdict, stage)");
     expect(html).toContain("renderCheckMatrix(summary, testSignals)");
@@ -129,6 +133,14 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("renderPrTimeline(item, stage, verdict, action)");
     expect(html).toContain("renderDecisionActions(item)");
     expect(html).toContain("buildFixRequest(item, summary, verdict, action)");
+    expect(html).toContain("Fix this block");
+    expect(html).toContain("Handoff owner");
+    expect(html).toContain("Codex owns finishing it or marking it ready");
+    expect(html).toContain("finish the draft or mark it ready for review");
+    expect(html).toContain("Codex draft");
+    expect(html).toContain("open a follow-up fix PR or rollback proposal");
+    expect(html).toContain("hosted app/config health failure");
+    expect(html).toContain("hosted health is ok and the post-deploy suite returns PASS");
     expect(html).toContain("Operator decision");
     expect(html).toContain("Operator decision request");
     expect(html).toContain("Approve only if");
