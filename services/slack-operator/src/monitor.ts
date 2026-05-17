@@ -1496,13 +1496,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .sys-agent[data-agent="deploy"] .sa-dot { background: var(--ok); }
     .sys-agent.empty { opacity: 0.55; }
 
-    /* Topbar — deploy-health pill (6th chip) */
+    /* Topbar — deploy-health pill (6th chip) — horizontal to match the other counter chips */
     .counter-chip.cc-health {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 0;
-      padding: 4px 10px;
-      min-height: 36px;
+      align-items: center;
+      gap: 6px;
+      padding: 0 10px;
       border-color: var(--line);
     }
     .counter-chip.cc-health .counter-number {
@@ -1510,6 +1508,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       align-items: center;
       gap: 6px;
       font-size: 0.78rem;
+      font-weight: 800;
       letter-spacing: 0.06em;
       text-transform: uppercase;
     }
@@ -1524,9 +1523,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .counter-chip.cc-health[data-state="ok"] .counter-number::before { background: var(--ok); }
     .counter-chip.cc-health[data-state="verifying"] { border-color: rgba(86, 204, 228, 0.55); background: rgba(86, 204, 228, 0.10); color: var(--cyan); }
     .counter-chip.cc-health[data-state="verifying"] .counter-number::before { background: var(--cyan); animation: pulse 1.4s ease-out infinite; }
-    .counter-chip.cc-health[data-state="fail"]    { border-color: rgba(238, 98, 96, 0.68); background: var(--bad-bg); color: var(--bad); }
-    .counter-chip.cc-health[data-state="fail"] .counter-number::before { background: var(--bad); }
-    .counter-chip.cc-health .counter-label { color: var(--muted); }
+    .counter-chip.cc-health[data-state="fail"]    { border-color: rgba(238, 98, 96, 0.68); background: var(--bad-bg); color: var(--bad); box-shadow: 0 0 0 1px rgba(238, 98, 96, 0.16); }
+    .counter-chip.cc-health[data-state="fail"] .counter-number::before { background: var(--bad); animation: pulse 1.4s ease-out infinite; }
+    .counter-chip.cc-health .counter-label { color: inherit; opacity: 0.7; }
 
     /* Topbar — richer live indicator + pause button */
     .cmd-status.cmd-status-rich {
@@ -1586,8 +1585,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       text-transform: uppercase;
       letter-spacing: 0.1em;
       white-space: nowrap;
-      padding-right: 6px;
+      padding-right: 4px;
+      border-right: 1px solid var(--line-soft);
+      margin-right: 2px;
+      padding-left: 0;
     }
+    .filter-right { gap: 8px; flex-wrap: wrap; row-gap: 6px; justify-content: flex-end; }
+    .filter-right .fb-pill-group { gap: 4px; }
 
     /* KanbanCard — active-agent dot, stale dot, local approved badge, restructured head */
     .card-head { align-items: center; }
@@ -1616,14 +1620,15 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .active-agent[data-agent="hermes"] .aa-dot { background: var(--cyan); }
     .active-agent[data-agent="deploy"] .aa-dot { background: var(--ok); }
     .stale-dot {
-      width: 7px;
-      height: 7px;
+      width: 8px;
+      height: 8px;
       border-radius: 999px;
       background: var(--ok);
-      box-shadow: 0 0 0 0 rgba(82, 210, 115, 0.35);
+      box-shadow: 0 0 0 2px rgba(82, 210, 115, 0.18);
+      flex-shrink: 0;
     }
-    .stale-dot[data-stale="waiting"] { background: var(--warn); }
-    .stale-dot[data-stale="stale"]   { background: var(--bad); animation: pulse 1.6s ease-out infinite; }
+    .stale-dot[data-stale="waiting"] { background: var(--warn); box-shadow: 0 0 0 2px rgba(217, 173, 66, 0.22); }
+    .stale-dot[data-stale="stale"]   { background: var(--bad);  box-shadow: 0 0 0 2px rgba(238, 98, 96, 0.24); animation: pulse 1.6s ease-out infinite; }
     .card-age {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 0.7rem;
@@ -1632,6 +1637,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       text-transform: uppercase;
       white-space: nowrap;
     }
+    .card-head .stale-dot[data-stale="stale"] ~ .card-age { color: var(--bad); }
+    .card-head .stale-dot[data-stale="waiting"] ~ .card-age { color: var(--warn); }
     .kc-id {
       display: flex;
       align-items: baseline;
@@ -2183,12 +2190,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       target.dataset.state = state;
       const stateEl = document.getElementById("live-status-state");
       const subEl = document.getElementById("live-status-sub");
-      if (stateEl) stateEl.textContent = liveStateLabel(state);
-      if (subEl) subEl.textContent = liveStateSub(state, label);
-      target.setAttribute("title", liveStateTitle(state));
+      if (stateEl) stateEl.textContent = liveConnectionLabel(state);
+      if (subEl) subEl.textContent = liveConnectionSub(state, label);
+      target.setAttribute("title", liveConnectionTitle(state));
     }
 
-    function liveStateLabel(state) {
+    function liveConnectionLabel(state) {
       if (state === "live") return "Live";
       if (state === "polling") return "Polling";
       if (state === "connecting") return "Connecting";
@@ -2199,13 +2206,18 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return state;
     }
 
-    function liveStateSub(state, label) {
+    function liveConnectionSub(state, label) {
+      const text = String(label || "").trim().toLowerCase();
       if (state === "paused") return "click ▶ to resume";
       if (state === "stale") return "no updates · refresh";
-      return String(label || "auto 5s");
+      if (state === "live") return text && text !== "live" ? label : "stream open";
+      if (state === "polling") return text && text !== "polling" ? label : "auto 5s";
+      if (state === "reconnecting" || state === "connecting") return "reconnecting…";
+      if (state === "error") return text && text !== "error" ? label : "see console";
+      return text || "auto 5s";
     }
 
-    function liveStateTitle(state) {
+    function liveConnectionTitle(state) {
       if (state === "live") return "Connected via SSE · /monitor/stream";
       if (state === "polling") return "Polling fallback · /monitor/events";
       if (state === "reconnecting") return "Reconnecting to event stream…";
@@ -2438,7 +2450,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           '<span class="kc-num">' + escapeHtml(idLabel) + '</span>' +
           (locallyApproved ? '<span class="kc-local" title="Locally marked operator-approved">local</span>' : "") +
         '</div>' +
-        '<h3 class="card-title">' + escapeHtml(cardTitleText(title, prNumber)) + '</h3>' +
+        '<h3 class="card-title">' + escapeHtml(cardTitleText(title, prNumber, item)) + '</h3>' +
         renderGroupBadges(item) +
         renderMiniSteps(stage, verdict) +
         '<p class="card-why">' + escapeHtml(cardWhy) + '</p>' +
@@ -2447,12 +2459,26 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '</article>';
     }
 
-    // Compact card title — drops repo + #PR prefix if the kc-id row already shows it.
-    function cardTitleText(title, prNumber) {
+    // Compact card title — drops repo + #PR prefix the kc-id row already shows,
+    // and substitutes a readable label for deploy / group / fallback items.
+    function cardTitleText(title, prNumber, item) {
+      const summary = (item && item.summary) || {};
+      const explicit = summary.title || summary.prTitle || summary.pullRequestTitle || item && item.title;
+      if (explicit) return String(explicit);
+      const raw = String(title || "").trim();
+      if (item && isDeployItem(item)) return "Post-deploy verification";
       if (prNumber) {
-        return String(title || "").replace(/^[^#]*#\\d+\\s*/, "").trim() || String(title || "");
+        const stripped = raw.replace(/^[^#]*#\\d+\\s*/, "").trim();
+        if (!stripped || stripped === ("#" + prNumber)) return "PR handoff";
+        return humaniseIntentLabel(stripped);
       }
-      return String(title || "");
+      return humaniseIntentLabel(raw);
+    }
+
+    function humaniseIntentLabel(value) {
+      const normalized = String(value || "").trim();
+      if (!normalized) return "Handoff";
+      return normalized.replace(/[_-]+/g, " ").replace(/\\s+/g, " ").replace(/\\b\\w/g, (c) => c.toUpperCase());
     }
 
     // Decide which agent is actively working on this item right now.
