@@ -60,6 +60,7 @@ describe("slack operator personal monitor", () => {
       eventsPath: "/monitor/events",
       streamPath: "/monitor/stream",
       commandPath: "/monitor/command",
+      codexTasksPath: "/monitor/codex-tasks",
     });
 
     expect(html).toContain("<title>Pascal Monitor</title>");
@@ -73,7 +74,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("detail-drawer");
     expect(html).toContain("command-console");
     expect(html).toContain("Ask Hermes");
-    expect(html).toContain("Read-only command console");
+    expect(html).toContain("Read-only Hermes console");
     expect(html).toContain("Needs Attention");
     expect(html).toContain("Codex Needed");
     expect(html).toContain("Hermes Checking");
@@ -98,10 +99,21 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("renderCodexTaskPrompt(item, summary, verdict, action)");
     expect(html).toContain("codexWorkState(item, stage)");
     expect(html).toContain("isCodexActivelyWorking");
-    expect(html).toContain("Copy Codex prompt");
+    expect(html).toContain("Copy for Codex app");
+    expect(html).toContain("Propose Codex task");
+    expect(html).toContain("Approve Codex task");
+    expect(html).toContain("Codex task queue");
+    expect(html).toContain("latestCodexTasks");
+    expect(html).toContain("normalizeCodexTasks(payload.codexTasks)");
+    expect(html).toContain("codexTaskForItem(item)");
+    expect(html).toContain("data-codex-task-action");
+    expect(html).toContain("handleCodexTaskAction(codexTaskButton)");
+    expect(html).toContain("fetch(codexTasksUrl");
     expect(html).toContain("Waiting for Codex");
     expect(html).toContain("CI after Codex");
     expect(html).toContain("No active Codex run detected");
+    expect(html).toContain("paste it into a Codex thread/app");
+    expect(html).toContain("isCodexTaskPromptText(text)");
     expect(html).toContain("verdict.level === \"needs-review\" && !isDraftPullRequest(item) && !locallyApproved");
     expect(html).toContain("renderOperatorChecklistPanel(item, verdict, action)");
     expect(html).toContain("renderAgentPrecheckList(item, summary, verdict, stage)");
@@ -123,6 +135,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("const eventsPath = \"/monitor/events\";");
     expect(html).toContain("const streamPath = \"/monitor/stream\";");
     expect(html).toContain("const commandPath = \"/monitor/command\";");
+    expect(html).toContain("const codexTasksPath = \"/monitor/codex-tasks\";");
     expect(html).toContain("new EventSource(streamUrl)");
     expect(html).toContain("addEventListener(\"monitor\"");
     expect(html).toContain("startPolling(\"polling fallback 5s\")");

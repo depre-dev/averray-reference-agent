@@ -104,11 +104,12 @@ export function renderMonitorManifest(options: { name?: string; shortName?: stri
   );
 }
 
-export function renderMonitorHtml(options: { title?: string; eventsPath?: string; streamPath?: string; commandPath?: string; manifestPath?: string } = {}): string {
+export function renderMonitorHtml(options: { title?: string; eventsPath?: string; streamPath?: string; commandPath?: string; codexTasksPath?: string; manifestPath?: string } = {}): string {
   const title = escapeHtml(options.title ?? "Hermes Handoff Monitor");
   const eventsPath = JSON.stringify(options.eventsPath ?? "/monitor/events");
   const streamPath = JSON.stringify(options.streamPath ?? "/monitor/stream");
   const commandPath = JSON.stringify(options.commandPath ?? "/monitor/command");
+  const codexTasksPath = JSON.stringify(options.codexTasksPath ?? "/monitor/codex-tasks");
   const manifestPath = options.manifestPath ?? "/monitor/manifest.webmanifest";
   const brandIcon = svgDataUrl(MONITOR_BRAND_SVG);
   return `<!doctype html>
@@ -1738,6 +1739,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       white-space: nowrap;
     }
     .work-state[data-state="waiting"] { --state-accent: var(--violet); }
+    .work-state[data-state="proposed"] { --state-accent: var(--warn); }
+    .work-state[data-state="approved"] { --state-accent: var(--ok); }
     .work-state[data-state="active"] { --state-accent: var(--cyan); }
     .work-state[data-state="ci"] { --state-accent: var(--warn); }
     .stale-dot {
@@ -1904,6 +1907,42 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       margin: 0;
       color: var(--muted);
       line-height: 1.4;
+    }
+    .codex-queue-box {
+      display: grid;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--violet);
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: rgba(146, 142, 255, 0.08);
+    }
+    .codex-queue-box[data-status="proposed"] { border-left-color: var(--warn); background: var(--warn-bg); }
+    .codex-queue-box[data-status="approved"] { border-left-color: var(--ok); background: var(--ok-bg); }
+    .codex-queue-box[data-status="running"] { border-left-color: var(--cyan); background: rgba(86, 204, 228, 0.10); }
+    .codex-queue-box[data-status="cancelled"],
+    .codex-queue-box[data-status="failed"] { border-left-color: var(--bad); background: var(--bad-bg); }
+    .codex-queue-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.68rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .codex-queue-body {
+      color: var(--text);
+      line-height: 1.4;
+      font-size: 0.86rem;
+    }
+    .codex-queue-id {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.7rem;
+      overflow-wrap: anywhere;
     }
     .prompt-box {
       margin: 0;
@@ -2844,7 +2883,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           <input id="command-input" class="console-input" name="text" placeholder="Ask for status, merge steward, why this PR is here..." autocomplete="off">
           <button id="command-submit" type="submit">Send</button>
         </div>
-        <div id="command-output" class="console-output">Read-only command console. It will refuse merge, deploy, claim, submit, and secret commands.</div>
+        <div id="command-output" class="console-output">Read-only Hermes console. It cannot start Codex work; paste Codex task prompts into a Codex thread.</div>
       </div>
       <div class="suggestions" aria-label="Suggested Hermes commands">
         <button class="suggestion" type="button" data-command-suggestion="handoff monitor details">handoff monitor</button>
@@ -2863,7 +2902,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         <input id="ask-input" class="console-input" name="text" placeholder="Ask for status, merge steward, why this PR is here..." autocomplete="off">
         <button id="ask-submit" type="submit">Send</button>
       </div>
-      <div id="ask-output" class="console-output">Read-only command console. It will refuse merge, deploy, claim, submit, and secret commands.</div>
+      <div id="ask-output" class="console-output">Read-only Hermes console. It cannot start Codex work; use Codex task proposals for handoff.</div>
       <div class="suggestions" aria-label="Suggested Hermes commands (mobile)">
         <button class="suggestion" type="button" data-command-suggestion="handoff monitor details">handoff monitor</button>
         <button class="suggestion" type="button" data-command-suggestion="merge steward details">merge steward</button>
@@ -2877,10 +2916,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     const eventsPath = ${eventsPath};
     const streamPath = ${streamPath};
     const commandPath = ${commandPath};
+    const codexTasksPath = ${codexTasksPath};
     const token = new URLSearchParams(location.search).get("token");
     const withToken = buildMonitorUrl(eventsPath);
     const streamUrl = buildMonitorUrl(streamPath);
     const commandUrl = buildCommandUrl(commandPath);
+    const codexTasksUrl = buildCommandUrl(codexTasksPath);
     const decisionStorageKey = "averray-monitor-operator-decisions:v1";
     let pipelineFilter = "all";
     let repoFilter = "all";
@@ -2892,6 +2933,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     let selectedKey = "";
     let autoFocusPending = true;
     let latestPipelineItems = [];
+    let latestCodexTasks = [];
     let latestPayload = null;
     let monitorDecisions = loadMonitorDecisions();
     let pollTimer = null;
@@ -2965,6 +3007,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         const value = String(suggestion.getAttribute("data-command-suggestion") || "");
         document.getElementById("command-input").value = contextualCommand(value);
         document.getElementById("command-input").focus();
+        return;
+      }
+      const codexTaskButton = event.target && event.target.closest ? event.target.closest("[data-codex-task-action]") : null;
+      if (codexTaskButton) {
+        void handleCodexTaskAction(codexTaskButton);
         return;
       }
       const button = event.target && event.target.closest ? event.target.closest("[data-monitor-decision]") : null;
@@ -3287,6 +3334,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const counts = payload.counts || {};
       const recent = payload.recent || [];
       setText("generated", payload.generatedAt ? new Date(payload.generatedAt).toLocaleTimeString() : "unknown");
+      latestCodexTasks = normalizeCodexTasks(payload.codexTasks);
       latestPipelineItems = groupPrPipelineItems(collectPipelineItems(payload));
       const attention = latestPipelineItems.filter(needsAttention);
       const verdicts = latestPipelineItems.map(releaseVerdict);
@@ -3618,6 +3666,34 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function codexWorkState(item, stage) {
+      const task = codexTaskForItem(item);
+      if (task && !isTerminalCodexTask(task)) {
+        const status = normalize(task.status);
+        if (status === "proposed") {
+          return {
+            state: "proposed",
+            label: "Codex proposed",
+            detail: "Hermes prepared a Codex task. Operator approval is needed before Codex should pick it up.",
+            task,
+          };
+        }
+        if (status === "approved") {
+          return {
+            state: "approved",
+            label: "Codex approved",
+            detail: "Operator approved this Codex task. The Codex worker/app should pick it up next.",
+            task,
+          };
+        }
+        if (status === "running") {
+          return {
+            state: "active",
+            label: "Codex active",
+            detail: "Codex is currently working on the approved task.",
+            task,
+          };
+        }
+      }
       const summary = item.summary || {};
       const reason = normalize(summary.finalReason || summary.reason || item.reason);
       const explicit = normalize(summary.codexState || summary.codexStatus || item.codexState || item.codexStatus);
@@ -3637,7 +3713,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (hasRecentCodexSignal(item)) {
         return { state: "active", label: "Codex active", detail: "Recent Codex activity was detected for this PR." };
       }
-      return { state: "waiting", label: "Waiting for Codex", detail: "No active Codex run detected. Start or continue Codex with the task prompt below." };
+      return { state: "waiting", label: "Waiting for Codex", detail: "No active Codex run detected. Copy this prompt and paste it into a Codex thread/app; the Hermes console below is read-only." };
     }
 
     function hasRecentCodexSignal(item) {
@@ -3694,8 +3770,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function primaryActionButton(item, verdict, action, lane) {
       if (lane.key === "codex") {
         const state = codexWorkState(item, pipelineStage(item, verdict));
+        if (state.state === "proposed" && state.task) {
+          return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="approve" data-codex-task-id="' + escapeAttr(state.task.id) + '">Approve task</button>';
+        }
+        if (state.state === "approved" && state.task) {
+          return '<button class="soft-button" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '">Approved</button>';
+        }
         if (state.state === "waiting") {
-          return '<button class="soft-button" data-action="primary" type="button" data-copy-label="Codex prompt copied" data-copy-text="' + escapeAttr(codexPromptForItem(item, item.summary || {}, verdict, action)) + '">Copy Codex prompt</button>';
+          return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="propose" data-card-key="' + escapeAttr(boardItemKey(item)) + '">Propose Codex task</button>';
         }
         if (state.state === "ci") return '<button class="soft-button" type="button" data-command-suggestion="github status">Check CI</button>';
         return '<button class="soft-button" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '">Inspect Codex state</button>';
@@ -3719,6 +3801,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return verdict.level === "pass" ? { key: "done" } : { key: "attention" };
       }
       if (item.active === true || item.activeState === "running" || status === "running") return { key: "hermes" };
+      const codexTask = codexTaskForItem(item);
+      if (codexTask && !isTerminalCodexTask(codexTask)) return { key: "codex" };
       if (isDraftPullRequest(item)) return { key: "codex" };
       if (reason === "ci_in_progress") return { key: "codex" };
       if (verdict.level === "block") return { key: "attention" };
@@ -3758,6 +3842,33 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function selectedItem() {
       if (!selectedKey) return null;
       return latestPipelineItems.find((item) => boardItemKey(item) === selectedKey) || null;
+    }
+
+    function itemByBoardKey(key) {
+      if (!key) return null;
+      return latestPipelineItems.find((item) => boardItemKey(item) === key) || null;
+    }
+
+    function normalizeCodexTasks(value) {
+      if (Array.isArray(value)) return value.filter(Boolean);
+      if (value && Array.isArray(value.items)) return value.items.filter(Boolean);
+      return [];
+    }
+
+    function codexTaskForItem(item) {
+      if (!item) return null;
+      const repo = String(item.repo || "");
+      const pr = Number(item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId));
+      if (!repo || !Number.isFinite(pr) || pr < 1) return null;
+      const candidates = latestCodexTasks
+        .filter((task) => String(task.repo || "") === repo && Number(task.pullRequestNumber) === pr)
+        .sort((a, b) => Date.parse(String(b.updatedAt || b.createdAt || "")) - Date.parse(String(a.updatedAt || a.createdAt || "")));
+      return candidates.find((task) => !isTerminalCodexTask(task)) || candidates[0] || null;
+    }
+
+    function isTerminalCodexTask(task) {
+      const status = normalize(task && task.status);
+      return status === "completed" || status === "failed" || status === "cancelled";
     }
 
     function renderDrawer(item) {
@@ -3830,7 +3941,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         (prUrl ? '<a class="pill" href="' + escapeAttr(prUrl) + '" target="_blank" rel="noreferrer">Open PR</a>' : "") +
         (workflowRunUrl ? '<a class="pill" href="' + escapeAttr(workflowRunUrl) + '" target="_blank" rel="noreferrer">Workflow Run</a>' : "") +
         '<button class="soft-button" type="button" data-command-suggestion="handoff monitor details">Ask Hermes</button>' +
-        (codexPromptForItem(item, summary, verdict, action) ? '<button class="soft-button" type="button" data-copy-label="Codex prompt copied" data-copy-text="' + escapeAttr(codexPromptForItem(item, summary, verdict, action)) + '">Copy Codex prompt</button>' : "") +
+        renderCodexFooterAction(item, summary, verdict, action) +
         '<button class="soft-button" type="button" data-copy-text="' + escapeAttr(item.correlationId || "") + '">copy correlation</button>' +
         (verdict.level === "needs-review" && !isDraftPullRequest(item) && !locallyApproved ? '<button class="soft-button" data-action="primary" type="button" data-monitor-decision="approve" data-decision-key="' + escapeAttr(decisionKeyForItem(item)) + '">Approve locally</button>' : "") +
         '</div></div>';
@@ -3903,11 +4014,75 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const prompt = codexPromptForItem(item, summary, verdict, action);
       if (!prompt) return "";
       const state = codexWorkState(item, pipelineStage(item, verdict));
+      const task = state.task || codexTaskForItem(item);
       return '<section class="drawer-section codex-task-prompt"><h3>Codex task prompt</h3>' +
         '<p class="codex-state-note">' + escapeHtml(state.detail) + '</p>' +
+        renderCodexQueueBox(task) +
         '<pre class="prompt-box">' + escapeHtml(prompt) + '</pre>' +
-        '<div class="card-actions"><button class="soft-button" data-action="primary" type="button" data-copy-label="Codex prompt copied" data-copy-text="' + escapeAttr(prompt) + '">Copy Codex prompt</button></div>' +
+        '<div class="card-actions">' +
+          renderCodexTaskControlButtons(item, task, prompt) +
+          renderCodexFallbackCopyButton(task, prompt) +
+        '</div>' +
         '</section>';
+    }
+
+    function renderCodexQueueBox(task) {
+      if (!task) {
+        return '<div class="codex-queue-box" data-status="none">' +
+          '<div class="codex-queue-head"><span>Codex task queue</span><span>not proposed</span></div>' +
+          '<div class="codex-queue-body">This is still a proposal. Use "Propose Codex task" to record it, then approve it when you want Codex to work.</div>' +
+        '</div>';
+      }
+      const status = normalize(task.status) || "unknown";
+      return '<div class="codex-queue-box" data-status="' + escapeAttr(status) + '">' +
+        '<div class="codex-queue-head"><span>Codex task queue</span><span>' + escapeHtml(status) + '</span></div>' +
+        '<div class="codex-queue-body">' + escapeHtml(codexTaskStatusText(task)) + '</div>' +
+        '<div class="codex-queue-id">' + escapeHtml(task.id || "unknown task") + '</div>' +
+      '</div>';
+    }
+
+    function renderCodexFooterAction(item, summary, verdict, action) {
+      const prompt = codexPromptForItem(item, summary, verdict, action);
+      if (!prompt) return "";
+      const task = codexTaskForItem(item);
+      return renderCodexTaskControlButtons(item, task, prompt);
+    }
+
+    function renderCodexTaskControlButtons(item, task, prompt) {
+      if (task && !isTerminalCodexTask(task)) {
+        const status = normalize(task.status);
+        if (status === "proposed") {
+          return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="approve" data-codex-task-id="' + escapeAttr(task.id) + '">Approve Codex task</button>' +
+            '<button class="soft-button" type="button" data-codex-task-action="cancel" data-codex-task-id="' + escapeAttr(task.id) + '">Cancel task</button>';
+        }
+        if (status === "approved") {
+          return '<button class="soft-button" data-action="primary" type="button" data-copy-label="' + escapeAttr(codexCopyLabel()) + '" data-copy-text="' + escapeAttr(task.prompt || prompt) + '">Copy approved prompt</button>' +
+            '<button class="soft-button" type="button" data-codex-task-action="cancel" data-codex-task-id="' + escapeAttr(task.id) + '">Cancel task</button>';
+        }
+        return '<button class="soft-button" type="button" data-copy-label="' + escapeAttr(codexCopyLabel()) + '" data-copy-text="' + escapeAttr(task.prompt || prompt) + '">Copy Codex prompt</button>';
+      }
+      return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="propose" data-card-key="' + escapeAttr(boardItemKey(item)) + '">Propose Codex task</button>';
+    }
+
+    function renderCodexFallbackCopyButton(task, prompt) {
+      const status = normalize(task && task.status);
+      if (status === "approved" || status === "running") return "";
+      return '<button class="soft-button" type="button" data-copy-label="' + escapeAttr(codexCopyLabel()) + '" data-copy-text="' + escapeAttr(prompt) + '">Copy for Codex app</button>';
+    }
+
+    function codexTaskStatusText(task) {
+      const status = normalize(task && task.status);
+      if (status === "proposed") return "Hermes proposed this task. It is waiting for operator approval before Codex should work on it.";
+      if (status === "approved") return "Operator approved this task. Codex should pick it up next; until the runner is wired, copy the approved prompt into Codex.";
+      if (status === "running") return "Codex is actively working on this task.";
+      if (status === "completed") return "Codex reported this task completed.";
+      if (status === "failed") return "Codex reported this task failed.";
+      if (status === "cancelled") return "This Codex task was cancelled.";
+      return "No Codex task status recorded.";
+    }
+
+    function codexCopyLabel() {
+      return "Codex prompt copied — paste it into a Codex thread/app, not the Hermes console";
     }
 
     function actionRecipeForItem(item, summary, verdict, action) {
@@ -4403,6 +4578,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     async function submitMonitorCommandInner(text, output, submit, input) {
       if (!output) return;
       const item = selectedItem();
+      if (isCodexTaskPromptText(text)) {
+        output.textContent = "That is a Codex task prompt, not a Hermes monitor command. Paste it into a Codex thread/app so Codex can edit the PR. Hermes will observe the next commit and CI run here.";
+        return;
+      }
       output.textContent = "Hermes is checking: " + text;
       if (submit) submit.disabled = true;
       try {
@@ -4425,6 +4604,81 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       } finally {
         if (submit) submit.disabled = false;
       }
+    }
+
+    async function handleCodexTaskAction(button) {
+      const action = String(button.getAttribute("data-codex-task-action") || "");
+      const taskId = String(button.getAttribute("data-codex-task-id") || "");
+      const key = String(button.getAttribute("data-card-key") || selectedKey || "");
+      const item = itemByBoardKey(key) || selectedItem();
+      const output = document.getElementById("command-output");
+      button.disabled = true;
+      try {
+        if (action === "propose") {
+          if (!item) throw new Error("No PR selected for Codex task proposal.");
+          const summary = item.summary || {};
+          const verdict = releaseVerdict(item);
+          const next = nextPipelineAction(item, verdict);
+          const prompt = codexPromptForItem(item, summary, verdict, next);
+          const pr = Number(item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId));
+          if (!prompt || !Number.isFinite(pr) || pr < 1) throw new Error("This card does not have enough PR metadata for a Codex task.");
+          await postCodexTask({
+            action: "propose",
+            repo: String(item.repo || "averray-agent/agent"),
+            pullRequestNumber: pr,
+            correlationId: item.correlationId,
+            title: cardTitleText(pipelineTitle(item), pr, item),
+            reason: next.text,
+            requester: "monitor",
+            prompt,
+          });
+          if (output) output.textContent = "Codex task proposed. Approve it when you want Codex to pick it up.";
+          return;
+        }
+        if (action === "approve") {
+          if (!taskId) throw new Error("Missing Codex task id.");
+          await postCodexTask({ action: "approve", id: taskId });
+          if (output) output.textContent = "Codex task approved. Codex worker pickup is now allowed.";
+          return;
+        }
+        if (action === "cancel") {
+          if (!taskId) throw new Error("Missing Codex task id.");
+          await postCodexTask({ action: "cancel", id: taskId });
+          if (output) output.textContent = "Codex task cancelled.";
+          return;
+        }
+        throw new Error("Unsupported Codex task action: " + action);
+      } catch (error) {
+        if (output) output.textContent = "Codex task action failed: " + String(error.message || error);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function postCodexTask(payload) {
+      const response = await fetch(codexTasksUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || result.error || "HTTP " + response.status);
+      if (result.queue) {
+        latestCodexTasks = normalizeCodexTasks(result.queue);
+        if (latestPayload) {
+          latestPayload = Object.assign({}, latestPayload, { codexTasks: result.queue });
+          render(latestPayload);
+        }
+      }
+      return result;
+    }
+
+    function isCodexTaskPromptText(text) {
+      const value = String(text || "").trim().toLowerCase();
+      if (!value) return false;
+      return (value.startsWith("continue ") || value.startsWith("fix ")) &&
+        value.includes("codex") &&
+        (value.includes("do not merge or deploy") || value.includes("hermes monitor shows") || value.includes("hermes reports"));
     }
 
     function contextualCommand(command) {
