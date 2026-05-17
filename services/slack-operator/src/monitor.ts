@@ -488,6 +488,47 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       border-left-color: var(--warn);
       background: var(--warn-bg);
     }
+    .block-resolution {
+      border-left: 4px solid var(--bad);
+    }
+    .resolution-summary {
+      margin: 0;
+      color: var(--text);
+      line-height: 1.42;
+    }
+    .resolution-grid {
+      display: grid;
+      grid-template-columns: 118px minmax(0, 1fr);
+      gap: 7px 10px;
+      margin: 10px 0;
+    }
+    .resolution-grid dt {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.62rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .resolution-grid dd {
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+    .resolution-steps {
+      display: grid;
+      gap: 8px;
+      margin: 10px 0 0;
+      padding-left: 20px;
+    }
+    .resolution-steps li {
+      color: var(--text);
+      line-height: 1.35;
+    }
+    .resolution-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
     .operator-decision {
       border-left: 4px solid var(--warn);
     }
@@ -1406,6 +1447,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       .fix-request-meta,
       .pipeline-meta,
       .operator-evidence,
+      .resolution-grid,
       .pipeline-detail { grid-template-columns: 1fr; }
       dl { grid-template-columns: 1fr; }
       .cmdbar,
@@ -2701,7 +2743,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function primaryActionButton(item, verdict, action, lane) {
-      if (verdict.level === "block") return '<button class="soft-button" data-action="primary" type="button" data-command-suggestion="merge steward details">Codex Fix -></button>';
+      if (verdict.level === "block") return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '">Fix plan -></button>';
       if (verdict.level === "needs-review") return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '">Review</button>';
       if (verdict.level === "running") return '<button class="soft-button" data-action="primary" type="button" data-command-suggestion="handoff monitor details">Ask Hermes</button>';
       if (verdict.level === "pass" && lane.key === "queue") return '<button class="soft-button" data-action="primary" type="button" data-command-suggestion="merge steward details">Queue Merge</button>';
@@ -2810,6 +2852,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '<div class="drawer-body">' +
         (verdict.level === "block" ? '<section class="drawer-section">' + renderFailureCallout(verdict, summary) + '</section>' : "") +
         '<section class="drawer-section"><h3>Hermes verdict</h3>' + renderHermesVerdictBox(verdict, age) + (richReviewWhy ? '<div class="review-why">' + richReviewWhy + '</div>' : "") + '</section>' +
+        (verdict.level === "block" ? renderBlockResolutionPanel(item, summary, verdict, action) : "") +
         (verdict.level === "needs-review" ? '<section class="drawer-section">' + renderOperatorChecklistPanel(item, verdict, action) + '</section>' : "") +
         '<section class="drawer-section"><h3>Agent pre-check</h3>' + renderAgentPrecheckList(item, summary, verdict, stage) + '</section>' +
         '<section class="drawer-section"><h3>Checks</h3>' + renderCheckMatrix(summary, testSignals) + '</section>' +
@@ -3576,6 +3619,25 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '</section>';
     }
 
+    function renderBlockResolutionPanel(item, summary, verdict, action) {
+      const plan = blockResolutionPlan(item, summary, verdict, action);
+      const evidenceRows = [
+        row("Owner", escapeHtml(plan.owner)),
+        row("Blocked by", escapeHtml(plan.reason)),
+        row("Evidence", plan.evidence.length ? chips(plan.evidence) : escapeHtml("Hermes verdict only")),
+        row("Clears when", escapeHtml(plan.clearsWhen)),
+      ].join("");
+      return '<section class="drawer-section block-resolution"><h3>Fix this block</h3>' +
+        '<p class="resolution-summary">' + escapeHtml(plan.summary) + '</p>' +
+        '<dl class="resolution-grid">' + evidenceRows + '</dl>' +
+        '<ol class="resolution-steps">' + plan.steps.map((step) => '<li>' + escapeHtml(step) + '</li>').join("") + '</ol>' +
+        '<div class="resolution-actions">' +
+          '<button class="soft-button" type="button" data-command-suggestion="' + escapeAttr(plan.askCommand) + '">Ask Hermes for details</button>' +
+          '<button class="soft-button" type="button" data-command-suggestion="ops health">Run ops health</button>' +
+        '</div>' +
+        '</section>';
+    }
+
     function renderDecisionActions(item) {
       const key = decisionKeyForItem(item);
       return '<div class="decision-actions">' +
@@ -3594,6 +3656,100 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '</section>';
     }
 
+    function blockResolutionPlan(item, summary, verdict, action) {
+      const reason = normalize(summary.finalReason || summary.reason || item.reason);
+      const request = buildFixRequest(item, summary, verdict, action);
+      const evidence = blockResolutionEvidence(summary, request);
+      const base = {
+        owner: request.owner || action.owner,
+        reason: request.reason || verdict.why,
+        evidence,
+        askCommand: "what should we do next",
+      };
+      if (isDeployItem(item) && reason === "hosted_health_failed") {
+        return {
+          ...base,
+          summary: "Production deploy finished, but the hosted app health check is failing. Treat this as a follow-up fix or rollback decision, not a merge approval.",
+          clearsWhen: "hosted health is ok and the post-deploy suite returns PASS",
+          steps: [
+            "Open the workflow run and inspect the hosted-health or post-deploy verification step.",
+            "Run ops health from this monitor to confirm whether the backend, frontend, and command-center are currently healthy.",
+            "Have Codex open a small fix PR for the broken app/config path, or prepare a rollback proposal if production is affected.",
+            "After the fix deploys, wait for Hermes post-deploy verification to record hosted ok and zero failing workflows.",
+          ],
+        };
+      }
+      if (isDeployItem(item) && reason === "github_workflow_failed") {
+        return {
+          ...base,
+          summary: "The deployed commit has a failed GitHub workflow. The release is blocked until the red run is understood and fixed.",
+          clearsWhen: "the failed workflow is green on a new commit or a follow-up deploy",
+          steps: [
+            "Open the failed workflow run from References.",
+            "Identify the failing job and affected component.",
+            "Have Codex fix the failing check in a follow-up PR, then let CI and Hermes post-deploy verification re-run.",
+          ],
+        };
+      }
+      if (isDeployItem(item) && reason === "testbed_cases_failed") {
+        return {
+          ...base,
+          summary: "The read-only post-deploy testbed suite failed. The release is blocked until the failing case is explained or fixed.",
+          clearsWhen: "all requested post-deploy testbed cases pass or the failed case is explicitly waived by an operator",
+          steps: [
+            "Ask Hermes for handoff details to get the failed testbed case IDs.",
+            "Have Codex fix the platform behavior or test fixture that caused the failure.",
+            "Re-run post-deploy verification and confirm the suite has zero failures.",
+          ],
+        };
+      }
+      if (reason === "ci_failed") {
+        return {
+          ...base,
+          summary: "CI is red. Codex owns this until the failing job is fixed on the PR branch.",
+          clearsWhen: "all branch protection checks are green and Hermes re-checks the PR",
+          steps: [
+            "Open the workflow run and identify the failing job.",
+            "Have Codex patch the PR branch with the smallest fix.",
+            "Wait for CI and Hermes PR handoff to re-run on the new commit.",
+          ],
+        };
+      }
+      if (reason === "deploy_failure" || reason === "deploy_failed") {
+        return {
+          ...base,
+          summary: "The production deploy workflow failed. Do not continue release work until the failing deploy step is fixed or rolled back.",
+          clearsWhen: "deploy workflow succeeds and post-deploy verification is green",
+          steps: [
+            "Open the deploy workflow run and find the exact failing command.",
+            "Have Codex fix the deploy script/config issue, or prepare a rollback proposal if the broken deploy reached production.",
+            "Re-run through the normal PR/deploy path and wait for Hermes verification.",
+          ],
+        };
+      }
+      return {
+        ...base,
+        summary: request.instruction || "The release gate is blocked. Codex should fix the blocking signal before this item moves forward.",
+        clearsWhen: "the blocking reason disappears and Hermes records PASS",
+        steps: [
+          "Open the linked PR or workflow run and inspect the red signal named above.",
+          "Have Codex make the smallest targeted fix and push a new commit.",
+          "Wait for CI, Hermes handoff, and any requested testbed checks to re-run cleanly.",
+        ],
+      };
+    }
+
+    function blockResolutionEvidence(summary, request) {
+      const health = summary.deploymentHealth && typeof summary.deploymentHealth === "object" ? summary.deploymentHealth : {};
+      const bits = [];
+      if (Array.isArray(health.hostedFailedUrls) && health.hostedFailedUrls.length) bits.push("hosted health URL failed");
+      if (typeof health.githubFailingWorkflowRuns === "number" && health.githubFailingWorkflowRuns > 0) bits.push(String(health.githubFailingWorkflowRuns) + " failed workflow run(s)");
+      if (typeof health.suiteFailed === "number" && health.suiteFailed > 0) bits.push(String(health.suiteFailed) + " failed testbed case(s)");
+      if (request.checks.length) bits.push.apply(bits, request.checks.slice(0, 4));
+      if (request.surfaces.length) bits.push.apply(bits, request.surfaces.slice(0, 4));
+      return Array.from(new Set(bits.filter(Boolean)));
+    }
+
     function buildFixRequest(item, summary, verdict, action) {
       const signals = summary.reviewSignals || {};
       const fixRequest = summary.fixRequest && typeof summary.fixRequest === "object" ? summary.fixRequest : {};
@@ -3604,26 +3760,62 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const reason = firstReviewReason(reviewReasons) || releaseReason(summary, item, verdict.level);
       const checks = Array.isArray(fixRequest.checks)
         ? fixRequest.checks.map(String).filter(Boolean)
-        : missingTests.length ? missingTests : testSignals.slice(0, 5);
+        : missingTests.length ? missingTests : defaultFixChecks(item, summary, testSignals);
       return {
         title: fixRequest.title || (verdict.level === "block" ? "Fix request for Codex" : "Operator decision request"),
         owner: fixRequest.owner || action.owner,
-        instruction: fixRequest.instruction || fixRequestInstruction(verdict, action),
+        instruction: fixRequest.instruction || fixRequestInstruction(item, summary, verdict, action),
         reason,
-        surfaces: Array.isArray(fixRequest.surfaces) ? fixRequest.surfaces.map(String).filter(Boolean) : touchedAreas,
+        surfaces: Array.isArray(fixRequest.surfaces) ? fixRequest.surfaces.map(String).filter(Boolean) : defaultFixSurfaces(item, summary, touchedAreas),
         checks,
-        rerun: fixRequest.rerun || "push an update, then let CI and Hermes handoff run again",
+        rerun: fixRequest.rerun || defaultFixRerun(item, summary),
       };
     }
 
-    function fixRequestInstruction(verdict, action) {
+    function fixRequestInstruction(item, summary, verdict, action) {
+      const reason = normalize(summary.finalReason || summary.reason || item.reason);
       if (verdict.level === "block") {
+        if (isDeployItem(item) && reason === "hosted_health_failed") {
+          return "Codex should fix the hosted app/config health failure in a follow-up PR, or prepare a rollback proposal if production is affected.";
+        }
+        if (isDeployItem(item)) {
+          return "Codex should fix the failed deploy or post-deploy signal in a follow-up PR, then let the production verification run again.";
+        }
         return "Codex should fix the blocking signal, push the PR branch, and wait for CI plus Hermes to re-run.";
       }
       if (verdict.level === "needs-review") {
         return "Hermes/Codex should provide the code-level pre-check evidence. Operator should decide whether the project intent, architecture, and rollout risk are acceptable.";
       }
       return action.text;
+    }
+
+    function defaultFixSurfaces(item, summary, touchedAreas) {
+      const reason = normalize(summary.finalReason || summary.reason || item.reason);
+      if (isDeployItem(item)) {
+        if (reason === "hosted_health_failed") return ["post-deploy", "hosted health"];
+        if (reason === "github_workflow_failed") return ["post-deploy", "github workflow"];
+        if (reason === "testbed_cases_failed") return ["post-deploy", "testbed suite"];
+        return ["post-deploy"];
+      }
+      return touchedAreas;
+    }
+
+    function defaultFixChecks(item, summary, testSignals) {
+      const reason = normalize(summary.finalReason || summary.reason || item.reason);
+      if (isDeployItem(item)) {
+        if (reason === "hosted_health_failed") return ["ops health", "hosted health", "post-deploy suite"];
+        if (reason === "github_workflow_failed") return ["failed workflow run", "post-deploy suite"];
+        if (reason === "testbed_cases_failed") return ["failed testbed case", "post-deploy suite"];
+        return ["deploy workflow", "post-deploy suite"];
+      }
+      return testSignals.slice(0, 5);
+    }
+
+    function defaultFixRerun(item, summary) {
+      if (isDeployItem(item)) {
+        return "merge a fix or rollback path, then let production deploy and Hermes post-deploy verification run again";
+      }
+      return "push an update, then let CI and Hermes handoff run again";
     }
 
     function firstReviewReason(reviewReasons) {
@@ -3772,6 +3964,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return { owner: "Hermes", text: "finish the current handoff checks and publish a verdict" };
       }
       if (verdict.level === "block") {
+        if (isDeployItem(item)) {
+          return { owner: "Codex", text: "open a follow-up fix PR or rollback proposal, then verify hosted health and post-deploy checks" };
+        }
         return { owner: "Codex", text: "fix the blocking signal, push the PR branch, and wait for CI/Hermes to re-run" };
       }
       if (verdict.level === "needs-review") {
