@@ -130,6 +130,12 @@ see current ownership and next actions without waiting for a new Hermes model
 turn. Deeper report commands still go through Hermes as read-only operator
 commands.
 
+The monitor also shows an always-visible live agent activity strip above the
+board. It renders Codex and Hermes as explicit active/waiting/idle cards and
+streams the latest active handoffs, Codex task states, and next-owner events
+from the same SSE snapshot. Operators should not need to ask the chat just to
+know whether Codex or Hermes is currently working.
+
 ## Correlation Metadata
 
 Use stable metadata so all surfaces connect:
