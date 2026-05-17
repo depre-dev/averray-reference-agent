@@ -2184,6 +2184,44 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       font-size: 0.7rem;
       overflow-wrap: anywhere;
     }
+    .codex-queue-progress {
+      display: grid;
+      gap: 4px;
+      padding: 8px;
+      border: 1px solid rgba(146, 142, 255, 0.18);
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.16);
+      color: var(--text);
+      font-size: 0.78rem;
+      line-height: 1.35;
+    }
+    .codex-queue-progress code {
+      color: var(--cyan);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .codex-task-events {
+      display: grid;
+      gap: 5px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      color: var(--muted);
+      font-size: 0.76rem;
+      line-height: 1.35;
+    }
+    .codex-task-events li {
+      display: grid;
+      grid-template-columns: 72px minmax(0, 1fr);
+      gap: 8px;
+      align-items: start;
+    }
+    .codex-task-events time {
+      color: var(--muted-2);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.68rem;
+      text-transform: uppercase;
+    }
     .prompt-box {
       margin: 0;
       padding: 10px;
@@ -3713,8 +3751,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           state: "active",
           stateLabel: "active",
           title: codexTaskTitle(runningTask),
-          detail: "task runner is working now.",
-          tags: ["runner active", normalize(runningTask.status)],
+          detail: runningTask.progressMessage || "task runner is working now.",
+          tags: ["runner active", normalize(runningTask.status), taskAgeLabel(runningTask)],
         };
       }
       if (ciItem) {
@@ -3830,9 +3868,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         const status = normalize(task.status);
         if (isTerminalCodexTask(task) && status !== "completed") return;
         if (!["running", "approved", "proposed", "completed"].includes(status)) return;
+        const detail = status === "running" && task.progressMessage ? " - " + task.progressMessage : "";
         rows.push({
           actor: "Codex",
-          text: status + " " + codexTaskTitle(task),
+          text: status + " " + codexTaskTitle(task) + detail,
           age: taskAgeLabel(task),
           ts: taskUpdatedMs(task),
           priority: status === "running" ? 380 : status === "approved" ? 300 : status === "proposed" ? 220 : 120,
@@ -4608,8 +4647,36 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return '<div class="codex-queue-box" data-status="' + escapeAttr(status) + '">' +
         '<div class="codex-queue-head"><span>Codex task queue</span><span>' + escapeHtml(status) + '</span></div>' +
         '<div class="codex-queue-body">' + escapeHtml(codexTaskStatusText(task)) + '</div>' +
+        renderCodexTaskProgress(task) +
+        renderCodexTaskEvents(task) +
         '<div class="codex-queue-id">' + escapeHtml(task.id || "unknown task") + '</div>' +
       '</div>';
+    }
+
+    function renderCodexTaskProgress(task) {
+      const message = String(task.progressMessage || "").trim();
+      const tail = lastCodexTaskTail(task);
+      if (!message && !tail) return "";
+      return '<div class="codex-queue-progress">' +
+        (message ? '<span>' + escapeHtml(message) + '</span>' : "") +
+        (tail ? '<code>' + escapeHtml(tail) + '</code>' : "") +
+      '</div>';
+    }
+
+    function renderCodexTaskEvents(task) {
+      const events = Array.isArray(task.events) ? task.events.slice(-5).reverse() : [];
+      if (!events.length) return "";
+      return '<ul class="codex-task-events">' + events.map((event) => {
+        const at = event && event.at ? shortTime(event.at) : "--";
+        const message = event && event.message ? String(event.message) : "";
+        return '<li><time>' + escapeHtml(at) + '</time><span>' + escapeHtml(message) + '</span></li>';
+      }).join("") + '</ul>';
+    }
+
+    function lastCodexTaskTail(task) {
+      const stderr = String(task.stderrTail || "").trim().split(/\r?\n/).filter(Boolean).slice(-1)[0] || "";
+      const stdout = String(task.stdoutTail || "").trim().split(/\r?\n/).filter(Boolean).slice(-1)[0] || "";
+      return stderr || stdout;
     }
 
     function renderCodexFooterAction(item, summary, verdict, action) {
@@ -5001,6 +5068,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (hr < 24) return hr + "h ago";
       const day = Math.floor(hr / 24);
       return day + "d ago";
+    }
+
+    function shortTime(value) {
+      const ms = Date.parse(String(value || ""));
+      if (!Number.isFinite(ms)) return "--";
+      return relativeTimeShort(Date.now() - ms);
     }
 
     function stateForLevel(level) {

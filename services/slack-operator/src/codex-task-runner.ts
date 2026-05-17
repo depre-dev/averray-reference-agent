@@ -7,6 +7,7 @@ import {
   claimNextApprovedCodexTask,
   completeCodexTask,
   failCodexTask,
+  updateCodexTaskProgress,
 } from "./codex-task-queue.js";
 
 export interface CodexTaskRunnerConfig {
@@ -141,6 +142,21 @@ export async function executeCodexTaskCommand(
     let stdout = "";
     let stderr = "";
     let finished = false;
+    let lastProgressWrite = 0;
+    let progressWrites: Promise<unknown> = Promise.resolve();
+    const publishProgress = (message: string) => {
+      const now = Date.now();
+      if (now - lastProgressWrite < 2_000) return;
+      lastProgressWrite = now;
+      progressWrites = progressWrites
+        .then(() => updateCodexTaskProgress(task.id, {
+          path: config.path,
+          progressMessage: message,
+          stdoutTail: sanitizeTail(stdout, config.outputTailBytes),
+          stderrTail: sanitizeTail(stderr, config.outputTailBytes),
+        }))
+        .catch(() => undefined);
+    };
     const timeout = setTimeout(() => {
       if (finished) return;
       child.kill("SIGTERM");
@@ -153,9 +169,11 @@ export async function executeCodexTaskCommand(
 
     child.stdout?.on("data", (chunk: Buffer) => {
       stdout = tail(stdout + chunk.toString("utf8"), config.outputTailBytes);
+      publishProgress(lastMeaningfulLine(stdout) || "Codex runner emitted output.");
     });
     child.stderr?.on("data", (chunk: Buffer) => {
       stderr = tail(stderr + chunk.toString("utf8"), config.outputTailBytes);
+      publishProgress(lastMeaningfulLine(stderr) || "Codex runner emitted stderr.");
     });
     child.on("error", (error) => {
       finished = true;
@@ -165,11 +183,13 @@ export async function executeCodexTaskCommand(
     child.on("close", (code) => {
       finished = true;
       clearTimeout(timeout);
-      resolve({
-        exitCode: code ?? 1,
-        stdout,
-        stderr,
-        summary: summarizeCommandResult(stdout) || summarizeCommandResult(stderr),
+      progressWrites.finally(() => {
+        resolve({
+          exitCode: code ?? 1,
+          stdout,
+          stderr,
+          summary: summarizeCommandResult(stdout) || summarizeCommandResult(stderr),
+        });
       });
     });
   });
@@ -197,6 +217,10 @@ function summarizeFailure(result: CodexTaskRunResult): string {
 
 function summarizeCommandResult(value: string): string {
   return value.trim().split(/\r?\n/).filter(Boolean).slice(-3).join("\n").trim();
+}
+
+function lastMeaningfulLine(value: string): string {
+  return value.trim().split(/\r?\n/).filter(Boolean).slice(-1)[0]?.trim() ?? "";
 }
 
 function parseArgs(value: string | undefined): string[] {

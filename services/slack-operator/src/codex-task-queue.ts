@@ -19,6 +19,12 @@ export interface CodexTaskInput {
   requester?: string;
 }
 
+export interface CodexTaskEvent {
+  at: string;
+  status: CodexTaskStatus | "progress";
+  message: string;
+}
+
 export interface CodexTask extends CodexTaskInput {
   schemaVersion: 1;
   kind: "codex_task";
@@ -40,6 +46,9 @@ export interface CodexTask extends CodexTaskInput {
   exitCode?: number;
   stdoutTail?: string;
   stderrTail?: string;
+  progressMessage?: string;
+  progressAt?: string;
+  events?: CodexTaskEvent[];
 }
 
 export interface CodexTaskQueueDeps {
@@ -94,6 +103,11 @@ export async function proposeCodexTask(
     ...(input.requester ? { requester: input.requester } : {}),
     createdAt: now,
     updatedAt: now,
+    events: [{
+      at: now,
+      status: "proposed",
+      message: "Hermes proposed a bounded Codex task.",
+    }],
   };
   await writeCodexTasks(path, [...tasks, task]);
   return { task, created: true };
@@ -114,6 +128,11 @@ export async function approveCodexTask(
     status: existing.status === "running" ? "running" : "approved",
     approvedAt: existing.approvedAt ?? now,
     approvedBy: deps.approvedBy ?? existing.approvedBy ?? "monitor",
+    events: appendTaskEvent(existing, {
+      at: now,
+      status: "approved",
+      message: "Operator approved Codex dispatch.",
+    }),
     updatedAt: now,
   };
   await writeCodexTasks(path, replaceTask(tasks, task));
@@ -135,6 +154,11 @@ export async function cancelCodexTask(
     status: "cancelled",
     cancelledAt: now,
     cancelledBy: deps.cancelledBy ?? "monitor",
+    events: appendTaskEvent(existing, {
+      at: now,
+      status: "cancelled",
+      message: "Operator cancelled this Codex task.",
+    }),
     updatedAt: now,
   };
   await writeCodexTasks(path, replaceTask(tasks, task));
@@ -157,6 +181,45 @@ export async function claimNextApprovedCodexTask(
     startedAt: now,
     runnerId: deps.runnerId ?? existing.runnerId ?? "codex-task-runner",
     attemptCount: (existing.attemptCount ?? 0) + 1,
+    progressMessage: "Codex runner claimed the task.",
+    progressAt: now,
+    events: appendTaskEvent(existing, {
+      at: now,
+      status: "running",
+      message: `Codex runner ${(deps.runnerId ?? existing.runnerId ?? "codex-task-runner")} claimed the task.`,
+    }),
+    updatedAt: now,
+  };
+  await writeCodexTasks(path, replaceTask(tasks, task));
+  return task;
+}
+
+export async function updateCodexTaskProgress(
+  id: string,
+  deps: CodexTaskQueueDeps & {
+    progressMessage?: string;
+    stdoutTail?: string;
+    stderrTail?: string;
+  } = {}
+): Promise<CodexTask | undefined> {
+  const path = queuePath(deps.path);
+  const tasks = await readCodexTasks(path);
+  const existing = tasks.find((task) => task.id === id);
+  if (!existing) return undefined;
+  if (TERMINAL_STATUSES.has(existing.status)) return existing;
+  const now = (deps.now ?? new Date()).toISOString();
+  const progressMessage = deps.progressMessage ?? existing.progressMessage ?? "Codex runner is still working.";
+  const task: CodexTask = {
+    ...existing,
+    progressMessage,
+    progressAt: now,
+    ...(deps.stdoutTail ? { stdoutTail: deps.stdoutTail } : {}),
+    ...(deps.stderrTail ? { stderrTail: deps.stderrTail } : {}),
+    events: appendTaskEvent(existing, {
+      at: now,
+      status: "progress",
+      message: progressMessage,
+    }),
     updatedAt: now,
   };
   await writeCodexTasks(path, replaceTask(tasks, task));
@@ -186,6 +249,13 @@ export async function completeCodexTask(
     ...(typeof deps.exitCode === "number" ? { exitCode: deps.exitCode } : {}),
     ...(deps.stdoutTail ? { stdoutTail: deps.stdoutTail } : {}),
     ...(deps.stderrTail ? { stderrTail: deps.stderrTail } : {}),
+    progressMessage: deps.completionSummary ?? "Codex runner completed the task.",
+    progressAt: now,
+    events: appendTaskEvent(existing, {
+      at: now,
+      status: "completed",
+      message: deps.completionSummary ?? "Codex runner completed the task.",
+    }),
     updatedAt: now,
   };
   await writeCodexTasks(path, replaceTask(tasks, task));
@@ -215,6 +285,13 @@ export async function failCodexTask(
     ...(typeof deps.exitCode === "number" ? { exitCode: deps.exitCode } : {}),
     ...(deps.stdoutTail ? { stdoutTail: deps.stdoutTail } : {}),
     ...(deps.stderrTail ? { stderrTail: deps.stderrTail } : {}),
+    progressMessage: deps.failureReason ?? "Codex task runner failed.",
+    progressAt: now,
+    events: appendTaskEvent(existing, {
+      at: now,
+      status: "failed",
+      message: deps.failureReason ?? "Codex task runner failed.",
+    }),
     updatedAt: now,
   };
   await writeCodexTasks(path, replaceTask(tasks, task));
@@ -257,6 +334,12 @@ async function writeCodexTasks(path: string, tasks: CodexTask[]): Promise<void> 
 
 function replaceTask(tasks: CodexTask[], task: CodexTask): CodexTask[] {
   return tasks.map((entry) => entry.id === task.id ? task : entry);
+}
+
+function appendTaskEvent(task: CodexTask, event: CodexTaskEvent): CodexTaskEvent[] {
+  return [...(task.events ?? []), event]
+    .filter((entry) => entry.at && entry.status && entry.message)
+    .slice(-25);
 }
 
 function isCodexTask(value: unknown): value is CodexTask {

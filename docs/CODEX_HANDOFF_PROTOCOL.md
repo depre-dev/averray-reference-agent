@@ -67,8 +67,9 @@ The monitor can now turn a PR card into a small Codex task:
 1. Hermes identifies the current owner and next action.
 2. The operator clicks **Propose Codex task** to persist the exact prompt and PR metadata.
 3. The operator clicks **Approve Codex task** when Codex is allowed to start.
-4. The optional `codex-task-runner` service claims approved tasks, marks them `running`, executes the configured command, then records `completed` or `failed`.
-5. Codex pushes branch updates. CI and Hermes handoff run again through the normal GitHub Actions path.
+4. The optional `codex-task-runner` service claims approved tasks, marks them `running`, and streams progress/events back into the monitor.
+5. The default branch worker fetches the PR metadata, refuses protected/base branches, clones only the PR head branch, runs Codex with a guarded prompt, commits/pushes only to that PR branch, then records `completed` or `failed`.
+6. CI and Hermes handoff run again through the normal GitHub Actions path.
 
 The monitor treats task completion as a handoff edge, not a release approval. If
 a Codex task is `completed` and that completion is newer than the latest Hermes
@@ -82,18 +83,42 @@ events; it intentionally disables PR comment writes so the private command
 center cannot mutate GitHub.
 
 The runner is opt-in and fail-closed. It does not start unless
-`CODEX_TASK_RUNNER_ENABLED=1` and `CODEX_TASK_RUNNER_COMMAND` are configured. A
-typical command can use JSON args with placeholders, for example:
+`CODEX_TASK_RUNNER_ENABLED=1` is configured. In Docker, the default runner
+command is the safe branch worker:
 
 ```env
-CODEX_TASK_RUNNER_COMMAND=codex
-CODEX_TASK_RUNNER_ARGS=["exec","--full-auto","{prompt}"]
+CODEX_TASK_RUNNER_ENABLED=1
+CODEX_TASK_RUNNER_COMMAND=node
+CODEX_TASK_RUNNER_ARGS=services/slack-operator/dist/codex-branch-worker.js
+CODEX_BRANCH_WORKER_ALLOWED_REPOS=averray-agent/agent,depre-dev/averray-reference-agent
+CODEX_BRANCH_WORKER_CODEX_COMMAND=codex
+CODEX_BRANCH_WORKER_CODEX_ARGS=["exec","--full-auto","{prompt}"]
+CODEX_HOME=/data/codex-home
 ```
 
 Task state is stored in `AVERRAY_CODEX_TASKS_PATH`, defaulting to
 `/data/codex-tasks.json` in Docker so the monitor and runner share durable state.
 The runner redacts common private keys, JWTs, GitHub tokens, and API keys from
 captured output before persisting tails in the queue.
+
+The branch worker has hard guardrails:
+
+- Codex may only work on open PR head branches, never `main`, `master`,
+  `production`, `prod`, or a branch equal to the base branch.
+- Codex refuses to start unless `CODEX_BRANCH_WORKER_ALLOWED_REPOS`,
+  `GITHUB_HELPER_REPOS`, or `GITHUB_DEFAULT_REPO` names the target repo.
+- Codex may not merge, deploy, rotate secrets, claim jobs, submit platform work,
+  or edit production state.
+- Codex refuses to complete if the resulting diff touches secret-like paths such
+  as `.env*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, or private-key files.
+- The monitor shows `proposed -> approved -> running -> progress -> completed`
+  or `failed` events so the operator can see whether Codex is queued, active,
+  blocked, or done.
+
+Before enabling the worker on a host, authenticate the Codex CLI for the
+configured `CODEX_HOME` and provide a GitHub token that can read the repo and
+push to the PR branch. If the worker is not enabled, the monitor still offers
+copy-prompt fallback buttons for manual Codex App use.
 
 ## Monitor GitHub-Live Fallback
 

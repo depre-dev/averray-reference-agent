@@ -12,6 +12,7 @@ import {
   listCodexTasks,
   proposeCodexTask,
   summarizeCodexTasks,
+  updateCodexTaskProgress,
 } from "../../services/slack-operator/src/codex-task-queue.js";
 
 describe("codex task queue", () => {
@@ -136,6 +137,20 @@ describe("codex task queue", () => {
       status: "running",
       runnerId: "runner-a",
       attemptCount: 1,
+      progressMessage: "Codex runner claimed the task.",
+    });
+
+    const progress = await updateCodexTaskProgress(second.task.id, {
+      path,
+      progressMessage: "Codex is editing files.",
+      stdoutTail: "editing files",
+      now: new Date("2026-05-17T12:04:30.000Z"),
+    });
+
+    expect(progress).toMatchObject({
+      status: "running",
+      progressMessage: "Codex is editing files.",
+      stdoutTail: "editing files",
     });
 
     const completed = await completeCodexTask(second.task.id, {
@@ -149,9 +164,17 @@ describe("codex task queue", () => {
     expect(completed).toMatchObject({
       status: "completed",
       completionSummary: "Pushed fix.",
+      progressMessage: "Pushed fix.",
       exitCode: 0,
       stdoutTail: "ok",
     });
+    expect(completed?.events?.map((entry) => entry.status)).toEqual([
+      "proposed",
+      "approved",
+      "running",
+      "progress",
+      "completed",
+    ]);
     expect(summarizeCodexTasks(await listCodexTasks({ path })).counts).toMatchObject({
       approved: 1,
       running: 0,

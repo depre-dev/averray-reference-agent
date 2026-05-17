@@ -117,6 +117,10 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Propose Codex task");
     expect(html).toContain("Approve Codex task");
     expect(html).toContain("Codex task queue");
+    expect(html).toContain("codex-queue-progress");
+    expect(html).toContain("codex-task-events");
+    expect(html).toContain("renderCodexTaskProgress(task)");
+    expect(html).toContain("renderCodexTaskEvents(task)");
     expect(html).toContain("latestCodexTasks");
     expect(html).toContain("normalizeCodexTasks(payload.codexTasks)");
     expect(html).toContain("codexTaskForItem(item)");
