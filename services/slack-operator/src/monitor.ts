@@ -3712,6 +3712,30 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           };
         }
       }
+      if (task && normalize(task.status) === "completed") {
+        if (codexTaskCompletedAfterHermesReview(item)) {
+          return {
+            state: "handoff",
+            label: "Codex done",
+            detail: "Codex reported this task completed. Hermes should re-check the PR before it moves to operator review or merge queue.",
+            task,
+          };
+        }
+        return {
+          state: "completed",
+          label: "Codex done",
+          detail: "Codex task runner reported this task completed and a newer Hermes/GitHub signal exists.",
+          task,
+        };
+      }
+      if (task && normalize(task.status) === "failed") {
+        return {
+          state: "failed",
+          label: "Codex failed",
+          detail: "Codex task runner reported failure. Inspect the runner output or send a smaller follow-up task.",
+          task,
+        };
+      }
       const summary = item.summary || {};
       const reason = normalize(summary.finalReason || summary.reason || item.reason);
       const explicit = normalize(summary.codexState || summary.codexStatus || item.codexState || item.codexStatus);
@@ -3732,6 +3756,38 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return { state: "active", label: "Codex active", detail: "Recent Codex activity was detected for this PR." };
       }
       return { state: "waiting", label: "Waiting for Codex", detail: "No active Codex run detected. Copy this prompt and paste it into a Codex thread/app; the Hermes console below is read-only." };
+    }
+
+    function codexTaskCompletedAfterHermesReview(item) {
+      const task = codexTaskForItem(item);
+      if (!task || normalize(task.status) !== "completed") return false;
+      if (isDraftPullRequest(item)) return false;
+      const completed = Date.parse(String(task.completedAt || task.updatedAt || ""));
+      if (!Number.isFinite(completed)) return true;
+      return completed > latestHermesReviewMs(item);
+    }
+
+    function codexTaskFailedForItem(item) {
+      const task = codexTaskForItem(item);
+      return Boolean(task && normalize(task.status) === "failed");
+    }
+
+    function latestHermesReviewMs(item) {
+      return itemEvents(item).reduce((latest, entry) => {
+        const summary = entry.summary || {};
+        const requester = normalize(entry.requester || summary.requester);
+        const intent = normalize(entry.intent);
+        const source = normalize(summary.source);
+        if (requester === "github_live" || requester === "github-live" || source === "github_live") return latest;
+        const hermesLike = requester === "github-actions"
+          || requester === "operator"
+          || intent === "pr_handoff"
+          || intent === "pr_code_review"
+          || intent === "testbed_suite";
+        if (!hermesLike) return latest;
+        const time = Date.parse(String(entry.updatedAt || entry.completedAt || entry.startedAt || ""));
+        return Number.isFinite(time) ? Math.max(latest, time) : latest;
+      }, 0);
     }
 
     function hasRecentCodexSignal(item) {
@@ -3820,8 +3876,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       }
       if (item.active === true || item.activeState === "running" || status === "running") return { key: "hermes" };
       const codexTask = codexTaskForItem(item);
+      if (codexTaskFailedForItem(item)) return { key: "attention" };
       if (codexTask && !isTerminalCodexTask(codexTask)) return { key: "codex" };
       if (isDraftPullRequest(item)) return { key: "codex" };
+      if (codexTaskCompletedAfterHermesReview(item)) return { key: "hermes" };
       if (reason === "ci_in_progress" || reason === "pr_checks_active") return { key: "codex" };
       if (verdict.level === "block") return { key: "attention" };
       if (verdict.level === "needs-review") return { key: "operator" };
@@ -4079,6 +4137,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         }
         return '<button class="soft-button" type="button" data-copy-label="' + escapeAttr(codexCopyLabel()) + '" data-copy-text="' + escapeAttr(task.prompt || prompt) + '">Copy Codex prompt</button>';
       }
+      if (task && normalize(task.status) === "completed" && codexTaskCompletedAfterHermesReview(item)) {
+        return '<button class="soft-button" data-action="primary" type="button" data-command-suggestion="handoff monitor details">Ask Hermes to re-check</button>';
+      }
+      if (task && normalize(task.status) === "failed") {
+        return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="propose" data-card-key="' + escapeAttr(boardItemKey(item)) + '">Propose retry</button>';
+      }
       return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="propose" data-card-key="' + escapeAttr(boardItemKey(item)) + '">Propose Codex task</button>';
     }
 
@@ -4093,8 +4157,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (status === "proposed") return "Hermes proposed this task. It is waiting for operator approval before Codex should work on it.";
       if (status === "approved") return "Operator approved this task. The Codex task runner may claim it next; use copy only as a fallback if no runner is configured.";
       if (status === "running") return "Codex task runner is actively working on this task.";
-      if (status === "completed") return "Codex task runner reported this task completed.";
-      if (status === "failed") return "Codex task runner reported this task failed.";
+      if (status === "completed") return "Codex task runner reported this task completed. Hermes should re-check if this completion is newer than the last handoff verdict.";
+      if (status === "failed") return "Codex task runner reported this task failed; send a smaller retry task or inspect the runner output.";
       if (status === "cancelled") return "This Codex task was cancelled.";
       return "No Codex task status recorded.";
     }
@@ -5339,6 +5403,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return { key: "hermes", label: "Hermes reviewing" };
       }
       if (isDraftPullRequest(item)) return { key: "pr", label: "Draft PR" };
+      if (codexTaskCompletedAfterHermesReview(item)) return { key: "hermes", label: "Hermes re-check" };
       if (verdict.level === "block") return { key: "gate", label: "Blocked at gate" };
       if (verdict.level === "needs-review") return { key: "gate", label: "Operator review" };
       if (verdict.level === "pass") return { key: "gate", label: "Ready for merge" };
@@ -5349,6 +5414,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const status = normalize(item.status);
       if (item.active === true || item.activeState === "running" || status === "running") return "Hermes";
       if (isDraftPullRequest(item)) return "Codex";
+      if (codexTaskCompletedAfterHermesReview(item)) return "Hermes";
       if (verdict.level === "block") return "Codex";
       if (verdict.level === "needs-review") return "Operator";
       if (verdict.level === "pass") return "Merge queue";
@@ -5366,8 +5432,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (item.active === true || item.activeState === "running" || status === "running") {
         return { owner: "Hermes", text: "finish the current handoff checks and publish a verdict" };
       }
+      if (codexTaskFailedForItem(item)) {
+        return { owner: "Codex", text: "review the failed Codex task output, push a smaller fix, or propose a retry task" };
+      }
       if (isDraftPullRequest(item)) {
         return { owner: "Codex", text: "finish the draft or mark it ready for review, then let CI and Hermes re-run" };
+      }
+      if (codexTaskCompletedAfterHermesReview(item)) {
+        return { owner: "Hermes", text: "re-run the PR handoff/code-review checks now that Codex reported completion" };
       }
       if (reason === "pr_checks_active" || reason === "ci_in_progress") {
         return { owner: "Codex", text: "wait for CI to finish on the current commit; if it fails, push the smallest fix and let Hermes re-run" };
@@ -5620,6 +5692,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return { level: "running", label: "CI RUNNING", why: releaseReason(summary, item, "running") };
       }
       const terminal = classifyReleaseGate(status, finalVerdict, mergeRecommendation, reason, reviewReasons);
+      if (codexTaskFailedForItem(item)) {
+        return { level: "block", label: "CODEX FAILED", why: "Codex task runner failed; inspect the task output or propose a smaller retry task before Hermes can continue." };
+      }
+      if (terminal.level !== "block" && codexTaskCompletedAfterHermesReview(item)) {
+        return { level: "running", label: "HERMES RECHECK", why: "Codex reported completion after the last Hermes verdict; Hermes should re-run PR checks before release-gate movement." };
+      }
       if (item.activeState === "just_finished") {
         return {
           level: terminal.level,

@@ -98,6 +98,13 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("actionRecipeForItem(item, summary, verdict, action)");
     expect(html).toContain("renderCodexTaskPrompt(item, summary, verdict, action)");
     expect(html).toContain("codexWorkState(item, stage)");
+    expect(html).toContain("codexTaskCompletedAfterHermesReview(item)");
+    expect(html).toContain("latestHermesReviewMs(item)");
+    expect(html).toContain("HERMES RECHECK");
+    expect(html).toContain("Ask Hermes to re-check");
+    expect(html).toContain("Codex task runner reported this task completed. Hermes should re-check");
+    expect(html).toContain("CODEX FAILED");
+    expect(html).toContain("Propose retry");
     expect(html).toContain("isCodexActivelyWorking");
     expect(html).toContain("Copy for Codex app");
     expect(html).toContain("Propose Codex task");
