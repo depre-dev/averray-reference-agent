@@ -1756,6 +1756,39 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
     .verdict-box .vb-head .vb-age { color: var(--muted); }
     .verdict-box .vb-text { color: var(--text); line-height: 1.4; }
+    .owner-contract {
+      display: grid;
+      gap: 10px;
+    }
+    .owner-contract .oc-current {
+      display: grid;
+      gap: 4px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface-soft);
+      padding: 10px 12px;
+    }
+    .oc-owner {
+      color: var(--text);
+      font-weight: 800;
+    }
+    .oc-action {
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    .oc-roles {
+      display: grid;
+      gap: 6px;
+    }
+    .oc-role {
+      display: grid;
+      grid-template-columns: 80px 1fr;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 0.8rem;
+      line-height: 1.35;
+    }
+    .oc-role strong { color: var(--text); }
 
     /* Operator checklist with real checkboxes */
     .operator-checklist { display: grid; gap: 6px; }
@@ -2744,6 +2777,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function primaryActionButton(item, verdict, action, lane) {
       if (verdict.level === "block") return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '">Fix plan -></button>';
+      if (isDraftPullRequest(item)) return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '">Codex draft -></button>';
       if (verdict.level === "needs-review") return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '">Review</button>';
       if (verdict.level === "running") return '<button class="soft-button" data-action="primary" type="button" data-command-suggestion="handoff monitor details">Ask Hermes</button>';
       if (verdict.level === "pass" && lane.key === "queue") return '<button class="soft-button" data-action="primary" type="button" data-command-suggestion="merge steward details">Queue Merge</button>';
@@ -2761,6 +2795,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return verdict.level === "pass" ? { key: "done" } : { key: "attention" };
       }
       if (item.active === true || item.activeState === "running" || status === "running") return { key: "hermes" };
+      if (isDraftPullRequest(item)) return { key: "codex" };
       if (reason === "ci_in_progress") return { key: "codex" };
       if (verdict.level === "block") return { key: "attention" };
       if (verdict.level === "needs-review") return { key: "operator" };
@@ -2852,8 +2887,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '<div class="drawer-body">' +
         (verdict.level === "block" ? '<section class="drawer-section">' + renderFailureCallout(verdict, summary) + '</section>' : "") +
         '<section class="drawer-section"><h3>Hermes verdict</h3>' + renderHermesVerdictBox(verdict, age) + (richReviewWhy ? '<div class="review-why">' + richReviewWhy + '</div>' : "") + '</section>' +
+        '<section class="drawer-section">' + renderHandoffOwnerContract(item, verdict, action) + '</section>' +
         (verdict.level === "block" ? renderBlockResolutionPanel(item, summary, verdict, action) : "") +
-        (verdict.level === "needs-review" ? '<section class="drawer-section">' + renderOperatorChecklistPanel(item, verdict, action) + '</section>' : "") +
+        (verdict.level === "needs-review" && !isDraftPullRequest(item) ? '<section class="drawer-section">' + renderOperatorChecklistPanel(item, verdict, action) + '</section>' : "") +
         '<section class="drawer-section"><h3>Agent pre-check</h3>' + renderAgentPrecheckList(item, summary, verdict, stage) + '</section>' +
         '<section class="drawer-section"><h3>Checks</h3>' + renderCheckMatrix(summary, testSignals) + '</section>' +
         ((touchedFiles.length || touchedAreas.length) ? '<section class="drawer-section"><h3>Touched files</h3>' + renderTouchedFiles(touchedFiles, touchedAreas) + '</section>' : "") +
@@ -2882,6 +2918,44 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '<div class="vb-head"><span>' + escapeHtml(verdict.label) + '</span><span class="vb-age">' + escapeHtml(age.label + " " + age.duration) + '</span></div>' +
         '<div class="vb-text">' + escapeHtml(shortenVerdictWhy(verdict.why)) + '</div>' +
         '</div>';
+    }
+
+    function renderHandoffOwnerContract(item, verdict, action) {
+      const contract = ownerContractForItem(item, verdict, action);
+      return '<h3>Handoff owner</h3><div class="owner-contract">' +
+        '<div class="oc-current"><span class="oc-owner">Current owner: ' + escapeHtml(contract.owner) + '</span><span class="oc-action">' + escapeHtml(contract.action) + '</span></div>' +
+        '<div class="oc-roles">' +
+          '<div class="oc-role"><strong>Codex</strong><span>builds code, fixes blockers, resolves draft readiness, and pushes PR updates.</span></div>' +
+          '<div class="oc-role"><strong>Hermes</strong><span>runs read-only PR checks, code-risk review, testbed verification, and publishes the verdict.</span></div>' +
+          '<div class="oc-role"><strong>Operator</strong><span>decides project intent, architecture, rollout, and business risk after agent pre-check evidence exists.</span></div>' +
+          '<div class="oc-role"><strong>Queue</strong><span>merges only after branch protection, Hermes verdict, and any operator sign-off are clean.</span></div>' +
+        '</div>' +
+      '</div>';
+    }
+
+    function ownerContractForItem(item, verdict, action) {
+      if (isDraftPullRequest(item)) {
+        return {
+          owner: "Codex",
+          action: "Finish the draft or mark it ready for review. Hermes and Operator should wait until the draft state clears.",
+        };
+      }
+      if (verdict.level === "block") {
+        return {
+          owner: action.owner,
+          action: action.text,
+        };
+      }
+      if (verdict.level === "needs-review") {
+        return {
+          owner: "Operator",
+          action: "Review the project-level decision request only. Code-level analysis should already be attached by Hermes/Codex.",
+        };
+      }
+      return {
+        owner: action.owner,
+        action: action.text,
+      };
     }
 
     // Drop verbose prefixes Hermes adds to roll-up verdicts so the box reads as a clear summary.
@@ -3604,7 +3678,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function renderFixRequest(item, summary, verdict, action) {
       if (verdict.level !== "block" && verdict.level !== "needs-review") return "";
       const request = buildFixRequest(item, summary, verdict, action);
-      const actions = verdict.level === "needs-review" ? renderDecisionActions(item) : "";
+      const actions = verdict.level === "needs-review" && !isDraftPullRequest(item) ? renderDecisionActions(item) : "";
       return '<section class="fix-request" data-level="' + escapeAttr(verdict.level) + '" aria-label="Fix request">' +
         '<p class="fix-request-title">' + escapeHtml(request.title) + '</p>' +
         '<p class="fix-request-copy">' + escapeHtml(request.instruction) + '</p>' +
@@ -3761,8 +3835,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const checks = Array.isArray(fixRequest.checks)
         ? fixRequest.checks.map(String).filter(Boolean)
         : missingTests.length ? missingTests : defaultFixChecks(item, summary, testSignals);
+      const isDraft = isDraftPullRequest(item);
       return {
-        title: fixRequest.title || (verdict.level === "block" ? "Fix request for Codex" : "Operator decision request"),
+        title: fixRequest.title || (isDraft ? "Draft readiness request for Codex" : verdict.level === "block" ? "Fix request for Codex" : "Operator decision request"),
         owner: fixRequest.owner || action.owner,
         instruction: fixRequest.instruction || fixRequestInstruction(item, summary, verdict, action),
         reason,
@@ -3774,6 +3849,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function fixRequestInstruction(item, summary, verdict, action) {
       const reason = normalize(summary.finalReason || summary.reason || item.reason);
+      if (isDraftPullRequest(item)) {
+        return "Codex should finish the draft work, mark the PR ready for review, and let CI plus Hermes run on the ready PR.";
+      }
       if (verdict.level === "block") {
         if (isDeployItem(item) && reason === "hosted_health_failed") {
           return "Codex should fix the hosted app/config health failure in a follow-up PR, or prepare a rollback proposal if production is affected.";
@@ -3939,6 +4017,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (item.active === true || item.activeState === "running" || status === "running") {
         return { key: "hermes", label: "Hermes reviewing" };
       }
+      if (isDraftPullRequest(item)) return { key: "pr", label: "Draft PR" };
       if (verdict.level === "block") return { key: "gate", label: "Blocked at gate" };
       if (verdict.level === "needs-review") return { key: "gate", label: "Operator review" };
       if (verdict.level === "pass") return { key: "gate", label: "Ready for merge" };
@@ -3948,6 +4027,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function nextPipelineActor(item, verdict) {
       const status = normalize(item.status);
       if (item.active === true || item.activeState === "running" || status === "running") return "Hermes";
+      if (isDraftPullRequest(item)) return "Codex";
       if (verdict.level === "block") return "Codex";
       if (verdict.level === "needs-review") return "Operator";
       if (verdict.level === "pass") return "Merge queue";
@@ -3962,6 +4042,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       }
       if (item.active === true || item.activeState === "running" || status === "running") {
         return { owner: "Hermes", text: "finish the current handoff checks and publish a verdict" };
+      }
+      if (isDraftPullRequest(item)) {
+        return { owner: "Codex", text: "finish the draft or mark it ready for review, then let CI and Hermes re-run" };
       }
       if (verdict.level === "block") {
         if (isDeployItem(item)) {
@@ -4202,7 +4285,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return { level: "pass", label: "CLOSED", why: "GitHub reports this PR is closed; this handoff is history." };
       }
       if (prState && prState.draft === true) {
-        return { level: "needs-review", label: "DRAFT", why: "GitHub reports this PR is still a draft." };
+        return { level: "needs-review", label: "DRAFT", why: "GitHub reports this PR is still a draft; Codex owns finishing it or marking it ready before Hermes/operator review." };
       }
       if (prState && normalize(prState.mergeableState) === "dirty") {
         return { level: "block", label: "CONFLICT", why: "GitHub reports this PR has merge conflicts." };
@@ -4302,7 +4385,18 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function pullRequestState(item, summary) {
       if (summary && typeof summary.currentPullRequest === "object" && summary.currentPullRequest !== null) return summary.currentPullRequest;
       if (summary && typeof summary.pullRequest === "object" && summary.pullRequest !== null) return summary.pullRequest;
+      if (item && Array.isArray(item.groupItems)) {
+        for (const entry of item.groupItems) {
+          const nested = pullRequestState(entry, entry.summary || {});
+          if (nested) return nested;
+        }
+      }
       return null;
+    }
+
+    function isDraftPullRequest(item) {
+      const prState = pullRequestState(item, item.summary || {});
+      return Boolean(prState && prState.draft === true && !isDonePullRequestState(prState));
     }
 
     function isDonePullRequestState(prState) {

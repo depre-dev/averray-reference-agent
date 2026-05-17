@@ -43,7 +43,7 @@ export function stalePrAlertItems(input: StalePrAlertInput): StalePrAlertItem[] 
       owner,
       ageMinutes,
       ageLabel: formatDuration(ageMinutes),
-      nextAction: nextActionText(owner, verdict),
+      nextAction: nextActionText(owner, verdict, item),
       reason: releaseReason(item, verdict),
       updatedAt,
     });
@@ -131,14 +131,16 @@ function releaseVerdict(item: Record<string, unknown>): "block" | "needs-review"
 function nextOwner(item: Record<string, unknown>, verdict: ReturnType<typeof releaseVerdict>): string {
   const status = normalize(stringField(item, "status"));
   if (item.active === true || stringField(item, "activeState") === "running" || status === "running") return "Hermes";
+  if (isDraftPullRequest(item)) return "Codex";
   if (verdict === "block") return "Codex";
   if (verdict === "needs-review") return "Operator";
   if (verdict === "pass") return "Merge queue";
   return "GitHub Actions";
 }
 
-function nextActionText(owner: string, verdict: ReturnType<typeof releaseVerdict>): string {
+function nextActionText(owner: string, verdict: ReturnType<typeof releaseVerdict>, item: Record<string, unknown>): string {
   if (owner === "Hermes") return "finish checks and publish a verdict";
+  if (owner === "Codex" && isDraftPullRequest(item)) return "finish the draft or mark it ready for review so CI and Hermes can run";
   if (owner === "Codex") return "fix the blocking signal and push an update";
   if (owner === "Operator") return "use the agent pre-check evidence to decide project intent, architecture, and rollout risk";
   if (owner === "Merge queue") return "merge when branch protection and queue checks are green";
@@ -151,6 +153,7 @@ function releaseReason(item: Record<string, unknown>, verdict: ReturnType<typeof
   const reviewReasons = Array.isArray(summary.reviewReasons) ? summary.reviewReasons : [];
   const first = toRecord(reviewReasons.find(Boolean));
   if (stringField(first, "message")) return stringField(first, "message") ?? "Operator review recommended.";
+  if (isDraftPullRequest(item)) return "PR is still draft; Codex must finish it or mark it ready before Hermes/operator can proceed.";
   const reason = normalize(stringField(summary, "finalReason") ?? stringField(summary, "reason") ?? stringField(item, "reason"));
   if (reason === "github_needs_review") return "Operator review recommended by the GitHub risk gate; agent pre-check evidence should be attached.";
   if (reason === "pr_review_hold") return "PR risk gate held this for operator review.";
@@ -160,6 +163,25 @@ function releaseReason(item: Record<string, unknown>, verdict: ReturnType<typeof
   if (verdict === "needs-review") return "Operator review recommended.";
   if (verdict === "pass") return "No blocking release signals recorded.";
   return "No reason recorded.";
+}
+
+function isDraftPullRequest(item: Record<string, unknown>): boolean {
+  const prState = pullRequestState(item);
+  return Boolean(prState && prState.draft === true && !isDonePullRequestState(prState));
+}
+
+function pullRequestState(item: Record<string, unknown>): Record<string, unknown> | undefined {
+  const summary = toRecord(item.summary);
+  const current = toRecord(summary.currentPullRequest);
+  if (Object.keys(current).length > 0) return current;
+  const pullRequest = toRecord(summary.pullRequest);
+  if (Object.keys(pullRequest).length > 0) return pullRequest;
+  return undefined;
+}
+
+function isDonePullRequestState(prState: Record<string, unknown> | undefined): boolean {
+  if (!prState) return false;
+  return prState.merged === true || normalize(stringField(prState, "state")) === "closed";
 }
 
 function ageInMinutes(updatedAt: string | undefined, now: Date): number {
