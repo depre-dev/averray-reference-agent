@@ -60,6 +60,57 @@ Hermes must not merge PRs, deploy, submit work, or run guarded live mutation dur
 - If **BLOCK**: stop. Fix the PR, add missing tests or notes, wait for CI, then let Hermes re-run. Do not ask Hermes to override the block.
 - If Hermes could not inspect the PR: treat it as HUMAN REVIEW and repair the missing token/repo/config separately.
 
+## Monitor-to-Codex Task Queue
+
+The monitor can now turn a PR card into a small Codex task:
+
+1. Hermes identifies the current owner and next action.
+2. The operator clicks **Propose Codex task** to persist the exact prompt and PR metadata.
+3. The operator clicks **Approve Codex task** when Codex is allowed to start.
+4. The optional `codex-task-runner` service claims approved tasks, marks them `running`, executes the configured command, then records `completed` or `failed`.
+5. Codex pushes branch updates. CI and Hermes handoff run again through the normal GitHub Actions path.
+
+The runner is opt-in and fail-closed. It does not start unless
+`CODEX_TASK_RUNNER_ENABLED=1` and `CODEX_TASK_RUNNER_COMMAND` are configured. A
+typical command can use JSON args with placeholders, for example:
+
+```env
+CODEX_TASK_RUNNER_COMMAND=codex
+CODEX_TASK_RUNNER_ARGS=["exec","--full-auto","{prompt}"]
+```
+
+Task state is stored in `AVERRAY_CODEX_TASKS_PATH`, defaulting to
+`/data/codex-tasks.json` in Docker so the monitor and runner share durable state.
+The runner redacts common private keys, JWTs, GitHub tokens, and API keys from
+captured output before persisting tails in the queue.
+
+## Monitor GitHub-Live Fallback
+
+The monitor has two read-only inputs:
+
+- Hermes handoff events from the local handoff log.
+- Live GitHub PR state for repos configured by `GITHUB_HELPER_REPOS`,
+  `GITHUB_DEFAULT_REPO`, or `GITHUB_REPOSITORY`.
+
+The GitHub-live layer exists so an open PR is still visible even before Hermes
+has emitted a handoff event, or after the local event window expires. It fetches
+open PRs, check runs, and touched files, then creates synthetic monitor cards
+with `requester=github-live` and `intent=github_open_pr`. Those cards are grouped
+with Hermes events by `repo#pullRequestNumber`, so the board should show one
+logical card per PR rather than duplicate rows.
+
+The default live PR scan limit is 20. Set `GITHUB_MONITOR_PR_LIMIT` if the
+monitor needs a different value without changing other GitHub helper commands.
+
+This layer never mutates GitHub. It only helps assign ownership:
+
+- draft PRs go to Codex.
+- failed PR checks go to Codex / Needs Attention.
+- running PR checks go to the Codex-needed lane until CI settles.
+- review-gated surfaces go to Operator only after the agent pre-check evidence
+  is attached.
+- green low-risk PRs go to the merge queue.
+
 ## Correlation Metadata
 
 Use stable metadata so all surfaces connect:

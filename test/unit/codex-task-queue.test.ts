@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   approveCodexTask,
   cancelCodexTask,
+  claimNextApprovedCodexTask,
+  completeCodexTask,
+  failCodexTask,
   listCodexTasks,
   proposeCodexTask,
   summarizeCodexTasks,
@@ -104,5 +107,82 @@ describe("codex task queue", () => {
       proposed: 1,
       terminal: 1,
     });
+  });
+
+  it("claims the oldest approved task and records runner completion", async () => {
+    const path = await tempQueuePath();
+    const first = await proposeCodexTask({
+      repo: "averray-agent/agent",
+      pullRequestNumber: 387,
+      prompt: "Fix PR #387.",
+    }, { path, now: new Date("2026-05-17T12:00:00.000Z") });
+    const second = await proposeCodexTask({
+      repo: "averray-agent/agent",
+      pullRequestNumber: 388,
+      prompt: "Fix PR #388.",
+    }, { path, now: new Date("2026-05-17T12:01:00.000Z") });
+
+    await approveCodexTask(second.task.id, { path, now: new Date("2026-05-17T12:02:00.000Z") });
+    await approveCodexTask(first.task.id, { path, now: new Date("2026-05-17T12:03:00.000Z") });
+
+    const claimed = await claimNextApprovedCodexTask({
+      path,
+      runnerId: "runner-a",
+      now: new Date("2026-05-17T12:04:00.000Z"),
+    });
+
+    expect(claimed).toMatchObject({
+      id: second.task.id,
+      status: "running",
+      runnerId: "runner-a",
+      attemptCount: 1,
+    });
+
+    const completed = await completeCodexTask(second.task.id, {
+      path,
+      completionSummary: "Pushed fix.",
+      exitCode: 0,
+      stdoutTail: "ok",
+      now: new Date("2026-05-17T12:05:00.000Z"),
+    });
+
+    expect(completed).toMatchObject({
+      status: "completed",
+      completionSummary: "Pushed fix.",
+      exitCode: 0,
+      stdoutTail: "ok",
+    });
+    expect(summarizeCodexTasks(await listCodexTasks({ path })).counts).toMatchObject({
+      approved: 1,
+      running: 0,
+      terminal: 1,
+    });
+  });
+
+  it("records runner failures without claiming another task", async () => {
+    const path = await tempQueuePath();
+    const proposed = await proposeCodexTask({
+      repo: "averray-agent/agent",
+      pullRequestNumber: 389,
+      prompt: "Fix PR #389.",
+    }, { path, now: new Date("2026-05-17T13:00:00.000Z") });
+    await approveCodexTask(proposed.task.id, { path, now: new Date("2026-05-17T13:01:00.000Z") });
+    await claimNextApprovedCodexTask({ path, runnerId: "runner-b", now: new Date("2026-05-17T13:02:00.000Z") });
+
+    const failed = await failCodexTask(proposed.task.id, {
+      path,
+      failureReason: "CI stayed red.",
+      exitCode: 2,
+      stderrTail: "failed",
+      now: new Date("2026-05-17T13:03:00.000Z"),
+    });
+
+    expect(failed).toMatchObject({
+      status: "failed",
+      failureReason: "CI stayed red.",
+      exitCode: 2,
+      stderrTail: "failed",
+    });
+    expect(await claimNextApprovedCodexTask({ path })).toBeUndefined();
   });
 });
