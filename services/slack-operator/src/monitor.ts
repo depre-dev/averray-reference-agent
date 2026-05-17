@@ -913,15 +913,16 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
     .counter-chip {
       display: inline-flex;
-      align-items: baseline;
+      align-items: center;
       gap: 6px;
-      min-height: 30px;
+      height: 30px;
       padding: 0 10px;
       border: 1px solid var(--line);
       border-radius: 7px;
       background: var(--surface-soft);
       white-space: nowrap;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      line-height: 1;
     }
     .counter-chip[data-tone="warn"] {
       border-color: rgba(255, 209, 102, 0.66);
@@ -936,15 +937,22 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       background: rgba(82, 210, 115, 0.1);
     }
     .counter-number {
+      display: inline-flex;
+      align-items: center;
       color: var(--text);
       font-weight: 800;
-      font-size: 0.95rem;
+      font-size: 0.92rem;
+      line-height: 1;
     }
     .counter-label {
+      display: inline-flex;
+      align-items: center;
       color: var(--muted);
       text-transform: uppercase;
       letter-spacing: 0.08em;
       font-size: 0.62rem;
+      line-height: 1;
+      padding-top: 1px; /* nudges small caps onto the visual midline */
     }
     .refresh-cluster {
       display: flex;
@@ -1140,7 +1148,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       gap: 8px;
       min-width: 0;
       border: 1px solid var(--line);
-      border-left: 3px solid var(--lane-accent);
+      border-left: 3px solid var(--verdict-accent, var(--lane-accent));
       border-radius: 8px;
       background: var(--surface-strong);
       box-shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
@@ -1150,10 +1158,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       color: var(--text);
       transition: transform 0.14s ease, border-color 0.14s ease, opacity 0.14s ease;
     }
+    .handoff-card[data-verdict="block"]        { --verdict-accent: var(--bad); }
+    .handoff-card[data-verdict="needs-review"] { --verdict-accent: var(--warn); }
+    .handoff-card[data-verdict="running"]      { --verdict-accent: var(--cyan); }
+    .handoff-card[data-verdict="pass"]         { --verdict-accent: var(--ok); }
     .handoff-card:hover,
     .handoff-card[data-selected="true"] {
       transform: translateY(-1px);
-      border-color: var(--lane-accent);
+      border-color: var(--verdict-accent, var(--lane-accent));
     }
     .command-shell.has-selection .handoff-card:not([data-selected="true"]) {
       opacity: 0.42;
@@ -1714,6 +1726,142 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
     .verdict-box .vb-head .vb-age { color: var(--muted); }
     .verdict-box .vb-text { color: var(--text); line-height: 1.4; }
+
+    /* ActorPill — coloured dot + arrow + actor name for "next" handoff display */
+    .card-next {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+    .card-next-label {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.6rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .actor-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--surface-soft);
+      color: var(--text);
+      font-size: 0.74rem;
+      font-weight: 700;
+      white-space: nowrap;
+      --actor-accent: var(--muted);
+    }
+    .actor-pill[data-actor="codex"]    { --actor-accent: var(--violet); }
+    .actor-pill[data-actor="hermes"]   { --actor-accent: var(--cyan); }
+    .actor-pill[data-actor="operator"] { --actor-accent: var(--warn); }
+    .actor-pill[data-actor="merge"]    { --actor-accent: var(--ok); }
+    .actor-pill[data-actor="deploy"]   { --actor-accent: var(--cyan); }
+    .actor-pill[data-actor="done"]     { --actor-accent: var(--muted); }
+    .actor-pill {
+      border-color: color-mix(in srgb, var(--actor-accent) 40%, var(--line));
+      background: color-mix(in srgb, var(--actor-accent) 12%, transparent);
+      color: var(--actor-accent);
+    }
+    .actor-pill .actor-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--actor-accent);
+    }
+    .actor-pill .actor-arrow {
+      font-size: 0.74rem;
+      opacity: 0.7;
+    }
+    .actor-pill .actor-label {
+      letter-spacing: 0.02em;
+    }
+
+    /* Lane empty — small leading dot before the empty-state copy */
+    .lane-empty {
+      gap: 8px;
+    }
+    .lane-empty::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--lane-accent);
+      opacity: 0.55;
+      flex-shrink: 0;
+      display: inline-block;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+    .done-rail .lane-empty::before { display: none; }
+
+    /* Done lane — compact rows instead of full kanban cards when expanded */
+    .done-row {
+      display: grid;
+      grid-template-columns: 16px minmax(0, 0.35fr) minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 10px;
+      border: 1px solid var(--line-soft);
+      border-left: 3px solid var(--ok);
+      border-radius: 7px;
+      background: var(--surface-strong);
+      color: var(--text);
+      cursor: pointer;
+      text-align: left;
+      font-size: 0.8rem;
+      transition: border-color 0.14s ease, transform 0.14s ease;
+    }
+    .done-row[data-verdict="block"] { border-left-color: var(--bad); }
+    .done-row:hover,
+    .done-row[data-selected="true"] {
+      transform: translateY(-1px);
+      border-color: var(--ok);
+    }
+    .done-row .done-check {
+      width: 14px;
+      height: 14px;
+      border-radius: 999px;
+      background: var(--ok);
+      display: grid;
+      place-items: center;
+      color: #08120e;
+      font-size: 10px;
+      font-weight: 800;
+    }
+    .done-row[data-verdict="block"] .done-check { background: var(--bad); }
+    .done-row .done-id {
+      display: inline-flex;
+      gap: 5px;
+      align-items: baseline;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.72rem;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .done-row .done-id .done-num {
+      color: var(--text);
+      font-weight: 700;
+    }
+    .done-row .done-title {
+      color: var(--text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .done-row .done-age {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      white-space: nowrap;
+    }
 
     /* Operator checklist with real checkboxes */
     .operator-checklist { display: grid; gap: 6px; }
@@ -2547,13 +2695,33 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const items = entries
         .filter((item) => boardLaneForItem(item, releaseVerdict(item)).key === lane.key)
         .sort((a, b) => boardSortScore(b) - boardSortScore(a) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+      const renderer = lane.key === "done" ? renderDoneRow : renderBoardCard;
       const cards = items.length
-        ? items.slice(0, lane.key === "done" ? 10 : 8).map((item) => renderBoardCard(item, lane)).join("")
+        ? items.slice(0, lane.key === "done" ? 12 : 8).map((item) => renderer(item, lane)).join("")
         : '<div class="lane-empty">' + escapeHtml(lane.empty) + '</div>';
       return '<section class="lane" data-lane="' + escapeAttr(lane.key) + '">' +
         '<div class="lane-head"><div class="lane-title">' + escapeHtml(lane.title) + ' <span class="pill">' + escapeHtml(String(items.length)) + '</span></div><span class="lane-subtitle">' + escapeHtml(lane.kicker) + '</span></div>' +
         '<div class="lane-body">' + cards + '</div>' +
         '</section>';
+    }
+
+    // Compact one-line entry for the Done lane when expanded.
+    function renderDoneRow(item /*, lane */) {
+      const verdict = releaseVerdict(item);
+      const key = boardItemKey(item);
+      const selected = key === selectedKey;
+      const age = handoffAge(item);
+      const repo = String(item.repo || "");
+      const repoShort = repo.split("/")[1] || repo;
+      const prNumber = item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId);
+      const idLabel = prNumber ? "#" + prNumber : (isDeployItem(item) ? "deploy" : "handoff");
+      const title = cardTitleText(pipelineTitle(item), prNumber, item);
+      return '<button class="done-row" data-select-card="' + escapeAttr(key) + '" data-selected="' + escapeAttr(String(selected)) + '" data-verdict="' + escapeAttr(verdict.level) + '" type="button">' +
+        '<span class="done-check">' + (verdict.level === "block" ? "!" : "✓") + '</span>' +
+        '<span class="done-id"><span class="done-repo">' + escapeHtml(repoShort) + '</span><span class="done-num">' + escapeHtml(idLabel) + '</span></span>' +
+        '<span class="done-title">' + escapeHtml(title) + '</span>' +
+        '<span class="done-age">' + escapeHtml(age.label + " " + age.duration) + '</span>' +
+        '</button>';
     }
 
     function renderDoneStub(entries) {
@@ -2584,7 +2752,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const activeAgent = activeAgentForItem(item, lane, stage);
       const locallyApproved = decisionForItem(item).status === "approved";
       const staleState = age.state || "fresh";
-      return '<article class="handoff-card" data-select-card="' + escapeAttr(key) + '" data-selected="' + escapeAttr(String(selected)) + '">' +
+      return '<article class="handoff-card" data-select-card="' + escapeAttr(key) + '" data-selected="' + escapeAttr(String(selected)) + '" data-verdict="' + escapeAttr(verdict.level) + '">' +
         '<div class="card-head">' +
           '<div class="kc-head-l">' +
             '<span class="pill state-pill" data-level="' + escapeAttr(verdict.level) + '">' + escapeHtml(verdict.label) + '</span>' +
@@ -2605,8 +2773,30 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         renderMiniSteps(stage, verdict) +
         '<p class="card-why">' + escapeHtml(cardWhy) + '</p>' +
         '<div class="card-meta-row"><span class="tags">' + touchedAreas.slice(0, 3).map((value) => '<code>' + escapeHtml(String(value)) + '</code>').join("") + '</span><span class="card-subtitle">' + escapeHtml(testSummaryText(tests)) + '</span></div>' +
-        '<div class="card-foot"><span class="card-next">Next <strong>' + escapeHtml(action.owner) + '</strong></span><span class="card-actions">' + primaryActionButton(item, verdict, action, lane) + '</span></div>' +
+        '<div class="card-foot"><span class="card-next"><span class="card-next-label">next</span>' + renderActorPill(action.owner) + '</span><span class="card-actions">' + primaryActionButton(item, verdict, action, lane) + '</span></div>' +
         '</article>';
+    }
+
+    // Pretty pill for "next actor" — colored dot + arrow + actor name.
+    function renderActorPill(owner) {
+      const slug = actorSlug(owner);
+      const label = String(owner || "—");
+      return '<span class="actor-pill" data-actor="' + escapeAttr(slug) + '">' +
+        '<span class="actor-dot"></span>' +
+        '<span class="actor-arrow">→</span>' +
+        '<span class="actor-label">' + escapeHtml(label) + '</span>' +
+        '</span>';
+    }
+
+    function actorSlug(owner) {
+      const v = normalize(owner);
+      if (v.indexOf("codex") >= 0) return "codex";
+      if (v.indexOf("hermes") >= 0) return "hermes";
+      if (v.indexOf("merge") >= 0) return "merge";
+      if (v.indexOf("operator") >= 0 || v.indexOf("human") >= 0) return "operator";
+      if (v.indexOf("deploy") >= 0) return "deploy";
+      if (v.indexOf("done") >= 0) return "done";
+      return "other";
     }
 
     // Compact card title — drops repo + #PR prefix the kc-id row already shows,
