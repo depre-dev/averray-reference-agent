@@ -27,6 +27,7 @@ import {
   isMonitorAuthorized,
   parseMonitorConfig,
   renderMonitorHtml,
+  renderMonitorManifest,
 } from "./monitor.js";
 import {
   formatStalePrAlertForSlack,
@@ -126,7 +127,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       monitor: {
         enabled: monitorConfig.enabled,
         tokenProtected: Boolean(monitorConfig.token),
-        paths: monitorConfig.enabled ? ["/monitor", "/monitor/events", "/monitor/stream", "/monitor/command"] : [],
+        paths: monitorConfig.enabled ? ["/monitor", "/monitor/events", "/monitor/stream", "/monitor/command", "/monitor/manifest.webmanifest"] : [],
       },
     });
     return;
@@ -136,7 +137,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
     writeRedirect(response, "/monitor");
     return;
   }
-  if (request.method === "GET" && (url.pathname === "/monitor" || url.pathname === "/monitor/events" || url.pathname === "/monitor/stream")) {
+  if (request.method === "GET" && (url.pathname === "/monitor" || url.pathname === "/monitor/events" || url.pathname === "/monitor/stream" || url.pathname === "/monitor/manifest.webmanifest")) {
     if (!monitorConfig.enabled) {
       writeJson(response, 404, { error: "monitor_disabled" });
       return;
@@ -147,6 +148,14 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
     }
     if (url.pathname === "/monitor") {
       writeHtml(response, 200, renderMonitorHtml());
+      return;
+    }
+    if (url.pathname === "/monitor/manifest.webmanifest") {
+      response.writeHead(200, {
+        "content-type": "application/manifest+json; charset=utf-8",
+        "cache-control": "public, max-age=300",
+      });
+      response.end(renderMonitorManifest());
       return;
     }
     if (url.pathname === "/monitor/stream") {
