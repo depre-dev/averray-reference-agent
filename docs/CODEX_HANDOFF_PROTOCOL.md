@@ -76,6 +76,10 @@ PR verdict, the card moves to **Hermes Checking** with a `HERMES RECHECK`
 verdict until Hermes/GitHub Actions publish a newer review. If the task is
 `failed`, the card moves to **Needs Attention** with a Codex-owned retry/fix
 action. Draft PRs always stay Codex-owned until GitHub reports `draft=false`.
+The monitor's **Ask Hermes to re-check** action runs a private, read-only
+`pr_code_review` + `pr_handoff` re-check for the PR and records fresh handoff
+events; it intentionally disables PR comment writes so the private command
+center cannot mutate GitHub.
 
 The runner is opt-in and fail-closed. It does not start unless
 `CODEX_TASK_RUNNER_ENABLED=1` and `CODEX_TASK_RUNNER_COMMAND` are configured. A
