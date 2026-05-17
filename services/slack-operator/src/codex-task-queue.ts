@@ -9,6 +9,15 @@ export type CodexTaskStatus =
   | "failed"
   | "cancelled";
 
+export type CodexRunnerHeartbeatStatus =
+  | "idle"
+  | "running"
+  | "completed"
+  | "failed"
+  | "disabled"
+  | "misconfigured"
+  | "error";
+
 export interface CodexTaskInput {
   repo: string;
   pullRequestNumber: number;
@@ -49,6 +58,16 @@ export interface CodexTask extends CodexTaskInput {
   progressMessage?: string;
   progressAt?: string;
   events?: CodexTaskEvent[];
+}
+
+export interface CodexRunnerHeartbeat {
+  schemaVersion: 1;
+  kind: "codex_runner_heartbeat";
+  runnerId: string;
+  status: CodexRunnerHeartbeatStatus;
+  message: string;
+  updatedAt: string;
+  activeTaskId?: string;
 }
 
 export interface CodexTaskQueueDeps {
@@ -298,8 +317,51 @@ export async function failCodexTask(
   return task;
 }
 
-export function summarizeCodexTasks(tasks: CodexTask[], limit = 100) {
+export async function readCodexRunnerHeartbeat(
+  deps: CodexTaskQueueDeps = {}
+): Promise<CodexRunnerHeartbeat | undefined> {
+  try {
+    const content = await readFile(runnerHeartbeatPath(deps.path), "utf8");
+    const value: unknown = JSON.parse(content);
+    return isCodexRunnerHeartbeat(value) ? value : undefined;
+  } catch (error) {
+    const code = isRecord(error) ? error.code : undefined;
+    if (code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+export async function updateCodexRunnerHeartbeat(
+  deps: CodexTaskQueueDeps & {
+    runnerId: string;
+    status: CodexRunnerHeartbeatStatus;
+    message?: string;
+    activeTaskId?: string;
+  }
+): Promise<CodexRunnerHeartbeat> {
+  const now = (deps.now ?? new Date()).toISOString();
+  const heartbeat: CodexRunnerHeartbeat = {
+    schemaVersion: 1,
+    kind: "codex_runner_heartbeat",
+    runnerId: deps.runnerId,
+    status: deps.status,
+    message: deps.message ?? codexRunnerStatusMessage(deps.status),
+    updatedAt: now,
+    ...(deps.activeTaskId ? { activeTaskId: deps.activeTaskId } : {}),
+  };
+  const path = runnerHeartbeatPath(deps.path);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(heartbeat, null, 2)}\n`);
+  return heartbeat;
+}
+
+export function summarizeCodexTasks(
+  tasks: CodexTask[],
+  limit = 100,
+  deps: { runner?: CodexRunnerHeartbeat; now?: Date } = {}
+) {
   const sorted = tasks.slice().sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  const runner = deps.runner ? summarizeCodexRunnerHeartbeat(deps.runner, deps.now ?? new Date()) : undefined;
   return {
     schemaVersion: 1,
     kind: "codex_task_queue",
@@ -310,6 +372,7 @@ export function summarizeCodexTasks(tasks: CodexTask[], limit = 100) {
       running: sorted.filter((task) => task.status === "running").length,
       terminal: sorted.filter((task) => TERMINAL_STATUSES.has(task.status)).length,
     },
+    ...(runner ? { runner } : {}),
     items: sorted.slice(0, limit),
   };
 }
@@ -361,10 +424,52 @@ function queuePath(path?: string): string {
     ?? "/tmp/averray-reference-agent/codex-tasks.json";
 }
 
+function runnerHeartbeatPath(path?: string): string {
+  return `${queuePath(path)}.runner.json`;
+}
+
+function summarizeCodexRunnerHeartbeat(heartbeat: CodexRunnerHeartbeat, now: Date) {
+  const updatedMs = Date.parse(heartbeat.updatedAt);
+  const ageMs = Number.isFinite(updatedMs) ? Math.max(0, now.getTime() - updatedMs) : undefined;
+  return {
+    ...heartbeat,
+    ...(typeof ageMs === "number" ? { ageMs, stale: ageMs > 90_000 } : { stale: true }),
+  };
+}
+
+function codexRunnerStatusMessage(status: CodexRunnerHeartbeatStatus): string {
+  switch (status) {
+    case "idle":
+      return "Codex runner is online and waiting for an approved task.";
+    case "running":
+      return "Codex runner is executing a task.";
+    case "completed":
+      return "Codex runner completed its latest task.";
+    case "failed":
+      return "Codex runner failed its latest task.";
+    case "disabled":
+      return "Codex task runner is disabled.";
+    case "misconfigured":
+      return "Codex task runner is misconfigured.";
+    case "error":
+      return "Codex task runner hit an error.";
+  }
+}
+
 function makeCodexTaskId(repo: string, pullRequestNumber: number, timestamp: string): string {
   const safeRepo = repo.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   const stamp = timestamp.replace(/[^0-9A-Za-z]/g, "");
   return `codex-task-${safeRepo}-${pullRequestNumber}-${stamp}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function isCodexRunnerHeartbeat(value: unknown): value is CodexRunnerHeartbeat {
+  if (!isRecord(value)) return false;
+  return value.kind === "codex_runner_heartbeat"
+    && value.schemaVersion === 1
+    && typeof value.runnerId === "string"
+    && typeof value.status === "string"
+    && typeof value.message === "string"
+    && typeof value.updatedAt === "string";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

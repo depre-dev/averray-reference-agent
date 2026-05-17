@@ -7,6 +7,7 @@ import {
   approveCodexTask,
   listCodexTasks,
   proposeCodexTask,
+  readCodexRunnerHeartbeat,
 } from "../../services/slack-operator/src/codex-task-queue.js";
 import {
   parseCodexTaskRunnerConfig,
@@ -77,6 +78,12 @@ describe("codex task runner", () => {
       completionSummary: "ready for Hermes",
       stdoutTail: "branch pushed\nready for Hermes\n",
     });
+    await expect(readCodexRunnerHeartbeat({ path })).resolves.toMatchObject({
+      runnerId: "test-runner",
+      status: "completed",
+      activeTaskId: proposed.task.id,
+      message: "ready for Hermes",
+    });
   });
 
   it("marks an approved task failed when the executor exits nonzero", async () => {
@@ -104,6 +111,12 @@ describe("codex task runner", () => {
       failureReason: "could not push branch",
       stderrTail: "could not push branch\n",
     });
+    await expect(readCodexRunnerHeartbeat({ path })).resolves.toMatchObject({
+      runnerId: "test-runner",
+      status: "failed",
+      activeTaskId: proposed.task.id,
+      message: "could not push branch",
+    });
   });
 
   it("does not mutate tasks when disabled or missing command", async () => {
@@ -117,11 +130,24 @@ describe("codex task runner", () => {
 
     await expect(runCodexTaskRunnerOnce(config(path, { enabled: false }))).resolves.toMatchObject({ status: "disabled" });
     expect((await listCodexTasks({ path }))[0]).toMatchObject({ status: "approved" });
+    await expect(readCodexRunnerHeartbeat({ path })).resolves.toMatchObject({ status: "disabled" });
 
     await expect(runCodexTaskRunnerOnce(config(path, { command: undefined }))).resolves.toMatchObject({
       status: "misconfigured",
     });
     expect((await listCodexTasks({ path }))[0]).toMatchObject({ status: "approved" });
+    await expect(readCodexRunnerHeartbeat({ path })).resolves.toMatchObject({ status: "misconfigured" });
+  });
+
+  it("reports idle heartbeat when no approved task is waiting", async () => {
+    const path = await tempQueuePath();
+
+    await expect(runCodexTaskRunnerOnce(config(path))).resolves.toMatchObject({ status: "idle" });
+    await expect(readCodexRunnerHeartbeat({ path })).resolves.toMatchObject({
+      runnerId: "test-runner",
+      status: "idle",
+      message: "Codex runner is online; no approved task is waiting.",
+    });
   });
 
   it("parses JSON command arguments from env", () => {
