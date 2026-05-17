@@ -1673,6 +1673,24 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .active-agent[data-agent="codex"] .aa-dot  { background: var(--violet); }
     .active-agent[data-agent="hermes"] .aa-dot { background: var(--cyan); }
     .active-agent[data-agent="deploy"] .aa-dot { background: var(--ok); }
+    .work-state {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid color-mix(in oklab, var(--state-accent, var(--line)) 55%, transparent);
+      border-radius: 999px;
+      padding: 2px 7px;
+      color: var(--state-accent, var(--muted));
+      background: color-mix(in oklab, var(--state-accent, var(--line)) 10%, transparent);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .work-state[data-state="waiting"] { --state-accent: var(--violet); }
+    .work-state[data-state="active"] { --state-accent: var(--cyan); }
+    .work-state[data-state="ci"] { --state-accent: var(--warn); }
     .stale-dot {
       width: 8px;
       height: 8px;
@@ -1828,6 +1846,27 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
+    }
+    .codex-task-prompt {
+      display: grid;
+      gap: 10px;
+    }
+    .codex-state-note {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    .prompt-box {
+      margin: 0;
+      padding: 10px;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      color: var(--text);
+      background: var(--panel-2);
+      white-space: pre-wrap;
+      line-height: 1.45;
+      max-height: 180px;
+      overflow: auto;
     }
 
     /* ActorPill — coloured dot + arrow + actor name for "next" handoff display */
@@ -2494,7 +2533,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const copyButton = event.target && event.target.closest ? event.target.closest("[data-copy-text]") : null;
       if (copyButton) {
         const value = String(copyButton.getAttribute("data-copy-text") || "");
+        const label = String(copyButton.getAttribute("data-copy-label") || "Copied");
         void navigator.clipboard?.writeText(value);
+        const output = document.getElementById("command-output");
+        if (output) output.textContent = label + ".";
         return;
       }
       const suggestion = event.target && event.target.closest ? event.target.closest("[data-command-suggestion]") : null;
@@ -2664,7 +2706,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const labelEl = document.getElementById("sys-label");
       const agentsEl = document.getElementById("sys-agents");
       if (!block || !labelEl || !agentsEl) return;
-      const codex = items.filter((it) => boardLaneForItem(it, releaseVerdict(it)).key === "codex").length;
+      const codex = items.filter(isCodexActivelyWorking).length;
       const hermes = items.filter((it) => boardLaneForItem(it, releaseVerdict(it)).key === "hermes").length;
       const deploy = items.filter(isDeployItem).filter((it) => it.active === true || it.activeState === "running" || normalize(it.status) === "running").length;
       const total = codex + hermes + deploy;
@@ -2677,6 +2719,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (deploy > 0) parts.push('<span class="sys-agent" data-agent="deploy"><span class="sa-dot"></span>deploy ' + deploy + '</span>');
       agentsEl.innerHTML = parts.join("");
       agentsEl.classList.toggle("hidden", parts.length === 0);
+    }
+
+    function isCodexActivelyWorking(item) {
+      const verdict = releaseVerdict(item);
+      if (boardLaneForItem(item, verdict).key !== "codex") return false;
+      const state = codexWorkState(item, pipelineStage(item, verdict));
+      return state.state === "active" || state.state === "ci";
     }
 
     function toggleChecklistItem(decisionKey, itemId, checked) {
@@ -2785,7 +2834,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function boardLaneDefinitions() {
       return [
         { key: "attention", title: "Needs Attention", kicker: "urgent · operator", empty: "No blockers waiting." },
-        { key: "codex", title: "Codex Working", kicker: "agent · writing", empty: "Nothing waiting on Codex." },
+        { key: "codex", title: "Codex Needed", kicker: "agent · action needed", empty: "No Codex action needed." },
         { key: "hermes", title: "Hermes Checking", kicker: "agent · reviewing", empty: "Hermes has no active PR checks." },
         { key: "operator", title: "Operator Review", kicker: "operator · sign-off", empty: "No operator sign-off needed." },
         { key: "queue", title: "Release Queue", kicker: "cleared to merge", empty: "Nothing ready to merge." },
@@ -2853,12 +2902,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const prNumber = item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId);
       const idLabel = prNumber ? "#" + prNumber : (isDeployItem(item) ? "deploy" : "handoff");
       const activeAgent = activeAgentForItem(item, lane, stage);
+      const codexState = lane.key === "codex" ? codexWorkState(item, stage) : null;
       const locallyApproved = decisionForItem(item).status === "approved";
       const staleState = age.state || "fresh";
       return '<article class="handoff-card" data-select-card="' + escapeAttr(key) + '" data-selected="' + escapeAttr(String(selected)) + '" data-verdict="' + escapeAttr(verdict.level) + '">' +
         '<div class="card-head">' +
           '<div class="kc-head-l">' +
             '<span class="pill state-pill" data-level="' + escapeAttr(verdict.level) + '">' + escapeHtml(verdict.label) + '</span>' +
+            (codexState ? '<span class="work-state" data-state="' + escapeAttr(codexState.state) + '">' + escapeHtml(codexState.label) + '</span>' : "") +
             (activeAgent ? '<span class="active-agent" data-agent="' + escapeAttr(activeAgent.id) + '"><span class="aa-dot"></span>' + escapeHtml(activeAgent.label) + '</span>' : "") +
           '</div>' +
           '<div class="kc-head-r">' +
@@ -2974,15 +3025,85 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (isDeployItem(item) && (item.active === true || status === "running" || stageKey === "deploy")) {
         return { id: "deploy", label: "Deploy verifying" };
       }
-      if (lane && lane.key === "codex") return { id: "codex", label: "Codex writing" };
+      if (lane && lane.key === "codex") {
+        const state = codexWorkState(item, stage);
+        if (state.state === "active") return { id: "codex", label: "Codex active" };
+        return null;
+      }
       if (lane && lane.key === "hermes") return { id: "hermes", label: "Hermes reviewing" };
       if (item.activeState === "running" || item.active === true) {
         if (stageKey === "hermes" || stageKey === "review") return { id: "hermes", label: "Hermes reviewing" };
-        if (stageKey === "ci" || stageKey === "pr") return { id: "codex", label: "Codex writing" };
+        if (stageKey === "ci" || stageKey === "pr") return { id: "codex", label: "Codex active" };
         if (stageKey === "deploy") return { id: "deploy", label: "Deploy verifying" };
         return { id: "hermes", label: "Hermes reviewing" };
       }
       return null;
+    }
+
+    function codexWorkState(item, stage) {
+      const summary = item.summary || {};
+      const reason = normalize(summary.finalReason || summary.reason || item.reason);
+      const explicit = normalize(summary.codexState || summary.codexStatus || item.codexState || item.codexStatus);
+      if (explicit === "active" || explicit === "running" || explicit === "writing") {
+        return { state: "active", label: "Codex active", detail: "Codex is currently writing or pushing updates for this item." };
+      }
+      if (explicit === "ci" || explicit === "ci_after_codex" || explicit === "ci_after_update") {
+        return { state: "ci", label: "CI after Codex", detail: "Codex already pushed an update; CI is rerunning before Hermes reviews again." };
+      }
+      if (reason === "ci_in_progress") {
+        return { state: "ci", label: "CI after Codex", detail: "Codex appears to have pushed an update; wait for CI before assigning more work." };
+      }
+      const stageKey = (stage && stage.key) || "";
+      if (stageKey === "ci" && hasRecentCodexSignal(item)) {
+        return { state: "ci", label: "CI after Codex", detail: "A recent Codex signal exists and CI is the current gate." };
+      }
+      if (hasRecentCodexSignal(item)) {
+        return { state: "active", label: "Codex active", detail: "Recent Codex activity was detected for this PR." };
+      }
+      return { state: "waiting", label: "Waiting for Codex", detail: "No active Codex run detected. Start or continue Codex with the task prompt below." };
+    }
+
+    function hasRecentCodexSignal(item) {
+      const now = Date.now();
+      return itemEvents(item).some((entry) => {
+        const text = [
+          entry.intent,
+          entry.requester,
+          entry.reason,
+          entry.summary && entry.summary.requester,
+          entry.summary && entry.summary.actor,
+          entry.summary && entry.summary.codexState,
+          entry.summary && entry.summary.codexStatus,
+          entry.summary && entry.summary.finalReason,
+        ].map((value) => String(value || "")).join(" ").toLowerCase();
+        if (!text.includes("codex")) return false;
+        const t = Date.parse(String(entry.updatedAt || entry.createdAt || ""));
+        if (!Number.isFinite(t)) return true;
+        return now - t <= 30 * 60 * 1000;
+      });
+    }
+
+    function itemEvents(item) {
+      return [item].concat(Array.isArray(item.groupItems) ? item.groupItems : []);
+    }
+
+    function codexPromptForItem(item, summary, verdict, action) {
+      const repo = String(item.repo || "averray-agent/agent");
+      const pr = item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId);
+      const prLabel = pr ? "PR #" + pr : "this PR";
+      const title = cardTitleText(pipelineTitle(item), pr, item);
+      const correlation = item.correlationId ? " Correlation: " + item.correlationId + "." : "";
+      if (isDraftPullRequest(item)) {
+        return "Continue " + repo + " " + prLabel + " (" + title + "). The Hermes monitor shows the PR is still DRAFT and no active Codex run is detected. Finish the draft work, run the relevant checks, push updates, and mark the PR ready for review when complete. Do not merge or deploy." + correlation;
+      }
+      if (verdict.level === "block" && action.owner === "Codex") {
+        const request = buildFixRequest(item, summary || item.summary || {}, verdict, action);
+        return "Fix " + repo + " " + prLabel + " (" + title + "). Hermes reports BLOCK: " + request.reason + ". " + request.instruction + " Run/check: " + (request.checks.length ? request.checks.join(", ") : "the relevant local checks and CI") + ". Push the smallest fix, then let CI and Hermes re-run. Do not merge or deploy." + correlation;
+      }
+      if (action.owner === "Codex") {
+        return "Continue " + repo + " " + prLabel + " (" + title + "). Hermes says Codex owns the next action: " + action.text + ". Push the update and let CI/Hermes re-run. Do not merge or deploy." + correlation;
+      }
+      return "";
     }
 
     function renderMiniSteps(stage, verdict) {
@@ -2994,6 +3115,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function primaryActionButton(item, verdict, action, lane) {
+      if (lane.key === "codex") {
+        const state = codexWorkState(item, pipelineStage(item, verdict));
+        if (state.state === "waiting") {
+          return '<button class="soft-button" data-action="primary" type="button" data-copy-label="Codex prompt copied" data-copy-text="' + escapeAttr(codexPromptForItem(item, item.summary || {}, verdict, action)) + '">Copy Codex prompt</button>';
+        }
+        if (state.state === "ci") return '<button class="soft-button" type="button" data-command-suggestion="github status">Check CI</button>';
+        return '<button class="soft-button" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '">Inspect Codex state</button>';
+      }
       if (verdict.level === "block") return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '">Fix plan -></button>';
       if (isDraftPullRequest(item)) return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '">Codex draft -></button>';
       if (verdict.level === "needs-review") return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '">Review</button>';
@@ -3107,6 +3236,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '<section class="drawer-section"><h3>Hermes verdict</h3>' + renderHermesVerdictBox(verdict, age) + (richReviewWhy ? '<div class="review-why">' + richReviewWhy + '</div>' : "") + '</section>' +
         '<section class="drawer-section">' + renderHandoffOwnerContract(item, verdict, action) + '</section>' +
         '<section class="drawer-section">' + renderActionRecipe(item, summary, verdict, action) + '</section>' +
+        renderCodexTaskPrompt(item, summary, verdict, action) +
         (verdict.level === "block" ? renderBlockResolutionPanel(item, summary, verdict, action) : "") +
         (verdict.level === "needs-review" && !isDraftPullRequest(item) ? '<section class="drawer-section">' + renderOperatorChecklistPanel(item, verdict, action) + '</section>' : "") +
         '<section class="drawer-section"><h3>Agent pre-check</h3>' + renderAgentPrecheckList(item, summary, verdict, stage) + '</section>' +
@@ -3122,6 +3252,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         (prUrl ? '<a class="pill" href="' + escapeAttr(prUrl) + '" target="_blank" rel="noreferrer">Open PR</a>' : "") +
         (workflowRunUrl ? '<a class="pill" href="' + escapeAttr(workflowRunUrl) + '" target="_blank" rel="noreferrer">Workflow Run</a>' : "") +
         '<button class="soft-button" type="button" data-command-suggestion="handoff monitor details">Ask Hermes</button>' +
+        (codexPromptForItem(item, summary, verdict, action) ? '<button class="soft-button" type="button" data-copy-label="Codex prompt copied" data-copy-text="' + escapeAttr(codexPromptForItem(item, summary, verdict, action)) + '">Copy Codex prompt</button>' : "") +
         '<button class="soft-button" type="button" data-copy-text="' + escapeAttr(item.correlationId || "") + '">copy correlation</button>' +
         (verdict.level === "needs-review" && !isDraftPullRequest(item) && !locallyApproved ? '<button class="soft-button" data-action="primary" type="button" data-monitor-decision="approve" data-decision-key="' + escapeAttr(decisionKeyForItem(item)) + '">Approve locally</button>' : "") +
         '</div></div>';
@@ -3190,12 +3321,24 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       '</div>';
     }
 
+    function renderCodexTaskPrompt(item, summary, verdict, action) {
+      const prompt = codexPromptForItem(item, summary, verdict, action);
+      if (!prompt) return "";
+      const state = codexWorkState(item, pipelineStage(item, verdict));
+      return '<section class="drawer-section codex-task-prompt"><h3>Codex task prompt</h3>' +
+        '<p class="codex-state-note">' + escapeHtml(state.detail) + '</p>' +
+        '<pre class="prompt-box">' + escapeHtml(prompt) + '</pre>' +
+        '<div class="card-actions"><button class="soft-button" data-action="primary" type="button" data-copy-label="Codex prompt copied" data-copy-text="' + escapeAttr(prompt) + '">Copy Codex prompt</button></div>' +
+        '</section>';
+    }
+
     function actionRecipeForItem(item, summary, verdict, action) {
       if (isDraftPullRequest(item)) {
+        const state = codexWorkState(item, pipelineStage(item, verdict));
         return {
           owner: "Codex",
           why: "The PR is still a draft, so it is not ready for Hermes/operator release judgment.",
-          ask: "Finish the draft work or mark the PR ready for review.",
+          ask: state.state === "waiting" ? "Start or continue Codex with the task prompt. Finish the draft work or mark the PR ready for review." : "Wait for Codex/CI to finish before assigning more work.",
           clearsWhen: "GitHub reports draft=false and CI/Hermes run on the ready PR.",
           proof: ["draft=false", "CI green", "Hermes verdict"],
         };
@@ -3435,7 +3578,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         { key: "ci", label: "CI" },
         { key: "codex", label: "Codex" },
         { key: "hermes", label: "Hermes" },
-        { key: "gate", label: "Human / Gate" },
+        { key: "gate", label: "Operator / Gate" },
         { key: "deploy", label: "Deploy" },
       ];
       const activeIndex = Math.max(0, phases.findIndex((p) => p.key === stage.key));
