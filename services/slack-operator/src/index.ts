@@ -2,6 +2,7 @@ import http from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import { logger, optionalEnv, query } from "@avg/mcp-common";
 import { createDefaultWorkflowDeps } from "@avg/averray-mcp/default-workflow-runtime";
+import { invokeAgentTask } from "@avg/averray-mcp/agent-invocation";
 import { getHandoffMonitor } from "@avg/averray-mcp/handoff-events";
 import { handleOperatorCommandText } from "@avg/averray-mcp/operator-handler";
 import {
@@ -139,6 +140,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
           "/monitor/events",
           "/monitor/stream",
           "/monitor/command",
+          "/monitor/recheck",
           "/monitor/codex-tasks",
           "/monitor/manifest.webmanifest",
         ] : [],
@@ -201,6 +203,18 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       return;
     }
     await handleMonitorCodexTaskRequest(request, response);
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/monitor/recheck") {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    await handleMonitorRecheckRequest(request, response);
     return;
   }
   if (request.method === "POST" && url.pathname === "/monitor/command") {
@@ -386,6 +400,67 @@ async function handleMonitorCommandRequest(request: http.IncomingMessage, respon
     logger.error({ err: error }, "monitor_operator_command_failed");
     writeJson(response, 500, {
       error: "monitor_command_failed",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function handleMonitorRecheckRequest(request: http.IncomingMessage, response: http.ServerResponse) {
+  try {
+    const rawBody = await readBody(request);
+    const payload = rawBody ? JSON.parse(rawBody) as unknown : {};
+    if (!isRecord(payload)) {
+      writeJson(response, 400, { error: "invalid_payload" });
+      return;
+    }
+
+    const repo = stringField(payload, "repo");
+    const pullRequestNumber = numberField(payload, "pullRequestNumber");
+    if (!repo || typeof pullRequestNumber !== "number" || pullRequestNumber < 1) {
+      writeJson(response, 400, {
+        error: "invalid_recheck_request",
+        message: "repo and pullRequestNumber are required to ask Hermes for a PR re-check.",
+      });
+      return;
+    }
+
+    const correlationId = stringField(payload, "correlationId")
+      ?? `monitor-recheck-${repo.replace(/[^a-zA-Z0-9]+/g, "-")}-${pullRequestNumber}-${Date.now()}`;
+    const reason = stringField(payload, "reason") ?? "monitor requested Hermes re-check after Codex handoff";
+    const deps = {
+      query,
+      workflowDeps: createDefaultWorkflowDeps(),
+      githubEnv: {
+        ...process.env,
+        // Monitor-triggered re-checks are private/read-only. The GitHub Actions
+        // handoff remains the path that may update PR comments.
+        GITHUB_PR_HANDOFF_COMMENTS_ENABLED: "0",
+      },
+    };
+    const base = {
+      requester: "command-center",
+      repo,
+      pullRequestNumber,
+      correlationId,
+      reason,
+    };
+    const codeReview = await invokeAgentTask({ ...base, intent: "pr_code_review" }, deps);
+    const handoff = await invokeAgentTask({
+      ...base,
+      intent: "pr_handoff",
+      testCaseIds: ["TBE2E-004"],
+    }, deps);
+    writeJson(response, 200, {
+      ok: true,
+      text: `Hermes re-check completed for ${repo}#${pullRequestNumber}.`,
+      codeReview,
+      handoff,
+      monitor: await loadMonitorSnapshot(new URL("http://localhost/monitor/events?limit=50&activeWindowMinutes=240")),
+    });
+  } catch (error) {
+    logger.error({ err: error }, "monitor_recheck_failed");
+    writeJson(response, 500, {
+      error: "monitor_recheck_failed",
       message: error instanceof Error ? error.message : String(error),
     });
   }

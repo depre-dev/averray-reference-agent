@@ -104,12 +104,13 @@ export function renderMonitorManifest(options: { name?: string; shortName?: stri
   );
 }
 
-export function renderMonitorHtml(options: { title?: string; eventsPath?: string; streamPath?: string; commandPath?: string; codexTasksPath?: string; manifestPath?: string } = {}): string {
+export function renderMonitorHtml(options: { title?: string; eventsPath?: string; streamPath?: string; commandPath?: string; codexTasksPath?: string; recheckPath?: string; manifestPath?: string } = {}): string {
   const title = escapeHtml(options.title ?? "Hermes Handoff Monitor");
   const eventsPath = JSON.stringify(options.eventsPath ?? "/monitor/events");
   const streamPath = JSON.stringify(options.streamPath ?? "/monitor/stream");
   const commandPath = JSON.stringify(options.commandPath ?? "/monitor/command");
   const codexTasksPath = JSON.stringify(options.codexTasksPath ?? "/monitor/codex-tasks");
+  const recheckPath = JSON.stringify(options.recheckPath ?? "/monitor/recheck");
   const manifestPath = options.manifestPath ?? "/monitor/manifest.webmanifest";
   const brandIcon = svgDataUrl(MONITOR_BRAND_SVG);
   return `<!doctype html>
@@ -2926,11 +2927,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     const streamPath = ${streamPath};
     const commandPath = ${commandPath};
     const codexTasksPath = ${codexTasksPath};
+    const recheckPath = ${recheckPath};
     const token = new URLSearchParams(location.search).get("token");
     const withToken = buildMonitorUrl(eventsPath);
     const streamUrl = buildMonitorUrl(streamPath);
     const commandUrl = buildCommandUrl(commandPath);
     const codexTasksUrl = buildCommandUrl(codexTasksPath);
+    const recheckUrl = buildCommandUrl(recheckPath);
     const decisionStorageKey = "averray-monitor-operator-decisions:v1";
     let pipelineFilter = "all";
     let repoFilter = "all";
@@ -3017,6 +3020,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const codexTaskButton = event.target && event.target.closest ? event.target.closest("[data-codex-task-action]") : null;
       if (codexTaskButton) {
         void handleCodexTaskAction(codexTaskButton);
+        return;
+      }
+      const recheckButton = event.target && event.target.closest ? event.target.closest("[data-hermes-recheck]") : null;
+      if (recheckButton) {
+        void handleHermesRecheckAction(recheckButton);
         return;
       }
       const button = event.target && event.target.closest ? event.target.closest("[data-monitor-decision]") : null;
@@ -4138,7 +4146,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return '<button class="soft-button" type="button" data-copy-label="' + escapeAttr(codexCopyLabel()) + '" data-copy-text="' + escapeAttr(task.prompt || prompt) + '">Copy Codex prompt</button>';
       }
       if (task && normalize(task.status) === "completed" && codexTaskCompletedAfterHermesReview(item)) {
-        return '<button class="soft-button" data-action="primary" type="button" data-command-suggestion="handoff monitor details">Ask Hermes to re-check</button>';
+        return '<button class="soft-button" data-action="primary" type="button" data-hermes-recheck="true" data-card-key="' + escapeAttr(boardItemKey(item)) + '">Ask Hermes to re-check</button>';
       }
       if (task && normalize(task.status) === "failed") {
         return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="propose" data-card-key="' + escapeAttr(boardItemKey(item)) + '">Propose retry</button>';
@@ -4751,6 +4759,47 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           latestPayload = Object.assign({}, latestPayload, { codexTasks: result.queue });
           render(latestPayload);
         }
+      }
+      return result;
+    }
+
+    async function handleHermesRecheckAction(button) {
+      const key = String(button.getAttribute("data-card-key") || selectedKey || "");
+      const item = itemByBoardKey(key) || selectedItem();
+      const output = document.getElementById("command-output");
+      button.disabled = true;
+      try {
+        if (!item) throw new Error("No PR selected for Hermes re-check.");
+        const pr = Number(item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId));
+        const repo = String(item.repo || "averray-agent/agent");
+        if (!repo || !Number.isFinite(pr) || pr < 1) throw new Error("This card does not have enough PR metadata for Hermes re-check.");
+        if (output) output.textContent = "Asking Hermes to re-check " + repo + "#" + pr + "…";
+        const result = await postHermesRecheck({
+          repo,
+          pullRequestNumber: pr,
+          correlationId: item.correlationId,
+          reason: "monitor requested Hermes re-check after Codex handoff",
+        });
+        if (output) output.textContent = result.text || ("Hermes re-check completed for " + repo + "#" + pr + ".");
+      } catch (error) {
+        if (output) output.textContent = "Hermes re-check failed: " + String(error.message || error);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function postHermesRecheck(payload) {
+      const response = await fetch(recheckUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || result.error || "HTTP " + response.status);
+      if (result.monitor) {
+        render(result.monitor);
+      } else {
+        await load();
       }
       return result;
     }

@@ -61,6 +61,7 @@ describe("slack operator personal monitor", () => {
       streamPath: "/monitor/stream",
       commandPath: "/monitor/command",
       codexTasksPath: "/monitor/codex-tasks",
+      recheckPath: "/monitor/recheck",
     });
 
     expect(html).toContain("<title>Pascal Monitor</title>");
@@ -105,6 +106,9 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Codex task runner reported this task completed. Hermes should re-check");
     expect(html).toContain("CODEX FAILED");
     expect(html).toContain("Propose retry");
+    expect(html).toContain("data-hermes-recheck");
+    expect(html).toContain("handleHermesRecheckAction(recheckButton)");
+    expect(html).toContain("fetch(recheckUrl");
     expect(html).toContain("isCodexActivelyWorking");
     expect(html).toContain("Copy for Codex app");
     expect(html).toContain("Propose Codex task");
@@ -143,6 +147,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("const streamPath = \"/monitor/stream\";");
     expect(html).toContain("const commandPath = \"/monitor/command\";");
     expect(html).toContain("const codexTasksPath = \"/monitor/codex-tasks\";");
+    expect(html).toContain("const recheckPath = \"/monitor/recheck\";");
     expect(html).toContain("new EventSource(streamUrl)");
     expect(html).toContain("addEventListener(\"monitor\"");
     expect(html).toContain("startPolling(\"polling fallback 5s\")");
