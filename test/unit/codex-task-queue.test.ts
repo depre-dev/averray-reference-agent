@@ -11,8 +11,10 @@ import {
   failCodexTask,
   listCodexTasks,
   proposeCodexTask,
+  readCodexRunnerHeartbeat,
   summarizeCodexTasks,
   updateCodexTaskProgress,
+  updateCodexRunnerHeartbeat,
 } from "../../services/slack-operator/src/codex-task-queue.js";
 
 describe("codex task queue", () => {
@@ -207,5 +209,35 @@ describe("codex task queue", () => {
       stderrTail: "failed",
     });
     expect(await claimNextApprovedCodexTask({ path })).toBeUndefined();
+  });
+
+  it("records runner heartbeat and includes freshness in queue summary", async () => {
+    const path = await tempQueuePath();
+    const heartbeat = await updateCodexRunnerHeartbeat({
+      path,
+      runnerId: "runner-a",
+      status: "idle",
+      message: "waiting for approved work",
+      now: new Date("2026-05-17T14:00:00.000Z"),
+    });
+
+    await expect(readCodexRunnerHeartbeat({ path })).resolves.toMatchObject({
+      kind: "codex_runner_heartbeat",
+      runnerId: "runner-a",
+      status: "idle",
+      message: "waiting for approved work",
+    });
+
+    expect(summarizeCodexTasks([], 100, {
+      runner: heartbeat,
+      now: new Date("2026-05-17T14:00:10.000Z"),
+    })).toMatchObject({
+      runner: {
+        runnerId: "runner-a",
+        status: "idle",
+        ageMs: 10_000,
+        stale: false,
+      },
+    });
   });
 });

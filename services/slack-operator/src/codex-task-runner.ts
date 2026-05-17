@@ -8,6 +8,7 @@ import {
   completeCodexTask,
   failCodexTask,
   updateCodexTaskProgress,
+  updateCodexRunnerHeartbeat,
 } from "./codex-task-queue.js";
 
 export interface CodexTaskRunnerConfig {
@@ -61,9 +62,18 @@ export async function runCodexTaskRunnerOnce(
   config: CodexTaskRunnerConfig,
   deps: { executor?: CodexTaskExecutor; now?: Date } = {}
 ): Promise<CodexTaskRunnerOnceResult> {
-  if (!config.enabled) return { status: "disabled" };
+  if (!config.enabled) {
+    await updateRunnerHeartbeat(config, "disabled", "Codex task runner is disabled.", deps.now);
+    return { status: "disabled" };
+  }
   const executor = deps.executor ?? executeCodexTaskCommand;
   if (!config.command && executor === executeCodexTaskCommand) {
+    await updateRunnerHeartbeat(
+      config,
+      "misconfigured",
+      "CODEX_TASK_RUNNER_COMMAND is required when the Codex task runner is enabled.",
+      deps.now
+    );
     return {
       status: "misconfigured",
       reason: "CODEX_TASK_RUNNER_COMMAND is required when the Codex task runner is enabled.",
@@ -75,18 +85,37 @@ export async function runCodexTaskRunnerOnce(
     runnerId: config.runnerId,
     now: deps.now,
   });
-  if (!claimed) return { status: "idle" };
+  if (!claimed) {
+    await updateRunnerHeartbeat(config, "idle", "Codex runner is online; no approved task is waiting.", deps.now);
+    return { status: "idle" };
+  }
+
+  await updateRunnerHeartbeat(
+    config,
+    "running",
+    `Codex runner claimed ${claimed.repo}#${claimed.pullRequestNumber}.`,
+    deps.now,
+    claimed.id
+  );
 
   try {
     const result = await executor(claimed, config);
     if (result.exitCode === 0) {
+      const summary = sanitizeOutput(result.summary ?? summarizeCommandResult(result.stdout));
       const task = await completeCodexTask(claimed.id, {
         path: config.path,
-        completionSummary: sanitizeOutput(result.summary ?? summarizeCommandResult(result.stdout)),
+        completionSummary: summary,
         exitCode: result.exitCode,
         stdoutTail: sanitizeTail(result.stdout, config.outputTailBytes),
         stderrTail: sanitizeTail(result.stderr, config.outputTailBytes),
       });
+      await updateRunnerHeartbeat(
+        config,
+        "completed",
+        summary || `Codex runner completed ${claimed.repo}#${claimed.pullRequestNumber}.`,
+        undefined,
+        claimed.id
+      );
       return { status: "completed", task: task ?? claimed };
     }
     const reason = summarizeFailure(result);
@@ -97,6 +126,7 @@ export async function runCodexTaskRunnerOnce(
       stdoutTail: sanitizeTail(result.stdout, config.outputTailBytes),
       stderrTail: sanitizeTail(result.stderr, config.outputTailBytes),
     });
+    await updateRunnerHeartbeat(config, "failed", reason, undefined, claimed.id);
     return { status: "failed", task: task ?? claimed, reason };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -104,6 +134,7 @@ export async function runCodexTaskRunnerOnce(
       path: config.path,
       failureReason: reason,
     });
+    await updateRunnerHeartbeat(config, "error", reason, undefined, claimed.id);
     return { status: "failed", task: task ?? claimed, reason };
   }
 }
@@ -207,6 +238,23 @@ function taskEnvironment(task: CodexTask): NodeJS.ProcessEnv {
     CODEX_TASK_REQUESTER: task.requester ?? "",
     CODEX_TASK_PROMPT: task.prompt,
   };
+}
+
+async function updateRunnerHeartbeat(
+  config: CodexTaskRunnerConfig,
+  status: Parameters<typeof updateCodexRunnerHeartbeat>[0]["status"],
+  message: string,
+  now?: Date,
+  activeTaskId?: string
+): Promise<void> {
+  await updateCodexRunnerHeartbeat({
+    path: config.path,
+    runnerId: config.runnerId,
+    status,
+    message,
+    ...(activeTaskId ? { activeTaskId } : {}),
+    ...(now ? { now } : {}),
+  }).catch(() => undefined);
 }
 
 function summarizeFailure(result: CodexTaskRunResult): string {

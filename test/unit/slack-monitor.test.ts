@@ -122,7 +122,15 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("renderCodexTaskProgress(task)");
     expect(html).toContain("renderCodexTaskEvents(task)");
     expect(html).toContain("latestCodexTasks");
+    expect(html).toContain("latestCodexRunner");
     expect(html).toContain("normalizeCodexTasks(payload.codexTasks)");
+    expect(html).toContain("normalizeCodexRunner(payload.codexTasks && payload.codexTasks.runner)");
+    expect(html).toContain("codexRunnerAgeLabel(runner)");
+    expect(html).toContain("codexRunnerStatusLabel(latestCodexRunner)");
+    expect(html).toContain("Codex worker online.");
+    expect(html).toContain("Codex worker heartbeat is stale.");
+    expect(html).toContain("No Codex heartbeat visible.");
+    expect(html).toContain("Runner: no heartbeat yet");
     expect(html).toContain("codexTaskForItem(item)");
     expect(html).toContain("data-codex-task-action");
     expect(html).toContain("handleCodexTaskAction(codexTaskButton)");

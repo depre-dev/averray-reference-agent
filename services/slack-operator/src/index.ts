@@ -35,6 +35,7 @@ import {
   cancelCodexTask,
   listCodexTasks,
   proposeCodexTask,
+  readCodexRunnerHeartbeat,
   summarizeCodexTasks,
 } from "./codex-task-queue.js";
 import {
@@ -190,7 +191,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       writeJson(response, 401, { error: "monitor_unauthorized" });
       return;
     }
-    writeJson(response, 200, summarizeCodexTasks(await listCodexTasks(), 100));
+    writeJson(response, 200, await loadCodexTaskQueueSummary());
     return;
   }
   if (request.method === "POST" && url.pathname === "/monitor/codex-tasks") {
@@ -500,7 +501,7 @@ async function handleMonitorCodexTaskRequest(request: http.IncomingMessage, resp
         action,
         created: result.created,
         task: result.task,
-        queue: summarizeCodexTasks(await listCodexTasks(), 100),
+        queue: await loadCodexTaskQueueSummary(),
       });
       return;
     }
@@ -520,7 +521,7 @@ async function handleMonitorCodexTaskRequest(request: http.IncomingMessage, resp
         ok: true,
         action,
         task,
-        queue: summarizeCodexTasks(await listCodexTasks(), 100),
+        queue: await loadCodexTaskQueueSummary(),
       });
       return;
     }
@@ -540,7 +541,7 @@ async function handleMonitorCodexTaskRequest(request: http.IncomingMessage, resp
         ok: true,
         action,
         task,
-        queue: summarizeCodexTasks(await listCodexTasks(), 100),
+        queue: await loadCodexTaskQueueSummary(),
       });
       return;
     }
@@ -868,8 +869,14 @@ async function loadMonitorSnapshot(url: URL): Promise<unknown> {
   const enriched = await enrichMonitorWithGithubPrState(monitor);
   return {
     ...enriched,
-    codexTasks: summarizeCodexTasks(await listCodexTasks(), 100),
+    codexTasks: await loadCodexTaskQueueSummary(),
   };
+}
+
+async function loadCodexTaskQueueSummary() {
+  const codexTasks = await listCodexTasks();
+  const codexRunner = await readCodexRunnerHeartbeat().catch(() => undefined);
+  return summarizeCodexTasks(codexTasks, 100, { runner: codexRunner });
 }
 
 async function writeMonitorStream(

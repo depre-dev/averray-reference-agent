@@ -3317,6 +3317,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     let autoFocusPending = true;
     let latestPipelineItems = [];
     let latestCodexTasks = [];
+    let latestCodexRunner = null;
     let latestPayload = null;
     let monitorDecisions = loadMonitorDecisions();
     let pollTimer = null;
@@ -3760,6 +3761,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const recent = payload.recent || [];
       setText("generated", payload.generatedAt ? new Date(payload.generatedAt).toLocaleTimeString() : "unknown");
       latestCodexTasks = normalizeCodexTasks(payload.codexTasks);
+      latestCodexRunner = normalizeCodexRunner(payload.codexTasks && payload.codexTasks.runner);
       latestPipelineItems = groupPrPipelineItems(collectPipelineItems(payload));
       const attention = latestPipelineItems.filter(needsAttention);
       const verdicts = latestPipelineItems.map(releaseVerdict);
@@ -3837,6 +3839,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function codexAgentSnapshot(items) {
+      const runner = latestCodexRunner;
+      const runnerStatus = normalize(runner && runner.status);
+      const runnerLabel = codexRunnerStatusLabel(runner);
       const tasks = latestCodexTasks.slice().sort((a, b) => taskUpdatedMs(b) - taskUpdatedMs(a));
       const runningTask = tasks.find((task) => normalize(task.status) === "running");
       const approvedTask = tasks.find((task) => normalize(task.status) === "approved");
@@ -3850,10 +3855,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           stateLabel: "active",
           title: codexTaskTitle(runningTask),
           detail: runningTask.progressMessage || "task runner is working now.",
-          waitingOn: "Codex CLI worker",
+          waitingOn: runner && runner.runnerId ? "runner " + runner.runnerId : "Codex CLI worker",
           nextHandoff: "push branch -> CI -> Hermes",
           updated: taskAgeLabel(runningTask),
-          tags: ["runner active", normalize(runningTask.status), taskAgeLabel(runningTask)],
+          tags: ["runner active", runnerLabel, taskAgeLabel(runningTask)].filter(Boolean),
         };
       }
       if (ciItem) {
@@ -3876,10 +3881,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           stateLabel: "queued",
           title: codexTaskTitle(approvedTask),
           detail: "approved task is waiting for the Codex runner to claim it.",
-          waitingOn: "runner pickup",
+          waitingOn: runnerStatus ? runnerLabel : "runner pickup",
           nextHandoff: "Codex starts",
           updated: taskAgeLabel(approvedTask),
-          tags: ["approved", "waiting runner"],
+          tags: ["approved", runnerStatus ? runnerLabel : "waiting runner"],
         };
       }
       if (proposedTask) {
@@ -3908,16 +3913,55 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           tags: [handoffAge(codexOwned).label.toLowerCase(), "no active run"],
         };
       }
+      if (runner && runner.stale) {
+        return {
+          agent: "Codex",
+          state: "waiting",
+          stateLabel: "heartbeat stale",
+          title: "Codex worker heartbeat is stale.",
+          detail: runner.message || "Last runner heartbeat is older than the freshness window.",
+          waitingOn: "runner heartbeat",
+          nextHandoff: "verify Codex runner",
+          updated: codexRunnerAgeLabel(runner),
+          tags: [runnerLabel, "check runner"].filter(Boolean),
+        };
+      }
+      if (runnerStatus === "idle" || runnerStatus === "completed") {
+        return {
+          agent: "Codex",
+          state: "idle",
+          stateLabel: "idle / online",
+          title: "Codex worker online.",
+          detail: runner.message || "No approved task is waiting.",
+          waitingOn: "approved task",
+          nextHandoff: "starts when a task is approved",
+          updated: codexRunnerAgeLabel(runner),
+          tags: [runnerLabel, runner && runner.stale ? "stale heartbeat" : "heartbeat ok"].filter(Boolean),
+        };
+      }
+      if (["misconfigured", "failed", "error", "disabled"].includes(runnerStatus)) {
+        return {
+          agent: "Codex",
+          state: "waiting",
+          stateLabel: runnerStatus === "disabled" ? "disabled" : "runner issue",
+          title: "Codex worker needs attention.",
+          detail: runner.message || "Runner cannot safely claim work.",
+          waitingOn: runnerStatus === "disabled" ? "operator enable" : "runner config",
+          nextHandoff: "fix runner before dispatch",
+          updated: codexRunnerAgeLabel(runner),
+          tags: [runnerLabel, runner && runner.stale ? "stale heartbeat" : "heartbeat"].filter(Boolean),
+        };
+      }
       return {
         agent: "Codex",
         state: "idle",
-        stateLabel: "idle",
-        title: "No Codex work active.",
-        detail: "No proposed, approved, or running Codex task is visible.",
-        waitingOn: "new task",
-        nextHandoff: "none",
+        stateLabel: "no heartbeat",
+        title: "No Codex heartbeat visible.",
+        detail: "Queue proposals can be created, but no Codex runner has checked in yet.",
+        waitingOn: "runner heartbeat",
+        nextHandoff: "start / verify Codex runner",
         updated: "now",
-        tags: [],
+        tags: ["runner unknown"],
       };
     }
 
@@ -4019,6 +4063,17 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           priority: 400,
         });
       });
+      if (latestCodexRunner) {
+        const runnerStatus = normalize(latestCodexRunner.status);
+        const runnerPriority = runnerStatus === "running" ? 390 : ["failed", "error", "misconfigured", "disabled"].includes(runnerStatus) ? 340 : 100;
+        rows.push({
+          actor: "Codex",
+          text: "runner " + codexRunnerStatusLabel(latestCodexRunner) + " - " + (latestCodexRunner.message || "no runner message"),
+          age: codexRunnerAgeLabel(latestCodexRunner),
+          ts: Date.parse(String(latestCodexRunner.updatedAt || "")) || Date.now(),
+          priority: runnerPriority,
+        });
+      }
       latestCodexTasks.forEach((task) => {
         const status = normalize(task.status);
         if (isTerminalCodexTask(task) && status !== "completed") return;
@@ -4083,6 +4138,24 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const ms = taskUpdatedMs(task);
       if (!ms) return "unknown";
       return formatDuration(Math.max(0, Math.floor((Date.now() - ms) / 60000)));
+    }
+
+    function normalizeCodexRunner(value) {
+      if (!value || typeof value !== "object") return null;
+      return value;
+    }
+
+    function codexRunnerAgeLabel(runner) {
+      const parsed = Date.parse(String((runner && runner.updatedAt) || ""));
+      if (!Number.isFinite(parsed)) return "unknown";
+      return formatDuration(Math.max(0, Math.floor((Date.now() - parsed) / 60000)));
+    }
+
+    function codexRunnerStatusLabel(runner) {
+      if (!runner) return "";
+      const status = normalize(runner.status);
+      if (runner.stale) return status ? status + " / stale" : "stale heartbeat";
+      return status || "heartbeat";
     }
 
     function titleCaseActor(value) {
@@ -5522,12 +5595,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const queue = items.filter((item) => nextPipelineAction(item, releaseVerdict(item)).owner === "Merge queue").length;
       const blocked = items.filter((item) => releaseVerdict(item).level === "block").length;
       const runningTasks = latestCodexTasks.filter((task) => !isTerminalCodexTask(task)).length;
+      const runnerLabel = latestCodexRunner ? "Codex runner " + codexRunnerStatusLabel(latestCodexRunner) : "no Codex runner heartbeat";
       const summary = [
         blocked ? blocked + " blocked" : "no blockers",
         runningTasks ? runningTasks + " Codex queue item(s)" : "no active Codex task",
+        runnerLabel,
         hermes ? hermes + " awaiting Hermes" : "Hermes idle",
       ].join(" · ");
-      return { codex, hermes, operator, queue, blocked, runningTasks, summary };
+      return { codex, hermes, operator, queue, blocked, runningTasks, runnerLabel, summary };
     }
 
     function renderInsightMetrics(entries) {
@@ -5565,8 +5640,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function renderCodexQueueConsoleHint(label) {
       if (label !== "Codex") return "";
       const tasks = latestCodexTasks.filter((task) => !isTerminalCodexTask(task)).slice(0, 3);
-      if (!tasks.length) return '<div class="ci-note">No Codex queue task is currently proposed, approved, or running.</div>';
-      return '<div class="ci-note">Codex queue: ' + escapeHtml(tasks.map((task) => normalize(task.status) + " " + (task.repo || "") + "#" + (task.pullRequestNumber || "?")).join(" · ")) + '</div>';
+      const runnerText = latestCodexRunner
+        ? "Runner: " + codexRunnerStatusLabel(latestCodexRunner) + " · " + (latestCodexRunner.message || "no runner message")
+        : "Runner: no heartbeat yet";
+      if (!tasks.length) return '<div class="ci-note">No Codex queue task is currently proposed, approved, or running. ' + escapeHtml(runnerText) + '.</div>';
+      return '<div class="ci-note">Codex queue: ' + escapeHtml(tasks.map((task) => normalize(task.status) + " " + (task.repo || "") + "#" + (task.pullRequestNumber || "?")).join(" · ")) + '. ' + escapeHtml(runnerText) + '.</div>';
     }
 
     function currentStreamLabel() {
@@ -5634,6 +5712,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (!response.ok) throw new Error(result.message || result.error || "HTTP " + response.status);
       if (result.queue) {
         latestCodexTasks = normalizeCodexTasks(result.queue);
+        latestCodexRunner = normalizeCodexRunner(result.queue && result.queue.runner);
         if (latestPayload) {
           latestPayload = Object.assign({}, latestPayload, { codexTasks: result.queue });
           render(latestPayload);
