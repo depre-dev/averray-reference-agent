@@ -57,6 +57,9 @@ function isAllowedMonitorCommand(text: string): boolean {
     || /^(github status|github open prs|github ci failures|github issue digest|merge steward|take care of open prs)( details?| full| audit)?$/.test(text)
     || /^(operator status|ops health|business ledger|daily operator brief|find safe work|admin readiness|project memory|known projects|codex handoff protocol)( details?| full| audit)?$/.test(text)
     || /^what (can|should) (i|we) do next( details?| full| audit)?$/.test(text)
+    || /^what is happening now( details?| full| audit)?$/.test(text)
+    || /^what is (codex|hermes) doing( right now)?( details?| full| audit)?$/.test(text)
+    || /^what needs my action( details?| full| audit)?$/.test(text)
     || /^what can you do for us( details?| full| audit)?$/.test(text)
     || /^(how do we deploy|runbook for|secret rotation runbook)( .*)?$/.test(text)
     || /^propose (merge|deploy|secret rotation|rollback)\b/.test(text)
@@ -1482,6 +1485,90 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       line-height: 1.4;
       white-space: pre-wrap;
     }
+    .console-output[data-mode="insight"] {
+      max-height: 240px;
+      white-space: normal;
+    }
+    .console-insight {
+      display: grid;
+      gap: 8px;
+      color: var(--text);
+    }
+    .ci-head,
+    .ci-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .ci-head strong {
+      color: var(--cream);
+      font-size: 0.88rem;
+    }
+    .ci-head span,
+    .ci-note {
+      color: var(--muted);
+      font-size: 0.76rem;
+    }
+    .ci-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 6px;
+    }
+    .ci-metric {
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: rgba(17, 36, 29, 0.72);
+      padding: 7px 8px;
+    }
+    .ci-metric span {
+      display: block;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.62rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .ci-metric strong {
+      display: block;
+      margin-top: 3px;
+      color: var(--cream);
+      font-size: 1rem;
+    }
+    .ci-list {
+      display: grid;
+      gap: 5px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .ci-list li {
+      display: grid;
+      gap: 2px;
+      border: 1px solid rgba(184, 211, 196, 0.10);
+      border-left: 3px solid var(--amber);
+      border-radius: 8px;
+      background: rgba(8, 18, 14, 0.72);
+      padding: 7px 8px;
+    }
+    .ci-list li[data-owner="Codex"] { border-left-color: var(--violet); }
+    .ci-list li[data-owner="Hermes"] { border-left-color: var(--cyan); }
+    .ci-list li[data-owner="Operator"] { border-left-color: var(--amber); }
+    .ci-list li[data-owner="Merge queue"] { border-left-color: var(--ok); }
+    .ci-list strong {
+      color: var(--cream);
+      font-size: 0.78rem;
+    }
+    .ci-list span {
+      color: var(--text);
+      font-size: 0.76rem;
+    }
+    .ci-list em {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.65rem;
+      font-style: normal;
+    }
     .suggestions {
       display: flex;
       align-items: center;
@@ -2893,14 +2980,15 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           <input id="command-input" class="console-input" name="text" placeholder="Ask for status, merge steward, why this PR is here..." autocomplete="off">
           <button id="command-submit" type="submit">Send</button>
         </div>
-        <div id="command-output" class="console-output">Read-only Hermes console. It cannot start Codex work; paste Codex task prompts into a Codex thread.</div>
+        <div id="command-output" class="console-output">Ask "what is happening now" to see live Hermes, Codex, operator, deploy, and queue activity.</div>
       </div>
       <div class="suggestions" aria-label="Suggested Hermes commands">
+        <button class="suggestion" type="button" data-command-suggestion="what is happening now">now</button>
+        <button class="suggestion" type="button" data-command-suggestion="what is Codex doing">codex</button>
+        <button class="suggestion" type="button" data-command-suggestion="what is Hermes doing">hermes</button>
+        <button class="suggestion" type="button" data-command-suggestion="what needs my action">my action</button>
         <button class="suggestion" type="button" data-command-suggestion="handoff monitor details">handoff monitor</button>
         <button class="suggestion" type="button" data-command-suggestion="merge steward details">merge steward</button>
-        <button class="suggestion" type="button" data-command-suggestion="github status">github status</button>
-        <button class="suggestion" type="button" data-command-suggestion="ops health">ops health</button>
-        <button class="suggestion" type="button" data-command-suggestion="codex handoff protocol">protocol</button>
       </div>
     </form>
     <button id="fab-ask" type="button" aria-label="Ask Hermes" title="Ask Hermes">💬</button>
@@ -2912,13 +3000,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         <input id="ask-input" class="console-input" name="text" placeholder="Ask for status, merge steward, why this PR is here..." autocomplete="off">
         <button id="ask-submit" type="submit">Send</button>
       </div>
-      <div id="ask-output" class="console-output">Read-only Hermes console. It cannot start Codex work; use Codex task proposals for handoff.</div>
+      <div id="ask-output" class="console-output">Ask "what is happening now" to see live Hermes, Codex, operator, deploy, and queue activity.</div>
       <div class="suggestions" aria-label="Suggested Hermes commands (mobile)">
+        <button class="suggestion" type="button" data-command-suggestion="what is happening now">now</button>
+        <button class="suggestion" type="button" data-command-suggestion="what is Codex doing">codex</button>
+        <button class="suggestion" type="button" data-command-suggestion="what is Hermes doing">hermes</button>
+        <button class="suggestion" type="button" data-command-suggestion="what needs my action">my action</button>
         <button class="suggestion" type="button" data-command-suggestion="handoff monitor details">handoff monitor</button>
         <button class="suggestion" type="button" data-command-suggestion="merge steward details">merge steward</button>
-        <button class="suggestion" type="button" data-command-suggestion="github status">github status</button>
-        <button class="suggestion" type="button" data-command-suggestion="ops health">ops health</button>
-        <button class="suggestion" type="button" data-command-suggestion="codex handoff protocol">protocol</button>
       </div>
     </form>
   </main>
@@ -3013,8 +3102,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const suggestion = event.target && event.target.closest ? event.target.closest("[data-command-suggestion]") : null;
       if (suggestion) {
         const value = String(suggestion.getAttribute("data-command-suggestion") || "");
-        document.getElementById("command-input").value = contextualCommand(value);
-        document.getElementById("command-input").focus();
+        const targetInput = suggestion.closest("#ask-sheet") ? document.getElementById("ask-input") : document.getElementById("command-input");
+        if (targetInput) {
+          targetInput.value = contextualCommand(value);
+          targetInput.focus();
+        }
         return;
       }
       const codexTaskButton = event.target && event.target.closest ? event.target.closest("[data-codex-task-action]") : null;
@@ -4669,9 +4761,17 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (!output) return;
       const item = selectedItem();
       if (isCodexTaskPromptText(text)) {
+        output.dataset.mode = "text";
         output.textContent = "That is a Codex task prompt, not a Hermes monitor command. Paste it into a Codex thread/app so Codex can edit the PR. Hermes will observe the next commit and CI run here.";
         return;
       }
+      if (isMonitorInsightCommand(text)) {
+        output.dataset.mode = "insight";
+        output.innerHTML = renderMonitorConsoleInsight(text, item);
+        if (input) input.value = "";
+        return;
+      }
+      output.dataset.mode = "text";
       output.textContent = "Hermes is checking: " + text;
       if (submit) submit.disabled = true;
       try {
@@ -4687,13 +4787,169 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.message || payload.error || "HTTP " + response.status);
+        output.dataset.mode = "text";
         output.textContent = payload.text || "Hermes command completed.";
         if (input) input.value = "";
       } catch (error) {
+        output.dataset.mode = "text";
         output.textContent = "Command refused or failed: " + String(error.message || error);
       } finally {
         if (submit) submit.disabled = false;
       }
+    }
+
+    function isMonitorInsightCommand(text) {
+      const normalized = normalizeConsoleCommandText(text);
+      return Boolean(
+        /^(now|status|what is happening now|what is going on|what's going on|what is live|current status|right now)$/.test(normalized)
+        || /^what is (codex|hermes) doing( right now)?$/.test(normalized)
+        || /^(codex|hermes|operator|my action|my actions|what needs my action|what needs operator action|blocked|blockers|selected|selected card)$/.test(normalized)
+        || /^why (is )?(this )?(pr|card|item)( here)?$/.test(normalized)
+      );
+    }
+
+    function normalizeConsoleCommandText(text) {
+      return String(text || "").trim().toLowerCase().replace(/[.!?]+$/g, "").replace(/\s+/g, " ");
+    }
+
+    function renderMonitorConsoleInsight(text, item) {
+      const kind = monitorInsightKind(text);
+      if (kind === "selected") return renderSelectedConsoleInsight(item);
+      if (kind === "codex") return renderLaneConsoleInsight("Codex", (entry) => nextPipelineAction(entry, releaseVerdict(entry)).owner === "Codex");
+      if (kind === "hermes") return renderLaneConsoleInsight("Hermes", (entry) => nextPipelineAction(entry, releaseVerdict(entry)).owner === "Hermes");
+      if (kind === "operator") return renderLaneConsoleInsight("Operator", (entry) => nextPipelineAction(entry, releaseVerdict(entry)).owner === "Operator");
+      if (kind === "blocked") return renderLaneConsoleInsight("Blocked", (entry) => releaseVerdict(entry).level === "block" || needsAttention(entry));
+      return renderNowConsoleInsight();
+    }
+
+    function monitorInsightKind(text) {
+      const normalized = normalizeConsoleCommandText(text);
+      if (normalized.includes("codex")) return "codex";
+      if (normalized.includes("hermes")) return "hermes";
+      if (normalized.includes("operator") || normalized.includes("my action")) return "operator";
+      if (normalized.includes("block")) return "blocked";
+      if (normalized.includes("selected") || normalized.includes("why")) return "selected";
+      return "now";
+    }
+
+    function renderNowConsoleInsight() {
+      const items = latestPipelineItems || [];
+      const metrics = currentMonitorMetrics(items);
+      const next = topConsoleItems(items.filter((item) => boardLaneForItem(item, releaseVerdict(item)).key !== "done"), 4);
+      return '<div class="console-insight">' +
+        '<div class="ci-head"><strong>What is happening now</strong><span>' + escapeHtml(currentStreamLabel()) + '</span></div>' +
+        renderInsightMetrics([
+          ["Codex", metrics.codex],
+          ["Hermes", metrics.hermes],
+          ["Operator", metrics.operator],
+          ["Queue", metrics.queue],
+        ]) +
+        '<div class="ci-note">' + escapeHtml(metrics.summary) + '</div>' +
+        renderConsoleItemList("Next actions", next, "No active release work needs action right now.") +
+        '</div>';
+    }
+
+    function renderLaneConsoleInsight(label, predicate) {
+      const items = topConsoleItems((latestPipelineItems || []).filter(predicate), 5);
+      const intro = label === "Codex"
+        ? "Codex owns code changes, draft readiness, CI fixes, and pushed commits."
+        : label === "Hermes"
+          ? "Hermes owns read-only PR checks, code-risk review, testbed verification, and fresh verdicts."
+          : label === "Operator"
+            ? "Operator owns project intent, architecture, rollout, and business-risk sign-off after agent pre-check evidence exists."
+            : "These items have the strongest release-gate risk and need the named owner to clear them.";
+      return '<div class="console-insight">' +
+        '<div class="ci-head"><strong>' + escapeHtml(label + " activity") + '</strong><span>' + escapeHtml(currentStreamLabel()) + '</span></div>' +
+        '<div class="ci-note">' + escapeHtml(intro) + '</div>' +
+        renderConsoleItemList("Items", items, "Nothing currently assigned to " + label + ".") +
+        renderCodexQueueConsoleHint(label) +
+        '</div>';
+    }
+
+    function renderSelectedConsoleInsight(item) {
+      if (!item) {
+        return '<div class="console-insight">' +
+          '<div class="ci-head"><strong>Selected card</strong><span>none selected</span></div>' +
+          '<div class="ci-note">Click a card first, then ask “why this PR is here” or “what should happen next”.</div>' +
+          renderConsoleItemList("Suggested next actions", topConsoleItems(latestPipelineItems || [], 3), "No active cards are available.") +
+          '</div>';
+      }
+      const verdict = releaseVerdict(item);
+      const action = nextPipelineAction(item, verdict);
+      const task = codexTaskForItem(item);
+      const taskText = task ? "Codex task: " + normalize(task.status) + " · " + (task.id || "unknown task") : "No Codex task is attached.";
+      return '<div class="console-insight">' +
+        '<div class="ci-head"><strong>' + escapeHtml(pipelineTitle(item)) + '</strong><span>' + escapeHtml(verdict.label) + '</span></div>' +
+        renderInsightMetrics([
+          ["Owner", action.owner],
+          ["Stage", pipelineStage(item, verdict).label],
+          ["Age", handoffAge(item).label + " " + handoffAge(item).duration],
+          ["Tests", String((item.testCaseIds || []).length || "n/a")],
+        ]) +
+        '<div class="ci-note"><strong>Next:</strong> ' + escapeHtml(action.owner + " — " + action.text) + '</div>' +
+        '<div class="ci-note"><strong>Why:</strong> ' + escapeHtml(shortenVerdictWhy(verdict.why || "No release-gate reason recorded.")) + '</div>' +
+        '<div class="ci-note">' + escapeHtml(taskText) + '</div>' +
+        '</div>';
+    }
+
+    function currentMonitorMetrics(items) {
+      const codex = items.filter((item) => nextPipelineAction(item, releaseVerdict(item)).owner === "Codex").length;
+      const hermes = items.filter((item) => nextPipelineAction(item, releaseVerdict(item)).owner === "Hermes").length;
+      const operator = items.filter((item) => nextPipelineAction(item, releaseVerdict(item)).owner === "Operator").length;
+      const queue = items.filter((item) => nextPipelineAction(item, releaseVerdict(item)).owner === "Merge queue").length;
+      const blocked = items.filter((item) => releaseVerdict(item).level === "block").length;
+      const runningTasks = latestCodexTasks.filter((task) => !isTerminalCodexTask(task)).length;
+      const summary = [
+        blocked ? blocked + " blocked" : "no blockers",
+        runningTasks ? runningTasks + " Codex queue item(s)" : "no active Codex task",
+        hermes ? hermes + " awaiting Hermes" : "Hermes idle",
+      ].join(" · ");
+      return { codex, hermes, operator, queue, blocked, runningTasks, summary };
+    }
+
+    function renderInsightMetrics(entries) {
+      return '<div class="ci-grid">' + entries.map(([label, value]) =>
+        '<div class="ci-metric"><span>' + escapeHtml(label) + '</span><strong>' + escapeHtml(String(value)) + '</strong></div>'
+      ).join("") + '</div>';
+    }
+
+    function topConsoleItems(items, limit) {
+      return [...items]
+        .filter(Boolean)
+        .sort((a, b) => boardSortScore(b) - boardSortScore(a) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
+        .slice(0, limit);
+    }
+
+    function renderConsoleItemList(title, items, emptyText) {
+      if (!items.length) {
+        return '<div class="ci-note"><strong>' + escapeHtml(title) + ':</strong> ' + escapeHtml(emptyText) + '</div>';
+      }
+      return '<div class="ci-row"><strong>' + escapeHtml(title) + '</strong><span>' + escapeHtml(String(items.length) + " shown") + '</span></div>' +
+        '<ul class="ci-list">' + items.map(renderConsoleItemLine).join("") + '</ul>';
+    }
+
+    function renderConsoleItemLine(item) {
+      const verdict = releaseVerdict(item);
+      const action = nextPipelineAction(item, verdict);
+      const age = handoffAge(item);
+      return '<li data-owner="' + escapeAttr(action.owner) + '">' +
+        '<strong>' + escapeHtml(pipelineTitle(item)) + '</strong>' +
+        '<span>' + escapeHtml(action.owner + ": " + action.text) + '</span>' +
+        '<em>' + escapeHtml(verdict.label + " · " + age.label + " " + age.duration) + '</em>' +
+      '</li>';
+    }
+
+    function renderCodexQueueConsoleHint(label) {
+      if (label !== "Codex") return "";
+      const tasks = latestCodexTasks.filter((task) => !isTerminalCodexTask(task)).slice(0, 3);
+      if (!tasks.length) return '<div class="ci-note">No Codex queue task is currently proposed, approved, or running.</div>';
+      return '<div class="ci-note">Codex queue: ' + escapeHtml(tasks.map((task) => normalize(task.status) + " " + (task.repo || "") + "#" + (task.pullRequestNumber || "?")).join(" · ")) + '</div>';
+    }
+
+    function currentStreamLabel() {
+      const state = document.getElementById("live-status-state")?.textContent || "unknown";
+      const sub = document.getElementById("live-status-sub")?.textContent || "";
+      return [state, sub].filter(Boolean).join(" · ");
     }
 
     async function handleCodexTaskAction(button) {
