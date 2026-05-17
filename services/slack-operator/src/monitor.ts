@@ -1793,23 +1793,173 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .cm-row[data-state="fail"] .cm-dot { background: var(--bad); }
     .cm-row[data-state="pending"] .cm-dot { background: var(--warn); }
     .cm-name { color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
-    .cm-state {
+    .cm-state-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 1px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(82, 210, 115, 0.45);
+      background: var(--ok-bg);
       color: var(--ok);
-      font-size: 0.7rem;
-      font-weight: 700;
-      letter-spacing: 0.08em;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.66rem;
+      font-weight: 800;
+      letter-spacing: 0.1em;
       text-transform: uppercase;
     }
-    .cm-row[data-state="fail"] .cm-state    { color: var(--bad); }
-    .cm-row[data-state="pending"] .cm-state { color: var(--warn); }
+    .cm-row[data-state="fail"] .cm-state-pill    { border-color: rgba(238, 98, 96, 0.55); background: var(--bad-bg); color: var(--bad); }
+    .cm-row[data-state="pending"] .cm-state-pill { border-color: rgba(217, 173, 66, 0.5);  background: var(--warn-bg); color: var(--warn); }
     .cm-summary {
       display: flex;
       justify-content: flex-end;
-      gap: 10px;
+      gap: 8px;
       color: var(--muted);
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 0.72rem;
-      padding-top: 4px;
+      padding-top: 6px;
+    }
+    .cm-summary span {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 4px;
+      padding: 2px 8px;
+      border: 1px solid var(--line-soft);
+      border-radius: 999px;
+      font-weight: 700;
+    }
+    .cm-summary .cm-sum-label { font-weight: 500; opacity: 0.75; font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.08em; }
+    .cm-summary .cm-sum-pass    { color: var(--ok);   border-color: rgba(82, 210, 115, 0.36); }
+    .cm-summary .cm-sum-fail    { color: var(--bad);  border-color: rgba(238, 98, 96, 0.36); }
+    .cm-summary .cm-sum-pending { color: var(--warn); border-color: rgba(217, 173, 66, 0.36); }
+
+    /* Touched files — compact chip row when no paths are surfaced */
+    .touched-files-compact {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+    }
+    .touched-files-compact .tf-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line-soft);
+      background: rgba(12, 24, 19, 0.55);
+      color: var(--accent);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.72rem;
+      letter-spacing: 0.02em;
+    }
+    .touched-files-compact .tf-note {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.66rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-left: 4px;
+    }
+
+    /* Drawer header tightened — pill + close + links on a single row */
+    .drawer-topline {
+      align-items: center;
+      gap: 8px;
+      flex-wrap: nowrap;
+    }
+    .drawer-topline .dr-spacer { flex: 1 1 auto; }
+    .drawer-topline .drawer-head-links {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 1;
+      min-width: 0;
+    }
+    .drawer-topline .drawer-head-links .pill {
+      padding: 2px 8px;
+      font-size: 0.72rem;
+    }
+    .drawer-topline .dr-age {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.7rem;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .drawer-topline .dr-close {
+      min-height: 26px;
+      min-width: 26px;
+      padding: 0;
+      display: grid;
+      place-items: center;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+    .drawer-topline .dr-close:hover { color: var(--text); }
+    .drawer-title {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin: 6px 0 0;
+    }
+    .drawer-title .drawer-title-id {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.04em;
+      font-weight: 500;
+    }
+    .drawer-title .drawer-title-text {
+      color: var(--text);
+      font-size: 1.18rem;
+      line-height: 1.25;
+      font-weight: 700;
+    }
+
+    /* Review why — severity chip + body */
+    .review-why { margin-top: 10px; }
+    .rw-list { display: grid; gap: 6px; }
+    .rw-row {
+      display: grid;
+      grid-template-columns: 60px 1fr;
+      align-items: start;
+      gap: 10px;
+    }
+    .rw-sev {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2px 6px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      background: var(--surface-soft);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.62rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .rw-sev[data-severity="bad"]  { color: var(--bad);  border-color: rgba(238, 98, 96, 0.55); background: var(--bad-bg); }
+    .rw-sev[data-severity="warn"] { color: var(--warn); border-color: rgba(217, 173, 66, 0.55); background: var(--warn-bg); }
+    .rw-sev[data-severity="info"] { color: var(--cyan); border-color: rgba(86, 204, 228, 0.45); background: rgba(86, 204, 228, 0.10); }
+    .rw-body {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      min-width: 0;
+    }
+    .rw-code {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.04em;
+    }
+    .rw-msg { color: var(--text); line-height: 1.4; font-size: 0.86rem; }
+    .rw-note {
+      color: var(--text);
+      line-height: 1.4;
+      font-size: 0.86rem;
+      margin-top: 10px;
     }
 
     /* Touched files grouped by area */
@@ -2467,12 +2617,54 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (explicit) return String(explicit);
       const raw = String(title || "").trim();
       if (item && isDeployItem(item)) return "Post-deploy verification";
+      const derived = derivePrCardTitle(item, summary);
+      if (derived) return derived;
       if (prNumber) {
         const stripped = raw.replace(/^[^#]*#\\d+\\s*/, "").trim();
         if (!stripped || stripped === ("#" + prNumber)) return "PR handoff";
         return humaniseIntentLabel(stripped);
       }
       return humaniseIntentLabel(raw);
+    }
+
+    // Build a human, item-distinct card title from the verdict + review reasons
+    // when the upstream doesn't supply a real PR title. Falls back to null so
+    // the caller can decide its own default.
+    function derivePrCardTitle(item, summary) {
+      if (!item || !item.pullRequestNumber) return null;
+      const verdict = baseReleaseVerdict(item);
+      const level = verdict.level;
+      const reasons = Array.isArray(summary && summary.reviewReasons) ? summary.reviewReasons : [];
+      const primary = reasons.find(Boolean);
+      if (primary) {
+        const message = String(primary.message || "").trim();
+        if (message) return clampTitleText(message);
+        const code = String(primary.code || "").trim();
+        if (code) return humaniseIntentLabel(code);
+      }
+      const signals = (summary && summary.reviewSignals) || {};
+      const touched = Array.isArray(signals.touchedAreas) ? signals.touchedAreas : [];
+      if (level === "block") {
+        const why = String(verdict.why || "").trim();
+        if (why) return clampTitleText(why);
+        return "Blocked — investigate";
+      }
+      if (level === "pass") {
+        return touched.length ? "Ready to merge · " + touched.slice(0, 3).join(", ") : "Ready to merge";
+      }
+      if (level === "running") {
+        return touched.length ? "Hermes reviewing · " + touched.slice(0, 3).join(", ") : "Hermes reviewing";
+      }
+      if (level === "needs-review") {
+        return touched.length ? "Operator review · " + touched.slice(0, 3).join(", ") : "Operator review";
+      }
+      return null;
+    }
+
+    function clampTitleText(text) {
+      const trimmed = String(text || "").trim();
+      if (trimmed.length <= 90) return trimmed;
+      return trimmed.slice(0, 87).trimEnd() + "…";
     }
 
     function humaniseIntentLabel(value) {
@@ -2601,16 +2793,23 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         commitUrl ? '<a class="pill" href="' + escapeAttr(commitUrl) + '" target="_blank" rel="noreferrer">commit</a>' : "",
       ].filter(Boolean).join("");
       target.dataset.open = "true";
+      const drawerTitle = pipelineTitle(item);
+      const drawerTitleShort = cardTitleText(drawerTitle, item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
+      const richReviewWhy = renderReviewReasonsRich(summary) || (verdict.why ? '<div class="rw-note">' + escapeHtml(verdict.why) + '</div>' : "");
       target.innerHTML = '<div class="drawer-head">' +
-        '<div class="drawer-topline"><span class="pill state-pill" data-level="' + escapeAttr(verdict.level) + '">' + escapeHtml(verdict.label) + '</span>' +
+        '<div class="drawer-topline">' +
+          '<span class="pill state-pill" data-level="' + escapeAttr(verdict.level) + '">' + escapeHtml(verdict.label) + '</span>' +
           (locallyApproved ? '<span class="kc-local" title="Locally marked operator-approved">local</span>' : "") +
-          '<button class="soft-button" type="button" data-close-drawer>Close</button></div>' +
-        '<h2 class="drawer-title">' + escapeHtml(title) + '</h2>' +
-        '<div class="drawer-links">' + (links || '<span class="pill">no external links</span>') + '<span class="pill">' + escapeHtml(age.label + " " + age.duration) + '</span></div>' +
+          '<span class="dr-spacer"></span>' +
+          (links ? '<span class="drawer-head-links">' + links + '</span>' : "") +
+          '<span class="pill dr-age">' + escapeHtml(age.label + " " + age.duration) + '</span>' +
+          '<button class="soft-button dr-close" type="button" data-close-drawer aria-label="Close drawer">✕</button>' +
+        '</div>' +
+        '<h2 class="drawer-title"><span class="drawer-title-id">' + escapeHtml(drawerTitle) + '</span><span class="drawer-title-text">' + escapeHtml(drawerTitleShort) + '</span></h2>' +
         '</div>' +
         '<div class="drawer-body">' +
         (verdict.level === "block" ? '<section class="drawer-section">' + renderFailureCallout(verdict, summary) + '</section>' : "") +
-        '<section class="drawer-section"><h3>Hermes verdict</h3>' + renderHermesVerdictBox(verdict, age) + '<dl class="pipeline-detail" style="margin-top:8px">' + reviewWhy + '</dl></section>' +
+        '<section class="drawer-section"><h3>Hermes verdict</h3>' + renderHermesVerdictBox(verdict, age) + (richReviewWhy ? '<div class="review-why">' + richReviewWhy + '</div>' : "") + '</section>' +
         (verdict.level === "needs-review" ? '<section class="drawer-section">' + renderOperatorChecklistPanel(item, verdict, action) + '</section>' : "") +
         '<section class="drawer-section"><h3>Agent pre-check</h3>' + renderAgentPrecheckList(item, summary, verdict, stage) + '</section>' +
         '<section class="drawer-section"><h3>Checks</h3>' + renderCheckMatrix(summary, testSignals) + '</section>' +
@@ -2638,8 +2837,35 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function renderHermesVerdictBox(verdict, age) {
       return '<div class="verdict-box" data-level="' + escapeAttr(verdict.level) + '">' +
         '<div class="vb-head"><span>' + escapeHtml(verdict.label) + '</span><span class="vb-age">' + escapeHtml(age.label + " " + age.duration) + '</span></div>' +
-        '<div class="vb-text">' + escapeHtml(verdict.why) + '</div>' +
+        '<div class="vb-text">' + escapeHtml(shortenVerdictWhy(verdict.why)) + '</div>' +
         '</div>';
+    }
+
+    // Drop verbose prefixes Hermes adds to roll-up verdicts so the box reads as a clear summary.
+    function shortenVerdictWhy(why) {
+      const text = String(why || "").trim();
+      if (!text) return "";
+      const m = text.match(/^Strictest result across [^:]+:\\s*(.*)$/i);
+      if (m && m[1]) return m[1].trim();
+      return text;
+    }
+
+    // Render reviewReasons[] as severity-chip + message rows.
+    function renderReviewReasonsRich(summary) {
+      const reasons = Array.isArray(summary && summary.reviewReasons) ? summary.reviewReasons : [];
+      if (!reasons.length) return "";
+      return '<div class="rw-list">' + reasons.slice(0, 4).map((reason) => {
+        const severity = normalize(reason && reason.severity);
+        const sevClass = severity === "high" || severity === "blocker" ? "bad"
+          : severity === "medium" || severity === "warn" ? "warn"
+          : "info";
+        const code = String((reason && reason.code) || "review");
+        const message = String((reason && reason.message) || "Operator review recommended.");
+        return '<div class="rw-row" data-severity="' + escapeAttr(sevClass) + '">' +
+          '<span class="rw-sev" data-severity="' + escapeAttr(sevClass) + '">' + escapeHtml(severity || "info") + '</span>' +
+          '<span class="rw-body"><span class="rw-code">' + escapeHtml(code) + '</span><span class="rw-msg">' + escapeHtml(message) + '</span></span>' +
+        '</div>';
+      }).join("") + '</div>';
     }
 
     function renderOperatorChecklistPanel(item, verdict, action) {
@@ -2716,17 +2942,21 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         checks.map((c) => '<div class="cm-row" data-state="' + escapeAttr(c.state) + '">' +
           '<span class="cm-dot"></span>' +
           '<span class="cm-name">' + escapeHtml(c.name) + '</span>' +
-          '<span class="cm-state">' + escapeHtml(c.state) + '</span>' +
+          '<span class="cm-state-pill">' + escapeHtml(c.state) + '</span>' +
         '</div>').join("") +
         '</div>' +
-        '<div class="cm-summary">' + pass + ' pass · ' + fail + ' fail · ' + pending + ' pending</div>';
+        '<div class="cm-summary">' +
+          '<span class="cm-sum-pass">' + pass + '<span class="cm-sum-label">pass</span></span>' +
+          '<span class="cm-sum-fail">' + fail + '<span class="cm-sum-label">fail</span></span>' +
+          '<span class="cm-sum-pending">' + pending + '<span class="cm-sum-label">pending</span></span>' +
+        '</div>';
     }
 
     function collectCheckMatrix(summary, testSignals) {
       const explicit = Array.isArray(summary && summary.checks) ? summary.checks : [];
       if (explicit.length) {
         return explicit.map((c) => ({
-          name: String(c.name || c.id || "check"),
+          name: prettyCheckName(c.name || c.id || "check"),
           state: normalizeCheckState(c.state || c.conclusion || c.status),
         }));
       }
@@ -2734,8 +2964,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return signals.slice(0, 8).map((value) => {
         const text = String(value || "");
         const state = /fail/i.test(text) ? "fail" : (/pend|wait|run/i.test(text) ? "pending" : "pass");
-        return { name: text, state };
+        return { name: prettyCheckName(text), state };
       });
+    }
+
+    function prettyCheckName(value) {
+      return String(value || "").replace(/^check:\\s*/i, "").trim() || "check";
     }
 
     function normalizeCheckState(value) {
@@ -2748,10 +2982,16 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function renderTouchedFiles(files, areas) {
       const groups = groupTouchedFilesByArea(files, areas);
       if (!groups.length) return '<div class="empty">No file paths recorded.</div>';
-      return '<div class="touched-files">' + groups.map((g) => (
+      const withPaths = groups.filter((g) => g.paths.length > 0);
+      // No file paths in any area — show a single compact line of touched-area chips instead of N empty groups.
+      if (withPaths.length === 0) {
+        const chipsHtml = groups.map((g) => '<span class="tf-chip">' + escapeHtml(g.area) + '</span>').join("");
+        return '<div class="touched-files-compact">' + chipsHtml + '<span class="tf-note">file paths not surfaced</span></div>';
+      }
+      return '<div class="touched-files">' + withPaths.map((g) => (
         '<div class="tf-group">' +
           '<div class="tf-group-head"><span class="tf-area">' + escapeHtml(g.area) + '</span><span class="tf-count">' + g.paths.length + '</span></div>' +
-          (g.paths.length ? g.paths.slice(0, 6).map((p) => '<div class="tf-path">' + escapeHtml(p) + '</div>').join("") + (g.paths.length > 6 ? '<div class="tf-path">+' + (g.paths.length - 6) + " more</div>" : "") : '<div class="tf-path">no files listed</div>') +
+          g.paths.slice(0, 6).map((p) => '<div class="tf-path">' + escapeHtml(p) + '</div>').join("") + (g.paths.length > 6 ? '<div class="tf-path">+' + (g.paths.length - 6) + " more</div>" : "") +
         '</div>'
       )).join("") + '</div>';
     }
@@ -2849,13 +3089,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function collectPhaseHistory(item) {
       const entries = [];
+      const now = Date.now();
       if (Array.isArray(item.groupItems)) {
         item.groupItems.forEach((entry) => {
           const t = entry.updatedAt || entry.createdAt;
           if (!t) return;
           const verdict = baseReleaseVerdict(entry);
           entries.push({
-            time: new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            time: relativeTimeShort(now - Date.parse(t)),
             state: stateForLevel(verdict.level),
             label: handoffKindLabel(entry.intent) + " · " + String(verdict.label).toLowerCase(),
           });
@@ -2863,12 +3104,25 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       } else if (item.updatedAt) {
         const verdict = baseReleaseVerdict(item);
         entries.push({
-          time: new Date(item.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          time: relativeTimeShort(now - Date.parse(item.updatedAt)),
           state: stateForLevel(verdict.level),
           label: handoffKindLabel(item.intent) + " · " + String(verdict.label).toLowerCase(),
         });
       }
       return entries.slice(-6);
+    }
+
+    function relativeTimeShort(ms) {
+      const n = Number(ms);
+      if (!Number.isFinite(n) || n < 0) return "just now";
+      const sec = Math.floor(n / 1000);
+      if (sec < 60) return sec + "s ago";
+      const min = Math.floor(sec / 60);
+      if (min < 60) return min + "m ago";
+      const hr = Math.floor(min / 60);
+      if (hr < 24) return hr + "h ago";
+      const day = Math.floor(hr / 24);
+      return day + "d ago";
     }
 
     function stateForLevel(level) {
