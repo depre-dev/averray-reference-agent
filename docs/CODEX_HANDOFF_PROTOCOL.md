@@ -122,6 +122,14 @@ This layer never mutates GitHub. It only helps assign ownership:
   is attached.
 - green low-risk PRs go to the merge queue.
 
+The monitor's **Ask Hermes** console also has local live-insight commands for
+operator orientation: `what is happening now`, `what is Codex doing`, `what is
+Hermes doing`, `what needs my action`, and `why this PR is here`. These answer
+from the current SSE snapshot and Codex task queue first, so the operator can
+see current ownership and next actions without waiting for a new Hermes model
+turn. Deeper report commands still go through Hermes as read-only operator
+commands.
+
 ## Correlation Metadata
 
 Use stable metadata so all surfaces connect:
