@@ -74,7 +74,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Ask Hermes");
     expect(html).toContain("Read-only command console");
     expect(html).toContain("Needs Attention");
-    expect(html).toContain("Codex Working");
+    expect(html).toContain("Codex Needed");
     expect(html).toContain("Hermes Checking");
     expect(html).toContain("Operator Review");
     expect(html).toContain("Release Queue");
@@ -94,6 +94,13 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("ownerContractForItem(item, verdict, action)");
     expect(html).toContain("renderActionRecipe(item, summary, verdict, action)");
     expect(html).toContain("actionRecipeForItem(item, summary, verdict, action)");
+    expect(html).toContain("renderCodexTaskPrompt(item, summary, verdict, action)");
+    expect(html).toContain("codexWorkState(item, stage)");
+    expect(html).toContain("isCodexActivelyWorking");
+    expect(html).toContain("Copy Codex prompt");
+    expect(html).toContain("Waiting for Codex");
+    expect(html).toContain("CI after Codex");
+    expect(html).toContain("No active Codex run detected");
     expect(html).toContain("verdict.level === \"needs-review\" && !isDraftPullRequest(item) && !locallyApproved");
     expect(html).toContain("renderOperatorChecklistPanel(item, verdict, action)");
     expect(html).toContain("renderAgentPrecheckList(item, summary, verdict, stage)");
