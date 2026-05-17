@@ -30,6 +30,16 @@ export interface CodexTask extends CodexTaskInput {
   approvedBy?: string;
   cancelledAt?: string;
   cancelledBy?: string;
+  startedAt?: string;
+  runnerId?: string;
+  attemptCount?: number;
+  completedAt?: string;
+  completionSummary?: string;
+  failedAt?: string;
+  failureReason?: string;
+  exitCode?: number;
+  stdoutTail?: string;
+  stderrTail?: string;
 }
 
 export interface CodexTaskQueueDeps {
@@ -125,6 +135,86 @@ export async function cancelCodexTask(
     status: "cancelled",
     cancelledAt: now,
     cancelledBy: deps.cancelledBy ?? "monitor",
+    updatedAt: now,
+  };
+  await writeCodexTasks(path, replaceTask(tasks, task));
+  return task;
+}
+
+export async function claimNextApprovedCodexTask(
+  deps: CodexTaskQueueDeps & { runnerId?: string } = {}
+): Promise<CodexTask | undefined> {
+  const path = queuePath(deps.path);
+  const tasks = await readCodexTasks(path);
+  const existing = tasks
+    .filter((task) => task.status === "approved")
+    .sort((a, b) => Date.parse(a.approvedAt ?? a.updatedAt) - Date.parse(b.approvedAt ?? b.updatedAt))[0];
+  if (!existing) return undefined;
+  const now = (deps.now ?? new Date()).toISOString();
+  const task: CodexTask = {
+    ...existing,
+    status: "running",
+    startedAt: now,
+    runnerId: deps.runnerId ?? existing.runnerId ?? "codex-task-runner",
+    attemptCount: (existing.attemptCount ?? 0) + 1,
+    updatedAt: now,
+  };
+  await writeCodexTasks(path, replaceTask(tasks, task));
+  return task;
+}
+
+export async function completeCodexTask(
+  id: string,
+  deps: CodexTaskQueueDeps & {
+    completionSummary?: string;
+    exitCode?: number;
+    stdoutTail?: string;
+    stderrTail?: string;
+  } = {}
+): Promise<CodexTask | undefined> {
+  const path = queuePath(deps.path);
+  const tasks = await readCodexTasks(path);
+  const existing = tasks.find((task) => task.id === id);
+  if (!existing) return undefined;
+  if (existing.status !== "running") return existing;
+  const now = (deps.now ?? new Date()).toISOString();
+  const task: CodexTask = {
+    ...existing,
+    status: "completed",
+    completedAt: now,
+    ...(deps.completionSummary ? { completionSummary: deps.completionSummary } : {}),
+    ...(typeof deps.exitCode === "number" ? { exitCode: deps.exitCode } : {}),
+    ...(deps.stdoutTail ? { stdoutTail: deps.stdoutTail } : {}),
+    ...(deps.stderrTail ? { stderrTail: deps.stderrTail } : {}),
+    updatedAt: now,
+  };
+  await writeCodexTasks(path, replaceTask(tasks, task));
+  return task;
+}
+
+export async function failCodexTask(
+  id: string,
+  deps: CodexTaskQueueDeps & {
+    failureReason?: string;
+    exitCode?: number;
+    stdoutTail?: string;
+    stderrTail?: string;
+  } = {}
+): Promise<CodexTask | undefined> {
+  const path = queuePath(deps.path);
+  const tasks = await readCodexTasks(path);
+  const existing = tasks.find((task) => task.id === id);
+  if (!existing) return undefined;
+  if (TERMINAL_STATUSES.has(existing.status)) return existing;
+  const now = (deps.now ?? new Date()).toISOString();
+  const task: CodexTask = {
+    ...existing,
+    status: "failed",
+    failedAt: now,
+    failureReason: deps.failureReason ?? "Codex task runner failed.",
+    ...(typeof deps.exitCode === "number" ? { exitCode: deps.exitCode } : {}),
+    ...(deps.stdoutTail ? { stdoutTail: deps.stdoutTail } : {}),
+    ...(deps.stderrTail ? { stderrTail: deps.stderrTail } : {}),
     updatedAt: now,
   };
   await writeCodexTasks(path, replaceTask(tasks, task));

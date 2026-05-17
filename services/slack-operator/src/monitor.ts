@@ -1367,7 +1367,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       box-shadow: -30px 0 80px rgba(0, 0, 0, 0.46);
       transform: translateX(104%);
       transition: transform 0.2s ease;
+      overflow: hidden;
     }
+    .drawer-handle { display: none; }
     .drawer[data-open="true"] { transform: translateX(0); }
     .drawer-head {
       display: grid;
@@ -2251,10 +2253,16 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       gap: 6px;
       flex-shrink: 1;
       min-width: 0;
+      overflow: hidden;
     }
     .drawer-topline .drawer-head-links .pill {
       padding: 2px 8px;
       font-size: 0.72rem;
+      min-width: 0;
+      max-width: 120px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .drawer-topline .dr-age {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -2271,6 +2279,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       place-items: center;
       font-size: 0.9rem;
       color: var(--muted);
+      flex: 0 0 auto;
     }
     .drawer-topline .dr-close:hover { color: var(--text); }
     .drawer-title {
@@ -2977,11 +2986,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       }
       const closeDrawer = event.target && event.target.closest ? event.target.closest("[data-close-drawer]") : null;
       if (closeDrawer) {
-        selectedKey = "";
-        autoFocusPending = false;
-        renderBoard(latestPipelineItems);
-        renderDrawer(null);
-        renderCommandContext();
+        closeSelectedDrawer();
         return;
       }
       const reviewCard = event.target && event.target.closest ? event.target.closest("[data-review-card]") : null;
@@ -3015,7 +3020,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return;
       }
       const button = event.target && event.target.closest ? event.target.closest("[data-monitor-decision]") : null;
-      if (!button) return;
+      if (!button) {
+        const drawer = event.target && event.target.closest ? event.target.closest("#detail-drawer") : null;
+        const consoleSurface = event.target && event.target.closest ? event.target.closest("#command-console,#ask-sheet,#fab-ask") : null;
+        if (selectedKey && !drawer && !consoleSurface) closeSelectedDrawer();
+        return;
+      }
       const key = String(button.getAttribute("data-decision-key") || "");
       const decision = String(button.getAttribute("data-monitor-decision") || "");
       if (!key) return;
@@ -3023,6 +3033,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (decision === "reset") setMonitorDecision(key, null);
       if (latestPayload) render(latestPayload);
     });
+
+    function closeSelectedDrawer() {
+      selectedKey = "";
+      autoFocusPending = false;
+      renderBoard(latestPipelineItems);
+      renderDrawer(null);
+      renderCommandContext();
+    }
     document.querySelectorAll("[data-pipeline-filter]").forEach((button) => {
       button.addEventListener("click", () => {
         pipelineFilter = String(button.getAttribute("data-pipeline-filter") || "all");
@@ -3804,7 +3822,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const codexTask = codexTaskForItem(item);
       if (codexTask && !isTerminalCodexTask(codexTask)) return { key: "codex" };
       if (isDraftPullRequest(item)) return { key: "codex" };
-      if (reason === "ci_in_progress") return { key: "codex" };
+      if (reason === "ci_in_progress" || reason === "pr_checks_active") return { key: "codex" };
       if (verdict.level === "block") return { key: "attention" };
       if (verdict.level === "needs-review") return { key: "operator" };
       if (verdict.level === "pass") return { key: "queue" };
@@ -4056,7 +4074,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
             '<button class="soft-button" type="button" data-codex-task-action="cancel" data-codex-task-id="' + escapeAttr(task.id) + '">Cancel task</button>';
         }
         if (status === "approved") {
-          return '<button class="soft-button" data-action="primary" type="button" data-copy-label="' + escapeAttr(codexCopyLabel()) + '" data-copy-text="' + escapeAttr(task.prompt || prompt) + '">Copy approved prompt</button>' +
+          return '<button class="soft-button" data-action="primary" type="button" data-copy-label="' + escapeAttr(codexCopyLabel()) + '" data-copy-text="' + escapeAttr(task.prompt || prompt) + '">Copy prompt fallback</button>' +
             '<button class="soft-button" type="button" data-codex-task-action="cancel" data-codex-task-id="' + escapeAttr(task.id) + '">Cancel task</button>';
         }
         return '<button class="soft-button" type="button" data-copy-label="' + escapeAttr(codexCopyLabel()) + '" data-copy-text="' + escapeAttr(task.prompt || prompt) + '">Copy Codex prompt</button>';
@@ -4073,10 +4091,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function codexTaskStatusText(task) {
       const status = normalize(task && task.status);
       if (status === "proposed") return "Hermes proposed this task. It is waiting for operator approval before Codex should work on it.";
-      if (status === "approved") return "Operator approved this task. Codex should pick it up next; until the runner is wired, copy the approved prompt into Codex.";
-      if (status === "running") return "Codex is actively working on this task.";
-      if (status === "completed") return "Codex reported this task completed.";
-      if (status === "failed") return "Codex reported this task failed.";
+      if (status === "approved") return "Operator approved this task. The Codex task runner may claim it next; use copy only as a fallback if no runner is configured.";
+      if (status === "running") return "Codex task runner is actively working on this task.";
+      if (status === "completed") return "Codex task runner reported this task completed.";
+      if (status === "failed") return "Codex task runner reported this task failed.";
       if (status === "cancelled") return "This Codex task was cancelled.";
       return "No Codex task status recorded.";
     }
@@ -5339,6 +5357,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function nextPipelineAction(item, verdict) {
       const status = normalize(item.status);
+      const summary = item.summary || {};
+      const reason = normalize(summary.finalReason || summary.reason || item.reason);
       const prState = pullRequestState(item, item.summary || {});
       if (isDonePullRequestState(prState)) {
         return { owner: "Done", text: "PR is no longer open in GitHub; keep this handoff as release history" };
@@ -5348,6 +5368,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       }
       if (isDraftPullRequest(item)) {
         return { owner: "Codex", text: "finish the draft or mark it ready for review, then let CI and Hermes re-run" };
+      }
+      if (reason === "pr_checks_active" || reason === "ci_in_progress") {
+        return { owner: "Codex", text: "wait for CI to finish on the current commit; if it fails, push the smallest fix and let Hermes re-run" };
       }
       if (verdict.level === "block") {
         if (isDeployItem(item)) {
@@ -5593,6 +5616,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (prState && normalize(prState.mergeableState) === "dirty") {
         return { level: "block", label: "CONFLICT", why: "GitHub reports this PR has merge conflicts." };
       }
+      if (reason === "pr_checks_active" || reason === "ci_in_progress") {
+        return { level: "running", label: "CI RUNNING", why: releaseReason(summary, item, "running") };
+      }
       const terminal = classifyReleaseGate(status, finalVerdict, mergeRecommendation, reason, reviewReasons);
       if (item.activeState === "just_finished") {
         return {
@@ -5680,6 +5706,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (reason === "testbed_cases_failed") return "One or more read-only post-deploy checks failed.";
       if (reason === "github_workflow_failed") return "GitHub has a failed workflow after deploy.";
       if (reason === "ci_failed") return "CI failed; fix before merge.";
+      if (reason === "pr_checks_failed") return "One or more PR checks failed; Codex should fix the failing signal before merge.";
+      if (reason === "pr_checks_active") return "PR checks are still running on the head commit.";
+      if (reason === "pr_checks_missing") return "GitHub has not surfaced PR check runs for this head commit yet.";
+      if (reason === "pr_is_draft") return "PR is still marked as draft; Codex owns finishing it or marking it ready.";
       if (reason === "ci_in_progress") return "CI is still running; wait for the result.";
       if (level === "pass") return "No blocking release signals recorded.";
       return String(summary.finalReason || summary.reason || item.reason || item.phase || "No reason recorded.");

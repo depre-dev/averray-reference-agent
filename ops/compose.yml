@@ -85,6 +85,7 @@ services:
       GITHUB_HELPER_REPOS: ${GITHUB_HELPER_REPOS:-}
       GITHUB_API_BASE_URL: ${GITHUB_API_BASE_URL:-https://api.github.com}
       GITHUB_HELPER_LIMIT: ${GITHUB_HELPER_LIMIT:-5}
+      GITHUB_MONITOR_PR_LIMIT: ${GITHUB_MONITOR_PR_LIMIT:-20}
       AVERRAY_HANDOFF_EVENTS_PATH: ${AVERRAY_HANDOFF_EVENTS_PATH:-/data/handoff-events.jsonl}
       TRACE_HTTP_PORT: ${TRACE_HTTP_PORT:-8789}
       TRACE_HTTP_URL: http://127.0.0.1:${TRACE_HTTP_PORT:-8789}/hermes-event
@@ -168,12 +169,41 @@ services:
       GITHUB_API_BASE_URL: ${GITHUB_API_BASE_URL:-https://api.github.com}
       GITHUB_HELPER_LIMIT: ${GITHUB_HELPER_LIMIT:-5}
       AVERRAY_HANDOFF_EVENTS_PATH: ${AVERRAY_HANDOFF_EVENTS_PATH:-/data/handoff-events.jsonl}
+      AVERRAY_CODEX_TASKS_PATH: ${AVERRAY_CODEX_TASKS_PATH:-/data/codex-tasks.json}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - avg-data:/data
     networks: [avg-internal]
     ports:
       - "127.0.0.1:${SLACK_OPERATOR_HTTP_PORT:-8790}:${SLACK_OPERATOR_HTTP_PORT:-8790}"
+
+  codex-task-runner:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.node
+    image: avg-node-runtime
+    profiles: ["codex-runner"]
+    restart: unless-stopped
+    depends_on:
+      hermes-permissions:
+        condition: service_completed_successfully
+      mcp-bundle:
+        condition: service_completed_successfully
+    command: ["node", "services/slack-operator/dist/codex-task-runner.js"]
+    environment:
+      AVERRAY_CODEX_TASKS_PATH: ${AVERRAY_CODEX_TASKS_PATH:-/data/codex-tasks.json}
+      CODEX_TASK_RUNNER_ENABLED: ${CODEX_TASK_RUNNER_ENABLED:-0}
+      CODEX_TASK_RUNNER_ID: ${CODEX_TASK_RUNNER_ID:-vps-codex-task-runner}
+      CODEX_TASK_RUNNER_COMMAND: ${CODEX_TASK_RUNNER_COMMAND:-}
+      CODEX_TASK_RUNNER_ARGS: ${CODEX_TASK_RUNNER_ARGS:-}
+      CODEX_TASK_RUNNER_CWD: ${CODEX_TASK_RUNNER_CWD:-}
+      CODEX_TASK_RUNNER_POLL_INTERVAL_MS: ${CODEX_TASK_RUNNER_POLL_INTERVAL_MS:-10000}
+      CODEX_TASK_RUNNER_TIMEOUT_MS: ${CODEX_TASK_RUNNER_TIMEOUT_MS:-1800000}
+      CODEX_TASK_RUNNER_OUTPUT_TAIL_BYTES: ${CODEX_TASK_RUNNER_OUTPUT_TAIL_BYTES:-12000}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - avg-data:/data
+    networks: [avg-internal]
 
   hermes:
     image: ${HERMES_IMAGE}
