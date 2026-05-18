@@ -5218,7 +5218,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '<button class="soft-button" type="button" data-command-suggestion="handoff monitor details">Ask Hermes</button>' +
         renderCodexFooterAction(item, summary, verdict, action) +
         '<button class="soft-button" type="button" data-copy-text="' + escapeAttr(item.correlationId || "") + '">copy correlation</button>' +
-        (verdict.level === "needs-review" && !isDraftPullRequest(item) && !locallyApproved ? '<button class="soft-button" data-action="primary" type="button" data-monitor-decision="approve" data-decision-key="' + escapeAttr(decisionKeyForItem(item)) + '">Approve locally</button>' : "") +
+        (verdict.level === "needs-review" && !isDraftPullRequest(item) && !locallyApproved ? '<button class="soft-button" data-action="primary" type="button" data-monitor-decision="approve" data-decision-key="' + escapeAttr(decisionKeyForItem(item)) + '">' + escapeHtml(isReleaseReviewVerdict(verdict) ? "Mark reviewed" : "Approve locally") + '</button>' : "") +
         '</div></div>';
     }
 
@@ -5778,7 +5778,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const rollout = signals.rolloutNotesRequired === true
         ? signals.rolloutNotesPresent === true ? "present" : "missing"
         : "not required";
-      const reasonCodes = reviewReasons.map((reason) => String((reason && reason.code) || "")).filter(Boolean);
+      const reasonCodes = isReleaseReviewVerdict(verdict)
+        ? ["ready_for_operator_release_review"]
+        : reviewReasons.map((reason) => String((reason && reason.code) || "")).filter(Boolean);
       return {
         summary: operatorDecisionSummary(request, surfaces, reasonCodes),
         evidence: [
@@ -5796,6 +5798,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function operatorDecisionSummary(request, surfaces, reasonCodes) {
       const surfaceText = surfaces.length ? surfaces.join(", ") : "the gated surface";
+      if (request.reason === "ready_for_operator_release_review") {
+        return "Hermes PASS is recorded. Operator decision: do a quick release-packet review before this PR moves into the merge queue.";
+      }
       if (hasSurfaceSignal(surfaces, reasonCodes, ["blockchain", "xcm", "settlement", "escrow", "claim", "submit"])) {
         return "Hermes has already done the code-level pre-check. Operator decision: confirm the blockchain/XCM settlement intent, metadata semantics, and rollout risk for " + surfaceText + ".";
       }
@@ -5812,6 +5817,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function operatorApproveChecklist(surfaces, reasonCodes, missingTests) {
+      if (reasonCodes.includes("ready_for_operator_release_review")) {
+        return [
+          "The change intent matches what you want shipped.",
+          "Hermes PASS, CI, and touched-surface evidence are enough for this release.",
+          "Rollout/rollback notes are acceptable for the affected surface.",
+        ];
+      }
       const items = [
         "The PR intent matches the project direction and no architecture question remains open.",
         "Hermes and CI evidence are enough for this risk level; you are not being asked for line-by-line code review.",
@@ -5835,6 +5847,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function operatorSendBackChecklist(surfaces, reasonCodes, missingTests, rollout) {
+      if (reasonCodes.includes("ready_for_operator_release_review")) {
+        return [
+          "The intended product behavior or architecture is not what you want shipped.",
+          "The release packet does not explain enough about tests, rollout, or blast radius.",
+          "The PR should be split, clarified, or sent back to Codex before merge.",
+        ];
+      }
       const items = [
         "The intended product behavior or architecture is unclear, surprising, or not what you want shipped.",
         "Hermes evidence is missing, stale, contradictory, or does not match the PR risk.",
@@ -6824,7 +6843,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const touchedAreas = Array.isArray(signals.touchedAreas) ? signals.touchedAreas.map(String).filter(Boolean) : [];
       const missingTests = Array.isArray(signals.missingTestSignals) ? signals.missingTestSignals.map(String).filter(Boolean) : [];
       const testSignals = Array.isArray(signals.testSignals) ? signals.testSignals.map(String).filter(Boolean) : [];
-      const reason = firstReviewReason(reviewReasons) || releaseReason(summary, item, verdict.level);
+      const reason = isReleaseReviewVerdict(verdict) ? "ready_for_operator_release_review" : firstReviewReason(reviewReasons) || releaseReason(summary, item, verdict.level);
       const checks = Array.isArray(fixRequest.checks)
         ? fixRequest.checks.map(String).filter(Boolean)
         : missingTests.length ? missingTests : defaultFixChecks(item, summary, testSignals);
@@ -6853,6 +6872,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           return "Codex should fix the failed deploy or post-deploy signal in a follow-up PR, then let the production verification run again.";
         }
         return "Codex should fix the blocking signal, push the PR branch, and wait for CI plus Hermes to re-run.";
+      }
+      if (isReleaseReviewVerdict(verdict)) {
+        return "Hermes/Codex should provide the code-level pre-check evidence. Operator should skim the release packet before this green PR enters the merge queue.";
       }
       if (verdict.level === "needs-review") {
         return "Hermes/Codex should provide the code-level pre-check evidence. Operator should decide whether the project intent, architecture, and rollout risk are acceptable.";
@@ -7283,7 +7305,34 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           why: "Operator approved this review gate in the private monitor; merge only if GitHub branch protection is green.",
         };
       }
+      if (requiresReleaseReviewBeforeQueue(item, verdict)) {
+        if (decision.status === "approved") {
+          return {
+            level: "pass",
+            label: "REVIEWED",
+            why: "Operator reviewed the green release packet in the private monitor; merge only if GitHub branch protection is green.",
+          };
+        }
+        return {
+          level: "needs-review",
+          label: "READY REVIEW",
+          why: "Hermes PASS is recorded. Operator should skim the release packet before this PR enters the merge queue.",
+        };
+      }
       return verdict;
+    }
+
+    function requiresReleaseReviewBeforeQueue(item, verdict) {
+      if (!item || !verdict || verdict.level !== "pass") return false;
+      if (isDeployItem(item)) return false;
+      const prState = pullRequestState(item, item.summary || {});
+      if (isDonePullRequestState(prState)) return false;
+      const prNumber = item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId);
+      return Boolean(prNumber);
+    }
+
+    function isReleaseReviewVerdict(verdict) {
+      return verdict && verdict.label === "READY REVIEW";
     }
 
     function groupedReleaseVerdict(item) {

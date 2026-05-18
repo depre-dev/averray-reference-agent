@@ -237,6 +237,11 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Request metadata preservation");
     expect(html).toContain("you are not being asked for line-by-line code review");
     expect(html).toContain("Operator approved");
+    expect(html).toContain("READY REVIEW");
+    expect(html).toContain("Mark reviewed");
+    expect(html).toContain("requiresReleaseReviewBeforeQueue(item, verdict)");
+    expect(html).toContain("ready_for_operator_release_review");
+    expect(html).toContain("quick release-packet review");
     expect(html).toContain("No operator sign-off needed.");
     expect(html).toContain("private monitor decision only");
     expect(html).toContain("Missing tests");
