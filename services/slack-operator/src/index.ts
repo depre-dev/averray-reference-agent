@@ -36,6 +36,7 @@ import {
   recordCollaborationMessage,
   synthesizeHermesReplyFor,
 } from "./monitor-collab.js";
+import { generateHermesReply } from "./monitor-hermes-voice.js";
 import {
   approveCodexTask,
   cancelCodexTask,
@@ -400,23 +401,64 @@ async function handleCommand(envelope: SlackCommandEnvelope) {
   }
 }
 
-// Hermes-side auto-acknowledgment for operator posts. Operators need
-// the channel to feel like a conversation — silence after a post
-// reads as "the agents aren't listening". A short canned reply is
-// enough to fix the perception without depending on the LLM stack.
+// Hermes-side auto-reply for operator posts. Operators need the
+// channel to feel like a conversation — silence after a post reads as
+// "the agents aren't listening".
 //
-// Fire-and-forget: a setTimeout records a Hermes reply ~800ms after
-// the operator post. The next SSE snapshot tick (and the client's
-// post-message poll, see submitCollaborationPost) surface it.
+// Voice routing:
+//   1. If OLLAMA_API_KEY is configured, call Ollama Cloud with the
+//      Hermes persona prompt + recent thread + selected-PR context.
+//      The reply is a real LLM-generated sentence in Hermes's voice.
+//   2. On any LLM failure (no key, timeout, HTTP error, malformed
+//      response) fall back to the canned template from
+//      synthesizeHermesReplyFor so the chat never silently breaks.
+//
+// Fire-and-forget: the LLM call runs after ~600ms so the operator's
+// own bubble paints first, then Hermes's reply lands 2-5s later.
+// timer.unref() so a slow LLM call can't keep the process alive on
+// shutdown.
 function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof recordCollaborationMessage>>) {
   const draft = synthesizeHermesReplyFor(operatorMessage);
   if (!draft) return;
-  const timer = setTimeout(() => {
+
+  const apiKey = optionalEnv("OLLAMA_API_KEY");
+  const baseUrl = optionalEnv("OLLAMA_BASE_URL") ?? "https://ollama.com/v1";
+  const model = optionalEnv("HERMES_MONITOR_REPLY_MODEL") ?? "deepseek-v4-pro:cloud";
+
+  const timer = setTimeout(async () => {
+    let text = draft.text;
+    if (apiKey) {
+      try {
+        // Pull the last ~10 messages, oldest-first, so the model sees
+        // the conversation in natural order rather than reversed.
+        const recent = listCollaborationMessages({ limit: 10 });
+        const llmText = await generateHermesReply(
+          {
+            operatorMessage: {
+              text: operatorMessage.text,
+              addressedTo: operatorMessage.addressedTo,
+              kind: operatorMessage.kind,
+              ...(operatorMessage.relatedPr ? { relatedPr: operatorMessage.relatedPr } : {}),
+            },
+            recentMessages: recent.map((m) => ({ author: m.author, text: m.text, ts: m.ts })),
+            ...(operatorMessage.relatedPr ? { selectedPr: operatorMessage.relatedPr } : {}),
+          },
+          { apiKey, baseUrl, model }
+        );
+        if (llmText) {
+          text = llmText;
+        } else {
+          logger.info({ id: operatorMessage.id }, "monitor_collaboration_llm_reply_unavailable_fell_back");
+        }
+      } catch (error) {
+        logger.warn({ err: error, id: operatorMessage.id }, "monitor_collaboration_llm_reply_threw");
+      }
+    }
     try {
       recordCollaborationMessage({
         author: "hermes",
         kind: "chat",
-        text: draft.text,
+        text,
         addressedTo: draft.addressedTo,
         ...(draft.relatedPr ? { relatedPr: draft.relatedPr } : {}),
         ...(draft.relatedCorrelationId ? { relatedCorrelationId: draft.relatedCorrelationId } : {}),
@@ -424,7 +466,7 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
     } catch (error) {
       logger.warn({ err: error }, "monitor_collaboration_auto_reply_failed");
     }
-  }, 800);
+  }, 600);
   timer.unref?.();
 }
 
