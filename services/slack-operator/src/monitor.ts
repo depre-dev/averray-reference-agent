@@ -1727,9 +1727,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .collab-thread {
       display: grid;
       align-content: start;
-      gap: 14px;
+      gap: 8px;
       min-height: 100%;
-      padding: 12px 14px 14px;
+      padding: 10px 12px 12px;
       color: var(--text);
     }
     .collab-head {
@@ -1741,7 +1741,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       justify-content: space-between;
       gap: 10px;
       color: var(--muted);
-      font-size: 0.74rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.64rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
       padding: 2px 0 6px;
       margin-bottom: 2px;
       border-bottom: 1px solid rgba(184, 211, 196, 0.08);
@@ -1749,121 +1752,85 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
     .collab-head strong {
       color: var(--cream);
-      font-size: 0.92rem;
+      font-size: 0.7rem;
+      letter-spacing: 0.14em;
       letter-spacing: 0.01em;
     }
-    /* ── Chat bubble redesign ──────────────────────────────────────────────
-       Asymmetric layout: Operator posts align right ("me"), agent posts
-       align left ("them"). System/idle messages render as centered notes.
-       Each agent gets a strong color identity through a filled avatar and
-       a tinted bubble background so Codex/Hermes/Operator are readable at
-       a glance instead of all looking like the same gray line. */
+    /* ── Collaboration thread (ops-console aesthetic) ──────────────────────
+       Matches the rest of the page: 3px solid left-rail in agent color
+       (same idiom as the kanban cards), uppercase tracked monospace
+       speaker labels (matching ACTION RECIPE / HERMES VERDICT section
+       headers), 8px radius, low-contrast hairline borders, dense rows.
+       No round avatars, no asymmetric layout — this is a dashboard
+       panel, not a consumer chat app. */
     .collab-message {
       display: grid;
-      grid-template-columns: 36px minmax(0, 1fr);
-      gap: 12px;
+      grid-template-rows: auto auto;
+      gap: 4px;
       align-items: flex-start;
-      max-width: min(720px, 96%);
-      padding: 2px 0;
+      padding: 8px 12px 8px 13px;
+      border: 1px solid var(--line-soft);
+      border-left: 3px solid var(--speaker-accent, var(--line));
+      border-radius: 8px;
+      background: rgba(8, 18, 14, 0.55);
+      min-width: 0;
     }
     .collab-message[data-speaker="codex"] { --speaker-accent: var(--violet); }
     .collab-message[data-speaker="hermes"] { --speaker-accent: var(--cyan); }
     .collab-message[data-speaker="operator"] { --speaker-accent: var(--warn); }
     .collab-message[data-speaker="system"] { --speaker-accent: var(--muted); }
-    /* Operator messages flip to right-aligned with avatar on the right —
-       same conversational metaphor as iMessage / Slack DMs. */
-    .collab-message[data-speaker="operator"] {
-      grid-template-columns: minmax(0, 1fr) 36px;
-      justify-self: end;
-      margin-left: auto;
-    }
-    .collab-message[data-speaker="operator"] .collab-avatar { grid-column: 2; grid-row: 1; }
-    .collab-message[data-speaker="operator"] .collab-bubble-stack { grid-column: 1; grid-row: 1; text-align: right; }
-    .collab-message[data-speaker="operator"] .collab-byline { flex-direction: row-reverse; }
-    /* System messages render as a centered, low-key note — not a chat row
-       pretending to be from an agent. */
+    /* System / idle rows: centered dashed note. Reads as a status line,
+       not a fake agent message. Matches the .lane-empty placeholder
+       idiom elsewhere on the page. */
     .collab-message[data-speaker="system"] {
-      grid-template-columns: minmax(0, 1fr);
-      justify-self: center;
-      text-align: center;
-      max-width: min(520px, 92%);
-    }
-    .collab-message[data-speaker="system"] .collab-avatar { display: none; }
-    .collab-message[data-speaker="system"] .collab-bubble {
-      background: rgba(122, 134, 130, 0.06);
       border: 1px dashed rgba(184, 211, 196, 0.18);
       border-left: 1px dashed rgba(184, 211, 196, 0.18);
-      padding: 6px 14px;
+      background: rgba(122, 134, 130, 0.04);
+      text-align: center;
+      padding: 6px 12px;
     }
     .collab-message[data-speaker="system"] .collab-byline { justify-content: center; }
-    .collab-avatar {
-      width: 32px;
-      height: 32px;
-      border-radius: 999px;
-      display: grid;
-      place-items: center;
-      color: #050d0b;
-      background: var(--speaker-accent, var(--muted));
-      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35), inset 0 -1px 0 rgba(0, 0, 0, 0.18);
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 0.78rem;
-      font-weight: 900;
-      letter-spacing: 0.01em;
-    }
-    .collab-bubble-stack {
-      display: grid;
-      gap: 4px;
-      min-width: 0;
-    }
-    .collab-bubble {
-      display: grid;
-      gap: 4px;
-      min-width: 0;
-      padding: 10px 14px;
-      border: 1px solid color-mix(in srgb, var(--speaker-accent, var(--line)) 22%, var(--line-soft));
-      border-radius: 14px;
-      background: color-mix(in srgb, var(--speaker-accent, var(--muted)) 8%, rgba(8, 18, 14, 0.86));
-      color: var(--text);
-    }
-    /* The bubble corner closest to the avatar gets squared off — gives
-       the bubble a clear "tail" toward its speaker, like a chat app. */
-    .collab-message[data-speaker="codex"] .collab-bubble,
-    .collab-message[data-speaker="hermes"] .collab-bubble { border-top-left-radius: 4px; }
-    .collab-message[data-speaker="operator"] .collab-bubble { border-top-right-radius: 4px; }
     .collab-byline {
       display: flex;
       align-items: baseline;
-      gap: 8px;
+      gap: 10px;
       min-width: 0;
       flex-wrap: wrap;
     }
+    /* Speaker label uses the same uppercase-tracked-monospace voice as
+       the drawer section headers (HERMES VERDICT / ACTION RECIPE / etc.). */
     .collab-speaker {
-      color: var(--speaker-accent, var(--cream));
-      font-size: 0.78rem;
+      color: var(--speaker-accent, var(--muted));
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.66rem;
       font-weight: 800;
-      letter-spacing: 0.01em;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
     }
     .collab-meta {
       color: var(--muted);
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 0.66rem;
+      font-size: 0.64rem;
+      letter-spacing: 0.02em;
       white-space: nowrap;
+      margin-left: auto;
     }
     .collab-text {
       color: var(--text);
-      font-size: 0.92rem;
-      line-height: 1.5;
+      font-size: 0.85rem;
+      line-height: 1.45;
       overflow-wrap: anywhere;
     }
-    /* Real posted messages: stronger tint + a hairline ring so they read
-       as "actual chat" vs. synthesized status. */
-    .collab-message[data-posted="true"] .collab-bubble {
-      background: color-mix(in srgb, var(--speaker-accent, var(--muted)) 18%, rgba(8, 18, 14, 0.92));
-      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--speaker-accent, var(--muted)) 28%, transparent);
+    /* Posted messages: stronger left-rail width + a faint speaker-color
+       wash so real posts read as more "load-bearing" than synthesized
+       status lines, without changing the layout idiom. */
+    .collab-message[data-posted="true"] {
+      border-left-width: 4px;
+      background: color-mix(in srgb, var(--speaker-accent, var(--muted)) 5%, rgba(8, 18, 14, 0.7));
     }
-    .collab-message[data-kind="request_help"] .collab-bubble {
-      background: color-mix(in srgb, var(--warn) 14%, rgba(8, 18, 14, 0.92));
-      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 36%, transparent);
+    .collab-message[data-kind="request_help"] {
+      border-left-color: var(--warn);
+      background: color-mix(in srgb, var(--warn) 8%, rgba(8, 18, 14, 0.7));
     }
     .collab-tag {
       display: inline-flex;
@@ -5965,16 +5932,18 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     //   - synthesized: built client-side from board state (verdicts,
     //     codex tasks). Subtler bubble, no "posted" tag.
     //   - posted: real messages recorded via POST /monitor/collaboration.
-    //     Stronger tint + a "posted" tag so the reader can tell what is
-    //     real chat vs. inferred narrative.
-    // System/idle messages render as centered notes — see the CSS for
-    // [data-speaker="system"] — so they don't masquerade as agent chat.
+    //     Wider left-rail + a "posted" tag so real posts read as more
+    //     load-bearing than synthesized status.
+    // System/idle messages render as a centered dashed note — see the
+    // CSS for [data-speaker="system"] — so they don't masquerade as agent chat.
+    //
+    // The DOM is intentionally flat (no avatar, no nested bubble wrapper)
+    // to match the ops-console aesthetic of the rest of the page:
+    // 3px left-rail + uppercase tracked speaker label, just like the
+    // drawer section headers.
     function renderCollabMessage(message) {
       const speaker = message.speaker || "Hermes";
       const slug = actorSlug(speaker);
-      const initial = speaker === "Operator" ? "P"
-        : speaker === "System" ? "·"
-          : speaker.charAt(0).toUpperCase();
       const posted = message.posted ? "true" : "false";
       const kindAttr = message.kind ? message.kind : "";
       const addressedAttr = message.addressedTo && message.addressedTo !== "everyone" ? message.addressedTo : "";
@@ -5988,17 +5957,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         : "";
       const postedBadge = message.posted ? '<span class="collab-tag" data-tag="posted">posted</span>' : "";
       return '<article class="collab-message" data-speaker="' + escapeAttr(slug) + '" data-posted="' + posted + '" data-kind="' + escapeAttr(kindAttr) + '" data-addressed="' + escapeAttr(addressedAttr) + '">' +
-        '<span class="collab-avatar" aria-hidden="true">' + escapeHtml(initial) + '</span>' +
-        '<div class="collab-bubble-stack">' +
-          '<div class="collab-byline">' +
-            '<span class="collab-speaker">' + escapeHtml(speaker) + '</span>' +
-            addressedBadge + kindBadge + postedBadge +
-          '</div>' +
-          '<div class="collab-bubble">' +
-            '<div class="collab-text">' + escapeHtml(message.text || "") + '</div>' +
-          '</div>' +
-          (meta ? '<div class="collab-meta">' + escapeHtml(meta) + '</div>' : "") +
+        '<div class="collab-byline">' +
+          '<span class="collab-speaker">' + escapeHtml(speaker) + '</span>' +
+          addressedBadge + kindBadge + postedBadge +
+          (meta ? '<span class="collab-meta">' + escapeHtml(meta) + '</span>' : "") +
         '</div>' +
+        '<div class="collab-text">' + escapeHtml(message.text || "") + '</div>' +
       '</article>';
     }
 
