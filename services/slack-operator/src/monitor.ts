@@ -4906,8 +4906,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function lastCodexTaskTail(task) {
-      const stderr = String(task.stderrTail || "").trim().split(/\r?\n/).filter(Boolean).slice(-1)[0] || "";
-      const stdout = String(task.stdoutTail || "").trim().split(/\r?\n/).filter(Boolean).slice(-1)[0] || "";
+      const stderr = String(task.stderrTail || "").trim().split(/\\r?\\n/).filter(Boolean).slice(-1)[0] || "";
+      const stdout = String(task.stdoutTail || "").trim().split(/\\r?\\n/).filter(Boolean).slice(-1)[0] || "";
       return stderr || stdout;
     }
 
