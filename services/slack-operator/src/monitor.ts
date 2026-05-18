@@ -1120,11 +1120,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       display: grid;
       grid-template-rows: auto auto minmax(0, 1fr);
       gap: 12px;
-      /* The bottom collaboration dock is fixed-positioned and claims a
-         substantial chunk of viewport height (see .command-console
-         min-height below). Reserve enough room here so content scrolled
-         to the bottom of the board never hides behind the dock. */
-      padding: 12px 14px min(56vh, 560px);
+      /* Reserve room at the bottom so content scrolled to the bottom
+         of the board never hides behind the fixed-position
+         collaboration dock. */
+      padding: 12px 14px 266px;
       overflow: hidden;
     }
     .live-lane {
@@ -1787,11 +1786,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       grid-template-columns: minmax(0, 1fr) clamp(320px, 25vw, 430px);
       gap: 14px;
       align-items: stretch;
-      /* The collaboration thread is now a workspace, not a status strip.
-         Claim the empty space below the board so the page doesn't show
-         a black void between a short kanban + a thin chat dock. */
-      min-height: min(52vh, 520px);
-      max-height: min(64vh, 640px);
+      /* Compact dock anchored at the bottom. Earlier we tried to fill
+         the viewport when the board was short (#145) but that left the
+         dock floating with empty room ABOVE it once the board grew. A
+         small floor + a moderate ceiling keeps the dock present without
+         dominating the screen. */
+      min-height: 218px;
+      max-height: min(32vh, 310px);
       border: 1px solid var(--line);
       border-radius: 14px;
       background:
@@ -1867,10 +1868,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       color: var(--text);
     }
     /* Per-message margin (not container gap) so grouped rows can use
-       margin-top: 0 to visually attach to the previous same-speaker
-       row. Grid gap does not yield to negative margins reliably. */
-    .collab-message + .collab-message { margin-top: 8px; }
-    .collab-message[data-grouped="true"] { margin-top: 0; }
+       a tighter margin-top to visually attach to the previous same-
+       speaker row without running into it. Non-grouped rows get more
+       breathing room since there's no panel border doing that work. */
+    .collab-message + .collab-message { margin-top: 12px; }
+    .collab-message[data-grouped="true"] { margin-top: 4px; }
     .collab-head {
       position: sticky;
       top: 0;
@@ -1902,33 +1904,42 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
        headers), 8px radius, low-contrast hairline borders, dense rows.
        No round avatars, no asymmetric layout — this is a dashboard
        panel, not a consumer chat app. */
+    /* Minimal chat-line style. No bordered panel, no colored left-rail
+       — both of those are the kanban card idiom and made the chat
+       read as another task board instead of as a conversation. Now
+       each message is just: author label on one line, message text on
+       the next, breathing room between. Author identity comes from
+       the uppercase tracked label's color, not from a card border. */
     .collab-message {
-      display: grid;
-      grid-template-rows: auto auto;
-      gap: 4px;
-      align-items: flex-start;
-      padding: 8px 12px 8px 13px;
-      border: 1px solid var(--line-soft);
-      border-left: 3px solid var(--speaker-accent, var(--line));
-      border-radius: 8px;
-      background: rgba(8, 18, 14, 0.55);
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      align-items: stretch;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
       min-width: 0;
     }
     .collab-message[data-speaker="codex"] { --speaker-accent: var(--violet); }
     .collab-message[data-speaker="hermes"] { --speaker-accent: var(--cyan); }
     .collab-message[data-speaker="operator"] { --speaker-accent: var(--warn); }
     .collab-message[data-speaker="system"] { --speaker-accent: var(--muted); }
-    /* System / idle rows: centered dashed note. Reads as a status line,
-       not a fake agent message. Matches the .lane-empty placeholder
-       idiom elsewhere on the page. */
+    /* System / idle rows: a centered subdued italic note. Reads as a
+       status line, not as either an agent message or a card. */
     .collab-message[data-speaker="system"] {
-      border: 1px dashed rgba(184, 211, 196, 0.18);
-      border-left: 1px dashed rgba(184, 211, 196, 0.18);
-      background: rgba(122, 134, 130, 0.04);
+      align-items: center;
       text-align: center;
-      padding: 6px 12px;
+      color: var(--muted);
+      font-style: italic;
+      padding: 2px 0;
     }
-    .collab-message[data-speaker="system"] .collab-byline { justify-content: center; }
+    .collab-message[data-speaker="system"] .collab-byline { display: none; }
+    .collab-message[data-speaker="system"] .collab-text {
+      color: var(--muted);
+      font-style: italic;
+      font-size: 0.78rem;
+    }
     .collab-byline {
       display: flex;
       align-items: baseline;
@@ -1936,8 +1947,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       min-width: 0;
       flex-wrap: wrap;
     }
-    /* Speaker label uses the same uppercase-tracked-monospace voice as
-       the drawer section headers (HERMES VERDICT / ACTION RECIPE / etc.). */
+    /* Speaker label inherits the page's uppercase-tracked-monospace
+       voice — same family as the drawer section headers — but now in
+       the agent's color so identity reads at a glance without a card
+       border doing the work. */
     .collab-speaker {
       color: var(--speaker-accent, var(--muted));
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -1956,42 +1969,31 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
     .collab-text {
       color: var(--text);
-      font-size: 0.85rem;
-      line-height: 1.45;
+      font-size: 0.9rem;
+      line-height: 1.5;
       overflow-wrap: anywhere;
     }
-    /* Posted messages: stronger left-rail width + a faint speaker-color
-       wash so real posts read as more "load-bearing" than synthesized
-       status lines, without changing the layout idiom. */
-    .collab-message[data-posted="true"] {
-      border-left-width: 4px;
-      background: color-mix(in srgb, var(--speaker-accent, var(--muted)) 5%, rgba(8, 18, 14, 0.7));
-    }
-    .collab-message[data-kind="request_help"] {
-      border-left-color: var(--warn);
-      background: color-mix(in srgb, var(--warn) 8%, rgba(8, 18, 14, 0.7));
+    /* Posted messages: the inline POSTED pill in the byline already
+       signals "real chat". Brighten the body text so it reads as the
+       load-bearing line in the thread. No background tint, no rail. */
+    .collab-message[data-posted="true"] .collab-text { color: var(--cream); }
+    /* request_help: a small warn-colored dot before the speaker label
+       calls attention to the row without imposing a panel background. */
+    .collab-message[data-kind="request_help"] .collab-byline::before {
+      content: "●";
+      color: var(--warn);
+      font-size: 0.6em;
+      line-height: 1;
+      margin-right: -4px;
+      flex-shrink: 0;
     }
     /* Grouped messages: a second+ message in a same-speaker run. The
-       top border + radius collapses into the previous row to make a
-       continuous left-rail "thread", so the eye sees one speaker
-       saying multiple things rather than a fresh row each time. The
-       margin-top: 0 override at the top of this block kills the
-       8px inter-row gap; padding-top adds back a small breath. */
-    .collab-message[data-grouped="true"] {
-      border-top: 0;
-      border-top-left-radius: 0;
-      border-top-right-radius: 0;
-      padding-top: 4px;
-    }
-    /* When a same-speaker run continues we hide the heavy hairline
-       between rows so the rail reads as one thread. */
-    .collab-message[data-grouped="true"]::before {
-      content: "";
-      display: block;
-      height: 1px;
-      background: color-mix(in srgb, var(--speaker-accent, var(--line)) 18%, transparent);
-      margin: 0 -12px 4px -13px;
-    }
+       previous CSS used the bordered panel to thread them visually.
+       Without panels, grouping just collapses the gap and hides the
+       repeated speaker label (the render code drops it server-side
+       too). The "↳ 1m later" follow-pill in the byline carries the
+       continuation cue. */
+    .collab-message[data-grouped="true"] .collab-byline { gap: 8px; }
     .collab-follow {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 0.62rem;
@@ -1999,16 +2001,15 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       text-transform: uppercase;
       color: color-mix(in srgb, var(--speaker-accent, var(--muted)) 70%, var(--muted));
     }
-    /* The newest message in the thread gets a subtle one-shot pulse so
-       the eye lands on it when new chat arrives — "this is alive". The
-       animation runs once then stays at rest. */
-    @keyframes collab-pulse {
-      0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--speaker-accent, var(--cyan)) 42%, transparent); }
-      60%  { box-shadow: 0 0 0 6px color-mix(in srgb, var(--speaker-accent, var(--cyan)) 0%, transparent); }
-      100% { box-shadow: 0 0 0 0 transparent; }
+    /* Freshness cue without a card: pulse the speaker label color
+       through cream and back. Subtle, runs once, doesn't draw a box. */
+    @keyframes collab-speaker-pulse {
+      0%   { color: var(--speaker-accent); }
+      50%  { color: var(--cream); }
+      100% { color: var(--speaker-accent); }
     }
-    .collab-message[data-newest="true"] {
-      animation: collab-pulse 1.4s ease-out 1;
+    .collab-message[data-newest="true"] .collab-speaker {
+      animation: collab-speaker-pulse 1.4s ease-out 1;
     }
     .collab-tag {
       display: inline-flex;

@@ -321,7 +321,9 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain('relativeFollowUpLabel');
     expect(html).toContain('data-grouped="true"');
     expect(html).toContain('data-newest="true"');
-    expect(html).toContain('collab-pulse');
+    // Chat-deboard PR: pulse animation moved from the message box-
+    // shadow to the speaker label color (no card to glow on).
+    expect(html).toContain('collab-speaker-pulse');
     expect(html).toContain('collab-follow');
     // Done rail polish: hover state, accent dot, pill enlargement.
     expect(html).toContain('.done-rail:hover');
@@ -355,6 +357,19 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("you're up on");
     expect(html).toContain('Working on " + title');
     expect(html).toContain("Hermes, your turn for the re-check");
+
+    // Chat-deboard PR: chat rows are no longer rectangular kanban-style
+    // panels. Drop the panel border + colored left-rail; switch to
+    // minimal "author label on top, text below" chat lines. System
+    // rows render as italic centered notes.
+    expect(html).toContain('Minimal chat-line style');
+    expect(html).toContain('.collab-message[data-newest="true"] .collab-speaker');
+    expect(html).toContain('.collab-message[data-posted="true"] .collab-text { color: var(--cream)');
+    // Dock sizing is back to compact-at-the-bottom (#145 reverted).
+    expect(html).toContain('min-height: 218px');
+    expect(html).toContain('max-height: min(32vh, 310px)');
+    // Old kanban-style chat panel rules are gone.
+    expect(html).not.toContain('border-left: 3px solid var(--speaker-accent');
   });
 
   it("serves a PWA manifest with the canonical name + scope", () => {
