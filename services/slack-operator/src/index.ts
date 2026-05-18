@@ -31,6 +31,11 @@ import {
   renderMonitorManifest,
 } from "./monitor.js";
 import {
+  CollaborationValidationError,
+  listCollaborationMessages,
+  recordCollaborationMessage,
+} from "./monitor-collab.js";
+import {
   approveCodexTask,
   cancelCodexTask,
   listCodexTasks,
@@ -143,6 +148,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
           "/monitor/command",
           "/monitor/recheck",
           "/monitor/codex-tasks",
+          "/monitor/collaboration",
           "/monitor/manifest.webmanifest",
         ] : [],
       },
@@ -228,6 +234,37 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       return;
     }
     await handleMonitorCommandRequest(request, response);
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/monitor/collaboration") {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    const sinceMs = parseOptionalInteger(url.searchParams.get("sinceMs"));
+    const limit = parseOptionalInteger(url.searchParams.get("limit"));
+    writeJson(response, 200, {
+      messages: listCollaborationMessages({
+        ...(sinceMs !== undefined ? { sinceMs } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+      }),
+    });
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/monitor/collaboration") {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    await handleMonitorCollaborationRequest(request, response);
     return;
   }
   if (!enabled) {
@@ -359,6 +396,33 @@ async function handleCommand(envelope: SlackCommandEnvelope) {
   } catch (error) {
     logger.error({ err: error }, "slack_operator_command_failed");
     await postSlack(envelope, `Averray command failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function handleMonitorCollaborationRequest(request: http.IncomingMessage, response: http.ServerResponse) {
+  try {
+    const rawBody = await readBody(request);
+    const payload = rawBody ? JSON.parse(rawBody) as unknown : {};
+    if (!isRecord(payload)) {
+      writeJson(response, 400, { error: "invalid_payload" });
+      return;
+    }
+    const message = recordCollaborationMessage(payload);
+    logger.info(
+      { author: message.author, kind: message.kind, addressedTo: message.addressedTo, id: message.id },
+      "monitor_collaboration_message_recorded"
+    );
+    writeJson(response, 200, { ok: true, message });
+  } catch (error) {
+    if (error instanceof CollaborationValidationError) {
+      writeJson(response, 400, { error: error.code, message: error.message });
+      return;
+    }
+    logger.error({ err: error }, "monitor_collaboration_record_failed");
+    writeJson(response, 500, {
+      error: "monitor_collaboration_failed",
+      message: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
@@ -931,6 +995,7 @@ async function loadMonitorSnapshot(url: URL): Promise<unknown> {
   return {
     ...enriched,
     codexTasks,
+    collaborationMessages: listCollaborationMessages({ limit: 200 }),
     diagnostics,
   };
 }

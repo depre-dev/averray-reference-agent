@@ -263,6 +263,21 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain('updateMobileTabCounts(filtered)');
     expect(html).toContain('submitMonitorCommandFrom(text');
     expect(html).toContain('drawer-handle');
+
+    // Real-message collaboration channel surface (PR: collab-room).
+    expect(html).toContain('data-compose-mode="post"');
+    expect(html).toContain('data-compose-mode="ask"');
+    expect(html).toContain('id="compose-target"');
+    expect(html).toContain('id="compose-intent"');
+    expect(html).toContain('id="compose-status"');
+    expect(html).toContain('"/monitor/collaboration"');
+    expect(html).toContain('latestCollabMessages');
+    expect(html).toContain('normalizeCollabMessages');
+    expect(html).toContain('submitCollaborationPost');
+    expect(html).toContain('data-posted="');
+    expect(html).toContain('data-tag="proposal"');
+    expect(html).toContain('data-tag="help"');
+    expect(html).toContain('collab-addressed');
   });
 
   it("serves a PWA manifest with the canonical name + scope", () => {
