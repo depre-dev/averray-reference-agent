@@ -1764,6 +1764,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .ci-list li[data-owner="Hermes"] { border-left-color: var(--cyan); }
     .ci-list li[data-owner="Operator"] { border-left-color: var(--amber); }
     .ci-list li[data-owner="Merge queue"] { border-left-color: var(--ok); }
+    .ci-list li[data-owner="Deploy"] { border-left-color: var(--cyan); }
     .ci-list strong {
       color: var(--cream);
       font-size: 0.78rem;
@@ -3247,10 +3248,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           <input id="command-input" class="console-input" name="text" placeholder="Ask for status, merge steward, why this PR is here..." autocomplete="off">
           <button id="command-submit" type="submit">Send</button>
         </div>
-        <div id="command-output" class="console-output">Ask "what is happening now" to see live Hermes, Codex, operator, deploy, and queue activity.</div>
+        <div id="command-output" class="console-output" data-mode="insight" data-auto="true">Loading current agent state...</div>
       </div>
       <div class="suggestions" aria-label="Suggested Hermes commands">
         <button class="suggestion" type="button" data-command-suggestion="what is happening now">now</button>
+        <button class="suggestion" type="button" data-command-suggestion="what are agents doing">agents</button>
         <button class="suggestion" type="button" data-command-suggestion="what is Codex doing">codex</button>
         <button class="suggestion" type="button" data-command-suggestion="what is Hermes doing">hermes</button>
         <button class="suggestion" type="button" data-command-suggestion="what needs my action">my action</button>
@@ -3267,9 +3269,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         <input id="ask-input" class="console-input" name="text" placeholder="Ask for status, merge steward, why this PR is here..." autocomplete="off">
         <button id="ask-submit" type="submit">Send</button>
       </div>
-      <div id="ask-output" class="console-output">Ask "what is happening now" to see live Hermes, Codex, operator, deploy, and queue activity.</div>
+      <div id="ask-output" class="console-output" data-mode="insight" data-auto="true">Loading current agent state...</div>
       <div class="suggestions" aria-label="Suggested Hermes commands (mobile)">
         <button class="suggestion" type="button" data-command-suggestion="what is happening now">now</button>
+        <button class="suggestion" type="button" data-command-suggestion="what are agents doing">agents</button>
         <button class="suggestion" type="button" data-command-suggestion="what is Codex doing">codex</button>
         <button class="suggestion" type="button" data-command-suggestion="what is Hermes doing">hermes</button>
         <button class="suggestion" type="button" data-command-suggestion="what needs my action">my action</button>
@@ -3750,6 +3753,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       renderBoard(latestPipelineItems);
       renderDrawer(selectedItem());
       renderCommandContext();
+      renderAutoConsoleInsight();
     }
 
     function renderList(id, entries, emptyText) {
@@ -5419,6 +5423,15 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       target.textContent = pipelineTitle(item) + " · " + (item.correlationId || "no correlation");
     }
 
+    function renderAutoConsoleInsight() {
+      [document.getElementById("command-output"), document.getElementById("ask-output")].forEach((output) => {
+        if (!output || output.dataset.auto === "false") return;
+        output.dataset.auto = "true";
+        output.dataset.mode = "insight";
+        output.innerHTML = renderNowConsoleInsight();
+      });
+    }
+
     async function submitMonitorCommand(text) {
       const output = document.getElementById("command-output");
       const submit = document.getElementById("command-submit");
@@ -5438,6 +5451,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     async function submitMonitorCommandInner(text, output, submit, input) {
       if (!output) return;
+      output.dataset.auto = "false";
       const item = selectedItem();
       if (isCodexTaskPromptText(text)) {
         output.dataset.mode = "text";
@@ -5481,6 +5495,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const normalized = normalizeConsoleCommandText(text);
       return Boolean(
         /^(now|status|what is happening now|what is going on|what's going on|what is live|current status|right now)$/.test(normalized)
+        || /^(agent status|agents status|what are agents doing|what are the agents doing|what are agents thinking|what are the agents thinking)$/.test(normalized)
         || /^what is (codex|hermes) doing( right now)?$/.test(normalized)
         || /^(codex|hermes|operator|my action|my actions|what needs my action|what needs operator action|blocked|blockers|selected|selected card)$/.test(normalized)
         || /^why (is )?(this )?(pr|card|item)( here)?$/.test(normalized)
@@ -5523,6 +5538,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           ["Operator", metrics.operator],
           ["Queue", metrics.queue],
         ]) +
+        renderAgentStateList(metrics) +
         '<div class="ci-note">' + escapeHtml(metrics.summary) + '</div>' +
         renderConsoleItemList("Next actions", next, "No active release work needs action right now.") +
         '</div>';
@@ -5572,20 +5588,52 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function currentMonitorMetrics(items) {
-      const codex = items.filter((item) => nextPipelineAction(item, releaseVerdict(item)).owner === "Codex").length;
-      const hermes = items.filter((item) => nextPipelineAction(item, releaseVerdict(item)).owner === "Hermes").length;
-      const operator = items.filter((item) => nextPipelineAction(item, releaseVerdict(item)).owner === "Operator").length;
-      const queue = items.filter((item) => nextPipelineAction(item, releaseVerdict(item)).owner === "Merge queue").length;
-      const blocked = items.filter((item) => releaseVerdict(item).level === "block").length;
-      const runningTasks = latestCodexTasks.filter((task) => !isTerminalCodexTask(task)).length;
+      const rows = items.map((item) => {
+        const verdict = releaseVerdict(item);
+        return { item, verdict, lane: boardLaneForItem(item, verdict), action: nextPipelineAction(item, verdict) };
+      });
+      const activeRows = rows.filter((row) => row.lane.key !== "done");
+      const codex = activeRows.filter((row) => row.lane.key === "codex" || row.action.owner === "Codex").length;
+      const hermes = activeRows.filter((row) => row.lane.key === "hermes" || row.action.owner === "Hermes").length;
+      const operator = activeRows.filter((row) => row.lane.key === "operator" || row.action.owner === "Operator").length;
+      const queue = activeRows.filter((row) => row.lane.key === "queue" || row.action.owner === "Merge queue").length;
+      const deploy = activeRows.filter((row) => row.lane.key === "deploy").length;
+      const blocked = activeRows.filter((row) => row.lane.key === "attention" || row.verdict.level === "block").length;
+      const runningTasks = (latestCodexTasks || []).filter((task) => !isTerminalCodexTask(task)).length;
       const runnerLabel = latestCodexRunner ? "Codex runner " + codexRunnerStatusLabel(latestCodexRunner) : "no Codex runner heartbeat";
-      const summary = [
-        blocked ? blocked + " blocked" : "no blockers",
-        runningTasks ? runningTasks + " Codex queue item(s)" : "no active Codex task",
-        runnerLabel,
-        hermes ? hermes + " awaiting Hermes" : "Hermes idle",
-      ].join(" · ");
-      return { codex, hermes, operator, queue, blocked, runningTasks, runnerLabel, summary };
+      const active = activeRows.length;
+      const done = rows.length - active;
+      const summary = active
+        ? [
+            blocked ? blocked + " blocked" : "no blockers",
+            runningTasks ? runningTasks + " Codex queue item(s)" : "no active Codex task",
+            runnerLabel,
+            hermes ? hermes + " awaiting Hermes" : "Hermes idle",
+          ].join(" · ")
+        : "No active release work. " + (done ? done + " completed item(s) are in history. " : "") + runnerLabel + ".";
+      return { codex, hermes, operator, queue, deploy, blocked, runningTasks, runnerLabel, active, done, summary };
+    }
+
+    function renderAgentStateList(metrics) {
+      const rows = [
+        ["Codex", "Codex", metrics.codex
+          ? "owns " + metrics.codex + " active code handoff(s)."
+          : metrics.runningTasks
+            ? "queue has " + metrics.runningTasks + " proposed/approved/running task(s); " + metrics.runnerLabel + "."
+            : "no active code handoff; " + metrics.runnerLabel + "."],
+        ["Hermes", "Hermes", metrics.hermes
+          ? "checking " + metrics.hermes + " PR/deploy handoff(s)."
+          : "idle; no live PR re-check is waiting."],
+        ["Operator", "Operator", metrics.operator || metrics.blocked
+          ? "needs attention on " + String(metrics.operator + metrics.blocked) + " release decision(s)."
+          : "no sign-off needed right now."],
+        ["Deploy", "Deploy", metrics.deploy
+          ? "post-deploy verification is active."
+          : "deploy lane is quiet."],
+      ];
+      return '<ul class="ci-list ci-agent-state">' + rows.map(([owner, title, text]) =>
+        '<li data-owner="' + escapeAttr(owner) + '"><strong>' + escapeHtml(title) + '</strong><span>' + escapeHtml(text) + '</span></li>'
+      ).join("") + '</ul>';
     }
 
     function renderInsightMetrics(entries) {
@@ -5642,6 +5690,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const key = String(button.getAttribute("data-card-key") || selectedKey || "");
       const item = itemByBoardKey(key) || selectedItem();
       const output = document.getElementById("command-output");
+      if (output) output.dataset.auto = "false";
       button.disabled = true;
       try {
         if (action === "propose") {
@@ -5708,6 +5757,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const key = String(button.getAttribute("data-card-key") || selectedKey || "");
       const item = itemByBoardKey(key) || selectedItem();
       const output = document.getElementById("command-output");
+      if (output) output.dataset.auto = "false";
       button.disabled = true;
       try {
         if (!item) throw new Error("No PR selected for Hermes re-check.");
