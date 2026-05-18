@@ -1667,90 +1667,83 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       line-height: 1.4;
       white-space: pre-wrap;
     }
-    .console-output[data-mode="insight"] {
-      max-height: 240px;
+    .console-output[data-mode="thread"] {
+      max-height: 220px;
       white-space: normal;
     }
-    .console-insight {
+    .collab-thread {
       display: grid;
       gap: 8px;
       color: var(--text);
     }
-    .ci-head,
-    .ci-row {
+    .collab-head {
       display: flex;
       align-items: baseline;
       justify-content: space-between;
       gap: 10px;
+      color: var(--muted);
+      font-size: 0.74rem;
     }
-    .ci-head strong {
+    .collab-head strong {
       color: var(--cream);
-      font-size: 0.88rem;
+      font-size: 0.86rem;
     }
-    .ci-head span,
-    .ci-note {
-      color: var(--muted);
-      font-size: 0.76rem;
-    }
-    .ci-grid {
+    .collab-message {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 6px;
+      grid-template-columns: 24px minmax(0, 1fr);
+      gap: 8px;
+      align-items: flex-start;
     }
-    .ci-metric {
-      border: 1px solid var(--line-soft);
-      border-radius: 8px;
-      background: rgba(17, 36, 29, 0.72);
-      padding: 7px 8px;
-    }
-    .ci-metric span {
-      display: block;
-      color: var(--muted);
+    .collab-avatar {
+      width: 22px;
+      height: 22px;
+      border: 1px solid var(--speaker-accent, var(--line));
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      color: var(--speaker-accent, var(--muted));
+      background: color-mix(in srgb, var(--speaker-accent, var(--muted)) 12%, transparent);
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 0.62rem;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
+      font-size: 0.68rem;
+      font-weight: 900;
     }
-    .ci-metric strong {
-      display: block;
-      margin-top: 3px;
-      color: var(--cream);
-      font-size: 1rem;
-    }
-    .ci-list {
+    .collab-message[data-speaker="codex"] { --speaker-accent: var(--violet); }
+    .collab-message[data-speaker="hermes"] { --speaker-accent: var(--cyan); }
+    .collab-message[data-speaker="operator"] { --speaker-accent: var(--warn); }
+    .collab-message[data-speaker="system"] { --speaker-accent: var(--muted); }
+    .collab-bubble {
       display: grid;
-      gap: 5px;
-      margin: 0;
-      padding: 0;
-      list-style: none;
-    }
-    .ci-list li {
-      display: grid;
-      gap: 2px;
+      gap: 3px;
+      min-width: 0;
+      padding: 7px 9px;
       border: 1px solid rgba(184, 211, 196, 0.10);
-      border-left: 3px solid var(--amber);
+      border-left: 3px solid var(--speaker-accent, var(--line));
       border-radius: 8px;
       background: rgba(8, 18, 14, 0.72);
-      padding: 7px 8px;
     }
-    .ci-list li[data-owner="Codex"] { border-left-color: var(--violet); }
-    .ci-list li[data-owner="Hermes"] { border-left-color: var(--cyan); }
-    .ci-list li[data-owner="Operator"] { border-left-color: var(--amber); }
-    .ci-list li[data-owner="Merge queue"] { border-left-color: var(--ok); }
-    .ci-list li[data-owner="Deploy"] { border-left-color: var(--cyan); }
-    .ci-list strong {
+    .collab-byline {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+    }
+    .collab-speaker {
       color: var(--cream);
-      font-size: 0.78rem;
-    }
-    .ci-list span {
-      color: var(--text);
       font-size: 0.76rem;
+      font-weight: 800;
     }
-    .ci-list em {
+    .collab-meta {
       color: var(--muted);
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 0.65rem;
-      font-style: normal;
+      font-size: 0.64rem;
+      white-space: nowrap;
+    }
+    .collab-text {
+      color: var(--text);
+      font-size: 0.78rem;
+      line-height: 1.38;
+      overflow-wrap: anywhere;
     }
     .suggestions {
       display: flex;
@@ -3235,7 +3228,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           <input id="command-input" class="console-input" name="text" placeholder="Ask for status, merge steward, why this PR is here..." autocomplete="off">
           <button id="command-submit" type="submit">Send</button>
         </div>
-        <div id="command-output" class="console-output" data-mode="insight" data-auto="true">Loading current agent state...</div>
+        <div id="command-output" class="console-output" data-mode="thread" data-auto="true">Waiting for Hermes, Codex, and operator messages...</div>
       </div>
       <div class="suggestions" aria-label="Suggested Hermes commands">
         <button class="suggestion" type="button" data-command-suggestion="what is happening now">now</button>
@@ -3256,7 +3249,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         <input id="ask-input" class="console-input" name="text" placeholder="Ask for status, merge steward, why this PR is here..." autocomplete="off">
         <button id="ask-submit" type="submit">Send</button>
       </div>
-      <div id="ask-output" class="console-output" data-mode="insight" data-auto="true">Loading current agent state...</div>
+      <div id="ask-output" class="console-output" data-mode="thread" data-auto="true">Waiting for Hermes, Codex, and operator messages...</div>
       <div class="suggestions" aria-label="Suggested Hermes commands (mobile)">
         <button class="suggestion" type="button" data-command-suggestion="what is happening now">now</button>
         <button class="suggestion" type="button" data-command-suggestion="what are agents doing">agents</button>
@@ -3740,7 +3733,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       renderBoard(latestPipelineItems);
       renderDrawer(selectedItem());
       renderCommandContext();
-      renderAutoConsoleInsight();
+      renderAutoCollaborationThread();
     }
 
     function renderList(id, entries, emptyText) {
@@ -5401,12 +5394,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       target.textContent = pipelineTitle(item) + " · " + (item.correlationId || "no correlation");
     }
 
-    function renderAutoConsoleInsight() {
+    function renderAutoCollaborationThread() {
       [document.getElementById("command-output"), document.getElementById("ask-output")].forEach((output) => {
         if (!output || output.dataset.auto === "false") return;
         output.dataset.auto = "true";
-        output.dataset.mode = "insight";
-        output.innerHTML = renderNowConsoleInsight();
+        output.dataset.mode = "thread";
+        output.innerHTML = renderCollaborationThread({ kind: "all" });
       });
     }
 
@@ -5437,7 +5430,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return;
       }
       if (isMonitorInsightCommand(text)) {
-        output.dataset.mode = "insight";
+        output.dataset.mode = "thread";
         output.innerHTML = renderMonitorConsoleInsight(text, item);
         if (input) input.value = "";
         return;
@@ -5486,12 +5479,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function renderMonitorConsoleInsight(text, item) {
       const kind = monitorInsightKind(text);
-      if (kind === "selected") return renderSelectedConsoleInsight(item);
-      if (kind === "codex") return renderLaneConsoleInsight("Codex", (entry) => nextPipelineAction(entry, releaseVerdict(entry)).owner === "Codex");
-      if (kind === "hermes") return renderLaneConsoleInsight("Hermes", (entry) => nextPipelineAction(entry, releaseVerdict(entry)).owner === "Hermes");
-      if (kind === "operator") return renderLaneConsoleInsight("Operator", (entry) => nextPipelineAction(entry, releaseVerdict(entry)).owner === "Operator");
-      if (kind === "blocked") return renderLaneConsoleInsight("Blocked", (entry) => releaseVerdict(entry).level === "block" || needsAttention(entry));
-      return renderNowConsoleInsight();
+      if (kind === "selected") return renderSelectedCollaborationThread(item);
+      return renderCollaborationThread({ kind });
     }
 
     function monitorInsightKind(text) {
@@ -5504,120 +5493,144 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return "now";
     }
 
-    function renderNowConsoleInsight() {
-      const items = latestPipelineItems || [];
-      const metrics = currentMonitorMetrics(items);
-      const next = topConsoleItems(items.filter((item) => boardLaneForItem(item, releaseVerdict(item)).key !== "done"), 4);
-      return '<div class="console-insight">' +
-        '<div class="ci-head"><strong>What is happening now</strong><span>' + escapeHtml(currentStreamLabel()) + '</span></div>' +
-        renderInsightMetrics([
-          ["Codex", metrics.codex],
-          ["Hermes", metrics.hermes],
-          ["Operator", metrics.operator],
-          ["Queue", metrics.queue],
-        ]) +
-        renderAgentStateList(metrics) +
-        '<div class="ci-note">' + escapeHtml(metrics.summary) + '</div>' +
-        renderConsoleItemList("Next actions", next, "No active release work needs action right now.") +
-        '</div>';
-    }
-
-    function renderLaneConsoleInsight(label, predicate) {
-      const items = topConsoleItems((latestPipelineItems || []).filter(predicate), 5);
-      const intro = label === "Codex"
-        ? "Codex owns code changes, draft readiness, CI fixes, and pushed commits."
-        : label === "Hermes"
-          ? "Hermes owns read-only PR checks, code-risk review, testbed verification, and fresh verdicts."
-          : label === "Operator"
-            ? "Operator owns project intent, architecture, rollout, and business-risk sign-off after agent pre-check evidence exists."
-            : "These items have the strongest release-gate risk and need the named owner to clear them.";
-      return '<div class="console-insight">' +
-        '<div class="ci-head"><strong>' + escapeHtml(label + " activity") + '</strong><span>' + escapeHtml(currentStreamLabel()) + '</span></div>' +
-        '<div class="ci-note">' + escapeHtml(intro) + '</div>' +
-        renderConsoleItemList("Items", items, "Nothing currently assigned to " + label + ".") +
-        renderCodexQueueConsoleHint(label) +
-        '</div>';
-    }
-
-    function renderSelectedConsoleInsight(item) {
+    function renderSelectedCollaborationThread(item) {
       if (!item) {
-        return '<div class="console-insight">' +
-          '<div class="ci-head"><strong>Selected card</strong><span>none selected</span></div>' +
-          '<div class="ci-note">Click a card first, then ask “why this PR is here” or “what should happen next”.</div>' +
-          renderConsoleItemList("Suggested next actions", topConsoleItems(latestPipelineItems || [], 3), "No active cards are available.") +
-          '</div>';
+        return renderCollaborationShell("Selected card", [
+          collabMessage("Hermes", "Click a PR card first, then ask why it is here or what should happen next.", "no selection", Date.now()),
+        ]);
       }
       const verdict = releaseVerdict(item);
       const action = nextPipelineAction(item, verdict);
       const task = codexTaskForItem(item);
-      const taskText = task ? "Codex task: " + normalize(task.status) + " · " + (task.id || "unknown task") : "No Codex task is attached.";
-      return '<div class="console-insight">' +
-        '<div class="ci-head"><strong>' + escapeHtml(pipelineTitle(item)) + '</strong><span>' + escapeHtml(verdict.label) + '</span></div>' +
-        renderInsightMetrics([
-          ["Owner", action.owner],
-          ["Stage", pipelineStage(item, verdict).label],
-          ["Age", handoffAge(item).label + " " + handoffAge(item).duration],
-          ["Tests", String((item.testCaseIds || []).length || "n/a")],
-        ]) +
-        '<div class="ci-note"><strong>Next:</strong> ' + escapeHtml(action.owner + " — " + action.text) + '</div>' +
-        '<div class="ci-note"><strong>Why:</strong> ' + escapeHtml(shortenVerdictWhy(verdict.why || "No release-gate reason recorded.")) + '</div>' +
-        '<div class="ci-note">' + escapeHtml(taskText) + '</div>' +
+      const lane = boardLaneForItem(item, verdict);
+      const messages = [
+        collabMessage("Hermes", pipelineTitle(item) + " is here because " + shortenVerdictWhy(verdict.why || "the handoff needs a release decision."), verdict.label, itemUpdatedMs(item)),
+        collabMessage("Hermes", collaborationAskForItem(item, verdict, action, lane), pipelineStage(item, verdict).label, itemUpdatedMs(item) + 1),
+      ];
+      if (task) messages.push(...collaborationMessagesForTask(task));
+      return renderCollaborationShell(cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item), messages);
+    }
+
+    function renderCollaborationThread(options) {
+      const kind = options && options.kind ? options.kind : "all";
+      const messages = buildCollaborationMessages(kind);
+      const title = kind === "codex" ? "Codex handoff"
+        : kind === "hermes" ? "Hermes review"
+          : kind === "operator" ? "Operator asks"
+            : kind === "blocked" ? "Needs attention"
+              : "Collaboration";
+      return renderCollaborationShell(title, messages);
+    }
+
+    function renderCollaborationShell(title, messages) {
+      const rows = (messages && messages.length ? messages : [
+        collabMessage("Hermes", "No active handoff right now. When Codex or you are needed, I will ask here.", "idle", Date.now()),
+      ])
+        .sort((a, b) => a.ts - b.ts)
+        .slice(-14);
+      return '<div class="collab-thread">' +
+        '<div class="collab-head"><strong>' + escapeHtml(title) + '</strong><span>' + escapeHtml(currentStreamLabel()) + '</span></div>' +
+        rows.map(renderCollabMessage).join("") +
         '</div>';
     }
 
-    function currentMonitorMetrics(items) {
-      const rows = items.map((item) => {
+    function renderCollabMessage(message) {
+      const speaker = message.speaker || "Hermes";
+      const slug = actorSlug(speaker);
+      const initial = speaker === "Operator" ? "Me" : speaker.charAt(0).toUpperCase();
+      return '<article class="collab-message" data-speaker="' + escapeAttr(slug) + '">' +
+        '<span class="collab-avatar">' + escapeHtml(initial) + '</span>' +
+        '<div class="collab-bubble">' +
+          '<div class="collab-byline"><span class="collab-speaker">' + escapeHtml(speaker) + '</span><span class="collab-meta">' + escapeHtml(message.meta || "") + '</span></div>' +
+          '<div class="collab-text">' + escapeHtml(message.text || "") + '</div>' +
+        '</div>' +
+      '</article>';
+    }
+
+    function collabMessage(speaker, text, meta, ts) {
+      return { speaker, text, meta: meta || "", ts: Number.isFinite(ts) ? ts : Date.now() };
+    }
+
+    function buildCollaborationMessages(kind) {
+      const messages = [];
+      latestCodexTasks
+        .slice()
+        .sort((a, b) => taskUpdatedMs(b) - taskUpdatedMs(a))
+        .slice(0, 8)
+        .forEach((task) => messages.push(...collaborationMessagesForTask(task)));
+      (latestPipelineItems || []).forEach((item) => {
         const verdict = releaseVerdict(item);
-        return { item, verdict, lane: boardLaneForItem(item, verdict), action: nextPipelineAction(item, verdict) };
+        const lane = boardLaneForItem(item, verdict);
+        if (lane.key === "done") return;
+        const action = nextPipelineAction(item, verdict);
+        if (kind === "codex" && action.owner !== "Codex" && lane.key !== "codex") return;
+        if (kind === "hermes" && action.owner !== "Hermes" && lane.key !== "hermes") return;
+        if (kind === "operator" && action.owner !== "Operator" && lane.key !== "operator") return;
+        if (kind === "blocked" && lane.key !== "attention" && verdict.level !== "block") return;
+        messages.push(collabMessage("Hermes", collaborationAskForItem(item, verdict, action, lane), collaborationMetaForItem(item, verdict), itemUpdatedMs(item)));
       });
-      const activeRows = rows.filter((row) => row.lane.key !== "done");
-      const codex = activeRows.filter((row) => row.lane.key === "codex" || row.action.owner === "Codex").length;
-      const hermes = activeRows.filter((row) => row.lane.key === "hermes" || row.action.owner === "Hermes").length;
-      const operator = activeRows.filter((row) => row.lane.key === "operator" || row.action.owner === "Operator").length;
-      const queue = activeRows.filter((row) => row.lane.key === "queue" || row.action.owner === "Merge queue").length;
-      const deploy = activeRows.filter((row) => row.lane.key === "deploy").length;
-      const blocked = activeRows.filter((row) => row.lane.key === "attention" || row.verdict.level === "block").length;
-      const runningTasks = (latestCodexTasks || []).filter((task) => !isTerminalCodexTask(task)).length;
-      const runnerLabel = latestCodexRunner ? "Codex runner " + codexRunnerStatusLabel(latestCodexRunner) : "no Codex runner heartbeat";
-      const active = activeRows.length;
-      const done = rows.length - active;
-      const summary = active
-        ? [
-            blocked ? blocked + " blocked" : "no blockers",
-            runningTasks ? runningTasks + " Codex queue item(s)" : "no active Codex task",
-            runnerLabel,
-            hermes ? hermes + " awaiting Hermes" : "Hermes idle",
-          ].join(" · ")
-        : "No active release work. " + (done ? done + " completed item(s) are in history. " : "") + runnerLabel + ".";
-      return { codex, hermes, operator, queue, deploy, blocked, runningTasks, runnerLabel, active, done, summary };
+      if (!messages.length && kind === "codex") {
+        messages.push(collabMessage("Hermes", "Codex has no active PR handoff. I will assign one here when a PR needs code work, draft finishing, or CI repair.", "idle", Date.now()));
+      } else if (!messages.length && kind === "hermes") {
+        messages.push(collabMessage("Hermes", "I have no active PR re-check or deploy verification waiting.", "idle", Date.now()));
+      } else if (!messages.length && kind === "operator") {
+        messages.push(collabMessage("Hermes", "Nothing needs your decision right now. I will ask directly here when project intent, rollout risk, or sign-off is needed.", "idle", Date.now()));
+      } else if (!messages.length) {
+        messages.push(collabMessage("Hermes", "No active handoff right now. Codex and Hermes are quiet; I will ask here when work appears.", "idle", Date.now()));
+      }
+      return messages;
     }
 
-    function renderAgentStateList(metrics) {
-      const rows = [
-        ["Codex", "Codex", metrics.codex
-          ? "owns " + metrics.codex + " active code handoff(s)."
-          : metrics.runningTasks
-            ? "queue has " + metrics.runningTasks + " proposed/approved/running task(s); " + metrics.runnerLabel + "."
-            : "no active code handoff; " + metrics.runnerLabel + "."],
-        ["Hermes", "Hermes", metrics.hermes
-          ? "checking " + metrics.hermes + " PR/deploy handoff(s)."
-          : "idle; no live PR re-check is waiting."],
-        ["Operator", "Operator", metrics.operator || metrics.blocked
-          ? "needs attention on " + String(metrics.operator + metrics.blocked) + " release decision(s)."
-          : "no sign-off needed right now."],
-        ["Deploy", "Deploy", metrics.deploy
-          ? "post-deploy verification is active."
-          : "deploy lane is quiet."],
-      ];
-      return '<ul class="ci-list ci-agent-state">' + rows.map(([owner, title, text]) =>
-        '<li data-owner="' + escapeAttr(owner) + '"><strong>' + escapeHtml(title) + '</strong><span>' + escapeHtml(text) + '</span></li>'
-      ).join("") + '</ul>';
+    function collaborationAskForItem(item, verdict, action, lane) {
+      const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
+      if (action.owner === "Codex" || lane.key === "codex") return "Codex, please pick up " + title + ". " + action.text;
+      if (action.owner === "Operator" || lane.key === "operator" || lane.key === "attention") return "Pascal, I need your decision on " + title + ". " + action.text;
+      if (action.owner === "Hermes" || lane.key === "hermes") return "I am checking " + title + " and will report the verdict here.";
+      if (lane.key === "queue") return title + " looks ready. I am keeping it in the release queue until merge/deploy ownership is clear.";
+      if (lane.key === "deploy") return "I am watching deploy verification for " + title + " and will report if it needs action.";
+      return action.owner + ", " + action.text + " for " + title + ".";
     }
 
-    function renderInsightMetrics(entries) {
-      return '<div class="ci-grid">' + entries.map(([label, value]) =>
-        '<div class="ci-metric"><span>' + escapeHtml(label) + '</span><strong>' + escapeHtml(String(value)) + '</strong></div>'
-      ).join("") + '</div>';
+    function collaborationMetaForItem(item, verdict) {
+      const age = handoffAge(item);
+      return verdict.label + " · " + age.label + " " + age.duration;
+    }
+
+    function collaborationMessagesForTask(task) {
+      if (!task) return [];
+      const status = normalize(task.status) || "unknown";
+      const title = codexTaskTitle(task);
+      const ts = taskUpdatedMs(task);
+      const messages = [];
+      if (status === "proposed") {
+        messages.push(collabMessage("Hermes", "Codex, I have a proposed task for you: " + title + ".", "task proposed", ts));
+        messages.push(collabMessage("Hermes", "Pascal, approve this task when you want Codex to start.", "approval needed", ts + 1));
+      } else if (status === "approved") {
+        messages.push(collabMessage("Hermes", "Codex, this task is approved: " + title + ".", "approved", ts));
+        messages.push(collabMessage("Codex", "I am queued for pickup. Waiting for the Codex runner to claim it.", "waiting runner", ts + 1));
+      } else if (status === "running") {
+        messages.push(collabMessage("Codex", "I am working on " + title + ". " + (task.progressMessage || "I will report back here when the branch is updated."), "running", ts));
+      } else if (status === "completed") {
+        messages.push(collabMessage("Codex", "I finished " + title + ". Hermes should re-check the PR or CI result now.", "completed", ts));
+      } else if (status === "failed") {
+        messages.push(collabMessage("Codex", "I could not finish " + title + ". " + (lastCodexTaskTail(task) || "Please inspect the runner output or send a smaller follow-up task."), "failed", ts));
+      } else if (status === "cancelled") {
+        messages.push(collabMessage("Operator", "Cancelled Codex task: " + title + ".", "cancelled", ts));
+      }
+      const events = Array.isArray(task.events) ? task.events.slice(-3) : [];
+      events.forEach((event, index) => {
+        const message = event && event.message ? String(event.message) : "";
+        if (!message) return;
+        messages.push(collabMessage(actorForTaskEvent(message), message, event.at ? shortTime(event.at) : "task event", (Date.parse(String(event.at || "")) || ts) + index + 2));
+      });
+      return messages;
+    }
+
+    function actorForTaskEvent(message) {
+      const text = normalize(message);
+      if (text.includes("approve") || text.includes("cancel")) return "Operator";
+      if (text.includes("runner") || text.includes("claim") || text.includes("start") || text.includes("complete") || text.includes("fail")) return "Codex";
+      return "Hermes";
     }
 
     function topConsoleItems(items, limit) {
@@ -5625,35 +5638,6 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         .filter(Boolean)
         .sort((a, b) => boardSortScore(b) - boardSortScore(a) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
         .slice(0, limit);
-    }
-
-    function renderConsoleItemList(title, items, emptyText) {
-      if (!items.length) {
-        return '<div class="ci-note"><strong>' + escapeHtml(title) + ':</strong> ' + escapeHtml(emptyText) + '</div>';
-      }
-      return '<div class="ci-row"><strong>' + escapeHtml(title) + '</strong><span>' + escapeHtml(String(items.length) + " shown") + '</span></div>' +
-        '<ul class="ci-list">' + items.map(renderConsoleItemLine).join("") + '</ul>';
-    }
-
-    function renderConsoleItemLine(item) {
-      const verdict = releaseVerdict(item);
-      const action = nextPipelineAction(item, verdict);
-      const age = handoffAge(item);
-      return '<li data-owner="' + escapeAttr(action.owner) + '">' +
-        '<strong>' + escapeHtml(pipelineTitle(item)) + '</strong>' +
-        '<span>' + escapeHtml(action.owner + ": " + action.text) + '</span>' +
-        '<em>' + escapeHtml(verdict.label + " · " + age.label + " " + age.duration) + '</em>' +
-      '</li>';
-    }
-
-    function renderCodexQueueConsoleHint(label) {
-      if (label !== "Codex") return "";
-      const tasks = latestCodexTasks.filter((task) => !isTerminalCodexTask(task)).slice(0, 3);
-      const runnerText = latestCodexRunner
-        ? "Runner: " + codexRunnerStatusLabel(latestCodexRunner) + " · " + (latestCodexRunner.message || "no runner message")
-        : "Runner: no heartbeat yet";
-      if (!tasks.length) return '<div class="ci-note">No Codex queue task is currently proposed, approved, or running. ' + escapeHtml(runnerText) + '.</div>';
-      return '<div class="ci-note">Codex queue: ' + escapeHtml(tasks.map((task) => normalize(task.status) + " " + (task.repo || "") + "#" + (task.pullRequestNumber || "?")).join(" · ")) + '. ' + escapeHtml(runnerText) + '.</div>';
     }
 
     function currentStreamLabel() {
