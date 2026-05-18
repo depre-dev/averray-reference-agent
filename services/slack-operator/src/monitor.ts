@@ -1009,37 +1009,54 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       min-width: 0;
       flex-wrap: wrap;
     }
+    /* Counter chip — number on top, small uppercase label below.
+       Matches the kanban-card "pill" vocabulary instead of the
+       generic outlined-pill look. Non-zero chips light up in their
+       tone color; zero chips fade so the eye lands on what's actually
+       live. Toggled via data-empty by JS after each render. */
     .counter-chip {
       display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      height: 30px;
-      padding: 0 10px;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 3px;
+      min-width: 70px;
+      padding: 6px 12px;
       border: 1px solid var(--line);
-      border-radius: 7px;
-      background: var(--surface-soft);
+      border-radius: 6px;
+      background: rgba(2, 9, 8, 0.3);
       white-space: nowrap;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       line-height: 1;
+      transition: opacity 140ms ease, border-color 140ms ease, background 140ms ease;
     }
-    .counter-chip[data-tone="warn"] {
-      border-color: rgba(255, 209, 102, 0.66);
-      background: rgba(255, 209, 102, 0.1);
+    .counter-chip[data-empty="true"] {
+      opacity: 0.42;
+      background: transparent;
+      border-color: var(--line-soft);
     }
-    .counter-chip[data-tone="bad"] {
-      border-color: rgba(255, 107, 107, 0.68);
-      background: rgba(255, 107, 107, 0.1);
+    .counter-chip[data-tone="warn"]:not([data-empty="true"]) {
+      border-color: color-mix(in srgb, var(--warn) 50%, var(--line));
+      background: color-mix(in srgb, var(--warn) 10%, rgba(2, 9, 8, 0.3));
     }
-    .counter-chip[data-tone="ok"] {
-      border-color: rgba(82, 210, 115, 0.62);
-      background: rgba(82, 210, 115, 0.1);
+    .counter-chip[data-tone="warn"]:not([data-empty="true"]) .counter-number { color: var(--warn); }
+    .counter-chip[data-tone="bad"]:not([data-empty="true"]) {
+      border-color: color-mix(in srgb, var(--bad) 55%, var(--line));
+      background: color-mix(in srgb, var(--bad) 10%, rgba(2, 9, 8, 0.3));
     }
+    .counter-chip[data-tone="bad"]:not([data-empty="true"]) .counter-number { color: var(--bad); }
+    .counter-chip[data-tone="ok"]:not([data-empty="true"]) {
+      border-color: color-mix(in srgb, var(--ok) 50%, var(--line));
+      background: color-mix(in srgb, var(--ok) 10%, rgba(2, 9, 8, 0.3));
+    }
+    .counter-chip[data-tone="ok"]:not([data-empty="true"]) .counter-number { color: var(--ok); }
     .counter-number {
       display: inline-flex;
       align-items: center;
       color: var(--text);
       font-weight: 800;
-      font-size: 0.92rem;
+      font-size: 1.05rem;
+      letter-spacing: 0.01em;
       line-height: 1;
     }
     .counter-label {
@@ -1047,27 +1064,34 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       align-items: center;
       color: var(--muted);
       text-transform: uppercase;
-      letter-spacing: 0.08em;
-      font-size: 0.62rem;
+      letter-spacing: 0.1em;
+      font-size: 0.58rem;
       line-height: 1;
-      padding-top: 1px; /* nudges small caps onto the visual midline */
     }
+    /* Right-side cluster — compact: live indicator, pause toggle, last-
+       refresh timestamp, refresh button. Inline rather than stacked,
+       smaller padding, so the whole topbar feels coordinated instead
+       of three separate widgets jammed together. */
     .refresh-cluster {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 6px;
       justify-content: flex-end;
     }
     .refresh-meta {
-      display: grid;
-      gap: 2px;
-      text-align: right;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 0.68rem;
+      font-size: 0.66rem;
       color: var(--muted);
       text-transform: uppercase;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.08em;
+      padding: 0 8px;
+      white-space: nowrap;
     }
+    .refresh-meta-label { color: color-mix(in srgb, var(--muted) 70%, var(--line)); }
+    .refresh-meta #generated { color: var(--text); font-weight: 600; }
     .filterbar {
       display: flex;
       align-items: center;
@@ -2280,6 +2304,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       background: var(--surface-soft);
       white-space: nowrap;
     }
+    /* Hide the sys-block when it's idle — the live-status indicator on
+       the right of the topbar already conveys "system is doing fine".
+       Two "idle" indicators is the placeholder vibe we're cleaning up. */
+    .sys[data-state="idle"] { display: none; }
     .sys-dot {
       width: 7px;
       height: 7px;
@@ -3732,8 +3760,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           <span class="cmd-status-sub" id="live-status-sub">auto 5s</span>
         </span>
         <button id="pause" class="cmd-pause" type="button" aria-pressed="false" title="Pause live updates">❚❚</button>
-        <span class="refresh-meta"><span>last refresh</span><span id="generated">waiting</span></span>
-        <button id="refresh" type="button">Refresh</button>
+        <span class="refresh-meta" title="time of the last monitor snapshot"><span class="refresh-meta-label">last refresh</span><span id="generated">waiting</span></span>
+        <button id="refresh" type="button" title="Force a refresh now">Refresh</button>
       </div>
     </header>
     <section class="filterbar" aria-label="Monitor filters">
@@ -4551,11 +4579,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const review = laneCounts.operator || 0;
       const ready = laneCounts.queue || 0;
       const running = (laneCounts.hermes || 0) + (laneCounts.deploy || 0);
-      setText("attention-chip", String(blocked + review + (laneCounts.codex || 0)));
-      setText("blocked-chip", String(blocked));
-      setText("review-chip", String(review));
-      setText("ready-chip", String(ready));
-      setText("running-chip", String(running));
+      setCounterChip("attention-chip", blocked + review + (laneCounts.codex || 0));
+      setCounterChip("blocked-chip", blocked);
+      setCounterChip("review-chip", review);
+      setCounterChip("ready-chip", ready);
+      setCounterChip("running-chip", running);
       updateSysAgents(latestPipelineItems);
       updateDeployHealth(latestPipelineItems);
       renderPipelineBoard(latestPipelineItems);
@@ -6837,8 +6865,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (counts.hermes) parts.push("Hermes is checking " + counts.hermes);
       if (counts.queue) parts.push(counts.queue + " waiting in the merge queue");
       const headline = parts.length ? parts.join("; ") + "." : plural(counts.total, "item") + (counts.total === 1 ? " is" : " are") + " on the board.";
-      const operatorNote = counts.operator ? "Operator decision is required." : "No operator decision is needed right now.";
-      return "Board read: " + headline + " " + operatorNote + " I will keep this thread updated as the cards move.";
+      const operatorNote = counts.operator
+        ? "Pascal, I will call out the decision points instead of making them look like normal queue work."
+        : "Pascal, nothing here needs your decision right this second; I am mostly keeping Codex pointed at the next handoff.";
+      return "Here is the live shape of the board: " + headline + " " + operatorNote + " I will narrate the next useful move here as the cards change, so the board is not just a wall of badges.";
     }
 
     function plural(count, noun) {
@@ -6848,25 +6878,25 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function boardBriefingLineForItem(item, verdict, action, lane) {
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
       if (codexTaskFailedForItem(item)) {
-        return "Codex: " + title + " — last runner task failed. Open the failed runner output first; if it's auth or clone setup, fix the runner. Otherwise create a smaller retry task or push the smallest PR-check fix.";
+        return "Codex, " + title + " is back in Needs Attention because the last runner task failed. Start by opening the failed runner output: if it is auth or clone setup, fix the runner path; if it is a real PR/check failure, come back with the smallest retry task or smallest branch fix.";
       }
       if (isDraftPullRequest(item)) {
-        return "Codex: " + title + " — finish the draft or mark it ready for review, then let CI and Hermes re-run.";
+        return "Codex, " + title + " is still a draft, so I am holding it out of the release path. Finish the draft work or mark it ready for review, then let CI and Hermes take another pass.";
       }
       if (lane.key === "attention" && action.owner === "Codex") {
-        return "Codex: " + title + " is blocked. " + capitalizeFirst(action.text) + ". Hermes will clear it only after the blocking signal disappears.";
+        return "Codex, " + title + " is blocked at the gate. " + capitalizeFirst(action.text) + "; I will keep it visible here until the blocking signal disappears and Hermes records a clean pass.";
       }
       if (action.owner === "Operator" || lane.key === "operator") {
-        return "Operator: " + title + " needs a decision. Review the evidence and only approve if intent, architecture, rollout risk, and test coverage match what should ship.";
+        return "Pascal, " + title + " needs your judgement rather than more automation. Check the evidence and only approve if the intent, architecture, rollout risk, and test coverage match what you actually want shipped.";
       }
       if (action.owner === "Hermes" || lane.key === "hermes") {
-        return "Hermes: " + title + " is waiting on a read-only verdict. I will publish the result here when the checks settle.";
+        return "Hermes is holding " + title + " while the read-only checks settle. I will bring the verdict back here, and if it turns red I will say exactly who needs to move next.";
       }
       if (action.owner === "Merge queue" || lane.key === "queue") {
-        return "Queue: " + title + " is merge-ready. Merge only after branch protection is green and merge/deploy ownership is clear.";
+        return title + " looks merge-ready, so I am keeping it in the release queue rather than pretending it is done. Merge only after branch protection is green and merge/deploy ownership is clear.";
       }
       if (lane.key === "deploy") {
-        return "Deploy: " + title + " is in post-deploy verification. Watch hosted health and the deploy checks before calling it done.";
+        return title + " is in post-deploy verification. I am watching hosted health and deploy checks before calling it safe.";
       }
       return action.owner + ": " + title + " needs the next step — " + action.text + ".";
     }
@@ -6888,13 +6918,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     // terse, action-first. Hermes's voice: dry, methodical, observing.
     function collaborationAskForItem(item, verdict, action, lane) {
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
-      if (codexTaskFailedForItem(item)) return "Codex — " + title + ": last runner task failed. Open the failed task output first; then fix the runner setup, push the smallest PR-check fix, or create a smaller retry task.";
-      if (isDraftPullRequest(item)) return "Codex — " + title + ": finish the draft or mark it ready for review, then let CI and Hermes re-run.";
-      if (action.owner === "Codex" || lane.key === "codex") return "Codex — you're up on " + title + ". " + action.text;
-      if (action.owner === "Operator" || lane.key === "operator" || lane.key === "attention") return "Pascal, this one needs your call on " + title + ". " + action.text;
-      if (action.owner === "Hermes" || lane.key === "hermes") return "Watching " + title + ". I'll land the verdict here once the checks clear.";
-      if (lane.key === "queue") return title + " is ready. Holding in the queue until merge/deploy ownership is clear.";
-      if (lane.key === "deploy") return "Watching the deploy on " + title + ". I'll flag if anything looks off.";
+      if (codexTaskFailedForItem(item)) return "Codex, " + title + " failed in the runner. Please inspect the failed output first, then either fix the runner setup, push the smallest PR-check fix, or create a smaller retry task so Hermes has something concrete to re-check.";
+      if (isDraftPullRequest(item)) return "Codex, " + title + " is still in draft mode. Finish the draft or mark it ready for review; once that happens I will wait for CI and Hermes to re-run before moving it forward.";
+      if (action.owner === "Codex" || lane.key === "codex") return "Codex, you are up on " + title + ". " + capitalizeFirst(action.text) + "; keep it narrow and hand it back when CI/Hermes can see the new signal.";
+      if (action.owner === "Operator" || lane.key === "operator" || lane.key === "attention") return "Pascal, " + title + " needs your call. " + capitalizeFirst(action.text) + "; if the answer is no, send it back to Codex with the exact change you want.";
+      if (action.owner === "Hermes" || lane.key === "hermes") return "I am watching " + title + " now. I will land the verdict here once the checks clear, and I will not pretend it is ready while the evidence is still moving.";
+      if (lane.key === "queue") return title + " is ready enough to sit in the merge queue. I am holding it there until branch protection and merge/deploy ownership are both clear.";
+      if (lane.key === "deploy") return "I am watching the deploy on " + title + ". If health or verification slips, I will say so here before anyone calls it done.";
       return action.owner + ", " + action.text + " for " + title + ".";
     }
 
@@ -6912,21 +6942,21 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (status === "proposed") {
         // Collapsed from two Hermes lines into one — they were back-to-
         // back from the same speaker and read as duplicate noise.
-        messages.push(collabMessage("Hermes", "Drafted a task for Codex on " + title + ". Pascal — approve when you want Codex to start.", "task proposed · approval needed", ts));
+        messages.push(collabMessage("Hermes", "I drafted a focused Codex task for " + title + ". Pascal, approve it when you want the runner to start; until then I will keep it visible but untouched.", "task proposed · approval needed", ts));
       } else if (status === "approved") {
         // Same collapse — Hermes's approval note and Codex's queued
         // ack happen in the same beat; keep them as one row each but
         // tighten the wording.
-        messages.push(collabMessage("Hermes", "Approved — " + title + " is yours, Codex.", "approved", ts));
-        messages.push(collabMessage("Codex", "Queued. Runner's picking me up next.", "waiting runner", ts + 1));
+        messages.push(collabMessage("Hermes", "Approved. Codex, " + title + " is yours now: take the smallest useful step, push the branch, and I will watch the checks when you hand it back.", "approved", ts));
+        messages.push(collabMessage("Codex", "Got it. I am queued behind the runner now; once I claim it, I will report back with either the branch update or the thing that blocked me.", "waiting runner", ts + 1));
       } else if (status === "running") {
-        messages.push(collabMessage("Codex", "Working on " + title + ". " + (task.progressMessage || "I'll ping here when the branch is ready."), "running", ts));
+        messages.push(collabMessage("Codex", "I am working on " + title + ". " + (task.progressMessage || "I will ping here when the branch is ready or if I hit something that needs a smaller task."), "running", ts));
       } else if (status === "completed") {
-        messages.push(collabMessage("Codex", title + " is in. Hermes, your turn for the re-check.", "completed", ts));
+        messages.push(collabMessage("Codex", title + " is in. Hermes, please take it back through the checks so we know whether it actually cleared the board.", "completed", ts));
       } else if (status === "failed") {
-        messages.push(collabMessage("Codex", title + " stalled on me. " + (lastCodexTaskTail(task) || "Check the runner output or send a smaller follow-up."), "failed", ts));
+        messages.push(collabMessage("Codex", "I stalled on " + title + ". " + (lastCodexTaskTail(task) || "Please check the runner output; if the task was too broad, send me a smaller follow-up and I will pick it up cleanly."), "failed", ts));
       } else if (status === "cancelled") {
-        messages.push(collabMessage("Operator", "Pulled the plug on the Codex task for " + title + ".", "cancelled", ts));
+        messages.push(collabMessage("Operator", "I cancelled the Codex task for " + title + ". Keep the card parked until there is a clearer next move.", "cancelled", ts));
       }
       const events = Array.isArray(task.events) ? task.events.slice(-3) : [];
       events.forEach((event, index) => {
@@ -7987,6 +8017,19 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         updateUnreadTitle();
       }
     });
+
+    // Set a counter-chip's number and toggle data-empty on its outer
+    // chip so the CSS can dim zero-count chips. The value is expected
+    // to be a non-negative integer; anything else is treated as 0.
+    function setCounterChip(numberId, value) {
+      const numberEl = document.getElementById(numberId);
+      if (!numberEl) return;
+      const num = Number(value);
+      const safe = Number.isFinite(num) ? Math.max(0, Math.floor(num)) : 0;
+      numberEl.textContent = String(safe);
+      const chip = numberEl.closest(".counter-chip");
+      if (chip) chip.setAttribute("data-empty", safe > 0 ? "false" : "true");
+    }
 
     function needsAttention(item) {
       const level = releaseVerdict(item).level;
