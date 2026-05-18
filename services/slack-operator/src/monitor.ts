@@ -3895,6 +3895,43 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       });
     }
 
+    // Short post-message poll: after an operator posts, hit GET
+    // /monitor/collaboration?sinceMs=<just-posted-ts> a handful of times
+    // over ~3 seconds so any Hermes auto-reply (recorded server-side
+    // ~800ms after our POST) surfaces visibly without waiting for the
+    // next SSE snapshot tick (up to 5s). Bails out as soon as a new
+    // message arrives so we don't keep polling forever.
+    function pollCollaborationSince(sinceMs) {
+      let attempts = 0;
+      const maxAttempts = 5;
+      const intervalMs = 700;
+      const tick = async () => {
+        attempts += 1;
+        try {
+          const url = buildCommandUrl(collaborationPath + "?sinceMs=" + (sinceMs + 1));
+          const resp = await fetch(url);
+          if (resp.ok) {
+            const body = await resp.json();
+            if (body && Array.isArray(body.messages) && body.messages.length > 0) {
+              const known = new Set((latestCollabMessages || []).map((m) => m && m.id).filter(Boolean));
+              const fresh = body.messages.filter((m) => m && m.id && !known.has(m.id));
+              if (fresh.length > 0) {
+                latestCollabMessages = (latestCollabMessages || []).concat(fresh);
+                forceThreadMode();
+                renderAutoCollaborationThread();
+                return; // got the reply, stop polling
+              }
+            }
+          }
+        } catch (e) {
+          // Network blips are fine — the next SSE snapshot will surface
+          // the reply anyway. Don't spam the console.
+        }
+        if (attempts < maxAttempts) setTimeout(tick, intervalMs);
+      };
+      setTimeout(tick, intervalMs);
+    }
+
     async function submitCollaborationPost(text) {
       const submit = document.getElementById("command-submit");
       const input = document.getElementById("command-input");
@@ -3931,6 +3968,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           // the new message shows up.
           forceThreadMode();
           renderAutoCollaborationThread();
+          // Hermes auto-replies on the server ~800ms after our post. The
+          // next SSE snapshot tick is up to 5s away, which feels sluggish
+          // for a conversation. Run a short GET poll loop so the reply
+          // surfaces in roughly a second.
+          pollCollaborationSince(result.message.ts);
         }
         setComposeStatus("Posted.", "ok");
         if (input) input.value = "";

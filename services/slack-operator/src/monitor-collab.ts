@@ -182,3 +182,66 @@ function nextId(nowMs: number): string {
   idSeq = (idSeq + 1) % 1_000_000;
   return `collab-${nowMs.toString(36)}-${idSeq.toString(36)}`;
 }
+
+// ───────────────────────────────────────────────────────────────────────
+// Hermes auto-reply synthesizer
+//
+// Operators expect the channel to feel like a conversation: post a
+// message, get an acknowledgment. Today the chat is one-way for
+// operator posts (Codex/Hermes only "speak" via synthesized board
+// state). This helper produces a short, contextual ack from Hermes so
+// the channel reads as bidirectional.
+//
+// Tone: brief, professional, on-message. Not LLM-routed — canned
+// templates keyed on intent and whether a PR is referenced. Cheap and
+// predictable; richer LLM-backed replies can layer on later.
+//
+// Returns null when no reply is warranted (operator talking to
+// themselves, message from a non-operator, addressed only to Codex,
+// etc.) so the caller can skip the schedule.
+// ───────────────────────────────────────────────────────────────────────
+
+export interface HermesReplyDraft {
+  text: string;
+  addressedTo: CollaborationTarget;
+  relatedPr?: CollaborationRelatedPr;
+  relatedCorrelationId?: string;
+}
+
+export function synthesizeHermesReplyFor(message: CollaborationMessage): HermesReplyDraft | null {
+  if (message.author !== "operator") return null;
+  // Only chime in when the operator is talking to Hermes or to the
+  // whole room. Don't reply to ops-to-Codex or ops-to-self posts —
+  // those have a different conversational partner.
+  if (message.addressedTo !== "hermes" && message.addressedTo !== "everyone") return null;
+
+  const prRef = message.relatedPr
+    ? `${message.relatedPr.repo}#${message.relatedPr.number}`
+    : null;
+
+  let text: string;
+  if (message.kind === "request_help") {
+    text = prRef
+      ? `On it — what specifically is blocking you on ${prRef}?`
+      : "On it. What's the blocker?";
+  } else if (message.kind === "proposal") {
+    text = prRef
+      ? `Noted on ${prRef}. I'll surface a verdict here once Codex picks it up or the checks move.`
+      : "Noted. I'll surface a verdict here once the work lands.";
+  } else if (message.kind === "status") {
+    text = prRef
+      ? `Acknowledged. I'll keep watching ${prRef} and call out anything new.`
+      : "Acknowledged. I'll keep watching the board.";
+  } else if (prRef) {
+    text = `Got it. I've got eyes on ${prRef} — I'll post here as soon as the verdict moves or the checks settle.`;
+  } else {
+    text = "Got it. I'll keep watching the board and surface anything that needs your call.";
+  }
+
+  return {
+    text,
+    addressedTo: "operator",
+    ...(message.relatedPr ? { relatedPr: message.relatedPr } : {}),
+    ...(message.relatedCorrelationId ? { relatedCorrelationId: message.relatedCorrelationId } : {}),
+  };
+}

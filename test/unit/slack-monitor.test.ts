@@ -327,6 +327,13 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain('.done-rail:hover');
     expect(html).toContain('.done-rail .lane-head::before');
     expect(html).toContain('.done-rail .lane-title .pill');
+
+    // Hermes auto-reply (PR: monitor-hermes-replies): client polls the
+    // collaboration buffer right after a post so the server-side
+    // Hermes reply (~800ms later) surfaces in ~1s instead of waiting
+    // for the next SSE snapshot.
+    expect(html).toContain('pollCollaborationSince');
+    expect(html).toContain('sinceMs=');
   });
 
   it("serves a PWA manifest with the canonical name + scope", () => {
