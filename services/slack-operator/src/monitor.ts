@@ -3237,21 +3237,6 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     </nav>
     <section class="board-shell">
       <div id="pull-indicator" data-state="idle" aria-hidden="true"><span class="pi-spinner"></span><span class="pi-label">Pull to refresh</span></div>
-      <div id="active" class="live-lane"><strong>Live lane</strong><span>No running or just-finished handoffs.</span><span class="pill">SSE + polling</span></div>
-      <section id="agent-activity" class="agent-activity" aria-label="Live agent activity">
-        <div class="agent-status-card" data-agent="codex" data-state="idle">
-          <div class="agent-status-head"><span class="agent-status-title">Codex</span><span class="agent-status-state">loading</span></div>
-          <div class="agent-status-focus"><strong>Focus</strong><span>Waiting for monitor data.</span></div>
-        </div>
-        <div class="agent-status-card" data-agent="hermes" data-state="idle">
-          <div class="agent-status-head"><span class="agent-status-title">Hermes</span><span class="agent-status-state">loading</span></div>
-          <div class="agent-status-focus"><strong>Focus</strong><span>Waiting for monitor data.</span></div>
-        </div>
-        <div class="handoff-radar">
-          <div class="handoff-radar-head"><strong>Agent handoff radar</strong><span>SSE</span></div>
-          <ul class="handoff-radar-list"><li><span class="activity-dot"></span><span class="radar-main"><strong>Waiting for monitor data.</strong><span>Codex/Hermes state will appear here once the first snapshot arrives.</span></span></li></ul>
-        </div>
-      </section>
       <section id="owner-lanes" class="kanban-board" aria-label="Release command board"><div class="empty">Loading command board...</div></section>
     </section>
     <aside id="detail-drawer" class="drawer" data-open="false" aria-label="Selected handoff detail"></aside>
@@ -3630,24 +3615,6 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (board) {
         board.innerHTML = '<div class="empty error">Monitor data unavailable: ' + escapeHtml(message) + '</div>';
       }
-      const active = document.getElementById("active");
-      if (active) {
-        active.innerHTML = '<strong>Live lane</strong><span>Monitor data unavailable: ' + escapeHtml(message) + '</span><span class="pill">error</span>';
-      }
-      const activity = document.getElementById("agent-activity");
-      if (activity) {
-        activity.innerHTML =
-          '<article class="agent-status-card" data-agent="codex" data-state="waiting">' +
-            '<div class="agent-status-head"><span class="agent-status-title">Codex</span><span class="agent-status-state">unknown</span></div>' +
-            '<div class="agent-status-focus"><strong>Focus</strong><span>Waiting for monitor data to recover.</span></div>' +
-          '</article>' +
-          '<article class="agent-status-card" data-agent="hermes" data-state="waiting">' +
-            '<div class="agent-status-head"><span class="agent-status-title">Hermes</span><span class="agent-status-state">unknown</span></div>' +
-            '<div class="agent-status-focus"><strong>Focus</strong><span>Waiting for monitor data to recover.</span></div>' +
-          '</article>' +
-          '<section class="handoff-radar"><div class="handoff-radar-head"><strong>Agent handoff radar</strong><span>error</span></div>' +
-            '<ul class="handoff-radar-list"><li><span class="activity-dot"></span><span class="radar-main"><strong>Snapshot fetch failed.</strong><span>' + escapeHtml(message) + '</span></span></li></ul></section>';
-      }
     }
 
     function updateLiveStatus(state, label) {
@@ -3767,13 +3734,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       latestCodexTasks = normalizeCodexTasks(payload.codexTasks);
       latestCodexRunner = normalizeCodexRunner(payload.codexTasks && payload.codexTasks.runner);
       latestPipelineItems = groupPrPipelineItems(collectPipelineItems(payload));
-      const attention = latestPipelineItems.filter(needsAttention);
-      const verdicts = latestPipelineItems.map(releaseVerdict);
-      const blocked = verdicts.filter((verdict) => verdict.level === "block").length;
-      const review = verdicts.filter((verdict) => verdict.level === "needs-review").length;
-      const ready = verdicts.filter((verdict) => verdict.level === "pass").length;
-      const running = verdicts.filter((verdict) => verdict.level === "running").length;
-      setText("attention-chip", String(blocked + review));
+      const laneCounts = commandBoardLaneCounts(latestPipelineItems);
+      const blocked = laneCounts.attention || 0;
+      const review = laneCounts.operator || 0;
+      const ready = laneCounts.queue || 0;
+      const running = (laneCounts.hermes || 0) + (laneCounts.deploy || 0);
+      setText("attention-chip", String(blocked + review + (laneCounts.codex || 0)));
       setText("blocked-chip", String(blocked));
       setText("review-chip", String(review));
       setText("ready-chip", String(ready));
@@ -3781,8 +3747,6 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       updateSysAgents(latestPipelineItems);
       updateDeployHealth(latestPipelineItems);
       renderPipelineBoard(latestPipelineItems);
-      renderLiveLane(payload.active || []);
-      renderAgentActivity(latestPipelineItems, payload.active || [], payload.recent || []);
       renderBoard(latestPipelineItems);
       renderDrawer(selectedItem());
       renderCommandContext();
@@ -4200,10 +4164,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function updateMobileTabCounts(entries) {
-      const counts = { all: entries.length, attention: 0, codex: 0, hermes: 0, operator: 0, queue: 0, deploy: 0, done: 0 };
+      const counts = { all: 0, attention: 0, codex: 0, hermes: 0, operator: 0, queue: 0, deploy: 0, done: 0 };
       entries.forEach((item) => {
         const key = boardLaneForItem(item, releaseVerdict(item)).key;
         if (counts[key] !== undefined) counts[key] += 1;
+        if (key !== "done") counts.all += 1;
       });
       Object.keys(counts).forEach((key) => {
         const el = document.getElementById("mt-" + key);
@@ -4215,7 +4180,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return entries.filter((item) => {
         const verdict = releaseVerdict(item);
         const lane = boardLaneForItem(item, verdict);
-        if (pipelineFilter !== "all" && verdict.level !== pipelineFilter) return false;
+        if (pipelineFilter !== "all") {
+          if (pipelineFilter === "pass" && lane.key !== "queue") return false;
+          else if (pipelineFilter === "running" && lane.key !== "hermes" && lane.key !== "deploy") return false;
+          else if (pipelineFilter === "block" && lane.key !== "attention") return false;
+          else if (pipelineFilter === "needs-review" && lane.key !== "operator") return false;
+          else if (!["pass", "running", "block", "needs-review"].includes(pipelineFilter) && verdict.level !== pipelineFilter) return false;
+        }
         if (repoFilter !== "all" && String(item.repo || "") !== repoFilter) return false;
         if (agentFilter === "codex" && lane.key !== "codex" && nextPipelineAction(item, verdict).owner !== "Codex") return false;
         if (agentFilter === "hermes" && lane.key !== "hermes" && nextPipelineAction(item, verdict).owner !== "Hermes") return false;
@@ -4245,6 +4216,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         { key: "deploy", title: "Deploying", kicker: "post-deploy verify", empty: "No deploy verification active." },
         { key: "done", title: "Done", kicker: "release history", empty: "No completed PRs in view." },
       ];
+    }
+
+    function commandBoardLaneCounts(entries) {
+      return entries.reduce((counts, item) => {
+        const key = boardLaneForItem(item, releaseVerdict(item)).key;
+        counts[key] = (counts[key] || 0) + 1;
+        return counts;
+      }, {});
     }
 
     function renderBoardLane(lane, entries, options) {
@@ -4289,7 +4268,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       setText("done-count", String(done.length));
       return '<button class="lane done-rail" data-lane="done" type="button" id="done-stub" aria-label="Show done lane" onclick="document.getElementById(\\'toggle-done\\').click()">' +
         '<div class="lane-head"><div class="lane-title">Done ▾ <span class="pill">' + escapeHtml(String(done.length)) + '</span></div></div>' +
-        '<div class="lane-body"><div class="lane-empty">last 24h · click</div></div>' +
+        '<div class="lane-body"><div class="lane-empty">' + escapeHtml(done.length ? done.length + " history item" + (done.length === 1 ? "" : "s") + " · click" : "history · click") + '</div></div>' +
         '</button>';
     }
 
@@ -5797,12 +5776,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function renderPipelineBoard(entries) {
-      const verdicts = entries.map(releaseVerdict);
-      setText("board-all", String(entries.length));
-      setText("board-block", String(verdicts.filter((verdict) => verdict.level === "block").length));
-      setText("board-review", String(verdicts.filter((verdict) => verdict.level === "needs-review").length));
-      setText("board-ready", String(verdicts.filter((verdict) => verdict.level === "pass").length));
-      setText("board-running", String(verdicts.filter((verdict) => verdict.level === "running").length));
+      const counts = commandBoardLaneCounts(entries);
+      setText("board-all", String(entries.length - (counts.done || 0)));
+      setText("board-block", String(counts.attention || 0));
+      setText("board-review", String(counts.operator || 0));
+      setText("board-ready", String(counts.queue || 0));
+      setText("board-running", String((counts.hermes || 0) + (counts.deploy || 0)));
       renderOwnerSummary(entries);
       renderStalenessSummary(entries);
       updatePipelineFilterButtons();

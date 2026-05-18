@@ -77,9 +77,9 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("command-console");
     expect(html).toContain("Ask Hermes");
     expect(html).toContain("what is happening now");
-    expect(html).toContain("agent-activity");
-    expect(html).toContain("Live agent activity");
-    expect(html).toContain("Agent handoff radar");
+    expect(html).not.toContain('id="active" class="live-lane"');
+    expect(html).not.toContain('id="agent-activity"');
+    expect(html).not.toContain("Live agent activity");
     expect(html).toContain("Needs Attention");
     expect(html).toContain("Codex Needed");
     expect(html).toContain("Hermes Checking");
@@ -152,11 +152,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("activeAgentForItem(item, lane, stage)");
     expect(html).toContain("updateDeployHealth(latestPipelineItems)");
     expect(html).toContain("updateSysAgents(latestPipelineItems)");
-    expect(html).toContain("renderAgentActivity(latestPipelineItems");
-    expect(html).toContain("codexAgentSnapshot(items)");
-    expect(html).toContain("hermesAgentSnapshot(items, activeEntries)");
-    expect(html).toContain("renderHandoffRadar(items, activeEntries, recentEntries");
-    expect(html).toContain("buildAgentRadarItems(items, activeEntries, recentEntries");
+    expect(html).toContain("currentMonitorMetrics(items)");
     expect(html).toContain("buildActivityStreamItems(items, activeEntries, recentEntries)");
     expect(html).toContain("renderMonitorLoadError(error)");
     expect(html).toContain("startPolling(\"polling 5s\")");
@@ -205,6 +201,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("prIdentityKey(item)");
     expect(html).toContain("renderPipelineSteps(stage, verdict)");
     expect(html).toContain("renderPrTimeline(item, stage, verdict, action)");
+    expect(html).toContain("commandBoardLaneCounts(entries)");
     expect(html).toContain("renderDecisionActions(item)");
     expect(html).toContain("buildFixRequest(item, summary, verdict, action)");
     expect(html).toContain("Fix this block");
