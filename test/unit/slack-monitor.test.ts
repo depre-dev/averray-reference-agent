@@ -123,7 +123,11 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Ask Hermes to re-check");
     expect(html).toContain("Codex task runner reported this task completed. Hermes should re-check");
     expect(html).toContain("CODEX FAILED");
-    expect(html).toContain("Propose retry");
+    expect(html).toContain("Review failed task");
+    expect(html).toContain("Create smaller retry task");
+    expect(html).toContain("Show failed runner output and retry prompt");
+    expect(html).toContain("Proof signals");
+    expect(html).toContain("renderDrawerDisclosureSection");
     expect(html).toContain("data-hermes-recheck");
     expect(html).toContain("handleHermesRecheckAction(recheckButton)");
     expect(html).toContain("fetch(recheckUrl");
