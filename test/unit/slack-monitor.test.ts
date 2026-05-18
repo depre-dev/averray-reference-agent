@@ -334,6 +334,15 @@ describe("slack operator personal monitor", () => {
     // for the next SSE snapshot.
     expect(html).toContain('pollCollaborationSince');
     expect(html).toContain('sinceMs=');
+
+    // Drawer focus mode (PR: monitor-drawer-scrim): scrim element +
+    // CSS, scrim click handler, Esc-to-close, done-row select-card
+    // bug fix, stronger selected-card visual.
+    expect(html).toContain('id="drawer-scrim"');
+    expect(html).toContain('#drawer-scrim[data-open="true"]');
+    expect(html).toContain('interactive === card');
+    expect(html).toContain('event.key !== "Escape"');
+    expect(html).toContain('scrim.dataset.open = "true"');
   });
 
   it("serves a PWA manifest with the canonical name + scope", () => {
