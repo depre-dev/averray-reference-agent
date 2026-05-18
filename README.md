@@ -60,6 +60,11 @@ Do not use `latest` in production. Test a new Hermes tag in a branch, run the
 smoke flow, then update the pin deliberately. For this release, review the
 upstream notes for API approval events, Codex runtime fixes, MCP parallel tool
 calls, dashboard/kanban changes, and security hardening before deploying.
+The monitor collaboration chat also passes `OLLAMA_API_KEY`,
+`OLLAMA_BASE_URL`, and `HERMES_MONITOR_REPLY_MODEL` into `slack-operator` so
+Hermes can use the same v0.14-era OpenAI-compatible provider path for live
+operator replies. If the key is unset, the monitor falls back to deterministic
+local acknowledgments.
 
 Run the reference prompt:
 

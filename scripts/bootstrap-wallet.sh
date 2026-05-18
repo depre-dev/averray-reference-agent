@@ -16,7 +16,7 @@ import { randomUUID } from "node:crypto";
 const privateKey = generatePrivateKey();
 const account = privateKeyToAccount(privateKey);
 
-console.log(`HERMES_IMAGE=nousresearch/hermes-agent@sha256:8811f1809971ac558f8d5e311e22fe73dc2944616dda7295c98acb6028f9df08`);
+console.log(`HERMES_IMAGE=nousresearch/hermes-agent@sha256:b6e41c155d6bfce5ad83c5d0fec670086db8a43250e4511c9474134be5482d33`);
 console.log(`POSTGRES_USER=avg_agent`);
 console.log(`POSTGRES_PASSWORD=${randomUUID().replaceAll("-", "")}`);
 console.log(`POSTGRES_DB=avg_agent`);
@@ -28,6 +28,7 @@ console.log(`AGENT_WALLET_ADDRESS=${account.address}`);
 console.log(`OLLAMA_API_KEY=`);
 console.log(`OLLAMA_BASE_URL=https://ollama.com/v1`);
 console.log(`HERMES_DEFAULT_MODEL=deepseek-v4-pro:cloud`);
+console.log(`HERMES_MONITOR_REPLY_MODEL=deepseek-v4-pro:cloud`);
 console.log(`HERMES_COMPARISON_MODEL=qwen3.5:cloud`);
 console.log(`SLACK_WEBHOOK_URL=`);
 console.log(`TRACE_HTTP_PORT=8789`);
