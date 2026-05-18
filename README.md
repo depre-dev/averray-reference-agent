@@ -49,13 +49,17 @@ Hermes service first so the container sees the updated environment.
 
 ## Hermes Pin
 
-The runtime image is pinned in [ops/.env.example](ops/.env.example):
+The runtime image is pinned in [ops/.env.example](ops/.env.example). The
+current pin tracks Hermes Agent v0.14.0 / `v2026.5.16`:
 
 ```text
-nousresearch/hermes-agent@sha256:8811f1809971ac558f8d5e311e22fe73dc2944616dda7295c98acb6028f9df08
+nousresearch/hermes-agent@sha256:b6e41c155d6bfce5ad83c5d0fec670086db8a43250e4511c9474134be5482d33
 ```
 
-Do not use `latest` in production. Test a new Hermes tag in a branch, run the smoke flow, then update the pin deliberately.
+Do not use `latest` in production. Test a new Hermes tag in a branch, run the
+smoke flow, then update the pin deliberately. For this release, review the
+upstream notes for API approval events, Codex runtime fixes, MCP parallel tool
+calls, dashboard/kanban changes, and security hardening before deploying.
 
 Run the reference prompt:
 

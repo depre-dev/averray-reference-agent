@@ -564,13 +564,15 @@ Look for:
 
 ## Runtime Pin
 
-The default Hermes image is pinned to:
+The default Hermes image is pinned to Hermes Agent v0.14.0 / `v2026.5.16`:
 
 ```text
-nousresearch/hermes-agent@sha256:8811f1809971ac558f8d5e311e22fe73dc2944616dda7295c98acb6028f9df08
+nousresearch/hermes-agent@sha256:b6e41c155d6bfce5ad83c5d0fec670086db8a43250e4511c9474134be5482d33
 ```
 
 Before changing that pin, test the new tag on a branch and re-run the safe first prompt.
+This pin is the published multi-arch index digest for `v2026.5.16`; on the
+current VPS (`x86_64`) Docker resolves it to the `linux/amd64` manifest.
 
 ## Kill Switch
 
