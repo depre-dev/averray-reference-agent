@@ -6286,6 +6286,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         : kind === "hermes" ? "Hermes review"
           : kind === "operator" ? "Operator asks"
             : kind === "blocked" ? "Needs attention"
+              : kind === "now" ? "What is happening now"
               : "Collaboration";
       return renderCollaborationShell(title, messages);
     }
@@ -6472,6 +6473,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       latestCollabMessages
         .filter((m) => postedMessageMatchesKind(m, kind))
         .forEach((m) => messages.push(postedToCollabRow(m)));
+      messages.push(...buildBoardBriefingMessages(kind));
       latestCodexTasks
         .filter((task) => !isTerminalCodexTask(task))
         .sort((a, b) => taskUpdatedMs(b) - taskUpdatedMs(a))
@@ -6500,6 +6502,106 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return messages;
     }
 
+    function buildBoardBriefingMessages(kind) {
+      if (!["all", "now", "blocked"].includes(kind || "all")) return [];
+      const items = topConsoleItems(boardBriefingItems(kind), 4);
+      if (!items.length) return [];
+      const baseTs = newestBoardItemUpdateMs(items);
+      const messages = [
+        collabMessage("Hermes", boardBriefingSummary(items), "board briefing", baseTs),
+      ];
+      items.forEach((item, index) => {
+        const verdict = releaseVerdict(item);
+        const lane = boardLaneForItem(item, verdict);
+        const action = nextPipelineAction(item, verdict);
+        messages.push(collabMessage("Hermes", boardBriefingLineForItem(item, verdict, action, lane), boardBriefingMeta(item, verdict, lane), baseTs + index + 1));
+      });
+      return messages;
+    }
+
+    function boardBriefingItems(kind) {
+      return (latestPipelineItems || []).filter((item) => {
+        if (!item) return false;
+        const verdict = releaseVerdict(item);
+        const lane = boardLaneForItem(item, verdict);
+        if (lane.key === "done") return false;
+        if (kind === "blocked") return lane.key === "attention" || verdict.level === "block";
+        return true;
+      });
+    }
+
+    function newestBoardItemUpdateMs(items) {
+      const latest = items.reduce((max, item) => {
+        const value = itemUpdatedMs(item);
+        return Number.isFinite(value) ? Math.max(max, value) : max;
+      }, 0);
+      return latest || Date.now();
+    }
+
+    function boardBriefingSummary(items) {
+      const counts = items.reduce((acc, item) => {
+        const verdict = releaseVerdict(item);
+        const lane = boardLaneForItem(item, verdict);
+        const action = nextPipelineAction(item, verdict);
+        acc.total += 1;
+        if (lane.key === "attention" || verdict.level === "block") acc.attention += 1;
+        if (action.owner === "Codex") acc.codex += 1;
+        if (action.owner === "Operator") acc.operator += 1;
+        if (action.owner === "Hermes") acc.hermes += 1;
+        if (action.owner === "Merge queue" || lane.key === "queue") acc.queue += 1;
+        return acc;
+      }, { total: 0, attention: 0, codex: 0, operator: 0, hermes: 0, queue: 0 });
+      const parts = [];
+      if (counts.attention) parts.push(plural(counts.attention, "item") + (counts.attention === 1 ? " needs attention" : " need attention"));
+      if (counts.codex) parts.push("Codex owns " + counts.codex);
+      if (counts.operator) parts.push("operator owns " + counts.operator);
+      if (counts.hermes) parts.push("Hermes is checking " + counts.hermes);
+      if (counts.queue) parts.push(counts.queue + " waiting in the merge queue");
+      const headline = parts.length ? parts.join("; ") + "." : plural(counts.total, "item") + (counts.total === 1 ? " is" : " are") + " on the board.";
+      const operatorNote = counts.operator ? "Operator decision is required." : "No operator decision is needed right now.";
+      return "Board read: " + headline + " " + operatorNote + " I will keep this thread updated as the cards move.";
+    }
+
+    function plural(count, noun) {
+      return count + " " + noun + (count === 1 ? "" : "s");
+    }
+
+    function boardBriefingLineForItem(item, verdict, action, lane) {
+      const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
+      if (codexTaskFailedForItem(item)) {
+        return "Codex: " + title + " is blocked because the last Codex task failed. First open the failed runner output; if it is auth or clone setup, fix the runner, otherwise create a smaller retry task or push the smallest PR-check fix.";
+      }
+      if (isDraftPullRequest(item)) {
+        return "Codex: " + title + " is still draft. Finish the draft or mark it ready for review, then let CI and Hermes re-run.";
+      }
+      if (lane.key === "attention" && action.owner === "Codex") {
+        return "Codex: " + title + " is blocked. " + capitalizeFirst(action.text) + ". Hermes will clear it only after the blocking signal disappears.";
+      }
+      if (action.owner === "Operator" || lane.key === "operator") {
+        return "Operator: " + title + " needs a decision. Review the evidence and only approve if intent, architecture, rollout risk, and test coverage match what should ship.";
+      }
+      if (action.owner === "Hermes" || lane.key === "hermes") {
+        return "Hermes: " + title + " is waiting on a read-only verdict. I will publish the result here when the checks settle.";
+      }
+      if (action.owner === "Merge queue" || lane.key === "queue") {
+        return "Queue: " + title + " is merge-ready. Merge only after branch protection is green and merge/deploy ownership is clear.";
+      }
+      if (lane.key === "deploy") {
+        return "Deploy: " + title + " is in post-deploy verification. Watch hosted health and the deploy checks before calling it done.";
+      }
+      return action.owner + ": " + title + " needs the next step — " + action.text + ".";
+    }
+
+    function boardBriefingMeta(item, verdict, lane) {
+      const stage = pipelineStage(item, verdict);
+      return stage.label + " · " + lane.key;
+    }
+
+    function capitalizeFirst(text) {
+      const value = String(text || "");
+      return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+    }
+
     // Synthesized agent voice — these lines are derived from board
     // state, not generated by an LLM. Truth-boundary stays clean
     // because the text only restates what the verdict/lane already
@@ -6507,6 +6609,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     // terse, action-first. Hermes's voice: dry, methodical, observing.
     function collaborationAskForItem(item, verdict, action, lane) {
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
+      if (codexTaskFailedForItem(item)) return "Codex — " + title + " failed in the runner. Open the failed task output first; then fix the runner setup, push the smallest PR-check fix, or create a smaller retry task.";
+      if (isDraftPullRequest(item)) return "Codex — " + title + " is still draft. Finish the draft or mark it ready for review, then let CI and Hermes re-run.";
       if (action.owner === "Codex" || lane.key === "codex") return "Codex — you're up on " + title + ". " + action.text;
       if (action.owner === "Operator" || lane.key === "operator" || lane.key === "attention") return "Pascal, this one needs your call on " + title + ". " + action.text;
       if (action.owner === "Hermes" || lane.key === "hermes") return "Watching " + title + ". I'll land the verdict here once the checks clear.";
@@ -6597,19 +6701,25 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
             requester: "monitor",
             prompt,
           });
-          if (output) output.textContent = "Codex task proposed. Approve it when you want Codex to pick it up.";
+          forceThreadMode();
+          renderAutoCollaborationThread();
+          setComposeStatus("Codex task proposed. Approve it when you want Codex to pick it up.", "ok");
           return;
         }
         if (action === "approve") {
           if (!taskId) throw new Error("Missing Codex task id.");
           await postCodexTask({ action: "approve", id: taskId });
-          if (output) output.textContent = "Codex task approved. Codex worker pickup is now allowed.";
+          forceThreadMode();
+          renderAutoCollaborationThread();
+          setComposeStatus("Codex task approved. Codex worker pickup is now allowed.", "ok");
           return;
         }
         if (action === "cancel") {
           if (!taskId) throw new Error("Missing Codex task id.");
           await postCodexTask({ action: "cancel", id: taskId });
-          if (output) output.textContent = "Codex task cancelled.";
+          forceThreadMode();
+          renderAutoCollaborationThread();
+          setComposeStatus("Codex task cancelled.", "ok");
           return;
         }
         throw new Error("Unsupported Codex task action: " + action);
@@ -6657,7 +6767,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           correlationId: item.correlationId,
           reason: "monitor requested Hermes re-check after Codex handoff",
         });
-        if (output) output.textContent = result.text || ("Hermes re-check completed for " + repo + "#" + pr + ".");
+        forceThreadMode();
+        renderAutoCollaborationThread();
+        setComposeStatus(result.text || ("Hermes re-check completed for " + repo + "#" + pr + "."), "ok");
       } catch (error) {
         if (output) output.textContent = "Hermes re-check failed: " + String(error.message || error);
       } finally {
