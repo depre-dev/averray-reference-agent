@@ -1009,37 +1009,54 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       min-width: 0;
       flex-wrap: wrap;
     }
+    /* Counter chip — number on top, small uppercase label below.
+       Matches the kanban-card "pill" vocabulary instead of the
+       generic outlined-pill look. Non-zero chips light up in their
+       tone color; zero chips fade so the eye lands on what's actually
+       live. Toggled via data-empty by JS after each render. */
     .counter-chip {
       display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      height: 30px;
-      padding: 0 10px;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 3px;
+      min-width: 70px;
+      padding: 6px 12px;
       border: 1px solid var(--line);
-      border-radius: 7px;
-      background: var(--surface-soft);
+      border-radius: 6px;
+      background: rgba(2, 9, 8, 0.3);
       white-space: nowrap;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       line-height: 1;
+      transition: opacity 140ms ease, border-color 140ms ease, background 140ms ease;
     }
-    .counter-chip[data-tone="warn"] {
-      border-color: rgba(255, 209, 102, 0.66);
-      background: rgba(255, 209, 102, 0.1);
+    .counter-chip[data-empty="true"] {
+      opacity: 0.42;
+      background: transparent;
+      border-color: var(--line-soft);
     }
-    .counter-chip[data-tone="bad"] {
-      border-color: rgba(255, 107, 107, 0.68);
-      background: rgba(255, 107, 107, 0.1);
+    .counter-chip[data-tone="warn"]:not([data-empty="true"]) {
+      border-color: color-mix(in srgb, var(--warn) 50%, var(--line));
+      background: color-mix(in srgb, var(--warn) 10%, rgba(2, 9, 8, 0.3));
     }
-    .counter-chip[data-tone="ok"] {
-      border-color: rgba(82, 210, 115, 0.62);
-      background: rgba(82, 210, 115, 0.1);
+    .counter-chip[data-tone="warn"]:not([data-empty="true"]) .counter-number { color: var(--warn); }
+    .counter-chip[data-tone="bad"]:not([data-empty="true"]) {
+      border-color: color-mix(in srgb, var(--bad) 55%, var(--line));
+      background: color-mix(in srgb, var(--bad) 10%, rgba(2, 9, 8, 0.3));
     }
+    .counter-chip[data-tone="bad"]:not([data-empty="true"]) .counter-number { color: var(--bad); }
+    .counter-chip[data-tone="ok"]:not([data-empty="true"]) {
+      border-color: color-mix(in srgb, var(--ok) 50%, var(--line));
+      background: color-mix(in srgb, var(--ok) 10%, rgba(2, 9, 8, 0.3));
+    }
+    .counter-chip[data-tone="ok"]:not([data-empty="true"]) .counter-number { color: var(--ok); }
     .counter-number {
       display: inline-flex;
       align-items: center;
       color: var(--text);
       font-weight: 800;
-      font-size: 0.92rem;
+      font-size: 1.05rem;
+      letter-spacing: 0.01em;
       line-height: 1;
     }
     .counter-label {
@@ -1047,27 +1064,34 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       align-items: center;
       color: var(--muted);
       text-transform: uppercase;
-      letter-spacing: 0.08em;
-      font-size: 0.62rem;
+      letter-spacing: 0.1em;
+      font-size: 0.58rem;
       line-height: 1;
-      padding-top: 1px; /* nudges small caps onto the visual midline */
     }
+    /* Right-side cluster — compact: live indicator, pause toggle, last-
+       refresh timestamp, refresh button. Inline rather than stacked,
+       smaller padding, so the whole topbar feels coordinated instead
+       of three separate widgets jammed together. */
     .refresh-cluster {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 6px;
       justify-content: flex-end;
     }
     .refresh-meta {
-      display: grid;
-      gap: 2px;
-      text-align: right;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 0.68rem;
+      font-size: 0.66rem;
       color: var(--muted);
       text-transform: uppercase;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.08em;
+      padding: 0 8px;
+      white-space: nowrap;
     }
+    .refresh-meta-label { color: color-mix(in srgb, var(--muted) 70%, var(--line)); }
+    .refresh-meta #generated { color: var(--text); font-weight: 600; }
     .filterbar {
       display: flex;
       align-items: center;
@@ -2239,6 +2263,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       background: var(--surface-soft);
       white-space: nowrap;
     }
+    /* Hide the sys-block when it's idle — the live-status indicator on
+       the right of the topbar already conveys "system is doing fine".
+       Two "idle" indicators is the placeholder vibe we're cleaning up. */
+    .sys[data-state="idle"] { display: none; }
     .sys-dot {
       width: 7px;
       height: 7px;
@@ -3691,8 +3719,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           <span class="cmd-status-sub" id="live-status-sub">auto 5s</span>
         </span>
         <button id="pause" class="cmd-pause" type="button" aria-pressed="false" title="Pause live updates">❚❚</button>
-        <span class="refresh-meta"><span>last refresh</span><span id="generated">waiting</span></span>
-        <button id="refresh" type="button">Refresh</button>
+        <span class="refresh-meta" title="time of the last monitor snapshot"><span class="refresh-meta-label">last refresh</span><span id="generated">waiting</span></span>
+        <button id="refresh" type="button" title="Force a refresh now">Refresh</button>
       </div>
     </header>
     <section class="filterbar" aria-label="Monitor filters">
@@ -4464,11 +4492,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const review = laneCounts.operator || 0;
       const ready = laneCounts.queue || 0;
       const running = (laneCounts.hermes || 0) + (laneCounts.deploy || 0);
-      setText("attention-chip", String(blocked + review + (laneCounts.codex || 0)));
-      setText("blocked-chip", String(blocked));
-      setText("review-chip", String(review));
-      setText("ready-chip", String(ready));
-      setText("running-chip", String(running));
+      setCounterChip("attention-chip", blocked + review + (laneCounts.codex || 0));
+      setCounterChip("blocked-chip", blocked);
+      setCounterChip("review-chip", review);
+      setCounterChip("ready-chip", ready);
+      setCounterChip("running-chip", running);
       updateSysAgents(latestPipelineItems);
       updateDeployHealth(latestPipelineItems);
       renderPipelineBoard(latestPipelineItems);
@@ -7815,6 +7843,19 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function setText(id, value) {
       const target = document.getElementById(id);
       if (target) target.textContent = String(value);
+    }
+
+    // Set a counter-chip's number and toggle data-empty on its outer
+    // chip so the CSS can dim zero-count chips. The value is expected
+    // to be a non-negative integer; anything else is treated as 0.
+    function setCounterChip(numberId, value) {
+      const numberEl = document.getElementById(numberId);
+      if (!numberEl) return;
+      const num = Number(value);
+      const safe = Number.isFinite(num) ? Math.max(0, Math.floor(num)) : 0;
+      numberEl.textContent = String(safe);
+      const chip = numberEl.closest(".counter-chip");
+      if (chip) chip.setAttribute("data-empty", safe > 0 ? "false" : "true");
     }
 
     function needsAttention(item) {
