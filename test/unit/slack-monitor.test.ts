@@ -77,6 +77,8 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("command-console");
     expect(html).toContain("Ask Hermes");
     expect(html).toContain("what is happening now");
+    expect(html).toContain("Loading current agent state");
+    expect(html).toContain('data-auto="true"');
     expect(html).not.toContain('id="active" class="live-lane"');
     expect(html).not.toContain('id="agent-activity"');
     expect(html).not.toContain("Live agent activity");
@@ -160,12 +162,15 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("setMonitorPaused");
     expect(html).toContain("toggleChecklistItem(decisionKey, itemId, checked)");
     expect(html).toContain("data-command-suggestion=\"what is happening now\"");
+    expect(html).toContain("data-command-suggestion=\"what are agents doing\"");
     expect(html).toContain("data-command-suggestion=\"what is Codex doing\"");
     expect(html).toContain("data-command-suggestion=\"what is Hermes doing\"");
     expect(html).toContain("data-command-suggestion=\"what needs my action\"");
     expect(html).toContain("isMonitorInsightCommand(text)");
     expect(html).toContain("renderMonitorConsoleInsight(text, item)");
     expect(html).toContain("renderNowConsoleInsight()");
+    expect(html).toContain("renderAutoConsoleInsight()");
+    expect(html).toContain("renderAgentStateList(metrics)");
     expect(html).toContain("renderLaneConsoleInsight(\"Codex\"");
     expect(html).toContain("renderSelectedConsoleInsight(item)");
     expect(html).toContain("currentMonitorMetrics(items)");
