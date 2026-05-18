@@ -34,6 +34,7 @@ import {
   CollaborationValidationError,
   listCollaborationMessages,
   recordCollaborationMessage,
+  synthesizeHermesReplyFor,
 } from "./monitor-collab.js";
 import {
   approveCodexTask,
@@ -399,6 +400,34 @@ async function handleCommand(envelope: SlackCommandEnvelope) {
   }
 }
 
+// Hermes-side auto-acknowledgment for operator posts. Operators need
+// the channel to feel like a conversation — silence after a post
+// reads as "the agents aren't listening". A short canned reply is
+// enough to fix the perception without depending on the LLM stack.
+//
+// Fire-and-forget: a setTimeout records a Hermes reply ~800ms after
+// the operator post. The next SSE snapshot tick (and the client's
+// post-message poll, see submitCollaborationPost) surface it.
+function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof recordCollaborationMessage>>) {
+  const draft = synthesizeHermesReplyFor(operatorMessage);
+  if (!draft) return;
+  const timer = setTimeout(() => {
+    try {
+      recordCollaborationMessage({
+        author: "hermes",
+        kind: "chat",
+        text: draft.text,
+        addressedTo: draft.addressedTo,
+        ...(draft.relatedPr ? { relatedPr: draft.relatedPr } : {}),
+        ...(draft.relatedCorrelationId ? { relatedCorrelationId: draft.relatedCorrelationId } : {}),
+      });
+    } catch (error) {
+      logger.warn({ err: error }, "monitor_collaboration_auto_reply_failed");
+    }
+  }, 800);
+  timer.unref?.();
+}
+
 async function handleMonitorCollaborationRequest(request: http.IncomingMessage, response: http.ServerResponse) {
   try {
     const rawBody = await readBody(request);
@@ -412,6 +441,7 @@ async function handleMonitorCollaborationRequest(request: http.IncomingMessage, 
       { author: message.author, kind: message.kind, addressedTo: message.addressedTo, id: message.id },
       "monitor_collaboration_message_recorded"
     );
+    scheduleHermesAutoReply(message);
     writeJson(response, 200, { ok: true, message });
   } catch (error) {
     if (error instanceof CollaborationValidationError) {
