@@ -405,6 +405,21 @@ describe("slack operator personal monitor", () => {
     // describes the draft state via pipelineTitle).
     expect(html).not.toContain('" is still draft. Finish the draft');
 
+    // Chat liveness (PR: monitor-chat-alive): typing indicator while
+    // a Hermes reply is in flight; slide-in animation on fresh rows;
+    // synthesized lines get addressedTo so the thread reads as
+    // dialogue; page title flashes when tab is hidden and posted
+    // messages arrive.
+    expect(html).toContain('renderHermesTypingRow');
+    expect(html).toContain('hermesTypingSinceMs');
+    expect(html).toContain('typing-dots');
+    expect(html).toContain('@keyframes typing-bounce');
+    expect(html).toContain('@keyframes collab-slide-in');
+    expect(html).toContain('data-fresh="true"');
+    expect(html).toContain('function inferAddressedTo(');
+    expect(html).toContain('function updateUnreadTitle()');
+    expect(html).toContain('"(" + unreadPostedCount + ") " + baseDocumentTitle');
+
     // Top-strip polish (PR: monitor-top-polish): counter chips use
     // a stacked number-over-label layout with data-empty driving the
     // zero-state dim; setCounterChip toggles it; the redundant
