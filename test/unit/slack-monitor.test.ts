@@ -77,7 +77,11 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("command-console");
     expect(html).toContain("Ask Hermes");
     expect(html).toContain("what is happening now");
-    expect(html).toContain("Loading current agent state");
+    expect(html).toContain("Waiting for Hermes, Codex, and operator messages");
+    expect(html).toContain('data-mode="thread"');
+    expect(html).toContain("collab-thread");
+    expect(html).toContain("collab-message");
+    expect(html).not.toContain("ci-grid");
     expect(html).toContain('data-auto="true"');
     expect(html).not.toContain('id="active" class="live-lane"');
     expect(html).not.toContain('id="agent-activity"');
@@ -135,7 +139,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Codex worker online.");
     expect(html).toContain("Codex worker heartbeat is stale.");
     expect(html).toContain("No Codex heartbeat visible.");
-    expect(html).toContain("Runner: no heartbeat yet");
+    expect(html).toContain("runner heartbeat");
     expect(html).toContain("codexTaskForItem(item)");
     expect(html).toContain("data-codex-task-action");
     expect(html).toContain("handleCodexTaskAction(codexTaskButton)");
@@ -156,7 +160,6 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("activeAgentForItem(item, lane, stage)");
     expect(html).toContain("updateDeployHealth(latestPipelineItems)");
     expect(html).toContain("updateSysAgents(latestPipelineItems)");
-    expect(html).toContain("currentMonitorMetrics(items)");
     expect(html).toContain("buildActivityStreamItems(items, activeEntries, recentEntries)");
     expect(html).toContain("renderMonitorLoadError(error)");
     expect(html).toContain("startPolling(\"polling 5s\")");
@@ -170,12 +173,10 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("data-command-suggestion=\"what needs my action\"");
     expect(html).toContain("isMonitorInsightCommand(text)");
     expect(html).toContain("renderMonitorConsoleInsight(text, item)");
-    expect(html).toContain("renderNowConsoleInsight()");
-    expect(html).toContain("renderAutoConsoleInsight()");
-    expect(html).toContain("renderAgentStateList(metrics)");
-    expect(html).toContain("renderLaneConsoleInsight(\"Codex\"");
-    expect(html).toContain("renderSelectedConsoleInsight(item)");
-    expect(html).toContain("currentMonitorMetrics(items)");
+    expect(html).toContain("renderAutoCollaborationThread()");
+    expect(html).toContain("renderCollaborationThread({ kind");
+    expect(html).toContain("renderSelectedCollaborationThread(item)");
+    expect(html).toContain("collaborationMessagesForTask(task)");
     expect(html).toContain("data-command-suggestion=\"handoff monitor details\"");
     expect(html).toContain("data-command-suggestion=\"merge steward details\"");
     expect(html).toContain("data-command-suggestion=\"github status\"");
