@@ -283,12 +283,16 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain('data-tag="help"');
     expect(html).toContain('collab-addressed');
 
-    // Chat-bubble redesign (PR: collab-redesign): asymmetric layout,
-    // bubble-stack wrapper, system-note empty state, force-thread reset.
-    expect(html).toContain('collab-bubble-stack');
+    // Collaboration thread (PR: collab-aesthetic): flat DOM, no avatar,
+    // 3px left-rail in agent color, uppercase tracked speaker, system
+    // note for idle, force-thread reset after Ask Hermes.
     expect(html).toContain('forceThreadMode');
     expect(html).toContain('data-speaker="operator"');
     expect(html).toContain('data-speaker="system"');
+    // Bubble structure is intentionally flat — guard against a future
+    // refactor reintroducing the chat-app avatar/bubble-stack wrappers.
+    expect(html).not.toContain('collab-avatar');
+    expect(html).not.toContain('collab-bubble-stack');
   });
 
   it("serves a PWA manifest with the canonical name + scope", () => {
