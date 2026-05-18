@@ -1856,6 +1856,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       right: calc(clamp(420px, 31vw, 640px) + 18px);
     }
     .console-main {
+      position: relative; /* anchor point for the unread-pill */
       display: grid;
       min-height: 0;
       min-width: 0;
@@ -2101,6 +2102,118 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     @keyframes typing-bounce {
       0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
       30%           { opacity: 1;    transform: translateY(-3px); }
+    }
+    /* "N new ↓" pill — anchored to the bottom-right of the chat output
+       when the operator has scrolled up and fresh messages arrived.
+       Click to jump to the latest message and clear the unread count.
+       The parent .console-main needs position:relative for the
+       absolute anchor to work; that rule was already there. */
+    .collab-unread-pill {
+      position: absolute;
+      right: 14px;
+      bottom: 14px;
+      z-index: 4;
+      padding: 5px 11px;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--cyan) 50%, var(--line));
+      background: color-mix(in srgb, var(--cyan) 18%, rgba(2, 9, 8, 0.92));
+      color: var(--cream);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.68rem;
+      letter-spacing: 0.06em;
+      cursor: pointer;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
+      animation: collab-slide-in 200ms ease-out 1;
+    }
+    .collab-unread-pill:hover {
+      background: color-mix(in srgb, var(--cyan) 28%, rgba(2, 9, 8, 0.92));
+    }
+    /* Chat-head meta cluster + mute toggle button. Lives at the top
+       right of the collaboration thread next to the live-status text. */
+    .collab-head-meta {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .collab-sound-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 22px;
+      padding: 0;
+      border: 1px solid var(--line-soft);
+      border-radius: 6px;
+      background: rgba(2, 9, 8, 0.4);
+      color: var(--text);
+      font-size: 0.78rem;
+      line-height: 1;
+      cursor: pointer;
+      transition: border-color 120ms ease, background 120ms ease;
+    }
+    .collab-sound-toggle:hover {
+      border-color: color-mix(in srgb, var(--cyan) 50%, var(--line));
+      background: color-mix(in srgb, var(--cyan) 8%, rgba(2, 9, 8, 0.4));
+    }
+    .collab-sound-toggle[aria-pressed="false"] { opacity: 0.55; }
+    /* Presence footer — small row at the bottom of the chat thread
+       showing what each agent is doing right now. Compact, monospace,
+       one tinted dot per agent matching the speaker color. Idle
+       agents fade so the eye lands on who's actually busy. */
+    .collab-presence {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-top: 14px;
+      padding: 8px 12px;
+      border-top: 1px solid rgba(184, 211, 196, 0.08);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.66rem;
+      color: var(--muted);
+    }
+    .collab-presence-agent {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      transition: opacity 140ms ease;
+    }
+    .collab-presence-agent[data-active="false"] { opacity: 0.45; }
+    .collab-presence-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      flex-shrink: 0;
+      background: var(--muted);
+    }
+    .collab-presence-agent[data-agent="codex"] .collab-presence-dot { background: var(--violet); }
+    .collab-presence-agent[data-agent="hermes"] .collab-presence-dot { background: var(--cyan); }
+    .collab-presence-agent[data-agent="operator"] .collab-presence-dot { background: var(--warn); }
+    .collab-presence-agent[data-active="true"] .collab-presence-dot {
+      box-shadow: 0 0 0 0 currentColor;
+      animation: collab-presence-pulse 2s ease-out infinite;
+    }
+    @keyframes collab-presence-pulse {
+      0%   { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 50%, transparent); }
+      70%  { box-shadow: 0 0 0 5px color-mix(in srgb, currentColor 0%, transparent); }
+      100% { box-shadow: 0 0 0 0 transparent; }
+    }
+    .collab-presence-name {
+      color: var(--cream);
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .collab-presence-agent[data-active="false"] .collab-presence-name { color: var(--muted); }
+    .collab-presence-status {
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .collab-tag {
       display: inline-flex;
@@ -3920,6 +4033,21 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     // Page title flash state for unfocused tabs.
     const baseDocumentTitle = document.title;
     let unreadPostedCount = 0;
+    // Audio notification for @operator addressed posts. Persisted via
+    // localStorage so the operator's mute preference survives reloads.
+    const SOUND_STORAGE_KEY = "averray-monitor-collab-sound:v1";
+    let collabSoundEnabled = (function () {
+      try { return localStorage.getItem(SOUND_STORAGE_KEY) !== "off"; }
+      catch (e) { return true; }
+    })();
+    let collabAudioContext = null;
+    // Tracks the set of posted message IDs we've already played a sound
+    // for, so the same message doesn't re-chime on every SSE snapshot.
+    const playedSoundIds = new Set();
+    // Snapshot of the rendered chat thread element so the scroll helpers
+    // can stick to bottom when the operator is at the bottom, and show a
+    // "N new ↓" affordance when they've scrolled up to read history.
+    let unreadScrolledCount = 0;
     // Compose state for the new collaboration "post" mode. The compose form
     // can run in two modes: "post" (POST /monitor/collaboration → real
     // multi-agent message) and "ask" (POST /monitor/command → Hermes
@@ -4025,6 +4153,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         void handleHermesRecheckAction(recheckButton);
         return;
       }
+      const soundToggle = event.target && event.target.closest ? event.target.closest("#collab-sound-toggle") : null;
+      if (soundToggle) {
+        setCollabSoundEnabled(!collabSoundEnabled);
+        // Play a confirmation chime on enable so the operator hears
+        // what they just turned on (and the AudioContext gets unlocked).
+        if (collabSoundEnabled) playOperatorChime();
+        return;
+      }
       const button = event.target && event.target.closest ? event.target.closest("[data-monitor-decision]") : null;
       if (!button) {
         const drawer = event.target && event.target.closest ? event.target.closest("#detail-drawer") : null;
@@ -4108,6 +4244,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       composeIntent = String(event.target.value || "chat");
     });
     setComposeMode(composeMode);
+    // Attach scroll listeners once at boot — they self-guard with a
+    // dataset flag so re-running this is a no-op.
+    ensureCollabScrollListeners();
 
     function setComposeMode(mode) {
       composeMode = mode === "ask" ? "ask" : "post";
@@ -4556,20 +4695,20 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const recent = payload.recent || [];
       setText("generated", payload.generatedAt ? new Date(payload.generatedAt).toLocaleTimeString() : "unknown");
       const incomingCollab = normalizeCollabMessages(payload.collaborationMessages);
-      // Bump the unread count when a new posted message arrives while
-      // the tab is unfocused, so the page title flashes "(N) Hermes
-      // Monitor" and the operator notices from another tab.
+      // Diff against the previous render so we know which posted
+      // messages are genuinely new this tick. Drives the title flash,
+      // the operator chime, and the scroll "N new ↓" affordance.
+      const prevPostedIds = new Set(
+        (latestCollabMessages || []).filter((m) => m && m.id).map((m) => String(m.id))
+      );
+      const freshlyPosted = incomingCollab.filter((m) => m && m.id && !prevPostedIds.has(String(m.id)));
       if (document && document.hidden) {
-        const prevPostedIds = new Set(
-          (latestCollabMessages || []).filter((m) => m && m.id).map((m) => String(m.id))
-        );
-        for (const m of incomingCollab) {
-          if (m && m.id && !prevPostedIds.has(String(m.id))) {
-            unreadPostedCount += 1;
-          }
-        }
+        unreadPostedCount += freshlyPosted.length;
         updateUnreadTitle();
       }
+      // Chime for any @operator-addressed posts that just landed. Self-
+      // posts and synthesized lines are filtered inside the helper.
+      maybeChimeForOperator(freshlyPosted);
       latestCollabMessages = incomingCollab;
       latestCodexTasks = normalizeCodexTasks(payload.codexTasks);
       latestCodexRunner = normalizeCodexRunner(payload.codexTasks && payload.codexTasks.runner);
@@ -6399,7 +6538,79 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         if (!output || output.dataset.auto === "false") return;
         output.dataset.auto = "true";
         output.dataset.mode = "thread";
+        // Remember whether the operator was at the bottom of the thread
+        // before we re-render. If they were, snap back to bottom so
+        // they always see the latest. If they had scrolled up to read
+        // history, leave the scroll position alone and surface a
+        // "N new ↓" affordance instead.
+        const wasAtBottom = isCollabScrolledToBottom(output);
+        const prevHadRows = output.querySelectorAll(".collab-message").length;
         output.innerHTML = renderCollaborationThread({ kind: "all" });
+        const nextHadRows = output.querySelectorAll(".collab-message").length;
+        if (wasAtBottom) {
+          unreadScrolledCount = 0;
+          scrollCollabToBottom(output);
+        } else if (nextHadRows > prevHadRows) {
+          unreadScrolledCount += (nextHadRows - prevHadRows);
+        }
+        updateCollabUnreadPill(output);
+      });
+    }
+
+    // Treat "within 32px of the bottom" as bottom so a tiny scroll
+    // jitter doesn't break the sticky-bottom behavior.
+    function isCollabScrolledToBottom(output) {
+      if (!output) return true;
+      return output.scrollHeight - output.scrollTop - output.clientHeight < 32;
+    }
+
+    function scrollCollabToBottom(output) {
+      if (!output) return;
+      output.scrollTop = output.scrollHeight;
+    }
+
+    // Adds (or updates) a tiny "N new ↓" pill anchored to the chat
+    // panel that, when clicked, scrolls to the latest message and
+    // clears the unread count. Only shown when the operator has
+    // scrolled up AND at least one message arrived in that state.
+    function updateCollabUnreadPill(output) {
+      if (!output) return;
+      const parent = output.parentElement;
+      if (!parent) return;
+      let pill = parent.querySelector(".collab-unread-pill");
+      if (unreadScrolledCount > 0 && !isCollabScrolledToBottom(output)) {
+        if (!pill) {
+          pill = document.createElement("button");
+          pill.type = "button";
+          pill.className = "collab-unread-pill";
+          pill.addEventListener("click", () => {
+            unreadScrolledCount = 0;
+            scrollCollabToBottom(output);
+            updateCollabUnreadPill(output);
+          });
+          parent.appendChild(pill);
+        }
+        pill.textContent = unreadScrolledCount + " new ↓";
+      } else if (pill) {
+        pill.remove();
+      }
+    }
+
+    // Wire up scroll listeners on the chat outputs so the unread pill
+    // hides itself when the operator scrolls back to bottom on their
+    // own. Idempotent — relies on a dataset flag so we don't stack
+    // listeners across re-renders.
+    function ensureCollabScrollListeners() {
+      [document.getElementById("command-output"), document.getElementById("ask-output")].forEach((output) => {
+        if (!output) return;
+        if (output.dataset.scrollWired === "true") return;
+        output.dataset.scrollWired = "true";
+        output.addEventListener("scroll", () => {
+          if (isCollabScrolledToBottom(output)) {
+            unreadScrolledCount = 0;
+          }
+          updateCollabUnreadPill(output);
+        });
       });
     }
 
@@ -6538,7 +6749,17 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const firstRender = previouslyKnown.size === 0;
       const nextKnown = new Set();
       const html = '<div class="collab-thread">' +
-        '<div class="collab-head"><strong>' + escapeHtml(title) + '</strong><span>' + escapeHtml(currentStreamLabel()) + '</span></div>' +
+        '<div class="collab-head">' +
+          '<strong>' + escapeHtml(title) + '</strong>' +
+          '<span class="collab-head-meta">' +
+            '<span>' + escapeHtml(currentStreamLabel()) + '</span>' +
+            '<button id="collab-sound-toggle" class="collab-sound-toggle" type="button" ' +
+              'aria-pressed="' + (collabSoundEnabled ? "true" : "false") + '" ' +
+              'title="' + (collabSoundEnabled ? "Mute @operator chime" : "Unmute @operator chime") + '">' +
+              (collabSoundEnabled ? "🔊" : "🔇") +
+            '</button>' +
+          '</span>' +
+        '</div>' +
         rows.map((m, i) => {
           const key = collabRowKey(m);
           nextKnown.add(key);
@@ -6550,9 +6771,100 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           });
         }).join("") +
         typingRow +
+        renderCollabPresenceFooter() +
         '</div>';
       knownCollabMessageIds = nextKnown;
       return html;
+    }
+
+    // Presence footer rendered at the bottom of the collaboration thread.
+    // One small status row per agent (Codex / Hermes / Operator) so the
+    // operator can tell at a glance who's busy on what, vs who's idle.
+    // Derived from the existing client-side state — no new backend calls.
+    function renderCollabPresenceFooter() {
+      const codex = describeCodexPresence();
+      const hermes = describeHermesPresence();
+      const operator = describeOperatorPresence();
+      const part = (slug, who, status) =>
+        '<span class="collab-presence-agent" data-agent="' + escapeAttr(slug) + '" data-active="' + (status.active ? "true" : "false") + '">' +
+          '<span class="collab-presence-dot"></span>' +
+          '<span class="collab-presence-name">' + escapeHtml(who) + '</span>' +
+          '<span class="collab-presence-status">' + escapeHtml(status.text) + '</span>' +
+        '</span>';
+      return '<div class="collab-presence" aria-label="Agent presence">' +
+        part("codex", "Codex", codex) +
+        part("hermes", "Hermes", hermes) +
+        part("operator", "Operator", operator) +
+      '</div>';
+    }
+
+    function describeCodexPresence() {
+      // Prefer a real active codex task — it's a concrete, ground-truth
+      // signal that Codex is doing something right now.
+      const liveTask = (latestCodexTasks || [])
+        .filter((task) => {
+          const s = normalize(task && task.status);
+          return s === "running" || s === "approved";
+        })
+        .sort((a, b) => taskUpdatedMs(b) - taskUpdatedMs(a))[0];
+      if (liveTask) {
+        const status = normalize(liveTask.status);
+        const title = codexTaskTitle(liveTask);
+        if (status === "running") return { active: true, text: "working on " + title };
+        if (status === "approved") return { active: true, text: "claiming " + title };
+      }
+      const codexCard = (latestPipelineItems || []).find((it) => {
+        const v = releaseVerdict(it);
+        return boardLaneForItem(it, v).key === "codex";
+      });
+      if (codexCard) {
+        const ref = collabPresenceItemRef(codexCard);
+        return { active: true, text: "needed on " + ref };
+      }
+      return { active: false, text: "idle" };
+    }
+
+    function describeHermesPresence() {
+      const hermesCard = (latestPipelineItems || []).find((it) => {
+        const v = releaseVerdict(it);
+        return boardLaneForItem(it, v).key === "hermes";
+      });
+      if (hermesCard) {
+        const ref = collabPresenceItemRef(hermesCard);
+        return { active: true, text: "watching " + ref };
+      }
+      const deployCard = (latestPipelineItems || []).find((it) => isDeployItem(it) && (it.active === true || it.activeState === "running" || normalize(it.status) === "running"));
+      if (deployCard) {
+        const ref = collabPresenceItemRef(deployCard);
+        return { active: true, text: "verifying deploy on " + ref };
+      }
+      return { active: false, text: "idle" };
+    }
+
+    function describeOperatorPresence() {
+      const sel = selectedItem();
+      if (sel) {
+        const ref = collabPresenceItemRef(sel);
+        return { active: true, text: "viewing " + ref };
+      }
+      const operatorCard = (latestPipelineItems || []).find((it) => {
+        const v = releaseVerdict(it);
+        const lane = boardLaneForItem(it, v);
+        return lane.key === "operator" || lane.key === "attention";
+      });
+      if (operatorCard) {
+        const ref = collabPresenceItemRef(operatorCard);
+        return { active: true, text: "decision needed on " + ref };
+      }
+      return { active: false, text: "idle" };
+    }
+
+    function collabPresenceItemRef(item) {
+      if (!item) return "the board";
+      const pr = item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId);
+      const repo = String(item.repo || "averray-agent/agent");
+      const repoShort = repo.split("/")[1] || repo;
+      return pr ? repoShort + "#" + pr : repoShort;
     }
 
     // Stable identity for fresh-detection. Posted messages have a real
@@ -8029,6 +8341,65 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       numberEl.textContent = String(safe);
       const chip = numberEl.closest(".counter-chip");
       if (chip) chip.setAttribute("data-empty", safe > 0 ? "false" : "true");
+    }
+
+    // Short soft chime via Web Audio API when an @operator-addressed
+    // message lands. Lazily creates the AudioContext on first use to
+    // avoid the "no user gesture yet" warning at boot; subsequent
+    // chimes share the same context. The browser autoplay policy is
+    // satisfied because the operator already clicked something to get
+    // here (mode toggles, send button, etc.).
+    function playOperatorChime() {
+      if (!collabSoundEnabled) return;
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        if (!collabAudioContext) collabAudioContext = new Ctx();
+        const ctx = collabAudioContext;
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        // Two-note "ding-dong": A5 then E6. Short, soft, not jarring.
+        osc.frequency.setValueAtTime(880, now);
+        osc.frequency.setValueAtTime(1318.5, now + 0.12);
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(0.08, now + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.36);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.38);
+      } catch (e) {
+        // Audio not available — swallow; this is a UX nicety, not a
+        // load-bearing channel.
+      }
+    }
+
+    function setCollabSoundEnabled(value) {
+      collabSoundEnabled = !!value;
+      try { localStorage.setItem(SOUND_STORAGE_KEY, collabSoundEnabled ? "on" : "off"); }
+      catch (e) { /* private mode / quota — ignore */ }
+      const btn = document.getElementById("collab-sound-toggle");
+      if (btn) {
+        btn.setAttribute("aria-pressed", collabSoundEnabled ? "true" : "false");
+        btn.textContent = collabSoundEnabled ? "🔊" : "🔇";
+        btn.setAttribute("title", collabSoundEnabled ? "Mute @operator chime" : "Unmute @operator chime");
+      }
+    }
+
+    // After ingesting a fresh batch of posted messages, walk anything
+    // addressed to "operator" that we haven't chimed for yet and play
+    // the chime. Guarded by an ID set so we never chime twice for the
+    // same message even across SSE snapshots.
+    function maybeChimeForOperator(messages) {
+      for (const m of messages || []) {
+        if (!m || !m.id) continue;
+        if (m.addressedTo !== "operator") continue;
+        if (m.author === "operator") continue;
+        if (playedSoundIds.has(m.id)) continue;
+        playedSoundIds.add(m.id);
+        playOperatorChime();
+      }
     }
 
     function needsAttention(item) {

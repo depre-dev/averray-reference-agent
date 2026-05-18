@@ -432,6 +432,24 @@ describe("slack operator personal monitor", () => {
     // by setCounterChip so the zero-dim toggle stays in sync.
     expect(html).not.toContain('setText("attention-chip"');
     expect(html).not.toContain('setText("blocked-chip"');
+
+    // Chat liveness round 2 (PR: monitor-chat-alive-2): presence footer
+    // at the bottom of the thread, @operator chime + mute toggle,
+    // auto-scroll behavior + "N new ↓" pill.
+    expect(html).toContain('renderCollabPresenceFooter');
+    expect(html).toContain('collab-presence-agent');
+    expect(html).toContain('describeCodexPresence');
+    expect(html).toContain('describeHermesPresence');
+    expect(html).toContain('describeOperatorPresence');
+    expect(html).toContain('@keyframes collab-presence-pulse');
+    expect(html).toContain('playOperatorChime');
+    expect(html).toContain('id="collab-sound-toggle"');
+    expect(html).toContain('SOUND_STORAGE_KEY');
+    expect(html).toContain('maybeChimeForOperator');
+    expect(html).toContain('isCollabScrolledToBottom');
+    expect(html).toContain('updateCollabUnreadPill');
+    expect(html).toContain('ensureCollabScrollListeners');
+    expect(html).toContain('collab-unread-pill');
   });
 
   it("serves a PWA manifest with the canonical name + scope", () => {
