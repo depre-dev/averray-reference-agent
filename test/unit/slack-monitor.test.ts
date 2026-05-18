@@ -72,7 +72,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("filterbar");
     expect(html).toContain("kanban-board");
     expect(html).toContain("data-done-expanded");
-    expect(html).toContain("done-rail");
+    expect(html).not.toContain("done-rail");
     expect(html).toContain("detail-drawer");
     expect(html).toContain("command-console");
     expect(html).toContain("Ask Hermes");
@@ -89,6 +89,8 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Release Queue");
     expect(html).toContain("Deploying");
     expect(html).toContain("done lane");
+    expect(html).toContain("flex-wrap: wrap");
+    expect(html).toContain('setText("done-count"');
     // Mockup-parity surface additions:
     expect(html).toContain("sys-agents");
     expect(html).toContain("deploy-health-chip");

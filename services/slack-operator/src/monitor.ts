@@ -1357,8 +1357,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         minmax(186px, 1fr)
         minmax(190px, 1fr)
         minmax(190px, 1fr)
-        minmax(186px, 0.96fr)
-        44px;
+        minmax(186px, 0.96fr);
       gap: 12px;
       overflow-x: hidden;
       overflow-y: hidden;
@@ -1528,32 +1527,6 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       flex-wrap: wrap;
       gap: 6px;
       justify-content: flex-end;
-    }
-    .done-rail {
-      min-width: 44px;
-      width: 44px;
-      cursor: pointer;
-      border-style: dashed;
-      background: rgba(2, 15, 13, 0.5);
-    }
-    .done-rail .lane-head {
-      min-height: 100%;
-      height: 100%;
-      justify-content: center;
-      padding: 8px 4px;
-      border-top-width: 0;
-      border-left: 2px solid var(--lane-accent);
-    }
-    .done-rail .lane-title {
-      writing-mode: vertical-rl;
-      transform: rotate(180deg);
-      gap: 8px;
-      overflow: visible;
-    }
-    .done-rail .lane-title::before,
-    .done-rail .lane-body,
-    .done-rail .lane-subtitle {
-      display: none;
     }
     .soft-button {
       min-height: 28px;
@@ -1827,19 +1800,6 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         grid-template-columns: repeat(7, minmax(250px, 82vw));
         overflow-x: auto;
       }
-      .done-rail {
-        min-width: 250px;
-        width: auto;
-      }
-      .done-rail .lane-head {
-        justify-content: space-between;
-        border-left: 0;
-        border-top: 2px solid var(--lane-accent);
-      }
-      .done-rail .lane-title {
-        writing-mode: horizontal-tb;
-        transform: none;
-      }
       .command-shell.has-selection .command-console { right: 14px; }
       .drawer { width: 100vw; }
     }
@@ -2001,13 +1961,34 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .filter-right .fb-pill-group { gap: 4px; }
 
     /* KanbanCard — active-agent dot, stale dot, local approved badge, restructured head */
-    .card-head { align-items: center; }
-    .kc-head-l { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-    .kc-head-r { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+    .card-head {
+      align-items: flex-start;
+      flex-wrap: wrap;
+      justify-content: flex-start;
+      row-gap: 6px;
+    }
+    .kc-head-l {
+      display: inline-flex;
+      flex: 1 1 150px;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+    .kc-head-r {
+      display: inline-flex;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 6px;
+      min-width: 0;
+      margin-left: auto;
+    }
     .active-agent {
       display: inline-flex;
       align-items: center;
       gap: 5px;
+      max-width: 100%;
       padding: 2px 8px;
       border: 1px solid var(--line);
       border-radius: 999px;
@@ -2015,6 +1996,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       font-size: 0.7rem;
       color: var(--muted);
       white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .kc-head-l .pill {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .active-agent .aa-dot {
       width: 6px;
@@ -2029,6 +2017,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .work-state {
       display: inline-flex;
       align-items: center;
+      max-width: 100%;
       border: 1px solid color-mix(in oklab, var(--state-accent, var(--line)) 55%, transparent);
       border-radius: 999px;
       padding: 2px 7px;
@@ -2040,6 +2029,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       letter-spacing: 0.05em;
       text-transform: uppercase;
       white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .work-state[data-state="waiting"] { --state-accent: var(--violet); }
     .work-state[data-state="proposed"] { --state-accent: var(--warn); }
@@ -2367,8 +2358,6 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       margin-right: 8px;
       vertical-align: middle;
     }
-    .done-rail .lane-empty::before { display: none; }
-
     /* Done lane — compact rows instead of full kanban cards when expanded */
     .done-row {
       display: grid;
@@ -2946,8 +2935,6 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         gap: 8px;
         overflow: visible;
       }
-      .done-rail { display: none; }
-
       /* Cards: keep all content; add the lane chip; bump touch sizes. */
       .handoff-card {
         padding: 12px;
@@ -4163,7 +4150,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       });
       target.innerHTML = visibleLanes
         .map((lane) => renderBoardLane(lane, filtered, { mobile }))
-        .join("") + (!mobile && !showDone ? renderDoneStub(filtered) : "");
+        .join("");
       updateMobileTabCounts(filtered);
     }
 
@@ -4264,15 +4251,6 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '<span class="done-id"><span class="done-repo">' + escapeHtml(repoShort) + '</span><span class="done-num">' + escapeHtml(idLabel) + '</span></span>' +
         '<span class="done-title">' + escapeHtml(title) + '</span>' +
         '<span class="done-age">' + escapeHtml(age.label + " " + age.duration) + '</span>' +
-        '</button>';
-    }
-
-    function renderDoneStub(entries) {
-      const done = entries.filter((item) => boardLaneForItem(item, releaseVerdict(item)).key === "done");
-      setText("done-count", String(done.length));
-      return '<button class="lane done-rail" data-lane="done" type="button" id="done-stub" aria-label="Show done lane" onclick="document.getElementById(\\'toggle-done\\').click()">' +
-        '<div class="lane-head"><div class="lane-title">Done ▾ <span class="pill">' + escapeHtml(String(done.length)) + '</span></div></div>' +
-        '<div class="lane-body"><div class="lane-empty">' + escapeHtml(done.length ? done.length + " history item" + (done.length === 1 ? "" : "s") + " · click" : "history · click") + '</div></div>' +
         '</button>';
     }
 
@@ -5832,6 +5810,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       setText("board-review", String(counts.operator || 0));
       setText("board-ready", String(counts.queue || 0));
       setText("board-running", String((counts.hermes || 0) + (counts.deploy || 0)));
+      setText("done-count", String(counts.done || 0));
       renderOwnerSummary(entries);
       renderStalenessSummary(entries);
       updatePipelineFilterButtons();
