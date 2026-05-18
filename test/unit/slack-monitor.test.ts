@@ -187,10 +187,10 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("renderCollaborationThread({ kind");
     expect(html).toContain("renderSelectedCollaborationThread(item)");
     expect(html).toContain("buildBoardBriefingMessages(kind)");
-    expect(html).toContain("Board read:");
-    expect(html).toContain("No operator decision is needed right now.");
-    expect(html).toContain("Open the failed runner output first");
-    expect(html).toContain("Finish the draft or mark it ready for review");
+    expect(html).toContain("Here is the live shape of the board");
+    expect(html).toContain("nothing here needs your decision right this second");
+    expect(html).toContain("Start by opening the failed runner output");
+    expect(html).toContain("Finish the draft work or mark it ready for review");
     expect(html).toContain("forceThreadMode();\n          renderAutoCollaborationThread();\n          setComposeStatus(\"Codex task approved");
     expect(html).toContain("latestCodexTasks\n        .filter((task) => !isTerminalCodexTask(task))");
     expect(html).toContain("collaborationMessagesForTask(task)");
@@ -360,13 +360,13 @@ describe("slack operator personal monitor", () => {
     // window stretches to cover Ollama Cloud latency, and the
     // synthesized agent lines got a personality pass.
     expect(html).toContain('maxAttempts = 9');
-    // Codex template refresh — pragmatic, terse voice. Old "I am
-    // working on..." / "I am queued..." phrasing is gone.
+    // Codex template refresh — v2 keeps the generated chat lines
+    // conversational while avoiding the old passive "queued for pickup"
+    // phrasing.
     expect(html).not.toContain('I am queued for pickup');
-    expect(html).not.toContain('I am working on " + title');
-    expect(html).toContain("you're up on");
-    expect(html).toContain('Working on " + title');
-    expect(html).toContain("Hermes, your turn for the re-check");
+    expect(html).toContain("you are up on");
+    expect(html).toContain('I am working on " + title');
+    expect(html).toContain("please take it back through the checks");
 
     // Chat-deboard PR: chat rows are no longer rectangular kanban-style
     // panels. Drop the panel border + colored left-rail; switch to
@@ -399,7 +399,7 @@ describe("slack operator personal monitor", () => {
     // proposed-task branch collapses two Hermes lines into one.
     expect(html).toContain('briefingCoveredKeys');
     expect(html).toContain('briefingCoveredKeys.has(boardItemKey(item))');
-    expect(html).toContain('Pascal — approve when you want Codex to start');
+    expect(html).toContain('Pascal, approve it when you want the runner to start');
     expect(html).toContain('task proposed · approval needed');
     // The old "is still draft. " redundancy is gone (title already
     // describes the draft state via pipelineTitle).

@@ -6715,8 +6715,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (counts.hermes) parts.push("Hermes is checking " + counts.hermes);
       if (counts.queue) parts.push(counts.queue + " waiting in the merge queue");
       const headline = parts.length ? parts.join("; ") + "." : plural(counts.total, "item") + (counts.total === 1 ? " is" : " are") + " on the board.";
-      const operatorNote = counts.operator ? "Operator decision is required." : "No operator decision is needed right now.";
-      return "Board read: " + headline + " " + operatorNote + " I will keep this thread updated as the cards move.";
+      const operatorNote = counts.operator
+        ? "Pascal, I will call out the decision points instead of making them look like normal queue work."
+        : "Pascal, nothing here needs your decision right this second; I am mostly keeping Codex pointed at the next handoff.";
+      return "Here is the live shape of the board: " + headline + " " + operatorNote + " I will narrate the next useful move here as the cards change, so the board is not just a wall of badges.";
     }
 
     function plural(count, noun) {
@@ -6726,25 +6728,25 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function boardBriefingLineForItem(item, verdict, action, lane) {
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
       if (codexTaskFailedForItem(item)) {
-        return "Codex: " + title + " — last runner task failed. Open the failed runner output first; if it's auth or clone setup, fix the runner. Otherwise create a smaller retry task or push the smallest PR-check fix.";
+        return "Codex, " + title + " is back in Needs Attention because the last runner task failed. Start by opening the failed runner output: if it is auth or clone setup, fix the runner path; if it is a real PR/check failure, come back with the smallest retry task or smallest branch fix.";
       }
       if (isDraftPullRequest(item)) {
-        return "Codex: " + title + " — finish the draft or mark it ready for review, then let CI and Hermes re-run.";
+        return "Codex, " + title + " is still a draft, so I am holding it out of the release path. Finish the draft work or mark it ready for review, then let CI and Hermes take another pass.";
       }
       if (lane.key === "attention" && action.owner === "Codex") {
-        return "Codex: " + title + " is blocked. " + capitalizeFirst(action.text) + ". Hermes will clear it only after the blocking signal disappears.";
+        return "Codex, " + title + " is blocked at the gate. " + capitalizeFirst(action.text) + "; I will keep it visible here until the blocking signal disappears and Hermes records a clean pass.";
       }
       if (action.owner === "Operator" || lane.key === "operator") {
-        return "Operator: " + title + " needs a decision. Review the evidence and only approve if intent, architecture, rollout risk, and test coverage match what should ship.";
+        return "Pascal, " + title + " needs your judgement rather than more automation. Check the evidence and only approve if the intent, architecture, rollout risk, and test coverage match what you actually want shipped.";
       }
       if (action.owner === "Hermes" || lane.key === "hermes") {
-        return "Hermes: " + title + " is waiting on a read-only verdict. I will publish the result here when the checks settle.";
+        return "Hermes is holding " + title + " while the read-only checks settle. I will bring the verdict back here, and if it turns red I will say exactly who needs to move next.";
       }
       if (action.owner === "Merge queue" || lane.key === "queue") {
-        return "Queue: " + title + " is merge-ready. Merge only after branch protection is green and merge/deploy ownership is clear.";
+        return title + " looks merge-ready, so I am keeping it in the release queue rather than pretending it is done. Merge only after branch protection is green and merge/deploy ownership is clear.";
       }
       if (lane.key === "deploy") {
-        return "Deploy: " + title + " is in post-deploy verification. Watch hosted health and the deploy checks before calling it done.";
+        return title + " is in post-deploy verification. I am watching hosted health and deploy checks before calling it safe.";
       }
       return action.owner + ": " + title + " needs the next step — " + action.text + ".";
     }
@@ -6766,13 +6768,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     // terse, action-first. Hermes's voice: dry, methodical, observing.
     function collaborationAskForItem(item, verdict, action, lane) {
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
-      if (codexTaskFailedForItem(item)) return "Codex — " + title + ": last runner task failed. Open the failed task output first; then fix the runner setup, push the smallest PR-check fix, or create a smaller retry task.";
-      if (isDraftPullRequest(item)) return "Codex — " + title + ": finish the draft or mark it ready for review, then let CI and Hermes re-run.";
-      if (action.owner === "Codex" || lane.key === "codex") return "Codex — you're up on " + title + ". " + action.text;
-      if (action.owner === "Operator" || lane.key === "operator" || lane.key === "attention") return "Pascal, this one needs your call on " + title + ". " + action.text;
-      if (action.owner === "Hermes" || lane.key === "hermes") return "Watching " + title + ". I'll land the verdict here once the checks clear.";
-      if (lane.key === "queue") return title + " is ready. Holding in the queue until merge/deploy ownership is clear.";
-      if (lane.key === "deploy") return "Watching the deploy on " + title + ". I'll flag if anything looks off.";
+      if (codexTaskFailedForItem(item)) return "Codex, " + title + " failed in the runner. Please inspect the failed output first, then either fix the runner setup, push the smallest PR-check fix, or create a smaller retry task so Hermes has something concrete to re-check.";
+      if (isDraftPullRequest(item)) return "Codex, " + title + " is still in draft mode. Finish the draft or mark it ready for review; once that happens I will wait for CI and Hermes to re-run before moving it forward.";
+      if (action.owner === "Codex" || lane.key === "codex") return "Codex, you are up on " + title + ". " + capitalizeFirst(action.text) + "; keep it narrow and hand it back when CI/Hermes can see the new signal.";
+      if (action.owner === "Operator" || lane.key === "operator" || lane.key === "attention") return "Pascal, " + title + " needs your call. " + capitalizeFirst(action.text) + "; if the answer is no, send it back to Codex with the exact change you want.";
+      if (action.owner === "Hermes" || lane.key === "hermes") return "I am watching " + title + " now. I will land the verdict here once the checks clear, and I will not pretend it is ready while the evidence is still moving.";
+      if (lane.key === "queue") return title + " is ready enough to sit in the merge queue. I am holding it there until branch protection and merge/deploy ownership are both clear.";
+      if (lane.key === "deploy") return "I am watching the deploy on " + title + ". If health or verification slips, I will say so here before anyone calls it done.";
       return action.owner + ", " + action.text + " for " + title + ".";
     }
 
@@ -6790,21 +6792,21 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (status === "proposed") {
         // Collapsed from two Hermes lines into one — they were back-to-
         // back from the same speaker and read as duplicate noise.
-        messages.push(collabMessage("Hermes", "Drafted a task for Codex on " + title + ". Pascal — approve when you want Codex to start.", "task proposed · approval needed", ts));
+        messages.push(collabMessage("Hermes", "I drafted a focused Codex task for " + title + ". Pascal, approve it when you want the runner to start; until then I will keep it visible but untouched.", "task proposed · approval needed", ts));
       } else if (status === "approved") {
         // Same collapse — Hermes's approval note and Codex's queued
         // ack happen in the same beat; keep them as one row each but
         // tighten the wording.
-        messages.push(collabMessage("Hermes", "Approved — " + title + " is yours, Codex.", "approved", ts));
-        messages.push(collabMessage("Codex", "Queued. Runner's picking me up next.", "waiting runner", ts + 1));
+        messages.push(collabMessage("Hermes", "Approved. Codex, " + title + " is yours now: take the smallest useful step, push the branch, and I will watch the checks when you hand it back.", "approved", ts));
+        messages.push(collabMessage("Codex", "Got it. I am queued behind the runner now; once I claim it, I will report back with either the branch update or the thing that blocked me.", "waiting runner", ts + 1));
       } else if (status === "running") {
-        messages.push(collabMessage("Codex", "Working on " + title + ". " + (task.progressMessage || "I'll ping here when the branch is ready."), "running", ts));
+        messages.push(collabMessage("Codex", "I am working on " + title + ". " + (task.progressMessage || "I will ping here when the branch is ready or if I hit something that needs a smaller task."), "running", ts));
       } else if (status === "completed") {
-        messages.push(collabMessage("Codex", title + " is in. Hermes, your turn for the re-check.", "completed", ts));
+        messages.push(collabMessage("Codex", title + " is in. Hermes, please take it back through the checks so we know whether it actually cleared the board.", "completed", ts));
       } else if (status === "failed") {
-        messages.push(collabMessage("Codex", title + " stalled on me. " + (lastCodexTaskTail(task) || "Check the runner output or send a smaller follow-up."), "failed", ts));
+        messages.push(collabMessage("Codex", "I stalled on " + title + ". " + (lastCodexTaskTail(task) || "Please check the runner output; if the task was too broad, send me a smaller follow-up and I will pick it up cleanly."), "failed", ts));
       } else if (status === "cancelled") {
-        messages.push(collabMessage("Operator", "Pulled the plug on the Codex task for " + title + ".", "cancelled", ts));
+        messages.push(collabMessage("Operator", "I cancelled the Codex task for " + title + ". Keep the card parked until there is a clearer next move.", "cancelled", ts));
       }
       const events = Array.isArray(task.events) ? task.events.slice(-3) : [];
       events.forEach((event, index) => {
