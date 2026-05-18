@@ -380,6 +380,18 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain('max-height: min(32vh, 310px)');
     // Old kanban-style chat panel rules are gone.
     expect(html).not.toContain('border-left: 3px solid var(--speaker-accent');
+
+    // Done-row inline expansion (PR: monitor-done-inline): clicking a
+    // closed PR row toggles a small detail strip below it instead of
+    // opening the full slide-over drawer.
+    expect(html).toContain('expandedDoneKey');
+    expect(html).toContain('renderDoneRowDetail');
+    expect(html).toContain('classList.contains("done-row")');
+    expect(html).toContain('done-row-detail');
+    expect(html).toContain('done-caret');
+    expect(html).toContain('done-detail-open');
+    // The expansion toggles via data-expanded.
+    expect(html).toContain('expanded ? "true" : "false"');
   });
 
   it("serves a PWA manifest with the canonical name + scope", () => {

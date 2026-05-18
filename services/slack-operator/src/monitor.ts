@@ -2851,6 +2851,82 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       letter-spacing: 0.06em;
       white-space: nowrap;
     }
+    /* Tiny chevron at the end of each done-row hints that clicking
+       toggles an inline detail strip below (it flips ▾ → ▴ when open). */
+    .done-row .done-caret {
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1;
+      margin-left: 2px;
+    }
+    /* Expanded done-row attaches to the detail strip below it: collapse
+       the bottom corners + soften the bottom border so the two read as
+       one stacked panel. */
+    .done-row[data-expanded="true"] {
+      border-bottom-left-radius: 0;
+      border-bottom-right-radius: 0;
+      border-bottom-color: transparent;
+      background: color-mix(in srgb, var(--ok) 5%, var(--surface-strong));
+    }
+    .done-row[data-expanded="true"][data-verdict="block"] {
+      background: color-mix(in srgb, var(--bad) 5%, var(--surface-strong));
+    }
+    /* Inline detail strip rendered as a sibling of the .done-row when
+       expanded. Compact two-row dl (Closed time + Verdict) on the left,
+       Open PR link on the right. Read-only — no actions, no drawer. */
+    .done-row-detail {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      padding: 8px 12px 10px;
+      border: 1px solid var(--line);
+      border-top: 0;
+      border-radius: 0 0 6px 6px;
+      background: var(--surface-strong);
+      margin-top: -2px;
+      font-size: 0.78rem;
+    }
+    .done-row-detail dl {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 4px 12px;
+      margin: 0;
+      min-width: 0;
+    }
+    .done-row-detail dt {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.62rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      align-self: baseline;
+    }
+    .done-row-detail dd {
+      color: var(--text);
+      margin: 0;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .done-row-detail .done-detail-open {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: var(--surface-soft);
+      color: var(--cyan);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.72rem;
+      letter-spacing: 0.02em;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .done-row-detail .done-detail-open:hover {
+      border-color: color-mix(in srgb, var(--cyan) 55%, var(--line));
+      background: color-mix(in srgb, var(--cyan) 8%, var(--surface-soft));
+    }
 
     /* Operator checklist with real checkboxes */
     .operator-checklist { display: grid; gap: 6px; }
@@ -3755,6 +3831,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     let mobileLaneTab = "all"; // mobile-only lane filter (matches boardLaneForItem keys + "all")
     const isMobileViewport = () => window.matchMedia("(max-width: 640px)").matches;
     let selectedKey = "";
+    // Done-row inline expansion key. Independent from selectedKey because
+    // done-rows DON'T open the full drawer — clicking one toggles a small
+    // detail strip in place. Only one row expanded at a time.
+    let expandedDoneKey = "";
     let autoFocusPending = true;
     let latestPipelineItems = [];
     let latestCodexTasks = [];
@@ -3807,6 +3887,15 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       // === card" as "this whole element is the selectable" and let the
       // selection happen.
       if (card && (!interactive || interactive === card)) {
+        // Done-rows behave differently from kanban cards. The closed-PR
+        // detail is read-only; the big slide-over drawer is overkill.
+        // Toggle a small inline detail strip in place instead.
+        if (card.classList && card.classList.contains("done-row")) {
+          const key = String(card.getAttribute("data-select-card") || "");
+          expandedDoneKey = expandedDoneKey === key ? "" : key;
+          renderBoard(latestPipelineItems);
+          return;
+        }
         selectedKey = String(card.getAttribute("data-select-card") || "");
         autoFocusPending = false;
         renderBoard(latestPipelineItems);
@@ -4894,23 +4983,51 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '</section>';
     }
 
-    // Compact one-line entry for the Done lane when expanded.
+    // Compact one-line entry for the Done lane when expanded. Clicking
+    // the row toggles a small inline detail strip below it (see
+    // renderDoneRowDetail) — not the full slide-over drawer, which is
+    // overkill for read-only closed PRs.
     function renderDoneRow(item /*, lane */) {
       const verdict = releaseVerdict(item);
       const key = boardItemKey(item);
-      const selected = key === selectedKey;
+      const expanded = key === expandedDoneKey;
       const age = handoffAge(item);
       const repo = String(item.repo || "");
       const repoShort = repo.split("/")[1] || repo;
       const prNumber = item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId);
       const idLabel = prNumber ? "#" + prNumber : (isDeployItem(item) ? "deploy" : "handoff");
       const title = cardTitleText(pipelineTitle(item), prNumber, item);
-      return '<button class="done-row" data-select-card="' + escapeAttr(key) + '" data-selected="' + escapeAttr(String(selected)) + '" data-verdict="' + escapeAttr(verdict.level) + '" type="button">' +
+      const row = '<button class="done-row" data-select-card="' + escapeAttr(key) + '" data-expanded="' + (expanded ? "true" : "false") + '" data-verdict="' + escapeAttr(verdict.level) + '" type="button" aria-expanded="' + (expanded ? "true" : "false") + '">' +
         '<span class="done-check">' + (verdict.level === "block" ? "!" : "✓") + '</span>' +
         '<span class="done-id"><span class="done-repo">' + escapeHtml(repoShort) + '</span><span class="done-num">' + escapeHtml(idLabel) + '</span></span>' +
         '<span class="done-title">' + escapeHtml(title) + '</span>' +
         '<span class="done-age">' + escapeHtml(age.label + " " + age.duration) + '</span>' +
+        '<span class="done-caret" aria-hidden="true">' + (expanded ? "▴" : "▾") + '</span>' +
         '</button>';
+      return row + (expanded ? renderDoneRowDetail(item, verdict) : "");
+    }
+
+    // Inline detail strip rendered beneath a clicked done-row. Read-only
+    // summary — what was the verdict, when did it finish, where can the
+    // operator go to look at it on GitHub.
+    function renderDoneRowDetail(item, verdict) {
+      const prUrl = item.pullRequestUrl || derivePullRequestUrl(item);
+      const updatedIso = String(item.updatedAt || "");
+      const closedLabel = updatedIso
+        ? new Date(updatedIso).toLocaleString()
+        : "unknown";
+      const verdictLabel = (verdict && verdict.label) ? verdict.label : "completed";
+      const why = (verdict && verdict.why) ? shortenVerdictWhy(verdict.why) : "";
+      const openPr = prUrl
+        ? '<a class="done-detail-open" href="' + escapeAttr(prUrl) + '" target="_blank" rel="noreferrer">Open PR ↗</a>'
+        : '';
+      return '<div class="done-row-detail" data-key="' + escapeAttr(boardItemKey(item)) + '">' +
+        '<dl>' +
+          '<dt>Closed</dt><dd>' + escapeHtml(closedLabel) + '</dd>' +
+          '<dt>Verdict</dt><dd>' + escapeHtml(verdictLabel) + (why ? ' · ' + escapeHtml(why) : '') + '</dd>' +
+        '</dl>' +
+        openPr +
+      '</div>';
     }
 
     function renderBoardCard(item, lane) {
