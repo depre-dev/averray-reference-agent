@@ -189,7 +189,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("buildBoardBriefingMessages(kind)");
     expect(html).toContain("Board read:");
     expect(html).toContain("No operator decision is needed right now.");
-    expect(html).toContain("First open the failed runner output");
+    expect(html).toContain("Open the failed runner output first");
     expect(html).toContain("Finish the draft or mark it ready for review");
     expect(html).toContain("forceThreadMode();\n          renderAutoCollaborationThread();\n          setComposeStatus(\"Codex task approved");
     expect(html).toContain("latestCodexTasks\n        .filter((task) => !isTerminalCodexTask(task))");
@@ -392,6 +392,18 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain('done-detail-open');
     // The expansion toggles via data-expanded.
     expect(html).toContain('expanded ? "true" : "false"');
+
+    // Chat dedupe (PR: monitor-chat-dedup): when the board briefing
+    // already covers a PR, the per-item ask loop skips it so the
+    // thread doesn't show two near-identical lines per item. The
+    // proposed-task branch collapses two Hermes lines into one.
+    expect(html).toContain('briefingCoveredKeys');
+    expect(html).toContain('briefingCoveredKeys.has(boardItemKey(item))');
+    expect(html).toContain('Pascal — approve when you want Codex to start');
+    expect(html).toContain('task proposed · approval needed');
+    // The old "is still draft. " redundancy is gone (title already
+    // describes the draft state via pipelineTitle).
+    expect(html).not.toContain('" is still draft. Finish the draft');
   });
 
   it("serves a PWA manifest with the canonical name + scope", () => {

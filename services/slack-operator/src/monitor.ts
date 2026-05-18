@@ -6590,7 +6590,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       latestCollabMessages
         .filter((m) => postedMessageMatchesKind(m, kind))
         .forEach((m) => messages.push(postedToCollabRow(m)));
-      messages.push(...buildBoardBriefingMessages(kind));
+      // The board briefing emits a header + N per-item lines. Capture
+      // which items it covered so the per-item ask loop below doesn't
+      // echo the same content for those same items.
+      const briefing = buildBoardBriefingMessages(kind);
+      messages.push(...briefing.messages);
+      const briefingCoveredKeys = new Set(briefing.items.map(boardItemKey));
       latestCodexTasks
         .filter((task) => !isTerminalCodexTask(task))
         .sort((a, b) => taskUpdatedMs(b) - taskUpdatedMs(a))
@@ -6600,6 +6605,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         const verdict = releaseVerdict(item);
         const lane = boardLaneForItem(item, verdict);
         if (lane.key === "done") return;
+        // Skip items the briefing already covered — otherwise the thread
+        // shows two near-identical synthesized lines per PR.
+        if (briefingCoveredKeys.has(boardItemKey(item))) return;
         const action = nextPipelineAction(item, verdict);
         if (kind === "codex" && action.owner !== "Codex" && lane.key !== "codex") return;
         if (kind === "hermes" && action.owner !== "Hermes" && lane.key !== "hermes") return;
@@ -6619,10 +6627,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return messages;
     }
 
+    // Returns { messages, items } so the caller can dedupe — items
+    // here are the pipeline items the briefing already mentioned by
+    // name, and the per-item ask loop should skip those keys to avoid
+    // echoing the same status twice.
     function buildBoardBriefingMessages(kind) {
-      if (!["all", "now", "blocked"].includes(kind || "all")) return [];
+      if (!["all", "now", "blocked"].includes(kind || "all")) return { messages: [], items: [] };
       const items = topConsoleItems(boardBriefingItems(kind), 4);
-      if (!items.length) return [];
+      if (!items.length) return { messages: [], items: [] };
       const baseTs = newestBoardItemUpdateMs(items);
       const messages = [
         collabMessage("Hermes", boardBriefingSummary(items), "board briefing", baseTs),
@@ -6633,7 +6645,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         const action = nextPipelineAction(item, verdict);
         messages.push(collabMessage("Hermes", boardBriefingLineForItem(item, verdict, action, lane), boardBriefingMeta(item, verdict, lane), baseTs + index + 1));
       });
-      return messages;
+      return { messages, items };
     }
 
     function boardBriefingItems(kind) {
@@ -6686,10 +6698,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function boardBriefingLineForItem(item, verdict, action, lane) {
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
       if (codexTaskFailedForItem(item)) {
-        return "Codex: " + title + " is blocked because the last Codex task failed. First open the failed runner output; if it is auth or clone setup, fix the runner, otherwise create a smaller retry task or push the smallest PR-check fix.";
+        return "Codex: " + title + " — last runner task failed. Open the failed runner output first; if it's auth or clone setup, fix the runner. Otherwise create a smaller retry task or push the smallest PR-check fix.";
       }
       if (isDraftPullRequest(item)) {
-        return "Codex: " + title + " is still draft. Finish the draft or mark it ready for review, then let CI and Hermes re-run.";
+        return "Codex: " + title + " — finish the draft or mark it ready for review, then let CI and Hermes re-run.";
       }
       if (lane.key === "attention" && action.owner === "Codex") {
         return "Codex: " + title + " is blocked. " + capitalizeFirst(action.text) + ". Hermes will clear it only after the blocking signal disappears.";
@@ -6726,8 +6738,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     // terse, action-first. Hermes's voice: dry, methodical, observing.
     function collaborationAskForItem(item, verdict, action, lane) {
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
-      if (codexTaskFailedForItem(item)) return "Codex — " + title + " failed in the runner. Open the failed task output first; then fix the runner setup, push the smallest PR-check fix, or create a smaller retry task.";
-      if (isDraftPullRequest(item)) return "Codex — " + title + " is still draft. Finish the draft or mark it ready for review, then let CI and Hermes re-run.";
+      if (codexTaskFailedForItem(item)) return "Codex — " + title + ": last runner task failed. Open the failed task output first; then fix the runner setup, push the smallest PR-check fix, or create a smaller retry task.";
+      if (isDraftPullRequest(item)) return "Codex — " + title + ": finish the draft or mark it ready for review, then let CI and Hermes re-run.";
       if (action.owner === "Codex" || lane.key === "codex") return "Codex — you're up on " + title + ". " + action.text;
       if (action.owner === "Operator" || lane.key === "operator" || lane.key === "attention") return "Pascal, this one needs your call on " + title + ". " + action.text;
       if (action.owner === "Hermes" || lane.key === "hermes") return "Watching " + title + ". I'll land the verdict here once the checks clear.";
@@ -6748,9 +6760,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const ts = taskUpdatedMs(task);
       const messages = [];
       if (status === "proposed") {
-        messages.push(collabMessage("Hermes", "Drafted a task for Codex on " + title + ".", "task proposed", ts));
-        messages.push(collabMessage("Hermes", "Pascal — approve when you want Codex to start.", "approval needed", ts + 1));
+        // Collapsed from two Hermes lines into one — they were back-to-
+        // back from the same speaker and read as duplicate noise.
+        messages.push(collabMessage("Hermes", "Drafted a task for Codex on " + title + ". Pascal — approve when you want Codex to start.", "task proposed · approval needed", ts));
       } else if (status === "approved") {
+        // Same collapse — Hermes's approval note and Codex's queued
+        // ack happen in the same beat; keep them as one row each but
+        // tighten the wording.
         messages.push(collabMessage("Hermes", "Approved — " + title + " is yours, Codex.", "approved", ts));
         messages.push(collabMessage("Codex", "Queued. Runner's picking me up next.", "waiting runner", ts + 1));
       } else if (status === "running") {
