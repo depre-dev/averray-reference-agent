@@ -1542,20 +1542,68 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       cursor: pointer;
       border-style: dashed;
       background: rgba(2, 15, 13, 0.5);
+      transition: background 120ms ease, border-color 120ms ease;
+    }
+    .done-rail:hover {
+      background: color-mix(in srgb, var(--lane-accent) 8%, rgba(2, 15, 13, 0.5));
+      border-color: color-mix(in srgb, var(--lane-accent) 55%, var(--line-soft));
+    }
+    .done-rail:focus-visible {
+      outline: 1px solid color-mix(in srgb, var(--lane-accent) 70%, var(--cyan));
+      outline-offset: 2px;
     }
     .done-rail .lane-head {
       min-height: 100%;
       height: 100%;
-      justify-content: center;
-      padding: 8px 4px;
+      justify-content: space-between;
+      padding: 10px 4px 10px;
+      gap: 10px;
       border-top-width: 0;
       border-left: 2px solid var(--lane-accent);
+    }
+    /* Top accent dot — matches the lane-title dot every other lane has,
+       so the rail reads as "yes this is a lane" not "a mystery sliver". */
+    .done-rail .lane-head::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--lane-accent);
+      opacity: 0.75;
+      margin: 0 auto;
+      flex-shrink: 0;
     }
     .done-rail .lane-title {
       writing-mode: vertical-rl;
       transform: rotate(180deg);
-      gap: 8px;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
       overflow: visible;
+      flex: 1;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .done-rail:hover .lane-title { color: var(--cream); }
+    /* The pill is rendered inside the vertical-rl title, so rotating it
+       back to horizontal keeps the count number readable. Sized up so
+       the number is the focal point of the rail. */
+    .done-rail .lane-title .pill {
+      writing-mode: horizontal-tb;
+      transform: rotate(180deg);
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--lane-accent) 45%, var(--line-soft));
+      background: color-mix(in srgb, var(--lane-accent) 10%, rgba(2, 15, 13, 0.7));
+      color: var(--cream);
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      min-width: 26px;
+      text-align: center;
     }
     .done-rail .lane-title::before,
     .done-rail .lane-body,
@@ -1725,13 +1773,18 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       white-space: normal;
     }
     .collab-thread {
-      display: grid;
+      display: flex;
+      flex-direction: column;
       align-content: start;
-      gap: 8px;
       min-height: 100%;
       padding: 10px 12px 12px;
       color: var(--text);
     }
+    /* Per-message margin (not container gap) so grouped rows can use
+       margin-top: 0 to visually attach to the previous same-speaker
+       row. Grid gap does not yield to negative margins reliably. */
+    .collab-message + .collab-message { margin-top: 8px; }
+    .collab-message[data-grouped="true"] { margin-top: 0; }
     .collab-head {
       position: sticky;
       top: 0;
@@ -1831,6 +1884,45 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .collab-message[data-kind="request_help"] {
       border-left-color: var(--warn);
       background: color-mix(in srgb, var(--warn) 8%, rgba(8, 18, 14, 0.7));
+    }
+    /* Grouped messages: a second+ message in a same-speaker run. The
+       top border + radius collapses into the previous row to make a
+       continuous left-rail "thread", so the eye sees one speaker
+       saying multiple things rather than a fresh row each time. The
+       margin-top: 0 override at the top of this block kills the
+       8px inter-row gap; padding-top adds back a small breath. */
+    .collab-message[data-grouped="true"] {
+      border-top: 0;
+      border-top-left-radius: 0;
+      border-top-right-radius: 0;
+      padding-top: 4px;
+    }
+    /* When a same-speaker run continues we hide the heavy hairline
+       between rows so the rail reads as one thread. */
+    .collab-message[data-grouped="true"]::before {
+      content: "";
+      display: block;
+      height: 1px;
+      background: color-mix(in srgb, var(--speaker-accent, var(--line)) 18%, transparent);
+      margin: 0 -12px 4px -13px;
+    }
+    .collab-follow {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.62rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: color-mix(in srgb, var(--speaker-accent, var(--muted)) 70%, var(--muted));
+    }
+    /* The newest message in the thread gets a subtle one-shot pulse so
+       the eye lands on it when new chat arrives — "this is alive". The
+       animation runs once then stays at rest. */
+    @keyframes collab-pulse {
+      0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--speaker-accent, var(--cyan)) 42%, transparent); }
+      60%  { box-shadow: 0 0 0 6px color-mix(in srgb, var(--speaker-accent, var(--cyan)) 0%, transparent); }
+      100% { box-shadow: 0 0 0 0 transparent; }
+    }
+    .collab-message[data-newest="true"] {
+      animation: collab-pulse 1.4s ease-out 1;
     }
     .collab-tag {
       display: inline-flex;
@@ -5915,10 +6007,32 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       ])
         .sort((a, b) => a.ts - b.ts)
         .slice(-24);
+      const lastIndex = rows.length - 1;
       return '<div class="collab-thread">' +
         '<div class="collab-head"><strong>' + escapeHtml(title) + '</strong><span>' + escapeHtml(currentStreamLabel()) + '</span></div>' +
-        rows.map(renderCollabMessage).join("") +
+        rows.map((m, i) => renderCollabMessage(m, {
+          prev: i > 0 ? rows[i - 1] : null,
+          isNewest: i === lastIndex,
+        })).join("") +
         '</div>';
+    }
+
+    // Two consecutive messages count as "the same speaker continuing"
+    // when they share a speaker AND land within this many ms of each
+    // other. 4 minutes catches typical reply bursts (a Codex push and
+    // its follow-up status line) without collapsing distinct sessions.
+    const COLLAB_GROUP_WINDOW_MS = 4 * 60 * 1000;
+
+    function relativeFollowUpLabel(prev, current) {
+      if (!prev) return "";
+      const delta = current.ts - prev.ts;
+      if (!Number.isFinite(delta) || delta < 0) return "";
+      if (delta < 30 * 1000) return "just after";
+      if (delta < 60 * 1000) return "a moment later";
+      const minutes = Math.round(delta / 60000);
+      if (minutes < 60) return minutes + "m later";
+      const hours = Math.round(delta / 3_600_000);
+      return hours + "h later";
     }
 
     // Render one row in the collaboration thread. Two flavors of message
@@ -5941,13 +6055,25 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     // to match the ops-console aesthetic of the rest of the page:
     // 3px left-rail + uppercase tracked speaker label, just like the
     // drawer section headers.
-    function renderCollabMessage(message) {
+    function renderCollabMessage(message, context) {
+      const ctx = context || {};
+      const prev = ctx.prev || null;
+      const isNewest = ctx.isNewest === true;
       const speaker = message.speaker || "Hermes";
       const slug = actorSlug(speaker);
       const posted = message.posted ? "true" : "false";
       const kindAttr = message.kind ? message.kind : "";
       const addressedAttr = message.addressedTo && message.addressedTo !== "everyone" ? message.addressedTo : "";
       const meta = message.meta || "";
+      // Group consecutive same-speaker messages so the thread reads as a
+      // conversation, not a status log. Grouped rows hide the speaker
+      // label, share the left-rail visually (via CSS), and use a
+      // relative "1m later" connector instead of repeating an absolute
+      // time. Never group system rows — those are dashed-border notes.
+      const sameSpeaker = !!prev && prev.speaker === message.speaker;
+      const closeInTime = !!prev && Math.abs(message.ts - prev.ts) <= COLLAB_GROUP_WINDOW_MS;
+      const grouped = sameSpeaker && closeInTime && slug !== "system";
+      const followLabel = grouped ? relativeFollowUpLabel(prev, message) : "";
       const kindBadge = message.kind === "proposal" ? '<span class="collab-tag" data-tag="proposal">proposal</span>'
         : message.kind === "request_help" ? '<span class="collab-tag" data-tag="help">needs help</span>'
           : message.kind === "status" ? '<span class="collab-tag" data-tag="status">status</span>'
@@ -5956,12 +6082,31 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         ? '<span class="collab-addressed">→ @' + escapeHtml(addressedAttr) + '</span>'
         : "";
       const postedBadge = message.posted ? '<span class="collab-tag" data-tag="posted">posted</span>' : "";
-      return '<article class="collab-message" data-speaker="' + escapeAttr(slug) + '" data-posted="' + posted + '" data-kind="' + escapeAttr(kindAttr) + '" data-addressed="' + escapeAttr(addressedAttr) + '">' +
-        '<div class="collab-byline">' +
-          '<span class="collab-speaker">' + escapeHtml(speaker) + '</span>' +
-          addressedBadge + kindBadge + postedBadge +
-          (meta ? '<span class="collab-meta">' + escapeHtml(meta) + '</span>' : "") +
-        '</div>' +
+      // Inside a grouped run the byline collapses to a faint connector
+      // (e.g. "↳ 1m later") plus any badge changes. On the first message
+      // in a run we render the full uppercase tracked speaker label.
+      const byline = grouped
+        ? (followLabel || kindBadge || postedBadge || addressedBadge
+          ? '<div class="collab-byline" data-grouped="true">' +
+              (followLabel ? '<span class="collab-follow">↳ ' + escapeHtml(followLabel) + '</span>' : "") +
+              addressedBadge + kindBadge + postedBadge +
+              (meta ? '<span class="collab-meta">' + escapeHtml(meta) + '</span>' : "") +
+            '</div>'
+          : "")
+        : '<div class="collab-byline">' +
+            '<span class="collab-speaker">' + escapeHtml(speaker) + '</span>' +
+            addressedBadge + kindBadge + postedBadge +
+            (meta ? '<span class="collab-meta">' + escapeHtml(meta) + '</span>' : "") +
+          '</div>';
+      return '<article class="collab-message"' +
+        ' data-speaker="' + escapeAttr(slug) + '"' +
+        ' data-posted="' + posted + '"' +
+        ' data-kind="' + escapeAttr(kindAttr) + '"' +
+        ' data-addressed="' + escapeAttr(addressedAttr) + '"' +
+        ' data-grouped="' + (grouped ? "true" : "false") + '"' +
+        (isNewest ? ' data-newest="true"' : "") +
+        '>' +
+        byline +
         '<div class="collab-text">' + escapeHtml(message.text || "") + '</div>' +
       '</article>';
     }

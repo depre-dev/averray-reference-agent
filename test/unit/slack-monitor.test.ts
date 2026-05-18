@@ -293,6 +293,20 @@ describe("slack operator personal monitor", () => {
     // refactor reintroducing the chat-app avatar/bubble-stack wrappers.
     expect(html).not.toContain('collab-avatar');
     expect(html).not.toContain('collab-bubble-stack');
+
+    // Conversation feel (PR: collab-conversation): group consecutive
+    // same-speaker messages, relative "1m later" connector, pulse on
+    // the newest row, polished Done rail.
+    expect(html).toContain('COLLAB_GROUP_WINDOW_MS');
+    expect(html).toContain('relativeFollowUpLabel');
+    expect(html).toContain('data-grouped="true"');
+    expect(html).toContain('data-newest="true"');
+    expect(html).toContain('collab-pulse');
+    expect(html).toContain('collab-follow');
+    // Done rail polish: hover state, accent dot, pill enlargement.
+    expect(html).toContain('.done-rail:hover');
+    expect(html).toContain('.done-rail .lane-head::before');
+    expect(html).toContain('.done-rail .lane-title .pill');
   });
 
   it("serves a PWA manifest with the canonical name + scope", () => {
