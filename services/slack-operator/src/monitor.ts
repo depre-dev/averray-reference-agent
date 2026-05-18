@@ -3581,13 +3581,17 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     startLiveUpdates();
 
     async function load() {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 12_000);
       try {
-        const response = await fetch(withToken, { cache: "no-store" });
+        const response = await fetch(withToken, { cache: "no-store", signal: controller.signal });
         if (!response.ok) throw new Error("HTTP " + response.status);
         render(await response.json());
       } catch (error) {
         updateLiveStatus("error", "update failed");
         renderMonitorLoadError(error);
+      } finally {
+        clearTimeout(timeout);
       }
     }
 

@@ -861,15 +861,77 @@ function writeRedirect(response: http.ServerResponse, location: string) {
 }
 
 async function loadMonitorSnapshot(url: URL): Promise<unknown> {
+  const startedAt = Date.now();
+  const phases: Array<Record<string, unknown>> = [];
+  const handoffStartedAt = Date.now();
   const monitor = await getHandoffMonitor({
     correlationId: url.searchParams.get("correlationId") ?? undefined,
     limit: parseOptionalInteger(url.searchParams.get("limit")),
     activeWindowMinutes: parseOptionalInteger(url.searchParams.get("activeWindowMinutes")),
   });
-  const enriched = await enrichMonitorWithGithubPrState(monitor);
+  phases.push({
+    name: "handoff_events",
+    status: "ok",
+    durationMs: Date.now() - handoffStartedAt,
+  });
+  let enriched = monitor;
+  const githubTimeoutMs = monitorGithubEnrichTimeoutMs();
+  const githubStartedAt = Date.now();
+  try {
+    enriched = await withTimeout(
+      enrichMonitorWithGithubPrState(monitor),
+      githubTimeoutMs,
+      "monitor_github_enrichment_timeout"
+    );
+    phases.push({
+      name: "github_pr_enrichment",
+      status: "ok",
+      durationMs: Date.now() - githubStartedAt,
+      timeoutMs: githubTimeoutMs,
+    });
+  } catch (error) {
+    logger.warn({ err: error }, "monitor_github_enrichment_skipped");
+    phases.push({
+      name: "github_pr_enrichment",
+      status: "skipped",
+      durationMs: Date.now() - githubStartedAt,
+      timeoutMs: githubTimeoutMs,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const codexStartedAt = Date.now();
+  let codexTasks: Awaited<ReturnType<typeof loadCodexTaskQueueSummary>> | undefined;
+  try {
+    codexTasks = await loadCodexTaskQueueSummary();
+    phases.push({
+      name: "codex_task_queue",
+      status: "ok",
+      durationMs: Date.now() - codexStartedAt,
+    });
+  } catch (error) {
+    logger.warn({ err: error }, "monitor_codex_task_queue_skipped");
+    phases.push({
+      name: "codex_task_queue",
+      status: "skipped",
+      durationMs: Date.now() - codexStartedAt,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const degraded = phases.some((phase) => phase.status !== "ok");
+  const diagnostics = {
+    monitorSnapshot: {
+      status: degraded ? "degraded" : "ok",
+      durationMs: Date.now() - startedAt,
+      phases,
+    },
+  };
+  if (degraded) {
+    logger.warn({ diagnostics }, "monitor_snapshot_degraded");
+  }
   return {
     ...enriched,
-    codexTasks: await loadCodexTaskQueueSummary(),
+    codexTasks,
+    diagnostics,
   };
 }
 
@@ -877,6 +939,29 @@ async function loadCodexTaskQueueSummary() {
   const codexTasks = await listCodexTasks();
   const codexRunner = await readCodexRunnerHeartbeat().catch(() => undefined);
   return summarizeCodexTasks(codexTasks, 100, { runner: codexRunner });
+}
+
+function monitorGithubEnrichTimeoutMs(): number {
+  const parsed = Number.parseInt(process.env.GITHUB_MONITOR_ENRICH_TIMEOUT_MS ?? "2500", 10);
+  if (!Number.isFinite(parsed)) return 2_500;
+  return Math.max(250, Math.min(15_000, parsed));
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${message} after ${timeoutMs}ms`)), timeoutMs);
+    timer.unref?.();
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
 }
 
 async function writeMonitorStream(

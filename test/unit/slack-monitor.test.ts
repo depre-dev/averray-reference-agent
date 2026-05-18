@@ -184,6 +184,9 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("new EventSource(streamUrl)");
     expect(html).toContain("addEventListener(\"monitor\"");
     expect(html).toContain("startPolling(\"polling fallback 5s\")");
+    expect(html).toContain("new AbortController()");
+    expect(html).toContain("controller.abort()");
+    expect(html).toContain("signal: controller.signal");
     expect(html).toContain("fetch(commandUrl");
     expect(html).toContain("submitMonitorCommand(text)");
     expect(html).toContain("selectedKey");
