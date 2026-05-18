@@ -2037,6 +2037,47 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .collab-message[data-newest="true"] .collab-speaker {
       animation: collab-speaker-pulse 1.4s ease-out 1;
     }
+    /* Slide-in for newly-arrived messages — they fade in from below
+       instead of popping into existence. data-fresh is set by JS only
+       on messages whose id wasn't in the previous render's id set. */
+    @keyframes collab-slide-in {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .collab-message[data-fresh="true"] {
+      animation: collab-slide-in 260ms ease-out 1;
+    }
+    /* "Hermes is typing…" row. Same layout as a real message so the
+       chat doesn't jitter when the real reply lands; just three dots
+       cycling through opacity to signal activity. */
+    .collab-message[data-typing="true"] .collab-typing-label {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.66rem;
+      letter-spacing: 0.06em;
+      text-transform: lowercase;
+      color: var(--muted);
+      font-style: italic;
+    }
+    .typing-dots {
+      display: inline-flex;
+      gap: 4px;
+      align-items: center;
+      vertical-align: middle;
+    }
+    .typing-dots span {
+      width: 5px;
+      height: 5px;
+      border-radius: 999px;
+      background: var(--cyan);
+      opacity: 0.25;
+      animation: typing-bounce 1.1s ease-in-out infinite;
+    }
+    .typing-dots span:nth-child(2) { animation-delay: 0.18s; }
+    .typing-dots span:nth-child(3) { animation-delay: 0.36s; }
+    @keyframes typing-bounce {
+      0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+      30%           { opacity: 1;    transform: translateY(-3px); }
+    }
     .collab-tag {
       display: inline-flex;
       align-items: center;
@@ -3841,6 +3882,16 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     let latestCodexRunner = null;
     let latestPayload = null;
     let latestCollabMessages = [];
+    // Set of message IDs we've already shown — used to mark NEW messages
+    // with data-fresh so they slide in instead of popping into existence.
+    let knownCollabMessageIds = new Set();
+    // Tracks an in-flight Hermes auto-reply. While set, a "Hermes is
+    // typing…" row renders at the bottom of the thread. Cleared when the
+    // reply arrives or the poll window expires.
+    let hermesTypingSinceMs = 0;
+    // Page title flash state for unfocused tabs.
+    const baseDocumentTitle = document.title;
+    let unreadPostedCount = 0;
     // Compose state for the new collaboration "post" mode. The compose form
     // can run in two modes: "post" (POST /monitor/collaboration → real
     // multi-agent message) and "ask" (POST /monitor/command → Hermes
@@ -4096,6 +4147,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
               const fresh = body.messages.filter((m) => m && m.id && !known.has(m.id));
               if (fresh.length > 0) {
                 latestCollabMessages = (latestCollabMessages || []).concat(fresh);
+                // Hermes spoke — drop the typing indicator so the real
+                // reply takes its place in the next render.
+                hermesTypingSinceMs = 0;
                 forceThreadMode();
                 renderAutoCollaborationThread();
                 return; // got the reply, stop polling
@@ -4106,7 +4160,17 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           // Network blips are fine — the next SSE snapshot will surface
           // the reply anyway. Don't spam the console.
         }
-        if (attempts < maxAttempts) setTimeout(tick, intervalMs);
+        if (attempts < maxAttempts) {
+          setTimeout(tick, intervalMs);
+        } else {
+          // Poll window expired without a Hermes reply. Drop the typing
+          // dots so the operator isn't left staring at "Hermes is typing…"
+          // forever — the reply (if any) will arrive on a later SSE tick.
+          if (hermesTypingSinceMs) {
+            hermesTypingSinceMs = 0;
+            renderAutoCollaborationThread();
+          }
+        }
       };
       setTimeout(tick, intervalMs);
     }
@@ -4140,6 +4204,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           const merged = (latestCollabMessages || []).slice();
           merged.push(result.message);
           latestCollabMessages = merged;
+          // Show "Hermes is typing…" right away — Hermes will reply in
+          // ~1–5s. The typing row sits at the bottom of the thread and
+          // is removed once the real reply arrives (or the poll window
+          // expires). Only show it for posts addressed to Hermes or
+          // everyone — Hermes doesn't reply to ops-to-Codex.
+          if (composeTarget === "hermes" || composeTarget === "everyone") {
+            hermesTypingSinceMs = Date.now();
+          }
           // If the operator had used Ask Hermes earlier in the session the
           // outputs are pinned to data-auto="false" and the thread render
           // would silently no-op. Posting is an explicit re-engagement with
@@ -4455,7 +4527,22 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const counts = payload.counts || {};
       const recent = payload.recent || [];
       setText("generated", payload.generatedAt ? new Date(payload.generatedAt).toLocaleTimeString() : "unknown");
-      latestCollabMessages = normalizeCollabMessages(payload.collaborationMessages);
+      const incomingCollab = normalizeCollabMessages(payload.collaborationMessages);
+      // Bump the unread count when a new posted message arrives while
+      // the tab is unfocused, so the page title flashes "(N) Hermes
+      // Monitor" and the operator notices from another tab.
+      if (document && document.hidden) {
+        const prevPostedIds = new Set(
+          (latestCollabMessages || []).filter((m) => m && m.id).map((m) => String(m.id))
+        );
+        for (const m of incomingCollab) {
+          if (m && m.id && !prevPostedIds.has(String(m.id))) {
+            unreadPostedCount += 1;
+          }
+        }
+        updateUnreadTitle();
+      }
+      latestCollabMessages = incomingCollab;
       latestCodexTasks = normalizeCodexTasks(payload.codexTasks);
       latestCodexRunner = normalizeCodexRunner(payload.codexTasks && payload.codexTasks.runner);
       latestPipelineItems = groupPrPipelineItems(collectPipelineItems(payload));
@@ -6415,13 +6502,55 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         .sort((a, b) => a.ts - b.ts)
         .slice(-24);
       const lastIndex = rows.length - 1;
-      return '<div class="collab-thread">' +
+      const typingRow = hermesTypingSinceMs ? renderHermesTypingRow() : "";
+      // Compute which rows are "fresh" (their id wasn't in the previous
+      // render). On the very first render every row is fresh — which
+      // would produce a flood of slide-ins; skip that case.
+      const previouslyKnown = knownCollabMessageIds;
+      const firstRender = previouslyKnown.size === 0;
+      const nextKnown = new Set();
+      const html = '<div class="collab-thread">' +
         '<div class="collab-head"><strong>' + escapeHtml(title) + '</strong><span>' + escapeHtml(currentStreamLabel()) + '</span></div>' +
-        rows.map((m, i) => renderCollabMessage(m, {
-          prev: i > 0 ? rows[i - 1] : null,
-          isNewest: i === lastIndex,
-        })).join("") +
+        rows.map((m, i) => {
+          const key = collabRowKey(m);
+          nextKnown.add(key);
+          const isFresh = !firstRender && !previouslyKnown.has(key);
+          return renderCollabMessage(m, {
+            prev: i > 0 ? rows[i - 1] : null,
+            isNewest: i === lastIndex,
+            isFresh,
+          });
+        }).join("") +
+        typingRow +
         '</div>';
+      knownCollabMessageIds = nextKnown;
+      return html;
+    }
+
+    // Stable identity for fresh-detection. Posted messages have a real
+    // server-generated id; synthesized messages don't, so we fall back
+    // to a composite of speaker+text+ts. Same logical message ⇒ same key
+    // across re-renders ⇒ no spurious slide-in animation.
+    function collabRowKey(m) {
+      if (!m) return "";
+      if (m.id) return String(m.id);
+      return (m.speaker || "") + "·" + (m.text || "") + "·" + (m.ts || 0);
+    }
+
+    // Transient "Hermes is typing…" row rendered at the bottom of the
+    // thread while a Hermes auto-reply is in flight. Uses the same
+    // .collab-message layout as a real row so the typography matches,
+    // with three animated dots in place of the message text.
+    function renderHermesTypingRow() {
+      return '<article class="collab-message" data-speaker="hermes" data-typing="true" aria-live="polite">' +
+        '<div class="collab-byline">' +
+          '<span class="collab-speaker">Hermes</span>' +
+          '<span class="collab-typing-label">is typing</span>' +
+        '</div>' +
+        '<div class="collab-text">' +
+          '<span class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></span>' +
+        '</div>' +
+      '</article>';
     }
 
     // Two consecutive messages count as "the same speaker continuing"
@@ -6466,6 +6595,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const ctx = context || {};
       const prev = ctx.prev || null;
       const isNewest = ctx.isNewest === true;
+      // "Fresh" = this id wasn't in the previous render's id set. JS
+      // populates the set after each render so the slide-in animation
+      // only plays once per message, not on every re-render.
+      const isFresh = ctx.isFresh === true;
       const speaker = message.speaker || "Hermes";
       const slug = actorSlug(speaker);
       const posted = message.posted ? "true" : "false";
@@ -6512,14 +6645,31 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         ' data-addressed="' + escapeAttr(addressedAttr) + '"' +
         ' data-grouped="' + (grouped ? "true" : "false") + '"' +
         (isNewest ? ' data-newest="true"' : "") +
+        (isFresh ? ' data-fresh="true"' : "") +
         '>' +
         byline +
         '<div class="collab-text">' + escapeHtml(message.text || "") + '</div>' +
       '</article>';
     }
 
-    function collabMessage(speaker, text, meta, ts) {
-      return { speaker, text, meta: meta || "", ts: Number.isFinite(ts) ? ts : Date.now() };
+    function collabMessage(speaker, text, meta, ts, addressedTo) {
+      const row = { speaker, text, meta: meta || "", ts: Number.isFinite(ts) ? ts : Date.now() };
+      if (addressedTo) row.addressedTo = addressedTo;
+      return row;
+    }
+
+    // Infer the conversational target of a synthesized Hermes line by
+    // looking at the action owner and lane. This pushes the chat from
+    // monologue ("Codex: PR #439 — finish the draft…") into dialogue
+    // ("Hermes → @codex: PR #439 — finish the draft…"), so the eye
+    // reads it as one agent talking to another.
+    function inferAddressedTo(action, lane) {
+      const owner = action && action.owner ? String(action.owner) : "";
+      const laneKey = lane && lane.key ? String(lane.key) : "";
+      if (owner === "Codex" || laneKey === "codex") return "codex";
+      if (owner === "Operator" || laneKey === "operator" || laneKey === "attention") return "operator";
+      if (owner === "Hermes" || laneKey === "hermes") return "hermes";
+      return "";
     }
 
     // Normalize the wire payload from POST /monitor/collaboration and the
@@ -6613,7 +6763,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         if (kind === "hermes" && action.owner !== "Hermes" && lane.key !== "hermes") return;
         if (kind === "operator" && action.owner !== "Operator" && lane.key !== "operator") return;
         if (kind === "blocked" && lane.key !== "attention" && verdict.level !== "block") return;
-        messages.push(collabMessage("Hermes", collaborationAskForItem(item, verdict, action, lane), collaborationMetaForItem(item, verdict), itemUpdatedMs(item)));
+        messages.push(collabMessage("Hermes", collaborationAskForItem(item, verdict, action, lane), collaborationMetaForItem(item, verdict), itemUpdatedMs(item), inferAddressedTo(action, lane)));
       });
       if (!messages.length && kind === "codex") {
         messages.push(collabMessage("System", "Codex has no active PR handoff right now.", "idle", Date.now()));
@@ -6643,7 +6793,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         const verdict = releaseVerdict(item);
         const lane = boardLaneForItem(item, verdict);
         const action = nextPipelineAction(item, verdict);
-        messages.push(collabMessage("Hermes", boardBriefingLineForItem(item, verdict, action, lane), boardBriefingMeta(item, verdict, lane), baseTs + index + 1));
+        messages.push(collabMessage("Hermes", boardBriefingLineForItem(item, verdict, action, lane), boardBriefingMeta(item, verdict, lane), baseTs + index + 1, inferAddressedTo(action, lane)));
       });
       return { messages, items };
     }
@@ -7816,6 +7966,27 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const target = document.getElementById(id);
       if (target) target.textContent = String(value);
     }
+
+    // Page-title flash for unfocused tabs. When new posted messages
+    // arrive while document.hidden is true, the title becomes
+    // "(N) Hermes Monitor"; coming back into focus resets it.
+    function updateUnreadTitle() {
+      if (unreadPostedCount > 0) {
+        document.title = "(" + unreadPostedCount + ") " + baseDocumentTitle;
+      } else {
+        document.title = baseDocumentTitle;
+      }
+    }
+    window.addEventListener("focus", () => {
+      unreadPostedCount = 0;
+      updateUnreadTitle();
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) {
+        unreadPostedCount = 0;
+        updateUnreadTitle();
+      }
+    });
 
     function needsAttention(item) {
       const level = releaseVerdict(item).level;
