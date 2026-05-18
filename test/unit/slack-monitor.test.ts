@@ -343,6 +343,18 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain('interactive === card');
     expect(html).toContain('event.key !== "Escape"');
     expect(html).toContain('scrim.dataset.open = "true"');
+
+    // Hermes LLM voice (PR: monitor-hermes-llm): the client poll
+    // window stretches to cover Ollama Cloud latency, and the
+    // synthesized agent lines got a personality pass.
+    expect(html).toContain('maxAttempts = 9');
+    // Codex template refresh — pragmatic, terse voice. Old "I am
+    // working on..." / "I am queued..." phrasing is gone.
+    expect(html).not.toContain('I am queued for pickup');
+    expect(html).not.toContain('I am working on " + title');
+    expect(html).toContain("you're up on");
+    expect(html).toContain('Working on " + title');
+    expect(html).toContain("Hermes, your turn for the re-check");
   });
 
   it("serves a PWA manifest with the canonical name + scope", () => {
