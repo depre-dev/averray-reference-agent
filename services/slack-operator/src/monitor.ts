@@ -1504,7 +1504,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
     .card-subtitle,
     .card-why,
-    .card-next {
+    .card-next,
+    .card-flow {
       color: var(--muted);
       font-size: 0.78rem;
       line-height: 1.35;
@@ -1535,6 +1536,50 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       flex-wrap: wrap;
       gap: 6px;
       justify-content: flex-end;
+    }
+    .card-flow {
+      display: grid;
+      gap: 5px;
+      padding: 7px 8px;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.026);
+    }
+    .card-flow[data-owner="operator"] {
+      border-color: color-mix(in srgb, var(--warn) 40%, var(--line-soft));
+      background: color-mix(in srgb, var(--warn) 7%, transparent);
+    }
+    .card-flow[data-owner="codex"] {
+      border-color: color-mix(in srgb, var(--violet) 40%, var(--line-soft));
+      background: color-mix(in srgb, var(--violet) 7%, transparent);
+    }
+    .card-flow[data-owner="merge"] {
+      border-color: color-mix(in srgb, var(--ok) 34%, var(--line-soft));
+      background: color-mix(in srgb, var(--ok) 6%, transparent);
+    }
+    .card-flow-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+    }
+    .card-flow-label {
+      flex: 0 0 auto;
+      min-width: 42px;
+      color: var(--faint);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.58rem;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .card-flow-text {
+      color: var(--cream);
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .card-flow-row[data-kind="after"] .card-flow-text {
+      color: var(--muted);
     }
     /* Done-rail: the collapsed Done lane lives as a vertical 56px rail on
        the right edge of the kanban board. Clicking it toggles into the
@@ -1622,6 +1667,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       font-size: 0.78rem;
       color: var(--text);
       background: rgba(255, 255, 255, 0.035);
+      line-height: 1.15;
+      text-align: center;
+      white-space: normal;
     }
     .soft-button[data-action="primary"] {
       border-color: var(--lane-accent);
@@ -4678,12 +4726,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function boardLaneDefinitions() {
       return [
-        { key: "attention", title: "Needs Attention", kicker: "urgent · operator", empty: "No blockers waiting." },
-        { key: "codex", title: "Codex Needed", kicker: "agent · action needed", empty: "No Codex action needed." },
-        { key: "hermes", title: "Hermes Checking", kicker: "agent · reviewing", empty: "Hermes has no active PR checks." },
-        { key: "operator", title: "Operator Review", kicker: "operator · sign-off", empty: "No operator sign-off needed." },
-        { key: "queue", title: "Release Queue", kicker: "cleared to merge", empty: "Nothing ready to merge." },
-        { key: "deploy", title: "Deploying", kicker: "post-deploy verify", empty: "No deploy verification active." },
+        { key: "attention", title: "Needs Attention", kicker: "blocked · decide/fix", empty: "No blockers waiting." },
+        { key: "codex", title: "Codex Needed", kicker: "create/approve task", empty: "No Codex action needed." },
+        { key: "hermes", title: "Hermes Checking", kicker: "wait for verdict", empty: "Hermes has no active PR checks." },
+        { key: "operator", title: "Operator Review", kicker: "risk decision", empty: "No operator sign-off needed." },
+        { key: "queue", title: "Release Queue", kicker: "reviewed · merge next", empty: "Nothing ready to merge." },
+        { key: "deploy", title: "Deploying", kicker: "verify production", empty: "No deploy verification active." },
         { key: "done", title: "Done", kicker: "release history", empty: "No completed PRs in view." },
       ];
     }
@@ -4753,6 +4801,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const codexState = lane.key === "codex" ? codexWorkState(item, stage) : null;
       const locallyApproved = decisionForItem(item).status === "approved";
       const staleState = age.state || "fresh";
+      const flow = cardFlowCopy(item, verdict, action, lane, codexState);
       return '<article class="handoff-card" data-select-card="' + escapeAttr(key) + '" data-selected="' + escapeAttr(String(selected)) + '" data-verdict="' + escapeAttr(verdict.level) + '" data-lane="' + escapeAttr(lane.key) + '">' +
         '<span class="lane-chip" data-lane="' + escapeAttr(lane.key) + '">' + escapeHtml(lane.title) + '</span>' +
         '<div class="card-head">' +
@@ -4776,8 +4825,57 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         renderMiniSteps(stage, verdict) +
         '<p class="card-why">' + escapeHtml(cardWhy) + '</p>' +
         '<div class="card-meta-row"><span class="tags">' + touchedAreas.slice(0, 3).map((value) => '<code>' + escapeHtml(String(value)) + '</code>').join("") + '</span><span class="card-subtitle">' + escapeHtml(testSummaryText(tests)) + '</span></div>' +
-        '<div class="card-foot"><span class="card-next"><span class="card-next-label">next</span>' + renderActorPill(action.owner) + '</span><span class="card-actions">' + primaryActionButton(item, verdict, action, lane) + '</span></div>' +
+        renderCardFlow(action, flow) +
+        '<div class="card-foot"><span class="card-next"><span class="card-next-label">waiting on</span>' + renderActorPill(action.owner) + '</span><span class="card-actions">' + primaryActionButton(item, verdict, action, lane) + '</span></div>' +
         '</article>';
+    }
+
+    function renderCardFlow(action, flow) {
+      return '<div class="card-flow" data-owner="' + escapeAttr(actorSlug(action.owner)) + '">' +
+        '<div class="card-flow-row" data-kind="button"><span class="card-flow-label">Button</span><span class="card-flow-text">' + escapeHtml(flow.button) + '</span></div>' +
+        '<div class="card-flow-row" data-kind="after"><span class="card-flow-label">After</span><span class="card-flow-text">' + escapeHtml(flow.after) + '</span></div>' +
+        '</div>';
+    }
+
+    function cardFlowCopy(item, verdict, action, lane, codexState) {
+      if (lane.key === "codex") {
+        const state = codexState || codexWorkState(item, pipelineStage(item, verdict));
+        if (state.state === "proposed") {
+          return { button: "Approves the queued task for Codex.", after: "Codex runner may claim it; cancel if the prompt is wrong." };
+        }
+        if (state.state === "approved") {
+          return { button: "Opens the approved task details.", after: "Wait for the runner; copy the prompt only as fallback." };
+        }
+        if (state.state === "waiting") {
+          return { button: "Creates a proposed Codex task; it does not start work yet.", after: "Review the prompt in the drawer, then approve it if Codex should start." };
+        }
+        if (state.state === "ci") {
+          return { button: "Asks for GitHub CI status.", after: "If CI fails, Codex fixes; if CI passes, Hermes reviews the PR again." };
+        }
+        return { button: "Opens the Codex run/task details.", after: "Use the drawer to inspect progress, retry, or request a Hermes re-check." };
+      }
+      if (isDraftPullRequest(item)) {
+        return { button: "Opens the draft-readiness plan.", after: "Codex finishes the draft, marks ready, then CI and Hermes re-run." };
+      }
+      if (verdict.level === "block") {
+        return { button: "Opens the blocker plan; no GitHub action happens from the card.", after: "Create or approve a Codex task from the drawer, then wait for CI/Hermes." };
+      }
+      if (verdict.level === "needs-review") {
+        if (isCriticalFileReview(item, item.summary || {})) {
+          return { button: "Opens the critical-file risk checklist.", after: "Approve locally only if the secret/deploy/schema boundary is intentional." };
+        }
+        if (isReleaseReviewVerdict(verdict)) {
+          return { button: "Opens the release packet.", after: "Mark reviewed to move this green PR toward the release queue." };
+        }
+        return { button: "Opens the operator checklist.", after: "Approve locally or send it back to Codex with a concrete ask." };
+      }
+      if (verdict.level === "running") {
+        return { button: "Asks Hermes for the current handoff details.", after: "Wait for Hermes to publish a verdict before assigning more work." };
+      }
+      if (verdict.level === "pass" && lane.key === "queue") {
+        return { button: "Asks the merge steward for merge context; it does not merge.", after: "Merge outside the monitor only after branch protection is green." };
+      }
+      return { button: "Opens handoff details.", after: action.text || "Follow the owner handoff shown on this card." };
     }
 
     // Pretty pill for "next actor" — colored dot + arrow + actor name.
@@ -5052,23 +5150,26 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (lane.key === "codex") {
         const state = codexWorkState(item, pipelineStage(item, verdict));
         if (state.state === "proposed" && state.task) {
-          return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="approve" data-codex-task-id="' + escapeAttr(state.task.id) + '">Approve task</button>';
+          return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="approve" data-codex-task-id="' + escapeAttr(state.task.id) + '" title="Approve this queued task so Codex can pick it up">Approve Codex task</button>';
         }
         if (state.state === "approved" && state.task) {
-          return '<button class="soft-button" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '">Approved</button>';
+          return '<button class="soft-button" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '" title="Open the approved Codex task details">View approved task</button>';
         }
         if (state.state === "waiting") {
-          return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="propose" data-card-key="' + escapeAttr(boardItemKey(item)) + '">Propose Codex task</button>';
+          return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="propose" data-card-key="' + escapeAttr(boardItemKey(item)) + '" title="Create a proposed Codex task; it still needs approval">Create Codex task</button>';
         }
-        if (state.state === "ci") return '<button class="soft-button" type="button" data-command-suggestion="github status">Check CI</button>';
-        return '<button class="soft-button" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '">Inspect Codex state</button>';
+        if (state.state === "ci") return '<button class="soft-button" type="button" data-command-suggestion="github status" title="Ask for the current GitHub CI status">Check CI status</button>';
+        return '<button class="soft-button" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '" title="Open Codex task/run details">View Codex run</button>';
       }
-      if (verdict.level === "block") return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '">Fix plan -></button>';
-      if (isDraftPullRequest(item)) return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '">Codex draft -></button>';
-      if (verdict.level === "needs-review") return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '">Review</button>';
-      if (verdict.level === "running") return '<button class="soft-button" data-action="primary" type="button" data-command-suggestion="handoff monitor details">Ask Hermes</button>';
-      if (verdict.level === "pass" && lane.key === "queue") return '<button class="soft-button" data-action="primary" type="button" data-command-suggestion="merge steward details">Queue Merge</button>';
-      return '<button class="soft-button" type="button" data-command-suggestion="handoff monitor details">Inspect</button>';
+      if (verdict.level === "block") return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '" title="Open the blocker plan; this does not mutate GitHub">Open fix plan</button>';
+      if (isDraftPullRequest(item)) return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '" title="Open the draft-readiness plan">Open draft plan</button>';
+      if (verdict.level === "needs-review") {
+        const label = isCriticalFileReview(item, item.summary || {}) ? "Open risk review" : isReleaseReviewVerdict(verdict) ? "Open release review" : "Open review checklist";
+        return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '" title="Open the operator review drawer; no GitHub action happens from this card">' + escapeHtml(label) + '</button>';
+      }
+      if (verdict.level === "running") return '<button class="soft-button" data-action="primary" type="button" data-command-suggestion="handoff monitor details" title="Ask Hermes what is currently running">Ask what is running</button>';
+      if (verdict.level === "pass" && lane.key === "queue") return '<button class="soft-button" data-action="primary" type="button" data-command-suggestion="merge steward details" title="Ask for merge context; this does not merge">Ask merge steward</button>';
+      return '<button class="soft-button" type="button" data-command-suggestion="handoff monitor details" title="Open handoff context">Inspect details</button>';
     }
 
     function boardLaneForItem(item, verdict) {
@@ -5223,11 +5324,17 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '<div class="card-actions">' +
         (prUrl ? '<a class="pill" href="' + escapeAttr(prUrl) + '" target="_blank" rel="noreferrer">Open PR</a>' : "") +
         (workflowRunUrl ? '<a class="pill" href="' + escapeAttr(workflowRunUrl) + '" target="_blank" rel="noreferrer">Workflow Run</a>' : "") +
-        '<button class="soft-button" type="button" data-command-suggestion="handoff monitor details">Ask Hermes</button>' +
+        '<button class="soft-button" type="button" data-command-suggestion="handoff monitor details">Ask Hermes for context</button>' +
         renderCodexFooterAction(item, summary, verdict, action) +
-        '<button class="soft-button" type="button" data-copy-text="' + escapeAttr(item.correlationId || "") + '">copy correlation</button>' +
-        (verdict.level === "needs-review" && !isDraftPullRequest(item) && !locallyApproved ? '<button class="soft-button" data-action="primary" type="button" data-monitor-decision="approve" data-decision-key="' + escapeAttr(decisionKeyForItem(item)) + '">' + escapeHtml(isReleaseReviewVerdict(verdict) ? "Mark reviewed" : "Approve locally") + '</button>' : "") +
+        '<button class="soft-button" type="button" data-copy-text="' + escapeAttr(item.correlationId || "") + '">Copy correlation id</button>' +
+        (verdict.level === "needs-review" && !isDraftPullRequest(item) && !locallyApproved ? '<button class="soft-button" data-action="primary" type="button" data-monitor-decision="approve" data-decision-key="' + escapeAttr(decisionKeyForItem(item)) + '" title="Private monitor decision only; this does not mutate GitHub">' + escapeHtml(operatorApprovalButtonLabel(item, verdict)) + '</button>' : "") +
         '</div></div>';
+    }
+
+    function operatorApprovalButtonLabel(item, verdict) {
+      if (isReleaseReviewVerdict(verdict)) return "Mark release reviewed";
+      if (isCriticalFileReview(item, item.summary || {})) return "Approve risk review";
+      return "Approve operator review";
     }
 
     function renderFailureCallout(verdict, summary) {
@@ -6735,7 +6842,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function renderDecisionActions(item) {
       const key = decisionKeyForItem(item);
       return '<div class="decision-actions">' +
-        '<button class="decision-button" type="button" data-monitor-decision="approve" data-decision-key="' + escapeAttr(key) + '">Operator approved</button>' +
+        '<button class="decision-button" type="button" data-monitor-decision="approve" data-decision-key="' + escapeAttr(key) + '">Mark reviewed locally</button>' +
         '</div>';
     }
 
@@ -6745,8 +6852,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const key = decisionKeyForItem(item);
       const at = decision.at ? " at " + new Date(decision.at).toLocaleString() : "";
       return '<section class="decision-note" aria-label="Operator decision">' +
-        '<strong>Operator approved</strong>' + escapeHtml(at) + '. This is a private monitor decision only; GitHub was not mutated. ' +
-        '<button class="decision-button" type="button" data-monitor-decision="reset" data-decision-key="' + escapeAttr(key) + '">Reset approval</button>' +
+        '<strong>Operator review marked complete</strong>' + escapeHtml(at) + '. This is a private monitor decision only; GitHub was not mutated. ' +
+        '<button class="decision-button" type="button" data-monitor-decision="reset" data-decision-key="' + escapeAttr(key) + '">Undo local review</button>' +
         '</section>';
     }
 
@@ -6856,8 +6963,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         ? fixRequest.checks.map(String).filter(Boolean)
         : missingTests.length ? missingTests : defaultFixChecks(item, summary, testSignals);
       const isDraft = isDraftPullRequest(item);
+      const criticalReview = isCriticalFileReview(item, summary);
       return {
-        title: fixRequest.title || (isDraft ? "Draft readiness request for Codex" : verdict.level === "block" ? "Fix request for Codex" : "Operator decision request"),
+        title: fixRequest.title || (isDraft ? "Draft readiness request for Codex" : verdict.level === "block" ? "Fix request for Codex" : criticalReview ? "Critical-file risk review" : "Operator decision request"),
         owner: fixRequest.owner || action.owner,
         instruction: fixRequest.instruction || fixRequestInstruction(item, summary, verdict, action),
         reason,
@@ -6883,6 +6991,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       }
       if (isReleaseReviewVerdict(verdict)) {
         return "Hermes/Codex should provide the code-level pre-check evidence. Operator should skim the release packet before this green PR enters the merge queue.";
+      }
+      if (isCriticalFileReview(item, summary)) {
+        return "Hermes/Codex should provide the code-level pre-check evidence. Operator should confirm the critical file change is intentional, rollbackable, and acceptable before the PR can move toward merge.";
       }
       if (verdict.level === "needs-review") {
         return "Hermes/Codex should provide the code-level pre-check evidence. Operator should decide whether the project intent, architecture, and rollout risk are acceptable.";
@@ -7114,6 +7225,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return { owner: "Codex", text: "fix the blocking signal, push the PR branch, and wait for CI/Hermes to re-run" };
       }
       if (verdict.level === "needs-review") {
+        if (isCriticalFileReview(item, summary)) {
+          return { owner: "Operator", text: "review the critical-file risk, confirm it is intentional, or send it back to Codex with the exact change needed" };
+        }
         return { owner: "Operator", text: "use the agent pre-check evidence to decide project intent, architecture, and rollout risk" };
       }
       if (verdict.level === "pass") {
@@ -7381,10 +7495,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (reason === "pr_checks_active" || reason === "ci_in_progress") {
         return { level: "running", label: "CI RUNNING", why: releaseReason(summary, item, "running") };
       }
-      const terminal = classifyReleaseGate(status, finalVerdict, mergeRecommendation, reason, reviewReasons);
       if (codexTaskFailedForItem(item)) {
         return { level: "block", label: "CODEX FAILED", why: "Codex task runner failed; inspect the task output or propose a smaller retry task before Hermes can continue." };
       }
+      if (isCriticalFileReview(item, summary) && !hasFailingCheckSignal(summary, reason)) {
+        return { level: "needs-review", label: "CRITICAL REVIEW", why: releaseReason(summary, item, "needs-review") };
+      }
+      const terminal = classifyReleaseGate(status, finalVerdict, mergeRecommendation, reason, reviewReasons);
       if (terminal.level !== "block" && codexTaskCompletedAfterHermesReview(item)) {
         return { level: "running", label: "HERMES RECHECK", why: "Codex reported completion after the last Hermes verdict; Hermes should re-run PR checks before release-gate movement." };
       }
@@ -7455,6 +7572,28 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return { level: "needs-review", label: "OPERATOR REVIEW" };
       }
       return { level: "pass", label: "PASS" };
+    }
+
+    function reviewReasonCodes(summary) {
+      const reasons = Array.isArray(summary && summary.reviewReasons) ? summary.reviewReasons : [];
+      return reasons.map((reason) => normalize(reason && reason.code)).filter(Boolean);
+    }
+
+    function isCriticalFileReview(item, summary) {
+      const reason = normalize((summary && (summary.finalReason || summary.reason)) || (item && item.reason));
+      return reason === "pr_critical_files" || reviewReasonCodes(summary).includes("pr_critical_files");
+    }
+
+    function hasFailingCheckSignal(summary, reason) {
+      const normalizedReason = normalize(reason || (summary && (summary.finalReason || summary.reason)));
+      if (normalizedReason === "pr_checks_failed" || normalizedReason === "ci_failed") return true;
+      const live = summary && summary.githubLive && summary.githubLive.checkTotals;
+      if (live && Number(live.failed || 0) > 0) return true;
+      const checks = Array.isArray(summary && summary.checks) ? summary.checks : [];
+      return checks.some((check) => {
+        const state = normalize(check && (check.conclusion || check.state || check.status));
+        return ["failure", "failed", "fail", "error", "cancelled", "timed_out"].includes(state);
+      });
     }
 
     function releaseReason(summary, item, level) {
