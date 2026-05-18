@@ -1120,7 +1120,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       display: grid;
       grid-template-rows: auto auto minmax(0, 1fr);
       gap: 12px;
-      padding: 12px 14px 266px;
+      /* The bottom collaboration dock is fixed-positioned and claims a
+         substantial chunk of viewport height (see .command-console
+         min-height below). Reserve enough room here so content scrolled
+         to the bottom of the board never hides behind the dock. */
+      padding: 12px 14px min(56vh, 560px);
       overflow: hidden;
     }
     .live-lane {
@@ -1361,7 +1365,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         minmax(190px, 1fr)
         minmax(190px, 1fr)
         minmax(186px, 0.96fr)
-        44px;
+        56px;
       gap: 12px;
       overflow-x: hidden;
       overflow-y: hidden;
@@ -1532,13 +1536,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       gap: 6px;
       justify-content: flex-end;
     }
-    /* Done-rail: the collapsed Done lane lives as a vertical 44px rail on
+    /* Done-rail: the collapsed Done lane lives as a vertical 56px rail on
        the right edge of the kanban board. Clicking it toggles into the
        expanded Done lane view (showDone=true), which uses the .done-row
-       compact row layout below. */
+       compact row layout below. Width was bumped from 44px so the
+       horizontal count pill + vertical DONE label have room to breathe. */
     .done-rail {
-      min-width: 44px;
-      width: 44px;
+      min-width: 56px;
+      width: 56px;
       cursor: pointer;
       border-style: dashed;
       background: rgba(2, 15, 13, 0.5);
@@ -1594,15 +1599,15 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .done-rail .lane-title .pill {
       writing-mode: horizontal-tb;
       transform: rotate(180deg);
-      padding: 2px 8px;
+      padding: 3px 10px;
       border-radius: 999px;
       border: 1px solid color-mix(in srgb, var(--lane-accent) 45%, var(--line-soft));
       background: color-mix(in srgb, var(--lane-accent) 10%, rgba(2, 15, 13, 0.7));
       color: var(--cream);
-      font-size: 0.78rem;
+      font-size: 0.84rem;
       font-weight: 800;
       letter-spacing: 0.02em;
-      min-width: 26px;
+      min-width: 34px;
       text-align: center;
     }
     .done-rail .lane-title::before,
@@ -1704,8 +1709,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       grid-template-columns: minmax(0, 1fr) clamp(320px, 25vw, 430px);
       gap: 14px;
       align-items: stretch;
-      min-height: 218px;
-      max-height: min(32vh, 310px);
+      /* The collaboration thread is now a workspace, not a status strip.
+         Claim the empty space below the board so the page doesn't show
+         a black void between a short kanban + a thin chat dock. */
+      min-height: min(52vh, 520px);
+      max-height: min(64vh, 640px);
       border: 1px solid var(--line);
       border-radius: 14px;
       background:
@@ -2088,7 +2096,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         grid-template-columns: repeat(7, minmax(250px, 82vw));
         overflow-x: auto;
       }
-      /* On mobile the vertical 44px rail makes no sense — expand it into a
+      /* On mobile the vertical 56px rail makes no sense — expand it into a
          full-width horizontal row so the Done lane stays accessible. */
       .done-rail {
         min-width: 250px;
