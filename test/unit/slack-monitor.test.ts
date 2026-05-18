@@ -1,3 +1,4 @@
+import { Script } from "node:vm";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -268,5 +269,12 @@ describe("slack operator personal monitor", () => {
     expect(Array.isArray(manifest.icons)).toBe(true);
     expect(manifest.icons.length).toBeGreaterThan(0);
     expect(manifest.icons[0].type).toBe("image/svg+xml");
+  });
+
+  it("renders inline browser JavaScript that compiles", () => {
+    const html = renderMonitorHtml();
+    const script = html.split("<script>")[1]?.split("</script>")[0] ?? "";
+    expect(script).toContain("function render(payload)");
+    expect(() => new Script(script, { filename: "monitor-inline.js" })).not.toThrow();
   });
 });
