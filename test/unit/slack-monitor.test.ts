@@ -404,6 +404,19 @@ describe("slack operator personal monitor", () => {
     // The old "is still draft. " redundancy is gone (title already
     // describes the draft state via pipelineTitle).
     expect(html).not.toContain('" is still draft. Finish the draft');
+
+    // Top-strip polish (PR: monitor-top-polish): counter chips use
+    // a stacked number-over-label layout with data-empty driving the
+    // zero-state dim; setCounterChip toggles it; the redundant
+    // "system idle" pill is hidden via CSS when idle.
+    expect(html).toContain('setCounterChip');
+    expect(html).toContain('chip.setAttribute("data-empty"');
+    expect(html).toContain('.counter-chip[data-empty="true"]');
+    expect(html).toContain('.sys[data-state="idle"] { display: none; }');
+    // The old setText("attention-chip", ...) plumbing is replaced
+    // by setCounterChip so the zero-dim toggle stays in sync.
+    expect(html).not.toContain('setText("attention-chip"');
+    expect(html).not.toContain('setText("blocked-chip"');
   });
 
   it("serves a PWA manifest with the canonical name + scope", () => {
