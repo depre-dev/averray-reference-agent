@@ -186,6 +186,12 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("renderAutoCollaborationThread()");
     expect(html).toContain("renderCollaborationThread({ kind");
     expect(html).toContain("renderSelectedCollaborationThread(item)");
+    expect(html).toContain("buildBoardBriefingMessages(kind)");
+    expect(html).toContain("Board read:");
+    expect(html).toContain("No operator decision is needed right now.");
+    expect(html).toContain("First open the failed runner output");
+    expect(html).toContain("Finish the draft or mark it ready for review");
+    expect(html).toContain("forceThreadMode();\n          renderAutoCollaborationThread();\n          setComposeStatus(\"Codex task approved");
     expect(html).toContain("latestCodexTasks\n        .filter((task) => !isTerminalCodexTask(task))");
     expect(html).toContain("collaborationMessagesForTask(task)");
     expect(html).toContain("data-command-suggestion=\"handoff monitor details\"");
