@@ -1473,10 +1473,23 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .handoff-card[data-verdict="needs-review"] { --verdict-accent: var(--warn); }
     .handoff-card[data-verdict="running"]      { --verdict-accent: var(--cyan); }
     .handoff-card[data-verdict="pass"]         { --verdict-accent: var(--ok); }
-    .handoff-card:hover,
+    .handoff-card:hover {
+      transform: translateY(-1px);
+      border-color: var(--verdict-accent, var(--lane-accent));
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.32);
+    }
+    /* Selected card pops a touch more than hover — thicker accent rail
+       and a subtle outer glow so when the drawer is open you can still
+       see which card it belongs to behind the scrim. */
     .handoff-card[data-selected="true"] {
       transform: translateY(-1px);
       border-color: var(--verdict-accent, var(--lane-accent));
+      border-left-width: 4px;
+      box-shadow:
+        0 0 0 1px color-mix(in srgb, var(--verdict-accent, var(--lane-accent)) 70%, transparent),
+        0 14px 36px rgba(0, 0, 0, 0.36);
+      z-index: 21;
+      position: relative;
     }
     .command-shell.has-selection .handoff-card:not([data-selected="true"]) {
       opacity: 0.42;
@@ -1675,6 +1688,23 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       border-color: var(--lane-accent);
       color: var(--lane-accent);
       background: color-mix(in srgb, var(--lane-accent) 12%, transparent);
+    }
+    /* Backdrop scrim that dims the rest of the page while the detail
+       drawer is open. Sits between the page content (low z-index) and
+       the drawer (z-index 20). Click anywhere on the scrim to close. */
+    #drawer-scrim {
+      position: fixed;
+      inset: 0;
+      z-index: 19;
+      background: rgba(2, 9, 8, 0.55);
+      backdrop-filter: blur(2px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 180ms ease;
+    }
+    #drawer-scrim[data-open="true"] {
+      opacity: 1;
+      pointer-events: auto;
     }
     .drawer {
       position: fixed;
@@ -2736,10 +2766,22 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       transition: border-color 0.14s ease, transform 0.14s ease;
     }
     .done-row[data-verdict="block"] { border-left-color: var(--bad); }
-    .done-row:hover,
+    .done-row:hover {
+      transform: translateY(-1px);
+      border-color: var(--ok);
+      background: color-mix(in srgb, var(--ok) 6%, var(--surface-strong));
+    }
+    .done-row[data-verdict="block"]:hover { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 6%, var(--surface-strong)); }
+    /* Selected done-row pops above the scrim too, so it stays visible
+       when the drawer focus mode is active. */
     .done-row[data-selected="true"] {
       transform: translateY(-1px);
       border-color: var(--ok);
+      box-shadow:
+        0 0 0 1px color-mix(in srgb, var(--ok) 70%, transparent),
+        0 10px 26px rgba(0, 0, 0, 0.34);
+      z-index: 21;
+      position: relative;
     }
     .done-row .done-check {
       width: 14px;
@@ -3591,6 +3633,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       <div id="pull-indicator" data-state="idle" aria-hidden="true"><span class="pi-spinner"></span><span class="pi-label">Pull to refresh</span></div>
       <section id="owner-lanes" class="kanban-board" aria-label="Release command board"><div class="empty">Loading command board...</div></section>
     </section>
+    <div id="drawer-scrim" data-open="false" aria-hidden="true"></div>
     <aside id="detail-drawer" class="drawer" data-open="false" aria-label="Selected handoff detail"></aside>
     <form id="command-console" class="command-console" autocomplete="off">
       <section class="console-main" aria-label="Hermes and Codex collaboration transcript">
@@ -3730,7 +3773,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     document.addEventListener("click", (event) => {
       const card = event.target && event.target.closest ? event.target.closest("[data-select-card]") : null;
       const interactive = event.target && event.target.closest ? event.target.closest("button,a,input") : null;
-      if (card && !interactive) {
+      // The "interactive" check exists to stop clicks on inner buttons
+      // inside a kanban card from also selecting the card. But when the
+      // selectable element IS itself a button (the done-row case), the
+      // interactive check would skip the selection. Treat "interactive
+      // === card" as "this whole element is the selectable" and let the
+      // selection happen.
+      if (card && (!interactive || interactive === card)) {
         selectedKey = String(card.getAttribute("data-select-card") || "");
         autoFocusPending = false;
         renderBoard(latestPipelineItems);
@@ -3803,6 +3852,19 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       renderDrawer(null);
       renderCommandContext();
     }
+    // Scrim → click anywhere outside the drawer to close it. The scrim
+    // sits z-index 19 below the drawer's z-index 20 so it never eats
+    // clicks meant for the drawer's content.
+    document.getElementById("drawer-scrim")?.addEventListener("click", () => {
+      if (selectedKey) closeSelectedDrawer();
+    });
+    // Esc key → close the drawer. Doesn't interfere with form input
+    // because the existing compose form doesn't use Esc for anything.
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      if (!selectedKey) return;
+      closeSelectedDrawer();
+    });
     document.querySelectorAll("[data-pipeline-filter]").forEach((button) => {
       button.addEventListener("click", () => {
         pipelineFilter = String(button.getAttribute("data-pipeline-filter") || "all");
@@ -5299,9 +5361,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function renderDrawer(item) {
       const target = document.getElementById("detail-drawer");
+      const scrim = document.getElementById("drawer-scrim");
       if (!target) return;
       if (!item) {
         target.dataset.open = "false";
+        if (scrim) scrim.dataset.open = "false";
         target.innerHTML = "";
         return;
       }
@@ -5331,6 +5395,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         commitUrl ? '<a class="pill" href="' + escapeAttr(commitUrl) + '" target="_blank" rel="noreferrer">commit</a>' : "",
       ].filter(Boolean).join("");
       target.dataset.open = "true";
+      if (scrim) scrim.dataset.open = "true";
       const drawerTitle = pipelineTitle(item);
       const drawerTitleShort = cardTitleText(drawerTitle, item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
       const richReviewWhy = renderReviewReasonsRich(summary) || (verdict.why ? '<div class="rw-note">' + escapeHtml(verdict.why) + '</div>' : "");
