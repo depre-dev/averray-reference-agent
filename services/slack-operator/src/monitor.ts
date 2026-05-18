@@ -1360,7 +1360,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         minmax(186px, 1fr)
         minmax(190px, 1fr)
         minmax(190px, 1fr)
-        minmax(186px, 0.96fr);
+        minmax(186px, 0.96fr)
+        44px;
       gap: 12px;
       overflow-x: hidden;
       overflow-y: hidden;
@@ -1530,6 +1531,36 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       flex-wrap: wrap;
       gap: 6px;
       justify-content: flex-end;
+    }
+    /* Done-rail: the collapsed Done lane lives as a vertical 44px rail on
+       the right edge of the kanban board. Clicking it toggles into the
+       expanded Done lane view (showDone=true), which uses the .done-row
+       compact row layout below. */
+    .done-rail {
+      min-width: 44px;
+      width: 44px;
+      cursor: pointer;
+      border-style: dashed;
+      background: rgba(2, 15, 13, 0.5);
+    }
+    .done-rail .lane-head {
+      min-height: 100%;
+      height: 100%;
+      justify-content: center;
+      padding: 8px 4px;
+      border-top-width: 0;
+      border-left: 2px solid var(--lane-accent);
+    }
+    .done-rail .lane-title {
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      gap: 8px;
+      overflow: visible;
+    }
+    .done-rail .lane-title::before,
+    .done-rail .lane-body,
+    .done-rail .lane-subtitle {
+      display: none;
     }
     .soft-button {
       min-height: 28px;
@@ -1953,6 +1984,21 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       .kanban-board[data-done-expanded="true"] {
         grid-template-columns: repeat(7, minmax(250px, 82vw));
         overflow-x: auto;
+      }
+      /* On mobile the vertical 44px rail makes no sense — expand it into a
+         full-width horizontal row so the Done lane stays accessible. */
+      .done-rail {
+        min-width: 250px;
+        width: auto;
+      }
+      .done-rail .lane-head {
+        justify-content: space-between;
+        border-left: 0;
+        border-top: 2px solid var(--lane-accent);
+      }
+      .done-rail .lane-title {
+        writing-mode: horizontal-tb;
+        transform: none;
       }
       .command-shell.has-selection .command-console { right: 14px; }
       .drawer { width: 100vw; }
@@ -2512,6 +2558,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       margin-right: 8px;
       vertical-align: middle;
     }
+    .done-rail .lane-empty::before { display: none; }
     /* Done lane — compact rows instead of full kanban cards when expanded */
     .done-row {
       display: grid;
@@ -3089,6 +3136,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         gap: 8px;
         overflow: visible;
       }
+      /* The collapsed Done rail is a desktop convenience; on phones it'd
+         break the flat-list layout, so it's just hidden. The full Done
+         lane is still reachable via the "done lane N" counter chip. */
+      .done-rail { display: none; }
       /* Cards: keep all content; add the lane chip; bump touch sizes. */
       .handoff-card {
         padding: 12px;
@@ -4432,8 +4483,21 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       });
       target.innerHTML = visibleLanes
         .map((lane) => renderBoardLane(lane, filtered, { mobile }))
-        .join("");
+        .join("") + (!mobile && !showDone ? renderDoneStub(filtered) : "");
       updateMobileTabCounts(filtered);
+    }
+
+    // Collapsed Done lane: a 44px vertical rail on the right edge of the
+    // kanban-board. Click anywhere on it to trigger the existing
+    // toggle-done button and expand into the full Done lane. Skipped on
+    // mobile (the flat list there has its own done-tab path).
+    function renderDoneStub(entries) {
+      const done = entries.filter((item) => boardLaneForItem(item, releaseVerdict(item)).key === "done");
+      setText("done-count", String(done.length));
+      return '<button class="lane done-rail" data-lane="done" type="button" id="done-stub" aria-label="Show done lane" onclick="document.getElementById(\\'toggle-done\\').click()">' +
+        '<div class="lane-head"><div class="lane-title">Done ▾ <span class="pill">' + escapeHtml(String(done.length)) + '</span></div></div>' +
+        '<div class="lane-body"><div class="lane-empty">' + escapeHtml(done.length ? done.length + " history item" + (done.length === 1 ? "" : "s") + " · click" : "history · click") + '</div></div>' +
+        '</button>';
     }
 
     function updateMobileTabCounts(entries) {
