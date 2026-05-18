@@ -6,7 +6,10 @@ This protocol keeps Averray's agent loop simple: Codex builds; Hermes reviews an
 
 - **Codex is the builder.** Codex works in Git branches/worktrees, edits code, opens PRs, responds to review, and fixes failures.
 - **Hermes is the reviewer/operator.** Hermes observes GitHub, reviews PR risk signals, runs read-only testbed checks, reports to PR comments/Slack/monitor, and proposes operator actions without broad merging or deploying by itself.
-- **Humans own approval.** PASS can enter the normal merge path, HUMAN REVIEW needs a human decision, and BLOCK must be fixed or explicitly overridden outside Hermes.
+- **Humans own approval.** PASS is a release signal, not a silent merge order.
+  The monitor keeps green open PRs in a lightweight **READY REVIEW** step until
+  the operator reviews the release packet locally. HUMAN REVIEW needs a human
+  decision, and BLOCK must be fixed or explicitly overridden outside Hermes.
 
 ## Transport
 
@@ -55,7 +58,9 @@ Hermes must not merge PRs, deploy, submit work, or run guarded live mutation dur
 
 ## What Codex Should Do After Hermes Reports
 
-- If **PASS**: continue normal merge queue or ask the human owner for final approval.
+- If **PASS**: the monitor asks the operator to skim the release packet, then
+  the PR can continue through the normal merge queue once branch protection is
+  green.
 - If **HUMAN REVIEW**: add or update PR notes explaining the risk, tests, rollout/rollback plan, and why the change is acceptable; ask the human owner to review.
 - If **BLOCK**: stop. Fix the PR, add missing tests or notes, wait for CI, then let Hermes re-run. Do not ask Hermes to override the block.
 - If Hermes could not inspect the PR: treat it as HUMAN REVIEW and repair the missing token/repo/config separately.
