@@ -72,7 +72,11 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("filterbar");
     expect(html).toContain("kanban-board");
     expect(html).toContain("data-done-expanded");
-    expect(html).not.toContain("done-rail");
+    // Right-side 44px vertical Done expander rail. Clicking it triggers
+    // the existing toggle-done button to expand the Done lane.
+    expect(html).toContain("done-rail");
+    expect(html).toContain('id="done-stub"');
+    expect(html).toContain("renderDoneStub");
     expect(html).toContain("detail-drawer");
     expect(html).toContain("command-console");
     expect(html).toContain("Ask Hermes");
