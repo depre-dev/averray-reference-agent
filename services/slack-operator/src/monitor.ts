@@ -1769,6 +1769,32 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       color: var(--text);
       line-height: 1.45;
     }
+    .drawer-disclosure {
+      display: grid;
+      gap: 10px;
+    }
+    .drawer-disclosure summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      list-style: none;
+      user-select: none;
+    }
+    .drawer-disclosure summary::-webkit-details-marker { display: none; }
+    .drawer-disclosure summary::before {
+      content: "›";
+      display: inline-block;
+      margin-right: 7px;
+      color: var(--accent);
+      transform: rotate(0deg);
+      transition: transform 0.15s ease;
+    }
+    .drawer-disclosure[open] summary::before { transform: rotate(90deg); }
+    .drawer-disclosure h3 { margin-bottom: 0; }
     .drawer-footer {
       position: sticky;
       bottom: 0;
@@ -4964,6 +4990,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return { button: "Opens the draft-readiness plan.", after: "Codex finishes the draft, marks ready, then CI and Hermes re-run." };
       }
       if (verdict.level === "block") {
+        if (codexTaskFailedForItem(item)) {
+          return { button: "Opens the failed Codex task output; no retry starts from the card.", after: "Inspect the runner error, then create a smaller retry task from the drawer." };
+        }
         return { button: "Opens the blocker plan; no GitHub action happens from the card.", after: "Create or approve a Codex task from the drawer, then wait for CI/Hermes." };
       }
       if (verdict.level === "needs-review") {
@@ -5267,7 +5296,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         if (state.state === "ci") return '<button class="soft-button" type="button" data-command-suggestion="github status" title="Ask for the current GitHub CI status">Check CI status</button>';
         return '<button class="soft-button" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '" title="Open Codex task/run details">View Codex run</button>';
       }
-      if (verdict.level === "block") return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '" title="Open the blocker plan; this does not mutate GitHub">Open fix plan</button>';
+      if (verdict.level === "block") {
+        if (codexTaskFailedForItem(item)) {
+          return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '" title="Open failed Codex task output and retry controls; this does not mutate GitHub">Review failed task</button>';
+        }
+        return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '" title="Open the blocker plan; this does not mutate GitHub">Open fix plan</button>';
+      }
       if (isDraftPullRequest(item)) return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '" title="Open the draft-readiness plan">Open draft plan</button>';
       if (verdict.level === "needs-review") {
         const label = isCriticalFileReview(item, item.summary || {}) ? "Open risk review" : isReleaseReviewVerdict(verdict) ? "Open release review" : "Open review checklist";
@@ -5415,17 +5449,17 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '</div>' +
         '<div class="drawer-body">' +
         (verdict.level === "block" ? '<section class="drawer-section">' + renderFailureCallout(verdict, summary) + '</section>' : "") +
-        '<section class="drawer-section"><h3>Hermes verdict</h3>' + renderHermesVerdictBox(verdict, age) + (richReviewWhy ? '<div class="review-why">' + richReviewWhy + '</div>' : "") + '</section>' +
         '<section class="drawer-section">' + renderHandoffOwnerContract(item, verdict, action) + '</section>' +
         '<section class="drawer-section">' + renderActionRecipe(item, summary, verdict, action) + '</section>' +
+        '<section class="drawer-section"><h3>Hermes verdict</h3>' + renderHermesVerdictBox(verdict, age) + (richReviewWhy ? '<div class="review-why">' + richReviewWhy + '</div>' : "") + '</section>' +
         renderCodexTaskPrompt(item, summary, verdict, action) +
         (verdict.level === "block" ? renderBlockResolutionPanel(item, summary, verdict, action) : "") +
         (verdict.level === "needs-review" && !isDraftPullRequest(item) ? '<section class="drawer-section">' + renderOperatorChecklistPanel(item, verdict, action) + '</section>' : "") +
-        '<section class="drawer-section"><h3>Agent pre-check</h3>' + renderAgentPrecheckList(item, summary, verdict, stage) + '</section>' +
-        '<section class="drawer-section"><h3>Checks</h3>' + renderCheckMatrix(summary, testSignals) + '</section>' +
-        ((touchedFiles.length || touchedAreas.length) ? '<section class="drawer-section"><h3>Touched files</h3>' + renderTouchedFiles(touchedFiles, touchedAreas) + '</section>' : "") +
-        '<section class="drawer-section"><h3>Timeline</h3>' + renderTimelineList(stage, verdict, item) + '</section>' +
-        '<section class="drawer-section"><h3>References</h3>' + renderReferencesKv(item, prUrl, workflowRunUrl, commitUrl, rollout, action) + '</section>' +
+        renderDrawerDisclosureSection("Agent pre-check", renderAgentPrecheckList(item, summary, verdict, stage)) +
+        renderDrawerDisclosureSection("Checks", renderCheckMatrix(summary, testSignals)) +
+        ((touchedFiles.length || touchedAreas.length) ? renderDrawerDisclosureSection("Touched files", renderTouchedFiles(touchedFiles, touchedAreas)) : "") +
+        renderDrawerDisclosureSection("Timeline", renderTimelineList(stage, verdict, item)) +
+        renderDrawerDisclosureSection("References", renderReferencesKv(item, prUrl, workflowRunUrl, commitUrl, rollout, action)) +
         renderPhaseHistorySection(item) +
         renderOperatorDecisionNote(item) +
         '</div>' +
@@ -5498,15 +5532,22 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function renderActionRecipe(item, summary, verdict, action) {
       const recipe = actionRecipeForItem(item, summary, verdict, action);
+      const proof = recipe.proof.length
+        ? '<details class="drawer-disclosure recipe-proof-disclosure"><summary>Proof signals</summary><span class="recipe-proof">' + recipe.proof.map((value) => '<code>' + escapeHtml(value) + '</code>').join("") + '</span></details>'
+        : escapeHtml("No proof recorded yet");
       return '<h3>Action recipe</h3><div class="action-recipe">' +
         '<dl class="recipe-grid">' +
           row("Owner", escapeHtml(recipe.owner)) +
           row("Why here", escapeHtml(recipe.why)) +
           row("Ask", escapeHtml(recipe.ask)) +
           row("Clears when", escapeHtml(recipe.clearsWhen)) +
-          row("Proof", recipe.proof.length ? '<span class="recipe-proof">' + recipe.proof.map((value) => '<code>' + escapeHtml(value) + '</code>').join("") + '</span>' : escapeHtml("No proof recorded yet")) +
+          row("Proof", proof) +
         '</dl>' +
       '</div>';
+    }
+
+    function renderDrawerDisclosureSection(title, body) {
+      return '<details class="drawer-section drawer-disclosure"><summary>' + escapeHtml(title) + '</summary>' + body + '</details>';
     }
 
     function renderCodexTaskPrompt(item, summary, verdict, action) {
@@ -5514,14 +5555,19 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (!prompt) return "";
       const state = codexWorkState(item, pipelineStage(item, verdict));
       const task = state.task || codexTaskForItem(item);
-      return '<section class="drawer-section codex-task-prompt"><h3>Codex task prompt</h3>' +
+      const status = normalize(task && task.status);
+      const heading = status === "failed" ? "Codex retry prompt" : "Codex task prompt";
+      const summaryLabel = status === "failed" ? "Show failed runner output and retry prompt" : "Show task queue and prompt";
+      return '<section class="drawer-section codex-task-prompt"><h3>' + escapeHtml(heading) + '</h3>' +
         '<p class="codex-state-note">' + escapeHtml(state.detail) + '</p>' +
-        renderCodexQueueBox(task) +
-        '<pre class="prompt-box">' + escapeHtml(prompt) + '</pre>' +
         '<div class="card-actions">' +
           renderCodexTaskControlButtons(item, task, prompt) +
           renderCodexFallbackCopyButton(task, prompt) +
         '</div>' +
+        '<details class="drawer-disclosure prompt-disclosure"><summary>' + escapeHtml(summaryLabel) + '</summary>' +
+          renderCodexQueueBox(task) +
+          '<pre class="prompt-box">' + escapeHtml(prompt) + '</pre>' +
+        '</details>' +
         '</section>';
     }
 
@@ -5592,7 +5638,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return '<button class="soft-button" data-action="primary" type="button" data-hermes-recheck="true" data-card-key="' + escapeAttr(boardItemKey(item)) + '">Ask Hermes to re-check</button>';
       }
       if (task && normalize(task.status) === "failed") {
-        return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="propose" data-card-key="' + escapeAttr(boardItemKey(item)) + '">Propose retry</button>';
+        return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="propose" data-card-key="' + escapeAttr(boardItemKey(item)) + '" title="Creates a smaller proposed retry task; it still needs approval">Create smaller retry task</button>';
       }
       return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="propose" data-card-key="' + escapeAttr(boardItemKey(item)) + '">Propose Codex task</button>';
     }
