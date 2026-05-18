@@ -178,6 +178,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("renderAutoCollaborationThread()");
     expect(html).toContain("renderCollaborationThread({ kind");
     expect(html).toContain("renderSelectedCollaborationThread(item)");
+    expect(html).toContain("latestCodexTasks\n        .filter((task) => !isTerminalCodexTask(task))");
     expect(html).toContain("collaborationMessagesForTask(task)");
     expect(html).toContain("data-command-suggestion=\"handoff monitor details\"");
     expect(html).toContain("data-command-suggestion=\"merge steward details\"");
