@@ -141,9 +141,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       --line: #29473d;
       --line-soft: rgba(84, 121, 108, 0.28);
       --text: #f3ead7;
+      --cream: #f3ead7;
       --muted: #8d9b91;
       --faint: #5f7169;
       --accent: #d89a2b;
+      --amber: #d9ad42;
       --ok: #63c789;
       --bad: #ee6260;
       --warn: #d9ad42;
@@ -1117,7 +1119,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       display: grid;
       grid-template-rows: auto auto minmax(0, 1fr);
       gap: 12px;
-      padding: 12px 14px 88px;
+      padding: 12px 14px 266px;
       overflow: hidden;
     }
     .live-lane {
@@ -1619,23 +1621,38 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       bottom: 10px;
       z-index: 18;
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(240px, auto);
-      gap: 10px;
-      align-items: end;
+      grid-template-columns: minmax(0, 1fr) clamp(320px, 25vw, 430px);
+      gap: 14px;
+      align-items: stretch;
+      min-height: 218px;
+      max-height: min(32vh, 310px);
       border: 1px solid var(--line);
-      border-radius: 12px;
-      background: rgba(7, 15, 12, 0.97);
-      box-shadow: 0 18px 60px rgba(0, 0, 0, 0.34);
-      padding: 10px;
-      backdrop-filter: blur(14px);
+      border-radius: 14px;
+      background:
+        linear-gradient(180deg, rgba(13, 29, 23, 0.98), rgba(5, 13, 11, 0.985)),
+        rgba(7, 15, 12, 0.98);
+      box-shadow: 0 22px 70px rgba(0, 0, 0, 0.42);
+      padding: 12px;
+      backdrop-filter: blur(16px);
     }
     .command-shell.has-selection .command-console {
       right: calc(clamp(420px, 31vw, 640px) + 18px);
     }
     .console-main {
       display: grid;
-      gap: 8px;
+      min-height: 0;
       min-width: 0;
+      border: 1px solid rgba(84, 121, 108, 0.18);
+      border-radius: 10px;
+      background: rgba(2, 9, 8, 0.34);
+      overflow: hidden;
+    }
+    .console-compose {
+      min-width: 0;
+      display: grid;
+      align-content: start;
+      gap: 10px;
+      padding-left: 2px;
     }
     .console-context {
       display: flex;
@@ -1659,8 +1676,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       padding: 0 12px;
       outline: none;
     }
+    .console-input:focus {
+      border-color: color-mix(in srgb, var(--cyan) 55%, var(--line));
+      box-shadow: 0 0 0 3px rgba(86, 204, 228, 0.08);
+    }
     .console-output {
-      max-height: 96px;
+      min-height: 0;
+      max-height: none;
       overflow: auto;
       color: var(--muted);
       font-size: 0.82rem;
@@ -1668,35 +1690,43 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       white-space: pre-wrap;
     }
     .console-output[data-mode="thread"] {
-      max-height: 220px;
       white-space: normal;
     }
     .collab-thread {
       display: grid;
-      gap: 8px;
+      align-content: start;
+      gap: 10px;
+      min-height: 100%;
+      padding: 10px;
       color: var(--text);
     }
     .collab-head {
+      position: sticky;
+      top: 0;
+      z-index: 1;
       display: flex;
       align-items: baseline;
       justify-content: space-between;
       gap: 10px;
       color: var(--muted);
       font-size: 0.74rem;
+      padding: 0 0 2px;
+      background: linear-gradient(180deg, rgba(5, 13, 11, 0.98), rgba(5, 13, 11, 0.72));
     }
     .collab-head strong {
       color: var(--cream);
-      font-size: 0.86rem;
+      font-size: 0.9rem;
     }
     .collab-message {
       display: grid;
-      grid-template-columns: 24px minmax(0, 1fr);
-      gap: 8px;
+      grid-template-columns: 28px minmax(0, 1fr);
+      gap: 10px;
       align-items: flex-start;
+      max-width: min(900px, 100%);
     }
     .collab-avatar {
-      width: 22px;
-      height: 22px;
+      width: 24px;
+      height: 24px;
       border: 1px solid var(--speaker-accent, var(--line));
       border-radius: 999px;
       display: grid;
@@ -1711,15 +1741,19 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .collab-message[data-speaker="hermes"] { --speaker-accent: var(--cyan); }
     .collab-message[data-speaker="operator"] { --speaker-accent: var(--warn); }
     .collab-message[data-speaker="system"] { --speaker-accent: var(--muted); }
+    .collab-message[data-speaker="codex"] {
+      margin-left: 26px;
+      max-width: min(874px, calc(100% - 26px));
+    }
     .collab-bubble {
       display: grid;
-      gap: 3px;
+      gap: 4px;
       min-width: 0;
-      padding: 7px 9px;
+      padding: 9px 11px;
       border: 1px solid rgba(184, 211, 196, 0.10);
       border-left: 3px solid var(--speaker-accent, var(--line));
       border-radius: 8px;
-      background: rgba(8, 18, 14, 0.72);
+      background: rgba(8, 18, 14, 0.82);
     }
     .collab-byline {
       display: flex;
@@ -1741,16 +1775,27 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
     .collab-text {
       color: var(--text);
-      font-size: 0.78rem;
-      line-height: 1.38;
+      font-size: 0.82rem;
+      line-height: 1.45;
       overflow-wrap: anywhere;
     }
+    .quick-asks {
+      display: grid;
+      gap: 7px;
+      min-width: 0;
+    }
+    .quick-asks-label {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.62rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
     .suggestions {
-      display: flex;
-      align-items: center;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 6px;
-      flex-wrap: wrap;
-      justify-content: flex-end;
+      align-items: stretch;
     }
     .suggestion {
       min-height: 30px;
@@ -1758,6 +1803,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       border-radius: 999px;
       font-size: 0.78rem;
       background: var(--surface-soft);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .hidden { display: none !important; }
     @media (max-width: 760px) {
@@ -1781,10 +1829,17 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       .cmdbar,
       .filterbar,
       .command-console { grid-template-columns: 1fr; }
+      .board-shell { padding-bottom: 340px; }
+      .command-console {
+        max-height: min(42vh, 380px);
+        overflow: auto;
+      }
+      .console-main { min-height: 160px; }
       .cmd-counters,
       .filter-left,
       .filter-right,
       .suggestions { justify-content: flex-start; overflow-x: auto; }
+      .suggestions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .agent-activity {
         grid-template-columns: 1fr;
       }
@@ -3222,23 +3277,28 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     </section>
     <aside id="detail-drawer" class="drawer" data-open="false" aria-label="Selected handoff detail"></aside>
     <form id="command-console" class="command-console" autocomplete="off">
-      <div class="console-main">
+      <section class="console-main" aria-label="Hermes and Codex collaboration transcript">
+        <div id="command-output" class="console-output" data-mode="thread" data-auto="true">Waiting for Hermes, Codex, and operator messages...</div>
+      </section>
+      <aside class="console-compose" aria-label="Ask Hermes">
         <div class="console-context"><strong>Ask Hermes</strong><span id="console-context">global monitor context</span></div>
         <div class="console-row">
           <input id="command-input" class="console-input" name="text" placeholder="Ask for status, merge steward, why this PR is here..." autocomplete="off">
           <button id="command-submit" type="submit">Send</button>
         </div>
-        <div id="command-output" class="console-output" data-mode="thread" data-auto="true">Waiting for Hermes, Codex, and operator messages...</div>
-      </div>
-      <div class="suggestions" aria-label="Suggested Hermes commands">
-        <button class="suggestion" type="button" data-command-suggestion="what is happening now">now</button>
-        <button class="suggestion" type="button" data-command-suggestion="what are agents doing">agents</button>
-        <button class="suggestion" type="button" data-command-suggestion="what is Codex doing">codex</button>
-        <button class="suggestion" type="button" data-command-suggestion="what is Hermes doing">hermes</button>
-        <button class="suggestion" type="button" data-command-suggestion="what needs my action">my action</button>
-        <button class="suggestion" type="button" data-command-suggestion="handoff monitor details">handoff monitor</button>
-        <button class="suggestion" type="button" data-command-suggestion="merge steward details">merge steward</button>
-      </div>
+        <div class="quick-asks">
+          <span class="quick-asks-label">Quick asks</span>
+          <div class="suggestions" aria-label="Suggested Hermes commands">
+            <button class="suggestion" type="button" data-command-suggestion="what is happening now">now</button>
+            <button class="suggestion" type="button" data-command-suggestion="what are agents doing">agents</button>
+            <button class="suggestion" type="button" data-command-suggestion="what is Codex doing">codex</button>
+            <button class="suggestion" type="button" data-command-suggestion="what is Hermes doing">hermes</button>
+            <button class="suggestion" type="button" data-command-suggestion="what needs my action">my action</button>
+            <button class="suggestion" type="button" data-command-suggestion="handoff monitor details">handoff monitor</button>
+            <button class="suggestion" type="button" data-command-suggestion="merge steward details">merge steward</button>
+          </div>
+        </div>
+      </aside>
     </form>
     <button id="fab-ask" type="button" aria-label="Ask Hermes" title="Ask Hermes">💬</button>
     <div id="ask-sheet-scrim" data-open="false"></div>

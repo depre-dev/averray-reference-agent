@@ -81,6 +81,8 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain('data-mode="thread"');
     expect(html).toContain("collab-thread");
     expect(html).toContain("collab-message");
+    expect(html).toContain("console-compose");
+    expect(html).toContain("Quick asks");
     expect(html).not.toContain("ci-grid");
     expect(html).toContain('data-auto="true"');
     expect(html).not.toContain('id="active" class="live-lane"');
