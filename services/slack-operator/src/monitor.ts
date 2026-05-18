@@ -1696,9 +1696,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .collab-thread {
       display: grid;
       align-content: start;
-      gap: 10px;
+      gap: 14px;
       min-height: 100%;
-      padding: 10px;
+      padding: 12px 14px 14px;
       color: var(--text);
     }
     .collab-head {
@@ -1711,118 +1711,162 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       gap: 10px;
       color: var(--muted);
       font-size: 0.74rem;
-      padding: 0 0 2px;
+      padding: 2px 0 6px;
+      margin-bottom: 2px;
+      border-bottom: 1px solid rgba(184, 211, 196, 0.08);
       background: linear-gradient(180deg, rgba(5, 13, 11, 0.98), rgba(5, 13, 11, 0.72));
     }
     .collab-head strong {
       color: var(--cream);
-      font-size: 0.9rem;
+      font-size: 0.92rem;
+      letter-spacing: 0.01em;
     }
+    /* ── Chat bubble redesign ──────────────────────────────────────────────
+       Asymmetric layout: Operator posts align right ("me"), agent posts
+       align left ("them"). System/idle messages render as centered notes.
+       Each agent gets a strong color identity through a filled avatar and
+       a tinted bubble background so Codex/Hermes/Operator are readable at
+       a glance instead of all looking like the same gray line. */
     .collab-message {
       display: grid;
-      grid-template-columns: 28px minmax(0, 1fr);
-      gap: 10px;
+      grid-template-columns: 36px minmax(0, 1fr);
+      gap: 12px;
       align-items: flex-start;
-      max-width: min(900px, 100%);
-    }
-    .collab-avatar {
-      width: 24px;
-      height: 24px;
-      border: 1px solid var(--speaker-accent, var(--line));
-      border-radius: 999px;
-      display: grid;
-      place-items: center;
-      color: var(--speaker-accent, var(--muted));
-      background: color-mix(in srgb, var(--speaker-accent, var(--muted)) 12%, transparent);
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 0.68rem;
-      font-weight: 900;
+      max-width: min(720px, 96%);
+      padding: 2px 0;
     }
     .collab-message[data-speaker="codex"] { --speaker-accent: var(--violet); }
     .collab-message[data-speaker="hermes"] { --speaker-accent: var(--cyan); }
     .collab-message[data-speaker="operator"] { --speaker-accent: var(--warn); }
     .collab-message[data-speaker="system"] { --speaker-accent: var(--muted); }
-    .collab-message[data-speaker="codex"] {
-      margin-left: 26px;
-      max-width: min(874px, calc(100% - 26px));
+    /* Operator messages flip to right-aligned with avatar on the right —
+       same conversational metaphor as iMessage / Slack DMs. */
+    .collab-message[data-speaker="operator"] {
+      grid-template-columns: minmax(0, 1fr) 36px;
+      justify-self: end;
+      margin-left: auto;
+    }
+    .collab-message[data-speaker="operator"] .collab-avatar { grid-column: 2; grid-row: 1; }
+    .collab-message[data-speaker="operator"] .collab-bubble-stack { grid-column: 1; grid-row: 1; text-align: right; }
+    .collab-message[data-speaker="operator"] .collab-byline { flex-direction: row-reverse; }
+    /* System messages render as a centered, low-key note — not a chat row
+       pretending to be from an agent. */
+    .collab-message[data-speaker="system"] {
+      grid-template-columns: minmax(0, 1fr);
+      justify-self: center;
+      text-align: center;
+      max-width: min(520px, 92%);
+    }
+    .collab-message[data-speaker="system"] .collab-avatar { display: none; }
+    .collab-message[data-speaker="system"] .collab-bubble {
+      background: rgba(122, 134, 130, 0.06);
+      border: 1px dashed rgba(184, 211, 196, 0.18);
+      border-left: 1px dashed rgba(184, 211, 196, 0.18);
+      padding: 6px 14px;
+    }
+    .collab-message[data-speaker="system"] .collab-byline { justify-content: center; }
+    .collab-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      color: #050d0b;
+      background: var(--speaker-accent, var(--muted));
+      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35), inset 0 -1px 0 rgba(0, 0, 0, 0.18);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.78rem;
+      font-weight: 900;
+      letter-spacing: 0.01em;
+    }
+    .collab-bubble-stack {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
     }
     .collab-bubble {
       display: grid;
       gap: 4px;
       min-width: 0;
-      padding: 9px 11px;
-      border: 1px solid rgba(184, 211, 196, 0.10);
-      border-left: 3px solid var(--speaker-accent, var(--line));
-      border-radius: 8px;
-      background: rgba(8, 18, 14, 0.82);
+      padding: 10px 14px;
+      border: 1px solid color-mix(in srgb, var(--speaker-accent, var(--line)) 22%, var(--line-soft));
+      border-radius: 14px;
+      background: color-mix(in srgb, var(--speaker-accent, var(--muted)) 8%, rgba(8, 18, 14, 0.86));
+      color: var(--text);
     }
+    /* The bubble corner closest to the avatar gets squared off — gives
+       the bubble a clear "tail" toward its speaker, like a chat app. */
+    .collab-message[data-speaker="codex"] .collab-bubble,
+    .collab-message[data-speaker="hermes"] .collab-bubble { border-top-left-radius: 4px; }
+    .collab-message[data-speaker="operator"] .collab-bubble { border-top-right-radius: 4px; }
     .collab-byline {
       display: flex;
       align-items: baseline;
-      justify-content: space-between;
       gap: 8px;
       min-width: 0;
+      flex-wrap: wrap;
     }
     .collab-speaker {
-      color: var(--cream);
-      font-size: 0.76rem;
+      color: var(--speaker-accent, var(--cream));
+      font-size: 0.78rem;
       font-weight: 800;
+      letter-spacing: 0.01em;
     }
     .collab-meta {
       color: var(--muted);
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 0.64rem;
+      font-size: 0.66rem;
       white-space: nowrap;
     }
     .collab-text {
       color: var(--text);
-      font-size: 0.82rem;
-      line-height: 1.45;
+      font-size: 0.92rem;
+      line-height: 1.5;
       overflow-wrap: anywhere;
     }
-    /* Real posted messages get a stronger left rail and a subtle tint so
-       operators can tell them apart from synthesized status lines. */
+    /* Real posted messages: stronger tint + a hairline ring so they read
+       as "actual chat" vs. synthesized status. */
     .collab-message[data-posted="true"] .collab-bubble {
-      border-left-width: 4px;
-      background: color-mix(in srgb, var(--speaker-accent, var(--muted)) 6%, rgba(8, 18, 14, 0.86));
+      background: color-mix(in srgb, var(--speaker-accent, var(--muted)) 18%, rgba(8, 18, 14, 0.92));
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--speaker-accent, var(--muted)) 28%, transparent);
     }
     .collab-message[data-kind="request_help"] .collab-bubble {
-      border-left-color: var(--warn);
-      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 22%, transparent);
+      background: color-mix(in srgb, var(--warn) 14%, rgba(8, 18, 14, 0.92));
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 36%, transparent);
     }
     .collab-tag {
       display: inline-flex;
       align-items: center;
       gap: 4px;
-      padding: 1px 7px;
+      padding: 1px 8px;
       border-radius: 999px;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 0.6rem;
-      letter-spacing: 0.06em;
+      font-size: 0.58rem;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
       border: 1px solid var(--line-soft);
       color: var(--muted);
-      background: rgba(8, 18, 14, 0.6);
+      background: rgba(2, 9, 8, 0.5);
     }
     .collab-tag[data-tag="proposal"] {
-      border-color: color-mix(in srgb, var(--cyan) 32%, var(--line-soft));
-      color: color-mix(in srgb, var(--cyan) 88%, var(--text));
+      border-color: color-mix(in srgb, var(--cyan) 42%, var(--line-soft));
+      color: color-mix(in srgb, var(--cyan) 92%, var(--text));
     }
     .collab-tag[data-tag="help"] {
-      border-color: color-mix(in srgb, var(--warn) 40%, var(--line-soft));
-      color: color-mix(in srgb, var(--warn) 92%, var(--text));
+      border-color: color-mix(in srgb, var(--warn) 52%, var(--line-soft));
+      color: color-mix(in srgb, var(--warn) 96%, var(--text));
     }
     .collab-tag[data-tag="status"] {
-      border-color: color-mix(in srgb, var(--violet) 32%, var(--line-soft));
-      color: color-mix(in srgb, var(--violet) 88%, var(--text));
+      border-color: color-mix(in srgb, var(--violet) 42%, var(--line-soft));
+      color: color-mix(in srgb, var(--violet) 92%, var(--text));
     }
     .collab-tag[data-tag="posted"] {
-      border-color: color-mix(in srgb, var(--speaker-accent, var(--muted)) 50%, var(--line-soft));
-      color: color-mix(in srgb, var(--speaker-accent, var(--muted)) 80%, var(--text));
+      border-color: color-mix(in srgb, var(--speaker-accent, var(--muted)) 60%, var(--line-soft));
+      color: color-mix(in srgb, var(--speaker-accent, var(--muted)) 92%, var(--text));
     }
     .collab-addressed {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 0.7rem;
+      font-size: 0.72rem;
       color: var(--cyan);
       letter-spacing: 0.02em;
     }
@@ -3654,6 +3698,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         if (composeMeta) composeMeta.style.display = "flex";
         if (quickAsks) quickAsks.style.display = "none";
         if (input) input.placeholder = "Post to Codex, Hermes, or the operator...";
+        // Switching into post mode is an explicit re-engagement with the
+        // conversation; re-engage the thread render too so the operator
+        // isn't still staring at a stale Ask-Hermes response.
+        forceThreadMode();
+        renderAutoCollaborationThread();
       } else {
         if (composeMeta) composeMeta.style.display = "none";
         if (quickAsks) quickAsks.style.display = "grid";
@@ -3667,6 +3716,17 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (!el) return;
       el.textContent = text || "";
       el.setAttribute("data-tone", tone || "");
+    }
+
+    // Reset both console outputs to auto-thread mode so the next render
+    // pass paints the collaboration thread (and not the residue of a
+    // prior "Ask Hermes" response).
+    function forceThreadMode() {
+      [document.getElementById("command-output"), document.getElementById("ask-output")].forEach((output) => {
+        if (!output) return;
+        output.dataset.auto = "true";
+        output.dataset.mode = "thread";
+      });
     }
 
     async function submitCollaborationPost(text) {
@@ -3698,6 +3758,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           const merged = (latestCollabMessages || []).slice();
           merged.push(result.message);
           latestCollabMessages = merged;
+          // If the operator had used Ask Hermes earlier in the session the
+          // outputs are pinned to data-auto="false" and the thread render
+          // would silently no-op. Posting is an explicit re-engagement with
+          // the conversation — force the outputs back into thread mode so
+          // the new message shows up.
+          forceThreadMode();
           renderAutoCollaborationThread();
         }
         setComposeStatus("Posted.", "ok");
@@ -4602,6 +4668,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (v.indexOf("operator") >= 0 || v.indexOf("human") >= 0) return "operator";
       if (v.indexOf("deploy") >= 0) return "deploy";
       if (v.indexOf("done") >= 0) return "done";
+      if (v.indexOf("system") >= 0) return "system";
       return "other";
     }
 
@@ -5813,7 +5880,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function renderCollaborationShell(title, messages) {
       const rows = (messages && messages.length ? messages : [
-        collabMessage("Hermes", "No active handoff right now. When Codex or you are needed, I will ask here.", "idle", Date.now()),
+        collabMessage("System", "No active handoff right now. Codex and Hermes will speak up here when there's work to coordinate.", "idle", Date.now()),
       ])
         .sort((a, b) => a.ts - b.ts)
         .slice(-24);
@@ -5830,10 +5897,20 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     //   - posted: real messages recorded via POST /monitor/collaboration —
     //     marked with data-posted so the user can tell what is real chat
     //     vs what is Hermes' inferred narrative.
+    // Render one row in the collaboration thread. Two flavors:
+    //   - synthesized: built client-side from board state (verdicts,
+    //     codex tasks). Subtler bubble, no "posted" tag.
+    //   - posted: real messages recorded via POST /monitor/collaboration.
+    //     Stronger tint + a "posted" tag so the reader can tell what is
+    //     real chat vs. inferred narrative.
+    // System/idle messages render as centered notes — see the CSS for
+    // [data-speaker="system"] — so they don't masquerade as agent chat.
     function renderCollabMessage(message) {
       const speaker = message.speaker || "Hermes";
       const slug = actorSlug(speaker);
-      const initial = speaker === "Operator" ? "Me" : speaker.charAt(0).toUpperCase();
+      const initial = speaker === "Operator" ? "P"
+        : speaker === "System" ? "·"
+          : speaker.charAt(0).toUpperCase();
       const posted = message.posted ? "true" : "false";
       const kindAttr = message.kind ? message.kind : "";
       const addressedAttr = message.addressedTo && message.addressedTo !== "everyone" ? message.addressedTo : "";
@@ -5843,14 +5920,20 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           : message.kind === "status" ? '<span class="collab-tag" data-tag="status">status</span>'
             : "";
       const addressedBadge = addressedAttr
-        ? '<span class="collab-addressed">@' + escapeHtml(addressedAttr) + '</span>'
+        ? '<span class="collab-addressed">→ @' + escapeHtml(addressedAttr) + '</span>'
         : "";
       const postedBadge = message.posted ? '<span class="collab-tag" data-tag="posted">posted</span>' : "";
       return '<article class="collab-message" data-speaker="' + escapeAttr(slug) + '" data-posted="' + posted + '" data-kind="' + escapeAttr(kindAttr) + '" data-addressed="' + escapeAttr(addressedAttr) + '">' +
-        '<span class="collab-avatar">' + escapeHtml(initial) + '</span>' +
-        '<div class="collab-bubble">' +
-          '<div class="collab-byline"><span class="collab-speaker">' + escapeHtml(speaker) + '</span>' + addressedBadge + kindBadge + postedBadge + '<span class="collab-meta">' + escapeHtml(meta) + '</span></div>' +
-          '<div class="collab-text">' + escapeHtml(message.text || "") + '</div>' +
+        '<span class="collab-avatar" aria-hidden="true">' + escapeHtml(initial) + '</span>' +
+        '<div class="collab-bubble-stack">' +
+          '<div class="collab-byline">' +
+            '<span class="collab-speaker">' + escapeHtml(speaker) + '</span>' +
+            addressedBadge + kindBadge + postedBadge +
+          '</div>' +
+          '<div class="collab-bubble">' +
+            '<div class="collab-text">' + escapeHtml(message.text || "") + '</div>' +
+          '</div>' +
+          (meta ? '<div class="collab-meta">' + escapeHtml(meta) + '</div>' : "") +
         '</div>' +
       '</article>';
     }
@@ -5944,13 +6027,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         messages.push(collabMessage("Hermes", collaborationAskForItem(item, verdict, action, lane), collaborationMetaForItem(item, verdict), itemUpdatedMs(item)));
       });
       if (!messages.length && kind === "codex") {
-        messages.push(collabMessage("Hermes", "Codex has no active PR handoff. I will assign one here when a PR needs code work, draft finishing, or CI repair.", "idle", Date.now()));
+        messages.push(collabMessage("System", "Codex has no active PR handoff right now.", "idle", Date.now()));
       } else if (!messages.length && kind === "hermes") {
-        messages.push(collabMessage("Hermes", "I have no active PR re-check or deploy verification waiting.", "idle", Date.now()));
+        messages.push(collabMessage("System", "Hermes has nothing to re-check or verify right now.", "idle", Date.now()));
       } else if (!messages.length && kind === "operator") {
-        messages.push(collabMessage("Hermes", "Nothing needs your decision right now. I will ask directly here when project intent, rollout risk, or sign-off is needed.", "idle", Date.now()));
+        messages.push(collabMessage("System", "Nothing needs your decision right now.", "idle", Date.now()));
       } else if (!messages.length) {
-        messages.push(collabMessage("Hermes", "No active handoff right now. Codex and Hermes are quiet; I will ask here when work appears.", "idle", Date.now()));
+        messages.push(collabMessage("System", "Codex and Hermes are quiet. Post a message to start the conversation.", "idle", Date.now()));
       }
       return messages;
     }
