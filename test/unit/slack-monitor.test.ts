@@ -278,6 +278,13 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain('data-tag="proposal"');
     expect(html).toContain('data-tag="help"');
     expect(html).toContain('collab-addressed');
+
+    // Chat-bubble redesign (PR: collab-redesign): asymmetric layout,
+    // bubble-stack wrapper, system-note empty state, force-thread reset.
+    expect(html).toContain('collab-bubble-stack');
+    expect(html).toContain('forceThreadMode');
+    expect(html).toContain('data-speaker="operator"');
+    expect(html).toContain('data-speaker="system"');
   });
 
   it("serves a PWA manifest with the canonical name + scope", () => {
