@@ -189,6 +189,12 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("buildBoardBriefingMessages(kind)");
     expect(html).toContain("Here is the live shape of the board");
     expect(html).toContain("nothing here needs your decision right this second");
+    expect(html).toContain("captureBoardNarrations(latestPipelineItems)");
+    expect(html).toContain("boardNarrationForChange(item, verdict, action, lane, previous)");
+    expect(html).toContain("Update on \" + title");
+    expect(html).toContain("First useful move:");
+    expect(html).toContain("latestBoardNarrations");
+    expect(html).toContain("board changed · ");
     expect(html).toContain("Start by opening the failed runner output");
     expect(html).toContain("Finish the draft work or mark it ready for review");
     expect(html).toContain("forceThreadMode();\n          renderAutoCollaborationThread();\n          setComposeStatus(\"Codex task approved");
