@@ -107,13 +107,14 @@ export function renderMonitorManifest(options: { name?: string; shortName?: stri
   );
 }
 
-export function renderMonitorHtml(options: { title?: string; eventsPath?: string; streamPath?: string; commandPath?: string; codexTasksPath?: string; recheckPath?: string; manifestPath?: string } = {}): string {
+export function renderMonitorHtml(options: { title?: string; eventsPath?: string; streamPath?: string; commandPath?: string; codexTasksPath?: string; recheckPath?: string; collaborationPath?: string; manifestPath?: string } = {}): string {
   const title = escapeHtml(options.title ?? "Hermes Handoff Monitor");
   const eventsPath = JSON.stringify(options.eventsPath ?? "/monitor/events");
   const streamPath = JSON.stringify(options.streamPath ?? "/monitor/stream");
   const commandPath = JSON.stringify(options.commandPath ?? "/monitor/command");
   const codexTasksPath = JSON.stringify(options.codexTasksPath ?? "/monitor/codex-tasks");
   const recheckPath = JSON.stringify(options.recheckPath ?? "/monitor/recheck");
+  const collaborationPath = JSON.stringify(options.collaborationPath ?? "/monitor/collaboration");
   const manifestPath = options.manifestPath ?? "/monitor/manifest.webmanifest";
   const brandIcon = svgDataUrl(MONITOR_BRAND_SVG);
   return `<!doctype html>
@@ -1779,6 +1780,111 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       line-height: 1.45;
       overflow-wrap: anywhere;
     }
+    /* Real posted messages get a stronger left rail and a subtle tint so
+       operators can tell them apart from synthesized status lines. */
+    .collab-message[data-posted="true"] .collab-bubble {
+      border-left-width: 4px;
+      background: color-mix(in srgb, var(--speaker-accent, var(--muted)) 6%, rgba(8, 18, 14, 0.86));
+    }
+    .collab-message[data-kind="request_help"] .collab-bubble {
+      border-left-color: var(--warn);
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 22%, transparent);
+    }
+    .collab-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 1px 7px;
+      border-radius: 999px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.6rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      border: 1px solid var(--line-soft);
+      color: var(--muted);
+      background: rgba(8, 18, 14, 0.6);
+    }
+    .collab-tag[data-tag="proposal"] {
+      border-color: color-mix(in srgb, var(--cyan) 32%, var(--line-soft));
+      color: color-mix(in srgb, var(--cyan) 88%, var(--text));
+    }
+    .collab-tag[data-tag="help"] {
+      border-color: color-mix(in srgb, var(--warn) 40%, var(--line-soft));
+      color: color-mix(in srgb, var(--warn) 92%, var(--text));
+    }
+    .collab-tag[data-tag="status"] {
+      border-color: color-mix(in srgb, var(--violet) 32%, var(--line-soft));
+      color: color-mix(in srgb, var(--violet) 88%, var(--text));
+    }
+    .collab-tag[data-tag="posted"] {
+      border-color: color-mix(in srgb, var(--speaker-accent, var(--muted)) 50%, var(--line-soft));
+      color: color-mix(in srgb, var(--speaker-accent, var(--muted)) 80%, var(--text));
+    }
+    .collab-addressed {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.7rem;
+      color: var(--cyan);
+      letter-spacing: 0.02em;
+    }
+    /* Compose form mode toggle + post-mode controls (target / intent). */
+    .compose-mode {
+      display: inline-flex;
+      gap: 4px;
+      padding: 2px;
+      border: 1px solid var(--line-soft);
+      border-radius: 999px;
+      background: var(--surface-soft);
+    }
+    .compose-mode button {
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      color: var(--muted);
+      background: transparent;
+      border: none;
+    }
+    .compose-mode button[aria-pressed="true"] {
+      background: color-mix(in srgb, var(--cyan) 18%, transparent);
+      color: var(--cream);
+    }
+    .compose-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      min-width: 0;
+    }
+    .compose-meta label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.66rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .compose-meta select {
+      min-height: 28px;
+      padding: 0 8px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--surface-soft);
+      color: var(--text);
+      font-size: 0.78rem;
+    }
+    .compose-mode-hint {
+      color: var(--muted);
+      font-size: 0.7rem;
+      line-height: 1.35;
+    }
+    .console-status {
+      color: var(--muted);
+      font-size: 0.72rem;
+      min-height: 1em;
+    }
+    .console-status[data-tone="error"] { color: var(--warn); }
+    .console-status[data-tone="ok"] { color: color-mix(in srgb, var(--cyan) 88%, var(--text)); }
     .quick-asks {
       display: grid;
       gap: 7px;
@@ -3280,13 +3386,38 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       <section class="console-main" aria-label="Hermes and Codex collaboration transcript">
         <div id="command-output" class="console-output" data-mode="thread" data-auto="true">Waiting for Hermes, Codex, and operator messages...</div>
       </section>
-      <aside class="console-compose" aria-label="Ask Hermes">
-        <div class="console-context"><strong>Ask Hermes</strong><span id="console-context">global monitor context</span></div>
+      <aside class="console-compose" aria-label="Collaborate with Codex and Hermes">
+        <div class="console-context">
+          <span class="compose-mode" role="tablist" aria-label="Compose mode">
+            <button type="button" data-compose-mode="post" aria-pressed="true">Post message</button>
+            <button type="button" data-compose-mode="ask" aria-pressed="false">Ask Hermes</button>
+          </span>
+          <span id="console-context">global monitor context</span>
+        </div>
+        <div class="compose-meta" id="compose-meta">
+          <label>To
+            <select id="compose-target" name="addressedTo">
+              <option value="everyone">Everyone</option>
+              <option value="codex">Codex</option>
+              <option value="hermes">Hermes</option>
+              <option value="operator">Operator</option>
+            </select>
+          </label>
+          <label>Intent
+            <select id="compose-intent" name="kind">
+              <option value="chat">Chat</option>
+              <option value="proposal">Proposal</option>
+              <option value="request_help">Needs help</option>
+              <option value="status">Status</option>
+            </select>
+          </label>
+        </div>
         <div class="console-row">
-          <input id="command-input" class="console-input" name="text" placeholder="Ask for status, merge steward, why this PR is here..." autocomplete="off">
+          <input id="command-input" class="console-input" name="text" placeholder="Post to Codex, Hermes, or the operator..." autocomplete="off">
           <button id="command-submit" type="submit">Send</button>
         </div>
-        <div class="quick-asks">
+        <p id="compose-status" class="console-status" aria-live="polite"></p>
+        <div class="quick-asks" id="quick-asks">
           <span class="quick-asks-label">Quick asks</span>
           <div class="suggestions" aria-label="Suggested Hermes commands">
             <button class="suggestion" type="button" data-command-suggestion="what is happening now">now</button>
@@ -3327,12 +3458,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     const commandPath = ${commandPath};
     const codexTasksPath = ${codexTasksPath};
     const recheckPath = ${recheckPath};
+    const collaborationPath = ${collaborationPath};
     const token = new URLSearchParams(location.search).get("token");
     const withToken = buildMonitorUrl(eventsPath);
     const streamUrl = buildMonitorUrl(streamPath);
     const commandUrl = buildCommandUrl(commandPath);
     const codexTasksUrl = buildCommandUrl(codexTasksPath);
     const recheckUrl = buildCommandUrl(recheckPath);
+    const collaborationUrl = buildCommandUrl(collaborationPath);
     const decisionStorageKey = "averray-monitor-operator-decisions:v1";
     let pipelineFilter = "all";
     let repoFilter = "all";
@@ -3347,6 +3480,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     let latestCodexTasks = [];
     let latestCodexRunner = null;
     let latestPayload = null;
+    let latestCollabMessages = [];
+    // Compose state for the new collaboration "post" mode. The compose form
+    // can run in two modes: "post" (POST /monitor/collaboration → real
+    // multi-agent message) and "ask" (POST /monitor/command → Hermes
+    // read-only insight). Operators flip the toggle; agents always post.
+    let composeMode = "post";
+    let composeTarget = "everyone";
+    let composeIntent = "chat";
     let monitorDecisions = loadMonitorDecisions();
     let pollTimer = null;
     let streamSource = null;
@@ -3478,8 +3619,95 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const input = document.getElementById("command-input");
       const text = String(input.value || "").trim();
       if (!text) return;
-      void submitMonitorCommand(text);
+      if (composeMode === "post") {
+        void submitCollaborationPost(text);
+      } else {
+        void submitMonitorCommand(text);
+      }
     });
+
+    // Mode toggle: "post" sends a real message to /monitor/collaboration,
+    // "ask" routes back to the existing read-only Hermes insight command.
+    document.querySelectorAll("[data-compose-mode]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const mode = String(btn.getAttribute("data-compose-mode") || "post");
+        setComposeMode(mode);
+      });
+    });
+    document.getElementById("compose-target")?.addEventListener("change", (event) => {
+      composeTarget = String(event.target.value || "everyone");
+    });
+    document.getElementById("compose-intent")?.addEventListener("change", (event) => {
+      composeIntent = String(event.target.value || "chat");
+    });
+    setComposeMode(composeMode);
+
+    function setComposeMode(mode) {
+      composeMode = mode === "ask" ? "ask" : "post";
+      document.querySelectorAll("[data-compose-mode]").forEach((btn) => {
+        btn.setAttribute("aria-pressed", btn.getAttribute("data-compose-mode") === composeMode ? "true" : "false");
+      });
+      const composeMeta = document.getElementById("compose-meta");
+      const quickAsks = document.getElementById("quick-asks");
+      const input = document.getElementById("command-input");
+      if (composeMode === "post") {
+        if (composeMeta) composeMeta.style.display = "flex";
+        if (quickAsks) quickAsks.style.display = "none";
+        if (input) input.placeholder = "Post to Codex, Hermes, or the operator...";
+      } else {
+        if (composeMeta) composeMeta.style.display = "none";
+        if (quickAsks) quickAsks.style.display = "grid";
+        if (input) input.placeholder = "Ask for status, merge steward, why this PR is here...";
+      }
+      setComposeStatus("", "");
+    }
+
+    function setComposeStatus(text, tone) {
+      const el = document.getElementById("compose-status");
+      if (!el) return;
+      el.textContent = text || "";
+      el.setAttribute("data-tone", tone || "");
+    }
+
+    async function submitCollaborationPost(text) {
+      const submit = document.getElementById("command-submit");
+      const input = document.getElementById("command-input");
+      const item = selectedItem();
+      const payload = {
+        author: "operator",
+        kind: composeIntent,
+        text,
+        addressedTo: composeTarget,
+      };
+      const pr = item && (item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId));
+      if (item && pr) payload.relatedPr = { repo: String(item.repo || "averray-agent/agent"), number: Number(pr) };
+      if (item && item.correlationId) payload.relatedCorrelationId = String(item.correlationId);
+      if (submit) submit.disabled = true;
+      setComposeStatus("Posting...", "");
+      try {
+        const response = await fetch(collaborationUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.message || result.error || "HTTP " + response.status);
+        if (result && result.message) {
+          // Optimistic merge so the new message shows up immediately even
+          // before the next SSE snapshot lands (snapshot tick is ~5s).
+          const merged = (latestCollabMessages || []).slice();
+          merged.push(result.message);
+          latestCollabMessages = merged;
+          renderAutoCollaborationThread();
+        }
+        setComposeStatus("Posted.", "ok");
+        if (input) input.value = "";
+      } catch (error) {
+        setComposeStatus("Post failed: " + String(error.message || error), "error");
+      } finally {
+        if (submit) submit.disabled = false;
+      }
+    }
 
     // ── Mobile-only wiring (no-ops on desktop because the elements are hidden) ──
 
@@ -3774,6 +4002,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const counts = payload.counts || {};
       const recent = payload.recent || [];
       setText("generated", payload.generatedAt ? new Date(payload.generatedAt).toLocaleTimeString() : "unknown");
+      latestCollabMessages = normalizeCollabMessages(payload.collaborationMessages);
       latestCodexTasks = normalizeCodexTasks(payload.codexTasks);
       latestCodexRunner = normalizeCodexRunner(payload.codexTasks && payload.codexTasks.runner);
       latestPipelineItems = groupPrPipelineItems(collectPipelineItems(payload));
@@ -5587,21 +5816,40 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         collabMessage("Hermes", "No active handoff right now. When Codex or you are needed, I will ask here.", "idle", Date.now()),
       ])
         .sort((a, b) => a.ts - b.ts)
-        .slice(-14);
+        .slice(-24);
       return '<div class="collab-thread">' +
         '<div class="collab-head"><strong>' + escapeHtml(title) + '</strong><span>' + escapeHtml(currentStreamLabel()) + '</span></div>' +
         rows.map(renderCollabMessage).join("") +
         '</div>';
     }
 
+    // Render one row in the collaboration thread. Two flavors of message
+    // can land here:
+    //   - synthesized: built client-side from board state (verdicts, codex
+    //     tasks) — these are inferences, not posts.
+    //   - posted: real messages recorded via POST /monitor/collaboration —
+    //     marked with data-posted so the user can tell what is real chat
+    //     vs what is Hermes' inferred narrative.
     function renderCollabMessage(message) {
       const speaker = message.speaker || "Hermes";
       const slug = actorSlug(speaker);
       const initial = speaker === "Operator" ? "Me" : speaker.charAt(0).toUpperCase();
-      return '<article class="collab-message" data-speaker="' + escapeAttr(slug) + '">' +
+      const posted = message.posted ? "true" : "false";
+      const kindAttr = message.kind ? message.kind : "";
+      const addressedAttr = message.addressedTo && message.addressedTo !== "everyone" ? message.addressedTo : "";
+      const meta = message.meta || "";
+      const kindBadge = message.kind === "proposal" ? '<span class="collab-tag" data-tag="proposal">proposal</span>'
+        : message.kind === "request_help" ? '<span class="collab-tag" data-tag="help">needs help</span>'
+          : message.kind === "status" ? '<span class="collab-tag" data-tag="status">status</span>'
+            : "";
+      const addressedBadge = addressedAttr
+        ? '<span class="collab-addressed">@' + escapeHtml(addressedAttr) + '</span>'
+        : "";
+      const postedBadge = message.posted ? '<span class="collab-tag" data-tag="posted">posted</span>' : "";
+      return '<article class="collab-message" data-speaker="' + escapeAttr(slug) + '" data-posted="' + posted + '" data-kind="' + escapeAttr(kindAttr) + '" data-addressed="' + escapeAttr(addressedAttr) + '">' +
         '<span class="collab-avatar">' + escapeHtml(initial) + '</span>' +
         '<div class="collab-bubble">' +
-          '<div class="collab-byline"><span class="collab-speaker">' + escapeHtml(speaker) + '</span><span class="collab-meta">' + escapeHtml(message.meta || "") + '</span></div>' +
+          '<div class="collab-byline"><span class="collab-speaker">' + escapeHtml(speaker) + '</span>' + addressedBadge + kindBadge + postedBadge + '<span class="collab-meta">' + escapeHtml(meta) + '</span></div>' +
           '<div class="collab-text">' + escapeHtml(message.text || "") + '</div>' +
         '</div>' +
       '</article>';
@@ -5611,8 +5859,74 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return { speaker, text, meta: meta || "", ts: Number.isFinite(ts) ? ts : Date.now() };
     }
 
+    // Normalize the wire payload from POST /monitor/collaboration and the
+    // monitor snapshot's collaborationMessages field into the same shape
+    // the in-DOM render expects. Anything malformed is dropped silently
+    // rather than crashing the thread render.
+    function normalizeCollabMessages(value) {
+      if (!Array.isArray(value)) return [];
+      const out = [];
+      for (const entry of value) {
+        if (!entry || typeof entry !== "object") continue;
+        const author = typeof entry.author === "string" ? entry.author : "";
+        const text = typeof entry.text === "string" ? entry.text : "";
+        const ts = Number(entry.ts);
+        if (!author || !text || !Number.isFinite(ts)) continue;
+        out.push({
+          id: typeof entry.id === "string" ? entry.id : "",
+          author,
+          text,
+          ts,
+          kind: typeof entry.kind === "string" ? entry.kind : "chat",
+          addressedTo: typeof entry.addressedTo === "string" ? entry.addressedTo : "everyone",
+          relatedPr: entry.relatedPr && typeof entry.relatedPr === "object" ? entry.relatedPr : null,
+          relatedCorrelationId: typeof entry.relatedCorrelationId === "string" ? entry.relatedCorrelationId : "",
+        });
+      }
+      return out;
+    }
+
+    // Convert a normalized posted message into the shape buildCollaborationMessages
+    // produces — same speaker/text/meta/ts contract, plus the posted/kind/addressedTo
+    // attributes so renderCollabMessage can decorate it correctly.
+    function postedToCollabRow(message) {
+      const speaker = message.author === "codex" ? "Codex"
+        : message.author === "hermes" ? "Hermes"
+          : message.author === "operator" ? "Operator"
+            : "System";
+      const metaParts = [];
+      if (message.relatedPr && message.relatedPr.repo && message.relatedPr.number) {
+        metaParts.push(message.relatedPr.repo + "#" + message.relatedPr.number);
+      }
+      metaParts.push(shortTime(new Date(message.ts).toISOString()));
+      return {
+        speaker,
+        text: message.text,
+        meta: metaParts.join(" · "),
+        ts: message.ts,
+        posted: true,
+        kind: message.kind || "chat",
+        addressedTo: message.addressedTo || "everyone",
+      };
+    }
+
+    function postedMessageMatchesKind(message, kind) {
+      if (!kind || kind === "all") return true;
+      if (kind === "codex") return message.author === "codex" || message.addressedTo === "codex";
+      if (kind === "hermes") return message.author === "hermes" || message.addressedTo === "hermes";
+      if (kind === "operator") return message.author === "operator" || message.addressedTo === "operator";
+      if (kind === "blocked") return message.kind === "request_help" || message.kind === "proposal";
+      return true;
+    }
+
     function buildCollaborationMessages(kind) {
       const messages = [];
+      // Real posted messages take precedence visually — they are the
+      // human/agent voice on the channel and shouldn't be drowned by
+      // synthesized status lines.
+      latestCollabMessages
+        .filter((m) => postedMessageMatchesKind(m, kind))
+        .forEach((m) => messages.push(postedToCollabRow(m)));
       latestCodexTasks
         .filter((task) => !isTerminalCodexTask(task))
         .sort((a, b) => taskUpdatedMs(b) - taskUpdatedMs(a))
