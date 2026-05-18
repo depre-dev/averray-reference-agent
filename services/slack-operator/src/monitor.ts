@@ -5614,7 +5614,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function buildCollaborationMessages(kind) {
       const messages = [];
       latestCodexTasks
-        .slice()
+        .filter((task) => !isTerminalCodexTask(task))
         .sort((a, b) => taskUpdatedMs(b) - taskUpdatedMs(a))
         .slice(0, 8)
         .forEach((task) => messages.push(...collaborationMessagesForTask(task)));
