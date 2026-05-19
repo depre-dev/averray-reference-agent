@@ -4136,9 +4136,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (reviewCard) {
         selectedKey = String(reviewCard.getAttribute("data-review-card") || "");
         autoFocusPending = false;
+        const item = itemByBoardKey(selectedKey);
         renderBoard(latestPipelineItems);
         renderDrawer(selectedItem());
         renderCommandContext();
+        if (item && codexTaskFailedForItem(item)) void postFailedTaskReviewReceipt(item);
         return;
       }
       const copyButton = event.target && event.target.closest ? event.target.closest("[data-copy-text]") : null;
@@ -4153,11 +4155,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const suggestion = event.target && event.target.closest ? event.target.closest("[data-command-suggestion]") : null;
       if (suggestion) {
         const value = String(suggestion.getAttribute("data-command-suggestion") || "");
+        const cardKey = String(suggestion.closest("[data-select-card]")?.getAttribute("data-select-card") || selectedKey || "");
+        const item = itemByBoardKey(cardKey) || selectedItem();
         const targetInput = suggestion.closest("#ask-sheet") ? document.getElementById("ask-input") : document.getElementById("command-input");
         if (targetInput) {
           targetInput.value = contextualCommand(value);
           targetInput.focus();
         }
+        if (!suggestion.classList.contains("suggestion")) void postCommandSuggestionReceipt(value, item);
         return;
       }
       const codexTaskButton = event.target && event.target.closest ? event.target.closest("[data-codex-task-action]") : null;
@@ -4188,9 +4193,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const key = String(button.getAttribute("data-decision-key") || "");
       const decision = String(button.getAttribute("data-monitor-decision") || "");
       if (!key) return;
+      const item = itemByDecisionKey(key) || selectedItem();
+      const verdict = item ? releaseVerdict(item) : null;
       if (decision === "approve") setMonitorDecision(key, { status: "approved", at: new Date().toISOString() });
       if (decision === "reset") setMonitorDecision(key, null);
       if (latestPayload) render(latestPayload);
+      void postMonitorDecisionReceipt(item, decision, verdict);
     });
 
     function closeSelectedDrawer() {
@@ -5815,6 +5823,18 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function itemByBoardKey(key) {
       if (!key) return null;
       return latestPipelineItems.find((item) => boardItemKey(item) === key) || null;
+    }
+
+    function itemByDecisionKey(key) {
+      if (!key) return null;
+      for (const item of latestPipelineItems) {
+        if (decisionKeyForItem(item) === key) return item;
+        if (Array.isArray(item.groupItems)) {
+          const nested = item.groupItems.find((entry) => decisionKeyForItem(entry) === key);
+          if (nested) return item;
+        }
+      }
+      return null;
     }
 
     function matchingPipelineItem(item) {
@@ -7762,7 +7782,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           const prompt = codexPromptForItem(item, summary, verdict, next);
           const pr = Number(item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId));
           if (!prompt || !Number.isFinite(pr) || pr < 1) throw new Error("This card does not have enough PR metadata for a Codex task.");
-          await postCodexTask({
+          const proposed = await postCodexTask({
             action: "propose",
             repo: String(item.repo || "averray-agent/agent"),
             pullRequestNumber: pr,
@@ -7772,6 +7792,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
             requester: "monitor",
             prompt,
           });
+          await postCodexTaskActionReceipt(item, "propose", proposed && proposed.task);
           preserveSelectedActionContext(key, item);
           forceThreadMode();
           renderAutoCollaborationThread();
@@ -7781,6 +7802,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         if (action === "approve") {
           if (!taskId) throw new Error("Missing Codex task id.");
           await postCodexTask({ action: "approve", id: taskId });
+          await postCodexTaskActionReceipt(item, "approve", latestCodexTasks.find((task) => task.id === taskId));
           preserveSelectedActionContext(key, item);
           forceThreadMode();
           renderAutoCollaborationThread();
@@ -7790,6 +7812,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         if (action === "cancel") {
           if (!taskId) throw new Error("Missing Codex task id.");
           await postCodexTask({ action: "cancel", id: taskId });
+          await postCodexTaskActionReceipt(item, "cancel", latestCodexTasks.find((task) => task.id === taskId));
           preserveSelectedActionContext(key, item);
           forceThreadMode();
           renderAutoCollaborationThread();
@@ -7857,6 +7880,147 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       }, relation));
     }
 
+    async function postActionReceipt(item, payload) {
+      if (!payload || !payload.text) return null;
+      const message = await safePostCollaborationMessage(Object.assign({
+        author: "operator",
+        kind: "status",
+        addressedTo: "everyone",
+      }, collaborationRelationForItem(item), payload));
+      if (!message) return null;
+      if (payload.addressedTo === "hermes" || payload.addressedTo === "everyone") {
+        hermesTypingSinceMs = Date.now();
+        const ts = Number(message.ts);
+        if (Number.isFinite(ts)) pollCollaborationSince(ts);
+      }
+      forceThreadMode();
+      renderAutoCollaborationThread();
+      return message;
+    }
+
+    async function postFailedTaskReviewReceipt(item) {
+      await postActionReceipt(item, {
+        author: "operator",
+        kind: "status",
+        addressedTo: "codex",
+        text: "Codex, I opened the failed task output for " + receiptPrLabel(item) + ". I am looking for the runner error first; the next move is either a smaller retry task or a clear no-code-change explanation.",
+      });
+    }
+
+    async function postMonitorDecisionReceipt(item, decision, verdict) {
+      if (!item || !decision) return;
+      if (decision === "reset") {
+        await postActionReceipt(item, {
+          author: "operator",
+          kind: "status",
+          addressedTo: "hermes",
+          text: "Hermes, I reopened my local review for " + receiptPrLabel(item) + ". Keep it out of the release path until I mark it reviewed again or send it back to Codex.",
+        });
+        return;
+      }
+      if (decision !== "approve") return;
+      const label = operatorApprovalButtonLabel(item, verdict || releaseVerdict(item));
+      if (isReleaseReviewVerdict(verdict)) {
+        await postActionReceipt(item, {
+          author: "operator",
+          kind: "approval",
+          addressedTo: "hermes",
+          text: "Hermes, I marked " + receiptPrLabel(item) + " reviewed for release. This did not merge anything; move it toward the release queue only while GitHub branch protection stays green.",
+        });
+        return;
+      }
+      await postActionReceipt(item, {
+        author: "operator",
+        kind: "approval",
+        addressedTo: "hermes",
+        text: "Hermes, I clicked " + label + " for " + receiptPrLabel(item) + ". I am accepting the project-level review gate in the monitor; if CI or the evidence changes, bring it back before it moves forward.",
+      });
+    }
+
+    async function postCommandSuggestionReceipt(command, item) {
+      const receipt = commandSuggestionReceipt(command, item);
+      if (!receipt) return;
+      await postActionReceipt(item, receipt);
+    }
+
+    async function postCodexTaskActionReceipt(item, action, task) {
+      const label = receiptPrLabel(item);
+      if (action === "propose") {
+        await postActionReceipt(item, {
+          author: "operator",
+          kind: "proposal",
+          addressedTo: "codex",
+          text: "Codex, I created a proposed task for " + label + ". It is not a runner start yet; hold until the task is approved, then keep the follow-up narrow and report back through the task.",
+        });
+        return;
+      }
+      if (action === "approve") {
+        await postActionReceipt(item, {
+          author: "operator",
+          kind: "approval",
+          addressedTo: "codex",
+          text: "Codex, I approved the task for " + label + ". You are allowed to pick it up now; please keep the change bounded, push only if there is a concrete fix, and let Hermes re-check after CI.",
+        });
+        return;
+      }
+      if (action === "cancel") {
+        const title = task && task.title ? " (" + task.title + ")" : "";
+        await postActionReceipt(item, {
+          author: "operator",
+          kind: "status",
+          addressedTo: "hermes",
+          text: "Hermes, I cancelled the Codex task for " + label + title + ". Keep the card parked until the next move is clearer or a smaller task is proposed.",
+        });
+      }
+    }
+
+    function commandSuggestionReceipt(command, item) {
+      const normalized = normalizeConsoleCommandText(command);
+      const label = receiptPrLabel(item);
+      if (normalized === "merge steward details") {
+        return {
+          author: "operator",
+          kind: "request_context",
+          addressedTo: "hermes",
+          text: "Hermes, I am asking for merge-steward context on " + label + ". This button does not merge the PR; tell me what branch protection, ownership, and deploy follow-up need before this leaves the release queue.",
+        };
+      }
+      if (normalized === "github status") {
+        return {
+          author: "operator",
+          kind: "request_context",
+          addressedTo: "hermes",
+          text: "Hermes, I am checking CI status for " + label + ". Please focus on the current head commit, failed checks, active checks, and whether Codex or GitHub is the next blocker.",
+        };
+      }
+      if (normalized === "handoff monitor details") {
+        return {
+          author: "operator",
+          kind: "request_context",
+          addressedTo: "hermes",
+          text: "Hermes, I opened handoff context for " + label + ". Explain why this card is here, who owns the next move, and what clears it.",
+        };
+      }
+      if (normalized === "ops health") {
+        return {
+          author: "operator",
+          kind: "request_context",
+          addressedTo: "hermes",
+          text: "Hermes, I am asking for ops health context from this card. Keep it read-only: summarize service health, recent errors, and whether production needs attention.",
+        };
+      }
+      return null;
+    }
+
+    function receiptPrLabel(item) {
+      if (!item) return "the selected card";
+      const pr = item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId);
+      const repo = String(item.repo || "averray-agent/agent");
+      if (pr) return repo + "#" + pr;
+      if (item.sha) return repo + "@" + compactSha(item.sha);
+      return item.correlationId ? "handoff " + String(item.correlationId) : "this card";
+    }
+
     function collaborationRelationForItem(item) {
       const relation = {};
       const pr = item && (item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId));
@@ -7918,11 +8082,23 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         const repo = String(item.repo || "averray-agent/agent");
         if (!repo || !Number.isFinite(pr) || pr < 1) throw new Error("This card does not have enough PR metadata for Hermes re-check.");
         if (output) output.textContent = "Asking Hermes to re-check " + repo + "#" + pr + "…";
+        await postActionReceipt(item, {
+          author: "operator",
+          kind: "request_recheck",
+          addressedTo: "hermes",
+          text: "Hermes, please re-check " + repo + "#" + pr + " now. Codex has handed something back or the board needs fresh evidence; rerun the read-only review and tell us what changed.",
+        });
         const result = await postHermesRecheck({
           repo,
           pullRequestNumber: pr,
           correlationId: item.correlationId,
           reason: "monitor requested Hermes re-check after Codex handoff",
+        });
+        await postActionReceipt(item, {
+          author: "hermes",
+          kind: "status",
+          addressedTo: "operator",
+          text: result.text || ("I finished the re-check request for " + repo + "#" + pr + ". The board is refreshing with the latest verdict."),
         });
         forceThreadMode();
         renderAutoCollaborationThread();
