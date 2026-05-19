@@ -209,6 +209,10 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("board changed · ");
     expect(html).toContain("Start by opening the failed runner output");
     expect(html).toContain("Finish the draft work or mark it ready for review");
+    expect(html).toContain("Waiting / Drafts");
+    expect(html).toContain("isExternalDraftPullRequest(item)");
+    expect(html).toContain("no Codex task starts from the card");
+    expect(html).toContain("PR author");
     expect(html).toContain("forceThreadMode();\n          renderAutoCollaborationThread();\n          setComposeStatus(\"Codex task approved");
     expect(html).toContain("latestCodexTasks\n        .filter((task) => !isTerminalCodexTask(task))");
     expect(html).toContain("collaborationMessagesForTask(task)");
@@ -260,9 +264,9 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("After");
     expect(html).toContain("it does not start work yet");
     expect(html).toContain("this does not merge");
-    expect(html).toContain("Codex owns finishing it or marking it ready");
+    expect(html).toContain("the PR author or owning agent must mark it ready");
     expect(html).toContain("finish the draft or mark it ready for review");
-    expect(html).toContain("Open draft plan");
+    expect(html).toContain("Inspect draft");
     expect(html).toContain("open a follow-up fix PR or rollback proposal");
     expect(html).toContain("hosted app/config health failure");
     expect(html).toContain("hosted health is ok and the post-deploy suite returns PASS");
