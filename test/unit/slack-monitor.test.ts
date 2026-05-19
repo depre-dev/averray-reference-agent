@@ -193,6 +193,10 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("shouldBoardNarrationOpenThread()");
     expect(html).toContain("preserveSelectedActionContext(key, item)");
     expect(html).toContain("selected ? renderSelectedCollaborationThread(selected) : renderCollaborationThread({ kind: \"all\" })");
+    expect(html).toContain("nextStepNarrationForItem(item, verdict, action, lane)");
+    expect(html).toContain("Right move now:");
+    expect(html).toContain("The card button just");
+    expect(html).toContain("I will move it once");
     expect(html).toContain("boardNarrationForChange(item, verdict, action, lane, previous)");
     expect(html).toContain("Update on \" + title");
     expect(html).toContain("First useful move:");

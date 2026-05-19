@@ -6755,6 +6755,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const messages = [
         collabMessage("Hermes", pipelineTitle(item) + " is here because " + shortenVerdictWhy(verdict.why || "the handoff needs a release decision."), verdict.label, itemUpdatedMs(item)),
         collabMessage("Hermes", collaborationAskForItem(item, verdict, action, lane), pipelineStage(item, verdict).label, itemUpdatedMs(item) + 1),
+        collabMessage("Hermes", nextStepNarrationForItem(item, verdict, action, lane), "what happens next", itemUpdatedMs(item) + 2, inferAddressedTo(action, lane)),
       ];
       if (task) messages.push(...collaborationMessagesForTask(task));
       return renderCollaborationShell(cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item), messages);
@@ -7332,54 +7333,67 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function boardNarrationForChange(item, verdict, action, lane, previous) {
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
       const movedFrom = previous ? " from " + boardLaneLabel(previous.laneKey) : "";
+      const nextStep = nextStepNarrationForItem(item, verdict, action, lane);
       if (codexTaskFailedForItem(item)) {
-        return "Update on " + title + ": I moved it" + movedFrom + " back to Needs Attention because the Codex runner failed. Codex owns the next move: inspect the runner output first, then either fix the setup problem or propose a smaller retry task that Hermes can re-check cleanly.";
+        return "Update on " + title + ": I moved it" + movedFrom + " back to Needs Attention because the Codex runner failed. " + nextStep;
       }
       if (isDraftPullRequest(item)) {
-        return "Update on " + title + ": it is still a draft, so I am keeping it out of the release path. Codex should finish the work, mark the PR ready, and then I will watch CI plus Hermes before it moves forward.";
+        return "Update on " + title + ": it is still a draft, so I am keeping it out of the release path. " + nextStep;
       }
       if (action.owner === "Operator" || lane.key === "operator") {
-        return "Update on " + title + ": this moved" + movedFrom + " into Operator Review. Automation has gone as far as it safely can; Pascal, the useful decision now is whether the intent, architecture, rollout risk, and test evidence are good enough to release.";
+        return "Update on " + title + ": this moved" + movedFrom + " into Operator Review. Automation has gone as far as it safely can. " + nextStep;
       }
       if (action.owner === "Codex" || lane.key === "codex" || lane.key === "attention") {
-        return "Update on " + title + ": the board now needs Codex. " + capitalizeFirst(action.text) + "; after Codex pushes or creates the retry task, I will pull it back through Hermes instead of letting the card sit silently.";
+        return "Update on " + title + ": the board now needs Codex. " + nextStep;
       }
       if (action.owner === "Hermes" || lane.key === "hermes") {
-        return "Update on " + title + ": I am taking it back through Hermes checks now. Nothing needs Pascal yet; I will post the verdict here as soon as the evidence stops moving.";
+        return "Update on " + title + ": I am taking it back through Hermes checks now. " + nextStep;
       }
       if (action.owner === "Merge queue" || lane.key === "queue") {
-        return "Update on " + title + ": the checks look merge-ready, so I moved it into the release queue. Keep it there until branch protection is green and someone owns the merge/deploy step.";
+        return "Update on " + title + ": the checks look merge-ready, so I moved it into the release queue. " + nextStep;
       }
       if (lane.key === "deploy") {
-        return "Update on " + title + ": it is in deploy verification now. I am watching hosted health and post-deploy checks before calling the release safe.";
+        return "Update on " + title + ": it is in deploy verification now. " + nextStep;
       }
-      return "Update on " + title + ": the board changed" + movedFrom + " to " + boardLaneLabel(lane.key) + ". Next owner is " + action.owner + ": " + action.text + ".";
+      return "Update on " + title + ": the board changed" + movedFrom + " to " + boardLaneLabel(lane.key) + ". " + nextStep;
+    }
+
+    function nextStepNarrationForItem(item, verdict, action, lane) {
+      const recipe = actionRecipeForItem(item, item.summary || {}, verdict, action);
+      const codexState = lane && lane.key === "codex" ? codexWorkState(item, pipelineStage(item, verdict)) : null;
+      const flow = cardFlowCopy(item, verdict, action, lane || {}, codexState);
+      return "Here is the actual handoff: " + recipe.owner + " owns it because " + sentenceFragment(recipe.why) + "." +
+        " Right move now: " + recipe.ask +
+        " The card button just " + sentenceFragment(flow.button) + "." +
+        " After that, " + sentenceFragment(flow.after) + "." +
+        " I will move it once " + sentenceFragment(recipe.clearsWhen) + ".";
     }
 
     function boardBriefingLineForItem(item, verdict, action, lane) {
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
+      const nextStep = nextStepNarrationForItem(item, verdict, action, lane);
       if (codexTaskFailedForItem(item)) {
-        return "Codex, " + title + " is back in Needs Attention because the last runner task failed. Start by opening the failed runner output: if it is auth or clone setup, fix the runner path; if it is a real PR/check failure, come back with the smallest retry task or smallest branch fix.";
+        return "Codex, " + title + " is back in Needs Attention because the last runner task failed. Start by opening the failed runner output: if it is auth or clone setup, fix the runner path; if it is a real PR/check failure, come back with the smallest retry task or smallest branch fix. " + nextStep;
       }
       if (isDraftPullRequest(item)) {
-        return "Codex, " + title + " is still a draft, so I am holding it out of the release path. Finish the draft work or mark it ready for review, then let CI and Hermes take another pass.";
+        return "Codex, " + title + " is still a draft, so I am holding it out of the release path. Finish the draft work or mark it ready for review, then let CI and Hermes take another pass. " + nextStep;
       }
       if (lane.key === "attention" && action.owner === "Codex") {
-        return "Codex, " + title + " is blocked at the gate. " + capitalizeFirst(action.text) + "; I will keep it visible here until the blocking signal disappears and Hermes records a clean pass.";
+        return "Codex, " + title + " is blocked at the gate. " + capitalizeFirst(action.text) + "; I will keep it visible here until the blocking signal disappears and Hermes records a clean pass. " + nextStep;
       }
       if (action.owner === "Operator" || lane.key === "operator") {
-        return "Pascal, " + title + " needs your judgement rather than more automation. Check the evidence and only approve if the intent, architecture, rollout risk, and test coverage match what you actually want shipped.";
+        return "Pascal, " + title + " needs your judgement rather than more automation. Check the evidence and only approve if the intent, architecture, rollout risk, and test coverage match what you actually want shipped. " + nextStep;
       }
       if (action.owner === "Hermes" || lane.key === "hermes") {
-        return "Hermes is holding " + title + " while the read-only checks settle. I will bring the verdict back here, and if it turns red I will say exactly who needs to move next.";
+        return "Hermes is holding " + title + " while the read-only checks settle. I will bring the verdict back here, and if it turns red I will say exactly who needs to move next. " + nextStep;
       }
       if (action.owner === "Merge queue" || lane.key === "queue") {
-        return title + " looks merge-ready, so I am keeping it in the release queue rather than pretending it is done. Merge only after branch protection is green and merge/deploy ownership is clear.";
+        return title + " looks merge-ready, so I am keeping it in the release queue rather than pretending it is done. Merge only after branch protection is green and merge/deploy ownership is clear. " + nextStep;
       }
       if (lane.key === "deploy") {
-        return title + " is in post-deploy verification. I am watching hosted health and deploy checks before calling it safe.";
+        return title + " is in post-deploy verification. I am watching hosted health and deploy checks before calling it safe. " + nextStep;
       }
-      return action.owner + ": " + title + " needs the next step — " + action.text + ".";
+      return action.owner + ": " + title + " needs the next step — " + action.text + ". " + nextStep;
     }
 
     function boardBriefingMeta(item, verdict, lane) {
@@ -7390,6 +7404,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function capitalizeFirst(text) {
       const value = String(text || "");
       return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+    }
+
+    function sentenceFragment(text) {
+      const value = String(text || "").trim().replace(/[.]+$/g, "");
+      return value ? value.charAt(0).toLowerCase() + value.slice(1) : "";
     }
 
     // Synthesized agent voice — these lines are derived from board
