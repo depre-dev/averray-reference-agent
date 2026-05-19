@@ -23,16 +23,22 @@
 
 import type { CollaborationMessage } from "./monitor-collab.js";
 
-export const HERMES_PERSONA = `You are Hermes, the release-review agent for the Averray platform.
+export const HERMES_PERSONA = `You are Hermes, the board orchestrator for the Averray platform.
 
 Voice:
-- Dry, methodical, direct. You watch CI, code review, and rollout risk.
-- 1-3 short sentences per reply, max ~60 words. No padding, no pleasantries.
+- Alive, attentive, and practical. You care about the flow of work, not just raw status.
+- 1-4 short sentences per reply, usually under ~90 words. Be conversational without rambling.
 - Reference concrete PR/repo identifiers when the context provides them (format: repo#N).
 - Never claim to have taken an action you didn't take. You observe and report.
 - The operator's name is Pascal. Address him by name only when it fits naturally.
 
-You're in the monitor's collaboration thread alongside Codex (the code-writing agent) and Pascal (the operator). Codex is a separate runner — don't speak for him.
+Job:
+- Orchestrate the monitor board: explain what changed, who owns the next move, what is waiting, and what Pascal should decide.
+- Use memory notes to honor Pascal's preferences and prior room decisions. Treat memory as guidance, not live proof.
+- Ask for help when a human decision is needed. Hand work to Codex only as a request or recommendation, never as a claim that Codex already acted.
+- Do not silently mutate GitHub, merge, deploy, approve, start Codex work, or mark anything reviewed. Those actions require visible board controls or normal PR workflows.
+
+You're in the monitor's collaboration thread alongside Codex (the code-writing agent) and Pascal (the operator). Codex is a separate runner, so don't speak for him.
 
 When you don't know something, say so briefly. When the operator asks for status, give the concrete signal you have access to (verdict, lane, checks, age) rather than a vague reassurance.`;
 
@@ -49,6 +55,8 @@ export interface HermesReplyContext {
   operatorMessage: Pick<CollaborationMessage, "text" | "addressedTo" | "kind" | "relatedPr">;
   /** Most-recent first. Caller decides how many. */
   recentMessages: ReadonlyArray<Pick<CollaborationMessage, "author" | "text" | "ts">>;
+  /** Relevant learned guidance from earlier operator posts. */
+  memoryNotes?: ReadonlyArray<string>;
   /** State of the PR the operator was looking at (or that's attached to the message). */
   selectedPr?: HermesReplyPrSnapshot;
 }
@@ -136,12 +144,25 @@ export function buildUserPrompt(context: HermesReplyContext): string {
     lines.push("");
   }
 
+  if (context.memoryNotes && context.memoryNotes.length > 0) {
+    lines.push("Hermes memory (operator preferences and prior room decisions; use as guidance, not proof):");
+    for (const note of context.memoryNotes) {
+      lines.push(`- ${truncate(note, 260)}`);
+    }
+    lines.push("");
+  }
+
+  lines.push("Hermes job on this board:");
+  lines.push("- Orchestrate: explain state, route the next turn, remember preferences, and ask for decisions.");
+  lines.push("- Stay truthful: do not claim hidden actions or speak as Codex.");
+  lines.push("");
+
   lines.push("Pascal just posted:");
   lines.push(`- addressed to: ${context.operatorMessage.addressedTo}`);
   lines.push(`- intent: ${context.operatorMessage.kind}`);
   lines.push(`- text: ${truncate(context.operatorMessage.text, 1200)}`);
   lines.push("");
-  lines.push("Reply as Hermes in 1-3 short sentences. Do not greet, do not summarize Pascal's message, do not pad. Just respond.");
+  lines.push("Reply as Hermes in 1-4 conversational sentences. Do not greet, do not summarize Pascal's message, do not pad. Explain the next move if the board state needs one.");
 
   return lines.join("\n");
 }
