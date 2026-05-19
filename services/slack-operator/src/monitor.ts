@@ -5787,14 +5787,18 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function codexTaskForItem(item) {
-      if (!item) return null;
+      const candidates = codexTasksForItem(item);
+      return candidates.find((task) => !isTerminalCodexTask(task)) || candidates[0] || null;
+    }
+
+    function codexTasksForItem(item) {
+      if (!item) return [];
       const repo = String(item.repo || "");
       const pr = Number(item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId));
-      if (!repo || !Number.isFinite(pr) || pr < 1) return null;
-      const candidates = latestCodexTasks
+      if (!repo || !Number.isFinite(pr) || pr < 1) return [];
+      return latestCodexTasks
         .filter((task) => String(task.repo || "") === repo && Number(task.pullRequestNumber) === pr)
         .sort((a, b) => Date.parse(String(b.updatedAt || b.createdAt || "")) - Date.parse(String(a.updatedAt || a.createdAt || "")));
-      return candidates.find((task) => !isTerminalCodexTask(task)) || candidates[0] || null;
     }
 
     function isTerminalCodexTask(task) {
@@ -6750,14 +6754,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       }
       const verdict = releaseVerdict(item);
       const action = nextPipelineAction(item, verdict);
-      const task = codexTaskForItem(item);
       const lane = boardLaneForItem(item, verdict);
       const messages = [
+        ...selectedConversationMemoryMessages(item),
         collabMessage("Hermes", pipelineTitle(item) + " is here because " + shortenVerdictWhy(verdict.why || "the handoff needs a release decision."), verdict.label, itemUpdatedMs(item)),
         collabMessage("Hermes", collaborationAskForItem(item, verdict, action, lane), pipelineStage(item, verdict).label, itemUpdatedMs(item) + 1),
         collabMessage("Hermes", nextStepNarrationForItem(item, verdict, action, lane), "what happens next", itemUpdatedMs(item) + 2, inferAddressedTo(action, lane)),
       ];
-      if (task) messages.push(...collaborationMessagesForTask(task));
       return renderCollaborationShell(cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item), messages);
     }
 
@@ -7111,6 +7114,68 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return true;
     }
 
+    function selectedConversationMemoryMessages(item) {
+      if (!item) return [];
+      const posted = latestCollabMessages
+        .filter((message) => collabMessageMatchesItem(message, item))
+        .map(postedToCollabRow);
+      const narrations = latestBoardNarrations
+        .filter((message) => boardNarrationMatchesItem(message, item));
+      const tasks = codexTasksForItem(item)
+        .sort((a, b) => taskUpdatedMs(a) - taskUpdatedMs(b))
+        .slice(-5)
+        .flatMap((task) => collaborationMessagesForTask(task));
+      const memory = posted.concat(narrations, tasks)
+        .sort((a, b) => a.ts - b.ts)
+        .slice(-14);
+      if (memory.length) return memory;
+      return [
+        collabMessage("Hermes", "This PR room is quiet so far. I will keep the next Codex, Hermes, and operator turns here once they attach to this PR.", "conversation memory", itemUpdatedMs(item) - 2),
+      ];
+    }
+
+    function collabMessageMatchesItem(message, item) {
+      if (!message || !item) return false;
+      const identity = itemConversationIdentity(item);
+      const related = message.relatedPr || {};
+      if (related.repo && related.number && String(related.repo) === identity.repo && Number(related.number) === identity.pr) return true;
+      if (message.relatedCorrelationId && identity.correlations.has(String(message.relatedCorrelationId))) return true;
+      return false;
+    }
+
+    function boardNarrationMatchesItem(message, item) {
+      if (!message || !item) return false;
+      const identity = itemConversationIdentity(item);
+      if (message.relatedBoardKey && String(message.relatedBoardKey) === identity.boardKey) return true;
+      const related = message.relatedPr || {};
+      if (related.repo && related.number && String(related.repo) === identity.repo && Number(related.number) === identity.pr) return true;
+      if (message.relatedCorrelationId && identity.correlations.has(String(message.relatedCorrelationId))) return true;
+      return false;
+    }
+
+    function itemConversationIdentity(item) {
+      const repo = String(item && item.repo || "averray-agent/agent");
+      const pr = Number(item && (item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId)));
+      return {
+        repo,
+        pr,
+        boardKey: item ? boardItemKey(item) : "",
+        correlations: itemCorrelationIds(item),
+      };
+    }
+
+    function itemCorrelationIds(item) {
+      const ids = new Set();
+      if (!item) return ids;
+      if (item.correlationId) ids.add(String(item.correlationId));
+      if (Array.isArray(item.groupItems)) {
+        item.groupItems.forEach((entry) => {
+          if (entry && entry.correlationId) ids.add(String(entry.correlationId));
+        });
+      }
+      return ids;
+    }
+
     function buildCollaborationMessages(kind) {
       const messages = [];
       // Real posted messages take precedence visually — they are the
@@ -7273,7 +7338,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         const previous = previousBoardNarrationState.get(key);
         if (previous && previous.signature === signature) return;
         if (!previous && !shouldNarrateNewBoardItem(item, verdict, action, lane)) return;
-        addBoardNarration(boardNarrationForChange(item, verdict, action, lane, previous), boardNarrationMeta(item, verdict, lane), itemUpdatedMs(item) || Date.now(), inferAddressedTo(action, lane));
+        addBoardNarration(boardNarrationForChange(item, verdict, action, lane, previous), boardNarrationMeta(item, verdict, lane), itemUpdatedMs(item) || Date.now(), inferAddressedTo(action, lane), item);
         added += 1;
       });
       previousBoardNarrationState = next;
@@ -7299,10 +7364,18 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return lane.key === "attention" || lane.key === "operator" || lane.key === "codex" || verdict.level === "block" || verdict.level === "needs-review";
     }
 
-    function addBoardNarration(text, meta, ts, addressedTo) {
+    function addBoardNarration(text, meta, ts, addressedTo, item) {
       const message = collabMessage("Hermes", text, meta, ts || Date.now(), addressedTo);
       message.id = "board-narration-" + String(ts || Date.now()) + "-" + String(latestBoardNarrations.length + 1);
       message.kind = "status";
+      if (item) {
+        const identity = itemConversationIdentity(item);
+        message.relatedBoardKey = identity.boardKey;
+        if (identity.repo && Number.isFinite(identity.pr) && identity.pr > 0) {
+          message.relatedPr = { repo: identity.repo, number: identity.pr };
+        }
+        if (item.correlationId) message.relatedCorrelationId = String(item.correlationId);
+      }
       latestBoardNarrations.push(message);
       latestBoardNarrations = latestBoardNarrations.slice(-BOARD_NARRATION_LIMIT);
     }
