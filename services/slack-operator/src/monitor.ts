@@ -551,6 +551,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .draft-delegation {
       border-left: 4px solid var(--violet);
     }
+    .merge-steward-packet {
+      border-left: 4px solid var(--ok);
+    }
     .resolution-summary {
       margin: 0;
       color: var(--text);
@@ -5239,7 +5242,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         { key: "codex", title: "Codex Needed", kicker: "create/approve task", empty: "No Codex action needed." },
         { key: "hermes", title: "Hermes Checking", kicker: "wait for verdict", empty: "Hermes has no active PR checks." },
         { key: "operator", title: "Operator Review", kicker: "risk decision", empty: "No operator sign-off needed." },
-        { key: "queue", title: "Release Queue", kicker: "reviewed · merge next", empty: "Nothing ready to merge." },
+        { key: "queue", title: "Release Queue", kicker: "merge steward", empty: "Nothing ready to merge." },
         { key: "deploy", title: "Deploying", kicker: "verify production", empty: "No deploy verification active." },
         { key: "done", title: "Done", kicker: "release history", empty: "No completed PRs in view." },
       ];
@@ -5416,7 +5419,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return { button: "Asks Hermes for the current handoff details.", after: "Wait for Hermes to publish a verdict before assigning more work." };
       }
       if (verdict.level === "pass" && lane.key === "queue") {
-        return { button: "Asks the merge steward for merge context; it does not merge.", after: "Merge outside the monitor only after branch protection is green." };
+        return { button: "Posts a merge-steward context request; it does not merge or deploy.", after: "If stewardship is clear, merge outside the monitor; then watch GitHub deploy and post-deploy verification." };
       }
       return { button: "Opens handoff details.", after: action.text || "Follow the owner handoff shown on this card." };
     }
@@ -5943,6 +5946,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         (verdict.level === "block" ? '<section class="drawer-section">' + renderFailureCallout(verdict, summary) + '</section>' : "") +
         '<section class="drawer-section">' + renderHandoffOwnerContract(item, verdict, action) + '</section>' +
         '<section class="drawer-section">' + renderActionRecipe(item, summary, verdict, action) + '</section>' +
+        renderMergeStewardPacket(item, summary, verdict, action) +
         '<section class="drawer-section"><h3>Hermes verdict</h3>' + renderHermesVerdictBox(verdict, age) + (richReviewWhy ? '<div class="review-why">' + richReviewWhy + '</div>' : "") + '</section>' +
         renderDraftDelegationPanel(item, summary) +
         renderCodexTaskPrompt(item, summary, verdict, action) +
@@ -6057,6 +6061,86 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           row("Proof", proof) +
         '</dl>' +
       '</div>';
+    }
+
+    function renderMergeStewardPacket(item, summary, verdict, action) {
+      const packet = mergeStewardPacketForItem(item, summary, verdict, action);
+      if (!packet) return "";
+      const evidence = packet.evidence.length ? chips(packet.evidence) : escapeHtml("Hermes PASS");
+      const rows = [
+        row("Owner", escapeHtml(packet.owner)),
+        row("Before merge", escapeHtml(packet.beforeMerge)),
+        row("Button does", escapeHtml(packet.buttonDoes)),
+        row("Button does not", escapeHtml(packet.buttonDoesNot)),
+        row("After merge", escapeHtml(packet.afterMerge)),
+        row("Evidence", evidence),
+      ].join("");
+      return '<section class="drawer-section merge-steward-packet"><h3>Merge steward packet</h3>' +
+        '<p class="resolution-summary">' + escapeHtml(packet.summary) + '</p>' +
+        '<dl class="resolution-grid">' + rows + '</dl>' +
+        '<ol class="resolution-steps">' + packet.steps.map((step) => '<li>' + escapeHtml(step) + '</li>').join("") + '</ol>' +
+        '<div class="resolution-actions">' +
+          '<button class="soft-button" type="button" data-command-suggestion="merge steward details" title="Ask for merge context; this does not merge">Ask merge steward</button>' +
+        '</div>' +
+        '</section>';
+    }
+
+    function mergeStewardPacketForItem(item, summary, verdict, action) {
+      if (!item || !verdict || isDeployItem(item)) return null;
+      const prState = pullRequestState(item, summary || {});
+      if (isDonePullRequestState(prState)) return null;
+      const lane = boardLaneForItem(item, verdict);
+      const releaseReview = isReleaseReviewVerdict(verdict);
+      const releaseQueued = lane.key === "queue" || action.owner === "Merge queue";
+      if (!releaseReview && !releaseQueued) return null;
+      const evidence = mergeStewardEvidence(summary || {}, verdict, releaseReview);
+      if (releaseReview) {
+        return {
+          owner: "Operator, then merge steward",
+          summary: "Hermes PASS is recorded, but this PR still needs the local release packet review before it can enter the release queue.",
+          beforeMerge: "Operator marks release reviewed, branch protection is green, and no active Codex task is still changing the branch.",
+          buttonDoes: "Opens the release review drawer so the operator can confirm the PR belongs in the queue.",
+          buttonDoesNot: "It does not merge, deploy, approve GitHub checks, or change branch protection.",
+          afterMerge: "Once this is reviewed and merged outside the monitor, GitHub deploy starts and Hermes should verify production before Done.",
+          evidence,
+          steps: [
+            "Review the release packet and the Hermes evidence.",
+            "Confirm this PR is intentionally ready to leave review.",
+            "Mark release reviewed only if the branch can enter the merge queue.",
+            "After merge, watch the Deploying lane until post-deploy verification is healthy.",
+          ],
+        };
+      }
+      return {
+        owner: "Merge steward / operator",
+        summary: "This PR is release-ready, not merged. The monitor is holding it in the release queue until branch protection, merge ownership, and deploy follow-up are explicit.",
+        beforeMerge: "Branch protection green, Hermes PASS present, required operator sign-off complete, and no active Codex task on the branch.",
+        buttonDoes: "Asks for merge context and stewardship details inside the collaboration thread.",
+        buttonDoesNot: "It does not merge the PR, deploy production, mutate GitHub, or override branch protection.",
+        afterMerge: "GitHub deploy workflow runs; keep watching until the monitor moves through Deploying and records post-deploy PASS.",
+        evidence,
+        steps: [
+          "Open the PR or ask the merge steward for context.",
+          "Confirm branch protection is green and there are no active or failing checks.",
+          "Confirm someone owns merge timing and the post-merge deploy watch.",
+          "Merge outside this monitor only when those conditions are clean.",
+          "After merge, watch Deploying and do not call it done until post-deploy verification passes.",
+        ],
+      };
+    }
+
+    function mergeStewardEvidence(summary, verdict, releaseReview) {
+      const evidence = [];
+      const totals = summary && summary.githubLive && summary.githubLive.checkTotals ? summary.githubLive.checkTotals : null;
+      const signals = summary && summary.reviewSignals ? summary.reviewSignals : {};
+      const testSignals = Array.isArray(signals.testSignals) ? signals.testSignals.map(String).filter(Boolean) : [];
+      if (verdict && verdict.label) evidence.push(verdict.label);
+      if (totals && Number(totals.total) > 0) evidence.push(String(Number(totals.passed) || 0) + "/" + String(Number(totals.total) || 0) + " GitHub checks passed");
+      if (testSignals.length) evidence.push(testSignals[0]);
+      if (signals.rolloutNotesRequired === true) evidence.push(signals.rolloutNotesPresent === true ? "rollout notes present" : "rollout notes missing");
+      if (signals.abiCompatChecked === true) evidence.push("ABI compatibility checked");
+      if (releaseReview) evidence.push("operator release review required");
+      return evidence.slice(0, 6);
     }
 
     function renderDrawerDisclosureSection(title, body) {
@@ -6247,6 +6331,15 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         };
       }
       if (verdict.level === "pass") {
+        if (action.owner === "Merge queue") {
+          return {
+            owner: "Merge steward",
+            why: "Hermes PASS is recorded, but the monitor has not merged anything.",
+            ask: "Confirm branch protection, merge ownership, and deploy timing; then merge outside the monitor only when those release conditions are clean.",
+            clearsWhen: "GitHub records the PR merged and post-deploy verification finishes healthy.",
+            proof: ["branch protection green", "Hermes PASS", "operator sign-off if required", "post-deploy verification"],
+          };
+        }
         return {
           owner: action.owner,
           why: "No blocking release signal is recorded for this item.",

@@ -115,6 +115,13 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("ownerContractForItem(item, verdict, action)");
     expect(html).toContain("renderActionRecipe(item, summary, verdict, action)");
     expect(html).toContain("actionRecipeForItem(item, summary, verdict, action)");
+    expect(html).toContain("renderMergeStewardPacket(item, summary, verdict, action)");
+    expect(html).toContain("mergeStewardPacketForItem(item, summary, verdict, action)");
+    expect(html).toContain("Merge steward packet");
+    expect(html).toContain("This PR is release-ready, not merged");
+    expect(html).toContain("Button does not");
+    expect(html).toContain("GitHub deploy workflow runs");
+    expect(html).toContain("watch Deploying");
     expect(html).toContain("renderCodexTaskPrompt(item, summary, verdict, action)");
     expect(html).toContain("codexWorkState(item, stage)");
     expect(html).toContain("codexTaskCompletedAfterHermesReview(item)");
@@ -209,6 +216,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("board changed · ");
     expect(html).toContain("Start by opening the failed runner output");
     expect(html).toContain("Finish the draft work or mark it ready for review");
+    expect(html).toContain("merge ownership, and deploy follow-up are explicit");
     expect(html).toContain("Waiting / Drafts");
     expect(html).toContain("isExternalDraftPullRequest(item)");
     expect(html).toContain("no Codex task starts from the card");
