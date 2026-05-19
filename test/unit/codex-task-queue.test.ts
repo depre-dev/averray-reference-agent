@@ -96,6 +96,21 @@ describe("codex task queue", () => {
     expect(result.task.events?.[0]?.message).toBe("Operator delegated Codex takeover from the monitor.");
   });
 
+  it("records operator review send-back in the initial task event", async () => {
+    const path = await tempQueuePath();
+    const result = await proposeCodexTask({
+      repo: "averray-agent/agent",
+      pullRequestNumber: 151,
+      title: "Operator send-back",
+      prompt: "Follow up on PR #151.",
+      reason: "operator sent review back to Codex",
+      requester: "monitor",
+    }, { path, now: new Date("2026-05-17T10:35:00.000Z") });
+
+    expect(result.created).toBe(true);
+    expect(result.task.events?.[0]?.message).toBe("Operator sent review back to Codex from the monitor.");
+  });
+
   it("allows a fresh proposal after a task is cancelled", async () => {
     const path = await tempQueuePath();
     const first = await proposeCodexTask({

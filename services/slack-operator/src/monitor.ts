@@ -690,6 +690,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       background: var(--ok-bg);
       color: var(--ok);
     }
+    .decision-button[data-codex-task-action="send-back"],
+    .soft-button[data-codex-task-action="send-back"] {
+      border-color: var(--violet);
+      background: rgba(135, 132, 255, 0.12);
+      color: var(--violet);
+    }
     .decision-note {
       border: 1px solid var(--ok);
       border-radius: 8px;
@@ -5684,6 +5690,31 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return "Take over " + repo + " " + prLabel + " (" + title + "). The operator explicitly delegated this draft from the Waiting / Drafts lane to Codex. First inspect the PR branch and current draft state; do not assume the work is complete. If the missing work is clear and safe, finish the smallest verifiable slice, run the relevant checks, push updates, and mark the PR ready for review only when it is actually complete. If the branch lacks context or ownership should remain with the original author, report that clearly and do not mark it ready. Do not merge or deploy." + checks + correlation;
     }
 
+    function codexOperatorSendBackPromptForItem(item, summary, verdict, action) {
+      const repo = String(item.repo || "averray-agent/agent");
+      const pr = item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId);
+      const prLabel = pr ? "PR #" + pr : "this PR";
+      const title = cardTitleText(pipelineTitle(item), pr, item);
+      const correlation = item.correlationId ? " Correlation: " + item.correlationId + "." : "";
+      const signals = summary && summary.reviewSignals ? summary.reviewSignals : {};
+      const touchedAreas = Array.isArray(signals.touchedAreas) ? signals.touchedAreas.map(String).filter(Boolean) : [];
+      const missingTests = Array.isArray(signals.missingTestSignals) ? signals.missingTestSignals.map(String).filter(Boolean) : [];
+      const reasons = operatorSendBackReasons(summary, verdict);
+      const surfaces = touchedAreas.length ? " Touched areas: " + touchedAreas.slice(0, 6).join(", ") + "." : "";
+      const tests = missingTests.length ? " Missing test signals: " + missingTests.slice(0, 6).join(", ") + "." : "";
+      return "Follow up on " + repo + " " + prLabel + " (" + title + "). The operator sent this PR back from review instead of approving it locally. Review the Hermes/operator evidence first: " + reasons + "." + surfaces + tests + " Make the smallest targeted fix if the review points to code, tests, rollout notes, or architecture risk. If no code change is justified, report that clearly in the task output and leave the PR for operator review. Push updates only when you have a concrete fix, then let CI and Hermes re-run. Do not merge or deploy." + correlation;
+    }
+
+    function operatorSendBackReasons(summary, verdict) {
+      const reasons = Array.isArray(summary && summary.reviewReasons) ? summary.reviewReasons : [];
+      const text = reasons.slice(0, 4).map((reason) => {
+        const code = String((reason && reason.code) || "review");
+        const message = String((reason && reason.message) || "").trim();
+        return message ? code + ": " + message : code;
+      }).filter(Boolean).join("; ");
+      return text || String(verdict && verdict.why || "operator review needs Codex follow-up").trim();
+    }
+
     function renderMiniSteps(stage, verdict) {
       const steps = ["pr", "ci", "hermes", "testbed", "gate", "deploy"];
       const activeIndex = Math.max(0, steps.indexOf(stage.key));
@@ -5912,8 +5943,22 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '<button class="soft-button" type="button" data-command-suggestion="handoff monitor details">Ask Hermes for context</button>' +
         renderCodexFooterAction(item, summary, verdict, action) +
         '<button class="soft-button" type="button" data-copy-text="' + escapeAttr(item.correlationId || "") + '">Copy correlation id</button>' +
-        (verdict.level === "needs-review" && !isDraftPullRequest(item) && !locallyApproved ? '<button class="soft-button" data-action="primary" type="button" data-monitor-decision="approve" data-decision-key="' + escapeAttr(decisionKeyForItem(item)) + '" title="Private monitor decision only; this does not mutate GitHub">' + escapeHtml(operatorApprovalButtonLabel(item, verdict)) + '</button>' : "") +
+        renderOperatorFooterActions(item, verdict, locallyApproved) +
         '</div></div>';
+    }
+
+    function renderOperatorFooterActions(item, verdict, locallyApproved) {
+      if (verdict.level !== "needs-review" || isDraftPullRequest(item) || locallyApproved) return "";
+      return renderOperatorApprovalButton(item, verdict, "soft-button") +
+        renderOperatorSendBackButton(item, "soft-button");
+    }
+
+    function renderOperatorApprovalButton(item, verdict, className) {
+      return '<button class="' + escapeAttr(className || "decision-button") + '" data-action="primary" type="button" data-monitor-decision="approve" data-decision-key="' + escapeAttr(decisionKeyForItem(item)) + '" title="Private monitor decision only; this does not mutate GitHub">' + escapeHtml(operatorApprovalButtonLabel(item, verdict)) + '</button>';
+    }
+
+    function renderOperatorSendBackButton(item, className) {
+      return '<button class="' + escapeAttr(className || "decision-button") + '" type="button" data-codex-task-action="send-back" data-card-key="' + escapeAttr(boardItemKey(item)) + '" title="Create and approve a Codex follow-up task from this operator review">Send back to Codex</button>';
     }
 
     function operatorApprovalButtonLabel(item, verdict) {
@@ -6239,7 +6284,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           '<span>' + escapeHtml(entry.label) + '</span>' +
           '</label>';
       }).join("");
-      return '<div class="operator-checklist">' + head + rows + '</div>';
+      return '<div class="operator-checklist">' + head + rows + renderDecisionActions(item, verdict) + '</div>';
     }
 
     function operatorChecklistItems(item, verdict, action) {
@@ -7620,7 +7665,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function actorForTaskEvent(message) {
       const text = normalize(message);
-      if (text.includes("approve") || text.includes("cancel")) return "Operator";
+      if (text.includes("approve") || text.includes("cancel") || text.includes("delegat") || text.includes("sent review back")) return "Operator";
       if (text.includes("runner") || text.includes("claim") || text.includes("start") || text.includes("complete") || text.includes("fail")) return "Codex";
       return "Hermes";
     }
@@ -7675,6 +7720,38 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           forceThreadMode();
           renderAutoCollaborationThread();
           setComposeStatus("Draft delegated to Codex. Task approved; runner pickup is now allowed.", "ok");
+          return;
+        }
+        if (action === "send-back") {
+          if (!item) throw new Error("No PR selected for operator send-back.");
+          if (isDraftPullRequest(item)) throw new Error("Draft PRs need explicit draft delegation instead of operator send-back.");
+          const summary = item.summary || {};
+          const verdict = releaseVerdict(item);
+          if (verdict.level !== "needs-review") throw new Error("Only operator-review cards can be sent back to Codex.");
+          const next = nextPipelineAction(item, verdict);
+          const prompt = codexOperatorSendBackPromptForItem(item, summary, verdict, next);
+          const pr = Number(item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId));
+          if (!prompt || !Number.isFinite(pr) || pr < 1) throw new Error("This review card does not have enough PR metadata for Codex send-back.");
+          const repo = String(item.repo || "averray-agent/agent");
+          await postOperatorSendBackConversation(item, "operator", verdict);
+          const proposed = await postCodexTask({
+            action: "propose",
+            repo,
+            pullRequestNumber: pr,
+            correlationId: item.correlationId,
+            title: "Operator send-back: " + cardTitleText(pipelineTitle(item), pr, item),
+            reason: "operator sent review back to Codex",
+            requester: "monitor",
+            prompt,
+          });
+          const createdTask = proposed && proposed.task ? proposed.task : null;
+          if (!createdTask || !createdTask.id) throw new Error("Codex task was not returned after operator send-back.");
+          await postCodexTask({ action: "approve", id: createdTask.id });
+          await postOperatorSendBackConversation(item, "agents", verdict);
+          preserveSelectedActionContext(key, item);
+          forceThreadMode();
+          renderAutoCollaborationThread();
+          setComposeStatus("Sent back to Codex. Task approved; runner pickup is now allowed.", "ok");
           return;
         }
         if (action === "propose") {
@@ -7750,6 +7827,33 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         kind: "status",
         addressedTo: "operator",
         text: "Got it. I will treat this as a deliberate draft takeover: inspect first, keep the change small, and report back through the task before Hermes moves it forward.",
+      }, relation));
+    }
+
+    async function postOperatorSendBackConversation(item, phase, verdict) {
+      const relation = collaborationRelationForItem(item);
+      const prLabel = relation.relatedPr ? relation.relatedPr.repo + "#" + relation.relatedPr.number : "this PR";
+      const why = operatorSendBackReasons(item.summary || {}, verdict || releaseVerdict(item));
+      if (phase === "operator") {
+        await safePostCollaborationMessage(Object.assign({
+          author: "operator",
+          kind: "request_help",
+          addressedTo: "codex",
+          text: "Codex, I am sending " + prLabel + " back from operator review. Hermes' pre-check is not enough for me to approve it yet: " + why + ". Please make the smallest justified fix, or report clearly if the right answer is no code change.",
+        }, relation));
+        return;
+      }
+      await safePostCollaborationMessage(Object.assign({
+        author: "hermes",
+        kind: "status",
+        addressedTo: "operator",
+        text: "I recorded the operator send-back. " + prLabel + " can move to Codex Needed now; I will wait for Codex to hand it back before I re-check the PR.",
+      }, relation));
+      await safePostCollaborationMessage(Object.assign({
+        author: "codex",
+        kind: "status",
+        addressedTo: "operator",
+        text: "Understood. I will inspect the operator concern, keep the follow-up narrow, and report back through the task if the right move is a code change or a no-change explanation.",
       }, relation));
     }
 
@@ -8165,10 +8269,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '</section>';
     }
 
-    function renderDecisionActions(item) {
-      const key = decisionKeyForItem(item);
+    function renderDecisionActions(item, verdict) {
       return '<div class="decision-actions">' +
-        '<button class="decision-button" type="button" data-monitor-decision="approve" data-decision-key="' + escapeAttr(key) + '">Mark reviewed locally</button>' +
+        renderOperatorApprovalButton(item, verdict || releaseVerdict(item), "decision-button") +
+        renderOperatorSendBackButton(item, "decision-button") +
         '</div>';
     }
 
