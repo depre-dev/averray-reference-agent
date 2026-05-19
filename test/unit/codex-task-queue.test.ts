@@ -45,6 +45,7 @@ describe("codex task queue", () => {
 
     expect(first.created).toBe(true);
     expect(first.task.status).toBe("proposed");
+    expect(first.task.events?.[0]?.message).toBe("Hermes proposed a bounded Codex task.");
 
     const second = await proposeCodexTask({
       repo: "averray-agent/agent",
@@ -78,6 +79,21 @@ describe("codex task queue", () => {
       running: 0,
       terminal: 0,
     });
+  });
+
+  it("records explicit operator delegation in the initial task event", async () => {
+    const path = await tempQueuePath();
+    const result = await proposeCodexTask({
+      repo: "averray-agent/agent",
+      pullRequestNumber: 439,
+      title: "Draft takeover",
+      prompt: "Take over PR #439.",
+      reason: "operator explicitly delegated draft takeover to Codex",
+      requester: "monitor",
+    }, { path, now: new Date("2026-05-17T10:30:00.000Z") });
+
+    expect(result.created).toBe(true);
+    expect(result.task.events?.[0]?.message).toBe("Operator delegated Codex takeover from the monitor.");
   });
 
   it("allows a fresh proposal after a task is cancelled", async () => {
