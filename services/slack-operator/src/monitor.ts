@@ -7572,28 +7572,35 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     // on a busy board. Show only the first 1-2 sentences (max ~180
     // chars) by default; the operator can expand inline if they need
     // the full explanation.
-    const COLLAB_SUMMARY_MAX_CHARS = 180;
-    const COLLAB_SUMMARY_MAX_SENTENCES = 2;
+    //
+    // The cap constants are INSIDE the function body (not module-level
+    // const) on purpose. The script body calls setComposeMode() at
+    // boot, which transitively reaches this function — module-level
+    // const declarations below that call hit a TDZ ReferenceError
+    // because they haven't been evaluated yet. Function declarations
+    // are hoisted but const isn't.
     function collapsedCollabSummary(text) {
+      const MAX_CHARS = 180;
+      const MAX_SENTENCES = 2;
       const trimmed = String(text || "").trim();
       if (!trimmed) return trimmed;
-      if (trimmed.length <= COLLAB_SUMMARY_MAX_CHARS) return trimmed;
+      if (trimmed.length <= MAX_CHARS) return trimmed;
       // Sentence boundary = period/exclaim/question followed by space
       // (so URLs and "1 changed file(s)" parens don't trip the split).
       const sentences = trimmed.split(/(?<=[.!?])\s+/);
       let out = "";
-      for (let i = 0; i < Math.min(sentences.length, COLLAB_SUMMARY_MAX_SENTENCES); i += 1) {
+      for (let i = 0; i < Math.min(sentences.length, MAX_SENTENCES); i += 1) {
         const next = (out ? out + " " : "") + sentences[i];
-        if (next.length > COLLAB_SUMMARY_MAX_CHARS) {
+        if (next.length > MAX_CHARS) {
           if (!out) {
             // First sentence is already too long — hard-cap on chars.
-            out = next.slice(0, COLLAB_SUMMARY_MAX_CHARS).trimEnd() + "…";
+            out = next.slice(0, MAX_CHARS).trimEnd() + "…";
           }
           break;
         }
         out = next;
       }
-      if (!out) out = trimmed.slice(0, COLLAB_SUMMARY_MAX_CHARS).trimEnd() + "…";
+      if (!out) out = trimmed.slice(0, MAX_CHARS).trimEnd() + "…";
       // If we cut before the end, add ellipsis so the trim is obvious.
       if (out.length < trimmed.length && !out.endsWith("…")) out += " …";
       return out;

@@ -1,4 +1,4 @@
-import { Script } from "node:vm";
+import vm, { Script } from "node:vm";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -536,12 +536,17 @@ describe("slack operator personal monitor", () => {
     // expandedCollabRowKeys per session. Rail width bumped 60→66px.
     expect(html).toContain('expandedCollabRowKeys');
     expect(html).toContain('collapsedCollabSummary');
-    expect(html).toContain('COLLAB_SUMMARY_MAX_CHARS');
     expect(html).toContain('data-collab-more');
     expect(html).toContain('.collab-more');
     expect(html).toContain('"66px"'); // rail width bump
     // Old 60px rail width is gone.
     expect(html).not.toContain('? "60px" : "minmax(186px, 1fr)"');
+    // The summary cap constants used to live at module scope but that
+    // hit a TDZ ReferenceError because setComposeMode() runs at boot
+    // before the declarations were reached. Guard against the
+    // regression: the constant names must NOT appear at script level.
+    expect(html).not.toContain('const COLLAB_SUMMARY_MAX_CHARS');
+    expect(html).not.toContain('const COLLAB_SUMMARY_MAX_SENTENCES');
   });
 
   it("serves a PWA manifest with the canonical name + scope", () => {
@@ -563,5 +568,85 @@ describe("slack operator personal monitor", () => {
     const script = html.split("<script>")[1]?.split("</script>")[0] ?? "";
     expect(script).toContain("function render(payload)");
     expect(() => new Script(script, { filename: "monitor-inline.js" })).not.toThrow();
+  });
+
+  it("inline browser JavaScript boots without throwing (catches TDZ)", () => {
+    // Run the inline <script> in a Node vm context with a catchall
+    // stub for all the browser globals it touches. We only care that
+    // the top-level evaluation doesn't throw — i.e. no TDZ, no
+    // undefined-reference, no syntax-tripping order-of-declaration
+    // bug. We don't assert any rendered output; that would require
+    // a real DOM. This guards against bugs like the COLLAB_SUMMARY_
+    // MAX_CHARS TDZ that took the monitor down in production.
+    const html = renderMonitorHtml();
+    const script = html.split("<script>")[1]?.split("</script>")[0] ?? "";
+    const makeStub = () => {
+      // Function-typed Proxy: callable (event handlers etc.),
+      // constructable (new AudioContext()), every property access
+      // resolves to another stub, every assignment is silently
+      // accepted. Surfaces TDZ + undefined-reference errors at boot
+      // without a real DOM.
+      const fn = function () {};
+      return new Proxy(fn, {
+        get(_target, prop) {
+          if (prop === "then") return undefined; // not a thenable
+          if (prop === Symbol.toPrimitive) return () => "";
+          if (prop === "length") return 0;
+          return makeStub();
+        },
+        set: () => true,
+        apply: () => makeStub(),
+        construct: () => makeStub(),
+        has: () => true,
+      });
+    };
+    const context = vm.createContext({
+      document: makeStub(),
+      window: makeStub(),
+      localStorage: makeStub(),
+      location: { search: "" },
+      navigator: { clipboard: makeStub() },
+      fetch: makeStub(),
+      EventSource: function () { return makeStub(); },
+      AudioContext: function () { return makeStub(); },
+      Notification: function () {},
+      MutationObserver: function () { return makeStub(); },
+      IntersectionObserver: function () { return makeStub(); },
+      ResizeObserver: function () { return makeStub(); },
+      AbortController: function () { return makeStub(); },
+      AbortSignal: makeStub(),
+      URL,
+      TextEncoder,
+      TextDecoder,
+      atob: (s: string) => Buffer.from(s, "base64").toString(),
+      btoa: (s: string) => Buffer.from(s).toString("base64"),
+      performance: { now: () => 0 },
+      URLSearchParams,
+      setTimeout: () => 0,
+      clearTimeout: () => {},
+      setInterval: () => 0,
+      clearInterval: () => {},
+      requestAnimationFrame: () => 0,
+      console,
+      Date,
+      Math,
+      Number,
+      String,
+      Boolean,
+      Array,
+      Object,
+      JSON,
+      Set,
+      Map,
+      WeakSet,
+      WeakMap,
+      Symbol,
+      Error,
+      RegExp,
+      Promise,
+      Proxy,
+      Reflect,
+    });
+    expect(() => vm.runInContext(script, context, { timeout: 2000 })).not.toThrow();
   });
 });
