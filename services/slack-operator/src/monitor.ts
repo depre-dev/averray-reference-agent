@@ -4718,7 +4718,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       latestCodexRunner = normalizeCodexRunner(payload.codexTasks && payload.codexTasks.runner);
       latestPipelineItems = groupPrPipelineItems(collectPipelineItems(payload));
       const boardNarrationsAdded = captureBoardNarrations(latestPipelineItems);
-      if (boardNarrationsAdded > 0) forceThreadMode();
+      if (boardNarrationsAdded > 0 && shouldBoardNarrationOpenThread()) forceThreadMode();
       const laneCounts = commandBoardLaneCounts(latestPipelineItems);
       const blocked = laneCounts.attention || 0;
       const review = laneCounts.operator || 0;
@@ -5147,6 +5147,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         .map((lane) => renderBoardLane(lane, filtered, { mobile }))
         .join("") + (!mobile && !showDone ? renderDoneStub(filtered) : "");
       updateMobileTabCounts(filtered);
+    }
+
+    function shouldBoardNarrationOpenThread() {
+      if (selectedKey) return false;
+      return [document.getElementById("command-output"), document.getElementById("ask-output")]
+        .some((output) => output && output.dataset.auto !== "false");
     }
 
     // Collapsed Done lane: a 44px vertical rail on the right edge of the
@@ -5662,7 +5668,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (lane.key === "codex") {
         const state = codexWorkState(item, pipelineStage(item, verdict));
         if (state.state === "proposed" && state.task) {
-          return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="approve" data-codex-task-id="' + escapeAttr(state.task.id) + '" title="Approve this queued task so Codex can pick it up">Approve Codex task</button>';
+          return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="approve" data-card-key="' + escapeAttr(boardItemKey(item)) + '" data-codex-task-id="' + escapeAttr(state.task.id) + '" title="Approve this queued task so Codex can pick it up">Approve Codex task</button>';
         }
         if (state.state === "approved" && state.task) {
           return '<button class="soft-button" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '" title="Open the approved Codex task details">View approved task</button>';
@@ -5748,6 +5754,30 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function itemByBoardKey(key) {
       if (!key) return null;
       return latestPipelineItems.find((item) => boardItemKey(item) === key) || null;
+    }
+
+    function matchingPipelineItem(item) {
+      if (!item) return null;
+      const repo = String(item.repo || "");
+      const pr = Number(item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId));
+      if (!repo || !Number.isFinite(pr) || pr < 1) return null;
+      return latestPipelineItems.find((candidate) => {
+        const candidatePr = Number(candidate.pullRequestNumber || pullRequestNumberFromCorrelation(candidate.correlationId));
+        return String(candidate.repo || "") === repo && candidatePr === pr;
+      }) || null;
+    }
+
+    function preserveSelectedActionContext(key, fallbackItem) {
+      const match = itemByBoardKey(key) || matchingPipelineItem(fallbackItem);
+      if (match) {
+        selectedKey = boardItemKey(match);
+      } else if (key) {
+        selectedKey = key;
+      }
+      autoFocusPending = false;
+      renderBoard(latestPipelineItems);
+      renderDrawer(selectedItem() || fallbackItem || null);
+      renderCommandContext();
     }
 
     function normalizeCodexTasks(value) {
@@ -5999,25 +6029,26 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function renderCodexTaskControlButtons(item, task, prompt) {
+      const key = escapeAttr(boardItemKey(item));
       if (task && !isTerminalCodexTask(task)) {
         const status = normalize(task.status);
         if (status === "proposed") {
-          return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="approve" data-codex-task-id="' + escapeAttr(task.id) + '">Approve Codex task</button>' +
-            '<button class="soft-button" type="button" data-codex-task-action="cancel" data-codex-task-id="' + escapeAttr(task.id) + '">Cancel task</button>';
+          return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="approve" data-card-key="' + key + '" data-codex-task-id="' + escapeAttr(task.id) + '">Approve Codex task</button>' +
+            '<button class="soft-button" type="button" data-codex-task-action="cancel" data-card-key="' + key + '" data-codex-task-id="' + escapeAttr(task.id) + '">Cancel task</button>';
         }
         if (status === "approved") {
           return '<button class="soft-button" data-action="primary" type="button" data-copy-label="' + escapeAttr(codexCopyLabel()) + '" data-copy-text="' + escapeAttr(task.prompt || prompt) + '">Copy prompt fallback</button>' +
-            '<button class="soft-button" type="button" data-codex-task-action="cancel" data-codex-task-id="' + escapeAttr(task.id) + '">Cancel task</button>';
+            '<button class="soft-button" type="button" data-codex-task-action="cancel" data-card-key="' + key + '" data-codex-task-id="' + escapeAttr(task.id) + '">Cancel task</button>';
         }
         return '<button class="soft-button" type="button" data-copy-label="' + escapeAttr(codexCopyLabel()) + '" data-copy-text="' + escapeAttr(task.prompt || prompt) + '">Copy Codex prompt</button>';
       }
       if (task && normalize(task.status) === "completed" && codexTaskCompletedAfterHermesReview(item)) {
-        return '<button class="soft-button" data-action="primary" type="button" data-hermes-recheck="true" data-card-key="' + escapeAttr(boardItemKey(item)) + '">Ask Hermes to re-check</button>';
+        return '<button class="soft-button" data-action="primary" type="button" data-hermes-recheck="true" data-card-key="' + key + '">Ask Hermes to re-check</button>';
       }
       if (task && normalize(task.status) === "failed") {
-        return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="propose" data-card-key="' + escapeAttr(boardItemKey(item)) + '" title="Creates a smaller proposed retry task; it still needs approval">Create smaller retry task</button>';
+        return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="propose" data-card-key="' + key + '" title="Creates a smaller proposed retry task; it still needs approval">Create smaller retry task</button>';
       }
-      return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="propose" data-card-key="' + escapeAttr(boardItemKey(item)) + '">Propose Codex task</button>';
+      return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="propose" data-card-key="' + key + '">Propose Codex task</button>';
     }
 
     function renderCodexFallbackCopyButton(task, prompt) {
@@ -6551,7 +6582,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         // "N new ↓" affordance instead.
         const wasAtBottom = isCollabScrolledToBottom(output);
         const prevHadRows = output.querySelectorAll(".collab-message").length;
-        output.innerHTML = renderCollaborationThread({ kind: "all" });
+        const selected = selectedItem();
+        output.innerHTML = selected ? renderSelectedCollaborationThread(selected) : renderCollaborationThread({ kind: "all" });
         const nextHadRows = output.querySelectorAll(".collab-message").length;
         if (wasAtBottom) {
           unreadScrolledCount = 0;
@@ -7443,6 +7475,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const item = itemByBoardKey(key) || selectedItem();
       const output = document.getElementById("command-output");
       if (output) output.dataset.auto = "false";
+      preserveSelectedActionContext(key, item);
       button.disabled = true;
       try {
         if (action === "propose") {
@@ -7463,6 +7496,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
             requester: "monitor",
             prompt,
           });
+          preserveSelectedActionContext(key, item);
           forceThreadMode();
           renderAutoCollaborationThread();
           setComposeStatus("Codex task proposed. Approve it when you want Codex to pick it up.", "ok");
@@ -7471,6 +7505,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         if (action === "approve") {
           if (!taskId) throw new Error("Missing Codex task id.");
           await postCodexTask({ action: "approve", id: taskId });
+          preserveSelectedActionContext(key, item);
           forceThreadMode();
           renderAutoCollaborationThread();
           setComposeStatus("Codex task approved. Codex worker pickup is now allowed.", "ok");
@@ -7479,6 +7514,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         if (action === "cancel") {
           if (!taskId) throw new Error("Missing Codex task id.");
           await postCodexTask({ action: "cancel", id: taskId });
+          preserveSelectedActionContext(key, item);
           forceThreadMode();
           renderAutoCollaborationThread();
           setComposeStatus("Codex task cancelled.", "ok");

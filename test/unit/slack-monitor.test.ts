@@ -190,6 +190,9 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Here is the live shape of the board");
     expect(html).toContain("nothing here needs your decision right this second");
     expect(html).toContain("captureBoardNarrations(latestPipelineItems)");
+    expect(html).toContain("shouldBoardNarrationOpenThread()");
+    expect(html).toContain("preserveSelectedActionContext(key, item)");
+    expect(html).toContain("selected ? renderSelectedCollaborationThread(selected) : renderCollaborationThread({ kind: \"all\" })");
     expect(html).toContain("boardNarrationForChange(item, verdict, action, lane, previous)");
     expect(html).toContain("Update on \" + title");
     expect(html).toContain("First useful move:");
