@@ -1389,44 +1389,100 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       font-size: 0.62rem;
       white-space: nowrap;
     }
-    /* Kanban grid template is driven by data-active-lanes (the count
-       of non-Done lanes that have items, set by renderBoard). Each
-       rule lays down N equal-ish lane columns + a fixed 56px Done
-       rail on the right. This way adding a new lane (or auto-hiding
-       an empty one) doesn't overflow or wrap the grid. */
+    /* Kanban grid template is now driven by an inline style attribute
+       set by renderBoard: each lane gets either minmax(186px, 1fr)
+       (full) or 60px (collapsed rail), plus a trailing 56px slot for
+       the Done rail when collapsed. The CSS only declares the display
+       mode + gap; per-render widths come from JS. */
     .kanban-board {
       min-height: 0;
       min-width: 0;
       display: grid;
-      grid-template-columns: minmax(190px, 1fr) 56px;
       gap: 12px;
       overflow-x: hidden;
       overflow-y: hidden;
       align-items: stretch;
       padding-bottom: 8px;
     }
-    .kanban-board[data-active-lanes="0"] { grid-template-columns: minmax(190px, 1fr) 56px; }
-    .kanban-board[data-active-lanes="1"] { grid-template-columns: minmax(190px, 1fr) 56px; }
-    .kanban-board[data-active-lanes="2"] { grid-template-columns: repeat(2, minmax(220px, 1fr)) 56px; }
-    .kanban-board[data-active-lanes="3"] { grid-template-columns: repeat(3, minmax(210px, 1fr)) 56px; }
-    .kanban-board[data-active-lanes="4"] { grid-template-columns: repeat(4, minmax(200px, 1fr)) 56px; }
-    .kanban-board[data-active-lanes="5"] { grid-template-columns: repeat(5, minmax(190px, 1fr)) 56px; }
-    .kanban-board[data-active-lanes="6"] { grid-template-columns: repeat(6, minmax(186px, 1fr)) 56px; }
-    .kanban-board[data-active-lanes="7"] { grid-template-columns: repeat(7, minmax(176px, 1fr)) 56px; }
-    .kanban-board[data-active-lanes="8"] { grid-template-columns: repeat(8, minmax(170px, 1fr)) 56px; }
-    /* Expanded-Done variants — the rail is replaced by a full-width
-       Done lane column, so the total is N + 1 wide columns. */
     .kanban-board[data-done-expanded="true"] {
       overflow-x: auto;
     }
-    .kanban-board[data-done-expanded="true"][data-active-lanes="1"] { grid-template-columns: repeat(2, minmax(220px, 1fr)); }
-    .kanban-board[data-done-expanded="true"][data-active-lanes="2"] { grid-template-columns: repeat(3, minmax(220px, 1fr)); }
-    .kanban-board[data-done-expanded="true"][data-active-lanes="3"] { grid-template-columns: repeat(4, minmax(220px, 1fr)); }
-    .kanban-board[data-done-expanded="true"][data-active-lanes="4"] { grid-template-columns: repeat(5, minmax(220px, 1fr)); }
-    .kanban-board[data-done-expanded="true"][data-active-lanes="5"] { grid-template-columns: repeat(6, minmax(220px, 1fr)); }
-    .kanban-board[data-done-expanded="true"][data-active-lanes="6"] { grid-template-columns: repeat(7, minmax(220px, 1fr)); }
-    .kanban-board[data-done-expanded="true"][data-active-lanes="7"] { grid-template-columns: repeat(8, minmax(220px, 1fr)); }
-    .kanban-board[data-done-expanded="true"][data-active-lanes="8"] { grid-template-columns: repeat(9, minmax(220px, 1fr)); }
+    /* Collapsed active lane — narrow vertical rail in the lane color,
+       same idiom as .done-rail. Click expands it for the session via
+       forcedExpandedLaneKeys; clicking the head re-collapses. */
+    .lane[data-collapsed="true"] {
+      cursor: pointer;
+      background: rgba(2, 15, 13, 0.45);
+      border-style: dashed;
+      transition: background 120ms ease, border-color 120ms ease;
+    }
+    .lane[data-collapsed="true"]:hover {
+      background: color-mix(in srgb, var(--lane-accent) 7%, rgba(2, 15, 13, 0.45));
+      border-color: color-mix(in srgb, var(--lane-accent) 50%, var(--line-soft));
+    }
+    .lane[data-collapsed="true"]:focus-visible {
+      outline: 1px solid color-mix(in srgb, var(--lane-accent) 70%, var(--cyan));
+      outline-offset: 2px;
+    }
+    .lane[data-collapsed="true"] .lane-head {
+      min-height: 100%;
+      height: 100%;
+      justify-content: space-between;
+      padding: 10px 4px;
+      gap: 10px;
+      border-top-width: 0;
+      border-left: 2px solid var(--lane-accent);
+    }
+    .lane[data-collapsed="true"] .lane-head::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--lane-accent);
+      opacity: 0.75;
+      margin: 0 auto;
+      flex-shrink: 0;
+    }
+    .lane[data-collapsed="true"] .lane-title {
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      flex: 1;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.68rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--muted);
+      overflow: visible;
+    }
+    .lane[data-collapsed="true"]:hover .lane-title { color: var(--cream); }
+    .lane[data-collapsed="true"] .lane-title .pill {
+      writing-mode: horizontal-tb;
+      transform: rotate(180deg);
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--lane-accent) 45%, var(--line-soft));
+      background: color-mix(in srgb, var(--lane-accent) 10%, rgba(2, 15, 13, 0.7));
+      color: var(--cream);
+      font-size: 0.74rem;
+      font-weight: 800;
+      min-width: 24px;
+      text-align: center;
+    }
+    .lane[data-collapsed="true"] .lane-subtitle,
+    .lane[data-collapsed="true"] .lane-body {
+      display: none;
+    }
+    /* Empty lane the operator explicitly expanded — clicking its head
+       collapses it again. Cursor + hover signal that. */
+    .lane[data-force-expanded="true"] .lane-head {
+      cursor: pointer;
+    }
+    .lane[data-force-expanded="true"] .lane-head:hover {
+      background: color-mix(in srgb, var(--lane-accent) 6%, transparent);
+    }
     .lane {
       min-height: 0;
       min-width: 0;
@@ -2404,14 +2460,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         grid-template-columns: 1fr;
       }
       /* On the mid-width breakpoint we keep the lanes horizontally
-         scrollable at a fixed minimum width — the data-active-lanes
-         desktop rules don't apply here. The 8 columns accommodate up
-         to 7 active lanes + Done. */
+         scrollable at a fixed minimum width. !important wins over the
+         inline grid-template-columns set by JS on desktop. */
       .kanban-board,
-      .kanban-board[data-done-expanded="true"],
-      .kanban-board[data-active-lanes],
-      .kanban-board[data-done-expanded="true"][data-active-lanes] {
-        grid-template-columns: repeat(8, minmax(250px, 82vw));
+      .kanban-board[data-done-expanded="true"] {
+        grid-template-columns: repeat(8, minmax(250px, 82vw)) !important;
         overflow-x: auto;
       }
       /* On mobile the vertical 56px rail makes no sense — expand it into a
@@ -3639,19 +3692,18 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         display: none;
       }
       /* The 640px mobile breakpoint switches the board to a single
-         column flat list. Override the desktop data-active-lanes
-         grid-template-columns so flex layout wins. */
+         column flat list. JS clears the inline grid-template-columns
+         on mobile (see renderBoard); the !important here is belt and
+         braces in case JS hasn't run yet (initial paint). */
       .kanban-board,
-      .kanban-board[data-done-expanded="true"],
-      .kanban-board[data-active-lanes],
-      .kanban-board[data-done-expanded="true"][data-active-lanes] {
-        display: flex;
+      .kanban-board[data-done-expanded="true"] {
+        display: flex !important;
         flex-direction: column;
         gap: 6px;
         overflow-x: hidden;
         overflow-y: auto;
         padding-bottom: 12px;
-        grid-template-columns: none;
+        grid-template-columns: none !important;
       }
       .lane {
         background: transparent;
@@ -4096,6 +4148,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     // can stick to bottom when the operator is at the bottom, and show a
     // "N new ↓" affordance when they've scrolled up to read history.
     let unreadScrolledCount = 0;
+    // Empty active lanes collapse to a narrow rail unless the operator
+    // clicks them — clicking adds the lane key here and the next render
+    // shows the lane expanded with its placeholder. Persists for the
+    // session; cleared on reload. Doesn't apply to lanes that have items
+    // (those are always expanded).
+    const forcedExpandedLaneKeys = new Set();
     // Compose state for the new collaboration "post" mode. The compose form
     // can run in two modes: "post" (POST /monitor/collaboration → real
     // multi-agent message) and "ask" (POST /monitor/command → Hermes
@@ -4133,6 +4191,32 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       renderBoard(latestPipelineItems);
     });
     document.addEventListener("click", (event) => {
+      // Clicking a collapsed (rail) lane expands it for the session.
+      // Clicking the head of an empty force-expanded lane collapses it
+      // again. Lanes with items aren't affected (no toggle on those).
+      const collapsedLane = event.target && event.target.closest
+        ? event.target.closest('.lane[data-collapsed="true"]')
+        : null;
+      if (collapsedLane) {
+        const key = collapsedLane.getAttribute("data-lane");
+        if (key) {
+          forcedExpandedLaneKeys.add(key);
+          if (latestPipelineItems) renderBoard(latestPipelineItems);
+        }
+        return;
+      }
+      const forceExpandedHead = event.target && event.target.closest
+        ? event.target.closest('.lane[data-force-expanded="true"] .lane-head')
+        : null;
+      if (forceExpandedHead) {
+        const lane = forceExpandedHead.closest(".lane");
+        const key = lane ? lane.getAttribute("data-lane") : null;
+        if (key) {
+          forcedExpandedLaneKeys.delete(key);
+          if (latestPipelineItems) renderBoard(latestPipelineItems);
+        }
+        return;
+      }
       const card = event.target && event.target.closest ? event.target.closest("[data-select-card]") : null;
       const interactive = event.target && event.target.closest ? event.target.closest("button,a,input") : null;
       // The "interactive" check exists to stop clicks on inner buttons
@@ -5182,10 +5266,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       document.getElementById("monitor-shell")?.classList.toggle("has-selection", Boolean(selectedKey));
       const lanes = boardLaneDefinitions();
       const counts = commandBoardLaneCounts(filtered);
-      // True when at least one ACTIVE (non-done) lane has at least one
-      // item. If everything is empty we keep showing all the active
-      // lanes so the board doesn't go blank — placeholders are useful
-      // when there's literally nothing to do.
+      // anyActiveItems = at least one non-done lane has cards. When the
+      // board is fully idle we leave every lane fully expanded so the
+      // operator sees the workflow shape and the empty placeholders.
+      // When work appears, empty lanes collapse to a narrow vertical
+      // rail (same idiom as the Done rail) to make room for the lanes
+      // that actually have something to show.
       const anyActiveItems = lanes.some((lane) => lane.key !== "done" && (counts[lane.key] || 0) > 0);
       // Mobile-tab filter narrows the set to a single lane (or all). The
       // mobile board renders lanes in order, with empty lanes suppressed
@@ -5199,22 +5285,44 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           return true;
         }
         if (lane.key === "done") return showDone;
-        // Desktop auto-hide: an empty active lane disappears when at
-        // least one other active lane has work, so the visible columns
-        // stay wide enough to read. With nothing on the board, we show
-        // every lane so the operator still sees the workflow shape.
-        if (anyActiveItems && (counts[lane.key] || 0) === 0) return false;
+        // Desktop: keep every active lane in the DOM — empty ones just
+        // render as a narrow rail. forcedExpandedLaneKeys lets the
+        // operator click a rail to expand it for a session.
         return true;
       });
-      // The CSS uses this attribute to pick a grid-template-columns that
-      // fits the visible active-lane count (plus a fixed 56px Done rail
-      // when collapsed). Keeps the grid from overflowing or wrapping
-      // when the active-lane count grows (now that we have a 7th lane,
-      // Waiting / Drafts).
-      const activeLaneCount = visibleLanes.filter((lane) => lane.key !== "done").length;
-      target.dataset.activeLanes = String(activeLaneCount);
+      // Decide which lanes are in rail mode for this render. Only on
+      // desktop (mobile uses a flat list) and only when there's any
+      // active work — otherwise everything stays fully expanded.
+      const collapsedKeys = new Set();
+      if (!mobile && anyActiveItems) {
+        for (const lane of visibleLanes) {
+          if (lane.key === "done") continue;
+          if ((counts[lane.key] || 0) > 0) continue;
+          if (forcedExpandedLaneKeys.has(lane.key)) continue;
+          collapsedKeys.add(lane.key);
+        }
+      }
+      // Build the grid-template-columns inline so each rail stays at a
+      // fixed narrow width and each expanded lane gets a fair share of
+      // the remaining space. Trailing 56px slot is the Done rail (when
+      // collapsed). Mobile clears the inline style so the flex column
+      // layout in the responsive CSS wins.
+      if (mobile) {
+        target.style.removeProperty("grid-template-columns");
+      } else {
+        const cols = visibleLanes.map((lane) => {
+          if (lane.key === "done") return "minmax(220px, 1fr)";
+          return collapsedKeys.has(lane.key) ? "60px" : "minmax(186px, 1fr)";
+        });
+        if (!showDone) cols.push("56px");
+        target.style.gridTemplateColumns = cols.join(" ");
+      }
       target.innerHTML = visibleLanes
-        .map((lane) => renderBoardLane(lane, filtered, { mobile }))
+        .map((lane) => renderBoardLane(lane, filtered, {
+          mobile,
+          collapsed: collapsedKeys.has(lane.key),
+          forceExpanded: forcedExpandedLaneKeys.has(lane.key) && (counts[lane.key] || 0) === 0,
+        }))
         .join("") + (!mobile && !showDone ? renderDoneStub(filtered) : "");
       updateMobileTabCounts(filtered);
     }
@@ -5304,6 +5412,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function renderBoardLane(lane, entries, options) {
       const mobile = Boolean(options && options.mobile);
+      const collapsed = Boolean(options && options.collapsed);
+      const forceExpanded = Boolean(options && options.forceExpanded);
       const items = entries
         .filter((item) => boardLaneForItem(item, releaseVerdict(item)).key === lane.key)
         .sort((a, b) => boardSortScore(b) - boardSortScore(a) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
@@ -5314,7 +5424,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const cards = items.length
         ? items.slice(0, lane.key === "done" ? 12 : 8).map((item) => renderer(item, lane)).join("")
         : '<div class="lane-empty">' + escapeHtml(lane.empty) + '</div>';
-      return '<section class="lane" data-lane="' + escapeAttr(lane.key) + '">' +
+      // data-collapsed turns the lane into a vertical rail (CSS).
+      // data-force-expanded marks an empty lane that the operator manually
+      // expanded via clicking the rail; clicking the lane head re-collapses
+      // it. Lanes with items are always fully expanded — the toggle only
+      // applies to lanes with zero items.
+      const collapsedAttr = collapsed ? ' data-collapsed="true" role="button" tabindex="0" aria-label="Expand ' + escapeAttr(lane.title) + ' lane"' : "";
+      const forceExpandedAttr = forceExpanded ? ' data-force-expanded="true"' : "";
+      return '<section class="lane" data-lane="' + escapeAttr(lane.key) + '"' + collapsedAttr + forceExpandedAttr + '>' +
         '<div class="lane-head"><div class="lane-title">' + escapeHtml(lane.title) + ' <span class="pill">' + escapeHtml(String(items.length)) + '</span></div><span class="lane-subtitle">' + escapeHtml(lane.kicker) + '</span></div>' +
         '<div class="lane-body">' + cards + '</div>' +
         '</section>';
