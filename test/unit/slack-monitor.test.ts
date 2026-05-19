@@ -227,6 +227,16 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Sent back to Codex. Task approved");
     expect(html).toContain("I recorded the operator send-back");
     expect(html).toContain("Only operator-review cards can be sent back to Codex");
+    expect(html).toContain("postActionReceipt(item");
+    expect(html).toContain("postMonitorDecisionReceipt(item, decision, verdict)");
+    expect(html).toContain("postCommandSuggestionReceipt(value, item)");
+    expect(html).toContain("postFailedTaskReviewReceipt(item)");
+    expect(html).toContain("postCodexTaskActionReceipt(item, \"approve\"");
+    expect(html).toContain("This button does not merge the PR");
+    expect(html).toContain("I opened the failed task output");
+    expect(html).toContain("You are allowed to pick it up now");
+    expect(html).toContain("I reopened my local review");
+    expect(html).toContain("please re-check \" + repo + \"#\" + pr + \" now");
     expect(html).toContain("forceThreadMode();\n          renderAutoCollaborationThread();\n          setComposeStatus(\"Codex task approved");
     expect(html).toContain("latestCodexTasks\n        .filter((task) => !isTerminalCodexTask(task))");
     expect(html).toContain("collaborationMessagesForTask(task)");
