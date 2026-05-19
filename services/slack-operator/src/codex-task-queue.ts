@@ -125,11 +125,19 @@ export async function proposeCodexTask(
     events: [{
       at: now,
       status: "proposed",
-      message: "Hermes proposed a bounded Codex task.",
+      message: initialCodexTaskEventMessage(input),
     }],
   };
   await writeCodexTasks(path, [...tasks, task]);
   return { task, created: true };
+}
+
+function initialCodexTaskEventMessage(input: CodexTaskInput): string {
+  const reason = (input.reason ?? "").toLowerCase();
+  if (reason.includes("operator explicitly delegated")) {
+    return "Operator delegated Codex takeover from the monitor.";
+  }
+  return "Hermes proposed a bounded Codex task.";
 }
 
 export async function approveCodexTask(

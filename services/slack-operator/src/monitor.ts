@@ -548,6 +548,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .block-resolution {
       border-left: 4px solid var(--bad);
     }
+    .draft-delegation {
+      border-left: 4px solid var(--violet);
+    }
     .resolution-summary {
       margin: 0;
       color: var(--text);
@@ -5669,6 +5672,18 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return "";
     }
 
+    function codexDelegationPromptForItem(item, summary) {
+      const repo = String(item.repo || "averray-agent/agent");
+      const pr = item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId);
+      const prLabel = pr ? "PR #" + pr : "this PR";
+      const title = cardTitleText(pipelineTitle(item), pr, item);
+      const correlation = item.correlationId ? " Correlation: " + item.correlationId + "." : "";
+      const signals = summary && summary.reviewSignals ? summary.reviewSignals : {};
+      const testSignals = Array.isArray(signals.testSignals) ? signals.testSignals.map(String).filter(Boolean) : [];
+      const checks = testSignals.length ? " Relevant signals already seen: " + testSignals.slice(0, 6).join(", ") + "." : "";
+      return "Take over " + repo + " " + prLabel + " (" + title + "). The operator explicitly delegated this draft from the Waiting / Drafts lane to Codex. First inspect the PR branch and current draft state; do not assume the work is complete. If the missing work is clear and safe, finish the smallest verifiable slice, run the relevant checks, push updates, and mark the PR ready for review only when it is actually complete. If the branch lacks context or ownership should remain with the original author, report that clearly and do not mark it ready. Do not merge or deploy." + checks + correlation;
+    }
+
     function renderMiniSteps(stage, verdict) {
       const steps = ["pr", "ci", "hermes", "testbed", "gate", "deploy"];
       const activeIndex = Math.max(0, steps.indexOf(stage.key));
@@ -5878,6 +5893,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '<section class="drawer-section">' + renderHandoffOwnerContract(item, verdict, action) + '</section>' +
         '<section class="drawer-section">' + renderActionRecipe(item, summary, verdict, action) + '</section>' +
         '<section class="drawer-section"><h3>Hermes verdict</h3>' + renderHermesVerdictBox(verdict, age) + (richReviewWhy ? '<div class="review-why">' + richReviewWhy + '</div>' : "") + '</section>' +
+        renderDraftDelegationPanel(item, summary) +
         renderCodexTaskPrompt(item, summary, verdict, action) +
         (verdict.level === "block" ? renderBlockResolutionPanel(item, summary, verdict, action) : "") +
         (verdict.level === "needs-review" && !isDraftPullRequest(item) ? '<section class="drawer-section">' + renderOperatorChecklistPanel(item, verdict, action) + '</section>' : "") +
@@ -5982,6 +5998,23 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return '<details class="drawer-section drawer-disclosure"><summary>' + escapeHtml(title) + '</summary>' + body + '</details>';
     }
 
+    function renderDraftDelegationPanel(item, summary) {
+      if (!isExternalDraftPullRequest(item)) return "";
+      const key = escapeAttr(boardItemKey(item));
+      return '<section class="drawer-section draft-delegation"><h3>Delegate takeover</h3>' +
+        '<p class="resolution-summary">This draft is currently just being watched. Use this only when you want Codex to take ownership instead of waiting for the PR author or owning agent.</p>' +
+        '<dl class="resolution-grid">' +
+          row("Codex will", escapeHtml("inspect the branch, finish verifiable missing work, run relevant checks, and mark ready only if it is complete")) +
+          row("Codex will not", escapeHtml("merge, deploy, or pretend the draft is ready without evidence")) +
+          row("Clears when", escapeHtml("Codex pushes the smallest safe update or reports that ownership should stay external, then Hermes re-checks")) +
+        '</dl>' +
+        '<div class="resolution-actions">' +
+          '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="delegate-draft" data-card-key="' + key + '" title="Create and approve an explicit Codex takeover task">Delegate to Codex</button>' +
+        '</div>' +
+        '<details class="drawer-disclosure prompt-disclosure"><summary>Show takeover prompt</summary><pre class="prompt-box">' + escapeHtml(codexDelegationPromptForItem(item, summary || item.summary || {})) + '</pre></details>' +
+        '</section>';
+    }
+
     function renderCodexTaskPrompt(item, summary, verdict, action) {
       const prompt = codexPromptForItem(item, summary, verdict, action);
       if (!prompt) return "";
@@ -6047,6 +6080,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function renderCodexFooterAction(item, summary, verdict, action) {
+      if (isExternalDraftPullRequest(item)) {
+        return '<button class="soft-button" data-action="primary" type="button" data-codex-task-action="delegate-draft" data-card-key="' + escapeAttr(boardItemKey(item)) + '" title="Create and approve an explicit Codex takeover task">Delegate to Codex</button>';
+      }
       const prompt = codexPromptForItem(item, summary, verdict, action);
       if (!prompt) return "";
       const task = codexTaskForItem(item);
@@ -7612,6 +7648,35 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       preserveSelectedActionContext(key, item);
       button.disabled = true;
       try {
+        if (action === "delegate-draft") {
+          if (!item) throw new Error("No draft PR selected for Codex delegation.");
+          if (!isExternalDraftPullRequest(item)) throw new Error("This PR already has a Codex task or is not an external draft.");
+          const summary = item.summary || {};
+          const prompt = codexDelegationPromptForItem(item, summary);
+          const pr = Number(item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId));
+          if (!prompt || !Number.isFinite(pr) || pr < 1) throw new Error("This draft does not have enough PR metadata for Codex delegation.");
+          const repo = String(item.repo || "averray-agent/agent");
+          await postDraftDelegationConversation(item, "operator");
+          const proposed = await postCodexTask({
+            action: "propose",
+            repo,
+            pullRequestNumber: pr,
+            correlationId: item.correlationId,
+            title: "Draft takeover: " + cardTitleText(pipelineTitle(item), pr, item),
+            reason: "operator explicitly delegated draft takeover to Codex",
+            requester: "monitor",
+            prompt,
+          });
+          const createdTask = proposed && proposed.task ? proposed.task : null;
+          if (!createdTask || !createdTask.id) throw new Error("Codex task was not returned after delegation.");
+          await postCodexTask({ action: "approve", id: createdTask.id });
+          await postDraftDelegationConversation(item, "agents");
+          preserveSelectedActionContext(key, item);
+          forceThreadMode();
+          renderAutoCollaborationThread();
+          setComposeStatus("Draft delegated to Codex. Task approved; runner pickup is now allowed.", "ok");
+          return;
+        }
         if (action === "propose") {
           if (!item) throw new Error("No PR selected for Codex task proposal.");
           const summary = item.summary || {};
@@ -7660,6 +7725,62 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       } finally {
         button.disabled = false;
       }
+    }
+
+    async function postDraftDelegationConversation(item, phase) {
+      const relation = collaborationRelationForItem(item);
+      const prLabel = relation.relatedPr ? relation.relatedPr.repo + "#" + relation.relatedPr.number : "this draft PR";
+      if (phase === "operator") {
+        await safePostCollaborationMessage(Object.assign({
+          author: "operator",
+          kind: "proposal",
+          addressedTo: "codex",
+          text: "Codex, please take over " + prLabel + ". It is still a draft, but I want you to inspect the branch, finish only the missing work you can verify, run the relevant checks, and mark it ready only if it is actually complete. Do not merge or deploy.",
+        }, relation));
+        return;
+      }
+      await safePostCollaborationMessage(Object.assign({
+        author: "hermes",
+        kind: "status",
+        addressedTo: "operator",
+        text: "I recorded that as an explicit takeover. " + prLabel + " can move from Waiting / Drafts into Codex Needed now; I will keep it out of the release path until Codex finishes and the PR is ready for a fresh check.",
+      }, relation));
+      await safePostCollaborationMessage(Object.assign({
+        author: "codex",
+        kind: "status",
+        addressedTo: "operator",
+        text: "Got it. I will treat this as a deliberate draft takeover: inspect first, keep the change small, and report back through the task before Hermes moves it forward.",
+      }, relation));
+    }
+
+    function collaborationRelationForItem(item) {
+      const relation = {};
+      const pr = item && (item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId));
+      if (item && pr) relation.relatedPr = { repo: String(item.repo || "averray-agent/agent"), number: Number(pr) };
+      if (item && item.correlationId) relation.relatedCorrelationId = String(item.correlationId);
+      return relation;
+    }
+
+    async function safePostCollaborationMessage(payload) {
+      try {
+        return await postCollaborationMessage(payload);
+      } catch (error) {
+        return null;
+      }
+    }
+
+    async function postCollaborationMessage(payload) {
+      const response = await fetch(collaborationUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || result.error || "HTTP " + response.status);
+      if (result && result.message) {
+        latestCollabMessages = (latestCollabMessages || []).concat([result.message]);
+      }
+      return result.message || null;
     }
 
     async function postCodexTask(payload) {

@@ -213,6 +213,12 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("isExternalDraftPullRequest(item)");
     expect(html).toContain("no Codex task starts from the card");
     expect(html).toContain("PR author");
+    expect(html).toContain("Delegate takeover");
+    expect(html).toContain("data-codex-task-action=\"delegate-draft\"");
+    expect(html).toContain("Draft delegated to Codex. Task approved");
+    expect(html).toContain("codexDelegationPromptForItem(item");
+    expect(html).toContain("postDraftDelegationConversation(item, \"operator\")");
+    expect(html).toContain("Got it. I will treat this as a deliberate draft takeover");
     expect(html).toContain("forceThreadMode();\n          renderAutoCollaborationThread();\n          setComposeStatus(\"Codex task approved");
     expect(html).toContain("latestCodexTasks\n        .filter((task) => !isTerminalCodexTask(task))");
     expect(html).toContain("collaborationMessagesForTask(task)");
