@@ -1411,6 +1411,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       --lane-accent: var(--muted);
     }
     .lane[data-lane="attention"] { --lane-accent: var(--bad); }
+    .lane[data-lane="waiting"] { --lane-accent: var(--muted); }
     .lane[data-lane="codex"] { --lane-accent: var(--violet); }
     .lane[data-lane="hermes"],
     .lane[data-lane="deploy"] { --lane-accent: var(--cyan); }
@@ -2921,6 +2922,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .actor-pill[data-actor="merge"]    { --actor-accent: var(--ok); }
     .actor-pill[data-actor="deploy"]   { --actor-accent: var(--cyan); }
     .actor-pill[data-actor="done"]     { --actor-accent: var(--muted); }
+    .actor-pill[data-actor="external"] { --actor-accent: var(--muted); }
     .actor-pill {
       border-color: color-mix(in srgb, var(--actor-accent) 40%, var(--line));
       background: color-mix(in srgb, var(--actor-accent) 12%, transparent);
@@ -3648,6 +3650,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         --lc-accent: var(--muted);
       }
       .lane-chip[data-lane="attention"] { --lc-accent: var(--bad); }
+      .lane-chip[data-lane="waiting"]   { --lc-accent: var(--muted); }
       .lane-chip[data-lane="codex"]     { --lc-accent: var(--violet); }
       .lane-chip[data-lane="hermes"]    { --lc-accent: var(--cyan); }
       .lane-chip[data-lane="operator"]  { --lc-accent: var(--warn); }
@@ -3907,6 +3910,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     <nav id="mobile-tabs" class="mobile-tabs" aria-label="Mobile lane filters">
       <button class="mobile-tab" type="button" data-mobile-tab="all" aria-pressed="true">All <span class="mt-count" id="mt-all">0</span></button>
       <button class="mobile-tab" type="button" data-mobile-tab="attention" aria-pressed="false">Attention <span class="mt-count" id="mt-attention">0</span></button>
+      <button class="mobile-tab" type="button" data-mobile-tab="waiting" aria-pressed="false">Waiting <span class="mt-count" id="mt-waiting">0</span></button>
       <button class="mobile-tab" type="button" data-mobile-tab="codex" aria-pressed="false">Codex <span class="mt-count" id="mt-codex">0</span></button>
       <button class="mobile-tab" type="button" data-mobile-tab="hermes" aria-pressed="false">Hermes <span class="mt-count" id="mt-hermes">0</span></button>
       <button class="mobile-tab" type="button" data-mobile-tab="operator" aria-pressed="false">Review <span class="mt-count" id="mt-operator">0</span></button>
@@ -5169,7 +5173,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function updateMobileTabCounts(entries) {
-      const counts = { all: 0, attention: 0, codex: 0, hermes: 0, operator: 0, queue: 0, deploy: 0, done: 0 };
+      const counts = { all: 0, attention: 0, waiting: 0, codex: 0, hermes: 0, operator: 0, queue: 0, deploy: 0, done: 0 };
       entries.forEach((item) => {
         const key = boardLaneForItem(item, releaseVerdict(item)).key;
         if (counts[key] !== undefined) counts[key] += 1;
@@ -5214,6 +5218,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function boardLaneDefinitions() {
       return [
         { key: "attention", title: "Needs Attention", kicker: "blocked · decide/fix", empty: "No blockers waiting." },
+        { key: "waiting", title: "Waiting / Drafts", kicker: "author finishes", empty: "No external drafts waiting." },
         { key: "codex", title: "Codex Needed", kicker: "create/approve task", empty: "No Codex action needed." },
         { key: "hermes", title: "Hermes Checking", kicker: "wait for verdict", empty: "Hermes has no active PR checks." },
         { key: "operator", title: "Operator Review", kicker: "risk decision", empty: "No operator sign-off needed." },
@@ -5370,7 +5375,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return { button: "Opens the Codex run/task details.", after: "Use the drawer to inspect progress, retry, or request a Hermes re-check." };
       }
       if (isDraftPullRequest(item)) {
-        return { button: "Opens the draft-readiness plan.", after: "Codex finishes the draft, marks ready, then CI and Hermes re-run." };
+        if (isExternalDraftPullRequest(item)) {
+          return { button: "Opens draft context; no Codex task starts from the card.", after: "Wait for the PR author or owning agent to mark it ready, unless you explicitly delegate Codex takeover." };
+        }
+        return { button: "Opens the active Codex draft task.", after: "Codex finishes the delegated draft work, marks ready, then CI and Hermes re-run." };
       }
       if (verdict.level === "block") {
         if (codexTaskFailedForItem(item)) {
@@ -5413,6 +5421,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (v.indexOf("hermes") >= 0) return "hermes";
       if (v.indexOf("merge") >= 0) return "merge";
       if (v.indexOf("operator") >= 0 || v.indexOf("human") >= 0) return "operator";
+      if (v.indexOf("author") >= 0 || v.indexOf("external") >= 0) return "external";
       if (v.indexOf("deploy") >= 0) return "deploy";
       if (v.indexOf("done") >= 0) return "done";
       if (v.indexOf("system") >= 0) return "system";
@@ -5454,6 +5463,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       }
       const signals = (summary && summary.reviewSignals) || {};
       const touched = Array.isArray(signals.touchedAreas) ? signals.touchedAreas : [];
+      if (isDraftPullRequest(item)) {
+        return isExternalDraftPullRequest(item) ? "Draft waiting for author" : "Draft delegated to Codex";
+      }
       if (level === "block") {
         const why = String(verdict.why || "").trim();
         if (why) return clampTitleText(why);
@@ -5644,6 +5656,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const title = cardTitleText(pipelineTitle(item), pr, item);
       const correlation = item.correlationId ? " Correlation: " + item.correlationId + "." : "";
       if (isDraftPullRequest(item)) {
+        if (isExternalDraftPullRequest(item)) return "";
         return "Continue " + repo + " " + prLabel + " (" + title + "). The Hermes monitor shows the PR is still DRAFT and no active Codex run is detected. Finish the draft work, run the relevant checks, push updates, and mark the PR ready for review when complete. Do not merge or deploy." + correlation;
       }
       if (verdict.level === "block" && action.owner === "Codex") {
@@ -5685,7 +5698,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         }
         return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '" title="Open the blocker plan; this does not mutate GitHub">Open fix plan</button>';
       }
-      if (isDraftPullRequest(item)) return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '" title="Open the draft-readiness plan">Open draft plan</button>';
+      if (isExternalDraftPullRequest(item)) return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '" title="Open draft context; no Codex task starts from this card">Inspect draft</button>';
+      if (isDraftPullRequest(item)) return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '" title="Open the active Codex draft task">Open Codex task</button>';
       if (verdict.level === "needs-review") {
         const label = isCriticalFileReview(item, item.summary || {}) ? "Open risk review" : isReleaseReviewVerdict(verdict) ? "Open release review" : "Open review checklist";
         return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '" title="Open the operator review drawer; no GitHub action happens from this card">' + escapeHtml(label) + '</button>';
@@ -5709,7 +5723,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const codexTask = codexTaskForItem(item);
       if (codexTaskFailedForItem(item)) return { key: "attention" };
       if (codexTask && !isTerminalCodexTask(codexTask)) return { key: "codex" };
-      if (isDraftPullRequest(item)) return { key: "codex" };
+      if (isExternalDraftPullRequest(item)) return { key: "waiting" };
+      if (isDraftPullRequest(item)) return { key: "waiting" };
       if (codexTaskCompletedAfterHermesReview(item)) return { key: "hermes" };
       if (reason === "ci_in_progress" || reason === "pr_checks_active") return { key: "codex" };
       if (verdict.level === "block") return { key: "attention" };
@@ -5908,7 +5923,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return '<h3>Handoff owner</h3><div class="owner-contract">' +
         '<div class="oc-current"><span class="oc-owner">Current owner: ' + escapeHtml(contract.owner) + '</span><span class="oc-action">' + escapeHtml(contract.action) + '</span></div>' +
         '<div class="oc-roles">' +
-          '<div class="oc-role"><strong>Codex</strong><span>builds code, fixes blockers, resolves draft readiness, and pushes PR updates.</span></div>' +
+          '<div class="oc-role"><strong>Codex</strong><span>builds code, fixes blockers, and resolves drafts only when a task is explicitly delegated.</span></div>' +
           '<div class="oc-role"><strong>Hermes</strong><span>runs read-only PR checks, code-risk review, testbed verification, and publishes the verdict.</span></div>' +
           '<div class="oc-role"><strong>Operator</strong><span>decides project intent, architecture, rollout, and business risk after agent pre-check evidence exists.</span></div>' +
           '<div class="oc-role"><strong>Queue</strong><span>merges only after branch protection, Hermes verdict, and any operator sign-off are clean.</span></div>' +
@@ -5918,9 +5933,15 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function ownerContractForItem(item, verdict, action) {
       if (isDraftPullRequest(item)) {
+        if (isExternalDraftPullRequest(item)) {
+          return {
+            owner: "PR author",
+            action: "The PR is still draft. Hermes is watching it, but Codex should not take over unless the operator explicitly delegates that work.",
+          };
+        }
         return {
           owner: "Codex",
-          action: "Finish the draft or mark it ready for review. Hermes and Operator should wait until the draft state clears.",
+          action: "Codex has an active delegated task for this draft. Finish it or mark it ready for review, then let CI and Hermes re-run.",
         };
       }
       if (verdict.level === "block") {
@@ -6079,10 +6100,19 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function actionRecipeForItem(item, summary, verdict, action) {
       if (isDraftPullRequest(item)) {
         const state = codexWorkState(item, pipelineStage(item, verdict));
+        if (isExternalDraftPullRequest(item)) {
+          return {
+            owner: "PR author",
+            why: "The PR is still a draft and there is no active Codex takeover task.",
+            ask: "Leave it watched while the author or owning agent finishes. If you want Codex to take over, say that explicitly in the collaboration chat.",
+            clearsWhen: "GitHub reports draft=false, then CI and Hermes run on the ready PR.",
+            proof: ["draft=false", "CI green", "Hermes verdict"],
+          };
+        }
         return {
           owner: "Codex",
-          why: "The PR is still a draft, so it is not ready for Hermes/operator release judgment.",
-          ask: state.state === "waiting" ? "Start or continue Codex with the task prompt. Finish the draft work or mark the PR ready for review." : "Wait for Codex/CI to finish before assigning more work.",
+          why: "The PR is still a draft and Codex has an active delegated task.",
+          ask: state.state === "waiting" ? "Start or continue the delegated Codex task. Finish the draft work or mark the PR ready for review." : "Wait for Codex/CI to finish before assigning more work.",
           clearsWhen: "GitHub reports draft=false and CI/Hermes run on the ready PR.",
           proof: ["draft=false", "CI green", "Hermes verdict"],
         };
@@ -7271,14 +7301,16 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         const action = nextPipelineAction(item, verdict);
         acc.total += 1;
         if (lane.key === "attention" || verdict.level === "block") acc.attention += 1;
+        if (lane.key === "waiting") acc.waiting += 1;
         if (action.owner === "Codex") acc.codex += 1;
         if (action.owner === "Operator") acc.operator += 1;
         if (action.owner === "Hermes") acc.hermes += 1;
         if (action.owner === "Merge queue" || lane.key === "queue") acc.queue += 1;
         return acc;
-      }, { total: 0, attention: 0, codex: 0, operator: 0, hermes: 0, queue: 0 });
+      }, { total: 0, attention: 0, waiting: 0, codex: 0, operator: 0, hermes: 0, queue: 0 });
       const parts = [];
       if (counts.attention) parts.push(plural(counts.attention, "item") + (counts.attention === 1 ? " needs attention" : " need attention"));
+      if (counts.waiting) parts.push(plural(counts.waiting, "draft") + (counts.waiting === 1 ? " is being watched" : " are being watched"));
       if (counts.codex) parts.push("Codex owns " + counts.codex);
       if (counts.operator) parts.push("operator owns " + counts.operator);
       if (counts.hermes) parts.push("Hermes is checking " + counts.hermes);
@@ -7286,6 +7318,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const headline = parts.length ? parts.join("; ") + "." : plural(counts.total, "item") + (counts.total === 1 ? " is" : " are") + " on the board.";
       const operatorNote = counts.operator
         ? "Pascal, I will call out the decision points instead of making them look like normal queue work."
+        : counts.waiting && !counts.codex
+          ? "Pascal, I am watching drafts without pretending Codex owns them; I will only ask Codex to take over if you explicitly say so."
         : "Pascal, nothing here needs your decision right this second; I am mostly keeping Codex pointed at the next handoff.";
       return "Here is the live shape of the board: " + headline + " " + operatorNote + " " + boardBriefingNextMove(items) + " I will narrate the next useful move here as the cards change, so the board is not just a wall of badges.";
     }
@@ -7305,7 +7339,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return "First useful move: Codex should open the failed runner output for " + title + ", then either fix the runner/auth setup or split the work into a smaller retry.";
       }
       if (isDraftPullRequest(lead)) {
-        return "First useful move: Codex should finish " + title + " as a real PR, mark it ready, and let CI plus Hermes re-check it.";
+        if (isExternalDraftPullRequest(lead)) {
+          return "First useful move: leave " + title + " watched while the PR author or owning agent finishes it; Codex should only take over if Pascal explicitly delegates that.";
+        }
+        return "First useful move: Codex should finish the delegated draft work for " + title + ", mark it ready, and let CI plus Hermes re-check it.";
       }
       if (action.owner === "Operator" || lane.key === "operator") {
         return "First useful move: Pascal should review " + title + " as a release decision, not as busywork; approve it only if the risk and intent are clear.";
@@ -7395,6 +7432,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function boardLaneLabel(key) {
       if (key === "attention") return "Needs Attention";
+      if (key === "waiting") return "Waiting / Drafts";
       if (key === "codex") return "Codex Needed";
       if (key === "hermes") return "Hermes Checking";
       if (key === "operator") return "Operator Review";
@@ -7411,7 +7449,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return "Update on " + title + ": I moved it" + movedFrom + " back to Needs Attention because the Codex runner failed. " + nextStep;
       }
       if (isDraftPullRequest(item)) {
-        return "Update on " + title + ": it is still a draft, so I am keeping it out of the release path. " + nextStep;
+        return "Update on " + title + ": it is still a draft, so I am keeping it out of the release path and not assigning it to Codex unless there is a delegated task. " + nextStep;
       }
       if (action.owner === "Operator" || lane.key === "operator") {
         return "Update on " + title + ": this moved" + movedFrom + " into Operator Review. Automation has gone as far as it safely can. " + nextStep;
@@ -7449,7 +7487,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return "Codex, " + title + " is back in Needs Attention because the last runner task failed. Start by opening the failed runner output: if it is auth or clone setup, fix the runner path; if it is a real PR/check failure, come back with the smallest retry task or smallest branch fix. " + nextStep;
       }
       if (isDraftPullRequest(item)) {
-        return "Codex, " + title + " is still a draft, so I am holding it out of the release path. Finish the draft work or mark it ready for review, then let CI and Hermes take another pass. " + nextStep;
+        if (isExternalDraftPullRequest(item)) {
+          return "Hermes is watching " + title + " as a draft owned outside this board. I am holding it out of release and not asking Codex to move unless Pascal explicitly delegates takeover. " + nextStep;
+        }
+        return "Codex, " + title + " is still a draft with a delegated task, so I am holding it out of the release path until the task makes it ready. Finish the draft work or mark it ready for review, then let CI and Hermes take another pass. " + nextStep;
       }
       if (lane.key === "attention" && action.owner === "Codex") {
         return "Codex, " + title + " is blocked at the gate. " + capitalizeFirst(action.text) + "; I will keep it visible here until the blocking signal disappears and Hermes records a clean pass. " + nextStep;
@@ -7492,7 +7533,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function collaborationAskForItem(item, verdict, action, lane) {
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
       if (codexTaskFailedForItem(item)) return "Codex, " + title + " failed in the runner. Please inspect the failed output first, then either fix the runner setup, push the smallest PR-check fix, or create a smaller retry task so Hermes has something concrete to re-check.";
-      if (isDraftPullRequest(item)) return "Codex, " + title + " is still in draft mode. Finish the draft or mark it ready for review; once that happens I will wait for CI and Hermes to re-run before moving it forward.";
+      if (isExternalDraftPullRequest(item)) return "I am watching " + title + " as an external draft. It stays out of the release path until the PR author or owning agent marks it ready; Codex should not pick it up unless Pascal explicitly delegates takeover.";
+      if (isDraftPullRequest(item)) return "Codex, " + title + " is still in draft mode with a delegated task. Finish the draft or mark it ready for review; once that happens I will wait for CI and Hermes to re-run before moving it forward.";
       if (action.owner === "Codex" || lane.key === "codex") return "Codex, you are up on " + title + ". " + capitalizeFirst(action.text) + "; keep it narrow and hand it back when CI/Hermes can see the new signal.";
       if (action.owner === "Operator" || lane.key === "operator" || lane.key === "attention") return "Pascal, " + title + " needs your call. " + capitalizeFirst(action.text) + "; if the answer is no, send it back to Codex with the exact change you want.";
       if (action.owner === "Hermes" || lane.key === "hermes") return "I am watching " + title + " now. I will land the verdict here once the checks clear, and I will not pretend it is ready while the evidence is still moving.";
@@ -7753,6 +7795,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function ownerLaneDefinitions() {
       return [
+        { key: "waiting", title: "Waiting", owner: "PR author", empty: "No external drafts waiting." },
         { key: "codex", title: "Codex", owner: "Codex", empty: "Nothing waiting on Codex." },
         { key: "hermes", title: "Hermes", owner: "Hermes", empty: "Hermes has no active PR checks." },
         { key: "operator", title: "Operator Review", owner: "Operator", empty: "No operator sign-off needed." },
@@ -8125,10 +8168,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         ? fixRequest.checks.map(String).filter(Boolean)
         : missingTests.length ? missingTests : defaultFixChecks(item, summary, testSignals);
       const isDraft = isDraftPullRequest(item);
+      const externalDraft = isExternalDraftPullRequest(item);
       const criticalReview = isCriticalFileReview(item, summary);
       return {
-        title: fixRequest.title || (isDraft ? "Draft readiness request for Codex" : verdict.level === "block" ? "Fix request for Codex" : criticalReview ? "Critical-file risk review" : "Operator decision request"),
-        owner: fixRequest.owner || action.owner,
+        title: fixRequest.title || (isDraft ? (externalDraft ? "Draft waiting on PR author" : "Delegated draft readiness task") : verdict.level === "block" ? "Fix request for Codex" : criticalReview ? "Critical-file risk review" : "Operator decision request"),
+        owner: fixRequest.owner || (externalDraft ? "PR author" : action.owner),
         instruction: fixRequest.instruction || fixRequestInstruction(item, summary, verdict, action),
         reason,
         surfaces: Array.isArray(fixRequest.surfaces) ? fixRequest.surfaces.map(String).filter(Boolean) : defaultFixSurfaces(item, summary, touchedAreas),
@@ -8140,7 +8184,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function fixRequestInstruction(item, summary, verdict, action) {
       const reason = normalize(summary.finalReason || summary.reason || item.reason);
       if (isDraftPullRequest(item)) {
-        return "Codex should finish the draft work, mark the PR ready for review, and let CI plus Hermes run on the ready PR.";
+        if (isExternalDraftPullRequest(item)) {
+          return "No agent action is required inside this board yet. Wait for the PR author or owning agent to finish the draft and mark it ready; delegate Codex takeover only if that ownership should change.";
+        }
+        return "Codex should finish the delegated draft work, mark the PR ready for review, and let CI plus Hermes run on the ready PR.";
       }
       if (verdict.level === "block") {
         if (isDeployItem(item) && reason === "hosted_health_failed") {
@@ -8349,6 +8396,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function nextPipelineActor(item, verdict) {
       const status = normalize(item.status);
       if (item.active === true || item.activeState === "running" || status === "running") return "Hermes";
+      if (isExternalDraftPullRequest(item)) return "PR author";
       if (isDraftPullRequest(item)) return "Codex";
       if (codexTaskCompletedAfterHermesReview(item)) return "Hermes";
       if (verdict.level === "block") return "Codex";
@@ -8362,6 +8410,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const summary = item.summary || {};
       const reason = normalize(summary.finalReason || summary.reason || item.reason);
       const prState = pullRequestState(item, item.summary || {});
+      const codexTask = codexTaskForItem(item);
       if (isDonePullRequestState(prState)) {
         return { owner: "Done", text: "PR is no longer open in GitHub; keep this handoff as release history" };
       }
@@ -8371,8 +8420,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (codexTaskFailedForItem(item)) {
         return { owner: "Codex", text: "review the failed Codex task output, push a smaller fix, or propose a retry task" };
       }
+      if (isExternalDraftPullRequest(item)) {
+        return { owner: "PR author", text: "finish the draft or mark it ready; Codex only takes over if the operator delegates a task" };
+      }
       if (isDraftPullRequest(item)) {
-        return { owner: "Codex", text: "finish the draft or mark it ready for review, then let CI and Hermes re-run" };
+        return { owner: codexTask && !isTerminalCodexTask(codexTask) ? "Codex" : "PR author", text: "finish the draft or mark it ready for review, then let CI and Hermes re-run" };
       }
       if (codexTaskCompletedAfterHermesReview(item)) {
         return { owner: "Hermes", text: "re-run the PR handoff/code-review checks now that Codex reported completion" };
@@ -8742,7 +8794,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return { level: "pass", label: "CLOSED", why: "GitHub reports this PR is closed; this handoff is history." };
       }
       if (prState && prState.draft === true) {
-        return { level: "needs-review", label: "DRAFT", why: "GitHub reports this PR is still a draft; Codex owns finishing it or marking it ready before Hermes/operator review." };
+        return { level: "needs-review", label: "DRAFT", why: "GitHub reports this PR is still a draft; the PR author or owning agent must mark it ready before Hermes/operator review." };
       }
       if (prState && normalize(prState.mergeableState) === "dirty") {
         return { level: "block", label: "CONFLICT", why: "GitHub reports this PR has merge conflicts." };
@@ -8871,7 +8923,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (reason === "pr_checks_failed") return "One or more PR checks failed; Codex should fix the failing signal before merge.";
       if (reason === "pr_checks_active") return "PR checks are still running on the head commit.";
       if (reason === "pr_checks_missing") return "GitHub has not surfaced PR check runs for this head commit yet.";
-      if (reason === "pr_is_draft") return "PR is still marked as draft; Codex owns finishing it or marking it ready.";
+      if (reason === "pr_is_draft") return "PR is still marked as draft; the author or owning agent must finish it before release review.";
       if (reason === "ci_in_progress") return "CI is still running; wait for the result.";
       if (level === "pass") return "No blocking release signals recorded.";
       return String(summary.finalReason || summary.reason || item.reason || item.phase || "No reason recorded.");
@@ -8892,6 +8944,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function isDraftPullRequest(item) {
       const prState = pullRequestState(item, item.summary || {});
       return Boolean(prState && prState.draft === true && !isDonePullRequestState(prState));
+    }
+
+    function isExternalDraftPullRequest(item) {
+      if (!isDraftPullRequest(item)) return false;
+      if (codexTaskFailedForItem(item)) return false;
+      const task = codexTaskForItem(item);
+      return !task || isTerminalCodexTask(task);
     }
 
     function isDonePullRequestState(prState) {

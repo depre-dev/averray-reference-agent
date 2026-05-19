@@ -131,7 +131,7 @@ function releaseVerdict(item: Record<string, unknown>): "block" | "needs-review"
 function nextOwner(item: Record<string, unknown>, verdict: ReturnType<typeof releaseVerdict>): string {
   const status = normalize(stringField(item, "status"));
   if (item.active === true || stringField(item, "activeState") === "running" || status === "running") return "Hermes";
-  if (isDraftPullRequest(item)) return "Codex";
+  if (isDraftPullRequest(item)) return "PR author";
   if (verdict === "block") return "Codex";
   if (verdict === "needs-review") return "Operator";
   if (verdict === "pass") return "Merge queue";
@@ -140,6 +140,7 @@ function nextOwner(item: Record<string, unknown>, verdict: ReturnType<typeof rel
 
 function nextActionText(owner: string, verdict: ReturnType<typeof releaseVerdict>, item: Record<string, unknown>): string {
   if (owner === "Hermes") return "finish checks and publish a verdict";
+  if (owner === "PR author" && isDraftPullRequest(item)) return "finish the draft or mark it ready; Codex should only take over if explicitly delegated";
   if (owner === "Codex" && isDraftPullRequest(item)) return "finish the draft or mark it ready for review so CI and Hermes can run";
   if (owner === "Codex") return "fix the blocking signal and push an update";
   if (owner === "Operator") return "use the agent pre-check evidence to decide project intent, architecture, and rollout risk";
@@ -153,7 +154,7 @@ function releaseReason(item: Record<string, unknown>, verdict: ReturnType<typeof
   const reviewReasons = Array.isArray(summary.reviewReasons) ? summary.reviewReasons : [];
   const first = toRecord(reviewReasons.find(Boolean));
   if (stringField(first, "message")) return stringField(first, "message") ?? "Operator review recommended.";
-  if (isDraftPullRequest(item)) return "PR is still draft; Codex must finish it or mark it ready before Hermes/operator can proceed.";
+  if (isDraftPullRequest(item)) return "PR is still draft; the author or owning agent must mark it ready before Hermes/operator can proceed.";
   const reason = normalize(stringField(summary, "finalReason") ?? stringField(summary, "reason") ?? stringField(item, "reason"));
   if (reason === "github_needs_review") return "Operator review recommended by the GitHub risk gate; agent pre-check evidence should be attached.";
   if (reason === "pr_review_hold") return "PR risk gate held this for operator review.";

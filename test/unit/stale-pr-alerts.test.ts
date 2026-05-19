@@ -82,7 +82,7 @@ describe("stale PR handoff alerts", () => {
     expect(items[0]?.owner).toBe("Operator");
   });
 
-  it("routes stale draft PRs back to Codex instead of operator review", () => {
+  it("routes stale draft PRs to the PR author instead of Codex", () => {
     const items = stalePrAlertItems({
       now,
       staleAfterMinutes: 120,
@@ -109,9 +109,9 @@ describe("stale PR handoff alerts", () => {
 
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({
-      owner: "Codex",
-      nextAction: "finish the draft or mark it ready for review so CI and Hermes can run",
-      reason: "PR is still draft; Codex must finish it or mark it ready before Hermes/operator can proceed.",
+      owner: "PR author",
+      nextAction: "finish the draft or mark it ready; Codex should only take over if explicitly delegated",
+      reason: "PR is still draft; the author or owning agent must mark it ready before Hermes/operator can proceed.",
     });
   });
 
