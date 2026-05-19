@@ -159,7 +159,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("No active Codex run detected");
     expect(html).toContain("paste it into a Codex thread/app");
     expect(html).toContain("isCodexTaskPromptText(text)");
-    expect(html).toContain("verdict.level === \"needs-review\" && !isDraftPullRequest(item) && !locallyApproved");
+    expect(html).toContain("verdict.level !== \"needs-review\" || isDraftPullRequest(item) || locallyApproved");
     expect(html).toContain("renderOperatorChecklistPanel(item, verdict, action)");
     expect(html).toContain("renderAgentPrecheckList(item, summary, verdict, stage)");
     expect(html).toContain("renderCheckMatrix(summary, testSignals)");
@@ -219,6 +219,14 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("codexDelegationPromptForItem(item");
     expect(html).toContain("postDraftDelegationConversation(item, \"operator\")");
     expect(html).toContain("Got it. I will treat this as a deliberate draft takeover");
+    expect(html).toContain("data-codex-task-action=\"send-back\"");
+    expect(html).toContain("Send back to Codex");
+    expect(html).toContain("codexOperatorSendBackPromptForItem(item");
+    expect(html).toContain("postOperatorSendBackConversation(item, \"operator\"");
+    expect(html).toContain("operator sent review back to Codex");
+    expect(html).toContain("Sent back to Codex. Task approved");
+    expect(html).toContain("I recorded the operator send-back");
+    expect(html).toContain("Only operator-review cards can be sent back to Codex");
     expect(html).toContain("forceThreadMode();\n          renderAutoCollaborationThread();\n          setComposeStatus(\"Codex task approved");
     expect(html).toContain("latestCodexTasks\n        .filter((task) => !isTerminalCodexTask(task))");
     expect(html).toContain("collaborationMessagesForTask(task)");
@@ -255,7 +263,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("renderPipelineSteps(stage, verdict)");
     expect(html).toContain("renderPrTimeline(item, stage, verdict, action)");
     expect(html).toContain("commandBoardLaneCounts(entries)");
-    expect(html).toContain("renderDecisionActions(item)");
+    expect(html).toContain("renderDecisionActions(item, verdict)");
     expect(html).toContain("buildFixRequest(item, summary, verdict, action)");
     expect(html).toContain("Fix this block");
     expect(html).toContain("Handoff owner");
@@ -288,7 +296,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Critical-file risk review");
     expect(html).toContain("Approve risk review");
     expect(html).toContain("Mark release reviewed");
-    expect(html).toContain("Mark reviewed locally");
+    expect(html).toContain("Approve operator review");
     expect(html).toContain("Operator review marked complete");
     expect(html).toContain("READY REVIEW");
     expect(html).toContain("Mark reviewed");

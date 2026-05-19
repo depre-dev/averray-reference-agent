@@ -134,6 +134,9 @@ export async function proposeCodexTask(
 
 function initialCodexTaskEventMessage(input: CodexTaskInput): string {
   const reason = (input.reason ?? "").toLowerCase();
+  if (reason.includes("operator sent review back")) {
+    return "Operator sent review back to Codex from the monitor.";
+  }
   if (reason.includes("operator explicitly delegated")) {
     return "Operator delegated Codex takeover from the monitor.";
   }
