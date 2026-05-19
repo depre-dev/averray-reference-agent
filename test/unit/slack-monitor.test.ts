@@ -512,6 +512,19 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain('updateCollabUnreadPill');
     expect(html).toContain('ensureCollabScrollListeners');
     expect(html).toContain('collab-unread-pill');
+
+    // Lane auto-hide (PR: monitor-lane-autohide): when at least one
+    // active lane has items, empty active lanes are skipped from the
+    // render. data-active-lanes lets the CSS size the grid template
+    // dynamically without overflow or wrapping.
+    expect(html).toContain('target.dataset.activeLanes = String(activeLaneCount)');
+    expect(html).toContain('anyActiveItems');
+    expect(html).toContain('.kanban-board[data-active-lanes="3"]');
+    expect(html).toContain('.kanban-board[data-active-lanes="7"]');
+    expect(html).toContain('.kanban-board[data-done-expanded="true"][data-active-lanes="7"]');
+    // The old hardcoded 6-column desktop grid is gone — the template
+    // is now driven by data-active-lanes.
+    expect(html).not.toContain('minmax(186px, 0.96fr)\n        56px');
   });
 
   it("serves a PWA manifest with the canonical name + scope", () => {
