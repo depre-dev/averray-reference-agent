@@ -6981,11 +6981,90 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const lane = boardLaneForItem(item, verdict);
       const messages = [
         ...selectedConversationMemoryMessages(item),
-        collabMessage("Hermes", pipelineTitle(item) + " is here because " + shortenVerdictWhy(verdict.why || "the handoff needs a release decision."), verdict.label, itemUpdatedMs(item)),
-        collabMessage("Hermes", collaborationAskForItem(item, verdict, action, lane), pipelineStage(item, verdict).label, itemUpdatedMs(item) + 1),
-        collabMessage("Hermes", nextStepNarrationForItem(item, verdict, action, lane), "what happens next", itemUpdatedMs(item) + 2, inferAddressedTo(action, lane)),
+        collabMessage("Hermes", selectedPrRoomBriefingForItem(item, verdict, action, lane), "PR room briefing · " + boardLaneLabel(lane.key), itemUpdatedMs(item)),
+        collabMessage("Hermes", selectedPrRoomHandoffForItem(item, verdict, action, lane), "next turn", itemUpdatedMs(item) + 1, inferAddressedTo(action, lane)),
+        collabMessage("Hermes", nextStepNarrationForItem(item, verdict, action, lane), "why it moves", itemUpdatedMs(item) + 2, inferAddressedTo(action, lane)),
       ];
       return renderCollaborationShell(cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item), messages);
+    }
+
+    function selectedPrRoomBriefingForItem(item, verdict, action, lane) {
+      const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
+      const laneLabel = boardLaneLabel(lane && lane.key);
+      const age = handoffAge(item);
+      return "I am treating " + title + " as its own PR room, not just a card on the board. Right now it is in " + laneLabel + ", " + action.owner + " owns the next turn, and the latest signal is " + verdict.label + " from " + age.label.toLowerCase() + " " + age.duration + ". " +
+        selectedPrRoomEvidenceForItem(item, verdict) + " " +
+        selectedPrRoomBoundaryForItem(item, verdict, action, lane);
+    }
+
+    function selectedPrRoomEvidenceForItem(item, verdict) {
+      const summary = item.summary || {};
+      const signals = summary.reviewSignals || {};
+      const githubLive = summary.githubLive || {};
+      const totals = githubLive.checkTotals || {};
+      const testSignals = Array.isArray(signals.testSignals) ? signals.testSignals.map(String).filter(Boolean) : [];
+      const reviewReasons = Array.isArray(summary.reviewReasons) ? summary.reviewReasons : [];
+      const codexTask = codexTaskForItem(item);
+      if (codexTaskFailedForItem(item)) {
+        return "The important evidence is the failed Codex runner output; I do not trust the branch state again until that output is inspected or a smaller retry exists.";
+      }
+      if (isDraftPullRequest(item)) {
+        return "The important evidence is GitHub's draft flag; while that is true, release checks are deliberately not the main question.";
+      }
+      if (codexTask && !isTerminalCodexTask(codexTask)) {
+        return "The important evidence is the active Codex task queue; I am waiting for that task to finish before pretending Hermes has a stable commit to review.";
+      }
+      if (Number(totals.total) > 0) {
+        return "The important evidence I see is GitHub live checks at " + String(Number(totals.passed) || 0) + "/" + String(Number(totals.total) || 0) + " passed" + (testSignals[0] ? ", plus " + testSignals[0] : "") + ".";
+      }
+      if (reviewReasons.length) {
+        const reason = reviewReasons[0] || {};
+        const code = reason.code ? String(reason.code) : "review signal";
+        const message = reason.message ? String(reason.message) : shortenVerdictWhy(verdict.why);
+        return "The important evidence is " + code + ": " + message;
+      }
+      return "The important evidence is the Hermes verdict itself: " + shortenVerdictWhy(verdict.why || "no stronger signal is attached yet.");
+    }
+
+    function selectedPrRoomBoundaryForItem(item, verdict, action, lane) {
+      if (codexTaskFailedForItem(item)) return "I will not ask Hermes to bless this again until Codex has dealt with the failed task or proposed a clean retry.";
+      if (isExternalDraftPullRequest(item)) return "I will keep it watched and quiet unless Pascal explicitly delegates a Codex takeover.";
+      if (isDraftPullRequest(item)) return "I will hold it out of release until the draft is finished or marked ready, then CI and Hermes can take a real pass.";
+      if (action.owner === "Operator" || (lane && lane.key) === "operator") return "I need Pascal's judgement here; automation can prepare evidence, but it should not decide project intent or rollout risk.";
+      if (action.owner === "Codex" || (lane && lane.key) === "codex" || verdict.level === "block") return "I will keep it visible until Codex changes the branch or creates a smaller retry and Hermes sees the blocking signal disappear.";
+      if (action.owner === "Merge queue" || (lane && lane.key) === "queue") return "I will not call it done from the queue; it still needs merge ownership, a real GitHub merge, and then post-deploy verification.";
+      if (action.owner === "Hermes" || (lane && lane.key) === "hermes") return "I am waiting for read-only evidence to settle before assigning anybody else work.";
+      if ((lane && lane.key) === "deploy") return "I will watch production health before turning this into release history.";
+      return "I will update this room when the owner, verdict, or lane changes.";
+    }
+
+    function selectedPrRoomHandoffForItem(item, verdict, action, lane) {
+      const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
+      if (codexTaskFailedForItem(item)) {
+        return "Codex, for " + title + ", start with the runner output instead of guessing. Tell us whether this is runner/auth setup, a real PR failure, or a task that needs to be split smaller.";
+      }
+      if (isExternalDraftPullRequest(item)) {
+        return "Pascal, " + title + " is an external draft. I am watching it, but I will not quietly convert it into Codex work unless you explicitly hand it over.";
+      }
+      if (isDraftPullRequest(item)) {
+        return "Codex, " + title + " is still draft work. Finish the draft or mark it ready only when the branch is actually ready for CI and Hermes.";
+      }
+      if (action.owner === "Operator" || (lane && lane.key) === "operator") {
+        return "Pascal, your next turn is not a rubber stamp on " + title + ". Read the evidence, decide whether the risk is intentional, then approve locally or send it back with a precise ask.";
+      }
+      if (action.owner === "Codex" || (lane && lane.key) === "codex" || verdict.level === "block") {
+        return "Codex, your next turn on " + title + " is the smallest branch update that removes the named blocker, followed by CI and a Hermes re-check.";
+      }
+      if (action.owner === "Merge queue" || (lane && lane.key) === "queue") {
+        return "Merge steward, " + title + " is not done yet. Confirm branch protection, merge timing, and who watches the deploy before this leaves the queue.";
+      }
+      if (action.owner === "Hermes" || (lane && lane.key) === "hermes") {
+        return "Hermes, keep " + title + " in read-only review until the moving checks stop moving; then post the verdict back into this room.";
+      }
+      if ((lane && lane.key) === "deploy") {
+        return "Hermes, " + title + " is in production verification. Watch hosted health and the post-deploy suite before calling it done.";
+      }
+      return action.owner + ", your next turn on " + title + " is: " + action.text + ".";
     }
 
     function renderCollaborationThread(options) {

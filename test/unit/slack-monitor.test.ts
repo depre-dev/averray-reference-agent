@@ -204,6 +204,14 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("collabMessageMatchesItem(message, item)");
     expect(html).toContain("boardNarrationMatchesItem(message, item)");
     expect(html).toContain("codexTasksForItem(item)");
+    expect(html).toContain("selectedPrRoomBriefingForItem(item, verdict, action, lane)");
+    expect(html).toContain("selectedPrRoomHandoffForItem(item, verdict, action, lane)");
+    expect(html).toContain("PR room briefing");
+    expect(html).toContain("I am treating \" + title + \" as its own PR room");
+    expect(html).toContain("not just a card on the board");
+    expect(html).toContain("latest signal is");
+    expect(html).toContain("your next turn is not a rubber stamp");
+    expect(html).toContain("Confirm branch protection, merge timing, and who watches the deploy");
     expect(html).toContain("This PR room is quiet so far");
     expect(html).toContain("nextStepNarrationForItem(item, verdict, action, lane)");
     expect(html).toContain("Right move now:");
