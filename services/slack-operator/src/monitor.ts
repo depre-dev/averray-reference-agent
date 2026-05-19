@@ -2109,6 +2109,31 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       line-height: 1.5;
       overflow-wrap: anywhere;
     }
+    /* "more ↓" / "less ↑" toggle for long synthesized messages. Sits
+       inline at the end of the truncated text so it reads as an
+       extension of the sentence, not a separate UI block. */
+    .collab-more {
+      display: inline-flex;
+      align-items: center;
+      margin-left: 6px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: color-mix(in srgb, var(--cyan) 80%, var(--text));
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.72rem;
+      letter-spacing: 0.02em;
+      cursor: pointer;
+      vertical-align: baseline;
+    }
+    .collab-more:hover { color: var(--cyan); text-decoration: underline; }
+    /* When fully expanded the "less ↑" sits on its own line beneath the
+       text — looks neater than glued to the end of a paragraph. */
+    .collab-message[data-expanded="true"] .collab-more {
+      display: inline-block;
+      margin-left: 0;
+      margin-top: 6px;
+    }
     /* Posted messages: the inline POSTED pill in the byline already
        signals "real chat". Brighten the body text so it reads as the
        load-bearing line in the thread. No background tint, no rail. */
@@ -4154,6 +4179,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     // session; cleared on reload. Doesn't apply to lanes that have items
     // (those are always expanded).
     const forcedExpandedLaneKeys = new Set();
+    // Per-message expand state for long synthesized chat lines. Persists
+    // for the session; keyed by collabRowKey(message) so synthesized
+    // messages (no server id) match across re-renders. The renderer
+    // shows a truncated summary + "more ↓" button by default, expands
+    // to the full text when the key is in this set.
+    const expandedCollabRowKeys = new Set();
     // Compose state for the new collaboration "post" mode. The compose form
     // can run in two modes: "post" (POST /monitor/collaboration → real
     // multi-agent message) and "ask" (POST /monitor/command → Hermes
@@ -4296,6 +4327,23 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         // Play a confirmation chime on enable so the operator hears
         // what they just turned on (and the AudioContext gets unlocked).
         if (collabSoundEnabled) playOperatorChime();
+        return;
+      }
+      // Toggle the expanded state for a long synthesized chat message.
+      // Re-renders the collaboration thread so the row paints with
+      // the full text (or back to the summary) using the same diff/
+      // animation path as a normal SSE tick.
+      const collabMore = event.target && event.target.closest ? event.target.closest("[data-collab-more]") : null;
+      if (collabMore) {
+        const key = collabMore.getAttribute("data-collab-more");
+        if (key) {
+          if (expandedCollabRowKeys.has(key)) expandedCollabRowKeys.delete(key);
+          else expandedCollabRowKeys.add(key);
+          // Force the thread to re-render even if data-auto is currently
+          // false (some flows pin it off — see Ask Hermes).
+          forceThreadMode();
+          renderAutoCollaborationThread();
+        }
         return;
       }
       const button = event.target && event.target.closest ? event.target.closest("[data-monitor-decision]") : null;
@@ -5312,7 +5360,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       } else {
         const cols = visibleLanes.map((lane) => {
           if (lane.key === "done") return "minmax(220px, 1fr)";
-          return collapsedKeys.has(lane.key) ? "60px" : "minmax(186px, 1fr)";
+          return collapsedKeys.has(lane.key) ? "66px" : "minmax(186px, 1fr)";
         });
         if (!showDone) cols.push("56px");
         target.style.gridTemplateColumns = cols.join(" ");
@@ -7486,6 +7534,23 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
             addressedBadge + kindBadge + postedBadge +
             (meta ? '<span class="collab-meta">' + escapeHtml(meta) + '</span>' : "") +
           '</div>';
+      // Long synthesized messages were a wall of text in the live
+      // thread. Compute a short summary (first ~2 sentences, capped
+      // at 180 chars) and a "more" affordance — clicking expands the
+      // row to show the full text. expandedCollabRowKeys persists the
+      // expanded state per-session, keyed by the same composite key
+      // collabRowKey() uses for fresh-detection.
+      const rowKey = collabRowKey(message);
+      const text = String(message.text || "");
+      const summary = collapsedCollabSummary(text);
+      const isOverflow = summary !== text;
+      const expanded = isOverflow && expandedCollabRowKeys.has(rowKey);
+      const overflowAttr = isOverflow ? ' data-overflow="true"' : "";
+      const expandedAttr = expanded ? ' data-expanded="true"' : "";
+      const renderText = !isOverflow || expanded ? text : summary;
+      const moreButton = isOverflow
+        ? '<button type="button" class="collab-more" data-collab-more="' + escapeAttr(rowKey) + '" aria-expanded="' + (expanded ? "true" : "false") + '">' + (expanded ? "less ↑" : "more ↓") + '</button>'
+        : "";
       return '<article class="collab-message"' +
         ' data-speaker="' + escapeAttr(slug) + '"' +
         ' data-posted="' + posted + '"' +
@@ -7494,10 +7559,44 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         ' data-grouped="' + (grouped ? "true" : "false") + '"' +
         (isNewest ? ' data-newest="true"' : "") +
         (isFresh ? ' data-fresh="true"' : "") +
+        overflowAttr +
+        expandedAttr +
         '>' +
         byline +
-        '<div class="collab-text">' + escapeHtml(message.text || "") + '</div>' +
+        '<div class="collab-text">' + escapeHtml(renderText) + moreButton + '</div>' +
       '</article>';
+    }
+
+    // Synthesized board-state messages can run 4-6 sentences explaining
+    // the whole workflow. That made the thread feel like a wall of text
+    // on a busy board. Show only the first 1-2 sentences (max ~180
+    // chars) by default; the operator can expand inline if they need
+    // the full explanation.
+    const COLLAB_SUMMARY_MAX_CHARS = 180;
+    const COLLAB_SUMMARY_MAX_SENTENCES = 2;
+    function collapsedCollabSummary(text) {
+      const trimmed = String(text || "").trim();
+      if (!trimmed) return trimmed;
+      if (trimmed.length <= COLLAB_SUMMARY_MAX_CHARS) return trimmed;
+      // Sentence boundary = period/exclaim/question followed by space
+      // (so URLs and "1 changed file(s)" parens don't trip the split).
+      const sentences = trimmed.split(/(?<=[.!?])\s+/);
+      let out = "";
+      for (let i = 0; i < Math.min(sentences.length, COLLAB_SUMMARY_MAX_SENTENCES); i += 1) {
+        const next = (out ? out + " " : "") + sentences[i];
+        if (next.length > COLLAB_SUMMARY_MAX_CHARS) {
+          if (!out) {
+            // First sentence is already too long — hard-cap on chars.
+            out = next.slice(0, COLLAB_SUMMARY_MAX_CHARS).trimEnd() + "…";
+          }
+          break;
+        }
+        out = next;
+      }
+      if (!out) out = trimmed.slice(0, COLLAB_SUMMARY_MAX_CHARS).trimEnd() + "…";
+      // If we cut before the end, add ellipsis so the trim is obvious.
+      if (out.length < trimmed.length && !out.endsWith("…")) out += " …";
+      return out;
     }
 
     function collabMessage(speaker, text, meta, ts, addressedTo) {

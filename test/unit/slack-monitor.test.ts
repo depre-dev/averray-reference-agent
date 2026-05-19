@@ -529,6 +529,19 @@ describe("slack operator personal monitor", () => {
     // grid template comes from the inline style now.
     expect(html).not.toContain('.kanban-board[data-active-lanes="3"]');
     expect(html).not.toContain('target.dataset.activeLanes = String(activeLaneCount)');
+
+    // Chat collapse (PR: monitor-chat-collapse): long synthesized
+    // messages render as a 1-2 sentence summary with a "more ↓"
+    // affordance to expand. Expand state lives in
+    // expandedCollabRowKeys per session. Rail width bumped 60→66px.
+    expect(html).toContain('expandedCollabRowKeys');
+    expect(html).toContain('collapsedCollabSummary');
+    expect(html).toContain('COLLAB_SUMMARY_MAX_CHARS');
+    expect(html).toContain('data-collab-more');
+    expect(html).toContain('.collab-more');
+    expect(html).toContain('"66px"'); // rail width bump
+    // Old 60px rail width is gone.
+    expect(html).not.toContain('? "60px" : "minmax(186px, 1fr)"');
   });
 
   it("serves a PWA manifest with the canonical name + scope", () => {
