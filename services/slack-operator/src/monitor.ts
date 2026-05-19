@@ -1145,10 +1145,19 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       border-radius: 7px;
       font-size: 0.78rem;
       background: var(--surface-soft);
+      transition: opacity 140ms ease, border-color 140ms ease;
     }
     .toggle-pill[aria-pressed="true"] {
       border-color: var(--accent);
       background: var(--accent-bg);
+    }
+    /* Mirror the top-strip counter-chip dim treatment (#157): filter
+       pills with count=0 fade so the eye lands on the ones that
+       actually have work. Only applies when the pill ISN'T the
+       currently selected filter — losing visual weight on a pressed
+       pill would hide the active state. */
+    .toggle-pill[data-empty="true"]:not([aria-pressed="true"]) {
+      opacity: 0.42;
     }
     .board-shell {
       min-height: 0;
@@ -2758,6 +2767,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
     .stale-dot[data-stale="waiting"] { background: var(--warn); box-shadow: 0 0 0 2px rgba(217, 173, 66, 0.22); }
     .stale-dot[data-stale="stale"]   { background: var(--bad);  box-shadow: 0 0 0 2px rgba(238, 98, 96, 0.24); animation: pulse 1.6s ease-out infinite; }
+    /* Stale-tier escalation: a 2-hour stuck PR is yellow, a half-day
+       stuck PR is orange, a day-plus stuck PR is bold red. Heavier
+       font-weight on higher tiers as a color-blind-friendly fallback. */
+    .stale-dot[data-stale-tier="warn"]     { background: var(--warn);      box-shadow: 0 0 0 2px rgba(217, 173, 66, 0.24); animation: none; }
+    .stale-dot[data-stale-tier="high"]     { background: #f59c47;          box-shadow: 0 0 0 2px rgba(245, 156, 71, 0.30); animation: pulse 2.2s ease-out infinite; }
+    .stale-dot[data-stale-tier="critical"] { background: var(--bad);       box-shadow: 0 0 0 2px rgba(238, 98, 96, 0.40); animation: pulse 1.3s ease-out infinite; }
     .card-age {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 0.7rem;
@@ -2768,6 +2783,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
     .card-head .stale-dot[data-stale="stale"] ~ .card-age { color: var(--bad); }
     .card-head .stale-dot[data-stale="waiting"] ~ .card-age { color: var(--warn); }
+    /* Stale-tier wins over the broader data-stale rules so the age
+       text matches its dot. Higher tiers get a heavier weight. */
+    .kc-head-r[data-stale-tier="warn"]     .card-age { color: var(--warn);  font-weight: 600; }
+    .kc-head-r[data-stale-tier="high"]     .card-age { color: #f59c47;      font-weight: 700; }
+    .kc-head-r[data-stale-tier="critical"] .card-age { color: var(--bad);   font-weight: 800; letter-spacing: 0.06em; }
     .kc-id {
       display: flex;
       align-items: baseline;
@@ -5561,8 +5581,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
             (codexState ? '<span class="work-state" data-state="' + escapeAttr(codexState.state) + '">' + escapeHtml(codexState.label) + '</span>' : "") +
             (activeAgent ? '<span class="active-agent" data-agent="' + escapeAttr(activeAgent.id) + '"><span class="aa-dot"></span>' + escapeHtml(activeAgent.label) + '</span>' : "") +
           '</div>' +
-          '<div class="kc-head-r">' +
-            '<span class="stale-dot" data-stale="' + escapeAttr(staleState) + '" title="' + escapeAttr(staleState) + '"></span>' +
+          '<div class="kc-head-r" data-stale-tier="' + escapeAttr(age.staleTier || "") + '">' +
+            '<span class="stale-dot" data-stale="' + escapeAttr(staleState) + '" data-stale-tier="' + escapeAttr(age.staleTier || "") + '" title="' + escapeAttr(staleState + (age.staleTier ? " · " + age.staleTier : "")) + '"></span>' +
             '<span class="card-age">' + escapeHtml(age.label + " " + age.duration) + '</span>' +
           '</div>' +
         '</div>' +
@@ -8599,15 +8619,33 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function renderPipelineBoard(entries) {
       const counts = commandBoardLaneCounts(entries);
-      setText("board-all", String(entries.length - (counts.done || 0)));
-      setText("board-block", String(counts.attention || 0));
-      setText("board-review", String(counts.operator || 0));
-      setText("board-ready", String(counts.queue || 0));
-      setText("board-running", String((counts.hermes || 0) + (counts.deploy || 0)));
-      setText("done-count", String(counts.done || 0));
+      // Same setText path as before, plus mirror the data-empty toggle
+      // we already use for the top-strip counter chips (#157) so the
+      // bottom filter pills dim when their count is 0. Reduces visual
+      // noise — operator's eye lands on the pills that actually have
+      // work behind them.
+      setFilterPillCount("board-all", entries.length - (counts.done || 0));
+      setFilterPillCount("board-block", counts.attention || 0);
+      setFilterPillCount("board-review", counts.operator || 0);
+      setFilterPillCount("board-ready", counts.queue || 0);
+      setFilterPillCount("board-running", (counts.hermes || 0) + (counts.deploy || 0));
+      setFilterPillCount("done-count", counts.done || 0);
       renderOwnerSummary(entries);
       renderStalenessSummary(entries);
       updatePipelineFilterButtons();
+    }
+
+    // Set a filter pill's inner count span AND toggle data-empty on
+    // the outer button so CSS can dim 0-count filters. Mirrors
+    // setCounterChip for the top-strip chips.
+    function setFilterPillCount(spanId, value) {
+      const span = document.getElementById(spanId);
+      if (!span) return;
+      const num = Number(value);
+      const safe = Number.isFinite(num) ? Math.max(0, Math.floor(num)) : 0;
+      span.textContent = String(safe);
+      const pill = span.closest(".toggle-pill");
+      if (pill) pill.setAttribute("data-empty", safe > 0 ? "false" : "true");
     }
 
     function renderStalenessSummary(entries) {
@@ -9294,11 +9332,19 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function handoffAge(item) {
       const updated = Date.parse(String(item.updatedAt || ""));
-      if (!Number.isFinite(updated)) return { state: "waiting", label: "Waiting", duration: "unknown age" };
+      if (!Number.isFinite(updated)) return { state: "waiting", label: "Waiting", duration: "unknown age", staleTier: "" };
       const minutes = Math.max(0, Math.floor((Date.now() - updated) / 60000));
       const state = minutes >= 120 ? "stale" : minutes >= 30 ? "waiting" : "fresh";
       const label = state === "stale" ? "Stale" : state === "waiting" ? "Waiting" : "Fresh";
-      return { state, label, duration: formatDuration(minutes) };
+      // Sub-tier so a 1-day-old stuck PR signals louder than a freshly-
+      // stale 2-hour-old one. Empty string when the item isn't stale.
+      //   warn:     2h  ≤ age < 12h  (default stale yellow/red)
+      //   high:    12h  ≤ age < 24h  (orange, bolder)
+      //   critical: 24h ≤ age        (red, bold, faster pulse)
+      const staleTier = state === "stale"
+        ? (minutes >= 1440 ? "critical" : minutes >= 720 ? "high" : "warn")
+        : "";
+      return { state, label, duration: formatDuration(minutes), staleTier };
     }
 
     function formatDuration(minutes) {

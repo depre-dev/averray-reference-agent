@@ -547,6 +547,21 @@ describe("slack operator personal monitor", () => {
     // regression: the constant names must NOT appear at script level.
     expect(html).not.toContain('const COLLAB_SUMMARY_MAX_CHARS');
     expect(html).not.toContain('const COLLAB_SUMMARY_MAX_SENTENCES');
+
+    // Filter pills + stale tiers (PR: monitor-polish-filters-stale):
+    // bottom filter pills dim when their count is 0 (same idiom as
+    // the top-strip counter chips); stale badges escalate yellow →
+    // orange → red as the age grows past 12h / 24h.
+    expect(html).toContain('setFilterPillCount');
+    expect(html).toContain('pill.setAttribute("data-empty"');
+    expect(html).toContain('.toggle-pill[data-empty="true"]:not([aria-pressed="true"])');
+    expect(html).toContain('staleTier');
+    expect(html).toContain('data-stale-tier="warn"');
+    expect(html).toContain('data-stale-tier="high"');
+    expect(html).toContain('data-stale-tier="critical"');
+    // The thresholds: 12h (720m) → high, 24h (1440m) → critical.
+    expect(html).toContain('minutes >= 1440');
+    expect(html).toContain('minutes >= 720');
   });
 
   it("serves a PWA manifest with the canonical name + scope", () => {
