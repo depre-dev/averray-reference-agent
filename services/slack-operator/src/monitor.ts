@@ -4023,6 +4023,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     let latestCodexRunner = null;
     let latestPayload = null;
     let latestCollabMessages = [];
+    let latestBoardNarrations = [];
+    let previousBoardNarrationState = new Map();
+    let hasBoardNarrationSnapshot = false;
+    const BOARD_NARRATION_LIMIT = 12;
     // Set of message IDs we've already shown — used to mark NEW messages
     // with data-fresh so they slide in instead of popping into existence.
     let knownCollabMessageIds = new Set();
@@ -4713,6 +4717,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       latestCodexTasks = normalizeCodexTasks(payload.codexTasks);
       latestCodexRunner = normalizeCodexRunner(payload.codexTasks && payload.codexTasks.runner);
       latestPipelineItems = groupPrPipelineItems(collectPipelineItems(payload));
+      const boardNarrationsAdded = captureBoardNarrations(latestPipelineItems);
+      if (boardNarrationsAdded > 0) forceThreadMode();
       const laneCounts = commandBoardLaneCounts(latestPipelineItems);
       const blocked = laneCounts.attention || 0;
       const review = laneCounts.operator || 0;
@@ -7080,6 +7086,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       latestCollabMessages
         .filter((m) => postedMessageMatchesKind(m, kind))
         .forEach((m) => messages.push(postedToCollabRow(m)));
+      latestBoardNarrations
+        .filter((m) => boardNarrationMatchesKind(m, kind))
+        .forEach((m) => messages.push(m));
       // The board briefing emits a header + N per-item lines. Capture
       // which items it covered so the per-item ask loop below doesn't
       // echo the same content for those same items.
@@ -7180,11 +7189,139 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const operatorNote = counts.operator
         ? "Pascal, I will call out the decision points instead of making them look like normal queue work."
         : "Pascal, nothing here needs your decision right this second; I am mostly keeping Codex pointed at the next handoff.";
-      return "Here is the live shape of the board: " + headline + " " + operatorNote + " I will narrate the next useful move here as the cards change, so the board is not just a wall of badges.";
+      return "Here is the live shape of the board: " + headline + " " + operatorNote + " " + boardBriefingNextMove(items) + " I will narrate the next useful move here as the cards change, so the board is not just a wall of badges.";
     }
 
     function plural(count, noun) {
       return count + " " + noun + (count === 1 ? "" : "s");
+    }
+
+    function boardBriefingNextMove(items) {
+      const lead = (items || [])[0];
+      if (!lead) return "The room is quiet; I will speak up when a card needs an owner.";
+      const verdict = releaseVerdict(lead);
+      const lane = boardLaneForItem(lead, verdict);
+      const action = nextPipelineAction(lead, verdict);
+      const title = cardTitleText(pipelineTitle(lead), lead.pullRequestNumber || pullRequestNumberFromCorrelation(lead.correlationId), lead);
+      if (codexTaskFailedForItem(lead)) {
+        return "First useful move: Codex should open the failed runner output for " + title + ", then either fix the runner/auth setup or split the work into a smaller retry.";
+      }
+      if (isDraftPullRequest(lead)) {
+        return "First useful move: Codex should finish " + title + " as a real PR, mark it ready, and let CI plus Hermes re-check it.";
+      }
+      if (action.owner === "Operator" || lane.key === "operator") {
+        return "First useful move: Pascal should review " + title + " as a release decision, not as busywork; approve it only if the risk and intent are clear.";
+      }
+      if (action.owner === "Codex" || lane.key === "codex" || lane.key === "attention") {
+        return "First useful move: Codex should take " + title + " and make the smallest change that clears the named blocker.";
+      }
+      if (action.owner === "Merge queue" || lane.key === "queue") {
+        return "First useful move: keep " + title + " queued until branch protection is green and merge ownership is explicit.";
+      }
+      if (action.owner === "Hermes" || lane.key === "hermes") {
+        return "First useful move: Hermes should finish the read-only check on " + title + " and publish the verdict here.";
+      }
+      return "First useful move: " + action.owner + " should " + action.text + " for " + title + ".";
+    }
+
+    function captureBoardNarrations(items) {
+      const next = new Map();
+      let added = 0;
+      (items || []).forEach((item) => {
+        if (!item) return;
+        const verdict = releaseVerdict(item);
+        const lane = boardLaneForItem(item, verdict);
+        if (lane.key === "done") return;
+        const action = nextPipelineAction(item, verdict);
+        const key = boardItemKey(item);
+        const signature = boardNarrationSignature(item, verdict, action, lane);
+        next.set(key, { signature, laneKey: lane.key, verdictLevel: verdict.level, owner: action.owner });
+        if (!hasBoardNarrationSnapshot) return;
+        const previous = previousBoardNarrationState.get(key);
+        if (previous && previous.signature === signature) return;
+        if (!previous && !shouldNarrateNewBoardItem(item, verdict, action, lane)) return;
+        addBoardNarration(boardNarrationForChange(item, verdict, action, lane, previous), boardNarrationMeta(item, verdict, lane), itemUpdatedMs(item) || Date.now(), inferAddressedTo(action, lane));
+        added += 1;
+      });
+      previousBoardNarrationState = next;
+      hasBoardNarrationSnapshot = true;
+      return added;
+    }
+
+    function boardNarrationSignature(item, verdict, action, lane) {
+      return [
+        lane && lane.key,
+        verdict && verdict.level,
+        action && action.owner,
+        action && action.text,
+        normalize(item && item.status),
+        normalize(item && item.activeState),
+        isDraftPullRequest(item) ? "draft" : "",
+        codexTaskFailedForItem(item) ? "codex-failed" : "",
+      ].join("|");
+    }
+
+    function shouldNarrateNewBoardItem(item, verdict, action, lane) {
+      if (codexTaskFailedForItem(item) || isDraftPullRequest(item)) return true;
+      return lane.key === "attention" || lane.key === "operator" || lane.key === "codex" || verdict.level === "block" || verdict.level === "needs-review";
+    }
+
+    function addBoardNarration(text, meta, ts, addressedTo) {
+      const message = collabMessage("Hermes", text, meta, ts || Date.now(), addressedTo);
+      message.id = "board-narration-" + String(ts || Date.now()) + "-" + String(latestBoardNarrations.length + 1);
+      message.kind = "status";
+      latestBoardNarrations.push(message);
+      latestBoardNarrations = latestBoardNarrations.slice(-BOARD_NARRATION_LIMIT);
+    }
+
+    function boardNarrationMatchesKind(message, kind) {
+      if (!kind || kind === "all" || kind === "now") return true;
+      if (kind === "blocked") return String(message.meta || "").toLowerCase().includes("needs attention") || String(message.text || "").toLowerCase().includes("blocked");
+      if (kind === "codex") return message.addressedTo === "codex";
+      if (kind === "hermes") return message.addressedTo === "hermes";
+      if (kind === "operator") return message.addressedTo === "operator";
+      return true;
+    }
+
+    function boardNarrationMeta(item, verdict, lane) {
+      return "board changed · " + boardLaneLabel(lane && lane.key) + " · " + (verdict && verdict.label ? verdict.label : "monitor verdict");
+    }
+
+    function boardLaneLabel(key) {
+      if (key === "attention") return "Needs Attention";
+      if (key === "codex") return "Codex Needed";
+      if (key === "hermes") return "Hermes Checking";
+      if (key === "operator") return "Operator Review";
+      if (key === "queue") return "Release Queue";
+      if (key === "deploy") return "Deploying";
+      return "Board";
+    }
+
+    function boardNarrationForChange(item, verdict, action, lane, previous) {
+      const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
+      const movedFrom = previous ? " from " + boardLaneLabel(previous.laneKey) : "";
+      if (codexTaskFailedForItem(item)) {
+        return "Update on " + title + ": I moved it" + movedFrom + " back to Needs Attention because the Codex runner failed. Codex owns the next move: inspect the runner output first, then either fix the setup problem or propose a smaller retry task that Hermes can re-check cleanly.";
+      }
+      if (isDraftPullRequest(item)) {
+        return "Update on " + title + ": it is still a draft, so I am keeping it out of the release path. Codex should finish the work, mark the PR ready, and then I will watch CI plus Hermes before it moves forward.";
+      }
+      if (action.owner === "Operator" || lane.key === "operator") {
+        return "Update on " + title + ": this moved" + movedFrom + " into Operator Review. Automation has gone as far as it safely can; Pascal, the useful decision now is whether the intent, architecture, rollout risk, and test evidence are good enough to release.";
+      }
+      if (action.owner === "Codex" || lane.key === "codex" || lane.key === "attention") {
+        return "Update on " + title + ": the board now needs Codex. " + capitalizeFirst(action.text) + "; after Codex pushes or creates the retry task, I will pull it back through Hermes instead of letting the card sit silently.";
+      }
+      if (action.owner === "Hermes" || lane.key === "hermes") {
+        return "Update on " + title + ": I am taking it back through Hermes checks now. Nothing needs Pascal yet; I will post the verdict here as soon as the evidence stops moving.";
+      }
+      if (action.owner === "Merge queue" || lane.key === "queue") {
+        return "Update on " + title + ": the checks look merge-ready, so I moved it into the release queue. Keep it there until branch protection is green and someone owns the merge/deploy step.";
+      }
+      if (lane.key === "deploy") {
+        return "Update on " + title + ": it is in deploy verification now. I am watching hosted health and post-deploy checks before calling the release safe.";
+      }
+      return "Update on " + title + ": the board changed" + movedFrom + " to " + boardLaneLabel(lane.key) + ". Next owner is " + action.owner + ": " + action.text + ".";
     }
 
     function boardBriefingLineForItem(item, verdict, action, lane) {
