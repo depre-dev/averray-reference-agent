@@ -1389,28 +1389,44 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       font-size: 0.62rem;
       white-space: nowrap;
     }
+    /* Kanban grid template is driven by data-active-lanes (the count
+       of non-Done lanes that have items, set by renderBoard). Each
+       rule lays down N equal-ish lane columns + a fixed 56px Done
+       rail on the right. This way adding a new lane (or auto-hiding
+       an empty one) doesn't overflow or wrap the grid. */
     .kanban-board {
       min-height: 0;
       min-width: 0;
       display: grid;
-      grid-template-columns:
-        minmax(190px, 1.08fr)
-        minmax(186px, 1fr)
-        minmax(186px, 1fr)
-        minmax(190px, 1fr)
-        minmax(190px, 1fr)
-        minmax(186px, 0.96fr)
-        56px;
+      grid-template-columns: minmax(190px, 1fr) 56px;
       gap: 12px;
       overflow-x: hidden;
       overflow-y: hidden;
       align-items: stretch;
       padding-bottom: 8px;
     }
+    .kanban-board[data-active-lanes="0"] { grid-template-columns: minmax(190px, 1fr) 56px; }
+    .kanban-board[data-active-lanes="1"] { grid-template-columns: minmax(190px, 1fr) 56px; }
+    .kanban-board[data-active-lanes="2"] { grid-template-columns: repeat(2, minmax(220px, 1fr)) 56px; }
+    .kanban-board[data-active-lanes="3"] { grid-template-columns: repeat(3, minmax(210px, 1fr)) 56px; }
+    .kanban-board[data-active-lanes="4"] { grid-template-columns: repeat(4, minmax(200px, 1fr)) 56px; }
+    .kanban-board[data-active-lanes="5"] { grid-template-columns: repeat(5, minmax(190px, 1fr)) 56px; }
+    .kanban-board[data-active-lanes="6"] { grid-template-columns: repeat(6, minmax(186px, 1fr)) 56px; }
+    .kanban-board[data-active-lanes="7"] { grid-template-columns: repeat(7, minmax(176px, 1fr)) 56px; }
+    .kanban-board[data-active-lanes="8"] { grid-template-columns: repeat(8, minmax(170px, 1fr)) 56px; }
+    /* Expanded-Done variants — the rail is replaced by a full-width
+       Done lane column, so the total is N + 1 wide columns. */
     .kanban-board[data-done-expanded="true"] {
-      grid-template-columns: repeat(7, minmax(220px, 1fr));
       overflow-x: auto;
     }
+    .kanban-board[data-done-expanded="true"][data-active-lanes="1"] { grid-template-columns: repeat(2, minmax(220px, 1fr)); }
+    .kanban-board[data-done-expanded="true"][data-active-lanes="2"] { grid-template-columns: repeat(3, minmax(220px, 1fr)); }
+    .kanban-board[data-done-expanded="true"][data-active-lanes="3"] { grid-template-columns: repeat(4, minmax(220px, 1fr)); }
+    .kanban-board[data-done-expanded="true"][data-active-lanes="4"] { grid-template-columns: repeat(5, minmax(220px, 1fr)); }
+    .kanban-board[data-done-expanded="true"][data-active-lanes="5"] { grid-template-columns: repeat(6, minmax(220px, 1fr)); }
+    .kanban-board[data-done-expanded="true"][data-active-lanes="6"] { grid-template-columns: repeat(7, minmax(220px, 1fr)); }
+    .kanban-board[data-done-expanded="true"][data-active-lanes="7"] { grid-template-columns: repeat(8, minmax(220px, 1fr)); }
+    .kanban-board[data-done-expanded="true"][data-active-lanes="8"] { grid-template-columns: repeat(9, minmax(220px, 1fr)); }
     .lane {
       min-height: 0;
       min-width: 0;
@@ -2387,9 +2403,15 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       .agent-activity {
         grid-template-columns: 1fr;
       }
+      /* On the mid-width breakpoint we keep the lanes horizontally
+         scrollable at a fixed minimum width — the data-active-lanes
+         desktop rules don't apply here. The 8 columns accommodate up
+         to 7 active lanes + Done. */
       .kanban-board,
-      .kanban-board[data-done-expanded="true"] {
-        grid-template-columns: repeat(7, minmax(250px, 82vw));
+      .kanban-board[data-done-expanded="true"],
+      .kanban-board[data-active-lanes],
+      .kanban-board[data-done-expanded="true"][data-active-lanes] {
+        grid-template-columns: repeat(8, minmax(250px, 82vw));
         overflow-x: auto;
       }
       /* On mobile the vertical 56px rail makes no sense — expand it into a
@@ -3616,14 +3638,20 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       .live-lane {
         display: none;
       }
+      /* The 640px mobile breakpoint switches the board to a single
+         column flat list. Override the desktop data-active-lanes
+         grid-template-columns so flex layout wins. */
       .kanban-board,
-      .kanban-board[data-done-expanded="true"] {
+      .kanban-board[data-done-expanded="true"],
+      .kanban-board[data-active-lanes],
+      .kanban-board[data-done-expanded="true"][data-active-lanes] {
         display: flex;
         flex-direction: column;
         gap: 6px;
         overflow-x: hidden;
         overflow-y: auto;
         padding-bottom: 12px;
+        grid-template-columns: none;
       }
       .lane {
         background: transparent;
@@ -5153,6 +5181,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       target.dataset.doneExpanded = String(showDone);
       document.getElementById("monitor-shell")?.classList.toggle("has-selection", Boolean(selectedKey));
       const lanes = boardLaneDefinitions();
+      const counts = commandBoardLaneCounts(filtered);
+      // True when at least one ACTIVE (non-done) lane has at least one
+      // item. If everything is empty we keep showing all the active
+      // lanes so the board doesn't go blank — placeholders are useful
+      // when there's literally nothing to do.
+      const anyActiveItems = lanes.some((lane) => lane.key !== "done" && (counts[lane.key] || 0) > 0);
       // Mobile-tab filter narrows the set to a single lane (or all). The
       // mobile board renders lanes in order, with empty lanes suppressed
       // — empty placeholders are visual noise on a phone.
@@ -5162,11 +5196,23 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           if (mobileLaneTab !== "all" && lane.key !== mobileLaneTab) return false;
           // Hide the Done lane unless the operator explicitly picked it.
           if (lane.key === "done" && mobileLaneTab !== "done") return false;
-        } else if (lane.key === "done" && !showDone) {
-          return false;
+          return true;
         }
+        if (lane.key === "done") return showDone;
+        // Desktop auto-hide: an empty active lane disappears when at
+        // least one other active lane has work, so the visible columns
+        // stay wide enough to read. With nothing on the board, we show
+        // every lane so the operator still sees the workflow shape.
+        if (anyActiveItems && (counts[lane.key] || 0) === 0) return false;
         return true;
       });
+      // The CSS uses this attribute to pick a grid-template-columns that
+      // fits the visible active-lane count (plus a fixed 56px Done rail
+      // when collapsed). Keeps the grid from overflowing or wrapping
+      // when the active-lane count grows (now that we have a 7th lane,
+      // Waiting / Drafts).
+      const activeLaneCount = visibleLanes.filter((lane) => lane.key !== "done").length;
+      target.dataset.activeLanes = String(activeLaneCount);
       target.innerHTML = visibleLanes
         .map((lane) => renderBoardLane(lane, filtered, { mobile }))
         .join("") + (!mobile && !showDone ? renderDoneStub(filtered) : "");
