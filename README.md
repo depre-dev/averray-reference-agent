@@ -63,7 +63,9 @@ calls, dashboard/kanban changes, and security hardening before deploying.
 The monitor collaboration chat also passes `OLLAMA_API_KEY`,
 `OLLAMA_BASE_URL`, and `HERMES_MONITOR_REPLY_MODEL` into `slack-operator` so
 Hermes can use the same v0.14-era OpenAI-compatible provider path for live
-operator replies. If the key is unset, the monitor falls back to deterministic
+operator replies. `HERMES_MONITOR_MEMORY_PATH` stores bounded operator guidance
+on the shared data volume so Hermes can remember prior room decisions across
+container restarts. If the key is unset, the monitor falls back to deterministic
 local acknowledgments.
 
 Run the reference prompt:

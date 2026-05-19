@@ -6007,12 +6007,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         if (item.active === true || item.activeState === "running" || status === "running") return { key: "deploy" };
         return verdict.level === "pass" ? { key: "done" } : { key: "attention" };
       }
+      if (isExternalDraftPullRequest(item)) return { key: "waiting" };
+      if (isDraftPullRequest(item)) return { key: "waiting" };
       if (item.active === true || item.activeState === "running" || status === "running") return { key: "hermes" };
       const codexTask = codexTaskForItem(item);
       if (codexTaskFailedForItem(item)) return { key: "attention" };
       if (codexTask && !isTerminalCodexTask(codexTask)) return { key: "codex" };
-      if (isExternalDraftPullRequest(item)) return { key: "waiting" };
-      if (isDraftPullRequest(item)) return { key: "waiting" };
       if (codexTaskCompletedAfterHermesReview(item)) return { key: "hermes" };
       if (reason === "ci_in_progress" || reason === "pr_checks_active") return { key: "codex" };
       if (verdict.level === "block") return { key: "attention" };
@@ -7236,11 +7236,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const testSignals = Array.isArray(signals.testSignals) ? signals.testSignals.map(String).filter(Boolean) : [];
       const reviewReasons = Array.isArray(summary.reviewReasons) ? summary.reviewReasons : [];
       const codexTask = codexTaskForItem(item);
-      if (codexTaskFailedForItem(item)) {
-        return "The important evidence is the failed Codex runner output; I do not trust the branch state again until that output is inspected or a smaller retry exists.";
-      }
       if (isDraftPullRequest(item)) {
         return "The important evidence is GitHub's draft flag; while that is true, release checks are deliberately not the main question.";
+      }
+      if (codexTaskFailedForItem(item)) {
+        return "The important evidence is the failed Codex runner output; I do not trust the branch state again until that output is inspected or a smaller retry exists.";
       }
       if (codexTask && !isTerminalCodexTask(codexTask)) {
         return "The important evidence is the active Codex task queue; I am waiting for that task to finish before pretending Hermes has a stable commit to review.";
@@ -7258,9 +7258,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function selectedPrRoomBoundaryForItem(item, verdict, action, lane) {
-      if (codexTaskFailedForItem(item)) return "I will not ask Hermes to bless this again until Codex has dealt with the failed task or proposed a clean retry.";
       if (isExternalDraftPullRequest(item)) return "I will keep it watched and quiet unless Pascal explicitly delegates a Codex takeover.";
       if (isDraftPullRequest(item)) return "I will hold it out of release until the draft is finished or marked ready, then CI and Hermes can take a real pass.";
+      if (codexTaskFailedForItem(item)) return "I will not ask Hermes to bless this again until Codex has dealt with the failed task or proposed a clean retry.";
       if (action.owner === "Operator" || (lane && lane.key) === "operator") return "I need Pascal's judgement here; automation can prepare evidence, but it should not decide project intent or rollout risk.";
       if (action.owner === "Codex" || (lane && lane.key) === "codex" || verdict.level === "block") return "I will keep it visible until Codex changes the branch or creates a smaller retry and Hermes sees the blocking signal disappear.";
       if (action.owner === "Merge queue" || (lane && lane.key) === "queue") return "I will not call it done from the queue; it still needs merge ownership, a real GitHub merge, and then post-deploy verification.";
@@ -7271,14 +7271,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function selectedPrRoomHandoffForItem(item, verdict, action, lane) {
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
-      if (codexTaskFailedForItem(item)) {
-        return "Codex, for " + title + ", start with the runner output instead of guessing. Tell us whether this is runner/auth setup, a real PR failure, or a task that needs to be split smaller.";
-      }
       if (isExternalDraftPullRequest(item)) {
         return "Pascal, " + title + " is an external draft. I am watching it, but I will not quietly convert it into Codex work unless you explicitly hand it over.";
       }
       if (isDraftPullRequest(item)) {
         return "Codex, " + title + " is still draft work. Finish the draft or mark it ready only when the branch is actually ready for CI and Hermes.";
+      }
+      if (codexTaskFailedForItem(item)) {
+        return "Codex, for " + title + ", start with the runner output instead of guessing. Tell us whether this is runner/auth setup, a real PR failure, or a task that needs to be split smaller.";
       }
       if (action.owner === "Operator" || (lane && lane.key) === "operator") {
         return "Pascal, your next turn is not a rubber stamp on " + title + ". Read the evidence, decide whether the risk is intentional, then approve locally or send it back with a precise ask.";
@@ -7897,14 +7897,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const lane = boardLaneForItem(lead, verdict);
       const action = nextPipelineAction(lead, verdict);
       const title = cardTitleText(pipelineTitle(lead), lead.pullRequestNumber || pullRequestNumberFromCorrelation(lead.correlationId), lead);
-      if (codexTaskFailedForItem(lead)) {
-        return "First useful move: Codex should open the failed runner output for " + title + ", then either fix the runner/auth setup or split the work into a smaller retry.";
-      }
       if (isDraftPullRequest(lead)) {
         if (isExternalDraftPullRequest(lead)) {
           return "First useful move: leave " + title + " watched while the PR author or owning agent finishes it; Codex should only take over if Pascal explicitly delegates that.";
         }
         return "First useful move: Codex should finish the delegated draft work for " + title + ", mark it ready, and let CI plus Hermes re-check it.";
+      }
+      if (codexTaskFailedForItem(lead)) {
+        return "First useful move: Codex should open the failed runner output for " + title + ", then either fix the runner/auth setup or split the work into a smaller retry.";
       }
       if (action.owner === "Operator" || lane.key === "operator") {
         return "First useful move: Pascal should review " + title + " as a release decision, not as busywork; approve it only if the risk and intent are clear.";
@@ -8007,11 +8007,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
       const movedFrom = previous ? " from " + boardLaneLabel(previous.laneKey) : "";
       const nextStep = nextStepNarrationForItem(item, verdict, action, lane);
+      if (isDraftPullRequest(item)) {
+        return "Update on " + title + ": it is still a draft, so I am keeping it in Waiting / Drafts instead of treating it as an urgent release blocker. " + nextStep;
+      }
       if (codexTaskFailedForItem(item)) {
         return "Update on " + title + ": I moved it" + movedFrom + " back to Needs Attention because the Codex runner failed. " + nextStep;
-      }
-      if (isDraftPullRequest(item)) {
-        return "Update on " + title + ": it is still a draft, so I am keeping it out of the release path and not assigning it to Codex unless there is a delegated task. " + nextStep;
       }
       if (action.owner === "Operator" || lane.key === "operator") {
         return "Update on " + title + ": this moved" + movedFrom + " into Operator Review. Automation has gone as far as it safely can. " + nextStep;
@@ -8045,14 +8045,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function boardBriefingLineForItem(item, verdict, action, lane) {
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
       const nextStep = nextStepNarrationForItem(item, verdict, action, lane);
-      if (codexTaskFailedForItem(item)) {
-        return "Codex, " + title + " is back in Needs Attention because the last runner task failed. Start by opening the failed runner output: if it is auth or clone setup, fix the runner path; if it is a real PR/check failure, come back with the smallest retry task or smallest branch fix. " + nextStep;
-      }
       if (isDraftPullRequest(item)) {
         if (isExternalDraftPullRequest(item)) {
           return "Hermes is watching " + title + " as a draft owned outside this board. I am holding it out of release and not asking Codex to move unless Pascal explicitly delegates takeover. " + nextStep;
         }
         return "Codex, " + title + " is still a draft with a delegated task, so I am holding it out of the release path until the task makes it ready. Finish the draft work or mark it ready for review, then let CI and Hermes take another pass. " + nextStep;
+      }
+      if (codexTaskFailedForItem(item)) {
+        return "Codex, " + title + " is back in Needs Attention because the last runner task failed. Start by opening the failed runner output: if it is auth or clone setup, fix the runner path; if it is a real PR/check failure, come back with the smallest retry task or smallest branch fix. " + nextStep;
       }
       if (lane.key === "attention" && action.owner === "Codex") {
         return "Codex, " + title + " is blocked at the gate. " + capitalizeFirst(action.text) + "; I will keep it visible here until the blocking signal disappears and Hermes records a clean pass. " + nextStep;
@@ -8094,9 +8094,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     // terse, action-first. Hermes's voice: dry, methodical, observing.
     function collaborationAskForItem(item, verdict, action, lane) {
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
-      if (codexTaskFailedForItem(item)) return "Codex, " + title + " failed in the runner. Please inspect the failed output first, then either fix the runner setup, push the smallest PR-check fix, or create a smaller retry task so Hermes has something concrete to re-check.";
       if (isExternalDraftPullRequest(item)) return "I am watching " + title + " as an external draft. It stays out of the release path until the PR author or owning agent marks it ready; Codex should not pick it up unless Pascal explicitly delegates takeover.";
       if (isDraftPullRequest(item)) return "Codex, " + title + " is still in draft mode with a delegated task. Finish the draft or mark it ready for review; once that happens I will wait for CI and Hermes to re-run before moving it forward.";
+      if (codexTaskFailedForItem(item)) return "Codex, " + title + " failed in the runner. Please inspect the failed output first, then either fix the runner setup, push the smallest PR-check fix, or create a smaller retry task so Hermes has something concrete to re-check.";
       if (action.owner === "Codex" || lane.key === "codex") return "Codex, you are up on " + title + ". " + capitalizeFirst(action.text) + "; keep it narrow and hand it back when CI/Hermes can see the new signal.";
       if (action.owner === "Operator" || lane.key === "operator" || lane.key === "attention") return "Pascal, " + title + " needs your call. " + capitalizeFirst(action.text) + "; if the answer is no, send it back to Codex with the exact change you want.";
       if (action.owner === "Hermes" || lane.key === "hermes") return "I am watching " + title + " now. I will land the verdict here once the checks clear, and I will not pretend it is ready while the evidence is still moving.";
@@ -9297,14 +9297,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (item.active === true || item.activeState === "running" || status === "running") {
         return { owner: "Hermes", text: "finish the current handoff checks and publish a verdict" };
       }
-      if (codexTaskFailedForItem(item)) {
-        return { owner: "Codex", text: "review the failed Codex task output, push a smaller fix, or propose a retry task" };
-      }
       if (isExternalDraftPullRequest(item)) {
         return { owner: "PR author", text: "finish the draft or mark it ready; Codex only takes over if the operator delegates a task" };
       }
       if (isDraftPullRequest(item)) {
         return { owner: codexTask && !isTerminalCodexTask(codexTask) ? "Codex" : "PR author", text: "finish the draft or mark it ready for review, then let CI and Hermes re-run" };
+      }
+      if (codexTaskFailedForItem(item)) {
+        return { owner: "Codex", text: "review the failed Codex task output, push a smaller fix, or propose a retry task" };
       }
       if (codexTaskCompletedAfterHermesReview(item)) {
         return { owner: "Hermes", text: "re-run the PR handoff/code-review checks now that Codex reported completion" };
@@ -9836,7 +9836,6 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function isExternalDraftPullRequest(item) {
       if (!isDraftPullRequest(item)) return false;
-      if (codexTaskFailedForItem(item)) return false;
       const task = codexTaskForItem(item);
       return !task || isTerminalCodexTask(task);
     }

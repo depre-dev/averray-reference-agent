@@ -33,6 +33,7 @@ import {
 import {
   CollaborationValidationError,
   listCollaborationMessages,
+  listHermesMemoryNotes,
   recordCollaborationMessage,
   synthesizeHermesReplyFor,
 } from "./monitor-collab.js";
@@ -432,6 +433,11 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
         // Pull the last ~10 messages, oldest-first, so the model sees
         // the conversation in natural order rather than reversed.
         const recent = listCollaborationMessages({ limit: 10 });
+        const memoryNotes = listHermesMemoryNotes({
+          ...(operatorMessage.relatedPr ? { relatedPr: operatorMessage.relatedPr } : {}),
+          ...(operatorMessage.relatedCorrelationId ? { relatedCorrelationId: operatorMessage.relatedCorrelationId } : {}),
+          limit: 8,
+        }).map((note) => note.text);
         const llmText = await generateHermesReply(
           {
             operatorMessage: {
@@ -441,6 +447,7 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
               ...(operatorMessage.relatedPr ? { relatedPr: operatorMessage.relatedPr } : {}),
             },
             recentMessages: recent.map((m) => ({ author: m.author, text: m.text, ts: m.ts })),
+            memoryNotes,
             ...(operatorMessage.relatedPr ? { selectedPr: operatorMessage.relatedPr } : {}),
           },
           { apiKey, baseUrl, model }

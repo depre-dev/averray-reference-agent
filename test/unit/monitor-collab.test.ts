@@ -1,9 +1,13 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   CollaborationValidationError,
   __resetCollaborationStoreForTests,
   listCollaborationMessages,
+  listHermesMemoryNotes,
   recordCollaborationMessage,
   synthesizeHermesReplyFor,
 } from "../../services/slack-operator/src/monitor-collab.js";
@@ -142,6 +146,124 @@ describe("monitor collaboration channel", () => {
     // The first 100 should have been evicted.
     expect(listed[0].text).toBe("m100");
     expect(listed[499].text).toBe("m599");
+  });
+});
+
+describe("Hermes collaboration memory", () => {
+  beforeEach(() => {
+    __resetCollaborationStoreForTests();
+  });
+
+  it("learns operator guidance as global memory", () => {
+    recordCollaborationMessage(
+      {
+        author: "operator",
+        addressedTo: "hermes",
+        text: "Remember: draft PRs that belong to another agent should wait until that agent finishes.",
+      },
+      NOW
+    );
+    const notes = listHermesMemoryNotes();
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({
+      scope: "global",
+      text: expect.stringContaining("draft PRs that belong to another agent"),
+    });
+  });
+
+  it("keeps PR-scoped memory tied to the selected PR while retaining global guidance", () => {
+    recordCollaborationMessage(
+      {
+        author: "operator",
+        addressedTo: "everyone",
+        text: "Remember: ask me before moving external-agent drafts.",
+      },
+      NOW
+    );
+    recordCollaborationMessage(
+      {
+        author: "operator",
+        addressedTo: "hermes",
+        text: "This draft belongs to another agent; do not ask Codex to start it yet.",
+        relatedPr: { repo: "averray-agent/agent", number: 439 },
+      },
+      NOW + 1
+    );
+    recordCollaborationMessage(
+      {
+        author: "operator",
+        addressedTo: "hermes",
+        text: "This draft belongs to Codex now.",
+        relatedPr: { repo: "averray-agent/agent", number: 440 },
+      },
+      NOW + 2
+    );
+
+    const notes = listHermesMemoryNotes({
+      relatedPr: { repo: "averray-agent/agent", number: 439 },
+    });
+    expect(notes.map((note) => note.text).join("\n")).toContain("external-agent drafts");
+    expect(notes.map((note) => note.text).join("\n")).toContain("averray-agent/agent#439");
+    expect(notes.map((note) => note.text).join("\n")).not.toContain("averray-agent/agent#440");
+  });
+
+  it("does not learn ordinary chatter or Codex-authored messages", () => {
+    recordCollaborationMessage(
+      { author: "operator", addressedTo: "hermes", text: "thanks, looks good" },
+      NOW
+    );
+    recordCollaborationMessage(
+      { author: "codex", addressedTo: "hermes", text: "Remember this runner path." },
+      NOW + 1
+    );
+    expect(listHermesMemoryNotes()).toEqual([]);
+  });
+
+  it("deduplicates repeated guidance", () => {
+    const input = {
+      author: "operator",
+      addressedTo: "hermes",
+      text: "Remember: release queue means merge steward owns the next move.",
+    };
+    recordCollaborationMessage(input, NOW);
+    recordCollaborationMessage(input, NOW + 1);
+    const notes = listHermesMemoryNotes();
+    expect(notes).toHaveLength(1);
+    expect(notes[0].ts).toBe(NOW + 1);
+  });
+
+  it("persists learned memory when a memory path is configured", () => {
+    const previousPath = process.env.HERMES_MONITOR_MEMORY_PATH;
+    const dir = mkdtempSync(join(tmpdir(), "hermes-memory-"));
+    const memoryPath = join(dir, "memory.json");
+    try {
+      process.env.HERMES_MONITOR_MEMORY_PATH = memoryPath;
+      __resetCollaborationStoreForTests();
+      recordCollaborationMessage(
+        {
+          author: "operator",
+          addressedTo: "hermes",
+          text: "Remember: draft PRs owned by external agents should stay out of Codex Needed.",
+        },
+        NOW
+      );
+
+      const persisted = JSON.parse(readFileSync(memoryPath, "utf8")) as {
+        notes: Array<{ text: string }>;
+      };
+      expect(persisted.notes[0].text).toContain("external agents");
+
+      __resetCollaborationStoreForTests();
+      expect(listHermesMemoryNotes()[0].text).toContain("external agents");
+    } finally {
+      if (previousPath === undefined) {
+        delete process.env.HERMES_MONITOR_MEMORY_PATH;
+      } else {
+        process.env.HERMES_MONITOR_MEMORY_PATH = previousPath;
+      }
+      __resetCollaborationStoreForTests();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

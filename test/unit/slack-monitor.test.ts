@@ -664,4 +664,15 @@ describe("slack operator personal monitor", () => {
     });
     expect(() => vm.runInContext(script, context, { timeout: 2000 })).not.toThrow();
   });
+
+  it("keeps draft PRs in Waiting / Drafts before task-failure urgency", () => {
+    const html = renderMonitorHtml();
+    const draftLaneIndex = html.indexOf('if (isExternalDraftPullRequest(item)) return { key: "waiting" };');
+    const failedAttentionIndex = html.indexOf('if (codexTaskFailedForItem(item)) return { key: "attention" };');
+
+    expect(draftLaneIndex).toBeGreaterThan(-1);
+    expect(failedAttentionIndex).toBeGreaterThan(-1);
+    expect(draftLaneIndex).toBeLessThan(failedAttentionIndex);
+    expect(html).not.toContain('if (codexTaskFailedForItem(item)) return false;');
+  });
 });

@@ -37,8 +37,11 @@ function jsonResponse(body: unknown, ok = true): Response {
 describe("HERMES_PERSONA", () => {
   it("constrains voice and reminds the model about truth boundary", () => {
     expect(HERMES_PERSONA).toMatch(/Hermes/);
+    expect(HERMES_PERSONA).toMatch(/board orchestrator/i);
     expect(HERMES_PERSONA).toMatch(/short sentences/i);
     expect(HERMES_PERSONA).toMatch(/never claim/i);
+    expect(HERMES_PERSONA).toMatch(/memory notes/i);
+    expect(HERMES_PERSONA).toMatch(/visible board controls/i);
     expect(HERMES_PERSONA).toMatch(/Pascal/);
     expect(HERMES_PERSONA).toMatch(/Codex/);
   });
@@ -80,9 +83,21 @@ describe("buildUserPrompt", () => {
     expect(prompt).toContain("hermes: Watching.");
   });
 
-  it("tells the model to reply as Hermes in 1-3 sentences", () => {
+  it("includes memory notes as guidance, not proof", () => {
+    const prompt = buildUserPrompt(baseContext({
+      memoryNotes: [
+        "Pascal preference: draft PRs owned by another agent should wait.",
+      ],
+    }));
+    expect(prompt).toContain("Hermes memory");
+    expect(prompt).toContain("draft PRs owned by another agent");
+    expect(prompt).toContain("use as guidance, not proof");
+  });
+
+  it("tells the model to reply as Hermes in 1-4 sentences", () => {
     const prompt = buildUserPrompt(baseContext());
-    expect(prompt).toMatch(/1-3 short sentences/);
+    expect(prompt).toMatch(/1-4 conversational sentences/);
+    expect(prompt).toMatch(/route the next turn/);
   });
 });
 
