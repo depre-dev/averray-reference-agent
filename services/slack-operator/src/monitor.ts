@@ -1052,6 +1052,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       background: color-mix(in srgb, var(--warn) 10%, rgba(2, 9, 8, 0.3));
     }
     .counter-chip[data-tone="warn"]:not([data-empty="true"]) .counter-number { color: var(--warn); }
+    .counter-chip[data-tone="waiting"]:not([data-empty="true"]) {
+      border-color: color-mix(in srgb, var(--cyan) 42%, var(--line));
+      background: color-mix(in srgb, var(--cyan) 8%, rgba(2, 9, 8, 0.3));
+    }
+    .counter-chip[data-tone="waiting"]:not([data-empty="true"]) .counter-number { color: var(--cyan); }
     .counter-chip[data-tone="bad"]:not([data-empty="true"]) {
       border-color: color-mix(in srgb, var(--bad) 55%, var(--line));
       background: color-mix(in srgb, var(--bad) 10%, rgba(2, 9, 8, 0.3));
@@ -1170,6 +1175,64 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
          collaboration dock. */
       padding: 12px 14px 266px;
       overflow: hidden;
+    }
+    .board-now {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      min-height: 50px;
+      border: 1px solid var(--line-soft);
+      border-left: 3px solid var(--muted);
+      border-radius: 8px;
+      background: rgba(7, 18, 15, 0.72);
+      padding: 10px 12px;
+      box-shadow: 0 12px 38px rgba(0, 0, 0, 0.18);
+    }
+    .board-now[data-tone="attention"] { border-left-color: var(--bad); background: color-mix(in srgb, var(--bad) 8%, rgba(7, 18, 15, 0.72)); }
+    .board-now[data-tone="operator"] { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, rgba(7, 18, 15, 0.72)); }
+    .board-now[data-tone="codex"] { border-left-color: var(--violet); background: color-mix(in srgb, var(--violet) 7%, rgba(7, 18, 15, 0.72)); }
+    .board-now[data-tone="running"] { border-left-color: var(--cyan); background: color-mix(in srgb, var(--cyan) 7%, rgba(7, 18, 15, 0.72)); }
+    .board-now[data-tone="queue"] { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 7%, rgba(7, 18, 15, 0.72)); }
+    .board-now[data-tone="waiting"] { border-left-color: var(--cyan); background: color-mix(in srgb, var(--cyan) 5%, rgba(7, 18, 15, 0.72)); }
+    .board-now-copy {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+    }
+    .board-now-kicker,
+    .collab-now-kicker {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.58rem;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    .board-now-title {
+      min-width: 0;
+      color: var(--cream);
+      font-size: 0.92rem;
+      font-weight: 800;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+    }
+    .board-now-next {
+      min-width: 0;
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1.28;
+      overflow-wrap: anywhere;
+    }
+    .board-now-counts {
+      display: flex;
+      justify-content: flex-end;
+      gap: 6px;
+      flex-wrap: wrap;
+      min-width: 140px;
+    }
+    .board-now-counts .pill {
+      background: rgba(0, 0, 0, 0.16);
     }
     .live-lane {
       display: grid;
@@ -2018,6 +2081,31 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
        breathing room since there's no panel border doing that work. */
     .collab-message + .collab-message { margin-top: 12px; }
     .collab-message[data-grouped="true"] { margin-top: 4px; }
+    .collab-now {
+      display: grid;
+      gap: 6px;
+      margin: 0 0 12px;
+      border: 1px solid var(--line-soft);
+      border-left: 3px solid var(--cyan);
+      border-radius: 8px;
+      background: rgba(7, 18, 15, 0.68);
+      padding: 10px 12px;
+    }
+    .collab-now-title {
+      color: var(--cream);
+      font-weight: 800;
+      line-height: 1.3;
+    }
+    .collab-now-next {
+      color: var(--muted);
+      font-size: 0.82rem;
+      line-height: 1.32;
+    }
+    .collab-now-counts {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
     .collab-head {
       position: sticky;
       top: 0;
@@ -2788,6 +2876,15 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .kc-head-r[data-stale-tier="warn"]     .card-age { color: var(--warn);  font-weight: 600; }
     .kc-head-r[data-stale-tier="high"]     .card-age { color: #f59c47;      font-weight: 700; }
     .kc-head-r[data-stale-tier="critical"] .card-age { color: var(--bad);   font-weight: 800; letter-spacing: 0.06em; }
+    .handoff-card[data-lane="waiting"] .stale-dot[data-stale="waiting"] {
+      background: var(--cyan);
+      box-shadow: 0 0 0 2px rgba(86, 204, 228, 0.16);
+      animation: none;
+    }
+    .handoff-card[data-lane="waiting"] .card-head .stale-dot[data-stale="waiting"] ~ .card-age {
+      color: var(--muted);
+      font-weight: 650;
+    }
     .kc-id {
       display: flex;
       align-items: baseline;
@@ -3715,6 +3812,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         padding: 8px 10px 88px;
         gap: 8px;
       }
+      .board-now {
+        grid-template-columns: 1fr;
+        align-items: start;
+      }
+      .board-now-counts {
+        justify-content: flex-start;
+        min-width: 0;
+      }
       .agent-activity {
         grid-template-columns: 1fr;
         gap: 8px;
@@ -4000,11 +4105,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         </div>
       </div>
       <div class="cmd-counters" aria-label="Release counters">
-        <span class="counter-chip" data-tone="warn"><span id="attention-chip" class="counter-number">0</span><span class="counter-label">needs attention</span></span>
-        <span class="counter-chip" data-tone="bad"><span id="blocked-chip" class="counter-number">0</span><span class="counter-label">blocked</span></span>
-        <span class="counter-chip"><span id="review-chip" class="counter-number">0</span><span class="counter-label">review</span></span>
-        <span class="counter-chip" data-tone="ok"><span id="ready-chip" class="counter-number">0</span><span class="counter-label">ready</span></span>
-        <span class="counter-chip"><span id="running-chip" class="counter-number">0</span><span class="counter-label">in flight</span></span>
+        <span class="counter-chip" data-tone="warn" title="All open work that needs an owner now"><span id="attention-chip" class="counter-number">0</span><span class="counter-label">action needed</span></span>
+        <span class="counter-chip" data-tone="bad" title="Blocked cards that need a fix or explicit decision"><span id="blocked-chip" class="counter-number">0</span><span class="counter-label">blocked fixes</span></span>
+        <span class="counter-chip" data-tone="waiting" title="Draft PRs parked until the author or owning agent marks them ready"><span id="waiting-chip" class="counter-number">0</span><span class="counter-label">waiting drafts</span></span>
+        <span class="counter-chip" title="Cards waiting for operator sign-off"><span id="review-chip" class="counter-number">0</span><span class="counter-label">operator review</span></span>
+        <span class="counter-chip" data-tone="ok" title="Reviewed PRs waiting for merge stewardship"><span id="ready-chip" class="counter-number">0</span><span class="counter-label">merge queue</span></span>
+        <span class="counter-chip" title="Hermes checks or deploy verification currently moving"><span id="running-chip" class="counter-number">0</span><span class="counter-label">checking/deploy</span></span>
         <span id="deploy-health-chip" class="counter-chip cc-health" data-state="idle"><span class="counter-number" id="deploy-health-state">IDLE</span><span class="counter-label">deploy health</span></span>
       </div>
       <div class="refresh-cluster">
@@ -4057,6 +4163,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     </nav>
     <section class="board-shell">
       <div id="pull-indicator" data-state="idle" aria-hidden="true"><span class="pi-spinner"></span><span class="pi-label">Pull to refresh</span></div>
+      <section id="board-now" class="board-now" data-tone="quiet" aria-live="polite">
+        <div class="board-now-copy">
+          <span class="board-now-kicker">Board now</span>
+          <strong class="board-now-title">Loading the live board read...</strong>
+          <span class="board-now-next">Hermes will summarize the next useful move here.</span>
+        </div>
+      </section>
       <section id="owner-lanes" class="kanban-board" aria-label="Release command board"><div class="empty">Loading command board...</div></section>
     </section>
     <div id="drawer-scrim" data-open="false" aria-hidden="true"></div>
@@ -4925,17 +5038,20 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (boardNarrationsAdded > 0 && shouldBoardNarrationOpenThread()) forceThreadMode();
       const laneCounts = commandBoardLaneCounts(latestPipelineItems);
       const blocked = laneCounts.attention || 0;
+      const waiting = laneCounts.waiting || 0;
       const review = laneCounts.operator || 0;
       const ready = laneCounts.queue || 0;
       const running = (laneCounts.hermes || 0) + (laneCounts.deploy || 0);
       setCounterChip("attention-chip", blocked + review + (laneCounts.codex || 0));
       setCounterChip("blocked-chip", blocked);
+      setCounterChip("waiting-chip", waiting);
       setCounterChip("review-chip", review);
       setCounterChip("ready-chip", ready);
       setCounterChip("running-chip", running);
       updateSysAgents(latestPipelineItems);
       updateDeployHealth(latestPipelineItems);
       renderPipelineBoard(latestPipelineItems);
+      renderBoardNowSummary(latestPipelineItems);
       renderBoard(latestPipelineItems);
       renderDrawer(selectedItem());
       renderCommandContext();
@@ -5556,7 +5672,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const verdict = releaseVerdict(item);
       const action = nextPipelineAction(item, verdict);
       const stage = pipelineStage(item, verdict);
-      const age = handoffAge(item);
+      const age = boardCardAge(item, lane);
       const title = pipelineTitle(item);
       const key = boardItemKey(item);
       const selected = key === selectedKey;
@@ -5599,6 +5715,19 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         renderCardFlow(action, flow) +
         '<div class="card-foot"><span class="card-next"><span class="card-next-label">waiting on</span>' + renderActorPill(action.owner) + '</span><span class="card-actions">' + primaryActionButton(item, verdict, action, lane) + '</span></div>' +
         '</article>';
+    }
+
+    function boardCardAge(item, lane) {
+      const age = handoffAge(item);
+      if (lane && lane.key === "waiting") {
+        return {
+          state: age.state === "fresh" ? "fresh" : "waiting",
+          label: age.state === "fresh" ? "Fresh" : "Parked",
+          duration: age.duration,
+          staleTier: "",
+        };
+      }
+      return age;
     }
 
     function renderCardFlow(action, flow) {
@@ -7305,19 +7434,20 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         : kind === "hermes" ? "Hermes review"
           : kind === "operator" ? "Operator asks"
             : kind === "blocked" ? "Needs attention"
-              : kind === "now" ? "What is happening now"
+            : kind === "now" ? "What is happening now"
               : "Collaboration";
-      return renderCollaborationShell(title, messages);
+      return renderCollaborationShell(title, messages, { showNowPanel: true });
     }
 
-    function renderCollaborationShell(title, messages) {
+    function renderCollaborationShell(title, messages, options) {
       const rows = (messages && messages.length ? messages : [
         collabMessage("System", "No active handoff right now. Codex and Hermes will speak up here when there's work to coordinate.", "idle", Date.now()),
       ])
         .sort((a, b) => a.ts - b.ts)
-        .slice(-24);
+        .slice(-18);
       const lastIndex = rows.length - 1;
       const typingRow = hermesTypingSinceMs ? renderHermesTypingRow() : "";
+      const nowPanel = options && options.showNowPanel ? renderCollabNowPanel() : "";
       // Compute which rows are "fresh" (their id wasn't in the previous
       // render). On the very first render every row is fresh — which
       // would produce a flood of slide-ins; skip that case.
@@ -7336,6 +7466,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
             '</button>' +
           '</span>' +
         '</div>' +
+        nowPanel +
         rows.map((m, i) => {
           const key = collabRowKey(m);
           nextKnown.add(key);
@@ -7351,6 +7482,16 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '</div>';
       knownCollabMessageIds = nextKnown;
       return html;
+    }
+
+    function renderCollabNowPanel() {
+      const snapshot = boardNowSnapshot(latestPipelineItems || []);
+      return '<div class="collab-now" data-tone="' + escapeAttr(snapshot.tone) + '">' +
+        '<span class="collab-now-kicker">Current read</span>' +
+        '<div class="collab-now-title">' + escapeHtml(snapshot.headline) + '</div>' +
+        '<div class="collab-now-next">' + escapeHtml(snapshot.next) + '</div>' +
+        '<div class="collab-now-counts">' + boardNowCountsMarkup(snapshot.counts) + '</div>' +
+      '</div>';
     }
 
     // Presence footer rendered at the bottom of the collaboration thread.
@@ -8633,6 +8774,80 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       renderOwnerSummary(entries);
       renderStalenessSummary(entries);
       updatePipelineFilterButtons();
+    }
+
+    function renderBoardNowSummary(entries) {
+      const target = document.getElementById("board-now");
+      if (!target) return;
+      const snapshot = boardNowSnapshot(entries);
+      target.dataset.tone = snapshot.tone;
+      target.innerHTML = '<div class="board-now-copy">' +
+          '<span class="board-now-kicker">Board now</span>' +
+          '<strong class="board-now-title">' + escapeHtml(snapshot.headline) + '</strong>' +
+          '<span class="board-now-next">' + escapeHtml(snapshot.next) + '</span>' +
+        '</div>' +
+        '<div class="board-now-counts">' + boardNowCountsMarkup(snapshot.counts) + '</div>';
+    }
+
+    function boardNowSnapshot(entries) {
+      const items = (entries || []).filter((item) => {
+        if (!item) return false;
+        return boardLaneForItem(item, releaseVerdict(item)).key !== "done";
+      });
+      const counts = commandBoardLaneCounts(items);
+      const attention = counts.attention || 0;
+      const waiting = counts.waiting || 0;
+      const codex = counts.codex || 0;
+      const operator = counts.operator || 0;
+      const hermes = counts.hermes || 0;
+      const queue = counts.queue || 0;
+      const deploy = counts.deploy || 0;
+      const running = hermes + deploy;
+      const total = attention + waiting + codex + operator + queue + running;
+      let tone = "quiet";
+      let headline = "Board is quiet: no active PR handoffs in this monitor window.";
+      if (attention) {
+        tone = "attention";
+        headline = "Board now: " + plural(attention, "card") + " " + (attention === 1 ? "needs" : "need") + " a fix or explicit decision before the release path can move.";
+      } else if (codex) {
+        tone = "codex";
+        headline = "Board now: Codex owns " + plural(codex, "next move") + "; keep the patch small and hand it back to Hermes.";
+      } else if (operator) {
+        tone = "operator";
+        headline = "Board now: " + plural(operator, "card") + " " + (operator === 1 ? "needs" : "need") + " Pascal's review decision; automation has gone as far as it safely can.";
+      } else if (running) {
+        tone = "running";
+        headline = "Board now: " + plural(running, "check") + " or deploy verification " + (running === 1 ? "is" : "are") + " still moving.";
+      } else if (queue) {
+        tone = "queue";
+        headline = "Board now: " + plural(queue, "PR") + " " + (queue === 1 ? "sits" : "sit") + " in the merge queue; branch protection and merge ownership decide what leaves next.";
+      } else if (waiting) {
+        tone = "waiting";
+        headline = "Board now: " + plural(waiting, "draft") + " " + (waiting === 1 ? "is" : "are") + " parked in Waiting / Drafts; Codex is not taking over unless you delegate it.";
+      } else if (total) {
+        headline = "Board now: " + plural(total, "item") + " are visible, but none need a new owner right now.";
+      }
+      const focus = topConsoleItems(items, 4);
+      const next = trimBoardNowText(boardBriefingNextMove(focus));
+      return { tone, headline, next, counts: { attention, waiting, codex, operator, queue, running } };
+    }
+
+    function boardNowCountsMarkup(counts) {
+      const chips = [
+        { label: "fix", value: counts.attention },
+        { label: "draft", value: counts.waiting },
+        { label: "codex", value: counts.codex },
+        { label: "review", value: counts.operator },
+        { label: "queue", value: counts.queue },
+        { label: "moving", value: counts.running },
+      ].filter((chip) => chip.value > 0);
+      if (!chips.length) return '<span class="pill">idle</span>';
+      return chips.map((chip) => '<span class="pill">' + escapeHtml(chip.label + " " + chip.value) + '</span>').join("");
+    }
+
+    function trimBoardNowText(text) {
+      const value = String(text || "I will speak up when a card needs an owner.").replace(/^First useful move:\s*/i, "Next: ");
+      return value.length > 250 ? value.slice(0, 247).trimEnd() + "..." : value;
     }
 
     // Set a filter pill's inner count span AND toggle data-empty on
