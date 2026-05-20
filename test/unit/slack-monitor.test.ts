@@ -490,6 +490,11 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain('chip.setAttribute("data-empty"');
     expect(html).toContain('.counter-chip[data-empty="true"]');
     expect(html).toContain('.sys[data-state="idle"] { display: none; }');
+    expect(html).toContain('id="waiting-chip"');
+    expect(html).toContain('action needed');
+    expect(html).toContain('waiting drafts');
+    expect(html).toContain('operator review');
+    expect(html).toContain('merge queue');
     // The old setText("attention-chip", ...) plumbing is replaced
     // by setCounterChip so the zero-dim toggle stays in sync.
     expect(html).not.toContain('setText("attention-chip"');
@@ -512,6 +517,19 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain('updateCollabUnreadPill');
     expect(html).toContain('ensureCollabScrollListeners');
     expect(html).toContain('collab-unread-pill');
+
+    // Board-now polish: the board and chat both get a current read
+    // before the older collaboration history; draft cards show as
+    // parked/waiting instead of shouting stale red.
+    expect(html).toContain('id="board-now"');
+    expect(html).toContain('renderBoardNowSummary');
+    expect(html).toContain('boardNowSnapshot');
+    expect(html).toContain('renderCollabNowPanel');
+    expect(html).toContain('Current read');
+    expect(html).toContain('boardCardAge');
+    expect(html).toContain('label: age.state === "fresh" ? "Fresh" : "Parked"');
+    expect(html).toContain('.handoff-card[data-lane="waiting"] .stale-dot[data-stale="waiting"]');
+    expect(html).toContain('.slice(-18)');
 
     // Lane rails (PR: monitor-lane-rails): empty active lanes collapse
     // to narrow vertical rails (Done-rail idiom). Click expands them
