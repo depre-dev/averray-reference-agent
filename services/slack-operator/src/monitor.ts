@@ -2012,6 +2012,28 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .command-shell.has-selection .command-console {
       right: calc(clamp(420px, 31vw, 640px) + 18px);
     }
+    /* Mid-width breakpoint: when the viewport is too narrow for the
+       chat thread + 320-430px compose form to sit side-by-side and
+       still leave the thread readable, stack the compose BELOW the
+       thread instead. Thread takes full width; compose gets a fixed
+       compact height. Below 760px we already have a different layout
+       (mobile bottom-sheet via #fab-ask), so this only covers the
+       1180-760px range. */
+    @media (max-width: 1180px) and (min-width: 761px) {
+      .command-console {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr) auto;
+        max-height: min(56vh, 540px);
+      }
+      .command-shell.has-selection .command-console {
+        right: 14px;
+      }
+      .console-compose {
+        padding-left: 0;
+        padding-top: 10px;
+        border-top: 1px solid var(--line-soft);
+      }
+    }
     .console-main {
       position: relative; /* anchor point for the unread-pill */
       display: grid;
@@ -2197,6 +2219,15 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 0.64rem;
       letter-spacing: 0.02em;
+      /* Cap so a long meta ("board changed · Operator Review ·
+         OPERATOR REVIEW") can't push past the chat column and bleed
+         into the compose area. Ellipsis when it would otherwise
+         overflow; min-width:0 lets it actually shrink in the flex
+         row instead of forcing horizontal overflow. */
+      max-width: min(60%, 320px);
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
       white-space: nowrap;
       margin-left: auto;
     }
@@ -5496,7 +5527,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       } else {
         const cols = visibleLanes.map((lane) => {
           if (lane.key === "done") return "minmax(220px, 1fr)";
-          return collapsedKeys.has(lane.key) ? "66px" : "minmax(186px, 1fr)";
+          // 210px min (was 186px) so card content has room before it
+          // wraps — "Stale 35h 38m", action buttons, and the "Inspect
+          // draft" pill were getting squished at the old min.
+          return collapsedKeys.has(lane.key) ? "66px" : "minmax(210px, 1fr)";
         });
         if (!showDone) cols.push("56px");
         target.style.gridTemplateColumns = cols.join(" ");

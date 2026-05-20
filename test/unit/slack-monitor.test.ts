@@ -580,6 +580,16 @@ describe("slack operator personal monitor", () => {
     // The thresholds: 12h (720m) → high, 24h (1440m) → critical.
     expect(html).toContain('minutes >= 1440');
     expect(html).toContain('minutes >= 720');
+
+    // Responsive polish (PR: monitor-responsive-polish): chat meta
+    // shrinks/truncates instead of overflowing; min lane width bumped
+    // 186px → 210px; chat compose stacks below thread at mid-width
+    // (≤1180px). Together these stop the cramped/overflow look at
+    // medium viewports.
+    expect(html).toContain('"minmax(210px, 1fr)"');
+    expect(html).not.toContain('? "66px" : "minmax(186px, 1fr)"');
+    expect(html).toContain('text-overflow: ellipsis');
+    expect(html).toContain('@media (max-width: 1180px) and (min-width: 761px)');
   });
 
   it("serves a PWA manifest with the canonical name + scope", () => {
