@@ -34,6 +34,7 @@ Voice:
 
 Job:
 - Orchestrate the monitor board: explain what changed, who owns the next move, what is waiting, and what Pascal should decide.
+- Treat the live board snapshot as the highest-priority evidence. If memory or old chat conflicts with the board, say the board wins.
 - Use memory notes to honor Pascal's preferences and prior room decisions. Treat memory as guidance, not live proof.
 - Ask for help when a human decision is needed. Hand work to Codex only as a request or recommendation, never as a claim that Codex already acted.
 - Do not silently mutate GitHub, merge, deploy, approve, start Codex work, or mark anything reviewed. Those actions require visible board controls or normal PR workflows.
@@ -51,6 +52,28 @@ export interface HermesReplyPrSnapshot {
   why?: string;
 }
 
+export interface HermesBoardCardSnapshot {
+  repo?: string;
+  number?: number;
+  title: string;
+  lane: string;
+  owner: string;
+  verdict?: string;
+  ageLabel?: string;
+  why?: string;
+  next?: string;
+  tags?: ReadonlyArray<string>;
+}
+
+export interface HermesBoardSnapshot {
+  generatedAt?: string;
+  status?: string;
+  headline?: string;
+  counts?: Readonly<Record<string, number | string | boolean>>;
+  runner?: string;
+  items?: ReadonlyArray<HermesBoardCardSnapshot>;
+}
+
 export interface HermesReplyContext {
   operatorMessage: Pick<CollaborationMessage, "text" | "addressedTo" | "kind" | "relatedPr">;
   /** Most-recent first. Caller decides how many. */
@@ -59,6 +82,8 @@ export interface HermesReplyContext {
   memoryNotes?: ReadonlyArray<string>;
   /** State of the PR the operator was looking at (or that's attached to the message). */
   selectedPr?: HermesReplyPrSnapshot;
+  /** Current monitor board state, built server-side from the live snapshot. */
+  board?: HermesBoardSnapshot;
 }
 
 export interface GenerateHermesReplyOptions {
@@ -119,6 +144,25 @@ export async function generateHermesReply(
 export function buildUserPrompt(context: HermesReplyContext): string {
   const lines: string[] = [];
 
+  if (context.board) {
+    lines.push("Live board snapshot (highest-priority evidence; if it conflicts with memory or older chat, trust the board):");
+    if (context.board.generatedAt) lines.push(`- generatedAt: ${context.board.generatedAt}`);
+    if (context.board.status) lines.push(`- status: ${context.board.status}`);
+    if (context.board.headline) lines.push(`- headline: ${truncate(context.board.headline, 360)}`);
+    const counts = formatBoardCounts(context.board.counts);
+    if (counts) lines.push(`- lane counts: ${counts}`);
+    if (context.board.runner) lines.push(`- codex runner: ${truncate(context.board.runner, 260)}`);
+    if (context.board.items && context.board.items.length > 0) {
+      lines.push("- top cards:");
+      for (const item of context.board.items.slice(0, 8)) {
+        lines.push(`  - ${formatBoardCard(item)}`);
+      }
+    } else {
+      lines.push("- top cards: none");
+    }
+    lines.push("");
+  }
+
   const pr = context.selectedPr ?? (context.operatorMessage.relatedPr
     ? { repo: context.operatorMessage.relatedPr.repo, number: context.operatorMessage.relatedPr.number }
     : undefined);
@@ -154,6 +198,7 @@ export function buildUserPrompt(context: HermesReplyContext): string {
 
   lines.push("Hermes job on this board:");
   lines.push("- Orchestrate: explain state, route the next turn, remember preferences, and ask for decisions.");
+  lines.push("- Use the live board snapshot to name the owner and next move. Mention uncertainty when the board lacks proof.");
   lines.push("- Stay truthful: do not claim hidden actions or speak as Codex.");
   lines.push("");
 
@@ -165,6 +210,29 @@ export function buildUserPrompt(context: HermesReplyContext): string {
   lines.push("Reply as Hermes in 1-4 conversational sentences. Do not greet, do not summarize Pascal's message, do not pad. Explain the next move if the board state needs one.");
 
   return lines.join("\n");
+}
+
+function formatBoardCounts(counts: HermesBoardSnapshot["counts"]): string {
+  if (!counts) return "";
+  return Object.entries(counts)
+    .filter(([, value]) => value !== undefined && value !== "" && value !== false)
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join(", ");
+}
+
+function formatBoardCard(item: HermesBoardCardSnapshot): string {
+  const pr = item.repo && item.number ? `${item.repo}#${item.number}` : item.repo || "unknown PR";
+  const parts = [
+    `${item.lane} / owner ${item.owner}`,
+    pr,
+    item.verdict ? `verdict ${item.verdict}` : "",
+    item.ageLabel ? `age ${item.ageLabel}` : "",
+    `title ${truncate(item.title, 140)}`,
+    item.why ? `why ${truncate(item.why, 220)}` : "",
+    item.next ? `next ${truncate(item.next, 220)}` : "",
+    item.tags && item.tags.length > 0 ? `tags ${item.tags.slice(0, 5).join(", ")}` : "",
+  ].filter(Boolean);
+  return parts.join(" | ");
 }
 
 function extractReplyText(json: unknown): string | null {
