@@ -44,7 +44,7 @@ import {
   relatedPrForHermesBoardNarration,
   targetForHermesBoardNarration,
 } from "./monitor-hermes-narration.js";
-import { generateHermesBoardNarration, generateHermesReply } from "./monitor-hermes-voice.js";
+import { appendHermesWhyTrace, generateHermesBoardNarration, generateHermesReply } from "./monitor-hermes-voice.js";
 import {
   approveCodexTask,
   cancelCodexTask,
@@ -442,32 +442,32 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
 
   const timer = setTimeout(async () => {
     let text = draft.text;
+    const memoryNotes = listHermesMemoryNotes({
+      ...(operatorMessage.relatedPr ? { relatedPr: operatorMessage.relatedPr } : {}),
+      ...(operatorMessage.relatedCorrelationId ? { relatedCorrelationId: operatorMessage.relatedCorrelationId } : {}),
+      limit: 8,
+    }).map((note) => note.text);
+    const shouldLoadBoard = Boolean(apiKey) || memoryNotes.length > 0;
+    const board = shouldLoadBoard ? await loadHermesBoardSnapshotForReply(operatorMessage) : undefined;
+    const replyContext = {
+      operatorMessage: {
+        text: operatorMessage.text,
+        addressedTo: operatorMessage.addressedTo,
+        kind: operatorMessage.kind,
+        ...(operatorMessage.relatedPr ? { relatedPr: operatorMessage.relatedPr } : {}),
+      },
+      recentMessages: apiKey
+        ? listCollaborationMessages({ limit: 10 }).map((m) => ({ author: m.author, text: m.text, ts: m.ts }))
+        : [],
+      memoryNotes,
+      ...(operatorMessage.relatedPr ? { selectedPr: operatorMessage.relatedPr } : {}),
+      ...(board ? { board } : {}),
+    };
     if (apiKey) {
       try {
-        // Pull the last ~10 messages, oldest-first, so the model sees
-        // the conversation in natural order rather than reversed.
-        const recent = listCollaborationMessages({ limit: 10 });
-        const memoryNotes = listHermesMemoryNotes({
-          ...(operatorMessage.relatedPr ? { relatedPr: operatorMessage.relatedPr } : {}),
-          ...(operatorMessage.relatedCorrelationId ? { relatedCorrelationId: operatorMessage.relatedCorrelationId } : {}),
-          limit: 8,
-        }).map((note) => note.text);
-        const board = await loadHermesBoardSnapshotForReply(operatorMessage);
-        const llmText = await generateHermesReply(
-          {
-            operatorMessage: {
-              text: operatorMessage.text,
-              addressedTo: operatorMessage.addressedTo,
-              kind: operatorMessage.kind,
-              ...(operatorMessage.relatedPr ? { relatedPr: operatorMessage.relatedPr } : {}),
-            },
-            recentMessages: recent.map((m) => ({ author: m.author, text: m.text, ts: m.ts })),
-            memoryNotes,
-            ...(operatorMessage.relatedPr ? { selectedPr: operatorMessage.relatedPr } : {}),
-            ...(board ? { board } : {}),
-          },
-          { apiKey, baseUrl, model }
-        );
+        // replyContext carries the recent thread oldest-first so the
+        // model sees the conversation in natural order rather than reversed.
+        const llmText = await generateHermesReply(replyContext, { apiKey, baseUrl, model });
         if (llmText) {
           text = llmText;
         } else {
@@ -477,6 +477,7 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
         logger.warn({ err: error, id: operatorMessage.id }, "monitor_collaboration_llm_reply_threw");
       }
     }
+    text = appendHermesWhyTrace(text, replyContext);
     try {
       recordCollaborationMessage({
         author: "hermes",
@@ -1138,25 +1139,24 @@ function scheduleHermesBoardNarration(snapshot: unknown): void {
 
   inFlightHermesBoardNarrationSignature = decision.signature;
   const timer = setTimeout(async () => {
-    let text = fallbackHermesBoardNarration(board);
+    const memoryNotes = hermesMemoryNotesForBoard(board, 8);
+    const narrationContext = {
+      board,
+      recentMessages: listCollaborationMessages({ limit: 8 }).map((m) => ({
+        author: m.author,
+        text: m.text,
+        ts: m.ts,
+      })),
+      memoryNotes,
+      trigger: decision.signature,
+    };
+    let text = appendHermesWhyTrace(fallbackHermesBoardNarration(board), narrationContext);
     const apiKey = optionalEnv("OLLAMA_API_KEY");
     const baseUrl = optionalEnv("OLLAMA_BASE_URL") ?? "https://ollama.com/v1";
     const model = optionalEnv("HERMES_MONITOR_REPLY_MODEL") ?? "deepseek-v4-pro:cloud";
     if (apiKey) {
       try {
-        const llmText = await generateHermesBoardNarration(
-          {
-            board,
-            recentMessages: listCollaborationMessages({ limit: 8 }).map((m) => ({
-              author: m.author,
-              text: m.text,
-              ts: m.ts,
-            })),
-            memoryNotes: listHermesMemoryNotes({ limit: 8 }).map((note) => note.text),
-            trigger: decision.signature,
-          },
-          { apiKey, baseUrl, model, timeoutMs: 6_000 }
-        );
+        const llmText = await generateHermesBoardNarration(narrationContext, { apiKey, baseUrl, model, timeoutMs: 6_000 });
         if (llmText) text = llmText;
       } catch (error) {
         logger.warn({ err: error }, "monitor_collaboration_board_narration_llm_threw");
@@ -1183,6 +1183,34 @@ function scheduleHermesBoardNarration(snapshot: unknown): void {
     }
   }, 900);
   timer.unref?.();
+}
+
+function hermesMemoryNotesForBoard(board: ReturnType<typeof buildHermesBoardSnapshotFromMonitor>, limit: number): string[] {
+  const notes: string[] = [];
+  const seen = new Set<string>();
+  const addNotes = (nextNotes: string[]) => {
+    for (const note of nextNotes) {
+      const key = note.toLowerCase().replace(/\s+/g, " ").trim();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      notes.push(note);
+      if (notes.length >= limit) return;
+    }
+  };
+
+  for (const item of board?.items?.slice(0, 6) ?? []) {
+    if (notes.length >= limit) break;
+    if (!item.repo || !item.number) continue;
+    addNotes(listHermesMemoryNotes({
+      relatedPr: { repo: item.repo, number: item.number },
+      limit: 4,
+    }).map((note) => note.text));
+  }
+
+  if (notes.length < limit) {
+    addNotes(listHermesMemoryNotes({ limit }).map((note) => note.text));
+  }
+  return notes;
 }
 
 async function loadCodexTaskQueueSummary() {

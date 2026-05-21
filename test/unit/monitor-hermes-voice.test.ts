@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   HERMES_PERSONA,
+  appendHermesWhyTrace,
   buildBoardNarrationPrompt,
   buildUserPrompt,
   generateHermesBoardNarration,
@@ -44,6 +45,7 @@ describe("HERMES_PERSONA", () => {
     expect(HERMES_PERSONA).toMatch(/never claim/i);
     expect(HERMES_PERSONA).toMatch(/memory notes/i);
     expect(HERMES_PERSONA).toMatch(/visible board controls/i);
+    expect(HERMES_PERSONA).toMatch(/Why:/);
     expect(HERMES_PERSONA).toMatch(/Pascal/);
     expect(HERMES_PERSONA).toMatch(/Codex/);
   });
@@ -94,6 +96,8 @@ describe("buildUserPrompt", () => {
     expect(prompt).toContain("Hermes memory");
     expect(prompt).toContain("draft PRs owned by another agent");
     expect(prompt).toContain("use as guidance, not proof");
+    expect(prompt).toContain("Memory audit");
+    expect(prompt).toContain("Why:");
   });
 
   it("includes live board context as higher-priority evidence", () => {
@@ -161,6 +165,41 @@ describe("buildBoardNarrationPrompt", () => {
     expect(prompt).toContain("Needs Attention / owner Codex");
     expect(prompt).toContain("Pascal prefers live");
     expect(prompt).toContain("Do not claim you clicked buttons");
+    expect(prompt).toContain("Memory audit");
+    expect(prompt).toContain("Why:");
+  });
+});
+
+describe("appendHermesWhyTrace", () => {
+  it("adds a compact board-plus-memory trace when memory is present", () => {
+    const text = appendHermesWhyTrace("I will keep this parked until Pascal delegates it.", {
+      selectedPr: { repo: "averray-agent/agent", number: 439 },
+      board: {
+        items: [
+          {
+            repo: "averray-agent/agent",
+            number: 439,
+            title: "PR is still marked as draft.",
+            lane: "Waiting / Drafts",
+            owner: "PR author",
+          },
+        ],
+      },
+      memoryNotes: [
+        "Pascal outcome for averray-agent/agent#439: delegated draft takeover to Codex; Codex may inspect only verifiable missing work.",
+      ],
+    });
+
+    expect(text).toContain("\nWhy:");
+    expect(text).toContain("board averray-agent/agent#439 in Waiting / Drafts");
+    expect(text).toContain("memory delegated draft takeover");
+  });
+
+  it("does not add a trace without memory notes", () => {
+    const text = appendHermesWhyTrace("I will keep watching.", {
+      board: { headline: "Board now: idle." },
+    });
+    expect(text).toBe("I will keep watching.");
   });
 });
 
@@ -173,6 +212,32 @@ describe("generateHermesReply", () => {
       jsonResponse({ choices: [{ message: { content: "Got it. Watching averray-agent/agent#137 — verdict lands here when the checks clear." } }] });
     const text = await generateHermesReply(baseContext(), { apiKey, baseUrl, fetchFn: fetchFn as typeof fetch });
     expect(text).toMatch(/averray-agent\/agent#137/);
+  });
+
+  it("adds a deterministic why trace when memory guides the reply", async () => {
+    const fetchFn = async (_url: string, _init: RequestInit) =>
+      jsonResponse({ choices: [{ message: { content: "I will keep this in Waiting / Drafts unless Pascal delegates takeover." } }] });
+    const text = await generateHermesReply(baseContext({
+      selectedPr: { repo: "averray-agent/agent", number: 439 },
+      board: {
+        items: [
+          {
+            repo: "averray-agent/agent",
+            number: 439,
+            title: "PR is still marked as draft.",
+            lane: "Waiting / Drafts",
+            owner: "PR author",
+          },
+        ],
+      },
+      memoryNotes: [
+        "Pascal note for averray-agent/agent#439: external-agent drafts should wait unless Pascal explicitly delegates takeover.",
+      ],
+    }), { apiKey, baseUrl, fetchFn: fetchFn as typeof fetch });
+
+    expect(text).toContain("\nWhy:");
+    expect(text).toContain("board averray-agent/agent#439 in Waiting / Drafts");
+    expect(text).toContain("memory external-agent drafts should wait");
   });
 
   it("returns null when the API key is empty", async () => {
@@ -301,5 +366,37 @@ describe("generateHermesBoardNarration", () => {
     expect(text).toMatch(/averray-agent\/agent#438/);
     expect(body.max_tokens).toBe(180);
     expect(body.messages[1].content).toContain("Speak proactively as Hermes");
+  });
+
+  it("adds a why trace when board narration receives relevant memory", async () => {
+    const fetchFn = async (_url: string, _init: RequestInit) =>
+      jsonResponse({ choices: [{ message: { content: "Pascal, this draft stays parked unless you explicitly delegate Codex takeover." } }] });
+    const text = await generateHermesBoardNarration(
+      {
+        board: {
+          headline: "Board now: 1 draft parked.",
+          counts: { waiting: 1 },
+          items: [
+            {
+              repo: "averray-agent/agent",
+              number: 439,
+              title: "PR is still marked as draft.",
+              lane: "Waiting / Drafts",
+              owner: "PR author",
+            },
+          ],
+        },
+        recentMessages: [],
+        memoryNotes: [
+          "Pascal preference: drafts owned by another agent should wait unless Pascal delegates takeover.",
+        ],
+        trigger: "waiting=1",
+      },
+      { apiKey, baseUrl, fetchFn: fetchFn as typeof fetch }
+    );
+
+    expect(text).toContain("\nWhy:");
+    expect(text).toContain("board averray-agent/agent#439 in Waiting / Drafts");
+    expect(text).toContain("memory drafts owned by another agent");
   });
 });

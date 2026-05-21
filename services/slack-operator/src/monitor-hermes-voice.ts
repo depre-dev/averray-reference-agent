@@ -36,6 +36,7 @@ Job:
 - Orchestrate the monitor board: explain what changed, who owns the next move, what is waiting, and what Pascal should decide.
 - Treat the live board snapshot as the highest-priority evidence. If memory or old chat conflicts with the board, say the board wins.
 - Use memory notes to honor Pascal's preferences and prior room decisions. Treat memory as guidance, not live proof.
+- When memory influences your routing, include a final short "Why:" trace that ties the live board signal to the memory cue.
 - Ask for help when a human decision is needed. Hand work to Codex only as a request or recommendation, never as a claim that Codex already acted.
 - Do not silently mutate GitHub, merge, deploy, approve, start Codex work, or mark anything reviewed. Those actions require visible board controls or normal PR workflows.
 
@@ -107,6 +108,13 @@ export interface GenerateHermesReplyOptions {
   fetchFn?: typeof fetch;
 }
 
+export interface HermesWhyTraceContext {
+  memoryNotes?: ReadonlyArray<string>;
+  selectedPr?: HermesReplyPrSnapshot;
+  board?: HermesBoardSnapshot;
+  trigger?: string;
+}
+
 export async function generateHermesReply(
   context: HermesReplyContext,
   options: GenerateHermesReplyOptions
@@ -143,7 +151,8 @@ export async function generateHermesReply(
     });
     if (!response.ok) return null;
     const json = await response.json().catch(() => null) as unknown;
-    return extractReplyText(json);
+    const text = extractReplyText(json);
+    return text ? appendHermesWhyTrace(text, context) : null;
   } catch {
     return null;
   } finally {
@@ -187,7 +196,8 @@ export async function generateHermesBoardNarration(
     });
     if (!response.ok) return null;
     const json = await response.json().catch(() => null) as unknown;
-    return extractReplyText(json);
+    const text = extractReplyText(json);
+    return text ? appendHermesWhyTrace(text, context) : null;
   } catch {
     return null;
   } finally {
@@ -233,6 +243,7 @@ export function buildUserPrompt(context: HermesReplyContext): string {
     for (const note of context.memoryNotes) {
       lines.push(`- ${truncate(note, 260)}`);
     }
+    lines.push("Memory audit: if this guidance changes your routing or tone, include a final one-line `Why:` trace that names the live board signal and memory cue.");
     lines.push("");
   }
 
@@ -275,6 +286,7 @@ export function buildBoardNarrationPrompt(context: HermesBoardNarrationContext):
     for (const note of context.memoryNotes) {
       lines.push(`- ${truncate(note, 240)}`);
     }
+    lines.push("Memory audit: if this guidance changes the narration, include a final one-line `Why:` trace that names the live board signal and memory cue.");
     lines.push("");
   }
 
@@ -285,6 +297,68 @@ export function buildBoardNarrationPrompt(context: HermesBoardNarrationContext):
   lines.push("- Do not claim you clicked buttons, started Codex, merged, deployed, approved, or changed GitHub.");
 
   return lines.join("\n");
+}
+
+export function appendHermesWhyTrace(text: string, context: HermesWhyTraceContext): string {
+  const trimmed = text.trim();
+  if (!trimmed || /^why:/im.test(trimmed)) return trimmed;
+
+  const trace = hermesWhyTrace(context);
+  if (!trace) return trimmed;
+
+  return `${trimmed}\nWhy: ${trace}`.slice(0, 1200);
+}
+
+function hermesWhyTrace(context: HermesWhyTraceContext): string | null {
+  const memory = memoryTrace(context.memoryNotes);
+  if (!memory) return null;
+
+  const board = boardTrace(context);
+  return [board ? `board ${board}` : null, `memory ${memory}`]
+    .filter(Boolean)
+    .join("; ");
+}
+
+function memoryTrace(notes: ReadonlyArray<string> | undefined): string | null {
+  const note = notes?.find((entry) => entry.trim());
+  if (!note) return null;
+  const cleaned = note
+    .replace(/^Pascal (?:preference|note|outcome)(?: for [^:]+)?:\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned ? truncate(cleaned, 120) : null;
+}
+
+function boardTrace(context: HermesWhyTraceContext): string | null {
+  const selectedItem = selectedBoardItem(context);
+  if (selectedItem) {
+    const label = tracePrLabel(selectedItem);
+    const owner = selectedItem.owner ? `, ${selectedItem.owner} owns next` : "";
+    return truncate(`${label} in ${selectedItem.lane}${owner}`, 120);
+  }
+  if (context.selectedPr) {
+    return `${context.selectedPr.repo}#${context.selectedPr.number} is selected`;
+  }
+  if (context.board?.headline) return truncate(context.board.headline, 120);
+  if (context.trigger) return truncate(`changed on ${context.trigger}`, 120);
+  return null;
+}
+
+function selectedBoardItem(context: HermesWhyTraceContext): HermesBoardCardSnapshot | undefined {
+  const items = context.board?.items ?? [];
+  if (context.selectedPr) {
+    const selected = items.find((item) =>
+      item.repo?.toLowerCase() === context.selectedPr?.repo.toLowerCase()
+      && item.number === context.selectedPr?.number
+    );
+    if (selected) return selected;
+  }
+  return items[0];
+}
+
+function tracePrLabel(item: HermesBoardCardSnapshot): string {
+  if (item.repo && item.number) return `${item.repo}#${item.number}`;
+  return item.repo || item.title || "card";
 }
 
 function appendBoardSnapshotLines(lines: string[], board: HermesBoardSnapshot): void {
