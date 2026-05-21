@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   HERMES_PERSONA,
+  buildBoardNarrationPrompt,
   buildUserPrompt,
+  generateHermesBoardNarration,
   generateHermesReply,
   type HermesReplyContext,
 } from "../../services/slack-operator/src/monitor-hermes-voice.js";
@@ -132,6 +134,36 @@ describe("buildUserPrompt", () => {
   });
 });
 
+describe("buildBoardNarrationPrompt", () => {
+  it("asks Hermes to proactively narrate board changes without claiming hidden actions", () => {
+    const prompt = buildBoardNarrationPrompt({
+      board: {
+        headline: "Board now: 1 blocked item.",
+        counts: { attention: 1 },
+        items: [
+          {
+            repo: "averray-agent/agent",
+            number: 438,
+            title: "1 PR check failed",
+            lane: "Needs Attention",
+            owner: "Codex",
+            verdict: "blocked",
+            why: "1 PR check failed.",
+            next: "inspect the failed runner output",
+          },
+        ],
+      },
+      recentMessages: [{ author: "operator", text: "keep it conversational", ts: NOW - 5_000 }],
+      memoryNotes: ["Pascal prefers live, caring Hermes updates."],
+      trigger: "attention=1",
+    });
+    expect(prompt).toContain("The monitor board changed");
+    expect(prompt).toContain("Needs Attention / owner Codex");
+    expect(prompt).toContain("Pascal prefers live");
+    expect(prompt).toContain("Do not claim you clicked buttons");
+  });
+});
+
 describe("generateHermesReply", () => {
   const apiKey = "test-key";
   const baseUrl = "https://ollama.example.com/v1";
@@ -233,5 +265,41 @@ describe("generateHermesReply", () => {
       fetchFn: fetchFn as typeof fetch,
     });
     expect(capturedUrl).toBe("https://ollama.example.com/v1/chat/completions");
+  });
+});
+
+describe("generateHermesBoardNarration", () => {
+  const apiKey = "test-key";
+  const baseUrl = "https://ollama.example.com/v1";
+
+  it("sends a proactive narration prompt to the configured model", async () => {
+    let capturedBody: unknown;
+    const fetchFn = async (_url: string, init: RequestInit) => {
+      capturedBody = JSON.parse(init.body as string);
+      return jsonResponse({ choices: [{ message: { content: "Codex, averray-agent/agent#438 needs you on the failed check; I will wait for the runner output before moving it." } }] });
+    };
+    const text = await generateHermesBoardNarration(
+      {
+        board: {
+          headline: "Board now: 1 blocked item.",
+          counts: { attention: 1 },
+          items: [
+            {
+              repo: "averray-agent/agent",
+              number: 438,
+              title: "1 PR check failed",
+              lane: "Needs Attention",
+              owner: "Codex",
+            },
+          ],
+        },
+        recentMessages: [],
+      },
+      { apiKey, baseUrl, model: "deepseek-v4-pro:cloud", fetchFn: fetchFn as typeof fetch }
+    );
+    const body = capturedBody as { max_tokens: number; messages: Array<{ role: string; content: string }> };
+    expect(text).toMatch(/averray-agent\/agent#438/);
+    expect(body.max_tokens).toBe(180);
+    expect(body.messages[1].content).toContain("Speak proactively as Hermes");
   });
 });
