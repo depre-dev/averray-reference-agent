@@ -417,6 +417,9 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain('interactive === card');
     expect(html).toContain('event.key !== "Escape"');
     expect(html).toContain('scrim.dataset.open = "true"');
+    expect(html).toContain('--z-detail-drawer: 40');
+    expect(html).toContain('z-index: var(--z-selected-card)');
+    expect(html).toContain('z-index: var(--z-detail-drawer)');
 
     // Hermes LLM voice (PR: monitor-hermes-llm): the client poll
     // window stretches to cover Ollama Cloud latency, and the

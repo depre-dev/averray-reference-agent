@@ -156,6 +156,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       --bad-bg: rgba(238, 98, 96, 0.12);
       --warn-bg: rgba(217, 173, 66, 0.12);
       --accent-bg: rgba(216, 154, 43, 0.12);
+      --z-drawer-scrim: 30;
+      --z-selected-card: 31;
+      --z-detail-drawer: 40;
     }
     * { box-sizing: border-box; }
     body {
@@ -1660,7 +1663,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
     /* Selected card pops a touch more than hover — thicker accent rail
        and a subtle outer glow so when the drawer is open you can still
-       see which card it belongs to behind the scrim. */
+       see which card it belongs to behind the scrim. The drawer itself
+       stays above this layer so long cards never cover drawer text. */
     .handoff-card[data-selected="true"] {
       transform: translateY(-1px);
       border-color: var(--verdict-accent, var(--lane-accent));
@@ -1668,7 +1672,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       box-shadow:
         0 0 0 1px color-mix(in srgb, var(--verdict-accent, var(--lane-accent)) 70%, transparent),
         0 14px 36px rgba(0, 0, 0, 0.36);
-      z-index: 21;
+      z-index: var(--z-selected-card);
       position: relative;
     }
     .command-shell.has-selection .handoff-card:not([data-selected="true"]) {
@@ -1870,12 +1874,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       background: color-mix(in srgb, var(--lane-accent) 12%, transparent);
     }
     /* Backdrop scrim that dims the rest of the page while the detail
-       drawer is open. Sits between the page content (low z-index) and
-       the drawer (z-index 20). Click anywhere on the scrim to close. */
+       drawer is open. Sits below the selected-card focus layer and
+       below the drawer. Click anywhere on the scrim to close. */
     #drawer-scrim {
       position: fixed;
       inset: 0;
-      z-index: 19;
+      z-index: var(--z-drawer-scrim);
       background: rgba(2, 9, 8, 0.55);
       backdrop-filter: blur(2px);
       opacity: 0;
@@ -1890,7 +1894,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       position: fixed;
       inset: 0 0 0 auto;
       width: clamp(420px, 31vw, 640px);
-      z-index: 20;
+      z-index: var(--z-detail-drawer);
       display: grid;
       grid-template-rows: auto minmax(0, 1fr) auto;
       border-left: 1px solid var(--line);
@@ -3243,15 +3247,15 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       background: color-mix(in srgb, var(--ok) 6%, var(--surface-strong));
     }
     .done-row[data-verdict="block"]:hover { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 6%, var(--surface-strong)); }
-    /* Selected done-row pops above the scrim too, so it stays visible
-       when the drawer focus mode is active. */
+    /* Selected done-row pops above the scrim too, but remains below the
+       drawer if a future action opens one from a Done entry. */
     .done-row[data-selected="true"] {
       transform: translateY(-1px);
       border-color: var(--ok);
       box-shadow:
         0 0 0 1px color-mix(in srgb, var(--ok) 70%, transparent),
         0 10px 26px rgba(0, 0, 0, 0.34);
-      z-index: 21;
+      z-index: var(--z-selected-card);
       position: relative;
     }
     .done-row .done-check {
