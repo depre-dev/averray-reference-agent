@@ -20,11 +20,11 @@ import { dirname } from "node:path";
  *
  * Conversation storage is intentionally in-memory and bounded: a ring
  * of the last `MAX_MESSAGES` entries with a 24h soft TTL on read.
- * Hermes memory is a smaller derived layer: operator guidance can be
- * persisted to `HERMES_MONITOR_MEMORY_PATH` so Hermes keeps learning
- * preferences across monitor restarts without treating memory as live
- * proof. Durable full transcripts and per-PR threads remain separate
- * follow-ups.
+ * Hermes memory is a smaller derived layer: operator guidance and
+ * operator outcomes can be persisted to `HERMES_MONITOR_MEMORY_PATH`
+ * so Hermes keeps learning preferences across monitor restarts without
+ * treating memory as live proof. Durable full transcripts and per-PR
+ * threads remain separate follow-ups.
  */
 
 const MAX_MESSAGES = 500;
@@ -260,12 +260,65 @@ function learnHermesMemoryFromMessage(message: CollaborationMessage): void {
 function memoryTextForMessage(message: CollaborationMessage): string | null {
   if (message.author !== "operator") return null;
   if (message.addressedTo === "operator") return null;
+
+  const outcomeMemory = operatorOutcomeMemoryTextForMessage(message);
+  if (outcomeMemory) return outcomeMemory;
+
   if (!looksLikeOperatorGuidance(message.text)) return null;
 
   const compact = message.text.replace(/\s+/g, " ").trim();
   const prRef = message.relatedPr ? `${message.relatedPr.repo}#${message.relatedPr.number}` : null;
   const prefix = prRef ? `Pascal note for ${prRef}: ` : "Pascal preference: ";
   return `${prefix}${compact}`.slice(0, HERMES_MEMORY_NOTE_MAX_CHARS);
+}
+
+function operatorOutcomeMemoryTextForMessage(message: CollaborationMessage): string | null {
+  if (!message.relatedPr) return null;
+
+  const compact = message.text.replace(/\s+/g, " ").trim();
+  const lower = compact.toLowerCase();
+  const prRef = `${message.relatedPr.repo}#${message.relatedPr.number}`;
+  const prefix = `Pascal outcome for ${prRef}: `;
+
+  const outcome = classifyOperatorOutcome(lower);
+  if (!outcome) return null;
+
+  return `${prefix}${outcome}`.slice(0, HERMES_MEMORY_NOTE_MAX_CHARS);
+}
+
+function classifyOperatorOutcome(lower: string): string | null {
+  if (includesAll(lower, ["opened the failed task output", "runner error"])) {
+    return "opened the failed Codex runner output; next move is a smaller retry task or a clear no-code-change explanation.";
+  }
+  if (includesAll(lower, ["please take over", "still a draft"])) {
+    return "delegated draft takeover to Codex; Codex may inspect and finish only verifiable missing work, then mark ready only if complete.";
+  }
+  if (includesAll(lower, ["sending", "back from operator review"])) {
+    return "sent operator review back to Codex because the pre-check was not enough; Codex should make the smallest justified fix or explain no change.";
+  }
+  if (includesAll(lower, ["reopened my local review", "keep it out of the release path"])) {
+    return "reopened local review; keep the PR out of the release path until it is marked reviewed again or sent back to Codex.";
+  }
+  if (includesAll(lower, ["marked", "reviewed for release"])) {
+    return "marked the PR reviewed for release; this is not a merge and it may move toward release only while branch protection stays green.";
+  }
+  if (includesAll(lower, ["accepting the project-level review gate"])) {
+    return "accepted the project-level review gate; if CI or evidence changes, bring the PR back before it moves forward.";
+  }
+  if (includesAll(lower, ["created a proposed task", "not a runner start yet"])) {
+    return "proposed a Codex task but did not start the runner; Codex should hold until the task is explicitly approved.";
+  }
+  if (includesAll(lower, ["approved the task", "allowed to pick it up now"])) {
+    return "approved the Codex task; Codex may pick it up, keep the change bounded, and let Hermes re-check after CI.";
+  }
+  if (includesAll(lower, ["cancelled the codex task"])) {
+    return "cancelled the Codex task; keep the card parked until the next move is clearer or a smaller task is proposed.";
+  }
+  return null;
+}
+
+function includesAll(text: string, cues: string[]): boolean {
+  return cues.every((cue) => text.includes(cue));
 }
 
 function looksLikeOperatorGuidance(text: string): boolean {
@@ -292,6 +345,14 @@ function looksLikeOperatorGuidance(text: string): boolean {
     "codex",
     "hermes",
     "board",
+    "approved",
+    "reviewed",
+    "sent back",
+    "take over",
+    "takeover",
+    "runner start",
+    "pick it up",
+    "reopened",
   ].some((cue) => lower.includes(cue));
 }
 

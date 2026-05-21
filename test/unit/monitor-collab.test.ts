@@ -207,6 +207,90 @@ describe("Hermes collaboration memory", () => {
     expect(notes.map((note) => note.text).join("\n")).not.toContain("averray-agent/agent#440");
   });
 
+  it("learns operator outcome memory from failed task review actions", () => {
+    recordCollaborationMessage(
+      {
+        author: "operator",
+        kind: "status",
+        addressedTo: "codex",
+        text: "Codex, I opened the failed task output for averray-agent/agent#438. I am looking for the runner error first; the next move is either a smaller retry task or a clear no-code-change explanation.",
+        relatedPr: { repo: "averray-agent/agent", number: 438 },
+      },
+      NOW
+    );
+
+    const notes = listHermesMemoryNotes({
+      relatedPr: { repo: "averray-agent/agent", number: 438 },
+    });
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({
+      scope: "pr",
+      text: expect.stringContaining("failed Codex runner output"),
+      relatedPr: { repo: "averray-agent/agent", number: 438 },
+    });
+  });
+
+  it("learns draft takeover and operator send-back outcomes addressed to Codex", () => {
+    recordCollaborationMessage(
+      {
+        author: "operator",
+        kind: "proposal",
+        addressedTo: "codex",
+        text: "Codex, please take over averray-agent/agent#439. It is still a draft, but I want you to inspect the branch, finish only the missing work you can verify, run the relevant checks, and mark it ready only if it is actually complete. Do not merge or deploy.",
+        relatedPr: { repo: "averray-agent/agent", number: 439 },
+      },
+      NOW
+    );
+    recordCollaborationMessage(
+      {
+        author: "operator",
+        kind: "request_help",
+        addressedTo: "codex",
+        text: "Codex, I am sending averray-agent/agent#151 back from operator review. Hermes' pre-check is not enough for me to approve it yet: backend changed. Please make the smallest justified fix, or report clearly if the right answer is no code change.",
+        relatedPr: { repo: "averray-agent/agent", number: 151 },
+      },
+      NOW + 1
+    );
+
+    const draftNotes = listHermesMemoryNotes({
+      relatedPr: { repo: "averray-agent/agent", number: 439 },
+    });
+    const sendBackNotes = listHermesMemoryNotes({
+      relatedPr: { repo: "averray-agent/agent", number: 151 },
+    });
+    expect(draftNotes.map((note) => note.text).join("\n")).toContain("delegated draft takeover");
+    expect(sendBackNotes.map((note) => note.text).join("\n")).toContain("sent operator review back to Codex");
+  });
+
+  it("learns local review and Codex task approval outcomes", () => {
+    recordCollaborationMessage(
+      {
+        author: "operator",
+        kind: "status",
+        addressedTo: "hermes",
+        text: "Hermes, I reopened my local review for averray-agent/agent#440. Keep it out of the release path until I mark it reviewed again or send it back to Codex.",
+        relatedPr: { repo: "averray-agent/agent", number: 440 },
+      },
+      NOW
+    );
+    recordCollaborationMessage(
+      {
+        author: "operator",
+        kind: "approval",
+        addressedTo: "codex",
+        text: "Codex, I approved the task for averray-agent/agent#440. You are allowed to pick it up now; please keep the change bounded, push only if there is a concrete fix, and let Hermes re-check after CI.",
+        relatedPr: { repo: "averray-agent/agent", number: 440 },
+      },
+      NOW + 1
+    );
+
+    const text = listHermesMemoryNotes({
+      relatedPr: { repo: "averray-agent/agent", number: 440 },
+    }).map((note) => note.text).join("\n");
+    expect(text).toContain("reopened local review");
+    expect(text).toContain("approved the Codex task");
+  });
+
   it("does not learn ordinary chatter or Codex-authored messages", () => {
     recordCollaborationMessage(
       { author: "operator", addressedTo: "hermes", text: "thanks, looks good" },
@@ -228,6 +312,22 @@ describe("Hermes collaboration memory", () => {
     recordCollaborationMessage(input, NOW);
     recordCollaborationMessage(input, NOW + 1);
     const notes = listHermesMemoryNotes();
+    expect(notes).toHaveLength(1);
+    expect(notes[0].ts).toBe(NOW + 1);
+  });
+
+  it("deduplicates repeated operator outcome memory", () => {
+    const input = {
+      author: "operator",
+      addressedTo: "codex",
+      text: "Codex, I approved the task for averray-agent/agent#443. You are allowed to pick it up now; please keep the change bounded, push only if there is a concrete fix, and let Hermes re-check after CI.",
+      relatedPr: { repo: "averray-agent/agent", number: 443 },
+    };
+    recordCollaborationMessage(input, NOW);
+    recordCollaborationMessage(input, NOW + 1);
+    const notes = listHermesMemoryNotes({
+      relatedPr: { repo: "averray-agent/agent", number: 443 },
+    });
     expect(notes).toHaveLength(1);
     expect(notes[0].ts).toBe(NOW + 1);
   });
