@@ -37,6 +37,7 @@ import {
   recordCollaborationMessage,
   synthesizeHermesReplyFor,
 } from "./monitor-collab.js";
+import { buildHermesBoardSnapshotFromMonitor } from "./monitor-hermes-board.js";
 import { generateHermesReply } from "./monitor-hermes-voice.js";
 import {
   approveCodexTask,
@@ -438,6 +439,7 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
           ...(operatorMessage.relatedCorrelationId ? { relatedCorrelationId: operatorMessage.relatedCorrelationId } : {}),
           limit: 8,
         }).map((note) => note.text);
+        const board = await loadHermesBoardSnapshotForReply(operatorMessage);
         const llmText = await generateHermesReply(
           {
             operatorMessage: {
@@ -449,6 +451,7 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
             recentMessages: recent.map((m) => ({ author: m.author, text: m.text, ts: m.ts })),
             memoryNotes,
             ...(operatorMessage.relatedPr ? { selectedPr: operatorMessage.relatedPr } : {}),
+            ...(board ? { board } : {}),
           },
           { apiKey, baseUrl, model }
         );
@@ -475,6 +478,19 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
     }
   }, 600);
   timer.unref?.();
+}
+
+async function loadHermesBoardSnapshotForReply(
+  operatorMessage: Awaited<ReturnType<typeof recordCollaborationMessage>>
+) {
+  try {
+    const url = new URL("http://localhost/monitor/events?limit=40&activeWindowMinutes=240");
+    const snapshot = await withTimeout(loadMonitorSnapshot(url), 4_000, "monitor_reply_board_snapshot_timeout");
+    return buildHermesBoardSnapshotFromMonitor(snapshot);
+  } catch (error) {
+    logger.warn({ err: error, id: operatorMessage.id }, "monitor_collaboration_board_snapshot_unavailable");
+    return undefined;
+  }
 }
 
 async function handleMonitorCollaborationRequest(request: http.IncomingMessage, response: http.ServerResponse) {

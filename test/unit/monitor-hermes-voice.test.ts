@@ -94,6 +94,37 @@ describe("buildUserPrompt", () => {
     expect(prompt).toContain("use as guidance, not proof");
   });
 
+  it("includes live board context as higher-priority evidence", () => {
+    const prompt = buildUserPrompt(baseContext({
+      board: {
+        generatedAt: "2026-05-20T08:54:42.000Z",
+        status: "attention",
+        headline: "Board now: 1 draft parked; 1 operator decision.",
+        counts: { waiting: 1, operator: 1, codex: 0 },
+        runner: "status=idle | Codex runner is online.",
+        items: [
+          {
+            repo: "averray-agent/agent",
+            number: 439,
+            title: "PR is still marked as draft.",
+            lane: "Waiting / Drafts",
+            owner: "PR author",
+            verdict: "draft",
+            why: "GitHub reports this PR is still a draft.",
+            next: "wait for the PR author unless Pascal delegates takeover",
+            tags: ["backend", "secrets"],
+          },
+        ],
+      },
+    }));
+    expect(prompt).toContain("Live board snapshot");
+    expect(prompt).toContain("highest-priority evidence");
+    expect(prompt).toContain("Board now: 1 draft parked");
+    expect(prompt).toContain("waiting=1");
+    expect(prompt).toContain("Waiting / Drafts / owner PR author");
+    expect(prompt).toContain("trust the board");
+  });
+
   it("tells the model to reply as Hermes in 1-4 sentences", () => {
     const prompt = buildUserPrompt(baseContext());
     expect(prompt).toMatch(/1-4 conversational sentences/);
