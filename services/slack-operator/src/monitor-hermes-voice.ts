@@ -86,6 +86,16 @@ export interface HermesReplyContext {
   board?: HermesBoardSnapshot;
 }
 
+export interface HermesBoardNarrationContext {
+  board: HermesBoardSnapshot;
+  /** Most-recent first. Caller decides how many. */
+  recentMessages: ReadonlyArray<Pick<CollaborationMessage, "author" | "text" | "ts">>;
+  /** Relevant learned guidance from earlier operator posts. */
+  memoryNotes?: ReadonlyArray<string>;
+  /** Why the narrator woke up, usually a compact board signature change. */
+  trigger?: string;
+}
+
 export interface GenerateHermesReplyOptions {
   apiKey: string;
   baseUrl: string;
@@ -141,25 +151,55 @@ export async function generateHermesReply(
   }
 }
 
+export async function generateHermesBoardNarration(
+  context: HermesBoardNarrationContext,
+  options: GenerateHermesReplyOptions
+): Promise<string | null> {
+  if (!options.apiKey) return null;
+  const baseUrl = options.baseUrl.replace(/\/+$/, "");
+  const url = `${baseUrl}/chat/completions`;
+  const model = options.model ?? "deepseek-v4-pro:cloud";
+  const timeoutMs = options.timeoutMs ?? 6_000;
+  const fetchImpl = options.fetchFn ?? fetch;
+
+  const body = {
+    model,
+    messages: [
+      { role: "system", content: HERMES_PERSONA },
+      { role: "user", content: buildBoardNarrationPrompt(context) },
+    ],
+    stream: false,
+    max_tokens: 180,
+    temperature: 0.65,
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${options.apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+    const json = await response.json().catch(() => null) as unknown;
+    return extractReplyText(json);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function buildUserPrompt(context: HermesReplyContext): string {
   const lines: string[] = [];
 
   if (context.board) {
-    lines.push("Live board snapshot (highest-priority evidence; if it conflicts with memory or older chat, trust the board):");
-    if (context.board.generatedAt) lines.push(`- generatedAt: ${context.board.generatedAt}`);
-    if (context.board.status) lines.push(`- status: ${context.board.status}`);
-    if (context.board.headline) lines.push(`- headline: ${truncate(context.board.headline, 360)}`);
-    const counts = formatBoardCounts(context.board.counts);
-    if (counts) lines.push(`- lane counts: ${counts}`);
-    if (context.board.runner) lines.push(`- codex runner: ${truncate(context.board.runner, 260)}`);
-    if (context.board.items && context.board.items.length > 0) {
-      lines.push("- top cards:");
-      for (const item of context.board.items.slice(0, 8)) {
-        lines.push(`  - ${formatBoardCard(item)}`);
-      }
-    } else {
-      lines.push("- top cards: none");
-    }
+    appendBoardSnapshotLines(lines, context.board);
     lines.push("");
   }
 
@@ -210,6 +250,59 @@ export function buildUserPrompt(context: HermesReplyContext): string {
   lines.push("Reply as Hermes in 1-4 conversational sentences. Do not greet, do not summarize Pascal's message, do not pad. Explain the next move if the board state needs one.");
 
   return lines.join("\n");
+}
+
+export function buildBoardNarrationPrompt(context: HermesBoardNarrationContext): string {
+  const lines: string[] = [];
+
+  lines.push("The monitor board changed. Speak proactively as Hermes in the collaboration thread.");
+  if (context.trigger) lines.push(`Trigger: ${truncate(context.trigger, 360)}`);
+  lines.push("");
+
+  appendBoardSnapshotLines(lines, context.board);
+  lines.push("");
+
+  if (context.recentMessages.length > 0) {
+    lines.push("Recent thread (oldest → newest):");
+    for (const m of context.recentMessages) {
+      lines.push(`- ${m.author}: ${truncate(m.text, 260)}`);
+    }
+    lines.push("");
+  }
+
+  if (context.memoryNotes && context.memoryNotes.length > 0) {
+    lines.push("Hermes memory (operator preferences and prior room decisions; use as guidance, not proof):");
+    for (const note of context.memoryNotes) {
+      lines.push(`- ${truncate(note, 240)}`);
+    }
+    lines.push("");
+  }
+
+  lines.push("Narration rules:");
+  lines.push("- 1-3 conversational sentences, no greeting, no filler.");
+  lines.push("- Name what changed, who owns the next move, and whether Pascal/Codex/Hermes should act or wait.");
+  lines.push("- If the board shows drafts parked outside Codex, say they are waiting on the PR author unless Pascal explicitly delegates takeover.");
+  lines.push("- Do not claim you clicked buttons, started Codex, merged, deployed, approved, or changed GitHub.");
+
+  return lines.join("\n");
+}
+
+function appendBoardSnapshotLines(lines: string[], board: HermesBoardSnapshot): void {
+  lines.push("Live board snapshot (highest-priority evidence; if it conflicts with memory or older chat, trust the board):");
+  if (board.generatedAt) lines.push(`- generatedAt: ${board.generatedAt}`);
+  if (board.status) lines.push(`- status: ${board.status}`);
+  if (board.headline) lines.push(`- headline: ${truncate(board.headline, 360)}`);
+  const counts = formatBoardCounts(board.counts);
+  if (counts) lines.push(`- lane counts: ${counts}`);
+  if (board.runner) lines.push(`- codex runner: ${truncate(board.runner, 260)}`);
+  if (board.items && board.items.length > 0) {
+    lines.push("- top cards:");
+    for (const item of board.items.slice(0, 8)) {
+      lines.push(`  - ${formatBoardCard(item)}`);
+    }
+  } else {
+    lines.push("- top cards: none");
+  }
 }
 
 function formatBoardCounts(counts: HermesBoardSnapshot["counts"]): string {

@@ -38,7 +38,13 @@ import {
   synthesizeHermesReplyFor,
 } from "./monitor-collab.js";
 import { buildHermesBoardSnapshotFromMonitor } from "./monitor-hermes-board.js";
-import { generateHermesReply } from "./monitor-hermes-voice.js";
+import {
+  decideHermesBoardNarration,
+  fallbackHermesBoardNarration,
+  relatedPrForHermesBoardNarration,
+  targetForHermesBoardNarration,
+} from "./monitor-hermes-narration.js";
+import { generateHermesBoardNarration, generateHermesReply } from "./monitor-hermes-voice.js";
 import {
   approveCodexTask,
   cancelCodexTask,
@@ -66,6 +72,13 @@ const authConfig = {
 };
 const routineConfig = parseSlackRoutineConfig(process.env, authConfig.allowedChannelIds);
 const monitorConfig = parseMonitorConfig(process.env);
+const monitorNarrationMinIntervalMs = Math.max(
+  5_000,
+  Number.parseInt(optionalEnv("HERMES_MONITOR_NARRATION_MIN_INTERVAL_MS", "30000"), 10) || 30_000
+);
+let lastHermesBoardNarrationSignature = "";
+let inFlightHermesBoardNarrationSignature = "";
+let lastHermesBoardNarrationAtMs = 0;
 
 logger.info({
   enabled,
@@ -485,7 +498,11 @@ async function loadHermesBoardSnapshotForReply(
 ) {
   try {
     const url = new URL("http://localhost/monitor/events?limit=40&activeWindowMinutes=240");
-    const snapshot = await withTimeout(loadMonitorSnapshot(url), 4_000, "monitor_reply_board_snapshot_timeout");
+    const snapshot = await withTimeout(
+      loadMonitorSnapshot(url, { suppressNarration: true }),
+      4_000,
+      "monitor_reply_board_snapshot_timeout"
+    );
     return buildHermesBoardSnapshotFromMonitor(snapshot);
   } catch (error) {
     logger.warn({ err: error, id: operatorMessage.id }, "monitor_collaboration_board_snapshot_unavailable");
@@ -1019,7 +1036,10 @@ function writeRedirect(response: http.ServerResponse, location: string) {
   response.end();
 }
 
-async function loadMonitorSnapshot(url: URL): Promise<unknown> {
+async function loadMonitorSnapshot(
+  url: URL,
+  options: { suppressNarration?: boolean } = {}
+): Promise<unknown> {
   const startedAt = Date.now();
   const phases: Array<Record<string, unknown>> = [];
   const handoffStartedAt = Date.now();
@@ -1087,12 +1107,82 @@ async function loadMonitorSnapshot(url: URL): Promise<unknown> {
   if (degraded) {
     logger.warn({ diagnostics }, "monitor_snapshot_degraded");
   }
-  return {
+  const snapshot = {
     ...enriched,
     codexTasks,
     collaborationMessages: listCollaborationMessages({ limit: 200 }),
     diagnostics,
   };
+  if (!options.suppressNarration) {
+    scheduleHermesBoardNarration(snapshot);
+  }
+  return snapshot;
+}
+
+function scheduleHermesBoardNarration(snapshot: unknown): void {
+  const board = buildHermesBoardSnapshotFromMonitor(snapshot);
+  const decision = decideHermesBoardNarration(
+    board,
+    lastHermesBoardNarrationSignature,
+    inFlightHermesBoardNarrationSignature
+  );
+  if (!decision.shouldNarrate || !board) return;
+  const now = Date.now();
+  if (lastHermesBoardNarrationAtMs > 0 && now - lastHermesBoardNarrationAtMs < monitorNarrationMinIntervalMs) {
+    logger.info(
+      { reason: "min_interval", signature: decision.signature },
+      "monitor_collaboration_board_narration_skipped"
+    );
+    return;
+  }
+
+  inFlightHermesBoardNarrationSignature = decision.signature;
+  const timer = setTimeout(async () => {
+    let text = fallbackHermesBoardNarration(board);
+    const apiKey = optionalEnv("OLLAMA_API_KEY");
+    const baseUrl = optionalEnv("OLLAMA_BASE_URL") ?? "https://ollama.com/v1";
+    const model = optionalEnv("HERMES_MONITOR_REPLY_MODEL") ?? "deepseek-v4-pro:cloud";
+    if (apiKey) {
+      try {
+        const llmText = await generateHermesBoardNarration(
+          {
+            board,
+            recentMessages: listCollaborationMessages({ limit: 8 }).map((m) => ({
+              author: m.author,
+              text: m.text,
+              ts: m.ts,
+            })),
+            memoryNotes: listHermesMemoryNotes({ limit: 8 }).map((note) => note.text),
+            trigger: decision.signature,
+          },
+          { apiKey, baseUrl, model, timeoutMs: 6_000 }
+        );
+        if (llmText) text = llmText;
+      } catch (error) {
+        logger.warn({ err: error }, "monitor_collaboration_board_narration_llm_threw");
+      }
+    }
+
+    try {
+      const relatedPr = relatedPrForHermesBoardNarration(board);
+      recordCollaborationMessage({
+        author: "hermes",
+        kind: "status",
+        addressedTo: targetForHermesBoardNarration(board),
+        text,
+        ...(relatedPr ? { relatedPr } : {}),
+      });
+      lastHermesBoardNarrationSignature = decision.signature;
+      lastHermesBoardNarrationAtMs = Date.now();
+    } catch (error) {
+      logger.warn({ err: error }, "monitor_collaboration_board_narration_record_failed");
+    } finally {
+      if (inFlightHermesBoardNarrationSignature === decision.signature) {
+        inFlightHermesBoardNarrationSignature = "";
+      }
+    }
+  }, 900);
+  timer.unref?.();
 }
 
 async function loadCodexTaskQueueSummary() {
