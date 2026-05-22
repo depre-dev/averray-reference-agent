@@ -8,6 +8,7 @@ import {
   buildUserPrompt,
   generateHermesBoardNarration,
   generateHermesReply,
+  hermesDecisionCoachForCard,
   hermesMemoryInfluence,
   type HermesReplyContext,
 } from "../../services/slack-operator/src/monitor-hermes-voice.js";
@@ -169,6 +170,60 @@ describe("buildBoardNarrationPrompt", () => {
     expect(prompt).toContain("Do not claim you clicked buttons");
     expect(prompt).toContain("Memory audit");
     expect(prompt).toContain("Why:");
+  });
+
+  it("includes lane-specific decision coaching in the board prompt", () => {
+    const prompt = buildBoardNarrationPrompt({
+      board: {
+        headline: "Board now: 1 operator decision.",
+        counts: { operator: 1 },
+        items: [
+          {
+            repo: "averray-reference-agent",
+            number: 183,
+            title: "2 changed files touch review-gated surfaces.",
+            lane: "Operator Review",
+            owner: "Operator",
+            verdict: "needs review",
+            why: "Hermes has already done the code-level pre-check.",
+            next: "decide whether project intent and rollout risk are acceptable",
+          },
+        ],
+      },
+      recentMessages: [],
+    });
+
+    expect(prompt).toContain("For decision lanes, coach the decision");
+    expect(prompt).toContain("button opens the operator checklist");
+    expect(prompt).toContain("approval is a local monitor sign-off, not a merge");
+    expect(prompt).toContain("avoid do not re-review code line by line");
+    expect(prompt).toContain("safest decide whether project intent");
+  });
+});
+
+describe("hermesDecisionCoachForCard", () => {
+  it("explains what key lane buttons do and do not do", () => {
+    expect(hermesDecisionCoachForCard({
+      repo: "averray-agent/agent",
+      number: 438,
+      title: "1 PR check failed.",
+      lane: "Needs Attention",
+      owner: "Codex",
+    })?.button).toContain("failed-task evidence");
+    expect(hermesDecisionCoachForCard({
+      repo: "averray-agent/agent",
+      number: 439,
+      title: "PR is still marked as draft.",
+      lane: "Waiting / Drafts",
+      owner: "PR author",
+    })?.avoid).toContain("unless Pascal explicitly delegates takeover");
+    expect(hermesDecisionCoachForCard({
+      repo: "averray-agent/agent",
+      number: 440,
+      title: "Ready to merge.",
+      lane: "Release Queue",
+      owner: "Merge steward",
+    })?.button).toContain("does not merge");
   });
 });
 

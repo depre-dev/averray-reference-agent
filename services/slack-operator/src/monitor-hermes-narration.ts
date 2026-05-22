@@ -1,6 +1,7 @@
 import type { CollaborationTarget } from "./monitor-collab.js";
 import {
   applyHermesMemoryInfluence,
+  hermesDecisionCoachForCard,
   type HermesBoardCardSnapshot,
   type HermesBoardSnapshot,
 } from "./monitor-hermes-voice.js";
@@ -74,19 +75,31 @@ function fallbackHermesBoardNarrationBase(board: HermesBoardSnapshot): string {
   }
   const label = prLabel(primary);
   if (primary.lane === "Waiting / Drafts") {
-    return `${label} is parked in Waiting / Drafts: ${sentence(primary.why || "GitHub still marks it as a draft")} I will keep it out of the release path; the next move is ${lowerFirst(primary.next || "wait for the PR author or owning agent")}.`;
+    return decisionNarration(
+      primary,
+      `${label} is parked in Waiting / Drafts: ${sentence(primary.why || "GitHub still marks it as a draft")} I will keep it out of the release path.`
+    );
   }
   if (primary.lane === "Needs Attention") {
-    return `${label} needs attention: ${sentence(primary.why || "a blocking signal is still present")} Current owner is ${primary.owner}; next move is ${lowerFirst(primary.next || "inspect the failing evidence and send back a smaller fix")}.`;
+    return decisionNarration(
+      primary,
+      `${label} needs attention: ${sentence(primary.why || "a blocking signal is still present")} Current owner is ${primary.owner}.`
+    );
   }
   if (primary.lane === "Operator Review") {
-    return `${label} is in Operator Review: ${sentence(primary.why || "Hermes has gone as far as automation safely can")} Pascal, the useful next move is ${lowerFirst(primary.next || "decide whether the risk is acceptable")}.`;
+    return decisionNarration(
+      primary,
+      `${label} is in Operator Review: ${sentence(primary.why || "Hermes has gone as far as automation safely can")} Pascal, this is a project-level decision, not more hidden automation.`
+    );
   }
   if (primary.lane === "Codex Needed") {
     return `${label} is Codex-owned now: ${sentence(primary.why || "the board has a task for Codex")} Codex should ${lowerFirst(primary.next || "work the next smallest verifiable step and report back")}.`;
   }
   if (primary.lane === "Release Queue") {
-    return `${label} is in the Release Queue: ${sentence(primary.why || "the checks look merge-ready")} The merge steward owns the next move; ${lowerFirst(primary.next || "merge only after branch protection is green")}.`;
+    return decisionNarration(
+      primary,
+      `${label} is in the Release Queue: ${sentence(primary.why || "the checks look merge-ready")} The merge steward owns the next move.`
+    );
   }
   if (primary.lane === "Hermes Checking") {
     return `${label} is with Hermes now: ${sentence(primary.why || "checks are still moving")} I will wait for the evidence to settle before assigning new work.`;
@@ -95,6 +108,18 @@ function fallbackHermesBoardNarrationBase(board: HermesBoardSnapshot): string {
     return `${label} is in deploy verification: ${sentence(primary.why || "production checks are still moving")} I will call out a pass or failure when the signal lands.`;
   }
   return `${label}: ${sentence(primary.why || board.headline || "the board changed")} Next move is ${lowerFirst(primary.next || "watch the card until the owner changes")}.`;
+}
+
+function decisionNarration(item: HermesBoardCardSnapshot, opening: string): string {
+  const coach = hermesDecisionCoachForCard(item);
+  if (!coach) {
+    return `${opening} Next move is ${lowerFirst(item.next || "watch the card until the owner changes")}.`;
+  }
+  return [
+    opening,
+    `The button ${coach.button}; ${coach.avoid}.`,
+    `Safest next step: ${coach.safestNext}.`,
+  ].join(" ");
 }
 
 export function targetForHermesBoardNarration(board: HermesBoardSnapshot): CollaborationTarget {
