@@ -1,6 +1,7 @@
 import type { WikipediaCitationRepairWorkflowInput } from "./job-workflows.js";
 import type { AdminActionKind, AdminActionProposalInput } from "./operator-admin.js";
 import type { GithubMergeStewardApprovalInput, GithubOperatorView } from "./operator-github.js";
+import type { TestbedAgentMissionInput } from "./operator-testbed.js";
 
 export type OperatorCommandSource = "slack" | "operator" | "command_center" | "hermes" | "agent";
 
@@ -116,6 +117,13 @@ export type ParsedOperatorCommand =
     }
   | {
       handled: true;
+      kind: "testbed_agent_mission";
+      source: OperatorCommandSource;
+      detailed: boolean;
+      input: TestbedAgentMissionInput;
+    }
+  | {
+      handled: true;
       kind: "testbed_e2e_suite";
       source: OperatorCommandSource;
       detailed: boolean;
@@ -191,6 +199,9 @@ const EXAMPLES = [
   "github open prs",
   "github ci failures",
   "github issue digest",
+  "testbed agent mission",
+  "agent browser mission https://testbed.example/app goal: complete onboarding",
+  "out of box agent test",
   "testbed e2e suite",
   "platform e2e suite",
   "run testbed e2e read-only",
@@ -279,6 +290,11 @@ export function parseOperatorCommand(
 
   if (isGithubMergeStewardCommand(normalizedText)) {
     return { handled: true, kind: "github_merge_steward", source, detailed };
+  }
+
+  const testbedMission = testbedAgentMissionInput(text, normalizedText);
+  if (testbedMission.handled) {
+    return { handled: true, kind: "testbed_agent_mission", source, detailed, input: testbedMission.input };
   }
 
   if (isRunTestbedE2eReadOnlyCommand(normalizedText)) {
@@ -577,6 +593,33 @@ function isGithubBriefCommand(text: string): boolean {
 function isGithubMergeStewardCommand(text: string): boolean {
   const compact = text.replace(/\b(details?|full|audit)\b/g, "").replace(/\s+/g, " ").trim();
   return /^(github steward|merge steward|pr steward|pull request steward|github merge steward|take care of open prs|drain open prs|review open prs)$/.test(compact);
+}
+
+function testbedAgentMissionInput(
+  originalText: string,
+  text: string
+): { handled: true; input: TestbedAgentMissionInput } | { handled: false } {
+  const compact = text.replace(/\b(details?|full|audit)\b/g, "").replace(/\s+/g, " ").trim();
+  const handled = /^(testbed agent mission|agent testbed mission|agent browser mission|browser mission|fresh agent mission|fresh agent page test|out of box agent test|out-of-box agent test|normal agent page test|can hermes test the page|test page as fresh agent)(\b.*)?$/.test(compact);
+  if (!handled) return { handled: false };
+
+  const targetUrl = extractToken(originalText, /\b(https?:\/\/[^\s)]+)/i);
+  const goal = extractToken(originalText, /\bgoal\s*:\s*(.+)$/i);
+  const agentName = compact.includes("codex")
+    ? "Codex"
+    : compact.includes("claude")
+      ? "Claude"
+      : "Hermes";
+  const freshMemory = !/\b(with memory|use memory|warm memory|returning agent|returning-agent|not fresh)\b/.test(compact);
+  return {
+    handled: true,
+    input: {
+      ...(targetUrl ? { targetUrl } : {}),
+      ...(goal ? { goal } : {}),
+      agentName,
+      freshMemory,
+    },
+  };
 }
 
 function githubMergeStewardApprovalInput(

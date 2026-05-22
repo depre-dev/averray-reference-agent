@@ -305,6 +305,41 @@ describe("operator commands", () => {
     });
   });
 
+  it("routes fresh-agent testbed browser missions read-only", () => {
+    expect(parseOperatorCommand("agent browser mission https://testbed.example/app goal: complete onboarding", { source: "operator" })).toEqual({
+      handled: true,
+      kind: "testbed_agent_mission",
+      source: "operator",
+      detailed: false,
+      input: {
+        targetUrl: "https://testbed.example/app",
+        goal: "complete onboarding",
+        agentName: "Hermes",
+        freshMemory: true,
+      },
+    });
+    expect(parseOperatorCommand("out of box agent test with memory details", { source: "slack" })).toEqual({
+      handled: true,
+      kind: "testbed_agent_mission",
+      source: "slack",
+      detailed: true,
+      input: {
+        agentName: "Hermes",
+        freshMemory: false,
+      },
+    });
+    expect(parseOperatorCommand("test page as fresh agent with Codex", { source: "command_center" })).toEqual({
+      handled: true,
+      kind: "testbed_agent_mission",
+      source: "command_center",
+      detailed: false,
+      input: {
+        agentName: "Codex",
+        freshMemory: true,
+      },
+    });
+  });
+
   it("routes the executable read-only testbed E2E run separately from the suite", () => {
     expect(parseOperatorCommand("run testbed e2e read-only", { source: "operator" })).toEqual({
       handled: true,

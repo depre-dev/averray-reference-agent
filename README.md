@@ -153,8 +153,9 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   `business ledger`,
   `ops health`, `github status`, `github open prs`, `github ci failures`,
   `github issue digest`, `github brief`, `daily github brief`,
-  `what changed since last time`, `testbed e2e suite`,
-  `platform e2e suite`, `run testbed e2e read-only`,
+  `what changed since last time`, `testbed agent mission`,
+  `agent browser mission https://testbed.example/app goal: complete onboarding`,
+  `testbed e2e suite`, `platform e2e suite`, `run testbed e2e read-only`,
   `daily operator brief`, `find safe work`,
   `operator status`, `operator status details`,
   `run one wikipedia citation repair if safe`, and
@@ -195,6 +196,15 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   `daily operator brief` and `find safe work` are read-only summaries that turn
   the current wallet, budget, latest-run, and open-job state into practical next
   actions for any MCP client, not just Slack or Hermes Workspace.
+  `testbed agent mission` and `agent browser mission ... goal: ...` call
+  `averray_testbed_agent_mission`, a read-only mission packet for testing Hermes
+  or any other agent like a normal out-of-the-box visitor. It returns the target
+  URL, goal, fresh-memory mode, browser-only prompt, denied shortcuts, evidence
+  schema, and scoring rubric. The mission generator does not run the browser,
+  query private state, use Averray operator/workflow tools, call GitHub, deploy,
+  submit, merge, or mutate anything; the receiving agent should use only
+  browser-visible evidence and stop before real payments, signatures, submits,
+  deploys, merges, or account-affecting actions.
   `testbed e2e suite` and `platform e2e suite` call
   `averray_testbed_e2e_suite`, a read-only E2E checklist for backend agents,
   Slack, Command Center, and MCP clients. It returns ordered test cases,
