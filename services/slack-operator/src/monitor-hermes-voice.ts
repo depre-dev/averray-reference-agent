@@ -115,6 +115,12 @@ export interface HermesWhyTraceContext {
   trigger?: string;
 }
 
+export interface HermesMemoryInfluence {
+  sentence: string;
+  trace: string;
+  conflict: boolean;
+}
+
 export async function generateHermesReply(
   context: HermesReplyContext,
   options: GenerateHermesReplyOptions
@@ -152,7 +158,7 @@ export async function generateHermesReply(
     if (!response.ok) return null;
     const json = await response.json().catch(() => null) as unknown;
     const text = extractReplyText(json);
-    return text ? appendHermesWhyTrace(text, context) : null;
+    return text ? appendHermesWhyTrace(applyHermesMemoryInfluence(text, context), context) : null;
   } catch {
     return null;
   } finally {
@@ -197,7 +203,7 @@ export async function generateHermesBoardNarration(
     if (!response.ok) return null;
     const json = await response.json().catch(() => null) as unknown;
     const text = extractReplyText(json);
-    return text ? appendHermesWhyTrace(text, context) : null;
+    return text ? appendHermesWhyTrace(applyHermesMemoryInfluence(text, context), context) : null;
   } catch {
     return null;
   } finally {
@@ -309,8 +315,85 @@ export function appendHermesWhyTrace(text: string, context: HermesWhyTraceContex
   return `${trimmed}\nWhy: ${trace}`.slice(0, 1200);
 }
 
+export function applyHermesMemoryInfluence(text: string, context: HermesWhyTraceContext): string {
+  const trimmed = text.trim();
+  if (!trimmed) return trimmed;
+  if (/\b(memory conflict|remembered|memory says|your guidance)\b/i.test(trimmed)) return trimmed;
+
+  const influence = hermesMemoryInfluence(context);
+  if (!influence) return trimmed;
+
+  const whyIndex = trimmed.search(/\nWhy:/i);
+  if (whyIndex >= 0) {
+    return `${trimmed.slice(0, whyIndex).trim()}\n${influence.sentence}\n${trimmed.slice(whyIndex + 1)}`.slice(0, 1200);
+  }
+  return `${trimmed}\n${influence.sentence}`.slice(0, 1200);
+}
+
+export function hermesMemoryInfluence(context: HermesWhyTraceContext): HermesMemoryInfluence | null {
+  const note = relevantMemoryNote(context);
+  if (!note) return null;
+  const cleaned = cleanMemoryNote(note);
+  if (!cleaned) return null;
+
+  const item = selectedBoardItem(context);
+  const lowerNote = cleaned.toLowerCase();
+  const lane = item?.lane ?? context.selectedPr?.lane ?? "";
+  const owner = item?.owner ?? "";
+  const boardSaysCodex = owner === "Codex" || lane === "Codex Needed";
+  const noteSaysExternalDraftWait = saysExternalDraftShouldWait(lowerNote);
+  const noteSaysDelegatedCodex = saysDelegatedCodex(lowerNote);
+
+  if (boardSaysCodex && noteSaysExternalDraftWait && !noteSaysDelegatedCodex) {
+    return {
+      conflict: true,
+      sentence: "I see a memory conflict: the live board says Codex owns the next move, but your remembered draft rule says external-agent drafts should wait unless you delegate takeover. I will trust the live board for now; correct me if this is still external-owned.",
+      trace: "live board assigns Codex while memory says external-agent drafts wait",
+    };
+  }
+
+  if (lane === "Waiting / Drafts" && noteSaysExternalDraftWait) {
+    return {
+      conflict: false,
+      sentence: "This matches your remembered draft rule: keep external-agent drafts parked unless Pascal explicitly delegates takeover.",
+      trace: "draft lane matches external-agent draft memory",
+    };
+  }
+
+  if (lane === "Operator Review" && saysOperatorReviewBoundary(lowerNote)) {
+    return {
+      conflict: false,
+      sentence: "I am applying your remembered review boundary here: backend or review-gated risk gets an operator decision, not another automatic handoff.",
+      trace: "operator-review lane matches review-boundary memory",
+    };
+  }
+
+  if (lane === "Release Queue" && saysReleaseQueueBoundary(lowerNote)) {
+    return {
+      conflict: false,
+      sentence: "I am applying your remembered release rule: the queue waits for merge-steward ownership and green branch protection rather than treating green checks as a merge.",
+      trace: "release queue matches merge-steward memory",
+    };
+  }
+
+  if (boardSaysCodex && noteSaysDelegatedCodex) {
+    return {
+      conflict: false,
+      sentence: "I am applying your remembered delegation rule: Codex should take the smallest verifiable step and report back through Hermes.",
+      trace: "Codex ownership matches delegation memory",
+    };
+  }
+
+  return {
+    conflict: false,
+    sentence: `I am carrying forward your remembered guidance here: ${truncate(cleaned, 160)}`,
+    trace: truncate(cleaned, 120),
+  };
+}
+
 function hermesWhyTrace(context: HermesWhyTraceContext): string | null {
-  const memory = memoryTrace(context.memoryNotes);
+  const influence = hermesMemoryInfluence(context);
+  const memory = influence?.trace ?? memoryTrace(context);
   if (!memory) return null;
 
   const board = boardTrace(context);
@@ -319,14 +402,74 @@ function hermesWhyTrace(context: HermesWhyTraceContext): string | null {
     .join("; ");
 }
 
-function memoryTrace(notes: ReadonlyArray<string> | undefined): string | null {
-  const note = notes?.find((entry) => entry.trim());
+function memoryTrace(context: HermesWhyTraceContext): string | null {
+  const note = relevantMemoryNote(context);
   if (!note) return null;
-  const cleaned = note
+  const cleaned = cleanMemoryNote(note);
+  return cleaned ? truncate(cleaned, 120) : null;
+}
+
+function relevantMemoryNote(context: HermesWhyTraceContext): string | null {
+  const notes = context.memoryNotes?.filter((entry) => entry.trim()) ?? [];
+  if (notes.length === 0) return null;
+  const item = selectedBoardItem(context);
+  const pr = item?.repo && item.number
+    ? { repo: item.repo, number: item.number }
+    : context.selectedPr
+      ? { repo: context.selectedPr.repo, number: context.selectedPr.number }
+      : undefined;
+  if (!pr) return notes[0];
+
+  const repoLower = pr.repo.toLowerCase();
+  const prRef = `${repoLower}#${pr.number}`;
+  return notes.find((note) => {
+    const lower = note.toLowerCase();
+    return lower.includes(prRef) || lower.includes(`#${pr.number}`);
+  }) ?? notes[0];
+}
+
+function cleanMemoryNote(note: string): string {
+  return note
     .replace(/^Pascal (?:preference|note|outcome)(?: for [^:]+)?:\s*/i, "")
     .replace(/\s+/g, " ")
     .trim();
-  return cleaned ? truncate(cleaned, 120) : null;
+}
+
+function saysExternalDraftShouldWait(lower: string): boolean {
+  return lower.includes("draft")
+    && (
+      lower.includes("external agent")
+      || lower.includes("external-agent")
+      || lower.includes("another agent")
+      || lower.includes("other agent")
+      || lower.includes("pr author")
+      || lower.includes("owning agent")
+    )
+    && (lower.includes("wait") || lower.includes("park") || lower.includes("stay out") || lower.includes("do not ask codex") || lower.includes("unless pascal"));
+}
+
+function saysDelegatedCodex(lower: string): boolean {
+  return lower.includes("codex")
+    && (lower.includes("delegated") || lower.includes("take over") || lower.includes("takeover") || lower.includes("approved") || lower.includes("allowed to pick"));
+}
+
+function saysOperatorReviewBoundary(lower: string): boolean {
+  return (lower.includes("operator") || lower.includes("review"))
+    && (
+      lower.includes("backend")
+      || lower.includes("review-gated")
+      || lower.includes("review gated")
+      || lower.includes("risk")
+      || lower.includes("sign-off")
+      || lower.includes("signoff")
+      || lower.includes("project-level")
+      || lower.includes("project level")
+    );
+}
+
+function saysReleaseQueueBoundary(lower: string): boolean {
+  return (lower.includes("release queue") || lower.includes("merge steward") || lower.includes("branch protection"))
+    && (lower.includes("merge") || lower.includes("green") || lower.includes("release"));
 }
 
 function boardTrace(context: HermesWhyTraceContext): string | null {

@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   HERMES_PERSONA,
   appendHermesWhyTrace,
+  applyHermesMemoryInfluence,
   buildBoardNarrationPrompt,
   buildUserPrompt,
   generateHermesBoardNarration,
   generateHermesReply,
+  hermesMemoryInfluence,
   type HermesReplyContext,
 } from "../../services/slack-operator/src/monitor-hermes-voice.js";
 
@@ -203,6 +205,120 @@ describe("appendHermesWhyTrace", () => {
   });
 });
 
+describe("applyHermesMemoryInfluence", () => {
+  it("uses remembered draft rules when a draft is parked outside Codex", () => {
+    const text = applyHermesMemoryInfluence("averray-agent/agent#439 is parked in Waiting / Drafts.", {
+      board: {
+        items: [
+          {
+            repo: "averray-agent/agent",
+            number: 439,
+            title: "PR is still marked as draft.",
+            lane: "Waiting / Drafts",
+            owner: "PR author",
+          },
+        ],
+      },
+      memoryNotes: [
+        "Pascal preference: external agent draft PRs should wait unless Pascal explicitly delegates takeover.",
+      ],
+    });
+
+    expect(text).toContain("remembered draft rule");
+    expect(text).toContain("unless Pascal explicitly delegates takeover");
+  });
+
+  it("calls out a conflict when the board asks Codex to own an external draft", () => {
+    const context = {
+      board: {
+        items: [
+          {
+            repo: "averray-agent/agent",
+            number: 439,
+            title: "PR is still marked as draft.",
+            lane: "Codex Needed",
+            owner: "Codex",
+          },
+        ],
+      },
+      memoryNotes: [
+        "Pascal preference: external agent draft PRs should wait unless Pascal explicitly delegates takeover.",
+      ],
+    };
+
+    const influence = hermesMemoryInfluence(context);
+    const text = applyHermesMemoryInfluence("Codex should inspect the draft next.", context);
+
+    expect(influence?.conflict).toBe(true);
+    expect(text).toContain("memory conflict");
+    expect(text).toContain("trust the live board");
+  });
+
+  it("uses remembered operator-review boundaries for review-gated backend risk", () => {
+    const text = applyHermesMemoryInfluence("Pascal, this one needs an operator decision.", {
+      board: {
+        items: [
+          {
+            repo: "averray-reference-agent",
+            number: 183,
+            title: "2 changed files touch review-gated surfaces.",
+            lane: "Operator Review",
+            owner: "Operator",
+          },
+        ],
+      },
+      memoryNotes: [
+        "Pascal note: backend review-gated risk needs operator sign-off instead of another automatic handoff.",
+      ],
+    });
+
+    expect(text).toContain("remembered review boundary");
+    expect(text).toContain("operator decision");
+  });
+
+  it("uses remembered release queue boundaries before merge", () => {
+    const text = applyHermesMemoryInfluence("averray-agent/agent#440 is in the Release Queue.", {
+      board: {
+        items: [
+          {
+            repo: "averray-agent/agent",
+            number: 440,
+            title: "Live GitHub PR metadata and checks look merge-ready.",
+            lane: "Release Queue",
+            owner: "Queue",
+          },
+        ],
+      },
+      memoryNotes: [
+        "Pascal preference: release queue waits for merge steward ownership and branch protection green.",
+      ],
+    });
+
+    expect(text).toContain("remembered release rule");
+    expect(text).toContain("merge-steward ownership");
+  });
+
+  it("does not duplicate a memory sentence that already exists", () => {
+    const text = "This matches your remembered draft rule: keep external-agent drafts parked.";
+    expect(applyHermesMemoryInfluence(text, {
+      board: {
+        items: [
+          {
+            repo: "averray-agent/agent",
+            number: 439,
+            title: "PR is still marked as draft.",
+            lane: "Waiting / Drafts",
+            owner: "PR author",
+          },
+        ],
+      },
+      memoryNotes: [
+        "Pascal preference: external agent draft PRs should wait unless Pascal explicitly delegates takeover.",
+      ],
+    })).toBe(text);
+  });
+});
+
 describe("generateHermesReply", () => {
   const apiKey = "test-key";
   const baseUrl = "https://ollama.example.com/v1";
@@ -237,7 +353,7 @@ describe("generateHermesReply", () => {
 
     expect(text).toContain("\nWhy:");
     expect(text).toContain("board averray-agent/agent#439 in Waiting / Drafts");
-    expect(text).toContain("memory external-agent drafts should wait");
+    expect(text).toContain("memory draft lane matches external-agent draft memory");
   });
 
   it("returns null when the API key is empty", async () => {
@@ -397,6 +513,6 @@ describe("generateHermesBoardNarration", () => {
 
     expect(text).toContain("\nWhy:");
     expect(text).toContain("board averray-agent/agent#439 in Waiting / Drafts");
-    expect(text).toContain("memory drafts owned by another agent");
+    expect(text).toContain("memory draft lane matches external-agent draft memory");
   });
 });

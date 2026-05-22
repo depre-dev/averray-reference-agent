@@ -87,4 +87,15 @@ describe("Hermes proactive board narration", () => {
     expect(text).toContain("release path");
     expect(text).toContain("delegates takeover");
   });
+
+  it("lets memory shape fallback narration when the LLM is unavailable", () => {
+    const text = fallbackHermesBoardNarration(board(), {
+      memoryNotes: [
+        "Pascal preference: external agent draft PRs should wait unless Pascal explicitly delegates takeover.",
+      ],
+    });
+
+    expect(text).toContain("remembered draft rule");
+    expect(text).toContain("unless Pascal explicitly delegates takeover");
+  });
 });
