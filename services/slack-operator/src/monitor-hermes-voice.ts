@@ -127,6 +127,12 @@ export interface HermesDecisionCoach {
   safestNext: string;
 }
 
+export interface HermesOwnerAsk {
+  target: string;
+  ask: string;
+  waitingFor: string;
+}
+
 export async function generateHermesReply(
   context: HermesReplyContext,
   options: GenerateHermesReplyOptions
@@ -305,6 +311,7 @@ export function buildBoardNarrationPrompt(context: HermesBoardNarrationContext):
   lines.push("Narration rules:");
   lines.push("- 1-3 conversational sentences, no greeting, no filler.");
   lines.push("- Name what changed, who owns the next move, and whether Pascal/Codex/Hermes should act or wait.");
+  lines.push("- Make the handoff conversational: address the current owner with one concrete ask, then say what signal you are waiting for.");
   lines.push("- For decision lanes, coach the decision: say what the visible button opens, what it does not do, and the safest next step.");
   lines.push("- If the board shows drafts parked outside Codex, say they are waiting on the PR author unless Pascal explicitly delegates takeover.");
   lines.push("- Do not claim you clicked buttons, started Codex, merged, deployed, approved, or changed GitHub.");
@@ -428,6 +435,66 @@ export function hermesDecisionCoachForCard(item: HermesBoardCardSnapshot): Herme
       button: "asks for merge-steward context; it does not merge the PR",
       avoid: "do not treat a green-looking card as permission to bypass branch protection or missing sign-off",
       safestNext: "merge outside the monitor only after branch protection is green and any operator sign-off is clean",
+    };
+  }
+
+  return null;
+}
+
+export function hermesOwnerAskForCard(item: HermesBoardCardSnapshot): HermesOwnerAsk | null {
+  if (item.lane === "Waiting / Drafts") {
+    return {
+      target: "PR author or owning agent",
+      ask: "finish the draft and mark it ready, or have Pascal explicitly delegate Codex takeover",
+      waitingFor: "the PR leaving draft state or an explicit takeover decision from Pascal",
+    };
+  }
+
+  if (item.lane === "Needs Attention") {
+    return {
+      target: item.owner === "Codex" ? "Codex" : item.owner || "current owner",
+      ask: "open the failed evidence and come back with the smallest verifiable fix or a smaller retry task",
+      waitingFor: "the red signal to disappear and Hermes to record a fresh pass",
+    };
+  }
+
+  if (item.lane === "Codex Needed") {
+    return {
+      target: "Codex",
+      ask: "pick up the approved task, keep the change narrow, and report the branch plus checks when done",
+      waitingFor: "the Codex runner heartbeat to move from waiting into running or terminal output",
+    };
+  }
+
+  if (item.lane === "Hermes Checking") {
+    return {
+      target: "Hermes",
+      ask: "keep checking without assigning new work until the evidence settles",
+      waitingFor: "a pass, block, operator-review, or release-queue verdict",
+    };
+  }
+
+  if (item.lane === "Operator Review") {
+    return {
+      target: "Pascal",
+      ask: "decide whether the intent, architecture, rollout risk, and evidence are acceptable",
+      waitingFor: "operator approval or a concrete request to send back to Codex",
+    };
+  }
+
+  if (item.lane === "Release Queue") {
+    return {
+      target: "merge steward",
+      ask: "confirm branch protection is green and own the merge/deploy handoff outside the monitor",
+      waitingFor: "a merge/deploy event or the card falling back because protection changed",
+    };
+  }
+
+  if (item.lane === "Deploying") {
+    return {
+      target: "Hermes",
+      ask: "watch production verification and call out the pass or failure when it lands",
+      waitingFor: "post-deploy health to pass or produce an actionable failure",
     };
   }
 
@@ -576,6 +643,7 @@ function formatBoardCounts(counts: HermesBoardSnapshot["counts"]): string {
 function formatBoardCard(item: HermesBoardCardSnapshot): string {
   const pr = item.repo && item.number ? `${item.repo}#${item.number}` : item.repo || "unknown PR";
   const coach = hermesDecisionCoachForCard(item);
+  const ownerAsk = hermesOwnerAskForCard(item);
   const parts = [
     `${item.lane} / owner ${item.owner}`,
     pr,
@@ -587,6 +655,9 @@ function formatBoardCard(item: HermesBoardCardSnapshot): string {
     coach ? `button ${coach.button}` : "",
     coach ? `avoid ${coach.avoid}` : "",
     coach ? `safest ${coach.safestNext}` : "",
+    ownerAsk ? `ask target ${ownerAsk.target}` : "",
+    ownerAsk ? `ask ${ownerAsk.ask}` : "",
+    ownerAsk ? `waiting for ${ownerAsk.waitingFor}` : "",
     item.tags && item.tags.length > 0 ? `tags ${item.tags.slice(0, 5).join(", ")}` : "",
   ].filter(Boolean);
   return parts.join(" | ");

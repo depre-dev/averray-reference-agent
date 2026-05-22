@@ -121,6 +121,8 @@ describe("Hermes proactive board narration", () => {
     expect(text).toContain("approval is a local monitor sign-off, not a merge");
     expect(text).toContain("Safest next step");
     expect(text).toContain("send it back to Codex with a concrete ask");
+    expect(text).toContain("Pascal, decide whether the intent");
+    expect(text).toContain("waiting for operator approval");
   });
 
   it("coaches release queue decisions without implying the monitor merges", () => {
@@ -143,5 +145,29 @@ describe("Hermes proactive board narration", () => {
     expect(text).toContain("button asks for merge-steward context");
     expect(text).toContain("it does not merge the PR");
     expect(text).toContain("branch protection is green");
+    expect(text).toContain("merge steward, confirm branch protection is green");
+    expect(text).toContain("waiting for a merge/deploy event");
+  });
+
+  it("uses owner-specific asks for Codex-owned fallback narration", () => {
+    const text = fallbackHermesBoardNarration(board({
+      counts: { codex: 1 },
+      items: [
+        {
+          repo: "averray-agent/agent",
+          number: 438,
+          title: "1 PR check failed.",
+          lane: "Needs Attention",
+          owner: "Codex",
+          verdict: "blocked",
+          why: "Codex task runner failed.",
+          next: "inspect the runner output",
+        },
+      ],
+    }));
+
+    expect(text).toContain("Codex, open the failed evidence");
+    expect(text).toContain("smallest verifiable fix");
+    expect(text).toContain("waiting for the red signal to disappear");
   });
 });

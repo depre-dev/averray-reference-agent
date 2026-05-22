@@ -10,6 +10,7 @@ import {
   generateHermesReply,
   hermesDecisionCoachForCard,
   hermesMemoryInfluence,
+  hermesOwnerAskForCard,
   type HermesReplyContext,
 } from "../../services/slack-operator/src/monitor-hermes-voice.js";
 
@@ -194,10 +195,14 @@ describe("buildBoardNarrationPrompt", () => {
     });
 
     expect(prompt).toContain("For decision lanes, coach the decision");
+    expect(prompt).toContain("Make the handoff conversational");
     expect(prompt).toContain("button opens the operator checklist");
     expect(prompt).toContain("approval is a local monitor sign-off, not a merge");
     expect(prompt).toContain("avoid do not re-review code line by line");
     expect(prompt).toContain("safest decide whether project intent");
+    expect(prompt).toContain("ask target Pascal");
+    expect(prompt).toContain("ask decide whether the intent");
+    expect(prompt).toContain("waiting for operator approval");
   });
 });
 
@@ -224,6 +229,44 @@ describe("hermesDecisionCoachForCard", () => {
       lane: "Release Queue",
       owner: "Merge steward",
     })?.button).toContain("does not merge");
+  });
+});
+
+describe("hermesOwnerAskForCard", () => {
+  it("turns board lanes into concrete owner handoffs", () => {
+    expect(hermesOwnerAskForCard({
+      repo: "averray-agent/agent",
+      number: 438,
+      title: "1 PR check failed.",
+      lane: "Needs Attention",
+      owner: "Codex",
+    })).toMatchObject({
+      target: "Codex",
+      ask: expect.stringContaining("smallest verifiable fix"),
+      waitingFor: expect.stringContaining("fresh pass"),
+    });
+    expect(hermesOwnerAskForCard({
+      repo: "averray-agent/agent",
+      number: 439,
+      title: "PR is still marked as draft.",
+      lane: "Waiting / Drafts",
+      owner: "PR author",
+    })).toMatchObject({
+      target: "PR author or owning agent",
+      ask: expect.stringContaining("mark it ready"),
+      waitingFor: expect.stringContaining("explicit takeover decision"),
+    });
+    expect(hermesOwnerAskForCard({
+      repo: "averray-agent/agent",
+      number: 440,
+      title: "Ready to merge.",
+      lane: "Release Queue",
+      owner: "Merge steward",
+    })).toMatchObject({
+      target: "merge steward",
+      ask: expect.stringContaining("branch protection is green"),
+      waitingFor: expect.stringContaining("merge/deploy event"),
+    });
   });
 });
 
