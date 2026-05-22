@@ -17,7 +17,7 @@ import { getDailyOperatorBrief, getOperatorStatus, getSafeWorkReport } from "./o
 import { getProjectMemory } from "./operator-project-memory.js";
 import { getProjectRunbook } from "./operator-project-runbook.js";
 import { getCodexHandoffProtocol } from "./codex-handoff-protocol.js";
-import { getTestbedE2eSuite, runTestbedE2eReadOnly } from "./operator-testbed.js";
+import { getTestbedAgentMission, getTestbedE2eSuite, runTestbedE2eReadOnly } from "./operator-testbed.js";
 import { getAgentUsefulnessPlan } from "./operator-usefulness.js";
 import { runWikipediaCitationRepairWorkflow } from "./job-workflows.js";
 import { getHandoffMonitor } from "./handoff-events.js";
@@ -115,6 +115,10 @@ export async function handleOperatorCommandText(
   if (command.kind === "github_merge_steward_approval") {
     const approval = await approveGithubMergeStewardCandidate(command.input);
     return { ...command, approval };
+  }
+  if (command.kind === "testbed_agent_mission") {
+    const mission = getTestbedAgentMission(command.input);
+    return { ...command, mission };
   }
   if (command.kind === "run_testbed_e2e_read_only") {
     const run = await runTestbedE2eReadOnly({ query: deps.query, workflowDeps: deps.workflowDeps });

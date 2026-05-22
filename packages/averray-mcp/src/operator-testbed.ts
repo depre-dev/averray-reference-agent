@@ -20,6 +20,138 @@ export interface TestbedE2eReadOnlyRunOptions {
   testCaseIds?: string[];
 }
 
+export interface TestbedAgentMissionInput {
+  targetUrl?: string;
+  goal?: string;
+  agentName?: string;
+  freshMemory?: boolean;
+  maxBrowserSteps?: number;
+  maxMinutes?: number;
+}
+
+export function getTestbedAgentMission(input: TestbedAgentMissionInput = {}) {
+  const targetUrl = cleanOptional(input.targetUrl) ?? "[TESTBED_URL]";
+  const goal = cleanOptional(input.goal)
+    ?? "Figure out what this page is for, complete the main user flow as far as the public UI allows, and report whether a normal outside agent can use it without private project context.";
+  const agentName = cleanOptional(input.agentName) ?? "Hermes";
+  const freshMemory = input.freshMemory !== false;
+  const maxBrowserSteps = clampInt(input.maxBrowserSteps, 20, 200, 80);
+  const maxMinutes = clampInt(input.maxMinutes, 5, 60, 20);
+
+  return {
+    schemaVersion: 1,
+    kind: "testbed_agent_browser_mission",
+    generatedAt: new Date().toISOString(),
+    mutates: false,
+    headline: "Fresh-agent browser mission ready: test the page like a normal outside agent, not like an internal operator.",
+    target: {
+      url: targetUrl,
+      goal,
+      agentName,
+      freshMemory,
+      maxBrowserSteps,
+      maxMinutes,
+    },
+    agentMode: {
+      identity: "normal_out_of_box_agent",
+      memoryMode: freshMemory ? "fresh_or_ignored" : "returning_agent_memory_allowed",
+      browserOnly: true,
+      privilegedAverrayMcpAllowed: false,
+      hiddenProjectContextAllowed: false,
+      humanHelpAllowed: false,
+      purpose: "Measure whether an agent with ordinary browser access can understand and use the public/testbed page.",
+    },
+    missionPrompt: [
+      `You are ${agentName}, acting as a normal out-of-the-box agent visiting Averray for the first time.`,
+      `Open ${targetUrl}.`,
+      `Goal: ${goal}`,
+      "",
+      "Use only the browser-visible page, normal public links, and screenshots/observations from the page.",
+      "Do not use private repository knowledge, databases, hidden monitor state, Averray MCP tools, Slack, GitHub, SSH, or operator memory unless the page itself gives you that information.",
+      "Work like a future external agent would: explain what you infer, try the main flow, note where you are uncertain, and stop before any real mutation, payment, wallet signature, submit, deploy, merge, or account-affecting action.",
+      "",
+      "Report with: verdict, completed path, blockers, confusing moments, evidence, screenshots or trace references, and what would make the page easier for the next agent.",
+    ].join("\n"),
+    runbook: [
+      "Start with a clean browser profile or explicitly ignore prior memory.",
+      "Open the target URL and record the first thing the page appears to ask from a new agent.",
+      "Identify the product purpose, primary user, and main task without reading private project notes.",
+      "Attempt the main flow using only visible UI controls.",
+      "Collect evidence: page states, URLs visited, visible copy that helped or blocked you, screenshots/trace references, and any console/network failures if available.",
+      "Stop before real mutations or irreversible actions; describe the next required human or sandbox approval instead.",
+      "Score the experience using the rubric and return the structured report.",
+    ],
+    allowedEvidence: [
+      "browser-visible UI text and controls",
+      "screenshots or trace references",
+      "public documentation linked from the page",
+      "client-side console or network errors if the browser exposes them",
+      "the agent's own step-by-step observations",
+    ],
+    deniedShortcuts: [
+      "private repo knowledge",
+      "database queries",
+      "Averray operator or workflow MCP tools after receiving this mission",
+      "Slack, GitHub, monitor internals, or VPS commands",
+      "wallet signatures, payment, submit, deploy, merge, or account mutation",
+      "asking Pascal what to do during the mission",
+    ],
+    successCriteria: [
+      "The agent can state what the page is for within the first screen or first natural click.",
+      "The agent can identify the main task and whether it is safe to proceed.",
+      "The agent can complete or reach a clear sandbox stop point in the primary flow.",
+      "Any blocker is explained with visible evidence, not private assumptions.",
+      "The final report is useful enough for another agent to reproduce the run.",
+    ],
+    scoringRubric: [
+      score("orientation", "Could the agent understand purpose and audience from the page itself?"),
+      score("navigation", "Could the agent find the main path without private instructions?"),
+      score("taskCompletion", "Could the agent complete the intended flow or reach a legitimate sandbox stop?"),
+      score("trustAndSafety", "Did the page make mutation boundaries, wallet/signature risk, and data use clear?"),
+      score("recoverability", "Could the agent recover from errors, empty states, or missing context?"),
+      score("evidenceQuality", "Did the agent return enough trace/screenshot/detail for a reviewer to verify the verdict?"),
+    ],
+    reportSchema: {
+      verdict: "pass | partial | fail",
+      confidence: "0.0-1.0",
+      targetUrl: "string",
+      goal: "string",
+      memoryMode: "fresh_or_ignored | returning_agent_memory_allowed",
+      completedPath: ["ordered browser actions the agent took"],
+      blockers: ["visible blocker or empty array"],
+      confusingMoments: ["where the page required guessing"],
+      evidence: [
+        {
+          type: "screenshot | url | visible_text | console | network | observation",
+          value: "bounded evidence reference",
+        },
+      ],
+      scores: {
+        orientation: "0-5",
+        navigation: "0-5",
+        taskCompletion: "0-5",
+        trustAndSafety: "0-5",
+        recoverability: "0-5",
+        evidenceQuality: "0-5",
+      },
+      recommendations: ["smallest page/product changes that would help the next outside agent"],
+      stoppedBeforeMutation: "boolean",
+    },
+    nextSteps: [
+      "Run this once with fresh memory to measure first-contact usability.",
+      "Run it again with returning-agent memory to measure whether memory improves the agent without hiding page gaps.",
+      "Compare Hermes against other agents with the same mission prompt and rubric.",
+    ],
+    safety: {
+      missionGeneratorMutates: false,
+      browserMissionShouldMutate: false,
+      freshAgentDefault: true,
+      requiresEvidence: true,
+      comparesAcrossAgents: true,
+    },
+  };
+}
+
 export async function getTestbedE2eSuite(deps: TestbedE2eSuiteDeps) {
   const [status, safeWork] = await Promise.all([
     getOperatorStatus(deps),
@@ -316,6 +448,20 @@ function testCase(input: {
     expectedEvidence: input.expectedEvidence,
     successCriteria: input.successCriteria,
   };
+}
+
+function score(id: string, question: string) {
+  return { id, scale: "0-5", question };
+}
+
+function cleanOptional(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function clampInt(value: number | undefined, min: number, max: number, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(value)));
 }
 
 type TestbedCase = ReturnType<typeof testCase>;
