@@ -2,6 +2,7 @@ import type { CollaborationTarget } from "./monitor-collab.js";
 import {
   applyHermesMemoryInfluence,
   hermesDecisionCoachForCard,
+  hermesOwnerAskForCard,
   type HermesBoardCardSnapshot,
   type HermesBoardSnapshot,
 } from "./monitor-hermes-voice.js";
@@ -93,7 +94,10 @@ function fallbackHermesBoardNarrationBase(board: HermesBoardSnapshot): string {
     );
   }
   if (primary.lane === "Codex Needed") {
-    return `${label} is Codex-owned now: ${sentence(primary.why || "the board has a task for Codex")} Codex should ${lowerFirst(primary.next || "work the next smallest verifiable step and report back")}.`;
+    return ownerAskNarration(
+      primary,
+      `${label} is Codex-owned now: ${sentence(primary.why || "the board has a task for Codex")}`
+    );
   }
   if (primary.lane === "Release Queue") {
     return decisionNarration(
@@ -102,23 +106,43 @@ function fallbackHermesBoardNarrationBase(board: HermesBoardSnapshot): string {
     );
   }
   if (primary.lane === "Hermes Checking") {
-    return `${label} is with Hermes now: ${sentence(primary.why || "checks are still moving")} I will wait for the evidence to settle before assigning new work.`;
+    return ownerAskNarration(
+      primary,
+      `${label} is with Hermes now: ${sentence(primary.why || "checks are still moving")}`
+    );
   }
   if (primary.lane === "Deploying") {
-    return `${label} is in deploy verification: ${sentence(primary.why || "production checks are still moving")} I will call out a pass or failure when the signal lands.`;
+    return ownerAskNarration(
+      primary,
+      `${label} is in deploy verification: ${sentence(primary.why || "production checks are still moving")}`
+    );
   }
   return `${label}: ${sentence(primary.why || board.headline || "the board changed")} Next move is ${lowerFirst(primary.next || "watch the card until the owner changes")}.`;
 }
 
 function decisionNarration(item: HermesBoardCardSnapshot, opening: string): string {
   const coach = hermesDecisionCoachForCard(item);
+  const ownerAsk = hermesOwnerAskForCard(item);
   if (!coach) {
-    return `${opening} Next move is ${lowerFirst(item.next || "watch the card until the owner changes")}.`;
+    return ownerAskNarration(item, opening);
   }
   return [
     opening,
     `The button ${coach.button}; ${coach.avoid}.`,
     `Safest next step: ${coach.safestNext}.`,
+    ownerAsk ? `${ownerAsk.target}, ${ownerAsk.ask}; I am waiting for ${ownerAsk.waitingFor}.` : "",
+  ].filter(Boolean).join(" ");
+}
+
+function ownerAskNarration(item: HermesBoardCardSnapshot, opening: string): string {
+  const ownerAsk = hermesOwnerAskForCard(item);
+  if (!ownerAsk) {
+    return `${opening} Next move is ${lowerFirst(item.next || "watch the card until the owner changes")}.`;
+  }
+  return [
+    opening,
+    `${ownerAsk.target}, ${ownerAsk.ask}.`,
+    `I am waiting for ${ownerAsk.waitingFor}.`,
   ].join(" ");
 }
 
