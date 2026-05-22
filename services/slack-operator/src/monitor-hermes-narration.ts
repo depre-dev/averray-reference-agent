@@ -1,10 +1,18 @@
 import type { CollaborationTarget } from "./monitor-collab.js";
-import type { HermesBoardCardSnapshot, HermesBoardSnapshot } from "./monitor-hermes-voice.js";
+import {
+  applyHermesMemoryInfluence,
+  type HermesBoardCardSnapshot,
+  type HermesBoardSnapshot,
+} from "./monitor-hermes-voice.js";
 
 export interface HermesBoardNarrationDecision {
   signature: string;
   shouldNarrate: boolean;
   reason?: string;
+}
+
+export interface HermesFallbackNarrationOptions {
+  memoryNotes?: ReadonlyArray<string>;
 }
 
 const ACTIONABLE_LANES = new Set([
@@ -48,7 +56,17 @@ export function buildHermesBoardNarrationSignature(board: HermesBoardSnapshot | 
   return [counts, ...cards].filter(Boolean).join("|");
 }
 
-export function fallbackHermesBoardNarration(board: HermesBoardSnapshot): string {
+export function fallbackHermesBoardNarration(
+  board: HermesBoardSnapshot,
+  options: HermesFallbackNarrationOptions = {}
+): string {
+  return applyHermesMemoryInfluence(fallbackHermesBoardNarrationBase(board), {
+    board,
+    memoryNotes: options.memoryNotes,
+  });
+}
+
+function fallbackHermesBoardNarrationBase(board: HermesBoardSnapshot): string {
   const items = board.items?.filter((item) => ACTIONABLE_LANES.has(item.lane)) ?? [];
   const primary = items[0];
   if (!primary) {

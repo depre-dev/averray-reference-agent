@@ -45,7 +45,12 @@ import {
   relatedPrForHermesBoardNarration,
   targetForHermesBoardNarration,
 } from "./monitor-hermes-narration.js";
-import { appendHermesWhyTrace, generateHermesBoardNarration, generateHermesReply } from "./monitor-hermes-voice.js";
+import {
+  appendHermesWhyTrace,
+  applyHermesMemoryInfluence,
+  generateHermesBoardNarration,
+  generateHermesReply,
+} from "./monitor-hermes-voice.js";
 import {
   approveCodexTask,
   cancelCodexTask,
@@ -482,7 +487,7 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
       }
     }
     if (memoryRequest !== "forget_pr") {
-      text = appendHermesWhyTrace(text, replyContext);
+      text = appendHermesWhyTrace(applyHermesMemoryInfluence(text, replyContext), replyContext);
     }
     try {
       recordCollaborationMessage({
@@ -1190,7 +1195,10 @@ function scheduleHermesBoardNarration(snapshot: unknown): void {
       memoryNotes,
       trigger: decision.signature,
     };
-    let text = appendHermesWhyTrace(fallbackHermesBoardNarration(board), narrationContext);
+    let text = appendHermesWhyTrace(
+      fallbackHermesBoardNarration(board, { memoryNotes }),
+      narrationContext
+    );
     const apiKey = optionalEnv("OLLAMA_API_KEY");
     const baseUrl = optionalEnv("OLLAMA_BASE_URL") ?? "https://ollama.com/v1";
     const model = optionalEnv("HERMES_MONITOR_REPLY_MODEL") ?? "deepseek-v4-pro:cloud";
