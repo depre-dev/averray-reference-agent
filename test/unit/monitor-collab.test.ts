@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   CollaborationValidationError,
   __resetCollaborationStoreForTests,
+  classifyHermesMemoryRequest,
   listCollaborationMessages,
   listHermesMemoryNotes,
   recordCollaborationMessage,
@@ -301,6 +302,101 @@ describe("Hermes collaboration memory", () => {
       NOW + 1
     );
     expect(listHermesMemoryNotes()).toEqual([]);
+  });
+
+  it("classifies memory show and forget requests only when Hermes is addressed", () => {
+    expect(classifyHermesMemoryRequest({
+      author: "operator",
+      addressedTo: "hermes",
+      text: "Hermes, what do you remember about this PR?",
+    })).toBe("show");
+    expect(classifyHermesMemoryRequest({
+      author: "operator",
+      addressedTo: "everyone",
+      text: "Hermes, forget this PR memory.",
+    })).toBe("forget_pr");
+    expect(classifyHermesMemoryRequest({
+      author: "codex",
+      addressedTo: "hermes",
+      text: "what do you remember about this PR?",
+    })).toBe("none");
+    expect(classifyHermesMemoryRequest({
+      author: "operator",
+      addressedTo: "codex",
+      text: "what do you remember about this PR?",
+    })).toBe("none");
+  });
+
+  it("does not learn memory governance requests as guidance", () => {
+    recordCollaborationMessage(
+      {
+        author: "operator",
+        addressedTo: "hermes",
+        text: "Hermes, what do you remember about this PR?",
+        relatedPr: { repo: "averray-agent/agent", number: 439 },
+      },
+      NOW
+    );
+    recordCollaborationMessage(
+      {
+        author: "operator",
+        addressedTo: "hermes",
+        text: "Hermes, forget this PR memory.",
+      },
+      NOW + 1
+    );
+
+    expect(listHermesMemoryNotes()).toEqual([]);
+  });
+
+  it("forgets only PR-scoped memory for the selected PR", () => {
+    recordCollaborationMessage(
+      {
+        author: "operator",
+        addressedTo: "hermes",
+        text: "Remember: ask me before moving external-agent drafts.",
+      },
+      NOW
+    );
+    recordCollaborationMessage(
+      {
+        author: "operator",
+        addressedTo: "hermes",
+        text: "This draft belongs to another agent; do not ask Codex to start it yet.",
+        relatedPr: { repo: "averray-agent/agent", number: 439 },
+      },
+      NOW + 1
+    );
+    recordCollaborationMessage(
+      {
+        author: "operator",
+        addressedTo: "hermes",
+        text: "This draft belongs to Codex now.",
+        relatedPr: { repo: "averray-agent/agent", number: 440 },
+      },
+      NOW + 2
+    );
+
+    recordCollaborationMessage(
+      {
+        author: "operator",
+        addressedTo: "hermes",
+        text: "Hermes, forget this PR memory.",
+        relatedPr: { repo: "averray-agent/agent", number: 439 },
+      },
+      NOW + 3
+    );
+
+    const pr439 = listHermesMemoryNotes({
+      relatedPr: { repo: "averray-agent/agent", number: 439 },
+    }).map((note) => note.text).join("\n");
+    const pr440 = listHermesMemoryNotes({
+      relatedPr: { repo: "averray-agent/agent", number: 440 },
+    }).map((note) => note.text).join("\n");
+
+    expect(pr439).toContain("external-agent drafts");
+    expect(pr439).not.toContain("averray-agent/agent#439");
+    expect(pr440).toContain("averray-agent/agent#440");
   });
 
   it("deduplicates repeated guidance", () => {

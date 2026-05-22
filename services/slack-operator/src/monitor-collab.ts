@@ -65,6 +65,8 @@ export interface HermesMemoryNote {
   relatedCorrelationId?: string;
 }
 
+export type HermesMemoryRequestKind = "show" | "forget_pr" | "none";
+
 export interface RecordCollaborationInput {
   author?: unknown;
   kind?: unknown;
@@ -136,7 +138,9 @@ export function recordCollaborationMessage(
 
   store.push(message);
   while (store.length > MAX_MESSAGES) store.shift();
-  learnHermesMemoryFromMessage(message);
+  if (!applyHermesMemoryGovernanceFromMessage(message)) {
+    learnHermesMemoryFromMessage(message);
+  }
   return message;
 }
 
@@ -162,6 +166,15 @@ export function listHermesMemoryNotes(options: ListHermesMemoryOptions = {}): He
     return false;
   });
   return filtered.slice(-limit);
+}
+
+export function classifyHermesMemoryRequest(message: Pick<CollaborationMessage, "author" | "addressedTo" | "text">): HermesMemoryRequestKind {
+  if (message.author !== "operator") return "none";
+  if (message.addressedTo !== "hermes" && message.addressedTo !== "everyone") return "none";
+  const lower = message.text.toLowerCase();
+  if (isForgetMemoryRequest(lower)) return "forget_pr";
+  if (isShowMemoryRequest(lower)) return "show";
+  return "none";
 }
 
 export function __resetCollaborationStoreForTests(): void {
@@ -257,6 +270,24 @@ function learnHermesMemoryFromMessage(message: CollaborationMessage): void {
   persistHermesMemoryNotes();
 }
 
+function applyHermesMemoryGovernanceFromMessage(message: CollaborationMessage): boolean {
+  loadHermesMemoryIfNeeded();
+  const request = classifyHermesMemoryRequest(message);
+  if (request === "none") return false;
+  if (request !== "forget_pr") return true;
+  if (!message.relatedPr) return true;
+
+  const before = hermesMemoryNotes.length;
+  for (let i = hermesMemoryNotes.length - 1; i >= 0; i -= 1) {
+    const note = hermesMemoryNotes[i];
+    if (note.scope === "pr" && note.relatedPr && samePr(note.relatedPr, message.relatedPr)) {
+      hermesMemoryNotes.splice(i, 1);
+    }
+  }
+  if (hermesMemoryNotes.length !== before) persistHermesMemoryNotes();
+  return true;
+}
+
 function memoryTextForMessage(message: CollaborationMessage): string | null {
   if (message.author !== "operator") return null;
   if (message.addressedTo === "operator") return null;
@@ -319,6 +350,29 @@ function classifyOperatorOutcome(lower: string): string | null {
 
 function includesAll(text: string, cues: string[]): boolean {
   return cues.every((cue) => text.includes(cue));
+}
+
+function includesAny(text: string, cues: string[]): boolean {
+  return cues.some((cue) => text.includes(cue));
+}
+
+function isForgetMemoryRequest(lower: string): boolean {
+  const asksForget = includesAny(lower, ["forget", "clear", "remove", "delete"]);
+  const namesMemory = includesAny(lower, ["memory", "remember", "remembered", "what you know"]);
+  return asksForget && namesMemory;
+}
+
+function isShowMemoryRequest(lower: string): boolean {
+  return includesAny(lower, [
+    "what do you remember",
+    "what are you remembering",
+    "show memory",
+    "show memories",
+    "list memory",
+    "list memories",
+    "memory for this pr",
+    "what memory",
+  ]);
 }
 
 function looksLikeOperatorGuidance(text: string): boolean {

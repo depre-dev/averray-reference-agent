@@ -32,6 +32,7 @@ import {
 } from "./monitor.js";
 import {
   CollaborationValidationError,
+  classifyHermesMemoryRequest,
   listCollaborationMessages,
   listHermesMemoryNotes,
   recordCollaborationMessage,
@@ -463,7 +464,10 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
       ...(operatorMessage.relatedPr ? { selectedPr: operatorMessage.relatedPr } : {}),
       ...(board ? { board } : {}),
     };
-    if (apiKey) {
+    const memoryRequest = classifyHermesMemoryRequest(operatorMessage);
+    if (memoryRequest !== "none") {
+      text = hermesMemoryGovernanceReply(operatorMessage, memoryRequest, memoryNotes);
+    } else if (apiKey) {
       try {
         // replyContext carries the recent thread oldest-first so the
         // model sees the conversation in natural order rather than reversed.
@@ -477,7 +481,9 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
         logger.warn({ err: error, id: operatorMessage.id }, "monitor_collaboration_llm_reply_threw");
       }
     }
-    text = appendHermesWhyTrace(text, replyContext);
+    if (memoryRequest !== "forget_pr") {
+      text = appendHermesWhyTrace(text, replyContext);
+    }
     try {
       recordCollaborationMessage({
         author: "hermes",
@@ -492,6 +498,40 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
     }
   }, 600);
   timer.unref?.();
+}
+
+function hermesMemoryGovernanceReply(
+  operatorMessage: Awaited<ReturnType<typeof recordCollaborationMessage>>,
+  request: ReturnType<typeof classifyHermesMemoryRequest>,
+  memoryNotes: string[]
+): string {
+  const prLabel = operatorMessage.relatedPr
+    ? `${operatorMessage.relatedPr.repo}#${operatorMessage.relatedPr.number}`
+    : "";
+  if (request === "forget_pr") {
+    if (!operatorMessage.relatedPr) {
+      return "I can forget PR-scoped memory, but I need a selected PR first. Pick the card, then say `Hermes, forget this PR memory` and I will clear only that PR's notes.";
+    }
+    return `Done. I cleared any PR-scoped memory I had for ${prLabel}; global Pascal preferences are still intact. If this PR needs a replacement rule, tell me with \`remember:\` and I will learn the corrected version.`;
+  }
+
+  if (!memoryNotes.length) {
+    return prLabel
+      ? `I do not have any remembered guidance for ${prLabel} yet. I will use the live board as the source of truth and learn from your next explicit correction or decision.`
+      : "I do not have any global monitor memory yet. I will learn from explicit `remember:` notes and operator decisions as they happen.";
+  }
+
+  const scope = prLabel ? `for ${prLabel}` : "for the monitor";
+  const bullets = memoryNotes.slice(0, 4).map((note) => `- ${shortMemoryNote(note)}`).join("\n");
+  return `Here is what I remember ${scope}. I will treat this as guidance, not proof; the live board still wins if it disagrees.\n${bullets}`;
+}
+
+function shortMemoryNote(note: string): string {
+  const compact = note
+    .replace(/^Pascal (?:preference|note|outcome)(?: for [^:]+)?:\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return compact.length > 180 ? `${compact.slice(0, 179)}…` : compact;
 }
 
 async function loadHermesBoardSnapshotForReply(
