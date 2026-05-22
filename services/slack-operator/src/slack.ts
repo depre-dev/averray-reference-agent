@@ -352,6 +352,9 @@ export function formatOperatorResultForSlack(result: unknown): string {
   if (result.kind === "github_merge_steward_approval") {
     return formatGithubMergeStewardApprovalForSlack(result);
   }
+  if (result.kind === "testbed_agent_mission") {
+    return formatTestbedAgentMissionForSlack(result);
+  }
   if (result.kind === "run_testbed_e2e_read_only") {
     return formatTestbedE2eReadOnlyRunForSlack(result);
   }
@@ -672,6 +675,37 @@ function formatTestbedE2eSuiteForSlack(result: Record<string, unknown>): string 
     `• suite mutates: \`${String(safety.suiteGeneratorMutates === true)}\``,
     `• live case mutates: \`${String(safety.guardedLiveCaseMutates === true)}\``,
     `• edits Wikipedia: \`${String(safety.editsWikipedia === true)}\``,
+  ].filter(Boolean).join("\n");
+}
+
+function formatTestbedAgentMissionForSlack(result: Record<string, unknown>): string {
+  const mission = isRecord(result.mission) ? result.mission : {};
+  const target = isRecord(mission.target) ? mission.target : {};
+  const safety = isRecord(mission.safety) ? mission.safety : {};
+  const agentMode = isRecord(mission.agentMode) ? mission.agentMode : {};
+  const rubric = arrayField(mission, "scoringRubric");
+  const prompt = stringField(mission, "missionPrompt") ?? "";
+  return [
+    "*Fresh-agent browser mission*",
+    stringField(mission, "headline") ?? "Browser-only mission packet generated.",
+    "",
+    "*Target*",
+    `• url: \`${stringField(target, "url") ?? "[TESTBED_URL]"}\``,
+    `• goal: ${stringField(target, "goal") ?? "test first-contact usability"}`,
+    `• agent: \`${stringField(target, "agentName") ?? "Hermes"}\``,
+    `• memory: \`${stringField(agentMode, "memoryMode") ?? (target.freshMemory === false ? "returning_agent_memory_allowed" : "fresh_or_ignored")}\``,
+    "",
+    "*How to run it*",
+    "• Start a clean browser-capable agent with the mission prompt.",
+    "• Use only visible page UI; no repo, Slack, GitHub, SSH, MCP, or operator memory.",
+    "• Stop before any real mutation and report the structured verdict back into the monitor chat.",
+    "",
+    "*Rubric*",
+    rubric.length > 0 ? rubric.slice(0, 6).map(formatTestbedMissionRubricItem).join("\n") : "• orientation, navigation, task completion, safety, recoverability, evidence quality",
+    "*Safety*",
+    `• mission generator mutates: \`${String(safety.missionGeneratorMutates === true)}\``,
+    `• browser mission should mutate: \`${String(safety.browserMissionShouldMutate === true)}\``,
+    prompt ? `*Prompt preview*\n\`\`\`${prompt.slice(0, 900)}${prompt.length > 900 ? "\n..." : ""}\`\`\`` : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -1014,6 +1048,13 @@ function formatTestbedRunCase(value: unknown): string {
   const error = stringField(value, "error");
   const suffix = error ? ` - ${error}` : reason ? ` - ${reason}` : "";
   return `• \`${id}\` ${name}: \`${status}\`${suffix}`;
+}
+
+function formatTestbedMissionRubricItem(value: unknown): string {
+  if (!isRecord(value)) return `• ${String(value || "rubric item")}`;
+  const id = stringField(value, "id") ?? "rubric";
+  const question = stringField(value, "question") ?? stringField(value, "label") ?? "score this dimension";
+  return `• \`${id}\` - ${question}`;
 }
 
 function formatMutationBoundary(value: unknown): string {

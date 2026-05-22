@@ -1,4 +1,5 @@
 import type { HermesBoardCardSnapshot, HermesBoardSnapshot } from "./monitor-hermes-voice.js";
+import { testbedMissionRunToMonitorItem, type TestbedMissionRun } from "./monitor-testbed-missions.js";
 
 interface PrIdentity {
   repo?: string;
@@ -18,7 +19,9 @@ export function buildHermesBoardSnapshotFromMonitor(snapshot: unknown): HermesBo
   if (!isRecord(snapshot)) return undefined;
 
   const activeTasks = activeCodexTaskMap(snapshot);
-  const rawItems = dedupeItems([...arrayRecords(snapshot.active), ...arrayRecords(snapshot.recent)]);
+  const missionItems = arrayRecords(snapshot.testbedMissions)
+    .map((run) => testbedMissionRunToMonitorItem(run as unknown as TestbedMissionRun));
+  const rawItems = dedupeItems([...arrayRecords(snapshot.active), ...arrayRecords(snapshot.recent), ...missionItems]);
   const cards = rawItems
     .map((item) => boardCardFromItem(item, snapshot, activeTasks))
     .filter((item): item is HermesBoardCardSnapshot => Boolean(item))
@@ -74,6 +77,32 @@ function classifyItem(
   const finalVerdict = normalize(textProp(summary, "finalVerdict") || textProp(summary, "status"));
   const mergeRecommendation = normalize(textProp(summary, "mergeRecommendation"));
   const intent = normalize(textProp(item, "intent"));
+  if (intent === "testbed_agent_mission") {
+    const failed = status === "failed" || includesAny(finalVerdict, ["failed", "failure", "block"]);
+    const completed = status === "completed" || includesAny(finalVerdict, ["pass", "completed"]);
+    if (failed) {
+      return {
+        lane: "Needs Attention",
+        owner: "Hermes",
+        verdict: "mission failed",
+        next: "inspect the browser-agent report and decide whether the page or the mission prompt needs the next fix",
+      };
+    }
+    if (completed) {
+      return {
+        lane: "Done",
+        owner: "History",
+        verdict: "mission completed",
+        next: "use the report as evidence for the next testbed/product improvement",
+      };
+    }
+    return {
+      lane: "Hermes Checking",
+      owner: "Hermes",
+      verdict: "mission ready",
+      next: "run the browser-only mission with a fresh agent, then post the structured report back into the monitor",
+    };
+  }
 
   if (isDonePrState(prState)) {
     return {
@@ -223,6 +252,8 @@ function titleForItem(
   prState: Record<string, unknown> | undefined,
   identity: PrIdentity
 ): string {
+  const directTitle = textProp(item, "title") || textProp(summary, "title");
+  if (directTitle) return directTitle;
   const prTitle = prState ? textProp(prState, "title") : "";
   if (prTitle) return prTitle;
   const pullRequest = recordProp(summary, "pullRequest");

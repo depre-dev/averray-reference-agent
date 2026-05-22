@@ -45,6 +45,7 @@ describe("slack operator personal monitor", () => {
     expect(guardMonitorCommand("merge steward details")).toMatchObject({ allowed: true });
     expect(guardMonitorCommand("ops health")).toMatchObject({ allowed: true });
     expect(guardMonitorCommand("propose deploy for averray-agent/agent sha abc1234")).toMatchObject({ allowed: true });
+    expect(guardMonitorCommand("agent browser mission https://testbed.example/app goal: complete onboarding")).toMatchObject({ allowed: true });
     expect(guardMonitorCommand("merge steward approve averray-agent/agent#123")).toMatchObject({
       allowed: false,
       reason: "mutation_command_blocked",
@@ -235,6 +236,12 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("codexDelegationPromptForItem(item");
     expect(html).toContain("postDraftDelegationConversation(item, \"operator\")");
     expect(html).toContain("Got it. I will treat this as a deliberate draft takeover");
+    expect(html).toContain("testbedMissionPipelineItems(payload.testbedMissions");
+    expect(html).toContain("isTestbedMissionItem(item)");
+    expect(html).toContain("renderTestbedMissionPanel(item, summary)");
+    expect(html).toContain("Fresh-agent browser mission");
+    expect(html).toContain("Copy mission prompt");
+    expect(html).toContain("browser-only report");
     expect(html).toContain("data-codex-task-action=\"send-back\"");
     expect(html).toContain("Send back to Codex");
     expect(html).toContain("codexOperatorSendBackPromptForItem(item");
