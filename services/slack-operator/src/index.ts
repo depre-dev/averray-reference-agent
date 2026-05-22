@@ -60,6 +60,11 @@ import {
   summarizeCodexTasks,
 } from "./codex-task-queue.js";
 import {
+  listTestbedMissionRuns,
+  recordTestbedMissionRunFromOperatorResult,
+  type TestbedMissionRun,
+} from "./monitor-testbed-missions.js";
+import {
   formatStalePrAlertForSlack,
   shouldPostStalePrAlert,
   stalePrAlertItems,
@@ -614,10 +619,15 @@ async function handleMonitorCommandRequest(request: http.IncomingMessage, respon
       commandText: text,
       result,
     }, query).catch((error) => logger.warn({ err: error }, "monitor_operator_command_record_failed"));
+    const testbedMissionRun = recordTestbedMissionRunFromOperatorResult(result);
+    if (testbedMissionRun) {
+      recordTestbedMissionCollaboration(testbedMissionRun);
+    }
     writeJson(response, 200, {
       ok: true,
       text: formatOperatorResultForSlack(result),
       result,
+      ...(testbedMissionRun ? { testbedMissionRun } : {}),
     });
   } catch (error) {
     logger.error({ err: error }, "monitor_operator_command_failed");
@@ -625,6 +635,24 @@ async function handleMonitorCommandRequest(request: http.IncomingMessage, respon
       error: "monitor_command_failed",
       message: error instanceof Error ? error.message : String(error),
     });
+  }
+}
+
+function recordTestbedMissionCollaboration(run: TestbedMissionRun): void {
+  try {
+    recordCollaborationMessage({
+      author: "hermes",
+      kind: "status",
+      addressedTo: "operator",
+      relatedCorrelationId: run.id,
+      text: [
+        `I created a fresh-agent browser mission for ${run.targetUrl}.`,
+        `The mission is now on the board as ${run.id}; open its card to copy the browser-only prompt and report schema.`,
+        "Start it with a clean browser-capable agent, then paste the structured report back here so I can compare the evidence and keep improving the testbed.",
+      ].join(" "),
+    });
+  } catch (error) {
+    logger.warn({ err: error, missionId: run.id }, "monitor_testbed_mission_collaboration_failed");
   }
 }
 
@@ -1156,6 +1184,7 @@ async function loadMonitorSnapshot(
   const snapshot = {
     ...enriched,
     codexTasks,
+    testbedMissions: listTestbedMissionRuns({ limit: 20 }),
     collaborationMessages: listCollaborationMessages({ limit: 200 }),
     diagnostics,
   };

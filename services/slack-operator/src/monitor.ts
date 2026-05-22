@@ -63,6 +63,7 @@ function isAllowedMonitorCommand(text: string): boolean {
     || /^what can you do for us( details?| full| audit)?$/.test(text)
     || /^(how do we deploy|runbook for|secret rotation runbook)( .*)?$/.test(text)
     || /^propose (merge|deploy|secret rotation|rollback)\b/.test(text)
+    || /^(testbed agent mission|agent testbed mission|agent browser mission|browser mission|fresh agent mission|fresh agent page test|out of box agent test|out-of-box agent test|normal agent page test|can hermes test the page|test page as fresh agent)(\b.*)?$/.test(text)
     || /^run testbed e2e read[ -]?only( details?| full| audit)?$/.test(text)
   );
 }
@@ -5718,10 +5719,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const touchedAreas = Array.isArray(signals.touchedAreas) ? signals.touchedAreas : [];
       const tests = Array.isArray(signals.testSignals) ? signals.testSignals : [];
       const cardWhy = lane.key === "operator" && verdict.level === "needs-review" ? operatorDecisionShort(item, verdict) : verdict.why;
-      const repo = item.repo || "unknown repo";
+      const missionItem = isTestbedMissionItem(item);
+      const mission = missionItem ? (testbedMissionRun(item) || {}) : {};
+      const repo = missionItem ? "testbed/mission" : (item.repo || "unknown repo");
       const repoShort = String(repo).split("/")[1] || repo;
       const prNumber = item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId);
-      const idLabel = prNumber ? "#" + prNumber : (isDeployItem(item) ? "deploy" : "handoff");
+      const idLabel = missionItem
+        ? missionShortLabel(mission.id || item.correlationId)
+        : (prNumber ? "#" + prNumber : (isDeployItem(item) ? "deploy" : "handoff"));
       const activeAgent = activeAgentForItem(item, lane, stage);
       const codexState = lane.key === "codex" ? codexWorkState(item, stage) : null;
       const locallyApproved = decisionForItem(item).status === "approved";
@@ -5768,6 +5773,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return age;
     }
 
+    function missionShortLabel(value) {
+      const raw = String(value || "mission");
+      const parts = raw.replace(/^testbed-mission-/, "").split("-");
+      return "mission " + (parts.length > 1 ? parts.slice(-2).join("-") : parts[0]);
+    }
+
     function renderCardFlow(action, flow) {
       return '<div class="card-flow" data-owner="' + escapeAttr(actorSlug(action.owner)) + '">' +
         '<div class="card-flow-row" data-kind="button"><span class="card-flow-label">Button</span><span class="card-flow-text">' + escapeHtml(flow.button) + '</span></div>' +
@@ -5776,6 +5787,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function cardFlowCopy(item, verdict, action, lane, codexState) {
+      if (isTestbedMissionItem(item)) {
+        return {
+          button: "Opens the mission packet, prompt, rubric, and report schema.",
+          after: "Run a clean browser-capable agent and paste the structured report back into this room.",
+        };
+      }
       if (lane.key === "codex") {
         const state = codexState || codexWorkState(item, pipelineStage(item, verdict));
         if (state.state === "proposed") {
@@ -5853,6 +5870,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const explicit = summary.title || summary.prTitle || summary.pullRequestTitle || item && item.title;
       if (explicit) return String(explicit);
       const raw = String(title || "").trim();
+      if (item && isTestbedMissionItem(item)) return "Fresh-agent browser mission";
       if (item && isDeployItem(item)) return "Post-deploy verification";
       const derived = derivePrCardTitle(item, summary);
       if (derived) return derived;
@@ -5918,6 +5936,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function activeAgentForItem(item, lane, stage) {
       const status = normalize(item.status);
       const stageKey = (stage && stage.key) || "";
+      if (isTestbedMissionItem(item)) {
+        const mission = testbedMissionRun(item) || {};
+        const missionStatus = normalize(mission.status || status);
+        if (missionStatus === "completed" || missionStatus === "failed") return null;
+        return { id: "hermes", label: "Mission ready" };
+      }
       if (isDeployItem(item) && (item.active === true || status === "running" || stageKey === "deploy")) {
         return { id: "deploy", label: "Deploy verifying" };
       }
@@ -6133,6 +6157,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function primaryActionButton(item, verdict, action, lane) {
+      if (isTestbedMissionItem(item)) {
+        return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '" title="Open the mission packet, prompt, and expected report">Open mission packet</button>';
+      }
       if (lane.key === "codex") {
         const state = codexWorkState(item, pipelineStage(item, verdict));
         if (state.state === "proposed" && state.task) {
@@ -6169,6 +6196,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const status = normalize(item.status);
       const reason = normalize(summary.finalReason || summary.reason || item.reason);
       const prState = pullRequestState(item, summary);
+      if (isTestbedMissionItem(item)) {
+        const mission = testbedMissionRun(item) || {};
+        const missionStatus = normalize(mission.status || summary.status || status);
+        if (missionStatus === "completed") return { key: "done" };
+        if (missionStatus === "failed") return { key: "attention" };
+        return { key: "hermes" };
+      }
       if (isDonePullRequestState(prState)) return { key: "done" };
       if (isDeployItem(item)) {
         if (item.active === true || item.activeState === "running" || status === "running") return { key: "deploy" };
@@ -6194,6 +6228,18 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return intent.includes("deploy") || intent === "testbed_suite" || correlationId.startsWith("github-deploy-");
     }
 
+    function isTestbedMissionItem(item) {
+      const summary = (item && item.summary) || {};
+      return normalize(item && item.intent) === "testbed_agent_mission"
+        || normalize(summary.kind) === "testbed_mission_run"
+        || Boolean(summary.testbedMission);
+    }
+
+    function testbedMissionRun(item) {
+      const summary = (item && item.summary) || {};
+      return summary.testbedMission || item.testbedMission || null;
+    }
+
     function boardSortScore(item) {
       const verdict = releaseVerdict(item);
       const age = handoffAge(item);
@@ -6206,6 +6252,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function boardItemKey(item) {
+      if (isTestbedMissionItem(item)) return String(item.correlationId || "testbed-mission");
       return prIdentityKey(item) + ":" + String(item.intent || "handoff");
     }
 
@@ -6344,6 +6391,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         (verdict.level === "block" ? '<section class="drawer-section">' + renderFailureCallout(verdict, summary) + '</section>' : "") +
         '<section class="drawer-section">' + renderHandoffOwnerContract(item, verdict, action) + '</section>' +
         '<section class="drawer-section">' + renderActionRecipe(item, summary, verdict, action) + '</section>' +
+        renderTestbedMissionPanel(item, summary) +
         renderMergeStewardPacket(item, summary, verdict, action) +
         '<section class="drawer-section"><h3>Hermes verdict</h3>' + renderHermesVerdictBox(verdict, age) + (richReviewWhy ? '<div class="review-why">' + richReviewWhy + '</div>' : "") + '</section>' +
         renderDraftDelegationPanel(item, summary) +
@@ -6363,6 +6411,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         (prUrl ? '<a class="pill" href="' + escapeAttr(prUrl) + '" target="_blank" rel="noreferrer">Open PR</a>' : "") +
         (workflowRunUrl ? '<a class="pill" href="' + escapeAttr(workflowRunUrl) + '" target="_blank" rel="noreferrer">Workflow Run</a>' : "") +
         '<button class="soft-button" type="button" data-command-suggestion="handoff monitor details">Ask Hermes for context</button>' +
+        renderTestbedMissionFooterActions(item) +
         renderCodexFooterAction(item, summary, verdict, action) +
         '<button class="soft-button" type="button" data-copy-text="' + escapeAttr(item.correlationId || "") + '">Copy correlation id</button>' +
         renderOperatorFooterActions(item, verdict, locallyApproved) +
@@ -6415,6 +6464,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function ownerContractForItem(item, verdict, action) {
+      if (isTestbedMissionItem(item)) {
+        return {
+          owner: "Hermes",
+          action: "Run this as a normal browser-only agent mission, not as an internal operator. The board is waiting for the structured report, not a code PR.",
+        };
+      }
       if (isDraftPullRequest(item)) {
         if (isExternalDraftPullRequest(item)) {
           return {
@@ -6481,6 +6536,61 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           '<button class="soft-button" type="button" data-command-suggestion="merge steward details" title="Ask for merge context; this does not merge">Ask merge steward</button>' +
         '</div>' +
         '</section>';
+    }
+
+    function renderTestbedMissionPanel(item, summary) {
+      if (!isTestbedMissionItem(item)) return "";
+      const run = testbedMissionRun(item) || {};
+      const mission = run.mission || {};
+      const target = mission.target || {};
+      const reportSchema = mission.reportSchema || {};
+      const rubric = Array.isArray(mission.scoringRubric) ? mission.scoringRubric : [];
+      const runbook = Array.isArray(mission.runbook) ? mission.runbook : [];
+      const prompt = String(mission.missionPrompt || "");
+      const result = run.result || null;
+      const rows = [
+        row("Target", escapeHtml(String(run.targetUrl || target.url || "[TESTBED_URL]"))),
+        row("Goal", escapeHtml(String(run.goal || target.goal || "test first-contact usability"))),
+        row("Agent", escapeHtml(String(run.agentName || target.agentName || "Hermes"))),
+        row("Memory", escapeHtml(run.freshMemory === false ? "returning memory allowed" : "fresh or explicitly ignored")),
+        row("Status", escapeHtml(String(run.status || summary.status || "ready"))),
+      ].join("");
+      const runbookHtml = runbook.length
+        ? '<ol class="resolution-steps">' + runbook.slice(0, 8).map((step) => '<li>' + escapeHtml(String(step)) + '</li>').join("") + '</ol>'
+        : '<p class="resolution-summary">Open the target in a clean browser profile, follow the visible UI, stop before mutation, and report evidence.</p>';
+      const rubricHtml = rubric.length
+        ? '<div class="check-matrix">' + rubric.slice(0, 8).map((entry) => {
+          const id = entry && entry.id ? String(entry.id) : "rubric";
+          const question = entry && entry.question ? String(entry.question) : String(entry && entry.label || "score this dimension");
+          return '<div class="cm-row" data-state="pending"><span class="cm-dot"></span><span class="cm-name">' + escapeHtml(id) + '</span><span class="cm-state-pill">' + escapeHtml(question) + '</span></div>';
+        }).join("") + '</div>'
+        : '<div class="empty">No rubric attached.</div>';
+      const resultHtml = result
+        ? '<details class="drawer-disclosure prompt-disclosure" open><summary>Structured result</summary><pre class="prompt-box">' + escapeHtml(prettyJson(result)) + '</pre></details>'
+        : '<p class="resolution-summary">No report is attached yet. The next useful thing is to run the browser mission and paste the structured report into the collaboration chat.</p>';
+      return '<section class="drawer-section testbed-mission-panel"><h3>Testbed mission</h3>' +
+        '<p class="resolution-summary">This starts from the monitor, but execution is browser-only: copy the prompt into a clean agent/browser run, then bring the report back here for Hermes to judge.</p>' +
+        '<dl class="resolution-grid">' + rows + '</dl>' +
+        '<h4>Runbook</h4>' + runbookHtml +
+        '<h4>Rubric</h4>' + rubricHtml +
+        resultHtml +
+        (prompt ? '<details class="drawer-disclosure prompt-disclosure"><summary>Mission prompt</summary><pre class="prompt-box">' + escapeHtml(prompt) + '</pre></details>' : "") +
+        '<details class="drawer-disclosure prompt-disclosure"><summary>Report schema</summary><pre class="prompt-box">' + escapeHtml(prettyJson(reportSchema)) + '</pre></details>' +
+        '<div class="resolution-actions">' +
+          (prompt ? '<button class="soft-button" type="button" data-copy-label="Mission prompt copied" data-copy-text="' + escapeAttr(prompt) + '">Copy mission prompt</button>' : "") +
+          '<button class="soft-button" type="button" data-copy-label="Report schema copied" data-copy-text="' + escapeAttr(prettyJson(reportSchema)) + '">Copy report schema</button>' +
+        '</div>' +
+        '</section>';
+    }
+
+    function renderTestbedMissionFooterActions(item) {
+      if (!isTestbedMissionItem(item)) return "";
+      const run = testbedMissionRun(item) || {};
+      const mission = run.mission || {};
+      const prompt = String(mission.missionPrompt || "");
+      return prompt
+        ? '<button class="soft-button" type="button" data-copy-label="Mission prompt copied" data-copy-text="' + escapeAttr(prompt) + '">Copy mission prompt</button>'
+        : "";
     }
 
     function mergeStewardPacketForItem(item, summary, verdict, action) {
@@ -6681,6 +6791,15 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function actionRecipeForItem(item, summary, verdict, action) {
+      if (isTestbedMissionItem(item)) {
+        return {
+          owner: "Hermes / browser agent",
+          why: "A mission packet was generated to test whether an out-of-the-box agent can use the page without private Averray context.",
+          ask: "Copy the mission prompt into a clean browser-capable agent, let it work only from visible UI, then paste the structured report into this room.",
+          clearsWhen: "The report includes a verdict, evidence, scores, blockers, and whether the agent stopped before mutation.",
+          proof: ["mission prompt", "fresh browser run", "structured report"],
+        };
+      }
       if (isDraftPullRequest(item)) {
         const state = codexWorkState(item, pipelineStage(item, verdict));
         if (isExternalDraftPullRequest(item)) {
@@ -6818,6 +6937,22 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function renderAgentPrecheckList(item, summary, verdict, stage) {
+      if (isTestbedMissionItem(item)) {
+        const run = testbedMissionRun(item) || {};
+        const rows = [
+          { state: "ok", label: "Mission packet", note: "prompt and rubric generated" },
+          { state: run.freshMemory === false ? "warn" : "ok", label: "Memory mode", note: run.freshMemory === false ? "returning memory allowed" : "fresh or ignored" },
+          { state: "ok", label: "Mutation boundary", note: "browser-only; stop before real mutation" },
+          { state: run.result ? "ok" : "warn", label: "Structured report", note: run.result ? "report attached" : "waiting for browser-agent report" },
+        ];
+        return '<div class="precheck-list">' + rows.map((r) => (
+          '<div class="pc-item">' +
+            '<span class="pc-tick" data-state="' + escapeAttr(r.state) + '"></span>' +
+            '<span class="pc-label">' + escapeHtml(r.label) + '</span>' +
+            '<span class="pc-note">' + escapeHtml(r.note) + '</span>' +
+          '</div>'
+        )).join("") + '</div>';
+      }
       const signals = summary.reviewSignals || {};
       const stageKey = (stage && stage.key) || "";
       const tests = Array.isArray(signals.testSignals) ? signals.testSignals : [];
@@ -6939,6 +7074,23 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function renderTimelineList(stage, verdict, item) {
+      if (isTestbedMissionItem(item)) {
+        const run = testbedMissionRun(item) || {};
+        const status = normalize(run.status || "ready");
+        const rows = [
+          { label: "Mission packet", state: "pass", value: "READY" },
+          { label: "Fresh browser run", state: status === "ready" ? "running" : "pass", value: status === "ready" ? "WAITING" : "DONE" },
+          { label: "Structured report", state: run.result ? "pass" : "pending", value: run.result ? "ATTACHED" : "WAITING" },
+          { label: "Hermes judgement", state: status === "completed" ? "pass" : status === "failed" ? "fail" : "pending", value: status === "completed" ? "PASS" : status === "failed" ? "FAIL" : "PENDING" },
+        ];
+        return '<div class="timeline-list">' + rows.map((r) => (
+          '<div class="tl-row" data-state="' + escapeAttr(r.state) + '">' +
+            '<span class="tl-dot"></span>' +
+            '<span class="tl-label">' + escapeHtml(r.label) + '</span>' +
+            '<span class="tl-state">' + escapeHtml(r.value) + '</span>' +
+          '</div>'
+        )).join("") + '</div>';
+      }
       const phases = [
         { key: "pr", label: "PR opened" },
         { key: "ci", label: "CI" },
@@ -6972,6 +7124,16 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function renderReferencesKv(item, prUrl, workflowRunUrl, commitUrl, rollout, action) {
+      if (isTestbedMissionItem(item)) {
+        const run = testbedMissionRun(item) || {};
+        return '<dl class="ref-kv">' +
+          '<dt>mission</dt><dd><code>' + escapeHtml(String(run.id || item.correlationId || "unknown")) + '</code></dd>' +
+          '<dt>target</dt><dd>' + escapeHtml(String(run.targetUrl || "[TESTBED_URL]")) + '</dd>' +
+          '<dt>agent</dt><dd>' + escapeHtml(String(run.agentName || "Hermes")) + '</dd>' +
+          '<dt>created</dt><dd>' + escapeHtml(String(run.createdAt || item.startedAt || "unknown")) + '</dd>' +
+          '<dt>next action</dt><dd>' + escapeHtml(action.text) + '</dd>' +
+          '</dl>';
+      }
       const sha = item.sha ? compactSha(item.sha) : "n/a";
       const branch = item.branch || (item.summary && item.summary.branch) || (item.summary && item.summary.ref) || "";
       const requester = item.requester || (item.summary && item.summary.requester) || (item.summary && item.summary.actor) || "";
@@ -7328,6 +7490,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         if (!response.ok) throw new Error(payload.message || payload.error || "HTTP " + response.status);
         output.dataset.mode = "text";
         output.textContent = payload.text || "Hermes command completed.";
+        if (payload.testbedMissionRun) {
+          forceThreadMode();
+          await load();
+          selectedKey = String(payload.testbedMissionRun.id || selectedKey || "");
+          renderBoard(latestPipelineItems);
+          renderDrawer(selectedItem());
+          renderCommandContext();
+        }
         if (input) input.value = "";
       } catch (error) {
         output.dataset.mode = "text";
@@ -7388,6 +7558,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function selectedPrRoomBriefingForItem(item, verdict, action, lane) {
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
+      if (isTestbedMissionItem(item)) {
+        const run = testbedMissionRun(item) || {};
+        return "I am treating " + title + " as a testbed mission room, not a PR room. The mission target is " + String(run.targetUrl || "[TESTBED_URL]") + ", the goal is " + String(run.goal || "test first-contact usability") + ", and the board is waiting for a browser-only report from a clean agent run.";
+      }
       const laneLabel = boardLaneLabel(lane && lane.key);
       const age = handoffAge(item);
       return "I am treating " + title + " as its own PR room, not just a card on the board. Right now it is in " + laneLabel + ", " + action.owner + " owns the next turn, and the latest signal is " + verdict.label + " from " + age.label.toLowerCase() + " " + age.duration + ". " +
@@ -7397,6 +7571,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function selectedPrRoomEvidenceForItem(item, verdict) {
       const summary = item.summary || {};
+      if (isTestbedMissionItem(item)) {
+        const run = testbedMissionRun(item) || {};
+        return run.result
+          ? "The important evidence is the structured browser-agent report attached to this mission."
+          : "The important evidence is still missing: a fresh browser-agent report with verdict, scores, blockers, and screenshots or trace references.";
+      }
       const signals = summary.reviewSignals || {};
       const githubLive = summary.githubLive || {};
       const totals = githubLive.checkTotals || {};
@@ -7425,6 +7605,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function selectedPrRoomBoundaryForItem(item, verdict, action, lane) {
+      if (isTestbedMissionItem(item)) return "I will keep this in Hermes Checking until the browser mission report arrives; this is product/testbed evidence, not a GitHub merge signal.";
       if (isExternalDraftPullRequest(item)) return "I will keep it watched and quiet unless Pascal explicitly delegates a Codex takeover.";
       if (isDraftPullRequest(item)) return "I will hold it out of release until the draft is finished or marked ready, then CI and Hermes can take a real pass.";
       if (codexTaskFailedForItem(item)) return "I will not ask Hermes to bless this again until Codex has dealt with the failed task or proposed a clean retry.";
@@ -7438,6 +7619,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function selectedPrRoomHandoffForItem(item, verdict, action, lane) {
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
+      if (isTestbedMissionItem(item)) {
+        return "Hermes, run " + title + " like a normal outside agent: browser-visible UI only, no repo memory, no private MCP, and stop before real mutation. Bring back the structured report so Pascal can see what a future agent actually experiences.";
+      }
       if (isExternalDraftPullRequest(item)) {
         return "Pascal, " + title + " is an external draft. I am watching it, but I will not quietly convert it into Codex work unless you explicitly hand it over.";
       }
@@ -8186,6 +8370,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
       const movedFrom = previous ? " from " + boardLaneLabel(previous.laneKey) : "";
       const nextStep = nextStepNarrationForItem(item, verdict, action, lane);
+      if (isTestbedMissionItem(item)) {
+        return "Update on " + title + ": I opened a testbed mission room" + movedFrom + ". This is not a PR gate; it is a browser-only evidence run. " + nextStep;
+      }
       if (isDraftPullRequest(item)) {
         return "Update on " + title + ": it is still a draft, so I am keeping it in Waiting / Drafts instead of treating it as an urgent release blocker. " + nextStep;
       }
@@ -8224,6 +8411,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function boardBriefingLineForItem(item, verdict, action, lane) {
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
       const nextStep = nextStepNarrationForItem(item, verdict, action, lane);
+      if (isTestbedMissionItem(item)) {
+        return "Hermes has a testbed browser mission ready for " + title + ". Run it as a clean outside agent, use only the visible page, and bring the structured report back here so the board can judge the product experience instead of guessing. " + nextStep;
+      }
       if (isDraftPullRequest(item)) {
         if (isExternalDraftPullRequest(item)) {
           return "Hermes is watching " + title + " as a draft owned outside this board. I am holding it out of release and not asking Codex to move unless Pascal explicitly delegates takeover. " + nextStep;
@@ -8273,6 +8463,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     // terse, action-first. Hermes's voice: dry, methodical, observing.
     function collaborationAskForItem(item, verdict, action, lane) {
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
+      if (isTestbedMissionItem(item)) return "Hermes, " + title + " is a browser-only mission. Please run it like a normal outside agent with fresh memory, then post the verdict, evidence, scores, and blockers back here.";
       if (isExternalDraftPullRequest(item)) return "I am watching " + title + " as an external draft. It stays out of the release path until the PR author or owning agent marks it ready; Codex should not pick it up unless Pascal explicitly delegates takeover.";
       if (isDraftPullRequest(item)) return "Codex, " + title + " is still in draft mode with a delegated task. Finish the draft or mark it ready for review; once that happens I will wait for CI and Hermes to re-run before moving it forward.";
       if (codexTaskFailedForItem(item)) return "Codex, " + title + " failed in the runner. Please inspect the failed output first, then either fix the runner setup, push the smallest PR-check fix, or create a smaller retry task so Hermes has something concrete to re-check.";
@@ -9386,6 +9577,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         .concat(payload.active || [])
         .concat(payload.recent || [])
         .filter(isPrPipelineItem)
+        .concat(testbedMissionPipelineItems(payload.testbedMissions || []))
         .filter((item) => {
           const key = String(item.correlationId || item.repo + "#" + item.pullRequestNumber);
           if (seen.has(key)) return false;
@@ -9394,6 +9586,54 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         });
       return keepCurrentDeployItems(entries)
         .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+    }
+
+    function testbedMissionPipelineItems(missions) {
+      if (!Array.isArray(missions)) return [];
+      return missions
+        .filter((run) => run && typeof run === "object")
+        .map((run) => {
+          const status = normalize(run.status);
+          const active = status === "ready" || status === "running";
+          const terminalStatus = status === "completed" ? "completed" : status === "failed" ? "failed" : "running";
+          const verdict = status === "completed" ? "pass" : status === "failed" ? "failed" : "running";
+          return {
+            correlationId: run.id,
+            requester: "monitor",
+            intent: "testbed_agent_mission",
+            repo: "testbed/agent",
+            status: terminalStatus,
+            phase: "testbed_mission",
+            active,
+            activeState: active ? "running" : "inactive",
+            startedAt: run.createdAt,
+            updatedAt: run.updatedAt,
+            reason: run.statusReason,
+            summary: {
+              kind: "testbed_mission_run",
+              title: run.title || "Fresh-agent browser mission",
+              status: run.status,
+              finalReason: run.statusReason,
+              finalVerdict: verdict,
+              mergeRecommendation: "not_applicable",
+              reviewSignals: {
+                touchedAreas: ["testbed"],
+                testSignals: ["browser mission packet ready"],
+                missingTestSignals: status === "completed" ? [] : ["browser agent report"],
+              },
+              reviewReasons: status === "failed"
+                ? [{ severity: "high", code: "testbed_mission_failed", message: run.statusReason || "Browser mission failed." }]
+                : [],
+              testbedMission: run,
+            },
+            safety: {
+              source: "monitor",
+              wouldMutate: false,
+              wouldWriteLocalCheckpoint: false,
+              freeFormHermesPromptUsed: false,
+            },
+          };
+        });
     }
 
     function keepCurrentDeployItems(entries) {
@@ -9469,6 +9709,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         || intent === "pr_handoff"
         || intent === "pr_code_review"
         || intent === "testbed_suite"
+        || intent === "testbed_agent_mission"
         || intent.includes("deploy")
         || correlationId.startsWith("github-pr-")
         || correlationId.startsWith("github-deploy-")
@@ -9514,6 +9755,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function pipelineStage(item, verdict) {
       const status = normalize(item.status);
       const prState = pullRequestState(item, item.summary || {});
+      if (isTestbedMissionItem(item)) return { key: "testbed", label: "Browser mission" };
       if (isDonePullRequestState(prState)) return { key: "deploy", label: pullRequestStateLabel(prState) };
       if (item.active === true || item.activeState === "running" || status === "running") {
         return { key: "hermes", label: "Hermes reviewing" };
@@ -9528,6 +9770,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function nextPipelineActor(item, verdict) {
       const status = normalize(item.status);
+      if (isTestbedMissionItem(item)) return "Hermes";
       if (item.active === true || item.activeState === "running" || status === "running") return "Hermes";
       if (isExternalDraftPullRequest(item)) return "PR author";
       if (isDraftPullRequest(item)) return "Codex";
@@ -9544,6 +9787,17 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const reason = normalize(summary.finalReason || summary.reason || item.reason);
       const prState = pullRequestState(item, item.summary || {});
       const codexTask = codexTaskForItem(item);
+      if (isTestbedMissionItem(item)) {
+        const mission = testbedMissionRun(item) || {};
+        const missionStatus = normalize(mission.status || summary.status || item.status);
+        if (missionStatus === "completed") {
+          return { owner: "Done", text: "use the browser mission report as evidence for the next testbed improvement" };
+        }
+        if (missionStatus === "failed") {
+          return { owner: "Hermes", text: "inspect the browser mission report and decide whether the page or mission prompt needs the next fix" };
+        }
+        return { owner: "Hermes", text: "run the browser-only mission with a fresh agent and post the structured report back here" };
+      }
       if (isDonePullRequestState(prState)) {
         return { owner: "Done", text: "PR is no longer open in GitHub; keep this handoff as release history" };
       }
@@ -9866,6 +10120,15 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function releaseVerdict(item) {
+      if (isTestbedMissionItem(item)) {
+        const summary = item.summary || {};
+        const mission = testbedMissionRun(item) || {};
+        const status = normalize(mission.status || summary.status || item.status);
+        const why = String(mission.statusReason || summary.finalReason || item.reason || "Mission packet is waiting for a browser-agent report.");
+        if (status === "completed") return { level: "pass", label: "MISSION DONE", why };
+        if (status === "failed") return { level: "block", label: "MISSION FAILED", why };
+        return { level: "running", label: status === "running" ? "MISSION RUNNING" : "MISSION READY", why };
+      }
       const verdict = Array.isArray(item.groupItems) ? groupedReleaseVerdict(item) : baseReleaseVerdict(item);
       const decision = decisionForItem(item);
       if (verdict.level === "needs-review" && decision.status === "approved") {
@@ -10231,6 +10494,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function row(label, value) {
       return "<dt>" + escapeHtml(label) + "</dt><dd>" + value + "</dd>";
+    }
+
+    function prettyJson(value) {
+      try {
+        return JSON.stringify(value || {}, null, 2);
+      } catch {
+        return String(value || "");
+      }
     }
 
     function escapeHtml(value) {

@@ -798,6 +798,42 @@ describe("slack operator bridge", () => {
     expect(text).toContain("No GitHub mutation was performed.");
   });
 
+  it("formats fresh-agent browser mission replies", () => {
+    const text = formatOperatorResultForSlack({
+      handled: true,
+      kind: "testbed_agent_mission",
+      mission: {
+        headline: "Fresh-agent browser mission ready for the testbed page.",
+        target: {
+          url: "https://testbed.example/app",
+          goal: "complete onboarding",
+          agentName: "Hermes",
+          freshMemory: true,
+        },
+        agentMode: {
+          memoryMode: "fresh_or_ignored",
+        },
+        missionPrompt: "Open https://testbed.example/app.\nGoal: complete onboarding",
+        scoringRubric: [
+          {
+            id: "orientation",
+            question: "Could the agent understand the page?",
+          },
+        ],
+        safety: {
+          missionGeneratorMutates: false,
+          browserMissionShouldMutate: false,
+        },
+      },
+    });
+
+    expect(text).toContain("*Fresh-agent browser mission*");
+    expect(text).toContain("url: `https://testbed.example/app`");
+    expect(text).toContain("Use only visible page UI");
+    expect(text).toContain("`orientation`");
+    expect(text).toContain("browser mission should mutate: `false`");
+  });
+
   it("formats testbed E2E suite replies", () => {
     const text = formatOperatorResultForSlack({
       handled: true,
