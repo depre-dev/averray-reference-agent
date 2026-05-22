@@ -121,6 +121,12 @@ export interface HermesMemoryInfluence {
   conflict: boolean;
 }
 
+export interface HermesDecisionCoach {
+  button: string;
+  avoid: string;
+  safestNext: string;
+}
+
 export async function generateHermesReply(
   context: HermesReplyContext,
   options: GenerateHermesReplyOptions
@@ -299,6 +305,7 @@ export function buildBoardNarrationPrompt(context: HermesBoardNarrationContext):
   lines.push("Narration rules:");
   lines.push("- 1-3 conversational sentences, no greeting, no filler.");
   lines.push("- Name what changed, who owns the next move, and whether Pascal/Codex/Hermes should act or wait.");
+  lines.push("- For decision lanes, coach the decision: say what the visible button opens, what it does not do, and the safest next step.");
   lines.push("- If the board shows drafts parked outside Codex, say they are waiting on the PR author unless Pascal explicitly delegates takeover.");
   lines.push("- Do not claim you clicked buttons, started Codex, merged, deployed, approved, or changed GitHub.");
 
@@ -389,6 +396,42 @@ export function hermesMemoryInfluence(context: HermesWhyTraceContext): HermesMem
     sentence: `I am carrying forward your remembered guidance here: ${truncate(cleaned, 160)}`,
     trace: truncate(cleaned, 120),
   };
+}
+
+export function hermesDecisionCoachForCard(item: HermesBoardCardSnapshot): HermesDecisionCoach | null {
+  if (item.lane === "Waiting / Drafts") {
+    return {
+      button: "opens draft context only; it does not start Codex work",
+      avoid: "do not route this to Codex unless Pascal explicitly delegates takeover",
+      safestNext: "wait for the PR author or owning agent to mark it ready, then let CI and Hermes re-check",
+    };
+  }
+
+  if (item.lane === "Needs Attention") {
+    return {
+      button: "opens the blocker or failed-task evidence; it does not repair the PR by itself",
+      avoid: "do not approve, merge, or rerun blindly while the red signal is still unexplained",
+      safestNext: "inspect the failing output or PR signal, then ask Codex for the smallest verifiable fix or a smaller retry task",
+    };
+  }
+
+  if (item.lane === "Operator Review") {
+    return {
+      button: "opens the operator checklist; approval is a local monitor sign-off, not a merge",
+      avoid: "do not re-review code line by line if Hermes/Codex already attached the code-level pre-check",
+      safestNext: "decide whether project intent, architecture direction, rollout risk, and evidence are acceptable; send it back to Codex with a concrete ask if not",
+    };
+  }
+
+  if (item.lane === "Release Queue") {
+    return {
+      button: "asks for merge-steward context; it does not merge the PR",
+      avoid: "do not treat a green-looking card as permission to bypass branch protection or missing sign-off",
+      safestNext: "merge outside the monitor only after branch protection is green and any operator sign-off is clean",
+    };
+  }
+
+  return null;
 }
 
 function hermesWhyTrace(context: HermesWhyTraceContext): string | null {
@@ -532,6 +575,7 @@ function formatBoardCounts(counts: HermesBoardSnapshot["counts"]): string {
 
 function formatBoardCard(item: HermesBoardCardSnapshot): string {
   const pr = item.repo && item.number ? `${item.repo}#${item.number}` : item.repo || "unknown PR";
+  const coach = hermesDecisionCoachForCard(item);
   const parts = [
     `${item.lane} / owner ${item.owner}`,
     pr,
@@ -540,6 +584,9 @@ function formatBoardCard(item: HermesBoardCardSnapshot): string {
     `title ${truncate(item.title, 140)}`,
     item.why ? `why ${truncate(item.why, 220)}` : "",
     item.next ? `next ${truncate(item.next, 220)}` : "",
+    coach ? `button ${coach.button}` : "",
+    coach ? `avoid ${coach.avoid}` : "",
+    coach ? `safest ${coach.safestNext}` : "",
     item.tags && item.tags.length > 0 ? `tags ${item.tags.slice(0, 5).join(", ")}` : "",
   ].filter(Boolean);
   return parts.join(" | ");

@@ -98,4 +98,50 @@ describe("Hermes proactive board narration", () => {
     expect(text).toContain("remembered draft rule");
     expect(text).toContain("unless Pascal explicitly delegates takeover");
   });
+
+  it("coaches operator-review decisions in fallback narration", () => {
+    const text = fallbackHermesBoardNarration(board({
+      counts: { operator: 1 },
+      items: [
+        {
+          repo: "averray-reference-agent",
+          number: 183,
+          title: "2 changed files touch review-gated surfaces.",
+          lane: "Operator Review",
+          owner: "Operator",
+          verdict: "needs review",
+          why: "Hermes has already done the code-level pre-check.",
+          next: "decide whether project intent and rollout risk are acceptable",
+        },
+      ],
+    }));
+
+    expect(text).toContain("project-level decision");
+    expect(text).toContain("button opens the operator checklist");
+    expect(text).toContain("approval is a local monitor sign-off, not a merge");
+    expect(text).toContain("Safest next step");
+    expect(text).toContain("send it back to Codex with a concrete ask");
+  });
+
+  it("coaches release queue decisions without implying the monitor merges", () => {
+    const text = fallbackHermesBoardNarration(board({
+      counts: { queue: 1 },
+      items: [
+        {
+          repo: "averray-agent/agent",
+          number: 440,
+          title: "Live GitHub PR metadata and checks look merge-ready.",
+          lane: "Release Queue",
+          owner: "Merge steward",
+          verdict: "ready",
+          why: "Live GitHub PR metadata and checks look merge-ready.",
+          next: "merge only after branch protection is green",
+        },
+      ],
+    }));
+
+    expect(text).toContain("button asks for merge-steward context");
+    expect(text).toContain("it does not merge the PR");
+    expect(text).toContain("branch protection is green");
+  });
 });
