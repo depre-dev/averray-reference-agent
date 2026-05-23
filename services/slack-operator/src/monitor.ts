@@ -6574,7 +6574,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         }).join("") + '</div>'
         : '<div class="empty">No rubric attached.</div>';
       const resultHtml = result
-        ? '<details class="drawer-disclosure prompt-disclosure" open><summary>Structured result</summary><pre class="prompt-box">' + escapeHtml(prettyJson(result)) + '</pre></details>'
+        ? renderTestbedMissionReportPacket(result) +
+          '<details class="drawer-disclosure prompt-disclosure"><summary>Structured result JSON</summary><pre class="prompt-box">' + escapeHtml(prettyJson(result)) + '</pre></details>'
         : '<p class="resolution-summary">No report is attached yet. The next useful thing is to run the browser mission and paste the structured report into the collaboration chat.</p>';
       return '<section class="drawer-section testbed-mission-panel"><h3>Testbed mission</h3>' +
         '<p class="resolution-summary">This starts from the monitor, but execution is browser-only: copy the prompt into a clean agent/browser run, then bring the report back here for Hermes to judge.</p>' +
@@ -6603,6 +6604,59 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         prompt ? '<button class="soft-button" type="button" data-copy-label="Mission prompt copied" data-copy-text="' + escapeAttr(prompt) + '">Copy mission prompt</button>' : "",
         '<button class="soft-button" type="button" data-copy-label="Report template copied" data-copy-text="' + escapeAttr(reportTemplate) + '">Copy report template</button>',
       ].filter(Boolean).join("");
+    }
+
+    function renderTestbedMissionReportPacket(result) {
+      const verdict = String(result && result.verdict || "reported");
+      const confidence = typeof result.confidence === "number" ? String(Math.round(result.confidence * 100)) + "%" : "not recorded";
+      const stopped = result && typeof result.stoppedBeforeMutation === "boolean" ? (result.stoppedBeforeMutation ? "yes" : "no") : "not recorded";
+      const rows = [
+        row("Verdict", escapeHtml(verdict)),
+        row("Confidence", escapeHtml(confidence)),
+        row("Stopped before mutation", escapeHtml(stopped)),
+      ].join("");
+      const completedPath = testbedReportList(result && result.completedPath);
+      const blockers = testbedReportList(result && result.blockers);
+      const confusingMoments = testbedReportList(result && result.confusingMoments);
+      const recommendations = testbedReportList(result && result.recommendations);
+      const evidence = testbedReportEvidenceList(result && result.evidence);
+      const scores = testbedReportScoreRows(result && result.scores);
+      return '<section class="drawer-section testbed-report-packet"><h3>Browser-agent report</h3>' +
+        '<dl class="resolution-grid">' + rows + '</dl>' +
+        (completedPath.length ? '<h4>Completed path</h4><ol class="resolution-steps">' + completedPath.map((step) => '<li>' + escapeHtml(step) + '</li>').join("") + '</ol>' : "") +
+        (blockers.length ? '<h4>Blockers</h4><ol class="resolution-steps">' + blockers.map((entry) => '<li>' + escapeHtml(entry) + '</li>').join("") + '</ol>' : "") +
+        (confusingMoments.length ? '<h4>Confusing moments</h4><ol class="resolution-steps">' + confusingMoments.map((entry) => '<li>' + escapeHtml(entry) + '</li>').join("") + '</ol>' : "") +
+        (evidence.length ? '<h4>Evidence</h4><div class="operator-evidence">' + evidence.map((entry) => '<div class="operator-evidence-item"><span class="operator-evidence-label">' + escapeHtml(entry.label) + '</span><span class="operator-evidence-value">' + escapeHtml(entry.value) + '</span></div>').join("") + '</div>' : "") +
+        (scores.length ? '<h4>Scores</h4><div class="check-matrix">' + scores.map((entry) => '<div class="cm-row" data-state="' + escapeAttr(entry.state) + '"><span class="cm-dot"></span><span class="cm-name">' + escapeHtml(entry.label) + '</span><span class="cm-state-pill">' + escapeHtml(entry.value) + '</span></div>').join("") + '</div>' : "") +
+        (recommendations.length ? '<h4>Recommendations</h4><ol class="resolution-steps">' + recommendations.map((entry) => '<li>' + escapeHtml(entry) + '</li>').join("") + '</ol>' : "") +
+        '</section>';
+    }
+
+    function testbedReportList(value) {
+      return Array.isArray(value)
+        ? value.map((entry) => String(entry || "").trim()).filter(Boolean).slice(0, 8)
+        : [];
+    }
+
+    function testbedReportEvidenceList(value) {
+      if (!Array.isArray(value)) return [];
+      return value.map((entry, index) => {
+        if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+          const label = String(entry.type || "evidence " + String(index + 1));
+          const detail = String(entry.value || entry.url || entry.path || "").trim();
+          return detail ? { label, value: detail } : { label: "evidence " + String(index + 1), value: JSON.stringify(entry) };
+        }
+        return { label: "evidence " + String(index + 1), value: String(entry || "").trim() };
+      }).filter((entry) => entry.value).slice(0, 8);
+    }
+
+    function testbedReportScoreRows(value) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+      return Object.entries(value).slice(0, 10).map(([label, score]) => {
+        const numeric = Number(score);
+        const state = Number.isFinite(numeric) && numeric >= 4 ? "pass" : Number.isFinite(numeric) && numeric <= 2 ? "fail" : "pending";
+        return { label, value: String(score), state };
+      });
     }
 
     function testbedMissionReportTemplate(run, mission) {
