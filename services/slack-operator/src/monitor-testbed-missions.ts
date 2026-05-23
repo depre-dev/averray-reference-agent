@@ -180,6 +180,44 @@ export function testbedMissionRunToMonitorItem(run: TestbedMissionRun): Record<s
   };
 }
 
+export function testbedMissionResultCoaching(run: TestbedMissionRun): string {
+  const result = run.result ?? {};
+  const verdict = typeof result.verdict === "string" ? result.verdict : run.status;
+  const blockers = stringArray(result.blockers);
+  const confusingMoments = stringArray(result.confusingMoments);
+  const recommendations = stringArray(result.recommendations);
+  const weakScores = weakMissionScores(result.scores);
+  if (run.status === "completed") {
+    return [
+      "What I learned: the fresh browser agent found a path through the page without project-specific memory.",
+      recommendations.length
+        ? `Useful follow-up: ${recommendations[0]}`
+        : "Useful follow-up: keep this report as the baseline before changing the page again.",
+      "Smallest Codex task: no fix task is needed from this mission unless we want to improve the strongest remaining low-score area.",
+    ].join(" ");
+  }
+  const primaryBlocker = blockers[0] || confusingMoments[0] || "the browser agent could not complete the mission cleanly";
+  const weakScoreText = weakScores.length ? ` Low score signal: ${weakScores.join(", ")}.` : "";
+  const recommendation = recommendations[0] || productFixSuggestion(primaryBlocker, weakScores);
+  return [
+    `What I learned: verdict ${verdict}; the first useful product signal is "${primaryBlocker}".${weakScoreText}`,
+    `Suggested product fix: ${recommendation}`,
+    `Smallest Codex task: improve the page or copy around "${primaryBlocker}" and then run this same testbed mission again.`,
+  ].join(" ");
+}
+
+export function testbedMissionReportValidationCoaching(errors: string[], warnings: string[] = []): string {
+  const missing = errors.slice(0, 4).join(" ");
+  const warning = warnings.length ? ` ${warnings[0]}` : "";
+  return [
+    "I saw a possible testbed mission report, but I did not ingest it yet.",
+    missing || "The report needs more structure before I can attach it to the mission.",
+    "Use the card's Copy report template action, fill the missing fields, and post it again so I can close or fail the mission with auditable evidence.",
+    "Smallest next move: keep the browser run as-is and only repair the report shape; do not ask Codex to change the product until the evidence is attached.",
+    warning,
+  ].filter(Boolean).join(" ");
+}
+
 export function __resetTestbedMissionRunsForTests(): void {
   missionRuns.splice(0, missionRuns.length);
   missionSeq = 0;
@@ -318,6 +356,34 @@ function missionReportStatusReason(
     return "Browser-agent report was attached but did not include a clear verdict; inspect it before Hermes can close the mission.";
   }
   return `Browser-agent report returned ${verdict}; inspect the attached evidence before changing the page or mission prompt.`;
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((entry) => String(entry ?? "").trim()).filter(Boolean)
+    : [];
+}
+
+function weakMissionScores(value: unknown): string[] {
+  if (!isRecord(value)) return [];
+  return Object.entries(value)
+    .filter(([, score]) => typeof score === "number" && score <= 3)
+    .map(([key, score]) => `${key}:${score}`)
+    .slice(0, 3);
+}
+
+function productFixSuggestion(primaryBlocker: string, weakScores: string[]): string {
+  const blocker = primaryBlocker.toLowerCase();
+  if (blocker.includes("wallet") || blocker.includes("submit") || blocker.includes("mutation")) {
+    return "make the mutation boundary explicit before the agent reaches any wallet, submit, or irreversible action.";
+  }
+  if (blocker.includes("find") || blocker.includes("navigation") || blocker.includes("where")) {
+    return "make the next action visible in the first viewport and label it with the user's goal language.";
+  }
+  if (weakScores.some((score) => score.toLowerCase().includes("trust") || score.toLowerCase().includes("safety"))) {
+    return "add clearer trust and safety copy near the action that made the agent hesitate.";
+  }
+  return "remove the ambiguity the browser agent reported and make the next safe step visible without insider context.";
 }
 
 function nextMissionId(nowMs: number): string {
