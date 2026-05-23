@@ -6554,6 +6554,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const rubric = Array.isArray(mission.scoringRubric) ? mission.scoringRubric : [];
       const runbook = Array.isArray(mission.runbook) ? mission.runbook : [];
       const prompt = String(mission.missionPrompt || "");
+      const reportTemplate = testbedMissionReportTemplate(run, mission);
       const result = run.result || null;
       const rows = [
         row("Target", escapeHtml(String(run.targetUrl || target.url || "[TESTBED_URL]"))),
@@ -6583,9 +6584,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         resultHtml +
         (prompt ? '<details class="drawer-disclosure prompt-disclosure"><summary>Mission prompt</summary><pre class="prompt-box">' + escapeHtml(prompt) + '</pre></details>' : "") +
         '<details class="drawer-disclosure prompt-disclosure"><summary>Report schema</summary><pre class="prompt-box">' + escapeHtml(prettyJson(reportSchema)) + '</pre></details>' +
+        '<details class="drawer-disclosure prompt-disclosure"><summary>Report template</summary><pre class="prompt-box">' + escapeHtml(reportTemplate) + '</pre></details>' +
         '<div class="resolution-actions">' +
           (prompt ? '<button class="soft-button" type="button" data-copy-label="Mission prompt copied" data-copy-text="' + escapeAttr(prompt) + '">Copy mission prompt</button>' : "") +
           '<button class="soft-button" type="button" data-copy-label="Report schema copied" data-copy-text="' + escapeAttr(prettyJson(reportSchema)) + '">Copy report schema</button>' +
+          '<button class="soft-button" type="button" data-copy-label="Report template copied" data-copy-text="' + escapeAttr(reportTemplate) + '">Copy report template</button>' +
         '</div>' +
         '</section>';
     }
@@ -6595,9 +6598,44 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const run = testbedMissionRun(item) || {};
       const mission = run.mission || {};
       const prompt = String(mission.missionPrompt || "");
-      return prompt
-        ? '<button class="soft-button" type="button" data-copy-label="Mission prompt copied" data-copy-text="' + escapeAttr(prompt) + '">Copy mission prompt</button>'
-        : "";
+      const reportTemplate = testbedMissionReportTemplate(run, mission);
+      return [
+        prompt ? '<button class="soft-button" type="button" data-copy-label="Mission prompt copied" data-copy-text="' + escapeAttr(prompt) + '">Copy mission prompt</button>' : "",
+        '<button class="soft-button" type="button" data-copy-label="Report template copied" data-copy-text="' + escapeAttr(reportTemplate) + '">Copy report template</button>',
+      ].filter(Boolean).join("");
+    }
+
+    function testbedMissionReportTemplate(run, mission) {
+      const currentRun = run || {};
+      const currentMission = mission || {};
+      const target = currentMission.target || {};
+      const rubric = Array.isArray(currentMission.scoringRubric) ? currentMission.scoringRubric : [];
+      const scores = {};
+      rubric.slice(0, 12).forEach((entry) => {
+        const id = entry && entry.id ? String(entry.id) : "";
+        if (id) scores[id] = 0;
+      });
+      return JSON.stringify({
+        missionId: String(currentRun.id || ""),
+        verdict: "pass | partial | fail",
+        confidence: 0,
+        targetUrl: String(currentRun.targetUrl || target.url || "[TESTBED_URL]"),
+        goal: String(currentRun.goal || target.goal || "test first-contact usability"),
+        memoryMode: currentRun.freshMemory === false ? "returning_agent_memory_allowed" : "fresh_or_ignored",
+        completedPath: [
+          "1. Opened the target page.",
+          "2. Followed the visible path without project-specific help.",
+        ],
+        blockers: [],
+        confusingMoments: [],
+        evidence: [
+          { type: "observation", value: "What the agent saw or decided." },
+          { type: "screenshot", value: "Screenshot path or URL, if available." },
+        ],
+        scores,
+        recommendations: [],
+        stoppedBeforeMutation: true,
+      }, null, 2);
     }
 
     function mergeStewardPacketForItem(item, summary, verdict, action) {
