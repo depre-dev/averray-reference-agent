@@ -61,6 +61,7 @@ import {
 } from "./codex-task-queue.js";
 import {
   listTestbedMissionRuns,
+  recordTestbedMissionReportFromMessage,
   recordTestbedMissionRunFromOperatorResult,
   type TestbedMissionRun,
 } from "./monitor-testbed-missions.js";
@@ -570,12 +571,25 @@ async function handleMonitorCollaborationRequest(request: http.IncomingMessage, 
       return;
     }
     const message = recordCollaborationMessage(payload);
+    const testbedMissionRun = recordTestbedMissionReportFromMessage({
+      relatedCorrelationId: message.relatedCorrelationId,
+      text: message.text,
+    });
+    if (testbedMissionRun) {
+      recordTestbedMissionReportCollaboration(testbedMissionRun);
+    }
     logger.info(
-      { author: message.author, kind: message.kind, addressedTo: message.addressedTo, id: message.id },
+      {
+        author: message.author,
+        kind: message.kind,
+        addressedTo: message.addressedTo,
+        id: message.id,
+        testbedMissionRunId: testbedMissionRun?.id,
+      },
       "monitor_collaboration_message_recorded"
     );
     scheduleHermesAutoReply(message);
-    writeJson(response, 200, { ok: true, message });
+    writeJson(response, 200, { ok: true, message, ...(testbedMissionRun ? { testbedMissionRun } : {}) });
   } catch (error) {
     if (error instanceof CollaborationValidationError) {
       writeJson(response, 400, { error: error.code, message: error.message });
@@ -586,6 +600,31 @@ async function handleMonitorCollaborationRequest(request: http.IncomingMessage, 
       error: "monitor_collaboration_failed",
       message: error instanceof Error ? error.message : String(error),
     });
+  }
+}
+
+function recordTestbedMissionReportCollaboration(run: TestbedMissionRun): void {
+  try {
+    const verdict = typeof run.result?.verdict === "string" ? run.result.verdict : run.status;
+    recordCollaborationMessage({
+      author: "hermes",
+      kind: "status",
+      addressedTo: run.status === "completed" ? "everyone" : "operator",
+      relatedCorrelationId: run.id,
+      text: run.status === "completed"
+        ? [
+          `I ingested the browser-agent report for ${run.id}.`,
+          `Verdict is ${verdict}; the mission is complete and the board now has structured evidence attached.`,
+          "Use the report in the drawer as the testbed proof for the next product improvement.",
+        ].join(" ")
+        : [
+          `I ingested the browser-agent report for ${run.id}.`,
+          `Verdict is ${verdict}; I am keeping the mission visible because the report needs follow-up.`,
+          "Open the card to inspect blockers, scores, and evidence before changing the page or mission prompt.",
+        ].join(" "),
+    });
+  } catch (error) {
+    logger.warn({ err: error, missionId: run.id }, "monitor_testbed_mission_report_collaboration_failed");
   }
 }
 

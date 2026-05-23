@@ -4749,6 +4749,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           // surfaces in roughly a second.
           pollCollaborationSince(result.message.ts);
         }
+        if (result && result.testbedMissionRun) {
+          await load();
+          selectedKey = String(result.testbedMissionRun.id || selectedKey || "");
+          renderBoard(latestPipelineItems);
+          renderDrawer(selectedItem());
+          renderCommandContext();
+        }
         setComposeStatus("Posted.", "ok");
         if (input) input.value = "";
       } catch (error) {
