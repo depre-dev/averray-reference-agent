@@ -6556,6 +6556,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const prompt = String(mission.missionPrompt || "");
       const reportTemplate = testbedMissionReportTemplate(run, mission);
       const result = run.result || null;
+      const history = testbedMissionHistoryList(run.history);
       const rows = [
         row("Target", escapeHtml(String(run.targetUrl || target.url || "[TESTBED_URL]"))),
         row("Goal", escapeHtml(String(run.goal || target.goal || "test first-contact usability"))),
@@ -6583,6 +6584,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '<h4>Runbook</h4>' + runbookHtml +
         '<h4>Rubric</h4>' + rubricHtml +
         resultHtml +
+        (history.length ? '<h4>Mission timeline</h4><ol class="resolution-steps">' + history.map((entry) => '<li><strong>' + escapeHtml(entry.event) + '</strong> <span class="muted">' + escapeHtml(entry.at) + '</span><br>' + escapeHtml(entry.message) + '</li>').join("") + '</ol>' : "") +
         (prompt ? '<details class="drawer-disclosure prompt-disclosure"><summary>Mission prompt</summary><pre class="prompt-box">' + escapeHtml(prompt) + '</pre></details>' : "") +
         '<details class="drawer-disclosure prompt-disclosure"><summary>Report schema</summary><pre class="prompt-box">' + escapeHtml(prettyJson(reportSchema)) + '</pre></details>' +
         '<details class="drawer-disclosure prompt-disclosure"><summary>Report template</summary><pre class="prompt-box">' + escapeHtml(reportTemplate) + '</pre></details>' +
@@ -6657,6 +6659,18 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         const state = Number.isFinite(numeric) && numeric >= 4 ? "pass" : Number.isFinite(numeric) && numeric <= 2 ? "fail" : "pending";
         return { label, value: String(score), state };
       });
+    }
+
+    function testbedMissionHistoryList(value) {
+      if (!Array.isArray(value)) return [];
+      return value.slice(-6).map((entry) => {
+        const record = entry && typeof entry === "object" && !Array.isArray(entry) ? entry : {};
+        return {
+          at: String(record.at || "unknown time"),
+          event: String(record.event || record.status || "mission update").replace(/_/g, " "),
+          message: String(record.message || "Mission state changed."),
+        };
+      }).filter((entry) => entry.message.trim()).reverse();
     }
 
     function testbedMissionReportTemplate(run, mission) {

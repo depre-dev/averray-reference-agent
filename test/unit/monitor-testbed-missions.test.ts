@@ -27,6 +27,13 @@ describe("monitor testbed mission runs", () => {
       goal: "complete onboarding",
       agentName: "Hermes",
       freshMemory: true,
+      history: [
+        {
+          event: "mission_packet_ready",
+          status: "ready",
+          message: "Mission packet generated; waiting for a clean browser-only agent run.",
+        },
+      ],
     });
     expect(run?.id).toMatch(/^testbed-mission-/);
     expect(listTestbedMissionRuns()).toHaveLength(1);
@@ -88,6 +95,16 @@ describe("monitor testbed mission runs", () => {
         confidence: 0.91,
         ingestedAt: "2026-05-22T10:05:00.000Z",
       },
+      history: [
+        {
+          event: "mission_packet_ready",
+        },
+        {
+          event: "mission_report_passed",
+          status: "completed",
+          at: "2026-05-22T10:05:00.000Z",
+        },
+      ],
     });
 
     const item = testbedMissionRunToMonitorItem(updated!);
@@ -135,6 +152,16 @@ describe("monitor testbed mission runs", () => {
       result: {
         verdict: "partial",
       },
+      history: [
+        {
+          event: "mission_packet_ready",
+        },
+        {
+          event: "mission_report_needs_fix",
+          status: "failed",
+          message: "Browser-agent report returned partial; blocker: Could not find the submit boundary.",
+        },
+      ],
     });
 
     const item = testbedMissionRunToMonitorItem(updated!);

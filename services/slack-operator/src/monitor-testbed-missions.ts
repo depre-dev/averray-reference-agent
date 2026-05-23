@@ -2,6 +2,13 @@ const MAX_MISSION_RUNS = 50;
 
 export type TestbedMissionStatus = "ready" | "running" | "completed" | "failed";
 
+export interface TestbedMissionHistoryEntry {
+  at: string;
+  status: TestbedMissionStatus;
+  event: string;
+  message: string;
+}
+
 export interface TestbedMissionRun {
   schemaVersion: 1;
   kind: "testbed_mission_run";
@@ -14,6 +21,7 @@ export interface TestbedMissionRun {
   freshMemory: boolean;
   mission: Record<string, unknown>;
   result?: Record<string, unknown>;
+  history: TestbedMissionHistoryEntry[];
   createdAt: string;
   updatedAt: string;
   statusReason: string;
@@ -62,6 +70,14 @@ export function recordTestbedMissionRunFromOperatorResult(
     agentName: stringField(target, "agentName") ?? "Hermes",
     freshMemory: target.freshMemory !== false,
     mission,
+    history: [
+      {
+        at: createdAt,
+        status: "ready",
+        event: "mission_packet_ready",
+        message: "Mission packet generated; waiting for a clean browser-only agent run.",
+      },
+    ],
     createdAt,
     updatedAt: createdAt,
     statusReason: "Mission packet is ready; waiting for a browser-only agent run and structured report.",
@@ -79,7 +95,7 @@ export function listTestbedMissionRuns(options: ListTestbedMissionRunOptions = {
   return runs
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .slice(0, limit)
-    .map((run) => ({ ...run, mission: { ...run.mission }, ...(run.result ? { result: { ...run.result } } : {}) }));
+    .map((run) => cloneRun(run));
 }
 
 export function recordTestbedMissionReportFromMessage(
@@ -108,6 +124,12 @@ export function recordTestbedMissionReportFromMessage(
   run.status = status;
   run.updatedAt = updatedAt;
   run.statusReason = missionReportStatusReason(report, status, stoppedBeforeMutation);
+  run.history.push({
+    at: updatedAt,
+    status,
+    event: status === "completed" ? "mission_report_passed" : "mission_report_needs_fix",
+    message: run.statusReason,
+  });
   return cloneRun(run);
 }
 
@@ -263,6 +285,7 @@ function cloneRun(run: TestbedMissionRun): TestbedMissionRun {
   return {
     ...run,
     mission: { ...run.mission },
+    history: run.history.map((entry) => ({ ...entry })),
     ...(run.result ? { result: { ...run.result } } : {}),
   };
 }

@@ -246,6 +246,8 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("renderTestbedMissionReportPacket(result)");
     expect(html).toContain("Browser-agent report");
     expect(html).toContain("Structured result JSON");
+    expect(html).toContain("Mission timeline");
+    expect(html).toContain("testbedMissionHistoryList(run.history)");
     expect(html).toContain("browser-only report");
     expect(html).toContain("result.testbedMissionRun");
     expect(html).toContain("data-codex-task-action=\"send-back\"");
