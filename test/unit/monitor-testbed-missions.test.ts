@@ -6,6 +6,7 @@ import {
   listTestbedMissionRuns,
   recordTestbedMissionReportFromMessage,
   recordTestbedMissionRunFromOperatorResult,
+  testbedMissionCodexFollowupPrompt,
   testbedMissionReportValidationCoaching,
   testbedMissionResultCoaching,
   testbedMissionRunToMonitorItem,
@@ -157,6 +158,13 @@ describe("monitor testbed mission runs", () => {
     expect(coaching).toContain("Suggested product fix");
     expect(coaching).toContain("Smallest Codex task");
     expect(coaching).toContain("run this same testbed mission again");
+
+    const prompt = testbedMissionCodexFollowupPrompt(updated!);
+    expect(prompt).toContain("Fix the testbed page for mission");
+    expect(prompt).toContain("Primary blocker: Could not find the submit boundary.");
+    expect(prompt).toContain("Suggested product fix: make the mutation boundary explicit");
+    expect(prompt).toContain("After the change, run the same testbed mission again");
+    expect(prompt).toContain("observation: The browser agent stopped at the wallet prompt.");
   });
 
   it("rejects incomplete browser-agent reports before attaching them", () => {
