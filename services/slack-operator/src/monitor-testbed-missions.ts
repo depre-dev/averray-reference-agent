@@ -269,6 +269,31 @@ export function testbedMissionCodexFollowupPrompt(run: TestbedMissionRun): strin
   ].join("\n");
 }
 
+export function testbedMissionRerunPrompt(run: TestbedMissionRun): string | undefined {
+  if (run.status !== "failed" || !run.result) return undefined;
+  const result = run.result;
+  const blockers = stringArray(result.blockers);
+  const confusingMoments = stringArray(result.confusingMoments);
+  const recommendations = stringArray(result.recommendations);
+  const primaryBlocker = blockers[0] || confusingMoments[0] || "the previous browser-agent run did not complete cleanly";
+  const prompt = isRecord(run.mission) && typeof run.mission.missionPrompt === "string"
+    ? run.mission.missionPrompt.trim()
+    : "";
+  return [
+    `Rerun testbed mission ${run.id} after the product fix.`,
+    "",
+    `Target: ${run.targetUrl}`,
+    `Goal: ${run.goal}`,
+    "Memory mode: fresh browser agent; do not use Averray project memory or this monitor as product context.",
+    `Previous verdict: ${String(result.verdict || run.status)}`,
+    `Previous blocker to compare against: ${primaryBlocker}`,
+    recommendations[0] ? `Expected improvement: ${recommendations[0]}` : "Expected improvement: the previous blocker should either disappear or become clearly different.",
+    "",
+    "Run the same visible-page path again. Stop before any real mutation boundary. Report whether the previous blocker is fixed, still present, or replaced by a new blocker.",
+    prompt ? `\nOriginal mission prompt:\n${prompt}` : "",
+  ].filter(Boolean).join("\n");
+}
+
 export function __resetTestbedMissionRunsForTests(): void {
   missionRuns.splice(0, missionRuns.length);
   missionSeq = 0;

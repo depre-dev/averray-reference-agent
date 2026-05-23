@@ -8,6 +8,7 @@ import {
   recordTestbedMissionRunFromOperatorResult,
   testbedMissionCodexFollowupPrompt,
   testbedMissionReportValidationCoaching,
+  testbedMissionRerunPrompt,
   testbedMissionResultCoaching,
   testbedMissionRunToMonitorItem,
 } from "../../services/slack-operator/src/monitor-testbed-missions.js";
@@ -192,6 +193,13 @@ describe("monitor testbed mission runs", () => {
     expect(prompt).toContain("Suggested product fix: make the mutation boundary explicit");
     expect(prompt).toContain("After the change, run the same testbed mission again");
     expect(prompt).toContain("observation: The browser agent stopped at the wallet prompt.");
+
+    const rerunPrompt = testbedMissionRerunPrompt(updated!);
+    expect(rerunPrompt).toContain("Rerun testbed mission");
+    expect(rerunPrompt).toContain("Memory mode: fresh browser agent");
+    expect(rerunPrompt).toContain("Previous blocker to compare against: Could not find the submit boundary.");
+    expect(rerunPrompt).toContain("Original mission prompt:");
+    expect(rerunPrompt).toContain("Open the app and complete onboarding.");
   });
 
   it("rejects incomplete browser-agent reports before attaching them", () => {
