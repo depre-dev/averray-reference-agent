@@ -36,6 +36,7 @@ import {
   listCollaborationMessages,
   listHermesMemoryNotes,
   recordCollaborationMessage,
+  recordHermesMemoryNote,
   synthesizeHermesReplyFor,
 } from "./monitor-collab.js";
 import { buildHermesBoardSnapshotFromMonitor } from "./monitor-hermes-board.js";
@@ -606,6 +607,10 @@ async function handleMonitorCollaborationRequest(request: http.IncomingMessage, 
 function recordTestbedMissionReportCollaboration(run: TestbedMissionRun): void {
   try {
     const verdict = typeof run.result?.verdict === "string" ? run.result.verdict : run.status;
+    recordHermesMemoryNote({
+      text: testbedMissionMemoryText(run),
+      relatedCorrelationId: run.id,
+    });
     recordCollaborationMessage({
       author: "hermes",
       kind: "status",
@@ -626,6 +631,29 @@ function recordTestbedMissionReportCollaboration(run: TestbedMissionRun): void {
   } catch (error) {
     logger.warn({ err: error, missionId: run.id }, "monitor_testbed_mission_report_collaboration_failed");
   }
+}
+
+function testbedMissionMemoryText(run: TestbedMissionRun): string {
+  const result = run.result ?? {};
+  const verdict = typeof result.verdict === "string" ? result.verdict : run.status;
+  const blockers = Array.isArray(result.blockers)
+    ? result.blockers.map(String).filter(Boolean)
+    : [];
+  const recommendations = Array.isArray(result.recommendations)
+    ? result.recommendations.map(String).filter(Boolean)
+    : [];
+  const scores = isRecord(result.scores) ? result.scores : {};
+  const weakScores = Object.entries(scores)
+    .filter(([, value]) => Number(value) <= 3)
+    .map(([key, value]) => `${key}:${String(value)}`)
+    .slice(0, 3);
+  const details = [
+    `Testbed mission report for ${run.targetUrl}: verdict ${verdict}.`,
+    blockers.length ? `Top blocker: ${blockers[0]}.` : "",
+    weakScores.length ? `Weak scores: ${weakScores.join(", ")}.` : "",
+    recommendations.length ? `Useful recommendation: ${recommendations[0]}.` : "",
+  ].filter(Boolean).join(" ");
+  return `${details} Treat this as learned testbed evidence for future page missions, not as live proof that the current page is fixed.`;
 }
 
 async function handleMonitorCommandRequest(request: http.IncomingMessage, response: http.ServerResponse) {

@@ -396,6 +396,26 @@ describe("applyHermesMemoryInfluence", () => {
     expect(text).toContain("merge-steward ownership");
   });
 
+  it("uses remembered testbed mission report evidence", () => {
+    const text = applyHermesMemoryInfluence("Hermes has a testbed browser mission ready.", {
+      board: {
+        items: [
+          {
+            title: "Fresh-agent browser mission",
+            lane: "Hermes Checking",
+            owner: "Hermes",
+          },
+        ],
+      },
+      memoryNotes: [
+        "Testbed mission report for https://testbed.example/app: verdict partial. Top blocker: unclear wallet boundary.",
+      ],
+    });
+
+    expect(text).toContain("last testbed mission evidence");
+    expect(text).toContain("browser-agent report");
+  });
+
   it("does not duplicate a memory sentence that already exists", () => {
     const text = "This matches your remembered draft rule: keep external-agent drafts parked.";
     expect(applyHermesMemoryInfluence(text, {

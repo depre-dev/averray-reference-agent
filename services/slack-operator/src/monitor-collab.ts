@@ -87,6 +87,13 @@ export interface ListHermesMemoryOptions {
   limit?: number;
 }
 
+export interface RecordHermesMemoryNoteInput {
+  text: string;
+  scope?: "global" | "pr";
+  relatedPr?: CollaborationRelatedPr;
+  relatedCorrelationId?: string;
+}
+
 export class CollaborationValidationError extends Error {
   constructor(public readonly code: string, message: string) {
     super(message);
@@ -166,6 +173,25 @@ export function listHermesMemoryNotes(options: ListHermesMemoryOptions = {}): He
     return false;
   });
   return filtered.slice(-limit);
+}
+
+export function recordHermesMemoryNote(
+  input: RecordHermesMemoryNoteInput,
+  nowMs: number = Date.now()
+): HermesMemoryNote | undefined {
+  loadHermesMemoryIfNeeded();
+  const text = normalizeText(input.text).slice(0, HERMES_MEMORY_NOTE_MAX_CHARS);
+  if (!text) return undefined;
+  const note: HermesMemoryNote = {
+    id: nextMemoryId(nowMs),
+    ts: nowMs,
+    scope: input.scope ?? (input.relatedPr ? "pr" : "global"),
+    text,
+    ...(input.relatedPr ? { relatedPr: input.relatedPr } : {}),
+    ...(input.relatedCorrelationId ? { relatedCorrelationId: input.relatedCorrelationId.trim().slice(0, 256) } : {}),
+  };
+  upsertHermesMemoryNote(note);
+  return note;
 }
 
 export function classifyHermesMemoryRequest(message: Pick<CollaborationMessage, "author" | "addressedTo" | "text">): HermesMemoryRequestKind {
@@ -249,15 +275,15 @@ function learnHermesMemoryFromMessage(message: CollaborationMessage): void {
   const noteText = memoryTextForMessage(message);
   if (!noteText) return;
 
-  const note: HermesMemoryNote = {
-    id: nextMemoryId(message.ts),
-    ts: message.ts,
-    scope: message.relatedPr ? "pr" : "global",
+  recordHermesMemoryNote({
     text: noteText,
+    scope: message.relatedPr ? "pr" : "global",
     ...(message.relatedPr ? { relatedPr: message.relatedPr } : {}),
     ...(message.relatedCorrelationId ? { relatedCorrelationId: message.relatedCorrelationId } : {}),
-  };
+  }, message.ts);
+}
 
+function upsertHermesMemoryNote(note: HermesMemoryNote): void {
   const dedupeKey = memoryDedupeKey(note);
   const existingIndex = hermesMemoryNotes.findIndex((candidate) =>
     memoryDedupeKey(candidate) === dedupeKey

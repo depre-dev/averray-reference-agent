@@ -390,6 +390,14 @@ export function hermesMemoryInfluence(context: HermesWhyTraceContext): HermesMem
     };
   }
 
+  if (lowerNote.includes("testbed mission report")) {
+    return {
+      conflict: false,
+      sentence: "I am carrying forward the last testbed mission evidence here, so I will compare new page runs against what the browser-agent report already taught us.",
+      trace: "testbed mission report memory",
+    };
+  }
+
   if (boardSaysCodex && noteSaysDelegatedCodex) {
     return {
       conflict: false,
