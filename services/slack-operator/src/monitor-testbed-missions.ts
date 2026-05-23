@@ -320,6 +320,36 @@ export function testbedMissionBaselinePrompt(run: TestbedMissionRun): string | u
   ].filter(Boolean).join("\n");
 }
 
+export function testbedMissionComparisonBrief(run: TestbedMissionRun): string | undefined {
+  if (!run.result) return undefined;
+  const result = run.result;
+  const verdict = String(result.verdict || run.status);
+  const completedPath = stringArray(result.completedPath);
+  const blockers = stringArray(result.blockers);
+  const confusingMoments = stringArray(result.confusingMoments);
+  const recommendations = stringArray(result.recommendations);
+  const weakScores = weakMissionScores(result.scores);
+  if (run.status === "completed") {
+    const knownGood = completedPath.length
+      ? `Known-good path starts with "${completedPath[0]}".`
+      : "Known-good path is attached in the browser-agent report.";
+    return [
+      "Comparison brief: treat this mission as a pass baseline.",
+      knownGood,
+      recommendations[0]
+        ? `Next run should preserve the pass while checking this improvement: ${recommendations[0]}`
+        : "Next run should preserve the same visible path and watch for any new hesitation or safety ambiguity.",
+    ].join(" ");
+  }
+  const primaryBlocker = blockers[0] || confusingMoments[0] || "the fresh browser agent did not complete the mission cleanly";
+  const weak = weakScores.length ? ` Weak signal: ${weakScores.join(", ")}.` : "";
+  return [
+    `Comparison brief: verdict ${verdict}; next run must check whether "${primaryBlocker}" is gone, unchanged, or replaced.`,
+    recommendations[0] ? `Expected improvement: ${recommendations[0]}.` : "Expected improvement: the next safe step should be clearer to an outside agent.",
+    weak,
+  ].filter(Boolean).join(" ");
+}
+
 export function __resetTestbedMissionRunsForTests(): void {
   missionRuns.splice(0, missionRuns.length);
   missionSeq = 0;

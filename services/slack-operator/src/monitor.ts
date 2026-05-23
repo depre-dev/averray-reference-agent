@@ -6559,6 +6559,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const history = testbedMissionHistoryList(run.history);
       const rerunPrompt = testbedMissionRerunPrompt(run, mission);
       const baselinePrompt = testbedMissionBaselinePrompt(run, mission);
+      const comparisonBrief = testbedMissionComparisonBrief(run);
       const rows = [
         row("Target", escapeHtml(String(run.targetUrl || target.url || "[TESTBED_URL]"))),
         row("Goal", escapeHtml(String(run.goal || target.goal || "test first-contact usability"))),
@@ -6586,6 +6587,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '<h4>Runbook</h4>' + runbookHtml +
         '<h4>Rubric</h4>' + rubricHtml +
         resultHtml +
+        (comparisonBrief ? '<h4>Comparison brief</h4><p class="resolution-summary">' + escapeHtml(comparisonBrief) + '</p>' : "") +
         (baselinePrompt ? '<details class="drawer-disclosure prompt-disclosure"><summary>Baseline for future runs</summary><pre class="prompt-box">' + escapeHtml(baselinePrompt) + '</pre></details>' : "") +
         (rerunPrompt ? '<details class="drawer-disclosure prompt-disclosure" open><summary>Rerun after fix</summary><pre class="prompt-box">' + escapeHtml(rerunPrompt) + '</pre></details>' : "") +
         (history.length ? '<h4>Mission timeline</h4><ol class="resolution-steps">' + history.map((entry) => '<li><strong>' + escapeHtml(entry.event) + '</strong> <span class="muted">' + escapeHtml(entry.at) + '</span><br>' + escapeHtml(entry.message) + '</li>').join("") + '</ol>' : "") +
@@ -6739,6 +6741,46 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         "When the page changes, run this mission again and compare against the known-good path. Report whether the path still works, became clearer, or regressed.",
         prompt ? nl + "Original mission prompt:" + nl + prompt : "",
       ].filter(Boolean).join(nl);
+    }
+
+    function testbedMissionComparisonBrief(run) {
+      const result = run && run.result;
+      if (!result) return "";
+      const status = String(run && run.status || "");
+      const verdict = String(result.verdict || status || "reported");
+      const completedPath = testbedReportList(result && result.completedPath);
+      const blockers = testbedReportList(result && result.blockers);
+      const confusingMoments = testbedReportList(result && result.confusingMoments);
+      const recommendations = testbedReportList(result && result.recommendations);
+      const weakScores = testbedWeakScoreLabels(result && result.scores);
+      const isPass = status === "completed" || verdict === "pass";
+      if (isPass) {
+        const knownGood = completedPath.length
+          ? 'Known-good path starts with "' + completedPath[0] + '".'
+          : "Known-good path is attached in the browser-agent report.";
+        return [
+          "Comparison brief: treat this mission as a pass baseline.",
+          knownGood,
+          recommendations[0]
+            ? "Next run should preserve the pass while checking this improvement: " + recommendations[0]
+            : "Next run should preserve the same visible path and watch for any new hesitation or safety ambiguity.",
+        ].join(" ");
+      }
+      const primaryBlocker = blockers[0] || confusingMoments[0] || "the fresh browser agent did not complete the mission cleanly";
+      const weak = weakScores.length ? " Weak signal: " + weakScores.join(", ") + "." : "";
+      return [
+        'Comparison brief: verdict ' + verdict + '; next run must check whether "' + primaryBlocker + '" is gone, unchanged, or replaced.',
+        recommendations[0] ? "Expected improvement: " + recommendations[0] + "." : "Expected improvement: the next safe step should be clearer to an outside agent.",
+        weak,
+      ].filter(Boolean).join(" ");
+    }
+
+    function testbedWeakScoreLabels(value) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+      return Object.entries(value)
+        .filter((entry) => Number(entry[1]) <= 3)
+        .map((entry) => String(entry[0]) + ":" + String(entry[1]))
+        .slice(0, 3);
     }
 
     function testbedMissionReportTemplate(run, mission) {
