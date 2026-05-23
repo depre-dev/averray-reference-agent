@@ -61,6 +61,7 @@ import {
   summarizeCodexTasks,
 } from "./codex-task-queue.js";
 import {
+  diagnoseTestbedMissionReportFromMessage,
   listTestbedMissionRuns,
   recordTestbedMissionReportFromMessage,
   recordTestbedMissionRunFromOperatorResult,
@@ -578,6 +579,14 @@ async function handleMonitorCollaborationRequest(request: http.IncomingMessage, 
     });
     if (testbedMissionRun) {
       recordTestbedMissionReportCollaboration(testbedMissionRun);
+    } else {
+      const testbedMissionDiagnosis = diagnoseTestbedMissionReportFromMessage({
+        relatedCorrelationId: message.relatedCorrelationId,
+        text: message.text,
+      });
+      if (testbedMissionDiagnosis.candidate && !testbedMissionDiagnosis.valid) {
+        recordTestbedMissionReportValidationCollaboration(message, testbedMissionDiagnosis.errors, testbedMissionDiagnosis.warnings);
+      }
     }
     logger.info(
       {
@@ -601,6 +610,32 @@ async function handleMonitorCollaborationRequest(request: http.IncomingMessage, 
       error: "monitor_collaboration_failed",
       message: error instanceof Error ? error.message : String(error),
     });
+  }
+}
+
+function recordTestbedMissionReportValidationCollaboration(
+  sourceMessage: Awaited<ReturnType<typeof recordCollaborationMessage>>,
+  errors: string[],
+  warnings: string[]
+): void {
+  try {
+    const missing = errors.slice(0, 4).join(" ");
+    const caution = warnings.length ? ` ${warnings[0]}` : "";
+    recordCollaborationMessage({
+      author: "hermes",
+      kind: "status",
+      addressedTo: sourceMessage.author === "operator" ? "operator" : "codex",
+      relatedPr: sourceMessage.relatedPr,
+      relatedCorrelationId: sourceMessage.relatedCorrelationId,
+      text: [
+        "I saw a possible testbed mission report, but I did not ingest it yet.",
+        missing || "The report needs more structure before I can attach it to the mission.",
+        "Use the card's Copy report template action, fill the missing fields, and post it again so I can close or fail the mission with auditable evidence.",
+        caution,
+      ].filter(Boolean).join(" "),
+    });
+  } catch (error) {
+    logger.warn({ err: error, sourceMessageId: sourceMessage.id }, "monitor_testbed_mission_report_validation_collaboration_failed");
   }
 }
 
