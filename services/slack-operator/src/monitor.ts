@@ -6558,6 +6558,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const result = run.result || null;
       const history = testbedMissionHistoryList(run.history);
       const rerunPrompt = testbedMissionRerunPrompt(run, mission);
+      const baselinePrompt = testbedMissionBaselinePrompt(run, mission);
       const rows = [
         row("Target", escapeHtml(String(run.targetUrl || target.url || "[TESTBED_URL]"))),
         row("Goal", escapeHtml(String(run.goal || target.goal || "test first-contact usability"))),
@@ -6585,6 +6586,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '<h4>Runbook</h4>' + runbookHtml +
         '<h4>Rubric</h4>' + rubricHtml +
         resultHtml +
+        (baselinePrompt ? '<details class="drawer-disclosure prompt-disclosure"><summary>Baseline for future runs</summary><pre class="prompt-box">' + escapeHtml(baselinePrompt) + '</pre></details>' : "") +
         (rerunPrompt ? '<details class="drawer-disclosure prompt-disclosure" open><summary>Rerun after fix</summary><pre class="prompt-box">' + escapeHtml(rerunPrompt) + '</pre></details>' : "") +
         (history.length ? '<h4>Mission timeline</h4><ol class="resolution-steps">' + history.map((entry) => '<li><strong>' + escapeHtml(entry.event) + '</strong> <span class="muted">' + escapeHtml(entry.at) + '</span><br>' + escapeHtml(entry.message) + '</li>').join("") + '</ol>' : "") +
         (prompt ? '<details class="drawer-disclosure prompt-disclosure"><summary>Mission prompt</summary><pre class="prompt-box">' + escapeHtml(prompt) + '</pre></details>' : "") +
@@ -6592,6 +6594,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '<details class="drawer-disclosure prompt-disclosure"><summary>Report template</summary><pre class="prompt-box">' + escapeHtml(reportTemplate) + '</pre></details>' +
         '<div class="resolution-actions">' +
           (prompt ? '<button class="soft-button" type="button" data-copy-label="Mission prompt copied" data-copy-text="' + escapeAttr(prompt) + '">Copy mission prompt</button>' : "") +
+          (baselinePrompt ? '<button class="soft-button" type="button" data-copy-label="Baseline prompt copied" data-copy-text="' + escapeAttr(baselinePrompt) + '">Copy baseline prompt</button>' : "") +
           (rerunPrompt ? '<button class="soft-button" type="button" data-copy-label="Rerun prompt copied" data-copy-text="' + escapeAttr(rerunPrompt) + '">Copy rerun prompt</button>' : "") +
           '<button class="soft-button" type="button" data-copy-label="Report schema copied" data-copy-text="' + escapeAttr(prettyJson(reportSchema)) + '">Copy report schema</button>' +
           '<button class="soft-button" type="button" data-copy-label="Report template copied" data-copy-text="' + escapeAttr(reportTemplate) + '">Copy report template</button>' +
@@ -6606,8 +6609,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const prompt = String(mission.missionPrompt || "");
       const reportTemplate = testbedMissionReportTemplate(run, mission);
       const rerunPrompt = testbedMissionRerunPrompt(run, mission);
+      const baselinePrompt = testbedMissionBaselinePrompt(run, mission);
       return [
         prompt ? '<button class="soft-button" type="button" data-copy-label="Mission prompt copied" data-copy-text="' + escapeAttr(prompt) + '">Copy mission prompt</button>' : "",
+        baselinePrompt ? '<button class="soft-button" type="button" data-copy-label="Baseline prompt copied" data-copy-text="' + escapeAttr(baselinePrompt) + '">Copy baseline prompt</button>' : "",
         rerunPrompt ? '<button class="soft-button" type="button" data-copy-label="Rerun prompt copied" data-copy-text="' + escapeAttr(rerunPrompt) + '">Copy rerun prompt</button>' : "",
         '<button class="soft-button" type="button" data-copy-label="Report template copied" data-copy-text="' + escapeAttr(reportTemplate) + '">Copy report template</button>',
       ].filter(Boolean).join("");
@@ -6702,6 +6707,36 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         recommendations[0] ? "Expected improvement: " + recommendations[0] : "Expected improvement: the previous blocker should either disappear or become clearly different.",
         "",
         "Run the same visible-page path again. Stop before any real mutation boundary. Report whether the previous blocker is fixed, still present, or replaced by a new blocker.",
+        prompt ? nl + "Original mission prompt:" + nl + prompt : "",
+      ].filter(Boolean).join(nl);
+    }
+
+    function testbedMissionBaselinePrompt(run, mission) {
+      const result = run && run.result;
+      const status = String(run && run.status || "");
+      const verdict = String(result && result.verdict || "");
+      const stopped = result && typeof result.stoppedBeforeMutation === "boolean" ? result.stoppedBeforeMutation : true;
+      const isBaseline = result && (status === "completed" || verdict === "pass") && stopped !== false;
+      if (!isBaseline) return "";
+      const completedPath = testbedReportList(result && result.completedPath);
+      const evidence = testbedReportEvidenceList(result && result.evidence).map((entry) => entry.label + ": " + entry.value).slice(0, 5);
+      const recommendations = testbedReportList(result && result.recommendations);
+      const prompt = String(mission && mission.missionPrompt || "").trim();
+      const confidence = typeof result.confidence === "number" ? String(Math.round(result.confidence * 100)) + "%" : "";
+      const nl = String.fromCharCode(10);
+      return [
+        "Use testbed mission " + String(run && run.id || "unknown") + " as the baseline for future page checks.",
+        "",
+        "Target: " + String(run && run.targetUrl || "[TESTBED_URL]"),
+        "Goal: " + String(run && run.goal || "test first-contact usability"),
+        "Memory mode: fresh browser agent; do not use Averray project memory or previous monitor discussion as product context.",
+        "Baseline verdict: " + String(verdict || status || "pass"),
+        confidence ? "Baseline confidence: " + confidence : "",
+        completedPath.length ? "Known-good path:" + nl + "- " + completedPath.join(nl + "- ") : "Known-good path: see the attached browser-agent report.",
+        evidence.length ? "Baseline evidence:" + nl + "- " + evidence.join(nl + "- ") : "",
+        recommendations[0] ? "Watch next time: " + recommendations[0] : "Watch next time: any new hesitation, missing context, or safety ambiguity compared with the known-good path.",
+        "",
+        "When the page changes, run this mission again and compare against the known-good path. Report whether the path still works, became clearer, or regressed.",
         prompt ? nl + "Original mission prompt:" + nl + prompt : "",
       ].filter(Boolean).join(nl);
     }

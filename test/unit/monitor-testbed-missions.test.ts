@@ -6,6 +6,7 @@ import {
   listTestbedMissionRuns,
   recordTestbedMissionReportFromMessage,
   recordTestbedMissionRunFromOperatorResult,
+  testbedMissionBaselinePrompt,
   testbedMissionCodexFollowupPrompt,
   testbedMissionReportValidationCoaching,
   testbedMissionRerunPrompt,
@@ -120,6 +121,14 @@ describe("monitor testbed mission runs", () => {
         },
       },
     });
+
+    const baselinePrompt = testbedMissionBaselinePrompt(updated!);
+    expect(baselinePrompt).toContain("Use testbed mission");
+    expect(baselinePrompt).toContain("as the baseline for future page checks");
+    expect(baselinePrompt).toContain("Known-good path:");
+    expect(baselinePrompt).toContain("opened page");
+    expect(baselinePrompt).toContain("Baseline confidence: 91%");
+    expect(baselinePrompt).toContain("When the page changes, run this mission again");
   });
 
   it("attaches a partial browser-agent report and keeps blockers visible", () => {

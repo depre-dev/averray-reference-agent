@@ -294,6 +294,32 @@ export function testbedMissionRerunPrompt(run: TestbedMissionRun): string | unde
   ].filter(Boolean).join("\n");
 }
 
+export function testbedMissionBaselinePrompt(run: TestbedMissionRun): string | undefined {
+  if (run.status !== "completed" || !run.result) return undefined;
+  const result = run.result;
+  const completedPath = stringArray(result.completedPath);
+  const evidence = missionEvidenceStrings(result.evidence).slice(0, 5);
+  const recommendations = stringArray(result.recommendations);
+  const prompt = isRecord(run.mission) && typeof run.mission.missionPrompt === "string"
+    ? run.mission.missionPrompt.trim()
+    : "";
+  return [
+    `Use testbed mission ${run.id} as the baseline for future page checks.`,
+    "",
+    `Target: ${run.targetUrl}`,
+    `Goal: ${run.goal}`,
+    "Memory mode: fresh browser agent; do not use Averray project memory or previous monitor discussion as product context.",
+    `Baseline verdict: ${String(result.verdict || run.status)}`,
+    typeof result.confidence === "number" ? `Baseline confidence: ${Math.round(result.confidence * 100)}%` : "",
+    completedPath.length ? `Known-good path:\n- ${completedPath.join("\n- ")}` : "Known-good path: see the attached browser-agent report.",
+    evidence.length ? `Baseline evidence:\n- ${evidence.join("\n- ")}` : "",
+    recommendations[0] ? `Watch next time: ${recommendations[0]}` : "Watch next time: any new hesitation, missing context, or safety ambiguity compared with the known-good path.",
+    "",
+    "When the page changes, run this mission again and compare against the known-good path. Report whether the path still works, became clearer, or regressed.",
+    prompt ? `\nOriginal mission prompt:\n${prompt}` : "",
+  ].filter(Boolean).join("\n");
+}
+
 export function __resetTestbedMissionRunsForTests(): void {
   missionRuns.splice(0, missionRuns.length);
   missionSeq = 0;
