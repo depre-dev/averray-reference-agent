@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach } from "vitest";
 
 import {
   __resetTestbedMissionRunsForTests,
+  diagnoseTestbedMissionReportFromMessage,
   listTestbedMissionRuns,
   recordTestbedMissionReportFromMessage,
   recordTestbedMissionRunFromOperatorResult,
@@ -69,6 +70,7 @@ describe("monitor testbed mission runs", () => {
           stoppedBeforeMutation: true,
           completedPath: ["opened page", "completed onboarding"],
           blockers: [],
+          evidence: [{ type: "observation", value: "The browser agent reached the final review step." }],
           scores: { orientation: 5 },
         }),
       },
@@ -111,8 +113,10 @@ describe("monitor testbed mission runs", () => {
           "```json",
           JSON.stringify({
             verdict: "partial",
+            confidence: 0.63,
             stoppedBeforeMutation: true,
             blockers: ["Could not find the submit boundary."],
+            evidence: [{ type: "observation", value: "The browser agent stopped at the wallet prompt." }],
             scores: { trustAndSafety: 2 },
           }),
           "```",
@@ -145,6 +149,45 @@ describe("monitor testbed mission runs", () => {
         ],
       },
     });
+  });
+
+  it("rejects incomplete browser-agent reports before attaching them", () => {
+    const run = recordTestbedMissionRunFromOperatorResult(missionResult(), Date.parse("2026-05-22T10:00:00.000Z"));
+    expect(run).toBeDefined();
+
+    const diagnosis = diagnoseTestbedMissionReportFromMessage({
+      relatedCorrelationId: run!.id,
+      text: JSON.stringify({
+        verdict: "pass",
+        stoppedBeforeMutation: true,
+        scores: { orientation: 5 },
+      }),
+    });
+
+    expect(diagnosis).toMatchObject({
+      candidate: true,
+      valid: false,
+      errors: expect.arrayContaining([
+        "Set confidence to a number from 0 to 1.",
+        "Add at least one evidence item or observation.",
+        "For a pass, add the completedPath steps the browser agent actually took.",
+      ]),
+    });
+
+    expect(recordTestbedMissionReportFromMessage({
+      relatedCorrelationId: run!.id,
+      text: JSON.stringify({
+        verdict: "pass",
+        stoppedBeforeMutation: true,
+        scores: { orientation: 5 },
+      }),
+    })).toBeUndefined();
+    const stillPending = listTestbedMissionRuns()[0];
+    expect(stillPending).toMatchObject({
+      id: run!.id,
+      status: "ready",
+    });
+    expect(stillPending.result).toBeUndefined();
   });
 });
 

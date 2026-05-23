@@ -29,6 +29,15 @@ export interface MissionReportInput {
   text?: string;
 }
 
+export interface MissionReportDiagnosis {
+  candidate: boolean;
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  missionId?: string;
+  report?: Record<string, unknown>;
+}
+
 const missionRuns: TestbedMissionRun[] = [];
 let missionSeq = 0;
 
@@ -77,9 +86,10 @@ export function recordTestbedMissionReportFromMessage(
   input: MissionReportInput,
   nowMs: number = Date.now()
 ): TestbedMissionRun | undefined {
-  const report = parseMissionReport(input.text ?? "");
-  if (!report) return undefined;
-  const missionId = missionIdFromReportInput(input, report);
+  const diagnosis = diagnoseTestbedMissionReportFromMessage(input);
+  if (!diagnosis.valid || !diagnosis.report) return undefined;
+  const report = diagnosis.report;
+  const missionId = diagnosis.missionId;
   const run = missionId
     ? missionRuns.find((candidate) => candidate.id === missionId)
     : onlyActiveMissionRun();
@@ -99,6 +109,28 @@ export function recordTestbedMissionReportFromMessage(
   run.updatedAt = updatedAt;
   run.statusReason = missionReportStatusReason(report, status, stoppedBeforeMutation);
   return cloneRun(run);
+}
+
+export function diagnoseTestbedMissionReportFromMessage(input: MissionReportInput): MissionReportDiagnosis {
+  const text = input.text ?? "";
+  const report = parseMissionReport(text);
+  const candidate = Boolean(report) || looksLikeMissionReportText(text);
+  if (!report) {
+    return candidate
+      ? { candidate: true, valid: false, errors: ["No JSON report object was found."], warnings: [] }
+      : { candidate: false, valid: false, errors: [], warnings: [] };
+  }
+  const missionId = missionIdFromReportInput(input, report);
+  const errors = validateMissionReport(report);
+  const warnings = missionId ? [] : ["No missionId was included; Hermes will only attach this if exactly one mission is active."];
+  return {
+    candidate: true,
+    valid: errors.length === 0,
+    errors,
+    warnings,
+    ...(missionId ? { missionId } : {}),
+    report,
+  };
 }
 
 export function testbedMissionRunToMonitorItem(run: TestbedMissionRun): Record<string, unknown> {
@@ -216,6 +248,42 @@ function looksLikeMissionReport(value: Record<string, unknown>): boolean {
   if (normalizeVerdict(value.verdict)) return true;
   if (Array.isArray(value.completedPath) || Array.isArray(value.blockers) || isRecord(value.scores)) return true;
   return false;
+}
+
+function looksLikeMissionReportText(text: string): boolean {
+  const lower = text.toLowerCase();
+  return lower.includes("mission report")
+    || lower.includes("testbed mission")
+    || /\btestbed-mission-[A-Za-z0-9-]+\b/.test(text);
+}
+
+function validateMissionReport(report: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  const verdict = normalizeVerdict(report.verdict);
+  if (!verdict) errors.push("Set verdict to pass, partial, or fail.");
+  if (typeof report.confidence !== "number" || report.confidence < 0 || report.confidence > 1) {
+    errors.push("Set confidence to a number from 0 to 1.");
+  }
+  if (typeof report.stoppedBeforeMutation !== "boolean") {
+    errors.push("Set stoppedBeforeMutation to true or false.");
+  }
+  if (!nonEmptyStringArray(report.evidence)) {
+    errors.push("Add at least one evidence item or observation.");
+  }
+  if (!isRecord(report.scores)) {
+    errors.push("Add a scores object, even if some scores are 0.");
+  }
+  if (verdict === "pass" && !nonEmptyStringArray(report.completedPath)) {
+    errors.push("For a pass, add the completedPath steps the browser agent actually took.");
+  }
+  if ((verdict === "partial" || verdict === "fail") && !nonEmptyStringArray(report.blockers) && !nonEmptyStringArray(report.confusingMoments)) {
+    errors.push("For partial or fail, add blockers or confusingMoments so Hermes knows what stopped the agent.");
+  }
+  return errors;
+}
+
+function nonEmptyStringArray(value: unknown): boolean {
+  return Array.isArray(value) && value.some((entry) => String(entry ?? "").trim().length > 0);
 }
 
 function normalizeVerdict(value: unknown): "pass" | "partial" | "fail" | undefined {
