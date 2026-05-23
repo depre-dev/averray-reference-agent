@@ -242,6 +242,7 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Fresh-agent browser mission");
     expect(html).toContain("Copy mission prompt");
     expect(html).toContain("browser-only report");
+    expect(html).toContain("result.testbedMissionRun");
     expect(html).toContain("data-codex-task-action=\"send-back\"");
     expect(html).toContain("Send back to Codex");
     expect(html).toContain("codexOperatorSendBackPromptForItem(item");
