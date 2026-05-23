@@ -218,6 +218,35 @@ export function testbedMissionReportValidationCoaching(errors: string[], warning
   ].filter(Boolean).join(" ");
 }
 
+export function testbedMissionCodexFollowupPrompt(run: TestbedMissionRun): string | undefined {
+  if (run.status === "completed" || !run.result) return undefined;
+  const result = run.result;
+  const blockers = stringArray(result.blockers);
+  const confusingMoments = stringArray(result.confusingMoments);
+  const recommendations = stringArray(result.recommendations);
+  const weakScores = weakMissionScores(result.scores);
+  const primaryBlocker = blockers[0] || confusingMoments[0] || "the fresh browser agent could not complete the mission cleanly";
+  const suggestedFix = recommendations[0] || productFixSuggestion(primaryBlocker, weakScores);
+  const evidence = missionEvidenceStrings(result.evidence)
+    .concat(blockers.map((blocker) => `blocker: ${blocker}`))
+    .concat(confusingMoments.map((moment) => `confusing moment: ${moment}`))
+    .concat(weakScores.map((score) => `weak score: ${score}`))
+    .slice(0, 8);
+  return [
+    `Fix the testbed page for mission ${run.id}.`,
+    "",
+    `Target: ${run.targetUrl}`,
+    `Goal: ${run.goal}`,
+    `Fresh-agent result: ${String(result.verdict || run.status)}`,
+    `Primary blocker: ${primaryBlocker}`,
+    `Suggested product fix: ${suggestedFix}`,
+    "",
+    "Use the smallest product/UI change that helps a normal outside agent complete this goal without project-specific memory. Keep mutation boundaries explicit and do not weaken safety copy.",
+    "After the change, run the same testbed mission again and report whether the blocker disappeared.",
+    evidence.length ? `Evidence:\n- ${evidence.join("\n- ")}` : "Evidence: see the attached testbed mission result in Hermes.",
+  ].join("\n");
+}
+
 export function __resetTestbedMissionRunsForTests(): void {
   missionRuns.splice(0, missionRuns.length);
   missionSeq = 0;
@@ -362,6 +391,21 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.map((entry) => String(entry ?? "").trim()).filter(Boolean)
     : [];
+}
+
+function missionEvidenceStrings(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((entry) => {
+    if (typeof entry === "string") return entry.trim();
+    if (!isRecord(entry)) return String(entry ?? "").trim();
+    const type = typeof entry.type === "string" ? entry.type.trim() : "evidence";
+    const detail = typeof entry.value === "string"
+      ? entry.value.trim()
+      : typeof entry.url === "string"
+        ? entry.url.trim()
+        : "";
+    return detail ? `${type}: ${detail}` : type;
+  }).filter(Boolean);
 }
 
 function weakMissionScores(value: unknown): string[] {

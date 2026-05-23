@@ -65,6 +65,7 @@ import {
   listTestbedMissionRuns,
   recordTestbedMissionReportFromMessage,
   recordTestbedMissionRunFromOperatorResult,
+  testbedMissionCodexFollowupPrompt,
   testbedMissionReportValidationCoaching,
   testbedMissionResultCoaching,
   type TestbedMissionRun,
@@ -660,6 +661,20 @@ function recordTestbedMissionReportCollaboration(run: TestbedMissionRun): void {
           testbedMissionResultCoaching(run),
         ].join(" "),
     });
+    const followupPrompt = testbedMissionCodexFollowupPrompt(run);
+    if (followupPrompt) {
+      recordCollaborationMessage({
+        author: "hermes",
+        kind: "proposal",
+        addressedTo: "operator",
+        relatedCorrelationId: run.id,
+        text: [
+          "I drafted the smallest Codex follow-up from this failed testbed mission.",
+          "Do not approve runner work automatically from here yet; use this as the task brief once there is a concrete branch/page target.",
+          followupPrompt,
+        ].join("\n\n"),
+      });
+    }
   } catch (error) {
     logger.warn({ err: error, missionId: run.id }, "monitor_testbed_mission_report_collaboration_failed");
   }
