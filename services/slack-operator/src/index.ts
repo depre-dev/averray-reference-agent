@@ -65,6 +65,8 @@ import {
   listTestbedMissionRuns,
   recordTestbedMissionReportFromMessage,
   recordTestbedMissionRunFromOperatorResult,
+  testbedMissionReportValidationCoaching,
+  testbedMissionResultCoaching,
   type TestbedMissionRun,
 } from "./monitor-testbed-missions.js";
 import {
@@ -619,20 +621,13 @@ function recordTestbedMissionReportValidationCollaboration(
   warnings: string[]
 ): void {
   try {
-    const missing = errors.slice(0, 4).join(" ");
-    const caution = warnings.length ? ` ${warnings[0]}` : "";
     recordCollaborationMessage({
       author: "hermes",
       kind: "status",
       addressedTo: sourceMessage.author === "operator" ? "operator" : "codex",
       relatedPr: sourceMessage.relatedPr,
       relatedCorrelationId: sourceMessage.relatedCorrelationId,
-      text: [
-        "I saw a possible testbed mission report, but I did not ingest it yet.",
-        missing || "The report needs more structure before I can attach it to the mission.",
-        "Use the card's Copy report template action, fill the missing fields, and post it again so I can close or fail the mission with auditable evidence.",
-        caution,
-      ].filter(Boolean).join(" "),
+      text: testbedMissionReportValidationCoaching(errors, warnings),
     });
   } catch (error) {
     logger.warn({ err: error, sourceMessageId: sourceMessage.id }, "monitor_testbed_mission_report_validation_collaboration_failed");
@@ -656,11 +651,13 @@ function recordTestbedMissionReportCollaboration(run: TestbedMissionRun): void {
           `I ingested the browser-agent report for ${run.id}.`,
           `Verdict is ${verdict}; the mission is complete and the board now has structured evidence attached.`,
           "Use the report in the drawer as the testbed proof for the next product improvement.",
+          testbedMissionResultCoaching(run),
         ].join(" ")
         : [
           `I ingested the browser-agent report for ${run.id}.`,
           `Verdict is ${verdict}; I am keeping the mission visible because the report needs follow-up.`,
           "Open the card to inspect blockers, scores, and evidence before changing the page or mission prompt.",
+          testbedMissionResultCoaching(run),
         ].join(" "),
     });
   } catch (error) {

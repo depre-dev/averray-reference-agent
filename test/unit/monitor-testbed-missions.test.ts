@@ -6,6 +6,8 @@ import {
   listTestbedMissionRuns,
   recordTestbedMissionReportFromMessage,
   recordTestbedMissionRunFromOperatorResult,
+  testbedMissionReportValidationCoaching,
+  testbedMissionResultCoaching,
   testbedMissionRunToMonitorItem,
 } from "../../services/slack-operator/src/monitor-testbed-missions.js";
 
@@ -149,6 +151,12 @@ describe("monitor testbed mission runs", () => {
         ],
       },
     });
+    const coaching = testbedMissionResultCoaching(updated!);
+    expect(coaching).toContain("What I learned: verdict partial");
+    expect(coaching).toContain("Could not find the submit boundary");
+    expect(coaching).toContain("Suggested product fix");
+    expect(coaching).toContain("Smallest Codex task");
+    expect(coaching).toContain("run this same testbed mission again");
   });
 
   it("rejects incomplete browser-agent reports before attaching them", () => {
@@ -188,6 +196,12 @@ describe("monitor testbed mission runs", () => {
       status: "ready",
     });
     expect(stillPending.result).toBeUndefined();
+
+    const coaching = testbedMissionReportValidationCoaching(diagnosis.errors, diagnosis.warnings);
+    expect(coaching).toContain("I saw a possible testbed mission report, but I did not ingest it yet.");
+    expect(coaching).toContain("Set confidence to a number from 0 to 1.");
+    expect(coaching).toContain("Smallest next move");
+    expect(coaching).toContain("do not ask Codex to change the product until the evidence is attached");
   });
 });
 
