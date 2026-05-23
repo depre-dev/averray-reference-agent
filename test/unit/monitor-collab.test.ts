@@ -10,6 +10,7 @@ import {
   listCollaborationMessages,
   listHermesMemoryNotes,
   recordCollaborationMessage,
+  recordHermesMemoryNote,
   synthesizeHermesReplyFor,
 } from "../../services/slack-operator/src/monitor-collab.js";
 
@@ -170,6 +171,27 @@ describe("Hermes collaboration memory", () => {
       scope: "global",
       text: expect.stringContaining("draft PRs that belong to another agent"),
     });
+  });
+
+  it("records system-learned testbed mission memory with correlation context", () => {
+    const note = recordHermesMemoryNote(
+      {
+        text: "Testbed mission report for https://testbed.example/app: verdict partial. Top blocker: unclear wallet boundary.",
+        relatedCorrelationId: "testbed-mission-abc-1",
+      },
+      NOW
+    );
+
+    expect(note).toMatchObject({
+      scope: "global",
+      relatedCorrelationId: "testbed-mission-abc-1",
+      text: expect.stringContaining("verdict partial"),
+    });
+    expect(listHermesMemoryNotes({
+      relatedCorrelationId: "testbed-mission-abc-1",
+    }).map((entry) => entry.text)).toEqual([
+      expect.stringContaining("unclear wallet boundary"),
+    ]);
   });
 
   it("keeps PR-scoped memory tied to the selected PR while retaining global guidance", () => {
