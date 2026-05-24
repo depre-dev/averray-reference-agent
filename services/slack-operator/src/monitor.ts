@@ -5878,7 +5878,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (explicit) return String(explicit);
       const raw = String(title || "").trim();
       if (item && isTestbedMissionItem(item)) return "Fresh-agent browser mission";
-      if (item && isDeployItem(item)) return "Post-deploy verification";
+      if (item && isDeployItem(item)) return deployCardTitle(item, summary);
       const derived = derivePrCardTitle(item, summary);
       if (derived) return derived;
       if (prNumber) {
@@ -5887,6 +5887,34 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return humaniseIntentLabel(stripped);
       }
       return humaniseIntentLabel(raw);
+    }
+
+    function deployCardTitle(item, summary) {
+      const prState = pullRequestState(item, summary || {});
+      const prTitle = prState && String(prState.title || prState.prTitle || prState.pullRequestTitle || "").trim();
+      if (prTitle) return clampTitleText("Deploy verification · " + prTitle);
+      const workflowTitle = deployWorkflowTitle(summary || {});
+      if (workflowTitle) return clampTitleText("Deploy verification · " + workflowTitle);
+      const sha = item && (item.sha || summary && (summary.sha || summary.headSha));
+      if (sha) return "Post-deploy verification · " + compactSha(sha);
+      return "Post-deploy verification";
+    }
+
+    function deployWorkflowTitle(summary) {
+      const health = summary.deploymentHealth && typeof summary.deploymentHealth === "object" ? summary.deploymentHealth : {};
+      const candidates = [
+        summary.workflowRun,
+        summary.githubWorkflowRun,
+        summary.deploymentWorkflowRun,
+        health.workflowRun,
+        health.githubWorkflowRun,
+      ];
+      for (const candidate of candidates) {
+        if (!candidate || typeof candidate !== "object") continue;
+        const title = String(candidate.displayTitle || candidate.title || candidate.name || "").trim();
+        if (title) return title;
+      }
+      return "";
     }
 
     // Build a human, item-distinct card title from the verdict + review reasons
