@@ -812,6 +812,7 @@ describe("slack operator bridge", () => {
         },
         agentMode: {
           memoryMode: "fresh_or_ignored",
+          mutationMode: "stop_before_mutation",
         },
         missionPrompt: "Open https://testbed.example/app.\nGoal: complete onboarding",
         scoringRubric: [
@@ -823,6 +824,7 @@ describe("slack operator bridge", () => {
         safety: {
           missionGeneratorMutates: false,
           browserMissionShouldMutate: false,
+          allowedMutationScope: "none; stop at mutation boundary",
         },
       },
     });
@@ -830,8 +832,10 @@ describe("slack operator bridge", () => {
     expect(text).toContain("*Fresh-agent browser mission*");
     expect(text).toContain("url: `https://testbed.example/app`");
     expect(text).toContain("Use only visible page UI");
+    expect(text).toContain("mutation mode: `stop_before_mutation`");
     expect(text).toContain("`orientation`");
     expect(text).toContain("browser mission should mutate: `false`");
+    expect(text).toContain("allowed mutation scope: `none; stop at mutation boundary`");
   });
 
   it("formats testbed E2E suite replies", () => {

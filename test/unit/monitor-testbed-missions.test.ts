@@ -31,6 +31,7 @@ describe("monitor testbed mission runs", () => {
       goal: "complete onboarding",
       agentName: "Hermes",
       freshMemory: true,
+      allowTestMutations: false,
       history: [
         {
           event: "mission_packet_ready",
@@ -41,6 +42,56 @@ describe("monitor testbed mission runs", () => {
     });
     expect(run?.id).toMatch(/^testbed-mission-/);
     expect(listTestbedMissionRuns()).toHaveLength(1);
+  });
+
+  it("accepts a passing test-mode report that crossed an allowed sandbox mutation", () => {
+    const run = recordTestbedMissionRunFromOperatorResult(
+      missionResult({ allowTestMutations: true }),
+      Date.parse("2026-05-22T10:00:00.000Z")
+    );
+    expect(run).toMatchObject({
+      allowTestMutations: true,
+      statusReason: "Mission packet is ready; waiting for a browser-only test-mode run and structured report.",
+    });
+
+    const updated = recordTestbedMissionReportFromMessage(
+      {
+        relatedCorrelationId: run!.id,
+        text: JSON.stringify({
+          verdict: "pass",
+          confidence: 0.88,
+          mutationMode: "testbed_mutation_allowed",
+          mutationsAttempted: ["submitted fake onboarding form"],
+          stoppedBeforeMutation: false,
+          completedPath: ["opened page", "submitted fake onboarding form", "saw sandbox success"],
+          blockers: [],
+          evidence: [{ type: "visible_text", value: "Sandbox submission complete" }],
+          scores: { taskCompletion: 5 },
+        }),
+      },
+      Date.parse("2026-05-22T10:05:00.000Z")
+    );
+
+    expect(updated).toMatchObject({
+      status: "completed",
+      statusReason: "Browser-agent report passed after permitted testbed-only page mutation; Hermes has structured evidence for this mission.",
+      result: {
+        mutationMode: "testbed_mutation_allowed",
+        mutationsAttempted: ["submitted fake onboarding form"],
+        stoppedBeforeMutation: false,
+      },
+    });
+    const item = testbedMissionRunToMonitorItem(updated!);
+    expect(item).toMatchObject({
+      summary: {
+        reviewSignals: {
+          testSignals: ["browser mission packet ready", "test-mode page mutation allowed", "browser agent report attached"],
+        },
+      },
+      safety: {
+        browserMissionShouldMutate: true,
+      },
+    });
   });
 
   it("turns active mission runs into Hermes Checking board items", () => {
@@ -280,7 +331,7 @@ describe("monitor testbed mission runs", () => {
   });
 });
 
-function missionResult() {
+function missionResult(options: { allowTestMutations?: boolean } = {}) {
   return {
     kind: "testbed_agent_mission",
     mission: {
@@ -300,6 +351,7 @@ function missionResult() {
       ],
       safety: {
         missionGeneratorMutates: false,
+        browserMissionShouldMutate: options.allowTestMutations === true,
       },
     },
   };

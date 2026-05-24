@@ -338,6 +338,19 @@ describe("operator commands", () => {
         freshMemory: true,
       },
     });
+    expect(parseOperatorCommand("agent browser mission https://testbed.example/app goal: complete onboarding in test mode allow test mutations", { source: "operator" })).toEqual({
+      handled: true,
+      kind: "testbed_agent_mission",
+      source: "operator",
+      detailed: false,
+      input: {
+        targetUrl: "https://testbed.example/app",
+        goal: "complete onboarding in test mode allow test mutations",
+        agentName: "Hermes",
+        freshMemory: true,
+        allowTestMutations: true,
+      },
+    });
   });
 
   it("routes the executable read-only testbed E2E run separately from the suite", () => {

@@ -204,7 +204,10 @@ Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
   query private state, use Averray operator/workflow tools, call GitHub, deploy,
   submit, merge, or mutate anything; the receiving agent should use only
   browser-visible evidence and stop before real payments, signatures, submits,
-  deploys, merges, or account-affecting actions.
+  deploys, merges, or account-affecting actions. Add phrases like
+  `test mode`, `sandbox`, or `allow test mutations` when the target is a fake
+  testbed page and the agent should complete clearly labeled sandbox submits;
+  reports must then list `mutationsAttempted` so Hermes can audit what happened.
   `testbed e2e suite` and `platform e2e suite` call
   `averray_testbed_e2e_suite`, a read-only E2E checklist for backend agents,
   Slack, Command Center, and MCP clients. It returns ordered test cases,
