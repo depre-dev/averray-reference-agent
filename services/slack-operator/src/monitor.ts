@@ -6560,6 +6560,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const rerunPrompt = testbedMissionRerunPrompt(run, mission);
       const baselinePrompt = testbedMissionBaselinePrompt(run, mission);
       const comparisonBrief = testbedMissionComparisonBrief(run);
+      const fixBrief = testbedMissionFixBrief(run);
       const rows = [
         row("Target", escapeHtml(String(run.targetUrl || target.url || "[TESTBED_URL]"))),
         row("Goal", escapeHtml(String(run.goal || target.goal || "test first-contact usability"))),
@@ -6587,6 +6588,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '<h4>Runbook</h4>' + runbookHtml +
         '<h4>Rubric</h4>' + rubricHtml +
         resultHtml +
+        renderTestbedMissionFixBrief(fixBrief) +
         (comparisonBrief ? '<h4>Comparison brief</h4><p class="resolution-summary">' + escapeHtml(comparisonBrief) + '</p>' : "") +
         (baselinePrompt ? '<details class="drawer-disclosure prompt-disclosure"><summary>Baseline for future runs</summary><pre class="prompt-box">' + escapeHtml(baselinePrompt) + '</pre></details>' : "") +
         (rerunPrompt ? '<details class="drawer-disclosure prompt-disclosure" open><summary>Rerun after fix</summary><pre class="prompt-box">' + escapeHtml(rerunPrompt) + '</pre></details>' : "") +
@@ -6602,6 +6604,20 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           '<button class="soft-button" type="button" data-copy-label="Report template copied" data-copy-text="' + escapeAttr(reportTemplate) + '">Copy report template</button>' +
         '</div>' +
         '</section>';
+    }
+
+    function renderTestbedMissionFixBrief(fixBrief) {
+      if (!fixBrief) return "";
+      const rows = [
+        row("Primary blocker", escapeHtml(fixBrief.primaryBlocker)),
+        row("Suspected UX gap", escapeHtml(fixBrief.suspectedUxGap)),
+        row("Smallest move", escapeHtml(fixBrief.smallestProductMove)),
+        row("Proof after fix", escapeHtml(fixBrief.rerunProof)),
+      ].join("");
+      return '<h4>Fix brief</h4>' +
+        '<p class="resolution-summary">Hermes distilled the failed browser-agent report into the smallest product follow-up.</p>' +
+        '<dl class="resolution-grid">' + rows + '</dl>' +
+        (fixBrief.evidence.length ? '<h4>Fix evidence</h4><ol class="resolution-steps">' + fixBrief.evidence.map((entry) => '<li>' + escapeHtml(entry) + '</li>').join("") + '</ol>' : "");
     }
 
     function renderTestbedMissionFooterActions(item) {
@@ -6775,12 +6791,70 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       ].filter(Boolean).join(" ");
     }
 
+    function testbedMissionFixBrief(run) {
+      const result = run && run.result;
+      const status = String(run && run.status || "");
+      const verdict = String(result && result.verdict || "");
+      const stopped = result && typeof result.stoppedBeforeMutation === "boolean" ? result.stoppedBeforeMutation : true;
+      const needsFix = result && (status === "failed" || verdict === "partial" || verdict === "fail" || stopped === false);
+      if (!needsFix) return null;
+      const blockers = testbedReportList(result && result.blockers);
+      const confusingMoments = testbedReportList(result && result.confusingMoments);
+      const recommendations = testbedReportList(result && result.recommendations);
+      const weakScores = testbedWeakScoreLabels(result && result.scores);
+      const primaryBlocker = blockers[0] || confusingMoments[0] || "the fresh browser agent could not complete the mission cleanly";
+      const smallestProductMove = recommendations[0] || testbedProductFixSuggestion(primaryBlocker, weakScores);
+      const evidence = testbedReportEvidenceList(result && result.evidence)
+        .map((entry) => entry.label + ": " + entry.value)
+        .concat(blockers.map((blocker) => "blocker: " + blocker))
+        .concat(confusingMoments.map((moment) => "confusing moment: " + moment))
+        .concat(weakScores.map((score) => "weak score: " + score))
+        .slice(0, 8);
+      return {
+        primaryBlocker,
+        suspectedUxGap: testbedProductUxGap(primaryBlocker, weakScores),
+        smallestProductMove,
+        rerunProof: 'run this same testbed mission again and verify whether "' + primaryBlocker + '" is gone, unchanged, or replaced',
+        evidence,
+      };
+    }
+
     function testbedWeakScoreLabels(value) {
       if (!value || typeof value !== "object" || Array.isArray(value)) return [];
       return Object.entries(value)
         .filter((entry) => Number(entry[1]) <= 3)
         .map((entry) => String(entry[0]) + ":" + String(entry[1]))
         .slice(0, 3);
+    }
+
+    function testbedProductFixSuggestion(primaryBlocker, weakScores) {
+      const blocker = String(primaryBlocker || "").toLowerCase();
+      const weak = Array.isArray(weakScores) ? weakScores.map((score) => String(score).toLowerCase()) : [];
+      if (blocker.includes("wallet") || blocker.includes("submit") || blocker.includes("mutation")) {
+        return "make the mutation boundary explicit before the agent reaches any wallet, submit, or irreversible action.";
+      }
+      if (blocker.includes("find") || blocker.includes("navigation") || blocker.includes("where")) {
+        return "make the next action visible in the first viewport and label it with the user's goal language.";
+      }
+      if (weak.some((score) => score.includes("trust") || score.includes("safety"))) {
+        return "add clearer trust and safety copy near the action that made the agent hesitate.";
+      }
+      return "remove the ambiguity the browser agent reported and make the next safe step visible without insider context.";
+    }
+
+    function testbedProductUxGap(primaryBlocker, weakScores) {
+      const blocker = String(primaryBlocker || "").toLowerCase();
+      const weak = Array.isArray(weakScores) ? weakScores.map((score) => String(score).toLowerCase()) : [];
+      if (blocker.includes("wallet") || blocker.includes("submit") || blocker.includes("mutation")) {
+        return "the page does not make the safe stopping point or irreversible action boundary obvious enough for a fresh agent.";
+      }
+      if (blocker.includes("find") || blocker.includes("navigation") || blocker.includes("where")) {
+        return "the next action is discoverable to project insiders, but not prominent enough for an outside agent's first pass.";
+      }
+      if (weak.some((score) => score.includes("trust") || score.includes("safety"))) {
+        return "the agent lacked enough trust or safety context near the moment it had to decide whether to continue.";
+      }
+      return "the page asks the agent to infer context that should be visible in the product experience.";
     }
 
     function testbedMissionReportTemplate(run, mission) {
