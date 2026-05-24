@@ -46,6 +46,14 @@ export interface MissionReportDiagnosis {
   report?: Record<string, unknown>;
 }
 
+export interface TestbedMissionFixBrief {
+  primaryBlocker: string;
+  suspectedUxGap: string;
+  smallestProductMove: string;
+  rerunProof: string;
+  evidence: string[];
+}
+
 const missionRuns: TestbedMissionRun[] = [];
 let missionSeq = 0;
 
@@ -205,10 +213,8 @@ export function testbedMissionRunToMonitorItem(run: TestbedMissionRun): Record<s
 export function testbedMissionResultCoaching(run: TestbedMissionRun): string {
   const result = run.result ?? {};
   const verdict = typeof result.verdict === "string" ? result.verdict : run.status;
-  const blockers = stringArray(result.blockers);
-  const confusingMoments = stringArray(result.confusingMoments);
   const recommendations = stringArray(result.recommendations);
-  const weakScores = weakMissionScores(result.scores);
+  const fixBrief = testbedMissionFixBrief(run);
   if (run.status === "completed") {
     return [
       "What I learned: the fresh browser agent found a path through the page without project-specific memory.",
@@ -218,13 +224,14 @@ export function testbedMissionResultCoaching(run: TestbedMissionRun): string {
       "Smallest Codex task: no fix task is needed from this mission unless we want to improve the strongest remaining low-score area.",
     ].join(" ");
   }
-  const primaryBlocker = blockers[0] || confusingMoments[0] || "the browser agent could not complete the mission cleanly";
-  const weakScoreText = weakScores.length ? ` Low score signal: ${weakScores.join(", ")}.` : "";
-  const recommendation = recommendations[0] || productFixSuggestion(primaryBlocker, weakScores);
+  const weakScoreText = fixBrief.evidence.find((entry) => entry.startsWith("weak score:"))
+    ? ` Low score signal: ${fixBrief.evidence.filter((entry) => entry.startsWith("weak score:")).map((entry) => entry.replace(/^weak score:\s*/, "")).join(", ")}.`
+    : "";
   return [
-    `What I learned: verdict ${verdict}; the first useful product signal is "${primaryBlocker}".${weakScoreText}`,
-    `Suggested product fix: ${recommendation}`,
-    `Smallest Codex task: improve the page or copy around "${primaryBlocker}" and then run this same testbed mission again.`,
+    `What I learned: verdict ${verdict}; the first useful product signal is "${fixBrief.primaryBlocker}".${weakScoreText}`,
+    `Suspected UX gap: ${fixBrief.suspectedUxGap}`,
+    `Suggested product fix: ${fixBrief.smallestProductMove}`,
+    `Smallest Codex task: improve the page or copy around "${fixBrief.primaryBlocker}" and then ${fixBrief.rerunProof}`,
   ].join(" ");
 }
 
@@ -243,30 +250,45 @@ export function testbedMissionReportValidationCoaching(errors: string[], warning
 export function testbedMissionCodexFollowupPrompt(run: TestbedMissionRun): string | undefined {
   if (run.status === "completed" || !run.result) return undefined;
   const result = run.result;
-  const blockers = stringArray(result.blockers);
-  const confusingMoments = stringArray(result.confusingMoments);
-  const recommendations = stringArray(result.recommendations);
-  const weakScores = weakMissionScores(result.scores);
-  const primaryBlocker = blockers[0] || confusingMoments[0] || "the fresh browser agent could not complete the mission cleanly";
-  const suggestedFix = recommendations[0] || productFixSuggestion(primaryBlocker, weakScores);
-  const evidence = missionEvidenceStrings(result.evidence)
-    .concat(blockers.map((blocker) => `blocker: ${blocker}`))
-    .concat(confusingMoments.map((moment) => `confusing moment: ${moment}`))
-    .concat(weakScores.map((score) => `weak score: ${score}`))
-    .slice(0, 8);
+  const fixBrief = testbedMissionFixBrief(run);
   return [
     `Fix the testbed page for mission ${run.id}.`,
     "",
     `Target: ${run.targetUrl}`,
     `Goal: ${run.goal}`,
     `Fresh-agent result: ${String(result.verdict || run.status)}`,
-    `Primary blocker: ${primaryBlocker}`,
-    `Suggested product fix: ${suggestedFix}`,
+    `Primary blocker: ${fixBrief.primaryBlocker}`,
+    `Suspected UX gap: ${fixBrief.suspectedUxGap}`,
+    `Smallest product move: ${fixBrief.smallestProductMove}`,
+    `Proof after fix: ${fixBrief.rerunProof}`,
     "",
     "Use the smallest product/UI change that helps a normal outside agent complete this goal without project-specific memory. Keep mutation boundaries explicit and do not weaken safety copy.",
     "After the change, run the same testbed mission again and report whether the blocker disappeared.",
-    evidence.length ? `Evidence:\n- ${evidence.join("\n- ")}` : "Evidence: see the attached testbed mission result in Hermes.",
+    fixBrief.evidence.length ? `Evidence:\n- ${fixBrief.evidence.join("\n- ")}` : "Evidence: see the attached testbed mission result in Hermes.",
   ].join("\n");
+}
+
+export function testbedMissionFixBrief(run: TestbedMissionRun): TestbedMissionFixBrief {
+  const result = run.result ?? {};
+  const blockers = stringArray(result.blockers);
+  const confusingMoments = stringArray(result.confusingMoments);
+  const recommendations = stringArray(result.recommendations);
+  const weakScores = weakMissionScores(result.scores);
+  const primaryBlocker = blockers[0] || confusingMoments[0] || "the fresh browser agent could not complete the mission cleanly";
+  const smallestProductMove = recommendations[0] || productFixSuggestion(primaryBlocker, weakScores);
+  const suspectedUxGap = productUxGap(primaryBlocker, weakScores);
+  const evidence = missionEvidenceStrings(result.evidence)
+    .concat(blockers.map((blocker) => `blocker: ${blocker}`))
+    .concat(confusingMoments.map((moment) => `confusing moment: ${moment}`))
+    .concat(weakScores.map((score) => `weak score: ${score}`))
+    .slice(0, 8);
+  return {
+    primaryBlocker,
+    suspectedUxGap,
+    smallestProductMove,
+    rerunProof: `run this same testbed mission again and verify whether "${primaryBlocker}" is gone, unchanged, or replaced`,
+    evidence,
+  };
 }
 
 export function testbedMissionRerunPrompt(run: TestbedMissionRun): string | undefined {
@@ -532,6 +554,20 @@ function productFixSuggestion(primaryBlocker: string, weakScores: string[]): str
     return "add clearer trust and safety copy near the action that made the agent hesitate.";
   }
   return "remove the ambiguity the browser agent reported and make the next safe step visible without insider context.";
+}
+
+function productUxGap(primaryBlocker: string, weakScores: string[]): string {
+  const blocker = primaryBlocker.toLowerCase();
+  if (blocker.includes("wallet") || blocker.includes("submit") || blocker.includes("mutation")) {
+    return "the page does not make the safe stopping point or irreversible action boundary obvious enough for a fresh agent.";
+  }
+  if (blocker.includes("find") || blocker.includes("navigation") || blocker.includes("where")) {
+    return "the next action is discoverable to project insiders, but not prominent enough for an outside agent's first pass.";
+  }
+  if (weakScores.some((score) => score.toLowerCase().includes("trust") || score.toLowerCase().includes("safety"))) {
+    return "the agent lacked enough trust or safety context near the moment it had to decide whether to continue.";
+  }
+  return "the page asks the agent to infer context that should be visible in the product experience.";
 }
 
 function nextMissionId(nowMs: number): string {

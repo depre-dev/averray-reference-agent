@@ -9,6 +9,7 @@ import {
   testbedMissionBaselinePrompt,
   testbedMissionComparisonBrief,
   testbedMissionCodexFollowupPrompt,
+  testbedMissionFixBrief,
   testbedMissionReportValidationCoaching,
   testbedMissionRerunPrompt,
   testbedMissionResultCoaching,
@@ -198,14 +199,24 @@ describe("monitor testbed mission runs", () => {
     const coaching = testbedMissionResultCoaching(updated!);
     expect(coaching).toContain("What I learned: verdict partial");
     expect(coaching).toContain("Could not find the submit boundary");
+    expect(coaching).toContain("Suspected UX gap");
     expect(coaching).toContain("Suggested product fix");
     expect(coaching).toContain("Smallest Codex task");
     expect(coaching).toContain("run this same testbed mission again");
 
+    const fixBrief = testbedMissionFixBrief(updated!);
+    expect(fixBrief.primaryBlocker).toBe("Could not find the submit boundary.");
+    expect(fixBrief.smallestProductMove).toContain("make the mutation boundary explicit");
+    expect(fixBrief.suspectedUxGap).toContain("irreversible action boundary");
+    expect(fixBrief.rerunProof).toContain("gone, unchanged, or replaced");
+    expect(fixBrief.evidence).toContain("weak score: trustAndSafety:2");
+
     const prompt = testbedMissionCodexFollowupPrompt(updated!);
     expect(prompt).toContain("Fix the testbed page for mission");
     expect(prompt).toContain("Primary blocker: Could not find the submit boundary.");
-    expect(prompt).toContain("Suggested product fix: make the mutation boundary explicit");
+    expect(prompt).toContain("Suspected UX gap");
+    expect(prompt).toContain("Smallest product move: make the mutation boundary explicit");
+    expect(prompt).toContain("Proof after fix: run this same testbed mission again");
     expect(prompt).toContain("After the change, run the same testbed mission again");
     expect(prompt).toContain("observation: The browser agent stopped at the wallet prompt.");
 
