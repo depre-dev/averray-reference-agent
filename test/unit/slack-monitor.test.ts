@@ -252,6 +252,12 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("testbedMissionBoardDigest(counts)");
     expect(html).toContain("testbedMissionNextMove(lead, title)");
     expect(html).toContain("testbedMissionSignature(item)");
+    expect(html).toContain("selectedTestbedMissionBriefing(item, title)");
+    expect(html).toContain("selectedTestbedMissionEvidence(item)");
+    expect(html).toContain("selectedTestbedMissionBoundary(item)");
+    expect(html).toContain("selectedTestbedMissionHandoff(item, title)");
+    expect(html).toContain("I opened testbed mission context");
+    expect(html).toContain("what evidence is attached or missing");
     expect(html).toContain("I am treating testbed missions as evidence work");
     expect(html).toContain("evidence instead of vibes");
     expect(html).toContain("The browser-agent report passed, so I am treating it as a baseline");
