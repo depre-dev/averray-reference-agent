@@ -8454,8 +8454,16 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         if (action.owner === "Operator") acc.operator += 1;
         if (action.owner === "Hermes") acc.hermes += 1;
         if (action.owner === "Merge queue" || lane.key === "queue") acc.queue += 1;
+        if (isTestbedMissionItem(item)) {
+          const mission = testbedMissionRun(item) || {};
+          const missionStatus = normalize(mission.status || (item.summary || {}).status || item.status);
+          acc.testbed += 1;
+          if (missionStatus === "failed") acc.testbedFailed += 1;
+          else if (missionStatus === "completed") acc.testbedBaseline += 1;
+          else acc.testbedWaiting += 1;
+        }
         return acc;
-      }, { total: 0, attention: 0, waiting: 0, codex: 0, operator: 0, hermes: 0, queue: 0 });
+      }, { total: 0, attention: 0, waiting: 0, codex: 0, operator: 0, hermes: 0, queue: 0, testbed: 0, testbedWaiting: 0, testbedFailed: 0, testbedBaseline: 0 });
       const parts = [];
       if (counts.attention) parts.push(plural(counts.attention, "item") + (counts.attention === 1 ? " needs attention" : " need attention"));
       if (counts.waiting) parts.push(plural(counts.waiting, "draft") + (counts.waiting === 1 ? " is being watched" : " are being watched"));
@@ -8463,13 +8471,24 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (counts.operator) parts.push("operator owns " + counts.operator);
       if (counts.hermes) parts.push("Hermes is checking " + counts.hermes);
       if (counts.queue) parts.push(counts.queue + " waiting in the merge queue");
+      if (counts.testbed) parts.push(testbedMissionBoardDigest(counts));
       const headline = parts.length ? parts.join("; ") + "." : plural(counts.total, "item") + (counts.total === 1 ? " is" : " are") + " on the board.";
       const operatorNote = counts.operator
         ? "Pascal, I will call out the decision points instead of making them look like normal queue work."
+        : counts.testbedWaiting
+          ? "Pascal, I am treating testbed missions as evidence work, not PR blockers; the useful move is getting a clean outside-agent report."
         : counts.waiting && !counts.codex
           ? "Pascal, I am watching drafts without pretending Codex owns them; I will only ask Codex to take over if you explicitly say so."
         : "Pascal, nothing here needs your decision right this second; I am mostly keeping Codex pointed at the next handoff.";
       return "Here is the live shape of the board: " + headline + " " + operatorNote + " " + boardBriefingNextMove(items) + " I will narrate the next useful move here as the cards change, so the board is not just a wall of badges.";
+    }
+
+    function testbedMissionBoardDigest(counts) {
+      const bits = [];
+      if (counts.testbedWaiting) bits.push(plural(counts.testbedWaiting, "testbed mission") + " waiting for a browser-agent report");
+      if (counts.testbedFailed) bits.push(plural(counts.testbedFailed, "testbed mission") + " needing a rerun or product fix");
+      if (counts.testbedBaseline) bits.push(plural(counts.testbedBaseline, "testbed baseline") + " recorded");
+      return bits.join(", ");
     }
 
     function plural(count, noun) {
@@ -8483,6 +8502,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const lane = boardLaneForItem(lead, verdict);
       const action = nextPipelineAction(lead, verdict);
       const title = cardTitleText(pipelineTitle(lead), lead.pullRequestNumber || pullRequestNumberFromCorrelation(lead.correlationId), lead);
+      if (isTestbedMissionItem(lead)) {
+        return testbedMissionNextMove(lead, title);
+      }
       if (isDraftPullRequest(lead)) {
         if (isExternalDraftPullRequest(lead)) {
           return "First useful move: leave " + title + " watched while the PR author or owning agent finishes it; Codex should only take over if Pascal explicitly delegates that.";
@@ -8505,6 +8527,18 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return "First useful move: Hermes should finish the read-only check on " + title + " and publish the verdict here.";
       }
       return "First useful move: " + action.owner + " should " + action.text + " for " + title + ".";
+    }
+
+    function testbedMissionNextMove(item, title) {
+      const mission = testbedMissionRun(item) || {};
+      const missionStatus = normalize(mission.status || (item.summary || {}).status || item.status);
+      if (missionStatus === "completed") {
+        return "First useful move: keep " + title + " as a baseline, and compare the next page change against its known-good browser-agent path.";
+      }
+      if (missionStatus === "failed") {
+        return "First useful move: turn the failed browser-agent report for " + title + " into one small product fix or a rerun prompt, then compare whether the blocker disappeared.";
+      }
+      return "First useful move: run " + title + " with a clean browser-capable agent, stop before mutation, and paste the structured report back so Hermes can judge evidence instead of vibes.";
     }
 
     function captureBoardNarrations(items) {
@@ -8541,12 +8575,27 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         normalize(item && item.activeState),
         isDraftPullRequest(item) ? "draft" : "",
         codexTaskFailedForItem(item) ? "codex-failed" : "",
+        testbedMissionSignature(item),
       ].join("|");
     }
 
     function shouldNarrateNewBoardItem(item, verdict, action, lane) {
+      if (isTestbedMissionItem(item)) return true;
       if (codexTaskFailedForItem(item) || isDraftPullRequest(item)) return true;
       return lane.key === "attention" || lane.key === "operator" || lane.key === "codex" || verdict.level === "block" || verdict.level === "needs-review";
+    }
+
+    function testbedMissionSignature(item) {
+      if (!isTestbedMissionItem(item)) return "";
+      const mission = testbedMissionRun(item) || {};
+      const result = mission.result || {};
+      return [
+        "testbed",
+        normalize(mission.status || (item.summary || {}).status || item.status),
+        normalize(mission.statusReason || item.reason),
+        normalize(result.verdict),
+        String(result.stoppedBeforeMutation === false),
+      ].join(":");
     }
 
     function addBoardNarration(text, meta, ts, addressedTo, item) {
