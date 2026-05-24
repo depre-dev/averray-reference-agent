@@ -247,6 +247,12 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Fresh-agent browser mission");
     expect(html).toContain("testbed-only mutation allowed");
     expect(html).toContain("Test mutations attempted");
+    expect(html).toContain("mutationMode");
+    expect(html).toContain("testbed_mutation_allowed");
+    expect(html).toContain("stop_before_mutation");
+    expect(html).toContain("mutationsAttempted");
+    expect(html).toContain("describe each fake/sandbox/test-only page action you submitted");
+    expect(html).toContain("mutationBoundaryNotes");
     expect(html).toContain("Copy mission prompt");
     expect(html).toContain("Copy report template");
     expect(html).toContain("testbedMissionReportTemplate(run, mission)");

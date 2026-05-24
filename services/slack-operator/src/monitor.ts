@@ -6937,6 +6937,15 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const currentRun = run || {};
       const currentMission = mission || {};
       const target = currentMission.target || {};
+      const safety = currentMission.safety || {};
+      const agentMode = currentMission.agentMode || {};
+      const allowTestMutations = currentRun.allowTestMutations === true ||
+        safety.browserMissionShouldMutate === true ||
+        agentMode.mutationMode === "testbed_mutation_allowed";
+      const mutationMode = allowTestMutations ? "testbed_mutation_allowed" : "stop_before_mutation";
+      const mutationBoundaryNotes = allowTestMutations
+        ? "Only include fake, sandbox, or test-only page mutations that were visibly safe. Stop before real payment, wallet signature, deploy, merge, or production data changes."
+        : "Stop before any submit, payment, wallet signature, deploy, merge, account-affecting, or production data-changing action.";
       const rubric = Array.isArray(currentMission.scoringRubric) ? currentMission.scoringRubric : [];
       const scores = {};
       rubric.slice(0, 12).forEach((entry) => {
@@ -6950,6 +6959,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         targetUrl: String(currentRun.targetUrl || target.url || "[TESTBED_URL]"),
         goal: String(currentRun.goal || target.goal || "test first-contact usability"),
         memoryMode: currentRun.freshMemory === false ? "returning_agent_memory_allowed" : "fresh_or_ignored",
+        mutationMode,
         completedPath: [
           "1. Opened the target page.",
           "2. Followed the visible path without project-specific help.",
@@ -6962,7 +6972,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         ],
         scores,
         recommendations: [],
-        stoppedBeforeMutation: true,
+        mutationsAttempted: allowTestMutations ? ["describe each fake/sandbox/test-only page action you submitted"] : [],
+        mutationBoundaryNotes,
+        stoppedBeforeMutation: !allowTestMutations,
       }, null, 2);
     }
 
