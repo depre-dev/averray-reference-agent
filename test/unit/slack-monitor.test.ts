@@ -249,6 +249,10 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Comparison brief");
     expect(html).toContain("testbedMissionComparisonBrief(run)");
     expect(html).toContain("testbedMissionFixBrief(run)");
+    expect(html).toContain("testbedMissionFixBriefPrompt(run, fixBrief)");
+    expect(html).toContain("Copy fix brief");
+    expect(html).toContain("Fix brief copied");
+    expect(html).toContain("Use this as a narrow Codex/product task");
     expect(html).toContain("renderTestbedMissionFixBrief(fixBrief)");
     expect(html).toContain("Fix brief");
     expect(html).toContain("Hermes distilled the failed browser-agent report");
