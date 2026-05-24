@@ -356,6 +356,10 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("open a follow-up fix PR or rollback proposal");
     expect(html).toContain("hosted app/config health failure");
     expect(html).toContain("hosted health is ok and the post-deploy suite returns PASS");
+    expect(html).toContain("deployCardTitle(item, summary)");
+    expect(html).toContain("Deploy verification · ");
+    expect(html).toContain("deployWorkflowTitle(summary || {})");
+    expect(html).toContain("Post-deploy verification · ");
     expect(html).toContain("Operator decision");
     expect(html).toContain("Operator decision request");
     expect(html).toContain("Approve only if");
