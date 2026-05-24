@@ -7,6 +7,7 @@ import {
   recordTestbedMissionReportFromMessage,
   recordTestbedMissionRunFromOperatorResult,
   testbedMissionBaselinePrompt,
+  testbedMissionComparisonBrief,
   testbedMissionCodexFollowupPrompt,
   testbedMissionReportValidationCoaching,
   testbedMissionRerunPrompt,
@@ -129,6 +130,11 @@ describe("monitor testbed mission runs", () => {
     expect(baselinePrompt).toContain("opened page");
     expect(baselinePrompt).toContain("Baseline confidence: 91%");
     expect(baselinePrompt).toContain("When the page changes, run this mission again");
+
+    const comparisonBrief = testbedMissionComparisonBrief(updated!);
+    expect(comparisonBrief).toContain("pass baseline");
+    expect(comparisonBrief).toContain('Known-good path starts with "opened page".');
+    expect(comparisonBrief).toContain("preserve the same visible path");
   });
 
   it("attaches a partial browser-agent report and keeps blockers visible", () => {
@@ -209,6 +215,12 @@ describe("monitor testbed mission runs", () => {
     expect(rerunPrompt).toContain("Previous blocker to compare against: Could not find the submit boundary.");
     expect(rerunPrompt).toContain("Original mission prompt:");
     expect(rerunPrompt).toContain("Open the app and complete onboarding.");
+
+    const comparisonBrief = testbedMissionComparisonBrief(updated!);
+    expect(comparisonBrief).toContain("verdict partial");
+    expect(comparisonBrief).toContain("Could not find the submit boundary");
+    expect(comparisonBrief).toContain("gone, unchanged, or replaced");
+    expect(comparisonBrief).toContain("trustAndSafety:2");
   });
 
   it("rejects incomplete browser-agent reports before attaching them", () => {
