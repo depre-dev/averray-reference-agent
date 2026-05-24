@@ -63,8 +63,10 @@ import {
 import {
   diagnoseTestbedMissionReportFromMessage,
   listTestbedMissionRuns,
+  readTestbedMissionRunnerHeartbeat,
   recordTestbedMissionReportFromMessage,
   recordTestbedMissionRunFromOperatorResult,
+  summarizeTestbedMissionRunnerHeartbeat,
   testbedMissionCodexFollowupPrompt,
   testbedMissionReportValidationCoaching,
   testbedMissionResultCoaching,
@@ -754,6 +756,10 @@ async function handleMonitorCommandRequest(request: http.IncomingMessage, respon
 
 function recordTestbedMissionCollaboration(run: TestbedMissionRun): void {
   try {
+    const runner = summarizeTestbedMissionRunnerHeartbeat(readTestbedMissionRunnerHeartbeat());
+    const runnerText = runner && runner.status !== "disabled" && runner.status !== "misconfigured"
+      ? "I will hand it to the Hermes testbed runner; when the runner returns a structured report, I will attach it here and explain what changed."
+      : "The mission is queued, but the automatic runner is not active yet, so use the card's copy actions as the manual fallback until TESTBED_MISSION_RUNNER_ENABLED is on.";
     recordCollaborationMessage({
       author: "hermes",
       kind: "status",
@@ -761,8 +767,8 @@ function recordTestbedMissionCollaboration(run: TestbedMissionRun): void {
       relatedCorrelationId: run.id,
       text: [
         `I created a fresh-agent browser mission for ${run.targetUrl}.`,
-        `The mission is now on the board as ${run.id}; open its card to copy the browser-only prompt and report schema.`,
-        "Start it with a clean browser-capable agent, then paste the structured report back here so I can compare the evidence and keep improving the testbed.",
+        `The mission is now on the board as ${run.id}.`,
+        runnerText,
       ].join(" "),
     });
   } catch (error) {
@@ -1299,6 +1305,7 @@ async function loadMonitorSnapshot(
     ...enriched,
     codexTasks,
     testbedMissions: listTestbedMissionRuns({ limit: 20 }),
+    testbedMissionRunner: summarizeTestbedMissionRunnerHeartbeat(readTestbedMissionRunnerHeartbeat()),
     collaborationMessages: listCollaborationMessages({ limit: 200 }),
     diagnostics,
   };

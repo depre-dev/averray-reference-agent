@@ -6611,6 +6611,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         row("Memory", escapeHtml(run.freshMemory === false ? "returning memory allowed" : "fresh or explicitly ignored")),
         row("Mutation mode", escapeHtml(allowTestMutations ? "testbed-only mutation allowed" : "stop before mutation")),
         row("Status", escapeHtml(String(run.status || summary.status || "ready"))),
+        run.runnerId ? row("Runner", escapeHtml(String(run.runnerId))) : "",
+        run.progressMessage ? row("Runner progress", escapeHtml(String(run.progressMessage))) : "",
       ].join("");
       const runbookHtml = runbook.length
         ? '<ol class="resolution-steps">' + runbook.slice(0, 8).map((step) => '<li>' + escapeHtml(String(step)) + '</li>').join("") + '</ol>'
@@ -6627,11 +6629,13 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const resultHtml = result
         ? renderTestbedMissionReportPacket(result) +
           '<details class="drawer-disclosure prompt-disclosure"><summary>Structured result JSON</summary><pre class="prompt-box">' + escapeHtml(prettyJson(result)) + '</pre></details>'
-        : '<p class="resolution-summary">No report is attached yet. The next useful thing is to run the browser mission and paste the structured report into the collaboration chat.</p>';
+        : '<p class="resolution-summary">' + escapeHtml(run.status === "running"
+          ? "No report is attached yet. Hermes has claimed this browser mission; wait for the runner report, or inspect runner output if it stalls."
+          : "No report is attached yet. If the automatic runner is enabled, Hermes will claim it; otherwise copy the prompt into a clean browser-capable agent and paste the structured report here.") + '</p>';
       return '<section class="drawer-section testbed-mission-panel"><h3>Testbed mission</h3>' +
         '<p class="resolution-summary">' + escapeHtml(allowTestMutations
-          ? "This starts from the monitor, but execution is browser-only. In test mode the agent may complete clearly fake/sandbox page actions, then bring the report back here for Hermes to judge."
-          : "This starts from the monitor, but execution is browser-only: copy the prompt into a clean agent/browser run, then bring the report back here for Hermes to judge.") + '</p>' +
+          ? "This starts from the monitor and runs through the Hermes testbed runner when enabled. In test mode the runner may complete clearly fake/sandbox page actions, then attach the report here for Hermes to judge."
+          : "This starts from the monitor and runs through the Hermes testbed runner when enabled. The runner should use a clean browser context, stop before mutation, and attach the report here for Hermes to judge.") + '</p>' +
         '<dl class="resolution-grid">' + rows + '</dl>' +
         '<h4>Runbook</h4>' + runbookHtml +
         '<h4>Rubric</h4>' + rubricHtml +
@@ -10118,6 +10122,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
                 touchedAreas: ["testbed"],
                 testSignals: [
                   "browser mission packet ready",
+                  ...(status === "running" ? ["browser mission runner claimed"] : []),
                   ...(run.allowTestMutations === true ? ["test-mode page mutation allowed"] : []),
                 ],
                 missingTestSignals: status === "completed" ? [] : ["browser agent report"],
