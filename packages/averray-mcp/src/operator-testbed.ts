@@ -25,6 +25,7 @@ export interface TestbedAgentMissionInput {
   goal?: string;
   agentName?: string;
   freshMemory?: boolean;
+  allowTestMutations?: boolean;
   maxBrowserSteps?: number;
   maxMinutes?: number;
 }
@@ -35,6 +36,7 @@ export function getTestbedAgentMission(input: TestbedAgentMissionInput = {}) {
     ?? "Figure out what this page is for, complete the main user flow as far as the public UI allows, and report whether a normal outside agent can use it without private project context.";
   const agentName = cleanOptional(input.agentName) ?? "Hermes";
   const freshMemory = input.freshMemory !== false;
+  const allowTestMutations = input.allowTestMutations === true;
   const maxBrowserSteps = clampInt(input.maxBrowserSteps, 20, 200, 80);
   const maxMinutes = clampInt(input.maxMinutes, 5, 60, 20);
 
@@ -43,7 +45,9 @@ export function getTestbedAgentMission(input: TestbedAgentMissionInput = {}) {
     kind: "testbed_agent_browser_mission",
     generatedAt: new Date().toISOString(),
     mutates: false,
-    headline: "Fresh-agent browser mission ready: test the page like a normal outside agent, not like an internal operator.",
+    headline: allowTestMutations
+      ? "Fresh-agent browser mission ready: test-mode page mutation is allowed, but only inside the sandbox/testbed flow."
+      : "Fresh-agent browser mission ready: test the page like a normal outside agent, not like an internal operator.",
     target: {
       url: targetUrl,
       goal,
@@ -59,6 +63,7 @@ export function getTestbedAgentMission(input: TestbedAgentMissionInput = {}) {
       privilegedAverrayMcpAllowed: false,
       hiddenProjectContextAllowed: false,
       humanHelpAllowed: false,
+      mutationMode: allowTestMutations ? "testbed_mutation_allowed" : "stop_before_mutation",
       purpose: "Measure whether an agent with ordinary browser access can understand and use the public/testbed page.",
     },
     missionPrompt: [
@@ -68,9 +73,11 @@ export function getTestbedAgentMission(input: TestbedAgentMissionInput = {}) {
       "",
       "Use only the browser-visible page, normal public links, and screenshots/observations from the page.",
       "Do not use private repository knowledge, databases, hidden monitor state, Averray MCP tools, Slack, GitHub, SSH, or operator memory unless the page itself gives you that information.",
-      "Work like a future external agent would: explain what you infer, try the main flow, note where you are uncertain, and stop before any real mutation, payment, wallet signature, submit, deploy, merge, or account-affecting action.",
+      allowTestMutations
+        ? "Work like a future external agent would: explain what you infer, try the main flow, and you may complete test-only submits or fake/sandbox mutations that the page itself presents as safe. Stop before real payment, real wallet signature, deploy, merge, production data change, or anything that is not clearly testbed-only."
+        : "Work like a future external agent would: explain what you infer, try the main flow, note where you are uncertain, and stop before any real mutation, payment, wallet signature, submit, deploy, merge, or account-affecting action.",
       "",
-      "Report with: verdict, completed path, blockers, confusing moments, evidence, screenshots or trace references, and what would make the page easier for the next agent.",
+      "Report with: verdict, completed path, blockers, confusing moments, evidence, screenshots or trace references, mutation boundary notes, and what would make the page easier for the next agent.",
     ].join("\n"),
     runbook: [
       "Start with a clean browser profile or explicitly ignore prior memory.",
@@ -78,7 +85,9 @@ export function getTestbedAgentMission(input: TestbedAgentMissionInput = {}) {
       "Identify the product purpose, primary user, and main task without reading private project notes.",
       "Attempt the main flow using only visible UI controls.",
       "Collect evidence: page states, URLs visited, visible copy that helped or blocked you, screenshots/trace references, and any console/network failures if available.",
-      "Stop before real mutations or irreversible actions; describe the next required human or sandbox approval instead.",
+      (allowTestMutations
+        ? "Complete test-only page mutations when the UI clearly marks them as sandbox/fake/test; stop before real mutations or irreversible actions."
+        : "Stop before real mutations or irreversible actions; describe the next required human or sandbox approval instead."),
       "Score the experience using the rubric and return the structured report.",
     ],
     allowedEvidence: [
@@ -93,13 +102,17 @@ export function getTestbedAgentMission(input: TestbedAgentMissionInput = {}) {
       "database queries",
       "Averray operator or workflow MCP tools after receiving this mission",
       "Slack, GitHub, monitor internals, or VPS commands",
-      "wallet signatures, payment, submit, deploy, merge, or account mutation",
+      allowTestMutations
+        ? "real wallet signatures, real payment, production submit, deploy, merge, or account mutation"
+        : "wallet signatures, payment, submit, deploy, merge, or account mutation",
       "asking Pascal what to do during the mission",
     ],
     successCriteria: [
       "The agent can state what the page is for within the first screen or first natural click.",
       "The agent can identify the main task and whether it is safe to proceed.",
-      "The agent can complete or reach a clear sandbox stop point in the primary flow.",
+      allowTestMutations
+        ? "The agent can complete the primary test flow, including safe sandbox/test-only actions when clearly labeled."
+        : "The agent can complete or reach a clear sandbox stop point in the primary flow.",
       "Any blocker is explained with visible evidence, not private assumptions.",
       "The final report is useful enough for another agent to reproduce the run.",
     ],
@@ -135,6 +148,8 @@ export function getTestbedAgentMission(input: TestbedAgentMissionInput = {}) {
         evidenceQuality: "0-5",
       },
       recommendations: ["smallest page/product changes that would help the next outside agent"],
+      mutationMode: allowTestMutations ? "testbed_mutation_allowed" : "stop_before_mutation",
+      mutationsAttempted: ["test-only actions submitted, or empty array"],
       stoppedBeforeMutation: "boolean",
     },
     nextSteps: [
@@ -144,7 +159,10 @@ export function getTestbedAgentMission(input: TestbedAgentMissionInput = {}) {
     ],
     safety: {
       missionGeneratorMutates: false,
-      browserMissionShouldMutate: false,
+      browserMissionShouldMutate: allowTestMutations,
+      allowedMutationScope: allowTestMutations
+        ? "testbed-only page actions that are visibly fake, sandbox, or non-production"
+        : "none; stop at mutation boundary",
       freshAgentDefault: true,
       requiresEvidence: true,
       comparesAcrossAgents: true,

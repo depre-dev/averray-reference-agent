@@ -694,17 +694,21 @@ function formatTestbedAgentMissionForSlack(result: Record<string, unknown>): str
     `• goal: ${stringField(target, "goal") ?? "test first-contact usability"}`,
     `• agent: \`${stringField(target, "agentName") ?? "Hermes"}\``,
     `• memory: \`${stringField(agentMode, "memoryMode") ?? (target.freshMemory === false ? "returning_agent_memory_allowed" : "fresh_or_ignored")}\``,
+    `• mutation mode: \`${stringField(agentMode, "mutationMode") ?? (safety.browserMissionShouldMutate === true ? "testbed_mutation_allowed" : "stop_before_mutation")}\``,
     "",
     "*How to run it*",
     "• Start a clean browser-capable agent with the mission prompt.",
     "• Use only visible page UI; no repo, Slack, GitHub, SSH, MCP, or operator memory.",
-    "• Stop before any real mutation and report the structured verdict back into the monitor chat.",
+    safety.browserMissionShouldMutate === true
+      ? "• Test-mode page actions are allowed only when the UI clearly marks them fake/sandbox/test; stop before real payment, wallet signature, deploy, merge, or production data change."
+      : "• Stop before any real mutation and report the structured verdict back into the monitor chat.",
     "",
     "*Rubric*",
     rubric.length > 0 ? rubric.slice(0, 6).map(formatTestbedMissionRubricItem).join("\n") : "• orientation, navigation, task completion, safety, recoverability, evidence quality",
     "*Safety*",
     `• mission generator mutates: \`${String(safety.missionGeneratorMutates === true)}\``,
     `• browser mission should mutate: \`${String(safety.browserMissionShouldMutate === true)}\``,
+    `• allowed mutation scope: \`${stringField(safety, "allowedMutationScope") ?? "none"}\``,
     prompt ? `*Prompt preview*\n\`\`\`${prompt.slice(0, 900)}${prompt.length > 900 ? "\n..." : ""}\`\`\`` : "",
   ].filter(Boolean).join("\n");
 }

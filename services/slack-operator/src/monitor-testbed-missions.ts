@@ -19,6 +19,7 @@ export interface TestbedMissionRun {
   goal: string;
   agentName: string;
   freshMemory: boolean;
+  allowTestMutations: boolean;
   mission: Record<string, unknown>;
   result?: Record<string, unknown>;
   history: TestbedMissionHistoryEntry[];
@@ -65,7 +66,9 @@ export function recordTestbedMissionRunFromOperatorResult(
   const mission = isRecord(result.mission) ? result.mission : undefined;
   if (!mission || mission.kind !== "testbed_agent_browser_mission") return undefined;
   const target = isRecord(mission.target) ? mission.target : {};
+  const safety = isRecord(mission.safety) ? mission.safety : {};
   const createdAt = new Date(nowMs).toISOString();
+  const allowTestMutations = safety.browserMissionShouldMutate === true;
   const run: TestbedMissionRun = {
     schemaVersion: 1,
     kind: "testbed_mission_run",
@@ -77,18 +80,23 @@ export function recordTestbedMissionRunFromOperatorResult(
       ?? "Test whether a normal outside agent can understand and use the page.",
     agentName: stringField(target, "agentName") ?? "Hermes",
     freshMemory: target.freshMemory !== false,
+    allowTestMutations,
     mission,
     history: [
       {
         at: createdAt,
         status: "ready",
         event: "mission_packet_ready",
-        message: "Mission packet generated; waiting for a clean browser-only agent run.",
+        message: allowTestMutations
+          ? "Mission packet generated; waiting for a clean browser-only test-mode run where safe sandbox page mutations are allowed."
+          : "Mission packet generated; waiting for a clean browser-only agent run.",
       },
     ],
     createdAt,
     updatedAt: createdAt,
-    statusReason: "Mission packet is ready; waiting for a browser-only agent run and structured report.",
+    statusReason: allowTestMutations
+      ? "Mission packet is ready; waiting for a browser-only test-mode run and structured report."
+      : "Mission packet is ready; waiting for a browser-only agent run and structured report.",
   };
   missionRuns.push(run);
   while (missionRuns.length > MAX_MISSION_RUNS) missionRuns.shift();
@@ -121,8 +129,9 @@ export function recordTestbedMissionReportFromMessage(
 
   const verdict = normalizeVerdict(report.verdict);
   const stoppedBeforeMutation = report.stoppedBeforeMutation !== false;
-  const completed = verdict === "pass" && stoppedBeforeMutation;
-  const failed = !verdict || verdict === "fail" || verdict === "partial" || !stoppedBeforeMutation;
+  const mutationBoundaryOk = stoppedBeforeMutation || run.allowTestMutations;
+  const completed = verdict === "pass" && mutationBoundaryOk;
+  const failed = !verdict || verdict === "fail" || verdict === "partial" || !mutationBoundaryOk;
   const status: TestbedMissionStatus = completed ? "completed" : failed ? "failed" : "completed";
   const updatedAt = new Date(nowMs).toISOString();
   run.result = {
@@ -131,7 +140,7 @@ export function recordTestbedMissionReportFromMessage(
   };
   run.status = status;
   run.updatedAt = updatedAt;
-  run.statusReason = missionReportStatusReason(report, status, stoppedBeforeMutation);
+  run.statusReason = missionReportStatusReason(report, status, stoppedBeforeMutation, run.allowTestMutations);
   run.history.push({
     at: updatedAt,
     status,
@@ -192,6 +201,7 @@ export function testbedMissionRunToMonitorItem(run: TestbedMissionRun): Record<s
         touchedAreas: ["testbed"],
         testSignals: [
           "browser mission packet ready",
+          ...(run.allowTestMutations ? ["test-mode page mutation allowed"] : []),
           ...(reportAttached ? ["browser agent report attached"] : []),
         ],
         missingTestSignals: reportAttached ? [] : ["browser agent report"],
@@ -204,6 +214,7 @@ export function testbedMissionRunToMonitorItem(run: TestbedMissionRun): Record<s
     safety: {
       source: "monitor",
       wouldMutate: false,
+      browserMissionShouldMutate: run.allowTestMutations,
       wouldWriteLocalCheckpoint: false,
       freeFormHermesPromptUsed: false,
     },
@@ -463,6 +474,9 @@ function validateMissionReport(report: Record<string, unknown>): string[] {
   if (!nonEmptyStringArray(report.evidence)) {
     errors.push("Add at least one evidence item or observation.");
   }
+  if (report.stoppedBeforeMutation === false && !nonEmptyStringArray(report.mutationsAttempted)) {
+    errors.push("List mutationsAttempted when the browser agent crossed a test mutation boundary.");
+  }
   if (!isRecord(report.scores)) {
     errors.push("Add a scores object, even if some scores are 0.");
   }
@@ -492,16 +506,20 @@ function normalizeVerdict(value: unknown): "pass" | "partial" | "fail" | undefin
 function missionReportStatusReason(
   report: Record<string, unknown>,
   status: TestbedMissionStatus,
-  stoppedBeforeMutation: boolean
+  stoppedBeforeMutation: boolean,
+  allowTestMutations: boolean
 ): string {
   const verdict = normalizeVerdict(report.verdict) ?? "reported";
   const blockers = Array.isArray(report.blockers)
     ? report.blockers.map(String).filter(Boolean)
     : [];
-  if (!stoppedBeforeMutation) {
+  if (!stoppedBeforeMutation && !allowTestMutations) {
     return "Browser-agent report says the mission crossed or attempted a mutation boundary.";
   }
   if (status === "completed") {
+    if (!stoppedBeforeMutation && allowTestMutations) {
+      return "Browser-agent report passed after permitted testbed-only page mutation; Hermes has structured evidence for this mission.";
+    }
     return "Browser-agent report passed; Hermes has structured evidence for this testbed mission.";
   }
   if (blockers.length > 0) {

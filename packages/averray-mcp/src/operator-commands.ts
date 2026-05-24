@@ -611,6 +611,7 @@ function testbedAgentMissionInput(
       ? "Claude"
       : "Hermes";
   const freshMemory = !/\b(with memory|use memory|warm memory|returning agent|returning-agent|not fresh)\b/.test(compact);
+  const allowTestMutations = /\b(test mode|test-mode|sandbox|fake|demo|allow test mutation|allow test mutations|test mutation allowed|test mutations allowed|may submit|can submit)\b/.test(compact);
   return {
     handled: true,
     input: {
@@ -618,6 +619,7 @@ function testbedAgentMissionInput(
       ...(goal ? { goal } : {}),
       agentName,
       freshMemory,
+      ...(allowTestMutations ? { allowTestMutations: true } : {}),
     },
   };
 }

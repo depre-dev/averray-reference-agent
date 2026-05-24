@@ -17,10 +17,12 @@ describe("testbed agent mission", () => {
         privilegedAverrayMcpAllowed: false,
         hiddenProjectContextAllowed: false,
         humanHelpAllowed: false,
+        mutationMode: "stop_before_mutation",
       },
       safety: {
         missionGeneratorMutates: false,
         browserMissionShouldMutate: false,
+        allowedMutationScope: "none; stop at mutation boundary",
         freshAgentDefault: true,
         requiresEvidence: true,
         comparesAcrossAgents: true,
@@ -33,6 +35,8 @@ describe("testbed agent mission", () => {
     expect(mission.reportSchema).toMatchObject({
       verdict: "pass | partial | fail",
       confidence: "0.0-1.0",
+      mutationMode: "stop_before_mutation",
+      mutationsAttempted: ["test-only actions submitted, or empty array"],
       stoppedBeforeMutation: "boolean",
     });
     expect(mission.reportSchema.completedPath).toEqual(["ordered browser actions the agent took"]);
@@ -68,5 +72,27 @@ describe("testbed agent mission", () => {
     expect(mission.missionPrompt).toContain("You are Claude");
     expect(mission.missionPrompt).toContain("Open https://testbed.example/app.");
     expect(mission.missionPrompt).toContain("Goal: Complete onboarding");
+  });
+
+  it("can build a test-mode mission where sandbox page mutations are allowed", () => {
+    const mission = getTestbedAgentMission({
+      targetUrl: "https://testbed.example/app",
+      goal: "Complete fake onboarding",
+      allowTestMutations: true,
+    });
+
+    expect(mission.agentMode.mutationMode).toBe("testbed_mutation_allowed");
+    expect(mission.safety).toMatchObject({
+      missionGeneratorMutates: false,
+      browserMissionShouldMutate: true,
+      allowedMutationScope: "testbed-only page actions that are visibly fake, sandbox, or non-production",
+    });
+    expect(mission.missionPrompt).toContain("you may complete test-only submits");
+    expect(mission.missionPrompt).toContain("Stop before real payment");
+    expect(mission.deniedShortcuts).toContain("real wallet signatures, real payment, production submit, deploy, merge, or account mutation");
+    expect(mission.reportSchema).toMatchObject({
+      mutationMode: "testbed_mutation_allowed",
+      stoppedBeforeMutation: "boolean",
+    });
   });
 });

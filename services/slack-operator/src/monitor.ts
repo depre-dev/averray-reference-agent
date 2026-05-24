@@ -42,6 +42,10 @@ export function normalizeMonitorCommandText(text: string): string {
 }
 
 function isBlockedMonitorCommand(text: string): boolean {
+  if (isTestbedMissionMonitorCommand(text) && isTestbedMutationModeText(text)) {
+    return /\b(merge\s+(pr|#|now)|deploy(?! for)|rollback(?! for)|restart|rotate|set secret|secret set|ssh|claim)\b/.test(text)
+      || /\bwikipedia citation repair\b/.test(text);
+  }
   return Boolean(
     /\b(approve|execute|merge)\b.*\b(merge steward|github merge steward)\b/.test(text)
     || /\b(merge steward|github merge steward)\b.*\b(approve|execute|merge)\b/.test(text)
@@ -63,9 +67,17 @@ function isAllowedMonitorCommand(text: string): boolean {
     || /^what can you do for us( details?| full| audit)?$/.test(text)
     || /^(how do we deploy|runbook for|secret rotation runbook)( .*)?$/.test(text)
     || /^propose (merge|deploy|secret rotation|rollback)\b/.test(text)
-    || /^(testbed agent mission|agent testbed mission|agent browser mission|browser mission|fresh agent mission|fresh agent page test|out of box agent test|out-of-box agent test|normal agent page test|can hermes test the page|test page as fresh agent)(\b.*)?$/.test(text)
+    || isTestbedMissionMonitorCommand(text)
     || /^run testbed e2e read[ -]?only( details?| full| audit)?$/.test(text)
   );
+}
+
+function isTestbedMissionMonitorCommand(text: string): boolean {
+  return /^(testbed agent mission|agent testbed mission|agent browser mission|browser mission|fresh agent mission|fresh agent page test|out of box agent test|out-of-box agent test|normal agent page test|can hermes test the page|test page as fresh agent)(\b.*)?$/.test(text);
+}
+
+function isTestbedMutationModeText(text: string): boolean {
+  return /\b(test mode|test-mode|sandbox|fake|demo|allow test mutation|allow test mutations|test mutation allowed|test mutations allowed|may submit|can submit)\b/.test(text);
 }
 
 // Inline SVG used for the PWA icon and apple-touch-icon. The brand mark
@@ -6582,6 +6594,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const rubric = Array.isArray(mission.scoringRubric) ? mission.scoringRubric : [];
       const runbook = Array.isArray(mission.runbook) ? mission.runbook : [];
       const prompt = String(mission.missionPrompt || "");
+      const safety = mission.safety || {};
+      const allowTestMutations = run.allowTestMutations === true || safety.browserMissionShouldMutate === true;
       const reportTemplate = testbedMissionReportTemplate(run, mission);
       const result = run.result || null;
       const history = testbedMissionHistoryList(run.history);
@@ -6595,11 +6609,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         row("Goal", escapeHtml(String(run.goal || target.goal || "test first-contact usability"))),
         row("Agent", escapeHtml(String(run.agentName || target.agentName || "Hermes"))),
         row("Memory", escapeHtml(run.freshMemory === false ? "returning memory allowed" : "fresh or explicitly ignored")),
+        row("Mutation mode", escapeHtml(allowTestMutations ? "testbed-only mutation allowed" : "stop before mutation")),
         row("Status", escapeHtml(String(run.status || summary.status || "ready"))),
       ].join("");
       const runbookHtml = runbook.length
         ? '<ol class="resolution-steps">' + runbook.slice(0, 8).map((step) => '<li>' + escapeHtml(String(step)) + '</li>').join("") + '</ol>'
-        : '<p class="resolution-summary">Open the target in a clean browser profile, follow the visible UI, stop before mutation, and report evidence.</p>';
+        : '<p class="resolution-summary">' + escapeHtml(allowTestMutations
+          ? "Open the target in a clean browser profile, follow the visible UI, complete only clearly testbed/fake actions, and report evidence."
+          : "Open the target in a clean browser profile, follow the visible UI, stop before mutation, and report evidence.") + '</p>';
       const rubricHtml = rubric.length
         ? '<div class="check-matrix">' + rubric.slice(0, 8).map((entry) => {
           const id = entry && entry.id ? String(entry.id) : "rubric";
@@ -6612,7 +6629,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           '<details class="drawer-disclosure prompt-disclosure"><summary>Structured result JSON</summary><pre class="prompt-box">' + escapeHtml(prettyJson(result)) + '</pre></details>'
         : '<p class="resolution-summary">No report is attached yet. The next useful thing is to run the browser mission and paste the structured report into the collaboration chat.</p>';
       return '<section class="drawer-section testbed-mission-panel"><h3>Testbed mission</h3>' +
-        '<p class="resolution-summary">This starts from the monitor, but execution is browser-only: copy the prompt into a clean agent/browser run, then bring the report back here for Hermes to judge.</p>' +
+        '<p class="resolution-summary">' + escapeHtml(allowTestMutations
+          ? "This starts from the monitor, but execution is browser-only. In test mode the agent may complete clearly fake/sandbox page actions, then bring the report back here for Hermes to judge."
+          : "This starts from the monitor, but execution is browser-only: copy the prompt into a clean agent/browser run, then bring the report back here for Hermes to judge.") + '</p>' +
         '<dl class="resolution-grid">' + rows + '</dl>' +
         '<h4>Runbook</h4>' + runbookHtml +
         '<h4>Rubric</h4>' + rubricHtml +
@@ -6672,12 +6691,15 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const verdict = String(result && result.verdict || "reported");
       const confidence = typeof result.confidence === "number" ? String(Math.round(result.confidence * 100)) + "%" : "not recorded";
       const stopped = result && typeof result.stoppedBeforeMutation === "boolean" ? (result.stoppedBeforeMutation ? "yes" : "no") : "not recorded";
+      const mutationMode = result && result.mutationMode ? String(result.mutationMode) : "not recorded";
       const rows = [
         row("Verdict", escapeHtml(verdict)),
         row("Confidence", escapeHtml(confidence)),
+        row("Mutation mode", escapeHtml(mutationMode)),
         row("Stopped before mutation", escapeHtml(stopped)),
       ].join("");
       const completedPath = testbedReportList(result && result.completedPath);
+      const mutationsAttempted = testbedReportList(result && result.mutationsAttempted);
       const blockers = testbedReportList(result && result.blockers);
       const confusingMoments = testbedReportList(result && result.confusingMoments);
       const recommendations = testbedReportList(result && result.recommendations);
@@ -6686,6 +6708,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       return '<section class="drawer-section testbed-report-packet"><h3>Browser-agent report</h3>' +
         '<dl class="resolution-grid">' + rows + '</dl>' +
         (completedPath.length ? '<h4>Completed path</h4><ol class="resolution-steps">' + completedPath.map((step) => '<li>' + escapeHtml(step) + '</li>').join("") + '</ol>' : "") +
+        (mutationsAttempted.length ? '<h4>Test mutations attempted</h4><ol class="resolution-steps">' + mutationsAttempted.map((entry) => '<li>' + escapeHtml(entry) + '</li>').join("") + '</ol>' : "") +
         (blockers.length ? '<h4>Blockers</h4><ol class="resolution-steps">' + blockers.map((entry) => '<li>' + escapeHtml(entry) + '</li>').join("") + '</ol>' : "") +
         (confusingMoments.length ? '<h4>Confusing moments</h4><ol class="resolution-steps">' + confusingMoments.map((entry) => '<li>' + escapeHtml(entry) + '</li>').join("") + '</ol>' : "") +
         (evidence.length ? '<h4>Evidence</h4><div class="operator-evidence">' + evidence.map((entry) => '<div class="operator-evidence-item"><span class="operator-evidence-label">' + escapeHtml(entry.label) + '</span><span class="operator-evidence-value">' + escapeHtml(entry.value) + '</span></div>').join("") + '</div>' : "") +
@@ -10093,7 +10116,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
               mergeRecommendation: "not_applicable",
               reviewSignals: {
                 touchedAreas: ["testbed"],
-                testSignals: ["browser mission packet ready"],
+                testSignals: [
+                  "browser mission packet ready",
+                  ...(run.allowTestMutations === true ? ["test-mode page mutation allowed"] : []),
+                ],
                 missingTestSignals: status === "completed" ? [] : ["browser agent report"],
               },
               reviewReasons: status === "failed"

@@ -46,6 +46,11 @@ describe("slack operator personal monitor", () => {
     expect(guardMonitorCommand("ops health")).toMatchObject({ allowed: true });
     expect(guardMonitorCommand("propose deploy for averray-agent/agent sha abc1234")).toMatchObject({ allowed: true });
     expect(guardMonitorCommand("agent browser mission https://testbed.example/app goal: complete onboarding")).toMatchObject({ allowed: true });
+    expect(guardMonitorCommand("agent browser mission https://testbed.example/app goal: complete onboarding test mode allow test mutations")).toMatchObject({ allowed: true });
+    expect(guardMonitorCommand("agent browser mission https://testbed.example/app test mode deploy now")).toMatchObject({
+      allowed: false,
+      reason: "mutation_command_blocked",
+    });
     expect(guardMonitorCommand("merge steward approve averray-agent/agent#123")).toMatchObject({
       allowed: false,
       reason: "mutation_command_blocked",
@@ -240,6 +245,8 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("isTestbedMissionItem(item)");
     expect(html).toContain("renderTestbedMissionPanel(item, summary)");
     expect(html).toContain("Fresh-agent browser mission");
+    expect(html).toContain("testbed-only mutation allowed");
+    expect(html).toContain("Test mutations attempted");
     expect(html).toContain("Copy mission prompt");
     expect(html).toContain("Copy report template");
     expect(html).toContain("testbedMissionReportTemplate(run, mission)");
