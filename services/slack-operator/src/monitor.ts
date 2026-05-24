@@ -7782,8 +7782,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function selectedPrRoomBriefingForItem(item, verdict, action, lane) {
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
       if (isTestbedMissionItem(item)) {
-        const run = testbedMissionRun(item) || {};
-        return "I am treating " + title + " as a testbed mission room, not a PR room. The mission target is " + String(run.targetUrl || "[TESTBED_URL]") + ", the goal is " + String(run.goal || "test first-contact usability") + ", and the board is waiting for a browser-only report from a clean agent run.";
+        return selectedTestbedMissionBriefing(item, title);
       }
       const laneLabel = boardLaneLabel(lane && lane.key);
       const age = handoffAge(item);
@@ -7795,10 +7794,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function selectedPrRoomEvidenceForItem(item, verdict) {
       const summary = item.summary || {};
       if (isTestbedMissionItem(item)) {
-        const run = testbedMissionRun(item) || {};
-        return run.result
-          ? "The important evidence is the structured browser-agent report attached to this mission."
-          : "The important evidence is still missing: a fresh browser-agent report with verdict, scores, blockers, and screenshots or trace references.";
+        return selectedTestbedMissionEvidence(item);
       }
       const signals = summary.reviewSignals || {};
       const githubLive = summary.githubLive || {};
@@ -7828,7 +7824,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function selectedPrRoomBoundaryForItem(item, verdict, action, lane) {
-      if (isTestbedMissionItem(item)) return "I will keep this in Hermes Checking until the browser mission report arrives; this is product/testbed evidence, not a GitHub merge signal.";
+      if (isTestbedMissionItem(item)) return selectedTestbedMissionBoundary(item);
       if (isExternalDraftPullRequest(item)) return "I will keep it watched and quiet unless Pascal explicitly delegates a Codex takeover.";
       if (isDraftPullRequest(item)) return "I will hold it out of release until the draft is finished or marked ready, then CI and Hermes can take a real pass.";
       if (codexTaskFailedForItem(item)) return "I will not ask Hermes to bless this again until Codex has dealt with the failed task or proposed a clean retry.";
@@ -7843,7 +7839,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function selectedPrRoomHandoffForItem(item, verdict, action, lane) {
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
       if (isTestbedMissionItem(item)) {
-        return "Hermes, run " + title + " like a normal outside agent: browser-visible UI only, no repo memory, no private MCP, and stop before real mutation. Bring back the structured report so Pascal can see what a future agent actually experiences.";
+        return selectedTestbedMissionHandoff(item, title);
       }
       if (isExternalDraftPullRequest(item)) {
         return "Pascal, " + title + " is an external draft. I am watching it, but I will not quietly convert it into Codex work unless you explicitly hand it over.";
@@ -7870,6 +7866,60 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         return "Hermes, " + title + " is in production verification. Watch hosted health and the post-deploy suite before calling it done.";
       }
       return action.owner + ", your next turn on " + title + " is: " + action.text + ".";
+    }
+
+    function selectedTestbedMissionBriefing(item, title) {
+      const run = testbedMissionRun(item) || {};
+      const status = normalize(run.status || (item.summary || {}).status || item.status);
+      const target = String(run.targetUrl || "[TESTBED_URL]");
+      const goal = String(run.goal || "test first-contact usability");
+      const statusLine = status === "completed"
+        ? "It has a passing report, so I am treating it as baseline evidence rather than active work."
+        : status === "failed"
+          ? "It has a failed or partial browser-agent report, so the useful question is what small page fix or rerun proves the blocker changed."
+          : "It is waiting for a clean browser-only report from a fresh agent.";
+      return "I am treating " + title + " as a testbed mission room, not a PR room. Target: " + target + ". Goal: " + goal + ". " + statusLine;
+    }
+
+    function selectedTestbedMissionEvidence(item) {
+      const run = testbedMissionRun(item) || {};
+      const result = run.result || null;
+      if (!result) {
+        return "The important evidence is still missing: a fresh browser-agent report with verdict, scores, blockers, and screenshots or trace references.";
+      }
+      const verdict = String(result.verdict || run.status || "reported");
+      const blockers = testbedReportList(result.blockers);
+      const completedPath = testbedReportList(result.completedPath);
+      const recommendations = testbedReportList(result.recommendations);
+      if (normalize(run.status) === "completed") {
+        return "The important evidence is the passing browser-agent report: verdict " + verdict + ". " +
+          (completedPath[0] ? "Known-good path starts with: " + completedPath[0] + ". " : "") +
+          (recommendations[0] ? "Next time I will watch this improvement: " + recommendations[0] + "." : "This is the baseline to compare future page changes against.");
+      }
+      return "The important evidence is the failed browser-agent report: verdict " + verdict + ". " +
+        (blockers[0] ? "Primary blocker: " + blockers[0] + ". " : "") +
+        (recommendations[0] ? "Suggested next product move: " + recommendations[0] + "." : "Use the rerun prompt to see whether the blocker disappears, stays, or changes.");
+    }
+
+    function selectedTestbedMissionBoundary(item) {
+      const run = testbedMissionRun(item) || {};
+      const status = normalize(run.status || (item.summary || {}).status || item.status);
+      if (status === "completed") return "I will keep the mission as release-adjacent evidence, not a merge gate; it becomes useful again when a future page change needs comparison against this baseline.";
+      if (status === "failed") return "I will keep this visible until the report turns into either one bounded product fix or a rerun that proves the blocker changed; this is product evidence, not a GitHub merge signal.";
+      return "I will keep this in Hermes Checking until the browser mission report arrives; this is product/testbed evidence, not a GitHub merge signal.";
+    }
+
+    function selectedTestbedMissionHandoff(item, title) {
+      const run = testbedMissionRun(item) || {};
+      const status = normalize(run.status || (item.summary || {}).status || item.status);
+      if (status === "completed") {
+        return "Hermes, keep " + title + " as the known-good outside-agent path. When the page changes, ask for a fresh run and compare it against this baseline before trusting the new experience.";
+      }
+      if (status === "failed") {
+        const brief = testbedMissionComparisonBrief(run);
+        return "Hermes, turn " + title + " into a concrete follow-up: " + (brief || "compare the next run against the blocker in the failed report.") + " If the fix is not obvious, ask Codex for one small product change instead of a broad redesign.";
+      }
+      return "Hermes, run " + title + " like a normal outside agent: browser-visible UI only, no repo memory, no private MCP, and stop before real mutation. Bring back the structured report so Pascal can see what a future agent actually experiences.";
     }
 
     function renderCollaborationThread(options) {
@@ -9111,6 +9161,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         };
       }
       if (normalized === "handoff monitor details") {
+        if (isTestbedMissionItem(item)) {
+          return {
+            author: "operator",
+            kind: "request_context",
+            addressedTo: "hermes",
+            text: "Hermes, I opened testbed mission context for " + label + ". Explain the mission state, what evidence is attached or missing, and the next smallest useful move for a normal outside-agent page test.",
+          };
+        }
         return {
           author: "operator",
           kind: "request_context",
@@ -9133,6 +9191,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (!item) return "the selected card";
       const pr = item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId);
       const repo = String(item.repo || "averray-agent/agent");
+      if (isTestbedMissionItem(item)) {
+        const run = testbedMissionRun(item) || {};
+        return run.id ? "testbed mission " + String(run.id) : "the selected testbed mission";
+      }
       if (pr) return repo + "#" + pr;
       if (item.sha) return repo + "@" + compactSha(item.sha);
       return item.correlationId ? "handoff " + String(item.correlationId) : "this card";
