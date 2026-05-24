@@ -6561,6 +6561,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const baselinePrompt = testbedMissionBaselinePrompt(run, mission);
       const comparisonBrief = testbedMissionComparisonBrief(run);
       const fixBrief = testbedMissionFixBrief(run);
+      const fixBriefPrompt = testbedMissionFixBriefPrompt(run, fixBrief);
       const rows = [
         row("Target", escapeHtml(String(run.targetUrl || target.url || "[TESTBED_URL]"))),
         row("Goal", escapeHtml(String(run.goal || target.goal || "test first-contact usability"))),
@@ -6598,6 +6599,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         '<details class="drawer-disclosure prompt-disclosure"><summary>Report template</summary><pre class="prompt-box">' + escapeHtml(reportTemplate) + '</pre></details>' +
         '<div class="resolution-actions">' +
           (prompt ? '<button class="soft-button" type="button" data-copy-label="Mission prompt copied" data-copy-text="' + escapeAttr(prompt) + '">Copy mission prompt</button>' : "") +
+          (fixBriefPrompt ? '<button class="soft-button" type="button" data-copy-label="Fix brief copied" data-copy-text="' + escapeAttr(fixBriefPrompt) + '">Copy fix brief</button>' : "") +
           (baselinePrompt ? '<button class="soft-button" type="button" data-copy-label="Baseline prompt copied" data-copy-text="' + escapeAttr(baselinePrompt) + '">Copy baseline prompt</button>' : "") +
           (rerunPrompt ? '<button class="soft-button" type="button" data-copy-label="Rerun prompt copied" data-copy-text="' + escapeAttr(rerunPrompt) + '">Copy rerun prompt</button>' : "") +
           '<button class="soft-button" type="button" data-copy-label="Report schema copied" data-copy-text="' + escapeAttr(prettyJson(reportSchema)) + '">Copy report schema</button>' +
@@ -6628,8 +6630,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const reportTemplate = testbedMissionReportTemplate(run, mission);
       const rerunPrompt = testbedMissionRerunPrompt(run, mission);
       const baselinePrompt = testbedMissionBaselinePrompt(run, mission);
+      const fixBriefPrompt = testbedMissionFixBriefPrompt(run, testbedMissionFixBrief(run));
       return [
         prompt ? '<button class="soft-button" type="button" data-copy-label="Mission prompt copied" data-copy-text="' + escapeAttr(prompt) + '">Copy mission prompt</button>' : "",
+        fixBriefPrompt ? '<button class="soft-button" type="button" data-copy-label="Fix brief copied" data-copy-text="' + escapeAttr(fixBriefPrompt) + '">Copy fix brief</button>' : "",
         baselinePrompt ? '<button class="soft-button" type="button" data-copy-label="Baseline prompt copied" data-copy-text="' + escapeAttr(baselinePrompt) + '">Copy baseline prompt</button>' : "",
         rerunPrompt ? '<button class="soft-button" type="button" data-copy-label="Rerun prompt copied" data-copy-text="' + escapeAttr(rerunPrompt) + '">Copy rerun prompt</button>' : "",
         '<button class="soft-button" type="button" data-copy-label="Report template copied" data-copy-text="' + escapeAttr(reportTemplate) + '">Copy report template</button>',
@@ -6817,6 +6821,27 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         rerunProof: 'run this same testbed mission again and verify whether "' + primaryBlocker + '" is gone, unchanged, or replaced',
         evidence,
       };
+    }
+
+    function testbedMissionFixBriefPrompt(run, fixBrief) {
+      if (!fixBrief) return "";
+      const nl = String.fromCharCode(10);
+      const evidence = Array.isArray(fixBrief.evidence) && fixBrief.evidence.length
+        ? "Evidence:" + nl + "- " + fixBrief.evidence.join(nl + "- ")
+        : "Evidence: see the attached browser-agent report in Hermes.";
+      return [
+        "Testbed mission fix brief: " + String(run && run.id || "unknown"),
+        "",
+        "Target: " + String(run && run.targetUrl || "[TESTBED_URL]"),
+        "Goal: " + String(run && run.goal || "test first-contact usability"),
+        "Primary blocker: " + fixBrief.primaryBlocker,
+        "Suspected UX gap: " + fixBrief.suspectedUxGap,
+        "Smallest product move: " + fixBrief.smallestProductMove,
+        "Proof after fix: " + fixBrief.rerunProof,
+        "",
+        "Use this as a narrow Codex/product task. Do not broaden into a redesign; change the smallest page/copy/control surface that helps a fresh outside agent complete the goal safely.",
+        evidence,
+      ].join(nl);
     }
 
     function testbedWeakScoreLabels(value) {
