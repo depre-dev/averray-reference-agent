@@ -248,6 +248,9 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Structured result JSON");
     expect(html).toContain("Comparison brief");
     expect(html).toContain("testbedMissionComparisonBrief(run)");
+    expect(html).toContain("testbedMissionChatSummary(testbedMissionRun(item))");
+    expect(html).toContain("The browser-agent report passed, so I am treating it as a baseline");
+    expect(html).toContain("The browser-agent report needs a follow-up run");
     expect(html).toContain("Mission timeline");
     expect(html).toContain("testbedMissionHistoryList(run.history)");
     expect(html).toContain("Baseline for future runs");

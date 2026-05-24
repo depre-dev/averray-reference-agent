@@ -8594,7 +8594,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const movedFrom = previous ? " from " + boardLaneLabel(previous.laneKey) : "";
       const nextStep = nextStepNarrationForItem(item, verdict, action, lane);
       if (isTestbedMissionItem(item)) {
-        return "Update on " + title + ": I opened a testbed mission room" + movedFrom + ". This is not a PR gate; it is a browser-only evidence run. " + nextStep;
+        return "Update on " + title + ": I opened a testbed mission room" + movedFrom + ". This is not a PR gate; it is a browser-only evidence run. " + testbedMissionChatSummary(testbedMissionRun(item)) + " " + nextStep;
       }
       if (isDraftPullRequest(item)) {
         return "Update on " + title + ": it is still a draft, so I am keeping it in Waiting / Drafts instead of treating it as an urgent release blocker. " + nextStep;
@@ -8635,7 +8635,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
       const nextStep = nextStepNarrationForItem(item, verdict, action, lane);
       if (isTestbedMissionItem(item)) {
-        return "Hermes has a testbed browser mission ready for " + title + ". Run it as a clean outside agent, use only the visible page, and bring the structured report back here so the board can judge the product experience instead of guessing. " + nextStep;
+        return "Hermes has a testbed browser mission for " + title + ". " + testbedMissionChatSummary(testbedMissionRun(item)) + " " + nextStep;
       }
       if (isDraftPullRequest(item)) {
         if (isExternalDraftPullRequest(item)) {
@@ -8686,7 +8686,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     // terse, action-first. Hermes's voice: dry, methodical, observing.
     function collaborationAskForItem(item, verdict, action, lane) {
       const title = cardTitleText(pipelineTitle(item), item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId), item);
-      if (isTestbedMissionItem(item)) return "Hermes, " + title + " is a browser-only mission. Please run it like a normal outside agent with fresh memory, then post the verdict, evidence, scores, and blockers back here.";
+      if (isTestbedMissionItem(item)) return "Hermes, " + title + " is a browser-only mission. " + testbedMissionChatSummary(testbedMissionRun(item));
       if (isExternalDraftPullRequest(item)) return "I am watching " + title + " as an external draft. It stays out of the release path until the PR author or owning agent marks it ready; Codex should not pick it up unless Pascal explicitly delegates takeover.";
       if (isDraftPullRequest(item)) return "Codex, " + title + " is still in draft mode with a delegated task. Finish the draft or mark it ready for review; once that happens I will wait for CI and Hermes to re-run before moving it forward.";
       if (codexTaskFailedForItem(item)) return "Codex, " + title + " failed in the runner. Please inspect the failed output first, then either fix the runner setup, push the smallest PR-check fix, or create a smaller retry task so Hermes has something concrete to re-check.";
@@ -8696,6 +8696,20 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (lane.key === "queue") return title + " is ready enough to sit in the merge queue. I am holding it there until branch protection and merge/deploy ownership are both clear.";
       if (lane.key === "deploy") return "I am watching the deploy on " + title + ". If health or verification slips, I will say so here before anyone calls it done.";
       return action.owner + ", " + action.text + " for " + title + ".";
+    }
+
+    function testbedMissionChatSummary(run) {
+      const mission = run || {};
+      const result = mission.result || null;
+      const status = String(mission.status || "");
+      if (result && (status === "completed" || result.verdict === "pass")) {
+        return "The browser-agent report passed, so I am treating it as a baseline: future runs should preserve the known-good path and compare against the attached evidence.";
+      }
+      if (result && (status === "failed" || result.verdict === "partial" || result.verdict === "fail" || result.stoppedBeforeMutation === false)) {
+        const brief = testbedMissionComparisonBrief(mission);
+        return "The browser-agent report needs a follow-up run. " + (brief || "Use the rerun prompt to check whether the prior blocker is gone, unchanged, or replaced.");
+      }
+      return "Run it as a clean outside agent with fresh memory, use only the visible page, stop before mutation, and bring the structured report back here so the board can judge the product experience instead of guessing.";
     }
 
     function collaborationMetaForItem(item, verdict) {
