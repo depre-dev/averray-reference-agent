@@ -98,6 +98,25 @@ Wikipedia citation-repair execution.
 Start with [docs/COMMAND_CENTER.md](docs/COMMAND_CENTER.md). Do not install
 Workspace with `curl | bash` on the VPS, and do not expose the UI publicly.
 
+Other local agents can ask Hermes to run a browser-only testbed mission through
+the command center API:
+
+```bash
+curl -fsS -X POST http://127.0.0.1:8790/monitor/testbed-missions \
+  -H 'content-type: application/json' \
+  -d '{"requester":"codex","targetUrl":"https://testbed.averray.com","goal":"Test the main flow like a new outside agent.","allowTestMutations":true}' | jq .
+```
+
+Poll `GET /monitor/testbed-missions` for mission and runner status. If the
+monitor is token-protected, send the same bearer token used for the board.
+For a local wrapper, run:
+
+```bash
+ALLOW_TEST_MUTATIONS=true scripts/request-hermes-testbed-mission.sh \
+  https://testbed.averray.com \
+  "Test the main flow like a new outside agent."
+```
+
 ## Safety Defaults
 
 - Testnet only.
