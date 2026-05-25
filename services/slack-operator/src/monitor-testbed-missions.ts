@@ -98,9 +98,10 @@ let loadedMissionStorePath: string | undefined;
 
 export function recordTestbedMissionRunFromOperatorResult(
   result: unknown,
-  nowMs: number = Date.now()
+  nowMs: number = Date.now(),
+  path?: string
 ): TestbedMissionRun | undefined {
-  ensureMissionStoreLoaded();
+  ensureMissionStoreLoaded(path);
   if (!isRecord(result) || result.kind !== "testbed_agent_mission") return undefined;
   const mission = isRecord(result.mission) ? result.mission : undefined;
   if (!mission || mission.kind !== "testbed_agent_browser_mission") return undefined;
@@ -139,7 +140,7 @@ export function recordTestbedMissionRunFromOperatorResult(
   };
   missionRuns.push(run);
   while (missionRuns.length > MAX_MISSION_RUNS) missionRuns.shift();
-  persistMissionStore();
+  persistMissionStore(path);
   return run;
 }
 

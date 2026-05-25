@@ -132,6 +132,44 @@ Mission state is stored in `AVERRAY_TESTBED_MISSIONS_PATH`, defaulting to
 `/data/testbed-missions.json` in Docker so the monitor and runner share durable
 state across container restarts.
 
+Other agents can queue the same mission directly through the monitor API. This
+is the stable handoff point when Claude, Codex, or another local agent wants
+Hermes to test a page without clicking the board:
+
+```bash
+curl -fsS -X POST http://127.0.0.1:8790/monitor/testbed-missions \
+  -H 'content-type: application/json' \
+  -d '{
+    "requester": "codex",
+    "targetUrl": "https://testbed.averray.com",
+    "goal": "Try the main onboarding flow like a new outside agent.",
+    "allowTestMutations": true
+  }' | jq .
+```
+
+Agents can poll mission and runner state with:
+
+```bash
+curl -fsS 'http://127.0.0.1:8790/monitor/testbed-missions?limit=10' | jq .
+curl -fsS 'http://127.0.0.1:8790/monitor/testbed-missions/<mission-id>' | jq .
+```
+
+If `SLACK_OPERATOR_MONITOR_TOKEN` is set, pass the same token as
+`Authorization: Bearer <token>` or `?token=<token>`. Creating a mission does not
+run privileged Averray MCP tools; it writes a browser mission packet for the
+Hermes testbed runner to claim.
+
+For local agents, the repo ships a small wrapper that handles JSON and optional
+bearer auth:
+
+```bash
+MONITOR_URL=http://127.0.0.1:8790 \
+ALLOW_TEST_MUTATIONS=true \
+scripts/request-hermes-testbed-mission.sh \
+  https://testbed.averray.com \
+  "Try the main onboarding flow like a new outside agent."
+```
+
 The runner is opt-in and fail-closed:
 
 ```env

@@ -73,6 +73,11 @@ import {
   type TestbedMissionRun,
 } from "./monitor-testbed-missions.js";
 import {
+  createTestbedMissionFromAgent,
+  getTestbedMissionForAgent,
+  listTestbedMissionsForAgent,
+} from "./testbed-agent-entrypoint.js";
+import {
   formatStalePrAlertForSlack,
   shouldPostStalePrAlert,
   stalePrAlertItems,
@@ -185,6 +190,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
           "/monitor/recheck",
           "/monitor/codex-tasks",
           "/monitor/collaboration",
+          "/monitor/testbed-missions",
           "/monitor/manifest.webmanifest",
         ] : [],
       },
@@ -270,6 +276,45 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       return;
     }
     await handleMonitorCommandRequest(request, response);
+    return;
+  }
+  const testbedMissionId = monitorTestbedMissionId(url.pathname);
+  if (request.method === "GET" && (url.pathname === "/monitor/testbed-missions" || testbedMissionId)) {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    if (testbedMissionId) {
+      const mission = getTestbedMissionForAgent(testbedMissionId);
+      if (!mission) {
+        writeJson(response, 404, { error: "testbed_mission_not_found", id: testbedMissionId });
+        return;
+      }
+      writeJson(response, 200, mission);
+      return;
+    }
+    const limit = parseOptionalInteger(url.searchParams.get("limit"));
+    const activeOnly = parseOptionalBoolean(url.searchParams.get("activeOnly"));
+    writeJson(response, 200, listTestbedMissionsForAgent({
+      ...(limit !== undefined ? { limit } : {}),
+      ...(activeOnly !== undefined ? { activeOnly } : {}),
+    }));
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/monitor/testbed-missions") {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    await handleMonitorTestbedMissionRequest(request, response);
     return;
   }
   if (request.method === "GET" && url.pathname === "/monitor/collaboration") {
@@ -749,6 +794,56 @@ async function handleMonitorCommandRequest(request: http.IncomingMessage, respon
     logger.error({ err: error }, "monitor_operator_command_failed");
     writeJson(response, 500, {
       error: "monitor_command_failed",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function handleMonitorTestbedMissionRequest(request: http.IncomingMessage, response: http.ServerResponse) {
+  try {
+    const rawBody = await readBody(request);
+    const payload = rawBody ? JSON.parse(rawBody) as unknown : {};
+    if (!isRecord(payload)) {
+      writeJson(response, 400, { error: "invalid_payload" });
+      return;
+    }
+
+    const targetUrl = stringField(payload, "targetUrl");
+    if (!targetUrl) {
+      writeJson(response, 400, {
+        error: "missing_target_url",
+        message: "targetUrl is required so Hermes knows which page to test.",
+      });
+      return;
+    }
+
+    const created = createTestbedMissionFromAgent({
+      targetUrl,
+      ...(stringField(payload, "goal") ? { goal: stringField(payload, "goal") } : {}),
+      ...(stringField(payload, "agentName") ? { agentName: stringField(payload, "agentName") } : {}),
+      ...(stringField(payload, "requester") ? { requester: stringField(payload, "requester") } : {}),
+      ...(booleanField(payload, "freshMemory") !== undefined ? { freshMemory: booleanField(payload, "freshMemory") } : {}),
+      ...(booleanField(payload, "allowTestMutations") !== undefined ? { allowTestMutations: booleanField(payload, "allowTestMutations") } : {}),
+      ...(numberField(payload, "maxBrowserSteps") !== undefined ? { maxBrowserSteps: numberField(payload, "maxBrowserSteps") } : {}),
+      ...(numberField(payload, "maxMinutes") !== undefined ? { maxMinutes: numberField(payload, "maxMinutes") } : {}),
+    });
+    recordTestbedMissionCollaboration(created.run);
+    logger.info(
+      {
+        missionId: created.run.id,
+        requester: created.requester,
+        targetUrl: created.run.targetUrl,
+      },
+      "monitor_testbed_mission_created_from_agent"
+    );
+    writeJson(response, 200, {
+      ok: true,
+      ...created,
+    });
+  } catch (error) {
+    logger.error({ err: error }, "monitor_testbed_mission_create_failed");
+    writeJson(response, 500, {
+      error: "monitor_testbed_mission_create_failed",
       message: error instanceof Error ? error.message : String(error),
     });
   }
@@ -1511,6 +1606,14 @@ function numberField(value: unknown, key: string): number | undefined {
   return undefined;
 }
 
+function booleanField(value: unknown, key: string): boolean | undefined {
+  if (!isRecord(value)) return undefined;
+  const field = value[key];
+  if (typeof field === "boolean") return field;
+  if (typeof field === "string") return parseOptionalBoolean(field);
+  return undefined;
+}
+
 function formatUtcTime(time: { hour: number; minute: number }): string {
   return `${String(time.hour).padStart(2, "0")}:${String(time.minute).padStart(2, "0")}`;
 }
@@ -1519,6 +1622,21 @@ function parseOptionalInteger(value: string | null): number | undefined {
   if (!value) return undefined;
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function parseOptionalBoolean(value: string | null): boolean | undefined {
+  if (!value) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return undefined;
+}
+
+function monitorTestbedMissionId(pathname: string): string | undefined {
+  const prefix = "/monitor/testbed-missions/";
+  if (!pathname.startsWith(prefix)) return undefined;
+  const id = decodeURIComponent(pathname.slice(prefix.length)).trim();
+  return id.length > 0 && !id.includes("/") ? id : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
