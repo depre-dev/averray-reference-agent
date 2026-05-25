@@ -174,12 +174,41 @@ services:
       HERMES_MONITOR_MEMORY_PATH: ${HERMES_MONITOR_MEMORY_PATH:-/data/hermes-monitor-memory.json}
       AVERRAY_HANDOFF_EVENTS_PATH: ${AVERRAY_HANDOFF_EVENTS_PATH:-/data/handoff-events.jsonl}
       AVERRAY_CODEX_TASKS_PATH: ${AVERRAY_CODEX_TASKS_PATH:-/data/codex-tasks.json}
+      AVERRAY_TESTBED_MISSIONS_PATH: ${AVERRAY_TESTBED_MISSIONS_PATH:-/data/testbed-missions.json}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - avg-data:/data
     networks: [avg-internal]
     ports:
       - "127.0.0.1:${SLACK_OPERATOR_HTTP_PORT:-8790}:${SLACK_OPERATOR_HTTP_PORT:-8790}"
+
+  testbed-mission-runner:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.node
+    image: avg-node-runtime
+    profiles: ["testbed-runner"]
+    restart: unless-stopped
+    depends_on:
+      hermes-permissions:
+        condition: service_completed_successfully
+      mcp-bundle:
+        condition: service_completed_successfully
+    command: ["node", "services/slack-operator/dist/testbed-mission-runner.js"]
+    environment:
+      AVERRAY_TESTBED_MISSIONS_PATH: ${AVERRAY_TESTBED_MISSIONS_PATH:-/data/testbed-missions.json}
+      TESTBED_MISSION_RUNNER_ENABLED: ${TESTBED_MISSION_RUNNER_ENABLED:-0}
+      TESTBED_MISSION_RUNNER_ID: ${TESTBED_MISSION_RUNNER_ID:-vps-hermes-testbed-runner}
+      TESTBED_MISSION_RUNNER_COMMAND: ${TESTBED_MISSION_RUNNER_COMMAND:-node}
+      TESTBED_MISSION_RUNNER_ARGS: ${TESTBED_MISSION_RUNNER_ARGS:-services/slack-operator/dist/testbed-mission-http-runner.js}
+      TESTBED_MISSION_RUNNER_CWD: ${TESTBED_MISSION_RUNNER_CWD:-}
+      TESTBED_MISSION_RUNNER_POLL_INTERVAL_MS: ${TESTBED_MISSION_RUNNER_POLL_INTERVAL_MS:-10000}
+      TESTBED_MISSION_RUNNER_TIMEOUT_MS: ${TESTBED_MISSION_RUNNER_TIMEOUT_MS:-1200000}
+      TESTBED_MISSION_RUNNER_OUTPUT_TAIL_BYTES: ${TESTBED_MISSION_RUNNER_OUTPUT_TAIL_BYTES:-12000}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - avg-data:/data
+    networks: [avg-internal]
 
   codex-task-runner:
     build:

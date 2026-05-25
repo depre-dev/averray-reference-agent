@@ -125,6 +125,41 @@ configured `CODEX_HOME` and provide a GitHub token that can read the repo and
 push to the PR branch. If the worker is not enabled, the monitor still offers
 copy-prompt fallback buttons for manual Codex App use.
 
+## Hermes Testbed Mission Runner
+
+The command center can also queue browser-first testbed missions for Hermes.
+Mission state is stored in `AVERRAY_TESTBED_MISSIONS_PATH`, defaulting to
+`/data/testbed-missions.json` in Docker so the monitor and runner share durable
+state across container restarts.
+
+The runner is opt-in and fail-closed:
+
+```env
+AVERRAY_TESTBED_MISSIONS_PATH=/data/testbed-missions.json
+TESTBED_MISSION_RUNNER_ENABLED=1
+TESTBED_MISSION_RUNNER_COMMAND=node
+TESTBED_MISSION_RUNNER_ARGS=services/slack-operator/dist/testbed-mission-http-runner.js
+```
+
+The default command is a lightweight HTTP visibility runner. It proves that the
+mission loop works end to end: Hermes creates a mission, the runner claims it,
+loads the target, writes a structured report, and the monitor attaches the
+result. For a full Hermes/browser deployment, replace the command and args with
+the browser-capable Hermes invocation for the host. Supported placeholders are:
+
+- `{missionId}`
+- `{targetUrl}`
+- `{goal}`
+- `{agentName}`
+- `{prompt}`
+- `{reportPath}`
+
+The child command also receives `TESTBED_MISSION_ID`, `TESTBED_TARGET_URL`,
+`TESTBED_MISSION_GOAL`, `TESTBED_MISSION_PROMPT`,
+`TESTBED_MISSION_REPORT_PATH`, and `TESTBED_MISSION_JSON`. It should write the
+structured JSON report to `TESTBED_MISSION_REPORT_PATH` or stdout. Invalid
+reports fail the mission visibly instead of silently clearing the board.
+
 ## Monitor GitHub-Live Fallback
 
 The monitor has two read-only inputs:

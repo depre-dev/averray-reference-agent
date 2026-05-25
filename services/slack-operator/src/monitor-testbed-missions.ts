@@ -1,6 +1,17 @@
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+
 const MAX_MISSION_RUNS = 50;
 
 export type TestbedMissionStatus = "ready" | "running" | "completed" | "failed";
+export type TestbedMissionRunnerHeartbeatStatus =
+  | "idle"
+  | "running"
+  | "completed"
+  | "failed"
+  | "disabled"
+  | "misconfigured"
+  | "error";
 
 export interface TestbedMissionHistoryEntry {
   at: string;
@@ -26,16 +37,27 @@ export interface TestbedMissionRun {
   createdAt: string;
   updatedAt: string;
   statusReason: string;
+  runnerId?: string;
+  claimedAt?: string;
+  completedAt?: string;
+  failedAt?: string;
+  failureReason?: string;
+  stdoutTail?: string;
+  stderrTail?: string;
+  progressMessage?: string;
+  progressAt?: string;
 }
 
 export interface ListTestbedMissionRunOptions {
   limit?: number;
   activeOnly?: boolean;
+  path?: string;
 }
 
 export interface MissionReportInput {
   relatedCorrelationId?: string;
   text?: string;
+  path?: string;
 }
 
 export interface MissionReportDiagnosis {
@@ -55,13 +77,30 @@ export interface TestbedMissionFixBrief {
   evidence: string[];
 }
 
+export interface TestbedMissionStoreDeps {
+  path?: string;
+  now?: Date;
+}
+
+export interface TestbedMissionRunnerHeartbeat {
+  schemaVersion: 1;
+  kind: "testbed_mission_runner_heartbeat";
+  runnerId: string;
+  status: TestbedMissionRunnerHeartbeatStatus;
+  message: string;
+  updatedAt: string;
+  activeMissionId?: string;
+}
+
 const missionRuns: TestbedMissionRun[] = [];
 let missionSeq = 0;
+let loadedMissionStorePath: string | undefined;
 
 export function recordTestbedMissionRunFromOperatorResult(
   result: unknown,
   nowMs: number = Date.now()
 ): TestbedMissionRun | undefined {
+  ensureMissionStoreLoaded();
   if (!isRecord(result) || result.kind !== "testbed_agent_mission") return undefined;
   const mission = isRecord(result.mission) ? result.mission : undefined;
   if (!mission || mission.kind !== "testbed_agent_browser_mission") return undefined;
@@ -100,10 +139,12 @@ export function recordTestbedMissionRunFromOperatorResult(
   };
   missionRuns.push(run);
   while (missionRuns.length > MAX_MISSION_RUNS) missionRuns.shift();
+  persistMissionStore();
   return run;
 }
 
 export function listTestbedMissionRuns(options: ListTestbedMissionRunOptions = {}): TestbedMissionRun[] {
+  ensureMissionStoreLoaded(options.path);
   const limit = clampInt(options.limit, 1, MAX_MISSION_RUNS, 20);
   const runs = options.activeOnly
     ? missionRuns.filter((run) => run.status === "ready" || run.status === "running")
@@ -118,6 +159,7 @@ export function recordTestbedMissionReportFromMessage(
   input: MissionReportInput,
   nowMs: number = Date.now()
 ): TestbedMissionRun | undefined {
+  ensureMissionStoreLoaded(input.path);
   const diagnosis = diagnoseTestbedMissionReportFromMessage(input);
   if (!diagnosis.valid || !diagnosis.report) return undefined;
   const report = diagnosis.report;
@@ -139,6 +181,8 @@ export function recordTestbedMissionReportFromMessage(
     ingestedAt: updatedAt,
   };
   run.status = status;
+  if (status === "completed") run.completedAt = updatedAt;
+  if (status === "failed") run.failedAt = updatedAt;
   run.updatedAt = updatedAt;
   run.statusReason = missionReportStatusReason(report, status, stoppedBeforeMutation, run.allowTestMutations);
   run.history.push({
@@ -147,7 +191,165 @@ export function recordTestbedMissionReportFromMessage(
     event: status === "completed" ? "mission_report_passed" : "mission_report_needs_fix",
     message: run.statusReason,
   });
+  persistMissionStore(input.path);
   return cloneRun(run);
+}
+
+export function claimNextReadyTestbedMission(
+  deps: TestbedMissionStoreDeps & { runnerId?: string } = {}
+): TestbedMissionRun | undefined {
+  ensureMissionStoreLoaded(deps.path);
+  const existing = missionRuns
+    .filter((run) => run.status === "ready")
+    .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))[0];
+  if (!existing) return undefined;
+  const now = (deps.now ?? new Date()).toISOString();
+  existing.status = "running";
+  existing.runnerId = deps.runnerId ?? existing.runnerId ?? "testbed-mission-runner";
+  existing.claimedAt = now;
+  existing.progressAt = now;
+  existing.progressMessage = "Hermes testbed runner claimed the browser mission.";
+  existing.statusReason = `Hermes testbed runner ${existing.runnerId} claimed the mission and is running the browser test.`;
+  existing.updatedAt = now;
+  existing.history.push({
+    at: now,
+    status: "running",
+    event: "mission_runner_claimed",
+    message: existing.statusReason,
+  });
+  trimMissionHistory(existing);
+  persistMissionStore(deps.path);
+  return cloneRun(existing);
+}
+
+export function updateTestbedMissionProgress(
+  id: string,
+  deps: TestbedMissionStoreDeps & {
+    progressMessage?: string;
+    stdoutTail?: string;
+    stderrTail?: string;
+  } = {}
+): TestbedMissionRun | undefined {
+  ensureMissionStoreLoaded(deps.path);
+  const existing = missionRuns.find((run) => run.id === id);
+  if (!existing) return undefined;
+  if (existing.status === "completed" || existing.status === "failed") return cloneRun(existing);
+  const now = (deps.now ?? new Date()).toISOString();
+  existing.status = "running";
+  existing.progressAt = now;
+  existing.progressMessage = deps.progressMessage ?? existing.progressMessage ?? "Hermes testbed runner is still working.";
+  existing.updatedAt = now;
+  if (deps.stdoutTail) existing.stdoutTail = deps.stdoutTail;
+  if (deps.stderrTail) existing.stderrTail = deps.stderrTail;
+  existing.history.push({
+    at: now,
+    status: "running",
+    event: "mission_runner_progress",
+    message: existing.progressMessage,
+  });
+  trimMissionHistory(existing);
+  persistMissionStore(deps.path);
+  return cloneRun(existing);
+}
+
+export function failTestbedMissionRun(
+  id: string,
+  deps: TestbedMissionStoreDeps & {
+    failureReason?: string;
+    stdoutTail?: string;
+    stderrTail?: string;
+  } = {}
+): TestbedMissionRun | undefined {
+  ensureMissionStoreLoaded(deps.path);
+  const existing = missionRuns.find((run) => run.id === id);
+  if (!existing) return undefined;
+  if (existing.status === "completed" || existing.status === "failed") return cloneRun(existing);
+  const now = (deps.now ?? new Date()).toISOString();
+  const reason = deps.failureReason ?? "Hermes testbed runner failed before it produced a valid report.";
+  existing.status = "failed";
+  existing.failedAt = now;
+  existing.failureReason = reason;
+  existing.statusReason = reason;
+  existing.progressAt = now;
+  existing.progressMessage = reason;
+  existing.updatedAt = now;
+  if (deps.stdoutTail) existing.stdoutTail = deps.stdoutTail;
+  if (deps.stderrTail) existing.stderrTail = deps.stderrTail;
+  existing.result = {
+    verdict: "fail",
+    confidence: 0,
+    stoppedBeforeMutation: true,
+    blockers: [reason],
+    evidence: [
+      deps.stderrTail ? `stderr: ${deps.stderrTail}` : "",
+      deps.stdoutTail ? `stdout: ${deps.stdoutTail}` : "",
+    ].filter(Boolean),
+    scores: {},
+    ingestedAt: now,
+  };
+  existing.history.push({
+    at: now,
+    status: "failed",
+    event: "mission_runner_failed",
+    message: reason,
+  });
+  trimMissionHistory(existing);
+  persistMissionStore(deps.path);
+  return cloneRun(existing);
+}
+
+export function readTestbedMissionRunnerHeartbeat(
+  deps: TestbedMissionStoreDeps = {}
+): TestbedMissionRunnerHeartbeat | undefined {
+  const path = missionRunnerHeartbeatPath(deps.path);
+  if (!path) return undefined;
+  try {
+    const value: unknown = JSON.parse(readFileSync(path, "utf8"));
+    return isTestbedMissionRunnerHeartbeat(value) ? value : undefined;
+  } catch (error) {
+    const code = isRecord(error) ? error.code : undefined;
+    if (code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+export function updateTestbedMissionRunnerHeartbeat(
+  deps: TestbedMissionStoreDeps & {
+    runnerId: string;
+    status: TestbedMissionRunnerHeartbeatStatus;
+    message?: string;
+    activeMissionId?: string;
+  }
+): TestbedMissionRunnerHeartbeat {
+  const path = missionRunnerHeartbeatPath(deps.path);
+  const now = (deps.now ?? new Date()).toISOString();
+  const heartbeat: TestbedMissionRunnerHeartbeat = {
+    schemaVersion: 1,
+    kind: "testbed_mission_runner_heartbeat",
+    runnerId: deps.runnerId,
+    status: deps.status,
+    message: deps.message ?? testbedMissionRunnerStatusMessage(deps.status),
+    updatedAt: now,
+    ...(deps.activeMissionId ? { activeMissionId: deps.activeMissionId } : {}),
+  };
+  if (path) {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(heartbeat, null, 2)}\n`);
+  }
+  return heartbeat;
+}
+
+export function summarizeTestbedMissionRunnerHeartbeat(
+  heartbeat: TestbedMissionRunnerHeartbeat | undefined,
+  now: Date = new Date()
+): Record<string, unknown> | undefined {
+  if (!heartbeat) return undefined;
+  const updatedMs = Date.parse(heartbeat.updatedAt);
+  const ageMs = Number.isFinite(updatedMs) ? Math.max(0, now.getTime() - updatedMs) : undefined;
+  return {
+    ...heartbeat,
+    ...(typeof ageMs === "number" ? { ageMs, stale: ageMs > 90_000 } : { stale: true }),
+  };
 }
 
 export function diagnoseTestbedMissionReportFromMessage(input: MissionReportInput): MissionReportDiagnosis {
@@ -201,6 +403,7 @@ export function testbedMissionRunToMonitorItem(run: TestbedMissionRun): Record<s
         touchedAreas: ["testbed"],
         testSignals: [
           "browser mission packet ready",
+          ...(run.status === "running" ? ["browser mission runner claimed"] : []),
           ...(run.allowTestMutations ? ["test-mode page mutation allowed"] : []),
           ...(reportAttached ? ["browser agent report attached"] : []),
         ],
@@ -386,6 +589,93 @@ export function testbedMissionComparisonBrief(run: TestbedMissionRun): string | 
 export function __resetTestbedMissionRunsForTests(): void {
   missionRuns.splice(0, missionRuns.length);
   missionSeq = 0;
+  loadedMissionStorePath = undefined;
+}
+
+function ensureMissionStoreLoaded(path?: string): void {
+  const targetPath = missionStorePath(path);
+  if (!targetPath || loadedMissionStorePath === targetPath) return;
+  try {
+    const value: unknown = JSON.parse(readFileSync(targetPath, "utf8"));
+    const runs = missionStoreRuns(value);
+    missionRuns.splice(0, missionRuns.length, ...runs);
+    missionSeq = missionStoreSeq(value, runs);
+    loadedMissionStorePath = targetPath;
+  } catch (error) {
+    const code = isRecord(error) ? error.code : undefined;
+    if (code !== "ENOENT") throw error;
+    missionRuns.splice(0, missionRuns.length);
+    missionSeq = 0;
+    loadedMissionStorePath = targetPath;
+  }
+}
+
+function persistMissionStore(path?: string): void {
+  const targetPath = missionStorePath(path);
+  if (!targetPath) return;
+  const store = {
+    schemaVersion: 1,
+    kind: "testbed_mission_store",
+    missionSeq,
+    runs: missionRuns.slice(-MAX_MISSION_RUNS),
+  };
+  mkdirSync(dirname(targetPath), { recursive: true });
+  writeFileSync(targetPath, `${JSON.stringify(store, null, 2)}\n`);
+  loadedMissionStorePath = targetPath;
+}
+
+function missionStoreRuns(value: unknown): TestbedMissionRun[] {
+  const rawRuns = Array.isArray(value)
+    ? value
+    : isRecord(value) && Array.isArray(value.runs)
+      ? value.runs
+      : [];
+  return rawRuns.filter(isTestbedMissionRun).slice(-MAX_MISSION_RUNS);
+}
+
+function missionStoreSeq(value: unknown, runs: TestbedMissionRun[]): number {
+  if (isRecord(value) && typeof value.missionSeq === "number" && Number.isFinite(value.missionSeq)) {
+    return Math.max(0, Math.floor(value.missionSeq));
+  }
+  return runs.reduce((max, run) => {
+    const match = run.id.match(/-(\d+)$/);
+    const parsed = match ? Number(match[1]) : 0;
+    return Number.isFinite(parsed) ? Math.max(max, parsed) : max;
+  }, 0);
+}
+
+function missionStorePath(path?: string): string | undefined {
+  return path ?? process.env.AVERRAY_TESTBED_MISSIONS_PATH;
+}
+
+function missionRunnerHeartbeatPath(path?: string): string | undefined {
+  const storePath = missionStorePath(path);
+  return storePath ? `${storePath}.runner.json` : undefined;
+}
+
+function trimMissionHistory(run: TestbedMissionRun): void {
+  run.history = run.history
+    .filter((entry) => entry.at && entry.status && entry.event && entry.message)
+    .slice(-30);
+}
+
+function testbedMissionRunnerStatusMessage(status: TestbedMissionRunnerHeartbeatStatus): string {
+  switch (status) {
+    case "idle":
+      return "Hermes testbed runner is online and waiting for a browser mission.";
+    case "running":
+      return "Hermes testbed runner is executing a browser mission.";
+    case "completed":
+      return "Hermes testbed runner completed its latest browser mission.";
+    case "failed":
+      return "Hermes testbed runner failed its latest browser mission.";
+    case "disabled":
+      return "Hermes testbed runner is disabled.";
+    case "misconfigured":
+      return "Hermes testbed runner is misconfigured.";
+    case "error":
+      return "Hermes testbed runner hit an error.";
+  }
 }
 
 function onlyActiveMissionRun(): TestbedMissionRun | undefined {
@@ -602,6 +892,30 @@ function clampInt(value: unknown, min: number, max: number, fallback: number): n
 function stringField(record: Record<string, unknown>, key: string): string | undefined {
   const value = record[key];
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function isTestbedMissionRun(value: unknown): value is TestbedMissionRun {
+  if (!isRecord(value)) return false;
+  return value.schemaVersion === 1
+    && value.kind === "testbed_mission_run"
+    && typeof value.id === "string"
+    && typeof value.status === "string"
+    && typeof value.targetUrl === "string"
+    && typeof value.goal === "string"
+    && typeof value.agentName === "string"
+    && typeof value.createdAt === "string"
+    && typeof value.updatedAt === "string"
+    && Array.isArray(value.history);
+}
+
+function isTestbedMissionRunnerHeartbeat(value: unknown): value is TestbedMissionRunnerHeartbeat {
+  if (!isRecord(value)) return false;
+  return value.schemaVersion === 1
+    && value.kind === "testbed_mission_runner_heartbeat"
+    && typeof value.runnerId === "string"
+    && typeof value.status === "string"
+    && typeof value.message === "string"
+    && typeof value.updatedAt === "string";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
