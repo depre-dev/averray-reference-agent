@@ -11,7 +11,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ARG CODEX_CLI_PACKAGE=@openai/codex
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates git openssh-client \
+  && apt-get install -y --no-install-recommends ca-certificates chromium git openssh-client \
   && rm -rf /var/lib/apt/lists/*
 RUN npm install -g "${CODEX_CLI_PACKAGE}"
 RUN useradd --create-home --uid 10001 appuser

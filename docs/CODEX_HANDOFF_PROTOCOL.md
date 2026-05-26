@@ -175,15 +175,27 @@ The runner is opt-in and fail-closed:
 ```env
 AVERRAY_TESTBED_MISSIONS_PATH=/data/testbed-missions.json
 TESTBED_MISSION_RUNNER_ENABLED=1
+TESTBED_MISSION_RUNNER_EXECUTOR=playwright
+TESTBED_MISSION_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
+TESTBED_MISSION_ARTIFACTS_DIR=/data/testbed-mission-artifacts
+```
+
+The default executor is the built-in Playwright browser baseline. It claims the
+mission, opens the target in a clean Chromium context, records URL/title/visible
+text, captures screenshot artifact paths, clicks one safe visible control when
+available, stops before risky mutation controls, writes a structured report, and
+lets the monitor attach the result.
+
+Custom external runners are still supported for comparing other agents or a
+more autonomous Hermes browser invocation:
+
+```env
+TESTBED_MISSION_RUNNER_EXECUTOR=command
 TESTBED_MISSION_RUNNER_COMMAND=node
 TESTBED_MISSION_RUNNER_ARGS=services/slack-operator/dist/testbed-mission-http-runner.js
 ```
 
-The default command is a lightweight HTTP visibility runner. It proves that the
-mission loop works end to end: Hermes creates a mission, the runner claims it,
-loads the target, writes a structured report, and the monitor attaches the
-result. For a full Hermes/browser deployment, replace the command and args with
-the browser-capable Hermes invocation for the host. Supported placeholders are:
+Supported command placeholders are:
 
 - `{missionId}`
 - `{targetUrl}`
