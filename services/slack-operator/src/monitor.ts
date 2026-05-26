@@ -1015,6 +1015,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       background: var(--bad-bg);
       color: var(--bad);
     }
+    .state-pill[data-level="mission-failed"] {
+      border-color: var(--bad);
+      background: color-mix(in srgb, var(--bad) 10%, rgba(86, 204, 228, 0.08));
+      color: color-mix(in srgb, var(--bad) 82%, var(--cyan));
+    }
     .state-pill[data-level="needs-review"] {
       border-color: var(--warn);
       background: var(--warn-bg);
@@ -1779,6 +1784,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       transition: transform 0.14s ease, border-color 0.14s ease, opacity 0.14s ease;
     }
     .handoff-card[data-verdict="block"]        { --verdict-accent: var(--bad); }
+    .handoff-card[data-verdict="mission-failed"] { --verdict-accent: var(--cyan); }
     .handoff-card[data-verdict="needs-review"] { --verdict-accent: var(--warn); }
     .handoff-card[data-verdict="running"]      { --verdict-accent: var(--cyan); }
     .handoff-card[data-verdict="pass"]         { --verdict-accent: var(--ok); }
@@ -3105,6 +3111,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       padding: 10px 12px;
     }
     .verdict-box[data-level="block"]        { border-left-color: var(--bad);  background: var(--bad-bg); }
+    .verdict-box[data-level="mission-failed"] { border-left-color: var(--cyan); background: rgba(86, 204, 228, 0.10); }
     .verdict-box[data-level="needs-review"] { border-left-color: var(--warn); background: var(--warn-bg); }
     .verdict-box[data-level="pass"]         { border-left-color: var(--ok);   background: var(--ok-bg); }
     .verdict-box[data-level="running"]      { border-left-color: var(--cyan); background: rgba(86, 204, 228, 0.10); }
@@ -5211,7 +5218,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const blocked = latestPipelineItems.filter((item) => {
         const verdict = releaseVerdict(item);
         const lane = boardLaneForItem(item, verdict);
-        return lane.key !== "done" && verdict.level === "block";
+        return !isTestbedMissionItem(item) && lane.key !== "done" && verdict.level === "block";
       }).length;
       const waiting = laneCounts.waiting || 0;
       const review = laneCounts.operator || 0;
@@ -5728,7 +5735,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         if (pipelineFilter !== "all") {
           if (pipelineFilter === "pass" && lane.key !== "queue") return false;
           else if (pipelineFilter === "running" && lane.key !== "hermes" && lane.key !== "mission" && lane.key !== "deploy") return false;
-          else if (pipelineFilter === "block" && lane.key !== "attention" && verdict.level !== "block") return false;
+          else if (pipelineFilter === "block" && (isTestbedMissionItem(item) || (lane.key !== "attention" && verdict.level !== "block"))) return false;
           else if (pipelineFilter === "needs-review" && lane.key !== "operator") return false;
           else if (!["pass", "running", "block", "needs-review"].includes(pipelineFilter) && verdict.level !== pipelineFilter) return false;
         }
@@ -6453,6 +6460,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const verdict = releaseVerdict(item);
       const age = handoffAge(item);
       if (verdict.level === "block") return 900;
+      if (verdict.level === "mission-failed") return 800;
       if (age.state === "stale") return 700;
       if (verdict.level === "needs-review") return 600;
       if (verdict.level === "running") return 500;
@@ -7806,6 +7814,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function stateForLevel(level) {
       if (level === "block") return "fail";
+      if (level === "mission-failed") return "fail";
       if (level === "needs-review") return "review";
       if (level === "running") return "running";
       return "pass";
@@ -8816,7 +8825,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         if (kind === "codex" && action.owner !== "Codex" && lane.key !== "codex") return;
         if (kind === "hermes" && action.owner !== "Hermes" && lane.key !== "hermes" && lane.key !== "mission") return;
         if (kind === "operator" && action.owner !== "Operator" && lane.key !== "operator") return;
-        if (kind === "blocked" && lane.key !== "attention" && verdict.level !== "block") return;
+        if (kind === "blocked" && (isTestbedMissionItem(item) || (lane.key !== "attention" && verdict.level !== "block"))) return;
         messages.push(collabMessage("Hermes", collaborationAskForItem(item, verdict, action, lane), collaborationMetaForItem(item, verdict), itemUpdatedMs(item), inferAddressedTo(action, lane)));
       });
       if (!messages.length && kind === "codex") {
@@ -8858,7 +8867,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         const verdict = releaseVerdict(item);
         const lane = boardLaneForItem(item, verdict);
         if (lane.key === "done") return false;
-        if (kind === "blocked") return lane.key === "attention" || verdict.level === "block";
+        if (kind === "blocked") return !isTestbedMissionItem(item) && (lane.key === "attention" || verdict.level === "block");
         return true;
       });
     }
@@ -8877,7 +8886,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         const lane = boardLaneForItem(item, verdict);
         const action = nextPipelineAction(item, verdict);
         acc.total += 1;
-        if (lane.key === "attention" || verdict.level === "block") acc.attention += 1;
+        if (!isTestbedMissionItem(item) && (lane.key === "attention" || verdict.level === "block")) acc.attention += 1;
         if (lane.key === "waiting") acc.waiting += 1;
         if (action.owner === "Codex") acc.codex += 1;
         if (action.owner === "Operator") acc.operator += 1;
@@ -9726,7 +9735,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       setFilterPillCount("board-block", counts.attention || 0);
       setFilterPillCount("board-review", counts.operator || 0);
       setFilterPillCount("board-ready", counts.queue || 0);
-      setFilterPillCount("board-running", (counts.hermes || 0) + (counts.deploy || 0));
+      setFilterPillCount("board-running", (counts.hermes || 0) + (counts.mission || 0) + (counts.deploy || 0));
       setFilterPillCount("done-count", counts.done || 0);
       renderOwnerSummary(entries);
       renderStalenessSummary(entries);
@@ -9756,10 +9765,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const waiting = counts.waiting || 0;
       const codex = counts.codex || 0;
       const operator = counts.operator || 0;
+      const mission = counts.mission || 0;
       const hermes = counts.hermes || 0;
       const queue = counts.queue || 0;
       const deploy = counts.deploy || 0;
-      const running = hermes + deploy;
+      const running = hermes + mission + deploy;
       const total = attention + waiting + codex + operator + queue + running;
       let tone = "quiet";
       let headline = "Board is quiet: no active PR handoffs in this monitor window.";
@@ -9772,6 +9782,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       } else if (operator) {
         tone = "operator";
         headline = "Board now: " + plural(operator, "card") + " " + (operator === 1 ? "needs" : "need") + " Pascal's review decision; automation has gone as far as it safely can.";
+      } else if (mission) {
+        tone = "running";
+        headline = "Board now: " + plural(mission, "browser mission") + " " + (mission === 1 ? "is" : "are") + " open as product evidence, separate from PR release blockers.";
       } else if (running) {
         tone = "running";
         headline = "Board now: " + plural(running, "check") + " or deploy verification " + (running === 1 ? "is" : "are") + " still moving.";
@@ -9786,7 +9799,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       }
       const focus = topConsoleItems(items, 4);
       const next = trimBoardNowText(boardBriefingNextMove(focus));
-      return { tone, headline, next, counts: { attention, waiting, codex, operator, queue, running } };
+      return { tone, headline, next, counts: { attention, waiting, codex, operator, mission, queue, running } };
     }
 
     function boardNowCountsMarkup(counts) {
@@ -9795,6 +9808,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         { label: "draft", value: counts.waiting },
         { label: "codex", value: counts.codex },
         { label: "review", value: counts.operator },
+        { label: "mission", value: counts.mission },
         { label: "queue", value: counts.queue },
         { label: "moving", value: counts.running },
       ].filter((chip) => chip.value > 0);
@@ -9894,6 +9908,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const prState = pullRequestState(item, item.summary || {});
       if (isDonePullRequestState(prState)) return 10;
       if (verdict.level === "block") return 500;
+      if (verdict.level === "mission-failed") return 450;
       if (age.state === "stale") return 400;
       if (verdict.level === "needs-review") return 300;
       if (verdict.level === "running") return 200;
@@ -10423,6 +10438,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function verdictSortScore(verdict) {
       if (verdict.level === "block") return 500;
+      if (verdict.level === "mission-failed") return 450;
       if (verdict.level === "needs-review") return 400;
       if (verdict.level === "running") return 300;
       if (verdict.level === "pass") return 100;
@@ -10643,7 +10659,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (key === "gate" && level === "block") return "blocked";
       if (key === "gate" && level === "needs-review") return "review";
       if (key === "gate" && level === "pass") return "done";
-      if (key === "report" && level === "block") return "blocked";
+      if (key === "report" && (level === "block" || level === "mission-failed")) return "blocked";
       return "active";
     }
 
@@ -10875,6 +10891,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function needsAttention(item) {
+      if (isTestbedMissionItem(item)) return false;
       const level = releaseVerdict(item).level;
       return level === "block" || level === "needs-review";
     }
@@ -10886,7 +10903,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         const status = normalize(mission.status || summary.status || item.status);
         const why = String(mission.statusReason || summary.finalReason || item.reason || "Mission packet is waiting for a browser-agent report.");
         if (status === "completed") return { level: "pass", label: "MISSION DONE", why };
-        if (status === "failed") return { level: "block", label: "MISSION FAILED", why };
+        if (status === "failed") return { level: "mission-failed", label: "MISSION FAILED", why };
         return { level: "running", label: status === "running" ? "MISSION RUNNING" : "MISSION READY", why };
       }
       const verdict = Array.isArray(item.groupItems) ? groupedReleaseVerdict(item) : baseReleaseVerdict(item);
