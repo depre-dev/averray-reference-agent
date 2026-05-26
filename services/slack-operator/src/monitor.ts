@@ -6061,9 +6061,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const raw = String(value || "").trim();
       if (!raw) return "";
       try {
-        return new URL(raw).host.replace(/^www\./, "");
+        const host = new URL(raw).host;
+        return host.startsWith("www.") ? host.slice(4) : host;
       } catch (error) {
-        return raw.replace(/^https?:\/\//, "").split("/")[0].replace(/^www\./, "");
+        const withoutProtocol = raw
+          .replace("https://", "")
+          .replace("http://", "");
+        const host = withoutProtocol.split("/")[0];
+        return host.startsWith("www.") ? host.slice(4) : host;
       }
     }
 
