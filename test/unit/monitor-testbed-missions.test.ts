@@ -85,7 +85,7 @@ describe("monitor testbed mission runs", () => {
     expect(item).toMatchObject({
       summary: {
         reviewSignals: {
-          testSignals: ["browser mission packet ready", "test-mode page mutation allowed", "browser agent report attached"],
+          testSignals: ["mission packet ready", "test-mode page mutation allowed", "browser agent report attached"],
         },
       },
       safety: {
@@ -94,7 +94,7 @@ describe("monitor testbed mission runs", () => {
     });
   });
 
-  it("turns active mission runs into Hermes Checking board items", () => {
+  it("turns active mission runs into mission-native board items", () => {
     const run = recordTestbedMissionRunFromOperatorResult(missionResult(), Date.parse("2026-05-22T10:00:00.000Z"));
     expect(run).toBeDefined();
 
@@ -103,7 +103,7 @@ describe("monitor testbed mission runs", () => {
     expect(item).toMatchObject({
       correlationId: run!.id,
       intent: "testbed_agent_mission",
-      repo: "testbed/agent",
+      repo: "testbed/mission",
       status: "running",
       active: true,
       activeState: "running",
@@ -112,8 +112,8 @@ describe("monitor testbed mission runs", () => {
         finalVerdict: "running",
         reviewSignals: {
           touchedAreas: ["testbed"],
-          testSignals: ["browser mission packet ready"],
-          missingTestSignals: ["browser agent report"],
+          testSignals: ["mission packet ready"],
+          missingTestSignals: ["browser-agent report"],
         },
       },
       safety: {
@@ -169,7 +169,7 @@ describe("monitor testbed mission runs", () => {
       summary: {
         finalVerdict: "pass",
         reviewSignals: {
-          testSignals: ["browser mission packet ready", "browser agent report attached"],
+          testSignals: ["mission packet ready", "browser agent report attached"],
           missingTestSignals: [],
         },
       },
