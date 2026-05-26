@@ -769,4 +769,13 @@ describe("slack operator personal monitor", () => {
     expect(draftLaneIndex).toBeLessThan(failedAttentionIndex);
     expect(html).not.toContain('if (codexTaskFailedForItem(item)) return false;');
   });
+
+  it("keeps failed browser missions out of PR blocker language", () => {
+    const html = renderMonitorHtml();
+
+    expect(html).toContain('return { level: "mission-failed", label: "MISSION FAILED", why };');
+    expect(html).toContain('!isTestbedMissionItem(item) && lane.key !== "done" && verdict.level === "block"');
+    expect(html).toContain('plural(mission, "browser mission")');
+    expect(html).toContain('label: "mission", value: counts.mission');
+  });
 });
