@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 interface HttpMissionReport {
   verdict: "pass" | "partial" | "fail";
   confidence: number;
+  executor: "http_visibility_check";
+  runnerMode: "non_browser_fetch";
   stoppedBeforeMutation: boolean;
   completedPath?: string[];
   blockers: string[];
@@ -32,15 +34,20 @@ export async function runHttpTestbedMission(env: NodeJS.ProcessEnv = process.env
     const text = visibleText(body);
     const hasGoalHint = goalWords(goal).some((word) => text.toLowerCase().includes(word));
     const ok = response.ok && text.length > 0;
-    const verdict = ok ? "pass" : "fail";
+    const verdict = ok ? "partial" : "fail";
     return {
       verdict,
-      confidence: ok ? 0.72 : 0.35,
+      confidence: ok ? 0.46 : 0.2,
+      executor: "http_visibility_check",
+      runnerMode: "non_browser_fetch",
       stoppedBeforeMutation: true,
       ...(ok ? { completedPath: [`opened ${targetUrl}`, "loaded first page without mutating state"] } : {}),
-      blockers: ok ? [] : [`HTTP ${response.status} while loading ${targetUrl}`],
+      blockers: ok
+        ? ["HTTP visibility check loaded the page, but no real browser interaction ran yet."]
+        : [`HTTP ${response.status} while loading ${targetUrl}`],
       confusingMoments: hasGoalHint || !ok ? [] : [`The first page loaded, but I did not see words tied to the goal: ${goal}.`],
       evidence: [
+        { type: "executor", value: "http_visibility_check; not a full browser-agent run" },
         { type: "http_status", value: `${response.status} ${response.statusText}` },
         { type: "content_type", value: contentType || "unknown" },
         { type: "visible_text_sample", value: text.slice(0, 500) || "[no visible text]" },
@@ -49,11 +56,38 @@ export async function runHttpTestbedMission(env: NodeJS.ProcessEnv = process.env
         pageLoads: response.ok ? 5 : 1,
         orientation: hasGoalHint ? 4 : ok ? 3 : 1,
         mutationSafety: 5,
-        evidenceQuality: ok ? 3 : 2,
+        evidenceQuality: ok ? 2 : 2,
       },
-      recommendations: ok && !hasGoalHint
-        ? ["Make the page's first-screen copy mirror the mission goal so a fresh agent knows where it is."]
-        : [],
+      recommendations: [
+        "Run the same mission with a browser-capable executor before treating it as outside-agent evidence.",
+        ...(ok && !hasGoalHint
+          ? ["Make the page's first-screen copy mirror the mission goal so a fresh agent knows where it is."]
+          : []),
+      ],
+    };
+  } catch (error) {
+    const detail = formatErrorWithCause(error);
+    return {
+      verdict: "fail",
+      confidence: 0,
+      executor: "http_visibility_check",
+      runnerMode: "non_browser_fetch",
+      stoppedBeforeMutation: true,
+      blockers: [`Could not load ${targetUrl}: ${detail}`],
+      confusingMoments: [],
+      evidence: [
+        { type: "executor", value: "http_visibility_check; target did not load" },
+        { type: "network_error", value: detail },
+      ],
+      scores: {
+        pageLoads: 0,
+        orientation: 0,
+        mutationSafety: 5,
+        evidenceQuality: 2,
+      },
+      recommendations: [
+        "Check DNS, tunnel, or target URL reachability from the runner container, then rerun the mission.",
+      ],
     };
   } finally {
     clearTimeout(timeout);
@@ -94,6 +128,22 @@ function goalWords(goal: string): string[] {
     .split(/[^a-z0-9]+/)
     .filter((word) => word.length >= 4)
     .slice(0, 8);
+}
+
+function formatErrorWithCause(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const cause = error.cause;
+  if (cause instanceof Error) return `${error.message}: ${cause.message}`;
+  if (cause && typeof cause === "object") {
+    const fields = cause as { code?: unknown; hostname?: unknown; message?: unknown };
+    const parts = [
+      fields.message ? String(fields.message) : "",
+      fields.code ? String(fields.code) : "",
+      fields.hostname ? String(fields.hostname) : "",
+    ].filter(Boolean);
+    if (parts.length) return `${error.message}: ${parts.join(" ")}`;
+  }
+  return error.message;
 }
 
 if (fileURLToPath(import.meta.url) === process.argv[1]) {

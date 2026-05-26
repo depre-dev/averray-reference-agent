@@ -1698,6 +1698,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .lane[data-lane="waiting"] { --lane-accent: var(--muted); }
     .lane[data-lane="codex"] { --lane-accent: var(--violet); }
     .lane[data-lane="hermes"],
+    .lane[data-lane="mission"],
     .lane[data-lane="deploy"] { --lane-accent: var(--cyan); }
     .lane[data-lane="operator"] { --lane-accent: var(--warn); }
     .lane[data-lane="queue"] { --lane-accent: var(--ok); }
@@ -4053,6 +4054,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       .lane-chip[data-lane="waiting"]   { --lc-accent: var(--muted); }
       .lane-chip[data-lane="codex"]     { --lc-accent: var(--violet); }
       .lane-chip[data-lane="hermes"]    { --lc-accent: var(--cyan); }
+      .lane-chip[data-lane="mission"]   { --lc-accent: var(--cyan); }
       .lane-chip[data-lane="operator"]  { --lc-accent: var(--warn); }
       .lane-chip[data-lane="queue"]     { --lc-accent: var(--ok); }
       .lane-chip[data-lane="deploy"]    { --lc-accent: var(--cyan); }
@@ -4314,6 +4316,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       <button class="mobile-tab" type="button" data-mobile-tab="waiting" aria-pressed="false">Waiting <span class="mt-count" id="mt-waiting">0</span></button>
       <button class="mobile-tab" type="button" data-mobile-tab="codex" aria-pressed="false">Codex <span class="mt-count" id="mt-codex">0</span></button>
       <button class="mobile-tab" type="button" data-mobile-tab="hermes" aria-pressed="false">Hermes <span class="mt-count" id="mt-hermes">0</span></button>
+      <button class="mobile-tab" type="button" data-mobile-tab="mission" aria-pressed="false">Missions <span class="mt-count" id="mt-mission">0</span></button>
       <button class="mobile-tab" type="button" data-mobile-tab="operator" aria-pressed="false">Review <span class="mt-count" id="mt-operator">0</span></button>
       <button class="mobile-tab" type="button" data-mobile-tab="queue" aria-pressed="false">Ready <span class="mt-count" id="mt-queue">0</span></button>
       <button class="mobile-tab" type="button" data-mobile-tab="deploy" aria-pressed="false">Deploy <span class="mt-count" id="mt-deploy">0</span></button>
@@ -5146,7 +5149,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const agentsEl = document.getElementById("sys-agents");
       if (!block || !labelEl || !agentsEl) return;
       const codex = items.filter(isCodexActivelyWorking).length;
-      const hermes = items.filter((it) => boardLaneForItem(it, releaseVerdict(it)).key === "hermes").length;
+      const hermes = items.filter((it) => {
+        const key = boardLaneForItem(it, releaseVerdict(it)).key;
+        return key === "hermes" || key === "mission";
+      }).length;
       const deploy = items.filter(isDeployItem).filter((it) => it.active === true || it.activeState === "running" || normalize(it.status) === "running").length;
       const total = codex + hermes + deploy;
       block.classList.toggle("running", total > 0);
@@ -5202,11 +5208,15 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const boardNarrationsAdded = captureBoardNarrations(latestPipelineItems);
       if (boardNarrationsAdded > 0 && shouldBoardNarrationOpenThread()) forceThreadMode();
       const laneCounts = commandBoardLaneCounts(latestPipelineItems);
-      const blocked = laneCounts.attention || 0;
+      const blocked = latestPipelineItems.filter((item) => {
+        const verdict = releaseVerdict(item);
+        const lane = boardLaneForItem(item, verdict);
+        return lane.key !== "done" && verdict.level === "block";
+      }).length;
       const waiting = laneCounts.waiting || 0;
       const review = laneCounts.operator || 0;
       const ready = laneCounts.queue || 0;
-      const running = (laneCounts.hermes || 0) + (laneCounts.deploy || 0);
+      const running = (laneCounts.hermes || 0) + (laneCounts.mission || 0) + (laneCounts.deploy || 0);
       setCounterChip("attention-chip", blocked + review + (laneCounts.codex || 0));
       setCounterChip("blocked-chip", blocked);
       setCounterChip("waiting-chip", waiting);
@@ -5699,7 +5709,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function updateMobileTabCounts(entries) {
-      const counts = { all: 0, attention: 0, waiting: 0, codex: 0, hermes: 0, operator: 0, queue: 0, deploy: 0, done: 0 };
+      const counts = { all: 0, attention: 0, waiting: 0, codex: 0, hermes: 0, mission: 0, operator: 0, queue: 0, deploy: 0, done: 0 };
       entries.forEach((item) => {
         const key = boardLaneForItem(item, releaseVerdict(item)).key;
         if (counts[key] !== undefined) counts[key] += 1;
@@ -5717,8 +5727,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         const lane = boardLaneForItem(item, verdict);
         if (pipelineFilter !== "all") {
           if (pipelineFilter === "pass" && lane.key !== "queue") return false;
-          else if (pipelineFilter === "running" && lane.key !== "hermes" && lane.key !== "deploy") return false;
-          else if (pipelineFilter === "block" && lane.key !== "attention") return false;
+          else if (pipelineFilter === "running" && lane.key !== "hermes" && lane.key !== "mission" && lane.key !== "deploy") return false;
+          else if (pipelineFilter === "block" && lane.key !== "attention" && verdict.level !== "block") return false;
           else if (pipelineFilter === "needs-review" && lane.key !== "operator") return false;
           else if (!["pass", "running", "block", "needs-review"].includes(pipelineFilter) && verdict.level !== pipelineFilter) return false;
         }
@@ -5747,6 +5757,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         { key: "waiting", title: "Waiting / Drafts", kicker: "author finishes", empty: "No external drafts waiting." },
         { key: "codex", title: "Codex Needed", kicker: "create/approve task", empty: "No Codex action needed." },
         { key: "hermes", title: "Hermes Checking", kicker: "wait for verdict", empty: "Hermes has no active PR checks." },
+        { key: "mission", title: "Browser Missions", kicker: "outside-agent evidence", empty: "No browser missions waiting." },
         { key: "operator", title: "Operator Review", kicker: "risk decision", empty: "No operator sign-off needed." },
         { key: "queue", title: "Release Queue", kicker: "merge steward", empty: "Nothing ready to merge." },
         { key: "deploy", title: "Deploying", kicker: "verify production", empty: "No deploy verification active." },
@@ -5917,9 +5928,23 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function cardFlowCopy(item, verdict, action, lane, codexState) {
       if (isTestbedMissionItem(item)) {
+        const run = testbedMissionRun(item) || {};
+        const status = normalize(run.status || (item.summary || {}).status || item.status);
+        if (status === "failed") {
+          return {
+            button: "Opens the mission report, runner output, and rerun prompts.",
+            after: "Decide whether this was product friction, runner setup, or a smaller mission retry.",
+          };
+        }
+        if (status === "completed") {
+          return {
+            button: "Opens the mission report and baseline prompts.",
+            after: "Use the evidence as a comparison baseline for future page changes.",
+          };
+        }
         return {
           button: "Opens the mission packet, prompt, rubric, and report schema.",
-          after: "Run a clean browser-capable agent and paste the structured report back into this room.",
+          after: "Hermes runner claims it automatically; otherwise copy the prompt into a clean browser-capable agent.",
         };
       }
       if (lane.key === "codex") {
@@ -5999,7 +6024,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const explicit = summary.title || summary.prTitle || summary.pullRequestTitle || item && item.title;
       if (explicit) return String(explicit);
       const raw = String(title || "").trim();
-      if (item && isTestbedMissionItem(item)) return "Fresh-agent browser mission";
+      if (item && isTestbedMissionItem(item)) return testbedMissionCardTitle(item);
       if (item && isDeployItem(item)) return deployCardTitle(item, summary);
       const derived = derivePrCardTitle(item, summary);
       if (derived) return derived;
@@ -6020,6 +6045,26 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const sha = item && (item.sha || summary && (summary.sha || summary.headSha));
       if (sha) return "Post-deploy verification · " + compactSha(sha);
       return "Post-deploy verification";
+    }
+
+    function testbedMissionCardTitle(item) {
+      const run = testbedMissionRun(item) || {};
+      const target = shortHost(run.targetUrl || "");
+      const goal = String(run.goal || "").trim();
+      const title = String(run.title || "Fresh-agent browser mission").trim();
+      if (goal && target) return clampTitleText(goal + " · " + target);
+      if (target) return "Browser mission · " + target;
+      return title || "Fresh-agent browser mission";
+    }
+
+    function shortHost(value) {
+      const raw = String(value || "").trim();
+      if (!raw) return "";
+      try {
+        return new URL(raw).host.replace(/^www\./, "");
+      } catch (error) {
+        return raw.replace(/^https?:\/\//, "").split("/")[0].replace(/^www\./, "");
+      }
     }
 
     function deployWorkflowTitle(summary) {
@@ -6306,7 +6351,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function renderMiniSteps(stage, verdict) {
-      const steps = ["pr", "ci", "hermes", "testbed", "gate", "deploy"];
+      const missionStageKeys = new Set(["packet", "claim", "browser", "report", "baseline"]);
+      const steps = missionStageKeys.has(stage && stage.key)
+        ? ["packet", "claim", "browser", "report", "baseline"]
+        : ["pr", "ci", "hermes", "testbed", "gate", "deploy"];
       const activeIndex = Math.max(0, steps.indexOf(stage.key));
       return '<div class="mini-steps" aria-label="Pipeline progress">' + steps.map((key, index) => {
         return '<span class="mini-step" data-state="' + escapeAttr(pipelineStepState(index, activeIndex, key, verdict.level)) + '"></span>';
@@ -6357,8 +6405,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         const mission = testbedMissionRun(item) || {};
         const missionStatus = normalize(mission.status || summary.status || status);
         if (missionStatus === "completed") return { key: "done" };
-        if (missionStatus === "failed") return { key: "attention" };
-        return { key: "hermes" };
+        return { key: "mission" };
       }
       if (isDonePullRequestState(prState)) return { key: "done" };
       if (isDeployItem(item)) {
@@ -8228,7 +8275,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const status = normalize(run.status || (item.summary || {}).status || item.status);
       if (status === "completed") return "I will keep the mission as release-adjacent evidence, not a merge gate; it becomes useful again when a future page change needs comparison against this baseline.";
       if (status === "failed") return "I will keep this visible until the report turns into either one bounded product fix or a rerun that proves the blocker changed; this is product evidence, not a GitHub merge signal.";
-      return "I will keep this in Hermes Checking until the browser mission report arrives; this is product/testbed evidence, not a GitHub merge signal.";
+      return "I will keep this in Browser Missions until the browser mission report arrives; this is product/testbed evidence, not a GitHub merge signal.";
     }
 
     function selectedTestbedMissionHandoff(item, title) {
@@ -8679,6 +8726,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         .sort((a, b) => a.ts - b.ts)
         .slice(-14);
       if (memory.length) return memory;
+      if (isTestbedMissionItem(item)) {
+        return [
+          collabMessage("Hermes", "This mission room is quiet so far. I will keep the runner claim, report, rerun, and product-fix notes here instead of mixing them into PR chatter.", "mission memory", itemUpdatedMs(item) - 2),
+        ];
+      }
       return [
         collabMessage("Hermes", "This PR room is quiet so far. I will keep the next Codex, Hermes, and operator turns here once they attach to this PR.", "conversation memory", itemUpdatedMs(item) - 2),
       ];
@@ -8757,7 +8809,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         if (briefingCoveredKeys.has(boardItemKey(item))) return;
         const action = nextPipelineAction(item, verdict);
         if (kind === "codex" && action.owner !== "Codex" && lane.key !== "codex") return;
-        if (kind === "hermes" && action.owner !== "Hermes" && lane.key !== "hermes") return;
+        if (kind === "hermes" && action.owner !== "Hermes" && lane.key !== "hermes" && lane.key !== "mission") return;
         if (kind === "operator" && action.owner !== "Operator" && lane.key !== "operator") return;
         if (kind === "blocked" && lane.key !== "attention" && verdict.level !== "block") return;
         messages.push(collabMessage("Hermes", collaborationAskForItem(item, verdict, action, lane), collaborationMetaForItem(item, verdict), itemUpdatedMs(item), inferAddressedTo(action, lane)));
@@ -9004,6 +9056,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (key === "waiting") return "Waiting / Drafts";
       if (key === "codex") return "Codex Needed";
       if (key === "hermes") return "Hermes Checking";
+      if (key === "mission") return "Browser Missions";
       if (key === "operator") return "Operator Review";
       if (key === "queue") return "Release Queue";
       if (key === "deploy") return "Deploying";
@@ -10271,7 +10324,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
             correlationId: run.id,
             requester: "monitor",
             intent: "testbed_agent_mission",
-            repo: "testbed/agent",
+            repo: "testbed/mission",
             status: terminalStatus,
             phase: "testbed_mission",
             active,
@@ -10289,11 +10342,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
               reviewSignals: {
                 touchedAreas: ["testbed"],
                 testSignals: [
-                  "browser mission packet ready",
+                  "mission packet ready",
                   ...(status === "running" ? ["browser mission runner claimed"] : []),
                   ...(run.allowTestMutations === true ? ["test-mode page mutation allowed"] : []),
                 ],
-                missingTestSignals: status === "completed" ? [] : ["browser agent report"],
+                missingTestSignals: status === "completed" || status === "failed" ? [] : ["browser-agent report"],
               },
               reviewReasons: status === "failed"
                 ? [{ severity: "high", code: "testbed_mission_failed", message: run.statusReason || "Browser mission failed." }]
@@ -10391,12 +10444,20 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function pipelineTitle(item) {
+      if (isTestbedMissionItem(item)) return testbedMissionPipelineTitle(item);
       const repo = item.repo || "unknown repo";
       const prNumber = item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId);
       if (isDeployItem(item)) return [repo, "post-deploy"].filter(Boolean).join(" ");
       if (Array.isArray(item.groupItems)) return [repo, prNumber ? "#" + prNumber : ""].filter(Boolean).join(" ");
       const intent = item.intent || "pr_handoff";
       return [repo, prNumber ? "#" + prNumber : "", intent].filter(Boolean).join(" ");
+    }
+
+    function testbedMissionPipelineTitle(item) {
+      const run = testbedMissionRun(item) || {};
+      const target = shortHost(run.targetUrl || "");
+      const id = missionShortLabel(run.id || item.correlationId || "");
+      return ["testbed mission", target, id].filter(Boolean).join(" · ");
     }
 
     function renderGroupBadges(item) {
@@ -10429,7 +10490,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     function pipelineStage(item, verdict) {
       const status = normalize(item.status);
       const prState = pullRequestState(item, item.summary || {});
-      if (isTestbedMissionItem(item)) return { key: "testbed", label: "Browser mission" };
+      if (isTestbedMissionItem(item)) return testbedMissionStage(item);
       if (isDonePullRequestState(prState)) return { key: "deploy", label: pullRequestStateLabel(prState) };
       if (item.active === true || item.activeState === "running" || status === "running") {
         return { key: "hermes", label: "Hermes reviewing" };
@@ -10440,6 +10501,16 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (verdict.level === "needs-review") return { key: "gate", label: "Operator review" };
       if (verdict.level === "pass") return { key: "gate", label: "Ready for merge" };
       return { key: "ci", label: "CI / handoff" };
+    }
+
+    function testbedMissionStage(item) {
+      const run = testbedMissionRun(item) || {};
+      const status = normalize(run.status || (item.summary || {}).status || item.status);
+      if (status === "ready") return { key: "claim", label: "Mission ready" };
+      if (status === "running") return { key: "browser", label: "Browser run" };
+      if (status === "completed") return { key: "baseline", label: "Evidence baseline" };
+      if (status === "failed") return { key: "report", label: "Report needs follow-up" };
+      return { key: "packet", label: "Mission packet" };
     }
 
     function nextPipelineActor(item, verdict) {
@@ -10468,9 +10539,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           return { owner: "Done", text: "use the browser mission report as evidence for the next testbed improvement" };
         }
         if (missionStatus === "failed") {
-          return { owner: "Hermes", text: "inspect the browser mission report and decide whether the page or mission prompt needs the next fix" };
+          return { owner: "Hermes", text: "turn the mission report into either a small product fix, a runner setup fix, or a smaller rerun" };
         }
-        return { owner: "Hermes", text: "run the browser-only mission with a fresh agent and post the structured report back here" };
+        return { owner: "Hermes", text: "claim the browser-only mission and bring back a structured outside-agent report" };
       }
       if (isDonePullRequestState(prState)) {
         return { owner: "Done", text: "PR is no longer open in GitHub; keep this handoff as release history" };
@@ -10537,14 +10608,23 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     }
 
     function renderPipelineSteps(stage, verdict) {
-      const steps = [
-        { key: "pr", label: "PR" },
-        { key: "ci", label: "CI" },
-        { key: "hermes", label: "Hermes" },
-        { key: "testbed", label: "Testbed" },
-        { key: "gate", label: "Gate" },
-        { key: "deploy", label: "Deploy" },
-      ];
+      const missionStageKeys = new Set(["packet", "claim", "browser", "report", "baseline"]);
+      const steps = missionStageKeys.has(stage && stage.key)
+        ? [
+            { key: "packet", label: "Packet" },
+            { key: "claim", label: "Claim" },
+            { key: "browser", label: "Browser" },
+            { key: "report", label: "Report" },
+            { key: "baseline", label: "Baseline" },
+          ]
+        : [
+            { key: "pr", label: "PR" },
+            { key: "ci", label: "CI" },
+            { key: "hermes", label: "Hermes" },
+            { key: "testbed", label: "Testbed" },
+            { key: "gate", label: "Gate" },
+            { key: "deploy", label: "Deploy" },
+          ];
       const activeIndex = Math.max(0, steps.findIndex((step) => step.key === stage.key));
       return '<div class="pipeline-steps" aria-label="PR pipeline stages">' + steps.map((step, index) => {
         const state = pipelineStepState(index, activeIndex, step.key, verdict.level);
@@ -10558,6 +10638,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (key === "gate" && level === "block") return "blocked";
       if (key === "gate" && level === "needs-review") return "review";
       if (key === "gate" && level === "pass") return "done";
+      if (key === "report" && level === "block") return "blocked";
       return "active";
     }
 

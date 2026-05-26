@@ -384,7 +384,7 @@ export function testbedMissionRunToMonitorItem(run: TestbedMissionRun): Record<s
     correlationId: run.id,
     requester: "monitor",
     intent: "testbed_agent_mission",
-    repo: "testbed/agent",
+    repo: "testbed/mission",
     status: terminalStatus,
     phase: "testbed_mission",
     active,
@@ -403,12 +403,12 @@ export function testbedMissionRunToMonitorItem(run: TestbedMissionRun): Record<s
       reviewSignals: {
         touchedAreas: ["testbed"],
         testSignals: [
-          "browser mission packet ready",
+          "mission packet ready",
           ...(run.status === "running" ? ["browser mission runner claimed"] : []),
           ...(run.allowTestMutations ? ["test-mode page mutation allowed"] : []),
           ...(reportAttached ? ["browser agent report attached"] : []),
         ],
-        missingTestSignals: reportAttached ? [] : ["browser agent report"],
+        missingTestSignals: reportAttached ? [] : ["browser-agent report"],
       },
       reviewReasons: run.status === "failed"
         ? [{ severity: "high", code: "testbed_mission_failed", message: run.statusReason }]
