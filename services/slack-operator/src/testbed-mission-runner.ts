@@ -154,14 +154,24 @@ export async function runTestbedMissionRunnerForever(
   config: TestbedMissionRunnerConfig,
   deps: { executor?: TestbedMissionExecutor; signal?: AbortSignal } = {}
 ): Promise<void> {
+  let idleLogged = false;
   while (!deps.signal?.aborted) {
     const result = await runTestbedMissionRunnerOnce(config, { executor: deps.executor });
     if (result.status === "misconfigured") {
       console.warn(`[testbed-mission-runner] ${result.reason}`);
+      idleLogged = false;
+    } else if (result.status === "disabled") {
+      if (!idleLogged) console.info("[testbed-mission-runner] disabled; set TESTBED_MISSION_RUNNER_ENABLED=1 to claim missions");
+      idleLogged = true;
+    } else if (result.status === "idle") {
+      if (!idleLogged) console.info("[testbed-mission-runner] idle; waiting for a browser mission");
+      idleLogged = true;
     } else if (result.status === "completed") {
       console.info(`[testbed-mission-runner] completed ${result.mission.id}`);
+      idleLogged = false;
     } else if (result.status === "failed") {
       console.warn(`[testbed-mission-runner] failed ${result.mission.id}: ${result.reason}`);
+      idleLogged = false;
     }
     await sleep(config.pollIntervalMs, deps.signal);
   }

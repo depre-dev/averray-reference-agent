@@ -101,7 +101,7 @@ export function recordTestbedMissionRunFromOperatorResult(
   nowMs: number = Date.now(),
   path?: string
 ): TestbedMissionRun | undefined {
-  ensureMissionStoreLoaded(path);
+  ensureMissionStoreLoaded(path, { force: true });
   if (!isRecord(result) || result.kind !== "testbed_agent_mission") return undefined;
   const mission = isRecord(result.mission) ? result.mission : undefined;
   if (!mission || mission.kind !== "testbed_agent_browser_mission") return undefined;
@@ -145,7 +145,7 @@ export function recordTestbedMissionRunFromOperatorResult(
 }
 
 export function listTestbedMissionRuns(options: ListTestbedMissionRunOptions = {}): TestbedMissionRun[] {
-  ensureMissionStoreLoaded(options.path);
+  ensureMissionStoreLoaded(options.path, { force: true });
   const limit = clampInt(options.limit, 1, MAX_MISSION_RUNS, 20);
   const runs = options.activeOnly
     ? missionRuns.filter((run) => run.status === "ready" || run.status === "running")
@@ -160,7 +160,7 @@ export function recordTestbedMissionReportFromMessage(
   input: MissionReportInput,
   nowMs: number = Date.now()
 ): TestbedMissionRun | undefined {
-  ensureMissionStoreLoaded(input.path);
+  ensureMissionStoreLoaded(input.path, { force: true });
   const diagnosis = diagnoseTestbedMissionReportFromMessage(input);
   if (!diagnosis.valid || !diagnosis.report) return undefined;
   const report = diagnosis.report;
@@ -199,7 +199,7 @@ export function recordTestbedMissionReportFromMessage(
 export function claimNextReadyTestbedMission(
   deps: TestbedMissionStoreDeps & { runnerId?: string } = {}
 ): TestbedMissionRun | undefined {
-  ensureMissionStoreLoaded(deps.path);
+  ensureMissionStoreLoaded(deps.path, { force: true });
   const existing = missionRuns
     .filter((run) => run.status === "ready")
     .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))[0];
@@ -231,7 +231,7 @@ export function updateTestbedMissionProgress(
     stderrTail?: string;
   } = {}
 ): TestbedMissionRun | undefined {
-  ensureMissionStoreLoaded(deps.path);
+  ensureMissionStoreLoaded(deps.path, { force: true });
   const existing = missionRuns.find((run) => run.id === id);
   if (!existing) return undefined;
   if (existing.status === "completed" || existing.status === "failed") return cloneRun(existing);
@@ -261,7 +261,7 @@ export function failTestbedMissionRun(
     stderrTail?: string;
   } = {}
 ): TestbedMissionRun | undefined {
-  ensureMissionStoreLoaded(deps.path);
+  ensureMissionStoreLoaded(deps.path, { force: true });
   const existing = missionRuns.find((run) => run.id === id);
   if (!existing) return undefined;
   if (existing.status === "completed" || existing.status === "failed") return cloneRun(existing);
@@ -593,9 +593,9 @@ export function __resetTestbedMissionRunsForTests(): void {
   loadedMissionStorePath = undefined;
 }
 
-function ensureMissionStoreLoaded(path?: string): void {
+function ensureMissionStoreLoaded(path?: string, options: { force?: boolean } = {}): void {
   const targetPath = missionStorePath(path);
-  if (!targetPath || loadedMissionStorePath === targetPath) return;
+  if (!targetPath || (!options.force && loadedMissionStorePath === targetPath)) return;
   try {
     const value: unknown = JSON.parse(readFileSync(targetPath, "utf8"));
     const runs = missionStoreRuns(value);
