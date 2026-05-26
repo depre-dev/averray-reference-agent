@@ -169,8 +169,8 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       --bad-bg: rgba(238, 98, 96, 0.12);
       --warn-bg: rgba(217, 173, 66, 0.12);
       --accent-bg: rgba(216, 154, 43, 0.12);
+      --z-selected-card: 29;
       --z-drawer-scrim: 30;
-      --z-selected-card: 31;
       --z-detail-drawer: 40;
     }
     * { box-sizing: border-box; }
@@ -607,6 +607,118 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       flex-wrap: wrap;
       gap: 8px;
       margin-top: 12px;
+    }
+    .testbed-mission-panel {
+      display: grid;
+      gap: 12px;
+      border-left: 4px solid var(--cyan);
+      background:
+        linear-gradient(180deg, rgba(86, 204, 228, 0.08), transparent 140px),
+        rgba(12, 24, 19, 0.68);
+    }
+    .testbed-mission-panel h4 {
+      margin: 2px 0 0;
+      color: var(--cream);
+      font-size: 0.88rem;
+      line-height: 1.25;
+    }
+    .testbed-hero {
+      display: grid;
+      gap: 10px;
+      border: 1px solid color-mix(in srgb, var(--cyan) 28%, var(--line-soft));
+      border-radius: 10px;
+      background: rgba(2, 12, 11, 0.5);
+      padding: 12px;
+    }
+    .testbed-hero-title {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      min-width: 0;
+    }
+    .testbed-hero-title strong {
+      display: block;
+      color: var(--cream);
+      font-size: 1rem;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+    }
+    .testbed-hero-title span {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1.35;
+    }
+    .testbed-state-pill {
+      flex: 0 0 auto;
+      border: 1px solid color-mix(in srgb, var(--cyan) 44%, var(--line-soft));
+      border-radius: 999px;
+      background: rgba(86, 204, 228, 0.09);
+      color: var(--cyan);
+      padding: 4px 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.62rem;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .testbed-meta-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .testbed-meta-card {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.026);
+      padding: 8px;
+    }
+    .testbed-meta-card span {
+      color: var(--faint);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.58rem;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .testbed-meta-card strong {
+      color: var(--text);
+      font-size: 0.78rem;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+    }
+    .testbed-next-box {
+      display: grid;
+      gap: 6px;
+      border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line-soft));
+      border-radius: 8px;
+      background: rgba(216, 154, 43, 0.06);
+      padding: 10px;
+    }
+    .testbed-next-box span {
+      color: var(--accent);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.6rem;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .testbed-next-box p {
+      margin: 0;
+      color: var(--text);
+      line-height: 1.38;
+    }
+    .testbed-copy-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 0;
     }
     .operator-decision {
       border-left: 4px solid var(--warn);
@@ -1674,10 +1786,9 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       border-color: var(--verdict-accent, var(--lane-accent));
       box-shadow: 0 12px 30px rgba(0, 0, 0, 0.32);
     }
-    /* Selected card pops a touch more than hover — thicker accent rail
-       and a subtle outer glow so when the drawer is open you can still
-       see which card it belongs to behind the scrim. The drawer itself
-       stays above this layer so long cards never cover drawer text. */
+    /* Selected card pops a touch more than hover, but it remains below
+       the scrim once the drawer opens. The drawer is the focused surface;
+       the card should read as context, not as a second giant panel. */
     .handoff-card[data-selected="true"] {
       transform: translateY(-1px);
       border-color: var(--verdict-accent, var(--lane-accent));
@@ -1887,7 +1998,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       background: color-mix(in srgb, var(--lane-accent) 12%, transparent);
     }
     /* Backdrop scrim that dims the rest of the page while the detail
-       drawer is open. Sits below the selected-card focus layer and
+       drawer is open. Sits above the selected-card focus layer and
        below the drawer. Click anywhere on the scrim to close. */
     #drawer-scrim {
       position: fixed;
@@ -3260,8 +3371,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       background: color-mix(in srgb, var(--ok) 6%, var(--surface-strong));
     }
     .done-row[data-verdict="block"]:hover { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 6%, var(--surface-strong)); }
-    /* Selected done-row pops above the scrim too, but remains below the
-       drawer if a future action opens one from a Done entry. */
+    /* Selected done rows use the same below-scrim focus layer as cards. */
     .done-row[data-selected="true"] {
       transform: translateY(-1px);
       border-color: var(--ok);
@@ -6604,13 +6714,19 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const comparisonBrief = testbedMissionComparisonBrief(run);
       const fixBrief = testbedMissionFixBrief(run);
       const fixBriefPrompt = testbedMissionFixBriefPrompt(run, fixBrief);
+      const status = String(run.status || summary.status || "ready");
+      const targetUrl = String(run.targetUrl || target.url || "[TESTBED_URL]");
+      const goal = String(run.goal || target.goal || "test first-contact usability");
+      const agentName = String(run.agentName || target.agentName || "Hermes");
+      const mutationMode = allowTestMutations ? "testbed-only mutation allowed" : "stop before mutation";
+      const nextStep = testbedMissionNextStep(run, allowTestMutations);
       const rows = [
-        row("Target", escapeHtml(String(run.targetUrl || target.url || "[TESTBED_URL]"))),
-        row("Goal", escapeHtml(String(run.goal || target.goal || "test first-contact usability"))),
-        row("Agent", escapeHtml(String(run.agentName || target.agentName || "Hermes"))),
+        row("Target", escapeHtml(targetUrl)),
+        row("Goal", escapeHtml(goal)),
+        row("Agent", escapeHtml(agentName)),
         row("Memory", escapeHtml(run.freshMemory === false ? "returning memory allowed" : "fresh or explicitly ignored")),
-        row("Mutation mode", escapeHtml(allowTestMutations ? "testbed-only mutation allowed" : "stop before mutation")),
-        row("Status", escapeHtml(String(run.status || summary.status || "ready"))),
+        row("Mutation mode", escapeHtml(mutationMode)),
+        row("Status", escapeHtml(status)),
         run.runnerId ? row("Runner", escapeHtml(String(run.runnerId))) : "",
         run.progressMessage ? row("Runner progress", escapeHtml(String(run.progressMessage))) : "",
       ].join("");
@@ -6633,30 +6749,61 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           ? "No report is attached yet. Hermes has claimed this browser mission; wait for the runner report, or inspect runner output if it stalls."
           : "No report is attached yet. If the automatic runner is enabled, Hermes will claim it; otherwise copy the prompt into a clean browser-capable agent and paste the structured report here.") + '</p>';
       return '<section class="drawer-section testbed-mission-panel"><h3>Testbed mission</h3>' +
-        '<p class="resolution-summary">' + escapeHtml(allowTestMutations
-          ? "This starts from the monitor and runs through the Hermes testbed runner when enabled. In test mode the runner may complete clearly fake/sandbox page actions, then attach the report here for Hermes to judge."
-          : "This starts from the monitor and runs through the Hermes testbed runner when enabled. The runner should use a clean browser context, stop before mutation, and attach the report here for Hermes to judge.") + '</p>' +
-        '<dl class="resolution-grid">' + rows + '</dl>' +
-        '<h4>Runbook</h4>' + runbookHtml +
-        '<h4>Rubric</h4>' + rubricHtml +
+        '<div class="testbed-hero">' +
+          '<div class="testbed-hero-title">' +
+            '<div><strong>' + escapeHtml(goal) + '</strong><span>' + escapeHtml(targetUrl) + '</span></div>' +
+            '<span class="testbed-state-pill">' + escapeHtml(status) + '</span>' +
+          '</div>' +
+          '<div class="testbed-meta-grid">' +
+            '<div class="testbed-meta-card"><span>Agent</span><strong>' + escapeHtml(agentName) + '</strong></div>' +
+            '<div class="testbed-meta-card"><span>Memory</span><strong>' + escapeHtml(run.freshMemory === false ? "returning allowed" : "fresh run") + '</strong></div>' +
+            '<div class="testbed-meta-card"><span>Mutation</span><strong>' + escapeHtml(mutationMode) + '</strong></div>' +
+            '<div class="testbed-meta-card"><span>Report</span><strong>' + escapeHtml(result ? "attached" : "waiting") + '</strong></div>' +
+          '</div>' +
+          '<div class="testbed-next-box"><span>What happens next</span><p>' + escapeHtml(nextStep) + '</p></div>' +
+        '</div>' +
         resultHtml +
         renderTestbedMissionFixBrief(fixBrief) +
         (comparisonBrief ? '<h4>Comparison brief</h4><p class="resolution-summary">' + escapeHtml(comparisonBrief) + '</p>' : "") +
-        (baselinePrompt ? '<details class="drawer-disclosure prompt-disclosure"><summary>Baseline for future runs</summary><pre class="prompt-box">' + escapeHtml(baselinePrompt) + '</pre></details>' : "") +
-        (rerunPrompt ? '<details class="drawer-disclosure prompt-disclosure" open><summary>Rerun after fix</summary><pre class="prompt-box">' + escapeHtml(rerunPrompt) + '</pre></details>' : "") +
         (history.length ? '<h4>Mission timeline</h4><ol class="resolution-steps">' + history.map((entry) => '<li><strong>' + escapeHtml(entry.event) + '</strong> <span class="muted">' + escapeHtml(entry.at) + '</span><br>' + escapeHtml(entry.message) + '</li>').join("") + '</ol>' : "") +
-        (prompt ? '<details class="drawer-disclosure prompt-disclosure"><summary>Mission prompt</summary><pre class="prompt-box">' + escapeHtml(prompt) + '</pre></details>' : "") +
-        '<details class="drawer-disclosure prompt-disclosure"><summary>Report schema</summary><pre class="prompt-box">' + escapeHtml(prettyJson(reportSchema)) + '</pre></details>' +
-        '<details class="drawer-disclosure prompt-disclosure"><summary>Report template</summary><pre class="prompt-box">' + escapeHtml(reportTemplate) + '</pre></details>' +
-        '<div class="resolution-actions">' +
+        '<details class="drawer-disclosure prompt-disclosure"><summary>Mission packet details</summary>' +
+          '<dl class="resolution-grid">' + rows + '</dl>' +
+          '<h4>Runbook</h4>' + runbookHtml +
+          '<h4>Rubric</h4>' + rubricHtml +
+          (baselinePrompt ? '<details class="drawer-disclosure prompt-disclosure"><summary>Baseline for future runs</summary><pre class="prompt-box">' + escapeHtml(baselinePrompt) + '</pre></details>' : "") +
+          (rerunPrompt ? '<details class="drawer-disclosure prompt-disclosure" open><summary>Rerun after fix</summary><pre class="prompt-box">' + escapeHtml(rerunPrompt) + '</pre></details>' : "") +
+          (prompt ? '<details class="drawer-disclosure prompt-disclosure"><summary>Mission prompt</summary><pre class="prompt-box">' + escapeHtml(prompt) + '</pre></details>' : "") +
+          '<details class="drawer-disclosure prompt-disclosure"><summary>Report schema</summary><pre class="prompt-box">' + escapeHtml(prettyJson(reportSchema)) + '</pre></details>' +
+          '<details class="drawer-disclosure prompt-disclosure"><summary>Report template</summary><pre class="prompt-box">' + escapeHtml(reportTemplate) + '</pre></details>' +
+        '</details>' +
+        '<div class="resolution-actions testbed-copy-grid">' +
           (prompt ? '<button class="soft-button" type="button" data-copy-label="Mission prompt copied" data-copy-text="' + escapeAttr(prompt) + '">Copy mission prompt</button>' : "") +
           (fixBriefPrompt ? '<button class="soft-button" type="button" data-copy-label="Fix brief copied" data-copy-text="' + escapeAttr(fixBriefPrompt) + '">Copy fix brief</button>' : "") +
           (baselinePrompt ? '<button class="soft-button" type="button" data-copy-label="Baseline prompt copied" data-copy-text="' + escapeAttr(baselinePrompt) + '">Copy baseline prompt</button>' : "") +
           (rerunPrompt ? '<button class="soft-button" type="button" data-copy-label="Rerun prompt copied" data-copy-text="' + escapeAttr(rerunPrompt) + '">Copy rerun prompt</button>' : "") +
-          '<button class="soft-button" type="button" data-copy-label="Report schema copied" data-copy-text="' + escapeAttr(prettyJson(reportSchema)) + '">Copy report schema</button>' +
           '<button class="soft-button" type="button" data-copy-label="Report template copied" data-copy-text="' + escapeAttr(reportTemplate) + '">Copy report template</button>' +
         '</div>' +
         '</section>';
+    }
+
+    function testbedMissionNextStep(run, allowTestMutations) {
+      const status = normalize(run && run.status);
+      if (status === "running") {
+        const progress = String(run && run.progressMessage || "").trim();
+        return progress || "Hermes has claimed the browser mission. Wait for the runner to attach a structured report; inspect runner output only if it stalls.";
+      }
+      if (status === "completed") {
+        return "Use the attached browser-agent report as evidence. If the product changed, rerun from a clean browser and compare against this baseline.";
+      }
+      if (status === "failed") {
+        return "Open the report or runner output first. If the product caused the failure, send a focused fix to Codex; if the runner failed, retry with a smaller mission.";
+      }
+      if (status === "ready" || status === "mission_ready") {
+        return "Hermes is waiting for a browser runner to take the mission. The fallback is to copy the mission prompt into a clean browser-capable agent and paste the structured report back here.";
+      }
+      return allowTestMutations
+        ? "Run this only against the testbed. Fake or sandbox page actions are allowed, but the report must say exactly what changed."
+        : "Run this from a clean browser context, stop before any real mutation boundary, and attach the structured report.";
     }
 
     function renderTestbedMissionFixBrief(fixBrief) {
@@ -7181,10 +7328,19 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function actionRecipeForItem(item, summary, verdict, action) {
       if (isTestbedMissionItem(item)) {
+        const run = testbedMissionRun(item) || {};
+        const status = normalize(run.status || summary.status || "");
+        const ask = status === "running"
+          ? "Let the browser runner finish and attach its structured report. Inspect runner output only if the mission stops moving."
+          : status === "completed"
+            ? "Use the attached report as the evidence packet. Rerun only when the page changes or you need a baseline comparison."
+            : status === "failed"
+              ? "Inspect the report or runner output, then send a product fix to Codex or retry with a smaller mission if the runner itself failed."
+              : "Let the Hermes testbed runner claim the mission; if no runner is available, copy the mission prompt into a clean browser-capable agent and paste the structured report here.";
         return {
           owner: "Hermes / browser agent",
           why: "A mission packet was generated to test whether an out-of-the-box agent can use the page without private Averray context.",
-          ask: "Copy the mission prompt into a clean browser-capable agent, let it work only from visible UI, then paste the structured report into this room.",
+          ask,
           clearsWhen: "The report includes a verdict, evidence, scores, blockers, and whether the agent stopped before mutation.",
           proof: ["mission prompt", "fresh browser run", "structured report"],
         };
