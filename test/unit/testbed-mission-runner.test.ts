@@ -182,6 +182,7 @@ describe("testbed mission runner", () => {
       enabled: true,
       path,
       runnerId: "test-runner",
+      executor: "command",
       args: [],
       pollIntervalMs: 1000,
       timeoutMs: 1000,
@@ -223,9 +224,22 @@ describe("testbed mission runner", () => {
     expect(config).toMatchObject({
       enabled: true,
       runnerId: "runner-a",
+      executor: "command",
       command: "hermes",
       args: ["run", "{prompt}"],
       pollIntervalMs: 500,
+    });
+  });
+
+  it("defaults to the built-in Playwright browser executor", () => {
+    const config = parseTestbedMissionRunnerConfig({
+      TESTBED_MISSION_RUNNER_ENABLED: "1",
+    });
+
+    expect(config).toMatchObject({
+      enabled: true,
+      executor: "playwright",
+      artifactsDir: "/data/testbed-mission-artifacts",
     });
   });
 });

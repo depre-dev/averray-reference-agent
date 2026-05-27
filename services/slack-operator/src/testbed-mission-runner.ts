@@ -1,8 +1,10 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import type { Locator, Page } from "playwright-core";
 
 import type { TestbedMissionRun } from "./monitor-testbed-missions.js";
 import {
@@ -17,12 +19,16 @@ export interface TestbedMissionRunnerConfig {
   enabled: boolean;
   path?: string;
   runnerId: string;
+  executor?: "playwright" | "command";
   command?: string;
   args: string[];
   cwd?: string;
   pollIntervalMs: number;
   timeoutMs: number;
   outputTailBytes: number;
+  browserExecutablePath?: string;
+  artifactsDir?: string;
+  maxBrowserSteps?: number;
 }
 
 export interface TestbedMissionRunResult {
@@ -52,12 +58,16 @@ export function parseTestbedMissionRunnerConfig(
     enabled: env.TESTBED_MISSION_RUNNER_ENABLED === "1" || env.TESTBED_MISSION_RUNNER_ENABLED === "true",
     ...(env.AVERRAY_TESTBED_MISSIONS_PATH ? { path: env.AVERRAY_TESTBED_MISSIONS_PATH } : {}),
     runnerId: env.TESTBED_MISSION_RUNNER_ID || `testbed-mission-runner-${process.pid}`,
+    executor: parseExecutor(env.TESTBED_MISSION_RUNNER_EXECUTOR, env.TESTBED_MISSION_RUNNER_COMMAND),
     ...(env.TESTBED_MISSION_RUNNER_COMMAND ? { command: env.TESTBED_MISSION_RUNNER_COMMAND } : {}),
     args: parseArgs(env.TESTBED_MISSION_RUNNER_ARGS),
     ...(env.TESTBED_MISSION_RUNNER_CWD ? { cwd: env.TESTBED_MISSION_RUNNER_CWD } : {}),
     pollIntervalMs: positiveInt(env.TESTBED_MISSION_RUNNER_POLL_INTERVAL_MS, 10_000),
     timeoutMs: positiveInt(env.TESTBED_MISSION_RUNNER_TIMEOUT_MS, 20 * 60_000),
     outputTailBytes: positiveInt(env.TESTBED_MISSION_RUNNER_OUTPUT_TAIL_BYTES, 12_000),
+    ...(env.TESTBED_MISSION_BROWSER_EXECUTABLE_PATH ? { browserExecutablePath: env.TESTBED_MISSION_BROWSER_EXECUTABLE_PATH } : {}),
+    artifactsDir: env.TESTBED_MISSION_ARTIFACTS_DIR || "/data/testbed-mission-artifacts",
+    maxBrowserSteps: positiveInt(env.TESTBED_MISSION_MAX_BROWSER_STEPS, 8),
   };
 }
 
@@ -69,8 +79,9 @@ export async function runTestbedMissionRunnerOnce(
     updateRunnerHeartbeat(config, "disabled", "Hermes testbed runner is disabled.", deps.now);
     return { status: "disabled" };
   }
-  const executor = deps.executor ?? executeTestbedMissionCommand;
-  if (!config.command && executor === executeTestbedMissionCommand) {
+  const executorMode = config.executor ?? (config.command ? "command" : "playwright");
+  const executor = deps.executor ?? (executorMode === "command" ? executeTestbedMissionCommand : executePlaywrightTestbedMission);
+  if (executorMode === "command" && !config.command && executor === executeTestbedMissionCommand) {
     const reason = "TESTBED_MISSION_RUNNER_COMMAND is required when the Hermes testbed runner is enabled.";
     updateRunnerHeartbeat(config, "misconfigured", reason, deps.now);
     return { status: "misconfigured", reason };
@@ -251,6 +262,173 @@ export async function executeTestbedMissionCommand(
   });
 }
 
+export async function executePlaywrightTestbedMission(
+  mission: TestbedMissionRun,
+  config: TestbedMissionRunnerConfig
+): Promise<TestbedMissionRunResult> {
+  const { chromium } = await import("playwright-core");
+  const artifactsDir = join(config.artifactsDir || "/tmp/averray-testbed-mission-artifacts", mission.id);
+  await mkdir(artifactsDir, { recursive: true });
+  const completedPath: string[] = [];
+  const blockers: string[] = [];
+  const confusingMoments: string[] = [];
+  const evidence: Array<{ type: string; value: string }> = [
+    { type: "executor", value: "playwright_browser" },
+  ];
+  const consoleErrors: string[] = [];
+  const recommendations: string[] = [];
+  const mutationAttempted = false;
+
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      ...(config.browserExecutablePath ? { executablePath: config.browserExecutablePath } : {}),
+      args: ["--no-sandbox", "--disable-dev-shm-usage"],
+    });
+    const context = await browser.newContext({
+      viewport: { width: 1365, height: 900 },
+      userAgent: "Averray-Hermes-Testbed-Playwright/1.0",
+    });
+    const page = await context.newPage();
+    page.on("console", (message) => {
+      if (message.type() === "error") consoleErrors.push(message.text());
+    });
+    page.on("pageerror", (error) => {
+      consoleErrors.push(error.message);
+    });
+
+    updateTestbedMissionProgress(mission.id, {
+      path: config.path,
+      progressMessage: `Opening ${mission.targetUrl} in a clean Chromium context.`,
+    });
+    await page.goto(mission.targetUrl, { waitUntil: "domcontentloaded", timeout: Math.min(config.timeoutMs, 45_000) });
+    await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined);
+    completedPath.push(`opened ${mission.targetUrl}`);
+
+    const firstUrl = page.url();
+    const title = await page.title().catch(() => "");
+    const firstText = await visiblePageText(page);
+    evidence.push({ type: "url", value: firstUrl });
+    if (title) evidence.push({ type: "title", value: title });
+    evidence.push({ type: "visible_text", value: clip(firstText, 900) || "[no visible text detected]" });
+    const firstScreenshot = join(artifactsDir, "first-screen.png");
+    await page.screenshot({ path: firstScreenshot, fullPage: false }).catch(() => undefined);
+    evidence.push({ type: "screenshot", value: firstScreenshot });
+
+    const orientationScore = scoreOrientation(firstText, mission.goal);
+    const maxBrowserSteps = config.maxBrowserSteps || 8;
+    const safeAction = await findFirstSafeAction(page, Boolean(mission.allowTestMutations), maxBrowserSteps);
+    if (safeAction) {
+      updateTestbedMissionProgress(mission.id, {
+        path: config.path,
+        progressMessage: `Clicking safe visible control: ${safeAction.label}`,
+      });
+      await safeAction.locator.click({ timeout: 7_000 });
+      await page.waitForLoadState("domcontentloaded", { timeout: 7_000 }).catch(() => undefined);
+      await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined);
+      const afterUrl = page.url();
+      const afterText = await visiblePageText(page);
+      completedPath.push(`clicked safe visible control: ${safeAction.label}`);
+      evidence.push({ type: "interaction", value: `clicked "${safeAction.label}"` });
+      evidence.push({ type: "url_after_click", value: afterUrl });
+      evidence.push({ type: "visible_text_after_click", value: clip(afterText, 900) || "[no visible text detected after click]" });
+      const afterScreenshot = join(artifactsDir, "after-safe-click.png");
+      await page.screenshot({ path: afterScreenshot, fullPage: false }).catch(() => undefined);
+      evidence.push({ type: "screenshot", value: afterScreenshot });
+    } else {
+      confusingMoments.push("I could load the page, but I did not find a safe obvious visible control to click without risking a real mutation.");
+      recommendations.push("Expose one clearly labeled sandbox-safe primary action for outside agents to continue the mission.");
+    }
+
+    const riskyControl = await findFirstRiskyAction(page, maxBrowserSteps);
+    if (riskyControl) {
+      completedPath.push(`stopped before risky control: ${riskyControl}`);
+      evidence.push({ type: "mutation_boundary", value: `stopped before "${riskyControl}"` });
+    }
+    if (consoleErrors.length) {
+      evidence.push({ type: "console", value: clip(consoleErrors.join("\n"), 1200) });
+    }
+
+    const navigationScore = safeAction ? 4 : 2;
+    const taskCompletionScore = safeAction ? 3 : 2;
+    const evidenceQuality = evidence.some((entry) => entry.type === "screenshot") ? 5 : 3;
+    const verdict = blockers.length ? "fail" : safeAction || orientationScore >= 3 ? "pass" : "partial";
+    const report = {
+      missionId: mission.id,
+      verdict,
+      confidence: verdict === "pass" ? 0.78 : 0.52,
+      executor: "playwright_browser",
+      runnerMode: "real_browser",
+      targetUrl: mission.targetUrl,
+      goal: mission.goal,
+      memoryMode: mission.freshMemory ? "fresh_or_ignored" : "returning_agent_memory_allowed",
+      stoppedBeforeMutation: !mutationAttempted,
+      completedPath,
+      blockers,
+      confusingMoments,
+      evidence,
+      scores: {
+        orientation: orientationScore,
+        navigation: navigationScore,
+        taskCompletion: taskCompletionScore,
+        trustAndSafety: riskyControl ? 5 : 4,
+        recoverability: consoleErrors.length ? 3 : 4,
+        evidenceQuality,
+      },
+      recommendations,
+      mutationMode: mission.allowTestMutations ? "testbed_mutation_allowed" : "read_only",
+      mutationsAttempted: mutationAttempted ? ["testbed-only page action"] : [],
+    };
+
+    const reportText = `${JSON.stringify(report, null, 2)}\n`;
+    return {
+      exitCode: 0,
+      stdout: `Playwright browser mission completed for ${mission.id}\n`,
+      stderr: "",
+      reportText,
+      summary: `${verdict}: ${completedPath.join(" -> ")}`,
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    const report = {
+      missionId: mission.id,
+      verdict: "fail",
+      confidence: 0,
+      executor: "playwright_browser",
+      runnerMode: "real_browser",
+      targetUrl: mission.targetUrl,
+      goal: mission.goal,
+      stoppedBeforeMutation: true,
+      completedPath,
+      blockers: [`Playwright browser mission failed: ${detail}`],
+      confusingMoments,
+      evidence: [
+        ...evidence,
+        { type: "runner_error", value: detail },
+      ],
+      scores: {
+        orientation: 0,
+        navigation: 0,
+        taskCompletion: 0,
+        trustAndSafety: 5,
+        recoverability: 1,
+        evidenceQuality: evidence.length ? 2 : 1,
+      },
+      recommendations: ["Inspect runner browser dependencies, target reachability, and page load errors, then rerun the mission."],
+    };
+    return {
+      exitCode: 0,
+      stdout: `Playwright browser mission failed for ${mission.id}: ${detail}\n`,
+      stderr: "",
+      reportText: `${JSON.stringify(report, null, 2)}\n`,
+      summary: detail,
+    };
+  } finally {
+    await browser?.close().catch(() => undefined);
+  }
+}
+
 export function renderTestbedMissionRunnerArgs(
   args: string[],
   mission: TestbedMissionRun,
@@ -355,6 +533,84 @@ function parseArgs(value: string | undefined): string[] {
     return parsed;
   }
   return trimmed.split(/\s+/);
+}
+
+function parseExecutor(value: string | undefined, command: string | undefined): "playwright" | "command" {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "command" || normalized === "external") return "command";
+  if (normalized === "playwright" || normalized === "browser" || normalized === "real-browser") return "playwright";
+  return command?.trim() ? "command" : "playwright";
+}
+
+async function visiblePageText(page: Page): Promise<string> {
+  return (await page.locator("body").innerText({ timeout: 5_000 }).catch(() => ""))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function findFirstSafeAction(
+  page: Page,
+  allowTestMutations: boolean,
+  maxControls: number
+): Promise<{ locator: Locator; label: string } | undefined> {
+  const controls = page.locator("a[href], button, [role='button'], input[type='submit']");
+  const count = Math.min(await controls.count().catch(() => 0), Math.max(1, maxControls));
+  for (let index = 0; index < count; index += 1) {
+    const locator = controls.nth(index);
+    if (!(await locator.isVisible().catch(() => false))) continue;
+    const label = await controlLabel(locator);
+    if (!label || isRiskyActionLabel(label, allowTestMutations)) continue;
+    return { locator, label };
+  }
+  return undefined;
+}
+
+async function findFirstRiskyAction(page: Page, maxControls: number): Promise<string | undefined> {
+  const controls = page.locator("a[href], button, [role='button'], input[type='submit']");
+  const count = Math.min(await controls.count().catch(() => 0), Math.max(1, maxControls));
+  for (let index = 0; index < count; index += 1) {
+    const locator = controls.nth(index);
+    if (!(await locator.isVisible().catch(() => false))) continue;
+    const label = await controlLabel(locator);
+    if (label && isRiskyActionLabel(label, false)) return label;
+  }
+  return undefined;
+}
+
+async function controlLabel(locator: Locator): Promise<string> {
+  const label = await locator.getAttribute("aria-label").catch(() => null)
+    || await locator.getAttribute("value").catch(() => null)
+    || await locator.innerText({ timeout: 1_500 }).catch(() => "");
+  return label.replace(/\s+/g, " ").trim().slice(0, 120);
+}
+
+function isRiskyActionLabel(label: string, allowTestMutations: boolean): boolean {
+  const normalized = label.toLowerCase();
+  if (allowTestMutations && /\b(test|sandbox|fake|demo|preview|simulate|try)\b/.test(normalized)) return false;
+  return /\b(connect wallet|sign|signature|pay|payment|checkout|buy|transfer|stake|mint|deploy|merge|delete|approve|confirm|submit|send)\b/.test(normalized);
+}
+
+function scoreOrientation(text: string, goal: string): number {
+  const normalized = text.toLowerCase();
+  if (!normalized) return 0;
+  const goalMatches = goalWords(goal).filter((word) => normalized.includes(word)).length;
+  if (goalMatches >= 3) return 5;
+  if (goalMatches >= 1) return 4;
+  if (normalized.length >= 400) return 3;
+  if (normalized.length >= 80) return 2;
+  return 1;
+}
+
+function goalWords(goal: string): string[] {
+  return goal
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length >= 4)
+    .slice(0, 8);
+}
+
+function clip(value: string, maxChars: number): string {
+  return value.length > maxChars ? `${value.slice(0, maxChars - 3)}...` : value;
 }
 
 function sanitizeTail(value: string, maxBytes: number): string | undefined {
