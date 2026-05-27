@@ -281,6 +281,7 @@ export async function executePlaywrightTestbedMission(
   const urlPath: string[] = [];
   const whatITried: string[] = [];
   const screenshotArtifacts: string[] = [];
+  const mutationBoundaryNotes: string[] = [];
   const recommendations: string[] = [];
   const mutationAttempted = false;
 
@@ -357,6 +358,7 @@ export async function executePlaywrightTestbedMission(
       await captureScreenshot(page, artifactsDir, "after-safe-click.png", evidence, screenshotArtifacts);
     } else {
       whatITried.push("Stopped before interaction because no clearly safe visible control was found.");
+      mutationBoundaryNotes.push("No clearly safe next action was found, so the agent stopped before interacting further.");
       confusingMoments.push("I could load the page, but I did not find a safe obvious visible control to click without risking a real mutation.");
       recommendations.push("Expose one clearly labeled sandbox-safe primary action for outside agents to continue the mission.");
     }
@@ -365,7 +367,13 @@ export async function executePlaywrightTestbedMission(
     if (riskyControl) {
       whatITried.push(`Noted mutation boundary at risky control "${riskyControl}" and did not click it.`);
       completedPath.push(`stopped before risky control: ${riskyControl}`);
+      mutationBoundaryNotes.push(`Stopped before risky control "${riskyControl}".`);
       evidence.push({ type: "mutation_boundary", value: `stopped before "${riskyControl}"` });
+    }
+    if (!mutationBoundaryNotes.length) {
+      mutationBoundaryNotes.push(mission.allowTestMutations
+        ? "No real mutation boundary was crossed; only visibly safe testbed actions were allowed."
+        : "No real mutation boundary was crossed; the run stayed browser-visible and read-only.");
     }
     appendPlaywrightEvidenceTrail(evidence, {
       whatITried,
@@ -406,6 +414,7 @@ export async function executePlaywrightTestbedMission(
       urlPath,
       blockers,
       confusingMoments,
+      mutationBoundaryNotes,
       evidence,
       consoleErrors,
       networkFailures,
@@ -438,6 +447,7 @@ export async function executePlaywrightTestbedMission(
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     whatITried.push(`Runner stopped with error: ${detail}`);
+    mutationBoundaryNotes.push("Runner failed before crossing any page mutation boundary.");
     if (page) {
       recordUrlStep(urlPath, `failure screen ${page.url()}`);
       await captureScreenshot(page, artifactsDir, "failure.png", evidence, screenshotArtifacts);
@@ -478,6 +488,7 @@ export async function executePlaywrightTestbedMission(
       urlPath,
       blockers: [`Playwright browser mission failed: ${detail}`],
       confusingMoments,
+      mutationBoundaryNotes,
       evidence: [
         ...evidence,
         { type: "runner_error", value: detail },
@@ -498,6 +509,8 @@ export async function executePlaywrightTestbedMission(
         evidenceQuality: screenshotArtifacts.length ? 3 : evidence.length ? 2 : 1,
       },
       recommendations: ["Inspect runner browser dependencies, target reachability, and page load errors, then rerun the mission."],
+      mutationMode: mission.allowTestMutations ? "testbed_mutation_allowed" : "read_only",
+      mutationsAttempted: [],
     };
     return {
       exitCode: 0,

@@ -7,6 +7,7 @@ interface HttpMissionReport {
   executor: "http_visibility_check";
   runnerMode: "non_browser_fetch";
   stoppedBeforeMutation: boolean;
+  mutationBoundaryNotes: string[];
   completedPath?: string[];
   blockers: string[];
   confusingMoments?: string[];
@@ -41,6 +42,7 @@ export async function runHttpTestbedMission(env: NodeJS.ProcessEnv = process.env
       executor: "http_visibility_check",
       runnerMode: "non_browser_fetch",
       stoppedBeforeMutation: true,
+      mutationBoundaryNotes: ["HTTP visibility check never interacts with page controls, so it stops before every mutation boundary."],
       ...(ok ? { completedPath: [`opened ${targetUrl}`, "loaded first page without mutating state"] } : {}),
       blockers: ok
         ? ["HTTP visibility check loaded the page, but no real browser interaction ran yet."]
@@ -73,6 +75,7 @@ export async function runHttpTestbedMission(env: NodeJS.ProcessEnv = process.env
       executor: "http_visibility_check",
       runnerMode: "non_browser_fetch",
       stoppedBeforeMutation: true,
+      mutationBoundaryNotes: ["HTTP visibility check failed before any browser interaction or mutation boundary."],
       blockers: [`Could not load ${targetUrl}: ${detail}`],
       confusingMoments: [],
       evidence: [

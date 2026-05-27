@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 const MAX_MISSION_RUNS = 50;
 
 export type TestbedMissionStatus = "ready" | "running" | "completed" | "failed";
+export type TestbedMissionVerdict = "pass" | "partial" | "fail";
 export type TestbedMissionRunnerHeartbeatStatus =
   | "idle"
   | "running"
@@ -67,6 +68,22 @@ export interface MissionReportDiagnosis {
   warnings: string[];
   missionId?: string;
   report?: Record<string, unknown>;
+}
+
+export interface TestbedMissionStructuredReport {
+  verdict: TestbedMissionVerdict;
+  confidence: number;
+  scores: Record<string, number>;
+  blockers: string[];
+  confusingMoments: string[];
+  mutationBoundaryNotes: string[];
+  stoppedBeforeMutation: boolean;
+  mutationMode: string;
+  mutationsAttempted: string[];
+  completedPath: string[];
+  recommendations: string[];
+  evidence: string[];
+  summary: string;
 }
 
 export interface TestbedMissionFixBrief {
@@ -170,8 +187,9 @@ export function recordTestbedMissionReportFromMessage(
     : onlyActiveMissionRun();
   if (!run) return undefined;
 
-  const verdict = normalizeVerdict(report.verdict);
-  const stoppedBeforeMutation = report.stoppedBeforeMutation !== false;
+  const structuredReport = normalizeTestbedMissionStructuredReport(report, run);
+  const verdict = structuredReport?.verdict;
+  const stoppedBeforeMutation = structuredReport?.stoppedBeforeMutation ?? report.stoppedBeforeMutation !== false;
   const mutationBoundaryOk = stoppedBeforeMutation || run.allowTestMutations;
   const completed = verdict === "pass" && mutationBoundaryOk;
   const failed = !verdict || verdict === "fail" || verdict === "partial" || !mutationBoundaryOk;
@@ -179,13 +197,14 @@ export function recordTestbedMissionReportFromMessage(
   const updatedAt = new Date(nowMs).toISOString();
   run.result = {
     ...report,
+    ...(structuredReport ? { structuredReport } : {}),
     ingestedAt: updatedAt,
   };
   run.status = status;
   if (status === "completed") run.completedAt = updatedAt;
   if (status === "failed") run.failedAt = updatedAt;
   run.updatedAt = updatedAt;
-  run.statusReason = missionReportStatusReason(report, status, stoppedBeforeMutation, run.allowTestMutations);
+  run.statusReason = missionReportStatusReason(run.result, status, stoppedBeforeMutation, run.allowTestMutations);
   run.history.push({
     at: updatedAt,
     status,
@@ -378,7 +397,12 @@ export function diagnoseTestbedMissionReportFromMessage(input: MissionReportInpu
 export function testbedMissionRunToMonitorItem(run: TestbedMissionRun): Record<string, unknown> {
   const active = run.status === "ready" || run.status === "running";
   const terminalStatus = run.status === "completed" ? "completed" : run.status === "failed" ? "failed" : "running";
-  const verdict = run.status === "completed" ? "pass" : run.status === "failed" ? "failed" : "running";
+  const structuredReport = testbedMissionStructuredReport(run);
+  const verdict = run.status === "completed"
+    ? "pass"
+    : run.status === "failed"
+      ? structuredReport?.verdict ?? "failed"
+      : "running";
   const reportAttached = Boolean(run.result);
   return {
     correlationId: run.id,
@@ -400,6 +424,7 @@ export function testbedMissionRunToMonitorItem(run: TestbedMissionRun): Record<s
       finalReason: run.statusReason,
       finalVerdict: verdict,
       mergeRecommendation: "not_applicable",
+      ...(structuredReport ? { structuredReport } : {}),
       reviewSignals: {
         touchedAreas: ["testbed"],
         testSignals: [
@@ -423,6 +448,17 @@ export function testbedMissionRunToMonitorItem(run: TestbedMissionRun): Record<s
       freeFormHermesPromptUsed: false,
     },
   };
+}
+
+export function testbedMissionStructuredReport(run: TestbedMissionRun): TestbedMissionStructuredReport | undefined {
+  const result = run.result;
+  if (!result) return undefined;
+  const existing = isRecord(result.structuredReport) ? result.structuredReport : undefined;
+  if (existing) {
+    const normalizedExisting = normalizeTestbedMissionStructuredReport(existing, run);
+    if (normalizedExisting) return normalizedExisting;
+  }
+  return normalizeTestbedMissionStructuredReport(result, run);
 }
 
 export function testbedMissionResultCoaching(run: TestbedMissionRun): string {
@@ -771,6 +807,9 @@ function validateMissionReport(report: Record<string, unknown>): string[] {
   if (!isRecord(report.scores)) {
     errors.push("Add a scores object, even if some scores are 0.");
   }
+  if (!nonEmptyStringArray(report.mutationBoundaryNotes)) {
+    errors.push("Add mutationBoundaryNotes explaining where the agent stopped, or which test-only mutation boundary it crossed.");
+  }
   if (verdict === "pass" && !nonEmptyStringArray(report.completedPath)) {
     errors.push("For a pass, add the completedPath steps the browser agent actually took.");
   }
@@ -778,6 +817,52 @@ function validateMissionReport(report: Record<string, unknown>): string[] {
     errors.push("For partial or fail, add blockers or confusingMoments so Hermes knows what stopped the agent.");
   }
   return errors;
+}
+
+export function normalizeTestbedMissionStructuredReport(
+  report: Record<string, unknown>,
+  run?: Pick<TestbedMissionRun, "allowTestMutations">
+): TestbedMissionStructuredReport | undefined {
+  const verdict = normalizeVerdict(report.verdict);
+  if (!verdict) return undefined;
+  const confidence = clampNumber(typeof report.confidence === "number" ? report.confidence : 0, 0, 1);
+  const stoppedBeforeMutation = typeof report.stoppedBeforeMutation === "boolean"
+    ? report.stoppedBeforeMutation
+    : true;
+  const mutationMode = typeof report.mutationMode === "string" && report.mutationMode.trim()
+    ? report.mutationMode.trim()
+    : run?.allowTestMutations ? "testbed_mutation_allowed" : "stop_before_mutation";
+  const blockers = stringArray(report.blockers);
+  const confusingMoments = stringArray(report.confusingMoments);
+  const mutationBoundaryNotes = stringArray(report.mutationBoundaryNotes);
+  const mutationsAttempted = stringArray(report.mutationsAttempted);
+  const completedPath = stringArray(report.completedPath);
+  const recommendations = stringArray(report.recommendations);
+  const evidence = missionEvidenceStrings(report.evidence).slice(0, 12);
+  const scores = normalizedMissionScores(report.scores);
+  const summary = missionReportSummary({
+    verdict,
+    blockers,
+    confusingMoments,
+    mutationBoundaryNotes,
+    stoppedBeforeMutation,
+    mutationMode,
+  });
+  return {
+    verdict,
+    confidence,
+    scores,
+    blockers,
+    confusingMoments,
+    mutationBoundaryNotes,
+    stoppedBeforeMutation,
+    mutationMode,
+    mutationsAttempted,
+    completedPath,
+    recommendations,
+    evidence,
+    summary,
+  };
 }
 
 function nonEmptyStringArray(value: unknown): boolean {
@@ -800,16 +885,22 @@ function missionReportStatusReason(
   stoppedBeforeMutation: boolean,
   allowTestMutations: boolean
 ): string {
-  const verdict = normalizeVerdict(report.verdict) ?? "reported";
-  const blockers = Array.isArray(report.blockers)
-    ? report.blockers.map(String).filter(Boolean)
-    : [];
+  const structuredReport = isRecord(report.structuredReport)
+    ? normalizeTestbedMissionStructuredReport(report.structuredReport, { allowTestMutations })
+    : normalizeTestbedMissionStructuredReport(report, { allowTestMutations });
+  const verdict = structuredReport?.verdict ?? normalizeVerdict(report.verdict) ?? "reported";
+  const blockers = structuredReport?.blockers ?? stringArray(report.blockers);
+  const mutationNotes = structuredReport?.mutationBoundaryNotes ?? stringArray(report.mutationBoundaryNotes);
   if (!stoppedBeforeMutation && !allowTestMutations) {
-    return "Browser-agent report says the mission crossed or attempted a mutation boundary.";
+    return mutationNotes[0]
+      ? `Browser-agent report says the mission crossed or attempted a mutation boundary: ${mutationNotes[0]}`
+      : "Browser-agent report says the mission crossed or attempted a mutation boundary.";
   }
   if (status === "completed") {
     if (!stoppedBeforeMutation && allowTestMutations) {
-      return "Browser-agent report passed after permitted testbed-only page mutation; Hermes has structured evidence for this mission.";
+      return mutationNotes[0]
+        ? `Browser-agent report passed after permitted testbed-only page mutation: ${mutationNotes[0]}`
+        : "Browser-agent report passed after permitted testbed-only page mutation; Hermes has structured evidence for this mission.";
     }
     return "Browser-agent report passed; Hermes has structured evidence for this testbed mission.";
   }
@@ -849,6 +940,42 @@ function weakMissionScores(value: unknown): string[] {
     .filter(([, score]) => typeof score === "number" && score <= 3)
     .map(([key, score]) => `${key}:${score}`)
     .slice(0, 3);
+}
+
+function normalizedMissionScores(value: unknown): Record<string, number> {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([key, score]) => [key, Number(score)] as const)
+      .filter(([, score]) => Number.isFinite(score))
+      .map(([key, score]) => [key, clampNumber(score, 0, 5)])
+  );
+}
+
+function missionReportSummary(report: {
+  verdict: TestbedMissionVerdict;
+  blockers: string[];
+  confusingMoments: string[];
+  mutationBoundaryNotes: string[];
+  stoppedBeforeMutation: boolean;
+  mutationMode: string;
+}): string {
+  const firstIssue = report.blockers[0] || report.confusingMoments[0];
+  const mutation = report.mutationBoundaryNotes[0]
+    || (report.stoppedBeforeMutation
+      ? "agent stopped before mutation"
+      : `agent crossed a ${report.mutationMode} boundary`);
+  if (report.verdict === "pass") {
+    return `pass: usable path found; ${mutation}`;
+  }
+  if (firstIssue) {
+    return `${report.verdict}: ${firstIssue}; ${mutation}`;
+  }
+  return `${report.verdict}: inspect evidence; ${mutation}`;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
 function productFixSuggestion(primaryBlocker: string, weakScores: string[]): string {
