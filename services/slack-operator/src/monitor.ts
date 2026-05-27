@@ -1788,6 +1788,69 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     .handoff-card[data-verdict="needs-review"] { --verdict-accent: var(--warn); }
     .handoff-card[data-verdict="running"]      { --verdict-accent: var(--cyan); }
     .handoff-card[data-verdict="pass"]         { --verdict-accent: var(--ok); }
+    .handoff-card.testbed-card {
+      --verdict-accent: var(--cyan);
+      border-color: color-mix(in srgb, var(--cyan) 34%, var(--line));
+      background: color-mix(in srgb, var(--cyan) 5%, var(--surface-strong));
+    }
+    .testbed-card .mission-kicker,
+    .testbed-card .mission-target-label {
+      color: var(--faint);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.62rem;
+      font-weight: 850;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .testbed-card .mission-target {
+      display: grid;
+      gap: 4px;
+      padding: 8px;
+      border: 1px solid color-mix(in srgb, var(--cyan) 28%, var(--line-soft));
+      border-radius: 8px;
+      background: rgba(86, 204, 228, 0.035);
+      min-width: 0;
+    }
+    .testbed-card .mission-target strong {
+      color: var(--cream);
+      font-size: 0.82rem;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+    }
+    .mission-meta-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+    }
+    .mission-meta-tile {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+      padding: 7px 8px;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.024);
+    }
+    .mission-meta-tile span {
+      color: var(--faint);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.56rem;
+      font-weight: 850;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .mission-meta-tile strong {
+      min-width: 0;
+      color: var(--text);
+      font-size: 0.72rem;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+    }
+    .mission-flow-note {
+      color: var(--muted);
+      font-size: 0.76rem;
+      line-height: 1.35;
+    }
     .handoff-card:hover {
       transform: translateY(-1px);
       border-color: var(--verdict-accent, var(--lane-accent));
@@ -5868,7 +5931,10 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const cardWhy = lane.key === "operator" && verdict.level === "needs-review" ? operatorDecisionShort(item, verdict) : verdict.why;
       const missionItem = isTestbedMissionItem(item);
       const mission = missionItem ? (testbedMissionRun(item) || {}) : {};
-      const repo = missionItem ? "testbed/mission" : (item.repo || "unknown repo");
+      if (missionItem) {
+        return renderTestbedMissionCard(item, lane, verdict, action, stage, age, mission, selected, key, flow);
+      }
+      const repo = item.repo || "unknown repo";
       const repoShort = String(repo).split("/")[1] || repo;
       const prNumber = item.pullRequestNumber || pullRequestNumberFromCorrelation(item.correlationId);
       const idLabel = missionItem
@@ -5905,6 +5971,71 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         renderCardFlow(action, flow) +
         '<div class="card-foot"><span class="card-next"><span class="card-next-label">waiting on</span>' + renderActorPill(action.owner) + '</span><span class="card-actions">' + primaryActionButton(item, verdict, action, lane) + '</span></div>' +
         '</article>';
+    }
+
+    function renderTestbedMissionCard(item, lane, verdict, action, stage, age, run, selected, key, flow) {
+      const mission = (run && run.mission) || {};
+      const target = mission.target || {};
+      const result = (run && run.result) || null;
+      const status = normalize(run && run.status || (item.summary || {}).status || item.status);
+      const targetUrl = String(run && run.targetUrl || target.url || "");
+      const targetLabel = shortHost(targetUrl) || targetUrl || "target not set";
+      const agentName = String(run && run.agentName || target.agentName || "Hermes");
+      const missionId = missionShortLabel(run && run.id || item.correlationId);
+      const allowTestMutations = run && run.allowTestMutations === true || (mission.safety && mission.safety.browserMissionShouldMutate === true);
+      const reportState = result ? String(result.verdict || "attached") : status === "running" ? "running" : status === "failed" ? "failed" : "waiting";
+      const memoryState = run && run.freshMemory === false ? "returning" : "fresh";
+      const mutationState = allowTestMutations ? "testbed-only" : "read-only stop";
+      const cardWhy = testbedMissionCardWhy(run, verdict);
+      const staleState = age.state || "fresh";
+      const activeAgent = activeAgentForItem(item, lane, stage);
+      return '<article class="handoff-card testbed-card" data-kind="testbed-mission" data-select-card="' + escapeAttr(key) + '" data-selected="' + escapeAttr(String(selected)) + '" data-verdict="' + escapeAttr(verdict.level) + '" data-lane="' + escapeAttr(lane.key) + '">' +
+        '<span class="lane-chip" data-lane="' + escapeAttr(lane.key) + '">' + escapeHtml(lane.title) + '</span>' +
+        '<div class="card-head">' +
+          '<div class="kc-head-l">' +
+            '<span class="pill state-pill" data-level="' + escapeAttr(verdict.level) + '">' + escapeHtml(testbedMissionStatusLabel(run, verdict)) + '</span>' +
+            (activeAgent ? '<span class="active-agent" data-agent="' + escapeAttr(activeAgent.id) + '"><span class="aa-dot"></span>' + escapeHtml(activeAgent.label) + '</span>' : "") +
+          '</div>' +
+          '<div class="kc-head-r" data-stale-tier="' + escapeAttr(age.staleTier || "") + '">' +
+            '<span class="stale-dot" data-stale="' + escapeAttr(staleState) + '" data-stale-tier="' + escapeAttr(age.staleTier || "") + '" title="' + escapeAttr(staleState + (age.staleTier ? " · " + age.staleTier : "")) + '"></span>' +
+            '<span class="card-age">' + escapeHtml(age.label + " " + age.duration) + '</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="kc-id"><span class="mission-kicker">browser mission</span><span class="kc-num">' + escapeHtml(missionId) + '</span></div>' +
+        '<h3 class="card-title">' + escapeHtml(testbedMissionCardTitle(item)) + '</h3>' +
+        '<div class="mission-target"><span class="mission-target-label">Target</span><strong>' + escapeHtml(targetLabel) + '</strong></div>' +
+        renderMiniSteps(stage, verdict) +
+        '<p class="card-why">' + escapeHtml(cardWhy) + '</p>' +
+        '<div class="mission-meta-grid">' +
+          renderMissionMetaTile("Agent", agentName) +
+          renderMissionMetaTile("Memory", memoryState) +
+          renderMissionMetaTile("Mutation", mutationState) +
+          renderMissionMetaTile("Report", reportState) +
+        '</div>' +
+        '<p class="mission-flow-note">' + escapeHtml(flow.after) + '</p>' +
+        '<div class="card-foot"><span class="card-next"><span class="card-next-label">mission owner</span>' + renderActorPill(action.owner) + '</span><span class="card-actions">' + primaryActionButton(item, verdict, action, lane) + '</span></div>' +
+        '</article>';
+    }
+
+    function renderMissionMetaTile(label, value) {
+      return '<span class="mission-meta-tile"><span>' + escapeHtml(label) + '</span><strong>' + escapeHtml(value || "—") + '</strong></span>';
+    }
+
+    function testbedMissionStatusLabel(run, verdict) {
+      const status = normalize(run && run.status);
+      if (status === "ready") return "Mission ready";
+      if (status === "running") return "Browser running";
+      if (status === "completed") return "Report attached";
+      if (status === "failed") return "Mission failed";
+      return (verdict && verdict.label) || "Browser mission";
+    }
+
+    function testbedMissionCardWhy(run, verdict) {
+      const status = normalize(run && run.status);
+      if (status === "completed") return "Browser-agent report is attached. Use it as product evidence and baseline future page changes against it.";
+      if (status === "failed") return String(run && (run.statusReason || run.failureReason) || verdict && verdict.why || "Browser mission failed. Inspect the report before deciding between a product fix and a rerun.").trim();
+      if (status === "running") return String(run && run.progressMessage || "Hermes has claimed this browser-only mission and is collecting evidence. Wait for the structured report.").trim();
+      return "Mission packet is ready. A browser-capable runner should open the target as a fresh outside agent and bring back a structured report.";
     }
 
     function boardCardAge(item, lane) {
@@ -6375,6 +6506,17 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
 
     function primaryActionButton(item, verdict, action, lane) {
       if (isTestbedMissionItem(item)) {
+        const run = testbedMissionRun(item) || {};
+        const status = normalize(run.status || (item.summary || {}).status || item.status);
+        if (status === "completed") {
+          return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '" title="Open the browser-agent report and baseline prompts">Open report baseline</button>';
+        }
+        if (status === "failed") {
+          return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '" title="Open the browser-agent report, runner output, and rerun prompts">Open mission report</button>';
+        }
+        if (status === "running") {
+          return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '" title="Watch the browser mission runner and expected report">Watch mission</button>';
+        }
         return '<button class="soft-button" data-action="primary" type="button" data-review-card="' + escapeAttr(boardItemKey(item)) + '" title="Open the mission packet, prompt, and expected report">Open mission packet</button>';
       }
       if (lane.key === "codex") {
@@ -9766,6 +9908,12 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const codex = counts.codex || 0;
       const operator = counts.operator || 0;
       const mission = counts.mission || 0;
+      const missionTotal = items.filter(isTestbedMissionItem).length;
+      const missionFailed = items.filter((item) => {
+        if (!isTestbedMissionItem(item)) return false;
+        const run = testbedMissionRun(item) || {};
+        return normalize(run.status || (item.summary || {}).status || item.status) === "failed";
+      }).length;
       const hermes = counts.hermes || 0;
       const queue = counts.queue || 0;
       const deploy = counts.deploy || 0;
@@ -9773,9 +9921,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       const total = attention + waiting + codex + operator + queue + running;
       let tone = "quiet";
       let headline = "Board is quiet: no active PR handoffs in this monitor window.";
-      if (attention) {
+      if (attention && missionFailed && attention === missionFailed) {
         tone = "attention";
-        headline = "Board now: " + plural(attention, "card") + " " + (attention === 1 ? "needs" : "need") + " a fix or explicit decision before the release path can move.";
+        headline = "Board now: " + plural(missionFailed, "browser mission") + " " + (missionFailed === 1 ? "needs" : "need") + " a report review, product fix, or smaller rerun.";
+      } else if (attention) {
+        tone = "attention";
+        headline = missionTotal
+          ? "Board now: " + plural(attention, "release card") + " plus " + plural(missionTotal, "browser mission") + " need clear next ownership."
+          : "Board now: " + plural(attention, "card") + " " + (attention === 1 ? "needs" : "need") + " a fix or explicit decision before the release path can move.";
       } else if (codex) {
         tone = "codex";
         headline = "Board now: Codex owns " + plural(codex, "next move") + "; keep the patch small and hand it back to Hermes.";
