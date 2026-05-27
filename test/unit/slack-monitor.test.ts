@@ -249,6 +249,15 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("mission owner");
     expect(html).toContain("Open mission report");
     expect(html).toContain("Open report baseline");
+    expect(html).toContain("testbedMissionsPath");
+    expect(html).toContain("handleTestbedMissionAction");
+    expect(html).toContain("data-testbed-mission-action=\"run-fresh\"");
+    expect(html).toContain("data-testbed-mission-action=\"run-memory\"");
+    expect(html).toContain("Run again fresh");
+    expect(html).toContain("Run with memory");
+    expect(html).toContain("Copy report");
+    expect(html).toContain("Create product fix");
+    expect(html).toContain("testbedMissionReportCopyText(run, mission)");
     expect(html).toContain("renderTestbedMissionPanel(item, summary)");
     expect(html).toContain("Fresh-agent browser mission");
     expect(html).toContain("testbed-only mutation allowed");

@@ -120,7 +120,7 @@ export function renderMonitorManifest(options: { name?: string; shortName?: stri
   );
 }
 
-export function renderMonitorHtml(options: { title?: string; eventsPath?: string; streamPath?: string; commandPath?: string; codexTasksPath?: string; recheckPath?: string; collaborationPath?: string; manifestPath?: string } = {}): string {
+export function renderMonitorHtml(options: { title?: string; eventsPath?: string; streamPath?: string; commandPath?: string; codexTasksPath?: string; recheckPath?: string; collaborationPath?: string; testbedMissionsPath?: string; manifestPath?: string } = {}): string {
   const title = escapeHtml(options.title ?? "Hermes Handoff Monitor");
   const eventsPath = JSON.stringify(options.eventsPath ?? "/monitor/events");
   const streamPath = JSON.stringify(options.streamPath ?? "/monitor/stream");
@@ -128,6 +128,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
   const codexTasksPath = JSON.stringify(options.codexTasksPath ?? "/monitor/codex-tasks");
   const recheckPath = JSON.stringify(options.recheckPath ?? "/monitor/recheck");
   const collaborationPath = JSON.stringify(options.collaborationPath ?? "/monitor/collaboration");
+  const testbedMissionsPath = JSON.stringify(options.testbedMissionsPath ?? "/monitor/testbed-missions");
   const manifestPath = options.manifestPath ?? "/monitor/manifest.webmanifest";
   const brandIcon = svgDataUrl(MONITOR_BRAND_SVG);
   return `<!doctype html>
@@ -719,6 +720,34 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 8px;
       margin-top: 0;
+    }
+    .testbed-control-panel {
+      display: grid;
+      gap: 8px;
+      border: 1px solid color-mix(in srgb, var(--cyan) 30%, var(--line-soft));
+      border-radius: 10px;
+      background: rgba(86, 204, 228, 0.045);
+      padding: 10px;
+    }
+    .testbed-control-panel h4 {
+      margin: 0;
+    }
+    .testbed-control-panel p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1.4;
+    }
+    .testbed-control-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .testbed-control-grid .soft-button {
+      justify-content: center;
+      min-height: 34px;
+      white-space: normal;
+      text-align: center;
     }
     .operator-decision {
       border-left: 4px solid var(--warn);
@@ -4482,6 +4511,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     const codexTasksPath = ${codexTasksPath};
     const recheckPath = ${recheckPath};
     const collaborationPath = ${collaborationPath};
+    const testbedMissionsPath = ${testbedMissionsPath};
     const token = new URLSearchParams(location.search).get("token");
     const withToken = buildMonitorUrl(eventsPath);
     const streamUrl = buildMonitorUrl(streamPath);
@@ -4489,6 +4519,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
     const codexTasksUrl = buildCommandUrl(codexTasksPath);
     const recheckUrl = buildCommandUrl(recheckPath);
     const collaborationUrl = buildCommandUrl(collaborationPath);
+    const testbedMissionsUrl = buildCommandUrl(testbedMissionsPath);
     const decisionStorageKey = "averray-monitor-operator-decisions:v1";
     let pipelineFilter = "all";
     let repoFilter = "all";
@@ -4653,6 +4684,11 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         if (item && codexTaskFailedForItem(item)) void postFailedTaskReviewReceipt(item);
         return;
       }
+      const testbedMissionButton = event.target && event.target.closest ? event.target.closest("[data-testbed-mission-action]") : null;
+      if (testbedMissionButton) {
+        void handleTestbedMissionAction(testbedMissionButton);
+        return;
+      }
       const copyButton = event.target && event.target.closest ? event.target.closest("[data-copy-text]") : null;
       if (copyButton) {
         const value = String(copyButton.getAttribute("data-copy-text") || "");
@@ -4780,6 +4816,58 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         void submitMonitorCommand(text);
       }
     });
+
+    async function handleTestbedMissionAction(button) {
+      const action = String(button.getAttribute("data-testbed-mission-action") || "");
+      const key = String(button.getAttribute("data-card-key") || selectedKey || "");
+      const item = itemByBoardKey(key) || selectedItem();
+      const output = document.getElementById("command-output");
+      if (!item || !isTestbedMissionItem(item)) {
+        if (output) output.textContent = "No browser mission selected.";
+        return;
+      }
+      const run = testbedMissionRun(item) || {};
+      const mission = run.mission || {};
+      const target = mission.target || {};
+      const safety = mission.safety || {};
+      const targetUrl = String(run.targetUrl || target.url || "").trim();
+      if (!targetUrl) {
+        if (output) output.textContent = "Mission has no target URL to rerun.";
+        return;
+      }
+      const freshMemory = action !== "run-memory";
+      const payload = {
+        targetUrl,
+        goal: String(run.goal || target.goal || "Test the main flow like a new outside agent."),
+        agentName: String(run.agentName || target.agentName || "Hermes"),
+        requester: "monitor",
+        freshMemory,
+        allowTestMutations: run.allowTestMutations === true || safety.browserMissionShouldMutate === true,
+        maxBrowserSteps: Number(target.maxBrowserSteps || 80),
+        maxMinutes: Number(target.maxMinutes || 20),
+      };
+      button.disabled = true;
+      if (output) output.textContent = freshMemory ? "Creating fresh browser mission..." : "Creating memory-aware browser mission...";
+      try {
+        const response = await fetch(testbedMissionsUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.message || result.error || "Mission request failed.");
+        const createdRun = result.run || result.testbedMissionRun || {};
+        const nextId = String(createdRun.id || result.missionId || "");
+        if (nextId) selectedKey = nextId;
+        if (output) output.textContent = (freshMemory ? "Fresh mission created" : "Memory mission created") + (nextId ? ": " + nextId : "") + ".";
+        await load();
+        renderDrawer(selectedItem());
+      } catch (error) {
+        if (output) output.textContent = "Could not create mission: " + (error instanceof Error ? error.message : String(error));
+      } finally {
+        button.disabled = false;
+      }
+    }
 
     // Mode toggle: "post" sends a real message to /monitor/collaboration,
     // "ask" routes back to the existing read-only Hermes insight command.
@@ -6968,6 +7056,7 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
         renderTestbedMissionFixBrief(fixBrief) +
         (comparisonBrief ? '<h4>Comparison brief</h4><p class="resolution-summary">' + escapeHtml(comparisonBrief) + '</p>' : "") +
         (history.length ? '<h4>Mission timeline</h4><ol class="resolution-steps">' + history.map((entry) => '<li><strong>' + escapeHtml(entry.event) + '</strong> <span class="muted">' + escapeHtml(entry.at) + '</span><br>' + escapeHtml(entry.message) + '</li>').join("") + '</ol>' : "") +
+        renderTestbedMissionControls(item, run, mission) +
         '<details class="drawer-disclosure prompt-disclosure"><summary>Mission packet details</summary>' +
           '<dl class="resolution-grid">' + rows + '</dl>' +
           '<h4>Runbook</h4>' + runbookHtml +
@@ -6986,6 +7075,37 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
           '<button class="soft-button" type="button" data-copy-label="Report template copied" data-copy-text="' + escapeAttr(reportTemplate) + '">Copy report template</button>' +
         '</div>' +
         '</section>';
+    }
+
+    function renderTestbedMissionControls(item, run, mission) {
+      const reportText = testbedMissionReportCopyText(run, mission);
+      const fixBriefPrompt = testbedMissionFixBriefPrompt(run, testbedMissionFixBrief(run));
+      const key = boardItemKey(item);
+      const copyReportLabel = run && run.result ? "Report copied" : "Report template copied";
+      return '<div class="testbed-control-panel">' +
+        '<h4>Mission controls</h4>' +
+        '<p>Start a comparable browser mission or copy the exact evidence packet for the next product move.</p>' +
+        '<div class="testbed-control-grid">' +
+          '<button class="soft-button" type="button" data-testbed-mission-action="run-fresh" data-card-key="' + escapeAttr(key) + '" title="Create a new mission with fresh memory and the same target/goal">Run again fresh</button>' +
+          '<button class="soft-button" type="button" data-testbed-mission-action="run-memory" data-card-key="' + escapeAttr(key) + '" title="Create a new mission that may use returning-agent memory">Run with memory</button>' +
+          '<button class="soft-button" type="button" data-copy-label="' + escapeAttr(copyReportLabel) + '" data-copy-text="' + escapeAttr(reportText) + '">Copy report</button>' +
+          (fixBriefPrompt
+            ? '<button class="soft-button" type="button" data-copy-label="Product fix prompt copied" data-copy-text="' + escapeAttr(fixBriefPrompt) + '">Create product fix</button>'
+            : '<button class="soft-button" type="button" disabled title="A product fix prompt appears after a partial or failed report">Create product fix</button>') +
+        '</div>' +
+      '</div>';
+    }
+
+    function testbedMissionReportCopyText(run, mission) {
+      if (run && run.result) {
+        return prettyJson({
+          missionId: run.id || "",
+          targetUrl: run.targetUrl || "",
+          goal: run.goal || "",
+          report: run.result,
+        });
+      }
+      return testbedMissionReportTemplate(run, mission);
     }
 
     function testbedMissionNextStep(run, allowTestMutations) {
@@ -7026,17 +7146,14 @@ export function renderMonitorHtml(options: { title?: string; eventsPath?: string
       if (!isTestbedMissionItem(item)) return "";
       const run = testbedMissionRun(item) || {};
       const mission = run.mission || {};
-      const prompt = String(mission.missionPrompt || "");
-      const reportTemplate = testbedMissionReportTemplate(run, mission);
-      const rerunPrompt = testbedMissionRerunPrompt(run, mission);
-      const baselinePrompt = testbedMissionBaselinePrompt(run, mission);
+      const reportText = testbedMissionReportCopyText(run, mission);
       const fixBriefPrompt = testbedMissionFixBriefPrompt(run, testbedMissionFixBrief(run));
+      const copyReportLabel = run.result ? "Report copied" : "Report template copied";
       return [
-        prompt ? '<button class="soft-button" type="button" data-copy-label="Mission prompt copied" data-copy-text="' + escapeAttr(prompt) + '">Copy mission prompt</button>' : "",
-        fixBriefPrompt ? '<button class="soft-button" type="button" data-copy-label="Fix brief copied" data-copy-text="' + escapeAttr(fixBriefPrompt) + '">Copy fix brief</button>' : "",
-        baselinePrompt ? '<button class="soft-button" type="button" data-copy-label="Baseline prompt copied" data-copy-text="' + escapeAttr(baselinePrompt) + '">Copy baseline prompt</button>' : "",
-        rerunPrompt ? '<button class="soft-button" type="button" data-copy-label="Rerun prompt copied" data-copy-text="' + escapeAttr(rerunPrompt) + '">Copy rerun prompt</button>' : "",
-        '<button class="soft-button" type="button" data-copy-label="Report template copied" data-copy-text="' + escapeAttr(reportTemplate) + '">Copy report template</button>',
+        '<button class="soft-button" type="button" data-testbed-mission-action="run-fresh" data-card-key="' + escapeAttr(boardItemKey(item)) + '">Run again fresh</button>',
+        '<button class="soft-button" type="button" data-testbed-mission-action="run-memory" data-card-key="' + escapeAttr(boardItemKey(item)) + '">Run with memory</button>',
+        '<button class="soft-button" type="button" data-copy-label="' + escapeAttr(copyReportLabel) + '" data-copy-text="' + escapeAttr(reportText) + '">Copy report</button>',
+        fixBriefPrompt ? '<button class="soft-button" type="button" data-copy-label="Product fix prompt copied" data-copy-text="' + escapeAttr(fixBriefPrompt) + '">Create product fix</button>' : "",
       ].filter(Boolean).join("");
     }
 
