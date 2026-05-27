@@ -11,6 +11,7 @@ import {
   readTestbedMissionRunnerHeartbeat,
 } from "../../services/slack-operator/src/monitor-testbed-missions.js";
 import {
+  appendPlaywrightEvidenceTrail,
   parseTestbedMissionRunnerConfig,
   renderTestbedMissionRunnerArgs,
   runTestbedMissionRunnerOnce,
@@ -241,6 +242,28 @@ describe("testbed mission runner", () => {
       executor: "playwright",
       artifactsDir: "/data/testbed-mission-artifacts",
     });
+  });
+
+  it("summarizes Playwright evidence trails for monitor review", () => {
+    const evidence: Array<{ type: string; value: string }> = [];
+
+    appendPlaywrightEvidenceTrail(evidence, {
+      whatITried: ["opened the target", "clicked the safe sandbox action"],
+      urlPath: ["first screen https://example.test/", "after safe click https://example.test/next"],
+      consoleErrors: ["ReferenceError: demo is not defined"],
+      networkFailures: ["GET https://example.test/api :: net::ERR_FAILED"],
+      networkResponses: ["500 GET https://example.test/api/status"],
+      screenshotArtifacts: ["/tmp/first-screen.png", "/tmp/after-safe-click.png"],
+    });
+
+    expect(evidence).toEqual([
+      expect.objectContaining({ type: "what_i_tried", value: expect.stringContaining("opened the target") }),
+      expect.objectContaining({ type: "url_path", value: expect.stringContaining("after safe click") }),
+      expect.objectContaining({ type: "console_errors", value: expect.stringContaining("ReferenceError") }),
+      expect.objectContaining({ type: "network_failures", value: expect.stringContaining("ERR_FAILED") }),
+      expect.objectContaining({ type: "network_responses", value: expect.stringContaining("500 GET") }),
+      expect.objectContaining({ type: "screenshots", value: expect.stringContaining("first-screen.png") }),
+    ]);
   });
 });
 
