@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -276,10 +276,16 @@ export async function executePlaywrightTestbedMission(
     { type: "executor", value: "playwright_browser" },
   ];
   const consoleErrors: string[] = [];
+  const networkFailures: string[] = [];
+  const networkResponses: string[] = [];
+  const urlPath: string[] = [];
+  const whatITried: string[] = [];
+  const screenshotArtifacts: string[] = [];
   const recommendations: string[] = [];
   const mutationAttempted = false;
 
   let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+  let page: Page | undefined;
   try {
     browser = await chromium.launch({
       headless: true,
@@ -290,14 +296,27 @@ export async function executePlaywrightTestbedMission(
       viewport: { width: 1365, height: 900 },
       userAgent: "Averray-Hermes-Testbed-Playwright/1.0",
     });
-    const page = await context.newPage();
+    page = await context.newPage();
     page.on("console", (message) => {
       if (message.type() === "error") consoleErrors.push(message.text());
     });
     page.on("pageerror", (error) => {
       consoleErrors.push(error.message);
     });
+    page.on("requestfailed", (request) => {
+      networkFailures.push(`${request.method()} ${request.url()} :: ${request.failure()?.errorText ?? "request failed"}`);
+    });
+    page.on("response", (response) => {
+      const status = response.status();
+      if (status >= 400) {
+        networkResponses.push(`${status} ${response.request().method()} ${response.url()}`);
+      }
+    });
+    page.on("framenavigated", (frame) => {
+      if (frame === page?.mainFrame()) recordUrlStep(urlPath, `navigated ${frame.url()}`);
+    });
 
+    whatITried.push(`Opened a clean Chromium context at ${mission.targetUrl}.`);
     updateTestbedMissionProgress(mission.id, {
       path: config.path,
       progressMessage: `Opening ${mission.targetUrl} in a clean Chromium context.`,
@@ -307,19 +326,20 @@ export async function executePlaywrightTestbedMission(
     completedPath.push(`opened ${mission.targetUrl}`);
 
     const firstUrl = page.url();
+    recordUrlStep(urlPath, `first screen ${firstUrl}`);
     const title = await page.title().catch(() => "");
     const firstText = await visiblePageText(page);
     evidence.push({ type: "url", value: firstUrl });
     if (title) evidence.push({ type: "title", value: title });
     evidence.push({ type: "visible_text", value: clip(firstText, 900) || "[no visible text detected]" });
-    const firstScreenshot = join(artifactsDir, "first-screen.png");
-    await page.screenshot({ path: firstScreenshot, fullPage: false }).catch(() => undefined);
-    evidence.push({ type: "screenshot", value: firstScreenshot });
+    await captureScreenshot(page, artifactsDir, "first-screen.png", evidence, screenshotArtifacts);
 
     const orientationScore = scoreOrientation(firstText, mission.goal);
     const maxBrowserSteps = config.maxBrowserSteps || 8;
+    whatITried.push(`Scanned up to ${maxBrowserSteps} visible controls for a clearly safe next action.`);
     const safeAction = await findFirstSafeAction(page, Boolean(mission.allowTestMutations), maxBrowserSteps);
     if (safeAction) {
+      whatITried.push(`Clicked the safe visible control "${safeAction.label}".`);
       updateTestbedMissionProgress(mission.id, {
         path: config.path,
         progressMessage: `Clicking safe visible control: ${safeAction.label}`,
@@ -328,27 +348,44 @@ export async function executePlaywrightTestbedMission(
       await page.waitForLoadState("domcontentloaded", { timeout: 7_000 }).catch(() => undefined);
       await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined);
       const afterUrl = page.url();
+      recordUrlStep(urlPath, `after safe click ${afterUrl}`);
       const afterText = await visiblePageText(page);
       completedPath.push(`clicked safe visible control: ${safeAction.label}`);
       evidence.push({ type: "interaction", value: `clicked "${safeAction.label}"` });
       evidence.push({ type: "url_after_click", value: afterUrl });
       evidence.push({ type: "visible_text_after_click", value: clip(afterText, 900) || "[no visible text detected after click]" });
-      const afterScreenshot = join(artifactsDir, "after-safe-click.png");
-      await page.screenshot({ path: afterScreenshot, fullPage: false }).catch(() => undefined);
-      evidence.push({ type: "screenshot", value: afterScreenshot });
+      await captureScreenshot(page, artifactsDir, "after-safe-click.png", evidence, screenshotArtifacts);
     } else {
+      whatITried.push("Stopped before interaction because no clearly safe visible control was found.");
       confusingMoments.push("I could load the page, but I did not find a safe obvious visible control to click without risking a real mutation.");
       recommendations.push("Expose one clearly labeled sandbox-safe primary action for outside agents to continue the mission.");
     }
 
     const riskyControl = await findFirstRiskyAction(page, maxBrowserSteps);
     if (riskyControl) {
+      whatITried.push(`Noted mutation boundary at risky control "${riskyControl}" and did not click it.`);
       completedPath.push(`stopped before risky control: ${riskyControl}`);
       evidence.push({ type: "mutation_boundary", value: `stopped before "${riskyControl}"` });
     }
-    if (consoleErrors.length) {
-      evidence.push({ type: "console", value: clip(consoleErrors.join("\n"), 1200) });
-    }
+    appendPlaywrightEvidenceTrail(evidence, {
+      whatITried,
+      urlPath,
+      consoleErrors,
+      networkFailures,
+      networkResponses,
+      screenshotArtifacts,
+    });
+    const manifestPath = await writeEvidenceManifest(artifactsDir, {
+      missionId: mission.id,
+      targetUrl: mission.targetUrl,
+      whatITried,
+      urlPath,
+      screenshots: screenshotArtifacts,
+      consoleErrors,
+      networkFailures,
+      networkResponses,
+    });
+    evidence.push({ type: "artifact_manifest", value: manifestPath });
 
     const navigationScore = safeAction ? 4 : 2;
     const taskCompletionScore = safeAction ? 3 : 2;
@@ -365,15 +402,24 @@ export async function executePlaywrightTestbedMission(
       memoryMode: mission.freshMemory ? "fresh_or_ignored" : "returning_agent_memory_allowed",
       stoppedBeforeMutation: !mutationAttempted,
       completedPath,
+      whatITried,
+      urlPath,
       blockers,
       confusingMoments,
       evidence,
+      consoleErrors,
+      networkFailures,
+      networkResponses,
+      artifacts: {
+        screenshots: screenshotArtifacts,
+        manifest: manifestPath,
+      },
       scores: {
         orientation: orientationScore,
         navigation: navigationScore,
         taskCompletion: taskCompletionScore,
         trustAndSafety: riskyControl ? 5 : 4,
-        recoverability: consoleErrors.length ? 3 : 4,
+        recoverability: consoleErrors.length || networkFailures.length || networkResponses.length ? 3 : 4,
         evidenceQuality,
       },
       recommendations,
@@ -391,6 +437,33 @@ export async function executePlaywrightTestbedMission(
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
+    whatITried.push(`Runner stopped with error: ${detail}`);
+    if (page) {
+      recordUrlStep(urlPath, `failure screen ${page.url()}`);
+      await captureScreenshot(page, artifactsDir, "failure.png", evidence, screenshotArtifacts);
+      const failureText = await visiblePageText(page).catch(() => "");
+      if (failureText) evidence.push({ type: "visible_text_failure", value: clip(failureText, 900) });
+    }
+    appendPlaywrightEvidenceTrail(evidence, {
+      whatITried,
+      urlPath,
+      consoleErrors,
+      networkFailures,
+      networkResponses,
+      screenshotArtifacts,
+    });
+    const manifestPath = await writeEvidenceManifest(artifactsDir, {
+      missionId: mission.id,
+      targetUrl: mission.targetUrl,
+      error: detail,
+      whatITried,
+      urlPath,
+      screenshots: screenshotArtifacts,
+      consoleErrors,
+      networkFailures,
+      networkResponses,
+    }).catch(() => undefined);
+    if (manifestPath) evidence.push({ type: "artifact_manifest", value: manifestPath });
     const report = {
       missionId: mission.id,
       verdict: "fail",
@@ -401,19 +474,28 @@ export async function executePlaywrightTestbedMission(
       goal: mission.goal,
       stoppedBeforeMutation: true,
       completedPath,
+      whatITried,
+      urlPath,
       blockers: [`Playwright browser mission failed: ${detail}`],
       confusingMoments,
       evidence: [
         ...evidence,
         { type: "runner_error", value: detail },
       ],
+      consoleErrors,
+      networkFailures,
+      networkResponses,
+      artifacts: {
+        screenshots: screenshotArtifacts,
+        ...(manifestPath ? { manifest: manifestPath } : {}),
+      },
       scores: {
         orientation: 0,
         navigation: 0,
         taskCompletion: 0,
         trustAndSafety: 5,
         recoverability: 1,
-        evidenceQuality: evidence.length ? 2 : 1,
+        evidenceQuality: screenshotArtifacts.length ? 3 : evidence.length ? 2 : 1,
       },
       recommendations: ["Inspect runner browser dependencies, target reachability, and page load errors, then rerun the mission."],
     };
@@ -427,6 +509,68 @@ export async function executePlaywrightTestbedMission(
   } finally {
     await browser?.close().catch(() => undefined);
   }
+}
+
+export function appendPlaywrightEvidenceTrail(
+  evidence: Array<{ type: string; value: string }>,
+  trail: {
+    whatITried: string[];
+    urlPath: string[];
+    consoleErrors: string[];
+    networkFailures: string[];
+    networkResponses: string[];
+    screenshotArtifacts: string[];
+  }
+): void {
+  if (trail.whatITried.length) {
+    evidence.push({ type: "what_i_tried", value: clip(trail.whatITried.join("\n"), 1800) });
+  }
+  if (trail.urlPath.length) {
+    evidence.push({ type: "url_path", value: clip(trail.urlPath.join("\n"), 1800) });
+  }
+  if (trail.consoleErrors.length) {
+    evidence.push({ type: "console_errors", value: clip(trail.consoleErrors.join("\n"), 1600) });
+  }
+  if (trail.networkFailures.length) {
+    evidence.push({ type: "network_failures", value: clip(trail.networkFailures.join("\n"), 1600) });
+  }
+  if (trail.networkResponses.length) {
+    evidence.push({ type: "network_responses", value: clip(trail.networkResponses.join("\n"), 1600) });
+  }
+  if (trail.screenshotArtifacts.length) {
+    evidence.push({ type: "screenshots", value: clip(trail.screenshotArtifacts.join("\n"), 1600) });
+  }
+}
+
+async function captureScreenshot(
+  page: Page,
+  artifactsDir: string,
+  fileName: string,
+  evidence: Array<{ type: string; value: string }>,
+  screenshotArtifacts: string[]
+): Promise<string | undefined> {
+  const path = join(artifactsDir, fileName);
+  try {
+    await page.screenshot({ path, fullPage: false });
+    screenshotArtifacts.push(path);
+    evidence.push({ type: "screenshot", value: path });
+    return path;
+  } catch {
+    return undefined;
+  }
+}
+
+async function writeEvidenceManifest(
+  artifactsDir: string,
+  manifest: Record<string, unknown>
+): Promise<string> {
+  const path = join(artifactsDir, "evidence-manifest.json");
+  await writeFile(path, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  return path;
+}
+
+function recordUrlStep(urlPath: string[], value: string): void {
+  if (urlPath[urlPath.length - 1] !== value) urlPath.push(value);
 }
 
 export function renderTestbedMissionRunnerArgs(
