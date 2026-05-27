@@ -14,6 +14,7 @@ import {
   testbedMissionRerunPrompt,
   testbedMissionResultCoaching,
   testbedMissionRunToMonitorItem,
+  testbedMissionStructuredReport,
 } from "../../services/slack-operator/src/monitor-testbed-missions.js";
 
 describe("monitor testbed mission runs", () => {
@@ -63,6 +64,7 @@ describe("monitor testbed mission runs", () => {
           mutationMode: "testbed_mutation_allowed",
           mutationsAttempted: ["submitted fake onboarding form"],
           stoppedBeforeMutation: false,
+          mutationBoundaryNotes: ["Submitted only the visibly fake onboarding form."],
           completedPath: ["opened page", "submitted fake onboarding form", "saw sandbox success"],
           blockers: [],
           evidence: [{ type: "visible_text", value: "Sandbox submission complete" }],
@@ -74,11 +76,17 @@ describe("monitor testbed mission runs", () => {
 
     expect(updated).toMatchObject({
       status: "completed",
-      statusReason: "Browser-agent report passed after permitted testbed-only page mutation; Hermes has structured evidence for this mission.",
+      statusReason: "Browser-agent report passed after permitted testbed-only page mutation: Submitted only the visibly fake onboarding form.",
       result: {
         mutationMode: "testbed_mutation_allowed",
         mutationsAttempted: ["submitted fake onboarding form"],
         stoppedBeforeMutation: false,
+        structuredReport: {
+          verdict: "pass",
+          mutationBoundaryNotes: ["Submitted only the visibly fake onboarding form."],
+          mutationsAttempted: ["submitted fake onboarding form"],
+          summary: "pass: usable path found; Submitted only the visibly fake onboarding form.",
+        },
       },
     });
     const item = testbedMissionRunToMonitorItem(updated!);
@@ -133,6 +141,7 @@ describe("monitor testbed mission runs", () => {
           verdict: "pass",
           confidence: 0.91,
           stoppedBeforeMutation: true,
+          mutationBoundaryNotes: ["Stopped before account creation; no real mutation was needed."],
           completedPath: ["opened page", "completed onboarding"],
           blockers: [],
           evidence: [{ type: "observation", value: "The browser agent reached the final review step." }],
@@ -148,6 +157,13 @@ describe("monitor testbed mission runs", () => {
       result: {
         verdict: "pass",
         confidence: 0.91,
+        structuredReport: {
+          verdict: "pass",
+          confidence: 0.91,
+          stoppedBeforeMutation: true,
+          mutationBoundaryNotes: ["Stopped before account creation; no real mutation was needed."],
+          summary: "pass: usable path found; Stopped before account creation; no real mutation was needed.",
+        },
         ingestedAt: "2026-05-22T10:05:00.000Z",
       },
       history: [
@@ -168,6 +184,13 @@ describe("monitor testbed mission runs", () => {
       active: false,
       summary: {
         finalVerdict: "pass",
+        structuredReport: {
+          verdict: "pass",
+          scores: { orientation: 5 },
+          blockers: [],
+          confusingMoments: [],
+          mutationBoundaryNotes: ["Stopped before account creation; no real mutation was needed."],
+        },
         reviewSignals: {
           testSignals: ["mission packet ready", "browser agent report attached"],
           missingTestSignals: [],
@@ -187,6 +210,17 @@ describe("monitor testbed mission runs", () => {
     expect(comparisonBrief).toContain("pass baseline");
     expect(comparisonBrief).toContain('Known-good path starts with "opened page".');
     expect(comparisonBrief).toContain("preserve the same visible path");
+
+    expect(testbedMissionStructuredReport(updated!)).toMatchObject({
+      verdict: "pass",
+      confidence: 0.91,
+      scores: { orientation: 5 },
+      blockers: [],
+      confusingMoments: [],
+      mutationBoundaryNotes: ["Stopped before account creation; no real mutation was needed."],
+      stoppedBeforeMutation: true,
+      summary: "pass: usable path found; Stopped before account creation; no real mutation was needed.",
+    });
   });
 
   it("attaches a partial browser-agent report and keeps blockers visible", () => {
@@ -203,6 +237,7 @@ describe("monitor testbed mission runs", () => {
             verdict: "partial",
             confidence: 0.63,
             stoppedBeforeMutation: true,
+            mutationBoundaryNotes: ["Stopped at the wallet prompt before signing."],
             blockers: ["Could not find the submit boundary."],
             evidence: [{ type: "observation", value: "The browser agent stopped at the wallet prompt." }],
             scores: { trustAndSafety: 2 },
@@ -219,6 +254,13 @@ describe("monitor testbed mission runs", () => {
       statusReason: "Browser-agent report returned partial; blocker: Could not find the submit boundary.",
       result: {
         verdict: "partial",
+        structuredReport: {
+          verdict: "partial",
+          blockers: ["Could not find the submit boundary."],
+          confusingMoments: [],
+          mutationBoundaryNotes: ["Stopped at the wallet prompt before signing."],
+          summary: "partial: Could not find the submit boundary.; Stopped at the wallet prompt before signing.",
+        },
       },
       history: [
         {
@@ -236,7 +278,12 @@ describe("monitor testbed mission runs", () => {
     expect(item).toMatchObject({
       status: "failed",
       summary: {
-        finalVerdict: "failed",
+        finalVerdict: "partial",
+        structuredReport: {
+          verdict: "partial",
+          scores: { trustAndSafety: 2 },
+          blockers: ["Could not find the submit boundary."],
+        },
         reviewSignals: {
           missingTestSignals: [],
         },
@@ -304,6 +351,7 @@ describe("monitor testbed mission runs", () => {
       errors: expect.arrayContaining([
         "Set confidence to a number from 0 to 1.",
         "Add at least one evidence item or observation.",
+        "Add mutationBoundaryNotes explaining where the agent stopped, or which test-only mutation boundary it crossed.",
         "For a pass, add the completedPath steps the browser agent actually took.",
       ]),
     });
