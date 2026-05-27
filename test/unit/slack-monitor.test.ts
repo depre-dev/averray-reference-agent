@@ -243,6 +243,12 @@ describe("slack operator personal monitor", () => {
     expect(html).toContain("Got it. I will treat this as a deliberate draft takeover");
     expect(html).toContain("testbedMissionPipelineItems(payload.testbedMissions");
     expect(html).toContain("isTestbedMissionItem(item)");
+    expect(html).toContain("renderTestbedMissionCard(item, lane, verdict, action");
+    expect(html).toContain("data-kind=\"testbed-mission\"");
+    expect(html).toContain("browser mission");
+    expect(html).toContain("mission owner");
+    expect(html).toContain("Open mission report");
+    expect(html).toContain("Open report baseline");
     expect(html).toContain("renderTestbedMissionPanel(item, summary)");
     expect(html).toContain("Fresh-agent browser mission");
     expect(html).toContain("testbed-only mutation allowed");
