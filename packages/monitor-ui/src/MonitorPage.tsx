@@ -1,11 +1,13 @@
-// Hermes Handoff Monitor — board page (M7')
+// Hermes Handoff Monitor — board page (M8')
 //
 // The live data container: wires useMonitorBoard() (SWR fetch of
-// /monitor/v2/board + the SSE LiveStream against /monitor/v2/stream) and
-// useCardParam() (the ?card= drawer route) to the presentational
-// <BoardView>. A spawned/updated card on the SSE feed flows
-// event → applyEventToBoard → SWR cache → re-render; the Refresh button
-// revalidates the HTTP snapshot; clicking a card opens its drawer.
+// /monitor/v2/board + the SSE LiveStream against /monitor/v2/stream),
+// useCardParam() (the ?card= drawer route), and the co-pilot rail's
+// collaboration feed to the presentational <BoardView>. A spawned/updated
+// card on the SSE feed flows event → applyEventToBoard → SWR cache →
+// re-render; the Refresh button revalidates; clicking a card opens its
+// drawer; the rail polls /monitor/collaboration and posts scoped
+// questions.
 //
 // The Hermes composer's `/mission <url>` spawns a real browser mission
 // by POSTing to /monitor/testbed-missions; the Playwright runner reports
@@ -16,11 +18,11 @@
 // client-side guard here.
 //
 // Deferred, by milestone:
-//   - the working Hermes narration stream + free-form Q&A → M8'
 //   - the degraded TopStrip ("?" KPIs) → M11'
 
 import { useMonitorBoard, type UseMonitorBoardOptions } from "./hooks/useMonitorBoard.js";
 import { useCardParam } from "./hooks/useCardParam.js";
+import type { UseCollaborationOptions } from "./hooks/useCollaboration.js";
 import { BoardView } from "./components/BoardView.js";
 
 const MISSIONS_URL = "/monitor/testbed-missions";
@@ -30,9 +32,15 @@ export interface MonitorPageProps {
   options?: UseMonitorBoardOptions;
   /** Override the /mission spawn (defaults to POST /monitor/testbed-missions). */
   onSpawnMission?: (url: string) => void;
+  /** Override the co-pilot collaboration wiring (defaults to live polling). */
+  collaboration?: UseCollaborationOptions;
 }
 
-export function MonitorPage({ options, onSpawnMission = defaultSpawnMission }: MonitorPageProps = {}) {
+export function MonitorPage({
+  options,
+  onSpawnMission = defaultSpawnMission,
+  collaboration = {},
+}: MonitorPageProps = {}) {
   const { board, status, refresh } = useMonitorBoard(options);
   const { cardId, setCard, clearCard } = useCardParam();
 
@@ -46,6 +54,7 @@ export function MonitorPage({ options, onSpawnMission = defaultSpawnMission }: M
       onCardClose={clearCard}
       onCardNavigate={setCard}
       onSpawnMission={onSpawnMission}
+      collaboration={collaboration}
     />
   );
 }
