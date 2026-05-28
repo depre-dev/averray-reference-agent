@@ -42,6 +42,12 @@ import {
 import { buildHermesBoardSnapshotFromMonitor } from "./monitor-hermes-board.js";
 import { buildV2BoardSnapshot } from "./monitor-v2.js";
 import {
+  isDebugSpawnEnabled,
+  mergeDebugCards,
+  onDebugCardSpawned,
+  spawnDebugCard,
+} from "./monitor-v2-debug.js";
+import {
   decideHermesBoardNarration,
   fallbackHermesBoardNarration,
   relatedPrForHermesBoardNarration,
@@ -189,6 +195,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
           "/monitor/stream",
           "/monitor/v2/board",
           "/monitor/v2/stream",
+          ...(isDebugSpawnEnabled() ? ["/monitor/v2/debug/spawn"] : []),
           "/monitor/command",
           "/monitor/recheck",
           "/monitor/codex-tasks",
@@ -255,7 +262,35 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       return;
     }
     const raw = await loadMonitorSnapshot(url, { suppressNarration: true });
-    writeJson(response, 200, buildV2BoardSnapshot(raw, { repo: monitorV2Repo() }));
+    writeJson(response, 200, mergeDebugCards(buildV2BoardSnapshot(raw, { repo: monitorV2Repo() })));
+    return;
+  }
+  // Dev-only acceptance vehicle: inject a synthetic card so the
+  // spawn → appears-live path can be exercised before real ingestion
+  // lands. Invisible (404) unless MONITOR_V2_DEBUG_SPAWN=1.
+  if (request.method === "POST" && url.pathname === "/monitor/v2/debug/spawn") {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isDebugSpawnEnabled()) {
+      writeJson(response, 404, { error: "debug_spawn_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    let payload: unknown = {};
+    try {
+      const rawBody = await readBody(request);
+      payload = rawBody ? (JSON.parse(rawBody) as unknown) : {};
+    } catch {
+      writeJson(response, 400, { error: "invalid_json" });
+      return;
+    }
+    const card = spawnDebugCard(payload, { defaultRepo: monitorV2Repo() });
+    writeJson(response, 201, { ok: true, card, at: new Date().toISOString() });
     return;
   }
   if (request.method === "GET" && url.pathname === "/monitor/codex-tasks") {
@@ -1650,7 +1685,7 @@ async function writeMonitorV2Stream(
     inFlight = true;
     try {
       const raw = await loadMonitorSnapshot(url, { suppressNarration: true });
-      writeSseEvent(response, "board.snapshot", buildV2BoardSnapshot(raw, { repo: monitorV2Repo() }));
+      writeSseEvent(response, "board.snapshot", mergeDebugCards(buildV2BoardSnapshot(raw, { repo: monitorV2Repo() })));
     } catch (error) {
       writeSseEvent(response, "error", {
         error: "monitor_v2_snapshot_failed",
@@ -1661,9 +1696,18 @@ async function writeMonitorV2Stream(
     }
   };
 
+  // Push a board.card.added the instant a debug card is spawned, so the
+  // dev acceptance path lands in milliseconds rather than on the next
+  // poll. No-op in production (nothing ever spawns).
+  const offSpawn = onDebugCardSpawned((card) => {
+    if (closed) return;
+    writeSseEvent(response, "board.card.added", { card, at: new Date().toISOString() });
+  });
+
   request.on("close", () => {
     closed = true;
     if (timer) clearInterval(timer);
+    offSpawn();
   });
 
   await send();
