@@ -56,3 +56,24 @@ test("parseHermesInput: empty / whitespace → empty", () => {
 test("parseHermesInput: a word starting with mission but not the command is an ask", () => {
   assert.equal(parseHermesInput("missionary work").kind, "ask");
 });
+
+test("parseHermesInput: /mute with a duration → mute with a future expiry", () => {
+  const now = () => 1_000;
+  const out = parseHermesInput("/mute 1h", now);
+  assert.equal(out.kind, "mute");
+  if (out.kind === "mute") assert.equal(out.untilMs, 1_000 + 3_600_000);
+});
+
+test("parseHermesInput: bare /mute defaults to one hour", () => {
+  const out = parseHermesInput("/mute", () => 0);
+  assert.equal(out.kind, "mute");
+  if (out.kind === "mute") assert.equal(out.untilMs, 3_600_000);
+});
+
+test("parseHermesInput: /unmute → unmute", () => {
+  assert.equal(parseHermesInput("/unmute").kind, "unmute");
+});
+
+test("parseHermesInput: an unparseable /mute argument → error", () => {
+  assert.equal(parseHermesInput("/mute whenever").kind, "error");
+});

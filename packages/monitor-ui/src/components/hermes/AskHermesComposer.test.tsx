@@ -55,16 +55,38 @@ describe("AskHermesComposer", () => {
     expect(input.value).toBe("");
   });
 
-  test("a plain question without an onAsk handler surfaces the M8' hint", () => {
+  test("a plain question without an onAsk handler surfaces a hint", () => {
     const { container, getByRole } = render(<AskHermesComposer onSpawnMission={vi.fn()} />);
     const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
     type(input, "hello hermes");
     fireEvent.click(getByRole("button", { name: /Send/ }));
-    expect(within(container).getByRole("alert").textContent).toMatch(/lands in M8'/);
+    expect(within(container).getByRole("alert").textContent).toMatch(/isn't wired here/);
   });
 
   test("the scope chip reflects the focused card", () => {
     const { getByText } = render(<AskHermesComposer focusedCardId="agent #548" />);
     expect(getByText("scope · agent #548")).toBeTruthy();
+  });
+
+  test("/mute and /unmute dispatch to their handlers", () => {
+    const onMute = vi.fn();
+    const onUnmute = vi.fn();
+    const { container } = render(<AskHermesComposer onMute={onMute} onUnmute={onUnmute} />);
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+
+    type(input, "/mute 1h");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onMute).toHaveBeenCalledTimes(1);
+    expect(typeof onMute.mock.calls[0]?.[0]).toBe("number");
+    expect(input.value).toBe("");
+
+    type(input, "/unmute");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onUnmute).toHaveBeenCalledTimes(1);
+  });
+
+  test("a muted state shows the muted chip", () => {
+    const { getByText } = render(<AskHermesComposer muted />);
+    expect(getByText("alerts muted")).toBeTruthy();
   });
 });

@@ -20,9 +20,12 @@
 // Deferred, by milestone:
 //   - the degraded TopStrip ("?" KPIs) → M11'
 
+import { useMemo } from "react";
 import { useMonitorBoard, type UseMonitorBoardOptions } from "./hooks/useMonitorBoard.js";
 import { useCardParam } from "./hooks/useCardParam.js";
 import type { UseCollaborationOptions } from "./hooks/useCollaboration.js";
+import { useActionAlerts, type UseActionAlertsOptions } from "./hooks/useActionAlerts.js";
+import { kpiCounts } from "./lib/monitor/board-state.js";
 import { BoardView } from "./components/BoardView.js";
 
 const MISSIONS_URL = "/monitor/testbed-missions";
@@ -34,15 +37,22 @@ export interface MonitorPageProps {
   onSpawnMission?: (url: string) => void;
   /** Override the co-pilot collaboration wiring (defaults to live polling). */
   collaboration?: UseCollaborationOptions;
+  /** Override the action-alert wiring (audio/notification/storage) for tests. */
+  alerts?: UseActionAlertsOptions;
 }
 
 export function MonitorPage({
   options,
   onSpawnMission = defaultSpawnMission,
   collaboration = {},
+  alerts,
 }: MonitorPageProps = {}) {
   const { board, status, refresh } = useMonitorBoard(options);
   const { cardId, setCard, clearCard } = useCardParam();
+
+  // The action-needed count drives all three notification tiers (§17).
+  const actionCount = useMemo(() => kpiCounts(board?.cards ?? []).action, [board?.cards]);
+  const { muted, mute, unmute } = useActionAlerts(actionCount, alerts);
 
   return (
     <BoardView
@@ -55,6 +65,9 @@ export function MonitorPage({
       onCardNavigate={setCard}
       onSpawnMission={onSpawnMission}
       collaboration={collaboration}
+      onMute={mute}
+      onUnmute={unmute}
+      muted={muted}
     />
   );
 }

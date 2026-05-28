@@ -19,9 +19,22 @@ export interface CoPilotRailProps {
   focusedCard?: BoardCard;
   /** Collaboration wiring. Omit to keep the rail inert (e.g. in BoardView tests). */
   collaboration?: UseCollaborationOptions;
+  /** Mute action alerts until a timestamp (/mute). */
+  onMute?: (untilMs: number) => void;
+  /** Clear the mute (/unmute). */
+  onUnmute?: () => void;
+  /** Whether action alerts are currently muted. */
+  muted?: boolean;
 }
 
-export function CoPilotRail({ onSpawnMission, focusedCard, collaboration }: CoPilotRailProps) {
+export function CoPilotRail({
+  onSpawnMission,
+  focusedCard,
+  collaboration,
+  onMute,
+  onUnmute,
+  muted,
+}: CoPilotRailProps) {
   const { messages, ask } = useCollaboration(collaboration ?? { enabled: false });
   const relatedPr = relatedPrForCard(focusedCard);
   const streamRef = useRef<HTMLDivElement>(null);
@@ -59,6 +72,9 @@ export function CoPilotRail({ onSpawnMission, focusedCard, collaboration }: CoPi
       <AskHermesComposer
         onSpawnMission={onSpawnMission}
         onAsk={(text) => ask(text, relatedPr)}
+        onMute={onMute}
+        onUnmute={onUnmute}
+        muted={muted}
         focusedCardId={focusedCard?.id ?? null}
       />
     </aside>

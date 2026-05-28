@@ -1,13 +1,11 @@
-// Hermes Handoff Monitor — Ask-Hermes composer (M7').
+// Hermes Handoff Monitor — Ask-Hermes composer (M7'/M9').
 //
-// A single text input that doubles as a command line. `/mission <url>`
-// spawns a browser mission; anything else is a question for Hermes.
+// A single text input that doubles as a command line:
+//   /mission <url>   spawn a browser mission (M7')
+//   /mute [1h|9am]   silence action alerts; /unmute clears it (M9')
+//   anything else    a question for Hermes
 // Enter sends, Shift+Enter inserts a newline. Parsing lives in the pure
 // hermes-commands helper; this component owns only input + dispatch.
-//
-// In M7' the mission-spawn path is wired end-to-end; the free-form "ask
-// Hermes" reply stream is M8'. When no onAsk handler is supplied, a plain
-// message surfaces a short hint rather than silently doing nothing.
 
 import { useState, type KeyboardEvent } from "react";
 import { parseHermesInput } from "../../lib/monitor/hermes-commands.js";
@@ -15,13 +13,26 @@ import { parseHermesInput } from "../../lib/monitor/hermes-commands.js";
 export interface AskHermesComposerProps {
   /** Spawn a browser mission against a URL (/mission <url>). */
   onSpawnMission?: (url: string) => void;
-  /** Ask Hermes a free-form question (M8'). */
+  /** Ask Hermes a free-form question. */
   onAsk?: (text: string) => void;
+  /** Mute action alerts until an absolute timestamp (/mute). */
+  onMute?: (untilMs: number) => void;
+  /** Clear the mute (/unmute). */
+  onUnmute?: () => void;
+  /** Whether alerts are currently muted (shown as a chip). */
+  muted?: boolean;
   /** Focused card id, shown in the scope chip. */
   focusedCardId?: string | null;
 }
 
-export function AskHermesComposer({ onSpawnMission, onAsk, focusedCardId }: AskHermesComposerProps) {
+export function AskHermesComposer({
+  onSpawnMission,
+  onAsk,
+  onMute,
+  onUnmute,
+  muted,
+  focusedCardId,
+}: AskHermesComposerProps) {
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -38,13 +49,23 @@ export function AskHermesComposer({ onSpawnMission, onAsk, focusedCardId }: AskH
         setValue("");
         setError(null);
         return;
+      case "mute":
+        onMute?.(command.untilMs);
+        setValue("");
+        setError(null);
+        return;
+      case "unmute":
+        onUnmute?.();
+        setValue("");
+        setError(null);
+        return;
       case "ask":
         if (onAsk) {
           onAsk(command.text);
           setValue("");
           setError(null);
         } else {
-          setError("Ask Hermes lands in M8'. For now: /mission <url> spawns a browser mission.");
+          setError("Ask Hermes isn't wired here. Use /mission <url> or /mute.");
         }
         return;
     }
@@ -61,15 +82,19 @@ export function AskHermesComposer({ onSpawnMission, onAsk, focusedCardId }: AskH
     <div className="hm-compose">
       <div className="hm-compose-toolbar">
         <span className="hm-compose-chip is-on">to · operator</span>
-        <span className="hm-compose-chip">intent · mission spawn</span>
         <span className="hm-compose-chip">scope · {focusedCardId ?? "board"}</span>
+        {muted ? (
+          <span className="hm-compose-chip" style={{ color: "var(--hm-muted)" }}>
+            alerts muted
+          </span>
+        ) : null}
         <span style={{ marginLeft: "auto", color: "var(--hm-muted-soft)" }}>⏎ send · ⇧⏎ newline</span>
       </div>
       <div className="hm-compose-row">
         <textarea
           className="hm-compose-input"
-          placeholder="Ask Hermes, or spawn a mission · /mission https://staging.averray.com/onboarding"
-          aria-label="Ask Hermes or spawn a browser mission"
+          placeholder="Ask Hermes · /mission <url> · /mute 1h"
+          aria-label="Ask Hermes, spawn a mission, or mute alerts"
           value={value}
           onChange={(e) => {
             setValue(e.target.value);

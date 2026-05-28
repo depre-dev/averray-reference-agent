@@ -50,7 +50,7 @@ beforeEach(() => {
 describe("MonitorPage — container", () => {
   test("wires fetched live board data into the BoardView", async () => {
     const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({ cards: FIXTURE_CARDS, at: "2026-05-28T10:30:00Z" }));
-    const { container } = render(<MonitorPage options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }} collaboration={{ enabled: false }} />, {
+    const { container } = render(<MonitorPage options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }} collaboration={{ enabled: false }} alerts={{ enabled: false }} />, {
       wrapper,
     });
 
@@ -64,7 +64,7 @@ describe("MonitorPage — container", () => {
 
   test("clicking a card opens the drawer and sets ?card=; esc closes it and clears the param", async () => {
     const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({ cards: FIXTURE_CARDS, at: "2026-05-28T10:30:00Z" }));
-    const { container } = render(<MonitorPage options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }} collaboration={{ enabled: false }} />, {
+    const { container } = render(<MonitorPage options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }} collaboration={{ enabled: false }} alerts={{ enabled: false }} />, {
       wrapper,
     });
 
@@ -86,7 +86,7 @@ describe("MonitorPage — container", () => {
     const fetcher = vi.fn(async (): Promise<MonitorBoard> => {
       throw new Error("no backend");
     });
-    const { container } = render(<MonitorPage options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }} collaboration={{ enabled: false }} />, {
+    const { container } = render(<MonitorPage options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }} collaboration={{ enabled: false }} alerts={{ enabled: false }} />, {
       wrapper,
     });
 
@@ -100,7 +100,7 @@ describe("MonitorPage — container", () => {
     const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({ cards: FIXTURE_CARDS, at: "2026-05-28T10:30:00Z" }));
     const onSpawnMission = vi.fn();
     const { container } = render(
-      <MonitorPage options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }} onSpawnMission={onSpawnMission} collaboration={{ enabled: false }} />,
+      <MonitorPage options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }} onSpawnMission={onSpawnMission} collaboration={{ enabled: false }} alerts={{ enabled: false }} />,
       { wrapper },
     );
     await waitFor(() => expect(within(container).getByRole("complementary", { name: "Hermes co-pilot" })).toBeTruthy());
@@ -117,7 +117,7 @@ describe("MonitorPage — container", () => {
     // the global fetch — so spying on it isolates the spawn call.
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 202 }));
     try {
-      const { container } = render(<MonitorPage options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }} collaboration={{ enabled: false }} />, {
+      const { container } = render(<MonitorPage options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }} collaboration={{ enabled: false }} alerts={{ enabled: false }} />, {
         wrapper,
       });
       await waitFor(() =>
@@ -136,5 +136,27 @@ describe("MonitorPage — container", () => {
     } finally {
       fetchSpy.mockRestore();
     }
+  });
+
+  test("the composer's /mute command mutes alerts end-to-end", async () => {
+    const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({ cards: FIXTURE_CARDS, at: "2026-05-28T10:30:00Z" }));
+    const storage = memStorage();
+    const { container } = render(
+      <MonitorPage
+        options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }}
+        collaboration={{ enabled: false }}
+        alerts={{ enabled: false, storage, now: () => 1_000 }}
+      />,
+      { wrapper },
+    );
+    await waitFor(() => expect(within(container).getByRole("complementary", { name: "Hermes co-pilot" })).toBeTruthy());
+
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "/mute 1h" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // The mute flows command → CoPilotRail → useActionAlerts → muted chip.
+    await waitFor(() => expect(within(container).getByText("alerts muted")).toBeTruthy());
+    expect(storage.getItem("monitor.mute.until")).toBeTruthy();
   });
 });
