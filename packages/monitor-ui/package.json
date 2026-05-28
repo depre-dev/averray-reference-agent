@@ -14,6 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "focus-trap-react": "^11.0.6",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "swr": "^2.2.5"

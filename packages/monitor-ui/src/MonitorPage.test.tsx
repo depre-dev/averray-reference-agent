@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { ReactNode } from "react";
-import { cleanup, render, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { SWRConfig } from "swr";
 import { MonitorPage } from "./MonitorPage.js";
 import { FIXTURE_CARDS } from "./lib/monitor/fixtures.js";
@@ -44,6 +44,7 @@ function wrapper({ children }: { children: ReactNode }) {
 
 beforeEach(() => {
   FakeEventSource.instances = [];
+  window.history.replaceState({}, "", "/");
 });
 
 describe("MonitorPage — container", () => {
@@ -59,6 +60,26 @@ describe("MonitorPage — container", () => {
     );
     expect(within(container).getByRole("banner")).toBeTruthy();
     expect(within(container).getByRole("complementary", { name: "Hermes co-pilot" })).toBeTruthy();
+  });
+
+  test("clicking a card opens the drawer and sets ?card=; esc closes it and clears the param", async () => {
+    const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({ cards: FIXTURE_CARDS, at: "2026-05-28T10:30:00Z" }));
+    const { container } = render(<MonitorPage options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }} />, {
+      wrapper,
+    });
+
+    const view = within(container);
+    await waitFor(() => expect(view.getByRole("button", { name: /Allow operator override/ })).toBeTruthy());
+
+    // Click the action card → drawer opens, URL carries the focused card.
+    fireEvent.click(view.getByRole("button", { name: /Allow operator override/ }));
+    await waitFor(() => expect(view.getByRole("dialog")).toBeTruthy());
+    expect(new URLSearchParams(window.location.search).get("card")).toBe("agent #548");
+
+    // Esc closes the drawer and clears the param.
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+    expect(new URLSearchParams(window.location.search).get("card")).toBeNull();
   });
 
   test("renders the board chrome without crashing when the fetch fails", async () => {
