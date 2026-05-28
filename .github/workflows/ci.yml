@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  packages: write # publish the runtime image to GHCR on main
 
 jobs:
   node:
@@ -38,8 +39,39 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build Node runtime image
-        run: docker build -f ops/Dockerfile.node .
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Push only happens for main; on PRs this just logs in is skipped.
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # On PRs: build only (validates the Dockerfile, incl. the in-image
+      # Vite SPA build). On main: build + push the sha + latest tags.
+      - name: Build (and push on main) the runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ops/Dockerfile.node
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Validate Compose file
         run: docker compose --env-file ops/.env.example -f ops/compose.yml -f ops/compose.prod.yml config
