@@ -40,6 +40,7 @@ import {
   synthesizeHermesReplyFor,
 } from "./monitor-collab.js";
 import { buildHermesBoardSnapshotFromMonitor } from "./monitor-hermes-board.js";
+import { buildV2BoardSnapshot } from "./monitor-v2.js";
 import {
   decideHermesBoardNarration,
   fallbackHermesBoardNarration,
@@ -186,6 +187,8 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
           "/monitor",
           "/monitor/events",
           "/monitor/stream",
+          "/monitor/v2/board",
+          "/monitor/v2/stream",
           "/monitor/command",
           "/monitor/recheck",
           "/monitor/codex-tasks",
@@ -228,6 +231,31 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       return;
     }
     writeJson(response, 200, await loadMonitorSnapshot(url));
+    return;
+  }
+  // ── v2 typed board endpoints (monitor redesign, M1') ──────────────
+  // Returns the strongly-typed BoardCard[] shape the redesigned React
+  // UI consumes. Maps the same internal monitor snapshot the legacy
+  // HTML monitor reads, via buildV2BoardSnapshot(). Existing
+  // /monitor/events + /monitor/stream stay for the legacy monitor.
+  if (
+    request.method === "GET" &&
+    (url.pathname === "/monitor/v2/board" || url.pathname === "/monitor/v2/stream")
+  ) {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    if (url.pathname === "/monitor/v2/stream") {
+      await writeMonitorV2Stream(request, response, url);
+      return;
+    }
+    const raw = await loadMonitorSnapshot(url, { suppressNarration: true });
+    writeJson(response, 200, buildV2BoardSnapshot(raw, { repo: monitorV2Repo() }));
     return;
   }
   if (request.method === "GET" && url.pathname === "/monitor/codex-tasks") {
@@ -1561,6 +1589,71 @@ async function writeMonitorStream(
     } catch (error) {
       writeSseEvent(response, "error", {
         error: "monitor_snapshot_failed",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      inFlight = false;
+    }
+  };
+
+  request.on("close", () => {
+    closed = true;
+    if (timer) clearInterval(timer);
+  });
+
+  await send();
+  if (!closed) timer = setInterval(() => void send(), intervalMs);
+}
+
+/**
+ * The configured repo the v2 board reports on. Single-repo for v1
+ * (per spec §21.6); every card still carries its own `repo` field so
+ * future multi-repo aggregation needs no client change.
+ */
+function monitorV2Repo(): string {
+  return (
+    optionalEnv("GITHUB_DEFAULT_REPO") ??
+    optionalEnv("GITHUB_REPOSITORY") ??
+    ""
+  );
+}
+
+/**
+ * v2 SSE stream — emits the typed BoardSnapshotV2 as a `board.snapshot`
+ * event on each interval. Mirrors writeMonitorStream's polling model
+ * (re-derive + push) rather than a true pub-sub; the redesigned client
+ * treats every snapshot as a full-state replace, so a periodic
+ * snapshot keeps it in sync. Per-card diff events
+ * (board.card.added/updated/moved/archived) are a later refinement;
+ * for M1' the snapshot cadence is the contract.
+ */
+async function writeMonitorV2Stream(
+  request: http.IncomingMessage,
+  response: http.ServerResponse,
+  url: URL
+): Promise<void> {
+  const intervalMs = Math.max(1_000, parseOptionalInteger(url.searchParams.get("intervalMs")) ?? 5_000);
+  let closed = false;
+  let inFlight = false;
+  let timer: ReturnType<typeof setInterval> | undefined;
+
+  response.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+    "x-accel-buffering": "no",
+  });
+  response.write(`retry: ${intervalMs}\n\n`);
+
+  const send = async () => {
+    if (closed || inFlight) return;
+    inFlight = true;
+    try {
+      const raw = await loadMonitorSnapshot(url, { suppressNarration: true });
+      writeSseEvent(response, "board.snapshot", buildV2BoardSnapshot(raw, { repo: monitorV2Repo() }));
+    } catch (error) {
+      writeSseEvent(response, "error", {
+        error: "monitor_v2_snapshot_failed",
         message: error instanceof Error ? error.message : String(error),
       });
     } finally {
