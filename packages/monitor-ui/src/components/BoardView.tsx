@@ -28,6 +28,7 @@ import type { LaneId } from "./Lane.js";
 import { CardRouter } from "./cards/CardRouter.js";
 import { DetailDrawer } from "./drawer/DetailDrawer.js";
 import { CoPilotRail } from "./hermes/CoPilotRail.js";
+import type { UseCollaborationOptions } from "../hooks/useCollaboration.js";
 
 // laneFor() promotes every isAction card into needs-attention, so the
 // action preset expands that lane (not operator-review) to keep the
@@ -61,8 +62,8 @@ export interface BoardViewProps {
   onCardNavigate?: (id: string) => void;
   /** Spawn a browser mission via the Hermes composer (/mission <url>). */
   onSpawnMission?: (url: string) => void;
-  /** Ask Hermes a free-form question (M8'). */
-  onAsk?: (text: string) => void;
+  /** Co-pilot collaboration wiring. Omit to keep the rail inert. */
+  collaboration?: UseCollaborationOptions;
 }
 
 export function BoardView({
@@ -74,7 +75,7 @@ export function BoardView({
   onCardClose,
   onCardNavigate,
   onSpawnMission,
-  onAsk,
+  collaboration,
 }: BoardViewProps) {
   // The stream is "degraded" only on a real drop (reconnecting/closed);
   // idle/connecting are pre-live transients, not disconnections. The
@@ -134,7 +135,7 @@ export function BoardView({
           />
         </div>
 
-        <CoPilotRail onSpawnMission={onSpawnMission} onAsk={onAsk} focusedCardId={focusedCardId} />
+        <CoPilotRail onSpawnMission={onSpawnMission} focusedCard={focusedCard} collaboration={collaboration} />
       </div>
 
       {focusedCard ? (
