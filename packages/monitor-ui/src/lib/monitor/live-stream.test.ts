@@ -5,7 +5,8 @@
 
 import { test, assert } from "vitest";
 
-import { backoffDelayMs, nextStatus, RECONNECT_CAP_MS } from "./live-stream.js";
+import { backoffDelayMs, nextStatus, RECONNECT_CAP_MS, LiveStream } from "./live-stream.js";
+import type { MonitorEvent } from "./board-cache.js";
 
 // ── backoffDelayMs ──────────────────────────────────────────────────
 
@@ -100,4 +101,97 @@ test("backoff progression: attempt N steady-state matches the cap", () => {
   // shape from the spec.
   assert.equal(backoffDelayMs(10), backoffDelayMs(20));
   assert.equal(backoffDelayMs(20), backoffDelayMs(99));
+});
+
+// ── LiveStream class — event tagging + delivery ─────────────────────
+//
+// A minimal EventSource stand-in: captures the named-event listeners
+// LiveStream attaches and lets a test drive events synchronously.
+
+class FakeEventSource {
+  static instances: FakeEventSource[] = [];
+  url: string;
+  onopen: ((e: unknown) => void) | null = null;
+  onerror: ((e: unknown) => void) | null = null;
+  onmessage: ((e: MessageEvent) => void) | null = null;
+  private listeners = new Map<string, (e: MessageEvent) => void>();
+  closed = false;
+
+  constructor(url: string) {
+    this.url = url;
+    FakeEventSource.instances.push(this);
+  }
+  addEventListener(type: string, fn: (e: MessageEvent) => void): void {
+    this.listeners.set(type, fn);
+  }
+  close(): void {
+    this.closed = true;
+  }
+  /** Test helper — dispatch a named SSE event with a JSON string body. */
+  emitNamed(type: string, data: string): void {
+    this.listeners.get(type)?.({ type, data } as MessageEvent);
+  }
+  /** Test helper — dispatch an unnamed `message` event. */
+  emitMessage(data: string): void {
+    this.onmessage?.({ type: "message", data } as MessageEvent);
+  }
+}
+
+function freshStream() {
+  FakeEventSource.instances = [];
+  const stream = new LiveStream({
+    url: "/monitor/v2/stream",
+    EventSourceCtor: FakeEventSource as unknown as typeof EventSource,
+  });
+  const received: MonitorEvent[] = [];
+  stream.on((e) => received.push(e));
+  stream.start();
+  const source = FakeEventSource.instances.at(-1) as FakeEventSource;
+  return { stream, received, source };
+}
+
+test("LiveStream: tags a typeless named-event payload with the event name", () => {
+  // The M1' BoardSnapshotV2 body is `{ cards, at, repo }` — no `type`.
+  const { received, source } = freshStream();
+  source.emitNamed("board.snapshot", JSON.stringify({ cards: [], at: "2026-05-28T00:00:00Z", repo: "x/y" }));
+  assert.equal(received.length, 1);
+  assert.equal(received[0]?.type, "board.snapshot");
+  assert.deepEqual((received[0] as { cards: unknown[] }).cards, []);
+});
+
+test("LiveStream: an explicit payload type wins over the event name", () => {
+  const { received, source } = freshStream();
+  source.emitNamed("board.snapshot", JSON.stringify({ type: "board.card.added", card: { id: "agent #1" } }));
+  assert.equal(received[0]?.type, "board.card.added");
+});
+
+test("LiveStream: the default 'message' event name is not used as a type", () => {
+  const { received, source } = freshStream();
+  source.emitMessage(JSON.stringify({ cards: [] }));
+  assert.equal(received.length, 1);
+  assert.equal(received[0]?.type, undefined);
+});
+
+test("LiveStream: malformed JSON is dropped, not delivered", () => {
+  const { received, source } = freshStream();
+  source.emitNamed("board.snapshot", "{ not json");
+  assert.equal(received.length, 0);
+});
+
+test("LiveStream: onStatus fires immediately and tracks open/closed", () => {
+  FakeEventSource.instances = [];
+  const stream = new LiveStream({
+    url: "/x",
+    EventSourceCtor: FakeEventSource as unknown as typeof EventSource,
+  });
+  const statuses: string[] = [];
+  stream.onStatus((s) => statuses.push(s));
+  assert.equal(statuses[0], "idle"); // fires immediately with current status
+  stream.start();
+  const source = FakeEventSource.instances.at(-1) as FakeEventSource;
+  source.onopen?.({});
+  assert.equal(statuses.at(-1), "open");
+  stream.stop();
+  assert.equal(statuses.at(-1), "closed");
+  assert.equal(source.closed, true);
 });

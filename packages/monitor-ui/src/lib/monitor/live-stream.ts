@@ -179,6 +179,15 @@ export class LiveStream {
       this.logger.warn?.("LiveStream: failed to parse SSE event payload", err);
       return;
     }
+    // The server tags updates with the SSE event name (`event: board.snapshot`)
+    // but the JSON payload itself may omit a `type` discriminator — the M1'
+    // BoardSnapshotV2 is just `{ cards, at, repo }`. Recover the type from the
+    // event name so board-cache's applyEventToBoard() can dispatch on it. A
+    // `type` already in the payload always wins; the default "message" event
+    // (unnamed data) is not a meaningful board type, so we ignore it.
+    if (typeof parsed.type !== "string" && typeof e.type === "string" && e.type !== "message") {
+      parsed = { ...parsed, type: e.type };
+    }
     for (const h of this.handlers) {
       try {
         h(parsed);
