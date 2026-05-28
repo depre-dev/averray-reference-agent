@@ -9,6 +9,11 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { MonitorPage } from "./MonitorPage.js";
+// Design tokens (fonts + --font-*/--avy-* vars, Google Fonts @import) MUST
+// load before monitor.css: hermes.css references var(--font-body) etc. 109×
+// and those custom properties are defined only here. Shipping monitor.css
+// alone left the board on fallback fonts.
+import "./styles/averray-tokens.css";
 import "./styles/monitor.css";
 
 const rootEl = document.getElementById("root");
