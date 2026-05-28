@@ -12,6 +12,7 @@
 // via URL params). Filter chips render count-only and are
 // non-interactive. The tip is derived from the board mode.
 
+import type { Ref } from "react";
 import type { KPICounts, BoardMode } from "../lib/monitor/board-state.js";
 
 const TIPS: Record<BoardMode, string> = {
@@ -23,11 +24,15 @@ const TIPS: Record<BoardMode, string> = {
 export type LanesBarProps = {
   counts: KPICounts;
   mode: BoardMode;
-  /** Search value (M5' wires this; M3' is read-only). */
+  /** Current search query. */
   searchValue?: string;
+  /** Search change handler. When omitted the input is read-only. */
+  onSearchChange?: (value: string) => void;
+  /** Ref to the search input so `/` can focus it (M10'). */
+  searchInputRef?: Ref<HTMLInputElement>;
 };
 
-export function LanesBar({ counts, mode, searchValue = "" }: LanesBarProps) {
+export function LanesBar({ counts, mode, searchValue = "", onSearchChange, searchInputRef }: LanesBarProps) {
   const tip = TIPS[mode];
   const filters: Array<[label: string, count: number]> = [
     ["All", counts.total],
@@ -46,12 +51,13 @@ export function LanesBar({ counts, mode, searchValue = "" }: LanesBarProps) {
             ⌕
           </span>
           <input
+            ref={searchInputRef}
             type="search"
             placeholder="search PR, repo, correlation id…"
             value={searchValue}
-            disabled
-            aria-label="Search PRs, repos, or correlation IDs (wired in M5')"
-            readOnly
+            onChange={onSearchChange ? (e) => onSearchChange(e.target.value) : undefined}
+            readOnly={!onSearchChange}
+            aria-label="Search PRs, repos, or correlation IDs"
           />
           <kbd>/</kbd>
         </span>

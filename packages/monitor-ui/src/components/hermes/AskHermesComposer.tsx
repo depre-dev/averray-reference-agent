@@ -7,7 +7,7 @@
 // Enter sends, Shift+Enter inserts a newline. Parsing lives in the pure
 // hermes-commands helper; this component owns only input + dispatch.
 
-import { useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { parseHermesInput } from "../../lib/monitor/hermes-commands.js";
 
 export interface AskHermesComposerProps {
@@ -23,6 +23,8 @@ export interface AskHermesComposerProps {
   muted?: boolean;
   /** Focused card id, shown in the scope chip. */
   focusedCardId?: string | null;
+  /** Bump to programmatically focus the input (the board's `a` shortcut). */
+  focusToken?: number;
 }
 
 export function AskHermesComposer({
@@ -32,9 +34,16 @@ export function AskHermesComposer({
   onUnmute,
   muted,
   focusedCardId,
+  focusToken,
 }: AskHermesComposerProps) {
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // The board's `a` shortcut bumps focusToken to bring focus here.
+  useEffect(() => {
+    if (focusToken) inputRef.current?.focus();
+  }, [focusToken]);
 
   const send = () => {
     const command = parseHermesInput(value);
@@ -92,6 +101,7 @@ export function AskHermesComposer({
       </div>
       <div className="hm-compose-row">
         <textarea
+          ref={inputRef}
           className="hm-compose-input"
           placeholder="Ask Hermes · /mission <url> · /mute 1h"
           aria-label="Ask Hermes, spawn a mission, or mute alerts"

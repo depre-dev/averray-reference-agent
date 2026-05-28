@@ -1,10 +1,10 @@
-// Hermes Handoff Monitor — BoardView (presentational board)
+// Hermes Handoff Monitor — BoardView (presentational board + keyboard).
 //
-// Pure render of the Direction A board from a MonitorBoard + stream
-// status. No data fetching — the live wiring lives in useMonitorBoard()
-// and the page container passes the result down. Keeping this component
-// data-free makes it deterministic to test and storybook against
-// fixtures.
+// Renders the Direction A board from a MonitorBoard + stream status, and
+// owns the board's view interaction: keyboard navigation (§12), the
+// cheat-sheet overlay, lane spotlight, and client-side search filtering.
+// Data fetching stays in the page container; this component takes the
+// result + callbacks and is deterministic to test against fixtures.
 //
 //   <div.hm-board>
 //     <TopStrip />               KPI pills + LIVE indicator + refresh
@@ -13,13 +13,17 @@
 //       <div.hm-lanes-wrap>
 //         <LanesBar />           search + filter chips + urgency label
 //         <Board renderCard />   the eight lanes, cards via <CardRouter>
-//       <aside.hm-hermes>        co-pilot rail chrome (full rail = M8')
+//       <CoPilotRail />          live narration + Ask-Hermes
+//   <DetailDrawer />             when ?card= resolves
+//   <KeyboardOverlay />          when ? is pressed
 
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { deriveBoardState, type BoardMode } from "../lib/monitor/board-state.js";
 import type { MonitorBoard } from "../lib/monitor/board-cache.js";
 import type { StreamStatus } from "../lib/monitor/live-stream.js";
 import { LANES, type BoardCard } from "../lib/monitor/card-types.js";
+import { laneFor } from "../lib/monitor/lane-rules.js";
+import { relatedPrForCard } from "../lib/monitor/collaboration.js";
 import { TopStrip } from "./TopStrip.js";
 import { BoardNowBanner } from "./BoardNowBanner.js";
 import { LanesBar } from "./LanesBar.js";
@@ -28,7 +32,9 @@ import type { LaneId } from "./Lane.js";
 import { CardRouter } from "./cards/CardRouter.js";
 import { DetailDrawer } from "./drawer/DetailDrawer.js";
 import { CoPilotRail } from "./hermes/CoPilotRail.js";
+import { KeyboardOverlay } from "./shortcuts/KeyboardOverlay.js";
 import type { UseCollaborationOptions } from "../hooks/useCollaboration.js";
+import { useBoardKeyboard } from "../hooks/useBoardKeyboard.js";
 
 // laneFor() promotes every isAction card into needs-attention, so the
 // action preset expands that lane (not operator-review) to keep the
@@ -47,29 +53,29 @@ function expandedForMode(mode: BoardMode): ReadonlySet<LaneId> {
   return ACTION_EXPANDED;
 }
 
+function matchesQuery(card: BoardCard, q: string): boolean {
+  if (!q) return true;
+  const hay = `${card.id} ${card.title} ${card.repo} ${card.branch ?? ""} ${card.summary ?? ""}`.toLowerCase();
+  return hay.includes(q);
+}
+
 export interface BoardViewProps {
   board: MonitorBoard | undefined;
   status: StreamStatus;
-  /** Refresh handler (the top-strip Refresh button). */
   onRefresh?: () => void;
   /** Focused card id (drives the detail drawer); null/undefined = closed. */
   focusedCardId?: string | null;
-  /** A card was clicked — open its drawer (sets ?card=). */
+  /** A card was clicked / Enter pressed — open its drawer (sets ?card=). */
   onCardClick?: (id: string) => void;
-  /** Close the drawer (esc / scrim). */
   onCardClose?: () => void;
-  /** j/k traversal target within the drawer. */
   onCardNavigate?: (id: string) => void;
-  /** Spawn a browser mission via the Hermes composer (/mission <url>). */
   onSpawnMission?: (url: string) => void;
-  /** Co-pilot collaboration wiring. Omit to keep the rail inert. */
   collaboration?: UseCollaborationOptions;
-  /** Mute action alerts until a timestamp (/mute). */
   onMute?: (untilMs: number) => void;
-  /** Clear the alert mute (/unmute). */
   onUnmute?: () => void;
-  /** Whether action alerts are currently muted. */
   muted?: boolean;
+  /** Disable the global keyboard handler (tests rendering many boards). */
+  keyboard?: boolean;
 }
 
 export function BoardView({
@@ -85,32 +91,92 @@ export function BoardView({
   onMute,
   onUnmute,
   muted,
+  keyboard = true,
 }: BoardViewProps) {
-  // The stream is "degraded" only on a real drop (reconnecting/closed);
-  // idle/connecting are pre-live transients, not disconnections. The
-  // LIVE indicator, by contrast, only lights on a confirmed open stream.
   const degraded = status === "reconnecting" || status === "closed";
   const streamOnline = !degraded;
   const cards = board?.cards ?? [];
   const liveLabel = useMemo(() => formatClock(board?.at), [board?.at]);
 
+  // KPIs / banner / mode reflect the whole board, regardless of search.
   const state = useMemo(
-    () =>
-      deriveBoardState(cards, {
-        streamOnline,
-        nowLabel: liveLabel,
-        lastGoodLabel: liveLabel || undefined,
-      }),
+    () => deriveBoardState(cards, { streamOnline, nowLabel: liveLabel, lastGoodLabel: liveLabel || undefined }),
     [cards, streamOnline, liveLabel],
   );
 
-  // Cards in display (lane) order — the traversal list for the drawer's
-  // j/k, and the lookup for the focused card.
+  // ── view state ──────────────────────────────────────────────────
+  const [query, setQuery] = useState("");
+  const [boardFocusId, setBoardFocusId] = useState<string | null>(null);
+  const [overlayOpen, setOverlayOpen] = useState(false);
+  const [askToken, setAskToken] = useState(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Controlled lane expansion: seed from the mode preset, re-apply when
+  // the board mode flips (e.g. empty→action as live data arrives), but
+  // keep manual toggles / spotlight within a stable mode.
+  const [expanded, setExpanded] = useState<ReadonlySet<LaneId>>(() => new Set(expandedForMode(state.mode)));
+  const modeRef = useRef(state.mode);
+  useEffect(() => {
+    if (modeRef.current !== state.mode) {
+      modeRef.current = state.mode;
+      setExpanded(new Set(expandedForMode(state.mode)));
+    }
+  }, [state.mode]);
+
+  // Search filters what's shown + focusable (not the KPI counts).
+  const q = query.trim().toLowerCase();
+  const displayGrouped = useMemo(() => {
+    if (!q) return state.grouped;
+    const out = {} as Record<LaneId, BoardCard[]>;
+    for (const lane of LANES) out[lane] = (state.grouped[lane] ?? []).filter((c) => matchesQuery(c, q));
+    return out;
+  }, [state.grouped, q]);
+
   const orderedCards = useMemo<BoardCard[]>(
-    () => LANES.flatMap((lane) => state.grouped[lane] ?? []),
-    [state.grouped],
+    () => LANES.flatMap((lane) => displayGrouped[lane] ?? []),
+    [displayGrouped],
   );
-  const focusedCard = focusedCardId ? orderedCards.find((c) => c.id === focusedCardId) : undefined;
+
+  const drawerCard = focusedCardId ? orderedCards.find((c) => c.id === focusedCardId) : undefined;
+  const boardFocusedCard = boardFocusId ? orderedCards.find((c) => c.id === boardFocusId) : undefined;
+  const scopeCard = drawerCard ?? boardFocusedCard;
+
+  const onToggleLane = useCallback((id: LaneId) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // ── keyboard (§12) ──────────────────────────────────────────────
+  useBoardKeyboard({
+    enabled: keyboard,
+    cards: orderedCards,
+    focusedId: boardFocusId,
+    drawerOpen: Boolean(drawerCard),
+    overlayOpen,
+    onFocusChange: setBoardFocusId,
+    onToggleOverlay: () => setOverlayOpen((o) => !o),
+    onCloseOverlay: () => setOverlayOpen(false),
+    onFocusSearch: () => searchInputRef.current?.focus(),
+    onOpenFocused: (id) => onCardClick?.(id),
+    onSpotlight: (id) => {
+      const card = orderedCards.find((c) => c.id === id);
+      if (card) setExpanded(new Set<LaneId>([laneFor(card), "done"]));
+    },
+    onOpenPr: (id) => {
+      const pr = relatedPrForCard(orderedCards.find((c) => c.id === id));
+      if (pr && typeof window !== "undefined") {
+        window.open(`https://github.com/${pr.repo}/pull/${pr.number}`, "_blank", "noopener,noreferrer");
+      }
+    },
+    onAsk: (id) => {
+      setBoardFocusId(id);
+      setAskToken((t) => t + 1);
+    },
+  });
 
   return (
     <div className="hm-board">
@@ -124,20 +190,22 @@ export function BoardView({
 
       <div className="hm-main">
         <div className="hm-lanes-wrap">
-          <LanesBar counts={state.counts} mode={state.mode} />
-          {/* Key by mode: <Board> seeds its expansion state from
-              initialExpanded only on mount, so when the board transitions
-              (e.g. empty→action as live data arrives) we remount to apply
-              the new preset. Manual collapse/expand toggles persist within
-              a mode; a mode change is a significant enough event to reset. */}
+          <LanesBar
+            counts={state.counts}
+            mode={state.mode}
+            searchValue={query}
+            onSearchChange={setQuery}
+            searchInputRef={searchInputRef}
+          />
           <Board
-            key={state.mode}
-            grouped={state.grouped}
-            initialExpanded={expandedForMode(state.mode)}
+            grouped={displayGrouped}
+            expanded={expanded}
+            onToggleLane={onToggleLane}
             renderCard={(card) => (
               <CardRouter
                 key={card.id}
                 card={card}
+                focused={card.id === boardFocusId}
                 onClick={onCardClick ? (c) => onCardClick(c.id) : undefined}
               />
             )}
@@ -146,22 +214,25 @@ export function BoardView({
 
         <CoPilotRail
           onSpawnMission={onSpawnMission}
-          focusedCard={focusedCard}
+          focusedCard={scopeCard}
           collaboration={collaboration}
           onMute={onMute}
           onUnmute={onUnmute}
           muted={muted}
+          composerFocusToken={askToken}
         />
       </div>
 
-      {focusedCard ? (
+      {drawerCard ? (
         <DetailDrawer
-          card={focusedCard}
+          card={drawerCard}
           cards={orderedCards}
           onClose={() => onCardClose?.()}
           onNavigate={(id) => onCardNavigate?.(id)}
         />
       ) : null}
+
+      {overlayOpen ? <KeyboardOverlay onClose={() => setOverlayOpen(false)} /> : null}
     </div>
   );
 }
