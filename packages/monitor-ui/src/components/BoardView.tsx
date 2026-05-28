@@ -64,6 +64,12 @@ export interface BoardViewProps {
   onSpawnMission?: (url: string) => void;
   /** Co-pilot collaboration wiring. Omit to keep the rail inert. */
   collaboration?: UseCollaborationOptions;
+  /** Mute action alerts until a timestamp (/mute). */
+  onMute?: (untilMs: number) => void;
+  /** Clear the alert mute (/unmute). */
+  onUnmute?: () => void;
+  /** Whether action alerts are currently muted. */
+  muted?: boolean;
 }
 
 export function BoardView({
@@ -76,6 +82,9 @@ export function BoardView({
   onCardNavigate,
   onSpawnMission,
   collaboration,
+  onMute,
+  onUnmute,
+  muted,
 }: BoardViewProps) {
   // The stream is "degraded" only on a real drop (reconnecting/closed);
   // idle/connecting are pre-live transients, not disconnections. The
@@ -135,7 +144,14 @@ export function BoardView({
           />
         </div>
 
-        <CoPilotRail onSpawnMission={onSpawnMission} focusedCard={focusedCard} collaboration={collaboration} />
+        <CoPilotRail
+          onSpawnMission={onSpawnMission}
+          focusedCard={focusedCard}
+          collaboration={collaboration}
+          onMute={onMute}
+          onUnmute={onUnmute}
+          muted={muted}
+        />
       </div>
 
       {focusedCard ? (

@@ -16,4 +16,7 @@ export * from "./snapshot-store.js";
 export * from "./live-stream.js";
 export * from "./hermes-commands.js";
 export * from "./collaboration.js";
+export * from "./notifications.js";
+export * from "./alert-audio.js";
+export * from "./favicon.js";
 export * from "./fixtures.js";
