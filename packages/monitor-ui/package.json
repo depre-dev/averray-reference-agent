@@ -1,0 +1,13 @@
+{
+  "name": "@avg/monitor-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Hermes Handoff Monitor — redesigned operator UI (Direction A). M2': pure-logic scaffold; React/Vite frontend lands M3'+.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false"
+  }
+}
