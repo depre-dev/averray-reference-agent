@@ -48,6 +48,11 @@ import {
   spawnDebugCard,
 } from "./monitor-v2-debug.js";
 import {
+  authorizeMissionSpawn,
+  missionSpawnRestricted,
+  parseMissionSpawnRoles,
+} from "./monitor-mission-roles.js";
+import {
   decideHermesBoardNarration,
   fallbackHermesBoardNarration,
   relatedPrForHermesBoardNarration,
@@ -103,6 +108,7 @@ const authConfig = {
 };
 const routineConfig = parseSlackRoutineConfig(process.env, authConfig.allowedChannelIds);
 const monitorConfig = parseMonitorConfig(process.env);
+const missionSpawnRoles = parseMissionSpawnRoles(process.env);
 const monitorNarrationMinIntervalMs = Math.max(
   5_000,
   Number.parseInt(optionalEnv("HERMES_MONITOR_NARRATION_MIN_INTERVAL_MS", "30000"), 10) || 30_000
@@ -189,6 +195,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       monitor: {
         enabled: monitorConfig.enabled,
         tokenProtected: Boolean(monitorConfig.token),
+        missionSpawnRestricted: missionSpawnRestricted(missionSpawnRoles),
         paths: monitorConfig.enabled ? [
           "/monitor",
           "/monitor/events",
@@ -375,6 +382,14 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
     }
     if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
       writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    // §21.5: spawning a browser mission needs an admin or mission-operator
+    // role on top of the edge gate. Opt-in — unrestricted until allowlists
+    // are configured.
+    const missionVerdict = authorizeMissionSpawn(missionSpawnRoles, request.headers);
+    if (!missionVerdict.allowed) {
+      writeJson(response, 403, { error: "mission_spawn_forbidden", reason: missionVerdict.reason });
       return;
     }
     await handleMonitorTestbedMissionRequest(request, response);
