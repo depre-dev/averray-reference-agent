@@ -5,7 +5,7 @@ import { MonitorPage } from "./MonitorPage.js";
 
 afterEach(cleanup);
 
-describe("MonitorPage — calm / A5 state", () => {
+describe("MonitorPage — rich-mix / A1 state", () => {
   test("renders the full board chrome end-to-end", () => {
     const { container } = render(<MonitorPage />);
     const view = within(container);
@@ -14,9 +14,9 @@ describe("MonitorPage — calm / A5 state", () => {
     expect(view.getByRole("banner")).toBeTruthy();
     expect(view.getByText("Hermes")).toBeTruthy();
 
-    // Board Now banner — calm tone
-    expect(container.querySelector(".hm-now--calm")).toBeTruthy();
-    expect(view.getByText(/Nothing waits on you/)).toBeTruthy();
+    // Board Now banner — action tone (the fixtures include action cards)
+    expect(container.querySelector(".hm-now--action")).toBeTruthy();
+    expect(view.getByText(/your review decision/)).toBeTruthy();
 
     // Lanes bar
     expect(view.getByText("sorted by next-action urgency")).toBeTruthy();
@@ -29,24 +29,37 @@ describe("MonitorPage — calm / A5 state", () => {
     expect(view.getByRole("complementary", { name: "Hermes co-pilot" })).toBeTruthy();
   });
 
-  test("only the Done lane is expanded; the seven live lanes are mini-rails", () => {
+  test("the rich-mix preset expands five lanes; the other three are mini-rails", () => {
     const { container } = render(<MonitorPage />);
-    expect(within(container).getByRole("region", { name: "Done lane" })).toBeTruthy();
-    expect(container.querySelectorAll(".hm-lane--collapsed").length).toBe(7);
+    expect(container.querySelectorAll("section.hm-lane").length).toBe(5);
+    expect(container.querySelectorAll(".hm-lane--collapsed").length).toBe(3);
   });
 
-  test("KPI pills read zero for every live lane in the calm state", () => {
+  test("renders the action card with its CTA and Hermes verdict", () => {
     const { container } = render(<MonitorPage />);
-    // "Operator review" is both a KPI label and a lane name, so scope the
-    // assertion to the banner (TopStrip) KPI region.
-    const banner = within(container).getByRole("banner");
-    expect(within(banner).getByText("Action needed")).toBeTruthy();
-    expect(within(banner).getByText("Operator review")).toBeTruthy();
+    const view = within(container);
+    // PR #548 is an isAction card, so laneFor() promotes it into the
+    // (expanded) needs-attention lane.
+    expect(view.getByText("Allow operator override of agent claim-stake floor")).toBeTruthy();
+    expect(view.getByText("Approve & merge")).toBeTruthy();
+    expect(view.getByText("Hermes verdict")).toBeTruthy();
   });
 
-  test("the Done lane reflects the release-history fixture count", () => {
+  test("renders a spread of card types (mission, deploy, done)", () => {
     const { container } = render(<MonitorPage />);
-    // 11 done-history fixtures → the calm banner reports them shipped.
-    expect(within(container).getByText(/11 card\(s\) shipped today/)).toBeTruthy();
+    const view = within(container);
+    // Mission card (hermes-checking lane, expanded)
+    expect(view.getByText("Verify onboarding flow on staging.averray.com")).toBeTruthy();
+    // Deploy card (deploying lane, expanded)
+    expect(view.getByText(/Post-merge verify/)).toBeTruthy();
+    // Done history cards render with CLOSED freshness pips
+    expect(view.getAllByText("CLOSED").length).toBeGreaterThan(0);
+  });
+
+  test("collapsed lanes hide their card bodies (drafts is a mini-rail)", () => {
+    const { container } = render(<MonitorPage />);
+    // The draft PR #550 lives in the collapsed drafts lane, so its title
+    // is not in the DOM until the lane is expanded.
+    expect(within(container).queryByText(/governance dispute UI/)).toBeNull();
   });
 });

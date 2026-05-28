@@ -1,22 +1,22 @@
-// Hermes Handoff Monitor — board page (M3')
+// Hermes Handoff Monitor — board page (M4')
 //
 // Composes the Direction A layout against fixtures and renders the
-// calm / "you're done for now" state (artboard A5): every live lane
-// collapses to a mini-rail, only Done stays expanded, and the BoardNow
-// banner reads the calm prose.
+// rich-mix board (artboard A1): every card type and state is on screen,
+// dispatched through <CardRouter> so degraded cards never masquerade as
+// fresh ones.
 //
 //   <div.hm-board>
 //     <TopStrip />               KPI pills + LIVE indicator + refresh
-//     <BoardNowBanner />         sage calm hero sentence
+//     <BoardNowBanner />         hero sentence (tone follows board mode)
 //     <div.hm-main>              grid: lanes-wrap | hermes rail (420px)
 //       <div.hm-lanes-wrap>
 //         <LanesBar />           search + filter chips + urgency label
-//         <Board />              the eight lanes (mini-rails + Done)
+//         <Board renderCard />   the eight lanes, cards via <CardRouter>
 //       <aside.hm-hermes>        co-pilot rail chrome (full rail = M8')
 //
 // What's deferred, by milestone:
-//   - card bodies inside lanes → M4' (the <Card> vocabulary)
 //   - live SSE data + real refresh → M5'
+//   - the detail drawer (card click) → M6'
 //   - the working Hermes co-pilot rail → M8'
 //
 // Auth is handled at the edge (Cloudflare Access), so there is no
@@ -29,14 +29,29 @@ import type { BoardCard } from "./lib/monitor/card-types.js";
 import { TopStrip } from "./components/TopStrip.js";
 import { BoardNowBanner } from "./components/BoardNowBanner.js";
 import { LanesBar } from "./components/LanesBar.js";
-import { Board, CALM_EXPANDED } from "./components/Board.js";
+import { Board } from "./components/Board.js";
+import type { LaneId } from "./components/Lane.js";
+import { CardRouter } from "./components/cards/CardRouter.js";
+
+// Expansion preset for the rich-mix demo. Note `laneFor()` promotes
+// every `isAction` card into needs-attention, so that lane (not
+// operator-review) holds the action cards — expand it so the action
+// treatment (verdict + CTA) is on screen. M5' will derive the preset
+// from live board mode.
+const RICH_MIX_EXPANDED: ReadonlySet<LaneId> = new Set<LaneId>([
+  "needs-attention",
+  "hermes-checking",
+  "release-queue",
+  "deploying",
+  "done",
+]);
 
 export function MonitorPage() {
-  // Calm / A5 state: only the day's release history exists — every live
-  // lane is empty. Reading against fixtures (rather than an empty list)
-  // proves the data pipeline end-to-end: counts, banner prose, and lane
-  // grouping all derive from real card shapes.
-  const cards: BoardCard[] = useMemo(() => FIXTURE_CARDS.filter((c) => c.lane === "done"), []);
+  // Rich-mix / A1 state: the full fixture board (PR, mission, task,
+  // deploy, draft, done) so every card type and state is exercised.
+  // M5' swaps fixtures for the live SSE feed and drives the expansion
+  // preset off board mode.
+  const cards: BoardCard[] = useMemo(() => FIXTURE_CARDS, []);
   const nowLabel = useMemo(() => buildNowLabel(), []);
 
   const state = useMemo(
@@ -53,7 +68,11 @@ export function MonitorPage() {
       <div className="hm-main">
         <div className="hm-lanes-wrap">
           <LanesBar counts={state.counts} mode={state.mode} />
-          <Board grouped={state.grouped} initialExpanded={CALM_EXPANDED} />
+          <Board
+            grouped={state.grouped}
+            initialExpanded={RICH_MIX_EXPANDED}
+            renderCard={(card) => <CardRouter key={card.id} card={card} />}
+          />
         </div>
 
         <HermesRailPlaceholder />
