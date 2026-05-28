@@ -10,7 +10,14 @@ import {
   cardId,
   toBoardCard,
   buildV2BoardSnapshot,
+  isCriticalFile,
+  mapChecks,
+  mapFiles,
+  indexRawSummaries,
+  indexCodexTasks,
+  enrichBoardCard,
 } from "../../services/slack-operator/src/monitor-v2.js";
+import type { BoardCard } from "../../services/slack-operator/src/monitor-v2.js";
 import type { HermesBoardCardSnapshot } from "../../services/slack-operator/src/monitor-hermes-voice.js";
 
 function slim(overrides: Partial<HermesBoardCardSnapshot> = {}): HermesBoardCardSnapshot {
@@ -263,5 +270,228 @@ describe("buildV2BoardSnapshot", () => {
   it("includes the configured repo on the envelope", () => {
     const snap = buildV2BoardSnapshot({ active: [], recent: [] }, { repo: "depre-dev/site" });
     expect(snap.repo).toBe("depre-dev/site");
+  });
+});
+
+// ── Enrichment ──────────────────────────────────────────────────────
+
+describe("isCriticalFile", () => {
+  it("flags secrets, env, migrations, contracts, .sol", () => {
+    expect(isCriticalFile("ops/secrets.yml")).toBe(true);
+    expect(isCriticalFile(".env")).toBe(true);
+    expect(isCriticalFile("config/.env.prod")).toBe(true);
+    expect(isCriticalFile("db/0042_migration.sql")).toBe(true);
+    expect(isCriticalFile("contracts/Foo.sol")).toBe(true);
+    expect(isCriticalFile("agent/Token.sol")).toBe(true);
+  });
+  it("treats ordinary files as non-critical", () => {
+    expect(isCriticalFile("docs/readme.md")).toBe(false);
+    expect(isCriticalFile("packages/monitor-ui/src/App.tsx")).toBe(false);
+  });
+});
+
+describe("mapChecks", () => {
+  it("maps githubLive.checkTotals to the UI shape", () => {
+    const summary = {
+      githubLive: { checkTotals: { total: 6, passed: 5, failed: 0, active: 1, neutral: 0 } },
+    };
+    expect(mapChecks(summary)).toEqual({ pass: 5, running: 1, fail: 0, pending: 0, total: 6 });
+  });
+  it("maps neutral → pending and failed → fail", () => {
+    const summary = {
+      githubLive: { checkTotals: { total: 7, passed: 4, failed: 2, active: 0, neutral: 1 } },
+    };
+    expect(mapChecks(summary)).toEqual({ pass: 4, running: 0, fail: 2, pending: 1, total: 7 });
+  });
+  it("returns undefined when there are no checks (no totals / zero total)", () => {
+    expect(mapChecks(undefined)).toBeUndefined();
+    expect(mapChecks({})).toBeUndefined();
+    expect(mapChecks({ githubLive: {} })).toBeUndefined();
+    expect(mapChecks({ githubLive: { checkTotals: { total: 0 } } })).toBeUndefined();
+  });
+});
+
+describe("mapFiles", () => {
+  it("maps touchedFiles to path + critical (diff left empty)", () => {
+    const summary = {
+      reviewSignals: {
+        touchedFiles: [
+          { path: "contracts/AgentAccountCore.sol", area: "contracts" },
+          { path: "ops/deploy.staging.yml", area: "ops" },
+          { path: "docs/operator/claim-stake.md", area: "docs" },
+        ],
+      },
+    };
+    expect(mapFiles(summary)).toEqual([
+      { path: "contracts/AgentAccountCore.sol", diff: "", critical: true },
+      { path: "ops/deploy.staging.yml", diff: "", critical: false },
+      { path: "docs/operator/claim-stake.md", diff: "", critical: false },
+    ]);
+  });
+  it("skips entries without a path and returns [] when absent", () => {
+    expect(mapFiles(undefined)).toEqual([]);
+    expect(mapFiles({ reviewSignals: { touchedFiles: [{ area: "ops" }, { path: "" }] } })).toEqual([]);
+  });
+});
+
+describe("indexRawSummaries", () => {
+  it("indexes active + recent items by <repo>#<number>", () => {
+    const raw = {
+      active: [{ summary: { pullRequest: { repo: "depre-dev/agent", number: 548 }, foo: 1 } }],
+      recent: [{ summary: { currentPullRequest: { repo: "depre-dev/site", number: 547 }, bar: 2 } }],
+    };
+    const index = indexRawSummaries(raw);
+    expect(index.get("depre-dev/agent#548")).toMatchObject({ foo: 1 });
+    expect(index.get("depre-dev/site#547")).toMatchObject({ bar: 2 });
+  });
+  it("falls back to item-level repo + pullRequestNumber", () => {
+    const raw = { active: [{ repo: "depre-dev/agent", pullRequestNumber: 999, summary: { z: 3 } }] };
+    expect(indexRawSummaries(raw).get("depre-dev/agent#999")).toMatchObject({ z: 3 });
+  });
+  it("returns an empty map for a non-record snapshot", () => {
+    expect(indexRawSummaries(undefined).size).toBe(0);
+    expect(indexRawSummaries("nope").size).toBe(0);
+  });
+});
+
+describe("indexCodexTasks", () => {
+  it("indexes codexTasks.items by <repo>#<number>", () => {
+    const raw = {
+      codexTasks: {
+        items: [
+          { repo: "depre-dev/agent", pullRequestNumber: 100, prompt: "do the thing" },
+          { repo: "depre-dev/agent", pullRequestNumber: 101, prompt: "other" },
+        ],
+      },
+    };
+    const index = indexCodexTasks(raw);
+    expect(index.get("depre-dev/agent#100")).toMatchObject({ prompt: "do the thing" });
+    expect(index.get("depre-dev/agent#101")).toMatchObject({ prompt: "other" });
+  });
+  it("returns an empty map when codexTasks is absent", () => {
+    expect(indexCodexTasks({}).size).toBe(0);
+  });
+});
+
+describe("enrichBoardCard", () => {
+  function base(overrides: Partial<BoardCard> = {}): BoardCard {
+    return {
+      id: "agent #548",
+      lane: "operator-review",
+      type: "pr",
+      agentType: "codex",
+      title: "T",
+      summary: "S",
+      repo: "depre-dev/agent",
+      freshness: 4,
+      state: "fresh",
+      risk: [],
+      waitingOn: { actor: "operator", tone: "warn" },
+      ...overrides,
+    };
+  }
+
+  it("adds checks + files to a live (non-done) card", () => {
+    const card = enrichBoardCard(base(), slim(), {
+      summary: {
+        githubLive: { checkTotals: { total: 6, passed: 5, failed: 0, active: 1, neutral: 0 } },
+        reviewSignals: { touchedFiles: [{ path: "contracts/Foo.sol" }] },
+      },
+    });
+    expect(card.checks).toEqual({ pass: 5, running: 1, fail: 0, pending: 0, total: 6 });
+    expect(card.files).toEqual([{ path: "contracts/Foo.sol", diff: "", critical: true }]);
+  });
+
+  it("does NOT add checks / files to done cards (compressed layout)", () => {
+    const card = enrichBoardCard(base({ type: "done", lane: "done" }), slim({ lane: "Done" }), {
+      summary: {
+        githubLive: { checkTotals: { total: 6, passed: 6, failed: 0, active: 0, neutral: 0 } },
+        reviewSignals: { touchedFiles: [{ path: "docs/x.md" }] },
+      },
+    });
+    expect(card.checks).toBeUndefined();
+    expect(card.files).toBeUndefined();
+  });
+
+  it("sets mergeStatus / closedAt / verdictText on done cards", () => {
+    const card = enrichBoardCard(
+      base({ type: "done", lane: "done", verdict: "merged" }),
+      slim({ lane: "Done", verdict: "merged" }),
+      {
+        summary: {
+          currentPullRequest: { repo: "depre-dev/agent", number: 546, merged: true, updatedAt: "2026-05-27T16:28:00Z" },
+        },
+      }
+    );
+    expect(card.mergeStatus).toBe("MERGED");
+    expect(card.closedAt).toBe("2026-05-27T16:28:00Z");
+    expect(card.verdictText).toBe("merged");
+  });
+
+  it("marks an unmerged closed PR as CLOSED", () => {
+    const card = enrichBoardCard(base({ type: "done", lane: "done" }), slim({ lane: "Done" }), {
+      summary: { currentPullRequest: { merged: false } },
+    });
+    expect(card.mergeStatus).toBe("CLOSED");
+  });
+
+  it("adds Codex task detail + runner liveness to task cards", () => {
+    const card = enrichBoardCard(base({ type: "task", lane: "codex-needed" }), slim({ lane: "Codex Needed" }), {
+      codexTask: {
+        id: "task-1",
+        prompt: "Coalesce repeated policy-attach entries",
+        stdoutTail: "ran ok",
+        failureReason: undefined,
+      },
+      runner: { status: "running", updatedAt: "2026-05-28T12:00:00Z", activeTaskId: "task-1" },
+    });
+    expect(card.prompt).toMatch(/Coalesce/);
+    expect(card.output).toBe("ran ok");
+    expect(card.runnerHeartbeat).toEqual({ lastSeen: "2026-05-28T12:00:00Z", online: true });
+  });
+
+  it("falls back to completionSummary for output and marks a stopped runner offline", () => {
+    const card = enrichBoardCard(base({ type: "task", lane: "codex-needed" }), slim({ lane: "Codex Needed" }), {
+      codexTask: { id: "task-2", prompt: "p", completionSummary: "done summary" },
+      runner: { status: "disabled", updatedAt: "2026-05-28T12:00:00Z" },
+    });
+    expect(card.output).toBe("done summary");
+    expect(card.runnerHeartbeat).toEqual({ lastSeen: "2026-05-28T12:00:00Z", online: false });
+  });
+
+  it("is a no-op when no enrichment context is present", () => {
+    const card = enrichBoardCard(base(), slim(), {});
+    expect(card.checks).toBeUndefined();
+    expect(card.files).toBeUndefined();
+    expect(card.mergeStatus).toBeUndefined();
+    expect(card.prompt).toBeUndefined();
+  });
+});
+
+describe("buildV2BoardSnapshot — enrichment integration", () => {
+  it("projects githubLive checks onto a classified card", () => {
+    const raw = {
+      active: [
+        {
+          title: "Allow operator override of agent claim-stake floor",
+          status: "needs_review",
+          intent: "operator_review",
+          ageLabel: "4m",
+          summary: {
+            pullRequest: { repo: "depre-dev/agent", number: 548, state: "open" },
+            currentPullRequest: { repo: "depre-dev/agent", number: 548, state: "open" },
+            finalVerdict: "operator_review",
+            githubLive: { checkTotals: { total: 6, passed: 5, failed: 0, active: 1, neutral: 0 } },
+            reviewSignals: { touchedFiles: [{ path: "ops/deploy.staging.yml" }] },
+          },
+        },
+      ],
+      recent: [],
+    };
+    const snap = buildV2BoardSnapshot(raw, { repo: "depre-dev/agent" });
+    const card = snap.cards.find((c) => c.id === "agent #548");
+    expect(card).toBeDefined();
+    expect(card?.checks).toEqual({ pass: 5, running: 1, fail: 0, pending: 0, total: 6 });
+    expect(card?.files).toEqual([{ path: "ops/deploy.staging.yml", diff: "", critical: false }]);
   });
 });
