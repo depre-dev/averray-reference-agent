@@ -1,0 +1,126 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { cleanup, fireEvent, render, within } from "@testing-library/react";
+import { Card } from "./Card.js";
+import { FIXTURE_CARDS } from "../../lib/monitor/fixtures.js";
+import type { BoardCard, PRCard } from "../../lib/monitor/card-types.js";
+
+afterEach(cleanup);
+
+function fixture(id: string): BoardCard {
+  const card = FIXTURE_CARDS.find((c) => c.id === id);
+  if (!card) throw new Error(`fixture not found: ${id}`);
+  return card;
+}
+
+describe("Card — type coverage", () => {
+  test("PR action card: title, FRESH pip, risk pills, checks, verdict, CTA", () => {
+    const { container } = render(<Card card={fixture("agent #548")} />);
+    const view = within(container);
+    expect(view.getByText("Allow operator override of agent claim-stake floor")).toBeTruthy();
+    expect(container.querySelector(".hm-card--action")).toBeTruthy();
+    expect(view.getByText(/FRESH/)).toBeTruthy();
+    // risk pills
+    expect(view.getByText("workflow")).toBeTruthy();
+    expect(view.getByText("review-gated")).toBeTruthy();
+    // checks bar + label
+    expect(container.querySelector(".hm-checks-bar")).toBeTruthy();
+    // Hermes verdict + CTA
+    expect(view.getByText("Hermes verdict")).toBeTruthy();
+    expect(view.getByText("Approve & merge")).toBeTruthy();
+    expect(view.getByText("Send back to Codex")).toBeTruthy();
+  });
+
+  test("mission card renders its summary and checks bar", () => {
+    const { container } = render(<Card card={fixture("mission browser-onboard-04")} />);
+    const view = within(container);
+    expect(view.getByText("Verify onboarding flow on staging.averray.com")).toBeTruthy();
+    expect(view.getByText("testbed")).toBeTruthy();
+    expect(container.querySelector(".hm-checks-bar")).toBeTruthy();
+  });
+
+  test("deploy card renders its verification summary", () => {
+    const { container } = render(<Card card={fixture("deploy #246")} />);
+    const view = within(container);
+    expect(view.getByText(/Post-merge verify/)).toBeTruthy();
+    expect(view.getByText("xcm")).toBeTruthy();
+  });
+
+  test("codex task card renders without checks (no CI yet)", () => {
+    const { container } = render(<Card card={fixture("task starter-coding-014")} />);
+    const view = within(container);
+    expect(view.getByText("Reduce audit-log noise when policy auto-applies")).toBeTruthy();
+    expect(container.querySelector(".hm-checks-bar")).toBeNull();
+  });
+
+  test("draft PR shows the draft pill", () => {
+    const { container } = render(<Card card={fixture("agent #550")} />);
+    expect(within(container).getByText("draft")).toBeTruthy();
+  });
+
+  test("done/closed card: CLOSED pip, no risk pills, no checks bar", () => {
+    const done = FIXTURE_CARDS.find((c) => c.type === "done");
+    if (!done) throw new Error("no done fixture");
+    const { container } = render(<Card card={done} />);
+    expect(within(container).getByText("CLOSED")).toBeTruthy();
+    expect(container.querySelector(".hm-pillrow")).toBeNull();
+    expect(container.querySelector(".hm-checks-bar")).toBeNull();
+  });
+});
+
+describe("Card — state coverage", () => {
+  test("stale card wears is-stale, a STALE pip, and the archive hint", () => {
+    const { container } = render(<Card card={fixture("agent #542")} />);
+    const view = within(container);
+    expect(container.querySelector(".hm-card.is-stale")).toBeTruthy();
+    expect(view.getByText(/STALE/)).toBeTruthy();
+    expect(view.getByText(/archive in 4h\?/)).toBeTruthy();
+  });
+
+  test("running state renders a fresh-styled, non-stale card", () => {
+    const running: PRCard = {
+      id: "agent #560",
+      lane: "hermes-checking",
+      type: "pr",
+      agentType: "claude",
+      title: "Running CI card",
+      summary: "checks in flight",
+      repo: "depre-dev/agent",
+      freshness: 3,
+      state: "running",
+      risk: [],
+      checks: { pass: 2, running: 4, fail: 0, pending: 0, total: 6 },
+      waitingOn: { actor: "CI", tone: "info" },
+      files: [],
+    };
+    const { container } = render(<Card card={running} />);
+    expect(container.querySelector(".hm-card.is-stale")).toBeNull();
+    expect(within(container).getByText(/FRESH/)).toBeTruthy();
+    expect(container.querySelector(".running")).toBeTruthy();
+  });
+
+  test("focused prop adds is-focused", () => {
+    const { container } = render(<Card card={fixture("agent #547")} focused />);
+    expect(container.querySelector(".hm-card.is-focused")).toBeTruthy();
+  });
+});
+
+describe("Card — interactivity", () => {
+  test("with onClick: role button, fires on click, CTA buttons don't bubble", () => {
+    const onClick = vi.fn();
+    const { container } = render(<Card card={fixture("agent #548")} onClick={onClick} />);
+    const root = container.querySelector(".hm-card") as HTMLElement;
+    expect(root.getAttribute("role")).toBe("button");
+    fireEvent.click(root);
+    expect(onClick).toHaveBeenCalledTimes(1);
+
+    // Clicking the primary CTA must not also trigger the card's onClick.
+    fireEvent.click(within(container).getByText("Approve & merge"));
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  test("without onClick: role article", () => {
+    const { container } = render(<Card card={fixture("agent #547")} />);
+    expect((container.querySelector(".hm-card") as HTMLElement).getAttribute("role")).toBe("article");
+  });
+});
