@@ -1,5 +1,8 @@
 import http from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { readFile } from "node:fs/promises";
 import { logger, optionalEnv, query } from "@avg/mcp-common";
 import { createDefaultWorkflowDeps } from "@avg/averray-mcp/default-workflow-runtime";
 import { invokeAgentTask } from "@avg/averray-mcp/agent-invocation";
@@ -52,6 +55,7 @@ import {
   missionSpawnRestricted,
   parseMissionSpawnRoles,
 } from "./monitor-mission-roles.js";
+import { MONITOR_SPA_MOUNT, contentTypeFor, resolveSpaRequest } from "./monitor-spa.js";
 import {
   decideHermesBoardNarration,
   fallbackHermesBoardNarration,
@@ -109,6 +113,10 @@ const authConfig = {
 const routineConfig = parseSlackRoutineConfig(process.env, authConfig.allowedChannelIds);
 const monitorConfig = parseMonitorConfig(process.env);
 const missionSpawnRoles = parseMissionSpawnRoles(process.env);
+// The Vite-built redesigned monitor SPA, served at /monitor/next. At
+// runtime index.js lives in services/slack-operator/dist, so the bundle
+// is three levels up under packages/monitor-ui/dist.
+const MONITOR_SPA_DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../packages/monitor-ui/dist");
 const monitorNarrationMinIntervalMs = Math.max(
   5_000,
   Number.parseInt(optionalEnv("HERMES_MONITOR_NARRATION_MIN_INTERVAL_MS", "30000"), 10) || 30_000
@@ -202,6 +210,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
           "/monitor/stream",
           "/monitor/v2/board",
           "/monitor/v2/stream",
+          "/monitor/next",
           ...(isDebugSpawnEnabled() ? ["/monitor/v2/debug/spawn"] : []),
           "/monitor/command",
           "/monitor/recheck",
@@ -298,6 +307,61 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
     }
     const card = spawnDebugCard(payload, { defaultRepo: monitorV2Repo() });
     writeJson(response, 201, { ok: true, card, at: new Date().toISOString() });
+    return;
+  }
+  // Redesigned monitor SPA, served side-by-side with the legacy HTML
+  // monitor (which keeps /monitor) until the cutover. The bundle's API
+  // calls hit the absolute /monitor/v2/* routes, so it works at this
+  // mount unchanged.
+  if (request.method === "GET" && (url.pathname === MONITOR_SPA_MOUNT || url.pathname.startsWith(`${MONITOR_SPA_MOUNT}/`))) {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    const resolution = resolveSpaRequest(url.pathname);
+    if (resolution.kind === "redirect") {
+      writeRedirect(response, resolution.location);
+      return;
+    }
+    if (resolution.kind === "miss") {
+      writeJson(response, 404, { error: "not_found" });
+      return;
+    }
+    const relPath = resolution.kind === "index" ? "index.html" : resolution.relPath;
+    const filePath = path.join(MONITOR_SPA_DIST, relPath);
+    // Defense-in-depth: never read outside the bundle dir.
+    if (filePath !== MONITOR_SPA_DIST && !filePath.startsWith(MONITOR_SPA_DIST + path.sep)) {
+      writeJson(response, 403, { error: "forbidden" });
+      return;
+    }
+    try {
+      const body = await readFile(filePath);
+      const isIndex = resolution.kind === "index";
+      response.writeHead(200, {
+        "content-type": isIndex ? "text/html; charset=utf-8" : resolution.contentType,
+        // index.html must never be cached (it points at hashed assets);
+        // the hashed assets are immutable.
+        "cache-control": isIndex ? "no-cache" : "public, max-age=31536000, immutable",
+      });
+      response.end(body);
+    } catch {
+      if (resolution.kind === "index") {
+        writeHtml(
+          response,
+          200,
+          "<!doctype html><meta charset=\"utf-8\"><title>Hermes monitor</title>" +
+            "<p style=\"font-family:system-ui;padding:24px\">The redesigned monitor UI is not built in this image. " +
+            "Run <code>npm --workspace packages/monitor-ui run build</code>, or use the legacy monitor at " +
+            "<a href=\"/monitor\">/monitor</a>.</p>",
+        );
+      } else {
+        writeJson(response, 404, { error: "asset_not_found" });
+      }
+    }
     return;
   }
   if (request.method === "GET" && url.pathname === "/monitor/codex-tasks") {
