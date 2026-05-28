@@ -131,16 +131,18 @@ test("visibleBindings: with no options returns the full ordered list", () => {
   }
 });
 
-test("visibleBindings: wiredOnly filters to just the M1-wired shortcuts", () => {
+test("visibleBindings: wiredOnly returns only wired bindings", () => {
   const visible = visibleBindings({ wiredOnly: true });
-  // Every entry in the filtered list must have wired: true
+  // Every entry in the filtered list must have wired: true.
   for (const b of visible) {
     assert.equal(b.wired, true, `wiredOnly should filter unwired bindings: ${b.action}`);
   }
-  // And the M9 board entries (`o` and `a`) must NOT be present
   const actions = visible.map((b) => b.action);
-  assert.ok(!actions.includes("open_pr_for_focused"), "o should be filtered by wiredOnly");
-  assert.ok(!actions.includes("ask_hermes_about_focused"), "a should be filtered by wiredOnly");
+  // M10' wired the board o/a shortcuts, so they're now included…
+  assert.ok(actions.includes("open_pr_for_focused"), "o is wired in M10'");
+  assert.ok(actions.includes("ask_hermes_about_focused"), "a is wired in M10'");
+  // …while still-deferred drawer action keys remain filtered out.
+  assert.ok(!actions.includes("drawer_action_approve"), "drawer approve is still unwired");
 });
 
 // ── Specific M1 contract assertions ─────────────────────────────────
@@ -160,11 +162,19 @@ test("the eight keys wired by the prototype are all marked wired=true", () => {
   }
 });
 
-test("the M9 additions (o, a) are present but marked wired=false", () => {
+test("the board o/a shortcuts are wired in M10'", () => {
   const o = KEYBOARD_BINDINGS.find((b) => b.scope === "board" && b.key === "o");
   const a = KEYBOARD_BINDINGS.find((b) => b.scope === "board" && b.key === "a");
   assert.ok(o, "binding for 'o' must exist");
   assert.ok(a, "binding for 'a' must exist");
-  assert.equal(o.wired, false);
-  assert.equal(a.wired, false);
+  assert.equal(o.wired, true);
+  assert.equal(a.wired, true);
+});
+
+test("drawer action keys (A/B/R/M/C) remain deferred (wired=false)", () => {
+  for (const key of ["A", "B", "R", "M", "C"]) {
+    const b = KEYBOARD_BINDINGS.find((x) => x.scope === "drawer" && x.key === key);
+    assert.ok(b, `binding for drawer '${key}' must exist`);
+    assert.equal(b.wired, false);
+  }
 });

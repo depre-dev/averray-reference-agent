@@ -52,23 +52,43 @@ export const ACTION_EXPANDED: ReadonlySet<LaneId> = new Set<LaneId>([
 export type BoardProps = {
   /** Lane → card[] grouping from `groupByLane(cards)`. */
   grouped: Record<LaneKey, BoardCard[]>;
-  /** Lanes that should render expanded (rest collapse to mini-rails). */
+  /** Initial expansion when Board is uncontrolled. */
   initialExpanded?: ReadonlySet<LaneId>;
+  /** Controlled expansion. When provided, Board defers to the parent
+   *  (pair with onToggleLane) — used for keyboard spotlight (M10'). */
+  expanded?: ReadonlySet<LaneId>;
+  /** Toggle handler when controlled. */
+  onToggleLane?: (id: LaneId) => void;
   /** Optional renderer for a single card. M4' supplies the card components. */
   renderCard?: (card: BoardCard) => ReactNode;
 };
 
-export function Board({ grouped, initialExpanded = DEFAULT_EXPANDED, renderCard }: BoardProps) {
-  const [expanded, setExpanded] = useState<Set<LaneId>>(() => new Set(initialExpanded));
+export function Board({
+  grouped,
+  initialExpanded = DEFAULT_EXPANDED,
+  expanded: controlledExpanded,
+  onToggleLane,
+  renderCard,
+}: BoardProps) {
+  const [internalExpanded, setInternalExpanded] = useState<Set<LaneId>>(() => new Set(initialExpanded));
+  const isControlled = controlledExpanded !== undefined;
+  const expanded = isControlled ? controlledExpanded : internalExpanded;
 
-  const onToggle = useCallback((id: LaneId) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  const onToggle = useCallback(
+    (id: LaneId) => {
+      if (isControlled) {
+        onToggleLane?.(id);
+        return;
+      }
+      setInternalExpanded((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+    },
+    [isControlled, onToggleLane],
+  );
 
   return (
     <div className="hm-lanes" role="region" aria-label="Lane grid">

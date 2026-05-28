@@ -25,6 +25,8 @@ export interface CoPilotRailProps {
   onUnmute?: () => void;
   /** Whether action alerts are currently muted. */
   muted?: boolean;
+  /** Bump to focus the composer (the board's `a` shortcut). */
+  composerFocusToken?: number;
 }
 
 export function CoPilotRail({
@@ -34,6 +36,7 @@ export function CoPilotRail({
   onMute,
   onUnmute,
   muted,
+  composerFocusToken,
 }: CoPilotRailProps) {
   const { messages, ask } = useCollaboration(collaboration ?? { enabled: false });
   const relatedPr = relatedPrForCard(focusedCard);
@@ -76,6 +79,7 @@ export function CoPilotRail({
         onUnmute={onUnmute}
         muted={muted}
         focusedCardId={focusedCard?.id ?? null}
+        focusToken={composerFocusToken}
       />
     </aside>
   );

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, test } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import { LanesBar } from "./LanesBar.js";
 import type { KPICounts } from "../lib/monitor/board-state.js";
 
@@ -18,13 +18,23 @@ const counts: KPICounts = {
 };
 
 describe("LanesBar", () => {
-  test("renders a disabled, read-only search input with the / hint", () => {
+  test("read-only search input (no handler) with the / hint", () => {
     const { container, getByText } = render(<LanesBar counts={counts} mode="calm" />);
     const input = container.querySelector(".hm-search input") as HTMLInputElement;
     expect(input).toBeTruthy();
-    expect(input.disabled).toBe(true);
-    expect(input.readOnly).toBe(true);
+    expect(input.readOnly).toBe(true); // no onSearchChange → read-only
     expect(getByText("/")).toBeTruthy();
+  });
+
+  test("an interactive search input reports changes", () => {
+    const onSearchChange = vi.fn();
+    const { container } = render(
+      <LanesBar counts={counts} mode="calm" searchValue="" onSearchChange={onSearchChange} />,
+    );
+    const input = container.querySelector(".hm-search input") as HTMLInputElement;
+    expect(input.readOnly).toBe(false);
+    fireEvent.change(input, { target: { value: "xcm" } });
+    expect(onSearchChange).toHaveBeenCalledWith("xcm");
   });
 
   test("tip text follows board mode", () => {

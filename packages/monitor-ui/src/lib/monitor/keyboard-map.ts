@@ -38,12 +38,12 @@ export const KEYBOARD_BINDINGS: readonly ShortcutBinding[] = Object.freeze([
   { key: "Enter", action: "open_drawer_for_focused", label: "open focused card", scope: "board", wired: true },
   { key: "f", action: "spotlight_focused_lane", label: "focus / spotlight lane", scope: "board", wired: true },
   // M10' additions
-  { key: "o", action: "open_pr_for_focused", label: "open PR on GitHub", scope: "board", wired: false },
-  { key: "a", action: "ask_hermes_about_focused", label: "ask Hermes about focused card", scope: "board", wired: false },
+  { key: "o", action: "open_pr_for_focused", label: "open PR on GitHub", scope: "board", wired: true },
+  { key: "a", action: "ask_hermes_about_focused", label: "ask Hermes about focused card", scope: "board", wired: true },
 
   // Drawer
-  { key: "j", action: "drawer_next_card", label: "next card (in drawer)", scope: "drawer", wired: false },
-  { key: "k", action: "drawer_prev_card", label: "previous card (in drawer)", scope: "drawer", wired: false },
+  { key: "j", action: "drawer_next_card", label: "next card (in drawer)", scope: "drawer", wired: true },
+  { key: "k", action: "drawer_prev_card", label: "previous card (in drawer)", scope: "drawer", wired: true },
   { key: "Enter", action: "drawer_primary_action", label: "trigger primary action", scope: "drawer", wired: false },
   { key: "A", action: "drawer_action_approve", label: "approve", scope: "drawer", wired: false },
   { key: "B", action: "drawer_action_send_back", label: "send back to Codex", scope: "drawer", wired: false },
@@ -52,7 +52,7 @@ export const KEYBOARD_BINDINGS: readonly ShortcutBinding[] = Object.freeze([
   { key: "C", action: "drawer_copy_report", label: "copy report", scope: "drawer", wired: false },
 
   // Hermes co-pilot composer
-  { key: "Enter", action: "hermes_send_message", label: "send message", scope: "hermes", wired: false },
+  { key: "Enter", action: "hermes_send_message", label: "send message", scope: "hermes", wired: true },
   { key: "ArrowUp", action: "hermes_history_prev", label: "previous question", scope: "hermes", wired: false },
   { key: "ArrowDown", action: "hermes_history_next", label: "next question", scope: "hermes", wired: false },
 ]);
