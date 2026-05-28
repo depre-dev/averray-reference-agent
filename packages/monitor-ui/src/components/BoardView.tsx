@@ -19,12 +19,14 @@ import { useMemo } from "react";
 import { deriveBoardState, type BoardMode } from "../lib/monitor/board-state.js";
 import type { MonitorBoard } from "../lib/monitor/board-cache.js";
 import type { StreamStatus } from "../lib/monitor/live-stream.js";
+import { LANES, type BoardCard } from "../lib/monitor/card-types.js";
 import { TopStrip } from "./TopStrip.js";
 import { BoardNowBanner } from "./BoardNowBanner.js";
 import { LanesBar } from "./LanesBar.js";
 import { Board, CALM_EXPANDED, DEFAULT_EXPANDED } from "./Board.js";
 import type { LaneId } from "./Lane.js";
 import { CardRouter } from "./cards/CardRouter.js";
+import { DetailDrawer } from "./drawer/DetailDrawer.js";
 
 // laneFor() promotes every isAction card into needs-attention, so the
 // action preset expands that lane (not operator-review) to keep the
@@ -48,9 +50,25 @@ export interface BoardViewProps {
   status: StreamStatus;
   /** Refresh handler (the top-strip Refresh button). */
   onRefresh?: () => void;
+  /** Focused card id (drives the detail drawer); null/undefined = closed. */
+  focusedCardId?: string | null;
+  /** A card was clicked — open its drawer (sets ?card=). */
+  onCardClick?: (id: string) => void;
+  /** Close the drawer (esc / scrim). */
+  onCardClose?: () => void;
+  /** j/k traversal target within the drawer. */
+  onCardNavigate?: (id: string) => void;
 }
 
-export function BoardView({ board, status, onRefresh }: BoardViewProps) {
+export function BoardView({
+  board,
+  status,
+  onRefresh,
+  focusedCardId,
+  onCardClick,
+  onCardClose,
+  onCardNavigate,
+}: BoardViewProps) {
   // The stream is "degraded" only on a real drop (reconnecting/closed);
   // idle/connecting are pre-live transients, not disconnections. The
   // LIVE indicator, by contrast, only lights on a confirmed open stream.
@@ -68,6 +86,14 @@ export function BoardView({ board, status, onRefresh }: BoardViewProps) {
       }),
     [cards, streamOnline, liveLabel],
   );
+
+  // Cards in display (lane) order — the traversal list for the drawer's
+  // j/k, and the lookup for the focused card.
+  const orderedCards = useMemo<BoardCard[]>(
+    () => LANES.flatMap((lane) => state.grouped[lane] ?? []),
+    [state.grouped],
+  );
+  const focusedCard = focusedCardId ? orderedCards.find((c) => c.id === focusedCardId) : undefined;
 
   return (
     <div className="hm-board">
@@ -91,12 +117,27 @@ export function BoardView({ board, status, onRefresh }: BoardViewProps) {
             key={state.mode}
             grouped={state.grouped}
             initialExpanded={expandedForMode(state.mode)}
-            renderCard={(card) => <CardRouter key={card.id} card={card} />}
+            renderCard={(card) => (
+              <CardRouter
+                key={card.id}
+                card={card}
+                onClick={onCardClick ? (c) => onCardClick(c.id) : undefined}
+              />
+            )}
           />
         </div>
 
         <HermesRailPlaceholder />
       </div>
+
+      {focusedCard ? (
+        <DetailDrawer
+          card={focusedCard}
+          cards={orderedCards}
+          onClose={() => onCardClose?.()}
+          onNavigate={(id) => onCardNavigate?.(id)}
+        />
+      ) : null}
     </div>
   );
 }
