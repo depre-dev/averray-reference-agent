@@ -27,6 +27,7 @@ import type { UseCollaborationOptions } from "./hooks/useCollaboration.js";
 import { useActionAlerts, type UseActionAlertsOptions } from "./hooks/useActionAlerts.js";
 import { kpiCounts } from "./lib/monitor/board-state.js";
 import { BoardView } from "./components/BoardView.js";
+import { ErrorBoundary } from "./components/ErrorBoundary.js";
 
 const MISSIONS_URL = "/monitor/testbed-missions";
 
@@ -55,20 +56,22 @@ export function MonitorPage({
   const { muted, mute, unmute } = useActionAlerts(actionCount, alerts);
 
   return (
-    <BoardView
-      board={board}
-      status={status}
-      onRefresh={refresh}
-      focusedCardId={cardId}
-      onCardClick={setCard}
-      onCardClose={clearCard}
-      onCardNavigate={setCard}
-      onSpawnMission={onSpawnMission}
-      collaboration={collaboration}
-      onMute={mute}
-      onUnmute={unmute}
-      muted={muted}
-    />
+    <ErrorBoundary>
+      <BoardView
+        board={board}
+        status={status}
+        onRefresh={refresh}
+        focusedCardId={cardId}
+        onCardClick={setCard}
+        onCardClose={clearCard}
+        onCardNavigate={setCard}
+        onSpawnMission={onSpawnMission}
+        collaboration={collaboration}
+        onMute={mute}
+        onUnmute={unmute}
+        muted={muted}
+      />
+    </ErrorBoundary>
   );
 }
 

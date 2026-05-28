@@ -1997,3 +1997,28 @@ body { margin: 0; }
   background: var(--hm-rail);
   border-radius: 4px;
 }
+
+/* ── M11' accessibility pass (§14) ──────────────────────────────────
+   Appended to the verbatim bundle CSS: the design prototype shipped no
+   focus-visible ring and no screen-reader utility, both of which the
+   WCAG AA pass requires. */
+
+/* Visible keyboard focus everywhere: sage 2px ring at 2px offset. */
+.hm-board :is(button, a, input, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--hm-sage);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Screen-reader-only: present to assistive tech, invisible on screen. */
+.hm-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

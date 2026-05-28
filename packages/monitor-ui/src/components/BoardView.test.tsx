@@ -65,12 +65,14 @@ describe("BoardView — rich-mix board (open stream)", () => {
 });
 
 describe("BoardView — degraded + transient states", () => {
-  test("a reconnecting stream renders the degraded banner and a dimmed LIVE", () => {
+  test("a reconnecting stream swaps in the degraded top strip + UNTRUSTED banner", () => {
     const { container, getByText } = render(<BoardView board={richBoard} status="reconnecting" />);
+    // BoardNow banner goes degraded…
     expect(container.querySelector(".hm-now--degraded")).toBeTruthy();
-    expect(getByText(/Live stream disconnected/)).toBeTruthy();
-    // LIVE indicator only lights on a confirmed open stream.
-    expect(getByText(/Live · —/)).toBeTruthy();
+    // …and the top strip swaps to the §16 degraded header.
+    expect(container.querySelector(".hm-top--degraded")).toBeTruthy();
+    expect(getByText("Hermes — degraded mode")).toBeTruthy();
+    expect(getByText("UNTRUSTED")).toBeTruthy();
   });
 
   test("a closed stream is degraded too", () => {
