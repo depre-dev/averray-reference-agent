@@ -52,6 +52,32 @@ export interface WaitingOn {
   tone: "warn" | "info" | "neutral";
 }
 
+/** CI check rollup for the card's checks bar. Mirrors the UI CardChecks. */
+export interface CardChecks {
+  pass: number;
+  running: number;
+  fail: number;
+  pending: number;
+  total: number;
+}
+
+/**
+ * One changed file + its risk classification. `diff` is the "+N -M" line;
+ * it is left empty when the upstream review signal didn't capture
+ * additions/deletions (the monitor fetch keeps only the filename).
+ */
+export interface CardFile {
+  path: string;
+  diff: string;
+  critical: boolean;
+}
+
+/** Codex runner liveness for a task card. */
+export interface CardRunnerHeartbeat {
+  lastSeen: string;
+  online: boolean;
+}
+
 export interface BoardCard {
   id: string;
   lane: Lane;
@@ -72,6 +98,33 @@ export interface BoardCard {
   next?: string;
   /** Hermes verdict / reasoning carried from the classifier. */
   verdict?: string;
+
+  // ── Enriched fields ─────────────────────────────────────────────
+  // Populated by enrichBoardCard() from the raw monitor snapshot.
+  // All optional and omitted when the underlying real data isn't
+  // present, so a card never claims detail it doesn't actually have.
+  /** CI checks rollup (non-done cards, when GitHub checks were fetched). */
+  checks?: CardChecks;
+  /** Changed files + risk flags (non-done cards). */
+  files?: CardFile[];
+  /** Done cards: merged vs. closed-without-merge. */
+  mergeStatus?: "MERGED" | "CLOSED";
+  /**
+   * Done cards: when the PR last changed. This is the PR's updatedAt —
+   * the monitor PR state doesn't carry an exact merged/closed timestamp,
+   * and for a terminal PR updatedAt is the closest real signal.
+   */
+  closedAt?: string;
+  /** Done cards: short verdict line ("merged" / "closed"). */
+  verdictText?: string;
+  /** Codex task cards: the dispatched prompt. */
+  prompt?: string;
+  /** Codex task cards: tail of stdout / completion summary. */
+  output?: string;
+  /** Codex task cards: failure reason when the task failed. */
+  failureReason?: string;
+  /** Codex task cards: runner liveness. */
+  runnerHeartbeat?: CardRunnerHeartbeat;
 }
 
 export interface BoardSnapshotV2 {
@@ -257,9 +310,218 @@ export function toBoardCard(item: HermesBoardCardSnapshot): BoardCard {
   return card;
 }
 
+// ── Card enrichment ─────────────────────────────────────────────────
+//
+// The slim classified card (HermesBoardCardSnapshot) drops the rich
+// per-PR detail that the raw monitor snapshot already carries on each
+// item's `summary` (githubLive check totals, reviewSignals touched
+// files, the PR merge state) and on the top-level `codexTasks`. The
+// redesigned UI can render all of it. We project that already-fetched
+// data onto the BoardCard here — zero new network calls — so the live
+// board shows real checks bars, file lists, merge verdicts, and Codex
+// task detail instead of bare cards.
+//
+// Everything is best-effort + defensive: the raw snapshot is `unknown`,
+// so each field is guarded and simply omitted when absent.
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function asFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * High-risk file predicate. Mirrors the "high" branch of
+ * github-pr-state.ts `highRiskForFile` (which is module-private), so the
+ * `critical` flag on a card file matches the review-gating logic.
+ */
+export function isCriticalFile(path: string): boolean {
+  const p = path.toLowerCase();
+  return (
+    p.includes("secret") ||
+    p.endsWith(".env") ||
+    p.includes(".env.") ||
+    p.includes("migration") ||
+    p.startsWith("contracts/") ||
+    p.endsWith(".sol")
+  );
+}
+
+/**
+ * Map a raw item `summary.githubLive.checkTotals`
+ * ({total,passed,failed,active,neutral}) to the UI CardChecks shape.
+ * Returns undefined when there are no checks to show (no totals object,
+ * or a zero total) so we don't render an empty "0/0" bar.
+ */
+export function mapChecks(summary: Record<string, unknown> | undefined): CardChecks | undefined {
+  const githubLive = asRecord(summary?.githubLive);
+  const totals = asRecord(githubLive?.checkTotals);
+  if (!totals) return undefined;
+  const total = asFiniteNumber(totals.total);
+  if (total === undefined || total <= 0) return undefined;
+  return {
+    pass: asFiniteNumber(totals.passed) ?? 0,
+    running: asFiniteNumber(totals.active) ?? 0,
+    fail: asFiniteNumber(totals.failed) ?? 0,
+    pending: asFiniteNumber(totals.neutral) ?? 0,
+    total,
+  };
+}
+
+/**
+ * Map a raw item `summary.reviewSignals.touchedFiles` ([{path,area}]) to
+ * the UI CardFile shape. `diff` is left empty: the monitor file fetch
+ * keeps only the filename, not additions/deletions.
+ */
+export function mapFiles(summary: Record<string, unknown> | undefined): CardFile[] {
+  const reviewSignals = asRecord(summary?.reviewSignals);
+  const touched = asArray(reviewSignals?.touchedFiles);
+  const files: CardFile[] = [];
+  for (const entry of touched) {
+    const file = asRecord(entry);
+    const path = asString(file?.path);
+    if (!path) continue;
+    files.push({ path, diff: "", critical: isCriticalFile(path) });
+  }
+  return files;
+}
+
+/** Stable per-PR correlation key: `<full-repo>#<number>`. */
+function prKey(repo: string | undefined, number: number | undefined): string | undefined {
+  if (!repo || typeof number !== "number" || !Number.isFinite(number)) return undefined;
+  return `${repo}#${number}`;
+}
+
+/**
+ * Index every raw monitor item (active + recent) by its PR key so a
+ * classified card can find its source `summary`. github-live entries
+ * carry the rich `githubLive`/`reviewSignals`/`currentPullRequest`
+ * detail we want to project.
+ */
+export function indexRawSummaries(rawSnapshot: unknown): Map<string, Record<string, unknown>> {
+  const root = asRecord(rawSnapshot);
+  const map = new Map<string, Record<string, unknown>>();
+  if (!root) return map;
+  for (const entry of [...asArray(root.active), ...asArray(root.recent)]) {
+    const item = asRecord(entry);
+    const summary = asRecord(item?.summary);
+    if (!summary) continue;
+    const pr = asRecord(summary.pullRequest) ?? asRecord(summary.currentPullRequest);
+    const keys = [
+      prKey(asString(pr?.repo), asFiniteNumber(pr?.number)),
+      prKey(asString(item?.repo), asFiniteNumber(item?.pullRequestNumber)),
+    ];
+    for (const key of keys) {
+      if (key && !map.has(key)) map.set(key, summary);
+    }
+  }
+  return map;
+}
+
+/** Index Codex tasks by their PR key for task-card enrichment. */
+export function indexCodexTasks(rawSnapshot: unknown): Map<string, Record<string, unknown>> {
+  const root = asRecord(rawSnapshot);
+  const codexTasks = asRecord(root?.codexTasks);
+  const map = new Map<string, Record<string, unknown>>();
+  for (const entry of asArray(codexTasks?.items)) {
+    const task = asRecord(entry);
+    const key = prKey(asString(task?.repo), asFiniteNumber(task?.pullRequestNumber));
+    if (key && !map.has(key)) map.set(key, task!);
+  }
+  return map;
+}
+
+function readRunner(rawSnapshot: unknown): Record<string, unknown> | undefined {
+  return asRecord(asRecord(asRecord(rawSnapshot)?.codexTasks)?.runner);
+}
+
+export interface EnrichmentContext {
+  /** The raw monitor item `summary` correlated to this card, if any. */
+  summary?: Record<string, unknown>;
+  /** The Codex task correlated to this card, if any. */
+  codexTask?: Record<string, unknown>;
+  /** The Codex runner heartbeat (global), if any. */
+  runner?: Record<string, unknown>;
+}
+
+/**
+ * Enrich a slim BoardCard with the rich detail already present in the
+ * raw monitor snapshot. Mutates and returns the card. Honest by
+ * construction: every field is omitted when its real source is absent.
+ */
+export function enrichBoardCard(
+  card: BoardCard,
+  item: HermesBoardCardSnapshot,
+  ctx: EnrichmentContext
+): BoardCard {
+  const { summary } = ctx;
+  const isDone = card.type === "done";
+
+  // Checks + files: live (non-done) cards only. Done cards render in the
+  // compressed historical layout (no checks bar / file list), matching
+  // the design.
+  if (summary && !isDone) {
+    const checks = mapChecks(summary);
+    if (checks) card.checks = checks;
+    const files = mapFiles(summary);
+    if (files.length > 0) card.files = files;
+  }
+
+  // Done cards: merge verdict + close timestamp from the PR state.
+  if (isDone && summary) {
+    const pr = asRecord(summary.currentPullRequest) ?? asRecord(summary.pullRequest);
+    if (pr) {
+      if (typeof pr.merged === "boolean") {
+        card.mergeStatus = pr.merged ? "MERGED" : "CLOSED";
+      }
+      const updatedAt = asString(pr.updatedAt);
+      if (updatedAt) card.closedAt = updatedAt;
+    }
+    const verdictText = card.verdict ?? item.verdict;
+    if (verdictText) card.verdictText = verdictText;
+  }
+
+  // Codex task cards: prompt / output / failure / runner liveness.
+  if (card.type === "task" && ctx.codexTask) {
+    const task = ctx.codexTask;
+    const prompt = asString(task.prompt);
+    if (prompt) card.prompt = prompt;
+    const output = asString(task.stdoutTail) ?? asString(task.completionSummary);
+    if (output) card.output = output;
+    const failureReason = asString(task.failureReason);
+    if (failureReason) card.failureReason = failureReason;
+    const runner = ctx.runner;
+    if (runner) {
+      const lastSeen = asString(runner.updatedAt);
+      const status = asString(runner.status);
+      if (lastSeen) {
+        card.runnerHeartbeat = {
+          lastSeen,
+          online: status === "running" || status === "idle",
+        };
+      }
+    }
+  }
+
+  return card;
+}
+
 /**
  * Build the full v2 board snapshot from the raw monitor snapshot.
- * Reuses the existing classifier, then enriches every card.
+ * Reuses the existing classifier, then enriches every card with the
+ * rich detail the raw snapshot already carries (zero new network calls).
  *
  * @param rawSnapshot the object returned by loadMonitorSnapshot()
  * @param opts.repo   the configured AVERRAY_REPO (single-repo per §21.6)
@@ -273,7 +535,18 @@ export function buildV2BoardSnapshot(
   const classified: HermesBoardSnapshot | undefined =
     buildHermesBoardSnapshotFromMonitor(rawSnapshot);
   const items = classified?.items ?? [];
-  const cards = items.map((item) => toBoardCard(item));
+  const summaryIndex = indexRawSummaries(rawSnapshot);
+  const codexIndex = indexCodexTasks(rawSnapshot);
+  const runner = readRunner(rawSnapshot);
+  const cards = items.map((item) => {
+    const base = toBoardCard(item);
+    const key = prKey(item.repo, item.number);
+    return enrichBoardCard(base, item, {
+      summary: key ? summaryIndex.get(key) : undefined,
+      codexTask: key ? codexIndex.get(key) : undefined,
+      runner,
+    });
+  });
   return {
     cards,
     at: now().toISOString(),
