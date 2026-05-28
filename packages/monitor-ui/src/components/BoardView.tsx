@@ -25,6 +25,7 @@ import { LANES, type BoardCard } from "../lib/monitor/card-types.js";
 import { laneFor } from "../lib/monitor/lane-rules.js";
 import { relatedPrForCard } from "../lib/monitor/collaboration.js";
 import { TopStrip } from "./TopStrip.js";
+import { TopStripDegraded } from "./TopStripDegraded.js";
 import { BoardNowBanner } from "./BoardNowBanner.js";
 import { LanesBar } from "./LanesBar.js";
 import { Board, CALM_EXPANDED, DEFAULT_EXPANDED } from "./Board.js";
@@ -111,6 +112,22 @@ export function BoardView({
   const [askToken, setAskToken] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
+  // §14: announce the action-needed 0→>0 edge once, assertively, for
+  // screen-reader users (the visual cue is the amber banner).
+  const [announcement, setAnnouncement] = useState("");
+  const prevActionRef = useRef<number | null>(null);
+  useEffect(() => {
+    const prev = prevActionRef.current;
+    prevActionRef.current = state.counts.action;
+    if (prev !== null && prev <= 0 && state.counts.action > 0) {
+      setAnnouncement(
+        state.counts.action === 1
+          ? "1 card now needs your review."
+          : `${state.counts.action} cards now need your review.`,
+      );
+    }
+  }, [state.counts.action]);
+
   // Controlled lane expansion: seed from the mode preset, re-apply when
   // the board mode flips (e.g. empty→action as live data arrives), but
   // keep manual toggles / spotlight within a stable mode.
@@ -180,11 +197,28 @@ export function BoardView({
 
   return (
     <div className="hm-board">
-      <TopStrip
-        counts={state.counts}
-        liveAt={status === "open" ? liveLabel || undefined : undefined}
-        onRefresh={onRefresh}
-      />
+      {/* §14: assertive announcement of the action 0→>0 edge. */}
+      <div className="hm-sr-only" role="status" aria-live="assertive">
+        {announcement}
+      </div>
+
+      {degraded ? (
+        <TopStripDegraded
+          lastKnownAt={liveLabel || undefined}
+          reason={
+            liveLabel
+              ? `Live SSE ${status} · last good read ${liveLabel} · KPIs unknown until reconnect · auto-reconnecting`
+              : `Live SSE ${status} · no good read yet · KPIs unknown until reconnect · auto-reconnecting`
+          }
+          onReconnect={onRefresh}
+        />
+      ) : (
+        <TopStrip
+          counts={state.counts}
+          liveAt={status === "open" ? liveLabel || undefined : undefined}
+          onRefresh={onRefresh}
+        />
+      )}
 
       <BoardNowBanner banner={state.banner} />
 
