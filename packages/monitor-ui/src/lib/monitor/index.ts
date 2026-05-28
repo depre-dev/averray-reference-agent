@@ -14,4 +14,5 @@ export * from "./board-cache.js";
 export * from "./drawer-routing.js";
 export * from "./snapshot-store.js";
 export * from "./live-stream.js";
+export * from "./hermes-commands.js";
 export * from "./fixtures.js";

@@ -1,0 +1,70 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { cleanup, fireEvent, render, within } from "@testing-library/react";
+import { AskHermesComposer } from "./AskHermesComposer.js";
+
+afterEach(cleanup);
+
+function type(el: HTMLElement, value: string) {
+  fireEvent.change(el, { target: { value } });
+}
+
+describe("AskHermesComposer", () => {
+  test("/mission <url> spawns a mission and clears the input", () => {
+    const onSpawnMission = vi.fn();
+    const { container, getByRole } = render(<AskHermesComposer onSpawnMission={onSpawnMission} />);
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    type(input, "/mission https://staging.averray.com/onboarding");
+    fireEvent.click(getByRole("button", { name: /Send/ }));
+    expect(onSpawnMission).toHaveBeenCalledWith("https://staging.averray.com/onboarding");
+    expect(input.value).toBe("");
+  });
+
+  test("Enter sends; Shift+Enter does not", () => {
+    const onSpawnMission = vi.fn();
+    const { container } = render(<AskHermesComposer onSpawnMission={onSpawnMission} />);
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+
+    type(input, "/mission https://x.test/a");
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
+    expect(onSpawnMission).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSpawnMission).toHaveBeenCalledWith("https://x.test/a");
+  });
+
+  test("/mission with no URL shows an error and does not spawn", () => {
+    const onSpawnMission = vi.fn();
+    const { container, getByRole } = render(<AskHermesComposer onSpawnMission={onSpawnMission} />);
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    type(input, "/mission");
+    fireEvent.click(getByRole("button", { name: /Send/ }));
+    expect(onSpawnMission).not.toHaveBeenCalled();
+    expect(within(container).getByRole("alert").textContent).toMatch(/needs a target URL/);
+    // The bad input is preserved so the operator can fix it.
+    expect(input.value).toBe("/mission");
+  });
+
+  test("a plain question calls onAsk when a handler is provided", () => {
+    const onAsk = vi.fn();
+    const { container, getByRole } = render(<AskHermesComposer onAsk={onAsk} />);
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    type(input, "what's blocking #548?");
+    fireEvent.click(getByRole("button", { name: /Send/ }));
+    expect(onAsk).toHaveBeenCalledWith("what's blocking #548?");
+    expect(input.value).toBe("");
+  });
+
+  test("a plain question without an onAsk handler surfaces the M8' hint", () => {
+    const { container, getByRole } = render(<AskHermesComposer onSpawnMission={vi.fn()} />);
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    type(input, "hello hermes");
+    fireEvent.click(getByRole("button", { name: /Send/ }));
+    expect(within(container).getByRole("alert").textContent).toMatch(/lands in M8'/);
+  });
+
+  test("the scope chip reflects the focused card", () => {
+    const { getByText } = render(<AskHermesComposer focusedCardId="agent #548" />);
+    expect(getByText("scope · agent #548")).toBeTruthy();
+  });
+});
