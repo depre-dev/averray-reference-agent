@@ -119,12 +119,29 @@ describe("DetailDrawer — variants", () => {
     expect(getByText(/Coalesce repeated policy-attach entries/)).toBeTruthy();
   });
 
-  test("mission card shows the hermes eyebrow and the M7' deferral note", () => {
+  test("mission card shows the full report — verdict, path, blockers, evidence, boundary, recommendations", () => {
     const card = fixture("mission browser-onboard-04");
-    const { getByText } = render(
+    const { container, getByText } = render(
       <DetailDrawer card={card} cards={[{ id: card.id }]} onClose={noop} onNavigate={noop} />,
     );
     expect(getByText("Browser mission · agent report")).toBeTruthy();
-    expect(getByText(/lands in M7'/)).toBeTruthy();
+    // Verdict + confidence (0.81 → 81%) + scores
+    expect(getByText(/Verdict · run #4/)).toBeTruthy();
+    expect(getByText("PARTIAL")).toBeTruthy();
+    expect(getByText(/81/)).toBeTruthy();
+    // Path steps
+    expect(getByText("Path taken")).toBeTruthy();
+    expect(getByText("Clicked Connect wallet")).toBeTruthy();
+    // Blockers
+    expect(getByText("Sign-message modal latency")).toBeTruthy();
+    // Evidence
+    expect(getByText("Evidence")).toBeTruthy();
+    expect(getByText("step-3-modal-gap.png")).toBeTruthy();
+    // Mutation boundary
+    expect(getByText(/BOUNDARY · enforced/)).toBeTruthy();
+    expect(getByText(/Read-only mission/)).toBeTruthy();
+    // Recommendations
+    expect(getByText("Hermes recommends")).toBeTruthy();
+    expect(container.querySelectorAll(".hm-mpath .step").length).toBe(6);
   });
 });

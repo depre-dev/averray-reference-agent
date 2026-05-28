@@ -27,6 +27,7 @@ import { Board, CALM_EXPANDED, DEFAULT_EXPANDED } from "./Board.js";
 import type { LaneId } from "./Lane.js";
 import { CardRouter } from "./cards/CardRouter.js";
 import { DetailDrawer } from "./drawer/DetailDrawer.js";
+import { CoPilotRail } from "./hermes/CoPilotRail.js";
 
 // laneFor() promotes every isAction card into needs-attention, so the
 // action preset expands that lane (not operator-review) to keep the
@@ -58,6 +59,10 @@ export interface BoardViewProps {
   onCardClose?: () => void;
   /** j/k traversal target within the drawer. */
   onCardNavigate?: (id: string) => void;
+  /** Spawn a browser mission via the Hermes composer (/mission <url>). */
+  onSpawnMission?: (url: string) => void;
+  /** Ask Hermes a free-form question (M8'). */
+  onAsk?: (text: string) => void;
 }
 
 export function BoardView({
@@ -68,6 +73,8 @@ export function BoardView({
   onCardClick,
   onCardClose,
   onCardNavigate,
+  onSpawnMission,
+  onAsk,
 }: BoardViewProps) {
   // The stream is "degraded" only on a real drop (reconnecting/closed);
   // idle/connecting are pre-live transients, not disconnections. The
@@ -127,7 +134,7 @@ export function BoardView({
           />
         </div>
 
-        <HermesRailPlaceholder />
+        <CoPilotRail onSpawnMission={onSpawnMission} onAsk={onAsk} focusedCardId={focusedCardId} />
       </div>
 
       {focusedCard ? (
@@ -139,36 +146,6 @@ export function BoardView({
         />
       ) : null}
     </div>
-  );
-}
-
-/**
- * Minimal Hermes co-pilot rail chrome so the `.hm-main` two-column grid
- * (1fr | 420px) renders end-to-end. The narrating stream + composer are
- * wired in M8'; this stub only holds the column and the rail header.
- */
-function HermesRailPlaceholder() {
-  return (
-    <aside className="hm-hermes" role="complementary" aria-label="Hermes co-pilot">
-      {/* A <div>, not <header>: only the TopStrip is the page banner
-          landmark — the rail's own header must not register as a second. */}
-      <div className="hm-hermes-head">
-        <div className="hm-hermes-mark" aria-hidden>
-          H
-        </div>
-        <div>
-          <div className="hm-hermes-title">Hermes co-pilot</div>
-          <div className="hm-hermes-sub">
-            <span className="pulse" aria-hidden />
-            Live · narrating the board · context: everywhere
-          </div>
-        </div>
-      </div>
-
-      <div className="hm-hermes-stream">
-        <div className="hm-lane-empty">Hermes narration lands in M8'.</div>
-      </div>
-    </aside>
   );
 }
 

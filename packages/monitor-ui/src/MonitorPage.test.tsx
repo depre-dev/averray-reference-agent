@@ -95,4 +95,46 @@ describe("MonitorPage — container", () => {
     expect(container.querySelectorAll(".hm-lane").length).toBe(8);
     expect(within(container).getByRole("complementary", { name: "Hermes co-pilot" })).toBeTruthy();
   });
+
+  test("the composer's /mission command reaches the spawn handler", async () => {
+    const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({ cards: FIXTURE_CARDS, at: "2026-05-28T10:30:00Z" }));
+    const onSpawnMission = vi.fn();
+    const { container } = render(
+      <MonitorPage options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }} onSpawnMission={onSpawnMission} />,
+      { wrapper },
+    );
+    await waitFor(() => expect(within(container).getByRole("complementary", { name: "Hermes co-pilot" })).toBeTruthy());
+
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "/mission https://staging.averray.com/onboarding" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSpawnMission).toHaveBeenCalledWith("https://staging.averray.com/onboarding");
+  });
+
+  test("the default spawn POSTs targetUrl to /monitor/testbed-missions", async () => {
+    const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({ cards: FIXTURE_CARDS, at: "2026-05-28T10:30:00Z" }));
+    // The board fetch uses the injected fetcher; defaultSpawnMission uses
+    // the global fetch — so spying on it isolates the spawn call.
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 202 }));
+    try {
+      const { container } = render(<MonitorPage options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }} />, {
+        wrapper,
+      });
+      await waitFor(() =>
+        expect(within(container).getByRole("complementary", { name: "Hermes co-pilot" })).toBeTruthy(),
+      );
+
+      const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+      fireEvent.change(input, { target: { value: "/mission https://x.test/y" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+      expect(calledUrl).toBe("/monitor/testbed-missions");
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(String(init.body))).toEqual({ targetUrl: "https://x.test/y" });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
 });

@@ -1,9 +1,8 @@
 // Hermes Handoff Monitor — detail-drawer bodies, one per card type.
 //
 // Each body is driven entirely by real card fields (verdict, files,
-// checks, prompt, verification, mergeStatus, …) — no fabricated CI rows
-// or operator checklists. The mission body is a stub here; the rich
-// browser-mission report lands in M7'.
+// checks, prompt, verification, mergeStatus, mission report, …) — no
+// fabricated CI rows or operator checklists.
 
 import type {
   BoardCard,
@@ -213,17 +212,139 @@ function DoneBody({ card }: { card: DoneCard }) {
 
 function MissionBody({ card }: { card: MissionCard }) {
   const m = card.mission;
+  const verdictColor =
+    m.verdictTone === "warn"
+      ? "var(--hm-amber-deep)"
+      : m.verdictTone === "fail"
+        ? "var(--hm-rose)"
+        : "var(--hm-sage-deep)";
+
   return (
     <>
-      <VerdictBlock head="Mission verdict" accent="var(--hm-hermes-deep)">
-        {m.verdict} · confidence {m.confidence} · target {m.target}
-      </VerdictBlock>
       <section>
-        <div className="hm-section-h">Full mission report</div>
-        <div className="hm-files" style={{ padding: "10px 12px", color: "var(--hm-muted)" }}>
-          The full browser-mission report — path, blockers, evidence, mutation boundary, recommendations — lands in M7'.
+        <div className="hm-section-h">
+          Verdict · run #{m.runs} · {m.latency}
+        </div>
+        <div className="hm-mission-confidence">
+          <div className="col">
+            <span className="lbl">Verdict</span>
+            <span className="val" style={{ color: verdictColor }}>
+              {m.verdict}
+            </span>
+            <span className="meta">{m.target}</span>
+          </div>
+          <div className="col">
+            <span className="lbl">Confidence</span>
+            <span className={"val " + (m.confidence < 0.7 ? "warn" : "")}>
+              {Math.round(m.confidence * 100)}
+              <span style={{ fontSize: 14, color: "var(--hm-muted)" }}>%</span>
+            </span>
+            <span className="meta">{m.seed}</span>
+          </div>
+          <div className="col">
+            <span className="lbl">Scores · success · clarity · latency</span>
+            <span className="val">
+              {m.successScore}
+              <span style={{ color: "var(--hm-muted)" }}> · </span>
+              {m.clarityScore}
+              <span style={{ color: "var(--hm-muted)" }}> · </span>
+              {m.latencyScore}
+            </span>
+            <span className="meta">out of 10 · by Hermes</span>
+          </div>
         </div>
       </section>
+
+      {m.path.length > 0 ? (
+        <section>
+          <div className="hm-section-h">Path taken</div>
+          <div className="hm-mpath">
+            {m.path.map((step) => (
+              <div className={"step " + step.status} key={step.n}>
+                <span className="n">{step.n}</span>
+                <span className="desc">{step.desc}</span>
+                <span className="lat">{step.lat}</span>
+                <span
+                  className={
+                    "hm-pill " +
+                    (step.status === "ok" ? "hm-pill--ok" : step.status === "warn" ? "hm-pill--running" : "hm-pill--err")
+                  }
+                >
+                  {step.status === "ok" ? "pass" : step.status === "warn" ? "slow" : "fail"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {m.blockers.length > 0 ? (
+        <section>
+          <div className="hm-section-h">Blockers · confusing moments</div>
+          <div style={{ display: "grid", gap: 10 }}>
+            {m.blockers.map((b, i) => (
+              <div className="hm-mblock" key={i}>
+                <div className="head">{b.head}</div>
+                <div className="body">{b.body}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {m.evidence.length > 0 ? (
+        <section>
+          <div className="hm-section-h">Evidence</div>
+          <div className="hm-evidence">
+            {m.evidence.map((e, i) => {
+              const hasLink = typeof e.href === "string" && e.href.length > 0 && e.href !== "#";
+              return (
+                <div className="row" key={i}>
+                  <span className="kind">{e.kind}</span>
+                  {hasLink ? (
+                    <a href={e.href} target="_blank" rel="noreferrer">
+                      {e.label}
+                    </a>
+                  ) : (
+                    <span>{e.label}</span>
+                  )}
+                  {hasLink ? <span style={{ color: "var(--hm-muted)" }}>open ↗</span> : null}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      <section>
+        <div className="hm-section-h">Mutation boundary</div>
+        <div
+          className="hm-verdict-block"
+          style={{ background: "var(--hm-hermes-soft)", borderColor: "rgba(15,107,90,0.18)" }}
+        >
+          <div className="head" style={{ color: "var(--hm-hermes-deep)" }}>
+            BOUNDARY · enforced
+          </div>
+          <div className="body">{m.mutationBoundary}</div>
+        </div>
+      </section>
+
+      {m.recommendations.length > 0 ? (
+        <section>
+          <div className="hm-section-h">Hermes recommends</div>
+          <div className="hm-checklist">
+            {m.recommendations.map((r, i) => (
+              <div className="row" key={i}>
+                <span className="box" style={{ borderColor: "var(--hm-hermes)", color: "transparent" }}>
+                  ✓
+                </span>
+                <span>{r}</span>
+                <span className="hint">→ codex</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </>
   );
 }
