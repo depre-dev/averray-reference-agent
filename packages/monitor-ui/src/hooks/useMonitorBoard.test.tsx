@@ -80,7 +80,12 @@ describe("useMonitorBoard", () => {
   test("an SSE board.snapshot replaces the board and persists to storage", async () => {
     const storage = memStorage();
     const fetcher = vi.fn(async () => board([{ id: "agent #1" }], "2026-05-28T10:00:00Z"));
-    const { result } = renderHook(() => useMonitorBoard({ fetcher, EventSourceCtor: ES, storage }), { wrapper });
+    // Pin the snapshot-eviction clock to the snapshot's own time. Without
+    // this the writer uses real Date.now(), and once wall-clock passes the
+    // hard-coded `at` + 24h TTL the just-written snapshot is evicted on
+    // write and this assertion flips from pass to fail — a time-bomb.
+    const now = () => Date.parse("2026-05-28T11:00:00Z");
+    const { result } = renderHook(() => useMonitorBoard({ fetcher, EventSourceCtor: ES, storage, now }), { wrapper });
 
     await waitFor(() => expect(result.current.board).toBeDefined());
     const es = FakeEventSource.instances.at(-1) as FakeEventSource;
