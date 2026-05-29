@@ -1,14 +1,15 @@
 // Hermes Handoff Monitor — static serving of the redesigned SPA (§20).
 //
 // slack-operator serves the Vite-built bundle (packages/monitor-ui/dist)
-// alongside the legacy HTML monitor. The new board mounts at
-// /monitor/next while the legacy monitor keeps /monitor, so the redesign
-// can be previewed in production before the cutover.
+// as the default board at /monitor. The legacy HTML monitor was demoted
+// to /monitor/legacy at the cutover (it stays reachable as a transition
+// fallback; its renderer is slated for removal once nothing depends on
+// it). The old preview path /monitor/next now 302s to /monitor/.
 //
 // This module is the pure request → resolution mapping (tested); the
 // HTTP handler in index.ts does the filesystem read + response.
 
-export const MONITOR_SPA_MOUNT = "/monitor/next";
+export const MONITOR_SPA_MOUNT = "/monitor";
 
 export type SpaResolution =
   | { kind: "redirect"; location: string }
@@ -18,11 +19,13 @@ export type SpaResolution =
 
 /**
  * Map a request path under the SPA mount to what should be served.
- *   /monitor/next            → redirect to /monitor/next/ (so the SPA's
- *                              relative asset URLs resolve correctly)
- *   /monitor/next/           → index.html
- *   /monitor/next/assets/... → the hashed asset
- *   anything else            → miss
+ *   /monitor            → redirect to /monitor/ (so the SPA's relative
+ *                         asset URLs resolve correctly)
+ *   /monitor/           → index.html
+ *   /monitor/assets/... → the hashed asset
+ *   anything else       → miss (so /monitor/v2/*, /monitor/codex-tasks,
+ *                         /monitor/legacy, … fall through to their own
+ *                         handlers)
  */
 export function resolveSpaRequest(pathname: string, mount: string = MONITOR_SPA_MOUNT): SpaResolution {
   if (pathname === mount) return { kind: "redirect", location: `${mount}/` };
