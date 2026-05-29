@@ -53,6 +53,7 @@ function boardCardFromItem(
   const title = titleForItem(item, summary, prState, identity);
   if (!title && !identity.repo) return undefined;
   const why = reasonForItem(item, summary, prState, codexTaskStatus);
+  const correlationId = textProp(item, "correlationId");
   return {
     ...identity,
     title: title || "Untitled handoff",
@@ -63,6 +64,7 @@ function boardCardFromItem(
     ...(why ? { why } : {}),
     next: classification.next,
     tags: tagsForItem(item, summary),
+    ...(correlationId ? { correlationId } : {}),
   };
 }
 
