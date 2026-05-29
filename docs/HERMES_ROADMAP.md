@@ -21,8 +21,8 @@
 | ID | Item | Status |
 |----|------|--------|
 | O0 | Discovery (integration map) | ✅ done |
-| O1 | Agent attribution (branch-prefix → agentType) | design done · prompt out |
-| O2 | Claude Code worker (greenfield, Agent SDK) | design done |
+| O1 | Agent attribution (branch-prefix → agentType) | ✅ done |
+| O2 | Claude Code worker (greenfield, Agent SDK) | 🟡 in build (partly done) |
 | O3 | Board-driven dispatch | design done |
 | O4 | Hermes enqueue + dispatch guardrail + autonomy mode | design done |
 | O5 | Self-management hardening | design done |
@@ -44,7 +44,7 @@
 | T4 | Tier-2 agent (Agent SDK + Playwright-MCP) | design done |
 | T5 | Env→mutation binding + enhancements (trace/video, baselines) | design done |
 
-*(Nothing is built yet — all "design done." Tell me what's actually shipped and I'll flip statuses.)*
+*(Status reflects what the operator reports: O1 shipped, O2 in build; the rest are design-only. Tell me as things land and I'll flip statuses.)*
 
 ## Recommended build order (the smooth, low-effort ramp)
 
