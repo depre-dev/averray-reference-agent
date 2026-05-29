@@ -18,9 +18,29 @@ export type CodexRunnerHeartbeatStatus =
   | "misconfigured"
   | "error";
 
+/**
+ * Which agent a task is dispatched to. Defaults to "codex" everywhere so
+ * existing tasks and callers keep working unchanged; "claude" is the
+ * greenfield Claude-worker path (P2). Resolve a possibly-absent value via
+ * {@link taskAgent}.
+ */
+export type TaskAgent = "codex" | "claude";
+
+/** Resolve a task's agent, defaulting legacy/undefined tasks to "codex". */
+export function taskAgent(task: { agent?: TaskAgent }): TaskAgent {
+  return task.agent === "claude" ? "claude" : "codex";
+}
+
 export interface CodexTaskInput {
   repo: string;
-  pullRequestNumber: number;
+  /**
+   * The PR this task acts on. Optional: greenfield tasks (Claude opens
+   * its own PR) have no PR number yet. When present, propose dedupes on
+   * repo + PR; when absent each task is distinct.
+   */
+  pullRequestNumber?: number;
+  /** Which agent runs this task. Defaults to "codex". */
+  agent?: TaskAgent;
   correlationId?: string;
   title?: string;
   prompt: string;
@@ -89,11 +109,15 @@ export async function proposeCodexTask(
   const path = queuePath(deps.path);
   const tasks = await readCodexTasks(path);
   const now = (deps.now ?? new Date()).toISOString();
-  const existing = tasks.find((task) =>
-    !TERMINAL_STATUSES.has(task.status)
-    && task.repo === input.repo
-    && task.pullRequestNumber === input.pullRequestNumber
-  );
+  // Dedupe only when the task targets a specific PR. Greenfield tasks
+  // (no PR yet) are each distinct, so they always create a new entry.
+  const existing = input.pullRequestNumber === undefined
+    ? undefined
+    : tasks.find((task) =>
+        !TERMINAL_STATUSES.has(task.status)
+        && task.repo === input.repo
+        && task.pullRequestNumber === input.pullRequestNumber
+      );
   if (existing) {
     const updated: CodexTask = {
       ...existing,
@@ -114,7 +138,8 @@ export async function proposeCodexTask(
     id: makeCodexTaskId(input.repo, input.pullRequestNumber, now),
     status: "proposed",
     repo: input.repo,
-    pullRequestNumber: input.pullRequestNumber,
+    agent: input.agent ?? "codex",
+    ...(input.pullRequestNumber !== undefined ? { pullRequestNumber: input.pullRequestNumber } : {}),
     ...(input.correlationId ? { correlationId: input.correlationId } : {}),
     ...(input.title ? { title: input.title } : {}),
     prompt: input.prompt,
@@ -196,12 +221,14 @@ export async function cancelCodexTask(
 }
 
 export async function claimNextApprovedCodexTask(
-  deps: CodexTaskQueueDeps & { runnerId?: string } = {}
+  deps: CodexTaskQueueDeps & { runnerId?: string; agent?: TaskAgent } = {}
 ): Promise<CodexTask | undefined> {
   const path = queuePath(deps.path);
   const tasks = await readCodexTasks(path);
+  // A per-agent runner claims only its own tasks; an unfiltered call (no
+  // `agent`) claims any approved task, preserving the current behavior.
   const existing = tasks
-    .filter((task) => task.status === "approved")
+    .filter((task) => task.status === "approved" && (deps.agent === undefined || taskAgent(task) === deps.agent))
     .sort((a, b) => Date.parse(a.approvedAt ?? a.updatedAt) - Date.parse(b.approvedAt ?? b.updatedAt))[0];
   if (!existing) return undefined;
   const now = (deps.now ?? new Date()).toISOString();
@@ -422,7 +449,8 @@ function isCodexTask(value: unknown): value is CodexTask {
     && value.schemaVersion === 1
     && typeof value.id === "string"
     && typeof value.repo === "string"
-    && typeof value.pullRequestNumber === "number"
+    // Optional: greenfield tasks have no PR yet. Reject only a wrong type.
+    && (value.pullRequestNumber === undefined || typeof value.pullRequestNumber === "number")
     && typeof value.prompt === "string"
     && typeof value.status === "string"
     && typeof value.createdAt === "string"
@@ -467,10 +495,11 @@ function codexRunnerStatusMessage(status: CodexRunnerHeartbeatStatus): string {
   }
 }
 
-function makeCodexTaskId(repo: string, pullRequestNumber: number, timestamp: string): string {
+function makeCodexTaskId(repo: string, pullRequestNumber: number | undefined, timestamp: string): string {
   const safeRepo = repo.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   const stamp = timestamp.replace(/[^0-9A-Za-z]/g, "");
-  return `codex-task-${safeRepo}-${pullRequestNumber}-${stamp}-${Math.random().toString(36).slice(2, 8)}`;
+  const prPart = pullRequestNumber ?? "new"; // greenfield tasks have no PR yet
+  return `codex-task-${safeRepo}-${prPart}-${stamp}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function isCodexRunnerHeartbeat(value: unknown): value is CodexRunnerHeartbeat {

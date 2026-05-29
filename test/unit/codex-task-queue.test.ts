@@ -13,6 +13,7 @@ import {
   proposeCodexTask,
   readCodexRunnerHeartbeat,
   summarizeCodexTasks,
+  taskAgent,
   updateCodexTaskProgress,
   updateCodexRunnerHeartbeat,
 } from "../../services/slack-operator/src/codex-task-queue.js";
@@ -270,5 +271,104 @@ describe("codex task queue", () => {
         stale: false,
       },
     });
+  });
+});
+
+describe("codex task queue — multi-agent (P2)", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
+    tempDirs.length = 0;
+  });
+
+  async function tempQueuePath(): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), "averray-codex-tasks-"));
+    tempDirs.push(dir);
+    return join(dir, "tasks.json");
+  }
+
+  it("defaults agent to codex and stores an explicit claude agent", async () => {
+    const path = await tempQueuePath();
+    const codex = await proposeCodexTask(
+      { repo: "averray-agent/agent", pullRequestNumber: 401, prompt: "x" },
+      { path, now: new Date("2026-05-17T10:00:00.000Z") },
+    );
+    const claude = await proposeCodexTask(
+      { repo: "averray-agent/agent", pullRequestNumber: 402, agent: "claude", prompt: "y" },
+      { path, now: new Date("2026-05-17T10:01:00.000Z") },
+    );
+    expect(codex.task.agent).toBe("codex");
+    expect(claude.task.agent).toBe("claude");
+    expect(taskAgent(codex.task)).toBe("codex");
+    expect(taskAgent(claude.task)).toBe("claude");
+    // taskAgent defaults a legacy task with no agent field to codex.
+    expect(taskAgent({})).toBe("codex");
+  });
+
+  it("creates greenfield tasks (no PR) and does not dedupe them", async () => {
+    const path = await tempQueuePath();
+    const first = await proposeCodexTask(
+      { repo: "averray-agent/agent", agent: "claude", prompt: "build a thing" },
+      { path, now: new Date("2026-05-17T10:00:00.000Z") },
+    );
+    const second = await proposeCodexTask(
+      { repo: "averray-agent/agent", agent: "claude", prompt: "build another thing" },
+      { path, now: new Date("2026-05-17T10:01:00.000Z") },
+    );
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(true); // greenfield: distinct, not deduped
+    expect(first.task.id).not.toBe(second.task.id);
+    expect(first.task.pullRequestNumber).toBeUndefined();
+    const all = await listCodexTasks({ path });
+    expect(all).toHaveLength(2);
+  });
+
+  it("claims only tasks matching the runner's agent filter", async () => {
+    const path = await tempQueuePath();
+    const codex = await proposeCodexTask(
+      { repo: "r", pullRequestNumber: 1, prompt: "c" },
+      { path, now: new Date("2026-05-17T10:00:00.000Z") },
+    );
+    const claude = await proposeCodexTask(
+      { repo: "r", agent: "claude", prompt: "k" },
+      { path, now: new Date("2026-05-17T10:01:00.000Z") },
+    );
+    await approveCodexTask(codex.task.id, { path, approvedBy: "operator", now: new Date("2026-05-17T10:02:00.000Z") });
+    await approveCodexTask(claude.task.id, { path, approvedBy: "operator", now: new Date("2026-05-17T10:03:00.000Z") });
+
+    // The claude runner skips the (older, approved-first) codex task.
+    const claimedByClaude = await claimNextApprovedCodexTask({
+      path,
+      agent: "claude",
+      runnerId: "claude-task-runner",
+      now: new Date("2026-05-17T10:04:00.000Z"),
+    });
+    expect(claimedByClaude?.id).toBe(claude.task.id);
+    expect(taskAgent(claimedByClaude!)).toBe("claude");
+
+    // The codex runner claims the remaining codex task.
+    const claimedByCodex = await claimNextApprovedCodexTask({
+      path,
+      agent: "codex",
+      runnerId: "codex-task-runner",
+      now: new Date("2026-05-17T10:05:00.000Z"),
+    });
+    expect(claimedByCodex?.id).toBe(codex.task.id);
+
+    // No more tasks for either agent.
+    expect(await claimNextApprovedCodexTask({ path, agent: "claude" })).toBeUndefined();
+    expect(await claimNextApprovedCodexTask({ path, agent: "codex" })).toBeUndefined();
+  });
+
+  it("an unfiltered claim still takes any approved task (back-compat)", async () => {
+    const path = await tempQueuePath();
+    const claude = await proposeCodexTask(
+      { repo: "r", agent: "claude", prompt: "k" },
+      { path, now: new Date("2026-05-17T10:00:00.000Z") },
+    );
+    await approveCodexTask(claude.task.id, { path, approvedBy: "operator", now: new Date("2026-05-17T10:01:00.000Z") });
+    const claimed = await claimNextApprovedCodexTask({ path, now: new Date("2026-05-17T10:02:00.000Z") });
+    expect(claimed?.id).toBe(claude.task.id);
   });
 });
