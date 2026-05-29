@@ -113,9 +113,9 @@ const authConfig = {
 const routineConfig = parseSlackRoutineConfig(process.env, authConfig.allowedChannelIds);
 const monitorConfig = parseMonitorConfig(process.env);
 const missionSpawnRoles = parseMissionSpawnRoles(process.env);
-// The Vite-built redesigned monitor SPA, served at /monitor/next. At
-// runtime index.js lives in services/slack-operator/dist, so the bundle
-// is three levels up under packages/monitor-ui/dist.
+// The Vite-built redesigned monitor SPA, served as the default board at
+// /monitor. At runtime index.js lives in services/slack-operator/dist, so
+// the bundle is three levels up under packages/monitor-ui/dist.
 const MONITOR_SPA_DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../packages/monitor-ui/dist");
 const monitorNarrationMinIntervalMs = Math.max(
   5_000,
@@ -206,11 +206,11 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
         missionSpawnRestricted: missionSpawnRestricted(missionSpawnRoles),
         paths: monitorConfig.enabled ? [
           "/monitor",
+          "/monitor/legacy",
           "/monitor/events",
           "/monitor/stream",
           "/monitor/v2/board",
           "/monitor/v2/stream",
-          "/monitor/next",
           ...(isDebugSpawnEnabled() ? ["/monitor/v2/debug/spawn"] : []),
           "/monitor/command",
           "/monitor/recheck",
@@ -228,7 +228,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
     writeRedirect(response, "/monitor");
     return;
   }
-  if (request.method === "GET" && (url.pathname === "/monitor" || url.pathname === "/monitor/events" || url.pathname === "/monitor/stream" || url.pathname === "/monitor/manifest.webmanifest")) {
+  if (request.method === "GET" && (url.pathname === "/monitor/legacy" || url.pathname === "/monitor/events" || url.pathname === "/monitor/stream" || url.pathname === "/monitor/manifest.webmanifest")) {
     if (!monitorConfig.enabled) {
       writeJson(response, 404, { error: "monitor_disabled" });
       return;
@@ -237,7 +237,9 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       writeJson(response, 401, { error: "monitor_unauthorized" });
       return;
     }
-    if (url.pathname === "/monitor") {
+    if (url.pathname === "/monitor/legacy") {
+      // Legacy HTML monitor — demoted from /monitor at the cutover, kept
+      // as a transition fallback. Slated for removal.
       writeHtml(response, 200, renderMonitorHtml());
       return;
     }
@@ -309,60 +311,68 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
     writeJson(response, 201, { ok: true, card, at: new Date().toISOString() });
     return;
   }
-  // Redesigned monitor SPA, served side-by-side with the legacy HTML
-  // monitor (which keeps /monitor) until the cutover. The bundle's API
-  // calls hit the absolute /monitor/v2/* routes, so it works at this
-  // mount unchanged.
-  if (request.method === "GET" && (url.pathname === MONITOR_SPA_MOUNT || url.pathname.startsWith(`${MONITOR_SPA_MOUNT}/`))) {
-    if (!monitorConfig.enabled) {
-      writeJson(response, 404, { error: "monitor_disabled" });
-      return;
-    }
-    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
-      writeJson(response, 401, { error: "monitor_unauthorized" });
-      return;
-    }
-    const resolution = resolveSpaRequest(url.pathname);
-    if (resolution.kind === "redirect") {
-      writeRedirect(response, resolution.location);
-      return;
-    }
-    if (resolution.kind === "miss") {
-      writeJson(response, 404, { error: "not_found" });
-      return;
-    }
-    const relPath = resolution.kind === "index" ? "index.html" : resolution.relPath;
-    const filePath = path.join(MONITOR_SPA_DIST, relPath);
-    // Defense-in-depth: never read outside the bundle dir.
-    if (filePath !== MONITOR_SPA_DIST && !filePath.startsWith(MONITOR_SPA_DIST + path.sep)) {
-      writeJson(response, 403, { error: "forbidden" });
-      return;
-    }
-    try {
-      const body = await readFile(filePath);
-      const isIndex = resolution.kind === "index";
-      response.writeHead(200, {
-        "content-type": isIndex ? "text/html; charset=utf-8" : resolution.contentType,
-        // index.html must never be cached (it points at hashed assets);
-        // the hashed assets are immutable.
-        "cache-control": isIndex ? "no-cache" : "public, max-age=31536000, immutable",
-      });
-      response.end(body);
-    } catch {
-      if (resolution.kind === "index") {
-        writeHtml(
-          response,
-          200,
-          "<!doctype html><meta charset=\"utf-8\"><title>Hermes monitor</title>" +
-            "<p style=\"font-family:system-ui;padding:24px\">The redesigned monitor UI is not built in this image. " +
-            "Run <code>npm --workspace packages/monitor-ui run build</code>, or use the legacy monitor at " +
-            "<a href=\"/monitor\">/monitor</a>.</p>",
-        );
-      } else {
-        writeJson(response, 404, { error: "asset_not_found" });
-      }
-    }
+  // Back-compat: the redesign previewed at /monitor/next before the
+  // cutover; it's now the default board at /monitor. 302 the old path.
+  if (request.method === "GET" && (url.pathname === "/monitor/next" || url.pathname.startsWith("/monitor/next/"))) {
+    writeRedirect(response, "/monitor/");
     return;
+  }
+  // Redesigned monitor SPA — the default board at /monitor (the legacy
+  // HTML monitor moved to /monitor/legacy). The guard only fires for the
+  // SPA's own paths (/monitor, /monitor/, /monitor/assets/*); every other
+  // /monitor/* path (the /monitor/v2/* APIs, /monitor/codex-tasks,
+  // /monitor/collaboration, …) resolves to "miss" and falls through to
+  // its own handler below. The bundle's API calls hit the absolute
+  // /monitor/v2/* routes; its assets are relative, so they resolve under
+  // the mount.
+  if (request.method === "GET") {
+    const resolution = resolveSpaRequest(url.pathname);
+    if (resolution.kind !== "miss") {
+      if (!monitorConfig.enabled) {
+        writeJson(response, 404, { error: "monitor_disabled" });
+        return;
+      }
+      if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+        writeJson(response, 401, { error: "monitor_unauthorized" });
+        return;
+      }
+      if (resolution.kind === "redirect") {
+        writeRedirect(response, resolution.location);
+        return;
+      }
+      const relPath = resolution.kind === "index" ? "index.html" : resolution.relPath;
+      const filePath = path.join(MONITOR_SPA_DIST, relPath);
+      // Defense-in-depth: never read outside the bundle dir.
+      if (filePath !== MONITOR_SPA_DIST && !filePath.startsWith(MONITOR_SPA_DIST + path.sep)) {
+        writeJson(response, 403, { error: "forbidden" });
+        return;
+      }
+      try {
+        const body = await readFile(filePath);
+        const isIndex = resolution.kind === "index";
+        response.writeHead(200, {
+          "content-type": isIndex ? "text/html; charset=utf-8" : resolution.contentType,
+          // index.html must never be cached (it points at hashed assets);
+          // the hashed assets are immutable.
+          "cache-control": isIndex ? "no-cache" : "public, max-age=31536000, immutable",
+        });
+        response.end(body);
+      } catch {
+        if (resolution.kind === "index") {
+          writeHtml(
+            response,
+            200,
+            "<!doctype html><meta charset=\"utf-8\"><title>Hermes monitor</title>" +
+              "<p style=\"font-family:system-ui;padding:24px\">The redesigned monitor UI is not built in this image. " +
+              "Run <code>npm --workspace packages/monitor-ui run build</code>, or use the legacy monitor at " +
+              "<a href=\"/monitor/legacy\">/monitor/legacy</a>.</p>",
+          );
+        } else {
+          writeJson(response, 404, { error: "asset_not_found" });
+        }
+      }
+      return;
+    }
   }
   if (request.method === "GET" && url.pathname === "/monitor/codex-tasks") {
     if (!monitorConfig.enabled) {
