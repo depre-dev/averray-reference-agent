@@ -27,7 +27,12 @@ how things work **today** and must be updated as phases land (see the last bulle
    submit — must ship with an explicit allowlist + budget **and** keep a human
    approval step. No ungated agent authority.
 7. **Secrets are never committed, printed, or logged.**
-8. **Keep this file true.** When a change alters how agents work — a new runner, a
+8. **Verify chain facts before asserting them.** For any Polkadot / Substrate /
+   Asset Hub behavior, address, runtime, fee, XCM, or settlement claim, check the
+   `polkadot-docs` MCP (plus on-chain/runtime state or transaction evidence) before
+   relying on memory or assumption. Never state a chain fact the product depends on
+   without verifying it — the truth-boundary discipline, applied to the chain.
+9. **Keep this file true.** When a change alters how agents work — a new runner, a
    dispatch path, a new gate, a role change — update `AGENTS.md` (and the affected
    docs) **in the same PR**. A stale working agreement is worse than none.
 
