@@ -13,6 +13,8 @@ import {
   isCriticalFile,
   mapChecks,
   mapFiles,
+  mapCheckRuns,
+  mapRiskSignals,
   indexRawSummaries,
   indexCodexTasks,
   enrichBoardCard,
@@ -349,9 +351,69 @@ describe("mapFiles", () => {
       { path: "docs/operator/claim-stake.md", diff: "", critical: false },
     ]);
   });
+  it("builds a +A -D diff line when additions/deletions are present", () => {
+    const summary = {
+      reviewSignals: {
+        touchedFiles: [
+          { path: "contracts/Foo.sol", area: "contracts", additions: 18, deletions: 4 },
+          { path: "docs/x.md", area: "docs", additions: 34, deletions: 0 },
+          { path: "ops/only-adds.yml", area: "ops", additions: 9 },
+        ],
+      },
+    };
+    expect(mapFiles(summary)).toEqual([
+      { path: "contracts/Foo.sol", diff: "+18 -4", critical: true },
+      { path: "docs/x.md", diff: "+34 -0", critical: false },
+      { path: "ops/only-adds.yml", diff: "+9 -0", critical: false },
+    ]);
+  });
   it("skips entries without a path and returns [] when absent", () => {
     expect(mapFiles(undefined)).toEqual([]);
     expect(mapFiles({ reviewSignals: { touchedFiles: [{ area: "ops" }, { path: "" }] } })).toEqual([]);
+  });
+});
+
+describe("mapCheckRuns", () => {
+  it("maps summary.checks to pass/fail/running/neutral", () => {
+    const summary = {
+      checks: [
+        { name: "CI · lint", status: "completed", conclusion: "success" },
+        { name: "CI · unit", status: "completed", conclusion: "failure" },
+        { name: "CI · deploy plan", status: "in_progress", conclusion: null },
+        { name: "CI · skipped", status: "completed", conclusion: "skipped" },
+      ],
+    };
+    expect(mapCheckRuns(summary)).toEqual([
+      { name: "CI · lint", status: "pass" },
+      { name: "CI · unit", status: "fail" },
+      { name: "CI · deploy plan", status: "running" },
+      { name: "CI · skipped", status: "neutral" },
+    ]);
+  });
+  it("skips nameless checks and returns [] when absent", () => {
+    expect(mapCheckRuns(undefined)).toEqual([]);
+    expect(mapCheckRuns({ checks: [{ status: "completed" }] })).toEqual([]);
+  });
+});
+
+describe("mapRiskSignals", () => {
+  it("maps reviewReasons, dropping the all-clear sentinel", () => {
+    const summary = {
+      reviewReasons: [
+        { severity: "high", code: "pr_critical_files", message: "1 changed file touches secrets." },
+        { severity: "medium", code: "pr_test_signal_missing", message: "No matching test files." },
+        { severity: "low", code: "pr_review_green", message: "Looks merge-ready." },
+      ],
+    };
+    expect(mapRiskSignals(summary)).toEqual([
+      { severity: "high", code: "pr_critical_files", message: "1 changed file touches secrets." },
+      { severity: "medium", code: "pr_test_signal_missing", message: "No matching test files." },
+    ]);
+  });
+  it("defaults an unknown severity to low and returns [] when absent", () => {
+    expect(mapRiskSignals({ reviewReasons: [{ code: "x", message: "m", severity: "bogus" }] }))
+      .toEqual([{ severity: "low", code: "x", message: "m" }]);
+    expect(mapRiskSignals(undefined)).toEqual([]);
   });
 });
 
@@ -412,15 +474,30 @@ describe("enrichBoardCard", () => {
     };
   }
 
-  it("adds checks + files to a live (non-done) card", () => {
+  it("adds checks + files + per-check breakdown + risk signals to a live card", () => {
     const card = enrichBoardCard(base(), slim(), {
       summary: {
         githubLive: { checkTotals: { total: 6, passed: 5, failed: 0, active: 1, neutral: 0 } },
-        reviewSignals: { touchedFiles: [{ path: "contracts/Foo.sol" }] },
+        reviewSignals: { touchedFiles: [{ path: "contracts/Foo.sol", additions: 18, deletions: 4 }] },
+        checks: [
+          { name: "CI · lint", status: "completed", conclusion: "success" },
+          { name: "CI · deploy plan", status: "in_progress" },
+        ],
+        reviewReasons: [
+          { severity: "high", code: "pr_critical_files", message: "1 changed file touches contracts." },
+          { severity: "low", code: "pr_review_green", message: "merge-ready" },
+        ],
       },
     });
     expect(card.checks).toEqual({ pass: 5, running: 1, fail: 0, pending: 0, total: 6 });
-    expect(card.files).toEqual([{ path: "contracts/Foo.sol", diff: "", critical: true }]);
+    expect(card.files).toEqual([{ path: "contracts/Foo.sol", diff: "+18 -4", critical: true }]);
+    expect(card.checkRuns).toEqual([
+      { name: "CI · lint", status: "pass" },
+      { name: "CI · deploy plan", status: "running" },
+    ]);
+    expect(card.riskSignals).toEqual([
+      { severity: "high", code: "pr_critical_files", message: "1 changed file touches contracts." },
+    ]);
   });
 
   it("does NOT add checks / files to done cards (compressed layout)", () => {

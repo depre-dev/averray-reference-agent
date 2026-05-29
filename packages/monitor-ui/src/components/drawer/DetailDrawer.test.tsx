@@ -92,6 +92,44 @@ describe("DetailDrawer — variants", () => {
     expect(getByText("Send back to Codex")).toBeTruthy();
   });
 
+  test("rich PR statuses: per-check breakdown, risk signals, and colored file diff render", () => {
+    const card: BoardCard = {
+      id: "agent #590",
+      lane: "operator-review",
+      type: "pr",
+      agentType: "codex",
+      title: "ops: add KMS CloudWatch alarm proof validator",
+      summary: "2 changed files touch review-gated surfaces (ops).",
+      repo: "averray-agent/agent",
+      freshness: 6,
+      state: "fresh",
+      risk: [],
+      isAction: true,
+      waitingOn: { actor: "operator", tone: "warn" },
+      verdict: "needs review",
+      files: [{ path: "scripts/ops/check-kms-cloudwatch-alarm-proof.mjs", diff: "+120 -0", critical: false }],
+      checks: { pass: 9, running: 0, fail: 0, pending: 0, total: 9 },
+      checkRuns: [
+        { name: "CI · lint", status: "pass" },
+        { name: "CI · deploy plan", status: "running" },
+      ],
+      riskSignals: [
+        { severity: "medium", code: "pr_review_risk_files", message: "2 changed file(s) touch review-gated surfaces (ops)." },
+      ],
+    };
+    const { getByText, container } = render(
+      <DetailDrawer card={card} cards={[{ id: card.id }]} onClose={noop} onNavigate={noop} />,
+    );
+    // per-check breakdown (names from summary.checks)
+    expect(getByText("CI · lint")).toBeTruthy();
+    expect(getByText("CI · deploy plan")).toBeTruthy();
+    // risk-signals section
+    expect(getByText("Risk signals · why Hermes flagged this")).toBeTruthy();
+    expect(getByText(/2 changed file\(s\) touch review-gated/)).toBeTruthy();
+    // colored "+A -D" diff
+    expect(container.querySelector(".hm-files .row .diff .add")).toBeTruthy();
+  });
+
   test("done card shows the release-history eyebrow", () => {
     const done = FIXTURE_CARDS.find((c) => c.type === "done") as BoardCard;
     const { getByText } = render(

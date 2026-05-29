@@ -6,8 +6,10 @@
 
 import type {
   BoardCard,
+  CardCheckRun,
   CardChecks,
   CardFile,
+  CardRiskSignal,
   DeployCard,
   DoneCard,
   MissionCard,
@@ -78,6 +80,20 @@ function VerdictBlock({ head, children, accent }: { head: string; children: Reac
   );
 }
 
+/** Render a "+A -B" diff line as colored add/rm spans (matches the design). */
+function DiffLine({ diff }: { diff: string }) {
+  if (!diff) return null;
+  return (
+    <span className="diff">
+      {diff.split(/(?=[+-])/).map((part, i) => (
+        <span key={i} className={part.trim().startsWith("+") ? "add" : "rm"}>
+          {part}{" "}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function FilesSection({ files }: { files: CardFile[] | undefined }) {
   if (!files || files.length === 0) return null;
   return (
@@ -87,7 +103,7 @@ function FilesSection({ files }: { files: CardFile[] | undefined }) {
         {files.map((f) => (
           <div className="row" key={f.path}>
             <span className="path">{f.path}</span>
-            <span className="diff">{f.diff}</span>
+            <DiffLine diff={f.diff} />
             {f.critical ? (
               <span className="hm-pill hm-pill--risk">review-gated</span>
             ) : (
@@ -100,7 +116,20 @@ function FilesSection({ files }: { files: CardFile[] | undefined }) {
   );
 }
 
-function ChecksSection({ checks }: { checks: CardChecks | undefined }) {
+const CHECK_RUN_PILL: Record<CardCheckRun["status"], string> = {
+  pass: "hm-pill hm-pill--ok",
+  fail: "hm-pill hm-pill--risk",
+  running: "hm-pill hm-pill--running",
+  neutral: "hm-pill hm-pill--neutral",
+};
+
+function ChecksSection({
+  checks,
+  checkRuns,
+}: {
+  checks: CardChecks | undefined;
+  checkRuns?: CardCheckRun[] | undefined;
+}) {
   if (!checks || checks.total <= 0) return null;
   return (
     <section>
@@ -111,6 +140,41 @@ function ChecksSection({ checks }: { checks: CardChecks | undefined }) {
       </div>
       <div className="hm-checks">
         <ChecksBar checks={checks} />
+      </div>
+      {checkRuns && checkRuns.length > 0 ? (
+        <div className="hm-files" style={{ marginTop: 8 }}>
+          {checkRuns.map((c) => (
+            <div className="row" key={c.name}>
+              <span className="path">{c.name}</span>
+              <span className={CHECK_RUN_PILL[c.status]}>{c.status}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+const RISK_PILL: Record<CardRiskSignal["severity"], string> = {
+  high: "hm-pill hm-pill--risk",
+  medium: "hm-pill hm-pill--running",
+  low: "hm-pill hm-pill--neutral",
+};
+
+function RiskSignalsSection({ signals }: { signals: CardRiskSignal[] | undefined }) {
+  if (!signals || signals.length === 0) return null;
+  return (
+    <section>
+      <div className="hm-section-h">Risk signals · why Hermes flagged this</div>
+      <div className="hm-files">
+        {signals.map((s) => (
+          <div className="row" key={s.code}>
+            <span className="path" style={{ whiteSpace: "normal" }}>
+              {s.message}
+            </span>
+            <span className={RISK_PILL[s.severity]}>{s.severity}</span>
+          </div>
+        ))}
       </div>
     </section>
   );
@@ -128,8 +192,9 @@ function PrBody({ card }: { card: BoardCard }) {
       ) : (
         <VerdictBlock head="Status">{card.summary || "No additional context yet."}</VerdictBlock>
       )}
+      <RiskSignalsSection signals={card.riskSignals} />
       <FilesSection files={files} />
-      <ChecksSection checks={card.checks} />
+      <ChecksSection checks={card.checks} checkRuns={card.checkRuns} />
     </>
   );
 }
@@ -190,7 +255,7 @@ function DeployBody({ card }: { card: DeployCard }) {
           <div className="body">Deploy {card.deployId}.</div>
         </div>
       </section>
-      <ChecksSection checks={card.checks} />
+      <ChecksSection checks={card.checks} checkRuns={card.checkRuns} />
     </>
   );
 }

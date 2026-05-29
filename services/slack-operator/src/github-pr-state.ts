@@ -55,6 +55,8 @@ interface GithubApiPullRequest {
 
 interface GithubApiPullRequestFile {
   filename?: string;
+  additions?: number;
+  deletions?: number;
 }
 
 interface GithubApiCheckRun {
@@ -339,6 +341,10 @@ function buildLiveReviewSignals(
   const touchedFiles = files.map((file) => ({
     path: file.filename ?? "",
     area: inferTouchedArea(file.filename ?? ""),
+    // Captured from the same /pulls/:n/files response (no extra fetch) so
+    // the board can show a real "+A -D" diff line per file.
+    ...(typeof file.additions === "number" ? { additions: file.additions } : {}),
+    ...(typeof file.deletions === "number" ? { deletions: file.deletions } : {}),
   })).filter((file) => file.path);
   const touchedAreas = [...new Set(touchedFiles.map((file) => file.area))].filter(Boolean);
   const testSignals = [
