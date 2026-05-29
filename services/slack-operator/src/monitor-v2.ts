@@ -262,12 +262,25 @@ export function cardId(item: HermesBoardCardSnapshot): string {
   if (item.repo && typeof item.number === "number") {
     return `${shortRepo(item.repo)} #${item.number}`;
   }
-  const slug = (item.title ?? "card")
+  const slug = slugify(item.title ?? "card").slice(0, 40);
+  // Identity-less cards (deploy verifications, missions, tasks) often
+  // share a generic title — e.g. every "post-deploy verification" card.
+  // Without a discriminator they'd collapse onto one id, which breaks
+  // React keys, SSE card diffing, and drawer routing. Append a short,
+  // stable suffix from the classifier correlationId so distinct items
+  // get distinct ids.
+  if (item.correlationId) {
+    const suffix = slugify(item.correlationId).slice(-12);
+    if (suffix) return (slug ? `${slug}-${suffix}` : suffix).slice(0, 64);
+  }
+  return slug || "card";
+}
+
+function slugify(value: string): string {
+  return value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40);
-  return slug || "card";
+    .replace(/^-+|-+$/g, "");
 }
 
 function shortRepo(repo: string): string {

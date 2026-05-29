@@ -64,6 +64,13 @@ export interface HermesBoardCardSnapshot {
   why?: string;
   next?: string;
   tags?: ReadonlyArray<string>;
+  /**
+   * Stable correlation id for items without PR identity (deploy
+   * verifications, missions, tasks). The classifier already keys these
+   * by correlationId; forwarding it lets the v2 mapper build a unique
+   * card id instead of colliding distinct items onto one title slug.
+   */
+  correlationId?: string;
 }
 
 export interface HermesBoardSnapshot {

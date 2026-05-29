@@ -174,6 +174,27 @@ describe("cardId", () => {
     const longTitle = "a".repeat(80);
     expect(cardId(slim({ repo: undefined, number: undefined, title: longTitle })).length).toBeLessThanOrEqual(40);
   });
+
+  it("appends a stable correlationId suffix for identity-less cards", () => {
+    const id = cardId(slim({
+      repo: undefined,
+      number: undefined,
+      title: "post-production-deploy verification after workflow run",
+      correlationId: "github-deploy-1099-abc1234",
+    }));
+    expect(id.startsWith("post-production-deploy-verification-afte")).toBe(true);
+    expect(id.endsWith("1099-abc1234")).toBe(true);
+  });
+
+  it("gives same-title deploy cards distinct ids by correlationId", () => {
+    const a = cardId(slim({ repo: undefined, number: undefined, title: "post-deploy verification", correlationId: "github-deploy-1099-aaa" }));
+    const b = cardId(slim({ repo: undefined, number: undefined, title: "post-deploy verification", correlationId: "github-deploy-1100-bbb" }));
+    expect(a).not.toBe(b);
+  });
+
+  it("ignores correlationId when PR identity exists", () => {
+    expect(cardId(slim({ repo: "depre-dev/agent", number: 548, correlationId: "github-deploy-1-x" }))).toBe("agent #548");
+  });
 });
 
 describe("toBoardCard", () => {
