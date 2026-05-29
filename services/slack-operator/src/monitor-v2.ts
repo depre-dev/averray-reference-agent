@@ -78,6 +78,19 @@ export interface CardRunnerHeartbeat {
   online: boolean;
 }
 
+/** One CI check run, for the per-check breakdown under the checks bar. */
+export interface CardCheckRun {
+  name: string;
+  status: "pass" | "fail" | "running" | "neutral";
+}
+
+/** A Hermes review finding — the "why this needs review" detail. */
+export interface CardRiskSignal {
+  severity: "low" | "medium" | "high";
+  code: string;
+  message: string;
+}
+
 export interface BoardCard {
   id: string;
   lane: Lane;
@@ -125,6 +138,10 @@ export interface BoardCard {
   failureReason?: string;
   /** Codex task cards: runner liveness. */
   runnerHeartbeat?: CardRunnerHeartbeat;
+  /** Per-check CI breakdown (non-done cards) — the list under the bar. */
+  checkRuns?: CardCheckRun[];
+  /** Hermes review findings (non-done cards) — the "why review" detail. */
+  riskSignals?: CardRiskSignal[];
 }
 
 export interface BoardSnapshotV2 {
@@ -394,9 +411,9 @@ export function mapChecks(summary: Record<string, unknown> | undefined): CardChe
 }
 
 /**
- * Map a raw item `summary.reviewSignals.touchedFiles` ([{path,area}]) to
- * the UI CardFile shape. `diff` is left empty: the monitor file fetch
- * keeps only the filename, not additions/deletions.
+ * Map a raw item `summary.reviewSignals.touchedFiles`
+ * ([{path,area,additions?,deletions?}]) to the UI CardFile shape. `diff`
+ * is a "+A -D" line when the fetch captured additions/deletions, else "".
  */
 export function mapFiles(summary: Record<string, unknown> | undefined): CardFile[] {
   const reviewSignals = asRecord(summary?.reviewSignals);
@@ -406,9 +423,58 @@ export function mapFiles(summary: Record<string, unknown> | undefined): CardFile
     const file = asRecord(entry);
     const path = asString(file?.path);
     if (!path) continue;
-    files.push({ path, diff: "", critical: isCriticalFile(path) });
+    const additions = asFiniteNumber(file?.additions);
+    const deletions = asFiniteNumber(file?.deletions);
+    const diff =
+      additions !== undefined || deletions !== undefined
+        ? `+${additions ?? 0} -${deletions ?? 0}`
+        : "";
+    files.push({ path, diff, critical: isCriticalFile(path) });
   }
   return files;
+}
+
+/**
+ * Map a raw item `summary.checks` ([{name,status,conclusion}]) to the
+ * per-check breakdown. Same status logic as summarizeGithubChecks: not
+ * completed → running; success → pass; failure-ish → fail; else neutral.
+ */
+export function mapCheckRuns(summary: Record<string, unknown> | undefined): CardCheckRun[] {
+  const FAIL = new Set(["failure", "cancelled", "timed_out", "action_required", "startup_failure"]);
+  const runs: CardCheckRun[] = [];
+  for (const entry of asArray(summary?.checks)) {
+    const check = asRecord(entry);
+    const name = asString(check?.name);
+    if (!name) continue;
+    const status = (asString(check?.status) ?? "").toLowerCase();
+    const conclusion = (asString(check?.conclusion) ?? "").toLowerCase();
+    let mapped: CardCheckRun["status"];
+    if (status !== "completed") mapped = "running";
+    else if (conclusion === "success") mapped = "pass";
+    else if (FAIL.has(conclusion)) mapped = "fail";
+    else mapped = "neutral";
+    runs.push({ name, status: mapped });
+  }
+  return runs;
+}
+
+/**
+ * Map a raw item `summary.reviewReasons`
+ * ([{severity,code,message}]) to the UI risk-signal list. Drops the
+ * all-clear "pr_review_green" sentinel so a green PR shows no findings.
+ */
+export function mapRiskSignals(summary: Record<string, unknown> | undefined): CardRiskSignal[] {
+  const SEVERITIES = new Set(["low", "medium", "high"]);
+  const signals: CardRiskSignal[] = [];
+  for (const entry of asArray(summary?.reviewReasons)) {
+    const reason = asRecord(entry);
+    const code = asString(reason?.code);
+    const message = asString(reason?.message);
+    if (!code || !message || code === "pr_review_green") continue;
+    const sev = (asString(reason?.severity) ?? "").toLowerCase();
+    signals.push({ severity: SEVERITIES.has(sev) ? (sev as CardRiskSignal["severity"]) : "low", code, message });
+  }
+  return signals;
 }
 
 /** Stable per-PR correlation key: `<full-repo>#<number>`. */
@@ -482,14 +548,18 @@ export function enrichBoardCard(
   const { summary } = ctx;
   const isDone = card.type === "done";
 
-  // Checks + files: live (non-done) cards only. Done cards render in the
-  // compressed historical layout (no checks bar / file list), matching
-  // the design.
+  // Checks + files + per-check breakdown + risk findings: live (non-done)
+  // cards only. Done cards render in the compressed historical layout (no
+  // checks bar / file list), matching the design.
   if (summary && !isDone) {
     const checks = mapChecks(summary);
     if (checks) card.checks = checks;
     const files = mapFiles(summary);
     if (files.length > 0) card.files = files;
+    const checkRuns = mapCheckRuns(summary);
+    if (checkRuns.length > 0) card.checkRuns = checkRuns;
+    const riskSignals = mapRiskSignals(summary);
+    if (riskSignals.length > 0) card.riskSignals = riskSignals;
   }
 
   // Done cards: merge verdict + close timestamp from the PR state.

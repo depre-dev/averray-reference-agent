@@ -64,6 +64,19 @@ export interface CardFile {
   critical: boolean;
 }
 
+/** One CI check run, for the per-check breakdown under the checks bar. */
+export interface CardCheckRun {
+  name: string;
+  status: "pass" | "fail" | "running" | "neutral";
+}
+
+/** A Hermes review finding — the "why this needs review" detail. */
+export interface CardRiskSignal {
+  severity: "low" | "medium" | "high";
+  code: string;
+  message: string;
+}
+
 export interface CardAction {
   kind: "operator-review" | "codex-approve" | "deploy-verify" | "mission-rerun";
   primary: string;
@@ -85,6 +98,10 @@ export interface CardBase {
   state: CardState;
   risk: RiskTag[];
   checks?: CardChecks;
+  /** Per-check CI breakdown — the list under the checks bar. */
+  checkRuns?: CardCheckRun[];
+  /** Hermes review findings — the "why this needs review" detail. */
+  riskSignals?: CardRiskSignal[];
   waitingOn: WaitingOn;
   /** true ⇒ this card drives the needs-attention lane */
   isAction?: boolean;
