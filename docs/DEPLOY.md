@@ -2,9 +2,10 @@
 
 The `slack-operator` (and its sibling Node services) run from one image,
 `avg-node-runtime`, built by `ops/Dockerfile.node`. That image serves the
-redesigned monitor SPA as the **default board at `/monitor`**. The legacy
-HTML monitor was demoted to `/monitor/legacy` (kept as a transition
-fallback; `/monitor/next` 302s to `/monitor/`).
+redesigned monitor SPA as the **only board at `/monitor`**. The legacy
+HTML monitor has been retired (`renderMonitorHtml` deleted); `/monitor/next`
+302s to `/monitor/`. The `/monitor/events` + `/monitor/stream` data
+endpoints and `/monitor/manifest.webmanifest` remain.
 
 There are two ways to deploy. **Registry-pull is recommended**;
 build-on-server is the fallback.
@@ -74,14 +75,15 @@ docker compose --env-file ops/.env.prod -f ops/compose.yml -f ops/compose.prod.y
 
 ## After deploy
 
-- Board (redesigned, default): `https://monitor.averray.com/monitor`
-- Legacy monitor (deprecated fallback): `https://monitor.averray.com/monitor/legacy`
+- Board (the only one): `https://monitor.averray.com/monitor`
 - Health/manifest (lists active routes): `GET /health`
 
-The redesigned board is now the default at `/monitor`. The legacy HTML
-monitor is demoted to `/monitor/legacy` as a transition fallback; its
-renderer (`renderMonitorHtml`) is slated for removal once nothing depends
-on it. `/monitor/next` (the old preview path) 302s to `/monitor/`.
+The redesigned board is the single pipeline at `/monitor`. The legacy HTML
+monitor has been retired — `renderMonitorHtml` is deleted and there is no
+`/monitor/legacy`. `/monitor/next` (the old preview path) 302s to
+`/monitor/`. Operator actions that lived only in the legacy UI (recheck,
+Codex dispatch) are tracked for wiring onto the new board in
+`docs/MONITOR_ACTION_PARITY.md`.
 
 ---
 

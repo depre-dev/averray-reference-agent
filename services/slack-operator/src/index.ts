@@ -30,7 +30,6 @@ import {
   guardMonitorCommand,
   isMonitorAuthorized,
   parseMonitorConfig,
-  renderMonitorHtml,
   renderMonitorManifest,
 } from "./monitor.js";
 import {
@@ -206,7 +205,6 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
         missionSpawnRestricted: missionSpawnRestricted(missionSpawnRoles),
         paths: monitorConfig.enabled ? [
           "/monitor",
-          "/monitor/legacy",
           "/monitor/events",
           "/monitor/stream",
           "/monitor/v2/board",
@@ -228,19 +226,13 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
     writeRedirect(response, "/monitor");
     return;
   }
-  if (request.method === "GET" && (url.pathname === "/monitor/legacy" || url.pathname === "/monitor/events" || url.pathname === "/monitor/stream" || url.pathname === "/monitor/manifest.webmanifest")) {
+  if (request.method === "GET" && (url.pathname === "/monitor/events" || url.pathname === "/monitor/stream" || url.pathname === "/monitor/manifest.webmanifest")) {
     if (!monitorConfig.enabled) {
       writeJson(response, 404, { error: "monitor_disabled" });
       return;
     }
     if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
       writeJson(response, 401, { error: "monitor_unauthorized" });
-      return;
-    }
-    if (url.pathname === "/monitor/legacy") {
-      // Legacy HTML monitor — demoted from /monitor at the cutover, kept
-      // as a transition fallback. Slated for removal.
-      writeHtml(response, 200, renderMonitorHtml());
       return;
     }
     if (url.pathname === "/monitor/manifest.webmanifest") {
@@ -317,8 +309,8 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
     writeRedirect(response, "/monitor/");
     return;
   }
-  // Redesigned monitor SPA — the default board at /monitor (the legacy
-  // HTML monitor moved to /monitor/legacy). The guard only fires for the
+  // Redesigned monitor SPA — the only board, served at /monitor (the
+  // legacy HTML monitor was retired). The guard only fires for the
   // SPA's own paths (/monitor, /monitor/, /monitor/assets/*); every other
   // /monitor/* path (the /monitor/v2/* APIs, /monitor/codex-tasks,
   // /monitor/collaboration, …) resolves to "miss" and falls through to
@@ -363,9 +355,8 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
             response,
             200,
             "<!doctype html><meta charset=\"utf-8\"><title>Hermes monitor</title>" +
-              "<p style=\"font-family:system-ui;padding:24px\">The redesigned monitor UI is not built in this image. " +
-              "Run <code>npm --workspace packages/monitor-ui run build</code>, or use the legacy monitor at " +
-              "<a href=\"/monitor/legacy\">/monitor/legacy</a>.</p>",
+              "<p style=\"font-family:system-ui;padding:24px\">The monitor UI is not built in this image. " +
+              "Run <code>npm --workspace packages/monitor-ui run build</code> and redeploy.</p>",
           );
         } else {
           writeJson(response, 404, { error: "asset_not_found" });
