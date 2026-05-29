@@ -3,60 +3,31 @@
 - **Status:** Planning / handoff only. **Nothing here is implemented.** This is the build spec a future agent follows; it does not apply changes.
 - **Date:** 2026-05-29
 - **Companions:** [`HERMES_MULTI_AGENT_ORCHESTRATION_PLAN.md`](./HERMES_MULTI_AGENT_ORCHESTRATION_PLAN.md) (the why + phases), [`HERMES_INTEGRATION_MAP.md`](./HERMES_INTEGRATION_MAP.md) (the confirmed source map).
-- **Scope:** turns plan phases P1–P5 + the dispatch guardrail into concrete, file-level build specs. All `path:line` references are local to this repo. Code blocks are **illustrative sketches of the intended change**, not applied diffs.
+- **Decisions:** all nine open decisions are **resolved** (see the table at the end). They're baked into the specs below. `path:line` references are local to this repo; code blocks are illustrative sketches, not applied diffs.
 
-> Build order: **P1 → P2 → P3 → P4 (+ guardrail) → P5.** P1 has no open decisions and is ready. P2/P3 have a few decisions flagged for operator sign-off. P4 is the authority change and must not ship without the guardrail. Every phase is one narrow PR per [AGENTS.md](../AGENTS.md), with `npm run typecheck` + `npm test` green and the PR template's invariant checks.
+> Build order: **P1 → P2 → P3 → P4 (enqueue + guardrail + autonomy mode) → P5.** P1 is unblocked. Every phase is one narrow PR per [AGENTS.md](../AGENTS.md), `npm run typecheck` + `npm test` green, PR template completed (incl. the durable-invariant checks).
 
 ---
 
-## P1 — Agent attribution  ·  ready to build · no open decisions · risk: low
+## P1 — Agent attribution  ·  ready to build · risk: low
 
 **Goal:** the board stops labelling every card `ext`. Attribute each card to the agent that opened the PR via the branch convention (`codex/*`, `claude/*`).
 
-**Why it's the first build:** smallest change, highest signal, and a prerequisite for routing (you can't route by agent if you can't attribute by agent). It's a pure read-path enrichment — no lane logic, no mutation.
+**Why first:** smallest change, highest signal, prerequisite for routing. Pure read-path enrichment — no lane logic, no mutation. (Bonus: greenfield Claude PRs from P2 land on `claude/*` branches, so they attribute automatically.)
 
 **Confirmed data flow:**
 ```
 raw monitor snapshot
-  → boardCardFromItem()          services/slack-operator/src/monitor-hermes-board.ts:42
-      builds the slim HermesBoardCardSnapshot (drops the branch today)
-  → toBoardCard()                services/slack-operator/src/monitor-v2.ts:313
-      → inferAgentType()         services/slack-operator/src/monitor-v2.ts:225  ← uses `owner`, defaults "ext"
-  → BoardCard.agentType
+  → boardCardFromItem()   services/slack-operator/src/monitor-hermes-board.ts:42  (builds slim card, drops branch today)
+  → toBoardCard()         services/slack-operator/src/monitor-v2.ts:313
+      → inferAgentType()   monitor-v2.ts:225  ← uses `owner`, defaults "ext"
 ```
-The branch *is* available upstream (`packages/averray-mcp/src/operator-github.ts:1432` sets `headBranch` from `pull.head.ref`; `services/slack-operator/src/github-pr-state.ts:180,280` too) but the slim card drops it (`monitor-v2.ts:338` — `// branch not in slim model`).
+The branch is available upstream (`packages/averray-mcp/src/operator-github.ts:1432`; `services/slack-operator/src/github-pr-state.ts:180,280`) but dropped from the slim card (`monitor-v2.ts:338` — `// branch not in slim model`).
 
 **Change set (3 files):**
-
-1. **`services/slack-operator/src/monitor-hermes-voice.ts`** — add a field to `HermesBoardCardSnapshot` (after `correlationId?`):
-   ```ts
-   /** PR head branch (e.g. "codex/foo"); forwarded so the v2 mapper can
-       attribute the card by branch prefix instead of the owner string. */
-   headBranch?: string;
-   ```
-
-2. **`services/slack-operator/src/monitor-hermes-board.ts`** — in `boardCardFromItem` (≈:57), resolve and forward the branch:
-   ```ts
-   const headBranch = headBranchForPr(prState, summary, item);
-   return { ...,
-     ...(correlationId ? { correlationId } : {}),
-     ...(headBranch ? { headBranch } : {}),
-   };
-   ```
-   Add a helper next to `pullRequestState` (≈:393) that tolerates a flat `headBranch` or a nested `head.ref` across `currentPullRequest` / `pullRequest` / `item.pullRequest`:
-   ```ts
-   function headBranchForPr(prState, summary, item): string {
-     for (const src of [prState, recordProp(summary, "pullRequest"), recordProp(item, "pullRequest")]) {
-       if (!src) continue;
-       const flat = textProp(src, "headBranch"); if (flat) return flat;
-       const head = recordProp(src, "head"); const ref = head ? textProp(head, "ref") : "";
-       if (ref) return ref;
-     }
-     return "";
-   }
-   ```
-
-3. **`services/slack-operator/src/monitor-v2.ts`** — `inferAgentType` (:225) prefers the branch prefix, then falls back to the existing owner-string logic; add an exported helper; and populate `card.branch` in `toBoardCard` (:338):
+1. **`monitor-hermes-voice.ts`** — add `headBranch?: string` to `HermesBoardCardSnapshot` (after `correlationId?`).
+2. **`monitor-hermes-board.ts`** — in `boardCardFromItem` (≈:57) resolve+forward the branch via a `headBranchForPr(prState, summary, item)` helper (tolerates flat `headBranch` or nested `head.ref` across `currentPullRequest`/`pullRequest`/`item.pullRequest`); add `...(headBranch ? { headBranch } : {})` to the returned card.
+3. **`monitor-v2.ts`** — `inferAgentType` prefers the branch prefix, then falls back to the owner logic; add exported `agentTypeFromBranch(headBranch)`; set `card.branch = item.headBranch` in `toBoardCard`:
    ```ts
    export function inferAgentType(item, type): AgentType {
      if (type === "mission") return "hermes";
@@ -74,128 +45,139 @@ The branch *is* available upstream (`packages/averray-mcp/src/operator-github.ts
      if (b.startsWith("claude/")) return "claude";
      return undefined;
    }
-   // toBoardCard:  replace the `branch not in slim model` line with:
-   if (item.headBranch) card.branch = item.headBranch;
    ```
 
-**Tests** (`test/unit/monitor-v2.test.ts`, reuse the existing `slim()` helper; `test/unit/monitor-hermes-board.test.ts` for forwarding):
-- branch prefix wins over a conflicting `owner` (`owner:"Codex"`, `headBranch:"claude/x"` → `claude`);
-- `codex/*`→codex, `claude/*`→claude, case-insensitive;
-- non-agent branch (`main`, `feature/x`) falls back to the owner string;
-- `mission` type stays `hermes` regardless of branch;
-- `toBoardCard` populates `branch` and `agentType` together;
-- board forwarding: `headBranch` from `currentPullRequest.headBranch` and from nested `head.ref`.
+**Tests** (`test/unit/monitor-v2.test.ts` via the `slim()` helper; `monitor-hermes-board.test.ts` for forwarding): branch wins over conflicting owner; `codex/*`/`claude/*` (case-insensitive); non-agent branch falls back to owner; mission stays hermes; `toBoardCard` sets branch+agentType; board forwards `headBranch` from `currentPullRequest.headBranch` and from `head.ref`.
 
-**Acceptance:** live board attributes `codex/*` and `claude/*` PRs correctly; non-prefixed PRs remain `ext`; typecheck + tests green.
-
-**Note (out of scope):** human-authored PRs on non-prefixed branches stay `ext`. A distinct `human` agent type can come later; not needed now.
+**Acceptance:** live board attributes `codex/*` and `claude/*` PRs; non-prefixed PRs stay `ext`; typecheck + tests green.
 
 ---
 
-## P2 — Claude Code worker  ·  concrete · 3 decisions · risk: medium
+## P2 — Claude Code worker (greenfield, Agent SDK)  ·  risk: medium-high
 
-**Goal:** a Claude worker symmetric to the Codex one, so an approved Claude task runs headless and opens/updates a PR.
+**Decisions baked in:** greenfield from the start (#1); **Claude Agent SDK** (#2); per-agent runner (#3).
 
-**Confirmed reuse surface:**
-- `services/slack-operator/src/codex-task-queue.ts` — JSON queue, `proposed→approved→running→completed/failed/cancelled`.
-- `services/slack-operator/src/codex-task-runner.ts` — **command-agnostic** poll/claim/execute/heartbeat (spawns `CODEX_TASK_RUNNER_COMMAND` with templated args; 10s poll; 30m timeout; secret-sanitized output).
-- `services/slack-operator/src/codex-branch-worker.ts` — the Codex-specific part: refuses protected branches (:123), checks out the PR head branch (:192), runs the `codex` CLI, pushes (:213).
+**Goal:** Hermes/operator can hand Claude a task with no pre-existing PR; Claude creates its own branch, does the work, and opens a PR — which then flows through the existing Hermes handoff.
+
+**Reuse surface:** `codex-task-queue.ts` (JSON queue, `proposed→approved→running→completed/failed/cancelled`), `codex-task-runner.ts` (command-agnostic poll/claim/heartbeat; 10s poll, 30m timeout, secret-sanitized output), `codex-branch-worker.ts` (protected-branch guard, push).
 
 **Design:**
-- **Generalize the queue:** add `agent: "codex" | "claude"` to `CodexTaskInput`/`CodexTask` (default `"codex"` for back-compat). Add an `agent` filter to `claimNextApprovedCodexTask` so each runner claims only its agent's tasks.
-- **Worker:** `claude-branch-worker.ts` mirroring `codex-branch-worker.ts` — same protected-branch guard, checkout, push, and output sanitization, but the command is `claude -p "<prompt>"` (headless print mode) or the Claude Agent SDK.
-- **Runner:** run a second `claude-task-runner` process (filters `agent==="claude"`, its own `CLAUDE_TASK_RUNNER_COMMAND` + heartbeat id), mirroring the Codex runner. Compose service added in `ops/`.
+- **Queue generalization:** add `agent: "codex" | "claude"` (default `"codex"`), and **make `pullRequestNumber` optional** so a task can be greenfield (no PR yet). Add an `agent` filter to `claimNextApprovedCodexTask`.
+- **Greenfield Claude worker** (`claude-branch-worker.ts`): creates a `claude/<task-slug>` branch from fresh `origin/main`, runs the task, commits, **opens a PR** (title/body from the task), pushes. Reuses the protected-branch guard + secret sanitization. (PR-centric tasks — a `pullRequestNumber` present — check out that branch instead, so both modes coexist.)
+- **Agent SDK invocation:** run Claude via the Agent SDK, not the bare CLI — set a restricted **permission mode + allowed-tools** (edit/git within the worktree, no destructive ops), capture **structured output** (summary, files touched, PR url) and **stream progress** to the monitor (`updateCodexTaskProgress` equivalent). `ANTHROPIC_API_KEY` is a managed secret (never logged).
+- **Per-agent runner:** a `claude-task-runner` process mirroring the Codex runner (own heartbeat id, own `CLAUDE_TASK_RUNNER_*` env), added as an `ops/` compose service.
 
-**Tests:** queue `agent` default + claim filter; `claude-branch-worker` refuses protected branches; runner claims only its agent's approved tasks.
+**Tests:** queue `agent` default + optional PR + claim filter; greenfield worker creates/pushes a `claude/*` branch and refuses protected branches; runner claims only `claude` tasks; structured-output parsing.
 
-**Acceptance:** an approved `claude` task → `claude-branch-worker` runs headless in the PR's worktree → pushes → the PR flows into Operator review via the existing Hermes handoff, unchanged.
+**Acceptance:** an approved greenfield `claude` task → worker opens a `claude/<task>` PR → it appears on the board attributed to `claude` (via P1) → flows into Operator review via the existing handoff, unchanged.
 
-**Open decisions (operator):**
-1. **PR-centric vs greenfield.** Codex today iterates on an *existing* PR's branch (`pullRequestNumber` is required). Same for Claude (smallest delta, recommended to start), or extend the schema/worker to originate a branch + PR?
-2. **Invocation:** `claude -p` headless (parity with the Codex CLI worker, recommended) vs the Agent SDK. Plus auth (API key env), sandbox, network, and whether the worker gets MCP access.
-3. **Runner topology:** a per-agent runner (recommended — clean heartbeats/isolation) vs one generalized runner routing by `task.agent`.
-
-**Risk:** medium — this worker executes code and pushes branches. It must reuse the protected-branch guard, secret sanitization, timeout, **and** the human approval gate (tasks run only at `status:"approved"`, `approvedBy:"operator"`).
+**Security (load-bearing):** this is an unattended coding agent with branch-create + push rights. It must run with the SDK permission mode scoped to its worktree, reuse the protected-branch guard + secret sanitization, hold `ANTHROPIC_API_KEY` as a managed secret, and — crucially — **only ever run tasks at `status:"approved"`** (who approves is the P4 autonomy-mode decision; the worker itself never self-approves).
 
 ---
 
-## P3 — Board-driven dispatch  ·  concrete · 1 decision · risk: low–medium
+## P3 — Board-driven dispatch  ·  risk: low–medium
 
-**Goal:** make the dormant `codex-needed` lane (`CREATE / APPROVE TASK`) work for both agents, drivable from the board.
+**Decision baked in:** both surfaces (#4).
 
-**Confirmed surface:** enqueue is `POST /monitor/codex-tasks` (`services/slack-operator/src/index.ts:389` → `proposeCodexTask` :1107); approval → `approveCodexTask(id, { approvedBy:"operator" })` (:1132). Co-pilot composer already parses `/mission`, `/mute`.
+**Goal:** make the dormant `codex-needed` lane (`CREATE / APPROVE TASK`) work for both agents.
+
+**Confirmed surface:** enqueue = `POST /monitor/codex-tasks` (`services/slack-operator/src/index.ts:389` → `proposeCodexTask` :1107); approve = `approveCodexTask(id, { approvedBy:"operator" })` (:1132).
 
 **Design:**
-- Extend the create-task endpoint + UI form to accept `agent` (`codex|claude`), defaulting to `codex`.
-- Add a co-pilot `/task <agent> <repo>#<pr> <prompt>` slash verb (mirror the `/mission` parser).
-- Render the task card's agent (depends on P1 attribution).
-- **Keep the human approve step** (`proposed → approved` by operator) — invariant.
+- Extend the create-task endpoint + board form to accept `agent` (`codex|claude`) and optional `repo#pr` (omitted ⇒ greenfield).
+- Add a co-pilot **`/task <agent> [<repo>#<pr>] <prompt>`** slash verb (mirror the `/mission` parser) — this is also where Hermes's *proposed* tasks surface.
+- Render the agent on the task card (depends on P1).
+- **Keep the human approve step** in supervised mode (`proposed → approved` by operator). Autopilot auto-approval is P4.
 
-**Tests:** endpoint validates/stores `agent`; task card renders the agent; slash-verb parsing.
-
-**Acceptance:** operator creates a `claude` task from the board → it lands in `codex-needed` → the Claude runner claims it → the resulting PR is attributed to `claude`.
-
-**Open decision:** dispatch surface — form, `/task` slash verb, or both (recommend both).
-
-**Risk:** low–medium — no new authority beyond the existing operator-authed endpoint + human approve.
+**Acceptance:** operator creates a `claude` task from the board (or `/task`) → lands in `codex-needed` → Claude runner claims after approval → PR attributed to `claude`.
 
 ---
 
-## P4 — Hermes as router + the dispatch guardrail  ·  the authority change · risk: HIGH
+## P4 — Hermes enqueue + dispatch guardrail + autonomy mode  ·  the authority change · risk: HIGH
 
-**Goal:** Hermes proposes and routes work itself; the human still approves.
+**Decisions baked in:** `enqueue_agent_task` MCP intent (#5); guardrail config in `policy.yaml` + `dispatch-policy.ts` (#6); surface+risk routing taxonomy + autonomy mode (#7); autopilot ends on stated-time-else-safety-cap; high-risk surfaces always escalate.
 
-**Confirmed gap:** `invoke_agent_task` has **no enqueue intent** (`packages/averray-mcp/src/agent-invocation.ts:24`), and `mutation-policy.ts` covers marketplace claim/submit **only** — there is no policy over code dispatch. A global `HALT_FILE` kill switch exists (`packages/averray-mcp/src/index.ts:409`).
+This phase has four parts; **none of it ships without all of them.**
 
-**Design — three parts, all required together:**
+### (A) Enqueue capability — proposes-only
+Add `enqueue_agent_task` to `AgentInvocationIntent` (`packages/averray-mcp/src/agent-invocation.ts:24`), wired to `proposeCodexTask`. It writes **`status:"proposed"` only — never `approved`** — and records a handoff event (reuses Hermes's existing audit trail). Approval is governed by the autonomy mode (D), never by this intent.
 
-1. **Enqueue capability (proposes-only).** Add an `enqueue_agent_task` intent to the `AgentInvocationIntent` union, wired to `proposeCodexTask`. It must write `status:"proposed"` **only — never `approved`.** (Alternative: Hermes calls `POST /monitor/codex-tasks` via the gateway. Recommend the MCP intent so it lands in the existing handoff-event audit trail.)
+### (B) Dispatch guardrail — NEW, do not reuse `mutation-policy.ts`
+A `dispatch:` block in `hermes/config/policy.yaml` + a `dispatch-policy.ts` mirroring `mutation-policy.ts`:
+- **Allowlist** — repos + task kinds Hermes may propose.
+- **Budget** — max proposed/auto-approved tasks per day (and per repo).
+- **Honors `HALT_FILE`** (the global kill switch).
+- **Human-approval invariant** — Hermes proposes; only the operator or autopilot-within-rules approves; **merge/deploy stays human, always.**
 
-2. **A NEW dispatch guardrail** (do **not** reuse `mutation-policy.ts`):
-   - **Allowlist** — which repos + task kinds Hermes may propose.
-   - **Budget** — max proposed tasks per day (and per repo), in the style of `hermes/config/policy.yaml`'s budget block; counters persisted in the data dir.
-   - **Human-approval invariant** — Hermes proposes; `approveCodexTask` stays operator-only.
-   - **Honors `HALT_FILE`.**
-   - Lives as a `dispatch:` block in `policy.yaml` + a `dispatch-policy.ts` mirroring `mutation-policy.ts`.
+### (C) Routing taxonomy — surface + risk
+The function Hermes uses to suggest (supervised) and route (autopilot):
+- **Codex surfaces:** contracts, chain/settlement, indexer, XCM, treasury/policy, payments, DB migrations, deploy/ops, secrets/config. *(High-risk, correctness-critical, hard to reverse.)*
+- **Claude surfaces:** UI/frontend, the monitor itself, docs/copy, tests, refactors, DX, non-financial backend, MCP tool ergonomics. *(Breadth + readability.)*
+- **Ambiguous/general** (small bugfixes, cross-cutting): Hermes picks by recent success / load.
+- **Risk tiers** (drive autopilot escalation in (D)): **high-risk** = contracts, chain/settlement, secrets, DB migrations, deploy/ops; **low/medium** = everything else. These mirror the surfaces the existing PR handoff already flags as risky.
+- *Emergent property:* high-risk surfaces are mostly Codex's, so autopilot naturally auto-approves Claude's lower-risk work and escalates the dangerous work. Routing is a **default the operator can override** at approval; it sharpens via learned per-agent success in P5.
 
-3. **Routing logic (a Hermes skill).** Reads the board (`averray_handoff_monitor`) + roadmap, decides what's needed, routes by **task taxonomy** (Codex owns chain/settlement; Claude takes UI/docs/general), proposes the (gated) task, and **narrates the decision** in the co-pilot rail (a collaboration message). Taxonomy + narration are skill/prompt work.
+### (D) Autonomy mode — the master control
+Server-side state (stored on the shared data volume, audited):
+```ts
+type AutonomyMode = "supervised" | "autopilot";
+interface AutonomyState {
+  mode: AutonomyMode;     // default "supervised"
+  until?: string;         // ISO; autopilot reverts at/after this
+  setBy: string; setAt: string; reason?: string;
+}
+```
+- **Set autopilot** via a board switch *or* a co-pilot NL command ("Hermes, you're in charge until 5pm" / "for 2 hours" / open-ended). Parse → `mode:"autopilot"`, `until` = stated time, **else `now + 4h` safety cap** (default; tunable). A forgotten autopilot can't run forever.
+- **Revert** via switch, an "I'm back" command, or `until` expiry (evaluated lazily on each dispatch decision + a periodic check).
+- **Auto-approval logic** when a task `T` is proposed (after routing):
+  ```
+  record proposed (always)
+  if mode == autopilot AND now < until
+     AND dispatchPolicy.allows(T)         // allowlist + daily budget + !HALT_FILE
+     AND riskTier(T) != "high":           // high-risk ALWAYS escalates to operator
+        approve(T, approvedBy: "hermes-autopilot")
+  else:
+        leave proposed for the operator
+  ```
+- **Invariant unchanged:** autopilot only changes *who starts work*. Work still parks at `operator-review`/`release-queue`; **merge/deploy is always human.** Every mode change and every `hermes-autopilot` approval is a logged event.
 
-**Tests:** dispatch-policy unit (allowlist / budget / halt); enqueue intent proposes-only (never approves); routing taxonomy mapping.
+**Tests:** dispatch-policy unit (allowlist/budget/halt); `enqueue_agent_task` proposes-only (never approves); routing taxonomy mapping; risk-tier classification; autonomy auto-approval matrix (supervised → never auto; autopilot + low-risk + within budget → auto; autopilot + high-risk → escalate; autopilot + expired `until` → escalate; HALT present → escalate); NL parse of "until 5pm" / "for 2h" / open-ended → 4h cap.
 
-**Acceptance:** given a backlog, Hermes proposes ≥1 correctly-routed task (gated), narrates why, and the operator approves it from the board.
+**Acceptance:** in supervised, Hermes proposes correctly-routed tasks and you approve. In autopilot ("you're in charge til 4pm"), Hermes auto-approves low/medium-risk dispatch within budget, escalates high-risk, narrates each decision in the rail, and reverts at 4pm (or your default cap). Merge/deploy never auto-fires.
 
-**Open decisions (operator):** enqueue via MCP intent vs gateway HTTP; where the dispatch policy config lives; the exact Codex-vs-Claude taxonomy (needs operator input).
-
-**Risk: HIGH — this is the authority change.** It must ship with the guardrail + proposes-only + human approve + `HALT_FILE`. This is the gate before any autonomy; treat it as security-reviewed work.
+**Risk: HIGH** — this is the authority change and the autonomy surface. Treat as security-reviewed work; ships only with (A)+(B)+(C)+(D) together.
 
 ---
 
 ## P5 — Self-management hardening  ·  ongoing
 
-- Heartbeat-staleness detection → surface stuck/stale tasks in `needs-attention`.
-- Retries via `attemptCount`; escalation rules when a task fails repeatedly.
-- Per-agent performance memory (Hermes memory) feeding the routing skill so attribution → routing improves over time.
-- Observability: a handoff event per dispatch decision; no silent caps (log anything dropped by the budget).
+- Heartbeat-staleness → surface stuck/stale tasks in `needs-attention`; retries via `attemptCount`; escalation when a task fails repeatedly.
+- **Learned routing:** per-agent success memory (Hermes memory) feeds the taxonomy so routing improves over time (the "intelligent" half of Rung C).
+- Observability: a handoff event per dispatch + per autonomy-mode change; autopilot session summaries ("Hermes was in charge 14:00–17:00: 3 tasks routed, 2 auto-approved, 1 escalated"). No silent caps — log anything the budget drops.
 
 ---
 
 ## Cross-cutting rules (every phase)
 
-- One narrow PR; branch `codex/<task>` or `claude/<task>`; `npm run typecheck` + `npm test` green; complete the PR template, including the durable-invariants checks.
-- **Update [AGENTS.md](../AGENTS.md) in the same PR** when a phase changes how agents work (e.g. P2 adds a worker, P4 changes Hermes's powers). This is a durable invariant.
-- Preserve the board's honest real/degraded/empty signaling — never make orchestration look more autonomous/live than it is.
+- One narrow PR; branch `codex/<task>` or `claude/<task>`; `npm run typecheck` + `npm test` green; complete the PR template incl. durable-invariant checks.
+- **Update [AGENTS.md](../AGENTS.md) in the same PR** when a phase changes how agents work (P2 adds a worker; P4 changes Hermes's powers + adds autonomy mode). Durable invariant.
+- Preserve the board's honest real/degraded/empty signaling.
 
-## Open-decisions summary (for operator sign-off)
+## Decisions (resolved)
 
-| # | Decision | Phase | Recommendation |
-|---|---|---|---|
-| 1 | Claude worker: iterate-on-PR vs greenfield branch+PR | P2 | Start PR-centric (smallest delta) |
-| 2 | Claude invocation: `claude -p` vs Agent SDK (+ auth/sandbox/MCP) | P2 | `claude -p` headless first |
-| 3 | Runner topology: per-agent vs one generalized | P2 | Per-agent runner |
-| 4 | Dispatch surface: form vs `/task` slash vs both | P3 | Both |
-| 5 | Hermes enqueue: new MCP intent vs gateway HTTP | P4 | MCP intent (auditable) |
-| 6 | Where the dispatch policy config lives | P4 | `dispatch:` in `policy.yaml` + `dispatch-policy.ts` |
-| 7 | Codex-vs-Claude task taxonomy | P4 | Needs operator input |
+| # | Decision | Resolution |
+|---|---|---|
+| 1 | Claude worker: PR-centric vs greenfield | **Greenfield from the start** (PR-centric tasks still supported when a PR is given) |
+| 2 | Claude invocation | **Claude Agent SDK** (scoped permissions, structured output, streamed progress) |
+| 3 | Runner topology | **Per-agent runner** |
+| 4 | Dispatch surface | **Both** — board form + co-pilot `/task` verb |
+| 5 | Hermes enqueue mechanism | **`enqueue_agent_task` MCP intent**, proposes-only |
+| 6 | Dispatch guardrail config | **`dispatch:` block in `policy.yaml` + `dispatch-policy.ts`** |
+| 7 | Codex-vs-Claude routing | **Surface + risk taxonomy** (§P4-C) used as an overridable default |
+| 8 | Autopilot end condition | **Stated time, else a safety cap** (default 4h; tunable) |
+| 9 | Autopilot risk line | **Always escalate high-risk** surfaces (contracts/chain/settlement/secrets/migrations/deploy) to the operator |
+
+**Remaining implementation defaults (builder-tunable, not blockers):** the safety-cap duration (proposed 4h), the exact high-risk surface list, the daily dispatch budget number, and the dispatch allowlist contents — set sensible defaults and surface them in `policy.yaml`.
 
 ---
 
