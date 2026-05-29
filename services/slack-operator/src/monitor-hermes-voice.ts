@@ -71,6 +71,12 @@ export interface HermesBoardCardSnapshot {
    * card id instead of colliding distinct items onto one title slug.
    */
   correlationId?: string;
+  /**
+   * The PR's head branch (e.g. "codex/foo", "claude/bar"). Forwarded so
+   * the v2 mapper can attribute the card to the agent that opened the PR
+   * via the branch-prefix convention. Absent for non-PR cards.
+   */
+  headBranch?: string;
 }
 
 export interface HermesBoardSnapshot {

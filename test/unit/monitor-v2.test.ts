@@ -9,6 +9,7 @@ import {
   parseAgeToMinutes,
   cardId,
   toBoardCard,
+  agentTypeFromBranch,
   buildV2BoardSnapshot,
   isCriticalFile,
   mapChecks,
@@ -106,18 +107,45 @@ describe("inferCardType", () => {
   });
 });
 
-describe("inferAgentType", () => {
-  it("mission type → hermes", () => {
-    expect(inferAgentType(slim({ owner: "Operator" }), "mission")).toBe("hermes");
+describe("agentTypeFromBranch", () => {
+  it("maps codex/* and claude/* prefixes (case-insensitive)", () => {
+    expect(agentTypeFromBranch("codex/foo")).toBe("codex");
+    expect(agentTypeFromBranch("claude/bar")).toBe("claude");
+    expect(agentTypeFromBranch("Codex/Foo")).toBe("codex");
+    expect(agentTypeFromBranch("  CLAUDE/Bar  ")).toBe("claude");
   });
-  it("owner contains codex → codex", () => {
-    expect(inferAgentType(slim({ owner: "Codex" }), "pr")).toBe("codex");
+  it("returns undefined for non-agent / missing branches", () => {
+    expect(agentTypeFromBranch("feature/x")).toBeUndefined();
+    expect(agentTypeFromBranch("codexish/x")).toBeUndefined(); // prefix must be "codex/"
+    expect(agentTypeFromBranch("")).toBeUndefined();
+    expect(agentTypeFromBranch(undefined)).toBeUndefined();
+  });
+});
+
+describe("inferAgentType", () => {
+  it("mission type → hermes (even with a non-hermes branch)", () => {
+    expect(inferAgentType(slim({ owner: "Operator", headBranch: "codex/x" }), "mission")).toBe("hermes");
+  });
+  it("branch prefix wins over a conflicting owner", () => {
+    expect(inferAgentType(slim({ owner: "Codex", headBranch: "claude/x" }), "pr")).toBe("claude");
+    expect(inferAgentType(slim({ owner: "Merge steward", headBranch: "codex/x" }), "pr")).toBe("codex");
+  });
+  it("codex/* and claude/* attribute, case-insensitive", () => {
+    expect(inferAgentType(slim({ owner: "ext", headBranch: "codex/feat" }), "pr")).toBe("codex");
+    expect(inferAgentType(slim({ owner: "ext", headBranch: "Claude/Feat" }), "pr")).toBe("claude");
+  });
+  it("non-agent branch falls back to the owner heuristic", () => {
+    expect(inferAgentType(slim({ owner: "Codex", headBranch: "feature/x" }), "pr")).toBe("codex");
+    expect(inferAgentType(slim({ owner: "Merge steward", headBranch: "feature/x" }), "pr")).toBe("ext");
+  });
+  it("owner contains codex → codex (no branch)", () => {
+    expect(inferAgentType(slim({ owner: "Codex", headBranch: undefined }), "pr")).toBe("codex");
   });
   it("owner contains hermes → hermes", () => {
-    expect(inferAgentType(slim({ owner: "Hermes" }), "pr")).toBe("hermes");
+    expect(inferAgentType(slim({ owner: "Hermes", headBranch: undefined }), "pr")).toBe("hermes");
   });
   it("unknown owner → ext", () => {
-    expect(inferAgentType(slim({ owner: "Merge steward" }), "pr")).toBe("ext");
+    expect(inferAgentType(slim({ owner: "Merge steward", headBranch: undefined }), "pr")).toBe("ext");
   });
 });
 
@@ -215,6 +243,16 @@ describe("toBoardCard", () => {
     expect(card.waitingOn).toEqual({ actor: "operator", tone: "neutral" });
     expect(card.verdict).toBe("Hermes pre-check passed");
     expect(card.next).toBe("Approve & merge");
+  });
+
+  it("sets branch + agentType together from headBranch", () => {
+    const card = toBoardCard(slim({ owner: "Operator", headBranch: "claude/monitor-agent-attribution" }));
+    expect(card.branch).toBe("claude/monitor-agent-attribution");
+    expect(card.agentType).toBe("claude"); // branch wins over the "Operator" owner
+  });
+
+  it("leaves branch undefined when no headBranch is present", () => {
+    expect(toBoardCard(slim({ headBranch: undefined })).branch).toBeUndefined();
   });
 
   it("flags needs-attention cards as isAction with warn tone", () => {

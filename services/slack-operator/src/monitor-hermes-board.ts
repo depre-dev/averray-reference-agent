@@ -54,6 +54,7 @@ function boardCardFromItem(
   if (!title && !identity.repo) return undefined;
   const why = reasonForItem(item, summary, prState, codexTaskStatus);
   const correlationId = textProp(item, "correlationId");
+  const headBranch = headBranchForPr(prState, summary, item);
   return {
     ...identity,
     title: title || "Untitled handoff",
@@ -65,7 +66,40 @@ function boardCardFromItem(
     next: classification.next,
     tags: tagsForItem(item, summary),
     ...(correlationId ? { correlationId } : {}),
+    ...(headBranch ? { headBranch } : {}),
   };
+}
+
+/** Read a PR's head branch, tolerating a flat `headBranch` or a nested `head.ref`. */
+function headBranchFromPr(pr: Record<string, unknown> | undefined): string {
+  if (!pr) return "";
+  const flat = textProp(pr, "headBranch");
+  if (flat) return flat;
+  const head = recordProp(pr, "head");
+  return head ? textProp(head, "ref") : "";
+}
+
+/**
+ * Resolve the PR head branch across the candidate PR objects
+ * (currentPullRequest / pullRequest / item.pullRequest). Used to
+ * attribute the card to the agent that opened the PR (codex/*, claude/*).
+ */
+function headBranchForPr(
+  prState: Record<string, unknown> | undefined,
+  summary: Record<string, unknown>,
+  item: Record<string, unknown>
+): string {
+  const candidates = [
+    prState,
+    recordProp(summary, "currentPullRequest"),
+    recordProp(summary, "pullRequest"),
+    recordProp(item, "pullRequest"),
+  ];
+  for (const pr of candidates) {
+    const branch = headBranchFromPr(pr);
+    if (branch) return branch;
+  }
+  return "";
 }
 
 function classifyItem(

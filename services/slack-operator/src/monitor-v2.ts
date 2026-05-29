@@ -218,13 +218,29 @@ export function inferCardType(item: HermesBoardCardSnapshot, lane: Lane): CardTy
 }
 
 /**
- * Infer the agent that owns the card from the classifier `owner`
- * field + lane. The slim model doesn't carry agentType, so this is
- * best-effort and defaults to "ext" (external / unknown).
+ * Map a PR head branch to the agent that opened it via the branch-prefix
+ * convention (codex/* → codex, claude/* → claude, case-insensitive).
+ * Returns undefined for non-agent branches so callers fall back to the
+ * owner heuristic.
+ */
+export function agentTypeFromBranch(headBranch?: string): AgentType | undefined {
+  const b = (headBranch ?? "").trim().toLowerCase();
+  if (b.startsWith("codex/")) return "codex";
+  if (b.startsWith("claude/")) return "claude";
+  return undefined;
+}
+
+/**
+ * Infer the agent that owns the card. Missions are always Hermes; then
+ * the PR head branch wins (codex/*, claude/*) since the branch-prefix
+ * convention is authoritative for who opened the PR; otherwise fall back
+ * to the classifier `owner` heuristic, defaulting to "ext".
  */
 export function inferAgentType(item: HermesBoardCardSnapshot, type: CardType): AgentType {
-  const owner = (item.owner ?? "").toLowerCase();
   if (type === "mission") return "hermes";
+  const fromBranch = agentTypeFromBranch(item.headBranch);
+  if (fromBranch) return fromBranch;
+  const owner = (item.owner ?? "").toLowerCase();
   if (owner.includes("codex")) return "codex";
   if (owner.includes("hermes")) return "hermes";
   if (owner.includes("claude")) return "claude";
@@ -335,7 +351,7 @@ export function toBoardCard(item: HermesBoardCardSnapshot): BoardCard {
   if (isDraft) card.isDraft = true;
   if (item.next) card.next = item.next;
   if (item.verdict) card.verdict = item.verdict;
-  if (typeof item.number === "number") card.branch = undefined; // branch not in slim model
+  if (item.headBranch) card.branch = item.headBranch;
 
   return card;
 }

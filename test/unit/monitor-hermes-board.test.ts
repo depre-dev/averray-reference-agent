@@ -122,4 +122,47 @@ describe("buildHermesBoardSnapshotFromMonitor", () => {
       why: "Codex task is approved.",
     });
   });
+
+  it("forwards the PR head branch (flat headBranch and nested head.ref)", () => {
+    const board = buildHermesBoardSnapshotFromMonitor({
+      generatedAt: "2026-05-20T08:54:42.000Z",
+      recent: [
+        {
+          correlationId: "github-live-pr-flat",
+          repo: "averray-agent/agent",
+          pullRequestNumber: 501,
+          status: "completed",
+          summary: {
+            currentPullRequest: {
+              repo: "averray-agent/agent",
+              number: 501,
+              state: "open",
+              title: "Codex PR (flat headBranch)",
+              headBranch: "codex/widen-claim",
+            },
+          },
+        },
+        {
+          correlationId: "github-live-pr-nested",
+          repo: "averray-agent/agent",
+          pullRequestNumber: 502,
+          status: "completed",
+          summary: {
+            pullRequest: {
+              repo: "averray-agent/agent",
+              number: 502,
+              state: "open",
+              title: "Claude PR (nested head.ref)",
+              head: { ref: "claude/board-polish" },
+            },
+          },
+        },
+      ],
+    });
+
+    const flat = board?.items?.find((item) => item.number === 501);
+    const nested = board?.items?.find((item) => item.number === 502);
+    expect(flat?.headBranch).toBe("codex/widen-claim");
+    expect(nested?.headBranch).toBe("claude/board-polish");
+  });
 });
