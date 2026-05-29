@@ -58,13 +58,42 @@ describe("Card — type coverage", () => {
     expect(within(container).getByText("draft")).toBeTruthy();
   });
 
-  test("done/closed card: CLOSED pip, no risk pills, no checks bar", () => {
+  test("done/closed card: CLOSED pip, no risk pills, no checks bar, no waiting-on", () => {
     const done = FIXTURE_CARDS.find((c) => c.type === "done");
     if (!done) throw new Error("no done fixture");
     const { container } = render(<Card card={done} />);
     expect(within(container).getByText("CLOSED")).toBeTruthy();
     expect(container.querySelector(".hm-pillrow")).toBeNull();
     expect(container.querySelector(".hm-checks-bar")).toBeNull();
+    // Closed cards never render a waiting-on line (compressed layout).
+    expect(container.querySelector(".hm-waiting")).toBeNull();
+  });
+
+  test("done card with a live waitingOn still suppresses the waiting-on line", () => {
+    // Live backend data carries a waitingOn on done cards; the card must
+    // not leak it into the compressed historical layout.
+    const done: BoardCard = {
+      id: "agent #588",
+      lane: "done",
+      type: "done",
+      agentType: "ext",
+      title: "Refresh mainnet audit package",
+      summary: "",
+      repo: "depre-dev/agent",
+      freshness: 0,
+      state: "fresh",
+      risk: [],
+      waitingOn: { actor: "operator", tone: "neutral" },
+      closedAt: "2026-05-28T22:15:52Z",
+      mergeStatus: "MERGED",
+      verdictText: "merged",
+    };
+    const { container } = render(<Card card={done} />);
+    const view = within(container);
+    expect(view.getByText("CLOSED")).toBeTruthy();
+    expect(view.getByText("merged")).toBeTruthy();
+    expect(container.querySelector(".hm-waiting")).toBeNull();
+    expect(view.queryByText(/waiting on/i)).toBeNull();
   });
 });
 
