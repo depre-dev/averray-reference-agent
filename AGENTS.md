@@ -8,6 +8,31 @@ for where this is all heading.
 
 ---
 
+## Durable invariants
+
+**These hold no matter how far the orchestration evolves — including after the
+multi-agent dashboard tool is fully built.** Everything *else* in this doc describes
+how things work **today** and must be updated as phases land (see the last bullet).
+
+1. **Humans own merge and deploy.** No agent — however autonomous Hermes becomes —
+   auto-merges or auto-deploys. Ever.
+2. **CI (`ci.yml`) is the merge gate.** Never bypass a failing check.
+3. **No direct pushes to `main`.** One narrow, reviewable PR per task.
+4. **The agent wallet stays testnet-only.** No mainnet key, no real-fund movement,
+   no silently raised spend budgets.
+5. **The `HALT_FILE` kill switch is always honored** by every mutating path. Never
+   add a bypass.
+6. **New power comes with a new guardrail.** Any capability that lets an agent
+   (including Hermes) act on the world — dispatch/enqueue work, mutate GitHub, spend,
+   submit — must ship with an explicit allowlist + budget **and** keep a human
+   approval step. No ungated agent authority.
+7. **Secrets are never committed, printed, or logged.**
+8. **Keep this file true.** When a change alters how agents work — a new runner, a
+   dispatch path, a new gate, a role change — update `AGENTS.md` (and the affected
+   docs) **in the same PR**. A stale working agreement is worse than none.
+
+---
+
 ## Quick reference
 
 ```bash
@@ -64,8 +89,11 @@ TypeScript monorepo: npm workspaces (`packages/*`, `services/*`), Node ≥ 22, E
   chain/settlement-adjacent work**; Claude takes UI, docs, and general code.
 - **Hermes reviews and operates** — observes GitHub, reviews PR risk, runs
   read-only checks, reports to the PR/Slack/monitor, and proposes operator actions.
-  Hermes is **recommendation-only**: it must not merge, deploy, submit work, or run
-  guarded live mutations during a handoff.
+  Today Hermes is **recommendation-only**: it must not merge, deploy, submit work, or
+  run guarded live mutations during a handoff. As Hermes gains orchestration powers
+  (routing and dispatching tasks per the orchestration plan), those powers stay
+  inside the **Durable invariants** above — gated, budgeted, and never extending to
+  auto-merge or auto-deploy. Update this section when that lands.
 - **Humans own approval.** A PASS verdict is a release *signal*, not a merge order.
   Merge and deploy are human-gated. No auto-merge.
 
