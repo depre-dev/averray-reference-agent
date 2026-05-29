@@ -140,7 +140,11 @@ export function Card({ card, focused = false, onClick }: CardProps) {
         </div>
       ) : null}
 
-      {card.waitingOn ? <WaitingOnLine waitingOn={card.waitingOn} /> : null}
+      {/* Closed cards use the compressed historical layout (header +
+          close-time + verdict only) — they never show a waiting-on line,
+          matching the design. Live data still carries a waitingOn on done
+          cards, so gate it here rather than relying on the source. */}
+      {!isClosed && card.waitingOn ? <WaitingOnLine waitingOn={card.waitingOn} /> : null}
 
       {isAction && verdict ? (
         <div className="hm-verdict">
