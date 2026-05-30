@@ -18,6 +18,7 @@
 //   - isAction = true   → amber wash + Hermes verdict + CTA buttons
 //   - archiveHint = true → "archive in 4h?" tail line
 
+import { useState } from "react";
 import type { BoardCard, CardChecks, WaitingOn, RiskTag, AgentType } from "../../lib/monitor/card-types.js";
 import { formatFreshness, freshnessTier } from "../../lib/monitor/urgency.js";
 import { ChecksBar } from "./ChecksBar.js";
@@ -26,6 +27,8 @@ export type CardProps = {
   card: BoardCard;
   focused?: boolean;
   onClick?: (card: BoardCard) => void;
+  /** Approve a proposed task card (O3). Operator-only; runs through a confirm. */
+  onApprove?: (card: BoardCard) => void;
 };
 
 // ── Helpers (mirror the bundle's small inline helpers) ──────────────
@@ -64,7 +67,7 @@ function riskPillClass(tag: RiskTag): string {
 
 // ── Card ───────────────────────────────────────────────────────────
 
-export function Card({ card, focused = false, onClick }: CardProps) {
+export function Card({ card, focused = false, onClick, onApprove }: CardProps) {
   const isAction = Boolean(card.isAction);
   const isStale = card.state === "stale";
   const isClosed = card.type === "done";
@@ -145,6 +148,10 @@ export function Card({ card, focused = false, onClick }: CardProps) {
           matching the design. Live data still carries a waitingOn on done
           cards, so gate it here rather than relying on the source. */}
       {!isClosed && card.waitingOn ? <WaitingOnLine waitingOn={card.waitingOn} /> : null}
+
+      {card.type === "task" && (card as { taskStatus?: string }).taskStatus === "proposed" && onApprove ? (
+        <TaskApprove card={card} onApprove={onApprove} />
+      ) : null}
 
       {isAction && verdict ? (
         <div className="hm-verdict">
@@ -247,6 +254,62 @@ function WaitingOnLine({ waitingOn }: { waitingOn: WaitingOn }) {
     <div className={`hm-waiting hm-waiting--${waitingOn.tone}`}>
       waiting on
       <span className="target">→ {waitingOn.actor}</span>
+    </div>
+  );
+}
+
+// ── Task approve (O3 dispatch) ──────────────────────────────────────
+// Approving a proposed task is a real mutation (it lets a runner claim the
+// work), so per MONITOR_ACTION_PARITY.md it goes through an explicit confirm
+// step — never a single click. The operator is the only one who approves
+// (proposed → approved); the lifecycle then flows from the board feed.
+
+function TaskApprove({ card, onApprove }: { card: BoardCard; onApprove: (card: BoardCard) => void }) {
+  const [confirming, setConfirming] = useState(false);
+  const agent = agentLabel(card.agentType);
+  const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
+  if (!confirming) {
+    return (
+      <div className="hm-card-cta">
+        <button
+          type="button"
+          className="hm-btn hm-btn--action hm-btn--sm"
+          onClick={(e) => {
+            stop(e);
+            setConfirming(true);
+          }}
+        >
+          Approve & dispatch
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="hm-card-cta" role="group" aria-label="Confirm task dispatch">
+      <span style={{ fontSize: 12, color: "var(--hm-ink-soft)", marginRight: "auto" }}>
+        Dispatch to {agent}?
+      </span>
+      <button
+        type="button"
+        className="hm-btn hm-btn--action hm-btn--sm"
+        onClick={(e) => {
+          stop(e);
+          setConfirming(false);
+          onApprove(card);
+        }}
+      >
+        Confirm
+      </button>
+      <button
+        type="button"
+        className="hm-btn hm-btn--ghost hm-btn--sm"
+        onClick={(e) => {
+          stop(e);
+          setConfirming(false);
+        }}
+      >
+        Cancel
+      </button>
     </div>
   );
 }

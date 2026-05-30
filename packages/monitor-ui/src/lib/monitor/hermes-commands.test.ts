@@ -109,3 +109,52 @@ test("parseHermesInput: /unmute → unmute", () => {
 test("parseHermesInput: an unparseable /mute argument → error", () => {
   assert.equal(parseHermesInput("/mute whenever").kind, "error");
 });
+
+// ── /task <agent> [<repo>#<pr>] <prompt> (O3) ──────────────────────
+test("parseHermesInput: /task claude <repo> <prompt> → greenfield claude task (no PR)", () => {
+  assert.deepEqual(parseHermesInput("/task claude averray-agent/agent Add a HEALTHCHECK.md at the root"), {
+    kind: "task",
+    agent: "claude",
+    repo: "averray-agent/agent",
+    prompt: "Add a HEALTHCHECK.md at the root",
+  });
+});
+
+test("parseHermesInput: /task codex <repo>#<pr> <prompt> → codex task with PR", () => {
+  assert.deepEqual(parseHermesInput("/task codex averray-agent/agent#123 tighten the validator"), {
+    kind: "task",
+    agent: "codex",
+    repo: "averray-agent/agent",
+    pullRequestNumber: 123,
+    prompt: "tighten the validator",
+  });
+});
+
+test("parseHermesInput: /task is case-insensitive and trims", () => {
+  const out = parseHermesInput("  /TASK   claude   owner/repo   do the thing  ");
+  assert.deepEqual(out, { kind: "task", agent: "claude", repo: "owner/repo", prompt: "do the thing" });
+});
+
+test("parseHermesInput: /task with an unknown agent → error", () => {
+  assert.equal(parseHermesInput("/task gpt5 owner/repo do x").kind, "error");
+});
+
+test("parseHermesInput: /task codex without a PR → error (codex iterates an existing PR)", () => {
+  assert.equal(parseHermesInput("/task codex owner/repo do x").kind, "error");
+});
+
+test("parseHermesInput: /task with a malformed repo → error", () => {
+  assert.equal(parseHermesInput("/task claude not-a-repo do x").kind, "error");
+});
+
+test("parseHermesInput: /task with no prompt → error", () => {
+  assert.equal(parseHermesInput("/task claude owner/repo").kind, "error");
+});
+
+test("parseHermesInput: bare /task → error", () => {
+  assert.equal(parseHermesInput("/task").kind, "error");
+});
+
+test("parseHermesInput: a word starting with task but not the command is an ask", () => {
+  assert.equal(parseHermesInput("tasks for today?").kind, "ask");
+});

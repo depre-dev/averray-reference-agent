@@ -26,6 +26,7 @@ import { useCardParam } from "./hooks/useCardParam.js";
 import type { UseCollaborationOptions } from "./hooks/useCollaboration.js";
 import { useActionAlerts, type UseActionAlertsOptions } from "./hooks/useActionAlerts.js";
 import { kpiCounts } from "./lib/monitor/board-state.js";
+import type { CreateTaskInput } from "./lib/monitor/card-types.js";
 import { BoardView } from "./components/BoardView.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 
@@ -39,6 +40,10 @@ export interface MonitorPageProps {
   onSpawnMission?: (url: string) => void;
   /** Override the /claude propose (defaults to POST /monitor/codex-tasks). */
   onSpawnClaudeTask?: (repo: string, prompt: string) => void;
+  /** Override the create-task dispatch (defaults to POST /monitor/codex-tasks propose). */
+  onCreateTask?: (input: CreateTaskInput) => void;
+  /** Override the approve dispatch (defaults to POST /monitor/codex-tasks approve). */
+  onApproveTask?: (id: string) => void;
   /** Override the co-pilot collaboration wiring (defaults to live polling). */
   collaboration?: UseCollaborationOptions;
   /** Override the action-alert wiring (audio/notification/storage) for tests. */
@@ -49,6 +54,8 @@ export function MonitorPage({
   options,
   onSpawnMission = defaultSpawnMission,
   onSpawnClaudeTask = defaultSpawnClaudeTask,
+  onCreateTask = defaultCreateTask,
+  onApproveTask = defaultApproveTask,
   collaboration = {},
   alerts,
 }: MonitorPageProps = {}) {
@@ -71,6 +78,8 @@ export function MonitorPage({
         onCardNavigate={setCard}
         onSpawnMission={onSpawnMission}
         onSpawnClaudeTask={onSpawnClaudeTask}
+        onCreateTask={onCreateTask}
+        onApproveTask={onApproveTask}
         collaboration={collaboration}
         onMute={mute}
         onUnmute={unmute}
@@ -110,6 +119,39 @@ function defaultSpawnClaudeTask(repo: string, prompt: string): void {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ action: "propose", agent: "claude", repo, prompt }),
+  }).catch(() => {
+    /* surfaced via the board feed / degraded state, not thrown here */
+  });
+}
+
+/**
+ * Propose a task (O3 board dispatch). POSTs `{ action: "propose", agent, repo,
+ * prompt, pullRequestNumber? }` to /monitor/codex-tasks. Like /claude it only
+ * PROPOSES — the task lands `proposed` in codex-needed and the operator must
+ * approve before any runner claims it. Fire-and-forget; the board feed drives
+ * the UI.
+ */
+function defaultCreateTask(input: CreateTaskInput): void {
+  void fetch(CODEX_TASKS_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "propose", ...input }),
+  }).catch(() => {
+    /* surfaced via the board feed / degraded state, not thrown here */
+  });
+}
+
+/**
+ * Approve a proposed task — the human gate (proposed → approved). POSTs
+ * `{ action: "approve", id }`. Only the operator triggers this; never
+ * auto-approved. The runner claims it after approval and the board feed
+ * reflects the lifecycle.
+ */
+function defaultApproveTask(id: string): void {
+  void fetch(CODEX_TASKS_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "approve", id }),
   }).catch(() => {
     /* surfaced via the board feed / degraded state, not thrown here */
   });

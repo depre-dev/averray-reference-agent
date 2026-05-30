@@ -7,7 +7,7 @@
 // mission (M7').
 
 import { useEffect, useRef } from "react";
-import type { BoardCard } from "../../lib/monitor/card-types.js";
+import type { BoardCard, CreateTaskInput } from "../../lib/monitor/card-types.js";
 import { relatedPrForCard } from "../../lib/monitor/collaboration.js";
 import { useCollaboration, type UseCollaborationOptions } from "../../hooks/useCollaboration.js";
 import { AskHermesComposer } from "./AskHermesComposer.js";
@@ -17,6 +17,8 @@ export interface CoPilotRailProps {
   onSpawnMission?: (url: string) => void;
   /** Propose a greenfield Claude task (/claude <repo> <task>). */
   onSpawnClaudeTask?: (repo: string, prompt: string) => void;
+  /** Propose a task (/task <agent> [<repo>#<pr>] <prompt>). */
+  onCreateTask?: (input: CreateTaskInput) => void;
   /** Focused card — scopes Ask-Hermes questions + the scope chip. */
   focusedCard?: BoardCard;
   /** Collaboration wiring. Omit to keep the rail inert (e.g. in BoardView tests). */
@@ -34,6 +36,7 @@ export interface CoPilotRailProps {
 export function CoPilotRail({
   onSpawnMission,
   onSpawnClaudeTask,
+  onCreateTask,
   focusedCard,
   collaboration,
   onMute,
@@ -80,6 +83,7 @@ export function CoPilotRail({
       <AskHermesComposer
         onSpawnMission={onSpawnMission}
         onSpawnClaudeTask={onSpawnClaudeTask}
+        onCreateTask={onCreateTask}
         onAsk={(text) => ask(text, relatedPr)}
         onMute={onMute}
         onUnmute={onUnmute}

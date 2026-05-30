@@ -21,6 +21,7 @@ import {
   indexTestbedMissions,
   enrichBoardCard,
   mapMissionReport,
+  synthesizeTaskCards,
 } from "../../services/slack-operator/src/monitor-v2.js";
 import type { BoardCard } from "../../services/slack-operator/src/monitor-v2.js";
 import type { HermesBoardCardSnapshot } from "../../services/slack-operator/src/monitor-hermes-voice.js";
@@ -760,5 +761,75 @@ describe("mapMissionReport", () => {
 
   it("returns undefined when the run has no result yet (mission still running)", () => {
     expect(mapMissionReport({ id: "m", targetUrl: "https://x.test" })).toBeUndefined();
+  });
+});
+
+describe("synthesizeTaskCards (O3 — surface queued tasks)", () => {
+  const proposedClaude = {
+    id: "claude-task-x1",
+    status: "proposed",
+    agent: "claude",
+    repo: "averray-agent/agent",
+    title: "Add a HEALTHCHECK.md",
+    prompt: "Add a top-level HEALTHCHECK.md.",
+    reason: "operator delegated",
+  };
+
+  it("surfaces a proposed greenfield task as a codex-needed card with its agent + status", () => {
+    const [card, ...rest] = synthesizeTaskCards({ codexTasks: { items: [proposedClaude] } }, undefined);
+    expect(rest).toHaveLength(0);
+    expect(card).toMatchObject({
+      id: "claude-task-x1",
+      lane: "codex-needed",
+      type: "task",
+      agentType: "claude",
+      taskStatus: "proposed",
+      repo: "averray-agent/agent",
+      prompt: "Add a top-level HEALTHCHECK.md.",
+    });
+    // proposed → waiting on the operator to approve
+    expect(card?.waitingOn).toEqual({ actor: "operator", tone: "warn" });
+  });
+
+  it("skips PR-bound tasks (they surface via their PR card) and terminal tasks", () => {
+    const cards = synthesizeTaskCards(
+      {
+        codexTasks: {
+          items: [
+            { id: "a", status: "proposed", agent: "codex", repo: "a/b", pullRequestNumber: 5, prompt: "x" },
+            { id: "b", status: "completed", agent: "claude", repo: "a/b", prompt: "x" },
+            { id: "c", status: "cancelled", agent: "claude", repo: "a/b", prompt: "x" },
+          ],
+        },
+      },
+      undefined,
+    );
+    expect(cards).toHaveLength(0);
+  });
+
+  it("defaults a missing agent to codex and tolerates an absent task list", () => {
+    const [card] = synthesizeTaskCards({ codexTasks: { items: [{ id: "z", status: "approved", repo: "a/b", prompt: "x" }] } }, undefined);
+    expect(card?.agentType).toBe("codex");
+    expect(card?.taskStatus).toBe("approved");
+    expect(synthesizeTaskCards({}, undefined)).toEqual([]);
+    expect(synthesizeTaskCards(undefined, undefined)).toEqual([]);
+  });
+
+  it("buildV2BoardSnapshot appends synthesized task cards", () => {
+    const snap = buildV2BoardSnapshot({ active: [], recent: [], codexTasks: { items: [proposedClaude] } }, { repo: "averray-agent/agent" });
+    const task = snap.cards.find((c) => c.id === "claude-task-x1");
+    expect(task?.type).toBe("task");
+    expect(task?.taskStatus).toBe("proposed");
+  });
+});
+
+describe("enrichBoardCard — task status", () => {
+  it("carries the task lifecycle status onto a task card", () => {
+    const base = toBoardCard(slim({ lane: "Codex needed", owner: "Hermes", title: "Reduce log noise" }));
+    expect(base.type).toBe("task");
+    const enriched = enrichBoardCard(base, slim({ lane: "Codex needed" }), {
+      codexTask: { status: "approved", prompt: "do it" },
+    });
+    expect(enriched.taskStatus).toBe("approved");
   });
 });

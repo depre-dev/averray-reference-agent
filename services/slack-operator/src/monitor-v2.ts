@@ -56,6 +56,15 @@ export interface WaitingOn {
   tone: "warn" | "info" | "neutral";
 }
 
+/** Task lifecycle status, mirrors codex-task-queue CodexTaskStatus. */
+export type TaskStatus =
+  | "proposed"
+  | "approved"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
 /** CI check rollup for the card's checks bar. Mirrors the UI CardChecks. */
 export interface CardChecks {
   pass: number;
@@ -172,6 +181,9 @@ export interface BoardCard {
   closedAt?: string;
   /** Done cards: short verdict line ("merged" / "closed"). */
   verdictText?: string;
+  /** Codex/Claude task cards: lifecycle status (drives the board's
+   *  approve affordance — only `proposed` tasks show "Approve"). */
+  taskStatus?: TaskStatus;
   /** Codex task cards: the dispatched prompt. */
   prompt?: string;
   /** Codex task cards: tail of stdout / completion summary. */
@@ -746,6 +758,8 @@ export function enrichBoardCard(
   // Codex task cards: prompt / output / failure / runner liveness.
   if (card.type === "task" && ctx.codexTask) {
     const task = ctx.codexTask;
+    const status = asString(task.status);
+    if (status) card.taskStatus = status as TaskStatus;
     const prompt = asString(task.prompt);
     if (prompt) card.prompt = prompt;
     const output = asString(task.stdoutTail) ?? asString(task.completionSummary);
@@ -777,6 +791,66 @@ export function enrichBoardCard(
  * @param opts.repo   the configured AVERRAY_REPO (single-repo per §21.6)
  * @param opts.now    clock injection for tests
  */
+const SYNTH_TERMINAL_TASK_STATUSES = new Set(["completed", "failed", "cancelled"]);
+
+/**
+ * Synthesize `codex-needed` cards for queued tasks the classifier won't
+ * surface on its own. Greenfield tasks (no PR yet) emit no monitor/handoff
+ * event, so without this a freshly-proposed task never appears on the board
+ * and the operator could never see or approve it — the O3 dispatch loop
+ * depends on this. PR-bound tasks are intentionally skipped (they surface via
+ * their PR card). Terminal tasks are dropped. Zero new network calls — reads
+ * the `codexTasks` already bundled on the snapshot.
+ */
+export function synthesizeTaskCards(
+  rawSnapshot: unknown,
+  runner: Record<string, unknown> | undefined,
+): BoardCard[] {
+  const root = asRecord(rawSnapshot);
+  const codexTasks = asRecord(root?.codexTasks);
+  const out: BoardCard[] = [];
+  for (const entry of asArray(codexTasks?.items)) {
+    const task = asRecord(entry);
+    if (!task) continue;
+    const status = asString(task.status);
+    if (!status || SYNTH_TERMINAL_TASK_STATUSES.has(status)) continue;
+    // PR-bound tasks surface (and get their status overlaid) via the PR card.
+    if (task.pullRequestNumber !== undefined && task.pullRequestNumber !== null) continue;
+    const id = asString(task.id);
+    if (!id) continue;
+    const agent: AgentType = task.agent === "claude" ? "claude" : "codex";
+    const prompt = asString(task.prompt);
+    const card: BoardCard = {
+      id,
+      lane: "codex-needed",
+      type: "task",
+      agentType: agent,
+      title: asString(task.title) ?? `${agent} task`,
+      summary: asString(task.reason) ?? "",
+      repo: asString(task.repo) ?? "",
+      freshness: 0,
+      state: "fresh",
+      risk: [],
+      // Proposed → operator must approve; approved/running → with the runner.
+      waitingOn:
+        status === "proposed"
+          ? { actor: "operator", tone: "warn" }
+          : { actor: "agent", tone: "info" },
+      taskStatus: status as TaskStatus,
+      ...(prompt ? { prompt } : {}),
+    };
+    if (status === "running" && runner) {
+      const lastSeen = asString(runner.updatedAt);
+      const rStatus = asString(runner.status);
+      if (lastSeen) {
+        card.runnerHeartbeat = { lastSeen, online: rStatus === "running" || rStatus === "idle" };
+      }
+    }
+    out.push(card);
+  }
+  return out;
+}
+
 export function buildV2BoardSnapshot(
   rawSnapshot: unknown,
   opts: { repo?: string; now?: () => Date } = {}
@@ -802,8 +876,13 @@ export function buildV2BoardSnapshot(
           : undefined,
     });
   });
+  // Surface queued greenfield tasks the classifier can't (no PR ⇒ no event),
+  // skipping any already represented (e.g. by a PR card).
+  const existingIds = new Set(cards.map((c) => c.id));
+  const taskCards = synthesizeTaskCards(rawSnapshot, runner).filter((c) => !existingIds.has(c.id));
+
   return {
-    cards,
+    cards: [...cards, ...taskCards],
     at: now().toISOString(),
     repo: opts.repo ?? "",
   };

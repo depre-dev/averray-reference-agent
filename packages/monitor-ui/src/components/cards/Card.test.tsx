@@ -153,3 +153,53 @@ describe("Card — interactivity", () => {
     expect((container.querySelector(".hm-card") as HTMLElement).getAttribute("role")).toBe("article");
   });
 });
+
+describe("Card — task approve (O3 dispatch)", () => {
+  const proposed = {
+    id: "claude-task-x1",
+    lane: "codex-needed",
+    type: "task",
+    agentType: "claude",
+    title: "Add a HEALTHCHECK.md",
+    summary: "operator delegated",
+    repo: "averray-agent/agent",
+    freshness: 1,
+    state: "fresh",
+    risk: [],
+    waitingOn: { actor: "operator", tone: "warn" },
+    taskStatus: "proposed",
+    prompt: "Add a top-level HEALTHCHECK.md.",
+  } as unknown as BoardCard;
+
+  test("a proposed task card shows the agent badge and an Approve & dispatch CTA", () => {
+    const { getByText, getByRole } = render(<Card card={proposed} onApprove={vi.fn()} />);
+    expect(getByText("claude")).toBeTruthy(); // agent badge
+    expect(getByRole("button", { name: /Approve & dispatch/ })).toBeTruthy();
+  });
+
+  test("approving requires a confirm step before onApprove fires (no single-click dispatch)", () => {
+    const onApprove = vi.fn();
+    const { getByRole, getByText } = render(<Card card={proposed} onApprove={onApprove} />);
+    fireEvent.click(getByRole("button", { name: /Approve & dispatch/ }));
+    expect(onApprove).not.toHaveBeenCalled(); // first click only arms the confirm
+    expect(getByText(/Dispatch to claude\?/)).toBeTruthy();
+    fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
+    expect(onApprove).toHaveBeenCalledTimes(1);
+    expect(onApprove.mock.calls[0]?.[0]?.id).toBe("claude-task-x1");
+  });
+
+  test("Cancel aborts the confirm without dispatching", () => {
+    const onApprove = vi.fn();
+    const { getByRole } = render(<Card card={proposed} onApprove={onApprove} />);
+    fireEvent.click(getByRole("button", { name: /Approve & dispatch/ }));
+    fireEvent.click(getByRole("button", { name: /Cancel/ }));
+    expect(onApprove).not.toHaveBeenCalled();
+    expect(getByRole("button", { name: /Approve & dispatch/ })).toBeTruthy();
+  });
+
+  test("a non-proposed task card shows no approve CTA", () => {
+    const running = { ...proposed, taskStatus: "running" } as unknown as BoardCard;
+    const { queryByRole } = render(<Card card={running} onApprove={vi.fn()} />);
+    expect(queryByRole("button", { name: /Approve & dispatch/ })).toBeNull();
+  });
+});
