@@ -21,7 +21,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { deriveBoardState, type BoardMode } from "../lib/monitor/board-state.js";
 import type { MonitorBoard } from "../lib/monitor/board-cache.js";
 import type { StreamStatus } from "../lib/monitor/live-stream.js";
-import { LANES, type BoardCard } from "../lib/monitor/card-types.js";
+import { LANES, type BoardCard, type CreateTaskInput } from "../lib/monitor/card-types.js";
+import { CreateTaskForm } from "./CreateTaskForm.js";
 import { laneFor } from "../lib/monitor/lane-rules.js";
 import { relatedPrForCard } from "../lib/monitor/collaboration.js";
 import { TopStrip } from "./TopStrip.js";
@@ -68,8 +69,9 @@ function lanesWithCards(grouped: Partial<Record<LaneId, BoardCard[]>>): LaneId[]
 function expandedForBoard(
   mode: BoardMode,
   grouped: Partial<Record<LaneId, BoardCard[]>>,
+  alwaysOpen: readonly LaneId[] = [],
 ): Set<LaneId> {
-  return new Set<LaneId>([...expandedForMode(mode), ...lanesWithCards(grouped)]);
+  return new Set<LaneId>([...expandedForMode(mode), ...lanesWithCards(grouped), ...alwaysOpen]);
 }
 
 function matchesQuery(card: BoardCard, q: string): boolean {
@@ -91,6 +93,10 @@ export interface BoardViewProps {
   onSpawnMission?: (url: string) => void;
   /** Propose a greenfield Claude task (/claude <repo> <task>). */
   onSpawnClaudeTask?: (repo: string, prompt: string) => void;
+  /** Propose a task — /task verb + the codex-needed create form (O3). */
+  onCreateTask?: (input: CreateTaskInput) => void;
+  /** Approve a proposed task card — the operator human gate (O3). */
+  onApproveTask?: (id: string) => void;
   collaboration?: UseCollaborationOptions;
   onMute?: (untilMs: number) => void;
   onUnmute?: () => void;
@@ -109,6 +115,8 @@ export function BoardView({
   onCardNavigate,
   onSpawnMission,
   onSpawnClaudeTask,
+  onCreateTask,
+  onApproveTask,
   collaboration,
   onMute,
   onUnmute,
@@ -116,6 +124,9 @@ export function BoardView({
   keyboard = true,
 }: BoardViewProps) {
   const degraded = status === "reconnecting" || status === "closed";
+  // Keep the dispatch lane (codex-needed) open when its create form is wired,
+  // so the operator can propose the first task even when the lane is empty.
+  const alwaysOpen: readonly LaneId[] = onCreateTask ? ["codex-needed"] : [];
   const streamOnline = !degraded;
   const cards = board?.cards ?? [];
   const liveLabel = useMemo(() => formatClock(board?.at), [board?.at]);
@@ -155,16 +166,17 @@ export function BoardView({
   // board stays "calm" (action == 0) still surfaces instead of hiding behind a
   // rail. Manual toggles / spotlight persist until the next such change.
   const [expanded, setExpanded] = useState<ReadonlySet<LaneId>>(
-    () => expandedForBoard(state.mode, state.grouped),
+    () => expandedForBoard(state.mode, state.grouped, alwaysOpen),
   );
   const seedRef = useRef<string>("");
   useEffect(() => {
-    const sig = `${state.mode}|${lanesWithCards(state.grouped).join(",")}`;
+    const sig = `${state.mode}|${lanesWithCards(state.grouped).join(",")}|${alwaysOpen.join(",")}`;
     if (seedRef.current !== sig) {
       seedRef.current = sig;
-      setExpanded(expandedForBoard(state.mode, state.grouped));
+      setExpanded(expandedForBoard(state.mode, state.grouped, alwaysOpen));
     }
-  }, [state.mode, state.grouped]);
+    // alwaysOpen is derived from the stable onCreateTask prop.
+  }, [state.mode, state.grouped, onCreateTask]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Search filters what's shown + focusable (not the KPI counts).
   const q = query.trim().toLowerCase();
@@ -261,12 +273,18 @@ export function BoardView({
             grouped={displayGrouped}
             expanded={expanded}
             onToggleLane={onToggleLane}
+            renderLaneHeader={
+              onCreateTask
+                ? (id) => (id === "codex-needed" ? <CreateTaskForm onCreate={onCreateTask} /> : null)
+                : undefined
+            }
             renderCard={(card) => (
               <CardRouter
                 key={card.id}
                 card={card}
                 focused={card.id === boardFocusId}
                 onClick={onCardClick ? (c) => onCardClick(c.id) : undefined}
+                onApprove={onApproveTask ? (c) => onApproveTask(c.id) : undefined}
               />
             )}
           />
@@ -275,6 +293,7 @@ export function BoardView({
         <CoPilotRail
           onSpawnMission={onSpawnMission}
           onSpawnClaudeTask={onSpawnClaudeTask}
+          onCreateTask={onCreateTask}
           focusedCard={scopeCard}
           collaboration={collaboration}
           onMute={onMute}

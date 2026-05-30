@@ -118,4 +118,42 @@ describe("AskHermesComposer", () => {
     const { getByText } = render(<AskHermesComposer muted />);
     expect(getByText("alerts muted")).toBeTruthy();
   });
+
+  test("/task <agent> <repo> <prompt> dispatches onCreateTask and clears the input", () => {
+    const onCreateTask = vi.fn();
+    const { container, getByRole } = render(<AskHermesComposer onCreateTask={onCreateTask} />);
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    type(input, "/task claude averray-agent/agent Add a HEALTHCHECK.md");
+    fireEvent.click(getByRole("button", { name: /Send/ }));
+    expect(onCreateTask).toHaveBeenCalledWith({
+      agent: "claude",
+      repo: "averray-agent/agent",
+      prompt: "Add a HEALTHCHECK.md",
+    });
+    expect(input.value).toBe("");
+  });
+
+  test("/task codex <repo>#<pr> forwards the pullRequestNumber", () => {
+    const onCreateTask = vi.fn();
+    const { container, getByRole } = render(<AskHermesComposer onCreateTask={onCreateTask} />);
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    type(input, "/task codex averray-agent/agent#42 tighten it");
+    fireEvent.click(getByRole("button", { name: /Send/ }));
+    expect(onCreateTask).toHaveBeenCalledWith({
+      agent: "codex",
+      repo: "averray-agent/agent",
+      prompt: "tighten it",
+      pullRequestNumber: 42,
+    });
+  });
+
+  test("/task with an invalid agent shows an error and does not dispatch", () => {
+    const onCreateTask = vi.fn();
+    const { container, getByRole } = render(<AskHermesComposer onCreateTask={onCreateTask} />);
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    type(input, "/task gpt5 a/b do x");
+    fireEvent.click(getByRole("button", { name: /Send/ }));
+    expect(onCreateTask).not.toHaveBeenCalled();
+    expect(within(container).getByRole("alert").textContent).toMatch(/not a valid agent/i);
+  });
 });

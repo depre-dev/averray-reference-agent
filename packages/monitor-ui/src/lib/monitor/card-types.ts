@@ -172,14 +172,33 @@ export interface MissionCard extends CardBase {
   mission: MissionReport;
 }
 
-/** Codex task card. Lifecycle: proposed → approved → running → succeeded/failed. */
+/** Task lifecycle status (mirrors the serializer's TaskStatus). */
+export type TaskStatus =
+  | "proposed"
+  | "approved"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+/** Codex/Claude task card. Lifecycle: proposed → approved → running → succeeded/failed. */
 export interface CodexTaskCard extends CardBase {
   type: "task";
   prompt: string;
   action?: CardAction;
+  /** Lifecycle status — drives the board's approve affordance (proposed only). */
+  taskStatus?: TaskStatus;
   runnerHeartbeat?: { lastSeen: string; online: boolean };
   output?: string;
   failureReason?: string;
+}
+
+/** Payload for proposing a task from the board (O3 dispatch). */
+export interface CreateTaskInput {
+  agent: "codex" | "claude";
+  repo: string;
+  prompt: string;
+  pullRequestNumber?: number;
 }
 
 /** Deploy verification card. */

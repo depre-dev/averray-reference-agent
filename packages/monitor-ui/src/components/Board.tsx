@@ -61,6 +61,8 @@ export type BoardProps = {
   onToggleLane?: (id: LaneId) => void;
   /** Optional renderer for a single card. M4' supplies the card components. */
   renderCard?: (card: BoardCard) => ReactNode;
+  /** Optional per-lane header content (e.g. the codex-needed create form, O3). */
+  renderLaneHeader?: (id: LaneId) => ReactNode;
 };
 
 export function Board({
@@ -69,6 +71,7 @@ export function Board({
   expanded: controlledExpanded,
   onToggleLane,
   renderCard,
+  renderLaneHeader,
 }: BoardProps) {
   const [internalExpanded, setInternalExpanded] = useState<Set<LaneId>>(() => new Set(initialExpanded));
   const isControlled = controlledExpanded !== undefined;
@@ -96,7 +99,14 @@ export function Board({
         const cards = grouped[lane.id] ?? [];
         const isExpanded = expanded.has(lane.id);
         return (
-          <Lane key={lane.id} lane={lane} expanded={isExpanded} count={cards.length} onToggle={onToggle}>
+          <Lane
+            key={lane.id}
+            lane={lane}
+            expanded={isExpanded}
+            count={cards.length}
+            onToggle={onToggle}
+            headerAccessory={renderLaneHeader?.(lane.id)}
+          >
             {renderCard ? cards.map(renderCard) : null}
           </Lane>
         );

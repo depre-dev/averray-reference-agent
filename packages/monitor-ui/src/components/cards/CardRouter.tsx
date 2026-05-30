@@ -17,9 +17,11 @@ export type CardRouterProps = {
   onClick?: (card: BoardCard) => void;
   /** Click handler for the degraded card's primary action (Retry / View last known). */
   onDegradedAction?: (card: BoardCard) => void;
+  /** Approve a proposed task card (O3 dispatch). */
+  onApprove?: (card: BoardCard) => void;
 };
 
-export function CardRouter({ card, focused, onClick, onDegradedAction }: CardRouterProps) {
+export function CardRouter({ card, focused, onClick, onDegradedAction, onApprove }: CardRouterProps) {
   const renderer = pickRenderer(card);
 
   if (renderer === "degraded") {
@@ -36,5 +38,5 @@ export function CardRouter({ card, focused, onClick, onDegradedAction }: CardRou
     );
   }
 
-  return <Card card={card} focused={focused} onClick={onClick} />;
+  return <Card card={card} focused={focused} onClick={onClick} onApprove={onApprove} />;
 }

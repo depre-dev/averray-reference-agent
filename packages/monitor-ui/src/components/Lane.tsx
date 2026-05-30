@@ -23,11 +23,14 @@ export type LaneProps = {
   count: number;
   /** Cards rendered into the body slot. M4' wires the <Card /> renders. */
   children?: ReactNode;
+  /** Optional content at the top of the expanded body, above the cards
+   *  (e.g. the codex-needed create-task form, O3). */
+  headerAccessory?: ReactNode;
   /** Click handler to toggle this lane's expand/collapse state. */
   onToggle?: (id: LaneId) => void;
 };
 
-export function Lane({ lane, expanded, count, children, onToggle }: LaneProps) {
+export function Lane({ lane, expanded, count, children, headerAccessory, onToggle }: LaneProps) {
   if (!expanded) {
     return <MiniRail lane={lane} count={count} onToggle={onToggle} />;
   }
@@ -60,6 +63,7 @@ export function Lane({ lane, expanded, count, children, onToggle }: LaneProps) {
         {lane.action ? <div className="hm-lane-action">{lane.action}</div> : null}
       </div>
       <div className="hm-lane-body">
+        {headerAccessory}
         {count === 0 ? (
           <div className="hm-lane-empty">No {lane.name.toLowerCase()} right now.</div>
         ) : (

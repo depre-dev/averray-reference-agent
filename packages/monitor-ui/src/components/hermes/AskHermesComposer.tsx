@@ -10,12 +10,15 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { parseHermesInput } from "../../lib/monitor/hermes-commands.js";
+import type { CreateTaskInput } from "../../lib/monitor/card-types.js";
 
 export interface AskHermesComposerProps {
   /** Spawn a browser mission against a URL (/mission <url>). */
   onSpawnMission?: (url: string) => void;
   /** Propose a greenfield Claude task (/claude <repo> <task>). */
   onSpawnClaudeTask?: (repo: string, prompt: string) => void;
+  /** Propose a task (/task <agent> [<repo>#<pr>] <prompt>). */
+  onCreateTask?: (input: CreateTaskInput) => void;
   /** Ask Hermes a free-form question. */
   onAsk?: (text: string) => void;
   /** Mute action alerts until an absolute timestamp (/mute). */
@@ -33,6 +36,7 @@ export interface AskHermesComposerProps {
 export function AskHermesComposer({
   onSpawnMission,
   onSpawnClaudeTask,
+  onCreateTask,
   onAsk,
   onMute,
   onUnmute,
@@ -69,6 +73,20 @@ export function AskHermesComposer({
           setError(null);
         } else {
           setError("Proposing Claude tasks isn't wired here.");
+        }
+        return;
+      case "task":
+        if (onCreateTask) {
+          onCreateTask({
+            agent: command.agent,
+            repo: command.repo,
+            prompt: command.prompt,
+            ...(command.pullRequestNumber !== undefined ? { pullRequestNumber: command.pullRequestNumber } : {}),
+          });
+          setValue("");
+          setError(null);
+        } else {
+          setError("Proposing tasks isn't wired here.");
         }
         return;
       case "mute":
@@ -116,8 +134,8 @@ export function AskHermesComposer({
         <textarea
           ref={inputRef}
           className="hm-compose-input"
-          placeholder="Ask Hermes · /mission <url> · /claude <repo> <task> · /mute 1h"
-          aria-label="Ask Hermes, spawn a mission, propose a Claude task, or mute alerts"
+          placeholder="Ask Hermes · /task <agent> <repo> <prompt> · /mission <url> · /mute 1h"
+          aria-label="Ask Hermes, propose a task, spawn a mission, or mute alerts"
           value={value}
           onChange={(e) => {
             setValue(e.target.value);
