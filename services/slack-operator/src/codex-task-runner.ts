@@ -308,12 +308,14 @@ export function renderCodexTaskRunnerArgs(args: string[], task: CodexTask): stri
   });
 }
 
-function sanitizeTail(value: string, maxBytes: number): string | undefined {
+// Exported so the Claude task runner reuses the exact same secret
+// sanitization (AGENTS.md: never log tokens/keys) instead of duplicating it.
+export function sanitizeTail(value: string, maxBytes: number): string | undefined {
   const output = sanitizeOutput(tail(value, maxBytes));
   return output ? output : undefined;
 }
 
-function sanitizeOutput(value: string): string {
+export function sanitizeOutput(value: string): string {
   return value
     .replace(/-----BEGIN [^-]+PRIVATE KEY-----[\s\S]*?-----END [^-]+PRIVATE KEY-----/g, "[redacted private key]")
     .replace(/\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/g, "[redacted jwt]")
@@ -326,7 +328,7 @@ function positiveInt(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 }
 
-function tail(value: string, maxBytes: number): string {
+export function tail(value: string, maxBytes: number): string {
   if (Buffer.byteLength(value, "utf8") <= maxBytes) return value;
   return Buffer.from(value, "utf8").subarray(-maxBytes).toString("utf8");
 }
