@@ -15,6 +15,8 @@ import { HermesTurn } from "./HermesTurn.js";
 
 export interface CoPilotRailProps {
   onSpawnMission?: (url: string) => void;
+  /** Propose a greenfield Claude task (/claude <repo> <task>). */
+  onSpawnClaudeTask?: (repo: string, prompt: string) => void;
   /** Focused card — scopes Ask-Hermes questions + the scope chip. */
   focusedCard?: BoardCard;
   /** Collaboration wiring. Omit to keep the rail inert (e.g. in BoardView tests). */
@@ -31,6 +33,7 @@ export interface CoPilotRailProps {
 
 export function CoPilotRail({
   onSpawnMission,
+  onSpawnClaudeTask,
   focusedCard,
   collaboration,
   onMute,
@@ -74,6 +77,7 @@ export function CoPilotRail({
 
       <AskHermesComposer
         onSpawnMission={onSpawnMission}
+        onSpawnClaudeTask={onSpawnClaudeTask}
         onAsk={(text) => ask(text, relatedPr)}
         onMute={onMute}
         onUnmute={onUnmute}

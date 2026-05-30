@@ -40,6 +40,38 @@ test("parseHermesInput: /mission with a non-URL arg → error", () => {
   assert.equal(out.kind, "error");
 });
 
+test("parseHermesInput: /claude <repo> <task> → claude (repo + full prompt)", () => {
+  assert.deepEqual(parseHermesInput("/claude averray-agent/agent Add a HEALTHCHECK.md at the repo root"), {
+    kind: "claude",
+    repo: "averray-agent/agent",
+    prompt: "Add a HEALTHCHECK.md at the repo root",
+  });
+});
+
+test("parseHermesInput: /claude is case-insensitive and trims surrounding whitespace", () => {
+  assert.deepEqual(parseHermesInput("  /CLAUDE   owner/repo   do the thing  "), {
+    kind: "claude",
+    repo: "owner/repo",
+    prompt: "do the thing",
+  });
+});
+
+test("parseHermesInput: /claude with no args → error", () => {
+  assert.equal(parseHermesInput("/claude").kind, "error");
+});
+
+test("parseHermesInput: /claude with a repo but no task → error", () => {
+  assert.equal(parseHermesInput("/claude averray-agent/agent").kind, "error");
+});
+
+test("parseHermesInput: /claude with a malformed repo → error", () => {
+  assert.equal(parseHermesInput("/claude not-a-repo do something").kind, "error");
+});
+
+test("parseHermesInput: a word starting with claude but not the command is an ask", () => {
+  assert.equal(parseHermesInput("claudette asked about #548").kind, "ask");
+});
+
 test("parseHermesInput: plain text → ask", () => {
   assert.deepEqual(parseHermesInput("what's blocking #548?"), {
     kind: "ask",

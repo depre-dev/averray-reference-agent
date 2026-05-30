@@ -71,6 +71,8 @@ export interface BoardViewProps {
   onCardClose?: () => void;
   onCardNavigate?: (id: string) => void;
   onSpawnMission?: (url: string) => void;
+  /** Propose a greenfield Claude task (/claude <repo> <task>). */
+  onSpawnClaudeTask?: (repo: string, prompt: string) => void;
   collaboration?: UseCollaborationOptions;
   onMute?: (untilMs: number) => void;
   onUnmute?: () => void;
@@ -88,6 +90,7 @@ export function BoardView({
   onCardClose,
   onCardNavigate,
   onSpawnMission,
+  onSpawnClaudeTask,
   collaboration,
   onMute,
   onUnmute,
@@ -248,6 +251,7 @@ export function BoardView({
 
         <CoPilotRail
           onSpawnMission={onSpawnMission}
+          onSpawnClaudeTask={onSpawnClaudeTask}
           focusedCard={scopeCard}
           collaboration={collaboration}
           onMute={onMute}
