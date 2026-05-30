@@ -271,6 +271,22 @@ describe("toBoardCard", () => {
     expect(card.type).toBe("draft");
   });
 
+  it("corrects a deploy card's waiting-on: branch-protection (pre-merge) → CI (post-merge verify)", () => {
+    const card = toBoardCard(slim({
+      lane: "Deploying",
+      owner: "Merge steward", // would map to branch-protection
+      title: "post-production-deploy verification after workflow run",
+    }));
+    expect(card.type).toBe("deploy");
+    expect(card.waitingOn).toEqual({ actor: "CI", tone: "info" });
+  });
+
+  it("leaves a non-deploy branch-protection waiting-on untouched (release-queue still awaits branch protection)", () => {
+    const card = toBoardCard(slim({ lane: "Release Queue", owner: "Merge steward" }));
+    expect(card.type).toBe("pr");
+    expect(card.waitingOn).toEqual({ actor: "branch-protection", tone: "neutral" });
+  });
+
   it("classifies a testbed mission card", () => {
     const card = toBoardCard(slim({
       lane: "Hermes Checking",

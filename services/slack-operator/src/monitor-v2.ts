@@ -375,7 +375,14 @@ export function toBoardCard(item: HermesBoardCardSnapshot): BoardCard {
   const type = inferCardType(item, lane);
   const isAction = lane === "needs-attention";
   const isDraft = lane === "drafts";
-  const waitingOn = mapOwnerToWaitingOn(item.owner, isAction);
+  let waitingOn = mapOwnerToWaitingOn(item.owner, isAction);
+  // A deploy card is post-merge (verifying the deploy), so it can never be
+  // waiting on branch protection — that owner label is a pre-merge artifact
+  // from the producer. Correct it to CI (the post-merge verification it
+  // actually awaits). Other owners (operator / agent) are left untouched.
+  if (type === "deploy" && waitingOn.actor === "branch-protection") {
+    waitingOn = { actor: "CI", tone: "info" };
+  }
 
   const card: BoardCard = {
     id: cardId(item),
