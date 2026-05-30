@@ -18,7 +18,9 @@ import {
   mapRiskSignals,
   indexRawSummaries,
   indexCodexTasks,
+  indexTestbedMissions,
   enrichBoardCard,
+  mapMissionReport,
 } from "../../services/slack-operator/src/monitor-v2.js";
 import type { BoardCard } from "../../services/slack-operator/src/monitor-v2.js";
 import type { HermesBoardCardSnapshot } from "../../services/slack-operator/src/monitor-hermes-voice.js";
@@ -629,5 +631,118 @@ describe("buildV2BoardSnapshot — enrichment integration", () => {
     expect(card).toBeDefined();
     expect(card?.checks).toEqual({ pass: 5, running: 1, fail: 0, pending: 0, total: 6 });
     expect(card?.files).toEqual([{ path: "ops/deploy.staging.yml", diff: "", critical: false }]);
+  });
+
+  it("enriches a mission card with the browser agent's structured report (by correlationId)", () => {
+    // A classified mission item carries correlationId = run.id and no PR
+    // number; the run with its report is bundled at snapshot.testbedMissions.
+    const raw = {
+      active: [
+        {
+          correlationId: "mission-xyz",
+          repo: "testbed/mission",
+          intent: "testbed_agent_mission",
+          title: "Verify onboarding mission",
+          summary: { kind: "testbed_mission_run", reviewSignals: { touchedAreas: ["testbed"] } },
+        },
+      ],
+      recent: [],
+      testbedMissions: [
+        {
+          id: "mission-xyz",
+          targetUrl: "https://staging.averray.com/onboarding",
+          freshMemory: true,
+          allowTestMutations: false,
+          result: {
+            verdict: "partial",
+            confidence: 0.81,
+            scores: { success: 4, clarity: 3, latency: 5 },
+            blockers: ["Sign-message modal latency"],
+            confusingMoments: ["Receipt poll has no visible cadence"],
+            mutationBoundaryNotes: ["No transactions submitted"],
+            stoppedBeforeMutation: true,
+            completedPath: ["Loaded onboarding page", "Clicked Connect wallet"],
+            recommendations: ["Add a spinner to the Sign-message modal"],
+            evidence: ["screenshot: https://x.test/step3.png", "trace: browser-trace 2m14s"],
+          },
+        },
+      ],
+    };
+    const snap = buildV2BoardSnapshot(raw, { repo: "depre-dev/agent" });
+    const mission = snap.cards.find((c) => c.type === "mission");
+    expect(mission?.mission).toBeDefined();
+    expect(mission?.mission?.verdict).toBe("PARTIAL");
+    expect(mission?.mission?.target).toBe("https://staging.averray.com/onboarding");
+    expect(mission?.mission?.path).toHaveLength(2);
+  });
+});
+
+describe("indexTestbedMissions", () => {
+  it("indexes bundled runs by id and tolerates a missing list", () => {
+    const map = indexTestbedMissions({ testbedMissions: [{ id: "m1" }, { id: "m2" }] });
+    expect(map.get("m1")).toEqual({ id: "m1" });
+    expect(map.size).toBe(2);
+    expect(indexTestbedMissions({}).size).toBe(0);
+    expect(indexTestbedMissions(undefined).size).toBe(0);
+  });
+});
+
+describe("mapMissionReport", () => {
+  const run = {
+    id: "mission-xyz",
+    targetUrl: "https://staging.averray.com/onboarding",
+    freshMemory: true,
+    allowTestMutations: false,
+    result: {
+      verdict: "partial",
+      confidence: 0.81,
+      scores: { success: 4, clarity: 3, latency: 5 },
+      blockers: ["Sign-message modal latency"],
+      confusingMoments: ["Receipt poll has no visible cadence"],
+      mutationBoundaryNotes: ["No transactions submitted"],
+      stoppedBeforeMutation: true,
+      completedPath: ["Loaded onboarding page", "Clicked Connect wallet"],
+      recommendations: ["Add a spinner to the Sign-message modal"],
+      evidence: ["screenshot: https://x.test/step3.png", "trace: browser-trace 2m14s"],
+    },
+  };
+
+  it("maps verdict, confidence, seed, path, blockers, evidence, boundary, recs", () => {
+    const m = mapMissionReport(run)!;
+    expect(m.verdict).toBe("PARTIAL");
+    expect(m.verdictTone).toBe("warn");
+    expect(m.confidence).toBe(0.81);
+    expect(m.seed).toBe("fresh · no memory");
+    expect(m.path).toEqual([
+      { n: 1, status: "ok", desc: "Loaded onboarding page", lat: "" },
+      { n: 2, status: "ok", desc: "Clicked Connect wallet", lat: "" },
+    ]);
+    // blockers then confusing moments, as plain heads
+    expect(m.blockers.map((b) => b.head)).toEqual([
+      "Sign-message modal latency",
+      "Receipt poll has no visible cadence",
+    ]);
+    // evidence "type: detail" → kind + label + href (link only when a URL)
+    expect(m.evidence[0]).toEqual({ kind: "screenshot", label: "https://x.test/step3.png", href: "https://x.test/step3.png" });
+    expect(m.evidence[1]).toEqual({ kind: "trace", label: "browser-trace 2m14s", href: "#" });
+    expect(m.mutationBoundary).toMatch(/stopped before any mutation\. No transactions submitted/);
+    expect(m.recommendations).toEqual(["Add a spinner to the Sign-message modal"]);
+  });
+
+  it("maps 0–5 scores to 0–10 by key, omitting unknown ones", () => {
+    const m = mapMissionReport(run)!;
+    expect(m.successScore).toBe(8); // 4 × 2
+    expect(m.clarityScore).toBe(6); // 3 × 2
+    expect(m.latencyScore).toBe(10); // 5 × 2
+  });
+
+  it("does NOT invent runs/latency the report doesn't carry", () => {
+    const m = mapMissionReport(run)!;
+    expect(m.runs).toBeUndefined();
+    expect(m.latency).toBeUndefined();
+  });
+
+  it("returns undefined when the run has no result yet (mission still running)", () => {
+    expect(mapMissionReport({ id: "m", targetUrl: "https://x.test" })).toBeUndefined();
   });
 });

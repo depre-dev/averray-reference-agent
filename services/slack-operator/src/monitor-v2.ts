@@ -23,6 +23,10 @@ import type {
   HermesBoardCardSnapshot,
   HermesBoardSnapshot,
 } from "./monitor-hermes-voice.js";
+import {
+  testbedMissionStructuredReport,
+  type TestbedMissionRun,
+} from "./monitor-testbed-missions.js";
 
 // ── v2 typed model ──────────────────────────────────────────────────
 
@@ -91,6 +95,44 @@ export interface CardRiskSignal {
   message: string;
 }
 
+// ── Mission report (testbed browser missions) ───────────────────────
+// Mirrors the UI MissionReport. The optional numeric fields (runs,
+// latency, the 0–10 scores) are NOT carried by the agent's structured
+// report, so we omit them rather than invent values — the UI guards them.
+export interface CardMissionStep {
+  n: number;
+  status: "ok" | "warn" | "fail";
+  desc: string;
+  lat: string;
+}
+export interface CardMissionBlocker {
+  head: string;
+  body: string;
+}
+export interface CardMissionEvidence {
+  kind: "screenshot" | "trace" | "console" | "video";
+  label: string;
+  href: string;
+}
+export interface CardMissionReport {
+  verdict: "OK" | "PARTIAL" | "FAILED";
+  verdictTone: "ok" | "warn" | "fail";
+  /** 0..1 */
+  confidence: number;
+  target: string;
+  seed: string;
+  path: CardMissionStep[];
+  blockers: CardMissionBlocker[];
+  evidence: CardMissionEvidence[];
+  mutationBoundary: string;
+  recommendations: string[];
+  runs?: number;
+  latency?: string;
+  successScore?: number;
+  clarityScore?: number;
+  latencyScore?: number;
+}
+
 export interface BoardCard {
   id: string;
   lane: Lane;
@@ -142,6 +184,8 @@ export interface BoardCard {
   checkRuns?: CardCheckRun[];
   /** Hermes review findings (non-done cards) — the "why review" detail. */
   riskSignals?: CardRiskSignal[];
+  /** Mission cards: the browser agent's structured report, when posted. */
+  mission?: CardMissionReport;
 }
 
 export interface BoardSnapshotV2 {
@@ -525,6 +569,97 @@ export function indexRawSummaries(rawSnapshot: unknown): Map<string, Record<stri
   return map;
 }
 
+/**
+ * Index testbed mission runs (bundled on the snapshot as `testbedMissions`)
+ * by run id. A mission card correlates to its run by correlationId (the
+ * mission item sets `correlationId: run.id`), since mission items carry no
+ * PR number and so can't be found via the PR-key summary index.
+ */
+export function indexTestbedMissions(rawSnapshot: unknown): Map<string, Record<string, unknown>> {
+  const root = asRecord(rawSnapshot);
+  const map = new Map<string, Record<string, unknown>>();
+  for (const entry of asArray(root?.testbedMissions)) {
+    const run = asRecord(entry);
+    const id = asString(run?.id);
+    if (id && run && !map.has(id)) map.set(id, run);
+  }
+  return map;
+}
+
+const EVIDENCE_KINDS = new Set(["screenshot", "trace", "console", "video"]);
+
+/** Parse one structured-report evidence string ("type: detail") into the UI shape. */
+function mapMissionEvidence(raw: string): CardMissionEvidence {
+  const match = /^(\w+):\s*(.+)$/.exec(raw.trim());
+  const kindRaw = match ? match[1]!.toLowerCase() : "";
+  const kind = (EVIDENCE_KINDS.has(kindRaw) ? kindRaw : "trace") as CardMissionEvidence["kind"];
+  const detail = (match ? match[2]! : raw).trim();
+  const href = /^https?:\/\//i.test(detail) ? detail : "#";
+  return { kind, label: detail, href };
+}
+
+function pickScore(scores: Record<string, number>, keys: string[]): number | undefined {
+  for (const [k, v] of Object.entries(scores)) {
+    if (keys.includes(k.toLowerCase()) && Number.isFinite(v)) return Math.round(v * 2); // 0..5 → 0..10
+  }
+  return undefined;
+}
+
+/**
+ * Map a stored testbed mission run to the UI MissionReport. Returns
+ * undefined when the run has no structured report yet (e.g. still running),
+ * so the card simply omits `mission` and the drawer shows its "no report
+ * yet" fallback. Best-effort + truthful: only fields the agent actually
+ * reported are populated; the numeric runs/latency/scores the structured
+ * report doesn't carry are left undefined (the UI guards them).
+ */
+export function mapMissionReport(run: Record<string, unknown>): CardMissionReport | undefined {
+  const report = testbedMissionStructuredReport(run as unknown as TestbedMissionRun);
+  if (!report) return undefined;
+
+  const [verdict, verdictTone]: [CardMissionReport["verdict"], CardMissionReport["verdictTone"]] =
+    report.verdict === "pass"
+      ? ["OK", "ok"]
+      : report.verdict === "partial"
+        ? ["PARTIAL", "warn"]
+        : ["FAILED", "fail"];
+
+  const path: CardMissionStep[] = report.completedPath.map((desc, i) => ({
+    n: i + 1,
+    status: "ok",
+    desc,
+    lat: "",
+  }));
+  const blockers: CardMissionBlocker[] = [
+    ...report.blockers.map((head) => ({ head, body: "" })),
+    ...report.confusingMoments.map((head) => ({ head, body: "" })),
+  ];
+  const notes = report.mutationBoundaryNotes.join(" ").trim();
+  const boundaryBase = report.stoppedBeforeMutation
+    ? "Read-only mission — the agent stopped before any mutation."
+    : "The agent crossed or attempted a mutation boundary.";
+
+  const successScore = pickScore(report.scores, ["success", "usability", "task", "completion"]);
+  const clarityScore = pickScore(report.scores, ["clarity", "ux", "understanding", "comprehension"]);
+  const latencyScore = pickScore(report.scores, ["latency", "speed", "performance", "responsiveness"]);
+
+  return {
+    verdict,
+    verdictTone,
+    confidence: report.confidence,
+    target: asString(run.targetUrl) ?? "",
+    seed: run.freshMemory === false ? "warm memory" : "fresh · no memory",
+    path,
+    blockers,
+    evidence: report.evidence.map(mapMissionEvidence),
+    mutationBoundary: notes ? `${boundaryBase} ${notes}` : boundaryBase,
+    recommendations: report.recommendations,
+    ...(successScore !== undefined ? { successScore } : {}),
+    ...(clarityScore !== undefined ? { clarityScore } : {}),
+    ...(latencyScore !== undefined ? { latencyScore } : {}),
+  };
+}
+
 /** Index Codex tasks by their PR key for task-card enrichment. */
 export function indexCodexTasks(rawSnapshot: unknown): Map<string, Record<string, unknown>> {
   const root = asRecord(rawSnapshot);
@@ -549,6 +684,8 @@ export interface EnrichmentContext {
   codexTask?: Record<string, unknown>;
   /** The Codex runner heartbeat (global), if any. */
   runner?: Record<string, unknown>;
+  /** The testbed mission run correlated to a mission card, if any. */
+  missionRun?: Record<string, unknown>;
 }
 
 /**
@@ -590,6 +727,13 @@ export function enrichBoardCard(
     }
     const verdictText = card.verdict ?? item.verdict;
     if (verdictText) card.verdictText = verdictText;
+  }
+
+  // Mission cards: project the browser agent's structured report. Omitted
+  // when the run has no report yet (the drawer shows its "no report" state).
+  if (card.type === "mission" && ctx.missionRun) {
+    const mission = mapMissionReport(ctx.missionRun);
+    if (mission) card.mission = mission;
   }
 
   // Codex task cards: prompt / output / failure / runner liveness.
@@ -636,6 +780,7 @@ export function buildV2BoardSnapshot(
   const items = classified?.items ?? [];
   const summaryIndex = indexRawSummaries(rawSnapshot);
   const codexIndex = indexCodexTasks(rawSnapshot);
+  const missionIndex = indexTestbedMissions(rawSnapshot);
   const runner = readRunner(rawSnapshot);
   const cards = items.map((item) => {
     const base = toBoardCard(item);
@@ -644,6 +789,10 @@ export function buildV2BoardSnapshot(
       summary: key ? summaryIndex.get(key) : undefined,
       codexTask: key ? codexIndex.get(key) : undefined,
       runner,
+      missionRun:
+        base.type === "mission" && item.correlationId
+          ? missionIndex.get(item.correlationId)
+          : undefined,
     });
   });
   return {
