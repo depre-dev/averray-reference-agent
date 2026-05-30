@@ -24,10 +24,15 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(view.getByRole("complementary", { name: "Hermes co-pilot" })).toBeTruthy();
   });
 
-  test("action mode expands five lanes; the other three are mini-rails", () => {
+  test("every lane that holds cards is expanded; only empty lanes stay mini-rails", () => {
     const { container } = render(<BoardView board={richBoard} status="open" />);
-    expect(container.querySelectorAll("section.hm-lane").length).toBe(5);
-    expect(container.querySelectorAll(".hm-lane--collapsed").length).toBe(3);
+    // 7 of 8 lanes hold cards after grouping (the lone operator-review PR is an
+    // action card, promoted to needs-attention) → 7 expanded, 1 empty rail.
+    expect(container.querySelectorAll("section.hm-lane").length).toBe(7);
+    expect(container.querySelectorAll(".hm-lane--collapsed").length).toBe(1);
+    // drafts/codex-needed hold cards but aren't in the action preset — pre-fix
+    // they were hidden behind rails; now their card bodies render.
+    expect(within(container).getByText(/governance dispute UI/)).toBeTruthy();
   });
 
   test("renders the action card with its CTA and Hermes verdict", () => {
@@ -46,9 +51,19 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(view.getAllByText("CLOSED").length).toBeGreaterThan(0);
   });
 
-  test("collapsed lanes hide their card bodies (drafts is a mini-rail)", () => {
-    const { container } = render(<BoardView board={richBoard} status="open" />);
-    expect(within(container).queryByText(/governance dispute UI/)).toBeNull();
+  test("a calm board still expands lanes holding in-flight cards (regression: action==0 used to hide all but Done)", () => {
+    const calm: MonitorBoard = {
+      at: "2026-05-28T10:30:00Z",
+      cards: FIXTURE_CARDS.filter((c) => c.type === "deploy" || c.type === "done"),
+    };
+    const { container } = render(<BoardView board={calm} status="open" />);
+    // No needs-attention card → calm tone.
+    expect(container.querySelector(".hm-now--calm")).toBeTruthy();
+    // The deploying lane (in-flight automation) is expanded and shows its body…
+    expect(within(container).getByText(/Post-merge verify/)).toBeTruthy();
+    expect(container.querySelectorAll("section.hm-lane").length).toBe(2); // deploying + done
+    // …and the six empty lanes are mini-rails — not everything-but-Done collapsed.
+    expect(container.querySelectorAll(".hm-lane--collapsed").length).toBe(6);
   });
 
   test("an open stream lights the LIVE indicator with the snapshot clock", () => {

@@ -62,14 +62,16 @@ export function CoPilotRail({
           <div className="hm-hermes-title">Hermes co-pilot</div>
           <div className="hm-hermes-sub">
             <span className="pulse" aria-hidden />
-            Live · narrating the board · context: {focusedCard?.id ?? "everywhere"}
+            Ask about any card · context: {focusedCard?.id ?? "whole board"}
           </div>
         </div>
       </div>
 
       <div className="hm-hermes-stream" ref={streamRef} aria-live="polite">
         {messages.length === 0 ? (
-          <div className="hm-lane-empty">No board chatter yet.</div>
+          <div className="hm-lane-empty">
+            Nothing asked yet. Ask Hermes about a card or the board below — replies show up here.
+          </div>
         ) : (
           messages.map((m) => <HermesTurn key={m.id} turn={m} />)
         )}
