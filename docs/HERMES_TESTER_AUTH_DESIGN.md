@@ -18,13 +18,31 @@
 
 ---
 
+## What already exists — reuse, don't rebuild
+
+Most of this loop is already implemented across the two repos; the sidecar is mostly *wiring*, not new SIWE code.
+
+| Need | Already exists | Where |
+|---|---|---|
+| Generate a wallet | viem `generatePrivateKey` → `.env` | `reference-agent/scripts/bootstrap-wallet.sh` (1 wallet today; extend to 3) |
+| **SIWE sign-in** | `wallet_sign_siwe` + `siweLogin()` | `packages/wallet-mcp` + `mcp-common` — **the SIWE flow is built; reuse it per role** |
+| Grant `admin`/`verifier` roles | env address lists | `AUTH_ADMIN_WALLETS` / `AUTH_VERIFIER_WALLETS` (platform `mcp-server/src/auth/config.js`) — one-time deploy env |
+| The full loop, end to end | a working script | platform `mcp-server/src/demo/e2e-remote.js` (SIWE → create job → claim → submit → verify) — adapt it as the gold-path mission |
+| Run **without funding** | sponsored gas | starter jobs set `requiresSponsoredGas: true` (ERC-4337 / Pimlico) → the loop runs with an *unfunded* wallet |
+
+**The one external/manual bit — funding.** Polkadot Hub TestNet funds come from the **web faucet `faucet.polkadot.io`** (token **PAS**, rate-limited, manual — verified via the `polkadot-docs` MCP per AGENTS invariant #8). There's no clean programmatic auto-fund, so:
+
+> **Use FIXED, pre-funded wallets — do not regenerate per run** (you'd hit the faucet rate limit). Fund the three role wallets **once** (or lean on **sponsored starter jobs** to skip gas funding entirely), then reuse them every run.
+
+---
+
 ## The signer sidecar (build step 3)
 
 A small service that owns the test wallet keys and hands out authenticated sessions — **the key never enters the model/agent context.**
 
-- **Holds three testnet keys** (`agent`, `admin`, `verifier`) as managed secrets (env/secret store), localhost-only, on the test environment. Least-privilege: each key maps to exactly its role.
+- **Holds three FIXED testnet keys** (`agent`, `admin`, `verifier`) as managed secrets (env/secret store), localhost-only — generated **once** (extend `bootstrap-wallet.sh`), pre-funded once (or sponsored), and **reused every run** (never regenerated — the faucet is rate-limited). Least-privilege: each key maps to exactly its role.
 - **Mints two session types per role:**
-  - **API session** — runs the SIWE API flow (`/auth/nonce` → sign locally → `/auth/verify`) → JWT. Used for the gold-path/API missions.
+  - **API session** — **reuse the existing `siweLogin()` / `wallet_sign_siwe`** (don't reimplement SIWE): `/auth/nonce` → sign locally → `/auth/verify` → JWT. Used for the gold-path/API missions.
   - **Browser session** — drives the operator app's login in a headless browser with the wallet signer, captures the post-login Playwright **`storageState`** (cookies/localStorage). Used for authed surface sweeps + browser missions.
 - **Caches + refreshes:** cache each `(role × session-type)` until near `AUTH_TOKEN_TTL_SECONDS` expiry; re-mint on expiry. Expose e.g. `GET /session/:role?type=api|browser → { token | storageState, roles, expiresAt }`.
 - **Deploys as an `ops/` compose service**, bound to localhost on the test env, keys injected from the secret store. Never logs tokens or keys.
@@ -49,7 +67,7 @@ The payoff of separate role wallets — a mission that exercises auth as a first
 ## Build sequence
 
 1. **Step 2 — pre-seeded session:** runner accepts a session input; authed routes join the surface sweep; works with a manually-provided `storageState` first. *(One narrow PR.)*
-2. **Step 3a — signer sidecar service:** the multi-role mint+cache service in `ops/`, keys isolated. *(One narrow PR.)*
+2. **Step 3a — signer sidecar service:** a thin multi-role mint+cache service in `ops/` that **wraps the existing `siweLogin()`** for three **fixed, pre-funded** keys; keys isolated. Mostly wiring, not new SIWE. *(One narrow PR.)*
 3. **Step 3b — SIWE mission + role-gating checks:** the auth mission that drives the sidecar and asserts happy-path + 401/403. *(One narrow PR.)*
 
 ## Security / invariants
