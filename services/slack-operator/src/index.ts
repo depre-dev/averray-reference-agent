@@ -75,6 +75,7 @@ import {
   readCodexRunnerHeartbeat,
   summarizeCodexTasks,
 } from "./codex-task-queue.js";
+import { parseProposeTaskPayload } from "./codex-task-request.js";
 import {
   diagnoseTestbedMissionReportFromMessage,
   listTestbedMissionRuns,
@@ -1085,25 +1086,17 @@ async function handleMonitorCodexTaskRequest(request: http.IncomingMessage, resp
     }
     const action = stringField(payload, "action") ?? "propose";
     if (action === "propose") {
-      const repo = stringField(payload, "repo");
-      const pullRequestNumber = numberField(payload, "pullRequestNumber");
-      const prompt = stringField(payload, "prompt");
-      if (!repo || typeof pullRequestNumber !== "number" || !Number.isInteger(pullRequestNumber) || pullRequestNumber < 1 || !prompt) {
+      // Codex tasks need an existing PR; Claude tasks are greenfield (PR
+      // optional). The agent-aware validation lives in a pure, tested parser.
+      const parsed = parseProposeTaskPayload(payload);
+      if (!parsed.ok) {
         writeJson(response, 400, {
           error: "invalid_codex_task",
-          message: "repo, pullRequestNumber, and prompt are required to propose Codex work.",
+          message: parsed.message,
         });
         return;
       }
-      const result = await proposeCodexTask({
-        repo,
-        pullRequestNumber,
-        prompt,
-        ...(stringField(payload, "correlationId") ? { correlationId: stringField(payload, "correlationId") } : {}),
-        ...(stringField(payload, "title") ? { title: stringField(payload, "title") } : {}),
-        ...(stringField(payload, "reason") ? { reason: stringField(payload, "reason") } : {}),
-        requester: stringField(payload, "requester") ?? "monitor",
-      });
+      const result = await proposeCodexTask(parsed.input);
       writeJson(response, 200, {
         ok: true,
         action,
