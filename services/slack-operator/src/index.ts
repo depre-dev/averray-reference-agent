@@ -970,6 +970,10 @@ async function handleMonitorTestbedMissionRequest(request: http.IncomingMessage,
       ...(booleanField(payload, "allowTestMutations") !== undefined ? { allowTestMutations: booleanField(payload, "allowTestMutations") } : {}),
       ...(numberField(payload, "maxBrowserSteps") !== undefined ? { maxBrowserSteps: numberField(payload, "maxBrowserSteps") } : {}),
       ...(numberField(payload, "maxMinutes") !== undefined ? { maxMinutes: numberField(payload, "maxMinutes") } : {}),
+      ...(stringField(payload, "mode") === "surface_sweep" ? { mode: "surface_sweep" as const } : {}),
+      ...(Array.isArray(payload.routes)
+        ? { routes: payload.routes.filter((r): r is string => typeof r === "string" && r.length > 0) }
+        : {}),
     });
     recordTestbedMissionCollaboration(created.run);
     logger.info(

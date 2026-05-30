@@ -14,6 +14,7 @@ import {
   updateTestbedMissionProgress,
   updateTestbedMissionRunnerHeartbeat,
 } from "./monitor-testbed-missions.js";
+import { executeSurfaceSweep, type SurfaceSweepDeps } from "./testbed-surface-sweep.js";
 
 export interface TestbedMissionRunnerConfig {
   enabled: boolean;
@@ -29,6 +30,10 @@ export interface TestbedMissionRunnerConfig {
   browserExecutablePath?: string;
   artifactsDir?: string;
   maxBrowserSteps?: number;
+  /** Base URL the surface sweep (T1) joins relative routes to. */
+  appBaseUrl?: string;
+  /** The env's truth boundary the sweep asserts surfaces label (demo/testnet/local-simulation/production). */
+  expectedBoundary?: string;
 }
 
 export interface TestbedMissionRunResult {
@@ -68,6 +73,10 @@ export function parseTestbedMissionRunnerConfig(
     ...(env.TESTBED_MISSION_BROWSER_EXECUTABLE_PATH ? { browserExecutablePath: env.TESTBED_MISSION_BROWSER_EXECUTABLE_PATH } : {}),
     artifactsDir: env.TESTBED_MISSION_ARTIFACTS_DIR || "/data/testbed-mission-artifacts",
     maxBrowserSteps: positiveInt(env.TESTBED_MISSION_MAX_BROWSER_STEPS, 8),
+    ...(env.AVERRAY_APP_BASE_URL || env.AVERRAY_API_BASE_URL
+      ? { appBaseUrl: env.AVERRAY_APP_BASE_URL || env.AVERRAY_API_BASE_URL }
+      : {}),
+    ...(env.AVERRAY_TESTBED_EXPECTED_BOUNDARY ? { expectedBoundary: env.AVERRAY_TESTBED_EXPECTED_BOUNDARY } : {}),
   };
 }
 
@@ -80,7 +89,7 @@ export async function runTestbedMissionRunnerOnce(
     return { status: "disabled" };
   }
   const executorMode = config.executor ?? (config.command ? "command" : "playwright");
-  const executor = deps.executor ?? (executorMode === "command" ? executeTestbedMissionCommand : executePlaywrightTestbedMission);
+  const executor = deps.executor ?? (executorMode === "command" ? executeTestbedMissionCommand : executeBrowserTestbedMission);
   if (executorMode === "command" && !config.command && executor === executeTestbedMissionCommand) {
     const reason = "TESTBED_MISSION_RUNNER_COMMAND is required when the Hermes testbed runner is enabled.";
     updateRunnerHeartbeat(config, "misconfigured", reason, deps.now);
@@ -260,6 +269,22 @@ export async function executeTestbedMissionCommand(
         });
     });
   });
+}
+
+/**
+ * Default browser executor: dispatch by mission mode. A `surface_sweep`
+ * mission (T1) walks a route list read-only and runs the boundary-honesty
+ * check; any other mission keeps the existing single-URL "explore" heuristic.
+ */
+export async function executeBrowserTestbedMission(
+  mission: TestbedMissionRun,
+  config: TestbedMissionRunnerConfig,
+  deps: SurfaceSweepDeps = {}
+): Promise<TestbedMissionRunResult> {
+  if (mission.mode === "surface_sweep") {
+    return executeSurfaceSweep(mission, config, deps);
+  }
+  return executePlaywrightTestbedMission(mission, config);
 }
 
 export async function executePlaywrightTestbedMission(
