@@ -255,6 +255,55 @@ services:
       - avg-data:/data
     networks: [avg-internal]
 
+  # Claude task runner (O2). Mirrors codex-task-runner; claims approved
+  # agent="claude" tasks. The startup route gate (claude-worker-auth) refuses
+  # to claim on a billing-route mismatch. Disabled by default; the operator
+  # enables it, sets CLAUDE_TASK_RUNNER_COMMAND to the Claude worker once it
+  # lands, and provisions the auth secrets in .env.prod. For SUB billing,
+  # leave ANTHROPIC_API_KEY UNSET (an empty value is treated as absent).
+  claude-task-runner:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.node
+    image: ${AVERRAY_IMAGE:-avg-node-runtime}
+    profiles: ["claude-runner"]
+    restart: unless-stopped
+    depends_on:
+      hermes-permissions:
+        condition: service_completed_successfully
+      mcp-bundle:
+        condition: service_completed_successfully
+    command: ["node", "services/slack-operator/dist/claude-task-runner.js"]
+    environment:
+      AVERRAY_CODEX_TASKS_PATH: ${AVERRAY_CODEX_TASKS_PATH:-/data/codex-tasks.json}
+      CLAUDE_TASK_RUNNER_ENABLED: ${CLAUDE_TASK_RUNNER_ENABLED:-0}
+      CLAUDE_TASK_RUNNER_ID: ${CLAUDE_TASK_RUNNER_ID:-vps-claude-task-runner}
+      # Point at the Claude worker (claude-branch-worker) once it lands; until
+      # then, leaving this empty makes the runner report "misconfigured"
+      # rather than run nothing.
+      CLAUDE_TASK_RUNNER_COMMAND: ${CLAUDE_TASK_RUNNER_COMMAND:-}
+      CLAUDE_TASK_RUNNER_ARGS: ${CLAUDE_TASK_RUNNER_ARGS:-}
+      CLAUDE_TASK_RUNNER_CWD: ${CLAUDE_TASK_RUNNER_CWD:-}
+      CLAUDE_TASK_RUNNER_POLL_INTERVAL_MS: ${CLAUDE_TASK_RUNNER_POLL_INTERVAL_MS:-10000}
+      CLAUDE_TASK_RUNNER_TIMEOUT_MS: ${CLAUDE_TASK_RUNNER_TIMEOUT_MS:-1800000}
+      CLAUDE_TASK_RUNNER_OUTPUT_TAIL_BYTES: ${CLAUDE_TASK_RUNNER_OUTPUT_TAIL_BYTES:-12000}
+      # Auth/billing (claude-worker-auth). Secrets sourced from .env.prod.
+      CLAUDE_WORKER_AUTH_MODE: ${CLAUDE_WORKER_AUTH_MODE:-sub}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_WORKER_DAILY_BUDGET: ${CLAUDE_WORKER_DAILY_BUDGET:-}
+      HALT_FILE: ${HALT_FILE:-/data/HALT}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_OWNER_TOKENS: ${GITHUB_OWNER_TOKENS:-}
+      GITHUB_REPO_TOKENS: ${GITHUB_REPO_TOKENS:-}
+      GITHUB_DEFAULT_REPO: ${GITHUB_DEFAULT_REPO:-}
+      GITHUB_HELPER_REPOS: ${GITHUB_HELPER_REPOS:-}
+      GITHUB_API_BASE_URL: ${GITHUB_API_BASE_URL:-https://api.github.com}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - avg-data:/data
+    networks: [avg-internal]
+
   hermes:
     image: ${HERMES_IMAGE}
     restart: unless-stopped

@@ -101,6 +101,16 @@ TypeScript monorepo: npm workspaces (`packages/*`, `services/*`), Node ≥ 22, E
   auto-merge or auto-deploy. Update this section when that lands.
 - **Humans own approval.** A PASS verdict is a release *signal*, not a merge order.
   Merge and deploy are human-gated. No auto-merge.
+- **Per-agent task runners** (`codex-task-runner`, `claude-task-runner`) claim
+  work from the shared task queue and execute the matching worker. They are the
+  dispatch path, so they carry invariant #6's guardrail: they claim **only
+  operator-`approved` tasks** (never self-approve), filtered by `agent`
+  (codex/claude). The Claude runner additionally runs a **billing-route
+  verification** at startup (`claude-worker-auth`) — on a mismatch it writes a
+  `misconfigured` heartbeat and **refuses to claim** rather than silently
+  API-bill — and honors the **api-mode daily budget** cap and the **`HALT_FILE`**
+  kill switch before claiming. Both runners are off by default and
+  operator-enabled per ops profile (`codex-runner` / `claude-runner`).
 
 ---
 
