@@ -182,4 +182,51 @@ describe("DetailDrawer — variants", () => {
     expect(getByText("Hermes recommends")).toBeTruthy();
     expect(container.querySelectorAll(".hm-mpath .step").length).toBe(6);
   });
+
+  // Regression: live cards cross an HTTP/JSON boundary and don't always carry
+  // the type-required nested objects (the backend doesn't populate deploy
+  // `verification` or a mission `mission` report yet). The drawer must render,
+  // not crash — this is the bug that took the live board down on card click.
+  test("deploy card with NO verification (live shape) renders without crashing", () => {
+    const card = {
+      id: "post-production-deploy-verification-afte-3e4a",
+      lane: "deploying",
+      type: "deploy",
+      agentType: "ext",
+      title: "post-production-deploy verification after workflow run",
+      summary: "post_deploy_healthy",
+      repo: "averray-agent/agent",
+      freshness: 180,
+      state: "fresh",
+      risk: [],
+      waitingOn: { actor: "branch-protection", tone: "neutral" },
+    } as unknown as BoardCard;
+    const { getByText, queryByText } = render(
+      <DetailDrawer card={card} cards={[{ id: card.id }]} onClose={noop} onNavigate={noop} />,
+    );
+    expect(getByText("Deploying · post-merge verification")).toBeTruthy();
+    expect(getByText("post_deploy_healthy")).toBeTruthy();
+    expect(queryByText("Verification progress")).toBeNull(); // omitted, not crashed
+  });
+
+  test("mission card with NO report (live shape) renders a fallback, not a crash", () => {
+    const card = {
+      id: "mission browser-live-01",
+      lane: "hermes-checking",
+      type: "mission",
+      agentType: "hermes",
+      title: "Verify onboarding on staging",
+      summary: "Fresh agent running; no structured report yet.",
+      repo: "depre-dev/site",
+      freshness: 5,
+      state: "fresh",
+      risk: [],
+      waitingOn: { actor: "agent", tone: "info" },
+    } as unknown as BoardCard;
+    const { getByText } = render(
+      <DetailDrawer card={card} cards={[{ id: card.id }]} onClose={noop} onNavigate={noop} />,
+    );
+    expect(getByText("Mission · no report yet")).toBeTruthy();
+    expect(getByText(/no structured report yet/i)).toBeTruthy();
+  });
 });

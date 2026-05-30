@@ -242,28 +242,42 @@ function TaskBody({ card }: { card: BoardCard }) {
 }
 
 function DeployBody({ card }: { card: DeployCard }) {
-  const { verification } = card;
+  // `verification`/`deployId` are required on the UI type, but the live
+  // backend doesn't always populate them (deploy verification is not wired
+  // yet). They cross an HTTP/JSON boundary, so read defensively — a
+  // verification-less deploy card must render, not crash the drawer.
+  const verification = (card as { verification?: DeployCard["verification"] }).verification;
+  const deployId = (card as { deployId?: string }).deployId;
   return (
     <>
       <VerdictBlock head="Post-merge verification">{card.summary || "Verifying the deploy."}</VerdictBlock>
-      <section>
-        <div className="hm-section-h">Verification progress</div>
-        <div className="hm-verdict-block">
-          <div className="head">
-            {verification.current}/{verification.total} · {verification.label}
+      {verification ? (
+        <section>
+          <div className="hm-section-h">Verification progress</div>
+          <div className="hm-verdict-block">
+            <div className="head">
+              {verification.current}/{verification.total} · {verification.label}
+            </div>
+            {deployId ? <div className="body">Deploy {deployId}.</div> : null}
           </div>
-          <div className="body">Deploy {card.deployId}.</div>
-        </div>
-      </section>
+        </section>
+      ) : null}
       <ChecksSection checks={card.checks} checkRuns={card.checkRuns} />
     </>
   );
 }
 
 function DoneBody({ card }: { card: DoneCard }) {
+  const closedAt = (card as { closedAt?: string }).closedAt;
   return (
     <VerdictBlock head="Final verdict · release history" accent="var(--hm-sage-deep)">
-      {card.mergeStatus === "MERGED" ? "MERGED" : "CLOSED"} · closed at <b>{card.closedAt}</b>.
+      {card.mergeStatus === "MERGED" ? "MERGED" : "CLOSED"}
+      {closedAt ? (
+        <>
+          {" "}· closed at <b>{closedAt}</b>
+        </>
+      ) : null}
+      .
       {card.verdictText ? (
         <>
           <br />
@@ -276,7 +290,16 @@ function DoneBody({ card }: { card: DoneCard }) {
 }
 
 function MissionBody({ card }: { card: MissionCard }) {
-  const m = card.mission;
+  // `mission` is required on the type, but a live mission card has no
+  // structured report until the browser agent posts one. Read defensively.
+  const m = (card as { mission?: MissionCard["mission"] }).mission;
+  if (!m) {
+    return (
+      <VerdictBlock head="Mission · no report yet" accent="var(--hm-hermes-deep)">
+        {card.summary || "No structured report yet — the browser agent hasn't posted one."}
+      </VerdictBlock>
+    );
+  }
   const verdictColor =
     m.verdictTone === "warn"
       ? "var(--hm-amber-deep)"
