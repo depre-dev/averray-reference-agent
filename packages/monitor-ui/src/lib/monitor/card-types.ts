@@ -145,19 +145,20 @@ export interface MissionReport {
   verdictTone: "ok" | "warn" | "fail";
   /** 0..1 */
   confidence: number;
-  /** e.g. "2m 14s" */
-  latency: string;
+  /** e.g. "2m 14s". Optional — a live agent report may not carry it. */
+  latency?: string;
   /** URL under test */
   target: string;
   /** e.g. "fresh · no memory" */
   seed: string;
-  runs: number;
+  /** Attempt count. Optional — not carried by a live agent report. */
+  runs?: number;
+  /** 0..10. Optional — only the scores the agent actually reported. */
+  successScore?: number;
   /** 0..10 */
-  successScore: number;
+  clarityScore?: number;
   /** 0..10 */
-  clarityScore: number;
-  /** 0..10 */
-  latencyScore: number;
+  latencyScore?: number;
   path: MissionStep[];
   blockers: MissionBlocker[];
   evidence: MissionEvidence[];

@@ -307,12 +307,20 @@ function MissionBody({ card }: { card: MissionCard }) {
         ? "var(--hm-rose)"
         : "var(--hm-sage-deep)";
 
+  // runs / latency / the 0–10 scores are optional: a live agent report may
+  // not carry them, and showing "run #0 · " or "0 · 0 · 0" would misrepresent.
+  const verdictHead =
+    "Verdict" +
+    (m.runs !== undefined ? ` · run #${m.runs}` : "") +
+    (m.latency ? ` · ${m.latency}` : "");
+  const hasScores =
+    m.successScore !== undefined || m.clarityScore !== undefined || m.latencyScore !== undefined;
+  const fmtScore = (n: number | undefined) => (n === undefined ? "—" : String(n));
+
   return (
     <>
       <section>
-        <div className="hm-section-h">
-          Verdict · run #{m.runs} · {m.latency}
-        </div>
+        <div className="hm-section-h">{verdictHead}</div>
         <div className="hm-mission-confidence">
           <div className="col">
             <span className="lbl">Verdict</span>
@@ -329,17 +337,19 @@ function MissionBody({ card }: { card: MissionCard }) {
             </span>
             <span className="meta">{m.seed}</span>
           </div>
-          <div className="col">
-            <span className="lbl">Scores · success · clarity · latency</span>
-            <span className="val">
-              {m.successScore}
-              <span style={{ color: "var(--hm-muted)" }}> · </span>
-              {m.clarityScore}
-              <span style={{ color: "var(--hm-muted)" }}> · </span>
-              {m.latencyScore}
-            </span>
-            <span className="meta">out of 10 · by Hermes</span>
-          </div>
+          {hasScores ? (
+            <div className="col">
+              <span className="lbl">Scores · success · clarity · latency</span>
+              <span className="val">
+                {fmtScore(m.successScore)}
+                <span style={{ color: "var(--hm-muted)" }}> · </span>
+                {fmtScore(m.clarityScore)}
+                <span style={{ color: "var(--hm-muted)" }}> · </span>
+                {fmtScore(m.latencyScore)}
+              </span>
+              <span className="meta">out of 10 · by Hermes</span>
+            </div>
+          ) : null}
         </div>
       </section>
 

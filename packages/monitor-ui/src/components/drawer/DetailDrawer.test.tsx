@@ -183,6 +183,48 @@ describe("DetailDrawer — variants", () => {
     expect(container.querySelectorAll(".hm-mpath .step").length).toBe(6);
   });
 
+  // A live agent report (from the serializer's mission enrichment) carries the
+  // qualitative detail but NOT the attempt count, latency, or 0–10 scores — so
+  // the drawer must render those faithfully (omit them), never as "run #0" /
+  // "0 · 0 · 0 out of 10".
+  test("mission card with a partial live report renders without invented runs/latency/scores", () => {
+    const card = {
+      id: "mission browser-live-09",
+      lane: "hermes-checking",
+      type: "mission",
+      agentType: "hermes",
+      title: "Verify checkout on staging",
+      summary: "agent report posted",
+      repo: "depre-dev/site",
+      freshness: 6,
+      state: "fresh",
+      risk: [],
+      waitingOn: { actor: "agent", tone: "info" },
+      mission: {
+        verdict: "PARTIAL",
+        verdictTone: "warn",
+        confidence: 0.74,
+        target: "https://staging.averray.com/checkout",
+        seed: "fresh · no memory",
+        path: [{ n: 1, status: "ok", desc: "Loaded checkout", lat: "" }],
+        blockers: [{ head: "Slow sign modal", body: "" }],
+        evidence: [],
+        mutationBoundary: "Read-only mission — the agent stopped before any mutation.",
+        recommendations: [],
+        // no runs / latency / successScore / clarityScore / latencyScore
+      },
+    } as unknown as BoardCard;
+    const { getByText, queryByText } = render(
+      <DetailDrawer card={card} cards={[{ id: card.id }]} onClose={noop} onNavigate={noop} />,
+    );
+    expect(getByText("PARTIAL")).toBeTruthy();
+    expect(getByText(/74/)).toBeTruthy(); // confidence %
+    expect(getByText("Loaded checkout")).toBeTruthy();
+    // no invented attempt count / score row
+    expect(queryByText(/run #/)).toBeNull();
+    expect(queryByText(/out of 10/)).toBeNull();
+  });
+
   // Regression: live cards cross an HTTP/JSON boundary and don't always carry
   // the type-required nested objects (the backend doesn't populate deploy
   // `verification` or a mission `mission` report yet). The drawer must render,
