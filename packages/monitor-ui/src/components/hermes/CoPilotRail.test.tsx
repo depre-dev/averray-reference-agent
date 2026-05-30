@@ -29,7 +29,7 @@ describe("CoPilotRail", () => {
 
   test("is inert (no fetch, empty-state copy) when collaboration is omitted", () => {
     const { getByText } = render(<CoPilotRail />, { wrapper });
-    expect(getByText("No board chatter yet.")).toBeTruthy();
+    expect(getByText(/Nothing asked yet/)).toBeTruthy();
   });
 
   test("the scope chip reflects the focused card", async () => {
@@ -51,7 +51,7 @@ describe("CoPilotRail", () => {
       <CoPilotRail focusedCard={card548} collaboration={{ fetcher, poster, refreshIntervalMs: 0 }} />,
       { wrapper },
     );
-    await waitFor(() => expect(within(container).getByText("No board chatter yet.")).toBeTruthy());
+    await waitFor(() => expect(within(container).getByText(/Nothing asked yet/)).toBeTruthy());
 
     const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "what's blocking?" } });

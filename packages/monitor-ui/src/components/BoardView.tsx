@@ -54,6 +54,24 @@ function expandedForMode(mode: BoardMode): ReadonlySet<LaneId> {
   return ACTION_EXPANDED;
 }
 
+const ALL_LANES = LANES as readonly LaneId[];
+
+/** Lanes that currently hold at least one card. */
+function lanesWithCards(grouped: Partial<Record<LaneId, BoardCard[]>>): LaneId[] {
+  return ALL_LANES.filter((lane) => (grouped[lane]?.length ?? 0) > 0);
+}
+
+// A lane with cards is always shown — only empty lanes collapse to rails. The
+// mode preset just decides which EMPTY lanes stay open (e.g. Done as release
+// history). This is why a calm board with automation in flight still shows
+// those lanes' cards instead of hiding everything but Done.
+function expandedForBoard(
+  mode: BoardMode,
+  grouped: Partial<Record<LaneId, BoardCard[]>>,
+): Set<LaneId> {
+  return new Set<LaneId>([...expandedForMode(mode), ...lanesWithCards(grouped)]);
+}
+
 function matchesQuery(card: BoardCard, q: string): boolean {
   if (!q) return true;
   const hay = `${card.id} ${card.title} ${card.repo} ${card.branch ?? ""} ${card.summary ?? ""}`.toLowerCase();
@@ -128,17 +146,22 @@ export function BoardView({
     }
   }, [state.counts.action]);
 
-  // Controlled lane expansion: seed from the mode preset, re-apply when
-  // the board mode flips (e.g. empty→action as live data arrives), but
-  // keep manual toggles / spotlight within a stable mode.
-  const [expanded, setExpanded] = useState<ReadonlySet<LaneId>>(() => new Set(expandedForMode(state.mode)));
-  const modeRef = useRef(state.mode);
+  // Controlled lane expansion: seed so every lane WITH cards is open (plus the
+  // mode preset's empty lanes, e.g. Done). Re-seed when the mode flips OR the
+  // set of lanes-with-cards changes — so in-flight work that arrives while the
+  // board stays "calm" (action == 0) still surfaces instead of hiding behind a
+  // rail. Manual toggles / spotlight persist until the next such change.
+  const [expanded, setExpanded] = useState<ReadonlySet<LaneId>>(
+    () => expandedForBoard(state.mode, state.grouped),
+  );
+  const seedRef = useRef<string>("");
   useEffect(() => {
-    if (modeRef.current !== state.mode) {
-      modeRef.current = state.mode;
-      setExpanded(new Set(expandedForMode(state.mode)));
+    const sig = `${state.mode}|${lanesWithCards(state.grouped).join(",")}`;
+    if (seedRef.current !== sig) {
+      seedRef.current = sig;
+      setExpanded(expandedForBoard(state.mode, state.grouped));
     }
-  }, [state.mode]);
+  }, [state.mode, state.grouped]);
 
   // Search filters what's shown + focusable (not the KPI counts).
   const q = query.trim().toLowerCase();
