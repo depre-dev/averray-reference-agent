@@ -11,6 +11,10 @@ import {
 export interface AgentTestbedMissionInput extends TestbedAgentMissionInput {
   requester?: string;
   path?: string;
+  /** T1: select a surface sweep instead of the single-URL explore. */
+  mode?: "explore" | "surface_sweep";
+  /** T1: routes for a surface sweep (relative to the app base URL, or absolute). */
+  routes?: string[];
 }
 
 export interface AgentTestbedMissionListInput {
@@ -38,7 +42,19 @@ export function createTestbedMissionFromAgent(
   input: AgentTestbedMissionInput = {},
   nowMs: number = Date.now()
 ): AgentTestbedMissionResult {
-  const mission = getTestbedAgentMission(input);
+  const mission = getTestbedAgentMission(input) as Record<string, unknown>;
+  // Carry the T1 sweep selection onto the mission packet's target so the
+  // recorded run picks up `mode` / `routes` (the packet generator is in the
+  // averray-mcp package and is agnostic to it).
+  if (input.mode || (input.routes && input.routes.length > 0)) {
+    const target =
+      mission.target && typeof mission.target === "object" && !Array.isArray(mission.target)
+        ? (mission.target as Record<string, unknown>)
+        : {};
+    if (input.mode) target.mode = input.mode;
+    if (input.routes && input.routes.length > 0) target.routes = input.routes;
+    mission.target = target;
+  }
   const run = recordTestbedMissionRunFromOperatorResult(
     {
       kind: "testbed_agent_mission",

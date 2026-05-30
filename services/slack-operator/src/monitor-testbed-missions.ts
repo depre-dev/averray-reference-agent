@@ -32,6 +32,12 @@ export interface TestbedMissionRun {
   agentName: string;
   freshMemory: boolean;
   allowTestMutations: boolean;
+  /** Mission shape. "explore" (default) is the single-URL heuristic; a
+   *  "surface_sweep" (T1) walks `routes` read-only with a boundary-honesty check. */
+  mode?: "explore" | "surface_sweep";
+  /** Routes for a surface_sweep (relative to the app base URL, or absolute).
+   *  Empty/absent ⇒ the default public surface list. */
+  routes?: string[];
   mission: Record<string, unknown>;
   result?: Record<string, unknown>;
   history: TestbedMissionHistoryEntry[];
@@ -126,18 +132,22 @@ export function recordTestbedMissionRunFromOperatorResult(
   const safety = isRecord(mission.safety) ? mission.safety : {};
   const createdAt = new Date(nowMs).toISOString();
   const allowTestMutations = safety.browserMissionShouldMutate === true;
+  const mode = stringField(target, "mode") === "surface_sweep" ? "surface_sweep" : undefined;
+  const routes = Array.isArray(target.routes) ? stringArray(target.routes) : [];
   const run: TestbedMissionRun = {
     schemaVersion: 1,
     kind: "testbed_mission_run",
     id: nextMissionId(nowMs),
     status: "ready",
-    title: "Fresh-agent browser mission",
+    title: mode === "surface_sweep" ? "Surface sweep (T1)" : "Fresh-agent browser mission",
     targetUrl: stringField(target, "url") ?? "[TESTBED_URL]",
     goal: stringField(target, "goal")
       ?? "Test whether a normal outside agent can understand and use the page.",
     agentName: stringField(target, "agentName") ?? "Hermes",
     freshMemory: target.freshMemory !== false,
     allowTestMutations,
+    ...(mode ? { mode } : {}),
+    ...(routes.length > 0 ? { routes } : {}),
     mission,
     history: [
       {
