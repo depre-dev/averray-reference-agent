@@ -21,9 +21,9 @@
 | ID | Item | Status |
 |----|------|--------|
 | O0 | Discovery (integration map) | ✅ done |
-| O1 | Agent attribution (branch-prefix → agentType) | ✅ done |
-| O2 | Claude Code worker (greenfield, Agent SDK) | 🟡 in build (partly done) |
-| O3 | Board-driven dispatch | design done |
+| O1 | Agent attribution (branch-prefix → agentType) | ✅ done (#252) |
+| O2 | Claude Code worker (greenfield, Agent SDK) | ✅ done (#256 queue · #259 auth · #260 runner · #262 worker · #263 ops) |
+| O3 | Board-driven dispatch | 🟡 partial — multi-agent queue ✅ (#256); board dispatch UI / `/task` verb + recheck wiring (spec #244) TBD |
 | O4 | Hermes enqueue + dispatch guardrail + autonomy mode | design done |
 | O5 | Self-management hardening | design done |
 | A1 | Agent scorecard | design done |
@@ -44,7 +44,7 @@
 | T4 | Tier-2 agent (Agent SDK + Playwright-MCP) | design done |
 | T5 | Env→mutation binding + enhancements (trace/video, baselines) | design done |
 
-*(Status reflects what the operator reports: O1 shipped, O2 in build; the rest are design-only. Tell me as things land and I'll flip statuses.)*
+*(Status as of 2026-05-29: **O0–O2 shipped, O3 partial**; the monitor redesign + board (PRs #225–#247) is fully shipped as the foundation; A/B/C/D and T1–T5 are design-only (T1 prompt out). Tell me as things land and I'll flip statuses.)*
 
 ## Recommended build order (the smooth, low-effort ramp)
 
