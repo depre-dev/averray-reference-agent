@@ -111,6 +111,16 @@ TypeScript monorepo: npm workspaces (`packages/*`, `services/*`), Node ≥ 22, E
   API-bill — and honors the **api-mode daily budget** cap and the **`HALT_FILE`**
   kill switch before claiming. Both runners are off by default and
   operator-enabled per ops profile (`codex-runner` / `claude-runner`).
+- **Branch workers** (`codex-branch-worker`, `claude-branch-worker`) are the
+  matching workers the runners spawn. They have **unattended push rights**, so
+  each is gated by a **repo allow-list** (`CODEX_BRANCH_WORKER_ALLOWED_REPOS` /
+  `CLAUDE_BRANCH_WORKER_ALLOWED_REPOS`) that is **empty by default and fails
+  closed** — the operator opts each `owner/repo` in explicitly. A worker only
+  ever pushes its own `codex/<slug>` / `claude/<slug>` branch (it **refuses
+  protected/base branches**), rejects secret-like files before committing,
+  redacts command output, and **opens a PR but never merges**. The Claude
+  worker is greenfield (creates the branch + opens the PR); the Codex worker
+  iterates an existing PR.
 
 ---
 

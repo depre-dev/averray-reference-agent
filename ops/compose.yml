@@ -278,15 +278,25 @@ services:
       AVERRAY_CODEX_TASKS_PATH: ${AVERRAY_CODEX_TASKS_PATH:-/data/codex-tasks.json}
       CLAUDE_TASK_RUNNER_ENABLED: ${CLAUDE_TASK_RUNNER_ENABLED:-0}
       CLAUDE_TASK_RUNNER_ID: ${CLAUDE_TASK_RUNNER_ID:-vps-claude-task-runner}
-      # Point at the Claude worker (claude-branch-worker) once it lands; until
-      # then, leaving this empty makes the runner report "misconfigured"
-      # rather than run nothing.
-      CLAUDE_TASK_RUNNER_COMMAND: ${CLAUDE_TASK_RUNNER_COMMAND:-}
-      CLAUDE_TASK_RUNNER_ARGS: ${CLAUDE_TASK_RUNNER_ARGS:-}
+      # Runs the Claude worker (claude-branch-worker). Inert until the operator
+      # opts in: the "claude-runner" profile + CLAUDE_TASK_RUNNER_ENABLED=1 must
+      # both be set, and the worker itself refuses to act without a populated
+      # CLAUDE_BRANCH_WORKER_ALLOWED_REPOS (fails closed).
+      CLAUDE_TASK_RUNNER_COMMAND: ${CLAUDE_TASK_RUNNER_COMMAND:-node}
+      CLAUDE_TASK_RUNNER_ARGS: ${CLAUDE_TASK_RUNNER_ARGS:-services/slack-operator/dist/claude-branch-worker.js}
       CLAUDE_TASK_RUNNER_CWD: ${CLAUDE_TASK_RUNNER_CWD:-}
       CLAUDE_TASK_RUNNER_POLL_INTERVAL_MS: ${CLAUDE_TASK_RUNNER_POLL_INTERVAL_MS:-10000}
       CLAUDE_TASK_RUNNER_TIMEOUT_MS: ${CLAUDE_TASK_RUNNER_TIMEOUT_MS:-1800000}
       CLAUDE_TASK_RUNNER_OUTPUT_TAIL_BYTES: ${CLAUDE_TASK_RUNNER_OUTPUT_TAIL_BYTES:-12000}
+      # Claude branch worker (greenfield executor). Empty ALLOWED_REPOS means the
+      # worker refuses every task — the operator opts each repo in explicitly.
+      CLAUDE_BRANCH_WORKER_ROOT: ${CLAUDE_BRANCH_WORKER_ROOT:-/data/claude-worker}
+      CLAUDE_BRANCH_WORKER_ALLOWED_REPOS: ${CLAUDE_BRANCH_WORKER_ALLOWED_REPOS:-}
+      CLAUDE_BRANCH_WORKER_BASE_BRANCH: ${CLAUDE_BRANCH_WORKER_BASE_BRANCH:-main}
+      CLAUDE_BRANCH_WORKER_CLAUDE_COMMAND: ${CLAUDE_BRANCH_WORKER_CLAUDE_COMMAND:-claude}
+      CLAUDE_BRANCH_WORKER_CLAUDE_ARGS: ${CLAUDE_BRANCH_WORKER_CLAUDE_ARGS:-}
+      CLAUDE_BRANCH_WORKER_GIT_USER_NAME: ${CLAUDE_BRANCH_WORKER_GIT_USER_NAME:-Averray Claude Worker}
+      CLAUDE_BRANCH_WORKER_GIT_USER_EMAIL: ${CLAUDE_BRANCH_WORKER_GIT_USER_EMAIL:-claude-worker@averray.local}
       # Auth/billing (claude-worker-auth). Secrets sourced from .env.prod.
       CLAUDE_WORKER_AUTH_MODE: ${CLAUDE_WORKER_AUTH_MODE:-sub}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
