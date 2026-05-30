@@ -247,10 +247,13 @@ async function gitChangedFiles(cwd: string): Promise<string[]> {
     .filter(Boolean);
 }
 
-function assertNoForbiddenFiles(paths: string[]): void {
+// Exported so the Claude branch worker reuses the exact same secret-file
+// guard + output sanitization (AGENTS.md: never log/commit secrets) rather
+// than maintaining a second copy that could drift.
+export function assertNoForbiddenFiles(paths: string[], who = "Codex"): void {
   const forbidden = paths.filter((path) => DEFAULT_DENY_PATTERNS.some((pattern) => pattern.test(path)));
   if (forbidden.length > 0) {
-    throw new Error(`Codex touched forbidden secret-like file(s): ${forbidden.join(", ")}`);
+    throw new Error(`${who} touched forbidden secret-like file(s): ${forbidden.join(", ")}`);
   }
 }
 
@@ -379,7 +382,7 @@ function lastNonEmptyLine(value: string): string {
   return value.trim().split(/\r?\n/).filter(Boolean).slice(-1)[0]?.trim() ?? "";
 }
 
-function redact(value: string): string {
+export function redact(value: string): string {
   return value
     .replace(/-----BEGIN [^-]+PRIVATE KEY-----[\s\S]*?-----END [^-]+PRIVATE KEY-----/g, "[redacted private key]")
     .replace(/\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/g, "[redacted jwt]")
