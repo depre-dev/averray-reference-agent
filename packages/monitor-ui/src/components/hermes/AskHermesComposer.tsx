@@ -1,9 +1,10 @@
 // Hermes Handoff Monitor — Ask-Hermes composer (M7'/M9').
 //
 // A single text input that doubles as a command line:
-//   /mission <url>   spawn a browser mission (M7')
-//   /mute [1h|9am]   silence action alerts; /unmute clears it (M9')
-//   anything else    a question for Hermes
+//   /mission <url>        spawn a browser mission (M7')
+//   /claude <repo> <task> propose a greenfield Claude task (O2)
+//   /mute [1h|9am]        silence action alerts; /unmute clears it (M9')
+//   anything else         a question for Hermes
 // Enter sends, Shift+Enter inserts a newline. Parsing lives in the pure
 // hermes-commands helper; this component owns only input + dispatch.
 
@@ -13,6 +14,8 @@ import { parseHermesInput } from "../../lib/monitor/hermes-commands.js";
 export interface AskHermesComposerProps {
   /** Spawn a browser mission against a URL (/mission <url>). */
   onSpawnMission?: (url: string) => void;
+  /** Propose a greenfield Claude task (/claude <repo> <task>). */
+  onSpawnClaudeTask?: (repo: string, prompt: string) => void;
   /** Ask Hermes a free-form question. */
   onAsk?: (text: string) => void;
   /** Mute action alerts until an absolute timestamp (/mute). */
@@ -29,6 +32,7 @@ export interface AskHermesComposerProps {
 
 export function AskHermesComposer({
   onSpawnMission,
+  onSpawnClaudeTask,
   onAsk,
   onMute,
   onUnmute,
@@ -58,6 +62,15 @@ export function AskHermesComposer({
         setValue("");
         setError(null);
         return;
+      case "claude":
+        if (onSpawnClaudeTask) {
+          onSpawnClaudeTask(command.repo, command.prompt);
+          setValue("");
+          setError(null);
+        } else {
+          setError("Proposing Claude tasks isn't wired here.");
+        }
+        return;
       case "mute":
         onMute?.(command.untilMs);
         setValue("");
@@ -74,7 +87,7 @@ export function AskHermesComposer({
           setValue("");
           setError(null);
         } else {
-          setError("Ask Hermes isn't wired here. Use /mission <url> or /mute.");
+          setError("Ask Hermes isn't wired here. Use /mission <url>, /claude <repo> <task>, or /mute.");
         }
         return;
     }
@@ -103,8 +116,8 @@ export function AskHermesComposer({
         <textarea
           ref={inputRef}
           className="hm-compose-input"
-          placeholder="Ask Hermes · /mission <url> · /mute 1h"
-          aria-label="Ask Hermes, spawn a mission, or mute alerts"
+          placeholder="Ask Hermes · /mission <url> · /claude <repo> <task> · /mute 1h"
+          aria-label="Ask Hermes, spawn a mission, propose a Claude task, or mute alerts"
           value={value}
           onChange={(e) => {
             setValue(e.target.value);

@@ -30,12 +30,15 @@ import { BoardView } from "./components/BoardView.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 
 const MISSIONS_URL = "/monitor/testbed-missions";
+const CODEX_TASKS_URL = "/monitor/codex-tasks";
 
 export interface MonitorPageProps {
   /** Override the live wiring (fetcher, EventSource, storage) for tests. */
   options?: UseMonitorBoardOptions;
   /** Override the /mission spawn (defaults to POST /monitor/testbed-missions). */
   onSpawnMission?: (url: string) => void;
+  /** Override the /claude propose (defaults to POST /monitor/codex-tasks). */
+  onSpawnClaudeTask?: (repo: string, prompt: string) => void;
   /** Override the co-pilot collaboration wiring (defaults to live polling). */
   collaboration?: UseCollaborationOptions;
   /** Override the action-alert wiring (audio/notification/storage) for tests. */
@@ -45,6 +48,7 @@ export interface MonitorPageProps {
 export function MonitorPage({
   options,
   onSpawnMission = defaultSpawnMission,
+  onSpawnClaudeTask = defaultSpawnClaudeTask,
   collaboration = {},
   alerts,
 }: MonitorPageProps = {}) {
@@ -66,6 +70,7 @@ export function MonitorPage({
         onCardClose={clearCard}
         onCardNavigate={setCard}
         onSpawnMission={onSpawnMission}
+        onSpawnClaudeTask={onSpawnClaudeTask}
         collaboration={collaboration}
         onMute={mute}
         onUnmute={unmute}
@@ -87,6 +92,24 @@ function defaultSpawnMission(url: string): void {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ targetUrl: url }),
+  }).catch(() => {
+    /* surfaced via the board feed / degraded state, not thrown here */
+  });
+}
+
+/**
+ * Propose a greenfield Claude task. POSTs `{ agent: "claude", repo, prompt }`
+ * to the slack-operator's /monitor/codex-tasks (the propose action), which
+ * enqueues it as a `proposed` task card on the v2 board. This only PROPOSES:
+ * the task still needs an explicit operator approval before the Claude runner
+ * claims it and opens a PR — the human gate is unchanged. Fire-and-forget; the
+ * board feed, not this call, drives the UI.
+ */
+function defaultSpawnClaudeTask(repo: string, prompt: string): void {
+  void fetch(CODEX_TASKS_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "propose", agent: "claude", repo, prompt }),
   }).catch(() => {
     /* surfaced via the board feed / degraded state, not thrown here */
   });

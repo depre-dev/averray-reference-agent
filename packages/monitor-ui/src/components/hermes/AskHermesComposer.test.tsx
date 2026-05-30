@@ -45,6 +45,35 @@ describe("AskHermesComposer", () => {
     expect(input.value).toBe("/mission");
   });
 
+  test("/claude <repo> <task> proposes a Claude task and clears the input", () => {
+    const onSpawnClaudeTask = vi.fn();
+    const { container, getByRole } = render(<AskHermesComposer onSpawnClaudeTask={onSpawnClaudeTask} />);
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    type(input, "/claude averray-agent/agent Add a HEALTHCHECK.md");
+    fireEvent.click(getByRole("button", { name: /Send/ }));
+    expect(onSpawnClaudeTask).toHaveBeenCalledWith("averray-agent/agent", "Add a HEALTHCHECK.md");
+    expect(input.value).toBe("");
+  });
+
+  test("/claude with a malformed repo shows an error and does not propose", () => {
+    const onSpawnClaudeTask = vi.fn();
+    const { container, getByRole } = render(<AskHermesComposer onSpawnClaudeTask={onSpawnClaudeTask} />);
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    type(input, "/claude not-a-repo do the thing");
+    fireEvent.click(getByRole("button", { name: /Send/ }));
+    expect(onSpawnClaudeTask).not.toHaveBeenCalled();
+    expect(within(container).getByRole("alert").textContent).toMatch(/not a valid owner\/repo/);
+    expect(input.value).toBe("/claude not-a-repo do the thing");
+  });
+
+  test("/claude without an onSpawnClaudeTask handler surfaces a hint", () => {
+    const { container, getByRole } = render(<AskHermesComposer onSpawnMission={vi.fn()} />);
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    type(input, "/claude averray-agent/agent do x");
+    fireEvent.click(getByRole("button", { name: /Send/ }));
+    expect(within(container).getByRole("alert").textContent).toMatch(/isn't wired here/);
+  });
+
   test("a plain question calls onAsk when a handler is provided", () => {
     const onAsk = vi.fn();
     const { container, getByRole } = render(<AskHermesComposer onAsk={onAsk} />);
