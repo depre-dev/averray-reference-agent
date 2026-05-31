@@ -51,7 +51,7 @@ describe("tester capabilities manifest", () => {
     });
     const goldPath = manifest.missionTypes.find((mission) => mission.id === "gold_path");
     expect(goldPath).toMatchObject({
-      status: "operator_only_design",
+      status: "executor_scaffolded_awaiting_live_driver",
       scope: "testbed_mutation_only",
     });
     const siweAuth = manifest.missionTypes.find((mission) => mission.id === "siwe_auth_role_gating");
