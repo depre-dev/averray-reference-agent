@@ -1,6 +1,6 @@
 # Hermes E2E Tester — Auth & Session Layer (build spec for steps 2–3)
 
-- **Status:** T3 signer sidecar merged (#283); SIWE mission/role-gating coverage is being wired as the T3 follow-up.
+- **Status:** Reconciled 2026-05-31. T3 signer sidecar foundation (#283) and SIWE mission/role-gating coverage (#290) have shipped.
 - **Date:** 2026-05-29
 - **Companion to:** [`HERMES_E2E_TESTER_DESIGN.md`](./HERMES_E2E_TESTER_DESIGN.md) — this details build steps **(2) pre-seeded session** and **(3) signer sidecar + SIWE mission**, which are the keystone that lets the tester reach the authed product instead of only public pages.
 - **Tests:** `averray-agent/agent` — SIWE auth (`/auth/nonce` → `personal_sign` → `/auth/verify` → JWT; roles `admin`/`verifier` pinned at sign-in via `AUTH_ADMIN_WALLETS`/`AUTH_VERIFIER_WALLETS`).
@@ -66,9 +66,9 @@ The payoff of separate role wallets — a mission that exercises auth as a first
 
 ## Build sequence
 
-1. **Step 2 — pre-seeded session:** runner accepts a session input; authed routes join the surface sweep; works with a manually-provided `storageState` first. *(One narrow PR.)*
-2. **Step 3a — signer sidecar service:** a thin multi-role mint+cache service in `ops/` that **wraps the existing `siweLogin()`** for three **fixed, pre-funded** keys; keys isolated. Mostly wiring, not new SIWE. *(One narrow PR.)*
-3. **Step 3b — SIWE mission + role-gating checks:** the auth mission that drives the sidecar and asserts happy-path + 401/403. *(One narrow PR.)*
+1. **Step 2 — pre-seeded session:** runner accepts a session input; authed routes join the surface sweep; works with a manually-provided `storageState` first. *(Shipped in #293.)*
+2. **Step 3a — signer sidecar service:** a thin multi-role mint+cache service in `ops/` that **wraps the existing `siweLogin()`** for three **fixed, pre-funded** keys; keys isolated. Mostly wiring, not new SIWE. *(Shipped in #283.)*
+3. **Step 3b — SIWE mission + role-gating checks:** the auth mission that drives the sidecar and asserts happy-path + 401/403. *(Shipped in #290.)*
 
 ## Security / invariants
 
@@ -78,4 +78,4 @@ The payoff of separate role wallets — a mission that exercises auth as a first
 
 ---
 
-*End of tester auth/session design. Step 3a shipped in #283; step 3b wires the SIWE role-gating mission against that sidecar.*
+*End of tester auth/session design. Reconciled 2026-05-31: step 3a shipped in #283 and step 3b shipped in #290.*

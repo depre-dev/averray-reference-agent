@@ -1,6 +1,6 @@
 # Hermes Orchestration — Execution Design (per-phase build specs)
 
-- **Status:** Planning / handoff only. **Nothing here is implemented.** This is the build spec a future agent follows; it does not apply changes.
+- **Status:** Reconciled 2026-05-31. This is the historical execution spec for O1-O5; O1-O4 have shipped, including O4 autonomy mode (#288) and autopilot auto-approval (#289). O5 self-management hardening remains follow-up.
 - **Date:** 2026-05-29
 - **Companions:** [`HERMES_MULTI_AGENT_ORCHESTRATION_PLAN.md`](./HERMES_MULTI_AGENT_ORCHESTRATION_PLAN.md) (the why + phases), [`HERMES_INTEGRATION_MAP.md`](./HERMES_INTEGRATION_MAP.md) (the confirmed source map).
 - **Decisions:** all nine open decisions are **resolved** (see the table at the end). They're baked into the specs below. `path:line` references are local to this repo; code blocks are illustrative sketches, not applied diffs.
@@ -147,6 +147,8 @@ interface AutonomyState {
 
 **Risk: HIGH** — this is the authority change and the autonomy surface. Treat as security-reviewed work; ships only with (A)+(B)+(C)+(D) together.
 
+Implementation note: O4 shipped across #280, #281, #288, and #289. Merge/deploy remain human-gated.
+
 ---
 
 ## P5 — Self-management hardening  ·  ongoing
@@ -181,4 +183,4 @@ interface AutonomyState {
 
 ---
 
-*End of execution design. Planning/handoff only — not implemented.*
+*End of execution design. Reconciled 2026-05-31: O1-O4 have shipped; O5 remains follow-up.*

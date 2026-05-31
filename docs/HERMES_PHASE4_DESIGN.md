@@ -1,6 +1,6 @@
 # Hermes Orchestration — Phase 4 Design (Multi-Agent Collaboration)
 
-- **Status:** Planning / handoff only. **Nothing here is implemented.** Design-level spec.
+- **Status:** Reconciled 2026-05-31. C4 inter-agent chat v1 shipped in #291. C1-C3 and remaining C follow-ups stay design/follow-up.
 - **Date:** 2026-05-29
 - **Companions:** the core [`HERMES_ORCHESTRATION_DESIGN.md`](./HERMES_ORCHESTRATION_DESIGN.md) (P1–P5), [`HERMES_PHASE2_DESIGN.md`](./HERMES_PHASE2_DESIGN.md) (A + D), [`HERMES_PHASE3_DESIGN.md`](./HERMES_PHASE3_DESIGN.md) (B).
 - **Position:** **Phase 4 (Theme C).** Today agents work in *parallel but isolated* — each builds its own PR; only Hermes reviews. C makes them work *together* and lets the roster grow. **Modular:** it builds on the core's multi-worker (P2) + the existing review machinery, and is independent of B — it can land alongside Phase 2/3 rather than strictly after.
@@ -28,6 +28,8 @@ Any unresolved disagreement — a panel split, or a reviewer that blocks — **p
 
 Extend the board's collaboration channel (today: `codex | hermes | operator | system`; note `claude` isn't yet a collaboration author) so agents can coordinate directly on a card — e.g. a reviewer asking the builder to clarify, or Hermes brokering a disagreement before escalating. A data-model extension (`CollaborationAuthor`/`Target`) + UI; low-risk and immediately useful once there are ≥2 builders.
 
+Implementation note: C4 v1 shipped in #291 with Claude author/target and card-scoped agent messages. Broader collaboration/review follow-ups are still governed by C1-C3.
+
 ---
 
 ## Dependencies & sequencing
@@ -47,4 +49,4 @@ Extend the board's collaboration channel (today: `codex | hermes | operator | sy
 
 ---
 
-*End of Phase 4 design. Planning/handoff only — not implemented.*
+*End of Phase 4 design. Reconciled 2026-05-31: C4 v1 has shipped; C1-C3 and remaining collaboration follow-ups are still design/follow-up.*

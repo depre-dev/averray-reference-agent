@@ -1,6 +1,6 @@
 # Hermes E2E Tester — Design (the product tester)
 
-- **Status:** Planning / handoff only. **Nothing here is implemented.** Design-level spec.
+- **Status:** Reconciled 2026-05-31. T2 pre-seeded session (#293), T3 SIWE role-gating (#290), and T5 env→mutation binding/enhancements (#297) have shipped. T4 Tier-2 agent, T6 agent-requested runs, and T7 capabilities/helper work remain follow-up/design unless code evidence proves otherwise.
 - **Date:** 2026-05-29
 - **Lives in:** this repo (`depre-dev/averray-reference-agent`) — the testbed/mission code is here.
 - **Tests:** the platform product `averray-agent/agent` — the Polkadot Agent Platform ("Averray"): an agent-first job/treasury runtime on Polkadot Hub TestNet.
@@ -104,10 +104,10 @@ Each mission's verdict is LLM-judged (Tier 2) or rule-checked (Tier 1); both rec
 
 ## Build sequencing
 
-1. **Tier 1 hardening** — broaden the heuristic executor to all surfaces + add the boundary-honesty check + add a **pre-seeded session** so it can reach authed pages. (Cheap, immediate value, no LLM.)
-2. **Signer sidecar + SIWE mission** — the keystone unlock for authed testing.
+1. **Tier 1 hardening** — broaden the heuristic executor to all surfaces + add the boundary-honesty check + add a **pre-seeded session** so it can reach authed pages. (T2 pre-seeded session shipped in #293.)
+2. **Signer sidecar + SIWE mission** — the keystone unlock for authed testing. (T3 role-gating mission shipped in #290; sidecar foundation shipped earlier in #283.)
 3. **Tier-2 agent executor** (Agent SDK + Playwright-MCP + HTTP/wallet) via the `command` hook — the gold-path missions.
-4. **Env→mutation-profile binding** (do before any mainnet exists).
+4. **Env→mutation-profile binding** (do before any mainnet exists). (T5 shipped in #297.)
 5. **Enhancements** — trace/video, regression baselines, B2 self-healing hook.
 
 ## Invariants / safety
@@ -119,4 +119,4 @@ Each mission's verdict is LLM-judged (Tier 2) or rule-checked (Tier 1); both rec
 
 ---
 
-*End of E2E tester design. Planning/handoff only — not implemented.*
+*End of E2E tester design. Reconciled 2026-05-31: T2, T3, and T5 have shipped; T4/T6/T7 remain follow-up/design.*

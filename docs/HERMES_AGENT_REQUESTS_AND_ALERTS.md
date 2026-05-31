@@ -1,6 +1,6 @@
 # Agent-Requested Tester Runs + the Operator Alert Bridge
 
-- **Status:** Partly implemented. The reference-agent now exposes the tester capabilities manifest endpoint in review; the platform helper, board approval gate for agent-requested missions, and off-device alert bridge remain follow-up work.
+- **Status:** Reconciled 2026-05-31. D4 off-device alert bridge shipped earlier (#279) and D1 operator digest/reporting shipped in #294. T6 board-gated agent-requested tester runs and T7 capabilities/platform-helper work remain follow-up/design unless code evidence proves otherwise.
 - **Date:** 2026-05-29
 - **Companions:** [`HERMES_E2E_TESTER_DESIGN.md`](./HERMES_E2E_TESTER_DESIGN.md), [`HERMES_TESTER_AUTH_DESIGN.md`](./HERMES_TESTER_AUTH_DESIGN.md), [`HERMES_ROADMAP.md`](./HERMES_ROADMAP.md).
 - **Problem:** the code-building agents (the ones opening `app:` PRs in `averray-agent/agent`) can't currently start a tester run, don't know the tester's capabilities, and there's no way to reach the operator for approval when they're away from the Mac.
@@ -53,7 +53,7 @@ Today the board only has **browser** notifications (#232: tab badge, desktop not
 
 ## Build sequence
 
-1. **Alert bridge (Slack)** — highest leverage: unblocks "step away," and it's the O4 prerequisite. *(reference-agent)*
+1. **Alert bridge (Slack)** — highest leverage: unblocks "step away," and it's the O4 prerequisite. *(Shipped as D4 in #279; D1 operator reporting shipped in #294.)*
 2. **Agent-requested run endpoint + the proposed-mission approval gate** on the board. *(reference-agent)*
 3. **Capabilities manifest** + the **platform-repo helper** + the **platform `AGENTS.md`** pointer. *(manifest endpoint = reference-agent; helper + AGENTS.md = platform repo follow-up)*
 
@@ -71,4 +71,4 @@ Today the board only has **browser** notifications (#232: tab badge, desktop not
 
 ---
 
-*End. The manifest endpoint is now implemented in the reference-agent; remaining items are still planning/handoff until their PRs land.*
+*End. Reconciled 2026-05-31: D4 and D1 are shipped; T6/T7 stay follow-up/design here.*

@@ -1,7 +1,7 @@
 # Worker Model Auth & Billing (Claude / Codex)
 
-- **Status:** Planning / handoff. Operational note for whoever builds **O2** (Claude worker) and **T4** (Tier-2 tester agent), and for the operator who provisions credentials.
-- **Date:** 2026-05-29
+- **Status:** Reconciled 2026-05-31. O2 has shipped; this remains the operational billing/auth note for the live Claude worker and the still-design T4 Tier-2 tester agent.
+- **Date:** 2026-05-31
 - **Scope:** how the agent *workers* authenticate to their **model providers** (Anthropic / OpenAI) and how that **bills**. This is **not** product auth (that's SIWE via the signer sidecar — see `HERMES_TESTER_AUTH_DESIGN.md`) and **not** the dispatch guardrail (though the spend cap below *is* the budget half of AGENTS invariant #6).
 
 > Time-sensitive: Anthropic unbundles programmatic Claude from the subscription on **June 15, 2026** (see below). Design O2/T4 for that reality, not for "free on the sub forever."
@@ -36,7 +36,7 @@ Authenticates via **"Sign in with ChatGPT"** — usage is **included in the Chat
 | Now / dev / low-volume (next ~2 weeks) | Claude: sub OAuth token (no API key in env). Codex: ChatGPT sub. | **~$0 extra** — bundled in existing subs; from June 15 the $100/$200 credit covers low volume. |
 | Autopilot / higher volume / production | API key + **spend cap** (Console) | metered, predictable, capped; clean ToS for shared automation. |
 
-**Cost projection (next 2 weeks): ~$0 extra**, running on the subs — provided the route is verified (footguns above) and you stay within Max usage limits (subs throttle, they don't surprise-bill). Autopilot (O4) isn't built yet, so volume is manual-dispatch-bounded. *Metered-equivalent would plausibly be low-tens-of-dollars to ≈$100 worst case (Opus, no caching, many reruns) — but it's moot on the sub.*
+**Cost projection (next 2 weeks): ~$0 extra**, running on the subs — provided the route is verified (footguns above) and you stay within Max usage limits (subs throttle, they don't surprise-bill). O4 autopilot has shipped, so keep dispatch budgets and A3a cost visibility active while A3b cost-aware routing/budget is in progress. *Metered-equivalent would plausibly be low-tens-of-dollars to ≈$100 worst case (Opus, no caching, many reruns) — but it's moot on the sub.*
 
 ---
 
@@ -46,7 +46,7 @@ Authenticates via **"Sign in with ChatGPT"** — usage is **included in the Chat
 - **Route-verification health check on worker startup** — assert the *intended* route is the *active* one (e.g. equivalent of `claude /status`; if intending sub but `ANTHROPIC_API_KEY` is present in the env, **fail loud**, don't silently API-bill). This defuses both footguns.
 - **Spend cap when on API key** — set a Console cap per runner; this is the budget half of AGENTS invariant #6 (new power ⇒ allowlist + **budget** + human approval).
 - **Operator provisions tokens/keys**; agents never handle the secret. Never log tokens/keys (existing invariant; output sanitization is a backstop, not a license).
-- **Do this now (O2 is in build):** run `claude /status` + check `echo $ANTHROPIC_API_KEY` in the worker env to confirm you're not already silently API-billing.
+- **Operator check:** run `claude /status` + check `echo $ANTHROPIC_API_KEY` in the worker env to confirm you're not silently API-billing when sub OAuth is intended.
 
 ## Sources
 [Claude Code auth](https://code.claude.com/docs/en/authentication) · [Claude Code headless](https://code.claude.com/docs/en/headless) · [Agent SDK with your Claude plan](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) · [Codex auth](https://developers.openai.com/codex/auth) · [Codex pricing](https://developers.openai.com/codex/pricing)
