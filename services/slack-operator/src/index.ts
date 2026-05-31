@@ -58,6 +58,19 @@ import {
   type AlertItem,
 } from "./alert-bridge.js";
 import {
+  runAnomalyPauseOnce,
+  loadAnomalyConfig,
+  touchHaltFile,
+  isHaltFilePresent,
+  type AnomalySignals,
+} from "./anomaly-pause.js";
+import {
+  isAutopilotSuspended,
+  setAutopilotSuspended,
+  clearAutopilotSuspended,
+  readAutopilotSuspendState,
+} from "./autopilot-state.js";
+import {
   isDebugSpawnEnabled,
   mergeDebugCards,
   onDebugCardSpawned,
@@ -468,6 +481,18 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
     writeJson(response, 200, buildTesterCapabilitiesManifest({
       runner: readTestbedMissionRunnerHeartbeat() ?? null,
     }));
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/monitor/autopilot-resume") {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    await handleMonitorAutopilotResumeRequest(request, response);
     return;
   }
   const testbedMissionId = monitorTestbedMissionId(url.pathname);
@@ -1109,6 +1134,28 @@ async function handleMonitorAlertMuteRequest(request: http.IncomingMessage, resp
   }
 }
 
+// D3 — operator-only resume: clears the autopilot-suspended flag a soft trip
+// set. (A hard trip also touched HALT_FILE; clearing HALT stays a separate,
+// deliberate operator action — this only lifts the autopilot suspension.)
+async function handleMonitorAutopilotResumeRequest(_request: http.IncomingMessage, response: http.ServerResponse) {
+  try {
+    const before = readAutopilotSuspendState();
+    clearAutopilotSuspended();
+    logger.info({ wasSuspended: before.suspended, tier: before.tier, signal: before.signal }, "d3_autopilot_resumed");
+    writeJson(response, 200, {
+      ok: true,
+      resumed: true,
+      wasSuspended: before.suspended,
+      ...(before.reason ? { clearedReason: before.reason } : {}),
+    });
+  } catch (error) {
+    writeJson(response, 500, {
+      error: "autopilot_resume_failed",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 async function handleMonitorRecheckRequest(request: http.IncomingMessage, response: http.ServerResponse) {
   try {
     const rawBody = await readBody(request);
@@ -1278,6 +1325,9 @@ function startOperatorRoutines() {
   let alertBridgeRunning = false;
   let alertBridgeState: AlertBridgeState = initialAlertBridgeState();
   const alertChannel: AlertChannel = slackAlertChannel();
+  let anomalyPauseRunning = false;
+  const anomalyConfig = loadAnomalyConfig();
+  const dispatchPerDayCap = Number(process.env.HERMES_DISPATCH_PER_DAY_MAX) || 10;
 
   const checkDailyBrief = async () => {
     if (dailyBriefRunning) return;
@@ -1457,6 +1507,77 @@ function startOperatorRoutines() {
     }
   };
 
+  // D3 — tiered anomaly auto-pause. Server-side fail-safe: a soft trip suspends
+  // autopilot (the flag PR3 will honor) + alerts; a hard trip touches HALT_FILE
+  // (everything mutating stops) + alerts. De-duped + skipped once HALT is set.
+  const checkAnomalies = async () => {
+    if (anomalyPauseRunning || !routineConfig.anomalyPause.enabled) return;
+    anomalyPauseRunning = true;
+    try {
+      const result = await runAnomalyPauseOnce({
+        config: anomalyConfig,
+        getSignals: async (): Promise<AnomalySignals> => {
+          const summary = (await loadCodexTaskQueueSummary()) as unknown as { items?: Array<Record<string, unknown>>; runner?: Record<string, unknown> };
+          const items = Array.isArray(summary.items) ? summary.items : [];
+          const nonTerminal = items.filter((t) => {
+            const s = typeof t.status === "string" ? t.status : "";
+            return s !== "completed" && s !== "failed" && s !== "cancelled";
+          });
+          const attempt = (t: Record<string, unknown>) => (typeof t.attemptCount === "number" ? t.attemptCount : 0);
+          const today = new Date().toISOString().slice(0, 10);
+          const runnerUpdatedAt =
+            summary.runner && typeof summary.runner.updatedAt === "string" ? Date.parse(summary.runner.updatedAt) : NaN;
+          const runnerHeartbeatAgeSec = Number.isFinite(runnerUpdatedAt)
+            ? Math.max(0, (Date.now() - runnerUpdatedAt) / 1000)
+            : undefined;
+          return {
+            maxTaskAttemptCount: nonTerminal.reduce((m, t) => Math.max(m, attempt(t)), 0),
+            failingTaskCount: nonTerminal.filter((t) => attempt(t) >= 2).length,
+            hermesTasksToday: items.filter(
+              (t) =>
+                (typeof t.requester === "string" ? t.requester.toLowerCase() : "") === "hermes" &&
+                (typeof t.createdAt === "string" ? t.createdAt.slice(0, 10) : "") === today,
+            ).length,
+            perDayCap: dispatchPerDayCap,
+            ...(runnerHeartbeatAgeSec !== undefined ? { runnerHeartbeatAgeSec } : {}),
+          };
+        },
+        isHaltPresent: () => isHaltFilePresent(),
+        isSuspended: () => isAutopilotSuspended(),
+        setSuspended: (info) => setAutopilotSuspended(info),
+        touchHalt: (reason) => touchHaltFile(reason),
+        alert: (payload) => alertChannel.dispatch(payload),
+        audit: async (record) => {
+          await recordOperatorCommandEvent(
+            {
+              source: "slack_routine",
+              commandText: "anomaly auto-pause trip",
+              ...(routineConfig.channelId ? { channelId: routineConfig.channelId } : {}),
+              result: {
+                kind: "anomaly_autopause",
+                tier: record.tier,
+                action: record.action,
+                signals: record.signals,
+                reason: record.reason,
+                safety: { readOnly: false, mutatesGithub: false, mutatesAverray: false, editsWikipedia: false },
+              },
+            },
+            query,
+          );
+        },
+        boardUrl: optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor") ?? "https://monitor.averray.com/monitor",
+        now: () => new Date(),
+      });
+      if (result.action !== "none" && result.action !== "halted") {
+        logger.warn({ action: result.action, trips: result.evaluation?.trips }, "d3_anomaly_autopause_tripped");
+      }
+    } catch (error) {
+      logger.error({ err: error }, "d3_anomaly_autopause_failed");
+    } finally {
+      anomalyPauseRunning = false;
+    }
+  };
+
   if (routineConfig.dailyBrief.enabled) {
     setTimeout(() => void checkDailyBrief(), 5_000);
     setInterval(() => void checkDailyBrief(), 60_000);
@@ -1480,6 +1601,10 @@ function startOperatorRoutines() {
   if (routineConfig.alertBridge.enabled) {
     setTimeout(() => void checkAlertBridge(), 9_000);
     setInterval(() => void checkAlertBridge(), routineConfig.alertBridge.intervalMs);
+  }
+  if (routineConfig.anomalyPause.enabled) {
+    setTimeout(() => void checkAnomalies(), 11_000);
+    setInterval(() => void checkAnomalies(), routineConfig.anomalyPause.intervalMs);
   }
 }
 

@@ -22,4 +22,15 @@ dispatch:
     - claude
   per_day_max: 10
   per_repo_per_day_max: 5
+# D3 anomaly auto-pause — the fail-safe for autopilot. Tiered: a SOFT trip
+# suspends autopilot (no new auto-approvals) + alerts; a HARD trip touches
+# HALT_FILE (everything mutating stops) + alerts. The operator resumes via
+# POST /monitor/autopilot-resume. Thresholds live here, beside the guardrail.
+anomaly:
+  task_retry_soft: 3       # a task at attempt #3+ → soft
+  task_runaway_hard: 6     # a task at attempt #6+ → hard
+  failing_tasks_hard: 3    # 3+ tasks failing/retrying → hard (multi-task runaway)
+  budget_spike_ratio: 0.8  # ≥80% of the per-day dispatch cap → soft
+  budget_blowout_ratio: 1.0 # ≥100% of the cap → hard
+  heartbeat_gap_sec: 600   # runner heartbeat 10min+ stale → soft
 

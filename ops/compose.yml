@@ -165,6 +165,14 @@ services:
       D4_ALERT_QUIET_HOURS: ${D4_ALERT_QUIET_HOURS:-}
       D4_ALERT_QUIET_TZ_OFFSET_MIN: ${D4_ALERT_QUIET_TZ_OFFSET_MIN:-0}
       SLACK_OPERATOR_MONITOR_URL: ${SLACK_OPERATOR_MONITOR_URL:-https://monitor.averray.com/monitor}
+      # D3 — tiered anomaly auto-pause (the autopilot fail-safe). Off by default;
+      # the operator enables it BEFORE turning on autopilot. A soft trip suspends
+      # autopilot (flag persisted on /data so it survives a restart); a hard trip
+      # also touches HALT_FILE. Thresholds live in hermes/config/policy.yaml.
+      D3_ANOMALY_PAUSE_ENABLED: ${D3_ANOMALY_PAUSE_ENABLED:-0}
+      D3_ANOMALY_PAUSE_INTERVAL_MINUTES: ${D3_ANOMALY_PAUSE_INTERVAL_MINUTES:-1}
+      AVERRAY_AUTOPILOT_SUSPENDED_PATH: ${AVERRAY_AUTOPILOT_SUSPENDED_PATH:-/data/autopilot-suspended.json}
+      HERMES_DISPATCH_PER_DAY_MAX: ${HERMES_DISPATCH_PER_DAY_MAX:-10}
       SLACK_OPERATOR_MONITOR_ENABLED: ${SLACK_OPERATOR_MONITOR_ENABLED:-0}
       SLACK_OPERATOR_MONITOR_TOKEN: ${SLACK_OPERATOR_MONITOR_TOKEN:-}
       SLACK_ALLOWED_USER_IDS: ${SLACK_ALLOWED_USER_IDS:-}
