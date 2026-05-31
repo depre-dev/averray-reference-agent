@@ -20,7 +20,7 @@
 // Deferred, by milestone:
 //   - the degraded TopStrip ("?" KPIs) → M11'
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useMonitorBoard, type UseMonitorBoardOptions } from "./hooks/useMonitorBoard.js";
 import { useCardParam } from "./hooks/useCardParam.js";
 import type { UseCollaborationOptions } from "./hooks/useCollaboration.js";
@@ -32,6 +32,9 @@ import { ErrorBoundary } from "./components/ErrorBoundary.js";
 
 const MISSIONS_URL = "/monitor/testbed-missions";
 const CODEX_TASKS_URL = "/monitor/codex-tasks";
+const ALERT_MUTE_URL = "/monitor/alert-mute";
+
+export type AlertMuteBody = { untilMs: number } | { muted: false };
 
 export interface MonitorPageProps {
   /** Override the live wiring (fetcher, EventSource, storage) for tests. */
@@ -48,6 +51,8 @@ export interface MonitorPageProps {
   collaboration?: UseCollaborationOptions;
   /** Override the action-alert wiring (audio/notification/storage) for tests. */
   alerts?: UseActionAlertsOptions;
+  /** Override the server-side mute POST (D4 off-device alerts) for tests. */
+  onAlertMute?: (body: AlertMuteBody) => void;
 }
 
 export function MonitorPage({
@@ -58,6 +63,7 @@ export function MonitorPage({
   onApproveTask = defaultApproveTask,
   collaboration = {},
   alerts,
+  onAlertMute = defaultPostAlertMute,
 }: MonitorPageProps = {}) {
   const { board, status, refresh } = useMonitorBoard(options);
   const { cardId, setCard, clearCard } = useCardParam();
@@ -65,6 +71,20 @@ export function MonitorPage({
   // The action-needed count drives all three notification tiers (§17).
   const actionCount = useMemo(() => kpiCounts(board?.cards ?? []).action, [board?.cards]);
   const { muted, mute, unmute } = useActionAlerts(actionCount, alerts);
+
+  // D4: mute the browser alerts AND the server-side off-device bridge together,
+  // so muting on the board also silences the Slack/push alert.
+  const muteEverywhere = useCallback(
+    (untilMs: number) => {
+      mute(untilMs);
+      onAlertMute({ untilMs });
+    },
+    [mute, onAlertMute],
+  );
+  const unmuteEverywhere = useCallback(() => {
+    unmute();
+    onAlertMute({ muted: false });
+  }, [unmute, onAlertMute]);
 
   return (
     <ErrorBoundary>
@@ -81,8 +101,8 @@ export function MonitorPage({
         onCreateTask={onCreateTask}
         onApproveTask={onApproveTask}
         collaboration={collaboration}
-        onMute={mute}
-        onUnmute={unmute}
+        onMute={muteEverywhere}
+        onUnmute={unmuteEverywhere}
         muted={muted}
       />
     </ErrorBoundary>
@@ -154,5 +174,20 @@ function defaultApproveTask(id: string): void {
     body: JSON.stringify({ action: "approve", id }),
   }).catch(() => {
     /* surfaced via the board feed / degraded state, not thrown here */
+  });
+}
+
+/**
+ * Set the SERVER-side alert mute (D4) so muting on the board also silences the
+ * off-device Slack/push alert. Fire-and-forget; failure just means the
+ * off-device mute didn't apply — the browser mute still did.
+ */
+function defaultPostAlertMute(body: AlertMuteBody): void {
+  void fetch(ALERT_MUTE_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  }).catch(() => {
+    /* the browser mute still applied; off-device mute is best-effort */
   });
 }

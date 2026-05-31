@@ -23,6 +23,14 @@ export interface SlackRoutineConfig {
     intervalMs: number;
     staleAfterMinutes: number;
   };
+  /** D4 — off-device operator alert bridge (board action-needed 0→≥1). */
+  alertBridge: {
+    enabled: boolean;
+    intervalMs: number;
+    cooldownMs: number;
+    quietHours?: { startMinute: number; endMinute: number };
+    quietHoursTzOffsetMin: number;
+  };
 }
 
 export function parseSlackRoutineConfig(
@@ -63,7 +71,27 @@ export function parseSlackRoutineConfig(
       intervalMs: Math.max(60_000, stalePrMinutes * 60_000),
       staleAfterMinutes: positiveNumber(env.SLACK_OPERATOR_STALE_PR_ALERT_AFTER_MINUTES) || 120,
     },
+    alertBridge: {
+      // Off by default: needs an explicit flag AND a webhook to send anywhere.
+      enabled: env.D4_ALERT_BRIDGE_ENABLED === "1" && Boolean(env.SLACK_WEBHOOK_URL),
+      intervalMs: Math.max(30_000, (positiveNumber(env.D4_ALERT_BRIDGE_INTERVAL_MINUTES) || 1) * 60_000),
+      cooldownMs: Math.max(0, (positiveNumber(env.D4_ALERT_BRIDGE_COOLDOWN_MINUTES) || 30) * 60_000),
+      ...(parseQuietHoursRange(env.D4_ALERT_QUIET_HOURS) ? { quietHours: parseQuietHoursRange(env.D4_ALERT_QUIET_HOURS) } : {}),
+      quietHoursTzOffsetMin: Number.isFinite(Number(env.D4_ALERT_QUIET_TZ_OFFSET_MIN)) ? Number(env.D4_ALERT_QUIET_TZ_OFFSET_MIN) : 0,
+    },
   };
+}
+
+/** Parse "HH:MM-HH:MM" into a minute-of-day window, or undefined. */
+export function parseQuietHoursRange(
+  value: string | undefined
+): { startMinute: number; endMinute: number } | undefined {
+  const match = /^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/.exec((value ?? "").trim());
+  if (!match) return undefined;
+  const start = Number(match[1]) * 60 + Number(match[2]);
+  const end = Number(match[3]) * 60 + Number(match[4]);
+  if (start < 0 || start >= 1440 || end < 0 || end >= 1440 || start === end) return undefined;
+  return { startMinute: start, endMinute: end };
 }
 
 export function shouldRunDailyBrief(
