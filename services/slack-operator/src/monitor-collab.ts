@@ -1,5 +1,10 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import {
+  planReviewForRisk,
+  type ReviewPanelMode,
+  type ReviewPanelVerdict,
+} from "./reviewer-panel.js";
 
 /**
  * In-memory collaboration channel for the Hermes Handoff Monitor.
@@ -73,6 +78,14 @@ export interface ReviewRequest {
   reviewer: ReviewRequestReviewer;
   reason: string;
   status: ReviewRequestStatus;
+  reviewMode?: ReviewPanelMode;
+  panelId?: string;
+  panelSize?: number;
+  response?: {
+    verdict: ReviewPanelVerdict;
+    reasoning: string;
+    respondedAt: string;
+  };
   createdAt: string;
   updatedAt: string;
 }
@@ -106,6 +119,29 @@ export interface RecordReviewRequestInput {
   reviewer?: unknown;
   reason?: unknown;
   status?: unknown;
+  reviewMode?: unknown;
+  panelId?: unknown;
+  panelSize?: unknown;
+  response?: unknown;
+}
+
+export interface RecordReviewPanelInput {
+  relatedPr?: unknown;
+  relatedMission?: unknown;
+  correlationId?: unknown;
+  relatedCorrelationId?: unknown;
+  requestedBy?: unknown;
+  riskTier?: unknown;
+  builder?: unknown;
+  reason?: unknown;
+}
+
+export interface RecordReviewPanelResult {
+  panelId: string;
+  mode: ReviewPanelMode;
+  reviewers: ReviewRequestReviewer[];
+  requests: ReviewRequest[];
+  reason: string;
 }
 
 export interface ListCollaborationOptions {
@@ -253,6 +289,10 @@ export function recordReviewRequest(
     );
   }
   const at = new Date(nowMs).toISOString();
+  const reviewMode = normalizeReviewMode(input.reviewMode);
+  const panelId = normalizeCorrelationId(input.panelId);
+  const panelSize = normalizePositiveInteger(input.panelSize);
+  const response = normalizeReviewResponse(input.response, at);
   const request: ReviewRequest = {
     id: nextReviewRequestId(nowMs),
     ...(relatedPr ? { relatedPr } : {}),
@@ -262,6 +302,10 @@ export function recordReviewRequest(
     reviewer,
     reason,
     status: status ?? "requested",
+    ...(reviewMode ? { reviewMode } : {}),
+    ...(panelId ? { panelId } : {}),
+    ...(panelSize ? { panelSize } : {}),
+    ...(response ? { response } : {}),
     createdAt: at,
     updatedAt: at,
   };
@@ -270,6 +314,57 @@ export function recordReviewRequest(
   while (reviewRequests.length > MAX_REVIEW_REQUESTS) reviewRequests.shift();
   recordReviewRequestCollaborationTurn(request, nowMs);
   return request;
+}
+
+export function recordReviewPanelRequests(
+  input: RecordReviewPanelInput,
+  nowMs: number = Date.now()
+): RecordReviewPanelResult {
+  const requestedBy = normalizeRequester(input.requestedBy);
+  if (!requestedBy) {
+    throw new CollaborationValidationError(
+      "invalid_requested_by",
+      "requestedBy must be one of: hermes, operator, codex, claude."
+    );
+  }
+
+  const relatedPr = normalizeRelatedPr(input.relatedPr);
+  const relatedMission = normalizeRelatedMission(input.relatedMission);
+  const correlationId = normalizeCorrelationId(input.correlationId) ?? normalizeCorrelationId(input.relatedCorrelationId);
+  if (!relatedPr && !relatedMission && !correlationId) {
+    throw new CollaborationValidationError(
+      "missing_review_scope",
+      "review panel must include relatedPr, relatedMission, or correlationId."
+    );
+  }
+
+  const plan = planReviewForRisk({
+    riskTier: typeof input.riskTier === "string" ? input.riskTier : undefined,
+    builder: typeof input.builder === "string" ? input.builder : undefined,
+    reason: normalizeText(input.reason),
+  });
+  const panelId = nextReviewPanelId(nowMs);
+  const requests = plan.reviewers.map((reviewer) =>
+    recordReviewRequest({
+      ...(relatedPr ? { relatedPr } : {}),
+      ...(relatedMission ? { relatedMission } : {}),
+      ...(correlationId ? { correlationId } : {}),
+      requestedBy,
+      reviewer,
+      reason: plan.reason,
+      reviewMode: plan.mode,
+      panelId,
+      panelSize: plan.reviewers.length,
+    }, nowMs)
+  );
+
+  return {
+    panelId,
+    mode: plan.mode,
+    reviewers: requests.map((request) => request.reviewer),
+    requests,
+    reason: plan.reason,
+  };
 }
 
 export function listReviewRequests(options: ListReviewRequestsOptions = {}): ReviewRequest[] {
@@ -377,6 +472,25 @@ function normalizeReviewStatus(value: unknown): ReviewRequestStatus | null {
   return null;
 }
 
+function normalizeReviewMode(value: unknown): ReviewPanelMode | undefined {
+  if (value == null || value === "") return undefined;
+  if (value === "single" || value === "panel") return value;
+  return undefined;
+}
+
+function normalizeReviewResponse(value: unknown, fallbackRespondedAt: string): ReviewRequest["response"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const obj = value as Record<string, unknown>;
+  const verdict = obj.verdict;
+  if (verdict !== "pass" && verdict !== "concern" && verdict !== "block") return undefined;
+  const reasoning = normalizeText(obj.reasoning);
+  if (!reasoning) return undefined;
+  const respondedAt = typeof obj.respondedAt === "string" && obj.respondedAt.trim()
+    ? obj.respondedAt.trim()
+    : fallbackRespondedAt;
+  return { verdict, reasoning, respondedAt };
+}
+
 function normalizeText(value: unknown): string {
   if (typeof value !== "string") return "";
   const trimmed = value.trim();
@@ -406,6 +520,12 @@ function normalizeCorrelationId(value: unknown): string | undefined {
   return trimmed ? trimmed.slice(0, 256) : undefined;
 }
 
+function normalizePositiveInteger(value: unknown): number | undefined {
+  const number = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  if (!Number.isInteger(number) || number < 1) return undefined;
+  return number;
+}
+
 function clampLimit(value: unknown, max: number = MAX_MESSAGES): number {
   if (!Number.isFinite(value as number)) return max;
   const n = Math.floor(Number(value));
@@ -421,6 +541,11 @@ function nextId(nowMs: number): string {
 function nextReviewRequestId(nowMs: number): string {
   reviewRequestSeq = (reviewRequestSeq + 1) % 1_000_000;
   return `review-${nowMs.toString(36)}-${reviewRequestSeq.toString(36)}`;
+}
+
+function nextReviewPanelId(nowMs: number): string {
+  reviewRequestSeq = (reviewRequestSeq + 1) % 1_000_000;
+  return `review-panel-${nowMs.toString(36)}-${reviewRequestSeq.toString(36)}`;
 }
 
 function nextMemoryId(nowMs: number): string {

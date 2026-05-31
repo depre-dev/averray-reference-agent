@@ -652,7 +652,7 @@ describe("buildV2BoardSnapshot — enrichment integration", () => {
     expect(card?.files).toEqual([{ path: "ops/deploy.staging.yml", diff: "", critical: false }]);
   });
 
-  it("attaches active cross-agent review requests to matching cards", () => {
+  it("attaches active and responded panel review requests to matching cards", () => {
     const raw = {
       active: [
         {
@@ -675,6 +675,9 @@ describe("buildV2BoardSnapshot — enrichment integration", () => {
           reviewer: "claude",
           reason: "Second-agent review before this moves forward.",
           status: "requested",
+          reviewMode: "panel",
+          panelId: "panel-1",
+          panelSize: 3,
           createdAt: "2026-05-31T12:00:00.000Z",
           updatedAt: "2026-05-31T12:00:00.000Z",
         },
@@ -688,6 +691,24 @@ describe("buildV2BoardSnapshot — enrichment integration", () => {
           createdAt: "2026-05-31T11:00:00.000Z",
           updatedAt: "2026-05-31T11:30:00.000Z",
         },
+        {
+          id: "review-3",
+          relatedPr: { repo: "depre-dev/agent", number: 548 },
+          requestedBy: "hermes",
+          reviewer: "hermes",
+          reason: "Hermes panel response.",
+          status: "responded",
+          reviewMode: "panel",
+          panelId: "panel-1",
+          panelSize: 3,
+          response: {
+            verdict: "pass",
+            reasoning: "Hermes sees the checks and rollout notes as sufficient.",
+            respondedAt: "2026-05-31T12:05:00.000Z",
+          },
+          createdAt: "2026-05-31T12:00:00.000Z",
+          updatedAt: "2026-05-31T12:05:00.000Z",
+        },
       ],
     };
 
@@ -700,8 +721,28 @@ describe("buildV2BoardSnapshot — enrichment integration", () => {
         reviewer: "claude",
         reason: "Second-agent review before this moves forward.",
         status: "requested",
+        reviewMode: "panel",
+        panelId: "panel-1",
+        panelSize: 3,
         createdAt: "2026-05-31T12:00:00.000Z",
         updatedAt: "2026-05-31T12:00:00.000Z",
+      },
+      {
+        id: "review-3",
+        requestedBy: "hermes",
+        reviewer: "hermes",
+        reason: "Hermes panel response.",
+        status: "responded",
+        reviewMode: "panel",
+        panelId: "panel-1",
+        panelSize: 3,
+        response: {
+          verdict: "pass",
+          reasoning: "Hermes sees the checks and rollout notes as sufficient.",
+          respondedAt: "2026-05-31T12:05:00.000Z",
+        },
+        createdAt: "2026-05-31T12:00:00.000Z",
+        updatedAt: "2026-05-31T12:05:00.000Z",
       },
     ]);
   });

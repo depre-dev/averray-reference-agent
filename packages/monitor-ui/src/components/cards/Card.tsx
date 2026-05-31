@@ -246,12 +246,16 @@ function ReviewRequestedLine({ card }: { card: BoardCard }) {
   const active = card.reviewRequests?.filter((request) => request.status === "requested") ?? [];
   const first = active[0];
   if (!first) return null;
-  const suffix = active.length > 1 ? ` +${active.length - 1}` : "";
+  const isPanel = active.length > 1 || first.reviewMode === "panel";
+  const label = isPanel ? "Panel review" : "Review requested";
+  const reviewers = isPanel
+    ? active.map((request) => actorDisplayName(request.reviewer)).join(", ")
+    : actorDisplayName(first.reviewer);
   return (
-    <div className="hm-review-request" aria-label={`Review requested from ${actorDisplayName(first.reviewer)}`}>
+    <div className="hm-review-request" aria-label={`${label} from ${reviewers}`}>
       <span className="hm-review-request-dot" aria-hidden />
-      <span>Review requested</span>
-      <strong>{actorDisplayName(first.reviewer)}{suffix}</strong>
+      <span>{label}</span>
+      <strong>{reviewers}</strong>
     </div>
   );
 }

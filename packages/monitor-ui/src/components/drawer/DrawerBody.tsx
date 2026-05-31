@@ -9,6 +9,7 @@ import type {
   CardCheckRun,
   CardChecks,
   CardFile,
+  CardReviewRequest,
   CardRiskSignal,
   DeployCard,
   DoneCard,
@@ -174,6 +175,13 @@ const RISK_PILL: Record<CardRiskSignal["severity"], string> = {
   low: "hm-pill hm-pill--neutral",
 };
 
+function actorDisplayName(actor: CardReviewRequest["reviewer"]): string {
+  if (actor === "hermes") return "Hermes";
+  if (actor === "operator") return "Pascal";
+  if (actor === "claude") return "Claude";
+  return "Codex";
+}
+
 function RiskSignalsSection({ signals }: { signals: CardRiskSignal[] | undefined }) {
   if (!signals || signals.length === 0) return null;
   return (
@@ -186,6 +194,33 @@ function RiskSignalsSection({ signals }: { signals: CardRiskSignal[] | undefined
               {s.message}
             </span>
             <span className={RISK_PILL[s.severity]}>{s.severity}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ReviewRequestsSection({ requests }: { requests: CardReviewRequest[] | undefined }) {
+  const active = requests?.filter((request) => request.status === "requested" || request.response) ?? [];
+  if (active.length === 0) return null;
+  const isPanel = active.length > 1 || active.some((request) => request.reviewMode === "panel");
+  return (
+    <section>
+      <div className="hm-section-h">{isPanel ? "Reviewer panel" : "Cross-agent review"}</div>
+      <div className="hm-files">
+        {active.map((request) => (
+          <div className="row" key={request.id}>
+            <span className="path" style={{ whiteSpace: "normal" }}>
+              <b>{actorDisplayName(request.reviewer)}</b>
+              {" · "}
+              {request.response
+                ? `${request.response.verdict}: ${request.response.reasoning}`
+                : request.reason}
+            </span>
+            <span className={request.response?.verdict === "block" ? "hm-pill hm-pill--risk" : "hm-pill hm-pill--neutral"}>
+              {request.response?.verdict ?? "requested"}
+            </span>
           </div>
         ))}
       </div>
@@ -235,6 +270,7 @@ function PrBody({ card }: { card: BoardCard }) {
       ) : (
         <VerdictBlock head="Status">{card.summary || "No additional context yet."}</VerdictBlock>
       )}
+      <ReviewRequestsSection requests={card.reviewRequests} />
       <RiskSignalsSection signals={card.riskSignals} />
       <FilesSection files={files} />
       <ChecksSection checks={card.checks} checkRuns={card.checkRuns} />

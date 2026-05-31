@@ -12,6 +12,7 @@ import {
   listReviewRequests,
   recordCollaborationMessage,
   recordHermesMemoryNote,
+  recordReviewPanelRequests,
   recordReviewRequest,
   synthesizeHermesReplyFor,
 } from "../../services/slack-operator/src/monitor-collab.js";
@@ -288,6 +289,54 @@ describe("monitor review requests", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("fans a high-risk panel into independent Hermes, Codex, and Claude review requests", () => {
+    const panel = recordReviewPanelRequests(
+      {
+        relatedPr: { repo: "depre-dev/averray-reference-agent", number: 302 },
+        requestedBy: "hermes",
+        riskTier: "high",
+        builder: "codex",
+        reason: "High-risk deploy and secret surface touched.",
+      },
+      NOW
+    );
+
+    expect(panel.mode).toBe("panel");
+    expect(panel.reviewers).toEqual(["hermes", "codex", "claude"]);
+    expect(panel.requests).toHaveLength(3);
+    expect(new Set(panel.requests.map((request) => request.panelId))).toEqual(new Set([panel.panelId]));
+    expect(panel.requests.map((request) => request.reviewMode)).toEqual(["panel", "panel", "panel"]);
+    expect(listReviewRequests({ status: "requested" })).toHaveLength(3);
+    expect(listCollaborationMessages({ limit: 5 }, NOW + 1).map((message) => message.addressedTo)).toEqual([
+      "hermes",
+      "codex",
+      "claude",
+    ]);
+  });
+
+  it("keeps non-high-risk review panels on the single C1 cross-agent path", () => {
+    const panel = recordReviewPanelRequests(
+      {
+        correlationId: "github-pr-302",
+        requestedBy: "hermes",
+        riskTier: "low",
+        builder: "codex",
+      },
+      NOW
+    );
+
+    expect(panel).toMatchObject({
+      mode: "single",
+      reviewers: ["claude"],
+    });
+    expect(panel.requests).toHaveLength(1);
+    expect(panel.requests[0]).toMatchObject({
+      reviewer: "claude",
+      reviewMode: "single",
+      panelSize: 1,
+    });
   });
 });
 

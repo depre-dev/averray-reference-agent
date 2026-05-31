@@ -72,6 +72,28 @@ describe("Card — type coverage", () => {
     expect(container.querySelector(".hm-review-request")).toBeTruthy();
   });
 
+  test("card shows high-risk reviewer panels as a panel, not a single reviewer", () => {
+    const card: BoardCard = {
+      ...fixture("agent #547"),
+      reviewRequests: ["hermes", "codex", "claude"].map((reviewer) => ({
+        id: `review-${reviewer}`,
+        requestedBy: "hermes",
+        reviewer: reviewer as "hermes" | "codex" | "claude",
+        reason: "High-risk panel before operator decision.",
+        status: "requested",
+        reviewMode: "panel",
+        panelId: "panel-1",
+        panelSize: 3,
+        createdAt: "2026-05-31T12:00:00.000Z",
+        updatedAt: "2026-05-31T12:00:00.000Z",
+      })),
+    };
+
+    const { container } = render(<Card card={card} />);
+    expect(within(container).getByText("Panel review")).toBeTruthy();
+    expect(within(container).getByText("Hermes, Codex, Claude")).toBeTruthy();
+  });
+
   test("draft PR shows the draft pill", () => {
     const { container } = render(<Card card={fixture("agent #550")} />);
     expect(within(container).getByText("draft")).toBeTruthy();
