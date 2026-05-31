@@ -59,6 +59,14 @@ A real LLM agent with a dedicated testnet wallet attempts the actual journeys li
 
 **Environment dictates what a mission may mutate — enforced, not assumed.**
 
+Implementation note (T5 slice): queued missions now carry `environment`,
+`mutationMode`, `mutationScope`, and `mutationBindingReason`. `allowTestMutations`
+is only honored for `local`, `testnet`, or `staging`; `mainnet`, `preview`, and
+`unknown` are rebound to read-only even when a request asks for mutations. The
+Playwright executor also records trace/video artifact references and attaches a
+baseline comparison when a previous completed run exists for the same target,
+goal, and environment.
+
 - **Now (testnet-only):** target the **hosted testnet stack** with a dedicated, funded test-agent wallet. Mutating gold-path missions are safe *by construction* (testnet/mock DOT, no real value). Tag test data (dedicated wallet + recognizable test-job namespace) so it's filterable/cleanable. Optionally add a **local-Anvil tier** (`demo:e2e`) as a cheap per-PR smoke that never touches shared testnet.
 - **Bind every env to a mutation profile now**, even with one env: tie the runner's `allowTestMutations` / `mutationMode` / `mutationScope` to the environment so a mutating mission against the wrong env is *structurally impossible*.
 - **At mainnet:** mutating gold-path missions stay on **testnet/staging forever**; **mainnet gets read-only smoke + read-only `TBE2E` checks only** — never a real-funds mutation. A dedicated **staging deploy** becomes worth building then (don't mutate the env real users hit). Per-PR ephemeral envs: defer until that pain is real.

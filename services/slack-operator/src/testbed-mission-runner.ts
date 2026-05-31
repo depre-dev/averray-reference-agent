@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { recordLlmUsageFromResult } from "@avg/averray-mcp/llm-usage";
 
-import type { Locator, Page } from "playwright-core";
+import type { BrowserContext, Locator, Page } from "playwright-core";
 
 import type { TestbedMissionRun } from "./monitor-testbed-missions.js";
 import {
@@ -49,6 +49,11 @@ export interface TestbedMissionRunnerConfig {
   authProtectedPath?: string;
   /** The env's truth boundary the sweep asserts surfaces label (demo/testnet/local-simulation/production). */
   expectedBoundary?: string;
+  /** T5: env name bound to mutation policy (testnet/local/staging may mutate; mainnet is read-only). */
+  missionEnvironment?: string;
+  /** T5 evidence capture toggles. Defaults on for the Playwright executor. */
+  captureTrace?: boolean;
+  captureVideo?: boolean;
   /** T2 pre-seeded session source (sidecar URL and/or manual storageState path/token). */
   session?: SweepSessionConfig;
 }
@@ -107,6 +112,11 @@ export function parseTestbedMissionRunnerConfig(
     authVerifierRunPath: env.TESTBED_AUTH_VERIFIER_RUN_PATH || "/verifier/run",
     authProtectedPath: env.TESTBED_AUTH_PROTECTED_PATH || env.TESTBED_AUTH_ADMIN_JOBS_PATH || "/admin/jobs",
     ...(env.AVERRAY_TESTBED_EXPECTED_BOUNDARY ? { expectedBoundary: env.AVERRAY_TESTBED_EXPECTED_BOUNDARY } : {}),
+    ...(env.TESTBED_MISSION_ENVIRONMENT || env.AVERRAY_TESTBED_ENVIRONMENT
+      ? { missionEnvironment: env.TESTBED_MISSION_ENVIRONMENT || env.AVERRAY_TESTBED_ENVIRONMENT }
+      : {}),
+    captureTrace: env.TESTBED_MISSION_CAPTURE_TRACE !== "0" && env.TESTBED_MISSION_CAPTURE_TRACE !== "false",
+    captureVideo: env.TESTBED_MISSION_CAPTURE_VIDEO !== "0" && env.TESTBED_MISSION_CAPTURE_VIDEO !== "false",
     session: parseSweepSessionConfig(env),
   };
 }
@@ -366,22 +376,35 @@ export async function executePlaywrightTestbedMission(
   const urlPath: string[] = [];
   const whatITried: string[] = [];
   const screenshotArtifacts: string[] = [];
+  const traceArtifacts: string[] = [];
+  const videoArtifacts: string[] = [];
   const mutationBoundaryNotes: string[] = [];
   const recommendations: string[] = [];
   const mutationAttempted = false;
 
   let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+  let context: BrowserContext | undefined;
   let page: Page | undefined;
+  let tracePath: string | undefined;
+  let traceRunning = false;
   try {
     browser = await chromium.launch({
       headless: true,
       ...(config.browserExecutablePath ? { executablePath: config.browserExecutablePath } : {}),
       args: ["--no-sandbox", "--disable-dev-shm-usage"],
     });
-    const context = await browser.newContext({
+    const videoDir = join(artifactsDir, "videos");
+    if (config.captureVideo !== false) await mkdir(videoDir, { recursive: true });
+    context = await browser.newContext({
       viewport: { width: 1365, height: 900 },
       userAgent: "Averray-Hermes-Testbed-Playwright/1.0",
+      ...(config.captureVideo !== false ? { recordVideo: { dir: videoDir, size: { width: 1365, height: 900 } } } : {}),
     });
+    if (config.captureTrace !== false) {
+      tracePath = join(artifactsDir, "trace.zip");
+      await context.tracing.start({ screenshots: true, snapshots: true, sources: false });
+      traceRunning = true;
+    }
     page = await context.newPage();
     page.on("console", (message) => {
       if (message.type() === "error") consoleErrors.push(message.text());
@@ -460,6 +483,16 @@ export async function executePlaywrightTestbedMission(
         ? "No real mutation boundary was crossed; only visibly safe testbed actions were allowed."
         : "No real mutation boundary was crossed; the run stayed browser-visible and read-only.");
     }
+    ({ traceRunning } = await finalizePlaywrightArtifacts({
+      context,
+      page,
+      tracePath,
+      traceRunning,
+      evidence,
+      traceArtifacts,
+      videoArtifacts,
+    }));
+    context = undefined;
     appendPlaywrightEvidenceTrail(evidence, {
       whatITried,
       urlPath,
@@ -467,13 +500,20 @@ export async function executePlaywrightTestbedMission(
       networkFailures,
       networkResponses,
       screenshotArtifacts,
+      traceArtifacts,
+      videoArtifacts,
     });
     const manifestPath = await writeEvidenceManifest(artifactsDir, {
       missionId: mission.id,
       targetUrl: mission.targetUrl,
+      environment: mission.environment ?? config.missionEnvironment ?? "unknown",
+      mutationMode: mission.mutationMode ?? (mission.allowTestMutations ? "testbed_mutation_allowed" : "read_only"),
+      mutationScope: mission.mutationScope ?? "none; stop at mutation boundary",
       whatITried,
       urlPath,
       screenshots: screenshotArtifacts,
+      traces: traceArtifacts,
+      videos: videoArtifacts,
       consoleErrors,
       networkFailures,
       networkResponses,
@@ -492,6 +532,7 @@ export async function executePlaywrightTestbedMission(
       runnerMode: "real_browser",
       targetUrl: mission.targetUrl,
       goal: mission.goal,
+      environment: mission.environment ?? config.missionEnvironment ?? "unknown",
       memoryMode: mission.freshMemory ? "fresh_or_ignored" : "returning_agent_memory_allowed",
       stoppedBeforeMutation: !mutationAttempted,
       completedPath,
@@ -506,6 +547,8 @@ export async function executePlaywrightTestbedMission(
       networkResponses,
       artifacts: {
         screenshots: screenshotArtifacts,
+        traces: traceArtifacts,
+        videos: videoArtifacts,
         manifest: manifestPath,
       },
       scores: {
@@ -517,7 +560,9 @@ export async function executePlaywrightTestbedMission(
         evidenceQuality,
       },
       recommendations,
-      mutationMode: mission.allowTestMutations ? "testbed_mutation_allowed" : "read_only",
+      mutationMode: mission.mutationMode ?? (mission.allowTestMutations ? "testbed_mutation_allowed" : "read_only"),
+      mutationScope: mission.mutationScope ?? "none; stop at mutation boundary",
+      mutationBindingReason: mission.mutationBindingReason ?? "mission used legacy mutation binding.",
       mutationsAttempted: mutationAttempted ? ["testbed-only page action"] : [],
     };
 
@@ -539,6 +584,16 @@ export async function executePlaywrightTestbedMission(
       const failureText = await visiblePageText(page).catch(() => "");
       if (failureText) evidence.push({ type: "visible_text_failure", value: clip(failureText, 900) });
     }
+    ({ traceRunning } = await finalizePlaywrightArtifacts({
+      context,
+      page,
+      tracePath,
+      traceRunning,
+      evidence,
+      traceArtifacts,
+      videoArtifacts,
+    }).catch(async () => ({ traceRunning: false })));
+    context = undefined;
     appendPlaywrightEvidenceTrail(evidence, {
       whatITried,
       urlPath,
@@ -546,14 +601,21 @@ export async function executePlaywrightTestbedMission(
       networkFailures,
       networkResponses,
       screenshotArtifacts,
+      traceArtifacts,
+      videoArtifacts,
     });
     const manifestPath = await writeEvidenceManifest(artifactsDir, {
       missionId: mission.id,
       targetUrl: mission.targetUrl,
+      environment: mission.environment ?? config.missionEnvironment ?? "unknown",
+      mutationMode: mission.mutationMode ?? (mission.allowTestMutations ? "testbed_mutation_allowed" : "read_only"),
+      mutationScope: mission.mutationScope ?? "none; stop at mutation boundary",
       error: detail,
       whatITried,
       urlPath,
       screenshots: screenshotArtifacts,
+      traces: traceArtifacts,
+      videos: videoArtifacts,
       consoleErrors,
       networkFailures,
       networkResponses,
@@ -567,6 +629,7 @@ export async function executePlaywrightTestbedMission(
       runnerMode: "real_browser",
       targetUrl: mission.targetUrl,
       goal: mission.goal,
+      environment: mission.environment ?? config.missionEnvironment ?? "unknown",
       stoppedBeforeMutation: true,
       completedPath,
       whatITried,
@@ -583,6 +646,8 @@ export async function executePlaywrightTestbedMission(
       networkResponses,
       artifacts: {
         screenshots: screenshotArtifacts,
+        traces: traceArtifacts,
+        videos: videoArtifacts,
         ...(manifestPath ? { manifest: manifestPath } : {}),
       },
       scores: {
@@ -594,7 +659,9 @@ export async function executePlaywrightTestbedMission(
         evidenceQuality: screenshotArtifacts.length ? 3 : evidence.length ? 2 : 1,
       },
       recommendations: ["Inspect runner browser dependencies, target reachability, and page load errors, then rerun the mission."],
-      mutationMode: mission.allowTestMutations ? "testbed_mutation_allowed" : "read_only",
+      mutationMode: mission.mutationMode ?? (mission.allowTestMutations ? "testbed_mutation_allowed" : "read_only"),
+      mutationScope: mission.mutationScope ?? "none; stop at mutation boundary",
+      mutationBindingReason: mission.mutationBindingReason ?? "mission used legacy mutation binding.",
       mutationsAttempted: [],
     };
     return {
@@ -605,6 +672,8 @@ export async function executePlaywrightTestbedMission(
       summary: detail,
     };
   } finally {
+    if (traceRunning && context && tracePath) await context.tracing.stop({ path: tracePath }).catch(() => undefined);
+    await context?.close().catch(() => undefined);
     await browser?.close().catch(() => undefined);
   }
 }
@@ -618,6 +687,8 @@ export function appendPlaywrightEvidenceTrail(
     networkFailures: string[];
     networkResponses: string[];
     screenshotArtifacts: string[];
+    traceArtifacts?: string[];
+    videoArtifacts?: string[];
   }
 ): void {
   if (trail.whatITried.length) {
@@ -638,6 +709,38 @@ export function appendPlaywrightEvidenceTrail(
   if (trail.screenshotArtifacts.length) {
     evidence.push({ type: "screenshots", value: clip(trail.screenshotArtifacts.join("\n"), 1600) });
   }
+  if (trail.traceArtifacts?.length) {
+    evidence.push({ type: "trace", value: clip(trail.traceArtifacts.join("\n"), 1600) });
+  }
+  if (trail.videoArtifacts?.length) {
+    evidence.push({ type: "video", value: clip(trail.videoArtifacts.join("\n"), 1600) });
+  }
+}
+
+async function finalizePlaywrightArtifacts(input: {
+  context: BrowserContext | undefined;
+  page: Page | undefined;
+  tracePath: string | undefined;
+  traceRunning: boolean;
+  evidence: Array<{ type: string; value: string }>;
+  traceArtifacts: string[];
+  videoArtifacts: string[];
+}): Promise<{ traceRunning: boolean }> {
+  const video = input.page?.video();
+  let traceRunning = input.traceRunning;
+  if (input.context && traceRunning && input.tracePath) {
+    await input.context.tracing.stop({ path: input.tracePath });
+    traceRunning = false;
+    input.traceArtifacts.push(input.tracePath);
+    input.evidence.push({ type: "trace", value: input.tracePath });
+  }
+  if (input.context) await input.context.close();
+  const videoPath = await video?.path().catch(() => undefined);
+  if (videoPath) {
+    input.videoArtifacts.push(videoPath);
+    input.evidence.push({ type: "video", value: videoPath });
+  }
+  return { traceRunning };
 }
 
 async function captureScreenshot(
@@ -708,6 +811,11 @@ function missionEnvironment(mission: TestbedMissionRun, reportPath: string): Nod
     TESTBED_AGENT_NAME: mission.agentName,
     TESTBED_FRESH_MEMORY: String(mission.freshMemory),
     TESTBED_ALLOW_TEST_MUTATIONS: String(mission.allowTestMutations),
+    TESTBED_REQUESTED_TEST_MUTATIONS: String(mission.requestedAllowTestMutations === true),
+    TESTBED_MISSION_ENVIRONMENT: mission.environment ?? "",
+    TESTBED_MUTATION_MODE: mission.mutationMode ?? (mission.allowTestMutations ? "testbed_mutation_allowed" : "read_only"),
+    TESTBED_MUTATION_SCOPE: mission.mutationScope ?? "none; stop at mutation boundary",
+    TESTBED_MUTATION_BINDING_REASON: mission.mutationBindingReason ?? "",
     TESTBED_MISSION_PROMPT: missionPrompt(mission),
     TESTBED_MISSION_JSON: JSON.stringify(mission.mission),
     TESTBED_MISSION_REPORT_PATH: reportPath,

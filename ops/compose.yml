@@ -199,6 +199,7 @@ services:
       AVERRAY_HANDOFF_EVENTS_PATH: ${AVERRAY_HANDOFF_EVENTS_PATH:-/data/handoff-events.jsonl}
       AVERRAY_CODEX_TASKS_PATH: ${AVERRAY_CODEX_TASKS_PATH:-/data/codex-tasks.json}
       AVERRAY_TESTBED_MISSIONS_PATH: ${AVERRAY_TESTBED_MISSIONS_PATH:-/data/testbed-missions.json}
+      TESTBED_MISSION_ENVIRONMENT: ${TESTBED_MISSION_ENVIRONMENT:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - avg-data:/data
@@ -233,6 +234,9 @@ services:
       TESTBED_MISSION_BROWSER_EXECUTABLE_PATH: ${TESTBED_MISSION_BROWSER_EXECUTABLE_PATH:-/usr/bin/chromium}
       TESTBED_MISSION_ARTIFACTS_DIR: ${TESTBED_MISSION_ARTIFACTS_DIR:-/data/testbed-mission-artifacts}
       TESTBED_MISSION_MAX_BROWSER_STEPS: ${TESTBED_MISSION_MAX_BROWSER_STEPS:-12}
+      TESTBED_MISSION_ENVIRONMENT: ${TESTBED_MISSION_ENVIRONMENT:-}
+      TESTBED_MISSION_CAPTURE_TRACE: ${TESTBED_MISSION_CAPTURE_TRACE:-1}
+      TESTBED_MISSION_CAPTURE_VIDEO: ${TESTBED_MISSION_CAPTURE_VIDEO:-1}
       # T1 surface sweep: base URL for relative routes (falls back to the
       # mission's targetUrl when unset) + the env's truth boundary the honesty
       # check asserts. Leave EXPECTED_BOUNDARY empty for the self-consistency

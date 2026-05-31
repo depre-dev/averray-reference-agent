@@ -44,7 +44,7 @@
 | T2 | Pre-seeded session (authed sweep) | design done |
 | T3 | Signer sidecar + SIWE mission (multi-role) | 🟡 in review — signer sidecar done (#283); SIWE role-gating mission follow-up |
 | T4 | Tier-2 agent (Agent SDK + Playwright-MCP) | design done |
-| T5 | Env→mutation binding + enhancements (trace/video, baselines) | design done |
+| T5 | Env→mutation binding + enhancements (trace/video, baselines) | 🟡 in review — env-bound mutation profile + Playwright trace/video + baseline comparison slice |
 | T6 | Agent-requested tester runs — board-gated (request → approve → read-only run) | design done (#274) |
 | T7 | Tester capabilities manifest (+ platform-repo request helper) | in review — manifest endpoint; platform helper follow-up |
 

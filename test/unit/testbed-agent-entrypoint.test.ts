@@ -86,6 +86,48 @@ describe("testbed agent entrypoint", () => {
     expect(String(result.mission.missionPrompt)).toContain("try the onboarding flow");
   });
 
+  it("keeps agent-requested mutations read-only when the target is production", () => {
+    const result = createTestbedMissionFromAgent(
+      {
+        path,
+        requester: "claude",
+        targetUrl: "https://averray.com",
+        goal: "try the main flow",
+        allowTestMutations: true,
+      },
+      Date.parse("2026-05-25T10:01:00.000Z")
+    );
+
+    expect(result.run).toMatchObject({
+      targetUrl: "https://averray.com",
+      requestedAllowTestMutations: true,
+      allowTestMutations: false,
+      environment: "mainnet",
+      mutationMode: "read_only",
+    });
+    expect(String(result.mission.missionPrompt)).toContain("Mutation profile override: mainnet / read_only");
+  });
+
+  it("allows explicit testnet mutation binding for test-mode missions", () => {
+    const result = createTestbedMissionFromAgent(
+      {
+        path,
+        requester: "operator",
+        targetUrl: "https://example.internal/gold-path",
+        environment: "testnet",
+        allowTestMutations: true,
+      },
+      Date.parse("2026-05-25T10:01:00.000Z")
+    );
+
+    expect(result.run).toMatchObject({
+      allowTestMutations: true,
+      environment: "testnet",
+      mutationMode: "testbed_mutation_allowed",
+      mutationScope: "testbed-only page actions that are visibly fake, sandbox, or non-production",
+    });
+  });
+
   it("lists missions and runner state for polling agents", () => {
     createTestbedMissionFromAgent(
       {

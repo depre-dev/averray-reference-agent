@@ -37,7 +37,7 @@ describe("monitor testbed mission runs", () => {
         {
           event: "mission_packet_ready",
           status: "ready",
-          message: "Mission packet generated; waiting for a clean browser-only agent run.",
+          message: "Mission packet generated for testnet; waiting for a clean browser-only agent run.",
         },
       ],
     });
@@ -70,7 +70,7 @@ describe("monitor testbed mission runs", () => {
     );
     expect(run).toMatchObject({
       allowTestMutations: true,
-      statusReason: "Mission packet is ready; waiting for a browser-only test-mode run and structured report.",
+      statusReason: "Mission packet is ready with testnet testbed mutations allowed; waiting for a browser-only test-mode run and structured report.",
     });
 
     const updated = recordTestbedMissionReportFromMessage(
@@ -111,11 +111,44 @@ describe("monitor testbed mission runs", () => {
     expect(item).toMatchObject({
       summary: {
         reviewSignals: {
-          testSignals: ["mission packet ready", "test-mode page mutation allowed", "browser agent report attached"],
+          testSignals: [
+            "mission packet ready",
+            "mission environment: testnet",
+            "mutation profile: testbed_mutation_allowed",
+            "test-mode page mutation allowed",
+            "browser agent report attached",
+          ],
         },
       },
       safety: {
         browserMissionShouldMutate: true,
+        mutationMode: "testbed_mutation_allowed",
+      },
+    });
+  });
+
+  it("rebounds requested mutations to read-only outside a testbed environment", () => {
+    const run = recordTestbedMissionRunFromOperatorResult(
+      missionResult({ allowTestMutations: true, targetUrl: "https://averray.com" }),
+      Date.parse("2026-05-22T10:00:00.000Z")
+    );
+
+    expect(run).toMatchObject({
+      targetUrl: "https://averray.com",
+      requestedAllowTestMutations: true,
+      allowTestMutations: false,
+      environment: "mainnet",
+      mutationMode: "read_only",
+      mutationScope: "none; stop at mutation boundary",
+      mutationBindingReason: "testbed mutations denied for mainnet environment.",
+      statusReason: "Mission packet is ready, but env→mutation binding forced read-only: testbed mutations denied for mainnet environment.",
+    });
+    expect(String(run?.mission.missionPrompt)).toContain("Mutation profile override: mainnet / read_only");
+    expect(testbedMissionRunToMonitorItem(run!)).toMatchObject({
+      safety: {
+        browserMissionShouldMutate: false,
+        requestedBrowserMissionShouldMutate: true,
+        missionEnvironment: "mainnet",
       },
     });
   });
@@ -138,7 +171,11 @@ describe("monitor testbed mission runs", () => {
         finalVerdict: "running",
         reviewSignals: {
           touchedAreas: ["testbed"],
-          testSignals: ["mission packet ready"],
+          testSignals: [
+            "mission packet ready",
+            "mission environment: testnet",
+            "mutation profile: read_only",
+          ],
           missingTestSignals: ["browser-agent report"],
         },
       },
@@ -210,7 +247,12 @@ describe("monitor testbed mission runs", () => {
           mutationBoundaryNotes: ["Stopped before account creation; no real mutation was needed."],
         },
         reviewSignals: {
-          testSignals: ["mission packet ready", "browser agent report attached"],
+          testSignals: [
+            "mission packet ready",
+            "mission environment: testnet",
+            "mutation profile: read_only",
+            "browser agent report attached",
+          ],
           missingTestSignals: [],
         },
       },
@@ -238,6 +280,53 @@ describe("monitor testbed mission runs", () => {
       mutationBoundaryNotes: ["Stopped before account creation; no real mutation was needed."],
       stoppedBeforeMutation: true,
       summary: "pass: usable path found; Stopped before account creation; no real mutation was needed.",
+    });
+  });
+
+  it("attaches a comparison against the previous completed mission baseline", () => {
+    const first = recordTestbedMissionRunFromOperatorResult(missionResult(), Date.parse("2026-05-22T10:00:00.000Z"));
+    recordTestbedMissionReportFromMessage(
+      {
+        relatedCorrelationId: first!.id,
+        text: JSON.stringify({
+          verdict: "pass",
+          confidence: 0.9,
+          stoppedBeforeMutation: true,
+          mutationBoundaryNotes: ["Stayed read-only."],
+          completedPath: ["opened page"],
+          blockers: [],
+          evidence: [{ type: "screenshot", value: "/tmp/first.png" }],
+          scores: { orientation: 5, navigation: 4 },
+        }),
+      },
+      Date.parse("2026-05-22T10:05:00.000Z")
+    );
+
+    const second = recordTestbedMissionRunFromOperatorResult(missionResult(), Date.parse("2026-05-22T11:00:00.000Z"));
+    const updated = recordTestbedMissionReportFromMessage(
+      {
+        relatedCorrelationId: second!.id,
+        text: JSON.stringify({
+          verdict: "pass",
+          confidence: 0.92,
+          stoppedBeforeMutation: true,
+          mutationBoundaryNotes: ["Stayed read-only."],
+          completedPath: ["opened page", "clicked docs"],
+          blockers: [],
+          evidence: [{ type: "trace", value: "/tmp/trace.zip" }],
+          scores: { orientation: 5, navigation: 5 },
+        }),
+      },
+      Date.parse("2026-05-22T11:05:00.000Z")
+    );
+
+    expect(updated?.result).toMatchObject({
+      baselineComparison: {
+        baselineRunId: first!.id,
+        verdictChanged: false,
+        blockerChanged: false,
+        scoreDeltas: { navigation: 1 },
+      },
     });
   });
 
@@ -397,13 +486,17 @@ describe("monitor testbed mission runs", () => {
   });
 });
 
-function missionResult(options: { allowTestMutations?: boolean; mode?: "surface_sweep" | "siwe_auth" } = {}) {
+function missionResult(options: {
+  allowTestMutations?: boolean;
+  mode?: "surface_sweep" | "siwe_auth";
+  targetUrl?: string;
+} = {}) {
   return {
     kind: "testbed_agent_mission",
     mission: {
       kind: "testbed_agent_browser_mission",
       target: {
-        url: "https://testbed.example/app",
+        url: options.targetUrl ?? "https://testbed.example/app",
         goal: "complete onboarding",
         agentName: "Hermes",
         freshMemory: true,
