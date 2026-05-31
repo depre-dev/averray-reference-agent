@@ -11,6 +11,41 @@ export interface MonitorBoard {
   cards: BoardCard[];
   /** ISO timestamp from the server */
   at: string;
+  llmUsage?: LlmUsageAggregate;
+}
+
+export interface LlmUsageModelRollup {
+  agent: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costUsd: number | null;
+  costStatus: "recorded" | "not_recorded";
+  runs: number;
+}
+
+export interface LlmUsageDayRollup {
+  day: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costUsd: number | null;
+  costStatus: "recorded" | "not_recorded";
+  runs: number;
+  byModel: LlmUsageModelRollup[];
+}
+
+export interface LlmUsageAggregate {
+  status: "recorded" | "not_recorded";
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costUsd: number | null;
+  costStatus: "recorded" | "not_recorded";
+  runs: number;
+  byModel: LlmUsageModelRollup[];
+  byDay: LlmUsageDayRollup[];
 }
 
 export interface MonitorEvent {

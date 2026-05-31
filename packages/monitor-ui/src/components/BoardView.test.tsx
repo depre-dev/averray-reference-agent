@@ -71,6 +71,51 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(getByText(/Live · 10:30:00/)).toBeTruthy();
   });
 
+  test("renders LLM usage when the monitor snapshot reports counters", () => {
+    const board: MonitorBoard = {
+      ...richBoard,
+      llmUsage: {
+        status: "recorded",
+        inputTokens: 100,
+        outputTokens: 40,
+        totalTokens: 140,
+        costUsd: null,
+        costStatus: "not_recorded",
+        runs: 1,
+        byModel: [],
+        byDay: [
+          {
+            day: "2026-05-31",
+            inputTokens: 100,
+            outputTokens: 40,
+            totalTokens: 140,
+            costUsd: null,
+            costStatus: "not_recorded",
+            runs: 1,
+            byModel: [
+              {
+                agent: "codex",
+                model: "gpt-5-codex",
+                inputTokens: 100,
+                outputTokens: 40,
+                totalTokens: 140,
+                costUsd: null,
+                costStatus: "not_recorded",
+                runs: 1,
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const { getByRole, getByText } = render(<BoardView board={board} status="open" />);
+    expect(getByRole("region", { name: "LLM usage" })).toBeTruthy();
+    expect(getByText("2026-05-31")).toBeTruthy();
+    expect(getByText("140 tokens")).toBeTruthy();
+    expect(getByText("gpt-5-codex")).toBeTruthy();
+    expect(getByText("not_recorded")).toBeTruthy();
+  });
+
   test("Refresh button is wired to onRefresh", () => {
     const onRefresh = vi.fn();
     const { getByRole } = render(<BoardView board={richBoard} status="open" onRefresh={onRefresh} />);

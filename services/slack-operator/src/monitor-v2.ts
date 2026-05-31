@@ -19,6 +19,7 @@
 // SSE `board.snapshot` event carries.
 
 import { buildHermesBoardSnapshotFromMonitor } from "./monitor-hermes-board.js";
+import { aggregateLlmUsage, type LlmUsageAggregate, type LlmUsageEvent } from "@avg/averray-mcp/llm-usage";
 import type {
   HermesBoardCardSnapshot,
   HermesBoardSnapshot,
@@ -206,6 +207,7 @@ export interface BoardSnapshotV2 {
   cards: BoardCard[];
   at: string;
   repo: string;
+  llmUsage: LlmUsageAggregate;
 }
 
 // ── Lane normalization ──────────────────────────────────────────────
@@ -451,6 +453,33 @@ function asString(value: unknown): string | undefined {
 
 function asFiniteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function usageEvents(value: unknown): LlmUsageEvent[] {
+  return asArray(value)
+    .map((entry) => {
+      const event = asRecord(entry);
+      if (!event) return undefined;
+      const agent = asString(event.agent);
+      const model = asString(event.model);
+      const ts = asString(event.ts);
+      const inputTokens = asFiniteNumber(event.inputTokens);
+      const outputTokens = asFiniteNumber(event.outputTokens);
+      if (!agent || !model || !ts || inputTokens === undefined || outputTokens === undefined) return undefined;
+      if (!Number.isInteger(inputTokens) || !Number.isInteger(outputTokens)) return undefined;
+      const costUsd = asFiniteNumber(event.costUsd);
+      return {
+        agent,
+        model,
+        ...(asString(event.runId) ? { runId: asString(event.runId) } : {}),
+        ...(asString(event.taskId) ? { taskId: asString(event.taskId) } : {}),
+        inputTokens,
+        outputTokens,
+        ...(costUsd !== undefined ? { costUsd } : {}),
+        ts,
+      };
+    })
+    .filter((event): event is LlmUsageEvent => Boolean(event));
 }
 
 /**
@@ -897,5 +926,6 @@ export function buildV2BoardSnapshot(
     cards: [...cards, ...taskCards],
     at: now().toISOString(),
     repo: opts.repo ?? "",
+    llmUsage: aggregateLlmUsage(usageEvents(asRecord(rawSnapshot)?.llmUsageEvents)),
   };
 }

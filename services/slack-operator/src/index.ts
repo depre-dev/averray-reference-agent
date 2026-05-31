@@ -8,6 +8,7 @@ import { createDefaultWorkflowDeps } from "@avg/averray-mcp/default-workflow-run
 import { invokeAgentTask } from "@avg/averray-mcp/agent-invocation";
 import { getHandoffMonitor } from "@avg/averray-mcp/handoff-events";
 import { buildAgentScorecard } from "@avg/averray-mcp/agent-scorecard";
+import { readLlmUsageEvents } from "@avg/averray-mcp/llm-usage";
 import { handleOperatorCommandText } from "@avg/averray-mcp/operator-handler";
 import {
   formatOperatorResultForSlack,
@@ -2081,7 +2082,25 @@ async function loadMonitorSnapshot(
       error: error instanceof Error ? error.message : String(error),
     });
   }
-  const degraded = phases.some((phase) => phase.status !== "ok");
+  const llmUsageStartedAt = Date.now();
+  let llmUsageEvents: Awaited<ReturnType<typeof readLlmUsageEvents>> = [];
+  try {
+    llmUsageEvents = await readLlmUsageEvents();
+    phases.push({
+      name: "llm_usage_log",
+      status: "ok",
+      durationMs: Date.now() - llmUsageStartedAt,
+    });
+  } catch (error) {
+    logger.warn({ err: error }, "monitor_llm_usage_skipped");
+    phases.push({
+      name: "llm_usage_log",
+      status: "skipped",
+      durationMs: Date.now() - llmUsageStartedAt,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const degraded = phases.some((phase) => phase.status !== "ok" && phase.name !== "llm_usage_log");
   const diagnostics = {
     monitorSnapshot: {
       status: degraded ? "degraded" : "ok",
@@ -2097,6 +2116,7 @@ async function loadMonitorSnapshot(
     codexTasks,
     testbedMissions: listTestbedMissionRuns({ limit: 20 }),
     testbedMissionRunner: summarizeTestbedMissionRunnerHeartbeat(readTestbedMissionRunnerHeartbeat()),
+    llmUsageEvents,
     collaborationMessages: listCollaborationMessages({ limit: 200 }),
     diagnostics,
   };
