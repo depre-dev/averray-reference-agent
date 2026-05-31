@@ -46,6 +46,10 @@ export interface CodexTaskInput {
   prompt: string;
   reason?: string;
   requester?: string;
+  /** O4-PR2 routing: the static-default risk tier (PR3 autopilot reads it). */
+  riskTier?: "high" | "low";
+  /** O4-PR2 routing: the one-line reason for the agent + tier (board + alert). */
+  routingReason?: string;
 }
 
 export interface CodexTaskEvent {
@@ -145,6 +149,8 @@ export async function proposeCodexTask(
     prompt: input.prompt,
     ...(input.reason ? { reason: input.reason } : {}),
     ...(input.requester ? { requester: input.requester } : {}),
+    ...(input.riskTier ? { riskTier: input.riskTier } : {}),
+    ...(input.routingReason ? { routingReason: input.routingReason } : {}),
     createdAt: now,
     updatedAt: now,
     events: [{
