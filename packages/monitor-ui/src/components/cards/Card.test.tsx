@@ -203,3 +203,38 @@ describe("Card — task approve (O3 dispatch)", () => {
     expect(queryByRole("button", { name: /Approve & dispatch/ })).toBeNull();
   });
 });
+
+describe("Card — requested tester mission approve (T6)", () => {
+  const requestedMission = {
+    id: "testbed-mission-requested-1",
+    lane: "operator-review",
+    type: "mission",
+    agentType: "hermes",
+    title: "Tester run requested",
+    summary: "Tester run requested by codex; it has not started and remains board-gated until the operator approves it.",
+    repo: "testbed/mission",
+    freshness: 1,
+    state: "fresh",
+    risk: ["testbed"],
+    waitingOn: { actor: "operator", tone: "neutral" },
+    missionStatus: "requested",
+  } as unknown as BoardCard;
+
+  test("shows that the mission has not started and requires approval", () => {
+    const { getByRole, getByText } = render(<Card card={requestedMission} onApproveMission={vi.fn()} />);
+    expect(getByText("Tester run requested")).toBeTruthy();
+    expect(getByText("not started")).toBeTruthy();
+    expect(getByRole("button", { name: /Approve tester run/ })).toBeTruthy();
+  });
+
+  test("approving a tester mission requires confirm before dispatching to the runner queue", () => {
+    const onApproveMission = vi.fn();
+    const { getByRole, getByText } = render(<Card card={requestedMission} onApproveMission={onApproveMission} />);
+    fireEvent.click(getByRole("button", { name: /Approve tester run/ }));
+    expect(onApproveMission).not.toHaveBeenCalled();
+    expect(getByText(/Queue runner now\?/)).toBeTruthy();
+    fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
+    expect(onApproveMission).toHaveBeenCalledTimes(1);
+    expect(onApproveMission.mock.calls[0]?.[0]?.id).toBe("testbed-mission-requested-1");
+  });
+});

@@ -70,6 +70,13 @@ export type TaskStatus =
   | "failed"
   | "cancelled";
 
+export type MissionStatus =
+  | "requested"
+  | "ready"
+  | "running"
+  | "completed"
+  | "failed";
+
 /** CI check rollup for the card's checks bar. Mirrors the UI CardChecks. */
 export interface CardChecks {
   pass: number;
@@ -205,6 +212,8 @@ export interface BoardCard {
   riskSignals?: CardRiskSignal[];
   /** Mission cards: the browser agent's structured report, when posted. */
   mission?: CardMissionReport;
+  /** Mission lifecycle status; requested missions are board-gated and not runner-claimable. */
+  missionStatus?: MissionStatus;
   /** D2: latest durable explanation associated with this card. */
   decisionRecord?: HermesDecisionRecord;
 }
@@ -788,6 +797,8 @@ export function enrichBoardCard(
   // Mission cards: project the browser agent's structured report. Omitted
   // when the run has no report yet (the drawer shows its "no report" state).
   if (card.type === "mission" && ctx.missionRun) {
+    const status = asString(ctx.missionRun.status);
+    if (status) card.missionStatus = status as MissionStatus;
     const mission = mapMissionReport(ctx.missionRun);
     if (mission) card.mission = mission;
   }

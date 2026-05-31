@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   __resetTestbedMissionRunsForTests,
@@ -10,6 +10,7 @@ import {
   recordTestbedMissionRunFromOperatorResult,
   readTestbedMissionRunnerHeartbeat,
 } from "../../services/slack-operator/src/monitor-testbed-missions.js";
+import { requestTestbedMissionFromAgent } from "../../services/slack-operator/src/testbed-agent-entrypoint.js";
 import {
   appendPlaywrightEvidenceTrail,
   parseTestbedMissionRunnerConfig,
@@ -137,6 +138,47 @@ describe("testbed mission runner", () => {
       status: "completed",
       runnerId: "test-runner",
     });
+  });
+
+  it("ignores requested missions until the operator approves them", async () => {
+    const path = tempMissionStorePath();
+    process.env.AVERRAY_TESTBED_MISSIONS_PATH = path;
+    requestTestbedMissionFromAgent(
+      {
+        path,
+        requesterAgent: "codex",
+        targetUrl: "https://testbed.example/app",
+        goal: "check the app like a fresh browser agent",
+        reason: "needs independent tester evidence",
+        mode: "fresh",
+      },
+      Date.parse("2026-05-24T10:00:00.000Z")
+    );
+    const executor = vi.fn(async () => ({
+      exitCode: 0,
+      stdout: "",
+      stderr: "",
+    }));
+
+    const result = await runTestbedMissionRunnerOnce(
+      {
+        enabled: true,
+        path,
+        runnerId: "test-runner",
+        command: "fake",
+        args: [],
+        pollIntervalMs: 1000,
+        timeoutMs: 1000,
+        outputTailBytes: 4000,
+      },
+      { executor }
+    );
+
+    expect(result.status).toBe("idle");
+    expect(executor).not.toHaveBeenCalled();
+    const [updated] = listTestbedMissionRuns({ path });
+    expect(updated).toMatchObject({ status: "requested" });
+    expect(updated?.runnerId).toBeUndefined();
   });
 
   it("fails the mission when the runner output is not a valid report", async () => {

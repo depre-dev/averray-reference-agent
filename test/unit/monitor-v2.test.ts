@@ -694,6 +694,47 @@ describe("buildV2BoardSnapshot — enrichment integration", () => {
     expect(mission?.mission?.target).toBe("https://staging.averray.com/onboarding");
     expect(mission?.mission?.path).toHaveLength(2);
   });
+
+  it("surfaces requested tester missions as board-gated operator approvals", () => {
+    const raw = {
+      active: [],
+      recent: [],
+      testbedMissions: [
+        {
+          schemaVersion: 1,
+          kind: "testbed_mission_run",
+          id: "testbed-mission-requested-1",
+          status: "requested",
+          title: "Tester run requested",
+          targetUrl: "https://staging.averray.com/onboarding",
+          goal: "check onboarding",
+          agentName: "Hermes",
+          requesterAgent: "codex",
+          freshMemory: true,
+          allowTestMutations: false,
+          mission: {},
+          history: [],
+          createdAt: "2026-05-31T10:00:00.000Z",
+          updatedAt: "2026-05-31T10:00:00.000Z",
+          statusReason: "Tester run requested by codex; it has not started and remains board-gated until the operator approves it.",
+        },
+      ],
+      generatedAt: "2026-05-31T10:02:00.000Z",
+    };
+
+    const snap = buildV2BoardSnapshot(raw, { repo: "depre-dev/agent", now: () => new Date("2026-05-31T10:02:00.000Z") });
+    const mission = snap.cards.find((c) => c.type === "mission");
+
+    expect(mission).toMatchObject({
+      title: "Tester run requested",
+      lane: "operator-review",
+      waitingOn: { actor: "operator" },
+      verdict: "Tester run requested",
+      missionStatus: "requested",
+      summary: expect.stringContaining("not started"),
+    });
+    expect(mission?.mission).toBeUndefined();
+  });
 });
 
 describe("indexTestbedMissions", () => {

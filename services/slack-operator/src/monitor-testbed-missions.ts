@@ -11,9 +11,10 @@ import {
 
 const MAX_MISSION_RUNS = 50;
 
-export type TestbedMissionStatus = "ready" | "running" | "completed" | "failed";
+export type TestbedMissionStatus = "requested" | "ready" | "running" | "completed" | "failed";
 export type TestbedMissionVerdict = "pass" | "partial" | "fail";
 export type TestbedMissionMode = "explore" | "surface_sweep" | "siwe_auth";
+export type TestbedMissionRequesterAgent = "codex" | "claude" | "hermes" | "operator";
 export type TestbedMissionRunnerHeartbeatStatus =
   | "idle"
   | "running"
@@ -39,6 +40,8 @@ export interface TestbedMissionRun {
   targetUrl: string;
   goal: string;
   agentName: string;
+  requesterAgent?: TestbedMissionRequesterAgent;
+  requestReason?: string;
   freshMemory: boolean;
   allowTestMutations: boolean;
   requestedAllowTestMutations?: boolean;
@@ -58,6 +61,9 @@ export interface TestbedMissionRun {
   history: TestbedMissionHistoryEntry[];
   createdAt: string;
   updatedAt: string;
+  requestedAt?: string;
+  approvedAt?: string;
+  approvedBy?: string;
   statusReason: string;
   runnerId?: string;
   claimedAt?: string;
@@ -129,6 +135,16 @@ export interface TestbedMissionStoreDeps {
   now?: Date;
 }
 
+export interface RecordTestbedMissionRunOptions {
+  initialStatus?: "ready" | "requested";
+  requesterAgent?: TestbedMissionRequesterAgent;
+  requestReason?: string;
+}
+
+export type ApproveTestbedMissionRunResult =
+  | { ok: true; run: TestbedMissionRun }
+  | { ok: false; error: "not_found" | "not_requested"; run?: TestbedMissionRun };
+
 export interface TestbedMissionRunnerHeartbeat {
   schemaVersion: 1;
   kind: "testbed_mission_runner_heartbeat";
@@ -146,7 +162,8 @@ let loadedMissionStorePath: string | undefined;
 export function recordTestbedMissionRunFromOperatorResult(
   result: unknown,
   nowMs: number = Date.now(),
-  path?: string
+  path?: string,
+  options: RecordTestbedMissionRunOptions = {}
 ): TestbedMissionRun | undefined {
   ensureMissionStoreLoaded(path, { force: true });
   if (!isRecord(result) || result.kind !== "testbed_agent_mission") return undefined;
@@ -169,16 +186,19 @@ export function recordTestbedMissionRunFromOperatorResult(
   });
   const mission = annotateMissionWithMutationBinding(rawMission, binding);
   const routes = Array.isArray(target.routes) ? stringArray(target.routes) : [];
+  const initialStatus = options.initialStatus ?? "ready";
   const run: TestbedMissionRun = {
     schemaVersion: 1,
     kind: "testbed_mission_run",
     id: nextMissionId(nowMs),
-    status: "ready",
-    title: testbedMissionTitle(mode),
+    status: initialStatus,
+    title: initialStatus === "requested" ? "Tester run requested" : testbedMissionTitle(mode),
     targetUrl: stringField(target, "url") ?? "[TESTBED_URL]",
     goal: stringField(target, "goal")
       ?? "Test whether a normal outside agent can understand and use the page.",
     agentName: stringField(target, "agentName") ?? "Hermes",
+    ...(options.requesterAgent ? { requesterAgent: options.requesterAgent } : {}),
+    ...(options.requestReason ? { requestReason: options.requestReason } : {}),
     freshMemory: target.freshMemory !== false,
     allowTestMutations: binding.allowTestMutations,
     requestedAllowTestMutations: binding.requestedAllowTestMutations,
@@ -192,14 +212,19 @@ export function recordTestbedMissionRunFromOperatorResult(
     history: [
       {
         at: createdAt,
-        status: "ready",
-        event: "mission_packet_ready",
-        message: testbedMissionReadyMessage(mode, binding),
+        status: initialStatus,
+        event: initialStatus === "requested" ? "mission_requested" : "mission_packet_ready",
+        message: initialStatus === "requested"
+          ? testbedMissionRequestedMessage(options.requesterAgent, options.requestReason)
+          : testbedMissionReadyMessage(mode, binding),
       },
     ],
     createdAt,
     updatedAt: createdAt,
-    statusReason: testbedMissionReadyReason(mode, binding),
+    ...(initialStatus === "requested" ? { requestedAt: createdAt } : {}),
+    statusReason: initialStatus === "requested"
+      ? testbedMissionRequestedReason(options.requesterAgent, options.requestReason)
+      : testbedMissionReadyReason(mode, binding),
   };
   missionRuns.push(run);
   while (missionRuns.length > MAX_MISSION_RUNS) missionRuns.shift();
@@ -211,12 +236,40 @@ export function listTestbedMissionRuns(options: ListTestbedMissionRunOptions = {
   ensureMissionStoreLoaded(options.path, { force: true });
   const limit = clampInt(options.limit, 1, MAX_MISSION_RUNS, 20);
   const runs = options.activeOnly
-    ? missionRuns.filter((run) => run.status === "ready" || run.status === "running")
+    ? missionRuns.filter((run) => run.status === "requested" || run.status === "ready" || run.status === "running")
     : missionRuns.slice();
   return runs
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .slice(0, limit)
     .map((run) => cloneRun(run));
+}
+
+export function approveTestbedMissionRun(
+  id: string,
+  deps: TestbedMissionStoreDeps & { approvedBy?: string } = {}
+): ApproveTestbedMissionRunResult {
+  ensureMissionStoreLoaded(deps.path, { force: true });
+  const existing = missionRuns.find((run) => run.id === id);
+  if (!existing) return { ok: false, error: "not_found" };
+  if (existing.status !== "requested") {
+    return { ok: false, error: "not_requested", run: cloneRun(existing) };
+  }
+  const now = (deps.now ?? new Date()).toISOString();
+  existing.status = "ready";
+  existing.title = testbedMissionTitle(existing.mode);
+  existing.approvedAt = now;
+  existing.approvedBy = deps.approvedBy ?? "operator";
+  existing.updatedAt = now;
+  existing.statusReason = testbedMissionReadyReasonForRun(existing);
+  existing.history.push({
+    at: now,
+    status: "ready",
+    event: "mission_approved",
+    message: `Operator approved the requested tester run; ${existing.statusReason}`,
+  });
+  trimMissionHistory(existing);
+  persistMissionStore(deps.path);
+  return { ok: true, run: cloneRun(existing) };
 }
 
 export function recordTestbedMissionReportFromMessage(
@@ -443,15 +496,24 @@ export function diagnoseTestbedMissionReportFromMessage(input: MissionReportInpu
 }
 
 export function testbedMissionRunToMonitorItem(run: TestbedMissionRun): Record<string, unknown> {
-  const active = run.status === "ready" || run.status === "running";
-  const terminalStatus = run.status === "completed" ? "completed" : run.status === "failed" ? "failed" : "running";
+  const active = run.status === "requested" || run.status === "ready" || run.status === "running";
+  const terminalStatus = run.status === "requested"
+    ? "requested"
+    : run.status === "completed"
+      ? "completed"
+      : run.status === "failed"
+        ? "failed"
+        : "running";
   const structuredReport = testbedMissionStructuredReport(run);
   const verdict = run.status === "completed"
     ? "pass"
     : run.status === "failed"
       ? structuredReport?.verdict ?? "failed"
-      : "running";
+      : run.status === "requested"
+        ? "requested"
+        : "running";
   const reportAttached = Boolean(run.result);
+  const requested = run.status === "requested";
   return {
     correlationId: run.id,
     requester: "monitor",
@@ -469,6 +531,7 @@ export function testbedMissionRunToMonitorItem(run: TestbedMissionRun): Record<s
       kind: "testbed_mission_run",
       title: run.title,
       status: run.status,
+      missionStatus: run.status,
       finalReason: run.statusReason,
       finalVerdict: verdict,
       mergeRecommendation: "not_applicable",
@@ -476,14 +539,18 @@ export function testbedMissionRunToMonitorItem(run: TestbedMissionRun): Record<s
       reviewSignals: {
         touchedAreas: ["testbed"],
         testSignals: [
-          "mission packet ready",
+          requested ? "tester run requested" : "mission packet ready",
           ...(run.status === "running" ? ["browser mission runner claimed"] : []),
           ...(run.environment ? [`mission environment: ${run.environment}`] : []),
           ...(run.mutationMode ? [`mutation profile: ${run.mutationMode}`] : []),
           ...(run.allowTestMutations ? ["test-mode page mutation allowed"] : []),
           ...(reportAttached ? ["browser agent report attached"] : []),
         ],
-        missingTestSignals: reportAttached ? [] : ["browser-agent report"],
+        missingTestSignals: reportAttached
+          ? []
+          : requested
+            ? ["operator approval", "browser-agent report"]
+            : ["browser-agent report"],
       },
       reviewReasons: run.status === "failed"
         ? [{ severity: "high", code: "testbed_mission_failed", message: run.statusReason }]
@@ -823,6 +890,41 @@ function onlyActiveMissionRun(): TestbedMissionRun | undefined {
     .filter((run) => run.status === "ready" || run.status === "running")
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   return activeRuns.length === 1 ? activeRuns[0] : undefined;
+}
+
+function testbedMissionRequestedMessage(
+  requesterAgent: TestbedMissionRequesterAgent | undefined,
+  reason: string | undefined
+): string {
+  const requester = requesterAgent ?? "agent";
+  return [
+    `Tester run requested by ${requester}; waiting for operator approval before the runner can claim it.`,
+    reason ? `Reason: ${reason}` : "",
+  ].filter(Boolean).join(" ");
+}
+
+function testbedMissionRequestedReason(
+  requesterAgent: TestbedMissionRequesterAgent | undefined,
+  reason: string | undefined
+): string {
+  const requester = requesterAgent ?? "agent";
+  return [
+    `Tester run requested by ${requester}; it has not started and remains board-gated until the operator approves it.`,
+    reason ? `Reason: ${reason}` : "",
+  ].filter(Boolean).join(" ");
+}
+
+function testbedMissionReadyReasonForRun(run: TestbedMissionRun): string {
+  if (run.mode === "siwe_auth") {
+    return "SIWE auth mission is ready; waiting for signer-sidecar role sessions and structured role-gating evidence.";
+  }
+  if (run.allowTestMutations) {
+    return `Mission packet is ready with ${run.environment ?? "testbed"} testbed mutations allowed; waiting for a browser-only test-mode run and structured report.`;
+  }
+  if (run.requestedAllowTestMutations) {
+    return `Mission packet is ready, but env→mutation binding forced read-only: ${run.mutationBindingReason ?? "testbed mutations denied"}.`;
+  }
+  return "Mission packet is ready; waiting for a browser-only agent run and structured report.";
 }
 
 function cloneRun(run: TestbedMissionRun): TestbedMissionRun {

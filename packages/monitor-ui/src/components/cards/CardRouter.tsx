@@ -19,9 +19,11 @@ export type CardRouterProps = {
   onDegradedAction?: (card: BoardCard) => void;
   /** Approve a proposed task card (O3 dispatch). */
   onApprove?: (card: BoardCard) => void;
+  /** Approve a board-gated requested tester mission (T6). */
+  onApproveMission?: (card: BoardCard) => void;
 };
 
-export function CardRouter({ card, focused, onClick, onDegradedAction, onApprove }: CardRouterProps) {
+export function CardRouter({ card, focused, onClick, onDegradedAction, onApprove, onApproveMission }: CardRouterProps) {
   const renderer = pickRenderer(card);
 
   if (renderer === "degraded") {
@@ -38,5 +40,5 @@ export function CardRouter({ card, focused, onClick, onDegradedAction, onApprove
     );
   }
 
-  return <Card card={card} focused={focused} onClick={onClick} onApprove={onApprove} />;
+  return <Card card={card} focused={focused} onClick={onClick} onApprove={onApprove} onApproveMission={onApproveMission} />;
 }

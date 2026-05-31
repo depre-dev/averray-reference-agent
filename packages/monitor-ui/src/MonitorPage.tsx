@@ -48,6 +48,8 @@ export interface MonitorPageProps {
   onCreateTask?: (input: CreateTaskInput) => void;
   /** Override the approve dispatch (defaults to POST /monitor/codex-tasks approve). */
   onApproveTask?: (id: string) => void;
+  /** Override the tester mission approval (defaults to POST /monitor/testbed-missions/:id/approve). */
+  onApproveMission?: (id: string) => void;
   /** Override the co-pilot collaboration wiring (defaults to live polling). */
   collaboration?: UseCollaborationOptions;
   /** Override the action-alert wiring (audio/notification/storage) for tests. */
@@ -64,6 +66,7 @@ export function MonitorPage({
   onSpawnClaudeTask = defaultSpawnClaudeTask,
   onCreateTask = defaultCreateTask,
   onApproveTask = defaultApproveTask,
+  onApproveMission = defaultApproveMission,
   collaboration = {},
   alerts,
   onAlertMute = defaultPostAlertMute,
@@ -105,6 +108,7 @@ export function MonitorPage({
         onSpawnClaudeTask={onSpawnClaudeTask}
         onCreateTask={onCreateTask}
         onApproveTask={onApproveTask}
+        onApproveMission={onApproveMission}
         collaboration={collaboration}
         onMute={muteEverywhere}
         onUnmute={unmuteEverywhere}
@@ -180,6 +184,20 @@ function defaultApproveTask(id: string): void {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ action: "approve", id }),
+  }).catch(() => {
+    /* surfaced via the board feed / degraded state, not thrown here */
+  });
+}
+
+/**
+ * Approve a requested tester mission — the T6 board gate (requested → ready).
+ * Agents can request a run, but only this operator action lets the runner
+ * claim it. Fire-and-forget; the board feed reflects the lifecycle.
+ */
+function defaultApproveMission(id: string): void {
+  void fetch(`${MISSIONS_URL}/${encodeURIComponent(id)}/approve`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
   }).catch(() => {
     /* surfaced via the board feed / degraded state, not thrown here */
   });

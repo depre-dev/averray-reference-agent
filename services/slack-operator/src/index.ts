@@ -138,9 +138,12 @@ import {
   type TestbedMissionRun,
 } from "./monitor-testbed-missions.js";
 import {
+  approveRequestedTestbedMission,
   createTestbedMissionFromAgent,
   getTestbedMissionForAgent,
   listTestbedMissionsForAgent,
+  requestTestbedMissionFromAgent,
+  TestbedMissionRequestValidationError,
 } from "./testbed-agent-entrypoint.js";
 import { buildTesterCapabilitiesManifest } from "./tester-capabilities.js";
 import {
@@ -669,6 +672,36 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       return;
     }
     await handleMonitorAutonomyModeRequest(request, response);
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/monitor/testbed-missions/request") {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    await handleMonitorTestbedMissionRequestProposal(request, response);
+    return;
+  }
+  const testbedMissionApprovalId = monitorTestbedMissionApproveId(url.pathname);
+  if (request.method === "POST" && testbedMissionApprovalId) {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    const missionVerdict = authorizeMissionSpawn(missionSpawnRoles, request.headers);
+    if (!missionVerdict.allowed) {
+      writeJson(response, 403, { error: "mission_approval_forbidden", reason: missionVerdict.reason });
+      return;
+    }
+    await handleMonitorTestbedMissionApprovalRequest(testbedMissionApprovalId, response);
     return;
   }
   const testbedMissionId = monitorTestbedMissionId(url.pathname);
@@ -1256,6 +1289,82 @@ async function handleMonitorTestbedMissionRequest(request: http.IncomingMessage,
   }
 }
 
+async function handleMonitorTestbedMissionRequestProposal(request: http.IncomingMessage, response: http.ServerResponse) {
+  try {
+    const rawBody = await readBody(request);
+    const payload = rawBody ? JSON.parse(rawBody) as unknown : {};
+    if (!isRecord(payload)) {
+      writeJson(response, 400, { error: "invalid_payload" });
+      return;
+    }
+
+    const created = requestTestbedMissionFromAgent({
+      requesterAgent: payload.requesterAgent,
+      targetUrl: payload.targetUrl,
+      goal: payload.goal,
+      reason: payload.reason,
+      mode: payload.mode,
+    });
+    recordTestbedMissionRequestCollaboration(created.run);
+    logger.info(
+      {
+        missionId: created.run.id,
+        requesterAgent: created.run.requesterAgent,
+        targetUrl: created.run.targetUrl,
+      },
+      "monitor_testbed_mission_requested"
+    );
+    writeJson(response, 200, {
+      ok: true,
+      boardGated: true,
+      ...created,
+    });
+  } catch (error) {
+    if (error instanceof TestbedMissionRequestValidationError) {
+      writeJson(response, 400, {
+        error: error.code,
+        message: error.message,
+      });
+      return;
+    }
+    logger.error({ err: error }, "monitor_testbed_mission_request_failed");
+    writeJson(response, 500, {
+      error: "monitor_testbed_mission_request_failed",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function handleMonitorTestbedMissionApprovalRequest(id: string, response: http.ServerResponse) {
+  try {
+    const result = approveRequestedTestbedMission(id, { approvedBy: "operator" });
+    if (!result.ok) {
+      if (result.error === "not_found") {
+        writeJson(response, 404, { error: "testbed_mission_not_found", id });
+        return;
+      }
+      writeJson(response, 409, {
+        error: "testbed_mission_not_requested",
+        id,
+        status: result.run?.status,
+      });
+      return;
+    }
+    recordTestbedMissionApprovalCollaboration(result.run);
+    logger.info({ missionId: id }, "monitor_testbed_mission_approved");
+    writeJson(response, 200, {
+      ok: true,
+      run: result.run,
+    });
+  } catch (error) {
+    logger.error({ err: error, missionId: id }, "monitor_testbed_mission_approval_failed");
+    writeJson(response, 500, {
+      error: "monitor_testbed_mission_approval_failed",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 function recordTestbedMissionCollaboration(run: TestbedMissionRun): void {
   try {
     const runner = summarizeTestbedMissionRunnerHeartbeat(readTestbedMissionRunnerHeartbeat());
@@ -1275,6 +1384,41 @@ function recordTestbedMissionCollaboration(run: TestbedMissionRun): void {
     });
   } catch (error) {
     logger.warn({ err: error, missionId: run.id }, "monitor_testbed_mission_collaboration_failed");
+  }
+}
+
+function recordTestbedMissionRequestCollaboration(run: TestbedMissionRun): void {
+  try {
+    recordCollaborationMessage({
+      author: "hermes",
+      kind: "proposal",
+      addressedTo: "operator",
+      relatedCorrelationId: run.id,
+      text: [
+        `Tester run requested by ${run.requesterAgent ?? "agent"} for ${run.targetUrl}.`,
+        "It has not started; the Hermes testbed runner will ignore it until you approve it on the board.",
+        run.requestReason ? `Reason: ${run.requestReason}` : "",
+      ].filter(Boolean).join(" "),
+    });
+  } catch (error) {
+    logger.warn({ err: error, missionId: run.id }, "monitor_testbed_mission_request_collaboration_failed");
+  }
+}
+
+function recordTestbedMissionApprovalCollaboration(run: TestbedMissionRun): void {
+  try {
+    recordCollaborationMessage({
+      author: "hermes",
+      kind: "status",
+      addressedTo: "operator",
+      relatedCorrelationId: run.id,
+      text: [
+        `Operator approved tester run ${run.id}.`,
+        "It is now ready; the Hermes testbed runner may claim it on the next poll.",
+      ].join(" "),
+    });
+  } catch (error) {
+    logger.warn({ err: error, missionId: run.id }, "monitor_testbed_mission_approval_collaboration_failed");
   }
 }
 
@@ -2455,6 +2599,15 @@ function monitorTestbedMissionId(pathname: string): string | undefined {
   const prefix = "/monitor/testbed-missions/";
   if (!pathname.startsWith(prefix)) return undefined;
   const id = decodeURIComponent(pathname.slice(prefix.length)).trim();
+  return id.length > 0 && !id.includes("/") ? id : undefined;
+}
+
+function monitorTestbedMissionApproveId(pathname: string): string | undefined {
+  const prefix = "/monitor/testbed-missions/";
+  const suffix = "/approve";
+  if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) return undefined;
+  const raw = pathname.slice(prefix.length, -suffix.length);
+  const id = decodeURIComponent(raw).trim();
   return id.length > 0 && !id.includes("/") ? id : undefined;
 }
 

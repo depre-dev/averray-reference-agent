@@ -97,6 +97,8 @@ export interface BoardViewProps {
   onCreateTask?: (input: CreateTaskInput) => void;
   /** Approve a proposed task card — the operator human gate (O3). */
   onApproveTask?: (id: string) => void;
+  /** Approve a requested tester mission — the operator human gate (T6). */
+  onApproveMission?: (id: string) => void;
   collaboration?: UseCollaborationOptions;
   onMute?: (untilMs: number) => void;
   onUnmute?: () => void;
@@ -123,6 +125,7 @@ export function BoardView({
   onSpawnClaudeTask,
   onCreateTask,
   onApproveTask,
+  onApproveMission,
   collaboration,
   onMute,
   onUnmute,
@@ -295,6 +298,7 @@ export function BoardView({
                 focused={card.id === boardFocusId}
                 onClick={onCardClick ? (c) => onCardClick(c.id) : undefined}
                 onApprove={onApproveTask ? (c) => onApproveTask(c.id) : undefined}
+                onApproveMission={onApproveMission ? (c) => onApproveMission(c.id) : undefined}
               />
             )}
           />

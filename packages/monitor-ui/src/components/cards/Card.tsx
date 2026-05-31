@@ -29,6 +29,8 @@ export type CardProps = {
   onClick?: (card: BoardCard) => void;
   /** Approve a proposed task card (O3). Operator-only; runs through a confirm. */
   onApprove?: (card: BoardCard) => void;
+  /** Approve a requested tester mission (T6). Operator-only; runs through a confirm. */
+  onApproveMission?: (card: BoardCard) => void;
 };
 
 // ── Helpers (mirror the bundle's small inline helpers) ──────────────
@@ -67,7 +69,7 @@ function riskPillClass(tag: RiskTag): string {
 
 // ── Card ───────────────────────────────────────────────────────────
 
-export function Card({ card, focused = false, onClick, onApprove }: CardProps) {
+export function Card({ card, focused = false, onClick, onApprove, onApproveMission }: CardProps) {
   const isAction = Boolean(card.isAction);
   const isStale = card.state === "stale";
   const isClosed = card.type === "done";
@@ -151,6 +153,17 @@ export function Card({ card, focused = false, onClick, onApprove }: CardProps) {
 
       {card.type === "task" && (card as { taskStatus?: string }).taskStatus === "proposed" && onApprove ? (
         <TaskApprove card={card} onApprove={onApprove} />
+      ) : null}
+
+      {card.type === "mission" && (card as { missionStatus?: string }).missionStatus === "requested" ? (
+        <div className="hm-waiting hm-waiting--neutral">
+          not started
+          <span className="target">→ awaiting operator approval</span>
+        </div>
+      ) : null}
+
+      {card.type === "mission" && (card as { missionStatus?: string }).missionStatus === "requested" && onApproveMission ? (
+        <MissionApprove card={card} onApprove={onApproveMission} />
       ) : null}
 
       {isAction && verdict ? (
@@ -288,6 +301,60 @@ function TaskApprove({ card, onApprove }: { card: BoardCard; onApprove: (card: B
     <div className="hm-card-cta" role="group" aria-label="Confirm task dispatch">
       <span style={{ fontSize: 12, color: "var(--hm-ink-soft)", marginRight: "auto" }}>
         Dispatch to {agent}?
+      </span>
+      <button
+        type="button"
+        className="hm-btn hm-btn--action hm-btn--sm"
+        onClick={(e) => {
+          stop(e);
+          setConfirming(false);
+          onApprove(card);
+        }}
+      >
+        Confirm
+      </button>
+      <button
+        type="button"
+        className="hm-btn hm-btn--ghost hm-btn--sm"
+        onClick={(e) => {
+          stop(e);
+          setConfirming(false);
+        }}
+      >
+        Cancel
+      </button>
+    </div>
+  );
+}
+
+// ── Mission approve (T6 tester request gate) ───────────────────────
+// Agent-requested tester runs are proposals only. The runner ignores
+// `requested`; this button performs the explicit operator gate
+// (requested → ready), after a confirm step.
+
+function MissionApprove({ card, onApprove }: { card: BoardCard; onApprove: (card: BoardCard) => void }) {
+  const [confirming, setConfirming] = useState(false);
+  const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
+  if (!confirming) {
+    return (
+      <div className="hm-card-cta">
+        <button
+          type="button"
+          className="hm-btn hm-btn--action hm-btn--sm"
+          onClick={(e) => {
+            stop(e);
+            setConfirming(true);
+          }}
+        >
+          Approve tester run
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="hm-card-cta" role="group" aria-label="Confirm tester mission approval">
+      <span style={{ fontSize: 12, color: "var(--hm-ink-soft)", marginRight: "auto" }}>
+        Queue runner now?
       </span>
       <button
         type="button"

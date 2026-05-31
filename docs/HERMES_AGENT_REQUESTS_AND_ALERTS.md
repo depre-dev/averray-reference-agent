@@ -1,6 +1,6 @@
 # Agent-Requested Tester Runs + the Operator Alert Bridge
 
-- **Status:** Reconciled 2026-05-31. D4 off-device alert bridge shipped earlier (#279) and D1 operator digest/reporting shipped in #294. T6 board-gated agent-requested tester runs and T7 capabilities/platform-helper work remain follow-up/design unless code evidence proves otherwise.
+- **Status:** Reconciled 2026-05-31. D4 off-device alert bridge shipped earlier (#279) and D1 operator digest/reporting shipped in #294. T6's first narrow slice is in flight here: agent requests land as board-gated `requested` missions and must be operator-approved before the runner can claim. T7 capabilities/platform-helper work remains follow-up/design unless code evidence proves otherwise.
 - **Date:** 2026-05-29
 - **Companions:** [`HERMES_E2E_TESTER_DESIGN.md`](./HERMES_E2E_TESTER_DESIGN.md), [`HERMES_TESTER_AUTH_DESIGN.md`](./HERMES_TESTER_AUTH_DESIGN.md), [`HERMES_ROADMAP.md`](./HERMES_ROADMAP.md).
 - **Problem:** the code-building agents (the ones opening `app:` PRs in `averray-agent/agent`) can't currently start a tester run, don't know the tester's capabilities, and there's no way to reach the operator for approval when they're away from the Mac.
@@ -15,13 +15,13 @@
 
 **Flow (reuses the O3 `proposed → approve → run` gate, for missions):**
 1. The agent submits a **run request** (mission type + target route(s)/feature + a one-line "why").
-2. It lands on the board as a **proposed mission — needs approval** (a new pending state for agent-requested missions; operator-spawned + deploy-triggered missions stay auto).
+2. It lands on the board as a **requested mission — needs approval** (`status: "requested"`; operator-spawned + deploy-triggered missions still create `ready` missions).
 3. The **operator accepts it on the board** (the gate you asked for).
 4. The `testbed-mission-runner` runs it; the verdict + per-route findings + evidence come back as a mission card.
 
 **Scope/safety:** agent-requested runs are **read-only by default** — surface sweep (T1) or a **targeted read-only mission** against the changed route/feature. Mutating/gold-path missions stay **operator-initiated** (an agent can't request a mutation). Testnet/preview env only; under `HALT_FILE`.
 
-**Entry point (closes the interface gap):** the building agents work in `averray-agent/agent` and likely don't have the Averray MCP. So ship a thin **platform-repo helper** (e.g. `scripts/request-tester-run.sh` / an npm script) that POSTs the request to the canonical queue endpoint **`POST /monitor/testbed-missions`** (slack-operator `:8790`) and prints the board link — **not** the `averray_testbed_agent_mission` MCP tool, which only returns a prompt packet. The reference-agent adds the **proposed → approve gate** on top of that endpoint for agent-requested runs; the platform repo ships the helper so agents have it in-context.
+**Entry point (closes the interface gap):** the building agents work in `averray-agent/agent` and likely don't have the Averray MCP. The reference-agent now exposes the board-gated request endpoint **`POST /monitor/testbed-missions/request`** with `{ requesterAgent, targetUrl, goal, reason, mode: "fresh" | "memory" }`. It records `requested` only; the runner ignores it until an operator clicks approve, which calls **`POST /monitor/testbed-missions/{id}/approve`** and moves the mission to `ready`. The platform repo helper (T7 follow-up) should POST to this request endpoint and print the board link.
 
 ## 2. Tester capabilities manifest — always known
 
@@ -54,7 +54,7 @@ Today the board only has **browser** notifications (#232: tab badge, desktop not
 ## Build sequence
 
 1. **Alert bridge (Slack)** — highest leverage: unblocks "step away," and it's the O4 prerequisite. *(Shipped as D4 in #279; D1 operator reporting shipped in #294.)*
-2. **Agent-requested run endpoint + the proposed-mission approval gate** on the board. *(reference-agent)*
+2. **Agent-requested run endpoint + the requested-mission approval gate** on the board. *(reference-agent first slice in flight: request creates `requested`, approve moves to `ready`, runner claims only `ready`.)*
 3. **Capabilities manifest** + the **platform-repo helper** + the **platform `AGENTS.md`** pointer. *(manifest endpoint = reference-agent; helper + AGENTS.md = platform repo follow-up)*
 
 ## Roadmap fit
@@ -71,4 +71,4 @@ Today the board only has **browser** notifications (#232: tab badge, desktop not
 
 ---
 
-*End. Reconciled 2026-05-31: D4 and D1 are shipped; T6/T7 stay follow-up/design here.*
+*End. Reconciled 2026-05-31: D4 and D1 are shipped; T6 first slice is in flight here; T7 stays follow-up/design.*

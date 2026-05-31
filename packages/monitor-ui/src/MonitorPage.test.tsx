@@ -138,6 +138,43 @@ describe("MonitorPage — container", () => {
     }
   });
 
+  test("the default mission approval POSTs to /monitor/testbed-missions/:id/approve", async () => {
+    const requestedMission = {
+      id: "testbed-mission-requested-1",
+      lane: "operator-review",
+      type: "mission",
+      agentType: "hermes",
+      title: "Tester run requested",
+      summary: "Tester run requested by codex; it has not started and remains board-gated until the operator approves it.",
+      repo: "testbed/mission",
+      freshness: 1,
+      state: "fresh",
+      risk: ["testbed"],
+      waitingOn: { actor: "operator", tone: "neutral" },
+      missionStatus: "requested",
+    } as unknown as MonitorBoard["cards"][number];
+    const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({
+      cards: [requestedMission],
+      at: "2026-05-28T10:30:00Z",
+    }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
+    try {
+      const { getByRole } = render(<MonitorPage options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }} collaboration={{ enabled: false }} alerts={{ enabled: false }} autonomy={{ fetchMode: async () => null }} />, {
+        wrapper,
+      });
+      await waitFor(() => expect(getByRole("button", { name: /Approve tester run/ })).toBeTruthy());
+      fireEvent.click(getByRole("button", { name: /Approve tester run/ }));
+      fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+      expect(calledUrl).toBe("/monitor/testbed-missions/testbed-mission-requested-1/approve");
+      expect(init.method).toBe("POST");
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   test("the composer's /mute command mutes alerts end-to-end", async () => {
     const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({ cards: FIXTURE_CARDS, at: "2026-05-28T10:30:00Z" }));
     const storage = memStorage();

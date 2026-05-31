@@ -114,6 +114,14 @@ function classifyItem(
   const mergeRecommendation = normalize(textProp(summary, "mergeRecommendation"));
   const intent = normalize(textProp(item, "intent"));
   if (intent === "testbed_agent_mission") {
+    if (status === "requested" || finalVerdict === "requested") {
+      return {
+        lane: "Operator Review",
+        owner: "Operator",
+        verdict: "Tester run requested",
+        next: "approve the requested tester run before the Hermes runner is allowed to claim it",
+      };
+    }
     const failed = status === "failed" || includesAny(finalVerdict, ["failed", "failure", "block"]);
     const completed = status === "completed" || includesAny(finalVerdict, ["pass", "completed"]);
     if (failed) {
