@@ -1,8 +1,12 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import {
+  evaluateReviewPanel,
   planReviewForRisk,
+  type ReviewPanelEvaluation,
   type ReviewPanelMode,
+  type ReviewPanelResponse,
+  type ReviewPanelReviewer,
   type ReviewPanelVerdict,
 } from "./reviewer-panel.js";
 
@@ -136,12 +140,26 @@ export interface RecordReviewPanelInput {
   reason?: unknown;
 }
 
+export interface RecordReviewResponseInput {
+  id?: unknown;
+  panelId?: unknown;
+  reviewer?: unknown;
+  verdict?: unknown;
+  reasoning?: unknown;
+  respondedAt?: unknown;
+}
+
 export interface RecordReviewPanelResult {
   panelId: string;
   mode: ReviewPanelMode;
   reviewers: ReviewRequestReviewer[];
   requests: ReviewRequest[];
   reason: string;
+}
+
+export interface RecordReviewResponseResult {
+  reviewRequest: ReviewRequest;
+  panelEvaluation?: ReviewPanelEvaluation;
 }
 
 export interface ListCollaborationOptions {
@@ -367,6 +385,71 @@ export function recordReviewPanelRequests(
   };
 }
 
+export function recordReviewResponse(
+  input: RecordReviewResponseInput,
+  nowMs: number = Date.now()
+): RecordReviewResponseResult {
+  const id = normalizeCorrelationId(input.id);
+  const panelId = normalizeCorrelationId(input.panelId);
+  const reviewer = normalizeReviewer(input.reviewer);
+  if (!id && (!panelId || !reviewer)) {
+    throw new CollaborationValidationError(
+      "missing_review_response_target",
+      "review response must include either id, or panelId + reviewer."
+    );
+  }
+
+  const verdict = normalizeReviewVerdict(input.verdict);
+  if (!verdict) {
+    throw new CollaborationValidationError(
+      "invalid_review_verdict",
+      "verdict must be one of: pass, concern, block."
+    );
+  }
+
+  const reasoning = normalizeText(input.reasoning);
+  if (!reasoning) {
+    throw new CollaborationValidationError(
+      "invalid_review_reasoning",
+      "reasoning is required and must be a non-empty string (max 4000 chars)."
+    );
+  }
+
+  const index = id
+    ? reviewRequests.findIndex((request) => request.id === id)
+    : findReviewRequestIndexByPanel(panelId!, reviewer!);
+  if (index < 0) {
+    throw new CollaborationValidationError(
+      "review_request_not_found",
+      "review request was not found."
+    );
+  }
+
+  const existing = reviewRequests[index]!;
+  if (existing.status === "cancelled") {
+    throw new CollaborationValidationError(
+      "review_request_cancelled",
+      "cancelled review requests cannot be answered."
+    );
+  }
+
+  const respondedAt = normalizeCorrelationId(input.respondedAt) ?? new Date(nowMs).toISOString();
+  const updated: ReviewRequest = {
+    ...existing,
+    status: "responded",
+    response: { verdict, reasoning, respondedAt },
+    updatedAt: new Date(nowMs).toISOString(),
+  };
+  reviewRequests[index] = updated;
+  recordReviewResponseCollaborationTurn(updated, nowMs);
+
+  const panelEvaluation = evaluateReviewPanelForRequest(updated);
+  return {
+    reviewRequest: updated,
+    ...(panelEvaluation ? { panelEvaluation } : {}),
+  };
+}
+
 export function listReviewRequests(options: ListReviewRequestsOptions = {}): ReviewRequest[] {
   const limit = clampLimit(options.limit, MAX_REVIEW_REQUESTS);
   const filtered = options.status
@@ -472,6 +555,11 @@ function normalizeReviewStatus(value: unknown): ReviewRequestStatus | null {
   return null;
 }
 
+function normalizeReviewVerdict(value: unknown): ReviewPanelVerdict | null {
+  if (value === "pass" || value === "concern" || value === "block") return value;
+  return null;
+}
+
 function normalizeReviewMode(value: unknown): ReviewPanelMode | undefined {
   if (value == null || value === "") return undefined;
   if (value === "single" || value === "panel") return value;
@@ -553,6 +641,14 @@ function nextMemoryId(nowMs: number): string {
   return `hermes-memory-${nowMs.toString(36)}-${memorySeq.toString(36)}`;
 }
 
+function findReviewRequestIndexByPanel(panelId: string, reviewer: ReviewRequestReviewer): number {
+  for (let i = reviewRequests.length - 1; i >= 0; i -= 1) {
+    const request = reviewRequests[i]!;
+    if (request.panelId === panelId && request.reviewer === reviewer) return i;
+  }
+  return -1;
+}
+
 function recordReviewRequestCollaborationTurn(request: ReviewRequest, nowMs: number): void {
   const scope = reviewRequestScopeLabel(request);
   const reviewer = actorDisplayName(request.reviewer);
@@ -565,6 +661,52 @@ function recordReviewRequestCollaborationTurn(request: ReviewRequest, nowMs: num
     ...(request.relatedPr ? { relatedPr: request.relatedPr } : {}),
     ...(relatedCorrelationId ? { relatedCorrelationId } : {}),
   }, nowMs);
+}
+
+function recordReviewResponseCollaborationTurn(request: ReviewRequest, nowMs: number): void {
+  if (!request.response) return;
+  const scope = reviewRequestScopeLabel(request);
+  const actor = actorDisplayName(request.reviewer);
+  const relatedCorrelationId = request.correlationId ?? request.relatedMission?.id;
+  recordCollaborationMessage({
+    author: request.reviewer,
+    kind: "status",
+    addressedTo: "operator",
+    text: `${actor} review verdict${scope ? ` on ${scope}` : ""}: ${request.response.verdict} — ${request.response.reasoning}`,
+    ...(request.relatedPr ? { relatedPr: request.relatedPr } : {}),
+    ...(relatedCorrelationId ? { relatedCorrelationId } : {}),
+  }, nowMs);
+}
+
+function evaluateReviewPanelForRequest(request: ReviewRequest): ReviewPanelEvaluation | undefined {
+  if (!request.panelId) return undefined;
+  const panelRequests = reviewRequests.filter((candidate) => candidate.panelId === request.panelId);
+  if (!panelRequests.some((candidate) => candidate.reviewMode === "panel")) return undefined;
+  const reviewers = panelRequests
+    .map((candidate) => candidate.reviewer)
+    .filter(isReviewPanelReviewer);
+  const uniqueReviewers = Array.from(new Set(reviewers));
+  if (uniqueReviewers.length < 2) return undefined;
+  const responses: ReviewPanelResponse[] = panelRequests
+    .filter((candidate): candidate is ReviewRequest & {
+      reviewer: ReviewPanelReviewer;
+      response: NonNullable<ReviewRequest["response"]>;
+    } => Boolean(candidate.response) && isReviewPanelReviewer(candidate.reviewer))
+    .map((candidate) => ({
+      reviewer: candidate.reviewer,
+      verdict: candidate.response.verdict,
+      reasoning: candidate.response.reasoning,
+    }));
+  return evaluateReviewPanel({
+    panelId: request.panelId,
+    relatedLabel: reviewRequestScopeLabel(request),
+    reviewers: uniqueReviewers,
+    responses,
+  });
+}
+
+function isReviewPanelReviewer(value: ReviewRequestReviewer): value is ReviewPanelReviewer {
+  return value === "hermes" || value === "codex" || value === "claude";
 }
 
 function reviewRequestScopeLabel(request: ReviewRequest): string {

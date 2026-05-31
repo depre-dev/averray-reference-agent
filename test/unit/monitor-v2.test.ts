@@ -752,6 +752,86 @@ describe("buildV2BoardSnapshot — enrichment integration", () => {
     ]);
   });
 
+  it("promotes a blocked high-risk reviewer panel to needs-attention for the D4 bridge", () => {
+    const raw = {
+      active: [
+        {
+          title: "Change settlement deploy path",
+          status: "needs_review",
+          intent: "operator_review",
+          ageLabel: "4m",
+          summary: {
+            pullRequest: { repo: "depre-dev/agent", number: 601, state: "open" },
+            currentPullRequest: { repo: "depre-dev/agent", number: 601, state: "open" },
+            finalVerdict: "operator_review",
+          },
+        },
+      ],
+      recent: [],
+      reviewRequests: [
+        {
+          id: "review-hermes",
+          relatedPr: { repo: "depre-dev/agent", number: 601 },
+          requestedBy: "hermes",
+          reviewer: "hermes",
+          reason: "High-risk reviewer panel.",
+          status: "responded",
+          reviewMode: "panel",
+          panelId: "panel-601",
+          panelSize: 3,
+          response: {
+            verdict: "pass",
+            reasoning: "Checks are green.",
+            respondedAt: "2026-05-31T12:04:00.000Z",
+          },
+          createdAt: "2026-05-31T12:00:00.000Z",
+          updatedAt: "2026-05-31T12:04:00.000Z",
+        },
+        {
+          id: "review-codex",
+          relatedPr: { repo: "depre-dev/agent", number: 601 },
+          requestedBy: "hermes",
+          reviewer: "codex",
+          reason: "High-risk reviewer panel.",
+          status: "responded",
+          reviewMode: "panel",
+          panelId: "panel-601",
+          panelSize: 3,
+          response: {
+            verdict: "block",
+            reasoning: "Settlement rollback proof is missing.",
+            respondedAt: "2026-05-31T12:05:00.000Z",
+          },
+          createdAt: "2026-05-31T12:00:00.000Z",
+          updatedAt: "2026-05-31T12:05:00.000Z",
+        },
+        {
+          id: "review-claude",
+          relatedPr: { repo: "depre-dev/agent", number: 601 },
+          requestedBy: "hermes",
+          reviewer: "claude",
+          reason: "High-risk reviewer panel.",
+          status: "requested",
+          reviewMode: "panel",
+          panelId: "panel-601",
+          panelSize: 3,
+          createdAt: "2026-05-31T12:00:00.000Z",
+          updatedAt: "2026-05-31T12:00:00.000Z",
+        },
+      ],
+    };
+
+    const snap = buildV2BoardSnapshot(raw, { repo: "depre-dev/agent" });
+    const card = snap.cards.find((c) => c.id === "agent #601");
+    expect(card).toMatchObject({
+      lane: "needs-attention",
+      isAction: true,
+      waitingOn: { actor: "operator", tone: "warn" },
+    });
+    expect(card?.summary).toContain("Codex blocked agent #601");
+    expect(card?.riskSignals?.some((signal) => signal.code === "review_panel_blocked")).toBe(true);
+  });
+
   it("enriches a mission card with the browser agent's structured report (by correlationId)", () => {
     // A classified mission item carries correlationId = run.id and no PR
     // number; the run with its report is bundled at snapshot.testbedMissions.

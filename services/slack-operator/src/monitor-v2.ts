@@ -32,6 +32,12 @@ import {
   isHermesDecisionRecord,
   type HermesDecisionRecord,
 } from "@avg/averray-mcp/decision-records";
+import {
+  evaluateReviewPanel,
+  type ReviewPanelEvaluation,
+  type ReviewPanelResponse,
+  type ReviewPanelReviewer,
+} from "./reviewer-panel.js";
 
 // ── v2 typed model ──────────────────────────────────────────────────
 
@@ -762,7 +768,75 @@ function attachReviewRequests(
       || (request.correlationId !== undefined && request.correlationId === card.id)
     )
     .map(({ relatedPrKey, relatedMissionId, correlationId, ...request }) => request);
-  return active.length > 0 ? { ...card, reviewRequests: active } : card;
+  if (active.length === 0) return card;
+  return promoteCardForReviewPanelEscalation({ ...card, reviewRequests: active }, active);
+}
+
+function promoteCardForReviewPanelEscalation(
+  card: BoardCard,
+  requests: readonly CardReviewRequest[]
+): BoardCard {
+  const escalation = firstReviewPanelEscalation(card, requests);
+  if (!escalation) return card;
+  const riskSignals = [
+    ...(card.riskSignals ?? []),
+    {
+      severity: "high" as const,
+      code: escalation.agreement === "blocked" ? "review_panel_blocked" : "review_panel_disagreement",
+      message: escalation.summary,
+    },
+  ];
+  const risk = Array.from(new Set([...card.risk, "workflow", "review-gated"] as RiskTag[]));
+  return {
+    ...card,
+    lane: "needs-attention",
+    isAction: true,
+    waitingOn: { actor: "operator", tone: "warn" },
+    risk,
+    riskSignals,
+    summary: card.summary ? `${escalation.summary} · ${card.summary}` : escalation.summary,
+  };
+}
+
+function firstReviewPanelEscalation(
+  card: BoardCard,
+  requests: readonly CardReviewRequest[]
+): ReviewPanelEvaluation | undefined {
+  const panelIds = Array.from(new Set(
+    requests
+      .filter((request) => request.reviewMode === "panel" && request.panelId)
+      .map((request) => request.panelId!)
+  ));
+  for (const panelId of panelIds) {
+    const panelRequests = requests.filter((request) => request.panelId === panelId);
+    const reviewers = panelRequests
+      .map((request) => request.reviewer)
+      .filter(isReviewPanelReviewer);
+    const uniqueReviewers = Array.from(new Set(reviewers));
+    if (uniqueReviewers.length < 2) continue;
+    const responses: ReviewPanelResponse[] = panelRequests
+      .filter((request): request is CardReviewRequest & {
+        reviewer: ReviewPanelReviewer;
+        response: NonNullable<CardReviewRequest["response"]>;
+      } => Boolean(request.response) && isReviewPanelReviewer(request.reviewer))
+      .map((request) => ({
+        reviewer: request.reviewer,
+        verdict: request.response.verdict,
+        reasoning: request.response.reasoning,
+      }));
+    const evaluation = evaluateReviewPanel({
+      panelId,
+      relatedLabel: card.id,
+      reviewers: uniqueReviewers,
+      responses,
+    });
+    if (evaluation.escalate) return evaluation;
+  }
+  return undefined;
+}
+
+function isReviewPanelReviewer(value: CardReviewRequest["reviewer"]): value is ReviewPanelReviewer {
+  return value === "hermes" || value === "codex" || value === "claude";
 }
 
 const EVIDENCE_KINDS = new Set(["screenshot", "trace", "console", "video"]);

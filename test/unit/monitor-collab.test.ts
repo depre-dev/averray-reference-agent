@@ -13,6 +13,7 @@ import {
   recordCollaborationMessage,
   recordHermesMemoryNote,
   recordReviewPanelRequests,
+  recordReviewResponse,
   recordReviewRequest,
   synthesizeHermesReplyFor,
 } from "../../services/slack-operator/src/monitor-collab.js";
@@ -381,6 +382,56 @@ describe("monitor review requests", () => {
       reviewMode: "single",
       panelSize: 1,
     });
+  });
+
+  it("records panel reviewer verdicts against existing requests without creating tasks", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "review-panel-response-task-queue-"));
+    const queuePath = join(dir, "tasks.json");
+    try {
+      const panel = recordReviewPanelRequests(
+        {
+          relatedPr: { repo: "depre-dev/averray-reference-agent", number: 302 },
+          requestedBy: "hermes",
+          riskTier: "high",
+          builder: "codex",
+          reason: "High-risk contract-adjacent surface.",
+        },
+        NOW
+      );
+
+      const codex = recordReviewResponse(
+        {
+          panelId: panel.panelId,
+          reviewer: "codex",
+          verdict: "block",
+          reasoning: "Settlement path needs operator proof before merge.",
+        },
+        NOW + 1_000
+      );
+
+      expect(codex.reviewRequest).toMatchObject({
+        reviewer: "codex",
+        status: "responded",
+        response: {
+          verdict: "block",
+          reasoning: "Settlement path needs operator proof before merge.",
+        },
+      });
+      expect(codex.panelEvaluation).toMatchObject({
+        agreement: "blocked",
+        panelVerdict: "block",
+        escalate: true,
+      });
+      expect(listReviewRequests({ status: "responded" })).toHaveLength(1);
+      expect(listCollaborationMessages({ limit: 1 }, NOW + 2_000)[0]).toMatchObject({
+        author: "codex",
+        addressedTo: "operator",
+        text: expect.stringContaining("block"),
+      });
+      await expect(listCodexTasks({ path: queuePath })).resolves.toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
