@@ -26,7 +26,7 @@
 | O3 | Board-driven dispatch | ✅ done — create/approve form (agent picker) + `/task` verb live on the board (#271) |
 | O4 | Hermes enqueue + dispatch guardrail + autonomy mode | 🟡 in build — PR1 enqueue+guardrail ✅ (#280) · PR2 routing taxonomy ✅ (#281) · PR3 autopilot auto-approval **blocked on D3** |
 | O5 | Self-management hardening | design done |
-| A1 | Agent scorecard | design done |
+| A1 | Agent scorecard | 🟡 in review — read-only `/monitor/agents` + `averray_agent_scorecard` scorecard slice |
 | A2 | Learned routing (data-driven, non-high-risk) | design done |
 | A3 | Cost visibility / cost-aware routing | design done |
 | D1 | "While you were away" digest (board + Slack/push) | design done |

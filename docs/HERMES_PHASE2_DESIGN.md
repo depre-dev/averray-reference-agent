@@ -1,6 +1,6 @@
 # Hermes Orchestration — Phase 2 Design (Intelligence + Trust)
 
-- **Status:** Planning / handoff only. **Nothing here is implemented.** Design-level spec for the next layer after the core orchestration.
+- **Status:** Phase-2 implementation has started. A1 now has a read-only scorecard spine/API/MCP slice in review; A2/A3 and D1-D3 remain design-level.
 - **Date:** 2026-05-29
 - **Companions:** [`HERMES_MULTI_AGENT_ORCHESTRATION_PLAN.md`](./HERMES_MULTI_AGENT_ORCHESTRATION_PLAN.md), [`HERMES_INTEGRATION_MAP.md`](./HERMES_INTEGRATION_MAP.md), [`HERMES_ORCHESTRATION_DESIGN.md`](./HERMES_ORCHESTRATION_DESIGN.md) (the core P1–P5).
 - **Position:** **Phase 2.** Builds on the core — it consumes agent attribution (P1), dispatch + the autonomy mode (P3/P4), and the handoff-event log. Do not start until the core ships.
@@ -44,6 +44,8 @@ Per-agent, per-surface metrics from the spine:
 - **The trust metric:** autopilot auto-approvals that *later needed human rework* — the direct measure of whether autopilot's judgment holds up.
 
 Surface: a board panel + `averray_agent_scorecard` MCP tool. **This is the first Phase-2 build** (decision #1) — the spine + its first visible payoff together.
+
+Implementation note: the first A1 slice exposes `/monitor/agents` and `averray_agent_scorecard` from existing monitor events, codex/Claude task queue state, and browser mission reports. It deliberately marks cost/tokens, autopilot auto-approval rework, time-to-PR, and time-to-merge as `not_recorded` until those signals exist in durable events. Board-panel polish and `/monitor/sessions/:id` are follow-ups.
 
 ### A2 — Learned routing  ·  acts · risk: medium · **data-driven within non-high-risk** (decision #2)
 Stats fully drive routing for non-high-risk surfaces — with safeguards so "data-driven" doesn't become brittle or self-entrenching:
@@ -102,4 +104,4 @@ All sits *after* the core P1–P4. Each ships as a narrow PR per [AGENTS.md](../
 
 ---
 
-*End of Phase 2 design. Planning/handoff only — not implemented.*
+*End of Phase 2 design. A1 read-only scorecard implementation has started; acting layers remain design-level until their guardrails are built.*

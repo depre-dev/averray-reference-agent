@@ -7,6 +7,7 @@ import { logger, optionalEnv, query } from "@avg/mcp-common";
 import { createDefaultWorkflowDeps } from "@avg/averray-mcp/default-workflow-runtime";
 import { invokeAgentTask } from "@avg/averray-mcp/agent-invocation";
 import { getHandoffMonitor } from "@avg/averray-mcp/handoff-events";
+import { buildAgentScorecard } from "@avg/averray-mcp/agent-scorecard";
 import { handleOperatorCommandText } from "@avg/averray-mcp/operator-handler";
 import {
   formatOperatorResultForSlack,
@@ -228,6 +229,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
           "/monitor/command",
           "/monitor/recheck",
           "/monitor/codex-tasks",
+          "/monitor/agents",
           "/monitor/collaboration",
           "/monitor/tester/capabilities",
           "/monitor/testbed-missions",
@@ -391,6 +393,19 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       return;
     }
     writeJson(response, 200, await loadCodexTaskQueueSummary());
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/monitor/agents") {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    const raw = await loadMonitorSnapshot(url, { suppressNarration: true });
+    writeJson(response, 200, buildAgentScorecard(raw));
     return;
   }
   if (request.method === "POST" && url.pathname === "/monitor/codex-tasks") {
