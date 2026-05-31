@@ -2,6 +2,11 @@ import type { AlertChannel, AlertPayload } from "./alert-bridge.js";
 import type { AutonomyState } from "./autonomy-mode.js";
 import { taskAgent, type CodexTask } from "./codex-task-queue.js";
 import type { BoardCard } from "./monitor-v2.js";
+import {
+  createHermesDecisionRecord,
+  whyHermesLine,
+  type HermesDecisionRecord,
+} from "@avg/averray-mcp/decision-records";
 
 export interface AutopilotAwayDigestTrackerState {
   active?: AutopilotAwaySession;
@@ -75,6 +80,7 @@ export interface AutopilotAwayDigest {
   d3Suspends: AutopilotAwayDigestItem[];
   waitingOnOperator: AutopilotAwayDigestItem[];
   recommendedNextActions: string[];
+  decisionRecord: HermesDecisionRecord;
   safety: {
     readOnly: true;
     mutatesGithub: false;
@@ -207,6 +213,39 @@ export function buildAutopilotAwayDigest(input: BuildAutopilotAwayDigestInput): 
     waitingOnOperator: waitingOnOperator.length,
   };
 
+  const recommendedNextActions = recommendedNextActionsFor({ waitingOnOperator, escalated, failures, openedPrs, autoApproved });
+  const decisionRecord = createHermesDecisionRecord({
+    kind: "away_digest",
+    subject: { type: "autopilot_session", id: input.session.sessionId },
+    decision: "reported",
+    reasons: [
+      `Autopilot session ended because ${input.session.endedBy}.`,
+      `Hermes summarized ${counts.routed} routed, ${counts.autoApproved} auto-approved, ${counts.escalated} escalated, and ${counts.waitingOnOperator} waiting item(s).`,
+      recommendedNextActions[0] ?? "Nothing needs operator action right now.",
+    ],
+    inputs: {
+      counts,
+      session: input.session,
+      waitingOnOperator: waitingOnOperator.slice(0, 5),
+      escalated: escalated.slice(0, 5),
+      failures: failures.slice(0, 5),
+      d3Suspends: d3Suspends.slice(0, 5),
+      wouldChangeDecision: "No digest would be emitted until the autopilot session ended or was interrupted.",
+    },
+    outcome: {
+      summary: "Hermes emitted an away digest for the operator.",
+      waitingNext: recommendedNextActions[0] ?? "Nothing needs operator action right now.",
+    },
+    safety: {
+      readOnly: true,
+      mutates: false,
+      mutatesGithub: false,
+      mutatesAverray: false,
+      editsWikipedia: false,
+    },
+    generatedAt: input.generatedAt,
+  });
+
   return {
     schemaVersion: 1,
     kind: "autopilot_away_digest",
@@ -222,7 +261,8 @@ export function buildAutopilotAwayDigest(input: BuildAutopilotAwayDigestInput): 
     failures,
     d3Suspends,
     waitingOnOperator,
-    recommendedNextActions: recommendedNextActionsFor({ waitingOnOperator, escalated, failures, openedPrs, autoApproved }),
+    recommendedNextActions,
+    decisionRecord,
     safety: {
       readOnly: true,
       mutatesGithub: false,
@@ -237,6 +277,7 @@ export function formatAutopilotAwayDigestForOperator(digest: AutopilotAwayDigest
     digest.headline,
     `Window: ${digest.session.startedAt} -> ${digest.session.endedAt} (${digest.session.endedBy}).`,
     `Hermes routed ${digest.counts.routed}, auto-approved ${digest.counts.autoApproved}, escalated ${digest.counts.escalated}, opened/updated ${digest.counts.openedPrs} PR task(s), and left ${digest.counts.waitingOnOperator} item(s) waiting on you.`,
+    whyHermesLine(digest.decisionRecord),
   ];
 
   if (digest.autoApproved.length > 0) {

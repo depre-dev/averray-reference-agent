@@ -16,6 +16,10 @@ import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { optionalEnv, readYamlFile } from "@avg/mcp-common";
 import type { AlertChannel, AlertPayload } from "./alert-bridge.js";
+import {
+  createHermesDecisionRecord,
+  type HermesDecisionRecord,
+} from "@avg/averray-mcp/decision-records";
 
 // ── Signals + thresholds ────────────────────────────────────────────
 
@@ -192,7 +196,13 @@ export interface AnomalyPauseDeps {
   setSuspended: (info: { reason: string; signal: string; tier: "soft" | "hard"; setAt: string }) => void;
   touchHalt: (reason: string) => void;
   alert: (payload: AlertPayload) => Promise<boolean>;
-  audit: (record: { tier: AnomalyTier; action: AnomalyAction; signals: string; reason: string }) => Promise<unknown> | unknown;
+  audit: (record: {
+    tier: AnomalyTier;
+    action: AnomalyAction;
+    signals: string;
+    reason: string;
+    decisionRecord?: HermesDecisionRecord;
+  }) => Promise<unknown> | unknown;
   boardUrl: string;
   now: () => Date;
 }
@@ -222,6 +232,64 @@ export async function runAnomalyPauseOnce(deps: AnomalyPauseDeps): Promise<Anoma
   }
 
   await deps.alert(buildAnomalyAlert(evaluation, action, deps.boardUrl));
-  await deps.audit({ tier: evaluation.tier, action, signals: signalList, reason });
+  await deps.audit({
+    tier: evaluation.tier,
+    action,
+    signals: signalList,
+    reason,
+    decisionRecord: buildAnomalyPauseDecisionRecord({
+      evaluation,
+      action,
+      signals,
+      config: deps.config,
+      generatedAt: setAt,
+    }),
+  });
   return { action, evaluation };
+}
+
+function buildAnomalyPauseDecisionRecord(input: {
+  evaluation: AnomalyEvaluation;
+  action: Exclude<AnomalyAction, "none">;
+  signals: AnomalySignals;
+  config: AnomalyConfig;
+  generatedAt: string;
+}): HermesDecisionRecord {
+  const { reason, signals } = summarizeTrips(input.evaluation);
+  return createHermesDecisionRecord({
+    kind: "anomaly_pause",
+    subject: { type: "autopilot_session", id: "hermes-autopilot" },
+    decision: input.action === "hard" ? "paused_hard" : "paused_soft",
+    reasons: [
+      ...input.evaluation.trips.map((trip) => `[${trip.tier}] ${trip.signal}: ${trip.detail}`),
+      input.action === "hard"
+        ? "A hard trip touches HALT and suspends autopilot."
+        : "A soft trip suspends autopilot without touching HALT.",
+    ],
+    inputs: {
+      riskTier: input.evaluation.tier,
+      anomalySignals: input.signals,
+      anomalySignalList: signals,
+      anomalyReason: reason,
+      thresholds: input.config,
+      wouldChangeDecision: "Lower signal values, a higher configured threshold, or an already-suspended soft state would avoid a new pause.",
+    },
+    outcome: {
+      summary: input.action === "hard"
+        ? "HALT was touched and autopilot was suspended."
+        : "Autopilot was suspended.",
+      waitingNext: "Operator inspection and resume decision.",
+      changed: input.action === "hard"
+        ? ["HALT_FILE touched", "autopilot suspended"]
+        : ["autopilot suspended"],
+    },
+    safety: {
+      readOnly: false,
+      mutates: true,
+      mutatesGithub: false,
+      mutatesAverray: false,
+      editsWikipedia: false,
+    },
+    generatedAt: input.generatedAt,
+  });
 }

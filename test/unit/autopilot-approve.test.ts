@@ -63,7 +63,7 @@ interface Harness {
   deps: AutoApprovalDeps;
   approved: Array<{ id: string; approvedBy: string }>;
   alerts: number;
-  audits: Array<{ action: string; reason: string; taskId: string }>;
+  audits: Array<Parameters<AutoApprovalDeps["audit"]>[0]>;
 }
 
 function harness(over: Partial<AutoApprovalDeps> = {}, task: AutoApprovalTask = TASK): Harness {
@@ -86,7 +86,7 @@ function harness(over: Partial<AutoApprovalDeps> = {}, task: AutoApprovalTask = 
       return true;
     },
     audit: (record) => {
-      audits.push({ action: record.action, reason: record.reason, taskId: record.taskId });
+      audits.push(record);
     },
     boardUrl: "https://board.example/monitor",
     ...over,
@@ -109,7 +109,17 @@ describe("runAutoApproval — orchestration (injected effects, no fs/network)", 
     const r = await runAutoApproval(h.deps);
     expect(r.action).toBe("approved");
     expect(h.approved).toEqual([{ id: "codex-task-1", approvedBy: "hermes-autopilot" }]);
-    expect(h.audits).toEqual([{ action: "approved", reason: "auto_approved", taskId: "codex-task-1" }]);
+    expect(h.audits[0]).toMatchObject({ action: "approved", reason: "auto_approved", taskId: "codex-task-1" });
+    expect(h.audits[0]?.decisionRecord).toMatchObject({
+      kind: "auto_approval",
+      decision: "approved",
+      inputs: {
+        riskTier: "low",
+        policyGates: { dispatchAllowed: true },
+        budgetGates: { todayCount: 0, todayRepoCount: 0 },
+      },
+      safety: { mutates: true, mutatesAverray: true },
+    });
     expect(h.alerts).toBe(0); // routine auto-approval doesn't spam the operator
   });
 
@@ -119,6 +129,11 @@ describe("runAutoApproval — orchestration (injected effects, no fs/network)", 
     expect(r.action).toBe("escalated");
     expect(h.approved).toHaveLength(0);
     expect(h.audits[0]).toMatchObject({ action: "escalated", reason: "high_risk_escalated" });
+    expect(h.audits[0]?.decisionRecord).toMatchObject({
+      kind: "escalation",
+      decision: "escalated",
+      inputs: { riskTier: "high" },
+    });
     expect(h.alerts).toBe(1);
   });
 

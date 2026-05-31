@@ -45,6 +45,12 @@ describe("A2 learned routing", () => {
     expect(decision).toMatchObject({ agent: "codex", riskTier: "high" });
     expect(decision.reason).toMatch(/rule-bound/);
     expect(decision.reason).toMatch(/scorecard ignored/);
+    expect(decision.decisionRecord).toMatchObject({
+      kind: "routing",
+      decision: "routed to codex",
+      inputs: { riskTier: "high", scorecardUsed: false },
+      safety: { readOnly: true, mutates: false },
+    });
   });
 
   it("routes non-high-risk work to the agent with stronger surface evidence", () => {
@@ -66,6 +72,18 @@ describe("A2 learned routing", () => {
     expect(decision.reason).toMatch(/A2 learned routing/);
     expect(decision.reason).toMatch(/claude 92% ready/);
     expect(decision.reason).toMatch(/codex 70% ready/);
+    expect(decision.decisionRecord).toMatchObject({
+      kind: "routing",
+      decision: "routed to claude",
+      inputs: {
+        mode: "learned",
+        riskTier: "low",
+        scorecardSnapshot: [
+          expect.objectContaining({ agent: "claude" }),
+          expect.objectContaining({ agent: "codex" }),
+        ],
+      },
+    });
   });
 
   it("falls back to the static default during cold start", () => {

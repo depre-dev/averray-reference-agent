@@ -219,9 +219,16 @@ describe("autopilot away digest aggregation", () => {
       id: "card-review",
       status: "operator-review",
     });
+    expect(digest.decisionRecord).toMatchObject({
+      kind: "away_digest",
+      decision: "reported",
+      inputs: { counts: digest.counts },
+      safety: { readOnly: true, mutates: false },
+    });
 
     const text = formatAutopilotAwayDigestForOperator(digest);
     expect(text).toContain("While you were away");
+    expect(text).toContain("Why Hermes did this:");
     expect(text).toContain("auto-approved 1");
     expect(text).toContain("Waiting on you");
   });

@@ -25,6 +25,7 @@ import {
 } from "../../services/slack-operator/src/monitor-v2.js";
 import type { BoardCard } from "../../services/slack-operator/src/monitor-v2.js";
 import type { HermesBoardCardSnapshot } from "../../services/slack-operator/src/monitor-hermes-voice.js";
+import { createHermesDecisionRecord } from "../../packages/averray-mcp/src/decision-records.js";
 
 function slim(overrides: Partial<HermesBoardCardSnapshot> = {}): HermesBoardCardSnapshot {
   return {
@@ -776,7 +777,18 @@ describe("synthesizeTaskCards (O3 — surface queued tasks)", () => {
   };
 
   it("surfaces a proposed greenfield task as a codex-needed card with its agent + status", () => {
-    const [card, ...rest] = synthesizeTaskCards({ codexTasks: { items: [proposedClaude] } }, undefined);
+    const decisionRecord = createHermesDecisionRecord({
+      kind: "routing",
+      subject: { type: "task", id: "claude-task-x1", repo: "averray-agent/agent" },
+      decision: "routed to claude",
+      reasons: ["Claude had the strongest UI evidence."],
+      outcome: { summary: "Task proposed." },
+      safety: { readOnly: true, mutates: false },
+      generatedAt: "2026-05-31T12:00:00.000Z",
+    });
+    const [card, ...rest] = synthesizeTaskCards({
+      codexTasks: { items: [{ ...proposedClaude, decisionRecord }] },
+    }, undefined);
     expect(rest).toHaveLength(0);
     expect(card).toMatchObject({
       id: "claude-task-x1",
@@ -786,6 +798,10 @@ describe("synthesizeTaskCards (O3 — surface queued tasks)", () => {
       taskStatus: "proposed",
       repo: "averray-agent/agent",
       prompt: "Add a top-level HEALTHCHECK.md.",
+      decisionRecord: {
+        kind: "routing",
+        decision: "routed to claude",
+      },
     });
     // proposed → waiting on the operator to approve
     expect(card?.waitingOn).toEqual({ actor: "operator", tone: "warn" });

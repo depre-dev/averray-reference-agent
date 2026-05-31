@@ -27,6 +27,10 @@ import {
   testbedMissionStructuredReport,
   type TestbedMissionRun,
 } from "./monitor-testbed-missions.js";
+import {
+  isHermesDecisionRecord,
+  type HermesDecisionRecord,
+} from "@avg/averray-mcp/decision-records";
 
 // ── v2 typed model ──────────────────────────────────────────────────
 
@@ -200,6 +204,8 @@ export interface BoardCard {
   riskSignals?: CardRiskSignal[];
   /** Mission cards: the browser agent's structured report, when posted. */
   mission?: CardMissionReport;
+  /** D2: latest durable explanation associated with this card. */
+  decisionRecord?: HermesDecisionRecord;
 }
 
 export interface BoardSnapshotV2 {
@@ -768,6 +774,9 @@ export function enrichBoardCard(
     if (output) card.output = output;
     const failureReason = asString(task.failureReason);
     if (failureReason) card.failureReason = failureReason;
+    if (isHermesDecisionRecord(task.decisionRecord)) {
+      card.decisionRecord = task.decisionRecord;
+    }
     const runner = ctx.runner;
     if (runner) {
       const lastSeen = asString(runner.updatedAt);
@@ -825,6 +834,7 @@ export function synthesizeTaskCards(
     const riskTierRaw = asString(task.riskTier);
     const riskTier = riskTierRaw === "high" || riskTierRaw === "low" ? riskTierRaw : undefined;
     const routingReason = asString(task.routingReason);
+    const decisionRecord = isHermesDecisionRecord(task.decisionRecord) ? task.decisionRecord : undefined;
     // O4-PR2: surface the routing decision — the reason (incl. the tier) on the
     // card face, and a riskSignal for the drawer. Persist riskTier (PR3 reads it).
     const summary = [routingReason, asString(task.reason)].filter(Boolean).join(" · ");
@@ -850,6 +860,7 @@ export function synthesizeTaskCards(
         ? { riskSignals: [{ severity: riskTier === "high" ? "high" : "low", code: "routing", message: routingReason }] }
         : {}),
       ...(prompt ? { prompt } : {}),
+      ...(decisionRecord ? { decisionRecord } : {}),
     };
     if (status === "running" && runner) {
       const lastSeen = asString(runner.updatedAt);

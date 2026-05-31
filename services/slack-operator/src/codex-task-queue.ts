@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import type { HermesDecisionRecord } from "@avg/averray-mcp/decision-records";
 
 export type CodexTaskStatus =
   | "proposed"
@@ -50,6 +51,8 @@ export interface CodexTaskInput {
   riskTier?: "high" | "low";
   /** O4-PR2 routing: the one-line reason for the agent + tier (board + alert). */
   routingReason?: string;
+  /** D2: why Hermes routed/proposed this task. */
+  decisionRecord?: HermesDecisionRecord;
 }
 
 export interface CodexTaskEvent {
@@ -130,6 +133,7 @@ export async function proposeCodexTask(
       prompt: input.prompt || existing.prompt,
       reason: input.reason ?? existing.reason,
       requester: input.requester ?? existing.requester,
+      decisionRecord: input.decisionRecord ?? existing.decisionRecord,
       updatedAt: now,
     };
     await writeCodexTasks(path, replaceTask(tasks, updated));
@@ -151,6 +155,7 @@ export async function proposeCodexTask(
     ...(input.requester ? { requester: input.requester } : {}),
     ...(input.riskTier ? { riskTier: input.riskTier } : {}),
     ...(input.routingReason ? { routingReason: input.routingReason } : {}),
+    ...(input.decisionRecord ? { decisionRecord: input.decisionRecord } : {}),
     createdAt: now,
     updatedAt: now,
     events: [{
@@ -194,6 +199,25 @@ export async function approveCodexTask(
       status: "approved",
       message: "Operator approved Codex dispatch.",
     }),
+    updatedAt: now,
+  };
+  await writeCodexTasks(path, replaceTask(tasks, task));
+  return task;
+}
+
+export async function annotateCodexTaskDecisionRecord(
+  id: string,
+  decisionRecord: HermesDecisionRecord,
+  deps: CodexTaskQueueDeps = {}
+): Promise<CodexTask | undefined> {
+  const path = queuePath(deps.path);
+  const tasks = await readCodexTasks(path);
+  const existing = tasks.find((task) => task.id === id);
+  if (!existing) return undefined;
+  const now = (deps.now ?? new Date()).toISOString();
+  const task: CodexTask = {
+    ...existing,
+    decisionRecord,
     updatedAt: now,
   };
   await writeCodexTasks(path, replaceTask(tasks, task));
