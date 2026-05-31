@@ -32,6 +32,10 @@
     "./agent-invocation": {
       "types": "./dist/agent-invocation.d.ts",
       "import": "./dist/agent-invocation.js"
+    },
+    "./dispatch-policy": {
+      "types": "./dist/dispatch-policy.d.ts",
+      "import": "./dist/dispatch-policy.js"
     }
   },
   "scripts": {

@@ -24,8 +24,15 @@ how things work **today** and must be updated as phases land (see the last bulle
    add a bypass.
 6. **New power comes with a new guardrail.** Any capability that lets an agent
    (including Hermes) act on the world — dispatch/enqueue work, mutate GitHub, spend,
-   submit — must ship with an explicit allowlist + budget **and** keep a human
-   approval step. No ungated agent authority.
+   submit — must ship with an explicit allowlist + budget. Approval may be the
+   operator **or** Hermes autopilot *within its rules* — never ungated agent
+   authority. Autopilot (O4-PR3) auto-approves **dispatch only**, and only when
+   ALL hold: mode `autopilot` and within its time window (stated, else a 4h safety
+   cap), **not** D3-suspended, `HALT_FILE` absent, the dispatch allowlist+budget
+   allows, and `riskTier != high` (**high-risk always escalates to the operator**).
+   It is **off by default** (supervised), reverts on expiry/suspend/HALT, and
+   **never** merges or deploys (invariant #1). Every auto-approval + escalation is
+   audited and alerted.
 7. **Secrets are never committed, printed, or logged.**
 8. **Verify chain facts before asserting them.** For any Polkadot / Substrate /
    Asset Hub behavior, address, runtime, fee, XCM, or settlement claim, check the
@@ -95,17 +102,20 @@ TypeScript monorepo: npm workspaces (`packages/*`, `services/*`), Node ≥ 22, E
   chain/settlement-adjacent work**; Claude takes UI, docs, and general code.
 - **Hermes reviews and operates** — observes GitHub, reviews PR risk, runs
   read-only checks, reports to the PR/Slack/monitor, and proposes operator actions.
-  Today Hermes is **recommendation-only**: it must not merge, deploy, submit work, or
-  run guarded live mutations during a handoff. As Hermes gains orchestration powers
-  (routing and dispatching tasks per the orchestration plan), those powers stay
-  inside the **Durable invariants** above — gated, budgeted, and never extending to
-  auto-merge or auto-deploy. Update this section when that lands.
+  Hermes proposes + routes tasks, and — when the operator turns on **autopilot**
+  (O4-PR3) — may **auto-approve dispatch** within the invariant-#6 gate (allowlist,
+  budget, not-suspended, HALT-absent, low/medium-risk only; high-risk always
+  escalates). Default is **supervised** (operator approves). Either way Hermes must
+  not merge, deploy, submit work, or run guarded live mutations during a handoff:
+  its powers stay inside the **Durable invariants** above — gated, budgeted, and
+  never extending to auto-merge or auto-deploy.
 - **Humans own approval.** A PASS verdict is a release *signal*, not a merge order.
   Merge and deploy are human-gated. No auto-merge.
 - **Per-agent task runners** (`codex-task-runner`, `claude-task-runner`) claim
   work from the shared task queue and execute the matching worker. They are the
   dispatch path, so they carry invariant #6's guardrail: they claim **only
-  operator-`approved` tasks** (never self-approve), filtered by `agent`
+  `approved` tasks** — approved by the operator **or** by `hermes-autopilot`
+  within its rules — and **never self-approve**, filtered by `agent`
   (codex/claude). The Claude runner additionally runs a **billing-route
   verification** at startup (`claude-worker-auth`) — on a mismatch it writes a
   `misconfigured` heartbeat and **refuses to claim** rather than silently
