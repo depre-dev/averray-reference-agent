@@ -81,6 +81,7 @@ import {
 import {
   runSelfHealingOnce,
   createCooldown,
+  testbedSurfaceKey,
   type FailureSignal,
 } from "./self-healing.js";
 import {
@@ -1767,7 +1768,9 @@ async function collectSelfHealingSignals(boardUrl: string): Promise<FailureSigna
     const missions = listTestbedMissionRuns({ limit: 25 }).filter((m) => m.status === "failed");
     for (const m of missions) {
       signals.push({
-        surface: `testbed:${m.id}`,
+        // Stable per-target surface (NOT the per-run mission id), so re-runs of
+        // the same failing mission dedup/cooldown instead of swarming the queue.
+        surface: testbedSurfaceKey(m.targetUrl),
         source: "testbed_mission",
         summary: `Testbed mission for ${m.targetUrl} failed: ${m.failureReason ?? m.statusReason ?? "no reason recorded"}`,
         evidence: `${boardUrl}?mission=${encodeURIComponent(m.id)}`,
@@ -2262,6 +2265,13 @@ function startOperatorRoutines() {
           ).length;
         },
         maxProposalsPerDay: dispatchPerDayCap,
+        openFixCount: async () => {
+          const tasks = await listCodexTasks();
+          return tasks.filter(
+            (t) => t.requester === "hermes-self-healing" && !["completed", "failed", "cancelled"].includes(t.status),
+          ).length;
+        },
+        maxOpenFixTasks: routineConfig.selfHealing.maxOpenFixTasks,
         inCooldown: (surface, nowMs) => selfHealingCooldown.inCooldown(surface, nowMs),
         markHandled: (surface, nowMs) => selfHealingCooldown.markHandled(surface, nowMs),
         propose: async ({ signal, agent, riskTier, prompt, routingReason }) => {

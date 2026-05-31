@@ -41,6 +41,8 @@ export interface SlackRoutineConfig {
     enabled: boolean;
     intervalMs: number;
     cooldownMs: number;
+    /** Concurrent open-fix cap — stops a batch of failures swarming the queue. */
+    maxOpenFixTasks: number;
   };
 }
 
@@ -100,6 +102,7 @@ export function parseSlackRoutineConfig(
       enabled: env.B2_SELF_HEALING_ENABLED === "1",
       intervalMs: Math.max(60_000, (positiveNumber(env.B2_SELF_HEALING_INTERVAL_MINUTES) || 5) * 60_000),
       cooldownMs: Math.max(60_000, (positiveNumber(env.B2_SELF_HEALING_COOLDOWN_MINUTES) || 30) * 60_000),
+      maxOpenFixTasks: Math.max(1, positiveNumber(env.B2_SELF_HEALING_MAX_OPEN_FIXES) || 3),
     },
   };
 }
