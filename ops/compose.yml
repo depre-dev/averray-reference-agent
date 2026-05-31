@@ -403,6 +403,69 @@ services:
       - avg-data:/data
     networks: [avg-internal]
 
+  # C3 test-writer specialist runner — a copy of claude-task-runner pinned to the
+  # internal "test-writer" agent, so it claims ONLY approved agent=="test-writer"
+  # tasks (the queue's per-agent claim filter isolates it from claude/codex). It
+  # reuses the Claude-family billing-route check, the fail-closed worker repo
+  # allow-list, HALT, and the heartbeat — the same gates as claude-task-runner.
+  # OFF by default and independently controlled: needs the "test-writer-runner"
+  # profile AND TEST_WRITER_TASK_RUNNER_ENABLED=1 (mapped to the runner's own
+  # CLAUDE_TASK_RUNNER_ENABLED inside the container, so it can't be flipped on by
+  # the claude-runner's flag). The worker still refuses every task until
+  # CLAUDE_BRANCH_WORKER_ALLOWED_REPOS is populated.
+  test-writer-task-runner:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.node
+    image: ${AVERRAY_IMAGE:-avg-node-runtime}
+    profiles: ["test-writer-runner"]
+    restart: unless-stopped
+    depends_on:
+      hermes-permissions:
+        condition: service_completed_successfully
+      mcp-bundle:
+        condition: service_completed_successfully
+    command: ["node", "services/slack-operator/dist/claude-task-runner.js"]
+    environment:
+      AVERRAY_CODEX_TASKS_PATH: ${AVERRAY_CODEX_TASKS_PATH:-/data/codex-tasks.json}
+      # Independent enable + id, remapped to the runner's own env var names so this
+      # service is controlled separately from the claude-runner.
+      CLAUDE_TASK_RUNNER_ENABLED: ${TEST_WRITER_TASK_RUNNER_ENABLED:-0}
+      CLAUDE_TASK_RUNNER_ID: ${TEST_WRITER_TASK_RUNNER_ID:-vps-test-writer-task-runner}
+      # Pin the agent identity so this runner claims ONLY test-writer tasks.
+      CLAUDE_TASK_RUNNER_AGENT: test-writer
+      # The dedicated test-writer worker entrypoint (hardcodes agent=test-writer;
+      # the runner also exports CLAUDE_TASK_AGENT=test-writer for the branch prefix).
+      CLAUDE_TASK_RUNNER_COMMAND: ${CLAUDE_TASK_RUNNER_COMMAND:-node}
+      CLAUDE_TASK_RUNNER_ARGS: ${TEST_WRITER_TASK_RUNNER_ARGS:-services/slack-operator/dist/test-writer-branch-worker.js}
+      CLAUDE_TASK_RUNNER_CWD: ${CLAUDE_TASK_RUNNER_CWD:-}
+      CLAUDE_TASK_RUNNER_POLL_INTERVAL_MS: ${CLAUDE_TASK_RUNNER_POLL_INTERVAL_MS:-10000}
+      CLAUDE_TASK_RUNNER_TIMEOUT_MS: ${CLAUDE_TASK_RUNNER_TIMEOUT_MS:-1800000}
+      CLAUDE_TASK_RUNNER_OUTPUT_TAIL_BYTES: ${CLAUDE_TASK_RUNNER_OUTPUT_TAIL_BYTES:-12000}
+      # Same fail-closed worker allow-list + auth/billing as the claude-runner.
+      CLAUDE_BRANCH_WORKER_ROOT: ${CLAUDE_BRANCH_WORKER_ROOT:-/data/claude-worker}
+      CLAUDE_BRANCH_WORKER_ALLOWED_REPOS: ${CLAUDE_BRANCH_WORKER_ALLOWED_REPOS:-}
+      CLAUDE_BRANCH_WORKER_BASE_BRANCH: ${CLAUDE_BRANCH_WORKER_BASE_BRANCH:-main}
+      CLAUDE_BRANCH_WORKER_CLAUDE_COMMAND: ${CLAUDE_BRANCH_WORKER_CLAUDE_COMMAND:-claude}
+      CLAUDE_BRANCH_WORKER_CLAUDE_ARGS: ${CLAUDE_BRANCH_WORKER_CLAUDE_ARGS:-}
+      CLAUDE_BRANCH_WORKER_GIT_USER_NAME: ${CLAUDE_BRANCH_WORKER_GIT_USER_NAME:-Averray Claude Worker}
+      CLAUDE_BRANCH_WORKER_GIT_USER_EMAIL: ${CLAUDE_BRANCH_WORKER_GIT_USER_EMAIL:-claude-worker@averray.local}
+      CLAUDE_WORKER_AUTH_MODE: ${CLAUDE_WORKER_AUTH_MODE:-sub}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_WORKER_DAILY_BUDGET: ${CLAUDE_WORKER_DAILY_BUDGET:-}
+      HALT_FILE: ${HALT_FILE:-/data/HALT}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_OWNER_TOKENS: ${GITHUB_OWNER_TOKENS:-}
+      GITHUB_REPO_TOKENS: ${GITHUB_REPO_TOKENS:-}
+      GITHUB_DEFAULT_REPO: ${GITHUB_DEFAULT_REPO:-}
+      GITHUB_HELPER_REPOS: ${GITHUB_HELPER_REPOS:-}
+      GITHUB_API_BASE_URL: ${GITHUB_API_BASE_URL:-https://api.github.com}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - avg-data:/data
+    networks: [avg-internal]
+
   hermes:
     image: ${HERMES_IMAGE}
     restart: unless-stopped

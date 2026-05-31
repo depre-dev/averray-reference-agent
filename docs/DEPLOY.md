@@ -126,6 +126,52 @@ note flips to online.
 
 ---
 
+## Optional: the C3 test-writer specialist runner (`test-writer-runner` profile)
+
+Off by default. The `test-writer` agent/role already ships; this is the runner
+instance that **claims and executes** approved `agent="test-writer"` tasks. It
+is a second Claude-family runner pinned to the test-writer agent, so it claims
+ONLY test-writer tasks — the queue's per-agent claim filter keeps it isolated
+from the `claude-runner` (and vice-versa). Without it, approved test-writer
+tasks queue forever. Same gates as the `claude-runner`: the startup
+billing-route verification (fails loud on a mismatch and refuses to claim), the
+**fail-closed** worker repo allow-list (`CLAUDE_BRANCH_WORKER_ALLOWED_REPOS`,
+shared), `HALT_FILE`, and the heartbeat. It opens a normal `test-writer/*` PR
+through the usual human review gate — no auto-merge/approve.
+
+**`.env.prod` edits:**
+```
+TEST_WRITER_TASK_RUNNER_ENABLED=1
+# Shared with the claude-runner; still fails closed when empty. Opt repos in:
+CLAUDE_BRANCH_WORKER_ALLOWED_REPOS=owner/repo
+# Plus the same Claude worker auth/billing you use for the claude-runner
+# (CLAUDE_WORKER_AUTH_MODE + CLAUDE_CODE_OAUTH_TOKEN, or api-mode ANTHROPIC_API_KEY
+# + CLAUDE_WORKER_DAILY_BUDGET). The runner verifies the route at startup.
+```
+
+**Bring it up under its profile** (shares the `avg-data` volume, so it reads the
+same task queue the operator/autopilot approves into):
+```
+docker compose --env-file ops/.env.prod --profile test-writer-runner \
+  -f ops/compose.yml -f ops/compose.prod.yml up -d test-writer-task-runner
+```
+
+It is controlled independently of the `claude-runner`:
+`TEST_WRITER_TASK_RUNNER_ENABLED` maps to that container's own
+`CLAUDE_TASK_RUNNER_ENABLED`, so enabling the claude-runner does not enable this
+one (and the agent pin means neither claims the other's tasks).
+
+**Verify it's online** (no secrets printed):
+```
+docker compose --env-file ops/.env.prod -f ops/compose.yml -f ops/compose.prod.yml \
+  logs --since 5m test-writer-task-runner | grep -iE "test-writer|online|idle|claimed|REFUSING|disabled" | tail -10
+```
+A healthy runner logs `test-writer runner is online; no approved test-writer
+task is waiting` (idle). On a billing-route mismatch it logs `REFUSING TO CLAIM`
+and writes a `misconfigured` heartbeat rather than running on the wrong route.
+
+---
+
 ## Assumptions / things to confirm in your environment
 
 - The image name assumes the GitHub org is `depre-dev` (i.e.
