@@ -76,8 +76,16 @@ import {
   expireAutonomyIfDue,
   isAutopilotEngaged,
   type AutonomyMode,
+  type AutonomyState,
 } from "./autonomy-mode.js";
 import { runAutoApproval } from "./autopilot-approve.js";
+import {
+  deliverAutopilotAwayDigest,
+  initialAutopilotAwayDigestTrackerState,
+  observeAutopilotAwayDigestSession,
+  type AutopilotAuditEvent,
+  type EndedAutopilotAwaySession,
+} from "./away-digest.js";
 import { loadDispatchPolicyConfig } from "@avg/averray-mcp/dispatch-policy";
 import {
   isDebugSpawnEnabled,
@@ -207,42 +215,125 @@ if (!enabled) {
   }
   startOperatorRoutines();
   // O4-PR3a — always-on safety revert: lazy-resolve already treats an expired
-  // autopilot as supervised, but this persists the revert + alerts ONCE when the
-  // window lapses (a forgotten autopilot ends on its own). Independent of the
-  // routine channel; the alert rides the D4 bridge (SLACK_WEBHOOK_URL).
-  setInterval(() => void checkAutonomyExpiry(), 60_000);
+  // autopilot as supervised, but this persists the revert + emits the D1
+  // "while you were away" digest exactly once when the window lapses.
+  setInterval(() => void checkAutonomyMaintenance(), 60_000);
+  void checkAutonomyMaintenance();
 }
 
-let autonomyExpiryRunning = false;
-async function checkAutonomyExpiry() {
-  if (autonomyExpiryRunning) return;
-  autonomyExpiryRunning = true;
+let autonomyMaintenanceRunning = false;
+let awayDigestTrackerState = initialAutopilotAwayDigestTrackerState();
+let pendingAwayDigestEnd: { endedAutonomy: AutonomyState; endedBy?: string } | undefined;
+
+async function checkAutonomyMaintenance(endedAutonomy?: AutonomyState, endedBy?: string) {
+  if (autonomyMaintenanceRunning) {
+    if (endedAutonomy) pendingAwayDigestEnd = { endedAutonomy, ...(endedBy ? { endedBy } : {}) };
+    return;
+  }
+  autonomyMaintenanceRunning = true;
   try {
+    const pending = pendingAwayDigestEnd;
+    pendingAwayDigestEnd = undefined;
     const result = expireAutonomyIfDue();
-    if (!result.expired) return;
-    logger.info({ until: result.previous?.until }, "o4_autonomy_expired_to_supervised");
-    const boardUrl = optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor") ?? "https://monitor.averray.com/monitor";
-    await slackAlertChannel().dispatch({
-      count: 0,
-      items: [],
-      boardUrl,
-      text: `⏱️ Hermes autopilot window ended — back to SUPERVISED. Every dispatch needs your approval again.\nBoard: ${boardUrl}`,
-    }).catch((error) => logger.warn({ err: error }, "o4_autonomy_expiry_alert_failed"));
-    await recordOperatorCommandEvent({
-      source: "slack_routine",
-      commandText: "autonomy autopilot window expired",
-      result: {
-        kind: "autonomy_mode_change",
-        from: "autopilot",
-        to: "supervised",
-        setBy: "autopilot-expiry",
-        safety: { readOnly: false, mutatesGithub: false, mutatesAverray: false, editsWikipedia: false },
-      },
-    }, query).catch((error) => logger.warn({ err: error }, "o4_autonomy_expiry_record_failed"));
+    if (result.expired) {
+      logger.info({ until: result.previous?.until }, "o4_autonomy_expired_to_supervised");
+      await recordOperatorCommandEvent({
+        source: "slack_routine",
+        commandText: "autonomy autopilot window expired",
+        result: {
+          kind: "autonomy_mode_change",
+          from: "autopilot",
+          to: "supervised",
+          setBy: "autopilot-expiry",
+          safety: { readOnly: false, mutatesGithub: false, mutatesAverray: false, editsWikipedia: false },
+        },
+      }, query).catch((error) => logger.warn({ err: error }, "o4_autonomy_expiry_record_failed"));
+    }
+    const effectiveEndedAutonomy = endedAutonomy ?? result.previous ?? pending?.endedAutonomy;
+    const effectiveEndedBy = endedBy ?? (result.expired ? "autopilot-expiry" : undefined) ?? pending?.endedBy;
+    await checkAutopilotAwayDigest(effectiveEndedAutonomy, effectiveEndedBy);
   } catch (error) {
-    logger.warn({ err: error }, "o4_autonomy_expiry_failed");
+    logger.warn({ err: error }, "o4_autonomy_maintenance_failed");
   } finally {
-    autonomyExpiryRunning = false;
+    autonomyMaintenanceRunning = false;
+    if (pendingAwayDigestEnd) void checkAutonomyMaintenance();
+  }
+}
+
+async function checkAutopilotAwayDigest(endedAutonomy?: AutonomyState, endedBy?: string) {
+  const observed = observeAutopilotAwayDigestSession(awayDigestTrackerState, {
+    now: new Date(),
+    autonomy: readAutonomyState(),
+    suspended: isAutopilotSuspended(),
+    halt: isHaltFilePresent(),
+    ...(endedAutonomy ? { endedAutonomy } : {}),
+    ...(endedBy ? { endedBy } : {}),
+  });
+  awayDigestTrackerState = observed.state;
+  if (!observed.ended) return;
+  await emitAutopilotAwayDigest(observed.ended);
+}
+
+async function emitAutopilotAwayDigest(session: EndedAutopilotAwaySession) {
+  const boardUrl = optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor") ?? "https://monitor.averray.com/monitor";
+  const digest = await deliverAutopilotAwayDigest({
+    session,
+    now: () => new Date(),
+    boardUrl,
+    loadTasks: () => listCodexTasks(),
+    loadAuditEvents: loadAutopilotAwayAuditEvents,
+    loadBoardCards: async () => {
+      const raw = await loadMonitorSnapshot(new URL("http://localhost/monitor/events?limit=50&activeWindowMinutes=240"), { suppressNarration: true });
+      return buildV2BoardSnapshot(raw, { repo: monitorV2Repo() }).cards;
+    },
+    recordBoardDigest: async (_digest, text) => {
+      recordCollaborationMessage({
+        author: "hermes",
+        kind: "status",
+        addressedTo: "operator",
+        text,
+      });
+    },
+    alert: slackAlertChannel(),
+    auditDigest: (entry) => recordOperatorCommandEvent({
+      source: "slack_routine",
+      commandText: `autopilot away digest: ${session.sessionId}`,
+      result: entry,
+    }, query),
+  });
+  logger.info({ sessionId: session.sessionId, counts: digest.counts }, "d1_autopilot_away_digest_emitted");
+}
+
+async function loadAutopilotAwayAuditEvents(startedAt: string, endedAt: string): Promise<AutopilotAuditEvent[]> {
+  const rows = await query<{ command_text?: string; result?: unknown; updated_at?: string | Date }>(
+    `select command_text, result, updated_at
+     from operator_command_events
+     where updated_at >= $1::timestamptz
+       and updated_at <= $2::timestamptz
+       and (
+         result->>'kind' in ('autopilot_auto_approval', 'anomaly_autopause', 'autonomy_mode_change')
+         or normalized_text like 'autopilot %'
+       )
+     order by updated_at asc`,
+    [startedAt, endedAt]
+  );
+  return rows
+    .map((row) => ({
+      at: row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at ?? ""),
+      ...(row.command_text ? { commandText: row.command_text } : {}),
+      ...(parseJsonRecord(row.result) ? { result: parseJsonRecord(row.result) } : {}),
+    }))
+    .filter((event) => event.at);
+}
+
+function parseJsonRecord(value: unknown): Record<string, unknown> | undefined {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -1250,10 +1341,10 @@ async function handleMonitorAutonomyModeRequest(request: http.IncomingMessage, r
 
     if (changed) {
       const boardUrl = optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor") ?? "https://monitor.averray.com/monitor";
-      const text = after.mode === "autopilot"
-        ? `🟢 Hermes is in AUTOPILOT until ${after.until ?? "—"} — low/medium-risk dispatch within budget auto-approves; high-risk still escalates to you. Merge/deploy stays human.\nBoard: ${boardUrl}`
-        : `⏸️ Hermes is back to SUPERVISED — every dispatch needs your approval again.\nBoard: ${boardUrl}`;
-      await slackAlertChannel().dispatch({ count: 0, items: [], boardUrl, text }).catch((error) => logger.warn({ err: error }, "o4_autonomy_alert_failed"));
+      if (after.mode === "autopilot") {
+        const text = `Hermes is in AUTOPILOT until ${after.until ?? "-"} - low/medium-risk dispatch within budget auto-approves; high-risk still escalates to you. Merge/deploy stays human.\nBoard: ${boardUrl}`;
+        await slackAlertChannel().dispatch({ count: 0, items: [], boardUrl, text }).catch((error) => logger.warn({ err: error }, "o4_autonomy_alert_failed"));
+      }
       await recordOperatorCommandEvent({
         source: "monitor",
         commandText: `autonomy mode → ${after.mode}`,
@@ -1266,6 +1357,11 @@ async function handleMonitorAutonomyModeRequest(request: http.IncomingMessage, r
           safety: { readOnly: false, mutatesGithub: false, mutatesAverray: false, editsWikipedia: false },
         },
       }, query).catch((error) => logger.warn({ err: error }, "o4_autonomy_record_failed"));
+      if (before.mode === "autopilot" && after.mode === "supervised") {
+        void checkAutonomyMaintenance(before, setBy || "operator-return");
+      } else {
+        void checkAutonomyMaintenance();
+      }
     }
 
     writeJson(response, 200, { ok: true, changed, autonomy: after });
