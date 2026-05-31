@@ -11,10 +11,10 @@
 |----|--------|-----------|
 | **O** | Orchestration core | `HERMES_ORCHESTRATION_DESIGN.md` (+ `HERMES_MULTI_AGENT_ORCHESTRATION_PLAN.md`, `HERMES_INTEGRATION_MAP.md`) |
 | **A** | Agent performance | `HERMES_PHASE2_DESIGN.md` *(file name historical)* |
-| **D** | Operator trust | `HERMES_PHASE2_DESIGN.md` *(file name historical)* |
+| **D** | Operator trust | `HERMES_PHASE2_DESIGN.md` *(historical)*, `HERMES_AGENT_REQUESTS_AND_ALERTS.md` (D4) |
 | **B** | Hermes as planner | `HERMES_PHASE3_DESIGN.md` *(file name historical)* |
 | **C** | Multi-agent collaboration | `HERMES_PHASE4_DESIGN.md` *(file name historical)* |
-| **T** | E2E tester | `HERMES_E2E_TESTER_DESIGN.md`, `HERMES_TESTER_AUTH_DESIGN.md` |
+| **T** | E2E tester | `HERMES_E2E_TESTER_DESIGN.md`, `HERMES_TESTER_AUTH_DESIGN.md`, `HERMES_AGENT_REQUESTS_AND_ALERTS.md` (T6/T7) |
 
 ## Work items
 
@@ -32,6 +32,7 @@
 | D1 | "While you were away" digest (board + Slack/push) | design done |
 | D2 | Explainability / decision records | design done |
 | D3 | Anomaly auto-pause (tiered soft→hard) | design done |
+| D4 | Off-device alert bridge (Slack now → push later; action-needed 0→≥1; quiet-hours/mute) — **O4 prerequisite** | design done (#274) |
 | B1 | Backlog generation (roadmap auto-flow; net-new escalates) | design done |
 | B2 | Self-healing (auto-fix non-high-risk; rollback human) | design done |
 | C1 | Cross-agent review (default) | design done |
@@ -43,18 +44,20 @@
 | T3 | Signer sidecar + SIWE mission (multi-role) | design done |
 | T4 | Tier-2 agent (Agent SDK + Playwright-MCP) | design done |
 | T5 | Env→mutation binding + enhancements (trace/video, baselines) | design done |
+| T6 | Agent-requested tester runs — board-gated (request → approve → read-only run) | design done (#274) |
+| T7 | Tester capabilities manifest (+ platform-repo request helper) | design done (#274) |
 
-*(Status as of 2026-05-29: **O0–O3 shipped — the loop is operator-driven from the board** (create → approve → runner → worker → PR → Hermes review); the monitor redesign + board (PRs #225–#247) is the foundation; A/B/C/D and T1–T5 are design-only (T1 prompt out). **Next: the safety net (T1 + D1/D3) before O4 autopilot.** Tell me as things land and I'll flip statuses.)*
+*(Status as of 2026-05-29: **O0–O3 shipped — the loop is operator-driven from the board** (create → approve → runner → worker → PR → Hermes review); the monitor redesign + board (PRs #225–#247) is the foundation; A/B/C/D (incl. D4) and T1–T7 are design-only (T1 prompt out). **Next: the safety net — D4 alert bridge (the O4 prerequisite) + T1, then D1/D3 — before O4 autopilot.** Tell me as things land and I'll flip statuses.)*
 
 ## Recommended build order (the smooth, low-effort ramp)
 
 1. **The self-feeding loop:** **O1 → O2 → O3.** Once this exists you stop hand-writing prompts; work is enqueued from the board and you just approve. Highest-leverage effort.
    - **T1** runs in parallel with O1 (independent, both runner/board TS).
-2. **The safety net:** **T2 + T3** (tester reaches authed product) and **D1 + D3** (digest + anomaly auto-pause). This is what makes autonomy safe to trust.
+2. **The safety net:** **D4** (off-device alert bridge — build first; delivers "step away" now + the O4 prerequisite), **T1** (+ **T6/T7** agent-requested runs + capabilities), **T2 + T3** (tester reaches authed product), **D1 + D3** (digest + anomaly auto-pause). This is what makes autonomy safe to trust.
 3. **Autonomy:** **O4** (enqueue + guardrail + autonomy mode) → set "Hermes in charge," read the digest. Lowest-effort end state.
 4. **Depth, anytime after:** **A1 → A2** (performance/learned routing), **B** (planner), **C** (collaboration), **T4/T5** (agentic missions + enhancements), **O5** (hardening), **A3**.
 
-**Dependencies to respect:** B2 needs D3 (loop fail-safe); A2 needs A1 (baselines); O4 is the authority change (ships only with its guardrail); T-missions that mutate stay on testnet (env→mutation binding before any mainnet).
+**Dependencies to respect:** B2 needs D3 (loop fail-safe); A2 needs A1 (baselines); O4 is the authority change (ships only with its guardrail) **and needs D4** (escalations must reach the operator off-device); T6 needs the proposed-mission approval gate; T-missions that mutate stay on testnet (env→mutation binding before any mainnet).
 
 ## Old → new mapping (so prior references resolve)
 
