@@ -45,13 +45,11 @@ The workers and tester pick reasoning effort from the task's `riskTier` (O4-PR2)
 
 ---
 
-## 4. Hermes's own model — open decision
+## 4. Hermes's own model — resolved: keep `deepseek-v4-pro` everywhere
 
-Hermes runs `deepseek-v4-pro:cloud` today. That was fine when Hermes only *reviewed + narrated* — but with O4 it now makes **routing and (under autopilot) auto-approval judgments**, where judgment quality directly affects what gets built and approved.
+**Decision (operator, 2026-05-31): Hermes stays on `deepseek-v4-pro:cloud` for all paths** — narration, routing, and (under autopilot) auto-approval. Rationale: cheapest + simplest, and Hermes runs frequently.
 
-**Recommendation (operator to confirm): a tiered Hermes model.** Keep a cheap, fast model (deepseek) for high-frequency narration/status, but use a **stronger model (Claude Opus / GPT) for the autopilot-critical paths** — routing decisions and the auto-approval reasoning — where a bad call is expensive. At minimum, *evaluate* a stronger model on those paths before relying on autopilot heavily.
-
-This is the one genuinely open call here — flagged for the operator.
+**The supervised burn-in is the evaluation.** Before flipping autopilot on you'll run supervised for a while (per O4-PR3) — watch the *quality* of Hermes's routing + proposed-dispatch decisions there. If they hold up, deepseek is good enough. If you see bad calls, revisit then (e.g. a tiered model: cheap deepseek for narration, a stronger model for the autopilot-critical routing + auto-approval paths). So: keep deepseek now; let the burn-in tell you whether that needs to change.
 
 ---
 
@@ -62,7 +60,7 @@ This is the one genuinely open call here — flagged for the operator.
 | Tier-2 tester LLM | **Claude Sonnet (routine) / Opus (deep)**; multi-backend (Claude + Codex/GPT) as a T5 enhancement |
 | Effort selection | **Driven by `riskTier`** (high → high/Opus; low/med → medium/Sonnet) + an **operator override** on the board |
 | Today's worker defaults | Codex = medium, Claude = Sonnet; high-risk → high/Opus |
-| **Hermes's model** | **OPEN** — recommend a tiered model (cheap narration / stronger for routing + auto-approval); operator decision |
+| **Hermes's model** | **Keep `deepseek-v4-pro` everywhere**; the supervised burn-in is the evaluation — revisit (e.g. tiered) only if bad routing/approval calls show up |
 
 ## Roadmap fit
 
