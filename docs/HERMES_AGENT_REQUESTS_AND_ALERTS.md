@@ -1,6 +1,6 @@
 # Agent-Requested Tester Runs + the Operator Alert Bridge
 
-- **Status:** Planning / handoff only. **Nothing here is implemented.**
+- **Status:** Partly implemented. The reference-agent now exposes the tester capabilities manifest endpoint in review; the platform helper, board approval gate for agent-requested missions, and off-device alert bridge remain follow-up work.
 - **Date:** 2026-05-29
 - **Companions:** [`HERMES_E2E_TESTER_DESIGN.md`](./HERMES_E2E_TESTER_DESIGN.md), [`HERMES_TESTER_AUTH_DESIGN.md`](./HERMES_TESTER_AUTH_DESIGN.md), [`HERMES_ROADMAP.md`](./HERMES_ROADMAP.md).
 - **Problem:** the code-building agents (the ones opening `app:` PRs in `averray-agent/agent`) can't currently start a tester run, don't know the tester's capabilities, and there's no way to reach the operator for approval when they're away from the Mac.
@@ -26,7 +26,7 @@
 ## 2. Tester capabilities manifest — always known
 
 So agents *at all times* know what's possible (no guessing):
-- **A machine-readable manifest** the agent fetches — e.g. `GET /monitor/tester/capabilities` (or folded into the existing discovery-manifest / `agent-tools.json` pattern). Contents: mission types (`surface_sweep`, `targeted_read_only`, `gold_path` [operator-only]), per-type **scope** (read-only vs mutating), supported **envs**, **how to request** (the helper/endpoint), the **approval gate**, and the **result shape** (verdict + findings + evidence links).
+- **A machine-readable manifest** the agent fetches at `GET /monitor/tester/capabilities` on the monitor. Contents: mission types (`surface_sweep`, `targeted_read_only`, `gold_path` [operator-only]), per-type **scope** (read-only vs mutating), supported **envs**, **how to request** (the helper/endpoint), the **approval gate**, and the **result shape** (verdict + findings + evidence links). The manifest is authenticated like the monitor and is intentionally honest about what is available now versus planned.
 - **A human/agent-readable pointer in the platform `AGENTS.md`** ("How to get hard evidence for your change") so the building agents *discover* it without being told.
 
 ## 3. The operator alert bridge — off-device
@@ -55,7 +55,7 @@ Today the board only has **browser** notifications (#232: tab badge, desktop not
 
 1. **Alert bridge (Slack)** — highest leverage: unblocks "step away," and it's the O4 prerequisite. *(reference-agent)*
 2. **Agent-requested run endpoint + the proposed-mission approval gate** on the board. *(reference-agent)*
-3. **Capabilities manifest** + the **platform-repo helper** + the **platform `AGENTS.md`** pointer. *(manifest = reference-agent; helper + AGENTS.md = platform repo)*
+3. **Capabilities manifest** + the **platform-repo helper** + the **platform `AGENTS.md`** pointer. *(manifest endpoint = reference-agent; helper + AGENTS.md = platform repo follow-up)*
 
 ## Roadmap fit
 
@@ -71,4 +71,4 @@ Today the board only has **browser** notifications (#232: tab badge, desktop not
 
 ---
 
-*End. Planning/handoff only — not implemented.*
+*End. The manifest endpoint is now implemented in the reference-agent; remaining items are still planning/handoff until their PRs land.*

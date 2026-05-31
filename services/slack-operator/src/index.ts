@@ -106,6 +106,7 @@ import {
   getTestbedMissionForAgent,
   listTestbedMissionsForAgent,
 } from "./testbed-agent-entrypoint.js";
+import { buildTesterCapabilitiesManifest } from "./tester-capabilities.js";
 import {
   formatStalePrAlertForSlack,
   shouldPostStalePrAlert,
@@ -228,6 +229,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
           "/monitor/recheck",
           "/monitor/codex-tasks",
           "/monitor/collaboration",
+          "/monitor/tester/capabilities",
           "/monitor/testbed-missions",
           "/monitor/manifest.webmanifest",
         ] : [],
@@ -437,6 +439,20 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       return;
     }
     await handleMonitorAlertMuteRequest(request, response);
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/monitor/tester/capabilities") {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    writeJson(response, 200, buildTesterCapabilitiesManifest({
+      runner: readTestbedMissionRunnerHeartbeat() ?? null,
+    }));
     return;
   }
   const testbedMissionId = monitorTestbedMissionId(url.pathname);
