@@ -726,6 +726,8 @@ export interface HermesReplyDraft {
   addressedTo: CollaborationTarget;
   relatedPr?: CollaborationRelatedPr;
   relatedCorrelationId?: string;
+  /** Skip LLM rewrite because this draft guards a truth boundary. */
+  force?: boolean;
 }
 
 export function synthesizeHermesReplyFor(message: CollaborationMessage): HermesReplyDraft | null {
@@ -738,6 +740,16 @@ export function synthesizeHermesReplyFor(message: CollaborationMessage): HermesR
   const prRef = message.relatedPr
     ? `${message.relatedPr.repo}#${message.relatedPr.number}`
     : null;
+  const dispatchGuard = codexDispatchGuardReply(message.text, prRef);
+  if (dispatchGuard) {
+    return {
+      text: dispatchGuard,
+      addressedTo: "operator",
+      ...(message.relatedPr ? { relatedPr: message.relatedPr } : {}),
+      ...(message.relatedCorrelationId ? { relatedCorrelationId: message.relatedCorrelationId } : {}),
+      force: true,
+    };
+  }
 
   let text: string;
   if (message.kind === "request_help") {
@@ -764,4 +776,23 @@ export function synthesizeHermesReplyFor(message: CollaborationMessage): HermesR
     ...(message.relatedPr ? { relatedPr: message.relatedPr } : {}),
     ...(message.relatedCorrelationId ? { relatedCorrelationId: message.relatedCorrelationId } : {}),
   };
+}
+
+function codexDispatchGuardReply(text: string, prRef: string | null): string | null {
+  const lower = text.toLowerCase();
+  const namesCodex = /\bcodex\b/.test(lower);
+  const dispatchVerb = /\b(send|hand|assign|route|delegate|move|pass|give)\b/.test(lower)
+    || /\btake\s+(?:this|it|over|on)\b/.test(lower)
+    || /\bpick\s+(?:this|it|up)\b/.test(lower);
+  if (!namesCodex || !dispatchVerb) return null;
+
+  return prRef
+    ? [
+      `I can help route ${prRef}, but plain chat does not dispatch Codex.`,
+      `Use \`/task codex ${prRef} <concrete prompt>\` or the card approval control; until then no runner has been queued.`,
+    ].join(" ")
+    : [
+      'I cannot dispatch "it" from board-scoped chat.',
+      "Select a card or use `/task codex owner/repo#PR <concrete prompt>`; until then no runner has been queued.",
+    ].join(" ");
 }

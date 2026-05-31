@@ -12,6 +12,7 @@ import { sortByUrgency } from "./urgency.js";
 
 export interface KPICounts {
   action: number;
+  codex: number;
   review: number;
   checking: number;
   queue: number;
@@ -61,6 +62,7 @@ export function kpiCounts(cards: BoardCard[]): KPICounts {
     counts["deploying"];
   return {
     action: counts["needs-attention"],
+    codex: counts["codex-needed"],
     review: counts["operator-review"],
     checking: counts["hermes-checking"],
     queue: counts["release-queue"],
@@ -135,16 +137,29 @@ export function boardNowBanner(cards: BoardCard[], opts: DeriveBoardOpts = {}): 
   return {
     tone: "calm",
     eyebrow: now ? `Board now · ${now} · you're done for now` : `Board now · you're done for now`,
-    headline:
-      counts.total === 0
-        ? `Nothing waits on you. Everything in flight is automation; the day's release history is below.`
-        : `Nothing in your queue right now. ${counts.checking + counts.queue + counts.deploying} card(s) are still automation in flight; Hermes is watching.`,
+    headline: calmHeadline(counts),
     sub:
       counts.done > 0
         ? `${counts.done} card(s) shipped today; you can step away.`
         : `No releases yet today; you can step away.`,
     primaryActionId: undefined,
   };
+}
+
+function calmHeadline(counts: KPICounts): string {
+  if (counts.total === 0) {
+    return "Nothing waits on you. Everything in flight is automation; the day's release history is below.";
+  }
+
+  const automationCount = counts.checking + counts.queue + counts.deploying;
+  const parts = [
+    counts.codex > 0 ? `${counts.codex} Codex-owned card(s)` : "",
+    automationCount > 0 ? `${automationCount} automation/release card(s)` : "",
+  ].filter(Boolean);
+  if (parts.length === 0) {
+    return `${counts.total} card(s) are still in flight; Hermes is watching.`;
+  }
+  return `No operator decision needed. ${parts.join(" and ")} are still in flight; Hermes is watching.`;
 }
 
 /** Aggregate selector — everything the board page needs in one call. */

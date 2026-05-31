@@ -8,6 +8,7 @@ afterEach(cleanup);
 
 const calmCounts: KPICounts = {
   action: 0,
+  codex: 0,
   review: 0,
   checking: 0,
   queue: 0,
@@ -19,6 +20,7 @@ const calmCounts: KPICounts = {
 
 const busyCounts: KPICounts = {
   action: 2,
+  codex: 2,
   review: 1,
   checking: 3,
   queue: 1,
@@ -40,6 +42,7 @@ describe("TopStrip", () => {
     const { getByText } = render(<TopStrip counts={busyCounts} />);
     // Each KPI label is present; the count lives in the sibling `.n` span.
     expect(getByText("Action needed")).toBeTruthy();
+    expect(getByText("Codex needed")).toBeTruthy();
     expect(getByText("Operator review")).toBeTruthy();
     expect(getByText("Hermes checking")).toBeTruthy();
     expect(getByText("Release queue")).toBeTruthy();

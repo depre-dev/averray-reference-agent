@@ -1045,7 +1045,9 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
       ...(board ? { board } : {}),
     };
     const memoryRequest = classifyHermesMemoryRequest(operatorMessage);
-    if (memoryRequest !== "none") {
+    if (draft.force) {
+      text = draft.text;
+    } else if (memoryRequest !== "none") {
       text = hermesMemoryGovernanceReply(operatorMessage, memoryRequest, memoryNotes);
     } else if (apiKey) {
       try {

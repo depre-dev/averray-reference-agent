@@ -36,6 +36,7 @@ test("kpiCounts: empty list returns zeros across the board", () => {
   const result = kpiCounts([]);
   assert.deepEqual(result, {
     action: 0,
+    codex: 0,
     review: 0,
     checking: 0,
     queue: 0,
@@ -51,6 +52,7 @@ test("kpiCounts: realistic mix counts each KPI correctly", () => {
     card({ id: "act-1", isAction: true }),
     card({ id: "rev-1", lane: "operator-review" }),
     card({ id: "rev-2", lane: "operator-review" }),
+    card({ id: "codex-1", type: "task", lane: "codex-needed" }),
     card({ id: "chk-1", lane: "hermes-checking" }),
     card({ id: "queue-1", lane: "release-queue" }),
     card({ id: "deploy-1", type: "deploy", deployId: "#1", verification: { current: 0, total: 1, label: "" } }),
@@ -59,13 +61,14 @@ test("kpiCounts: realistic mix counts each KPI correctly", () => {
   ];
   const result = kpiCounts(cards);
   assert.equal(result.action, 1);
+  assert.equal(result.codex, 1);
   assert.equal(result.review, 2);
   assert.equal(result.checking, 1);
   assert.equal(result.queue, 1);
   assert.equal(result.deploying, 1);
   assert.equal(result.done, 2);
-  // total = all live lanes (1+2+1+1+1) = 6
-  assert.equal(result.total, 6);
+  // total = all live lanes (1+1+2+1+1+1) = 7
+  assert.equal(result.total, 7);
   assert.equal(result.blocked, 0);
 });
 
@@ -187,9 +190,22 @@ test("boardNowBanner: calm board with in-flight automation reads correctly", () 
   ];
   const banner = boardNowBanner(cards);
   assert.equal(banner.tone, "calm");
-  assert.match(banner.headline, /automation in flight/);
+  assert.match(banner.headline, /automation\/release card/);
   // 1 checking + 1 deploying = 2
-  assert.match(banner.headline, /2 card/);
+  assert.match(banner.headline, /2 automation\/release card/);
+});
+
+test("boardNowBanner: calm board names Codex-owned work instead of claiming the board is empty", () => {
+  const cards = [
+    card({ id: "codex-1", type: "task", lane: "codex-needed", title: "Fix a failing check" }),
+    card({ id: "deploy-1", type: "deploy", deployId: "#1", verification: { current: 1, total: 3, label: "" } }),
+  ];
+  const banner = boardNowBanner(cards);
+  assert.equal(banner.tone, "calm");
+  assert.match(banner.headline, /No operator decision needed/);
+  assert.match(banner.headline, /1 Codex-owned card/);
+  assert.match(banner.headline, /1 automation\/release card/);
+  assert.notMatch(banner.headline, /Nothing in your queue/);
 });
 
 test("boardNowBanner: degraded mode (stream offline)", () => {

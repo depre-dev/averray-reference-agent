@@ -691,6 +691,32 @@ describe("synthesizeHermesReplyFor", () => {
     expect(reply?.relatedPr).toEqual({ repo: "averray-agent/agent", number: 137 });
   });
 
+  it("does not imply plain chat dispatched Codex work", () => {
+    const m = opMessage({
+      addressedTo: "hermes",
+      text: "send it to codex",
+    });
+    const reply = synthesizeHermesReplyFor(m);
+    expect(reply?.text).toContain("board-scoped chat");
+    expect(reply?.text).toContain("/task codex owner/repo#PR");
+    expect(reply?.text).toContain("no runner has been queued");
+    expect(reply?.force).toBe(true);
+  });
+
+  it("gives the exact slash-command shape when a Codex dispatch ask is scoped to a PR", () => {
+    const m = opMessage({
+      addressedTo: "hermes",
+      text: "please hand this back to Codex",
+      relatedPr: { repo: "depre-dev/averray-reference-agent", number: 301 },
+    });
+    const reply = synthesizeHermesReplyFor(m);
+    expect(reply?.text).toContain("depre-dev/averray-reference-agent#301");
+    expect(reply?.text).toContain("/task codex depre-dev/averray-reference-agent#301");
+    expect(reply?.text).toContain("no runner has been queued");
+    expect(reply?.relatedPr).toEqual({ repo: "depre-dev/averray-reference-agent", number: 301 });
+    expect(reply?.force).toBe(true);
+  });
+
   it("uses a help-specific reply for request_help intent", () => {
     const m = opMessage({ kind: "request_help" });
     const reply = synthesizeHermesReplyFor(m);
