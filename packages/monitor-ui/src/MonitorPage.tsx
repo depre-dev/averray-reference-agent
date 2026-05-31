@@ -22,6 +22,7 @@
 
 import { useCallback, useMemo } from "react";
 import { useMonitorBoard, type UseMonitorBoardOptions } from "./hooks/useMonitorBoard.js";
+import { useBacklogSuggestions, type UseBacklogSuggestionsOptions } from "./hooks/useBacklogSuggestions.js";
 import { useCardParam } from "./hooks/useCardParam.js";
 import type { UseCollaborationOptions } from "./hooks/useCollaboration.js";
 import { useActionAlerts, type UseActionAlertsOptions } from "./hooks/useActionAlerts.js";
@@ -40,6 +41,8 @@ export type AlertMuteBody = { untilMs: number } | { muted: false };
 export interface MonitorPageProps {
   /** Override the live wiring (fetcher, EventSource, storage) for tests. */
   options?: UseMonitorBoardOptions;
+  /** Override the read-only backlog-suggestions endpoint wiring for tests. */
+  backlogSuggestions?: UseBacklogSuggestionsOptions;
   /** Override the /mission spawn (defaults to POST /monitor/testbed-missions). */
   onSpawnMission?: (url: string) => void;
   /** Override the /claude propose (defaults to POST /monitor/codex-tasks). */
@@ -60,6 +63,7 @@ export interface MonitorPageProps {
 
 export function MonitorPage({
   options,
+  backlogSuggestions,
   onSpawnMission = defaultSpawnMission,
   onSpawnClaudeTask = defaultSpawnClaudeTask,
   onCreateTask = defaultCreateTask,
@@ -70,6 +74,7 @@ export function MonitorPage({
   autonomy,
 }: MonitorPageProps = {}) {
   const { board, status, refresh } = useMonitorBoard(options);
+  const { data: backlogSuggestionsData } = useBacklogSuggestions(backlogSuggestions);
   const { cardId, setCard, clearCard } = useCardParam();
   const { mode: autonomyMode, setAutopilot, setSupervised } = useAutonomyMode(autonomy);
 
@@ -95,6 +100,7 @@ export function MonitorPage({
     <ErrorBoundary>
       <BoardView
         board={board}
+        backlogSuggestions={backlogSuggestionsData}
         status={status}
         onRefresh={refresh}
         focusedCardId={cardId}

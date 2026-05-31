@@ -117,9 +117,16 @@ describe("MonitorPage — container", () => {
     // the global fetch — so spying on it isolates the spawn call.
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 202 }));
     try {
-      const { container } = render(<MonitorPage options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }} collaboration={{ enabled: false }} alerts={{ enabled: false }} autonomy={{ fetchMode: async () => null }} />, {
-        wrapper,
-      });
+      const { container } = render(
+        <MonitorPage
+          options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }}
+          backlogSuggestions={{ enabled: false }}
+          collaboration={{ enabled: false }}
+          alerts={{ enabled: false }}
+          autonomy={{ fetchMode: async () => null }}
+        />,
+        { wrapper },
+      );
       await waitFor(() =>
         expect(within(container).getByRole("complementary", { name: "Hermes co-pilot" })).toBeTruthy(),
       );
