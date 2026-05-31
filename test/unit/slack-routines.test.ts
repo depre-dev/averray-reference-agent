@@ -22,6 +22,8 @@ describe("slack operator routines", () => {
       SLACK_OPERATOR_SAFE_WORK_SCAN_INTERVAL_MINUTES: "15",
       SLACK_OPERATOR_STALE_PR_ALERT_INTERVAL_MINUTES: "20",
       SLACK_OPERATOR_STALE_PR_ALERT_AFTER_MINUTES: "180",
+      B2_SELF_HEALING_ENABLED: "1",
+      B2_SELF_HEALING_MAX_PROPOSALS_PER_TICK: "3",
     }, new Set(["C1"]));
 
     expect(config.channelId).toBe("C1");
@@ -38,6 +40,8 @@ describe("slack operator routines", () => {
     expect(config.stalePrAlerts.enabled).toBe(true);
     expect(config.stalePrAlerts.intervalMs).toBe(20 * 60_000);
     expect(config.stalePrAlerts.staleAfterMinutes).toBe(180);
+    expect(config.selfHealing.enabled).toBe(true);
+    expect(config.selfHealing.maxProposalsPerTick).toBe(3);
   });
 
   it("lets an explicit routine channel override the allowed-channel fallback", () => {

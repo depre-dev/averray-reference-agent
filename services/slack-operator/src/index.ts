@@ -2296,8 +2296,8 @@ function startOperatorRoutines() {
           });
           return { agent: r.agent, riskTier: r.riskTier, reason: r.reason };
         },
-        hasOpenFixTask: async (surface) => {
-          const corr = `self-heal:${surface}`;
+        hasOpenFixTask: async (targetSignature) => {
+          const corr = `self-heal:${targetSignature}`;
           const tasks = await listCodexTasks();
           return tasks.some(
             (t) => t.correlationId === corr && !["completed", "failed", "cancelled"].includes(t.status),
@@ -2318,9 +2318,10 @@ function startOperatorRoutines() {
           ).length;
         },
         maxOpenFixTasks: routineConfig.selfHealing.maxOpenFixTasks,
-        inCooldown: (surface, nowMs) => selfHealingCooldown.inCooldown(surface, nowMs),
-        markHandled: (surface, nowMs) => selfHealingCooldown.markHandled(surface, nowMs),
-        propose: async ({ signal, agent, riskTier, prompt, routingReason }) => {
+        maxProposalsPerTick: routineConfig.selfHealing.maxProposalsPerTick,
+        inCooldown: (targetSignature, nowMs) => selfHealingCooldown.inCooldown(targetSignature, nowMs),
+        markHandled: (targetSignature, nowMs) => selfHealingCooldown.markHandled(targetSignature, nowMs),
+        propose: async ({ signal, targetSignature, agent, riskTier, prompt, routingReason }) => {
           const { task, created } = await proposeCodexTask({
             repo: signal.repo!,
             agent,
@@ -2330,7 +2331,7 @@ function startOperatorRoutines() {
             title: `Self-healing fix: ${signal.surface}`,
             reason: `Hermes self-healing proposal for a ${signal.source} failure`,
             requester: "hermes-self-healing",
-            correlationId: `self-heal:${signal.surface}`,
+            correlationId: `self-heal:${targetSignature}`,
           });
           // Flow through the EXISTING approval/autopilot gate (B2 never approves).
           if (created && task.status === "proposed") {
@@ -2341,7 +2342,7 @@ function startOperatorRoutines() {
         alert: (payload) => alertChannel.dispatch(payload),
         audit: async (record) => {
           await recordHandoffEvent({
-            correlationId: `self-heal:${record.surface}`,
+            correlationId: `self-heal:${record.targetSignature ?? `${record.source}:${record.surface}`}`,
             requester: "hermes-self-healing",
             intent: "self_healing",
             phase: "self_healing",

@@ -7,6 +7,7 @@ import {
   buildHealingEscalationAlert,
   createCooldown,
   testbedSurfaceKey,
+  selfHealingTargetSignature,
   type FailureSignal,
   type HealingClassification,
   type SelfHealingDeps,
@@ -100,6 +101,7 @@ function harness(signals: FailureSignal[], over: Partial<SelfHealingDeps> = {}, 
     maxProposalsPerDay: 10,
     openFixCount: () => 0,
     maxOpenFixTasks: 3,
+    maxProposalsPerTick: 10,
     inCooldown: (s, n) => cooldown.inCooldown(s, n),
     markHandled: (s, n) => cooldown.markHandled(s, n),
     propose: async ({ signal: s, agent, riskTier }) => {
@@ -156,20 +158,45 @@ describe("runSelfHealingOnce — orchestration (injected deps, no fs/network)", 
   });
 
   it("dedup: an already-open fix task for the surface → skip (no second proposal)", async () => {
-    const h = harness([signal()], { hasOpenFixTask: () => true });
+    const h = harness([signal()], { hasOpenFixTask: (targetSignature) => targetSignature === "testbed_mission:testbed:sweep-1" });
     await runSelfHealingOnce(h.deps);
     expect(h.proposed).toHaveLength(0);
     expect(h.audits[0]).toMatchObject({ action: "skip", reason: "open_fix_exists" });
   });
 
-  it("cooldown: a surface handled within the window is skipped", async () => {
+  it("cooldown: a target handled within the window is skipped", async () => {
     const cd = createCooldown(30 * 60_000);
-    cd.markHandled("testbed:sweep-1", Date.parse("2026-05-31T11:50:00.000Z")); // 10m before now
+    cd.markHandled("testbed_mission:testbed:sweep-1", Date.parse("2026-05-31T11:50:00.000Z")); // 10m before now
     const h = harness([signal()], { inCooldown: (s, n) => cd.inCooldown(s, n), markHandled: (s, n) => cd.markHandled(s, n) });
     const r = await runSelfHealingOnce(h.deps);
     expect(h.proposed).toHaveLength(0);
     expect(h.alerts).toBe(0);
     expect(r.handled[0]).toMatchObject({ action: "skip", reason: "cooldown" });
+  });
+
+  it("same failure twice within cooldown → proposed once", async () => {
+    const cooldown = createCooldown(30 * 60_000);
+    const now = { value: Date.parse("2026-05-31T12:00:00.000Z") };
+    const first = harness([signal()], {
+      inCooldown: (target, n) => cooldown.inCooldown(target, n),
+      markHandled: (target, n) => cooldown.markHandled(target, n),
+      now: () => new Date(now.value),
+    });
+    const second = harness([signal({ summary: "same mission failed again: 503 on /overview" })], {
+      inCooldown: (target, n) => cooldown.inCooldown(target, n),
+      markHandled: (target, n) => cooldown.markHandled(target, n),
+      now: () => new Date(now.value + 5 * 60_000),
+    });
+
+    await runSelfHealingOnce(first.deps);
+    await runSelfHealingOnce(second.deps);
+
+    expect(first.proposed).toHaveLength(1);
+    expect(second.proposed).toHaveLength(0);
+  });
+
+  it("uses a stable target signature based on the failing mission identity, not refreshed failure text", () => {
+    expect(selfHealingTargetSignature(signal())).toBe(selfHealingTargetSignature(signal({ summary: "updated failure text" })));
   });
 
   it("D3 interlock: suspended → escalate only (no proposal)", async () => {
@@ -196,6 +223,17 @@ describe("runSelfHealingOnce — orchestration (injected deps, no fs/network)", 
     expect(h.audits[0]).toMatchObject({ action: "escalate", reason: "dispatch_budget_exhausted" });
   });
 
+  it("per-tick cap: extra same-tick proposals escalate instead of bursting", async () => {
+    const h = harness([
+      signal({ surface: "testbed:a" }),
+      signal({ surface: "testbed:b" }),
+    ], { maxProposalsPerTick: 1 });
+    await runSelfHealingOnce(h.deps);
+    expect(h.proposed.map((p) => p.surface)).toEqual(["testbed:a"]);
+    expect(h.alerts).toBe(1);
+    expect(h.audits.find((a) => a.surface === "testbed:b")).toMatchObject({ action: "escalate", reason: "tick_budget_exhausted" });
+  });
+
   it("mixed batch: one low-risk proposes, one high-risk escalates, deduped surface skips", async () => {
     const signals = [
       signal({ surface: "testbed:a" }),
@@ -204,7 +242,7 @@ describe("runSelfHealingOnce — orchestration (injected deps, no fs/network)", 
     ];
     const h = harness(signals, {
       classify: (s) => (s.area === "deploy" ? HIGH : LOW),
-      hasOpenFixTask: (surface) => surface === "testbed:c",
+      hasOpenFixTask: (targetSignature) => targetSignature === "testbed_mission:testbed:c",
     });
     await runSelfHealingOnce(h.deps);
     expect(h.proposed.map((p) => p.surface)).toEqual(["testbed:a"]);

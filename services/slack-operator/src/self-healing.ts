@@ -11,10 +11,11 @@
 // suspended (D3) or HALT is set, B2 does NOT propose — it only escalates. That
 // interlock is what makes self-healing safe to build (no fix-fail-fix spiral).
 //
-// Storm control: dedup (at most one OPEN fix task per failing surface — checked
-// against the queue, so it survives a restart) + a cooldown (a flapping check
-// can't spawn a swarm) + a daily proposal budget backstop. Read-only except the
-// proposal itself, which is just a `proposed` queue entry. Never logs secrets.
+// Storm control: dedup (at most one OPEN fix task per failing target signature
+// — checked against the queue, so it survives a restart) + a cooldown (a
+// flapping check can't spawn a swarm) + per-tick/open-fix/daily proposal
+// backstops. Read-only except the proposal itself, which is just a `proposed`
+// queue entry. Never logs secrets.
 //
 // Pure decision (decideHealingAction) + effect-injected orchestrator
 // (runSelfHealingOnce) so the matrix is unit-tested with no fs/network.
@@ -58,6 +59,7 @@ export type HealingReason =
   | "high_risk_surface"
   | "dispatch_budget_exhausted"
   | "open_fix_cap_reached"
+  | "tick_budget_exhausted"
   | "routed_fix";
 
 /**
@@ -126,6 +128,15 @@ export function buildFixPrompt(signal: FailureSignal): string {
   return lines.join("\n");
 }
 
+/**
+ * Stable per-target signature for B2 storm control. Keep this tied to the
+ * failing task/mission identity, not volatile failure text, so refreshed error
+ * wording does not re-open the same fix every interval.
+ */
+export function selfHealingTargetSignature(signal: FailureSignal): string {
+  return `${signal.source}:${signal.surface}`;
+}
+
 export function buildHealingEscalationAlert(
   signal: FailureSignal,
   decision: HealingDecision,
@@ -155,6 +166,7 @@ function escalationHeadline(reason: HealingReason): string {
     case "no_target_repo": return "a failure with no routable fix target";
     case "dispatch_budget_exhausted": return "a failure, but the dispatch budget is exhausted";
     case "open_fix_cap_reached": return "a failure, but too many self-healing fixes are already open";
+    case "tick_budget_exhausted": return "a failure, but this tick's proposal cap is exhausted";
     default: return "a failure needs your attention";
   }
 }
@@ -172,6 +184,7 @@ function humanSource(source: HealingSource): string {
 
 export interface HealingAuditRecord {
   surface: string;
+  targetSignature?: string;
   source: HealingSource;
   action: "propose" | "escalate" | "skip";
   reason: HealingReason | "cooldown" | "open_fix_exists";
@@ -187,8 +200,8 @@ export interface SelfHealingDeps {
   isHalt: () => boolean;
   /** Classify a signal's surface → agent + riskTier (the routing taxonomy). */
   classify: (signal: FailureSignal) => HealingClassification;
-  /** Durable dedup: is there already a non-terminal fix task for this surface? */
-  hasOpenFixTask: (surface: string) => Promise<boolean> | boolean;
+  /** Durable dedup: is there already a non-terminal fix task for this target? */
+  hasOpenFixTask: (targetSignature: string) => Promise<boolean> | boolean;
   /** B2 fix tasks already proposed today (for the daily budget backstop). */
   proposalsToday: () => Promise<number> | number;
   maxProposalsPerDay: number;
@@ -197,12 +210,15 @@ export interface SelfHealingDeps {
    *  even within the daily budget. */
   openFixCount: () => Promise<number> | number;
   maxOpenFixTasks: number;
-  /** In-memory cooldown: has this surface been handled within the window? */
-  inCooldown: (surface: string, nowMs: number) => boolean;
-  markHandled: (surface: string, nowMs: number) => void;
+  /** Per-tick cap: prevents a noisy batch from proposing a burst of fixes. */
+  maxProposalsPerTick: number;
+  /** In-memory cooldown: has this target been handled within the window? */
+  inCooldown: (targetSignature: string, nowMs: number) => boolean;
+  markHandled: (targetSignature: string, nowMs: number) => void;
   /** Propose a `proposed` fix task and run it through the EXISTING gate. */
   propose: (input: {
     signal: FailureSignal;
+    targetSignature: string;
     agent: TaskAgent;
     riskTier: HealingRiskTier;
     prompt: string;
@@ -229,8 +245,9 @@ export async function runSelfHealingOnce(deps: SelfHealingDeps): Promise<SelfHea
   let proposedThisRun = 0;
 
   for (const signal of signals) {
+    const targetSignature = selfHealingTargetSignature(signal);
     // Cooldown: a flapping surface can't spawn a swarm of fixes/alerts.
-    if (deps.inCooldown(signal.surface, nowMs)) {
+    if (deps.inCooldown(targetSignature, nowMs)) {
       handled.push({ surface: signal.surface, action: "skip", reason: "cooldown" });
       continue;
     }
@@ -247,27 +264,32 @@ export async function runSelfHealingOnce(deps: SelfHealingDeps): Promise<SelfHea
     } else if (decision.action === "propose" && openFixCount + proposedThisRun >= deps.maxOpenFixTasks) {
       decision = { action: "escalate", reason: "open_fix_cap_reached", ...(decision.riskTier ? { riskTier: decision.riskTier } : {}) };
     }
+    if (decision.action === "propose" && proposedThisRun >= deps.maxProposalsPerTick) {
+      decision = { action: "escalate", reason: "tick_budget_exhausted", ...(decision.riskTier ? { riskTier: decision.riskTier } : {}) };
+    }
 
     if (decision.action === "propose") {
-      // Durable dedup: one open fix task per surface.
-      if (await deps.hasOpenFixTask(signal.surface)) {
-        deps.markHandled(signal.surface, nowMs);
-        await deps.audit({ surface: signal.surface, source: signal.source, action: "skip", reason: "open_fix_exists" });
+      // Durable dedup: one open fix proposal per failing target.
+      if (await deps.hasOpenFixTask(targetSignature)) {
+        deps.markHandled(targetSignature, nowMs);
+        await deps.audit({ surface: signal.surface, targetSignature, source: signal.source, action: "skip", reason: "open_fix_exists" });
         handled.push({ surface: signal.surface, action: "skip", reason: "open_fix_exists" });
         continue;
       }
       const prompt = buildFixPrompt(signal);
       const { taskId } = await deps.propose({
         signal,
+        targetSignature,
         agent: decision.agent!,
         riskTier: decision.riskTier!,
         prompt,
         routingReason: classification!.reason,
       });
       proposedThisRun += 1;
-      deps.markHandled(signal.surface, nowMs);
+      deps.markHandled(targetSignature, nowMs);
       await deps.audit({
         surface: signal.surface,
+        targetSignature,
         source: signal.source,
         action: "propose",
         reason: decision.reason,
@@ -282,9 +304,10 @@ export async function runSelfHealingOnce(deps: SelfHealingDeps): Promise<SelfHea
 
     // Escalate.
     await deps.alert(buildHealingEscalationAlert(signal, decision, deps.boardUrl));
-    deps.markHandled(signal.surface, nowMs);
+    deps.markHandled(targetSignature, nowMs);
     await deps.audit({
       surface: signal.surface,
+      targetSignature,
       source: signal.source,
       action: "escalate",
       reason: decision.reason,

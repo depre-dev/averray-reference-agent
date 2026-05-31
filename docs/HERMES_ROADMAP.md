@@ -5,7 +5,7 @@
 
 > **Naming:** one prefix per stream, numbered within it. **`P#` and `Phase #` are retired** — they collided (`P2` Claude worker vs `Phase 2` A+D). Use the IDs below in all handoff prompts and discussion.
 
-> **Reconciliation note (2026-05-31):** This index was reconciled against landed PRs #285-#297. It marks only code-backed shipped slices as done; A3b cost-aware routing/budget remains in progress, and T4/T6/T7 plus the remaining B/O5/C follow-ups stay design/follow-up unless code evidence proves otherwise. Current `main` has an O5 first slice in build, but O5 is not marked complete.
+> **Reconciliation note (2026-06-01):** This index was reconciled against landed PRs #285-#312. It marks only code-backed shipped slices as done; A3b cost-aware routing/budget remains in progress, and T4/T6/T7 plus the remaining B/O5/C follow-ups stay design/follow-up unless code evidence proves otherwise. B2's first self-healing slice is shipped and opt-in (#309): it proposes routed fixes for non-high-risk failures or escalates high-risk/rollback/D3/HALT cases, with env wiring in `ops/compose.yml`; it does not approve, run, merge, deploy, or roll back work.
 
 ## Streams
 
@@ -37,7 +37,7 @@
 | D3 | Anomaly auto-pause (tiered soft→hard) — owns the autopilot-suspended flag | ✅ done (#286) — anomaly auto-pause owns autopilot-suspended flag |
 | D4 | Off-device alert bridge (Slack now → push later; action-needed 0→≥1; quiet-hours/mute) — **O4 prerequisite** | ✅ done (#279) |
 | B1 | Backlog generation (roadmap auto-flow; net-new escalates) | 🟡 in review — first planner-only/read-only backlog suggestions slice |
-| B2 | Self-healing (auto-fix non-high-risk; rollback human) | design done |
+| B2 | Self-healing (auto-fix non-high-risk; rollback human) | ✅ first slice shipped (#309) — opt-in B2 routine collects failed testbed/deploy-verification signals, proposes routed non-high-risk fix tasks only, escalates high-risk/rollback/D3/HALT cases, and is guarded by open-proposal dedupe, cooldown, per-tick cap, and daily cap; approval/run/merge/deploy remain unchanged |
 | C1 | Cross-agent review (default) | 🟡 in build — first slice records/displays review requests only; no auto-run or authority change |
 | C2 | Reviewer panel (high-risk) | 🟡 in build — panel requests, verdict recording, and block/disagreement action-needed bridge |
 | C3 | Specialist agents (test-writer/security/docs) | 🟡 in build — first `test-writer` specialist template |
@@ -50,7 +50,7 @@
 | T6 | Agent-requested tester runs — board-gated (request → approve → read-only run) | in flight — first slice adds `requested` missions, `/monitor/testbed-missions/request`, `/approve`, board approve UI, and runner-ready gating (this PR) |
 | T7 | Tester capabilities manifest (+ platform-repo request helper) | design/follow-up — do not mark shipped here without code evidence; platform helper remains follow-up |
 
-*(Status as of 2026-05-31 — **shipped:** O0–O4, A1, A2, A3a, A4, D1–D4, C4 v1, T1–T3, and T5. **In progress:** A3b cost-aware routing/budget, the O5 first slice, C3's first internal `test-writer` specialist template, and T6's first board-gated request/approve slice. **Design / follow-up:** remaining O5 hardening, B1–B2, C1–C2, remaining C follow-ups, T4, T7, and platform helper pieces not proven by code evidence. Merge/deploy remain human-gated; autopilot approves dispatch only inside O4 guardrails.)*
+*(Status as of 2026-06-01 — **shipped:** O0–O4, A1, A2, A3a, A4, D1–D4, B2 first self-healing slice (#309), C4 v1, T1–T3, and T5. **In progress:** A3b cost-aware routing/budget, the O5 first slice, B1 first planner-only/read-only backlog suggestions slice, C3's first internal `test-writer` specialist template, and T6's first board-gated request/approve slice. **Design / follow-up:** remaining O5 hardening, B1 follow-ons, C1–C2, remaining C follow-ups, T4, T7, and platform helper pieces not proven by code evidence. Merge/deploy remain human-gated; B2 proposes only and autopilot approves dispatch only inside O4 guardrails.)*
 
 ## Recommended build order (the smooth, low-effort ramp)
 
