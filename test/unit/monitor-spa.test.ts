@@ -45,6 +45,7 @@ describe("resolveSpaRequest", () => {
     expect(resolveSpaRequest("/monitor/events").kind).toBe("miss");
     expect(resolveSpaRequest("/monitor/codex-tasks").kind).toBe("miss");
     expect(resolveSpaRequest("/monitor/collaboration").kind).toBe("miss");
+    expect(resolveSpaRequest("/monitor/review-requests").kind).toBe("miss");
     expect(resolveSpaRequest("/monitor/testbed-missions").kind).toBe("miss");
     expect(resolveSpaRequest("/monitor/legacy").kind).toBe("miss");
     // The old preview path is a miss here (index.ts 302s it to /monitor/).

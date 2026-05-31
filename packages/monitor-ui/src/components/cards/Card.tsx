@@ -117,6 +117,10 @@ export function Card({ card, focused = false, onClick, onApprove }: CardProps) {
         </div>
       ) : null}
 
+      {!isClosed && card.reviewRequests?.some((request) => request.status === "requested") ? (
+        <ReviewRequestedLine card={card} />
+      ) : null}
+
       {isClosed && verdictText ? (
         <div className="hm-card-meta">
           <span className="hm-mono">{closedAt}</span>
@@ -223,6 +227,27 @@ function CardHead({ card, isStale, isClosed }: { card: BoardCard; isStale: boole
       </span>
     </div>
   );
+}
+
+function ReviewRequestedLine({ card }: { card: BoardCard }) {
+  const active = card.reviewRequests?.filter((request) => request.status === "requested") ?? [];
+  const first = active[0];
+  if (!first) return null;
+  const suffix = active.length > 1 ? ` +${active.length - 1}` : "";
+  return (
+    <div className="hm-review-request" aria-label={`Review requested from ${actorDisplayName(first.reviewer)}`}>
+      <span className="hm-review-request-dot" aria-hidden />
+      <span>Review requested</span>
+      <strong>{actorDisplayName(first.reviewer)}{suffix}</strong>
+    </div>
+  );
+}
+
+function actorDisplayName(actor: "hermes" | "operator" | "codex" | "claude"): string {
+  if (actor === "hermes") return "Hermes";
+  if (actor === "operator") return "Pascal";
+  if (actor === "claude") return "Claude";
+  return "Codex";
 }
 
 // ── Checks label (e.g. "5/6 · 1 running") ──────────────────────────

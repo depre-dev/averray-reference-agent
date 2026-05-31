@@ -9,10 +9,13 @@ import {
   classifyHermesMemoryRequest,
   listCollaborationMessages,
   listHermesMemoryNotes,
+  listReviewRequests,
   recordCollaborationMessage,
   recordHermesMemoryNote,
+  recordReviewRequest,
   synthesizeHermesReplyFor,
 } from "../../services/slack-operator/src/monitor-collab.js";
+import { listCodexTasks } from "../../services/slack-operator/src/codex-task-queue.js";
 
 const NOW = Date.UTC(2026, 4, 18, 12, 0, 0);
 
@@ -183,6 +186,108 @@ describe("monitor collaboration channel", () => {
     // The first 100 should have been evicted.
     expect(listed[0].text).toBe("m100");
     expect(listed[499].text).toBe("m599");
+  });
+});
+
+describe("monitor review requests", () => {
+  beforeEach(() => {
+    __resetCollaborationStoreForTests();
+  });
+
+  it("creates a card-scoped cross-agent review request", () => {
+    const request = recordReviewRequest(
+      {
+        relatedPr: { repo: "depre-dev/averray-reference-agent", number: 298 },
+        requestedBy: "hermes",
+        reviewer: "claude",
+        reason: "Second-agent review before this O5 board-health slice moves forward.",
+      },
+      NOW
+    );
+
+    expect(request).toMatchObject({
+      requestedBy: "hermes",
+      reviewer: "claude",
+      status: "requested",
+      relatedPr: { repo: "depre-dev/averray-reference-agent", number: 298 },
+      reason: expect.stringContaining("Second-agent review"),
+      createdAt: "2026-05-18T12:00:00.000Z",
+      updatedAt: "2026-05-18T12:00:00.000Z",
+    });
+    expect(request.id).toMatch(/^review-/);
+  });
+
+  it("rejects invalid review authors and reviewers", () => {
+    expect(() =>
+      recordReviewRequest({
+        relatedPr: { repo: "depre-dev/averray-reference-agent", number: 298 },
+        requestedBy: "system",
+        reviewer: "claude",
+        reason: "system cannot request this advisory review",
+      }, NOW)
+    ).toThrowError(CollaborationValidationError);
+
+    expect(() =>
+      recordReviewRequest({
+        relatedPr: { repo: "depre-dev/averray-reference-agent", number: 298 },
+        requestedBy: "hermes",
+        reviewer: "everyone",
+        reason: "reviewer must be a concrete actor",
+      }, NOW)
+    ).toThrowError(CollaborationValidationError);
+  });
+
+  it("lists requests with attribution and preserves collaboration context", () => {
+    recordCollaborationMessage(
+      { author: "operator", text: "Hermes, keep this card parked until review lands." },
+      NOW - 1
+    );
+    const request = recordReviewRequest(
+      {
+        correlationId: "agent-task-42",
+        requestedBy: "operator",
+        reviewer: "codex",
+        reason: "Please review Claude's plan before work proceeds.",
+      },
+      NOW
+    );
+
+    expect(listReviewRequests({ limit: 5 })).toEqual([request]);
+    expect(listReviewRequests({ status: "requested" })[0]).toMatchObject({
+      requestedBy: "operator",
+      reviewer: "codex",
+      correlationId: "agent-task-42",
+    });
+    expect(listCollaborationMessages({ limit: 5 }, NOW + 1).map((message) => message.text)).toEqual([
+      "Hermes, keep this card parked until review lands.",
+      expect.stringContaining("Review requested from Codex"),
+    ]);
+  });
+
+  it("requires a card scope and never creates a task as a side effect", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "review-request-task-queue-"));
+    const queuePath = join(dir, "tasks.json");
+    try {
+      await expect(listCodexTasks({ path: queuePath })).resolves.toEqual([]);
+      expect(() =>
+        recordReviewRequest({
+          requestedBy: "hermes",
+          reviewer: "claude",
+          reason: "missing relatedPr, relatedMission, or correlationId",
+        }, NOW)
+      ).toThrowError(CollaborationValidationError);
+
+      recordReviewRequest({
+        relatedMission: { id: "mission-browser-123" },
+        requestedBy: "hermes",
+        reviewer: "claude",
+        reason: "Review the mission evidence before follow-up work.",
+      }, NOW);
+
+      await expect(listCodexTasks({ path: queuePath })).resolves.toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

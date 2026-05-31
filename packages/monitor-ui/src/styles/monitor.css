@@ -736,6 +736,35 @@ body { margin: 0; }
 .hm-card-meta .sep { color: var(--hm-muted-soft); }
 .hm-card-meta .repo { color: var(--hm-ink-soft); }
 
+.hm-review-request {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--hm-blue-soft);
+  border: 1px solid rgba(70, 111, 157, 0.22);
+  color: var(--hm-blue);
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.hm-review-request strong {
+  color: var(--hm-ink);
+  font-weight: 800;
+  letter-spacing: 0 !important;
+  text-transform: none;
+}
+.hm-review-request-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--hm-blue);
+}
+
 .hm-pillrow { display: flex; flex-wrap: wrap; gap: 5px; }
 .hm-pill {
   display: inline-flex; align-items: center; gap: 5px;

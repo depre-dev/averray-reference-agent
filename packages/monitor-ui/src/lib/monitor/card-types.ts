@@ -77,6 +77,16 @@ export interface CardRiskSignal {
   message: string;
 }
 
+export interface CardReviewRequest {
+  id: string;
+  requestedBy: "hermes" | "operator" | "codex" | "claude";
+  reviewer: "codex" | "claude" | "hermes" | "operator";
+  reason: string;
+  status: "requested" | "responded" | "cancelled";
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface HermesDecisionSubject {
   type: "task" | "card" | "repo" | "pr" | "mission" | "digest" | "autopilot_session";
   id: string;
@@ -142,8 +152,12 @@ export interface CardBase {
   archiveHint?: boolean;
   /** free-form "next action" copy from the classifier */
   next?: string;
+  /** Stable correlation id for non-PR cards (mission/task/deploy), when present. */
+  correlationId?: string;
   /** D2: latest durable explanation associated with the card. */
   decisionRecord?: HermesDecisionRecord;
+  /** C1: active cross-agent review requests scoped to this card. */
+  reviewRequests?: CardReviewRequest[];
 }
 
 /** PR card — file changes, Hermes verdict, operator-review action. */

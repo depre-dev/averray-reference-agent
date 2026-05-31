@@ -652,6 +652,60 @@ describe("buildV2BoardSnapshot — enrichment integration", () => {
     expect(card?.files).toEqual([{ path: "ops/deploy.staging.yml", diff: "", critical: false }]);
   });
 
+  it("attaches active cross-agent review requests to matching cards", () => {
+    const raw = {
+      active: [
+        {
+          title: "Allow operator override of agent claim-stake floor",
+          status: "needs_review",
+          intent: "operator_review",
+          ageLabel: "4m",
+          summary: {
+            pullRequest: { repo: "depre-dev/agent", number: 548, state: "open" },
+            currentPullRequest: { repo: "depre-dev/agent", number: 548, state: "open" },
+          },
+        },
+      ],
+      recent: [],
+      reviewRequests: [
+        {
+          id: "review-1",
+          relatedPr: { repo: "depre-dev/agent", number: 548 },
+          requestedBy: "hermes",
+          reviewer: "claude",
+          reason: "Second-agent review before this moves forward.",
+          status: "requested",
+          createdAt: "2026-05-31T12:00:00.000Z",
+          updatedAt: "2026-05-31T12:00:00.000Z",
+        },
+        {
+          id: "review-2",
+          relatedPr: { repo: "depre-dev/agent", number: 548 },
+          requestedBy: "hermes",
+          reviewer: "codex",
+          reason: "Old request already answered.",
+          status: "responded",
+          createdAt: "2026-05-31T11:00:00.000Z",
+          updatedAt: "2026-05-31T11:30:00.000Z",
+        },
+      ],
+    };
+
+    const snap = buildV2BoardSnapshot(raw, { repo: "depre-dev/agent" });
+    const card = snap.cards.find((c) => c.id === "agent #548");
+    expect(card?.reviewRequests).toEqual([
+      {
+        id: "review-1",
+        requestedBy: "hermes",
+        reviewer: "claude",
+        reason: "Second-agent review before this moves forward.",
+        status: "requested",
+        createdAt: "2026-05-31T12:00:00.000Z",
+        updatedAt: "2026-05-31T12:00:00.000Z",
+      },
+    ]);
+  });
+
   it("enriches a mission card with the browser agent's structured report (by correlationId)", () => {
     // A classified mission item carries correlationId = run.id and no PR
     // number; the run with its report is bundled at snapshot.testbedMissions.

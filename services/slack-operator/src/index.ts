@@ -39,9 +39,12 @@ import {
   classifyHermesMemoryRequest,
   listCollaborationMessages,
   listHermesMemoryNotes,
+  listReviewRequests,
   recordCollaborationMessage,
   recordHermesMemoryNote,
+  recordReviewRequest,
   synthesizeHermesReplyFor,
+  type ReviewRequestStatus,
 } from "./monitor-collab.js";
 import { buildHermesBoardSnapshotFromMonitor } from "./monitor-hermes-board.js";
 import { buildV2BoardSnapshot } from "./monitor-v2.js";
@@ -388,6 +391,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
           "/monitor/decision-records",
           "/monitor/agents",
           "/monitor/collaboration",
+          "/monitor/review-requests",
           "/monitor/tester/capabilities",
           "/monitor/testbed-missions",
           "/monitor/manifest.webmanifest",
@@ -737,6 +741,37 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
     });
     return;
   }
+  if (request.method === "GET" && url.pathname === "/monitor/review-requests") {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    const limit = parseOptionalInteger(url.searchParams.get("limit"));
+    const status = parseReviewRequestStatus(url.searchParams.get("status"));
+    writeJson(response, 200, {
+      reviewRequests: listReviewRequests({
+        ...(limit !== undefined ? { limit } : {}),
+        ...(status ? { status } : {}),
+      }),
+    });
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/monitor/review-requests") {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    await handleMonitorReviewRequest(request, response);
+    return;
+  }
   if (request.method === "POST" && url.pathname === "/monitor/collaboration") {
     if (!monitorConfig.enabled) {
       writeJson(response, 404, { error: "monitor_disabled" });
@@ -785,6 +820,38 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
     return;
   }
   writeJson(response, 404, { error: "not_found" });
+}
+
+async function handleMonitorReviewRequest(request: http.IncomingMessage, response: http.ServerResponse) {
+  try {
+    const rawBody = await readBody(request);
+    const payload = rawBody ? JSON.parse(rawBody) as unknown : {};
+    if (!isRecord(payload)) {
+      writeJson(response, 400, { error: "invalid_payload" });
+      return;
+    }
+    const reviewRequest = recordReviewRequest(payload);
+    logger.info(
+      {
+        id: reviewRequest.id,
+        requestedBy: reviewRequest.requestedBy,
+        reviewer: reviewRequest.reviewer,
+        status: reviewRequest.status,
+      },
+      "monitor_review_request_recorded"
+    );
+    writeJson(response, 200, { ok: true, reviewRequest });
+  } catch (error) {
+    if (error instanceof CollaborationValidationError) {
+      writeJson(response, 400, { error: error.code, message: error.message });
+      return;
+    }
+    logger.error({ err: error }, "monitor_review_request_failed");
+    writeJson(response, 500, {
+      error: "monitor_review_request_failed",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 async function runSocketModeForever() {
@@ -2147,6 +2214,7 @@ async function loadMonitorSnapshot(
     testbedMissionRunner: summarizeTestbedMissionRunnerHeartbeat(readTestbedMissionRunnerHeartbeat()),
     llmUsageEvents,
     collaborationMessages: listCollaborationMessages({ limit: 200 }),
+    reviewRequests: listReviewRequests({ limit: 200 }),
     diagnostics,
   };
   if (!options.suppressNarration) {
@@ -2448,6 +2516,12 @@ function parseOptionalBoolean(value: string | null): boolean | undefined {
   const normalized = value.trim().toLowerCase();
   if (["1", "true", "yes", "on"].includes(normalized)) return true;
   if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return undefined;
+}
+
+function parseReviewRequestStatus(value: string | null): ReviewRequestStatus | undefined {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "requested" || normalized === "responded" || normalized === "cancelled") return normalized;
   return undefined;
 }
 

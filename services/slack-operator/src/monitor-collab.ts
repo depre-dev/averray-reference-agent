@@ -28,6 +28,7 @@ import { dirname } from "node:path";
  */
 
 const MAX_MESSAGES = 500;
+const MAX_REVIEW_REQUESTS = 300;
 const SOFT_TTL_MS = 24 * 60 * 60 * 1000;
 const HERMES_MEMORY_MAX_NOTES = 120;
 const HERMES_MEMORY_NOTE_MAX_CHARS = 320;
@@ -39,10 +40,17 @@ const KNOWN_TARGETS = new Set(["everyone", "claude", "codex", "hermes", "operato
 export type CollaborationAuthor = "claude" | "codex" | "hermes" | "operator" | "system";
 export type CollaborationKind = "chat" | "proposal" | "request_help" | "status";
 export type CollaborationTarget = "everyone" | "claude" | "codex" | "hermes" | "operator";
+export type ReviewRequester = "hermes" | "operator" | "codex" | "claude";
+export type ReviewRequestReviewer = "codex" | "claude" | "hermes" | "operator";
+export type ReviewRequestStatus = "requested" | "responded" | "cancelled";
 
 export interface CollaborationRelatedPr {
   repo: string;
   number: number;
+}
+
+export interface CollaborationRelatedMission {
+  id: string;
 }
 
 export interface CollaborationMessage {
@@ -54,6 +62,19 @@ export interface CollaborationMessage {
   addressedTo: CollaborationTarget;
   relatedPr?: CollaborationRelatedPr;
   relatedCorrelationId?: string;
+}
+
+export interface ReviewRequest {
+  id: string;
+  relatedPr?: CollaborationRelatedPr;
+  relatedMission?: CollaborationRelatedMission;
+  correlationId?: string;
+  requestedBy: ReviewRequester;
+  reviewer: ReviewRequestReviewer;
+  reason: string;
+  status: ReviewRequestStatus;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface HermesMemoryNote {
@@ -76,9 +97,25 @@ export interface RecordCollaborationInput {
   relatedCorrelationId?: unknown;
 }
 
+export interface RecordReviewRequestInput {
+  relatedPr?: unknown;
+  relatedMission?: unknown;
+  correlationId?: unknown;
+  relatedCorrelationId?: unknown;
+  requestedBy?: unknown;
+  reviewer?: unknown;
+  reason?: unknown;
+  status?: unknown;
+}
+
 export interface ListCollaborationOptions {
   sinceMs?: number;
   limit?: number;
+}
+
+export interface ListReviewRequestsOptions {
+  limit?: number;
+  status?: ReviewRequestStatus;
 }
 
 export interface ListHermesMemoryOptions {
@@ -102,8 +139,10 @@ export class CollaborationValidationError extends Error {
 }
 
 const store: CollaborationMessage[] = [];
+const reviewRequests: ReviewRequest[] = [];
 const hermesMemoryNotes: HermesMemoryNote[] = [];
 let idSeq = 0;
+let reviewRequestSeq = 0;
 let memorySeq = 0;
 let memoryLoaded = false;
 
@@ -168,6 +207,79 @@ export function listCollaborationMessages(
   return filtered.slice(-limit);
 }
 
+export function recordReviewRequest(
+  input: RecordReviewRequestInput,
+  nowMs: number = Date.now()
+): ReviewRequest {
+  const requestedBy = normalizeRequester(input.requestedBy);
+  if (!requestedBy) {
+    throw new CollaborationValidationError(
+      "invalid_requested_by",
+      "requestedBy must be one of: hermes, operator, codex, claude."
+    );
+  }
+
+  const reviewer = normalizeReviewer(input.reviewer);
+  if (!reviewer) {
+    throw new CollaborationValidationError(
+      "invalid_reviewer",
+      "reviewer must be one of: codex, claude, hermes, operator."
+    );
+  }
+
+  const reason = normalizeText(input.reason);
+  if (!reason) {
+    throw new CollaborationValidationError(
+      "invalid_reason",
+      "reason is required and must be a non-empty string (max 4000 chars)."
+    );
+  }
+
+  const relatedPr = normalizeRelatedPr(input.relatedPr);
+  const relatedMission = normalizeRelatedMission(input.relatedMission);
+  const correlationId = normalizeCorrelationId(input.correlationId) ?? normalizeCorrelationId(input.relatedCorrelationId);
+  if (!relatedPr && !relatedMission && !correlationId) {
+    throw new CollaborationValidationError(
+      "missing_review_scope",
+      "review request must include relatedPr, relatedMission, or correlationId."
+    );
+  }
+
+  const status = normalizeReviewStatus(input.status);
+  if (status === null && hasExplicitTarget(input.status)) {
+    throw new CollaborationValidationError(
+      "invalid_review_status",
+      "status must be one of: requested, responded, cancelled."
+    );
+  }
+  const at = new Date(nowMs).toISOString();
+  const request: ReviewRequest = {
+    id: nextReviewRequestId(nowMs),
+    ...(relatedPr ? { relatedPr } : {}),
+    ...(relatedMission ? { relatedMission } : {}),
+    ...(correlationId ? { correlationId } : {}),
+    requestedBy,
+    reviewer,
+    reason,
+    status: status ?? "requested",
+    createdAt: at,
+    updatedAt: at,
+  };
+
+  reviewRequests.push(request);
+  while (reviewRequests.length > MAX_REVIEW_REQUESTS) reviewRequests.shift();
+  recordReviewRequestCollaborationTurn(request, nowMs);
+  return request;
+}
+
+export function listReviewRequests(options: ListReviewRequestsOptions = {}): ReviewRequest[] {
+  const limit = clampLimit(options.limit, MAX_REVIEW_REQUESTS);
+  const filtered = options.status
+    ? reviewRequests.filter((request) => request.status === options.status)
+    : reviewRequests;
+  return filtered.slice(-limit);
+}
+
 export function listHermesMemoryNotes(options: ListHermesMemoryOptions = {}): HermesMemoryNote[] {
   loadHermesMemoryIfNeeded();
   const limit = clampLimit(options.limit, HERMES_MEMORY_MAX_NOTES);
@@ -211,8 +323,10 @@ export function classifyHermesMemoryRequest(message: Pick<CollaborationMessage, 
 
 export function __resetCollaborationStoreForTests(): void {
   store.length = 0;
+  reviewRequests.length = 0;
   hermesMemoryNotes.length = 0;
   idSeq = 0;
+  reviewRequestSeq = 0;
   memorySeq = 0;
   memoryLoaded = false;
 }
@@ -243,6 +357,26 @@ function hasExplicitTarget(value: unknown): boolean {
   return true;
 }
 
+function normalizeRequester(value: unknown): ReviewRequester | null {
+  const author = normalizeAuthor(value);
+  if (author === "system" || !author) return null;
+  return author;
+}
+
+function normalizeReviewer(value: unknown): ReviewRequestReviewer | null {
+  const target = normalizeTarget(value);
+  if (target === "everyone" || !target) return null;
+  return target;
+}
+
+function normalizeReviewStatus(value: unknown): ReviewRequestStatus | null {
+  if (value == null || value === "") return null;
+  if (typeof value !== "string") return null;
+  const v = value.trim().toLowerCase();
+  if (v === "requested" || v === "responded" || v === "cancelled") return v;
+  return null;
+}
+
 function normalizeText(value: unknown): string {
   if (typeof value !== "string") return "";
   const trimmed = value.trim();
@@ -257,6 +391,13 @@ function normalizeRelatedPr(value: unknown): CollaborationRelatedPr | undefined 
   const number = typeof obj.number === "number" && Number.isInteger(obj.number) ? obj.number : NaN;
   if (!repo || !Number.isFinite(number) || number < 1) return undefined;
   return { repo, number };
+}
+
+function normalizeRelatedMission(value: unknown): CollaborationRelatedMission | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const obj = value as Record<string, unknown>;
+  const id = typeof obj.id === "string" ? obj.id.trim().slice(0, 256) : "";
+  return id ? { id } : undefined;
 }
 
 function normalizeCorrelationId(value: unknown): string | undefined {
@@ -277,9 +418,41 @@ function nextId(nowMs: number): string {
   return `collab-${nowMs.toString(36)}-${idSeq.toString(36)}`;
 }
 
+function nextReviewRequestId(nowMs: number): string {
+  reviewRequestSeq = (reviewRequestSeq + 1) % 1_000_000;
+  return `review-${nowMs.toString(36)}-${reviewRequestSeq.toString(36)}`;
+}
+
 function nextMemoryId(nowMs: number): string {
   memorySeq = (memorySeq + 1) % 1_000_000;
   return `hermes-memory-${nowMs.toString(36)}-${memorySeq.toString(36)}`;
+}
+
+function recordReviewRequestCollaborationTurn(request: ReviewRequest, nowMs: number): void {
+  const scope = reviewRequestScopeLabel(request);
+  const reviewer = actorDisplayName(request.reviewer);
+  const relatedCorrelationId = request.correlationId ?? request.relatedMission?.id;
+  recordCollaborationMessage({
+    author: request.requestedBy,
+    kind: "request_help",
+    addressedTo: request.reviewer,
+    text: `Review requested from ${reviewer}${scope ? ` on ${scope}` : ""}: ${request.reason}`,
+    ...(request.relatedPr ? { relatedPr: request.relatedPr } : {}),
+    ...(relatedCorrelationId ? { relatedCorrelationId } : {}),
+  }, nowMs);
+}
+
+function reviewRequestScopeLabel(request: ReviewRequest): string {
+  if (request.relatedPr) return `${request.relatedPr.repo}#${request.relatedPr.number}`;
+  if (request.relatedMission) return `mission ${request.relatedMission.id}`;
+  return request.correlationId ?? "";
+}
+
+function actorDisplayName(actor: ReviewRequester | ReviewRequestReviewer): string {
+  if (actor === "hermes") return "Hermes";
+  if (actor === "operator") return "Pascal";
+  if (actor === "claude") return "Claude";
+  return "Codex";
 }
 
 function learnHermesMemoryFromMessage(message: CollaborationMessage): void {
