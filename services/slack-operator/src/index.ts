@@ -44,6 +44,19 @@ import {
 import { buildHermesBoardSnapshotFromMonitor } from "./monitor-hermes-board.js";
 import { buildV2BoardSnapshot } from "./monitor-v2.js";
 import {
+  evaluateAlertBridge,
+  initialAlertBridgeState,
+  buildAlertPayload,
+  slackAlertChannel,
+  getServerAlertMuteUntilMs,
+  setServerAlertMute,
+  clearServerAlertMute,
+  minuteOfDayForOffset,
+  type AlertBridgeState,
+  type AlertChannel,
+  type AlertItem,
+} from "./alert-bridge.js";
+import {
   isDebugSpawnEnabled,
   mergeDebugCards,
   onDebugCardSpawned,
@@ -412,6 +425,18 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       return;
     }
     await handleMonitorCommandRequest(request, response);
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/monitor/alert-mute") {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    await handleMonitorAlertMuteRequest(request, response);
     return;
   }
   const testbedMissionId = monitorTestbedMissionId(url.pathname);
@@ -1019,6 +1044,40 @@ function recordTestbedMissionCollaboration(run: TestbedMissionRun): void {
   }
 }
 
+// D4 — server-side mute. The board's /mute control POSTs here so muting on the
+// board also silences off-device alerts (the mute was browser-only before).
+// `{ untilMs }` mutes until that epoch ms; `{ muted: false }` clears it.
+async function handleMonitorAlertMuteRequest(request: http.IncomingMessage, response: http.ServerResponse) {
+  try {
+    const rawBody = await readBody(request);
+    const payload = rawBody ? JSON.parse(rawBody) as unknown : {};
+    if (!isRecord(payload)) {
+      writeJson(response, 400, { error: "invalid_payload" });
+      return;
+    }
+    if (payload.muted === false) {
+      clearServerAlertMute();
+      writeJson(response, 200, { ok: true, muted: false, muteUntilMs: 0 });
+      return;
+    }
+    const untilMs = numberField(payload, "untilMs");
+    if (typeof untilMs !== "number" || untilMs <= 0) {
+      writeJson(response, 400, {
+        error: "invalid_until",
+        message: "Provide { untilMs: <epoch ms> } to mute, or { muted: false } to clear.",
+      });
+      return;
+    }
+    setServerAlertMute(untilMs);
+    writeJson(response, 200, { ok: true, muted: true, muteUntilMs: untilMs });
+  } catch (error) {
+    writeJson(response, 500, {
+      error: "alert_mute_failed",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 async function handleMonitorRecheckRequest(request: http.IncomingMessage, response: http.ServerResponse) {
   try {
     const rawBody = await readBody(request);
@@ -1185,6 +1244,9 @@ function startOperatorRoutines() {
   let opsHealthRunning = false;
   let safeWorkRunning = false;
   let stalePrAlertsRunning = false;
+  let alertBridgeRunning = false;
+  let alertBridgeState: AlertBridgeState = initialAlertBridgeState();
+  const alertChannel: AlertChannel = slackAlertChannel();
 
   const checkDailyBrief = async () => {
     if (dailyBriefRunning) return;
@@ -1315,6 +1377,55 @@ function startOperatorRoutines() {
     }
   };
 
+  // D4 — off-device alert bridge. Server-side: fires with no monitor tab open.
+  // Reads the board's needs-attention items and pings the operator on the
+  // 0→≥1 rising edge (de-duped, cooldown, mute + quiet-hours suppressed).
+  const checkAlertBridge = async () => {
+    if (alertBridgeRunning || !routineConfig.alertBridge.enabled) return;
+    alertBridgeRunning = true;
+    try {
+      const raw = await loadMonitorSnapshot(
+        new URL("http://localhost/monitor/events?limit=100&activeWindowMinutes=1440"),
+        { suppressNarration: true },
+      );
+      const board = buildV2BoardSnapshot(raw, { repo: monitorV2Repo() });
+      const items: AlertItem[] = board.cards
+        .filter((c) => c.lane === "needs-attention")
+        .map((c) => ({ id: c.id, title: c.title }));
+      const now = Date.now();
+      const result = evaluateAlertBridge({
+        items,
+        nowMs: now,
+        nowMinuteOfDay: minuteOfDayForOffset(now, routineConfig.alertBridge.quietHoursTzOffsetMin),
+        state: alertBridgeState,
+        config: {
+          cooldownMs: routineConfig.alertBridge.cooldownMs,
+          ...(getServerAlertMuteUntilMs() > 0 ? { muteUntilMs: getServerAlertMuteUntilMs() } : {}),
+          ...(routineConfig.alertBridge.quietHours ? { quietHours: routineConfig.alertBridge.quietHours } : {}),
+        },
+      });
+      alertBridgeState = result.state;
+      if (result.dispatch) {
+        const payload = buildAlertPayload(
+          result.payloadItems,
+          items.length,
+          optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor"),
+        );
+        const sent = await alertChannel.dispatch(payload);
+        logger.info(
+          { count: items.length, reason: result.reason, channel: alertChannel.name, sent },
+          "d4_alert_bridge_dispatched",
+        );
+      } else if (result.suppressedBy) {
+        logger.info({ count: items.length, suppressedBy: result.suppressedBy }, "d4_alert_bridge_suppressed");
+      }
+    } catch (error) {
+      logger.error({ err: error }, "d4_alert_bridge_failed");
+    } finally {
+      alertBridgeRunning = false;
+    }
+  };
+
   if (routineConfig.dailyBrief.enabled) {
     setTimeout(() => void checkDailyBrief(), 5_000);
     setInterval(() => void checkDailyBrief(), 60_000);
@@ -1334,6 +1445,10 @@ function startOperatorRoutines() {
   if (routineConfig.stalePrAlerts.enabled) {
     setTimeout(() => void checkStalePrAlerts(), 12_000);
     setInterval(() => void checkStalePrAlerts(), routineConfig.stalePrAlerts.intervalMs);
+  }
+  if (routineConfig.alertBridge.enabled) {
+    setTimeout(() => void checkAlertBridge(), 9_000);
+    setInterval(() => void checkAlertBridge(), routineConfig.alertBridge.intervalMs);
   }
 }
 
