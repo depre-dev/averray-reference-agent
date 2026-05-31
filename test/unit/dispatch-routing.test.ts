@@ -73,6 +73,7 @@ const ALLOWED: DispatchPolicyConfig = {
   allowedAgents: ["codex", "claude"],
   perDayMax: 10,
   perRepoPerDayMax: 5,
+  perDayUsdMax: 0,
 };
 
 function baseDeps(proposeTaskFn: (t: ProposedAgentTask) => Promise<{ id?: string }>): AgentInvocationDeps {

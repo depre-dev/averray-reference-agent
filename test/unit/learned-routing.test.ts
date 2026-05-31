@@ -26,6 +26,18 @@ function agent(agentName: "codex" | "claude", surfaces: unknown[]) {
   };
 }
 
+function agentWithCost(agentName: "codex" | "claude", surfaces: unknown[], averageUsdPerTask: number) {
+  return {
+    ...agent(agentName, surfaces),
+    cost: {
+      status: "recorded",
+      totalUsd: averageUsdPerTask * 10,
+      averageUsdPerTask,
+      byModel: [{ model: `${agentName}-model`, runs: 10, costUsd: averageUsdPerTask * 10 }],
+    },
+  };
+}
+
 describe("A2 learned routing", () => {
   it("keeps high-risk tasks rule-bound to codex regardless of scorecard stats", () => {
     const staticDecision = classifyTask({ prompt: "update the escrow settlement contract" });
@@ -145,6 +157,55 @@ describe("A2 learned routing", () => {
     expect(decision.reason).toMatch(/exploration/);
   });
 
+  it("uses recorded cost only as a close quality tie-break", () => {
+    const staticDecision = classifyTask({ prompt: "polish the onboarding UI component" });
+    const decision = applyLearnedRouting(
+      { prompt: "polish the onboarding UI component" },
+      staticDecision,
+      {
+        now: NOW,
+        config: { minSamples: 5, explorationRate: 0, costTieMaxScoreDelta: 0.05 },
+        scorecard: scorecard([
+          agentWithCost("codex", [{ surface: "frontend", count: 100, ready: 90, blocked: 0 }], 0.20),
+          agentWithCost("claude", [{ surface: "frontend", count: 100, ready: 88, blocked: 0 }], 0.02),
+        ]),
+      },
+    );
+
+    expect(decision.agent).toBe("claude");
+    expect(decision.reason).toMatch(/A3 cost-aware routing/);
+    expect(decision.reason).toMatch(/lower recorded cost/);
+    expect(decision.decisionRecord).toMatchObject({
+      inputs: {
+        mode: "cost_aware",
+        scorecardSnapshot: [
+          expect.objectContaining({ agent: "codex", costUsdPerTask: 0.2 }),
+          expect.objectContaining({ agent: "claude", costUsdPerTask: 0.02 }),
+        ],
+      },
+    });
+  });
+
+  it("does not treat missing cost as cheap or expensive", () => {
+    const staticDecision = classifyTask({ prompt: "polish the onboarding UI component" });
+    const decision = applyLearnedRouting(
+      { prompt: "polish the onboarding UI component" },
+      staticDecision,
+      {
+        now: NOW,
+        config: { minSamples: 5, explorationRate: 0, costTieMaxScoreDelta: 0.05 },
+        scorecard: scorecard([
+          agent("codex", [{ surface: "frontend", count: 100, ready: 90, blocked: 0 }]),
+          agentWithCost("claude", [{ surface: "frontend", count: 100, ready: 88, blocked: 0 }], 0.01),
+        ]),
+      },
+    );
+
+    expect(decision.agent).toBe("codex");
+    expect(decision.reason).toMatch(/cost neutral/);
+    expect(decision.reason).toMatch(/cost not recorded/);
+  });
+
   it("treats not_recorded and missing signals as neutral, not as free good score", () => {
     const staticDecision = classifyTask({ prompt: "polish the onboarding UI component" });
     const decision = applyLearnedRouting(
@@ -171,6 +232,7 @@ describe("A2 learned routing", () => {
       A2_LEARNED_ROUTING_EXPLORATION_RATE: "2",
     });
 
-    expect(config).toEqual({ minSamples: 3, decayHalfLifeDays: 7, explorationRate: 1 });
+    expect(config).toMatchObject({ minSamples: 3, decayHalfLifeDays: 7, explorationRate: 1 });
+    expect(config.costAware).toBe(true);
   });
 });

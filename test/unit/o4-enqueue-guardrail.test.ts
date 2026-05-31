@@ -17,6 +17,7 @@ const ALLOWED: DispatchPolicyConfig = {
   allowedAgents: ["codex", "claude"],
   perDayMax: 10,
   perRepoPerDayMax: 5,
+  perDayUsdMax: 0,
 };
 
 describe("dispatch-policy — allowlist + budget (fail-closed)", () => {
@@ -53,6 +54,26 @@ describe("dispatch-policy — allowlist + budget (fail-closed)", () => {
     expect(r).toEqual({ allowed: false, reason: "repo_daily_budget_exhausted" });
   });
 
+  it("enforces the recorded daily dollar budget without treating missing cost as spent", () => {
+    const withCostCap: DispatchPolicyConfig = { ...ALLOWED, perDayUsdMax: 1 };
+    expect(evaluateDispatchPolicy(withCostCap, {
+      repo: "averray-agent/agent",
+      agent: "codex",
+      todayCount: 0,
+      todayRepoCount: 0,
+      todayCostUsd: 0.80,
+      estimatedTaskCostUsd: 0.25,
+    })).toEqual({ allowed: false, reason: "daily_cost_budget_exhausted" });
+    expect(evaluateDispatchPolicy(withCostCap, {
+      repo: "averray-agent/agent",
+      agent: "codex",
+      todayCount: 0,
+      todayRepoCount: 0,
+      todayCostUsd: null,
+      estimatedTaskCostUsd: 0.25,
+    })).toEqual({ allowed: true, reason: "dispatch_allowed_cost_unmeasured" });
+  });
+
   it("loadDispatchPolicyConfig: fail-closed default repos + env override + default agents", () => {
     // No POLICY_CONFIG_PATH / yaml ⇒ empty repos (fail-closed); agents default codex+claude.
     const bare = loadDispatchPolicyConfig({ POLICY_CONFIG_PATH: "/does/not/exist.yaml" } as NodeJS.ProcessEnv);
@@ -62,9 +83,11 @@ describe("dispatch-policy — allowlist + budget (fail-closed)", () => {
       POLICY_CONFIG_PATH: "/does/not/exist.yaml",
       HERMES_DISPATCH_ALLOWED_REPOS: "averray-agent/agent, depre-dev/site",
       HERMES_DISPATCH_PER_DAY_MAX: "3",
+      HERMES_DISPATCH_PER_DAY_USD_MAX: "1.5",
     } as NodeJS.ProcessEnv);
     expect(overridden.allowedRepos).toEqual(["averray-agent/agent", "depre-dev/site"]);
     expect(overridden.perDayMax).toBe(3);
+    expect(overridden.perDayUsdMax).toBe(1.5);
   });
 });
 
@@ -123,6 +146,34 @@ describe("enqueue_agent_task — proposes-only handler", () => {
     const result = (await invokeAgentTask(enqueue(), baseDeps({ listQueuedTasksFn: async () => overBudget, proposeTaskFn }))) as { status: string; reason?: string };
     expect(result.status).toBe("blocked");
     expect(result.reason).toBe("daily_budget_exhausted");
+    expect(proposeTaskFn).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the recorded daily dollar dispatch budget is exhausted", async () => {
+    const proposeTaskFn = vi.fn(async () => ({ id: "x" }));
+    const result = (await invokeAgentTask(enqueue(), baseDeps({
+      dispatchPolicyConfig: { ...ALLOWED, perDayUsdMax: 1 },
+      agentScorecardFn: async () => ({
+        kind: "averray_agent_scorecard",
+        llmUsage: {
+          byDay: [{ day: "2026-05-31", costStatus: "recorded", costUsd: 0.9 }],
+        },
+        agents: [
+          {
+            agent: "claude",
+            cost: {
+              status: "recorded",
+              averageUsdPerTask: 0.2,
+              byModel: [{ model: "claude", runs: 5 }],
+            },
+          },
+        ],
+      }),
+      proposeTaskFn,
+    }))) as { status: string; reason?: string };
+
+    expect(result.status).toBe("blocked");
+    expect(result.reason).toBe("daily_cost_budget_exhausted");
     expect(proposeTaskFn).not.toHaveBeenCalled();
   });
 

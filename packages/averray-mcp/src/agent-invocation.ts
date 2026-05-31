@@ -878,6 +878,11 @@ async function invokeEnqueueAgentTask(
   }
 
   const env = deps.enqueueEnv ?? process.env;
+  let scorecardPromise: Promise<unknown> | undefined;
+  const loadScorecard = () => {
+    scorecardPromise ??= (deps.agentScorecardFn ?? (() => getAgentScorecard({ now: deps.now })))();
+    return scorecardPromise;
+  };
   const routing = agentExplicit
     ? {
       ...staticRouting,
@@ -906,7 +911,7 @@ async function invokeEnqueueAgentTask(
         generatedAt: deps.now ?? startedAt,
       }),
     }
-    : await resolveLearnedRouting(routingInput, staticRouting, deps, env);
+    : await resolveLearnedRouting(routingInput, staticRouting, deps, env, loadScorecard);
   const agent: "codex" | "claude" = agentExplicit ? explicitAgent : routing.agent;
 
   // (b) Dispatch guardrail — allowlist + per-day budget. Fail-closed.
@@ -918,11 +923,16 @@ async function invokeEnqueueAgentTask(
   const hermesToday = queued.filter(
     (t) => (t.requester ?? "").toLowerCase() === "hermes" && (t.createdAt ?? "").slice(0, 10) === today,
   );
+  const costBudget = policy.perDayUsdMax > 0
+    ? await dispatchCostBudgetSnapshot(policy.perDayUsdMax, agent, today, loadScorecard)
+    : disabledCostBudgetSnapshot();
   const decision = evaluateDispatchPolicy(policy, {
     repo,
     agent,
     todayCount: hermesToday.length,
     todayRepoCount: hermesToday.filter((t) => t.repo === repo).length,
+    todayCostUsd: costBudget.todayCostUsd,
+    estimatedTaskCostUsd: costBudget.estimatedTaskCostUsd,
   });
   const decisionRecord = routing.decisionRecord
     ? extendHermesDecisionRecord(routing.decisionRecord, {
@@ -937,12 +947,16 @@ async function invokeEnqueueAgentTask(
         budgetGates: {
           perDayMax: policy.perDayMax,
           perRepoPerDayMax: policy.perRepoPerDayMax,
+          perDayUsdMax: policy.perDayUsdMax,
           todayCount: hermesToday.length,
           todayRepoCount: hermesToday.filter((t) => t.repo === repo).length,
+          todayCostUsd: costBudget.todayCostUsd ?? "not_recorded",
+          estimatedTaskCostUsd: costBudget.estimatedTaskCostUsd ?? "not_recorded",
+          costBudgetStatus: costBudget.status,
         },
         wouldChangeDecision: decision.allowed
-          ? "A dispatch policy block, exhausted budget, or explicit operator override would prevent this proposed task from moving forward."
-          : "Allowlisting the repo/agent or restoring budget would let Hermes propose this task.",
+          ? "A dispatch policy block, exhausted count/cost budget, or explicit operator override would prevent this proposed task from moving forward."
+          : "Allowlisting the repo/agent or restoring count/cost budget would let Hermes propose this task.",
       },
       outcome: {
         summary: decision.allowed
@@ -997,7 +1011,8 @@ async function resolveLearnedRouting(
   routingInput: { repo: string; prompt: string; area?: string },
   staticRouting: ReturnType<typeof classifyTask>,
   deps: AgentInvocationDeps,
-  env: NodeJS.ProcessEnv
+  env: NodeJS.ProcessEnv,
+  loadScorecard?: () => Promise<unknown>
 ): Promise<ReturnType<typeof classifyTask>> {
   const config = parseLearnedRoutingConfig(env, deps.learnedRoutingConfig);
   if (staticRouting.riskTier === "high") {
@@ -1009,7 +1024,7 @@ async function resolveLearnedRouting(
   }
 
   try {
-    const scorecard = await (deps.agentScorecardFn ?? (() => getAgentScorecard({ now: deps.now })))();
+    const scorecard = await (loadScorecard ?? (() => getAgentScorecard({ now: deps.now })))();
     return applyLearnedRouting(routingInput, staticRouting, {
       scorecard,
       config,
@@ -1022,6 +1037,65 @@ async function resolveLearnedRouting(
       reason: `A2 scorecard unavailable → static default (${staticRouting.reason})`,
     };
   }
+}
+
+interface DispatchCostBudgetSnapshot {
+  status: "disabled" | "recorded" | "not_recorded";
+  todayCostUsd: number | null;
+  estimatedTaskCostUsd: number | null;
+}
+
+function disabledCostBudgetSnapshot(): DispatchCostBudgetSnapshot {
+  return { status: "disabled", todayCostUsd: null, estimatedTaskCostUsd: null };
+}
+
+async function dispatchCostBudgetSnapshot(
+  capUsd: number,
+  agent: "codex" | "claude",
+  today: string,
+  loadScorecard: () => Promise<unknown>
+): Promise<DispatchCostBudgetSnapshot> {
+  if (capUsd <= 0) return disabledCostBudgetSnapshot();
+  try {
+    const scorecard = await loadScorecard();
+    const snapshot = dispatchCostBudgetSnapshotFromScorecard(scorecard, agent, today);
+    return snapshot.todayCostUsd !== null && snapshot.estimatedTaskCostUsd !== null
+      ? { ...snapshot, status: "recorded" }
+      : snapshot;
+  } catch {
+    return { status: "not_recorded", todayCostUsd: null, estimatedTaskCostUsd: null };
+  }
+}
+
+function dispatchCostBudgetSnapshotFromScorecard(
+  scorecard: unknown,
+  agent: "codex" | "claude",
+  today: string
+): DispatchCostBudgetSnapshot {
+  if (!isRecord(scorecard)) return { status: "not_recorded", todayCostUsd: null, estimatedTaskCostUsd: null };
+  const llmUsage = isRecord(scorecard.llmUsage) ? scorecard.llmUsage : {};
+  const todayRollup = recordsFrom(llmUsage, "byDay").find((entry) => stringField(entry, "day") === today);
+  const todayCostUsd = todayRollup && stringField(todayRollup, "costStatus") === "recorded"
+    ? numberField(todayRollup, "costUsd") ?? null
+    : null;
+  const agentRecord = recordsFrom(scorecard, "agents").find((entry) => stringField(entry, "agent") === agent);
+  const estimatedTaskCostUsd = estimatedCostForAgent(agentRecord);
+  return {
+    status: todayCostUsd !== null && estimatedTaskCostUsd !== null ? "recorded" : "not_recorded",
+    todayCostUsd,
+    estimatedTaskCostUsd,
+  };
+}
+
+function estimatedCostForAgent(agentRecord: Record<string, unknown> | undefined): number | null {
+  if (!agentRecord || !isRecord(agentRecord.cost)) return null;
+  const cost = agentRecord.cost;
+  if (stringField(cost, "status") !== "recorded") return null;
+  const averageUsdPerTask = numberField(cost, "averageUsdPerTask");
+  if (averageUsdPerTask !== undefined) return averageUsdPerTask;
+  const totalUsd = numberField(cost, "totalUsd");
+  const runs = recordsFrom(cost, "byModel").reduce((sum, entry) => sum + (numberField(entry, "runs") ?? 0), 0);
+  return totalUsd !== undefined && runs > 0 ? totalUsd / runs : null;
 }
 
 // enqueue transport — POST/GET the slack-operator queue endpoint. Injected in
@@ -1145,6 +1219,10 @@ function numberField(record: Record<string, unknown>, key: string): number | und
 function arrayField(record: Record<string, unknown>, key: string): unknown[] {
   const value = record[key];
   return Array.isArray(value) ? value : [];
+}
+
+function recordsFrom(record: Record<string, unknown>, key: string): Record<string, unknown>[] {
+  return arrayField(record, key).filter(isRecord);
 }
 
 function truthyEnv(value: string | undefined): boolean {
