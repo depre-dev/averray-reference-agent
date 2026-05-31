@@ -31,6 +31,11 @@ export interface SlackRoutineConfig {
     quietHours?: { startMinute: number; endMinute: number };
     quietHoursTzOffsetMin: number;
   };
+  /** D3 — tiered anomaly auto-pause (soft suspend → hard HALT). Off by default. */
+  anomalyPause: {
+    enabled: boolean;
+    intervalMs: number;
+  };
 }
 
 export function parseSlackRoutineConfig(
@@ -78,6 +83,11 @@ export function parseSlackRoutineConfig(
       cooldownMs: Math.max(0, (positiveNumber(env.D4_ALERT_BRIDGE_COOLDOWN_MINUTES) || 30) * 60_000),
       ...(parseQuietHoursRange(env.D4_ALERT_QUIET_HOURS) ? { quietHours: parseQuietHoursRange(env.D4_ALERT_QUIET_HOURS) } : {}),
       quietHoursTzOffsetMin: Number.isFinite(Number(env.D4_ALERT_QUIET_TZ_OFFSET_MIN)) ? Number(env.D4_ALERT_QUIET_TZ_OFFSET_MIN) : 0,
+    },
+    anomalyPause: {
+      // Off by default — the operator enables D3 before turning on autopilot.
+      enabled: env.D3_ANOMALY_PAUSE_ENABLED === "1",
+      intervalMs: Math.max(30_000, (positiveNumber(env.D3_ANOMALY_PAUSE_INTERVAL_MINUTES) || 1) * 60_000),
     },
   };
 }
