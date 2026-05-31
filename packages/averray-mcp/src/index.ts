@@ -53,6 +53,7 @@ import { approveGithubMergeStewardCandidate, getGithubOperatorBrief, getGithubOp
 import { getTestbedAgentMission, getTestbedE2eSuite, runTestbedE2eReadOnly } from "./operator-testbed.js";
 import { invokeAgentTask } from "./agent-invocation.js";
 import { getHandoffMonitor } from "./handoff-events.js";
+import { getAgentScorecard } from "./agent-scorecard.js";
 
 const server = new McpServer({
   name: "averray-mcp",
@@ -321,6 +322,18 @@ server.tool(
   },
   async ({ correlationId, limit, activeWindowMinutes }) => {
     return jsonContent(await getHandoffMonitor({ correlationId, limit, activeWindowMinutes }));
+  }
+);
+
+server.tool(
+  "averray_agent_scorecard",
+  "Read-only A1 agent scorecard for Codex, Claude, Hermes, and browser missions. Aggregates monitor handoffs, task queue state, and browser mission reports into performance/trust baselines. Missing cost, token, and autopilot rework signals are explicitly marked not_recorded. This observes only: it does not route tasks, approve work, merge PRs, deploy, claim jobs, edit queues, or mutate external systems.",
+  {
+    limit: z.number().int().min(1).max(100).default(100),
+    activeWindowMinutes: z.number().int().min(1).max(1440).default(240)
+  },
+  async ({ limit, activeWindowMinutes }) => {
+    return jsonContent(await getAgentScorecard({ limit, activeWindowMinutes }));
   }
 );
 

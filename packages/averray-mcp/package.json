@@ -25,6 +25,10 @@
       "types": "./dist/handoff-events.d.ts",
       "import": "./dist/handoff-events.js"
     },
+    "./agent-scorecard": {
+      "types": "./dist/agent-scorecard.d.ts",
+      "import": "./dist/agent-scorecard.js"
+    },
     "./agent-invocation": {
       "types": "./dist/agent-invocation.d.ts",
       "import": "./dist/agent-invocation.js"
