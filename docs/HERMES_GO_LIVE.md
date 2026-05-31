@@ -41,19 +41,20 @@ C="docker compose -p avg --env-file .env.prod \
 These keys ship commented/defaulted-off. Uncomment + set them **in the file**. If your file ships them as commented lines (`# KEY=...`), strip the leading `# ` for exactly these keys:
 
 ```bash
-sed -i -E 's/^# (D3_ANOMALY_PAUSE_ENABLED|B2_SELF_HEALING_ENABLED|B2_SELF_HEALING_REPO|CLAUDE_BRANCH_WORKER_ALLOWED_REPOS|HERMES_DISPATCH_ALLOWED_REPOS)=/\1=/' .env.prod
+sed -i -E 's/^# (D3_ANOMALY_PAUSE_ENABLED|B2_SELF_HEALING_ENABLED|B2_SELF_HEALING_MAX_PROPOSALS_PER_TICK|B2_SELF_HEALING_REPO|CLAUDE_BRANCH_WORKER_ALLOWED_REPOS|HERMES_DISPATCH_ALLOWED_REPOS)=/\1=/' .env.prod
 ```
 
 Target state (verify by grep — **no leading `#`**):
 
 ```bash
-grep -nE '^(D3_ANOMALY_PAUSE_ENABLED|B2_SELF_HEALING_ENABLED|B2_SELF_HEALING_REPO|CODEX_BRANCH_WORKER_ALLOWED_REPOS|CLAUDE_BRANCH_WORKER_ALLOWED_REPOS|HERMES_DISPATCH_ALLOWED_REPOS)=' .env.prod
+grep -nE '^(D3_ANOMALY_PAUSE_ENABLED|B2_SELF_HEALING_ENABLED|B2_SELF_HEALING_MAX_PROPOSALS_PER_TICK|B2_SELF_HEALING_REPO|CODEX_BRANCH_WORKER_ALLOWED_REPOS|CLAUDE_BRANCH_WORKER_ALLOWED_REPOS|HERMES_DISPATCH_ALLOWED_REPOS)=' .env.prod
 ```
 
 | Key | Value | Effect |
 |---|---|---|
 | `D3_ANOMALY_PAUSE_ENABLED` | `1` | tiered anomaly auto-pause (soft→supervised, hard→`HALT_FILE`) |
 | `B2_SELF_HEALING_ENABLED` | `1` | self-healing **proposes** fix tasks (never auto-runs; D3-interlocked) |
+| `B2_SELF_HEALING_MAX_PROPOSALS_PER_TICK` | `1` | first-arm swarm guard; old failures beyond the tick cap are cooled down/skipped |
 | `B2_SELF_HEALING_REPO` | `averray-agent/agent` | repo B2 proposes fixes against |
 | `CODEX_BRANCH_WORKER_ALLOWED_REPOS` | `averray-agent/agent,depre-dev/averray-reference-agent` | fail-closed allowlist (Codex runner) |
 | `CLAUDE_BRANCH_WORKER_ALLOWED_REPOS` | `averray-agent/agent,depre-dev/averray-reference-agent` | fail-closed allowlist (Claude runner) |

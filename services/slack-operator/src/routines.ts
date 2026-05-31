@@ -105,7 +105,7 @@ export function parseSlackRoutineConfig(
       intervalMs: Math.max(60_000, (positiveNumber(env.B2_SELF_HEALING_INTERVAL_MINUTES) || 5) * 60_000),
       cooldownMs: Math.max(60_000, (positiveNumber(env.B2_SELF_HEALING_COOLDOWN_MINUTES) || 30) * 60_000),
       maxOpenFixTasks: Math.max(1, positiveNumber(env.B2_SELF_HEALING_MAX_OPEN_FIXES) || 3),
-      maxProposalsPerTick: Math.max(1, positiveNumber(env.B2_SELF_HEALING_MAX_PROPOSALS_PER_TICK) || 2),
+      maxProposalsPerTick: Math.max(1, positiveNumber(env.B2_SELF_HEALING_MAX_PROPOSALS_PER_TICK) || 1),
     },
   };
 }

@@ -53,6 +53,22 @@ describe("slack operator routines", () => {
     expect(config.channelId).toBe("C-routine");
   });
 
+  it("parses B2 self-healing storm-control caps", () => {
+    const config = parseSlackRoutineConfig({
+      B2_SELF_HEALING_ENABLED: "1",
+      B2_SELF_HEALING_INTERVAL_MINUTES: "2",
+      B2_SELF_HEALING_COOLDOWN_MINUTES: "45",
+      B2_SELF_HEALING_MAX_PROPOSALS_PER_TICK: "2",
+      B2_SELF_HEALING_MAX_OPEN_FIXES: "4",
+    }, new Set(["C1"]));
+
+    expect(config.selfHealing.enabled).toBe(true);
+    expect(config.selfHealing.intervalMs).toBe(2 * 60_000);
+    expect(config.selfHealing.cooldownMs).toBe(45 * 60_000);
+    expect(config.selfHealing.maxProposalsPerTick).toBe(2);
+    expect(config.selfHealing.maxOpenFixTasks).toBe(4);
+  });
+
   it("runs the daily brief once per UTC date after the target time", () => {
     const config = parseSlackRoutineConfig({
       SLACK_OPERATOR_DAILY_BRIEF_ENABLED: "1",
