@@ -10,7 +10,7 @@
 | ID | Stream | Design doc |
 |----|--------|-----------|
 | **O** | Orchestration core | `HERMES_ORCHESTRATION_DESIGN.md` (+ `HERMES_MULTI_AGENT_ORCHESTRATION_PLAN.md`, `HERMES_INTEGRATION_MAP.md`) |
-| **A** | Agent performance | `HERMES_PHASE2_DESIGN.md` *(file name historical)* |
+| **A** | Agent performance | `HERMES_PHASE2_DESIGN.md` *(historical)*, `HERMES_AGENT_MODELS_AND_EFFORT.md` (A4) |
 | **D** | Operator trust | `HERMES_PHASE2_DESIGN.md` *(historical)*, `HERMES_AGENT_REQUESTS_AND_ALERTS.md` (D4) |
 | **B** | Hermes as planner | `HERMES_PHASE3_DESIGN.md` *(file name historical)* |
 | **C** | Multi-agent collaboration | `HERMES_PHASE4_DESIGN.md` *(file name historical)* |
@@ -29,6 +29,7 @@
 | A1 | Agent scorecard | 🟡 in review — read-only `/monitor/agents` + `averray_agent_scorecard` scorecard slice |
 | A2 | Learned routing (data-driven, non-high-risk) | 🟡 in review — scorecard-backed default routing, high-risk rule-bound |
 | A3 | Cost visibility / cost-aware routing | design done |
+| A4 | Agent model & effort policy — riskTier→effort/model + operator override (tester LLM; Hermes model = open) | design done (see `HERMES_AGENT_MODELS_AND_EFFORT.md`) |
 | D1 | "While you were away" digest (board + Slack/push) | design done |
 | D2 | Explainability / decision records | design done |
 | D3 | Anomaly auto-pause (tiered soft→hard) — owns the autopilot-suspended flag | 🟡 in build (prompt out — unblocks O4-PR3) |
