@@ -406,6 +406,8 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
           "/monitor/agents",
           "/monitor/collaboration",
           "/monitor/review-requests",
+          "/monitor/review-panels",
+          "/monitor/review-responses",
           "/monitor/tester/capabilities",
           "/monitor/testbed-missions",
           "/monitor/manifest.webmanifest",
@@ -830,7 +832,10 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
     await handleMonitorReviewRequest(request, response);
     return;
   }
-  if (request.method === "POST" && url.pathname === "/monitor/review-requests/respond") {
+  if (request.method === "POST" && (
+    url.pathname === "/monitor/review-requests/respond"
+    || url.pathname === "/monitor/review-responses"
+  )) {
     if (!monitorConfig.enabled) {
       writeJson(response, 404, { error: "monitor_disabled" });
       return;
@@ -944,18 +949,38 @@ async function handleMonitorReviewResponse(request: http.IncomingMessage, respon
       writeJson(response, 400, { error: "invalid_payload" });
       return;
     }
-    const result = recordReviewResponse(payload);
+    const result = recordReviewResponse(payload, Date.now(), {
+      boardUrl: optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor"),
+    });
+    const alertSent = result.panelEvaluation?.alert
+      ? await slackAlertChannel().dispatch(result.panelEvaluation.alert)
+      : false;
     logger.info(
       {
         id: result.reviewRequest.id,
         reviewer: result.reviewRequest.reviewer,
         verdict: result.reviewRequest.response?.verdict,
         panelId: result.reviewRequest.panelId,
-        escalated: result.panelEvaluation?.escalate === true,
+        panelAgreement: result.panelEvaluation?.agreement,
+        panelEscalated: result.panelEvaluation?.escalate ?? false,
+        alertSent,
       },
       "monitor_review_response_recorded"
     );
-    writeJson(response, 200, { ok: true, ...result });
+    writeJson(response, 200, {
+      ok: true,
+      reviewRequest: result.reviewRequest,
+      ...(result.panelEvaluation ? { panelEvaluation: result.panelEvaluation } : {}),
+      alertSent,
+      safety: {
+        advisoryOnly: true,
+        createsTasks: false,
+        approvesTasks: false,
+        mutatesGithub: false,
+        mutatesTaskQueue: false,
+        changesMergeAuthority: false,
+      },
+    });
   } catch (error) {
     if (error instanceof CollaborationValidationError) {
       writeJson(response, 400, { error: error.code, message: error.message });

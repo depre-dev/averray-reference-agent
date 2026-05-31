@@ -142,11 +142,16 @@ export interface RecordReviewPanelInput {
 
 export interface RecordReviewResponseInput {
   id?: unknown;
+  requestId?: unknown;
   panelId?: unknown;
   reviewer?: unknown;
   verdict?: unknown;
   reasoning?: unknown;
   respondedAt?: unknown;
+}
+
+export interface RecordReviewResponseOptions {
+  boardUrl?: string;
 }
 
 export interface RecordReviewPanelResult {
@@ -387,9 +392,10 @@ export function recordReviewPanelRequests(
 
 export function recordReviewResponse(
   input: RecordReviewResponseInput,
-  nowMs: number = Date.now()
+  nowMs: number = Date.now(),
+  options: RecordReviewResponseOptions = {}
 ): RecordReviewResponseResult {
-  const id = normalizeCorrelationId(input.id);
+  const id = normalizeCorrelationId(input.id) ?? normalizeCorrelationId(input.requestId);
   const panelId = normalizeCorrelationId(input.panelId);
   const reviewer = normalizeReviewer(input.reviewer);
   if (!id && (!panelId || !reviewer)) {
@@ -443,7 +449,10 @@ export function recordReviewResponse(
   reviewRequests[index] = updated;
   recordReviewResponseCollaborationTurn(updated, nowMs);
 
-  const panelEvaluation = evaluateReviewPanelForRequest(updated);
+  const panelEvaluation = evaluateReviewPanelForRequest(updated, options);
+  if (panelEvaluation?.escalate) {
+    recordPanelEscalationCollaborationTurn(panelEvaluation, updated, nowMs);
+  }
   return {
     reviewRequest: updated,
     ...(panelEvaluation ? { panelEvaluation } : {}),
@@ -670,15 +679,34 @@ function recordReviewResponseCollaborationTurn(request: ReviewRequest, nowMs: nu
   const relatedCorrelationId = request.correlationId ?? request.relatedMission?.id;
   recordCollaborationMessage({
     author: request.reviewer,
-    kind: "status",
-    addressedTo: "operator",
+    kind: request.response.verdict === "block" ? "request_help" : "status",
+    addressedTo: request.response.verdict === "block" ? "operator" : "hermes",
     text: `${actor} review verdict${scope ? ` on ${scope}` : ""}: ${request.response.verdict} — ${request.response.reasoning}`,
     ...(request.relatedPr ? { relatedPr: request.relatedPr } : {}),
     ...(relatedCorrelationId ? { relatedCorrelationId } : {}),
   }, nowMs);
 }
 
-function evaluateReviewPanelForRequest(request: ReviewRequest): ReviewPanelEvaluation | undefined {
+function recordPanelEscalationCollaborationTurn(
+  evaluation: ReviewPanelEvaluation,
+  request: ReviewRequest,
+  nowMs: number
+): void {
+  const relatedCorrelationId = request.correlationId ?? request.relatedMission?.id;
+  recordCollaborationMessage({
+    author: "hermes",
+    kind: "request_help",
+    addressedTo: "operator",
+    text: `${evaluation.summary} Advisory only: no agent may merge, approve, or change authority from this panel result.`,
+    ...(request.relatedPr ? { relatedPr: request.relatedPr } : {}),
+    ...(relatedCorrelationId ? { relatedCorrelationId } : {}),
+  }, nowMs + 1);
+}
+
+function evaluateReviewPanelForRequest(
+  request: ReviewRequest,
+  options: RecordReviewResponseOptions
+): ReviewPanelEvaluation | undefined {
   if (!request.panelId) return undefined;
   const panelRequests = reviewRequests.filter((candidate) => candidate.panelId === request.panelId);
   if (!panelRequests.some((candidate) => candidate.reviewMode === "panel")) return undefined;
@@ -702,6 +730,7 @@ function evaluateReviewPanelForRequest(request: ReviewRequest): ReviewPanelEvalu
     relatedLabel: reviewRequestScopeLabel(request),
     reviewers: uniqueReviewers,
     responses,
+    ...(options.boardUrl ? { boardUrl: options.boardUrl } : {}),
   });
 }
 
