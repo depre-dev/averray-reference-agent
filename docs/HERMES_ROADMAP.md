@@ -39,7 +39,7 @@
 | B1 | Backlog generation (roadmap auto-flow; net-new escalates) | 🟡 in review — first planner-only/read-only backlog suggestions slice |
 | B2 | Self-healing (auto-fix non-high-risk; rollback human) | design done |
 | C1 | Cross-agent review (default) | 🟡 in build — first slice records/displays review requests only; no auto-run or authority change |
-| C2 | Reviewer panel (high-risk) | design done |
+| C2 | Reviewer panel (high-risk) | 🟡 in build — panel requests, verdict recording, and block/disagreement action-needed bridge |
 | C3 | Specialist agents (test-writer/security/docs) | 🟡 in build — first `test-writer` specialist template |
 | C4 | Inter-agent chat | ✅ done (#291) — Claude author/target + card-scoped agent messages v1 |
 | T1 | Surface sweep + truth-boundary honesty | ✅ done — executor #273; deploy-wire (platform #604) + runner #277; runs per-deploy (report-only) |

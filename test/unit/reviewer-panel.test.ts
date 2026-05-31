@@ -42,7 +42,7 @@ describe("C2 reviewer panel", () => {
     });
   });
 
-  it("allows a no-block majority while keeping minority reasoning attached", () => {
+  it("escalates any no-block disagreement while keeping every verdict attached", () => {
     const evaluation = evaluateReviewPanel({
       panelId: "panel-2",
       relatedLabel: "agent#405",
@@ -53,9 +53,10 @@ describe("C2 reviewer panel", () => {
     expect(evaluation).toMatchObject({
       agreement: "majority",
       panelVerdict: "pass",
-      escalate: false,
+      escalate: true,
     });
     expect(evaluation.reviewers).toHaveLength(3);
+    expect(evaluation.summary).toMatch(/operator decision required/);
   });
 
   it("escalates disagreement with every reviewer verdict in the D4 alert payload", () => {
@@ -98,6 +99,22 @@ describe("C2 reviewer panel", () => {
       panelVerdict: "pending",
       escalate: false,
     });
+  });
+
+  it("escalates a block immediately even when other panelists are pending", () => {
+    const evaluation = evaluateReviewPanel({
+      panelId: "panel-5",
+      relatedLabel: "agent#408",
+      reviewers: ["hermes", "codex", "claude"],
+      responses: [{ reviewer: "codex", verdict: "block", reasoning: "contract deploy path is unsafe" }],
+    });
+
+    expect(evaluation).toMatchObject({
+      agreement: "blocked",
+      panelVerdict: "block",
+      escalate: true,
+    });
+    expect(evaluation.alert?.text).toContain("Codex: block");
   });
 });
 

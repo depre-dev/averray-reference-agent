@@ -19,6 +19,12 @@
 
 Any unresolved disagreement — a panel split, or a reviewer that blocks — **parks the PR for the operator**, showing each reviewer's verdict + reasoning side by side. The human owns the call. Consistent with every other gate in the system; no agent quietly overrides another. (Decision records from D2 make the disagreement legible.)
 
+Implementation note: C2 is advisory only. A high-risk panel records independent
+Hermes/Codex/Claude review requests and verdicts. A `block` verdict escalates as
+soon as it lands; any completed non-unanimous panel also parks the card in
+`needs-attention`, which lets the existing D4 alert bridge notify the operator.
+No panel path merges, deploys, approves dispatch, or changes high-risk routing.
+
 ## C3 — Roster growth  ·  **internal specialists now, external later** (decision #3)
 
 - **Internal specialists now:** add role-specific agents — a **test-writer**, a **security-review** agent, a **docs** agent — via the per-agent-runner pattern from P2. Adding one is modular: a new runner + a new `agentType` + a routing-taxonomy entry. The risk taxonomy decides what each is trusted with (e.g. the security-review agent is a reviewer, not a builder, on high-risk surfaces).

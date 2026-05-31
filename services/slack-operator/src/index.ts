@@ -44,6 +44,7 @@ import {
   recordCollaborationMessage,
   recordHermesMemoryNote,
   recordReviewPanelRequests,
+  recordReviewResponse,
   recordReviewRequest,
   synthesizeHermesReplyFor,
   type ReviewRequestStatus,
@@ -829,6 +830,18 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
     await handleMonitorReviewRequest(request, response);
     return;
   }
+  if (request.method === "POST" && url.pathname === "/monitor/review-requests/respond") {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    await handleMonitorReviewResponse(request, response);
+    return;
+  }
   if (request.method === "POST" && url.pathname === "/monitor/review-panels") {
     if (!monitorConfig.enabled) {
       writeJson(response, 404, { error: "monitor_disabled" });
@@ -918,6 +931,39 @@ async function handleMonitorReviewRequest(request: http.IncomingMessage, respons
     logger.error({ err: error }, "monitor_review_request_failed");
     writeJson(response, 500, {
       error: "monitor_review_request_failed",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function handleMonitorReviewResponse(request: http.IncomingMessage, response: http.ServerResponse) {
+  try {
+    const rawBody = await readBody(request);
+    const payload = rawBody ? JSON.parse(rawBody) as unknown : {};
+    if (!isRecord(payload)) {
+      writeJson(response, 400, { error: "invalid_payload" });
+      return;
+    }
+    const result = recordReviewResponse(payload);
+    logger.info(
+      {
+        id: result.reviewRequest.id,
+        reviewer: result.reviewRequest.reviewer,
+        verdict: result.reviewRequest.response?.verdict,
+        panelId: result.reviewRequest.panelId,
+        escalated: result.panelEvaluation?.escalate === true,
+      },
+      "monitor_review_response_recorded"
+    );
+    writeJson(response, 200, { ok: true, ...result });
+  } catch (error) {
+    if (error instanceof CollaborationValidationError) {
+      writeJson(response, 400, { error: error.code, message: error.message });
+      return;
+    }
+    logger.error({ err: error }, "monitor_review_response_failed");
+    writeJson(response, 500, {
+      error: "monitor_review_response_failed",
       message: error instanceof Error ? error.message : String(error),
     });
   }

@@ -71,6 +71,17 @@ export function evaluateReviewPanel(input: ReviewPanelEvaluationInput): ReviewPa
   const reviewers = input.reviewers.map((reviewer) => responsesByReviewer.get(reviewer)).filter(Boolean) as ReviewPanelResponse[];
   const pendingCount = input.reviewers.length - reviewers.length;
 
+  // A block is actionable as soon as it lands; the operator should not wait for
+  // the rest of the panel to answer before seeing the card.
+  const blocker = reviewers.find((reviewer) => reviewer.verdict === "block");
+  if (blocker) {
+    return withEscalation(input, reviewers, {
+      agreement: "blocked",
+      panelVerdict: "block",
+      summary: `${displayName(blocker.reviewer)} blocked ${input.relatedLabel}; operator decision required.`,
+    });
+  }
+
   if (pendingCount > 0) {
     return {
       panelId: input.panelId,
@@ -81,15 +92,6 @@ export function evaluateReviewPanel(input: ReviewPanelEvaluationInput): ReviewPa
       reviewers,
       summary: `Panel is waiting on ${pendingCount} reviewer${pendingCount === 1 ? "" : "s"} for ${input.relatedLabel}.`,
     };
-  }
-
-  const blocker = reviewers.find((reviewer) => reviewer.verdict === "block");
-  if (blocker) {
-    return withEscalation(input, reviewers, {
-      agreement: "blocked",
-      panelVerdict: "block",
-      summary: `${displayName(blocker.reviewer)} blocked ${input.relatedLabel}; operator decision required.`,
-    });
   }
 
   const counts = verdictCounts(reviewers);
@@ -108,15 +110,11 @@ export function evaluateReviewPanel(input: ReviewPanelEvaluationInput): ReviewPa
   }
 
   if (top.count > reviewers.length / 2) {
-    return {
-      panelId: input.panelId,
-      relatedLabel: input.relatedLabel,
+    return withEscalation(input, reviewers, {
       agreement: "majority",
       panelVerdict: top.verdict,
-      escalate: false,
-      reviewers,
-      summary: `Reviewer panel majority: ${top.verdict} for ${input.relatedLabel}; minority reasoning remains attached for the operator.`,
-    };
+      summary: `Reviewer panel disagrees on ${input.relatedLabel}; majority is ${top.verdict}, operator decision required.`,
+    });
   }
 
   return withEscalation(input, reviewers, {
