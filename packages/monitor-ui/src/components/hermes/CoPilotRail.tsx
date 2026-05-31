@@ -6,8 +6,9 @@
 // shows up on the next poll. `/mission <url>` still spawns a browser
 // mission (M7').
 
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { BoardCard, CreateTaskInput } from "../../lib/monitor/card-types.js";
+import type { BacklogSuggestion, BacklogSuggestionsResponse } from "../../lib/monitor/backlog-suggestions.js";
 import { relatedPrForCard } from "../../lib/monitor/collaboration.js";
 import { useCollaboration, type UseCollaborationOptions } from "../../hooks/useCollaboration.js";
 import { AskHermesComposer } from "./AskHermesComposer.js";
@@ -19,8 +20,14 @@ export interface CoPilotRailProps {
   onSpawnClaudeTask?: (repo: string, prompt: string) => void;
   /** Propose a task (/task <agent> [<repo>#<pr>] <prompt>). */
   onCreateTask?: (input: CreateTaskInput) => void;
+  /** Planner-only B1 follow-up suggestions. Read-only; never creates tasks. */
+  backlogSuggestions?: BacklogSuggestionsResponse;
+  /** Board cards used to link suggestions to their source card. */
+  boardCards?: readonly BoardCard[];
   /** Focused card — scopes Ask-Hermes questions + the scope chip. */
   focusedCard?: BoardCard;
+  /** Open a related card from a linked follow-up suggestion. */
+  onCardClick?: (id: string) => void;
   /** Collaboration wiring. Omit to keep the rail inert (e.g. in BoardView tests). */
   collaboration?: UseCollaborationOptions;
   /** Mute action alerts until a timestamp (/mute). */
@@ -43,7 +50,10 @@ export function CoPilotRail({
   onSpawnMission,
   onSpawnClaudeTask,
   onCreateTask,
+  backlogSuggestions,
+  boardCards,
   focusedCard,
+  onCardClick,
   collaboration,
   onMute,
   onUnmute,
@@ -79,6 +89,12 @@ export function CoPilotRail({
         </div>
       </div>
 
+      <BacklogSuggestionsRailBlock
+        response={backlogSuggestions}
+        boardCards={boardCards ?? []}
+        onCardClick={onCardClick}
+      />
+
       <div className="hm-hermes-stream" ref={streamRef} aria-live="polite">
         {messages.length === 0 ? (
           <div className="hm-lane-empty">
@@ -104,5 +120,100 @@ export function CoPilotRail({
         focusToken={composerFocusToken}
       />
     </aside>
+  );
+}
+
+function BacklogSuggestionsRailBlock({
+  response,
+  boardCards,
+  onCardClick,
+}: {
+  response?: BacklogSuggestionsResponse;
+  boardCards: readonly BoardCard[];
+  onCardClick?: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const bodyId = useId();
+  const suggestions = response?.suggestions?.slice(0, 3) ?? [];
+  const cardsById = useMemo(() => new Map(boardCards.map((card) => [card.id, card])), [boardCards]);
+
+  if (!response) return null;
+
+  return (
+    <section className="hm-backlog-suggestions hm-backlog-suggestions--rail" aria-label="Suggested follow-ups">
+      <button
+        type="button"
+        className="hm-backlog-suggestions-toggle"
+        aria-expanded={open}
+        aria-controls={bodyId}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span aria-hidden>{open ? "▾" : "▸"}</span>
+        <span>
+          <span className="hm-kicker">Suggested follow-ups ({suggestions.length})</span>
+          <strong>planner-only · read-only</strong>
+        </span>
+        <span className="hm-backlog-suggestions-safety">no tasks created</span>
+      </button>
+      {open ? (
+        <div className="hm-backlog-suggestions-grid" id={bodyId}>
+          {suggestions.length > 0 ? suggestions.map((suggestion) => (
+            <BacklogSuggestionRow
+              suggestion={suggestion}
+              relatedCard={cardsById.get(suggestion.related.cardId)}
+              onCardClick={onCardClick}
+              key={suggestion.id}
+            />
+          )) : (
+            <div className="hm-backlog-suggestion-empty">No follow-up suggestions right now.</div>
+          )}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function BacklogSuggestionRow({
+  suggestion,
+  relatedCard,
+  onCardClick,
+}: {
+  suggestion: BacklogSuggestion;
+  relatedCard?: BoardCard;
+  onCardClick?: (id: string) => void;
+}) {
+  const copyPrompt = () => {
+    if (!suggestion.suggestedPrompt || typeof navigator === "undefined") return;
+    void navigator.clipboard?.writeText(suggestion.suggestedPrompt);
+  };
+  return (
+    <div className="hm-backlog-suggestion-row">
+      <span>
+        <strong>{suggestion.title}</strong>
+        <small>{suggestion.reason}</small>
+      </span>
+      <span className="hm-backlog-suggestion-meta">
+        {suggestion.suggestedOwner} · {suggestion.riskTier} · {Math.round(suggestion.confidence * 100)}%
+      </span>
+      {relatedCard ? (
+        onCardClick ? (
+          <button
+            type="button"
+            className="hm-backlog-link"
+            onClick={() => onCardClick(relatedCard.id)}
+            aria-label={`Open related card ${relatedCard.id}`}
+          >
+            Open card
+          </button>
+        ) : (
+          <span className="hm-backlog-link">linked card</span>
+        )
+      ) : null}
+      {suggestion.suggestedPrompt ? (
+        <button type="button" className="hm-backlog-copy" onClick={copyPrompt}>
+          Copy prompt
+        </button>
+      ) : null}
+    </div>
   );
 }

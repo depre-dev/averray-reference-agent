@@ -116,11 +116,13 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(getByText("not_recorded")).toBeTruthy();
   });
 
-  test("renders backlog suggestions as planner-only read-only prompts", () => {
-    const { getByRole, getByText } = render(
+  test("renders backlog suggestions as a collapsed planner-only rail block", () => {
+    const onCardClick = vi.fn();
+    const { container, getByRole, getByText, queryByText } = render(
       <BoardView
         board={richBoard}
         status="open"
+        onCardClick={onCardClick}
         backlogSuggestions={{
           generatedAt: "2026-05-31T12:00:00.000Z",
           safety: {
@@ -139,7 +141,7 @@ describe("BoardView — rich-mix board (open stream)", () => {
               reason: "A browser mission failed and needs a narrow fix plan.",
               suggestedOwner: "claude",
               riskTier: "low",
-              related: { cardId: "mission-1" },
+              related: { cardId: "mission browser-onboard-04" },
               suggestedPrompt: "Investigate the failed mission.",
               confidence: 0.82,
               evidence: ["missionVerdict:FAILED"],
@@ -149,10 +151,20 @@ describe("BoardView — rich-mix board (open stream)", () => {
       />,
     );
     expect(getByRole("region", { name: "Suggested follow-ups" })).toBeTruthy();
+    expect(container.querySelector(".hm-lanes-wrap .hm-backlog-suggestions")).toBeFalsy();
+    const toggle = getByRole("button", { name: /Suggested follow-ups \(1\)/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(getByText("planner-only · read-only")).toBeTruthy();
     expect(getByText("no tasks created")).toBeTruthy();
+    expect(queryByText("Follow up failed mission")).toBeFalsy();
+
+    fireEvent.click(toggle);
+
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(getByText("Follow up failed mission")).toBeTruthy();
     expect(getByRole("button", { name: "Copy prompt" })).toBeTruthy();
+    fireEvent.click(getByRole("button", { name: "Open related card mission browser-onboard-04" }));
+    expect(onCardClick).toHaveBeenCalledWith("mission browser-onboard-04");
   });
 
   test("Refresh button is wired to onRefresh", () => {
