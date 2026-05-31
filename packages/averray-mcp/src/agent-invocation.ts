@@ -27,6 +27,12 @@ import {
   type DispatchPolicyConfig,
 } from "./dispatch-policy.js";
 import { classifyTask, type RiskTier } from "./dispatch-routing.js";
+import { getAgentScorecard } from "./agent-scorecard.js";
+import {
+  applyLearnedRouting,
+  parseLearnedRoutingConfig,
+  type LearnedRoutingConfig,
+} from "./learned-routing.js";
 
 export type AgentInvocationIntent =
   | "operator_command"
@@ -104,6 +110,12 @@ export interface AgentInvocationDeps {
   listQueuedTasksFn?: () => Promise<QueuedTaskSummary[]>;
   /** HALT kill-switch check; defaults to assertNoKillSwitch. */
   assertNoKillSwitchFn?: (toolName: string) => Promise<void>;
+  /** A1 scorecard source for A2 learned routing; defaults to getAgentScorecard. */
+  agentScorecardFn?: () => Promise<unknown>;
+  /** A2 learned routing config override; defaults to env + conservative defaults. */
+  learnedRoutingConfig?: Partial<LearnedRoutingConfig>;
+  /** Injectable RNG for deterministic A2 exploration tests. */
+  routingRandomFn?: () => number;
   /** Env for the default enqueue transport + policy load. */
   enqueueEnv?: NodeJS.ProcessEnv;
 }
@@ -837,14 +849,15 @@ async function invokeEnqueueAgentTask(
   if (!repo) return blockedInvocation(invocation, startedAt, "repo_required");
   if (!prompt) return blockedInvocation(invocation, startedAt, "prompt_required");
 
-  // Routing taxonomy (O4-PR2): a pure, overridable default. An explicit agent in
-  // the request wins; otherwise derive it. The riskTier is ALWAYS computed and
-  // persisted (PR3's autopilot reads it). The operator can still flip the agent
-  // at approval — unchanged. No authority is granted here.
-  const routing = classifyTask({ repo, prompt, ...(input.area ? { area: input.area } : {}) });
+  // Routing taxonomy (O4-PR2) + A2 learned default: explicit agent wins;
+  // otherwise A2 may refine the low-risk default from the A1 scorecard. The
+  // riskTier is ALWAYS computed by the static taxonomy and persisted (PR3's
+  // autopilot reads it). The operator can still flip the agent at approval —
+  // unchanged. No authority is granted here.
+  const routingInput = { repo, prompt, ...(input.area ? { area: input.area } : {}) };
+  const staticRouting = classifyTask(routingInput);
   const explicitAgent = (input.agent ?? "").trim();
-  const agent: "codex" | "claude" =
-    explicitAgent === "codex" || explicitAgent === "claude" ? explicitAgent : routing.agent;
+  const agentExplicit = explicitAgent === "codex" || explicitAgent === "claude";
 
   // (a) HALT kill-switch — block cleanly rather than crash.
   const assertKill = deps.assertNoKillSwitchFn ?? assertNoKillSwitch;
@@ -857,8 +870,13 @@ async function invokeEnqueueAgentTask(
     });
   }
 
-  // (b) Dispatch guardrail — allowlist + per-day budget. Fail-closed.
   const env = deps.enqueueEnv ?? process.env;
+  const routing = agentExplicit
+    ? staticRouting
+    : await resolveLearnedRouting(routingInput, staticRouting, deps, env);
+  const agent: "codex" | "claude" = agentExplicit ? explicitAgent : routing.agent;
+
+  // (b) Dispatch guardrail — allowlist + per-day budget. Fail-closed.
   const policy = deps.dispatchPolicyConfig ?? loadDispatchPolicyConfig(env);
   const queued = await (deps.listQueuedTasksFn ?? defaultListQueuedTasks(env))().catch(
     () => [] as QueuedTaskSummary[],
@@ -902,7 +920,7 @@ async function invokeEnqueueAgentTask(
       proposedTaskId: created.id ?? null,
       repo,
       agent,
-      agentExplicit: explicitAgent === "codex" || explicitAgent === "claude",
+      agentExplicit,
       riskTier: routing.riskTier,
       routingReason: routing.reason,
       requester: "hermes",
@@ -910,6 +928,37 @@ async function invokeEnqueueAgentTask(
     },
     { mutates: false, localCheckpoint: false },
   );
+}
+
+async function resolveLearnedRouting(
+  routingInput: { repo: string; prompt: string; area?: string },
+  staticRouting: ReturnType<typeof classifyTask>,
+  deps: AgentInvocationDeps,
+  env: NodeJS.ProcessEnv
+): Promise<ReturnType<typeof classifyTask>> {
+  const config = parseLearnedRoutingConfig(env, deps.learnedRoutingConfig);
+  if (staticRouting.riskTier === "high") {
+    return applyLearnedRouting(routingInput, staticRouting, {
+      config,
+      now: deps.now,
+      ...(deps.routingRandomFn ? { rng: deps.routingRandomFn } : {}),
+    });
+  }
+
+  try {
+    const scorecard = await (deps.agentScorecardFn ?? (() => getAgentScorecard({ now: deps.now })))();
+    return applyLearnedRouting(routingInput, staticRouting, {
+      scorecard,
+      config,
+      now: deps.now,
+      ...(deps.routingRandomFn ? { rng: deps.routingRandomFn } : {}),
+    });
+  } catch {
+    return {
+      ...staticRouting,
+      reason: `A2 scorecard unavailable → static default (${staticRouting.reason})`,
+    };
+  }
 }
 
 // enqueue transport — POST/GET the slack-operator queue endpoint. Injected in
