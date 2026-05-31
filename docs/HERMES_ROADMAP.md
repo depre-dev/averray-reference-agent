@@ -38,7 +38,7 @@
 | C1 | Cross-agent review (default) | design done |
 | C2 | Reviewer panel (high-risk) | design done |
 | C3 | Specialist agents (test-writer/security/docs) | design done |
-| C4 | Inter-agent chat | design done |
+| C4 | Inter-agent chat | 🟡 in review — Claude author/target + card-scoped agent messages |
 | T1 | Surface sweep + truth-boundary honesty | ✅ done — executor #273; deploy-wire (platform #604) + runner #277; runs per-deploy (report-only) |
 | T2 | Pre-seeded session (authed sweep) | design done |
 | T3 | Signer sidecar + SIWE mission (multi-role) | 🟡 in review — signer sidecar done (#283); SIWE role-gating mission follow-up |
@@ -47,7 +47,7 @@
 | T6 | Agent-requested tester runs — board-gated (request → approve → read-only run) | design done (#274) |
 | T7 | Tester capabilities manifest (+ platform-repo request helper) | in review — manifest endpoint; platform helper follow-up |
 
-*(Status as of 2026-05-31 — **shipped:** O0–O3 (operator-driven loop), T1 (per-deploy surface sweep), T3 (signer sidecar foundation), D4 (alert bridge), O4-PR1+PR2 (Hermes proposes smart risk-tagged work; supervised). **In build:** D3 (anomaly auto-pause — unblocks O4-PR3) and T7 reference-agent manifest endpoint. **Design-only / remaining:** O4-PR3 (autopilot, gated on D3), O5, A1–A3, B1–B2, C1–C4, D1–D2, T2, T4–T6, and the T7 platform helper/AGENTS pointer. **Critical path to autopilot:** D3 → O4-PR3 → supervised burn-in → flip on. Everything else is depth/enhancement.)*
+*(Status as of 2026-05-31 — **shipped:** O0–O3 (operator-driven loop), T1 (per-deploy surface sweep), T3 (signer sidecar foundation), D4 (alert bridge), O4-PR1+PR2 (Hermes proposes smart risk-tagged work; supervised). **In build:** D3 (anomaly auto-pause — unblocks O4-PR3), C4 (inter-agent chat channel), and T7 reference-agent manifest endpoint. **Design-only / remaining:** O4-PR3 (autopilot, gated on D3), O5, A1–A3, B1–B2, C1–C3, D1–D2, T2, T4–T6, and the T7 platform helper/AGENTS pointer. **Critical path to autopilot:** D3 → O4-PR3 → supervised burn-in → flip on. Everything else is depth/enhancement.)*
 
 ## Recommended build order (the smooth, low-effort ramp)
 

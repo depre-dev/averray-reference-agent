@@ -1,15 +1,15 @@
 // Hermes Handoff Monitor — collaboration feed types + helpers (M8').
 //
-// The co-pilot rail renders the operator ↔ Hermes ↔ Codex collaboration
+// The co-pilot rail renders the operator ↔ Hermes ↔ Codex/Claude collaboration
 // feed served by slack-operator's /monitor/collaboration. This is the
 // frontend's copy of the contract (they cross an HTTP/JSON boundary, so
 // the declarations are intentionally independent, like card-types.ts).
 
 import type { BoardCard } from "./card-types.js";
 
-export type CollaborationAuthor = "codex" | "hermes" | "operator" | "system";
+export type CollaborationAuthor = "claude" | "codex" | "hermes" | "operator" | "system";
 export type CollaborationKind = "chat" | "proposal" | "request_help" | "status";
-export type CollaborationTarget = "everyone" | "codex" | "hermes" | "operator";
+export type CollaborationTarget = "everyone" | "claude" | "codex" | "hermes" | "operator";
 
 export interface CollaborationRelatedPr {
   repo: string;
@@ -31,6 +31,7 @@ export interface CollaborationMessage {
 export function actorLabel(author: CollaborationAuthor): string {
   if (author === "hermes") return "Hermes";
   if (author === "operator") return "Pascal";
+  if (author === "claude") return "Claude";
   if (author === "codex") return "Codex";
   return "System";
 }

@@ -32,13 +32,13 @@ const SOFT_TTL_MS = 24 * 60 * 60 * 1000;
 const HERMES_MEMORY_MAX_NOTES = 120;
 const HERMES_MEMORY_NOTE_MAX_CHARS = 320;
 
-const KNOWN_AUTHORS = new Set(["codex", "hermes", "operator", "system"] as const);
+const KNOWN_AUTHORS = new Set(["claude", "codex", "hermes", "operator", "system"] as const);
 const KNOWN_KINDS = new Set(["chat", "proposal", "request_help", "status"] as const);
-const KNOWN_TARGETS = new Set(["everyone", "codex", "hermes", "operator"] as const);
+const KNOWN_TARGETS = new Set(["everyone", "claude", "codex", "hermes", "operator"] as const);
 
-export type CollaborationAuthor = "codex" | "hermes" | "operator" | "system";
+export type CollaborationAuthor = "claude" | "codex" | "hermes" | "operator" | "system";
 export type CollaborationKind = "chat" | "proposal" | "request_help" | "status";
-export type CollaborationTarget = "everyone" | "codex" | "hermes" | "operator";
+export type CollaborationTarget = "everyone" | "claude" | "codex" | "hermes" | "operator";
 
 export interface CollaborationRelatedPr {
   repo: string;
@@ -115,7 +115,7 @@ export function recordCollaborationMessage(
   if (!author) {
     throw new CollaborationValidationError(
       "invalid_author",
-      "author must be one of: codex, hermes, operator, system."
+      "author must be one of: claude, codex, hermes, operator, system."
     );
   }
 
@@ -128,7 +128,13 @@ export function recordCollaborationMessage(
   }
 
   const kind = normalizeKind(input.kind) ?? "chat";
-  const addressedTo = normalizeTarget(input.addressedTo) ?? "everyone";
+  const addressedTo = normalizeTarget(input.addressedTo);
+  if (addressedTo === null && hasExplicitTarget(input.addressedTo)) {
+    throw new CollaborationValidationError(
+      "invalid_target",
+      "addressedTo must be one of: everyone, claude, codex, hermes, operator."
+    );
+  }
   const relatedPr = normalizeRelatedPr(input.relatedPr);
   const relatedCorrelationId = normalizeCorrelationId(input.relatedCorrelationId);
 
@@ -138,7 +144,7 @@ export function recordCollaborationMessage(
     author,
     kind,
     text,
-    addressedTo,
+    addressedTo: addressedTo ?? "everyone",
     ...(relatedPr ? { relatedPr } : {}),
     ...(relatedCorrelationId ? { relatedCorrelationId } : {}),
   };
@@ -229,6 +235,12 @@ function normalizeTarget(value: unknown): CollaborationTarget | null {
   if (typeof value !== "string") return null;
   const v = value.trim().toLowerCase();
   return (KNOWN_TARGETS as Set<string>).has(v) ? (v as CollaborationTarget) : null;
+}
+
+function hasExplicitTarget(value: unknown): boolean {
+  if (value == null) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  return true;
 }
 
 function normalizeText(value: unknown): string {

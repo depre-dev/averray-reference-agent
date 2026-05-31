@@ -29,6 +29,14 @@ describe("HermesTurn", () => {
     expect(getByText("Pascal")).toBeTruthy();
   });
 
+  test("Claude turns are attributed as agent messages", () => {
+    const { container, getByText } = render(
+      <HermesTurn turn={{ ...base, id: "claude-1", author: "claude", addressedTo: "codex" }} />,
+    );
+    expect(getByText("Claude")).toBeTruthy();
+    expect((container.querySelector(".hm-turn") as HTMLElement).className).toContain("hm-turn--claude");
+  });
+
   test("a relatedPr renders a real GitHub PR link", () => {
     const { container } = render(
       <HermesTurn turn={{ ...base, id: "3", relatedPr: { repo: "depre-dev/agent", number: 548 } }} />,
