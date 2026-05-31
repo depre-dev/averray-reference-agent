@@ -101,6 +101,12 @@ export interface BoardViewProps {
   onMute?: (untilMs: number) => void;
   onUnmute?: () => void;
   muted?: boolean;
+  /** Engage autopilot until `untilMs` (undefined → server 4h cap). */
+  onSetAutopilot?: (untilMs?: number) => void;
+  /** Revert to supervised. */
+  onSetSupervised?: () => void;
+  /** Current autonomy mode (drives the composer toggle chip). */
+  autonomyMode?: "supervised" | "autopilot";
   /** Disable the global keyboard handler (tests rendering many boards). */
   keyboard?: boolean;
 }
@@ -121,6 +127,9 @@ export function BoardView({
   onMute,
   onUnmute,
   muted,
+  onSetAutopilot,
+  onSetSupervised,
+  autonomyMode,
   keyboard = true,
 }: BoardViewProps) {
   const degraded = status === "reconnecting" || status === "closed";
@@ -299,6 +308,9 @@ export function BoardView({
           onMute={onMute}
           onUnmute={onUnmute}
           muted={muted}
+          onSetAutopilot={onSetAutopilot}
+          onSetSupervised={onSetSupervised}
+          autonomyMode={autonomyMode}
           composerFocusToken={askToken}
         />
       </div>

@@ -71,6 +71,12 @@ import {
   readAutopilotSuspendState,
 } from "./autopilot-state.js";
 import {
+  readAutonomyState,
+  setAutonomyMode,
+  expireAutonomyIfDue,
+  type AutonomyMode,
+} from "./autonomy-mode.js";
+import {
   isDebugSpawnEnabled,
   mergeDebugCards,
   onDebugCardSpawned,
@@ -195,6 +201,44 @@ if (!enabled) {
     logger.warn("slack_operator_enabled_without_socket_or_signing_secret");
   }
   startOperatorRoutines();
+  // O4-PR3a — always-on safety revert: lazy-resolve already treats an expired
+  // autopilot as supervised, but this persists the revert + alerts ONCE when the
+  // window lapses (a forgotten autopilot ends on its own). Independent of the
+  // routine channel; the alert rides the D4 bridge (SLACK_WEBHOOK_URL).
+  setInterval(() => void checkAutonomyExpiry(), 60_000);
+}
+
+let autonomyExpiryRunning = false;
+async function checkAutonomyExpiry() {
+  if (autonomyExpiryRunning) return;
+  autonomyExpiryRunning = true;
+  try {
+    const result = expireAutonomyIfDue();
+    if (!result.expired) return;
+    logger.info({ until: result.previous?.until }, "o4_autonomy_expired_to_supervised");
+    const boardUrl = optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor") ?? "https://monitor.averray.com/monitor";
+    await slackAlertChannel().dispatch({
+      count: 0,
+      items: [],
+      boardUrl,
+      text: `⏱️ Hermes autopilot window ended — back to SUPERVISED. Every dispatch needs your approval again.\nBoard: ${boardUrl}`,
+    }).catch((error) => logger.warn({ err: error }, "o4_autonomy_expiry_alert_failed"));
+    await recordOperatorCommandEvent({
+      source: "slack_routine",
+      commandText: "autonomy autopilot window expired",
+      result: {
+        kind: "autonomy_mode_change",
+        from: "autopilot",
+        to: "supervised",
+        setBy: "autopilot-expiry",
+        safety: { readOnly: false, mutatesGithub: false, mutatesAverray: false, editsWikipedia: false },
+      },
+    }, query).catch((error) => logger.warn({ err: error }, "o4_autonomy_expiry_record_failed"));
+  } catch (error) {
+    logger.warn({ err: error }, "o4_autonomy_expiry_failed");
+  } finally {
+    autonomyExpiryRunning = false;
+  }
 }
 
 async function handleHttpRequest(request: http.IncomingMessage, response: http.ServerResponse) {
@@ -493,6 +537,18 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       return;
     }
     await handleMonitorAutopilotResumeRequest(request, response);
+    return;
+  }
+  if (url.pathname === "/monitor/autonomy-mode" && (request.method === "GET" || request.method === "POST")) {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    await handleMonitorAutonomyModeRequest(request, response);
     return;
   }
   const testbedMissionId = monitorTestbedMissionId(url.pathname);
@@ -1151,6 +1207,66 @@ async function handleMonitorAutopilotResumeRequest(_request: http.IncomingMessag
   } catch (error) {
     writeJson(response, 500, {
       error: "autopilot_resume_failed",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+// O4-PR3a — autonomy mode. GET returns the current (clock-resolved) mode; POST
+// sets it (supervised | autopilot[, untilMs]). Setting autopilot is an explicit
+// operator action; an absent/past `untilMs` falls back to the now+4h safety cap.
+// Every mode change is alerted (D4) + audited. The auto-approval that READS this
+// mode ships in PR3b — until then this only records the operator's intent.
+async function handleMonitorAutonomyModeRequest(request: http.IncomingMessage, response: http.ServerResponse) {
+  try {
+    if (request.method === "GET") {
+      writeJson(response, 200, { ok: true, autonomy: readAutonomyState() });
+      return;
+    }
+    const rawBody = await readBody(request);
+    const payload = rawBody ? JSON.parse(rawBody) as unknown : {};
+    if (!isRecord(payload)) {
+      writeJson(response, 400, { error: "invalid_payload" });
+      return;
+    }
+    const modeRaw = stringField(payload, "mode");
+    if (modeRaw !== "supervised" && modeRaw !== "autopilot") {
+      writeJson(response, 400, { error: "invalid_mode", message: "mode must be 'supervised' or 'autopilot'." });
+      return;
+    }
+    const mode: AutonomyMode = modeRaw;
+    const untilMs = typeof payload.untilMs === "number" && Number.isFinite(payload.untilMs) ? payload.untilMs : undefined;
+    const setBy = stringField(payload, "setBy") ?? "monitor";
+    const before = readAutonomyState();
+    const after = setAutonomyMode({ mode, ...(untilMs !== undefined ? { untilMs } : {}), setBy });
+    const changed = before.mode !== after.mode || before.until !== after.until;
+    logger.info({ from: before.mode, to: after.mode, until: after.until, setBy }, "o4_autonomy_mode_set");
+
+    if (changed) {
+      const boardUrl = optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor") ?? "https://monitor.averray.com/monitor";
+      const text = after.mode === "autopilot"
+        ? `🟢 Hermes is in AUTOPILOT until ${after.until ?? "—"} — low/medium-risk dispatch within budget auto-approves; high-risk still escalates to you. Merge/deploy stays human.\nBoard: ${boardUrl}`
+        : `⏸️ Hermes is back to SUPERVISED — every dispatch needs your approval again.\nBoard: ${boardUrl}`;
+      await slackAlertChannel().dispatch({ count: 0, items: [], boardUrl, text }).catch((error) => logger.warn({ err: error }, "o4_autonomy_alert_failed"));
+      await recordOperatorCommandEvent({
+        source: "monitor",
+        commandText: `autonomy mode → ${after.mode}`,
+        result: {
+          kind: "autonomy_mode_change",
+          from: before.mode,
+          to: after.mode,
+          until: after.until ?? null,
+          setBy,
+          safety: { readOnly: false, mutatesGithub: false, mutatesAverray: false, editsWikipedia: false },
+        },
+      }, query).catch((error) => logger.warn({ err: error }, "o4_autonomy_record_failed"));
+    }
+
+    writeJson(response, 200, { ok: true, changed, autonomy: after });
+  } catch (error) {
+    logger.error({ err: error }, "o4_autonomy_mode_failed");
+    writeJson(response, 500, {
+      error: "autonomy_mode_failed",
       message: error instanceof Error ? error.message : String(error),
     });
   }

@@ -117,7 +117,7 @@ describe("MonitorPage — container", () => {
     // the global fetch — so spying on it isolates the spawn call.
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 202 }));
     try {
-      const { container } = render(<MonitorPage options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }} collaboration={{ enabled: false }} alerts={{ enabled: false }} />, {
+      const { container } = render(<MonitorPage options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }} collaboration={{ enabled: false }} alerts={{ enabled: false }} autonomy={{ fetchMode: async () => null }} />, {
         wrapper,
       });
       await waitFor(() =>
@@ -158,5 +158,33 @@ describe("MonitorPage — container", () => {
     // The mute flows command → CoPilotRail → useActionAlerts → muted chip.
     await waitFor(() => expect(within(container).getByText("alerts muted")).toBeTruthy());
     expect(storage.getItem("monitor.mute.until")).toBeTruthy();
+  });
+
+  test("the board toggle posts autopilot, and the NL command reverts to supervised", async () => {
+    const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({ cards: FIXTURE_CARDS, at: "2026-05-28T10:30:00Z" }));
+    const postMode = vi.fn(async (body: { mode: string }) => (body.mode === "autopilot" ? "autopilot" as const : "supervised" as const));
+    const { container } = render(
+      <MonitorPage
+        options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }}
+        collaboration={{ enabled: false }}
+        alerts={{ enabled: false }}
+        autonomy={{ fetchMode: async () => "supervised", postMode }}
+      />,
+      { wrapper },
+    );
+    await waitFor(() => expect(within(container).getByRole("complementary", { name: "Hermes co-pilot" })).toBeTruthy());
+
+    // Toggle chip starts supervised; clicking engages autopilot (open-ended → server cap).
+    const toggle = within(container).getByText("○ supervised").closest("button") as HTMLButtonElement;
+    fireEvent.click(toggle);
+    await waitFor(() => expect(postMode).toHaveBeenCalledWith({ mode: "autopilot" }));
+    await waitFor(() => expect(within(container).getByText("● autopilot")).toBeTruthy());
+
+    // The NL command "I'm back" reverts to supervised.
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "I'm back" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(postMode).toHaveBeenCalledWith({ mode: "supervised" }));
+    await waitFor(() => expect(within(container).getByText("○ supervised")).toBeTruthy());
   });
 });

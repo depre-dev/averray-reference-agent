@@ -158,3 +158,72 @@ test("parseHermesInput: bare /task → error", () => {
 test("parseHermesInput: a word starting with task but not the command is an ask", () => {
   assert.equal(parseHermesInput("tasks for today?").kind, "ask");
 });
+
+// ── O4-PR3a autonomy-mode NL parsing ────────────────────────────────
+
+const NOW = new Date("2026-05-31T09:00:00.000Z").getTime();
+const at = () => NOW;
+const HOUR = 3_600_000;
+
+test("autonomy: open-ended 'you're in charge' → autopilot capped at now+4h", () => {
+  assert.deepEqual(parseHermesInput("Hermes, you're in charge", at), {
+    kind: "autopilot",
+    untilMs: NOW + 4 * HOUR,
+  });
+});
+
+test("autonomy: 'take over for 2h' → autopilot at now+2h", () => {
+  assert.deepEqual(parseHermesInput("take over for 2h", at), {
+    kind: "autopilot",
+    untilMs: NOW + 2 * HOUR,
+  });
+});
+
+test("autonomy: 'for 90 minutes' duration honored", () => {
+  assert.deepEqual(parseHermesInput("you're in charge for 90 minutes", at), {
+    kind: "autopilot",
+    untilMs: NOW + 90 * 60_000,
+  });
+});
+
+test("autonomy: a stated duration beyond 4h is honored (not re-capped)", () => {
+  assert.deepEqual(parseHermesInput("you're in charge for 8h", at), {
+    kind: "autopilot",
+    untilMs: NOW + 8 * HOUR,
+  });
+});
+
+test("autonomy: 'until 5pm' → autopilot with a future clock time", () => {
+  const cmd = parseHermesInput("you're in charge until 5pm", at);
+  assert.equal(cmd.kind, "autopilot");
+  if (cmd.kind === "autopilot") {
+    assert.ok(cmd.untilMs > NOW, "until is in the future");
+    const d = new Date(cmd.untilMs);
+    assert.equal(d.getMinutes(), 0);
+    assert.equal(d.getHours(), 17); // 5pm local
+  }
+});
+
+test("autonomy: 'I'm back' → supervised", () => {
+  assert.deepEqual(parseHermesInput("I'm back", at), { kind: "supervised" });
+});
+
+test("autonomy: 'stand down' / 'autopilot off' → supervised", () => {
+  assert.deepEqual(parseHermesInput("stand down", at), { kind: "supervised" });
+  assert.deepEqual(parseHermesInput("autopilot off", at), { kind: "supervised" });
+});
+
+test("autonomy: slash forms /autopilot and /supervised", () => {
+  assert.equal(parseHermesInput("/autopilot until 3pm", at).kind, "autopilot");
+  assert.deepEqual(parseHermesInput("/supervised", at), { kind: "supervised" });
+});
+
+test("autonomy: 'take back' reverts (does not match the autopilot 'take' trigger)", () => {
+  assert.deepEqual(parseHermesInput("ok I'll take back control", at), { kind: "supervised" });
+});
+
+test("autonomy: an unrelated sentence is still an ask, not a mode change", () => {
+  assert.equal(parseHermesInput("what is the charge for this task?", at).kind, "ask");
+  // "are you in charge…" doesn't match a delegation trigger → no false positive.
+  assert.equal(parseHermesInput("are you in charge of the indexer?", at).kind, "ask");
+});

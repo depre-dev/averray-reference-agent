@@ -25,6 +25,7 @@ import { useMonitorBoard, type UseMonitorBoardOptions } from "./hooks/useMonitor
 import { useCardParam } from "./hooks/useCardParam.js";
 import type { UseCollaborationOptions } from "./hooks/useCollaboration.js";
 import { useActionAlerts, type UseActionAlertsOptions } from "./hooks/useActionAlerts.js";
+import { useAutonomyMode, type UseAutonomyModeOptions } from "./hooks/useAutonomyMode.js";
 import { kpiCounts } from "./lib/monitor/board-state.js";
 import type { CreateTaskInput } from "./lib/monitor/card-types.js";
 import { BoardView } from "./components/BoardView.js";
@@ -53,6 +54,8 @@ export interface MonitorPageProps {
   alerts?: UseActionAlertsOptions;
   /** Override the server-side mute POST (D4 off-device alerts) for tests. */
   onAlertMute?: (body: AlertMuteBody) => void;
+  /** Override the autonomy-mode wiring (GET/POST /monitor/autonomy-mode) for tests. */
+  autonomy?: UseAutonomyModeOptions;
 }
 
 export function MonitorPage({
@@ -64,9 +67,11 @@ export function MonitorPage({
   collaboration = {},
   alerts,
   onAlertMute = defaultPostAlertMute,
+  autonomy,
 }: MonitorPageProps = {}) {
   const { board, status, refresh } = useMonitorBoard(options);
   const { cardId, setCard, clearCard } = useCardParam();
+  const { mode: autonomyMode, setAutopilot, setSupervised } = useAutonomyMode(autonomy);
 
   // The action-needed count drives all three notification tiers (§17).
   const actionCount = useMemo(() => kpiCounts(board?.cards ?? []).action, [board?.cards]);
@@ -104,6 +109,9 @@ export function MonitorPage({
         onMute={muteEverywhere}
         onUnmute={unmuteEverywhere}
         muted={muted}
+        onSetAutopilot={setAutopilot}
+        onSetSupervised={setSupervised}
+        autonomyMode={autonomyMode}
       />
     </ErrorBoundary>
   );
