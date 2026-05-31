@@ -104,6 +104,25 @@ export function buildTesterCapabilitiesManifest(deps: TesterCapabilitiesDeps = {
           : "Requires the signer sidecar and runner session injection before agents should rely on it.",
       },
       {
+        id: "siwe_auth_role_gating",
+        status: signerEnabled ? "available" : "planned",
+        tier: 1,
+        scope: "read_only",
+        mutation: "never",
+        supportedEnvs: ["testnet"],
+        dependsOn: ["T3 signer sidecar"],
+        request: {
+          body: {
+            mode: "siwe_auth",
+            targetUrl: env.AVERRAY_API_BASE_URL || "https://api.testnet.example",
+            goal: "Verify SIWE sessions for agent/admin/verifier and prove wrong-role requests are rejected.",
+            requester: "agent-name",
+          },
+        },
+        evidence: ["JWT role claims by role", "agent -> admin 403 missing_role", "agent -> verifier 403", "no token -> wallet_sign_in"],
+        result: "structured mission report with per-check findings and no token/key material",
+      },
+      {
         id: "gold_path",
         status: "operator_only_design",
         tier: 2,

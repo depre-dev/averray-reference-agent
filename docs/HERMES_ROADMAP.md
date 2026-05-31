@@ -41,7 +41,7 @@
 | C4 | Inter-agent chat | design done |
 | T1 | Surface sweep + truth-boundary honesty | ✅ done — executor #273; deploy-wire (platform #604) + runner #277; runs per-deploy (report-only) |
 | T2 | Pre-seeded session (authed sweep) | design done |
-| T3 | Signer sidecar + SIWE mission (multi-role) | ✅ done (#283) |
+| T3 | Signer sidecar + SIWE mission (multi-role) | 🟡 in review — signer sidecar done (#283); SIWE role-gating mission follow-up |
 | T4 | Tier-2 agent (Agent SDK + Playwright-MCP) | design done |
 | T5 | Env→mutation binding + enhancements (trace/video, baselines) | design done |
 | T6 | Agent-requested tester runs — board-gated (request → approve → read-only run) | design done (#274) |

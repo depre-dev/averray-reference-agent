@@ -1,6 +1,6 @@
 # Hermes E2E Tester — Auth & Session Layer (build spec for steps 2–3)
 
-- **Status:** T3 signer sidecar implementation in review; SIWE mission/role-gating coverage remains follow-up work.
+- **Status:** T3 signer sidecar merged (#283); SIWE mission/role-gating coverage is being wired as the T3 follow-up.
 - **Date:** 2026-05-29
 - **Companion to:** [`HERMES_E2E_TESTER_DESIGN.md`](./HERMES_E2E_TESTER_DESIGN.md) — this details build steps **(2) pre-seeded session** and **(3) signer sidecar + SIWE mission**, which are the keystone that lets the tester reach the authed product instead of only public pages.
 - **Tests:** `averray-agent/agent` — SIWE auth (`/auth/nonce` → `personal_sign` → `/auth/verify` → JWT; roles `admin`/`verifier` pinned at sign-in via `AUTH_ADMIN_WALLETS`/`AUTH_VERIFIER_WALLETS`).
@@ -78,4 +78,4 @@ The payoff of separate role wallets — a mission that exercises auth as a first
 
 ---
 
-*End of tester auth/session design. Step 3a is now in review; later SIWE mission and role-gating checks still follow this design.*
+*End of tester auth/session design. Step 3a shipped in #283; step 3b wires the SIWE role-gating mission against that sidecar.*
