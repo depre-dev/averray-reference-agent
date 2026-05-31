@@ -1098,6 +1098,7 @@ async function handleMonitorTestbedMissionRequest(request: http.IncomingMessage,
       return;
     }
 
+    const mode = stringField(payload, "mode");
     const created = createTestbedMissionFromAgent({
       targetUrl,
       ...(stringField(payload, "goal") ? { goal: stringField(payload, "goal") } : {}),
@@ -1107,7 +1108,7 @@ async function handleMonitorTestbedMissionRequest(request: http.IncomingMessage,
       ...(booleanField(payload, "allowTestMutations") !== undefined ? { allowTestMutations: booleanField(payload, "allowTestMutations") } : {}),
       ...(numberField(payload, "maxBrowserSteps") !== undefined ? { maxBrowserSteps: numberField(payload, "maxBrowserSteps") } : {}),
       ...(numberField(payload, "maxMinutes") !== undefined ? { maxMinutes: numberField(payload, "maxMinutes") } : {}),
-      ...(stringField(payload, "mode") === "surface_sweep" ? { mode: "surface_sweep" as const } : {}),
+      ...(mode === "surface_sweep" || mode === "siwe_auth" ? { mode } : {}),
       ...(Array.isArray(payload.routes)
         ? { routes: payload.routes.filter((r): r is string => typeof r === "string" && r.length > 0) }
         : {}),

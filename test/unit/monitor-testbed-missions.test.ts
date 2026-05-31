@@ -45,6 +45,24 @@ describe("monitor testbed mission runs", () => {
     expect(listTestbedMissionRuns()).toHaveLength(1);
   });
 
+  it("records a SIWE auth mission as a mission-native run", () => {
+    const run = recordTestbedMissionRunFromOperatorResult(
+      missionResult({ mode: "siwe_auth" }),
+      Date.parse("2026-05-22T10:00:00.000Z")
+    );
+
+    expect(run).toMatchObject({
+      title: "SIWE auth role-gating mission",
+      mode: "siwe_auth",
+      statusReason: "SIWE auth mission is ready; waiting for signer-sidecar role sessions and structured role-gating evidence.",
+      history: [
+        {
+          message: "SIWE auth mission generated; waiting for the signer-sidecar role sessions and read-only role-gating checks.",
+        },
+      ],
+    });
+  });
+
   it("accepts a passing test-mode report that crossed an allowed sandbox mutation", () => {
     const run = recordTestbedMissionRunFromOperatorResult(
       missionResult({ allowTestMutations: true }),
@@ -379,7 +397,7 @@ describe("monitor testbed mission runs", () => {
   });
 });
 
-function missionResult(options: { allowTestMutations?: boolean } = {}) {
+function missionResult(options: { allowTestMutations?: boolean; mode?: "surface_sweep" | "siwe_auth" } = {}) {
   return {
     kind: "testbed_agent_mission",
     mission: {
@@ -389,6 +407,7 @@ function missionResult(options: { allowTestMutations?: boolean } = {}) {
         goal: "complete onboarding",
         agentName: "Hermes",
         freshMemory: true,
+        ...(options.mode ? { mode: options.mode } : {}),
       },
       missionPrompt: "Open the app and complete onboarding.",
       reportSchema: {

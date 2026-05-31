@@ -14,6 +14,7 @@ import {
   updateTestbedMissionProgress,
   updateTestbedMissionRunnerHeartbeat,
 } from "./monitor-testbed-missions.js";
+import { executeSiweAuthMission, type SiweAuthMissionDeps } from "./testbed-auth-mission.js";
 import { executeSurfaceSweep, type SurfaceSweepDeps } from "./testbed-surface-sweep.js";
 
 export interface TestbedMissionRunnerConfig {
@@ -32,6 +33,13 @@ export interface TestbedMissionRunnerConfig {
   maxBrowserSteps?: number;
   /** Base URL the surface sweep (T1) joins relative routes to. */
   appBaseUrl?: string;
+  /** Base URL for platform API role-gating probes (T3 SIWE mission). */
+  apiBaseUrl?: string;
+  /** Local signer sidecar URL for T3 SIWE mission sessions. */
+  signerBaseUrl?: string;
+  authAdminJobsPath?: string;
+  authVerifierRunPath?: string;
+  authProtectedPath?: string;
   /** The env's truth boundary the sweep asserts surfaces label (demo/testnet/local-simulation/production). */
   expectedBoundary?: string;
 }
@@ -76,6 +84,11 @@ export function parseTestbedMissionRunnerConfig(
     ...(env.AVERRAY_APP_BASE_URL || env.AVERRAY_API_BASE_URL
       ? { appBaseUrl: env.AVERRAY_APP_BASE_URL || env.AVERRAY_API_BASE_URL }
       : {}),
+    ...(env.AVERRAY_API_BASE_URL ? { apiBaseUrl: env.AVERRAY_API_BASE_URL } : {}),
+    signerBaseUrl: env.TEST_WALLET_SIGNER_BASE_URL || "http://127.0.0.1:8791",
+    authAdminJobsPath: env.TESTBED_AUTH_ADMIN_JOBS_PATH || "/admin/jobs",
+    authVerifierRunPath: env.TESTBED_AUTH_VERIFIER_RUN_PATH || "/verifier/run",
+    authProtectedPath: env.TESTBED_AUTH_PROTECTED_PATH || env.TESTBED_AUTH_ADMIN_JOBS_PATH || "/admin/jobs",
     ...(env.AVERRAY_TESTBED_EXPECTED_BOUNDARY ? { expectedBoundary: env.AVERRAY_TESTBED_EXPECTED_BOUNDARY } : {}),
   };
 }
@@ -279,10 +292,13 @@ export async function executeTestbedMissionCommand(
 export async function executeBrowserTestbedMission(
   mission: TestbedMissionRun,
   config: TestbedMissionRunnerConfig,
-  deps: SurfaceSweepDeps = {}
+  deps: SurfaceSweepDeps & SiweAuthMissionDeps = {}
 ): Promise<TestbedMissionRunResult> {
   if (mission.mode === "surface_sweep") {
     return executeSurfaceSweep(mission, config, deps);
+  }
+  if (mission.mode === "siwe_auth") {
+    return executeSiweAuthMission(mission, config, deps);
   }
   return executePlaywrightTestbedMission(mission, config);
 }

@@ -52,6 +52,17 @@ describe("tester capabilities manifest", () => {
       status: "operator_only_design",
       scope: "testbed_mutation_only",
     });
+    const siweAuth = manifest.missionTypes.find((mission) => mission.id === "siwe_auth_role_gating");
+    expect(siweAuth).toMatchObject({
+      status: "planned",
+      scope: "read_only",
+      mutation: "never",
+      request: {
+        body: {
+          mode: "siwe_auth",
+        },
+      },
+    });
   });
 
   it("marks authed sweep as session-source available only when the signer sidecar is enabled", () => {
@@ -68,6 +79,9 @@ describe("tester capabilities manifest", () => {
     expect(withSigner.runtime.signerSidecarEnabled).toBe(true);
     expect(withSigner.missionTypes.find((mission) => mission.id === "authed_surface_sweep")).toMatchObject({
       status: "session_source_available",
+    });
+    expect(withSigner.missionTypes.find((mission) => mission.id === "siwe_auth_role_gating")).toMatchObject({
+      status: "available",
     });
   });
 });

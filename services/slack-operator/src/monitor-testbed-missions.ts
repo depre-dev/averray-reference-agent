@@ -5,6 +5,7 @@ const MAX_MISSION_RUNS = 50;
 
 export type TestbedMissionStatus = "ready" | "running" | "completed" | "failed";
 export type TestbedMissionVerdict = "pass" | "partial" | "fail";
+export type TestbedMissionMode = "explore" | "surface_sweep" | "siwe_auth";
 export type TestbedMissionRunnerHeartbeatStatus =
   | "idle"
   | "running"
@@ -32,9 +33,10 @@ export interface TestbedMissionRun {
   agentName: string;
   freshMemory: boolean;
   allowTestMutations: boolean;
-  /** Mission shape. "explore" (default) is the single-URL heuristic; a
-   *  "surface_sweep" (T1) walks `routes` read-only with a boundary-honesty check. */
-  mode?: "explore" | "surface_sweep";
+  /** Mission shape. "explore" (default) is the single-URL heuristic;
+   *  "surface_sweep" (T1) walks routes read-only; "siwe_auth" (T3)
+   *  verifies signer-sidecar role sessions and auth guards. */
+  mode?: TestbedMissionMode;
   /** Routes for a surface_sweep (relative to the app base URL, or absolute).
    *  Empty/absent ⇒ the default public surface list. */
   routes?: string[];
@@ -132,14 +134,14 @@ export function recordTestbedMissionRunFromOperatorResult(
   const safety = isRecord(mission.safety) ? mission.safety : {};
   const createdAt = new Date(nowMs).toISOString();
   const allowTestMutations = safety.browserMissionShouldMutate === true;
-  const mode = stringField(target, "mode") === "surface_sweep" ? "surface_sweep" : undefined;
+  const mode = parseTestbedMissionMode(stringField(target, "mode"));
   const routes = Array.isArray(target.routes) ? stringArray(target.routes) : [];
   const run: TestbedMissionRun = {
     schemaVersion: 1,
     kind: "testbed_mission_run",
     id: nextMissionId(nowMs),
     status: "ready",
-    title: mode === "surface_sweep" ? "Surface sweep (T1)" : "Fresh-agent browser mission",
+    title: testbedMissionTitle(mode),
     targetUrl: stringField(target, "url") ?? "[TESTBED_URL]",
     goal: stringField(target, "goal")
       ?? "Test whether a normal outside agent can understand and use the page.",
@@ -154,16 +156,12 @@ export function recordTestbedMissionRunFromOperatorResult(
         at: createdAt,
         status: "ready",
         event: "mission_packet_ready",
-        message: allowTestMutations
-          ? "Mission packet generated; waiting for a clean browser-only test-mode run where safe sandbox page mutations are allowed."
-          : "Mission packet generated; waiting for a clean browser-only agent run.",
+        message: testbedMissionReadyMessage(mode, allowTestMutations),
       },
     ],
     createdAt,
     updatedAt: createdAt,
-    statusReason: allowTestMutations
-      ? "Mission packet is ready; waiting for a browser-only test-mode run and structured report."
-      : "Mission packet is ready; waiting for a browser-only agent run and structured report.",
+    statusReason: testbedMissionReadyReason(mode, allowTestMutations),
   };
   missionRuns.push(run);
   while (missionRuns.length > MAX_MISSION_RUNS) missionRuns.shift();
@@ -689,6 +687,40 @@ function missionStoreSeq(value: unknown, runs: TestbedMissionRun[]): number {
     const parsed = match ? Number(match[1]) : 0;
     return Number.isFinite(parsed) ? Math.max(max, parsed) : max;
   }, 0);
+}
+
+function parseTestbedMissionMode(value: string | undefined): TestbedMissionMode | undefined {
+  if (value === "surface_sweep" || value === "siwe_auth") return value;
+  return undefined;
+}
+
+function testbedMissionTitle(mode: TestbedMissionMode | undefined): string {
+  switch (mode) {
+    case "surface_sweep":
+      return "Surface sweep (T1)";
+    case "siwe_auth":
+      return "SIWE auth role-gating mission";
+    default:
+      return "Fresh-agent browser mission";
+  }
+}
+
+function testbedMissionReadyMessage(mode: TestbedMissionMode | undefined, allowTestMutations: boolean): string {
+  if (mode === "siwe_auth") {
+    return "SIWE auth mission generated; waiting for the signer-sidecar role sessions and read-only role-gating checks.";
+  }
+  return allowTestMutations
+    ? "Mission packet generated; waiting for a clean browser-only test-mode run where safe sandbox page mutations are allowed."
+    : "Mission packet generated; waiting for a clean browser-only agent run.";
+}
+
+function testbedMissionReadyReason(mode: TestbedMissionMode | undefined, allowTestMutations: boolean): string {
+  if (mode === "siwe_auth") {
+    return "SIWE auth mission is ready; waiting for signer-sidecar role sessions and structured role-gating evidence.";
+  }
+  return allowTestMutations
+    ? "Mission packet is ready; waiting for a browser-only test-mode run and structured report."
+    : "Mission packet is ready; waiting for a browser-only agent run and structured report.";
 }
 
 function missionStorePath(path?: string): string | undefined {

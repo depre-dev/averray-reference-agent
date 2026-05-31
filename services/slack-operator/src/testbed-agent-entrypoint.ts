@@ -5,14 +5,15 @@ import {
   readTestbedMissionRunnerHeartbeat,
   recordTestbedMissionRunFromOperatorResult,
   summarizeTestbedMissionRunnerHeartbeat,
+  type TestbedMissionMode,
   type TestbedMissionRun,
 } from "./monitor-testbed-missions.js";
 
 export interface AgentTestbedMissionInput extends TestbedAgentMissionInput {
   requester?: string;
   path?: string;
-  /** T1: select a surface sweep instead of the single-URL explore. */
-  mode?: "explore" | "surface_sweep";
+  /** Select a mission executor instead of the single-URL explore default. */
+  mode?: TestbedMissionMode;
   /** T1: routes for a surface sweep (relative to the app base URL, or absolute). */
   routes?: string[];
 }
@@ -43,9 +44,9 @@ export function createTestbedMissionFromAgent(
   nowMs: number = Date.now()
 ): AgentTestbedMissionResult {
   const mission = getTestbedAgentMission(input) as Record<string, unknown>;
-  // Carry the T1 sweep selection onto the mission packet's target so the
-  // recorded run picks up `mode` / `routes` (the packet generator is in the
-  // averray-mcp package and is agnostic to it).
+  // Carry executor selection onto the mission packet's target so the recorded
+  // run picks up `mode` / `routes` (the averray-mcp packet generator is
+  // deliberately agnostic to monitor-local executors).
   if (input.mode || (input.routes && input.routes.length > 0)) {
     const target =
       mission.target && typeof mission.target === "object" && !Array.isArray(mission.target)
