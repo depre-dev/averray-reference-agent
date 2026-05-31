@@ -13,7 +13,7 @@ const MAX_MISSION_RUNS = 50;
 
 export type TestbedMissionStatus = "requested" | "ready" | "running" | "completed" | "failed";
 export type TestbedMissionVerdict = "pass" | "partial" | "fail";
-export type TestbedMissionMode = "explore" | "surface_sweep" | "siwe_auth";
+export type TestbedMissionMode = "explore" | "surface_sweep" | "siwe_auth" | "gold_path";
 export type TestbedMissionRequesterAgent = "codex" | "claude" | "test-writer" | "hermes" | "operator";
 export type TestbedMissionRunnerHeartbeatStatus =
   | "idle"

@@ -155,13 +155,22 @@ export function buildTesterCapabilitiesManifest(deps: TesterCapabilitiesDeps = {
       },
       {
         id: "gold_path",
-        status: "operator_only_design",
+        status: "executor_scaffolded_awaiting_live_driver",
         tier: 2,
         scope: "testbed_mutation_only",
-        mutation: "testnet-only, never mainnet",
-        supportedEnvs: ["testnet"],
-        dependsOn: ["T3 signer sidecar", "T4 tier-2 agent executor", "T5 env-to-mutation binding"],
-        note: "Not agent-requestable from this manifest yet.",
+        mutation: "testnet-only, never mainnet (T5 env→mutation binding; mainnet is structurally read-only)",
+        supportedEnvs: ["local", "testnet", "staging"],
+        dependsOn: ["T3 signer sidecar", "T5 env-to-mutation binding"],
+        request: {
+          body: {
+            mode: "gold_path",
+            targetUrl: "https://app.testnet.example",
+            goal: "Attempt the agent gold path (onboard → claim → submit → verify → payout/SBT → receipt) and judge honestly.",
+            allowTestMutations: true,
+            requester: "agent-name",
+          },
+        },
+        note: "T4: the Tier-2 executor is built (mutation binding + session + A4 model policy + honest judge + report) behind the command hook and the T6 request→approve gate (gold_path missions land `requested`, never auto-run). The live Claude Agent SDK + Playwright-MCP driver is a follow-up; until it's wired the runner emits an honest \"not executed\" report rather than a fake pass.",
       },
     ],
     approvalGate: {

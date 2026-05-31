@@ -172,6 +172,42 @@ and writes a `misconfigured` heartbeat rather than running on the wrong route.
 
 ---
 
+## Optional: the T4 Tier-2 gold-path tester (`command` executor)
+
+Off by default. The Tier-2 LLM gold-path tester drives the product's agent gold
+path (onboard → claim → submit → verify → payout/SBT → receipt) and judges it
+honestly. It runs through the testbed runner's **`command` executor** — point a
+testbed runner at the gold-path entry:
+
+```
+TESTBED_MISSION_RUNNER_ENABLED=1
+TESTBED_MISSION_RUNNER_EXECUTOR=command
+TESTBED_MISSION_RUNNER_ARGS=services/slack-operator/dist/gold-path-mission-entry.js
+TESTBED_MISSION_ENVIRONMENT=testnet      # T5 binds mutation; mainnet is read-only by construction
+TESTBED_SESSION_SIGNER_URL=http://test-wallet-signer:8791   # T3 session (API Bearer); key never enters the model
+TESTBED_GOLDPATH_DEEP=0                   # opus for deep/critical; sonnet otherwise (A4)
+TESTBED_GOLDPATH_LIVE=0                   # see note below
+```
+
+Gold-path missions are queued with `mode: "gold_path"` and **land `requested`** —
+they stay behind the operator approve gate (`POST /monitor/testbed-missions/{id}/approve`)
+and never auto-run. Mutation is bound by T5: only `local/testnet/staging` may
+mutate; **mainnet is structurally read-only**.
+
+> **The runner claims ALL ready missions** (no per-mode filter yet), so run the
+> gold-path command executor in a deployment whose queue contains only
+> `gold_path` missions, or wait for the per-mode-claim follow-up. A mixed queue
+> would route surface-sweep missions through the gold-path entry.
+
+> **Live driver is a follow-up.** This PR ships the executor — the T5 mutation
+> binding, T3 session, A4 model policy, the honest self-judge, the report, and
+> the approve-gate wiring — with a deterministic fake driver for CI. The live
+> **Claude Agent SDK + Playwright-MCP** driver is not wired yet: with
+> `TESTBED_GOLDPATH_LIVE` unset (or set, until the driver lands) the runner emits
+> an honest **"not executed"** report rather than a fake pass.
+
+---
+
 ## Assumptions / things to confirm in your environment
 
 - The image name assumes the GitHub org is `depre-dev` (i.e.

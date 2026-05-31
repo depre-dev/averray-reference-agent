@@ -33,6 +33,10 @@ export interface AgentTestbedMissionInput {
   mode?: TestbedMissionMode;
   /** T1: routes for a surface sweep (relative to the app base URL, or absolute). */
   routes?: string[];
+  /** When true, create the mission as `requested` (operator must approve before a
+   *  runner can claim it) rather than auto-`ready`. T4 gold-path uses this so the
+   *  Tier-2 agent never auto-runs — it stays behind the T6 request→approve gate. */
+  requireApproval?: boolean;
 }
 
 export type AgentRequestedTestbedMissionMode = "fresh" | "memory";
@@ -81,7 +85,10 @@ export function createTestbedMissionFromAgent(
   input: AgentTestbedMissionInput = {},
   nowMs: number = Date.now()
 ): AgentTestbedMissionResult {
-  return createTestbedMissionRecord(input, nowMs, { initialStatus: "ready" });
+  // A gold-path (or any approval-required) mission lands as `requested` so it
+  // stays behind the operator approve gate — no auto-run.
+  const initialStatus = input.requireApproval ? "requested" : "ready";
+  return createTestbedMissionRecord(input, nowMs, { initialStatus });
 }
 
 export function requestTestbedMissionFromAgent(
