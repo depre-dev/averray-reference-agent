@@ -87,6 +87,45 @@ Codex dispatch) are tracked for wiring onto the new board in
 
 ---
 
+## Optional: the Tier-1 surface-sweep runner (`testbed-runner` profile)
+
+Off by default. Enable it so queued `surface_sweep` missions (e.g. the
+post-deploy step in the platform repo's `deploy-production.yml`) actually
+execute — without it they queue forever and the board shows "no healthy
+runner". It's a profile-gated service, mirroring `codex-runner` /
+`claude-runner`.
+
+**`.env.prod` edits:**
+```
+TESTBED_MISSION_RUNNER_ENABLED=1
+# Optional: the env's truth boundary the honesty check asserts. Set to
+# testnet / demo / local-simulation when the deployed env is non-production so
+# data-bearing surfaces must carry that marker; leave empty otherwise.
+AVERRAY_TESTBED_EXPECTED_BOUNDARY=
+```
+
+**Bring it up under its profile** (shares the `avg-data` volume, so it reads
+the same mission queue the `/monitor/testbed-missions` endpoint writes):
+```
+docker compose --env-file ops/.env.prod --profile testbed-runner \
+  -f ops/compose.yml -f ops/compose.prod.yml up -d testbed-mission-runner
+```
+
+The runtime image already ships system Chromium at `/usr/bin/chromium`
+(`ops/Dockerfile.node`), and the service points the Playwright executor at it
+via `TESTBED_MISSION_BROWSER_EXECUTABLE_PATH` — no extra browser install.
+
+**Verify it's online** (no secrets printed):
+```
+docker compose --env-file ops/.env.prod -f ops/compose.yml -f ops/compose.prod.yml \
+  logs --since 5m testbed-mission-runner | grep -iE "online|idle|claimed|chromium|disabled" | tail -10
+```
+A healthy runner logs `idle` (online, waiting). Once it claims a sweep, the
+per-route report appears on the board and the entrypoint's "no healthy runner"
+note flips to online.
+
+---
+
 ## Assumptions / things to confirm in your environment
 
 - The image name assumes the GitHub org is `depre-dev` (i.e.
