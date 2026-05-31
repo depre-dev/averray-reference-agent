@@ -109,6 +109,13 @@ TypeScript monorepo: npm workspaces (`packages/*`, `services/*`), Node ≥ 22, E
   not merge, deploy, submit work, or run guarded live mutations during a handoff:
   its powers stay inside the **Durable invariants** above — gated, budgeted, and
   never extending to auto-merge or auto-deploy.
+- **Self-healing (B2, off by default).** On a failure signal (failed testbed
+  mission, failed deploy/verification), Hermes auto-**proposes** a routed fix
+  task (non-high-risk) — which still lands `proposed` and flows through the same
+  approval/autopilot gate; B2 never auto-approves or runs it — or **escalates**
+  (high-risk surface, any rollback, or while D3-suspended / HALT is set; rollback
+  is always operator-confirmed). Deduped + cooldown'd; depends on D3 as the loop
+  fail-safe. Same invariant #6 guardrail — it only proposes.
 - **Humans own approval.** A PASS verdict is a release *signal*, not a merge order.
   Merge and deploy are human-gated. No auto-merge.
 - **Per-agent task runners** (`codex-task-runner`, `claude-task-runner`) claim

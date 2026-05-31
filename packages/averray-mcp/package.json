@@ -41,6 +41,10 @@
       "types": "./dist/dispatch-policy.d.ts",
       "import": "./dist/dispatch-policy.js"
     },
+    "./dispatch-routing": {
+      "types": "./dist/dispatch-routing.d.ts",
+      "import": "./dist/dispatch-routing.js"
+    },
     "./decision-records": {
       "types": "./dist/decision-records.d.ts",
       "import": "./dist/decision-records.js"

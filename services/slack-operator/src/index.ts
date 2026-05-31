@@ -6,7 +6,8 @@ import { readFile } from "node:fs/promises";
 import { logger, optionalEnv, query } from "@avg/mcp-common";
 import { createDefaultWorkflowDeps } from "@avg/averray-mcp/default-workflow-runtime";
 import { invokeAgentTask } from "@avg/averray-mcp/agent-invocation";
-import { getHandoffMonitor } from "@avg/averray-mcp/handoff-events";
+import { getHandoffMonitor, recordHandoffEvent } from "@avg/averray-mcp/handoff-events";
+import { classifyTask } from "@avg/averray-mcp/dispatch-routing";
 import { buildAgentScorecard } from "@avg/averray-mcp/agent-scorecard";
 import { readLlmUsageEvents } from "@avg/averray-mcp/llm-usage";
 import { handleOperatorCommandText } from "@avg/averray-mcp/operator-handler";
@@ -76,6 +77,11 @@ import {
   clearAutopilotSuspended,
   readAutopilotSuspendState,
 } from "./autopilot-state.js";
+import {
+  runSelfHealingOnce,
+  createCooldown,
+  type FailureSignal,
+} from "./self-healing.js";
 import {
   readAutonomyState,
   setAutonomyMode,
@@ -1701,6 +1707,59 @@ async function computeAutopilotCountsToday(repo: string): Promise<{ todayCount: 
   return { todayCount: dispatched.length, todayRepoCount: dispatched.filter((t) => t.repo === repo).length };
 }
 
+// B2 — collect failure signals for self-healing. Concrete sources wired today:
+// failed testbed missions (usually a non-high-risk surface regression → propose)
+// and failed/blocked deploy-or-verification handoff correlations (a deploy
+// surface → high-risk → escalate; a rollback always escalates). CI-on-main and
+// ops-health are additional sources to wire when their failed-status is exposed
+// as cleanly; the self-healing core treats every signal source identically.
+const SELF_HEAL_DEPLOY_PHASE_RE = /(deploy|post[_-]?deploy|verif|release|rollback)/i;
+
+async function collectSelfHealingSignals(boardUrl: string): Promise<FailureSignal[]> {
+  const signals: FailureSignal[] = [];
+  const fixRepo = optionalEnv("B2_SELF_HEALING_REPO") || optionalEnv("GITHUB_DEFAULT_REPO");
+
+  try {
+    const missions = listTestbedMissionRuns({ limit: 25 }).filter((m) => m.status === "failed");
+    for (const m of missions) {
+      signals.push({
+        surface: `testbed:${m.id}`,
+        source: "testbed_mission",
+        summary: `Testbed mission for ${m.targetUrl} failed: ${m.failureReason ?? m.statusReason ?? "no reason recorded"}`,
+        evidence: `${boardUrl}?mission=${encodeURIComponent(m.id)}`,
+        ...(fixRepo ? { repo: fixRepo } : {}),
+        area: `testbed ${m.targetUrl}`,
+      });
+    }
+  } catch (error) {
+    logger.warn({ err: error }, "b2_collect_testbed_signals_failed");
+  }
+
+  try {
+    const monitor = await getHandoffMonitor({ limit: 50, activeWindowMinutes: 24 * 60 });
+    for (const c of monitor.recent ?? []) {
+      const failed = c.status === "failed" || c.status === "blocked";
+      const phase = String(c.phase ?? "");
+      const deployish = SELF_HEAL_DEPLOY_PHASE_RE.test(phase) || SELF_HEAL_DEPLOY_PHASE_RE.test(String(c.intent ?? ""));
+      if (!failed || !deployish) continue;
+      const rollback = /rollback/i.test(phase) || /rollback/i.test(String(c.reason ?? ""));
+      signals.push({
+        surface: `deploy-verify:${c.correlationId}`,
+        source: "post_deploy_verification",
+        summary: `Post-deploy verification (${phase || "deploy"}) ${c.status}${c.reason ? `: ${c.reason}` : ""}`,
+        evidence: c.pullRequestUrl ?? boardUrl,
+        ...(c.repo ? { repo: c.repo } : {}),
+        area: "deploy", // a deploy surface → high-risk → escalate
+        ...(rollback ? { isRollback: true } : {}),
+      });
+    }
+  } catch (error) {
+    logger.warn({ err: error }, "b2_collect_deploy_signals_failed");
+  }
+
+  return signals;
+}
+
 // O4-PR3b — run a freshly-proposed task through the autopilot gate. Returns the
 // (possibly approved) task + the decision. Supervised → silent no-op.
 async function autoApproveProposedTask(task: CodexTask) {
@@ -2122,6 +2181,98 @@ function startOperatorRoutines() {
     }
   };
 
+  // B2 — self-healing. On a failure signal: auto-PROPOSE a routed fix (non-high-
+  // risk) that flows through the existing approval/autopilot gate, or ESCALATE
+  // (high-risk / rollback / D3-suspended / HALT). Never auto-approves or runs.
+  let selfHealingRunning = false;
+  const selfHealingCooldown = createCooldown(routineConfig.selfHealing.cooldownMs);
+  const selfHealingBoardUrl = optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor") ?? "https://monitor.averray.com/monitor";
+  const checkSelfHealing = async () => {
+    if (selfHealingRunning || !routineConfig.selfHealing.enabled) return;
+    selfHealingRunning = true;
+    try {
+      const result = await runSelfHealingOnce({
+        getSignals: () => collectSelfHealingSignals(selfHealingBoardUrl),
+        isSuspended: () => isAutopilotSuspended(),
+        isHalt: () => isHaltFilePresent(),
+        classify: (signal) => {
+          const r = classifyTask({
+            ...(signal.repo ? { repo: signal.repo } : {}),
+            prompt: signal.summary,
+            ...(signal.area ? { area: signal.area } : {}),
+          });
+          return { agent: r.agent, riskTier: r.riskTier, reason: r.reason };
+        },
+        hasOpenFixTask: async (surface) => {
+          const corr = `self-heal:${surface}`;
+          const tasks = await listCodexTasks();
+          return tasks.some(
+            (t) => t.correlationId === corr && !["completed", "failed", "cancelled"].includes(t.status),
+          );
+        },
+        proposalsToday: async () => {
+          const today = new Date().toISOString().slice(0, 10);
+          const tasks = await listCodexTasks();
+          return tasks.filter(
+            (t) => t.requester === "hermes-self-healing" && (t.createdAt ?? "").slice(0, 10) === today,
+          ).length;
+        },
+        maxProposalsPerDay: dispatchPerDayCap,
+        inCooldown: (surface, nowMs) => selfHealingCooldown.inCooldown(surface, nowMs),
+        markHandled: (surface, nowMs) => selfHealingCooldown.markHandled(surface, nowMs),
+        propose: async ({ signal, agent, riskTier, prompt, routingReason }) => {
+          const { task, created } = await proposeCodexTask({
+            repo: signal.repo!,
+            agent,
+            riskTier,
+            routingReason,
+            prompt,
+            title: `Self-healing fix: ${signal.surface}`,
+            reason: `Hermes self-healing proposal for a ${signal.source} failure`,
+            requester: "hermes-self-healing",
+            correlationId: `self-heal:${signal.surface}`,
+          });
+          // Flow through the EXISTING approval/autopilot gate (B2 never approves).
+          if (created && task.status === "proposed") {
+            await autoApproveProposedTask(task);
+          }
+          return { taskId: task.id };
+        },
+        alert: (payload) => alertChannel.dispatch(payload),
+        audit: async (record) => {
+          await recordHandoffEvent({
+            correlationId: `self-heal:${record.surface}`,
+            requester: "hermes-self-healing",
+            intent: "self_healing",
+            phase: "self_healing",
+            status: record.action === "propose" ? "completed" : record.action === "escalate" ? "needs_review" : "completed",
+            reason: `b2 ${record.action}: ${record.reason}`,
+            summary: {
+              kind: "self_healing",
+              action: record.action,
+              source: record.source,
+              ...(record.riskTier ? { riskTier: record.riskTier } : {}),
+              ...(record.agent ? { agent: record.agent } : {}),
+              ...(record.taskId ? { taskId: record.taskId } : {}),
+              ...(record.evidence ? { evidence: record.evidence } : {}),
+            },
+            safety: { readOnly: record.action !== "propose", mutatesGithub: false, mutatesAverray: false, editsWikipedia: false },
+          }).catch((error) => logger.warn({ err: error }, "b2_self_healing_audit_failed"));
+        },
+        boardUrl: selfHealingBoardUrl,
+        now: () => new Date(),
+      });
+      const acted = result.handled.filter((h) => h.action !== "skip");
+      if (acted.length > 0) {
+        logger.info({ handled: acted }, "b2_self_healing_acted");
+      }
+    } catch (error) {
+      logger.error({ err: error }, "b2_self_healing_failed");
+    } finally {
+      selfHealingRunning = false;
+    }
+  };
+
   if (routineConfig.dailyBrief.enabled) {
     setTimeout(() => void checkDailyBrief(), 5_000);
     setInterval(() => void checkDailyBrief(), 60_000);
@@ -2149,6 +2300,10 @@ function startOperatorRoutines() {
   if (routineConfig.anomalyPause.enabled) {
     setTimeout(() => void checkAnomalies(), 11_000);
     setInterval(() => void checkAnomalies(), routineConfig.anomalyPause.intervalMs);
+  }
+  if (routineConfig.selfHealing.enabled) {
+    setTimeout(() => void checkSelfHealing(), 13_000);
+    setInterval(() => void checkSelfHealing(), routineConfig.selfHealing.intervalMs);
   }
 }
 
