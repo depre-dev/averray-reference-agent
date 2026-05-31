@@ -30,7 +30,7 @@
 | A2 | Learned routing (data-driven, non-high-risk) | 🟡 in review — scorecard-backed default routing, high-risk rule-bound |
 | A3 | Cost visibility / cost-aware routing | design done |
 | A4 | Agent model & effort policy — riskTier→effort/model + operator override (tester LLM; Hermes model = open) | design done (see `HERMES_AGENT_MODELS_AND_EFFORT.md`) |
-| D1 | "While you were away" digest (board + Slack/push) | design done |
+| D1 | "While you were away" digest (board + Slack/push) | 🟡 in review — autopilot session-end digest + alert-bridge push |
 | D2 | Explainability / decision records | design done |
 | D3 | Anomaly auto-pause (tiered soft→hard) — owns the autopilot-suspended flag | 🟡 in build (prompt out — unblocks O4-PR3) |
 | D4 | Off-device alert bridge (Slack now → push later; action-needed 0→≥1; quiet-hours/mute) — **O4 prerequisite** | ✅ done (#279) |
@@ -48,7 +48,7 @@
 | T6 | Agent-requested tester runs — board-gated (request → approve → read-only run) | design done (#274) |
 | T7 | Tester capabilities manifest (+ platform-repo request helper) | in review — manifest endpoint; platform helper follow-up |
 
-*(Status as of 2026-05-31 — **shipped:** O0–O3 (operator-driven loop), T1 (per-deploy surface sweep), T3 (signer sidecar foundation), D4 (alert bridge), O4-PR1+PR2 (Hermes proposes smart risk-tagged work; supervised). **In build:** D3 (anomaly auto-pause — unblocks O4-PR3), C4 (inter-agent chat channel), and T7 reference-agent manifest endpoint. **Design-only / remaining:** O4-PR3 (autopilot, gated on D3), O5, A1–A3, B1–B2, C1–C3, D1–D2, T2, T4–T6, and the T7 platform helper/AGENTS pointer. **Critical path to autopilot:** D3 → O4-PR3 → supervised burn-in → flip on. Everything else is depth/enhancement.)*
+*(Status as of 2026-05-31 — **shipped:** O0–O3 (operator-driven loop), T1 (per-deploy surface sweep), T3 (signer sidecar foundation), D4 (alert bridge), O4-PR1+PR2 (Hermes proposes smart risk-tagged work; supervised). **In build:** D1 (autopilot away digest), D3 (anomaly auto-pause — unblocks O4-PR3), C4 (inter-agent chat channel), and T7 reference-agent manifest endpoint. **Design-only / remaining:** O4-PR3 (autopilot, gated on D3), O5, A1–A3, B1–B2, C1–C3, D2, T2, T4–T6, and the T7 platform helper/AGENTS pointer. **Critical path to autopilot:** D3 → O4-PR3 → supervised burn-in → flip on. Everything else is depth/enhancement.)*
 
 ## Recommended build order (the smooth, low-effort ramp)
 
