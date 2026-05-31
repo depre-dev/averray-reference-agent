@@ -14,6 +14,8 @@
 // looks correctness-critical is treated as high-risk → Codex. Never
 // under-classify risk.
 
+import type { HermesDecisionRecord } from "./decision-records.js";
+
 export type RoutingAgent = "codex" | "claude";
 export type RiskTier = "high" | "low";
 
@@ -31,6 +33,8 @@ export interface RoutingDecision {
   riskTier: RiskTier;
   /** Short human string for the board + the off-device alert. */
   reason: string;
+  /** D2 explainability record, when a dynamic router generated one. */
+  decisionRecord?: HermesDecisionRecord;
 }
 
 interface SurfaceGroup {

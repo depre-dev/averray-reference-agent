@@ -20,6 +20,11 @@
 
 import type { AlertPayload } from "./alert-bridge.js";
 import { evaluateDispatchPolicy, type DispatchPolicyConfig } from "@avg/averray-mcp/dispatch-policy";
+import {
+  createHermesDecisionRecord,
+  whyHermesLine,
+  type HermesDecisionRecord,
+} from "@avg/averray-mcp/decision-records";
 
 export interface AutoApprovalSignals {
   /** mode==autopilot AND now<until (PR3a isAutopilotEngaged). */
@@ -91,6 +96,7 @@ export interface AutoApprovalAudit {
   reason: AutoApprovalReason;
   detail?: string;
   riskTier?: "high" | "low";
+  decisionRecord?: HermesDecisionRecord;
 }
 
 export interface AutoApprovalDeps {
@@ -156,30 +162,144 @@ export async function runAutoApproval(deps: AutoApprovalDeps): Promise<AutoAppro
     ...(decision.detail ? { detail: decision.detail } : {}),
     ...(deps.task.riskTier ? { riskTier: deps.task.riskTier } : {}),
   };
+  const decisionRecord = buildAutoApprovalDecisionRecord({
+    task: deps.task,
+    decision,
+    dispatch,
+    policy: deps.policy,
+    todayCount,
+    todayRepoCount,
+    suspended,
+    halt,
+  });
 
   if (decision.approve) {
     await deps.approve(deps.task.id, AUTOPILOT_APPROVER);
-    await deps.audit({ ...baseAudit, action: "approved" });
+    await deps.audit({ ...baseAudit, action: "approved", decisionRecord });
     return { action: "approved", reason: decision.reason };
   }
 
   if (decision.escalate) {
-    await deps.audit({ ...baseAudit, action: "escalated" });
-    await deps.alert(buildHighRiskEscalationAlert(deps.task, deps.boardUrl));
+    await deps.audit({ ...baseAudit, action: "escalated", decisionRecord });
+    await deps.alert(buildHighRiskEscalationAlert(deps.task, deps.boardUrl, decisionRecord));
     return { action: "escalated", reason: decision.reason, ...(decision.detail ? { detail: decision.detail } : {}) };
   }
 
   // Engaged but a gate blocked a low-risk task (suspended / halt / over-budget).
-  await deps.audit({ ...baseAudit, action: "left_proposed" });
+  await deps.audit({ ...baseAudit, action: "left_proposed", decisionRecord });
   return { action: "left_proposed", reason: decision.reason, ...(decision.detail ? { detail: decision.detail } : {}) };
 }
 
-export function buildHighRiskEscalationAlert(task: AutoApprovalTask, boardUrl: string): AlertPayload {
+export function buildHighRiskEscalationAlert(
+  task: AutoApprovalTask,
+  boardUrl: string,
+  decisionRecord?: HermesDecisionRecord,
+): AlertPayload {
   const label = task.title ? `"${task.title}"` : task.id;
   const text =
     `⚠️ Autopilot escalated a HIGH-RISK task to you — ${label} in ${task.repo} (${task.agent}). ` +
     `Autopilot never auto-approves high-risk dispatch; approve or cancel it on the board.\n` +
+    (decisionRecord ? `${whyHermesLine(decisionRecord)}\n` : "") +
     (task.routingReason ? `Why high-risk: ${task.routingReason}\n` : "") +
     `Board: ${boardUrl}`;
   return { count: 1, items: [], boardUrl, text };
+}
+
+function buildAutoApprovalDecisionRecord(input: {
+  task: AutoApprovalTask;
+  decision: AutoApprovalDecision;
+  dispatch: { allowed: boolean; reason: string };
+  policy: DispatchPolicyConfig;
+  todayCount: number;
+  todayRepoCount: number;
+  suspended: boolean;
+  halt: boolean;
+}): HermesDecisionRecord {
+  const action = input.decision.approve
+    ? "approved"
+    : input.decision.escalate
+      ? "escalated"
+      : "left_proposed";
+  return createHermesDecisionRecord({
+    kind: input.decision.escalate ? "escalation" : "auto_approval",
+    subject: { type: "task", id: input.task.id, repo: input.task.repo },
+    decision: action,
+    reasons: autoApprovalReasons(input),
+    inputs: {
+      riskTier: input.task.riskTier ?? "unset",
+      routingReason: input.task.routingReason,
+      policyGates: {
+        dispatchAllowed: input.dispatch.allowed,
+        dispatchReason: input.dispatch.reason,
+        allowedRepos: input.policy.allowedRepos,
+        allowedAgents: input.policy.allowedAgents,
+      },
+      budgetGates: {
+        todayCount: input.todayCount,
+        todayRepoCount: input.todayRepoCount,
+        perDayMax: input.policy.perDayMax,
+        perRepoPerDayMax: input.policy.perRepoPerDayMax,
+      },
+      anomalySignals: {
+        autopilotSuspended: input.suspended,
+        haltPresent: input.halt,
+      },
+      wouldChangeDecision: input.decision.approve
+        ? "Any failed gate, exhausted budget, HALT, suspension, or high-risk tier would have left the task proposed."
+        : "A low-risk tier, no suspension/HALT, allowed dispatch policy, and remaining budget are required for auto-approval.",
+    },
+    outcome: {
+      summary: input.decision.approve
+        ? "Hermes approved the proposed task for dispatch."
+        : input.decision.escalate
+          ? "Hermes left the task proposed and alerted the operator."
+          : "Hermes left the task proposed for operator action.",
+      waitingNext: input.decision.approve
+        ? "The runner can claim the task."
+        : "The operator can approve or cancel the task on the board.",
+      changed: input.decision.approve ? ["task status: proposed -> approved"] : undefined,
+    },
+    safety: {
+      readOnly: false,
+      mutates: input.decision.approve,
+      mutatesGithub: false,
+      mutatesAverray: input.decision.approve,
+      editsWikipedia: false,
+    },
+  });
+}
+
+function autoApprovalReasons(input: {
+  task: AutoApprovalTask;
+  decision: AutoApprovalDecision;
+  dispatch: { allowed: boolean; reason: string };
+  policy: DispatchPolicyConfig;
+  todayCount: number;
+  todayRepoCount: number;
+  suspended: boolean;
+  halt: boolean;
+}): string[] {
+  if (input.decision.approve) {
+    return [
+      "Autopilot is engaged and the task is low-risk.",
+      "The dispatch policy allowed this repo and agent.",
+      `Daily budget remaining after this decision: ${Math.max(0, input.policy.perDayMax - input.todayCount)} global, ${Math.max(0, input.policy.perRepoPerDayMax - input.todayRepoCount)} for this repo.`,
+    ];
+  }
+  if (input.decision.escalate) {
+    return [
+      "Autopilot never auto-approves high-risk or unclassified tasks.",
+      input.task.routingReason ?? input.decision.detail ?? "The task did not carry a low-risk classification.",
+      "The operator must approve or cancel the task manually.",
+    ];
+  }
+  if (input.suspended) return ["The D3 anomaly guard suspended autopilot.", "Hermes left the task proposed until the operator resumes autopilot."];
+  if (input.halt) return ["HALT is present.", "Hermes left the task proposed because mutating work is stopped."];
+  if (!input.dispatch.allowed) {
+    return [
+      `The dispatch policy blocked approval: ${input.dispatch.reason}.`,
+      "Hermes left the task proposed so the operator can inspect the policy or budget.",
+    ];
+  }
+  return ["A required approval gate did not pass.", "Hermes left the task proposed for operator review."];
 }

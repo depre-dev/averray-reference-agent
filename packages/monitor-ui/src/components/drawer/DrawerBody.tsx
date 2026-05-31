@@ -12,6 +12,7 @@ import type {
   CardRiskSignal,
   DeployCard,
   DoneCard,
+  HermesDecisionRecord,
   MissionCard,
 } from "../../lib/monitor/card-types.js";
 import { ChecksBar } from "../cards/ChecksBar.js";
@@ -49,20 +50,32 @@ export function drawerVariant(card: BoardCard): DrawerVariant {
 }
 
 export function DrawerBody({ card, variant }: { card: BoardCard; variant: DrawerVariant }) {
+  let body: React.ReactNode;
   switch (variant) {
     case "mission":
-      return <MissionBody card={card as MissionCard} />;
+      body = <MissionBody card={card as MissionCard} />;
+      break;
     case "done":
-      return <DoneBody card={card as DoneCard} />;
+      body = <DoneBody card={card as DoneCard} />;
+      break;
     case "deploy":
-      return <DeployBody card={card as DeployCard} />;
+      body = <DeployBody card={card as DeployCard} />;
+      break;
     case "task":
-      return <TaskBody card={card} />;
+      body = <TaskBody card={card} />;
+      break;
     case "draft":
-      return <DraftBody card={card} />;
+      body = <DraftBody card={card} />;
+      break;
     default:
-      return <PrBody card={card} />;
+      body = <PrBody card={card} />;
   }
+  return (
+    <>
+      {body}
+      <DecisionRecordSection record={card.decisionRecord} />
+    </>
+  );
 }
 
 // ── Shared building blocks ──────────────────────────────────────────
@@ -175,6 +188,36 @@ function RiskSignalsSection({ signals }: { signals: CardRiskSignal[] | undefined
             <span className={RISK_PILL[s.severity]}>{s.severity}</span>
           </div>
         ))}
+      </div>
+    </section>
+  );
+}
+
+function DecisionRecordSection({ record }: { record: HermesDecisionRecord | undefined }) {
+  if (!record) return null;
+  const changed = record.outcome.changed?.join(", ");
+  return (
+    <section>
+      <div className="hm-section-h">Why Hermes did this</div>
+      <div className="hm-verdict-block">
+        <div className="head">
+          {record.kind} · {record.decision}
+        </div>
+        <div className="body">
+          <div>{record.outcome.summary}</div>
+          {record.reasons.length > 0 ? (
+            <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+              {record.reasons.slice(0, 4).map((reason) => (
+                <li key={reason}>{reason}</li>
+              ))}
+            </ul>
+          ) : null}
+          <div style={{ marginTop: 8, color: "var(--hm-muted)" }}>
+            {record.safety.readOnly ? "Read-only" : "Operational"} · {record.safety.mutates ? "mutates state" : "no state mutation"}
+            {record.outcome.waitingNext ? ` · Next: ${record.outcome.waitingNext}` : ""}
+            {changed ? ` · Changed: ${changed}` : ""}
+          </div>
+        </div>
       </div>
     </section>
   );

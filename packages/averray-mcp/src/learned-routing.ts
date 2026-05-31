@@ -1,4 +1,5 @@
 import type { RoutingAgent, RoutingDecision, RoutingInput } from "./dispatch-routing.js";
+import { createHermesDecisionRecord } from "./decision-records.js";
 
 export interface LearnedRoutingConfig {
   minSamples: number;
@@ -74,37 +75,123 @@ export function applyLearnedRouting(
   staticDecision: RoutingDecision,
   options: LearnedRoutingOptions = {}
 ): RoutingDecision {
-  if (staticDecision.riskTier === "high") {
-    return {
-      agent: "codex",
-      riskTier: staticDecision.riskTier,
-      reason: `A2 high-risk rule-bound → codex; scorecard ignored (${staticDecision.reason})`,
-    };
-  }
-
   const config = parseLearnedRoutingConfig(undefined, options.config);
   const now = options.now ?? new Date();
   const rng = options.rng ?? Math.random;
   const surface = targetSurface(input, staticDecision);
+
+  if (staticDecision.riskTier === "high") {
+    const reason = `A2 high-risk rule-bound → codex; scorecard ignored (${staticDecision.reason})`;
+    return {
+      agent: "codex",
+      riskTier: staticDecision.riskTier,
+      reason,
+      decisionRecord: createHermesDecisionRecord({
+        kind: "routing",
+        subject: routingSubject(input, surface),
+        decision: "routed to codex",
+        reasons: [
+          "The static classifier marked this task high-risk.",
+          "High-risk tasks are rule-bound to Codex and cannot be changed by scorecard evidence.",
+          staticDecision.reason,
+        ],
+        inputs: {
+          riskTier: staticDecision.riskTier,
+          surface,
+          routingReason: reason,
+          staticDecision,
+          scorecardUsed: false,
+          wouldChangeDecision: "Only changing the static risk classifier could route high-risk work away from Codex.",
+          policyGates: { dispatchEvaluated: false },
+        },
+        outcome: {
+          summary: "Codex selected for the proposed task; dispatch still waits on the normal operator gates.",
+          waitingNext: "Operator dispatch gate or the autopilot gate.",
+        },
+        safety: { readOnly: true, mutates: false },
+        generatedAt: now,
+      }),
+    };
+  }
+
   const candidates = ROUTING_AGENTS
     .map((agent) => scoreAgentForSurface(agent, surface, options.scorecard, config, now))
     .filter((candidate) => candidate.effectiveSamples >= config.minSamples)
     .sort((a, b) => b.score - a.score || b.effectiveSamples - a.effectiveSamples || agentSort(a.agent) - agentSort(b.agent));
 
   if (candidates.length === 0) {
+    const reason = `A2 cold start on ${surface} → static default (${staticDecision.reason})`;
     return {
       ...staticDecision,
-      reason: `A2 cold start on ${surface} → static default (${staticDecision.reason})`,
+      reason,
+      decisionRecord: createHermesDecisionRecord({
+        kind: "routing",
+        subject: routingSubject(input, surface),
+        decision: `routed to ${staticDecision.agent}`,
+        reasons: [
+          `Hermes has fewer than ${config.minSamples} effective samples for ${surface}.`,
+          "Cold-start routing uses the static default until scorecard evidence is ready.",
+          staticDecision.reason,
+        ],
+        inputs: {
+          riskTier: staticDecision.riskTier,
+          surface,
+          mode: "cold_start",
+          routingReason: reason,
+          staticDecision,
+          wouldChangeDecision: `At least ${config.minSamples} effective samples for another agent on ${surface} would let learned routing choose differently.`,
+          scorecardSnapshot: ROUTING_AGENTS.map((agent) =>
+            candidateSnapshot(scoreAgentForSurface(agent, surface, options.scorecard, config, now))
+          ),
+          policyGates: { dispatchEvaluated: false },
+        },
+        outcome: {
+          summary: `${staticDecision.agent} selected from the static routing rule; task still waits on operator gates.`,
+          waitingNext: "Operator dispatch gate or the autopilot gate.",
+        },
+        safety: { readOnly: true, mutates: false },
+        generatedAt: now,
+      }),
     };
   }
 
   const best = candidates[0]!;
   const chosen = shouldExplore(candidates, config, rng) ? candidates[1]! : best;
   const mode = chosen.agent === best.agent ? "learned" : "exploration";
+  const reason = `${reasonPrefix(mode, chosen, surface)}; ${comparisonSummary(candidates, surface)}; static default ${staticDecision.agent}`;
   return {
     agent: chosen.agent,
     riskTier: staticDecision.riskTier,
-    reason: `${reasonPrefix(mode, chosen, surface)}; ${comparisonSummary(candidates, surface)}; static default ${staticDecision.agent}`,
+    reason,
+    decisionRecord: createHermesDecisionRecord({
+      kind: "routing",
+      subject: routingSubject(input, surface),
+      decision: `routed to ${chosen.agent}`,
+      reasons: [
+        mode === "exploration"
+          ? `Hermes intentionally explored ${chosen.agent} despite ${best.agent} having the strongest score.`
+          : `${chosen.agent} had the strongest current score for ${surface}.`,
+        comparisonSummary(candidates, surface),
+        `The static default would have selected ${staticDecision.agent}.`,
+      ],
+      inputs: {
+        riskTier: staticDecision.riskTier,
+        surface,
+        mode,
+        routingReason: reason,
+        staticDecision,
+        learnedRoutingConfig: config,
+        scorecardSnapshot: candidates.map(candidateSnapshot),
+        wouldChangeDecision: "Different scorecard quality, enough recency decay, or exploration RNG could choose the other candidate.",
+        policyGates: { dispatchEvaluated: false },
+      },
+      outcome: {
+        summary: `${chosen.agent} selected for the proposed task; task still waits on operator gates.`,
+        waitingNext: "Operator dispatch gate or the autopilot gate.",
+      },
+      safety: { readOnly: true, mutates: false },
+      generatedAt: now,
+    }),
   };
 }
 
@@ -126,6 +213,25 @@ function comparisonSummary(candidates: CandidateScore[], surface: string): strin
       return `${agent} ${percent(candidate.readyRate)} ready, score ${formatNumber(candidate.score)}, n=${candidate.samples}, effective=${formatNumber(candidate.effectiveSamples)}`;
     })
     .join(" vs ");
+}
+
+function routingSubject(input: RoutingInput, surface: string) {
+  const repo = input.repo?.trim();
+  return {
+    type: repo ? "repo" as const : "task" as const,
+    id: repo || surface || "unknown-routing-surface",
+    ...(repo ? { repo } : {}),
+  };
+}
+
+function candidateSnapshot(candidate: CandidateScore) {
+  return {
+    agent: candidate.agent,
+    score: Number.isFinite(candidate.score) ? Number(candidate.score.toFixed(3)) : "not_enough_data",
+    samples: candidate.samples,
+    effectiveSamples: Number(candidate.effectiveSamples.toFixed(2)),
+    readyRate: candidate.readyRate === null ? "not_recorded" : Number(candidate.readyRate.toFixed(3)),
+  };
 }
 
 function scoreAgentForSurface(

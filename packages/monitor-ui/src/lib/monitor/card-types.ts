@@ -77,6 +77,37 @@ export interface CardRiskSignal {
   message: string;
 }
 
+export interface HermesDecisionSubject {
+  type: "task" | "card" | "repo" | "pr" | "mission" | "digest" | "autopilot_session";
+  id: string;
+  repo?: string;
+  pullRequestNumber?: number;
+}
+
+export interface HermesDecisionRecord {
+  schemaVersion: 1;
+  recordType: "hermes_decision_record";
+  id: string;
+  kind: "routing" | "auto_approval" | "escalation" | "anomaly_pause" | "away_digest";
+  subject: HermesDecisionSubject;
+  decision: string;
+  reasons: string[];
+  inputs: Record<string, unknown>;
+  outcome: {
+    summary: string;
+    waitingNext?: string;
+    changed?: string[];
+  };
+  safety: {
+    readOnly: boolean;
+    mutates: boolean;
+    mutatesGithub?: boolean;
+    mutatesAverray?: boolean;
+    editsWikipedia?: boolean;
+  };
+  generatedAt: string;
+}
+
 export interface CardAction {
   kind: "operator-review" | "codex-approve" | "deploy-verify" | "mission-rerun";
   primary: string;
@@ -111,6 +142,8 @@ export interface CardBase {
   archiveHint?: boolean;
   /** free-form "next action" copy from the classifier */
   next?: string;
+  /** D2: latest durable explanation associated with the card. */
+  decisionRecord?: HermesDecisionRecord;
 }
 
 /** PR card — file changes, Hermes verdict, operator-review action. */

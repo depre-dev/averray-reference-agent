@@ -45,6 +45,7 @@ import {
 } from "./monitor-collab.js";
 import { buildHermesBoardSnapshotFromMonitor } from "./monitor-hermes-board.js";
 import { buildV2BoardSnapshot } from "./monitor-v2.js";
+import { listDecisionRecordsForMonitor } from "./decision-record-store.js";
 import {
   evaluateAlertBridge,
   initialAlertBridgeState,
@@ -114,6 +115,7 @@ import {
 } from "./monitor-hermes-voice.js";
 import {
   approveCodexTask,
+  annotateCodexTaskDecisionRecord,
   cancelCodexTask,
   listCodexTasks,
   proposeCodexTask,
@@ -383,6 +385,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
           "/monitor/command",
           "/monitor/recheck",
           "/monitor/codex-tasks",
+          "/monitor/decision-records",
           "/monitor/agents",
           "/monitor/collaboration",
           "/monitor/tester/capabilities",
@@ -547,6 +550,26 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       return;
     }
     writeJson(response, 200, await loadCodexTaskQueueSummary());
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/monitor/decision-records") {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    writeJson(
+      response,
+      200,
+      await listDecisionRecordsForMonitor({
+        query,
+        tasks: await listCodexTasks().catch(() => []),
+        limit: parseOptionalInteger(url.searchParams.get("limit")),
+      }),
+    );
     return;
   }
   if (request.method === "GET" && url.pathname === "/monitor/agents") {
@@ -1482,6 +1505,10 @@ async function autoApproveProposedTask(task: CodexTask) {
           safety: { readOnly: false, mutatesGithub: false, mutatesAverray: false, editsWikipedia: false },
         },
       }, query).catch((error) => logger.warn({ err: error }, "o4_autopilot_audit_failed"));
+      if (record.decisionRecord) {
+        await annotateCodexTaskDecisionRecord(record.taskId, record.decisionRecord)
+          .catch((error) => logger.warn({ err: error, taskId: record.taskId }, "o4_autopilot_decision_record_annotation_failed"));
+      }
     },
     boardUrl,
   });
@@ -1845,6 +1872,7 @@ function startOperatorRoutines() {
                 action: record.action,
                 signals: record.signals,
                 reason: record.reason,
+                ...(record.decisionRecord ? { decisionRecord: record.decisionRecord } : {}),
                 safety: { readOnly: false, mutatesGithub: false, mutatesAverray: false, editsWikipedia: false },
               },
             },

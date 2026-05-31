@@ -40,6 +40,10 @@
     "./dispatch-policy": {
       "types": "./dist/dispatch-policy.d.ts",
       "import": "./dist/dispatch-policy.js"
+    },
+    "./decision-records": {
+      "types": "./dist/decision-records.d.ts",
+      "import": "./dist/decision-records.js"
     }
   },
   "scripts": {

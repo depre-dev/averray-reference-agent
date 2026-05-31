@@ -136,7 +136,7 @@ describe("buildAnomalyAlert", () => {
 interface Harness {
   deps: AnomalyPauseDeps;
   alerts: AlertPayload[];
-  audits: Array<{ tier: string; action: string; signals: string; reason: string }>;
+  audits: Array<Parameters<AnomalyPauseDeps["audit"]>[0]>;
   suspended: { current: boolean; info?: { reason: string; signal: string; tier: "soft" | "hard"; setAt: string } };
   halt: { touched: boolean; reason?: string };
 }
@@ -234,6 +234,15 @@ describe("runAnomalyPauseOnce — tiered action", () => {
     expect(rec).toMatchObject({ tier: "hard", action: "hard" });
     expect(rec.signals).toMatch(/hard:task_runaway/);
     expect(rec.reason).toMatch(/attempt #6/);
+    expect(rec.decisionRecord).toMatchObject({
+      kind: "anomaly_pause",
+      decision: "paused_hard",
+      inputs: {
+        riskTier: "hard",
+        anomalySignals: { maxTaskAttemptCount: 6 },
+      },
+      safety: { mutates: true },
+    });
   });
 
   it("re-evaluates after an operator resume: a still-present soft condition trips again", async () => {

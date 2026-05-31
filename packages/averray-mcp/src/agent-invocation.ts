@@ -33,6 +33,11 @@ import {
   parseLearnedRoutingConfig,
   type LearnedRoutingConfig,
 } from "./learned-routing.js";
+import {
+  createHermesDecisionRecord,
+  extendHermesDecisionRecord,
+  type HermesDecisionRecord,
+} from "./decision-records.js";
 
 export type AgentInvocationIntent =
   | "operator_command"
@@ -55,6 +60,8 @@ export interface ProposedAgentTask {
   /** O4-PR2 routing: persisted risk tier (PR3's autopilot reads it) + why. */
   riskTier?: RiskTier;
   routingReason?: string;
+  /** D2: durable explanation for the Hermes routing decision. */
+  decisionRecord?: HermesDecisionRecord;
 }
 
 /** A queued task, as returned by GET /monitor/codex-tasks (for the daily budget). */
@@ -872,7 +879,33 @@ async function invokeEnqueueAgentTask(
 
   const env = deps.enqueueEnv ?? process.env;
   const routing = agentExplicit
-    ? staticRouting
+    ? {
+      ...staticRouting,
+      decisionRecord: createHermesDecisionRecord({
+        kind: "routing",
+        subject: { type: "repo", id: repo, repo },
+        decision: `routed to ${explicitAgent}`,
+        reasons: [
+          `The request explicitly selected ${explicitAgent}.`,
+          `Hermes still classified the task as ${staticRouting.riskTier}-risk for operator gates.`,
+          staticRouting.reason,
+        ],
+        inputs: {
+          riskTier: staticRouting.riskTier,
+          routingReason: staticRouting.reason,
+          staticDecision: staticRouting,
+          explicitAgent: true,
+          wouldChangeDecision: "A different explicit agent in the request would change the selected agent; the risk tier still comes from the static classifier.",
+          policyGates: { dispatchEvaluated: false },
+        },
+        outcome: {
+          summary: `${explicitAgent} selected from the explicit request; task still waits on operator gates.`,
+          waitingNext: "Operator dispatch gate or the autopilot gate.",
+        },
+        safety: { readOnly: true, mutates: false },
+        generatedAt: deps.now ?? startedAt,
+      }),
+    }
     : await resolveLearnedRouting(routingInput, staticRouting, deps, env);
   const agent: "codex" | "claude" = agentExplicit ? explicitAgent : routing.agent;
 
@@ -891,8 +924,36 @@ async function invokeEnqueueAgentTask(
     todayCount: hermesToday.length,
     todayRepoCount: hermesToday.filter((t) => t.repo === repo).length,
   });
+  const decisionRecord = routing.decisionRecord
+    ? extendHermesDecisionRecord(routing.decisionRecord, {
+      inputs: {
+        policyGates: {
+          dispatchEvaluated: true,
+          dispatchAllowed: decision.allowed,
+          dispatchReason: decision.reason,
+          allowedRepos: policy.allowedRepos,
+          allowedAgents: policy.allowedAgents,
+        },
+        budgetGates: {
+          perDayMax: policy.perDayMax,
+          perRepoPerDayMax: policy.perRepoPerDayMax,
+          todayCount: hermesToday.length,
+          todayRepoCount: hermesToday.filter((t) => t.repo === repo).length,
+        },
+        wouldChangeDecision: decision.allowed
+          ? "A dispatch policy block, exhausted budget, or explicit operator override would prevent this proposed task from moving forward."
+          : "Allowlisting the repo/agent or restoring budget would let Hermes propose this task.",
+      },
+      outcome: {
+        summary: decision.allowed
+          ? `Task proposed for ${agent}; it is waiting at the dispatch gate.`
+          : `Task was not proposed because the dispatch gate returned ${decision.reason}.`,
+        waitingNext: decision.allowed ? "Operator dispatch gate or the autopilot gate." : "Operator policy review.",
+      },
+    })
+    : undefined;
   if (!decision.allowed) {
-    return blockedInvocation(invocation, startedAt, decision.reason, undefined, {
+    return blockedInvocation(invocation, startedAt, decision.reason, decisionRecord, {
       mutates: false,
       localCheckpoint: false,
     });
@@ -907,6 +968,7 @@ async function invokeEnqueueAgentTask(
     requester: "hermes",
     riskTier: routing.riskTier,
     routingReason: routing.reason,
+    ...(decisionRecord ? { decisionRecord } : {}),
     ...(input.pullRequestNumber ? { pullRequestNumber: input.pullRequestNumber } : {}),
     ...(input.reason ? { reason: input.reason } : {}),
   });
@@ -923,6 +985,7 @@ async function invokeEnqueueAgentTask(
       agentExplicit,
       riskTier: routing.riskTier,
       routingReason: routing.reason,
+      ...(decisionRecord ? { decisionRecord } : {}),
       requester: "hermes",
       note: "Task proposed; it lands on the board and awaits operator approval. Never auto-approved or auto-run.",
     },
