@@ -116,6 +116,45 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(getByText("not_recorded")).toBeTruthy();
   });
 
+  test("renders backlog suggestions as planner-only read-only prompts", () => {
+    const { getByRole, getByText } = render(
+      <BoardView
+        board={richBoard}
+        status="open"
+        backlogSuggestions={{
+          generatedAt: "2026-05-31T12:00:00.000Z",
+          safety: {
+            readOnly: true,
+            createsTasks: false,
+            approvesTasks: false,
+            mutatesGithub: false,
+            mutatesSlack: false,
+            mutatesTaskQueue: false,
+          },
+          source: { cardsRead: 1, source: "monitor_v2_board" },
+          suggestions: [
+            {
+              id: "failed-mission:mission-1",
+              title: "Follow up failed mission",
+              reason: "A browser mission failed and needs a narrow fix plan.",
+              suggestedOwner: "claude",
+              riskTier: "low",
+              related: { cardId: "mission-1" },
+              suggestedPrompt: "Investigate the failed mission.",
+              confidence: 0.82,
+              evidence: ["missionVerdict:FAILED"],
+            },
+          ],
+        }}
+      />,
+    );
+    expect(getByRole("region", { name: "Suggested follow-ups" })).toBeTruthy();
+    expect(getByText("planner-only · read-only")).toBeTruthy();
+    expect(getByText("no tasks created")).toBeTruthy();
+    expect(getByText("Follow up failed mission")).toBeTruthy();
+    expect(getByRole("button", { name: "Copy prompt" })).toBeTruthy();
+  });
+
   test("Refresh button is wired to onRefresh", () => {
     const onRefresh = vi.fn();
     const { getByRole } = render(<BoardView board={richBoard} status="open" onRefresh={onRefresh} />);

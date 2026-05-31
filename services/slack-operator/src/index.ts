@@ -45,6 +45,7 @@ import {
 } from "./monitor-collab.js";
 import { buildHermesBoardSnapshotFromMonitor } from "./monitor-hermes-board.js";
 import { buildV2BoardSnapshot } from "./monitor-v2.js";
+import { buildBacklogSuggestionsResponse } from "./backlog-suggestions.js";
 import { listDecisionRecordsForMonitor } from "./decision-record-store.js";
 import {
   evaluateAlertBridge,
@@ -385,6 +386,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
           "/monitor/command",
           "/monitor/recheck",
           "/monitor/codex-tasks",
+          "/monitor/backlog-suggestions",
           "/monitor/decision-records",
           "/monitor/agents",
           "/monitor/collaboration",
@@ -570,6 +572,20 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
         limit: parseOptionalInteger(url.searchParams.get("limit")),
       }),
     );
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/monitor/backlog-suggestions") {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    const raw = await loadMonitorSnapshot(url, { suppressNarration: true });
+    const board = mergeDebugCards(buildV2BoardSnapshot(raw, { repo: monitorV2Repo() }));
+    writeJson(response, 200, buildBacklogSuggestionsResponse(board.cards));
     return;
   }
   if (request.method === "GET" && url.pathname === "/monitor/agents") {

@@ -20,6 +20,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { deriveBoardState, type BoardMode } from "../lib/monitor/board-state.js";
 import type { LlmUsageAggregate, MonitorBoard } from "../lib/monitor/board-cache.js";
+import type { BacklogSuggestion, BacklogSuggestionsResponse } from "../lib/monitor/backlog-suggestions.js";
 import type { StreamStatus } from "../lib/monitor/live-stream.js";
 import { LANES, type BoardCard, type CreateTaskInput } from "../lib/monitor/card-types.js";
 import { CreateTaskForm } from "./CreateTaskForm.js";
@@ -82,6 +83,7 @@ function matchesQuery(card: BoardCard, q: string): boolean {
 
 export interface BoardViewProps {
   board: MonitorBoard | undefined;
+  backlogSuggestions?: BacklogSuggestionsResponse;
   status: StreamStatus;
   onRefresh?: () => void;
   /** Focused card id (drives the detail drawer); null/undefined = closed. */
@@ -113,6 +115,7 @@ export interface BoardViewProps {
 
 export function BoardView({
   board,
+  backlogSuggestions,
   status,
   onRefresh,
   focusedCardId,
@@ -279,6 +282,7 @@ export function BoardView({
             searchInputRef={searchInputRef}
           />
           <LlmUsagePanel usage={board?.llmUsage} />
+          <BacklogSuggestionsPanel response={backlogSuggestions} />
           <Board
             grouped={displayGrouped}
             expanded={expanded}
@@ -368,6 +372,50 @@ function LlmUsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
         )}
       </div>
     </section>
+  );
+}
+
+function BacklogSuggestionsPanel({ response }: { response?: BacklogSuggestionsResponse }) {
+  const suggestions = response?.suggestions?.slice(0, 3) ?? [];
+  if (suggestions.length === 0) return null;
+  return (
+    <section className="hm-backlog-suggestions" aria-label="Suggested follow-ups">
+      <div className="hm-backlog-suggestions-head">
+        <div>
+          <span className="hm-kicker">Suggested follow-ups</span>
+          <strong>planner-only · read-only</strong>
+        </div>
+        <span className="hm-backlog-suggestions-safety">no tasks created</span>
+      </div>
+      <div className="hm-backlog-suggestions-grid">
+        {suggestions.map((suggestion) => (
+          <BacklogSuggestionRow suggestion={suggestion} key={suggestion.id} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function BacklogSuggestionRow({ suggestion }: { suggestion: BacklogSuggestion }) {
+  const copyPrompt = () => {
+    if (!suggestion.suggestedPrompt || typeof navigator === "undefined") return;
+    void navigator.clipboard?.writeText(suggestion.suggestedPrompt);
+  };
+  return (
+    <div className="hm-backlog-suggestion-row">
+      <span>
+        <strong>{suggestion.title}</strong>
+        <small>{suggestion.reason}</small>
+      </span>
+      <span className="hm-backlog-suggestion-meta">
+        {suggestion.suggestedOwner} · {suggestion.riskTier} · {Math.round(suggestion.confidence * 100)}%
+      </span>
+      {suggestion.suggestedPrompt ? (
+        <button type="button" className="hm-backlog-copy" onClick={copyPrompt}>
+          Copy prompt
+        </button>
+      ) : null}
+    </div>
   );
 }
 
