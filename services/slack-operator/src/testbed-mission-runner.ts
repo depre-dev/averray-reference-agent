@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { recordLlmUsageFromResult } from "@avg/averray-mcp/llm-usage";
 
 import type { Locator, Page } from "playwright-core";
 
@@ -63,6 +64,9 @@ export interface TestbedMissionRunResult {
   stderr: string;
   reportText?: string;
   summary?: string;
+  usage?: unknown;
+  model?: string;
+  costUsd?: number;
 }
 
 export type TestbedMissionExecutor = (
@@ -143,6 +147,12 @@ export async function runTestbedMissionRunnerOnce(
 
   try {
     const result = await executor(mission, config);
+    await recordLlmUsageFromResult({
+      agent: "hermes",
+      taskId: mission.id,
+      runId: mission.id,
+      result,
+    }).catch(() => undefined);
     if (result.exitCode !== 0) {
       const reason = summarizeFailure(result);
       const failed = failTestbedMissionRun(mission.id, {

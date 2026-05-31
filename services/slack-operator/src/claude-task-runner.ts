@@ -22,6 +22,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { hostname } from "node:os";
 import { fileURLToPath } from "node:url";
+import { recordLlmUsageFromResult } from "@avg/averray-mcp/llm-usage";
 
 import {
   budgetGate,
@@ -62,6 +63,9 @@ export interface ClaudeTaskRunResult {
   stdout: string;
   stderr: string;
   summary?: string;
+  usage?: unknown;
+  model?: string;
+  costUsd?: number;
 }
 
 export type ClaudeTaskExecutor = (
@@ -177,6 +181,12 @@ export async function runClaudeTaskRunnerOnce(
 
   try {
     const result = await executor(claimed, config, { mode });
+    await recordLlmUsageFromResult({
+      agent: "claude",
+      taskId: claimed.id,
+      ...(claimed.correlationId ? { runId: claimed.correlationId } : {}),
+      result,
+    }).catch(() => undefined);
     if (result.exitCode === 0) {
       const summary = sanitizeOutput(result.summary ?? summarizeCommandResult(result.stdout));
       const task = await completeCodexTask(claimed.id, {

@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { hostname } from "node:os";
 import { fileURLToPath } from "node:url";
+import { recordLlmUsageFromResult } from "@avg/averray-mcp/llm-usage";
 
 import type { CodexTask } from "./codex-task-queue.js";
 import {
@@ -28,6 +29,9 @@ export interface CodexTaskRunResult {
   stdout: string;
   stderr: string;
   summary?: string;
+  usage?: unknown;
+  model?: string;
+  costUsd?: number;
 }
 
 export type CodexTaskExecutor = (
@@ -100,6 +104,12 @@ export async function runCodexTaskRunnerOnce(
 
   try {
     const result = await executor(claimed, config);
+    await recordLlmUsageFromResult({
+      agent: "codex",
+      taskId: claimed.id,
+      ...(claimed.correlationId ? { runId: claimed.correlationId } : {}),
+      result,
+    }).catch(() => undefined);
     if (result.exitCode === 0) {
       const summary = sanitizeOutput(result.summary ?? summarizeCommandResult(result.stdout));
       const task = await completeCodexTask(claimed.id, {

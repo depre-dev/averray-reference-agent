@@ -29,6 +29,10 @@
       "types": "./dist/agent-scorecard.d.ts",
       "import": "./dist/agent-scorecard.js"
     },
+    "./llm-usage": {
+      "types": "./dist/llm-usage.d.ts",
+      "import": "./dist/llm-usage.js"
+    },
     "./agent-invocation": {
       "types": "./dist/agent-invocation.d.ts",
       "import": "./dist/agent-invocation.js"

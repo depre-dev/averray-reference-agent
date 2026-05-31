@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -46,6 +46,9 @@ describe("codex task runner", () => {
 
   it("claims an approved task, executes it, and marks it completed", async () => {
     const path = await tempQueuePath();
+    const usagePath = join(path.replace(/tasks\.json$/, ""), "llm-usage.jsonl");
+    const previousUsagePath = process.env.LLM_USAGE_LOG_PATH;
+    process.env.LLM_USAGE_LOG_PATH = usagePath;
     const proposed = await proposeCodexTask({
       repo: "averray-agent/agent",
       pullRequestNumber: 390,
@@ -64,11 +67,26 @@ describe("codex task runner", () => {
           stdout: "branch pushed\nready for Hermes\n",
           stderr: "",
           summary: "ready for Hermes",
+          usage: {
+            model: "gpt-5-codex",
+            inputTokens: 20,
+            outputTokens: 8,
+          },
         };
       },
     });
+    if (previousUsagePath === undefined) delete process.env.LLM_USAGE_LOG_PATH;
+    else process.env.LLM_USAGE_LOG_PATH = previousUsagePath;
 
     expect(result.status).toBe("completed");
+    await expect(readFile(usagePath, "utf8").then((line) => JSON.parse(line))).resolves.toMatchObject({
+      agent: "codex",
+      model: "gpt-5-codex",
+      taskId: proposed.task.id,
+      runId: "github-pr-390",
+      inputTokens: 20,
+      outputTokens: 8,
+    });
     const [task] = await listCodexTasks({ path });
     expect(task).toMatchObject({
       id: proposed.task.id,

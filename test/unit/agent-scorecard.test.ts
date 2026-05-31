@@ -80,6 +80,25 @@ describe("A1 agent scorecard", () => {
           result: { verdict: "pass" },
         },
       ],
+      llmUsageEvents: [
+        {
+          agent: "codex",
+          model: "gpt-5-codex",
+          taskId: "codex-task-1",
+          inputTokens: 300,
+          outputTokens: 70,
+          ts: "2026-05-31T10:11:00.000Z",
+        },
+        {
+          agent: "claude",
+          model: "claude-sonnet-4-5",
+          taskId: "claude-task-1",
+          inputTokens: 200,
+          outputTokens: 80,
+          costUsd: 0.04,
+          ts: "2026-05-31T10:06:00.000Z",
+        },
+      ],
     }, { now: new Date("2026-05-31T12:00:00.000Z") });
 
     expect(scorecard).toMatchObject({
@@ -98,6 +117,13 @@ describe("A1 agent scorecard", () => {
         mutatesGithub: false,
         mutatesRunnerQueue: false,
       },
+    });
+    expect(scorecard.llmUsage).toMatchObject({
+      status: "recorded",
+      inputTokens: 500,
+      outputTokens: 150,
+      totalTokens: 650,
+      costUsd: 0.04,
     });
 
     const codex = scorecard.agents.find((agent) => agent.agent === "codex");
@@ -126,6 +152,13 @@ describe("A1 agent scorecard", () => {
       cost: {
         status: "not_recorded",
         totalUsd: null,
+        totalTokens: 370,
+      },
+      tokens: {
+        status: "recorded",
+        inputTokens: 300,
+        outputTokens: 70,
+        totalTokens: 370,
       },
       trust: {
         status: "not_recorded",
@@ -157,6 +190,15 @@ describe("A1 agent scorecard", () => {
         failed: 1,
         attempts: 2,
         successRate: 0,
+      },
+      cost: {
+        status: "recorded",
+        totalUsd: 0.04,
+        totalTokens: 280,
+      },
+      tokens: {
+        status: "recorded",
+        totalTokens: 280,
       },
     });
 
@@ -190,6 +232,7 @@ describe("A1 agent scorecard", () => {
     try {
       const codexTasksPath = join(dir, "codex-tasks.json");
       const testbedMissionsPath = join(dir, "testbed-missions.json");
+      const llmUsageLogPath = join(dir, "llm-usage.jsonl");
       await writeFile(codexTasksPath, JSON.stringify({
         items: [
           {
@@ -210,11 +253,20 @@ describe("A1 agent scorecard", () => {
           },
         ],
       }));
+      await writeFile(llmUsageLogPath, JSON.stringify({
+        agent: "codex",
+        model: "gpt-5-codex",
+        taskId: "codex-task-2",
+        inputTokens: 10,
+        outputTokens: 4,
+        ts: "2026-05-31T11:00:00.000Z",
+      }) + "\n");
 
       const scorecard = await getAgentScorecard({
         eventLogPath: join(dir, "missing-events.jsonl"),
         codexTasksPath,
         testbedMissionsPath,
+        llmUsageLogPath,
         now: new Date("2026-05-31T12:00:00.000Z"),
       });
 
@@ -225,6 +277,7 @@ describe("A1 agent scorecard", () => {
       });
       expect(scorecard.agents.find((agent) => agent.agent === "codex")).toMatchObject({
         tasks: { completed: 1 },
+        tokens: { totalTokens: 14 },
       });
       expect(scorecard.agents.find((agent) => agent.agent === "hermes")).toMatchObject({
         missions: { partial: 1 },

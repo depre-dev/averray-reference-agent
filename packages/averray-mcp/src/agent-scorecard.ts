@@ -1,5 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { getHandoffMonitor } from "./handoff-events.js";
+import {
+  aggregateLlmUsage,
+  aggregateLlmUsageForAgent,
+  llmUsageLogPath,
+  readLlmUsageEvents,
+  type LlmUsageEvent,
+} from "./llm-usage.js";
 
 export type ScorecardAgent = "codex" | "claude" | "hermes" | "browser" | "unknown";
 export type ScorecardConfidence = "none" | "low" | "medium" | "high";
@@ -11,6 +18,8 @@ export interface AgentScorecardOptions {
   eventLogPath?: string;
   codexTasksPath?: string;
   testbedMissionsPath?: string;
+  llmUsageLogPath?: string;
+  llmUsageEvents?: LlmUsageEvent[];
 }
 
 interface MutableAgentStats {
@@ -54,6 +63,7 @@ export async function getAgentScorecard(options: AgentScorecardOptions = {}) {
   });
   const codexTasks = await readCodexTasks(options.codexTasksPath);
   const testbedMissions = await readTestbedMissions(options.testbedMissionsPath);
+  const llmUsageEvents = options.llmUsageEvents ?? await readLlmUsageEvents(options.llmUsageLogPath ?? llmUsageLogPath());
   return buildAgentScorecard({
     ...monitor,
     codexTasks: {
@@ -62,6 +72,7 @@ export async function getAgentScorecard(options: AgentScorecardOptions = {}) {
       items: codexTasks,
     },
     testbedMissions,
+    llmUsageEvents,
   }, { now });
 }
 
@@ -82,9 +93,14 @@ export function buildAgentScorecard(snapshot: unknown, options: { now?: Date } =
   for (const mission of records(root.testbedMissions)) {
     recordMission(agents, mission);
   }
+  const llmUsageEvents = usageEvents(root.llmUsageEvents);
+  const llmUsage = aggregateLlmUsage(llmUsageEvents);
+  for (const item of llmUsage.byModel) {
+    ensureAgent(agents, scorecardAgent(item.agent));
+  }
 
   const items = Array.from(agents.values())
-    .map(finalizeAgent)
+    .map((agent) => finalizeAgent(agent, llmUsage))
     .sort((a, b) => agentSortKey(a.agent) - agentSortKey(b.agent) || b.sampleCount - a.sampleCount);
 
   const totals = items.reduce(
@@ -103,11 +119,14 @@ export function buildAgentScorecard(snapshot: unknown, options: { now?: Date } =
     schemaVersion: 1,
     kind: "averray_agent_scorecard",
     generatedAt: now.toISOString(),
-    truthBoundary: "Read-only A1 scorecard from monitor events, task queue state, and browser mission reports. Missing cost and autopilot-rework signals are marked as not recorded, not inferred.",
+    truthBoundary: "Read-only A1 scorecard from monitor events, task queue state, browser mission reports, and whitelisted LLM usage counters. Missing cost/token/autopilot-rework signals are marked as not_recorded, not inferred.",
     totals,
+    llmUsage,
     agents: items,
     gaps: [
-      "Cost and token totals are not present in the current runner events.",
+      llmUsage.status === "recorded"
+        ? "LLM usage only includes providers/runs that report whitelisted counters; missing providers stay not_recorded."
+        : "Cost and token totals are not present in the current runner events.",
       "Autopilot auto-approval rework is not yet emitted as a durable signal.",
       "Time-to-PR and time-to-merge need GitHub timeline evidence before they become routing inputs.",
     ],
@@ -207,7 +226,7 @@ function recordMission(agents: Map<ScorecardAgent, MutableAgentStats>, mission: 
   else if (verdict === "fail" || verdict === "failed" || verdict === "block") stats.missionFailed += 1;
 }
 
-function finalizeAgent(stats: MutableAgentStats) {
+function finalizeAgent(stats: MutableAgentStats, llmUsage: ReturnType<typeof aggregateLlmUsage>) {
   const terminalTasks = stats.taskCompleted + stats.taskFailed + stats.taskCancelled;
   const checkTotal = stats.checkPass + stats.checkFail + stats.checkRunning + stats.checkNeutral;
   const sampleCount = stats.handoffs + stats.taskTotal + stats.missionTotal;
@@ -222,6 +241,8 @@ function finalizeAgent(stats: MutableAgentStats) {
   const routingScore = sampleCount > 0
     ? clamp(Math.round((successRate * 0.65 + (checkPassRate ?? successRate) * 0.25 + (1 - failurePenalty) * 0.10) * 100), 0, 100)
     : null;
+  const agentUsage = aggregateLlmUsageForAgent(llmUsage, stats.agent);
+  const tokensRecorded = agentUsage.status === "recorded";
 
   return {
     agent: stats.agent,
@@ -278,10 +299,34 @@ function finalizeAgent(stats: MutableAgentStats) {
       status: stats.taskDurationCount > 0 ? "task_duration_available" : "timeline_not_recorded",
     },
     cost: {
-      status: "not_recorded",
-      totalUsd: null,
-      totalTokens: null,
-      averageUsdPerTask: null,
+      status: agentUsage.costStatus,
+      totalUsd: agentUsage.costUsd,
+      totalTokens: tokensRecorded ? agentUsage.totalTokens : null,
+      averageUsdPerTask: agentUsage.costUsd !== null && stats.taskTotal > 0
+        ? round(agentUsage.costUsd / stats.taskTotal, 6)
+        : null,
+      byModel: agentUsage.byModel.map((entry) => ({
+        model: entry.model,
+        inputTokens: entry.inputTokens,
+        outputTokens: entry.outputTokens,
+        totalTokens: entry.totalTokens,
+        costUsd: entry.costUsd,
+        costStatus: entry.costStatus,
+        runs: entry.runs,
+      })),
+    },
+    tokens: {
+      status: tokensRecorded ? "recorded" : "not_recorded",
+      inputTokens: tokensRecorded ? agentUsage.inputTokens : null,
+      outputTokens: tokensRecorded ? agentUsage.outputTokens : null,
+      totalTokens: tokensRecorded ? agentUsage.totalTokens : null,
+      byModel: agentUsage.byModel.map((entry) => ({
+        model: entry.model,
+        inputTokens: entry.inputTokens,
+        outputTokens: entry.outputTokens,
+        totalTokens: entry.totalTokens,
+        runs: entry.runs,
+      })),
     },
     trust: {
       autopilotAutoApprovals: 0,
@@ -383,9 +428,8 @@ function agentForHandoff(item: Record<string, unknown>): ScorecardAgent {
 
 function taskAgent(task: Record<string, unknown>): ScorecardAgent {
   const agent = (stringField(task, "agent") ?? "").toLowerCase();
-  if (agent === "claude") return "claude";
-  if (agent === "codex") return "codex";
-  if (agent === "hermes") return "hermes";
+  const scorecard = scorecardAgent(agent);
+  if (scorecard !== "unknown") return scorecard;
   return "codex";
 }
 
@@ -402,6 +446,40 @@ function agentFromBranch(branch: string | undefined): ScorecardAgent | undefined
   if (normalized.startsWith("codex/")) return "codex";
   if (normalized.startsWith("claude/")) return "claude";
   return undefined;
+}
+
+function scorecardAgent(value: string): ScorecardAgent {
+  const agent = value.trim().toLowerCase();
+  if (agent === "codex") return "codex";
+  if (agent === "claude") return "claude";
+  if (agent === "hermes") return "hermes";
+  if (agent === "browser" || agent === "tester" || agent === "testbed") return "browser";
+  return "unknown";
+}
+
+function usageEvents(value: unknown): LlmUsageEvent[] {
+  return records(value)
+    .map((event) => {
+      const inputTokens = numberField(event, "inputTokens");
+      const outputTokens = numberField(event, "outputTokens");
+      const agent = stringField(event, "agent");
+      const model = stringField(event, "model");
+      const ts = stringField(event, "ts");
+      if (!agent || !model || !ts || inputTokens === undefined || outputTokens === undefined) return undefined;
+      if (!Number.isInteger(inputTokens) || !Number.isInteger(outputTokens) || inputTokens < 0 || outputTokens < 0) return undefined;
+      const costUsd = numberField(event, "costUsd");
+      return {
+        agent,
+        model,
+        ...(stringField(event, "runId") ? { runId: stringField(event, "runId") } : {}),
+        ...(stringField(event, "taskId") ? { taskId: stringField(event, "taskId") } : {}),
+        inputTokens,
+        outputTokens,
+        ...(costUsd !== undefined ? { costUsd } : {}),
+        ts,
+      };
+    })
+    .filter((event): event is LlmUsageEvent => Boolean(event));
 }
 
 function surfacesForHandoff(summary: Record<string, unknown> | undefined): string[] {

@@ -19,7 +19,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { deriveBoardState, type BoardMode } from "../lib/monitor/board-state.js";
-import type { MonitorBoard } from "../lib/monitor/board-cache.js";
+import type { LlmUsageAggregate, MonitorBoard } from "../lib/monitor/board-cache.js";
 import type { StreamStatus } from "../lib/monitor/live-stream.js";
 import { LANES, type BoardCard, type CreateTaskInput } from "../lib/monitor/card-types.js";
 import { CreateTaskForm } from "./CreateTaskForm.js";
@@ -278,6 +278,7 @@ export function BoardView({
             onSearchChange={setQuery}
             searchInputRef={searchInputRef}
           />
+          <LlmUsagePanel usage={board?.llmUsage} />
           <Board
             grouped={displayGrouped}
             expanded={expanded}
@@ -336,4 +337,40 @@ function formatClock(iso: string | undefined): string {
   if (Number.isNaN(d.getTime())) return "";
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+}
+
+function LlmUsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
+  const latestDay = usage?.byDay?.[0];
+  const models = latestDay?.byModel?.slice(0, 4) ?? [];
+  return (
+    <section className="hm-llm-usage" aria-label="LLM usage">
+      <div className="hm-llm-usage-head">
+        <div>
+          <span className="hm-kicker">LLM usage</span>
+          <strong>{latestDay?.day ?? "not recorded"}</strong>
+        </div>
+        <span className="hm-llm-usage-total">
+          {usage?.status === "recorded" ? `${formatNumber(latestDay?.totalTokens ?? 0)} tokens` : "not_recorded"}
+        </span>
+      </div>
+      <div className="hm-llm-usage-grid">
+        {models.length > 0 ? models.map((entry) => (
+          <div className="hm-llm-usage-row" key={`${entry.agent}:${entry.model}`}>
+            <span>
+              <strong>{entry.agent}</strong>
+              <small>{entry.model}</small>
+            </span>
+            <span>{formatNumber(entry.totalTokens)} tok</span>
+            <span>{entry.costStatus === "recorded" && entry.costUsd !== null ? `$${entry.costUsd.toFixed(4)}` : "not_recorded"}</span>
+          </div>
+        )) : (
+          <div className="hm-llm-usage-empty">Reported usage counters have not arrived yet.</div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat("en-US").format(value);
 }
