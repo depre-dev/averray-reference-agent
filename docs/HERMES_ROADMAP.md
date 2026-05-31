@@ -39,7 +39,7 @@
 | C2 | Reviewer panel (high-risk) | design done |
 | C3 | Specialist agents (test-writer/security/docs) | design done |
 | C4 | Inter-agent chat | design done |
-| T1 | Surface sweep + truth-boundary honesty | design done · prompt out |
+| T1 | Surface sweep + truth-boundary honesty | ✅ done — executor #273; deploy-wire (platform #604) + runner #277; runs per-deploy (report-only) |
 | T2 | Pre-seeded session (authed sweep) | design done |
 | T3 | Signer sidecar + SIWE mission (multi-role) | design done |
 | T4 | Tier-2 agent (Agent SDK + Playwright-MCP) | design done |
@@ -47,7 +47,7 @@
 | T6 | Agent-requested tester runs — board-gated (request → approve → read-only run) | design done (#274) |
 | T7 | Tester capabilities manifest (+ platform-repo request helper) | design done (#274) |
 
-*(Status as of 2026-05-29: **O0–O3 shipped — the loop is operator-driven from the board** (create → approve → runner → worker → PR → Hermes review); the monitor redesign + board (PRs #225–#247) is the foundation; A/B/C/D (incl. D4) and T1–T7 are design-only (T1 prompt out). **Next: the safety net — D4 alert bridge (the O4 prerequisite) + T1, then D1/D3 — before O4 autopilot.** Tell me as things land and I'll flip statuses.)*
+*(Status as of 2026-05-29: **O0–O3 + T1 shipped** — the loop is operator-driven from the board, and T1 runs a report-only surface sweep per deploy; the monitor redesign + board (PRs #225–#247) is the foundation; T2–T7, A/B/C, D1–D4 are design-only. **Next: D4 alert bridge (the O4 prerequisite), then T6/T7 + D1/D3 — before O4 autopilot.** Tell me as things land and I'll flip statuses.)*
 
 ## Recommended build order (the smooth, low-effort ramp)
 
