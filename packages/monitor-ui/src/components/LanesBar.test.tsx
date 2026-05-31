@@ -8,6 +8,7 @@ afterEach(cleanup);
 
 const counts: KPICounts = {
   action: 1,
+  codex: 0,
   review: 2,
   checking: 3,
   queue: 1,
