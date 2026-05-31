@@ -209,6 +209,14 @@ services:
       TESTBED_MISSION_BROWSER_EXECUTABLE_PATH: ${TESTBED_MISSION_BROWSER_EXECUTABLE_PATH:-/usr/bin/chromium}
       TESTBED_MISSION_ARTIFACTS_DIR: ${TESTBED_MISSION_ARTIFACTS_DIR:-/data/testbed-mission-artifacts}
       TESTBED_MISSION_MAX_BROWSER_STEPS: ${TESTBED_MISSION_MAX_BROWSER_STEPS:-12}
+      # T1 surface sweep: base URL for relative routes (falls back to the
+      # mission's targetUrl when unset) + the env's truth boundary the honesty
+      # check asserts. Leave EXPECTED_BOUNDARY empty for the self-consistency
+      # checks only (errored-but-silent / empty-unlabeled); set demo / testnet /
+      # local-simulation to ALSO require that marker on data-bearing surfaces.
+      AVERRAY_APP_BASE_URL: ${AVERRAY_APP_BASE_URL:-}
+      AVERRAY_API_BASE_URL: ${AVERRAY_API_BASE_URL:-}
+      AVERRAY_TESTBED_EXPECTED_BOUNDARY: ${AVERRAY_TESTBED_EXPECTED_BOUNDARY:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - avg-data:/data
