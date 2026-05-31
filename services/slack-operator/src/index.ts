@@ -209,6 +209,10 @@ server.listen(httpPort, "0.0.0.0", () => {
   logger.info({ httpPort }, "slack_operator_http_listening");
 });
 
+let autonomyMaintenanceRunning = false;
+let awayDigestTrackerState = initialAutopilotAwayDigestTrackerState();
+let pendingAwayDigestEnd: { endedAutonomy: AutonomyState; endedBy?: string } | undefined;
+
 if (!enabled) {
   logger.info("slack_operator_disabled");
 } else {
@@ -223,10 +227,6 @@ if (!enabled) {
   setInterval(() => void checkAutonomyMaintenance(), 60_000);
   void checkAutonomyMaintenance();
 }
-
-let autonomyMaintenanceRunning = false;
-let awayDigestTrackerState = initialAutopilotAwayDigestTrackerState();
-let pendingAwayDigestEnd: { endedAutonomy: AutonomyState; endedBy?: string } | undefined;
 
 async function checkAutonomyMaintenance(endedAutonomy?: AutonomyState, endedBy?: string) {
   if (autonomyMaintenanceRunning) {
