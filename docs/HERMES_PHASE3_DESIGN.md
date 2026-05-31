@@ -1,9 +1,9 @@
 # Hermes Orchestration — Phase 3 Design (Hermes as Planner)
 
-- **Status:** Planning / handoff only. **Nothing here is implemented.** Design-level spec for the autonomy payoff layer.
+- **Status:** Reconciled 2026-05-31. B1/B2 remain planning/handoff only. The enabling A/D/O prerequisites have advanced, but no B-stream item is marked shipped here.
 - **Date:** 2026-05-29
 - **Companions:** the core [`HERMES_ORCHESTRATION_DESIGN.md`](./HERMES_ORCHESTRATION_DESIGN.md) (P1–P5) and [`HERMES_PHASE2_DESIGN.md`](./HERMES_PHASE2_DESIGN.md) (themes A + D).
-- **Position:** **Phase 3 (Theme B).** The leap from *Hermes routes work you define* → *Hermes decides what's next*. Builds on the core (P1–P4) **and** Phase 2 — it needs the scorecard (prioritization), D2 (explain why it proposed something), **D3 (the loop fail-safe)**, and D1 (report what it planned while you were away). Do not start before those exist.
+- **Position:** **Phase 3 (Theme B).** The leap from *Hermes routes work you define* → *Hermes decides what's next*. Builds on the core (P1–P4) **and** Phase 2 — it needs the scorecard (prioritization), D2 (explain why it proposed something), **D3 (the loop fail-safe)**, and D1 (report what it planned while you were away). Those prerequisites are now shipped, but B1/B2 still need their own implementation.
 
 > **The principle that makes it safe:** separate *deciding scope* from *executing sanctioned scope*. The roadmap (and you) sanction *what* gets built; autopilot may *execute* sanctioned work unattended, but *inventing new scope* always returns to you. This single line keeps an autonomous planner from becoming "agent builds whatever."
 
@@ -60,4 +60,4 @@ Build B1 before B2 (B1 is the core "what's next" loop; B2 adds incident response
 
 ---
 
-*End of Phase 3 design. Planning/handoff only — not implemented.*
+*End of Phase 3 design. Reconciled 2026-05-31: B1/B2 remain design/follow-up.*

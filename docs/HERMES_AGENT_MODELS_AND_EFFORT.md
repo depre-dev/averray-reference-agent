@@ -1,6 +1,6 @@
 # Hermes Orchestration — Agent Models & Effort Policy
 
-- **Status:** Planning / handoff. Pins down which model each agent role runs, the tester's LLM, and how reasoning **effort** is chosen.
+- **Status:** Reconciled 2026-05-31. A4 riskTier→effort/model + operator override shipped in #292. A3b cost-aware routing/budget and the multi-backend tester follow-up remain separate work; do not confuse that with the shipped T5 env-binding slice (#297).
 - **Date:** 2026-05-31
 - **Companions:** [`HERMES_ORCHESTRATION_DESIGN.md`](./HERMES_ORCHESTRATION_DESIGN.md) (routing/riskTier), [`HERMES_PHASE2_DESIGN.md`](./HERMES_PHASE2_DESIGN.md) (A-stream/cost), [`HERMES_E2E_TESTER_DESIGN.md`](./HERMES_E2E_TESTER_DESIGN.md) (T4), [`HERMES_WORKER_AUTH_BILLING.md`](./HERMES_WORKER_AUTH_BILLING.md) (billing).
 
@@ -38,8 +38,8 @@ The workers and tester pick reasoning effort from the task's `riskTier` (O4-PR2)
 | **low / medium** (UI / docs / tests / refactors / general) | **medium** reasoning | **Sonnet** | routine; medium is plenty and keeps cost down |
 
 - **Operator override:** an effort selector on the board next to the agent picker, so the operator can push effort up (or down) per task when they know better. The risk-tier value is the *default*, not a hard rule.
-- **Cost link (A3):** effort is the main cost lever, so this policy *is* the practical core of cost-aware routing — high effort only where risk justifies it. A3's $-budget rides on top.
-- **Until wired:** set worker defaults **Codex = medium, Claude = Sonnet**, and bump the high-risk lane to **high / Opus** manually.
+- **Cost link (A3):** effort is the main cost lever, so this policy *is* the practical core of cost-aware routing — high effort only where risk justifies it. A3a cost visibility has shipped; A3b's $-budget rides on top.
+- **Wiring status:** A4 shipped in #292. Worker defaults still preserve the invariant that high-risk work gets high effort / Opus-class treatment.
 
 **Invariant:** high-risk work always gets high effort — never under-power the dangerous lane (the same spirit as "high-risk → Codex, rule-bound"). Effort/model never bypasses the safety gates (guardrail, approval, HALT).
 
@@ -72,4 +72,4 @@ This is the one genuinely open call here — flagged for the operator.
 
 ---
 
-*End. Planning/handoff only — the policy is recorded; A4 wires it, and Hermes's model is an operator decision.*
+*End. Reconciled 2026-05-31: A4 shipped in #292; Hermes's own model tiering remains an operator decision.*
