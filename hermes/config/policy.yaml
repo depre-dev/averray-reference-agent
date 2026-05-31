@@ -11,4 +11,15 @@ budget:
   per_run_usd_max: 0.5
   per_day_usd_max: 1.0
   max_browser_steps: 80
+# O4 dispatch guardrail — which repos/agents Hermes may PROPOSE tasks for, and
+# how many per day. Proposes-only: every proposed task still needs operator
+# approval on the board (O4-PR1 adds no auto-approval). FAIL-CLOSED: an empty
+# allowed_repos means Hermes can propose nothing — the operator opts repos in.
+dispatch:
+  allowed_repos: []
+  allowed_agents:
+    - codex
+    - claude
+  per_day_max: 10
+  per_repo_per_day_max: 5
 

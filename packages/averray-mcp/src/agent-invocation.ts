@@ -20,6 +20,12 @@ import {
   summarizeHandoffResult,
   type HandoffEventInput,
 } from "./handoff-events.js";
+import { assertNoKillSwitch } from "@avg/mcp-common";
+import {
+  loadDispatchPolicyConfig,
+  evaluateDispatchPolicy,
+  type DispatchPolicyConfig,
+} from "./dispatch-policy.js";
 
 export type AgentInvocationIntent =
   | "operator_command"
@@ -28,7 +34,25 @@ export type AgentInvocationIntent =
   | "testbed_case"
   | "pr_code_review"
   | "pr_handoff"
-  | "post_deploy_verification";
+  | "post_deploy_verification"
+  | "enqueue_agent_task";
+
+/** A task Hermes proposed (O4). Proposes-only: status is "proposed", never approved. */
+export interface ProposedAgentTask {
+  repo: string;
+  agent: "codex" | "claude";
+  prompt: string;
+  requester: string;
+  pullRequestNumber?: number;
+  reason?: string;
+}
+
+/** A queued task, as returned by GET /monitor/codex-tasks (for the daily budget). */
+export interface QueuedTaskSummary {
+  requester?: string;
+  createdAt?: string;
+  repo?: string;
+}
 
 export interface AgentInvocationInput {
   requester: string;
@@ -51,6 +75,9 @@ export interface AgentInvocationInput {
   defaultDryRun?: boolean;
   maxEvidenceUrls?: number;
   confidenceThreshold?: number;
+  /** enqueue_agent_task: the task prompt + which agent to propose it to. */
+  prompt?: string;
+  agent?: "codex" | "claude";
 }
 
 export interface AgentInvocationDeps {
@@ -61,6 +88,17 @@ export interface AgentInvocationDeps {
   healthFetchFn?: typeof fetch;
   handoffEventRecorder?: (event: HandoffEventInput) => Promise<unknown>;
   now?: Date;
+  // ── enqueue_agent_task (O4) — all injectable for tests (no network). ──
+  /** Dispatch guardrail config; defaults to loadDispatchPolicyConfig(env). */
+  dispatchPolicyConfig?: DispatchPolicyConfig;
+  /** POST a PROPOSED task to the queue; defaults to the slack-operator endpoint. */
+  proposeTaskFn?: (task: ProposedAgentTask) => Promise<{ id?: string }>;
+  /** List queued tasks for the daily budget; defaults to GET the queue endpoint. */
+  listQueuedTasksFn?: () => Promise<QueuedTaskSummary[]>;
+  /** HALT kill-switch check; defaults to assertNoKillSwitch. */
+  assertNoKillSwitchFn?: (toolName: string) => Promise<void>;
+  /** Env for the default enqueue transport + policy load. */
+  enqueueEnv?: NodeJS.ProcessEnv;
 }
 
 const POST_DEPLOY_TEST_CASES = [
@@ -167,6 +205,10 @@ async function invokeAgentTaskInner(
 
   if (intent === "post_deploy_verification") {
     return invokePostDeployVerification(input, deps, invocation, startedAt);
+  }
+
+  if (intent === "enqueue_agent_task") {
+    return invokeEnqueueAgentTask(input, deps, invocation, startedAt);
   }
 
   if (intent === "testbed_case") {
@@ -771,6 +813,116 @@ function opsSignalsFromSuite(run: unknown) {
 
 function firstPresent(values: Array<string | undefined>): string | undefined {
   return values.find((value): value is string => typeof value === "string" && value.length > 0);
+}
+
+// O4 — Hermes proposes an agent task (proposes-only; never approves/runs).
+// Order: HALT kill-switch → dispatch guardrail (allowlist + budget) → create a
+// `proposed` task on the queue. The handoff event is recorded by the
+// invokeAgentTask wrapper. The operator approval gate is untouched.
+async function invokeEnqueueAgentTask(
+  input: AgentInvocationInput,
+  deps: AgentInvocationDeps,
+  invocation: Record<string, unknown>,
+  startedAt: Date
+): Promise<unknown> {
+  const repo = (input.repo ?? "").trim();
+  const prompt = (input.prompt ?? "").trim();
+  const agent = ((input.agent ?? "codex").trim() || "codex") as "codex" | "claude";
+  if (!repo) return blockedInvocation(invocation, startedAt, "repo_required");
+  if (!prompt) return blockedInvocation(invocation, startedAt, "prompt_required");
+
+  // (a) HALT kill-switch — block cleanly rather than crash.
+  const assertKill = deps.assertNoKillSwitchFn ?? assertNoKillSwitch;
+  try {
+    await assertKill("enqueue_agent_task");
+  } catch {
+    return blockedInvocation(invocation, startedAt, "halt_file_present", undefined, {
+      mutates: false,
+      localCheckpoint: false,
+    });
+  }
+
+  // (b) Dispatch guardrail — allowlist + per-day budget. Fail-closed.
+  const env = deps.enqueueEnv ?? process.env;
+  const policy = deps.dispatchPolicyConfig ?? loadDispatchPolicyConfig(env);
+  const queued = await (deps.listQueuedTasksFn ?? defaultListQueuedTasks(env))().catch(
+    () => [] as QueuedTaskSummary[],
+  );
+  const today = (deps.now ?? new Date()).toISOString().slice(0, 10);
+  const hermesToday = queued.filter(
+    (t) => (t.requester ?? "").toLowerCase() === "hermes" && (t.createdAt ?? "").slice(0, 10) === today,
+  );
+  const decision = evaluateDispatchPolicy(policy, {
+    repo,
+    agent,
+    todayCount: hermesToday.length,
+    todayRepoCount: hermesToday.filter((t) => t.repo === repo).length,
+  });
+  if (!decision.allowed) {
+    return blockedInvocation(invocation, startedAt, decision.reason, undefined, {
+      mutates: false,
+      localCheckpoint: false,
+    });
+  }
+
+  // (c) Create a PROPOSED task — never approved. The operator approves on the board.
+  const proposeTask = deps.proposeTaskFn ?? defaultProposeTask(env);
+  const created = await proposeTask({
+    repo,
+    agent,
+    prompt,
+    requester: "hermes",
+    ...(input.pullRequestNumber ? { pullRequestNumber: input.pullRequestNumber } : {}),
+    ...(input.reason ? { reason: input.reason } : {}),
+  });
+
+  return completedInvocation(
+    invocation,
+    startedAt,
+    {
+      kind: "enqueue_agent_task",
+      status: "proposed", // proposes-only — this PR never approves or runs a task
+      proposedTaskId: created.id ?? null,
+      repo,
+      agent,
+      requester: "hermes",
+      note: "Task proposed; it lands on the board and awaits operator approval. Never auto-approved or auto-run.",
+    },
+    { mutates: false, localCheckpoint: false },
+  );
+}
+
+// enqueue transport — POST/GET the slack-operator queue endpoint. Injected in
+// tests; in prod reads the internal monitor base URL + token from env.
+function monitorBase(env: NodeJS.ProcessEnv): string {
+  return (env.AVERRAY_MONITOR_BASE_URL?.trim() || "http://slack-operator:8790").replace(/\/+$/, "");
+}
+
+function monitorAuthHeaders(env: NodeJS.ProcessEnv): Record<string, string> {
+  const token = env.SLACK_OPERATOR_MONITOR_TOKEN?.trim();
+  return token ? { authorization: `Bearer ${token}` } : {};
+}
+
+function defaultProposeTask(env: NodeJS.ProcessEnv): (task: ProposedAgentTask) => Promise<{ id?: string }> {
+  return async (task) => {
+    const res = await fetch(`${monitorBase(env)}/monitor/codex-tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...monitorAuthHeaders(env) },
+      body: JSON.stringify({ action: "propose", ...task }),
+    });
+    if (!res.ok) throw new Error(`enqueue_propose_failed:${res.status}`);
+    const json = (await res.json().catch(() => ({}))) as { task?: { id?: string } };
+    return { id: json.task?.id };
+  };
+}
+
+function defaultListQueuedTasks(env: NodeJS.ProcessEnv): () => Promise<QueuedTaskSummary[]> {
+  return async () => {
+    const res = await fetch(`${monitorBase(env)}/monitor/codex-tasks`, { headers: monitorAuthHeaders(env) });
+    if (!res.ok) return [];
+    const json = (await res.json().catch(() => ({}))) as { items?: QueuedTaskSummary[] };
+    return Array.isArray(json.items) ? json.items : [];
+  };
 }
 
 function completedInvocation(
