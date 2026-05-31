@@ -831,7 +831,10 @@ export function enrichBoardCard(
  * @param opts.repo   the configured AVERRAY_REPO (single-repo per §21.6)
  * @param opts.now    clock injection for tests
  */
-const SYNTH_TERMINAL_TASK_STATUSES = new Set(["completed", "failed", "cancelled"]);
+const SYNTH_TERMINAL_TASK_STATUSES = new Set(["completed", "cancelled"]);
+const APPROVED_STALE_MINUTES = 30;
+const RUNNING_STALE_MINUTES = 20;
+const REPEATED_FAILURE_ATTEMPTS = 2;
 
 /**
  * Synthesize `codex-needed` cards for queued tasks the classifier won't
@@ -839,16 +842,19 @@ const SYNTH_TERMINAL_TASK_STATUSES = new Set(["completed", "failed", "cancelled"
  * event, so without this a freshly-proposed task never appears on the board
  * and the operator could never see or approve it — the O3 dispatch loop
  * depends on this. PR-bound tasks are intentionally skipped (they surface via
- * their PR card). Terminal tasks are dropped. Zero new network calls — reads
- * the `codexTasks` already bundled on the snapshot.
+ * their PR card). Completed/cancelled tasks are dropped; failed/stuck tasks
+ * are promoted to needs-attention. Zero new network calls — reads the
+ * `codexTasks` already bundled on the snapshot.
  */
 export function synthesizeTaskCards(
   rawSnapshot: unknown,
   runner: Record<string, unknown> | undefined,
+  opts: { now?: Date } = {},
 ): BoardCard[] {
   const root = asRecord(rawSnapshot);
   const codexTasks = asRecord(root?.codexTasks);
   const out: BoardCard[] = [];
+  const now = opts.now ?? new Date();
   for (const entry of asArray(codexTasks?.items)) {
     const task = asRecord(entry);
     if (!task) continue;
@@ -864,30 +870,33 @@ export function synthesizeTaskCards(
     const riskTier = riskTierRaw === "high" || riskTierRaw === "low" ? riskTierRaw : undefined;
     const routingReason = asString(task.routingReason);
     const decisionRecord = isHermesDecisionRecord(task.decisionRecord) ? task.decisionRecord : undefined;
+    const health = taskHealthForBoard(task, runner, now);
     // O4-PR2: surface the routing decision — the reason (incl. the tier) on the
     // card face, and a riskSignal for the drawer. Persist riskTier (PR3 reads it).
-    const summary = [routingReason, asString(task.reason)].filter(Boolean).join(" · ");
+    const summary = [health.summary, routingReason, asString(task.reason)].filter(Boolean).join(" · ");
+    const riskSignals = [
+      ...(health.riskSignal ? [health.riskSignal] : []),
+      ...(routingReason
+        ? [{ severity: riskTier === "high" ? "high" as const : "low" as const, code: "routing", message: routingReason }]
+        : []),
+    ];
     const card: BoardCard = {
       id,
-      lane: "codex-needed",
+      lane: health.lane,
       type: "task",
       agentType: agent,
       title: asString(task.title) ?? `${agent} task`,
       summary,
       repo: asString(task.repo) ?? "",
-      freshness: 0,
-      state: "fresh",
-      risk: [],
+      freshness: health.freshness,
+      state: health.state,
+      risk: health.risk,
       // Proposed → operator must approve; approved/running → with the runner.
-      waitingOn:
-        status === "proposed"
-          ? { actor: "operator", tone: "warn" }
-          : { actor: "agent", tone: "info" },
+      waitingOn: health.waitingOn,
+      ...(health.isAction ? { isAction: true } : {}),
       taskStatus: status as TaskStatus,
       ...(riskTier ? { riskTier } : {}),
-      ...(routingReason
-        ? { riskSignals: [{ severity: riskTier === "high" ? "high" : "low", code: "routing", message: routingReason }] }
-        : {}),
+      ...(riskSignals.length > 0 ? { riskSignals } : {}),
       ...(prompt ? { prompt } : {}),
       ...(decisionRecord ? { decisionRecord } : {}),
     };
@@ -903,11 +912,164 @@ export function synthesizeTaskCards(
   return out;
 }
 
+interface TaskHealthForBoard {
+  lane: Lane;
+  state: CardState;
+  waitingOn: WaitingOn;
+  risk: RiskTag[];
+  freshness: number;
+  summary?: string;
+  riskSignal?: CardRiskSignal;
+  isAction?: boolean;
+}
+
+export function taskHealthForBoard(
+  task: Record<string, unknown>,
+  runner: Record<string, unknown> | undefined,
+  now: Date = new Date(),
+): TaskHealthForBoard {
+  const status = asString(task.status);
+  const attemptCount = Math.max(0, Math.floor(asFiniteNumber(task.attemptCount) ?? 0));
+  const failureReason = asString(task.failureReason);
+  const runnerState = runnerHealthForTask(task, runner, now);
+
+  if (status === "failed") {
+    const repeated = attemptCount >= REPEATED_FAILURE_ATTEMPTS;
+    return attentionHealth({
+      state: "stale",
+      freshness: minutesSince(asString(task.failedAt) ?? asString(task.updatedAt), now),
+      summary: repeated
+        ? `Task failed after ${attemptCount} runner attempt(s).`
+        : "Task failed in the runner.",
+      riskSignal: {
+        severity: repeated ? "high" : "medium",
+        code: repeated ? "task_failed_repeatedly" : "task_failed",
+        message: [
+          repeated
+            ? `The task failed after ${attemptCount} runner attempt(s); operator should decide whether to split, retry, or cancel.`
+            : "The task failed and needs operator triage before it disappears from the queue.",
+          failureReason,
+        ].filter(Boolean).join(" "),
+      },
+    });
+  }
+
+  if (status === "approved") {
+    const ageMinutes = minutesSince(asString(task.approvedAt) ?? asString(task.updatedAt), now);
+    if (ageMinutes >= APPROVED_STALE_MINUTES || runnerState.unavailable) {
+      return attentionHealth({
+        state: "stale",
+        freshness: ageMinutes,
+        summary: runnerState.unavailable
+          ? `Approved task is waiting but the ${runnerState.label}.`
+          : `Approved task has waited ${ageMinutes}m for a runner claim.`,
+        riskSignal: {
+          severity: runnerState.unavailable ? "high" : "medium",
+          code: runnerState.unavailable ? "runner_unavailable_for_approved_task" : "approved_task_stale",
+          message: runnerState.unavailable
+            ? `The task is approved, but the ${runnerState.label}; no runner can safely claim it.`
+            : `The task has been approved for ${ageMinutes}m without being claimed.`,
+        },
+      });
+    }
+  }
+
+  if (status === "running") {
+    const ageMinutes = minutesSince(
+      asString(task.progressAt) ?? asString(task.startedAt) ?? asString(task.updatedAt),
+      now,
+    );
+    const activeElsewhere = runnerState.activeTaskMismatch;
+    if (ageMinutes >= RUNNING_STALE_MINUTES || runnerState.unavailable || activeElsewhere) {
+      return attentionHealth({
+        state: "stale",
+        freshness: ageMinutes,
+        summary: runnerState.unavailable
+          ? `Running task may be stuck because the ${runnerState.label}.`
+          : activeElsewhere
+            ? "Running task no longer matches the runner heartbeat."
+            : `Running task has had no progress for ${ageMinutes}m.`,
+        riskSignal: {
+          severity: runnerState.unavailable || activeElsewhere ? "high" : "medium",
+          code: runnerState.unavailable
+            ? "runner_unavailable_for_running_task"
+            : activeElsewhere
+              ? "runner_active_task_mismatch"
+              : "running_task_stale",
+          message: runnerState.unavailable
+            ? `The task is still marked running, but the ${runnerState.label}.`
+            : activeElsewhere
+              ? "The task is marked running, but the runner heartbeat points at another task."
+              : `The task is running with no recorded progress for ${ageMinutes}m.`,
+        },
+      });
+    }
+  }
+
+  return {
+    lane: "codex-needed",
+    state: status === "running" ? "running" : "fresh",
+    waitingOn: status === "proposed"
+      ? { actor: "operator", tone: "warn" }
+      : { actor: "agent", tone: "info" },
+    risk: [],
+    freshness: minutesSince(asString(task.updatedAt) ?? asString(task.createdAt), now),
+  };
+}
+
+function attentionHealth(input: {
+  state: CardState;
+  freshness: number;
+  summary: string;
+  riskSignal: CardRiskSignal;
+}): TaskHealthForBoard {
+  return {
+    lane: "needs-attention",
+    state: input.state,
+    waitingOn: { actor: "operator", tone: "warn" },
+    risk: ["workflow"],
+    freshness: input.freshness,
+    summary: input.summary,
+    riskSignal: input.riskSignal,
+    isAction: true,
+  };
+}
+
+function runnerHealthForTask(
+  task: Record<string, unknown>,
+  runner: Record<string, unknown> | undefined,
+  now: Date,
+): { unavailable: boolean; activeTaskMismatch: boolean; label: string } {
+  if (!runner) return { unavailable: true, activeTaskMismatch: false, label: "runner heartbeat is missing" };
+  const status = asString(runner.status);
+  const runnerStale = runner.stale === true || minutesSince(asString(runner.updatedAt), now) > 2;
+  const unavailable = runnerStale || status === "disabled" || status === "misconfigured" || status === "error" || status === "failed";
+  const taskId = asString(task.id);
+  const activeTaskId = asString(runner.activeTaskId);
+  return {
+    unavailable,
+    activeTaskMismatch: Boolean(taskId && activeTaskId && taskId !== activeTaskId),
+    label: unavailable
+      ? runnerStale
+        ? "runner heartbeat is stale"
+        : `runner is ${status ?? "unavailable"}`
+      : "runner is available",
+  };
+}
+
+function minutesSince(value: string | undefined, now: Date): number {
+  if (!value) return 0;
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms)) return 0;
+  return Math.max(0, Math.floor((now.getTime() - ms) / 60_000));
+}
+
 export function buildV2BoardSnapshot(
   rawSnapshot: unknown,
   opts: { repo?: string; now?: () => Date } = {}
 ): BoardSnapshotV2 {
   const now = opts.now ?? (() => new Date());
+  const snapshotAt = now();
   const classified: HermesBoardSnapshot | undefined =
     buildHermesBoardSnapshotFromMonitor(rawSnapshot);
   const items = classified?.items ?? [];
@@ -931,11 +1093,11 @@ export function buildV2BoardSnapshot(
   // Surface queued greenfield tasks the classifier can't (no PR ⇒ no event),
   // skipping any already represented (e.g. by a PR card).
   const existingIds = new Set(cards.map((c) => c.id));
-  const taskCards = synthesizeTaskCards(rawSnapshot, runner).filter((c) => !existingIds.has(c.id));
+  const taskCards = synthesizeTaskCards(rawSnapshot, runner, { now: snapshotAt }).filter((c) => !existingIds.has(c.id));
 
   return {
     cards: [...cards, ...taskCards],
-    at: now().toISOString(),
+    at: snapshotAt.toISOString(),
     repo: opts.repo ?? "",
     llmUsage: aggregateLlmUsage(usageEvents(asRecord(rawSnapshot)?.llmUsageEvents)),
   };

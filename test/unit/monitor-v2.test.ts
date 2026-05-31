@@ -22,6 +22,7 @@ import {
   enrichBoardCard,
   mapMissionReport,
   synthesizeTaskCards,
+  taskHealthForBoard,
 } from "../../services/slack-operator/src/monitor-v2.js";
 import type { BoardCard } from "../../services/slack-operator/src/monitor-v2.js";
 import type { HermesBoardCardSnapshot } from "../../services/slack-operator/src/monitor-hermes-voice.js";
@@ -829,6 +830,101 @@ describe("synthesizeTaskCards (O3 — surface queued tasks)", () => {
     expect(card?.taskStatus).toBe("approved");
     expect(synthesizeTaskCards({}, undefined)).toEqual([]);
     expect(synthesizeTaskCards(undefined, undefined)).toEqual([]);
+  });
+
+  it("promotes failed greenfield tasks to needs-attention with retry context", () => {
+    const [card] = synthesizeTaskCards(
+      {
+        codexTasks: {
+          items: [{
+            id: "failed-task",
+            status: "failed",
+            agent: "codex",
+            repo: "a/b",
+            prompt: "x",
+            attemptCount: 2,
+            failedAt: "2026-05-31T11:45:00.000Z",
+            updatedAt: "2026-05-31T11:45:00.000Z",
+            failureReason: "tests failed",
+          }],
+        },
+      },
+      { status: "idle", updatedAt: "2026-05-31T11:59:30.000Z" },
+      { now: new Date("2026-05-31T12:00:00.000Z") },
+    );
+
+    expect(card).toMatchObject({
+      id: "failed-task",
+      lane: "needs-attention",
+      isAction: true,
+      state: "stale",
+      waitingOn: { actor: "operator", tone: "warn" },
+      risk: ["workflow"],
+      freshness: 15,
+      riskSignals: [
+        {
+          severity: "high",
+          code: "task_failed_repeatedly",
+        },
+      ],
+    });
+    expect(card?.summary).toContain("failed after 2 runner attempt");
+    expect(card?.riskSignals?.[0]?.message).toContain("tests failed");
+  });
+
+  it("promotes stale approved tasks when no runner can claim them", () => {
+    const [card] = synthesizeTaskCards(
+      {
+        codexTasks: {
+          items: [{
+            id: "approved-stale",
+            status: "approved",
+            agent: "claude",
+            repo: "a/b",
+            prompt: "x",
+            approvedAt: "2026-05-31T11:00:00.000Z",
+            updatedAt: "2026-05-31T11:00:00.000Z",
+          }],
+        },
+      },
+      { status: "misconfigured", updatedAt: "2026-05-31T11:59:50.000Z" },
+      { now: new Date("2026-05-31T12:00:00.000Z") },
+    );
+
+    expect(card).toMatchObject({
+      lane: "needs-attention",
+      agentType: "claude",
+      riskSignals: [
+        {
+          severity: "high",
+          code: "runner_unavailable_for_approved_task",
+        },
+      ],
+    });
+    expect(card?.summary).toContain("runner is misconfigured");
+  });
+
+  it("promotes running tasks with stale progress or mismatched heartbeat", () => {
+    const health = taskHealthForBoard(
+      {
+        id: "running-stale",
+        status: "running",
+        progressAt: "2026-05-31T11:35:00.000Z",
+        updatedAt: "2026-05-31T11:35:00.000Z",
+      },
+      { status: "running", activeTaskId: "other-task", updatedAt: "2026-05-31T11:59:50.000Z" },
+      new Date("2026-05-31T12:00:00.000Z"),
+    );
+
+    expect(health).toMatchObject({
+      lane: "needs-attention",
+      state: "stale",
+      isAction: true,
+      riskSignal: {
+        severity: "high",
+        code: "runner_active_task_mismatch",
+      },
+    });
   });
 
   it("buildV2BoardSnapshot appends synthesized task cards", () => {

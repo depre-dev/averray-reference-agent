@@ -25,7 +25,7 @@
 | O2 | Claude Code worker (greenfield, Agent SDK) | ✅ done (#256 queue · #259 auth · #260 runner · #262 worker · #263 ops) |
 | O3 | Board-driven dispatch | ✅ done — create/approve form (agent picker) + `/task` verb live on the board (#271) |
 | O4 | Hermes enqueue + dispatch guardrail + autonomy mode | 🟡 in build — PR1 enqueue+guardrail ✅ (#280) · PR2 routing taxonomy ✅ (#281) · PR3 autopilot auto-approval **blocked on D3** |
-| O5 | Self-management hardening | design done |
+| O5 | Self-management hardening | 🟡 in build — first slice surfaces failed/stale agent tasks in `needs-attention` |
 | A1 | Agent scorecard | 🟡 in review — read-only `/monitor/agents` + `averray_agent_scorecard` scorecard slice |
 | A2 | Learned routing (data-driven, non-high-risk) | 🟡 in review — scorecard-backed default routing, high-risk rule-bound |
 | A3 | Cost visibility / cost-aware routing | design done |
