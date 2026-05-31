@@ -54,6 +54,32 @@ describe("monitor collaboration channel", () => {
     });
   });
 
+  it("accepts Claude as a card-scoped agent author and target", () => {
+    const message = recordCollaborationMessage(
+      {
+        author: "Claude",
+        kind: "status",
+        addressedTo: "Codex",
+        text: "Codex, I reviewed this card and need a smaller repro before I can continue.",
+        relatedPr: { repo: "averray-agent/agent", number: 214 },
+      },
+      NOW
+    );
+
+    expect(message).toMatchObject({
+      author: "claude",
+      kind: "status",
+      addressedTo: "codex",
+      text: expect.stringContaining("smaller repro"),
+      relatedPr: { repo: "averray-agent/agent", number: 214 },
+    });
+    expect(listCollaborationMessages({ limit: 1 }, NOW + 1)[0]).toMatchObject({
+      author: "claude",
+      addressedTo: "codex",
+      relatedPr: { repo: "averray-agent/agent", number: 214 },
+    });
+  });
+
   it("preserves relatedPr and relatedCorrelationId when well-formed", () => {
     const message = recordCollaborationMessage(
       {
@@ -101,13 +127,22 @@ describe("monitor collaboration channel", () => {
     expect(message.text).toHaveLength(4_000);
   });
 
-  it("falls back to chat/everyone when kind/addressedTo are unknown", () => {
+  it("falls back to chat when kind is unknown", () => {
     const message = recordCollaborationMessage(
-      { author: "operator", text: "hi", kind: "rant", addressedTo: "everybody" },
+      { author: "operator", text: "hi", kind: "rant" },
       NOW
     );
     expect(message.kind).toBe("chat");
     expect(message.addressedTo).toBe("everyone");
+  });
+
+  it("rejects unknown targets instead of silently broadcasting", () => {
+    expect(() =>
+      recordCollaborationMessage(
+        { author: "claude", text: "Codex, can you clarify this?", addressedTo: "everybody" },
+        NOW
+      )
+    ).toThrowError(CollaborationValidationError);
   });
 
   it("lists messages newest-last and respects limit", () => {
@@ -505,6 +540,14 @@ describe("synthesizeHermesReplyFor", () => {
   it("does not reply to messages from non-operator authors", () => {
     const m = recordCollaborationMessage(
       { author: "codex", text: "I picked up #1.", addressedTo: "hermes" },
+      NOW
+    );
+    expect(synthesizeHermesReplyFor(m)).toBeNull();
+  });
+
+  it("does not auto-reply to Claude agent messages", () => {
+    const m = recordCollaborationMessage(
+      { author: "claude", text: "Hermes, please hold this until Codex replies.", addressedTo: "hermes" },
       NOW
     );
     expect(synthesizeHermesReplyFor(m)).toBeNull();

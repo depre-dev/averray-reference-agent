@@ -943,7 +943,9 @@ body { margin: 0; }
 .hm-turn-actor .actor-dot { width: 7px; height: 7px; border-radius: 999px; }
 .hm-turn--hermes  .actor-dot { background: var(--hm-hermes); }
 .hm-turn--operator .actor-dot { background: var(--hm-ink); }
-.hm-turn--codex   .actor-dot { background: var(--hm-clay); }
+.hm-turn--codex   .actor-dot { background: #6b8a4e; }
+.hm-turn--claude  .actor-dot { background: var(--hm-clay); }
+.hm-turn--system  .actor-dot { background: var(--hm-muted-soft); }
 .hm-turn-time {
   margin-left: auto;
   font-family: var(--font-mono);
