@@ -1,6 +1,14 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
+import {
+  annotateMissionWithMutationBinding,
+  resolveTestbedMutationBinding,
+  testbedEnvironmentFromEnv,
+  type TestbedMissionEnvironment,
+  type TestbedMissionMutationMode,
+} from "./testbed-mutation-binding.js";
+
 const MAX_MISSION_RUNS = 50;
 
 export type TestbedMissionStatus = "ready" | "running" | "completed" | "failed";
@@ -33,6 +41,11 @@ export interface TestbedMissionRun {
   agentName: string;
   freshMemory: boolean;
   allowTestMutations: boolean;
+  requestedAllowTestMutations?: boolean;
+  environment?: TestbedMissionEnvironment;
+  mutationMode?: TestbedMissionMutationMode;
+  mutationScope?: string;
+  mutationBindingReason?: string;
   /** Mission shape. "explore" (default) is the single-URL heuristic;
    *  "surface_sweep" (T1) walks routes read-only; "siwe_auth" (T3)
    *  verifies signer-sidecar role sessions and auth guards. */
@@ -94,6 +107,15 @@ export interface TestbedMissionStructuredReport {
   summary: string;
 }
 
+export interface TestbedMissionBaselineComparison {
+  baselineRunId: string;
+  baselineCompletedAt?: string;
+  verdictChanged: boolean;
+  blockerChanged: boolean;
+  scoreDeltas: Record<string, number>;
+  summary: string;
+}
+
 export interface TestbedMissionFixBrief {
   primaryBlocker: string;
   suspectedUxGap: string;
@@ -128,13 +150,24 @@ export function recordTestbedMissionRunFromOperatorResult(
 ): TestbedMissionRun | undefined {
   ensureMissionStoreLoaded(path, { force: true });
   if (!isRecord(result) || result.kind !== "testbed_agent_mission") return undefined;
-  const mission = isRecord(result.mission) ? result.mission : undefined;
-  if (!mission || mission.kind !== "testbed_agent_browser_mission") return undefined;
-  const target = isRecord(mission.target) ? mission.target : {};
-  const safety = isRecord(mission.safety) ? mission.safety : {};
+  const rawMission = isRecord(result.mission) ? result.mission : undefined;
+  if (!rawMission || rawMission.kind !== "testbed_agent_browser_mission") return undefined;
+  const target = isRecord(rawMission.target) ? rawMission.target : {};
+  const safety = isRecord(rawMission.safety) ? rawMission.safety : {};
   const createdAt = new Date(nowMs).toISOString();
-  const allowTestMutations = safety.browserMissionShouldMutate === true;
   const mode = parseTestbedMissionMode(stringField(target, "mode"));
+  const binding = resolveTestbedMutationBinding({
+    targetUrl: stringField(target, "url"),
+    mode,
+    requestedAllowTestMutations:
+      safety.requestedBrowserMissionShouldMutate === true
+      || safety.browserMissionShouldMutate === true,
+    configuredEnvironment:
+      stringField(target, "environment")
+      ?? stringField(safety, "mutationEnvironment")
+      ?? testbedEnvironmentFromEnv(),
+  });
+  const mission = annotateMissionWithMutationBinding(rawMission, binding);
   const routes = Array.isArray(target.routes) ? stringArray(target.routes) : [];
   const run: TestbedMissionRun = {
     schemaVersion: 1,
@@ -147,7 +180,12 @@ export function recordTestbedMissionRunFromOperatorResult(
       ?? "Test whether a normal outside agent can understand and use the page.",
     agentName: stringField(target, "agentName") ?? "Hermes",
     freshMemory: target.freshMemory !== false,
-    allowTestMutations,
+    allowTestMutations: binding.allowTestMutations,
+    requestedAllowTestMutations: binding.requestedAllowTestMutations,
+    environment: binding.environment,
+    mutationMode: binding.mutationMode,
+    mutationScope: binding.mutationScope,
+    mutationBindingReason: binding.reason,
     ...(mode ? { mode } : {}),
     ...(routes.length > 0 ? { routes } : {}),
     mission,
@@ -156,12 +194,12 @@ export function recordTestbedMissionRunFromOperatorResult(
         at: createdAt,
         status: "ready",
         event: "mission_packet_ready",
-        message: testbedMissionReadyMessage(mode, allowTestMutations),
+        message: testbedMissionReadyMessage(mode, binding),
       },
     ],
     createdAt,
     updatedAt: createdAt,
-    statusReason: testbedMissionReadyReason(mode, allowTestMutations),
+    statusReason: testbedMissionReadyReason(mode, binding),
   };
   missionRuns.push(run);
   while (missionRuns.length > MAX_MISSION_RUNS) missionRuns.shift();
@@ -203,9 +241,11 @@ export function recordTestbedMissionReportFromMessage(
   const failed = !verdict || verdict === "fail" || verdict === "partial" || !mutationBoundaryOk;
   const status: TestbedMissionStatus = completed ? "completed" : failed ? "failed" : "completed";
   const updatedAt = new Date(nowMs).toISOString();
+  const baselineComparison = structuredReport ? compareToPreviousMissionBaseline(run, structuredReport) : undefined;
   run.result = {
     ...report,
     ...(structuredReport ? { structuredReport } : {}),
+    ...(baselineComparison ? { baselineComparison } : {}),
     ingestedAt: updatedAt,
   };
   run.status = status;
@@ -438,6 +478,8 @@ export function testbedMissionRunToMonitorItem(run: TestbedMissionRun): Record<s
         testSignals: [
           "mission packet ready",
           ...(run.status === "running" ? ["browser mission runner claimed"] : []),
+          ...(run.environment ? [`mission environment: ${run.environment}`] : []),
+          ...(run.mutationMode ? [`mutation profile: ${run.mutationMode}`] : []),
           ...(run.allowTestMutations ? ["test-mode page mutation allowed"] : []),
           ...(reportAttached ? ["browser agent report attached"] : []),
         ],
@@ -452,6 +494,11 @@ export function testbedMissionRunToMonitorItem(run: TestbedMissionRun): Record<s
       source: "monitor",
       wouldMutate: false,
       browserMissionShouldMutate: run.allowTestMutations,
+      requestedBrowserMissionShouldMutate: run.requestedAllowTestMutations === true,
+      missionEnvironment: run.environment,
+      mutationMode: run.mutationMode,
+      mutationScope: run.mutationScope,
+      mutationBindingReason: run.mutationBindingReason,
       wouldWriteLocalCheckpoint: false,
       freeFormHermesPromptUsed: false,
     },
@@ -705,22 +752,36 @@ function testbedMissionTitle(mode: TestbedMissionMode | undefined): string {
   }
 }
 
-function testbedMissionReadyMessage(mode: TestbedMissionMode | undefined, allowTestMutations: boolean): string {
+function testbedMissionReadyMessage(
+  mode: TestbedMissionMode | undefined,
+  binding: ReturnType<typeof resolveTestbedMutationBinding>
+): string {
   if (mode === "siwe_auth") {
     return "SIWE auth mission generated; waiting for the signer-sidecar role sessions and read-only role-gating checks.";
   }
-  return allowTestMutations
-    ? "Mission packet generated; waiting for a clean browser-only test-mode run where safe sandbox page mutations are allowed."
-    : "Mission packet generated; waiting for a clean browser-only agent run.";
+  if (binding.allowTestMutations) {
+    return `Mission packet generated for ${binding.environment}; waiting for a clean browser-only test-mode run where safe sandbox page mutations are allowed.`;
+  }
+  if (binding.requestedAllowTestMutations) {
+    return `Mission packet generated, but mutation was rebound to read-only: ${binding.reason}`;
+  }
+  return `Mission packet generated for ${binding.environment}; waiting for a clean browser-only agent run.`;
 }
 
-function testbedMissionReadyReason(mode: TestbedMissionMode | undefined, allowTestMutations: boolean): string {
+function testbedMissionReadyReason(
+  mode: TestbedMissionMode | undefined,
+  binding: ReturnType<typeof resolveTestbedMutationBinding>
+): string {
   if (mode === "siwe_auth") {
     return "SIWE auth mission is ready; waiting for signer-sidecar role sessions and structured role-gating evidence.";
   }
-  return allowTestMutations
-    ? "Mission packet is ready; waiting for a browser-only test-mode run and structured report."
-    : "Mission packet is ready; waiting for a browser-only agent run and structured report.";
+  if (binding.allowTestMutations) {
+    return `Mission packet is ready with ${binding.environment} testbed mutations allowed; waiting for a browser-only test-mode run and structured report.`;
+  }
+  if (binding.requestedAllowTestMutations) {
+    return `Mission packet is ready, but env→mutation binding forced read-only: ${binding.reason}`;
+  }
+  return "Mission packet is ready; waiting for a browser-only agent run and structured report.";
 }
 
 function missionStorePath(path?: string): string | undefined {
@@ -953,6 +1014,49 @@ function missionReportStatusReason(
     return "Browser-agent report was attached but did not include a clear verdict; inspect it before Hermes can close the mission.";
   }
   return `Browser-agent report returned ${verdict}; inspect the attached evidence before changing the page or mission prompt.`;
+}
+
+function compareToPreviousMissionBaseline(
+  run: TestbedMissionRun,
+  report: TestbedMissionStructuredReport
+): TestbedMissionBaselineComparison | undefined {
+  const baseline = missionRuns
+    .filter((candidate) =>
+      candidate.id !== run.id
+      && candidate.status === "completed"
+      && candidate.targetUrl === run.targetUrl
+      && candidate.goal === run.goal
+      && (candidate.environment ?? "unknown") === (run.environment ?? "unknown")
+      && Boolean(candidate.result)
+    )
+    .sort((a, b) => (b.completedAt ?? b.updatedAt).localeCompare(a.completedAt ?? a.updatedAt))[0];
+  if (!baseline) return undefined;
+  const baselineReport = testbedMissionStructuredReport(baseline);
+  if (!baselineReport) return undefined;
+  const scoreDeltas = Object.fromEntries(
+    Object.keys({ ...baselineReport.scores, ...report.scores })
+      .map((key) => [key, Math.round(((report.scores[key] ?? 0) - (baselineReport.scores[key] ?? 0)) * 100) / 100] as const)
+      .filter(([, delta]) => delta !== 0)
+  );
+  const blockerChanged = (baselineReport.blockers[0] ?? "") !== (report.blockers[0] ?? "");
+  const verdictChanged = baselineReport.verdict !== report.verdict;
+  const scoreSummary = Object.entries(scoreDeltas)
+    .slice(0, 3)
+    .map(([key, delta]) => `${key} ${delta > 0 ? "+" : ""}${delta}`)
+    .join(", ");
+  return {
+    baselineRunId: baseline.id,
+    ...(baseline.completedAt ? { baselineCompletedAt: baseline.completedAt } : {}),
+    verdictChanged,
+    blockerChanged,
+    scoreDeltas,
+    summary: [
+      `Compared against baseline ${baseline.id}.`,
+      verdictChanged ? `Verdict changed ${baselineReport.verdict}→${report.verdict}.` : `Verdict stayed ${report.verdict}.`,
+      blockerChanged ? "Primary blocker changed." : "Primary blocker unchanged.",
+      scoreSummary ? `Score deltas: ${scoreSummary}.` : "No score deltas recorded.",
+    ].join(" "),
+  };
 }
 
 function stringArray(value: unknown): string[] {

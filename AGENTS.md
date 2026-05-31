@@ -217,6 +217,10 @@ security-sensitive surface.
   (the marketplace policy does not cover it — see
   [docs/HERMES_INTEGRATION_MAP.md](docs/HERMES_INTEGRATION_MAP.md) Q4) and must keep
   the human approval step.
+- **Testbed missions bind mutations to environment.** `allowTestMutations` is
+  honored only for `local`, `testnet`, or `staging`; `mainnet`, `preview`, and
+  unknown targets are read-only by construction. Do not bypass this binding in
+  the mission queue, runner, or command executor.
 - Validate tool inputs with Zod schemas (`packages/schemas`); fail closed on
   malformed input.
 

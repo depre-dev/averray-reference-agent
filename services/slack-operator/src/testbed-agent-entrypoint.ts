@@ -8,10 +8,18 @@ import {
   type TestbedMissionMode,
   type TestbedMissionRun,
 } from "./monitor-testbed-missions.js";
+import {
+  annotateMissionWithMutationBinding,
+  resolveTestbedMutationBinding,
+  testbedEnvironmentFromEnv,
+  type TestbedMissionEnvironment,
+} from "./testbed-mutation-binding.js";
 
 export interface AgentTestbedMissionInput extends TestbedAgentMissionInput {
   requester?: string;
   path?: string;
+  /** Explicit environment binding; absent ⇒ infer from URL / runner env. */
+  environment?: TestbedMissionEnvironment | string;
   /** Select a mission executor instead of the single-URL explore default. */
   mode?: TestbedMissionMode;
   /** T1: routes for a surface sweep (relative to the app base URL, or absolute). */
@@ -43,7 +51,16 @@ export function createTestbedMissionFromAgent(
   input: AgentTestbedMissionInput = {},
   nowMs: number = Date.now()
 ): AgentTestbedMissionResult {
-  const mission = getTestbedAgentMission(input) as Record<string, unknown>;
+  const binding = resolveTestbedMutationBinding({
+    targetUrl: input.targetUrl,
+    mode: input.mode,
+    requestedAllowTestMutations: input.allowTestMutations === true,
+    configuredEnvironment: input.environment ?? testbedEnvironmentFromEnv(),
+  });
+  const mission = annotateMissionWithMutationBinding(
+    getTestbedAgentMission({ ...input, allowTestMutations: binding.allowTestMutations }) as Record<string, unknown>,
+    binding
+  );
   // Carry executor selection onto the mission packet's target so the recorded
   // run picks up `mode` / `routes` (the averray-mcp packet generator is
   // deliberately agnostic to monitor-local executors).

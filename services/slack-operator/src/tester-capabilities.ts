@@ -13,6 +13,7 @@ export function buildTesterCapabilitiesManifest(deps: TesterCapabilitiesDeps = {
   const runnerEnabled = truthy(env.TESTBED_MISSION_RUNNER_ENABLED);
   const signerEnabled = truthy(env.TEST_WALLET_SIGNER_ENABLED);
   const runnerExecutor = env.TESTBED_MISSION_RUNNER_EXECUTOR || "playwright";
+  const missionEnvironment = env.TESTBED_MISSION_ENVIRONMENT || env.AVERRAY_TESTBED_ENVIRONMENT || "inferred_from_target_url";
   // T2: the runner now injects a pre-seeded session into the sweep. The authed
   // sweep is genuinely available once a session SOURCE is configured (the
   // signer sidecar URL, or a manual storageState path / token).
@@ -48,6 +49,11 @@ export function buildTesterCapabilitiesManifest(deps: TesterCapabilitiesDeps = {
     runtime: {
       runnerEnabled,
       runnerExecutor,
+      missionEnvironment,
+      evidenceCapture: {
+        trace: env.TESTBED_MISSION_CAPTURE_TRACE === "0" || env.TESTBED_MISSION_CAPTURE_TRACE === "false" ? "disabled" : "enabled",
+        video: env.TESTBED_MISSION_CAPTURE_VIDEO === "0" || env.TESTBED_MISSION_CAPTURE_VIDEO === "false" ? "disabled" : "enabled",
+      },
       runner: deps.runner ?? null,
       signerSidecarEnabled: signerEnabled,
       authedSessionConfigured: sessionConfigured,
@@ -57,8 +63,8 @@ export function buildTesterCapabilitiesManifest(deps: TesterCapabilitiesDeps = {
     },
     safety: {
       agentRequestedDefault: "read_only",
-      mutationRule: "Agents may request read-only runs only. Testbed mutation and gold-path runs are operator-only.",
-      mainnetRule: "mainnet is read-only by design",
+      mutationRule: "Mission env binds mutation mode: only local/testnet/staging can enable testbed-only mutations; unknown/preview/mainnet are read-only.",
+      mainnetRule: "mainnet is read-only by design, even when allowTestMutations is requested",
       haltFile: "all runners remain subject to HALT_FILE",
       privateContextRule: "browser missions must use page-visible evidence, not private repo or monitor internals",
     },
@@ -78,7 +84,7 @@ export function buildTesterCapabilitiesManifest(deps: TesterCapabilitiesDeps = {
             requester: "agent-name",
           },
         },
-        evidence: ["http status", "screenshots", "visible text", "console errors", "network failures", "artifact manifest"],
+        evidence: ["http status", "screenshots", "trace", "video", "visible text", "console errors", "network failures", "artifact manifest"],
         result: "structured mission report with verdict, scores, blockers, findings, and evidence links",
       },
       {
@@ -96,7 +102,7 @@ export function buildTesterCapabilitiesManifest(deps: TesterCapabilitiesDeps = {
             requester: "agent-name",
           },
         },
-        evidence: ["http status", "screenshots", "visible text", "console errors", "network failures", "artifact manifest"],
+        evidence: ["http status", "screenshots", "trace", "video", "visible text", "console errors", "network failures", "artifact manifest", "baseline comparison when available"],
         result: "structured mission report with verdict, blockers, confusing moments, mutation boundary notes, and evidence links",
       },
       {
@@ -158,7 +164,7 @@ export function buildTesterCapabilitiesManifest(deps: TesterCapabilitiesDeps = {
       blockers: "visible blockers or empty array",
       confusingMoments: "where the page required guessing",
       mutationBoundaryNotes: "what the tester stopped before or safely exercised",
-      evidence: "bounded screenshots, URLs, console/network findings, visible text, and artifact manifest links",
+      evidence: "bounded screenshots, Playwright trace/video artifacts, URLs, console/network findings, visible text, artifact manifest links, and baseline comparison when available",
       recommendations: "smallest product changes that help the next outside agent",
     },
     platformHelper: {

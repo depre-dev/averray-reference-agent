@@ -135,7 +135,7 @@ export function getTestbedAgentMission(input: TestbedAgentMissionInput = {}) {
       confusingMoments: ["where the page required guessing"],
       evidence: [
         {
-          type: "screenshot | url | visible_text | console | network | observation",
+          type: "screenshot | trace | video | url | visible_text | console | network | observation",
           value: "bounded evidence reference",
         },
       ],
@@ -151,6 +151,7 @@ export function getTestbedAgentMission(input: TestbedAgentMissionInput = {}) {
       mutationMode: allowTestMutations ? "testbed_mutation_allowed" : "stop_before_mutation",
       mutationsAttempted: ["test-only actions submitted, or empty array"],
       stoppedBeforeMutation: "boolean",
+      baselineComparison: "optional comparison against the previous completed run for this target/env",
     },
     nextSteps: [
       "Run this once with fresh memory to measure first-contact usability.",

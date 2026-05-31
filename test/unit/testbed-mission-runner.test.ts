@@ -222,6 +222,9 @@ describe("testbed mission runner", () => {
       TESTBED_MISSION_RUNNER_COMMAND: "hermes",
       TESTBED_MISSION_RUNNER_ARGS: "[\"run\",\"{prompt}\"]",
       TESTBED_MISSION_RUNNER_POLL_INTERVAL_MS: "500",
+      TESTBED_MISSION_ENVIRONMENT: "testnet",
+      TESTBED_MISSION_CAPTURE_TRACE: "0",
+      TESTBED_MISSION_CAPTURE_VIDEO: "false",
     });
 
     expect(config).toMatchObject({
@@ -231,6 +234,9 @@ describe("testbed mission runner", () => {
       command: "hermes",
       args: ["run", "{prompt}"],
       pollIntervalMs: 500,
+      missionEnvironment: "testnet",
+      captureTrace: false,
+      captureVideo: false,
     });
   });
 
@@ -256,6 +262,8 @@ describe("testbed mission runner", () => {
       networkFailures: ["GET https://example.test/api :: net::ERR_FAILED"],
       networkResponses: ["500 GET https://example.test/api/status"],
       screenshotArtifacts: ["/tmp/first-screen.png", "/tmp/after-safe-click.png"],
+      traceArtifacts: ["/tmp/trace.zip"],
+      videoArtifacts: ["/tmp/video.webm"],
     });
 
     expect(evidence).toEqual([
@@ -265,6 +273,8 @@ describe("testbed mission runner", () => {
       expect.objectContaining({ type: "network_failures", value: expect.stringContaining("ERR_FAILED") }),
       expect.objectContaining({ type: "network_responses", value: expect.stringContaining("500 GET") }),
       expect.objectContaining({ type: "screenshots", value: expect.stringContaining("first-screen.png") }),
+      expect.objectContaining({ type: "trace", value: expect.stringContaining("trace.zip") }),
+      expect.objectContaining({ type: "video", value: expect.stringContaining("video.webm") }),
     ]);
   });
 });
