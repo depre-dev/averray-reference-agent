@@ -22,14 +22,16 @@ export type CodexRunnerHeartbeatStatus =
 /**
  * Which agent a task is dispatched to. Defaults to "codex" everywhere so
  * existing tasks and callers keep working unchanged; "claude" is the
- * greenfield Claude-worker path (P2). Resolve a possibly-absent value via
- * {@link taskAgent}.
+ * greenfield Claude-worker path (P2), and C3 specialists (for example
+ * "test-writer") use the same per-agent filter. Resolve a possibly-absent
+ * value via {@link taskAgent}.
  */
-export type TaskAgent = "codex" | "claude";
+export type TaskAgent = "codex" | "claude" | "test-writer" | (string & {});
 
 /** Resolve a task's agent, defaulting legacy/undefined tasks to "codex". */
-export function taskAgent(task: { agent?: TaskAgent }): TaskAgent {
-  return task.agent === "claude" ? "claude" : "codex";
+export function taskAgent(task: { agent?: TaskAgent | string }): TaskAgent {
+  const agent = typeof task.agent === "string" ? task.agent.trim() : "";
+  return agent ? (agent as TaskAgent) : "codex";
 }
 
 export interface CodexTaskInput {
@@ -170,13 +172,21 @@ export async function proposeCodexTask(
 
 function initialCodexTaskEventMessage(input: CodexTaskInput): string {
   const reason = (input.reason ?? "").toLowerCase();
+  const agent = taskAgent(input);
   if (reason.includes("operator sent review back")) {
     return "Operator sent review back to Codex from the monitor.";
   }
   if (reason.includes("operator explicitly delegated")) {
     return "Operator delegated Codex takeover from the monitor.";
   }
-  return "Hermes proposed a bounded Codex task.";
+  return `Hermes proposed a bounded ${taskAgentEventLabel(agent)} task.`;
+}
+
+function taskAgentEventLabel(agent: TaskAgent): string {
+  if (agent === "codex") return "Codex";
+  if (agent === "claude") return "Claude";
+  if (agent === "test-writer") return "test-writer";
+  return agent;
 }
 
 export async function approveCodexTask(
@@ -197,7 +207,7 @@ export async function approveCodexTask(
     events: appendTaskEvent(existing, {
       at: now,
       status: "approved",
-      message: "Operator approved Codex dispatch.",
+      message: `Operator approved ${taskAgentEventLabel(taskAgent(existing))} dispatch.`,
     }),
     updatedAt: now,
   };
@@ -268,12 +278,12 @@ export async function claimNextApprovedCodexTask(
     startedAt: now,
     runnerId: deps.runnerId ?? existing.runnerId ?? "codex-task-runner",
     attemptCount: (existing.attemptCount ?? 0) + 1,
-    progressMessage: "Codex runner claimed the task.",
+    progressMessage: `${taskAgentEventLabel(taskAgent(existing))} runner claimed the task.`,
     progressAt: now,
     events: appendTaskEvent(existing, {
       at: now,
       status: "running",
-      message: `Codex runner ${(deps.runnerId ?? existing.runnerId ?? "codex-task-runner")} claimed the task.`,
+      message: `${taskAgentEventLabel(taskAgent(existing))} runner ${(deps.runnerId ?? existing.runnerId ?? "codex-task-runner")} claimed the task.`,
     }),
     updatedAt: now,
   };
@@ -295,7 +305,7 @@ export async function updateCodexTaskProgress(
   if (!existing) return undefined;
   if (TERMINAL_STATUSES.has(existing.status)) return existing;
   const now = (deps.now ?? new Date()).toISOString();
-  const progressMessage = deps.progressMessage ?? existing.progressMessage ?? "Codex runner is still working.";
+  const progressMessage = deps.progressMessage ?? existing.progressMessage ?? `${taskAgentEventLabel(taskAgent(existing))} runner is still working.`;
   const task: CodexTask = {
     ...existing,
     progressMessage,
@@ -336,12 +346,12 @@ export async function completeCodexTask(
     ...(typeof deps.exitCode === "number" ? { exitCode: deps.exitCode } : {}),
     ...(deps.stdoutTail ? { stdoutTail: deps.stdoutTail } : {}),
     ...(deps.stderrTail ? { stderrTail: deps.stderrTail } : {}),
-    progressMessage: deps.completionSummary ?? "Codex runner completed the task.",
+    progressMessage: deps.completionSummary ?? `${taskAgentEventLabel(taskAgent(existing))} runner completed the task.`,
     progressAt: now,
     events: appendTaskEvent(existing, {
       at: now,
       status: "completed",
-      message: deps.completionSummary ?? "Codex runner completed the task.",
+      message: deps.completionSummary ?? `${taskAgentEventLabel(taskAgent(existing))} runner completed the task.`,
     }),
     updatedAt: now,
   };
@@ -368,16 +378,16 @@ export async function failCodexTask(
     ...existing,
     status: "failed",
     failedAt: now,
-    failureReason: deps.failureReason ?? "Codex task runner failed.",
+    failureReason: deps.failureReason ?? `${taskAgentEventLabel(taskAgent(existing))} task runner failed.`,
     ...(typeof deps.exitCode === "number" ? { exitCode: deps.exitCode } : {}),
     ...(deps.stdoutTail ? { stdoutTail: deps.stdoutTail } : {}),
     ...(deps.stderrTail ? { stderrTail: deps.stderrTail } : {}),
-    progressMessage: deps.failureReason ?? "Codex task runner failed.",
+    progressMessage: deps.failureReason ?? `${taskAgentEventLabel(taskAgent(existing))} task runner failed.`,
     progressAt: now,
     events: appendTaskEvent(existing, {
       at: now,
       status: "failed",
-      message: deps.failureReason ?? "Codex task runner failed.",
+      message: deps.failureReason ?? `${taskAgentEventLabel(taskAgent(existing))} task runner failed.`,
     }),
     updatedAt: now,
   };

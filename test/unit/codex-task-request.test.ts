@@ -62,6 +62,16 @@ describe("parseProposeTaskPayload — claude (greenfield) tasks", () => {
   });
 });
 
+describe("parseProposeTaskPayload — specialist greenfield tasks", () => {
+  it("accepts test-writer work with no PR", () => {
+    const r = parseProposeTaskPayload({ repo: "averray-agent/agent", agent: "test-writer", prompt: "add parser tests" });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.input.agent).toBe("test-writer");
+    expect(r.input.pullRequestNumber).toBeUndefined();
+  });
+});
+
 describe("parseProposeTaskPayload — rejection paths", () => {
   it("rejects an unknown agent", () => {
     const r = parseProposeTaskPayload({ repo: "a/b", agent: "gpt5", prompt: "x" });

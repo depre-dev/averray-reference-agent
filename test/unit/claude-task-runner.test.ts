@@ -34,6 +34,7 @@ describe("claude task runner", () => {
   function config(path: string, overrides: Partial<ClaudeTaskRunnerConfig> = {}): ClaudeTaskRunnerConfig {
     return {
       enabled: true,
+      agent: "claude",
       path,
       runnerId: "test-claude-runner",
       args: [],
@@ -47,6 +48,12 @@ describe("claude task runner", () => {
 
   async function approvedClaudeTask(path: string, prompt = "Build the thing"): Promise<string> {
     const { task } = await proposeCodexTask({ repo: "averray-agent/agent", agent: "claude", prompt }, { path });
+    await approveCodexTask(task.id, { path, approvedBy: "operator" });
+    return task.id;
+  }
+
+  async function approvedTestWriterTask(path: string, prompt = "Add parser tests"): Promise<string> {
+    const { task } = await proposeCodexTask({ repo: "averray-agent/agent", agent: "test-writer", prompt }, { path });
     await approveCodexTask(task.id, { path, approvedBy: "operator" });
     return task.id;
   }
@@ -96,6 +103,30 @@ describe("claude task runner", () => {
     const tasks = await listCodexTasks({ path });
     expect(tasks.find((t) => t.id === claudeId)?.status).toBe("completed");
     expect(tasks.find((t) => t.id === codexId)?.status).toBe("approved"); // untouched
+  });
+
+  it("can be configured as the C3 test-writer specialist runner", async () => {
+    const path = await tempQueuePath();
+    const claudeId = await approvedClaudeTask(path, "general Claude work");
+    const testWriterId = await approvedTestWriterTask(path);
+    const seen: Array<{ id: string; agent?: string }> = [];
+
+    const result = await runClaudeTaskRunnerOnce(config(path, {
+      agent: "test-writer",
+      runnerId: "test-writer-runner",
+    }), {
+      executor: async (task) => {
+        seen.push({ id: task.id, agent: task.agent });
+        return { exitCode: 0, stdout: "opened PR", stderr: "", summary: "opened PR" };
+      },
+      log: () => {},
+    });
+
+    expect(result.status).toBe("completed");
+    expect(seen).toEqual([{ id: testWriterId, agent: "test-writer" }]);
+    const tasks = await listCodexTasks({ path });
+    expect(tasks.find((t) => t.id === testWriterId)?.status).toBe("completed");
+    expect(tasks.find((t) => t.id === claudeId)?.status).toBe("approved");
   });
 
   it("happy path: claim → execute → completeCodexTask + completed heartbeat", async () => {

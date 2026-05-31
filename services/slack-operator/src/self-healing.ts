@@ -20,6 +20,7 @@
 // (runSelfHealingOnce) so the matrix is unit-tested with no fs/network.
 
 import type { AlertPayload } from "./alert-bridge.js";
+import type { TaskAgent } from "./codex-task-queue.js";
 
 export type HealingRiskTier = "high" | "low";
 export type HealingSource = "testbed_mission" | "post_deploy_verification" | "ci_main" | "ops_health";
@@ -41,7 +42,7 @@ export interface FailureSignal {
 }
 
 export interface HealingClassification {
-  agent: "codex" | "claude";
+  agent: TaskAgent;
   riskTier: HealingRiskTier;
   reason: string;
 }
@@ -62,7 +63,7 @@ export interface HealingDecision {
   action: HealingAction;
   reason: HealingReason;
   riskTier?: HealingRiskTier;
-  agent?: "codex" | "claude";
+  agent?: TaskAgent;
 }
 
 /**
@@ -154,7 +155,7 @@ export interface HealingAuditRecord {
   action: "propose" | "escalate" | "skip";
   reason: HealingReason | "cooldown" | "open_fix_exists";
   riskTier?: HealingRiskTier;
-  agent?: "codex" | "claude";
+  agent?: TaskAgent;
   taskId?: string;
   evidence?: string;
 }
@@ -176,7 +177,7 @@ export interface SelfHealingDeps {
   /** Propose a `proposed` fix task and run it through the EXISTING gate. */
   propose: (input: {
     signal: FailureSignal;
-    agent: "codex" | "claude";
+    agent: TaskAgent;
     riskTier: HealingRiskTier;
     prompt: string;
     routingReason: string;

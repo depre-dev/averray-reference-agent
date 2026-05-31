@@ -20,6 +20,7 @@ dispatch:
   allowed_agents:
     - codex
     - claude
+    - test-writer
   per_day_max: 10
   per_repo_per_day_max: 5
 # D3 anomaly auto-pause — the fail-safe for autopilot. Tiered: a SOFT trip
@@ -33,4 +34,3 @@ anomaly:
   budget_spike_ratio: 0.8  # ≥80% of the per-day dispatch cap → soft
   budget_blowout_ratio: 1.0 # ≥100% of the cap → hard
   heartbeat_gap_sec: 600   # runner heartbeat 10min+ stale → soft
-

@@ -361,6 +361,25 @@ describe("codex task queue — multi-agent (P2)", () => {
     expect(await claimNextApprovedCodexTask({ path, agent: "codex" })).toBeUndefined();
   });
 
+  it("stores and filters a specialist agent", async () => {
+    const path = await tempQueuePath();
+    const specialist = await proposeCodexTask(
+      { repo: "r", agent: "test-writer", prompt: "add tests" },
+      { path, now: new Date("2026-05-17T10:00:00.000Z") },
+    );
+    await approveCodexTask(specialist.task.id, { path, approvedBy: "operator", now: new Date("2026-05-17T10:01:00.000Z") });
+
+    const claimed = await claimNextApprovedCodexTask({
+      path,
+      agent: "test-writer",
+      runnerId: "test-writer-runner",
+      now: new Date("2026-05-17T10:02:00.000Z"),
+    });
+
+    expect(claimed?.id).toBe(specialist.task.id);
+    expect(taskAgent(claimed!)).toBe("test-writer");
+  });
+
   it("an unfiltered claim still takes any approved task (back-compat)", async () => {
     const path = await tempQueuePath();
     const claude = await proposeCodexTask(

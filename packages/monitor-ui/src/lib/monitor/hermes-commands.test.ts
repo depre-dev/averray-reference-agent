@@ -120,6 +120,15 @@ test("parseHermesInput: /task claude <repo> <prompt> → greenfield claude task 
   });
 });
 
+test("parseHermesInput: /task test-writer <repo> <prompt> → specialist greenfield task", () => {
+  assert.deepEqual(parseHermesInput("/task test-writer averray-agent/agent Add parser coverage"), {
+    kind: "task",
+    agent: "test-writer",
+    repo: "averray-agent/agent",
+    prompt: "Add parser coverage",
+  });
+});
+
 test("parseHermesInput: /task codex <repo>#<pr> <prompt> → codex task with PR", () => {
   assert.deepEqual(parseHermesInput("/task codex averray-agent/agent#123 tighten the validator"), {
     kind: "task",

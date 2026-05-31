@@ -212,6 +212,51 @@ describe("A1 agent scorecard", () => {
     });
   });
 
+  it("attributes test-writer specialist branches and tasks separately", () => {
+    const scorecard = buildAgentScorecard({
+      active: [],
+      recent: [{
+        requester: "github-actions",
+        status: "completed",
+        summary: {
+          finalVerdict: "ok_to_merge",
+          currentPullRequest: {
+            repo: "averray-agent/agent",
+            number: 201,
+            merged: false,
+            draft: false,
+            headBranch: "test-writer/parser-coverage",
+          },
+          reviewSignals: { touchedAreas: ["tests"] },
+        },
+      }],
+      codexTasks: {
+        items: [{
+          id: "test-writer-task-1",
+          agent: "test-writer",
+          status: "completed",
+        }],
+      },
+      llmUsageEvents: [{
+        agent: "test-writer",
+        model: "claude-sonnet-4-5",
+        taskId: "test-writer-task-1",
+        inputTokens: 120,
+        outputTokens: 40,
+        ts: "2026-05-31T10:00:00.000Z",
+      }],
+    }, { now: new Date("2026-05-31T12:00:00.000Z") });
+
+    const specialist = scorecard.agents.find((agent) => agent.agent === "test-writer");
+    expect(specialist).toMatchObject({
+      agent: "test-writer",
+      sampleCount: 2,
+      tasks: { total: 1, completed: 1 },
+      quality: { pullRequests: { opened: 1 } },
+      surfaces: [{ surface: "tests", count: 1 }],
+    });
+  });
+
   it("keeps empty snapshots explicit instead of inventing routing confidence", () => {
     const scorecard = buildAgentScorecard({}, { now: new Date("2026-05-31T12:00:00.000Z") });
 

@@ -3,7 +3,7 @@
 // The Hermes composer is a single text input that doubles as a command
 // line:
 //   /mission <url>                        spawn a browser mission (M7')
-//   /task <agent> [<repo>#<pr>] <prompt>  propose a codex|claude task (O3)
+//   /task <agent> [<repo>#<pr>] <prompt>  propose a codex|claude|specialist task (O3/C3)
 //   /claude <repo> <…>                    propose a greenfield Claude task (O2 shortcut)
 //   /mute [1h|9am|…]                      silence action alerts; /unmute clears it
 //   anything else                         a question routed to Hermes
@@ -12,7 +12,7 @@
 
 import { parseMuteArg } from "./notifications.js";
 
-export type TaskAgent = "codex" | "claude";
+export type TaskAgent = "codex" | "claude" | "test-writer";
 
 export type HermesCommand =
   | { kind: "mission"; url: string }
@@ -62,12 +62,12 @@ export function parseHermesInput(raw: string, now: () => number = Date.now): Her
   if (task) {
     const arg = (task[1] ?? "").trim();
     if (!arg) {
-      return { kind: "error", message: "/task needs an agent, repo, and a prompt, e.g. /task claude averray-agent/agent Add a HEALTHCHECK.md" };
+      return { kind: "error", message: "/task needs an agent, repo, and a prompt, e.g. /task test-writer averray-agent/agent Add parser tests" };
     }
     const agentGap = arg.search(/\s/);
     const agentRaw = (agentGap === -1 ? arg : arg.slice(0, agentGap)).toLowerCase();
-    if (agentRaw !== "codex" && agentRaw !== "claude") {
-      return { kind: "error", message: `"${agentRaw}" is not a valid agent (expected codex or claude).` };
+    if (!isTaskAgent(agentRaw)) {
+      return { kind: "error", message: `"${agentRaw}" is not a valid agent (expected codex, claude, or test-writer).` };
     }
     const rest = (agentGap === -1 ? "" : arg.slice(agentGap + 1)).trim();
     const targetGap = rest.search(/\s/);
@@ -124,6 +124,10 @@ export function parseHermesInput(raw: string, now: () => number = Date.now): Her
   if (autonomy) return autonomy;
 
   return { kind: "ask", text };
+}
+
+function isTaskAgent(value: string): value is TaskAgent {
+  return value === "codex" || value === "claude" || value === "test-writer";
 }
 
 // ── O4-PR3a autonomy-mode NL parsing ────────────────────────────────

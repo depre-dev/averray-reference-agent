@@ -24,6 +24,8 @@ Any unresolved disagreement — a panel split, or a reviewer that blocks — **p
 - **Internal specialists now:** add role-specific agents — a **test-writer**, a **security-review** agent, a **docs** agent — via the per-agent-runner pattern from P2. Adding one is modular: a new runner + a new `agentType` + a routing-taxonomy entry. The risk taxonomy decides what each is trusted with (e.g. the security-review agent is a reviewer, not a builder, on high-risk surfaces).
 - **External/3rd-party agents later:** defer the generic external-agent interface (via the `ext` type) until internal collaboration is solid — external agents add a real trust/security surface (sandboxing, credential scope, allowlisting) that's better handled once the internal model is proven.
 
+Implementation note: C3 first slice adds the `test-writer` internal specialist as the template. It reuses the Claude-family per-agent runner/branch-worker with `CLAUDE_TASK_RUNNER_AGENT=test-writer`, a role prompt, `test-writer/*` branch attribution, and the normal PR review/human merge gate. Adding the next internal specialist should be config + prompt + routing taxonomy entry, not a new authority path.
+
 ## C4 — Inter-agent communication
 
 Extend the board's collaboration channel (today: `codex | hermes | operator | system`; note `claude` isn't yet a collaboration author) so agents can coordinate directly on a card — e.g. a reviewer asking the builder to clarify, or Hermes brokering a disagreement before escalating. A data-model extension (`CollaborationAuthor`/`Target`) + UI; low-risk and immediately useful once there are ≥2 builders.

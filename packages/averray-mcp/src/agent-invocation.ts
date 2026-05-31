@@ -26,7 +26,7 @@ import {
   evaluateDispatchPolicy,
   type DispatchPolicyConfig,
 } from "./dispatch-policy.js";
-import { classifyTask, type RiskTier } from "./dispatch-routing.js";
+import { classifyTask, type RiskTier, type RoutingAgent } from "./dispatch-routing.js";
 import { getAgentScorecard } from "./agent-scorecard.js";
 import {
   applyLearnedRouting,
@@ -52,7 +52,7 @@ export type AgentInvocationIntent =
 /** A task Hermes proposed (O4). Proposes-only: status is "proposed", never approved. */
 export interface ProposedAgentTask {
   repo: string;
-  agent: "codex" | "claude";
+  agent: RoutingAgent;
   prompt: string;
   requester: string;
   pullRequestNumber?: number;
@@ -95,7 +95,7 @@ export interface AgentInvocationInput {
   /** enqueue_agent_task: the task prompt + which agent to propose it to. */
   prompt?: string;
   /** Explicit agent; when omitted it's DERIVED from the routing taxonomy (overridable). */
-  agent?: "codex" | "claude";
+  agent?: RoutingAgent;
   /** Optional surface hint for routing (e.g. "contracts", "ui"). */
   area?: string;
 }
@@ -864,7 +864,7 @@ async function invokeEnqueueAgentTask(
   const routingInput = { repo, prompt, ...(input.area ? { area: input.area } : {}) };
   const staticRouting = classifyTask(routingInput);
   const explicitAgent = (input.agent ?? "").trim();
-  const agentExplicit = explicitAgent === "codex" || explicitAgent === "claude";
+  const agentExplicit = isExplicitRoutingAgent(explicitAgent);
 
   // (a) HALT kill-switch — block cleanly rather than crash.
   const assertKill = deps.assertNoKillSwitchFn ?? assertNoKillSwitch;
@@ -912,7 +912,7 @@ async function invokeEnqueueAgentTask(
       }),
     }
     : await resolveLearnedRouting(routingInput, staticRouting, deps, env, loadScorecard);
-  const agent: "codex" | "claude" = agentExplicit ? explicitAgent : routing.agent;
+  const agent: RoutingAgent = agentExplicit ? explicitAgent : routing.agent;
 
   // (b) Dispatch guardrail — allowlist + per-day budget. Fail-closed.
   const policy = deps.dispatchPolicyConfig ?? loadDispatchPolicyConfig(env);
@@ -1051,7 +1051,7 @@ function disabledCostBudgetSnapshot(): DispatchCostBudgetSnapshot {
 
 async function dispatchCostBudgetSnapshot(
   capUsd: number,
-  agent: "codex" | "claude",
+  agent: RoutingAgent,
   today: string,
   loadScorecard: () => Promise<unknown>
 ): Promise<DispatchCostBudgetSnapshot> {
@@ -1069,7 +1069,7 @@ async function dispatchCostBudgetSnapshot(
 
 function dispatchCostBudgetSnapshotFromScorecard(
   scorecard: unknown,
-  agent: "codex" | "claude",
+  agent: RoutingAgent,
   today: string
 ): DispatchCostBudgetSnapshot {
   if (!isRecord(scorecard)) return { status: "not_recorded", todayCostUsd: null, estimatedTaskCostUsd: null };
@@ -1096,6 +1096,10 @@ function estimatedCostForAgent(agentRecord: Record<string, unknown> | undefined)
   const totalUsd = numberField(cost, "totalUsd");
   const runs = recordsFrom(cost, "byModel").reduce((sum, entry) => sum + (numberField(entry, "runs") ?? 0), 0);
   return totalUsd !== undefined && runs > 0 ? totalUsd / runs : null;
+}
+
+function isExplicitRoutingAgent(value: string): value is RoutingAgent {
+  return value === "codex" || value === "claude" || value === "test-writer";
 }
 
 // enqueue transport — POST/GET the slack-operator queue endpoint. Injected in

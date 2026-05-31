@@ -1,5 +1,6 @@
-// Claude task runner (O2) — the per-agent runner that claims approved
-// `agent: "claude"` tasks and executes the Claude worker. Mirrors
+// Claude task runner (O2/C3) — the per-agent runner that claims approved
+// Claude-family tasks (default `agent: "claude"`, or a configured internal
+// specialist such as `agent: "test-writer"`) and executes the worker. Mirrors
 // codex-task-runner.ts (poll → claim → execute → heartbeat) and ADOPTS the
 // auth/billing layer (claude-worker-auth.ts): the route-verification health
 // check gates the loop so Claude work never runs on the wrong billing route.
@@ -9,8 +10,8 @@
 //      "misconfigured" heartbeat and DO NOT CLAIM (never silently API-bill).
 //   2. HALT_FILE — the kill switch; when present, don't claim.
 //   3. Budget — in api mode, stop claiming past CLAUDE_WORKER_DAILY_BUDGET.
-//   4. Claim — only approved tasks where agent === "claude" (codex tasks are
-//      left to the codex runner via the queue's agent filter).
+//   4. Claim — only approved tasks for this runner's configured agent (codex
+//      tasks are left to the codex runner via the queue's agent filter).
 //
 // The executor is command-agnostic (like the codex runner): it spawns the
 // configured CLAUDE_TASK_RUNNER_COMMAND (the claude-branch-worker, once it
@@ -32,18 +33,22 @@ import {
   type ClaudeWorkerAuthEnv,
   type ClaudeWorkerAuthMode,
 } from "./claude-worker-auth.js";
-import type { CodexTask } from "./codex-task-queue.js";
+import type { CodexTask, TaskAgent } from "./codex-task-queue.js";
 import {
   claimNextApprovedCodexTask,
   completeCodexTask,
   failCodexTask,
+  taskAgent,
   updateCodexTaskProgress,
   updateCodexRunnerHeartbeat,
 } from "./codex-task-queue.js";
 import { sanitizeOutput, sanitizeTail, tail } from "./codex-task-runner.js";
+import { taskAgentLabel } from "./specialist-agents.js";
 
 export interface ClaudeTaskRunnerConfig {
   enabled: boolean;
+  /** Queue agent claimed by this runner. Defaults to "claude"; C3 specialists configure this. */
+  agent: TaskAgent;
   path?: string;
   runnerId: string;
   command?: string;
@@ -97,9 +102,11 @@ export interface ClaudeTaskRunnerDeps {
 }
 
 export function parseClaudeTaskRunnerConfig(env: NodeJS.ProcessEnv = process.env): ClaudeTaskRunnerConfig {
-  const runnerId = env.CLAUDE_TASK_RUNNER_ID || `claude-${hostname()}-${process.pid}`;
+  const agent = (env.CLAUDE_TASK_RUNNER_AGENT?.trim() || "claude") as TaskAgent;
+  const runnerId = env.CLAUDE_TASK_RUNNER_ID || `${agent}-${hostname()}-${process.pid}`;
   return {
     enabled: env.CLAUDE_TASK_RUNNER_ENABLED === "1" || env.CLAUDE_TASK_RUNNER_ENABLED === "true",
+    agent,
     ...(env.AVERRAY_CODEX_TASKS_PATH ? { path: env.AVERRAY_CODEX_TASKS_PATH } : {}),
     runnerId,
     ...(env.CLAUDE_TASK_RUNNER_COMMAND ? { command: env.CLAUDE_TASK_RUNNER_COMMAND } : {}),
@@ -125,7 +132,7 @@ export async function runClaudeTaskRunnerOnce(
   const log = deps.log ?? ((m: string) => console.info(m));
 
   if (!config.enabled) {
-    await heartbeat(config, "disabled", "Claude task runner is disabled.", deps.now);
+    await heartbeat(config, "disabled", `${taskAgentLabel(config.agent)} task runner is disabled.`, deps.now);
     return { status: "disabled" };
   }
 
@@ -134,17 +141,17 @@ export async function runClaudeTaskRunnerOnce(
   const verification = verifyAuthRoute(config.authEnv, probedRoute ? { probedRoute } : {});
   if (!verification.ok) {
     const reason = `auth route check failed: ${verification.reason}`;
-    log(`[claude-task-runner] REFUSING TO CLAIM (${config.runnerId}): ${verification.reason}`);
+    log(`[claude-task-runner] REFUSING TO CLAIM (${config.runnerId}/${config.agent}): ${verification.reason}`);
     await heartbeat(config, "misconfigured", reason, deps.now);
     return { status: "misconfigured", reason: verification.reason };
   }
   const mode = verification.mode;
-  log(`[claude-task-runner] ${config.runnerId}: ${verification.message}`);
+  log(`[claude-task-runner] ${config.runnerId}/${config.agent}: ${verification.message}`);
 
   // Executor must be configured (mirror codex: command required when live).
   const executor = deps.executor ?? executeClaudeTaskCommand;
   if (!config.command && executor === executeClaudeTaskCommand) {
-    const reason = "CLAUDE_TASK_RUNNER_COMMAND is required when the Claude task runner is enabled.";
+    const reason = "CLAUDE_TASK_RUNNER_COMMAND is required when the Claude-family task runner is enabled.";
     await heartbeat(config, "misconfigured", reason, deps.now);
     return { status: "misconfigured", reason };
   }
@@ -153,7 +160,7 @@ export async function runClaudeTaskRunnerOnce(
   if (config.haltFile) {
     const halted = deps.isHalted ? deps.isHalted(config.haltFile) : existsSync(config.haltFile);
     if (halted) {
-      await heartbeat(config, "idle", "HALT_FILE present — not claiming Claude tasks.", deps.now);
+      await heartbeat(config, "idle", `HALT_FILE present — not claiming ${taskAgentLabel(config.agent)} tasks.`, deps.now);
       return { status: "halted" };
     }
   }
@@ -165,24 +172,24 @@ export async function runClaudeTaskRunnerOnce(
     return { status: "budget_exhausted", reason: gate.reason ?? "daily budget reached" };
   }
 
-  // 4. CLAIM — only approved agent="claude" tasks.
+  // 4. CLAIM — only approved tasks for this runner's configured agent.
   const claimed = await claimNextApprovedCodexTask({
     path: config.path,
     runnerId: config.runnerId,
-    agent: "claude",
+    agent: config.agent,
     now: deps.now,
   });
   if (!claimed) {
-    await heartbeat(config, "idle", "Claude runner is online; no approved Claude task is waiting.", deps.now);
+    await heartbeat(config, "idle", `${taskAgentLabel(config.agent)} runner is online; no approved ${config.agent} task is waiting.`, deps.now);
     return { status: "idle" };
   }
 
-  await heartbeat(config, "running", `Claude runner claimed ${taskLabel(claimed)}.`, deps.now, claimed.id);
+  await heartbeat(config, "running", `${taskAgentLabel(config.agent)} runner claimed ${taskLabel(claimed)}.`, deps.now, claimed.id);
 
   try {
     const result = await executor(claimed, config, { mode });
     await recordLlmUsageFromResult({
-      agent: "claude",
+      agent: config.agent,
       taskId: claimed.id,
       ...(claimed.correlationId ? { runId: claimed.correlationId } : {}),
       result,
@@ -196,7 +203,7 @@ export async function runClaudeTaskRunnerOnce(
         stdoutTail: sanitizeTail(result.stdout, config.outputTailBytes),
         stderrTail: sanitizeTail(result.stderr, config.outputTailBytes),
       });
-      await heartbeat(config, "completed", summary || `Claude runner completed ${taskLabel(claimed)}.`, undefined, claimed.id);
+      await heartbeat(config, "completed", summary || `${taskAgentLabel(config.agent)} runner completed ${taskLabel(claimed)}.`, undefined, claimed.id);
       return { status: "completed", task: task ?? claimed };
     }
     const reason = summarizeFailure(result);
@@ -318,6 +325,7 @@ function taskEnvironment(task: CodexTask): NodeJS.ProcessEnv {
     CLAUDE_TASK_CORRELATION_ID: task.correlationId ?? "",
     CLAUDE_TASK_REASON: task.reason ?? "",
     CLAUDE_TASK_REQUESTER: task.requester ?? "",
+    CLAUDE_TASK_AGENT: taskAgent(task),
     CLAUDE_TASK_PROMPT: task.prompt,
   };
 }

@@ -218,6 +218,14 @@ describe("Card — task approve (O3 dispatch)", () => {
     expect(getByRole("button", { name: /Approve & dispatch/ })).toBeTruthy();
   });
 
+  test("a proposed test-writer card shows specialist attribution", () => {
+    const card = { ...proposed, id: "test-writer-task-x1", agentType: "test-writer" } as unknown as BoardCard;
+    const { getByText, getByRole } = render(<Card card={card} onApprove={vi.fn()} />);
+    expect(getByText("test-writer")).toBeTruthy();
+    fireEvent.click(getByRole("button", { name: /Approve & dispatch/ }));
+    expect(getByText(/Dispatch to test-writer\?/)).toBeTruthy();
+  });
+
   test("approving requires a confirm step before onApprove fires (no single-click dispatch)", () => {
     const onApprove = vi.fn();
     const { getByRole, getByText } = render(<Card card={proposed} onApprove={onApprove} />);

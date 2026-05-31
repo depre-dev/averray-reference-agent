@@ -84,6 +84,26 @@ describe("monitor collaboration channel", () => {
     });
   });
 
+  it("accepts the test-writer specialist as a card-scoped author and target", () => {
+    const message = recordCollaborationMessage(
+      {
+        author: "test-writer",
+        kind: "status",
+        addressedTo: "Claude",
+        text: "Claude, I added the failing parser coverage.",
+        relatedPr: { repo: "averray-agent/agent", number: 214 },
+      },
+      NOW
+    );
+
+    expect(message).toMatchObject({
+      author: "test-writer",
+      addressedTo: "claude",
+      text: expect.stringContaining("parser coverage"),
+      relatedPr: { repo: "averray-agent/agent", number: 214 },
+    });
+  });
+
   it("preserves relatedPr and relatedCorrelationId when well-formed", () => {
     const message = recordCollaborationMessage(
       {
@@ -263,6 +283,30 @@ describe("monitor review requests", () => {
       "Hermes, keep this card parked until review lands.",
       expect.stringContaining("Review requested from Codex"),
     ]);
+  });
+
+  it("creates review requests involving the test-writer specialist", () => {
+    const request = recordReviewRequest(
+      {
+        correlationId: "agent-task-99",
+        requestedBy: "hermes",
+        reviewer: "test-writer",
+        reason: "Please add coverage before this card moves forward.",
+      },
+      NOW
+    );
+
+    expect(request).toMatchObject({
+      requestedBy: "hermes",
+      reviewer: "test-writer",
+      correlationId: "agent-task-99",
+      status: "requested",
+    });
+    expect(listCollaborationMessages({ limit: 1 }, NOW + 1)[0]).toMatchObject({
+      author: "hermes",
+      addressedTo: "test-writer",
+      text: expect.stringContaining("Test-writer"),
+    });
   });
 
   it("requires a card scope and never creates a task as a side effect", async () => {

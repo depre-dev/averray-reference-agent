@@ -16,6 +16,7 @@ import {
   type CommandResult,
   type ExecFn,
 } from "../../services/slack-operator/src/claude-branch-worker.js";
+import { defineSpecialistAgent, TEST_WRITER_ROLE_PROMPT } from "../../services/slack-operator/src/specialist-agents.js";
 
 const task: ClaudeWorkerTask = {
   id: "claude-task-averray-agent-agent-new-20260530-abc123",
@@ -29,9 +30,11 @@ describe("claude branch worker — pure functions", () => {
   it("parses a greenfield task (no PR) and a PR-bearing task", () => {
     const green = parseClaudeWorkerTask({ CLAUDE_TASK_ID: "t1", CLAUDE_TASK_REPO: "a/b", CLAUDE_TASK_PROMPT: "do x" });
     expect(green).toMatchObject({ id: "t1", repo: "a/b", prompt: "do x" });
+    expect(green.agent).toBe("claude");
     expect(green.pullRequestNumber).toBeUndefined();
-    const withPr = parseClaudeWorkerTask({ CLAUDE_TASK_ID: "t1", CLAUDE_TASK_REPO: "a/b", CLAUDE_TASK_PROMPT: "x", CLAUDE_TASK_PR: "42" });
+    const withPr = parseClaudeWorkerTask({ CLAUDE_TASK_ID: "t1", CLAUDE_TASK_REPO: "a/b", CLAUDE_TASK_PROMPT: "x", CLAUDE_TASK_PR: "42", CLAUDE_TASK_AGENT: "test-writer" });
     expect(withPr.pullRequestNumber).toBe(42);
+    expect(withPr.agent).toBe("test-writer");
     expect(() => parseClaudeWorkerTask({ CLAUDE_TASK_REPO: "a/b", CLAUDE_TASK_PROMPT: "x" } as NodeJS.ProcessEnv)).toThrow(/CLAUDE_TASK_ID/);
   });
 
@@ -49,6 +52,12 @@ describe("claude branch worker — pure functions", () => {
     expect(b).toMatch(/^claude\/[a-z0-9-]+$/);
   });
 
+  it("derives a specialist-prefixed branch for the test-writer", () => {
+    const b = claudeBranchName({ ...task, agent: "test-writer" });
+    expect(b.startsWith("test-writer/add-a-health-endpoint")).toBe(true);
+    expect(b).toMatch(/^test-writer\/[a-z0-9-]+$/);
+  });
+
   it("validate: rejects empty allow-list, disallowed repo, and protected/base branch", () => {
     const ok = parseClaudeWorkerConfig({ CLAUDE_BRANCH_WORKER_ALLOWED_REPOS: "averray-agent/agent" });
     expect(() => validateClaudeWorkerTask(task, "claude/x", parseClaudeWorkerConfig({}))).toThrow(/allowed repos/i);
@@ -63,6 +72,32 @@ describe("claude branch worker — pure functions", () => {
     expect(p).toMatch(/never edit \.env/i);
     expect(p).toMatch(/Do NOT open the pull request yourself/i);
     expect(p).toContain(task.prompt);
+  });
+
+  it("injects the TEST-WRITER specialist role prompt", () => {
+    const p = buildGuardedClaudePrompt({ ...task, agent: "test-writer" }, "test-writer/x");
+    expect(p).toContain("TEST-WRITER ROLE");
+    expect(p).toContain(TEST_WRITER_ROLE_PROMPT);
+    expect(p).toContain("Prefer adding or tightening tests");
+  });
+
+  it("keeps the next specialist config-only at the worker seam", () => {
+    const docs = defineSpecialistAgent({
+      id: "docs",
+      label: "Docs",
+      branchPrefix: "docs",
+      greenfield: true,
+      prBodyLabel: "docs specialist",
+      commitPrefix: "Docs task",
+      roleTitle: "DOCS",
+      rolePrompt: "DOCS ROLE: improve docs only.",
+    });
+
+    expect(docs).toMatchObject({
+      id: "docs",
+      branchPrefix: "docs",
+      rolePrompt: "DOCS ROLE: improve docs only.",
+    });
   });
 
   it("renders {prompt} into the claude args", () => {
@@ -133,6 +168,24 @@ describe("claude branch worker — orchestration (injected exec + PR open)", () 
     expect(prInputs).toHaveLength(1);
     expect(prInputs[0]).toMatchObject({ base: "main" });
     expect((prInputs[0] as { head: string }).head).toMatch(/^claude\//);
+  });
+
+  it("test-writer specialist opens a normal PR through the same harness", async () => {
+    const { exec, calls } = fakeExec();
+    const prInputs: unknown[] = [];
+    await runClaudeBranchWorker({ ...task, agent: "test-writer", title: "Add parser tests" }, await config(), {
+      exec,
+      openPullRequest: async (_t, _c, input) => {
+        prInputs.push(input);
+        return { number: 778, html_url: "https://github.com/averray-agent/agent/pull/778" };
+      },
+    });
+
+    expect(calls.some((c) => c.command === "claude")).toBe(true);
+    expect(calls.some((c) => c.command === "git" && c.args[0] === "push")).toBe(true);
+    expect((prInputs[0] as { head: string }).head).toMatch(/^test-writer\//);
+    expect((prInputs[0] as { body: string }).body).toContain("test-writer specialist");
+    expect((prInputs[0] as { body: string }).body).toContain("human-gated");
   });
 
   it("no changes → does NOT commit, push, or open a PR", async () => {

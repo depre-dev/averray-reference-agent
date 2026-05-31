@@ -7,6 +7,7 @@ test("actorLabel maps authors to display names", () => {
   assert.equal(actorLabel("hermes"), "Hermes");
   assert.equal(actorLabel("operator"), "Pascal");
   assert.equal(actorLabel("claude"), "Claude");
+  assert.equal(actorLabel("test-writer"), "Test-writer");
   assert.equal(actorLabel("codex"), "Codex");
   assert.equal(actorLabel("system"), "System");
 });

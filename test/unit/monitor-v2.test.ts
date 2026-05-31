@@ -113,9 +113,10 @@ describe("inferCardType", () => {
 });
 
 describe("agentTypeFromBranch", () => {
-  it("maps codex/* and claude/* prefixes (case-insensitive)", () => {
+  it("maps codex/*, claude/*, and specialist prefixes (case-insensitive)", () => {
     expect(agentTypeFromBranch("codex/foo")).toBe("codex");
     expect(agentTypeFromBranch("claude/bar")).toBe("claude");
+    expect(agentTypeFromBranch("test-writer/bar")).toBe("test-writer");
     expect(agentTypeFromBranch("Codex/Foo")).toBe("codex");
     expect(agentTypeFromBranch("  CLAUDE/Bar  ")).toBe("claude");
   });
@@ -138,6 +139,7 @@ describe("inferAgentType", () => {
   it("codex/* and claude/* attribute, case-insensitive", () => {
     expect(inferAgentType(slim({ owner: "ext", headBranch: "codex/feat" }), "pr")).toBe("codex");
     expect(inferAgentType(slim({ owner: "ext", headBranch: "Claude/Feat" }), "pr")).toBe("claude");
+    expect(inferAgentType(slim({ owner: "ext", headBranch: "test-writer/coverage" }), "pr")).toBe("test-writer");
   });
   it("non-agent branch falls back to the owner heuristic", () => {
     expect(inferAgentType(slim({ owner: "Codex", headBranch: "feature/x" }), "pr")).toBe("codex");
@@ -148,6 +150,9 @@ describe("inferAgentType", () => {
   });
   it("owner contains hermes → hermes", () => {
     expect(inferAgentType(slim({ owner: "Hermes", headBranch: undefined }), "pr")).toBe("hermes");
+  });
+  it("owner contains test-writer → test-writer", () => {
+    expect(inferAgentType(slim({ owner: "Test-writer", headBranch: undefined }), "pr")).toBe("test-writer");
   });
   it("unknown owner → ext", () => {
     expect(inferAgentType(slim({ owner: "Merge steward", headBranch: undefined }), "pr")).toBe("ext");
@@ -966,6 +971,27 @@ describe("synthesizeTaskCards (O3 — surface queued tasks)", () => {
     expect(card?.taskStatus).toBe("approved");
     expect(synthesizeTaskCards({}, undefined)).toEqual([]);
     expect(synthesizeTaskCards(undefined, undefined)).toEqual([]);
+  });
+
+  it("surfaces test-writer task cards with specialist attribution", () => {
+    const [card] = synthesizeTaskCards({
+      codexTasks: {
+        items: [{
+          id: "test-writer-task-x1",
+          status: "proposed",
+          agent: "test-writer",
+          repo: "a/b",
+          prompt: "add parser tests",
+        }],
+      },
+    }, undefined);
+
+    expect(card).toMatchObject({
+      id: "test-writer-task-x1",
+      agentType: "test-writer",
+      title: "test-writer task",
+      taskStatus: "proposed",
+    });
   });
 
   it("promotes failed greenfield tasks to needs-attention with retry context", () => {

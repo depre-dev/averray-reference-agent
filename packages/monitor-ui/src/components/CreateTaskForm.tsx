@@ -11,7 +11,7 @@ import type { CreateTaskInput } from "../lib/monitor/card-types.js";
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
 
 export function CreateTaskForm({ onCreate }: { onCreate?: (input: CreateTaskInput) => void }) {
-  const [agent, setAgent] = useState<"codex" | "claude">("claude");
+  const [agent, setAgent] = useState<CreateTaskInput["agent"]>("claude");
   const [repo, setRepo] = useState("");
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -49,10 +49,11 @@ export function CreateTaskForm({ onCreate }: { onCreate?: (input: CreateTaskInpu
         <select
           aria-label="Agent"
           value={agent}
-          onChange={(e) => setAgent(e.target.value === "codex" ? "codex" : "claude")}
+          onChange={(e) => setAgent(parseTaskAgent(e.target.value))}
           style={{ fontSize: 12 }}
         >
           <option value="claude">claude</option>
+          <option value="test-writer">test-writer</option>
           <option value="codex">codex</option>
         </select>
         <input
@@ -93,4 +94,10 @@ export function CreateTaskForm({ onCreate }: { onCreate?: (input: CreateTaskInpu
       </div>
     </form>
   );
+}
+
+function parseTaskAgent(value: string): CreateTaskInput["agent"] {
+  if (value === "codex") return "codex";
+  if (value === "test-writer") return "test-writer";
+  return "claude";
 }

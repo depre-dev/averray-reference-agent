@@ -8,7 +8,7 @@ import {
   type LlmUsageEvent,
 } from "./llm-usage.js";
 
-export type ScorecardAgent = "codex" | "claude" | "hermes" | "browser" | "unknown";
+export type ScorecardAgent = "codex" | "claude" | "test-writer" | "hermes" | "browser" | "unknown";
 export type ScorecardConfidence = "none" | "low" | "medium" | "high";
 
 export interface AgentScorecardOptions {
@@ -445,6 +445,7 @@ function agentFromBranch(branch: string | undefined): ScorecardAgent | undefined
   const normalized = branch?.trim().toLowerCase() ?? "";
   if (normalized.startsWith("codex/")) return "codex";
   if (normalized.startsWith("claude/")) return "claude";
+  if (normalized.startsWith("test-writer/")) return "test-writer";
   return undefined;
 }
 
@@ -452,6 +453,7 @@ function scorecardAgent(value: string): ScorecardAgent {
   const agent = value.trim().toLowerCase();
   if (agent === "codex") return "codex";
   if (agent === "claude") return "claude";
+  if (agent === "test-writer" || agent === "test writer") return "test-writer";
   if (agent === "hermes") return "hermes";
   if (agent === "browser" || agent === "tester" || agent === "testbed") return "browser";
   return "unknown";
@@ -521,9 +523,10 @@ function agentSortKey(agent: ScorecardAgent): number {
   switch (agent) {
     case "codex": return 0;
     case "claude": return 1;
-    case "hermes": return 2;
-    case "browser": return 3;
-    case "unknown": return 4;
+    case "test-writer": return 2;
+    case "hermes": return 3;
+    case "browser": return 4;
+    case "unknown": return 5;
   }
 }
 
