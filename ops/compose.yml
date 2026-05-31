@@ -182,6 +182,15 @@ services:
       HERMES_DISPATCH_ALLOWED_REPOS: ${HERMES_DISPATCH_ALLOWED_REPOS:-}
       HERMES_DISPATCH_PER_REPO_PER_DAY_MAX: ${HERMES_DISPATCH_PER_REPO_PER_DAY_MAX:-5}
       HERMES_DISPATCH_PER_DAY_USD_MAX: ${HERMES_DISPATCH_PER_DAY_USD_MAX:-0}
+      # B2 — self-healing. On a failure: PROPOSE a routed fix (non-high-risk) that
+      # still flows through the approval/autopilot gate, or ESCALATE (high-risk /
+      # rollback / D3-suspended / HALT). Off by default; never auto-approves.
+      # Deduped (one open fix per surface) + cooldown'd. B2_SELF_HEALING_REPO is
+      # the repo a proposed fix targets (falls back to GITHUB_DEFAULT_REPO).
+      B2_SELF_HEALING_ENABLED: ${B2_SELF_HEALING_ENABLED:-0}
+      B2_SELF_HEALING_INTERVAL_MINUTES: ${B2_SELF_HEALING_INTERVAL_MINUTES:-5}
+      B2_SELF_HEALING_COOLDOWN_MINUTES: ${B2_SELF_HEALING_COOLDOWN_MINUTES:-30}
+      B2_SELF_HEALING_REPO: ${B2_SELF_HEALING_REPO:-}
       SLACK_OPERATOR_MONITOR_ENABLED: ${SLACK_OPERATOR_MONITOR_ENABLED:-0}
       SLACK_OPERATOR_MONITOR_TOKEN: ${SLACK_OPERATOR_MONITOR_TOKEN:-}
       SLACK_ALLOWED_USER_IDS: ${SLACK_ALLOWED_USER_IDS:-}

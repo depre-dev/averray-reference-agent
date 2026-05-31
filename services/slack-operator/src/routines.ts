@@ -36,6 +36,12 @@ export interface SlackRoutineConfig {
     enabled: boolean;
     intervalMs: number;
   };
+  /** B2 — self-healing: propose routed fixes / escalate on failure. Off by default. */
+  selfHealing: {
+    enabled: boolean;
+    intervalMs: number;
+    cooldownMs: number;
+  };
 }
 
 export function parseSlackRoutineConfig(
@@ -88,6 +94,12 @@ export function parseSlackRoutineConfig(
       // Off by default — the operator enables D3 before turning on autopilot.
       enabled: env.D3_ANOMALY_PAUSE_ENABLED === "1",
       intervalMs: Math.max(30_000, (positiveNumber(env.D3_ANOMALY_PAUSE_INTERVAL_MINUTES) || 1) * 60_000),
+    },
+    selfHealing: {
+      // Off by default — proposes fixes / escalates only once the operator turns it on.
+      enabled: env.B2_SELF_HEALING_ENABLED === "1",
+      intervalMs: Math.max(60_000, (positiveNumber(env.B2_SELF_HEALING_INTERVAL_MINUTES) || 5) * 60_000),
+      cooldownMs: Math.max(60_000, (positiveNumber(env.B2_SELF_HEALING_COOLDOWN_MINUTES) || 30) * 60_000),
     },
   };
 }
