@@ -122,6 +122,14 @@ export interface CardReviewRequest {
   reviewer: "codex" | "claude" | "hermes" | "operator";
   reason: string;
   status: "requested" | "responded" | "cancelled";
+  reviewMode?: "single" | "panel";
+  panelId?: string;
+  panelSize?: number;
+  response?: {
+    verdict: "pass" | "concern" | "block";
+    reasoning: string;
+    respondedAt: string;
+  };
   createdAt: string;
   updatedAt: string;
 }
@@ -677,6 +685,10 @@ function reviewRequestsFromSnapshot(rawSnapshot: unknown): CardReviewRequestWith
     const reviewer = asReviewActor(request.reviewer);
     const reason = asString(request.reason);
     const status = asReviewStatus(request.status);
+    const reviewMode = asReviewMode(request.reviewMode);
+    const panelId = asString(request.panelId);
+    const panelSize = asFiniteNumber(request.panelSize);
+    const response = asReviewResponse(request.response);
     const createdAt = asString(request.createdAt);
     const updatedAt = asString(request.updatedAt);
     if (!id || !requestedBy || !reviewer || !reason || !status || !createdAt || !updatedAt) continue;
@@ -688,6 +700,10 @@ function reviewRequestsFromSnapshot(rawSnapshot: unknown): CardReviewRequestWith
       reviewer,
       reason,
       status,
+      ...(reviewMode ? { reviewMode } : {}),
+      ...(panelId ? { panelId } : {}),
+      ...(panelSize ? { panelSize } : {}),
+      ...(response ? { response } : {}),
       createdAt,
       updatedAt,
       relatedPrKey: prKey(asString(relatedPr?.repo), asFiniteNumber(relatedPr?.number)),
@@ -714,13 +730,29 @@ function asReviewStatus(value: unknown): CardReviewRequest["status"] | undefined
   return undefined;
 }
 
+function asReviewMode(value: unknown): CardReviewRequest["reviewMode"] | undefined {
+  if (value === "single" || value === "panel") return value;
+  return undefined;
+}
+
+function asReviewResponse(value: unknown): CardReviewRequest["response"] | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const verdict = record.verdict;
+  if (verdict !== "pass" && verdict !== "concern" && verdict !== "block") return undefined;
+  const reasoning = asString(record.reasoning);
+  const respondedAt = asString(record.respondedAt);
+  if (!reasoning || !respondedAt) return undefined;
+  return { verdict, reasoning, respondedAt };
+}
+
 function attachReviewRequests(
   card: BoardCard,
   requests: readonly CardReviewRequestWithScope[],
   scope: { relatedPrKey?: string; relatedMissionId?: string; correlationId?: string }
 ): BoardCard {
   const active = requests
-    .filter((request) => request.status === "requested")
+    .filter((request) => request.status === "requested" || request.response !== undefined)
     .filter((request) =>
       (scope.relatedPrKey !== undefined && request.relatedPrKey === scope.relatedPrKey)
       || (scope.relatedMissionId !== undefined && request.relatedMissionId === scope.relatedMissionId)

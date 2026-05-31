@@ -83,6 +83,14 @@ export interface CardReviewRequest {
   reviewer: "codex" | "claude" | "hermes" | "operator";
   reason: string;
   status: "requested" | "responded" | "cancelled";
+  reviewMode?: "single" | "panel";
+  panelId?: string;
+  panelSize?: number;
+  response?: {
+    verdict: "pass" | "concern" | "block";
+    reasoning: string;
+    respondedAt: string;
+  };
   createdAt: string;
   updatedAt: string;
 }
