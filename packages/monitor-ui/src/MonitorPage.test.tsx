@@ -166,9 +166,16 @@ describe("MonitorPage — container", () => {
     }));
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
     try {
-      const { getByRole } = render(<MonitorPage options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }} collaboration={{ enabled: false }} alerts={{ enabled: false }} autonomy={{ fetchMode: async () => null }} />, {
-        wrapper,
-      });
+      const { getByRole } = render(
+        <MonitorPage
+          options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }}
+          backlogSuggestions={{ enabled: false }}
+          collaboration={{ enabled: false }}
+          alerts={{ enabled: false }}
+          autonomy={{ fetchMode: async () => null }}
+        />,
+        { wrapper },
+      );
       await waitFor(() => expect(getByRole("button", { name: /Approve tester run/ })).toBeTruthy());
       fireEvent.click(getByRole("button", { name: /Approve tester run/ }));
       fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
