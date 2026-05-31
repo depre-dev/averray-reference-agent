@@ -48,6 +48,17 @@ describe("CreateTaskForm (O3 board dispatch)", () => {
     expect(onCreate).toHaveBeenCalledWith({ agent: "codex", repo: "a/b", prompt: "x" });
   });
 
+  test("can propose a test-writer specialist task via the agent select", () => {
+    const onCreate = vi.fn();
+    const { container } = render(<CreateTaskForm onCreate={onCreate} />);
+    const f = fields(container);
+    fireEvent.change(f.agent, { target: { value: "test-writer" } });
+    fireEvent.change(f.repo, { target: { value: "a/b" } });
+    fireEvent.change(f.prompt, { target: { value: "add tests" } });
+    fireEvent.click(f.submit);
+    expect(onCreate).toHaveBeenCalledWith({ agent: "test-writer", repo: "a/b", prompt: "add tests" });
+  });
+
   test("a malformed repo blocks submit with an error", () => {
     const onCreate = vi.fn();
     const { container } = render(<CreateTaskForm onCreate={onCreate} />);

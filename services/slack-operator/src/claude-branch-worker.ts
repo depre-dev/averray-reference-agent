@@ -1,9 +1,9 @@
-// Claude branch worker (O2) — the greenfield executor the claude-task-runner
-// spawns per approved `agent:"claude"` task. Mirrors codex-branch-worker, but
+// Claude branch worker (O2/C3) — the greenfield executor the claude-task-runner
+// spawns per approved Claude-family task. Mirrors codex-branch-worker, but
 // instead of working on an existing PR it:
-//   create a `claude/<slug>` branch off a fresh base → run Claude in an
+//   create an agent-prefixed branch off a fresh base → run Claude in an
 //   isolated worktree → commit → push → OPEN a pull request.
-// The opened PR is auto-attributed to "claude" by O1 (branch prefix) and
+// The opened PR is auto-attributed by O1 (branch prefix) and
 // flows into Operator review through the existing Hermes handoff.
 //
 // Auth: the runner already resolved the billing route and handed us an env
@@ -29,9 +29,18 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { assertNoForbiddenFiles, redact } from "./codex-branch-worker.js";
+import {
+  specialistAgentDefinition,
+  taskAgentBranchPrefix,
+  taskAgentCommitPrefix,
+  taskAgentLabel,
+  taskAgentPrBodyLabel,
+} from "./specialist-agents.js";
 
 export interface ClaudeWorkerTask {
   id: string;
+  /** Queue agent identity. "claude" by default; C3 specialists set e.g. "test-writer". */
+  agent?: string;
   repo: string;
   /** Greenfield tasks have no PR yet; Claude opens its own. */
   pullRequestNumber?: number;
@@ -96,6 +105,7 @@ export function parseClaudeWorkerTask(env: NodeJS.ProcessEnv = process.env): Cla
   }
   return {
     id: requiredEnv(env, "CLAUDE_TASK_ID"),
+    agent: env.CLAUDE_TASK_AGENT?.trim() || "claude",
     repo: requiredEnv(env, "CLAUDE_TASK_REPO"),
     ...(pullRequestNumber ? { pullRequestNumber } : {}),
     ...(env.CLAUDE_TASK_TITLE ? { title: env.CLAUDE_TASK_TITLE } : {}),
@@ -120,7 +130,7 @@ export function parseClaudeWorkerConfig(env: NodeJS.ProcessEnv = process.env): C
   };
 }
 
-/** Deterministic `claude/<slug>-<idtail>` head branch for the task. */
+/** Deterministic `<agent-prefix>/<slug>-<idtail>` head branch for the task. */
 export function claudeBranchName(task: ClaudeWorkerTask): string {
   const base = (task.title || task.prompt || "task")
     .toLowerCase()
@@ -129,15 +139,16 @@ export function claudeBranchName(task: ClaudeWorkerTask): string {
     .slice(0, 40)
     .replace(/-+$/g, "");
   const tail = task.id.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(-8);
-  return `claude/${[base, tail].filter(Boolean).join("-") || "task"}`;
+  return `${taskAgentBranchPrefix(task.agent ?? "claude")}/${[base, tail].filter(Boolean).join("-") || "task"}`;
 }
 
 export function validateClaudeWorkerTask(task: ClaudeWorkerTask, branch: string, config: ClaudeWorkerConfig): void {
+  const label = taskAgentLabel(task.agent ?? "claude");
   if (config.allowedRepos.length === 0) {
-    throw new Error("No Claude worker allowed repos configured (CLAUDE_BRANCH_WORKER_ALLOWED_REPOS).");
+    throw new Error(`No ${label} worker allowed repos configured (CLAUDE_BRANCH_WORKER_ALLOWED_REPOS).`);
   }
   if (!config.allowedRepos.includes(task.repo)) {
-    throw new Error(`Repo ${task.repo} is not allowed for Claude worker dispatch.`);
+    throw new Error(`Repo ${task.repo} is not allowed for ${label} worker dispatch.`);
   }
   if (PROTECTED_BRANCHES.has(branch.toLowerCase()) || branch === config.baseBranch) {
     throw new Error(`Refusing to let Claude push to protected/base branch ${branch}.`);
@@ -145,8 +156,11 @@ export function validateClaudeWorkerTask(task: ClaudeWorkerTask, branch: string,
 }
 
 export function buildGuardedClaudePrompt(task: ClaudeWorkerTask, branch: string): string {
+  const specialist = specialistAgentDefinition(task.agent);
+  const label = taskAgentLabel(task.agent ?? "claude");
   return [
-    "You are Claude working for Hermes on an approved Averray task.",
+    `You are ${label} working for Hermes on an approved Averray task.`,
+    specialist?.rolePrompt ?? "",
     "",
     "Hard boundaries:",
     `- Work only in this checked-out worktree on branch ${branch}.`,
@@ -172,6 +186,8 @@ export function renderClaudeWorkerArgs(args: string[], prompt: string, task: Cla
     "{repo}": task.repo,
     "{title}": task.title ?? "",
     "{correlationId}": task.correlationId ?? "",
+    "{agent}": task.agent ?? "claude",
+    "{agentLabel}": taskAgentLabel(task.agent ?? "claude"),
   };
   return args.map((arg) => {
     let value = arg;
@@ -183,8 +199,11 @@ export function renderClaudeWorkerArgs(args: string[], prompt: string, task: Cla
 }
 
 export function buildPullRequestBody(task: ClaudeWorkerTask): string {
+  const label = taskAgentPrBodyLabel(task.agent ?? "claude");
+  const specialist = specialistAgentDefinition(task.agent);
   return [
-    "Opened by the Averray **Claude worker** for an approved Hermes task.",
+    `Opened by the Averray **${label}** for an approved Hermes task.`,
+    specialist ? `Specialist role: **${specialist.roleTitle}**.` : "",
     "",
     "**Task**",
     task.prompt,
@@ -216,7 +235,7 @@ export async function runClaudeBranchWorker(
     await exec("git", ["checkout", "-B", branch, `origin/${config.baseBranch}`], { cwd: workdir });
 
     const prompt = buildGuardedClaudePrompt(task, branch);
-    console.log(`Claude worker starting ${task.repo} on ${branch}.`);
+    console.log(`${taskAgentLabel(task.agent ?? "claude")} worker starting ${task.repo} on ${branch}.`);
     const claude = await exec(config.claudeCommand, renderClaudeWorkerArgs(config.claudeArgs, prompt, task), {
       cwd: workdir,
       timeoutMs: config.commandTimeoutMs,
@@ -226,9 +245,9 @@ export async function runClaudeBranchWorker(
     }
 
     const changedFiles = await listChangedFiles(exec, workdir);
-    assertNoForbiddenFiles(changedFiles, "Claude");
+    assertNoForbiddenFiles(changedFiles, taskAgentLabel(task.agent ?? "claude"));
     if (changedFiles.length === 0) {
-      console.log(`Claude produced no changes for ${task.repo}; not opening a PR.`);
+      console.log(`${taskAgentLabel(task.agent ?? "claude")} produced no changes for ${task.repo}; not opening a PR.`);
       return;
     }
 
@@ -242,7 +261,7 @@ export async function runClaudeBranchWorker(
       title: pullRequestTitle(task),
       body: buildPullRequestBody(task),
     });
-    console.log(`Claude opened PR #${pr.number} on ${task.repo} (${branch})${pr.html_url ? ` — ${pr.html_url}` : ""}.`);
+    console.log(`${taskAgentLabel(task.agent ?? "claude")} opened PR #${pr.number} on ${task.repo} (${branch})${pr.html_url ? ` — ${pr.html_url}` : ""}.`);
   } finally {
     if (!config.keepWorktree) await rm(workdir, { recursive: true, force: true });
   }
@@ -391,8 +410,8 @@ function slug(value: string): string {
 }
 
 function commitMessage(task: ClaudeWorkerTask): string {
-  const title = (task.title || task.prompt || "Claude task").replace(/\s+/g, " ").trim();
-  return `Claude task: ${title}`.slice(0, 72);
+  const title = (task.title || task.prompt || `${taskAgentLabel(task.agent ?? "claude")} task`).replace(/\s+/g, " ").trim();
+  return `${taskAgentCommitPrefix(task.agent ?? "claude")}: ${title}`.slice(0, 72);
 }
 
 function pullRequestTitle(task: ClaudeWorkerTask): string {

@@ -36,7 +36,7 @@ export type CardProps = {
 // ── Helpers (mirror the bundle's small inline helpers) ──────────────
 
 function agentLabel(t: AgentType | undefined): string {
-  if (t === "codex" || t === "claude" || t === "hermes") return t;
+  if (t === "codex" || t === "claude" || t === "test-writer" || t === "hermes") return t;
   return "ext";
 }
 
@@ -54,7 +54,7 @@ function freshClass(card: BoardCard): string {
  * badge. `agent #548` → `#548`, `mission browser-X` → `browser-X`.
  */
 function shortId(id: string): string {
-  return id.replace(/^[a-z]+ /, "");
+  return id.replace(/^[a-z-]+ /, "");
 }
 
 // Risk-tag pill classification — matches the bundle's branching.
@@ -260,10 +260,11 @@ function ReviewRequestedLine({ card }: { card: BoardCard }) {
   );
 }
 
-function actorDisplayName(actor: "hermes" | "operator" | "codex" | "claude"): string {
+function actorDisplayName(actor: "hermes" | "operator" | "codex" | "claude" | "test-writer"): string {
   if (actor === "hermes") return "Hermes";
   if (actor === "operator") return "Pascal";
   if (actor === "claude") return "Claude";
+  if (actor === "test-writer") return "Test-writer";
   return "Codex";
 }
 

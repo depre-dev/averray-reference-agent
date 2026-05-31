@@ -14,7 +14,7 @@ import {
 
 const ALLOWED: DispatchPolicyConfig = {
   allowedRepos: ["averray-agent/agent"],
-  allowedAgents: ["codex", "claude"],
+  allowedAgents: ["codex", "claude", "test-writer"],
   perDayMax: 10,
   perRepoPerDayMax: 5,
   perDayUsdMax: 0,
@@ -75,10 +75,10 @@ describe("dispatch-policy — allowlist + budget (fail-closed)", () => {
   });
 
   it("loadDispatchPolicyConfig: fail-closed default repos + env override + default agents", () => {
-    // No POLICY_CONFIG_PATH / yaml ⇒ empty repos (fail-closed); agents default codex+claude.
+    // No POLICY_CONFIG_PATH / yaml ⇒ empty repos (fail-closed); agents default codex+claude+internal specialists.
     const bare = loadDispatchPolicyConfig({ POLICY_CONFIG_PATH: "/does/not/exist.yaml" } as NodeJS.ProcessEnv);
     expect(bare.allowedRepos).toEqual([]);
-    expect(bare.allowedAgents).toEqual(["codex", "claude"]);
+    expect(bare.allowedAgents).toEqual(["codex", "claude", "test-writer"]);
     const overridden = loadDispatchPolicyConfig({
       POLICY_CONFIG_PATH: "/does/not/exist.yaml",
       HERMES_DISPATCH_ALLOWED_REPOS: "averray-agent/agent, depre-dev/site",

@@ -4,13 +4,19 @@
 // unit-tested without standing up the server. The rule that matters:
 //   - Codex tasks iterate an EXISTING PR, so a valid pullRequestNumber is
 //     required.
-//   - Claude tasks are GREENFIELD (the worker opens its own PR), so the PR is
-//     optional — and only validated when the caller supplies one.
+//   - Claude/specialist tasks are GREENFIELD (the worker opens its own PR), so
+//     the PR is optional — and only validated when the caller supplies one.
 // The queue layer (proposeCodexTask) already supports both shapes; this is the
 // untrusted-input gate in front of it, and it decides which agent runs.
 import type { CodexTaskInput, TaskAgent } from "./codex-task-queue.js";
+import {
+  isGreenfieldTaskAgent,
+  knownTaskAgent,
+  taskAgentIds,
+  taskAgentLabel,
+} from "./specialist-agents.js";
 
-const TASK_AGENTS: readonly TaskAgent[] = ["codex", "claude"];
+const TASK_AGENTS: readonly string[] = taskAgentIds();
 
 export type ParseProposeResult =
   | { ok: true; input: CodexTaskInput }
@@ -37,8 +43,8 @@ function num(field: unknown): number | undefined {
 }
 
 function requiredFieldsMessage(agent: TaskAgent): string {
-  return agent === "claude"
-    ? "repo and prompt are required to propose Claude work; pullRequestNumber is optional."
+  return isGreenfieldTaskAgent(agent)
+    ? `repo and prompt are required to propose ${taskAgentLabel(agent)} work; pullRequestNumber is optional.`
     : "repo, pullRequestNumber, and prompt are required to propose Codex work.";
 }
 
@@ -51,9 +57,9 @@ export function parseProposeTaskPayload(payload: unknown): ParseProposeResult {
   const prompt = str(payload, "prompt");
 
   const agentField = typeof payload.agent === "string" ? payload.agent.trim() : "";
-  const agent = (agentField || "codex") as TaskAgent;
-  if (!TASK_AGENTS.includes(agent)) {
-    return { ok: false, message: `Unknown agent "${agentField}". Expected "codex" or "claude".` };
+  const agent = (agentField ? knownTaskAgent(agentField) : "codex") as TaskAgent | undefined;
+  if (!agent) {
+    return { ok: false, message: `Unknown agent "${agentField}". Expected ${TASK_AGENTS.map((entry) => `"${entry}"`).join(", ")}.` };
   }
 
   // A PR number is "supplied" only when the caller sent a non-empty value.
@@ -70,8 +76,8 @@ export function parseProposeTaskPayload(payload: unknown): ParseProposeResult {
   if (!repo || !prompt) {
     return { ok: false, message: requiredFieldsMessage(agent) };
   }
-  // Codex must target an existing PR.
-  if (agent === "codex" && !prValid) {
+  // Non-greenfield agents must target an existing PR.
+  if (!isGreenfieldTaskAgent(agent) && !prValid) {
     return { ok: false, message: requiredFieldsMessage(agent) };
   }
   // Any supplied PR (either agent) must be a positive integer.

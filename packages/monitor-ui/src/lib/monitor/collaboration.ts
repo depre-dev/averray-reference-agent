@@ -7,9 +7,9 @@
 
 import type { BoardCard } from "./card-types.js";
 
-export type CollaborationAuthor = "claude" | "codex" | "hermes" | "operator" | "system";
+export type CollaborationAuthor = "claude" | "codex" | "test-writer" | "hermes" | "operator" | "system";
 export type CollaborationKind = "chat" | "proposal" | "request_help" | "status";
-export type CollaborationTarget = "everyone" | "claude" | "codex" | "hermes" | "operator";
+export type CollaborationTarget = "everyone" | "claude" | "codex" | "test-writer" | "hermes" | "operator";
 
 export interface CollaborationRelatedPr {
   repo: string;
@@ -49,6 +49,7 @@ export function actorLabel(author: CollaborationAuthor): string {
   if (author === "hermes") return "Hermes";
   if (author === "operator") return "Pascal";
   if (author === "claude") return "Claude";
+  if (author === "test-writer") return "Test-writer";
   if (author === "codex") return "Codex";
   return "System";
 }

@@ -16,7 +16,7 @@
 
 import type { HermesDecisionRecord } from "./decision-records.js";
 
-export type RoutingAgent = "codex" | "claude";
+export type RoutingAgent = "codex" | "claude" | "test-writer" | (string & {});
 export type RiskTier = "high" | "low";
 
 export interface RoutingInput {
@@ -60,9 +60,12 @@ const CLAUDE_SURFACES: SurfaceGroup[] = [
   { surface: "UI/frontend", keywords: ["ui", "frontend", "front-end", "component", "css", "styling", "layout", "tooltip", "badge", "label", "accessibility", "a11y", "responsive"] },
   { surface: "the monitor", keywords: ["monitor", "board", "drawer", "co-pilot", "copilot", "lane"] },
   { surface: "docs/copy", keywords: ["docs", "documentation", "readme", "copy", "comment", "changelog", "guide"] },
-  { surface: "tests", keywords: ["test", "tests", "spec", "vitest", "coverage"] },
   { surface: "refactor/DX", keywords: ["refactor", "cleanup", "rename", "dx", "lint", "typo", "formatting", "tidy"] },
   { surface: "MCP tooling", keywords: ["mcp tool", "tool ergonomics", "tool schema"] },
+];
+
+const SPECIALIST_SURFACES: SurfaceGroup[] = [
+  { surface: "tests", keywords: ["test", "tests", "spec", "vitest", "coverage", "test-writing", "playwright"] },
 ];
 
 function matchesKeyword(haystack: string, keyword: string): boolean {
@@ -99,6 +102,15 @@ export function classifyTask(input: RoutingInput): RoutingDecision {
       agent: "codex",
       riskTier: "high",
       reason: `${highSurface} (correctness-critical) → codex, high-risk`,
+    };
+  }
+
+  const specialistSurface = firstSurface(haystack, SPECIALIST_SURFACES);
+  if (specialistSurface) {
+    return {
+      agent: "test-writer",
+      riskTier: "low",
+      reason: `${specialistSurface} → test-writer specialist, low-risk`,
     };
   }
 

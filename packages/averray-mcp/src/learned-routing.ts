@@ -57,7 +57,7 @@ export const DEFAULT_LEARNED_ROUTING_CONFIG: LearnedRoutingConfig = {
   costTieMaxScoreDelta: 0.05,
 };
 
-const ROUTING_AGENTS: RoutingAgent[] = ["codex", "claude"];
+const LEARNED_ROUTING_AGENTS = ["codex", "claude"] as const satisfies readonly RoutingAgent[];
 
 export function parseLearnedRoutingConfig(
   env: NodeJS.ProcessEnv = process.env,
@@ -132,7 +132,40 @@ export function applyLearnedRouting(
     };
   }
 
-  const candidates = ROUTING_AGENTS
+  if (!isLearnedRoutingAgent(staticDecision.agent)) {
+    const reason = `C3 specialist route → ${staticDecision.agent}; scorecard ignored (${staticDecision.reason})`;
+    return {
+      ...staticDecision,
+      reason,
+      decisionRecord: createHermesDecisionRecord({
+        kind: "routing",
+        subject: routingSubject(input, surface),
+        decision: `routed to ${staticDecision.agent}`,
+        reasons: [
+          `${staticDecision.agent} is an internal specialist selected by the static routing taxonomy.`,
+          "Specialist routes are fixed until a future scorecard model is explicitly taught to compare specialists.",
+          staticDecision.reason,
+        ],
+        inputs: {
+          riskTier: staticDecision.riskTier,
+          surface,
+          routingReason: reason,
+          staticDecision,
+          scorecardUsed: false,
+          wouldChangeDecision: "Changing the specialist routing taxonomy or adding an explicit operator-selected agent would change this decision.",
+          policyGates: { dispatchEvaluated: false },
+        },
+        outcome: {
+          summary: `${staticDecision.agent} selected for the proposed task; task still waits on operator gates.`,
+          waitingNext: "Operator dispatch gate or the autopilot gate.",
+        },
+        safety: { readOnly: true, mutates: false },
+        generatedAt: now,
+      }),
+    };
+  }
+
+  const candidates = LEARNED_ROUTING_AGENTS
     .map((agent) => scoreAgentForSurface(agent, surface, options.scorecard, config, now))
     .filter((candidate) => candidate.effectiveSamples >= config.minSamples)
     .sort((a, b) => b.score - a.score || b.effectiveSamples - a.effectiveSamples || agentSort(a.agent) - agentSort(b.agent));
@@ -158,7 +191,7 @@ export function applyLearnedRouting(
           routingReason: reason,
           staticDecision,
           wouldChangeDecision: `At least ${config.minSamples} effective samples for another agent on ${surface} would let learned routing choose differently.`,
-          scorecardSnapshot: ROUTING_AGENTS.map((agent) =>
+          scorecardSnapshot: LEARNED_ROUTING_AGENTS.map((agent) =>
             candidateSnapshot(scoreAgentForSurface(agent, surface, options.scorecard, config, now))
           ),
           policyGates: { dispatchEvaluated: false },
@@ -280,14 +313,18 @@ function costSummary(
 }
 
 function comparisonSummary(candidates: CandidateScore[], surface: string): string {
-  return ROUTING_AGENTS
+  return LEARNED_ROUTING_AGENTS
     .map((agent) => candidates.find((candidate) => candidate.agent === agent))
     .map((candidate, index) => {
-      const agent = ROUTING_AGENTS[index]!;
+      const agent = LEARNED_ROUTING_AGENTS[index]!;
       if (!candidate) return `${agent} cold start on ${surface}`;
       return `${agent} ${percent(candidate.readyRate)} ready, score ${formatNumber(candidate.score)}, n=${candidate.samples}, effective=${formatNumber(candidate.effectiveSamples)}`;
     })
     .join(" vs ");
+}
+
+function isLearnedRoutingAgent(agent: RoutingAgent): agent is typeof LEARNED_ROUTING_AGENTS[number] {
+  return (LEARNED_ROUTING_AGENTS as readonly string[]).includes(agent);
 }
 
 function routingSubject(input: RoutingInput, surface: string) {

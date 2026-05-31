@@ -82,7 +82,7 @@ export function decideAutoApproval(s: AutoApprovalSignals): AutoApprovalDecision
 export interface AutoApprovalTask {
   id: string;
   repo: string;
-  agent: "codex" | "claude";
+  agent: string;
   riskTier?: "high" | "low";
   routingReason?: string;
   title?: string;

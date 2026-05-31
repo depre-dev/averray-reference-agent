@@ -47,7 +47,7 @@ export type Lane =
 
 export type CardType = "pr" | "mission" | "task" | "deploy" | "draft" | "done";
 
-export type AgentType = "claude" | "codex" | "hermes" | "ext";
+export type AgentType = "claude" | "codex" | "test-writer" | "hermes" | "ext";
 
 export type CardState = "fresh" | "stale" | "failed-fetch" | "source-offline" | "running";
 
@@ -118,8 +118,8 @@ export interface CardRiskSignal {
 
 export interface CardReviewRequest {
   id: string;
-  requestedBy: "hermes" | "operator" | "codex" | "claude";
-  reviewer: "codex" | "claude" | "hermes" | "operator";
+  requestedBy: "hermes" | "operator" | "codex" | "claude" | "test-writer";
+  reviewer: "codex" | "claude" | "test-writer" | "hermes" | "operator";
   reason: string;
   status: "requested" | "responded" | "cancelled";
   reviewMode?: "single" | "panel";
@@ -324,6 +324,7 @@ export function agentTypeFromBranch(headBranch?: string): AgentType | undefined 
   const b = (headBranch ?? "").trim().toLowerCase();
   if (b.startsWith("codex/")) return "codex";
   if (b.startsWith("claude/")) return "claude";
+  if (b.startsWith("test-writer/")) return "test-writer";
   return undefined;
 }
 
@@ -341,6 +342,7 @@ export function inferAgentType(item: HermesBoardCardSnapshot, type: CardType): A
   if (owner.includes("codex")) return "codex";
   if (owner.includes("hermes")) return "hermes";
   if (owner.includes("claude")) return "claude";
+  if (owner.includes("test-writer") || owner.includes("test writer")) return "test-writer";
   return "ext";
 }
 
@@ -721,7 +723,7 @@ interface CardReviewRequestWithScope extends CardReviewRequest {
 }
 
 function asReviewActor(value: unknown): CardReviewRequest["requestedBy"] | undefined {
-  if (value === "hermes" || value === "operator" || value === "codex" || value === "claude") return value;
+  if (value === "hermes" || value === "operator" || value === "codex" || value === "claude" || value === "test-writer") return value;
   return undefined;
 }
 
@@ -987,7 +989,7 @@ export function synthesizeTaskCards(
     if (task.pullRequestNumber !== undefined && task.pullRequestNumber !== null) continue;
     const id = asString(task.id);
     if (!id) continue;
-    const agent: AgentType = task.agent === "claude" ? "claude" : "codex";
+    const agent = agentTypeFromTaskAgent(task.agent);
     const prompt = asString(task.prompt);
     const riskTierRaw = asString(task.riskTier);
     const riskTier = riskTierRaw === "high" || riskTierRaw === "low" ? riskTierRaw : undefined;
@@ -1034,6 +1036,14 @@ export function synthesizeTaskCards(
     out.push(card);
   }
   return out;
+}
+
+function agentTypeFromTaskAgent(value: unknown): AgentType {
+  if (value === "claude") return "claude";
+  if (value === "test-writer") return "test-writer";
+  if (value === "hermes") return "hermes";
+  if (value === "ext") return "ext";
+  return "codex";
 }
 
 interface TaskHealthForBoard {

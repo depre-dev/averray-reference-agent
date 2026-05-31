@@ -32,7 +32,6 @@ describe("classifyTask — the routing taxonomy (§O4-C)", () => {
     "tweak the onboarding UI component styling",
     "fix a bug in the monitor board drawer",
     "update the README docs",
-    "add a vitest spec for the parser",
     "refactor and rename a helper for clarity",
   ];
   it.each(low)("Claude surface %j → claude + low", (prompt) => {
@@ -40,6 +39,13 @@ describe("classifyTask — the routing taxonomy (§O4-C)", () => {
     expect(r.agent).toBe("claude");
     expect(r.riskTier).toBe("low");
     expect(r.reason).toMatch(/low-risk/);
+  });
+
+  it("routes test-writing work to the test-writer specialist", () => {
+    const r = classifyTask({ repo: "depre-dev/averray-reference-agent", prompt: "add a vitest spec for the parser" });
+    expect(r.agent).toBe("test-writer");
+    expect(r.riskTier).toBe("low");
+    expect(r.reason).toMatch(/test-writer specialist/);
   });
 
   it("ambiguous/general → claude + low (default)", () => {
@@ -70,7 +76,7 @@ describe("classifyTask — the routing taxonomy (§O4-C)", () => {
 
 const ALLOWED: DispatchPolicyConfig = {
   allowedRepos: ["averray-agent/agent"],
-  allowedAgents: ["codex", "claude"],
+  allowedAgents: ["codex", "claude", "test-writer"],
   perDayMax: 10,
   perRepoPerDayMax: 5,
   perDayUsdMax: 0,
@@ -109,6 +115,22 @@ describe("enqueue_agent_task — routing as an overridable default", () => {
     expect(task.riskTier).toBe("low");
     expect(task.routingReason).toMatch(/claude, low-risk/);
     expect(result.result?.agentExplicit).toBe(false);
+  });
+
+  it("derives the test-writer specialist for low-risk test-writing tasks", async () => {
+    const proposeTaskFn = vi.fn(async () => ({ id: "tw1" }));
+    const result = (await invokeAgentTask(
+      enqueue({ prompt: "add a vitest spec for the parser" }),
+      baseDeps(proposeTaskFn)
+    )) as {
+      status: string; result?: { agent?: string; riskTier?: string; agentExplicit?: boolean; routingReason?: string };
+    };
+    const task = proposeTaskFn.mock.calls[0]![0];
+    expect(task.agent).toBe("test-writer");
+    expect(task.riskTier).toBe("low");
+    expect(task.routingReason).toMatch(/C3 specialist route/);
+    expect(result.result?.agentExplicit).toBe(false);
+    expect(result.result?.agent).toBe("test-writer");
   });
 
   it("uses A2 scorecard data as the low-risk default when enough samples exist", async () => {

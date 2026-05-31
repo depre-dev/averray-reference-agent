@@ -15,7 +15,7 @@ import { optionalEnv, readYamlFile } from "@avg/mcp-common";
 export interface DispatchPolicyConfig {
   /** Repos Hermes may propose work in. EMPTY ⇒ deny everything (fail-closed). */
   allowedRepos: string[];
-  /** Agents Hermes may propose to. Defaults to codex + claude. */
+  /** Agents Hermes may propose to. Defaults to codex + claude + internal specialists. */
   allowedAgents: string[];
   /** Max Hermes-proposed tasks per day across all repos. */
   perDayMax: number;
@@ -66,7 +66,7 @@ function positiveIntOr(value: unknown, fallback: number): number {
 /**
  * Load the dispatch guardrail from the `dispatch:` block of policy.yaml, with
  * env overrides. Defaults are fail-closed: an absent/empty allowed_repos denies
- * everything. allowed_agents defaults to codex + claude.
+ * everything. allowed_agents defaults to codex + claude + internal specialists.
  */
 export function loadDispatchPolicyConfig(env: NodeJS.ProcessEnv = process.env): DispatchPolicyConfig {
   const yaml = readYamlFile<{ dispatch?: DispatchYamlBlock }>(
@@ -84,7 +84,7 @@ export function loadDispatchPolicyConfig(env: NodeJS.ProcessEnv = process.env): 
   const allowedAgents = stringArray(block.allowed_agents);
   return {
     allowedRepos,
-    allowedAgents: allowedAgents.length > 0 ? allowedAgents : ["codex", "claude"],
+    allowedAgents: allowedAgents.length > 0 ? allowedAgents : ["codex", "claude", "test-writer"],
     perDayMax: positiveIntOr(env.HERMES_DISPATCH_PER_DAY_MAX ?? block.per_day_max, 10),
     perRepoPerDayMax: positiveIntOr(env.HERMES_DISPATCH_PER_REPO_PER_DAY_MAX ?? block.per_repo_per_day_max, 5),
     perDayUsdMax: positiveNumberOr(env.HERMES_DISPATCH_PER_DAY_USD_MAX ?? block.per_day_usd_max, 0),

@@ -38,15 +38,15 @@ const SOFT_TTL_MS = 24 * 60 * 60 * 1000;
 const HERMES_MEMORY_MAX_NOTES = 120;
 const HERMES_MEMORY_NOTE_MAX_CHARS = 320;
 
-const KNOWN_AUTHORS = new Set(["claude", "codex", "hermes", "operator", "system"] as const);
+const KNOWN_AUTHORS = new Set(["claude", "codex", "test-writer", "hermes", "operator", "system"] as const);
 const KNOWN_KINDS = new Set(["chat", "proposal", "request_help", "status"] as const);
-const KNOWN_TARGETS = new Set(["everyone", "claude", "codex", "hermes", "operator"] as const);
+const KNOWN_TARGETS = new Set(["everyone", "claude", "codex", "test-writer", "hermes", "operator"] as const);
 
-export type CollaborationAuthor = "claude" | "codex" | "hermes" | "operator" | "system";
+export type CollaborationAuthor = "claude" | "codex" | "test-writer" | "hermes" | "operator" | "system";
 export type CollaborationKind = "chat" | "proposal" | "request_help" | "status";
-export type CollaborationTarget = "everyone" | "claude" | "codex" | "hermes" | "operator";
-export type ReviewRequester = "hermes" | "operator" | "codex" | "claude";
-export type ReviewRequestReviewer = "codex" | "claude" | "hermes" | "operator";
+export type CollaborationTarget = "everyone" | "claude" | "codex" | "test-writer" | "hermes" | "operator";
+export type ReviewRequester = "hermes" | "operator" | "codex" | "claude" | "test-writer";
+export type ReviewRequestReviewer = "codex" | "claude" | "test-writer" | "hermes" | "operator";
 export type ReviewRequestStatus = "requested" | "responded" | "cancelled";
 
 export interface CollaborationRelatedPr {
@@ -190,7 +190,7 @@ export function recordCollaborationMessage(
   if (!author) {
     throw new CollaborationValidationError(
       "invalid_author",
-      "author must be one of: claude, codex, hermes, operator, system."
+      "author must be one of: claude, codex, test-writer, hermes, operator, system."
     );
   }
 
@@ -207,7 +207,7 @@ export function recordCollaborationMessage(
   if (addressedTo === null && hasExplicitTarget(input.addressedTo)) {
     throw new CollaborationValidationError(
       "invalid_target",
-      "addressedTo must be one of: everyone, claude, codex, hermes, operator."
+      "addressedTo must be one of: everyone, claude, codex, test-writer, hermes, operator."
     );
   }
   const relatedPr = normalizeRelatedPr(input.relatedPr);
@@ -251,7 +251,7 @@ export function recordReviewRequest(
   if (!requestedBy) {
     throw new CollaborationValidationError(
       "invalid_requested_by",
-      "requestedBy must be one of: hermes, operator, codex, claude."
+      "requestedBy must be one of: hermes, operator, codex, claude, test-writer."
     );
   }
 
@@ -259,7 +259,7 @@ export function recordReviewRequest(
   if (!reviewer) {
     throw new CollaborationValidationError(
       "invalid_reviewer",
-      "reviewer must be one of: codex, claude, hermes, operator."
+      "reviewer must be one of: codex, claude, test-writer, hermes, operator."
     );
   }
 
@@ -577,6 +577,7 @@ function actorDisplayName(actor: ReviewRequester | ReviewRequestReviewer): strin
   if (actor === "hermes") return "Hermes";
   if (actor === "operator") return "Pascal";
   if (actor === "claude") return "Claude";
+  if (actor === "test-writer") return "Test-writer";
   return "Codex";
 }
 

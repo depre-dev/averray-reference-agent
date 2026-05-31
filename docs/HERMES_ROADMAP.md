@@ -40,7 +40,7 @@
 | B2 | Self-healing (auto-fix non-high-risk; rollback human) | design done |
 | C1 | Cross-agent review (default) | 🟡 in build — first slice records/displays review requests only; no auto-run or authority change |
 | C2 | Reviewer panel (high-risk) | design done |
-| C3 | Specialist agents (test-writer/security/docs) | design done |
+| C3 | Specialist agents (test-writer/security/docs) | 🟡 in build — first `test-writer` specialist template |
 | C4 | Inter-agent chat | ✅ done (#291) — Claude author/target + card-scoped agent messages v1 |
 | T1 | Surface sweep + truth-boundary honesty | ✅ done — executor #273; deploy-wire (platform #604) + runner #277; runs per-deploy (report-only) |
 | T2 | Pre-seeded session (authed sweep) | ✅ done (#293) |
@@ -50,7 +50,7 @@
 | T6 | Agent-requested tester runs — board-gated (request → approve → read-only run) | in flight — first slice adds `requested` missions, `/monitor/testbed-missions/request`, `/approve`, board approve UI, and runner-ready gating (this PR) |
 | T7 | Tester capabilities manifest (+ platform-repo request helper) | design/follow-up — do not mark shipped here without code evidence; platform helper remains follow-up |
 
-*(Status as of 2026-05-31 — **shipped:** O0–O4, A1, A2, A3a, A4, D1–D4, C4 v1, T1–T3, and T5. **In progress:** A3b cost-aware routing/budget, the O5 first slice, and T6's first board-gated request/approve slice. **Design / follow-up:** remaining O5 hardening, B1–B2, C1–C3 and remaining C follow-ups, T4, T7, and platform helper pieces not proven by code evidence. Merge/deploy remain human-gated; autopilot approves dispatch only inside O4 guardrails.)*
+*(Status as of 2026-05-31 — **shipped:** O0–O4, A1, A2, A3a, A4, D1–D4, C4 v1, T1–T3, and T5. **In progress:** A3b cost-aware routing/budget, the O5 first slice, C3's first internal `test-writer` specialist template, and T6's first board-gated request/approve slice. **Design / follow-up:** remaining O5 hardening, B1–B2, C1–C2, remaining C follow-ups, T4, T7, and platform helper pieces not proven by code evidence. Merge/deploy remain human-gated; autopilot approves dispatch only inside O4 guardrails.)*
 
 ## Recommended build order (the smooth, low-effort ramp)
 

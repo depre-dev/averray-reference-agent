@@ -97,9 +97,12 @@ TypeScript monorepo: npm workspaces (`packages/*`, `services/*`), Node ≥ 22, E
 
 ## Agent roles
 
-- **Codex and Claude are builders.** Each works in its own branch/worktree, edits
-  code, opens PRs, responds to review, and fixes failures. **Codex owns
-  chain/settlement-adjacent work**; Claude takes UI, docs, and general code.
+- **Codex, Claude, and internal specialists are builders.** Each works in its
+  own branch/worktree, edits code, opens PRs, responds to review, and fixes
+  failures. **Codex owns chain/settlement-adjacent work**; Claude takes UI,
+  docs, and general code. C3 specialist agents are scoped internal variants of
+  the Claude runner; the first is **test-writer**, which takes low-risk
+  test-writing tasks and opens normal human-reviewed PRs.
 - **Hermes reviews and operates** — observes GitHub, reviews PR risk, runs
   read-only checks, reports to the PR/Slack/monitor, and proposes operator actions.
   Hermes proposes + routes tasks, and — when the operator turns on **autopilot**
@@ -123,18 +126,22 @@ TypeScript monorepo: npm workspaces (`packages/*`, `services/*`), Node ≥ 22, E
   dispatch path, so they carry invariant #6's guardrail: they claim **only
   `approved` tasks** — approved by the operator **or** by `hermes-autopilot`
   within its rules — and **never self-approve**, filtered by `agent`
-  (codex/claude). The Claude runner additionally runs a **billing-route
+  (codex/claude/test-writer). The Claude runner additionally runs a **billing-route
   verification** at startup (`claude-worker-auth`) — on a mismatch it writes a
   `misconfigured` heartbeat and **refuses to claim** rather than silently
   API-bill — and honors the **api-mode daily budget** cap and the **`HALT_FILE`**
   kill switch before claiming. Both runners are off by default and
-  operator-enabled per ops profile (`codex-runner` / `claude-runner`).
+  operator-enabled per ops profile (`codex-runner` / `claude-runner`). Internal
+  specialists reuse the Claude-family runner by setting
+  `CLAUDE_TASK_RUNNER_AGENT` and a role-aware worker prompt; they do not add
+  auto-approval, auto-merge, or deploy authority.
 - **Branch workers** (`codex-branch-worker`, `claude-branch-worker`) are the
   matching workers the runners spawn. They have **unattended push rights**, so
   each is gated by a **repo allow-list** (`CODEX_BRANCH_WORKER_ALLOWED_REPOS` /
   `CLAUDE_BRANCH_WORKER_ALLOWED_REPOS`) that is **empty by default and fails
   closed** — the operator opts each `owner/repo` in explicitly. A worker only
-  ever pushes its own `codex/<slug>` / `claude/<slug>` branch (it **refuses
+  ever pushes its own `codex/<slug>` / `claude/<slug>` / specialist-prefixed
+  branch such as `test-writer/<slug>` (it **refuses
   protected/base branches**), rejects secret-like files before committing,
   redacts command output, and **opens a PR but never merges**. The Claude
   worker is greenfield (creates the branch + opens the PR); the Codex worker
