@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { enrichMonitorWithGithubPrState } from "../../services/slack-operator/src/github-pr-state.js";
+import { buildHermesBoardSnapshotFromMonitor } from "../../services/slack-operator/src/monitor-hermes-board.js";
 
 describe("monitor GitHub PR state enrichment", () => {
   it("adds live GitHub PR state to matching monitor entries", async () => {
@@ -172,5 +173,158 @@ describe("monitor GitHub PR state enrichment", () => {
     expect((monitor.recent?.[0] as any).summary.reviewReasons).toEqual(expect.arrayContaining([
       { severity: "high", code: "pr_checks_failed", message: "1 PR check(s) failed." },
     ]));
+  });
+
+  it("treats a young head commit with queued Actions as pending, not missing", async () => {
+    const calls: string[] = [];
+    const monitor = await enrichMonitorWithGithubPrState({ recent: [] }, {
+      env: {
+        GITHUB_DEFAULT_REPO: "depre-dev/queued-actions",
+        GITHUB_TOKEN: "ghp_readonly",
+        GITHUB_MONITOR_PR_CHECKS_GRACE_MINUTES: "10",
+      },
+      now: new Date("2026-05-17T10:06:00.000Z"),
+      fetchFn: async (url, init) => {
+        calls.push(String(url));
+        expect(init?.headers).toMatchObject({ authorization: "Bearer ghp_readonly" });
+        const href = String(url);
+        if (href.endsWith("/pulls?state=open&sort=updated&direction=desc&per_page=20")) {
+          return new Response(JSON.stringify([
+            {
+              number: 12,
+              title: "Fresh PR waiting for Actions",
+              html_url: "https://github.com/depre-dev/queued-actions/pull/12",
+              user: { login: "codex" },
+              state: "open",
+              draft: false,
+              created_at: "2026-05-17T10:00:00.000Z",
+              updated_at: "2026-05-17T10:00:00.000Z",
+              head: { sha: "queued123", ref: "codex/fresh-pr" },
+              base: { ref: "main" },
+            },
+          ]), { status: 200 });
+        }
+        if (href.endsWith("/pulls/12/files?per_page=100")) {
+          return new Response(JSON.stringify([
+            { filename: "docs/fresh-pr.md" },
+          ]), { status: 200 });
+        }
+        if (href.endsWith("/commits/queued123/check-runs?per_page=100")) {
+          return new Response(JSON.stringify({ check_runs: [] }), { status: 200 });
+        }
+        if (href.endsWith("/actions/runs?head_sha=queued123&per_page=100")) {
+          return new Response(JSON.stringify({
+            workflow_runs: [
+              { name: "CI", status: "queued", head_sha: "queued123", html_url: "https://github.com/runs/1" },
+            ],
+          }), { status: 200 });
+        }
+        if (href.endsWith("/commits/queued123")) {
+          return new Response(JSON.stringify({
+            commit: { committer: { date: "2026-05-17T10:00:00.000Z" } },
+          }), { status: 200 });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+
+    expect(calls).toEqual(expect.arrayContaining([
+      "https://api.github.com/repos/depre-dev/queued-actions/commits/queued123/check-runs?per_page=100",
+      "https://api.github.com/repos/depre-dev/queued-actions/actions/runs?head_sha=queued123&per_page=100",
+      "https://api.github.com/repos/depre-dev/queued-actions/commits/queued123",
+    ]));
+    expect(monitor.recent?.[0]).toMatchObject({
+      reason: "pr_checks_pending",
+      status: "running",
+      summary: {
+        finalVerdict: "pending",
+        mergeRecommendation: "pending",
+        githubLive: {
+          checksPending: true,
+          pendingReason: "workflow_run_active",
+          checkTotals: { total: 1, pending: 1, passed: 0, failed: 0, active: 0 },
+        },
+      },
+    });
+    expect((monitor.recent?.[0] as any).summary.reviewReasons).toEqual(expect.arrayContaining([
+      { severity: "low", code: "pr_checks_pending", message: "PR checks have not reported yet; waiting for GitHub Actions to start or finish." },
+    ]));
+    expect((monitor.recent?.[0] as any).summary.reviewReasons).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "pr_checks_missing" }),
+    ]));
+    const board = buildHermesBoardSnapshotFromMonitor(monitor);
+    expect(board?.items?.[0]).toMatchObject({
+      lane: "Hermes Checking",
+      owner: "Hermes",
+      verdict: "checks pending",
+    });
+  });
+
+  it("emits checks-missing only after the grace window when no check or workflow exists", async () => {
+    const monitor = await enrichMonitorWithGithubPrState({ recent: [] }, {
+      env: {
+        GITHUB_DEFAULT_REPO: "depre-dev/no-actions",
+        GITHUB_TOKEN: "ghp_readonly",
+        GITHUB_MONITOR_PR_CHECKS_GRACE_MINUTES: "10",
+      },
+      now: new Date("2026-05-17T10:15:01.000Z"),
+      fetchFn: async (url, init) => {
+        expect(init?.headers).toMatchObject({ authorization: "Bearer ghp_readonly" });
+        const href = String(url);
+        if (href.endsWith("/pulls?state=open&sort=updated&direction=desc&per_page=20")) {
+          return new Response(JSON.stringify([
+            {
+              number: 13,
+              title: "PR with missing workflow",
+              html_url: "https://github.com/depre-dev/no-actions/pull/13",
+              user: { login: "codex" },
+              state: "open",
+              draft: false,
+              created_at: "2026-05-17T10:00:00.000Z",
+              updated_at: "2026-05-17T10:00:00.000Z",
+              head: { sha: "missing123", ref: "codex/missing-ci" },
+              base: { ref: "main" },
+            },
+          ]), { status: 200 });
+        }
+        if (href.endsWith("/pulls/13/files?per_page=100")) {
+          return new Response(JSON.stringify([
+            { filename: "docs/ci.md" },
+          ]), { status: 200 });
+        }
+        if (href.endsWith("/commits/missing123/check-runs?per_page=100")) {
+          return new Response(JSON.stringify({ check_runs: [] }), { status: 200 });
+        }
+        if (href.endsWith("/actions/runs?head_sha=missing123&per_page=100")) {
+          return new Response(JSON.stringify({ workflow_runs: [] }), { status: 200 });
+        }
+        if (href.endsWith("/commits/missing123")) {
+          return new Response(JSON.stringify({
+            commit: { committer: { date: "2026-05-17T10:00:00.000Z" } },
+          }), { status: 200 });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+
+    expect(monitor.recent?.[0]).toMatchObject({
+      reason: "pr_checks_missing",
+      summary: {
+        finalVerdict: "needs_review",
+        githubLive: {
+          checksPending: false,
+          checkTotals: { total: 0, pending: 0 },
+        },
+      },
+    });
+    expect((monitor.recent?.[0] as any).summary.reviewReasons).toEqual(expect.arrayContaining([
+      { severity: "medium", code: "pr_checks_missing", message: "No PR check runs were found for the head commit." },
+    ]));
+    const board = buildHermesBoardSnapshotFromMonitor(monitor);
+    expect(board?.items?.[0]).toMatchObject({
+      lane: "Operator Review",
+      owner: "Operator",
+      verdict: "needs review",
+    });
   });
 });

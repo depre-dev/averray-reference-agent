@@ -561,7 +561,7 @@ export function mapChecks(summary: Record<string, unknown> | undefined): CardChe
     pass: asFiniteNumber(totals.passed) ?? 0,
     running: asFiniteNumber(totals.active) ?? 0,
     fail: asFiniteNumber(totals.failed) ?? 0,
-    pending: asFiniteNumber(totals.neutral) ?? 0,
+    pending: asFiniteNumber(totals.pending) ?? asFiniteNumber(totals.neutral) ?? 0,
     total,
   };
 }
