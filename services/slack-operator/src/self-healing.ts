@@ -57,7 +57,27 @@ export type HealingReason =
   | "unclassified"
   | "high_risk_surface"
   | "dispatch_budget_exhausted"
+  | "open_fix_cap_reached"
   | "routed_fix";
+
+/**
+ * Stable per-surface key for a testbed-mission failure. Keys on the TARGET
+ * (host + path), NOT the per-run mission id — testbed missions get a fresh id
+ * every run, so keying on the id makes every failed re-run look like a new
+ * surface and defeats dedup/cooldown (a recurring failure swarms the queue).
+ * Keying on the target collapses all re-runs of the same failing surface to one
+ * open fix + one cooldown window.
+ */
+export function testbedSurfaceKey(targetUrl: string): string {
+  let key = (targetUrl ?? "").trim().toLowerCase();
+  try {
+    const u = new URL(key);
+    key = `${u.host}${u.pathname}`.replace(/\/+$/, "");
+  } catch {
+    key = key.replace(/^https?:\/\//, "").split(/[?#]/)[0]!.replace(/\/+$/, "");
+  }
+  return `testbed:${key || "unknown"}`;
+}
 
 export interface HealingDecision {
   action: HealingAction;
@@ -134,6 +154,7 @@ function escalationHeadline(reason: HealingReason): string {
     case "autopilot_suspended": return "a failure tripped while autopilot is suspended (D3)";
     case "no_target_repo": return "a failure with no routable fix target";
     case "dispatch_budget_exhausted": return "a failure, but the dispatch budget is exhausted";
+    case "open_fix_cap_reached": return "a failure, but too many self-healing fixes are already open";
     default: return "a failure needs your attention";
   }
 }
@@ -171,6 +192,11 @@ export interface SelfHealingDeps {
   /** B2 fix tasks already proposed today (for the daily budget backstop). */
   proposalsToday: () => Promise<number> | number;
   maxProposalsPerDay: number;
+  /** Currently-OPEN (non-terminal) B2 fix tasks across all surfaces — the
+   *  concurrent-work cap that stops a batch of distinct failures from swarming
+   *  even within the daily budget. */
+  openFixCount: () => Promise<number> | number;
+  maxOpenFixTasks: number;
   /** In-memory cooldown: has this surface been handled within the window? */
   inCooldown: (surface: string, nowMs: number) => boolean;
   markHandled: (surface: string, nowMs: number) => void;
@@ -199,6 +225,7 @@ export async function runSelfHealingOnce(deps: SelfHealingDeps): Promise<SelfHea
   const halt = deps.isHalt();
   const handled: SelfHealingResult["handled"] = [];
   const proposalsToday = await deps.proposalsToday();
+  const openFixCount = await deps.openFixCount();
   let proposedThisRun = 0;
 
   for (const signal of signals) {
@@ -213,9 +240,12 @@ export async function runSelfHealingOnce(deps: SelfHealingDeps): Promise<SelfHea
       !suspended && !halt && !signal.isRollback && signal.repo ? deps.classify(signal) : undefined;
     let decision = decideHealingAction(signal, classification, { suspended, halt });
 
-    // Budget backstop: don't propose past the daily cap — escalate instead.
+    // Backstops: don't propose past the daily cap, nor past the concurrent
+    // open-fix cap — escalate instead so a batch of failures can't swarm.
     if (decision.action === "propose" && proposalsToday + proposedThisRun >= deps.maxProposalsPerDay) {
       decision = { action: "escalate", reason: "dispatch_budget_exhausted", ...(decision.riskTier ? { riskTier: decision.riskTier } : {}) };
+    } else if (decision.action === "propose" && openFixCount + proposedThisRun >= deps.maxOpenFixTasks) {
+      decision = { action: "escalate", reason: "open_fix_cap_reached", ...(decision.riskTier ? { riskTier: decision.riskTier } : {}) };
     }
 
     if (decision.action === "propose") {

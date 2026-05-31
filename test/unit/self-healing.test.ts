@@ -6,6 +6,7 @@ import {
   buildFixPrompt,
   buildHealingEscalationAlert,
   createCooldown,
+  testbedSurfaceKey,
   type FailureSignal,
   type HealingClassification,
   type SelfHealingDeps,
@@ -97,6 +98,8 @@ function harness(signals: FailureSignal[], over: Partial<SelfHealingDeps> = {}, 
     hasOpenFixTask: () => false,
     proposalsToday: () => 0,
     maxProposalsPerDay: 10,
+    openFixCount: () => 0,
+    maxOpenFixTasks: 3,
     inCooldown: (s, n) => cooldown.inCooldown(s, n),
     markHandled: (s, n) => cooldown.markHandled(s, n),
     propose: async ({ signal: s, agent, riskTier }) => {
@@ -207,5 +210,51 @@ describe("runSelfHealingOnce — orchestration (injected deps, no fs/network)", 
     expect(h.proposed.map((p) => p.surface)).toEqual(["testbed:a"]);
     expect(h.alerts).toBe(1); // deploy-verify:b escalated
     expect(h.audits.find((a) => a.surface === "testbed:c")).toMatchObject({ action: "skip", reason: "open_fix_exists" });
+  });
+});
+
+// ── swarm fixes: stable surface key + open-fix cap ──────────────────
+
+describe("testbedSurfaceKey — stable across re-runs (NOT the per-run id)", () => {
+  it("keys on the target host+path, so re-runs of the same mission collapse", () => {
+    // Different mission RUN ids, same target → same surface key.
+    const a = testbedSurfaceKey("https://app.example.test/overview");
+    const b = testbedSurfaceKey("https://app.example.test/overview?ts=2");
+    expect(a).toBe("testbed:app.example.test/overview");
+    expect(b).toBe("testbed:app.example.test/overview");
+    expect(a).toBe(b);
+  });
+  it("distinct targets stay distinct surfaces", () => {
+    expect(testbedSurfaceKey("https://app.example.test/runs")).not.toBe(
+      testbedSurfaceKey("https://app.example.test/overview"),
+    );
+  });
+  it("tolerates a non-URL target and trailing slashes", () => {
+    expect(testbedSurfaceKey("app.example.test/jobs/")).toBe("testbed:app.example.test/jobs");
+    expect(testbedSurfaceKey("")).toBe("testbed:unknown");
+  });
+});
+
+describe("runSelfHealingOnce — open-fix cap backstop", () => {
+  it("at the concurrent open-fix cap → escalate instead of proposing", async () => {
+    const h = harness([signal()], { openFixCount: () => 3, maxOpenFixTasks: 3 });
+    await runSelfHealingOnce(h.deps);
+    expect(h.proposed).toHaveLength(0);
+    expect(h.alerts).toBe(1);
+    expect(h.audits[0]).toMatchObject({ action: "escalate", reason: "open_fix_cap_reached" });
+  });
+
+  it("a batch of distinct-surface failures stops proposing once the cap fills mid-run", async () => {
+    const signals = [
+      signal({ surface: "testbed:a" }),
+      signal({ surface: "testbed:b" }),
+      signal({ surface: "testbed:c" }),
+    ];
+    // Start with 2 already open + cap 3 → only the first new one proposes, the rest escalate.
+    const h = harness(signals, { openFixCount: () => 2, maxOpenFixTasks: 3 });
+    await runSelfHealingOnce(h.deps);
+    expect(h.proposed.map((p) => p.surface)).toEqual(["testbed:a"]);
+    expect(h.alerts).toBe(2); // b + c escalated
+    expect(h.audits.filter((a) => a.reason === "open_fix_cap_reached")).toHaveLength(2);
   });
 });
