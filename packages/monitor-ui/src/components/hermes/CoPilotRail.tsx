@@ -29,6 +29,12 @@ export interface CoPilotRailProps {
   onUnmute?: () => void;
   /** Whether action alerts are currently muted. */
   muted?: boolean;
+  /** Engage autopilot until `untilMs` (undefined → server 4h cap). */
+  onSetAutopilot?: (untilMs?: number) => void;
+  /** Revert to supervised. */
+  onSetSupervised?: () => void;
+  /** Current autonomy mode (drives the toggle chip). */
+  autonomyMode?: "supervised" | "autopilot";
   /** Bump to focus the composer (the board's `a` shortcut). */
   composerFocusToken?: number;
 }
@@ -42,6 +48,9 @@ export function CoPilotRail({
   onMute,
   onUnmute,
   muted,
+  onSetAutopilot,
+  onSetSupervised,
+  autonomyMode,
   composerFocusToken,
 }: CoPilotRailProps) {
   const { messages, ask } = useCollaboration(collaboration ?? { enabled: false });
@@ -88,6 +97,9 @@ export function CoPilotRail({
         onMute={onMute}
         onUnmute={onUnmute}
         muted={muted}
+        onSetAutopilot={onSetAutopilot}
+        onSetSupervised={onSetSupervised}
+        autonomyMode={autonomyMode}
         focusedCardId={focusedCard?.id ?? null}
         focusToken={composerFocusToken}
       />

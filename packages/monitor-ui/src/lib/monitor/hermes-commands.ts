@@ -20,9 +20,16 @@ export type HermesCommand =
   | { kind: "task"; agent: TaskAgent; repo: string; pullRequestNumber?: number; prompt: string }
   | { kind: "mute"; untilMs: number }
   | { kind: "unmute" }
+  // O4-PR3a — autonomy mode. "autopilot" delegates approval to Hermes until
+  // `untilMs` (a stated time, else the now+4h safety cap); "supervised" reverts.
+  | { kind: "autopilot"; untilMs: number }
+  | { kind: "supervised" }
   | { kind: "ask"; text: string }
   | { kind: "error"; message: string }
   | { kind: "empty" };
+
+/** A forgotten autopilot can't run forever: the open-ended end-of-autopilot cap. */
+export const AUTOPILOT_SAFETY_CAP_MS = 4 * 60 * 60 * 1000;
 
 const MISSION_RE = /^\/mission\b\s*(.*)$/is;
 const TASK_RE = /^\/task\b\s*(.*)$/is;
@@ -113,5 +120,58 @@ export function parseHermesInput(raw: string, now: () => number = Date.now): Her
     return parsed.ok ? { kind: "mute", untilMs: parsed.untilMs } : { kind: "error", message: parsed.error };
   }
 
+  const autonomy = parseAutonomyDirective(text, now);
+  if (autonomy) return autonomy;
+
   return { kind: "ask", text };
+}
+
+// ── O4-PR3a autonomy-mode NL parsing ────────────────────────────────
+//
+// "Hermes, you're in charge until 5pm" / "for 2h" / open-ended → autopilot
+// (open-ended gets the now+4h safety cap). "I'm back" / "stand down" /
+// "autopilot off" → supervised. Slash forms /autopilot and /supervised too.
+
+// Revert-to-supervised triggers (checked first — "take back" must not match the
+// "take ..." autopilot trigger).
+const SUPERVISED_RE = /(^\/supervised\b|\bi'?m back\b|\bi am back\b|\bstand down\b|\bautopilot\s+off\b|\btake\s+back\b|\bi'?ve got it\b|\byou'?re off\b)/i;
+// Engage-autopilot triggers.
+const AUTOPILOT_RE = /(^\/autopilot\b|\byou'?re in charge\b|\byou are in charge\b|\byou'?ve got (?:it|the wheel|this)\b|\btake (?:over|the wheel|the lead)\b|\bautopilot\s+on\b)/i;
+// Window extraction within the directive.
+const FOR_DUR_RE = /\bfor\s+(\d+)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours)\b/i;
+const UNTIL_CLOCK_RE = /\buntil\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i;
+
+function parseAutonomyDirective(text: string, now: () => number): HermesCommand | null {
+  if (SUPERVISED_RE.test(text)) return { kind: "supervised" };
+  if (!AUTOPILOT_RE.test(text)) return null;
+  return { kind: "autopilot", untilMs: parseAutonomyWindow(text, now) };
+}
+
+/** Stated time honored; absent/unparseable → the now+4h safety cap. */
+function parseAutonomyWindow(text: string, now: () => number): number {
+  const nowMs = now();
+  const dur = FOR_DUR_RE.exec(text);
+  if (dur) {
+    const n = Number.parseInt(dur[1] as string, 10);
+    if (n > 0) {
+      const ms = (dur[2] as string).toLowerCase().startsWith("m") ? n * 60_000 : n * 3_600_000;
+      return nowMs + ms;
+    }
+  }
+  const clock = UNTIL_CLOCK_RE.exec(text);
+  if (clock) {
+    let hour = Number.parseInt(clock[1] as string, 10);
+    const min = clock[2] ? Number.parseInt(clock[2], 10) : 0;
+    const ap = clock[3]?.toLowerCase();
+    if (ap === "pm" && hour < 12) hour += 12;
+    if (ap === "am" && hour === 12) hour = 0;
+    if (hour <= 23 && min <= 59) {
+      const d = new Date(nowMs);
+      d.setHours(hour, min, 0, 0);
+      let untilMs = d.getTime();
+      if (untilMs <= nowMs) untilMs += 24 * 60 * 60 * 1000;
+      return untilMs;
+    }
+  }
+  return nowMs + AUTOPILOT_SAFETY_CAP_MS;
 }

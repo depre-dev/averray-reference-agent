@@ -27,6 +27,12 @@ export interface AskHermesComposerProps {
   onUnmute?: () => void;
   /** Whether alerts are currently muted (shown as a chip). */
   muted?: boolean;
+  /** Engage autopilot until `untilMs` (undefined → server applies the 4h cap). */
+  onSetAutopilot?: (untilMs?: number) => void;
+  /** Revert to supervised. */
+  onSetSupervised?: () => void;
+  /** Current autonomy mode (drives the toggle chip). */
+  autonomyMode?: "supervised" | "autopilot";
   /** Focused card id, shown in the scope chip. */
   focusedCardId?: string | null;
   /** Bump to programmatically focus the input (the board's `a` shortcut). */
@@ -41,6 +47,9 @@ export function AskHermesComposer({
   onMute,
   onUnmute,
   muted,
+  onSetAutopilot,
+  onSetSupervised,
+  autonomyMode,
   focusedCardId,
   focusToken,
 }: AskHermesComposerProps) {
@@ -99,6 +108,24 @@ export function AskHermesComposer({
         setValue("");
         setError(null);
         return;
+      case "autopilot":
+        if (onSetAutopilot) {
+          onSetAutopilot(command.untilMs);
+          setValue("");
+          setError(null);
+        } else {
+          setError("Autonomy mode isn't wired here.");
+        }
+        return;
+      case "supervised":
+        if (onSetSupervised) {
+          onSetSupervised();
+          setValue("");
+          setError(null);
+        } else {
+          setError("Autonomy mode isn't wired here.");
+        }
+        return;
       case "ask":
         if (onAsk) {
           onAsk(command.text);
@@ -123,6 +150,20 @@ export function AskHermesComposer({
       <div className="hm-compose-toolbar">
         <span className="hm-compose-chip is-on">to · operator</span>
         <span className="hm-compose-chip">scope · {focusedCardId ?? "board"}</span>
+        {onSetAutopilot && onSetSupervised ? (
+          <button
+            type="button"
+            className="hm-compose-chip"
+            aria-pressed={autonomyMode === "autopilot"}
+            title={autonomyMode === "autopilot"
+              ? "Hermes is in autopilot — click to take back control (supervised)"
+              : "Supervised — click to put Hermes in charge (autopilot, 4h cap)"}
+            onClick={() => (autonomyMode === "autopilot" ? onSetSupervised() : onSetAutopilot(undefined))}
+            style={autonomyMode === "autopilot" ? { color: "var(--hm-emerald, #34d399)" } : undefined}
+          >
+            {autonomyMode === "autopilot" ? "● autopilot" : "○ supervised"}
+          </button>
+        ) : null}
         {muted ? (
           <span className="hm-compose-chip" style={{ color: "var(--hm-muted)" }}>
             alerts muted
