@@ -65,7 +65,34 @@ interface GithubApiCheckRun {
   conclusion?: string | null;
 }
 
+interface GithubApiWorkflowRun {
+  name?: string;
+  status?: string;
+  conclusion?: string | null;
+  head_sha?: string;
+  html_url?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+interface GithubApiCommit {
+  commit?: {
+    author?: { date?: string | null } | null;
+    committer?: { date?: string | null } | null;
+  } | null;
+}
+
+interface GithubPendingCheckState {
+  pending: boolean;
+  pendingCount: number;
+  reason?: "workflow_run_active" | "head_commit_grace";
+  workflowRuns: GithubApiWorkflowRun[];
+  headCommitAt?: string;
+  graceMs: number;
+}
+
 const CACHE_TTL_MS = 60_000;
+const DEFAULT_PR_CHECKS_GRACE_MS = 10 * 60_000;
 const cache = new Map<string, { expiresAt: number; value: MonitorPullRequestState }>();
 const openPullRequestCache = new Map<string, { expiresAt: number; value: MonitorEntry[] }>();
 
@@ -199,10 +226,11 @@ async function fetchOpenPullRequestMonitorEntries(input: {
   if (cached && cached.expiresAt > input.now.getTime()) return cached.value;
 
   const baseUrl = (input.env.GITHUB_API_BASE_URL ?? "https://api.github.com").replace(/\/+$/g, "");
+  const checksGraceMs = parseChecksGraceMs(input.env);
   const results = await Promise.all(repos.map(async (repo) => {
     const token = resolveGithubTokenForRepo(repo, input.env);
     if (!token) return [];
-    return fetchRepoOpenPullRequestEntries({ repo, token, limit, baseUrl, fetchFn: input.fetchFn, now: input.now });
+    return fetchRepoOpenPullRequestEntries({ repo, token, limit, baseUrl, fetchFn: input.fetchFn, now: input.now, checksGraceMs });
   }));
   const entries = results.flat();
   openPullRequestCache.set(cacheKey, { expiresAt: input.now.getTime() + CACHE_TTL_MS, value: entries });
@@ -216,6 +244,7 @@ async function fetchRepoOpenPullRequestEntries(input: {
   baseUrl: string;
   fetchFn: typeof fetch;
   now: Date;
+  checksGraceMs: number;
 }): Promise<MonitorEntry[]> {
   const repoPath = encodeRepoPath(input.repo);
   const pulls = await githubGet<GithubApiPullRequest[]>(
@@ -226,7 +255,15 @@ async function fetchRepoOpenPullRequestEntries(input: {
 
   const entries = await Promise.all(pulls
     .slice(0, input.limit)
-    .map(async (pull) => openPullRequestEntryFromGithub({ repo: input.repo, pull, token: input.token, baseUrl: input.baseUrl, fetchFn: input.fetchFn, now: input.now })));
+    .map(async (pull) => openPullRequestEntryFromGithub({
+      repo: input.repo,
+      pull,
+      token: input.token,
+      baseUrl: input.baseUrl,
+      fetchFn: input.fetchFn,
+      now: input.now,
+      checksGraceMs: input.checksGraceMs,
+    })));
   return entries.filter((entry): entry is MonitorEntry => Boolean(entry));
 }
 
@@ -237,6 +274,7 @@ async function openPullRequestEntryFromGithub(input: {
   baseUrl: string;
   fetchFn: typeof fetch;
   now: Date;
+  checksGraceMs: number;
 }): Promise<MonitorEntry | undefined> {
   const number = numberField(input.pull.number);
   if (number <= 0) return undefined;
@@ -256,14 +294,28 @@ async function openPullRequestEntryFromGithub(input: {
       ).then((result) => result.check_runs ?? []).catch(() => [])
       : Promise.resolve([]),
   ]);
-  const reviewSignals = buildLiveReviewSignals(input.pull, files, checks);
-  const checksSummary = summarizeGithubChecks(checks);
+  const pendingCheckState = headSha && checks.length === 0
+    ? await readPendingCheckState({
+      baseUrl: input.baseUrl,
+      repoPath,
+      headSha,
+      token: input.token,
+      fetchFn: input.fetchFn,
+      pull: input.pull,
+      now: input.now,
+      graceMs: input.checksGraceMs,
+    })
+    : emptyPendingCheckState(input.checksGraceMs);
+  const reviewSignals = buildLiveReviewSignals(input.pull, files, checks, pendingCheckState);
+  const checksSummary = summarizeGithubChecks(checks, pendingCheckState.pendingCount);
   const reviewReasons = liveReviewReasons(input.pull, files, reviewSignals, checksSummary);
   const highSeverity = reviewReasons.some((reason) => reason.severity === "high");
   const mediumSeverity = reviewReasons.some((reason) => reason.severity === "medium");
-  const finalVerdict = highSeverity ? "hold" : mediumSeverity ? "needs_review" : "ok_to_merge";
-  const mergeRecommendation = highSeverity ? "hold" : mediumSeverity ? "needs_review" : "ok_to_merge";
-  const reason = reviewReasons.find((entry) => entry.code !== "pr_review_green")?.code
+  const checksPending = pendingCheckState.pending && checks.length === 0;
+  const finalVerdict = highSeverity ? "hold" : mediumSeverity ? "needs_review" : checksPending ? "pending" : "ok_to_merge";
+  const mergeRecommendation = highSeverity ? "hold" : mediumSeverity ? "needs_review" : checksPending ? "pending" : "ok_to_merge";
+  const reason = reviewReasons.find((entry) => entry.severity === "high" || entry.severity === "medium")?.code
+    ?? reviewReasons.find((entry) => entry.code !== "pr_review_green")?.code
     ?? (finalVerdict === "ok_to_merge" ? "github_ok_to_merge" : "github_needs_review");
   const state: MonitorPullRequestState = {
     repo: input.repo,
@@ -290,7 +342,7 @@ async function openPullRequestEntryFromGithub(input: {
     repo: input.repo,
     pullRequestNumber: number,
     pullRequestUrl: input.pull.html_url,
-    status: finalVerdict === "hold" ? "blocked" : "completed",
+    status: finalVerdict === "hold" ? "blocked" : finalVerdict === "pending" ? "running" : "completed",
     phase: "github_live",
     active: false,
     activeState: "inactive",
@@ -301,7 +353,7 @@ async function openPullRequestEntryFromGithub(input: {
     summary: {
       kind: "github_live_pull_request",
       source: "github_live",
-      status: finalVerdict === "hold" ? "blocked" : finalVerdict === "needs_review" ? "needs_review" : "completed",
+      status: finalVerdict === "hold" ? "blocked" : finalVerdict === "pending" ? "running" : finalVerdict === "needs_review" ? "needs_review" : "completed",
       finalReason: reason,
       finalVerdict,
       mergeRecommendation,
@@ -317,6 +369,16 @@ async function openPullRequestEntryFromGithub(input: {
       githubLive: {
         checkedAt: input.now.toISOString(),
         checkTotals: checksSummary,
+        checksPending,
+        ...(pendingCheckState.reason ? { pendingReason: pendingCheckState.reason } : {}),
+        ...(pendingCheckState.headCommitAt ? { headCommitAt: pendingCheckState.headCommitAt } : {}),
+        checksGraceMs: pendingCheckState.graceMs,
+        workflowRuns: pendingCheckState.workflowRuns.map((run) => ({
+          name: run.name ?? "workflow",
+          status: run.status ?? "unknown",
+          conclusion: run.conclusion ?? undefined,
+          url: run.html_url ?? undefined,
+        })),
       },
     },
     safety: {
@@ -336,7 +398,8 @@ function mergeGithubLiveEntries(recent: unknown[], githubLiveEntries: MonitorEnt
 function buildLiveReviewSignals(
   pull: GithubApiPullRequest,
   files: GithubApiPullRequestFile[],
-  checks: GithubApiCheckRun[]
+  checks: GithubApiCheckRun[],
+  pendingCheckState: GithubPendingCheckState
 ): Record<string, unknown> {
   const touchedFiles = files.map((file) => ({
     path: file.filename ?? "",
@@ -350,8 +413,11 @@ function buildLiveReviewSignals(
   const testSignals = [
     ...files.map((file) => file.filename ?? "").filter(isTestFile).map((filename) => `test file changed: ${filename}`),
     ...checks.map((check) => check.name ?? "").filter(Boolean).map((name) => `check: ${name}`),
+    ...pendingCheckState.workflowRuns.map((run) => run.name ?? "").filter(Boolean).map((name) => `workflow pending: ${name}`),
   ];
-  const missingTestSignals = touchedAreas.filter((area) => needsMatchingTestSignal(area) && !hasTestSignalForArea(area, testSignals));
+  const missingTestSignals = pendingCheckState.pending
+    ? []
+    : touchedAreas.filter((area) => needsMatchingTestSignal(area) && !hasTestSignalForArea(area, testSignals));
   const rolloutNotesRequired = touchedAreas.some((area) => ["ops", "contracts", "indexer", "blockchain", "settlement"].includes(area));
   const body = pull.body ?? "";
   const rolloutNotesPresent = /rollout|rollback|deploy|migration|feature flag|feature-flag/i.test(body);
@@ -381,6 +447,7 @@ function liveReviewReasons(
   if (pull.draft === true) findings.push({ severity: "high", code: "pr_is_draft", message: "PR is still marked as draft." });
   if (checks.failed > 0) findings.push({ severity: "high", code: "pr_checks_failed", message: `${checks.failed} PR check(s) failed.` });
   if (checks.active > 0) findings.push({ severity: "high", code: "pr_checks_active", message: `${checks.active} PR check(s) are still running.` });
+  if (checks.pending > 0) findings.push({ severity: "low", code: "pr_checks_pending", message: "PR checks have not reported yet; waiting for GitHub Actions to start or finish." });
   if (checks.total === 0) findings.push({ severity: "medium", code: "pr_checks_missing", message: "No PR check runs were found for the head commit." });
   const criticalFiles = files.filter((file) => highRiskForFile(file.filename ?? "") === "high");
   if (criticalFiles.length > 0) {
@@ -419,14 +486,15 @@ function liveReviewReasons(
   return findings;
 }
 
-function summarizeGithubChecks(checks: GithubApiCheckRun[]): {
+function summarizeGithubChecks(checks: GithubApiCheckRun[], pending: number = 0): {
   total: number;
   passed: number;
   failed: number;
   active: number;
   neutral: number;
+  pending: number;
 } {
-  const total = checks.length;
+  const total = checks.length + pending;
   let passed = 0;
   let failed = 0;
   let active = 0;
@@ -444,7 +512,96 @@ function summarizeGithubChecks(checks: GithubApiCheckRun[]): {
       neutral += 1;
     }
   }
-  return { total, passed, failed, active, neutral };
+  return { total, passed, failed, active, neutral, pending };
+}
+
+async function readPendingCheckState(input: {
+  baseUrl: string;
+  repoPath: string;
+  headSha: string;
+  token: string;
+  fetchFn: typeof fetch;
+  pull: GithubApiPullRequest;
+  now: Date;
+  graceMs: number;
+}): Promise<GithubPendingCheckState> {
+  const [workflowRuns, headCommitAt] = await Promise.all([
+    githubGet<{ workflow_runs?: GithubApiWorkflowRun[] }>(
+      `${input.baseUrl}/repos/${input.repoPath}/actions/runs?head_sha=${encodeURIComponent(input.headSha)}&per_page=100`,
+      input.token,
+      input.fetchFn
+    ).then((result) => result.workflow_runs ?? []).catch(() => []),
+    readHeadCommitAt(input).catch(() => undefined),
+  ]);
+  const activeWorkflowRuns = workflowRuns.filter((run) => isActiveWorkflowRun(run));
+  if (activeWorkflowRuns.length > 0) {
+    return {
+      pending: true,
+      pendingCount: activeWorkflowRuns.length,
+      reason: "workflow_run_active",
+      workflowRuns: activeWorkflowRuns,
+      ...(headCommitAt ? { headCommitAt } : {}),
+      graceMs: input.graceMs,
+    };
+  }
+  const referenceAt = headCommitAt ?? input.pull.updated_at ?? input.pull.created_at;
+  if (isWithinGraceWindow(referenceAt, input.now, input.graceMs)) {
+    return {
+      pending: true,
+      pendingCount: 1,
+      reason: "head_commit_grace",
+      workflowRuns: [],
+      ...(referenceAt ? { headCommitAt: referenceAt } : {}),
+      graceMs: input.graceMs,
+    };
+  }
+  return {
+    pending: false,
+    pendingCount: 0,
+    workflowRuns: [],
+    ...(headCommitAt ? { headCommitAt } : {}),
+    graceMs: input.graceMs,
+  };
+}
+
+async function readHeadCommitAt(input: {
+  baseUrl: string;
+  repoPath: string;
+  headSha: string;
+  token: string;
+  fetchFn: typeof fetch;
+}): Promise<string | undefined> {
+  const commit = await githubGet<GithubApiCommit>(
+    `${input.baseUrl}/repos/${input.repoPath}/commits/${encodeURIComponent(input.headSha)}`,
+    input.token,
+    input.fetchFn
+  );
+  return commit.commit?.committer?.date ?? commit.commit?.author?.date ?? undefined;
+}
+
+function emptyPendingCheckState(graceMs: number): GithubPendingCheckState {
+  return { pending: false, pendingCount: 0, workflowRuns: [], graceMs };
+}
+
+function isActiveWorkflowRun(run: GithubApiWorkflowRun): boolean {
+  const status = normalize(run.status);
+  return status === "queued" || status === "in_progress";
+}
+
+function isWithinGraceWindow(timestamp: string | undefined, now: Date, graceMs: number): boolean {
+  if (!timestamp || graceMs <= 0) return false;
+  const parsed = Date.parse(timestamp);
+  if (!Number.isFinite(parsed)) return false;
+  const ageMs = now.getTime() - parsed;
+  return ageMs >= 0 && ageMs < graceMs;
+}
+
+function parseChecksGraceMs(env: NodeJS.ProcessEnv): number {
+  const raw = env.GITHUB_MONITOR_PR_CHECKS_GRACE_MINUTES ?? env.GITHUB_PR_CHECKS_GRACE_MINUTES;
+  if (!raw) return DEFAULT_PR_CHECKS_GRACE_MS;
+  const minutes = Number(raw);
+  if (!Number.isFinite(minutes) || minutes < 0) return DEFAULT_PR_CHECKS_GRACE_MS;
+  return Math.round(minutes * 60_000);
 }
 
 async function githubGet<T>(url: string, token: string, fetchFn: typeof fetch): Promise<T> {

@@ -179,8 +179,10 @@ function classifyItem(
     return {
       lane: "Hermes Checking",
       owner: "Hermes",
-      verdict: "running",
-      next: "wait for Hermes/GitHub checks to finish before assigning new work",
+      verdict: reason === "pr_checks_pending" || includesAny(finalVerdict, ["pending"]) ? "checks pending" : "running",
+      next: reason === "pr_checks_pending" || includesAny(finalVerdict, ["pending"])
+        ? "wait for GitHub Actions to start or report check runs on the current head commit"
+        : "wait for Hermes/GitHub checks to finish before assigning new work",
     };
   }
   if (booleanProp(prState, "draft")) {
@@ -201,14 +203,17 @@ function classifyItem(
   }
   if (
     reason === "pr_checks_active"
+    || reason === "pr_checks_pending"
     || reason === "ci_in_progress"
-    || includesAny(finalVerdict, ["running", "active"])
+    || includesAny(finalVerdict, ["running", "active", "pending"])
   ) {
     return {
-      lane: "Codex Needed",
-      owner: "Codex",
-      verdict: "CI running",
-      next: "wait for CI on the current commit; if it fails, Codex should push the smallest fix and let Hermes re-run",
+      lane: reason === "pr_checks_pending" || includesAny(finalVerdict, ["pending"]) ? "Hermes Checking" : "Codex Needed",
+      owner: reason === "pr_checks_pending" || includesAny(finalVerdict, ["pending"]) ? "Hermes" : "Codex",
+      verdict: reason === "pr_checks_pending" || includesAny(finalVerdict, ["pending"]) ? "checks pending" : "CI running",
+      next: reason === "pr_checks_pending" || includesAny(finalVerdict, ["pending"])
+        ? "wait for GitHub Actions to start or report check runs on the current head commit"
+        : "wait for CI on the current commit; if it fails, Codex should push the smallest fix and let Hermes re-run",
     };
   }
   if (
