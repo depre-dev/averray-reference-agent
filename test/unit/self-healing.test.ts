@@ -164,6 +164,20 @@ describe("runSelfHealingOnce — orchestration (injected deps, no fs/network)", 
     expect(h.audits[0]).toMatchObject({ action: "skip", reason: "open_fix_exists" });
   });
 
+  it("dedup: duplicate signals for the same failing target in one tick → proposed once", async () => {
+    const h = harness([
+      signal({ surface: "testbed:app.example/overview", evidence: "https://board.example?mission=old-1" }),
+      signal({ surface: "testbed:app.example/overview", evidence: "https://board.example?mission=old-2" }),
+    ]);
+    const r = await runSelfHealingOnce(h.deps);
+    expect(h.proposed.map((p) => p.surface)).toEqual(["testbed:app.example/overview"]);
+    expect(r.handled).toEqual([
+      { surface: "testbed:app.example/overview", action: "propose", reason: "routed_fix" },
+      { surface: "testbed:app.example/overview", action: "skip", reason: "duplicate_signal" },
+    ]);
+    expect(h.audits.at(-1)).toMatchObject({ action: "skip", reason: "duplicate_signal" });
+  });
+
   it("cooldown: a target handled within the window is skipped", async () => {
     const cd = createCooldown(30 * 60_000);
     cd.markHandled("testbed_mission:testbed:sweep-1", Date.parse("2026-05-31T11:50:00.000Z")); // 10m before now
@@ -223,15 +237,15 @@ describe("runSelfHealingOnce — orchestration (injected deps, no fs/network)", 
     expect(h.audits[0]).toMatchObject({ action: "escalate", reason: "dispatch_budget_exhausted" });
   });
 
-  it("per-tick cap: extra same-tick proposals escalate instead of bursting", async () => {
+  it("per-tick cap: extra same-tick proposals skip instead of bursting", async () => {
     const h = harness([
       signal({ surface: "testbed:a" }),
       signal({ surface: "testbed:b" }),
     ], { maxProposalsPerTick: 1 });
     await runSelfHealingOnce(h.deps);
     expect(h.proposed.map((p) => p.surface)).toEqual(["testbed:a"]);
-    expect(h.alerts).toBe(1);
-    expect(h.audits.find((a) => a.surface === "testbed:b")).toMatchObject({ action: "escalate", reason: "tick_budget_exhausted" });
+    expect(h.alerts).toBe(0);
+    expect(h.audits.find((a) => a.surface === "testbed:b")).toMatchObject({ action: "skip", reason: "tick_budget_exhausted" });
   });
 
   it("mixed batch: one low-risk proposes, one high-risk escalates, deduped surface skips", async () => {
@@ -294,5 +308,20 @@ describe("runSelfHealingOnce — open-fix cap backstop", () => {
     expect(h.proposed.map((p) => p.surface)).toEqual(["testbed:a"]);
     expect(h.alerts).toBe(2); // b + c escalated
     expect(h.audits.filter((a) => a.reason === "open_fix_cap_reached")).toHaveLength(2);
+  });
+});
+
+describe("runSelfHealingOnce — per-tick proposal cap", () => {
+  it("cools down and skips eligible failures once the tick cap is reached", async () => {
+    const signals = [
+      signal({ surface: "testbed:a" }),
+      signal({ surface: "testbed:b" }),
+      signal({ surface: "testbed:c" }),
+    ];
+    const h = harness(signals, { maxProposalsPerTick: 1 });
+    await runSelfHealingOnce(h.deps);
+    expect(h.proposed.map((p) => p.surface)).toEqual(["testbed:a"]);
+    expect(h.alerts).toBe(0);
+    expect(h.audits.filter((a) => a.reason === "tick_budget_exhausted")).toHaveLength(2);
   });
 });

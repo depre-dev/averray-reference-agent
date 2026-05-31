@@ -12,10 +12,10 @@
 // interlock is what makes self-healing safe to build (no fix-fail-fix spiral).
 //
 // Storm control: dedup (at most one OPEN fix task per failing target signature
-// — checked against the queue, so it survives a restart) + a cooldown (a
-// flapping check can't spawn a swarm) + per-tick/open-fix/daily proposal
-// backstops. Read-only except the proposal itself, which is just a `proposed`
-// queue entry. Never logs secrets.
+// — checked against the queue, so it survives a restart) + same-tick de-dupe +
+// a cooldown (a flapping check can't spawn a swarm) + per-tick/open-fix/daily
+// proposal backstops. Read-only except the proposal itself, which is just a
+// `proposed` queue entry. Never logs secrets.
 //
 // Pure decision (decideHealingAction) + effect-injected orchestrator
 // (runSelfHealingOnce) so the matrix is unit-tested with no fs/network.
@@ -187,7 +187,7 @@ export interface HealingAuditRecord {
   targetSignature?: string;
   source: HealingSource;
   action: "propose" | "escalate" | "skip";
-  reason: HealingReason | "cooldown" | "open_fix_exists";
+  reason: HealingReason | "cooldown" | "duplicate_signal" | "open_fix_exists";
   riskTier?: HealingRiskTier;
   agent?: TaskAgent;
   taskId?: string;
@@ -243,10 +243,31 @@ export async function runSelfHealingOnce(deps: SelfHealingDeps): Promise<SelfHea
   const proposalsToday = await deps.proposalsToday();
   const openFixCount = await deps.openFixCount();
   let proposedThisRun = 0;
+  const seenTargets = new Set<string>();
 
   for (const signal of signals) {
     const targetSignature = selfHealingTargetSignature(signal);
-    // Cooldown: a flapping surface can't spawn a swarm of fixes/alerts.
+
+    // Same-tick dedup: if a collector returns the same failing target twice,
+    // only the first copy can act.
+    if (seenTargets.has(targetSignature)) {
+      deps.markHandled(targetSignature, nowMs);
+      await deps.audit({ surface: signal.surface, targetSignature, source: signal.source, action: "skip", reason: "duplicate_signal" });
+      handled.push({ surface: signal.surface, action: "skip", reason: "duplicate_signal" });
+      continue;
+    }
+    seenTargets.add(targetSignature);
+
+    // Durable dedup: one open fix task per target, checked before cooldown so
+    // the audit reason stays truthful after restarts or operator-created tasks.
+    if (await deps.hasOpenFixTask(targetSignature)) {
+      deps.markHandled(targetSignature, nowMs);
+      await deps.audit({ surface: signal.surface, targetSignature, source: signal.source, action: "skip", reason: "open_fix_exists" });
+      handled.push({ surface: signal.surface, action: "skip", reason: "open_fix_exists" });
+      continue;
+    }
+
+    // Cooldown: a flapping target can't spawn a swarm of fixes/alerts.
     if (deps.inCooldown(targetSignature, nowMs)) {
       handled.push({ surface: signal.surface, action: "skip", reason: "cooldown" });
       continue;
@@ -257,25 +278,22 @@ export async function runSelfHealingOnce(deps: SelfHealingDeps): Promise<SelfHea
       !suspended && !halt && !signal.isRollback && signal.repo ? deps.classify(signal) : undefined;
     let decision = decideHealingAction(signal, classification, { suspended, halt });
 
-    // Backstops: don't propose past the daily cap, nor past the concurrent
-    // open-fix cap — escalate instead so a batch of failures can't swarm.
+    // Backstops: don't propose past the per-tick cap, daily cap, nor past the
+    // concurrent open-fix cap. The per-tick cap cools down + skips so one old
+    // backlog of failures cannot page/propose a swarm on first arm.
+    if (decision.action === "propose" && proposedThisRun >= deps.maxProposalsPerTick) {
+      deps.markHandled(targetSignature, nowMs);
+      await deps.audit({ surface: signal.surface, targetSignature, source: signal.source, action: "skip", reason: "tick_budget_exhausted" });
+      handled.push({ surface: signal.surface, action: "skip", reason: "tick_budget_exhausted" });
+      continue;
+    }
     if (decision.action === "propose" && proposalsToday + proposedThisRun >= deps.maxProposalsPerDay) {
       decision = { action: "escalate", reason: "dispatch_budget_exhausted", ...(decision.riskTier ? { riskTier: decision.riskTier } : {}) };
     } else if (decision.action === "propose" && openFixCount + proposedThisRun >= deps.maxOpenFixTasks) {
       decision = { action: "escalate", reason: "open_fix_cap_reached", ...(decision.riskTier ? { riskTier: decision.riskTier } : {}) };
     }
-    if (decision.action === "propose" && proposedThisRun >= deps.maxProposalsPerTick) {
-      decision = { action: "escalate", reason: "tick_budget_exhausted", ...(decision.riskTier ? { riskTier: decision.riskTier } : {}) };
-    }
 
     if (decision.action === "propose") {
-      // Durable dedup: one open fix proposal per failing target.
-      if (await deps.hasOpenFixTask(targetSignature)) {
-        deps.markHandled(targetSignature, nowMs);
-        await deps.audit({ surface: signal.surface, targetSignature, source: signal.source, action: "skip", reason: "open_fix_exists" });
-        handled.push({ surface: signal.surface, action: "skip", reason: "open_fix_exists" });
-        continue;
-      }
       const prompt = buildFixPrompt(signal);
       const { taskId } = await deps.propose({
         signal,
