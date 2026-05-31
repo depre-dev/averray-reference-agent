@@ -74,8 +74,11 @@ import {
   readAutonomyState,
   setAutonomyMode,
   expireAutonomyIfDue,
+  isAutopilotEngaged,
   type AutonomyMode,
 } from "./autonomy-mode.js";
+import { runAutoApproval } from "./autopilot-approve.js";
+import { loadDispatchPolicyConfig } from "@avg/averray-mcp/dispatch-policy";
 import {
   isDebugSpawnEnabled,
   mergeDebugCards,
@@ -107,6 +110,8 @@ import {
   proposeCodexTask,
   readCodexRunnerHeartbeat,
   summarizeCodexTasks,
+  taskAgent,
+  type CodexTask,
 } from "./codex-task-queue.js";
 import { parseProposeTaskPayload } from "./codex-task-request.js";
 import {
@@ -1333,6 +1338,63 @@ async function handleMonitorRecheckRequest(request: http.IncomingMessage, respon
   }
 }
 
+// O4-PR3b — count tasks AUTOPILOT has dispatched today (global + per repo), for
+// the daily-budget gate. Only autopilot's own approvals count against its cap;
+// operator approvals are unbounded.
+async function computeAutopilotCountsToday(repo: string): Promise<{ todayCount: number; todayRepoCount: number }> {
+  const tasks = await listCodexTasks();
+  const today = new Date().toISOString().slice(0, 10);
+  const dispatched = tasks.filter(
+    (t) => t.approvedBy === "hermes-autopilot" && typeof t.approvedAt === "string" && t.approvedAt.slice(0, 10) === today,
+  );
+  return { todayCount: dispatched.length, todayRepoCount: dispatched.filter((t) => t.repo === repo).length };
+}
+
+// O4-PR3b — run a freshly-proposed task through the autopilot gate. Returns the
+// (possibly approved) task + the decision. Supervised → silent no-op.
+async function autoApproveProposedTask(task: CodexTask) {
+  let approvedTask: CodexTask | undefined;
+  const boardUrl = optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor") ?? "https://monitor.averray.com/monitor";
+  const autopilot = await runAutoApproval({
+    task: {
+      id: task.id,
+      repo: task.repo,
+      agent: taskAgent(task),
+      ...(task.riskTier ? { riskTier: task.riskTier } : {}),
+      ...(task.routingReason ? { routingReason: task.routingReason } : {}),
+      ...(task.title ? { title: task.title } : {}),
+    },
+    isEngaged: () => isAutopilotEngaged(),
+    isSuspended: () => isAutopilotSuspended(),
+    isHalt: () => isHaltFilePresent(),
+    policy: loadDispatchPolicyConfig(),
+    counts: () => computeAutopilotCountsToday(task.repo),
+    approve: async (id, approvedBy) => {
+      approvedTask = await approveCodexTask(id, { approvedBy });
+      return approvedTask;
+    },
+    alert: (payload) => slackAlertChannel().dispatch(payload),
+    audit: async (record) => {
+      await recordOperatorCommandEvent({
+        source: "slack_routine",
+        commandText: `autopilot ${record.action}: ${record.taskId}`,
+        result: {
+          kind: "autopilot_auto_approval",
+          ...record,
+          safety: { readOnly: false, mutatesGithub: false, mutatesAverray: false, editsWikipedia: false },
+        },
+      }, query).catch((error) => logger.warn({ err: error }, "o4_autopilot_audit_failed"));
+    },
+    boardUrl,
+  });
+  if (autopilot.action === "approved") {
+    logger.info({ taskId: task.id, repo: task.repo, agent: taskAgent(task) }, "o4_autopilot_auto_approved");
+  } else if (autopilot.action === "escalated") {
+    logger.info({ taskId: task.id, reason: autopilot.reason }, "o4_autopilot_escalated_high_risk");
+  }
+  return { task: approvedTask ?? task, autopilot };
+}
+
 async function handleMonitorCodexTaskRequest(request: http.IncomingMessage, response: http.ServerResponse) {
   try {
     const rawBody = await readBody(request);
@@ -1354,11 +1416,21 @@ async function handleMonitorCodexTaskRequest(request: http.IncomingMessage, resp
         return;
       }
       const result = await proposeCodexTask(parsed.input);
+      // O4-PR3b — the authority: if autopilot is engaged, a passing low/medium-
+      // risk task auto-approves here; high-risk escalates; supervised is a no-op.
+      let task = result.task;
+      let autopilot: Awaited<ReturnType<typeof autoApproveProposedTask>>["autopilot"] | undefined;
+      if (result.created && task.status === "proposed") {
+        const outcome = await autoApproveProposedTask(task);
+        task = outcome.task;
+        autopilot = outcome.autopilot;
+      }
       writeJson(response, 200, {
         ok: true,
         action,
         created: result.created,
-        task: result.task,
+        task,
+        ...(autopilot ? { autopilot } : {}),
         queue: await loadCodexTaskQueueSummary(),
       });
       return;

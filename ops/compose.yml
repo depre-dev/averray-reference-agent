@@ -173,6 +173,14 @@ services:
       D3_ANOMALY_PAUSE_INTERVAL_MINUTES: ${D3_ANOMALY_PAUSE_INTERVAL_MINUTES:-1}
       AVERRAY_AUTOPILOT_SUSPENDED_PATH: ${AVERRAY_AUTOPILOT_SUSPENDED_PATH:-/data/autopilot-suspended.json}
       HERMES_DISPATCH_PER_DAY_MAX: ${HERMES_DISPATCH_PER_DAY_MAX:-10}
+      # O4-PR3 — autopilot auto-approval. Mode persisted on /data (default
+      # supervised). The auto-approval reuses the O4-PR1 dispatch guardrail, so
+      # slack-operator needs the allowlist + per-repo cap too. FAIL-CLOSED: an
+      # empty allowlist means autopilot can auto-approve NOTHING — the operator
+      # opts repos in here before turning autopilot on. high-risk always escalates.
+      AVERRAY_AUTONOMY_MODE_PATH: ${AVERRAY_AUTONOMY_MODE_PATH:-/data/autonomy-mode.json}
+      HERMES_DISPATCH_ALLOWED_REPOS: ${HERMES_DISPATCH_ALLOWED_REPOS:-}
+      HERMES_DISPATCH_PER_REPO_PER_DAY_MAX: ${HERMES_DISPATCH_PER_REPO_PER_DAY_MAX:-5}
       SLACK_OPERATOR_MONITOR_ENABLED: ${SLACK_OPERATOR_MONITOR_ENABLED:-0}
       SLACK_OPERATOR_MONITOR_TOKEN: ${SLACK_OPERATOR_MONITOR_TOKEN:-}
       SLACK_ALLOWED_USER_IDS: ${SLACK_ALLOWED_USER_IDS:-}
