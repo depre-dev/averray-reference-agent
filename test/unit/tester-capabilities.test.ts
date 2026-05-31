@@ -65,22 +65,32 @@ describe("tester capabilities manifest", () => {
     });
   });
 
-  it("marks authed sweep as session-source available only when the signer sidecar is enabled", () => {
-    const withoutSigner = buildTesterCapabilitiesManifest({
-      env: { TEST_WALLET_SIGNER_ENABLED: "0" },
-    });
-    expect(withoutSigner.missionTypes.find((mission) => mission.id === "authed_surface_sweep")).toMatchObject({
-      status: "planned",
+  it("authed sweep is ready-but-needs-session until a session SOURCE is configured (T2)", () => {
+    // No runner session source → ready_needs_session, even with the sidecar up.
+    const noSource = buildTesterCapabilitiesManifest({ env: { TEST_WALLET_SIGNER_ENABLED: "1" } });
+    expect(noSource.runtime.signerSidecarEnabled).toBe(true);
+    expect(noSource.runtime.authedSessionConfigured).toBe(false);
+    expect(noSource.missionTypes.find((m) => m.id === "authed_surface_sweep")).toMatchObject({
+      status: "ready_needs_session",
     });
 
-    const withSigner = buildTesterCapabilitiesManifest({
-      env: { TEST_WALLET_SIGNER_ENABLED: "1" },
+    // Sidecar URL on the runner → available, sourced from the sidecar.
+    const viaSidecar = buildTesterCapabilitiesManifest({
+      env: { TESTBED_SESSION_SIGNER_URL: "http://test-wallet-signer:8791" },
     });
-    expect(withSigner.runtime.signerSidecarEnabled).toBe(true);
-    expect(withSigner.missionTypes.find((mission) => mission.id === "authed_surface_sweep")).toMatchObject({
-      status: "session_source_available",
+    expect(viaSidecar.runtime.authedSessionConfigured).toBe(true);
+    expect(viaSidecar.runtime.authedSessionSource).toBe("test-wallet-signer sidecar");
+    expect(viaSidecar.missionTypes.find((m) => m.id === "authed_surface_sweep")).toMatchObject({
+      status: "available",
     });
-    expect(withSigner.missionTypes.find((mission) => mission.id === "siwe_auth_role_gating")).toMatchObject({
+
+    // Manual storageState path → available, sourced manually (decoupled landing).
+    const viaManual = buildTesterCapabilitiesManifest({
+      env: { TESTBED_SESSION_STORAGE_STATE_PATH: "/data/agent-storage-state.json" },
+    });
+    expect(viaManual.runtime.authedSessionConfigured).toBe(true);
+    expect(viaManual.runtime.authedSessionSource).toBe("manual storageState/token");
+    expect(viaManual.missionTypes.find((m) => m.id === "authed_surface_sweep")).toMatchObject({
       status: "available",
     });
   });

@@ -218,3 +218,68 @@ describe("executeBrowserTestbedMission — dispatch (single-URL explore stays in
     expect(sweepMission.mode === "surface_sweep").toBe(true);
   });
 });
+
+// ── T2 pre-seeded session ───────────────────────────────────────────
+
+const AGENT_SESSION = { role: "agent" as const, storageState: { cookies: [], origins: [] } };
+
+describe("T2: authed routes + session-gated coverage", () => {
+  it("resolveSweepRoutes adds the authed routes only when includeAuthed", () => {
+    const pub = resolveSweepRoutes(undefined, "https://app.example.test", {});
+    expect(pub.map((r) => r.route)).toEqual(["/", "/onboarding", "/jobs", "/strategies"]);
+
+    const authed = resolveSweepRoutes(undefined, "https://app.example.test", { includeAuthed: true });
+    expect(authed.map((r) => r.route)).toEqual(
+      expect.arrayContaining(["/", "/overview", "/runs", "/receipts", "/audit-log", "/capabilities"]),
+    );
+
+    // An explicit mission.routes list overrides the default regardless of includeAuthed.
+    const explicit = resolveSweepRoutes(["/x"], "https://app.example.test", { includeAuthed: true });
+    expect(explicit.map((r) => r.route)).toEqual(["/x"]);
+  });
+
+  it("with a session, the authed operator routes join the sweep", async () => {
+    const seen: string[] = [];
+    const fake = vi.fn(async (url: string, route: string) => { seen.push(route); return capture({ route, url }); });
+    const result = await executeSurfaceSweep(mission(), { ...config, session: AGENT_SESSION }, { captureRoute: fake });
+    expect(seen).toEqual(expect.arrayContaining(["/overview", "/runs", "/treasury", "/audit-log"]));
+    expect(JSON.parse(result.reportText ?? "{}").verdict).toBe("pass");
+  });
+
+  it("without a session, the sweep stays public-only (graceful fallback, no crash)", async () => {
+    const seen: string[] = [];
+    const fake = vi.fn(async (url: string, route: string) => { seen.push(route); return capture({ route, url }); });
+    await executeSurfaceSweep(mission(), config, { captureRoute: fake });
+    expect(seen).toEqual(["/", "/onboarding", "/jobs", "/strategies"]);
+    expect(seen).not.toContain("/overview");
+  });
+
+  it("the boundary-honesty check applies to authed pages too", async () => {
+    const fake = vi.fn(async (url: string, route: string) =>
+      route === "/receipts"
+        ? capture({ route, url, consoleErrors: ["TypeError: x"], visibleText: "Your receipts are all here, lots of healthy detail." })
+        : capture({ route, url }),
+    );
+    const result = await executeSurfaceSweep(mission(), { ...config, session: AGENT_SESSION }, { captureRoute: fake });
+    const report = JSON.parse(result.reportText ?? "{}");
+    expect(report.honestyFindings.some((f: { route: string; code: string }) => f.route === "/receipts" && f.code === "errored_but_silent")).toBe(true);
+  });
+
+  it("the runner resolves a session and the authed routes join the sweep", async () => {
+    const seen: string[] = [];
+    const fake = vi.fn(async (url: string, route: string) => { seen.push(route); return capture({ route, url }); });
+    await executeBrowserTestbedMission(mission(), config, {
+      captureRoute: fake,
+      resolveSession: async () => AGENT_SESSION,
+    });
+    expect(seen).toContain("/overview");
+  });
+
+  it("the runner with no configured session source sweeps public-only", async () => {
+    const seen: string[] = [];
+    const fake = vi.fn(async (url: string, route: string) => { seen.push(route); return capture({ route, url }); });
+    await executeBrowserTestbedMission(mission(), config, { captureRoute: fake });
+    expect(seen).not.toContain("/overview");
+    expect(seen).toContain("/");
+  });
+});

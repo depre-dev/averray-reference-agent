@@ -241,10 +241,20 @@ services:
       AVERRAY_APP_BASE_URL: ${AVERRAY_APP_BASE_URL:-}
       AVERRAY_API_BASE_URL: ${AVERRAY_API_BASE_URL:-}
       AVERRAY_TESTBED_EXPECTED_BOUNDARY: ${AVERRAY_TESTBED_EXPECTED_BOUNDARY:-}
+      # T3b SIWE auth mission: the sidecar base URL + the role-gated probe paths.
       TEST_WALLET_SIGNER_BASE_URL: ${TEST_WALLET_SIGNER_BASE_URL:-http://test-wallet-signer:8791}
       TESTBED_AUTH_ADMIN_JOBS_PATH: ${TESTBED_AUTH_ADMIN_JOBS_PATH:-/admin/jobs}
       TESTBED_AUTH_VERIFIER_RUN_PATH: ${TESTBED_AUTH_VERIFIER_RUN_PATH:-/verifier/run}
       TESTBED_AUTH_PROTECTED_PATH: ${TESTBED_AUTH_PROTECTED_PATH:-/admin/jobs}
+      # T2 pre-seeded session: lets the surface sweep reach the AUTHED operator
+      # pages. Source (a) the T3 signer sidecar (SIGNER_URL + ROLE), or (b) a
+      # manually-provided storageState path / Bearer token. ALL EMPTY ⇒ the
+      # sweep runs public-only (graceful fallback). Read-only; never logs secrets.
+      TESTBED_SESSION_SIGNER_URL: ${TESTBED_SESSION_SIGNER_URL:-}
+      TESTBED_SESSION_ROLE: ${TESTBED_SESSION_ROLE:-agent}
+      TESTBED_SESSION_TYPE: ${TESTBED_SESSION_TYPE:-browser}
+      TESTBED_SESSION_STORAGE_STATE_PATH: ${TESTBED_SESSION_STORAGE_STATE_PATH:-}
+      TESTBED_SESSION_TOKEN: ${TESTBED_SESSION_TOKEN:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - avg-data:/data

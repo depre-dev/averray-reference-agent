@@ -16,6 +16,12 @@ import {
 } from "./monitor-testbed-missions.js";
 import { executeSiweAuthMission, type SiweAuthMissionDeps } from "./testbed-auth-mission.js";
 import { executeSurfaceSweep, type SurfaceSweepDeps } from "./testbed-surface-sweep.js";
+import {
+  parseSweepSessionConfig,
+  resolveSweepSession,
+  type SweepSession,
+  type SweepSessionConfig,
+} from "./testbed-session.js";
 
 export interface TestbedMissionRunnerConfig {
   enabled: boolean;
@@ -42,6 +48,13 @@ export interface TestbedMissionRunnerConfig {
   authProtectedPath?: string;
   /** The env's truth boundary the sweep asserts surfaces label (demo/testnet/local-simulation/production). */
   expectedBoundary?: string;
+  /** T2 pre-seeded session source (sidecar URL and/or manual storageState path/token). */
+  session?: SweepSessionConfig;
+}
+
+/** Injected session resolution for tests (defaults to the env-config resolver). */
+export interface BrowserMissionDeps extends SurfaceSweepDeps {
+  resolveSession?: (config: TestbedMissionRunnerConfig) => Promise<SweepSession | undefined>;
 }
 
 export interface TestbedMissionRunResult {
@@ -90,6 +103,7 @@ export function parseTestbedMissionRunnerConfig(
     authVerifierRunPath: env.TESTBED_AUTH_VERIFIER_RUN_PATH || "/verifier/run",
     authProtectedPath: env.TESTBED_AUTH_PROTECTED_PATH || env.TESTBED_AUTH_ADMIN_JOBS_PATH || "/admin/jobs",
     ...(env.AVERRAY_TESTBED_EXPECTED_BOUNDARY ? { expectedBoundary: env.AVERRAY_TESTBED_EXPECTED_BOUNDARY } : {}),
+    session: parseSweepSessionConfig(env),
   };
 }
 
@@ -292,15 +306,35 @@ export async function executeTestbedMissionCommand(
 export async function executeBrowserTestbedMission(
   mission: TestbedMissionRun,
   config: TestbedMissionRunnerConfig,
-  deps: SurfaceSweepDeps & SiweAuthMissionDeps = {}
+  deps: BrowserMissionDeps & SiweAuthMissionDeps = {}
 ): Promise<TestbedMissionRunResult> {
   if (mission.mode === "surface_sweep") {
-    return executeSurfaceSweep(mission, config, deps);
+    // T2: resolve the pre-seeded session (sidecar or manual) so the sweep can
+    // reach authed routes. No session → public-only (graceful fallback).
+    const resolveSession = deps.resolveSession ?? defaultResolveSweepSession;
+    const session = await resolveSession(config);
+    // Drop the SweepSessionConfig (env source) and pass the RESOLVED session.
+    const { session: _sessionConfig, ...sweepConfig } = config;
+    return executeSurfaceSweep(mission, { ...sweepConfig, ...(session ? { session } : {}) }, deps);
   }
   if (mission.mode === "siwe_auth") {
     return executeSiweAuthMission(mission, config, deps);
   }
   return executePlaywrightTestbedMission(mission, config);
+}
+
+/** Default session resolver: pull from the env-configured sidecar or manual
+ *  storageState path/token. Never throws — degrades to undefined (public-only). */
+async function defaultResolveSweepSession(
+  config: TestbedMissionRunnerConfig,
+): Promise<SweepSession | undefined> {
+  if (!config.session) return undefined;
+  return resolveSweepSession(config.session, {
+    readFileImpl: async (path) => {
+      const { readFile } = await import("node:fs/promises");
+      return readFile(path, "utf8");
+    },
+  });
 }
 
 export async function executePlaywrightTestbedMission(

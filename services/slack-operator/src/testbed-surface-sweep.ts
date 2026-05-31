@@ -15,6 +15,11 @@
 
 import type { TestbedMissionRun } from "./monitor-testbed-missions.js";
 import type { TestbedMissionRunResult } from "./testbed-mission-runner.js";
+import {
+  DEFAULT_AUTHED_ROUTES,
+  buildSweepContextOptions,
+  type SweepSession,
+} from "./testbed-session.js";
 
 /** The environment's truth — what marker a data-bearing surface must carry. */
 export type SweepBoundary =
@@ -176,13 +181,18 @@ export function sweepVerdict(captures: RouteCapture[], findings: HonestyFinding[
   return "pass";
 }
 
-/** Resolve the routes to sweep. mission.routes overrides the public default;
- *  relative routes are joined to the configured app base URL. */
+/** Resolve the routes to sweep. mission.routes overrides the default; otherwise
+ *  the default is the public routes, plus the AUTHED operator routes when a
+ *  session is present (`includeAuthed`). Relative routes join the app base URL. */
 export function resolveSweepRoutes(
   routes: string[] | undefined,
   baseUrl: string | undefined,
+  opts: { includeAuthed?: boolean } = {},
 ): Array<{ route: string; url: string }> {
-  const list = routes && routes.length > 0 ? routes : DEFAULT_PUBLIC_ROUTES;
+  const defaults = opts.includeAuthed
+    ? [...DEFAULT_PUBLIC_ROUTES, ...DEFAULT_AUTHED_ROUTES]
+    : DEFAULT_PUBLIC_ROUTES;
+  const list = routes && routes.length > 0 ? routes : defaults;
   const base = (baseUrl ?? "").replace(/\/+$/, "");
   return list.map((route) => {
     if (/^https?:\/\//i.test(route)) return { route, url: route };
@@ -321,11 +331,18 @@ export function resolveExpectedBoundary(value: string | undefined): SweepBoundar
  */
 export async function executeSurfaceSweep(
   mission: TestbedMissionRun,
-  config: { appBaseUrl?: string; expectedBoundary?: string; browserExecutablePath?: string; timeoutMs?: number; artifactsDir?: string },
+  config: { appBaseUrl?: string; expectedBoundary?: string; browserExecutablePath?: string; timeoutMs?: number; artifactsDir?: string; session?: SweepSession },
   deps: SurfaceSweepDeps = {},
 ): Promise<TestbedMissionRunResult> {
   const expectedBoundary = resolveExpectedBoundary(config.expectedBoundary);
-  const resolved = resolveSweepRoutes(mission.routes, config.appBaseUrl ?? originOf(mission.targetUrl));
+  // With a session, the default route set extends to the authed operator pages;
+  // without one, the sweep stays public-only (graceful fallback — never fails
+  // just because a session is absent).
+  const resolved = resolveSweepRoutes(
+    mission.routes,
+    config.appBaseUrl ?? originOf(mission.targetUrl),
+    { includeAuthed: Boolean(config.session) },
+  );
   const capture = deps.captureRoute ?? makeBrowserCapture(config);
 
   const captures: RouteCapture[] = [];
@@ -372,6 +389,7 @@ function originOf(url: string | undefined): string | undefined {
 function makeBrowserCapture(config: {
   browserExecutablePath?: string;
   timeoutMs?: number;
+  session?: SweepSession;
 }): (url: string, route: string) => Promise<RouteCapture> {
   return async (url, route) => {
     const { chromium } = await import("playwright-core");
@@ -384,10 +402,9 @@ function makeBrowserCapture(config: {
     const networkFailures: string[] = [];
     const badResponses: string[] = [];
     try {
-      const context = await browser.newContext({
-        viewport: { width: 1365, height: 900 },
-        userAgent: "Averray-Hermes-Surface-Sweep/1.0",
-      });
+      // Pre-seeded session (T2): storageState rehydrates the authed browser; a
+      // Bearer (if any) authes the page's same-origin API calls. Read-only.
+      const context = await browser.newContext(buildSweepContextOptions(config.session));
       const page = await context.newPage();
       page.on("console", (m) => {
         if (m.type() === "error") consoleErrors.push(m.text());
