@@ -55,6 +55,7 @@ const POLICY: DispatchPolicyConfig = {
   allowedAgents: ["codex", "claude"],
   perDayMax: 10,
   perRepoPerDayMax: 5,
+  perDayUsdMax: 0,
 };
 
 const TASK: AutoApprovalTask = { id: "codex-task-1", repo: "owner/repo", agent: "claude", riskTier: "low", title: "tweak the UI" };

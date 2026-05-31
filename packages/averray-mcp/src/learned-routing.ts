@@ -5,6 +5,9 @@ export interface LearnedRoutingConfig {
   minSamples: number;
   decayHalfLifeDays: number;
   explorationRate: number;
+  costAware: boolean;
+  costMinRuns: number;
+  costTieMaxScoreDelta: number;
 }
 
 export interface LearnedRoutingOptions {
@@ -20,6 +23,9 @@ interface CandidateScore {
   samples: number;
   effectiveSamples: number;
   readyRate: number | null;
+  costUsdPerTask: number | null;
+  costRuns: number;
+  costStatus: "recorded" | "not_recorded";
 }
 
 interface SurfaceSignal {
@@ -46,6 +52,9 @@ export const DEFAULT_LEARNED_ROUTING_CONFIG: LearnedRoutingConfig = {
   minSamples: 8,
   decayHalfLifeDays: 14,
   explorationRate: 0.02,
+  costAware: true,
+  costMinRuns: 3,
+  costTieMaxScoreDelta: 0.05,
 };
 
 const ROUTING_AGENTS: RoutingAgent[] = ["codex", "claude"];
@@ -61,12 +70,21 @@ export function parseLearnedRoutingConfig(
       DEFAULT_LEARNED_ROUTING_CONFIG.decayHalfLifeDays
     ),
     explorationRate: numberFromEnv(env.A2_LEARNED_ROUTING_EXPLORATION_RATE, DEFAULT_LEARNED_ROUTING_CONFIG.explorationRate),
+    costAware: boolFromEnv(env.A3_COST_AWARE_ROUTING, DEFAULT_LEARNED_ROUTING_CONFIG.costAware),
+    costMinRuns: intFromEnv(env.A3_COST_ROUTING_MIN_USAGE_RUNS, DEFAULT_LEARNED_ROUTING_CONFIG.costMinRuns),
+    costTieMaxScoreDelta: numberFromEnv(
+      env.A3_COST_ROUTING_MAX_SCORE_DELTA,
+      DEFAULT_LEARNED_ROUTING_CONFIG.costTieMaxScoreDelta
+    ),
     ...overrides,
   };
   return {
     minSamples: Math.max(1, Math.floor(config.minSamples)),
     decayHalfLifeDays: Math.max(1, config.decayHalfLifeDays),
     explorationRate: clamp(config.explorationRate, 0, 1),
+    costAware: config.costAware,
+    costMinRuns: Math.max(1, Math.floor(config.costMinRuns)),
+    costTieMaxScoreDelta: Math.max(0, config.costTieMaxScoreDelta),
   };
 }
 
@@ -156,9 +174,22 @@ export function applyLearnedRouting(
   }
 
   const best = candidates[0]!;
-  const chosen = shouldExplore(candidates, config, rng) ? candidates[1]! : best;
-  const mode = chosen.agent === best.agent ? "learned" : "exploration";
-  const reason = `${reasonPrefix(mode, chosen, surface)}; ${comparisonSummary(candidates, surface)}; static default ${staticDecision.agent}`;
+  const costPreferred = costAwareChoice(candidates, config);
+  const explored = shouldExplore(candidates, config, rng)
+    ? candidates.find((candidate) => candidate.agent !== costPreferred.agent) ?? candidates[1]!
+    : undefined;
+  const chosen = explored ?? costPreferred;
+  const mode = explored
+    ? "exploration"
+    : costPreferred.agent === best.agent
+      ? "learned"
+      : "cost_aware";
+  const reason = [
+    reasonPrefix(mode, chosen, surface),
+    comparisonSummary(candidates, surface),
+    costSummary(best, costPreferred, candidates, config),
+    `static default ${staticDecision.agent}`,
+  ].filter(Boolean).join("; ");
   return {
     agent: chosen.agent,
     riskTier: staticDecision.riskTier,
@@ -169,9 +200,12 @@ export function applyLearnedRouting(
       decision: `routed to ${chosen.agent}`,
       reasons: [
         mode === "exploration"
-          ? `Hermes intentionally explored ${chosen.agent} despite ${best.agent} having the strongest score.`
-          : `${chosen.agent} had the strongest current score for ${surface}.`,
+          ? `Hermes intentionally explored ${chosen.agent} despite ${costPreferred.agent} being the preferred scored route.`
+          : mode === "cost_aware"
+            ? `${chosen.agent} had recorded lower cost while staying within the quality tie band for ${surface}.`
+            : `${chosen.agent} had the strongest current score for ${surface}.`,
         comparisonSummary(candidates, surface),
+        costSummary(best, costPreferred, candidates, config) || "A3 cost routing found no recorded close-tie cost advantage.",
         `The static default would have selected ${staticDecision.agent}.`,
       ],
       inputs: {
@@ -182,7 +216,7 @@ export function applyLearnedRouting(
         staticDecision,
         learnedRoutingConfig: config,
         scorecardSnapshot: candidates.map(candidateSnapshot),
-        wouldChangeDecision: "Different scorecard quality, enough recency decay, or exploration RNG could choose the other candidate.",
+        wouldChangeDecision: "Different scorecard quality, recorded cost data within the tie band, enough recency decay, or exploration RNG could choose the other candidate.",
         policyGates: { dispatchEvaluated: false },
       },
       outcome: {
@@ -199,9 +233,50 @@ function shouldExplore(candidates: CandidateScore[], config: LearnedRoutingConfi
   return candidates.length > 1 && config.explorationRate > 0 && rng() < config.explorationRate;
 }
 
-function reasonPrefix(mode: "learned" | "exploration", chosen: CandidateScore, surface: string): string {
-  const label = mode === "exploration" ? "A2 exploration" : "A2 learned routing";
+function reasonPrefix(mode: "learned" | "exploration" | "cost_aware", chosen: CandidateScore, surface: string): string {
+  const label = mode === "exploration"
+    ? "A2 exploration"
+    : mode === "cost_aware"
+      ? "A3 cost-aware routing"
+      : "A2 learned routing";
   return `${label}: ${chosen.agent} on ${surface}`;
+}
+
+function costAwareChoice(candidates: CandidateScore[], config: LearnedRoutingConfig): CandidateScore {
+  const best = candidates[0]!;
+  if (!config.costAware || best.costStatus !== "recorded" || best.costRuns < config.costMinRuns) return best;
+  const closeRecorded = candidates.filter((candidate) =>
+    candidate.costStatus === "recorded"
+    && candidate.costRuns >= config.costMinRuns
+    && candidate.costUsdPerTask !== null
+    && best.score - candidate.score <= config.costTieMaxScoreDelta
+  );
+  if (closeRecorded.length < 2) return best;
+  return closeRecorded.sort((a, b) =>
+    (a.costUsdPerTask ?? Number.POSITIVE_INFINITY) - (b.costUsdPerTask ?? Number.POSITIVE_INFINITY)
+    || b.score - a.score
+    || agentSort(a.agent) - agentSort(b.agent)
+  )[0] ?? best;
+}
+
+function costSummary(
+  best: CandidateScore,
+  costPreferred: CandidateScore,
+  candidates: CandidateScore[],
+  config: LearnedRoutingConfig
+): string {
+  if (!config.costAware) return "A3 cost-aware routing disabled";
+  const values = candidates.map((candidate) => {
+    const cost = candidate.costUsdPerTask === null ? "cost not recorded" : `$${formatUsd(candidate.costUsdPerTask)}/task`;
+    return `${candidate.agent} ${cost}, cost-runs=${candidate.costRuns}`;
+  }).join(" vs ");
+  if (costPreferred.agent !== best.agent) {
+    return `A3 close quality tie → ${costPreferred.agent} lower recorded cost (${values})`;
+  }
+  if (best.costStatus !== "recorded" || best.costRuns < config.costMinRuns) {
+    return `A3 cost neutral: winning route lacks enough recorded cost data (${values})`;
+  }
+  return `A3 cost checked; quality winner kept (${values})`;
 }
 
 function comparisonSummary(candidates: CandidateScore[], surface: string): string {
@@ -231,6 +306,8 @@ function candidateSnapshot(candidate: CandidateScore) {
     samples: candidate.samples,
     effectiveSamples: Number(candidate.effectiveSamples.toFixed(2)),
     readyRate: candidate.readyRate === null ? "not_recorded" : Number(candidate.readyRate.toFixed(3)),
+    costUsdPerTask: candidate.costUsdPerTask === null ? "not_recorded" : Number(candidate.costUsdPerTask.toFixed(6)),
+    costRuns: candidate.costRuns,
   };
 }
 
@@ -246,6 +323,7 @@ function scoreAgentForSurface(
   if (!agentRecord) return emptyCandidate(agent);
 
   const baseline = agentBaseline(agentRecord);
+  const cost = agentCostSignal(agentRecord);
   const matchingSignals = records(agentRecord.surfaces)
     .filter((entry) => surfaceMatches(surface, stringField(entry, "surface") ?? ""))
     .map((entry) => surfaceSignal(entry, baseline));
@@ -280,11 +358,36 @@ function scoreAgentForSurface(
     samples,
     effectiveSamples,
     readyRate: readyRateWeight > 0 ? weightedReadyRate / readyRateWeight : null,
+    ...cost,
   };
 }
 
 function emptyCandidate(agent: RoutingAgent): CandidateScore {
-  return { agent, score: Number.NEGATIVE_INFINITY, samples: 0, effectiveSamples: 0, readyRate: null };
+  return {
+    agent,
+    score: Number.NEGATIVE_INFINITY,
+    samples: 0,
+    effectiveSamples: 0,
+    readyRate: null,
+    costUsdPerTask: null,
+    costRuns: 0,
+    costStatus: "not_recorded",
+  };
+}
+
+function agentCostSignal(agentRecord: Record<string, unknown>) {
+  const cost = recordField(agentRecord, "cost");
+  const byModel = records(cost?.byModel);
+  const runs = byModel.reduce((sum, entry) => sum + (numberField(entry, "runs") ?? 0), 0);
+  const averageUsdPerTask = numberField(cost, "averageUsdPerTask");
+  const totalUsd = numberField(cost, "totalUsd");
+  const fallbackAverage = totalUsd !== undefined && runs > 0 ? totalUsd / runs : undefined;
+  const costUsdPerTask = averageUsdPerTask ?? fallbackAverage;
+  return {
+    costUsdPerTask: cost?.status === "recorded" && costUsdPerTask !== undefined ? costUsdPerTask : null,
+    costRuns: runs,
+    costStatus: cost?.status === "recorded" && costUsdPerTask !== undefined ? "recorded" as const : "not_recorded" as const,
+  };
 }
 
 function surfaceSignal(entry: Record<string, unknown>, baseline: AgentBaseline): SurfaceSignal {
@@ -406,6 +509,11 @@ function formatNumber(value: number): string {
   return value.toFixed(2).replace(/\.?0+$/, "");
 }
 
+function formatUsd(value: number): string {
+  if (!Number.isFinite(value)) return "n/a";
+  return value < 0.01 ? value.toFixed(4) : value.toFixed(2);
+}
+
 function intFromEnv(value: string | undefined, fallback: number): number {
   const parsed = value ? Number.parseInt(value, 10) : NaN;
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -414,6 +522,14 @@ function intFromEnv(value: string | undefined, fallback: number): number {
 function numberFromEnv(value: string | undefined, fallback: number): number {
   const parsed = value ? Number(value) : NaN;
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function boolFromEnv(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
 }
 
 function agentSort(agent: RoutingAgent): number {

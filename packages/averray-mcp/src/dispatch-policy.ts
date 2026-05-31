@@ -21,6 +21,8 @@ export interface DispatchPolicyConfig {
   perDayMax: number;
   /** Max per repo per day. 0 ⇒ no per-repo cap (only the global cap applies). */
   perRepoPerDayMax: number;
+  /** Max recorded LLM cost per day. 0 ⇒ disabled until the operator opts in. */
+  perDayUsdMax: number;
 }
 
 export interface DispatchPolicyInput {
@@ -30,6 +32,10 @@ export interface DispatchPolicyInput {
   todayCount: number;
   /** Hermes-proposed tasks already created today for `repo`. */
   todayRepoCount: number;
+  /** Recorded LLM usage spend for today, if available from A1/A3 counters. */
+  todayCostUsd?: number | null;
+  /** Recorded average cost estimate for the selected agent, if available. */
+  estimatedTaskCostUsd?: number | null;
 }
 
 export interface DispatchPolicyDecision {
@@ -42,6 +48,7 @@ interface DispatchYamlBlock {
   allowed_agents?: unknown;
   per_day_max?: unknown;
   per_repo_per_day_max?: unknown;
+  per_day_usd_max?: unknown;
 }
 
 function stringArray(value: unknown): string[] {
@@ -80,6 +87,7 @@ export function loadDispatchPolicyConfig(env: NodeJS.ProcessEnv = process.env): 
     allowedAgents: allowedAgents.length > 0 ? allowedAgents : ["codex", "claude"],
     perDayMax: positiveIntOr(env.HERMES_DISPATCH_PER_DAY_MAX ?? block.per_day_max, 10),
     perRepoPerDayMax: positiveIntOr(env.HERMES_DISPATCH_PER_REPO_PER_DAY_MAX ?? block.per_repo_per_day_max, 5),
+    perDayUsdMax: positiveNumberOr(env.HERMES_DISPATCH_PER_DAY_USD_MAX ?? block.per_day_usd_max, 0),
   };
 }
 
@@ -109,5 +117,19 @@ export function evaluateDispatchPolicy(
   if (config.perRepoPerDayMax > 0 && input.todayRepoCount >= config.perRepoPerDayMax) {
     return { allowed: false, reason: "repo_daily_budget_exhausted" };
   }
+  if (config.perDayUsdMax > 0) {
+    if (input.todayCostUsd === null || input.todayCostUsd === undefined
+      || input.estimatedTaskCostUsd === null || input.estimatedTaskCostUsd === undefined) {
+      return { allowed: true, reason: "dispatch_allowed_cost_unmeasured" };
+    }
+    if (input.todayCostUsd + input.estimatedTaskCostUsd > config.perDayUsdMax) {
+      return { allowed: false, reason: "daily_cost_budget_exhausted" };
+    }
+  }
   return { allowed: true, reason: "dispatch_allowed" };
+}
+
+function positiveNumberOr(value: unknown, fallback: number): number {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
