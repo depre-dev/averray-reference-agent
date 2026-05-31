@@ -95,7 +95,7 @@ Two existing guardrail layers, **both about job/mission execution, neither about
 
 ## Q5 — Full MCP tool surface + `invoke_agent_task` intents ✅ CONFIRMED
 
-`averray_*` tools registered in `packages/averray-mcp/src/index.ts` (selected): `list_jobs`, `get_definition`, `operator_status`, `daily_operator_brief`, `find_safe_work`, `agent_usefulness_plan`, `project_memory`, `project_runbook`, `admin_readiness`, `admin_action_proposal`, `ops_health`, `github_status`, `github_brief`, `approve_github_merge_steward_candidate`, `testbed_agent_mission`, `testbed_e2e_suite`, `run_testbed_e2e_read_only`, `handoff_monitor`, **`invoke_agent_task`** (`:328`), **`handle_operator_command`** (`:358`), `run_wikipedia_citation_repair`, `claim`, `save_draft_submission`, …
+`averray_*` tools registered in `packages/averray-mcp/src/index.ts` (selected): `list_jobs`, `get_definition`, `operator_status`, `daily_operator_brief`, `find_safe_work`, `agent_usefulness_plan`, `project_memory`, `project_runbook`, `admin_readiness`, `admin_action_proposal`, `ops_health`, `github_status`, `github_brief`, `approve_github_merge_steward_candidate`, `testbed_agent_mission` *(prompt packet only — to **queue** a mission use `POST /monitor/testbed-missions` on slack-operator `:8790`)*, `testbed_e2e_suite`, `run_testbed_e2e_read_only`, `handoff_monitor`, **`invoke_agent_task`** (`:328`), **`handle_operator_command`** (`:358`), `run_wikipedia_citation_repair`, `claim`, `save_draft_submission`, …
 
 `AgentInvocationIntent` (`packages/averray-mcp/src/agent-invocation.ts:24`):
 ```

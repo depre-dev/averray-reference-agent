@@ -43,6 +43,8 @@ A real LLM agent with a dedicated testnet wallet attempts the actual journeys li
 - **Wiring:** runs through the existing **`command` executor hook** (`testbed-mission-runner.ts:191`) — the runner passes the mission + a `reportPath`; the agent writes its structured report there; the runner ingests it. No pipeline rewrite — bring the agent.
 - **Reuse the P2 worker pattern:** the Tier-2 agent is a specialized per-agent runner (its own command + heartbeat), so it slots into the multi-agent model rather than being a bespoke thing.
 
+> **Canonical queue path (don't get this wrong):** missions are queued via **`POST /monitor/testbed-missions`** (slack-operator, `:8790`) — that's the path that supports `mode` (e.g. `surface_sweep`) + `routes`. The `averray_testbed_agent_mission` MCP tool only returns a *prompt packet* (`targetUrl`/`goal`, no `mode`/`routes`, no queueing) — **do not use it to start a run.** (Confirmed while wiring the post-deploy sweep — platform PR #604.)
+
 ---
 
 ## Wallet & auth  (decision #3): real SIWE via a signer sidecar
