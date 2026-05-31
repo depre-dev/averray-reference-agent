@@ -1,4 +1,5 @@
 import type { TestbedMissionRunnerHeartbeat } from "./monitor-testbed-missions.js";
+import { isSweepSessionConfigured, parseSweepSessionConfig } from "./testbed-session.js";
 
 export interface TesterCapabilitiesDeps {
   now?: Date;
@@ -12,6 +13,10 @@ export function buildTesterCapabilitiesManifest(deps: TesterCapabilitiesDeps = {
   const runnerEnabled = truthy(env.TESTBED_MISSION_RUNNER_ENABLED);
   const signerEnabled = truthy(env.TEST_WALLET_SIGNER_ENABLED);
   const runnerExecutor = env.TESTBED_MISSION_RUNNER_EXECUTOR || "playwright";
+  // T2: the runner now injects a pre-seeded session into the sweep. The authed
+  // sweep is genuinely available once a session SOURCE is configured (the
+  // signer sidecar URL, or a manual storageState path / token).
+  const sessionConfigured = isSweepSessionConfigured(parseSweepSessionConfig(env as NodeJS.ProcessEnv));
 
   return {
     schemaVersion: 1,
@@ -45,7 +50,10 @@ export function buildTesterCapabilitiesManifest(deps: TesterCapabilitiesDeps = {
       runnerExecutor,
       runner: deps.runner ?? null,
       signerSidecarEnabled: signerEnabled,
-      authedSessionSource: signerEnabled ? "test-wallet-signer sidecar" : "not currently advertised",
+      authedSessionConfigured: sessionConfigured,
+      authedSessionSource: sessionConfigured
+        ? (env.TESTBED_SESSION_SIGNER_URL ? "test-wallet-signer sidecar" : "manual storageState/token")
+        : (signerEnabled ? "signer sidecar available; set TESTBED_SESSION_SIGNER_URL on the runner" : "not configured"),
     },
     safety: {
       agentRequestedDefault: "read_only",
@@ -93,15 +101,21 @@ export function buildTesterCapabilitiesManifest(deps: TesterCapabilitiesDeps = {
       },
       {
         id: "authed_surface_sweep",
-        status: signerEnabled ? "session_source_available" : "planned",
+        status: sessionConfigured ? "available" : "ready_needs_session",
         tier: 1,
         scope: "read_only",
         mutation: "never",
         supportedEnvs: ["testnet", "mainnet-read-only"],
-        dependsOn: ["T2 pre-seeded session runner wiring", "T3 signer sidecar"],
-        note: signerEnabled
-          ? "The signer sidecar can mint sessions, but runner session injection is still a separate capability."
-          : "Requires the signer sidecar and runner session injection before agents should rely on it.",
+        request: {
+          body: {
+            mode: "surface_sweep",
+            targetUrl: "https://app.example",
+            requester: "agent-name",
+          },
+        },
+        note: sessionConfigured
+          ? "Runner session injection (T2) is wired and a session source is configured: the sweep covers the authed operator pages (overview/runs/sessions/receipts/treasury/disputes/policies/agents/audit-log/capabilities) and applies the boundary-honesty check there. Read-only."
+          : "Runner session injection (T2) is wired; set a session source on the runner (TESTBED_SESSION_SIGNER_URL via the T3 sidecar, or a manual TESTBED_SESSION_STORAGE_STATE_PATH/TOKEN). Until then the sweep runs public-only.",
       },
       {
         id: "siwe_auth_role_gating",
