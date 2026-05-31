@@ -78,6 +78,7 @@ that SSH in to invoke Hermes. Don't edit the platform repo from here.
 | `packages/{mcp-common,schemas}/` | Shared helpers + Zod schemas |
 | `services/slack-operator/` | Serves the `/monitor` board, the Codex task queue + runner, testbed mission runner |
 | `services/skills-observer/` | Sidecar ingesting Hermes skill files |
+| `services/test-wallet-signer/` | T3 test-wallet signer sidecar; mints cached API/browser sessions without exposing keys to agents |
 | `ops/` | Docker Compose stack (`compose.yml`, `compose.prod.yml`, `compose.command-center.yml`, `compose.cloudflare-access.yml`), migrations |
 | `hermes/` | Hermes config (`hermes.yaml`, `policy.yaml`) + trace plugin |
 | `test/unit/` | Vitest suites (alongside `*.test.ts(x)` colocated in packages) |
@@ -182,6 +183,11 @@ security-sensitive surface.
   `DATABASE_URL`, `AGENT_WALLET_PRIVATE_KEY`, gateway/API keys, SSH keys. Output is
   scrubbed for keys/tokens in some paths, but **never rely on sanitization** — don't
   emit secrets in the first place.
+- **T3 test wallets stay inside the signer sidecar.** `TEST_WALLET_*_PRIVATE_KEY`
+  values are operator-provisioned secrets, mounted only into the opt-in
+  `test-wallet-signer` service, and must never be copied into prompts, logs, test
+  mission reports, or model context. Testnet may expose `agent` / `admin` /
+  `verifier`; mainnet is structurally limited to a read-only `agent` session.
 - **The agent wallet is testnet-only.** Never configure a mainnet key here, never
   move real funds, never raise policy budgets to enable spend without explicit
   operator sign-off.

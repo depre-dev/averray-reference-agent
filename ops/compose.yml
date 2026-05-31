@@ -230,6 +230,35 @@ services:
       - avg-data:/data
     networks: [avg-internal]
 
+  test-wallet-signer:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.node
+    image: ${AVERRAY_IMAGE:-avg-node-runtime}
+    profiles: ["test-wallet-signer"]
+    restart: unless-stopped
+    depends_on:
+      mcp-bundle:
+        condition: service_completed_successfully
+    command: ["node", "services/test-wallet-signer/dist/index.js"]
+    environment:
+      TEST_WALLET_SIGNER_ENABLED: ${TEST_WALLET_SIGNER_ENABLED:-0}
+      TEST_WALLET_SIGNER_ENVIRONMENT: ${TEST_WALLET_SIGNER_ENVIRONMENT:-testnet}
+      TEST_WALLET_SIGNER_HOST: ${TEST_WALLET_SIGNER_HOST:-0.0.0.0}
+      TEST_WALLET_SIGNER_PORT: ${TEST_WALLET_SIGNER_PORT:-8791}
+      TEST_WALLET_SIGNER_REFRESH_SKEW_SECONDS: ${TEST_WALLET_SIGNER_REFRESH_SKEW_SECONDS:-60}
+      TEST_WALLET_SIGNER_BROWSER_EXECUTABLE_PATH: ${TEST_WALLET_SIGNER_BROWSER_EXECUTABLE_PATH:-/usr/bin/chromium}
+      AUTH_TOKEN_TTL_SECONDS: ${AUTH_TOKEN_TTL_SECONDS:-3600}
+      AVERRAY_API_BASE_URL: ${AVERRAY_API_BASE_URL}
+      AVERRAY_APP_BASE_URL: ${AVERRAY_APP_BASE_URL}
+      TEST_WALLET_AGENT_PRIVATE_KEY: ${TEST_WALLET_AGENT_PRIVATE_KEY:-}
+      TEST_WALLET_ADMIN_PRIVATE_KEY: ${TEST_WALLET_ADMIN_PRIVATE_KEY:-}
+      TEST_WALLET_VERIFIER_PRIVATE_KEY: ${TEST_WALLET_VERIFIER_PRIVATE_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    networks: [avg-internal]
+    ports:
+      - "127.0.0.1:${TEST_WALLET_SIGNER_PORT:-8791}:${TEST_WALLET_SIGNER_PORT:-8791}"
+
   codex-task-runner:
     build:
       context: ..

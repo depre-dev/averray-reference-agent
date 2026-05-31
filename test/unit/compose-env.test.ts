@@ -28,4 +28,24 @@ describe("compose environment wiring", () => {
     expect(envExample).toContain("HERMES_MONITOR_REPLY_MODEL=deepseek-v4-pro:cloud");
     expect(bootstrap).toContain("HERMES_MONITOR_REPLY_MODEL=deepseek-v4-pro:cloud");
   });
+
+  it("wires the T3 test-wallet signer sidecar behind an opt-in localhost profile", () => {
+    const compose = parse(readText("../../ops/compose.yml")) as {
+      services?: Record<string, { profiles?: string[]; ports?: string[]; environment?: Record<string, string> }>;
+    };
+    const service = compose.services?.["test-wallet-signer"];
+
+    expect(service?.profiles).toEqual(["test-wallet-signer"]);
+    expect(service?.ports).toEqual(["127.0.0.1:${TEST_WALLET_SIGNER_PORT:-8791}:${TEST_WALLET_SIGNER_PORT:-8791}"]);
+    expect(service?.environment?.TEST_WALLET_SIGNER_ENABLED).toBe("${TEST_WALLET_SIGNER_ENABLED:-0}");
+    expect(service?.environment?.TEST_WALLET_ADMIN_PRIVATE_KEY).toBe("${TEST_WALLET_ADMIN_PRIVATE_KEY:-}");
+
+    const envExample = readText("../../ops/.env.example");
+    const bootstrap = readText("../../scripts/bootstrap-wallet.sh");
+    expect(envExample).toContain("TEST_WALLET_SIGNER_ENABLED=0");
+    expect(envExample).toContain("TEST_WALLET_VERIFIER_PRIVATE_KEY=");
+    expect(bootstrap).toContain("TEST_WALLET_AGENT_PRIVATE_KEY=");
+    expect(bootstrap).toContain("TEST_WALLET_ADMIN_PRIVATE_KEY=");
+    expect(bootstrap).toContain("TEST_WALLET_VERIFIER_PRIVATE_KEY=");
+  });
 });
