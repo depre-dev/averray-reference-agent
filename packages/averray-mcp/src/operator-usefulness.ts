@@ -41,6 +41,7 @@ export async function getAgentUsefulnessPlan(deps: OperatorStatusDeps) {
           "project memory",
           "runbook for deploy averray-agent/agent",
           "admin readiness",
+          "hermes backlog",
           "what should i do next",
           "run one wikipedia citation repair dry run only",
           "run one wikipedia citation repair if safe",
@@ -61,6 +62,7 @@ export async function getAgentUsefulnessPlan(deps: OperatorStatusDeps) {
           "project memory",
           "merge runbook for averray-agent/agent",
           "admin readiness",
+          "hermes backlog",
           "find safe work",
         ],
       },
@@ -69,6 +71,7 @@ export async function getAgentUsefulnessPlan(deps: OperatorStatusDeps) {
         use: "Canonical structured contract any compatible agent can call without learning Slack or Workspace.",
         tools: [
           "averray_agent_usefulness_plan",
+          "averray_hermes_backlog_plan",
           "averray_project_memory",
           "averray_project_runbook",
           "averray_admin_readiness",
@@ -102,6 +105,12 @@ export async function getAgentUsefulnessPlan(deps: OperatorStatusDeps) {
         nextStep: "Add a read-only GitHub digest command before allowing any write actions.",
       },
       {
+        id: "hermes_planner",
+        status: "enabled",
+        value: "Can rank the next roadmap-backed Hermes work with owner, lane, close criteria, verification path, and a copyable task prompt.",
+        commands: ["hermes backlog", "what should Hermes build next"],
+      },
+      {
         id: "project_admin_copilot",
         status: "readiness_enabled",
         value: "Can explain the staged path from operator copilot to approval-gated project admin, including denied actions and required controls.",
@@ -128,6 +137,7 @@ export async function getAgentUsefulnessPlan(deps: OperatorStatusDeps) {
     ],
     nextImplementationTracks: [
       "GitHub PR/issue digest and CI failure explainer",
+      "Idle-triggered Hermes backlog proposal routine using the B1 planner",
       "Admin action registry with project allowlists, approvals, audit receipts, and rollback notes",
       "Host-level ops routine for disk/log/WAL checks and stale sessions",
       "Reward ledger with chain/accounting reconciliation once payout data is exposed",

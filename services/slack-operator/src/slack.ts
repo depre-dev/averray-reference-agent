@@ -173,6 +173,30 @@ export function formatOperatorResultForSlack(result: unknown): string {
       "Read-only plan. Use `what can you do for us details` in MCP/Workspace for the full structured JSON.",
     ].filter(Boolean).join("\n");
   }
+  if (result.kind === "hermes_backlog_plan") {
+    const plan = isRecord(result.plan) ? result.plan : {};
+    const source = isRecord(plan.source) ? plan.source : {};
+    const cadence = isRecord(plan.cadence) ? plan.cadence : {};
+    const boardGate = isRecord(plan.boardGate) ? plan.boardGate : {};
+    const safety = isRecord(plan.safety) ? plan.safety : {};
+    const items = Array.isArray(plan.items) ? plan.items : [];
+    const itemLines = items.slice(0, 5).map(formatBacklogItem).join("\n");
+    return [
+      "*Hermes backlog plan*",
+      stringField(plan, "headline") ?? "Hermes has roadmap-backed proposals ready.",
+      "",
+      "*Gate*",
+      `• board: \`${stringField(boardGate, "status") ?? "unknown"}\` - ${stringField(boardGate, "reason") ?? "no reason recorded"}`,
+      `• idle eligible: \`${String(cadence.idleEligible === true)}\``,
+      "*Shortlist*",
+      itemLines || "No roadmap proposals are currently available.",
+      "*Safety*",
+      `• proposes only: \`${String(safety.proposesOnly !== false)}\``,
+      `• auto-approval unchanged: \`${String(safety.autoApprovalUnchanged !== false)}\``,
+      `• source: \`${stringField(source, "roadmap") ?? "docs/HERMES_ROADMAP.md"}\``,
+      stringField(plan, "nextOperatorStep") ?? "Pick one item and approve only when you want an agent to start.",
+    ].filter(Boolean).join("\n");
+  }
   if (result.kind === "project_memory") {
     const memory = isRecord(result.memory) ? result.memory : {};
     const selected = isRecord(memory.selectedProject) ? memory.selectedProject : undefined;
@@ -480,6 +504,18 @@ function formatUseCase(value: unknown): string {
   const status = stringField(value, "status") ?? "unknown";
   const summary = stringField(value, "value") ?? "";
   return `• \`${id}\` - ${status}${summary ? `: ${summary}` : ""}`;
+}
+
+function formatBacklogItem(value: unknown): string {
+  if (!isRecord(value)) return "• unknown";
+  const id = stringField(value, "id") ?? "unknown";
+  const title = stringField(value, "title") ?? "untitled";
+  const owner = stringField(value, "owner") ?? "unknown";
+  const riskTier = stringField(value, "riskTier") ?? "unknown";
+  const score = numberField(value, "score") ?? 0;
+  const signals = arrayField(value, "scoreSignals").slice(0, 2).map(String).join("; ");
+  const verification = arrayField(value, "verificationPath").slice(0, 2).map(String).join("; ");
+  return `• \`${id}\` ${title} - owner \`${owner}\`, risk \`${riskTier}\`, score \`${score}\`${signals ? `; why: ${signals}` : ""}${verification ? `; verify: ${verification}` : ""}`;
 }
 
 function formatAdminStage(value: unknown): string {

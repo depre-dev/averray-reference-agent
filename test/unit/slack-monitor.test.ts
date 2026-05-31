@@ -42,6 +42,7 @@ describe("slack operator personal monitor", () => {
   it("guards the monitor command console to read-only and proposal commands", () => {
     expect(guardMonitorCommand("merge steward details")).toMatchObject({ allowed: true });
     expect(guardMonitorCommand("ops health")).toMatchObject({ allowed: true });
+    expect(guardMonitorCommand("what should Hermes build next")).toMatchObject({ allowed: true });
     expect(guardMonitorCommand("propose deploy for averray-agent/agent sha abc1234")).toMatchObject({ allowed: true });
     expect(guardMonitorCommand("agent browser mission https://testbed.example/app goal: complete onboarding")).toMatchObject({ allowed: true });
     expect(guardMonitorCommand("agent browser mission https://testbed.example/app goal: complete onboarding test mode allow test mutations")).toMatchObject({ allowed: true });

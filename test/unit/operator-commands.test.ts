@@ -124,6 +124,18 @@ describe("operator commands", () => {
       source: "command_center",
       detailed: true,
     });
+    expect(parseOperatorCommand("what should Hermes build next?", { source: "operator" })).toEqual({
+      handled: true,
+      kind: "hermes_backlog_plan",
+      source: "operator",
+      detailed: false,
+    });
+    expect(parseOperatorCommand("roadmap backlog details", { source: "command_center" })).toEqual({
+      handled: true,
+      kind: "hermes_backlog_plan",
+      source: "command_center",
+      detailed: true,
+    });
     expect(parseOperatorCommand("project memory", { source: "operator" })).toEqual({
       handled: true,
       kind: "project_memory",
