@@ -21,7 +21,7 @@
 
 **Scope/safety:** agent-requested runs are **read-only by default** — surface sweep (T1) or a **targeted read-only mission** against the changed route/feature. Mutating/gold-path missions stay **operator-initiated** (an agent can't request a mutation). Testnet/preview env only; under `HALT_FILE`.
 
-**Entry point (closes the interface gap):** the building agents work in `averray-agent/agent` and likely don't have the Averray MCP. So ship a thin **platform-repo helper** (e.g. `scripts/request-tester-run.sh` / an npm script) that POSTs the request to the monitor's mission-request endpoint (in this repo) and prints the board link. The reference-agent exposes the endpoint + the gate; the platform repo ships the helper so agents have it in-context.
+**Entry point (closes the interface gap):** the building agents work in `averray-agent/agent` and likely don't have the Averray MCP. So ship a thin **platform-repo helper** (e.g. `scripts/request-tester-run.sh` / an npm script) that POSTs the request to the canonical queue endpoint **`POST /monitor/testbed-missions`** (slack-operator `:8790`) and prints the board link — **not** the `averray_testbed_agent_mission` MCP tool, which only returns a prompt packet. The reference-agent adds the **proposed → approve gate** on top of that endpoint for agent-requested runs; the platform repo ships the helper so agents have it in-context.
 
 ## 2. Tester capabilities manifest — always known
 
