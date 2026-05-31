@@ -184,6 +184,8 @@ export interface BoardCard {
   /** Codex/Claude task cards: lifecycle status (drives the board's
    *  approve affordance — only `proposed` tasks show "Approve"). */
   taskStatus?: TaskStatus;
+  /** Task cards: O4 routing risk tier (PR3's autopilot reads it). */
+  riskTier?: "high" | "low";
   /** Codex task cards: the dispatched prompt. */
   prompt?: string;
   /** Codex task cards: tail of stdout / completion summary. */
@@ -820,13 +822,19 @@ export function synthesizeTaskCards(
     if (!id) continue;
     const agent: AgentType = task.agent === "claude" ? "claude" : "codex";
     const prompt = asString(task.prompt);
+    const riskTierRaw = asString(task.riskTier);
+    const riskTier = riskTierRaw === "high" || riskTierRaw === "low" ? riskTierRaw : undefined;
+    const routingReason = asString(task.routingReason);
+    // O4-PR2: surface the routing decision — the reason (incl. the tier) on the
+    // card face, and a riskSignal for the drawer. Persist riskTier (PR3 reads it).
+    const summary = [routingReason, asString(task.reason)].filter(Boolean).join(" · ");
     const card: BoardCard = {
       id,
       lane: "codex-needed",
       type: "task",
       agentType: agent,
       title: asString(task.title) ?? `${agent} task`,
-      summary: asString(task.reason) ?? "",
+      summary,
       repo: asString(task.repo) ?? "",
       freshness: 0,
       state: "fresh",
@@ -837,6 +845,10 @@ export function synthesizeTaskCards(
           ? { actor: "operator", tone: "warn" }
           : { actor: "agent", tone: "info" },
       taskStatus: status as TaskStatus,
+      ...(riskTier ? { riskTier } : {}),
+      ...(routingReason
+        ? { riskSignals: [{ severity: riskTier === "high" ? "high" : "low", code: "routing", message: routingReason }] }
+        : {}),
       ...(prompt ? { prompt } : {}),
     };
     if (status === "running" && runner) {

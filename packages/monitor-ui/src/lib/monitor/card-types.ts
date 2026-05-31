@@ -188,6 +188,8 @@ export interface CodexTaskCard extends CardBase {
   action?: CardAction;
   /** Lifecycle status — drives the board's approve affordance (proposed only). */
   taskStatus?: TaskStatus;
+  /** O4 routing risk tier (PR3's autopilot reads it; surfaced in the summary too). */
+  riskTier?: "high" | "low";
   runnerHeartbeat?: { lastSeen: string; online: boolean };
   output?: string;
   failureReason?: string;

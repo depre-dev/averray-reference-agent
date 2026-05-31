@@ -82,6 +82,11 @@ export function parseProposeTaskPayload(payload: unknown): ParseProposeResult {
   const correlationId = str(payload, "correlationId");
   const title = str(payload, "title");
   const reason = str(payload, "reason");
+  // O4-PR2 routing metadata (set by Hermes's enqueue handler). Only a valid
+  // "high"/"low" tier is accepted; anything else is ignored.
+  const riskTierRaw = str(payload, "riskTier");
+  const riskTier = riskTierRaw === "high" || riskTierRaw === "low" ? riskTierRaw : undefined;
+  const routingReason = str(payload, "routingReason");
 
   const input: CodexTaskInput = {
     repo,
@@ -91,6 +96,8 @@ export function parseProposeTaskPayload(payload: unknown): ParseProposeResult {
     ...(correlationId ? { correlationId } : {}),
     ...(title ? { title } : {}),
     ...(reason ? { reason } : {}),
+    ...(riskTier ? { riskTier } : {}),
+    ...(routingReason ? { routingReason } : {}),
     requester: str(payload, "requester") ?? "monitor",
   };
   return { ok: true, input };

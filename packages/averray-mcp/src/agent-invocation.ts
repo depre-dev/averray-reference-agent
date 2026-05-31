@@ -26,6 +26,7 @@ import {
   evaluateDispatchPolicy,
   type DispatchPolicyConfig,
 } from "./dispatch-policy.js";
+import { classifyTask, type RiskTier } from "./dispatch-routing.js";
 
 export type AgentInvocationIntent =
   | "operator_command"
@@ -45,6 +46,9 @@ export interface ProposedAgentTask {
   requester: string;
   pullRequestNumber?: number;
   reason?: string;
+  /** O4-PR2 routing: persisted risk tier (PR3's autopilot reads it) + why. */
+  riskTier?: RiskTier;
+  routingReason?: string;
 }
 
 /** A queued task, as returned by GET /monitor/codex-tasks (for the daily budget). */
@@ -77,7 +81,10 @@ export interface AgentInvocationInput {
   confidenceThreshold?: number;
   /** enqueue_agent_task: the task prompt + which agent to propose it to. */
   prompt?: string;
+  /** Explicit agent; when omitted it's DERIVED from the routing taxonomy (overridable). */
   agent?: "codex" | "claude";
+  /** Optional surface hint for routing (e.g. "contracts", "ui"). */
+  area?: string;
 }
 
 export interface AgentInvocationDeps {
@@ -827,9 +834,17 @@ async function invokeEnqueueAgentTask(
 ): Promise<unknown> {
   const repo = (input.repo ?? "").trim();
   const prompt = (input.prompt ?? "").trim();
-  const agent = ((input.agent ?? "codex").trim() || "codex") as "codex" | "claude";
   if (!repo) return blockedInvocation(invocation, startedAt, "repo_required");
   if (!prompt) return blockedInvocation(invocation, startedAt, "prompt_required");
+
+  // Routing taxonomy (O4-PR2): a pure, overridable default. An explicit agent in
+  // the request wins; otherwise derive it. The riskTier is ALWAYS computed and
+  // persisted (PR3's autopilot reads it). The operator can still flip the agent
+  // at approval — unchanged. No authority is granted here.
+  const routing = classifyTask({ repo, prompt, ...(input.area ? { area: input.area } : {}) });
+  const explicitAgent = (input.agent ?? "").trim();
+  const agent: "codex" | "claude" =
+    explicitAgent === "codex" || explicitAgent === "claude" ? explicitAgent : routing.agent;
 
   // (a) HALT kill-switch — block cleanly rather than crash.
   const assertKill = deps.assertNoKillSwitchFn ?? assertNoKillSwitch;
@@ -872,6 +887,8 @@ async function invokeEnqueueAgentTask(
     agent,
     prompt,
     requester: "hermes",
+    riskTier: routing.riskTier,
+    routingReason: routing.reason,
     ...(input.pullRequestNumber ? { pullRequestNumber: input.pullRequestNumber } : {}),
     ...(input.reason ? { reason: input.reason } : {}),
   });
@@ -885,6 +902,9 @@ async function invokeEnqueueAgentTask(
       proposedTaskId: created.id ?? null,
       repo,
       agent,
+      agentExplicit: explicitAgent === "codex" || explicitAgent === "claude",
+      riskTier: routing.riskTier,
+      routingReason: routing.reason,
       requester: "hermes",
       note: "Task proposed; it lands on the board and awaits operator approval. Never auto-approved or auto-run.",
     },
