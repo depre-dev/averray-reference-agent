@@ -1,11 +1,13 @@
-import { getTestbedAgentMission, type TestbedAgentMissionInput } from "@avg/averray-mcp/operator-testbed";
+import { getTestbedAgentMission } from "@avg/averray-mcp/operator-testbed";
 
 import {
+  approveTestbedMissionRun,
   listTestbedMissionRuns,
   readTestbedMissionRunnerHeartbeat,
   recordTestbedMissionRunFromOperatorResult,
   summarizeTestbedMissionRunnerHeartbeat,
   type TestbedMissionMode,
+  type TestbedMissionRequesterAgent,
   type TestbedMissionRun,
 } from "./monitor-testbed-missions.js";
 import {
@@ -15,7 +17,14 @@ import {
   type TestbedMissionEnvironment,
 } from "./testbed-mutation-binding.js";
 
-export interface AgentTestbedMissionInput extends TestbedAgentMissionInput {
+export interface AgentTestbedMissionInput {
+  targetUrl?: string;
+  goal?: string;
+  agentName?: string;
+  freshMemory?: boolean;
+  allowTestMutations?: boolean;
+  maxBrowserSteps?: number;
+  maxMinutes?: number;
   requester?: string;
   path?: string;
   /** Explicit environment binding; absent ⇒ infer from URL / runner env. */
@@ -24,6 +33,17 @@ export interface AgentTestbedMissionInput extends TestbedAgentMissionInput {
   mode?: TestbedMissionMode;
   /** T1: routes for a surface sweep (relative to the app base URL, or absolute). */
   routes?: string[];
+}
+
+export type AgentRequestedTestbedMissionMode = "fresh" | "memory";
+
+export interface AgentRequestedTestbedMissionInput {
+  requesterAgent?: unknown;
+  targetUrl?: unknown;
+  goal?: unknown;
+  reason?: unknown;
+  mode?: unknown;
+  path?: string;
 }
 
 export interface AgentTestbedMissionListInput {
@@ -47,9 +67,62 @@ export interface AgentTestbedMissionResult {
   nextStep: string;
 }
 
+export class TestbedMissionRequestValidationError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string
+  ) {
+    super(message);
+    this.name = "TestbedMissionRequestValidationError";
+  }
+}
+
 export function createTestbedMissionFromAgent(
   input: AgentTestbedMissionInput = {},
   nowMs: number = Date.now()
+): AgentTestbedMissionResult {
+  return createTestbedMissionRecord(input, nowMs, { initialStatus: "ready" });
+}
+
+export function requestTestbedMissionFromAgent(
+  input: AgentRequestedTestbedMissionInput,
+  nowMs: number = Date.now()
+): AgentTestbedMissionResult {
+  const request = parseAgentRequestedTestbedMission(input);
+  const missionInput: AgentTestbedMissionInput = {
+    requester: request.requesterAgent,
+    targetUrl: request.targetUrl,
+    goal: request.goal,
+    freshMemory: request.mode === "fresh",
+    allowTestMutations: false,
+  };
+  if (input.path) missionInput.path = input.path;
+  return createTestbedMissionRecord(
+    missionInput,
+    nowMs,
+    {
+      initialStatus: "requested",
+      requesterAgent: request.requesterAgent,
+      requestReason: request.reason,
+    }
+  );
+}
+
+export function approveRequestedTestbedMission(
+  id: string,
+  input: { path?: string; approvedBy?: string; now?: Date } = {}
+) {
+  return approveTestbedMissionRun(id, input);
+}
+
+function createTestbedMissionRecord(
+  input: AgentTestbedMissionInput,
+  nowMs: number,
+  options: {
+    initialStatus: "ready" | "requested";
+    requesterAgent?: TestbedMissionRequesterAgent;
+    requestReason?: string;
+  }
 ): AgentTestbedMissionResult {
   const binding = resolveTestbedMutationBinding({
     targetUrl: input.targetUrl,
@@ -79,7 +152,8 @@ export function createTestbedMissionFromAgent(
       mission,
     },
     nowMs,
-    input.path
+    input.path,
+    options
   );
   if (!run) {
     throw new Error("Hermes testbed mission could not be recorded.");
@@ -95,9 +169,11 @@ export function createTestbedMissionFromAgent(
     mission,
     runner,
     statusUrlHint: `/monitor/testbed-missions?limit=20`,
-    nextStep: runnerReady
-      ? "Hermes testbed runner can claim this mission; poll /monitor/testbed-missions or watch the board for the structured report."
-      : "Mission is queued, but no healthy automatic runner is visible; use the mission prompt manually or start the testbed runner.",
+    nextStep: run.status === "requested"
+      ? "Tester run request is board-gated; the operator must approve it before the Hermes testbed runner can claim it."
+      : runnerReady
+        ? "Hermes testbed runner can claim this mission; poll /monitor/testbed-missions or watch the board for the structured report."
+        : "Mission is queued, but no healthy automatic runner is visible; use the mission prompt manually or start the testbed runner.",
   };
 }
 
@@ -130,6 +206,7 @@ export function getTestbedMissionForAgent(id: string, input: AgentTestbedMission
 function summarizeMissionCounts(runs: TestbedMissionRun[]) {
   return {
     total: runs.length,
+    requested: runs.filter((run) => run.status === "requested").length,
     ready: runs.filter((run) => run.status === "ready").length,
     running: runs.filter((run) => run.status === "running").length,
     completed: runs.filter((run) => run.status === "completed").length,
@@ -150,6 +227,9 @@ function nextStepForRun(
   if (run.status === "running") {
     return "Hermes testbed runner is working; poll this mission until it records a structured report or failure.";
   }
+  if (run.status === "requested") {
+    return "Tester run request is waiting for operator approval; the runner will ignore it until it moves to ready.";
+  }
   const runnerReady = runner && !runner.stale && runner.status !== "disabled" && runner.status !== "misconfigured";
   return runnerReady
     ? "Mission is ready; Hermes testbed runner should claim it on its next poll."
@@ -158,4 +238,53 @@ function nextStepForRun(
 
 function cleanString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function parseAgentRequestedTestbedMission(input: AgentRequestedTestbedMissionInput): {
+  requesterAgent: TestbedMissionRequesterAgent;
+  targetUrl: string;
+  goal: string;
+  reason: string;
+  mode: AgentRequestedTestbedMissionMode;
+} {
+  const requesterAgent = parseRequesterAgent(input.requesterAgent);
+  const targetUrl = parseHttpUrl(input.targetUrl);
+  const goal = cleanString(input.goal);
+  if (!goal) {
+    throw new TestbedMissionRequestValidationError("missing_goal", "goal is required for an agent-requested tester run.");
+  }
+  const reason = cleanString(input.reason) ?? "Agent requested a board-gated tester run.";
+  const mode = parseRequestMode(input.mode);
+  return { requesterAgent, targetUrl, goal, reason, mode };
+}
+
+function parseRequesterAgent(value: unknown): TestbedMissionRequesterAgent {
+  const agent = cleanString(value);
+  if (agent === "codex" || agent === "claude" || agent === "hermes" || agent === "operator") return agent;
+  throw new TestbedMissionRequestValidationError(
+    "invalid_requester_agent",
+    "requesterAgent must be one of codex, claude, hermes, or operator."
+  );
+}
+
+function parseRequestMode(value: unknown): AgentRequestedTestbedMissionMode {
+  const mode = cleanString(value) ?? "fresh";
+  if (mode === "fresh" || mode === "memory") return mode;
+  throw new TestbedMissionRequestValidationError("invalid_mode", "mode must be fresh or memory.");
+}
+
+function parseHttpUrl(value: unknown): string {
+  const raw = cleanString(value);
+  if (!raw) {
+    throw new TestbedMissionRequestValidationError("missing_target_url", "targetUrl is required.");
+  }
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return parsed.toString();
+    }
+  } catch {
+    // fall through to the validation error below
+  }
+  throw new TestbedMissionRequestValidationError("invalid_target_url", "targetUrl must be a valid http or https URL.");
 }

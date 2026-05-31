@@ -11,6 +11,9 @@ import {
   createTestbedMissionFromAgent,
   getTestbedMissionForAgent,
   listTestbedMissionsForAgent,
+  requestTestbedMissionFromAgent,
+  approveRequestedTestbedMission,
+  TestbedMissionRequestValidationError,
 } from "../../services/slack-operator/src/testbed-agent-entrypoint.js";
 
 vi.mock("@avg/averray-mcp/operator-testbed", () => ({
@@ -86,6 +89,104 @@ describe("testbed agent entrypoint", () => {
     expect(String(result.mission.missionPrompt)).toContain("try the onboarding flow");
   });
 
+  it("lets an agent request a board-gated tester run without making it claimable", () => {
+    const result = requestTestbedMissionFromAgent(
+      {
+        path,
+        requesterAgent: "codex",
+        targetUrl: "https://testbed.example/onboarding",
+        goal: "check whether the onboarding page is understandable to a fresh browser agent",
+        reason: "Codex changed onboarding copy and wants independent browser evidence.",
+        mode: "fresh",
+      },
+      Date.parse("2026-05-25T10:01:00.000Z")
+    );
+
+    expect(result).toMatchObject({
+      kind: "hermes_testbed_agent_entrypoint",
+      requester: "codex",
+      run: {
+        status: "requested",
+        title: "Tester run requested",
+        requesterAgent: "codex",
+        requestReason: "Codex changed onboarding copy and wants independent browser evidence.",
+        targetUrl: "https://testbed.example/onboarding",
+        goal: "check whether the onboarding page is understandable to a fresh browser agent",
+        freshMemory: true,
+        allowTestMutations: false,
+      },
+    });
+    expect(result.nextStep).toContain("board-gated");
+
+    const list = listTestbedMissionsForAgent({ path, limit: 10 });
+    expect(list.counts).toMatchObject({
+      requested: 1,
+      ready: 0,
+      running: 0,
+    });
+  });
+
+  it("rejects invalid requested tester run URLs and missing goals", () => {
+    expect(() => requestTestbedMissionFromAgent({
+      path,
+      requesterAgent: "codex",
+      targetUrl: "not-a-url",
+      goal: "check onboarding",
+      reason: "needs browser proof",
+      mode: "fresh",
+    })).toThrow(TestbedMissionRequestValidationError);
+
+    try {
+      requestTestbedMissionFromAgent({
+        path,
+        requesterAgent: "codex",
+        targetUrl: "https://testbed.example/onboarding",
+        reason: "needs browser proof",
+        mode: "fresh",
+      });
+      throw new Error("expected missing goal rejection");
+    } catch (error) {
+      expect(error).toBeInstanceOf(TestbedMissionRequestValidationError);
+      expect((error as TestbedMissionRequestValidationError).code).toBe("missing_goal");
+    }
+  });
+
+  it("approves a requested tester run into the existing ready mission flow", () => {
+    const created = requestTestbedMissionFromAgent(
+      {
+        path,
+        requesterAgent: "claude",
+        targetUrl: "https://testbed.example/onboarding",
+        goal: "check onboarding",
+        reason: "verify the changed page",
+        mode: "memory",
+      },
+      Date.parse("2026-05-25T10:01:00.000Z")
+    );
+
+    const approved = approveRequestedTestbedMission(created.run.id, {
+      path,
+      approvedBy: "operator",
+      now: new Date("2026-05-25T10:03:00.000Z"),
+    });
+
+    expect(approved).toMatchObject({
+      ok: true,
+      run: {
+        id: created.run.id,
+        status: "ready",
+        title: "Fresh-agent browser mission",
+        freshMemory: false,
+        approvedAt: "2026-05-25T10:03:00.000Z",
+        approvedBy: "operator",
+      },
+    });
+    expect(listTestbedMissionsForAgent({ path, limit: 10 }).counts).toMatchObject({
+      requested: 0,
+      ready: 1,
+    });
+  });
+
   it("keeps agent-requested mutations read-only when the target is production", () => {
     const result = createTestbedMissionFromAgent(
       {
@@ -144,6 +245,7 @@ describe("testbed agent entrypoint", () => {
       kind: "hermes_testbed_agent_mission_list",
       counts: {
         total: 1,
+        requested: 0,
         ready: 1,
         running: 0,
         completed: 0,

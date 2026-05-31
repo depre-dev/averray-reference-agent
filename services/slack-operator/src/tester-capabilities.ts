@@ -37,6 +37,17 @@ export function buildTesterCapabilitiesManifest(deps: TesterCapabilitiesDeps = {
         auth: "monitor auth plus the mission-spawn role gate when configured",
         contentType: "application/json",
       },
+      requestBoardGatedMission: {
+        method: "POST",
+        path: "/monitor/testbed-missions/request",
+        auth: "same monitor auth as /monitor",
+        contentType: "application/json",
+      },
+      approveRequestedMission: {
+        method: "POST",
+        path: "/monitor/testbed-missions/{id}/approve",
+        auth: "monitor auth plus the mission-spawn role gate when configured",
+      },
       listMissions: {
         method: "GET",
         path: "/monitor/testbed-missions?limit=20",
@@ -154,9 +165,9 @@ export function buildTesterCapabilitiesManifest(deps: TesterCapabilitiesDeps = {
       },
     ],
     approvalGate: {
-      agentRequestedRuns: "read-only requests are monitor-gated; mutating missions remain operator-only",
-      currentEnforcement: "POST /monitor/testbed-missions requires monitor auth and, when configured, a Cloudflare Access mission operator/admin allowlist",
-      proposedMissionApproval: "planned T6 board approval flow; not advertised as automatic here",
+      agentRequestedRuns: "read-only requests use /monitor/testbed-missions/request and land as requested; runners ignore them until operator approval",
+      currentEnforcement: "POST /monitor/testbed-missions still creates ready operator missions; POST /monitor/testbed-missions/{id}/approve is the T6 requested -> ready gate",
+      proposedMissionApproval: "available; board-gated and never automatic from agent request",
     },
     resultShape: {
       verdict: "pass | partial | fail",

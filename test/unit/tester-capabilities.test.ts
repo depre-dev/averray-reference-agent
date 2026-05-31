@@ -27,6 +27,8 @@ describe("tester capabilities manifest", () => {
       endpoints: {
         capabilities: { method: "GET", path: "/monitor/tester/capabilities" },
         requestMission: { method: "POST", path: "/monitor/testbed-missions" },
+        requestBoardGatedMission: { method: "POST", path: "/monitor/testbed-missions/request" },
+        approveRequestedMission: { method: "POST", path: "/monitor/testbed-missions/{id}/approve" },
       },
       runtime: {
         runnerEnabled: true,

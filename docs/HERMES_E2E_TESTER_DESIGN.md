@@ -1,6 +1,6 @@
 # Hermes E2E Tester — Design (the product tester)
 
-- **Status:** Reconciled 2026-05-31. T2 pre-seeded session (#293), T3 SIWE role-gating (#290), and T5 env→mutation binding/enhancements (#297) have shipped. T4 Tier-2 agent, T6 agent-requested runs, and T7 capabilities/helper work remain follow-up/design unless code evidence proves otherwise.
+- **Status:** Reconciled 2026-05-31. T2 pre-seeded session (#293), T3 SIWE role-gating (#290), and T5 env→mutation binding/enhancements (#297) have shipped. T6's first board-gated request/approve slice is in flight here. T4 Tier-2 agent and T7 capabilities/helper work remain follow-up/design unless code evidence proves otherwise.
 - **Date:** 2026-05-29
 - **Lives in:** this repo (`depre-dev/averray-reference-agent`) — the testbed/mission code is here.
 - **Tests:** the platform product `averray-agent/agent` — the Polkadot Agent Platform ("Averray"): an agent-first job/treasury runtime on Polkadot Hub TestNet.
@@ -119,4 +119,4 @@ Each mission's verdict is LLM-judged (Tier 2) or rule-checked (Tier 1); both rec
 
 ---
 
-*End of E2E tester design. Reconciled 2026-05-31: T2, T3, and T5 have shipped; T4/T6/T7 remain follow-up/design.*
+*End of E2E tester design. Reconciled 2026-05-31: T2, T3, and T5 have shipped; T6 first slice is in flight; T4/T7 remain follow-up/design.*

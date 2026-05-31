@@ -47,18 +47,18 @@
 | T3 | Signer sidecar + SIWE mission (multi-role) | ✅ done — signer sidecar foundation (#283) + SIWE role-gating mission (#290) |
 | T4 | Tier-2 agent (Agent SDK + Playwright-MCP) | design done |
 | T5 | Env→mutation binding + enhancements (trace/video, baselines) | ✅ done (#297) — env-bound mutation profile + Playwright trace/video + baseline comparison slice |
-| T6 | Agent-requested tester runs — board-gated (request → approve → read-only run) | design done (#274) |
+| T6 | Agent-requested tester runs — board-gated (request → approve → read-only run) | in flight — first slice adds `requested` missions, `/monitor/testbed-missions/request`, `/approve`, board approve UI, and runner-ready gating (this PR) |
 | T7 | Tester capabilities manifest (+ platform-repo request helper) | design/follow-up — do not mark shipped here without code evidence; platform helper remains follow-up |
 
-*(Status as of 2026-05-31 — **shipped:** O0–O4, A1, A2, A3a, A4, D1–D4, C4 v1, T1–T3, and T5. **In progress:** A3b cost-aware routing/budget and the O5 first slice. **Design / follow-up:** remaining O5 hardening, B1–B2, C1–C3 and remaining C follow-ups, T4, T6, T7, plus any platform helper pieces not proven by code evidence. Merge/deploy remain human-gated; autopilot approves dispatch only inside O4 guardrails.)*
+*(Status as of 2026-05-31 — **shipped:** O0–O4, A1, A2, A3a, A4, D1–D4, C4 v1, T1–T3, and T5. **In progress:** A3b cost-aware routing/budget, the O5 first slice, and T6's first board-gated request/approve slice. **Design / follow-up:** remaining O5 hardening, B1–B2, C1–C3 and remaining C follow-ups, T4, T7, and platform helper pieces not proven by code evidence. Merge/deploy remain human-gated; autopilot approves dispatch only inside O4 guardrails.)*
 
 ## Recommended build order (the smooth, low-effort ramp)
 
 1. **The self-feeding loop:** **O1 → O2 → O3.** Once this exists you stop hand-writing prompts; work is enqueued from the board and you just approve. Highest-leverage effort.
    - **T1** runs in parallel with O1 (independent, both runner/board TS).
-2. **The safety net:** **D4** (off-device alert bridge), **T1**, **T2 + T3** (tester reaches authed product), **D1 + D3** (digest + anomaly auto-pause), and **T5** (env-bound mutation profile). This foundation has shipped; **T6/T7** remain follow-up for agent-requested runs + capabilities.
+2. **The safety net:** **D4** (off-device alert bridge), **T1**, **T2 + T3** (tester reaches authed product), **D1 + D3** (digest + anomaly auto-pause), and **T5** (env-bound mutation profile). This foundation has shipped; **T6** is receiving its first request/approve gate slice, while **T7** remains follow-up for platform helper/capability discovery.
 3. **Autonomy:** **O4** (enqueue + guardrail + autonomy mode) has shipped; supervised burn-in and monitoring decide when to rely on it more heavily.
-4. **Depth, anytime after:** **A1 → A2** shipped; **A3b** is in progress. Remaining depth is **B** (planner), **C1–C3** plus C follow-ups, **T4/T6/T7**, and **O5** hardening.
+4. **Depth, anytime after:** **A1 → A2** shipped; **A3b** is in progress. Remaining depth is **B** (planner), **C1–C3** plus C follow-ups, **T4/T7**, T6 follow-on helper polish, and **O5** hardening.
 
 **Dependencies to respect:** B2 needs D3 (loop fail-safe); A2 needs A1 (baselines); O4 is the authority change and needs D4 (escalations must reach the operator off-device); T6 needs the proposed-mission approval gate; T-missions that mutate stay on testnet (env→mutation binding before any mainnet).
 

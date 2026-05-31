@@ -216,7 +216,9 @@ export interface MissionReport {
 /** Browser mission card (testbed). */
 export interface MissionCard extends CardBase {
   type: "mission";
-  mission: MissionReport;
+  mission?: MissionReport;
+  /** requested missions are board-gated and cannot be claimed until approved. */
+  missionStatus?: "requested" | "ready" | "running" | "completed" | "failed";
 }
 
 /** Task lifecycle status (mirrors the serializer's TaskStatus). */
