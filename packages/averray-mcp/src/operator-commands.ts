@@ -44,6 +44,12 @@ export type ParsedOperatorCommand =
     }
   | {
       handled: true;
+      kind: "hermes_backlog_plan";
+      source: OperatorCommandSource;
+      detailed: boolean;
+    }
+  | {
+      handled: true;
       kind: "project_memory";
       source: OperatorCommandSource;
       detailed: boolean;
@@ -208,6 +214,9 @@ const EXAMPLES = [
   "handoff monitor",
   "hermes handoff monitor",
   "what is hermes doing",
+  "hermes backlog",
+  "what should Hermes build next",
+  "roadmap backlog",
   "find safe work",
   "operator status",
   "operator status details",
@@ -241,6 +250,10 @@ export function parseOperatorCommand(
 
   if (isAgentUsefulnessPlanCommand(normalizedText)) {
     return { handled: true, kind: "agent_usefulness_plan", source, detailed };
+  }
+
+  if (isHermesBacklogPlanCommand(normalizedText)) {
+    return { handled: true, kind: "hermes_backlog_plan", source, detailed };
   }
 
   const projectMemory = projectMemoryTarget(text, normalizedText);
@@ -461,6 +474,10 @@ function isFindSafeWorkCommand(text: string): boolean {
 
 function isAgentUsefulnessPlanCommand(text: string): boolean {
   return /^(what can you do|what can you do for us|how can you help|how can you work for us|work for us|agent usefulness|agent usefulness plan|agent plan|usefulness plan|show use cases|show agent use cases)( details?| full| audit)?$/.test(text);
+}
+
+function isHermesBacklogPlanCommand(text: string): boolean {
+  return /^(hermes backlog|backlog plan|roadmap backlog|roadmap plan|hermes roadmap|hermes roadmap plan|what should hermes build next|what should we build next|plan next hermes work|next hermes work)( details?| full| audit)?$/.test(text);
 }
 
 function projectMemoryTarget(

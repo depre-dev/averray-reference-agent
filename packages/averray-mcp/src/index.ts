@@ -54,6 +54,7 @@ import { getTestbedAgentMission, getTestbedE2eSuite, runTestbedE2eReadOnly } fro
 import { invokeAgentTask } from "./agent-invocation.js";
 import { getHandoffMonitor } from "./handoff-events.js";
 import { getAgentScorecard } from "./agent-scorecard.js";
+import { getHermesBacklogPlan } from "./hermes-backlog.js";
 
 const server = new McpServer({
   name: "averray-mcp",
@@ -338,6 +339,17 @@ server.tool(
 );
 
 server.tool(
+  "averray_hermes_backlog_plan",
+  "Read-only B1 Hermes backlog planner. Returns a ranked roadmap-backed shortlist with owner, lane, close criteria, verification path, and a copyable prompt. It proposes only: it does not enqueue tasks, approve work, merge PRs, deploy, edit GitHub, or mutate any external system.",
+  {
+    limit: z.number().int().min(1).max(8).default(3)
+  },
+  async ({ limit }) => {
+    return jsonContent(getHermesBacklogPlan({ limit }));
+  }
+);
+
+server.tool(
   "averray_invoke_agent_task",
   "Stable agent-to-agent hook for trusted deploy scripts, backend agents, Codex, and other operator agents. Runs a named safe operator command, the full read-only testbed E2E suite, one testbed testcase by ID, a post-deploy verification workflow, a read-only PR code-review verifier, or a PR handoff workflow that reviews GitHub PR metadata/checks/files and then runs requested tests with requester/correlation metadata. Uses structured operator/MCP workflows instead of free-form Hermes prompts. Fails closed for unknown commands, live mutation cases, local checkpoint writes, and PRs that are not merge-ready unless the caller explicitly opts into that class of action. PR handoff and PR code review only recommend merge state; they never merge. If GITHUB_PR_HANDOFF_COMMENTS_ENABLED=1, PR handoff may upsert one idempotent GitHub verdict comment.",
   {
@@ -369,7 +381,7 @@ server.tool(
 
 server.tool(
   "averray_handle_operator_command",
-  "Direct router for trusted Slack/operator/command-center messages. Use this for short commands like 'what can you do for us', 'project memory', 'known projects', 'how do we deploy averray-agent/agent', 'codex handoff protocol', 'what should Codex do when Hermes blocks', 'runbook for deploy averray-agent/agent', 'merge runbook for averray-agent/agent', 'secret rotation runbook', 'admin readiness', 'admin proposal', 'propose merge for averray-agent/agent#123', 'propose deploy for averray-agent/agent sha abc1234', 'business ledger', 'ops health', 'github status', 'github steward', 'merge steward', 'github brief', 'daily github brief', 'what changed since last time', 'github open prs', 'github ci failures', 'testbed agent mission', 'agent browser mission https://testbed.example/app goal: complete onboarding', 'testbed e2e suite', 'platform e2e suite', 'run testbed e2e read-only', 'handoff monitor', 'what is Hermes doing', 'daily operator brief', 'find safe work', 'operator status', 'operator status details', 'run one wikipedia citation repair if safe', and 'status last wikipedia citation repair' instead of sending them through a free-form Hermes prompt. Recognized repair run commands call averray_run_wikipedia_citation_repair directly; recognized agent mission commands call averray_testbed_agent_mission directly; recognized read-only E2E run commands call averray_run_testbed_e2e_read_only directly. Recognized status/help/brief/work-discovery/usefulness/project-memory/project-runbook/codex-handoff-protocol/admin-readiness/admin-proposal/ledger/health/github/testbed/handoff-monitor commands are read-only against external systems except GitHub brief, which persists a local checkpoint timestamp. Human surfaces may compact identifiers by default; add 'details' for full audit identifiers.",
+  "Direct router for trusted Slack/operator/command-center messages. Use this for short commands like 'what can you do for us', 'hermes backlog', 'what should Hermes build next', 'project memory', 'known projects', 'how do we deploy averray-agent/agent', 'codex handoff protocol', 'what should Codex do when Hermes blocks', 'runbook for deploy averray-agent/agent', 'merge runbook for averray-agent/agent', 'secret rotation runbook', 'admin readiness', 'admin proposal', 'propose merge for averray-agent/agent#123', 'propose deploy for averray-agent/agent sha abc1234', 'business ledger', 'ops health', 'github status', 'github steward', 'merge steward', 'github brief', 'daily github brief', 'what changed since last time', 'github open prs', 'github ci failures', 'testbed agent mission', 'agent browser mission https://testbed.example/app goal: complete onboarding', 'testbed e2e suite', 'platform e2e suite', 'run testbed e2e read-only', 'handoff monitor', 'what is Hermes doing', 'daily operator brief', 'find safe work', 'operator status', 'operator status details', 'run one wikipedia citation repair if safe', and 'status last wikipedia citation repair' instead of sending them through a free-form Hermes prompt. Recognized repair run commands call averray_run_wikipedia_citation_repair directly; recognized agent mission commands call averray_testbed_agent_mission directly; recognized read-only E2E run commands call averray_run_testbed_e2e_read_only directly. Recognized status/help/brief/work-discovery/usefulness/backlog/project-memory/project-runbook/codex-handoff-protocol/admin-readiness/admin-proposal/ledger/health/github/testbed/handoff-monitor commands are read-only against external systems except GitHub brief, which persists a local checkpoint timestamp. Human surfaces may compact identifiers by default; add 'details' for full audit identifiers.",
   {
     text: z.string().min(1),
     source: z.enum(["slack", "operator", "command_center", "hermes", "agent"]).default("operator"),

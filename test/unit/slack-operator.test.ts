@@ -346,6 +346,39 @@ describe("slack operator bridge", () => {
     expect(text).toContain("GitHub PR/issue digest");
   });
 
+  it("formats Hermes backlog replies", () => {
+    const text = formatOperatorResultForSlack({
+      handled: true,
+      kind: "hermes_backlog_plan",
+      plan: {
+        headline: "Hermes can propose the next roadmap-backed work without changing authority.",
+        source: { roadmap: "docs/HERMES_ROADMAP.md" },
+        cadence: { idleEligible: true },
+        boardGate: { status: "quiet", reason: "No live cards." },
+        safety: { proposesOnly: true, autoApprovalUnchanged: true },
+        items: [
+          {
+            id: "C1",
+            title: "Cross-agent review by default",
+            owner: "claude",
+            riskTier: "medium",
+            score: 92,
+            scoreSignals: ["C4 inter-agent chat is shipped"],
+            verificationPath: ["Run one synthetic PR"],
+          },
+        ],
+        nextOperatorStep: "Pick one item and approve only when you want an agent to start.",
+      },
+    });
+
+    expect(text).toContain("*Hermes backlog plan*");
+    expect(text).toContain("board: `quiet`");
+    expect(text).toContain("`C1` Cross-agent review by default");
+    expect(text).toContain("owner `claude`");
+    expect(text).toContain("auto-approval unchanged: `true`");
+    expect(text).toContain("docs/HERMES_ROADMAP.md");
+  });
+
   it("formats project memory replies", () => {
     const list = formatOperatorResultForSlack({
       handled: true,

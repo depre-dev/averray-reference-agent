@@ -60,6 +60,7 @@ function isAllowedMonitorCommand(text: string): boolean {
     /^(handoff monitor|agent handoff monitor|hermes handoff monitor|hermes monitor|what is hermes doing|current handoffs|active handoffs|handoff status)( details?| full| audit)?$/.test(text)
     || /^(github status|github open prs|github ci failures|github issue digest|merge steward|take care of open prs)( details?| full| audit)?$/.test(text)
     || /^(operator status|ops health|business ledger|daily operator brief|find safe work|admin readiness|project memory|known projects|codex handoff protocol)( details?| full| audit)?$/.test(text)
+    || /^(hermes backlog|backlog plan|roadmap backlog|roadmap plan|hermes roadmap|hermes roadmap plan|what should hermes build next|what should we build next|plan next hermes work|next hermes work)( details?| full| audit)?$/.test(text)
     || /^what (can|should) (i|we) do next( details?| full| audit)?$/.test(text)
     || /^what is happening now( details?| full| audit)?$/.test(text)
     || /^what is (codex|hermes) doing( right now)?( details?| full| audit)?$/.test(text)
