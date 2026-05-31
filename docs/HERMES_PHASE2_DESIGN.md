@@ -1,6 +1,6 @@
 # Hermes Orchestration — Phase 2 Design (Intelligence + Trust)
 
-- **Status:** Phase-2 implementation has started. A1 now has a read-only scorecard spine/API/MCP slice in review; A2/A3 and D1-D3 remain design-level.
+- **Status:** Phase-2 implementation has started. A1 now has a read-only scorecard spine/API/MCP slice in review; A2 learned routing is in review; A3 and D1-D3 remain design-level.
 - **Date:** 2026-05-29
 - **Companions:** [`HERMES_MULTI_AGENT_ORCHESTRATION_PLAN.md`](./HERMES_MULTI_AGENT_ORCHESTRATION_PLAN.md), [`HERMES_INTEGRATION_MAP.md`](./HERMES_INTEGRATION_MAP.md), [`HERMES_ORCHESTRATION_DESIGN.md`](./HERMES_ORCHESTRATION_DESIGN.md) (the core P1–P5).
 - **Position:** **Phase 2.** Builds on the core — it consumes agent attribution (P1), dispatch + the autonomy mode (P3/P4), and the handoff-event log. Do not start until the core ships.
@@ -57,6 +57,8 @@ Stats fully drive routing for non-high-risk surfaces — with safeguards so "dat
 - **Always explained:** every routing decision carries its rationale ("Claude — 92% merge on UI vs Codex 70%"), recorded in D2 and shown in the rail.
 - Coheres with autopilot: autopilot only auto-approves non-high-risk anyway, so data-driven routing of non-high-risk and autopilot auto-approval line up cleanly.
 
+Implementation note: A2 is wired only as the default agent choice for proposed tasks with no explicit agent. It reads the A1 scorecard defensively, ignores `not_recorded` signals as neutral, keeps high-risk routing rule-bound to Codex, and leaves the operator approval gate unchanged.
+
 ### A3 — Cost  ·  later
 Visibility first (cost is on the scorecard from A1). Cost-as-a-routing-factor and a $-based dispatch budget come once throughput data is meaningful — don't optimize cost before you can measure value.
 
@@ -104,4 +106,4 @@ All sits *after* the core P1–P4. Each ships as a narrow PR per [AGENTS.md](../
 
 ---
 
-*End of Phase 2 design. A1 read-only scorecard implementation has started; acting layers remain design-level until their guardrails are built.*
+*End of Phase 2 design. A1 read-only scorecard implementation has started; A2 learned routing is in review with guardrails; remaining acting layers stay design-level until their guardrails are built.*

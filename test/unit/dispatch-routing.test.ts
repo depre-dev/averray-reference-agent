@@ -84,6 +84,7 @@ function baseDeps(proposeTaskFn: (t: ProposedAgentTask) => Promise<{ id?: string
     dispatchPolicyConfig: ALLOWED,
     listQueuedTasksFn: async () => [],
     proposeTaskFn,
+    agentScorecardFn: async () => ({ kind: "averray_agent_scorecard", agents: [] }),
     now: new Date("2026-05-31T12:00:00Z"),
   };
 }
@@ -109,6 +110,26 @@ describe("enqueue_agent_task — routing as an overridable default", () => {
     expect(result.result?.agentExplicit).toBe(false);
   });
 
+  it("uses A2 scorecard data as the low-risk default when enough samples exist", async () => {
+    const proposeTaskFn = vi.fn(async () => ({ id: "t1b" }));
+    await invokeAgentTask(enqueue(), {
+      ...baseDeps(proposeTaskFn),
+      learnedRoutingConfig: { minSamples: 5, explorationRate: 0 },
+      agentScorecardFn: async () => ({
+        kind: "averray_agent_scorecard",
+        agents: [
+          { agent: "codex", surfaces: [{ surface: "frontend", count: 10, ready: 9, blocked: 0 }] },
+          { agent: "claude", surfaces: [{ surface: "frontend", count: 10, ready: 5, blocked: 2 }] },
+        ],
+      }),
+    });
+    const task = proposeTaskFn.mock.calls[0]![0];
+    expect(task.agent).toBe("codex");
+    expect(task.riskTier).toBe("low");
+    expect(task.routingReason).toMatch(/A2 learned routing/);
+    expect(task.routingReason).toMatch(/codex 90% ready/);
+  });
+
   it("high-risk surface with no agent → codex/high persisted", async () => {
     const proposeTaskFn = vi.fn(async () => ({ id: "t2" }));
     await invokeAgentTask(enqueue({ prompt: "update the escrow settlement contract" }), baseDeps(proposeTaskFn));
@@ -128,6 +149,25 @@ describe("enqueue_agent_task — routing as an overridable default", () => {
     expect(task.agent).toBe("claude"); // override wins
     expect(task.riskTier).toBe("high"); // tier never under-classified
     expect(result.result?.agentExplicit).toBe(true);
+  });
+
+  it("explicit agent still wins even when A2 would pick another low-risk agent", async () => {
+    const proposeTaskFn = vi.fn(async () => ({ id: "t3b" }));
+    await invokeAgentTask(enqueue({ agent: "claude" }), {
+      ...baseDeps(proposeTaskFn),
+      learnedRoutingConfig: { minSamples: 5, explorationRate: 0 },
+      agentScorecardFn: async () => ({
+        kind: "averray_agent_scorecard",
+        agents: [
+          { agent: "codex", surfaces: [{ surface: "frontend", count: 10, ready: 10, blocked: 0 }] },
+          { agent: "claude", surfaces: [{ surface: "frontend", count: 10, ready: 1, blocked: 5 }] },
+        ],
+      }),
+    });
+    const task = proposeTaskFn.mock.calls[0]![0];
+    expect(task.agent).toBe("claude");
+    expect(task.routingReason).toMatch(/UI\/frontend/);
+    expect(task.routingReason).not.toMatch(/A2 learned routing/);
   });
 
   it("persists riskTier + routingReason on the proposed task (PR3 reads the tier)", async () => {
