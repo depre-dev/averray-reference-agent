@@ -15,6 +15,7 @@ import {
   recordReviewPanelRequests,
   recordReviewResponse,
   recordReviewRequest,
+  recordReviewResponse,
   synthesizeHermesReplyFor,
 } from "../../services/slack-operator/src/monitor-collab.js";
 import { listCodexTasks } from "../../services/slack-operator/src/codex-task-queue.js";
@@ -361,6 +362,139 @@ describe("monitor review requests", () => {
     ]);
   });
 
+  it("records panel verdicts without escalating while the panel is incomplete", () => {
+    const panel = recordReviewPanelRequests(
+      {
+        relatedPr: { repo: "depre-dev/averray-reference-agent", number: 304 },
+        requestedBy: "hermes",
+        riskTier: "high",
+        builder: "codex",
+        reason: "High-risk tester mission gate touched deploy-ops.",
+      },
+      NOW
+    );
+
+    const result = recordReviewResponse(
+      {
+        panelId: panel.panelId,
+        reviewer: "hermes",
+        verdict: "pass",
+        reasoning: "Hermes sees the gate as advisory-only.",
+      },
+      NOW + 1
+    );
+
+    expect(result.reviewRequest).toMatchObject({
+      reviewer: "hermes",
+      status: "responded",
+      response: {
+        verdict: "pass",
+        reasoning: "Hermes sees the gate as advisory-only.",
+      },
+    });
+    expect(result.panelEvaluation).toMatchObject({
+      agreement: "pending",
+      panelVerdict: "pending",
+      escalate: false,
+    });
+  });
+
+  it("escalates high-risk panel disagreement as action-needed without creating tasks", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "review-panel-task-queue-"));
+    const queuePath = join(dir, "tasks.json");
+    try {
+      const panel = recordReviewPanelRequests(
+        {
+          relatedPr: { repo: "depre-dev/averray-reference-agent", number: 304 },
+          requestedBy: "hermes",
+          riskTier: "high",
+          builder: "codex",
+          reason: "High-risk tester mission gate touched deploy-ops.",
+        },
+        NOW
+      );
+
+      recordReviewResponse({
+        panelId: panel.panelId,
+        reviewer: "hermes",
+        verdict: "pass",
+        reasoning: "Hermes sees the gate as advisory-only.",
+      }, NOW + 1);
+      recordReviewResponse({
+        panelId: panel.panelId,
+        reviewer: "codex",
+        verdict: "pass",
+        reasoning: "Codex confirms no merge authority changed.",
+      }, NOW + 2);
+      const final = recordReviewResponse({
+        panelId: panel.panelId,
+        reviewer: "claude",
+        verdict: "concern",
+        reasoning: "Claude wants operator review before this moves forward.",
+      }, NOW + 3, { boardUrl: "https://monitor.example/monitor" });
+
+      expect(final.panelEvaluation).toMatchObject({
+        agreement: "majority",
+        panelVerdict: "pass",
+        escalate: true,
+        alert: {
+          boardUrl: "https://monitor.example/monitor",
+        },
+      });
+      expect(final.panelEvaluation?.alert?.text).toContain("Claude: concern");
+      expect(listCollaborationMessages({ limit: 10 }, NOW + 10)).toContainEqual(expect.objectContaining({
+        author: "hermes",
+        addressedTo: "operator",
+        kind: "request_help",
+        text: expect.stringContaining("Advisory only"),
+      }));
+      await expect(listCodexTasks({ path: queuePath })).resolves.toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("escalates any blocking panel verdict with every reviewer verdict attached", () => {
+    const panel = recordReviewPanelRequests(
+      {
+        relatedPr: { repo: "depre-dev/averray-reference-agent", number: 305 },
+        requestedBy: "hermes",
+        riskTier: "high",
+        builder: "claude",
+        reason: "High-risk chain-settlement behavior changed.",
+      },
+      NOW
+    );
+
+    recordReviewResponse({
+      panelId: panel.panelId,
+      reviewer: "hermes",
+      verdict: "pass",
+      reasoning: "Hermes confirms this is only a review record.",
+    }, NOW + 1);
+    recordReviewResponse({
+      panelId: panel.panelId,
+      reviewer: "codex",
+      verdict: "block",
+      reasoning: "Codex blocks until operator checks the chain-surface reasoning.",
+    }, NOW + 2);
+    const final = recordReviewResponse({
+      panelId: panel.panelId,
+      reviewer: "claude",
+      verdict: "concern",
+      reasoning: "Claude flags migration rollback ambiguity.",
+    }, NOW + 3);
+
+    expect(final.panelEvaluation).toMatchObject({
+      agreement: "blocked",
+      panelVerdict: "block",
+      escalate: true,
+    });
+    expect(final.panelEvaluation?.alert?.text).toContain("Hermes: pass");
+    expect(final.panelEvaluation?.alert?.text).toContain("Codex: block");
+    expect(final.panelEvaluation?.alert?.text).toContain("Claude: concern");
+  });
+
   it("keeps non-high-risk review panels on the single C1 cross-agent path", () => {
     const panel = recordReviewPanelRequests(
       {
@@ -424,9 +558,10 @@ describe("monitor review requests", () => {
       });
       expect(listReviewRequests({ status: "responded" })).toHaveLength(1);
       expect(listCollaborationMessages({ limit: 1 }, NOW + 2_000)[0]).toMatchObject({
-        author: "codex",
+        author: "hermes",
         addressedTo: "operator",
-        text: expect.stringContaining("block"),
+        kind: "request_help",
+        text: expect.stringContaining("Advisory only"),
       });
       await expect(listCodexTasks({ path: queuePath })).resolves.toEqual([]);
     } finally {
