@@ -53,6 +53,25 @@ describe("Card — type coverage", () => {
     expect(container.querySelector(".hm-checks-bar")).toBeNull();
   });
 
+  test("card shows a small cross-agent review request indicator", () => {
+    const card: BoardCard = {
+      ...fixture("agent #547"),
+      reviewRequests: [{
+        id: "review-1",
+        requestedBy: "hermes",
+        reviewer: "claude",
+        reason: "Second-agent review before this moves forward.",
+        status: "requested",
+        createdAt: "2026-05-31T12:00:00.000Z",
+        updatedAt: "2026-05-31T12:00:00.000Z",
+      }],
+    };
+    const { container } = render(<Card card={card} />);
+    expect(within(container).getByText("Review requested")).toBeTruthy();
+    expect(within(container).getByText("Claude")).toBeTruthy();
+    expect(container.querySelector(".hm-review-request")).toBeTruthy();
+  });
+
   test("draft PR shows the draft pill", () => {
     const { container } = render(<Card card={fixture("agent #550")} />);
     expect(within(container).getByText("draft")).toBeTruthy();

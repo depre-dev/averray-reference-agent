@@ -132,6 +132,10 @@ TypeScript monorepo: npm workspaces (`packages/*`, `services/*`), Node ≥ 22, E
   redacts command output, and **opens a PR but never merges**. The Claude
   worker is greenfield (creates the branch + opens the PR); the Codex worker
   iterates an existing PR.
+- **Cross-agent review requests are advisory records.** Hermes, the operator,
+  Codex, or Claude may request a second-agent review on a card, but the request
+  only records/displays coordination context; it does **not** enqueue a task,
+  auto-run a reviewer, approve dispatch, merge, or deploy.
 
 ---
 

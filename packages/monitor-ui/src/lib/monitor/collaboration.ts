@@ -16,6 +16,10 @@ export interface CollaborationRelatedPr {
   number: number;
 }
 
+export interface CollaborationRelatedMission {
+  id: string;
+}
+
 export interface CollaborationMessage {
   id: string;
   ts: number;
@@ -25,6 +29,19 @@ export interface CollaborationMessage {
   addressedTo: CollaborationTarget;
   relatedPr?: CollaborationRelatedPr;
   relatedCorrelationId?: string;
+}
+
+export interface ReviewRequest {
+  id: string;
+  relatedPr?: CollaborationRelatedPr;
+  relatedMission?: CollaborationRelatedMission;
+  correlationId?: string;
+  requestedBy: Exclude<CollaborationAuthor, "system">;
+  reviewer: Exclude<CollaborationTarget, "everyone">;
+  reason: string;
+  status: "requested" | "responded" | "cancelled";
+  createdAt: string;
+  updatedAt: string;
 }
 
 /** Display name for a turn's author (operator → "Pascal", else the role). */

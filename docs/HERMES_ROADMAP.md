@@ -38,7 +38,7 @@
 | D4 | Off-device alert bridge (Slack now → push later; action-needed 0→≥1; quiet-hours/mute) — **O4 prerequisite** | ✅ done (#279) |
 | B1 | Backlog generation (roadmap auto-flow; net-new escalates) | design done |
 | B2 | Self-healing (auto-fix non-high-risk; rollback human) | design done |
-| C1 | Cross-agent review (default) | design done |
+| C1 | Cross-agent review (default) | 🟡 in build — first slice records/displays review requests only; no auto-run or authority change |
 | C2 | Reviewer panel (high-risk) | design done |
 | C3 | Specialist agents (test-writer/security/docs) | design done |
 | C4 | Inter-agent chat | ✅ done (#291) — Claude author/target + card-scoped agent messages v1 |

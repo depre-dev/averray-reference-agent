@@ -109,6 +109,16 @@ export interface CardRiskSignal {
   message: string;
 }
 
+export interface CardReviewRequest {
+  id: string;
+  requestedBy: "hermes" | "operator" | "codex" | "claude";
+  reviewer: "codex" | "claude" | "hermes" | "operator";
+  reason: string;
+  status: "requested" | "responded" | "cancelled";
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ── Mission report (testbed browser missions) ───────────────────────
 // Mirrors the UI MissionReport. The optional numeric fields (runs,
 // latency, the 0–10 scores) are NOT carried by the agent's structured
@@ -165,6 +175,8 @@ export interface BoardCard {
   archiveHint?: boolean;
   /** Free-form "next action" copy carried from the classifier. */
   next?: string;
+  /** Stable correlation id for non-PR cards (mission/task/deploy), when present. */
+  correlationId?: string;
   /** Hermes verdict / reasoning carried from the classifier. */
   verdict?: string;
 
@@ -207,6 +219,8 @@ export interface BoardCard {
   mission?: CardMissionReport;
   /** D2: latest durable explanation associated with this card. */
   decisionRecord?: HermesDecisionRecord;
+  /** C1: active cross-agent review requests scoped to this card. */
+  reviewRequests?: CardReviewRequest[];
 }
 
 export interface BoardSnapshotV2 {
@@ -425,6 +439,7 @@ export function toBoardCard(item: HermesBoardCardSnapshot): BoardCard {
   if (item.next) card.next = item.next;
   if (item.verdict) card.verdict = item.verdict;
   if (item.headBranch) card.branch = item.headBranch;
+  if (item.correlationId) card.correlationId = item.correlationId;
 
   return card;
 }
@@ -640,6 +655,71 @@ export function indexTestbedMissions(rawSnapshot: unknown): Map<string, Record<s
     if (id && run && !map.has(id)) map.set(id, run);
   }
   return map;
+}
+
+function reviewRequestsFromSnapshot(rawSnapshot: unknown): CardReviewRequestWithScope[] {
+  const root = asRecord(rawSnapshot);
+  const requests: CardReviewRequestWithScope[] = [];
+  for (const entry of asArray(root?.reviewRequests)) {
+    const request = asRecord(entry);
+    if (!request) continue;
+    const id = asString(request.id);
+    const requestedBy = asReviewActor(request.requestedBy);
+    const reviewer = asReviewActor(request.reviewer);
+    const reason = asString(request.reason);
+    const status = asReviewStatus(request.status);
+    const createdAt = asString(request.createdAt);
+    const updatedAt = asString(request.updatedAt);
+    if (!id || !requestedBy || !reviewer || !reason || !status || !createdAt || !updatedAt) continue;
+    const relatedPr = asRecord(request.relatedPr);
+    const relatedMission = asRecord(request.relatedMission);
+    requests.push({
+      id,
+      requestedBy,
+      reviewer,
+      reason,
+      status,
+      createdAt,
+      updatedAt,
+      relatedPrKey: prKey(asString(relatedPr?.repo), asFiniteNumber(relatedPr?.number)),
+      relatedMissionId: asString(relatedMission?.id),
+      correlationId: asString(request.correlationId),
+    });
+  }
+  return requests;
+}
+
+interface CardReviewRequestWithScope extends CardReviewRequest {
+  relatedPrKey?: string;
+  relatedMissionId?: string;
+  correlationId?: string;
+}
+
+function asReviewActor(value: unknown): CardReviewRequest["requestedBy"] | undefined {
+  if (value === "hermes" || value === "operator" || value === "codex" || value === "claude") return value;
+  return undefined;
+}
+
+function asReviewStatus(value: unknown): CardReviewRequest["status"] | undefined {
+  if (value === "requested" || value === "responded" || value === "cancelled") return value;
+  return undefined;
+}
+
+function attachReviewRequests(
+  card: BoardCard,
+  requests: readonly CardReviewRequestWithScope[],
+  scope: { relatedPrKey?: string; relatedMissionId?: string; correlationId?: string }
+): BoardCard {
+  const active = requests
+    .filter((request) => request.status === "requested")
+    .filter((request) =>
+      (scope.relatedPrKey !== undefined && request.relatedPrKey === scope.relatedPrKey)
+      || (scope.relatedMissionId !== undefined && request.relatedMissionId === scope.relatedMissionId)
+      || (scope.correlationId !== undefined && request.correlationId === scope.correlationId)
+      || (request.correlationId !== undefined && request.correlationId === card.id)
+    )
+    .map(({ relatedPrKey, relatedMissionId, correlationId, ...request }) => request);
+  return active.length > 0 ? { ...card, reviewRequests: active } : card;
 }
 
 const EVIDENCE_KINDS = new Set(["screenshot", "trace", "console", "video"]);
@@ -898,6 +978,7 @@ export function synthesizeTaskCards(
       ...(riskTier ? { riskTier } : {}),
       ...(riskSignals.length > 0 ? { riskSignals } : {}),
       ...(prompt ? { prompt } : {}),
+      ...(asString(task.correlationId) ? { correlationId: asString(task.correlationId) } : {}),
       ...(decisionRecord ? { decisionRecord } : {}),
     };
     if (status === "running" && runner) {
@@ -1076,11 +1157,12 @@ export function buildV2BoardSnapshot(
   const summaryIndex = indexRawSummaries(rawSnapshot);
   const codexIndex = indexCodexTasks(rawSnapshot);
   const missionIndex = indexTestbedMissions(rawSnapshot);
+  const reviewRequests = reviewRequestsFromSnapshot(rawSnapshot);
   const runner = readRunner(rawSnapshot);
   const cards = items.map((item) => {
     const base = toBoardCard(item);
     const key = prKey(item.repo, item.number);
-    return enrichBoardCard(base, item, {
+    const enriched = enrichBoardCard(base, item, {
       summary: key ? summaryIndex.get(key) : undefined,
       codexTask: key ? codexIndex.get(key) : undefined,
       runner,
@@ -1089,11 +1171,20 @@ export function buildV2BoardSnapshot(
           ? missionIndex.get(item.correlationId)
           : undefined,
     });
+    return attachReviewRequests(enriched, reviewRequests, {
+      ...(key ? { relatedPrKey: key } : {}),
+      ...(base.type === "mission" && item.correlationId ? { relatedMissionId: item.correlationId } : {}),
+      ...(item.correlationId ? { correlationId: item.correlationId } : {}),
+    });
   });
   // Surface queued greenfield tasks the classifier can't (no PR ⇒ no event),
   // skipping any already represented (e.g. by a PR card).
   const existingIds = new Set(cards.map((c) => c.id));
-  const taskCards = synthesizeTaskCards(rawSnapshot, runner, { now: snapshotAt }).filter((c) => !existingIds.has(c.id));
+  const taskCards = synthesizeTaskCards(rawSnapshot, runner, { now: snapshotAt })
+    .filter((c) => !existingIds.has(c.id))
+    .map((card) => attachReviewRequests(card, reviewRequests, {
+      correlationId: card.correlationId ?? card.id,
+    }));
 
   return {
     cards: [...cards, ...taskCards],
