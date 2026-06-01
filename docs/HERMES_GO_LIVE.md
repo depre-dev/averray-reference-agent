@@ -114,6 +114,24 @@ Only after the burn-in holds up do you consider the autopilot flip — a **separ
 - **Stop a runner:** `$C stop claude-task-runner` (and/or `test-writer-task-runner`, `security-task-runner`, `docs-task-runner`).
 - **Autopilot off:** flip the board switch / clear the autonomy mode; it auto-expires at the stated time else a 4h cap regardless.
 
+### Relief valve — pause the self-healing loop
+
+If B2 is flooding the board with self-healing proposals for failing testbed missions (the cards
+keep regenerating even after you Dismiss them — Dismiss/Snooze are not yet persisted server-side),
+turn B2 **off** until the root cause is fixed. Existing proposals stay in the queue but no new
+ones are generated:
+
+```bash
+cd /srv/averray-reference-agent
+sed -i -E 's/^B2_SELF_HEALING_ENABLED=1/B2_SELF_HEALING_ENABLED=0/' .env.prod
+grep -n '^B2_SELF_HEALING_ENABLED=' .env.prod        # expect =0
+$C up -d --force-recreate slack-operator
+docker exec avg-slack-operator-1 sh -c 'printenv | grep B2_SELF_HEALING_ENABLED'   # expect =0
+```
+
+Re-arm later by setting it back to `1` and force-recreating. This is a clean toggle — B2 is
+proposes-only, so pausing it loses no committed work, only the (currently failing) proposal stream.
+
 ---
 
 ## Invariants (never violated by activation)
