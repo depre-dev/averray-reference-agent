@@ -183,6 +183,24 @@ export function basicAuthHeaderValue(credential: TestbedBasicAuthCredential): st
 }
 
 /**
+ * Build request headers for an allowlisted gated-host request. This mirrors
+ * `curl --user` by pre-sending the Basic header, but only for configured hosts.
+ * Returns undefined when the request URL is not allowlisted, so callers can
+ * continue the request unchanged and never leak credentials to third parties.
+ */
+export function basicAuthHeadersForUrl(
+  requestUrl: string,
+  basicAuth: TestbedBasicAuth | undefined,
+  existingHeaders: Record<string, string> = {},
+): Record<string, string> | undefined {
+  if (!basicAuthAppliesToUrl(requestUrl, basicAuth) || !basicAuth) return undefined;
+  const next = { ...existingHeaders };
+  delete next.Authorization;
+  next.authorization = basicAuthHeaderValue(basicAuth.credential);
+  return next;
+}
+
+/**
  * Playwright newContext() httpCredentials scoped to the gated origin, so the
  * credential is answered ONLY to a 401 from that origin and never leaks to
  * third-party origins the page might touch. Returns undefined when Basic Auth

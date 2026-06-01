@@ -11,6 +11,7 @@ import {
   cloudflareAccessHeaders,
   parseTestbedBasicAuth,
   basicAuthAppliesToUrl,
+  basicAuthHeadersForUrl,
   basicAuthHeaderValue,
   basicAuthHttpCredentialsForUrl,
   DEFAULT_AUTHED_ROUTES,
@@ -214,6 +215,15 @@ describe("Caddy HTTP Basic Auth (the real edge gate)", () => {
   it("builds a correct Basic header value", () => {
     expect(basicAuthHeaderValue({ username: "op", password: "pw" }))
       .toBe(`Basic ${Buffer.from("op:pw").toString("base64")}`);
+  });
+
+  it("prebuilds Basic headers only for allowlisted gated hosts", () => {
+    const basic = parseTestbedBasicAuth({ TESTBED_BASIC_AUTH_USER: "op", TESTBED_BASIC_AUTH_PASS: "pw" } as NodeJS.ProcessEnv);
+    expect(basicAuthHeadersForUrl("https://app.averray.com/", basic, { accept: "text/html" })).toEqual({
+      accept: "text/html",
+      authorization: `Basic ${Buffer.from("op:pw").toString("base64")}`,
+    });
+    expect(basicAuthHeadersForUrl("https://evil.example/", basic, { accept: "text/html" })).toBeUndefined();
   });
 
   it("builds Playwright httpCredentials scoped to the gated origin", () => {
