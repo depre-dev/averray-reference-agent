@@ -168,6 +168,13 @@ body { margin: 0; }
 .hm-kpi--ok .n    { background: var(--hm-sage-soft); color: var(--hm-sage-deep); }
 .hm-kpi--action   { background: var(--hm-amber-wash); border-color: var(--hm-amber-ring); color: var(--hm-amber-deep); }
 .hm-kpi--action .n{ background: var(--hm-amber-soft); color: var(--hm-amber-deep); }
+.hm-kpi--automation {
+  background: transparent;
+  border-color: var(--hm-line);
+  color: var(--hm-muted);
+  text-transform: none;
+  letter-spacing: 0.02em !important;
+}
 .hm-kpi--zero     { opacity: 0.55; }
 .hm-kpi .dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; opacity: 0.7; }
 

@@ -184,6 +184,22 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(getByText(/Live · 10:30:00/)).toBeTruthy();
   });
 
+  test("automation health stays a header gauge, not a decision-lane card", () => {
+    const board: MonitorBoard = {
+      at: "2026-06-01T12:00:00.000Z",
+      cards: [],
+      automationHealth: { selfHealingOpen: 2, dispatchUsedToday: 4, dispatchPerDayCap: 5 },
+    };
+    const { container, getByLabelText, getByText, queryByRole } = render(
+      <BoardView board={board} status="open" keyboard={false} />,
+    );
+
+    expect(getByText("Self-heal 2 open · dispatch 4/5")).toBeTruthy();
+    expect(getByLabelText("Automation health: Self-heal 2 open · dispatch 4/5")).toBeTruthy();
+    expect(queryByRole("article")).toBeNull();
+    expect(container.querySelector(".hm-lane--needs-attention .hm-card")).toBeNull();
+  });
+
   test("renders LLM usage when the monitor snapshot reports counters", () => {
     const board: MonitorBoard = {
       ...richBoard,

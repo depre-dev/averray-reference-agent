@@ -23,6 +23,7 @@ import {
   mapMissionReport,
   synthesizeTaskCards,
   taskHealthForBoard,
+  automationHealthForBoard,
 } from "../../services/slack-operator/src/monitor-v2.js";
 import type { BoardCard } from "../../services/slack-operator/src/monitor-v2.js";
 import type { HermesBoardCardSnapshot } from "../../services/slack-operator/src/monitor-hermes-voice.js";
@@ -1330,6 +1331,66 @@ describe("synthesizeTaskCards (O3 — surface queued tasks)", () => {
     const task = snap.cards.find((c) => c.id === "claude-task-x1");
     expect(task?.type).toBe("task");
     expect(task?.taskStatus).toBe("proposed");
+    expect(snap.automationHealth).toMatchObject({
+      selfHealingOpen: 0,
+      dispatchPerDayCap: 10,
+    });
+  });
+
+  it("derives a quiet automation-health gauge from real task queue capacity", () => {
+    const raw = {
+      codexTasks: {
+        items: [
+          {
+            id: "self-heal-open",
+            status: "proposed",
+            requester: "hermes-self-healing",
+            createdAt: "2026-06-01T09:00:00.000Z",
+          },
+          {
+            id: "self-heal-done",
+            status: "completed",
+            requester: "hermes-self-healing",
+            createdAt: "2026-06-01T08:00:00.000Z",
+          },
+          {
+            id: "hermes-proposed",
+            status: "proposed",
+            requester: "hermes",
+            createdAt: "2026-06-01T07:00:00.000Z",
+          },
+          {
+            id: "o5-approved",
+            status: "approved",
+            approvedBy: "o5-self-management",
+            createdAt: "2026-06-01T06:00:00.000Z",
+          },
+          {
+            id: "operator-task",
+            status: "proposed",
+            requester: "operator",
+            createdAt: "2026-06-01T05:00:00.000Z",
+          },
+          {
+            id: "old-hermes-task",
+            status: "proposed",
+            requester: "hermes",
+            createdAt: "2026-05-31T23:00:00.000Z",
+          },
+        ],
+      },
+    };
+
+    expect(automationHealthForBoard(raw, new Date("2026-06-01T12:00:00.000Z"), {
+      HERMES_DISPATCH_PER_DAY_MAX: "5",
+    })).toEqual({
+      selfHealingOpen: 1,
+      dispatchUsedToday: 4,
+      dispatchPerDayCap: 5,
+      quietSignalCount: 0,
+      selfHealingCapacitySignals: 0,
+      taskHealthCapacitySignals: 0,
+    });
   });
 
   it("dedupes self-healing handoff cards when an actionable task exists for the same correlation", () => {
@@ -1453,7 +1514,11 @@ describe("synthesizeTaskCards (O3 — surface queued tasks)", () => {
       lane: "needs-attention",
       type: "task",
     });
-    expect(snap.automationHealth).toBeUndefined();
+    expect(snap.automationHealth).toMatchObject({
+      quietSignalCount: 0,
+      selfHealingCapacitySignals: 0,
+      taskHealthCapacitySignals: 0,
+    });
   });
 
   it("collapses a failed testbed mission and its self-healing task into one actionable card", () => {

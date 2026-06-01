@@ -10,6 +10,7 @@
 // Visual contract is the bundle's `hm-top` block in styles/monitor.css.
 
 import type { KPICounts } from "../lib/monitor/board-state.js";
+import type { AutomationHealth } from "../lib/monitor/board-cache.js";
 
 export type TopStripProps = {
   /** Current KPI counts from `kpiCounts(cards)`. */
@@ -18,11 +19,13 @@ export type TopStripProps = {
   liveAt?: string;
   /** Deploy-health label shown in the rightmost KPI pill. Default "OK". */
   deployHealth?: "OK" | "DEGRADED" | "UNKNOWN";
+  /** Optional quiet gauge for Slack-only automation capacity signals. */
+  automationHealth?: AutomationHealth;
   /** Click handler for the refresh button (M5' wires the actual refresh). */
   onRefresh?: () => void;
 };
 
-export function TopStrip({ counts, liveAt, deployHealth = "OK", onRefresh }: TopStripProps) {
+export function TopStrip({ counts, liveAt, deployHealth = "OK", automationHealth, onRefresh }: TopStripProps) {
   return (
     <div className="hm-top" role="banner">
       <div className="hm-brand">
@@ -46,6 +49,7 @@ export function TopStrip({ counts, liveAt, deployHealth = "OK", onRefresh }: Top
           <span className="dot" aria-hidden />
           Deploy {deployHealth}
         </span>
+        {automationHealth ? <AutomationHealthPill health={automationHealth} /> : null}
       </div>
 
       <div className="hm-top-right">
@@ -64,6 +68,21 @@ export function TopStrip({ counts, liveAt, deployHealth = "OK", onRefresh }: Top
         </button>
       </div>
     </div>
+  );
+}
+
+function AutomationHealthPill({ health }: { health: AutomationHealth }) {
+  const quietSignals = Math.max(0, Math.floor(health.quietSignalCount ?? 0));
+  const text = [
+    `Self-heal ${health.selfHealingOpen} open`,
+    `dispatch ${health.dispatchUsedToday}/${health.dispatchPerDayCap}`,
+    quietSignals > 0 ? `quiet ${quietSignals}` : "",
+  ].filter(Boolean).join(" · ");
+  return (
+    <span className="hm-kpi hm-kpi--automation" aria-label={`Automation health: ${text}`}>
+      <span className="dot" aria-hidden />
+      {text}
+    </span>
   );
 }
 
