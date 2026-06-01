@@ -45,6 +45,8 @@ export interface SlackRoutineConfig {
     maxOpenFixTasks: number;
     /** Per-tick cap — stops one scan from proposing a burst. */
     maxProposalsPerTick: number;
+    /** Failed testbed missions older than this are treated as stale B2 inputs. */
+    testbedFailureMaxAgeHours: number;
   };
 }
 
@@ -106,6 +108,7 @@ export function parseSlackRoutineConfig(
       cooldownMs: Math.max(60_000, (positiveNumber(env.B2_SELF_HEALING_COOLDOWN_MINUTES) || 30) * 60_000),
       maxOpenFixTasks: Math.max(1, positiveNumber(env.B2_SELF_HEALING_MAX_OPEN_FIXES) || 3),
       maxProposalsPerTick: Math.max(1, positiveNumber(env.B2_SELF_HEALING_MAX_PROPOSALS_PER_TICK) || 1),
+      testbedFailureMaxAgeHours: Math.max(1, positiveNumber(env.B2_SELF_HEALING_TESTBED_FAILURE_MAX_AGE_HOURS) || 72),
     },
   };
 }

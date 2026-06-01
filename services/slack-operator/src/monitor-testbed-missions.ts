@@ -82,6 +82,11 @@ export interface ListTestbedMissionRunOptions {
   path?: string;
 }
 
+export interface SelfHealingTestbedMissionFilterOptions {
+  now?: Date;
+  maxAgeHours?: number;
+}
+
 export interface MissionReportInput {
   relatedCorrelationId?: string;
   text?: string;
@@ -241,6 +246,33 @@ export function listTestbedMissionRuns(options: ListTestbedMissionRunOptions = {
   return runs
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .slice(0, limit)
+    .map((run) => cloneRun(run));
+}
+
+export function failedTestbedMissionsForSelfHealing(
+  runs: readonly TestbedMissionRun[],
+  options: SelfHealingTestbedMissionFilterOptions = {},
+): TestbedMissionRun[] {
+  const nowMs = (options.now ?? new Date()).getTime();
+  const maxAgeHours = Math.max(1, options.maxAgeHours ?? 72);
+  const maxAgeMs = maxAgeHours * 60 * 60 * 1000;
+  const latestBySurface = new Map<string, TestbedMissionRun>();
+
+  for (const run of runs) {
+    const key = missionSelfHealingSurfaceKey(run);
+    const current = latestBySurface.get(key);
+    if (!current || missionUpdatedMs(run) > missionUpdatedMs(current)) {
+      latestBySurface.set(key, run);
+    }
+  }
+
+  return Array.from(latestBySurface.values())
+    .filter((run) => run.status === "failed")
+    .filter((run) => {
+      const failedMs = missionFailedMs(run);
+      return Number.isFinite(failedMs) && nowMs - failedMs <= maxAgeMs;
+    })
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .map((run) => cloneRun(run));
 }
 
@@ -801,6 +833,27 @@ function missionStoreSeq(value: unknown, runs: TestbedMissionRun[]): number {
     const parsed = match ? Number(match[1]) : 0;
     return Number.isFinite(parsed) ? Math.max(max, parsed) : max;
   }, 0);
+}
+
+function missionSelfHealingSurfaceKey(run: TestbedMissionRun): string {
+  let key = run.targetUrl.trim().toLowerCase();
+  try {
+    const url = new URL(key);
+    key = `${url.host}${url.pathname}`.replace(/\/+$/, "");
+  } catch {
+    key = key.replace(/^https?:\/\//, "").split(/[?#]/)[0]!.replace(/\/+$/, "");
+  }
+  return key || "unknown";
+}
+
+function missionUpdatedMs(run: TestbedMissionRun): number {
+  const parsed = Date.parse(run.updatedAt);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function missionFailedMs(run: TestbedMissionRun): number {
+  const parsed = Date.parse(run.failedAt ?? run.updatedAt);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
 }
 
 function parseTestbedMissionMode(value: string | undefined): TestbedMissionMode | undefined {

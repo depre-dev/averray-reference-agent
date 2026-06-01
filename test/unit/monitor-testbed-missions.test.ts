@@ -3,6 +3,8 @@ import { describe, expect, it, beforeEach } from "vitest";
 import {
   __resetTestbedMissionRunsForTests,
   diagnoseTestbedMissionReportFromMessage,
+  failedTestbedMissionsForSelfHealing,
+  failTestbedMissionRun,
   listTestbedMissionRuns,
   recordTestbedMissionReportFromMessage,
   recordTestbedMissionRunFromOperatorResult,
@@ -483,6 +485,67 @@ describe("monitor testbed mission runs", () => {
     expect(coaching).toContain("Set confidence to a number from 0 to 1.");
     expect(coaching).toContain("Smallest next move");
     expect(coaching).toContain("do not ask Codex to change the product until the evidence is attached");
+  });
+
+  it("feeds B2 only the latest failed mission per target", () => {
+    const stale = recordTestbedMissionRunFromOperatorResult(
+      missionResult({ targetUrl: "https://testbed.example/app?run=old" }),
+      Date.parse("2026-05-22T10:00:00.000Z"),
+    )!;
+    failTestbedMissionRun(stale.id, {
+      now: new Date("2026-05-22T10:05:00.000Z"),
+      failureReason: "fetch failed",
+    });
+
+    const latestPass = recordTestbedMissionRunFromOperatorResult(
+      missionResult({ targetUrl: "https://testbed.example/app?run=new" }),
+      Date.parse("2026-05-22T11:00:00.000Z"),
+    )!;
+    recordTestbedMissionReportFromMessage(
+      {
+        relatedCorrelationId: latestPass.id,
+        text: JSON.stringify({
+          verdict: "pass",
+          confidence: 0.8,
+          stoppedBeforeMutation: true,
+          mutationBoundaryNotes: [],
+          completedPath: ["opened app"],
+          blockers: [],
+          evidence: ["200 OK"],
+          scores: { orientation: 5 },
+        }),
+      },
+      Date.parse("2026-05-22T11:05:00.000Z"),
+    );
+
+    expect(failedTestbedMissionsForSelfHealing(listTestbedMissionRuns(), {
+      now: new Date("2026-05-22T12:00:00.000Z"),
+    })).toEqual([]);
+  });
+
+  it("expires old failed missions from the B2 self-healing input", () => {
+    const old = recordTestbedMissionRunFromOperatorResult(
+      missionResult({ targetUrl: "https://testbed.example/old" }),
+      Date.parse("2026-05-22T10:00:00.000Z"),
+    )!;
+    failTestbedMissionRun(old.id, {
+      now: new Date("2026-05-22T10:05:00.000Z"),
+      failureReason: "pre-wiring runner failed",
+    });
+
+    const fresh = recordTestbedMissionRunFromOperatorResult(
+      missionResult({ targetUrl: "https://testbed.example/fresh" }),
+      Date.parse("2026-05-25T10:00:00.000Z"),
+    )!;
+    failTestbedMissionRun(fresh.id, {
+      now: new Date("2026-05-25T10:05:00.000Z"),
+      failureReason: "fresh product blocker",
+    });
+
+    expect(failedTestbedMissionsForSelfHealing(listTestbedMissionRuns(), {
+      now: new Date("2026-05-25T12:00:00.000Z"),
+      maxAgeHours: 24,
+    }).map((run) => run.id)).toEqual([fresh.id]);
   });
 });
 
