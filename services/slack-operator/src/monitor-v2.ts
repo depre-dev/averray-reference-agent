@@ -149,6 +149,18 @@ export interface CardReviewRequest {
   updatedAt: string;
 }
 
+export type CardDiscussionAuthor = "claude" | "codex" | "test-writer" | "security" | "docs" | "hermes";
+
+export interface CardDiscussionMessage {
+  id: string;
+  ts: number;
+  author: CardDiscussionAuthor;
+  kind: "chat" | "proposal" | "request_help" | "status";
+  text: string;
+  addressedTo: "everyone" | "claude" | "codex" | "test-writer" | "security" | "docs" | "hermes" | "operator";
+  hermesMode?: "live" | "templated";
+}
+
 export interface CardSourceFailure {
   code: string;
   source: "github" | "runner" | "deploy" | "codex";
@@ -262,6 +274,8 @@ export interface BoardCard {
   decisionRecord?: HermesDecisionRecord;
   /** C1: active cross-agent review requests scoped to this card. */
   reviewRequests?: CardReviewRequest[];
+  /** C4: real Hermes/agent discussion scoped to this card. */
+  discussion?: CardDiscussionMessage[];
 }
 
 export interface BoardSnapshotV2 {
@@ -919,6 +933,79 @@ function asReviewResponse(value: unknown): CardReviewRequest["response"] | undef
   return { verdict, reasoning, respondedAt };
 }
 
+interface CardDiscussionMessageWithScope extends CardDiscussionMessage {
+  relatedPrKey?: string;
+  correlationId?: string;
+}
+
+function discussionMessagesFromSnapshot(rawSnapshot: unknown): CardDiscussionMessageWithScope[] {
+  const root = asRecord(rawSnapshot);
+  const messages: CardDiscussionMessageWithScope[] = [];
+  for (const entry of asArray(root?.collaborationMessages)) {
+    const message = asRecord(entry);
+    if (!message) continue;
+    const id = asString(message.id);
+    const ts = asFiniteNumber(message.ts);
+    const author = asDiscussionAuthor(message.author);
+    const kind = asDiscussionKind(message.kind);
+    const text = asString(message.text);
+    const addressedTo = asDiscussionTarget(message.addressedTo);
+    if (!id || ts === undefined || !author || !kind || !text || !addressedTo) continue;
+    const relatedPr = asRecord(message.relatedPr);
+    const hermesMode = author === "hermes" ? asHermesMode(message.hermesMode) : undefined;
+    messages.push({
+      id,
+      ts,
+      author,
+      kind,
+      text,
+      addressedTo,
+      ...(hermesMode ? { hermesMode } : {}),
+      relatedPrKey: prKey(asString(relatedPr?.repo), asFiniteNumber(relatedPr?.number)),
+      correlationId: asString(message.relatedCorrelationId),
+    });
+  }
+  return messages;
+}
+
+function attachDiscussion(
+  card: BoardCard,
+  messages: readonly CardDiscussionMessageWithScope[],
+  scope: { relatedPrKey?: string; correlationId?: string }
+): BoardCard {
+  const scoped = messages
+    .filter((message) =>
+      (scope.relatedPrKey !== undefined && message.relatedPrKey === scope.relatedPrKey)
+      || (scope.correlationId !== undefined && message.correlationId === scope.correlationId)
+      || (message.correlationId !== undefined && message.correlationId === card.id)
+    )
+    .sort((a, b) => a.ts - b.ts)
+    .slice(-CARD_DISCUSSION_LIMIT)
+    .map(({ relatedPrKey, correlationId, ...message }) => message);
+  if (scoped.length === 0) return card;
+  return { ...card, discussion: scoped };
+}
+
+function asDiscussionAuthor(value: unknown): CardDiscussionAuthor | undefined {
+  if (value === "claude" || value === "codex" || value === "test-writer" || value === "security" || value === "docs" || value === "hermes") return value;
+  return undefined;
+}
+
+function asDiscussionKind(value: unknown): CardDiscussionMessage["kind"] | undefined {
+  if (value === "chat" || value === "proposal" || value === "request_help" || value === "status") return value;
+  return undefined;
+}
+
+function asDiscussionTarget(value: unknown): CardDiscussionMessage["addressedTo"] | undefined {
+  if (value === "everyone" || value === "claude" || value === "codex" || value === "test-writer" || value === "security" || value === "docs" || value === "hermes" || value === "operator") return value;
+  return undefined;
+}
+
+function asHermesMode(value: unknown): CardDiscussionMessage["hermesMode"] | undefined {
+  if (value === "live" || value === "templated") return value;
+  return undefined;
+}
+
 function attachReviewRequests(
   card: BoardCard,
   requests: readonly CardReviewRequestWithScope[],
@@ -1285,6 +1372,7 @@ const APPROVED_STALE_MINUTES = 30;
 const RUNNING_STALE_MINUTES = 20;
 const REPEATED_FAILURE_ATTEMPTS = 2;
 const AUTOMATION_TERMINAL_TASK_STATUSES = new Set(["completed", "failed", "cancelled"]);
+const CARD_DISCUSSION_LIMIT = 4;
 
 /**
  * Synthesize `codex-needed` cards for queued tasks the classifier won't
@@ -1565,6 +1653,7 @@ export function buildV2BoardSnapshot(
   const codexIndex = indexCodexTasks(rawSnapshot);
   const missionIndex = indexTestbedMissions(rawSnapshot);
   const reviewRequests = reviewRequestsFromSnapshot(rawSnapshot);
+  const discussionMessages = discussionMessagesFromSnapshot(rawSnapshot);
   const runner = readRunner(rawSnapshot);
   const quietSelfHealingCapacitySignals = countValue(classified?.counts?.selfHealingCapacitySignals);
   const quietTaskHealthCapacitySignals = countQuietTaskHealthCapacitySignals(rawSnapshot);
@@ -1580,9 +1669,13 @@ export function buildV2BoardSnapshot(
           ? missionIndex.get(item.correlationId)
           : undefined,
     });
-    return attachReviewRequests(enriched, reviewRequests, {
+    const withReviews = attachReviewRequests(enriched, reviewRequests, {
       ...(key ? { relatedPrKey: key } : {}),
       ...(base.type === "mission" && item.correlationId ? { relatedMissionId: item.correlationId } : {}),
+      ...(item.correlationId ? { correlationId: item.correlationId } : {}),
+    });
+    return attachDiscussion(withReviews, discussionMessages, {
+      ...(key ? { relatedPrKey: key } : {}),
       ...(item.correlationId ? { correlationId: item.correlationId } : {}),
     });
   });
@@ -1593,9 +1686,14 @@ export function buildV2BoardSnapshot(
   const existingIds = new Set(sourceCards.map((c) => c.id));
   const taskCards = synthesizeTaskCards(rawSnapshot, runner, { now: snapshotAt })
     .filter((c) => !existingIds.has(c.id))
-    .map((card) => attachReviewRequests(card, reviewRequests, {
-      correlationId: card.correlationId ?? card.id,
-    }));
+    .map((card) => {
+      const scope = { correlationId: card.correlationId ?? card.id };
+      return attachDiscussion(
+        attachReviewRequests(card, reviewRequests, scope),
+        discussionMessages,
+        scope,
+      );
+    });
   const actionableTaskCorrelationIds = new Set(
     taskCards.map((card) => card.correlationId).filter((value): value is string => Boolean(value)),
   );

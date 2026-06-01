@@ -95,6 +95,18 @@ export interface CardReviewRequest {
   updatedAt: string;
 }
 
+export type CardDiscussionAuthor = "claude" | "codex" | "test-writer" | "security" | "docs" | "hermes";
+
+export interface CardDiscussionMessage {
+  id: string;
+  ts: number;
+  author: CardDiscussionAuthor;
+  kind: "chat" | "proposal" | "request_help" | "status";
+  text: string;
+  addressedTo: "everyone" | "claude" | "codex" | "test-writer" | "security" | "docs" | "hermes" | "operator";
+  hermesMode?: "live" | "templated";
+}
+
 export interface CardSourceFailure {
   code: string;
   source: "github" | "runner" | "deploy" | "codex";
@@ -173,6 +185,8 @@ export interface CardBase {
   decisionRecord?: HermesDecisionRecord;
   /** C1: active cross-agent review requests scoped to this card. */
   reviewRequests?: CardReviewRequest[];
+  /** C4: real Hermes/agent discussion scoped to this card. */
+  discussion?: CardDiscussionMessage[];
   /** Source read / heartbeat failure behind a degraded card. */
   sourceFailure?: CardSourceFailure;
 }

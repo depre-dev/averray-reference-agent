@@ -782,6 +782,85 @@ describe("buildV2BoardSnapshot — enrichment integration", () => {
     ]);
   });
 
+  it("attaches real card-scoped Hermes/agent discussion and ignores operator/unrelated messages", () => {
+    const raw = {
+      active: [
+        {
+          title: "Allow operator override of agent claim-stake floor",
+          status: "needs_review",
+          intent: "operator_review",
+          ageLabel: "4m",
+          summary: {
+            pullRequest: { repo: "depre-dev/agent", number: 548, state: "open" },
+            currentPullRequest: { repo: "depre-dev/agent", number: 548, state: "open" },
+          },
+        },
+      ],
+      recent: [],
+      collaborationMessages: [
+        {
+          id: "operator-1",
+          ts: Date.parse("2026-06-01T10:00:00.000Z"),
+          author: "operator",
+          kind: "chat",
+          text: "what is happening?",
+          addressedTo: "hermes",
+          relatedPr: { repo: "depre-dev/agent", number: 548 },
+        },
+        {
+          id: "hermes-1",
+          ts: Date.parse("2026-06-01T10:01:00.000Z"),
+          author: "hermes",
+          kind: "status",
+          text: "Contract test X is red.",
+          addressedTo: "codex",
+          hermesMode: "live",
+          relatedPr: { repo: "depre-dev/agent", number: 548 },
+        },
+        {
+          id: "codex-1",
+          ts: Date.parse("2026-06-01T10:02:00.000Z"),
+          author: "codex",
+          kind: "chat",
+          text: "Fixing via Y.",
+          addressedTo: "hermes",
+          relatedPr: { repo: "depre-dev/agent", number: 548 },
+        },
+        {
+          id: "claude-unrelated",
+          ts: Date.parse("2026-06-01T10:03:00.000Z"),
+          author: "claude",
+          kind: "chat",
+          text: "Different card.",
+          addressedTo: "hermes",
+          relatedPr: { repo: "depre-dev/agent", number: 999 },
+        },
+      ],
+    };
+
+    const snap = buildV2BoardSnapshot(raw, { repo: "depre-dev/agent" });
+    const card = snap.cards.find((c) => c.id === "agent #548");
+    expect(card?.discussion).toEqual([
+      {
+        id: "hermes-1",
+        ts: Date.parse("2026-06-01T10:01:00.000Z"),
+        author: "hermes",
+        kind: "status",
+        text: "Contract test X is red.",
+        addressedTo: "codex",
+        hermesMode: "live",
+      },
+      {
+        id: "codex-1",
+        ts: Date.parse("2026-06-01T10:02:00.000Z"),
+        author: "codex",
+        kind: "chat",
+        text: "Fixing via Y.",
+        addressedTo: "hermes",
+      },
+    ]);
+  });
+
   it("promotes a blocked high-risk reviewer panel to needs-attention for the D4 bridge", () => {
     const raw = {
       active: [

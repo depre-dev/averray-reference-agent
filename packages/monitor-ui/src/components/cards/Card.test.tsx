@@ -94,6 +94,45 @@ describe("Card — type coverage", () => {
     expect(within(container).getByText("Hermes, Codex, Claude")).toBeTruthy();
   });
 
+  test("card shows real scoped Hermes/agent discussion inline", () => {
+    const card: BoardCard = {
+      ...fixture("agent #547"),
+      discussion: [
+        {
+          id: "hermes-1",
+          ts: Date.parse("2026-06-01T10:01:00.000Z"),
+          author: "hermes",
+          kind: "status",
+          text: "Contract test X is red.",
+          addressedTo: "codex",
+          hermesMode: "live",
+        },
+        {
+          id: "codex-1",
+          ts: Date.parse("2026-06-01T10:02:00.000Z"),
+          author: "codex",
+          kind: "chat",
+          text: "Fixing via Y.",
+          addressedTo: "hermes",
+        },
+      ],
+    };
+
+    const { container } = render(<Card card={card} />);
+    const discussion = container.querySelector(".hm-agent-discussion");
+    expect(discussion).toBeTruthy();
+    expect(within(discussion as HTMLElement).getByText("Agent discussion")).toBeTruthy();
+    expect(within(discussion as HTMLElement).getByText("Hermes (live)")).toBeTruthy();
+    expect(within(discussion as HTMLElement).getByText("Contract test X is red.")).toBeTruthy();
+    expect(within(discussion as HTMLElement).getByText("Codex")).toBeTruthy();
+    expect(within(discussion as HTMLElement).getByText("Fixing via Y.")).toBeTruthy();
+  });
+
+  test("card without discussion stays clean", () => {
+    const { container } = render(<Card card={fixture("agent #547")} />);
+    expect(container.querySelector(".hm-agent-discussion")).toBeNull();
+  });
+
   test("draft PR shows the draft pill", () => {
     const { container } = render(<Card card={fixture("agent #550")} />);
     expect(within(container).getByText("draft")).toBeTruthy();

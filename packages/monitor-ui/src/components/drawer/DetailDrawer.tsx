@@ -19,6 +19,7 @@ import type { BoardCard } from "../../lib/monitor/card-types.js";
 import { traverseDrawerCard } from "../../lib/monitor/drawer-routing.js";
 import { buildDrawerFooter, type DrawerActionHandlers, type DrawerFooterDeps } from "../../lib/monitor/drawer-footer.js";
 import { DRAWER_ACCENT, DrawerBody, drawerVariant } from "./DrawerBody.js";
+import { AgentDiscussion } from "../cards/AgentDiscussion.js";
 
 export interface DetailDrawerProps {
   card: BoardCard;
@@ -156,6 +157,7 @@ export function DetailDrawer({ card, cards, onClose, onNavigate, actions, footer
 
           <div className="hm-drawer-body">
             <DrawerBody card={card} variant={variant} />
+            <AgentDiscussion messages={card.discussion} />
           </div>
 
           <footer className="hm-drawer-foot">

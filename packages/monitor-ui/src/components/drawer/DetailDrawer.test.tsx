@@ -99,6 +99,48 @@ describe("DetailDrawer — variants", () => {
     expect(within(sendBack).getByText("B")).toBeTruthy();
   });
 
+  test("shows the scoped Hermes/agent discussion in the drawer when present", () => {
+    const card: BoardCard = {
+      ...fixture("agent #548"),
+      discussion: [
+        {
+          id: "hermes-1",
+          ts: Date.parse("2026-06-01T10:01:00.000Z"),
+          author: "hermes",
+          kind: "status",
+          text: "Contract test X is red.",
+          addressedTo: "codex",
+          hermesMode: "live",
+        },
+        {
+          id: "codex-1",
+          ts: Date.parse("2026-06-01T10:02:00.000Z"),
+          author: "codex",
+          kind: "chat",
+          text: "Fixing via Y.",
+          addressedTo: "hermes",
+        },
+      ],
+    };
+
+    const { getByRole } = render(
+      <DetailDrawer card={card} cards={[{ id: card.id }]} onClose={noop} onNavigate={noop} />,
+    );
+    const discussion = within(getByRole("dialog")).getByRole("region", { name: "Agent discussion" });
+    expect(within(discussion).getByText("Hermes (live)")).toBeTruthy();
+    expect(within(discussion).getByText("Contract test X is red.")).toBeTruthy();
+    expect(within(discussion).getByText("Codex")).toBeTruthy();
+    expect(within(discussion).getByText("Fixing via Y.")).toBeTruthy();
+  });
+
+  test("cards without discussion do not render an empty thread in the drawer", () => {
+    const card = fixture("agent #548");
+    const { queryByRole } = render(
+      <DetailDrawer card={card} cards={[{ id: card.id }]} onClose={noop} onNavigate={noop} />,
+    );
+    expect(queryByRole("region", { name: "Agent discussion" })).toBeNull();
+  });
+
   test("rich PR statuses: per-check breakdown, risk signals, and colored file diff render", () => {
     const card: BoardCard = {
       id: "agent #590",
