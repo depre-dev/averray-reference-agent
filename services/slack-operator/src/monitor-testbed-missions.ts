@@ -137,6 +137,7 @@ export interface TestbedMissionFixBrief {
 
 export type TestbedMissionSelfHealingReason =
   | "product_signal"
+  | "environment_or_auth_failure"
   | "runner_failed"
   | "invalid_report"
   | "missing_product_report";
@@ -712,6 +713,14 @@ export function testbedMissionSelfHealingDisposition(run: TestbedMissionRun): Te
     };
   }
 
+  if (testbedMissionEnvironmentOrAuthFailure(run, structuredReport)) {
+    return {
+      autoFixable: false,
+      reason: "environment_or_auth_failure",
+      summary: `Testbed mission ${run.id} failed on an environment/auth/runner boundary for ${run.targetUrl}: ${reason}`,
+    };
+  }
+
   const fixBrief = testbedMissionFixBrief(run);
   const fixPrompt = testbedMissionCodexFollowupPrompt(run);
   return {
@@ -723,6 +732,30 @@ export function testbedMissionSelfHealingDisposition(run: TestbedMissionRun): Te
     summary: `Testbed mission ${run.id} found a product blocker on ${run.targetUrl}: ${fixBrief.primaryBlocker}`,
     ...(fixPrompt ? { fixPrompt } : {}),
   };
+}
+
+function testbedMissionEnvironmentOrAuthFailure(
+  run: TestbedMissionRun,
+  report: TestbedMissionStructuredReport,
+): boolean {
+  const haystack = [
+    run.failureReason,
+    run.statusReason,
+    report.summary,
+    ...report.blockers,
+    ...report.confusingMoments,
+    ...report.recommendations,
+    ...report.evidence,
+    ...report.completedPath,
+  ].filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    .join("\n");
+
+  return [
+    /\b(?:http\s*)?(?:401|403)\b/i,
+    /unauthori[sz]ed|forbidden|access denied|authentication required|login required|sign[ -]?in required/i,
+    /cloudflare access|net::err_|err_name_not_resolved|econnrefused|connection refused/i,
+    /page load failed|navigation failed|browser context closed|target closed|timed out/i,
+  ].some((pattern) => pattern.test(haystack));
 }
 
 export function testbedMissionFixBrief(run: TestbedMissionRun): TestbedMissionFixBrief {
