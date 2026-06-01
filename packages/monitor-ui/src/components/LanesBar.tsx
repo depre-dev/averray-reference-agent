@@ -13,7 +13,7 @@
 // non-interactive. The tip is derived from the board mode.
 
 import type { Ref } from "react";
-import type { KPICounts, BoardMode } from "../lib/monitor/board-state.js";
+import type { KPICounts, BoardMode, BoardFilter } from "../lib/monitor/board-state.js";
 
 const TIPS: Record<BoardMode, string> = {
   action: "· focus on the lane that needs you",
@@ -30,17 +30,29 @@ export type LanesBarProps = {
   onSearchChange?: (value: string) => void;
   /** Ref to the search input so `/` can focus it (M10'). */
   searchInputRef?: Ref<HTMLInputElement>;
+  /** Active filter chip. Defaults to "all". */
+  activeFilter?: BoardFilter;
+  /** Filter change handler. When omitted the chips render count-only (read-only). */
+  onFilterChange?: (filter: BoardFilter) => void;
 };
 
-export function LanesBar({ counts, mode, searchValue = "", onSearchChange, searchInputRef }: LanesBarProps) {
+export function LanesBar({
+  counts,
+  mode,
+  searchValue = "",
+  onSearchChange,
+  searchInputRef,
+  activeFilter = "all",
+  onFilterChange,
+}: LanesBarProps) {
   const tip = TIPS[mode];
-  const filters: Array<[label: string, count: number]> = [
-    ["All", counts.total],
-    ["Blocked", counts.blocked],
-    ["Review", counts.review],
-    ["Ready", counts.queue],
-    ["Running", counts.checking],
-    ["Done", counts.done],
+  const filters: Array<[label: string, count: number, key: BoardFilter]> = [
+    ["All", counts.total, "all"],
+    ["Blocked", counts.blocked, "blocked"],
+    ["Review", counts.review, "review"],
+    ["Ready", counts.queue, "ready"],
+    ["Running", counts.checking, "running"],
+    ["Done", counts.done, "done"],
   ];
 
   return (
@@ -68,11 +80,26 @@ export function LanesBar({ counts, mode, searchValue = "", onSearchChange, searc
 
       <div className="hm-lanes-tools">
         <span className="hm-mono hm-muted">sorted by next-action urgency</span>
-        {filters.map(([label, n], i) => (
-          <span key={label} className={"hm-filter-chip " + (i === 0 ? "is-active" : "")} aria-disabled="true">
-            {label} <span className="ct">{n}</span>
-          </span>
-        ))}
+        {filters.map(([label, n, key]) => {
+          const active = activeFilter === key;
+          const className = "hm-filter-chip " + (active ? "is-active" : "");
+          // Interactive when a handler is wired; otherwise count-only (read-only).
+          return onFilterChange ? (
+            <button
+              key={label}
+              type="button"
+              className={className}
+              aria-pressed={active}
+              onClick={() => onFilterChange(key)}
+            >
+              {label} <span className="ct">{n}</span>
+            </button>
+          ) : (
+            <span key={label} className={className} aria-disabled="true">
+              {label} <span className="ct">{n}</span>
+            </span>
+          );
+        })}
       </div>
     </div>
   );

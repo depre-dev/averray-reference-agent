@@ -7,8 +7,35 @@
 // Per §5/§16 of docs/HERMES_MONITOR_REDESIGN_SPEC.md.
 
 import type { BoardCard, Lane } from "./card-types.js";
-import { groupByLane, laneCounts } from "./lane-rules.js";
+import { groupByLane, laneCounts, laneFor } from "./lane-rules.js";
 import { sortByUrgency } from "./urgency.js";
+
+/** The state a LanesBar filter chip narrows the board to. */
+export type BoardFilter = "all" | "blocked" | "review" | "ready" | "running" | "done";
+
+/**
+ * Whether a card belongs to a filter chip's state. Lane-based chips reuse the
+ * SAME lane derivation (`laneFor`) the chip COUNTS use, so the filtered view and
+ * the count on the chip always agree. "blocked" is the cross-lane stale/offline
+ * state (matching kpiCounts.blocked). "all" matches everything.
+ */
+export function matchesBoardFilter(card: BoardCard, filter: BoardFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "blocked") return card?.state === "failed-fetch" || card?.state === "source-offline";
+  const lane = laneFor(card);
+  switch (filter) {
+    case "review":
+      return lane === "operator-review";
+    case "ready":
+      return lane === "release-queue";
+    case "running":
+      return lane === "hermes-checking";
+    case "done":
+      return lane === "done";
+    default:
+      return true;
+  }
+}
 
 export interface KPICounts {
   action: number;

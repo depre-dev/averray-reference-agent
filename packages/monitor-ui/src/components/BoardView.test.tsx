@@ -266,3 +266,29 @@ describe("BoardView — degraded + transient states", () => {
     expect(container.querySelectorAll(".hm-lane").length).toBe(8);
   });
 });
+
+describe("BoardView — filter chips (G1)", () => {
+  test("clicking a filter chip narrows the visible board to that state", () => {
+    const { container } = render(<BoardView board={richBoard} status="open" />);
+    const view = within(container);
+    // Baseline: the action card is visible.
+    expect(view.getByText("Allow operator override of agent claim-stake floor")).toBeTruthy();
+
+    // Click the "Done" filter chip (a real button now).
+    const doneChip = Array.from(container.querySelectorAll(".hm-filter-chip"))
+      .find((c) => c.textContent?.includes("Done")) as HTMLElement;
+    expect(doneChip.tagName).toBe("BUTTON");
+    fireEvent.click(doneChip);
+
+    // The live action card is filtered out; done-lane (CLOSED) cards remain.
+    expect(view.queryByText("Allow operator override of agent claim-stake floor")).toBeNull();
+    expect(view.getAllByText("CLOSED").length).toBeGreaterThan(0);
+    expect(doneChip.getAttribute("aria-pressed")).toBe("true");
+
+    // Clicking "All" restores the full board.
+    const allChip = Array.from(container.querySelectorAll(".hm-filter-chip"))
+      .find((c) => c.textContent?.includes("All")) as HTMLElement;
+    fireEvent.click(allChip);
+    expect(view.getByText("Allow operator override of agent claim-stake floor")).toBeTruthy();
+  });
+});

@@ -18,7 +18,7 @@
 //   <KeyboardOverlay />          when ? is pressed
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { deriveBoardState, type BoardMode } from "../lib/monitor/board-state.js";
+import { deriveBoardState, matchesBoardFilter, type BoardMode, type BoardFilter } from "../lib/monitor/board-state.js";
 import type { LlmUsageAggregate, MonitorBoard } from "../lib/monitor/board-cache.js";
 import type { BacklogSuggestionsResponse } from "../lib/monitor/backlog-suggestions.js";
 import type { StreamStatus } from "../lib/monitor/live-stream.js";
@@ -165,6 +165,7 @@ export function BoardView({
 
   // ── view state ──────────────────────────────────────────────────
   const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<BoardFilter>("all");
   const [boardFocusId, setBoardFocusId] = useState<string | null>(null);
   const [overlayOpen, setOverlayOpen] = useState(false);
   const [askToken, setAskToken] = useState(0);
@@ -204,14 +205,27 @@ export function BoardView({
     // alwaysOpen is derived from the stable onCreateTask prop.
   }, [state.mode, state.grouped, onCreateTask]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Search filters what's shown + focusable (not the KPI counts).
+  // Search + filter chip narrow what's shown + focusable (not the KPI counts —
+  // the chip counts stay live off the whole board).
   const q = query.trim().toLowerCase();
   const displayGrouped = useMemo(() => {
-    if (!q) return state.grouped;
+    if (!q && filter === "all") return state.grouped;
     const out = {} as Record<LaneId, BoardCard[]>;
-    for (const lane of LANES) out[lane] = (state.grouped[lane] ?? []).filter((c) => matchesQuery(c, q));
+    for (const lane of LANES) {
+      out[lane] = (state.grouped[lane] ?? []).filter(
+        (c) => (!q || matchesQuery(c, q)) && matchesBoardFilter(c, filter),
+      );
+    }
     return out;
-  }, [state.grouped, q]);
+  }, [state.grouped, q, filter]);
+
+  // A non-"all" filter reveals every lane that has a match, regardless of the
+  // operator's manual collapse state, so chip results are never hidden. Clearing
+  // back to "all" restores the normal expansion.
+  const effectiveExpanded = useMemo<ReadonlySet<LaneId>>(() => {
+    if (filter === "all") return expanded;
+    return new Set(LANES.filter((lane) => (displayGrouped[lane]?.length ?? 0) > 0));
+  }, [filter, expanded, displayGrouped]);
 
   const orderedCards = useMemo<BoardCard[]>(
     () => LANES.flatMap((lane) => displayGrouped[lane] ?? []),
@@ -310,11 +324,13 @@ export function BoardView({
             searchValue={query}
             onSearchChange={setQuery}
             searchInputRef={searchInputRef}
+            activeFilter={filter}
+            onFilterChange={setFilter}
           />
           <LlmUsagePanel usage={board?.llmUsage} />
           <Board
             grouped={displayGrouped}
-            expanded={expanded}
+            expanded={effectiveExpanded}
             onToggleLane={onToggleLane}
             renderLaneHeader={
               onCreateTask
