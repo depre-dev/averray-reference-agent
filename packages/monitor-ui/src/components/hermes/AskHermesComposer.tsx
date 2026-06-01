@@ -19,8 +19,12 @@ export interface AskHermesComposerProps {
   onSpawnClaudeTask?: (repo: string, prompt: string) => void;
   /** Propose a task (/task <agent> [<repo>#<pr>] <prompt>). */
   onCreateTask?: (input: CreateTaskInput) => void;
-  /** Ask Hermes a free-form question. */
-  onAsk?: (text: string) => void;
+  /** Ask Hermes a free-form question, scoped to the focused card or the whole board. */
+  onAsk?: (text: string, opts?: { scope: "card" | "board" }) => void;
+  /** Prefill the composer with this text (e.g. a suggestion chip). */
+  prefill?: string;
+  /** Bump to (re)apply `prefill` into the input + focus it. */
+  prefillToken?: number;
   /** Mute action alerts until an absolute timestamp (/mute). */
   onMute?: (untilMs: number) => void;
   /** Clear the mute (/unmute). */
@@ -50,17 +54,34 @@ export function AskHermesComposer({
   onSetAutopilot,
   onSetSupervised,
   autonomyMode,
+  prefill,
+  prefillToken,
   focusedCardId,
   focusToken,
 }: AskHermesComposerProps) {
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Scope a question to the focused card or the whole board. When no card is
+  // focused there's nothing to scope to, so it's board-only.
+  const [scopeToCard, setScopeToCard] = useState(true);
+  const effectiveScope: "card" | "board" = focusedCardId && scopeToCard ? "card" : "board";
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // The board's `a` shortcut bumps focusToken to bring focus here.
   useEffect(() => {
     if (focusToken) inputRef.current?.focus();
   }, [focusToken]);
+
+  // A suggestion chip / prefill bumps prefillToken to drop its text in + focus.
+  useEffect(() => {
+    if (prefillToken) {
+      setValue(prefill ?? "");
+      setError(null);
+      inputRef.current?.focus();
+    }
+    // Only re-apply when the token changes (an explicit prefill action).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillToken]);
 
   const send = () => {
     const command = parseHermesInput(value);
@@ -128,7 +149,7 @@ export function AskHermesComposer({
         return;
       case "ask":
         if (onAsk) {
-          onAsk(command.text);
+          onAsk(command.text, { scope: effectiveScope });
           setValue("");
           setError(null);
         } else {
@@ -148,8 +169,25 @@ export function AskHermesComposer({
   return (
     <div className="hm-compose">
       <div className="hm-compose-toolbar">
-        <span className="hm-compose-chip is-on">to · operator</span>
-        <span className="hm-compose-chip">scope · {focusedCardId ?? "board"}</span>
+        {/* Honest recipient label: a question posts to the Hermes collaboration
+            channel as the operator. Targeting other agents isn't a wired action,
+            so this is informational, not a fake toggle. */}
+        <span className="hm-compose-chip is-on">to · Hermes</span>
+        {/* Scope toggle: actually controls whether a question is scoped to the
+            focused card or the whole board on send. Board-only with no card. */}
+        {focusedCardId ? (
+          <button
+            type="button"
+            className={"hm-compose-chip" + (scopeToCard ? " is-on" : "")}
+            aria-pressed={scopeToCard}
+            title={scopeToCard ? "Scoped to this card — click for the whole board" : "Whole board — click to scope to this card"}
+            onClick={() => setScopeToCard((s) => !s)}
+          >
+            scope · {scopeToCard ? focusedCardId : "board"}
+          </button>
+        ) : (
+          <span className="hm-compose-chip">scope · board</span>
+        )}
         {onSetAutopilot && onSetSupervised ? (
           <button
             type="button"

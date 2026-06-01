@@ -115,3 +115,32 @@ describe("CoPilotRail", () => {
     expect(onCardClick).toHaveBeenCalledWith("task-activity-1");
   });
 });
+
+describe("CoPilotRail — G3 suggestion → composer", () => {
+  test("'Use in composer' fills the Ask-Hermes input with the suggested prompt", () => {
+    const backlogSuggestions = {
+      generatedAt: "2026-06-01T00:00:00Z",
+      suggestions: [
+        {
+          id: "sug-1",
+          title: "Add a regression test for the claim flow",
+          reason: "the last mission flagged it",
+          suggestedOwner: "test-writer" as const,
+          riskTier: "low" as const,
+          related: { cardId: "agent #548" },
+          suggestedPrompt: "Write a vitest covering the claim-stake floor override",
+          confidence: 0.7,
+        },
+      ],
+    };
+    const { container, getByText } = render(
+      <CoPilotRail backlogSuggestions={backlogSuggestions} boardCards={[card548]} />,
+      { wrapper },
+    );
+    // Open the suggestions block, then click "Use in composer".
+    fireEvent.click(getByText(/Suggested follow-ups/));
+    fireEvent.click(getByText("Use in composer"));
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    expect(input.value).toBe("Write a vitest covering the claim-stake floor override");
+  });
+});

@@ -80,7 +80,8 @@ describe("AskHermesComposer", () => {
     const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
     type(input, "what's blocking #548?");
     fireEvent.click(getByRole("button", { name: /Send/ }));
-    expect(onAsk).toHaveBeenCalledWith("what's blocking #548?");
+    // No focused card → the question is board-scoped.
+    expect(onAsk).toHaveBeenCalledWith("what's blocking #548?", { scope: "board" });
     expect(input.value).toBe("");
   });
 
@@ -155,5 +156,40 @@ describe("AskHermesComposer", () => {
     fireEvent.click(getByRole("button", { name: /Send/ }));
     expect(onCreateTask).not.toHaveBeenCalled();
     expect(within(container).getByRole("alert").textContent).toMatch(/not a valid agent/i);
+  });
+});
+
+describe("AskHermesComposer — G3 compose chips + prefill", () => {
+  test("scope chip toggles the scope passed to onAsk", () => {
+    const onAsk = vi.fn();
+    const { container, getByRole, getByText } = render(
+      <AskHermesComposer onAsk={onAsk} focusedCardId="agent #548" />,
+    );
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    // Default: scoped to the focused card.
+    type(input, "why did this fail?");
+    fireEvent.click(getByRole("button", { name: /Send/ }));
+    expect(onAsk).toHaveBeenLastCalledWith("why did this fail?", { scope: "card" });
+    // Toggle the scope chip → whole board.
+    fireEvent.click(getByText(/^scope ·/).closest("button") as HTMLElement);
+    type(input, "board status?");
+    fireEvent.click(getByRole("button", { name: /Send/ }));
+    expect(onAsk).toHaveBeenLastCalledWith("board status?", { scope: "board" });
+  });
+
+  test("the 'to' chip is an honest recipient label, not a fake toggle", () => {
+    const { getByText } = render(<AskHermesComposer onAsk={vi.fn()} />);
+    const to = getByText("to · Hermes");
+    expect(to.tagName).toBe("SPAN"); // informational, not a button
+  });
+
+  test("prefill drops suggestion text into the composer when the token bumps", () => {
+    const { container, rerender } = render(
+      <AskHermesComposer onAsk={vi.fn()} prefill="" prefillToken={0} />,
+    );
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    expect(input.value).toBe("");
+    rerender(<AskHermesComposer onAsk={vi.fn()} prefill="Investigate the flaky test" prefillToken={1} />);
+    expect(input.value).toBe("Investigate the flaky test");
   });
 });

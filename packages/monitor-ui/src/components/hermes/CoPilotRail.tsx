@@ -73,6 +73,13 @@ export function CoPilotRail({
   const { messages, ask } = useCollaboration(collaboration ?? { enabled: false });
   const relatedPr = relatedPrForCard(focusedCard);
   const streamRef = useRef<HTMLDivElement>(null);
+  // Suggestion chips fill the composer: hold the text + a bump token.
+  const [prefill, setPrefill] = useState("");
+  const [prefillToken, setPrefillToken] = useState(0);
+  const fillComposer = (text: string) => {
+    setPrefill(text);
+    setPrefillToken((t) => t + 1);
+  };
   const activity = useMemo(
     () => buildHermesActivityFeed({
       cards: boardCards ?? [],
@@ -114,6 +121,7 @@ export function CoPilotRail({
         response={backlogSuggestions}
         boardCards={boardCards ?? []}
         onCardClick={onCardClick}
+        onUseInComposer={fillComposer}
       />
 
       <section className="hm-activity" aria-label="Hermes activity">
@@ -132,13 +140,15 @@ export function CoPilotRail({
         onSpawnMission={onSpawnMission}
         onSpawnClaudeTask={onSpawnClaudeTask}
         onCreateTask={onCreateTask}
-        onAsk={(text) => ask(text, relatedPr)}
+        onAsk={(text, opts) => ask(text, opts?.scope === "board" ? undefined : relatedPr)}
         onMute={onMute}
         onUnmute={onUnmute}
         muted={muted}
         onSetAutopilot={onSetAutopilot}
         onSetSupervised={onSetSupervised}
         autonomyMode={autonomyMode}
+        prefill={prefill}
+        prefillToken={prefillToken}
         focusedCardId={focusedCard?.id ?? null}
         focusToken={composerFocusToken}
       />
@@ -187,10 +197,12 @@ function BacklogSuggestionsRailBlock({
   response,
   boardCards,
   onCardClick,
+  onUseInComposer,
 }: {
   response?: BacklogSuggestionsResponse;
   boardCards: readonly BoardCard[];
   onCardClick?: (id: string) => void;
+  onUseInComposer?: (text: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const bodyId = useId();
@@ -222,6 +234,7 @@ function BacklogSuggestionsRailBlock({
               suggestion={suggestion}
               relatedCard={cardsById.get(suggestion.related.cardId)}
               onCardClick={onCardClick}
+              onUseInComposer={onUseInComposer}
               key={suggestion.id}
             />
           )) : (
@@ -237,10 +250,12 @@ function BacklogSuggestionRow({
   suggestion,
   relatedCard,
   onCardClick,
+  onUseInComposer,
 }: {
   suggestion: BacklogSuggestion;
   relatedCard?: BoardCard;
   onCardClick?: (id: string) => void;
+  onUseInComposer?: (text: string) => void;
 }) {
   const copyPrompt = () => {
     if (!suggestion.suggestedPrompt || typeof navigator === "undefined") return;
@@ -268,6 +283,15 @@ function BacklogSuggestionRow({
         ) : (
           <span className="hm-backlog-link">linked card</span>
         )
+      ) : null}
+      {suggestion.suggestedPrompt && onUseInComposer ? (
+        <button
+          type="button"
+          className="hm-backlog-use"
+          onClick={() => onUseInComposer(suggestion.suggestedPrompt!)}
+        >
+          Use in composer
+        </button>
       ) : null}
       {suggestion.suggestedPrompt ? (
         <button type="button" className="hm-backlog-copy" onClick={copyPrompt}>
