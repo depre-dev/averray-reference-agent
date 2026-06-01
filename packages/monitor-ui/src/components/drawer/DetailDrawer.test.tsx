@@ -82,14 +82,21 @@ describe("DetailDrawer — shell", () => {
 describe("DetailDrawer — variants", () => {
   test("action PR shows the risk eyebrow, Hermes verdict, files, and CTA", () => {
     const card = fixture("agent #548");
-    const { getByText } = render(
+    const { getByRole, getByText } = render(
       <DetailDrawer card={card} cards={[{ id: card.id }]} onClose={noop} onNavigate={noop} />,
     );
     expect(getByText("Operator review · risk decision")).toBeTruthy();
     expect(getByText("Hermes verdict")).toBeTruthy();
     expect(getByText("agent/contracts/AgentAccountCore.sol")).toBeTruthy();
-    expect(getByText("Approve & merge")).toBeTruthy();
-    expect(getByText("Send back to Codex")).toBeTruthy();
+    const author = getByText("author").parentElement;
+    expect(author?.textContent).toContain("codex");
+    expect(getByRole("link", { name: /open on github/i }).getAttribute("href")).toBe(
+      "https://github.com/depre-dev/agent/pull/548",
+    );
+    const approve = getByRole("button", { name: /Approve & merge\s*A/i });
+    const sendBack = getByRole("button", { name: /Send back to Codex\s*B/i });
+    expect(within(approve).getByText("A")).toBeTruthy();
+    expect(within(sendBack).getByText("B")).toBeTruthy();
   });
 
   test("rich PR statuses: per-check breakdown, risk signals, and colored file diff render", () => {
@@ -180,6 +187,11 @@ describe("DetailDrawer — variants", () => {
     expect(getByText(/Read-only mission/)).toBeTruthy();
     // Recommendations
     expect(getByText("Hermes recommends")).toBeTruthy();
+    // Static mission contract reference
+    expect(getByText("Spec · /mission spawn flow")).toBeTruthy();
+    expect(getByText(/A mission is a first-class work item/)).toBeTruthy();
+    expect(getByText("POST /missions")).toBeTruthy();
+    expect(getByText("GET /missions/:id")).toBeTruthy();
     expect(container.querySelectorAll(".hm-mpath .step").length).toBe(6);
   });
 
@@ -270,6 +282,7 @@ describe("DetailDrawer — variants", () => {
     );
     expect(getByText("Mission · no report yet")).toBeTruthy();
     expect(getByText(/no structured report yet/i)).toBeTruthy();
+    expect(getByText("Spec · /mission spawn flow")).toBeTruthy();
   });
 });
 

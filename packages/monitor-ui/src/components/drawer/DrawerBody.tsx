@@ -371,15 +371,53 @@ function DoneBody({ card }: { card: DoneCard }) {
   );
 }
 
+function MissionSpecDetails() {
+  return (
+    <details className="hm-spec" open>
+      <summary>Spec · /mission spawn flow</summary>
+      <div className="body">
+        <p style={{ margin: "0 0 8px" }}>
+          A mission is a first-class work item, not a side-effect of a PR. The flow is symmetric to PR review but
+          operates against a live URL, not a diff.
+        </p>
+        <p style={{ margin: "4px 0" }}>
+          <span className="endpoint">POST /missions</span> ·{" "}
+          <code>{`{ prompt, target_url, freshness: 'fresh' | 'memory', memory_seed? }`}</code> →{" "}
+          <code>{`{ mission_id }`}</code>
+        </p>
+        <p style={{ margin: "4px 0" }}>
+          <span className="endpoint">GET /missions/:id</span> · streams structured report fields as they arrive (
+          <code>verdict</code>, <code>confidence</code>, <code>path</code>, <code>blockers</code>, <code>evidence</code>,{" "}
+          <code>mutation_boundary</code>, <code>recommendations</code>).
+        </p>
+        <p style={{ margin: "4px 0" }}>
+          <b>Fresh run:</b> new agent, no prior context. Reseeds confidence scoring from zero.
+        </p>
+        <p style={{ margin: "4px 0" }}>
+          <b>Memory run:</b> agent reads the last terminal report as context. Faster, more biased.
+        </p>
+        <p style={{ margin: "4px 0" }}>
+          <b>Create product fix:</b> takes the top recommendation and posts to{" "}
+          <span className="endpoint">POST /codex/tasks</span> with the mission report appended as evidence. Operator
+          approves before dispatch.
+        </p>
+      </div>
+    </details>
+  );
+}
+
 function MissionBody({ card }: { card: MissionCard }) {
   // `mission` is required on the type, but a live mission card has no
   // structured report until the browser agent posts one. Read defensively.
   const m = (card as { mission?: MissionCard["mission"] }).mission;
   if (!m) {
     return (
-      <VerdictBlock head="Mission · no report yet" accent="var(--hm-hermes-deep)">
-        {card.summary || "No structured report yet — the browser agent hasn't posted one."}
-      </VerdictBlock>
+      <>
+        <VerdictBlock head="Mission · no report yet" accent="var(--hm-hermes-deep)">
+          {card.summary || "No structured report yet — the browser agent hasn't posted one."}
+        </VerdictBlock>
+        <MissionSpecDetails />
+      </>
     );
   }
   const verdictColor =
@@ -525,6 +563,7 @@ function MissionBody({ card }: { card: MissionCard }) {
           </div>
         </section>
       ) : null}
+      <MissionSpecDetails />
     </>
   );
 }

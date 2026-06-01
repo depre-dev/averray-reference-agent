@@ -33,10 +33,34 @@ export interface DetailDrawerProps {
   footerDeps?: Pick<DrawerFooterDeps, "openUrl" | "copy">;
 }
 
+function githubBranchPath(branch: string): string {
+  return branch.split("/").map(encodeURIComponent).join("/");
+}
+
+function githubUrlForCard(card: BoardCard): string | undefined {
+  if (!/^[^/\s]+\/[^/\s]+$/.test(card.repo)) return undefined;
+  const pullRequestNumber =
+    card.decisionRecord?.subject.pullRequestNumber ?? Number.parseInt(card.id.match(/#(\d+)/)?.[1] ?? "", 10);
+  if (Number.isFinite(pullRequestNumber)) {
+    return `https://github.com/${card.repo}/pull/${pullRequestNumber}`;
+  }
+  if (card.branch) {
+    return `https://github.com/${card.repo}/tree/${githubBranchPath(card.branch)}`;
+  }
+  return `https://github.com/${card.repo}`;
+}
+
+function footerHint(key: string): "A" | "B" | undefined {
+  if (key === "approve-merge") return "A";
+  if (key === "send-back-codex") return "B";
+  return undefined;
+}
+
 export function DetailDrawer({ card, cards, onClose, onNavigate, actions, footerDeps }: DetailDrawerProps) {
   const variant = drawerVariant(card);
   const accent = DRAWER_ACCENT[variant];
   const asideRef = useRef<HTMLElement | null>(null);
+  const githubUrl = githubUrlForCard(card);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -119,6 +143,14 @@ export function DetailDrawer({ card, cards, onClose, onNavigate, actions, footer
                   <span className="hm-muted">waiting on</span> {card.waitingOn.actor}
                 </span>
               ) : null}
+              <span>
+                <span className="hm-muted">author</span> {card.agentType}
+              </span>
+              {githubUrl ? (
+                <a href={githubUrl} target="_blank" rel="noreferrer">
+                  open on github ↗
+                </a>
+              ) : null}
             </div>
           </header>
 
@@ -127,15 +159,22 @@ export function DetailDrawer({ card, cards, onClose, onNavigate, actions, footer
           </div>
 
           <footer className="hm-drawer-foot">
-            {footerButtons.map((btn) =>
-              btn.run ? (
+            {footerButtons.map((btn) => {
+              const hint = footerHint(btn.key);
+              const label = (
+                <>
+                  <span>{btn.label}</span>
+                  {hint ? <span className="hm-kbd">{hint}</span> : null}
+                </>
+              );
+              return btn.run ? (
                 <button
                   key={btn.key}
                   type="button"
                   className={`hm-btn hm-btn--${btn.kind}`}
                   onClick={btn.run}
                 >
-                  {btn.label}
+                  {label}
                 </button>
               ) : (
                 // Truth-boundary: no real action ⇒ visibly disabled WITH a reason.
@@ -147,10 +186,10 @@ export function DetailDrawer({ card, cards, onClose, onNavigate, actions, footer
                   aria-disabled="true"
                   title={btn.disabledReason}
                 >
-                  {btn.label}
+                  {label}
                 </button>
-              ),
-            )}
+              );
+            })}
             <span className="spacer" />
             <span className="hm-mono hm-muted">j ‹ prev · k › next · esc close</span>
           </footer>
