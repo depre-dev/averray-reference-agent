@@ -33,6 +33,7 @@ import { LanesBar } from "./LanesBar.js";
 import { Board, CALM_EXPANDED, DEFAULT_EXPANDED } from "./Board.js";
 import type { LaneId } from "./Lane.js";
 import { CardRouter } from "./cards/CardRouter.js";
+import { HermesCheckingBody } from "./HermesCheckingBody.js";
 import { DetailDrawer } from "./drawer/DetailDrawer.js";
 import { missionReportText, type DrawerActionHandlers } from "../lib/monitor/drawer-footer.js";
 import { CoPilotRail } from "./hermes/CoPilotRail.js";
@@ -279,6 +280,25 @@ export function BoardView({
     [displayGrouped],
   );
 
+  // Shared per-card renderer — used directly by most lanes and re-used by the
+  // hermes-checking lane body (P1-1) so unrouted cards still render the same way.
+  const renderCard = (card: BoardCard) => (
+    <CardRouter
+      key={card.id}
+      card={card}
+      focused={card.id === boardFocusId}
+      onClick={onCardClick ? (c) => onCardClick(c.id) : undefined}
+      onApprove={onApproveTask ? (c) => onApproveTask(c.id) : undefined}
+      onApproveMission={onApproveMission ? (c) => onApproveMission(c.id) : undefined}
+      onApproveMerge={onApproveMergeCard}
+      onRerunMission={onRerunMission ? (c, freshness) => {
+        const target = c.type === "mission" ? c.mission?.target : undefined;
+        if (target) onRerunMission(target, freshness);
+      } : undefined}
+      onKeepWatching={(c) => onKeepWatchingCard(c.id)}
+    />
+  );
+
   const drawerCard = focusedCardId ? orderedCards.find((c) => c.id === focusedCardId) : undefined;
   const boardFocusedCard = boardFocusId ? orderedCards.find((c) => c.id === boardFocusId) : undefined;
   const scopeCard = drawerCard ?? boardFocusedCard;
@@ -469,22 +489,12 @@ export function BoardView({
                 ? (id) => (id === "codex-needed" ? <CreateTaskForm onCreate={onCreateTask} /> : null)
                 : undefined
             }
-            renderCard={(card) => (
-              <CardRouter
-                key={card.id}
-                card={card}
-                focused={card.id === boardFocusId}
-                onClick={onCardClick ? (c) => onCardClick(c.id) : undefined}
-                onApprove={onApproveTask ? (c) => onApproveTask(c.id) : undefined}
-                onApproveMission={onApproveMission ? (c) => onApproveMission(c.id) : undefined}
-                onApproveMerge={onApproveMergeCard}
-                onRerunMission={onRerunMission ? (c, freshness) => {
-                  const target = c.type === "mission" ? c.mission?.target : undefined;
-                  if (target) onRerunMission(target, freshness);
-                } : undefined}
-                onKeepWatching={(c) => onKeepWatchingCard(c.id)}
-              />
-            )}
+            renderCard={renderCard}
+            renderLaneBody={(id, laneCards) =>
+              id === "hermes-checking"
+                ? <HermesCheckingBody cards={laneCards} renderCard={renderCard} />
+                : undefined
+            }
           />
         </div>
 
