@@ -2629,9 +2629,8 @@ function startOperatorRoutines() {
             requester: "hermes-self-healing",
             correlationId: `self-heal:${targetSignature}`,
           });
-          // Flow through the EXISTING approval/autopilot gate (B2 never approves).
           if (created && task.status === "proposed") {
-            await autoApproveProposedTask(task);
+            logger.info({ taskId: task.id, targetSignature }, "b2_self_healing_proposed_waiting_for_operator");
           }
           return { taskId: task.id };
         },

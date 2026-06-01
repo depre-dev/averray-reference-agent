@@ -520,6 +520,36 @@ describe("monitor testbed mission runs", () => {
     expect(disposition.fixPrompt ?? "").toContain("Smallest product move: Make the claim action visible with a blocked-state reason.");
   });
 
+  it("keeps auth/environment browser failures triage-only with no code-fix prompt", () => {
+    const run = recordTestbedMissionRunFromOperatorResult(missionResult(), Date.parse("2026-05-22T10:00:00.000Z"));
+    const updated = recordTestbedMissionReportFromMessage(
+      {
+        relatedCorrelationId: run!.id,
+        text: JSON.stringify({
+          verdict: "fail",
+          confidence: 0.9,
+          stoppedBeforeMutation: true,
+          mutationBoundaryNotes: ["Stopped before signing."],
+          completedPath: ["opened target URL", "HTTP 401 while loading the page"],
+          blockers: ["HTTP 401 Unauthorized before the app rendered."],
+          confusingMoments: ["The browser could not authenticate to the environment."],
+          recommendations: ["Have the operator re-run with a valid hosted session."],
+          evidence: ["GET https://testbed.example/app returned HTTP 401."],
+          scores: { orientation: 0 },
+        }),
+      },
+      Date.parse("2026-05-22T10:05:00.000Z"),
+    );
+
+    const disposition = testbedMissionSelfHealingDisposition(updated!);
+    expect(disposition).toMatchObject({
+      autoFixable: false,
+      reason: "environment_or_auth_failure",
+    });
+    expect(disposition.summary).toContain("environment/auth/runner boundary");
+    expect(disposition.fixPrompt).toBeUndefined();
+  });
+
   it("marks runner/report-pipeline failures as human-review, not auto-fixable", () => {
     const run = recordTestbedMissionRunFromOperatorResult(missionResult(), Date.parse("2026-05-22T10:00:00.000Z"));
     const failed = failTestbedMissionRun(run!.id, {
