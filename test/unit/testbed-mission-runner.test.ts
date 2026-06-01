@@ -364,8 +364,12 @@ describe("testbed mission runner", () => {
       browser,
       captureVideo: true,
       videoDir: join(mkdtempSync(join(tmpdir(), "averray-testbed-video-")), "videos"),
-      viewport: { width: 1365, height: 900 },
-      userAgent: "Averray-Hermes-Testbed-Playwright/1.0",
+      contextOptions: {
+        viewport: { width: 1365, height: 900 },
+        userAgent: "Averray-Hermes-Testbed-Playwright/1.0",
+        extraHTTPHeaders: { "CF-Access-Client-Id": "cf-client-id" },
+        httpCredentials: { username: "operator", password: "secret", origin: "https://app.averray.com" },
+      },
     });
 
     expect(result).toMatchObject({
@@ -376,9 +380,39 @@ describe("testbed mission runner", () => {
     expect(videoContext.close).toHaveBeenCalledOnce();
     expect(newContext).toHaveBeenCalledTimes(2);
     expect(newContext.mock.calls[0]?.[0]).toMatchObject({
+      extraHTTPHeaders: { "CF-Access-Client-Id": "cf-client-id" },
+      httpCredentials: { username: "operator", password: "secret", origin: "https://app.averray.com" },
       recordVideo: { size: { width: 1365, height: 900 } },
     });
+    expect(newContext.mock.calls[1]?.[0]).toMatchObject({
+      extraHTTPHeaders: { "CF-Access-Client-Id": "cf-client-id" },
+      httpCredentials: { username: "operator", password: "secret", origin: "https://app.averray.com" },
+    });
     expect(newContext.mock.calls[1]?.[0]).not.toHaveProperty("recordVideo");
+  });
+
+  it("passes Basic Auth credentials to a non-video browser context", async () => {
+    const page = {} as Page;
+    const context = {
+      newPage: vi.fn(async () => page),
+    } as unknown as BrowserContext;
+    const newContext = vi.fn(async () => context);
+    const browser = { newContext } as unknown as Browser;
+
+    await createPlaywrightContextPageWithVideoFallback({
+      browser,
+      captureVideo: false,
+      videoDir: join(mkdtempSync(join(tmpdir(), "averray-testbed-video-")), "videos"),
+      contextOptions: {
+        viewport: { width: 1365, height: 900 },
+        userAgent: "Averray-Hermes-Testbed-Playwright/1.0",
+        httpCredentials: { username: "operator", password: "secret", origin: "https://app.averray.com" },
+      },
+    });
+
+    expect(newContext).toHaveBeenCalledWith(expect.objectContaining({
+      httpCredentials: { username: "operator", password: "secret", origin: "https://app.averray.com" },
+    }));
   });
 
   it("recognizes Playwright ffmpeg-missing errors", () => {
