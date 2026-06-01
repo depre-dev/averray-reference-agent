@@ -6,6 +6,7 @@ import { SWRConfig } from "swr";
 import { MonitorPage } from "./MonitorPage.js";
 import { FIXTURE_CARDS } from "./lib/monitor/fixtures.js";
 import type { MonitorBoard } from "./lib/monitor/board-cache.js";
+import type { BoardCard } from "./lib/monitor/card-types.js";
 import type { StorageLike } from "./lib/monitor/snapshot-store.js";
 
 afterEach(cleanup);
@@ -40,6 +41,24 @@ function memStorage(): StorageLike {
 
 function wrapper({ children }: { children: ReactNode }) {
   return <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>{children}</SWRConfig>;
+}
+
+function taskCard(overrides: Partial<BoardCard> = {}): BoardCard {
+  return {
+    id: "codex-task-1",
+    lane: "codex-needed",
+    type: "task",
+    agentType: "codex",
+    title: "Investigate board card",
+    summary: "A proposed task is waiting for operator action.",
+    repo: "depre-dev/averray-reference-agent",
+    freshness: 1,
+    state: "fresh",
+    risk: ["workflow"],
+    waitingOn: { actor: "operator", tone: "warn" },
+    taskStatus: "proposed",
+    ...overrides,
+  } as BoardCard;
 }
 
 beforeEach(() => {
@@ -185,6 +204,102 @@ describe("MonitorPage — container", () => {
       expect(calledUrl).toBe("/monitor/testbed-missions/testbed-mission-requested-1/approve");
       expect(init.method).toBe("POST");
     } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  test("the default dismiss POSTs task cards to the durable codex-task endpoint", async () => {
+    const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({
+      cards: [taskCard()],
+      at: "2026-05-28T10:30:00Z",
+    }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
+    try {
+      const { getByRole } = render(
+        <MonitorPage
+          options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }}
+          backlogSuggestions={{ enabled: false }}
+          collaboration={{ enabled: false }}
+          alerts={{ enabled: false }}
+          autonomy={{ fetchMode: async () => null }}
+        />,
+        { wrapper },
+      );
+      await waitFor(() => expect(getByRole("button", { name: "Dismiss" })).toBeTruthy());
+      fireEvent.click(getByRole("button", { name: "Dismiss" }));
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+      expect(calledUrl).toBe("/monitor/codex-tasks/codex-task-1/dismiss");
+      expect(init.method).toBe("POST");
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  test("the default dismiss POSTs self-healing cards to the suppression-aware endpoint", async () => {
+    const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({
+      cards: [taskCard({
+        id: "codex-task-self-heal-1",
+        title: "Self-healing: failed mission",
+        correlationId: "self-heal:testbed_mission:testbed:sweep-1",
+      })],
+      at: "2026-05-28T10:30:00Z",
+    }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
+    try {
+      const { getByRole } = render(
+        <MonitorPage
+          options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }}
+          backlogSuggestions={{ enabled: false }}
+          collaboration={{ enabled: false }}
+          alerts={{ enabled: false }}
+          autonomy={{ fetchMode: async () => null }}
+        />,
+        { wrapper },
+      );
+      await waitFor(() => expect(getByRole("button", { name: "Dismiss" })).toBeTruthy());
+      fireEvent.click(getByRole("button", { name: "Dismiss" }));
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+      expect(calledUrl).toBe("/monitor/self-healing-proposals/codex-task-self-heal-1/dismiss");
+      expect(init.method).toBe("POST");
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  test("the default snooze POSTs a durable until timestamp", async () => {
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-28T10:30:00.000Z"));
+    const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({
+      cards: [taskCard()],
+      at: "2026-05-28T10:30:00Z",
+    }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
+    try {
+      const { getByRole } = render(
+        <MonitorPage
+          options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }}
+          backlogSuggestions={{ enabled: false }}
+          collaboration={{ enabled: false }}
+          alerts={{ enabled: false }}
+          autonomy={{ fetchMode: async () => null }}
+        />,
+        { wrapper },
+      );
+      await waitFor(() => expect(getByRole("button", { name: "Snooze" })).toBeTruthy());
+      fireEvent.click(getByRole("button", { name: "Snooze" }));
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+      expect(calledUrl).toBe("/monitor/codex-tasks/codex-task-1/snooze");
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(String(init.body))).toEqual({
+        untilMs: Date.parse("2026-05-28T11:00:00.000Z"),
+      });
+    } finally {
+      nowSpy.mockRestore();
       fetchSpy.mockRestore();
     }
   });

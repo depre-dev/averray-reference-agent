@@ -90,6 +90,10 @@ export interface CodexTask extends CodexTaskInput {
   retryCount?: number;
   selfManagementEscalatedAt?: string;
   selfManagementEscalationReason?: string;
+  operatorDismissedAt?: string;
+  operatorDismissedBy?: string;
+  operatorSnoozedUntil?: string;
+  operatorSnoozedBy?: string;
   events?: CodexTaskEvent[];
 }
 
@@ -274,7 +278,11 @@ export async function claimNextApprovedCodexTask(
   // A per-agent runner claims only its own tasks; an unfiltered call (no
   // `agent`) claims any approved task, preserving the current behavior.
   const existing = tasks
-    .filter((task) => task.status === "approved" && (deps.agent === undefined || taskAgent(task) === deps.agent))
+    .filter((task) =>
+      task.status === "approved"
+      && !isTaskSnoozed(task, deps.now ?? new Date())
+      && (deps.agent === undefined || taskAgent(task) === deps.agent)
+    )
     .sort((a, b) => Date.parse(a.approvedAt ?? a.updatedAt) - Date.parse(b.approvedAt ?? b.updatedAt))[0];
   if (!existing) return undefined;
   const now = (deps.now ?? new Date()).toISOString();
@@ -505,6 +513,59 @@ export async function escalateCodexTask(
   return task;
 }
 
+export async function dismissCodexTask(
+  id: string,
+  deps: CodexTaskQueueDeps & { dismissedBy?: string } = {}
+): Promise<CodexTask | undefined> {
+  const path = queuePath(deps.path);
+  const tasks = await readCodexTasks(path);
+  const existing = tasks.find((task) => task.id === id);
+  if (!existing) return undefined;
+  const now = (deps.now ?? new Date()).toISOString();
+  const shouldCancel = !TERMINAL_STATUSES.has(existing.status) && existing.status !== "running";
+  const task: CodexTask = {
+    ...existing,
+    ...(shouldCancel ? { status: "cancelled" as const, cancelledAt: existing.cancelledAt ?? now, cancelledBy: deps.dismissedBy ?? existing.cancelledBy ?? "operator" } : {}),
+    operatorDismissedAt: existing.operatorDismissedAt ?? now,
+    operatorDismissedBy: deps.dismissedBy ?? existing.operatorDismissedBy ?? "operator",
+    events: appendTaskEvent(existing, {
+      at: now,
+      status: shouldCancel ? "cancelled" : "progress",
+      message: shouldCancel
+        ? "Operator dismissed this card; task dispatch was cancelled."
+        : "Operator dismissed this card.",
+    }),
+    updatedAt: now,
+  };
+  await writeCodexTasks(path, replaceTask(tasks, task));
+  return task;
+}
+
+export async function snoozeCodexTask(
+  id: string,
+  deps: CodexTaskQueueDeps & { snoozedUntil: Date; snoozedBy?: string }
+): Promise<CodexTask | undefined> {
+  const path = queuePath(deps.path);
+  const tasks = await readCodexTasks(path);
+  const existing = tasks.find((task) => task.id === id);
+  if (!existing) return undefined;
+  const now = (deps.now ?? new Date()).toISOString();
+  const snoozedUntil = deps.snoozedUntil.toISOString();
+  const task: CodexTask = {
+    ...existing,
+    operatorSnoozedUntil: snoozedUntil,
+    operatorSnoozedBy: deps.snoozedBy ?? "operator",
+    events: appendTaskEvent(existing, {
+      at: now,
+      status: "progress",
+      message: `Operator snoozed this card until ${snoozedUntil}.`,
+    }),
+    updatedAt: now,
+  };
+  await writeCodexTasks(path, replaceTask(tasks, task));
+  return task;
+}
+
 export async function readCodexRunnerHeartbeat(
   deps: CodexTaskQueueDeps = {}
 ): Promise<CodexRunnerHeartbeat | undefined> {
@@ -643,6 +704,16 @@ function codexRunnerStatusMessage(status: CodexRunnerHeartbeatStatus): string {
     case "error":
       return "Codex task runner hit an error.";
   }
+}
+
+export function isTaskDismissed(task: Pick<CodexTask, "operatorDismissedAt">): boolean {
+  return Boolean(task.operatorDismissedAt);
+}
+
+export function isTaskSnoozed(task: Pick<CodexTask, "operatorSnoozedUntil">, now: Date = new Date()): boolean {
+  if (!task.operatorSnoozedUntil) return false;
+  const untilMs = Date.parse(task.operatorSnoozedUntil);
+  return Number.isFinite(untilMs) && untilMs > now.getTime();
 }
 
 function makeCodexTaskId(repo: string, pullRequestNumber: number | undefined, timestamp: string): string {

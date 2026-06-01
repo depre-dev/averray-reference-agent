@@ -103,6 +103,10 @@ export interface BoardViewProps {
   onApproveTask?: (id: string) => void;
   /** Approve a requested tester mission — the operator human gate (T6). */
   onApproveMission?: (id: string) => void;
+  /** Persist operator dismissal for cards backed by server-side state. */
+  onDismissCard?: (card: BoardCard) => void;
+  /** Persist operator snooze for cards backed by server-side state. */
+  onSnoozeCard?: (card: BoardCard, untilMs: number) => void;
   /** Re-run a mission (drawer footer) via POST /monitor/testbed-missions. */
   onRerunMission?: (targetUrl: string, freshness: "fresh" | "memory") => void;
   collaboration?: UseCollaborationOptions;
@@ -133,6 +137,8 @@ export function BoardView({
   onCreateTask,
   onApproveTask,
   onApproveMission,
+  onDismissCard: persistDismissCard,
+  onSnoozeCard: persistSnoozeCard,
   onRerunMission,
   collaboration,
   onMute,
@@ -279,21 +285,24 @@ export function BoardView({
     });
   }, []);
 
-  const onDismissCard = useCallback((id: string) => {
+  const onDismissCard = useCallback((card: BoardCard) => {
     setDismissedCardIds((prev) => {
       const next = new Set(prev);
-      next.add(id);
+      next.add(card.id);
       return next;
     });
-  }, []);
+    persistDismissCard?.(card);
+  }, [persistDismissCard]);
 
-  const onSnoozeCard = useCallback((id: string) => {
+  const onSnoozeCard = useCallback((card: BoardCard) => {
+    const untilMs = Date.now() + OPERATOR_CARD_SNOOZE_MS;
     setSnoozedUntilById((prev) => {
       const next = new Map(prev);
-      next.set(id, Date.now() + OPERATOR_CARD_SNOOZE_MS);
+      next.set(card.id, untilMs);
       return next;
     });
-  }, []);
+    persistSnoozeCard?.(card, untilMs);
+  }, [persistSnoozeCard]);
 
   const onKeepWatchingCard = useCallback((id: string) => {
     setKeptCardIds((prev) => {
@@ -436,8 +445,8 @@ export function BoardView({
                 onClick={onCardClick ? (c) => onCardClick(c.id) : undefined}
                 onApprove={onApproveTask ? (c) => onApproveTask(c.id) : undefined}
                 onApproveMission={onApproveMission ? (c) => onApproveMission(c.id) : undefined}
-                onDismiss={(c) => onDismissCard(c.id)}
-                onSnooze={(c) => onSnoozeCard(c.id)}
+                onDismiss={onDismissCard}
+                onSnooze={onSnoozeCard}
                 onKeepWatching={(c) => onKeepWatchingCard(c.id)}
                 onInvestigate={onCardClick ? (c) => onCardClick(c.id) : undefined}
               />

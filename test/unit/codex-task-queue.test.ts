@@ -8,11 +8,13 @@ import {
   cancelCodexTask,
   claimNextApprovedCodexTask,
   completeCodexTask,
+  dismissCodexTask,
   failCodexTask,
   listCodexTasks,
   proposeCodexTask,
   readCodexRunnerHeartbeat,
   retryCodexTask,
+  snoozeCodexTask,
   summarizeCodexTasks,
   taskAgent,
   updateCodexTaskProgress,
@@ -316,6 +318,87 @@ describe("codex task queue", () => {
         ageMs: 10_000,
         stale: false,
       },
+    });
+  });
+
+  it("persists operator dismissal across a reload and cancels unclaimed dispatch", async () => {
+    const path = await tempQueuePath();
+    const proposed = await proposeCodexTask({
+      repo: "averray-agent/agent",
+      prompt: "Fix the stale board card.",
+      requester: "hermes-self-healing",
+      correlationId: "self-heal:testbed:overview",
+    }, { path, now: new Date("2026-05-17T15:00:00.000Z") });
+
+    const dismissed = await dismissCodexTask(proposed.task.id, {
+      path,
+      dismissedBy: "operator",
+      now: new Date("2026-05-17T15:01:00.000Z"),
+    });
+
+    expect(dismissed).toMatchObject({
+      id: proposed.task.id,
+      status: "cancelled",
+      cancelledBy: "operator",
+      operatorDismissedAt: "2026-05-17T15:01:00.000Z",
+      operatorDismissedBy: "operator",
+    });
+    expect(dismissed?.events?.at(-1)).toMatchObject({
+      status: "cancelled",
+      message: "Operator dismissed this card; task dispatch was cancelled.",
+    });
+
+    const [reloaded] = await listCodexTasks({ path });
+    expect(reloaded).toMatchObject({
+      id: proposed.task.id,
+      status: "cancelled",
+      operatorDismissedAt: "2026-05-17T15:01:00.000Z",
+    });
+    expect(summarizeCodexTasks(await listCodexTasks({ path })).counts).toMatchObject({
+      total: 1,
+      terminal: 1,
+    });
+  });
+
+  it("snoozes approved tasks until the snooze timestamp expires", async () => {
+    const path = await tempQueuePath();
+    const proposed = await proposeCodexTask({
+      repo: "averray-agent/agent",
+      prompt: "Fix after a short pause.",
+    }, { path, now: new Date("2026-05-17T16:00:00.000Z") });
+    await approveCodexTask(proposed.task.id, {
+      path,
+      approvedBy: "operator",
+      now: new Date("2026-05-17T16:01:00.000Z"),
+    });
+
+    const snoozed = await snoozeCodexTask(proposed.task.id, {
+      path,
+      snoozedBy: "operator",
+      snoozedUntil: new Date("2026-05-17T16:30:00.000Z"),
+      now: new Date("2026-05-17T16:02:00.000Z"),
+    });
+    expect(snoozed).toMatchObject({
+      id: proposed.task.id,
+      status: "approved",
+      operatorSnoozedUntil: "2026-05-17T16:30:00.000Z",
+      operatorSnoozedBy: "operator",
+    });
+
+    await expect(claimNextApprovedCodexTask({
+      path,
+      runnerId: "runner-before-expiry",
+      now: new Date("2026-05-17T16:15:00.000Z"),
+    })).resolves.toBeUndefined();
+
+    await expect(claimNextApprovedCodexTask({
+      path,
+      runnerId: "runner-after-expiry",
+      now: new Date("2026-05-17T16:31:00.000Z"),
+    })).resolves.toMatchObject({
+      id: proposed.task.id,
+      status: "running",
+      runnerId: "runner-after-expiry",
     });
   });
 });

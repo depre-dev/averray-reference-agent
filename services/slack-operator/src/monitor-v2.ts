@@ -1275,6 +1275,10 @@ export function synthesizeTaskCards(
     if (!task) continue;
     const status = asString(task.status);
     if (!status || SYNTH_TERMINAL_TASK_STATUSES.has(status)) continue;
+    if (asString(task.operatorDismissedAt)) continue;
+    const operatorSnoozedUntil = asString(task.operatorSnoozedUntil);
+    const operatorSnoozedUntilMs = operatorSnoozedUntil ? Date.parse(operatorSnoozedUntil) : NaN;
+    if (Number.isFinite(operatorSnoozedUntilMs) && operatorSnoozedUntilMs > now.getTime()) continue;
     // PR-bound tasks surface (and get their status overlaid) via the PR card.
     if (task.pullRequestNumber !== undefined && task.pullRequestNumber !== null) continue;
     const id = asString(task.id);
