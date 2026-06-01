@@ -93,6 +93,7 @@ import {
   type AutonomyMode,
   type AutonomyState,
 } from "./autonomy-mode.js";
+import { readOperatorCardNotes, writeOperatorCardNotes } from "./operator-card-notes.js";
 import { runAutoApproval } from "./autopilot-approve.js";
 import {
   deliverAutopilotAwayDigest,
@@ -706,6 +707,21 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
     }
     await handleMonitorAutonomyModeRequest(request, response);
     return;
+  }
+  {
+    const operatorNotesCardId = monitorOperatorNotesCardId(url.pathname);
+    if (operatorNotesCardId && (request.method === "GET" || request.method === "PUT")) {
+      if (!monitorConfig.enabled) {
+        writeJson(response, 404, { error: "monitor_disabled" });
+        return;
+      }
+      if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+        writeJson(response, 401, { error: "monitor_unauthorized" });
+        return;
+      }
+      await handleMonitorOperatorNotesRequest(operatorNotesCardId, request, response);
+      return;
+    }
   }
   if (request.method === "POST" && url.pathname === "/monitor/testbed-missions/request") {
     if (!monitorConfig.enabled) {
@@ -1757,6 +1773,47 @@ async function handleMonitorAutonomyModeRequest(request: http.IncomingMessage, r
     logger.error({ err: error }, "o4_autonomy_mode_failed");
     writeJson(response, 500, {
       error: "autonomy_mode_failed",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+// Operator-private per-card notes (checklist + free-text note). GET returns the
+// saved notes (or the default checklist); PUT persists them. OPERATOR-PRIVATE:
+// this never feeds any agent payload — it lives in its own store.
+async function handleMonitorOperatorNotesRequest(
+  cardId: string,
+  request: http.IncomingMessage,
+  response: http.ServerResponse,
+) {
+  try {
+    if (request.method === "GET") {
+      writeJson(response, 200, { ok: true, cardId, notes: readOperatorCardNotes(cardId) });
+      return;
+    }
+    const rawBody = await readBody(request);
+    const payload = rawBody ? JSON.parse(rawBody) as unknown : {};
+    if (!isRecord(payload)) {
+      writeJson(response, 400, { error: "invalid_payload" });
+      return;
+    }
+    const note = typeof payload.note === "string" ? payload.note : "";
+    const checklist = Array.isArray(payload.checklist)
+      ? payload.checklist
+          .filter(isRecord)
+          .map((item) => ({
+            id: typeof item.id === "string" && item.id ? item.id : "item",
+            label: typeof item.label === "string" ? item.label : "",
+            done: item.done === true,
+          }))
+      : undefined;
+    const saved = writeOperatorCardNotes(cardId, { note, ...(checklist ? { checklist } : {}) });
+    logger.info({ cardId, items: saved.checklist.length, hasNote: saved.note.length > 0 }, "operator_card_notes_saved");
+    writeJson(response, 200, { ok: true, cardId, notes: saved });
+  } catch (error) {
+    logger.error({ err: error }, "operator_card_notes_failed");
+    writeJson(response, 500, {
+      error: "operator_card_notes_failed",
       message: error instanceof Error ? error.message : String(error),
     });
   }
@@ -2997,6 +3054,15 @@ function monitorTestbedMissionId(pathname: string): string | undefined {
   if (!pathname.startsWith(prefix)) return undefined;
   const id = decodeURIComponent(pathname.slice(prefix.length)).trim();
   return id.length > 0 && !id.includes("/") ? id : undefined;
+}
+
+/** Parse the card id from /monitor/cards/:id/operator-notes. */
+function monitorOperatorNotesCardId(pathname: string): string | undefined {
+  const prefix = "/monitor/cards/";
+  const suffix = "/operator-notes";
+  if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) return undefined;
+  const raw = decodeURIComponent(pathname.slice(prefix.length, -suffix.length)).trim();
+  return raw.length > 0 && !raw.includes("/") ? raw : undefined;
 }
 
 function monitorTestbedMissionApproveId(pathname: string): string | undefined {

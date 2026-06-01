@@ -18,6 +18,7 @@ import type {
 } from "../../lib/monitor/card-types.js";
 import { humanizeSignalText } from "../../lib/monitor/signal-labels.js";
 import { ChecksBar } from "../cards/ChecksBar.js";
+import { OperatorNotes } from "./OperatorNotes.js";
 
 export type DrawerVariant = "mission" | "action" | "done" | "draft" | "task" | "deploy" | "pr";
 
@@ -76,6 +77,7 @@ export function DrawerBody({ card, variant }: { card: BoardCard; variant: Drawer
     <>
       {body}
       <DecisionRecordSection record={card.decisionRecord} />
+      <OperatorNotes cardId={card.id} />
     </>
   );
 }
