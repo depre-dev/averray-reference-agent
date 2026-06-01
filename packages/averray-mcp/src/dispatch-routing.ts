@@ -16,7 +16,7 @@
 
 import type { HermesDecisionRecord } from "./decision-records.js";
 
-export type RoutingAgent = "codex" | "claude" | "test-writer" | (string & {});
+export type RoutingAgent = "codex" | "claude" | "test-writer" | "security" | "docs" | (string & {});
 export type RiskTier = "high" | "low";
 
 export interface RoutingInput {
@@ -68,6 +68,14 @@ const SPECIALIST_SURFACES: SurfaceGroup[] = [
   { surface: "tests", keywords: ["test", "tests", "spec", "vitest", "coverage", "test-writing", "playwright"] },
 ];
 
+const SECURITY_SPECIALIST_SURFACES: SurfaceGroup[] = [
+  { surface: "security review", keywords: ["security review", "security audit", "dependency cve", "cve", "vulnerability", "secret handling", "auth boundary", "authentication", "authorization", "input validation"] },
+];
+
+const DOCS_SPECIALIST_SURFACES: SurfaceGroup[] = [
+  { surface: "docs", keywords: ["docs", "documentation", "readme", "runbook", "guide", "changelog"] },
+];
+
 function matchesKeyword(haystack: string, keyword: string): boolean {
   // Keywords with non-word chars (".sol", ".env", "on-chain", "ci/cd") match as
   // literal substrings; plain words match on word boundaries to avoid
@@ -96,6 +104,15 @@ export function classifyTask(input: RoutingInput): RoutingDecision {
     .join(" ")
     .toLowerCase();
 
+  const securitySurface = firstSurface(haystack, SECURITY_SPECIALIST_SURFACES);
+  if (securitySurface) {
+    return {
+      agent: "security",
+      riskTier: "high",
+      reason: `${securitySurface} → security specialist, high-risk/operator-reviewed`,
+    };
+  }
+
   const highSurface = firstSurface(haystack, HIGH_RISK_SURFACES);
   if (highSurface) {
     return {
@@ -111,6 +128,15 @@ export function classifyTask(input: RoutingInput): RoutingDecision {
       agent: "test-writer",
       riskTier: "low",
       reason: `${specialistSurface} → test-writer specialist, low-risk`,
+    };
+  }
+
+  const docsSurface = firstSurface(haystack, DOCS_SPECIALIST_SURFACES);
+  if (docsSurface) {
+    return {
+      agent: "docs",
+      riskTier: "low",
+      reason: `${docsSurface} → docs specialist, low-risk`,
     };
   }
 

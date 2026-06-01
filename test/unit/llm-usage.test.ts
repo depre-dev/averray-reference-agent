@@ -190,7 +190,7 @@ describe("LLM usage tracker", () => {
 
     expect(aggregate).toMatchObject({
       status: "not_recorded",
-      message: "No runner has reported LLM usage counters yet. Claude/test-writer counters depend on SDK output; Codex CLI and Hermes/Ollama do not reliably report usage today.",
+      message: "No runner has reported LLM usage counters yet. Claude-family counters depend on SDK output; Codex CLI and Hermes/Ollama do not reliably report usage today.",
     });
     expect(aggregate.sourceStatus.find((entry) => entry.agent === "codex")).toMatchObject({
       status: "not_reported",

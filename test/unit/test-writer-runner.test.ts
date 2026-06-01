@@ -37,6 +37,20 @@ describe("test-writer runner config", () => {
     expect(parseClaudeTaskRunnerConfig({}).agent).toBe("claude");
     expect(parseClaudeTaskRunnerConfig({ CLAUDE_TASK_RUNNER_AGENT: "" }).agent).toBe("claude");
   });
+
+  it("keeps security and docs specialist runners off until their own enable flag is mapped in", () => {
+    const security = parseClaudeTaskRunnerConfig({
+      CLAUDE_TASK_RUNNER_AGENT: "security",
+      CLAUDE_TASK_RUNNER_ID: "vps-security-task-runner",
+    });
+    const docs = parseClaudeTaskRunnerConfig({
+      CLAUDE_TASK_RUNNER_AGENT: "docs",
+      CLAUDE_TASK_RUNNER_ID: "vps-docs-task-runner",
+    });
+
+    expect(security).toMatchObject({ agent: "security", runnerId: "vps-security-task-runner", enabled: false });
+    expect(docs).toMatchObject({ agent: "docs", runnerId: "vps-docs-task-runner", enabled: false });
+  });
 });
 
 describe("test-writer runner claim isolation", () => {
@@ -64,11 +78,21 @@ describe("test-writer runner claim isolation", () => {
       { repo: "averray-agent/agent", agent: "test-writer", prompt: "add tests for the parser" },
       { path },
     );
+    const security = await proposeCodexTask(
+      { repo: "averray-agent/agent", agent: "security", prompt: "review auth handling" },
+      { path },
+    );
+    const docs = await proposeCodexTask(
+      { repo: "averray-agent/agent", agent: "docs", prompt: "update the runbook" },
+      { path },
+    );
     // Approve codex + claude FIRST (older) so a naive claimer would grab them.
     await approveCodexTask(codex.task.id, { path, approvedBy: "operator", now: new Date("2026-05-31T10:00:00.000Z") });
     await approveCodexTask(claude.task.id, { path, approvedBy: "operator", now: new Date("2026-05-31T10:01:00.000Z") });
     await approveCodexTask(testWriter.task.id, { path, approvedBy: "operator", now: new Date("2026-05-31T10:02:00.000Z") });
-    return { codexId: codex.task.id, claudeId: claude.task.id, testWriterId: testWriter.task.id };
+    await approveCodexTask(security.task.id, { path, approvedBy: "operator", now: new Date("2026-05-31T10:03:00.000Z") });
+    await approveCodexTask(docs.task.id, { path, approvedBy: "operator", now: new Date("2026-05-31T10:04:00.000Z") });
+    return { codexId: codex.task.id, claudeId: claude.task.id, testWriterId: testWriter.task.id, securityId: security.task.id, docsId: docs.task.id };
   }
 
   it("the test-writer runner claims ONLY the test-writer task (skips older codex/claude)", async () => {
@@ -113,5 +137,27 @@ describe("test-writer runner claim isolation", () => {
     await approveCodexTask(codex.task.id, { path, approvedBy: "operator", now: new Date("2026-05-31T10:00:00.000Z") });
     const claimed = await claimNextApprovedCodexTask({ path, agent: "test-writer", now: new Date("2026-05-31T10:01:00.000Z") });
     expect(claimed).toBeUndefined();
+  });
+
+  it("security and docs runners claim only their own specialist tasks", async () => {
+    const { securityId, docsId } = await seedApprovedTasks();
+
+    const security = await claimNextApprovedCodexTask({
+      path,
+      runnerId: "vps-security-task-runner",
+      agent: "security",
+      now: new Date("2026-05-31T10:05:00.000Z"),
+    });
+    const docs = await claimNextApprovedCodexTask({
+      path,
+      runnerId: "vps-docs-task-runner",
+      agent: "docs",
+      now: new Date("2026-05-31T10:06:00.000Z"),
+    });
+
+    expect(security?.id).toBe(securityId);
+    expect(taskAgent(security!)).toBe("security");
+    expect(docs?.id).toBe(docsId);
+    expect(taskAgent(docs!)).toBe("docs");
   });
 });

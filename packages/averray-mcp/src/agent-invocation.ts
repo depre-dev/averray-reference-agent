@@ -1099,7 +1099,7 @@ function estimatedCostForAgent(agentRecord: Record<string, unknown> | undefined)
 }
 
 function isExplicitRoutingAgent(value: string): value is RoutingAgent {
-  return value === "codex" || value === "claude" || value === "test-writer";
+  return value === "codex" || value === "claude" || value === "test-writer" || value === "security" || value === "docs";
 }
 
 // enqueue transport — POST/GET the slack-operator queue endpoint. Injected in

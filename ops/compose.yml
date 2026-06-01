@@ -503,6 +503,107 @@ services:
       - avg-data:/data
     networks: [avg-internal]
 
+  # C3 security specialist runner — same Claude-family runner pattern as
+  # test-writer, pinned to agent=="security". OFF by default; it only claims
+  # approved security tasks when the "security-runner" profile and
+  # SECURITY_TASK_RUNNER_ENABLED=1 are both set. High-risk findings remain
+  # proposes-only/escalate in the role prompt; merge/deploy are human-gated.
+  security-task-runner:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.node
+    image: ${AVERRAY_IMAGE:-avg-node-runtime}
+    profiles: ["security-runner"]
+    restart: unless-stopped
+    depends_on:
+      hermes-permissions:
+        condition: service_completed_successfully
+      mcp-bundle:
+        condition: service_completed_successfully
+    command: ["node", "services/slack-operator/dist/claude-task-runner.js"]
+    environment:
+      AVERRAY_CODEX_TASKS_PATH: ${AVERRAY_CODEX_TASKS_PATH:-/data/codex-tasks.json}
+      CLAUDE_TASK_RUNNER_ENABLED: ${SECURITY_TASK_RUNNER_ENABLED:-0}
+      CLAUDE_TASK_RUNNER_ID: ${SECURITY_TASK_RUNNER_ID:-vps-security-task-runner}
+      CLAUDE_TASK_RUNNER_AGENT: security
+      CLAUDE_TASK_RUNNER_COMMAND: ${CLAUDE_TASK_RUNNER_COMMAND:-node}
+      CLAUDE_TASK_RUNNER_ARGS: ${SECURITY_TASK_RUNNER_ARGS:-services/slack-operator/dist/security-branch-worker.js}
+      CLAUDE_TASK_RUNNER_CWD: ${CLAUDE_TASK_RUNNER_CWD:-}
+      CLAUDE_TASK_RUNNER_POLL_INTERVAL_MS: ${CLAUDE_TASK_RUNNER_POLL_INTERVAL_MS:-10000}
+      CLAUDE_TASK_RUNNER_TIMEOUT_MS: ${CLAUDE_TASK_RUNNER_TIMEOUT_MS:-1800000}
+      CLAUDE_TASK_RUNNER_OUTPUT_TAIL_BYTES: ${CLAUDE_TASK_RUNNER_OUTPUT_TAIL_BYTES:-12000}
+      CLAUDE_BRANCH_WORKER_ROOT: ${CLAUDE_BRANCH_WORKER_ROOT:-/data/claude-worker}
+      CLAUDE_BRANCH_WORKER_ALLOWED_REPOS: ${CLAUDE_BRANCH_WORKER_ALLOWED_REPOS:-}
+      CLAUDE_BRANCH_WORKER_BASE_BRANCH: ${CLAUDE_BRANCH_WORKER_BASE_BRANCH:-main}
+      CLAUDE_BRANCH_WORKER_CLAUDE_COMMAND: ${CLAUDE_BRANCH_WORKER_CLAUDE_COMMAND:-claude}
+      CLAUDE_BRANCH_WORKER_CLAUDE_ARGS: ${CLAUDE_BRANCH_WORKER_CLAUDE_ARGS:-}
+      CLAUDE_BRANCH_WORKER_GIT_USER_NAME: ${CLAUDE_BRANCH_WORKER_GIT_USER_NAME:-Averray Claude Worker}
+      CLAUDE_BRANCH_WORKER_GIT_USER_EMAIL: ${CLAUDE_BRANCH_WORKER_GIT_USER_EMAIL:-claude-worker@averray.local}
+      CLAUDE_WORKER_AUTH_MODE: ${CLAUDE_WORKER_AUTH_MODE:-sub}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_WORKER_DAILY_BUDGET: ${CLAUDE_WORKER_DAILY_BUDGET:-}
+      HALT_FILE: ${HALT_FILE:-/data/HALT}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_OWNER_TOKENS: ${GITHUB_OWNER_TOKENS:-}
+      GITHUB_REPO_TOKENS: ${GITHUB_REPO_TOKENS:-}
+      GITHUB_DEFAULT_REPO: ${GITHUB_DEFAULT_REPO:-}
+      GITHUB_HELPER_REPOS: ${GITHUB_HELPER_REPOS:-}
+      GITHUB_API_BASE_URL: ${GITHUB_API_BASE_URL:-https://api.github.com}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - avg-data:/data
+    networks: [avg-internal]
+
+  # C3 docs specialist runner — same off-by-default Claude-family runner
+  # pattern, pinned to agent=="docs" and isolated by the per-agent claim filter.
+  docs-task-runner:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.node
+    image: ${AVERRAY_IMAGE:-avg-node-runtime}
+    profiles: ["docs-runner"]
+    restart: unless-stopped
+    depends_on:
+      hermes-permissions:
+        condition: service_completed_successfully
+      mcp-bundle:
+        condition: service_completed_successfully
+    command: ["node", "services/slack-operator/dist/claude-task-runner.js"]
+    environment:
+      AVERRAY_CODEX_TASKS_PATH: ${AVERRAY_CODEX_TASKS_PATH:-/data/codex-tasks.json}
+      CLAUDE_TASK_RUNNER_ENABLED: ${DOCS_TASK_RUNNER_ENABLED:-0}
+      CLAUDE_TASK_RUNNER_ID: ${DOCS_TASK_RUNNER_ID:-vps-docs-task-runner}
+      CLAUDE_TASK_RUNNER_AGENT: docs
+      CLAUDE_TASK_RUNNER_COMMAND: ${CLAUDE_TASK_RUNNER_COMMAND:-node}
+      CLAUDE_TASK_RUNNER_ARGS: ${DOCS_TASK_RUNNER_ARGS:-services/slack-operator/dist/docs-branch-worker.js}
+      CLAUDE_TASK_RUNNER_CWD: ${CLAUDE_TASK_RUNNER_CWD:-}
+      CLAUDE_TASK_RUNNER_POLL_INTERVAL_MS: ${CLAUDE_TASK_RUNNER_POLL_INTERVAL_MS:-10000}
+      CLAUDE_TASK_RUNNER_TIMEOUT_MS: ${CLAUDE_TASK_RUNNER_TIMEOUT_MS:-1800000}
+      CLAUDE_TASK_RUNNER_OUTPUT_TAIL_BYTES: ${CLAUDE_TASK_RUNNER_OUTPUT_TAIL_BYTES:-12000}
+      CLAUDE_BRANCH_WORKER_ROOT: ${CLAUDE_BRANCH_WORKER_ROOT:-/data/claude-worker}
+      CLAUDE_BRANCH_WORKER_ALLOWED_REPOS: ${CLAUDE_BRANCH_WORKER_ALLOWED_REPOS:-}
+      CLAUDE_BRANCH_WORKER_BASE_BRANCH: ${CLAUDE_BRANCH_WORKER_BASE_BRANCH:-main}
+      CLAUDE_BRANCH_WORKER_CLAUDE_COMMAND: ${CLAUDE_BRANCH_WORKER_CLAUDE_COMMAND:-claude}
+      CLAUDE_BRANCH_WORKER_CLAUDE_ARGS: ${CLAUDE_BRANCH_WORKER_CLAUDE_ARGS:-}
+      CLAUDE_BRANCH_WORKER_GIT_USER_NAME: ${CLAUDE_BRANCH_WORKER_GIT_USER_NAME:-Averray Claude Worker}
+      CLAUDE_BRANCH_WORKER_GIT_USER_EMAIL: ${CLAUDE_BRANCH_WORKER_GIT_USER_EMAIL:-claude-worker@averray.local}
+      CLAUDE_WORKER_AUTH_MODE: ${CLAUDE_WORKER_AUTH_MODE:-sub}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_WORKER_DAILY_BUDGET: ${CLAUDE_WORKER_DAILY_BUDGET:-}
+      HALT_FILE: ${HALT_FILE:-/data/HALT}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_OWNER_TOKENS: ${GITHUB_OWNER_TOKENS:-}
+      GITHUB_REPO_TOKENS: ${GITHUB_REPO_TOKENS:-}
+      GITHUB_DEFAULT_REPO: ${GITHUB_DEFAULT_REPO:-}
+      GITHUB_HELPER_REPOS: ${GITHUB_HELPER_REPOS:-}
+      GITHUB_API_BASE_URL: ${GITHUB_API_BASE_URL:-https://api.github.com}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - avg-data:/data
+    networks: [avg-internal]
+
   hermes:
     image: ${HERMES_IMAGE}
     restart: unless-stopped

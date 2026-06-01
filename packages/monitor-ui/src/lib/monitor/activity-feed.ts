@@ -348,6 +348,8 @@ function agentLabel(agent: AgentType | CardReviewRequest["requestedBy"] | CardRe
   if (agent === "operator") return "Pascal";
   if (agent === "claude") return "Claude";
   if (agent === "test-writer") return "Test-writer";
+  if (agent === "security") return "Security";
+  if (agent === "docs") return "Docs";
   if (agent === "ext") return "external agent";
   return "Codex";
 }

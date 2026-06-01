@@ -48,4 +48,26 @@ describe("compose environment wiring", () => {
     expect(bootstrap).toContain("TEST_WALLET_ADMIN_PRIVATE_KEY=");
     expect(bootstrap).toContain("TEST_WALLET_VERIFIER_PRIVATE_KEY=");
   });
+
+  it("keeps C3 security/docs specialist runners off by default and pinned to their agents", () => {
+    const compose = parse(readText("../../ops/compose.yml")) as {
+      services?: Record<string, { profiles?: string[]; environment?: Record<string, string> }>;
+    };
+
+    const security = compose.services?.["security-task-runner"];
+    const docs = compose.services?.["docs-task-runner"];
+
+    expect(security?.profiles).toEqual(["security-runner"]);
+    expect(security?.environment?.CLAUDE_TASK_RUNNER_ENABLED).toBe("${SECURITY_TASK_RUNNER_ENABLED:-0}");
+    expect(security?.environment?.CLAUDE_TASK_RUNNER_AGENT).toBe("security");
+    expect(security?.environment?.CLAUDE_TASK_RUNNER_ARGS).toBe("${SECURITY_TASK_RUNNER_ARGS:-services/slack-operator/dist/security-branch-worker.js}");
+    expect(docs?.profiles).toEqual(["docs-runner"]);
+    expect(docs?.environment?.CLAUDE_TASK_RUNNER_ENABLED).toBe("${DOCS_TASK_RUNNER_ENABLED:-0}");
+    expect(docs?.environment?.CLAUDE_TASK_RUNNER_AGENT).toBe("docs");
+    expect(docs?.environment?.CLAUDE_TASK_RUNNER_ARGS).toBe("${DOCS_TASK_RUNNER_ARGS:-services/slack-operator/dist/docs-branch-worker.js}");
+
+    const envExample = readText("../../ops/.env.example");
+    expect(envExample).toContain("SECURITY_TASK_RUNNER_ENABLED=0");
+    expect(envExample).toContain("DOCS_TASK_RUNNER_ENABLED=0");
+  });
 });

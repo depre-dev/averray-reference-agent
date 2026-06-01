@@ -95,10 +95,12 @@ export interface LlmUsageActiveCallInput {
 }
 
 const DEFAULT_USAGE_LOG_PATH = "/data/llm-usage.jsonl";
-const DEFAULT_EXPECTED_AGENTS = ["claude", "test-writer", "codex", "hermes"] as const;
+const DEFAULT_EXPECTED_AGENTS = ["claude", "test-writer", "security", "docs", "codex", "hermes"] as const;
 const DEFAULT_SOURCE_REASONS: Readonly<Record<string, string>> = {
   claude: "Claude Agent SDK usage counters have not arrived from runner output yet.",
   "test-writer": "Test-writer SDK usage counters have not arrived from runner output yet.",
+  security: "Security specialist SDK usage counters have not arrived from runner output yet.",
+  docs: "Docs specialist SDK usage counters have not arrived from runner output yet.",
   codex: "Codex CLI does not report usage.",
   hermes: "Hermes/Ollama responses have not exposed usage counters yet.",
 };
@@ -229,7 +231,7 @@ export function aggregateLlmUsage(
     status,
     message: status === "recorded"
       ? "LLM usage includes only runner results that emitted whitelisted token counters."
-      : "No runner has reported LLM usage counters yet. Claude/test-writer counters depend on SDK output; Codex CLI and Hermes/Ollama do not reliably report usage today.",
+      : "No runner has reported LLM usage counters yet. Claude-family counters depend on SDK output; Codex CLI and Hermes/Ollama do not reliably report usage today.",
     ...total,
     runs: events.length,
     byModel,

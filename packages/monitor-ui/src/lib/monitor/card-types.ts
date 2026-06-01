@@ -21,7 +21,7 @@ export type Lane =
 
 export type CardType = "pr" | "mission" | "task" | "deploy" | "draft" | "done";
 
-export type AgentType = "claude" | "codex" | "test-writer" | "hermes" | "ext";
+export type AgentType = "claude" | "codex" | "test-writer" | "security" | "docs" | "hermes" | "ext";
 
 export type RiskTag =
   | "workflow"
@@ -79,8 +79,8 @@ export interface CardRiskSignal {
 
 export interface CardReviewRequest {
   id: string;
-  requestedBy: "hermes" | "operator" | "codex" | "claude" | "test-writer";
-  reviewer: "codex" | "claude" | "test-writer" | "hermes" | "operator";
+  requestedBy: "hermes" | "operator" | "codex" | "claude" | "test-writer" | "security" | "docs";
+  reviewer: "codex" | "claude" | "test-writer" | "security" | "docs" | "hermes" | "operator";
   reason: string;
   status: "requested" | "responded" | "cancelled";
   reviewMode?: "single" | "panel";
@@ -263,7 +263,7 @@ export interface CodexTaskCard extends CardBase {
 
 /** Payload for proposing a task from the board (O3 dispatch). */
 export interface CreateTaskInput {
-  agent: "codex" | "claude" | "test-writer";
+  agent: "codex" | "claude" | "test-writer" | "security" | "docs";
   repo: string;
   prompt: string;
   pullRequestNumber?: number;

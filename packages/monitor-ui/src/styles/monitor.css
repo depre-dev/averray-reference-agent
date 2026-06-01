@@ -835,6 +835,8 @@ body { margin: 0; }
 .hm-card-id .agent-dot--codex  { background: #6b8a4e; }
 .hm-card-id .agent-dot--claude { background: var(--hm-clay); }
 .hm-card-id .agent-dot--test-writer { background: #2f7fb8; }
+.hm-card-id .agent-dot--security { background: #a3414f; }
+.hm-card-id .agent-dot--docs { background: #6b5b9a; }
 .hm-card-id .agent-dot--hermes { background: var(--hm-sage); }
 .hm-card-id .agent-dot--ext    { background: var(--hm-muted); }
 .hm-card-id strong {
@@ -1258,6 +1260,8 @@ button.hm-activity-row:hover {
 .hm-turn--codex   .actor-dot { background: #6b8a4e; }
 .hm-turn--claude  .actor-dot { background: var(--hm-clay); }
 .hm-turn--test-writer .actor-dot { background: #2f7fb8; }
+.hm-turn--security .actor-dot { background: #a3414f; }
+.hm-turn--docs .actor-dot { background: #6b5b9a; }
 .hm-turn--system  .actor-dot { background: var(--hm-muted-soft); }
 .hm-turn-time {
   margin-left: auto;

@@ -59,7 +59,7 @@ export type Lane =
 
 export type CardType = "pr" | "mission" | "task" | "deploy" | "draft" | "done";
 
-export type AgentType = "claude" | "codex" | "test-writer" | "hermes" | "ext";
+export type AgentType = "claude" | "codex" | "test-writer" | "security" | "docs" | "hermes" | "ext";
 
 export type CardState = "fresh" | "stale" | "failed-fetch" | "source-offline" | "running";
 
@@ -130,8 +130,8 @@ export interface CardRiskSignal {
 
 export interface CardReviewRequest {
   id: string;
-  requestedBy: "hermes" | "operator" | "codex" | "claude" | "test-writer";
-  reviewer: "codex" | "claude" | "test-writer" | "hermes" | "operator";
+  requestedBy: "hermes" | "operator" | "codex" | "claude" | "test-writer" | "security" | "docs";
+  reviewer: "codex" | "claude" | "test-writer" | "security" | "docs" | "hermes" | "operator";
   reason: string;
   status: "requested" | "responded" | "cancelled";
   reviewMode?: "single" | "panel";
@@ -346,6 +346,8 @@ export function agentTypeFromBranch(headBranch?: string): AgentType | undefined 
   if (b.startsWith("codex/")) return "codex";
   if (b.startsWith("claude/")) return "claude";
   if (b.startsWith("test-writer/")) return "test-writer";
+  if (b.startsWith("security/")) return "security";
+  if (b.startsWith("docs/")) return "docs";
   return undefined;
 }
 
@@ -364,6 +366,8 @@ export function inferAgentType(item: HermesBoardCardSnapshot, type: CardType): A
   if (owner.includes("hermes")) return "hermes";
   if (owner.includes("claude")) return "claude";
   if (owner.includes("test-writer") || owner.includes("test writer")) return "test-writer";
+  if (owner.includes("security")) return "security";
+  if (owner.includes("docs")) return "docs";
   return "ext";
 }
 
@@ -856,7 +860,7 @@ interface CardReviewRequestWithScope extends CardReviewRequest {
 }
 
 function asReviewActor(value: unknown): CardReviewRequest["requestedBy"] | undefined {
-  if (value === "hermes" || value === "operator" || value === "codex" || value === "claude" || value === "test-writer") return value;
+  if (value === "hermes" || value === "operator" || value === "codex" || value === "claude" || value === "test-writer" || value === "security" || value === "docs") return value;
   return undefined;
 }
 
@@ -1328,6 +1332,8 @@ export function synthesizeTaskCards(
 function agentTypeFromTaskAgent(value: unknown): AgentType {
   if (value === "claude") return "claude";
   if (value === "test-writer") return "test-writer";
+  if (value === "security") return "security";
+  if (value === "docs") return "docs";
   if (value === "hermes") return "hermes";
   if (value === "ext") return "ext";
   return "codex";

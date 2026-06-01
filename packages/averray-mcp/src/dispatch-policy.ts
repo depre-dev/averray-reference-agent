@@ -84,7 +84,7 @@ export function loadDispatchPolicyConfig(env: NodeJS.ProcessEnv = process.env): 
   const allowedAgents = stringArray(block.allowed_agents);
   return {
     allowedRepos,
-    allowedAgents: allowedAgents.length > 0 ? allowedAgents : ["codex", "claude", "test-writer"],
+    allowedAgents: allowedAgents.length > 0 ? allowedAgents : ["codex", "claude", "test-writer", "security", "docs"],
     perDayMax: positiveIntOr(env.HERMES_DISPATCH_PER_DAY_MAX ?? block.per_day_max, 10),
     perRepoPerDayMax: positiveIntOr(env.HERMES_DISPATCH_PER_REPO_PER_DAY_MAX ?? block.per_repo_per_day_max, 5),
     perDayUsdMax: positiveNumberOr(env.HERMES_DISPATCH_PER_DAY_USD_MAX ?? block.per_day_usd_max, 0),

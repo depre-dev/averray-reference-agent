@@ -68,7 +68,9 @@ grep -nE '^(D3_ANOMALY_PAUSE_ENABLED|B2_SELF_HEALING_ENABLED|B2_SELF_HEALING_MAX
 
 ```bash
 $C --profile claude-runner up -d claude-task-runner          # Claude greenfield runner
-$C --profile test-writer-runner up -d test-writer-runner     # C3 specialist (#311) — optional, off by default
+$C --profile test-writer-runner up -d test-writer-task-runner # C3 specialist (#311) — optional, off by default
+$C --profile security-runner up -d security-task-runner       # C3 security specialist — optional, off by default
+$C --profile docs-runner up -d docs-task-runner               # C3 docs specialist — optional, off by default
 $C up -d --force-recreate slack-operator                     # reload D3/B2 env + register routines
 ```
 
@@ -109,7 +111,7 @@ Only after the burn-in holds up do you consider the autopilot flip — a **separ
 
 - **Stop all mutating work now:** `touch` the `HALT_FILE` (path per the ops env) — every runner/dispatch stops.
 - **Disarm a feature:** set its flag back to `0` in `.env.prod`, then `$C up -d --force-recreate slack-operator`.
-- **Stop a runner:** `$C stop claude-task-runner` (and/or `test-writer-runner`).
+- **Stop a runner:** `$C stop claude-task-runner` (and/or `test-writer-task-runner`, `security-task-runner`, `docs-task-runner`).
 - **Autopilot off:** flip the board switch / clear the autonomy mode; it auto-expires at the stated time else a 4h cap regardless.
 
 ---

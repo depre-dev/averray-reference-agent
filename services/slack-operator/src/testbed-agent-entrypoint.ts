@@ -267,10 +267,10 @@ function parseAgentRequestedTestbedMission(input: AgentRequestedTestbedMissionIn
 
 function parseRequesterAgent(value: unknown): TestbedMissionRequesterAgent {
   const agent = cleanString(value);
-  if (agent === "codex" || agent === "claude" || agent === "test-writer" || agent === "hermes" || agent === "operator") return agent;
+  if (agent === "codex" || agent === "claude" || agent === "test-writer" || agent === "security" || agent === "docs" || agent === "hermes" || agent === "operator") return agent;
   throw new TestbedMissionRequestValidationError(
     "invalid_requester_agent",
-    "requesterAgent must be one of codex, claude, test-writer, hermes, or operator."
+    "requesterAgent must be one of codex, claude, test-writer, security, docs, hermes, or operator."
   );
 }
 
