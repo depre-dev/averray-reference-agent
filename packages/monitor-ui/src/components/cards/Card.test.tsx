@@ -338,3 +338,54 @@ describe("Card — archive hint 'Keep watching' (G4)", () => {
     expect(getByText("Keep watching").tagName).toBe("SPAN");
   });
 });
+
+describe("Card — decision hoist (P1-2)", () => {
+  test("needs-attention card surfaces the decision summary + top reason in the body", () => {
+    const card = fixture("agent #542"); // needs-attention, has a decisionRecord
+    const { container } = render(<Card card={card} />);
+    const block = container.querySelector(".hm-card-decision");
+    expect(block).toBeTruthy();
+    const view = within(block as HTMLElement);
+    expect(view.getByText("Hermes decided")).toBeTruthy();
+    expect(view.getByText(/Escalated for triage/)).toBeTruthy();
+    // Top reason only — the full reason list stays in the drawer.
+    expect(view.getByText(/no reviewer assigned/)).toBeTruthy();
+    expect(view.queryByText(/no activity for 48h/)).toBeNull();
+  });
+
+  test("codex-needed card surfaces the decision in the body", () => {
+    const card = fixture("task starter-coding-014"); // codex-needed, has a decisionRecord
+    const { container } = render(<Card card={card} />);
+    const block = container.querySelector(".hm-card-decision");
+    expect(block).toBeTruthy();
+    expect(within(block as HTMLElement).getByText(/Proposed a bounded Codex task/)).toBeTruthy();
+  });
+
+  test("a card without a decision record shows no hoist (no fabricated rationale)", () => {
+    const card = fixture("agent #549"); // hermes-checking, no decisionRecord
+    const { container } = render(<Card card={card} />);
+    expect(container.querySelector(".hm-card-decision")).toBeNull();
+  });
+
+  test("the hoist is gated on the operator-decision lanes, not merely on having a record", () => {
+    const base = fixture("agent #547"); // release-queue
+    const withRecord = {
+      ...base,
+      decisionRecord: {
+        schemaVersion: 1 as const,
+        recordType: "hermes_decision_record" as const,
+        id: "dr-test",
+        kind: "routing" as const,
+        subject: { type: "pr" as const, id: base.id, repo: base.repo },
+        decision: "queue",
+        reasons: ["all checks green"],
+        inputs: {},
+        outcome: { summary: "Merge-ready; queued behind branch protection." },
+        safety: { readOnly: true, mutates: false },
+        generatedAt: "2026-05-29T10:00:00Z",
+      },
+    } as unknown as BoardCard;
+    const { container } = render(<Card card={withRecord} />);
+    expect(container.querySelector(".hm-card-decision")).toBeNull();
+  });
+});

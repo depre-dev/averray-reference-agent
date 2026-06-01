@@ -79,6 +79,27 @@ export const FIXTURE_CARDS: BoardCard[] = [
     prompt:
       "Coalesce repeated policy-attach entries into a single rolled-up row with a count and a 'last applied' timestamp. Do not change the on-chain audit record.",
     action: { kind: "codex-approve", primary: "Dispatch to Codex", secondary: "Edit prompt" },
+    decisionRecord: {
+      schemaVersion: 1,
+      recordType: "hermes_decision_record",
+      id: "dr-task-starter-coding-014",
+      kind: "routing",
+      subject: { type: "task", id: "task starter-coding-014", repo: "depre-dev/agent" },
+      decision: "propose Codex task",
+      reasons: [
+        "14 near-identical policy-attach entries on ops/schema-dual-sign in the last hour",
+        "Bounded, low-risk cleanup with a clear acceptance check",
+        "No on-chain audit record is touched",
+      ],
+      inputs: {},
+      outcome: {
+        summary:
+          "Proposed a bounded Codex task to roll up repeated policy-attach audit rows; awaiting operator approval to dispatch.",
+        waitingNext: "operator approval",
+      },
+      safety: { readOnly: true, mutates: false },
+      generatedAt: "2026-05-29T11:40:00Z",
+    },
   },
 
   // ── Drafts (author hasn't finished) ──
@@ -203,6 +224,27 @@ export const FIXTURE_CARDS: BoardCard[] = [
     archiveHint: true,
     isAction: true,
     files: [],
+    decisionRecord: {
+      schemaVersion: 1,
+      recordType: "hermes_decision_record",
+      id: "dr-agent-542",
+      kind: "escalation",
+      subject: { type: "pr", id: "agent #542", repo: "depre-dev/agent", pullRequestNumber: 542 },
+      decision: "escalate to operator",
+      reasons: [
+        "Author marked ready 2 days ago with no reviewer assigned",
+        "Dependency bump touches the indexer — not auto-mergeable",
+        "Stale: no activity for 48h",
+      ],
+      inputs: {},
+      outcome: {
+        summary:
+          "Escalated for triage: a ready indexer dependency bump has sat 2 days with no reviewer; needs an operator to assign or close it.",
+        waitingNext: "operator triage",
+      },
+      safety: { readOnly: true, mutates: false },
+      generatedAt: "2026-05-29T09:15:00Z",
+    },
   },
 
   // ── Done / release history — keep a representative slice ──

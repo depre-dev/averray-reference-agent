@@ -2366,3 +2366,47 @@ button.hm-turn-pin {
   white-space: nowrap;
   border: 0;
 }
+
+/* P1-2 · Decision hoist on operator-facing cards.
+   Surfaces Hermes's outcome summary + top reason in the card body for the
+   needs-attention / codex-needed lanes, so the operator reads what they're
+   deciding without opening the drawer. A quiet sage-washed block — present
+   only when a decision record exists. */
+.hm-card-decision {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--hm-sage);
+  background: var(--hm-sage-wash);
+  border-radius: 0 8px 8px 0;
+  font-family: var(--font-body);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.hm-card-decision-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--hm-sage-deep);
+  font-weight: 600;
+}
+.hm-card-decision-summary {
+  color: var(--hm-ink-soft);
+}
+.hm-card-decision-reason {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--hm-muted);
+}
+.hm-card-decision-reason-dot {
+  flex: none;
+  width: 4px;
+  height: 4px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--hm-sage);
+}
