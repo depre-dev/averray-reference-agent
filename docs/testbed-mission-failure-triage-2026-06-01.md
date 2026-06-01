@@ -21,9 +21,9 @@ Evidence in code:
 - `services/slack-operator/src/monitor-testbed-missions.ts` has two different failure layers: `mission_report_needs_fix` means a browser-agent product report exists; `mission_runner_failed` means the runner/report pipeline failed before a trustworthy product report existed.
 - `services/slack-operator/src/index.ts` collected both kinds into the same `FailureSignal` with `repo`, so the self-healing core treated runner/report failures as routable code work.
 - The generic B2 prompt only included a board URL as evidence. The hosted board is Cloudflare-protected from a fresh agent context, so a Claude worker could receive a vague "testbed mission failed" task with no durable product evidence it can act on.
-- `testbedMissionCodexFollowupPrompt()` already contains the richer product-fix prompt, but B2 was not using it for self-healing proposals.
+- `testbedMissionCodexFollowupPrompt()` contains a richer product-fix prompt, but a browser mission still points at product evidence rather than a concrete PR, branch, or code surface.
 
-Conclusion: some self-healing tasks were doomed because the target was not a real code task yet. Runner/report-pipeline failures need human/operator diagnosis; structured browser-agent product failures can still become a code-agent fix.
+Conclusion: some self-healing tasks were doomed because the target was not a real code task yet. Runner/report-pipeline failures need human/operator diagnosis. Structured browser-agent product failures are useful evidence, but they should not be dispatched by B2 until a human or another monitor surface maps them to a concrete code-agent target.
 
 ## Code decision
 
@@ -32,8 +32,13 @@ B2 should not delete or rewrite mission history. Instead, its input now filters 
 - Keep only the newest mission per target surface.
 - Drop a failed mission once a newer mission for that target exists, including a pass, requested, ready, or running rerun.
 - Drop failed missions older than `B2_SELF_HEALING_TESTBED_FAILURE_MAX_AGE_HOURS` (default: 72).
-- For the remaining failed missions, propose a self-healing code task only when the run has a structured browser-agent product report.
-- Use the structured testbed follow-up prompt for product-fixable missions so the worker gets blocker, UX gap, proof, and evidence without relying on a protected board link.
+- For the remaining failed missions, escalate structured browser-agent product reports as `not_auto_fixable` because the mission is product evidence, not by itself a routable code surface.
+- Preserve the structured testbed follow-up prompt on the disposition so an operator can copy/handoff the blocker, UX gap, proof, and evidence without relying on a protected board link.
 - Escalate runner/report-pipeline failures as `not_auto_fixable` instead of dispatching a doomed code-agent task.
+- Keep true code surfaces, such as a real PR/branch CI failure with a configured repo target, eligible for B2 proposals.
 
 This is a read-only input guard. It does not create, approve, dismiss, or mutate product work.
+
+## Reconciliation note — 2026-06-01
+
+After the stale-input guard and dismiss suppression landed, the remaining loop cause was the structured product-report path: B2 still treated a failed browser mission as code-agent-actionable whenever a repo was configured. This update keeps those missions in the operator evidence lane and only lets B2 propose for concrete code surfaces, so re-arming B2 should stop the mission-failure → self-heal-failure loop without hiding real PR/CI failures.

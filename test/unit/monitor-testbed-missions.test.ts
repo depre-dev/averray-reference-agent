@@ -488,7 +488,7 @@ describe("monitor testbed mission runs", () => {
     expect(coaching).toContain("do not ask Codex to change the product until the evidence is attached");
   });
 
-  it("marks structured failed browser reports as code-agent-fixable for B2", () => {
+  it("marks structured failed browser reports as operator-review evidence, not B2 code-agent work", () => {
     const run = recordTestbedMissionRunFromOperatorResult(missionResult(), Date.parse("2026-05-22T10:00:00.000Z"));
     const updated = recordTestbedMissionReportFromMessage(
       {
@@ -511,10 +511,11 @@ describe("monitor testbed mission runs", () => {
 
     const disposition = testbedMissionSelfHealingDisposition(updated!);
     expect(disposition).toMatchObject({
-      autoFixable: true,
+      autoFixable: false,
       reason: "product_signal",
     });
     expect(disposition.summary).toContain("Could not find the claim button.");
+    expect(disposition.summary).toContain("product blocker");
     expect(disposition.fixPrompt ?? "").toContain(`Fix the testbed page for mission ${run!.id}`);
     expect(disposition.fixPrompt ?? "").toContain("Smallest product move: Make the claim action visible with a blocked-state reason.");
   });
