@@ -14,8 +14,8 @@ function fixture(id: string): BoardCard {
 }
 
 describe("Card — type coverage", () => {
-  test("PR action card: title, FRESH pip, risk pills, checks, verdict, CTA", () => {
-    const { container } = render(<Card card={fixture("agent #548")} />);
+  test("PR action card: title, FRESH pip, risk pills, checks, verdict, one working primary", () => {
+    const { container } = render(<Card card={fixture("agent #548")} onApproveMerge={vi.fn()} />);
     const view = within(container);
     expect(view.getByText("Allow operator override of agent claim-stake floor")).toBeTruthy();
     expect(container.querySelector(".hm-card--action")).toBeTruthy();
@@ -27,8 +27,8 @@ describe("Card — type coverage", () => {
     expect(container.querySelector(".hm-checks-bar")).toBeTruthy();
     // Hermes verdict + CTA
     expect(view.getByText("Hermes verdict")).toBeTruthy();
-    expect(view.getByText("Approve & merge")).toBeTruthy();
-    expect(view.getByText("Send back to Codex")).toBeTruthy();
+    expect(view.getByRole("button", { name: "Approve merge" })).toBeTruthy();
+    expect(view.queryByText("Send back to Codex")).toBeNull();
   });
 
   test("mission card renders its summary and checks bar", () => {
@@ -178,15 +178,17 @@ describe("Card — state coverage", () => {
 describe("Card — interactivity", () => {
   test("with onClick: role button, fires on click, CTA buttons don't bubble", () => {
     const onClick = vi.fn();
-    const { container } = render(<Card card={fixture("agent #548")} onClick={onClick} />);
+    const onApproveMerge = vi.fn();
+    const { container } = render(<Card card={fixture("agent #548")} onClick={onClick} onApproveMerge={onApproveMerge} />);
     const root = container.querySelector(".hm-card") as HTMLElement;
     expect(root.getAttribute("role")).toBe("button");
     fireEvent.click(root);
     expect(onClick).toHaveBeenCalledTimes(1);
 
     // Clicking the primary CTA must not also trigger the card's onClick.
-    fireEvent.click(within(container).getByText("Approve & merge"));
+    fireEvent.click(within(container).getByText("Approve merge"));
     expect(onClick).toHaveBeenCalledTimes(1);
+    expect(onApproveMerge).not.toHaveBeenCalled(); // first click only arms confirm
   });
 
   test("without onClick: role article", () => {
@@ -218,28 +220,25 @@ describe("Card — task approve (O3 dispatch)", () => {
     expect(getByRole("button", { name: /Approve & dispatch/ })).toBeTruthy();
   });
 
-  test("a waiting-on-operator task exposes real inline controls", () => {
+  test("a waiting-on-operator task exposes exactly one dispatch primary", () => {
     const onApprove = vi.fn();
     const onDismiss = vi.fn();
     const onSnooze = vi.fn();
     const onInvestigate = vi.fn();
-    const { getByRole } = render(
+    const { getByRole, queryByRole } = render(
       <Card
         card={proposed}
         onApprove={onApprove}
-        onDismiss={onDismiss}
-        onSnooze={onSnooze}
-        onInvestigate={onInvestigate}
       />,
     );
     expect(getByRole("button", { name: /Approve & dispatch/ })).toBeTruthy();
-    fireEvent.click(getByRole("button", { name: "Dismiss" }));
-    fireEvent.click(getByRole("button", { name: "Snooze" }));
-    fireEvent.click(getByRole("button", { name: "Investigate" }));
+    expect(queryByRole("button", { name: "Dismiss" })).toBeNull();
+    expect(queryByRole("button", { name: "Snooze" })).toBeNull();
+    expect(queryByRole("button", { name: "Investigate" })).toBeNull();
     expect(onApprove).not.toHaveBeenCalled();
-    expect(onDismiss).toHaveBeenCalledWith(proposed);
-    expect(onSnooze).toHaveBeenCalledWith(proposed);
-    expect(onInvestigate).toHaveBeenCalledWith(proposed);
+    expect(onDismiss).not.toHaveBeenCalled();
+    expect(onSnooze).not.toHaveBeenCalled();
+    expect(onInvestigate).not.toHaveBeenCalled();
   });
 
   test("humanizes guardrail enum codes while preserving raw codes on hover", () => {
@@ -288,6 +287,24 @@ describe("Card — task approve (O3 dispatch)", () => {
     const { queryByRole } = render(<Card card={running} onApprove={vi.fn()} />);
     expect(queryByRole("button", { name: /Approve & dispatch/ })).toBeNull();
   });
+
+  test("watch-only in-flight cards show no action buttons even with handlers wired", () => {
+    const running = {
+      ...proposed,
+      waitingOn: { actor: "agent", tone: "info" },
+      taskStatus: "running",
+      state: "running",
+    } as unknown as BoardCard;
+    const { container } = render(
+      <Card
+        card={running}
+        onApprove={vi.fn()}
+        onApproveMerge={vi.fn()}
+        onRerunMission={vi.fn()}
+      />,
+    );
+    expect(within(container).queryAllByRole("button")).toHaveLength(0);
+  });
 });
 
 describe("Card — requested tester mission approve (T6)", () => {
@@ -310,18 +327,48 @@ describe("Card — requested tester mission approve (T6)", () => {
     const { getByRole, getByText } = render(<Card card={requestedMission} onApproveMission={vi.fn()} />);
     expect(getByText("Tester run requested")).toBeTruthy();
     expect(getByText("not started")).toBeTruthy();
-    expect(getByRole("button", { name: /Approve tester run/ })).toBeTruthy();
+    expect(getByRole("button", { name: /Approve & dispatch/ })).toBeTruthy();
   });
 
   test("approving a tester mission requires confirm before dispatching to the runner queue", () => {
     const onApproveMission = vi.fn();
     const { getByRole, getByText } = render(<Card card={requestedMission} onApproveMission={onApproveMission} />);
-    fireEvent.click(getByRole("button", { name: /Approve tester run/ }));
+    fireEvent.click(getByRole("button", { name: /Approve & dispatch/ }));
     expect(onApproveMission).not.toHaveBeenCalled();
-    expect(getByText(/Queue runner now\?/)).toBeTruthy();
+    expect(getByText(/Dispatch tester runner\?/)).toBeTruthy();
     fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
     expect(onApproveMission).toHaveBeenCalledTimes(1);
     expect(onApproveMission.mock.calls[0]?.[0]?.id).toBe("testbed-mission-requested-1");
+  });
+
+  test("failed mission triage exposes exactly one Re-run primary", () => {
+    const failedMission = {
+      ...requestedMission,
+      id: "testbed-mission-failed-1",
+      lane: "needs-attention",
+      missionStatus: "failed",
+      isAction: true,
+      mission: {
+        verdict: "FAILED",
+        verdictTone: "fail",
+        confidence: 0.8,
+        target: "https://staging.example.test",
+        seed: "fresh",
+        path: [],
+        blockers: [],
+        evidence: [],
+        mutationBoundary: "No mutation crossed.",
+        recommendations: [],
+      },
+    } as unknown as BoardCard;
+    const onRerunMission = vi.fn();
+    const { getByRole, getByText, queryByRole } = render(<Card card={failedMission} onRerunMission={onRerunMission} />);
+    expect(getByRole("button", { name: "Re-run" })).toBeTruthy();
+    expect(queryByRole("button", { name: /Approve & dispatch/ })).toBeNull();
+    fireEvent.click(getByRole("button", { name: "Re-run" }));
+    expect(getByText(/Re-run as a fresh mission\?/)).toBeTruthy();
+    fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
+    expect(onRerunMission).toHaveBeenCalledWith(failedMission, "fresh");
   });
 });
 

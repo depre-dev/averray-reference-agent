@@ -22,6 +22,7 @@ import { useState } from "react";
 import type { BoardCard, CardChecks, WaitingOn, RiskTag, AgentType } from "../../lib/monitor/card-types.js";
 import { formatFreshness, freshnessTier } from "../../lib/monitor/urgency.js";
 import { humanizedSignalParts } from "../../lib/monitor/signal-labels.js";
+import { relatedPrForCard } from "../../lib/monitor/collaboration.js";
 import { ChecksBar } from "./ChecksBar.js";
 
 export type CardProps = {
@@ -32,14 +33,12 @@ export type CardProps = {
   onApprove?: (card: BoardCard) => void;
   /** Approve a requested tester mission (T6). Operator-only; runs through a confirm. */
   onApproveMission?: (card: BoardCard) => void;
-  /** Hide this card from the current monitor view. Local UI-only control. */
-  onDismiss?: (card: BoardCard) => void;
-  /** Temporarily hide this card from the current monitor view. Local UI-only control. */
-  onSnooze?: (card: BoardCard) => void;
+  /** Approve a PR for merge review. Opens/records only; humans still merge. */
+  onApproveMerge?: (card: BoardCard) => void;
+  /** Re-run a failed tester mission. */
+  onRerunMission?: (card: BoardCard, freshness: "fresh" | "memory") => void;
   /** "Keep watching" on the archive hint — cancel/extend this card's auto-archive. */
   onKeepWatching?: (card: BoardCard) => void;
-  /** Open the card's detail surface from an inline action. */
-  onInvestigate?: (card: BoardCard) => void;
 };
 
 // ── Helpers (mirror the bundle's small inline helpers) ──────────────
@@ -84,10 +83,9 @@ export function Card({
   onClick,
   onApprove,
   onApproveMission,
-  onDismiss,
-  onSnooze,
+  onApproveMerge,
+  onRerunMission,
   onKeepWatching,
-  onInvestigate,
 }: CardProps) {
   const isAction = Boolean(card.isAction);
   const isStale = card.state === "stale";
@@ -106,7 +104,6 @@ export function Card({
   // discriminated union means these are narrow per branch; we read them
   // defensively because the same Card renders every type.
   const verdict = (card as { verdict?: string }).verdict;
-  const action = (card as { action?: { primary: string; secondary?: string } }).action;
   const checks: CardChecks | undefined = card.checks;
   const closedAt = (card as { closedAt?: string }).closedAt;
   const verdictText = (card as { verdictText?: string }).verdictText;
@@ -186,9 +183,8 @@ export function Card({
           card={card}
           onApprove={onApprove}
           onApproveMission={onApproveMission}
-          onDismiss={onDismiss}
-          onSnooze={onSnooze}
-          onInvestigate={onInvestigate ?? onClick}
+          onApproveMerge={onApproveMerge}
+          onRerunMission={onRerunMission}
         />
       ) : null}
 
@@ -196,28 +192,6 @@ export function Card({
         <div className="hm-verdict">
           <span className="label">Hermes verdict</span>
           <HumanizedText text={verdict} />
-        </div>
-      ) : null}
-
-      {isAction && action ? (
-        <div className="hm-card-cta">
-          <button
-            type="button"
-            className="hm-btn hm-btn--action hm-btn--sm"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <HumanizedText text={action.primary} />
-            <span className="hm-kbd">A</span>
-          </button>
-          {action.secondary ? (
-            <button
-              type="button"
-              className="hm-btn hm-btn--ghost hm-btn--sm"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <HumanizedText text={action.secondary} />
-            </button>
-          ) : null}
         </div>
       ) : null}
 
@@ -374,66 +348,64 @@ function OperatorActions({
   card,
   onApprove,
   onApproveMission,
-  onDismiss,
-  onSnooze,
-  onInvestigate,
+  onApproveMerge,
+  onRerunMission,
 }: {
   card: BoardCard;
   onApprove?: (card: BoardCard) => void;
   onApproveMission?: (card: BoardCard) => void;
-  onDismiss?: (card: BoardCard) => void;
-  onSnooze?: (card: BoardCard) => void;
-  onInvestigate?: (card: BoardCard) => void;
+  onApproveMerge?: (card: BoardCard) => void;
+  onRerunMission?: (card: BoardCard, freshness: "fresh" | "memory") => void;
 }) {
   const [confirming, setConfirming] = useState(false);
   const agent = agentLabel(card.agentType);
   const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
   const taskStatus = (card as { taskStatus?: string }).taskStatus;
   const missionStatus = (card as { missionStatus?: string }).missionStatus;
-  const canApproveTask = card.type === "task" && taskStatus === "proposed" && Boolean(onApprove);
-  const canApproveMission = card.type === "mission" && missionStatus === "requested" && Boolean(onApproveMission);
-  const canApprove = canApproveTask || canApproveMission;
-  const approveLabel = canApproveMission ? "Approve tester run" : "Approve & dispatch";
-  const confirmLabel = canApproveMission ? "Queue runner now?" : `Dispatch to ${agent}?`;
-  const approve = canApproveMission ? onApproveMission : onApprove;
+  const missionTarget = card.type === "mission" ? card.mission?.target : undefined;
+  const relatedPr = card.type === "pr" ? relatedPrForCard(card) : undefined;
+  const primary =
+    card.type === "task" && taskStatus === "proposed" && onApprove
+      ? {
+          label: "Approve & dispatch",
+          confirm: `Dispatch to ${agent}?`,
+          run: () => onApprove(card),
+        }
+      : card.type === "mission" && missionStatus === "requested" && onApproveMission
+        ? {
+            label: "Approve & dispatch",
+            confirm: "Dispatch tester runner?",
+            run: () => onApproveMission(card),
+          }
+        : card.type === "mission" && missionStatus === "failed" && missionTarget && onRerunMission
+          ? {
+              label: "Re-run",
+              confirm: "Re-run as a fresh mission?",
+              run: () => onRerunMission(card, "fresh" as const),
+            }
+          : card.type === "pr" && card.isAction && relatedPr && onApproveMerge
+            ? {
+                label: "Approve merge",
+                confirm: "Open GitHub merge review?",
+                run: () => onApproveMerge(card),
+              }
+            : undefined;
 
-  if (!canApprove && !onDismiss && !onSnooze && !onInvestigate) return null;
-
-  const action = (handler: ((card: BoardCard) => void) | undefined) => (e: { stopPropagation: () => void }) => {
-    stop(e);
-    handler?.(card);
-  };
+  if (!primary) return null;
 
   if (!confirming) {
     return (
       <div className="hm-card-cta hm-card-cta--operator" role="group" aria-label="Operator actions">
-        {canApprove ? (
-          <button
-            type="button"
-            className="hm-btn hm-btn--action hm-btn--sm"
-            onClick={(e) => {
-              stop(e);
-              setConfirming(true);
-            }}
-          >
-            {approveLabel}
-          </button>
-        ) : null}
-        {onDismiss ? (
-          <button type="button" className="hm-btn hm-btn--ghost hm-btn--sm" onClick={action(onDismiss)}>
-            Dismiss
-          </button>
-        ) : null}
-        {onSnooze ? (
-          <button type="button" className="hm-btn hm-btn--ghost hm-btn--sm" onClick={action(onSnooze)}>
-            Snooze
-          </button>
-        ) : null}
-        {onInvestigate ? (
-          <button type="button" className="hm-btn hm-btn--ghost hm-btn--sm" onClick={action(onInvestigate)}>
-            Investigate
-          </button>
-        ) : null}
+        <button
+          type="button"
+          className="hm-btn hm-btn--action hm-btn--sm"
+          onClick={(e) => {
+            stop(e);
+            setConfirming(true);
+          }}
+        >
+          {primary.label}
+        </button>
       </div>
     );
   }
@@ -441,7 +413,7 @@ function OperatorActions({
   return (
     <div className="hm-card-cta hm-card-cta--operator" role="group" aria-label="Confirm operator action">
       <span style={{ fontSize: 12, color: "var(--hm-ink-soft)", marginRight: "auto" }}>
-        {confirmLabel}
+        {primary.confirm}
       </span>
       <button
         type="button"
@@ -449,7 +421,7 @@ function OperatorActions({
         onClick={(e) => {
           stop(e);
           setConfirming(false);
-          approve?.(card);
+          primary.run();
         }}
       >
         Confirm
