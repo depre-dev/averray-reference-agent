@@ -26,5 +26,19 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages ./packages
 COPY --from=build /app/services ./services
 COPY --from=build /app/scripts ./scripts
+
+# Playwright browser + ffmpeg for the testbed-mission-runner's browser-agent.
+# The gold-path tester drives Playwright-MCP, which launches Playwright's OWN
+# managed Chromium from PLAYWRIGHT_BROWSERS_PATH (not /usr/bin/chromium), and
+# surface-sweep video capture needs Playwright's bundled ffmpeg — both live in
+# /home/appuser/.cache/ms-playwright. install-deps pulls Chromium's system libs
+# (root); the browser + ffmpeg binaries are installed AS appuser so they land
+# in that cache (where the runner looks). Version follows the playwright-core
+# pinned in package.json (we invoke the installed node_modules CLI, no re-pin).
+ENV PLAYWRIGHT_BROWSERS_PATH=/home/appuser/.cache/ms-playwright
+RUN apt-get update \
+  && node node_modules/playwright-core/cli.js install-deps chromium \
+  && rm -rf /var/lib/apt/lists/*
 USER appuser
+RUN node node_modules/playwright-core/cli.js install chromium ffmpeg
 CMD ["node", "packages/trace-mcp/dist/index.js"]
