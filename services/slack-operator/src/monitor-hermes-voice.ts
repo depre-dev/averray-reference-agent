@@ -23,6 +23,7 @@
 
 import type { CollaborationMessage } from "./monitor-collab.js";
 import { beginLlmUsageCall, recordLlmUsageFromResult } from "@avg/averray-mcp/llm-usage";
+import { logger } from "@avg/mcp-common";
 
 export const HERMES_PERSONA = `You are Hermes, the board orchestrator for the Averray platform.
 
@@ -152,6 +153,8 @@ export interface HermesOwnerAsk {
   waitingFor: string;
 }
 
+let llmUsageDebugLogged = false;
+
 export async function generateHermesReply(
   context: HermesReplyContext,
   options: GenerateHermesReplyOptions
@@ -194,6 +197,7 @@ export async function generateHermesReply(
     });
     if (!response.ok) return null;
     const json = await response.json().catch(() => null) as unknown;
+    maybeLogHermesUsageShape(json);
     await recordLlmUsageFromResult({
       agent: "hermes",
       model,
@@ -253,6 +257,7 @@ export async function generateHermesBoardNarration(
     });
     if (!response.ok) return null;
     const json = await response.json().catch(() => null) as unknown;
+    maybeLogHermesUsageShape(json);
     await recordLlmUsageFromResult({
       agent: "hermes",
       model,
@@ -554,6 +559,83 @@ export function hermesOwnerAskForCard(item: HermesBoardCardSnapshot): HermesOwne
   }
 
   return null;
+}
+
+export function summarizeHermesUsageDebugShape(value: unknown): Record<string, unknown> {
+  const root = asRecord(value);
+  return {
+    topLevelKeys: root ? Object.keys(root).sort() : [],
+    usageType: typeof root?.usage,
+    present: {
+      ...debugPath(root, "usage"),
+      ...debugPath(root, "prompt_eval_count"),
+      ...debugPath(root, "eval_count"),
+      ...debugPath(root, "prompt_tokens"),
+      ...debugPath(root, "completion_tokens"),
+      ...debugPath(asRecord(root?.message), "usage", "message.usage"),
+      ...debugPath(asRecord(asArray(root?.choices)[0]), "usage", "choices[0].usage"),
+      ...debugPath(asRecord(asRecord(asArray(root?.choices)[0])?.message), "usage", "choices[0].message.usage"),
+    },
+  };
+}
+
+function maybeLogHermesUsageShape(value: unknown): void {
+  if (llmUsageDebugLogged || process.env.LLM_USAGE_DEBUG !== "1") return;
+  llmUsageDebugLogged = true;
+  logger.info(summarizeHermesUsageDebugShape(value), "llm_usage_debug_shape");
+}
+
+function debugPath(record: Record<string, unknown> | undefined, key: string, label = key): Record<string, unknown> {
+  if (!record || !(key in record)) return {};
+  return { [label]: redactUsageDebugValue(record[key]) };
+}
+
+function redactUsageDebugValue(value: unknown): unknown {
+  const record = asRecord(value);
+  if (!record) return value;
+  const allowedKeys = [
+    "model",
+    "inputTokens",
+    "input_tokens",
+    "inputTokenCount",
+    "outputTokens",
+    "output_tokens",
+    "outputTokenCount",
+    "promptTokens",
+    "prompt_tokens",
+    "promptTokenCount",
+    "completionTokens",
+    "completion_tokens",
+    "completionTokenCount",
+    "prompt_eval_count",
+    "promptEvalCount",
+    "eval_count",
+    "evalCount",
+    "cacheTokens",
+    "cache_tokens",
+    "cacheReadInputTokens",
+    "cache_read_input_tokens",
+    "cacheCreationInputTokens",
+    "cache_creation_input_tokens",
+    "prompt_tokens_details",
+    "input_tokens_details",
+  ];
+  return Object.fromEntries(
+    allowedKeys
+      .filter((allowedKey) => allowedKey in record)
+      .map((allowedKey) => [
+        allowedKey,
+        asRecord(record[allowedKey]) ? redactUsageDebugValue(record[allowedKey]) : record[allowedKey],
+      ]),
+  );
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
 function hermesWhyTrace(context: HermesWhyTraceContext): string | null {
