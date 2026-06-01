@@ -27,6 +27,8 @@ import type {
   AgentType,
   HermesDecisionRecord,
   CardWorkingNow,
+  MissionCard,
+  MissionReport,
 } from "../../lib/monitor/card-types.js";
 import { formatFreshness, freshnessTier } from "../../lib/monitor/urgency.js";
 import { laneFor } from "../../lib/monitor/lane-rules.js";
@@ -157,6 +159,8 @@ export function Card({
           </span>
         </div>
       ) : null}
+
+      {!isClosed && card.type === "mission" ? <MissionRunSummary card={card} /> : null}
 
       {/* P1-2: hoist the decision onto operator-facing cards. On the two
           lanes where the operator decides (needs-attention, codex-needed),
@@ -344,6 +348,106 @@ function WorkingNowLine({ workingNow }: { workingNow: CardWorkingNow }) {
       <span className="target">{workingNow.label}</span>
     </div>
   );
+}
+
+function MissionRunSummary({ card }: { card: MissionCard }) {
+  const mission = card.mission;
+  const status = missionRunStatus(card, mission);
+  const tone = missionRunTone(card, mission);
+  const target = mission?.target ? shortMissionTarget(mission.target) : undefined;
+  const blocker = mission ? missionPrimaryBlocker(card, mission) : undefined;
+  const evidence = mission ? missionEvidenceSummary(mission) : [];
+  const boundary = mission?.mutationBoundary ? compactSentence(mission.mutationBoundary, 92) : undefined;
+
+  return (
+    <div className={`hm-mission-run hm-mission-run--${tone}`} aria-label={`Tester run ${status}`}>
+      <div className="hm-mission-run-top">
+        <span className="hm-mission-run-kicker">Tester run</span>
+        <span className={`hm-mission-run-verdict hm-mission-run-verdict--${tone}`}>{status}</span>
+        {target ? <span className="hm-mission-run-target">{target}</span> : null}
+      </div>
+
+      {blocker ? (
+        <div className="hm-mission-run-blocker">
+          <span>Blocker</span>
+          <strong>
+            <HumanizedText text={blocker} />
+          </strong>
+        </div>
+      ) : null}
+
+      {mission ? (
+        <div className="hm-mission-run-facts">
+          <span>{mission.seed || "fresh agent"}</span>
+          {mission.latency ? <span>{mission.latency}</span> : null}
+          {evidence.length > 0 ? (
+            evidence.map((item) => <span key={item}>{item}</span>)
+          ) : (
+            <span>no artifacts captured</span>
+          )}
+        </div>
+      ) : (
+        <div className="hm-mission-run-facts">
+          <span>waiting for operator approval</span>
+        </div>
+      )}
+
+      {boundary ? <div className="hm-mission-run-boundary">{boundary}</div> : null}
+    </div>
+  );
+}
+
+function missionRunStatus(card: MissionCard, mission: MissionReport | undefined): string {
+  if (mission) {
+    const confidence = Math.round(mission.confidence * 100);
+    return `${mission.verdict} ${confidence}%`;
+  }
+  if (card.missionStatus === "requested") return "REQUESTED";
+  if (card.missionStatus === "running") return "RUNNING";
+  if (card.missionStatus === "completed") return "COMPLETED";
+  if (card.missionStatus === "failed") return "FAILED";
+  return "QUEUED";
+}
+
+function missionRunTone(card: MissionCard, mission: MissionReport | undefined): "ok" | "warn" | "fail" | "neutral" {
+  if (mission?.verdictTone) return mission.verdictTone;
+  if (card.missionStatus === "failed") return "fail";
+  if (card.missionStatus === "completed") return "ok";
+  if (card.missionStatus === "running") return "warn";
+  return "neutral";
+}
+
+function shortMissionTarget(target: string): string {
+  try {
+    const parsed = new URL(target);
+    const path = parsed.pathname === "/" ? "" : parsed.pathname;
+    return `${parsed.hostname}${path}`;
+  } catch {
+    return compactSentence(target, 64);
+  }
+}
+
+function missionPrimaryBlocker(card: MissionCard, mission: MissionReport): string | undefined {
+  const cleanFailure = missionFailureCardSummary(card)?.replace(/^Mission failed\s+—\s+/i, "").trim();
+  if (cleanFailure) return cleanFailure;
+  const first = mission.blockers[0];
+  if (!first) return undefined;
+  return compactSentence([first.head, first.body].filter(Boolean).join(" — "), 118);
+}
+
+function missionEvidenceSummary(mission: MissionReport): string[] {
+  const counts = new Map<string, number>();
+  for (const item of mission.evidence) counts.set(item.kind, (counts.get(item.kind) ?? 0) + 1);
+  return Array.from(counts.entries()).map(([kind, count]) => (count > 1 ? `${count} ${kind}s` : kind));
+}
+
+function compactSentence(value: string, maxLength: number): string {
+  const firstLine = value
+    .replace(/[│║╔╗╚╝═]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (firstLine.length <= maxLength) return firstLine;
+  return `${firstLine.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
 }
 
 // ── Checks label (e.g. "5/6 · 1 running") ──────────────────────────

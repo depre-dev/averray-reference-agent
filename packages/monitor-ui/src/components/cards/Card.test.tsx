@@ -37,6 +37,15 @@ describe("Card — type coverage", () => {
     expect(view.getByText("Verify onboarding flow on staging.averray.com")).toBeTruthy();
     expect(view.getByText("testbed")).toBeTruthy();
     expect(container.querySelector(".hm-checks-bar")).toBeTruthy();
+    const run = container.querySelector(".hm-mission-run");
+    expect(run).toBeTruthy();
+    expect(within(run as HTMLElement).getByText("Tester run")).toBeTruthy();
+    expect(within(run as HTMLElement).getByText("PARTIAL 81%")).toBeTruthy();
+    expect(within(run as HTMLElement).getByText("staging.averray.com/onboarding")).toBeTruthy();
+    expect(within(run as HTMLElement).getByText("2 screenshots")).toBeTruthy();
+    expect(within(run as HTMLElement).getByText("trace")).toBeTruthy();
+    expect(within(run as HTMLElement).getByText("console")).toBeTruthy();
+    expect(within(run as HTMLElement).getByText(/Read-only mission/)).toBeTruthy();
   });
 
   test("deploy card renders its verification summary", () => {
@@ -535,5 +544,22 @@ describe("Card — failed mission readable summary", () => {
     expect(text).not.toContain("|");
     expect(text).not.toMatch(/[─-▟]/);
     expect(text).not.toContain("ms-playwright");
+  });
+
+  test("renders failed tester runs as a compact report, without raw runner output", () => {
+    const card = fixture("mission browser-checkout-12");
+    const { container } = render(<Card card={card} />);
+    const run = container.querySelector(".hm-mission-run");
+    expect(run).toBeTruthy();
+    const text = run?.textContent ?? "";
+    expect(within(run as HTMLElement).getByText("Tester run")).toBeTruthy();
+    expect(within(run as HTMLElement).getByText("FAILED 0%")).toBeTruthy();
+    expect(within(run as HTMLElement).getByText("staging.averray.com/checkout")).toBeTruthy();
+    expect(text).toContain("browser binary not installed");
+    expect(text).toContain("no artifacts captured");
+    expect(text).toContain("No mutation");
+    expect(text).not.toContain("ms-playwright");
+    expect(text).not.toContain("npx playwright install");
+    expect(text).not.toContain("|");
   });
 });
