@@ -22,7 +22,12 @@
  */
 
 import type { CollaborationMessage } from "./monitor-collab.js";
-import { beginLlmUsageCall, recordLlmUsageFromResult } from "@avg/averray-mcp/llm-usage";
+import {
+  beginLlmUsageCall,
+  llmUsageLogPath,
+  recordLlmUsageFromResult,
+  type LlmUsageEvent,
+} from "@avg/averray-mcp/llm-usage";
 import { logger } from "@avg/mcp-common";
 
 export const HERMES_PERSONA = `You are Hermes, the board orchestrator for the Averray platform.
@@ -198,13 +203,13 @@ export async function generateHermesReply(
     if (!response.ok) return null;
     const json = await response.json().catch(() => null) as unknown;
     maybeLogHermesUsageShape(json);
-    await recordLlmUsageFromResult({
+    await recordHermesLlmUsage({
       agent: "hermes",
       model,
       ...(options.runId ? { runId: options.runId } : {}),
       ...(options.taskId ? { taskId: options.taskId } : {}),
       result: json,
-    }, options.usageLogPath ? { path: options.usageLogPath } : {}).catch(() => undefined);
+    }, options);
     const text = extractReplyText(json);
     return text ? appendHermesWhyTrace(applyHermesMemoryInfluence(text, context), context) : null;
   } catch {
@@ -258,13 +263,13 @@ export async function generateHermesBoardNarration(
     if (!response.ok) return null;
     const json = await response.json().catch(() => null) as unknown;
     maybeLogHermesUsageShape(json);
-    await recordLlmUsageFromResult({
+    await recordHermesLlmUsage({
       agent: "hermes",
       model,
       ...(options.runId ? { runId: options.runId } : {}),
       ...(options.taskId ? { taskId: options.taskId } : {}),
       result: json,
-    }, options.usageLogPath ? { path: options.usageLogPath } : {}).catch(() => undefined);
+    }, options);
     const text = extractReplyText(json);
     return text ? appendHermesWhyTrace(applyHermesMemoryInfluence(text, context), context) : null;
   } catch {
@@ -585,6 +590,32 @@ function maybeLogHermesUsageShape(value: unknown): void {
   logger.info(summarizeHermesUsageDebugShape(value), "llm_usage_debug_shape");
 }
 
+async function recordHermesLlmUsage(
+  input: Parameters<typeof recordLlmUsageFromResult>[0],
+  options: Pick<GenerateHermesReplyOptions, "usageLogPath">
+): Promise<LlmUsageEvent | undefined> {
+  const path = options.usageLogPath ?? llmUsageLogPath();
+  try {
+    const event = await recordLlmUsageFromResult(input, { path });
+    if (!event) {
+      logger.debug({
+        agent: input.agent,
+        model: input.model,
+        path,
+      }, "monitor_collaboration_llm_usage_not_recorded");
+    }
+    return event;
+  } catch (error) {
+    logger.warn({
+      err: error,
+      agent: input.agent,
+      model: input.model,
+      path,
+    }, "monitor_collaboration_llm_usage_record_failed");
+    return undefined;
+  }
+}
+
 function debugPath(record: Record<string, unknown> | undefined, key: string, label = key): Record<string, unknown> {
   if (!record || !(key in record)) return {};
   return { [label]: redactUsageDebugValue(record[key]) };
@@ -808,11 +839,17 @@ function extractReplyText(json: unknown): string | null {
   if (!first || typeof first !== "object") return null;
   const message = (first as { message?: unknown }).message;
   if (!message || typeof message !== "object") return null;
-  const content = (message as { content?: unknown }).content;
-  if (typeof content !== "string") return null;
-  const trimmed = content.trim();
-  if (!trimmed) return null;
-  return trimmed.slice(0, 1200);
+  return firstNonEmptyTextField(message, ["content", "reasoning", "reasoning_content"], 1200);
+}
+
+function firstNonEmptyTextField(record: object, keys: readonly string[], max: number): string | null {
+  for (const key of keys) {
+    const value = (record as Record<string, unknown>)[key];
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed) return trimmed.slice(0, max);
+  }
+  return null;
 }
 
 function truncate(text: string, max: number): string {
