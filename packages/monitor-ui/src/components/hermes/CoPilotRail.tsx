@@ -78,7 +78,9 @@ export function CoPilotRail({
   composerFocusToken,
   onScopedConversationChange,
 }: CoPilotRailProps) {
-  const { messages, ask } = useCollaboration(collaboration ?? { enabled: false });
+  const { messages, ask, enabled, pending, sendError } = useCollaboration(
+    collaboration ?? { enabled: false },
+  );
   const relatedPr = relatedPrForCard(focusedCard);
   const streamRef = useRef<HTMLDivElement>(null);
   // Suggestion chips fill the composer: hold the text + a bump token.
@@ -106,6 +108,10 @@ export function CoPilotRail({
   const scopedConversationActive = useMemo(
     () => hasScopedConversation(messages, focusedCard),
     [focusedCard, messages],
+  );
+  const templateModeObserved = useMemo(
+    () => messages.some((message) => message.author === "hermes" && message.hermesMode === "templated"),
+    [messages],
   );
   useEffect(() => {
     onScopedConversationChange?.(scopedConversationActive);
@@ -140,6 +146,12 @@ export function CoPilotRail({
         onUseInComposer={fillComposer}
       />
 
+      {templateModeObserved ? (
+        <div className="hm-hermes-mode-banner" role="status">
+          Hermes is offline — replies are templated until the live model key is configured.
+        </div>
+      ) : null}
+
       <section className="hm-activity" aria-label="Hermes activity">
         <div className="hm-activity-head">
           <span className="hm-kicker">Activity</span>
@@ -172,6 +184,9 @@ export function CoPilotRail({
         prefillToken={prefillToken}
         focusedCardId={focusedCard?.id ?? null}
         focusToken={composerFocusToken}
+        collaborationEnabled={enabled}
+        pending={pending}
+        sendError={sendError}
       />
     </aside>
   );
@@ -214,7 +229,7 @@ function ActivityEntryRow({
       <div className="hm-turn-head">
         <span className="hm-turn-actor">
           <span className="actor-dot" aria-hidden />
-          {actorLabel(entry.actor)}
+          {entry.actorDisplay ?? actorLabel(entry.actor)}
         </span>
         <span className="hm-turn-kind">· {entry.kindLabel}</span>
         <span className="hm-turn-time">{formatTurnTime(entry.atMs)}</span>

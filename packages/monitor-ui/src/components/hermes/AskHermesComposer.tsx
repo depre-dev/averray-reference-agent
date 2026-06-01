@@ -41,6 +41,13 @@ export interface AskHermesComposerProps {
   focusedCardId?: string | null;
   /** Bump to programmatically focus the input (the board's `a` shortcut). */
   focusToken?: number;
+  /** When false the collaboration channel is off: the input is disabled
+   *  with an honest "Ask Hermes unavailable" message (no silent drop). */
+  collaborationEnabled?: boolean;
+  /** True while a posted question is awaiting Hermes's reply. */
+  pending?: boolean;
+  /** Inline error when the POST itself failed (question didn't send). */
+  sendError?: string | null;
 }
 
 export function AskHermesComposer({
@@ -58,7 +65,19 @@ export function AskHermesComposer({
   prefillToken,
   focusedCardId,
   focusToken,
+  collaborationEnabled = true,
+  pending = false,
+  sendError = null,
 }: AskHermesComposerProps) {
+  // The composer is a multi-purpose command line: /mission, /task, /mute,
+  // and autopilot dispatch to their own handlers and work regardless of the
+  // collaboration channel. So we only fully disable the input when Ask is
+  // the *only* thing it could do (no other command handler wired) and the
+  // channel is off. Otherwise the input stays usable and only the free-form
+  // Ask branch reports "unavailable" (never a silent drop).
+  const askOnly =
+    !onSpawnMission && !onSpawnClaudeTask && !onCreateTask && !onMute && !onUnmute && !onSetAutopilot && !onSetSupervised;
+  const inputDisabled = !collaborationEnabled && askOnly;
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   // Scope a question to the focused card or the whole board. When no card is
@@ -148,7 +167,12 @@ export function AskHermesComposer({
         }
         return;
       case "ask":
-        if (onAsk) {
+        // Honest unavailable state: when the collaboration channel is off we
+        // never silently drop a free-form question — we say so and keep the
+        // text so the operator can retry / use a command instead.
+        if (!collaborationEnabled) {
+          setError("Ask Hermes unavailable — the collaboration channel is offline.");
+        } else if (onAsk) {
           onAsk(command.text, { scope: effectiveScope });
           setValue("");
           setError(null);
@@ -213,22 +237,54 @@ export function AskHermesComposer({
         <textarea
           ref={inputRef}
           className="hm-compose-input"
-          placeholder="Ask Hermes · /task <agent> <repo> <prompt> · /mission <url> · /mute 1h"
-          aria-label="Ask Hermes, propose a task, spawn a mission, or mute alerts"
+          placeholder={
+            inputDisabled
+              ? "Ask Hermes unavailable — collaboration channel is offline"
+              : "Ask Hermes · /task <agent> <repo> <prompt> · /mission <url> · /mute 1h"
+          }
+          aria-label={
+            inputDisabled
+              ? "Ask Hermes unavailable — collaboration channel is offline"
+              : "Ask Hermes, propose a task, spawn a mission, or mute alerts"
+          }
           value={value}
+          disabled={inputDisabled}
           onChange={(e) => {
             setValue(e.target.value);
             if (error) setError(null);
           }}
           onKeyDown={onKeyDown}
         />
-        <button type="button" className="hm-compose-send" onClick={send}>
+        <button
+          type="button"
+          className="hm-compose-send"
+          onClick={send}
+          disabled={inputDisabled}
+          title={inputDisabled ? "Ask Hermes unavailable" : undefined}
+        >
           Send <span className="hm-kbd">⏎</span>
         </button>
       </div>
+      {!collaborationEnabled ? (
+        <div className="hm-compose-note" role="note" style={{ color: "var(--hm-muted)", fontSize: 12, marginTop: 6 }}>
+          Ask Hermes unavailable — the collaboration channel is offline.{!askOnly ? " Commands like /mission and /mute still work." : ""}
+        </div>
+      ) : pending ? (
+        <div className="hm-compose-thinking" role="status" aria-live="polite" style={{ color: "var(--hm-muted)", fontSize: 12, marginTop: 6 }}>
+          <span className="pulse" aria-hidden /> Hermes thinking…
+        </div>
+      ) : null}
+      {/* A failed local parse error and a failed POST are distinct: the
+          parse error is the composer's own state; sendError comes from the
+          hook. Show whichever is active (parse takes precedence as it
+          blocks the send entirely). */}
       {error ? (
         <div className="hm-compose-error" role="alert" style={{ color: "var(--hm-rose)", fontSize: 12, marginTop: 6 }}>
           {error}
+        </div>
+      ) : sendError ? (
+        <div className="hm-compose-error" role="alert" style={{ color: "var(--hm-rose)", fontSize: 12, marginTop: 6 }}>
+          {sendError}
         </div>
       ) : null}
     </div>

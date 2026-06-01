@@ -120,6 +120,25 @@ describe("buildHermesActivityFeed", () => {
     });
   });
 
+  test("labels templated Hermes collaboration turns in activity", () => {
+    const entries = buildHermesActivityFeed({
+      cards: [],
+      messages: [message({
+        id: "hermes-template",
+        author: "hermes",
+        kind: "chat",
+        addressedTo: "operator",
+        text: "Template reply based on the board.",
+        hermesMode: "templated",
+        relatedPr: undefined,
+      })],
+      banner,
+      now: () => Date.parse("2026-05-28T10:05:00Z"),
+    });
+    const collaboration = entries.find((entry) => entry.id === "collaboration:hermes-template");
+    expect(collaboration?.text).toContain("Hermes (offline — templated) said");
+  });
+
   test("narrates review-panel responses without creating pretend chatter", () => {
     const entries = buildHermesActivityFeed({
       cards: [task({

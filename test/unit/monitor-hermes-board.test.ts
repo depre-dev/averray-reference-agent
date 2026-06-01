@@ -123,6 +123,47 @@ describe("buildHermesBoardSnapshotFromMonitor", () => {
     });
   });
 
+  it("keeps self-healing capacity signals off the board and counts them quietly", () => {
+    const board = buildHermesBoardSnapshotFromMonitor({
+      generatedAt: "2026-06-01T10:00:00.000Z",
+      active: [
+        {
+          correlationId: "self-heal:testbed:overview",
+          title: "Self-healing budget exhausted",
+          intent: "self_healing",
+          status: "needs_review",
+          reason: "Escalated to operator: dispatch_budget_exhausted",
+          updatedAt: "2026-06-01T09:59:00.000Z",
+          summary: { kind: "self_healing", action: "escalate" },
+        },
+        {
+          correlationId: "self-heal:testbed:runs",
+          title: "Self-healing halted",
+          intent: "self_healing",
+          status: "needs_review",
+          reason: "Escalated to operator: halt_present",
+          updatedAt: "2026-06-01T09:58:00.000Z",
+          summary: { kind: "self_healing", action: "escalate" },
+        },
+        {
+          correlationId: "self-heal:testbed:agents",
+          title: "Self-healing dispatch blocked",
+          intent: "self_healing",
+          status: "needs_review",
+          reason: "Escalated to operator: dispatch_blocked:daily_budget_exhausted",
+          updatedAt: "2026-06-01T09:57:00.000Z",
+          summary: { kind: "self_healing", action: "escalate" },
+        },
+      ],
+      recent: [],
+    });
+
+    expect(board?.items).toEqual([]);
+    expect(board?.counts?.attention).toBe(0);
+    expect(board?.counts?.selfHealingCapacitySignals).toBe(3);
+    expect(board?.headline).toContain("no active PR handoffs need attention");
+  });
+
   it("forwards the PR head branch (flat headBranch and nested head.ref)", () => {
     const board = buildHermesBoardSnapshotFromMonitor({
       generatedAt: "2026-05-20T08:54:42.000Z",

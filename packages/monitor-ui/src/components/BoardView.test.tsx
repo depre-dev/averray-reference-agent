@@ -36,11 +36,12 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(within(container).getByText(/governance dispute UI/)).toBeTruthy();
   });
 
-  test("renders the action card with its CTA and Hermes verdict", () => {
+  test("renders the action card with one primary and Hermes verdict", () => {
     const { container } = render(<BoardView board={richBoard} status="open" />);
     const view = within(container);
     expect(view.getByText("Allow operator override of agent claim-stake floor")).toBeTruthy();
-    expect(view.getByText("Approve & merge")).toBeTruthy();
+    expect(view.getAllByRole("button", { name: "Approve merge" }).length).toBeGreaterThan(0);
+    expect(view.queryByText("Send back to Codex")).toBeNull();
     expect(view.getByText("Hermes verdict")).toBeTruthy();
   });
 
@@ -131,15 +132,72 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(onMute.mock.calls[0]?.[0]).toBeGreaterThan(Date.now() + 59 * 60_000);
   });
 
-  test("Ask Hermes float focuses the composer when no drawer is open", () => {
-    const { getByRole } = render(<BoardView board={richBoard} status="open" keyboard={false} />);
+  test("Ask Hermes float gives immediate feedback and focuses the composer (collaboration on)", () => {
+    const { getByRole, getByText } = render(
+      <BoardView
+        board={richBoard}
+        status="open"
+        keyboard={false}
+        collaboration={{ fetcher: async () => [], poster: async () => {}, refreshIntervalMs: 0 }}
+      />,
+    );
     fireEvent.click(getByRole("button", { name: "Ask Hermes" }));
+    // P0-4: the action is visibly acknowledged (transient status line)…
+    expect(getByText(/Asking Hermes/)).toBeTruthy();
+    // …and the (enabled) composer takes focus.
     expect(getByRole("textbox", { name: "Ask Hermes, propose a task, spawn a mission, or mute alerts" })).toBe(document.activeElement);
+  });
+
+  test("Ask Hermes is honestly unavailable when collaboration is off — but wired commands still work (no silent drop)", () => {
+    // Wire a command handler (/mute) so the composer isn't Ask-only: the
+    // input must stay usable for commands while the free-form Ask path is
+    // honestly unavailable.
+    const onMute = vi.fn();
+    const { getByRole, getByText, container } = render(
+      <BoardView board={richBoard} status="open" keyboard={false} onMute={onMute} />,
+    );
+    fireEvent.click(getByRole("button", { name: "Ask Hermes" }));
+    expect(getByText(/Ask Hermes unavailable/)).toBeTruthy();
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    expect(input.disabled).toBe(false);
+    // A free-form question reports unavailable instead of silently dropping…
+    fireEvent.change(input, { target: { value: "what's blocking?" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(getByRole("alert").textContent).toMatch(/Ask Hermes unavailable/);
+    // …but a wired command still dispatches.
+    fireEvent.change(input, { target: { value: "/mute 1h" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onMute).toHaveBeenCalledTimes(1);
+  });
+
+  test("Ask Hermes composer is fully disabled when it is Ask-only and collaboration is off", () => {
+    // No command handlers wired → Ask-only → the input is honestly disabled.
+    const { getByRole, container } = render(<BoardView board={richBoard} status="open" keyboard={false} />);
+    fireEvent.click(getByRole("button", { name: "Ask Hermes" }));
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    expect(input.disabled).toBe(true);
+    expect(input.getAttribute("aria-label")).toMatch(/Ask Hermes unavailable/);
   });
 
   test("an open stream lights the LIVE indicator with the snapshot clock", () => {
     const { getByText } = render(<BoardView board={richBoard} status="open" />);
     expect(getByText(/Live · 10:30:00/)).toBeTruthy();
+  });
+
+  test("automation health stays a header gauge, not a decision-lane card", () => {
+    const board: MonitorBoard = {
+      at: "2026-06-01T12:00:00.000Z",
+      cards: [],
+      automationHealth: { selfHealingOpen: 2, dispatchUsedToday: 4, dispatchPerDayCap: 5 },
+    };
+    const { container, getByLabelText, getByText, queryByRole } = render(
+      <BoardView board={board} status="open" keyboard={false} />,
+    );
+
+    expect(getByText("Self-heal 2 open · dispatch 4/5")).toBeTruthy();
+    expect(getByLabelText("Automation health: Self-heal 2 open · dispatch 4/5")).toBeTruthy();
+    expect(queryByRole("article")).toBeNull();
+    expect(container.querySelector(".hm-lane--needs-attention .hm-card")).toBeNull();
   });
 
   test("renders LLM usage when the monitor snapshot reports counters", () => {
@@ -236,9 +294,8 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(queryByText("not_recorded")).toBeNull();
   });
 
-  test("waiting-on-operator card actions are real board controls", () => {
+  test("waiting-on-operator task card exposes one dispatch primary", () => {
     const onApproveTask = vi.fn();
-    const onCardClick = vi.fn();
     const board: MonitorBoard = {
       at: "2026-05-28T10:30:00Z",
       cards: [{
@@ -258,18 +315,17 @@ describe("BoardView — rich-mix board (open stream)", () => {
       }],
     };
     const { getByRole, getByText, queryByText } = render(
-      <BoardView board={board} status="open" onApproveTask={onApproveTask} onCardClick={onCardClick} keyboard={false} />,
+      <BoardView board={board} status="open" onApproveTask={onApproveTask} keyboard={false} />,
     );
     expect(getByRole("button", { name: /Approve & dispatch/ })).toBeTruthy();
-    fireEvent.click(getByRole("button", { name: "Investigate" }));
-    expect(onCardClick).toHaveBeenCalledWith("task-action-1");
+    expect(queryByText("Dismiss")).toBeNull();
+    expect(queryByText("Snooze")).toBeNull();
+    expect(queryByText("Investigate")).toBeNull();
     fireEvent.click(getByRole("button", { name: /Approve & dispatch/ }));
     fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
     expect(onApproveTask).toHaveBeenCalledWith("task-action-1");
 
     expect(getByText("Fix the failed mission")).toBeTruthy();
-    fireEvent.click(getByRole("button", { name: "Dismiss" }));
-    expect(queryByText("Fix the failed mission")).toBeNull();
   });
 
   test("renders backlog suggestions as a collapsed planner-only rail block", () => {
@@ -350,9 +406,23 @@ describe("BoardView — degraded + transient states", () => {
   test("no board yet (connecting) renders the calm empty layout, not degraded", () => {
     const { container, getByText } = render(<BoardView board={undefined} status="connecting" />);
     expect(container.querySelector(".hm-now--degraded")).toBeNull();
-    expect(getByText(/Nothing waits on you/)).toBeTruthy();
+    expect(getByText(/Nothing needs you right now/)).toBeTruthy();
     // Still eight lanes, all empty.
     expect(container.querySelectorAll(".hm-lane").length).toBe(8);
+  });
+
+  test("zero-decision board renders a deliberate success empty state", () => {
+    const board: MonitorBoard = { cards: [], at: "2026-06-01T10:00:00Z" };
+    const { container, getByText } = render(<BoardView board={board} status="open" />);
+    expect(container.querySelector(".hm-now--calm")).toBeTruthy();
+    expect(container.querySelector(".hm-now--degraded")).toBeNull();
+    expect(getByText(/Nothing needs you right now/)).toBeTruthy();
+    expect(getByText(/The board is quiet on purpose/)).toBeTruthy();
+    expect(
+      getByText("No active decisions, dispatches, or release work. Hermes is watching; you can step away.", {
+        selector: ".hm-now-sub",
+      }),
+    ).toBeTruthy();
   });
 });
 

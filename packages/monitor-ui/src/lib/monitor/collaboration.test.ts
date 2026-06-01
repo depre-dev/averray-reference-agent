@@ -1,6 +1,6 @@
 import { test, assert } from "vitest";
 
-import { actorLabel, formatTurnTime, relatedPrForCard } from "./collaboration.js";
+import { actorLabel, actorLabelForMessage, formatTurnTime, relatedPrForCard } from "./collaboration.js";
 import type { BoardCard } from "./card-types.js";
 
 test("actorLabel maps authors to display names", () => {
@@ -10,6 +10,13 @@ test("actorLabel maps authors to display names", () => {
   assert.equal(actorLabel("test-writer"), "Test-writer");
   assert.equal(actorLabel("codex"), "Codex");
   assert.equal(actorLabel("system"), "System");
+});
+
+test("actorLabelForMessage labels Hermes live vs templated provenance", () => {
+  assert.equal(actorLabelForMessage({ author: "hermes", hermesMode: "live" }), "Hermes (live)");
+  assert.equal(actorLabelForMessage({ author: "hermes", hermesMode: "templated" }), "Hermes (offline — templated)");
+  assert.equal(actorLabelForMessage({ author: "hermes" }), "Hermes");
+  assert.equal(actorLabelForMessage({ author: "operator" }), "Pascal");
 });
 
 test("formatTurnTime renders HH:MM and tolerates a bad timestamp", () => {

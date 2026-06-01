@@ -24,6 +24,15 @@ describe("HermesTurn", () => {
     expect((container.querySelector(".hm-turn") as HTMLElement).className).toContain("hm-turn--hermes");
   });
 
+  test("labels live and templated Hermes turns honestly", () => {
+    const live = render(<HermesTurn turn={{ ...base, id: "live", hermesMode: "live" }} />);
+    expect(live.getByText("Hermes (live)")).toBeTruthy();
+    live.unmount();
+
+    const templated = render(<HermesTurn turn={{ ...base, id: "templated", hermesMode: "templated" }} />);
+    expect(templated.getByText("Hermes (offline — templated)")).toBeTruthy();
+  });
+
   test("operator turns are labelled Pascal", () => {
     const { getByText } = render(<HermesTurn turn={{ ...base, id: "2", author: "operator" }} />);
     expect(getByText("Pascal")).toBeTruthy();

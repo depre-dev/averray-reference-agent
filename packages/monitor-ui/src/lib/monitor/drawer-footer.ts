@@ -155,11 +155,17 @@ export function buildDrawerFooter(card: BoardCard, deps: DrawerFooterDeps = {}):
       run: () => copy(card.id),
     });
   } else {
+    // Open the SPECIFIC PR — never the repo-root fallback. A task with no
+    // resolved PR has nothing to open yet; silently linking to the repo root
+    // sends the operator to the wrong target, so disable with an honest reason.
+    const prUrl = pullRequestUrlForCard(card);
     buttons.push({
       key: "open-github",
       label: "Open on github",
       kind: "primary",
-      ...(url ? { run: () => openUrl(url) } : { disabledReason: "No GitHub link for this card." }),
+      ...(prUrl
+        ? { run: () => openUrl(prUrl) }
+        : { disabledReason: "No PR yet — opens once the task proposes a change." }),
     });
   }
 

@@ -168,6 +168,13 @@ body { margin: 0; }
 .hm-kpi--ok .n    { background: var(--hm-sage-soft); color: var(--hm-sage-deep); }
 .hm-kpi--action   { background: var(--hm-amber-wash); border-color: var(--hm-amber-ring); color: var(--hm-amber-deep); }
 .hm-kpi--action .n{ background: var(--hm-amber-soft); color: var(--hm-amber-deep); }
+.hm-kpi--automation {
+  background: transparent;
+  border-color: var(--hm-line);
+  color: var(--hm-muted);
+  text-transform: none;
+  letter-spacing: 0.02em !important;
+}
 .hm-kpi--zero     { opacity: 0.55; }
 .hm-kpi .dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; opacity: 0.7; }
 
@@ -1116,6 +1123,17 @@ body { margin: 0; }
   vertical-align: 0;
   animation: hm-pulse 2s infinite;
 }
+.hm-hermes-mode-banner {
+  margin: 10px 16px 0;
+  padding: 9px 11px;
+  border-radius: var(--hm-radius-sm);
+  border: 1px solid rgba(157, 105, 54, 0.26);
+  background: rgba(245, 236, 220, 0.72);
+  color: var(--hm-ink-soft);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
 .hm-hermes-tools {
   margin-left: auto;
   display: flex; gap: 6px;
@@ -1144,11 +1162,13 @@ body { margin: 0; }
 .hm-hermes-stream::-webkit-scrollbar-thumb { background: var(--hm-line); border-radius: 999px; }
 
 .hm-activity {
+  flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   border-bottom: 1px solid var(--hm-line-soft);
   background: linear-gradient(180deg, var(--hm-paper-2), var(--hm-paper));
+  overflow: hidden;
 }
 .hm-activity-head {
   padding: 12px 16px 0;
@@ -1163,7 +1183,8 @@ body { margin: 0; }
   color: var(--hm-ink);
 }
 .hm-activity-stream {
-  max-height: min(44vh, 520px);
+  flex: 1;
+  min-height: 0;
   padding-top: 10px;
 }
 .hm-activity-row {
@@ -1350,10 +1371,14 @@ button.hm-turn-pin {
 
 /* Compose */
 .hm-compose {
+  flex: 0 0 auto;
   padding: 10px 14px 14px;
   background: var(--hm-paper);
   border-top: 1px solid var(--hm-line-soft);
   display: grid; gap: 8px;
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
 }
 .hm-compose-row {
   display: grid;
@@ -2409,4 +2434,33 @@ button.hm-turn-pin {
   margin-top: 6px;
   border-radius: 50%;
   background: var(--hm-sage);
+}
+
+/* P0-4 · Ask-Hermes feedback.
+   A transient confirmation toast for any Ask-Hermes trigger, plus the
+   composer's "Hermes thinking…" indicator. The toast self-clears; the
+   durable pending/error state lives in the composer. */
+.hm-ask-status {
+  position: absolute;
+  right: 22px;
+  bottom: 72px; /* sits just above the .hm-ask-float pill */
+  pointer-events: none;
+  z-index: 20;
+}
+.hm-ask-status-toast {
+  display: inline-block;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--hm-ink);
+  color: #fffdf7;
+  box-shadow: var(--hm-shadow-pop);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 12px;
+}
+.hm-compose-thinking .pulse,
+.hm-compose-thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }

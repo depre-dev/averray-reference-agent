@@ -180,6 +180,29 @@ export function BoardView({
   const [askToken, setAskToken] = useState(0);
   const [hermesFocusConversationActive, setHermesFocusConversationActive] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  // P0-4: every Ask-Hermes trigger must produce immediate visible feedback.
+  // We bump askToken (focuses the composer, which scrolls it into view),
+  // explicitly scroll the composer into view, and show a transient
+  // aria-live line ("Asking Hermes about {card}").
+  const [askStatus, setAskStatus] = useState<string | null>(null);
+  const askStatusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const triggerAsk = useCallback((focusId: string | null, label?: string) => {
+    if (focusId) setBoardFocusId(focusId);
+    setAskToken((t) => t + 1);
+    // Scroll the composer into view so the operator sees where their
+    // question lands. Guarded + querySelector so it doesn't depend on the
+    // rail's internal structure and is a safe no-op under jsdom/tests.
+    if (typeof document !== "undefined") {
+      const composer = document.querySelector(".hm-compose-input");
+      (composer as HTMLElement | null)?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+    }
+    setAskStatus(label ? `Asking Hermes about ${label}` : "Asking Hermes…");
+    if (askStatusTimer.current) clearTimeout(askStatusTimer.current);
+    askStatusTimer.current = setTimeout(() => setAskStatus(null), 4000);
+  }, []);
+  useEffect(() => () => {
+    if (askStatusTimer.current) clearTimeout(askStatusTimer.current);
+  }, []);
 
   // KPIs / banner / mode reflect the whole board, regardless of search.
   const state = useMemo(
@@ -312,6 +335,13 @@ export function BoardView({
     });
   }, []);
 
+  const onApproveMergeCard = useCallback((card: BoardCard) => {
+    const pr = relatedPrForCard(card);
+    if (pr && typeof window !== "undefined") {
+      window.open(`https://github.com/${pr.repo}/pull/${pr.number}`, "_blank", "noopener,noreferrer");
+    }
+  }, []);
+
   // ── keyboard (§12) ──────────────────────────────────────────────
   useBoardKeyboard({
     enabled: keyboard,
@@ -335,8 +365,8 @@ export function BoardView({
       }
     },
     onAsk: (id) => {
-      setBoardFocusId(id);
-      setAskToken((t) => t + 1);
+      const card = orderedCards.find((c) => c.id === id);
+      triggerAsk(id, card?.title ?? id);
     },
   });
 
@@ -347,11 +377,12 @@ export function BoardView({
   // proposes / approves / opens GitHub through paths the board already uses.
   const drawerActions = useMemo<DrawerActionHandlers>(() => {
     const a: DrawerActionHandlers = {
-      // Ask Hermes: close the modal drawer, scope the rail composer to the card.
+      // Ask Hermes: close the modal drawer, scope the rail composer to the
+      // card, scroll it into view, and surface immediate "Asking Hermes
+      // about {card}" feedback (P0-4 — the action used to be silent).
       onAskHermes: (card) => {
         onCardClose?.();
-        setBoardFocusId(card.id);
-        setAskToken((t) => t + 1);
+        triggerAsk(card.id, card.title ?? card.id);
       },
     };
     if (onRerunMission) {
@@ -410,6 +441,7 @@ export function BoardView({
         <TopStrip
           counts={state.counts}
           liveAt={status === "open" ? liveLabel || undefined : undefined}
+          automationHealth={board?.automationHealth}
           onRefresh={onRefresh}
         />
       )}
@@ -445,10 +477,12 @@ export function BoardView({
                 onClick={onCardClick ? (c) => onCardClick(c.id) : undefined}
                 onApprove={onApproveTask ? (c) => onApproveTask(c.id) : undefined}
                 onApproveMission={onApproveMission ? (c) => onApproveMission(c.id) : undefined}
-                onDismiss={onDismissCard}
-                onSnooze={onSnoozeCard}
+                onApproveMerge={onApproveMergeCard}
+                onRerunMission={onRerunMission ? (c, freshness) => {
+                  const target = c.type === "mission" ? c.mission?.target : undefined;
+                  if (target) onRerunMission(target, freshness);
+                } : undefined}
                 onKeepWatching={(c) => onKeepWatchingCard(c.id)}
-                onInvestigate={onCardClick ? (c) => onCardClick(c.id) : undefined}
               />
             )}
           />
@@ -475,6 +509,14 @@ export function BoardView({
         />
       </div>
 
+      {/* P0-4: transient confirmation that an Ask-Hermes action was received.
+          aria-live so it's announced; visually a small floating toast. It
+          self-clears after a few seconds (the composer carries the durable
+          thinking/error state). */}
+      <div className="hm-ask-status" role="status" aria-live="polite">
+        {askStatus ? <span className="hm-ask-status-toast">{askStatus}</span> : null}
+      </div>
+
       {drawerCard ? (
         <DetailDrawer
           card={drawerCard}
@@ -491,8 +533,8 @@ export function BoardView({
           className="hm-ask-float"
           onClick={() => {
             const nextFocusId = boardFocusId ?? state.banner.primaryActionId ?? state.mostUrgent?.id ?? orderedCards[0]?.id ?? null;
-            if (nextFocusId) setBoardFocusId(nextFocusId);
-            setAskToken((t) => t + 1);
+            const card = nextFocusId ? orderedCards.find((c) => c.id === nextFocusId) : undefined;
+            triggerAsk(nextFocusId, card?.title ?? card?.id);
           }}
           aria-label="Ask Hermes"
         >

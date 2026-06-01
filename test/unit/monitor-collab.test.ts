@@ -122,6 +122,30 @@ describe("monitor collaboration channel", () => {
     expect(message.relatedCorrelationId).toBe("smoke-2026-05-18-abc");
   });
 
+  it("records Hermes reply provenance but does not let non-Hermes turns claim it", () => {
+    const hermes = recordCollaborationMessage(
+      {
+        author: "hermes",
+        kind: "chat",
+        text: "The board says Codex owns the next move.",
+        addressedTo: "operator",
+        hermesMode: "LIVE",
+      },
+      NOW
+    );
+    const operator = recordCollaborationMessage(
+      {
+        author: "operator",
+        text: "ok",
+        hermesMode: "templated",
+      },
+      NOW + 1
+    );
+
+    expect(hermes.hermesMode).toBe("live");
+    expect(operator.hermesMode).toBeUndefined();
+  });
+
   it("drops malformed relatedPr without failing the record", () => {
     const message = recordCollaborationMessage(
       {

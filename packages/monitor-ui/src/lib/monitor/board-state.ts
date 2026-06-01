@@ -206,7 +206,7 @@ export function boardNowBanner(cards: BoardCard[], opts: DeriveBoardOpts = {}): 
 
 function calmHeadline(counts: KPICounts): string {
   if (counts.total === 0) {
-    return "Nothing waits on you. Everything in flight is automation; the day's release history is below.";
+    return "Nothing needs you right now. The board is quiet on purpose.";
   }
 
   const automationCount = counts.checking + counts.queue + counts.deploying;
@@ -221,7 +221,12 @@ function calmHeadline(counts: KPICounts): string {
 }
 
 function calmSub(counts: KPICounts, metrics?: CalmBoardMetrics): string {
-  const base = counts.done > 0 ? `${counts.done} card(s) shipped today` : "No releases yet today";
+  const base =
+    counts.total === 0 && counts.done === 0
+      ? "No active decisions, dispatches, or release work"
+      : counts.done > 0
+        ? `${counts.done} card(s) shipped today`
+        : "No releases yet today";
   const parts = [base];
   if (metrics?.avgTimeToDecision) parts.push(`avg time-to-decision ${metrics.avgTimeToDecision}`);
   if (typeof metrics?.disputes === "number") parts.push(`${metrics.disputes} dispute(s)`);

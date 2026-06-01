@@ -51,6 +51,17 @@ describe("CoPilotRail", () => {
     expect(container.querySelector(".hm-turn-time")).toBeTruthy();
   });
 
+  test("shows one template-mode banner and labels offline Hermes replies", async () => {
+    const fetcher = vi.fn(async () => [
+      msg("1", "hermes", "Template answer from the board.", { hermesMode: "templated" }),
+      msg("2", "hermes", "Another template answer.", { hermesMode: "templated" }),
+    ]);
+    const { container } = render(<CoPilotRail collaboration={{ fetcher, refreshIntervalMs: 0 }} />, { wrapper });
+    await waitFor(() => expect(within(container).getByText(/Template answer from the board/)).toBeTruthy());
+    expect(within(container).getAllByText("Hermes (offline — templated)").length).toBeGreaterThan(0);
+    expect(within(container).getAllByText(/replies are templated/)).toHaveLength(1);
+  });
+
   test("is inert (no fetch, empty-state copy) when collaboration is omitted", () => {
     const { getByText } = render(<CoPilotRail />, { wrapper });
     expect(getByText(/No real Hermes activity has been logged yet/)).toBeTruthy();

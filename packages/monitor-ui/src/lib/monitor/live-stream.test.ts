@@ -151,7 +151,7 @@ function freshStream() {
 }
 
 test("LiveStream: tags a typeless named-event payload with the event name", () => {
-  // The M1' BoardSnapshotV2 body is `{ cards, at, repo }` — no `type`.
+  // The v2 BoardSnapshot body has board fields but no `type`.
   const { received, source } = freshStream();
   source.emitNamed("board.snapshot", JSON.stringify({ cards: [], at: "2026-05-28T00:00:00Z", repo: "x/y" }));
   assert.equal(received.length, 1);

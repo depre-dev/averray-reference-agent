@@ -145,6 +145,16 @@ describe("buildDrawerFooter — done + generic variants", () => {
     find(f, "open-github").run!();
     expect(openUrl).toHaveBeenCalledWith("https://github.com/averray-agent/agent/pull/12");
   });
+
+  it("no-PR task card → Open on github is DISABLED, never the repo-root fallback (P0-3)", () => {
+    // A proposed task has a repo but no resolved PR yet. The old code fell back
+    // to githubUrlForCard()'s repo root; now it must be disabled with a reason.
+    const taskNoPr = card({ type: "task", id: "claude-task-x1", taskStatus: "proposed" });
+    const f = buildDrawerFooter(taskNoPr, {});
+    const open = find(f, "open-github");
+    expect(open.run).toBeUndefined();
+    expect(open.disabledReason).toBe("No PR yet — opens once the task proposes a change.");
+  });
 });
 
 describe("buildDrawerFooter — Ask Hermes on every variant", () => {

@@ -247,7 +247,7 @@ export interface SelfHealingDeps {
   /** In-memory cooldown: has this target been handled within the window? */
   inCooldown: (targetSignature: string, nowMs: number) => boolean;
   markHandled: (targetSignature: string, nowMs: number) => void;
-  /** Propose a `proposed` fix task and run it through the EXISTING gate. */
+  /** Propose a `proposed` fix task; operator/autopilot approval happens elsewhere. */
   propose: (input: {
     signal: FailureSignal;
     targetSignature: string;

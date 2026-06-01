@@ -18,7 +18,10 @@
 // The output is what `GET /monitor/v2/board` serializes and what the
 // SSE `board.snapshot` event carries.
 
-import { buildHermesBoardSnapshotFromMonitor } from "./monitor-hermes-board.js";
+import {
+  buildHermesBoardSnapshotFromMonitor,
+  isQuietAutomationCapacityReason,
+} from "./monitor-hermes-board.js";
 import {
   aggregateLlmUsage,
   listActiveLlmUsageCalls,
@@ -266,6 +269,20 @@ export interface BoardSnapshotV2 {
   at: string;
   repo: string;
   llmUsage: LlmUsageAggregate;
+  automationHealth?: AutomationHealth;
+}
+
+export interface AutomationHealth {
+  /** Non-terminal self-healing fix proposals currently open. */
+  selfHealingOpen: number;
+  /** Hermes/system-managed task proposals created today. */
+  dispatchUsedToday: number;
+  /** Same cap used by the dispatch/self-healing backstops. */
+  dispatchPerDayCap: number;
+  /** Slack-only capacity/escalation signals kept off the decision lanes. */
+  quietSignalCount: number;
+  selfHealingCapacitySignals: number;
+  taskHealthCapacitySignals: number;
 }
 
 // ── Lane normalization ──────────────────────────────────────────────
@@ -531,6 +548,10 @@ function humanizeTaskTitle(title: string): string {
 
 function asFiniteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function countValue(value: unknown): number {
+  return Math.max(0, Math.floor(asFiniteNumber(value) ?? 0));
 }
 
 function asNonEmptyString(value: unknown): string | undefined {
@@ -1263,6 +1284,7 @@ const SYNTH_TERMINAL_TASK_STATUSES = new Set(["completed", "cancelled"]);
 const APPROVED_STALE_MINUTES = 30;
 const RUNNING_STALE_MINUTES = 20;
 const REPEATED_FAILURE_ATTEMPTS = 2;
+const AUTOMATION_TERMINAL_TASK_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 /**
  * Synthesize `codex-needed` cards for queued tasks the classifier won't
@@ -1286,6 +1308,7 @@ export function synthesizeTaskCards(
   for (const entry of asArray(codexTasks?.items)) {
     const task = asRecord(entry);
     if (!task) continue;
+    if (isQuietTaskHealthCapacityTask(task)) continue;
     const status = asString(task.status);
     if (!status || SYNTH_TERMINAL_TASK_STATUSES.has(status)) continue;
     if (asString(task.operatorDismissedAt)) continue;
@@ -1543,6 +1566,8 @@ export function buildV2BoardSnapshot(
   const missionIndex = indexTestbedMissions(rawSnapshot);
   const reviewRequests = reviewRequestsFromSnapshot(rawSnapshot);
   const runner = readRunner(rawSnapshot);
+  const quietSelfHealingCapacitySignals = countValue(classified?.counts?.selfHealingCapacitySignals);
+  const quietTaskHealthCapacitySignals = countQuietTaskHealthCapacitySignals(rawSnapshot);
   const sourceCards = items.map((item) => {
     const base = toBoardCard(item);
     const key = prKey(item.repo, item.number);
@@ -1588,7 +1613,81 @@ export function buildV2BoardSnapshot(
     llmUsage: aggregateLlmUsage(usageEvents(asRecord(rawSnapshot)?.llmUsageEvents), {
       activeCalls: listActiveLlmUsageCalls(),
     }),
+    automationHealth: automationHealthForBoard(rawSnapshot, snapshotAt, process.env, {
+      selfHealingCapacitySignals: quietSelfHealingCapacitySignals,
+      taskHealthCapacitySignals: quietTaskHealthCapacitySignals,
+    }),
   };
+}
+
+function countQuietTaskHealthCapacitySignals(rawSnapshot: unknown): number {
+  const root = asRecord(rawSnapshot);
+  const codexTasks = asRecord(root?.codexTasks);
+  return asArray(codexTasks?.items)
+    .map((entry) => asRecord(entry))
+    .filter((task): task is Record<string, unknown> => Boolean(task))
+    .filter(isQuietTaskHealthCapacityTask)
+    .length;
+}
+
+function isQuietTaskHealthCapacityTask(task: Record<string, unknown>): boolean {
+  if (!asString(task.selfManagementEscalatedAt)) return false;
+  return isQuietAutomationCapacityReason([
+    asString(task.selfManagementEscalationReason),
+    asString(task.progressMessage),
+    asString(task.failureReason),
+    asString(task.reason),
+  ].filter(Boolean).join(" "));
+}
+
+interface AutomationCapacitySignalCounts {
+  selfHealingCapacitySignals?: number;
+  taskHealthCapacitySignals?: number;
+}
+
+export function automationHealthForBoard(
+  rawSnapshot: unknown,
+  now: Date = new Date(),
+  env: { HERMES_DISPATCH_PER_DAY_MAX?: string | undefined } = process.env,
+  capacitySignals: AutomationCapacitySignalCounts = {},
+): AutomationHealth {
+  const selfHealingCapacitySignals = Math.max(0, Math.floor(capacitySignals.selfHealingCapacitySignals ?? 0));
+  const taskHealthCapacitySignals = Math.max(0, Math.floor(capacitySignals.taskHealthCapacitySignals ?? 0));
+  const quietSignalCount = selfHealingCapacitySignals + taskHealthCapacitySignals;
+  const tasks = asArray(asRecord(asRecord(rawSnapshot)?.codexTasks)?.items)
+    .map(asRecord)
+    .filter((task): task is Record<string, unknown> => Boolean(task));
+  const today = now.toISOString().slice(0, 10);
+  const selfHealingOpen = tasks.filter((task) =>
+    asString(task.requester) === "hermes-self-healing"
+    && !AUTOMATION_TERMINAL_TASK_STATUSES.has(asString(task.status) ?? "")
+  ).length;
+  const dispatchUsedToday = tasks.filter((task) =>
+    isAutomationDispatchTask(task)
+    && asString(task.createdAt)?.slice(0, 10) === today
+  ).length;
+  return {
+    selfHealingOpen,
+    dispatchUsedToday,
+    dispatchPerDayCap: dispatchPerDayCap(env),
+    quietSignalCount,
+    selfHealingCapacitySignals,
+    taskHealthCapacitySignals,
+  };
+}
+
+function isAutomationDispatchTask(task: Record<string, unknown>): boolean {
+  const requester = asString(task.requester);
+  const approvedBy = asString(task.approvedBy);
+  return requester === "hermes"
+    || requester === "hermes-self-healing"
+    || approvedBy === "hermes-autopilot"
+    || approvedBy === "o5-self-management";
+}
+
+function dispatchPerDayCap(env: { HERMES_DISPATCH_PER_DAY_MAX?: string | undefined }): number {
+  const parsed = Number.parseInt(env.HERMES_DISPATCH_PER_DAY_MAX ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 10;
 }
 
 function sourceCardCorrelationIdsForDedupe(

@@ -10,6 +10,7 @@ import type { BoardCard } from "./card-types.js";
 export type CollaborationAuthor = "claude" | "codex" | "test-writer" | "security" | "docs" | "hermes" | "operator" | "system";
 export type CollaborationKind = "chat" | "proposal" | "request_help" | "status";
 export type CollaborationTarget = "everyone" | "claude" | "codex" | "test-writer" | "security" | "docs" | "hermes" | "operator";
+export type HermesReplyMode = "live" | "templated";
 
 export interface CollaborationRelatedPr {
   repo: string;
@@ -27,6 +28,7 @@ export interface CollaborationMessage {
   kind: CollaborationKind;
   text: string;
   addressedTo: CollaborationTarget;
+  hermesMode?: HermesReplyMode;
   relatedPr?: CollaborationRelatedPr;
   relatedCorrelationId?: string;
 }
@@ -54,6 +56,14 @@ export function actorLabel(author: CollaborationAuthor): string {
   if (author === "docs") return "Docs";
   if (author === "codex") return "Codex";
   return "System";
+}
+
+/** Display name for a concrete collaboration turn, including Hermes reply provenance. */
+export function actorLabelForMessage(message: Pick<CollaborationMessage, "author" | "hermesMode">): string {
+  if (message.author !== "hermes") return actorLabel(message.author);
+  if (message.hermesMode === "live") return "Hermes (live)";
+  if (message.hermesMode === "templated") return "Hermes (offline — templated)";
+  return "Hermes";
 }
 
 /** Short clock label (HH:MM) for a turn timestamp. */

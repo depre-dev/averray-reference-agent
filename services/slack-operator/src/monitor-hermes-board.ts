@@ -14,6 +14,15 @@ interface BoardClassification {
 }
 
 const TERMINAL_CODEX_STATUSES = new Set(["completed", "cancelled", "failed", "terminal"]);
+const QUIET_AUTOMATION_REASONS = [
+  "dispatch_budget_exhausted",
+  "open_fix_cap_reached",
+  "retry_budget_exhausted",
+  "tick_budget_exhausted",
+  "halt_present",
+  "autopilot_suspended",
+  "dispatch_blocked",
+];
 
 export function buildHermesBoardSnapshotFromMonitor(snapshot: unknown): HermesBoardSnapshot | undefined {
   if (!isRecord(snapshot)) return undefined;
@@ -21,13 +30,15 @@ export function buildHermesBoardSnapshotFromMonitor(snapshot: unknown): HermesBo
   const activeTasks = activeCodexTaskMap(snapshot);
   const missionItems = arrayRecords(snapshot.testbedMissions)
     .map((run) => testbedMissionRunToMonitorItem(run as unknown as TestbedMissionRun));
-  const rawItems = dedupeItems([...arrayRecords(snapshot.active), ...arrayRecords(snapshot.recent), ...missionItems]);
+  const allRawItems = [...arrayRecords(snapshot.active), ...arrayRecords(snapshot.recent), ...missionItems];
+  const quietSelfHealingCapacitySignals = allRawItems.filter(isQuietSelfHealingCapacityEvent).length;
+  const rawItems = dedupeItems(allRawItems.filter((item) => !isQuietSelfHealingCapacityEvent(item)));
   const cards = rawItems
     .map((item) => boardCardFromItem(item, snapshot, activeTasks))
     .filter((item): item is HermesBoardCardSnapshot => Boolean(item))
     .slice(0, 10);
 
-  const counts = boardCounts(cards, snapshot);
+  const counts = boardCounts(cards, snapshot, { quietSelfHealingCapacitySignals });
   const runner = runnerSummary(snapshot);
   return {
     ...stringProp(snapshot, "generatedAt", "generatedAt"),
@@ -37,6 +48,21 @@ export function buildHermesBoardSnapshotFromMonitor(snapshot: unknown): HermesBo
     ...(runner ? { runner } : {}),
     items: cards,
   };
+}
+
+export function isQuietAutomationCapacityReason(value: unknown): boolean {
+  const text = String(value || "").toLowerCase();
+  return QUIET_AUTOMATION_REASONS.some((reason) => text.includes(reason));
+}
+
+function isQuietSelfHealingCapacityEvent(item: Record<string, unknown>): boolean {
+  const summary = recordProp(item, "summary") ?? {};
+  return normalize(textProp(item, "intent")) === "self_healing"
+    && isQuietAutomationCapacityReason([
+      textProp(item, "reason"),
+      textProp(summary, "reason"),
+      textProp(summary, "finalReason"),
+    ].filter(Boolean).join(" "));
 }
 
 function boardCardFromItem(
@@ -323,7 +349,8 @@ function tagsForItem(item: Record<string, unknown>, summary: Record<string, unkn
 
 function boardCounts(
   cards: ReadonlyArray<HermesBoardCardSnapshot>,
-  snapshot: Record<string, unknown>
+  snapshot: Record<string, unknown>,
+  opts: { quietSelfHealingCapacitySignals?: number } = {},
 ): Record<string, number | string | boolean> {
   const counts: Record<string, number | string | boolean> = {
     attention: countLane(cards, "Needs Attention"),
@@ -352,6 +379,9 @@ function boardCounts(
     if (proposed !== undefined) counts.codexTasksProposed = proposed;
     if (approved !== undefined) counts.codexTasksApproved = approved;
     if (taskRunning !== undefined) counts.codexTasksRunning = taskRunning;
+  }
+  if (opts.quietSelfHealingCapacitySignals !== undefined) {
+    counts.selfHealingCapacitySignals = opts.quietSelfHealingCapacitySignals;
   }
   return counts;
 }

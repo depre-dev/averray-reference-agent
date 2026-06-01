@@ -45,6 +45,16 @@ test("board.snapshot: missing cards array becomes []", () => {
   assert.deepEqual(next.cards, []);
 });
 
+test("board.snapshot: carries automation-health gauge data when present", () => {
+  const next = applyEventToBoard(baseBoard(), {
+    type: "board.snapshot",
+    at: "2026-05-27T17:35:00Z",
+    cards: [],
+    automationHealth: { selfHealingOpen: 2, dispatchUsedToday: 4, dispatchPerDayCap: 5 },
+  });
+  assert.deepEqual(next.automationHealth, { selfHealingOpen: 2, dispatchUsedToday: 4, dispatchPerDayCap: 5 });
+});
+
 // ── board.card.added ────────────────────────────────────────────────
 
 test("board.card.added: appends a new card", () => {
