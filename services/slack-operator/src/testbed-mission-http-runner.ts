@@ -19,6 +19,33 @@ interface HttpMissionReport {
 export async function runHttpTestbedMission(env: NodeJS.ProcessEnv = process.env): Promise<HttpMissionReport> {
   const targetUrl = requiredEnv(env, "TESTBED_TARGET_URL");
   const goal = env.TESTBED_MISSION_GOAL || "test first-contact usability";
+  if (isGatedAppTarget(targetUrl, env)) {
+    return {
+      verdict: "fail",
+      confidence: 0,
+      executor: "http_visibility_check",
+      runnerMode: "non_browser_fetch",
+      stoppedBeforeMutation: true,
+      mutationBoundaryNotes: ["HTTP visibility check is public-only and refused the gated app before sending a request."],
+      blockers: [
+        `http_visibility_check is public-only; gated target ${targetUrl} requires the browser-capable executor with Cloudflare Access edge auth and a T2/T3 authenticated session.`,
+      ],
+      confusingMoments: [],
+      evidence: [
+        { type: "executor", value: "http_visibility_check; refused gated target before network request" },
+        { type: "target_classification", value: "gated_app" },
+      ],
+      scores: {
+        pageLoads: 0,
+        orientation: 0,
+        mutationSafety: 5,
+        evidenceQuality: 3,
+      },
+      recommendations: [
+        "Use the Playwright surface-sweep executor with TESTBED_CF_ACCESS_CLIENT_ID/SECRET plus a T2/T3 session, or run a T4 gold-path mission with TESTBED_GOLDPATH_LIVE=1.",
+      ],
+    };
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15_000);
   timeout.unref();
@@ -94,6 +121,20 @@ export async function runHttpTestbedMission(env: NodeJS.ProcessEnv = process.env
     };
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+function isGatedAppTarget(targetUrl: string, env: NodeJS.ProcessEnv): boolean {
+  const hosts = (env.TESTBED_HTTP_GATED_HOSTS || "app.averray.com")
+    .split(",")
+    .map((host) => host.trim().toLowerCase())
+    .filter(Boolean);
+  if (hosts.length === 0) return false;
+  try {
+    const url = new URL(targetUrl);
+    return hosts.includes(url.hostname.toLowerCase());
+  } catch {
+    return false;
   }
 }
 

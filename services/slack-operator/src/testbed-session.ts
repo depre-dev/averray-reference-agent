@@ -32,6 +32,11 @@ export interface SweepSession {
   token?: string;
 }
 
+export interface CloudflareAccessServiceToken {
+  clientId: string;
+  clientSecret: string;
+}
+
 export interface SweepSessionConfig {
   /** Which role's session to use (default "agent"). */
   role?: string;
@@ -89,6 +94,33 @@ export function parseSweepSessionConfig(env: NodeJS.ProcessEnv = process.env): S
     ...(env.TESTBED_SESSION_STORAGE_STATE_PATH ? { storageStatePath: env.TESTBED_SESSION_STORAGE_STATE_PATH } : {}),
     ...(env.TESTBED_SESSION_TOKEN ? { token: env.TESTBED_SESSION_TOKEN } : {}),
   };
+}
+
+export function parseCloudflareAccessServiceToken(
+  env: NodeJS.ProcessEnv = process.env,
+): CloudflareAccessServiceToken | undefined {
+  const clientId = firstNonEmpty(
+    env.TESTBED_CF_ACCESS_CLIENT_ID,
+    env.CF_ACCESS_CLIENT_ID,
+    env.CLOUDFLARE_ACCESS_CLIENT_ID,
+  );
+  const clientSecret = firstNonEmpty(
+    env.TESTBED_CF_ACCESS_CLIENT_SECRET,
+    env.CF_ACCESS_CLIENT_SECRET,
+    env.CLOUDFLARE_ACCESS_CLIENT_SECRET,
+  );
+  return clientId && clientSecret ? { clientId, clientSecret } : undefined;
+}
+
+export function cloudflareAccessHeaders(
+  token?: CloudflareAccessServiceToken,
+): Record<string, string> {
+  return token
+    ? {
+      "CF-Access-Client-Id": token.clientId,
+      "CF-Access-Client-Secret": token.clientSecret,
+    }
+    : {};
 }
 
 /** Whether any session source is configured. When false, the sweep runs
@@ -208,11 +240,26 @@ async function fetchSidecarSession(
  * session: storageState rehydrates the authed browser; a Bearer token is
  * attached so the page's same-origin API calls are authed too. Pure + tested.
  */
-export function buildSweepContextOptions(session?: SweepSession): Record<string, unknown> {
+export function buildSweepContextOptions(
+  session?: SweepSession,
+  cloudflareAccess?: CloudflareAccessServiceToken,
+): Record<string, unknown> {
+  const extraHTTPHeaders = {
+    ...cloudflareAccessHeaders(cloudflareAccess),
+    ...(session?.token ? { Authorization: `Bearer ${session.token}` } : {}),
+  };
   return {
     viewport: { width: 1365, height: 900 },
     userAgent: "Averray-Hermes-Surface-Sweep/1.0",
     ...(session?.storageState ? { storageState: session.storageState } : {}),
-    ...(session?.token ? { extraHTTPHeaders: { Authorization: `Bearer ${session.token}` } } : {}),
+    ...(Object.keys(extraHTTPHeaders).length > 0 ? { extraHTTPHeaders } : {}),
   };
+}
+
+function firstNonEmpty(...values: Array<string | undefined>): string | undefined {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) return trimmed;
+  }
+  return undefined;
 }

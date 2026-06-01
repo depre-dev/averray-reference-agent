@@ -206,10 +206,13 @@ describe("executeBrowserTestbedMission — dispatch (single-URL explore stays in
       AVERRAY_APP_BASE_URL: "https://app.averray.com",
       AVERRAY_API_BASE_URL: "https://api.averray.com",
       TESTBED_SURFACE_SWEEP_BASE_URL: "https://averray.com",
+      TESTBED_CF_ACCESS_CLIENT_ID: "cf-id",
+      TESTBED_CF_ACCESS_CLIENT_SECRET: "cf-secret",
     });
 
     expect(parsed.appBaseUrl).toBe("https://app.averray.com");
     expect(parsed.surfaceSweepBaseUrl).toBe("https://averray.com");
+    expect(parsed.cloudflareAccess).toEqual({ clientId: "cf-id", clientSecret: "cf-secret" });
   });
 
   it("routes a surface_sweep mission to the sweep (uses the injected capture)", async () => {

@@ -12,7 +12,10 @@ export async function mintBrowserSessionWithPlaywright(
     ...(config.browserExecutablePath ? { executablePath: config.browserExecutablePath } : {})
   });
   try {
-    const context = await browser.newContext();
+      const edgeHeaders = cloudflareAccessHeaders(config);
+      const context = await browser.newContext(
+        Object.keys(edgeHeaders).length ? { extraHTTPHeaders: edgeHeaders } : undefined,
+      );
     try {
       const page = await context.newPage();
       await page.goto(config.appBaseUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
@@ -20,7 +23,7 @@ export async function mintBrowserSessionWithPlaywright(
 
       const session = await siweLoginWithSigner(wallet.account, {
         baseUrl: config.apiBaseUrl,
-        postJson: createPlaywrightPostJson(context.request, config.apiBaseUrl)
+        postJson: createPlaywrightPostJson(context.request, config.apiBaseUrl, edgeHeaders)
       });
       return {
         wallet: session.wallet,
@@ -35,11 +38,15 @@ export async function mintBrowserSessionWithPlaywright(
   }
 }
 
-function createPlaywrightPostJson(request: APIRequestContext, baseUrl: string): SiwePostJson {
+function createPlaywrightPostJson(
+  request: APIRequestContext,
+  baseUrl: string,
+  edgeHeaders: Record<string, string> = {},
+): SiwePostJson {
   return async (path, body) => {
     const response = await request.post(`${trimTrailingSlash(baseUrl)}${path}`, {
       data: body,
-      headers: { "content-type": "application/json" }
+      headers: { "content-type": "application/json", ...edgeHeaders }
     });
     return {
       ok: response.ok(),
@@ -47,4 +54,13 @@ function createPlaywrightPostJson(request: APIRequestContext, baseUrl: string): 
       payload: await response.json().catch(() => ({}))
     };
   };
+}
+
+function cloudflareAccessHeaders(config: TestWalletSignerConfig): Record<string, string> {
+  return config.cfAccessClientId && config.cfAccessClientSecret
+    ? {
+      "CF-Access-Client-Id": config.cfAccessClientId,
+      "CF-Access-Client-Secret": config.cfAccessClientSecret,
+    }
+    : {};
 }

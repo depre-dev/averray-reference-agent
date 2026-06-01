@@ -24,6 +24,7 @@
 //     expected (stoppedBeforeMutation), not a failure.
 
 import type { TestbedMutationBinding } from "./testbed-mutation-binding.js";
+import type { CloudflareAccessServiceToken } from "./testbed-session.js";
 
 export type GoldPathStep =
   | "onboard"
@@ -109,6 +110,8 @@ export interface GoldPathDriverInput {
   freshMemory: boolean;
   /** T3 session (Bearer for the API gold path, storageState for browser). Opaque here. */
   session?: { role?: string; token?: string; storageState?: unknown };
+  /** Edge auth for Cloudflare-Access-gated app routes. Values are never report content. */
+  cloudflareAccess?: CloudflareAccessServiceToken;
   /** Local T3 signer sidecar URL. The driver may request sessions; wallet keys never leave the sidecar. */
   signerBaseUrl?: string;
 }
@@ -345,6 +348,7 @@ export interface GoldPathMissionDeps {
   driver: GoldPathDriver;
   model: GoldPathModel;
   resolveSession?: () => Promise<GoldPathDriverInput["session"] | undefined> | GoldPathDriverInput["session"] | undefined;
+  cloudflareAccess?: CloudflareAccessServiceToken;
   signerBaseUrl?: string;
   steps?: readonly GoldPathStep[];
 }
@@ -369,6 +373,7 @@ export async function runGoldPathMissionOnce(deps: GoldPathMissionDeps): Promise
     model: deps.model,
     freshMemory: deps.mission.freshMemory !== false,
     ...(session ? { session } : {}),
+    ...(deps.cloudflareAccess ? { cloudflareAccess: deps.cloudflareAccess } : {}),
     ...(deps.signerBaseUrl ? { signerBaseUrl: deps.signerBaseUrl } : {}),
   });
 

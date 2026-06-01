@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   parseSweepSessionConfig,
+  parseCloudflareAccessServiceToken,
   parseSweepSessionRole,
   isSweepSessionConfigured,
   normalizeStorageState,
   resolveSweepSession,
   buildSweepContextOptions,
+  cloudflareAccessHeaders,
   DEFAULT_AUTHED_ROUTES,
   type SweepStorageState,
 } from "../../services/slack-operator/src/testbed-session.js";
@@ -147,6 +149,25 @@ describe("buildSweepContextOptions", () => {
   it("token session → Authorization Bearer attached for the page's API calls", () => {
     const opts = buildSweepContextOptions({ role: "agent", token: "jwt-abc" });
     expect(opts.extraHTTPHeaders).toEqual({ Authorization: "Bearer jwt-abc" });
+  });
+
+  it("Cloudflare Access service token headers compose with the app session", () => {
+    const token = parseCloudflareAccessServiceToken({
+      TESTBED_CF_ACCESS_CLIENT_ID: "cf-client-id",
+      TESTBED_CF_ACCESS_CLIENT_SECRET: "cf-client-secret",
+    });
+    expect(token).toEqual({ clientId: "cf-client-id", clientSecret: "cf-client-secret" });
+    expect(cloudflareAccessHeaders(token)).toEqual({
+      "CF-Access-Client-Id": "cf-client-id",
+      "CF-Access-Client-Secret": "cf-client-secret",
+    });
+
+    const opts = buildSweepContextOptions({ role: "agent", token: "jwt-abc" }, token);
+    expect(opts.extraHTTPHeaders).toEqual({
+      "CF-Access-Client-Id": "cf-client-id",
+      "CF-Access-Client-Secret": "cf-client-secret",
+      Authorization: "Bearer jwt-abc",
+    });
   });
 });
 

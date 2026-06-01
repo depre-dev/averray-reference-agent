@@ -273,6 +273,10 @@ services:
       TESTBED_MISSION_ENVIRONMENT: ${TESTBED_MISSION_ENVIRONMENT:-}
       TESTBED_MISSION_CAPTURE_TRACE: ${TESTBED_MISSION_CAPTURE_TRACE:-1}
       TESTBED_MISSION_CAPTURE_VIDEO: ${TESTBED_MISSION_CAPTURE_VIDEO:-1}
+      # Cloudflare Access edge auth for app.averray.com. Values are service
+      # token secrets and must never appear in logs, prompts, or reports.
+      TESTBED_CF_ACCESS_CLIENT_ID: ${TESTBED_CF_ACCESS_CLIENT_ID:-}
+      TESTBED_CF_ACCESS_CLIENT_SECRET: ${TESTBED_CF_ACCESS_CLIENT_SECRET:-}
       # T4 live gold-path driver. Default is off so CI/test deploys keep the
       # deterministic fake path; when enabled the runner invokes Claude with
       # Playwright-MCP/browser tooling and writes a structured report.
@@ -332,6 +336,8 @@ services:
       TEST_WALLET_SIGNER_PORT: ${TEST_WALLET_SIGNER_PORT:-8791}
       TEST_WALLET_SIGNER_REFRESH_SKEW_SECONDS: ${TEST_WALLET_SIGNER_REFRESH_SKEW_SECONDS:-60}
       TEST_WALLET_SIGNER_BROWSER_EXECUTABLE_PATH: ${TEST_WALLET_SIGNER_BROWSER_EXECUTABLE_PATH:-/usr/bin/chromium}
+      TESTBED_CF_ACCESS_CLIENT_ID: ${TESTBED_CF_ACCESS_CLIENT_ID:-}
+      TESTBED_CF_ACCESS_CLIENT_SECRET: ${TESTBED_CF_ACCESS_CLIENT_SECRET:-}
       AUTH_TOKEN_TTL_SECONDS: ${AUTH_TOKEN_TTL_SECONDS:-3600}
       AVERRAY_API_BASE_URL: ${AVERRAY_API_BASE_URL}
       AVERRAY_APP_BASE_URL: ${AVERRAY_APP_BASE_URL}

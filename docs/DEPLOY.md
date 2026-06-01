@@ -102,6 +102,10 @@ TESTBED_MISSION_RUNNER_ENABLED=1
 # AVERRAY_APP_BASE_URL pointed at the gated operator app for signed-in T2/T3
 # sessions.
 TESTBED_SURFACE_SWEEP_BASE_URL=https://averray.com
+# Required when sweeping https://app.averray.com with a T2/T3 session.
+TESTBED_CF_ACCESS_CLIENT_ID=<from ops secrets>
+TESTBED_CF_ACCESS_CLIENT_SECRET=<from ops secrets>
+TESTBED_SESSION_SIGNER_URL=http://test-wallet-signer:8791
 # Optional: the env's truth boundary the honesty check asserts. Set to
 # testnet / demo / local-simulation when the deployed env is non-production so
 # data-bearing surfaces must carry that marker; leave empty otherwise.
@@ -207,8 +211,10 @@ TESTBED_MISSION_RUNNER_EXECUTOR=command
 TESTBED_MISSION_RUNNER_ARGS=services/slack-operator/dist/gold-path-mission-entry.js
 TESTBED_MISSION_ENVIRONMENT=testnet      # T5 binds mutation; mainnet is read-only by construction
 TESTBED_SESSION_SIGNER_URL=http://test-wallet-signer:8791   # T3 session (API Bearer); key never enters the model
+TESTBED_CF_ACCESS_CLIENT_ID=<from ops secrets>              # Cloudflare Access service token
+TESTBED_CF_ACCESS_CLIENT_SECRET=<from ops secrets>          # never logged / never in prompts
 TESTBED_GOLDPATH_DEEP=0                   # opus for deep/critical; sonnet otherwise (A4)
-TESTBED_GOLDPATH_LIVE=0                   # see note below
+TESTBED_GOLDPATH_LIVE=1                   # invokes the live Claude + Playwright-MCP driver
 ```
 
 Gold-path missions are queued with `mode: "gold_path"` and **land `requested`** —
@@ -221,12 +227,11 @@ mutate; **mainnet is structurally read-only**.
 > `gold_path` missions, or wait for the per-mode-claim follow-up. A mixed queue
 > would route surface-sweep missions through the gold-path entry.
 
-> **Live driver is a follow-up.** This PR ships the executor — the T5 mutation
-> binding, T3 session, A4 model policy, the honest self-judge, the report, and
-> the approve-gate wiring — with a deterministic fake driver for CI. The live
-> **Claude Agent SDK + Playwright-MCP** driver is not wired yet: with
-> `TESTBED_GOLDPATH_LIVE` unset (or set, until the driver lands) the runner emits
-> an honest **"not executed"** report rather than a fake pass.
+> **Auth for the hosted app has two layers.** Cloudflare Access is satisfied by
+> `TESTBED_CF_ACCESS_CLIENT_ID` / `TESTBED_CF_ACCESS_CLIENT_SECRET`; product auth
+> is satisfied through the T2/T3 session source. The live driver prompt may name
+> the header/env names, but it must never print service-token values, wallet
+> keys, JWTs, or storageState contents.
 
 ---
 

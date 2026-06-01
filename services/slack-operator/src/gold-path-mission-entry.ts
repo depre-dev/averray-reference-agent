@@ -18,7 +18,11 @@ import {
   resolveTestbedMutationBinding,
   testbedEnvironmentFromEnv,
 } from "./testbed-mutation-binding.js";
-import { resolveSweepSession, parseSweepSessionConfig } from "./testbed-session.js";
+import {
+  parseCloudflareAccessServiceToken,
+  resolveSweepSession,
+  parseSweepSessionConfig,
+} from "./testbed-session.js";
 import {
   runGoldPathMissionOnce,
   pickGoldPathModel,
@@ -84,6 +88,7 @@ export async function runGoldPathMissionEntry(
   });
 
   const driver = deps.driver ?? selectGoldPathDriver(env);
+  const cloudflareAccess = parseCloudflareAccessServiceToken(env);
 
   const result = await runGoldPathMissionOnce({
     mission: { id: mission.id, targetUrl: mission.targetUrl, goal: mission.goal, freshMemory: mission.freshMemory },
@@ -91,6 +96,7 @@ export async function runGoldPathMissionEntry(
     driver,
     model,
     signerBaseUrl: env.TEST_WALLET_SIGNER_BASE_URL || env.TESTBED_SESSION_SIGNER_URL,
+    ...(cloudflareAccess ? { cloudflareAccess } : {}),
     // T3: the API Bearer (and/or browser storageState) from the signer sidecar —
     // the wallet key never enters this process. Undefined when unconfigured.
     resolveSession: () => resolveSweepSession({ ...parseSweepSessionConfig(env), sessionType: "api" }),

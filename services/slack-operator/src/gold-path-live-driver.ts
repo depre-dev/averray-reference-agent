@@ -124,10 +124,12 @@ export function createClaudeGoldPathDriver(
         timeoutMs: config.timeoutMs,
       });
       const elapsedMs = Math.max(0, (deps.now?.() ?? Date.now()) - started);
-      const rawObservation = await readFile(observationPath, "utf8").catch(() => result.stdout);
+      const rawObservation = await readFile(observationPath, "utf8")
+        .then((text) => redactGoldPathOutput(text, childEnv))
+        .catch(() => result.stdout);
       if (result.exitCode !== 0) {
         const reason = lastNonEmptyLine(result.stderr) || lastNonEmptyLine(result.stdout) || `Claude live driver exited with ${result.exitCode}.`;
-        return failedObservation(input, redact(reason), elapsedMs, result);
+        return failedObservation(input, redactGoldPathOutput(reason, childEnv), elapsedMs, redactExecResult(result, childEnv));
       }
       const parsed = parseClaudeGoldPathObservation(rawObservation, input, elapsedMs);
       if (!parsed) {
@@ -135,7 +137,7 @@ export function createClaudeGoldPathDriver(
           input,
           "Claude live driver finished without a valid gold-path observation JSON.",
           elapsedMs,
-          result,
+          redactExecResult(result, childEnv),
         );
       }
       return parsed;
@@ -159,10 +161,14 @@ export function buildClaudeGoldPathPrompt(
   const mutationLine = input.allowMutations
     ? `Mutation profile: TESTNET/STAGING test-only mutations are allowed only inside clearly fake/sandbox Averray flows. Scope: ${input.mutationScope}`
     : "Mutation profile: READ ONLY. Stop before claim, submit, payout/SBT, wallet signature, payment, deploy, merge, or any irreversible action.";
+  const edgeAuthLine = input.cloudflareAccess
+    ? "Cloudflare Access edge auth is configured in this process environment. When loading the gated app or its API, attach CF-Access-Client-Id and CF-Access-Client-Secret headers from env; never print, screenshot, or report their values."
+    : "No Cloudflare Access service token was configured; if the target is behind Cloudflare Access, report that as an auth blocker instead of treating the product as broken.";
   return [
     "You are Hermes running the Averray Tier-2 gold-path tester as a normal browser-capable outside agent.",
     "Use the Claude Agent SDK browser tooling / Playwright MCP tools available in this runtime. Do not use private repo state, Slack, GitHub, SSH, databases, or Averray monitor internals.",
     "Reuse T3 only through the local signer sidecar when you need authentication. The wallet private keys must never enter your prompt, output, logs, screenshots, or report.",
+    edgeAuthLine,
     opts.signerBaseUrl ? `Signer sidecar: ${opts.signerBaseUrl}. Request browser/api sessions by role as needed; do not print returned tokens.` : "No signer sidecar URL was provided; report that as a blocker if authentication is required.",
     mutationLine,
     `Target URL: ${input.targetUrl}`,
@@ -288,9 +294,38 @@ async function execClaudeCommand(input: ExecClaudeInput): Promise<ExecClaudeResu
     child.on("close", (code) => {
       settled = true;
       clearTimeout(timeout);
-      resolve({ exitCode: code ?? 1, stdout: redact(stdout), stderr: redact(stderr) });
+      resolve({
+        exitCode: code ?? 1,
+        stdout: redactGoldPathOutput(stdout, input.env),
+        stderr: redactGoldPathOutput(stderr, input.env),
+      });
     });
   });
+}
+
+function redactExecResult(result: ExecClaudeResult, env: NodeJS.ProcessEnv): ExecClaudeResult {
+  return {
+    ...result,
+    stdout: redactGoldPathOutput(result.stdout, env),
+    stderr: redactGoldPathOutput(result.stderr, env),
+  };
+}
+
+function redactGoldPathOutput(value: string, env: NodeJS.ProcessEnv): string {
+  let next = redact(value);
+  for (const secret of [
+    env.TESTBED_CF_ACCESS_CLIENT_ID,
+    env.TESTBED_CF_ACCESS_CLIENT_SECRET,
+    env.CF_ACCESS_CLIENT_ID,
+    env.CF_ACCESS_CLIENT_SECRET,
+    env.CLOUDFLARE_ACCESS_CLIENT_ID,
+    env.CLOUDFLARE_ACCESS_CLIENT_SECRET,
+  ]) {
+    if (secret && secret.length >= 6) {
+      next = next.split(secret).join("[redacted-cloudflare-access]");
+    }
+  }
+  return next;
 }
 
 function normalizeSteps(value: unknown, input: GoldPathDriverInput): GoldPathStepResult[] {

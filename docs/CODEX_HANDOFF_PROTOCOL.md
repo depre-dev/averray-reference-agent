@@ -198,13 +198,28 @@ available, stops before risky mutation controls, writes a structured report, and
 lets the monitor attach the result.
 
 Custom external runners are still supported for comparing other agents or a
-more autonomous Hermes browser invocation:
+more autonomous Hermes browser invocation. The lightweight HTTP visibility
+runner is for genuinely public URLs only; do not point it at
+`https://app.averray.com`, which is gated and requires a browser-capable
+executor plus auth.
 
 ```env
 TESTBED_MISSION_RUNNER_EXECUTOR=command
 TESTBED_MISSION_RUNNER_COMMAND=node
 TESTBED_MISSION_RUNNER_ARGS=services/slack-operator/dist/testbed-mission-http-runner.js
 ```
+
+For the hosted operator app, use the Playwright surface sweep or the T4
+gold-path command executor with:
+
+```env
+TESTBED_CF_ACCESS_CLIENT_ID=<from ops secrets>
+TESTBED_CF_ACCESS_CLIENT_SECRET=<from ops secrets>
+TESTBED_SESSION_SIGNER_URL=http://test-wallet-signer:8791
+```
+
+Those values are service-token/session secrets. They stay in ops env only and
+must not be pasted into prompts, logs, or mission reports.
 
 Supported command placeholders are:
 

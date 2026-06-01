@@ -20,7 +20,9 @@ import { executeSiweAuthMission, type SiweAuthMissionDeps } from "./testbed-auth
 import { executeSurfaceSweep, type SurfaceSweepDeps } from "./testbed-surface-sweep.js";
 import {
   parseSweepSessionConfig,
+  parseCloudflareAccessServiceToken,
   resolveSweepSession,
+  type CloudflareAccessServiceToken,
   type SweepSession,
   type SweepSessionConfig,
 } from "./testbed-session.js";
@@ -59,6 +61,8 @@ export interface TestbedMissionRunnerConfig {
   captureVideo?: boolean;
   /** T2 pre-seeded session source (sidecar URL and/or manual storageState path/token). */
   session?: SweepSessionConfig;
+  /** Cloudflare Access service-token headers for gated hosted app routes. */
+  cloudflareAccess?: CloudflareAccessServiceToken;
 }
 
 /** Injected session resolution for tests (defaults to the env-config resolver). */
@@ -92,6 +96,7 @@ export type TestbedMissionRunnerOnceResult =
 export function parseTestbedMissionRunnerConfig(
   env: NodeJS.ProcessEnv = process.env
 ): TestbedMissionRunnerConfig {
+  const cloudflareAccess = parseCloudflareAccessServiceToken(env);
   return {
     enabled: env.TESTBED_MISSION_RUNNER_ENABLED === "1" || env.TESTBED_MISSION_RUNNER_ENABLED === "true",
     ...(env.AVERRAY_TESTBED_MISSIONS_PATH ? { path: env.AVERRAY_TESTBED_MISSIONS_PATH } : {}),
@@ -124,6 +129,7 @@ export function parseTestbedMissionRunnerConfig(
     captureTrace: env.TESTBED_MISSION_CAPTURE_TRACE !== "0" && env.TESTBED_MISSION_CAPTURE_TRACE !== "false",
     captureVideo: env.TESTBED_MISSION_CAPTURE_VIDEO !== "0" && env.TESTBED_MISSION_CAPTURE_VIDEO !== "false",
     session: parseSweepSessionConfig(env),
+    ...(cloudflareAccess ? { cloudflareAccess } : {}),
   };
 }
 
@@ -380,6 +386,12 @@ export async function executeGoldPathTestbedMission(
     TESTBED_MUTATION_BINDING_REASON: mission.mutationBindingReason ?? "",
     TEST_WALLET_SIGNER_BASE_URL: config.signerBaseUrl ?? process.env.TEST_WALLET_SIGNER_BASE_URL ?? "",
     TESTBED_SESSION_SIGNER_URL: config.signerBaseUrl ?? process.env.TESTBED_SESSION_SIGNER_URL ?? "",
+    ...(config.cloudflareAccess
+      ? {
+        TESTBED_CF_ACCESS_CLIENT_ID: config.cloudflareAccess.clientId,
+        TESTBED_CF_ACCESS_CLIENT_SECRET: config.cloudflareAccess.clientSecret,
+      }
+      : {}),
   });
   return {
     exitCode: 0,

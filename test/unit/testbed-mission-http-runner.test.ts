@@ -61,4 +61,27 @@ describe("testbed mission HTTP runner", () => {
       ]),
     });
   });
+
+  it("refuses the gated operator app before making a non-browser HTTP probe", async () => {
+    const fetchImpl = vi.fn();
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const report = await runHttpTestbedMission({
+      TESTBED_TARGET_URL: "https://app.averray.com",
+      TESTBED_MISSION_GOAL: "Load the operator app",
+    });
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(report).toMatchObject({
+      verdict: "fail",
+      executor: "http_visibility_check",
+      blockers: [
+        expect.stringContaining("gated target https://app.averray.com requires the browser-capable executor"),
+      ],
+      evidence: expect.arrayContaining([
+        { type: "target_classification", value: "gated_app" },
+      ]),
+    });
+    expect(report.blockers.join(" ")).not.toContain("HTTP 401");
+  });
 });
