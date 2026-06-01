@@ -6,9 +6,9 @@
 // the T5 mutation binding, the T3 session, the A4 model, picks a driver, runs the
 // gold path, and writes the report.
 //
-// CI never reaches the live path: the live Claude Agent SDK + Playwright-MCP
-// driver is opt-in (TESTBED_GOLDPATH_LIVE=1) and is a follow-up — until it's
-// wired it FAILS CLOSED (an honest "not executed" report), never a fake pass.
+// CI never reaches the live path: the live Claude Agent SDK / Claude Code +
+// Playwright-MCP driver is opt-in (TESTBED_GOLDPATH_LIVE=1). The default stays
+// fake/unavailable so tests never call a live model.
 
 import { writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -26,6 +26,10 @@ import {
   type GoldPathDriver,
   type GoldPathMissionResult,
 } from "./gold-path-mission.js";
+import {
+  createClaudeGoldPathDriver,
+  parseClaudeGoldPathDriverConfig,
+} from "./gold-path-live-driver.js";
 
 interface GoldPathMissionEnv {
   id: string;
@@ -47,20 +51,13 @@ function readMissionFromEnv(env: NodeJS.ProcessEnv): GoldPathMissionEnv {
   };
 }
 
-/**
- * Choose the driver. The live LLM driver is opt-in and not wired in this build,
- * so both branches currently return the honest non-run driver — a deploy can
- * never silently emit a fake pass. The live adapter plugs into this seam.
- */
-function selectGoldPathDriver(env: NodeJS.ProcessEnv): GoldPathDriver {
+/** Choose the driver. Live LLM is opt-in; default remains the honest fake. */
+export function selectGoldPathDriver(env: NodeJS.ProcessEnv): GoldPathDriver {
   if (env.TESTBED_GOLDPATH_LIVE === "1") {
-    return createUnavailableGoldPathDriver(
-      "Live gold-path driver (Claude Agent SDK + Playwright-MCP) is not wired in this build — no real run performed. " +
-        "This is a deliberate follow-up; the executor, safety binding, session, model policy, judge, and report are in place.",
-    );
+    return createClaudeGoldPathDriver(parseClaudeGoldPathDriverConfig(env), env);
   }
   return createUnavailableGoldPathDriver(
-    "Gold-path runner is not in live mode (set TESTBED_GOLDPATH_LIVE=1 once the live LLM driver is wired); no real run performed.",
+    "Gold-path runner is not in live mode (set TESTBED_GOLDPATH_LIVE=1 to use the Claude + Playwright-MCP driver); no real run performed.",
   );
 }
 
@@ -93,6 +90,7 @@ export async function runGoldPathMissionEntry(
     binding,
     driver,
     model,
+    signerBaseUrl: env.TEST_WALLET_SIGNER_BASE_URL || env.TESTBED_SESSION_SIGNER_URL,
     // T3: the API Bearer (and/or browser storageState) from the signer sidecar —
     // the wallet key never enters this process. Undefined when unconfigured.
     resolveSession: () => resolveSweepSession({ ...parseSweepSessionConfig(env), sessionType: "api" }),

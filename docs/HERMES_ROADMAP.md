@@ -45,12 +45,12 @@
 | T1 | Surface sweep + truth-boundary honesty | ✅ done — executor #273; deploy-wire (platform #604) + runner #277; runs per-deploy (report-only) |
 | T2 | Pre-seeded session (authed sweep) | ✅ done (#293) |
 | T3 | Signer sidecar + SIWE mission (multi-role) | ✅ done — signer sidecar foundation (#283) + SIWE role-gating mission (#290) |
-| T4 | Tier-2 agent (Agent SDK + Playwright-MCP) | design done |
+| T4 | Tier-2 agent (Agent SDK + Playwright-MCP) | 🚧 live driver wired in this PR — opt-in Claude + Playwright-MCP driver behind `TESTBED_GOLDPATH_LIVE`; fake/default path remains for CI; hosted run proof remains follow-up |
 | T5 | Env→mutation binding + enhancements (trace/video, baselines) | ✅ done (#297) — env-bound mutation profile + Playwright trace/video + baseline comparison slice |
 | T6 | Agent-requested tester runs — board-gated (request → approve → read-only run) | ✅ first slice done (#304; `POST /monitor/testbed-missions/request`, `/approve`, board approve UI, and runner ignores `requested` until approval) |
 | T7 | Tester capabilities manifest (+ platform-repo request helper) | ✅ reference-agent manifest done (#284; `GET /monitor/tester/capabilities`, `services/slack-operator/src/tester-capabilities.ts`). Platform-repo request helper remains follow-up outside this repo |
 
-*(Status as of 2026-06-01 — **shipped/code-backed:** O0–O5, A1–A4, D1–D4, B1 first slices, B2 proposes-only self-healing, C1 first slice, C2, C3 test-writer slice, C4 v1, T1–T3, T5, T6 first slice, and the T7 reference-agent manifest. **In progress:** none after #336 merges. **Design / follow-up:** B1 idle-triggered auto-flow, C1 automatic/default reviewer dispatch, C3 security/docs specialists, T4 Tier-2 browser agent, and the T7 platform helper. Merge/deploy remain human-gated; autopilot approves dispatch only inside O4 guardrails.)*
+*(Status as of 2026-06-01 — **shipped/code-backed:** O0–O5, A1–A4, D1–D4, B1 first slices, B2 proposes-only self-healing, C1 first slice, C2, C3 test-writer slice, C4 v1, T1–T3, T5, T6 first slice, and the T7 reference-agent manifest. **In progress:** T4 live gold-path driver wiring. **Design / follow-up:** B1 idle-triggered auto-flow, C1 automatic/default reviewer dispatch, C3 security/docs specialists, T4 hosted run proof, and the T7 platform helper. Merge/deploy remain human-gated; autopilot approves dispatch only inside O4 guardrails.)*
 
 ## Recommended build order (the smooth, low-effort ramp)
 
@@ -58,7 +58,7 @@
    - **T1** runs in parallel with O1 (independent, both runner/board TS).
 2. **The safety net:** **D4** (off-device alert bridge), **T1**, **T2 + T3** (tester reaches authed product), **D1 + D3** (digest + anomaly auto-pause), and **T5** (env-bound mutation profile). This foundation has shipped; **T6** has its first request/approve gate slice, and **T7** has the reference-agent manifest. The platform helper remains follow-up.
 3. **Autonomy:** **O4** (enqueue + guardrail + autonomy mode) has shipped; supervised burn-in and monitoring decide when to rely on it more heavily.
-4. **Depth, anytime after:** **A1 → A3** shipped, **O5** hardening is code-backed, and **B1/B2** now have code-backed first slices. Remaining depth is B1 idle auto-flow, C1 automatic/default reviewer dispatch, C3 additional specialists, **T4**, and T7 platform helper polish.
+4. **Depth, anytime after:** **A1 → A3** shipped, **O5** hardening is code-backed, and **B1/B2** now have code-backed first slices. Remaining depth is B1 idle auto-flow, C1 automatic/default reviewer dispatch, C3 additional specialists, **T4 hosted run proof**, and T7 platform helper polish.
 
 **Dependencies to respect:** B2 needs D3 (loop fail-safe); A2 needs A1 (baselines); O4 is the authority change and needs D4 (escalations must reach the operator off-device); T6 needs the proposed-mission approval gate; T-missions that mutate stay on testnet (env→mutation binding before any mainnet).
 

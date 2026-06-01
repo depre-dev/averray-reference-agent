@@ -271,6 +271,19 @@ services:
       TESTBED_MISSION_ENVIRONMENT: ${TESTBED_MISSION_ENVIRONMENT:-}
       TESTBED_MISSION_CAPTURE_TRACE: ${TESTBED_MISSION_CAPTURE_TRACE:-1}
       TESTBED_MISSION_CAPTURE_VIDEO: ${TESTBED_MISSION_CAPTURE_VIDEO:-1}
+      # T4 live gold-path driver. Default is off so CI/test deploys keep the
+      # deterministic fake path; when enabled the runner invokes Claude with
+      # Playwright-MCP/browser tooling and writes a structured report.
+      TESTBED_GOLDPATH_LIVE: ${TESTBED_GOLDPATH_LIVE:-0}
+      TESTBED_GOLDPATH_CLAUDE_COMMAND: ${TESTBED_GOLDPATH_CLAUDE_COMMAND:-claude}
+      TESTBED_GOLDPATH_CLAUDE_ARGS: '${TESTBED_GOLDPATH_CLAUDE_ARGS:-["-p","{prompt}"]}'
+      TESTBED_GOLDPATH_TIMEOUT_MS: ${TESTBED_GOLDPATH_TIMEOUT_MS:-1200000}
+      TESTBED_GOLDPATH_AUTH_PROBED_ROUTE: ${TESTBED_GOLDPATH_AUTH_PROBED_ROUTE:-}
+      TESTBED_GOLDPATH_DEEP: ${TESTBED_GOLDPATH_DEEP:-0}
+      TESTBED_GOLDPATH_MODEL: ${TESTBED_GOLDPATH_MODEL:-}
+      CLAUDE_WORKER_AUTH_MODE: ${CLAUDE_WORKER_AUTH_MODE:-sub}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # T1 surface sweep: base URL for relative routes (falls back to the
       # mission's targetUrl when unset) + the env's truth boundary the honesty
       # check asserts. Leave EXPECTED_BOUNDARY empty for the self-consistency

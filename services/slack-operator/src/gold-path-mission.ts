@@ -62,13 +62,34 @@ export interface GoldPathStepResult {
   detail: string;
   /** A page-visible evidence pointer (url / selector text / receipt id). Never secrets. */
   evidence?: string;
+  /** Real elapsed time for this step, when the live driver captured it. */
+  latencyMs?: number;
   /** True if this observation involved a (testbed-only) mutation. */
   mutating?: boolean;
+}
+
+export interface GoldPathFinding {
+  head: string;
+  body?: string;
+  evidence?: string[];
 }
 
 export interface GoldPathObservation {
   steps: GoldPathStepResult[];
   notes: string[];
+  /** Evidence artifacts from the live browser driver: screenshots, traces, console/network notes. */
+  evidence?: Array<{ type: string; value: string }>;
+  /** Structured blockers with body text for the monitor drawer. */
+  blockers?: GoldPathFinding[];
+  /** Structured confusing moments with body text for the monitor drawer. */
+  confusingMoments?: GoldPathFinding[];
+  /** Attempt count and elapsed time captured by the live driver. */
+  runs?: number;
+  latencyMs?: number;
+  /** Optional 0..5 score overrides from the self-judge. */
+  scores?: Partial<Record<"success" | "clarity" | "latency", number>>;
+  /** Provider usage captured by the live driver, when the Claude SDK exposes it. */
+  usage?: Record<string, unknown>;
   /** Mutations the agent actually attempted (must be empty in read-only mode). */
   mutationsAttempted: string[];
   /** Whether the agent stopped at every mutation boundary it wasn't allowed to cross. */
@@ -88,6 +109,8 @@ export interface GoldPathDriverInput {
   freshMemory: boolean;
   /** T3 session (Bearer for the API gold path, storageState for browser). Opaque here. */
   session?: { role?: string; token?: string; storageState?: unknown };
+  /** Local T3 signer sidecar URL. The driver may request sessions; wallet keys never leave the sidecar. */
+  signerBaseUrl?: string;
 }
 
 /** The injected product driver. Real impl = Claude Agent SDK + Playwright-MCP;
@@ -173,6 +196,12 @@ export function judgeGoldPath(
       }
     }
   }
+  for (const blocker of observation.blockers ?? []) {
+    if (blocker.head.trim()) blockers.push(blocker.body ? `${blocker.head}: ${blocker.body}` : blocker.head);
+  }
+  for (const moment of observation.confusingMoments ?? []) {
+    if (moment.head.trim()) confusingMoments.push(moment.body ? `${moment.head}: ${moment.body}` : moment.head);
+  }
 
   if (!observation.stoppedBeforeMutation && !opts.allowMutations) {
     // The driver crossed a mutation boundary it was NOT allowed to — a hard fault.
@@ -213,6 +242,7 @@ export interface GoldPathReportInput {
   missionId: string;
   goal: string;
   targetUrl: string;
+  freshMemory?: boolean;
   model: GoldPathModel;
   binding: TestbedMutationBinding;
   observation: GoldPathObservation;
@@ -220,10 +250,16 @@ export interface GoldPathReportInput {
 }
 
 export function buildGoldPathReport(input: GoldPathReportInput): Record<string, unknown> {
-  const { missionId, goal, targetUrl, model, binding, observation, judgement } = input;
+  const { missionId, goal, targetUrl, freshMemory, model, binding, observation, judgement } = input;
   const completedPath = observation.steps.map(
     (s) => `${s.step} → ${s.status}${s.detail ? ` (${s.detail})` : ""}`,
   );
+  const path = observation.steps.map((s, index) => ({
+    n: index + 1,
+    status: stepStatusForDrawer(s.status),
+    desc: `${s.step}: ${s.detail}`,
+    ...(Number.isFinite(s.latencyMs) ? { latencyMs: s.latencyMs } : {}),
+  }));
   const evidence: Array<{ type: string; value: string }> = [
     { type: "executor", value: "gold_path" },
     { type: "model", value: model },
@@ -233,6 +269,7 @@ export function buildGoldPathReport(input: GoldPathReportInput): Record<string, 
   for (const s of observation.steps) {
     if (s.evidence) evidence.push({ type: `step:${s.step}`, value: s.evidence });
   }
+  if (observation.evidence?.length) evidence.push(...observation.evidence);
 
   const mutationBoundaryNotes = [
     `Mutation profile: ${binding.environment} / ${binding.mutationMode}. ${binding.reason}`,
@@ -241,33 +278,58 @@ export function buildGoldPathReport(input: GoldPathReportInput): Record<string, 
       : "Read-only run: the agent stopped before every mutation boundary.",
   ];
 
+  const scores = {
+    ...judgement.scores,
+    ...(observation.scores?.success !== undefined ? { success: observation.scores.success } : {}),
+    ...(observation.scores?.clarity !== undefined ? { clarity: observation.scores.clarity } : {}),
+    ...(observation.scores?.latency !== undefined ? { latency: observation.scores.latency } : {}),
+  };
+  const blockers = observation.blockers?.length ? observation.blockers : judgement.blockers;
+  const confusingMoments = observation.confusingMoments?.length ? observation.confusingMoments : judgement.confusingMoments;
+
   return {
     missionId,
     verdict: judgement.verdict,
+    verdictTone: judgement.verdict === "pass" ? "ok" : judgement.verdict === "partial" ? "warn" : "fail",
     confidence: judgement.confidence,
     executor: "gold_path",
     runnerMode: "gold_path",
     mode: "gold_path",
     goal,
     targetUrl,
+    target: targetUrl,
+    seed: freshMemory === false ? "memory" : "fresh",
     environment: binding.environment,
     model,
+    runs: observation.runs ?? 1,
+    ...(Number.isFinite(observation.latencyMs) ? { latencyMs: observation.latencyMs } : {}),
     stoppedBeforeMutation: observation.stoppedBeforeMutation,
     mutationMode: binding.mutationMode,
     mutationScope: binding.mutationScope,
     mutationBindingReason: binding.reason,
     mutationsAttempted: observation.mutationsAttempted,
     completedPath,
-    blockers: judgement.blockers,
-    confusingMoments: judgement.confusingMoments,
+    path,
+    blockers,
+    confusingMoments,
     mutationBoundaryNotes,
     recommendations: judgement.recommendations,
     evidence,
-    scores: judgement.scores,
+    scores,
+    successScore: observation.scores?.success,
+    clarityScore: observation.scores?.clarity,
+    latencyScore: observation.scores?.latency,
+    ...(observation.usage ? { usage: observation.usage } : {}),
     steps: observation.steps,
     notes: observation.notes,
     summary: `gold_path ${judgement.verdict}: ${observation.steps.filter((s) => s.status === "ok").length}/${observation.steps.length} steps clean on ${binding.environment} (${binding.mutationMode}), ${judgement.blockers.length} blocker(s)`,
   };
+}
+
+function stepStatusForDrawer(status: GoldPathStepStatus): "ok" | "warn" | "err" {
+  if (status === "ok" || status === "skipped") return "ok";
+  if (status === "degraded" || status === "empty") return "warn";
+  return "err";
 }
 
 // ── orchestrator (effect-injected; never calls a live LLM directly) ──
@@ -283,6 +345,7 @@ export interface GoldPathMissionDeps {
   driver: GoldPathDriver;
   model: GoldPathModel;
   resolveSession?: () => Promise<GoldPathDriverInput["session"] | undefined> | GoldPathDriverInput["session"] | undefined;
+  signerBaseUrl?: string;
   steps?: readonly GoldPathStep[];
 }
 
@@ -306,6 +369,7 @@ export async function runGoldPathMissionOnce(deps: GoldPathMissionDeps): Promise
     model: deps.model,
     freshMemory: deps.mission.freshMemory !== false,
     ...(session ? { session } : {}),
+    ...(deps.signerBaseUrl ? { signerBaseUrl: deps.signerBaseUrl } : {}),
   });
 
   // Defense in depth: if a read-only run somehow returned attempted mutations,
@@ -321,6 +385,7 @@ export async function runGoldPathMissionOnce(deps: GoldPathMissionDeps): Promise
     missionId: deps.mission.id,
     goal: deps.mission.goal,
     targetUrl: deps.mission.targetUrl,
+    freshMemory: deps.mission.freshMemory,
     model: deps.model,
     binding: deps.binding,
     observation: safeObservation,
