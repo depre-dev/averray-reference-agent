@@ -30,6 +30,8 @@ export interface TestWalletSignerConfig {
   authTokenTtlSeconds: number;
   refreshSkewSeconds: number;
   browserExecutablePath?: string;
+  cfAccessClientId?: string;
+  cfAccessClientSecret?: string;
   wallets: Partial<Record<TestWalletRole, RoleWallet>>;
 }
 
@@ -179,6 +181,8 @@ export function loadTestWalletSignerConfig(env: NodeJS.ProcessEnv = process.env)
   const enabled = parseBoolean(env.TEST_WALLET_SIGNER_ENABLED, false);
   const environment = parseEnvironment(env.TEST_WALLET_SIGNER_ENVIRONMENT);
   const requiredRoles = environment === "mainnet" ? ["agent"] as const : TEST_WALLET_ROLES;
+  const cfAccessClientId = firstNonEmpty(env.TESTBED_CF_ACCESS_CLIENT_ID, env.CF_ACCESS_CLIENT_ID, env.CLOUDFLARE_ACCESS_CLIENT_ID);
+  const cfAccessClientSecret = firstNonEmpty(env.TESTBED_CF_ACCESS_CLIENT_SECRET, env.CF_ACCESS_CLIENT_SECRET, env.CLOUDFLARE_ACCESS_CLIENT_SECRET);
   const wallets: Partial<Record<TestWalletRole, RoleWallet>> = {};
   if (enabled) {
     for (const role of requiredRoles) {
@@ -198,6 +202,8 @@ export function loadTestWalletSignerConfig(env: NodeJS.ProcessEnv = process.env)
     ...(env.TEST_WALLET_SIGNER_BROWSER_EXECUTABLE_PATH
       ? { browserExecutablePath: env.TEST_WALLET_SIGNER_BROWSER_EXECUTABLE_PATH }
       : {}),
+    ...(cfAccessClientId ? { cfAccessClientId } : {}),
+    ...(cfAccessClientSecret ? { cfAccessClientSecret } : {}),
     wallets
   };
 }
@@ -260,6 +266,14 @@ function positiveInt(value: string | undefined, fallback: number): number {
 
 function isReadOnlyEnvironment(environment: SignerEnvironment): boolean {
   return environment === "mainnet";
+}
+
+function firstNonEmpty(...values: Array<string | undefined>): string | undefined {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) return trimmed;
+  }
+  return undefined;
 }
 
 async function missingBrowserMinter(): Promise<BrowserMintResult> {

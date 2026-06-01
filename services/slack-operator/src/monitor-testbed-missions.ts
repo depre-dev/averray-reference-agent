@@ -843,6 +843,7 @@ function testbedMissionEnvironmentOrAuthFailure(
     /\bstatus[=:\s]+(?:401|403|5\d\d)\b/i,
     /unauthori[sz]ed|forbidden|access denied|authentication required|login required|sign[ -]?in required/i,
     /www-authenticate|basic realm|basic auth|cloudflare access/i,
+    /gated (?:app|target)|browser-capable executor|http_visibility_check is public-only/i,
     /bad gateway|service unavailable|gateway timeout|internal server error/i,
     /net::err_|err_name_not_resolved|econnrefused|connection refused/i,
     /page load failed|navigation failed|browser context closed|target closed|timed out|timeout/i,

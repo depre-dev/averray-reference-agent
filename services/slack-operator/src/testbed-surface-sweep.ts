@@ -18,6 +18,7 @@ import type { TestbedMissionRunResult } from "./testbed-mission-runner.js";
 import {
   DEFAULT_AUTHED_ROUTES,
   buildSweepContextOptions,
+  type CloudflareAccessServiceToken,
   type SweepSession,
 } from "./testbed-session.js";
 
@@ -331,7 +332,15 @@ export function resolveExpectedBoundary(value: string | undefined): SweepBoundar
  */
 export async function executeSurfaceSweep(
   mission: TestbedMissionRun,
-  config: { appBaseUrl?: string; expectedBoundary?: string; browserExecutablePath?: string; timeoutMs?: number; artifactsDir?: string; session?: SweepSession },
+  config: {
+    appBaseUrl?: string;
+    expectedBoundary?: string;
+    browserExecutablePath?: string;
+    timeoutMs?: number;
+    artifactsDir?: string;
+    session?: SweepSession;
+    cloudflareAccess?: CloudflareAccessServiceToken;
+  },
   deps: SurfaceSweepDeps = {},
 ): Promise<TestbedMissionRunResult> {
   const expectedBoundary = resolveExpectedBoundary(config.expectedBoundary);
@@ -390,6 +399,7 @@ function makeBrowserCapture(config: {
   browserExecutablePath?: string;
   timeoutMs?: number;
   session?: SweepSession;
+  cloudflareAccess?: CloudflareAccessServiceToken;
 }): (url: string, route: string) => Promise<RouteCapture> {
   return async (url, route) => {
     const { chromium } = await import("playwright-core");
@@ -404,7 +414,7 @@ function makeBrowserCapture(config: {
     try {
       // Pre-seeded session (T2): storageState rehydrates the authed browser; a
       // Bearer (if any) authes the page's same-origin API calls. Read-only.
-      const context = await browser.newContext(buildSweepContextOptions(config.session));
+      const context = await browser.newContext(buildSweepContextOptions(config.session, config.cloudflareAccess));
       const page = await context.newPage();
       page.on("console", (m) => {
         if (m.type() === "error") consoleErrors.push(m.text());

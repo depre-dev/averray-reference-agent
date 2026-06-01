@@ -131,6 +131,18 @@ describe("test-wallet signer sidecar", () => {
     expect(config.wallets).toEqual({});
   });
 
+  it("loads Cloudflare Access service token refs without treating them as wallet keys", () => {
+    const config = loadTestWalletSignerConfig({
+      TEST_WALLET_SIGNER_ENABLED: "0",
+      TESTBED_CF_ACCESS_CLIENT_ID: "cf-client-id",
+      TESTBED_CF_ACCESS_CLIENT_SECRET: "cf-client-secret"
+    });
+
+    expect(config.cfAccessClientId).toBe("cf-client-id");
+    expect(config.cfAccessClientSecret).toBe("cf-client-secret");
+    expect(config.wallets).toEqual({});
+  });
+
   it("never reflects private keys or bearer tokens in error output", async () => {
     const secret = KEYS.agent;
     const server = createTestWalletSignerHttpServer({

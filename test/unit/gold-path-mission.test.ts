@@ -259,13 +259,19 @@ describe("Claude live gold-path driver", () => {
   };
 
   it("builds a prompt that uses the signer sidecar without exposing wallet keys", () => {
-    const prompt = buildClaudeGoldPathPrompt(input, {
+    const prompt = buildClaudeGoldPathPrompt({
+      ...input,
+      cloudflareAccess: { clientId: "cf-client-id", clientSecret: "cf-client-secret" },
+    }, {
       observationPath: "/tmp/observation.json",
       signerBaseUrl: "http://test-wallet-signer:8791",
     });
     expect(prompt).toContain("Signer sidecar: http://test-wallet-signer:8791");
+    expect(prompt).toContain("CF-Access-Client-Id");
     expect(prompt).toContain("Write ONLY the observation JSON");
     expect(prompt).not.toMatch(/TEST_WALLET_.*PRIVATE/i);
+    expect(prompt).not.toContain("cf-client-id");
+    expect(prompt).not.toContain("cf-client-secret");
   });
 
   it("parses the live observation shape with real latency and blocker body", () => {
@@ -359,5 +365,44 @@ describe("Claude live gold-path driver", () => {
       steps: [expect.objectContaining({ step: "onboard", latencyMs: 50 })],
       usage: { inputTokens: 12, outputTokens: 8 },
     });
+  });
+
+  it("passes Cloudflare Access env to the live command but redacts it from failed observations", async () => {
+    const driver = createClaudeGoldPathDriver(
+      {
+        enabled: true,
+        command: "claude",
+        args: ["-p", "{prompt}"],
+        timeoutMs: 1000,
+        signerBaseUrl: "http://test-wallet-signer:8791",
+      },
+      {
+        TESTBED_GOLDPATH_LIVE: "1",
+        CLAUDE_WORKER_AUTH_MODE: "sub",
+        CLAUDE_CODE_OAUTH_TOKEN: "oauth-token",
+        TESTBED_CF_ACCESS_CLIENT_ID: "cf-client-id",
+        TESTBED_CF_ACCESS_CLIENT_SECRET: "cf-client-secret",
+      } as NodeJS.ProcessEnv,
+      {
+        exec: async ({ env, args }) => {
+          expect(env.TESTBED_CF_ACCESS_CLIENT_ID).toBe("cf-client-id");
+          expect(env.TESTBED_CF_ACCESS_CLIENT_SECRET).toBe("cf-client-secret");
+          expect(args.join(" ")).not.toContain("cf-client-secret");
+          return {
+            exitCode: 1,
+            stdout: "stdout leaked cf-client-id",
+            stderr: "stderr leaked cf-client-secret",
+          };
+        },
+      },
+    );
+
+    const observation = await driver.run({
+      ...input,
+      cloudflareAccess: { clientId: "cf-client-id", clientSecret: "cf-client-secret" },
+    });
+    expect(JSON.stringify(observation)).not.toContain("cf-client-id");
+    expect(JSON.stringify(observation)).not.toContain("cf-client-secret");
+    expect(JSON.stringify(observation)).toContain("[redacted-cloudflare-access]");
   });
 });

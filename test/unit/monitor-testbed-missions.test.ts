@@ -611,6 +611,40 @@ describe("monitor testbed mission runs", () => {
     }
   });
 
+  it("classifies refused non-browser gated-app checks as environment setup, not code work", () => {
+    const run = recordTestbedMissionRunFromOperatorResult(
+      missionResult({ targetUrl: "https://app.averray.com" }),
+      Date.parse("2026-06-01T10:00:00.000Z"),
+    );
+    const updated = recordTestbedMissionReportFromMessage(
+      {
+        relatedCorrelationId: run!.id,
+        text: JSON.stringify({
+          verdict: "fail",
+          confidence: 0,
+          stoppedBeforeMutation: true,
+          mutationBoundaryNotes: ["HTTP visibility check refused a gated app target."],
+          completedPath: [],
+          blockers: [
+            "http_visibility_check is public-only; gated target https://app.averray.com requires the browser-capable executor with Cloudflare Access edge auth and a T2/T3 authenticated session.",
+          ],
+          confusingMoments: [],
+          recommendations: ["Use the Playwright surface-sweep executor with CF Access and T2/T3 auth."],
+          evidence: ["executor: http_visibility_check; refused gated target before network request"],
+          scores: { orientation: 0 },
+        }),
+      },
+      Date.parse("2026-06-01T10:05:00.000Z"),
+    );
+
+    const disposition = testbedMissionSelfHealingDisposition(updated!);
+    expect(disposition).toMatchObject({
+      autoFixable: false,
+      reason: "environment_or_auth_failure",
+    });
+    expect(disposition.fixPrompt).toBeUndefined();
+  });
+
   it("marks runner/report-pipeline failures as human-review, not auto-fixable", () => {
     const run = recordTestbedMissionRunFromOperatorResult(missionResult(), Date.parse("2026-05-22T10:00:00.000Z"));
     const failed = failTestbedMissionRun(run!.id, {
