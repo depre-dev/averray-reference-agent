@@ -24,6 +24,7 @@ import {
   synthesizeTaskCards,
   taskHealthForBoard,
   automationHealthForBoard,
+  diffBoardSnapshots,
 } from "../../services/slack-operator/src/monitor-v2.js";
 import type { BoardCard } from "../../services/slack-operator/src/monitor-v2.js";
 import type { HermesBoardCardSnapshot } from "../../services/slack-operator/src/monitor-hermes-voice.js";
@@ -1590,5 +1591,81 @@ describe("enrichBoardCard — task status", () => {
       codexTask: { status: "approved", prompt: "do it" },
     });
     expect(enriched.taskStatus).toBe("approved");
+  });
+});
+
+describe("diffBoardSnapshots", () => {
+  function card(overrides: Partial<BoardCard> = {}): BoardCard {
+    return {
+      id: "agent #548",
+      lane: "codex-needed",
+      type: "pr",
+      agentType: "codex",
+      title: "Fix failing workflow",
+      summary: "CI is still running.",
+      repo: "depre-dev/agent",
+      freshness: 1,
+      state: "fresh",
+      risk: [],
+      waitingOn: { actor: "agent", tone: "info" },
+      ...overrides,
+    };
+  }
+
+  function snapshot(cards: BoardCard[], at: string) {
+    return {
+      cards,
+      at,
+      repo: "depre-dev/agent",
+      llmUsage: {
+        status: "not_recorded",
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        costUsd: null,
+        costStatus: "not_recorded",
+        runs: 0,
+        byModel: [],
+        byDay: [],
+      },
+    };
+  }
+
+  it("emits a moved event with the full fresh card when the lane changes", () => {
+    const previous = snapshot([card({ lane: "codex-needed", summary: "Fix assigned." })], "2026-06-01T10:00:00Z");
+    const nextCard = card({
+      lane: "hermes-checking",
+      summary: "Fix returned; Hermes is re-reviewing the current head.",
+      freshness: 0,
+      checks: { total: 5, pass: 5, fail: 0, running: 0, pending: 0 },
+    });
+    const next = snapshot([nextCard], "2026-06-01T10:00:02Z");
+
+    expect(diffBoardSnapshots(previous, next)).toEqual([
+      {
+        type: "board.card.moved",
+        id: "agent #548",
+        fromLane: "codex-needed",
+        toLane: "hermes-checking",
+        card: nextCard,
+        at: "2026-06-01T10:00:02Z",
+      },
+    ]);
+  });
+
+  it("emits add/update/archive events from real snapshot differences", () => {
+    const previous = snapshot([
+      card({ id: "agent #1", summary: "old" }),
+      card({ id: "agent #2", lane: "operator-review" }),
+    ], "2026-06-01T10:00:00Z");
+    const updated = card({ id: "agent #1", summary: "new evidence arrived" });
+    const added = card({ id: "agent #3", lane: "release-queue" });
+    const next = snapshot([updated, added], "2026-06-01T10:00:02Z");
+
+    expect(diffBoardSnapshots(previous, next)).toEqual([
+      { type: "board.card.archived", id: "agent #2", fromLane: "operator-review", at: "2026-06-01T10:00:02Z" },
+      { type: "board.card.updated", id: "agent #1", partial: updated, card: updated, at: "2026-06-01T10:00:02Z" },
+      { type: "board.card.added", card: added, at: "2026-06-01T10:00:02Z" },
+    ]);
   });
 });

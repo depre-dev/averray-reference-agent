@@ -50,7 +50,7 @@ import {
   type ReviewRequestStatus,
 } from "./monitor-collab.js";
 import { buildHermesBoardSnapshotFromMonitor } from "./monitor-hermes-board.js";
-import { buildV2BoardSnapshot } from "./monitor-v2.js";
+import { buildV2BoardSnapshot, diffBoardSnapshots, type BoardSnapshotV2 } from "./monitor-v2.js";
 import { buildBacklogSuggestionsResponse } from "./backlog-suggestions.js";
 import { listDecisionRecordsForMonitor } from "./decision-record-store.js";
 import {
@@ -3143,23 +3143,21 @@ function monitorV2Repo(): string {
 }
 
 /**
- * v2 SSE stream — emits the typed BoardSnapshotV2 as a `board.snapshot`
- * event on each interval. Mirrors writeMonitorStream's polling model
- * (re-derive + push) rather than a true pub-sub; the redesigned client
- * treats every snapshot as a full-state replace, so a periodic
- * snapshot keeps it in sync. Per-card diff events
- * (board.card.added/updated/moved/archived) are a later refinement;
- * for M1' the snapshot cadence is the contract.
+ * v2 SSE stream — emits typed card-level events derived from consecutive
+ * real BoardSnapshotV2 reads, followed by a reconciliation snapshot. Lane
+ * movement is never simulated: a `board.card.moved` means the card's real
+ * lane changed in the monitor source between two snapshots.
  */
 async function writeMonitorV2Stream(
   request: http.IncomingMessage,
   response: http.ServerResponse,
   url: URL
 ): Promise<void> {
-  const intervalMs = Math.max(1_000, parseOptionalInteger(url.searchParams.get("intervalMs")) ?? 5_000);
+  const intervalMs = Math.max(1_000, parseOptionalInteger(url.searchParams.get("intervalMs")) ?? 2_000);
   let closed = false;
   let inFlight = false;
   let timer: ReturnType<typeof setInterval> | undefined;
+  let lastSnapshot: BoardSnapshotV2 | undefined;
 
   response.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
@@ -3174,7 +3172,12 @@ async function writeMonitorV2Stream(
     inFlight = true;
     try {
       const raw = await loadMonitorSnapshot(url, { suppressNarration: true });
-      writeSseEvent(response, "board.snapshot", mergeDebugCards(buildV2BoardSnapshot(raw, { repo: monitorV2Repo() })));
+      const snapshot = mergeDebugCards(buildV2BoardSnapshot(raw, { repo: monitorV2Repo() }));
+      for (const event of diffBoardSnapshots(lastSnapshot, snapshot)) {
+        writeSseEvent(response, event.type, event);
+      }
+      writeSseEvent(response, "board.snapshot", snapshot);
+      lastSnapshot = snapshot;
     } catch (error) {
       writeSseEvent(response, "error", {
         error: "monitor_v2_snapshot_failed",
