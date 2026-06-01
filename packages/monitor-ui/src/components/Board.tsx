@@ -63,6 +63,10 @@ export type BoardProps = {
   renderCard?: (card: BoardCard) => ReactNode;
   /** Optional per-lane header content (e.g. the codex-needed create form, O3). */
   renderLaneHeader?: (id: LaneId) => ReactNode;
+  /** Optional whole-body renderer for a lane. When it returns a node, it
+   *  replaces the default `cards.map(renderCard)` (P1-1 uses this to group
+   *  the hermes-checking lane). Return `undefined` to use the default. */
+  renderLaneBody?: (id: LaneId, cards: BoardCard[]) => ReactNode | undefined;
 };
 
 export function Board({
@@ -72,6 +76,7 @@ export function Board({
   onToggleLane,
   renderCard,
   renderLaneHeader,
+  renderLaneBody,
 }: BoardProps) {
   const [internalExpanded, setInternalExpanded] = useState<Set<LaneId>>(() => new Set(initialExpanded));
   const isControlled = controlledExpanded !== undefined;
@@ -98,6 +103,7 @@ export function Board({
       {LANE_DESCRIPTORS.map((lane) => {
         const cards = grouped[lane.id] ?? [];
         const isExpanded = expanded.has(lane.id);
+        const customBody = renderLaneBody?.(lane.id, cards);
         return (
           <Lane
             key={lane.id}
@@ -107,7 +113,7 @@ export function Board({
             onToggle={onToggle}
             headerAccessory={renderLaneHeader?.(lane.id)}
           >
-            {renderCard ? cards.map(renderCard) : null}
+            {customBody !== undefined ? customBody : renderCard ? cards.map(renderCard) : null}
           </Lane>
         );
       })}

@@ -29,6 +29,36 @@ export function laneFor(card: BoardCard | undefined | null): Lane {
 }
 
 /**
+ * P1-1: an "unrouted" card is one that only lands in `hermes-checking`
+ * through `laneFor()`'s fallback — it carries no routing (it isn't an
+ * action/draft, isn't a task/deploy/done, and has no explicit `lane`).
+ * That's a bug (the classifier or an upstream source dropped the lane),
+ * not a legitimate in-flight resident, so the UI renders these as a quiet,
+ * collapsed "N unrouted" summary instead of loose junk-drawer cards. They
+ * still appear in `hermes-checking` (laneFor is unchanged) — they're just
+ * no longer loud.
+ */
+export function isUnroutedCard(card: BoardCard | undefined | null): boolean {
+  if (!card) return true;
+  if (card.isAction || card.isDraft) return false;
+  if (card.type === "task" || card.type === "deploy" || card.type === "done") return false;
+  return !card.lane;
+}
+
+export type InflightStatus = "Pre-check" | "CI watching" | "Mission running";
+
+/**
+ * Human status label for a legitimate in-flight `hermes-checking` card, so
+ * every card in the lane reads as deliberate progress with a reason rather
+ * than mystery noise.
+ */
+export function inflightStatus(card: BoardCard): InflightStatus {
+  if (card.type === "mission") return "Mission running";
+  if (card.waitingOn?.actor === "CI" || (card.checks?.running ?? 0) > 0) return "CI watching";
+  return "Pre-check";
+}
+
+/**
  * Group cards by lane. Every lane appears in the result, even empty
  * ones — UI code can iterate the full LANES list and trust [].
  */

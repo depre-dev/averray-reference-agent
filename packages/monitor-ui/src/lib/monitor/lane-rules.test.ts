@@ -3,7 +3,7 @@
 
 import { test, assert } from "vitest";
 
-import { laneFor, groupByLane, laneCounts } from "./lane-rules.js";
+import { laneFor, groupByLane, laneCounts, isUnroutedCard, inflightStatus } from "./lane-rules.js";
 import { LANES } from "./card-types.js";
 
 // ── Test fixtures ───────────────────────────────────────────────────
@@ -177,6 +177,52 @@ test("laneFor: card with no lane field defaults to hermes-checking", () => {
   const card = prCard({});
   delete card.lane;
   assert.equal(laneFor(card), "hermes-checking");
+});
+
+// ── isUnroutedCard: P1-1 — the fallback case is a bug, surfaced quietly ──
+
+test("isUnroutedCard: a card with no routing (no lane, generic type) is unrouted", () => {
+  const card = prCard({});
+  delete card.lane;
+  assert.equal(isUnroutedCard(card), true);
+});
+
+test("isUnroutedCard: null/undefined (the laneFor null fallback) is unrouted", () => {
+  assert.equal(isUnroutedCard(undefined), true);
+  assert.equal(isUnroutedCard(null), true);
+});
+
+test("isUnroutedCard: a card with an explicit hermes-checking lane is routed (legit in-flight)", () => {
+  assert.equal(isUnroutedCard(prCard({ lane: "hermes-checking" })), false);
+  assert.equal(isUnroutedCard(missionCard({ lane: "hermes-checking" })), false);
+});
+
+test("isUnroutedCard: typed/flagged cards are never unrouted (they route by type/flag)", () => {
+  const noLaneTask = taskCard({}); delete noLaneTask.lane;
+  const noLaneDeploy = deployCard({}); delete noLaneDeploy.lane;
+  const noLaneDone = doneCard({}); delete noLaneDone.lane;
+  const action = prCard({ isAction: true }); delete action.lane;
+  const draft = draftCard({ isDraft: true }); delete draft.lane;
+  assert.equal(isUnroutedCard(noLaneTask), false);
+  assert.equal(isUnroutedCard(noLaneDeploy), false);
+  assert.equal(isUnroutedCard(noLaneDone), false);
+  assert.equal(isUnroutedCard(action), false);
+  assert.equal(isUnroutedCard(draft), false);
+});
+
+// ── inflightStatus: every legit in-flight card gets a human reason ──
+
+test("inflightStatus: mission → 'Mission running'", () => {
+  assert.equal(inflightStatus(missionCard({ lane: "hermes-checking" })), "Mission running");
+});
+
+test("inflightStatus: CI signal (waitingOn CI or running checks) → 'CI watching'", () => {
+  assert.equal(inflightStatus(prCard({ lane: "hermes-checking", waitingOn: { actor: "CI", tone: "info" } })), "CI watching");
+  assert.equal(inflightStatus(prCard({ lane: "hermes-checking", checks: { pass: 1, running: 2, fail: 0, pending: 0, total: 3 } })), "CI watching");
+});
+
+test("inflightStatus: default PR pre-check → 'Pre-check'", () => {
+  assert.equal(inflightStatus(prCard({ lane: "hermes-checking", waitingOn: { actor: "agent", tone: "info" } })), "Pre-check");
 });
 
 // ── groupByLane ────────────────────────────────────────────────────
