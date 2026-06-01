@@ -1123,6 +1123,17 @@ body { margin: 0; }
   vertical-align: 0;
   animation: hm-pulse 2s infinite;
 }
+.hm-hermes-mode-banner {
+  margin: 10px 16px 0;
+  padding: 9px 11px;
+  border-radius: var(--hm-radius-sm);
+  border: 1px solid rgba(157, 105, 54, 0.26);
+  background: rgba(245, 236, 220, 0.72);
+  color: var(--hm-ink-soft);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
 .hm-hermes-tools {
   margin-left: auto;
   display: flex; gap: 6px;

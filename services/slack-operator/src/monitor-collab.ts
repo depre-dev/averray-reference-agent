@@ -49,6 +49,7 @@ const KNOWN_TARGETS = new Set(["everyone", "claude", "codex", "test-writer", "se
 export type CollaborationAuthor = "claude" | "codex" | "test-writer" | "security" | "docs" | "hermes" | "operator" | "system";
 export type CollaborationKind = "chat" | "proposal" | "request_help" | "status";
 export type CollaborationTarget = "everyone" | "claude" | "codex" | "test-writer" | "security" | "docs" | "hermes" | "operator";
+export type HermesReplyMode = "live" | "templated";
 export type ReviewRequester = "hermes" | "operator" | "codex" | "claude" | "test-writer" | "security" | "docs";
 export type ReviewRequestReviewer = "codex" | "claude" | "test-writer" | "security" | "docs" | "hermes" | "operator";
 export type ReviewRequestStatus = "requested" | "responded" | "cancelled";
@@ -69,6 +70,7 @@ export interface CollaborationMessage {
   kind: CollaborationKind;
   text: string;
   addressedTo: CollaborationTarget;
+  hermesMode?: HermesReplyMode;
   relatedPr?: CollaborationRelatedPr;
   relatedCorrelationId?: string;
 }
@@ -110,6 +112,7 @@ export interface RecordCollaborationInput {
   kind?: unknown;
   text?: unknown;
   addressedTo?: unknown;
+  hermesMode?: unknown;
   relatedPr?: unknown;
   relatedCorrelationId?: unknown;
 }
@@ -235,6 +238,7 @@ export function recordCollaborationMessage(
   }
   const relatedPr = normalizeRelatedPr(input.relatedPr);
   const relatedCorrelationId = normalizeCorrelationId(input.relatedCorrelationId);
+  const hermesMode = author === "hermes" ? normalizeHermesReplyMode(input.hermesMode) : undefined;
 
   const message: CollaborationMessage = {
     id: nextId(nowMs),
@@ -243,6 +247,7 @@ export function recordCollaborationMessage(
     kind,
     text,
     addressedTo: addressedTo ?? "everyone",
+    ...(hermesMode ? { hermesMode } : {}),
     ...(relatedPr ? { relatedPr } : {}),
     ...(relatedCorrelationId ? { relatedCorrelationId } : {}),
   };
@@ -562,6 +567,13 @@ function normalizeReviewStatus(value: unknown): ReviewRequestStatus | null {
   const v = value.trim().toLowerCase();
   if (v === "requested" || v === "responded" || v === "cancelled") return v;
   return null;
+}
+
+function normalizeHermesReplyMode(value: unknown): HermesReplyMode | undefined {
+  if (typeof value !== "string") return undefined;
+  const v = value.trim().toLowerCase();
+  if (v === "live" || v === "templated") return v;
+  return undefined;
 }
 
 function normalizeReviewVerdict(value: unknown): ReviewPanelVerdict | null {
