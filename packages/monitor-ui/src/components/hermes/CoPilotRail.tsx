@@ -10,7 +10,12 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { BoardCard, CreateTaskInput } from "../../lib/monitor/card-types.js";
 import type { BacklogSuggestion, BacklogSuggestionsResponse } from "../../lib/monitor/backlog-suggestions.js";
 import type { BoardNowBanner as BoardNowBannerData } from "../../lib/monitor/board-state.js";
-import { relatedPrForCard, type CollaborationMessage } from "../../lib/monitor/collaboration.js";
+import {
+  actorLabel,
+  formatTurnTime,
+  relatedPrForCard,
+  type CollaborationMessage,
+} from "../../lib/monitor/collaboration.js";
 import {
   buildHermesActivityFeed,
   type HermesActivityEntry,
@@ -142,7 +147,12 @@ export function CoPilotRail({
         </div>
         <div className="hm-hermes-stream hm-activity-stream" ref={streamRef} aria-live="polite">
           {activity.map((entry) => (
-            <ActivityEntryRow entry={entry} onCardClick={onCardClick} key={entry.id} />
+            <ActivityEntryRow
+              entry={entry}
+              onCardClick={onCardClick}
+              onUseInComposer={fillComposer}
+              key={entry.id}
+            />
           ))}
         </div>
       </section>
@@ -193,37 +203,76 @@ function messageMatchesCard(message: CollaborationMessage, card: BoardCard): boo
 function ActivityEntryRow({
   entry,
   onCardClick,
+  onUseInComposer,
 }: {
   entry: HermesActivityEntry;
   onCardClick?: (id: string) => void;
+  onUseInComposer?: (text: string) => void;
 }) {
-  const body = (
-    <>
-      <span className="hm-activity-dot" aria-hidden />
-      <span>
-        <strong>{entry.text}</strong>
+  return (
+    <div className={`hm-turn hm-turn--${entry.actor} hm-turn--activity-${entry.tone}`}>
+      <div className="hm-turn-head">
+        <span className="hm-turn-actor">
+          <span className="actor-dot" aria-hidden />
+          {actorLabel(entry.actor)}
+        </span>
+        <span className="hm-turn-kind">· {entry.kindLabel}</span>
+        <span className="hm-turn-time">{formatTurnTime(entry.atMs)}</span>
+      </div>
+      <div className="hm-turn-body">
+        {entry.text}
         {entry.meta ? <small>{entry.meta}</small> : null}
-      </span>
+      </div>
+      {entry.cardId ? (
+        <ActivityPin
+          cardId={entry.cardId}
+          onCardClick={onCardClick}
+        />
+      ) : null}
+      {onUseInComposer && entry.suggestions?.length ? (
+        <div className="hm-turn-actions" aria-label="Suggested prompts">
+          {entry.suggestions.map((suggestion) => (
+            <button
+              type="button"
+              className="hm-turn-suggest"
+              onClick={() => onUseInComposer(suggestion)}
+              key={suggestion}
+            >
+              {suggestion}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ActivityPin({
+  cardId,
+  onCardClick,
+}: {
+  cardId: string;
+  onCardClick?: (id: string) => void;
+}) {
+  const content = (
+    <>
+      <span className="pin-id">{cardId}</span>
+      <span className="pin-title">Referenced card</span>
+      <span className="pin-arrow">{onCardClick ? "open ›" : "referenced"}</span>
     </>
   );
-  if (entry.cardId && onCardClick) {
-    return (
-      <button
-        type="button"
-        className={`hm-activity-row hm-activity-row--${entry.tone}`}
-        onClick={() => onCardClick(entry.cardId!)}
-        aria-label={`Open card ${entry.cardId}`}
-      >
-        {body}
-        <span className="hm-activity-link">{entry.cardId}</span>
-      </button>
-    );
+  if (!onCardClick) {
+    return <div className="hm-turn-pin">{content}</div>;
   }
   return (
-    <div className={`hm-activity-row hm-activity-row--${entry.tone}`}>
-      {body}
-      {entry.cardId ? <span className="hm-activity-link">{entry.cardId}</span> : null}
-    </div>
+    <button
+      type="button"
+      className="hm-turn-pin"
+      onClick={() => onCardClick(cardId)}
+      aria-label={`Open referenced card ${cardId}`}
+    >
+      {content}
+    </button>
   );
 }
 

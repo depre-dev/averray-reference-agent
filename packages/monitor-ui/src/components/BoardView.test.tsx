@@ -15,7 +15,7 @@ describe("BoardView — rich-mix board (open stream)", () => {
     const { container } = render(<BoardView board={richBoard} status="open" />);
     const view = within(container);
     expect(view.getByRole("banner")).toBeTruthy();
-    expect(view.getByText("Hermes")).toBeTruthy();
+    expect(container.querySelector(".hm-brand-name")?.textContent).toBe("Hermes");
     // action tone — the fixtures include action cards
     expect(container.querySelector(".hm-now--action")).toBeTruthy();
     expect(view.getByText(/your review decision/)).toBeTruthy();
