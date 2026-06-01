@@ -164,7 +164,6 @@ describe("codex branch worker", () => {
     const config = parseCodexWorkerConfig({
       CODEX_TASK_REPO: "averray-agent/agent",
       CODEX_BRANCH_WORKER_ALLOWED_REPOS: "averray-agent/agent",
-      CODEX_BRANCH_WORKER_ROOT: "/private/tmp/averray-test-codex-worker",
       CODEX_BRANCH_WORKER_CODEX_COMMAND: "codex",
       CODEX_BRANCH_WORKER_CODEX_ARGS: "[\"exec\",\"{prompt}\"]",
     });
