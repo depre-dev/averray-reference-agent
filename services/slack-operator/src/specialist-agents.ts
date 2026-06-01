@@ -97,7 +97,7 @@ export const TASK_AGENT_DEFINITIONS: readonly TaskAgentDefinition[] = [
     id: "codex",
     label: "Codex",
     branchPrefix: "codex",
-    greenfield: false,
+    greenfield: true,
     prBodyLabel: "Codex worker",
     commitPrefix: "Codex task",
   },

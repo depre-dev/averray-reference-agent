@@ -89,6 +89,7 @@ export async function runCodexTaskRunnerOnce(
   const claimed = await claimNextApprovedCodexTask({
     path: config.path,
     runnerId: config.runnerId,
+    agent: "codex",
     now: deps.now,
   });
   if (!claimed) {
@@ -99,7 +100,7 @@ export async function runCodexTaskRunnerOnce(
   await updateRunnerHeartbeat(
     config,
     "running",
-    `Codex runner claimed ${claimed.repo}#${claimed.pullRequestNumber}.`,
+    `Codex runner claimed ${taskLabel(claimed)}.`,
     deps.now,
     claimed.id
   );
@@ -131,7 +132,7 @@ export async function runCodexTaskRunnerOnce(
       await updateRunnerHeartbeat(
         config,
         "completed",
-        summary || `Codex runner completed ${claimed.repo}#${claimed.pullRequestNumber}.`,
+        summary || `Codex runner completed ${taskLabel(claimed)}.`,
         undefined,
         claimed.id
       );
@@ -252,7 +253,7 @@ function taskEnvironment(task: CodexTask): NodeJS.ProcessEnv {
     ...process.env,
     CODEX_TASK_ID: task.id,
     CODEX_TASK_REPO: task.repo,
-    CODEX_TASK_PR: String(task.pullRequestNumber),
+    CODEX_TASK_PR: task.pullRequestNumber != null ? String(task.pullRequestNumber) : "",
     CODEX_TASK_TITLE: task.title ?? "",
     CODEX_TASK_CORRELATION_ID: task.correlationId ?? "",
     CODEX_TASK_REASON: task.reason ?? "",
@@ -309,13 +310,13 @@ export function renderCodexTaskRunnerArgs(args: string[], task: CodexTask): stri
   const replacements: Record<string, string> = {
     "{taskId}": task.id,
     "{repo}": task.repo,
-    "{pr}": String(task.pullRequestNumber),
+    "{pr}": task.pullRequestNumber != null ? String(task.pullRequestNumber) : "",
     "{title}": task.title ?? "",
     "{correlationId}": task.correlationId ?? "",
     "{prompt}": task.prompt,
     "{CODEX_TASK_ID}": task.id,
     "{CODEX_TASK_REPO}": task.repo,
-    "{CODEX_TASK_PR}": String(task.pullRequestNumber),
+    "{CODEX_TASK_PR}": task.pullRequestNumber != null ? String(task.pullRequestNumber) : "",
     "{CODEX_TASK_TITLE}": task.title ?? "",
     "{CODEX_TASK_CORRELATION_ID}": task.correlationId ?? "",
     "{CODEX_TASK_PROMPT}": task.prompt,
@@ -327,6 +328,10 @@ export function renderCodexTaskRunnerArgs(args: string[], task: CodexTask): stri
     }
     return value;
   });
+}
+
+function taskLabel(task: CodexTask): string {
+  return task.pullRequestNumber != null ? `${task.repo}#${task.pullRequestNumber}` : `${task.repo} (greenfield)`;
 }
 
 // Exported so the Claude task runner reuses the exact same secret

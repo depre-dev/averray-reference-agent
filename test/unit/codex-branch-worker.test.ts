@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildGuardedCodexGreenfieldPrompt,
   buildGuardedCodexPrompt,
+  codexBranchName,
+  type ExecFn,
   parseCodexWorkerConfig,
   parseCodexWorkerTask,
   renderCodexWorkerArgs,
+  runCodexBranchWorker,
+  validateGreenfieldCodexWorkerTask,
   validatePullRequestForCodexWorker,
   type CodexWorkerTask,
   type GithubPullRequestForWorker,
@@ -40,7 +45,7 @@ describe("codex branch worker", () => {
     },
   };
 
-  it("parses task and worker config from environment", () => {
+  it("parses PR-mode and greenfield tasks plus worker config from environment", () => {
     expect(parseCodexWorkerTask({
       CODEX_TASK_ID: "task-1",
       CODEX_TASK_REPO: "averray-agent/agent",
@@ -54,6 +59,21 @@ describe("codex branch worker", () => {
       prompt: "Fix it.",
       correlationId: "corr-1",
     });
+    expect(parseCodexWorkerTask({
+      CODEX_TASK_ID: "task-2",
+      CODEX_TASK_REPO: "averray-agent/agent",
+      CODEX_TASK_PROMPT: "Build the missing thing.",
+    })).toMatchObject({
+      id: "task-2",
+      repo: "averray-agent/agent",
+      prompt: "Build the missing thing.",
+    });
+    expect(() => parseCodexWorkerTask({
+      CODEX_TASK_ID: "task-3",
+      CODEX_TASK_REPO: "averray-agent/agent",
+      CODEX_TASK_PR: "nope",
+      CODEX_TASK_PROMPT: "Fix it.",
+    })).toThrow(/positive integer/);
 
     expect(parseCodexWorkerConfig({
       CODEX_TASK_REPO: "averray-agent/agent",
@@ -66,6 +86,7 @@ describe("codex branch worker", () => {
       allowedRepos: ["averray-agent/agent", "depre-dev/averray-reference-agent"],
       codexCommand: "codex",
       codexArgs: ["exec", "{prompt}"],
+      baseBranch: "main",
     });
   });
 
@@ -111,5 +132,73 @@ describe("codex branch worker", () => {
       "--pr=381",
       "github-pr-381",
     ]);
+  });
+
+  it("builds and validates a greenfield branch for Codex tasks without a PR", () => {
+    const greenfield: CodexWorkerTask = {
+      id: "codex-task-greenfield-123456",
+      repo: "averray-agent/agent",
+      title: "Add runner guard",
+      prompt: "Add the missing guard.",
+    };
+    const branch = codexBranchName(greenfield);
+    const config = parseCodexWorkerConfig({
+      CODEX_TASK_REPO: "averray-agent/agent",
+      CODEX_BRANCH_WORKER_ALLOWED_REPOS: "averray-agent/agent",
+    });
+
+    expect(branch).toMatch(/^codex\/add-runner-guard-[a-z0-9-]+$/);
+    expect(() => validateGreenfieldCodexWorkerTask(greenfield, branch, config)).not.toThrow();
+    expect(buildGuardedCodexGreenfieldPrompt(greenfield, branch)).toContain("the harness commits, pushes, and opens it");
+    expect(renderCodexWorkerArgs(["--pr={pr}", "{prompt}"], "Prompt", greenfield)).toEqual(["--pr=", "Prompt"]);
+  });
+
+  it("runs a greenfield Codex task by branching from base and opening a new PR", async () => {
+    const greenfield: CodexWorkerTask = {
+      id: "codex-task-greenfield-abcdef",
+      repo: "averray-agent/agent",
+      title: "Add runner guard",
+      prompt: "Add the missing guard.",
+      correlationId: "mission-1",
+    };
+    const config = parseCodexWorkerConfig({
+      CODEX_TASK_REPO: "averray-agent/agent",
+      CODEX_BRANCH_WORKER_ALLOWED_REPOS: "averray-agent/agent",
+      CODEX_BRANCH_WORKER_ROOT: "/private/tmp/averray-test-codex-worker",
+      CODEX_BRANCH_WORKER_CODEX_COMMAND: "codex",
+      CODEX_BRANCH_WORKER_CODEX_ARGS: "[\"exec\",\"{prompt}\"]",
+    });
+    const commands: Array<{ command: string; args: string[]; cwd?: string }> = [];
+    const exec: ExecFn = async (command, args, options) => {
+      commands.push({ command, args, ...(options?.cwd ? { cwd: options.cwd } : {}) });
+      if (command === "git" && args[0] === "status") {
+        return { exitCode: 0, stdout: " M services/slack-operator/src/codex-branch-worker.ts\n", stderr: "" };
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    };
+    const opened: Array<{ head: string; base: string; title: string; body: string }> = [];
+
+    await runCodexBranchWorker(greenfield, config, {
+      exec,
+      openPullRequest: async (_task, _config, input) => {
+        opened.push(input);
+        return { number: 606, html_url: "https://github.com/averray-agent/agent/pull/606" };
+      },
+    });
+
+    const branch = codexBranchName(greenfield);
+    expect(commands).toEqual(expect.arrayContaining([
+      expect.objectContaining({ command: "git", args: ["clone", "--no-tags", "--depth=50", "https://github.com/averray-agent/agent.git", expect.any(String)] }),
+      expect.objectContaining({ command: "git", args: ["fetch", "origin", "main"] }),
+      expect.objectContaining({ command: "git", args: ["checkout", "-B", branch, "origin/main"] }),
+      expect.objectContaining({ command: "codex", args: ["exec", expect.stringContaining("Task from Hermes:")] }),
+      expect.objectContaining({ command: "git", args: ["push", "origin", `HEAD:${branch}`] }),
+    ]));
+    expect(opened).toEqual([expect.objectContaining({
+      head: branch,
+      base: "main",
+      title: "codex: Add runner guard",
+      body: expect.stringContaining("Review + merge are human-gated"),
+    })]);
   });
 });

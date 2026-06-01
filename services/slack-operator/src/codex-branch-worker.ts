@@ -3,11 +3,13 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { taskAgentBranchPrefix, taskAgentCommitPrefix, taskAgentPrBodyLabel } from "./specialist-agents.js";
 
 export interface CodexWorkerTask {
   id: string;
   repo: string;
-  pullRequestNumber: number;
+  /** Existing-PR mode. Greenfield tasks omit this and the worker opens a new PR. */
+  pullRequestNumber?: number;
   title?: string;
   prompt: string;
   correlationId?: string;
@@ -21,6 +23,7 @@ export interface CodexWorkerConfig {
   keepWorktree: boolean;
   gitUserName: string;
   gitUserEmail: string;
+  baseBranch: string;
   codexCommand: string;
   codexArgs: string[];
   commandTimeoutMs: number;
@@ -55,6 +58,26 @@ interface CommandResult {
   stderr: string;
 }
 
+export type ExecFn = (
+  command: string,
+  args: string[],
+  options?: { cwd?: string; timeoutMs?: number; token?: string }
+) => Promise<CommandResult>;
+
+export interface OpenedPullRequest {
+  number: number;
+  html_url?: string;
+}
+
+export interface CodexBranchWorkerDeps {
+  exec?: ExecFn;
+  openPullRequest?: (
+    task: CodexWorkerTask,
+    config: CodexWorkerConfig,
+    input: { head: string; base: string; title: string; body: string }
+  ) => Promise<OpenedPullRequest>;
+}
+
 const DEFAULT_CODEX_ARGS = ["exec", "--full-auto", "{prompt}"];
 const PROTECTED_BRANCHES = new Set(["main", "master", "production", "prod"]);
 const DEFAULT_DENY_PATTERNS = [
@@ -69,14 +92,15 @@ const DEFAULT_DENY_PATTERNS = [
 
 export function parseCodexWorkerTask(env: NodeJS.ProcessEnv = process.env): CodexWorkerTask {
   const repo = requiredEnv(env, "CODEX_TASK_REPO");
-  const pullRequestNumber = Number(env.CODEX_TASK_PR);
-  if (!Number.isInteger(pullRequestNumber) || pullRequestNumber < 1) {
-    throw new Error("CODEX_TASK_PR must be a positive integer.");
+  const prRaw = env.CODEX_TASK_PR?.trim();
+  const pullRequestNumber = prRaw ? Number(prRaw) : undefined;
+  if (prRaw && (!Number.isInteger(pullRequestNumber) || (pullRequestNumber as number) < 1)) {
+    throw new Error("CODEX_TASK_PR, when set, must be a positive integer.");
   }
   return {
     id: requiredEnv(env, "CODEX_TASK_ID"),
     repo,
-    pullRequestNumber,
+    ...(pullRequestNumber ? { pullRequestNumber } : {}),
     ...(env.CODEX_TASK_TITLE ? { title: env.CODEX_TASK_TITLE } : {}),
     prompt: requiredEnv(env, "CODEX_TASK_PROMPT"),
     ...(env.CODEX_TASK_CORRELATION_ID ? { correlationId: env.CODEX_TASK_CORRELATION_ID } : {}),
@@ -92,6 +116,7 @@ export function parseCodexWorkerConfig(env: NodeJS.ProcessEnv = process.env): Co
     keepWorktree: env.CODEX_BRANCH_WORKER_KEEP_WORKTREE === "1" || env.CODEX_BRANCH_WORKER_KEEP_WORKTREE === "true",
     gitUserName: env.CODEX_BRANCH_WORKER_GIT_USER_NAME?.trim() || "Averray Codex Worker",
     gitUserEmail: env.CODEX_BRANCH_WORKER_GIT_USER_EMAIL?.trim() || "codex-worker@averray.local",
+    baseBranch: env.CODEX_BRANCH_WORKER_BASE_BRANCH?.trim() || "main",
     codexCommand: env.CODEX_BRANCH_WORKER_CODEX_COMMAND?.trim() || "codex",
     codexArgs: parseArgs(env.CODEX_BRANCH_WORKER_CODEX_ARGS, DEFAULT_CODEX_ARGS),
     commandTimeoutMs: positiveInt(env.CODEX_BRANCH_WORKER_TIMEOUT_MS, 30 * 60_000),
@@ -108,6 +133,9 @@ export function validatePullRequestForCodexWorker(
   }
   if (config.allowedRepos.length > 0 && !config.allowedRepos.includes(task.repo)) {
     throw new Error(`Repo ${task.repo} is not allowed for Codex worker dispatch.`);
+  }
+  if (task.pullRequestNumber === undefined) {
+    throw new Error("validatePullRequestForCodexWorker requires an existing PR task.");
   }
   if (pr.state !== "open") {
     throw new Error(`PR #${task.pullRequestNumber} is not open (${pr.state}).`);
@@ -127,6 +155,29 @@ export function validatePullRequestForCodexWorker(
   const baseRef = pr.base?.ref;
   if (baseRepo === headRepo && baseRef && baseRef === headRef) {
     throw new Error(`Refusing to let Codex work on the base branch ${baseRef}.`);
+  }
+}
+
+export function codexBranchName(task: CodexWorkerTask): string {
+  const base = (task.title || task.prompt || "task")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/g, "");
+  const tail = task.id.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(-8);
+  return `${taskAgentBranchPrefix("codex")}/${[base, tail].filter(Boolean).join("-") || "task"}`;
+}
+
+export function validateGreenfieldCodexWorkerTask(task: CodexWorkerTask, branch: string, config: CodexWorkerConfig): void {
+  if (config.allowedRepos.length === 0) {
+    throw new Error("No Codex worker allowed repos configured.");
+  }
+  if (!config.allowedRepos.includes(task.repo)) {
+    throw new Error(`Repo ${task.repo} is not allowed for Codex worker dispatch.`);
+  }
+  if (PROTECTED_BRANCHES.has(branch.toLowerCase()) || branch === config.baseBranch) {
+    throw new Error(`Refusing to let Codex push to protected/base branch ${branch}.`);
   }
 }
 
@@ -156,12 +207,35 @@ export function buildGuardedCodexPrompt(task: CodexWorkerTask, pr: GithubPullReq
   ].filter(Boolean).join("\n");
 }
 
+export function buildGuardedCodexGreenfieldPrompt(task: CodexWorkerTask, branch: string): string {
+  const correlation = task.correlationId ? `\nCorrelation ID: ${task.correlationId}` : "";
+  return [
+    "You are Codex working for Hermes on an approved Averray monitor task.",
+    "",
+    "Hard boundaries:",
+    `- Work only in this checked-out worktree on branch ${branch}.`,
+    "- Do not merge, deploy, rotate secrets, claim jobs, submit platform work, or edit production state.",
+    "- Do not add or print secrets, JWTs, private keys, or provider tokens.",
+    "- Keep the change minimal and specific to the task.",
+    "- Run the smallest relevant local checks you can before finishing.",
+    "- Do not open the pull request yourself; the harness commits, pushes, and opens it.",
+    "- Leave GitHub merge/deploy decisions to Hermes and the operator.",
+    "",
+    `Repository: ${task.repo}`,
+    `Title: ${task.title || "untitled"}`,
+    correlation.trim(),
+    "",
+    "Task from Hermes:",
+    task.prompt,
+  ].filter(Boolean).join("\n");
+}
+
 export function renderCodexWorkerArgs(args: string[], prompt: string, task: CodexWorkerTask): string[] {
   const replacements: Record<string, string> = {
     "{prompt}": prompt,
     "{taskId}": task.id,
     "{repo}": task.repo,
-    "{pr}": String(task.pullRequestNumber),
+    "{pr}": task.pullRequestNumber != null ? String(task.pullRequestNumber) : "",
     "{title}": task.title ?? "",
     "{correlationId}": task.correlationId ?? "",
   };
@@ -176,8 +250,14 @@ export function renderCodexWorkerArgs(args: string[], prompt: string, task: Code
 
 export async function runCodexBranchWorker(
   task: CodexWorkerTask = parseCodexWorkerTask(),
-  config: CodexWorkerConfig = parseCodexWorkerConfig()
+  config: CodexWorkerConfig = parseCodexWorkerConfig(),
+  deps: CodexBranchWorkerDeps = {}
 ): Promise<void> {
+  const exec = deps.exec ?? run;
+  const openPullRequest = deps.openPullRequest ?? openPullRequestViaApi;
+  if (task.pullRequestNumber === undefined) {
+    return runGreenfieldCodexBranchWorker(task, config, { exec, openPullRequest });
+  }
   const pr = await fetchPullRequest(task, config);
   validatePullRequestForCodexWorker(task, pr, config);
   const headRepo = pr.head.repo?.full_name as string;
@@ -186,31 +266,31 @@ export async function runCodexBranchWorker(
   const workdir = await mkdtemp(join(config.workRoot, `${task.id}-`));
   let cleanup = !config.keepWorktree;
   try {
-    await run("git", ["clone", "--no-tags", "--depth=50", cloneUrl, workdir], { token: config.githubToken });
-    await run("git", ["config", "user.name", config.gitUserName], { cwd: workdir });
-    await run("git", ["config", "user.email", config.gitUserEmail], { cwd: workdir });
-    await run("git", ["fetch", "origin", `${pr.head.ref}:${pr.head.ref}`], { cwd: workdir, token: config.githubToken });
-    await run("git", ["checkout", pr.head.ref], { cwd: workdir });
-    const beforeSha = (await run("git", ["rev-parse", "HEAD"], { cwd: workdir })).stdout.trim();
+    await exec("git", ["clone", "--no-tags", "--depth=50", cloneUrl, workdir], { token: config.githubToken });
+    await exec("git", ["config", "user.name", config.gitUserName], { cwd: workdir });
+    await exec("git", ["config", "user.email", config.gitUserEmail], { cwd: workdir });
+    await exec("git", ["fetch", "origin", `${pr.head.ref}:${pr.head.ref}`], { cwd: workdir, token: config.githubToken });
+    await exec("git", ["checkout", pr.head.ref], { cwd: workdir });
+    const beforeSha = (await exec("git", ["rev-parse", "HEAD"], { cwd: workdir })).stdout.trim();
     const prompt = buildGuardedCodexPrompt(task, pr);
     console.log(`Codex worker claimed ${task.repo}#${task.pullRequestNumber} on ${pr.head.ref}.`);
-    const codex = await run(config.codexCommand, renderCodexWorkerArgs(config.codexArgs, prompt, task), {
+    const codex = await exec(config.codexCommand, renderCodexWorkerArgs(config.codexArgs, prompt, task), {
       cwd: workdir,
       timeoutMs: config.commandTimeoutMs,
     });
     if (codex.exitCode !== 0) {
       throw new Error(lastNonEmptyLine(codex.stderr) || lastNonEmptyLine(codex.stdout) || `Codex exited with ${codex.exitCode}.`);
     }
-    const changedFiles = await gitChangedFiles(workdir);
+    const changedFiles = await gitChangedFiles(workdir, exec);
     assertNoForbiddenFiles(changedFiles);
     const hasChanges = changedFiles.length > 0;
     if (hasChanges) {
-      await run("git", ["add", "-A"], { cwd: workdir });
-      await run("git", ["commit", "-m", commitMessage(task)], { cwd: workdir });
+      await exec("git", ["add", "-A"], { cwd: workdir });
+      await exec("git", ["commit", "-m", commitMessage(task)], { cwd: workdir });
     }
-    const afterSha = (await run("git", ["rev-parse", "HEAD"], { cwd: workdir })).stdout.trim();
+    const afterSha = (await exec("git", ["rev-parse", "HEAD"], { cwd: workdir })).stdout.trim();
     if (afterSha !== beforeSha) {
-      await run("git", ["push", "origin", `HEAD:${pr.head.ref}`], { cwd: workdir, token: config.githubToken });
+      await exec("git", ["push", "origin", `HEAD:${pr.head.ref}`], { cwd: workdir, token: config.githubToken });
       console.log(`Codex pushed ${afterSha.slice(0, 12)} to ${headRepo}:${pr.head.ref}.`);
     } else {
       console.log("Codex completed without producing a new commit.");
@@ -223,7 +303,64 @@ export async function runCodexBranchWorker(
   }
 }
 
+async function runGreenfieldCodexBranchWorker(
+  task: CodexWorkerTask,
+  config: CodexWorkerConfig,
+  deps: {
+    exec: ExecFn;
+    openPullRequest: NonNullable<CodexBranchWorkerDeps["openPullRequest"]>;
+  }
+): Promise<void> {
+  const branch = codexBranchName(task);
+  validateGreenfieldCodexWorkerTask(task, branch, config);
+
+  const cloneUrl = `https://github.com/${task.repo}.git`;
+  await mkdir(config.workRoot, { recursive: true });
+  const workdir = await mkdtemp(join(config.workRoot, `${slug(task.id)}-`));
+  try {
+    await deps.exec("git", ["clone", "--no-tags", "--depth=50", cloneUrl, workdir], { token: config.githubToken });
+    await deps.exec("git", ["config", "user.name", config.gitUserName], { cwd: workdir });
+    await deps.exec("git", ["config", "user.email", config.gitUserEmail], { cwd: workdir });
+    await deps.exec("git", ["fetch", "origin", config.baseBranch], { cwd: workdir, token: config.githubToken });
+    await deps.exec("git", ["checkout", "-B", branch, `origin/${config.baseBranch}`], { cwd: workdir });
+
+    const prompt = buildGuardedCodexGreenfieldPrompt(task, branch);
+    console.log(`Codex worker starting greenfield ${task.repo} on ${branch}.`);
+    const codex = await deps.exec(config.codexCommand, renderCodexWorkerArgs(config.codexArgs, prompt, task), {
+      cwd: workdir,
+      timeoutMs: config.commandTimeoutMs,
+    });
+    if (codex.exitCode !== 0) {
+      throw new Error(lastNonEmptyLine(codex.stderr) || lastNonEmptyLine(codex.stdout) || `Codex exited with ${codex.exitCode}.`);
+    }
+
+    const changedFiles = await gitChangedFiles(workdir, deps.exec);
+    assertNoForbiddenFiles(changedFiles);
+    if (changedFiles.length === 0) {
+      console.log(`Codex produced no changes for ${task.repo}; not opening a PR.`);
+      return;
+    }
+
+    await deps.exec("git", ["add", "-A"], { cwd: workdir });
+    await deps.exec("git", ["commit", "-m", commitMessage(task)], { cwd: workdir });
+    await deps.exec("git", ["push", "origin", `HEAD:${branch}`], { cwd: workdir, token: config.githubToken });
+
+    const pr = await deps.openPullRequest(task, config, {
+      head: branch,
+      base: config.baseBranch,
+      title: pullRequestTitle(task),
+      body: buildPullRequestBody(task),
+    });
+    console.log(`Codex opened PR #${pr.number} on ${task.repo} (${branch})${pr.html_url ? ` - ${pr.html_url}` : ""}.`);
+  } finally {
+    if (!config.keepWorktree) await rm(workdir, { recursive: true, force: true });
+  }
+}
+
 async function fetchPullRequest(task: CodexWorkerTask, config: CodexWorkerConfig): Promise<GithubPullRequestForWorker> {
+  if (task.pullRequestNumber === undefined) {
+    throw new Error("fetchPullRequest requires an existing PR task.");
+  }
   const response = await fetch(`${config.apiBaseUrl.replace(/\/$/, "")}/repos/${task.repo}/pulls/${task.pullRequestNumber}`, {
     headers: {
       accept: "application/vnd.github+json",
@@ -237,8 +374,30 @@ async function fetchPullRequest(task: CodexWorkerTask, config: CodexWorkerConfig
   return await response.json() as GithubPullRequestForWorker;
 }
 
-async function gitChangedFiles(cwd: string): Promise<string[]> {
-  const result = await run("git", ["status", "--porcelain"], { cwd });
+async function openPullRequestViaApi(
+  task: CodexWorkerTask,
+  config: CodexWorkerConfig,
+  input: { head: string; base: string; title: string; body: string }
+): Promise<OpenedPullRequest> {
+  const response = await fetch(`${config.apiBaseUrl.replace(/\/$/, "")}/repos/${task.repo}/pulls`, {
+    method: "POST",
+    headers: {
+      accept: "application/vnd.github+json",
+      "content-type": "application/json",
+      "user-agent": "averray-codex-branch-worker",
+      ...(config.githubToken ? { authorization: `Bearer ${config.githubToken}` } : {}),
+    },
+    body: JSON.stringify({ title: input.title, head: input.head, base: input.base, body: input.body, maintainer_can_modify: true }),
+  });
+  if (!response.ok) {
+    throw new Error(`GitHub PR creation failed for ${task.repo} (${input.head} → ${input.base}): HTTP ${response.status}`);
+  }
+  const json = await response.json() as OpenedPullRequest;
+  return { number: json.number, ...(json.html_url ? { html_url: json.html_url } : {}) };
+}
+
+async function gitChangedFiles(cwd: string, exec: ExecFn = run): Promise<string[]> {
+  const result = await exec("git", ["status", "--porcelain"], { cwd });
   return result.stdout
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -258,8 +417,30 @@ export function assertNoForbiddenFiles(paths: string[], who = "Codex"): void {
 }
 
 function commitMessage(task: CodexWorkerTask): string {
-  const title = (task.title || `PR ${task.pullRequestNumber}`).replace(/\s+/g, " ").trim();
-  return `Codex task: ${title}`.slice(0, 72);
+  const title = (task.title || (task.pullRequestNumber ? `PR ${task.pullRequestNumber}` : "greenfield task")).replace(/\s+/g, " ").trim();
+  return `${taskAgentCommitPrefix("codex")}: ${title}`.slice(0, 72);
+}
+
+function pullRequestTitle(task: CodexWorkerTask): string {
+  const title = (task.title || task.prompt || "Hermes Codex task").replace(/\s+/g, " ").trim();
+  return `codex: ${title}`.slice(0, 120);
+}
+
+function buildPullRequestBody(task: CodexWorkerTask): string {
+  return [
+    `Opened by the Averray **${taskAgentPrBodyLabel("codex")}** for an approved Hermes task.`,
+    "",
+    "**Task**",
+    task.prompt,
+    "",
+    task.correlationId ? `Correlation ID: \`${task.correlationId}\`` : "",
+    "",
+    "_Automated change on a fresh branch. Review + merge are human-gated (AGENTS.md)._",
+  ].filter(Boolean).join("\n");
+}
+
+function slug(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "task";
 }
 
 async function run(
