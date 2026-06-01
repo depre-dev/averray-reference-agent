@@ -95,6 +95,57 @@ describe("LLM usage tracker", () => {
       totalTokens: 42,
       costUsd: 0.02,
     });
+    expect(aggregate.sourceStatus.find((entry) => entry.agent === "claude")).toMatchObject({
+      status: "recorded",
+    });
+    expect(aggregate.sourceStatus.find((entry) => entry.agent === "hermes")).toMatchObject({
+      status: "not_reported",
+      reason: "Hermes/Ollama responses have not exposed usage counters yet.",
+    });
+  });
+
+  it("extracts Claude SDK-style message usage and total cost aliases", () => {
+    const event = llmUsageEventFromResult({
+      agent: "claude",
+      taskId: "task-sdk",
+      ts: new Date("2026-05-31T12:00:00.000Z"),
+      result: {
+        messages: [
+          {
+            type: "assistant",
+            model: "claude-sonnet-4-5",
+            usage: {
+              input_tokens: 75,
+              output_tokens: 18,
+            },
+            total_cost_usd: 0.0042,
+          },
+        ],
+      },
+    });
+
+    expect(event).toEqual({
+      agent: "claude",
+      model: "claude-sonnet-4-5",
+      taskId: "task-sdk",
+      inputTokens: 75,
+      outputTokens: 18,
+      costUsd: 0.0042,
+      ts: "2026-05-31T12:00:00.000Z",
+    });
+  });
+
+  it("explains missing sources instead of exposing a dead not_recorded enum", () => {
+    const aggregate = aggregateLlmUsage([]);
+
+    expect(aggregate).toMatchObject({
+      status: "not_recorded",
+      message: "No runner has reported LLM usage counters yet. Claude/test-writer counters depend on SDK output; Codex CLI and Hermes/Ollama do not reliably report usage today.",
+    });
+    expect(aggregate.sourceStatus.find((entry) => entry.agent === "codex")).toMatchObject({
+      status: "not_reported",
+      reason: "Codex usage is not reported by the CLI yet.",
+    });
   });
 
   it("does not copy prompts or secrets into usage events", () => {

@@ -36,8 +36,15 @@ export interface LlmUsageDayRollup {
   byModel: LlmUsageModelRollup[];
 }
 
+export interface LlmUsageSourceStatus {
+  agent: string;
+  status: "recorded" | "not_reported";
+  reason?: string;
+}
+
 export interface LlmUsageAggregate {
   status: "recorded" | "not_recorded";
+  message?: string;
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
@@ -46,6 +53,7 @@ export interface LlmUsageAggregate {
   runs: number;
   byModel: LlmUsageModelRollup[];
   byDay: LlmUsageDayRollup[];
+  sourceStatus?: LlmUsageSourceStatus[];
 }
 
 export interface MonitorEvent {

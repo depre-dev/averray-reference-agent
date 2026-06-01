@@ -34,8 +34,15 @@ export interface LlmUsageDayRollup {
   byModel: LlmUsageModelRollup[];
 }
 
+export interface LlmUsageSourceStatus {
+  agent: string;
+  status: "recorded" | "not_reported";
+  reason?: string;
+}
+
 export interface LlmUsageAggregate {
   status: "recorded" | "not_recorded";
+  message: string;
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
@@ -44,6 +51,7 @@ export interface LlmUsageAggregate {
   runs: number;
   byModel: LlmUsageModelRollup[];
   byDay: LlmUsageDayRollup[];
+  sourceStatus: LlmUsageSourceStatus[];
 }
 
 export interface LlmUsageCaptureInput {
@@ -55,7 +63,19 @@ export interface LlmUsageCaptureInput {
   result: unknown;
 }
 
+export interface LlmUsageAggregateOptions {
+  expectedAgents?: readonly string[];
+  sourceReasons?: Readonly<Record<string, string>>;
+}
+
 const DEFAULT_USAGE_LOG_PATH = "/data/llm-usage.jsonl";
+const DEFAULT_EXPECTED_AGENTS = ["claude", "test-writer", "codex", "hermes"] as const;
+const DEFAULT_SOURCE_REASONS: Readonly<Record<string, string>> = {
+  claude: "Claude Agent SDK usage counters have not arrived from runner output yet.",
+  "test-writer": "Test-writer SDK usage counters have not arrived from runner output yet.",
+  codex: "Codex usage is not reported by the CLI yet.",
+  hermes: "Hermes/Ollama responses have not exposed usage counters yet.",
+};
 
 export function llmUsageLogPath(env: NodeJS.ProcessEnv = process.env): string {
   return env.LLM_USAGE_LOG_PATH?.trim() || env.AVERRAY_LLM_USAGE_LOG_PATH?.trim() || DEFAULT_USAGE_LOG_PATH;
@@ -97,13 +117,17 @@ export async function recordLlmUsageFromResult(
 }
 
 export function llmUsageEventFromResult(input: LlmUsageCaptureInput): LlmUsageEvent | undefined {
-  const usage = firstRecord(
-    recordField(input.result, "usage"),
-    recordField(recordField(input.result, "response"), "usage"),
-    recordField(recordField(input.result, "result"), "usage"),
-    explicitUsageJson(input.result)
+  const usageSource = firstUsageSource(
+    tokenUsageSource(input.result),
+    usageSourceFromRecord(input.result),
+    usageSourceFromRecord(recordField(input.result, "response")),
+    usageSourceFromRecord(recordField(input.result, "result")),
+    usageSourceFromArrayField(input.result, "messages"),
+    usageSourceFromArrayField(input.result, "events"),
+    explicitUsageSource(input.result)
   );
-  if (!usage) return undefined;
+  if (!usageSource) return undefined;
+  const { usage, carrier } = usageSource;
 
   const inputTokens = integerField(usage, "inputTokens")
     ?? integerField(usage, "input_tokens")
@@ -116,14 +140,23 @@ export function llmUsageEventFromResult(input: LlmUsageCaptureInput): LlmUsageEv
   if (inputTokens === undefined || outputTokens === undefined) return undefined;
 
   const model = stringField(usage, "model")
+    ?? stringField(carrier, "model")
+    ?? stringField(carrier, "modelId")
     ?? stringField(input.result, "model")
     ?? stringField(input.result, "modelId")
     ?? input.model
     ?? "not_recorded";
   const costUsd = numberField(usage, "costUsd")
     ?? numberField(usage, "cost_usd")
+    ?? numberField(usage, "total_cost_usd")
+    ?? numberField(carrier, "costUsd")
+    ?? numberField(carrier, "cost_usd")
+    ?? numberField(carrier, "totalCostUsd")
+    ?? numberField(carrier, "total_cost_usd")
     ?? numberField(input.result, "costUsd")
-    ?? numberField(input.result, "totalCostUsd");
+    ?? numberField(input.result, "cost_usd")
+    ?? numberField(input.result, "totalCostUsd")
+    ?? numberField(input.result, "total_cost_usd");
 
   const event: LlmUsageEvent = {
     agent: input.agent,
@@ -138,16 +171,25 @@ export function llmUsageEventFromResult(input: LlmUsageCaptureInput): LlmUsageEv
   return sanitizeUsageEvent(event);
 }
 
-export function aggregateLlmUsage(events: readonly LlmUsageEvent[] = []): LlmUsageAggregate {
+export function aggregateLlmUsage(
+  events: readonly LlmUsageEvent[] = [],
+  options: LlmUsageAggregateOptions = {}
+): LlmUsageAggregate {
   const byModel = rollupByModel(events);
   const byDay = rollupByDay(events);
   const total = totalsFor(events);
+  const sourceStatus = sourceStatuses(events, options);
+  const status = events.length > 0 ? "recorded" : "not_recorded";
   return {
-    status: events.length > 0 ? "recorded" : "not_recorded",
+    status,
+    message: status === "recorded"
+      ? "LLM usage includes only runner results that emitted whitelisted cost/token counters."
+      : "No runner has reported LLM usage counters yet. Claude/test-writer counters depend on SDK output; Codex CLI and Hermes/Ollama do not reliably report usage today.",
     ...total,
     runs: events.length,
     byModel,
     byDay,
+    sourceStatus,
   };
 }
 
@@ -167,11 +209,45 @@ export function aggregateLlmUsageForAgent(
   const total = totalsFor(events);
   return {
     status: byModel.length > 0 ? "recorded" : "not_recorded",
+    message: byModel.length > 0
+      ? "LLM usage includes only runner results that emitted whitelisted cost/token counters."
+      : sourceReason(agent, undefined),
     ...total,
     runs: byModel.reduce((sum, entry) => sum + entry.runs, 0),
     byModel,
     byDay: [],
+    sourceStatus: [{
+      agent,
+      status: byModel.length > 0 ? "recorded" : "not_reported",
+      ...(byModel.length > 0 ? {} : { reason: sourceReason(agent, undefined) }),
+    }],
   };
+}
+
+function sourceStatuses(
+  events: readonly LlmUsageEvent[],
+  options: LlmUsageAggregateOptions
+): LlmUsageSourceStatus[] {
+  const recorded = new Set(events.map((event) => event.agent));
+  const expectedAgents = uniqueStrings([
+    ...(options.expectedAgents ?? DEFAULT_EXPECTED_AGENTS),
+    ...recorded,
+  ]);
+  return expectedAgents.map((agent) => ({
+    agent,
+    status: recorded.has(agent) ? "recorded" as const : "not_reported" as const,
+    ...(recorded.has(agent) ? {} : { reason: sourceReason(agent, options.sourceReasons) }),
+  }));
+}
+
+function sourceReason(agent: string, overrides?: Readonly<Record<string, string>>): string {
+  return overrides?.[agent]
+    ?? DEFAULT_SOURCE_REASONS[agent]
+    ?? `${agent} usage counters have not arrived from runner output yet.`;
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort();
 }
 
 function rollupByModel(events: readonly LlmUsageEvent[]): LlmUsageModelRollup[] {
@@ -257,6 +333,48 @@ function parseUsageLine(line: string): LlmUsageEvent | undefined {
   }
 }
 
+interface UsageSource {
+  usage: Record<string, unknown>;
+  carrier: Record<string, unknown>;
+}
+
+function usageSourceFromRecord(value: unknown): UsageSource | undefined {
+  if (!isRecord(value)) return undefined;
+  const usage = recordField(value, "usage");
+  return usage ? { usage, carrier: value } : undefined;
+}
+
+function tokenUsageSource(value: unknown): UsageSource | undefined {
+  if (!isRecord(value)) return undefined;
+  return hasTokenCounts(value) ? { usage: value, carrier: value } : undefined;
+}
+
+function usageSourceFromArrayField(value: unknown, key: string): UsageSource | undefined {
+  if (!isRecord(value) || !Array.isArray(value[key])) return undefined;
+  for (const item of value[key]) {
+    const source = usageSourceFromRecord(item) ?? tokenUsageSource(item);
+    if (source) return source;
+  }
+  return undefined;
+}
+
+function explicitUsageSource(value: unknown): UsageSource | undefined {
+  const usage = explicitUsageJson(value);
+  return usage ? { usage, carrier: usage } : undefined;
+}
+
+function hasTokenCounts(record: Record<string, unknown>): boolean {
+  const inputTokens = integerField(record, "inputTokens")
+    ?? integerField(record, "input_tokens")
+    ?? integerField(record, "promptTokens")
+    ?? integerField(record, "prompt_tokens");
+  const outputTokens = integerField(record, "outputTokens")
+    ?? integerField(record, "output_tokens")
+    ?? integerField(record, "completionTokens")
+    ?? integerField(record, "completion_tokens");
+  return inputTokens !== undefined && outputTokens !== undefined;
+}
+
 function explicitUsageJson(value: unknown): Record<string, unknown> | undefined {
   const stdout = isRecord(value) && typeof value.stdout === "string" ? value.stdout : "";
   const stderr = isRecord(value) && typeof value.stderr === "string" ? value.stderr : "";
@@ -270,8 +388,8 @@ function explicitUsageJson(value: unknown): Record<string, unknown> | undefined 
   }
 }
 
-function firstRecord(...values: Array<Record<string, unknown> | undefined>): Record<string, unknown> | undefined {
-  return values.find((value): value is Record<string, unknown> => Boolean(value));
+function firstUsageSource(...values: Array<UsageSource | undefined>): UsageSource | undefined {
+  return values.find((value): value is UsageSource => Boolean(value));
 }
 
 function recordField(value: unknown, key: string): Record<string, unknown> | undefined {

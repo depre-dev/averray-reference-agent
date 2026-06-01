@@ -79,9 +79,10 @@ describe("BoardView — rich-mix board (open stream)", () => {
         inputTokens: 100,
         outputTokens: 40,
         totalTokens: 140,
-        costUsd: null,
-        costStatus: "not_recorded",
+        costUsd: 0.0123,
+        costStatus: "recorded",
         runs: 1,
+        message: "LLM usage includes only runner results that emitted whitelisted cost/token counters.",
         byModel: [],
         byDay: [
           {
@@ -89,22 +90,26 @@ describe("BoardView — rich-mix board (open stream)", () => {
             inputTokens: 100,
             outputTokens: 40,
             totalTokens: 140,
-            costUsd: null,
-            costStatus: "not_recorded",
+            costUsd: 0.0123,
+            costStatus: "recorded",
             runs: 1,
             byModel: [
               {
-                agent: "codex",
-                model: "gpt-5-codex",
+                agent: "claude",
+                model: "claude-sonnet-4-5",
                 inputTokens: 100,
                 outputTokens: 40,
                 totalTokens: 140,
-                costUsd: null,
-                costStatus: "not_recorded",
+                costUsd: 0.0123,
+                costStatus: "recorded",
                 runs: 1,
               },
             ],
           },
+        ],
+        sourceStatus: [
+          { agent: "claude", status: "recorded" },
+          { agent: "codex", status: "not_reported", reason: "Codex usage is not reported by the CLI yet." },
         ],
       },
     };
@@ -112,8 +117,34 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(getByRole("region", { name: "LLM usage" })).toBeTruthy();
     expect(getByText("2026-05-31")).toBeTruthy();
     expect(getByText("140 tokens")).toBeTruthy();
-    expect(getByText("gpt-5-codex")).toBeTruthy();
-    expect(getByText("not_recorded")).toBeTruthy();
+    expect(getByText("claude-sonnet-4-5")).toBeTruthy();
+    expect(getByText("$0.0123")).toBeTruthy();
+    expect(getByText("Codex usage is not reported by the CLI yet.")).toBeTruthy();
+  });
+
+  test("renders a plain-language usage explanation when no source emits counters", () => {
+    const board: MonitorBoard = {
+      ...richBoard,
+      llmUsage: {
+        status: "not_recorded",
+        message: "No runner has reported LLM usage counters yet. Claude/test-writer counters depend on SDK output; Codex CLI and Hermes/Ollama do not reliably report usage today.",
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        costUsd: null,
+        costStatus: "not_recorded",
+        runs: 0,
+        byModel: [],
+        byDay: [],
+        sourceStatus: [],
+      },
+    };
+
+    const { getByRole, getByText, queryByText } = render(<BoardView board={board} status="open" />);
+    expect(getByRole("region", { name: "LLM usage" })).toBeTruthy();
+    expect(getByText("usage not reported")).toBeTruthy();
+    expect(getByText(/No runner has reported LLM usage counters yet/)).toBeTruthy();
+    expect(queryByText("not_recorded")).toBeNull();
   });
 
   test("renders backlog suggestions as a collapsed planner-only rail block", () => {
