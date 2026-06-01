@@ -173,6 +173,9 @@ export function llmUsageEventFromResult(input: LlmUsageCaptureInput): LlmUsageEv
   const usageSource = firstUsageSource(
     tokenUsageSource(input.result),
     usageSourceFromRecord(input.result),
+    usageSourceFromRecord(recordField(input.result, "message")),
+    usageSourceFromArrayField(input.result, "choices"),
+    usageSourceFromNestedArrayField(input.result, "choices", "message"),
     usageSourceFromRecord(recordField(input.result, "response")),
     usageSourceFromRecord(recordField(input.result, "result")),
     usageSourceFromArrayField(input.result, "messages"),
@@ -184,14 +187,18 @@ export function llmUsageEventFromResult(input: LlmUsageCaptureInput): LlmUsageEv
 
   const inputTokens = integerField(usage, "inputTokens")
     ?? integerField(usage, "input_tokens")
+    ?? integerField(usage, "inputTokenCount")
     ?? integerField(usage, "promptTokens")
     ?? integerField(usage, "prompt_tokens")
+    ?? integerField(usage, "promptTokenCount")
     ?? integerField(usage, "prompt_eval_count")
     ?? integerField(usage, "promptEvalCount");
   const outputTokens = integerField(usage, "outputTokens")
     ?? integerField(usage, "output_tokens")
+    ?? integerField(usage, "outputTokenCount")
     ?? integerField(usage, "completionTokens")
     ?? integerField(usage, "completion_tokens")
+    ?? integerField(usage, "completionTokenCount")
     ?? integerField(usage, "eval_count")
     ?? integerField(usage, "evalCount");
   if (inputTokens === undefined || outputTokens === undefined) return undefined;
@@ -397,7 +404,7 @@ interface UsageSource {
 function usageSourceFromRecord(value: unknown): UsageSource | undefined {
   if (!isRecord(value)) return undefined;
   const usage = recordField(value, "usage");
-  return usage ? { usage, carrier: value } : undefined;
+  return usage && hasTokenCounts(usage) ? { usage, carrier: value } : undefined;
 }
 
 function tokenUsageSource(value: unknown): UsageSource | undefined {
@@ -414,6 +421,15 @@ function usageSourceFromArrayField(value: unknown, key: string): UsageSource | u
   return undefined;
 }
 
+function usageSourceFromNestedArrayField(value: unknown, key: string, nestedKey: string): UsageSource | undefined {
+  if (!isRecord(value) || !Array.isArray(value[key])) return undefined;
+  for (const item of value[key]) {
+    const source = usageSourceFromRecord(recordField(item, nestedKey)) ?? tokenUsageSource(recordField(item, nestedKey));
+    if (source) return source;
+  }
+  return undefined;
+}
+
 function explicitUsageSource(value: unknown): UsageSource | undefined {
   const usage = explicitUsageJson(value);
   if (usage) return { usage, carrier: usage };
@@ -424,14 +440,18 @@ function explicitUsageSource(value: unknown): UsageSource | undefined {
 function hasTokenCounts(record: Record<string, unknown>): boolean {
   const inputTokens = integerField(record, "inputTokens")
     ?? integerField(record, "input_tokens")
+    ?? integerField(record, "inputTokenCount")
     ?? integerField(record, "promptTokens")
     ?? integerField(record, "prompt_tokens")
+    ?? integerField(record, "promptTokenCount")
     ?? integerField(record, "prompt_eval_count")
     ?? integerField(record, "promptEvalCount");
   const outputTokens = integerField(record, "outputTokens")
     ?? integerField(record, "output_tokens")
+    ?? integerField(record, "outputTokenCount")
     ?? integerField(record, "completionTokens")
     ?? integerField(record, "completion_tokens")
+    ?? integerField(record, "completionTokenCount")
     ?? integerField(record, "eval_count")
     ?? integerField(record, "evalCount");
   return inputTokens !== undefined && outputTokens !== undefined;
@@ -441,11 +461,14 @@ function cacheTokensFromUsage(usage: Record<string, unknown>): number {
   const explicit = integerField(usage, "cacheTokens")
     ?? integerField(usage, "cache_tokens");
   if (explicit !== undefined) return explicit;
+  const detailsCache = integerField(recordField(usage, "prompt_tokens_details"), "cached_tokens")
+    ?? integerField(recordField(usage, "input_tokens_details"), "cached_tokens");
   return [
     integerField(usage, "cacheReadInputTokens"),
     integerField(usage, "cache_read_input_tokens"),
     integerField(usage, "cacheCreationInputTokens"),
     integerField(usage, "cache_creation_input_tokens"),
+    detailsCache,
   ].reduce<number>((sum, value) => sum + (value ?? 0), 0);
 }
 
@@ -501,7 +524,10 @@ function stringField(record: unknown, key: string): string | undefined {
 function numberField(record: unknown, key: string): number | undefined {
   if (!isRecord(record)) return undefined;
   const value = record[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string" || !/^\d+(?:\.\d+)?$/.test(value.trim())) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function integerField(record: unknown, key: string): number | undefined {

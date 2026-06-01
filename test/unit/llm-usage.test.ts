@@ -163,6 +163,106 @@ describe("LLM usage tracker", () => {
     });
   });
 
+  it("extracts top-level Ollama token counts from numeric strings and appends the event", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "averray-llm-usage-"));
+    try {
+      const path = join(dir, "llm-usage.jsonl");
+      const nativeOllamaChatShape = {
+        model: "deepseek-v4-pro:cloud",
+        created_at: "2026-06-01T09:00:00.000Z",
+        message: {
+          role: "assistant",
+          content: "redacted in usage events",
+        },
+        done: true,
+        prompt_eval_count: "181",
+        eval_count: "37",
+      };
+
+      const event = await recordLlmUsageFromResult({
+        agent: "hermes",
+        model: "deepseek-v4-pro:cloud",
+        runId: "board-narration-1",
+        ts: new Date("2026-06-01T09:00:00.000Z"),
+        result: nativeOllamaChatShape,
+      }, { path });
+
+      expect(event).toEqual({
+        agent: "hermes",
+        model: "deepseek-v4-pro:cloud",
+        runId: "board-narration-1",
+        inputTokens: 181,
+        outputTokens: 37,
+        ts: "2026-06-01T09:00:00.000Z",
+      });
+      await expect(readFile(path, "utf8").then((line) => JSON.parse(line))).resolves.toEqual(event);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("extracts OpenAI-compatible usage from choices[0].usage", () => {
+    const event = llmUsageEventFromResult({
+      agent: "hermes",
+      model: "deepseek-v4-pro:cloud",
+      ts: new Date("2026-06-01T09:05:00.000Z"),
+      result: {
+        model: "deepseek-v4-pro:cloud",
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content: "not copied" },
+            usage: {
+              prompt_tokens: 93,
+              completion_tokens: 21,
+              prompt_tokens_details: { cached_tokens: 7 },
+            },
+          },
+        ],
+      },
+    });
+
+    expect(event).toEqual({
+      agent: "hermes",
+      model: "deepseek-v4-pro:cloud",
+      inputTokens: 93,
+      outputTokens: 21,
+      cacheTokens: 7,
+      ts: "2026-06-01T09:05:00.000Z",
+    });
+  });
+
+  it("extracts nested message.usage from provider chat responses", () => {
+    const event = llmUsageEventFromResult({
+      agent: "hermes",
+      model: "deepseek-v4-pro:cloud",
+      ts: new Date("2026-06-01T09:10:00.000Z"),
+      result: {
+        model: "deepseek-v4-pro:cloud",
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: "also not copied",
+              usage: {
+                prompt_eval_count: 64,
+                eval_count: 15,
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    expect(event).toEqual({
+      agent: "hermes",
+      model: "deepseek-v4-pro:cloud",
+      inputTokens: 64,
+      outputTokens: 15,
+      ts: "2026-06-01T09:10:00.000Z",
+    });
+  });
+
   it("extracts best-effort token counts from Codex CLI output when present", () => {
     const event = llmUsageEventFromResult({
       agent: "codex",

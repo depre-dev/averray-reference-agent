@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -26,42 +26,64 @@ describe("testbed mission runner", () => {
 
   it("claims a ready mission and completes it from a structured report", async () => {
     const path = tempMissionStorePath();
+    const usagePath = join(path.replace(/missions\.json$/, ""), "llm-usage.jsonl");
+    const previousUsagePath = process.env.LLM_USAGE_LOG_PATH;
+    process.env.LLM_USAGE_LOG_PATH = usagePath;
     process.env.AVERRAY_TESTBED_MISSIONS_PATH = path;
     const run = recordTestbedMissionRunFromOperatorResult(missionResult(), Date.parse("2026-05-24T10:00:00.000Z"));
     expect(run).toBeDefined();
 
-    const result = await runTestbedMissionRunnerOnce(
-      {
-        enabled: true,
-        path,
-        runnerId: "test-runner",
-        command: "fake",
-        args: [],
-        pollIntervalMs: 1000,
-        timeoutMs: 1000,
-        outputTailBytes: 4000,
-      },
-      {
-        executor: async (mission) => ({
-          exitCode: 0,
-          stdout: "mission complete",
-          stderr: "",
-          reportText: JSON.stringify({
-            verdict: "pass",
-            confidence: 0.86,
-            stoppedBeforeMutation: true,
-            mutationBoundaryNotes: ["Stopped before any real mutation boundary."],
-            completedPath: ["opened page", "verified first-run onboarding"],
-            blockers: [],
-            evidence: [{ type: "visible_text", value: "Welcome to the testbed" }],
-            scores: { orientation: 5, mutationSafety: 5 },
-            missionId: mission.id,
+    let result: Awaited<ReturnType<typeof runTestbedMissionRunnerOnce>>;
+    try {
+      result = await runTestbedMissionRunnerOnce(
+        {
+          enabled: true,
+          path,
+          runnerId: "test-runner",
+          command: "fake",
+          args: [],
+          pollIntervalMs: 1000,
+          timeoutMs: 1000,
+          outputTailBytes: 4000,
+        },
+        {
+          executor: async (mission) => ({
+            exitCode: 0,
+            stdout: "mission complete",
+            stderr: "",
+            reportText: JSON.stringify({
+              verdict: "pass",
+              confidence: 0.86,
+              stoppedBeforeMutation: true,
+              mutationBoundaryNotes: ["Stopped before any real mutation boundary."],
+              completedPath: ["opened page", "verified first-run onboarding"],
+              blockers: [],
+              evidence: [{ type: "visible_text", value: "Welcome to the testbed" }],
+              scores: { orientation: 5, mutationSafety: 5 },
+              missionId: mission.id,
+            }),
+            usage: {
+              model: "browser-agent",
+              inputTokens: 50,
+              outputTokens: 11,
+            },
           }),
-        }),
-      }
-    );
+        }
+      );
+    } finally {
+      if (previousUsagePath === undefined) delete process.env.LLM_USAGE_LOG_PATH;
+      else process.env.LLM_USAGE_LOG_PATH = previousUsagePath;
+    }
 
     expect(result.status).toBe("completed");
+    expect(JSON.parse(readFileSync(usagePath, "utf8").trim())).toMatchObject({
+      agent: "hermes",
+      model: "browser-agent",
+      taskId: run!.id,
+      runId: run!.id,
+      inputTokens: 50,
+      outputTokens: 11,
+    });
     const [updated] = listTestbedMissionRuns({ path });
     expect(updated).toMatchObject({
       id: run!.id,

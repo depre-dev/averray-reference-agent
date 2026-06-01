@@ -14,6 +14,7 @@ import {
   hermesDecisionCoachForCard,
   hermesMemoryInfluence,
   hermesOwnerAskForCard,
+  summarizeHermesUsageDebugShape,
   type HermesReplyContext,
 } from "../../services/slack-operator/src/monitor-hermes-voice.js";
 
@@ -589,6 +590,37 @@ describe("generateHermesReply", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it("summarizes usage debug shape without logging message content", () => {
+    const summary = summarizeHermesUsageDebugShape({
+      id: "chatcmpl-1",
+      model: "deepseek-v4-pro:cloud",
+      choices: [
+        {
+          message: {
+            role: "assistant",
+            content: "operator message content must stay redacted",
+            usage: {
+              prompt_eval_count: 44,
+              eval_count: 12,
+            },
+          },
+        },
+      ],
+    });
+
+    expect(summary).toMatchObject({
+      topLevelKeys: ["choices", "id", "model"],
+      usageType: "undefined",
+      present: {
+        "choices[0].message.usage": {
+          prompt_eval_count: 44,
+          eval_count: 12,
+        },
+      },
+    });
+    expect(JSON.stringify(summary)).not.toContain("operator message content");
   });
 
   it("strips a trailing slash from baseUrl before appending the path", async () => {
