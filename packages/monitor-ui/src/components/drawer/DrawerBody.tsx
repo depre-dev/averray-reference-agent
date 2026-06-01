@@ -16,6 +16,7 @@ import type {
   HermesDecisionRecord,
   MissionCard,
 } from "../../lib/monitor/card-types.js";
+import { humanizeSignalText } from "../../lib/monitor/signal-labels.js";
 import { ChecksBar } from "../cards/ChecksBar.js";
 
 export type DrawerVariant = "mission" | "action" | "done" | "draft" | "task" | "deploy" | "pr";
@@ -191,9 +192,11 @@ function RiskSignalsSection({ signals }: { signals: CardRiskSignal[] | undefined
         {signals.map((s) => (
           <div className="row" key={s.code}>
             <span className="path" style={{ whiteSpace: "normal" }}>
-              {s.message}
+              {humanizeSignalText(s.message)}
             </span>
-            <span className={RISK_PILL[s.severity]}>{s.severity}</span>
+            <span className={RISK_PILL[s.severity]} title={`raw code: ${s.code}`}>
+              {s.severity}
+            </span>
           </div>
         ))}
       </div>

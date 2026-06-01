@@ -49,6 +49,7 @@ const ACTION_EXPANDED: ReadonlySet<LaneId> = new Set<LaneId>([
   "deploying",
   "done",
 ]);
+const OPERATOR_CARD_SNOOZE_MS = 30 * 60_000;
 
 function expandedForMode(mode: BoardMode): ReadonlySet<LaneId> {
   if (mode === "calm") return CALM_EXPANDED;
@@ -143,7 +144,17 @@ export function BoardView({
   // so the operator can propose the first task even when the lane is empty.
   const alwaysOpen: readonly LaneId[] = onCreateTask ? ["codex-needed"] : [];
   const streamOnline = !degraded;
-  const cards = board?.cards ?? [];
+  const rawCards = board?.cards ?? [];
+  const [dismissedCardIds, setDismissedCardIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [snoozedUntilById, setSnoozedUntilById] = useState<ReadonlyMap<string, number>>(() => new Map());
+  const cards = useMemo(() => {
+    const nowMs = Date.now();
+    return rawCards.filter((card) => {
+      if (dismissedCardIds.has(card.id)) return false;
+      const snoozedUntil = snoozedUntilById.get(card.id);
+      return snoozedUntil === undefined || snoozedUntil <= nowMs;
+    });
+  }, [dismissedCardIds, rawCards, snoozedUntilById]);
   const liveLabel = useMemo(() => formatClock(board?.at), [board?.at]);
 
   // KPIs / banner / mode reflect the whole board, regardless of search.
@@ -216,6 +227,22 @@ export function BoardView({
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const onDismissCard = useCallback((id: string) => {
+    setDismissedCardIds((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }, []);
+
+  const onSnoozeCard = useCallback((id: string) => {
+    setSnoozedUntilById((prev) => {
+      const next = new Map(prev);
+      next.set(id, Date.now() + OPERATOR_CARD_SNOOZE_MS);
       return next;
     });
   }, []);
@@ -302,6 +329,9 @@ export function BoardView({
                 onClick={onCardClick ? (c) => onCardClick(c.id) : undefined}
                 onApprove={onApproveTask ? (c) => onApproveTask(c.id) : undefined}
                 onApproveMission={onApproveMission ? (c) => onApproveMission(c.id) : undefined}
+                onDismiss={(c) => onDismissCard(c.id)}
+                onSnooze={(c) => onSnoozeCard(c.id)}
+                onInvestigate={onCardClick ? (c) => onCardClick(c.id) : undefined}
               />
             )}
           />

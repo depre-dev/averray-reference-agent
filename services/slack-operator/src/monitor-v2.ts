@@ -1286,7 +1286,7 @@ export function buildV2BoardSnapshot(
   const missionIndex = indexTestbedMissions(rawSnapshot);
   const reviewRequests = reviewRequestsFromSnapshot(rawSnapshot);
   const runner = readRunner(rawSnapshot);
-  const cards = items.map((item) => {
+  const sourceCards = items.map((item) => {
     const base = toBoardCard(item);
     const key = prKey(item.repo, item.number);
     const enriched = enrichBoardCard(base, item, {
@@ -1305,13 +1305,22 @@ export function buildV2BoardSnapshot(
     });
   });
   // Surface queued greenfield tasks the classifier can't (no PR ⇒ no event),
-  // skipping any already represented (e.g. by a PR card).
-  const existingIds = new Set(cards.map((c) => c.id));
+  // skipping any already represented (e.g. by a PR card). When the same
+  // self-healing event also produced a task, keep the task card because it
+  // owns the real approve/dispatch control; the handoff event is context.
+  const existingIds = new Set(sourceCards.map((c) => c.id));
   const taskCards = synthesizeTaskCards(rawSnapshot, runner, { now: snapshotAt })
     .filter((c) => !existingIds.has(c.id))
     .map((card) => attachReviewRequests(card, reviewRequests, {
       correlationId: card.correlationId ?? card.id,
     }));
+  const actionableTaskCorrelationIds = new Set(
+    taskCards.map((card) => card.correlationId).filter((value): value is string => Boolean(value)),
+  );
+  const cards = sourceCards.filter((card) => {
+    if (!card.correlationId || card.type === "task") return true;
+    return !actionableTaskCorrelationIds.has(card.correlationId);
+  });
 
   return {
     cards: [...cards, ...taskCards],
