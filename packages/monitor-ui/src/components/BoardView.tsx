@@ -157,19 +157,28 @@ export function BoardView({
   }, [dismissedCardIds, rawCards, snoozedUntilById]);
   const liveLabel = useMemo(() => formatClock(board?.at), [board?.at]);
 
-  // KPIs / banner / mode reflect the whole board, regardless of search.
-  const state = useMemo(
-    () => deriveBoardState(cards, { streamOnline, nowLabel: liveLabel, lastGoodLabel: liveLabel || undefined }),
-    [cards, streamOnline, liveLabel],
-  );
-
   // ── view state ──────────────────────────────────────────────────
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<BoardFilter>("all");
   const [boardFocusId, setBoardFocusId] = useState<string | null>(null);
   const [overlayOpen, setOverlayOpen] = useState(false);
   const [askToken, setAskToken] = useState(0);
+  const [hermesFocusConversationActive, setHermesFocusConversationActive] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // KPIs / banner / mode reflect the whole board, regardless of search.
+  const state = useMemo(
+    () => deriveBoardState(cards, {
+      streamOnline,
+      nowLabel: liveLabel,
+      lastGoodLabel: liveLabel || undefined,
+      ...(hermesFocusConversationActive && scopeCandidateId(cards, focusedCardId, boardFocusId)
+        ? { hermesFocusCardId: scopeCandidateId(cards, focusedCardId, boardFocusId) }
+        : {}),
+      ...(board?.calmMetrics ? { calmMetrics: board.calmMetrics } : {}),
+    }),
+    [board?.calmMetrics, boardFocusId, cards, focusedCardId, hermesFocusConversationActive, streamOnline, liveLabel],
+  );
 
   // §14: announce the action-needed 0→>0 edge once, assertively, for
   // screen-reader users (the visual cue is the amber banner).
@@ -213,11 +222,11 @@ export function BoardView({
     const out = {} as Record<LaneId, BoardCard[]>;
     for (const lane of LANES) {
       out[lane] = (state.grouped[lane] ?? []).filter(
-        (c) => (!q || matchesQuery(c, q)) && matchesBoardFilter(c, filter),
+        (c) => (!q || matchesQuery(c, q)) && matchesBoardFilter(c, filter, { todayIso: board?.at }),
       );
     }
     return out;
-  }, [state.grouped, q, filter]);
+  }, [board?.at, state.grouped, q, filter]);
 
   // A non-"all" filter reveals every lane that has a match, regardless of the
   // operator's manual collapse state, so chip results are never hidden. Clearing
@@ -235,6 +244,22 @@ export function BoardView({
   const drawerCard = focusedCardId ? orderedCards.find((c) => c.id === focusedCardId) : undefined;
   const boardFocusedCard = boardFocusId ? orderedCards.find((c) => c.id === boardFocusId) : undefined;
   const scopeCard = drawerCard ?? boardFocusedCard;
+  const bannerCta = renderBannerCta({
+    bannerMode: state.banner.tone,
+    primaryActionId: state.banner.primaryActionId,
+    cards,
+    onOpenCard: onCardClick ? (card) => {
+      setFilter("all");
+      setBoardFocusId(card.id);
+      setExpanded(new Set<LaneId>([laneFor(card), "done"]));
+      onCardClick(card.id);
+    } : undefined,
+    onReviewToday: () => {
+      setFilter("today-done");
+      setExpanded(new Set<LaneId>(["done"]));
+    },
+    onMuteOneHour: onMute ? () => onMute(Date.now() + 60 * 60_000) : undefined,
+  });
 
   const onToggleLane = useCallback((id: LaneId) => {
     setExpanded((prev) => {
@@ -314,7 +339,7 @@ export function BoardView({
         />
       )}
 
-      <BoardNowBanner banner={state.banner} />
+      <BoardNowBanner banner={state.banner} cta={bannerCta} />
 
       <div className="hm-main">
         <div className="hm-lanes-wrap">
@@ -370,6 +395,7 @@ export function BoardView({
           onSetSupervised={onSetSupervised}
           autonomyMode={autonomyMode}
           composerFocusToken={askToken}
+          onScopedConversationChange={setHermesFocusConversationActive}
         />
       </div>
 
@@ -382,8 +408,82 @@ export function BoardView({
         />
       ) : null}
 
+      {!drawerCard ? (
+        <button
+          type="button"
+          className="hm-ask-float"
+          onClick={() => {
+            const nextFocusId = boardFocusId ?? state.banner.primaryActionId ?? state.mostUrgent?.id ?? orderedCards[0]?.id ?? null;
+            if (nextFocusId) setBoardFocusId(nextFocusId);
+            setAskToken((t) => t + 1);
+          }}
+          aria-label="Ask Hermes"
+        >
+          <span className="mark" aria-hidden>H</span>
+          Ask Hermes <span className="hm-kbd">A</span>
+        </button>
+      ) : null}
+
       {overlayOpen ? <KeyboardOverlay onClose={() => setOverlayOpen(false)} /> : null}
     </div>
+  );
+}
+
+function scopeCandidateId(cards: BoardCard[], focusedCardId: string | null | undefined, boardFocusId: string | null): string | undefined {
+  const id = focusedCardId ?? boardFocusId ?? undefined;
+  if (!id) return undefined;
+  return cards.some((card) => card.id === id) ? id : undefined;
+}
+
+function renderBannerCta({
+  bannerMode,
+  primaryActionId,
+  cards,
+  onOpenCard,
+  onReviewToday,
+  onMuteOneHour,
+}: {
+  bannerMode: BoardMode;
+  primaryActionId: string | undefined;
+  cards: readonly BoardCard[];
+  onOpenCard?: (card: BoardCard) => void;
+  onReviewToday: () => void;
+  onMuteOneHour?: () => void;
+}) {
+  if (bannerMode === "degraded") return null;
+  if (bannerMode === "calm") {
+    return (
+      <>
+        <div className="button-row">
+          <button type="button" className="hm-btn hm-btn--primary" onClick={onReviewToday}>
+            Review today <span className="hm-kbd">R</span>
+          </button>
+          {onMuteOneHour ? (
+            <button type="button" className="hm-btn hm-btn--ghost" onClick={onMuteOneHour}>
+              Mute for 1 hour
+            </button>
+          ) : null}
+        </div>
+        <span className="hm-now-quick">Hermes will tone an alert if action goes from 0 to 1</span>
+      </>
+    );
+  }
+
+  const card = primaryActionId ? cards.find((candidate) => candidate.id === primaryActionId) : undefined;
+  if (!card || !onOpenCard) return null;
+  const openCard = () => onOpenCard(card);
+  return (
+    <>
+      <div className="button-row">
+        <button type="button" className="hm-btn hm-btn--action" onClick={openCard}>
+          Jump to {card.id} <span className="hm-kbd">↵</span>
+        </button>
+        <button type="button" className="hm-btn hm-btn--ghost" onClick={openCard}>
+          Open review checklist
+        </button>
+      </div>
+      <span className="hm-now-quick">scoped to the current review decision</span>
+    </>
   );
 }
 

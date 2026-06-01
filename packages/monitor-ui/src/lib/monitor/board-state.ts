@@ -11,7 +11,7 @@ import { groupByLane, laneCounts, laneFor } from "./lane-rules.js";
 import { sortByUrgency } from "./urgency.js";
 
 /** The state a LanesBar filter chip narrows the board to. */
-export type BoardFilter = "all" | "blocked" | "review" | "ready" | "running" | "done";
+export type BoardFilter = "all" | "blocked" | "review" | "ready" | "running" | "done" | "today-done";
 
 /**
  * Whether a card belongs to a filter chip's state. Lane-based chips reuse the
@@ -19,7 +19,11 @@ export type BoardFilter = "all" | "blocked" | "review" | "ready" | "running" | "
  * the count on the chip always agree. "blocked" is the cross-lane stale/offline
  * state (matching kpiCounts.blocked). "all" matches everything.
  */
-export function matchesBoardFilter(card: BoardCard, filter: BoardFilter): boolean {
+export function matchesBoardFilter(
+  card: BoardCard,
+  filter: BoardFilter,
+  opts: { todayIso?: string } = {},
+): boolean {
   if (filter === "all") return true;
   if (filter === "blocked") return card?.state === "failed-fetch" || card?.state === "source-offline";
   const lane = laneFor(card);
@@ -32,6 +36,8 @@ export function matchesBoardFilter(card: BoardCard, filter: BoardFilter): boolea
       return lane === "hermes-checking";
     case "done":
       return lane === "done";
+    case "today-done":
+      return lane === "done" && isSameUtcDay(doneClosedAt(card), opts.todayIso);
     default:
       return true;
   }
@@ -49,7 +55,16 @@ export interface KPICounts {
   total: number;
 }
 
-export type BoardMode = "calm" | "action" | "degraded";
+export type BoardMode = "calm" | "action" | "hermes-focus" | "degraded";
+
+export interface CalmBoardMetrics {
+  avgTimeToDecision?: string;
+  disputes?: number;
+  lastDeploy?: {
+    id?: string;
+    verifiedAt?: string;
+  };
+}
 
 export interface BoardNowBanner {
   tone: BoardMode;
@@ -63,6 +78,8 @@ export interface DeriveBoardOpts {
   streamOnline?: boolean;
   nowLabel?: string;
   lastGoodLabel?: string;
+  hermesFocusCardId?: string;
+  calmMetrics?: CalmBoardMetrics;
 }
 
 export interface DerivedBoardState {
@@ -118,6 +135,9 @@ export function boardMode(cards: BoardCard[], opts: DeriveBoardOpts = {}): Board
   if (!Array.isArray(cards) || cards.length === 0) return "calm";
   const counts = kpiCounts(cards);
   if (counts.blocked > 0) return "degraded";
+  if (opts.hermesFocusCardId && cards.some((card) => card.id === opts.hermesFocusCardId && isPendingReviewCard(card))) {
+    return "hermes-focus";
+  }
   if (counts.action > 0) return "action";
   return "calm";
 }
@@ -161,14 +181,25 @@ export function boardNowBanner(cards: BoardCard[], opts: DeriveBoardOpts = {}): 
     };
   }
 
+  if (mode === "hermes-focus") {
+    const focusCard = cards.find((card) => card.id === opts.hermesFocusCardId);
+    const pendingCount = pendingReviewCount(cards);
+    return {
+      tone: "hermes-focus",
+      eyebrow: now ? `Board now · ${now} · in conversation with Hermes` : "Board now · in conversation with Hermes",
+      headline: `Hermes has the floor — ${pendingCount} review ${pendingCount === 1 ? "decision" : "decisions"} pending, blast radius assessed.`,
+      sub: focusCard
+        ? `Conversation is scoped to ${focusCard.title}. Open the checklist when the risk and intent are clear.`
+        : "Conversation is scoped to the current review card. Open the checklist when the risk and intent are clear.",
+      primaryActionId: focusCard?.id,
+    };
+  }
+
   return {
     tone: "calm",
     eyebrow: now ? `Board now · ${now} · you're done for now` : `Board now · you're done for now`,
     headline: calmHeadline(counts),
-    sub:
-      counts.done > 0
-        ? `${counts.done} card(s) shipped today; you can step away.`
-        : `No releases yet today; you can step away.`,
+    sub: calmSub(counts, opts.calmMetrics),
     primaryActionId: undefined,
   };
 }
@@ -187,6 +218,39 @@ function calmHeadline(counts: KPICounts): string {
     return `${counts.total} card(s) are still in flight; Hermes is watching.`;
   }
   return `No operator decision needed. ${parts.join(" and ")} are still in flight; Hermes is watching.`;
+}
+
+function calmSub(counts: KPICounts, metrics?: CalmBoardMetrics): string {
+  const base = counts.done > 0 ? `${counts.done} card(s) shipped today` : "No releases yet today";
+  const parts = [base];
+  if (metrics?.avgTimeToDecision) parts.push(`avg time-to-decision ${metrics.avgTimeToDecision}`);
+  if (typeof metrics?.disputes === "number") parts.push(`${metrics.disputes} dispute(s)`);
+  if (metrics?.lastDeploy?.id || metrics?.lastDeploy?.verifiedAt) {
+    const id = metrics.lastDeploy.id ? ` ${metrics.lastDeploy.id}` : "";
+    const verified = metrics.lastDeploy.verifiedAt ? ` verified at ${metrics.lastDeploy.verifiedAt}` : "";
+    parts.push(`last deploy${id}${verified}`);
+  }
+  return `${parts.join(" · ")}. Hermes is watching; you can step away.`;
+}
+
+function pendingReviewCount(cards: BoardCard[]): number {
+  return cards.filter(isPendingReviewCard).length || 1;
+}
+
+function isPendingReviewCard(card: BoardCard): boolean {
+  return card.waitingOn?.actor === "operator" && (card.lane === "operator-review" || card.isAction === true);
+}
+
+function doneClosedAt(card: BoardCard): string | undefined {
+  return card.type === "done" ? card.closedAt : undefined;
+}
+
+function isSameUtcDay(iso: string | undefined, todayIso: string | undefined): boolean {
+  if (!iso || !todayIso) return false;
+  const at = new Date(iso);
+  const today = new Date(todayIso);
+  if (Number.isNaN(at.getTime()) || Number.isNaN(today.getTime())) return false;
+  return at.toISOString().slice(0, 10) === today.toISOString().slice(0, 10);
 }
 
 /** Aggregate selector — everything the board page needs in one call. */

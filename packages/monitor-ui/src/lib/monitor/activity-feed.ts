@@ -219,6 +219,8 @@ function summaryActivity(banner: BoardNowBanner, nowMs: number): HermesActivityE
   const text =
     banner.tone === "action"
       ? `Needs you: review the current action lane${banner.primaryActionId ? `, starting with ${banner.primaryActionId}` : ""}.`
+      : banner.tone === "hermes-focus"
+        ? `Hermes is answering the active review thread${banner.primaryActionId ? ` for ${banner.primaryActionId}` : ""}.`
       : banner.tone === "degraded"
         ? "Needs you: reconnect or verify freshness before approving anything."
         : "Needs you: nothing right now.";
@@ -226,7 +228,7 @@ function summaryActivity(banner: BoardNowBanner, nowMs: number): HermesActivityE
     id: "activity-current-summary",
     atMs: nowMs,
     source: "summary",
-    tone: banner.tone === "action" ? "action" : banner.tone === "degraded" ? "warning" : "success",
+    tone: banner.tone === "action" || banner.tone === "hermes-focus" ? "action" : banner.tone === "degraded" ? "warning" : "success",
     text,
     meta: banner.sub,
     ...(banner.primaryActionId ? { cardId: banner.primaryActionId } : {}),

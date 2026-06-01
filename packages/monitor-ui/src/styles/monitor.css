@@ -73,6 +73,7 @@ body { margin: 0; }
    ROOT BOARD CONTAINER — fills the artboard
    ============================================================ */
 .hm-board {
+  position: relative;
   width: 100%;
   height: 100%;
   background: var(--hm-paper-3);
@@ -234,6 +235,9 @@ body { margin: 0; }
   background: linear-gradient(180deg, var(--hm-amber-wash) 0%, var(--hm-paper) 92%);
   border-bottom-color: var(--hm-amber-ring);
 }
+.hm-now--hermes-focus {
+  background: linear-gradient(180deg, rgba(244, 227, 207, 0.92) 0%, var(--hm-paper) 92%);
+}
 .hm-now--calm {
   background: linear-gradient(180deg, var(--hm-sage-wash) 0%, var(--hm-paper) 92%);
 }
@@ -303,6 +307,9 @@ body { margin: 0; }
 .hm-now--action .hm-now-glyph {
   background: var(--hm-amber-soft);
   border-color: var(--hm-amber-ring);
+}
+.hm-now--hermes-focus .hm-now-glyph {
+  color: var(--hm-amber-deep);
 }
 .hm-now--calm .hm-now-glyph {
   background: var(--hm-sage-soft);
@@ -1624,6 +1631,7 @@ button.hm-activity-row:hover {
   font-family: var(--font-display);
   font-weight: 700;
   font-size: 12.5px;
+  border: 0;
 }
 .hm-ask-float .mark {
   width: 22px; height: 22px;
@@ -1632,6 +1640,10 @@ button.hm-activity-row:hover {
   color: #fffdf7;
   display: grid; place-items: center;
   font-size: 11px; font-weight: 800;
+}
+.hm-ask-float .hm-kbd {
+  background: rgba(255,253,247,0.18);
+  color: #fffdf7;
 }
 
 /* ============================================================

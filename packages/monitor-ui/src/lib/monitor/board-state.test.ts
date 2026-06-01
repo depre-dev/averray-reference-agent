@@ -131,6 +131,13 @@ test("boardMode: a single action card → action mode", () => {
   assert.equal(boardMode(cards), "action");
 });
 
+test("boardMode: scoped Hermes conversation on pending review card → hermes-focus", () => {
+  const cards = [
+    card({ id: "agent #548", lane: "operator-review", isAction: true, waitingOn: { actor: "operator", tone: "warn" } }),
+  ];
+  assert.equal(boardMode(cards, { hermesFocusCardId: "agent #548" }), "hermes-focus");
+});
+
 test("boardMode: blocked cards force degraded mode (overrides action)", () => {
   // A failed-fetch card means we can't trust the data — even if
   // something looks like it needs action, the truthful UI mode is
@@ -177,11 +184,43 @@ test("boardNowBanner: multiple action cards pluralize correctly", () => {
   assert.match(banner.headline, /2 cards need your review decision/);
 });
 
+test("boardNowBanner: Hermes focus mode uses the scoped review card", () => {
+  const cards = [
+    card({ id: "agent #548", lane: "operator-review", isAction: true, title: "Review relay hang fix", waitingOn: { actor: "operator", tone: "warn" } }),
+  ];
+  const banner = boardNowBanner(cards, { nowLabel: "14:32:43 utc", hermesFocusCardId: "agent #548" });
+  assert.equal(banner.tone, "hermes-focus");
+  assert.match(banner.eyebrow, /in conversation with Hermes/);
+  assert.match(banner.headline, /Hermes has the floor/);
+  assert.match(banner.headline, /1 review decision pending/);
+  assert.match(banner.sub, /Review relay hang fix/);
+  assert.equal(banner.primaryActionId, "agent #548");
+});
+
 test("boardNowBanner: calm board with nothing in flight reads 'nothing waits on you'", () => {
   const banner = boardNowBanner([], { nowLabel: "17:48:02 utc" });
   assert.equal(banner.tone, "calm");
   assert.match(banner.eyebrow, /you're done for now/);
   assert.match(banner.headline, /Nothing waits on you/);
+});
+
+test("boardNowBanner: calm sub only includes metrics the board model provides", () => {
+  const cards = [
+    card({ id: "done-1", type: "done", lane: "done", closedAt: "2026-05-27", mergeStatus: "MERGED" }),
+  ];
+  const banner = boardNowBanner(cards, {
+    calmMetrics: {
+      avgTimeToDecision: "4m 12s",
+      disputes: 0,
+      lastDeploy: { id: "#246", verifiedAt: "17:42:11" },
+    },
+  });
+  assert.match(banner.sub, /avg time-to-decision 4m 12s/);
+  assert.match(banner.sub, /0 dispute/);
+  assert.match(banner.sub, /last deploy #246 verified at 17:42:11/);
+
+  const withoutMetrics = boardNowBanner(cards);
+  assert.notMatch(withoutMetrics.sub, /avg time-to-decision|dispute|last deploy/);
 });
 
 test("boardNowBanner: calm board with in-flight automation reads correctly", () => {
@@ -251,6 +290,13 @@ test("deriveBoardState: bundles every selector together", () => {
   assert.equal(state.grouped["needs-attention"].length, 1);
   assert.equal(state.grouped["operator-review"].length, 1);
   assert.equal(state.grouped["done"].length, 1);
+});
+
+test("matchesBoardFilter: today-done keeps only done cards closed on the snapshot date", () => {
+  const today = card({ id: "today", type: "done", lane: "done", closedAt: "2026-06-01T08:00:00.000Z", mergeStatus: "MERGED" });
+  const yesterday = card({ id: "yesterday", type: "done", lane: "done", closedAt: "2026-05-31T22:00:00.000Z", mergeStatus: "MERGED" });
+  assert.equal(matchesBoardFilter(today, "today-done", { todayIso: "2026-06-01T12:00:00.000Z" }), true);
+  assert.equal(matchesBoardFilter(yesterday, "today-done", { todayIso: "2026-06-01T12:00:00.000Z" }), false);
 });
 
 test("matchesBoardFilter — chips narrow by the same lane derivation as the counts", () => {

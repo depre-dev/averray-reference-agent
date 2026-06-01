@@ -6,12 +6,15 @@
 // refetch when SSE events arrive. Never mutates the input.
 
 import type { BoardCard, Lane } from "./card-types.js";
+import type { CalmBoardMetrics } from "./board-state.js";
 
 export interface MonitorBoard {
   cards: BoardCard[];
   /** ISO timestamp from the server */
   at: string;
   llmUsage?: LlmUsageAggregate;
+  /** Optional board-summary metrics; omitted means the UI must not fabricate them. */
+  calmMetrics?: CalmBoardMetrics;
 }
 
 export interface LlmUsageModelRollup {
@@ -86,7 +89,8 @@ export function applyEventToBoard(
     case "board.snapshot": {
       const cards = Array.isArray(event.cards) ? (event.cards as BoardCard[]) : [];
       const at = typeof event.at === "string" ? event.at : new Date().toISOString();
-      return { cards, at };
+      const calmMetrics = isRecord(event.calmMetrics) ? (event.calmMetrics as CalmBoardMetrics) : undefined;
+      return { cards, at, ...(calmMetrics ? { calmMetrics } : {}) };
     }
     case "board.card.added": {
       if (!prev) return prev;
@@ -137,4 +141,8 @@ export function applyEventToBoard(
     default:
       return prev;
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
