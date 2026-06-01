@@ -1371,6 +1371,91 @@ describe("synthesizeTaskCards (O3 — surface queued tasks)", () => {
     });
   });
 
+  it("does not render self-healing capacity handoff events as cards", () => {
+    const snap = buildV2BoardSnapshot(
+      {
+        active: [{
+          title: "Self-healing cap reached",
+          status: "needs_review",
+          intent: "self_healing",
+          reason: "Escalated to operator: open_fix_cap_reached",
+          correlationId: "self-heal:testbed:overview",
+          ageLabel: "1m",
+          summary: { kind: "self_healing", action: "escalate" },
+        }],
+        recent: [],
+      },
+      { repo: "depre-dev/averray-reference-agent" },
+    );
+
+    expect(snap.cards).toEqual([]);
+    expect(snap.automationHealth).toMatchObject({
+      quietSignalCount: 1,
+      selfHealingCapacitySignals: 1,
+      taskHealthCapacitySignals: 0,
+    });
+  });
+
+  it("does not synthesize task-health capacity escalations as board cards", () => {
+    const snap = buildV2BoardSnapshot(
+      {
+        active: [],
+        recent: [],
+        codexTasks: {
+          items: [{
+            id: "codex-task-retry-exhausted",
+            status: "failed",
+            agent: "codex",
+            repo: "depre-dev/averray-reference-agent",
+            title: "Retry exhausted",
+            prompt: "Investigate this task.",
+            selfManagementEscalatedAt: "2026-06-01T09:58:00.000Z",
+            selfManagementEscalationReason: "retry_budget_exhausted",
+            updatedAt: "2026-06-01T09:58:00.000Z",
+          }],
+        },
+      },
+      { repo: "depre-dev/averray-reference-agent" },
+    );
+
+    expect(snap.cards).toEqual([]);
+    expect(snap.automationHealth).toMatchObject({
+      quietSignalCount: 1,
+      selfHealingCapacitySignals: 0,
+      taskHealthCapacitySignals: 1,
+    });
+  });
+
+  it("still renders ordinary failed tasks that need operator triage", () => {
+    const snap = buildV2BoardSnapshot(
+      {
+        active: [],
+        recent: [],
+        codexTasks: {
+          items: [{
+            id: "codex-task-real-failure",
+            status: "failed",
+            agent: "codex",
+            repo: "depre-dev/averray-reference-agent",
+            title: "Real failed task",
+            prompt: "Investigate this task.",
+            failureReason: "Claude work failed on a code change.",
+            updatedAt: "2026-06-01T09:58:00.000Z",
+          }],
+        },
+      },
+      { repo: "depre-dev/averray-reference-agent" },
+    );
+
+    expect(snap.cards).toHaveLength(1);
+    expect(snap.cards[0]).toMatchObject({
+      id: "codex-task-real-failure",
+      lane: "needs-attention",
+      type: "task",
+    });
+    expect(snap.automationHealth).toBeUndefined();
+  });
+
   it("collapses a failed testbed mission and its self-healing task into one actionable card", () => {
     const missionId = "testbed-mission-failed-1";
     const snap = buildV2BoardSnapshot(

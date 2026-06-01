@@ -18,7 +18,10 @@
 // The output is what `GET /monitor/v2/board` serializes and what the
 // SSE `board.snapshot` event carries.
 
-import { buildHermesBoardSnapshotFromMonitor } from "./monitor-hermes-board.js";
+import {
+  buildHermesBoardSnapshotFromMonitor,
+  isQuietAutomationCapacityReason,
+} from "./monitor-hermes-board.js";
 import {
   aggregateLlmUsage,
   listActiveLlmUsageCalls,
@@ -266,6 +269,11 @@ export interface BoardSnapshotV2 {
   at: string;
   repo: string;
   llmUsage: LlmUsageAggregate;
+  automationHealth?: {
+    quietSignalCount: number;
+    selfHealingCapacitySignals: number;
+    taskHealthCapacitySignals: number;
+  };
 }
 
 // ── Lane normalization ──────────────────────────────────────────────
@@ -531,6 +539,10 @@ function humanizeTaskTitle(title: string): string {
 
 function asFiniteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function countValue(value: unknown): number {
+  return Math.max(0, Math.floor(asFiniteNumber(value) ?? 0));
 }
 
 function asNonEmptyString(value: unknown): string | undefined {
@@ -1286,6 +1298,7 @@ export function synthesizeTaskCards(
   for (const entry of asArray(codexTasks?.items)) {
     const task = asRecord(entry);
     if (!task) continue;
+    if (isQuietTaskHealthCapacityTask(task)) continue;
     const status = asString(task.status);
     if (!status || SYNTH_TERMINAL_TASK_STATUSES.has(status)) continue;
     if (asString(task.operatorDismissedAt)) continue;
@@ -1543,6 +1556,8 @@ export function buildV2BoardSnapshot(
   const missionIndex = indexTestbedMissions(rawSnapshot);
   const reviewRequests = reviewRequestsFromSnapshot(rawSnapshot);
   const runner = readRunner(rawSnapshot);
+  const quietSelfHealingCapacitySignals = countValue(classified?.counts?.selfHealingCapacitySignals);
+  const quietTaskHealthCapacitySignals = countQuietTaskHealthCapacitySignals(rawSnapshot);
   const sourceCards = items.map((item) => {
     const base = toBoardCard(item);
     const key = prKey(item.repo, item.number);
@@ -1588,7 +1603,44 @@ export function buildV2BoardSnapshot(
     llmUsage: aggregateLlmUsage(usageEvents(asRecord(rawSnapshot)?.llmUsageEvents), {
       activeCalls: listActiveLlmUsageCalls(),
     }),
+    ...automationHealthProp(quietSelfHealingCapacitySignals, quietTaskHealthCapacitySignals),
   };
+}
+
+function automationHealthProp(
+  selfHealingCapacitySignals: number,
+  taskHealthCapacitySignals: number,
+): Pick<BoardSnapshotV2, "automationHealth"> | {} {
+  const quietSignalCount = selfHealingCapacitySignals + taskHealthCapacitySignals;
+  return quietSignalCount > 0
+    ? {
+        automationHealth: {
+          quietSignalCount,
+          selfHealingCapacitySignals,
+          taskHealthCapacitySignals,
+        },
+      }
+    : {};
+}
+
+function countQuietTaskHealthCapacitySignals(rawSnapshot: unknown): number {
+  const root = asRecord(rawSnapshot);
+  const codexTasks = asRecord(root?.codexTasks);
+  return asArray(codexTasks?.items)
+    .map((entry) => asRecord(entry))
+    .filter((task): task is Record<string, unknown> => Boolean(task))
+    .filter(isQuietTaskHealthCapacityTask)
+    .length;
+}
+
+function isQuietTaskHealthCapacityTask(task: Record<string, unknown>): boolean {
+  if (!asString(task.selfManagementEscalatedAt)) return false;
+  return isQuietAutomationCapacityReason([
+    asString(task.selfManagementEscalationReason),
+    asString(task.progressMessage),
+    asString(task.failureReason),
+    asString(task.reason),
+  ].filter(Boolean).join(" "));
 }
 
 function sourceCardCorrelationIdsForDedupe(
