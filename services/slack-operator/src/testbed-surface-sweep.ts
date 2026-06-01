@@ -18,6 +18,7 @@ import type { TestbedMissionRunResult } from "./testbed-mission-runner.js";
 import {
   DEFAULT_AUTHED_ROUTES,
   buildSweepContextOptions,
+  basicAuthHeadersForUrl,
   basicAuthHttpCredentialsForUrl,
   type CloudflareAccessServiceToken,
   type SweepSession,
@@ -406,6 +407,7 @@ function makeBrowserCapture(config: {
   timeoutMs?: number;
   session?: SweepSession;
   cloudflareAccess?: CloudflareAccessServiceToken;
+  basicAuth?: TestbedBasicAuth;
   httpCredentials?: { username: string; password: string; origin?: string };
 }): (url: string, route: string) => Promise<RouteCapture> {
   return async (url, route) => {
@@ -423,6 +425,12 @@ function makeBrowserCapture(config: {
       // Bearer (if any) authes the page's same-origin API calls. Read-only.
       const context = await browser.newContext(buildSweepContextOptions(config.session, config.cloudflareAccess, config.httpCredentials));
       const page = await context.newPage();
+      if (config.basicAuth) {
+        await page.route("**/*", (route) => {
+          const headers = basicAuthHeadersForUrl(route.request().url(), config.basicAuth, route.request().headers());
+          return headers ? route.continue({ headers }) : route.continue();
+        });
+      }
       page.on("console", (m) => {
         if (m.type() === "error") consoleErrors.push(m.text());
       });

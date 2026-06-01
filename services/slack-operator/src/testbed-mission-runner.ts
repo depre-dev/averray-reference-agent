@@ -19,6 +19,7 @@ import {
 import { executeSiweAuthMission, type SiweAuthMissionDeps } from "./testbed-auth-mission.js";
 import { executeSurfaceSweep, type SurfaceSweepDeps } from "./testbed-surface-sweep.js";
 import {
+  basicAuthHeadersForUrl,
   basicAuthHttpCredentialsForUrl,
   cloudflareAccessHeaders,
   parseSweepSessionConfig,
@@ -524,6 +525,12 @@ export async function executePlaywrightTestbedMission(
     });
     context = contextAndPage.context;
     page = contextAndPage.page;
+    if (config.basicAuth) {
+      await page.route("**/*", (route) => {
+        const headers = basicAuthHeadersForUrl(route.request().url(), config.basicAuth, route.request().headers());
+        return headers ? route.continue({ headers }) : route.continue();
+      });
+    }
     if (contextAndPage.videoDisabledReason) {
       whatITried.push(contextAndPage.videoDisabledReason);
       evidence.push({ type: "runner_warning", value: contextAndPage.videoDisabledReason });
