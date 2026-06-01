@@ -22,6 +22,8 @@
 
 import type { AlertPayload } from "./alert-bridge.js";
 import type { TaskAgent } from "./codex-task-queue.js";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 
 export type HealingRiskTier = "high" | "low";
 export type HealingSource = "testbed_mission" | "post_deploy_verification" | "ci_main" | "ops_health";
@@ -67,6 +69,7 @@ export type HealingReason =
   | "dispatch_budget_exhausted"
   | "open_fix_cap_reached"
   | "tick_budget_exhausted"
+  | "operator_dismissed"
   | "routed_fix";
 
 /**
@@ -216,6 +219,8 @@ export interface SelfHealingDeps {
   classify: (signal: FailureSignal) => HealingClassification;
   /** Durable dedup: is there already a non-terminal fix task for this target? */
   hasOpenFixTask: (targetSignature: string) => Promise<boolean> | boolean;
+  /** Durable suppression: operator dismissed this target, so B2 must not recreate it. */
+  isSuppressedTarget?: (targetSignature: string) => Promise<boolean> | boolean;
   /** B2 fix tasks already proposed today (for the daily budget backstop). */
   proposalsToday: () => Promise<number> | number;
   maxProposalsPerDay: number;
@@ -271,6 +276,15 @@ export async function runSelfHealingOnce(deps: SelfHealingDeps): Promise<SelfHea
       continue;
     }
     seenTargets.add(targetSignature);
+
+    // Operator dismissal is durable: once the operator says "clear this
+    // proposal", B2 must not recreate the same target on the next tick.
+    if (await deps.isSuppressedTarget?.(targetSignature)) {
+      deps.markHandled(targetSignature, nowMs);
+      await deps.audit({ surface: signal.surface, targetSignature, source: signal.source, action: "skip", reason: "operator_dismissed" });
+      handled.push({ surface: signal.surface, action: "skip", reason: "operator_dismissed" });
+      continue;
+    }
 
     // Durable dedup: one open fix task per target, checked before cooldown so
     // the audit reason stays truthful after restarts or operator-created tasks.
@@ -352,6 +366,55 @@ export async function runSelfHealingOnce(deps: SelfHealingDeps): Promise<SelfHea
   return { handled };
 }
 
+export interface SelfHealingTargetSuppression {
+  schemaVersion: 1;
+  kind: "self_healing_target_suppression";
+  targetSignature: string;
+  dismissedAt: string;
+  dismissedBy: string;
+  sourceTaskId?: string;
+}
+
+export interface SelfHealingSuppressionDeps {
+  path?: string;
+  now?: Date;
+  dismissedBy?: string;
+  sourceTaskId?: string;
+}
+
+export async function suppressSelfHealingTarget(
+  targetSignature: string,
+  deps: SelfHealingSuppressionDeps = {}
+): Promise<SelfHealingTargetSuppression> {
+  const path = selfHealingSuppressionPath(deps.path);
+  const items = await readSelfHealingSuppressions(path);
+  const normalized = normalizeTargetSignature(targetSignature);
+  const now = (deps.now ?? new Date()).toISOString();
+  const suppression: SelfHealingTargetSuppression = {
+    schemaVersion: 1,
+    kind: "self_healing_target_suppression",
+    targetSignature: normalized,
+    dismissedAt: now,
+    dismissedBy: deps.dismissedBy ?? "operator",
+    ...(deps.sourceTaskId ? { sourceTaskId: deps.sourceTaskId } : {}),
+  };
+  const next = [
+    ...items.filter((item) => item.targetSignature !== normalized),
+    suppression,
+  ];
+  await writeSelfHealingSuppressions(path, next);
+  return suppression;
+}
+
+export async function isSelfHealingTargetSuppressed(
+  targetSignature: string,
+  deps: Pick<SelfHealingSuppressionDeps, "path"> = {}
+): Promise<boolean> {
+  const normalized = normalizeTargetSignature(targetSignature);
+  const items = await readSelfHealingSuppressions(selfHealingSuppressionPath(deps.path));
+  return items.some((item) => item.targetSignature === normalized);
+}
+
 /** A simple in-memory per-surface cooldown the routine closure holds. */
 export function createCooldown(cooldownMs: number) {
   const last = new Map<string, number>();
@@ -364,4 +427,43 @@ export function createCooldown(cooldownMs: number) {
       last.set(surface, nowMs);
     },
   };
+}
+
+async function readSelfHealingSuppressions(path: string): Promise<SelfHealingTargetSuppression[]> {
+  try {
+    const content = await readFile(path, "utf8");
+    const value: unknown = JSON.parse(content);
+    if (!Array.isArray(value)) return [];
+    return value.filter(isSelfHealingTargetSuppression);
+  } catch (error) {
+    const code = typeof error === "object" && error !== null && "code" in error ? (error as { code?: unknown }).code : undefined;
+    if (code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+async function writeSelfHealingSuppressions(path: string, items: SelfHealingTargetSuppression[]): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(items, null, 2)}\n`);
+}
+
+function selfHealingSuppressionPath(path?: string): string {
+  return path
+    ?? process.env.SELF_HEALING_SUPPRESSIONS_PATH
+    ?? `${process.env.AVERRAY_CODEX_TASKS_PATH ?? "/tmp/averray-reference-agent/codex-tasks.json"}.self-healing-suppressions.json`;
+}
+
+function normalizeTargetSignature(value: string): string {
+  return value.trim();
+}
+
+function isSelfHealingTargetSuppression(value: unknown): value is SelfHealingTargetSuppression {
+  return typeof value === "object"
+    && value !== null
+    && !Array.isArray(value)
+    && (value as SelfHealingTargetSuppression).schemaVersion === 1
+    && (value as SelfHealingTargetSuppression).kind === "self_healing_target_suppression"
+    && typeof (value as SelfHealingTargetSuppression).targetSignature === "string"
+    && typeof (value as SelfHealingTargetSuppression).dismissedAt === "string"
+    && typeof (value as SelfHealingTargetSuppression).dismissedBy === "string";
 }

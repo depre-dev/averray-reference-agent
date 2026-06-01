@@ -1138,6 +1138,38 @@ describe("synthesizeTaskCards (O3 — surface queued tasks)", () => {
     });
   });
 
+  it("hides operator-dismissed task cards across reloads", () => {
+    const cards = synthesizeTaskCards({
+      codexTasks: {
+        items: [{
+          ...proposedClaude,
+          operatorDismissedAt: "2026-05-31T11:55:00.000Z",
+          operatorDismissedBy: "operator",
+        }],
+      },
+    }, undefined, { now: new Date("2026-05-31T12:00:00.000Z") });
+
+    expect(cards).toEqual([]);
+  });
+
+  it("hides snoozed task cards until the snooze timestamp expires", () => {
+    const raw = {
+      codexTasks: {
+        items: [{
+          ...proposedClaude,
+          operatorSnoozedUntil: "2026-05-31T12:30:00.000Z",
+          operatorSnoozedBy: "operator",
+        }],
+      },
+    };
+
+    expect(synthesizeTaskCards(raw, undefined, { now: new Date("2026-05-31T12:00:00.000Z") })).toEqual([]);
+    expect(synthesizeTaskCards(raw, undefined, { now: new Date("2026-05-31T12:31:00.000Z") })[0]).toMatchObject({
+      id: "claude-task-x1",
+      taskStatus: "proposed",
+    });
+  });
+
   it("promotes failed greenfield tasks to needs-attention with retry context", () => {
     const [card] = synthesizeTaskCards(
       {

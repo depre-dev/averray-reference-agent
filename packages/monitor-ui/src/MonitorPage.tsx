@@ -28,12 +28,13 @@ import type { UseCollaborationOptions } from "./hooks/useCollaboration.js";
 import { useActionAlerts, type UseActionAlertsOptions } from "./hooks/useActionAlerts.js";
 import { useAutonomyMode, type UseAutonomyModeOptions } from "./hooks/useAutonomyMode.js";
 import { kpiCounts } from "./lib/monitor/board-state.js";
-import type { CreateTaskInput } from "./lib/monitor/card-types.js";
+import type { BoardCard, CreateTaskInput } from "./lib/monitor/card-types.js";
 import { BoardView } from "./components/BoardView.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 
 const MISSIONS_URL = "/monitor/testbed-missions";
 const CODEX_TASKS_URL = "/monitor/codex-tasks";
+const SELF_HEALING_PROPOSALS_URL = "/monitor/self-healing-proposals";
 const ALERT_MUTE_URL = "/monitor/alert-mute";
 
 export type AlertMuteBody = { untilMs: number } | { muted: false };
@@ -51,6 +52,10 @@ export interface MonitorPageProps {
   onCreateTask?: (input: CreateTaskInput) => void;
   /** Override the approve dispatch (defaults to POST /monitor/codex-tasks approve). */
   onApproveTask?: (id: string) => void;
+  /** Override persisted card dismiss. */
+  onDismissCard?: (card: BoardCard) => void;
+  /** Override persisted card snooze. */
+  onSnoozeCard?: (card: BoardCard, untilMs: number) => void;
   /** Override the tester mission approval (defaults to POST /monitor/testbed-missions/:id/approve). */
   onApproveMission?: (id: string) => void;
   /** Override the drawer mission re-run (defaults to POST /monitor/testbed-missions). */
@@ -72,6 +77,8 @@ export function MonitorPage({
   onSpawnClaudeTask = defaultSpawnClaudeTask,
   onCreateTask = defaultCreateTask,
   onApproveTask = defaultApproveTask,
+  onDismissCard = defaultDismissCard,
+  onSnoozeCard = defaultSnoozeCard,
   onApproveMission = defaultApproveMission,
   onRerunMission = defaultRerunMission,
   collaboration = {},
@@ -117,6 +124,8 @@ export function MonitorPage({
         onSpawnClaudeTask={onSpawnClaudeTask}
         onCreateTask={onCreateTask}
         onApproveTask={onApproveTask}
+        onDismissCard={onDismissCard}
+        onSnoozeCard={onSnoozeCard}
         onApproveMission={onApproveMission}
         onRerunMission={onRerunMission}
         collaboration={collaboration}
@@ -213,6 +222,34 @@ function defaultApproveTask(id: string): void {
   }).catch(() => {
     /* surfaced via the board feed / degraded state, not thrown here */
   });
+}
+
+function defaultDismissCard(card: BoardCard): void {
+  const base = monitorCardActionBase(card);
+  if (!base) return;
+  void fetch(`${base}/${encodeURIComponent(card.id)}/dismiss`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+  }).catch(() => {
+    /* optimistic local hide already applied; next poll is the source of truth */
+  });
+}
+
+function defaultSnoozeCard(card: BoardCard, untilMs: number): void {
+  const base = monitorCardActionBase(card);
+  if (!base) return;
+  void fetch(`${base}/${encodeURIComponent(card.id)}/snooze`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ untilMs }),
+  }).catch(() => {
+    /* optimistic local hide already applied; next poll is the source of truth */
+  });
+}
+
+function monitorCardActionBase(card: BoardCard): string | undefined {
+  if (card.type !== "task") return undefined;
+  return card.correlationId?.startsWith("self-heal:") ? SELF_HEALING_PROPOSALS_URL : CODEX_TASKS_URL;
 }
 
 /**

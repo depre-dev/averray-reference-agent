@@ -368,7 +368,7 @@ function WaitingOnLine({ waitingOn }: { waitingOn: WaitingOn }) {
 
 // ── Operator actions ────────────────────────────────────────────────
 // Approve is only shown when it maps to an existing human gate. Dismiss and
-// snooze are local monitor controls; they do not mutate task authority.
+// snooze persist for task-backed cards; they do not grant runner authority.
 
 function OperatorActions({
   card,

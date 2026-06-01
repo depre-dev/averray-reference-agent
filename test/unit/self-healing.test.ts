@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   decideHealingAction,
@@ -6,8 +9,10 @@ import {
   buildFixPrompt,
   buildHealingEscalationAlert,
   createCooldown,
+  isSelfHealingTargetSuppressed,
   testbedSurfaceKey,
   selfHealingTargetSignature,
+  suppressSelfHealingTarget,
   type FailureSignal,
   type HealingClassification,
   type SelfHealingDeps,
@@ -15,6 +20,18 @@ import {
 
 const LOW: HealingClassification = { agent: "claude", riskTier: "low", reason: "UI surface, low-risk" };
 const HIGH: HealingClassification = { agent: "codex", riskTier: "high", reason: "deploy/settlement, high-risk" };
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
+  tempDirs.length = 0;
+});
+
+async function tempSuppressionPath(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "averray-self-healing-"));
+  tempDirs.push(dir);
+  return join(dir, "suppressions.json");
+}
 
 function signal(over: Partial<FailureSignal> = {}): FailureSignal {
   return {
@@ -189,6 +206,37 @@ describe("runSelfHealingOnce — orchestration (injected deps, no fs/network)", 
     await runSelfHealingOnce(h.deps);
     expect(h.proposed).toHaveLength(0);
     expect(h.audits[0]).toMatchObject({ action: "skip", reason: "open_fix_exists" });
+  });
+
+  it("operator-dismissed self-healing targets suppress re-proposal", async () => {
+    const h = harness([signal()], {
+      isSuppressedTarget: (targetSignature) => targetSignature === "testbed_mission:testbed:sweep-1",
+    });
+    const r = await runSelfHealingOnce(h.deps);
+    expect(h.proposed).toHaveLength(0);
+    expect(h.alerts).toBe(0);
+    expect(r.handled[0]).toMatchObject({ action: "skip", reason: "operator_dismissed" });
+    expect(h.audits[0]).toMatchObject({ action: "skip", reason: "operator_dismissed" });
+  });
+
+  it("persists self-healing target suppressions durably", async () => {
+    const path = await tempSuppressionPath();
+    await expect(isSelfHealingTargetSuppressed("testbed_mission:testbed:sweep-1", { path })).resolves.toBe(false);
+
+    const suppression = await suppressSelfHealingTarget("testbed_mission:testbed:sweep-1", {
+      path,
+      dismissedBy: "operator",
+      sourceTaskId: "codex-task-self-heal-1",
+      now: new Date("2026-05-31T12:05:00.000Z"),
+    });
+
+    expect(suppression).toMatchObject({
+      targetSignature: "testbed_mission:testbed:sweep-1",
+      dismissedAt: "2026-05-31T12:05:00.000Z",
+      dismissedBy: "operator",
+      sourceTaskId: "codex-task-self-heal-1",
+    });
+    await expect(isSelfHealingTargetSuppressed("testbed_mission:testbed:sweep-1", { path })).resolves.toBe(true);
   });
 
   it("dedup: duplicate signals for the same failing target in one tick → proposed once", async () => {

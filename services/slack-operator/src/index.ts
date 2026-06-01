@@ -82,6 +82,8 @@ import {
 import {
   runSelfHealingOnce,
   createCooldown,
+  isSelfHealingTargetSuppressed,
+  suppressSelfHealingTarget,
   testbedSurfaceKey,
   type FailureSignal,
 } from "./self-healing.js";
@@ -133,11 +135,13 @@ import {
   annotateCodexTaskDecisionRecord,
   cancelCodexTask,
   deferCodexTaskRetry,
+  dismissCodexTask,
   escalateCodexTask,
   listCodexTasks,
   proposeCodexTask,
   readCodexRunnerHeartbeat,
   retryCodexTask,
+  snoozeCodexTask,
   summarizeCodexTasks,
   taskAgent,
   type CodexTask,
@@ -418,6 +422,10 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
           "/monitor/command",
           "/monitor/recheck",
           "/monitor/codex-tasks",
+          "/monitor/codex-tasks/:id/dismiss",
+          "/monitor/codex-tasks/:id/snooze",
+          "/monitor/self-healing-proposals/:id/dismiss",
+          "/monitor/self-healing-proposals/:id/snooze",
           "/monitor/backlog-suggestions",
           "/monitor/decision-records",
           "/monitor/agents",
@@ -646,6 +654,19 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       return;
     }
     await handleMonitorCodexTaskRequest(request, response);
+    return;
+  }
+  const cardActionRoute = monitorCardActionRoute(url.pathname);
+  if (request.method === "POST" && cardActionRoute) {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    await handleMonitorCardActionRequest(cardActionRoute, request, response);
     return;
   }
   if (request.method === "POST" && url.pathname === "/monitor/recheck") {
@@ -2118,6 +2139,100 @@ async function handleMonitorCodexTaskRequest(request: http.IncomingMessage, resp
   }
 }
 
+interface MonitorCardActionRoute {
+  collection: "codex-tasks" | "self-healing-proposals";
+  id: string;
+  action: "dismiss" | "snooze";
+}
+
+function monitorCardActionRoute(pathname: string): MonitorCardActionRoute | undefined {
+  const match = /^\/monitor\/(codex-tasks|self-healing-proposals)\/([^/]+)\/(dismiss|snooze)$/.exec(pathname);
+  if (!match) return undefined;
+  return {
+    collection: match[1] as MonitorCardActionRoute["collection"],
+    id: decodeURIComponent(match[2] ?? ""),
+    action: match[3] as MonitorCardActionRoute["action"],
+  };
+}
+
+async function handleMonitorCardActionRequest(
+  route: MonitorCardActionRoute,
+  request: http.IncomingMessage,
+  response: http.ServerResponse,
+) {
+  try {
+    if (route.action === "dismiss") {
+      const task = await dismissCodexTask(route.id, { dismissedBy: "operator" });
+      if (!task) {
+        writeJson(response, 404, { error: "codex_task_not_found", id: route.id });
+        return;
+      }
+      const suppression = await maybeSuppressSelfHealingTarget(route.collection, task);
+      writeJson(response, 200, {
+        ok: true,
+        action: "dismiss",
+        task,
+        ...(suppression ? { selfHealingSuppression: suppression } : {}),
+        queue: await loadCodexTaskQueueSummary(),
+      });
+      return;
+    }
+
+    const rawBody = await readBody(request);
+    const payload = rawBody ? JSON.parse(rawBody) as unknown : {};
+    if (!isRecord(payload)) {
+      writeJson(response, 400, { error: "invalid_payload" });
+      return;
+    }
+    const untilMs = numberField(payload, "untilMs");
+    if (untilMs === undefined || !Number.isFinite(untilMs) || untilMs <= Date.now()) {
+      writeJson(response, 400, {
+        error: "invalid_snooze_until",
+        message: "untilMs must be a future epoch millisecond timestamp.",
+      });
+      return;
+    }
+    const task = await snoozeCodexTask(route.id, {
+      snoozedUntil: new Date(untilMs),
+      snoozedBy: "operator",
+    });
+    if (!task) {
+      writeJson(response, 404, { error: "codex_task_not_found", id: route.id });
+      return;
+    }
+    writeJson(response, 200, {
+      ok: true,
+      action: "snooze",
+      task,
+      queue: await loadCodexTaskQueueSummary(),
+    });
+  } catch (error) {
+    logger.error({ err: error, id: route.id, action: route.action }, "monitor_card_action_failed");
+    writeJson(response, 500, {
+      error: "monitor_card_action_failed",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function maybeSuppressSelfHealingTarget(
+  collection: MonitorCardActionRoute["collection"],
+  task: CodexTask,
+) {
+  const targetSignature = selfHealingTargetSignatureFromTask(task);
+  if (!targetSignature) return undefined;
+  if (collection !== "self-healing-proposals" && task.requester !== "hermes-self-healing") return undefined;
+  return suppressSelfHealingTarget(targetSignature, {
+    dismissedBy: "operator",
+    sourceTaskId: task.id,
+  });
+}
+
+function selfHealingTargetSignatureFromTask(task: CodexTask): string | undefined {
+  const prefix = "self-heal:";
+  return task.correlationId?.startsWith(prefix) ? task.correlationId.slice(prefix.length) : undefined;
+}
+
 function startOperatorRoutines() {
   const channelRoutineEnabled = routineConfig.dailyBrief.enabled
     || routineConfig.dailyGithubBrief.enabled
@@ -2482,6 +2597,7 @@ function startOperatorRoutines() {
             (t) => t.correlationId === corr && !["completed", "failed", "cancelled"].includes(t.status),
           );
         },
+        isSuppressedTarget: (targetSignature) => isSelfHealingTargetSuppressed(targetSignature),
         proposalsToday: async () => {
           const today = new Date().toISOString().slice(0, 10);
           const tasks = await listCodexTasks();
