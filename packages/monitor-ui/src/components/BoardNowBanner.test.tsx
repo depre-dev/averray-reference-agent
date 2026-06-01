@@ -31,6 +31,13 @@ describe("BoardNowBanner", () => {
     expect(getByText("!")).toBeTruthy();
   });
 
+  test("Hermes focus tone → action wash + H glyph", () => {
+    const { container, getByText } = render(<BoardNowBanner banner={banner("hermes-focus")} />);
+    expect(container.querySelector(".hm-now--action")).toBeTruthy();
+    expect(container.querySelector(".hm-now--hermes-focus")).toBeTruthy();
+    expect(getByText("H")).toBeTruthy();
+  });
+
   test("degraded tone → rose class + ‼ glyph", () => {
     const { container, getByText } = render(<BoardNowBanner banner={banner("degraded")} />);
     expect(container.querySelector(".hm-now--degraded")).toBeTruthy();

@@ -13,7 +13,7 @@
 import type { ReactNode } from "react";
 
 export type BannerData = {
-  tone: "action" | "calm" | "degraded";
+  tone: "action" | "calm" | "hermes-focus" | "degraded";
   eyebrow: string;
   headline: string;
   sub: string;
@@ -29,6 +29,7 @@ export type BoardNowBannerProps = {
 const GLYPHS: Record<BannerData["tone"], string> = {
   action: "!",
   calm: "✓",
+  "hermes-focus": "H",
   degraded: "‼",
 };
 
@@ -36,6 +37,8 @@ export function BoardNowBanner({ banner, cta }: BoardNowBannerProps) {
   const toneClass =
     banner.tone === "action"
       ? "hm-now hm-now--action"
+      : banner.tone === "hermes-focus"
+        ? "hm-now hm-now--action hm-now--hermes-focus"
       : banner.tone === "calm"
         ? "hm-now hm-now--calm"
         : "hm-now hm-now--degraded";

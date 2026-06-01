@@ -10,7 +10,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { BoardCard, CreateTaskInput } from "../../lib/monitor/card-types.js";
 import type { BacklogSuggestion, BacklogSuggestionsResponse } from "../../lib/monitor/backlog-suggestions.js";
 import type { BoardNowBanner as BoardNowBannerData } from "../../lib/monitor/board-state.js";
-import { relatedPrForCard } from "../../lib/monitor/collaboration.js";
+import { relatedPrForCard, type CollaborationMessage } from "../../lib/monitor/collaboration.js";
 import {
   buildHermesActivityFeed,
   type HermesActivityEntry,
@@ -50,6 +50,8 @@ export interface CoPilotRailProps {
   autonomyMode?: "supervised" | "autopilot";
   /** Bump to focus the composer (the board's `a` shortcut). */
   composerFocusToken?: number;
+  /** True only when real collaboration messages are scoped to a pending review card. */
+  onScopedConversationChange?: (active: boolean) => void;
 }
 
 export function CoPilotRail({
@@ -69,6 +71,7 @@ export function CoPilotRail({
   onSetSupervised,
   autonomyMode,
   composerFocusToken,
+  onScopedConversationChange,
 }: CoPilotRailProps) {
   const { messages, ask } = useCollaboration(collaboration ?? { enabled: false });
   const relatedPr = relatedPrForCard(focusedCard);
@@ -87,6 +90,14 @@ export function CoPilotRail({
     }),
     [boardBanner, boardCards, messages],
   );
+
+  const scopedConversationActive = useMemo(
+    () => hasScopedConversation(messages, focusedCard),
+    [focusedCard, messages],
+  );
+  useEffect(() => {
+    onScopedConversationChange?.(scopedConversationActive);
+  }, [onScopedConversationChange, scopedConversationActive]);
 
   // Keep the newest turn in view as the feed grows.
   useEffect(() => {
@@ -144,6 +155,29 @@ export function CoPilotRail({
       />
     </aside>
   );
+}
+
+function hasScopedConversation(messages: readonly CollaborationMessage[], card: BoardCard | undefined): boolean {
+  if (!card || card.waitingOn?.actor !== "operator" || (card.lane !== "operator-review" && card.isAction !== true)) {
+    return false;
+  }
+  return messages.some((message) => (
+    (message.author === "operator" || message.author === "hermes")
+    && messageMatchesCard(message, card)
+  ));
+}
+
+function messageMatchesCard(message: CollaborationMessage, card: BoardCard): boolean {
+  const relatedPr = relatedPrForCard(card);
+  if (
+    relatedPr
+    && message.relatedPr?.repo === relatedPr.repo
+    && message.relatedPr.number === relatedPr.number
+  ) {
+    return true;
+  }
+  const correlation = card.correlationId ?? card.id;
+  return Boolean(message.relatedCorrelationId && message.relatedCorrelationId === correlation);
 }
 
 function ActivityEntryRow({

@@ -17,6 +17,7 @@ import type { KPICounts, BoardMode, BoardFilter } from "../lib/monitor/board-sta
 
 const TIPS: Record<BoardMode, string> = {
   action: "· focus on the lane that needs you",
+  "hermes-focus": "· Hermes is answering the active review thread",
   calm: "· everything quiet · history below",
   degraded: "· data may be stale; auto-reconnecting",
 };

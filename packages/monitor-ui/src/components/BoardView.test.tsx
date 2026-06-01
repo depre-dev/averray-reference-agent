@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { BoardView } from "./BoardView.js";
 import { FIXTURE_CARDS } from "../lib/monitor/fixtures.js";
 import type { MonitorBoard } from "../lib/monitor/board-cache.js";
+import type { BoardCard } from "../lib/monitor/card-types.js";
 
 afterEach(cleanup);
 
@@ -43,6 +44,50 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(view.getByText("Hermes verdict")).toBeTruthy();
   });
 
+  test("action banner CTA opens the real review card", () => {
+    const onCardClick = vi.fn();
+    const board: MonitorBoard = {
+      at: "2026-05-28T10:30:00Z",
+      cards: [reviewCard({ id: "agent #548", title: "Review relay hang fix" })],
+    };
+    const { getByRole } = render(<BoardView board={board} status="open" onCardClick={onCardClick} keyboard={false} />);
+
+    fireEvent.click(getByRole("button", { name: /Jump to agent #548/ }));
+    expect(onCardClick).toHaveBeenCalledWith("agent #548");
+
+    fireEvent.click(getByRole("button", { name: "Open review checklist" }));
+    expect(onCardClick).toHaveBeenCalledWith("agent #548");
+  });
+
+  test("Hermes focus banner appears only for a real scoped conversation on the pending review card", async () => {
+    const board: MonitorBoard = {
+      at: "2026-05-28T10:30:00Z",
+      cards: [reviewCard({ id: "agent #548", title: "Review relay hang fix" })],
+    };
+    const { getByText } = render(
+      <BoardView
+        board={board}
+        status="open"
+        focusedCardId="agent #548"
+        onCardClick={() => {}}
+        keyboard={false}
+        collaboration={{
+          fetcher: async () => [{
+            id: "msg-1",
+            ts: Date.now(),
+            author: "operator",
+            kind: "chat",
+            addressedTo: "hermes",
+            text: "What is the blast radius?",
+            relatedPr: { repo: "depre-dev/averray-reference-agent", number: 548 },
+          }],
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(getByText(/Hermes has the floor/)).toBeTruthy());
+  });
+
   test("renders a spread of card types (mission, deploy, done)", () => {
     const { container } = render(<BoardView board={richBoard} status="open" />);
     const view = within(container);
@@ -64,6 +109,32 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(container.querySelectorAll("section.hm-lane").length).toBe(2); // deploying + done
     // …and the six empty lanes are mini-rails — not everything-but-Done collapsed.
     expect(container.querySelectorAll(".hm-lane--collapsed").length).toBe(6);
+  });
+
+  test("calm banner CTA filters to today's done cards and mutes alerts for one hour", () => {
+    const onMute = vi.fn();
+    const board: MonitorBoard = {
+      at: "2026-06-01T12:00:00.000Z",
+      cards: [
+        doneCard({ id: "done-today", title: "Merged today", closedAt: "2026-06-01T08:00:00.000Z" }),
+        doneCard({ id: "done-old", title: "Merged yesterday", closedAt: "2026-05-31T08:00:00.000Z" }),
+      ],
+    };
+    const { getByRole, queryByText } = render(<BoardView board={board} status="open" onMute={onMute} keyboard={false} />);
+
+    fireEvent.click(getByRole("button", { name: /Review today/ }));
+    expect(queryByText("Merged today")).toBeTruthy();
+    expect(queryByText("Merged yesterday")).toBeNull();
+
+    fireEvent.click(getByRole("button", { name: "Mute for 1 hour" }));
+    expect(onMute).toHaveBeenCalledTimes(1);
+    expect(onMute.mock.calls[0]?.[0]).toBeGreaterThan(Date.now() + 59 * 60_000);
+  });
+
+  test("Ask Hermes float focuses the composer when no drawer is open", () => {
+    const { getByRole } = render(<BoardView board={richBoard} status="open" keyboard={false} />);
+    fireEvent.click(getByRole("button", { name: "Ask Hermes" }));
+    expect(getByRole("textbox", { name: "Ask Hermes, propose a task, spawn a mission, or mute alerts" })).toBe(document.activeElement);
   });
 
   test("an open stream lights the LIVE indicator with the snapshot clock", () => {
@@ -310,3 +381,41 @@ describe("BoardView — filter chips (G1)", () => {
     expect(view.getByText("Allow operator override of agent claim-stake floor")).toBeTruthy();
   });
 });
+
+function reviewCard(overrides: Partial<BoardCard> = {}): BoardCard {
+  return {
+    id: "agent #548",
+    lane: "operator-review",
+    type: "pr",
+    agentType: "codex",
+    title: "Review relay hang fix",
+    summary: "Hermes needs an operator review decision.",
+    repo: "depre-dev/averray-reference-agent",
+    freshness: 1,
+    state: "fresh",
+    risk: ["review-gated"],
+    waitingOn: { actor: "operator", tone: "warn" },
+    files: [],
+    isAction: true,
+    ...overrides,
+  } as BoardCard;
+}
+
+function doneCard(overrides: Partial<BoardCard> = {}): BoardCard {
+  return {
+    id: "done-today",
+    lane: "done",
+    type: "done",
+    agentType: "codex",
+    title: "Merged today",
+    summary: "Merged",
+    repo: "depre-dev/averray-reference-agent",
+    freshness: 1,
+    state: "fresh",
+    risk: [],
+    waitingOn: { actor: "CI", tone: "neutral" },
+    closedAt: "2026-06-01T08:00:00.000Z",
+    mergeStatus: "MERGED",
+    ...overrides,
+  } as BoardCard;
+}
