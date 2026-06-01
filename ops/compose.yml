@@ -179,6 +179,9 @@ services:
       # empty allowlist means autopilot can auto-approve NOTHING — the operator
       # opts repos in here before turning autopilot on. high-risk always escalates.
       AVERRAY_AUTONOMY_MODE_PATH: ${AVERRAY_AUTONOMY_MODE_PATH:-/data/autonomy-mode.json}
+      # Operator-private per-card notes (checklist + note). Operator-only; never
+      # part of any agent payload. Persisted on /data so notes survive a restart.
+      AVERRAY_OPERATOR_CARD_NOTES_PATH: ${AVERRAY_OPERATOR_CARD_NOTES_PATH:-/data/operator-card-notes.json}
       HERMES_DISPATCH_ALLOWED_REPOS: ${HERMES_DISPATCH_ALLOWED_REPOS:-}
       HERMES_DISPATCH_PER_REPO_PER_DAY_MAX: ${HERMES_DISPATCH_PER_REPO_PER_DAY_MAX:-5}
       HERMES_DISPATCH_PER_DAY_USD_MAX: ${HERMES_DISPATCH_PER_DAY_USD_MAX:-0}
