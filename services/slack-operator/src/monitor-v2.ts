@@ -28,6 +28,7 @@ import {
   testbedMissionStructuredReport,
   type TestbedMissionRun,
 } from "./monitor-testbed-missions.js";
+import { testbedSurfaceKey } from "./self-healing.js";
 import {
   isHermesDecisionRecord,
   type HermesDecisionRecord,
@@ -1318,8 +1319,10 @@ export function buildV2BoardSnapshot(
     taskCards.map((card) => card.correlationId).filter((value): value is string => Boolean(value)),
   );
   const cards = sourceCards.filter((card) => {
-    if (!card.correlationId || card.type === "task") return true;
-    return !actionableTaskCorrelationIds.has(card.correlationId);
+    if (card.type === "task") return true;
+    const correlationIds = sourceCardCorrelationIdsForDedupe(card, missionIndex);
+    if (correlationIds.length === 0) return true;
+    return !correlationIds.some((id) => actionableTaskCorrelationIds.has(id));
   });
 
   return {
@@ -1328,4 +1331,20 @@ export function buildV2BoardSnapshot(
     repo: opts.repo ?? "",
     llmUsage: aggregateLlmUsage(usageEvents(asRecord(rawSnapshot)?.llmUsageEvents)),
   };
+}
+
+function sourceCardCorrelationIdsForDedupe(
+  card: BoardCard,
+  missionIndex: ReadonlyMap<string, Record<string, unknown>>,
+): string[] {
+  const ids = new Set<string>();
+  if (card.correlationId) ids.add(card.correlationId);
+  if (card.type === "mission" && card.correlationId) {
+    const missionRun = missionIndex.get(card.correlationId);
+    const targetUrl = asString(missionRun?.targetUrl);
+    if (targetUrl) {
+      ids.add(`self-heal:testbed_mission:${testbedSurfaceKey(targetUrl)}`);
+    }
+  }
+  return Array.from(ids);
 }

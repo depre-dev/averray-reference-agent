@@ -1214,6 +1214,66 @@ describe("synthesizeTaskCards (O3 — surface queued tasks)", () => {
       waitingOn: { actor: "operator", tone: "warn" },
     });
   });
+
+  it("collapses a failed testbed mission and its self-healing task into one actionable card", () => {
+    const missionId = "testbed-mission-failed-1";
+    const snap = buildV2BoardSnapshot(
+      {
+        active: [],
+        recent: [],
+        testbedMissions: [{
+          schemaVersion: 1,
+          kind: "testbed_mission_run",
+          id: missionId,
+          status: "failed",
+          title: "Fresh-agent browser mission",
+          targetUrl: "https://averray.com/",
+          goal: "Test the main flow like a new outside agent.",
+          agentName: "Hermes",
+          freshMemory: true,
+          allowTestMutations: false,
+          createdAt: "2026-06-01T10:00:00.000Z",
+          updatedAt: "2026-06-01T10:05:00.000Z",
+          failedAt: "2026-06-01T10:05:00.000Z",
+          statusReason: "Browser-agent report returned fail.",
+          failureReason: "Browser-agent report returned fail.",
+          result: {
+            verdict: "fail",
+            confidence: 0.4,
+            stoppedBeforeMutation: true,
+            blockers: ["primary action unclear"],
+            confusingMoments: [],
+            evidence: [],
+            scores: {},
+            recommendations: [],
+          },
+        }],
+        codexTasks: {
+          items: [{
+            id: "codex-task-self-heal-averray",
+            status: "proposed",
+            agent: "codex",
+            repo: "depre-dev/averray-reference-agent",
+            title: "Self-healing fix: testbed:averray.com",
+            prompt: "Investigate the failed mission and propose the smallest fix.",
+            requester: "hermes-self-healing",
+            correlationId: "self-heal:testbed_mission:testbed:averray.com",
+            reason: "Hermes self-healing proposal for a testbed_mission failure",
+          }],
+        },
+      },
+      { repo: "depre-dev/averray-reference-agent", now: () => new Date("2026-06-01T10:06:00.000Z") },
+    );
+
+    expect(snap.cards).toHaveLength(1);
+    expect(snap.cards[0]).toMatchObject({
+      id: "codex-task-self-heal-averray",
+      lane: "codex-needed",
+      type: "task",
+      taskStatus: "proposed",
+      waitingOn: { actor: "operator", tone: "warn" },
+    });
+  });
 });
 
 describe("enrichBoardCard — task status", () => {
