@@ -70,6 +70,12 @@ export interface TestbedMissionRun {
   completedAt?: string;
   failedAt?: string;
   failureReason?: string;
+  operatorAcceptedAt?: string;
+  operatorAcceptedBy?: string;
+  operatorIssueOpenedAt?: string;
+  operatorIssueOpenedBy?: string;
+  operatorIssueUrl?: string;
+  operatorIssueNumber?: number;
   stdoutTail?: string;
   stderrTail?: string;
   progressMessage?: string;
@@ -163,6 +169,10 @@ export interface RecordTestbedMissionRunOptions {
 export type ApproveTestbedMissionRunResult =
   | { ok: true; run: TestbedMissionRun }
   | { ok: false; error: "not_found" | "not_requested"; run?: TestbedMissionRun };
+
+export type TestbedMissionFailureTriageResult =
+  | { ok: true; run: TestbedMissionRun }
+  | { ok: false; error: "not_found" | "not_failed"; run?: TestbedMissionRun };
 
 export interface TestbedMissionRunnerHeartbeat {
   schemaVersion: 1;
@@ -312,6 +322,66 @@ export function approveTestbedMissionRun(
     status: "ready",
     event: "mission_approved",
     message: `Operator approved the requested tester run; ${existing.statusReason}`,
+  });
+  trimMissionHistory(existing);
+  persistMissionStore(deps.path);
+  return { ok: true, run: cloneRun(existing) };
+}
+
+export function acceptTestbedMissionFailure(
+  id: string,
+  deps: TestbedMissionStoreDeps & { acceptedBy?: string } = {}
+): TestbedMissionFailureTriageResult {
+  ensureMissionStoreLoaded(deps.path, { force: true });
+  const existing = missionRuns.find((run) => run.id === id);
+  if (!existing) return { ok: false, error: "not_found" };
+  if (existing.status !== "failed") {
+    return { ok: false, error: "not_failed", run: cloneRun(existing) };
+  }
+  const now = (deps.now ?? new Date()).toISOString();
+  existing.operatorAcceptedAt = now;
+  existing.operatorAcceptedBy = deps.acceptedBy ?? "operator";
+  existing.updatedAt = now;
+  existing.statusReason = `Operator accepted the failed mission outcome for triage; no code task was dispatched.`;
+  existing.history.push({
+    at: now,
+    status: "failed",
+    event: "mission_failure_accepted",
+    message: existing.statusReason,
+  });
+  trimMissionHistory(existing);
+  persistMissionStore(deps.path);
+  return { ok: true, run: cloneRun(existing) };
+}
+
+export function recordTestbedMissionIssueOpened(
+  id: string,
+  deps: TestbedMissionStoreDeps & {
+    issueUrl: string;
+    issueNumber?: number;
+    openedBy?: string;
+  }
+): TestbedMissionFailureTriageResult {
+  ensureMissionStoreLoaded(deps.path, { force: true });
+  const existing = missionRuns.find((run) => run.id === id);
+  if (!existing) return { ok: false, error: "not_found" };
+  if (existing.status !== "failed") {
+    return { ok: false, error: "not_failed", run: cloneRun(existing) };
+  }
+  const now = (deps.now ?? new Date()).toISOString();
+  existing.operatorIssueOpenedAt = now;
+  existing.operatorIssueOpenedBy = deps.openedBy ?? "operator";
+  existing.operatorIssueUrl = deps.issueUrl;
+  if (deps.issueNumber !== undefined) existing.operatorIssueNumber = deps.issueNumber;
+  existing.updatedAt = now;
+  existing.statusReason = `Operator filed a GitHub issue for this failed mission; no code task was dispatched.`;
+  existing.history.push({
+    at: now,
+    status: "failed",
+    event: "mission_failure_issue_opened",
+    message: deps.issueNumber !== undefined
+      ? `Operator filed issue #${deps.issueNumber}: ${deps.issueUrl}`
+      : `Operator filed issue: ${deps.issueUrl}`,
   });
   trimMissionHistory(existing);
   persistMissionStore(deps.path);
@@ -543,10 +613,13 @@ export function diagnoseTestbedMissionReportFromMessage(input: MissionReportInpu
 
 export function testbedMissionRunToMonitorItem(run: TestbedMissionRun): Record<string, unknown> {
   const active = run.status === "requested" || run.status === "ready" || run.status === "running";
+  const failureTriaged = run.status === "failed" && Boolean(run.operatorAcceptedAt || run.operatorIssueOpenedAt);
   const terminalStatus = run.status === "requested"
     ? "requested"
     : run.status === "completed"
       ? "completed"
+      : failureTriaged
+        ? "completed"
       : run.status === "failed"
         ? "failed"
         : "running";
@@ -580,6 +653,15 @@ export function testbedMissionRunToMonitorItem(run: TestbedMissionRun): Record<s
       missionStatus: run.status,
       finalReason: run.statusReason,
       finalVerdict: verdict,
+      ...(run.operatorAcceptedAt ? { operatorAcceptedAt: run.operatorAcceptedAt, operatorAcceptedBy: run.operatorAcceptedBy } : {}),
+      ...(run.operatorIssueUrl
+        ? {
+            operatorIssueUrl: run.operatorIssueUrl,
+            operatorIssueNumber: run.operatorIssueNumber,
+            operatorIssueOpenedAt: run.operatorIssueOpenedAt,
+            operatorIssueOpenedBy: run.operatorIssueOpenedBy,
+          }
+        : {}),
       mergeRecommendation: "not_applicable",
       ...(structuredReport ? { structuredReport } : {}),
       reviewSignals: {

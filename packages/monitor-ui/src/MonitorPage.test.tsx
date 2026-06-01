@@ -208,6 +208,71 @@ describe("MonitorPage — container", () => {
     }
   });
 
+  test("failed mission triage posts accept/open-issue actions to real mission endpoints", async () => {
+    const failedMission = {
+      id: "surface-sweep-t1-testbed-mission-failed-1",
+      correlationId: "testbed-mission-failed-1",
+      lane: "needs-attention",
+      type: "mission",
+      agentType: "hermes",
+      title: "Surface sweep (T1)",
+      summary: "Browser-agent report returned fail.",
+      repo: "testbed/mission",
+      freshness: 1,
+      state: "fresh",
+      risk: ["testbed"],
+      waitingOn: { actor: "operator", tone: "warn" },
+      missionStatus: "failed",
+      isAction: true,
+      mission: {
+        verdict: "FAILED",
+        verdictTone: "fail",
+        confidence: 0.4,
+        target: "https://staging.example.test",
+        seed: "fresh",
+        path: [],
+        blockers: [],
+        evidence: [],
+        mutationBoundary: "No mutation crossed.",
+        recommendations: [],
+      },
+    } as unknown as MonitorBoard["cards"][number];
+    const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({
+      cards: [failedMission],
+      at: "2026-05-28T10:30:00Z",
+    }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
+    try {
+      const { getByRole, getByText } = render(
+        <MonitorPage
+          options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }}
+          backlogSuggestions={{ enabled: false }}
+          collaboration={{ enabled: false }}
+          alerts={{ enabled: false }}
+          autonomy={{ fetchMode: async () => null }}
+        />,
+        { wrapper },
+      );
+      await waitFor(() => expect(getByRole("button", { name: "Accept failure" })).toBeTruthy());
+
+      fireEvent.click(getByRole("button", { name: "Accept failure" }));
+      expect(getByText(/Accept this failed mission/)).toBeTruthy();
+      fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
+
+      fireEvent.click(getByRole("button", { name: "Open issue" }));
+      expect(getByText(/File a GitHub issue/)).toBeTruthy();
+      fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect((fetchSpy.mock.calls[0] as [string, RequestInit])[0]).toBe("/monitor/testbed-missions/testbed-mission-failed-1/accept-failure");
+      expect((fetchSpy.mock.calls[1] as [string, RequestInit])[0]).toBe("/monitor/testbed-missions/testbed-mission-failed-1/open-issue");
+      expect((fetchSpy.mock.calls[0] as [string, RequestInit])[1].method).toBe("POST");
+      expect((fetchSpy.mock.calls[1] as [string, RequestInit])[1].method).toBe("POST");
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   test("operator task cards do not expose secondary dismiss/snooze buttons", async () => {
     const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({
       cards: [taskCard()],

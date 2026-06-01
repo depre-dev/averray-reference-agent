@@ -2,10 +2,12 @@ import { describe, expect, it, beforeEach } from "vitest";
 
 import {
   __resetTestbedMissionRunsForTests,
+  acceptTestbedMissionFailure,
   diagnoseTestbedMissionReportFromMessage,
   failedTestbedMissionsForSelfHealing,
   failTestbedMissionRun,
   listTestbedMissionRuns,
+  recordTestbedMissionIssueOpened,
   recordTestbedMissionReportFromMessage,
   recordTestbedMissionRunFromOperatorResult,
   testbedMissionBaselinePrompt,
@@ -625,6 +627,51 @@ describe("monitor testbed mission runs", () => {
       now: new Date("2026-05-25T12:00:00.000Z"),
       maxAgeHours: 24,
     }).map((run) => run.id)).toEqual([fresh.id]);
+  });
+
+  it("marks accepted or issue-filed failed missions as triaged history for the board", () => {
+    const accepted = recordTestbedMissionRunFromOperatorResult(
+      missionResult({ targetUrl: "https://testbed.example/accepted" }),
+      Date.parse("2026-05-25T10:00:00.000Z"),
+    )!;
+    failTestbedMissionRun(accepted.id, {
+      now: new Date("2026-05-25T10:05:00.000Z"),
+      failureReason: "operator reviewed this known failure",
+    });
+    const acceptedResult = acceptTestbedMissionFailure(accepted.id, {
+      now: new Date("2026-05-25T10:06:00.000Z"),
+      acceptedBy: "operator",
+    });
+    expect(acceptedResult).toMatchObject({ ok: true });
+    expect(testbedMissionRunToMonitorItem(acceptedResult.ok ? acceptedResult.run : accepted)).toMatchObject({
+      status: "completed",
+      summary: {
+        operatorAcceptedAt: "2026-05-25T10:06:00.000Z",
+      },
+    });
+
+    const issue = recordTestbedMissionRunFromOperatorResult(
+      missionResult({ targetUrl: "https://testbed.example/issue" }),
+      Date.parse("2026-05-25T11:00:00.000Z"),
+    )!;
+    failTestbedMissionRun(issue.id, {
+      now: new Date("2026-05-25T11:05:00.000Z"),
+      failureReason: "needs product tracking",
+    });
+    const issueResult = recordTestbedMissionIssueOpened(issue.id, {
+      now: new Date("2026-05-25T11:06:00.000Z"),
+      issueUrl: "https://github.com/depre-dev/averray-reference-agent/issues/123",
+      issueNumber: 123,
+      openedBy: "operator",
+    });
+    expect(issueResult).toMatchObject({ ok: true });
+    expect(testbedMissionRunToMonitorItem(issueResult.ok ? issueResult.run : issue)).toMatchObject({
+      status: "completed",
+      summary: {
+        operatorIssueUrl: "https://github.com/depre-dev/averray-reference-agent/issues/123",
+        operatorIssueNumber: 123,
+      },
+    });
   });
 });
 

@@ -47,6 +47,10 @@ export type CardProps = {
   onApproveMerge?: (card: BoardCard) => void;
   /** Re-run a failed tester mission. */
   onRerunMission?: (card: BoardCard, freshness: "fresh" | "memory") => void;
+  /** Accept/acknowledge a failed tester mission without dispatching code work. */
+  onAcceptMissionFailure?: (card: BoardCard) => void;
+  /** File a GitHub issue for a failed tester mission. */
+  onOpenMissionIssue?: (card: BoardCard) => void;
   /** "Keep watching" on the archive hint — cancel/extend this card's auto-archive. */
   onKeepWatching?: (card: BoardCard) => void;
 };
@@ -95,6 +99,8 @@ export function Card({
   onApproveMission,
   onApproveMerge,
   onRerunMission,
+  onAcceptMissionFailure,
+  onOpenMissionIssue,
   onKeepWatching,
 }: CardProps) {
   const isAction = Boolean(card.isAction);
@@ -210,6 +216,8 @@ export function Card({
           onApproveMission={onApproveMission}
           onApproveMerge={onApproveMerge}
           onRerunMission={onRerunMission}
+          onAcceptMissionFailure={onAcceptMissionFailure}
+          onOpenMissionIssue={onOpenMissionIssue}
         />
       ) : null}
 
@@ -425,62 +433,106 @@ function OperatorActions({
   onApproveMission,
   onApproveMerge,
   onRerunMission,
+  onAcceptMissionFailure,
+  onOpenMissionIssue,
 }: {
   card: BoardCard;
   onApprove?: (card: BoardCard) => void;
   onApproveMission?: (card: BoardCard) => void;
   onApproveMerge?: (card: BoardCard) => void;
   onRerunMission?: (card: BoardCard, freshness: "fresh" | "memory") => void;
+  onAcceptMissionFailure?: (card: BoardCard) => void;
+  onOpenMissionIssue?: (card: BoardCard) => void;
 }) {
-  const [confirming, setConfirming] = useState(false);
+  const [confirmingKey, setConfirmingKey] = useState<string | null>(null);
   const agent = agentLabel(card.agentType);
   const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
   const taskStatus = (card as { taskStatus?: string }).taskStatus;
   const missionStatus = (card as { missionStatus?: string }).missionStatus;
   const missionTarget = card.type === "mission" ? card.mission?.target : undefined;
   const relatedPr = card.type === "pr" ? relatedPrForCard(card) : undefined;
-  const primary =
+  const actions =
     card.type === "task" && taskStatus === "proposed" && onApprove
-      ? {
+      ? [{
+          key: "approve",
           label: "Approve & dispatch",
           confirm: `Dispatch to ${agent}?`,
           run: () => onApprove(card),
-        }
+          kind: "action" as const,
+        }]
       : card.type === "mission" && missionStatus === "requested" && onApproveMission
-        ? {
+        ? [{
+            key: "approve-mission",
             label: "Approve & dispatch",
             confirm: "Dispatch tester runner?",
             run: () => onApproveMission(card),
-          }
-        : card.type === "mission" && missionStatus === "failed" && missionTarget && onRerunMission
-          ? {
-              label: "Re-run",
-              confirm: "Re-run as a fresh mission?",
-              run: () => onRerunMission(card, "fresh" as const),
-            }
+            kind: "action" as const,
+          }]
+        : card.type === "mission" && missionStatus === "failed"
+          ? [
+              missionTarget && onRerunMission
+                ? {
+                    key: "rerun-mission",
+                    label: "Re-run",
+                    confirm: "Re-run as a fresh mission?",
+                    run: () => onRerunMission(card, "fresh" as const),
+                    kind: "action" as const,
+                  }
+                : undefined,
+              onAcceptMissionFailure
+                ? {
+                    key: "accept-failure",
+                    label: "Accept failure",
+                    confirm: "Accept this failed mission and clear the triage card?",
+                    run: () => onAcceptMissionFailure(card),
+                    kind: "ghost" as const,
+                  }
+                : undefined,
+              onOpenMissionIssue
+                ? {
+                    key: "open-issue",
+                    label: "Open issue",
+                    confirm: "File a GitHub issue for this failed mission?",
+                    run: () => onOpenMissionIssue(card),
+                    kind: "ghost" as const,
+                  }
+                : undefined,
+            ].filter((action): action is {
+              key: string;
+              label: string;
+              confirm: string;
+              run: () => void;
+              kind: "action" | "ghost";
+            } => Boolean(action))
           : card.type === "pr" && card.isAction && relatedPr && onApproveMerge
-            ? {
+            ? [{
+                key: "approve-merge",
                 label: "Approve merge",
                 confirm: "Open GitHub merge review?",
                 run: () => onApproveMerge(card),
-              }
-            : undefined;
+                kind: "action" as const,
+              }]
+            : [];
 
-  if (!primary) return null;
+  if (actions.length === 0) return null;
+  const confirming = confirmingKey ? actions.find((action) => action.key === confirmingKey) : undefined;
 
   if (!confirming) {
     return (
       <div className="hm-card-cta hm-card-cta--operator" role="group" aria-label="Operator actions">
-        <button
-          type="button"
-          className="hm-btn hm-btn--action hm-btn--sm"
-          onClick={(e) => {
-            stop(e);
-            setConfirming(true);
-          }}
-        >
-          {primary.label}
-        </button>
+        {actions.map((action) => (
+          <button
+            type="button"
+            className={`hm-btn ${action.kind === "action" ? "hm-btn--action" : "hm-btn--ghost"} hm-btn--sm`}
+            key={action.key}
+            onClick={(e) => {
+              stop(e);
+              setConfirmingKey(action.key);
+            }}
+          >
+            {action.label}
+          </button>
+        ))}
       </div>
     );
   }
@@ -488,15 +540,15 @@ function OperatorActions({
   return (
     <div className="hm-card-cta hm-card-cta--operator" role="group" aria-label="Confirm operator action">
       <span style={{ fontSize: 12, color: "var(--hm-ink-soft)", marginRight: "auto" }}>
-        {primary.confirm}
+        {confirming.confirm}
       </span>
       <button
         type="button"
         className="hm-btn hm-btn--action hm-btn--sm"
         onClick={(e) => {
           stop(e);
-          setConfirming(false);
-          primary.run();
+          setConfirmingKey(null);
+          confirming.run();
         }}
       >
         Confirm
@@ -506,7 +558,7 @@ function OperatorActions({
         className="hm-btn hm-btn--ghost hm-btn--sm"
         onClick={(e) => {
           stop(e);
-          setConfirming(false);
+          setConfirmingKey(null);
         }}
       >
         Cancel

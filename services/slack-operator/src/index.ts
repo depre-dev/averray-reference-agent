@@ -149,10 +149,12 @@ import {
 } from "./codex-task-queue.js";
 import { parseProposeTaskPayload } from "./codex-task-request.js";
 import {
+  acceptTestbedMissionFailure,
   diagnoseTestbedMissionReportFromMessage,
   failedTestbedMissionsForSelfHealing,
   listTestbedMissionRuns,
   readTestbedMissionRunnerHeartbeat,
+  recordTestbedMissionIssueOpened,
   recordTestbedMissionReportFromMessage,
   recordTestbedMissionRunFromOperatorResult,
   summarizeTestbedMissionRunnerHeartbeat,
@@ -787,6 +789,42 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       return;
     }
     await handleMonitorTestbedMissionApprovalRequest(testbedMissionApprovalId, response);
+    return;
+  }
+  const testbedMissionAcceptFailureId = monitorTestbedMissionActionId(url.pathname, "accept-failure");
+  if (request.method === "POST" && testbedMissionAcceptFailureId) {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    const missionVerdict = authorizeMissionSpawn(missionSpawnRoles, request.headers);
+    if (!missionVerdict.allowed) {
+      writeJson(response, 403, { error: "mission_accept_failure_forbidden", reason: missionVerdict.reason });
+      return;
+    }
+    await handleMonitorTestbedMissionAcceptFailureRequest(testbedMissionAcceptFailureId, response);
+    return;
+  }
+  const testbedMissionOpenIssueId = monitorTestbedMissionActionId(url.pathname, "open-issue");
+  if (request.method === "POST" && testbedMissionOpenIssueId) {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    const missionVerdict = authorizeMissionSpawn(missionSpawnRoles, request.headers);
+    if (!missionVerdict.allowed) {
+      writeJson(response, 403, { error: "mission_open_issue_forbidden", reason: missionVerdict.reason });
+      return;
+    }
+    await handleMonitorTestbedMissionOpenIssueRequest(testbedMissionOpenIssueId, request, response);
     return;
   }
   const testbedMissionId = monitorTestbedMissionId(url.pathname);
@@ -1638,6 +1676,106 @@ async function handleMonitorTestbedMissionApprovalRequest(id: string, response: 
   }
 }
 
+async function handleMonitorTestbedMissionAcceptFailureRequest(id: string, response: http.ServerResponse) {
+  try {
+    const result = acceptTestbedMissionFailure(id, { acceptedBy: "operator" });
+    if (!result.ok) {
+      if (result.error === "not_found") {
+        writeJson(response, 404, { error: "testbed_mission_not_found", id });
+        return;
+      }
+      writeJson(response, 409, {
+        error: "testbed_mission_not_failed",
+        id,
+        status: result.run?.status,
+      });
+      return;
+    }
+    recordTestbedMissionFailureAcceptedCollaboration(result.run);
+    logger.info({ missionId: id }, "monitor_testbed_mission_failure_accepted");
+    writeJson(response, 200, {
+      ok: true,
+      run: result.run,
+    });
+  } catch (error) {
+    logger.error({ err: error, missionId: id }, "monitor_testbed_mission_accept_failure_failed");
+    writeJson(response, 500, {
+      error: "monitor_testbed_mission_accept_failure_failed",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function handleMonitorTestbedMissionOpenIssueRequest(
+  id: string,
+  request: http.IncomingMessage,
+  response: http.ServerResponse
+) {
+  try {
+    const run = listTestbedMissionRuns({ limit: 50 }).find((candidate) => candidate.id === id);
+    if (!run) {
+      writeJson(response, 404, { error: "testbed_mission_not_found", id });
+      return;
+    }
+    if (run.status !== "failed") {
+      writeJson(response, 409, { error: "testbed_mission_not_failed", id, status: run.status });
+      return;
+    }
+
+    const rawBody = await readBody(request);
+    const payload = rawBody ? JSON.parse(rawBody) as unknown : {};
+    if (!isRecord(payload)) {
+      writeJson(response, 400, { error: "invalid_payload" });
+      return;
+    }
+
+    const repo = stringField(payload, "repo")
+      ?? optionalEnv("TESTBED_MISSION_ISSUE_REPO")
+      ?? optionalEnv("B2_SELF_HEALING_REPO")
+      ?? optionalEnv("GITHUB_DEFAULT_REPO")
+      ?? optionalEnv("AVERRAY_REPO");
+    if (!repo || !/^[^/\s]+\/[^/\s]+$/.test(repo)) {
+      writeJson(response, 400, {
+        error: "missing_issue_repo",
+        message: "Set TESTBED_MISSION_ISSUE_REPO or pass { repo: \"owner/name\" } to file a mission issue.",
+      });
+      return;
+    }
+    const token = githubTokenForRepo(repo, process.env);
+    if (!token) {
+      writeJson(response, 503, {
+        error: "github_token_missing",
+        message: `No GitHub token is configured for ${repo}; the mission was not marked resolved.`,
+      });
+      return;
+    }
+
+    const issue = await createGithubIssueForMission(repo, token, run);
+    const recorded = recordTestbedMissionIssueOpened(id, {
+      issueUrl: issue.htmlUrl,
+      ...(issue.number !== undefined ? { issueNumber: issue.number } : {}),
+      openedBy: "operator",
+    });
+    if (!recorded.ok) {
+      writeJson(response, 409, { error: "testbed_mission_issue_record_failed", id, state: recorded.error });
+      return;
+    }
+    recordTestbedMissionIssueOpenedCollaboration(recorded.run, issue.htmlUrl);
+    logger.info({ missionId: id, repo, issueNumber: issue.number }, "monitor_testbed_mission_issue_opened");
+    writeJson(response, 200, {
+      ok: true,
+      issue,
+      run: recorded.run,
+    });
+  } catch (error) {
+    logger.error({ err: error, missionId: id }, "monitor_testbed_mission_open_issue_failed");
+    writeJson(response, 500, {
+      error: "monitor_testbed_mission_open_issue_failed",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 function recordTestbedMissionCollaboration(run: TestbedMissionRun): void {
   try {
     const runner = summarizeTestbedMissionRunnerHeartbeat(readTestbedMissionRunnerHeartbeat());
@@ -1692,6 +1830,41 @@ function recordTestbedMissionApprovalCollaboration(run: TestbedMissionRun): void
     });
   } catch (error) {
     logger.warn({ err: error, missionId: run.id }, "monitor_testbed_mission_approval_collaboration_failed");
+  }
+}
+
+function recordTestbedMissionFailureAcceptedCollaboration(run: TestbedMissionRun): void {
+  try {
+    recordCollaborationMessage({
+      author: "hermes",
+      kind: "status",
+      addressedTo: "operator",
+      relatedCorrelationId: run.id,
+      text: [
+        `Operator accepted failed tester mission ${run.id}.`,
+        "No code task was dispatched; this card can move out of needs-attention.",
+      ].join(" "),
+    });
+  } catch (error) {
+    logger.warn({ err: error, missionId: run.id }, "monitor_testbed_mission_failure_accept_collaboration_failed");
+  }
+}
+
+function recordTestbedMissionIssueOpenedCollaboration(run: TestbedMissionRun, issueUrl: string): void {
+  try {
+    recordCollaborationMessage({
+      author: "hermes",
+      kind: "status",
+      addressedTo: "operator",
+      relatedCorrelationId: run.id,
+      text: [
+        `Operator filed a GitHub issue for failed tester mission ${run.id}.`,
+        issueUrl,
+        "No code task was dispatched by this triage action.",
+      ].join(" "),
+    });
+  } catch (error) {
+    logger.warn({ err: error, missionId: run.id }, "monitor_testbed_mission_issue_open_collaboration_failed");
   }
 }
 
@@ -3290,6 +3463,99 @@ function monitorTestbedMissionApproveId(pathname: string): string | undefined {
   const raw = pathname.slice(prefix.length, -suffix.length);
   const id = decodeURIComponent(raw).trim();
   return id.length > 0 && !id.includes("/") ? id : undefined;
+}
+
+function monitorTestbedMissionActionId(pathname: string, action: "accept-failure" | "open-issue"): string | undefined {
+  const prefix = "/monitor/testbed-missions/";
+  const suffix = `/${action}`;
+  if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) return undefined;
+  const raw = pathname.slice(prefix.length, -suffix.length);
+  const id = decodeURIComponent(raw).trim();
+  return id.length > 0 && !id.includes("/") ? id : undefined;
+}
+
+async function createGithubIssueForMission(
+  repo: string,
+  token: string,
+  run: TestbedMissionRun,
+): Promise<{ number?: number; htmlUrl: string }> {
+  const apiBase = (optionalEnv("GITHUB_API_BASE_URL") ?? "https://api.github.com").replace(/\/+$/g, "");
+  const title = `Testbed mission failed: ${run.title}`;
+  const body = missionIssueBody(run);
+  const response = await fetch(`${apiBase}/repos/${repo}/issues`, {
+    method: "POST",
+    headers: {
+      accept: "application/vnd.github+json",
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+      "user-agent": "averray-reference-agent-monitor",
+      "x-github-api-version": "2022-11-28",
+    },
+    body: JSON.stringify({
+      title,
+      body,
+    }),
+  });
+  const text = await response.text();
+  let payload: unknown;
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    payload = {};
+  }
+  if (!response.ok) {
+    throw new Error(`GitHub issue creation failed for ${repo}: HTTP ${response.status}`);
+  }
+  const record = isRecord(payload) ? payload : {};
+  const htmlUrl = stringField(record, "html_url");
+  if (!htmlUrl) {
+    throw new Error(`GitHub issue creation for ${repo} did not return html_url.`);
+  }
+  return {
+    htmlUrl,
+    ...(numberField(record, "number") !== undefined ? { number: numberField(record, "number") } : {}),
+  };
+}
+
+function missionIssueBody(run: TestbedMissionRun): string {
+  const structured = isRecord(run.result) && isRecord(run.result.structuredReport)
+    ? run.result.structuredReport
+    : undefined;
+  const blockers = Array.isArray(structured?.blockers)
+    ? structured.blockers.filter((value): value is string => typeof value === "string" && value.length > 0)
+    : [];
+  const recommendations = Array.isArray(structured?.recommendations)
+    ? structured.recommendations.filter((value): value is string => typeof value === "string" && value.length > 0)
+    : [];
+  const evidence = Array.isArray(structured?.evidence)
+    ? structured.evidence.filter((value): value is string => typeof value === "string" && value.length > 0)
+    : [];
+  return [
+    "Filed from the Hermes monitor failed-mission triage action.",
+    "",
+    `Mission id: ${run.id}`,
+    `Target: ${run.targetUrl}`,
+    `Goal: ${run.goal}`,
+    `Status reason: ${run.statusReason}`,
+    run.failureReason ? `Failure reason: ${run.failureReason}` : "",
+    "",
+    blockers.length ? `Blockers:\n${blockers.map((item) => `- ${item}`).join("\n")}` : "Blockers: not recorded",
+    recommendations.length ? `Recommendations:\n${recommendations.map((item) => `- ${item}`).join("\n")}` : "Recommendations: not recorded",
+    evidence.length ? `Evidence:\n${evidence.map((item) => `- ${item}`).join("\n")}` : "Evidence: see the mission run record in Hermes.",
+    "",
+    "No code task was auto-dispatched by this action.",
+  ].filter(Boolean).join("\n");
+}
+
+function githubTokenForRepo(repo: string, env: NodeJS.ProcessEnv): string | undefined {
+  const [owner, name] = repo.split("/", 2);
+  const repoToken = owner && name ? env[`GITHUB_TOKEN_${toEnvKey(owner)}_${toEnvKey(name)}`]?.trim() : undefined;
+  const ownerToken = owner ? env[`GITHUB_TOKEN_${toEnvKey(owner)}`]?.trim() : undefined;
+  return repoToken || ownerToken || env.GITHUB_TOKEN?.trim() || undefined;
+}
+
+function toEnvKey(value: string): string {
+  return value.toUpperCase().replace(/[^A-Z0-9]+/g, "_");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
