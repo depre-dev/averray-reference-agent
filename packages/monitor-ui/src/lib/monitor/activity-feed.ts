@@ -7,6 +7,7 @@ import type {
 } from "./card-types.js";
 import type { CollaborationMessage } from "./collaboration.js";
 import { actorLabel, formatTurnTime } from "./collaboration.js";
+import { humanizeSignalText } from "./signal-labels.js";
 
 export type ActivityTone = "neutral" | "info" | "action" | "success" | "warning";
 
@@ -270,7 +271,7 @@ function parseTime(value: string | undefined): number | undefined {
 }
 
 function plain(value: string | undefined): string {
-  return (value ?? "").replace(/\s+/g, " ").trim();
+  return humanizeSignalText(value).replace(/\s+/g, " ").trim();
 }
 
 function cardTitle(card: BoardCard): string {

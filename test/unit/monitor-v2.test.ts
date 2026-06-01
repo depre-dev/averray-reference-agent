@@ -1175,6 +1175,45 @@ describe("synthesizeTaskCards (O3 — surface queued tasks)", () => {
     expect(task?.type).toBe("task");
     expect(task?.taskStatus).toBe("proposed");
   });
+
+  it("dedupes self-healing handoff cards when an actionable task exists for the same correlation", () => {
+    const correlationId = "self-heal:testbed:failed-mission";
+    const snap = buildV2BoardSnapshot(
+      {
+        active: [{
+          title: "Self-healing: failed browser mission",
+          status: "failed",
+          intent: "self_healing",
+          reason: "dispatch_budget_exhausted",
+          correlationId,
+          ageLabel: "1m",
+        }],
+        recent: [],
+        codexTasks: {
+          items: [{
+            id: "codex-task-self-heal-1",
+            status: "proposed",
+            agent: "codex",
+            repo: "depre-dev/averray-reference-agent",
+            title: "Self-healing: failed browser mission",
+            prompt: "Investigate and propose the smallest fix.",
+            correlationId,
+            reason: "routed_fix",
+          }],
+        },
+      },
+      { repo: "depre-dev/averray-reference-agent" },
+    );
+
+    const correlated = snap.cards.filter((card) => card.correlationId === correlationId);
+    expect(correlated).toHaveLength(1);
+    expect(correlated[0]).toMatchObject({
+      id: "codex-task-self-heal-1",
+      type: "task",
+      taskStatus: "proposed",
+      waitingOn: { actor: "operator", tone: "warn" },
+    });
+  });
 });
 
 describe("enrichBoardCard — task status", () => {

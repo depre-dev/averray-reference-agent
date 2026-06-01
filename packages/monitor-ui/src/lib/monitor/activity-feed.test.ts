@@ -122,4 +122,20 @@ describe("buildHermesActivityFeed", () => {
       "Codex returned a block review on Self-healing fix: Codex found an unresolved deploy risk.",
     );
   });
+
+  test("humanizes guardrail enums in proactive narration", () => {
+    const entries = buildHermesActivityFeed({
+      cards: [task({
+        lane: "needs-attention",
+        isAction: true,
+        summary: "dispatch_budget_exhausted",
+      })],
+      messages: [],
+      banner,
+      now: () => Date.parse("2026-05-28T10:05:00Z"),
+    });
+    const text = entries.map((entry) => entry.text).join("\n");
+    expect(text).toContain("Dispatch budget used up - paused until reset");
+    expect(text).not.toContain("dispatch_budget_exhausted");
+  });
 });

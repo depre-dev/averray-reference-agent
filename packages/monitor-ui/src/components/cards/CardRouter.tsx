@@ -21,9 +21,25 @@ export type CardRouterProps = {
   onApprove?: (card: BoardCard) => void;
   /** Approve a board-gated requested tester mission (T6). */
   onApproveMission?: (card: BoardCard) => void;
+  /** Hide a waiting-on-operator card from the current monitor view. */
+  onDismiss?: (card: BoardCard) => void;
+  /** Temporarily hide a waiting-on-operator card from the current monitor view. */
+  onSnooze?: (card: BoardCard) => void;
+  /** Open the card's detail surface from an inline action. */
+  onInvestigate?: (card: BoardCard) => void;
 };
 
-export function CardRouter({ card, focused, onClick, onDegradedAction, onApprove, onApproveMission }: CardRouterProps) {
+export function CardRouter({
+  card,
+  focused,
+  onClick,
+  onDegradedAction,
+  onApprove,
+  onApproveMission,
+  onDismiss,
+  onSnooze,
+  onInvestigate,
+}: CardRouterProps) {
   const renderer = pickRenderer(card);
 
   if (renderer === "degraded") {
@@ -40,5 +56,16 @@ export function CardRouter({ card, focused, onClick, onDegradedAction, onApprove
     );
   }
 
-  return <Card card={card} focused={focused} onClick={onClick} onApprove={onApprove} onApproveMission={onApproveMission} />;
+  return (
+    <Card
+      card={card}
+      focused={focused}
+      onClick={onClick}
+      onApprove={onApprove}
+      onApproveMission={onApproveMission}
+      onDismiss={onDismiss}
+      onSnooze={onSnooze}
+      onInvestigate={onInvestigate}
+    />
+  );
 }

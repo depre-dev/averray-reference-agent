@@ -21,6 +21,7 @@
 import { useState } from "react";
 import type { BoardCard, CardChecks, WaitingOn, RiskTag, AgentType } from "../../lib/monitor/card-types.js";
 import { formatFreshness, freshnessTier } from "../../lib/monitor/urgency.js";
+import { humanizedSignalParts } from "../../lib/monitor/signal-labels.js";
 import { ChecksBar } from "./ChecksBar.js";
 
 export type CardProps = {
@@ -31,6 +32,12 @@ export type CardProps = {
   onApprove?: (card: BoardCard) => void;
   /** Approve a requested tester mission (T6). Operator-only; runs through a confirm. */
   onApproveMission?: (card: BoardCard) => void;
+  /** Hide this card from the current monitor view. Local UI-only control. */
+  onDismiss?: (card: BoardCard) => void;
+  /** Temporarily hide this card from the current monitor view. Local UI-only control. */
+  onSnooze?: (card: BoardCard) => void;
+  /** Open the card's detail surface from an inline action. */
+  onInvestigate?: (card: BoardCard) => void;
 };
 
 // ── Helpers (mirror the bundle's small inline helpers) ──────────────
@@ -69,7 +76,16 @@ function riskPillClass(tag: RiskTag): string {
 
 // ── Card ───────────────────────────────────────────────────────────
 
-export function Card({ card, focused = false, onClick, onApprove, onApproveMission }: CardProps) {
+export function Card({
+  card,
+  focused = false,
+  onClick,
+  onApprove,
+  onApproveMission,
+  onDismiss,
+  onSnooze,
+  onInvestigate,
+}: CardProps) {
   const isAction = Boolean(card.isAction);
   const isStale = card.state === "stale";
   const isClosed = card.type === "done";
@@ -114,7 +130,7 @@ export function Card({ card, focused = false, onClick, onApprove, onApproveMissi
       {card.summary && !isClosed ? (
         <div className="hm-card-meta" style={{ lineHeight: 1.5 }}>
           <span style={{ color: "var(--hm-ink-soft)", fontFamily: "var(--font-body)", fontSize: 12 }}>
-            {card.summary}
+            <HumanizedText text={card.summary} />
           </span>
         </div>
       ) : null}
@@ -155,10 +171,6 @@ export function Card({ card, focused = false, onClick, onApprove, onApproveMissi
           cards, so gate it here rather than relying on the source. */}
       {!isClosed && card.waitingOn ? <WaitingOnLine waitingOn={card.waitingOn} /> : null}
 
-      {card.type === "task" && (card as { taskStatus?: string }).taskStatus === "proposed" && onApprove ? (
-        <TaskApprove card={card} onApprove={onApprove} />
-      ) : null}
-
       {card.type === "mission" && (card as { missionStatus?: string }).missionStatus === "requested" ? (
         <div className="hm-waiting hm-waiting--neutral">
           not started
@@ -166,14 +178,21 @@ export function Card({ card, focused = false, onClick, onApprove, onApproveMissi
         </div>
       ) : null}
 
-      {card.type === "mission" && (card as { missionStatus?: string }).missionStatus === "requested" && onApproveMission ? (
-        <MissionApprove card={card} onApprove={onApproveMission} />
+      {!isClosed && card.waitingOn?.actor === "operator" ? (
+        <OperatorActions
+          card={card}
+          onApprove={onApprove}
+          onApproveMission={onApproveMission}
+          onDismiss={onDismiss}
+          onSnooze={onSnooze}
+          onInvestigate={onInvestigate ?? onClick}
+        />
       ) : null}
 
       {isAction && verdict ? (
         <div className="hm-verdict">
           <span className="label">Hermes verdict</span>
-          {verdict}
+          <HumanizedText text={verdict} />
         </div>
       ) : null}
 
@@ -184,7 +203,7 @@ export function Card({ card, focused = false, onClick, onApprove, onApproveMissi
             className="hm-btn hm-btn--action hm-btn--sm"
             onClick={(e) => e.stopPropagation()}
           >
-            {action.primary}
+            <HumanizedText text={action.primary} />
             <span className="hm-kbd">A</span>
           </button>
           {action.secondary ? (
@@ -193,7 +212,7 @@ export function Card({ card, focused = false, onClick, onApprove, onApproveMissi
               className="hm-btn hm-btn--ghost hm-btn--sm"
               onClick={(e) => e.stopPropagation()}
             >
-              {action.secondary}
+              <HumanizedText text={action.secondary} />
             </button>
           ) : null}
         </div>
@@ -290,6 +309,24 @@ function ChecksLabel({ checks }: { checks: CardChecks }) {
   );
 }
 
+function HumanizedText({ text }: { text: string | undefined }) {
+  const parts = humanizedSignalParts(text);
+  if (parts.length === 0) return null;
+  return (
+    <>
+      {parts.map((part, index) => (
+        part.rawCode ? (
+          <span className="hm-signal-code" title={`raw code: ${part.rawCode}`} key={`${part.rawCode}:${index}`}>
+            {part.text}
+          </span>
+        ) : (
+          <span key={`text:${index}`}>{part.text}</span>
+        )
+      ))}
+    </>
+  );
+}
+
 // ── Waiting-on line ────────────────────────────────────────────────
 
 function WaitingOnLine({ waitingOn }: { waitingOn: WaitingOn }) {
@@ -301,36 +338,82 @@ function WaitingOnLine({ waitingOn }: { waitingOn: WaitingOn }) {
   );
 }
 
-// ── Task approve (O3 dispatch) ──────────────────────────────────────
-// Approving a proposed task is a real mutation (it lets a runner claim the
-// work), so per MONITOR_ACTION_PARITY.md it goes through an explicit confirm
-// step — never a single click. The operator is the only one who approves
-// (proposed → approved); the lifecycle then flows from the board feed.
+// ── Operator actions ────────────────────────────────────────────────
+// Approve is only shown when it maps to an existing human gate. Dismiss and
+// snooze are local monitor controls; they do not mutate task authority.
 
-function TaskApprove({ card, onApprove }: { card: BoardCard; onApprove: (card: BoardCard) => void }) {
+function OperatorActions({
+  card,
+  onApprove,
+  onApproveMission,
+  onDismiss,
+  onSnooze,
+  onInvestigate,
+}: {
+  card: BoardCard;
+  onApprove?: (card: BoardCard) => void;
+  onApproveMission?: (card: BoardCard) => void;
+  onDismiss?: (card: BoardCard) => void;
+  onSnooze?: (card: BoardCard) => void;
+  onInvestigate?: (card: BoardCard) => void;
+}) {
   const [confirming, setConfirming] = useState(false);
   const agent = agentLabel(card.agentType);
   const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
+  const taskStatus = (card as { taskStatus?: string }).taskStatus;
+  const missionStatus = (card as { missionStatus?: string }).missionStatus;
+  const canApproveTask = card.type === "task" && taskStatus === "proposed" && Boolean(onApprove);
+  const canApproveMission = card.type === "mission" && missionStatus === "requested" && Boolean(onApproveMission);
+  const canApprove = canApproveTask || canApproveMission;
+  const approveLabel = canApproveMission ? "Approve tester run" : "Approve & dispatch";
+  const confirmLabel = canApproveMission ? "Queue runner now?" : `Dispatch to ${agent}?`;
+  const approve = canApproveMission ? onApproveMission : onApprove;
+
+  if (!canApprove && !onDismiss && !onSnooze && !onInvestigate) return null;
+
+  const action = (handler: ((card: BoardCard) => void) | undefined) => (e: { stopPropagation: () => void }) => {
+    stop(e);
+    handler?.(card);
+  };
+
   if (!confirming) {
     return (
-      <div className="hm-card-cta">
-        <button
-          type="button"
-          className="hm-btn hm-btn--action hm-btn--sm"
-          onClick={(e) => {
-            stop(e);
-            setConfirming(true);
-          }}
-        >
-          Approve & dispatch
-        </button>
+      <div className="hm-card-cta hm-card-cta--operator" role="group" aria-label="Operator actions">
+        {canApprove ? (
+          <button
+            type="button"
+            className="hm-btn hm-btn--action hm-btn--sm"
+            onClick={(e) => {
+              stop(e);
+              setConfirming(true);
+            }}
+          >
+            {approveLabel}
+          </button>
+        ) : null}
+        {onDismiss ? (
+          <button type="button" className="hm-btn hm-btn--ghost hm-btn--sm" onClick={action(onDismiss)}>
+            Dismiss
+          </button>
+        ) : null}
+        {onSnooze ? (
+          <button type="button" className="hm-btn hm-btn--ghost hm-btn--sm" onClick={action(onSnooze)}>
+            Snooze
+          </button>
+        ) : null}
+        {onInvestigate ? (
+          <button type="button" className="hm-btn hm-btn--ghost hm-btn--sm" onClick={action(onInvestigate)}>
+            Investigate
+          </button>
+        ) : null}
       </div>
     );
   }
+
   return (
-    <div className="hm-card-cta" role="group" aria-label="Confirm task dispatch">
+    <div className="hm-card-cta hm-card-cta--operator" role="group" aria-label="Confirm operator action">
       <span style={{ fontSize: 12, color: "var(--hm-ink-soft)", marginRight: "auto" }}>
-        Dispatch to {agent}?
+        {confirmLabel}
       </span>
       <button
         type="button"
@@ -338,61 +421,7 @@ function TaskApprove({ card, onApprove }: { card: BoardCard; onApprove: (card: B
         onClick={(e) => {
           stop(e);
           setConfirming(false);
-          onApprove(card);
-        }}
-      >
-        Confirm
-      </button>
-      <button
-        type="button"
-        className="hm-btn hm-btn--ghost hm-btn--sm"
-        onClick={(e) => {
-          stop(e);
-          setConfirming(false);
-        }}
-      >
-        Cancel
-      </button>
-    </div>
-  );
-}
-
-// ── Mission approve (T6 tester request gate) ───────────────────────
-// Agent-requested tester runs are proposals only. The runner ignores
-// `requested`; this button performs the explicit operator gate
-// (requested → ready), after a confirm step.
-
-function MissionApprove({ card, onApprove }: { card: BoardCard; onApprove: (card: BoardCard) => void }) {
-  const [confirming, setConfirming] = useState(false);
-  const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
-  if (!confirming) {
-    return (
-      <div className="hm-card-cta">
-        <button
-          type="button"
-          className="hm-btn hm-btn--action hm-btn--sm"
-          onClick={(e) => {
-            stop(e);
-            setConfirming(true);
-          }}
-        >
-          Approve tester run
-        </button>
-      </div>
-    );
-  }
-  return (
-    <div className="hm-card-cta" role="group" aria-label="Confirm tester mission approval">
-      <span style={{ fontSize: 12, color: "var(--hm-ink-soft)", marginRight: "auto" }}>
-        Queue runner now?
-      </span>
-      <button
-        type="button"
-        className="hm-btn hm-btn--action hm-btn--sm"
-        onClick={(e) => {
-          stop(e);
-          setConfirming(false);
-          onApprove(card);
+          approve?.(card);
         }}
       >
         Confirm

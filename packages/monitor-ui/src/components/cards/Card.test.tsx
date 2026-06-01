@@ -218,6 +218,43 @@ describe("Card — task approve (O3 dispatch)", () => {
     expect(getByRole("button", { name: /Approve & dispatch/ })).toBeTruthy();
   });
 
+  test("a waiting-on-operator task exposes real inline controls", () => {
+    const onApprove = vi.fn();
+    const onDismiss = vi.fn();
+    const onSnooze = vi.fn();
+    const onInvestigate = vi.fn();
+    const { getByRole } = render(
+      <Card
+        card={proposed}
+        onApprove={onApprove}
+        onDismiss={onDismiss}
+        onSnooze={onSnooze}
+        onInvestigate={onInvestigate}
+      />,
+    );
+    expect(getByRole("button", { name: /Approve & dispatch/ })).toBeTruthy();
+    fireEvent.click(getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(getByRole("button", { name: "Snooze" }));
+    fireEvent.click(getByRole("button", { name: "Investigate" }));
+    expect(onApprove).not.toHaveBeenCalled();
+    expect(onDismiss).toHaveBeenCalledWith(proposed);
+    expect(onSnooze).toHaveBeenCalledWith(proposed);
+    expect(onInvestigate).toHaveBeenCalledWith(proposed);
+  });
+
+  test("humanizes guardrail enum codes while preserving raw codes on hover", () => {
+    const card = {
+      ...proposed,
+      summary: "dispatch_budget_exhausted then duplicate_signal",
+    } as unknown as BoardCard;
+    const { getByText, getByTitle, queryByText } = render(<Card card={card} onApprove={vi.fn()} />);
+    expect(getByText("Dispatch budget used up - paused until reset")).toBeTruthy();
+    expect(getByText("Skipped - duplicate of an existing fix")).toBeTruthy();
+    expect(getByTitle("raw code: dispatch_budget_exhausted")).toBeTruthy();
+    expect(getByTitle("raw code: duplicate_signal")).toBeTruthy();
+    expect(queryByText(/dispatch_budget_exhausted/)).toBeNull();
+  });
+
   test("a proposed test-writer card shows specialist attribution", () => {
     const card = { ...proposed, id: "test-writer-task-x1", agentType: "test-writer" } as unknown as BoardCard;
     const { getByText, getByRole } = render(<Card card={card} onApprove={vi.fn()} />);

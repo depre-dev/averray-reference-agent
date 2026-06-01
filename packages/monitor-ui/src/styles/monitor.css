@@ -1553,6 +1553,12 @@ button.hm-activity-row:hover {
 .hm-card-cta {
   display: flex; gap: 6px; margin-top: 2px;
 }
+.hm-card-cta--operator { flex-wrap: wrap; }
+.hm-signal-code {
+  text-decoration: underline dotted rgba(40,60,80,0.45);
+  text-underline-offset: 2px;
+  cursor: help;
+}
 
 /* ============================================================
    KEYBOARD SHORTCUTS OVERLAY
