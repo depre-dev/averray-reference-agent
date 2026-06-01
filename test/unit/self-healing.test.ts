@@ -218,6 +218,40 @@ describe("runSelfHealingOnce — orchestration (injected deps, no fs/network)", 
     expect(h.audits[0]).toMatchObject({ action: "escalate", reason: "not_auto_fixable" });
   });
 
+  it("a testbed product signal escalates for human diagnosis instead of dispatching a code task", async () => {
+    const classify = vi.fn(() => LOW);
+    const h = harness([
+      signal({
+        autoFixable: false,
+        nonAutoFixableReason: "product_signal",
+        fixPrompt: "Fix mission m1 after a human maps the product evidence to a code surface.",
+      }),
+    ], { classify });
+    await runSelfHealingOnce(h.deps);
+    expect(classify).not.toHaveBeenCalled();
+    expect(h.proposed).toHaveLength(0);
+    expect(h.alerts).toBe(1);
+    expect(h.audits[0]).toMatchObject({ action: "escalate", reason: "not_auto_fixable" });
+  });
+
+  it("a real PR CI failure remains code-agent-actionable", async () => {
+    const h = harness([
+      signal({
+        surface: "pr:304",
+        source: "ci_main",
+        summary: "CI failed on PR #304 after tests started.",
+        evidence: "https://github.com/depre-dev/averray-reference-agent/pull/304",
+        repo: "depre-dev/averray-reference-agent",
+        area: "ci pr",
+      }),
+    ]);
+    const r = await runSelfHealingOnce(h.deps);
+    expect(h.proposed).toEqual([{ surface: "pr:304", agent: "claude", riskTier: "low" }]);
+    expect(h.alerts).toBe(0);
+    expect(h.audits[0]).toMatchObject({ action: "propose", reason: "routed_fix", agent: "claude" });
+    expect(r.handled[0]).toMatchObject({ action: "propose", reason: "routed_fix" });
+  });
+
   it("dedup: an already-open fix task for the surface → skip (no second proposal)", async () => {
     const h = harness([signal()], { hasOpenFixTask: (targetSignature) => targetSignature === "testbed_mission:testbed:sweep-1" });
     await runSelfHealingOnce(h.deps);

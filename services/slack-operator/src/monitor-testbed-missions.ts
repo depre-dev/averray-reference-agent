@@ -715,7 +715,10 @@ export function testbedMissionSelfHealingDisposition(run: TestbedMissionRun): Te
   const fixBrief = testbedMissionFixBrief(run);
   const fixPrompt = testbedMissionCodexFollowupPrompt(run);
   return {
-    autoFixable: Boolean(fixPrompt),
+    // A browser mission failure is product evidence, not a concrete code target.
+    // Keep the prompt for operator handoff, but do not let B2 dispatch a doomed
+    // code task without a real PR/branch/CI surface to act on.
+    autoFixable: false,
     reason: fixPrompt ? "product_signal" : "missing_product_report",
     summary: `Testbed mission ${run.id} found a product blocker on ${run.targetUrl}: ${fixBrief.primaryBlocker}`,
     ...(fixPrompt ? { fixPrompt } : {}),
