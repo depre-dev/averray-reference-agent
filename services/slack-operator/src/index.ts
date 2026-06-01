@@ -85,6 +85,7 @@ import {
   testbedSurfaceKey,
   type FailureSignal,
 } from "./self-healing.js";
+import { runTaskHealthOnce } from "./task-health.js";
 import {
   readAutonomyState,
   setAutonomyMode,
@@ -101,7 +102,7 @@ import {
   type AutopilotAuditEvent,
   type EndedAutopilotAwaySession,
 } from "./away-digest.js";
-import { loadDispatchPolicyConfig } from "@avg/averray-mcp/dispatch-policy";
+import { evaluateDispatchPolicy, loadDispatchPolicyConfig } from "@avg/averray-mcp/dispatch-policy";
 import {
   isDebugSpawnEnabled,
   mergeDebugCards,
@@ -130,9 +131,12 @@ import {
   approveCodexTask,
   annotateCodexTaskDecisionRecord,
   cancelCodexTask,
+  deferCodexTaskRetry,
+  escalateCodexTask,
   listCodexTasks,
   proposeCodexTask,
   readCodexRunnerHeartbeat,
+  retryCodexTask,
   summarizeCodexTasks,
   taskAgent,
   type CodexTask,
@@ -213,6 +217,7 @@ logger.info({
     safeWorkScanIntervalMs: routineConfig.safeWorkScan.enabled ? routineConfig.safeWorkScan.intervalMs : 0,
     stalePrAlertIntervalMs: routineConfig.stalePrAlerts.enabled ? routineConfig.stalePrAlerts.intervalMs : 0,
     stalePrAlertAfterMinutes: routineConfig.stalePrAlerts.staleAfterMinutes,
+    taskHealthIntervalMs: routineConfig.taskHealth.enabled ? routineConfig.taskHealth.intervalMs : 0,
   },
   monitor: {
     enabled: monitorConfig.enabled,
@@ -387,6 +392,15 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
           enabled: routineConfig.stalePrAlerts.enabled,
           intervalMs: routineConfig.stalePrAlerts.enabled ? routineConfig.stalePrAlerts.intervalMs : 0,
           staleAfterMinutes: routineConfig.stalePrAlerts.staleAfterMinutes,
+        },
+        taskHealth: {
+          enabled: routineConfig.taskHealth.enabled,
+          intervalMs: routineConfig.taskHealth.enabled ? routineConfig.taskHealth.intervalMs : 0,
+          maxRetries: routineConfig.taskHealth.maxRetries,
+          retryBackoffMs: routineConfig.taskHealth.retryBackoffMs,
+          approvedStaleMs: routineConfig.taskHealth.approvedStaleMs,
+          runningStaleMs: routineConfig.taskHealth.runningStaleMs,
+          restartRecoveryMs: routineConfig.taskHealth.restartRecoveryMs,
         },
       },
       monitor: {
@@ -1835,6 +1849,18 @@ async function computeAutopilotCountsToday(repo: string): Promise<{ todayCount: 
   return { todayCount: dispatched.length, todayRepoCount: dispatched.filter((t) => t.repo === repo).length };
 }
 
+async function computeSelfManagedDispatchCountsToday(repo: string): Promise<{ todayCount: number; todayRepoCount: number }> {
+  const tasks = await listCodexTasks();
+  const today = new Date().toISOString().slice(0, 10);
+  const dispatched = tasks.filter(
+    (t) =>
+      (t.approvedBy === "hermes-autopilot" || t.approvedBy === "o5-self-management") &&
+      typeof t.approvedAt === "string" &&
+      t.approvedAt.slice(0, 10) === today,
+  );
+  return { todayCount: dispatched.length, todayRepoCount: dispatched.filter((t) => t.repo === repo).length };
+}
+
 // B2 — collect failure signals for self-healing. Concrete sources wired today:
 // failed testbed missions (usually a non-high-risk surface regression → propose)
 // and failed/blocked deploy-or-verification handoff correlations (a deploy
@@ -2036,17 +2062,21 @@ async function handleMonitorCodexTaskRequest(request: http.IncomingMessage, resp
 }
 
 function startOperatorRoutines() {
+  const channelRoutineEnabled = routineConfig.dailyBrief.enabled
+    || routineConfig.dailyGithubBrief.enabled
+    || routineConfig.opsHealth.enabled
+    || routineConfig.safeWorkScan.enabled
+    || routineConfig.stalePrAlerts.enabled;
+  const serverRoutineEnabled = routineConfig.alertBridge.enabled
+    || routineConfig.anomalyPause.enabled
+    || routineConfig.taskHealth.enabled
+    || routineConfig.selfHealing.enabled;
+
   if (!routineConfig.channelId) {
-    if (
-      routineConfig.dailyBrief.enabled
-      || routineConfig.dailyGithubBrief.enabled
-      || routineConfig.opsHealth.enabled
-      || routineConfig.safeWorkScan.enabled
-      || routineConfig.stalePrAlerts.enabled
-    ) {
+    if (channelRoutineEnabled) {
       logger.warn("slack_operator_routines_no_channel");
     }
-    return;
+    if (!serverRoutineEnabled) return;
   }
 
   let lastDailyBriefDateKey: string | undefined;
@@ -2063,6 +2093,7 @@ function startOperatorRoutines() {
   let alertBridgeState: AlertBridgeState = initialAlertBridgeState();
   const alertChannel: AlertChannel = slackAlertChannel();
   let anomalyPauseRunning = false;
+  let taskHealthRunning = false;
   const anomalyConfig = loadAnomalyConfig();
   const dispatchPerDayCap = Number(process.env.HERMES_DISPATCH_PER_DAY_MAX) || 10;
 
@@ -2316,6 +2347,55 @@ function startOperatorRoutines() {
     }
   };
 
+  // O5 — task health self-management. Reconciles the durable JSON queue after
+  // runner failures or restarts: bounded failed-task retries, stale approved /
+  // running escalation, and stale running-task requeue when the heartbeat is no
+  // longer claiming the task. No merge/deploy authority is added.
+  const checkTaskHealth = async () => {
+    if (taskHealthRunning || !routineConfig.taskHealth.enabled) return;
+    taskHealthRunning = true;
+    try {
+      const result = await runTaskHealthOnce(routineConfig.taskHealth, {
+        listTasks: () => listCodexTasks(),
+        readRunner: () => readCodexRunnerHeartbeat(),
+        retryTask: (id, reason) => retryCodexTask(id, { approvedBy: "o5-self-management", reason }),
+        deferRetry: (id, retryAfter, reason) => deferCodexTaskRetry(id, { retryAfter, reason }),
+        escalateTask: (id, reason) => escalateCodexTask(id, { reason }),
+        isSuspended: () => isAutopilotSuspended(),
+        isHalt: () => isHaltFilePresent(),
+        dispatchAllowed: async (task) => {
+          const counts = await computeSelfManagedDispatchCountsToday(task.repo);
+          return evaluateDispatchPolicy(loadDispatchPolicyConfig(), {
+            repo: task.repo,
+            agent: taskAgent(task),
+            todayCount: counts.todayCount,
+            todayRepoCount: counts.todayRepoCount,
+          });
+        },
+        audit: async (action) => {
+          await recordOperatorCommandEvent({
+            source: "slack_routine",
+            commandText: `task health ${action.action}: ${action.taskId}`,
+            ...(routineConfig.channelId ? { channelId: routineConfig.channelId } : {}),
+            result: {
+              kind: "o5_task_health",
+              ...action,
+              safety: { readOnly: action.action !== "retry", mutatesGithub: false, mutatesAverray: false, editsWikipedia: false },
+            },
+          }, query).catch((error) => logger.warn({ err: error, action }, "o5_task_health_audit_failed"));
+        },
+        now: () => new Date(),
+      });
+      if (result.actions.length > 0) {
+        logger.info({ actions: result.actions }, "o5_task_health_reconciled");
+      }
+    } catch (error) {
+      logger.error({ err: error }, "o5_task_health_failed");
+    } finally {
+      taskHealthRunning = false;
+    }
+  };
+
   // B2 — self-healing. On a failure signal: auto-PROPOSE a routed fix (non-high-
   // risk) that flows through the existing approval/autopilot gate, or ESCALATE
   // (high-risk / rollback / D3-suspended / HALT). Never auto-approves or runs.
@@ -2416,23 +2496,23 @@ function startOperatorRoutines() {
     }
   };
 
-  if (routineConfig.dailyBrief.enabled) {
+  if (routineConfig.channelId && routineConfig.dailyBrief.enabled) {
     setTimeout(() => void checkDailyBrief(), 5_000);
     setInterval(() => void checkDailyBrief(), 60_000);
   }
-  if (routineConfig.dailyGithubBrief.enabled) {
+  if (routineConfig.channelId && routineConfig.dailyGithubBrief.enabled) {
     setTimeout(() => void checkDailyGithubBrief(), 7_500);
     setInterval(() => void checkDailyGithubBrief(), 60_000);
   }
-  if (routineConfig.opsHealth.enabled) {
+  if (routineConfig.channelId && routineConfig.opsHealth.enabled) {
     setTimeout(() => void checkOpsHealth(), 7_000);
     setInterval(() => void checkOpsHealth(), 60_000);
   }
-  if (routineConfig.safeWorkScan.enabled) {
+  if (routineConfig.channelId && routineConfig.safeWorkScan.enabled) {
     setTimeout(() => void checkSafeWork(), 10_000);
     setInterval(() => void checkSafeWork(), routineConfig.safeWorkScan.intervalMs);
   }
-  if (routineConfig.stalePrAlerts.enabled) {
+  if (routineConfig.channelId && routineConfig.stalePrAlerts.enabled) {
     setTimeout(() => void checkStalePrAlerts(), 12_000);
     setInterval(() => void checkStalePrAlerts(), routineConfig.stalePrAlerts.intervalMs);
   }
@@ -2443,6 +2523,10 @@ function startOperatorRoutines() {
   if (routineConfig.anomalyPause.enabled) {
     setTimeout(() => void checkAnomalies(), 11_000);
     setInterval(() => void checkAnomalies(), routineConfig.anomalyPause.intervalMs);
+  }
+  if (routineConfig.taskHealth.enabled) {
+    setTimeout(() => void checkTaskHealth(), 12_000);
+    setInterval(() => void checkTaskHealth(), routineConfig.taskHealth.intervalMs);
   }
   if (routineConfig.selfHealing.enabled) {
     setTimeout(() => void checkSelfHealing(), 13_000);

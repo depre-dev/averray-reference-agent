@@ -1356,6 +1356,19 @@ export function taskHealthForBoard(
   const runnerState = runnerHealthForTask(task, runner, now);
 
   if (status === "failed") {
+    const retryAfter = asString(task.retryAfter);
+    const retryAfterMs = retryAfter ? Date.parse(retryAfter) : NaN;
+    if (!asString(task.selfManagementEscalatedAt) && Number.isFinite(retryAfterMs) && retryAfterMs > now.getTime()) {
+      const waitMinutes = Math.max(1, Math.ceil((retryAfterMs - now.getTime()) / 60_000));
+      return {
+        lane: "codex-needed",
+        state: "stale",
+        waitingOn: { actor: "agent", tone: "info" },
+        risk: [],
+        freshness: minutesSince(asString(task.failedAt) ?? asString(task.updatedAt), now),
+        summary: `Task failed; O5 has scheduled a bounded retry in ${waitMinutes}m.`,
+      };
+    }
     const repeated = attemptCount >= REPEATED_FAILURE_ATTEMPTS;
     return attentionHealth({
       state: "stale",

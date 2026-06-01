@@ -12,6 +12,7 @@ import {
   listCodexTasks,
   proposeCodexTask,
   readCodexRunnerHeartbeat,
+  retryCodexTask,
   summarizeCodexTasks,
   taskAgent,
   updateCodexTaskProgress,
@@ -239,6 +240,51 @@ describe("codex task queue", () => {
       failureReason: "CI stayed red.",
       exitCode: 2,
       stderrTail: "failed",
+    });
+    expect(await claimNextApprovedCodexTask({ path })).toBeUndefined();
+  });
+
+  it("rehydrates and requeues one orphaned running task after runner restart", async () => {
+    const path = await tempQueuePath();
+    const proposed = await proposeCodexTask({
+      repo: "averray-agent/agent",
+      pullRequestNumber: 390,
+      prompt: "Fix PR #390.",
+    }, { path, now: new Date("2026-05-17T13:30:00.000Z") });
+    await approveCodexTask(proposed.task.id, { path, now: new Date("2026-05-17T13:31:00.000Z") });
+    await claimNextApprovedCodexTask({ path, runnerId: "runner-before-restart", now: new Date("2026-05-17T13:32:00.000Z") });
+
+    const requeued = await retryCodexTask(proposed.task.id, {
+      path,
+      approvedBy: "o5-self-management",
+      reason: "restart_recovery_requeue",
+      now: new Date("2026-05-17T13:45:00.000Z"),
+    });
+
+    expect(requeued).toMatchObject({
+      id: proposed.task.id,
+      status: "approved",
+      approvedBy: "o5-self-management",
+      retryCount: 1,
+      progressMessage: "restart_recovery_requeue",
+    });
+    expect(requeued?.runnerId).toBeUndefined();
+    expect(requeued?.startedAt).toBeUndefined();
+
+    const rehydrated = await listCodexTasks({ path });
+    expect(rehydrated).toHaveLength(1);
+    expect(rehydrated[0]).toMatchObject({ status: "approved", retryCount: 1 });
+
+    const claimedAgain = await claimNextApprovedCodexTask({
+      path,
+      runnerId: "runner-after-restart",
+      now: new Date("2026-05-17T13:46:00.000Z"),
+    });
+    expect(claimedAgain).toMatchObject({
+      id: proposed.task.id,
+      status: "running",
+      runnerId: "runner-after-restart",
+      attemptCount: 2,
     });
     expect(await claimNextApprovedCodexTask({ path })).toBeUndefined();
   });
