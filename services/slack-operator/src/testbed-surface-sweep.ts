@@ -18,8 +18,10 @@ import type { TestbedMissionRunResult } from "./testbed-mission-runner.js";
 import {
   DEFAULT_AUTHED_ROUTES,
   buildSweepContextOptions,
+  basicAuthHttpCredentialsForUrl,
   type CloudflareAccessServiceToken,
   type SweepSession,
+  type TestbedBasicAuth,
 } from "./testbed-session.js";
 
 /** The environment's truth — what marker a data-bearing surface must carry. */
@@ -340,9 +342,13 @@ export async function executeSurfaceSweep(
     artifactsDir?: string;
     session?: SweepSession;
     cloudflareAccess?: CloudflareAccessServiceToken;
+    basicAuth?: TestbedBasicAuth;
   },
   deps: SurfaceSweepDeps = {},
 ): Promise<TestbedMissionRunResult> {
+  // Caddy Basic Auth gate: scope the credential to the gated origin so the
+  // browser answers the host's 401 and loads the pages (no creds elsewhere).
+  const httpCredentials = basicAuthHttpCredentialsForUrl(mission.targetUrl, config.basicAuth);
   const expectedBoundary = resolveExpectedBoundary(config.expectedBoundary);
   // With a session, the default route set extends to the authed operator pages;
   // without one, the sweep stays public-only (graceful fallback — never fails
@@ -352,7 +358,7 @@ export async function executeSurfaceSweep(
     config.appBaseUrl ?? originOf(mission.targetUrl),
     { includeAuthed: Boolean(config.session) },
   );
-  const capture = deps.captureRoute ?? makeBrowserCapture(config);
+  const capture = deps.captureRoute ?? makeBrowserCapture({ ...config, httpCredentials });
 
   const captures: RouteCapture[] = [];
   for (const { route, url } of resolved) {
@@ -400,6 +406,7 @@ function makeBrowserCapture(config: {
   timeoutMs?: number;
   session?: SweepSession;
   cloudflareAccess?: CloudflareAccessServiceToken;
+  httpCredentials?: { username: string; password: string; origin?: string };
 }): (url: string, route: string) => Promise<RouteCapture> {
   return async (url, route) => {
     const { chromium } = await import("playwright-core");
@@ -414,7 +421,7 @@ function makeBrowserCapture(config: {
     try {
       // Pre-seeded session (T2): storageState rehydrates the authed browser; a
       // Bearer (if any) authes the page's same-origin API calls. Read-only.
-      const context = await browser.newContext(buildSweepContextOptions(config.session, config.cloudflareAccess));
+      const context = await browser.newContext(buildSweepContextOptions(config.session, config.cloudflareAccess, config.httpCredentials));
       const page = await context.newPage();
       page.on("console", (m) => {
         if (m.type() === "error") consoleErrors.push(m.text());

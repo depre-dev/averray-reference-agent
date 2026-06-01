@@ -20,6 +20,8 @@ import {
 } from "./testbed-mutation-binding.js";
 import {
   parseCloudflareAccessServiceToken,
+  parseTestbedBasicAuth,
+  basicAuthAppliesToUrl,
   resolveSweepSession,
   parseSweepSessionConfig,
 } from "./testbed-session.js";
@@ -89,6 +91,10 @@ export async function runGoldPathMissionEntry(
 
   const driver = deps.driver ?? selectGoldPathDriver(env);
   const cloudflareAccess = parseCloudflareAccessServiceToken(env);
+  // Caddy HTTP Basic Auth (the real gate on app.averray.com). The credential
+  // reaches the browser subprocess via env passthrough; only the presence flag
+  // is forwarded to the driver to shape its prompt guidance.
+  const basicAuth = basicAuthAppliesToUrl(mission.targetUrl, parseTestbedBasicAuth(env));
 
   const result = await runGoldPathMissionOnce({
     mission: { id: mission.id, targetUrl: mission.targetUrl, goal: mission.goal, freshMemory: mission.freshMemory },
@@ -97,6 +103,7 @@ export async function runGoldPathMissionEntry(
     model,
     signerBaseUrl: env.TEST_WALLET_SIGNER_BASE_URL || env.TESTBED_SESSION_SIGNER_URL,
     ...(cloudflareAccess ? { cloudflareAccess } : {}),
+    ...(basicAuth ? { basicAuth: true } : {}),
     // T3: the API Bearer (and/or browser storageState) from the signer sidecar —
     // the wallet key never enters this process. Undefined when unconfigured.
     resolveSession: () => resolveSweepSession({ ...parseSweepSessionConfig(env), sessionType: "api" }),

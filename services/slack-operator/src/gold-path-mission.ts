@@ -112,6 +112,10 @@ export interface GoldPathDriverInput {
   session?: { role?: string; token?: string; storageState?: unknown };
   /** Edge auth for Cloudflare-Access-gated app routes. Values are never report content. */
   cloudflareAccess?: CloudflareAccessServiceToken;
+  /** True ⇒ Caddy HTTP Basic Auth is configured (the real gate on app.averray.com).
+   *  The credential reaches the browser subprocess via env; only this flag drives
+   *  the driver's prompt guidance — never the credential value. */
+  basicAuth?: boolean;
   /** Local T3 signer sidecar URL. The driver may request sessions; wallet keys never leave the sidecar. */
   signerBaseUrl?: string;
 }
@@ -349,6 +353,8 @@ export interface GoldPathMissionDeps {
   model: GoldPathModel;
   resolveSession?: () => Promise<GoldPathDriverInput["session"] | undefined> | GoldPathDriverInput["session"] | undefined;
   cloudflareAccess?: CloudflareAccessServiceToken;
+  /** Caddy HTTP Basic Auth configured for the gated host (flag only). */
+  basicAuth?: boolean;
   signerBaseUrl?: string;
   steps?: readonly GoldPathStep[];
 }
@@ -374,6 +380,7 @@ export async function runGoldPathMissionOnce(deps: GoldPathMissionDeps): Promise
     freshMemory: deps.mission.freshMemory !== false,
     ...(session ? { session } : {}),
     ...(deps.cloudflareAccess ? { cloudflareAccess: deps.cloudflareAccess } : {}),
+    ...(deps.basicAuth ? { basicAuth: true } : {}),
     ...(deps.signerBaseUrl ? { signerBaseUrl: deps.signerBaseUrl } : {}),
   });
 

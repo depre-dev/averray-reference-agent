@@ -164,11 +164,15 @@ export function buildClaudeGoldPathPrompt(
   const edgeAuthLine = input.cloudflareAccess
     ? "Cloudflare Access edge auth is configured in this process environment. When loading the gated app or its API, attach CF-Access-Client-Id and CF-Access-Client-Secret headers from env; never print, screenshot, or report their values."
     : "No Cloudflare Access service token was configured; if the target is behind Cloudflare Access, report that as an auth blocker instead of treating the product as broken.";
+  const basicAuthLine = input.basicAuth
+    ? "The gated host is behind Caddy HTTP Basic Auth. Open the browser context with httpCredentials { username, password } from TESTBED_BASIC_AUTH_USER / TESTBED_BASIC_AUTH_PASS in this environment so the 401 challenge is answered automatically; never print, screenshot, or report the username or password. (Basic Auth only loads the pages — authed claim/submit/verify still needs the SIWE session via the signer sidecar.)"
+    : "No HTTP Basic Auth credential was configured; if the host returns 401 with a Basic realm, report that as an auth blocker instead of treating the product as broken.";
   return [
     "You are Hermes running the Averray Tier-2 gold-path tester as a normal browser-capable outside agent.",
     "Use the Claude Agent SDK browser tooling / Playwright MCP tools available in this runtime. Do not use private repo state, Slack, GitHub, SSH, databases, or Averray monitor internals.",
     "Reuse T3 only through the local signer sidecar when you need authentication. The wallet private keys must never enter your prompt, output, logs, screenshots, or report.",
     edgeAuthLine,
+    basicAuthLine,
     opts.signerBaseUrl ? `Signer sidecar: ${opts.signerBaseUrl}. Request browser/api sessions by role as needed; do not print returned tokens.` : "No signer sidecar URL was provided; report that as a blocker if authentication is required.",
     mutationLine,
     `Target URL: ${input.targetUrl}`,
@@ -323,6 +327,12 @@ function redactGoldPathOutput(value: string, env: NodeJS.ProcessEnv): string {
   ]) {
     if (secret && secret.length >= 6) {
       next = next.split(secret).join("[redacted-cloudflare-access]");
+    }
+  }
+  // Caddy HTTP Basic Auth — never let the credential surface in a report/log.
+  for (const secret of [env.TESTBED_BASIC_AUTH_PASS, env.TESTBED_BASIC_AUTH_USER]) {
+    if (secret && secret.length >= 4) {
+      next = next.split(secret).join("[redacted-basic-auth]");
     }
   }
   return next;
