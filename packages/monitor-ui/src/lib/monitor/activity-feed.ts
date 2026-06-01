@@ -4,6 +4,7 @@ import type {
   BoardCard,
   CardReviewRequest,
   HermesDecisionRecord,
+  TaskTimelineEvent,
 } from "./card-types.js";
 import type { CollaborationAuthor, CollaborationMessage } from "./collaboration.js";
 import { actorLabel, actorLabelForMessage, formatTurnTime, relatedPrForCard } from "./collaboration.js";
@@ -76,6 +77,7 @@ function cardActivity(card: BoardCard, boardAtMs: number): HermesActivityEntry[]
   const atMs = estimateCardTime(card, boardAtMs);
   const entries: HermesActivityEntry[] = [];
   if (card.type === "task" && card.taskStatus) {
+    if (card.taskEvents?.length) return card.taskEvents.flatMap((event) => taskTimelineActivity(card, event, boardAtMs));
     const label = agentLabel(card.agentType);
     const title = cardTitle(card);
     if (card.taskStatus === "proposed") {
@@ -161,6 +163,66 @@ function cardActivity(card: BoardCard, boardAtMs: number): HermesActivityEntry[]
   }
 
   return entries;
+}
+
+function taskTimelineActivity(card: BoardCard, event: TaskTimelineEvent, nowMs: number): HermesActivityEntry[] {
+  const atMs = parseTime(event.at);
+  if (atMs === undefined) return [];
+  const ref = cardRef(card);
+  const agent = agentLabel(card.agentType);
+  const reason = compactReason(card.summary) || plain(event.message) || "task routed by Hermes";
+  const common = {
+    id: `task-event:${card.id}:${event.status}:${event.at}`,
+    atMs,
+    source: "board" as const,
+    actor: "hermes" as const,
+    kindLabel: "narration" as const,
+    cardId: card.id,
+  };
+
+  if (event.status === "proposed") {
+    return [{
+      ...common,
+      tone: "action",
+      text: `Moved ${ref} to ${agent} — ${sentence(reason)}`,
+      meta: "route recorded",
+      suggestions: ["Why this route?", "Show dispatch guardrails"],
+    }];
+  }
+  if (event.status === "approved") {
+    return [{
+      ...common,
+      tone: "info",
+      text: `Released ${ref} to ${agent} — operator approved dispatch.`,
+      meta: "handoff recorded",
+    }];
+  }
+  if (event.status === "running") {
+    return [{
+      ...common,
+      tone: "info",
+      text: `${agent} picked up ${ref} — ${relativeAge(atMs, nowMs)}.`,
+      meta: "pickup recorded",
+    }];
+  }
+  if (event.status === "completed") {
+    return [{
+      ...common,
+      tone: "success",
+      text: `${agent} returned ${ref} — ${sentence(plain(event.message))}`,
+      meta: "completion recorded",
+    }];
+  }
+  if (event.status === "failed") {
+    return [{
+      ...common,
+      tone: "warning",
+      text: `${agent} hit a blocker on ${ref} — ${sentence(plain(event.message))}`,
+      meta: "failure recorded",
+      suggestions: ["Show failure evidence", "Should this be split?"],
+    }];
+  }
+  return [];
 }
 
 function decisionRecordActivity(
@@ -339,6 +401,31 @@ function parseTime(value: string | undefined): number | undefined {
 
 function plain(value: string | undefined): string {
   return humanizeSignalText(value).replace(/\s+/g, " ").trim();
+}
+
+function sentence(value: string): string {
+  const text = value.trim();
+  if (!text) return "recorded by Hermes.";
+  return /[.!?]$/.test(text) ? text : `${text}.`;
+}
+
+function compactReason(value: string | undefined): string {
+  const [first] = plain(value).split(/\s+·\s+|;\s+|\.\s+/);
+  return first?.trim() ?? "";
+}
+
+function cardRef(card: BoardCard): string {
+  const pr = /#\d+/.exec(card.id);
+  return pr?.[0] ?? cardTitle(card);
+}
+
+function relativeAge(atMs: number, nowMs: number): string {
+  const diffSeconds = Math.max(0, Math.round((nowMs - atMs) / 1000));
+  if (diffSeconds < 60) return `${diffSeconds}s ago`;
+  const diffMinutes = Math.round(diffSeconds / 60);
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.round(diffMinutes / 60);
+  return `${diffHours}h ago`;
 }
 
 function cardTitle(card: BoardCard): string {

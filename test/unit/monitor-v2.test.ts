@@ -636,6 +636,25 @@ describe("enrichBoardCard", () => {
     expect(card.runnerHeartbeat).toEqual({ lastSeen: "2026-05-28T12:00:00Z", online: true });
   });
 
+  it("projects real task timeline events onto task cards", () => {
+    const card = enrichBoardCard(base({ type: "task", lane: "codex-needed" }), slim({ lane: "Codex Needed" }), {
+      codexTask: {
+        id: "task-1",
+        prompt: "Fix contract tests",
+        events: [
+          { at: "2026-06-01T12:00:00.000Z", status: "proposed", message: "Hermes proposed a bounded Codex task." },
+          { at: "2026-06-01T12:00:12.000Z", status: "running", message: "Codex runner claimed the task." },
+          { at: "", status: "running", message: "missing timestamp ignored" },
+        ],
+      },
+    });
+
+    expect(card.taskEvents).toEqual([
+      { at: "2026-06-01T12:00:00.000Z", status: "proposed", message: "Hermes proposed a bounded Codex task." },
+      { at: "2026-06-01T12:00:12.000Z", status: "running", message: "Codex runner claimed the task." },
+    ]);
+  });
+
   it("falls back to completionSummary for output and marks a stopped runner offline", () => {
     const card = enrichBoardCard(base({ type: "task", lane: "codex-needed" }), slim({ lane: "Codex Needed" }), {
       codexTask: { id: "task-2", status: "approved", prompt: "p", completionSummary: "done summary" },
@@ -1153,8 +1172,11 @@ describe("synthesizeTaskCards (O3 — surface queued tasks)", () => {
       safety: { readOnly: true, mutates: false },
       generatedAt: "2026-05-31T12:00:00.000Z",
     });
+    const events = [
+      { at: "2026-05-31T12:00:00.000Z", status: "proposed", message: "Hermes proposed a bounded Claude task." },
+    ];
     const [card, ...rest] = synthesizeTaskCards({
-      codexTasks: { items: [{ ...proposedClaude, decisionRecord }] },
+      codexTasks: { items: [{ ...proposedClaude, decisionRecord, events }] },
     }, undefined);
     expect(rest).toHaveLength(0);
     expect(card).toMatchObject({
@@ -1170,6 +1192,7 @@ describe("synthesizeTaskCards (O3 — surface queued tasks)", () => {
         decision: "routed to claude",
       },
     });
+    expect(card?.taskEvents).toEqual(events);
     // proposed → waiting on the operator to approve
     expect(card?.waitingOn).toEqual({ actor: "operator", tone: "warn" });
   });
