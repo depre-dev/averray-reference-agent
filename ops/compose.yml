@@ -286,12 +286,13 @@ services:
       CLAUDE_WORKER_AUTH_MODE: ${CLAUDE_WORKER_AUTH_MODE:-sub}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      # T1 surface sweep: base URL for relative routes (falls back to the
-      # mission's targetUrl when unset) + the env's truth boundary the honesty
-      # check asserts. Leave EXPECTED_BOUNDARY empty for the self-consistency
-      # checks only (errored-but-silent / empty-unlabeled); set demo / testnet /
-      # local-simulation to ALSO require that marker on data-bearing surfaces.
+      # T1 surface sweep: public base URL for relative public routes + the env's
+      # truth boundary the honesty check asserts. Leave EXPECTED_BOUNDARY empty
+      # for the self-consistency checks only (errored-but-silent /
+      # empty-unlabeled); set demo / testnet / local-simulation to ALSO require
+      # that marker on data-bearing surfaces.
       AVERRAY_APP_BASE_URL: ${AVERRAY_APP_BASE_URL:-}
+      TESTBED_SURFACE_SWEEP_BASE_URL: ${TESTBED_SURFACE_SWEEP_BASE_URL:-https://averray.com}
       AVERRAY_API_BASE_URL: ${AVERRAY_API_BASE_URL:-}
       AVERRAY_TESTBED_EXPECTED_BOUNDARY: ${AVERRAY_TESTBED_EXPECTED_BOUNDARY:-}
       # T3b SIWE auth mission: the sidecar base URL + the role-gated probe paths.

@@ -552,6 +552,65 @@ describe("monitor testbed mission runs", () => {
     expect(disposition.fixPrompt).toBeUndefined();
   });
 
+  it("keeps Caddy Basic-auth surface sweep failures triage-only", () => {
+    const run = recordTestbedMissionRunFromOperatorResult(
+      missionResult({ mode: "surface_sweep", targetUrl: "https://app.averray.com" }),
+      Date.parse("2026-06-01T10:00:00.000Z"),
+    );
+    const updated = recordTestbedMissionReportFromMessage(
+      {
+        relatedCorrelationId: run!.id,
+        text: JSON.stringify({
+          verdict: "fail",
+          confidence: 0.95,
+          stoppedBeforeMutation: true,
+          mutationBoundaryNotes: ["Read-only surface sweep stopped before the app rendered."],
+          completedPath: ["swept / -> https://app.averray.com/ (status 401)"],
+          blockers: ["/ failed to load cleanly (status 401)."],
+          confusingMoments: ["The hosted operator app asked for Basic auth before any product surface loaded."],
+          recommendations: ["Run public-only T1 sweeps against the public site, or provide the correct authenticated session path for app routes."],
+          evidence: [
+            "route / :: status=401 title=\"\" errors=1",
+            "www-authenticate: Basic realm=\"Averray Operator\"",
+            "server: Caddy",
+          ],
+          scores: { orientation: 0 },
+        }),
+      },
+      Date.parse("2026-06-01T10:05:00.000Z"),
+    );
+
+    const disposition = testbedMissionSelfHealingDisposition(updated!);
+    expect(disposition).toMatchObject({
+      autoFixable: false,
+      reason: "environment_or_auth_failure",
+    });
+    expect(disposition.summary).toContain("environment/auth/runner boundary");
+    expect(disposition.fixPrompt).toBeUndefined();
+  });
+
+  it("classifies 5xx, timeouts, and runner exits as environment failures before self-healing", () => {
+    for (const failureReason of [
+      "Browser-agent report returned fail; blocker: HTTP 503 Service Unavailable while loading the route.",
+      "Hermes testbed runner command timed out after 1200000ms.",
+      "runner-killed EXIT 137 before Playwright produced a report.",
+    ]) {
+      __resetTestbedMissionRunsForTests();
+      const run = recordTestbedMissionRunFromOperatorResult(missionResult(), Date.parse("2026-06-01T10:00:00.000Z"));
+      const failed = failTestbedMissionRun(run!.id, {
+        now: new Date("2026-06-01T10:05:00.000Z"),
+        failureReason,
+      });
+
+      const disposition = testbedMissionSelfHealingDisposition(failed!);
+      expect(disposition).toMatchObject({
+        autoFixable: false,
+        reason: "environment_or_auth_failure",
+      });
+      expect(disposition.fixPrompt).toBeUndefined();
+    }
+  });
+
   it("marks runner/report-pipeline failures as human-review, not auto-fixable", () => {
     const run = recordTestbedMissionRunFromOperatorResult(missionResult(), Date.parse("2026-05-22T10:00:00.000Z"));
     const failed = failTestbedMissionRun(run!.id, {
