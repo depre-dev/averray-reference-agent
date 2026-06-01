@@ -104,7 +104,14 @@ export function applyEventToBoard(
       const automationHealth = isAutomationHealth(event.automationHealth)
         ? event.automationHealth
         : undefined;
-      return { cards, at, ...(calmMetrics ? { calmMetrics } : {}), ...(automationHealth ? { automationHealth } : {}) };
+      const llmUsage = isLlmUsageAggregate(event.llmUsage) ? event.llmUsage : undefined;
+      return {
+        cards,
+        at,
+        ...(llmUsage ? { llmUsage } : {}),
+        ...(calmMetrics ? { calmMetrics } : {}),
+        ...(automationHealth ? { automationHealth } : {}),
+      };
     }
     case "board.card.added": {
       if (!prev) return prev;
@@ -114,9 +121,9 @@ export function applyEventToBoard(
       if (idx >= 0) {
         const next = prev.cards.slice();
         next[idx] = card;
-        return { cards: next, at: typeof event.at === "string" ? event.at : prev.at };
+        return { ...prev, cards: next, at: typeof event.at === "string" ? event.at : prev.at };
       }
-      return { cards: [...prev.cards, card], at: typeof event.at === "string" ? event.at : prev.at };
+      return { ...prev, cards: [...prev.cards, card], at: typeof event.at === "string" ? event.at : prev.at };
     }
     case "board.card.updated": {
       if (!prev) return prev;
@@ -127,7 +134,7 @@ export function applyEventToBoard(
       if (idx < 0) return prev;
       const next = prev.cards.slice();
       next[idx] = { ...next[idx], ...partial, id } as BoardCard;
-      return { cards: next, at: typeof event.at === "string" ? event.at : prev.at };
+      return { ...prev, cards: next, at: typeof event.at === "string" ? event.at : prev.at };
     }
     case "board.card.moved": {
       if (!prev) return prev;
@@ -139,13 +146,15 @@ export function applyEventToBoard(
       const card = isRecord(event.card) ? (event.card as unknown as BoardCard) : undefined;
       const next = prev.cards.slice();
       next[idx] = card?.id === id ? { ...card, lane: toLane } : ({ ...next[idx], lane: toLane } as BoardCard);
-      return { cards: next, at: typeof event.at === "string" ? event.at : prev.at };
+      return { ...prev, cards: next, at: typeof event.at === "string" ? event.at : prev.at };
     }
     case "board.card.archived": {
       if (!prev) return prev;
       const id = event.id as string | undefined;
       if (!id) return prev;
+      if (!prev.cards.some((c) => c.id === id)) return prev;
       return {
+        ...prev,
         cards: prev.cards.filter((c) => c.id !== id),
         at: typeof event.at === "string" ? event.at : prev.at,
       };
@@ -167,4 +176,15 @@ function isAutomationHealth(value: unknown): value is AutomationHealth {
   return Number.isFinite(value.selfHealingOpen)
     && Number.isFinite(value.dispatchUsedToday)
     && Number.isFinite(value.dispatchPerDayCap);
+}
+
+function isLlmUsageAggregate(value: unknown): value is LlmUsageAggregate {
+  if (!isRecord(value)) return false;
+  return (value.status === "recorded" || value.status === "not_recorded")
+    && Number.isFinite(value.inputTokens)
+    && Number.isFinite(value.outputTokens)
+    && Number.isFinite(value.totalTokens)
+    && Number.isFinite(value.runs)
+    && Array.isArray(value.byModel)
+    && Array.isArray(value.byDay);
 }
