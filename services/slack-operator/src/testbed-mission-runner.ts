@@ -19,6 +19,8 @@ import {
 import { executeSiweAuthMission, type SiweAuthMissionDeps } from "./testbed-auth-mission.js";
 import { executeSurfaceSweep, type SurfaceSweepDeps } from "./testbed-surface-sweep.js";
 import {
+  basicAuthHttpCredentialsForUrl,
+  cloudflareAccessHeaders,
   parseSweepSessionConfig,
   parseCloudflareAccessServiceToken,
   parseTestbedBasicAuth,
@@ -414,13 +416,9 @@ export async function createPlaywrightContextPageWithVideoFallback(input: {
   browser: Browser;
   captureVideo: boolean;
   videoDir: string;
-  viewport: NonNullable<BrowserContextOptions["viewport"]>;
-  userAgent: string;
+  contextOptions: BrowserContextOptions;
 }): Promise<{ context: BrowserContext; page: Page; videoDisabledReason?: string }> {
-  const baseOptions: BrowserContextOptions = {
-    viewport: input.viewport,
-    userAgent: input.userAgent,
-  };
+  const baseOptions = input.contextOptions;
   if (!input.captureVideo) {
     const context = await input.browser.newContext(baseOptions);
     return { context, page: await context.newPage() };
@@ -431,7 +429,10 @@ export async function createPlaywrightContextPageWithVideoFallback(input: {
   try {
     videoContext = await input.browser.newContext({
       ...baseOptions,
-      recordVideo: { dir: input.videoDir, size: input.viewport },
+      recordVideo: {
+        dir: input.videoDir,
+        size: resolveVideoSize(input.contextOptions.viewport),
+      },
     });
     return { context: videoContext, page: await videoContext.newPage() };
   } catch (error) {
@@ -449,6 +450,12 @@ export async function createPlaywrightContextPageWithVideoFallback(input: {
 export function isPlaywrightFfmpegMissing(error: unknown): boolean {
   const detail = error instanceof Error ? error.message : String(error);
   return /ffmpeg|video rendering requires/i.test(detail);
+}
+
+function resolveVideoSize(
+  viewport: BrowserContextOptions["viewport"],
+): { width: number; height: number } {
+  return viewport ?? { width: 1365, height: 900 };
 }
 
 /** Default session resolver: pull from the env-configured sidecar or manual
@@ -502,12 +509,18 @@ export async function executePlaywrightTestbedMission(
       args: ["--no-sandbox", "--disable-dev-shm-usage"],
     });
     const videoDir = join(artifactsDir, "videos");
+    const httpCredentials = basicAuthHttpCredentialsForUrl(mission.targetUrl, config.basicAuth);
+    const extraHTTPHeaders = cloudflareAccessHeaders(config.cloudflareAccess);
     const contextAndPage = await createPlaywrightContextPageWithVideoFallback({
       browser,
       captureVideo: config.captureVideo !== false,
       videoDir,
-      viewport: { width: 1365, height: 900 },
-      userAgent: "Averray-Hermes-Testbed-Playwright/1.0",
+      contextOptions: {
+        viewport: { width: 1365, height: 900 },
+        userAgent: "Averray-Hermes-Testbed-Playwright/1.0",
+        ...(Object.keys(extraHTTPHeaders).length > 0 ? { extraHTTPHeaders } : {}),
+        ...(httpCredentials ? { httpCredentials } : {}),
+      },
     });
     context = contextAndPage.context;
     page = contextAndPage.page;
