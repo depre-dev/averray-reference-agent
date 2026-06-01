@@ -15,6 +15,33 @@ function baseBoard() {
   };
 }
 
+function llmUsage() {
+  return {
+    status: "not_recorded",
+    message: "No LLM usage counters have been recorded yet.",
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    costUsd: null,
+    costStatus: "not_recorded",
+    runs: 0,
+    byModel: [],
+    byDay: [],
+    sourceStatus: [
+      { agent: "codex", status: "not_reported", reason: "Codex CLI does not report usage." },
+    ],
+    activeCalls: [],
+  };
+}
+
+function baseBoardWithMetadata() {
+  return {
+    ...baseBoard(),
+    llmUsage: llmUsage(),
+    automationHealth: { selfHealingOpen: 2, dispatchUsedToday: 4, dispatchPerDayCap: 5 },
+  };
+}
+
 // ── board.snapshot — replace everything ─────────────────────────────
 
 test("board.snapshot: replaces the cache wholesale", () => {
@@ -55,16 +82,30 @@ test("board.snapshot: carries automation-health gauge data when present", () => 
   assert.deepEqual(next.automationHealth, { selfHealingOpen: 2, dispatchUsedToday: 4, dispatchPerDayCap: 5 });
 });
 
+test("board.snapshot: carries LLM usage metadata when present", () => {
+  const usage = llmUsage();
+  const next = applyEventToBoard(baseBoard(), {
+    type: "board.snapshot",
+    at: "2026-05-27T17:35:00Z",
+    cards: [],
+    llmUsage: usage,
+  });
+  assert.deepEqual(next.llmUsage, usage);
+});
+
 // ── board.card.added ────────────────────────────────────────────────
 
 test("board.card.added: appends a new card", () => {
-  const next = applyEventToBoard(baseBoard(), {
+  const prev = baseBoardWithMetadata();
+  const next = applyEventToBoard(prev, {
     type: "board.card.added",
     card: { id: "c", lane: "release-queue", type: "pr" },
     at: "2026-05-27T17:35:00Z",
   });
   assert.equal(next.cards.length, 3);
   assert.equal(next.cards[2].id, "c");
+  assert.deepEqual(next.llmUsage, prev.llmUsage);
+  assert.deepEqual(next.automationHealth, prev.automationHealth);
 });
 
 test("board.card.added: same id is treated as an update (idempotent)", () => {
@@ -90,7 +131,8 @@ test("board.card.added: skipped when prev is undefined (no base to add into)", (
 // ── board.card.updated ──────────────────────────────────────────────
 
 test("board.card.updated: patches the matching card by id", () => {
-  const next = applyEventToBoard(baseBoard(), {
+  const prev = baseBoardWithMetadata();
+  const next = applyEventToBoard(prev, {
     type: "board.card.updated",
     id: "a",
     partial: { freshness: 42, state: "stale" },
@@ -100,6 +142,8 @@ test("board.card.updated: patches the matching card by id", () => {
   assert.equal(card.state, "stale");
   // Untouched fields preserved.
   assert.equal(card.lane, "operator-review");
+  assert.deepEqual(next.llmUsage, prev.llmUsage);
+  assert.deepEqual(next.automationHealth, prev.automationHealth);
 });
 
 test("board.card.updated: unknown id is a no-op (does not append)", () => {
@@ -126,13 +170,16 @@ test("board.card.updated: id mismatch in partial is overridden (id is the truth)
 // ── board.card.moved ────────────────────────────────────────────────
 
 test("board.card.moved: updates the matching card's lane", () => {
-  const next = applyEventToBoard(baseBoard(), {
+  const prev = baseBoardWithMetadata();
+  const next = applyEventToBoard(prev, {
     type: "board.card.moved",
     id: "a",
     fromLane: "operator-review",
     toLane: "release-queue",
   });
   assert.equal(next.cards.find(c => c.id === "a").lane, "release-queue");
+  assert.deepEqual(next.llmUsage, prev.llmUsage);
+  assert.deepEqual(next.automationHealth, prev.automationHealth);
 });
 
 test("board.card.moved: replaces stale card details when the stream supplies the fresh card", () => {
@@ -171,13 +218,16 @@ test("board.card.moved: missing toLane is a no-op (safer than landing in undefin
 // ── board.card.archived ────────────────────────────────────────────
 
 test("board.card.archived: removes the matching card", () => {
-  const next = applyEventToBoard(baseBoard(), {
+  const prev = baseBoardWithMetadata();
+  const next = applyEventToBoard(prev, {
     type: "board.card.archived",
     id: "a",
     reason: "stale > 48h",
   });
   assert.equal(next.cards.length, 1);
   assert.equal(next.cards[0].id, "b");
+  assert.deepEqual(next.llmUsage, prev.llmUsage);
+  assert.deepEqual(next.automationHealth, prev.automationHealth);
 });
 
 test("board.card.archived: unknown id is a no-op (length unchanged)", () => {
