@@ -195,8 +195,8 @@ describe("MonitorPage — container", () => {
         />,
         { wrapper },
       );
-      await waitFor(() => expect(getByRole("button", { name: /Approve tester run/ })).toBeTruthy());
-      fireEvent.click(getByRole("button", { name: /Approve tester run/ }));
+      await waitFor(() => expect(getByRole("button", { name: /Approve & dispatch/ })).toBeTruthy());
+      fireEvent.click(getByRole("button", { name: /Approve & dispatch/ }));
       fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
 
       expect(fetchSpy).toHaveBeenCalledTimes(1);
@@ -208,14 +208,14 @@ describe("MonitorPage — container", () => {
     }
   });
 
-  test("the default dismiss POSTs task cards to the durable codex-task endpoint", async () => {
+  test("operator task cards do not expose secondary dismiss/snooze buttons", async () => {
     const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({
       cards: [taskCard()],
       at: "2026-05-28T10:30:00Z",
     }));
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
     try {
-      const { getByRole } = render(
+      const { getByRole, queryByRole } = render(
         <MonitorPage
           options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }}
           backlogSuggestions={{ enabled: false }}
@@ -225,81 +225,12 @@ describe("MonitorPage — container", () => {
         />,
         { wrapper },
       );
-      await waitFor(() => expect(getByRole("button", { name: "Dismiss" })).toBeTruthy());
-      fireEvent.click(getByRole("button", { name: "Dismiss" }));
+      await waitFor(() => expect(getByRole("button", { name: /Approve & dispatch/ })).toBeTruthy());
+      expect(queryByRole("button", { name: "Dismiss" })).toBeNull();
+      expect(queryByRole("button", { name: "Snooze" })).toBeNull();
 
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-      const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-      expect(calledUrl).toBe("/monitor/codex-tasks/codex-task-1/dismiss");
-      expect(init.method).toBe("POST");
+      expect(fetchSpy).not.toHaveBeenCalled();
     } finally {
-      fetchSpy.mockRestore();
-    }
-  });
-
-  test("the default dismiss POSTs self-healing cards to the suppression-aware endpoint", async () => {
-    const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({
-      cards: [taskCard({
-        id: "codex-task-self-heal-1",
-        title: "Self-healing: failed mission",
-        correlationId: "self-heal:testbed_mission:testbed:sweep-1",
-      })],
-      at: "2026-05-28T10:30:00Z",
-    }));
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
-    try {
-      const { getByRole } = render(
-        <MonitorPage
-          options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }}
-          backlogSuggestions={{ enabled: false }}
-          collaboration={{ enabled: false }}
-          alerts={{ enabled: false }}
-          autonomy={{ fetchMode: async () => null }}
-        />,
-        { wrapper },
-      );
-      await waitFor(() => expect(getByRole("button", { name: "Dismiss" })).toBeTruthy());
-      fireEvent.click(getByRole("button", { name: "Dismiss" }));
-
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-      const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-      expect(calledUrl).toBe("/monitor/self-healing-proposals/codex-task-self-heal-1/dismiss");
-      expect(init.method).toBe("POST");
-    } finally {
-      fetchSpy.mockRestore();
-    }
-  });
-
-  test("the default snooze POSTs a durable until timestamp", async () => {
-    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-28T10:30:00.000Z"));
-    const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({
-      cards: [taskCard()],
-      at: "2026-05-28T10:30:00Z",
-    }));
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
-    try {
-      const { getByRole } = render(
-        <MonitorPage
-          options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }}
-          backlogSuggestions={{ enabled: false }}
-          collaboration={{ enabled: false }}
-          alerts={{ enabled: false }}
-          autonomy={{ fetchMode: async () => null }}
-        />,
-        { wrapper },
-      );
-      await waitFor(() => expect(getByRole("button", { name: "Snooze" })).toBeTruthy());
-      fireEvent.click(getByRole("button", { name: "Snooze" }));
-
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-      const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-      expect(calledUrl).toBe("/monitor/codex-tasks/codex-task-1/snooze");
-      expect(init.method).toBe("POST");
-      expect(JSON.parse(String(init.body))).toEqual({
-        untilMs: Date.parse("2026-05-28T11:00:00.000Z"),
-      });
-    } finally {
-      nowSpy.mockRestore();
       fetchSpy.mockRestore();
     }
   });

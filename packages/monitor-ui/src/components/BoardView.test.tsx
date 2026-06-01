@@ -36,11 +36,12 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(within(container).getByText(/governance dispute UI/)).toBeTruthy();
   });
 
-  test("renders the action card with its CTA and Hermes verdict", () => {
+  test("renders the action card with one primary and Hermes verdict", () => {
     const { container } = render(<BoardView board={richBoard} status="open" />);
     const view = within(container);
     expect(view.getByText("Allow operator override of agent claim-stake floor")).toBeTruthy();
-    expect(view.getByText("Approve & merge")).toBeTruthy();
+    expect(view.getAllByRole("button", { name: "Approve merge" }).length).toBeGreaterThan(0);
+    expect(view.queryByText("Send back to Codex")).toBeNull();
     expect(view.getByText("Hermes verdict")).toBeTruthy();
   });
 
@@ -236,9 +237,8 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(queryByText("not_recorded")).toBeNull();
   });
 
-  test("waiting-on-operator card actions are real board controls", () => {
+  test("waiting-on-operator task card exposes one dispatch primary", () => {
     const onApproveTask = vi.fn();
-    const onCardClick = vi.fn();
     const board: MonitorBoard = {
       at: "2026-05-28T10:30:00Z",
       cards: [{
@@ -258,18 +258,17 @@ describe("BoardView — rich-mix board (open stream)", () => {
       }],
     };
     const { getByRole, getByText, queryByText } = render(
-      <BoardView board={board} status="open" onApproveTask={onApproveTask} onCardClick={onCardClick} keyboard={false} />,
+      <BoardView board={board} status="open" onApproveTask={onApproveTask} keyboard={false} />,
     );
     expect(getByRole("button", { name: /Approve & dispatch/ })).toBeTruthy();
-    fireEvent.click(getByRole("button", { name: "Investigate" }));
-    expect(onCardClick).toHaveBeenCalledWith("task-action-1");
+    expect(queryByText("Dismiss")).toBeNull();
+    expect(queryByText("Snooze")).toBeNull();
+    expect(queryByText("Investigate")).toBeNull();
     fireEvent.click(getByRole("button", { name: /Approve & dispatch/ }));
     fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
     expect(onApproveTask).toHaveBeenCalledWith("task-action-1");
 
     expect(getByText("Fix the failed mission")).toBeTruthy();
-    fireEvent.click(getByRole("button", { name: "Dismiss" }));
-    expect(queryByText("Fix the failed mission")).toBeNull();
   });
 
   test("renders backlog suggestions as a collapsed planner-only rail block", () => {

@@ -312,6 +312,13 @@ export function BoardView({
     });
   }, []);
 
+  const onApproveMergeCard = useCallback((card: BoardCard) => {
+    const pr = relatedPrForCard(card);
+    if (pr && typeof window !== "undefined") {
+      window.open(`https://github.com/${pr.repo}/pull/${pr.number}`, "_blank", "noopener,noreferrer");
+    }
+  }, []);
+
   // ── keyboard (§12) ──────────────────────────────────────────────
   useBoardKeyboard({
     enabled: keyboard,
@@ -445,10 +452,12 @@ export function BoardView({
                 onClick={onCardClick ? (c) => onCardClick(c.id) : undefined}
                 onApprove={onApproveTask ? (c) => onApproveTask(c.id) : undefined}
                 onApproveMission={onApproveMission ? (c) => onApproveMission(c.id) : undefined}
-                onDismiss={onDismissCard}
-                onSnooze={onSnoozeCard}
+                onApproveMerge={onApproveMergeCard}
+                onRerunMission={onRerunMission ? (c, freshness) => {
+                  const target = c.type === "mission" ? c.mission?.target : undefined;
+                  if (target) onRerunMission(target, freshness);
+                } : undefined}
                 onKeepWatching={(c) => onKeepWatchingCard(c.id)}
-                onInvestigate={onCardClick ? (c) => onCardClick(c.id) : undefined}
               />
             )}
           />
