@@ -75,6 +75,11 @@ describe("buildHermesActivityFeed", () => {
     expect(text).toContain("Proposed Codex work for Self-healing fix");
     expect(text).toContain("Routed Self-healing fix");
     expect(text).toContain("Codex asked for help on depre-dev/averray-reference-agent#316");
+    expect(entries.find((entry) => entry.text.includes("Proposed Codex work"))).toMatchObject({
+      actor: "hermes",
+      kindLabel: "narration",
+      suggestions: ["Why this route?", "Show dispatch guardrails"],
+    });
     expect(entries.at(-1)).toMatchObject({
       source: "summary",
       text: "Needs you: review the current action lane, starting with task-1.",
@@ -90,7 +95,29 @@ describe("buildHermesActivityFeed", () => {
       now: () => Date.parse("2026-05-28T10:05:00Z"),
     });
     expect(entries[0]?.text).toContain("No real Hermes activity has been logged yet");
+    expect(entries[0]).toMatchObject({ actor: "hermes", kindLabel: "narration" });
     expect(entries.at(-1)?.text).toBe("Needs you: nothing right now.");
+  });
+
+  test("pins card-scoped collaboration messages to their board card", () => {
+    const card = task({ id: "agent #316", repo: "depre-dev/averray-reference-agent" });
+    const entries = buildHermesActivityFeed({
+      cards: [card],
+      messages: [message({
+        id: "operator-q",
+        author: "operator",
+        kind: "chat",
+        text: "What blocks this?",
+      })],
+      banner,
+      now: () => Date.parse("2026-05-28T10:05:00Z"),
+    });
+    const collaboration = entries.find((entry) => entry.id === "collaboration:operator-q");
+    expect(collaboration).toMatchObject({
+      actor: "operator",
+      kindLabel: "question",
+      cardId: "agent #316",
+    });
   });
 
   test("narrates review-panel responses without creating pretend chatter", () => {

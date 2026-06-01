@@ -5,8 +5,8 @@ import type {
   CardReviewRequest,
   HermesDecisionRecord,
 } from "./card-types.js";
-import type { CollaborationMessage } from "./collaboration.js";
-import { actorLabel, formatTurnTime } from "./collaboration.js";
+import type { CollaborationAuthor, CollaborationMessage } from "./collaboration.js";
+import { actorLabel, formatTurnTime, relatedPrForCard } from "./collaboration.js";
 import { humanizeSignalText } from "./signal-labels.js";
 
 export type ActivityTone = "neutral" | "info" | "action" | "success" | "warning";
@@ -16,9 +16,12 @@ export interface HermesActivityEntry {
   atMs: number;
   source: "board" | "decision" | "collaboration" | "review" | "summary";
   tone: ActivityTone;
+  actor: CollaborationAuthor;
+  kindLabel: "narration" | "question" | "reply" | "proposal" | "request" | "status";
   text: string;
   meta?: string;
   cardId?: string;
+  suggestions?: string[];
 }
 
 export interface BuildHermesActivityFeedInput {
@@ -44,7 +47,7 @@ export function buildHermesActivityFeed(input: BuildHermesActivityFeedInput): He
   }
 
   for (const message of input.messages) {
-    entries.push(collaborationActivity(message));
+    entries.push(collaborationActivity(message, cardIdForMessage(message, input.cards)));
   }
 
   const deduped = dedupeEntries(entries)
@@ -57,6 +60,8 @@ export function buildHermesActivityFeed(input: BuildHermesActivityFeedInput): He
       atMs: boardAtMs,
       source: "summary",
       tone: "neutral",
+      actor: "hermes",
+      kindLabel: "narration",
       text: "No real Hermes activity has been logged yet. New board events and card-scoped coordination will appear here.",
       meta: "waiting for events",
     });
@@ -78,9 +83,12 @@ function cardActivity(card: BoardCard, boardAtMs: number): HermesActivityEntry[]
         atMs,
         source: "board",
         tone: "action",
+        actor: "hermes",
+        kindLabel: "narration",
         text: `Proposed ${label} work for ${title}; waiting on your dispatch decision.`,
         meta: card.riskTier ? `${card.riskTier} risk` : "task proposed",
         cardId: card.id,
+        suggestions: ["Why this route?", "Show dispatch guardrails"],
       });
     } else if (card.taskStatus === "approved") {
       entries.push({
@@ -88,6 +96,8 @@ function cardActivity(card: BoardCard, boardAtMs: number): HermesActivityEntry[]
         atMs,
         source: "board",
         tone: "info",
+        actor: "hermes",
+        kindLabel: "narration",
         text: `Dispatched ${label} work for ${title}; the runner can claim it when available.`,
         meta: "dispatch approved",
         cardId: card.id,
@@ -98,6 +108,8 @@ function cardActivity(card: BoardCard, boardAtMs: number): HermesActivityEntry[]
         atMs,
         source: "board",
         tone: "info",
+        actor: "hermes",
+        kindLabel: "narration",
         text: `${label} is working on ${title}; Hermes is watching for progress or a PR.`,
         meta: "runner active",
         cardId: card.id,
@@ -108,9 +120,12 @@ function cardActivity(card: BoardCard, boardAtMs: number): HermesActivityEntry[]
         atMs,
         source: "board",
         tone: "warning",
+        actor: "hermes",
+        kindLabel: "narration",
         text: `${label} work failed on ${title}; operator triage is needed before retrying or splitting it.`,
         meta: card.failureReason ?? "task failed",
         cardId: card.id,
+        suggestions: ["Show failure evidence", "Should this be split?"],
       });
     }
   }
@@ -121,9 +136,12 @@ function cardActivity(card: BoardCard, boardAtMs: number): HermesActivityEntry[]
       atMs,
       source: "board",
       tone: "action",
+      actor: "hermes",
+      kindLabel: "narration",
       text: `Escalated ${cardTitle(card)} to you: ${plain(card.summary) || "Hermes needs an operator decision."}`,
       meta: "needs your call",
       cardId: card.id,
+      suggestions: ["Summarize what needs review", "What happens if I dismiss this?"],
     });
   }
 
@@ -133,6 +151,8 @@ function cardActivity(card: BoardCard, boardAtMs: number): HermesActivityEntry[]
       atMs,
       source: "board",
       tone: card.mergeStatus === "MERGED" ? "success" : "neutral",
+      actor: "hermes",
+      kindLabel: "narration",
       text: `${card.mergeStatus === "MERGED" ? "Merged" : "Closed"} ${cardTitle(card)}; it is now release history.`,
       meta: card.closedAt ? formatDateMeta(card.closedAt) : "done",
       cardId: card.id,
@@ -155,9 +175,12 @@ function decisionRecordActivity(
     atMs,
     source: "decision",
     tone: toneForDecision(record),
+    actor: "hermes",
+    kindLabel: "narration",
     text: `${decisionVerb(record)} ${cardTitle(card)}: ${plain(reason)}.${waiting}`,
     meta: record.kind.replace(/_/g, " "),
     cardId: card.id,
+    suggestions: ["Why this decision?", "What would change it?"],
   };
 }
 
@@ -172,9 +195,12 @@ function reviewRequestActivity(card: BoardCard): HermesActivityEntry[] {
         atMs,
         source: "review",
         tone: request.response.verdict === "block" ? "action" : request.response.verdict === "concern" ? "warning" : "success",
+        actor: "hermes",
+        kindLabel: "narration",
         text: `${agentLabel(request.reviewer)} returned a ${request.response.verdict} review on ${cardTitle(card)}: ${plain(request.response.reasoning)}`,
         meta: panel ? "reviewer panel" : "review response",
         cardId: card.id,
+        suggestions: request.response.verdict === "block" ? ["What blocks this?", "Summarize panel verdicts"] : undefined,
       };
     }
     return {
@@ -182,14 +208,17 @@ function reviewRequestActivity(card: BoardCard): HermesActivityEntry[] {
       atMs,
       source: "review",
       tone: panel ? "action" : "info",
+      actor: "hermes",
+      kindLabel: "narration",
       text: `${agentLabel(request.requestedBy)} requested ${panel ? "a reviewer panel" : `${agentLabel(request.reviewer)} review`} for ${cardTitle(card)}: ${plain(request.reason)}`,
       meta: panel ? "panel requested" : "review requested",
       cardId: card.id,
+      suggestions: ["Why request review?", "What should I check?"],
     };
   });
 }
 
-function collaborationActivity(message: CollaborationMessage): HermesActivityEntry {
+function collaborationActivity(message: CollaborationMessage, cardId: string | undefined): HermesActivityEntry {
   const actor = actorLabel(message.author);
   const target = message.addressedTo === "everyone" ? "the room" : actorLabel(message.addressedTo);
   const scope = message.relatedPr
@@ -210,8 +239,11 @@ function collaborationActivity(message: CollaborationMessage): HermesActivityEnt
     atMs: message.ts,
     source: "collaboration",
     tone: message.kind === "request_help" ? "action" : message.kind === "proposal" ? "info" : "neutral",
+    actor: message.author,
+    kindLabel: collaborationKindLabel(message),
     text: `${actor} ${verb}${scope} to ${target}: ${plain(message.text)}`,
     meta: `${message.kind} · ${formatTurnTime(message.ts)}`,
+    ...(cardId ? { cardId } : {}),
   };
 }
 
@@ -229,10 +261,41 @@ function summaryActivity(banner: BoardNowBanner, nowMs: number): HermesActivityE
     atMs: nowMs,
     source: "summary",
     tone: banner.tone === "action" || banner.tone === "hermes-focus" ? "action" : banner.tone === "degraded" ? "warning" : "success",
+    actor: "hermes",
+    kindLabel: "narration",
     text,
     meta: banner.sub,
     ...(banner.primaryActionId ? { cardId: banner.primaryActionId } : {}),
+    ...(banner.primaryActionId && (banner.tone === "action" || banner.tone === "hermes-focus")
+      ? { suggestions: ["Summarize the top card", "What decision is pending?"] }
+      : {}),
   };
+}
+
+function collaborationKindLabel(message: CollaborationMessage): HermesActivityEntry["kindLabel"] {
+  if (message.author === "operator") return "question";
+  if (message.author === "hermes") return "reply";
+  if (message.kind === "proposal") return "proposal";
+  if (message.kind === "request_help") return "request";
+  return "status";
+}
+
+function cardIdForMessage(message: CollaborationMessage, cards: readonly BoardCard[]): string | undefined {
+  for (const card of cards) {
+    const relatedPr = relatedPrForCard(card);
+    if (
+      relatedPr
+      && message.relatedPr?.repo === relatedPr.repo
+      && message.relatedPr.number === relatedPr.number
+    ) {
+      return card.id;
+    }
+    const correlation = card.correlationId ?? card.id;
+    if (message.relatedCorrelationId && message.relatedCorrelationId === correlation) {
+      return card.id;
+    }
+  }
+  return undefined;
 }
 
 function decisionVerb(record: HermesDecisionRecord): string {

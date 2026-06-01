@@ -15,8 +15,21 @@ function wrapper({ children }: { children: ReactNode }) {
   return <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>{children}</SWRConfig>;
 }
 
-function msg(id: string, author: CollaborationMessage["author"], text: string): CollaborationMessage {
-  return { id, ts: Date.parse("2026-05-28T10:00:00Z"), author, kind: "chat", text, addressedTo: "everyone" };
+function msg(
+  id: string,
+  author: CollaborationMessage["author"],
+  text: string,
+  overrides: Partial<CollaborationMessage> = {},
+): CollaborationMessage {
+  return {
+    id,
+    ts: Date.parse("2026-05-28T10:00:00Z"),
+    author,
+    kind: "chat",
+    text,
+    addressedTo: "everyone",
+    ...overrides,
+  };
 }
 
 const card548 = FIXTURE_CARDS.find((c) => c.id === "agent #548") as BoardCard;
@@ -33,6 +46,9 @@ describe("CoPilotRail", () => {
     const fetcher = vi.fn(async () => [msg("1", "hermes", "Pre-check passed on #548.")]);
     const { container } = render(<CoPilotRail collaboration={{ fetcher, refreshIntervalMs: 0 }} />, { wrapper });
     await waitFor(() => expect(within(container).getByText(/Pre-check passed on #548/)).toBeTruthy());
+    expect(within(container).getAllByText("Hermes").length).toBeGreaterThan(0);
+    expect(within(container).getAllByText(/reply/).length).toBeGreaterThan(0);
+    expect(container.querySelector(".hm-turn-time")).toBeTruthy();
   });
 
   test("is inert (no fetch, empty-state copy) when collaboration is omitted", () => {
@@ -101,7 +117,7 @@ describe("CoPilotRail", () => {
       taskStatus: "proposed",
       riskTier: "low",
     };
-    const { getByText, getByRole } = render(
+    const { container, getAllByText, getByText, getByRole } = render(
       <CoPilotRail
         boardCards={[taskCard]}
         boardBanner={banner}
@@ -111,8 +127,34 @@ describe("CoPilotRail", () => {
       { wrapper },
     );
     expect(getByText(/Proposed Codex work for Repair failed mission/)).toBeTruthy();
-    fireEvent.click(getByRole("button", { name: "Open card task-activity-1" }));
+    expect(getAllByText(/narration/).length).toBeGreaterThan(0);
+    fireEvent.click(getByRole("button", { name: "Open referenced card task-activity-1" }));
     expect(onCardClick).toHaveBeenCalledWith("task-activity-1");
+    fireEvent.click(getByRole("button", { name: "Why this route?" }));
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    expect(input.value).toBe("Why this route?");
+  });
+
+  test("card-scoped collaboration messages render with a real card pin", async () => {
+    const onCardClick = vi.fn();
+    const fetcher = vi.fn(async () => [
+      msg("operator-question", "operator", "What is still blocking this?", {
+        relatedPr: { repo: "depre-dev/agent", number: 548 },
+      }),
+    ]);
+    const { container, getByRole } = render(
+      <CoPilotRail
+        boardCards={[card548]}
+        onCardClick={onCardClick}
+        collaboration={{ fetcher, refreshIntervalMs: 0 }}
+      />,
+      { wrapper },
+    );
+    await waitFor(() => expect(within(container).getByText(/What is still blocking this/)).toBeTruthy());
+    expect(within(container).getByText("Pascal")).toBeTruthy();
+    expect(within(container).getByText(/question/)).toBeTruthy();
+    fireEvent.click(getByRole("button", { name: "Open referenced card agent #548" }));
+    expect(onCardClick).toHaveBeenCalledWith("agent #548");
   });
 });
 
