@@ -87,6 +87,31 @@ describe("buildHermesActivityFeed", () => {
     });
   });
 
+  test("narrates task lifecycle events once as plain card-tied moves", () => {
+    const entries = buildHermesActivityFeed({
+      cards: [task({
+        id: "agent #549",
+        agentType: "codex",
+        summary: "contract suite red · operator delegated",
+        taskEvents: [
+          { at: "2026-06-01T12:00:00.000Z", status: "proposed", message: "Hermes proposed a bounded Codex task." },
+          { at: "2026-06-01T12:00:12.000Z", status: "running", message: "Codex runner runner-1 claimed the task." },
+          { at: "2026-06-01T12:00:12.000Z", status: "running", message: "Codex runner runner-1 claimed the task." },
+        ],
+      })],
+      messages: [],
+      banner,
+      now: () => Date.parse("2026-06-01T12:00:24.000Z"),
+    });
+    const lines = entries.map((entry) => entry.text);
+    expect(lines).toContain("Moved #549 to Codex — contract suite red.");
+    expect(lines.filter((line) => line === "Codex picked up #549 — 12s ago.")).toHaveLength(1);
+    expect(entries.find((entry) => entry.text === "Moved #549 to Codex — contract suite red.")).toMatchObject({
+      cardId: "agent #549",
+      meta: "route recorded",
+    });
+  });
+
   test("says so when no real activity exists and still ends with the board summary", () => {
     const entries = buildHermesActivityFeed({
       cards: [],

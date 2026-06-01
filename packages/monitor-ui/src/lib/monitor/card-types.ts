@@ -247,6 +247,12 @@ export type TaskStatus =
   | "failed"
   | "cancelled";
 
+export interface TaskTimelineEvent {
+  at: string;
+  status: TaskStatus | "progress";
+  message: string;
+}
+
 /** Codex/Claude task card. Lifecycle: proposed → approved → running → succeeded/failed. */
 export interface CodexTaskCard extends CardBase {
   type: "task";
@@ -257,6 +263,8 @@ export interface CodexTaskCard extends CardBase {
   /** O4 routing risk tier (PR3's autopilot reads it; surfaced in the summary too). */
   riskTier?: "high" | "low";
   runnerHeartbeat?: { lastSeen: string; online: boolean };
+  /** Real task lifecycle events recorded by the queue, used for Hermes timeline narration. */
+  taskEvents?: TaskTimelineEvent[];
   output?: string;
   failureReason?: string;
 }

@@ -85,6 +85,12 @@ export type TaskStatus =
   | "failed"
   | "cancelled";
 
+export interface TaskTimelineEvent {
+  at: string;
+  status: TaskStatus | "progress";
+  message: string;
+}
+
 export type MissionStatus =
   | "requested"
   | "ready"
@@ -250,6 +256,8 @@ export interface BoardCard {
   sourceFailure?: CardSourceFailure;
   /** Codex task cards: runner liveness. */
   runnerHeartbeat?: CardRunnerHeartbeat;
+  /** Real task lifecycle events recorded by the queue, used for Hermes timeline narration. */
+  taskEvents?: TaskTimelineEvent[];
   /** Per-check CI breakdown (non-done cards) — the list under the bar. */
   checkRuns?: CardCheckRun[];
   /** Hermes review findings (non-done cards) — the "why review" detail. */
@@ -531,6 +539,32 @@ function asArray(value: unknown): unknown[] {
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function mapTaskEvents(task: Record<string, unknown>): TaskTimelineEvent[] {
+  return asArray(task.events).flatMap((entry) => {
+    const event = asRecord(entry);
+    if (!event) return [];
+    const at = asString(event.at);
+    const status = asTaskTimelineStatus(event.status);
+    const message = asString(event.message);
+    return at && status && message ? [{ at, status, message }] : [];
+  });
+}
+
+function asTaskTimelineStatus(value: unknown): TaskTimelineEvent["status"] | undefined {
+  if (
+    value === "proposed"
+    || value === "approved"
+    || value === "running"
+    || value === "completed"
+    || value === "failed"
+    || value === "cancelled"
+    || value === "progress"
+  ) {
+    return value;
+  }
+  return undefined;
 }
 
 // Self-healing task titles embed the namespaced surface key
@@ -1245,6 +1279,8 @@ export function enrichBoardCard(
     if (output) card.output = output;
     const failureReason = asString(task.failureReason);
     if (failureReason) card.failureReason = failureReason;
+    const taskEvents = mapTaskEvents(task);
+    if (taskEvents.length > 0) card.taskEvents = taskEvents;
     if (isHermesDecisionRecord(task.decisionRecord)) {
       card.decisionRecord = task.decisionRecord;
     }
@@ -1321,6 +1357,7 @@ export function synthesizeTaskCards(
     if (!id) continue;
     const agent = agentTypeFromTaskAgent(task.agent);
     const prompt = asString(task.prompt);
+    const taskEvents = mapTaskEvents(task);
     const riskTierRaw = asString(task.riskTier);
     const riskTier = riskTierRaw === "high" || riskTierRaw === "low" ? riskTierRaw : undefined;
     const routingReason = asString(task.routingReason);
@@ -1354,6 +1391,7 @@ export function synthesizeTaskCards(
       ...(riskSignals.length > 0 ? { riskSignals } : {}),
       ...(health.sourceFailure ? { sourceFailure: health.sourceFailure } : {}),
       ...(prompt ? { prompt } : {}),
+      ...(taskEvents.length > 0 ? { taskEvents } : {}),
       ...(asString(task.correlationId) ? { correlationId: asString(task.correlationId) } : {}),
       ...(decisionRecord ? { decisionRecord } : {}),
     };
