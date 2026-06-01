@@ -19,7 +19,12 @@
 // SSE `board.snapshot` event carries.
 
 import { buildHermesBoardSnapshotFromMonitor } from "./monitor-hermes-board.js";
-import { aggregateLlmUsage, type LlmUsageAggregate, type LlmUsageEvent } from "@avg/averray-mcp/llm-usage";
+import {
+  aggregateLlmUsage,
+  listActiveLlmUsageCalls,
+  type LlmUsageAggregate,
+  type LlmUsageEvent,
+} from "@avg/averray-mcp/llm-usage";
 import type {
   HermesBoardCardSnapshot,
   HermesBoardSnapshot,
@@ -515,6 +520,7 @@ function usageEvents(value: unknown): LlmUsageEvent[] {
       if (!agent || !model || !ts || inputTokens === undefined || outputTokens === undefined) return undefined;
       if (!Number.isInteger(inputTokens) || !Number.isInteger(outputTokens)) return undefined;
       const costUsd = asFiniteNumber(event.costUsd);
+      const cacheTokens = asFiniteNumber(event.cacheTokens);
       return {
         agent,
         model,
@@ -522,6 +528,7 @@ function usageEvents(value: unknown): LlmUsageEvent[] {
         ...(asString(event.taskId) ? { taskId: asString(event.taskId) } : {}),
         inputTokens,
         outputTokens,
+        ...(cacheTokens !== undefined && Number.isInteger(cacheTokens) ? { cacheTokens } : {}),
         ...(costUsd !== undefined ? { costUsd } : {}),
         ts,
       };
@@ -1329,7 +1336,9 @@ export function buildV2BoardSnapshot(
     cards: [...cards, ...taskCards],
     at: snapshotAt.toISOString(),
     repo: opts.repo ?? "",
-    llmUsage: aggregateLlmUsage(usageEvents(asRecord(rawSnapshot)?.llmUsageEvents)),
+    llmUsage: aggregateLlmUsage(usageEvents(asRecord(rawSnapshot)?.llmUsageEvents), {
+      activeCalls: listActiveLlmUsageCalls(),
+    }),
   };
 }
 

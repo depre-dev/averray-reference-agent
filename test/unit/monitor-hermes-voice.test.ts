@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -550,6 +553,42 @@ describe("generateHermesReply", () => {
       fetchFn: fetchFn as typeof fetch,
     });
     expect(capturedModel).toBe("gpt-oss-120b");
+  });
+
+  it("records Ollama token counters from Hermes chat responses", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "averray-hermes-usage-"));
+    try {
+      const usageLogPath = join(dir, "llm-usage.jsonl");
+      const fetchFn = async () =>
+        jsonResponse({
+          model: "deepseek-v4-pro:cloud",
+          choices: [{ message: { content: "Watching it." } }],
+          prompt_eval_count: 44,
+          eval_count: 12,
+        });
+
+      const text = await generateHermesReply(baseContext(), {
+        apiKey,
+        baseUrl,
+        model: "deepseek-v4-pro:cloud",
+        runId: "chat-correlation-1",
+        taskId: "chat-message-1",
+        usageLogPath,
+        fetchFn: fetchFn as typeof fetch,
+      });
+
+      expect(text).toContain("Watching it.");
+      await expect(readFile(usageLogPath, "utf8").then((line) => JSON.parse(line))).resolves.toMatchObject({
+        agent: "hermes",
+        model: "deepseek-v4-pro:cloud",
+        runId: "chat-correlation-1",
+        taskId: "chat-message-1",
+        inputTokens: 44,
+        outputTokens: 12,
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("strips a trailing slash from baseUrl before appending the path", async () => {

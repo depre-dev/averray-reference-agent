@@ -1177,7 +1177,14 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
       try {
         // replyContext carries the recent thread oldest-first so the
         // model sees the conversation in natural order rather than reversed.
-        const llmText = await generateHermesReply(replyContext, { apiKey, baseUrl, model });
+        const llmText = await generateHermesReply(replyContext, {
+          apiKey,
+          baseUrl,
+          model,
+          taskId: operatorMessage.id,
+          runId: operatorMessage.relatedCorrelationId
+            ?? (operatorMessage.relatedPr ? `${operatorMessage.relatedPr.repo}#${operatorMessage.relatedPr.number}` : operatorMessage.id),
+        });
         if (llmText) {
           text = llmText;
         } else {
@@ -2715,7 +2722,14 @@ function scheduleHermesBoardNarration(snapshot: unknown): void {
     const model = optionalEnv("HERMES_MONITOR_REPLY_MODEL") ?? "deepseek-v4-pro:cloud";
     if (apiKey) {
       try {
-        const llmText = await generateHermesBoardNarration(narrationContext, { apiKey, baseUrl, model, timeoutMs: 6_000 });
+        const llmText = await generateHermesBoardNarration(narrationContext, {
+          apiKey,
+          baseUrl,
+          model,
+          timeoutMs: 6_000,
+          taskId: "monitor-board-narration",
+          runId: decision.signature,
+        });
         if (llmText) text = llmText;
       } catch (error) {
         logger.warn({ err: error }, "monitor_collaboration_board_narration_llm_threw");

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -144,6 +144,41 @@ describe("claude task runner", () => {
     await expect(readCodexRunnerHeartbeat({ path })).resolves.toMatchObject({
       runnerId: "test-claude-runner",
       status: "completed",
+    });
+  });
+
+  it("records Claude SDK usage counters for completed tasks", async () => {
+    const path = await tempQueuePath();
+    const usagePath = join(path.replace(/tasks\.json$/, ""), "llm-usage.jsonl");
+    const previousUsagePath = process.env.LLM_USAGE_LOG_PATH;
+    process.env.LLM_USAGE_LOG_PATH = usagePath;
+    const id = await approvedClaudeTask(path);
+
+    const result = await runClaudeTaskRunnerOnce(config(path, { model: "claude-sonnet-4-5" }), {
+      executor: async () => ({
+        exitCode: 0,
+        stdout: "opened PR",
+        stderr: "",
+        summary: "opened PR",
+        usage: {
+          input_tokens: 120,
+          output_tokens: 30,
+          cache_read_input_tokens: 15,
+        },
+      }),
+      log: () => {},
+    });
+    if (previousUsagePath === undefined) delete process.env.LLM_USAGE_LOG_PATH;
+    else process.env.LLM_USAGE_LOG_PATH = previousUsagePath;
+
+    expect(result.status).toBe("completed");
+    await expect(readFile(usagePath, "utf8").then((line) => JSON.parse(line))).resolves.toMatchObject({
+      agent: "claude",
+      model: "claude-sonnet-4-5",
+      taskId: id,
+      inputTokens: 120,
+      outputTokens: 30,
+      cacheTokens: 15,
     });
   });
 

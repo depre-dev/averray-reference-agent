@@ -8,6 +8,7 @@ export interface LlmUsageEvent {
   taskId?: string;
   inputTokens: number;
   outputTokens: number;
+  cacheTokens?: number;
   costUsd?: number;
   ts: string;
 }
@@ -17,20 +18,24 @@ export interface LlmUsageModelRollup {
   model: string;
   inputTokens: number;
   outputTokens: number;
+  cacheTokens: number;
   totalTokens: number;
   costUsd: number | null;
   costStatus: "recorded" | "not_recorded";
   runs: number;
+  lastActiveAt: string | null;
 }
 
 export interface LlmUsageDayRollup {
   day: string;
   inputTokens: number;
   outputTokens: number;
+  cacheTokens: number;
   totalTokens: number;
   costUsd: number | null;
   costStatus: "recorded" | "not_recorded";
   runs: number;
+  lastActiveAt: string | null;
   byModel: LlmUsageModelRollup[];
 }
 
@@ -40,18 +45,30 @@ export interface LlmUsageSourceStatus {
   reason?: string;
 }
 
+export interface LlmUsageActiveCall {
+  id: string;
+  agent: string;
+  model: string;
+  startedAt: string;
+  runId?: string;
+  taskId?: string;
+}
+
 export interface LlmUsageAggregate {
   status: "recorded" | "not_recorded";
   message: string;
   inputTokens: number;
   outputTokens: number;
+  cacheTokens: number;
   totalTokens: number;
   costUsd: number | null;
   costStatus: "recorded" | "not_recorded";
   runs: number;
+  lastActiveAt: string | null;
   byModel: LlmUsageModelRollup[];
   byDay: LlmUsageDayRollup[];
   sourceStatus: LlmUsageSourceStatus[];
+  activeCalls: LlmUsageActiveCall[];
 }
 
 export interface LlmUsageCaptureInput {
@@ -66,6 +83,15 @@ export interface LlmUsageCaptureInput {
 export interface LlmUsageAggregateOptions {
   expectedAgents?: readonly string[];
   sourceReasons?: Readonly<Record<string, string>>;
+  activeCalls?: readonly LlmUsageActiveCall[];
+}
+
+export interface LlmUsageActiveCallInput {
+  agent: string;
+  model?: string;
+  runId?: string;
+  taskId?: string;
+  startedAt?: Date;
 }
 
 const DEFAULT_USAGE_LOG_PATH = "/data/llm-usage.jsonl";
@@ -73,9 +99,12 @@ const DEFAULT_EXPECTED_AGENTS = ["claude", "test-writer", "codex", "hermes"] as 
 const DEFAULT_SOURCE_REASONS: Readonly<Record<string, string>> = {
   claude: "Claude Agent SDK usage counters have not arrived from runner output yet.",
   "test-writer": "Test-writer SDK usage counters have not arrived from runner output yet.",
-  codex: "Codex usage is not reported by the CLI yet.",
+  codex: "Codex CLI does not report usage.",
   hermes: "Hermes/Ollama responses have not exposed usage counters yet.",
 };
+
+const activeCalls = new Map<string, LlmUsageActiveCall>();
+let nextActiveCallId = 0;
 
 export function llmUsageLogPath(env: NodeJS.ProcessEnv = process.env): string {
   return env.LLM_USAGE_LOG_PATH?.trim() || env.AVERRAY_LLM_USAGE_LOG_PATH?.trim() || DEFAULT_USAGE_LOG_PATH;
@@ -116,6 +145,28 @@ export async function recordLlmUsageFromResult(
   return event;
 }
 
+export function beginLlmUsageCall(input: LlmUsageActiveCallInput): () => void {
+  const agent = input.agent.trim();
+  if (!agent) return () => undefined;
+  const id = `llm-call-${Date.now()}-${++nextActiveCallId}`;
+  const call: LlmUsageActiveCall = {
+    id,
+    agent,
+    model: input.model?.trim() || `${agent} model pending`,
+    startedAt: (input.startedAt ?? new Date()).toISOString(),
+    ...(input.runId ? { runId: input.runId.trim() } : {}),
+    ...(input.taskId ? { taskId: input.taskId.trim() } : {}),
+  };
+  activeCalls.set(id, call);
+  return () => {
+    activeCalls.delete(id);
+  };
+}
+
+export function listActiveLlmUsageCalls(): LlmUsageActiveCall[] {
+  return Array.from(activeCalls.values()).sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+}
+
 export function llmUsageEventFromResult(input: LlmUsageCaptureInput): LlmUsageEvent | undefined {
   const usageSource = firstUsageSource(
     tokenUsageSource(input.result),
@@ -132,12 +183,17 @@ export function llmUsageEventFromResult(input: LlmUsageCaptureInput): LlmUsageEv
   const inputTokens = integerField(usage, "inputTokens")
     ?? integerField(usage, "input_tokens")
     ?? integerField(usage, "promptTokens")
-    ?? integerField(usage, "prompt_tokens");
+    ?? integerField(usage, "prompt_tokens")
+    ?? integerField(usage, "prompt_eval_count")
+    ?? integerField(usage, "promptEvalCount");
   const outputTokens = integerField(usage, "outputTokens")
     ?? integerField(usage, "output_tokens")
     ?? integerField(usage, "completionTokens")
-    ?? integerField(usage, "completion_tokens");
+    ?? integerField(usage, "completion_tokens")
+    ?? integerField(usage, "eval_count")
+    ?? integerField(usage, "evalCount");
   if (inputTokens === undefined || outputTokens === undefined) return undefined;
+  const cacheTokens = cacheTokensFromUsage(usage);
 
   const model = stringField(usage, "model")
     ?? stringField(carrier, "model")
@@ -146,17 +202,6 @@ export function llmUsageEventFromResult(input: LlmUsageCaptureInput): LlmUsageEv
     ?? stringField(input.result, "modelId")
     ?? input.model
     ?? "not_recorded";
-  const costUsd = numberField(usage, "costUsd")
-    ?? numberField(usage, "cost_usd")
-    ?? numberField(usage, "total_cost_usd")
-    ?? numberField(carrier, "costUsd")
-    ?? numberField(carrier, "cost_usd")
-    ?? numberField(carrier, "totalCostUsd")
-    ?? numberField(carrier, "total_cost_usd")
-    ?? numberField(input.result, "costUsd")
-    ?? numberField(input.result, "cost_usd")
-    ?? numberField(input.result, "totalCostUsd")
-    ?? numberField(input.result, "total_cost_usd");
 
   const event: LlmUsageEvent = {
     agent: input.agent,
@@ -165,7 +210,7 @@ export function llmUsageEventFromResult(input: LlmUsageCaptureInput): LlmUsageEv
     ...(input.taskId ? { taskId: input.taskId } : {}),
     inputTokens,
     outputTokens,
-    ...(costUsd !== undefined ? { costUsd } : {}),
+    ...(cacheTokens > 0 ? { cacheTokens } : {}),
     ts: (input.ts ?? new Date()).toISOString(),
   };
   return sanitizeUsageEvent(event);
@@ -183,13 +228,14 @@ export function aggregateLlmUsage(
   return {
     status,
     message: status === "recorded"
-      ? "LLM usage includes only runner results that emitted whitelisted cost/token counters."
+      ? "LLM usage includes only runner results that emitted whitelisted token counters."
       : "No runner has reported LLM usage counters yet. Claude/test-writer counters depend on SDK output; Codex CLI and Hermes/Ollama do not reliably report usage today.",
     ...total,
     runs: events.length,
     byModel,
     byDay,
     sourceStatus,
+    activeCalls: [...(options.activeCalls ?? [])],
   };
 }
 
@@ -203,14 +249,15 @@ export function aggregateLlmUsageForAgent(
     model: entry.model,
     inputTokens: entry.inputTokens,
     outputTokens: entry.outputTokens,
+    ...(entry.cacheTokens > 0 ? { cacheTokens: entry.cacheTokens } : {}),
     ...(entry.costUsd !== null ? { costUsd: entry.costUsd } : {}),
-    ts: "1970-01-01T00:00:00.000Z",
+    ts: entry.lastActiveAt ?? "1970-01-01T00:00:00.000Z",
   }));
   const total = totalsFor(events);
   return {
     status: byModel.length > 0 ? "recorded" : "not_recorded",
     message: byModel.length > 0
-      ? "LLM usage includes only runner results that emitted whitelisted cost/token counters."
+      ? "LLM usage includes only runner results that emitted whitelisted token counters."
       : sourceReason(agent, undefined),
     ...total,
     runs: byModel.reduce((sum, entry) => sum + entry.runs, 0),
@@ -221,6 +268,7 @@ export function aggregateLlmUsageForAgent(
       status: byModel.length > 0 ? "recorded" : "not_reported",
       ...(byModel.length > 0 ? {} : { reason: sourceReason(agent, undefined) }),
     }],
+    activeCalls: aggregate.activeCalls.filter((call) => call.agent === agent),
   };
 }
 
@@ -280,9 +328,10 @@ function rollupByDay(events: readonly LlmUsageEvent[]): LlmUsageDayRollup[] {
     .sort((a, b) => b.day.localeCompare(a.day));
 }
 
-function totalsFor(events: readonly Pick<LlmUsageEvent, "inputTokens" | "outputTokens" | "costUsd">[]) {
+function totalsFor(events: readonly Pick<LlmUsageEvent, "inputTokens" | "outputTokens" | "cacheTokens" | "costUsd" | "ts">[]) {
   const inputTokens = events.reduce((sum, event) => sum + event.inputTokens, 0);
   const outputTokens = events.reduce((sum, event) => sum + event.outputTokens, 0);
+  const cacheTokens = events.reduce((sum, event) => sum + (event.cacheTokens ?? 0), 0);
   const costEvents = events.filter((event) => typeof event.costUsd === "number");
   const costUsd = costEvents.length > 0
     ? round(costEvents.reduce((sum, event) => sum + (event.costUsd ?? 0), 0), 6)
@@ -290,9 +339,11 @@ function totalsFor(events: readonly Pick<LlmUsageEvent, "inputTokens" | "outputT
   return {
     inputTokens,
     outputTokens,
-    totalTokens: inputTokens + outputTokens,
+    cacheTokens,
+    totalTokens: inputTokens + outputTokens + cacheTokens,
     costUsd,
     costStatus: costEvents.length > 0 ? "recorded" as const : "not_recorded" as const,
+    lastActiveAt: lastActiveAtFor(events),
   };
 }
 
@@ -300,6 +351,7 @@ function sanitizeUsageEvent(event: LlmUsageEvent): LlmUsageEvent | undefined {
   if (!event.agent.trim() || !event.model.trim()) return undefined;
   if (!Number.isInteger(event.inputTokens) || event.inputTokens < 0) return undefined;
   if (!Number.isInteger(event.outputTokens) || event.outputTokens < 0) return undefined;
+  if (event.cacheTokens !== undefined && (!Number.isInteger(event.cacheTokens) || event.cacheTokens < 0)) return undefined;
   if (event.costUsd !== undefined && (!Number.isFinite(event.costUsd) || event.costUsd < 0)) return undefined;
   if (!Number.isFinite(Date.parse(event.ts))) return undefined;
   return {
@@ -309,6 +361,7 @@ function sanitizeUsageEvent(event: LlmUsageEvent): LlmUsageEvent | undefined {
     ...(event.taskId ? { taskId: event.taskId.trim() } : {}),
     inputTokens: event.inputTokens,
     outputTokens: event.outputTokens,
+    ...(event.cacheTokens !== undefined ? { cacheTokens: event.cacheTokens } : {}),
     ...(event.costUsd !== undefined ? { costUsd: round(event.costUsd, 6) } : {}),
     ts: new Date(event.ts).toISOString(),
   };
@@ -325,6 +378,7 @@ function parseUsageLine(line: string): LlmUsageEvent | undefined {
       ...(stringField(parsed, "taskId") ? { taskId: stringField(parsed, "taskId") } : {}),
       inputTokens: integerField(parsed, "inputTokens") ?? -1,
       outputTokens: integerField(parsed, "outputTokens") ?? -1,
+      ...(integerField(parsed, "cacheTokens") !== undefined ? { cacheTokens: integerField(parsed, "cacheTokens") } : {}),
       ...(numberField(parsed, "costUsd") !== undefined ? { costUsd: numberField(parsed, "costUsd") } : {}),
       ts: stringField(parsed, "ts") ?? "",
     });
@@ -360,19 +414,37 @@ function usageSourceFromArrayField(value: unknown, key: string): UsageSource | u
 
 function explicitUsageSource(value: unknown): UsageSource | undefined {
   const usage = explicitUsageJson(value);
-  return usage ? { usage, carrier: usage } : undefined;
+  if (usage) return { usage, carrier: usage };
+  const parsed = explicitUsageText(value);
+  return parsed ? { usage: parsed, carrier: parsed } : undefined;
 }
 
 function hasTokenCounts(record: Record<string, unknown>): boolean {
   const inputTokens = integerField(record, "inputTokens")
     ?? integerField(record, "input_tokens")
     ?? integerField(record, "promptTokens")
-    ?? integerField(record, "prompt_tokens");
+    ?? integerField(record, "prompt_tokens")
+    ?? integerField(record, "prompt_eval_count")
+    ?? integerField(record, "promptEvalCount");
   const outputTokens = integerField(record, "outputTokens")
     ?? integerField(record, "output_tokens")
     ?? integerField(record, "completionTokens")
-    ?? integerField(record, "completion_tokens");
+    ?? integerField(record, "completion_tokens")
+    ?? integerField(record, "eval_count")
+    ?? integerField(record, "evalCount");
   return inputTokens !== undefined && outputTokens !== undefined;
+}
+
+function cacheTokensFromUsage(usage: Record<string, unknown>): number {
+  const explicit = integerField(usage, "cacheTokens")
+    ?? integerField(usage, "cache_tokens");
+  if (explicit !== undefined) return explicit;
+  return [
+    integerField(usage, "cacheReadInputTokens"),
+    integerField(usage, "cache_read_input_tokens"),
+    integerField(usage, "cacheCreationInputTokens"),
+    integerField(usage, "cache_creation_input_tokens"),
+  ].reduce<number>((sum, value) => sum + (value ?? 0), 0);
 }
 
 function explicitUsageJson(value: unknown): Record<string, unknown> | undefined {
@@ -386,6 +458,28 @@ function explicitUsageJson(value: unknown): Record<string, unknown> | undefined 
   } catch {
     return undefined;
   }
+}
+
+function explicitUsageText(value: unknown): Record<string, unknown> | undefined {
+  const stdout = isRecord(value) && typeof value.stdout === "string" ? value.stdout : "";
+  const stderr = isRecord(value) && typeof value.stderr === "string" ? value.stderr : "";
+  const text = `${stdout}\n${stderr}`;
+  const inputTokens = tokenCountFromText(text, /(?:input|prompt)\s+tokens?\D+([\d,]+)/i);
+  const outputTokens = tokenCountFromText(text, /(?:output|completion)\s+tokens?\D+([\d,]+)/i);
+  if (inputTokens === undefined || outputTokens === undefined) return undefined;
+  const model = text.match(/\bmodel(?:\s+id)?\s*[:=]\s*([A-Za-z0-9_.:\/-]+)/i)?.[1];
+  return {
+    inputTokens,
+    outputTokens,
+    ...(model ? { model } : {}),
+  };
+}
+
+function tokenCountFromText(text: string, pattern: RegExp): number | undefined {
+  const match = text.match(pattern);
+  if (!match?.[1]) return undefined;
+  const parsed = Number.parseInt(match[1].replace(/,/g, ""), 10);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 function firstUsageSource(...values: Array<UsageSource | undefined>): UsageSource | undefined {
@@ -411,6 +505,14 @@ function numberField(record: unknown, key: string): number | undefined {
 function integerField(record: unknown, key: string): number | undefined {
   const value = numberField(record, key);
   return value !== undefined && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+function lastActiveAtFor(events: readonly Pick<LlmUsageEvent, "ts">[]): string | null {
+  let latest = "";
+  for (const event of events) {
+    if (event.ts > latest) latest = event.ts;
+  }
+  return latest || null;
 }
 
 function round(value: number, digits: number): number {

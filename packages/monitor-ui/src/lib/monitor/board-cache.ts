@@ -19,20 +19,24 @@ export interface LlmUsageModelRollup {
   model: string;
   inputTokens: number;
   outputTokens: number;
+  cacheTokens?: number;
   totalTokens: number;
   costUsd: number | null;
   costStatus: "recorded" | "not_recorded";
   runs: number;
+  lastActiveAt?: string | null;
 }
 
 export interface LlmUsageDayRollup {
   day: string;
   inputTokens: number;
   outputTokens: number;
+  cacheTokens?: number;
   totalTokens: number;
   costUsd: number | null;
   costStatus: "recorded" | "not_recorded";
   runs: number;
+  lastActiveAt?: string | null;
   byModel: LlmUsageModelRollup[];
 }
 
@@ -42,18 +46,30 @@ export interface LlmUsageSourceStatus {
   reason?: string;
 }
 
+export interface LlmUsageActiveCall {
+  id: string;
+  agent: string;
+  model: string;
+  startedAt: string;
+  runId?: string;
+  taskId?: string;
+}
+
 export interface LlmUsageAggregate {
   status: "recorded" | "not_recorded";
   message?: string;
   inputTokens: number;
   outputTokens: number;
+  cacheTokens?: number;
   totalTokens: number;
   costUsd: number | null;
   costStatus: "recorded" | "not_recorded";
   runs: number;
+  lastActiveAt?: string | null;
   byModel: LlmUsageModelRollup[];
   byDay: LlmUsageDayRollup[];
   sourceStatus?: LlmUsageSourceStatus[];
+  activeCalls?: LlmUsageActiveCall[];
 }
 
 export interface MonitorEvent {

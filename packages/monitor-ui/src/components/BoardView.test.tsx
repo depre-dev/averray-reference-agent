@@ -76,50 +76,68 @@ describe("BoardView — rich-mix board (open stream)", () => {
       ...richBoard,
       llmUsage: {
         status: "recorded",
-        inputTokens: 100,
-        outputTokens: 40,
-        totalTokens: 140,
-        costUsd: 0.0123,
-        costStatus: "recorded",
-        runs: 1,
-        message: "LLM usage includes only runner results that emitted whitelisted cost/token counters.",
-        byModel: [],
+        inputTokens: 48_000,
+        outputTokens: 9_000,
+        cacheTokens: 2_000,
+        totalTokens: 59_000,
+        costUsd: null,
+        costStatus: "not_recorded",
+        runs: 12,
+        lastActiveAt: "2026-05-31T10:28:00.000Z",
+        message: "LLM usage includes only runner results that emitted whitelisted token counters.",
+        byModel: [
+          {
+            agent: "claude",
+            model: "claude-sonnet-4-5",
+            inputTokens: 48_000,
+            outputTokens: 9_000,
+            cacheTokens: 2_000,
+            totalTokens: 59_000,
+            costUsd: null,
+            costStatus: "not_recorded",
+            runs: 12,
+            lastActiveAt: "2026-05-31T10:28:00.000Z",
+          },
+        ],
         byDay: [
           {
             day: "2026-05-31",
-            inputTokens: 100,
-            outputTokens: 40,
-            totalTokens: 140,
-            costUsd: 0.0123,
-            costStatus: "recorded",
-            runs: 1,
-            byModel: [
-              {
-                agent: "claude",
-                model: "claude-sonnet-4-5",
-                inputTokens: 100,
-                outputTokens: 40,
-                totalTokens: 140,
-                costUsd: 0.0123,
-                costStatus: "recorded",
-                runs: 1,
-              },
-            ],
+            inputTokens: 48_000,
+            outputTokens: 9_000,
+            cacheTokens: 2_000,
+            totalTokens: 59_000,
+            costUsd: null,
+            costStatus: "not_recorded",
+            runs: 12,
+            lastActiveAt: "2026-05-31T10:28:00.000Z",
+            byModel: [],
           },
         ],
         sourceStatus: [
           { agent: "claude", status: "recorded" },
-          { agent: "codex", status: "not_reported", reason: "Codex usage is not reported by the CLI yet." },
+          { agent: "codex", status: "not_reported", reason: "Codex CLI does not report usage." },
+        ],
+        activeCalls: [
+          {
+            id: "call-1",
+            agent: "claude",
+            model: "claude-sonnet-4-5",
+            taskId: "task-1",
+            startedAt: "2026-05-31T10:29:00.000Z",
+          },
         ],
       },
     };
-    const { getByRole, getByText } = render(<BoardView board={board} status="open" />);
+    const { getAllByText, getByRole, getByText } = render(<BoardView board={board} status="open" />);
     expect(getByRole("region", { name: "LLM usage" })).toBeTruthy();
-    expect(getByText("2026-05-31")).toBeTruthy();
-    expect(getByText("140 tokens")).toBeTruthy();
-    expect(getByText("claude-sonnet-4-5")).toBeTruthy();
-    expect(getByText("$0.0123")).toBeTruthy();
-    expect(getByText("Codex usage is not reported by the CLI yet.")).toBeTruthy();
+    expect(getByText("12 calls in board window")).toBeTruthy();
+    expect(getByText("59K tokens total")).toBeTruthy();
+    expect(getAllByText("claude · claude-sonnet-4-5").length).toBeGreaterThan(0);
+    expect(getByText("12 calls")).toBeTruthy();
+    expect(getByText("48K in")).toBeTruthy();
+    expect(getByText("9K out")).toBeTruthy();
+    expect(getByText("59K total")).toBeTruthy();
+    expect(getByText("Codex CLI does not report usage.")).toBeTruthy();
   });
 
   test("renders a plain-language usage explanation when no source emits counters", () => {

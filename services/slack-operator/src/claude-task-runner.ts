@@ -23,7 +23,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { hostname } from "node:os";
 import { fileURLToPath } from "node:url";
-import { recordLlmUsageFromResult } from "@avg/averray-mcp/llm-usage";
+import { beginLlmUsageCall, recordLlmUsageFromResult } from "@avg/averray-mcp/llm-usage";
 
 import {
   budgetGate,
@@ -54,6 +54,7 @@ export interface ClaudeTaskRunnerConfig {
   command?: string;
   args: string[];
   cwd?: string;
+  model?: string;
   pollIntervalMs: number;
   timeoutMs: number;
   outputTailBytes: number;
@@ -112,6 +113,7 @@ export function parseClaudeTaskRunnerConfig(env: NodeJS.ProcessEnv = process.env
     ...(env.CLAUDE_TASK_RUNNER_COMMAND ? { command: env.CLAUDE_TASK_RUNNER_COMMAND } : {}),
     args: parseArgs(env.CLAUDE_TASK_RUNNER_ARGS),
     ...(env.CLAUDE_TASK_RUNNER_CWD ? { cwd: env.CLAUDE_TASK_RUNNER_CWD } : {}),
+    ...(env.CLAUDE_TASK_RUNNER_MODEL ? { model: env.CLAUDE_TASK_RUNNER_MODEL } : {}),
     pollIntervalMs: positiveInt(env.CLAUDE_TASK_RUNNER_POLL_INTERVAL_MS, 10_000),
     timeoutMs: positiveInt(env.CLAUDE_TASK_RUNNER_TIMEOUT_MS, 30 * 60_000),
     outputTailBytes: positiveInt(env.CLAUDE_TASK_RUNNER_OUTPUT_TAIL_BYTES, 12_000),
@@ -186,10 +188,17 @@ export async function runClaudeTaskRunnerOnce(
 
   await heartbeat(config, "running", `${taskAgentLabel(config.agent)} runner claimed ${taskLabel(claimed)}.`, deps.now, claimed.id);
 
+  const endLlmUsageCall = beginLlmUsageCall({
+    agent: config.agent,
+    model: config.model,
+    taskId: claimed.id,
+    ...(claimed.correlationId ? { runId: claimed.correlationId } : {}),
+  });
   try {
     const result = await executor(claimed, config, { mode });
     await recordLlmUsageFromResult({
       agent: config.agent,
+      ...(config.model ? { model: config.model } : {}),
       taskId: claimed.id,
       ...(claimed.correlationId ? { runId: claimed.correlationId } : {}),
       result,
@@ -221,6 +230,8 @@ export async function runClaudeTaskRunnerOnce(
     const task = await failCodexTask(claimed.id, { path: config.path, failureReason: reason });
     await heartbeat(config, "error", reason, undefined, claimed.id);
     return { status: "failed", task: task ?? claimed, reason };
+  } finally {
+    endLlmUsageCall();
   }
 }
 
