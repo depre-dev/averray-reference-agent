@@ -564,6 +564,60 @@ describe("generateHermesReply", () => {
     expect(text).toContain("live reply");
   });
 
+  it("strips chain-of-thought planning and returns the answer when content is empty (deepseek-v4-pro)", async () => {
+    const fetchFn = async () =>
+      jsonResponse({
+        choices: [{
+          message: {
+            role: "assistant",
+            content: "",
+            reasoning:
+              "I should acknowledge Pascal and keep it under 4 sentences. I'll mention the board is quiet and reassure him. Everything's quiet, Pascal — no decisions are waiting on you right now.",
+          },
+        }],
+      });
+    const text = await generateHermesReply(baseContext(), { apiKey, baseUrl, fetchFn: fetchFn as typeof fetch });
+    expect(text).toContain("Everything's quiet, Pascal");
+    // The meta-planning never reaches the operator.
+    expect(text).not.toContain("I should");
+    expect(text).not.toContain("I'll mention");
+    expect(text).not.toContain("under 4 sentences");
+  });
+
+  it("returns null when the reasoning is pure planning with no answer (no chain-of-thought leak)", async () => {
+    const fetchFn = async () =>
+      jsonResponse({
+        choices: [{
+          message: {
+            content: "",
+            reasoning: "I should keep it under 4 sentences. Let me think about how to phrase this for Pascal.",
+          },
+        }],
+      });
+    const text = await generateHermesReply(baseContext(), { apiKey, baseUrl, fetchFn: fetchFn as typeof fetch });
+    expect(text).toBeNull();
+  });
+
+  it("requests a low reasoning budget so the answer lands in content (ollama.com/v1)", async () => {
+    let sentBody: Record<string, unknown> | undefined;
+    const fetchFn = async (_url: string, init: RequestInit) => {
+      sentBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+      return jsonResponse({ choices: [{ message: { content: "Watching it." } }] });
+    };
+    await generateHermesReply(baseContext(), { apiKey, baseUrl, fetchFn: fetchFn as typeof fetch });
+    expect(sentBody?.reasoning_effort).toBe("low");
+  });
+
+  it("honors an explicit reasoningEffort override", async () => {
+    let sentBody: Record<string, unknown> | undefined;
+    const fetchFn = async (_url: string, init: RequestInit) => {
+      sentBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+      return jsonResponse({ choices: [{ message: { content: "Watching it." } }] });
+    };
+    await generateHermesReply(baseContext(), { apiKey, baseUrl, reasoningEffort: "high", fetchFn: fetchFn as typeof fetch });
+    expect(sentBody?.reasoning_effort).toBe("high");
+  });
+
   it("returns null when the fetch throws", async () => {
     const fetchFn = async () => { throw new Error("network down"); };
     const text = await generateHermesReply(baseContext(), { apiKey, baseUrl, fetchFn: fetchFn as typeof fetch });

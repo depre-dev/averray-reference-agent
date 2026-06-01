@@ -124,6 +124,14 @@ export interface GenerateHermesReplyOptions {
   model?: string;
   /** Hard cap so a slow LLM call can't wedge the chat. Default 6000ms. */
   timeoutMs?: number;
+  /**
+   * OpenAI-compat reasoning budget sent to ollama.com/v1. Defaults to "low"
+   * so the model spends its tokens on the answer (in `content`) rather than
+   * chain-of-thought (which lands in `reasoning` and used to leak as the
+   * reply). The strip-the-planning fallback in extractReplyText handles any
+   * residual reasoning-only responses.
+   */
+  reasoningEffort?: "low" | "medium" | "high";
   /** Injection point so tests don't need to hit the network. */
   fetchFn?: typeof fetch;
   /** Optional usage identity for durable LLM activity events. */
@@ -180,6 +188,8 @@ export async function generateHermesReply(
     stream: false,
     max_tokens: 220,
     temperature: 0.7,
+    // Keep the token budget on the answer, not chain-of-thought (ollama.com/v1).
+    reasoning_effort: options.reasoningEffort ?? "low",
   };
 
   const controller = new AbortController();
@@ -240,6 +250,8 @@ export async function generateHermesBoardNarration(
     stream: false,
     max_tokens: 180,
     temperature: 0.65,
+    // Keep the token budget on the answer, not chain-of-thought (ollama.com/v1).
+    reasoning_effort: options.reasoningEffort ?? "low",
   };
 
   const controller = new AbortController();
@@ -839,7 +851,73 @@ function extractReplyText(json: unknown): string | null {
   if (!first || typeof first !== "object") return null;
   const message = (first as { message?: unknown }).message;
   if (!message || typeof message !== "object") return null;
-  return firstNonEmptyTextField(message, ["content", "reasoning", "reasoning_content"], 1200);
+
+  // Content-first: a clean answer in `content` is always preferred and is
+  // returned verbatim.
+  const content = firstNonEmptyTextField(message, ["content"], 1200);
+  if (content) return content;
+
+  // DeepSeek-style fallback: the model emitted only chain-of-thought into
+  // `reasoning` / `reasoning_content` with an empty `content`. Distill the
+  // actual answer out so we never surface the model's meta-planning
+  // ("I should acknowledge… keep it under 4 sentences") as Hermes's reply.
+  const reasoning = firstNonEmptyTextField(message, ["reasoning", "reasoning_content"], 4000);
+  if (!reasoning) return null;
+  const distilled = distillAnswerFromReasoning(reasoning);
+  return distilled ? distilled.slice(0, 1200) : null;
+}
+
+// Sentence openers that mark a chain-of-thought planning line rather than the
+// answer itself (anchored at the start so they don't trip on real answers that
+// merely contain the word mid-sentence).
+const PLANNING_SENTENCE =
+  /^(?:let me\b|let's\b|i'(?:ll|m|d)\b|i (?:will|am|would|should|need to|want to|can|could|must|have to|think)\b|first,|next,|then,|okay,|ok,|so,|now,|alright,|the user\b|the operator\b|they(?:'re| are)\b|maybe i\b|keep it\b|keep this\b|keep things\b|make sure\b|remember\b)/i;
+
+// Phrases that betray the model planning the *shape* of its reply (length /
+// voice / format constraints) wherever they appear in the sentence.
+const PLANNING_HINT =
+  /\b(?:under \d+ words|\d+\s*(?:-|–|to)\s*\d+ sentences?|in hermes'?s? voice|chain[- ]of[- ]thought|stay (?:concise|brief|short)|be (?:concise|brief)|keep it (?:short|brief|concise|under)|don'?t (?:over|ramble|repeat))\b/i;
+
+function isPlanningSentence(sentence: string): boolean {
+  const s = sentence.trim();
+  if (!s) return true;
+  return PLANNING_SENTENCE.test(s) || PLANNING_HINT.test(s);
+}
+
+function splitSentences(text: string): string[] {
+  return text
+    .replace(/\s+/g, " ")
+    .split(/(?<=[.!?])\s+(?=[A-Z0-9"'(])/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Pull the answer out of a reasoning-only response. Reasoners typically plan
+ * ("I should…", "keep it under 4 sentences") and then write the answer last,
+ * so we prefer the final paragraph, drop the meta-planning sentences, and keep
+ * the answer-like tail. A response that is *only* planning (e.g. truncated
+ * mid-thought) yields "" so the caller falls back to the labeled template
+ * rather than leaking chain-of-thought.
+ */
+function distillAnswerFromReasoning(text: string): string {
+  const normalized = text.replace(/\r\n/g, "\n").trim();
+  if (!normalized) return "";
+  const paragraphs = normalized.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  const candidates = paragraphs.length > 1
+    ? [paragraphs[paragraphs.length - 1]!, normalized]
+    : [normalized];
+  for (const candidate of candidates) {
+    const sentences = splitSentences(candidate);
+    if (sentences.length === 0) continue;
+    const answerLike = sentences.filter((s) => !isPlanningSentence(s));
+    if (answerLike.length === 0) continue;
+    // No planning detected ⇒ it's already a clean answer; keep it whole.
+    if (answerLike.length === sentences.length) return candidate.trim();
+    // Planning was present and stripped ⇒ keep the concise answer tail.
+    return answerLike.slice(-3).join(" ").trim();
+  }
+  return "";
 }
 
 function firstNonEmptyTextField(record: object, keys: readonly string[], max: number): string | null {
