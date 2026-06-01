@@ -114,6 +114,15 @@ export interface CardSourceFailure {
   lastGoodAt?: string;
 }
 
+export interface CardWorkingNow {
+  agent: AgentType;
+  label: string;
+  source: "runner" | "mission" | "classifier";
+  runnerId?: string;
+  taskId?: string;
+  since?: string;
+}
+
 export interface HermesDecisionSubject {
   type: "task" | "card" | "repo" | "pr" | "mission" | "digest" | "autopilot_session";
   id: string;
@@ -189,6 +198,8 @@ export interface CardBase {
   discussion?: CardDiscussionMessage[];
   /** Source read / heartbeat failure behind a degraded card. */
   sourceFailure?: CardSourceFailure;
+  /** Agent currently working this in-flight card, backed by live runner/classifier state. */
+  workingNow?: CardWorkingNow;
 }
 
 /** PR card — file changes, Hermes verdict, operator-review action. */

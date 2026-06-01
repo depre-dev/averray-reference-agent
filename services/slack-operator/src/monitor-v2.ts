@@ -124,6 +124,15 @@ export interface CardRunnerHeartbeat {
   online: boolean;
 }
 
+export interface CardWorkingNow {
+  agent: AgentType;
+  label: string;
+  source: "runner" | "mission" | "classifier";
+  runnerId?: string;
+  taskId?: string;
+  since?: string;
+}
+
 /** One CI check run, for the per-check breakdown under the checks bar. */
 export interface CardCheckRun {
   name: string;
@@ -270,6 +279,8 @@ export interface BoardCard {
   runnerHeartbeat?: CardRunnerHeartbeat;
   /** Real task lifecycle events recorded by the queue, used for Hermes timeline narration. */
   taskEvents?: TaskTimelineEvent[];
+  /** Agent currently working this in-flight card, backed by live runner/classifier state. */
+  workingNow?: CardWorkingNow;
   /** Per-check CI breakdown (non-done cards) — the list under the bar. */
   checkRuns?: CardCheckRun[];
   /** Hermes review findings (non-done cards) — the "why review" detail. */
@@ -585,6 +596,84 @@ function asTaskTimelineStatus(value: unknown): TaskTimelineEvent["status"] | und
     return value;
   }
   return undefined;
+}
+
+const WATCH_LANES = new Set<Lane>(["codex-needed", "hermes-checking", "release-queue", "deploying"]);
+
+function isWatchLane(lane: Lane): boolean {
+  return WATCH_LANES.has(lane);
+}
+
+function defaultWorkingNowLabel(agent: AgentType): string {
+  if (agent === "codex") return "Codex fixing";
+  if (agent === "claude") return "Claude fixing";
+  if (agent === "test-writer") return "Test-writer writing tests";
+  if (agent === "security") return "Security reviewing";
+  if (agent === "docs") return "Docs updating";
+  if (agent === "hermes") return "Hermes reviewing";
+  return "External agent working";
+}
+
+function workingNowFromRunningTask(
+  task: Record<string, unknown>,
+  runner: Record<string, unknown> | undefined,
+): CardWorkingNow | undefined {
+  if (asString(task.status) !== "running") return undefined;
+  if (!runner || asString(runner.status) !== "running") return undefined;
+  const taskId = asString(task.id);
+  if (!taskId || asString(runner.activeTaskId) !== taskId) return undefined;
+  const persisted = asRecord(task.workingNow);
+  const agent = agentTypeFromTaskAgent(asString(persisted?.agent) ?? task.agent);
+  const label = asString(persisted?.label) ?? defaultWorkingNowLabel(agent);
+  const runnerId = asString(persisted?.runnerId) ?? asString(task.runnerId) ?? asString(runner.runnerId);
+  const since = asString(persisted?.since) ?? asString(task.startedAt) ?? asString(runner.updatedAt);
+  return {
+    agent,
+    label,
+    source: "runner",
+    taskId,
+    ...(runnerId ? { runnerId } : {}),
+    ...(since ? { since } : {}),
+  };
+}
+
+function workingNowFromMissionRun(run: Record<string, unknown> | undefined): CardWorkingNow | undefined {
+  if (!run || asString(run.status) !== "running") return undefined;
+  const taskId = asString(run.id);
+  const runnerId = asString(run.runnerId) ?? asString(run.agentName);
+  const since = asString(run.startedAt) ?? asString(run.claimedAt) ?? asString(run.updatedAt);
+  return {
+    agent: "hermes",
+    label: "Hermes reviewing",
+    source: "mission",
+    ...(taskId ? { taskId } : {}),
+    ...(runnerId ? { runnerId } : {}),
+    ...(since ? { since } : {}),
+  };
+}
+
+function workingNowAgentFromOwner(owner: string | undefined): AgentType | undefined {
+  const value = (owner ?? "").toLowerCase();
+  if (value.includes("codex")) return "codex";
+  if (value.includes("claude")) return "claude";
+  if (value.includes("test-writer") || value.includes("test writer")) return "test-writer";
+  if (value.includes("security")) return "security";
+  if (value.includes("docs")) return "docs";
+  if (value.includes("hermes")) return "hermes";
+  return undefined;
+}
+
+function workingNowFromClassifier(card: BoardCard, item: HermesBoardCardSnapshot): CardWorkingNow | undefined {
+  if (!isWatchLane(card.lane) || card.type === "task" || card.type === "mission" || card.lane === "codex-needed") {
+    return undefined;
+  }
+  const agent = workingNowAgentFromOwner(item.owner);
+  if (!agent) return undefined;
+  return {
+    agent,
+    label: defaultWorkingNowLabel(agent),
+    source: "classifier",
+  };
 }
 
 // Self-healing task titles embed the namespaced surface key
@@ -1359,6 +1448,13 @@ export function enrichBoardCard(
     if (status) card.missionStatus = status as MissionStatus;
     const mission = mapMissionReport(ctx.missionRun);
     if (mission) card.mission = mission;
+    const workingNow = workingNowFromMissionRun(ctx.missionRun);
+    if (workingNow) card.workingNow = workingNow;
+  }
+
+  const taskWorkingNow = ctx.codexTask ? workingNowFromRunningTask(ctx.codexTask, ctx.runner) : undefined;
+  if (taskWorkingNow && isWatchLane(card.lane)) {
+    card.workingNow = taskWorkingNow;
   }
 
   // Codex task cards: prompt / output / failure / runner liveness.
@@ -1395,6 +1491,11 @@ export function enrichBoardCard(
       card.state = "source-offline";
       card.sourceFailure = runnerFailure;
     }
+  }
+
+  if (!card.workingNow) {
+    const classifierWorkingNow = workingNowFromClassifier(card, item);
+    if (classifierWorkingNow) card.workingNow = classifierWorkingNow;
   }
 
   return card;
@@ -1496,6 +1597,8 @@ export function synthesizeTaskCards(
         card.runnerHeartbeat = { lastSeen, online: rStatus === "running" || rStatus === "idle" };
       }
     }
+    const workingNow = workingNowFromRunningTask(task, runner);
+    if (workingNow) card.workingNow = workingNow;
     out.push(card);
   }
   return out;
