@@ -8,14 +8,14 @@ import {
 describe("signal-labels", () => {
   test("maps known guardrail enum codes to exact human labels", () => {
     expect(humanizeSignalCode("dispatch_budget_exhausted"))
-      .toBe("Dispatch budget used up - paused until reset");
+      .toBe("Dispatch budget used up — paused until reset");
     expect(humanizeSignalCode("open_fix_cap_reached"))
-      .toBe("Self-healing fix cap reached - won't propose more");
+      .toBe("Self-healing fix cap reached — won't propose more");
     expect(humanizeSignalCode("duplicate_signal"))
-      .toBe("Skipped - duplicate of an existing fix");
+      .toBe("Skipped — duplicate of an existing fix");
     expect(humanizeSignalCode("routed_fix")).toBe("Routed fix proposal");
     expect(humanizeSignalCode("not_auto_fixable"))
-      .toBe("Needs human diagnosis - not a code-agent fix");
+      .toBe("Needs human diagnosis — not a code-agent fix");
   });
 
   test("keeps unknown enum-like codes readable without dropping the raw token", () => {
@@ -27,6 +27,6 @@ describe("signal-labels", () => {
 
   test("humanizes enum tokens inside sentences", () => {
     expect(humanizeSignalText("Reason: dispatch_budget_exhausted; next duplicate_signal."))
-      .toBe("Reason: Dispatch budget used up - paused until reset; next Skipped - duplicate of an existing fix.");
+      .toBe("Reason: Dispatch budget used up — paused until reset; next Skipped — duplicate of an existing fix.");
   });
 });

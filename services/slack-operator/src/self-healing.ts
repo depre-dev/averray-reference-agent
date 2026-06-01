@@ -88,6 +88,19 @@ export function testbedSurfaceKey(targetUrl: string): string {
   return `testbed:${key || "unknown"}`;
 }
 
+/**
+ * Operator-facing label for a surface key. Surface keys are namespaced for
+ * dedup (e.g. "testbed:testbed-mission-7", "deploy-verify:abc123"); the
+ * leading "<namespace>:" is internal plumbing and only confuses operators
+ * (it produces titles like "testbed:testbed-mission-7"). Strip the first
+ * namespace segment for display, keeping the meaningful remainder.
+ */
+export function surfaceLabel(surface: string): string {
+  const value = (surface ?? "").trim();
+  const stripped = value.replace(/^[a-z0-9_-]+:/i, "");
+  return stripped || value;
+}
+
 export interface HealingDecision {
   action: HealingAction;
   reason: HealingReason;

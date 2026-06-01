@@ -18,9 +18,17 @@ describe("Lane", () => {
   test("expanded empty lane shows the empty placeholder", () => {
     const { container, getByText } = render(<Lane lane={lane} expanded count={0} />);
     expect(container.querySelector("section.hm-lane")).toBeTruthy();
-    expect(getByText("No operator review right now.")).toBeTruthy();
+    expect(getByText("Nothing waiting on your risk decision.")).toBeTruthy();
     // Empty lane is not the --expanded variant.
     expect((container.querySelector(".hm-lane") as HTMLElement).className).not.toContain("hm-lane--expanded");
+  });
+
+  test("empty copy is per-lane, not the awkward 'No {name} right now.' template", () => {
+    const done: LaneDescriptor = { id: "done", name: "Done", action: "Release history" };
+    const { getByText, queryByText } = render(<Lane lane={done} expanded count={0} />);
+    expect(getByText("Nothing shipped yet.")).toBeTruthy();
+    // The old auto-generated "No done right now." is gone.
+    expect(queryByText("No done right now.")).toBeNull();
   });
 
   test("expanded populated lane renders children and the --expanded variant", () => {
