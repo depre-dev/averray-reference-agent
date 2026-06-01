@@ -7,6 +7,7 @@ import { CoPilotRail } from "./CoPilotRail.js";
 import { FIXTURE_CARDS } from "../../lib/monitor/fixtures.js";
 import type { BoardCard } from "../../lib/monitor/card-types.js";
 import type { CollaborationMessage } from "../../lib/monitor/collaboration.js";
+import type { BoardNowBanner } from "../../lib/monitor/board-state.js";
 
 afterEach(cleanup);
 
@@ -19,17 +20,24 @@ function msg(id: string, author: CollaborationMessage["author"], text: string): 
 }
 
 const card548 = FIXTURE_CARDS.find((c) => c.id === "agent #548") as BoardCard;
+const banner: BoardNowBanner = {
+  tone: "action",
+  eyebrow: "Board now",
+  headline: "1 card needs your review decision; automation has gone as far as it safely can.",
+  sub: "Most urgent: agent #548.",
+  primaryActionId: "agent #548",
+};
 
 describe("CoPilotRail", () => {
   test("renders the collaboration feed as turns", async () => {
     const fetcher = vi.fn(async () => [msg("1", "hermes", "Pre-check passed on #548.")]);
     const { container } = render(<CoPilotRail collaboration={{ fetcher, refreshIntervalMs: 0 }} />, { wrapper });
-    await waitFor(() => expect(within(container).getByText("Pre-check passed on #548.")).toBeTruthy());
+    await waitFor(() => expect(within(container).getByText(/Pre-check passed on #548/)).toBeTruthy());
   });
 
   test("is inert (no fetch, empty-state copy) when collaboration is omitted", () => {
     const { getByText } = render(<CoPilotRail />, { wrapper });
-    expect(getByText(/Nothing asked yet/)).toBeTruthy();
+    expect(getByText(/No real Hermes activity has been logged yet/)).toBeTruthy();
   });
 
   test("the scope chip reflects the focused card", async () => {
@@ -51,7 +59,7 @@ describe("CoPilotRail", () => {
       <CoPilotRail focusedCard={card548} collaboration={{ fetcher, poster, refreshIntervalMs: 0 }} />,
       { wrapper },
     );
-    await waitFor(() => expect(within(container).getByText(/Nothing asked yet/)).toBeTruthy());
+    await waitFor(() => expect(within(container).getByText(/No real Hermes activity has been logged yet/)).toBeTruthy());
 
     const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "what's blocking?" } });
@@ -63,7 +71,7 @@ describe("CoPilotRail", () => {
     });
     // Hermes's reply lands on the revalidate triggered by ask().
     await waitFor(() =>
-      expect(within(container).getByText("CI is still running — 1 check left.")).toBeTruthy(),
+      expect(within(container).getByText(/CI is still running/)).toBeTruthy(),
     );
   });
 
@@ -77,5 +85,33 @@ describe("CoPilotRail", () => {
     fireEvent.change(input, { target: { value: "/mission https://staging.averray.com/x" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onSpawnMission).toHaveBeenCalledWith("https://staging.averray.com/x");
+  });
+
+  test("shows proactive board activity and links it back to a card", () => {
+    const onCardClick = vi.fn();
+    const taskCard: BoardCard = {
+      ...card548,
+      id: "task-activity-1",
+      type: "task",
+      agentType: "codex",
+      title: "Repair failed mission",
+      summary: "Hermes self-healing proposal for a failed testbed mission.",
+      lane: "codex-needed",
+      prompt: "Repair the failed mission.",
+      taskStatus: "proposed",
+      riskTier: "low",
+    };
+    const { getByText, getByRole } = render(
+      <CoPilotRail
+        boardCards={[taskCard]}
+        boardBanner={banner}
+        onCardClick={onCardClick}
+        collaboration={{ fetcher: async () => [], refreshIntervalMs: 0 }}
+      />,
+      { wrapper },
+    );
+    expect(getByText(/Proposed Codex work for Repair failed mission/)).toBeTruthy();
+    fireEvent.click(getByRole("button", { name: "Open card task-activity-1" }));
+    expect(onCardClick).toHaveBeenCalledWith("task-activity-1");
   });
 });

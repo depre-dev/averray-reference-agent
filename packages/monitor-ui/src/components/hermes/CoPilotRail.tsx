@@ -9,10 +9,14 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { BoardCard, CreateTaskInput } from "../../lib/monitor/card-types.js";
 import type { BacklogSuggestion, BacklogSuggestionsResponse } from "../../lib/monitor/backlog-suggestions.js";
+import type { BoardNowBanner as BoardNowBannerData } from "../../lib/monitor/board-state.js";
 import { relatedPrForCard } from "../../lib/monitor/collaboration.js";
+import {
+  buildHermesActivityFeed,
+  type HermesActivityEntry,
+} from "../../lib/monitor/activity-feed.js";
 import { useCollaboration, type UseCollaborationOptions } from "../../hooks/useCollaboration.js";
 import { AskHermesComposer } from "./AskHermesComposer.js";
-import { HermesTurn } from "./HermesTurn.js";
 
 export interface CoPilotRailProps {
   onSpawnMission?: (url: string) => void;
@@ -24,6 +28,8 @@ export interface CoPilotRailProps {
   backlogSuggestions?: BacklogSuggestionsResponse;
   /** Board cards used to link suggestions to their source card. */
   boardCards?: readonly BoardCard[];
+  /** Current board "what needs you" summary. Appended to the activity feed. */
+  boardBanner?: BoardNowBannerData;
   /** Focused card — scopes Ask-Hermes questions + the scope chip. */
   focusedCard?: BoardCard;
   /** Open a related card from a linked follow-up suggestion. */
@@ -52,6 +58,7 @@ export function CoPilotRail({
   onCreateTask,
   backlogSuggestions,
   boardCards,
+  boardBanner,
   focusedCard,
   onCardClick,
   collaboration,
@@ -66,12 +73,26 @@ export function CoPilotRail({
   const { messages, ask } = useCollaboration(collaboration ?? { enabled: false });
   const relatedPr = relatedPrForCard(focusedCard);
   const streamRef = useRef<HTMLDivElement>(null);
+  const activity = useMemo(
+    () => buildHermesActivityFeed({
+      cards: boardCards ?? [],
+      messages,
+      banner: boardBanner ?? {
+        tone: "calm",
+        eyebrow: "Board now",
+        headline: "Nothing waits on you. Hermes will narrate real board events when they arrive.",
+        sub: "No current board summary was provided to the rail.",
+        primaryActionId: undefined,
+      },
+    }),
+    [boardBanner, boardCards, messages],
+  );
 
   // Keep the newest turn in view as the feed grows.
   useEffect(() => {
     const el = streamRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages.length]);
+  }, [activity.length]);
 
   return (
     <aside className="hm-hermes" role="complementary" aria-label="Hermes co-pilot">
@@ -84,7 +105,7 @@ export function CoPilotRail({
           <div className="hm-hermes-title">Hermes co-pilot</div>
           <div className="hm-hermes-sub">
             <span className="pulse" aria-hidden />
-            Ask about any card · context: {focusedCard?.id ?? "whole board"}
+            Live activity · context: {focusedCard?.id ?? "whole board"}
           </div>
         </div>
       </div>
@@ -95,15 +116,17 @@ export function CoPilotRail({
         onCardClick={onCardClick}
       />
 
-      <div className="hm-hermes-stream" ref={streamRef} aria-live="polite">
-        {messages.length === 0 ? (
-          <div className="hm-lane-empty">
-            Nothing asked yet. Ask Hermes about a card or the board below — replies show up here.
-          </div>
-        ) : (
-          messages.map((m) => <HermesTurn key={m.id} turn={m} />)
-        )}
-      </div>
+      <section className="hm-activity" aria-label="Hermes activity">
+        <div className="hm-activity-head">
+          <span className="hm-kicker">Activity</span>
+          <strong>What Hermes sees</strong>
+        </div>
+        <div className="hm-hermes-stream hm-activity-stream" ref={streamRef} aria-live="polite">
+          {activity.map((entry) => (
+            <ActivityEntryRow entry={entry} onCardClick={onCardClick} key={entry.id} />
+          ))}
+        </div>
+      </section>
 
       <AskHermesComposer
         onSpawnMission={onSpawnMission}
@@ -120,6 +143,43 @@ export function CoPilotRail({
         focusToken={composerFocusToken}
       />
     </aside>
+  );
+}
+
+function ActivityEntryRow({
+  entry,
+  onCardClick,
+}: {
+  entry: HermesActivityEntry;
+  onCardClick?: (id: string) => void;
+}) {
+  const body = (
+    <>
+      <span className="hm-activity-dot" aria-hidden />
+      <span>
+        <strong>{entry.text}</strong>
+        {entry.meta ? <small>{entry.meta}</small> : null}
+      </span>
+    </>
+  );
+  if (entry.cardId && onCardClick) {
+    return (
+      <button
+        type="button"
+        className={`hm-activity-row hm-activity-row--${entry.tone}`}
+        onClick={() => onCardClick(entry.cardId!)}
+        aria-label={`Open card ${entry.cardId}`}
+      >
+        {body}
+        <span className="hm-activity-link">{entry.cardId}</span>
+      </button>
+    );
+  }
+  return (
+    <div className={`hm-activity-row hm-activity-row--${entry.tone}`}>
+      {body}
+      {entry.cardId ? <span className="hm-activity-link">{entry.cardId}</span> : null}
+    </div>
   );
 }
 
