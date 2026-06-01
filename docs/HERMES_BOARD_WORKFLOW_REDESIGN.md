@@ -50,7 +50,7 @@ Recoverable — the fixes are surgical, not a rewrite. But today it fails the bl
 
 ## 2. The board as the two loops — what the operator should actually see
 
-Map the eight lanes to **loop stages**. The operator-facing lanes are only the two ends of Loop 1 plus triage; everything else is the loops *running themselves* — calm, watch-only, no buttons.
+Map the eight lanes to **loop stages**. The operator-facing lanes are only the two ends of Loop 1 plus triage; everything else is the loops *running themselves* — a **live mirror** of the agents working (see §2.5): fully visible and legible, just with no operator *buttons*.
 
 | Lane | Loop stage | Operator meaning | Action? |
 |------|-----------|------------------|---------|
@@ -66,6 +66,26 @@ Map the eight lanes to **loop stages**. The operator-facing lanes are only the t
 **The win condition:** the operator opens the board and sees a short list of *real* decisions — mostly "ready to merge" — or a first-class **"Nothing needs you right now"** empty state. Everything else is quiet progress in the loops. The tester is **invokable** (see §5), and its fail→fix→re-run cycle runs itself until it closes or gets stuck.
 
 The operator's daily experience, in their terms: **SEE** (only what needs me) → **DECIDE** (one plain line: what happened, what Hermes recommends, what I'm approving) → **ACT** (one button that resolves it) → **RESOLVE/WATCH** (it moves to an automation lane; Hermes narrates) → **ASK** (plain-language questions answered in the rail, any time).
+
+---
+
+## 2.5 The board is a LIVE MIRROR of the team working
+
+The board is not just a decision inbox — it's a **real-time window into the team**. Like a kanban where you watch employees pick up cards, move them, and coordinate, you should be able to glance at this board and *see what's actually going on*: Hermes moving a PR to Codex, the two of them discussing a fix, who's working what. **Three tiers, not two:**
+
+1. **DECIDE — your decisions, prominent.** `operator-review` ("merge this") + `needs-attention` ("we're stuck"). Highlighted, actionable.
+2. **WATCH — the team working, a live mirror.** Hermes reviewing, Codex/Claude fixing, the tester retrying. These lanes are **alive and legible** — cards **move in real time** as the true state changes, each shows **which agent is on it now**, and the **resolution discussion is visible** (Hermes: "contract test X red" → Codex: "fixing via Y"). No operator buttons — you *observe*, you don't act.
+3. **HIDE — internal telemetry, off-board.** budget / cap / escalation → Slack + one quiet status line.
+
+**The line that matters: "watch-only" = you observe, not that it's hidden.** Agent *work and coordination* is shown vividly; only machine *bookkeeping* is hidden.
+
+**Mirror requirements (all truth-boundary — mirror REAL events, never simulate motion):**
+- **Real-time movement** — a PR visibly travels its loop: opens → Hermes checking → (operator-review | assigned to Codex/Claude → fixing → back to checking) → operator-review. The board reflects true state transitions promptly, never stale.
+- **Live attribution** — every in-flight card names the agent currently working it (Hermes reviewing / Codex fixing / Claude fixing), like an assignee. *(Extends O1 branch-prefix attribution to a "working now" state.)*
+- **Visible coordination** — surface the inter-agent discussion (C4) **on the card** (the resolution thread), not only in the global rail, so you can read *how* a fix is being worked out.
+- **Plain-language narration of moves** — Hermes narrates real handoffs as they happen ("Moved #549 to Codex — contract suite red; Codex picked it up 12s ago").
+
+> **Dependency / honesty:** the mirror is only as real as the loops. It requires the underlying events — routing decisions, handoffs, "agent working now" state, the resolution discussion — to actually be *emitted*. Where they aren't yet, **that is the build**; never animate fake motion or a discussion that didn't happen.
 
 ---
 
@@ -98,6 +118,15 @@ Ownership per coordination rules: self-heal/dispatch **decision logic = Codex**;
 - **P1-3 · One resolving primary action per operator card; none on watch-only cards.** *(REDESIGN · Claude)* — Each operator-facing card type has exactly one primary that moves/clears it (Approve & dispatch / Approve merge / Re-run / Send back). Internal/in-flight cards have **no buttons** — the absence is the signal "this isn't yours." "Approve & dispatch" authorizes an *agent to start* — **never** implies merge. **Accept:** no operator card without a working primary; no watch-only card with buttons.
 - **P1-4 · Quiet automation-health status line.** *(REDESIGN · Codex + Claude)* — Roll the (now Slack-only) capacity signals into **one** status line in the existing header/rail (gauge, not worklist). **Accept:** automation health visible in one quiet place; it never touches the decision lanes. *(No new view.)*
 
+### P1.5 — The live mirror (watch the team work)
+
+- **P1-5 · Real-time lane movement reflects true state.** *(REDESIGN · Claude + Codex)* — Cards must transition lanes *promptly* on every real state change (PR opened/routed, fix assigned, fix returned, re-review, mission re-run). Verify the snapshot/stream surfaces transitions, not just terminal states. **Accept:** a PR's journey through Loop 1 is visible as actual card movement, in near-real-time, never stale.
+- **P1-6 · Live agent attribution on in-flight cards.** *(REDESIGN · Claude; Codex for the "working-now" event)* — Every watch-lane card names the agent currently working it (Hermes reviewing / Codex fixing / Claude fixing) — an assignee, not just the author. Extends O1 attribution with a "working now" state emitted when a runner picks up a task. **Accept:** every in-flight card shows who's on it now.
+- **P1-7 · Surface coordination/discussion on the card.** *(REDESIGN · Claude)* — Bring the C4 inter-agent resolution thread onto the card/drawer (not only the global rail), so the operator can read the Hermes ↔ Codex/Claude back-and-forth for *that* card in context. **Accept:** a card with agent discussion shows it inline.
+- **P1-8 · Hermes narrates moves/handoffs in plain language.** *(REDESIGN · Codex)* — Narrate *real* loop transitions as they occur ("Moved #549 to Codex — contract suite red; picked up 12s ago"), tied to the card. Dedup so it stays a clear timeline, not a feed. **Accept:** each genuine handoff/route produces one plain-language line tied to its card. *(This is the constructive counterpart to cutting blanket proactive narration — narrate real movement, not every snapshot diff.)*
+
+> These four are what turn the WATCH tier from "quiet lanes" into "watching the team coordinate." They depend on the loops genuinely running (Hermes really reviewing/routing, agents really fixing + discussing) — the mirror shows only what's real.
+
 ### P2 — The rail + honesty
 
 - **P2-1 · Full-height co-pilot.** *(REDESIGN · Claude)* — Replace `max-height: min(44vh, 520px)` (`monitor.css:1166`) with `flex:1` + independent scroll, sticky composer. **Accept:** ~8–10 turns visible without page scroll.
@@ -127,4 +156,4 @@ Ownership per coordination rules: self-heal/dispatch **decision logic = Codex**;
 
 ---
 
-*End. The board's job is the two loops — surface the operator's two decisions ("merge this" / "we're stuck"), run everything else as calm progress, and answer in plain language. Build that smoothly first; extend later.*
+*End. The board's job is the two loops — surface the operator's two decisions ("merge this" / "we're stuck") prominently, **mirror the team's real work and coordination live** so you can watch it like a kanban of working employees, hide only the machine bookkeeping, and answer in plain language. Build that smoothly first; extend later.*
