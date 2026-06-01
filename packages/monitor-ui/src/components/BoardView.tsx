@@ -352,29 +352,49 @@ function formatClock(iso: string | undefined): string {
 function LlmUsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
   const latestDay = usage?.byDay?.[0];
   const models = latestDay?.byModel?.slice(0, 4) ?? [];
+  const missingSources = (usage?.sourceStatus ?? [])
+    .filter((entry) => entry.status === "not_reported")
+    .slice(0, Math.max(0, 4 - models.length));
+  const hasRows = models.length > 0 || missingSources.length > 0;
+  const emptyMessage = usage?.message
+    ?? "No runner has reported LLM usage counters yet. Claude/test-writer counters depend on SDK output; Codex CLI and Hermes/Ollama do not reliably report usage today.";
   return (
     <section className="hm-llm-usage" aria-label="LLM usage">
       <div className="hm-llm-usage-head">
         <div>
           <span className="hm-kicker">LLM usage</span>
-          <strong>{latestDay?.day ?? "not recorded"}</strong>
+          <strong>{latestDay?.day ?? "usage not reported"}</strong>
         </div>
         <span className="hm-llm-usage-total">
-          {usage?.status === "recorded" ? `${formatNumber(latestDay?.totalTokens ?? 0)} tokens` : "not_recorded"}
+          {usage?.status === "recorded" ? `${formatNumber(latestDay?.totalTokens ?? 0)} tokens` : "not reported"}
         </span>
       </div>
       <div className="hm-llm-usage-grid">
-        {models.length > 0 ? models.map((entry) => (
-          <div className="hm-llm-usage-row" key={`${entry.agent}:${entry.model}`}>
-            <span>
-              <strong>{entry.agent}</strong>
-              <small>{entry.model}</small>
-            </span>
-            <span>{formatNumber(entry.totalTokens)} tok</span>
-            <span>{entry.costStatus === "recorded" && entry.costUsd !== null ? `$${entry.costUsd.toFixed(4)}` : "not_recorded"}</span>
-          </div>
-        )) : (
-          <div className="hm-llm-usage-empty">Reported usage counters have not arrived yet.</div>
+        {hasRows ? (
+          <>
+            {models.map((entry) => (
+              <div className="hm-llm-usage-row" key={`${entry.agent}:${entry.model}`}>
+                <span>
+                  <strong>{entry.agent}</strong>
+                  <small>{entry.model}</small>
+                </span>
+                <span>{formatNumber(entry.totalTokens)} tok</span>
+                <span>{entry.costStatus === "recorded" && entry.costUsd !== null ? `$${entry.costUsd.toFixed(4)}` : "cost not reported"}</span>
+              </div>
+            ))}
+            {missingSources.map((entry) => (
+              <div className="hm-llm-usage-row hm-llm-usage-row--muted" key={`missing:${entry.agent}`}>
+                <span>
+                  <strong>{entry.agent}</strong>
+                  <small>{entry.reason ?? `${entry.agent} usage counters have not arrived.`}</small>
+                </span>
+                <span>not reported</span>
+                <span>no live metric</span>
+              </div>
+            ))}
+          </>
+        ) : (
+          <div className="hm-llm-usage-empty">{emptyMessage}</div>
         )}
       </div>
     </section>
