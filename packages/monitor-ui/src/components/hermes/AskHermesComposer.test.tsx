@@ -193,3 +193,45 @@ describe("AskHermesComposer — G3 compose chips + prefill", () => {
     expect(input.value).toBe("Investigate the flaky test");
   });
 });
+
+describe("AskHermesComposer — P0-4 feedback + honest disabled state", () => {
+  test("disables the input + send and never drops text when collaboration is off", () => {
+    const onAsk = vi.fn();
+    const { container, getByRole, getByText } = render(
+      <AskHermesComposer onAsk={onAsk} collaborationEnabled={false} />,
+    );
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    expect(input.disabled).toBe(true);
+    expect((getByRole("button", { name: /Send/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(getByText(/Ask Hermes unavailable/)).toBeTruthy();
+    // Even if a keyDown sneaks through, send() is a guarded no-op — no silent drop.
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onAsk).not.toHaveBeenCalled();
+  });
+
+  test("shows a 'Hermes thinking…' indicator while a question is pending", () => {
+    const { getByText, queryByText, rerender } = render(
+      <AskHermesComposer onAsk={vi.fn()} pending={false} />,
+    );
+    expect(queryByText(/Hermes thinking/)).toBeNull();
+    rerender(<AskHermesComposer onAsk={vi.fn()} pending />);
+    expect(getByText(/Hermes thinking/)).toBeTruthy();
+  });
+
+  test("shows an inline error when the POST failed (sendError)", () => {
+    const { getByRole } = render(
+      <AskHermesComposer onAsk={vi.fn()} sendError="Couldn't reach Hermes — your question wasn't sent. Try again." />,
+    );
+    expect(getByRole("alert").textContent).toMatch(/wasn't sent/);
+  });
+
+  test("a local parse error takes precedence over a stale sendError", () => {
+    const { container, getByRole } = render(
+      <AskHermesComposer onSpawnMission={vi.fn()} sendError="old send failure" />,
+    );
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    type(input, "/mission"); // invalid → local parse error
+    fireEvent.click(getByRole("button", { name: /Send/ }));
+    expect(getByRole("alert").textContent).toMatch(/needs a target URL/);
+  });
+});

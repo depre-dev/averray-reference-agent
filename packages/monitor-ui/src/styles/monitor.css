@@ -2366,3 +2366,32 @@ button.hm-turn-pin {
   white-space: nowrap;
   border: 0;
 }
+
+/* P0-4 · Ask-Hermes feedback.
+   A transient confirmation toast for any Ask-Hermes trigger, plus the
+   composer's "Hermes thinking…" indicator. The toast self-clears; the
+   durable pending/error state lives in the composer. */
+.hm-ask-status {
+  position: absolute;
+  right: 22px;
+  bottom: 72px; /* sits just above the .hm-ask-float pill */
+  pointer-events: none;
+  z-index: 20;
+}
+.hm-ask-status-toast {
+  display: inline-block;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--hm-ink);
+  color: #fffdf7;
+  box-shadow: var(--hm-shadow-pop);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 12px;
+}
+.hm-compose-thinking .pulse,
+.hm-compose-thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

@@ -78,7 +78,9 @@ export function CoPilotRail({
   composerFocusToken,
   onScopedConversationChange,
 }: CoPilotRailProps) {
-  const { messages, ask } = useCollaboration(collaboration ?? { enabled: false });
+  const { messages, ask, enabled, pending, sendError } = useCollaboration(
+    collaboration ?? { enabled: false },
+  );
   const relatedPr = relatedPrForCard(focusedCard);
   const streamRef = useRef<HTMLDivElement>(null);
   // Suggestion chips fill the composer: hold the text + a bump token.
@@ -172,6 +174,9 @@ export function CoPilotRail({
         prefillToken={prefillToken}
         focusedCardId={focusedCard?.id ?? null}
         focusToken={composerFocusToken}
+        collaborationEnabled={enabled}
+        pending={pending}
+        sendError={sendError}
       />
     </aside>
   );

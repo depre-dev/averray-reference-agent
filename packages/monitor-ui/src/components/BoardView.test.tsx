@@ -132,10 +132,51 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(onMute.mock.calls[0]?.[0]).toBeGreaterThan(Date.now() + 59 * 60_000);
   });
 
-  test("Ask Hermes float focuses the composer when no drawer is open", () => {
-    const { getByRole } = render(<BoardView board={richBoard} status="open" keyboard={false} />);
+  test("Ask Hermes float gives immediate feedback and focuses the composer (collaboration on)", () => {
+    const { getByRole, getByText } = render(
+      <BoardView
+        board={richBoard}
+        status="open"
+        keyboard={false}
+        collaboration={{ fetcher: async () => [], poster: async () => {}, refreshIntervalMs: 0 }}
+      />,
+    );
     fireEvent.click(getByRole("button", { name: "Ask Hermes" }));
+    // P0-4: the action is visibly acknowledged (transient status line)…
+    expect(getByText(/Asking Hermes/)).toBeTruthy();
+    // …and the (enabled) composer takes focus.
     expect(getByRole("textbox", { name: "Ask Hermes, propose a task, spawn a mission, or mute alerts" })).toBe(document.activeElement);
+  });
+
+  test("Ask Hermes is honestly unavailable when collaboration is off — but wired commands still work (no silent drop)", () => {
+    // Wire a command handler (/mute) so the composer isn't Ask-only: the
+    // input must stay usable for commands while the free-form Ask path is
+    // honestly unavailable.
+    const onMute = vi.fn();
+    const { getByRole, getByText, container } = render(
+      <BoardView board={richBoard} status="open" keyboard={false} onMute={onMute} />,
+    );
+    fireEvent.click(getByRole("button", { name: "Ask Hermes" }));
+    expect(getByText(/Ask Hermes unavailable/)).toBeTruthy();
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    expect(input.disabled).toBe(false);
+    // A free-form question reports unavailable instead of silently dropping…
+    fireEvent.change(input, { target: { value: "what's blocking?" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(getByRole("alert").textContent).toMatch(/Ask Hermes unavailable/);
+    // …but a wired command still dispatches.
+    fireEvent.change(input, { target: { value: "/mute 1h" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onMute).toHaveBeenCalledTimes(1);
+  });
+
+  test("Ask Hermes composer is fully disabled when it is Ask-only and collaboration is off", () => {
+    // No command handlers wired → Ask-only → the input is honestly disabled.
+    const { getByRole, container } = render(<BoardView board={richBoard} status="open" keyboard={false} />);
+    fireEvent.click(getByRole("button", { name: "Ask Hermes" }));
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    expect(input.disabled).toBe(true);
+    expect(input.getAttribute("aria-label")).toMatch(/Ask Hermes unavailable/);
   });
 
   test("an open stream lights the LIVE indicator with the snapshot clock", () => {
