@@ -54,6 +54,12 @@ export type ExecClaudeFn = (input: ExecClaudeInput) => Promise<ExecClaudeResult>
 
 const DEFAULT_CLAUDE_ARGS = ["-p", "{prompt}"];
 
+interface GoldPathSessionArtifacts {
+  role?: string;
+  token?: string;
+  storageStatePath?: string;
+}
+
 export function parseClaudeGoldPathDriverConfig(
   env: NodeJS.ProcessEnv = process.env
 ): ClaudeGoldPathDriverConfig {
@@ -98,9 +104,13 @@ export function createClaudeGoldPathDriver(
 
       const runDir = await mkdtemp(join(tmpdir(), "averray-gold-path-live-"));
       const observationPath = join(runDir, "observation.json");
+      const sessionArtifacts = await materializeGoldPathSession(input.session, runDir);
       const prompt = buildClaudeGoldPathPrompt(input, {
         observationPath,
         signerBaseUrl: input.signerBaseUrl ?? config.signerBaseUrl,
+        hasSessionToken: Boolean(sessionArtifacts.token),
+        ...(sessionArtifacts.role ? { sessionRole: sessionArtifacts.role } : {}),
+        ...(sessionArtifacts.storageStatePath ? { sessionStorageStatePath: sessionArtifacts.storageStatePath } : {}),
       });
       const childEnv = buildClaudeInvocationEnv({
         ...env,
@@ -112,6 +122,17 @@ export function createClaudeGoldPathDriver(
         TESTBED_MUTATION_SCOPE: input.mutationScope,
         ...(input.signerBaseUrl ?? config.signerBaseUrl
           ? { TEST_WALLET_SIGNER_BASE_URL: input.signerBaseUrl ?? config.signerBaseUrl }
+          : {}),
+        ...(input.signerBaseUrl ?? config.signerBaseUrl
+          ? { TESTBED_SESSION_SIGNER_URL: input.signerBaseUrl ?? config.signerBaseUrl }
+          : {}),
+        ...(sessionArtifacts.role ? { TESTBED_SESSION_ROLE: sessionArtifacts.role } : {}),
+        ...(sessionArtifacts.token ? { TESTBED_SESSION_TOKEN: sessionArtifacts.token } : {}),
+        ...(sessionArtifacts.storageStatePath
+          ? {
+            TESTBED_SESSION_TYPE: "browser",
+            TESTBED_SESSION_STORAGE_STATE_PATH: sessionArtifacts.storageStatePath,
+          }
           : {}),
       }, authMode.mode);
 
@@ -154,9 +175,33 @@ function claudeAuthEnv(env: NodeJS.ProcessEnv): ClaudeWorkerAuthEnv {
   };
 }
 
+async function materializeGoldPathSession(
+  session: GoldPathDriverInput["session"] | undefined,
+  runDir: string,
+): Promise<GoldPathSessionArtifacts> {
+  if (!session) return {};
+  const artifacts: GoldPathSessionArtifacts = {};
+  if (session.role) artifacts.role = session.role;
+  if (typeof session.token === "string" && session.token.trim()) {
+    artifacts.token = session.token;
+  }
+  if (session.storageState !== undefined) {
+    const storageStatePath = join(runDir, "siwe-storage-state.json");
+    await writeFile(storageStatePath, `${JSON.stringify(session.storageState, null, 2)}\n`, "utf8");
+    artifacts.storageStatePath = storageStatePath;
+  }
+  return artifacts;
+}
+
 export function buildClaudeGoldPathPrompt(
   input: GoldPathDriverInput,
-  opts: { observationPath: string; signerBaseUrl?: string }
+  opts: {
+    observationPath: string;
+    signerBaseUrl?: string;
+    sessionRole?: string;
+    hasSessionToken?: boolean;
+    sessionStorageStatePath?: string;
+  }
 ): string {
   const mutationLine = input.allowMutations
     ? `Mutation profile: TESTNET/STAGING test-only mutations are allowed only inside clearly fake/sandbox Averray flows. Scope: ${input.mutationScope}`
@@ -167,12 +212,25 @@ export function buildClaudeGoldPathPrompt(
   const basicAuthLine = input.basicAuth
     ? "The gated host is behind Caddy HTTP Basic Auth. Open the browser context with httpCredentials { username, password } from TESTBED_BASIC_AUTH_USER / TESTBED_BASIC_AUTH_PASS in this environment so the 401 challenge is answered automatically; never print, screenshot, or report the username or password. (Basic Auth only loads the pages — authed claim/submit/verify still needs the SIWE session via the signer sidecar.)"
     : "No HTTP Basic Auth credential was configured; if the host returns 401 with a Basic realm, report that as an auth blocker instead of treating the product as broken.";
+  const siweSessionLine = opts.sessionStorageStatePath || opts.hasSessionToken
+    ? [
+      `A SIWE session is already minted for role ${opts.sessionRole ?? input.session?.role ?? "agent"}.`,
+      opts.sessionStorageStatePath
+        ? `For browser work, create the Playwright context with storageState loaded from TESTBED_SESSION_STORAGE_STATE_PATH (${opts.sessionStorageStatePath}).`
+        : "No browser storageState file was materialized; request a browser session from the signer sidecar if the UI requires it.",
+      opts.hasSessionToken
+        ? "For same-origin API checks, use the Bearer token from TESTBED_SESSION_TOKEN. Never print or report the token."
+        : "No API Bearer token was materialized; request an API session from the signer sidecar if the API requires it.",
+      "When the host is Basic-Auth-gated, combine the SIWE storageState with Basic Auth httpCredentials in the same browser context.",
+    ].join(" ")
+    : "No pre-minted SIWE session was resolved; if authentication is required, request a browser/api session from the signer sidecar or report the missing session as an auth blocker.";
   return [
     "You are Hermes running the Averray Tier-2 gold-path tester as a normal browser-capable outside agent.",
     "Use the Claude Agent SDK browser tooling / Playwright MCP tools available in this runtime. Do not use private repo state, Slack, GitHub, SSH, databases, or Averray monitor internals.",
     "Reuse T3 only through the local signer sidecar when you need authentication. The wallet private keys must never enter your prompt, output, logs, screenshots, or report.",
     edgeAuthLine,
     basicAuthLine,
+    siweSessionLine,
     opts.signerBaseUrl ? `Signer sidecar: ${opts.signerBaseUrl}. Request browser/api sessions by role as needed; do not print returned tokens.` : "No signer sidecar URL was provided; report that as a blocker if authentication is required.",
     mutationLine,
     `Target URL: ${input.targetUrl}`,
@@ -334,6 +392,9 @@ function redactGoldPathOutput(value: string, env: NodeJS.ProcessEnv): string {
     if (secret && secret.length >= 4) {
       next = next.split(secret).join("[redacted-basic-auth]");
     }
+  }
+  if (env.TESTBED_SESSION_TOKEN && env.TESTBED_SESSION_TOKEN.length >= 6) {
+    next = next.split(env.TESTBED_SESSION_TOKEN).join("[redacted-session-token]");
   }
   return next;
 }
