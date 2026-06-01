@@ -182,6 +182,16 @@ services:
       HERMES_DISPATCH_ALLOWED_REPOS: ${HERMES_DISPATCH_ALLOWED_REPOS:-}
       HERMES_DISPATCH_PER_REPO_PER_DAY_MAX: ${HERMES_DISPATCH_PER_REPO_PER_DAY_MAX:-5}
       HERMES_DISPATCH_PER_DAY_USD_MAX: ${HERMES_DISPATCH_PER_DAY_USD_MAX:-0}
+      # O5 — task health self-management. Reconciles the durable JSON queue
+      # after failed tasks / stale runner state: bounded retries first, then
+      # operator escalation. Still respects D3/HALT and the dispatch guardrail.
+      O5_TASK_HEALTH_ENABLED: ${O5_TASK_HEALTH_ENABLED:-1}
+      O5_TASK_HEALTH_INTERVAL_MINUTES: ${O5_TASK_HEALTH_INTERVAL_MINUTES:-5}
+      O5_TASK_HEALTH_MAX_RETRIES: ${O5_TASK_HEALTH_MAX_RETRIES:-1}
+      O5_TASK_HEALTH_RETRY_BACKOFF_MINUTES: ${O5_TASK_HEALTH_RETRY_BACKOFF_MINUTES:-15}
+      O5_TASK_HEALTH_APPROVED_STALE_MINUTES: ${O5_TASK_HEALTH_APPROVED_STALE_MINUTES:-30}
+      O5_TASK_HEALTH_RUNNING_STALE_MINUTES: ${O5_TASK_HEALTH_RUNNING_STALE_MINUTES:-20}
+      O5_TASK_HEALTH_RESTART_RECOVERY_MINUTES: ${O5_TASK_HEALTH_RESTART_RECOVERY_MINUTES:-10}
       # B2 — self-healing. On a failure: PROPOSE a routed fix (non-high-risk) that
       # still flows through the approval/autopilot gate, or ESCALATE (high-risk /
       # rollback / D3-suspended / HALT). Off by default; never auto-approves.

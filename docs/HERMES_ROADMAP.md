@@ -27,7 +27,7 @@
 | O2 | Claude Code worker (greenfield, Agent SDK) | ✅ done (#256 queue · #259 auth · #260 runner · #262 worker · #263 ops) |
 | O3 | Board-driven dispatch | ✅ done — create/approve form (agent picker) + `/task` verb live on the board (#271) |
 | O4 | Hermes enqueue + dispatch guardrail + autonomy mode | ✅ done — PR1 enqueue+guardrail (#280) · PR2 routing taxonomy (#281) · PR3a autonomy mode (#288) · PR3b autopilot auto-approval (#289); merge/deploy remain human-gated |
-| O5 | Self-management hardening | ✅ first slice done — failed/stale agent tasks surface in `needs-attention` (#298; `services/slack-operator/src/monitor-v2.ts`, tests in `test/unit/monitor-v2.test.ts`); board liveness truth fix landed in #307. Broader retries/escalation hardening remains follow-up; no open PR as of 2026-06-01 |
+| O5 | Self-management hardening | ✅ done — failed/stale agent tasks surface in `needs-attention` (#298; `services/slack-operator/src/monitor-v2.ts`, tests in `test/unit/monitor-v2.test.ts`), board liveness truth fix landed in #307, and bounded retry / stale escalation / restart reconciliation hardening landed in #336 (`services/slack-operator/src/task-health.ts`, queue retry fields in `services/slack-operator/src/codex-task-queue.ts`, O5 env wiring in `ops/compose.yml`) |
 | A1 | Agent scorecard | ✅ done (#285) — read-only `/monitor/agents` + `averray_agent_scorecard` scorecard slice |
 | A2 | Learned routing (data-driven, non-high-risk) | ✅ done (#287) — scorecard-backed default routing, high-risk rule-bound |
 | A3 | Cost visibility / cost-aware routing | ✅ done — A3a cost visibility (#295) + A3b cost-aware routing (#301; `packages/averray-mcp/src/learned-routing.ts`, `test/unit/learned-routing.test.ts`) + dispatch USD budget gate (`packages/averray-mcp/src/dispatch-policy.ts`) |
@@ -50,7 +50,7 @@
 | T6 | Agent-requested tester runs — board-gated (request → approve → read-only run) | ✅ first slice done (#304; `POST /monitor/testbed-missions/request`, `/approve`, board approve UI, and runner ignores `requested` until approval) |
 | T7 | Tester capabilities manifest (+ platform-repo request helper) | ✅ reference-agent manifest done (#284; `GET /monitor/tester/capabilities`, `services/slack-operator/src/tester-capabilities.ts`). Platform-repo request helper remains follow-up outside this repo |
 
-*(Status as of 2026-06-01 — **shipped/code-backed:** O0–O4, O5 first slice, A1–A4, D1–D4, B1 first slices, B2 proposes-only self-healing, C1 first slice, C2, C3 test-writer slice, C4 v1, T1–T3, T5, T6 first slice, and the T7 reference-agent manifest. **In progress:** none by open PR check on 2026-06-01. **Design / follow-up:** remaining O5 hardening, B1 idle-triggered auto-flow, C1 automatic/default reviewer dispatch, C3 security/docs specialists, T4 Tier-2 browser agent, and the T7 platform helper. Merge/deploy remain human-gated; autopilot approves dispatch only inside O4 guardrails.)*
+*(Status as of 2026-06-01 — **shipped/code-backed:** O0–O5, A1–A4, D1–D4, B1 first slices, B2 proposes-only self-healing, C1 first slice, C2, C3 test-writer slice, C4 v1, T1–T3, T5, T6 first slice, and the T7 reference-agent manifest. **In progress:** none after #336 merges. **Design / follow-up:** B1 idle-triggered auto-flow, C1 automatic/default reviewer dispatch, C3 security/docs specialists, T4 Tier-2 browser agent, and the T7 platform helper. Merge/deploy remain human-gated; autopilot approves dispatch only inside O4 guardrails.)*
 
 ## Recommended build order (the smooth, low-effort ramp)
 
@@ -58,7 +58,7 @@
    - **T1** runs in parallel with O1 (independent, both runner/board TS).
 2. **The safety net:** **D4** (off-device alert bridge), **T1**, **T2 + T3** (tester reaches authed product), **D1 + D3** (digest + anomaly auto-pause), and **T5** (env-bound mutation profile). This foundation has shipped; **T6** has its first request/approve gate slice, and **T7** has the reference-agent manifest. The platform helper remains follow-up.
 3. **Autonomy:** **O4** (enqueue + guardrail + autonomy mode) has shipped; supervised burn-in and monitoring decide when to rely on it more heavily.
-4. **Depth, anytime after:** **A1 → A3** shipped, and **B1/B2** now have code-backed first slices. Remaining depth is B1 idle auto-flow, C1 automatic/default reviewer dispatch, C3 additional specialists, **T4**, T7 platform helper polish, and broader **O5** hardening.
+4. **Depth, anytime after:** **A1 → A3** shipped, **O5** hardening is code-backed, and **B1/B2** now have code-backed first slices. Remaining depth is B1 idle auto-flow, C1 automatic/default reviewer dispatch, C3 additional specialists, **T4**, and T7 platform helper polish.
 
 **Dependencies to respect:** B2 needs D3 (loop fail-safe); A2 needs A1 (baselines); O4 is the authority change and needs D4 (escalations must reach the operator off-device); T6 needs the proposed-mission approval gate; T-missions that mutate stay on testnet (env→mutation binding before any mainnet).
 

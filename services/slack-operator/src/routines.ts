@@ -36,6 +36,16 @@ export interface SlackRoutineConfig {
     enabled: boolean;
     intervalMs: number;
   };
+  /** O5 — task health self-management: bounded retries + stale escalation. */
+  taskHealth: {
+    enabled: boolean;
+    intervalMs: number;
+    maxRetries: number;
+    retryBackoffMs: number;
+    approvedStaleMs: number;
+    runningStaleMs: number;
+    restartRecoveryMs: number;
+  };
   /** B2 — self-healing: propose routed fixes / escalate on failure. Off by default. */
   selfHealing: {
     enabled: boolean;
@@ -100,6 +110,15 @@ export function parseSlackRoutineConfig(
       // Off by default — the operator enables D3 before turning on autopilot.
       enabled: env.D3_ANOMALY_PAUSE_ENABLED === "1",
       intervalMs: Math.max(30_000, (positiveNumber(env.D3_ANOMALY_PAUSE_INTERVAL_MINUTES) || 1) * 60_000),
+    },
+    taskHealth: {
+      enabled: env.O5_TASK_HEALTH_ENABLED !== "0",
+      intervalMs: Math.max(60_000, (positiveNumber(env.O5_TASK_HEALTH_INTERVAL_MINUTES) || 5) * 60_000),
+      maxRetries: env.O5_TASK_HEALTH_MAX_RETRIES === "0" ? 0 : Math.max(0, positiveNumber(env.O5_TASK_HEALTH_MAX_RETRIES) || 1),
+      retryBackoffMs: Math.max(60_000, (positiveNumber(env.O5_TASK_HEALTH_RETRY_BACKOFF_MINUTES) || 15) * 60_000),
+      approvedStaleMs: Math.max(60_000, (positiveNumber(env.O5_TASK_HEALTH_APPROVED_STALE_MINUTES) || 30) * 60_000),
+      runningStaleMs: Math.max(60_000, (positiveNumber(env.O5_TASK_HEALTH_RUNNING_STALE_MINUTES) || 20) * 60_000),
+      restartRecoveryMs: Math.max(60_000, (positiveNumber(env.O5_TASK_HEALTH_RESTART_RECOVERY_MINUTES) || 10) * 60_000),
     },
     selfHealing: {
       // Off by default — proposes fixes / escalates only once the operator turns it on.

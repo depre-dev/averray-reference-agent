@@ -1178,6 +1178,37 @@ describe("synthesizeTaskCards (O3 — surface queued tasks)", () => {
     expect(card?.riskSignals?.[0]?.message).toContain("tests failed");
   });
 
+  it("keeps failed tasks with a scheduled O5 retry out of action-needed until backoff expires", () => {
+    const [card] = synthesizeTaskCards(
+      {
+        codexTasks: {
+          items: [{
+            id: "failed-waiting-retry",
+            status: "failed",
+            agent: "codex",
+            repo: "a/b",
+            prompt: "x",
+            attemptCount: 1,
+            failedAt: "2026-05-31T11:55:00.000Z",
+            updatedAt: "2026-05-31T11:55:00.000Z",
+            retryAfter: "2026-05-31T12:05:00.000Z",
+          }],
+        },
+      },
+      { status: "idle", updatedAt: "2026-05-31T11:59:30.000Z" },
+      { now: new Date("2026-05-31T12:00:00.000Z") },
+    );
+
+    expect(card).toMatchObject({
+      id: "failed-waiting-retry",
+      lane: "codex-needed",
+      waitingOn: { actor: "agent", tone: "info" },
+      risk: [],
+    });
+    expect(card?.isAction).toBeUndefined();
+    expect(card?.summary).toContain("scheduled a bounded retry in 5m");
+  });
+
   it("promotes stale approved tasks when no runner can claim them", () => {
     const [card] = synthesizeTaskCards(
       {

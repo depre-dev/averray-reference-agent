@@ -40,6 +40,15 @@ describe("slack operator routines", () => {
     expect(config.stalePrAlerts.enabled).toBe(true);
     expect(config.stalePrAlerts.intervalMs).toBe(20 * 60_000);
     expect(config.stalePrAlerts.staleAfterMinutes).toBe(180);
+    expect(config.taskHealth).toMatchObject({
+      enabled: true,
+      intervalMs: 5 * 60_000,
+      maxRetries: 1,
+      retryBackoffMs: 15 * 60_000,
+      approvedStaleMs: 30 * 60_000,
+      runningStaleMs: 20 * 60_000,
+      restartRecoveryMs: 10 * 60_000,
+    });
     expect(config.selfHealing.enabled).toBe(true);
     expect(config.selfHealing.maxProposalsPerTick).toBe(3);
   });
@@ -69,6 +78,28 @@ describe("slack operator routines", () => {
     expect(config.selfHealing.maxProposalsPerTick).toBe(2);
     expect(config.selfHealing.maxOpenFixTasks).toBe(4);
     expect(config.selfHealing.testbedFailureMaxAgeHours).toBe(12);
+  });
+
+  it("parses O5 task health retry and stale thresholds", () => {
+    const config = parseSlackRoutineConfig({
+      O5_TASK_HEALTH_ENABLED: "0",
+      O5_TASK_HEALTH_INTERVAL_MINUTES: "2",
+      O5_TASK_HEALTH_MAX_RETRIES: "3",
+      O5_TASK_HEALTH_RETRY_BACKOFF_MINUTES: "4",
+      O5_TASK_HEALTH_APPROVED_STALE_MINUTES: "12",
+      O5_TASK_HEALTH_RUNNING_STALE_MINUTES: "8",
+      O5_TASK_HEALTH_RESTART_RECOVERY_MINUTES: "6",
+    }, new Set(["C1"]));
+
+    expect(config.taskHealth).toMatchObject({
+      enabled: false,
+      intervalMs: 2 * 60_000,
+      maxRetries: 3,
+      retryBackoffMs: 4 * 60_000,
+      approvedStaleMs: 12 * 60_000,
+      runningStaleMs: 8 * 60_000,
+      restartRecoveryMs: 6 * 60_000,
+    });
   });
 
   it("runs the daily brief once per UTC date after the target time", () => {

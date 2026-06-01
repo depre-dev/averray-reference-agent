@@ -80,8 +80,13 @@ The monitor treats task completion as a handoff edge, not a release approval. If
 a Codex task is `completed` and that completion is newer than the latest Hermes
 PR verdict, the card moves to **Hermes Checking** with a `HERMES RECHECK`
 verdict until Hermes/GitHub Actions publish a newer review. If the task is
-`failed`, the card moves to **Needs Attention** with a Codex-owned retry/fix
-action. Draft PRs always stay Codex-owned until GitHub reports `draft=false`.
+`failed`, O5 task health gets one conservative self-management pass before the
+card becomes operator action: a bounded retry can be scheduled after backoff,
+and the card stays Codex-owned while that retry is pending. Once the retry
+budget is spent, dispatch is blocked, D3/HALT is active, or a running/approved
+task stays stale past the configured threshold, the card moves to **Needs
+Attention** for operator triage. Draft PRs always stay Codex-owned until GitHub
+reports `draft=false`.
 The monitor's **Ask Hermes to re-check** action runs a private, read-only
 `pr_code_review` + `pr_handoff` re-check for the PR and records fresh handoff
 events; it intentionally disables PR comment writes so the private command
@@ -105,6 +110,12 @@ Task state is stored in `AVERRAY_CODEX_TASKS_PATH`, defaulting to
 `/data/codex-tasks.json` in Docker so the monitor and runner share durable state.
 The runner redacts common private keys, JWTs, GitHub tokens, and API keys from
 captured output before persisting tails in the queue.
+
+The O5 task-health routine also reads that durable queue on slack-operator
+restart. If it finds a stale `running` task that the runner heartbeat no longer
+owns, it requeues the same task for one bounded retry instead of creating a
+duplicate task. It still honors `HALT_FILE`, the D3 suspended flag, and the
+dispatch allowlist/budget before retrying.
 
 The branch worker has hard guardrails:
 

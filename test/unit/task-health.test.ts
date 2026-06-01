@@ -1,0 +1,195 @@
+import { describe, expect, it, vi } from "vitest";
+
+import type { CodexTask } from "../../services/slack-operator/src/codex-task-queue.js";
+import {
+  decideTaskHealthAction,
+  runTaskHealthOnce,
+  type TaskHealthConfig,
+} from "../../services/slack-operator/src/task-health.js";
+
+const config: TaskHealthConfig = {
+  enabled: true,
+  intervalMs: 60_000,
+  maxRetries: 1,
+  retryBackoffMs: 10 * 60_000,
+  approvedStaleMs: 30 * 60_000,
+  runningStaleMs: 20 * 60_000,
+  restartRecoveryMs: 10 * 60_000,
+};
+
+function task(overrides: Partial<CodexTask>): CodexTask {
+  return {
+    schemaVersion: 1,
+    kind: "codex_task",
+    id: "task-1",
+    status: "failed",
+    repo: "depre-dev/averray-reference-agent",
+    agent: "codex",
+    prompt: "fix it",
+    createdAt: "2026-06-01T10:00:00.000Z",
+    updatedAt: "2026-06-01T10:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("task health self-management", () => {
+  it("retries a failed task once after backoff, then escalates when retry budget is spent", async () => {
+    const now = new Date("2026-06-01T10:30:00.000Z");
+    const retry = await decideTaskHealthAction(
+      task({
+        id: "retry-me",
+        failedAt: "2026-06-01T10:00:00.000Z",
+        updatedAt: "2026-06-01T10:00:00.000Z",
+      }),
+      {
+        config,
+        now,
+        suspended: false,
+        halt: false,
+        dispatch: { allowed: true, reason: "dispatch_allowed" },
+      },
+    );
+
+    expect(retry).toMatchObject({
+      taskId: "retry-me",
+      action: "retry",
+      reason: "bounded_retry",
+    });
+
+    const exhausted = await decideTaskHealthAction(
+      task({
+        id: "escalate-me",
+        retryCount: 1,
+        failedAt: "2026-06-01T10:00:00.000Z",
+        updatedAt: "2026-06-01T10:00:00.000Z",
+      }),
+      {
+        config,
+        now,
+        suspended: false,
+        halt: false,
+        dispatch: { allowed: true, reason: "dispatch_allowed" },
+      },
+    );
+
+    expect(exhausted).toMatchObject({
+      taskId: "escalate-me",
+      action: "escalate",
+      reason: "retry_budget_exhausted",
+    });
+  });
+
+  it("schedules backoff once and does not emit duplicate retry proposals while waiting", async () => {
+    const now = new Date("2026-06-01T10:05:00.000Z");
+    const failed = task({
+      failedAt: "2026-06-01T10:00:00.000Z",
+      updatedAt: "2026-06-01T10:00:00.000Z",
+    });
+
+    const first = await decideTaskHealthAction(failed, {
+      config,
+      now,
+      suspended: false,
+      halt: false,
+      dispatch: { allowed: true, reason: "dispatch_allowed" },
+    });
+    expect(first).toMatchObject({
+      action: "defer_retry",
+      reason: "retry_backoff_wait",
+      retryAfter: new Date("2026-06-01T10:10:00.000Z"),
+    });
+
+    const second = await decideTaskHealthAction({ ...failed, retryAfter: "2026-06-01T10:10:00.000Z" }, {
+      config,
+      now,
+      suspended: false,
+      halt: false,
+      dispatch: { allowed: true, reason: "dispatch_allowed" },
+    });
+    expect(second).toMatchObject({
+      action: "none",
+      reason: "retry_backoff_pending",
+    });
+  });
+
+  it("escalates approved tasks that sit past the stale threshold", async () => {
+    const action = await decideTaskHealthAction(
+      task({
+        id: "approved-stale",
+        status: "approved",
+        approvedAt: "2026-06-01T09:00:00.000Z",
+        updatedAt: "2026-06-01T09:00:00.000Z",
+      }),
+      {
+        config,
+        now: new Date("2026-06-01T10:00:00.000Z"),
+        suspended: false,
+        halt: false,
+        dispatch: { allowed: true, reason: "dispatch_not_needed" },
+      },
+    );
+
+    expect(action).toMatchObject({
+      taskId: "approved-stale",
+      action: "escalate",
+      reason: "approved_task_stale",
+    });
+  });
+
+  it("requeues stale running tasks after a restart when the runner heartbeat no longer owns them", async () => {
+    const retryTask = vi.fn();
+    const escalateTask = vi.fn();
+
+    const result = await runTaskHealthOnce(config, {
+      listTasks: () => [
+        task({
+          id: "running-orphan",
+          status: "running",
+          startedAt: "2026-06-01T09:40:00.000Z",
+          progressAt: "2026-06-01T09:40:00.000Z",
+          updatedAt: "2026-06-01T09:40:00.000Z",
+          attemptCount: 1,
+        }),
+      ],
+      readRunner: () => undefined,
+      retryTask,
+      deferRetry: vi.fn(),
+      escalateTask,
+      isSuspended: () => false,
+      isHalt: () => false,
+      dispatchAllowed: () => ({ allowed: true, reason: "dispatch_allowed" }),
+      now: () => new Date("2026-06-01T10:00:00.000Z"),
+    });
+
+    expect(result.actions).toEqual([
+      {
+        taskId: "running-orphan",
+        action: "retry",
+        reason: "restart_recovery_requeue",
+      },
+    ]);
+    expect(retryTask).toHaveBeenCalledWith("running-orphan", "restart_recovery_requeue");
+    expect(escalateTask).not.toHaveBeenCalled();
+  });
+
+  it("respects D3 anomaly pause before retrying into another dispatch", async () => {
+    const result = await decideTaskHealthAction(
+      task({
+        failedAt: "2026-06-01T10:00:00.000Z",
+        updatedAt: "2026-06-01T10:00:00.000Z",
+      }),
+      {
+        config,
+        now: new Date("2026-06-01T10:30:00.000Z"),
+        suspended: true,
+        halt: false,
+        dispatch: { allowed: true, reason: "dispatch_allowed" },
+      },
+    );
+
+    expect(result).toMatchObject({
+      action: "escalate",
+      reason: "autopilot_suspended",
+    });
+  });
+});

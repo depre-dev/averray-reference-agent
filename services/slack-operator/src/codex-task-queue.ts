@@ -86,6 +86,10 @@ export interface CodexTask extends CodexTaskInput {
   stderrTail?: string;
   progressMessage?: string;
   progressAt?: string;
+  retryAfter?: string;
+  retryCount?: number;
+  selfManagementEscalatedAt?: string;
+  selfManagementEscalationReason?: string;
   events?: CodexTaskEvent[];
 }
 
@@ -388,6 +392,110 @@ export async function failCodexTask(
       at: now,
       status: "failed",
       message: deps.failureReason ?? `${taskAgentEventLabel(taskAgent(existing))} task runner failed.`,
+    }),
+    updatedAt: now,
+  };
+  await writeCodexTasks(path, replaceTask(tasks, task));
+  return task;
+}
+
+export async function retryCodexTask(
+  id: string,
+  deps: CodexTaskQueueDeps & {
+    approvedBy?: string;
+    reason?: string;
+  } = {}
+): Promise<CodexTask | undefined> {
+  const path = queuePath(deps.path);
+  const tasks = await readCodexTasks(path);
+  const existing = tasks.find((task) => task.id === id);
+  if (!existing) return undefined;
+  if (existing.status !== "failed" && existing.status !== "running") return existing;
+  const now = (deps.now ?? new Date()).toISOString();
+  const {
+    retryAfter: _retryAfter,
+    selfManagementEscalatedAt: _escalatedAt,
+    selfManagementEscalationReason: _escalationReason,
+    runnerId: _runnerId,
+    startedAt: _startedAt,
+    failedAt: _failedAt,
+    failureReason: _failureReason,
+    exitCode: _exitCode,
+    ...rest
+  } = existing;
+  const message = deps.reason ?? `${taskAgentEventLabel(taskAgent(existing))} task scheduled for bounded retry.`;
+  const task: CodexTask = {
+    ...rest,
+    status: "approved",
+    approvedAt: now,
+    approvedBy: deps.approvedBy ?? "o5-self-management",
+    retryCount: (existing.retryCount ?? 0) + 1,
+    progressMessage: message,
+    progressAt: now,
+    events: appendTaskEvent(existing, {
+      at: now,
+      status: "approved",
+      message,
+    }),
+    updatedAt: now,
+  };
+  await writeCodexTasks(path, replaceTask(tasks, task));
+  return task;
+}
+
+export async function deferCodexTaskRetry(
+  id: string,
+  deps: CodexTaskQueueDeps & {
+    retryAfter: Date;
+    reason?: string;
+  }
+): Promise<CodexTask | undefined> {
+  const path = queuePath(deps.path);
+  const tasks = await readCodexTasks(path);
+  const existing = tasks.find((task) => task.id === id);
+  if (!existing) return undefined;
+  if (existing.status !== "failed") return existing;
+  const now = (deps.now ?? new Date()).toISOString();
+  const retryAfter = deps.retryAfter.toISOString();
+  const message = deps.reason ?? `${taskAgentEventLabel(taskAgent(existing))} task will be retried after ${retryAfter}.`;
+  const task: CodexTask = {
+    ...existing,
+    retryAfter,
+    progressMessage: message,
+    progressAt: now,
+    events: appendTaskEvent(existing, {
+      at: now,
+      status: "progress",
+      message,
+    }),
+    updatedAt: now,
+  };
+  await writeCodexTasks(path, replaceTask(tasks, task));
+  return task;
+}
+
+export async function escalateCodexTask(
+  id: string,
+  deps: CodexTaskQueueDeps & {
+    reason: string;
+  }
+): Promise<CodexTask | undefined> {
+  const path = queuePath(deps.path);
+  const tasks = await readCodexTasks(path);
+  const existing = tasks.find((task) => task.id === id);
+  if (!existing) return undefined;
+  if (existing.selfManagementEscalatedAt && existing.selfManagementEscalationReason === deps.reason) return existing;
+  const now = (deps.now ?? new Date()).toISOString();
+  const task: CodexTask = {
+    ...existing,
+    selfManagementEscalatedAt: now,
+    selfManagementEscalationReason: deps.reason,
+    progressMessage: deps.reason,
+    progressAt: now,
+    events: appendTaskEvent(existing, {
+      at: now,
+      status: "progress",
+      message: deps.reason,
     }),
     updatedAt: now,
   };
