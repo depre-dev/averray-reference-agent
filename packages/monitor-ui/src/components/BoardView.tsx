@@ -151,14 +151,19 @@ export function BoardView({
   const rawCards = board?.cards ?? [];
   const [dismissedCardIds, setDismissedCardIds] = useState<ReadonlySet<string>>(() => new Set());
   const [snoozedUntilById, setSnoozedUntilById] = useState<ReadonlyMap<string, number>>(() => new Map());
+  // "Keep watching" cancels a card's archive hint for this session — the
+  // operator opted to keep it, so we suppress the "archive in 4h?" prompt.
+  const [keptCardIds, setKeptCardIds] = useState<ReadonlySet<string>>(() => new Set());
   const cards = useMemo(() => {
     const nowMs = Date.now();
-    return rawCards.filter((card) => {
-      if (dismissedCardIds.has(card.id)) return false;
-      const snoozedUntil = snoozedUntilById.get(card.id);
-      return snoozedUntil === undefined || snoozedUntil <= nowMs;
-    });
-  }, [dismissedCardIds, rawCards, snoozedUntilById]);
+    return rawCards
+      .filter((card) => {
+        if (dismissedCardIds.has(card.id)) return false;
+        const snoozedUntil = snoozedUntilById.get(card.id);
+        return snoozedUntil === undefined || snoozedUntil <= nowMs;
+      })
+      .map((card) => (card.archiveHint && keptCardIds.has(card.id) ? { ...card, archiveHint: false } : card));
+  }, [dismissedCardIds, rawCards, snoozedUntilById, keptCardIds]);
   const liveLabel = useMemo(() => formatClock(board?.at), [board?.at]);
 
   // ── view state ──────────────────────────────────────────────────
@@ -286,6 +291,14 @@ export function BoardView({
     setSnoozedUntilById((prev) => {
       const next = new Map(prev);
       next.set(id, Date.now() + OPERATOR_CARD_SNOOZE_MS);
+      return next;
+    });
+  }, []);
+
+  const onKeepWatchingCard = useCallback((id: string) => {
+    setKeptCardIds((prev) => {
+      const next = new Set(prev);
+      next.add(id);
       return next;
     });
   }, []);
@@ -425,6 +438,7 @@ export function BoardView({
                 onApproveMission={onApproveMission ? (c) => onApproveMission(c.id) : undefined}
                 onDismiss={(c) => onDismissCard(c.id)}
                 onSnooze={(c) => onSnoozeCard(c.id)}
+                onKeepWatching={(c) => onKeepWatchingCard(c.id)}
                 onInvestigate={onCardClick ? (c) => onCardClick(c.id) : undefined}
               />
             )}

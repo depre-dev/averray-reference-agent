@@ -324,3 +324,17 @@ describe("Card — requested tester mission approve (T6)", () => {
     expect(onApproveMission.mock.calls[0]?.[0]?.id).toBe("testbed-mission-requested-1");
   });
 });
+
+describe("Card — archive hint 'Keep watching' (G4)", () => {
+  test("calls onKeepWatching when wired; renders an honest disabled label otherwise", () => {
+    const card = fixture("agent #542"); // archiveHint: true
+    const onKeepWatching = vi.fn();
+    const { getByRole, rerender, getByText } = render(<Card card={card} onKeepWatching={onKeepWatching} />);
+    fireEvent.click(getByRole("button", { name: "Keep watching" }));
+    expect(onKeepWatching).toHaveBeenCalledWith(card);
+
+    // No handler ⇒ informational label, not a fake link.
+    rerender(<Card card={card} />);
+    expect(getByText("Keep watching").tagName).toBe("SPAN");
+  });
+});
