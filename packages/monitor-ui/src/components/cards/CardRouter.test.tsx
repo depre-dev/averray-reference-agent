@@ -24,7 +24,7 @@ describe("CardRouter — dispatch", () => {
     const view = within(container);
     expect(container.querySelector(".hm-card--err")).toBeTruthy();
     expect(view.getByText(/Upstream returned an error/)).toBeTruthy();
-    expect(view.getByText("fetch failed")).toBeTruthy();
+    expect(view.getByText("source · fetch failed")).toBeTruthy();
     expect(view.getByText("Retry now")).toBeTruthy();
   });
 

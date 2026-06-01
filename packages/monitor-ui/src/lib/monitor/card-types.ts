@@ -95,6 +95,13 @@ export interface CardReviewRequest {
   updatedAt: string;
 }
 
+export interface CardSourceFailure {
+  code: string;
+  source: "github" | "runner" | "deploy" | "codex";
+  message: string;
+  lastGoodAt?: string;
+}
+
 export interface HermesDecisionSubject {
   type: "task" | "card" | "repo" | "pr" | "mission" | "digest" | "autopilot_session";
   id: string;
@@ -166,6 +173,8 @@ export interface CardBase {
   decisionRecord?: HermesDecisionRecord;
   /** C1: active cross-agent review requests scoped to this card. */
   reviewRequests?: CardReviewRequest[];
+  /** Source read / heartbeat failure behind a degraded card. */
+  sourceFailure?: CardSourceFailure;
 }
 
 /** PR card — file changes, Hermes verdict, operator-review action. */
@@ -181,12 +190,12 @@ export interface MissionStep {
   status: "ok" | "warn" | "fail";
   desc: string;
   /** latency string, e.g. "320ms" / "12.4s" */
-  lat: string;
+  lat?: string;
 }
 
 export interface MissionBlocker {
   head: string;
-  body: string;
+  body?: string;
 }
 
 export interface MissionEvidence {

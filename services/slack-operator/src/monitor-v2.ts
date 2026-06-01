@@ -146,19 +146,26 @@ export interface CardReviewRequest {
   updatedAt: string;
 }
 
+export interface CardSourceFailure {
+  code: string;
+  source: "github" | "runner" | "deploy" | "codex";
+  message: string;
+  lastGoodAt?: string;
+}
+
 // ── Mission report (testbed browser missions) ───────────────────────
 // Mirrors the UI MissionReport. The optional numeric fields (runs,
-// latency, the 0–10 scores) are NOT carried by the agent's structured
-// report, so we omit them rather than invent values — the UI guards them.
+// latency, per-step latency, and the 0–10 scores) are populated only
+// when the agent's structured report actually carries them.
 export interface CardMissionStep {
   n: number;
   status: "ok" | "warn" | "fail";
   desc: string;
-  lat: string;
+  lat?: string;
 }
 export interface CardMissionBlocker {
   head: string;
-  body: string;
+  body?: string;
 }
 export interface CardMissionEvidence {
   kind: "screenshot" | "trace" | "console" | "video";
@@ -236,6 +243,8 @@ export interface BoardCard {
   output?: string;
   /** Codex task cards: failure reason when the task failed. */
   failureReason?: string;
+  /** Source read / heartbeat failure behind a degraded card. */
+  sourceFailure?: CardSourceFailure;
   /** Codex task cards: runner liveness. */
   runnerHeartbeat?: CardRunnerHeartbeat;
   /** Per-check CI breakdown (non-done cards) — the list under the bar. */
@@ -505,6 +514,116 @@ function asString(value: unknown): string | undefined {
 
 function asFiniteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function asNonEmptyString(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+  return undefined;
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    const str = asNonEmptyString(value);
+    if (str) return str;
+  }
+  return undefined;
+}
+
+function formatLatency(value: unknown): string | undefined {
+  const str = asNonEmptyString(value);
+  if (str) return str;
+  const n = asFiniteNumber(value);
+  if (n === undefined) return undefined;
+  return n >= 1000 ? `${Number((n / 1000).toFixed(2))}s` : `${Math.round(n)}ms`;
+}
+
+function parseSourceFailure(
+  value: unknown,
+  source: CardSourceFailure["source"],
+): CardSourceFailure | undefined {
+  const text = asNonEmptyString(value);
+  if (text) {
+    return { source, code: "ERROR", message: text };
+  }
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const code = firstString(
+    record.code,
+    record.statusCode,
+    record.httpStatus,
+    record.status,
+    record.exitCode !== undefined ? `EXIT ${String(record.exitCode)}` : undefined,
+  );
+  const message = firstString(record.message, record.error, record.reason, record.statusText, record.detail);
+  if (!message && !code) return undefined;
+  const lastGoodAt = firstString(record.lastGoodAt, record.lastSuccessfulAt, record.checkedAt, record.updatedAt);
+  return {
+    source,
+    code: code ?? "ERROR",
+    message: message ?? `${source} source read failed`,
+    ...(lastGoodAt ? { lastGoodAt } : {}),
+  };
+}
+
+function sourceFailureFromSummary(summary: Record<string, unknown> | undefined, type: CardType): CardSourceFailure | undefined {
+  if (!summary) return undefined;
+  const githubLive = asRecord(summary.githubLive);
+  const githubFailure =
+    parseSourceFailure(githubLive?.fetchError, "github")
+    ?? parseSourceFailure(githubLive?.error, "github")
+    ?? parseSourceFailure(githubLive?.failure, "github")
+    ?? parseSourceFailure(summary.githubFetchError, "github")
+    ?? parseSourceFailure(summary.githubError, "github");
+  if (githubFailure) return githubFailure;
+
+  if (type === "deploy") {
+    const deployVerification = asRecord(summary.deployVerification);
+    return (
+      parseSourceFailure(deployVerification?.error, "deploy")
+      ?? parseSourceFailure(summary.deployError, "deploy")
+      ?? parseSourceFailure(summary.deploymentError, "deploy")
+    );
+  }
+
+  return undefined;
+}
+
+function runnerSourceFailure(
+  runner: Record<string, unknown> | undefined,
+  now: Date = new Date(),
+): CardSourceFailure | undefined {
+  if (!runner) {
+    return {
+      source: "runner",
+      code: "MISSING",
+      message: "runner heartbeat is missing",
+    };
+  }
+  const status = asString(runner.status);
+  const lastGoodAt = firstString(runner.lastGoodAt, runner.updatedAt);
+  const runnerStale = runner.stale === true || minutesSince(asString(runner.updatedAt), now) > 2;
+  if (status === "disabled" || status === "misconfigured" || status === "error" || status === "failed") {
+    const explicit = parseSourceFailure(runner.error ?? runner.failureReason ?? runner.message, "runner");
+    const finalLastGoodAt = explicit?.lastGoodAt ?? lastGoodAt;
+    return {
+      source: "runner",
+      code: explicit?.code ?? status.toUpperCase(),
+      message: explicit?.message ?? `runner is ${status}`,
+      ...(finalLastGoodAt ? { lastGoodAt: finalLastGoodAt } : {}),
+    };
+  }
+  if (runnerStale) {
+    return {
+      source: "runner",
+      code: "STALE",
+      message: "runner heartbeat is stale",
+      ...(lastGoodAt ? { lastGoodAt } : {}),
+    };
+  }
+  return undefined;
 }
 
 function usageEvents(value: unknown): LlmUsageEvent[] {
@@ -866,6 +985,65 @@ function pickScore(scores: Record<string, number>, keys: string[]): number | und
   return undefined;
 }
 
+function reportSource(run: Record<string, unknown>): Record<string, unknown> {
+  const result = asRecord(run.result);
+  const structured = asRecord(result?.structuredReport);
+  return structured ?? result ?? {};
+}
+
+function reportArrayEntry(source: Record<string, unknown>, key: string, index: number): Record<string, unknown> | undefined {
+  const entry = asArray(source[key])[index];
+  return asRecord(entry);
+}
+
+function missionStepLatency(source: Record<string, unknown>, index: number): string | undefined {
+  const step = reportArrayEntry(source, "completedPath", index)
+    ?? reportArrayEntry(source, "path", index)
+    ?? reportArrayEntry(source, "steps", index)
+    ?? reportArrayEntry(source, "completedSteps", index);
+  return formatLatency(step?.lat ?? step?.latency ?? step?.latencyMs ?? step?.durationMs ?? step?.elapsedMs);
+}
+
+function missionStepDesc(source: Record<string, unknown>, index: number, fallback: string): string {
+  const step = reportArrayEntry(source, "completedPath", index)
+    ?? reportArrayEntry(source, "path", index)
+    ?? reportArrayEntry(source, "steps", index)
+    ?? reportArrayEntry(source, "completedSteps", index);
+  return firstString(step?.desc, step?.description, step?.action, step?.name, step?.value)
+    ?? (fallback === "[object Object]" ? "Step recorded by browser agent" : fallback);
+}
+
+function missionBlockerHead(source: Record<string, unknown>, key: "blockers" | "confusingMoments", index: number, fallback: string): string {
+  const entry = reportArrayEntry(source, key, index);
+  return firstString(entry?.head, entry?.title, entry?.summary, entry?.label, entry?.message)
+    ?? (fallback === "[object Object]" ? "Browser-agent finding" : fallback);
+}
+
+function missionBlockerBody(source: Record<string, unknown>, key: "blockers" | "confusingMoments", index: number): string | undefined {
+  const entry = reportArrayEntry(source, key, index);
+  if (!entry) return undefined;
+  const evidence = asArray(entry.evidence)
+    .map((value) => asNonEmptyString(value))
+    .filter((value): value is string => Boolean(value));
+  return firstString(
+    entry.body,
+    entry.detail,
+    entry.details,
+    entry.description,
+    entry.message,
+    evidence.length ? evidence.join(" ") : undefined,
+  );
+}
+
+function missionRuns(source: Record<string, unknown>): number | undefined {
+  const runs = asFiniteNumber(source.runs) ?? asFiniteNumber(source.runCount) ?? asFiniteNumber(source.attempts);
+  return runs !== undefined && runs >= 0 ? runs : undefined;
+}
+
+function missionLatency(source: Record<string, unknown>): string | undefined {
+  return formatLatency(source.latency ?? source.duration ?? source.durationMs ?? source.elapsedMs ?? source.totalLatencyMs);
+}
+
 /**
  * Map a stored testbed mission run to the UI MissionReport. Returns
  * undefined when the run has no structured report yet (e.g. still running),
@@ -877,6 +1055,7 @@ function pickScore(scores: Record<string, number>, keys: string[]): number | und
 export function mapMissionReport(run: Record<string, unknown>): CardMissionReport | undefined {
   const report = testbedMissionStructuredReport(run as unknown as TestbedMissionRun);
   if (!report) return undefined;
+  const source = reportSource(run);
 
   const [verdict, verdictTone]: [CardMissionReport["verdict"], CardMissionReport["verdictTone"]] =
     report.verdict === "pass"
@@ -885,15 +1064,24 @@ export function mapMissionReport(run: Record<string, unknown>): CardMissionRepor
         ? ["PARTIAL", "warn"]
         : ["FAILED", "fail"];
 
-  const path: CardMissionStep[] = report.completedPath.map((desc, i) => ({
-    n: i + 1,
-    status: "ok",
-    desc,
-    lat: "",
-  }));
+  const path: CardMissionStep[] = report.completedPath.map((desc, i) => {
+    const lat = missionStepLatency(source, i);
+    return {
+      n: i + 1,
+      status: "ok" as const,
+      desc: missionStepDesc(source, i, desc),
+      ...(lat ? { lat } : {}),
+    };
+  });
   const blockers: CardMissionBlocker[] = [
-    ...report.blockers.map((head) => ({ head, body: "" })),
-    ...report.confusingMoments.map((head) => ({ head, body: "" })),
+    ...report.blockers.map((head, index) => {
+      const body = missionBlockerBody(source, "blockers", index);
+      return { head: missionBlockerHead(source, "blockers", index, head), ...(body ? { body } : {}) };
+    }),
+    ...report.confusingMoments.map((head, index) => {
+      const body = missionBlockerBody(source, "confusingMoments", index);
+      return { head: missionBlockerHead(source, "confusingMoments", index, head), ...(body ? { body } : {}) };
+    }),
   ];
   const notes = report.mutationBoundaryNotes.join(" ").trim();
   const boundaryBase = report.stoppedBeforeMutation
@@ -903,6 +1091,8 @@ export function mapMissionReport(run: Record<string, unknown>): CardMissionRepor
   const successScore = pickScore(report.scores, ["success", "usability", "task", "completion"]);
   const clarityScore = pickScore(report.scores, ["clarity", "ux", "understanding", "comprehension"]);
   const latencyScore = pickScore(report.scores, ["latency", "speed", "performance", "responsiveness"]);
+  const runs = missionRuns(source);
+  const latency = missionLatency(source);
 
   return {
     verdict,
@@ -915,6 +1105,8 @@ export function mapMissionReport(run: Record<string, unknown>): CardMissionRepor
     evidence: report.evidence.map(mapMissionEvidence),
     mutationBoundary: notes ? `${boundaryBase} ${notes}` : boundaryBase,
     recommendations: report.recommendations,
+    ...(runs !== undefined ? { runs } : {}),
+    ...(latency ? { latency } : {}),
     ...(successScore !== undefined ? { successScore } : {}),
     ...(clarityScore !== undefined ? { clarityScore } : {}),
     ...(latencyScore !== undefined ? { latencyScore } : {}),
@@ -961,6 +1153,11 @@ export function enrichBoardCard(
 ): BoardCard {
   const { summary } = ctx;
   const isDone = card.type === "done";
+  const sourceFailure = sourceFailureFromSummary(summary, card.type);
+  if (sourceFailure && !isDone) {
+    card.state = "failed-fetch";
+    card.sourceFailure = sourceFailure;
+  }
 
   // Checks + files + per-check breakdown + risk findings: live (non-done)
   // cards only. Done cards render in the compressed historical layout (no
@@ -1023,6 +1220,13 @@ export function enrichBoardCard(
           online: status === "running" || status === "idle",
         };
       }
+    }
+    const runnerFailure = (status === "approved" || status === "running")
+      ? runnerSourceFailure(ctx.runner)
+      : undefined;
+    if (runnerFailure) {
+      card.state = "source-offline";
+      card.sourceFailure = runnerFailure;
     }
   }
 
@@ -1104,6 +1308,7 @@ export function synthesizeTaskCards(
       taskStatus: status as TaskStatus,
       ...(riskTier ? { riskTier } : {}),
       ...(riskSignals.length > 0 ? { riskSignals } : {}),
+      ...(health.sourceFailure ? { sourceFailure: health.sourceFailure } : {}),
       ...(prompt ? { prompt } : {}),
       ...(asString(task.correlationId) ? { correlationId: asString(task.correlationId) } : {}),
       ...(decisionRecord ? { decisionRecord } : {}),
@@ -1136,6 +1341,7 @@ interface TaskHealthForBoard {
   freshness: number;
   summary?: string;
   riskSignal?: CardRiskSignal;
+  sourceFailure?: CardSourceFailure;
   isAction?: boolean;
 }
 
@@ -1174,7 +1380,7 @@ export function taskHealthForBoard(
     const ageMinutes = minutesSince(asString(task.approvedAt) ?? asString(task.updatedAt), now);
     if (ageMinutes >= APPROVED_STALE_MINUTES || runnerState.unavailable) {
       return attentionHealth({
-        state: "stale",
+        state: runnerState.sourceFailure ? "source-offline" : "stale",
         freshness: ageMinutes,
         summary: runnerState.unavailable
           ? `Approved task is waiting but the ${runnerState.label}.`
@@ -1186,6 +1392,7 @@ export function taskHealthForBoard(
             ? `The task is approved, but the ${runnerState.label}; no runner can safely claim it.`
             : `The task has been approved for ${ageMinutes}m without being claimed.`,
         },
+        sourceFailure: runnerState.sourceFailure,
       });
     }
   }
@@ -1198,7 +1405,7 @@ export function taskHealthForBoard(
     const activeElsewhere = runnerState.activeTaskMismatch;
     if (ageMinutes >= RUNNING_STALE_MINUTES || runnerState.unavailable || activeElsewhere) {
       return attentionHealth({
-        state: "stale",
+        state: runnerState.sourceFailure ? "source-offline" : "stale",
         freshness: ageMinutes,
         summary: runnerState.unavailable
           ? `Running task may be stuck because the ${runnerState.label}.`
@@ -1218,6 +1425,7 @@ export function taskHealthForBoard(
               ? "The task is marked running, but the runner heartbeat points at another task."
               : `The task is running with no recorded progress for ${ageMinutes}m.`,
         },
+        sourceFailure: runnerState.sourceFailure,
       });
     }
   }
@@ -1238,6 +1446,7 @@ function attentionHealth(input: {
   freshness: number;
   summary: string;
   riskSignal: CardRiskSignal;
+  sourceFailure?: CardSourceFailure;
 }): TaskHealthForBoard {
   return {
     lane: "needs-attention",
@@ -1247,6 +1456,7 @@ function attentionHealth(input: {
     freshness: input.freshness,
     summary: input.summary,
     riskSignal: input.riskSignal,
+    ...(input.sourceFailure ? { sourceFailure: input.sourceFailure } : {}),
     isAction: true,
   };
 }
@@ -1255,8 +1465,9 @@ function runnerHealthForTask(
   task: Record<string, unknown>,
   runner: Record<string, unknown> | undefined,
   now: Date,
-): { unavailable: boolean; activeTaskMismatch: boolean; label: string } {
-  if (!runner) return { unavailable: true, activeTaskMismatch: false, label: "runner heartbeat is missing" };
+): { unavailable: boolean; activeTaskMismatch: boolean; label: string; sourceFailure?: CardSourceFailure } {
+  const sourceFailure = runnerSourceFailure(runner, now);
+  if (!runner) return { unavailable: true, activeTaskMismatch: false, label: "runner heartbeat is missing", sourceFailure };
   const status = asString(runner.status);
   const runnerStale = runner.stale === true || minutesSince(asString(runner.updatedAt), now) > 2;
   const unavailable = runnerStale || status === "disabled" || status === "misconfigured" || status === "error" || status === "failed";
@@ -1270,6 +1481,7 @@ function runnerHealthForTask(
         ? "runner heartbeat is stale"
         : `runner is ${status ?? "unavailable"}`
       : "runner is available",
+    ...(sourceFailure ? { sourceFailure } : {}),
   };
 }
 

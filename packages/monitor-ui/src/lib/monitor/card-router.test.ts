@@ -83,6 +83,24 @@ test("defaultDegradedContent: failed-fetch returns retry copy + err pill", () =>
   assert.ok(pillClasses.includes("hm-pill--neutral"), "should have a neutral status pill");
 });
 
+test("defaultDegradedContent: failed-fetch uses the real source reason when present", () => {
+  const content = defaultDegradedContent(baseCard({
+    state: "failed-fetch",
+    sourceFailure: {
+      source: "github",
+      code: "404",
+      message: "GitHub returned 404 reading /pulls/555",
+      lastGoodAt: "2026-05-31T12:00:00Z",
+    },
+  }));
+
+  assert.equal(content.body, "GitHub returned 404 reading /pulls/555");
+  assert.deepEqual(content.pills, [
+    ["hm-pill--err", "github · 404"],
+    ["hm-pill--neutral", "last good 2026-05-31T12:00:00Z"],
+  ]);
+});
+
 test("defaultDegradedContent: source-offline returns cached-view copy + offline pill", () => {
   const content = defaultDegradedContent(baseCard({ state: "source-offline" }));
   assert.match(content.body, /Upstream unreachable/);
@@ -93,6 +111,24 @@ test("defaultDegradedContent: source-offline returns cached-view copy + offline 
   // Critically: NO err pill on source-offline. Offline is a
   // neutral "we don't know" state, not an error state.
   assert.ok(!pillClasses.includes("hm-pill--err"), "source-offline must NOT carry an err pill");
+});
+
+test("defaultDegradedContent: source-offline uses heartbeat reason when present", () => {
+  const content = defaultDegradedContent(baseCard({
+    state: "source-offline",
+    sourceFailure: {
+      source: "runner",
+      code: "STALE",
+      message: "runner heartbeat is stale",
+      lastGoodAt: "2026-05-31T12:00:00Z",
+    },
+  }));
+
+  assert.equal(content.body, "runner heartbeat is stale");
+  assert.deepEqual(content.pills, [
+    ["hm-pill--offline", "runner · offline · STALE"],
+    ["hm-pill--neutral", "last good 2026-05-31T12:00:00Z"],
+  ]);
 });
 
 test("defaultDegradedContent: both variants return 2 pills", () => {
