@@ -101,8 +101,11 @@ TypeScript monorepo: npm workspaces (`packages/*`, `services/*`), Node ≥ 22, E
   own branch/worktree, edits code, opens PRs, responds to review, and fixes
   failures. **Codex owns chain/settlement-adjacent work**; Claude takes UI,
   docs, and general code. C3 specialist agents are scoped internal variants of
-  the Claude runner; the first is **test-writer**, which takes low-risk
-  test-writing tasks and opens normal human-reviewed PRs.
+  the Claude runner: **test-writer** takes low-risk test-writing tasks,
+  **security** proposes security-focused fixes/reviews (dependency CVEs,
+  auth/secret handling, input validation; high-risk findings escalate to the
+  operator), and **docs** proposes documentation updates for changed surfaces.
+  All specialist work opens normal human-reviewed PRs.
 - **Hermes reviews and operates** — observes GitHub, reviews PR risk, runs
   read-only checks, reports to the PR/Slack/monitor, and proposes operator actions.
   Hermes proposes + routes tasks, and — when the operator turns on **autopilot**
@@ -126,7 +129,7 @@ TypeScript monorepo: npm workspaces (`packages/*`, `services/*`), Node ≥ 22, E
   dispatch path, so they carry invariant #6's guardrail: they claim **only
   `approved` tasks** — approved by the operator **or** by `hermes-autopilot`
   within its rules — and **never self-approve**, filtered by `agent`
-  (codex/claude/test-writer). The Claude runner additionally runs a **billing-route
+  (codex/claude/test-writer/security/docs). The Claude runner additionally runs a **billing-route
   verification** at startup (`claude-worker-auth`) — on a mismatch it writes a
   `misconfigured` heartbeat and **refuses to claim** rather than silently
   API-bill — and honors the **api-mode daily budget** cap and the **`HALT_FILE`**
@@ -141,7 +144,7 @@ TypeScript monorepo: npm workspaces (`packages/*`, `services/*`), Node ≥ 22, E
   `CLAUDE_BRANCH_WORKER_ALLOWED_REPOS`) that is **empty by default and fails
   closed** — the operator opts each `owner/repo` in explicitly. A worker only
   ever pushes its own `codex/<slug>` / `claude/<slug>` / specialist-prefixed
-  branch such as `test-writer/<slug>` (it **refuses
+  branch such as `test-writer/<slug>`, `security/<slug>`, or `docs/<slug>` (it **refuses
   protected/base branches**), rejects secret-like files before committing,
   redacts command output, and **opens a PR but never merges**. The Claude
   worker is greenfield (creates the branch + opens the PR); the Codex worker

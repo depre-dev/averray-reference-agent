@@ -39,7 +39,7 @@ const LANES: readonly Lane[] = [
   "done",
 ];
 const CARD_TYPES: readonly CardType[] = ["pr", "mission", "task", "deploy", "draft", "done"];
-const AGENT_TYPES: readonly AgentType[] = ["claude", "codex", "test-writer", "hermes", "ext"];
+const AGENT_TYPES: readonly AgentType[] = ["claude", "codex", "test-writer", "security", "docs", "hermes", "ext"];
 const CARD_STATES: readonly CardState[] = ["fresh", "stale", "failed-fetch", "source-offline", "running"];
 const RISK_TAGS: readonly RiskTag[] = [
   "workflow",

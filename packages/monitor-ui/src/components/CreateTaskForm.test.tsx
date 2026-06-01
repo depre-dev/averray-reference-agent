@@ -59,6 +59,24 @@ describe("CreateTaskForm (O3 board dispatch)", () => {
     expect(onCreate).toHaveBeenCalledWith({ agent: "test-writer", repo: "a/b", prompt: "add tests" });
   });
 
+  test("can propose security and docs specialist tasks via the agent select", () => {
+    const onCreate = vi.fn();
+    const { container } = render(<CreateTaskForm onCreate={onCreate} />);
+    const f = fields(container);
+
+    fireEvent.change(f.agent, { target: { value: "security" } });
+    fireEvent.change(f.repo, { target: { value: "a/b" } });
+    fireEvent.change(f.prompt, { target: { value: "review auth boundaries" } });
+    fireEvent.click(f.submit);
+    expect(onCreate).toHaveBeenLastCalledWith({ agent: "security", repo: "a/b", prompt: "review auth boundaries" });
+
+    fireEvent.change(f.agent, { target: { value: "docs" } });
+    fireEvent.change(f.repo, { target: { value: "a/b" } });
+    fireEvent.change(f.prompt, { target: { value: "update deploy docs" } });
+    fireEvent.click(f.submit);
+    expect(onCreate).toHaveBeenLastCalledWith({ agent: "docs", repo: "a/b", prompt: "update deploy docs" });
+  });
+
   test("a malformed repo blocks submit with an error", () => {
     const onCreate = vi.fn();
     const { container } = render(<CreateTaskForm onCreate={onCreate} />);

@@ -23,10 +23,10 @@ export type CodexRunnerHeartbeatStatus =
  * Which agent a task is dispatched to. Defaults to "codex" everywhere so
  * existing tasks and callers keep working unchanged; "claude" is the
  * greenfield Claude-worker path (P2), and C3 specialists (for example
- * "test-writer") use the same per-agent filter. Resolve a possibly-absent
- * value via {@link taskAgent}.
+ * "test-writer", "security", "docs") use the same per-agent filter. Resolve a
+ * possibly-absent value via {@link taskAgent}.
  */
-export type TaskAgent = "codex" | "claude" | "test-writer" | (string & {});
+export type TaskAgent = "codex" | "claude" | "test-writer" | "security" | "docs" | (string & {});
 
 /** Resolve a task's agent, defaulting legacy/undefined tasks to "codex". */
 export function taskAgent(task: { agent?: TaskAgent | string }): TaskAgent {
@@ -190,6 +190,8 @@ function taskAgentEventLabel(agent: TaskAgent): string {
   if (agent === "codex") return "Codex";
   if (agent === "claude") return "Claude";
   if (agent === "test-writer") return "test-writer";
+  if (agent === "security") return "security";
+  if (agent === "docs") return "docs";
   return agent;
 }
 

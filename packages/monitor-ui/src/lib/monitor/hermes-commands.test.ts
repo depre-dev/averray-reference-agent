@@ -129,6 +129,24 @@ test("parseHermesInput: /task test-writer <repo> <prompt> → specialist greenfi
   });
 });
 
+test("parseHermesInput: /task security <repo> <prompt> → security specialist greenfield task", () => {
+  assert.deepEqual(parseHermesInput("/task security averray-agent/agent Review auth boundaries"), {
+    kind: "task",
+    agent: "security",
+    repo: "averray-agent/agent",
+    prompt: "Review auth boundaries",
+  });
+});
+
+test("parseHermesInput: /task docs <repo> <prompt> → docs specialist greenfield task", () => {
+  assert.deepEqual(parseHermesInput("/task docs depre-dev/averray-reference-agent Update DEPLOY.md"), {
+    kind: "task",
+    agent: "docs",
+    repo: "depre-dev/averray-reference-agent",
+    prompt: "Update DEPLOY.md",
+  });
+});
+
 test("parseHermesInput: /task codex <repo>#<pr> <prompt> → codex task with PR", () => {
   assert.deepEqual(parseHermesInput("/task codex averray-agent/agent#123 tighten the validator"), {
     kind: "task",

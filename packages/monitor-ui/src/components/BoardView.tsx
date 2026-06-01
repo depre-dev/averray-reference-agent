@@ -573,7 +573,7 @@ function LlmUsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
   const activeCalls = usage?.activeCalls ?? [];
   const hasRows = models.length > 0 || missingSources.length > 0;
   const emptyMessage = usage?.message
-    ?? "No runner has reported LLM usage counters yet. Claude/test-writer counters depend on SDK output; Codex CLI and Hermes/Ollama do not reliably report usage today.";
+    ?? "No runner has reported LLM usage counters yet. Claude-family counters depend on SDK output; Codex CLI and Hermes/Ollama do not reliably report usage today.";
   return (
     <section className="hm-llm-usage" aria-label="LLM usage">
       <div className="hm-llm-usage-head">

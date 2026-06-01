@@ -54,6 +54,8 @@ export function CreateTaskForm({ onCreate }: { onCreate?: (input: CreateTaskInpu
         >
           <option value="claude">claude</option>
           <option value="test-writer">test-writer</option>
+          <option value="security">security</option>
+          <option value="docs">docs</option>
           <option value="codex">codex</option>
         </select>
         <input
@@ -99,5 +101,7 @@ export function CreateTaskForm({ onCreate }: { onCreate?: (input: CreateTaskInpu
 function parseTaskAgent(value: string): CreateTaskInput["agent"] {
   if (value === "codex") return "codex";
   if (value === "test-writer") return "test-writer";
+  if (value === "security") return "security";
+  if (value === "docs") return "docs";
   return "claude";
 }

@@ -12,7 +12,7 @@
 
 import { parseMuteArg } from "./notifications.js";
 
-export type TaskAgent = "codex" | "claude" | "test-writer";
+export type TaskAgent = "codex" | "claude" | "test-writer" | "security" | "docs";
 
 export type HermesCommand =
   | { kind: "mission"; url: string }
@@ -67,7 +67,7 @@ export function parseHermesInput(raw: string, now: () => number = Date.now): Her
     const agentGap = arg.search(/\s/);
     const agentRaw = (agentGap === -1 ? arg : arg.slice(0, agentGap)).toLowerCase();
     if (!isTaskAgent(agentRaw)) {
-      return { kind: "error", message: `"${agentRaw}" is not a valid agent (expected codex, claude, or test-writer).` };
+      return { kind: "error", message: `"${agentRaw}" is not a valid agent (expected codex, claude, test-writer, security, or docs).` };
     }
     const rest = (agentGap === -1 ? "" : arg.slice(agentGap + 1)).trim();
     const targetGap = rest.search(/\s/);
@@ -127,7 +127,7 @@ export function parseHermesInput(raw: string, now: () => number = Date.now): Her
 }
 
 function isTaskAgent(value: string): value is TaskAgent {
-  return value === "codex" || value === "claude" || value === "test-writer";
+  return value === "codex" || value === "claude" || value === "test-writer" || value === "security" || value === "docs";
 }
 
 // ── O4-PR3a autonomy-mode NL parsing ────────────────────────────────

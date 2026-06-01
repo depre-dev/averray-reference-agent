@@ -216,7 +216,7 @@ describe("BoardView — rich-mix board (open stream)", () => {
       ...richBoard,
       llmUsage: {
         status: "not_recorded",
-        message: "No runner has reported LLM usage counters yet. Claude/test-writer counters depend on SDK output; Codex CLI and Hermes/Ollama do not reliably report usage today.",
+        message: "No runner has reported LLM usage counters yet. Claude-family counters depend on SDK output; Codex CLI and Hermes/Ollama do not reliably report usage today.",
         inputTokens: 0,
         outputTokens: 0,
         totalTokens: 0,

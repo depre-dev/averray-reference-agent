@@ -31,7 +31,6 @@ describe("classifyTask — the routing taxonomy (§O4-C)", () => {
   const low: string[] = [
     "tweak the onboarding UI component styling",
     "fix a bug in the monitor board drawer",
-    "update the README docs",
     "refactor and rename a helper for clarity",
   ];
   it.each(low)("Claude surface %j → claude + low", (prompt) => {
@@ -46,6 +45,21 @@ describe("classifyTask — the routing taxonomy (§O4-C)", () => {
     expect(r.agent).toBe("test-writer");
     expect(r.riskTier).toBe("low");
     expect(r.reason).toMatch(/test-writer specialist/);
+  });
+
+  it("routes security review work to the security specialist with operator-reviewed risk", () => {
+    const r = classifyTask({ repo: "depre-dev/averray-reference-agent", prompt: "security review auth boundary and input validation" });
+    expect(r.agent).toBe("security");
+    expect(r.riskTier).toBe("high");
+    expect(r.reason).toMatch(/security specialist/);
+    expect(r.reason).toMatch(/operator-reviewed/);
+  });
+
+  it("routes documentation work to the docs specialist", () => {
+    const r = classifyTask({ repo: "depre-dev/averray-reference-agent", prompt: "update the README docs for the runner" });
+    expect(r.agent).toBe("docs");
+    expect(r.riskTier).toBe("low");
+    expect(r.reason).toMatch(/docs specialist/);
   });
 
   it("ambiguous/general → claude + low (default)", () => {
@@ -76,7 +90,7 @@ describe("classifyTask — the routing taxonomy (§O4-C)", () => {
 
 const ALLOWED: DispatchPolicyConfig = {
   allowedRepos: ["averray-agent/agent"],
-  allowedAgents: ["codex", "claude", "test-writer"],
+  allowedAgents: ["codex", "claude", "test-writer", "security", "docs"],
   perDayMax: 10,
   perRepoPerDayMax: 5,
   perDayUsdMax: 0,

@@ -126,22 +126,31 @@ note flips to online.
 
 ---
 
-## Optional: the C3 test-writer specialist runner (`test-writer-runner` profile)
+## Optional: C3 specialist runners (`test-writer-runner`, `security-runner`, `docs-runner` profiles)
 
-Off by default. The `test-writer` agent/role already ships; this is the runner
-instance that **claims and executes** approved `agent="test-writer"` tasks. It
-is a second Claude-family runner pinned to the test-writer agent, so it claims
-ONLY test-writer tasks — the queue's per-agent claim filter keeps it isolated
-from the `claude-runner` (and vice-versa). Without it, approved test-writer
-tasks queue forever. Same gates as the `claude-runner`: the startup
-billing-route verification (fails loud on a mismatch and refuses to claim), the
-**fail-closed** worker repo allow-list (`CLAUDE_BRANCH_WORKER_ALLOWED_REPOS`,
-shared), `HALT_FILE`, and the heartbeat. It opens a normal `test-writer/*` PR
-through the usual human review gate — no auto-merge/approve.
+Off by default. The C3 specialists are Claude-family runners pinned to one
+internal role, so each claims ONLY tasks whose `agent` matches the pin:
+
+| Agent | Profile | Service | Branch prefix | Scope |
+| --- | --- | --- | --- | --- |
+| `test-writer` | `test-writer-runner` | `test-writer-task-runner` | `test-writer/*` | low-risk test coverage |
+| `security` | `security-runner` | `security-task-runner` | `security/*` | proposes security-focused fixes/reviews; high-risk findings escalate |
+| `docs` | `docs-runner` | `docs-task-runner` | `docs/*` | proposes docs updates for changed surfaces |
+
+The queue's per-agent claim filter keeps specialist runners isolated from the
+`claude-runner` and from each other. Without the matching profile enabled,
+approved specialist tasks queue forever. Same gates as the `claude-runner`: the
+startup billing-route verification (fails loud on a mismatch and refuses to
+claim), the **fail-closed** worker repo allow-list
+(`CLAUDE_BRANCH_WORKER_ALLOWED_REPOS`, shared), `HALT_FILE`, and the heartbeat.
+Each opens a normal PR through the usual human review gate — no auto-merge,
+auto-approve, deploy authority, or security auto-action.
 
 **`.env.prod` edits:**
 ```
 TEST_WRITER_TASK_RUNNER_ENABLED=1
+SECURITY_TASK_RUNNER_ENABLED=1
+DOCS_TASK_RUNNER_ENABLED=1
 # Shared with the claude-runner; still fails closed when empty. Opt repos in:
 CLAUDE_BRANCH_WORKER_ALLOWED_REPOS=owner/repo
 # Plus the same Claude worker auth/billing you use for the claude-runner
@@ -154,21 +163,30 @@ same task queue the operator/autopilot approves into):
 ```
 docker compose --env-file ops/.env.prod --profile test-writer-runner \
   -f ops/compose.yml -f ops/compose.prod.yml up -d test-writer-task-runner
+docker compose --env-file ops/.env.prod --profile security-runner \
+  -f ops/compose.yml -f ops/compose.prod.yml up -d security-task-runner
+docker compose --env-file ops/.env.prod --profile docs-runner \
+  -f ops/compose.yml -f ops/compose.prod.yml up -d docs-task-runner
 ```
 
 It is controlled independently of the `claude-runner`:
-`TEST_WRITER_TASK_RUNNER_ENABLED` maps to that container's own
-`CLAUDE_TASK_RUNNER_ENABLED`, so enabling the claude-runner does not enable this
-one (and the agent pin means neither claims the other's tasks).
+`TEST_WRITER_TASK_RUNNER_ENABLED`, `SECURITY_TASK_RUNNER_ENABLED`, and
+`DOCS_TASK_RUNNER_ENABLED` each map to that container's own
+`CLAUDE_TASK_RUNNER_ENABLED`, so enabling the claude-runner does not enable a
+specialist (and the agent pin means none claims another agent's tasks).
 
 **Verify it's online** (no secrets printed):
 ```
 docker compose --env-file ops/.env.prod -f ops/compose.yml -f ops/compose.prod.yml \
   logs --since 5m test-writer-task-runner | grep -iE "test-writer|online|idle|claimed|REFUSING|disabled" | tail -10
+docker compose --env-file ops/.env.prod -f ops/compose.yml -f ops/compose.prod.yml \
+  logs --since 5m security-task-runner | grep -iE "security|online|idle|claimed|REFUSING|disabled" | tail -10
+docker compose --env-file ops/.env.prod -f ops/compose.yml -f ops/compose.prod.yml \
+  logs --since 5m docs-task-runner | grep -iE "docs|online|idle|claimed|REFUSING|disabled" | tail -10
 ```
-A healthy runner logs `test-writer runner is online; no approved test-writer
-task is waiting` (idle). On a billing-route mismatch it logs `REFUSING TO CLAIM`
-and writes a `misconfigured` heartbeat rather than running on the wrong route.
+A healthy runner logs `<agent> runner is online; no approved <agent> task is
+waiting` (idle). On a billing-route mismatch it logs `REFUSING TO CLAIM` and
+writes a `misconfigured` heartbeat rather than running on the wrong route.
 
 ---
 
