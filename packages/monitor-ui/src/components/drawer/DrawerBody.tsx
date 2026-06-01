@@ -14,9 +14,11 @@ import type {
   DeployCard,
   DoneCard,
   HermesDecisionRecord,
+  MissionBlocker,
   MissionCard,
 } from "../../lib/monitor/card-types.js";
 import { humanizeSignalText } from "../../lib/monitor/signal-labels.js";
+import { cleanFailureText } from "../../lib/monitor/mission-failure.js";
 import { ChecksBar } from "../cards/ChecksBar.js";
 import { OperatorNotes } from "./OperatorNotes.js";
 
@@ -408,6 +410,51 @@ function MissionSpecDetails() {
   );
 }
 
+/**
+ * A single mission blocker. The head/body are shown CLEANED (ANSI,
+ * box-drawing, pipes stripped) so they're readable. When cleaning
+ * actually changed the text — i.e. the runner left a raw multi-line dump —
+ * the original is preserved under a collapsible "raw runner output", one
+ * click deep. Truth-boundary: the real failure text is never dropped, just
+ * de-emphasized.
+ */
+function MissionBlockerBlock({ blocker }: { blocker: MissionBlocker }) {
+  const rawCombined = [blocker.head, blocker.body].filter(Boolean).join("\n");
+  const cleanedHead = cleanFailureText(blocker.head) || blocker.head;
+  const cleanedBody = cleanFailureText(blocker.body);
+  // Show the raw disclosure only when cleaning meaningfully changed things
+  // (otherwise it's redundant noise).
+  const rawDiffers = rawCombined.trim() !== `${cleanedHead}${cleanedBody ? ` ${cleanedBody}` : ""}`.trim();
+  return (
+    <div className="hm-mblock">
+      <div className="head">{cleanedHead}</div>
+      {cleanedBody ? <div className="body">{cleanedBody}</div> : null}
+      {rawDiffers && rawCombined.trim() ? (
+        <details className="hm-mblock-raw" style={{ marginTop: 6 }}>
+          <summary style={{ cursor: "pointer", color: "var(--hm-muted)", fontSize: 12 }}>
+            Show raw runner output
+          </summary>
+          <pre
+            style={{
+              margin: "6px 0 0",
+              padding: 8,
+              background: "var(--hm-paper-3)",
+              borderRadius: 6,
+              fontSize: 11,
+              lineHeight: 1.4,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              overflowX: "auto",
+            }}
+          >
+            {rawCombined}
+          </pre>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
 function MissionBody({ card }: { card: MissionCard }) {
   // `mission` is required on the type, but a live mission card has no
   // structured report until the browser agent posts one. Read defensively.
@@ -503,10 +550,7 @@ function MissionBody({ card }: { card: MissionCard }) {
           <div className="hm-section-h">Blockers · confusing moments</div>
           <div style={{ display: "grid", gap: 10 }}>
             {m.blockers.map((b, i) => (
-              <div className="hm-mblock" key={i}>
-                <div className="head">{b.head}</div>
-                <div className="body">{b.body}</div>
-              </div>
+              <MissionBlockerBlock blocker={b} key={i} />
             ))}
           </div>
         </section>

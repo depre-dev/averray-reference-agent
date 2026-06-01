@@ -31,6 +31,7 @@ import type {
 import { formatFreshness, freshnessTier } from "../../lib/monitor/urgency.js";
 import { laneFor } from "../../lib/monitor/lane-rules.js";
 import { humanizedSignalParts } from "../../lib/monitor/signal-labels.js";
+import { missionFailureCardSummary } from "../../lib/monitor/mission-failure.js";
 import { relatedPrForCard } from "../../lib/monitor/collaboration.js";
 import { ChecksBar } from "./ChecksBar.js";
 import { AgentDiscussion } from "./AgentDiscussion.js";
@@ -124,6 +125,12 @@ export function Card({
   const closedAt = (card as { closedAt?: string }).closedAt;
   const verdictText = (card as { verdictText?: string }).verdictText;
 
+  // A failed/partial browser mission must show a CLEAN one-liner here, not
+  // the raw multi-line Playwright/runner dump. The full raw detail lives in
+  // the drawer (MissionBody blockers + Evidence). Falls back to the normal
+  // summary for every other card.
+  const cardSummary = missionFailureCardSummary(card) ?? card.summary;
+
   const onCardClick = onClick ? () => onClick(card) : undefined;
 
   return (
@@ -143,10 +150,10 @@ export function Card({
 
       <div className="hm-card-title">{card.title}</div>
 
-      {card.summary && !isClosed ? (
+      {cardSummary && !isClosed ? (
         <div className="hm-card-meta" style={{ lineHeight: 1.5 }}>
           <span style={{ color: "var(--hm-ink-soft)", fontFamily: "var(--font-body)", fontSize: 12 }}>
-            <HumanizedText text={card.summary} />
+            <HumanizedText text={cardSummary} />
           </span>
         </div>
       ) : null}

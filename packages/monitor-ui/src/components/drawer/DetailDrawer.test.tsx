@@ -364,3 +364,26 @@ describe("DetailDrawer — footer actions (G2)", () => {
     expect(onApproveAndMerge).toHaveBeenCalledWith(card);
   });
 });
+
+describe("DetailDrawer — failed mission blocker (raw reachable, cleaned by default)", () => {
+  test("shows a cleaned blocker head and keeps the raw runner output one click deep", () => {
+    const card = fixture("mission browser-claim-09"); // failed mission, raw dump in blocker
+    const { container, getByText } = render(
+      <DetailDrawer card={card} cards={[{ id: card.id }]} onClose={noop} onNavigate={noop} />,
+    );
+    const blocker = container.querySelector(".hm-mblock");
+    expect(blocker).toBeTruthy();
+    // The head is shown CLEANED — no box-drawing / pipes in the visible head.
+    const head = blocker?.querySelector(".head");
+    expect(head?.textContent ?? "").not.toMatch(/[─-▟]/);
+    expect(head?.textContent ?? "").not.toContain("|");
+    // The raw runner output is preserved, reachable under a disclosure.
+    const raw = blocker?.querySelector("details.hm-mblock-raw");
+    expect(raw).toBeTruthy();
+    expect(getByText("Show raw runner output")).toBeTruthy();
+    // The raw <pre> still contains the real, unredacted failure text.
+    const pre = raw?.querySelector("pre");
+    expect(pre?.textContent ?? "").toContain("ms-playwright");
+    expect(pre?.textContent ?? "").toContain("ffmpeg");
+  });
+});

@@ -520,3 +520,20 @@ describe("Card — decision hoist (P1-2)", () => {
     expect(container.querySelector(".hm-card-decision")).toBeNull();
   });
 });
+
+describe("Card — failed mission readable summary", () => {
+  test("renders a clean one-liner, never raw stderr / box-drawing / pipes", () => {
+    const card = fixture("mission browser-checkout-12"); // failed mission, raw dump in summary + blocker
+    const { container } = render(<Card card={card} />);
+    const meta = container.querySelector(".hm-card-meta");
+    expect(meta).toBeTruthy();
+    const text = meta?.textContent ?? "";
+    // Clean, mapped one-liner.
+    expect(text).toContain("Mission failed — browser binary not installed");
+    // Zero raw noise on the card.
+    expect(text).not.toContain("\n");
+    expect(text).not.toContain("|");
+    expect(text).not.toMatch(/[─-▟]/);
+    expect(text).not.toContain("ms-playwright");
+  });
+});

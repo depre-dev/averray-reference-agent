@@ -9,6 +9,7 @@ import type {
 import type { CollaborationAuthor, CollaborationMessage } from "./collaboration.js";
 import { actorLabel, actorLabelForMessage, formatTurnTime, relatedPrForCard } from "./collaboration.js";
 import { humanizeSignalText } from "./signal-labels.js";
+import { cleanFailureText } from "./mission-failure.js";
 
 export type ActivityTone = "neutral" | "info" | "action" | "success" | "warning";
 
@@ -126,7 +127,7 @@ function cardActivity(card: BoardCard, boardAtMs: number): HermesActivityEntry[]
         actor: "hermes",
         kindLabel: "narration",
         text: `${label} work failed on ${title}; operator triage is needed before retrying or splitting it.`,
-        meta: card.failureReason ?? "task failed",
+        meta: plain(card.failureReason) || "task failed",
         cardId: card.id,
         suggestions: ["Show failure evidence", "Should this be split?"],
       });
@@ -400,7 +401,11 @@ function parseTime(value: string | undefined): number | undefined {
 }
 
 function plain(value: string | undefined): string {
-  return humanizeSignalText(value).replace(/\s+/g, " ").trim();
+  // cleanFailureText first strips ANSI / box-drawing / pipe noise from raw
+  // runner output (a failed mission's message can be a multi-line dump), so
+  // rail narration never echoes the raw stderr. Then humanize enum codes
+  // and collapse whitespace.
+  return humanizeSignalText(cleanFailureText(value)).replace(/\s+/g, " ").trim();
 }
 
 function sentence(value: string): string {

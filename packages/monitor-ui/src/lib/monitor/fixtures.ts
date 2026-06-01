@@ -247,6 +247,44 @@ export const FIXTURE_CARDS: BoardCard[] = [
     },
   },
 
+  // Failed browser mission that renders through the live <Card> (not the
+  // degraded path): the runner left a raw multi-line Playwright dump. The
+  // card/rail must show a CLEAN one-liner; the drawer keeps the raw text.
+  {
+    id: "mission browser-checkout-12",
+    lane: "hermes-checking",
+    type: "mission",
+    agentType: "hermes",
+    title: "Verify checkout flow on staging",
+    summary:
+      "Executable doesn't exist at /home/appuser/.cache/ms-playwright/chromium-1140/chrome-linux/chrome\n│ Video rendering requires ffmpeg binary │\n╔════════════════════╗\n║ npx playwright install ffmpeg ║\n╚════════════════════╝\n| | |",
+    repo: "depre-dev/site",
+    freshness: 7,
+    state: "fresh",
+    risk: ["testbed"],
+    missionStatus: "failed",
+    waitingOn: { actor: "operator", tone: "warn" },
+    mission: {
+      verdict: "FAILED",
+      verdictTone: "fail",
+      confidence: 0,
+      latency: "—",
+      target: "https://staging.averray.com/checkout",
+      seed: "fresh · no memory",
+      runs: 1,
+      path: [],
+      blockers: [
+        {
+          head: "Executable doesn't exist at /home/appuser/.cache/ms-playwright/chromium-1140/chrome-linux/chrome",
+          body: "│ Video rendering requires ffmpeg binary │\n╔════════════════════╗\n║ npx playwright install ffmpeg ║\n╚════════════════════╝",
+        },
+      ],
+      evidence: [],
+      mutationBoundary: "No mutation — mission failed before it reached the page.",
+      recommendations: [],
+    },
+  },
+
   // ── Done / release history — keep a representative slice ──
   ...buildDoneHistory(),
 ];
@@ -304,11 +342,16 @@ export const DEGRADED_FIXTURE_CARDS: BoardCard[] = [
     type: "mission",
     agentType: "hermes",
     title: "Verify claim flow on staging — third pass after the modal fix",
-    summary: "",
+    // Raw runner failure dump — multi-line with box-drawing + pipes. The
+    // card/rail must render a CLEAN one-liner from this; the drawer keeps
+    // the raw text reachable under the blocker's "raw runner output".
+    summary:
+      "Executable doesn't exist at /home/appuser/.cache/ms-playwright/chromium-1140/chrome-linux/chrome\n│ Video rendering requires ffmpeg binary │\n╔════════════════════╗\n║ npx playwright install ffmpeg ║\n╚════════════════════╝\n| | |",
     repo: "depre-dev/site",
     freshness: 42,
     state: "source-offline",
     risk: ["testbed"],
+    missionStatus: "failed",
     waitingOn: { actor: "agent", tone: "neutral" },
     mission: {
       verdict: "FAILED",
@@ -322,7 +365,12 @@ export const DEGRADED_FIXTURE_CARDS: BoardCard[] = [
       clarityScore: 0,
       latencyScore: 0,
       path: [],
-      blockers: [],
+      blockers: [
+        {
+          head: "Executable doesn't exist at /home/appuser/.cache/ms-playwright/chromium-1140/chrome-linux/chrome",
+          body: "│ Video rendering requires ffmpeg binary │\n╔════════════════════╗\n║ npx playwright install ffmpeg ║\n╚════════════════════╝",
+        },
+      ],
       evidence: [],
       mutationBoundary: "Mission did not run — runner pool offline.",
       recommendations: [],
