@@ -40,6 +40,12 @@ export interface FailureSignal {
   area?: string;
   /** A rollback is ALWAYS operator-confirmed — escalate, never propose. */
   isRollback?: boolean;
+  /** False when the signal needs human diagnosis instead of a code-agent fix. */
+  autoFixable?: boolean;
+  /** Operator-facing explanation for why B2 must not dispatch a code task. */
+  nonAutoFixableReason?: string;
+  /** Source-specific prompt with enough context for a code agent to act. */
+  fixPrompt?: string;
 }
 
 export interface HealingClassification {
@@ -54,6 +60,7 @@ export type HealingReason =
   | "autopilot_suspended"
   | "halt_present"
   | "rollback_operator_confirmed"
+  | "not_auto_fixable"
   | "no_target_repo"
   | "unclassified"
   | "high_risk_surface"
@@ -104,6 +111,8 @@ export function decideHealingAction(
   if (gates.suspended) return { action: "escalate", reason: "autopilot_suspended" };
   // Rollback is always operator-confirmed.
   if (signal.isRollback) return { action: "escalate", reason: "rollback_operator_confirmed" };
+  // Some signals are real alerts but not code-agent-fixable.
+  if (signal.autoFixable === false) return { action: "escalate", reason: "not_auto_fixable" };
   // Can't route a build without a repo.
   if (!signal.repo) return { action: "escalate", reason: "no_target_repo" };
   if (!classification) return { action: "escalate", reason: "unclassified" };
@@ -116,6 +125,8 @@ export function decideHealingAction(
 
 /** A clear, bounded fix-task prompt describing the failure + an evidence link. */
 export function buildFixPrompt(signal: FailureSignal): string {
+  const specificPrompt = signal.fixPrompt?.trim();
+  if (specificPrompt) return specificPrompt;
   const lines = [
     `A ${humanSource(signal.source)} failed and Hermes self-healing is proposing a fix.`,
     "",
@@ -152,6 +163,8 @@ export function buildHealingEscalationAlert(
       ? "A rollback is always operator-confirmed — Hermes will not auto-act.\n"
       : decision.reason === "high_risk_surface"
         ? "High-risk surface — Hermes escalates instead of auto-proposing a fix.\n"
+        : decision.reason === "not_auto_fixable"
+          ? `Needs human diagnosis — B2 will not dispatch a code-agent fix${signal.nonAutoFixableReason ? ` (${signal.nonAutoFixableReason})` : ""}.\n`
         : "") +
     `Board: ${boardUrl}`;
   return { count: 1, items: [{ id: signal.surface, title: `self-healing: ${signal.surface}` }], boardUrl, text };
@@ -160,6 +173,7 @@ export function buildHealingEscalationAlert(
 function escalationHeadline(reason: HealingReason): string {
   switch (reason) {
     case "rollback_operator_confirmed": return "a rollback needs your confirmation";
+    case "not_auto_fixable": return "a failure is not code-agent-fixable";
     case "high_risk_surface": return "a high-risk surface failed";
     case "halt_present": return "a failure tripped while HALT is set";
     case "autopilot_suspended": return "a failure tripped while autopilot is suspended (D3)";
@@ -275,7 +289,7 @@ export async function runSelfHealingOnce(deps: SelfHealingDeps): Promise<SelfHea
 
     // Classify only when a build is even possible (else the decision escalates).
     const classification =
-      !suspended && !halt && !signal.isRollback && signal.repo ? deps.classify(signal) : undefined;
+      !suspended && !halt && !signal.isRollback && signal.autoFixable !== false && signal.repo ? deps.classify(signal) : undefined;
     let decision = decideHealingAction(signal, classification, { suspended, halt });
 
     // Backstops: don't propose past the per-tick cap, daily cap, nor past the

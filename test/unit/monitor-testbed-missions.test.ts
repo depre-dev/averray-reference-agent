@@ -16,6 +16,7 @@ import {
   testbedMissionRerunPrompt,
   testbedMissionResultCoaching,
   testbedMissionRunToMonitorItem,
+  testbedMissionSelfHealingDisposition,
   testbedMissionStructuredReport,
 } from "../../services/slack-operator/src/monitor-testbed-missions.js";
 
@@ -485,6 +486,53 @@ describe("monitor testbed mission runs", () => {
     expect(coaching).toContain("Set confidence to a number from 0 to 1.");
     expect(coaching).toContain("Smallest next move");
     expect(coaching).toContain("do not ask Codex to change the product until the evidence is attached");
+  });
+
+  it("marks structured failed browser reports as code-agent-fixable for B2", () => {
+    const run = recordTestbedMissionRunFromOperatorResult(missionResult(), Date.parse("2026-05-22T10:00:00.000Z"));
+    const updated = recordTestbedMissionReportFromMessage(
+      {
+        relatedCorrelationId: run!.id,
+        text: JSON.stringify({
+          verdict: "fail",
+          confidence: 0.7,
+          stoppedBeforeMutation: true,
+          mutationBoundaryNotes: ["Stopped before signing."],
+          completedPath: ["opened app", "looked for claim button"],
+          blockers: ["Could not find the claim button."],
+          confusingMoments: ["Primary action looked disabled without explanation."],
+          recommendations: ["Make the claim action visible with a blocked-state reason."],
+          evidence: ["Agent searched the main panel and command area."],
+          scores: { orientation: 2 },
+        }),
+      },
+      Date.parse("2026-05-22T10:05:00.000Z"),
+    );
+
+    const disposition = testbedMissionSelfHealingDisposition(updated!);
+    expect(disposition).toMatchObject({
+      autoFixable: true,
+      reason: "product_signal",
+    });
+    expect(disposition.summary).toContain("Could not find the claim button.");
+    expect(disposition.fixPrompt ?? "").toContain(`Fix the testbed page for mission ${run!.id}`);
+    expect(disposition.fixPrompt ?? "").toContain("Smallest product move: Make the claim action visible with a blocked-state reason.");
+  });
+
+  it("marks runner/report-pipeline failures as human-review, not auto-fixable", () => {
+    const run = recordTestbedMissionRunFromOperatorResult(missionResult(), Date.parse("2026-05-22T10:00:00.000Z"));
+    const failed = failTestbedMissionRun(run!.id, {
+      now: new Date("2026-05-22T10:05:00.000Z"),
+      failureReason: "Hermes testbed runner finished, but the output did not contain a valid structured mission report.",
+    });
+
+    const disposition = testbedMissionSelfHealingDisposition(failed!);
+    expect(disposition).toMatchObject({
+      autoFixable: false,
+      reason: "runner_failed",
+    });
+    expect(disposition.summary).toContain("runner/report pipeline");
+    expect(disposition.fixPrompt).toBeUndefined();
   });
 
   it("feeds B2 only the latest failed mission per target", () => {

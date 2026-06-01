@@ -135,6 +135,19 @@ export interface TestbedMissionFixBrief {
   evidence: string[];
 }
 
+export type TestbedMissionSelfHealingReason =
+  | "product_signal"
+  | "runner_failed"
+  | "invalid_report"
+  | "missing_product_report";
+
+export interface TestbedMissionSelfHealingDisposition {
+  autoFixable: boolean;
+  reason: TestbedMissionSelfHealingReason;
+  summary: string;
+  fixPrompt?: string;
+}
+
 export interface TestbedMissionStoreDeps {
   path?: string;
   now?: Date;
@@ -673,6 +686,42 @@ export function testbedMissionCodexFollowupPrompt(run: TestbedMissionRun): strin
   ].join("\n");
 }
 
+export function testbedMissionSelfHealingDisposition(run: TestbedMissionRun): TestbedMissionSelfHealingDisposition {
+  const reason = run.failureReason ?? run.statusReason ?? "no reason recorded";
+  if (run.history.some((entry) => entry.event === "mission_runner_failed")) {
+    return {
+      autoFixable: false,
+      reason: "runner_failed",
+      summary: `Testbed mission ${run.id} failed in the runner/report pipeline for ${run.targetUrl}: ${reason}`,
+    };
+  }
+  if (reportValidationFailure(reason)) {
+    return {
+      autoFixable: false,
+      reason: "invalid_report",
+      summary: `Testbed mission ${run.id} has invalid browser-agent evidence for ${run.targetUrl}: ${reason}`,
+    };
+  }
+
+  const structuredReport = testbedMissionStructuredReport(run);
+  if (!structuredReport || !run.result) {
+    return {
+      autoFixable: false,
+      reason: "missing_product_report",
+      summary: `Testbed mission ${run.id} failed without an attached product report for ${run.targetUrl}: ${reason}`,
+    };
+  }
+
+  const fixBrief = testbedMissionFixBrief(run);
+  const fixPrompt = testbedMissionCodexFollowupPrompt(run);
+  return {
+    autoFixable: Boolean(fixPrompt),
+    reason: fixPrompt ? "product_signal" : "missing_product_report",
+    summary: `Testbed mission ${run.id} found a product blocker on ${run.targetUrl}: ${fixBrief.primaryBlocker}`,
+    ...(fixPrompt ? { fixPrompt } : {}),
+  };
+}
+
 export function testbedMissionFixBrief(run: TestbedMissionRun): TestbedMissionFixBrief {
   const result = run.result ?? {};
   const blockers = stringArray(result.blockers);
@@ -694,6 +743,10 @@ export function testbedMissionFixBrief(run: TestbedMissionRun): TestbedMissionFi
     rerunProof: `run this same testbed mission again and verify whether "${primaryBlocker}" is gone, unchanged, or replaced`,
     evidence,
   };
+}
+
+function reportValidationFailure(reason: string): boolean {
+  return /valid structured mission report|missing structured mission report|invalid browser-agent report/i.test(reason);
 }
 
 export function testbedMissionRerunPrompt(run: TestbedMissionRun): string | undefined {
