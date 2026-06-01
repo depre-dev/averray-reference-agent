@@ -1376,18 +1376,19 @@ export function taskHealthForBoard(
       };
     }
     const repeated = attemptCount >= REPEATED_FAILURE_ATTEMPTS;
+    const attemptsLabel = `${attemptCount} runner attempt${attemptCount === 1 ? "" : "s"}`;
     return attentionHealth({
       state: "stale",
       freshness: minutesSince(asString(task.failedAt) ?? asString(task.updatedAt), now),
       summary: repeated
-        ? `Task failed after ${attemptCount} runner attempt(s).`
+        ? `Task failed after ${attemptsLabel}.`
         : "Task failed in the runner.",
       riskSignal: {
         severity: repeated ? "high" : "medium",
         code: repeated ? "task_failed_repeatedly" : "task_failed",
         message: [
           repeated
-            ? `The task failed after ${attemptCount} runner attempt(s); operator should decide whether to split, retry, or cancel.`
+            ? `The task failed after ${attemptsLabel}; operator should decide whether to split, retry, or cancel.`
             : "The task failed and needs operator triage before it disappears from the queue.",
           failureReason,
         ].filter(Boolean).join(" "),

@@ -4,11 +4,11 @@ export interface HumanizedSignalPart {
 }
 
 const SIGNAL_LABELS: Record<string, string> = {
-  dispatch_budget_exhausted: "Dispatch budget used up - paused until reset",
-  open_fix_cap_reached: "Self-healing fix cap reached - won't propose more",
-  duplicate_signal: "Skipped - duplicate of an existing fix",
+  dispatch_budget_exhausted: "Dispatch budget used up — paused until reset",
+  open_fix_cap_reached: "Self-healing fix cap reached — won't propose more",
+  duplicate_signal: "Skipped — duplicate of an existing fix",
   routed_fix: "Routed fix proposal",
-  not_auto_fixable: "Needs human diagnosis - not a code-agent fix",
+  not_auto_fixable: "Needs human diagnosis — not a code-agent fix",
 };
 
 const ENUM_TOKEN = /\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g;

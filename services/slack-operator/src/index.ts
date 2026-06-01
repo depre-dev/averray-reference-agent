@@ -83,6 +83,7 @@ import {
   runSelfHealingOnce,
   createCooldown,
   testbedSurfaceKey,
+  surfaceLabel,
   type FailureSignal,
 } from "./self-healing.js";
 import { runTaskHealthOnce } from "./task-health.js";
@@ -2507,7 +2508,7 @@ function startOperatorRoutines() {
             riskTier,
             routingReason,
             prompt,
-            title: `Self-healing fix: ${signal.surface}`,
+            title: `Self-healing fix: ${surfaceLabel(signal.surface)}`,
             reason: `Hermes self-healing proposal for a ${signal.source} failure`,
             requester: "hermes-self-healing",
             correlationId: `self-heal:${targetSignature}`,
@@ -2520,13 +2521,21 @@ function startOperatorRoutines() {
         },
         alert: (payload) => alertChannel.dispatch(payload),
         audit: async (record) => {
+          // Operator-facing phrasing — the internal "b2" stream codename and
+          // the raw action verb leak into board cards otherwise.
+          const actionPhrase =
+            record.action === "propose"
+              ? "Proposed a fix"
+              : record.action === "escalate"
+                ? "Escalated to operator"
+                : "Skipped";
           await recordHandoffEvent({
             correlationId: `self-heal:${record.targetSignature ?? `${record.source}:${record.surface}`}`,
             requester: "hermes-self-healing",
             intent: "self_healing",
             phase: "self_healing",
             status: record.action === "propose" ? "completed" : record.action === "escalate" ? "needs_review" : "completed",
-            reason: `b2 ${record.action}: ${record.reason}`,
+            reason: `${actionPhrase}: ${record.reason}`,
             summary: {
               kind: "self_healing",
               action: record.action,

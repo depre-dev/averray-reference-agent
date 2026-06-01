@@ -7,6 +7,7 @@ import {
   buildHealingEscalationAlert,
   createCooldown,
   testbedSurfaceKey,
+  surfaceLabel,
   selfHealingTargetSignature,
   type FailureSignal,
   type HealingClassification,
@@ -27,6 +28,22 @@ function signal(over: Partial<FailureSignal> = {}): FailureSignal {
     ...over,
   };
 }
+
+// ── surface label (operator-facing display) ─────────────────────────
+
+describe("surfaceLabel — strips the internal namespace from a surface key", () => {
+  it("drops a doubled testbed prefix so titles aren't 'testbed:testbed-mission-…'", () => {
+    expect(surfaceLabel("testbed:testbed-mission-mpmo4ff2-1")).toBe("testbed-mission-mpmo4ff2-1");
+  });
+  it("drops other namespaces (deploy-verify, etc.) keeping the remainder", () => {
+    expect(surfaceLabel("deploy-verify:abc123")).toBe("abc123");
+    expect(surfaceLabel("testbed:app.example/overview")).toBe("app.example/overview");
+  });
+  it("leaves an unnamespaced value untouched and tolerates empty input", () => {
+    expect(surfaceLabel("app.example/overview")).toBe("app.example/overview");
+    expect(surfaceLabel("")).toBe("");
+  });
+});
 
 // ── pure decision matrix ────────────────────────────────────────────
 

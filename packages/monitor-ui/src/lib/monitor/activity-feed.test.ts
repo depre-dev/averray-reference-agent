@@ -162,7 +162,7 @@ describe("buildHermesActivityFeed", () => {
       now: () => Date.parse("2026-05-28T10:05:00Z"),
     });
     const text = entries.map((entry) => entry.text).join("\n");
-    expect(text).toContain("Dispatch budget used up - paused until reset");
+    expect(text).toContain("Dispatch budget used up — paused until reset");
     expect(text).not.toContain("dispatch_budget_exhausted");
   });
 });

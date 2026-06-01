@@ -248,8 +248,8 @@ describe("Card — task approve (O3 dispatch)", () => {
       summary: "dispatch_budget_exhausted then duplicate_signal",
     } as unknown as BoardCard;
     const { getByText, getByTitle, queryByText } = render(<Card card={card} onApprove={vi.fn()} />);
-    expect(getByText("Dispatch budget used up - paused until reset")).toBeTruthy();
-    expect(getByText("Skipped - duplicate of an existing fix")).toBeTruthy();
+    expect(getByText("Dispatch budget used up — paused until reset")).toBeTruthy();
+    expect(getByText("Skipped — duplicate of an existing fix")).toBeTruthy();
     expect(getByTitle("raw code: dispatch_budget_exhausted")).toBeTruthy();
     expect(getByTitle("raw code: duplicate_signal")).toBeTruthy();
     expect(queryByText(/dispatch_budget_exhausted/)).toBeNull();

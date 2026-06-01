@@ -15,6 +15,25 @@ import { MiniRail, type LaneDescriptor, type LaneId } from "./MiniRail.js";
 
 export type { LaneDescriptor, LaneId };
 
+// Per-lane empty copy. The generic "No {lane} right now." reads wrong for
+// several lanes ("No done right now.", "No deploying right now."), so each
+// lane gets a sentence that fits its meaning. Falls back to the generic
+// form for any lane id not listed.
+const LANE_EMPTY_COPY: Partial<Record<LaneId, string>> = {
+  "needs-attention": "Nothing needs your review right now.",
+  drafts: "No drafts in progress.",
+  "codex-needed": "No tasks waiting to be created.",
+  "hermes-checking": "Nothing in pre-check right now.",
+  "operator-review": "Nothing waiting on your risk decision.",
+  "release-queue": "Release queue is empty.",
+  deploying: "Nothing deploying right now.",
+  done: "Nothing shipped yet.",
+};
+
+function laneEmptyMessage(lane: LaneDescriptor): string {
+  return LANE_EMPTY_COPY[lane.id] ?? `No ${lane.name.toLowerCase()} right now.`;
+}
+
 export type LaneProps = {
   lane: LaneDescriptor;
   /** Whether the lane is expanded (default) or collapsed to a mini-rail. */
@@ -65,7 +84,7 @@ export function Lane({ lane, expanded, count, children, headerAccessory, onToggl
       <div className="hm-lane-body">
         {headerAccessory}
         {count === 0 ? (
-          <div className="hm-lane-empty">No {lane.name.toLowerCase()} right now.</div>
+          <div className="hm-lane-empty">{laneEmptyMessage(lane)}</div>
         ) : (
           children
         )}
