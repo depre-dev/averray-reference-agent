@@ -135,6 +135,20 @@ test("board.card.moved: updates the matching card's lane", () => {
   assert.equal(next.cards.find(c => c.id === "a").lane, "release-queue");
 });
 
+test("board.card.moved: replaces stale card details when the stream supplies the fresh card", () => {
+  const next = applyEventToBoard(baseBoard(), {
+    type: "board.card.moved",
+    id: "a",
+    fromLane: "operator-review",
+    toLane: "hermes-checking",
+    card: { id: "a", lane: "hermes-checking", type: "pr", title: "Re-reviewing current head", summary: "fresh" },
+  });
+  const card = next.cards.find(c => c.id === "a");
+  assert.equal(card.lane, "hermes-checking");
+  assert.equal(card.title, "Re-reviewing current head");
+  assert.equal(card.summary, "fresh");
+});
+
 test("board.card.moved: unknown id is a no-op", () => {
   const next = applyEventToBoard(baseBoard(), {
     type: "board.card.moved",

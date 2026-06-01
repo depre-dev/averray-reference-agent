@@ -286,6 +286,12 @@ export interface BoardSnapshotV2 {
   automationHealth?: AutomationHealth;
 }
 
+export type BoardCardStreamEvent =
+  | { type: "board.card.added"; card: BoardCard; at: string }
+  | { type: "board.card.updated"; id: string; partial: BoardCard; card: BoardCard; at: string }
+  | { type: "board.card.moved"; id: string; fromLane: Lane; toLane: Lane; card: BoardCard; at: string }
+  | { type: "board.card.archived"; id: string; fromLane?: Lane; at: string };
+
 export interface AutomationHealth {
   /** Non-terminal self-healing fix proposals currently open. */
   selfHealingOpen: number;
@@ -1716,6 +1722,56 @@ export function buildV2BoardSnapshot(
       taskHealthCapacitySignals: quietTaskHealthCapacitySignals,
     }),
   };
+}
+
+/**
+ * Compare two real board snapshots and emit the card-level events the v2 SSE
+ * stream can send before the reconciliation snapshot. These are not synthetic
+ * animations: every event is derived from two consecutive source snapshots.
+ */
+export function diffBoardSnapshots(
+  previous: BoardSnapshotV2 | undefined,
+  next: BoardSnapshotV2,
+): BoardCardStreamEvent[] {
+  if (!previous) return [];
+  const at = next.at;
+  const previousById = new Map(previous.cards.map((card) => [card.id, card]));
+  const nextById = new Map(next.cards.map((card) => [card.id, card]));
+  const events: BoardCardStreamEvent[] = [];
+
+  for (const card of previous.cards) {
+    if (!nextById.has(card.id)) {
+      events.push({ type: "board.card.archived", id: card.id, fromLane: card.lane, at });
+    }
+  }
+
+  for (const card of next.cards) {
+    const before = previousById.get(card.id);
+    if (!before) {
+      events.push({ type: "board.card.added", card, at });
+      continue;
+    }
+    if (before.lane !== card.lane) {
+      events.push({
+        type: "board.card.moved",
+        id: card.id,
+        fromLane: before.lane,
+        toLane: card.lane,
+        card,
+        at,
+      });
+      continue;
+    }
+    if (!sameBoardCard(before, card)) {
+      events.push({ type: "board.card.updated", id: card.id, partial: card, card, at });
+    }
+  }
+
+  return events;
+}
+
+function sameBoardCard(a: BoardCard, b: BoardCard): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 function countQuietTaskHealthCapacitySignals(rawSnapshot: unknown): number {

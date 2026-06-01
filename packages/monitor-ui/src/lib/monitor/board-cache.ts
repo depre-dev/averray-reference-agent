@@ -136,8 +136,9 @@ export function applyEventToBoard(
       if (!id || !toLane) return prev;
       const idx = prev.cards.findIndex((c) => c.id === id);
       if (idx < 0) return prev;
+      const card = isRecord(event.card) ? (event.card as unknown as BoardCard) : undefined;
       const next = prev.cards.slice();
-      next[idx] = { ...next[idx], lane: toLane } as BoardCard;
+      next[idx] = card?.id === id ? { ...card, lane: toLane } : ({ ...next[idx], lane: toLane } as BoardCard);
       return { cards: next, at: typeof event.at === "string" ? event.at : prev.at };
     }
     case "board.card.archived": {
