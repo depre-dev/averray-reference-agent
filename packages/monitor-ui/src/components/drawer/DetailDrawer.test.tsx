@@ -272,3 +272,40 @@ describe("DetailDrawer — variants", () => {
     expect(getByText(/no structured report yet/i)).toBeTruthy();
   });
 });
+
+describe("DetailDrawer — footer actions (G2)", () => {
+  test("truth-boundary: an action lacking a backend renders DISABLED with a tooltip reason", () => {
+    const card = fixture("agent #548"); // action PR card
+    const { getByText } = render(
+      <DetailDrawer card={card} cards={[{ id: card.id }]} onClose={noop} onNavigate={noop} />,
+    );
+    // No `actions` wired → Send back to Codex + Ask Hermes are disabled with a reason.
+    const sendBack = getByText("Send back to Codex").closest("button") as HTMLButtonElement;
+    expect(sendBack.disabled).toBe(true);
+    expect(sendBack.getAttribute("title")).toMatch(/isn't available/i);
+    const ask = getByText("Ask Hermes").closest("button") as HTMLButtonElement;
+    expect(ask.disabled).toBe(true);
+    expect(ask.getAttribute("title")).toMatch(/isn't available/i);
+  });
+
+  test("Approve & merge opens the GitHub PR and records approval — never merges in-board", () => {
+    const card = fixture("agent #548");
+    const openUrl = vi.fn();
+    const onApproveAndMerge = vi.fn();
+    const { getByText } = render(
+      <DetailDrawer
+        card={card}
+        cards={[{ id: card.id }]}
+        onClose={noop}
+        onNavigate={noop}
+        actions={{ onApproveAndMerge }}
+        footerDeps={{ openUrl }}
+      />,
+    );
+    const btn = getByText("Approve & merge").closest("button") as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+    fireEvent.click(btn);
+    expect(openUrl).toHaveBeenCalledWith("https://github.com/depre-dev/agent/pull/548");
+    expect(onApproveAndMerge).toHaveBeenCalledWith(card);
+  });
+});

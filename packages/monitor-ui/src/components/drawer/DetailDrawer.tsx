@@ -17,6 +17,7 @@ import { useEffect, useRef } from "react";
 import { FocusTrap } from "focus-trap-react";
 import type { BoardCard } from "../../lib/monitor/card-types.js";
 import { traverseDrawerCard } from "../../lib/monitor/drawer-routing.js";
+import { buildDrawerFooter, type DrawerActionHandlers, type DrawerFooterDeps } from "../../lib/monitor/drawer-footer.js";
 import { DRAWER_ACCENT, DrawerBody, drawerVariant } from "./DrawerBody.js";
 
 export interface DetailDrawerProps {
@@ -26,9 +27,13 @@ export interface DetailDrawerProps {
   onClose: () => void;
   /** Navigate the drawer to another card id (j/k). */
   onNavigate: (id: string) => void;
+  /** Backend-touching footer actions. Buttons without a handler/data disable. */
+  actions?: DrawerActionHandlers;
+  /** Override clipboard / open-url for tests. */
+  footerDeps?: Pick<DrawerFooterDeps, "openUrl" | "copy">;
 }
 
-export function DetailDrawer({ card, cards, onClose, onNavigate }: DetailDrawerProps) {
+export function DetailDrawer({ card, cards, onClose, onNavigate, actions, footerDeps }: DetailDrawerProps) {
   const variant = drawerVariant(card);
   const accent = DRAWER_ACCENT[variant];
   const asideRef = useRef<HTMLElement | null>(null);
@@ -60,7 +65,10 @@ export function DetailDrawer({ card, cards, onClose, onNavigate }: DetailDrawerP
     return () => window.removeEventListener("keydown", onKey);
   }, [card.id, cards, onClose, onNavigate]);
 
-  const action = "action" in card ? card.action : undefined;
+  const footerButtons = buildDrawerFooter(card, {
+    ...(actions ? { handlers: actions } : {}),
+    ...(footerDeps ?? {}),
+  });
 
   return (
     <FocusTrap
@@ -119,21 +127,30 @@ export function DetailDrawer({ card, cards, onClose, onNavigate }: DetailDrawerP
           </div>
 
           <footer className="hm-drawer-foot">
-            {action ? (
-              <>
-                <button type="button" className="hm-btn hm-btn--action">
-                  {action.primary}
+            {footerButtons.map((btn) =>
+              btn.run ? (
+                <button
+                  key={btn.key}
+                  type="button"
+                  className={`hm-btn hm-btn--${btn.kind}`}
+                  onClick={btn.run}
+                >
+                  {btn.label}
                 </button>
-                {action.secondary ? (
-                  <button type="button" className="hm-btn hm-btn--ghost">
-                    {action.secondary}
-                  </button>
-                ) : null}
-              </>
-            ) : null}
-            <button type="button" className="hm-btn hm-btn--ghost">
-              Ask Hermes
-            </button>
+              ) : (
+                // Truth-boundary: no real action ⇒ visibly disabled WITH a reason.
+                <button
+                  key={btn.key}
+                  type="button"
+                  className={`hm-btn hm-btn--${btn.kind}`}
+                  disabled
+                  aria-disabled="true"
+                  title={btn.disabledReason}
+                >
+                  {btn.label}
+                </button>
+              ),
+            )}
             <span className="spacer" />
             <span className="hm-mono hm-muted">j ‹ prev · k › next · esc close</span>
           </footer>
