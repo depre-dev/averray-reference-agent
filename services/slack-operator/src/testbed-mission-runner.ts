@@ -7,6 +7,7 @@ import { recordLlmUsageFromResult } from "@avg/averray-mcp/llm-usage";
 
 import type { BrowserContext, Locator, Page } from "playwright-core";
 
+import { runGoldPathMissionEntry } from "./gold-path-mission-entry.js";
 import type { TestbedMissionRun } from "./monitor-testbed-missions.js";
 import {
   claimNextReadyTestbedMission,
@@ -340,7 +341,40 @@ export async function executeBrowserTestbedMission(
   if (mission.mode === "siwe_auth") {
     return executeSiweAuthMission(mission, config, deps);
   }
+  if (mission.mode === "gold_path") {
+    return executeGoldPathTestbedMission(mission, config);
+  }
   return executePlaywrightTestbedMission(mission, config);
+}
+
+export async function executeGoldPathTestbedMission(
+  mission: TestbedMissionRun,
+  config: TestbedMissionRunnerConfig
+): Promise<TestbedMissionRunResult> {
+  const result = await runGoldPathMissionEntry({
+    ...process.env,
+    TESTBED_MISSION_ID: mission.id,
+    TESTBED_TARGET_URL: mission.targetUrl,
+    TESTBED_MISSION_GOAL: mission.goal,
+    TESTBED_AGENT_NAME: mission.agentName,
+    TESTBED_FRESH_MEMORY: String(mission.freshMemory),
+    TESTBED_REQUESTED_TEST_MUTATIONS: String(mission.requestedAllowTestMutations === true),
+    TESTBED_MISSION_ENVIRONMENT: mission.environment ?? config.missionEnvironment ?? "",
+    TESTBED_MUTATION_MODE: mission.mutationMode ?? (mission.allowTestMutations ? "testbed_mutation_allowed" : "read_only"),
+    TESTBED_MUTATION_SCOPE: mission.mutationScope ?? "none; stop at mutation boundary",
+    TESTBED_MUTATION_BINDING_REASON: mission.mutationBindingReason ?? "",
+    TEST_WALLET_SIGNER_BASE_URL: config.signerBaseUrl ?? process.env.TEST_WALLET_SIGNER_BASE_URL ?? "",
+    TESTBED_SESSION_SIGNER_URL: config.signerBaseUrl ?? process.env.TESTBED_SESSION_SIGNER_URL ?? "",
+  });
+  return {
+    exitCode: 0,
+    stdout: `Gold-path mission completed for ${mission.id}: ${result.verdict}\n`,
+    stderr: "",
+    reportText: result.reportText,
+    summary: typeof result.report.summary === "string" ? result.report.summary : result.verdict,
+    model: typeof result.report.model === "string" ? result.report.model : undefined,
+    usage: result.report.usage,
+  };
 }
 
 /** Default session resolver: pull from the env-configured sidecar or manual

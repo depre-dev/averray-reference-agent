@@ -1,12 +1,12 @@
 # Hermes E2E Tester — Design (the product tester)
 
-- **Status:** Reconciled 2026-05-31. T2 pre-seeded session (#293), T3 SIWE role-gating (#290), and T5 env→mutation binding/enhancements (#297) have shipped. T6's first board-gated request/approve slice is in flight here. T4 Tier-2 agent and T7 capabilities/helper work remain follow-up/design unless code evidence proves otherwise.
+- **Status:** Reconciled 2026-06-01. T2 pre-seeded session (#293), T3 SIWE role-gating (#290), T5 env→mutation binding/enhancements (#297), and T6's first board-gated request/approve slice have shipped. T4 live-driver wiring is in progress here: the fake/default CI path remains, and the opt-in Claude + Playwright-MCP driver must still be proved by a hosted run.
 - **Date:** 2026-05-29
 - **Lives in:** this repo (`depre-dev/averray-reference-agent`) — the testbed/mission code is here.
 - **Tests:** the platform product `averray-agent/agent` — the Polkadot Agent Platform ("Averray"): an agent-first job/treasury runtime on Polkadot Hub TestNet.
 - **Roadmap fit:** matures the existing testbed missions into a real product tester. The Tier-2 agent is **Theme C's first specialized agent** (built on the P2 per-agent-runner pattern), and failed missions are a **Theme B2 self-healing trigger**.
 
-> Honest starting point: the mission *pipeline* is ~80% built (queue, lifecycle, heartbeat, structured report, evidence/screenshots, board MissionDrawer, two executors, MCP entry). What's thin is the *brain* — the Playwright executor (`services/slack-operator/src/testbed-mission-runner.ts:265`) is a single-step heuristic smoke test; the `command` executor (`:191`, passes the mission + a `reportPath`) is an empty hook where the real agent belongs; missions run a clean browser with **no wallet**, so they can only see public pages.
+> Honest starting point: the mission *pipeline* is built enough to run gated missions (queue, lifecycle, heartbeat, structured report, evidence/screenshots, board MissionDrawer, approval gate, and runners). This PR wires the Tier-2 brain as an opt-in Claude + Playwright-MCP driver behind `TESTBED_GOLDPATH_LIVE`; CI and default deploys keep the fake path, and hosted run proof remains the next evidence step.
 
 ---
 
@@ -106,7 +106,7 @@ Each mission's verdict is LLM-judged (Tier 2) or rule-checked (Tier 1); both rec
 
 1. **Tier 1 hardening** — broaden the heuristic executor to all surfaces + add the boundary-honesty check + add a **pre-seeded session** so it can reach authed pages. (T2 pre-seeded session shipped in #293.)
 2. **Signer sidecar + SIWE mission** — the keystone unlock for authed testing. (T3 role-gating mission shipped in #290; sidecar foundation shipped earlier in #283.)
-3. **Tier-2 agent executor** (Agent SDK + Playwright-MCP + HTTP/wallet) via the `command` hook — the gold-path missions.
+3. **Tier-2 agent executor** (Agent SDK + Playwright-MCP + HTTP/wallet) — the gold-path missions. This PR wires the opt-in live driver behind `TESTBED_GOLDPATH_LIVE`; hosted run proof remains follow-up.
 4. **Env→mutation-profile binding** (do before any mainnet exists). (T5 shipped in #297.)
 5. **Enhancements** — trace/video, regression baselines, B2 self-healing hook.
 
@@ -119,4 +119,4 @@ Each mission's verdict is LLM-judged (Tier 2) or rule-checked (Tier 1); both rec
 
 ---
 
-*End of E2E tester design. Reconciled 2026-05-31: T2, T3, and T5 have shipped; T6 first slice is in flight; T4/T7 remain follow-up/design.*
+*End of E2E tester design. Reconciled 2026-06-01: T2, T3, T5, and T6 first slice have shipped; T4 live-driver wiring is in progress here; T7 platform helper remains follow-up.*

@@ -14,6 +14,11 @@ import {
   type GoldPathStepResult,
 } from "../../services/slack-operator/src/gold-path-mission.js";
 import { runGoldPathMissionEntry } from "../../services/slack-operator/src/gold-path-mission-entry.js";
+import {
+  buildClaudeGoldPathPrompt,
+  createClaudeGoldPathDriver,
+  parseClaudeGoldPathObservation,
+} from "../../services/slack-operator/src/gold-path-live-driver.js";
 import { resolveTestbedMutationBinding, type TestbedMutationBinding } from "../../services/slack-operator/src/testbed-mutation-binding.js";
 
 function obs(steps: GoldPathStepResult[], over: Partial<GoldPathObservation> = {}): GoldPathObservation {
@@ -112,7 +117,47 @@ describe("runGoldPathMissionOnce", () => {
     expect(r.stoppedBeforeMutation).toBe(true);
     expect(typeof r.summary).toBe("string");
     expect(Array.isArray(r.completedPath)).toBe(true);
+    expect(Array.isArray(r.path)).toBe(true);
     expect(r.scores).toBeTruthy();
+  });
+
+  it("carries live driver path latency and blocker body into the report", async () => {
+    const result = await runGoldPathMissionOnce({
+      mission,
+      binding: TESTNET,
+      driver: {
+        async run() {
+          return {
+            steps: [
+              { step: "onboard", status: "ok", detail: "signed in", latencyMs: 1200, evidence: "screenshot:onboard.png" },
+              { step: "discover", status: "blocked", detail: "jobs list 500", latencyMs: 800 },
+            ],
+            notes: ["real browser run"],
+            evidence: [{ type: "trace", value: "/tmp/trace.zip" }],
+            blockers: [{ head: "Jobs list failed", body: "GET /jobs returned 500 after onboarding.", evidence: ["/tmp/trace.zip"] }],
+            runs: 1,
+            latencyMs: 2000,
+            scores: { success: 2, clarity: 3, latency: 4 },
+            mutationsAttempted: [],
+            stoppedBeforeMutation: true,
+          };
+        },
+      },
+      model: "sonnet",
+    });
+    expect(result.verdict).toBe("fail");
+    expect(result.report).toMatchObject({
+      latencyMs: 2000,
+      path: [
+        expect.objectContaining({ desc: "onboard: signed in", latencyMs: 1200 }),
+        expect.objectContaining({ desc: "discover: jobs list 500", latencyMs: 800 }),
+      ],
+      blockers: [
+        expect.objectContaining({ head: "Jobs list failed", body: "GET /jobs returned 500 after onboarding." }),
+      ],
+      scores: expect.objectContaining({ success: 2, clarity: 3, latency: 4 }),
+      evidence: expect.arrayContaining([expect.objectContaining({ type: "trace", value: "/tmp/trace.zip" })]),
+    });
   });
 
   it("MAINNET + requested mutations → STRUCTURALLY read-only (no mutation attempted)", async () => {
@@ -182,5 +227,137 @@ describe("runGoldPathMissionEntry — env wiring keeps mainnet read-only", () =>
     expect(result.report.mutationMode).toBe("read_only");
     expect((result.report.mutationsAttempted as unknown[]).length).toBe(0);
     expect(result.report.stoppedBeforeMutation).toBe(true);
+  });
+
+  it("fake path remains the default even when no live LLM is configured", async () => {
+    const result = await runGoldPathMissionEntry(
+      {
+        TESTBED_MISSION_ID: "gp-entry-2",
+        TESTBED_TARGET_URL: "https://app.testnet.example",
+        TESTBED_MISSION_GOAL: "gold path",
+        TESTBED_MISSION_ENVIRONMENT: "testnet",
+        TESTBED_REQUESTED_TEST_MUTATIONS: "true",
+        TESTBED_MISSION_REPORT_PATH: join(dir, "report-default.json"),
+      } as NodeJS.ProcessEnv,
+    );
+    expect(result.verdict).toBe("fail");
+    expect((result.report.summary as string)).toMatch(/gold_path fail/);
+    expect(JSON.stringify(result.report)).toContain("not in live mode");
+  });
+});
+
+describe("Claude live gold-path driver", () => {
+  const input = {
+    targetUrl: "https://testbed.example",
+    goal: "gold path",
+    steps: GOLD_PATH_STEPS,
+    allowMutations: true,
+    mutationScope: "testbed-only",
+    model: "sonnet" as const,
+    freshMemory: true,
+    signerBaseUrl: "http://test-wallet-signer:8791",
+  };
+
+  it("builds a prompt that uses the signer sidecar without exposing wallet keys", () => {
+    const prompt = buildClaudeGoldPathPrompt(input, {
+      observationPath: "/tmp/observation.json",
+      signerBaseUrl: "http://test-wallet-signer:8791",
+    });
+    expect(prompt).toContain("Signer sidecar: http://test-wallet-signer:8791");
+    expect(prompt).toContain("Write ONLY the observation JSON");
+    expect(prompt).not.toMatch(/TEST_WALLET_.*PRIVATE/i);
+  });
+
+  it("parses the live observation shape with real latency and blocker body", () => {
+    const observation = parseClaudeGoldPathObservation(JSON.stringify({
+      steps: [
+        { step: "onboard", status: "ok", detail: "session loaded", latencyMs: 101 },
+        { step: "claim", status: "blocked", detail: "claim button disabled", latencyMs: 202 },
+      ],
+      notes: ["tried visible CTA"],
+      blockers: [{ head: "Claim disabled", body: "The button stayed disabled after selecting a job." }],
+      evidence: [{ type: "screenshot", value: "/tmp/claim.png" }],
+      runs: 1,
+      latencyMs: 303,
+      scores: { success: 2, clarity: 3, latency: 4 },
+      usage: { inputTokens: 11, outputTokens: 7 },
+      mutationsAttempted: [],
+      stoppedBeforeMutation: true,
+    }), input);
+
+    expect(observation).toMatchObject({
+      latencyMs: 303,
+      steps: [
+        expect.objectContaining({ step: "onboard", latencyMs: 101 }),
+        expect.objectContaining({ step: "claim", status: "blocked", latencyMs: 202 }),
+      ],
+      blockers: [expect.objectContaining({ head: "Claim disabled", body: "The button stayed disabled after selecting a job." })],
+      usage: { inputTokens: 11, outputTokens: 7 },
+    });
+  });
+
+  it("refuses a live sub-mode run when an API key would silently override billing", async () => {
+    const driver = createClaudeGoldPathDriver(
+      {
+        enabled: true,
+        command: "claude",
+        args: ["-p", "{prompt}"],
+        timeoutMs: 1000,
+        signerBaseUrl: "http://test-wallet-signer:8791",
+      },
+      {
+        TESTBED_GOLDPATH_LIVE: "1",
+        CLAUDE_WORKER_AUTH_MODE: "sub",
+        CLAUDE_CODE_OAUTH_TOKEN: "oauth-token",
+        ANTHROPIC_API_KEY: "sk-test-should-refuse",
+      } as NodeJS.ProcessEnv,
+      {
+        exec: async () => {
+          throw new Error("exec should not be called");
+        },
+      },
+    );
+
+    const observation = await driver.run(input);
+    expect(observation.steps[0]).toMatchObject({ status: "error" });
+    expect(observation.blockers?.[0]?.body).toMatch(/ANTHROPIC_API_KEY is set/);
+  });
+
+  it("runs the live command behind the flag and parses its report", async () => {
+    const driver = createClaudeGoldPathDriver(
+      {
+        enabled: true,
+        command: "claude",
+        args: ["-p", "{prompt}"],
+        timeoutMs: 1000,
+        signerBaseUrl: "http://test-wallet-signer:8791",
+      },
+      {
+        TESTBED_GOLDPATH_LIVE: "1",
+        CLAUDE_WORKER_AUTH_MODE: "sub",
+        CLAUDE_CODE_OAUTH_TOKEN: "oauth-token",
+      } as NodeJS.ProcessEnv,
+      {
+        exec: async ({ args }) => {
+          expect(args.join(" ")).toContain("test-wallet-signer");
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify({
+              steps: [{ step: "onboard", status: "ok", detail: "loaded", latencyMs: 50 }],
+              notes: ["ok"],
+              usage: { inputTokens: 12, outputTokens: 8 },
+              mutationsAttempted: [],
+              stoppedBeforeMutation: true,
+            }),
+            stderr: "",
+          };
+        },
+      },
+    );
+
+    await expect(driver.run(input)).resolves.toMatchObject({
+      steps: [expect.objectContaining({ step: "onboard", latencyMs: 50 })],
+      usage: { inputTokens: 12, outputTokens: 8 },
+    });
   });
 });

@@ -13,6 +13,7 @@ export function buildTesterCapabilitiesManifest(deps: TesterCapabilitiesDeps = {
   const runnerEnabled = truthy(env.TESTBED_MISSION_RUNNER_ENABLED);
   const signerEnabled = truthy(env.TEST_WALLET_SIGNER_ENABLED);
   const runnerExecutor = env.TESTBED_MISSION_RUNNER_EXECUTOR || "playwright";
+  const goldPathLive = truthy(env.TESTBED_GOLDPATH_LIVE);
   const missionEnvironment = env.TESTBED_MISSION_ENVIRONMENT || env.AVERRAY_TESTBED_ENVIRONMENT || "inferred_from_target_url";
   // T2: the runner now injects a pre-seeded session into the sweep. The authed
   // sweep is genuinely available once a session SOURCE is configured (the
@@ -155,7 +156,7 @@ export function buildTesterCapabilitiesManifest(deps: TesterCapabilitiesDeps = {
       },
       {
         id: "gold_path",
-        status: "executor_scaffolded_awaiting_live_driver",
+        status: goldPathLive ? "available_live_driver" : "available_fake_default",
         tier: 2,
         scope: "testbed_mutation_only",
         mutation: "testnet-only, never mainnet (T5 env→mutation binding; mainnet is structurally read-only)",
@@ -170,7 +171,9 @@ export function buildTesterCapabilitiesManifest(deps: TesterCapabilitiesDeps = {
             requester: "agent-name",
           },
         },
-        note: "T4: the Tier-2 executor is built (mutation binding + session + A4 model policy + honest judge + report) behind the command hook and the T6 request→approve gate (gold_path missions land `requested`, never auto-run). The live Claude Agent SDK + Playwright-MCP driver is a follow-up; until it's wired the runner emits an honest \"not executed\" report rather than a fake pass.",
+        note: goldPathLive
+          ? "T4: the live Claude + Playwright-MCP gold-path driver is enabled. It still sits behind the T6 request→approve gate, uses the T3 signer sidecar for sessions, and obeys T5 mutation binding (mainnet read-only)."
+          : "T4: the live Claude + Playwright-MCP driver is wired but disabled by default. Until TESTBED_GOLDPATH_LIVE=1, the runner emits an honest \"not executed\" report rather than a fake pass.",
       },
     ],
     approvalGate: {
