@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { recordLlmUsageFromResult } from "@avg/averray-mcp/llm-usage";
 
-import type { BrowserContext, Locator, Page } from "playwright-core";
+import type { Browser, BrowserContext, BrowserContextOptions, Locator, Page } from "playwright-core";
 
 import { runGoldPathMissionEntry } from "./gold-path-mission-entry.js";
 import type { TestbedMissionRun } from "./monitor-testbed-missions.js";
@@ -410,6 +410,47 @@ export async function executeGoldPathTestbedMission(
   };
 }
 
+export async function createPlaywrightContextPageWithVideoFallback(input: {
+  browser: Browser;
+  captureVideo: boolean;
+  videoDir: string;
+  viewport: NonNullable<BrowserContextOptions["viewport"]>;
+  userAgent: string;
+}): Promise<{ context: BrowserContext; page: Page; videoDisabledReason?: string }> {
+  const baseOptions: BrowserContextOptions = {
+    viewport: input.viewport,
+    userAgent: input.userAgent,
+  };
+  if (!input.captureVideo) {
+    const context = await input.browser.newContext(baseOptions);
+    return { context, page: await context.newPage() };
+  }
+
+  await mkdir(input.videoDir, { recursive: true });
+  let videoContext: BrowserContext | undefined;
+  try {
+    videoContext = await input.browser.newContext({
+      ...baseOptions,
+      recordVideo: { dir: input.videoDir, size: input.viewport },
+    });
+    return { context: videoContext, page: await videoContext.newPage() };
+  } catch (error) {
+    if (!isPlaywrightFfmpegMissing(error)) throw error;
+    await videoContext?.close().catch(() => undefined);
+    const context = await input.browser.newContext(baseOptions);
+    return {
+      context,
+      page: await context.newPage(),
+      videoDisabledReason: "Video capture disabled: Playwright ffmpeg is unavailable in the runner.",
+    };
+  }
+}
+
+export function isPlaywrightFfmpegMissing(error: unknown): boolean {
+  const detail = error instanceof Error ? error.message : String(error);
+  return /ffmpeg|video rendering requires/i.test(detail);
+}
+
 /** Default session resolver: pull from the env-configured sidecar or manual
  *  storageState path/token. Never throws — degrades to undefined (public-only). */
 async function defaultResolveSweepSession(
@@ -461,18 +502,25 @@ export async function executePlaywrightTestbedMission(
       args: ["--no-sandbox", "--disable-dev-shm-usage"],
     });
     const videoDir = join(artifactsDir, "videos");
-    if (config.captureVideo !== false) await mkdir(videoDir, { recursive: true });
-    context = await browser.newContext({
+    const contextAndPage = await createPlaywrightContextPageWithVideoFallback({
+      browser,
+      captureVideo: config.captureVideo !== false,
+      videoDir,
       viewport: { width: 1365, height: 900 },
       userAgent: "Averray-Hermes-Testbed-Playwright/1.0",
-      ...(config.captureVideo !== false ? { recordVideo: { dir: videoDir, size: { width: 1365, height: 900 } } } : {}),
     });
+    context = contextAndPage.context;
+    page = contextAndPage.page;
+    if (contextAndPage.videoDisabledReason) {
+      whatITried.push(contextAndPage.videoDisabledReason);
+      evidence.push({ type: "runner_warning", value: contextAndPage.videoDisabledReason });
+      recommendations.push("Install Playwright ffmpeg in the runner image for video evidence; this run continued with screenshots and trace only.");
+    }
     if (config.captureTrace !== false) {
       tracePath = join(artifactsDir, "trace.zip");
       await context.tracing.start({ screenshots: true, snapshots: true, sources: false });
       traceRunning = true;
     }
-    page = await context.newPage();
     page.on("console", (message) => {
       if (message.type() === "error") consoleErrors.push(message.text());
     });

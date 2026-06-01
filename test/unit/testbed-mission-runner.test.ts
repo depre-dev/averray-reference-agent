@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Browser, BrowserContext, Page } from "playwright-core";
 
 import {
   __resetTestbedMissionRunsForTests,
@@ -13,6 +14,8 @@ import {
 import { requestTestbedMissionFromAgent } from "../../services/slack-operator/src/testbed-agent-entrypoint.js";
 import {
   appendPlaywrightEvidenceTrail,
+  createPlaywrightContextPageWithVideoFallback,
+  isPlaywrightFfmpegMissing,
   parseTestbedMissionRunnerConfig,
   renderTestbedMissionRunnerArgs,
   runTestbedMissionRunnerOnce,
@@ -340,6 +343,47 @@ describe("testbed mission runner", () => {
       expect.objectContaining({ type: "trace", value: expect.stringContaining("trace.zip") }),
       expect.objectContaining({ type: "video", value: expect.stringContaining("video.webm") }),
     ]);
+  });
+
+  it("retries without video when Playwright ffmpeg is missing", async () => {
+    const page = {} as Page;
+    const videoContext = {
+      newPage: vi.fn(async () => {
+        throw new Error("Executable doesn't exist at /home/appuser/.cache/ms-playwright/ffmpeg-1011/ffmpeg-linux. Video rendering requires ffmpeg binary.");
+      }),
+      close: vi.fn(async () => undefined),
+    } as unknown as BrowserContext;
+    const fallbackContext = {
+      newPage: vi.fn(async () => page),
+    } as unknown as BrowserContext;
+    const contexts = [videoContext, fallbackContext];
+    const newContext = vi.fn(async () => contexts.shift() ?? fallbackContext);
+    const browser = { newContext } as unknown as Browser;
+
+    const result = await createPlaywrightContextPageWithVideoFallback({
+      browser,
+      captureVideo: true,
+      videoDir: join(mkdtempSync(join(tmpdir(), "averray-testbed-video-")), "videos"),
+      viewport: { width: 1365, height: 900 },
+      userAgent: "Averray-Hermes-Testbed-Playwright/1.0",
+    });
+
+    expect(result).toMatchObject({
+      context: fallbackContext,
+      page,
+      videoDisabledReason: expect.stringContaining("ffmpeg"),
+    });
+    expect(videoContext.close).toHaveBeenCalledOnce();
+    expect(newContext).toHaveBeenCalledTimes(2);
+    expect(newContext.mock.calls[0]?.[0]).toMatchObject({
+      recordVideo: { size: { width: 1365, height: 900 } },
+    });
+    expect(newContext.mock.calls[1]?.[0]).not.toHaveProperty("recordVideo");
+  });
+
+  it("recognizes Playwright ffmpeg-missing errors", () => {
+    expect(isPlaywrightFfmpegMissing(new Error("Video rendering requires ffmpeg binary"))).toBe(true);
+    expect(isPlaywrightFfmpegMissing(new Error("net::ERR_NAME_NOT_RESOLVED"))).toBe(false);
   });
 });
 
