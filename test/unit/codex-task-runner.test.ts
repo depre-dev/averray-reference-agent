@@ -104,6 +104,68 @@ describe("codex task runner", () => {
     });
   });
 
+  it("claims only Codex-routed tasks and leaves Claude-routed tasks for Claude", async () => {
+    const path = await tempQueuePath();
+    const claude = await proposeCodexTask({
+      repo: "averray-agent/agent",
+      agent: "claude",
+      title: "Claude task",
+      prompt: "Build a frontend refinement.",
+    }, { path, now: new Date("2026-06-01T10:00:00.000Z") });
+    const codex = await proposeCodexTask({
+      repo: "averray-agent/agent",
+      agent: "codex",
+      title: "Codex task",
+      prompt: "Fix the runner guard.",
+    }, { path, now: new Date("2026-06-01T10:01:00.000Z") });
+    await approveCodexTask(claude.task.id, { path, now: new Date("2026-06-01T10:02:00.000Z") });
+    await approveCodexTask(codex.task.id, { path, now: new Date("2026-06-01T10:03:00.000Z") });
+
+    const seen: string[] = [];
+    const result = await runCodexTaskRunnerOnce(config(path), {
+      executor: async (task) => {
+        seen.push(task.id);
+        return { exitCode: 0, stdout: "done\n", stderr: "", summary: "done" };
+      },
+      now: new Date("2026-06-01T10:04:00.000Z"),
+    });
+
+    expect(result.status).toBe("completed");
+    expect(seen).toEqual([codex.task.id]);
+    const tasks = await listCodexTasks({ path });
+    expect(tasks.find((task) => task.id === codex.task.id)).toMatchObject({ status: "completed", agent: "codex" });
+    expect(tasks.find((task) => task.id === claude.task.id)).toMatchObject({ status: "approved", agent: "claude" });
+  });
+
+  it("executes greenfield Codex tasks without requiring CODEX_TASK_PR", async () => {
+    const path = await tempQueuePath();
+    const proposed = await proposeCodexTask({
+      repo: "averray-agent/agent",
+      agent: "codex",
+      title: "Add runner guard",
+      prompt: "Fix the greenfield runner path.",
+      correlationId: "greenfield-1",
+    }, { path });
+    await approveCodexTask(proposed.task.id, { path });
+
+    const result = await runCodexTaskRunnerOnce(config(path), {
+      executor: async (task) => {
+        expect(task.pullRequestNumber).toBeUndefined();
+        expect(renderCodexTaskRunnerArgs(["--pr={pr}", "{CODEX_TASK_PR}"], task)).toEqual(["--pr=", ""]);
+        return { exitCode: 0, stdout: "opened pr\n", stderr: "", summary: "opened pr" };
+      },
+    });
+
+    expect(result.status).toBe("completed");
+    const [task] = await listCodexTasks({ path });
+    expect(task).toMatchObject({
+      id: proposed.task.id,
+      status: "completed",
+      agent: "codex",
+    });
+    expect(task.pullRequestNumber).toBeUndefined();
+  });
+
   it("marks an approved task failed when the executor exits nonzero", async () => {
     const path = await tempQueuePath();
     const proposed = await proposeCodexTask({
@@ -198,6 +260,23 @@ describe("codex task runner", () => {
       "Continue PR #393.",
       "--pr=393",
       "averray-agent/agent",
+    ]);
+  });
+
+  it("renders empty PR placeholders for greenfield task command args", async () => {
+    const path = await tempQueuePath();
+    const proposed = await proposeCodexTask({
+      repo: "averray-agent/agent",
+      agent: "codex",
+      title: "New task",
+      prompt: "Build new task.",
+    }, { path });
+
+    expect(renderCodexTaskRunnerArgs(["exec", "--pr={pr}", "{CODEX_TASK_PR}", "{prompt}"], proposed.task)).toEqual([
+      "exec",
+      "--pr=",
+      "",
+      "Build new task.",
     ]);
   });
 });

@@ -6,6 +6,7 @@ import {
   INTERNAL_SPECIALIST_AGENTS,
   SECURITY_AGENT_ID,
   SECURITY_ROLE_PROMPT,
+  taskAgentDefinition,
   specialistAgentDefinition,
 } from "../../services/slack-operator/src/specialist-agents.js";
 import { buildGuardedClaudePrompt, claudeBranchName, type ClaudeWorkerTask } from "../../services/slack-operator/src/claude-branch-worker.js";
@@ -18,6 +19,16 @@ const baseTask: ClaudeWorkerTask = {
 };
 
 describe("C3 specialist agent templates", () => {
+  it("keeps Codex registered as a greenfield-capable worker", () => {
+    expect(taskAgentDefinition("codex")).toMatchObject({
+      id: "codex",
+      label: "Codex",
+      branchPrefix: "codex",
+      greenfield: true,
+      prBodyLabel: "Codex worker",
+    });
+  });
+
   it("registers the security specialist as proposes-only with operator escalation", () => {
     const specialist = specialistAgentDefinition(SECURITY_AGENT_ID);
 

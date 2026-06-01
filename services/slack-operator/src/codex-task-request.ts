@@ -2,9 +2,8 @@
 //
 // Extracted from the HTTP handler so the agent-aware payload rules can be
 // unit-tested without standing up the server. The rule that matters:
-//   - Codex tasks iterate an EXISTING PR, so a valid pullRequestNumber is
-//     required.
-//   - Claude/specialist tasks are GREENFIELD (the worker opens its own PR), so
+//   - Codex can either iterate an existing PR or start GREENFIELD work.
+//   - Claude/specialist tasks are also GREENFIELD (the worker opens its own PR), so
 //     the PR is optional — and only validated when the caller supplies one.
 // The queue layer (proposeCodexTask) already supports both shapes; this is the
 // untrusted-input gate in front of it, and it decides which agent runs.
@@ -45,7 +44,7 @@ function num(field: unknown): number | undefined {
 function requiredFieldsMessage(agent: TaskAgent): string {
   return isGreenfieldTaskAgent(agent)
     ? `repo and prompt are required to propose ${taskAgentLabel(agent)} work; pullRequestNumber is optional.`
-    : "repo, pullRequestNumber, and prompt are required to propose Codex work.";
+    : `repo, pullRequestNumber, and prompt are required to propose ${taskAgentLabel(agent)} work.`;
 }
 
 export function parseProposeTaskPayload(payload: unknown): ParseProposeResult {

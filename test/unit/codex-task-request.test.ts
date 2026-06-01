@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { parseProposeTaskPayload } from "../../services/slack-operator/src/codex-task-request.js";
 
-describe("parseProposeTaskPayload — codex (existing-PR) tasks", () => {
+describe("parseProposeTaskPayload — codex tasks", () => {
   it("accepts a valid repo + PR + prompt and defaults agent/requester", () => {
     const r = parseProposeTaskPayload({ repo: "averray-agent/agent", pullRequestNumber: 402, prompt: "fix it" });
     expect(r.ok).toBe(true);
@@ -21,11 +21,16 @@ describe("parseProposeTaskPayload — codex (existing-PR) tasks", () => {
     expect(r.ok && r.input.pullRequestNumber).toBe(402);
   });
 
-  it("rejects codex work with no PR (codex iterates an existing PR)", () => {
+  it("accepts greenfield Codex work with no PR", () => {
     const r = parseProposeTaskPayload({ repo: "a/b", prompt: "x" });
-    expect(r.ok).toBe(false);
-    if (r.ok) return;
-    expect(r.message).toMatch(/pullRequestNumber.*required.*Codex/i);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.input).toMatchObject({
+      repo: "a/b",
+      agent: "codex",
+      prompt: "x",
+    });
+    expect(r.input.pullRequestNumber).toBeUndefined();
   });
 
   it("rejects a non-positive / non-integer PR", () => {
