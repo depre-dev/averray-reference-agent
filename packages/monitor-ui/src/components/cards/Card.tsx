@@ -36,6 +36,8 @@ export type CardProps = {
   onDismiss?: (card: BoardCard) => void;
   /** Temporarily hide this card from the current monitor view. Local UI-only control. */
   onSnooze?: (card: BoardCard) => void;
+  /** "Keep watching" on the archive hint — cancel/extend this card's auto-archive. */
+  onKeepWatching?: (card: BoardCard) => void;
   /** Open the card's detail surface from an inline action. */
   onInvestigate?: (card: BoardCard) => void;
 };
@@ -84,6 +86,7 @@ export function Card({
   onApproveMission,
   onDismiss,
   onSnooze,
+  onKeepWatching,
   onInvestigate,
 }: CardProps) {
   const isAction = Boolean(card.isAction);
@@ -230,9 +233,32 @@ export function Card({
             }}
           >
             Hermes: archive in 4h?{" "}
-            <span style={{ color: "var(--hm-sage-deep)", cursor: "pointer", borderBottom: "1px dotted" }}>
-              Keep watching
-            </span>
+            {onKeepWatching ? (
+              <button
+                type="button"
+                className="hm-keep-watching"
+                style={{
+                  color: "var(--hm-sage-deep)",
+                  cursor: "pointer",
+                  borderBottom: "1px dotted",
+                  background: "none",
+                  border: 0,
+                  padding: 0,
+                  font: "inherit",
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onKeepWatching(card);
+                }}
+              >
+                Keep watching
+              </button>
+            ) : (
+              // No handler wired ⇒ honest disabled label, not a fake link.
+              <span style={{ color: "var(--hm-muted)" }} aria-disabled="true">
+                Keep watching
+              </span>
+            )}
           </span>
         </div>
       ) : null}

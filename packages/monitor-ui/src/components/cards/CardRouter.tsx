@@ -25,6 +25,8 @@ export type CardRouterProps = {
   onDismiss?: (card: BoardCard) => void;
   /** Temporarily hide a waiting-on-operator card from the current monitor view. */
   onSnooze?: (card: BoardCard) => void;
+  /** "Keep watching" on the archive hint — cancel this card's auto-archive. */
+  onKeepWatching?: (card: BoardCard) => void;
   /** Open the card's detail surface from an inline action. */
   onInvestigate?: (card: BoardCard) => void;
 };
@@ -38,6 +40,7 @@ export function CardRouter({
   onApproveMission,
   onDismiss,
   onSnooze,
+  onKeepWatching,
   onInvestigate,
 }: CardRouterProps) {
   const renderer = pickRenderer(card);
@@ -65,6 +68,7 @@ export function CardRouter({
       onApproveMission={onApproveMission}
       onDismiss={onDismiss}
       onSnooze={onSnooze}
+      onKeepWatching={onKeepWatching}
       onInvestigate={onInvestigate}
     />
   );

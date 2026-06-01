@@ -419,3 +419,15 @@ function doneCard(overrides: Partial<BoardCard> = {}): BoardCard {
     ...overrides,
   } as BoardCard;
 }
+
+describe("BoardView — keep watching (G4)", () => {
+  test("'Keep watching' cancels the card's archive hint", () => {
+    const { container } = render(<BoardView board={richBoard} status="open" />);
+    const view = within(container);
+    // The archiveHint fixture (agent #542) shows the "Keep watching" affordance.
+    const keep = view.getByRole("button", { name: "Keep watching" });
+    fireEvent.click(keep);
+    // The archive prompt is suppressed for that card.
+    expect(view.queryByRole("button", { name: "Keep watching" })).toBeNull();
+  });
+});
