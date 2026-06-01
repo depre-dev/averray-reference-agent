@@ -406,9 +406,23 @@ describe("BoardView — degraded + transient states", () => {
   test("no board yet (connecting) renders the calm empty layout, not degraded", () => {
     const { container, getByText } = render(<BoardView board={undefined} status="connecting" />);
     expect(container.querySelector(".hm-now--degraded")).toBeNull();
-    expect(getByText(/Nothing waits on you/)).toBeTruthy();
+    expect(getByText(/Nothing needs you right now/)).toBeTruthy();
     // Still eight lanes, all empty.
     expect(container.querySelectorAll(".hm-lane").length).toBe(8);
+  });
+
+  test("zero-decision board renders a deliberate success empty state", () => {
+    const board: MonitorBoard = { cards: [], at: "2026-06-01T10:00:00Z" };
+    const { container, getByText } = render(<BoardView board={board} status="open" />);
+    expect(container.querySelector(".hm-now--calm")).toBeTruthy();
+    expect(container.querySelector(".hm-now--degraded")).toBeNull();
+    expect(getByText(/Nothing needs you right now/)).toBeTruthy();
+    expect(getByText(/The board is quiet on purpose/)).toBeTruthy();
+    expect(
+      getByText("No active decisions, dispatches, or release work. Hermes is watching; you can step away.", {
+        selector: ".hm-now-sub",
+      }),
+    ).toBeTruthy();
   });
 });
 

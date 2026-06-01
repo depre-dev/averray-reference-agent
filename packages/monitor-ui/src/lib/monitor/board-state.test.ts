@@ -197,11 +197,13 @@ test("boardNowBanner: Hermes focus mode uses the scoped review card", () => {
   assert.equal(banner.primaryActionId, "agent #548");
 });
 
-test("boardNowBanner: calm board with nothing in flight reads 'nothing waits on you'", () => {
+test("boardNowBanner: zero-decision board renders the first-class calm empty state", () => {
   const banner = boardNowBanner([], { nowLabel: "17:48:02 utc" });
   assert.equal(banner.tone, "calm");
   assert.match(banner.eyebrow, /you're done for now/);
-  assert.match(banner.headline, /Nothing waits on you/);
+  assert.match(banner.headline, /Nothing needs you right now/);
+  assert.match(banner.headline, /quiet on purpose/);
+  assert.match(banner.sub, /No active decisions, dispatches, or release work/);
 });
 
 test("boardNowBanner: calm sub only includes metrics the board model provides", () => {
