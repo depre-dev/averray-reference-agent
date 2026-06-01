@@ -140,6 +140,7 @@ import {
 import { parseProposeTaskPayload } from "./codex-task-request.js";
 import {
   diagnoseTestbedMissionReportFromMessage,
+  failedTestbedMissionsForSelfHealing,
   listTestbedMissionRuns,
   readTestbedMissionRunnerHeartbeat,
   recordTestbedMissionReportFromMessage,
@@ -1839,7 +1840,9 @@ async function collectSelfHealingSignals(boardUrl: string): Promise<FailureSigna
   const fixRepo = optionalEnv("B2_SELF_HEALING_REPO") || optionalEnv("GITHUB_DEFAULT_REPO");
 
   try {
-    const missions = listTestbedMissionRuns({ limit: 25 }).filter((m) => m.status === "failed");
+    const missions = failedTestbedMissionsForSelfHealing(listTestbedMissionRuns({ limit: 25 }), {
+      maxAgeHours: routineConfig.selfHealing.testbedFailureMaxAgeHours,
+    });
     for (const m of missions) {
       signals.push({
         // Stable per-target surface (NOT the per-run mission id), so re-runs of

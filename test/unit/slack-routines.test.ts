@@ -60,6 +60,7 @@ describe("slack operator routines", () => {
       B2_SELF_HEALING_COOLDOWN_MINUTES: "45",
       B2_SELF_HEALING_MAX_PROPOSALS_PER_TICK: "2",
       B2_SELF_HEALING_MAX_OPEN_FIXES: "4",
+      B2_SELF_HEALING_TESTBED_FAILURE_MAX_AGE_HOURS: "12",
     }, new Set(["C1"]));
 
     expect(config.selfHealing.enabled).toBe(true);
@@ -67,6 +68,7 @@ describe("slack operator routines", () => {
     expect(config.selfHealing.cooldownMs).toBe(45 * 60_000);
     expect(config.selfHealing.maxProposalsPerTick).toBe(2);
     expect(config.selfHealing.maxOpenFixTasks).toBe(4);
+    expect(config.selfHealing.testbedFailureMaxAgeHours).toBe(12);
   });
 
   it("runs the daily brief once per UTC date after the target time", () => {
