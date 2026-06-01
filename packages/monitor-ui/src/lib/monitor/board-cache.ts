@@ -15,6 +15,17 @@ export interface MonitorBoard {
   llmUsage?: LlmUsageAggregate;
   /** Optional board-summary metrics; omitted means the UI must not fabricate them. */
   calmMetrics?: CalmBoardMetrics;
+  /** Quiet automation-capacity gauge. Omitted means the UI must omit it. */
+  automationHealth?: AutomationHealth;
+}
+
+export interface AutomationHealth {
+  selfHealingOpen: number;
+  dispatchUsedToday: number;
+  dispatchPerDayCap: number;
+  quietSignalCount?: number;
+  selfHealingCapacitySignals?: number;
+  taskHealthCapacitySignals?: number;
 }
 
 export interface LlmUsageModelRollup {
@@ -90,7 +101,10 @@ export function applyEventToBoard(
       const cards = Array.isArray(event.cards) ? (event.cards as BoardCard[]) : [];
       const at = typeof event.at === "string" ? event.at : new Date().toISOString();
       const calmMetrics = isRecord(event.calmMetrics) ? (event.calmMetrics as CalmBoardMetrics) : undefined;
-      return { cards, at, ...(calmMetrics ? { calmMetrics } : {}) };
+      const automationHealth = isAutomationHealth(event.automationHealth)
+        ? event.automationHealth
+        : undefined;
+      return { cards, at, ...(calmMetrics ? { calmMetrics } : {}), ...(automationHealth ? { automationHealth } : {}) };
     }
     case "board.card.added": {
       if (!prev) return prev;
@@ -145,4 +159,11 @@ export function applyEventToBoard(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isAutomationHealth(value: unknown): value is AutomationHealth {
+  if (!isRecord(value)) return false;
+  return Number.isFinite(value.selfHealingOpen)
+    && Number.isFinite(value.dispatchUsedToday)
+    && Number.isFinite(value.dispatchPerDayCap);
 }

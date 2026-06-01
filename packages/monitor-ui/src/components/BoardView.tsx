@@ -441,6 +441,7 @@ export function BoardView({
         <TopStrip
           counts={state.counts}
           liveAt={status === "open" ? liveLabel || undefined : undefined}
+          automationHealth={board?.automationHealth}
           onRefresh={onRefresh}
         />
       )}

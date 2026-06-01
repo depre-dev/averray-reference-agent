@@ -91,4 +91,33 @@ describe("TopStrip", () => {
     const { getByText } = render(<TopStrip counts={calmCounts} deployHealth="DEGRADED" />);
     expect(getByText(/Deploy DEGRADED/)).toBeTruthy();
   });
+
+  test("renders one quiet automation-health gauge when provided", () => {
+    const { getByLabelText, getByText } = render(
+      <TopStrip
+        counts={calmCounts}
+        automationHealth={{ selfHealingOpen: 2, dispatchUsedToday: 4, dispatchPerDayCap: 5 }}
+      />,
+    );
+    expect(getByText("Self-heal 2 open · dispatch 4/5")).toBeTruthy();
+    expect(getByLabelText("Automation health: Self-heal 2 open · dispatch 4/5")).toBeTruthy();
+  });
+
+  test("folds Slack-only capacity signals into the same gauge line", () => {
+    const { getByLabelText, getByText } = render(
+      <TopStrip
+        counts={calmCounts}
+        automationHealth={{
+          selfHealingOpen: 2,
+          dispatchUsedToday: 4,
+          dispatchPerDayCap: 5,
+          quietSignalCount: 1,
+          selfHealingCapacitySignals: 1,
+          taskHealthCapacitySignals: 0,
+        }}
+      />,
+    );
+    expect(getByText("Self-heal 2 open · dispatch 4/5 · quiet 1")).toBeTruthy();
+    expect(getByLabelText("Automation health: Self-heal 2 open · dispatch 4/5 · quiet 1")).toBeTruthy();
+  });
 });
