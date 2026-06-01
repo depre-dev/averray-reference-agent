@@ -6,7 +6,7 @@ import type {
   HermesDecisionRecord,
 } from "./card-types.js";
 import type { CollaborationAuthor, CollaborationMessage } from "./collaboration.js";
-import { actorLabel, formatTurnTime, relatedPrForCard } from "./collaboration.js";
+import { actorLabel, actorLabelForMessage, formatTurnTime, relatedPrForCard } from "./collaboration.js";
 import { humanizeSignalText } from "./signal-labels.js";
 
 export type ActivityTone = "neutral" | "info" | "action" | "success" | "warning";
@@ -17,6 +17,7 @@ export interface HermesActivityEntry {
   source: "board" | "decision" | "collaboration" | "review" | "summary";
   tone: ActivityTone;
   actor: CollaborationAuthor;
+  actorDisplay?: string;
   kindLabel: "narration" | "question" | "reply" | "proposal" | "request" | "status";
   text: string;
   meta?: string;
@@ -219,7 +220,7 @@ function reviewRequestActivity(card: BoardCard): HermesActivityEntry[] {
 }
 
 function collaborationActivity(message: CollaborationMessage, cardId: string | undefined): HermesActivityEntry {
-  const actor = actorLabel(message.author);
+  const actor = actorLabelForMessage(message);
   const target = message.addressedTo === "everyone" ? "the room" : actorLabel(message.addressedTo);
   const scope = message.relatedPr
     ? ` on ${message.relatedPr.repo}#${message.relatedPr.number}`
@@ -240,6 +241,7 @@ function collaborationActivity(message: CollaborationMessage, cardId: string | u
     source: "collaboration",
     tone: message.kind === "request_help" ? "action" : message.kind === "proposal" ? "info" : "neutral",
     actor: message.author,
+    actorDisplay: actor,
     kindLabel: collaborationKindLabel(message),
     text: `${actor} ${verb}${scope} to ${target}: ${plain(message.text)}`,
     meta: `${message.kind} · ${formatTurnTime(message.ts)}`,

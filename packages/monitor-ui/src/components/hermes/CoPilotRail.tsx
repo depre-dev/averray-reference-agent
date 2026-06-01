@@ -109,6 +109,10 @@ export function CoPilotRail({
     () => hasScopedConversation(messages, focusedCard),
     [focusedCard, messages],
   );
+  const templateModeObserved = useMemo(
+    () => messages.some((message) => message.author === "hermes" && message.hermesMode === "templated"),
+    [messages],
+  );
   useEffect(() => {
     onScopedConversationChange?.(scopedConversationActive);
   }, [onScopedConversationChange, scopedConversationActive]);
@@ -141,6 +145,12 @@ export function CoPilotRail({
         onCardClick={onCardClick}
         onUseInComposer={fillComposer}
       />
+
+      {templateModeObserved ? (
+        <div className="hm-hermes-mode-banner" role="status">
+          Hermes is offline — replies are templated until the live model key is configured.
+        </div>
+      ) : null}
 
       <section className="hm-activity" aria-label="Hermes activity">
         <div className="hm-activity-head">
@@ -219,7 +229,7 @@ function ActivityEntryRow({
       <div className="hm-turn-head">
         <span className="hm-turn-actor">
           <span className="actor-dot" aria-hidden />
-          {actorLabel(entry.actor)}
+          {entry.actorDisplay ?? actorLabel(entry.actor)}
         </span>
         <span className="hm-turn-kind">· {entry.kindLabel}</span>
         <span className="hm-turn-time">{formatTurnTime(entry.atMs)}</span>

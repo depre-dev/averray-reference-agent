@@ -1199,13 +1199,13 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
 
   const timer = setTimeout(async () => {
     let text = draft.text;
+    let hermesMode: "live" | "templated" = "templated";
     const memoryNotes = listHermesMemoryNotes({
       ...(operatorMessage.relatedPr ? { relatedPr: operatorMessage.relatedPr } : {}),
       ...(operatorMessage.relatedCorrelationId ? { relatedCorrelationId: operatorMessage.relatedCorrelationId } : {}),
       limit: 8,
     }).map((note) => note.text);
-    const shouldLoadBoard = Boolean(apiKey) || memoryNotes.length > 0;
-    const board = shouldLoadBoard ? await loadHermesBoardSnapshotForReply(operatorMessage) : undefined;
+    const board = await loadHermesBoardSnapshotForReply(operatorMessage);
     const replyContext = {
       operatorMessage: {
         text: operatorMessage.text,
@@ -1239,6 +1239,7 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
         });
         if (llmText) {
           text = llmText;
+          hermesMode = "live";
         } else {
           logger.info({ id: operatorMessage.id }, "monitor_collaboration_llm_reply_unavailable_fell_back");
         }
@@ -1254,6 +1255,7 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
         author: "hermes",
         kind: "chat",
         text,
+        hermesMode,
         addressedTo: draft.addressedTo,
         ...(draft.relatedPr ? { relatedPr: draft.relatedPr } : {}),
         ...(draft.relatedCorrelationId ? { relatedCorrelationId: draft.relatedCorrelationId } : {}),
@@ -2982,6 +2984,7 @@ function scheduleHermesBoardNarration(snapshot: unknown): void {
       fallbackHermesBoardNarration(board, { memoryNotes }),
       narrationContext
     );
+    let hermesMode: "live" | "templated" = "templated";
     const apiKey = optionalEnv("OLLAMA_API_KEY");
     const baseUrl = optionalEnv("OLLAMA_BASE_URL") ?? "https://ollama.com/v1";
     const model = optionalEnv("HERMES_MONITOR_REPLY_MODEL") ?? "deepseek-v4-pro:cloud";
@@ -2995,7 +2998,10 @@ function scheduleHermesBoardNarration(snapshot: unknown): void {
           taskId: "monitor-board-narration",
           runId: decision.signature,
         });
-        if (llmText) text = llmText;
+        if (llmText) {
+          text = llmText;
+          hermesMode = "live";
+        }
       } catch (error) {
         logger.warn({ err: error }, "monitor_collaboration_board_narration_llm_threw");
       }
@@ -3008,6 +3014,7 @@ function scheduleHermesBoardNarration(snapshot: unknown): void {
         kind: "status",
         addressedTo: targetForHermesBoardNarration(board),
         text,
+        hermesMode,
         ...(relatedPr ? { relatedPr } : {}),
       });
       lastHermesBoardNarrationSignature = decision.signature;
