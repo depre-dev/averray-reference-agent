@@ -9,6 +9,7 @@ import {
   boardMode,
   boardNowBanner,
   deriveBoardState,
+  matchesBoardFilter,
 } from "./board-state.js";
 
 // Reused fixture factory — keep card shapes minimal but realistic.
@@ -250,4 +251,28 @@ test("deriveBoardState: bundles every selector together", () => {
   assert.equal(state.grouped["needs-attention"].length, 1);
   assert.equal(state.grouped["operator-review"].length, 1);
   assert.equal(state.grouped["done"].length, 1);
+});
+
+test("matchesBoardFilter — chips narrow by the same lane derivation as the counts", () => {
+  const action = card({ id: "a", isAction: true });
+  const review = card({ id: "r", lane: "operator-review" });
+  const ready = card({ id: "q", lane: "release-queue" });
+  const running = card({ id: "c", lane: "hermes-checking" });
+  const done = card({ id: "d", type: "done", lane: "done" });
+  const blocked = card({ id: "b", state: "source-offline" });
+
+  // "all" matches everything.
+  for (const c of [action, review, ready, running, done, blocked]) {
+    assert.equal(matchesBoardFilter(c, "all"), true);
+  }
+  // Lane-based chips match only their lane.
+  assert.equal(matchesBoardFilter(review, "review"), true);
+  assert.equal(matchesBoardFilter(running, "review"), false);
+  assert.equal(matchesBoardFilter(ready, "ready"), true);
+  assert.equal(matchesBoardFilter(running, "running"), true);
+  assert.equal(matchesBoardFilter(done, "done"), true);
+  assert.equal(matchesBoardFilter(review, "done"), false);
+  // "blocked" is the cross-lane stale/offline state.
+  assert.equal(matchesBoardFilter(blocked, "blocked"), true);
+  assert.equal(matchesBoardFilter(running, "blocked"), false);
 });

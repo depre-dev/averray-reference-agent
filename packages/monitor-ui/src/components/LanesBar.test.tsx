@@ -61,10 +61,39 @@ describe("LanesBar", () => {
     expect(chips[5].querySelector(".ct")?.textContent).toBe("9");
   });
 
-  test("filter chips are non-interactive in M3'", () => {
+  test("read-only fallback (no onFilterChange): chips are count-only, aria-disabled", () => {
     const { container } = render(<LanesBar counts={counts} mode="calm" />);
     const chip = container.querySelector(".hm-filter-chip") as HTMLElement;
     expect(chip.getAttribute("aria-disabled")).toBe("true");
+    expect(chip.tagName).toBe("SPAN");
+  });
+
+  test("interactive chips: clicking a chip calls onFilterChange with its filter key", () => {
+    const onFilterChange = vi.fn();
+    const { container } = render(
+      <LanesBar counts={counts} mode="calm" activeFilter="all" onFilterChange={onFilterChange} />,
+    );
+    const chips = container.querySelectorAll(".hm-filter-chip");
+    // Each chip is a real button (not aria-disabled) and reports its filter key.
+    expect((chips[0] as HTMLElement).tagName).toBe("BUTTON");
+    expect((chips[0] as HTMLElement).getAttribute("aria-disabled")).toBeNull();
+    const keys = ["all", "blocked", "review", "ready", "running", "done"] as const;
+    keys.forEach((key, i) => {
+      fireEvent.click(chips[i] as HTMLElement);
+      expect(onFilterChange).toHaveBeenLastCalledWith(key);
+    });
+  });
+
+  test("interactive chips: the active chip reflects activeFilter (aria-pressed)", () => {
+    const { container } = render(
+      <LanesBar counts={counts} mode="calm" activeFilter="review" onFilterChange={vi.fn()} />,
+    );
+    const chips = Array.from(container.querySelectorAll(".hm-filter-chip")) as HTMLElement[];
+    const review = chips.find((c) => c.textContent?.includes("Review"))!;
+    expect(review.className).toContain("is-active");
+    expect(review.getAttribute("aria-pressed")).toBe("true");
+    // The All chip is no longer active.
+    expect(chips[0].className).not.toContain("is-active");
   });
 
   test("shows the urgency-sort label", () => {
