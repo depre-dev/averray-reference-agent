@@ -30,12 +30,14 @@ import {
   pickGoldPathModel,
   createUnavailableGoldPathDriver,
   type GoldPathDriver,
+  type GoldPathDriverInput,
   type GoldPathMissionResult,
 } from "./gold-path-mission.js";
 import {
   createClaudeGoldPathDriver,
   parseClaudeGoldPathDriverConfig,
 } from "./gold-path-live-driver.js";
+import type { SweepSessionDeps } from "./testbed-session.js";
 
 interface GoldPathMissionEnv {
   id: string;
@@ -69,7 +71,11 @@ export function selectGoldPathDriver(env: NodeJS.ProcessEnv): GoldPathDriver {
 
 export async function runGoldPathMissionEntry(
   env: NodeJS.ProcessEnv = process.env,
-  deps: { driver?: GoldPathDriver } = {},
+  deps: {
+    driver?: GoldPathDriver;
+    resolveSession?: () => Promise<GoldPathDriverInput["session"] | undefined> | GoldPathDriverInput["session"] | undefined;
+    sessionDeps?: SweepSessionDeps;
+  } = {},
 ): Promise<GoldPathMissionResult> {
   const mission = readMissionFromEnv(env);
 
@@ -106,7 +112,7 @@ export async function runGoldPathMissionEntry(
     ...(basicAuth ? { basicAuth: true } : {}),
     // T3: the API Bearer (and/or browser storageState) from the signer sidecar —
     // the wallet key never enters this process. Undefined when unconfigured.
-    resolveSession: () => resolveSweepSession({ ...parseSweepSessionConfig(env), sessionType: "api" }),
+    resolveSession: deps.resolveSession ?? (() => resolveGoldPathSessionFromEnv(env, binding, deps.sessionDeps)),
   });
 
   const reportPath = env.TESTBED_MISSION_REPORT_PATH;
@@ -116,6 +122,34 @@ export async function runGoldPathMissionEntry(
     process.stdout.write(result.reportText);
   }
   return result;
+}
+
+export async function resolveGoldPathSessionFromEnv(
+  env: NodeJS.ProcessEnv,
+  binding: { environment: string },
+  deps: SweepSessionDeps = {},
+): Promise<GoldPathDriverInput["session"] | undefined> {
+  const parsed = parseSweepSessionConfig(env);
+  const signerBaseUrl = parsed.signerBaseUrl || env.TEST_WALLET_SIGNER_BASE_URL;
+  const role = binding.environment === "mainnet" ? "agent" : parsed.role;
+  const base = {
+    ...parsed,
+    ...(signerBaseUrl ? { signerBaseUrl } : {}),
+    ...(role ? { role } : {}),
+  };
+  const [api, browser] = await Promise.all([
+    resolveSweepSession({ ...base, sessionType: "api" }, deps),
+    resolveSweepSession({ ...base, sessionType: "browser" }, deps),
+  ]);
+  const token = api?.token ?? browser?.token;
+  const storageState = browser?.storageState ?? api?.storageState;
+  const resolvedRole = api?.role ?? browser?.role ?? role;
+  if (!token && storageState === undefined) return undefined;
+  return {
+    ...(resolvedRole ? { role: resolvedRole } : {}),
+    ...(token ? { token } : {}),
+    ...(storageState !== undefined ? { storageState } : {}),
+  };
 }
 
 if (fileURLToPath(import.meta.url) === process.argv[1]) {

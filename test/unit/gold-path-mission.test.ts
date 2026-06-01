@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -10,10 +10,11 @@ import {
   runGoldPathMissionOnce,
   createScriptedGoldPathDriver,
   createUnavailableGoldPathDriver,
+  type GoldPathDriverInput,
   type GoldPathObservation,
   type GoldPathStepResult,
 } from "../../services/slack-operator/src/gold-path-mission.js";
-import { runGoldPathMissionEntry } from "../../services/slack-operator/src/gold-path-mission-entry.js";
+import { resolveGoldPathSessionFromEnv, runGoldPathMissionEntry } from "../../services/slack-operator/src/gold-path-mission-entry.js";
 import {
   buildClaudeGoldPathPrompt,
   createClaudeGoldPathDriver,
@@ -23,6 +24,15 @@ import { resolveTestbedMutationBinding, type TestbedMutationBinding } from "../.
 
 function obs(steps: GoldPathStepResult[], over: Partial<GoldPathObservation> = {}): GoldPathObservation {
   return { steps, notes: [], mutationsAttempted: [], stoppedBeforeMutation: true, ...over };
+}
+
+const STORAGE_STATE = { cookies: [{ name: "refresh" }], origins: [] };
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 }
 
 // ── A4 model policy ─────────────────────────────────────────────────
@@ -244,6 +254,85 @@ describe("runGoldPathMissionEntry — env wiring keeps mainnet read-only", () =>
     expect((result.report.summary as string)).toMatch(/gold_path fail/);
     expect(JSON.stringify(result.report)).toContain("not in live mode");
   });
+
+  it("resolves API Bearer + browser storageState from the signer sidecar and passes both to the driver", async () => {
+    let seenSession: GoldPathDriverInput["session"];
+    const fetchedUrls: string[] = [];
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      fetchedUrls.push(url);
+      if (url.endsWith("/session/agent?type=api")) {
+        return jsonResponse({ type: "api", role: "agent", token: "jwt-agent" });
+      }
+      if (url.endsWith("/session/agent?type=browser")) {
+        return jsonResponse({ type: "browser", role: "agent", storageState: STORAGE_STATE });
+      }
+      return jsonResponse({ error: "not found" }, 404);
+    };
+
+    await runGoldPathMissionEntry(
+      {
+        TESTBED_MISSION_ID: "gp-entry-session",
+        TESTBED_TARGET_URL: "https://app.testnet.example",
+        TESTBED_MISSION_GOAL: "gold path",
+        TESTBED_MISSION_ENVIRONMENT: "testnet",
+        TESTBED_REQUESTED_TEST_MUTATIONS: "true",
+        TESTBED_MISSION_REPORT_PATH: join(dir, "report-session.json"),
+        TEST_WALLET_SIGNER_BASE_URL: "http://signer.local",
+        TESTBED_SESSION_ROLE: "agent",
+      } as NodeJS.ProcessEnv,
+      {
+        sessionDeps: { fetchImpl },
+        driver: {
+          async run(input) {
+            seenSession = input.session;
+            return createScriptedGoldPathDriver().run(input);
+          },
+        },
+      },
+    );
+
+    expect(fetchedUrls).toEqual(expect.arrayContaining([
+      "http://signer.local/session/agent?type=api",
+      "http://signer.local/session/agent?type=browser",
+    ]));
+    expect(seenSession).toEqual({
+      role: "agent",
+      token: "jwt-agent",
+      storageState: STORAGE_STATE,
+    });
+  });
+
+  it("mainnet session resolution forces the read-only agent role", async () => {
+    const fetchedUrls: string[] = [];
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      fetchedUrls.push(url);
+      if (url.endsWith("/session/agent?type=api")) {
+        return jsonResponse({ type: "api", role: "agent", token: "jwt-agent" });
+      }
+      if (url.endsWith("/session/agent?type=browser")) {
+        return jsonResponse({ type: "browser", role: "agent", storageState: STORAGE_STATE });
+      }
+      return jsonResponse({ error: "not found" }, 404);
+    };
+
+    const session = await resolveGoldPathSessionFromEnv(
+      {
+        TESTBED_SESSION_ROLE: "admin",
+        TEST_WALLET_SIGNER_BASE_URL: "http://signer.local",
+      } as NodeJS.ProcessEnv,
+      { environment: "mainnet" },
+      { fetchImpl },
+    );
+
+    expect(fetchedUrls).toEqual(expect.arrayContaining([
+      "http://signer.local/session/agent?type=api",
+      "http://signer.local/session/agent?type=browser",
+    ]));
+    expect(fetchedUrls.some((url) => url.includes("/session/admin?"))).toBe(false);
+    expect(session).toEqual({ role: "agent", token: "jwt-agent", storageState: STORAGE_STATE });
+  });
 });
 
 describe("Claude live gold-path driver", () => {
@@ -367,6 +456,56 @@ describe("Claude live gold-path driver", () => {
     });
   });
 
+  it("materializes SIWE session state for the live command without exposing the token in the prompt", async () => {
+    const driver = createClaudeGoldPathDriver(
+      {
+        enabled: true,
+        command: "claude",
+        args: ["-p", "{prompt}"],
+        timeoutMs: 1000,
+        signerBaseUrl: "http://test-wallet-signer:8791",
+      },
+      {
+        TESTBED_GOLDPATH_LIVE: "1",
+        CLAUDE_WORKER_AUTH_MODE: "sub",
+        CLAUDE_CODE_OAUTH_TOKEN: "oauth-token",
+      } as NodeJS.ProcessEnv,
+      {
+        exec: async ({ env, args }) => {
+          expect(env.TESTBED_SESSION_ROLE).toBe("agent");
+          expect(env.TESTBED_SESSION_TOKEN).toBe("jwt-secret-token");
+          expect(env.TESTBED_SESSION_TYPE).toBe("browser");
+          expect(env.TESTBED_SESSION_STORAGE_STATE_PATH).toMatch(/siwe-storage-state\.json$/);
+          const storageState = JSON.parse(await readFile(String(env.TESTBED_SESSION_STORAGE_STATE_PATH), "utf8"));
+          expect(storageState).toEqual(STORAGE_STATE);
+
+          const prompt = args.join(" ");
+          expect(prompt).toContain("A SIWE session is already minted for role agent");
+          expect(prompt).toContain("TESTBED_SESSION_STORAGE_STATE_PATH");
+          expect(prompt).not.toContain("jwt-secret-token");
+          expect(prompt).not.toContain("refresh");
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify({
+              steps: [{ step: "onboard", status: "ok", detail: "loaded with SIWE", latencyMs: 50 }],
+              notes: ["ok"],
+              mutationsAttempted: [],
+              stoppedBeforeMutation: true,
+            }),
+            stderr: "",
+          };
+        },
+      },
+    );
+
+    await expect(driver.run({
+      ...input,
+      session: { role: "agent", token: "jwt-secret-token", storageState: STORAGE_STATE },
+    })).resolves.toMatchObject({
+      steps: [expect.objectContaining({ step: "onboard", detail: "loaded with SIWE" })],
+    });
+  });
+
   it("passes Cloudflare Access env to the live command but redacts it from failed observations", async () => {
     const driver = createClaudeGoldPathDriver(
       {
@@ -404,5 +543,39 @@ describe("Claude live gold-path driver", () => {
     expect(JSON.stringify(observation)).not.toContain("cf-client-id");
     expect(JSON.stringify(observation)).not.toContain("cf-client-secret");
     expect(JSON.stringify(observation)).toContain("[redacted-cloudflare-access]");
+  });
+
+  it("redacts SIWE session tokens from failed live-driver observations", async () => {
+    const driver = createClaudeGoldPathDriver(
+      {
+        enabled: true,
+        command: "claude",
+        args: ["-p", "{prompt}"],
+        timeoutMs: 1000,
+        signerBaseUrl: "http://test-wallet-signer:8791",
+      },
+      {
+        TESTBED_GOLDPATH_LIVE: "1",
+        CLAUDE_WORKER_AUTH_MODE: "sub",
+        CLAUDE_CODE_OAUTH_TOKEN: "oauth-token",
+      } as NodeJS.ProcessEnv,
+      {
+        exec: async ({ env }) => {
+          expect(env.TESTBED_SESSION_TOKEN).toBe("siwe-token-secret");
+          return {
+            exitCode: 1,
+            stdout: "stdout leaked siwe-token-secret",
+            stderr: "stderr leaked siwe-token-secret",
+          };
+        },
+      },
+    );
+
+    const observation = await driver.run({
+      ...input,
+      session: { role: "agent", token: "siwe-token-secret", storageState: STORAGE_STATE },
+    });
+    expect(JSON.stringify(observation)).not.toContain("siwe-token-secret");
+    expect(JSON.stringify(observation)).toContain("[redacted-session-token]");
   });
 });
