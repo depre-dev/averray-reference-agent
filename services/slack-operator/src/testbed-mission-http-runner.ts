@@ -1,5 +1,10 @@
 import { writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import {
+  parseTestbedBasicAuth,
+  basicAuthAppliesToUrl,
+  basicAuthHeaderValue,
+} from "./testbed-session.js";
 
 interface HttpMissionReport {
   verdict: "pass" | "partial" | "fail";
@@ -19,16 +24,21 @@ interface HttpMissionReport {
 export async function runHttpTestbedMission(env: NodeJS.ProcessEnv = process.env): Promise<HttpMissionReport> {
   const targetUrl = requiredEnv(env, "TESTBED_TARGET_URL");
   const goal = env.TESTBED_MISSION_GOAL || "test first-contact usability";
-  if (isGatedAppTarget(targetUrl, env)) {
+  // The real edge gate on app.averray.com is Caddy HTTP Basic Auth. With the
+  // credential configured we send `Authorization: Basic …` and load the page;
+  // only when we genuinely can't authenticate do we refuse before the request.
+  const basicAuth = parseTestbedBasicAuth(env);
+  const useBasicAuth = basicAuthAppliesToUrl(targetUrl, basicAuth);
+  if (isGatedAppTarget(targetUrl, env) && !useBasicAuth) {
     return {
       verdict: "fail",
       confidence: 0,
       executor: "http_visibility_check",
       runnerMode: "non_browser_fetch",
       stoppedBeforeMutation: true,
-      mutationBoundaryNotes: ["HTTP visibility check is public-only and refused the gated app before sending a request."],
+      mutationBoundaryNotes: ["HTTP visibility check refused the gated app: no Basic Auth credential configured for this host."],
       blockers: [
-        `http_visibility_check is public-only; gated target ${targetUrl} requires the browser-capable executor with Cloudflare Access edge auth and a T2/T3 authenticated session.`,
+        `gated target ${targetUrl} is behind Caddy HTTP Basic Auth; set TESTBED_BASIC_AUTH_USER/TESTBED_BASIC_AUTH_PASS for this host to load it.`,
       ],
       confusingMoments: [],
       evidence: [
@@ -42,7 +52,7 @@ export async function runHttpTestbedMission(env: NodeJS.ProcessEnv = process.env
         evidenceQuality: 3,
       },
       recommendations: [
-        "Use the Playwright surface-sweep executor with TESTBED_CF_ACCESS_CLIENT_ID/SECRET plus a T2/T3 session, or run a T4 gold-path mission with TESTBED_GOLDPATH_LIVE=1.",
+        "Set TESTBED_BASIC_AUTH_USER/TESTBED_BASIC_AUTH_PASS (Caddy Basic Auth) so the sweep loads the gated app; authed gold-path flows additionally need the T2/T3 SIWE session.",
       ],
     };
   }
@@ -55,6 +65,8 @@ export async function runHttpTestbedMission(env: NodeJS.ProcessEnv = process.env
       signal: controller.signal,
       headers: {
         "User-Agent": "Averray-Hermes-Testbed-Runner/1.0",
+        // Basic Auth only for the configured gated host; never logged/reported.
+        ...(useBasicAuth && basicAuth ? { Authorization: basicAuthHeaderValue(basicAuth.credential) } : {}),
       },
     });
     const contentType = response.headers.get("content-type") ?? "";

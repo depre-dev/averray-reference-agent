@@ -277,6 +277,12 @@ services:
       # token secrets and must never appear in logs, prompts, or reports.
       TESTBED_CF_ACCESS_CLIENT_ID: ${TESTBED_CF_ACCESS_CLIENT_ID:-}
       TESTBED_CF_ACCESS_CLIENT_SECRET: ${TESTBED_CF_ACCESS_CLIENT_SECRET:-}
+      # Caddy HTTP Basic Auth — the REAL edge gate on app.averray.com. Secrets;
+      # never logged, prompted, or written to a report. Sent only to the gated
+      # host(s) listed in TESTBED_BASIC_AUTH_HOSTS.
+      TESTBED_BASIC_AUTH_USER: ${TESTBED_BASIC_AUTH_USER:-}
+      TESTBED_BASIC_AUTH_PASS: ${TESTBED_BASIC_AUTH_PASS:-}
+      TESTBED_BASIC_AUTH_HOSTS: ${TESTBED_BASIC_AUTH_HOSTS:-app.averray.com}
       # T4 live gold-path driver. Default is off so CI/test deploys keep the
       # deterministic fake path; when enabled the runner invokes Claude with
       # Playwright-MCP/browser tooling and writes a structured report.
@@ -338,6 +344,12 @@ services:
       TEST_WALLET_SIGNER_BROWSER_EXECUTABLE_PATH: ${TEST_WALLET_SIGNER_BROWSER_EXECUTABLE_PATH:-/usr/bin/chromium}
       TESTBED_CF_ACCESS_CLIENT_ID: ${TESTBED_CF_ACCESS_CLIENT_ID:-}
       TESTBED_CF_ACCESS_CLIENT_SECRET: ${TESTBED_CF_ACCESS_CLIENT_SECRET:-}
+      # Caddy HTTP Basic Auth — the REAL edge gate on app.averray.com. Secrets;
+      # never logged, prompted, or written to a report. Sent only to the gated
+      # host(s) listed in TESTBED_BASIC_AUTH_HOSTS.
+      TESTBED_BASIC_AUTH_USER: ${TESTBED_BASIC_AUTH_USER:-}
+      TESTBED_BASIC_AUTH_PASS: ${TESTBED_BASIC_AUTH_PASS:-}
+      TESTBED_BASIC_AUTH_HOSTS: ${TESTBED_BASIC_AUTH_HOSTS:-app.averray.com}
       AUTH_TOKEN_TTL_SECONDS: ${AUTH_TOKEN_TTL_SECONDS:-3600}
       AVERRAY_API_BASE_URL: ${AVERRAY_API_BASE_URL}
       AVERRAY_APP_BASE_URL: ${AVERRAY_APP_BASE_URL}

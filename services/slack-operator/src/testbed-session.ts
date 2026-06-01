@@ -123,6 +123,87 @@ export function cloudflareAccessHeaders(
     : {};
 }
 
+// ── HTTP Basic Auth (the REAL edge gate on app.averray.com) ──────────
+//
+// app.averray.com is gated by Caddy HTTP Basic Auth (401, www-authenticate:
+// Basic realm="Averray Operator") — NOT Cloudflare Access. The tester sends
+// `Authorization: Basic base64(user:pass)` (fetch executors) or Playwright
+// httpCredentials (browser executors) so a sweep can LOAD the gated pages.
+// The credential is applied ONLY to the configured gated host(s) and is never
+// logged or written to a report. (Authed gold-path flows still need the SIWE
+// session on top — separate follow-up.)
+
+export interface TestbedBasicAuthCredential {
+  username: string;
+  password: string;
+}
+
+export interface TestbedBasicAuth {
+  credential: TestbedBasicAuthCredential;
+  /** Lowercased hostnames the credential is allowed to be sent to. */
+  hosts: string[];
+}
+
+/** Default gated host when TESTBED_BASIC_AUTH_HOSTS is unset (confirmed gate). */
+export const DEFAULT_BASIC_AUTH_HOSTS = ["app.averray.com"];
+
+export function parseTestbedBasicAuth(
+  env: NodeJS.ProcessEnv = process.env,
+): TestbedBasicAuth | undefined {
+  const username = firstNonEmpty(env.TESTBED_BASIC_AUTH_USER);
+  const password = firstNonEmpty(env.TESTBED_BASIC_AUTH_PASS);
+  if (!username || !password) return undefined;
+  const hosts = parseHostList(env.TESTBED_BASIC_AUTH_HOSTS) ?? DEFAULT_BASIC_AUTH_HOSTS;
+  return { credential: { username, password }, hosts };
+}
+
+function parseHostList(value: string | undefined): string[] | undefined {
+  if (!value) return undefined;
+  const hosts = value.split(",").map((h) => h.trim().toLowerCase()).filter(Boolean);
+  return hosts.length > 0 ? hosts : undefined;
+}
+
+/** Whether the gated-host Basic Auth applies to `targetUrl` (host allowlisted). */
+export function basicAuthAppliesToUrl(
+  targetUrl: string,
+  basicAuth: TestbedBasicAuth | undefined,
+): boolean {
+  if (!basicAuth) return false;
+  try {
+    return basicAuth.hosts.includes(new URL(targetUrl).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+/** `Basic base64(user:pass)` header value — for fetch-based executors. */
+export function basicAuthHeaderValue(credential: TestbedBasicAuthCredential): string {
+  const token = Buffer.from(`${credential.username}:${credential.password}`, "utf8").toString("base64");
+  return `Basic ${token}`;
+}
+
+/**
+ * Playwright newContext() httpCredentials scoped to the gated origin, so the
+ * credential is answered ONLY to a 401 from that origin and never leaks to
+ * third-party origins the page might touch. Returns undefined when Basic Auth
+ * doesn't apply to the target.
+ */
+export function basicAuthHttpCredentialsForUrl(
+  targetUrl: string,
+  basicAuth: TestbedBasicAuth | undefined,
+): { username: string; password: string; origin: string } | undefined {
+  if (!basicAuthAppliesToUrl(targetUrl, basicAuth) || !basicAuth) return undefined;
+  try {
+    return {
+      username: basicAuth.credential.username,
+      password: basicAuth.credential.password,
+      origin: new URL(targetUrl).origin,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 /** Whether any session source is configured. When false, the sweep runs
  *  public-only (no fetch / no fs touched). */
 export function isSweepSessionConfigured(config: SweepSessionConfig): boolean {
@@ -243,6 +324,7 @@ async function fetchSidecarSession(
 export function buildSweepContextOptions(
   session?: SweepSession,
   cloudflareAccess?: CloudflareAccessServiceToken,
+  httpCredentials?: { username: string; password: string; origin?: string },
 ): Record<string, unknown> {
   const extraHTTPHeaders = {
     ...cloudflareAccessHeaders(cloudflareAccess),
@@ -253,6 +335,9 @@ export function buildSweepContextOptions(
     userAgent: "Averray-Hermes-Surface-Sweep/1.0",
     ...(session?.storageState ? { storageState: session.storageState } : {}),
     ...(Object.keys(extraHTTPHeaders).length > 0 ? { extraHTTPHeaders } : {}),
+    // Caddy HTTP Basic Auth on the gated host — Playwright answers the 401
+    // challenge with these creds, scoped to `origin` so they never leak.
+    ...(httpCredentials ? { httpCredentials } : {}),
   };
 }
 

@@ -21,10 +21,12 @@ import { executeSurfaceSweep, type SurfaceSweepDeps } from "./testbed-surface-sw
 import {
   parseSweepSessionConfig,
   parseCloudflareAccessServiceToken,
+  parseTestbedBasicAuth,
   resolveSweepSession,
   type CloudflareAccessServiceToken,
   type SweepSession,
   type SweepSessionConfig,
+  type TestbedBasicAuth,
 } from "./testbed-session.js";
 
 export interface TestbedMissionRunnerConfig {
@@ -63,6 +65,8 @@ export interface TestbedMissionRunnerConfig {
   session?: SweepSessionConfig;
   /** Cloudflare Access service-token headers for gated hosted app routes. */
   cloudflareAccess?: CloudflareAccessServiceToken;
+  /** Caddy HTTP Basic Auth credential for the real edge gate (app.averray.com). */
+  basicAuth?: TestbedBasicAuth;
 }
 
 /** Injected session resolution for tests (defaults to the env-config resolver). */
@@ -97,6 +101,7 @@ export function parseTestbedMissionRunnerConfig(
   env: NodeJS.ProcessEnv = process.env
 ): TestbedMissionRunnerConfig {
   const cloudflareAccess = parseCloudflareAccessServiceToken(env);
+  const basicAuth = parseTestbedBasicAuth(env);
   return {
     enabled: env.TESTBED_MISSION_RUNNER_ENABLED === "1" || env.TESTBED_MISSION_RUNNER_ENABLED === "true",
     ...(env.AVERRAY_TESTBED_MISSIONS_PATH ? { path: env.AVERRAY_TESTBED_MISSIONS_PATH } : {}),
@@ -130,6 +135,7 @@ export function parseTestbedMissionRunnerConfig(
     captureVideo: env.TESTBED_MISSION_CAPTURE_VIDEO !== "0" && env.TESTBED_MISSION_CAPTURE_VIDEO !== "false",
     session: parseSweepSessionConfig(env),
     ...(cloudflareAccess ? { cloudflareAccess } : {}),
+    ...(basicAuth ? { basicAuth } : {}),
   };
 }
 

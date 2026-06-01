@@ -9,6 +9,10 @@ import {
   resolveSweepSession,
   buildSweepContextOptions,
   cloudflareAccessHeaders,
+  parseTestbedBasicAuth,
+  basicAuthAppliesToUrl,
+  basicAuthHeaderValue,
+  basicAuthHttpCredentialsForUrl,
   DEFAULT_AUTHED_ROUTES,
   type SweepStorageState,
 } from "../../services/slack-operator/src/testbed-session.js";
@@ -176,5 +180,52 @@ describe("DEFAULT_AUTHED_ROUTES", () => {
     expect(DEFAULT_AUTHED_ROUTES).toEqual(
       expect.arrayContaining(["/overview", "/runs", "/sessions", "/receipts", "/treasury", "/disputes", "/policies", "/agents", "/audit-log", "/capabilities"]),
     );
+  });
+});
+
+describe("Caddy HTTP Basic Auth (the real edge gate)", () => {
+  it("parses user/pass and defaults the host allowlist to app.averray.com", () => {
+    const basic = parseTestbedBasicAuth({ TESTBED_BASIC_AUTH_USER: "op", TESTBED_BASIC_AUTH_PASS: "pw" } as NodeJS.ProcessEnv);
+    expect(basic).toEqual({ credential: { username: "op", password: "pw" }, hosts: ["app.averray.com"] });
+  });
+
+  it("returns undefined unless BOTH user and pass are set", () => {
+    expect(parseTestbedBasicAuth({ TESTBED_BASIC_AUTH_USER: "op" } as NodeJS.ProcessEnv)).toBeUndefined();
+    expect(parseTestbedBasicAuth({ TESTBED_BASIC_AUTH_PASS: "pw" } as NodeJS.ProcessEnv)).toBeUndefined();
+    expect(parseTestbedBasicAuth({} as NodeJS.ProcessEnv)).toBeUndefined();
+  });
+
+  it("honors an explicit, comma-separated host allowlist (lowercased)", () => {
+    const basic = parseTestbedBasicAuth({
+      TESTBED_BASIC_AUTH_USER: "op",
+      TESTBED_BASIC_AUTH_PASS: "pw",
+      TESTBED_BASIC_AUTH_HOSTS: "App.Averray.com, staging.averray.com",
+    } as NodeJS.ProcessEnv);
+    expect(basic?.hosts).toEqual(["app.averray.com", "staging.averray.com"]);
+  });
+
+  it("applies ONLY to allowlisted hosts (never leaks to other origins)", () => {
+    const basic = parseTestbedBasicAuth({ TESTBED_BASIC_AUTH_USER: "op", TESTBED_BASIC_AUTH_PASS: "pw" } as NodeJS.ProcessEnv);
+    expect(basicAuthAppliesToUrl("https://app.averray.com/overview", basic)).toBe(true);
+    expect(basicAuthAppliesToUrl("https://evil.example/overview", basic)).toBe(false);
+    expect(basicAuthAppliesToUrl("https://app.averray.com", undefined)).toBe(false);
+  });
+
+  it("builds a correct Basic header value", () => {
+    expect(basicAuthHeaderValue({ username: "op", password: "pw" }))
+      .toBe(`Basic ${Buffer.from("op:pw").toString("base64")}`);
+  });
+
+  it("builds Playwright httpCredentials scoped to the gated origin", () => {
+    const basic = parseTestbedBasicAuth({ TESTBED_BASIC_AUTH_USER: "op", TESTBED_BASIC_AUTH_PASS: "pw" } as NodeJS.ProcessEnv);
+    expect(basicAuthHttpCredentialsForUrl("https://app.averray.com/runs", basic))
+      .toEqual({ username: "op", password: "pw", origin: "https://app.averray.com" });
+    // Non-gated host → no credentials.
+    expect(basicAuthHttpCredentialsForUrl("https://public.averray.com/", basic)).toBeUndefined();
+  });
+
+  it("buildSweepContextOptions attaches httpCredentials when provided", () => {
+    const opts = buildSweepContextOptions(undefined, undefined, { username: "op", password: "pw", origin: "https://app.averray.com" });
+    expect(opts.httpCredentials).toEqual({ username: "op", password: "pw", origin: "https://app.averray.com" });
   });
 });
