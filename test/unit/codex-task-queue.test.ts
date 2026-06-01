@@ -175,6 +175,12 @@ describe("codex task queue", () => {
       runnerId: "runner-a",
       attemptCount: 1,
       progressMessage: "Codex runner claimed the task.",
+      workingNow: {
+        agent: "codex",
+        runnerId: "runner-a",
+        label: "Codex fixing",
+        since: "2026-05-17T12:04:00.000Z",
+      },
     });
 
     const progress = await updateCodexTaskProgress(second.task.id, {
@@ -205,6 +211,7 @@ describe("codex task queue", () => {
       exitCode: 0,
       stdoutTail: "ok",
     });
+    expect(completed?.workingNow).toBeUndefined();
     expect(completed?.events?.map((entry) => entry.status)).toEqual([
       "proposed",
       "approved",
@@ -243,6 +250,7 @@ describe("codex task queue", () => {
       exitCode: 2,
       stderrTail: "failed",
     });
+    expect(failed?.workingNow).toBeUndefined();
     expect(await claimNextApprovedCodexTask({ path })).toBeUndefined();
   });
 
@@ -272,6 +280,7 @@ describe("codex task queue", () => {
     });
     expect(requeued?.runnerId).toBeUndefined();
     expect(requeued?.startedAt).toBeUndefined();
+    expect(requeued?.workingNow).toBeUndefined();
 
     const rehydrated = await listCodexTasks({ path });
     expect(rehydrated).toHaveLength(1);
@@ -287,6 +296,12 @@ describe("codex task queue", () => {
       status: "running",
       runnerId: "runner-after-restart",
       attemptCount: 2,
+      workingNow: {
+        agent: "codex",
+        runnerId: "runner-after-restart",
+        label: "Codex fixing",
+        since: "2026-05-17T13:46:00.000Z",
+      },
     });
     expect(await claimNextApprovedCodexTask({ path })).toBeUndefined();
   });

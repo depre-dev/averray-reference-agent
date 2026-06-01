@@ -625,15 +625,90 @@ describe("enrichBoardCard", () => {
     const card = enrichBoardCard(base({ type: "task", lane: "codex-needed" }), slim({ lane: "Codex Needed" }), {
       codexTask: {
         id: "task-1",
+        status: "running",
         prompt: "Coalesce repeated policy-attach entries",
         stdoutTail: "ran ok",
         failureReason: undefined,
+        workingNow: {
+          agent: "codex",
+          runnerId: "runner-a",
+          label: "Codex fixing",
+          since: "2026-05-28T11:55:00Z",
+        },
       },
-      runner: { status: "running", updatedAt: "2026-05-28T12:00:00Z", activeTaskId: "task-1" },
+      runner: { status: "running", runnerId: "runner-a", updatedAt: "2026-05-28T12:00:00Z", activeTaskId: "task-1" },
     });
     expect(card.prompt).toMatch(/Coalesce/);
     expect(card.output).toBe("ran ok");
     expect(card.runnerHeartbeat).toEqual({ lastSeen: "2026-05-28T12:00:00Z", online: true });
+    expect(card.workingNow).toEqual({
+      agent: "codex",
+      label: "Codex fixing",
+      source: "runner",
+      taskId: "task-1",
+      runnerId: "runner-a",
+      since: "2026-05-28T11:55:00Z",
+    });
+  });
+
+  it("shows the runner currently working a PR separately from branch author attribution", () => {
+    const card = enrichBoardCard(
+      base({ type: "pr", lane: "hermes-checking", agentType: "claude", branch: "claude/ui-polish" }),
+      slim({ lane: "Hermes Checking", owner: "Hermes", headBranch: "claude/ui-polish" }),
+      {
+        codexTask: {
+          id: "task-pr-1",
+          status: "running",
+          agent: "codex",
+          repo: "depre-dev/agent",
+          pullRequestNumber: 548,
+          startedAt: "2026-05-28T11:57:00Z",
+          workingNow: {
+            agent: "codex",
+            runnerId: "codex-task-runner",
+            label: "Codex fixing",
+            since: "2026-05-28T11:57:00Z",
+          },
+        },
+        runner: {
+          status: "running",
+          runnerId: "codex-task-runner",
+          activeTaskId: "task-pr-1",
+          updatedAt: "2026-05-28T12:00:00Z",
+        },
+      },
+    );
+
+    expect(card.agentType).toBe("claude");
+    expect(card.workingNow).toMatchObject({
+      agent: "codex",
+      label: "Codex fixing",
+      source: "runner",
+      taskId: "task-pr-1",
+    });
+  });
+
+  it("does not show a task worker when runner heartbeat points elsewhere", () => {
+    const card = enrichBoardCard(base({ type: "task", lane: "codex-needed" }), slim({ lane: "Codex Needed" }), {
+      codexTask: { id: "task-1", status: "running", agent: "codex", prompt: "x" },
+      runner: { status: "running", updatedAt: "2026-05-28T12:00:00Z", activeTaskId: "other-task" },
+    });
+
+    expect(card.workingNow).toBeUndefined();
+  });
+
+  it("uses the classifier owner as a Hermes working-now source for watch cards", () => {
+    const card = enrichBoardCard(
+      base({ type: "pr", lane: "hermes-checking", agentType: "hermes", waitingOn: { actor: "agent", tone: "info" } }),
+      slim({ lane: "Hermes Checking", owner: "Hermes" }),
+      {},
+    );
+
+    expect(card.workingNow).toEqual({
+      agent: "hermes",
+      label: "Hermes reviewing",
+      source: "classifier",
+    });
   });
 
   it("projects real task timeline events onto task cards", () => {
@@ -1004,6 +1079,41 @@ describe("buildV2BoardSnapshot — enrichment integration", () => {
     expect(mission?.mission?.path).toHaveLength(2);
   });
 
+  it("names Hermes as working now for a running mission backed by a mission run", () => {
+    const raw = {
+      active: [
+        {
+          correlationId: "mission-running-1",
+          repo: "testbed/mission",
+          intent: "testbed_agent_mission",
+          title: "Verify settings flow mission",
+          summary: { kind: "testbed_mission_run" },
+        },
+      ],
+      recent: [],
+      testbedMissions: [
+        {
+          id: "mission-running-1",
+          status: "running",
+          runnerId: "hermes-browser-runner",
+          targetUrl: "https://staging.averray.com/settings",
+          startedAt: "2026-05-31T10:01:00.000Z",
+        },
+      ],
+    };
+
+    const snap = buildV2BoardSnapshot(raw, { repo: "depre-dev/agent" });
+    const mission = snap.cards.find((c) => c.correlationId === "mission-running-1");
+    expect(mission?.workingNow).toEqual({
+      agent: "hermes",
+      label: "Hermes reviewing",
+      source: "mission",
+      taskId: "mission-running-1",
+      runnerId: "hermes-browser-runner",
+      since: "2026-05-31T10:01:00.000Z",
+    });
+  });
+
   it("surfaces requested tester missions as board-gated operator approvals", () => {
     const raw = {
       active: [],
@@ -1195,6 +1305,71 @@ describe("synthesizeTaskCards (O3 — surface queued tasks)", () => {
     expect(card?.taskEvents).toEqual(events);
     // proposed → waiting on the operator to approve
     expect(card?.waitingOn).toEqual({ actor: "operator", tone: "warn" });
+  });
+
+  it("names the active runner on an in-flight task card only when heartbeat matches", () => {
+    const [card] = synthesizeTaskCards(
+      {
+        codexTasks: {
+          items: [{
+            id: "running-claude-task",
+            status: "running",
+            agent: "claude",
+            repo: "a/b",
+            prompt: "x",
+            startedAt: "2026-05-31T11:55:00.000Z",
+            workingNow: {
+              agent: "claude",
+              runnerId: "claude-task-runner",
+              label: "Claude fixing",
+              since: "2026-05-31T11:55:00.000Z",
+            },
+          }],
+        },
+      },
+      {
+        status: "running",
+        runnerId: "claude-task-runner",
+        activeTaskId: "running-claude-task",
+        updatedAt: "2026-05-31T12:00:00.000Z",
+      },
+      { now: new Date("2026-05-31T12:00:00.000Z") },
+    );
+
+    expect(card).toMatchObject({
+      id: "running-claude-task",
+      state: "running",
+      workingNow: {
+        agent: "claude",
+        label: "Claude fixing",
+        source: "runner",
+        taskId: "running-claude-task",
+        runnerId: "claude-task-runner",
+      },
+    });
+
+    const [mismatched] = synthesizeTaskCards(
+      {
+        codexTasks: {
+          items: [{
+            id: "running-claude-task",
+            status: "running",
+            agent: "claude",
+            repo: "a/b",
+            prompt: "x",
+            startedAt: "2026-05-31T11:55:00.000Z",
+          }],
+        },
+      },
+      {
+        status: "running",
+        runnerId: "claude-task-runner",
+        activeTaskId: "other-task",
+        updatedAt: "2026-05-31T12:00:00.000Z",
+      },
+      { now: new Date("2026-05-31T12:00:00.000Z") },
+    );
+    expect(mismatched?.workingNow).toBeUndefined();
   });
 
   it("skips PR-bound tasks (they surface via their PR card) and terminal tasks", () => {

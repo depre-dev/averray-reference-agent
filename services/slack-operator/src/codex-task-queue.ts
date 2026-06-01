@@ -63,6 +63,13 @@ export interface CodexTaskEvent {
   message: string;
 }
 
+export interface CodexTaskWorkingNow {
+  agent: TaskAgent;
+  runnerId: string;
+  label: string;
+  since: string;
+}
+
 export interface CodexTask extends CodexTaskInput {
   schemaVersion: 1;
   kind: "codex_task";
@@ -86,6 +93,7 @@ export interface CodexTask extends CodexTaskInput {
   stderrTail?: string;
   progressMessage?: string;
   progressAt?: string;
+  workingNow?: CodexTaskWorkingNow;
   retryAfter?: string;
   retryCount?: number;
   selfManagementEscalatedAt?: string;
@@ -199,6 +207,15 @@ function taskAgentEventLabel(agent: TaskAgent): string {
   return agent;
 }
 
+function taskAgentWorkingNowLabel(agent: TaskAgent): string {
+  if (agent === "codex") return "Codex fixing";
+  if (agent === "claude") return "Claude fixing";
+  if (agent === "test-writer") return "Test-writer writing tests";
+  if (agent === "security") return "Security reviewing";
+  if (agent === "docs") return "Docs updating";
+  return `${agent} working`;
+}
+
 export async function approveCodexTask(
   id: string,
   deps: CodexTaskQueueDeps & { approvedBy?: string } = {}
@@ -259,6 +276,7 @@ export async function cancelCodexTask(
     status: "cancelled",
     cancelledAt: now,
     cancelledBy: deps.cancelledBy ?? "monitor",
+    workingNow: undefined,
     events: appendTaskEvent(existing, {
       at: now,
       status: "cancelled",
@@ -286,18 +304,26 @@ export async function claimNextApprovedCodexTask(
     .sort((a, b) => Date.parse(a.approvedAt ?? a.updatedAt) - Date.parse(b.approvedAt ?? b.updatedAt))[0];
   if (!existing) return undefined;
   const now = (deps.now ?? new Date()).toISOString();
+  const agent = taskAgent(existing);
+  const runnerId = deps.runnerId ?? existing.runnerId ?? "codex-task-runner";
   const task: CodexTask = {
     ...existing,
     status: "running",
     startedAt: now,
-    runnerId: deps.runnerId ?? existing.runnerId ?? "codex-task-runner",
+    runnerId,
     attemptCount: (existing.attemptCount ?? 0) + 1,
-    progressMessage: `${taskAgentEventLabel(taskAgent(existing))} runner claimed the task.`,
+    progressMessage: `${taskAgentEventLabel(agent)} runner claimed the task.`,
     progressAt: now,
+    workingNow: {
+      agent,
+      runnerId,
+      label: taskAgentWorkingNowLabel(agent),
+      since: now,
+    },
     events: appendTaskEvent(existing, {
       at: now,
       status: "running",
-      message: `${taskAgentEventLabel(taskAgent(existing))} runner ${(deps.runnerId ?? existing.runnerId ?? "codex-task-runner")} claimed the task.`,
+      message: `${taskAgentEventLabel(agent)} runner ${runnerId} claimed the task.`,
     }),
     updatedAt: now,
   };
@@ -356,6 +382,7 @@ export async function completeCodexTask(
     ...existing,
     status: "completed",
     completedAt: now,
+    workingNow: undefined,
     ...(deps.completionSummary ? { completionSummary: deps.completionSummary } : {}),
     ...(typeof deps.exitCode === "number" ? { exitCode: deps.exitCode } : {}),
     ...(deps.stdoutTail ? { stdoutTail: deps.stdoutTail } : {}),
@@ -392,6 +419,7 @@ export async function failCodexTask(
     ...existing,
     status: "failed",
     failedAt: now,
+    workingNow: undefined,
     failureReason: deps.failureReason ?? `${taskAgentEventLabel(taskAgent(existing))} task runner failed.`,
     ...(typeof deps.exitCode === "number" ? { exitCode: deps.exitCode } : {}),
     ...(deps.stdoutTail ? { stdoutTail: deps.stdoutTail } : {}),
@@ -426,6 +454,7 @@ export async function retryCodexTask(
     retryAfter: _retryAfter,
     selfManagementEscalatedAt: _escalatedAt,
     selfManagementEscalationReason: _escalationReason,
+    workingNow: _workingNow,
     runnerId: _runnerId,
     startedAt: _startedAt,
     failedAt: _failedAt,

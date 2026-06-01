@@ -19,7 +19,15 @@
 //   - archiveHint = true → "archive in 4h?" tail line
 
 import { useState } from "react";
-import type { BoardCard, CardChecks, WaitingOn, RiskTag, AgentType, HermesDecisionRecord } from "../../lib/monitor/card-types.js";
+import type {
+  BoardCard,
+  CardChecks,
+  WaitingOn,
+  RiskTag,
+  AgentType,
+  HermesDecisionRecord,
+  CardWorkingNow,
+} from "../../lib/monitor/card-types.js";
 import { formatFreshness, freshnessTier } from "../../lib/monitor/urgency.js";
 import { laneFor } from "../../lib/monitor/lane-rules.js";
 import { humanizedSignalParts } from "../../lib/monitor/signal-labels.js";
@@ -153,6 +161,8 @@ export function Card({
       ) : null}
 
       {!isClosed ? <AgentDiscussion messages={card.discussion} compact /> : null}
+
+      {!isClosed && card.workingNow ? <WorkingNowLine workingNow={card.workingNow} /> : null}
 
       {isClosed && verdictText ? (
         <div className="hm-card-meta">
@@ -302,6 +312,23 @@ function actorDisplayName(actor: "hermes" | "operator" | "codex" | "claude" | "t
   if (actor === "security") return "Security";
   if (actor === "docs") return "Docs";
   return "Codex";
+}
+
+function WorkingNowLine({ workingNow }: { workingNow: CardWorkingNow }) {
+  const details = [
+    workingNow.runnerId ? `runner: ${workingNow.runnerId}` : undefined,
+    workingNow.taskId ? `task: ${workingNow.taskId}` : undefined,
+    workingNow.since ? `since: ${workingNow.since}` : undefined,
+    `source: ${workingNow.source}`,
+  ].filter(Boolean).join(" · ");
+
+  return (
+    <div className="hm-working-now" aria-label={`Working now: ${workingNow.label}`} title={details || undefined}>
+      <span className={`agent-dot agent-dot--${workingNow.agent}`} aria-hidden />
+      working now
+      <span className="target">{workingNow.label}</span>
+    </div>
+  );
 }
 
 // ── Checks label (e.g. "5/6 · 1 running") ──────────────────────────

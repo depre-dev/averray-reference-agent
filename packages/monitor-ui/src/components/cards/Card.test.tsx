@@ -208,6 +208,38 @@ describe("Card — state coverage", () => {
     expect(container.querySelector(".running")).toBeTruthy();
   });
 
+  test("in-flight cards render the live worker separately from branch attribution", () => {
+    const running: PRCard = {
+      id: "agent #561",
+      lane: "hermes-checking",
+      type: "pr",
+      agentType: "claude",
+      title: "Claude-authored PR under Codex repair",
+      summary: "runner active",
+      repo: "depre-dev/agent",
+      freshness: 2,
+      state: "running",
+      risk: [],
+      waitingOn: { actor: "agent", tone: "info" },
+      files: [],
+      workingNow: {
+        agent: "codex",
+        label: "Codex fixing",
+        source: "runner",
+        runnerId: "codex-task-runner",
+        taskId: "task-pr-561",
+      },
+    };
+
+    const { container } = render(<Card card={running} />);
+    const view = within(container);
+    expect(view.getByText("claude")).toBeTruthy();
+    expect(view.getByText(/working now/i)).toBeTruthy();
+    expect(view.getByText("Codex fixing")).toBeTruthy();
+    expect(container.querySelector(".hm-working-now")).toBeTruthy();
+    expect(container.querySelector(".hm-working-now")?.getAttribute("title")).toContain("runner: codex-task-runner");
+  });
+
   test("focused prop adds is-focused", () => {
     const { container } = render(<Card card={fixture("agent #547")} focused />);
     expect(container.querySelector(".hm-card.is-focused")).toBeTruthy();
