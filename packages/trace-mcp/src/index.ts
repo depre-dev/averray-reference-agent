@@ -2,6 +2,7 @@ import http from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { jsonContent, logger, optionalEnv, query, runStdioServer } from "@avg/mcp-common";
+import { recordHermesLlmUsageFromTraceEvent } from "./hermes-llm-usage.js";
 
 const server = new McpServer({
   name: "trace-mcp",
@@ -79,6 +80,9 @@ function startHttpIngest() {
            )`,
           [runId, event?.kind ?? "hermes-event", JSON.stringify(event)]
         );
+        await recordHermesLlmUsageFromTraceEvent(event).catch((error) => {
+          logger.warn({ err: error }, "trace_http_llm_usage_record_failed");
+        });
         res.writeHead(204).end();
       } catch (error) {
         logger.warn({ err: error }, "trace_http_ingest_failed");
@@ -117,4 +121,3 @@ function readBody(req: http.IncomingMessage): Promise<string> {
     req.on("error", reject);
   });
 }
-
