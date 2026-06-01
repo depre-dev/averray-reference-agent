@@ -98,6 +98,10 @@ runner". It's a profile-gated service, mirroring `codex-runner` /
 **`.env.prod` edits:**
 ```
 TESTBED_MISSION_RUNNER_ENABLED=1
+# Public-only T1 route sweeps should target the public site. Keep
+# AVERRAY_APP_BASE_URL pointed at the gated operator app for signed-in T2/T3
+# sessions.
+TESTBED_SURFACE_SWEEP_BASE_URL=https://averray.com
 # Optional: the env's truth boundary the honesty check asserts. Set to
 # testnet / demo / local-simulation when the deployed env is non-production so
 # data-bearing surfaces must carry that marker; leave empty otherwise.

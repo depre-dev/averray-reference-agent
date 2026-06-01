@@ -13,6 +13,7 @@ import {
 } from "../../services/slack-operator/src/testbed-surface-sweep.js";
 import {
   executeBrowserTestbedMission,
+  parseTestbedMissionRunnerConfig,
   type TestbedMissionRunnerConfig,
 } from "../../services/slack-operator/src/testbed-mission-runner.js";
 import type { TestbedMissionRun } from "../../services/slack-operator/src/monitor-testbed-missions.js";
@@ -199,6 +200,18 @@ describe("buildSweepReport + executeSurfaceSweep (injected capture)", () => {
 });
 
 describe("executeBrowserTestbedMission — dispatch (single-URL explore stays intact)", () => {
+  it("parses a dedicated public surface sweep base without changing the gated app base", () => {
+    const parsed = parseTestbedMissionRunnerConfig({
+      TESTBED_MISSION_RUNNER_ENABLED: "1",
+      AVERRAY_APP_BASE_URL: "https://app.averray.com",
+      AVERRAY_API_BASE_URL: "https://api.averray.com",
+      TESTBED_SURFACE_SWEEP_BASE_URL: "https://averray.com",
+    });
+
+    expect(parsed.appBaseUrl).toBe("https://app.averray.com");
+    expect(parsed.surfaceSweepBaseUrl).toBe("https://averray.com");
+  });
+
   it("routes a surface_sweep mission to the sweep (uses the injected capture)", async () => {
     const fake = vi.fn(async (url: string, route: string) => capture({ route, url }));
     const result = await executeBrowserTestbedMission(mission({ mode: "surface_sweep", routes: ["/"] }), config, {
@@ -206,6 +219,26 @@ describe("executeBrowserTestbedMission — dispatch (single-URL explore stays in
     });
     expect(fake).toHaveBeenCalledTimes(1);
     expect(JSON.parse(result.reportText ?? "{}").executor).toBe("surface_sweep");
+  });
+
+  it("routes public surface_sweep URLs through the dedicated public base", async () => {
+    const fake = vi.fn(async (url: string, route: string) => capture({ route, url }));
+    await executeBrowserTestbedMission(
+      mission({ mode: "surface_sweep" }),
+      {
+        ...config,
+        appBaseUrl: "https://app.averray.com",
+        surfaceSweepBaseUrl: "https://averray.com",
+      },
+      { captureRoute: fake },
+    );
+
+    expect(fake.mock.calls.map((call) => call[0])).toEqual([
+      "https://averray.com/",
+      "https://averray.com/onboarding",
+      "https://averray.com/jobs",
+      "https://averray.com/strategies",
+    ]);
   });
 
   it("an explore mission never reaches the sweep capture (dispatch gates on mode)", async () => {
@@ -273,6 +306,24 @@ describe("T2: authed routes + session-gated coverage", () => {
       resolveSession: async () => AGENT_SESSION,
     });
     expect(seen).toContain("/overview");
+  });
+
+  it("a resolved session keeps the sweep on the gated app base for operator routes", async () => {
+    const fake = vi.fn(async (url: string, route: string) => capture({ route, url }));
+    await executeBrowserTestbedMission(
+      mission(),
+      {
+        ...config,
+        appBaseUrl: "https://app.averray.com",
+        surfaceSweepBaseUrl: "https://averray.com",
+      },
+      {
+        captureRoute: fake,
+        resolveSession: async () => AGENT_SESSION,
+      },
+    );
+
+    expect(fake.mock.calls.map((call) => call[0])).toContain("https://app.averray.com/overview");
   });
 
   it("the runner with no configured session source sweeps public-only", async () => {

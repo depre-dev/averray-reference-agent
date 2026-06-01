@@ -689,6 +689,14 @@ export function testbedMissionCodexFollowupPrompt(run: TestbedMissionRun): strin
 
 export function testbedMissionSelfHealingDisposition(run: TestbedMissionRun): TestbedMissionSelfHealingDisposition {
   const reason = run.failureReason ?? run.statusReason ?? "no reason recorded";
+  const structuredReport = testbedMissionStructuredReport(run);
+  if (testbedMissionEnvironmentOrAuthFailure(run, structuredReport)) {
+    return {
+      autoFixable: false,
+      reason: "environment_or_auth_failure",
+      summary: `Testbed mission ${run.id} failed on an environment/auth/runner boundary for ${run.targetUrl}: ${reason}`,
+    };
+  }
   if (run.history.some((entry) => entry.event === "mission_runner_failed")) {
     return {
       autoFixable: false,
@@ -704,20 +712,11 @@ export function testbedMissionSelfHealingDisposition(run: TestbedMissionRun): Te
     };
   }
 
-  const structuredReport = testbedMissionStructuredReport(run);
   if (!structuredReport || !run.result) {
     return {
       autoFixable: false,
       reason: "missing_product_report",
       summary: `Testbed mission ${run.id} failed without an attached product report for ${run.targetUrl}: ${reason}`,
-    };
-  }
-
-  if (testbedMissionEnvironmentOrAuthFailure(run, structuredReport)) {
-    return {
-      autoFixable: false,
-      reason: "environment_or_auth_failure",
-      summary: `Testbed mission ${run.id} failed on an environment/auth/runner boundary for ${run.targetUrl}: ${reason}`,
     };
   }
 
@@ -736,25 +735,36 @@ export function testbedMissionSelfHealingDisposition(run: TestbedMissionRun): Te
 
 function testbedMissionEnvironmentOrAuthFailure(
   run: TestbedMissionRun,
-  report: TestbedMissionStructuredReport,
+  report?: TestbedMissionStructuredReport,
 ): boolean {
   const haystack = [
     run.failureReason,
     run.statusReason,
-    report.summary,
-    ...report.blockers,
-    ...report.confusingMoments,
-    ...report.recommendations,
-    ...report.evidence,
-    ...report.completedPath,
+    run.stdoutTail,
+    run.stderrTail,
+    ...run.history.map((entry) => entry.message),
+    ...(report
+      ? [
+        report.summary,
+        ...report.blockers,
+        ...report.confusingMoments,
+        ...report.recommendations,
+        ...report.evidence,
+        ...report.completedPath,
+      ]
+      : []),
   ].filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
     .join("\n");
 
   return [
-    /\b(?:http\s*)?(?:401|403)\b/i,
+    /\b(?:http\s*)?(?:401|403|5\d\d)\b/i,
+    /\bstatus[=:\s]+(?:401|403|5\d\d)\b/i,
     /unauthori[sz]ed|forbidden|access denied|authentication required|login required|sign[ -]?in required/i,
-    /cloudflare access|net::err_|err_name_not_resolved|econnrefused|connection refused/i,
-    /page load failed|navigation failed|browser context closed|target closed|timed out/i,
+    /www-authenticate|basic realm|basic auth|cloudflare access/i,
+    /bad gateway|service unavailable|gateway timeout|internal server error/i,
+    /net::err_|err_name_not_resolved|econnrefused|connection refused/i,
+    /page load failed|navigation failed|browser context closed|target closed|timed out|timeout/i,
+    /runner[-\s]?(?:killed|terminated)|\bexit(?:ed)?\b|exit code|sig(?:term|kill)/i,
   ].some((pattern) => pattern.test(haystack));
 }
 

@@ -39,8 +39,10 @@ export interface TestbedMissionRunnerConfig {
   browserExecutablePath?: string;
   artifactsDir?: string;
   maxBrowserSteps?: number;
-  /** Base URL the surface sweep (T1) joins relative routes to. */
+  /** Base URL the authenticated app/session helpers use. */
   appBaseUrl?: string;
+  /** Public base URL the surface sweep (T1) joins relative routes to. */
+  surfaceSweepBaseUrl?: string;
   /** Base URL for platform API role-gating probes (T3 SIWE mission). */
   apiBaseUrl?: string;
   /** Local signer sidecar URL for T3 SIWE mission sessions. */
@@ -106,6 +108,9 @@ export function parseTestbedMissionRunnerConfig(
     maxBrowserSteps: positiveInt(env.TESTBED_MISSION_MAX_BROWSER_STEPS, 8),
     ...(env.AVERRAY_APP_BASE_URL || env.AVERRAY_API_BASE_URL
       ? { appBaseUrl: env.AVERRAY_APP_BASE_URL || env.AVERRAY_API_BASE_URL }
+      : {}),
+    ...(env.TESTBED_SURFACE_SWEEP_BASE_URL || env.AVERRAY_PUBLIC_BASE_URL
+      ? { surfaceSweepBaseUrl: env.TESTBED_SURFACE_SWEEP_BASE_URL || env.AVERRAY_PUBLIC_BASE_URL }
       : {}),
     ...(env.AVERRAY_API_BASE_URL ? { apiBaseUrl: env.AVERRAY_API_BASE_URL } : {}),
     signerBaseUrl: env.TEST_WALLET_SIGNER_BASE_URL || "http://127.0.0.1:8791",
@@ -335,8 +340,18 @@ export async function executeBrowserTestbedMission(
     const resolveSession = deps.resolveSession ?? defaultResolveSweepSession;
     const session = await resolveSession(config);
     // Drop the SweepSessionConfig (env source) and pass the RESOLVED session.
-    const { session: _sessionConfig, ...sweepConfig } = config;
-    return executeSurfaceSweep(mission, { ...sweepConfig, ...(session ? { session } : {}) }, deps);
+    // T1 public sweeps use the public sweep base; the gated app base remains
+    // available to T2/T3 session flows.
+    const { session: _sessionConfig, surfaceSweepBaseUrl, ...sweepConfig } = config;
+    return executeSurfaceSweep(
+      mission,
+      {
+        ...sweepConfig,
+        appBaseUrl: session ? config.appBaseUrl : (surfaceSweepBaseUrl ?? config.appBaseUrl),
+        ...(session ? { session } : {}),
+      },
+      deps,
+    );
   }
   if (mission.mode === "siwe_auth") {
     return executeSiweAuthMission(mission, config, deps);
