@@ -34,6 +34,7 @@ import { Board, CALM_EXPANDED, DEFAULT_EXPANDED } from "./Board.js";
 import type { LaneId } from "./Lane.js";
 import { CardRouter } from "./cards/CardRouter.js";
 import { DetailDrawer } from "./drawer/DetailDrawer.js";
+import { missionReportText, type DrawerActionHandlers } from "../lib/monitor/drawer-footer.js";
 import { CoPilotRail } from "./hermes/CoPilotRail.js";
 import { KeyboardOverlay } from "./shortcuts/KeyboardOverlay.js";
 import type { UseCollaborationOptions } from "../hooks/useCollaboration.js";
@@ -102,6 +103,8 @@ export interface BoardViewProps {
   onApproveTask?: (id: string) => void;
   /** Approve a requested tester mission — the operator human gate (T6). */
   onApproveMission?: (id: string) => void;
+  /** Re-run a mission (drawer footer) via POST /monitor/testbed-missions. */
+  onRerunMission?: (targetUrl: string, freshness: "fresh" | "memory") => void;
   collaboration?: UseCollaborationOptions;
   onMute?: (untilMs: number) => void;
   onUnmute?: () => void;
@@ -130,6 +133,7 @@ export function BoardView({
   onCreateTask,
   onApproveTask,
   onApproveMission,
+  onRerunMission,
   collaboration,
   onMute,
   onUnmute,
@@ -275,6 +279,55 @@ export function BoardView({
     },
   });
 
+  // G2: compose the drawer footer's backend actions from the EXISTING board
+  // handlers. A handler is provided only when its real action is wired (and the
+  // footer further disables a button when the card lacks the data it needs) —
+  // so a footer button is never live-but-no-op. No new authority: it only
+  // proposes / approves / opens GitHub through paths the board already uses.
+  const drawerActions = useMemo<DrawerActionHandlers>(() => {
+    const a: DrawerActionHandlers = {
+      // Ask Hermes: close the modal drawer, scope the rail composer to the card.
+      onAskHermes: (card) => {
+        onCardClose?.();
+        setBoardFocusId(card.id);
+        setAskToken((t) => t + 1);
+      },
+    };
+    if (onRerunMission) {
+      a.onRerunMission = (card, freshness) => {
+        const target = card.type === "mission" ? card.mission?.target : undefined;
+        if (target) onRerunMission(target, freshness);
+      };
+    }
+    if (onApproveTask) {
+      // Records operator approval; the merge itself happens on GitHub (the
+      // footer opens it). The board never merges.
+      a.onApproveAndMerge = (card) => onApproveTask(card.id);
+    }
+    if (onCreateTask) {
+      a.onCreateProductFix = (card) => {
+        const report = missionReportText(card);
+        onCreateTask({
+          agent: "claude", // greenfield product fix — the worker opens its own PR
+          repo: card.repo,
+          prompt: `Product fix proposed from a failed testbed mission.\n\n${card.title}\n\n${report ?? card.summary}`,
+        });
+      };
+      a.onSendBackToCodex = (card) => {
+        const pr = "pullRequestNumber" in card ? (card as { pullRequestNumber?: number }).pullRequestNumber : undefined;
+        if (typeof pr === "number") {
+          onCreateTask({
+            agent: "codex",
+            repo: card.repo,
+            pullRequestNumber: pr,
+            prompt: `Operator sent this PR back to Codex for another pass: ${card.title}`,
+          });
+        }
+      };
+    }
+    return a;
+  }, [onRerunMission, onApproveTask, onCreateTask, onCardClose]);
+
   return (
     <div className="hm-board">
       {/* §14: assertive announcement of the action 0→>0 edge. */}
@@ -363,6 +416,7 @@ export function BoardView({
           cards={orderedCards}
           onClose={() => onCardClose?.()}
           onNavigate={(id) => onCardNavigate?.(id)}
+          actions={drawerActions}
         />
       ) : null}
 

@@ -53,6 +53,8 @@ export interface MonitorPageProps {
   onApproveTask?: (id: string) => void;
   /** Override the tester mission approval (defaults to POST /monitor/testbed-missions/:id/approve). */
   onApproveMission?: (id: string) => void;
+  /** Override the drawer mission re-run (defaults to POST /monitor/testbed-missions). */
+  onRerunMission?: (targetUrl: string, freshness: "fresh" | "memory") => void;
   /** Override the co-pilot collaboration wiring (defaults to live polling). */
   collaboration?: UseCollaborationOptions;
   /** Override the action-alert wiring (audio/notification/storage) for tests. */
@@ -71,6 +73,7 @@ export function MonitorPage({
   onCreateTask = defaultCreateTask,
   onApproveTask = defaultApproveTask,
   onApproveMission = defaultApproveMission,
+  onRerunMission = defaultRerunMission,
   collaboration = {},
   alerts,
   onAlertMute = defaultPostAlertMute,
@@ -115,6 +118,7 @@ export function MonitorPage({
         onCreateTask={onCreateTask}
         onApproveTask={onApproveTask}
         onApproveMission={onApproveMission}
+        onRerunMission={onRerunMission}
         collaboration={collaboration}
         onMute={muteEverywhere}
         onUnmute={unmuteEverywhere}
@@ -139,6 +143,22 @@ function defaultSpawnMission(url: string): void {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ targetUrl: url }),
+  }).catch(() => {
+    /* surfaced via the board feed / degraded state, not thrown here */
+  });
+}
+
+/**
+ * Re-run a mission from the drawer footer. Same endpoint as a spawn, plus a
+ * freshness flag: "fresh" → a new agent with no prior context (freshMemory),
+ * "memory" → the agent reads the last terminal report as context. Fire-and-
+ * forget; the new mission card arrives on the board feed.
+ */
+function defaultRerunMission(targetUrl: string, freshness: "fresh" | "memory"): void {
+  void fetch(MISSIONS_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ targetUrl, freshMemory: freshness === "fresh" }),
   }).catch(() => {
     /* surfaced via the board feed / degraded state, not thrown here */
   });
