@@ -502,6 +502,68 @@ describe("generateHermesReply", () => {
     expect(text).toBeNull();
   });
 
+  it("uses DeepSeek reasoning text when content is empty and records OpenAI-style usage", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "averray-hermes-reasoning-usage-"));
+    try {
+      const usageLogPath = join(dir, "llm-usage.jsonl");
+      const fetchFn = async () =>
+        jsonResponse({
+          model: "deepseek-v4-pro:cloud",
+          choices: [
+            {
+              message: {
+                role: "assistant",
+                content: "",
+                reasoning: "Pascal, this is live Hermes. The board has one operator triage item and I am not dispatching code work.",
+              },
+            },
+          ],
+          usage: {
+            prompt_tokens: 93,
+            completion_tokens: 21,
+          },
+        });
+
+      const text = await generateHermesReply(baseContext(), {
+        apiKey,
+        baseUrl,
+        model: "deepseek-v4-pro:cloud",
+        runId: "deepseek-reasoning-1",
+        taskId: "chat-message-2",
+        usageLogPath,
+        fetchFn: fetchFn as typeof fetch,
+      });
+
+      expect(text).toContain("this is live Hermes");
+      expect(text).not.toContain("content");
+      await expect(readFile(usageLogPath, "utf8").then((line) => JSON.parse(line))).resolves.toMatchObject({
+        agent: "hermes",
+        model: "deepseek-v4-pro:cloud",
+        runId: "deepseek-reasoning-1",
+        taskId: "chat-message-2",
+        inputTokens: 93,
+        outputTokens: 21,
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses reasoning_content when content and reasoning are empty", async () => {
+    const fetchFn = async () =>
+      jsonResponse({
+        choices: [{
+          message: {
+            content: "",
+            reasoning: "   ",
+            reasoning_content: "I have the live reply now.",
+          },
+        }],
+      });
+    const text = await generateHermesReply(baseContext(), { apiKey, baseUrl, fetchFn: fetchFn as typeof fetch });
+    expect(text).toContain("live reply");
+  });
+
   it("returns null when the fetch throws", async () => {
     const fetchFn = async () => { throw new Error("network down"); };
     const text = await generateHermesReply(baseContext(), { apiKey, baseUrl, fetchFn: fetchFn as typeof fetch });
@@ -671,6 +733,55 @@ describe("generateHermesBoardNarration", () => {
     expect(text).toMatch(/averray-agent\/agent#438/);
     expect(body.max_tokens).toBe(180);
     expect(body.messages[1].content).toContain("Speak proactively as Hermes");
+  });
+
+  it("uses DeepSeek reasoning text for proactive narration when content is empty", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "averray-hermes-narration-usage-"));
+    try {
+      const usageLogPath = join(dir, "llm-usage.jsonl");
+      const fetchFn = async () =>
+        jsonResponse({
+          choices: [{
+            message: {
+              content: "",
+              reasoning: "Pascal, Hermes is live on narration too; one release card needs a merge steward.",
+            },
+          }],
+          usage: {
+            prompt_tokens: 55,
+            completion_tokens: 13,
+          },
+        });
+      const text = await generateHermesBoardNarration(
+        {
+          board: {
+            headline: "Board now: 1 release item.",
+            counts: { release: 1 },
+            items: [
+              {
+                repo: "averray-agent/agent",
+                number: 440,
+                title: "Ready to merge.",
+                lane: "Release Queue",
+                owner: "Merge steward",
+              },
+            ],
+          },
+          recentMessages: [],
+        },
+        { apiKey, baseUrl, usageLogPath, fetchFn: fetchFn as typeof fetch }
+      );
+
+      expect(text).toContain("Hermes is live on narration");
+      await expect(readFile(usageLogPath, "utf8").then((line) => JSON.parse(line))).resolves.toMatchObject({
+        agent: "hermes",
+        model: "deepseek-v4-pro:cloud",
+        inputTokens: 55,
+        outputTokens: 13,
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("adds a why trace when board narration receives relevant memory", async () => {
