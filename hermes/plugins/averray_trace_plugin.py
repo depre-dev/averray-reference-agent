@@ -9,6 +9,7 @@ import json
 import os
 import urllib.request
 from datetime import datetime, timezone
+from collections.abc import Mapping, Sequence
 
 
 TRACE_HTTP_URL = os.environ.get("TRACE_HTTP_URL", "http://trace-mcp:8789/hermes-event")
@@ -35,18 +36,46 @@ def _post(kind, payload):
         pass
 
 
+def _event_payload(event):
+    if hasattr(event, "model_dump"):
+        try:
+            return _json_safe(event.model_dump())
+        except Exception:
+            pass
+    if hasattr(event, "dict"):
+        try:
+            return _json_safe(event.dict())
+        except Exception:
+            pass
+    if hasattr(event, "__dict__"):
+        try:
+            return _json_safe(event.__dict__)
+        except Exception:
+            pass
+    return {"repr": repr(event)}
+
+
+def _json_safe(value):
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_json_safe(item) for item in value]
+    return repr(value)
+
+
 async def pre_llm_call(event):
-    _post("pre_llm_call", getattr(event, "dict", lambda: {"repr": repr(event)})())
+    _post("pre_llm_call", _event_payload(event))
 
 
 async def post_llm_call(event):
-    _post("post_llm_call", getattr(event, "dict", lambda: {"repr": repr(event)})())
+    _post("post_llm_call", _event_payload(event))
 
 
 async def pre_tool_call(event):
-    _post("pre_tool_call", getattr(event, "dict", lambda: {"repr": repr(event)})())
+    _post("pre_tool_call", _event_payload(event))
 
 
 async def post_tool_call(event):
-    _post("post_tool_call", getattr(event, "dict", lambda: {"repr": repr(event)})())
-
+    _post("post_tool_call", _event_payload(event))

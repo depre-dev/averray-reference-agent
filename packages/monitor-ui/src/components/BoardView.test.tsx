@@ -274,7 +274,7 @@ describe("BoardView — rich-mix board (open stream)", () => {
       ...richBoard,
       llmUsage: {
         status: "not_recorded",
-        message: "No runner has reported LLM usage counters yet. Claude-family counters depend on SDK output; Codex CLI and Hermes/Ollama do not reliably report usage today.",
+        message: "No LLM usage counters have been recorded yet. Sources stay not reported until a real provider or runner emits whitelisted counters.",
         inputTokens: 0,
         outputTokens: 0,
         totalTokens: 0,
@@ -290,7 +290,7 @@ describe("BoardView — rich-mix board (open stream)", () => {
     const { getByRole, getByText, queryByText } = render(<BoardView board={board} status="open" />);
     expect(getByRole("region", { name: "LLM usage" })).toBeTruthy();
     expect(getByText("usage not reported")).toBeTruthy();
-    expect(getByText(/No runner has reported LLM usage counters yet/)).toBeTruthy();
+    expect(getByText(/No LLM usage counters have been recorded yet/)).toBeTruthy();
     expect(queryByText("not_recorded")).toBeNull();
   });
 

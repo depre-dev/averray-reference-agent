@@ -102,7 +102,7 @@ const DEFAULT_SOURCE_REASONS: Readonly<Record<string, string>> = {
   security: "Security specialist SDK usage counters have not arrived from runner output yet.",
   docs: "Docs specialist SDK usage counters have not arrived from runner output yet.",
   codex: "Codex CLI does not report usage.",
-  hermes: "Hermes/Ollama responses have not exposed usage counters yet.",
+  hermes: "Hermes monitor replies may be templated when OLLAMA_API_KEY is unset; live Hermes agent usage is recorded from post_llm_call traces when provider counters are present.",
 };
 
 const activeCalls = new Map<string, LlmUsageActiveCall>();
@@ -238,7 +238,7 @@ export function aggregateLlmUsage(
     status,
     message: status === "recorded"
       ? "LLM usage includes only runner results that emitted whitelisted token counters."
-      : "No runner has reported LLM usage counters yet. Claude-family counters depend on SDK output; Codex CLI and Hermes/Ollama do not reliably report usage today.",
+      : "No LLM usage counters have been recorded yet. Sources stay not reported until a real provider or runner emits whitelisted counters.",
     ...total,
     runs: events.length,
     byModel,

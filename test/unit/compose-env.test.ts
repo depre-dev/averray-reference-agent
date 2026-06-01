@@ -16,6 +16,16 @@ describe("compose environment wiring", () => {
     expect(env?.OLLAMA_API_KEY).toBe("${OLLAMA_API_KEY:-}");
     expect(env?.OLLAMA_BASE_URL).toBe("${OLLAMA_BASE_URL:-https://ollama.com/v1}");
     expect(env?.HERMES_MONITOR_REPLY_MODEL).toBe("${HERMES_MONITOR_REPLY_MODEL:-deepseek-v4-pro:cloud}");
+    expect(env?.LLM_USAGE_LOG_PATH).toBe("${LLM_USAGE_LOG_PATH:-/data/llm-usage.jsonl}");
+  });
+
+  it("passes the shared LLM usage log path into Hermes and its MCP env", () => {
+    const compose = parse(readText("../../ops/compose.yml")) as {
+      services?: Record<string, { environment?: Record<string, string> }>;
+    };
+
+    expect(compose.services?.hermes?.environment?.LLM_USAGE_LOG_PATH).toBe("${LLM_USAGE_LOG_PATH:-/data/llm-usage.jsonl}");
+    expect(compose.services?.["mcp-env"]?.environment?.LLM_USAGE_LOG_PATH).toBe("${LLM_USAGE_LOG_PATH:-/data/llm-usage.jsonl}");
   });
 
   it("keeps bootstrap-generated env files on the documented Hermes pin", () => {
@@ -26,6 +36,7 @@ describe("compose environment wiring", () => {
     expect(pin).toBeTruthy();
     expect(bootstrap).toContain(`HERMES_IMAGE=${pin}`);
     expect(envExample).toContain("HERMES_MONITOR_REPLY_MODEL=deepseek-v4-pro:cloud");
+    expect(envExample).toContain("LLM_USAGE_LOG_PATH=/data/llm-usage.jsonl");
     expect(bootstrap).toContain("HERMES_MONITOR_REPLY_MODEL=deepseek-v4-pro:cloud");
   });
 

@@ -104,7 +104,7 @@ describe("LLM usage tracker", () => {
     });
     expect(aggregate.sourceStatus.find((entry) => entry.agent === "hermes")).toMatchObject({
       status: "not_reported",
-      reason: "Hermes/Ollama responses have not exposed usage counters yet.",
+      reason: "Hermes monitor replies may be templated when OLLAMA_API_KEY is unset; live Hermes agent usage is recorded from post_llm_call traces when provider counters are present.",
     });
   });
 
@@ -290,7 +290,7 @@ describe("LLM usage tracker", () => {
 
     expect(aggregate).toMatchObject({
       status: "not_recorded",
-      message: "No runner has reported LLM usage counters yet. Claude-family counters depend on SDK output; Codex CLI and Hermes/Ollama do not reliably report usage today.",
+      message: "No LLM usage counters have been recorded yet. Sources stay not reported until a real provider or runner emits whitelisted counters.",
     });
     expect(aggregate.sourceStatus.find((entry) => entry.agent === "codex")).toMatchObject({
       status: "not_reported",
