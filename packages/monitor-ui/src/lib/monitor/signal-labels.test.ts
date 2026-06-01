@@ -14,6 +14,8 @@ describe("signal-labels", () => {
     expect(humanizeSignalCode("duplicate_signal"))
       .toBe("Skipped - duplicate of an existing fix");
     expect(humanizeSignalCode("routed_fix")).toBe("Routed fix proposal");
+    expect(humanizeSignalCode("not_auto_fixable"))
+      .toBe("Needs human diagnosis - not a code-agent fix");
   });
 
   test("keeps unknown enum-like codes readable without dropping the raw token", () => {

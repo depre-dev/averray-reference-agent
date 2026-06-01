@@ -45,6 +45,10 @@ describe("decideHealingAction — propose only the safe path; everything else es
     expect(decideHealingAction(signal({ isRollback: true }), LOW, open)).toMatchObject({ action: "escalate", reason: "rollback_operator_confirmed" });
   });
 
+  it("not auto-fixable → escalate before routing a build", () => {
+    expect(decideHealingAction(signal({ autoFixable: false }), LOW, open)).toMatchObject({ action: "escalate", reason: "not_auto_fixable" });
+  });
+
   it("D3 interlock: suspended → escalate only", () => {
     expect(decideHealingAction(signal(), LOW, { suspended: true, halt: false })).toMatchObject({ action: "escalate", reason: "autopilot_suspended" });
   });
@@ -69,11 +73,24 @@ describe("buildFixPrompt / escalation alert", () => {
     expect(p).toContain("Evidence: https://board.example?mission=sweep-1");
     expect(p).toMatch(/do not merge or deploy/i);
   });
+  it("uses a source-specific prompt when the collector has enough evidence", () => {
+    expect(buildFixPrompt(signal({ fixPrompt: "Fix mission m1 with attached evidence." }))).toBe("Fix mission m1 with attached evidence.");
+  });
   it("the escalation alert names the surface + reason", () => {
     const alert = buildHealingEscalationAlert(signal({ isRollback: true }), { action: "escalate", reason: "rollback_operator_confirmed" }, "https://board.example");
     expect(alert.text).toMatch(/rollback/i);
     expect(alert.text).toContain("testbed:sweep-1");
     expect(alert.items[0]?.id).toBe("testbed:sweep-1");
+  });
+  it("the not-auto-fixable escalation says it needs human diagnosis", () => {
+    const alert = buildHealingEscalationAlert(
+      signal({ autoFixable: false, nonAutoFixableReason: "runner_failed" }),
+      { action: "escalate", reason: "not_auto_fixable" },
+      "https://board.example",
+    );
+    expect(alert.text).toContain("not code-agent-fixable");
+    expect(alert.text).toContain("Needs human diagnosis");
+    expect(alert.text).toContain("runner_failed");
   });
 });
 
@@ -155,6 +172,16 @@ describe("runSelfHealingOnce — orchestration (injected deps, no fs/network)", 
     expect(h.proposed).toHaveLength(0);
     expect(h.alerts).toBe(1);
     expect(h.audits[0]).toMatchObject({ action: "escalate", reason: "rollback_operator_confirmed" });
+  });
+
+  it("a non-auto-fixable failure escalates without calling the classifier", async () => {
+    const classify = vi.fn(() => LOW);
+    const h = harness([signal({ autoFixable: false, nonAutoFixableReason: "runner_failed" })], { classify });
+    await runSelfHealingOnce(h.deps);
+    expect(classify).not.toHaveBeenCalled();
+    expect(h.proposed).toHaveLength(0);
+    expect(h.alerts).toBe(1);
+    expect(h.audits[0]).toMatchObject({ action: "escalate", reason: "not_auto_fixable" });
   });
 
   it("dedup: an already-open fix task for the surface → skip (no second proposal)", async () => {

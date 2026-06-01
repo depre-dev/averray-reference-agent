@@ -149,6 +149,7 @@ import {
   testbedMissionCodexFollowupPrompt,
   testbedMissionReportValidationCoaching,
   testbedMissionResultCoaching,
+  testbedMissionSelfHealingDisposition,
   type TestbedMissionRun,
 } from "./monitor-testbed-missions.js";
 import {
@@ -1844,15 +1845,18 @@ async function collectSelfHealingSignals(boardUrl: string): Promise<FailureSigna
       maxAgeHours: routineConfig.selfHealing.testbedFailureMaxAgeHours,
     });
     for (const m of missions) {
+      const disposition = testbedMissionSelfHealingDisposition(m);
       signals.push({
         // Stable per-target surface (NOT the per-run mission id), so re-runs of
         // the same failing mission dedup/cooldown instead of swarming the queue.
         surface: testbedSurfaceKey(m.targetUrl),
         source: "testbed_mission",
-        summary: `Testbed mission for ${m.targetUrl} failed: ${m.failureReason ?? m.statusReason ?? "no reason recorded"}`,
+        summary: disposition.summary,
         evidence: `${boardUrl}?mission=${encodeURIComponent(m.id)}`,
-        ...(fixRepo ? { repo: fixRepo } : {}),
+        ...(disposition.autoFixable && fixRepo ? { repo: fixRepo } : {}),
         area: `testbed ${m.targetUrl}`,
+        ...(disposition.autoFixable ? {} : { autoFixable: false, nonAutoFixableReason: disposition.reason }),
+        ...(disposition.fixPrompt ? { fixPrompt: disposition.fixPrompt } : {}),
       });
     }
   } catch (error) {
