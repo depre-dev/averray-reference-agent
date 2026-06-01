@@ -25,6 +25,10 @@ export type CardRouterProps = {
   onApproveMerge?: (card: BoardCard) => void;
   /** Re-run a failed tester mission. */
   onRerunMission?: (card: BoardCard, freshness: "fresh" | "memory") => void;
+  /** Accept/acknowledge a failed tester mission. */
+  onAcceptMissionFailure?: (card: BoardCard) => void;
+  /** File a GitHub issue for a failed tester mission. */
+  onOpenMissionIssue?: (card: BoardCard) => void;
   /** "Keep watching" on the archive hint — cancel this card's auto-archive. */
   onKeepWatching?: (card: BoardCard) => void;
 };
@@ -38,6 +42,8 @@ export function CardRouter({
   onApproveMission,
   onApproveMerge,
   onRerunMission,
+  onAcceptMissionFailure,
+  onOpenMissionIssue,
   onKeepWatching,
 }: CardRouterProps) {
   const renderer = pickRenderer(card);
@@ -65,6 +71,8 @@ export function CardRouter({
       onApproveMission={onApproveMission}
       onApproveMerge={onApproveMerge}
       onRerunMission={onRerunMission}
+      onAcceptMissionFailure={onAcceptMissionFailure}
+      onOpenMissionIssue={onOpenMissionIssue}
       onKeepWatching={onKeepWatching}
     />
   );

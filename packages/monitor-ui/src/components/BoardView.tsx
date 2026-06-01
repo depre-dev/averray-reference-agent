@@ -110,6 +110,10 @@ export interface BoardViewProps {
   onSnoozeCard?: (card: BoardCard, untilMs: number) => void;
   /** Re-run a mission (drawer footer) via POST /monitor/testbed-missions. */
   onRerunMission?: (targetUrl: string, freshness: "fresh" | "memory") => void;
+  /** Accept/acknowledge a failed mission via POST /monitor/testbed-missions/:id/accept-failure. */
+  onAcceptMissionFailure?: (id: string) => void;
+  /** File a GitHub issue for a failed mission via POST /monitor/testbed-missions/:id/open-issue. */
+  onOpenMissionIssue?: (id: string) => void;
   collaboration?: UseCollaborationOptions;
   onMute?: (untilMs: number) => void;
   onUnmute?: () => void;
@@ -141,6 +145,8 @@ export function BoardView({
   onDismissCard: persistDismissCard,
   onSnoozeCard: persistSnoozeCard,
   onRerunMission,
+  onAcceptMissionFailure,
+  onOpenMissionIssue,
   collaboration,
   onMute,
   onUnmute,
@@ -295,6 +301,8 @@ export function BoardView({
         const target = c.type === "mission" ? c.mission?.target : undefined;
         if (target) onRerunMission(target, freshness);
       } : undefined}
+      onAcceptMissionFailure={onAcceptMissionFailure ? (c) => onAcceptMissionFailure(c.correlationId ?? c.id) : undefined}
+      onOpenMissionIssue={onOpenMissionIssue ? (c) => onOpenMissionIssue(c.correlationId ?? c.id) : undefined}
       onKeepWatching={(c) => onKeepWatchingCard(c.id)}
     />
   );

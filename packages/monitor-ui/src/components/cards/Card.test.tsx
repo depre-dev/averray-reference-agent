@@ -412,7 +412,7 @@ describe("Card — requested tester mission approve (T6)", () => {
     expect(onApproveMission.mock.calls[0]?.[0]?.id).toBe("testbed-mission-requested-1");
   });
 
-  test("failed mission triage exposes exactly one Re-run primary", () => {
+  test("failed mission triage exposes operator Re-run, Accept failure, and Open issue actions", () => {
     const failedMission = {
       ...requestedMission,
       id: "testbed-mission-failed-1",
@@ -433,13 +433,26 @@ describe("Card — requested tester mission approve (T6)", () => {
       },
     } as unknown as BoardCard;
     const onRerunMission = vi.fn();
-    const { getByRole, getByText, queryByRole } = render(<Card card={failedMission} onRerunMission={onRerunMission} />);
+    const onAcceptMissionFailure = vi.fn();
+    const onOpenMissionIssue = vi.fn();
+    const { getByRole, getByText, queryByRole } = render(
+      <Card
+        card={failedMission}
+        onRerunMission={onRerunMission}
+        onAcceptMissionFailure={onAcceptMissionFailure}
+        onOpenMissionIssue={onOpenMissionIssue}
+      />,
+    );
     expect(getByRole("button", { name: "Re-run" })).toBeTruthy();
+    expect(getByRole("button", { name: "Accept failure" })).toBeTruthy();
+    expect(getByRole("button", { name: "Open issue" })).toBeTruthy();
     expect(queryByRole("button", { name: /Approve & dispatch/ })).toBeNull();
     fireEvent.click(getByRole("button", { name: "Re-run" }));
     expect(getByText(/Re-run as a fresh mission\?/)).toBeTruthy();
     fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
     expect(onRerunMission).toHaveBeenCalledWith(failedMission, "fresh");
+    expect(onAcceptMissionFailure).not.toHaveBeenCalled();
+    expect(onOpenMissionIssue).not.toHaveBeenCalled();
   });
 });
 

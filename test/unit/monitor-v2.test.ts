@@ -1858,6 +1858,55 @@ describe("synthesizeTaskCards (O3 — surface queued tasks)", () => {
       waitingOn: { actor: "operator", tone: "warn" },
     });
   });
+
+  it("surfaces a failed testbed mission as operator-waiting triage, not agent work", () => {
+    const missionId = "testbed-mission-surface-sweep-1";
+    const snap = buildV2BoardSnapshot(
+      {
+        active: [],
+        recent: [],
+        testbedMissions: [{
+          schemaVersion: 1,
+          kind: "testbed_mission_run",
+          id: missionId,
+          status: "failed",
+          title: "Surface sweep (T1)",
+          targetUrl: "https://averray.com/",
+          goal: "Sweep the public surface.",
+          agentName: "Hermes",
+          freshMemory: true,
+          allowTestMutations: false,
+          createdAt: "2026-06-01T10:00:00.000Z",
+          updatedAt: "2026-06-01T10:05:00.000Z",
+          failedAt: "2026-06-01T10:05:00.000Z",
+          statusReason: "Browser-agent report returned fail.",
+          failureReason: "Browser-agent report returned fail.",
+          result: {
+            verdict: "fail",
+            confidence: 0.4,
+            stoppedBeforeMutation: true,
+            blockers: ["primary action unclear"],
+            confusingMoments: [],
+            evidence: [],
+            scores: {},
+            recommendations: ["Fix the visible call to action, then rerun the mission."],
+          },
+        }],
+        codexTasks: { items: [] },
+      },
+      { repo: "depre-dev/averray-reference-agent", now: () => new Date("2026-06-01T10:06:00.000Z") },
+    );
+
+    expect(snap.cards).toHaveLength(1);
+    expect(snap.cards[0]).toMatchObject({
+      lane: "needs-attention",
+      type: "mission",
+      missionStatus: "failed",
+      waitingOn: { actor: "operator", tone: "warn" },
+      isAction: true,
+    });
+    expect(snap.cards.some((card) => card.type === "task")).toBe(false);
+  });
 });
 
 describe("enrichBoardCard — task status", () => {

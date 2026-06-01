@@ -153,7 +153,7 @@ function classifyItem(
     if (failed) {
       return {
         lane: "Needs Attention",
-        owner: "Hermes",
+        owner: "Operator",
         verdict: "mission failed",
         next: "inspect the browser-agent report and decide whether the page or the mission prompt needs the next fix",
       };

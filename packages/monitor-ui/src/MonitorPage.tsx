@@ -60,6 +60,10 @@ export interface MonitorPageProps {
   onApproveMission?: (id: string) => void;
   /** Override the drawer mission re-run (defaults to POST /monitor/testbed-missions). */
   onRerunMission?: (targetUrl: string, freshness: "fresh" | "memory") => void;
+  /** Override failed-mission acknowledgement (defaults to POST /monitor/testbed-missions/:id/accept-failure). */
+  onAcceptMissionFailure?: (id: string) => void;
+  /** Override failed-mission issue creation (defaults to POST /monitor/testbed-missions/:id/open-issue). */
+  onOpenMissionIssue?: (id: string) => void;
   /** Override the co-pilot collaboration wiring (defaults to live polling). */
   collaboration?: UseCollaborationOptions;
   /** Override the action-alert wiring (audio/notification/storage) for tests. */
@@ -81,6 +85,8 @@ export function MonitorPage({
   onSnoozeCard = defaultSnoozeCard,
   onApproveMission = defaultApproveMission,
   onRerunMission = defaultRerunMission,
+  onAcceptMissionFailure = defaultAcceptMissionFailure,
+  onOpenMissionIssue = defaultOpenMissionIssue,
   collaboration = {},
   alerts,
   onAlertMute = defaultPostAlertMute,
@@ -128,6 +134,8 @@ export function MonitorPage({
         onSnoozeCard={onSnoozeCard}
         onApproveMission={onApproveMission}
         onRerunMission={onRerunMission}
+        onAcceptMissionFailure={onAcceptMissionFailure}
+        onOpenMissionIssue={onOpenMissionIssue}
         collaboration={collaboration}
         onMute={muteEverywhere}
         onUnmute={unmuteEverywhere}
@@ -259,6 +267,24 @@ function monitorCardActionBase(card: BoardCard): string | undefined {
  */
 function defaultApproveMission(id: string): void {
   void fetch(`${MISSIONS_URL}/${encodeURIComponent(id)}/approve`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+  }).catch(() => {
+    /* surfaced via the board feed / degraded state, not thrown here */
+  });
+}
+
+function defaultAcceptMissionFailure(id: string): void {
+  void fetch(`${MISSIONS_URL}/${encodeURIComponent(id)}/accept-failure`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+  }).catch(() => {
+    /* surfaced via the board feed / degraded state, not thrown here */
+  });
+}
+
+function defaultOpenMissionIssue(id: string): void {
+  void fetch(`${MISSIONS_URL}/${encodeURIComponent(id)}/open-issue`, {
     method: "POST",
     headers: { "content-type": "application/json" },
   }).catch(() => {
