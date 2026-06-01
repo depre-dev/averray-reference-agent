@@ -24,7 +24,8 @@ describe("LLM usage tracker", () => {
           usage: {
             input_tokens: 100,
             output_tokens: 25,
-            cost_usd: 0.0123456,
+            cache_creation_input_tokens: 10,
+            cache_read_input_tokens: 5,
           },
         },
       }, { path });
@@ -36,7 +37,7 @@ describe("LLM usage tracker", () => {
         taskId: "task-1",
         inputTokens: 100,
         outputTokens: 25,
-        costUsd: 0.012346,
+        cacheTokens: 15,
         ts: "2026-05-31T12:00:00.000Z",
       });
       expect(JSON.parse((await readFile(path, "utf8")).trim())).toEqual(event);
@@ -45,7 +46,7 @@ describe("LLM usage tracker", () => {
     }
   });
 
-  it("aggregates per agent/model/day and leaves bundled cost as not_recorded", () => {
+  it("aggregates per agent/model/day with call counts, cache tokens, and last-active time", () => {
     const aggregate = aggregateLlmUsage([
       {
         agent: "codex",
@@ -61,7 +62,7 @@ describe("LLM usage tracker", () => {
         taskId: "claude-task",
         inputTokens: 20,
         outputTokens: 7,
-        costUsd: 0.02,
+        cacheTokens: 4,
         ts: "2026-05-31T02:00:00.000Z",
       },
       {
@@ -70,7 +71,6 @@ describe("LLM usage tracker", () => {
         taskId: "claude-task-2",
         inputTokens: 3,
         outputTokens: 2,
-        costUsd: 0.01,
         ts: "2026-06-01T02:00:00.000Z",
       },
     ]);
@@ -79,21 +79,25 @@ describe("LLM usage tracker", () => {
       status: "recorded",
       inputTokens: 33,
       outputTokens: 14,
-      totalTokens: 47,
-      costUsd: 0.03,
-      costStatus: "recorded",
+      cacheTokens: 4,
+      totalTokens: 51,
+      costUsd: null,
+      costStatus: "not_recorded",
       runs: 3,
+      lastActiveAt: "2026-06-01T02:00:00.000Z",
     });
     expect(aggregate.byModel.find((entry) => entry.agent === "codex")).toMatchObject({
       model: "gpt-5-codex",
       totalTokens: 15,
+      runs: 1,
+      lastActiveAt: "2026-05-31T01:00:00.000Z",
       costUsd: null,
       costStatus: "not_recorded",
     });
     expect(aggregate.byDay.map((day) => day.day)).toEqual(["2026-06-01", "2026-05-31"]);
     expect(aggregate.byDay.find((day) => day.day === "2026-05-31")).toMatchObject({
-      totalTokens: 42,
-      costUsd: 0.02,
+      totalTokens: 46,
+      costUsd: null,
     });
     expect(aggregate.sourceStatus.find((entry) => entry.agent === "claude")).toMatchObject({
       status: "recorded",
@@ -104,7 +108,7 @@ describe("LLM usage tracker", () => {
     });
   });
 
-  it("extracts Claude SDK-style message usage and total cost aliases", () => {
+  it("extracts Claude SDK-style message usage and cache token aliases", () => {
     const event = llmUsageEventFromResult({
       agent: "claude",
       taskId: "task-sdk",
@@ -117,8 +121,8 @@ describe("LLM usage tracker", () => {
             usage: {
               input_tokens: 75,
               output_tokens: 18,
+              cache_read_input_tokens: 11,
             },
-            total_cost_usd: 0.0042,
           },
         ],
       },
@@ -130,7 +134,53 @@ describe("LLM usage tracker", () => {
       taskId: "task-sdk",
       inputTokens: 75,
       outputTokens: 18,
-      costUsd: 0.0042,
+      cacheTokens: 11,
+      ts: "2026-05-31T12:00:00.000Z",
+    });
+  });
+
+  it("extracts Ollama response token counts", () => {
+    const event = llmUsageEventFromResult({
+      agent: "hermes",
+      model: "deepseek-v4-pro:cloud",
+      runId: "chat-1",
+      ts: new Date("2026-05-31T12:00:00.000Z"),
+      result: {
+        model: "deepseek-v4-pro:cloud",
+        response: "Watching it.",
+        prompt_eval_count: 44,
+        eval_count: 12,
+      },
+    });
+
+    expect(event).toEqual({
+      agent: "hermes",
+      model: "deepseek-v4-pro:cloud",
+      runId: "chat-1",
+      inputTokens: 44,
+      outputTokens: 12,
+      ts: "2026-05-31T12:00:00.000Z",
+    });
+  });
+
+  it("extracts best-effort token counts from Codex CLI output when present", () => {
+    const event = llmUsageEventFromResult({
+      agent: "codex",
+      model: "gpt-5-codex",
+      taskId: "codex-task",
+      ts: new Date("2026-05-31T12:00:00.000Z"),
+      result: {
+        stdout: "Model: gpt-5-codex\nInput tokens: 1,200\nOutput tokens: 340\n",
+        stderr: "",
+      },
+    });
+
+    expect(event).toEqual({
+      agent: "codex",
+      model: "gpt-5-codex",
+      taskId: "codex-task",
+      inputTokens: 1200,
+      outputTokens: 340,
       ts: "2026-05-31T12:00:00.000Z",
     });
   });
@@ -144,7 +194,7 @@ describe("LLM usage tracker", () => {
     });
     expect(aggregate.sourceStatus.find((entry) => entry.agent === "codex")).toMatchObject({
       status: "not_reported",
-      reason: "Codex usage is not reported by the CLI yet.",
+      reason: "Codex CLI does not report usage.",
     });
   });
 

@@ -392,10 +392,22 @@ body { margin: 0; }
 }
 .hm-llm-usage-total,
 .hm-llm-usage-row,
+.hm-llm-usage-active,
 .hm-llm-usage-empty {
   font-family: var(--font-mono);
   font-size: 11.5px;
   color: var(--hm-muted);
+}
+.hm-llm-usage-active {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 6px;
+  border-top: 1px solid var(--hm-line-soft);
+}
+.hm-llm-usage-active strong {
+  color: var(--hm-ink);
+  text-align: right;
 }
 .hm-llm-usage-grid {
   display: grid;
@@ -404,6 +416,7 @@ body { margin: 0; }
 .hm-llm-usage-row {
   padding-top: 6px;
   border-top: 1px solid var(--hm-line-soft);
+  flex-wrap: wrap;
 }
 .hm-llm-usage-row--muted strong {
   color: var(--hm-muted);

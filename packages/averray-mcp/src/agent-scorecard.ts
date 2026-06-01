@@ -470,6 +470,7 @@ function usageEvents(value: unknown): LlmUsageEvent[] {
       if (!agent || !model || !ts || inputTokens === undefined || outputTokens === undefined) return undefined;
       if (!Number.isInteger(inputTokens) || !Number.isInteger(outputTokens) || inputTokens < 0 || outputTokens < 0) return undefined;
       const costUsd = numberField(event, "costUsd");
+      const cacheTokens = numberField(event, "cacheTokens");
       return {
         agent,
         model,
@@ -477,6 +478,7 @@ function usageEvents(value: unknown): LlmUsageEvent[] {
         ...(stringField(event, "taskId") ? { taskId: stringField(event, "taskId") } : {}),
         inputTokens,
         outputTokens,
+        ...(cacheTokens !== undefined && Number.isInteger(cacheTokens) && cacheTokens >= 0 ? { cacheTokens } : {}),
         ...(costUsd !== undefined ? { costUsd } : {}),
         ts,
       };

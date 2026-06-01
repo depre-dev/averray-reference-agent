@@ -22,6 +22,7 @@
  */
 
 import type { CollaborationMessage } from "./monitor-collab.js";
+import { beginLlmUsageCall, recordLlmUsageFromResult } from "@avg/averray-mcp/llm-usage";
 
 export const HERMES_PERSONA = `You are Hermes, the board orchestrator for the Averray platform.
 
@@ -119,6 +120,11 @@ export interface GenerateHermesReplyOptions {
   timeoutMs?: number;
   /** Injection point so tests don't need to hit the network. */
   fetchFn?: typeof fetch;
+  /** Optional usage identity for durable LLM activity events. */
+  runId?: string;
+  taskId?: string;
+  /** Test/ops override for the durable usage JSONL path. */
+  usageLogPath?: string;
 }
 
 export interface HermesWhyTraceContext {
@@ -170,6 +176,12 @@ export async function generateHermesReply(
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const endLlmUsageCall = beginLlmUsageCall({
+    agent: "hermes",
+    model,
+    ...(options.runId ? { runId: options.runId } : {}),
+    ...(options.taskId ? { taskId: options.taskId } : {}),
+  });
   try {
     const response = await fetchImpl(url, {
       method: "POST",
@@ -182,12 +194,20 @@ export async function generateHermesReply(
     });
     if (!response.ok) return null;
     const json = await response.json().catch(() => null) as unknown;
+    await recordLlmUsageFromResult({
+      agent: "hermes",
+      model,
+      ...(options.runId ? { runId: options.runId } : {}),
+      ...(options.taskId ? { taskId: options.taskId } : {}),
+      result: json,
+    }, options.usageLogPath ? { path: options.usageLogPath } : {}).catch(() => undefined);
     const text = extractReplyText(json);
     return text ? appendHermesWhyTrace(applyHermesMemoryInfluence(text, context), context) : null;
   } catch {
     return null;
   } finally {
     clearTimeout(timer);
+    endLlmUsageCall();
   }
 }
 
@@ -215,6 +235,12 @@ export async function generateHermesBoardNarration(
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const endLlmUsageCall = beginLlmUsageCall({
+    agent: "hermes",
+    model,
+    ...(options.runId ? { runId: options.runId } : {}),
+    ...(options.taskId ? { taskId: options.taskId } : {}),
+  });
   try {
     const response = await fetchImpl(url, {
       method: "POST",
@@ -227,12 +253,20 @@ export async function generateHermesBoardNarration(
     });
     if (!response.ok) return null;
     const json = await response.json().catch(() => null) as unknown;
+    await recordLlmUsageFromResult({
+      agent: "hermes",
+      model,
+      ...(options.runId ? { runId: options.runId } : {}),
+      ...(options.taskId ? { taskId: options.taskId } : {}),
+      result: json,
+    }, options.usageLogPath ? { path: options.usageLogPath } : {}).catch(() => undefined);
     const text = extractReplyText(json);
     return text ? appendHermesWhyTrace(applyHermesMemoryInfluence(text, context), context) : null;
   } catch {
     return null;
   } finally {
     clearTimeout(timer);
+    endLlmUsageCall();
   }
 }
 

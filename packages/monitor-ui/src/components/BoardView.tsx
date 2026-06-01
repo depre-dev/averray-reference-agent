@@ -382,10 +382,11 @@ function formatClock(iso: string | undefined): string {
 
 function LlmUsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
   const latestDay = usage?.byDay?.[0];
-  const models = latestDay?.byModel?.slice(0, 4) ?? [];
+  const models = (usage?.byModel?.length ? usage.byModel : latestDay?.byModel ?? []).slice(0, 5);
   const missingSources = (usage?.sourceStatus ?? [])
     .filter((entry) => entry.status === "not_reported")
-    .slice(0, Math.max(0, 4 - models.length));
+    .slice(0, Math.max(0, 5 - models.length));
+  const activeCalls = usage?.activeCalls ?? [];
   const hasRows = models.length > 0 || missingSources.length > 0;
   const emptyMessage = usage?.message
     ?? "No runner has reported LLM usage counters yet. Claude/test-writer counters depend on SDK output; Codex CLI and Hermes/Ollama do not reliably report usage today.";
@@ -394,11 +395,19 @@ function LlmUsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
       <div className="hm-llm-usage-head">
         <div>
           <span className="hm-kicker">LLM usage</span>
-          <strong>{latestDay?.day ?? "usage not reported"}</strong>
+          <strong>{usage?.status === "recorded" ? `${formatNumber(usage.runs)} calls in board window` : "usage not reported"}</strong>
         </div>
         <span className="hm-llm-usage-total">
-          {usage?.status === "recorded" ? `${formatNumber(latestDay?.totalTokens ?? 0)} tokens` : "not reported"}
+          {usage?.status === "recorded" ? `${formatCompactNumber(usage.totalTokens)} tokens total` : "not reported"}
         </span>
+      </div>
+      <div className="hm-llm-usage-active">
+        <span>What's running now</span>
+        {activeCalls.length > 0 ? (
+          <strong>{activeCalls.map((call) => `${call.agent} · ${call.model}`).join(" · ")}</strong>
+        ) : (
+          <strong>No in-flight LLM calls</strong>
+        )}
       </div>
       <div className="hm-llm-usage-grid">
         {hasRows ? (
@@ -406,11 +415,13 @@ function LlmUsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
             {models.map((entry) => (
               <div className="hm-llm-usage-row" key={`${entry.agent}:${entry.model}`}>
                 <span>
-                  <strong>{entry.agent}</strong>
-                  <small>{entry.model}</small>
+                  <strong>{entry.agent} · {entry.model}</strong>
+                  <small>Last active {formatRelativeTime(entry.lastActiveAt)}</small>
                 </span>
-                <span>{formatNumber(entry.totalTokens)} tok</span>
-                <span>{entry.costStatus === "recorded" && entry.costUsd !== null ? `$${entry.costUsd.toFixed(4)}` : "cost not reported"}</span>
+                <span>{formatNumber(entry.runs)} calls</span>
+                <span>{formatCompactNumber(entry.inputTokens)} in</span>
+                <span>{formatCompactNumber(entry.outputTokens)} out</span>
+                <span>{formatCompactNumber(entry.totalTokens)} total</span>
               </div>
             ))}
             {missingSources.map((entry) => (
@@ -420,7 +431,8 @@ function LlmUsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
                   <small>{entry.reason ?? `${entry.agent} usage counters have not arrived.`}</small>
                 </span>
                 <span>not reported</span>
-                <span>no live metric</span>
+                <span>0 calls</span>
+                <span>0 tokens</span>
               </div>
             ))}
           </>
@@ -434,4 +446,22 @@ function LlmUsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat("en-US").format(value);
+}
+
+function formatCompactNumber(value: number): string {
+  return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
+function formatRelativeTime(iso: string | null | undefined): string {
+  if (!iso) return "last active unknown";
+  const time = Date.parse(iso);
+  if (!Number.isFinite(time)) return "last active unknown";
+  const seconds = Math.max(0, Math.round((Date.now() - time) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days}d ago`;
 }
