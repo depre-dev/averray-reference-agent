@@ -19,8 +19,9 @@
 //   - archiveHint = true → "archive in 4h?" tail line
 
 import { useState } from "react";
-import type { BoardCard, CardChecks, WaitingOn, RiskTag, AgentType } from "../../lib/monitor/card-types.js";
+import type { BoardCard, CardChecks, WaitingOn, RiskTag, AgentType, HermesDecisionRecord } from "../../lib/monitor/card-types.js";
 import { formatFreshness, freshnessTier } from "../../lib/monitor/urgency.js";
+import { laneFor } from "../../lib/monitor/lane-rules.js";
 import { humanizedSignalParts } from "../../lib/monitor/signal-labels.js";
 import { relatedPrForCard } from "../../lib/monitor/collaboration.js";
 import { ChecksBar } from "./ChecksBar.js";
@@ -133,6 +134,17 @@ export function Card({
             <HumanizedText text={card.summary} />
           </span>
         </div>
+      ) : null}
+
+      {/* P1-2: hoist the decision onto operator-facing cards. On the two
+          lanes where the operator decides (needs-attention, codex-needed),
+          surface Hermes's outcome summary + top reason in the body so they
+          read *what they're deciding* without opening the drawer. The full
+          record (all reasons, safety, changed) still lives in the drawer's
+          "Why Hermes did this". Renders nothing when there's no decision
+          record — never a fabricated rationale. */}
+      {!isClosed && card.decisionRecord && isDecisionLane(card) ? (
+        <CardDecisionLine record={card.decisionRecord} />
       ) : null}
 
       {!isClosed && card.reviewRequests?.some((request) => request.status === "requested") ? (
@@ -326,6 +338,39 @@ function HumanizedText({ text }: { text: string | undefined }) {
         )
       ))}
     </>
+  );
+}
+
+// ── Decision hoist (P1-2) ───────────────────────────────────────────
+// The operator decides on cards in the needs-attention and codex-needed
+// lanes. We use laneFor() (the authoritative classifier) rather than
+// reading card.lane directly, per lane-rules.ts.
+
+function isDecisionLane(card: BoardCard): boolean {
+  const lane = laneFor(card);
+  return lane === "needs-attention" || lane === "codex-needed";
+}
+
+function CardDecisionLine({ record }: { record: HermesDecisionRecord }) {
+  const summary = record.outcome.summary?.trim();
+  const topReason = record.reasons.find((reason) => reason.trim().length > 0)?.trim();
+  // Nothing meaningful to hoist → render nothing rather than an empty box.
+  if (!summary && !topReason) return null;
+  return (
+    <div className="hm-card-decision" aria-label="Hermes decision">
+      <span className="hm-card-decision-label">Hermes decided</span>
+      {summary ? (
+        <span className="hm-card-decision-summary">
+          <HumanizedText text={summary} />
+        </span>
+      ) : null}
+      {topReason ? (
+        <span className="hm-card-decision-reason">
+          <span className="hm-card-decision-reason-dot" aria-hidden />
+          <HumanizedText text={topReason} />
+        </span>
+      ) : null}
+    </div>
   );
 }
 
