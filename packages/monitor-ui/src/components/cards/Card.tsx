@@ -25,6 +25,7 @@ import { laneFor } from "../../lib/monitor/lane-rules.js";
 import { humanizedSignalParts } from "../../lib/monitor/signal-labels.js";
 import { relatedPrForCard } from "../../lib/monitor/collaboration.js";
 import { ChecksBar } from "./ChecksBar.js";
+import { AgentDiscussion } from "./AgentDiscussion.js";
 
 export type CardProps = {
   card: BoardCard;
@@ -150,6 +151,8 @@ export function Card({
       {!isClosed && card.reviewRequests?.some((request) => request.status === "requested") ? (
         <ReviewRequestedLine card={card} />
       ) : null}
+
+      {!isClosed ? <AgentDiscussion messages={card.discussion} compact /> : null}
 
       {isClosed && verdictText ? (
         <div className="hm-card-meta">
