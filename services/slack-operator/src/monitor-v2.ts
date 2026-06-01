@@ -33,7 +33,7 @@ import {
   testbedMissionStructuredReport,
   type TestbedMissionRun,
 } from "./monitor-testbed-missions.js";
-import { testbedSurfaceKey } from "./self-healing.js";
+import { testbedSurfaceKey, surfaceLabel } from "./self-healing.js";
 import {
   isHermesDecisionRecord,
   type HermesDecisionRecord,
@@ -514,6 +514,19 @@ function asArray(value: unknown): unknown[] {
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+// Self-healing task titles embed the namespaced surface key
+// ("Self-healing fix: testbed:testbed-mission-7"). Tasks persist their title
+// at creation time, so already-stored tasks keep the raw, doubled-looking
+// form. Strip the internal "<namespace>:" at display time so every card —
+// old or new — reads cleanly, matching how new proposals are now titled
+// (surfaceLabel in self-healing.ts).
+function humanizeTaskTitle(title: string): string {
+  return title.replace(
+    /^(Self-healing fix:\s*)(\S+)/,
+    (_match, prefix: string, surface: string) => `${prefix}${surfaceLabel(surface)}`,
+  );
 }
 
 function asFiniteNumber(value: unknown): number | undefined {
@@ -1304,7 +1317,7 @@ export function synthesizeTaskCards(
       lane: health.lane,
       type: "task",
       agentType: agent,
-      title: asString(task.title) ?? `${agent} task`,
+      title: humanizeTaskTitle(asString(task.title) ?? `${agent} task`),
       summary,
       repo: asString(task.repo) ?? "",
       freshness: health.freshness,

@@ -1170,6 +1170,28 @@ describe("synthesizeTaskCards (O3 — surface queued tasks)", () => {
     });
   });
 
+  it("humanizes persisted self-healing titles so the doubled surface namespace doesn't leak", () => {
+    const [card] = synthesizeTaskCards(
+      {
+        codexTasks: {
+          items: [{
+            id: "self-heal-x1",
+            status: "proposed",
+            agent: "claude",
+            repo: "a/b",
+            prompt: "fix it",
+            // Stored by an older build: "testbed:" namespace doubled with the
+            // "testbed-mission-…" key. The board must present it cleanly.
+            title: "Self-healing fix: testbed:testbed-mission-mpmo4ff2-1",
+          }],
+        },
+      },
+      undefined,
+    );
+    expect(card?.title).toBe("Self-healing fix: testbed-mission-mpmo4ff2-1");
+    expect(card?.title).not.toContain("testbed:testbed");
+  });
+
   it("promotes failed greenfield tasks to needs-attention with retry context", () => {
     const [card] = synthesizeTaskCards(
       {
