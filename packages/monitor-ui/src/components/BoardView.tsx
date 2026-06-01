@@ -313,6 +313,7 @@ export function BoardView({
           onCreateTask={onCreateTask}
           backlogSuggestions={backlogSuggestions}
           boardCards={cards}
+          boardBanner={state.banner}
           focusedCard={scopeCard}
           onCardClick={onCardClick}
           collaboration={collaboration}

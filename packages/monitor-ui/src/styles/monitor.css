@@ -1121,6 +1121,87 @@ body { margin: 0; }
 .hm-hermes-stream::-webkit-scrollbar { width: 6px; }
 .hm-hermes-stream::-webkit-scrollbar-thumb { background: var(--hm-line); border-radius: 999px; }
 
+.hm-activity {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--hm-line-soft);
+  background: linear-gradient(180deg, var(--hm-paper-2), var(--hm-paper));
+}
+.hm-activity-head {
+  padding: 12px 16px 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.hm-activity-head strong {
+  font-family: var(--font-display);
+  font-size: 12px;
+  color: var(--hm-ink);
+}
+.hm-activity-stream {
+  max-height: min(44vh, 520px);
+  padding-top: 10px;
+}
+.hm-activity-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 9px 1fr auto;
+  gap: 9px;
+  align-items: start;
+  padding: 10px 11px;
+  border-radius: var(--hm-radius);
+  border: 1px solid var(--hm-line);
+  background: var(--hm-paper);
+  color: var(--hm-ink-soft);
+  font: inherit;
+  text-align: left;
+}
+button.hm-activity-row {
+  cursor: pointer;
+}
+button.hm-activity-row:hover {
+  border-color: var(--hm-line-strong);
+  background: var(--hm-paper-3);
+}
+.hm-activity-row strong {
+  display: block;
+  color: var(--hm-ink);
+  font-size: 12.5px;
+  line-height: 1.45;
+  font-weight: 600;
+}
+.hm-activity-row small {
+  display: block;
+  margin-top: 4px;
+  color: var(--hm-muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+.hm-activity-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  margin-top: 5px;
+  background: var(--hm-muted-soft);
+}
+.hm-activity-row--info .hm-activity-dot { background: var(--hm-hermes); }
+.hm-activity-row--action .hm-activity-dot { background: var(--hm-amber); }
+.hm-activity-row--success .hm-activity-dot { background: var(--hm-sage); }
+.hm-activity-row--warning .hm-activity-dot { background: var(--hm-clay); }
+.hm-activity-link {
+  justify-self: end;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--hm-muted);
+}
+
 /* Hermes turn (card-stream) */
 .hm-turn {
   display: grid;
