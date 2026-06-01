@@ -564,6 +564,28 @@ describe("enrichBoardCard", () => {
     ]);
   });
 
+  it("marks a card failed-fetch when the GitHub source read reported a real error", () => {
+    const card = enrichBoardCard(base(), slim(), {
+      summary: {
+        githubLive: {
+          fetchError: {
+            code: "404",
+            message: "GitHub returned 404 reading /pulls/555",
+            lastGoodAt: "2026-05-31T12:00:00Z",
+          },
+        },
+      },
+    });
+
+    expect(card.state).toBe("failed-fetch");
+    expect(card.sourceFailure).toEqual({
+      source: "github",
+      code: "404",
+      message: "GitHub returned 404 reading /pulls/555",
+      lastGoodAt: "2026-05-31T12:00:00Z",
+    });
+  });
+
   it("does NOT add checks / files to done cards (compressed layout)", () => {
     const card = enrichBoardCard(base({ type: "done", lane: "done" }), slim({ lane: "Done" }), {
       summary: {
@@ -614,11 +636,18 @@ describe("enrichBoardCard", () => {
 
   it("falls back to completionSummary for output and marks a stopped runner offline", () => {
     const card = enrichBoardCard(base({ type: "task", lane: "codex-needed" }), slim({ lane: "Codex Needed" }), {
-      codexTask: { id: "task-2", prompt: "p", completionSummary: "done summary" },
-      runner: { status: "disabled", updatedAt: "2026-05-28T12:00:00Z" },
+      codexTask: { id: "task-2", status: "approved", prompt: "p", completionSummary: "done summary" },
+      runner: { status: "disabled", updatedAt: "2026-05-28T12:00:00Z", message: "runner disabled by operator" },
     });
     expect(card.output).toBe("done summary");
     expect(card.runnerHeartbeat).toEqual({ lastSeen: "2026-05-28T12:00:00Z", online: false });
+    expect(card.state).toBe("source-offline");
+    expect(card.sourceFailure).toEqual({
+      source: "runner",
+      code: "ERROR",
+      message: "runner disabled by operator",
+      lastGoodAt: "2026-05-28T12:00:00Z",
+    });
   });
 
   it("is a no-op when no enrichment context is present", () => {
@@ -954,8 +983,8 @@ describe("mapMissionReport", () => {
     expect(m.confidence).toBe(0.81);
     expect(m.seed).toBe("fresh · no memory");
     expect(m.path).toEqual([
-      { n: 1, status: "ok", desc: "Loaded onboarding page", lat: "" },
-      { n: 2, status: "ok", desc: "Clicked Connect wallet", lat: "" },
+      { n: 1, status: "ok", desc: "Loaded onboarding page" },
+      { n: 2, status: "ok", desc: "Clicked Connect wallet" },
     ]);
     // blockers then confusing moments, as plain heads
     expect(m.blockers.map((b) => b.head)).toEqual([
@@ -980,6 +1009,41 @@ describe("mapMissionReport", () => {
     const m = mapMissionReport(run)!;
     expect(m.runs).toBeUndefined();
     expect(m.latency).toBeUndefined();
+    expect(m.path[0]).not.toHaveProperty("lat");
+    expect(m.blockers[0]).not.toHaveProperty("body");
+  });
+
+  it("maps real mission step latencies, blocker body, run count, and total latency when reported", () => {
+    const m = mapMissionReport({
+      ...run,
+      result: {
+        verdict: "partial",
+        confidence: 0.81,
+        scores: { success: 4 },
+        blockers: [{ head: "Sign-message modal latency", body: "The modal stayed pending for 4.2s." }],
+        confusingMoments: [],
+        mutationBoundaryNotes: ["No transactions submitted"],
+        stoppedBeforeMutation: true,
+        completedPath: [
+          { desc: "Loaded onboarding page", latencyMs: 180 },
+          { desc: "Clicked Connect wallet", durationMs: 4200 },
+        ],
+        recommendations: [],
+        evidence: ["trace: browser-trace"],
+        runs: 2,
+        durationMs: 4380,
+      },
+    })!;
+
+    expect(m.path).toEqual([
+      { n: 1, status: "ok", desc: "Loaded onboarding page", lat: "180ms" },
+      { n: 2, status: "ok", desc: "Clicked Connect wallet", lat: "4.2s" },
+    ]);
+    expect(m.blockers).toEqual([
+      { head: "Sign-message modal latency", body: "The modal stayed pending for 4.2s." },
+    ]);
+    expect(m.runs).toBe(2);
+    expect(m.latency).toBe("4.38s");
   });
 
   it("returns undefined when the run has no result yet (mission still running)", () => {
@@ -1135,7 +1199,14 @@ describe("synthesizeTaskCards (O3 — surface queued tasks)", () => {
 
     expect(card).toMatchObject({
       lane: "needs-attention",
+      state: "source-offline",
       agentType: "claude",
+      sourceFailure: {
+        source: "runner",
+        code: "MISCONFIGURED",
+        message: "runner is misconfigured",
+        lastGoodAt: "2026-05-31T11:59:50.000Z",
+      },
       riskSignals: [
         {
           severity: "high",
