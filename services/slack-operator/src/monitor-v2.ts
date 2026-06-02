@@ -208,6 +208,11 @@ export interface CardMissionReport {
   /** 0..1 */
   confidence: number;
   target: string;
+  /** What the mission was asked to test (run.goal) — the operator's "Scope". */
+  goal?: string;
+  /** The agent's "what I tried" trace (newline-separated), pulled out of the
+   *  evidence list so it reads as a narrative rather than a buried trace row. */
+  narrative?: string;
   seed: string;
   path: CardMissionStep[];
   blockers: CardMissionBlocker[];
@@ -1222,6 +1227,9 @@ function isReviewPanelReviewer(value: CardReviewRequest["reviewer"]): value is R
 
 const EVIDENCE_KINDS = new Set(["screenshot", "trace", "console", "video"]);
 
+/** Matches the agent-narrative evidence entry ("what_i_tried: …" / "what i tried: …"). */
+const MISSION_NARRATIVE_RE = /^what[_ ]i[_ ]tried\s*:\s*/i;
+
 /** Parse one structured-report evidence string ("type: detail") into the UI shape. */
 function mapMissionEvidence(raw: string): CardMissionEvidence {
   const match = /^(\w+):\s*(.+)$/.exec(raw.trim());
@@ -1379,15 +1387,27 @@ export function mapMissionReport(run: Record<string, unknown>): CardMissionRepor
   const runs = missionRuns(source);
   const latency = missionLatency(source);
 
+  // The agent's "what I tried" trace is serialized into evidence as a
+  // `what_i_tried: <lines>` entry. Lift it out so it renders as a readable
+  // narrative instead of a buried trace row, and drop it from the evidence list.
+  const narrativeEntry = report.evidence.find((e) => MISSION_NARRATIVE_RE.test(e.trim()));
+  const narrative = narrativeEntry
+    ? narrativeEntry.trim().replace(MISSION_NARRATIVE_RE, "").trim()
+    : undefined;
+  const evidenceForUi = report.evidence.filter((e) => !MISSION_NARRATIVE_RE.test(e.trim()));
+  const goal = asString(run.goal);
+
   return {
     verdict,
     verdictTone,
     confidence: report.confidence,
     target: asString(run.targetUrl) ?? "",
+    ...(goal ? { goal } : {}),
+    ...(narrative ? { narrative } : {}),
     seed: run.freshMemory === false ? "warm memory" : "fresh · no memory",
     path,
     blockers,
-    evidence: report.evidence.map(mapMissionEvidence),
+    evidence: evidenceForUi.map(mapMissionEvidence),
     mutationBoundary: notes ? `${boundaryBase} ${notes}` : boundaryBase,
     recommendations: report.recommendations,
     ...(runs !== undefined ? { runs } : {}),

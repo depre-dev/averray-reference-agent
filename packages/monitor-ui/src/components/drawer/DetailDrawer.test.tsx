@@ -277,6 +277,60 @@ describe("DetailDrawer — variants", () => {
     // no invented attempt count / score row
     expect(queryByText(/run #/)).toBeNull();
     expect(queryByText(/out of 10/)).toBeNull();
+    // a thin report without goal/narrative shows NEITHER section (no padding)
+    expect(queryByText("Scope")).toBeNull();
+    expect(queryByText("What the agent did")).toBeNull();
+  });
+
+  test("mission drawer surfaces scope (goal) + the agent narrative + scored per-step detail", () => {
+    const card = {
+      id: "mission gold-path-12",
+      lane: "hermes-checking",
+      type: "mission",
+      agentType: "hermes",
+      title: "Gold path on app.averray.com",
+      summary: "agent report posted",
+      repo: "depre-dev/site",
+      freshness: 4,
+      state: "fresh",
+      risk: [],
+      waitingOn: { actor: "agent", tone: "info" },
+      mission: {
+        verdict: "OK",
+        verdictTone: "ok",
+        confidence: 0.9,
+        target: "https://app.averray.com/overview",
+        goal: "Complete the claim → submit → verify gold path as a fresh agent.",
+        narrative: "Opened a clean browser context.\nSigned in through the local signer sidecar.\nClaimed task and submitted the receipt.",
+        seed: "fresh · no memory",
+        path: [
+          { n: 1, status: "ok", desc: "Loaded overview", lat: "1.2s" },
+          { n: 2, status: "ok", desc: "Claimed task" },
+        ],
+        blockers: [],
+        evidence: [],
+        mutationBoundary: "Read-only mission — the agent stopped before any mutation.",
+        recommendations: ["Add a confirmation toast after submit"],
+        successScore: 9,
+        clarityScore: 8,
+        latencyScore: 7,
+      },
+    } as unknown as BoardCard;
+    const { getByText } = render(
+      <DetailDrawer card={card} cards={[{ id: card.id }]} onClose={noop} onNavigate={noop} />,
+    );
+    // Scope (goal) leads.
+    expect(getByText("Scope")).toBeTruthy();
+    expect(getByText(/Complete the claim → submit → verify/)).toBeTruthy();
+    // The agent narrative renders as its own readable section, one line per step.
+    expect(getByText("What the agent did")).toBeTruthy();
+    expect(getByText("Signed in through the local signer sidecar.")).toBeTruthy();
+    // Scores render for a scored run.
+    expect(getByText(/out of 10/)).toBeTruthy();
+    // Per-step detail + latency, not just "PASS".
+    expect(getByText("Loaded overview")).toBeTruthy();
+    expect(getByText("1.2s")).toBeTruthy();
+    expect(getByText("Add a confirmation toast after submit")).toBeTruthy();
   });
 
   // Regression: live cards cross an HTTP/JSON boundary and don't always carry

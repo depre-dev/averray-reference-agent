@@ -1256,6 +1256,32 @@ describe("mapMissionReport", () => {
     expect(m.recommendations).toEqual(["Add a spinner to the Sign-message modal"]);
   });
 
+  it("surfaces the goal as scope and lifts the what_i_tried trace into a narrative", () => {
+    const m = mapMissionReport({
+      ...run,
+      goal: "Test onboarding like a fresh outside agent.",
+      result: {
+        ...run.result,
+        evidence: [
+          "screenshot: https://x.test/step3.png",
+          "what_i_tried: Opened a clean Chromium context.\nClicked Connect wallet.\nStopped before signing.",
+        ],
+      },
+    })!;
+    expect(m.goal).toBe("Test onboarding like a fresh outside agent.");
+    expect(m.narrative).toBe("Opened a clean Chromium context.\nClicked Connect wallet.\nStopped before signing.");
+    // The narrative is lifted OUT of evidence — not double-shown as a trace row.
+    expect(m.evidence).toHaveLength(1);
+    expect(m.evidence.some((e) => /Opened a clean Chromium/.test(e.label))).toBe(false);
+  });
+
+  it("omits goal/narrative when the report doesn't carry them (truth-boundary — no padding)", () => {
+    const m = mapMissionReport(run)!;
+    expect(m.goal).toBeUndefined();
+    expect(m.narrative).toBeUndefined();
+    expect(m.evidence).toHaveLength(2);
+  });
+
   it("maps 0–5 scores to 0–10 by key, omitting unknown ones", () => {
     const m = mapMissionReport(run)!;
     expect(m.successScore).toBe(8); // 4 × 2
