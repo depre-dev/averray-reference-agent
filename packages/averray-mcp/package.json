@@ -49,6 +49,10 @@
       "types": "./dist/dispatch-routing.d.ts",
       "import": "./dist/dispatch-routing.js"
     },
+    "./work-router": {
+      "types": "./dist/work-router.d.ts",
+      "import": "./dist/work-router.js"
+    },
     "./decision-records": {
       "types": "./dist/decision-records.d.ts",
       "import": "./dist/decision-records.js"
