@@ -495,9 +495,12 @@ async function run(
 
 function gitArgsWithAuth(command: string, args: string[], token?: string): string[] {
   if (command !== "git" || !token) return args;
+  // GitHub's git smart-HTTP endpoint rejects `Authorization: Bearer <PAT>`; it
+  // requires Basic auth with the token as the password (x-access-token user).
+  const basic = Buffer.from(`x-access-token:${token}`).toString("base64");
   return [
     "-c",
-    `http.https://github.com/.extraheader=AUTHORIZATION: Bearer ${token}`,
+    `http.https://github.com/.extraheader=AUTHORIZATION: Basic ${basic}`,
     ...args,
   ];
 }
