@@ -522,6 +522,9 @@ function MissionBody({ card }: { card: MissionCard }) {
 
   return (
     <>
+      {m.goal ? (
+        <VerdictBlock head="Scope" accent="var(--hm-hermes-deep)">{m.goal}</VerdictBlock>
+      ) : null}
       <section>
         <div className="hm-section-h">{verdictHead}</div>
         <div className="hm-mission-confidence">
@@ -555,6 +558,21 @@ function MissionBody({ card }: { card: MissionCard }) {
           ) : null}
         </div>
       </section>
+
+      {m.narrative ? (
+        <section>
+          <div className="hm-section-h">What the agent did</div>
+          <div className="hm-mission-narrative">
+            {m.narrative
+              .split("\n")
+              .map((line) => line.trim())
+              .filter(Boolean)
+              .map((line, i) => (
+                <p key={i}>{line}</p>
+              ))}
+          </div>
+        </section>
+      ) : null}
 
       {m.path.length > 0 ? (
         <section>

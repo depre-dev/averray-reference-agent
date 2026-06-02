@@ -2372,6 +2372,22 @@ button.hm-turn-pin {
 }
 
 /* Mission path (numbered steps with status) */
+/* "What the agent did" — the agent narrative, one line per step. */
+.hm-mission-narrative {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--hm-line);
+  border-radius: var(--hm-radius);
+  background: var(--hm-paper);
+}
+.hm-mission-narrative p {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--hm-ink-soft);
+}
 .hm-mpath {
   display: grid; gap: 4px;
   border: 1px solid var(--hm-line);

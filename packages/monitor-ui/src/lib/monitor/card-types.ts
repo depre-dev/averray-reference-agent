@@ -238,6 +238,10 @@ export interface MissionReport {
   latency?: string;
   /** URL under test */
   target: string;
+  /** What the mission was asked to test — surfaced as "Scope" at the top. */
+  goal?: string;
+  /** The agent's "what I tried" trace, newline-separated, as readable text. */
+  narrative?: string;
   /** e.g. "fresh · no memory" */
   seed: string;
   /** Attempt count. Optional — not carried by a live agent report. */
