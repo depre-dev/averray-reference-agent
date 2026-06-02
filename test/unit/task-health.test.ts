@@ -112,6 +112,74 @@ describe("task health self-management", () => {
     });
   });
 
+  it("escalates invalid self-healing tasks that target the placeholder testbed mission repo instead of retrying", async () => {
+    const action = await decideTaskHealthAction(
+      task({
+        id: "bad-self-heal",
+        requester: "hermes-self-healing",
+        repo: "testbed/mission",
+        agent: "claude",
+        failedAt: "2026-06-01T10:00:00.000Z",
+        updatedAt: "2026-06-01T10:00:00.000Z",
+      }),
+      {
+        config,
+        now: new Date("2026-06-01T10:30:00.000Z"),
+        suspended: false,
+        halt: false,
+        dispatch: { allowed: true, reason: "dispatch_allowed" },
+      },
+    );
+
+    expect(action).toMatchObject({
+      taskId: "bad-self-heal",
+      action: "escalate",
+      reason: "invalid_self_healing_target:testbed_mission_not_a_repo",
+    });
+  });
+
+  it("escalates stale running placeholder self-healing tasks before restart recovery", async () => {
+    const retryTask = vi.fn();
+    const escalateTask = vi.fn();
+
+    const result = await runTaskHealthOnce(config, {
+      listTasks: () => [
+        task({
+          id: "running-bad-self-heal",
+          status: "running",
+          requester: "hermes-self-healing",
+          repo: "testbed/mission",
+          agent: "claude",
+          startedAt: "2026-06-01T09:40:00.000Z",
+          progressAt: "2026-06-01T09:40:00.000Z",
+          updatedAt: "2026-06-01T09:40:00.000Z",
+          attemptCount: 1,
+        }),
+      ],
+      readRunner: () => undefined,
+      retryTask,
+      deferRetry: vi.fn(),
+      escalateTask,
+      isSuspended: () => false,
+      isHalt: () => false,
+      dispatchAllowed: () => ({ allowed: true, reason: "dispatch_allowed" }),
+      now: () => new Date("2026-06-01T10:00:00.000Z"),
+    });
+
+    expect(result.actions).toEqual([
+      {
+        taskId: "running-bad-self-heal",
+        action: "escalate",
+        reason: "invalid_self_healing_target:testbed_mission_not_a_repo",
+      },
+    ]);
+    expect(retryTask).not.toHaveBeenCalled();
+    expect(escalateTask).toHaveBeenCalledWith(
+      "running-bad-self-heal",
+      "invalid_self_healing_target:testbed_mission_not_a_repo",
+    );
+  });
+
   it("escalates approved tasks that sit past the stale threshold", async () => {
     const action = await decideTaskHealthAction(
       task({
