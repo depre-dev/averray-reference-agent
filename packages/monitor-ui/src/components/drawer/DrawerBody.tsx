@@ -482,7 +482,72 @@ function MissionBlockerBlock({ blocker }: { blocker: MissionBlocker }) {
   );
 }
 
+/**
+ * Live-follow view for a RUNNING mission. Shows only real progress — the stage
+ * line + recent runner output (a rolling tail) — and a screenshot only when a
+ * servable URL exists. No verdict and no per-step ledger: the agent posts the
+ * verdict only in the terminal report, at which point MissionBody re-renders
+ * into the full report (the `board.card.updated` SSE refreshes this ~every 2s).
+ */
+function MissionRunInProgress({ card }: { card: MissionCard }) {
+  const progress = card.missionProgress;
+  const stage = progress?.message?.trim();
+  const output = progress?.output?.trim();
+  const screenshot = progress?.screenshot;
+  return (
+    <>
+      <section>
+        <div className="hm-section-h">Mission · running</div>
+        <div
+          className="hm-verdict-block"
+          style={{ background: "var(--hm-hermes-soft)", borderColor: "rgba(15,107,90,0.18)" }}
+        >
+          <div className="head" style={{ color: "var(--hm-hermes-deep)", display: "flex", alignItems: "center", gap: 8 }}>
+            <span className="fresh-dot" style={{ background: "var(--hm-hermes)" }} aria-hidden />
+            {stage || "Runner claimed the mission — starting…"}
+          </div>
+          <div className="body" style={{ color: "var(--hm-muted)" }}>{card.title}</div>
+        </div>
+      </section>
+
+      {screenshot ? (
+        <section>
+          <div className="hm-section-h">Latest screenshot</div>
+          <img
+            src={screenshot}
+            alt="Latest mission screenshot"
+            style={{ width: "100%", borderRadius: "var(--hm-radius)", border: "1px solid var(--hm-line)", display: "block" }}
+          />
+        </section>
+      ) : null}
+
+      <section>
+        <div className="hm-section-h">Recent runner output</div>
+        {output ? (
+          <pre className="hm-mission-run-output">{output}</pre>
+        ) : (
+          <div className="hm-verdict-block">
+            <div className="body" style={{ color: "var(--hm-muted)" }}>
+              No output yet — waiting for the runner's first lines.
+            </div>
+          </div>
+        )}
+        <div className="hm-mission-run-note">
+          Rolling ~12KB tail — older steps scroll off. Refreshes ~every 2s while the run is live.
+          No verdict until the agent posts its report.
+        </div>
+      </section>
+    </>
+  );
+}
+
 function MissionBody({ card }: { card: MissionCard }) {
+  // RUNNING → follow the run live (stage + recent output). The SAME body
+  // auto-swaps to the end report once the agent posts one: the
+  // `board.card.updated` SSE refreshes this card every ~2s and re-renders.
+  if (card.missionStatus === "running") {
+    return <MissionRunInProgress card={card} />;
+  }
   // `mission` is required on the type, but a live mission card has no
   // structured report until the browser agent posts one. Read defensively.
   const m = (card as { mission?: MissionCard["mission"] }).mission;

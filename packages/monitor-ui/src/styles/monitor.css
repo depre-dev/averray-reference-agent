@@ -2527,6 +2527,28 @@ button.hm-turn-pin {
 }
 
 /* Mission path (numbered steps with status) */
+/* Live-follow (running mission): scrollable recent runner output + honest note. */
+.hm-mission-run-output {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--hm-line);
+  border-radius: var(--hm-radius);
+  background: var(--hm-paper-3, var(--hm-paper));
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--hm-ink-soft);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.hm-mission-run-note {
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--hm-muted);
+}
 /* "What the agent did" — the agent narrative, one line per step. */
 .hm-mission-narrative {
   display: grid;

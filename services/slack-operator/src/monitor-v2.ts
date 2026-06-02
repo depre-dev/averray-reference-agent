@@ -206,6 +206,19 @@ export interface CardMissionEvidence {
   label: string;
   href: string;
 }
+/** Live snapshot of a RUNNING mission (rolling ~2s poll), not a final report. */
+export interface CardMissionProgress {
+  /** Latest stage line (`progressMessage`). */
+  message?: string;
+  /** Sanitized recent runner output — a rolling tail (older lines scroll off). */
+  output?: string;
+  /** When the latest progress was recorded (ISO). */
+  at?: string;
+  /** Latest screenshot URL — present only when an absolute, servable URL exists.
+   *  The runner does not publish one live today (no artifact endpoint), so this
+   *  is usually absent; the UI shows stage + output without faking an image. */
+  screenshot?: string;
+}
 export interface CardMissionReport {
   verdict: "OK" | "PARTIAL" | "FAILED";
   verdictTone: "ok" | "warn" | "fail";
@@ -302,6 +315,10 @@ export interface BoardCard {
   mission?: CardMissionReport;
   /** Mission lifecycle status; requested missions are board-gated and not runner-claimable. */
   missionStatus?: MissionStatus;
+  /** Live progress while a mission is RUNNING (the rolling ~2s poll snapshot):
+   *  stage message + a sanitized recent-output tail. No verdict — the agent
+   *  posts that only in the terminal report. */
+  missionProgress?: CardMissionProgress;
   /** D2: latest durable explanation associated with this card. */
   decisionRecord?: HermesDecisionRecord;
   /** C1: active cross-agent review requests scoped to this card. */
@@ -647,6 +664,24 @@ function workingNowFromRunningTask(
     taskId,
     ...(runnerId ? { runnerId } : {}),
     ...(since ? { since } : {}),
+  };
+}
+
+/** Project a running mission's live poll snapshot (stage + recent output). */
+function missionRunProgress(run: Record<string, unknown> | undefined): CardMissionProgress | undefined {
+  if (!run) return undefined;
+  const message = asString(run.progressMessage);
+  const output = asString(run.stdoutTail);
+  const at = asString(run.progressAt) ?? asString(run.updatedAt);
+  // A servable absolute screenshot URL only — never a local artifact path.
+  const screenshotRaw = asString(run.progressScreenshotUrl) ?? asString(run.liveScreenshotUrl);
+  const screenshot = screenshotRaw && /^https?:\/\//i.test(screenshotRaw) ? screenshotRaw : undefined;
+  if (!message && !output && !screenshot) return undefined;
+  return {
+    ...(message ? { message } : {}),
+    ...(output ? { output } : {}),
+    ...(at ? { at } : {}),
+    ...(screenshot ? { screenshot } : {}),
   };
 }
 
@@ -1565,6 +1600,12 @@ export function enrichBoardCard(
       card.mission = mission;
       const oneLine = missionReportOneLine(ctx.missionRun);
       if (oneLine) card.summary = oneLine;
+    }
+    // While running, surface the live poll snapshot (stage + recent output) so
+    // the drawer can follow the run. Real progress only — no verdict here.
+    if (status === "running") {
+      const progress = missionRunProgress(ctx.missionRun);
+      if (progress) card.missionProgress = progress;
     }
     const workingNow = workingNowFromMissionRun(ctx.missionRun);
     if (workingNow) card.workingNow = workingNow;
