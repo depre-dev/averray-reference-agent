@@ -328,7 +328,7 @@ body { margin: 0; }
    ============================================================ */
 .hm-main {
   display: grid;
-  grid-template-columns: 1fr 420px;
+  grid-template-columns: minmax(0, 1fr) 440px;
   min-height: 0;
   overflow: hidden;
 }
@@ -354,9 +354,14 @@ body { margin: 0; }
 }
 .hm-lanes-tools {
   display: flex; align-items: center; gap: 10px;
+  flex-wrap: nowrap;
   font-family: var(--font-mono);
   font-size: 11.5px;
   color: var(--hm-muted);
+  white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .hm-search {
   display: inline-flex; align-items: center; gap: 8px;
@@ -976,15 +981,15 @@ body { margin: 0; }
   cursor: pointer;
 }
 .hm-lane--expanded {
-  flex: 1 1 300px;
-  min-width: 300px;
+  flex: 1 1 292px;
+  min-width: 292px;
 }
 .hm-lane--xl { flex: 2 1 0; }
 .hm-lane--focus { flex: 4 1 0; min-width: 520px; background: var(--hm-paper); }
 .hm-lane--action { border-color: var(--hm-amber-ring); }
 .hm-lane--action.hm-lane--expanded {
-  flex: 1.3 0 350px;
-  min-width: 350px;
+  flex: 1.45 0 410px;
+  min-width: 390px;
 }
 .hm-lane--action::before {
   content: ""; position: absolute; inset: 0 0 auto 0; height: 3px;
@@ -1180,7 +1185,10 @@ body { margin: 0; }
 
 /* Card pieces */
 .hm-card-head {
-  display: flex; align-items: flex-start; gap: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
   min-width: 0;
 }
 .hm-card-id {
@@ -1190,7 +1198,7 @@ body { margin: 0; }
   display: inline-flex; align-items: center; gap: 5px;
   /* Long correlation ids must truncate, not spill past the card edge. */
   min-width: 0;
-  flex: 0 1 auto;
+  width: 100%;
   overflow: hidden;
 }
 .hm-card-id .agent-dot {
@@ -1217,12 +1225,16 @@ body { margin: 0; }
 }
 
 .hm-card-fresh {
-  margin-left: auto;
   display: inline-flex; align-items: center; gap: 5px;
   font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--hm-muted);
   white-space: nowrap;
+  justify-self: end;
+  max-width: 118px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .hm-card-fresh .fresh-dot {
   width: 6px; height: 6px; border-radius: 999px; background: var(--hm-fresh);
@@ -1261,6 +1273,7 @@ body { margin: 0; }
   min-width: 0;
   max-width: 100%;
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .hm-review-request {
@@ -1485,6 +1498,7 @@ body { margin: 0; }
 }
 .hm-mission-run-facts span {
   display: inline-flex;
+  max-width: 100%;
   min-height: 18px;
   align-items: center;
   padding: 0 6px;
@@ -1494,6 +1508,9 @@ body { margin: 0; }
   color: var(--hm-muted);
   font-family: var(--font-mono);
   font-size: 9.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .hm-mission-run-boundary {
   color: var(--hm-sage-deep);
@@ -1567,7 +1584,8 @@ body { margin: 0; }
 
 /* Waiting on */
 .hm-waiting {
-  display: inline-flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: 6px;
+  flex-wrap: wrap;
   font-family: var(--font-display);
   font-size: 10px;
   font-weight: 800;
@@ -1577,10 +1595,14 @@ body { margin: 0; }
   margin-top: 2px;
 }
 .hm-waiting .target {
+  max-width: 100%;
   background: var(--hm-amber-soft);
   color: var(--hm-amber-deep);
   padding: 2px 8px;
   border-radius: 999px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .hm-waiting--ok .target  { background: var(--hm-sage-soft); color: var(--hm-sage-deep); }
 .hm-waiting--info .target{ background: var(--hm-blue-soft); color: var(--hm-blue); }
@@ -1677,13 +1699,13 @@ body { margin: 0; }
   flex-direction: column;
   min-height: 0;
   min-width: 0;
-  background: var(--hm-paper-2);
+  background: var(--hm-paper);
   border-left: 1px solid var(--hm-line);
   overflow: hidden;
 }
 .hm-hermes-head {
   display: flex; align-items: center; gap: 10px;
-  padding: 14px 18px 12px;
+  padding: 14px 18px 13px;
   border-bottom: 1px solid var(--hm-line-soft);
   background: var(--hm-paper);
   min-width: 0;
@@ -1773,15 +1795,17 @@ body { margin: 0; }
   display: flex;
   flex-direction: column;
   border-bottom: 1px solid var(--hm-line-soft);
-  background: linear-gradient(180deg, var(--hm-paper-2), var(--hm-paper));
+  background: linear-gradient(180deg, rgba(250, 248, 241, 0.92), var(--hm-paper));
   overflow: hidden;
 }
 .hm-activity-head {
-  padding: 12px 16px 0;
+  padding: 12px 16px 8px;
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
+  border-bottom: 1px solid var(--hm-line-soft);
+  background: rgba(255, 253, 247, 0.82);
 }
 .hm-activity-head strong {
   font-family: var(--font-display);
@@ -1791,7 +1815,7 @@ body { margin: 0; }
 .hm-activity-stream {
   flex: 1;
   min-height: 0;
-  padding-top: 10px;
+  padding-top: 12px;
 }
 .hm-activity-row {
   width: 100%;
@@ -1854,18 +1878,22 @@ button.hm-activity-row:hover {
 /* Hermes turn (card-stream) */
 .hm-turn {
   display: grid;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: 9px;
+  padding: 11px 12px;
   border-radius: var(--hm-radius);
   background: var(--hm-paper);
-  border: 1px solid var(--hm-line);
+  border: 1px solid rgba(47, 43, 37, 0.11);
+  box-shadow: 0 8px 22px rgba(47, 43, 37, 0.045);
   font-size: 12.5px;
   line-height: 1.55;
   min-width: 0;
   overflow: hidden;
 }
 .hm-turn-head {
-  display: flex; align-items: center; gap: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
   font-family: var(--font-display);
   font-size: 10.5px;
   font-weight: 800;
@@ -1873,22 +1901,32 @@ button.hm-activity-row:hover {
   text-transform: uppercase;
   color: var(--hm-muted);
   min-width: 0;
-  flex-wrap: wrap;
 }
 .hm-turn-actor {
+  grid-column: 1;
+  grid-row: 1;
   display: inline-flex; align-items: center; gap: 5px;
   color: var(--hm-ink);
   min-width: 0;
   max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .hm-turn-kind {
-  margin-left: 4px;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  justify-self: start;
+  width: fit-content;
+  max-width: 100%;
   opacity: 0.7;
   font-weight: 500;
   letter-spacing: 0 !important;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: -4px;
 }
 .hm-turn-actor .actor-dot { width: 7px; height: 7px; border-radius: 999px; }
 .hm-turn--hermes  .actor-dot { background: var(--hm-hermes); }
@@ -1900,7 +1938,9 @@ button.hm-activity-row:hover {
 .hm-turn--docs .actor-dot { background: #6b5b9a; }
 .hm-turn--system  .actor-dot { background: var(--hm-muted-soft); }
 .hm-turn-time {
-  margin-left: auto;
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
   font-family: var(--font-mono);
   font-size: 10.5px;
   font-weight: 500;
@@ -1912,6 +1952,7 @@ button.hm-activity-row:hover {
   color: var(--hm-ink-soft);
   min-width: 0;
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .hm-turn-body b { color: var(--hm-ink); font-weight: 600; }
 .hm-turn-body small {
@@ -1942,8 +1983,8 @@ button.hm-activity-row:hover {
   gap: 3px 9px;
   padding: 8px 10px;
   border-radius: var(--hm-radius-sm);
-  background: var(--hm-paper-3);
-  border: 1px solid var(--hm-line-soft);
+  background: rgba(245, 241, 231, 0.68);
+  border: 1px solid rgba(47, 43, 37, 0.09);
   font-family: var(--font-body);
   font-size: 12px;
   color: var(--hm-ink-soft);
@@ -1971,7 +2012,10 @@ button.hm-turn-pin {
   font-weight: 600;
   color: var(--hm-muted);
   font-size: 11px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 .hm-turn-pin .pin-arrow {
   grid-area: arrow;
@@ -1982,16 +2026,16 @@ button.hm-turn-pin {
 }
 
 .hm-turn-actions {
-  display: flex; gap: 6px;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
+  gap: 6px;
 }
 .hm-turn-suggest {
   display: inline-flex; align-items: center; gap: 6px;
   justify-content: center;
-  flex: 1 1 132px;
   min-width: 0;
-  padding: 5px 9px;
-  border-radius: 999px;
+  padding: 6px 9px;
+  border-radius: 10px;
   background: var(--hm-sage-wash);
   color: var(--hm-sage-deep);
   font-family: var(--font-display);
@@ -2010,7 +2054,7 @@ button.hm-turn-pin {
 /* Compose */
 .hm-compose {
   flex: 0 0 auto;
-  padding: 10px 14px 14px;
+  padding: 11px 14px 14px;
   background: var(--hm-paper);
   border-top: 1px solid var(--hm-line-soft);
   display: grid; gap: 8px;
@@ -2020,19 +2064,19 @@ button.hm-turn-pin {
 }
 .hm-compose-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 66px;
+  grid-template-columns: minmax(0, 1fr) 72px;
   gap: 8px;
   align-items: end;
 }
 .hm-compose-input {
-  border: 1px solid var(--hm-line);
-  border-radius: 10px;
-  padding: 10px 12px;
-  background: var(--hm-paper-2);
+  border: 1px solid rgba(47, 43, 37, 0.14);
+  border-radius: 12px;
+  padding: 11px 12px;
+  background: rgba(250, 248, 241, 0.86);
   font-family: var(--font-body);
   font-size: 13px;
   color: var(--hm-ink);
-  min-height: 56px;
+  min-height: 62px;
   min-width: 0;
   resize: none;
   outline: none;
@@ -2050,8 +2094,8 @@ button.hm-turn-pin {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 0 14px;
   justify-content: center;
-  height: 56px;
-  border-radius: 10px;
+  height: 62px;
+  border-radius: 12px;
   background: var(--hm-sage);
   color: #fffdf7;
   border: 0;
@@ -2064,6 +2108,7 @@ button.hm-turn-pin {
 .hm-compose-send:hover { background: var(--hm-sage-deep); }
 .hm-compose-chip {
   display: inline-flex; align-items: center; gap: 5px;
+  max-width: 100%;
   padding: 3px 8px;
   border-radius: 999px;
   border: 1px solid var(--hm-line);
@@ -2075,6 +2120,9 @@ button.hm-turn-pin {
   text-transform: uppercase;
   cursor: pointer;
   background: var(--hm-paper-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .hm-compose-chip.is-on { background: var(--hm-ink); color: #fffdf7; border-color: var(--hm-ink); }
 
@@ -2277,39 +2325,45 @@ button.hm-turn-pin {
 .hm-card-cta--operator {
   flex-wrap: wrap;
   min-width: 0;
+  width: 100%;
 }
 .hm-card-cta--actions {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(78px, 1fr));
   align-items: stretch;
+  gap: 6px;
 }
 .hm-card-cta--operator .hm-btn {
   width: 100%;
   min-height: 28px;
   height: auto;
-  padding: 6px 9px;
+  padding: 6px 8px;
   line-height: 1.12;
   white-space: normal;
   text-align: center;
+  overflow-wrap: anywhere;
 }
 .hm-card-cta--confirm {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: stretch;
-  padding: 8px;
+  gap: 7px;
+  padding: 9px;
   border-radius: var(--hm-radius-sm);
-  border: 1px solid var(--hm-amber-ring);
-  background: rgba(255, 253, 247, 0.72);
+  border: 1px solid rgba(176, 111, 43, 0.42);
+  background: rgba(255, 246, 231, 0.92);
+  box-shadow: inset 3px 0 0 var(--hm-amber);
 }
 .hm-card-confirm-copy {
   grid-column: 1 / -1;
   display: grid;
-  gap: 2px;
+  gap: 3px;
   color: var(--hm-ink);
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 700;
-  line-height: 1.25;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 .hm-card-confirm-copy small {
   color: var(--hm-muted);

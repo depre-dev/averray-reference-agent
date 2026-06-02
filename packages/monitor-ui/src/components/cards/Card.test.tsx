@@ -348,6 +348,7 @@ describe("Card — task approve (O3 dispatch)", () => {
     fireEvent.click(getByRole("button", { name: /Approve & dispatch/ }));
     expect(onApprove).not.toHaveBeenCalled(); // first click only arms the confirm
     expect(getByText(/Dispatch to claude\?/)).toBeTruthy();
+    expect(getByText(/First click only arms this action/)).toBeTruthy();
     fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
     expect(onApprove).toHaveBeenCalledTimes(1);
     expect(onApprove.mock.calls[0]?.[0]?.id).toBe("claude-task-x1");
