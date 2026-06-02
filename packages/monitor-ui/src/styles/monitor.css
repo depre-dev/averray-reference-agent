@@ -966,7 +966,10 @@ body { margin: 0; }
   font-size: 11px;
   color: var(--hm-muted);
   display: inline-flex; align-items: center; gap: 5px;
-  flex-shrink: 0;
+  /* Long correlation ids must truncate, not spill past the card edge. */
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
 }
 .hm-card-id .agent-dot {
   width: 6px; height: 6px; border-radius: 999px;
@@ -982,6 +985,13 @@ body { margin: 0; }
   font-weight: 600;
   color: var(--hm-ink);
   letter-spacing: 0 !important;
+  /* The id is the long part — it shrinks and ellipsizes; the dot + agent
+   *  label stay intact. */
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hm-card-fresh {
@@ -1006,6 +1016,8 @@ body { margin: 0; }
   line-height: 1.4;
   color: var(--hm-ink);
   text-wrap: pretty;
+  /* Break long unbreakable tokens (urls, ids, branches) instead of leaking. */
+  overflow-wrap: anywhere;
 }
 .hm-card--action .hm-card-title {
   font-weight: 700;
@@ -1017,6 +1029,9 @@ body { margin: 0; }
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--hm-muted);
+  /* Long repo/branch/url tokens break to the next line, never past the edge. */
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .hm-card-meta .sep { color: var(--hm-muted-soft); }
 .hm-card-meta .repo { color: var(--hm-ink-soft); }
@@ -1657,7 +1672,8 @@ button.hm-activity-row:hover {
 /* Pinned context card inside a Hermes turn */
 .hm-turn-pin {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  /* id (flex + truncates) · title · arrow — the long id must not widen the rail. */
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 9px;
   padding: 8px 10px;
@@ -1679,6 +1695,10 @@ button.hm-turn-pin {
   font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--hm-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .hm-turn-pin .pin-title {
   font-weight: 600;
