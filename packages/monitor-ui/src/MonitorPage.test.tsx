@@ -231,7 +231,7 @@ describe("MonitorPage — container", () => {
       const [missionUrl] = fetchSpy.mock.calls[0] as [string, RequestInit];
       const [suiteUrl, suiteInit] = fetchSpy.mock.calls[1] as [string, RequestInit];
       expect(missionUrl).toBe("/monitor/testbed-missions");
-      expect(suiteUrl).toBe("/monitor/testbed-suites");
+      expect(suiteUrl).toBe("/monitor/suites");
       expect(JSON.parse(String(suiteInit.body))).toEqual({
         name: "Daily app sweep",
         target: "https://app.averray.com/overview",
@@ -243,7 +243,7 @@ describe("MonitorPage — container", () => {
     }
   });
 
-  test("the saved suite Run button POSTs to /monitor/testbed-suites/:id/run", async () => {
+  test("the saved suite Run button POSTs to /monitor/suites/:id/run", async () => {
     const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({
       cards: [],
       at: "2026-05-28T10:30:00Z",
@@ -278,7 +278,7 @@ describe("MonitorPage — container", () => {
 
       expect(fetchSpy).toHaveBeenCalledTimes(1);
       const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-      expect(calledUrl).toBe("/monitor/testbed-suites/testbed-suite-daily-app-sweep-1/run");
+      expect(calledUrl).toBe("/monitor/suites/testbed-suite-daily-app-sweep-1/run");
       expect(init.method).toBe("POST");
     } finally {
       fetchSpy.mockRestore();
@@ -326,9 +326,9 @@ describe("MonitorPage — container", () => {
       expect(fetchSpy).toHaveBeenCalledTimes(2);
       const [approveUrl, approveInit] = fetchSpy.mock.calls[0] as [string, RequestInit];
       const [dismissUrl, dismissInit] = fetchSpy.mock.calls[1] as [string, RequestInit];
-      expect(approveUrl).toBe("/monitor/testbed-suites/testbed-suite-settings-coverage-1/approve");
+      expect(approveUrl).toBe("/monitor/suites/testbed-suite-settings-coverage-1/approve");
       expect(approveInit.method).toBe("POST");
-      expect(dismissUrl).toBe("/monitor/testbed-suites/testbed-suite-settings-coverage-1/dismiss");
+      expect(dismissUrl).toBe("/monitor/suites/testbed-suite-settings-coverage-1/dismiss");
       expect(dismissInit.method).toBe("POST");
     } finally {
       fetchSpy.mockRestore();

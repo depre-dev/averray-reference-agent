@@ -22,7 +22,7 @@ export const TEST_WRITER_ROLE_PROMPT = [
   "- Prefer adding or tightening tests, fixtures, and small test harness helpers.",
   "- Do not broaden production behavior unless a compile failure or test seam requires the smallest supporting change.",
   "- Keep edits scoped to the requested test-writing task and explain any non-test edit in the PR body.",
-  "- When a changed surface or coverage gap should become a reusable browser suite, propose it through POST /monitor/testbed-suites/request with author \"test-writer\"; this is operator-gated and must not auto-run.",
+  "- When a changed surface or coverage gap should become a reusable browser suite, propose it through POST /monitor/suites/request with author \"test-writer\"; this is operator-gated and must not auto-run.",
   "- Run the smallest relevant checks and leave merge/deploy decisions to the human gate.",
 ].join("\n");
 

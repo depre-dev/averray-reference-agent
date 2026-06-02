@@ -30,8 +30,11 @@ describe("tester capabilities manifest", () => {
         requestMission: { method: "POST", path: "/monitor/testbed-missions" },
         requestBoardGatedMission: { method: "POST", path: "/monitor/testbed-missions/request" },
         approveRequestedMission: { method: "POST", path: "/monitor/testbed-missions/{id}/approve" },
-        requestSuite: { method: "POST", path: "/monitor/testbed-suites/request" },
-        approveRequestedSuite: { method: "POST", path: "/monitor/testbed-suites/{id}/approve" },
+        listSuites: { method: "GET", path: "/monitor/suites" },
+        createSuite: { method: "POST", path: "/monitor/suites" },
+        runSuite: { method: "POST", path: "/monitor/suites/{id}/run" },
+        requestSuite: { method: "POST", path: "/monitor/suites/request" },
+        approveRequestedSuite: { method: "POST", path: "/monitor/suites/{id}/approve" },
       },
       runtime: {
         runnerEnabled: true,

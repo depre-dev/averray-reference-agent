@@ -79,7 +79,7 @@ describe("C3 specialist agent templates", () => {
   });
 
   it("tells the test-writer to propose saved suites without auto-running them", () => {
-    expect(TEST_WRITER_ROLE_PROMPT).toContain("/monitor/testbed-suites/request");
+    expect(TEST_WRITER_ROLE_PROMPT).toContain("/monitor/suites/request");
     expect(TEST_WRITER_ROLE_PROMPT).toContain('author "test-writer"');
     expect(TEST_WRITER_ROLE_PROMPT).toContain("must not auto-run");
   });

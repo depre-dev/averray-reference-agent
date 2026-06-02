@@ -29,6 +29,7 @@ export interface SavedTestSuite {
   target: string;
   mode: MissionLaunchMode;
   goal?: string;
+  role?: string;
   author: SavedTestSuiteAuthor;
   requesterAgent?: string;
   requestReason?: string;
@@ -46,5 +47,6 @@ export interface SaveTestSuiteInput {
   target: string;
   mode: MissionLaunchMode;
   goal?: string;
+  role?: string;
   author: SavedTestSuiteAuthor;
 }

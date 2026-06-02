@@ -34,7 +34,7 @@ import { BoardView } from "./components/BoardView.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 
 const MISSIONS_URL = "/monitor/testbed-missions";
-const SUITES_URL = "/monitor/testbed-suites";
+const SUITES_URL = "/monitor/suites";
 const CODEX_TASKS_URL = "/monitor/codex-tasks";
 const SELF_HEALING_PROPOSALS_URL = "/monitor/self-healing-proposals";
 const ALERT_MUTE_URL = "/monitor/alert-mute";
@@ -48,13 +48,13 @@ export interface MonitorPageProps {
   backlogSuggestions?: UseBacklogSuggestionsOptions;
   /** Override the /mission spawn (defaults to POST /monitor/testbed-missions). */
   onSpawnMission?: (input: MissionSpawnInput) => void;
-  /** Override saving a named suite (defaults to POST /monitor/testbed-suites). */
+  /** Override saving a named suite (defaults to POST /monitor/suites). */
   onSaveSuite?: (input: SaveTestSuiteInput) => void;
-  /** Override running a named suite (defaults to POST /monitor/testbed-suites/:id/run). */
+  /** Override running a named suite (defaults to POST /monitor/suites/:id/run). */
   onRunSuite?: (id: string) => void;
-  /** Override approving a requested suite (defaults to POST /monitor/testbed-suites/:id/approve). */
+  /** Override approving a requested suite (defaults to POST /monitor/suites/:id/approve). */
   onApproveSuite?: (id: string) => void;
-  /** Override dismissing a requested suite (defaults to POST /monitor/testbed-suites/:id/dismiss). */
+  /** Override dismissing a requested suite (defaults to POST /monitor/suites/:id/dismiss). */
   onDismissSuite?: (id: string) => void;
   /** Override the /claude propose (defaults to POST /monitor/codex-tasks). */
   onSpawnClaudeTask?: (repo: string, prompt: string) => void;
