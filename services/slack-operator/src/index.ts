@@ -1574,9 +1574,6 @@ async function handleMonitorTestbedMissionRequest(request: http.IncomingMessage,
       ...(Array.isArray(payload.routes)
         ? { routes: payload.routes.filter((r): r is string => typeof r === "string" && r.length > 0) }
         : {}),
-      // T4: a gold-path (Tier-2 LLM) mission is mutation-capable and deep, so it
-      // always lands `requested` — behind the operator approve gate, never auto-run.
-      ...(mode === "gold_path" ? { requireApproval: true } : {}),
     });
     recordTestbedMissionCollaboration(created.run);
     logger.info(

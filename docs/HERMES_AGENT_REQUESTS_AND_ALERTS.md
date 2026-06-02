@@ -19,7 +19,7 @@
 3. The **operator accepts it on the board** (the gate you asked for).
 4. The `testbed-mission-runner` runs it; the verdict + per-route findings + evidence come back as a mission card.
 
-**Scope/safety:** agent-requested runs are **read-only by default** — surface sweep (T1) or a **targeted read-only mission** against the changed route/feature. Mutating/gold-path missions stay **operator-initiated** (an agent can't request a mutation). Testnet/preview env only; under `HALT_FILE`.
+**Scope/safety:** agent-requested runs are **read-only by default** — surface sweep (T1) or a **targeted read-only mission** against the changed route/feature. Mutating/gold-path missions stay **operator-initiated** (an agent can't request a mutation). Operator/per-deploy gold-path missions may run autonomously only on testnet inside `TESTBED_GOLDPATH_*` spend/concurrency caps, after sponsored ready-job posting and green read-only + claim-readiness preflight. Testnet/preview env only; under `HALT_FILE`.
 
 **Entry point (closes the interface gap):** the building agents work in `averray-agent/agent` and likely don't have the Averray MCP. The reference-agent now exposes the board-gated request endpoint **`POST /monitor/testbed-missions/request`** with `{ requesterAgent, targetUrl, goal, reason, mode: "fresh" | "memory" }`. It records `requested` only; the runner ignores it until an operator clicks approve, which calls **`POST /monitor/testbed-missions/{id}/approve`** and moves the mission to `ready`. The platform repo helper (T7 follow-up) should POST to this request endpoint and print the board link.
 

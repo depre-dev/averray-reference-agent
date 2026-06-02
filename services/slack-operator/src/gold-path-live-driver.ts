@@ -224,6 +224,9 @@ export function buildClaudeGoldPathPrompt(
       "When the host is Basic-Auth-gated, combine the SIWE storageState with Basic Auth httpCredentials in the same browser context.",
     ].join(" ")
     : "No pre-minted SIWE session was resolved; if authentication is required, request a browser/api session from the signer sidecar or report the missing session as an auth blocker.";
+  const preparedJobLine = input.preparedJobId
+    ? `A sponsored starter job was already auto-posted for this mission: ${input.preparedJobId}. Prefer claiming that exact job id unless the product clearly shows it is unavailable.`
+    : "No pre-posted starter job id was provided; if no claimable test job exists, report that as a claim-readiness blocker instead of asking the operator to post one.";
   return [
     "You are Hermes running the Averray Tier-2 gold-path tester as a normal browser-capable outside agent.",
     "Use the Claude Agent SDK browser tooling / Playwright MCP tools available in this runtime. Do not use private repo state, Slack, GitHub, SSH, databases, or Averray monitor internals.",
@@ -235,6 +238,7 @@ export function buildClaudeGoldPathPrompt(
     mutationLine,
     `Target URL: ${input.targetUrl}`,
     `Goal: ${input.goal}`,
+    preparedJobLine,
     `Model/effort policy selected: ${input.model}.`,
     `Fresh memory: ${input.freshMemory ? "yes" : "returning-agent memory allowed"}.`,
     "",

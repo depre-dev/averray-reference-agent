@@ -5,6 +5,25 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Browser, BrowserContext, Page } from "playwright-core";
 
+vi.mock("@avg/averray-mcp/operator-testbed", () => ({
+  getTestbedAgentMission: (input: Record<string, unknown> = {}) => ({
+    schemaVersion: 1,
+    kind: "testbed_agent_browser_mission",
+    target: {
+      url: input.targetUrl ?? "[TESTBED_URL]",
+      goal: input.goal ?? "test the page",
+      agentName: input.agentName ?? "Hermes",
+      freshMemory: input.freshMemory !== false,
+      maxBrowserSteps: input.maxBrowserSteps ?? 80,
+      maxMinutes: input.maxMinutes ?? 20,
+    },
+    missionPrompt: `Goal: ${input.goal ?? "test the page"}`,
+    safety: {
+      browserMissionShouldMutate: input.allowTestMutations === true,
+    },
+  }),
+}));
+
 import {
   __resetTestbedMissionRunsForTests,
   listTestbedMissionRuns,
@@ -203,6 +222,184 @@ describe("testbed mission runner", () => {
     expect(executor).not.toHaveBeenCalled();
     const [updated] = listTestbedMissionRuns({ path });
     expect(updated).toMatchObject({ status: "requested" });
+    expect(updated?.runnerId).toBeUndefined();
+  });
+
+  it("auto-posts and preflights an internal testnet gold-path mission before claiming it", async () => {
+    const path = tempMissionStorePath();
+    const readyJobsPath = join(path.replace(/missions\.json$/, ""), "ready-to-post-jobs.json");
+    writeFileSync(readyJobsPath, JSON.stringify([
+      {
+        id: "hermes-gold-path-smoke",
+        category: "coding",
+        tier: "starter",
+        rewardAsset: "USDC",
+        rewardAmount: 2,
+        verifierMode: "benchmark",
+        verifierTerms: ["complete", "verified", "output"],
+        verifierMinimumMatches: 2,
+        inputSchemaRef: "schema://jobs/coding-input",
+        outputSchemaRef: "schema://jobs/coding-output",
+        requiresSponsoredGas: true,
+      },
+    ]));
+    const run = recordTestbedMissionRunFromOperatorResult(goldPathMissionResult(), Date.parse("2026-06-02T08:00:00.000Z"), path);
+    const fetchCalls: Array<{ url: string; method: string; body?: string }> = [];
+    const executor = vi.fn(async (mission) => ({
+      exitCode: 0,
+      stdout: "gold path complete",
+      stderr: "",
+      reportText: JSON.stringify({
+        missionId: mission.id,
+        verdict: "pass",
+        confidence: 0.9,
+        stoppedBeforeMutation: false,
+        mutationMode: "testbed_mutation_allowed",
+        mutationsAttempted: ["claim", "submit", "payout_sbt"],
+        mutationBoundaryNotes: ["Testnet-only gold-path loop completed."],
+        completedPath: ["posted job", "claimed job", "submitted work", "verified", "settled"],
+        blockers: [],
+        evidence: [{ type: "receipt", value: "session-123" }],
+        scores: { success: 5 },
+      }),
+    }));
+
+    const result = await runTestbedMissionRunnerOnce(
+      {
+        enabled: true,
+        path,
+        runnerId: "test-runner",
+        command: "fake",
+        args: [],
+        pollIntervalMs: 1000,
+        timeoutMs: 1000,
+        outputTailBytes: 4000,
+        apiBaseUrl: "https://api.testnet.example",
+        appBaseUrl: "https://app.testnet.example",
+        signerBaseUrl: "http://signer.test",
+        goldPathAutonomy: {
+          enabled: true,
+          maxUsdcPerDay: 10,
+          maxStakeUsdPerRun: 1,
+          maxConcurrentRuns: 1,
+          readyJobsPath,
+        },
+      },
+      {
+        executor,
+        now: new Date("2026-06-02T08:01:00.000Z"),
+        goldPathAutonomy: {
+          isHaltPresent: () => false,
+          isSuspended: () => false,
+          resolveSession: async ({ role }) => ({ role, token: `${role}-token` }),
+          fetchImpl: async (url, init) => {
+            fetchCalls.push({ url: String(url), method: init?.method ?? "GET", body: typeof init?.body === "string" ? init.body : undefined });
+            if (String(url).endsWith("/admin/jobs")) return jsonResponse({ id: "posted" }, 200);
+            if (String(url).includes("/jobs/definition")) return jsonResponse({ id: "posted" }, 200);
+            return new Response("ok", { status: 200 });
+          },
+        },
+      }
+    );
+
+    expect(result.status).toBe("completed");
+    expect(executor).toHaveBeenCalledOnce();
+    const [updated] = listTestbedMissionRuns({ path });
+    expect(updated).toMatchObject({
+      id: run!.id,
+      status: "completed",
+      runnerId: "test-runner",
+      goldPathAutonomy: {
+        budget: { estimatedRewardUsd: 2, maxUsdcPerDay: 10 },
+        job: { templateId: "hermes-gold-path-smoke" },
+        preflight: { status: "passed" },
+      },
+    });
+    expect(updated?.goldPathAutonomy?.job?.jobId).toContain("hermes-gold-path-smoke-gp-");
+    expect(fetchCalls.map((call) => call.method)).toEqual(["POST", "GET", "GET"]);
+    expect(fetchCalls[0]?.url).toBe("https://api.testnet.example/admin/jobs");
+    expect(fetchCalls[0]?.body).toContain(updated?.goldPathAutonomy?.job?.jobId ?? "");
+  });
+
+  it("aborts a gold-path mission before claim when preflight is red", async () => {
+    const path = tempMissionStorePath();
+    const readyJobsPath = join(path.replace(/missions\.json$/, ""), "ready-to-post-jobs.json");
+    writeFileSync(readyJobsPath, JSON.stringify([readyGoldPathJobTemplate()]));
+    const run = recordTestbedMissionRunFromOperatorResult(goldPathMissionResult(), Date.parse("2026-06-02T08:00:00.000Z"), path);
+    const executor = vi.fn(async () => ({
+      exitCode: 0,
+      stdout: "",
+      stderr: "",
+    }));
+
+    const result = await runTestbedMissionRunnerOnce(
+      goldPathRunnerConfig(path, readyJobsPath),
+      {
+        executor,
+        now: new Date("2026-06-02T08:01:00.000Z"),
+        goldPathAutonomy: {
+          isHaltPresent: () => false,
+          isSuspended: () => false,
+          resolveSession: async ({ role }) => ({ role, token: `${role}-token` }),
+          fetchImpl: async (url) => {
+            if (String(url).endsWith("/admin/jobs")) return jsonResponse({ id: "posted" }, 200);
+            if (String(url).includes("/jobs/definition")) return jsonResponse({ id: "posted" }, 200);
+            return new Response("down", { status: 503 });
+          },
+        },
+      }
+    );
+
+    expect(result).toMatchObject({
+      status: "failed",
+      reason: expect.stringContaining("Gold-path preflight failed"),
+    });
+    expect(executor).not.toHaveBeenCalled();
+    const [updated] = listTestbedMissionRuns({ path });
+    expect(updated).toMatchObject({
+      id: run!.id,
+      status: "failed",
+      failureReason: expect.stringContaining("read_only_smoke: HTTP 503"),
+    });
+    expect(updated?.runnerId).toBeUndefined();
+    expect(updated?.claimedAt).toBeUndefined();
+  });
+
+  it("blocks a gold-path mission before claim when the daily spend cap would be exceeded", async () => {
+    const path = tempMissionStorePath();
+    const readyJobsPath = join(path.replace(/missions\.json$/, ""), "ready-to-post-jobs.json");
+    writeFileSync(readyJobsPath, JSON.stringify([readyGoldPathJobTemplate({ rewardAmount: 2 })]));
+    const run = recordTestbedMissionRunFromOperatorResult(goldPathMissionResult(), Date.parse("2026-06-02T08:00:00.000Z"), path);
+    const executor = vi.fn(async () => ({ exitCode: 0, stdout: "", stderr: "" }));
+
+    const result = await runTestbedMissionRunnerOnce(
+      {
+        ...goldPathRunnerConfig(path, readyJobsPath),
+        goldPathAutonomy: {
+          enabled: true,
+          maxUsdcPerDay: 1,
+          maxStakeUsdPerRun: 1,
+          maxConcurrentRuns: 1,
+          readyJobsPath,
+        },
+      },
+      {
+        executor,
+        now: new Date("2026-06-02T08:01:00.000Z"),
+        goldPathAutonomy: {
+          isHaltPresent: () => false,
+          isSuspended: () => false,
+        },
+      }
+    );
+
+    expect(result).toMatchObject({
+      status: "failed",
+      reason: expect.stringContaining("daily USDC cap"),
+    });
+    expect(executor).not.toHaveBeenCalled();
+    const [updated] = listTestbedMissionRuns({ path });
+    expect(updated).toMatchObject({ id: run!.id, status: "failed" });
     expect(updated?.runnerId).toBeUndefined();
   });
 
@@ -446,6 +643,80 @@ function missionResult() {
       },
     },
   };
+}
+
+function goldPathMissionResult() {
+  return {
+    kind: "testbed_agent_mission",
+    mission: {
+      kind: "testbed_agent_browser_mission",
+      target: {
+        url: "https://app.testnet.example/gold-path",
+        goal: "complete the gold path",
+        agentName: "Hermes",
+        freshMemory: true,
+        mode: "gold_path",
+        environment: "testnet",
+      },
+      missionPrompt: "Complete the sponsored testnet gold path.",
+      reportSchema: {
+        verdict: "pass | partial | fail",
+      },
+      safety: {
+        missionGeneratorMutates: false,
+        browserMissionShouldMutate: true,
+        requestedBrowserMissionShouldMutate: true,
+        mutationEnvironment: "testnet",
+      },
+    },
+  };
+}
+
+function readyGoldPathJobTemplate(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "hermes-gold-path-smoke",
+    category: "coding",
+    tier: "starter",
+    rewardAsset: "USDC",
+    rewardAmount: 2,
+    verifierMode: "benchmark",
+    verifierTerms: ["complete", "verified", "output"],
+    verifierMinimumMatches: 2,
+    inputSchemaRef: "schema://jobs/coding-input",
+    outputSchemaRef: "schema://jobs/coding-output",
+    requiresSponsoredGas: true,
+    ...overrides,
+  };
+}
+
+function goldPathRunnerConfig(path: string, readyJobsPath: string) {
+  return {
+    enabled: true,
+    path,
+    runnerId: "test-runner",
+    command: "fake",
+    args: [],
+    pollIntervalMs: 1000,
+    timeoutMs: 1000,
+    outputTailBytes: 4000,
+    apiBaseUrl: "https://api.testnet.example",
+    appBaseUrl: "https://app.testnet.example",
+    signerBaseUrl: "http://signer.test",
+    goldPathAutonomy: {
+      enabled: true,
+      maxUsdcPerDay: 10,
+      maxStakeUsdPerRun: 1,
+      maxConcurrentRuns: 1,
+      readyJobsPath,
+    },
+  };
+}
+
+function jsonResponse(value: unknown, status: number): Response {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 }
 
 function externalReadyMissionRun() {

@@ -46,6 +46,7 @@ interface GoldPathMissionEnv {
   freshMemory: boolean;
   requestedAllowTestMutations: boolean;
   environment?: string;
+  preparedJobId?: string;
 }
 
 function readMissionFromEnv(env: NodeJS.ProcessEnv): GoldPathMissionEnv {
@@ -56,6 +57,7 @@ function readMissionFromEnv(env: NodeJS.ProcessEnv): GoldPathMissionEnv {
     freshMemory: env.TESTBED_FRESH_MEMORY !== "false",
     requestedAllowTestMutations: env.TESTBED_REQUESTED_TEST_MUTATIONS === "true",
     ...(env.TESTBED_MISSION_ENVIRONMENT ? { environment: env.TESTBED_MISSION_ENVIRONMENT } : {}),
+    ...(env.TESTBED_GOLDPATH_JOB_ID ? { preparedJobId: env.TESTBED_GOLDPATH_JOB_ID } : {}),
   };
 }
 
@@ -103,7 +105,13 @@ export async function runGoldPathMissionEntry(
   const basicAuth = basicAuthAppliesToUrl(mission.targetUrl, parseTestbedBasicAuth(env));
 
   const result = await runGoldPathMissionOnce({
-    mission: { id: mission.id, targetUrl: mission.targetUrl, goal: mission.goal, freshMemory: mission.freshMemory },
+    mission: {
+      id: mission.id,
+      targetUrl: mission.targetUrl,
+      goal: mission.goal,
+      freshMemory: mission.freshMemory,
+      ...(mission.preparedJobId ? { preparedJobId: mission.preparedJobId } : {}),
+    },
     binding,
     driver,
     model,

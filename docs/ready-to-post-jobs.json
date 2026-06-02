@@ -1,0 +1,23 @@
+[
+  {
+    "id": "hermes-gold-path-smoke",
+    "title": "Hermes gold-path smoke job",
+    "description": "Sponsored testnet-only starter job used by Hermes gold-path autonomy before the browser agent claims, submits, verifies, and settles the loop.",
+    "category": "coding",
+    "tier": "starter",
+    "rewardAsset": "USDC",
+    "rewardAmount": 2,
+    "verifierMode": "benchmark",
+    "verifierTerms": [
+      "complete",
+      "verified",
+      "output"
+    ],
+    "verifierMinimumMatches": 2,
+    "inputSchemaRef": "schema://jobs/coding-input",
+    "outputSchemaRef": "schema://jobs/coding-output",
+    "claimTtlSeconds": 3600,
+    "retryLimit": 1,
+    "requiresSponsoredGas": true
+  }
+]

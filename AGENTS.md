@@ -122,6 +122,13 @@ TypeScript monorepo: npm workspaces (`packages/*`, `services/*`), Node ≥ 22, E
   (high-risk surface, any rollback, or while D3-suspended / HALT is set; rollback
   is always operator-confirmed). Deduped + cooldown'd; depends on D3 as the loop
   fail-safe. Same invariant #6 guardrail — it only proposes.
+- **Gold-path tester autonomy is budgeted, testnet-only.** Internal/operator
+  scheduled gold-path missions may auto-post a sponsored starter job and run the
+  claim→submit→verify→settle loop only when `TESTBED_GOLDPATH_AUTONOMY_ENABLED`
+  is on, the `TESTBED_GOLDPATH_*` spend/concurrency caps pass, the T3 signer
+  sidecar provides sessions, `HALT_FILE` is absent, and D3 is not suspended.
+  External-agent requested tester runs (T6, carrying `requesterAgent`) still land
+  `requested` and require operator approval before any runner can claim them.
 - **Humans own approval.** A PASS verdict is a release *signal*, not a merge order.
   Merge and deploy are human-gated. No auto-merge.
 - **Per-agent task runners** (`codex-task-runner`, `claude-task-runner`) claim
