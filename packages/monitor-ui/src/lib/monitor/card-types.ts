@@ -279,6 +279,15 @@ export interface MissionProgress {
   at?: string;
   /** Latest screenshot URL — present only when a servable URL exists. */
   screenshot?: string;
+  /** Optional P3b stream metadata. Missing means fall back to the P3 step-view. */
+  liveScreencast?: {
+    status: "running" | "ended" | "unavailable";
+    streamUrl?: string;
+    latestFrameUrl?: string;
+    frameCount?: number;
+    updatedAt?: string;
+    reason?: string;
+  };
 }
 
 /** Browser mission card (testbed). */

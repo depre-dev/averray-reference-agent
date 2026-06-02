@@ -580,7 +580,14 @@ describe("enrichBoardCard", () => {
           status: "running",
           progressMessage: "Clicking safe visible control: Connect wallet",
           stdoutTail: "opened https://staging.averray.com\nclicked Connect wallet\n",
-          progressAt: "2026-06-02T10:00:00.000Z"
+          progressAt: "2026-06-02T10:00:00.000Z",
+          liveScreencast: {
+            status: "running",
+            streamUrl: "/monitor/testbed-missions/mission%20run-1/screencast",
+            latestFrameUrl: "/monitor/testbed-missions/mission%20run-1/screencast/latest.jpg",
+            frameCount: 3,
+            updatedAt: "2026-06-02T10:00:00.000Z"
+          }
         }
       }
     );
@@ -588,7 +595,14 @@ describe("enrichBoardCard", () => {
     expect(card.missionProgress).toEqual({
       message: "Clicking safe visible control: Connect wallet",
       output: "opened https://staging.averray.com\nclicked Connect wallet\n",
-      at: "2026-06-02T10:00:00.000Z"
+      at: "2026-06-02T10:00:00.000Z",
+      liveScreencast: {
+        status: "running",
+        streamUrl: "/monitor/testbed-missions/mission%20run-1/screencast",
+        latestFrameUrl: "/monitor/testbed-missions/mission%20run-1/screencast/latest.jpg",
+        frameCount: 3,
+        updatedAt: "2026-06-02T10:00:00.000Z"
+      }
     });
     // No verdict/report while running — the agent posts that only at the end.
     expect(card.mission).toBeUndefined();
