@@ -164,6 +164,47 @@ describe("MonitorPage — container", () => {
     }
   });
 
+  test("the board launcher POSTs an explicit mission request without mutation flags", async () => {
+    const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({ cards: [], at: "2026-05-28T10:30:00Z" }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 202 }));
+    try {
+      const { getByRole, getByLabelText } = render(
+        <MonitorPage
+          options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }}
+          backlogSuggestions={{ enabled: false }}
+          collaboration={{ enabled: false }}
+          alerts={{ enabled: false }}
+          autonomy={{ fetchMode: async () => null }}
+        />,
+        { wrapper },
+      );
+      await waitFor(() => expect(getByRole("button", { name: "Start a mission" })).toBeTruthy());
+
+      fireEvent.click(getByRole("button", { name: "Start a mission" }));
+      fireEvent.change(getByLabelText("Target"), { target: { value: "https://app.averray.com/agent" } });
+      fireEvent.click(getByLabelText(/Gold Path/));
+      fireEvent.click(getByLabelText("Memory"));
+      fireEvent.change(getByLabelText("Goal"), { target: { value: "prove the signed-in receipt loop" } });
+      fireEvent.click(getByLabelText(/Request approval/));
+      fireEvent.click(getByRole("button", { name: "Launch mission" }));
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+      expect(calledUrl).toBe("/monitor/testbed-missions");
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(String(init.body))).toEqual({
+        targetUrl: "https://app.averray.com/agent",
+        mode: "gold_path",
+        freshMemory: false,
+        initialStatus: "requested",
+        goal: "prove the signed-in receipt loop",
+      });
+      expect(JSON.parse(String(init.body))).not.toHaveProperty("allowTestMutations");
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   test("the default mission approval POSTs to /monitor/testbed-missions/:id/approve", async () => {
     const requestedMission = {
       id: "testbed-mission-requested-1",
@@ -202,6 +243,51 @@ describe("MonitorPage — container", () => {
       expect(fetchSpy).toHaveBeenCalledTimes(1);
       const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
       expect(calledUrl).toBe("/monitor/testbed-missions/testbed-mission-requested-1/approve");
+      expect(init.method).toBe("POST");
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  test("requested mission dismiss POSTs to /monitor/testbed-missions/:id/dismiss", async () => {
+    const requestedMission = {
+      id: "testbed-mission-requested-1",
+      lane: "operator-review",
+      type: "mission",
+      agentType: "hermes",
+      title: "Tester run requested",
+      summary: "Tester run requested by codex; it has not started and remains board-gated until the operator approves it.",
+      repo: "testbed/mission",
+      freshness: 1,
+      state: "fresh",
+      risk: ["testbed"],
+      waitingOn: { actor: "operator", tone: "neutral" },
+      missionStatus: "requested",
+    } as unknown as MonitorBoard["cards"][number];
+    const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({
+      cards: [requestedMission],
+      at: "2026-05-28T10:30:00Z",
+    }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
+    try {
+      const { getByRole, getByText } = render(
+        <MonitorPage
+          options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }}
+          backlogSuggestions={{ enabled: false }}
+          collaboration={{ enabled: false }}
+          alerts={{ enabled: false }}
+          autonomy={{ fetchMode: async () => null }}
+        />,
+        { wrapper },
+      );
+      await waitFor(() => expect(getByRole("button", { name: "Dismiss" })).toBeTruthy());
+      fireEvent.click(getByRole("button", { name: "Dismiss" }));
+      expect(getByText(/Dismiss this requested tester mission/)).toBeTruthy();
+      fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+      expect(calledUrl).toBe("/monitor/testbed-missions/testbed-mission-requested-1/dismiss");
       expect(init.method).toBe("POST");
     } finally {
       fetchSpy.mockRestore();

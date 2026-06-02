@@ -4,6 +4,7 @@ import {
   __resetTestbedMissionRunsForTests,
   acceptTestbedMissionFailure,
   diagnoseTestbedMissionReportFromMessage,
+  dismissRequestedTestbedMissionRun,
   failedTestbedMissionsForSelfHealing,
   failTestbedMissionRun,
   listTestbedMissionRuns,
@@ -156,6 +157,44 @@ describe("monitor testbed mission runs", () => {
         missionEnvironment: "mainnet",
       },
     });
+  });
+
+  it("dismisses only requested mission runs before a runner can claim them", () => {
+    const requested = recordTestbedMissionRunFromOperatorResult(
+      missionResult({ targetUrl: "https://testbed.example/requested" }),
+      Date.parse("2026-05-22T10:00:00.000Z"),
+      undefined,
+      { initialStatus: "requested" },
+    )!;
+    const ready = recordTestbedMissionRunFromOperatorResult(
+      missionResult({ targetUrl: "https://testbed.example/ready" }),
+      Date.parse("2026-05-22T10:01:00.000Z"),
+    )!;
+
+    const dismissed = dismissRequestedTestbedMissionRun(requested.id, {
+      now: new Date("2026-05-22T10:02:00.000Z"),
+      dismissedBy: "operator",
+    });
+    const rejected = dismissRequestedTestbedMissionRun(ready.id);
+
+    expect(dismissed).toMatchObject({
+      ok: true,
+      run: {
+        id: requested.id,
+        status: "requested",
+        statusReason: "Operator dismissed the requested tester run before the runner claimed it.",
+        history: [
+          { event: "mission_requested" },
+          { event: "mission_dismissed", at: "2026-05-22T10:02:00.000Z" },
+        ],
+      },
+    });
+    expect(rejected).toMatchObject({
+      ok: false,
+      error: "not_requested",
+      run: { id: ready.id, status: "ready" },
+    });
+    expect(listTestbedMissionRuns({ limit: 10 }).map((run) => run.id)).toEqual([ready.id]);
   });
 
   it("turns active mission runs into mission-native board items", () => {

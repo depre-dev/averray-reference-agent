@@ -229,6 +229,10 @@ export type ApproveTestbedMissionRunResult =
   | { ok: true; run: TestbedMissionRun }
   | { ok: false; error: "not_found" | "not_requested"; run?: TestbedMissionRun };
 
+export type DismissTestbedMissionRunResult =
+  | { ok: true; run: TestbedMissionRun }
+  | { ok: false; error: "not_found" | "not_requested"; run?: TestbedMissionRun };
+
 export type TestbedMissionFailureTriageResult =
   | { ok: true; run: TestbedMissionRun }
   | { ok: false; error: "not_found" | "not_failed"; run?: TestbedMissionRun };
@@ -385,6 +389,33 @@ export function approveTestbedMissionRun(
   trimMissionHistory(existing);
   persistMissionStore(deps.path);
   return { ok: true, run: cloneRun(existing) };
+}
+
+export function dismissRequestedTestbedMissionRun(
+  id: string,
+  deps: TestbedMissionStoreDeps & { dismissedBy?: string } = {}
+): DismissTestbedMissionRunResult {
+  ensureMissionStoreLoaded(deps.path, { force: true });
+  const index = missionRuns.findIndex((run) => run.id === id);
+  if (index < 0) return { ok: false, error: "not_found" };
+  const existing = missionRuns[index];
+  if (existing.status !== "requested") {
+    return { ok: false, error: "not_requested", run: cloneRun(existing) };
+  }
+  const now = (deps.now ?? new Date()).toISOString();
+  existing.updatedAt = now;
+  existing.statusReason = `Operator dismissed the requested tester run before the runner claimed it.`;
+  existing.history.push({
+    at: now,
+    status: "requested",
+    event: "mission_dismissed",
+    message: `${existing.statusReason} Dismissed by ${deps.dismissedBy ?? "operator"}.`,
+  });
+  trimMissionHistory(existing);
+  const dismissed = cloneRun(existing);
+  missionRuns.splice(index, 1);
+  persistMissionStore(deps.path);
+  return { ok: true, run: dismissed };
 }
 
 export function acceptTestbedMissionFailure(

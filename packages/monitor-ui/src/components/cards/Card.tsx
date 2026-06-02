@@ -46,6 +46,8 @@ export type CardProps = {
   onApprove?: (card: BoardCard) => void;
   /** Approve a requested tester mission (T6). Operator-only; runs through a confirm. */
   onApproveMission?: (card: BoardCard) => void;
+  /** Dismiss a requested tester mission before the runner can claim it. */
+  onDismissMission?: (card: BoardCard) => void;
   /** Approve a PR for merge review. Opens/records only; humans still merge. */
   onApproveMerge?: (card: BoardCard) => void;
   /** Re-run a failed tester mission. */
@@ -100,6 +102,7 @@ export function Card({
   onClick,
   onApprove,
   onApproveMission,
+  onDismissMission,
   onApproveMerge,
   onRerunMission,
   onAcceptMissionFailure,
@@ -225,6 +228,7 @@ export function Card({
           card={card}
           onApprove={onApprove}
           onApproveMission={onApproveMission}
+          onDismissMission={onDismissMission}
           onApproveMerge={onApproveMerge}
           onRerunMission={onRerunMission}
           onAcceptMissionFailure={onAcceptMissionFailure}
@@ -542,6 +546,7 @@ function OperatorActions({
   card,
   onApprove,
   onApproveMission,
+  onDismissMission,
   onApproveMerge,
   onRerunMission,
   onAcceptMissionFailure,
@@ -550,6 +555,7 @@ function OperatorActions({
   card: BoardCard;
   onApprove?: (card: BoardCard) => void;
   onApproveMission?: (card: BoardCard) => void;
+  onDismissMission?: (card: BoardCard) => void;
   onApproveMerge?: (card: BoardCard) => void;
   onRerunMission?: (card: BoardCard, freshness: "fresh" | "memory") => void;
   onAcceptMissionFailure?: (card: BoardCard) => void;
@@ -571,14 +577,33 @@ function OperatorActions({
           run: () => onApprove(card),
           kind: "action" as const,
         }]
-      : card.type === "mission" && missionStatus === "requested" && onApproveMission
-        ? [{
-            key: "approve-mission",
-            label: "Approve & dispatch",
-            confirm: "Dispatch tester runner?",
-            run: () => onApproveMission(card),
-            kind: "action" as const,
-          }]
+      : card.type === "mission" && missionStatus === "requested"
+        ? [
+            onApproveMission
+              ? {
+                  key: "approve-mission",
+                  label: "Approve & dispatch",
+                  confirm: "Dispatch tester runner?",
+                  run: () => onApproveMission(card),
+                  kind: "action" as const,
+                }
+              : undefined,
+            onDismissMission
+              ? {
+                  key: "dismiss-mission",
+                  label: "Dismiss",
+                  confirm: "Dismiss this requested tester mission?",
+                  run: () => onDismissMission(card),
+                  kind: "ghost" as const,
+                }
+              : undefined,
+          ].filter((action): action is {
+            key: string;
+            label: string;
+            confirm: string;
+            run: () => void;
+            kind: "action" | "ghost";
+          } => Boolean(action))
         : card.type === "mission" && missionStatus === "failed"
           ? [
               missionTarget && onRerunMission

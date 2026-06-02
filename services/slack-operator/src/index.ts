@@ -151,6 +151,7 @@ import { parseProposeTaskPayload } from "./codex-task-request.js";
 import {
   acceptTestbedMissionFailure,
   diagnoseTestbedMissionReportFromMessage,
+  dismissRequestedTestbedMissionRun,
   failedTestbedMissionsForSelfHealing,
   listTestbedMissionRuns,
   readTestbedMissionRunnerHeartbeat,
@@ -166,7 +167,7 @@ import {
 } from "./monitor-testbed-missions.js";
 import {
   approveRequestedTestbedMission,
-  createTestbedMissionFromAgent,
+  createMonitorTestbedMissionFromPayload,
   getTestbedMissionForAgent,
   listTestbedMissionsForAgent,
   requestTestbedMissionFromAgent,
@@ -790,6 +791,24 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       return;
     }
     await handleMonitorTestbedMissionApprovalRequest(testbedMissionApprovalId, response);
+    return;
+  }
+  const testbedMissionDismissId = monitorTestbedMissionActionId(url.pathname, "dismiss");
+  if (request.method === "POST" && testbedMissionDismissId) {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    const missionVerdict = authorizeMissionSpawn(missionSpawnRoles, request.headers);
+    if (!missionVerdict.allowed) {
+      writeJson(response, 403, { error: "mission_dismiss_forbidden", reason: missionVerdict.reason });
+      return;
+    }
+    await handleMonitorTestbedMissionDismissRequest(testbedMissionDismissId, response);
     return;
   }
   const testbedMissionAcceptFailureId = monitorTestbedMissionActionId(url.pathname, "accept-failure");
@@ -1551,31 +1570,7 @@ async function handleMonitorTestbedMissionRequest(request: http.IncomingMessage,
       return;
     }
 
-    const targetUrl = stringField(payload, "targetUrl");
-    if (!targetUrl) {
-      writeJson(response, 400, {
-        error: "missing_target_url",
-        message: "targetUrl is required so Hermes knows which page to test.",
-      });
-      return;
-    }
-
-    const mode = stringField(payload, "mode");
-    const created = createTestbedMissionFromAgent({
-      targetUrl,
-      ...(stringField(payload, "goal") ? { goal: stringField(payload, "goal") } : {}),
-      ...(stringField(payload, "agentName") ? { agentName: stringField(payload, "agentName") } : {}),
-      ...(stringField(payload, "requester") ? { requester: stringField(payload, "requester") } : {}),
-      ...(stringField(payload, "environment") ? { environment: stringField(payload, "environment") } : {}),
-      ...(booleanField(payload, "freshMemory") !== undefined ? { freshMemory: booleanField(payload, "freshMemory") } : {}),
-      ...(booleanField(payload, "allowTestMutations") !== undefined ? { allowTestMutations: booleanField(payload, "allowTestMutations") } : {}),
-      ...(numberField(payload, "maxBrowserSteps") !== undefined ? { maxBrowserSteps: numberField(payload, "maxBrowserSteps") } : {}),
-      ...(numberField(payload, "maxMinutes") !== undefined ? { maxMinutes: numberField(payload, "maxMinutes") } : {}),
-      ...(mode === "surface_sweep" || mode === "siwe_auth" || mode === "gold_path" ? { mode } : {}),
-      ...(Array.isArray(payload.routes)
-        ? { routes: payload.routes.filter((r): r is string => typeof r === "string" && r.length > 0) }
-        : {}),
-    });
+    const created = createMonitorTestbedMissionFromPayload(payload);
     recordTestbedMissionCollaboration(created.run);
     logger.info(
       {
@@ -1590,6 +1585,13 @@ async function handleMonitorTestbedMissionRequest(request: http.IncomingMessage,
       ...created,
     });
   } catch (error) {
+    if (error instanceof TestbedMissionRequestValidationError) {
+      writeJson(response, 400, {
+        error: error.code,
+        message: error.message,
+      });
+      return;
+    }
     logger.error({ err: error }, "monitor_testbed_mission_create_failed");
     writeJson(response, 500, {
       error: "monitor_testbed_mission_create_failed",
@@ -1669,6 +1671,36 @@ async function handleMonitorTestbedMissionApprovalRequest(id: string, response: 
     logger.error({ err: error, missionId: id }, "monitor_testbed_mission_approval_failed");
     writeJson(response, 500, {
       error: "monitor_testbed_mission_approval_failed",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function handleMonitorTestbedMissionDismissRequest(id: string, response: http.ServerResponse) {
+  try {
+    const result = dismissRequestedTestbedMissionRun(id, { dismissedBy: "operator" });
+    if (!result.ok) {
+      if (result.error === "not_found") {
+        writeJson(response, 404, { error: "testbed_mission_not_found", id });
+        return;
+      }
+      writeJson(response, 409, {
+        error: "testbed_mission_not_requested",
+        id,
+        status: result.run?.status,
+      });
+      return;
+    }
+    recordTestbedMissionDismissedCollaboration(result.run);
+    logger.info({ missionId: id }, "monitor_testbed_mission_dismissed");
+    writeJson(response, 200, {
+      ok: true,
+      run: result.run,
+    });
+  } catch (error) {
+    logger.error({ err: error, missionId: id }, "monitor_testbed_mission_dismiss_failed");
+    writeJson(response, 500, {
+      error: "monitor_testbed_mission_dismiss_failed",
       message: error instanceof Error ? error.message : String(error),
     });
   }
@@ -1828,6 +1860,23 @@ function recordTestbedMissionApprovalCollaboration(run: TestbedMissionRun): void
     });
   } catch (error) {
     logger.warn({ err: error, missionId: run.id }, "monitor_testbed_mission_approval_collaboration_failed");
+  }
+}
+
+function recordTestbedMissionDismissedCollaboration(run: TestbedMissionRun): void {
+  try {
+    recordCollaborationMessage({
+      author: "hermes",
+      kind: "status",
+      addressedTo: "operator",
+      relatedCorrelationId: run.id,
+      text: [
+        `Operator dismissed requested tester run ${run.id}.`,
+        "The runner never claimed it; no browser mission was started.",
+      ].join(" "),
+    });
+  } catch (error) {
+    logger.warn({ err: error, missionId: run.id }, "monitor_testbed_mission_dismiss_collaboration_failed");
   }
 }
 
@@ -3406,14 +3455,6 @@ function numberField(value: unknown, key: string): number | undefined {
   return undefined;
 }
 
-function booleanField(value: unknown, key: string): boolean | undefined {
-  if (!isRecord(value)) return undefined;
-  const field = value[key];
-  if (typeof field === "boolean") return field;
-  if (typeof field === "string") return parseOptionalBoolean(field);
-  return undefined;
-}
-
 function formatUtcTime(time: { hour: number; minute: number }): string {
   return `${String(time.hour).padStart(2, "0")}:${String(time.minute).padStart(2, "0")}`;
 }
@@ -3463,7 +3504,7 @@ function monitorTestbedMissionApproveId(pathname: string): string | undefined {
   return id.length > 0 && !id.includes("/") ? id : undefined;
 }
 
-function monitorTestbedMissionActionId(pathname: string, action: "accept-failure" | "open-issue"): string | undefined {
+function monitorTestbedMissionActionId(pathname: string, action: "accept-failure" | "dismiss" | "open-issue"): string | undefined {
   const prefix = "/monitor/testbed-missions/";
   const suffix = `/${action}`;
   if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) return undefined;
