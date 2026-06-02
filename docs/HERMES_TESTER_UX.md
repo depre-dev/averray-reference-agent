@@ -130,6 +130,25 @@ External agents are **requesters, never runners.** They discover via the manifes
 
 ---
 
+## 6.5 Invocation autonomy — internal runs autonomous within budget, external runs operator-gated
+
+The operator is **not in the loop for the tester's own runs.** Two trigger classes, two policies:
+
+| Trigger | Policy |
+|---|---|
+| **Internal** — operator-scheduled, per-deploy, or a saved-suite run | **Autonomous** within a spend/safety budget. No per-run approval: auto-posts a claimable test job, auto-runs the smoke ladder, then claims → completes → submits → settles. |
+| **External** — a product-repo agent's request (T6, `requesterAgent`) | **Operator-gated.** Parks as `requested` until the operator approves; then runs the same autonomous flow. |
+
+**The spend/safety budget — set once, then hands-off** — replaces per-run approval for internal runs:
+- **testnet-only** wallet; configurable **caps** (max USDC/day, max stake/run, max concurrent runs);
+- **D3 anomaly-pause + `HALT_FILE`** interlock; **abort-on-red-preflight** (a failed smoke ladder never claims);
+- **stop + escalate** on any revert / policy rejection / anomaly — never retry blindly;
+- a run that would exceed the budget is **blocked + escalated**, not silently run.
+
+So "without the operator's involvement" means *bounded once by the budget*, then autonomous — the operator steps in only for (a) external-agent requests and (b) anything that hits a rail. Mirrors the O4 autopilot model: set the bounds once, the system operates inside them; merge/deploy and over-budget stay human.
+
+---
+
 ## 7. Prioritized handoff prompts (one narrow PR each)
 
 | # | Prompt | Type · Owner |
@@ -145,8 +164,9 @@ External agents are **requesters, never runners.** They discover via the manifes
 | **P6** | Manifest: add the **ready-to-test inventory** — extend `GET /monitor/tester/capabilities` (`tester-capabilities.ts`) beyond flow *types* to list saved suites (name, flow, target, last-run verdict+ts), available targets/envs + reachability + mutation profile; keep per-flow `status` honest. | FEATURE · Claude+Codex |
 | **P7** | **Report-back to the requester** — when a mission carries `requesterAgent` (T6), make the structured report retrievable by it (`GET /monitor/testbed-missions/:id` returning the same MissionBody report / a callback). Read-only; no operator-private data leaks. | FEATURE · Codex |
 | **P8** | **Advertise the tester in the product repo** (`averray-agent/agent`, T7 follow-up) — a thin request helper + AGENTS.md pointer: discover (manifest) → request (T6, requester+reason) → read report (P7); operator-gated, request-only, read-only by default. | FEATURE · Claude |
+| **P9** | **Autonomous gold-path runs within a spend budget** (§6.5) — internal runs (scheduled / per-deploy / suite) auto-post a claimable test job + auto-run the smoke ladder + claim→submit→settle with **no operator step**, bounded by an operator-set testnet-only spend budget (USDC/day, stake/run, concurrency) + D3/HALT interlock + abort-on-red-preflight + stop-on-anomaly; **external-agent (T6) requests stay operator-gated.** | FEATURE · Codex |
 
-**Sequence:** P0 ✅ (readable) → **P0b (report detail — scope/conclusion/fix; the first thing now, so the end report says something)** → P2 ✅ (gold-path authed) → P1 (easy launch) → P3 (run lifecycle + live follow) → P3b (optional 1:1 screencast) → P4/P5 (library + agent authoring) → P6/P7/P8 (external-agent contract). With P0/P2 done, **P0b is the next move** — it completes the *end report* (scope + conclusion + fix suggestion) the operator can't yet see; P3 then makes the run *followable* through the dispatch→running→done lifecycle.
+**Sequence:** P0 ✅ (readable) → **P0b ✅ (report detail — scope/conclusion/fix)** → P2 ✅ (gold-path authed) → **P9 (autonomous runs within budget — so the tester runs itself, hands-off)** → P1 (easy launch) → P3 (run lifecycle + live follow) → P3b (optional 1:1 screencast) → P4/P5 (library + agent authoring) → P6/P7/P8 (external-agent contract). With P0/P0b/P2 done, **P9 is the move that makes it autonomous** — internal runs execute within the budget without the operator; the operator's only gate is approving external-agent requests.
 
 **Invariants:** truth-boundary throughout (real runs only — no fabricated verdicts, no implied per-step streaming, honest "recent output"); testnet-only mutation, server-enforced; the UI can never enable mutation on a prod target; keys/sessions stay in the sidecar.
 
