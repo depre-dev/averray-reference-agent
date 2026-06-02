@@ -23,7 +23,9 @@ import type { LlmUsageAggregate, MonitorBoard } from "../lib/monitor/board-cache
 import type { BacklogSuggestionsResponse } from "../lib/monitor/backlog-suggestions.js";
 import type { StreamStatus } from "../lib/monitor/live-stream.js";
 import { LANES, type BoardCard, type CreateTaskInput } from "../lib/monitor/card-types.js";
+import type { MissionSpawnInput } from "../lib/monitor/mission-launch.js";
 import { CreateTaskForm } from "./CreateTaskForm.js";
+import { StartMissionLauncher } from "./StartMissionLauncher.js";
 import { laneFor } from "../lib/monitor/lane-rules.js";
 import { relatedPrForCard } from "../lib/monitor/collaboration.js";
 import { TopStrip } from "./TopStrip.js";
@@ -95,7 +97,7 @@ export interface BoardViewProps {
   onCardClick?: (id: string) => void;
   onCardClose?: () => void;
   onCardNavigate?: (id: string) => void;
-  onSpawnMission?: (url: string) => void;
+  onSpawnMission?: (input: MissionSpawnInput) => void;
   /** Propose a greenfield Claude task (/claude <repo> <task>). */
   onSpawnClaudeTask?: (repo: string, prompt: string) => void;
   /** Propose a task — /task verb + the codex-needed create form (O3). */
@@ -104,6 +106,8 @@ export interface BoardViewProps {
   onApproveTask?: (id: string) => void;
   /** Approve a requested tester mission — the operator human gate (T6). */
   onApproveMission?: (id: string) => void;
+  /** Dismiss a requested tester mission before the runner can claim it. */
+  onDismissMission?: (id: string) => void;
   /** Persist operator dismissal for cards backed by server-side state. */
   onDismissCard?: (card: BoardCard) => void;
   /** Persist operator snooze for cards backed by server-side state. */
@@ -142,6 +146,7 @@ export function BoardView({
   onCreateTask,
   onApproveTask,
   onApproveMission,
+  onDismissMission,
   onDismissCard: persistDismissCard,
   onSnoozeCard: persistSnoozeCard,
   onRerunMission,
@@ -296,6 +301,7 @@ export function BoardView({
       onClick={onCardClick ? (c) => onCardClick(c.id) : undefined}
       onApprove={onApproveTask ? (c) => onApproveTask(c.id) : undefined}
       onApproveMission={onApproveMission ? (c) => onApproveMission(c.id) : undefined}
+      onDismissMission={onDismissMission ? (c) => onDismissMission(c.correlationId ?? c.id) : undefined}
       onApproveMerge={onApproveMergeCard}
       onRerunMission={onRerunMission ? (c, freshness) => {
         const target = c.type === "mission" ? c.mission?.target : undefined;
@@ -494,6 +500,7 @@ export function BoardView({
             onFilterChange={setFilter}
           />
           <LlmUsagePanel usage={board?.llmUsage} />
+          {onSpawnMission ? <StartMissionLauncher onSpawnMission={onSpawnMission} /> : null}
           <Board
             grouped={displayGrouped}
             expanded={effectiveExpanded}

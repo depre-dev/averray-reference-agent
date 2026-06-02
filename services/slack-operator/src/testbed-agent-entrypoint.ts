@@ -40,6 +40,22 @@ export interface AgentTestbedMissionInput {
   requireApproval?: boolean;
 }
 
+export interface MonitorTestbedMissionPostInput {
+  targetUrl?: unknown;
+  goal?: unknown;
+  agentName?: unknown;
+  requester?: unknown;
+  environment?: unknown;
+  freshMemory?: unknown;
+  allowTestMutations?: unknown;
+  maxBrowserSteps?: unknown;
+  maxMinutes?: unknown;
+  mode?: unknown;
+  initialStatus?: unknown;
+  routes?: unknown;
+  path?: string;
+}
+
 export type AgentRequestedTestbedMissionMode = "fresh" | "memory";
 
 export interface AgentRequestedTestbedMissionInput {
@@ -91,6 +107,34 @@ export function createTestbedMissionFromAgent(
   // guarded by their own budget/preflight rules.
   const initialStatus = input.requireApproval ? "requested" : "ready";
   return createTestbedMissionRecord(input, nowMs, { initialStatus });
+}
+
+export function createMonitorTestbedMissionFromPayload(
+  input: MonitorTestbedMissionPostInput,
+  nowMs: number = Date.now()
+): AgentTestbedMissionResult {
+  const targetUrl = parseHttpUrl(input.targetUrl);
+  const mode = parseMonitorMissionMode(input.mode);
+  const initialStatus = cleanString(input.initialStatus);
+  const missionInput: AgentTestbedMissionInput = {
+    targetUrl,
+    ...(cleanString(input.goal) ? { goal: cleanString(input.goal) } : {}),
+    ...(cleanString(input.agentName) ? { agentName: cleanString(input.agentName) } : {}),
+    ...(cleanString(input.requester) ? { requester: cleanString(input.requester) } : {}),
+    ...(cleanString(input.environment) ? { environment: cleanString(input.environment) } : {}),
+    ...(parseOptionalBoolean(input.freshMemory) !== undefined ? { freshMemory: parseOptionalBoolean(input.freshMemory) } : {}),
+    ...(parseOptionalNumber(input.maxBrowserSteps) !== undefined ? { maxBrowserSteps: parseOptionalNumber(input.maxBrowserSteps) } : {}),
+    ...(parseOptionalNumber(input.maxMinutes) !== undefined ? { maxMinutes: parseOptionalNumber(input.maxMinutes) } : {}),
+    ...(mode ? { mode } : {}),
+    ...(parseStringArray(input.routes).length > 0 ? { routes: parseStringArray(input.routes) } : {}),
+    ...(initialStatus === "requested" ? { requireApproval: true } : {}),
+    ...(input.path ? { path: input.path } : {}),
+    allowTestMutations: mode === "gold_path",
+  };
+  // Deliberately ignore input.allowTestMutations. The monitor board launcher
+  // never sends it; if a client forges it, mutation posture is still derived
+  // server-side from the target, mode, and configured environment.
+  return createTestbedMissionFromAgent(missionInput, nowMs);
 }
 
 export function requestTestbedMissionFromAgent(
@@ -247,6 +291,31 @@ function nextStepForRun(
 
 function cleanString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function parseOptionalBoolean(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return undefined;
+}
+
+function parseOptionalNumber(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return value;
+}
+
+function parseStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+function parseMonitorMissionMode(value: unknown): TestbedMissionMode | undefined {
+  const mode = cleanString(value);
+  if (mode === "surface_sweep" || mode === "siwe_auth" || mode === "gold_path") return mode;
+  return undefined;
 }
 
 function parseAgentRequestedTestbedMission(input: AgentRequestedTestbedMissionInput): {

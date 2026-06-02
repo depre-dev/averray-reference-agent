@@ -9,6 +9,7 @@ import {
 } from "../../services/slack-operator/src/monitor-testbed-missions.js";
 import {
   createTestbedMissionFromAgent,
+  createMonitorTestbedMissionFromPayload,
   getTestbedMissionForAgent,
   listTestbedMissionsForAgent,
   requestTestbedMissionFromAgent,
@@ -207,6 +208,54 @@ describe("testbed agent entrypoint", () => {
       mutationMode: "read_only",
     });
     expect(String(result.mission.missionPrompt)).toContain("Mutation profile override: mainnet / read_only");
+  });
+
+  it("ignores client mutation flags on monitor mission posts", () => {
+    const result = createMonitorTestbedMissionFromPayload(
+      {
+        path,
+        targetUrl: "https://app.averray.com",
+        mode: "surface_sweep",
+        initialStatus: "ready",
+        freshMemory: true,
+        allowTestMutations: true,
+      },
+      Date.parse("2026-05-25T10:01:00.000Z")
+    );
+
+    expect(result.run).toMatchObject({
+      targetUrl: "https://app.averray.com/",
+      mode: "surface_sweep",
+      status: "ready",
+      requestedAllowTestMutations: false,
+      allowTestMutations: false,
+      environment: "mainnet",
+      mutationMode: "read_only",
+      mutationBindingReason: "surface_sweep missions are read-only by contract.",
+    });
+  });
+
+  it("derives testnet gold-path mutation posture from mode and target, not a client flag", () => {
+    const result = createMonitorTestbedMissionFromPayload(
+      {
+        path,
+        targetUrl: "https://testnet.averray.example/gold-path",
+        mode: "gold_path",
+        initialStatus: "ready",
+        freshMemory: true,
+      },
+      Date.parse("2026-05-25T10:01:00.000Z")
+    );
+
+    expect(result.run).toMatchObject({
+      targetUrl: "https://testnet.averray.example/gold-path",
+      mode: "gold_path",
+      status: "ready",
+      requestedAllowTestMutations: true,
+      allowTestMutations: true,
+      environment: "testnet",
+      mutationMode: "testbed_mutation_allowed",
+    });
   });
 
   it("allows explicit testnet mutation binding for test-mode missions", () => {

@@ -404,10 +404,13 @@ describe("Card — requested tester mission approve (T6)", () => {
   } as unknown as BoardCard;
 
   test("shows that the mission has not started and requires approval", () => {
-    const { getByRole, getByText } = render(<Card card={requestedMission} onApproveMission={vi.fn()} />);
+    const { getByRole, getByText } = render(
+      <Card card={requestedMission} onApproveMission={vi.fn()} onDismissMission={vi.fn()} />,
+    );
     expect(getByText("Tester run requested")).toBeTruthy();
     expect(getByText("not started")).toBeTruthy();
     expect(getByRole("button", { name: /Approve & dispatch/ })).toBeTruthy();
+    expect(getByRole("button", { name: "Dismiss" })).toBeTruthy();
   });
 
   test("approving a tester mission requires confirm before dispatching to the runner queue", () => {
@@ -419,6 +422,17 @@ describe("Card — requested tester mission approve (T6)", () => {
     fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
     expect(onApproveMission).toHaveBeenCalledTimes(1);
     expect(onApproveMission.mock.calls[0]?.[0]?.id).toBe("testbed-mission-requested-1");
+  });
+
+  test("dismissing a tester mission requires confirm before clearing the request", () => {
+    const onDismissMission = vi.fn();
+    const { getByRole, getByText } = render(<Card card={requestedMission} onDismissMission={onDismissMission} />);
+    fireEvent.click(getByRole("button", { name: "Dismiss" }));
+    expect(onDismissMission).not.toHaveBeenCalled();
+    expect(getByText(/Dismiss this requested tester mission\?/)).toBeTruthy();
+    fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
+    expect(onDismissMission).toHaveBeenCalledTimes(1);
+    expect(onDismissMission.mock.calls[0]?.[0]?.id).toBe("testbed-mission-requested-1");
   });
 
   test("failed mission triage exposes operator Re-run, Accept failure, and Open issue actions", () => {

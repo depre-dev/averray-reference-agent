@@ -21,6 +21,8 @@ export type CardRouterProps = {
   onApprove?: (card: BoardCard) => void;
   /** Approve a board-gated requested tester mission (T6). */
   onApproveMission?: (card: BoardCard) => void;
+  /** Dismiss a requested tester mission before a runner can claim it. */
+  onDismissMission?: (card: BoardCard) => void;
   /** Approve a PR for merge review. Opens/records only; humans still merge. */
   onApproveMerge?: (card: BoardCard) => void;
   /** Re-run a failed tester mission. */
@@ -40,6 +42,7 @@ export function CardRouter({
   onDegradedAction,
   onApprove,
   onApproveMission,
+  onDismissMission,
   onApproveMerge,
   onRerunMission,
   onAcceptMissionFailure,
@@ -69,6 +72,7 @@ export function CardRouter({
       onClick={onClick}
       onApprove={onApprove}
       onApproveMission={onApproveMission}
+      onDismissMission={onDismissMission}
       onApproveMerge={onApproveMerge}
       onRerunMission={onRerunMission}
       onAcceptMissionFailure={onAcceptMissionFailure}

@@ -29,6 +29,7 @@ import { useActionAlerts, type UseActionAlertsOptions } from "./hooks/useActionA
 import { useAutonomyMode, type UseAutonomyModeOptions } from "./hooks/useAutonomyMode.js";
 import { kpiCounts } from "./lib/monitor/board-state.js";
 import type { BoardCard, CreateTaskInput } from "./lib/monitor/card-types.js";
+import type { MissionSpawnInput } from "./lib/monitor/mission-launch.js";
 import { BoardView } from "./components/BoardView.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 
@@ -45,7 +46,7 @@ export interface MonitorPageProps {
   /** Override the read-only backlog-suggestions endpoint wiring for tests. */
   backlogSuggestions?: UseBacklogSuggestionsOptions;
   /** Override the /mission spawn (defaults to POST /monitor/testbed-missions). */
-  onSpawnMission?: (url: string) => void;
+  onSpawnMission?: (input: MissionSpawnInput) => void;
   /** Override the /claude propose (defaults to POST /monitor/codex-tasks). */
   onSpawnClaudeTask?: (repo: string, prompt: string) => void;
   /** Override the create-task dispatch (defaults to POST /monitor/codex-tasks propose). */
@@ -58,6 +59,8 @@ export interface MonitorPageProps {
   onSnoozeCard?: (card: BoardCard, untilMs: number) => void;
   /** Override the tester mission approval (defaults to POST /monitor/testbed-missions/:id/approve). */
   onApproveMission?: (id: string) => void;
+  /** Override requested-mission dismiss (defaults to POST /monitor/testbed-missions/:id/dismiss). */
+  onDismissMission?: (id: string) => void;
   /** Override the drawer mission re-run (defaults to POST /monitor/testbed-missions). */
   onRerunMission?: (targetUrl: string, freshness: "fresh" | "memory") => void;
   /** Override failed-mission acknowledgement (defaults to POST /monitor/testbed-missions/:id/accept-failure). */
@@ -84,6 +87,7 @@ export function MonitorPage({
   onDismissCard = defaultDismissCard,
   onSnoozeCard = defaultSnoozeCard,
   onApproveMission = defaultApproveMission,
+  onDismissMission = defaultDismissMission,
   onRerunMission = defaultRerunMission,
   onAcceptMissionFailure = defaultAcceptMissionFailure,
   onOpenMissionIssue = defaultOpenMissionIssue,
@@ -133,6 +137,7 @@ export function MonitorPage({
         onDismissCard={onDismissCard}
         onSnoozeCard={onSnoozeCard}
         onApproveMission={onApproveMission}
+        onDismissMission={onDismissMission}
         onRerunMission={onRerunMission}
         onAcceptMissionFailure={onAcceptMissionFailure}
         onOpenMissionIssue={onOpenMissionIssue}
@@ -155,14 +160,26 @@ export function MonitorPage({
  * board — so the spawned card appears and updates through the live feed.
  * Fire-and-forget: the board feed, not this call, drives the UI.
  */
-function defaultSpawnMission(url: string): void {
+function defaultSpawnMission(input: MissionSpawnInput): void {
   void fetch(MISSIONS_URL, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ targetUrl: url }),
+    body: JSON.stringify(missionSpawnBody(input)),
   }).catch(() => {
     /* surfaced via the board feed / degraded state, not thrown here */
   });
+}
+
+function missionSpawnBody(input: MissionSpawnInput): Record<string, unknown> {
+  if (typeof input === "string") return { targetUrl: input };
+  const body: Record<string, unknown> = {
+    targetUrl: input.targetUrl,
+    mode: input.mode,
+    freshMemory: input.freshMemory,
+    initialStatus: input.initialStatus,
+  };
+  if (input.goal) body.goal = input.goal;
+  return body;
 }
 
 /**
@@ -271,6 +288,15 @@ function defaultApproveMission(id: string): void {
     headers: { "content-type": "application/json" },
   }).catch(() => {
     /* surfaced via the board feed / degraded state, not thrown here */
+  });
+}
+
+function defaultDismissMission(id: string): void {
+  void fetch(`${MISSIONS_URL}/${encodeURIComponent(id)}/dismiss`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+  }).catch(() => {
+    /* optimistic local hide already applied; next poll is the source of truth */
   });
 }
 
