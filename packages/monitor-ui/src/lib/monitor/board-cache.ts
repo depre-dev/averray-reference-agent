@@ -7,12 +7,14 @@
 
 import type { BoardCard, Lane } from "./card-types.js";
 import type { CalmBoardMetrics } from "./board-state.js";
+import type { SavedTestSuite } from "./mission-launch.js";
 
 export interface MonitorBoard {
   cards: BoardCard[];
   /** ISO timestamp from the server */
   at: string;
   llmUsage?: LlmUsageAggregate;
+  testbedSuites?: SavedTestSuite[];
   /** Optional board-summary metrics; omitted means the UI must not fabricate them. */
   calmMetrics?: CalmBoardMetrics;
   /** Quiet automation-capacity gauge. Omitted means the UI must omit it. */
@@ -105,10 +107,12 @@ export function applyEventToBoard(
         ? event.automationHealth
         : undefined;
       const llmUsage = isLlmUsageAggregate(event.llmUsage) ? event.llmUsage : undefined;
+      const testbedSuites = Array.isArray(event.testbedSuites) ? (event.testbedSuites as SavedTestSuite[]) : undefined;
       return {
         cards,
         at,
         ...(llmUsage ? { llmUsage } : {}),
+        ...(testbedSuites ? { testbedSuites } : {}),
         ...(calmMetrics ? { calmMetrics } : {}),
         ...(automationHealth ? { automationHealth } : {}),
       };

@@ -166,6 +166,13 @@ import {
   type TestbedMissionRun,
 } from "./monitor-testbed-missions.js";
 import {
+  appendTestbedSuiteRun,
+  createTestbedSuite,
+  getTestbedSuite,
+  listTestbedSuites,
+  type TestbedSuite,
+} from "./monitor-testbed-suites.js";
+import {
   approveRequestedTestbedMission,
   createMonitorTestbedMissionFromPayload,
   getTestbedMissionForAgent,
@@ -721,6 +728,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
     writeJson(response, 200, buildTesterCapabilitiesManifest({
       runner: readTestbedMissionRunnerHeartbeat() ?? null,
       missionRuns: listTestbedMissionRuns({ limit: 50 }),
+      savedSuites: testerSavedSuitesForManifest(),
     }));
     return;
   }
@@ -773,6 +781,45 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       return;
     }
     await handleMonitorTestbedMissionRequestProposal(request, response);
+    return;
+  }
+  const testbedSuiteRunId = monitorTestbedSuiteRunId(url.pathname);
+  if (request.method === "POST" && testbedSuiteRunId) {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    const missionVerdict = authorizeMissionSpawn(missionSpawnRoles, request.headers);
+    if (!missionVerdict.allowed) {
+      writeJson(response, 403, { error: "testbed_suite_run_forbidden", reason: missionVerdict.reason });
+      return;
+    }
+    await handleMonitorTestbedSuiteRunRequest(testbedSuiteRunId, response);
+    return;
+  }
+  if (url.pathname === "/monitor/testbed-suites" && (request.method === "GET" || request.method === "POST")) {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    const missionVerdict = authorizeMissionSpawn(missionSpawnRoles, request.headers);
+    if (!missionVerdict.allowed) {
+      writeJson(response, 403, { error: "testbed_suite_forbidden", reason: missionVerdict.reason });
+      return;
+    }
+    if (request.method === "GET") {
+      writeJson(response, 200, listTestbedSuites({ missionRuns: listTestbedMissionRuns({ limit: 50 }) }));
+      return;
+    }
+    await handleMonitorTestbedSuiteCreateRequest(request, response);
     return;
   }
   const testbedMissionApprovalId = monitorTestbedMissionApproveId(url.pathname);
@@ -1595,6 +1642,76 @@ async function handleMonitorTestbedMissionRequest(request: http.IncomingMessage,
     logger.error({ err: error }, "monitor_testbed_mission_create_failed");
     writeJson(response, 500, {
       error: "monitor_testbed_mission_create_failed",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function handleMonitorTestbedSuiteCreateRequest(request: http.IncomingMessage, response: http.ServerResponse) {
+  try {
+    const rawBody = await readBody(request);
+    const payload = rawBody ? JSON.parse(rawBody) as unknown : {};
+    if (!isRecord(payload)) {
+      writeJson(response, 400, { error: "invalid_payload" });
+      return;
+    }
+    const suite = createTestbedSuite(payload);
+    writeJson(response, 200, { ok: true, suite });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.startsWith("suite_") || message.startsWith("invalid_suite_")) {
+      writeJson(response, 400, { error: message });
+      return;
+    }
+    logger.error({ err: error }, "monitor_testbed_suite_create_failed");
+    writeJson(response, 500, {
+      error: "monitor_testbed_suite_create_failed",
+      message,
+    });
+  }
+}
+
+async function handleMonitorTestbedSuiteRunRequest(id: string, response: http.ServerResponse) {
+  try {
+    const suite = getTestbedSuite(id);
+    if (!suite) {
+      writeJson(response, 404, { error: "testbed_suite_not_found", id });
+      return;
+    }
+    const created = createMonitorTestbedMissionFromPayload({
+      targetUrl: suite.target,
+      mode: suite.mode,
+      freshMemory: true,
+      initialStatus: "ready",
+      requester: "operator",
+      ...(suite.goal ? { goal: suite.goal } : {}),
+    });
+    recordTestbedMissionCollaboration(created.run);
+    const updatedSuite = appendTestbedSuiteRun(suite.id, created.run);
+    logger.info(
+      {
+        suiteId: suite.id,
+        missionId: created.run.id,
+        targetUrl: created.run.targetUrl,
+      },
+      "monitor_testbed_suite_run_created"
+    );
+    writeJson(response, 200, {
+      ok: true,
+      suite: updatedSuite ?? suite,
+      ...created,
+    });
+  } catch (error) {
+    if (error instanceof TestbedMissionRequestValidationError) {
+      writeJson(response, 400, {
+        error: error.code,
+        message: error.message,
+      });
+      return;
+    }
+    logger.error({ err: error }, "monitor_testbed_suite_run_failed");
+    writeJson(response, 500, {
+      error: "monitor_testbed_suite_run_failed",
       message: error instanceof Error ? error.message : String(error),
     });
   }
@@ -3158,6 +3275,7 @@ async function loadMonitorSnapshot(
     ...enriched,
     codexTasks,
     testbedMissions: listTestbedMissionRuns({ limit: 20 }),
+    testbedSuites: listTestbedSuites({ missionRuns: listTestbedMissionRuns({ limit: 50 }) }).suites,
     testbedMissionRunner: summarizeTestbedMissionRunnerHeartbeat(readTestbedMissionRunnerHeartbeat()),
     llmUsageEvents,
     collaborationMessages: listCollaborationMessages({ limit: 200 }),
@@ -3511,6 +3629,37 @@ function monitorTestbedMissionActionId(pathname: string, action: "accept-failure
   const raw = pathname.slice(prefix.length, -suffix.length);
   const id = decodeURIComponent(raw).trim();
   return id.length > 0 && !id.includes("/") ? id : undefined;
+}
+
+function monitorTestbedSuiteRunId(pathname: string): string | undefined {
+  const prefix = "/monitor/testbed-suites/";
+  const suffix = "/run";
+  if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) return undefined;
+  const raw = pathname.slice(prefix.length, -suffix.length);
+  const id = decodeURIComponent(raw).trim();
+  return id.length > 0 && !id.includes("/") ? id : undefined;
+}
+
+function testerSavedSuitesForManifest() {
+  const missionRuns = listTestbedMissionRuns({ limit: 50 });
+  return listTestbedSuites({ missionRuns }).suites.map((suite) => ({
+    id: suite.id,
+    name: suite.name,
+    flow: testerSuiteFlowId(suite.mode),
+    target: suite.target,
+    ...(suite.lastRun ? {
+      lastRun: {
+        missionId: suite.lastRun.runId,
+        verdict: suite.lastRun.verdict,
+        at: suite.lastRun.ts,
+      },
+    } : {}),
+  }));
+}
+
+function testerSuiteFlowId(mode: TestbedSuite["mode"]): string {
+  if (mode === "siwe_auth") return "siwe_auth_role_gating";
+  return mode;
 }
 
 async function createGithubIssueForMission(

@@ -1,20 +1,24 @@
 import { useId, useState, type FormEvent } from "react";
-import type { MissionLaunchInput, MissionLaunchMode } from "../lib/monitor/mission-launch.js";
+import type { MissionLaunchInput, MissionLaunchMode, SaveTestSuiteInput } from "../lib/monitor/mission-launch.js";
 
 const DEFAULT_TARGET = "https://app.averray.com";
 
 export interface StartMissionLauncherProps {
   onSpawnMission?: (input: MissionLaunchInput) => void;
+  onSaveSuite?: (input: SaveTestSuiteInput) => void;
 }
 
-export function StartMissionLauncher({ onSpawnMission }: StartMissionLauncherProps) {
+export function StartMissionLauncher({ onSpawnMission, onSaveSuite }: StartMissionLauncherProps) {
   const targetId = useId();
   const goalId = useId();
+  const suiteNameId = useId();
   const [open, setOpen] = useState(false);
   const [targetUrl, setTargetUrl] = useState(DEFAULT_TARGET);
   const [mode, setMode] = useState<MissionLaunchMode>("surface_sweep");
   const [freshMemory, setFreshMemory] = useState(true);
   const [requestApproval, setRequestApproval] = useState(false);
+  const [saveSuite, setSaveSuite] = useState(false);
+  const [suiteName, setSuiteName] = useState("");
   const [goal, setGoal] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -23,6 +27,10 @@ export function StartMissionLauncher({ onSpawnMission }: StartMissionLauncherPro
     const target = targetUrl.trim();
     if (!isHttpUrl(target)) {
       setError("Use an http:// or https:// target.");
+      return;
+    }
+    if (saveSuite && !suiteName.trim()) {
+      setError("Name the suite before saving it.");
       return;
     }
     setError(null);
@@ -34,6 +42,15 @@ export function StartMissionLauncher({ onSpawnMission }: StartMissionLauncherPro
       initialStatus: requestApproval ? "requested" : "ready",
       ...(trimmedGoal ? { goal: trimmedGoal } : {}),
     });
+    if (saveSuite) {
+      onSaveSuite?.({
+        name: suiteName.trim(),
+        target,
+        mode,
+        author: "operator",
+        ...(trimmedGoal ? { goal: trimmedGoal } : {}),
+      });
+    }
     setOpen(false);
   };
 
@@ -86,6 +103,16 @@ export function StartMissionLauncher({ onSpawnMission }: StartMissionLauncherPro
               <span>Gold Path</span>
               <small>testnet</small>
             </label>
+            <label>
+              <input
+                type="radio"
+                name="mission-flow"
+                checked={mode === "siwe_auth"}
+                onChange={() => setMode("siwe_auth")}
+              />
+              <span>Role Gating</span>
+              <small>read-only</small>
+            </label>
           </fieldset>
 
           <fieldset className="hm-choice-group hm-choice-group--compact">
@@ -129,6 +156,30 @@ export function StartMissionLauncher({ onSpawnMission }: StartMissionLauncherPro
             />
             <span>Request approval before the runner claims it</span>
           </label>
+
+          {onSaveSuite ? (
+            <>
+              <label className="hm-checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={saveSuite}
+                  onChange={(event) => setSaveSuite(event.target.checked)}
+                />
+                <span>Save this config as a suite</span>
+              </label>
+              {saveSuite ? (
+                <label className="hm-field" htmlFor={suiteNameId}>
+                  <span>Suite name</span>
+                  <input
+                    id={suiteNameId}
+                    value={suiteName}
+                    onChange={(event) => setSuiteName(event.target.value)}
+                    placeholder="Daily app sweep"
+                  />
+                </label>
+              ) : null}
+            </>
+          ) : null}
 
           {error ? <div className="hm-form-error" role="alert">{error}</div> : null}
 
