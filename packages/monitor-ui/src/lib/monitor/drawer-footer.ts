@@ -35,6 +35,8 @@ export interface DrawerActionHandlers {
   onApproveAndMerge?: (card: BoardCard) => void;
   /** Return the item to the codex-needed/dispatch path. */
   onSendBackToCodex?: (card: BoardCard) => void;
+  /** Triage a stuck/failed card off the board (server-persisted dismiss). */
+  onDismiss?: (card: BoardCard) => void;
   /** Focus the co-pilot composer scoped to this card. */
   onAskHermes?: (card: BoardCard) => void;
 }
@@ -118,20 +120,31 @@ export function buildDrawerFooter(card: BoardCard, deps: DrawerFooterDeps = {}):
         : { disabledReason: "Proposing a fix task isn't available here." }),
     });
   } else if (variant === "action") {
-    // Merging needs the SPECIFIC PR (the repo url isn't enough), so this path
-    // requires a resolved pull-request url — never the repo fallback.
+    // The operator's one resolving primary depends on what's actually possible:
+    //   - a card with a real PR → "Approve & merge" (opens GitHub; the board
+    //     NEVER merges — the human merges there, we just record approval);
+    //   - a card with NO PR (e.g. a failed task that can't be merged) → never
+    //     show a dead "Approve & merge"; lead with "Dismiss" to triage it off
+    //     the board, which is the honest resolving action.
     const prUrl = pullRequestUrlForCard(card);
-    buttons.push({
-      key: "approve-merge",
-      label: "Approve & merge",
-      kind: "action",
-      // The board NEVER merges — it opens the GitHub merge UI (human merges)
-      // and records operator approval if that path is wired.
-      ...(prUrl
-        ? { run: () => { openUrl(prUrl); h.onApproveAndMerge?.(card); } }
-        : { disabledReason: "No linked PR to merge on GitHub." }),
-    });
     const hasPr = Boolean(relatedPrForCard(card));
+    if (prUrl) {
+      buttons.push({
+        key: "approve-merge",
+        label: "Approve & merge",
+        kind: "action",
+        run: () => { openUrl(prUrl); h.onApproveAndMerge?.(card); },
+      });
+    } else {
+      buttons.push({
+        key: "dismiss",
+        label: "Dismiss",
+        kind: "action",
+        ...(h.onDismiss
+          ? { run: () => h.onDismiss!(card) }
+          : { disabledReason: "Dismissing isn't available here." }),
+      });
+    }
     buttons.push({
       key: "send-back-codex",
       label: "Send back to Codex",
@@ -139,7 +152,7 @@ export function buildDrawerFooter(card: BoardCard, deps: DrawerFooterDeps = {}):
       // Codex iterates an existing PR, so send-back needs a linked PR number.
       ...(h.onSendBackToCodex && hasPr
         ? { run: () => h.onSendBackToCodex!(card) }
-        : { disabledReason: h.onSendBackToCodex ? "No linked PR to send back to Codex." : "Sending back to Codex isn't available here." }),
+        : { disabledReason: hasPr ? "Sending back to Codex isn't available here." : "No linked PR to send back to Codex." }),
     });
   } else if (variant === "done") {
     buttons.push({
