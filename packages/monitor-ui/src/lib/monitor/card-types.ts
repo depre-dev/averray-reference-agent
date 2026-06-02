@@ -222,6 +222,10 @@ export interface MissionBlocker {
   head: string;
   body?: string;
 }
+export interface MissionScore {
+  label: string;
+  value: number;
+}
 
 export interface MissionEvidence {
   kind: "screenshot" | "trace" | "console" | "video";
@@ -240,8 +244,16 @@ export interface MissionReport {
   target: string;
   /** e.g. "fresh · no memory" */
   seed: string;
+  /** Mission goal/scope, when the run carried it. */
+  goal?: string;
+  /** One-line conclusion derived from the reported verdict and report detail. */
+  conclusion?: string;
+  /** Browser-agent narrative from the what_i_tried evidence trail. */
+  agentNarrative?: string[];
   /** Attempt count. Optional — not carried by a live agent report. */
   runs?: number;
+  /** Generic score entries from the structured report, mapped to 0..10. */
+  scores?: MissionScore[];
   /** 0..10. Optional — only the scores the agent actually reported. */
   successScore?: number;
   /** 0..10 */

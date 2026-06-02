@@ -206,16 +206,25 @@ describe("DetailDrawer — variants", () => {
     expect(getByText(/Coalesce repeated policy-attach entries/)).toBeTruthy();
   });
 
-  test("mission card shows the full report — verdict, path, blockers, evidence, boundary, recommendations", () => {
+  test("mission card shows the full report — scope, conclusion, narrative, path, blockers, evidence, boundary, recommendations", () => {
     const card = fixture("mission browser-onboard-04");
-    const { container, getByText } = render(
+    const { container, getAllByText, getByText } = render(
       <DetailDrawer card={card} cards={[{ id: card.id }]} onClose={noop} onNavigate={noop} />,
     );
     expect(getByText("Browser mission · agent report")).toBeTruthy();
+    // Scope + conclusion + narrative
+    expect(getByText("Scope")).toBeTruthy();
+    expect(getByText(/fresh agent can connect a wallet/)).toBeTruthy();
+    expect(getByText("Conclusion")).toBeTruthy();
+    expect(getByText(/PARTIAL — Sign-message modal latency/)).toBeTruthy();
+    expect(getByText("What the agent did")).toBeTruthy();
+    expect(getByText(/Opened a clean Chromium context/)).toBeTruthy();
     // Verdict + confidence (0.81 → 81%) + scores
     expect(getByText(/Verdict · run #4/)).toBeTruthy();
     expect(getByText("PARTIAL")).toBeTruthy();
     expect(getByText(/81/)).toBeTruthy();
+    expect(getAllByText("Scores").length).toBeGreaterThan(0);
+    expect(getByText("7/10")).toBeTruthy();
     // Path steps
     expect(getByText("Path taken")).toBeTruthy();
     expect(getByText("Clicked Connect wallet")).toBeTruthy();
@@ -228,7 +237,8 @@ describe("DetailDrawer — variants", () => {
     expect(getByText(/BOUNDARY · enforced/)).toBeTruthy();
     expect(getByText(/Read-only mission/)).toBeTruthy();
     // Recommendations
-    expect(getByText("Hermes recommends")).toBeTruthy();
+    expect(getByText("Suggested fix")).toBeTruthy();
+    expect(getByText(/Add a spinner/)).toBeTruthy();
     // Static mission contract reference
     expect(getByText("Spec · /mission spawn flow")).toBeTruthy();
     expect(getByText(/A mission is a first-class work item/)).toBeTruthy();
@@ -277,6 +287,10 @@ describe("DetailDrawer — variants", () => {
     // no invented attempt count / score row
     expect(queryByText(/run #/)).toBeNull();
     expect(queryByText(/out of 10/)).toBeNull();
+    expect(queryByText("Scope")).toBeNull();
+    expect(queryByText("Conclusion")).toBeNull();
+    expect(queryByText("What the agent did")).toBeNull();
+    expect(queryByText("Suggested fix")).toBeNull();
   });
 
   // Regression: live cards cross an HTTP/JSON boundary and don't always carry
@@ -390,6 +404,48 @@ describe("DetailDrawer — footer actions (G2)", () => {
 });
 
 describe("DetailDrawer — failed mission blocker (raw reachable, cleaned by default)", () => {
+  test("failed mission report shows blockers and suggested fix", () => {
+    const card = {
+      id: "mission failed-readable-01",
+      lane: "needs-attention",
+      type: "mission",
+      agentType: "hermes",
+      title: "Fresh-agent browser mission",
+      summary: "FAIL · gold-path · 1 blocker",
+      repo: "testbed/mission",
+      freshness: 4,
+      state: "fresh",
+      risk: ["testbed"],
+      missionStatus: "failed",
+      waitingOn: { actor: "operator", tone: "warn" },
+      mission: {
+        verdict: "FAILED",
+        verdictTone: "fail",
+        confidence: 0.42,
+        goal: "Claim a sponsored starter job and reach the receipt.",
+        conclusion: "FAIL — claim blocked at sign-in.",
+        agentNarrative: ["Opened the app.", "Stopped at sign-in because the wallet prompt never appeared."],
+        target: "https://app.averray.com",
+        seed: "fresh · no memory",
+        scores: [{ label: "Task Completion", value: 2 }],
+        path: [{ n: 1, status: "fail", desc: "Opened app but could not reach sign-in", lat: "9.2s" }],
+        blockers: [{ head: "claim blocked at sign-in", body: "Wallet prompt never appeared after clicking claim." }],
+        evidence: [],
+        mutationBoundary: "Read-only mission — the agent stopped before any mutation.",
+        recommendations: ["Make the claim sign-in prompt visible after the first click."],
+      },
+    } as unknown as BoardCard;
+    const { getByText } = render(
+      <DetailDrawer card={card} cards={[{ id: card.id }]} onClose={noop} onNavigate={noop} />,
+    );
+    expect(getByText("Conclusion")).toBeTruthy();
+    expect(getByText(/FAIL — claim blocked at sign-in/)).toBeTruthy();
+    expect(getByText("Blockers · confusing moments")).toBeTruthy();
+    expect(getByText("claim blocked at sign-in")).toBeTruthy();
+    expect(getByText("Suggested fix")).toBeTruthy();
+    expect(getByText(/Make the claim sign-in prompt visible/)).toBeTruthy();
+  });
+
   test("shows a cleaned blocker head and keeps the raw runner output one click deep", () => {
     const card = fixture("mission browser-claim-09"); // failed mission, raw dump in blocker
     const { container, getByText } = render(

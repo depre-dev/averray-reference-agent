@@ -1217,6 +1217,7 @@ describe("indexTestbedMissions", () => {
 describe("mapMissionReport", () => {
   const run = {
     id: "mission-xyz",
+    goal: "Verify a fresh agent can connect wallet and reach the first receipt.",
     targetUrl: "https://staging.averray.com/onboarding",
     freshMemory: true,
     allowTestMutations: false,
@@ -1230,16 +1231,28 @@ describe("mapMissionReport", () => {
       stoppedBeforeMutation: true,
       completedPath: ["Loaded onboarding page", "Clicked Connect wallet"],
       recommendations: ["Add a spinner to the Sign-message modal"],
-      evidence: ["screenshot: https://x.test/step3.png", "trace: browser-trace 2m14s"],
+      evidence: [
+        { type: "what_i_tried", value: "Opened a clean Chromium context.\nClicked Connect wallet." },
+        "screenshot: https://x.test/step3.png",
+        "trace: browser-trace 2m14s",
+      ],
     },
   };
 
-  it("maps verdict, confidence, seed, path, blockers, evidence, boundary, recs", () => {
+  it("maps verdict, scope, conclusion, narrative, scores, path, blockers, evidence, boundary, recs", () => {
     const m = mapMissionReport(run)!;
     expect(m.verdict).toBe("PARTIAL");
     expect(m.verdictTone).toBe("warn");
     expect(m.confidence).toBe(0.81);
+    expect(m.goal).toBe("Verify a fresh agent can connect wallet and reach the first receipt.");
+    expect(m.conclusion).toBe("PARTIAL — Sign-message modal latency");
+    expect(m.agentNarrative).toEqual(["Opened a clean Chromium context.", "Clicked Connect wallet."]);
     expect(m.seed).toBe("fresh · no memory");
+    expect(m.scores).toEqual([
+      { label: "Success", value: 8 },
+      { label: "Clarity", value: 6 },
+      { label: "Latency", value: 10 },
+    ]);
     expect(m.path).toEqual([
       { n: 1, status: "ok", desc: "Loaded onboarding page" },
       { n: 2, status: "ok", desc: "Clicked Connect wallet" },
@@ -1250,6 +1263,7 @@ describe("mapMissionReport", () => {
       "Receipt poll has no visible cadence",
     ]);
     // evidence "type: detail" → kind + label + href (link only when a URL)
+    expect(m.evidence).toHaveLength(2);
     expect(m.evidence[0]).toEqual({ kind: "screenshot", label: "https://x.test/step3.png", href: "https://x.test/step3.png" });
     expect(m.evidence[1]).toEqual({ kind: "trace", label: "browser-trace 2m14s", href: "#" });
     expect(m.mutationBoundary).toMatch(/stopped before any mutation\. No transactions submitted/);
@@ -1284,7 +1298,7 @@ describe("mapMissionReport", () => {
         stoppedBeforeMutation: true,
         completedPath: [
           { desc: "Loaded onboarding page", latencyMs: 180 },
-          { desc: "Clicked Connect wallet", durationMs: 4200 },
+          { desc: "Clicked Connect wallet", status: "warn", durationMs: 4200 },
         ],
         recommendations: [],
         evidence: ["trace: browser-trace"],
@@ -1295,7 +1309,7 @@ describe("mapMissionReport", () => {
 
     expect(m.path).toEqual([
       { n: 1, status: "ok", desc: "Loaded onboarding page", lat: "180ms" },
-      { n: 2, status: "ok", desc: "Clicked Connect wallet", lat: "4.2s" },
+      { n: 2, status: "warn", desc: "Clicked Connect wallet", lat: "4.2s" },
     ]);
     expect(m.blockers).toEqual([
       { head: "Sign-message modal latency", body: "The modal stayed pending for 4.2s." },

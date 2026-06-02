@@ -67,7 +67,11 @@ export function missionReportText(card: BoardCard): string | undefined {
   const lines = [
     `Mission report — ${card.title}`,
     `Target: ${m.target}`,
+    ...(m.goal ? [`Scope: ${m.goal}`] : []),
     `Verdict: ${m.verdict} (confidence ${Math.round((m.confidence ?? 0) * 100)}%)`,
+    ...(m.conclusion ? [`Conclusion: ${m.conclusion}`] : []),
+    ...(m.agentNarrative?.length ? ["", "What the agent did:", ...m.agentNarrative.map((line) => `- ${line}`)] : []),
+    ...(m.scores?.length ? ["", "Scores:", ...m.scores.map((score) => `- ${score.label}: ${score.value}/10`)] : []),
     ...(m.blockers.length ? ["", "Blockers:", ...m.blockers.map((b) => `- ${b.head}: ${b.body}`)] : []),
     ...(m.recommendations.length ? ["", "Recommendations:", ...m.recommendations.map((r) => `- ${r}`)] : []),
   ];

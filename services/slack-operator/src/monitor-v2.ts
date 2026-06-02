@@ -197,6 +197,10 @@ export interface CardMissionBlocker {
   head: string;
   body?: string;
 }
+export interface CardMissionScore {
+  label: string;
+  value: number;
+}
 export interface CardMissionEvidence {
   kind: "screenshot" | "trace" | "console" | "video";
   label: string;
@@ -209,6 +213,10 @@ export interface CardMissionReport {
   confidence: number;
   target: string;
   seed: string;
+  goal?: string;
+  conclusion?: string;
+  agentNarrative?: string[];
+  scores?: CardMissionScore[];
   path: CardMissionStep[];
   blockers: CardMissionBlocker[];
   evidence: CardMissionEvidence[];
@@ -1298,6 +1306,18 @@ function missionStepDesc(source: Record<string, unknown>, index: number, fallbac
     ?? (fallback === "[object Object]" ? "Step recorded by browser agent" : fallback);
 }
 
+function missionStepStatus(source: Record<string, unknown>, index: number): CardMissionStep["status"] {
+  const step = reportArrayEntry(source, "completedPath", index)
+    ?? reportArrayEntry(source, "path", index)
+    ?? reportArrayEntry(source, "steps", index)
+    ?? reportArrayEntry(source, "completedSteps", index);
+  const raw = firstString(step?.status, step?.verdict, step?.outcome, step?.state)?.toLowerCase();
+  if (!raw) return "ok";
+  if (/\b(fail|failed|error|blocked|blocker)\b/.test(raw)) return "fail";
+  if (/\b(warn|partial|slow|skip|skipped|pending)\b/.test(raw)) return "warn";
+  return "ok";
+}
+
 function missionBlockerHead(source: Record<string, unknown>, key: "blockers" | "confusingMoments", index: number, fallback: string): string {
   const entry = reportArrayEntry(source, key, index);
   return firstString(entry?.head, entry?.title, entry?.summary, entry?.label, entry?.message)
@@ -1329,6 +1349,82 @@ function missionLatency(source: Record<string, unknown>): string | undefined {
   return formatLatency(source.latency ?? source.duration ?? source.durationMs ?? source.elapsedMs ?? source.totalLatencyMs);
 }
 
+function missionScoreLabel(key: string): string {
+  return key
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .trim()
+    .replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+
+function missionScoreList(scores: Record<string, number>): CardMissionScore[] {
+  return Object.entries(scores)
+    .filter(([, value]) => Number.isFinite(value))
+    .map(([key, value]) => ({
+      label: missionScoreLabel(key),
+      value: Math.round(value * 2),
+    }));
+}
+
+function narrativeLinesFromValue(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => asNonEmptyString(entry))
+      .filter((entry): entry is string => Boolean(entry));
+  }
+  const text = asNonEmptyString(value);
+  return text ? text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) : [];
+}
+
+function missionNarrativeEvidenceValue(entry: unknown): string | undefined {
+  if (typeof entry === "string") {
+    const match = /^what_i_tried:\s*([\s\S]+)$/i.exec(entry.trim());
+    return match?.[1]?.trim();
+  }
+  const record = asRecord(entry);
+  if (!record) return undefined;
+  const type = asNonEmptyString(record.type)?.toLowerCase();
+  return type === "what_i_tried" ? asNonEmptyString(record.value) : undefined;
+}
+
+function missionAgentNarrative(source: Record<string, unknown>): string[] {
+  const direct = [
+    ...narrativeLinesFromValue(source.what_i_tried),
+    ...narrativeLinesFromValue(source.whatITried),
+    ...narrativeLinesFromValue(source.whatI_tried),
+  ];
+  const fromEvidence = asArray(source.evidence).flatMap((entry) => narrativeLinesFromValue(missionNarrativeEvidenceValue(entry)));
+  return Array.from(new Set([...direct, ...fromEvidence]));
+}
+
+function isAgentNarrativeEvidence(raw: string): boolean {
+  return /^what_i_tried:\s*/i.test(raw.trim());
+}
+
+function trimConclusionPrefix(text: string): string {
+  return text.replace(/^(pass|partial|fail|failed|ok)\s*:\s*/i, "").trim();
+}
+
+function missionConclusion(
+  report: ReturnType<typeof testbedMissionStructuredReport>,
+  source: Record<string, unknown>,
+): string | undefined {
+  if (!report) return undefined;
+  const verdict = report.verdict === "pass" ? "OK" : report.verdict === "partial" ? "PARTIAL" : "FAIL";
+  const detail = report.verdict === "pass"
+    ? firstString(source.conclusion, source.summary, report.summary, report.recommendations[0])
+    : firstString(
+      report.blockers[0],
+      report.confusingMoments[0],
+      report.recommendations[0],
+      source.conclusion,
+      source.summary,
+      report.summary,
+    );
+  const cleaned = detail ? trimConclusionPrefix(detail) : "";
+  return cleaned ? `${verdict} — ${cleaned}` : undefined;
+}
+
 /**
  * Map a stored testbed mission run to the UI MissionReport. Returns
  * undefined when the run has no structured report yet (e.g. still running),
@@ -1353,7 +1449,7 @@ export function mapMissionReport(run: Record<string, unknown>): CardMissionRepor
     const lat = missionStepLatency(source, i);
     return {
       n: i + 1,
-      status: "ok" as const,
+      status: missionStepStatus(source, i),
       desc: missionStepDesc(source, i, desc),
       ...(lat ? { lat } : {}),
     };
@@ -1376,8 +1472,12 @@ export function mapMissionReport(run: Record<string, unknown>): CardMissionRepor
   const successScore = pickScore(report.scores, ["success", "usability", "task", "completion"]);
   const clarityScore = pickScore(report.scores, ["clarity", "ux", "understanding", "comprehension"]);
   const latencyScore = pickScore(report.scores, ["latency", "speed", "performance", "responsiveness"]);
+  const scores = missionScoreList(report.scores);
   const runs = missionRuns(source);
   const latency = missionLatency(source);
+  const goal = firstString(run.goal, source.goal);
+  const conclusion = missionConclusion(report, source);
+  const agentNarrative = missionAgentNarrative(source);
 
   return {
     verdict,
@@ -1385,9 +1485,13 @@ export function mapMissionReport(run: Record<string, unknown>): CardMissionRepor
     confidence: report.confidence,
     target: asString(run.targetUrl) ?? "",
     seed: run.freshMemory === false ? "warm memory" : "fresh · no memory",
+    ...(goal ? { goal } : {}),
+    ...(conclusion ? { conclusion } : {}),
+    ...(agentNarrative.length > 0 ? { agentNarrative } : {}),
+    ...(scores.length > 0 ? { scores } : {}),
     path,
     blockers,
-    evidence: report.evidence.map(mapMissionEvidence),
+    evidence: report.evidence.filter((raw) => !isAgentNarrativeEvidence(raw)).map(mapMissionEvidence),
     mutationBoundary: notes ? `${boundaryBase} ${notes}` : boundaryBase,
     recommendations: report.recommendations,
     ...(runs !== undefined ? { runs } : {}),

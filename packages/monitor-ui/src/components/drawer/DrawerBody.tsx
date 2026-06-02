@@ -516,12 +516,26 @@ function MissionBody({ card }: { card: MissionCard }) {
     "Verdict" +
     (m.runs !== undefined ? ` · run #${m.runs}` : "") +
     (m.latency ? ` · ${m.latency}` : "");
-  const hasScores =
-    m.successScore !== undefined || m.clarityScore !== undefined || m.latencyScore !== undefined;
+  const hasGenericScores = (m.scores?.length ?? 0) > 0;
+  const hasLegacyScores =
+    !hasGenericScores &&
+    (m.successScore !== undefined || m.clarityScore !== undefined || m.latencyScore !== undefined);
   const fmtScore = (n: number | undefined) => (n === undefined ? "—" : String(n));
 
   return (
     <>
+      {m.goal ? (
+        <VerdictBlock head="Scope" accent="var(--hm-hermes-deep)">
+          <b>Scope:</b> {m.goal}
+        </VerdictBlock>
+      ) : null}
+
+      {m.conclusion ? (
+        <VerdictBlock head="Conclusion" accent={verdictColor} tone={m.verdictTone === "fail" ? "fail" : m.verdictTone === "warn" ? "warn" : undefined}>
+          {m.conclusion}
+        </VerdictBlock>
+      ) : null}
+
       <section>
         <div className="hm-section-h">{verdictHead}</div>
         <div className="hm-mission-confidence">
@@ -540,7 +554,14 @@ function MissionBody({ card }: { card: MissionCard }) {
             </span>
             <span className="meta">{m.seed}</span>
           </div>
-          {hasScores ? (
+          {hasGenericScores ? (
+            <div className="col">
+              <span className="lbl">Scores</span>
+              <span className="val">{m.scores!.length}</span>
+              <span className="meta">reported · 0..10 scale</span>
+            </div>
+          ) : null}
+          {hasLegacyScores ? (
             <div className="col">
               <span className="lbl">Scores · success · clarity · latency</span>
               <span className="val">
@@ -555,6 +576,38 @@ function MissionBody({ card }: { card: MissionCard }) {
           ) : null}
         </div>
       </section>
+
+      {hasGenericScores ? (
+        <section>
+          <div className="hm-section-h">Scores</div>
+          <div className="hm-checklist">
+            {m.scores!.map((score) => (
+              <div className="row" key={score.label}>
+                <span className="box" style={{ borderColor: "var(--hm-hermes)", color: "transparent" }}>
+                  ✓
+                </span>
+                <span>{score.label}</span>
+                <span className="hint">{score.value}/10</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {m.agentNarrative?.length ? (
+        <section>
+          <div className="hm-section-h">What the agent did</div>
+          <div className="hm-verdict-block">
+            <div className="body">
+              <ol style={{ margin: "0 0 0 18px", padding: 0, display: "grid", gap: 6 }}>
+                {m.agentNarrative.map((line, i) => (
+                  <li key={`${i}-${line}`}>{line}</li>
+                ))}
+              </ol>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       {m.path.length > 0 ? (
         <section>
@@ -629,7 +682,7 @@ function MissionBody({ card }: { card: MissionCard }) {
 
       {m.recommendations.length > 0 ? (
         <section>
-          <div className="hm-section-h">Hermes recommends</div>
+          <div className="hm-section-h">Suggested fix</div>
           <div className="hm-checklist">
             {m.recommendations.map((r, i) => (
               <div className="row" key={i}>
