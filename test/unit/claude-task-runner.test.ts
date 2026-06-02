@@ -93,7 +93,13 @@ describe("claude task runner", () => {
     const result = await runClaudeTaskRunnerOnce(config(path), {
       executor: async (task) => {
         seen.push(task.id);
-        return { exitCode: 0, stdout: "opened PR", stderr: "", summary: "opened PR" };
+        return {
+          exitCode: 0,
+          stdout: "opened PR",
+          stderr: "",
+          summary: "opened PR",
+          outcome: { opened: true, pullRequestUrl: "https://github.com/averray-agent/agent/pull/777" },
+        };
       },
       log: () => {},
     });
@@ -117,7 +123,13 @@ describe("claude task runner", () => {
     }), {
       executor: async (task) => {
         seen.push({ id: task.id, agent: task.agent });
-        return { exitCode: 0, stdout: "opened PR", stderr: "", summary: "opened PR" };
+        return {
+          exitCode: 0,
+          stdout: "opened PR",
+          stderr: "",
+          summary: "opened PR",
+          outcome: { opened: true, pullRequestUrl: "https://github.com/averray-agent/agent/pull/778" },
+        };
       },
       log: () => {},
     });
@@ -134,13 +146,19 @@ describe("claude task runner", () => {
     const id = await approvedClaudeTask(path);
 
     const result = await runClaudeTaskRunnerOnce(config(path), {
-      executor: async () => ({ exitCode: 0, stdout: "branch pushed\nPR opened\n", stderr: "", summary: "PR opened" }),
+      executor: async () => ({
+        exitCode: 0,
+        stdout: "branch pushed\nPR opened\n",
+        stderr: "",
+        summary: "PR opened",
+        outcome: { opened: true, pullRequestUrl: "https://github.com/averray-agent/agent/pull/779" },
+      }),
       log: () => {},
     });
 
     expect(result.status).toBe("completed");
     const [task] = await listCodexTasks({ path });
-    expect(task).toMatchObject({ id, status: "completed", completionSummary: "PR opened" });
+    expect(task).toMatchObject({ id, status: "completed", completionSummary: "PR opened\nhttps://github.com/averray-agent/agent/pull/779" });
     await expect(readCodexRunnerHeartbeat({ path })).resolves.toMatchObject({
       runnerId: "test-claude-runner",
       status: "completed",
@@ -160,6 +178,7 @@ describe("claude task runner", () => {
         stdout: "opened PR",
         stderr: "",
         summary: "opened PR",
+        outcome: { opened: true, pullRequestUrl: "https://github.com/averray-agent/agent/pull/780" },
         usage: {
           input_tokens: 120,
           output_tokens: 30,
@@ -179,6 +198,48 @@ describe("claude task runner", () => {
       inputTokens: 120,
       outputTokens: 30,
       cacheTokens: 15,
+    });
+  });
+
+  it("zero-exit no-PR outcome → failCodexTask + failed heartbeat", async () => {
+    const path = await tempQueuePath();
+    const id = await approvedClaudeTask(path);
+
+    const result = await runClaudeTaskRunnerOnce(config(path), {
+      executor: async () => ({
+        exitCode: 0,
+        stdout: "Claude produced no changes; not opening a PR.\n",
+        stderr: "",
+        summary: "Claude produced no changes; not opening a PR.",
+        outcome: { opened: false, reason: "no_changes" },
+      }),
+      log: () => {},
+    });
+
+    expect(result).toMatchObject({ status: "failed", reason: "no_changes" });
+    const [task] = await listCodexTasks({ path });
+    expect(task).toMatchObject({ id, status: "failed", failureReason: "no_changes", completionSummary: "no_changes" });
+    await expect(readCodexRunnerHeartbeat({ path })).resolves.toMatchObject({ status: "failed", message: "no_changes" });
+  });
+
+  it("timeout errors remain failed", async () => {
+    const path = await tempQueuePath();
+    const id = await approvedClaudeTask(path);
+
+    const result = await runClaudeTaskRunnerOnce(config(path), {
+      executor: async () => {
+        throw new Error("Claude task command timed out after 1000ms.");
+      },
+      log: () => {},
+    });
+
+    expect(result).toMatchObject({ status: "failed", reason: "Claude task command timed out after 1000ms." });
+    const [task] = await listCodexTasks({ path });
+    expect(task).toMatchObject({
+      id,
+      status: "failed",
+      failureReason: "Claude task command timed out after 1000ms.",
+      completionSummary: "Claude task command timed out after 1000ms.",
     });
   });
 

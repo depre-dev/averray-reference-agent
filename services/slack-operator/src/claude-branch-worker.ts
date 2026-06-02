@@ -28,7 +28,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { assertNoForbiddenFiles, redact } from "./codex-branch-worker.js";
+import {
+  assertNoForbiddenFiles,
+  gitCheckoutFailureReason,
+  redact,
+} from "./codex-branch-worker.js";
+import {
+  formatBranchWorkerOutcome,
+  type BranchWorkerOutcome,
+} from "./branch-worker-outcome.js";
 import {
   specialistAgentDefinition,
   taskAgentBranchPrefix,
@@ -218,7 +226,7 @@ export async function runClaudeBranchWorker(
   task: ClaudeWorkerTask = parseClaudeWorkerTask(),
   config: ClaudeWorkerConfig = parseClaudeWorkerConfig(),
   deps: ClaudeBranchWorkerDeps = {}
-): Promise<void> {
+): Promise<BranchWorkerOutcome> {
   const exec = deps.exec ?? defaultExec;
   const openPullRequest = deps.openPullRequest ?? openPullRequestViaApi;
   const branch = claudeBranchName(task);
@@ -228,7 +236,9 @@ export async function runClaudeBranchWorker(
   await mkdir(config.workRoot, { recursive: true });
   const workdir = await mkdtemp(join(config.workRoot, `${slug(task.id)}-`));
   try {
-    await exec("git", ["clone", "--no-tags", "--depth=50", cloneUrl, workdir], { token: config.githubToken });
+    const cloneResult = await exec("git", ["clone", "--no-tags", "--depth=50", cloneUrl, workdir], { token: config.githubToken });
+    const checkoutFailure = await gitCheckoutFailureReason(exec, workdir, cloneResult, taskAgentLabel(task.agent ?? "claude"));
+    if (checkoutFailure) return { opened: false, reason: checkoutFailure, summary: checkoutFailure };
     await exec("git", ["config", "user.name", config.gitUserName], { cwd: workdir });
     await exec("git", ["config", "user.email", config.gitUserEmail], { cwd: workdir });
     await exec("git", ["fetch", "origin", config.baseBranch], { cwd: workdir, token: config.githubToken });
@@ -248,7 +258,11 @@ export async function runClaudeBranchWorker(
     assertNoForbiddenFiles(changedFiles, taskAgentLabel(task.agent ?? "claude"));
     if (changedFiles.length === 0) {
       console.log(`${taskAgentLabel(task.agent ?? "claude")} produced no changes for ${task.repo}; not opening a PR.`);
-      return;
+      return {
+        opened: false,
+        reason: `no_changes: ${taskAgentLabel(task.agent ?? "claude")} produced no changes for ${task.repo}; not opening a PR.`,
+        summary: `${taskAgentLabel(task.agent ?? "claude")} produced no changes for ${task.repo}; not opening a PR.`,
+      };
     }
 
     await exec("git", ["add", "-A"], { cwd: workdir });
@@ -262,6 +276,12 @@ export async function runClaudeBranchWorker(
       body: buildPullRequestBody(task),
     });
     console.log(`${taskAgentLabel(task.agent ?? "claude")} opened PR #${pr.number} on ${task.repo} (${branch})${pr.html_url ? ` — ${pr.html_url}` : ""}.`);
+    return {
+      opened: true,
+      pullRequestNumber: pr.number,
+      ...(pr.html_url ? { pullRequestUrl: pr.html_url } : {}),
+      summary: `${taskAgentLabel(task.agent ?? "claude")} opened PR #${pr.number} on ${task.repo}.`,
+    };
   } finally {
     if (!config.keepWorktree) await rm(workdir, { recursive: true, force: true });
   }
@@ -428,6 +448,10 @@ function lastNonEmptyLine(value: string): string {
 
 if (fileURLToPath(import.meta.url) === process.argv[1]) {
   runClaudeBranchWorker()
+    .then((outcome) => {
+      console.log(formatBranchWorkerOutcome(outcome));
+      if (!outcome.opened) process.exitCode = 2;
+    })
     .catch((error) => {
       console.error(redact(error instanceof Error ? error.message : String(error)));
       process.exitCode = 1;

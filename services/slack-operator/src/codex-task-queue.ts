@@ -404,6 +404,7 @@ export async function failCodexTask(
   id: string,
   deps: CodexTaskQueueDeps & {
     failureReason?: string;
+    completionSummary?: string;
     exitCode?: number;
     stdoutTail?: string;
     stderrTail?: string;
@@ -415,21 +416,23 @@ export async function failCodexTask(
   if (!existing) return undefined;
   if (TERMINAL_STATUSES.has(existing.status)) return existing;
   const now = (deps.now ?? new Date()).toISOString();
+  const failureReason = deps.failureReason ?? `${taskAgentEventLabel(taskAgent(existing))} task runner failed.`;
   const task: CodexTask = {
     ...existing,
     status: "failed",
     failedAt: now,
     workingNow: undefined,
-    failureReason: deps.failureReason ?? `${taskAgentEventLabel(taskAgent(existing))} task runner failed.`,
+    failureReason,
+    completionSummary: deps.completionSummary ?? failureReason,
     ...(typeof deps.exitCode === "number" ? { exitCode: deps.exitCode } : {}),
     ...(deps.stdoutTail ? { stdoutTail: deps.stdoutTail } : {}),
     ...(deps.stderrTail ? { stderrTail: deps.stderrTail } : {}),
-    progressMessage: deps.failureReason ?? `${taskAgentEventLabel(taskAgent(existing))} task runner failed.`,
+    progressMessage: failureReason,
     progressAt: now,
     events: appendTaskEvent(existing, {
       at: now,
       status: "failed",
-      message: deps.failureReason ?? `${taskAgentEventLabel(taskAgent(existing))} task runner failed.`,
+      message: failureReason,
     }),
     updatedAt: now,
   };

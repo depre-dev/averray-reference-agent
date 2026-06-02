@@ -170,6 +170,12 @@ describe("codex branch worker", () => {
     const commands: Array<{ command: string; args: string[]; cwd?: string }> = [];
     const exec: ExecFn = async (command, args, options) => {
       commands.push({ command, args, ...(options?.cwd ? { cwd: options.cwd } : {}) });
+      if (command === "git" && args[0] === "rev-parse" && args.includes("--is-inside-work-tree")) {
+        return { exitCode: 0, stdout: "true\n", stderr: "" };
+      }
+      if (command === "git" && args[0] === "ls-files") {
+        return { exitCode: 0, stdout: "package.json\n", stderr: "" };
+      }
       if (command === "git" && args[0] === "status") {
         return { exitCode: 0, stdout: " M services/slack-operator/src/codex-branch-worker.ts\n", stderr: "" };
       }
@@ -177,7 +183,7 @@ describe("codex branch worker", () => {
     };
     const opened: Array<{ head: string; base: string; title: string; body: string }> = [];
 
-    await runCodexBranchWorker(greenfield, config, {
+    const outcome = await runCodexBranchWorker(greenfield, config, {
       exec,
       openPullRequest: async (_task, _config, input) => {
         opened.push(input);
@@ -199,5 +205,84 @@ describe("codex branch worker", () => {
       title: "codex: Add runner guard",
       body: expect.stringContaining("Review + merge are human-gated"),
     })]);
+    expect(outcome).toMatchObject({
+      opened: true,
+      pullRequestUrl: "https://github.com/averray-agent/agent/pull/606",
+    });
+  });
+
+  it("returns a no-PR outcome when greenfield Codex produces no changes", async () => {
+    const greenfield: CodexWorkerTask = {
+      id: "codex-task-greenfield-nochange",
+      repo: "averray-agent/agent",
+      title: "No changes",
+      prompt: "Try the change.",
+    };
+    const config = parseCodexWorkerConfig({
+      CODEX_TASK_REPO: "averray-agent/agent",
+      CODEX_BRANCH_WORKER_ALLOWED_REPOS: "averray-agent/agent",
+      CODEX_BRANCH_WORKER_CODEX_COMMAND: "codex",
+      CODEX_BRANCH_WORKER_CODEX_ARGS: "[\"exec\",\"{prompt}\"]",
+    });
+    const commands: Array<{ command: string; args: string[] }> = [];
+    const exec: ExecFn = async (command, args) => {
+      commands.push({ command, args });
+      if (command === "git" && args[0] === "rev-parse" && args.includes("--is-inside-work-tree")) {
+        return { exitCode: 0, stdout: "true\n", stderr: "" };
+      }
+      if (command === "git" && args[0] === "ls-files") {
+        return { exitCode: 0, stdout: "package.json\n", stderr: "" };
+      }
+      if (command === "git" && args[0] === "status") {
+        return { exitCode: 0, stdout: "", stderr: "" };
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    };
+
+    const outcome = await runCodexBranchWorker(greenfield, config, {
+      exec,
+      openPullRequest: async () => ({ number: 1 }),
+    });
+
+    expect(outcome).toMatchObject({ opened: false, reason: expect.stringContaining("no_changes") });
+    expect(commands.some((c) => c.command === "git" && c.args[0] === "push")).toBe(false);
+  });
+
+  it("returns a no-PR outcome when clone leaves an empty checkout", async () => {
+    const greenfield: CodexWorkerTask = {
+      id: "codex-task-greenfield-empty",
+      repo: "averray-agent/agent",
+      title: "Empty clone",
+      prompt: "Try the change.",
+    };
+    const config = parseCodexWorkerConfig({
+      CODEX_TASK_REPO: "averray-agent/agent",
+      CODEX_BRANCH_WORKER_ALLOWED_REPOS: "averray-agent/agent",
+      CODEX_BRANCH_WORKER_CODEX_COMMAND: "codex",
+      CODEX_BRANCH_WORKER_CODEX_ARGS: "[\"exec\",\"{prompt}\"]",
+    });
+    const commands: Array<{ command: string; args: string[] }> = [];
+    const exec: ExecFn = async (command, args) => {
+      commands.push({ command, args });
+      if (command === "git" && args[0] === "clone") {
+        return { exitCode: 0, stdout: "", stderr: "fatal: could not read Username for https://github.com" };
+      }
+      if (command === "git" && args[0] === "rev-parse" && args.includes("--is-inside-work-tree")) {
+        return { exitCode: 0, stdout: "false\n", stderr: "" };
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    };
+
+    const outcome = await runCodexBranchWorker(greenfield, config, {
+      exec,
+      openPullRequest: async () => ({ number: 1 }),
+    });
+
+    expect(outcome).toMatchObject({
+      opened: false,
+      reason: expect.stringContaining("fatal: could not read Username"),
+    });
+    expect(commands.some((c) => c.command === "codex")).toBe(false);
+    expect(commands.some((c) => c.command === "git" && c.args[0] === "push")).toBe(false);
   });
 });

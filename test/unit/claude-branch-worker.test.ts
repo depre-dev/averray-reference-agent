@@ -133,10 +133,19 @@ describe("claude branch worker — orchestration (injected exec + PR open)", () 
     };
   }
 
-  function fakeExec(opts: { claudeExit?: number; changed?: string[]; claudeStderr?: string } = {}) {
+  function fakeExec(opts: { claudeExit?: number; changed?: string[]; claudeStderr?: string; emptyCheckout?: boolean; cloneStderr?: string } = {}) {
     const calls: { command: string; args: string[] }[] = [];
     const exec: ExecFn = async (command, args) => {
       calls.push({ command, args });
+      if (command === "git" && args[0] === "clone") {
+        return { exitCode: 0, stdout: "", stderr: opts.cloneStderr ?? "" } satisfies CommandResult;
+      }
+      if (command === "git" && args[0] === "rev-parse" && args.includes("--is-inside-work-tree")) {
+        return { exitCode: 0, stdout: opts.emptyCheckout ? "false\n" : "true\n", stderr: "" } satisfies CommandResult;
+      }
+      if (command === "git" && args[0] === "ls-files") {
+        return { exitCode: 0, stdout: opts.emptyCheckout ? "" : "package.json\n", stderr: "" } satisfies CommandResult;
+      }
       if (command === "git" && args[0] === "status") {
         const lines = (opts.changed ?? ["src/healthz.ts"]).map((f) => ` M ${f}`).join("\n");
         return { exitCode: 0, stdout: lines, stderr: "" } satisfies CommandResult;
@@ -152,7 +161,7 @@ describe("claude branch worker — orchestration (injected exec + PR open)", () 
   it("happy path: creates the branch, runs Claude, commits, pushes, and OPENS a PR", async () => {
     const { exec, calls } = fakeExec();
     const prInputs: unknown[] = [];
-    await runClaudeBranchWorker(task, await config(), {
+    const outcome = await runClaudeBranchWorker(task, await config(), {
       exec,
       openPullRequest: async (_t, _c, input) => {
         prInputs.push(input);
@@ -168,12 +177,16 @@ describe("claude branch worker — orchestration (injected exec + PR open)", () 
     expect(prInputs).toHaveLength(1);
     expect(prInputs[0]).toMatchObject({ base: "main" });
     expect((prInputs[0] as { head: string }).head).toMatch(/^claude\//);
+    expect(outcome).toMatchObject({
+      opened: true,
+      pullRequestUrl: "https://github.com/averray-agent/agent/pull/777",
+    });
   });
 
   it("test-writer specialist opens a normal PR through the same harness", async () => {
     const { exec, calls } = fakeExec();
     const prInputs: unknown[] = [];
-    await runClaudeBranchWorker({ ...task, agent: "test-writer", title: "Add parser tests" }, await config(), {
+    const outcome = await runClaudeBranchWorker({ ...task, agent: "test-writer", title: "Add parser tests" }, await config(), {
       exec,
       openPullRequest: async (_t, _c, input) => {
         prInputs.push(input);
@@ -186,17 +199,34 @@ describe("claude branch worker — orchestration (injected exec + PR open)", () 
     expect((prInputs[0] as { head: string }).head).toMatch(/^test-writer\//);
     expect((prInputs[0] as { body: string }).body).toContain("test-writer specialist");
     expect((prInputs[0] as { body: string }).body).toContain("human-gated");
+    expect(outcome).toMatchObject({ opened: true, pullRequestNumber: 778 });
   });
 
   it("no changes → does NOT commit, push, or open a PR", async () => {
     const { exec, calls } = fakeExec({ changed: [] });
     let opened = 0;
-    await runClaudeBranchWorker(task, await config(), {
+    const outcome = await runClaudeBranchWorker(task, await config(), {
       exec,
       openPullRequest: async () => { opened += 1; return { number: 1 }; },
     });
     expect(opened).toBe(0);
     expect(calls.some((c) => c.command === "git" && c.args[0] === "commit")).toBe(false);
+    expect(calls.some((c) => c.command === "git" && c.args[0] === "push")).toBe(false);
+    expect(outcome).toMatchObject({ opened: false, reason: expect.stringContaining("no_changes") });
+  });
+
+  it("empty checkout after clone → returns no-PR failure and preserves git stderr", async () => {
+    const { exec, calls } = fakeExec({ emptyCheckout: true, cloneStderr: "remote: Repository not found." });
+    const outcome = await runClaudeBranchWorker(task, await config(), {
+      exec,
+      openPullRequest: async () => ({ number: 1 }),
+    });
+
+    expect(outcome).toMatchObject({
+      opened: false,
+      reason: expect.stringContaining("remote: Repository not found."),
+    });
+    expect(calls.some((c) => c.command === "claude")).toBe(false);
     expect(calls.some((c) => c.command === "git" && c.args[0] === "push")).toBe(false);
   });
 

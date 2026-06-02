@@ -67,6 +67,7 @@ describe("codex task runner", () => {
           stdout: "branch pushed\nready for Hermes\n",
           stderr: "",
           summary: "ready for Hermes",
+          outcome: { opened: true, pullRequestUrl: "https://github.com/averray-agent/agent/pull/390" },
           usage: {
             model: "gpt-5-codex",
             inputTokens: 20,
@@ -93,14 +94,14 @@ describe("codex task runner", () => {
       status: "completed",
       runnerId: "test-runner",
       attemptCount: 1,
-      completionSummary: "ready for Hermes",
+      completionSummary: "ready for Hermes\nhttps://github.com/averray-agent/agent/pull/390",
       stdoutTail: "branch pushed\nready for Hermes\n",
     });
     await expect(readCodexRunnerHeartbeat({ path })).resolves.toMatchObject({
       runnerId: "test-runner",
       status: "completed",
       activeTaskId: proposed.task.id,
-      message: "ready for Hermes",
+      message: "ready for Hermes\nhttps://github.com/averray-agent/agent/pull/390",
     });
   });
 
@@ -125,7 +126,13 @@ describe("codex task runner", () => {
     const result = await runCodexTaskRunnerOnce(config(path), {
       executor: async (task) => {
         seen.push(task.id);
-        return { exitCode: 0, stdout: "done\n", stderr: "", summary: "done" };
+        return {
+          exitCode: 0,
+          stdout: "done\n",
+          stderr: "",
+          summary: "done",
+          outcome: { opened: true, pullRequestUrl: "https://github.com/averray-agent/agent/pull/606" },
+        };
       },
       now: new Date("2026-06-01T10:04:00.000Z"),
     });
@@ -152,7 +159,13 @@ describe("codex task runner", () => {
       executor: async (task) => {
         expect(task.pullRequestNumber).toBeUndefined();
         expect(renderCodexTaskRunnerArgs(["--pr={pr}", "{CODEX_TASK_PR}"], task)).toEqual(["--pr=", ""]);
-        return { exitCode: 0, stdout: "opened pr\n", stderr: "", summary: "opened pr" };
+        return {
+          exitCode: 0,
+          stdout: "opened pr\n",
+          stderr: "",
+          summary: "opened pr",
+          outcome: { opened: true, pullRequestUrl: "https://github.com/averray-agent/agent/pull/607" },
+        };
       },
     });
 
@@ -164,6 +177,61 @@ describe("codex task runner", () => {
       agent: "codex",
     });
     expect(task.pullRequestNumber).toBeUndefined();
+  });
+
+  it("marks a zero-exit no-PR outcome failed instead of completed", async () => {
+    const path = await tempQueuePath();
+    const proposed = await proposeCodexTask({
+      repo: "averray-agent/agent",
+      agent: "codex",
+      title: "No diff",
+      prompt: "Try the change.",
+    }, { path });
+    await approveCodexTask(proposed.task.id, { path });
+
+    const result = await runCodexTaskRunnerOnce(config(path), {
+      executor: async () => ({
+        exitCode: 0,
+        stdout: "Codex produced no changes; not opening a PR.\n",
+        stderr: "",
+        summary: "Codex produced no changes; not opening a PR.",
+        outcome: { opened: false, reason: "no_changes" },
+      }),
+    });
+
+    expect(result).toMatchObject({ status: "failed", reason: "no_changes" });
+    const [task] = await listCodexTasks({ path });
+    expect(task).toMatchObject({
+      id: proposed.task.id,
+      status: "failed",
+      failureReason: "no_changes",
+      completionSummary: "no_changes",
+      progressMessage: "no_changes",
+    });
+  });
+
+  it("marks an executor timeout error failed", async () => {
+    const path = await tempQueuePath();
+    const proposed = await proposeCodexTask({
+      repo: "averray-agent/agent",
+      pullRequestNumber: 394,
+      prompt: "Finish PR #394.",
+    }, { path });
+    await approveCodexTask(proposed.task.id, { path });
+
+    const result = await runCodexTaskRunnerOnce(config(path), {
+      executor: async () => {
+        throw new Error("Codex task command timed out after 1000ms.");
+      },
+    });
+
+    expect(result).toMatchObject({ status: "failed", reason: "Codex task command timed out after 1000ms." });
+    const [task] = await listCodexTasks({ path });
+    expect(task).toMatchObject({
+      status: "failed",
+      failureReason: "Codex task command timed out after 1000ms.",
+      completionSummary: "Codex task command timed out after 1000ms.",
+    });
   });
 
   it("marks an approved task failed when the executor exits nonzero", async () => {
