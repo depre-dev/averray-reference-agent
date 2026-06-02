@@ -93,7 +93,31 @@ The gold-path suite is first-class in the vision but can't run the *authed* flow
 
 ---
 
-## 6. Prioritized handoff prompts (one narrow PR each)
+## 6. External-agent invocation protocol
+
+How a product-repo (external) agent discovers what the tester can do, sees what's ready, and asks it to run a mission. **Most of this already exists** — T7 (capabilities manifest, `tester-capabilities.ts`) + T6 (request/approve, `monitor-testbed-missions.ts`). The contract is **Discover → Request → Approve → Run → Report**, and the manifest is *where the agent learns capabilities + readiness*.
+
+### The five-step contract
+1. **DISCOVER** — `GET /monitor/tester/capabilities` → a self-describing manifest: each flow with `status`, `scope`, `mutationRule`, and an example invocation:
+   - `surface_sweep` · read_only · `available`
+   - `authed_surface_sweep` · read_only · `available` | `ready_needs_session` (tells the agent if the T2 session is wired)
+   - `siwe_auth` · read_only
+   - `gold_path` · testbed_mutation_only · `available_live_driver` | `available_fake_default` (tells the agent if the real driver is on)
+   The `status` field is the truth-boundary — it never advertises a capability that isn't actually runnable.
+2. **REQUEST** — POST a mission with `initialStatus: "requested"` + `requesterAgent` + `requestReason` → it parks as a `requested` card. **External agents REQUEST, they cannot RUN** — the security boundary.
+3. **APPROVE** — the requested card appears on the board; the operator approves (`/approve`) or dismisses. The human decides whether to spend the run. (A future trust policy could auto-approve low-risk read-only requests.)
+4. **RUN** — the testbed-mission-runner claims + runs (read-only by default; mutating only on testnet per the env binding; the server overrides any client-supplied mutation flag).
+5. **REPORT** — the structured report (verdict/path/blockers/evidence — the §2 report) flows back to the requester (poll the mission id / callback) and onto the board.
+
+### What's missing to make it a real external contract (→ P6–P8)
+The manifest describes capability *types* but not the live *inventory* of runnable suites; it isn't *advertised* to external agents; and the report doesn't flow *back* to the requester. Three narrow PRs close it.
+
+### Invariant
+External agents are **requesters, never runners.** They discover via the manifest, request with an identity + reason, and read the report back — every actual run passes the operator approve gate (or an explicit trust policy), and mutation stays server-enforced testnet-only.
+
+---
+
+## 7. Prioritized handoff prompts (one narrow PR each)
 
 | # | Prompt | Type · Owner |
 |---|---|---|
@@ -103,8 +127,11 @@ The gold-path suite is first-class in the vision but can't run the *authed* flow
 | **P3** | Live run panel (poll-to-completion; `missionStatus==="running"` branch in `MissionBody`; honest "recent output ~2s"). | FEATURE · Claude |
 | **P4** | Saved suite library (suite store + Suites panel + Run + run history) + the predefined/NL **+ New suite** paths. | FEATURE · Claude |
 | **P5** | The agent authoring paths — test-writer (C3) suite proposals + platform-agent suite requests (T6 gate). | FEATURE · Codex+Claude |
+| **P6** | Manifest: add the **ready-to-test inventory** — extend `GET /monitor/tester/capabilities` (`tester-capabilities.ts`) beyond flow *types* to list saved suites (name, flow, target, last-run verdict+ts), available targets/envs + reachability + mutation profile; keep per-flow `status` honest. | FEATURE · Claude+Codex |
+| **P7** | **Report-back to the requester** — when a mission carries `requesterAgent` (T6), make the structured report retrievable by it (`GET /monitor/testbed-missions/:id` returning the same MissionBody report / a callback). Read-only; no operator-private data leaks. | FEATURE · Codex |
+| **P8** | **Advertise the tester in the product repo** (`averray-agent/agent`, T7 follow-up) — a thin request helper + AGENTS.md pointer: discover (manifest) → request (T6, requester+reason) → read report (P7); operator-gated, request-only, read-only by default. | FEATURE · Claude |
 
-**Sequence:** P0 (readable) → P2 (gold-path can actually run authed) → P1 (easy launch) → P3 (follow it live) → P4/P5 (the library + agent authoring). P0 first — the report-attachment bug is what makes the whole tester feel broken.
+**Sequence:** P0 (readable) → P2 (gold-path can actually run authed) → P1 (easy launch) → P3 (follow it live) → P4/P5 (the library + agent authoring) → P6/P7/P8 (the external-agent invocation contract: manifest inventory → report-back → advertise). P0 first — the report-attachment bug is what makes the whole tester feel broken; P6–P8 turn the tester into a service other agents can discover and request.
 
 **Invariants:** truth-boundary throughout (real runs only — no fabricated verdicts, no implied per-step streaming, honest "recent output"); testnet-only mutation, server-enforced; the UI can never enable mutation on a prod target; keys/sessions stay in the sidecar.
 
