@@ -460,10 +460,17 @@ function MissionBody({ card }: { card: MissionCard }) {
   // structured report until the browser agent posts one. Read defensively.
   const m = (card as { mission?: MissionCard["mission"] }).mission;
   if (!m) {
+    const finished = card.missionStatus === "completed" || card.missionStatus === "failed";
     return (
       <>
-        <VerdictBlock head="Mission · no report yet" accent="var(--hm-hermes-deep)">
-          {card.summary || "No structured report yet — the browser agent hasn't posted one."}
+        <VerdictBlock
+          head={finished ? "Mission · report unavailable" : "Mission · no report yet"}
+          accent="var(--hm-hermes-deep)"
+        >
+          {card.summary
+            || (finished
+              ? "Run finished without a structured report — see recent output."
+              : "No structured report yet — the browser agent hasn't posted one.")}
         </VerdictBlock>
         <MissionSpecDetails />
       </>

@@ -91,6 +91,10 @@ describe("inferCardType", () => {
   it("done lane → done", () => {
     expect(inferCardType(slim({ lane: "Done" }), "done")).toBe("done");
   });
+  it("done-lane testbed mission → mission", () => {
+    expect(inferCardType(slim({ lane: "Done", tags: ["testbed"], title: "Fresh-agent browser mission" }), "done"))
+      .toBe("mission");
+  });
   it("testbed tag → mission", () => {
     expect(inferCardType(slim({ tags: ["testbed"] }), "hermes-checking")).toBe("mission");
   });
@@ -1077,6 +1081,50 @@ describe("buildV2BoardSnapshot — enrichment integration", () => {
     expect(mission?.mission?.verdict).toBe("PARTIAL");
     expect(mission?.mission?.target).toBe("https://staging.averray.com/onboarding");
     expect(mission?.mission?.path).toHaveLength(2);
+  });
+
+  it("keeps completed mission runs as mission cards and attaches their report", () => {
+    const raw = {
+      active: [],
+      recent: [],
+      testbedMissions: [
+        {
+          id: "mission-completed-1",
+          status: "completed",
+          title: "Fresh-agent browser mission",
+          targetUrl: "https://app.averray.com",
+          createdAt: "2026-06-01T22:01:00.000Z",
+          updatedAt: "2026-06-01T22:03:00.000Z",
+          statusReason: "gold path completed",
+          freshMemory: true,
+          allowTestMutations: false,
+          result: {
+            structuredReport: {
+              verdict: "pass",
+              confidence: 0.94,
+              mode: "gold_path",
+              scores: { success: 5, clarity: 4, latency: 4 },
+              blockers: [],
+              confusingMoments: [],
+              mutationBoundaryNotes: ["Read-only mission completed without mutation."],
+              stoppedBeforeMutation: true,
+              completedPath: ["Loaded app shell", "Opened the work lane"],
+              recommendations: ["Keep this as the baseline before changing the page again."],
+              evidence: ["trace: /tmp/mission-completed-1/trace.zip"],
+            },
+          },
+        },
+      ],
+    };
+
+    const snap = buildV2BoardSnapshot(raw, { repo: "depre-dev/agent" });
+    const mission = snap.cards.find((c) => c.correlationId === "mission-completed-1");
+    expect(mission?.lane).toBe("done");
+    expect(mission?.type).toBe("mission");
+    expect(mission?.missionStatus).toBe("completed");
+    expect(mission?.mission?.verdict).toBe("OK");
+    expect(mission?.mission?.target).toBe("https://app.averray.com");
+    expect(mission?.summary).toBe("PASS · gold-path · 0 blockers");
   });
 
   it("names Hermes as working now for a running mission backed by a mission run", () => {
