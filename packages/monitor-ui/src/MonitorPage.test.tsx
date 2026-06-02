@@ -285,6 +285,56 @@ describe("MonitorPage — container", () => {
     }
   });
 
+  test("requested suite approval and dismiss POST to the suite endpoints", async () => {
+    const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({
+      cards: [],
+      at: "2026-05-28T10:30:00Z",
+      testbedSuites: [{
+        schemaVersion: 1,
+        kind: "testbed_suite",
+        id: "testbed-suite-settings-coverage-1",
+        status: "requested",
+        name: "Settings coverage gap",
+        target: "https://app.averray.com/settings",
+        mode: "surface_sweep",
+        author: "test-writer",
+        requesterAgent: "test-writer",
+        requestReason: "Changed surface has no saved regression suite.",
+        requestedAt: "2026-05-28T10:00:00.000Z",
+        createdAt: "2026-05-28T10:00:00.000Z",
+        updatedAt: "2026-05-28T10:00:00.000Z",
+        history: [],
+      }],
+    }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
+    try {
+      const { getByRole } = render(
+        <MonitorPage
+          options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }}
+          backlogSuggestions={{ enabled: false }}
+          collaboration={{ enabled: false }}
+          alerts={{ enabled: false }}
+          autonomy={{ fetchMode: async () => null }}
+        />,
+        { wrapper },
+      );
+      await waitFor(() => expect(getByRole("button", { name: "Approve" })).toBeTruthy());
+
+      fireEvent.click(getByRole("button", { name: "Approve" }));
+      fireEvent.click(getByRole("button", { name: "Dismiss" }));
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      const [approveUrl, approveInit] = fetchSpy.mock.calls[0] as [string, RequestInit];
+      const [dismissUrl, dismissInit] = fetchSpy.mock.calls[1] as [string, RequestInit];
+      expect(approveUrl).toBe("/monitor/testbed-suites/testbed-suite-settings-coverage-1/approve");
+      expect(approveInit.method).toBe("POST");
+      expect(dismissUrl).toBe("/monitor/testbed-suites/testbed-suite-settings-coverage-1/dismiss");
+      expect(dismissInit.method).toBe("POST");
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   test("the default mission approval POSTs to /monitor/testbed-missions/:id/approve", async () => {
     const requestedMission = {
       id: "testbed-mission-requested-1",

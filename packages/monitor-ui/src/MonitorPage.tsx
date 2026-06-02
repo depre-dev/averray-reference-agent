@@ -52,6 +52,10 @@ export interface MonitorPageProps {
   onSaveSuite?: (input: SaveTestSuiteInput) => void;
   /** Override running a named suite (defaults to POST /monitor/testbed-suites/:id/run). */
   onRunSuite?: (id: string) => void;
+  /** Override approving a requested suite (defaults to POST /monitor/testbed-suites/:id/approve). */
+  onApproveSuite?: (id: string) => void;
+  /** Override dismissing a requested suite (defaults to POST /monitor/testbed-suites/:id/dismiss). */
+  onDismissSuite?: (id: string) => void;
   /** Override the /claude propose (defaults to POST /monitor/codex-tasks). */
   onSpawnClaudeTask?: (repo: string, prompt: string) => void;
   /** Override the create-task dispatch (defaults to POST /monitor/codex-tasks propose). */
@@ -88,6 +92,8 @@ export function MonitorPage({
   onSpawnMission = defaultSpawnMission,
   onSaveSuite = defaultSaveSuite,
   onRunSuite = defaultRunSuite,
+  onApproveSuite = defaultApproveSuite,
+  onDismissSuite = defaultDismissSuite,
   onSpawnClaudeTask = defaultSpawnClaudeTask,
   onCreateTask = defaultCreateTask,
   onApproveTask = defaultApproveTask,
@@ -140,6 +146,8 @@ export function MonitorPage({
         onSpawnMission={onSpawnMission}
         onSaveSuite={onSaveSuite}
         onRunSuite={onRunSuite}
+        onApproveSuite={onApproveSuite}
+        onDismissSuite={onDismissSuite}
         onSpawnClaudeTask={onSpawnClaudeTask}
         onCreateTask={onCreateTask}
         onApproveTask={onApproveTask}
@@ -174,6 +182,24 @@ function defaultSaveSuite(input: SaveTestSuiteInput): void {
 
 function defaultRunSuite(id: string): void {
   void fetch(`${SUITES_URL}/${encodeURIComponent(id)}/run`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+  }).catch(() => {
+    /* surfaced via the board feed / degraded state, not thrown here */
+  });
+}
+
+function defaultApproveSuite(id: string): void {
+  void fetch(`${SUITES_URL}/${encodeURIComponent(id)}/approve`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+  }).catch(() => {
+    /* surfaced via the board feed / degraded state, not thrown here */
+  });
+}
+
+function defaultDismissSuite(id: string): void {
+  void fetch(`${SUITES_URL}/${encodeURIComponent(id)}/dismiss`, {
     method: "POST",
     headers: { "content-type": "application/json" },
   }).catch(() => {

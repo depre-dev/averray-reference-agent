@@ -129,6 +129,11 @@ TypeScript monorepo: npm workspaces (`packages/*`, `services/*`), Node ≥ 22, E
   sidecar provides sessions, `HALT_FILE` is absent, and D3 is not suspended.
   External-agent requested tester runs (T6, carrying `requesterAgent`) still land
   `requested` and require operator approval before any runner can claim them.
+- **Saved tester suite proposals are operator-gated.** Test-writer specialists
+  and product/platform agents may propose reusable saved suites through the
+  monitor suite request surface. These proposals land `requested`; approval only
+  saves the suite, and never starts a run. Running a saved suite remains a
+  separate operator/internal action bounded by the tester safety rules.
 - **Humans own approval.** A PASS verdict is a release *signal*, not a merge order.
   Merge and deploy are human-gated. No auto-merge.
 - **Per-agent task runners** (`codex-task-runner`, `claude-task-runner`) claim

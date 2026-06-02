@@ -13,6 +13,7 @@ const MAX_TESTBED_SUITE_HISTORY = 50;
 export type TestbedSuiteAuthor = "predefined" | "operator" | "test-writer" | "platform";
 export type TestbedSuiteMode = Extract<TestbedMissionMode, "surface_sweep" | "siwe_auth" | "gold_path">;
 export type TestbedSuiteRunVerdict = TestbedMissionVerdict | "requested" | "ready" | "running" | "failed" | "unknown";
+export type TestbedSuiteStatus = "requested" | "saved";
 
 export interface TestbedSuiteHistoryEntry {
   runId: string;
@@ -24,11 +25,17 @@ export interface TestbedSuite {
   schemaVersion: 1;
   kind: "testbed_suite";
   id: string;
+  status: TestbedSuiteStatus;
   name: string;
   target: string;
   mode: TestbedSuiteMode;
   goal?: string;
   author: TestbedSuiteAuthor;
+  requesterAgent?: string;
+  requestReason?: string;
+  requestedAt?: string;
+  approvedAt?: string;
+  approvedBy?: string;
   createdAt: string;
   updatedAt: string;
   history: TestbedSuiteHistoryEntry[];
@@ -46,6 +53,9 @@ export interface CreateTestbedSuiteInput {
   mode?: unknown;
   goal?: unknown;
   author?: unknown;
+  requesterAgent?: unknown;
+  reason?: unknown;
+  requestReason?: unknown;
 }
 
 export interface ListTestbedSuitesOptions {
@@ -83,17 +93,72 @@ export function createTestbedSuite(
   input: CreateTestbedSuiteInput,
   deps: TestbedSuiteStoreDeps = {}
 ): TestbedSuite {
+  return createSuiteRecord(input, "saved", deps);
+}
+
+export function requestTestbedSuite(
+  input: CreateTestbedSuiteInput,
+  deps: TestbedSuiteStoreDeps = {}
+): TestbedSuite {
+  const author = parseSuiteAuthor(input.author);
+  if (author !== "test-writer" && author !== "platform") {
+    throw new Error("invalid_suite_request_author");
+  }
+  return createSuiteRecord(input, "requested", deps);
+}
+
+export function approveRequestedTestbedSuite(
+  id: string,
+  deps: TestbedSuiteStoreDeps & { approvedBy?: string } = {}
+): { ok: true; suite: TestbedSuite } | { ok: false; error: "not_found" | "not_requested"; suite?: TestbedSuite } {
+  ensureSuiteStoreLoaded(deps.path, { force: true });
+  const suite = suites.find((candidate) => candidate.id === id);
+  if (!suite) return { ok: false, error: "not_found" };
+  if (suite.status !== "requested") return { ok: false, error: "not_requested", suite: cloneSuite(suite) };
+  const now = (deps.now ?? new Date()).toISOString();
+  suite.status = "saved";
+  suite.approvedAt = now;
+  suite.approvedBy = deps.approvedBy ?? "operator";
+  suite.updatedAt = now;
+  persistSuiteStore(deps.path);
+  return { ok: true, suite: cloneSuite(suite) };
+}
+
+export function dismissRequestedTestbedSuite(
+  id: string,
+  deps: TestbedSuiteStoreDeps = {}
+): { ok: true; suite: TestbedSuite } | { ok: false; error: "not_found" | "not_requested"; suite?: TestbedSuite } {
+  ensureSuiteStoreLoaded(deps.path, { force: true });
+  const index = suites.findIndex((candidate) => candidate.id === id);
+  if (index < 0) return { ok: false, error: "not_found" };
+  const suite = suites[index];
+  if (suite.status !== "requested") return { ok: false, error: "not_requested", suite: cloneSuite(suite) };
+  const dismissed = cloneSuite({ ...suite, updatedAt: (deps.now ?? new Date()).toISOString() });
+  suites.splice(index, 1);
+  persistSuiteStore(deps.path);
+  return { ok: true, suite: dismissed };
+}
+
+function createSuiteRecord(
+  input: CreateTestbedSuiteInput,
+  status: TestbedSuiteStatus,
+  deps: TestbedSuiteStoreDeps = {}
+): TestbedSuite {
   ensureSuiteStoreLoaded(deps.path, { force: true });
   const now = (deps.now ?? new Date()).toISOString();
   const suite: TestbedSuite = {
     schemaVersion: 1,
     kind: "testbed_suite",
     id: nextSuiteId(input.name),
+    status,
     name: parseSuiteName(input.name),
     target: parseHttpTarget(input.target),
     mode: parseSuiteMode(input.mode),
     ...(parseOptionalString(input.goal) ? { goal: parseOptionalString(input.goal) } : {}),
     author: parseSuiteAuthor(input.author),
+    ...(parseOptionalString(input.requesterAgent) ? { requesterAgent: parseOptionalString(input.requesterAgent) } : {}),
+    ...(parseOptionalString(input.reason) || parseOptionalString(input.requestReason) ? { requestReason: parseOptionalString(input.reason) ?? parseOptionalString(input.requestReason) } : {}),
+    ...(status === "requested" ? { requestedAt: now } : {}),
     createdAt: now,
     updatedAt: now,
     history: [],
@@ -191,7 +256,7 @@ function suiteStoreSuites(value: unknown): TestbedSuite[] {
     : isRecord(value) && Array.isArray(value.suites)
       ? value.suites
       : [];
-  return rawSuites.filter(isTestbedSuite).slice(-MAX_TESTBED_SUITES);
+  return rawSuites.filter(isTestbedSuite).map(normalizeSuite).slice(-MAX_TESTBED_SUITES);
 }
 
 function suiteStoreSeq(value: unknown, loadedSuites: TestbedSuite[]): number {
@@ -257,6 +322,7 @@ function isTestbedSuite(value: unknown): value is TestbedSuite {
   if (!isRecord(value)) return false;
   if (value.schemaVersion !== 1 || value.kind !== "testbed_suite") return false;
   if (typeof value.id !== "string" || typeof value.name !== "string" || typeof value.target !== "string") return false;
+  if (value.status !== undefined && value.status !== "requested" && value.status !== "saved") return false;
   if (value.mode !== "surface_sweep" && value.mode !== "siwe_auth" && value.mode !== "gold_path") return false;
   if (value.author !== "predefined" && value.author !== "operator" && value.author !== "test-writer" && value.author !== "platform") return false;
   if (typeof value.createdAt !== "string" || typeof value.updatedAt !== "string") return false;
@@ -266,9 +332,16 @@ function isTestbedSuite(value: unknown): value is TestbedSuite {
 
 function cloneSuite(suite: TestbedSuite): TestbedSuite {
   return {
-    ...suite,
+    ...normalizeSuite(suite),
     history: suite.history.map((entry) => ({ ...entry })),
     ...(suite.lastRun ? { lastRun: { ...suite.lastRun } } : {}),
+  };
+}
+
+function normalizeSuite(suite: TestbedSuite): TestbedSuite {
+  return {
+    ...suite,
+    status: suite.status ?? "saved",
   };
 }
 

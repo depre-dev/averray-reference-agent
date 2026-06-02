@@ -187,6 +187,19 @@ export function buildTesterCapabilitiesManifest(deps: TesterCapabilitiesDeps = {
         auth: "same monitor auth as /monitor",
         contentType: "application/json",
       },
+      requestSuite: {
+        method: "POST",
+        path: "/monitor/testbed-suites/request",
+        auth: "same monitor auth as /monitor",
+        contentType: "application/json",
+        note: "agent-authored suite proposals land requested; operators approve before they become runnable saved suites",
+      },
+      approveRequestedSuite: {
+        method: "POST",
+        path: "/monitor/testbed-suites/{id}/approve",
+        auth: "monitor auth plus the mission-spawn role gate when configured",
+        note: "approval saves the suite but does not run it",
+      },
       approveRequestedMission: {
         method: "POST",
         path: "/monitor/testbed-missions/{id}/approve",

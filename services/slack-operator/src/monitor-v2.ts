@@ -2068,6 +2068,7 @@ function testbedSuitesFromSnapshot(rawSnapshot: unknown): TestbedSuite[] {
         && typeof suite.id === "string"
         && typeof suite.name === "string"
         && typeof suite.target === "string"
+        && (suite.status === undefined || suite.status === "requested" || suite.status === "saved")
         && (suite.mode === "surface_sweep" || suite.mode === "siwe_auth" || suite.mode === "gold_path")
         && Array.isArray(suite.history)
       ) {

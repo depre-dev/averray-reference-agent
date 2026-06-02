@@ -6,6 +6,7 @@ import {
   INTERNAL_SPECIALIST_AGENTS,
   SECURITY_AGENT_ID,
   SECURITY_ROLE_PROMPT,
+  TEST_WRITER_ROLE_PROMPT,
   taskAgentDefinition,
   specialistAgentDefinition,
 } from "../../services/slack-operator/src/specialist-agents.js";
@@ -75,5 +76,11 @@ describe("C3 specialist agent templates", () => {
 
   it("keeps the roster modular", () => {
     expect(INTERNAL_SPECIALIST_AGENTS.map((agent) => agent.id)).toEqual(["test-writer", "security", "docs"]);
+  });
+
+  it("tells the test-writer to propose saved suites without auto-running them", () => {
+    expect(TEST_WRITER_ROLE_PROMPT).toContain("/monitor/testbed-suites/request");
+    expect(TEST_WRITER_ROLE_PROMPT).toContain('author "test-writer"');
+    expect(TEST_WRITER_ROLE_PROMPT).toContain("must not auto-run");
   });
 });
