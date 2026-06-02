@@ -678,7 +678,7 @@ function OperatorActions({
     <div className="hm-card-cta hm-card-cta--operator hm-card-cta--confirm" role="group" aria-label="Confirm operator action">
       <span className="hm-card-confirm-copy">
         {confirming.confirm}
-        <small>Nothing runs until you confirm.</small>
+        <small>First click only arms this action. Confirm to send it to the live queue.</small>
       </span>
       <button
         type="button"
