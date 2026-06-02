@@ -215,12 +215,33 @@ TESTBED_CF_ACCESS_CLIENT_ID=<from ops secrets>              # Cloudflare Access 
 TESTBED_CF_ACCESS_CLIENT_SECRET=<from ops secrets>          # never logged / never in prompts
 TESTBED_GOLDPATH_DEEP=0                   # opus for deep/critical; sonnet otherwise (A4)
 TESTBED_GOLDPATH_LIVE=1                   # invokes the live Claude + Playwright-MCP driver
+TESTBED_GOLDPATH_AUTONOMY_ENABLED=1       # internal/operator runs auto-run only inside this budget
+TESTBED_GOLDPATH_MAX_USDC_PER_DAY=10
+TESTBED_GOLDPATH_MAX_STAKE_USD_PER_RUN=1
+TESTBED_GOLDPATH_MAX_CONCURRENT_RUNS=1
+TESTBED_GOLDPATH_READY_JOBS_PATH=docs/ready-to-post-jobs.json
+TESTBED_GOLDPATH_READY_JOB_ID=hermes-gold-path-smoke
 ```
 
-Gold-path missions are queued with `mode: "gold_path"` and **land `requested`** —
-they stay behind the operator approve gate (`POST /monitor/testbed-missions/{id}/approve`)
-and never auto-run. Mutation is bound by T5: only `local/testnet/staging` may
-mutate; **mainnet is structurally read-only**.
+Gold-path missions created by the operator/per-deploy scheduler are queued with
+`mode: "gold_path"` and can run without per-run approval **only** when the
+autonomy gate passes:
+
+- `TESTBED_GOLDPATH_AUTONOMY_ENABLED=1`
+- environment is `testnet` and T5 allows testbed mutations
+- `HALT_FILE` is absent and D3 anomaly pause is not suspended
+- the ready-job template is sponsored (`requiresSponsoredGas: true`)
+- the daily USDC cap, per-run stake cap, and concurrent-run cap pass
+- read-only smoke and claim-readiness smoke both pass before the runner claims
+  the mission
+
+The runner auto-posts a claimable sponsored starter job from
+`TESTBED_GOLDPATH_READY_JOBS_PATH` before the browser agent claims/submits it.
+External-agent requested tester runs still land `requested` through
+`POST /monitor/testbed-missions/request` and stay behind the operator approve
+gate (`POST /monitor/testbed-missions/{id}/approve`). Mutation is bound by T5:
+only testnet may run autonomous mutating gold-path jobs here; **mainnet is
+structurally read-only**.
 
 > **The runner claims ALL ready missions** (no per-mode filter yet), so run the
 > gold-path command executor in a deployment whose queue contains only

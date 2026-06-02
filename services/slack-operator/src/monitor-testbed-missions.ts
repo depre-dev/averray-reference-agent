@@ -80,6 +80,26 @@ export interface TestbedMissionRun {
   stderrTail?: string;
   progressMessage?: string;
   progressAt?: string;
+  goldPathAutonomy?: {
+    budget?: {
+      reservedAt: string;
+      estimatedRewardUsd: number;
+      estimatedStakeUsd: number;
+      maxUsdcPerDay: number;
+      maxStakeUsdPerRun: number;
+      maxConcurrentRuns: number;
+    };
+    job?: {
+      templateId: string;
+      jobId: string;
+      postedAt: string;
+    };
+    preflight?: {
+      checkedAt: string;
+      status: "passed" | "failed";
+      checks: Array<{ name: string; ok: boolean; detail: string }>;
+    };
+  };
 }
 
 export interface ListTestbedMissionRunOptions {
@@ -435,10 +455,26 @@ export function recordTestbedMissionReportFromMessage(
 export function claimNextReadyTestbedMission(
   deps: TestbedMissionStoreDeps & { runnerId?: string } = {}
 ): TestbedMissionRun | undefined {
+  const existing = peekNextReadyTestbedMission(deps);
+  return existing ? claimReadyTestbedMission(existing.id, deps) : undefined;
+}
+
+export function peekNextReadyTestbedMission(
+  deps: TestbedMissionStoreDeps = {}
+): TestbedMissionRun | undefined {
   ensureMissionStoreLoaded(deps.path, { force: true });
   const existing = missionRuns
     .filter((run) => run.status === "ready")
     .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))[0];
+  return existing ? cloneRun(existing) : undefined;
+}
+
+export function claimReadyTestbedMission(
+  id: string,
+  deps: TestbedMissionStoreDeps & { runnerId?: string } = {}
+): TestbedMissionRun | undefined {
+  ensureMissionStoreLoaded(deps.path, { force: true });
+  const existing = missionRuns.find((run) => run.id === id && run.status === "ready");
   if (!existing) return undefined;
   const now = (deps.now ?? new Date()).toISOString();
   existing.status = "running";
@@ -452,6 +488,37 @@ export function claimNextReadyTestbedMission(
     at: now,
     status: "running",
     event: "mission_runner_claimed",
+    message: existing.statusReason,
+  });
+  trimMissionHistory(existing);
+  persistMissionStore(deps.path);
+  return cloneRun(existing);
+}
+
+export function recordGoldPathAutonomyPrepared(
+  id: string,
+  deps: TestbedMissionStoreDeps & {
+    budget: NonNullable<NonNullable<TestbedMissionRun["goldPathAutonomy"]>["budget"]>;
+    job: NonNullable<NonNullable<TestbedMissionRun["goldPathAutonomy"]>["job"]>;
+    preflight: NonNullable<NonNullable<TestbedMissionRun["goldPathAutonomy"]>["preflight"]>;
+  }
+): TestbedMissionRun | undefined {
+  ensureMissionStoreLoaded(deps.path, { force: true });
+  const existing = missionRuns.find((run) => run.id === id);
+  if (!existing) return undefined;
+  if (existing.status === "completed" || existing.status === "failed") return cloneRun(existing);
+  const now = (deps.now ?? new Date()).toISOString();
+  existing.goldPathAutonomy = {
+    budget: deps.budget,
+    job: deps.job,
+    preflight: deps.preflight,
+  };
+  existing.statusReason = `Gold-path autonomy prepared job ${deps.job.jobId}; budget reserved and preflight passed.`;
+  existing.updatedAt = now;
+  existing.history.push({
+    at: now,
+    status: existing.status,
+    event: "gold_path_autonomy_prepared",
     message: existing.statusReason,
   });
   trimMissionHistory(existing);
@@ -1039,7 +1106,7 @@ function missionFailedMs(run: TestbedMissionRun): number {
 }
 
 function parseTestbedMissionMode(value: string | undefined): TestbedMissionMode | undefined {
-  if (value === "surface_sweep" || value === "siwe_auth") return value;
+  if (value === "surface_sweep" || value === "siwe_auth" || value === "gold_path") return value;
   return undefined;
 }
 
@@ -1049,6 +1116,8 @@ function testbedMissionTitle(mode: TestbedMissionMode | undefined): string {
       return "Surface sweep (T1)";
     case "siwe_auth":
       return "SIWE auth role-gating mission";
+    case "gold_path":
+      return "Autonomous gold-path mission";
     default:
       return "Fresh-agent browser mission";
   }
@@ -1060,6 +1129,9 @@ function testbedMissionReadyMessage(
 ): string {
   if (mode === "siwe_auth") {
     return "SIWE auth mission generated; waiting for the signer-sidecar role sessions and read-only role-gating checks.";
+  }
+  if (mode === "gold_path") {
+    return "Gold-path mission generated; waiting for the testnet budget gate, ready-job posting, preflight, and autonomous run.";
   }
   if (binding.allowTestMutations) {
     return `Mission packet generated for ${binding.environment}; waiting for a clean browser-only test-mode run where safe sandbox page mutations are allowed.`;
@@ -1076,6 +1148,9 @@ function testbedMissionReadyReason(
 ): string {
   if (mode === "siwe_auth") {
     return "SIWE auth mission is ready; waiting for signer-sidecar role sessions and structured role-gating evidence.";
+  }
+  if (mode === "gold_path") {
+    return "Gold-path mission is ready; waiting for budgeted testnet auto-post, preflight, and structured settlement evidence.";
   }
   if (binding.allowTestMutations) {
     return `Mission packet is ready with ${binding.environment} testbed mutations allowed; waiting for a browser-only test-mode run and structured report.`;

@@ -10,12 +10,21 @@ import type { Browser, BrowserContext, BrowserContextOptions, Locator, Page } fr
 import { runGoldPathMissionEntry } from "./gold-path-mission-entry.js";
 import type { TestbedMissionRun } from "./monitor-testbed-missions.js";
 import {
-  claimNextReadyTestbedMission,
+  claimReadyTestbedMission,
   failTestbedMissionRun,
+  listTestbedMissionRuns,
+  peekNextReadyTestbedMission,
+  recordGoldPathAutonomyPrepared,
   recordTestbedMissionReportFromMessage,
   updateTestbedMissionProgress,
   updateTestbedMissionRunnerHeartbeat,
 } from "./monitor-testbed-missions.js";
+import {
+  parseGoldPathAutonomyConfig,
+  prepareGoldPathAutonomousRun,
+  type GoldPathAutonomyConfig,
+  type GoldPathAutonomyDeps,
+} from "./gold-path-autonomy.js";
 import { executeSiweAuthMission, type SiweAuthMissionDeps } from "./testbed-auth-mission.js";
 import { executeSurfaceSweep, type SurfaceSweepDeps } from "./testbed-surface-sweep.js";
 import {
@@ -70,6 +79,8 @@ export interface TestbedMissionRunnerConfig {
   cloudflareAccess?: CloudflareAccessServiceToken;
   /** Caddy HTTP Basic Auth credential for the real edge gate (app.averray.com). */
   basicAuth?: TestbedBasicAuth;
+  /** Spend/safety budget that lets internal gold-path runs start without per-run approval. */
+  goldPathAutonomy?: GoldPathAutonomyConfig;
 }
 
 /** Injected session resolution for tests (defaults to the env-config resolver). */
@@ -139,12 +150,13 @@ export function parseTestbedMissionRunnerConfig(
     session: parseSweepSessionConfig(env),
     ...(cloudflareAccess ? { cloudflareAccess } : {}),
     ...(basicAuth ? { basicAuth } : {}),
+    goldPathAutonomy: parseGoldPathAutonomyConfig(env),
   };
 }
 
 export async function runTestbedMissionRunnerOnce(
   config: TestbedMissionRunnerConfig,
-  deps: { executor?: TestbedMissionExecutor; now?: Date } = {}
+  deps: { executor?: TestbedMissionExecutor; now?: Date; goldPathAutonomy?: GoldPathAutonomyDeps } = {}
 ): Promise<TestbedMissionRunnerOnceResult> {
   if (!config.enabled) {
     updateRunnerHeartbeat(config, "disabled", "Hermes testbed runner is disabled.", deps.now);
@@ -158,21 +170,76 @@ export async function runTestbedMissionRunnerOnce(
     return { status: "misconfigured", reason };
   }
 
-  const mission = claimNextReadyTestbedMission({
+  const candidate = peekNextReadyTestbedMission({
     path: config.path,
-    runnerId: config.runnerId,
     now: deps.now,
   });
-  if (!mission) {
+  if (!candidate) {
     updateRunnerHeartbeat(config, "idle", "Hermes testbed runner is online; no browser mission is waiting.", deps.now);
     return { status: "idle" };
   }
 
+  const autonomy = await prepareGoldPathAutonomousRun(candidate, {
+    config: config.goldPathAutonomy ?? parseGoldPathAutonomyConfig({}),
+    runtime: {
+      apiBaseUrl: config.apiBaseUrl,
+      appBaseUrl: config.appBaseUrl,
+      signerBaseUrl: config.signerBaseUrl,
+      cloudflareAccess: config.cloudflareAccess,
+      basicAuth: config.basicAuth,
+    },
+    runs: listTestbedMissionRuns({ path: config.path, limit: 50 }),
+  }, {
+    now: deps.now,
+    ...deps.goldPathAutonomy,
+  });
+  if (!autonomy.ok) {
+    const failed = failTestbedMissionRun(candidate.id, {
+      path: config.path,
+      now: deps.now,
+      failureReason: autonomy.reason,
+      stderrTail: "",
+      stdoutTail: "",
+    }) ?? candidate;
+    updateRunnerHeartbeat(config, "failed", autonomy.reason, deps.now, candidate.id);
+    return { status: "failed", mission: failed, reason: autonomy.reason };
+  }
+  if (autonomy.prepared) {
+    recordGoldPathAutonomyPrepared(candidate.id, {
+      path: config.path,
+      now: deps.now,
+      budget: autonomy.prepared.budget,
+      job: autonomy.prepared.job,
+      preflight: autonomy.prepared.preflight,
+    });
+  }
+
+  const mission = claimReadyTestbedMission(candidate.id, {
+    path: config.path,
+    runnerId: config.runnerId,
+    now: deps.now,
+  });
+  // If another runner changed the peeked mission before this exact claim, stop
+  // here so we do not claim an unprepared gold-path mission by accident.
+  if (!mission) {
+    updateRunnerHeartbeat(config, "idle", "Hermes testbed runner is online; the prepared mission changed before claim.", deps.now);
+    return { status: "idle" };
+  }
+
+  return runClaimedMission(mission, config, executor, deps.now);
+}
+
+async function runClaimedMission(
+  mission: TestbedMissionRun,
+  config: TestbedMissionRunnerConfig,
+  executor: TestbedMissionExecutor,
+  now?: Date,
+): Promise<TestbedMissionRunnerOnceResult> {
   updateRunnerHeartbeat(
     config,
     "running",
     `Hermes testbed runner claimed ${mission.id}.`,
-    deps.now,
+    now,
     mission.id
   );
 
@@ -395,6 +462,7 @@ export async function executeGoldPathTestbedMission(
     TESTBED_MUTATION_BINDING_REASON: mission.mutationBindingReason ?? "",
     TEST_WALLET_SIGNER_BASE_URL: config.signerBaseUrl ?? process.env.TEST_WALLET_SIGNER_BASE_URL ?? "",
     TESTBED_SESSION_SIGNER_URL: config.signerBaseUrl ?? process.env.TESTBED_SESSION_SIGNER_URL ?? "",
+    TESTBED_GOLDPATH_JOB_ID: mission.goldPathAutonomy?.job?.jobId ?? "",
     ...(config.cloudflareAccess
       ? {
         TESTBED_CF_ACCESS_CLIENT_ID: config.cloudflareAccess.clientId,

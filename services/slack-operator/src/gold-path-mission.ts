@@ -118,6 +118,8 @@ export interface GoldPathDriverInput {
   basicAuth?: boolean;
   /** Local T3 signer sidecar URL. The driver may request sessions; wallet keys never leave the sidecar. */
   signerBaseUrl?: string;
+  /** Gold-path autonomy may pre-post a sponsored starter job before the driver claims it. */
+  preparedJobId?: string;
 }
 
 /** The injected product driver. Real impl = Claude Agent SDK + Playwright-MCP;
@@ -347,6 +349,7 @@ export interface GoldPathMissionDeps {
     targetUrl: string;
     goal: string;
     freshMemory?: boolean;
+    preparedJobId?: string;
   };
   binding: TestbedMutationBinding;
   driver: GoldPathDriver;
@@ -382,6 +385,7 @@ export async function runGoldPathMissionOnce(deps: GoldPathMissionDeps): Promise
     ...(deps.cloudflareAccess ? { cloudflareAccess: deps.cloudflareAccess } : {}),
     ...(deps.basicAuth ? { basicAuth: true } : {}),
     ...(deps.signerBaseUrl ? { signerBaseUrl: deps.signerBaseUrl } : {}),
+    ...(deps.mission.preparedJobId ? { preparedJobId: deps.mission.preparedJobId } : {}),
   });
 
   // Defense in depth: if a read-only run somehow returned attempted mutations,

@@ -14,6 +14,7 @@ export function buildTesterCapabilitiesManifest(deps: TesterCapabilitiesDeps = {
   const signerEnabled = truthy(env.TEST_WALLET_SIGNER_ENABLED);
   const runnerExecutor = env.TESTBED_MISSION_RUNNER_EXECUTOR || "playwright";
   const goldPathLive = truthy(env.TESTBED_GOLDPATH_LIVE);
+  const goldPathAutonomy = truthy(env.TESTBED_GOLDPATH_AUTONOMY_ENABLED);
   const missionEnvironment = env.TESTBED_MISSION_ENVIRONMENT || env.AVERRAY_TESTBED_ENVIRONMENT || "inferred_from_target_url";
   // T2: the runner now injects a pre-seeded session into the sweep. The authed
   // sweep is genuinely available once a session SOURCE is configured (the
@@ -172,13 +173,14 @@ export function buildTesterCapabilitiesManifest(deps: TesterCapabilitiesDeps = {
           },
         },
         note: goldPathLive
-          ? "T4: the live Claude + Playwright-MCP gold-path driver is enabled. It still sits behind the T6 request→approve gate, uses the T3 signer sidecar for sessions, and obeys T5 mutation binding (mainnet read-only)."
+          ? `T4: the live Claude + Playwright-MCP gold-path driver is enabled. Operator-scheduled/per-deploy gold-path runs ${goldPathAutonomy ? "auto-run within TESTBED_GOLDPATH_* spend/safety caps" : "need TESTBED_GOLDPATH_AUTONOMY_ENABLED=1 plus budget caps before mutating"}; external agent requests still use the T6 request→approve gate. It uses the T3 signer sidecar for sessions and obeys T5 mutation binding (mainnet read-only).`
           : "T4: the live Claude + Playwright-MCP driver is wired but disabled by default. Until TESTBED_GOLDPATH_LIVE=1, the runner emits an honest \"not executed\" report rather than a fake pass.",
       },
     ],
     approvalGate: {
-      agentRequestedRuns: "read-only requests use /monitor/testbed-missions/request and land as requested; runners ignore them until operator approval",
+      agentRequestedRuns: "external-agent requests use /monitor/testbed-missions/request and land as requested; runners ignore them until operator approval",
       currentEnforcement: "POST /monitor/testbed-missions still creates ready operator missions; POST /monitor/testbed-missions/{id}/approve is the T6 requested -> ready gate",
+      goldPathAutonomy: "operator-scheduled/per-deploy gold-path missions can auto-run only when TESTBED_GOLDPATH_AUTONOMY_ENABLED=1 and the spend/safety budget, HALT_FILE, D3 anomaly pause, sponsored ready-job, and preflight checks pass",
       proposedMissionApproval: "available; board-gated and never automatic from agent request",
     },
     resultShape: {

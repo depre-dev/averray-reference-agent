@@ -229,6 +229,52 @@ describe("testbed agent entrypoint", () => {
     });
   });
 
+  it("creates operator-scheduled gold-path missions as ready so the budget gate, not a per-run approval, governs them", () => {
+    const result = createTestbedMissionFromAgent(
+      {
+        path,
+        requester: "operator",
+        targetUrl: "https://app.testnet.example/gold-path",
+        goal: "run the autonomous gold path",
+        mode: "gold_path",
+        environment: "testnet",
+        allowTestMutations: true,
+      },
+      Date.parse("2026-05-25T10:01:00.000Z")
+    );
+
+    expect(result.run).toMatchObject({
+      status: "ready",
+      mode: "gold_path",
+      allowTestMutations: true,
+    });
+    expect(result.run.requestedAt).toBeUndefined();
+    expect(result.nextStep).not.toContain("board-gated");
+  });
+
+  it("still supports an explicit approval gate for external request paths", () => {
+    const result = createTestbedMissionFromAgent(
+      {
+        path,
+        requester: "codex",
+        targetUrl: "https://app.testnet.example/gold-path",
+        goal: "operator must approve this one",
+        mode: "gold_path",
+        environment: "testnet",
+        allowTestMutations: true,
+        requireApproval: true,
+      },
+      Date.parse("2026-05-25T10:01:00.000Z")
+    );
+
+    expect(result.run).toMatchObject({
+      status: "requested",
+      mode: "gold_path",
+      allowTestMutations: true,
+    });
+    expect(result.nextStep).toContain("board-gated");
+  });
+
   it("lists missions and runner state for polling agents", () => {
     createTestbedMissionFromAgent(
       {
