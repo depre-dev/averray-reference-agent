@@ -52,6 +52,26 @@
 
 *(Status as of 2026-06-01 (rev 2) — **shipped/code-backed:** O0–O5, A1–A4, D1–D4, B1 first slices, B2 proposes-only self-healing, C1 first slice, C2, **C3 (test-writer + security + docs specialists)**, C4 v1, T1–T3, **T4 (live gold-path driver)**, T5, T6 first slice, and the T7 reference-agent manifest. The **v2 monitor redesign also landed in full** — degraded card states (#331), mission-drawer polish (#333), operator checklist + private note (#338), co-pilot turn anatomy (#335), and the banner/filter/footer/composer wiring (#320–#332, #334). **No open PRs.** **Design / follow-up (no open PR):** B1 idle-triggered auto-flow and C1 automatic/default reviewer dispatch (both intended build-now-flag-off, enable only post-burn-in), T4's first hosted/live run proof, and the T7 platform-repo helper (lives in `averray-agent/agent`). Merge/deploy remain human-gated; autopilot approves dispatch only inside O4 guardrails.)*
 
+## Post-2026-06-02 — autonomous dispatch proven + new work streams
+
+> **Reconciliation note (2026-06-02):** The **autonomous dispatch loop round-tripped end-to-end for the first time on this deployment.** Root cause of every prior silent no-op: the branch workers authenticated `git clone` with `Authorization: Bearer <PAT>`, which GitHub's git smart-HTTP endpoint rejects — git fell through to an interactive prompt and left an empty worktree, and the no-op was wrongly recorded as `completed`. Fixed to `Basic` / `x-access-token` in **#402** (merged + deployed); execution budget raised 30m→90m. An operator-approved board task now clones, runs `claude -p`, and opens its own PR. In `HERMES_MULTI_AGENT_ORCHESTRATION_PLAN.md` terms, **Rung B (Dispatcher) is now functionally proven** (its P1 attribution / P2 Claude worker / P3 dispatch lane are live); the frontier is **Rung C** — Hermes-as-planner (that plan's **P4 router + P5 hardening**).
+
+### New streams opened this session (additions to the O/A/B/C/D/T index)
+
+| ID | Item | Status | Doc |
+|----|------|--------|-----|
+| **L2** | **Board Loop 2 — citation-repair tester→fix loop.** PR-1 `citation_repair` mission mode + result→card; PR-2 Hermes analysis brain (verdict + fix-spec posted to the card); PR-3 wire FAIL → existing self-healing dispatch → PR → auto re-run. | 🟠 in flight (PR-1/2/3) | `HERMES_BOARD_WORKFLOW_REDESIGN.md` |
+| **TUX** | **Tester UX wave 2.** P3 live-follow panel · P4 saved-suite library · P5 agent authoring (test-writer + platform request) · P3b optional screencast. | 🟠 P3/P4/P5 in flight; P3b optional | `HERMES_TESTER_UX.md` §3–§4, §7 |
+| **RR** | **Runner reliability + honesty.** Clone Basic-auth ✅ (#402). Open: `failed`-not-`completed` for no-PR/empty-clone runs (truth-boundary); UI "Approve & dispatch" persistence; `--output-format stream-json --verbose` for live progress. | 🔴 open (clone done) | — |
+| **AQ** | **Citation-repair adapter quality.** Extractor misses `{{dead link}}` template citations, emits garbled `current_claim`/`target_text`, flags live sources as `weak_source`. **Gates the gold-path milestone.** | 🔴 open | `HERMES_TESTER_UX.md` §5 |
+
+### The real product milestone still pending
+- **First real gold-path job settled on-chain** (claim → work → submit → settle). Reached the live job on 2026-06-02 but stopped on the honest call (auto-output was low quality). **Blocked by AQ.** This — not any infra item — is the proof the product actually works.
+
+### Platform repo (`averray-agent/agent`)
+- **USDC auto-refill** (worker/poster liquidity from treasury) — `USDC_AUTOREFILL_INTEGRATION.md`; defer until burn rate is measured over ~20–30 loops.
+- **T7 platform-repo helper** (tester request/advertise shim).
+
 ## Recommended build order (the smooth, low-effort ramp)
 
 1. **The self-feeding loop:** **O1 → O2 → O3.** Once this exists you stop hand-writing prompts; work is enqueued from the board and you just approve. Highest-leverage effort.
