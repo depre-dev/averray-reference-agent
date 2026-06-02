@@ -790,7 +790,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
     await handleMonitorTestbedMissionRequestProposal(request, response);
     return;
   }
-  if (request.method === "POST" && url.pathname === "/monitor/testbed-suites/request") {
+  if (request.method === "POST" && isMonitorTestbedSuiteRequestPath(url.pathname)) {
     if (!monitorConfig.enabled) {
       writeJson(response, 404, { error: "monitor_disabled" });
       return;
@@ -857,8 +857,8 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
     return;
   }
   const testbedSuiteId = monitorTestbedSuiteId(url.pathname);
-  const handlesTestbedSuiteRead = request.method === "GET" && (url.pathname === "/monitor/testbed-suites" || Boolean(testbedSuiteId));
-  const handlesTestbedSuiteCreate = request.method === "POST" && url.pathname === "/monitor/testbed-suites";
+  const handlesTestbedSuiteRead = request.method === "GET" && (isMonitorTestbedSuiteCollectionPath(url.pathname) || Boolean(testbedSuiteId));
+  const handlesTestbedSuiteCreate = request.method === "POST" && isMonitorTestbedSuiteCollectionPath(url.pathname);
   if (handlesTestbedSuiteRead || handlesTestbedSuiteCreate) {
     if (!monitorConfig.enabled) {
       writeJson(response, 404, { error: "monitor_disabled" });
@@ -3913,29 +3913,43 @@ function monitorTestbedMissionActionId(pathname: string, action: "accept-failure
   return id.length > 0 && !id.includes("/") ? id : undefined;
 }
 
+const MONITOR_TESTBED_SUITE_COLLECTION_PATHS = ["/monitor/suites", "/monitor/testbed-suites"] as const;
+const MONITOR_TESTBED_SUITE_PREFIXES = ["/monitor/suites/", "/monitor/testbed-suites/"] as const;
+
+function isMonitorTestbedSuiteCollectionPath(pathname: string): boolean {
+  return MONITOR_TESTBED_SUITE_COLLECTION_PATHS.includes(pathname as typeof MONITOR_TESTBED_SUITE_COLLECTION_PATHS[number]);
+}
+
+function isMonitorTestbedSuiteRequestPath(pathname: string): boolean {
+  return MONITOR_TESTBED_SUITE_PREFIXES.some((prefix) => pathname === `${prefix}request`);
+}
+
 function monitorTestbedSuiteRunId(pathname: string): string | undefined {
-  const prefix = "/monitor/testbed-suites/";
-  const suffix = "/run";
-  if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) return undefined;
-  const raw = pathname.slice(prefix.length, -suffix.length);
-  const id = decodeURIComponent(raw).trim();
-  return id.length > 0 && !id.includes("/") ? id : undefined;
+  return monitorTestbedSuiteIdWithSuffix(pathname, "run");
 }
 
 function monitorTestbedSuiteId(pathname: string): string | undefined {
-  const prefix = "/monitor/testbed-suites/";
-  if (!pathname.startsWith(prefix)) return undefined;
-  const id = decodeURIComponent(pathname.slice(prefix.length)).trim();
-  return id.length > 0 && !id.includes("/") ? id : undefined;
+  for (const prefix of MONITOR_TESTBED_SUITE_PREFIXES) {
+    if (!pathname.startsWith(prefix)) continue;
+    const id = decodeURIComponent(pathname.slice(prefix.length)).trim();
+    return id.length > 0 && !id.includes("/") ? id : undefined;
+  }
+  return undefined;
 }
 
 function monitorTestbedSuiteActionId(pathname: string, action: "approve" | "dismiss"): string | undefined {
-  const prefix = "/monitor/testbed-suites/";
-  const suffix = `/${action}`;
-  if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) return undefined;
-  const raw = pathname.slice(prefix.length, -suffix.length);
-  const id = decodeURIComponent(raw).trim();
-  return id.length > 0 && !id.includes("/") ? id : undefined;
+  return monitorTestbedSuiteIdWithSuffix(pathname, action);
+}
+
+function monitorTestbedSuiteIdWithSuffix(pathname: string, suffixName: "run" | "approve" | "dismiss"): string | undefined {
+  const suffix = `/${suffixName}`;
+  for (const prefix of MONITOR_TESTBED_SUITE_PREFIXES) {
+    if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) continue;
+    const raw = pathname.slice(prefix.length, -suffix.length);
+    const id = decodeURIComponent(raw).trim();
+    return id.length > 0 && !id.includes("/") ? id : undefined;
+  }
+  return undefined;
 }
 
 function testerSavedSuitesForManifest() {

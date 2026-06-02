@@ -30,6 +30,7 @@ export interface TestbedSuite {
   target: string;
   mode: TestbedSuiteMode;
   goal?: string;
+  role?: string;
   author: TestbedSuiteAuthor;
   requesterAgent?: string;
   requestReason?: string;
@@ -52,6 +53,7 @@ export interface CreateTestbedSuiteInput {
   target?: unknown;
   mode?: unknown;
   goal?: unknown;
+  role?: unknown;
   author?: unknown;
   requesterAgent?: unknown;
   reason?: unknown;
@@ -155,6 +157,7 @@ function createSuiteRecord(
     target: parseHttpTarget(input.target),
     mode: parseSuiteMode(input.mode),
     ...(parseOptionalString(input.goal) ? { goal: parseOptionalString(input.goal) } : {}),
+    ...(parseOptionalString(input.role) ? { role: parseOptionalString(input.role) } : {}),
     author: parseSuiteAuthor(input.author),
     ...(parseOptionalString(input.requesterAgent) ? { requesterAgent: parseOptionalString(input.requesterAgent) } : {}),
     ...(parseOptionalString(input.reason) || parseOptionalString(input.requestReason) ? { requestReason: parseOptionalString(input.reason) ?? parseOptionalString(input.requestReason) } : {}),
