@@ -88,6 +88,9 @@ export async function decideTaskHealthAction(
   const base = { taskId: task.id };
   if (TERMINAL_NO_ACTION.has(task.status)) return { ...base, action: "none", reason: "terminal" };
   if (task.selfManagementEscalatedAt) return { ...base, action: "none", reason: "already_escalated" };
+  if (isInvalidSelfHealingTarget(task)) {
+    return { ...base, action: "escalate", reason: "invalid_self_healing_target:testbed_mission_not_a_repo" };
+  }
 
   if (task.status === "failed") {
     const scheduledRetry = parseDate(task.retryAfter);
@@ -131,6 +134,10 @@ export async function decideTaskHealthAction(
   }
 
   return { ...base, action: "none", reason: "not_managed" };
+}
+
+function isInvalidSelfHealingTarget(task: CodexTask): boolean {
+  return task.requester === "hermes-self-healing" && task.repo === "testbed/mission";
 }
 
 function mayRetry(task: CodexTask, config: TaskHealthConfig): boolean {
