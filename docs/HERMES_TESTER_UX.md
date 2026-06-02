@@ -77,13 +77,26 @@ Promote a launched config into a **named, saved suite** = `{ name, target, mode,
 
 ---
 
-## 4. Live run panel *(poll-to-completion — honest)*
+## 4. The run lifecycle — dispatch → live follow → end report *(the operator's "1:1" ask)*
 
-**Feasibility (verified):** full per-step streaming is NOT worth it now (the agent posts one terminal report). **Poll-to-completion is feasible and low-effort.** Build on existing wiring: `board.card.updated` SSE fires every poll (`monitor-v2.ts:1907`); `publishProgress` writes `progressMessage` + a sanitized stdout tail throttled to ~1 write / 2s (`testbed-mission-runner.ts:289`).
+The operator's flow: **send the command → it's dispatched and goes "ready/running" → open the drawer and watch what's happening → when done, an end report with a conclusion + a fix suggestion if it failed.** That's a clear lifecycle the drawer should make visible:
 
-**Panel:** in `MissionBody` (`DrawerBody.tsx:458`), branch on `missionStatus === "running"` → a `MissionRunInProgress` view: a **stage badge** from `progressMessage` + scrollable **recent runner output** (the sanitized tail), refreshing ~every 2s; on completion the *same* `MissionBody` auto-swaps to the full verdict/path/blockers/evidence (P0) — no new component, no reload.
-- **Honest copy:** "recent runner output" (it's a rolling ~12KB tail — older steps scroll off), and it refreshes ~2s; never imply a full per-step ledger (critique #4/#5). Never show a verdict before the agent posts one.
-- **Optional [Codex] sub-task:** have the runner extract a `STAGE: …` marker from stdout into `progressMessage` (`testbed-mission-runner.ts:289`) so stages advance visibly — chain after the panel lands (touches the runner boundary Codex owns).
+`requested / dispatched → running (live) → done (verdict + conclusion + recommendations)`
+
+**Believability note:** a run's *depth* (and time) comes from its scope — an explore mission does ~2 steps in ~3s; a gold-path run does many steps + on-chain txs and takes tens of seconds. The runner genuinely drives Chromium (video/trace/screenshots prove it); thin/fast runs are thin *because the scope is thin*. (Confirm `TESTBED_GOLDPATH_LIVE=1` so the gold-path uses the real driver, not the fake.)
+
+### 4a. Live follow panel (poll-to-completion — honest)
+**Feasibility (verified):** the agent posts one terminal report, so per-step *field* streaming isn't free — but **poll-to-completion is low-effort** on existing wiring: `board.card.updated` SSE fires every poll (`monitor-v2.ts:1907`); `publishProgress` writes `progressMessage` + a sanitized stdout tail throttled to ~1 write / 2s (`testbed-mission-runner.ts:289`).
+
+In `MissionBody` (`DrawerBody.tsx:458`), branch on `missionStatus === "running"` → a `MissionRunInProgress` view: a **stage badge** (from `progressMessage`), the **latest screenshot**, and scrollable **recent runner output** (the rolling tail), refreshing ~every 2s; on completion the *same* `MissionBody` auto-swaps to the full end report — no new component, no reload.
+- **Honest copy:** "recent runner output" (a rolling ~12KB tail — older steps scroll off); refreshes ~2s; never imply a full per-step ledger or show a verdict before the agent posts one.
+- **Optional [Codex]:** extract a `STAGE: …` marker from stdout into `progressMessage` so stages advance visibly.
+
+### 4b. The end report = conclusion + fix suggestion
+On completion the drawer must read like a verdict you can act on: the **scope/goal** at top, the **verdict + a one-line conclusion**, the **path/steps**, and — if it failed or found issues — the **recommendations** ("the fix") plus the **"Create product fix → Codex"** action (already in the footer) to dispatch that fix. The report already carries `goal`, `scores`, `blockers`, `recommendations`, and the agent's `what_i_tried` narrative — *surface them* (see P0b); today the drawer shows only verdict/path/evidence, so a thin run "says nothing."
+
+### 4c. True 1:1 live *(optional upgrade — P3b)*
+The 2s poll panel gets you "watch the steps + latest screenshot advance." A literal frame-by-frame **live screencast of the browser** is a separate, bigger build (a video / CDP screencast stream) — offered as **P3b**, not pretended into the poll panel.
 
 ---
 
@@ -121,17 +134,19 @@ External agents are **requesters, never runners.** They discover via the manifes
 
 | # | Prompt | Type · Owner |
 |---|---|---|
-| **P0** | Attach the real report — **verify the `correlationId→missionIndex` join first** (likely culprit), project the verdict one-liner, honest no-report fallback that never masks a real FAILED. Regression test: a completed run with a structured report → populated `card.mission`. | BUG · Claude |
+| **P0** | Attach the real report — **verify the `correlationId→missionIndex` join first** (likely culprit), project the verdict one-liner, honest no-report fallback that never masks a real FAILED. Regression test: a completed run with a structured report → populated `card.mission`. | BUG · Claude ✅ #383 |
+| **P0b** | **Mission report detail** — in `MissionBody` (`DrawerBody.tsx`) surface the report's `goal`/scope at the top, the `what_i_tried` agent narrative as a "What the agent did" section, and the **recommendations** + **Create-product-fix** as the "conclusion + fix" — plus per-step detail (status + latency) and scores/blockers when present. Truth-boundary: show only what the report contains; a thin run shows its real thin path. | FEATURE · Claude |
 | **P1** | "Start a mission" launcher MVP (target → flow + Fresh/Memory → goal + request-approval; widen the POST body; wire the approve gate; mutation-flag-ignored test; no role step). | FEATURE · Claude |
 | **P2** | Gold-path **SIWE session** (T3 sidecar → Bearer + storageState; browser carries Basic Auth + SIWE; testnet-only; sponsored jobs). | FEATURE · Codex |
-| **P3** | Live run panel (poll-to-completion; `missionStatus==="running"` branch in `MissionBody`; honest "recent output ~2s"). | FEATURE · Claude |
+| **P3** | **Run lifecycle + live follow** — drive the drawer through `requested/dispatched → running (live) → done`: while running, show a stage badge + latest screenshot + recent output (~2s poll); auto-swap to the end report on completion. Honest copy (no fake per-step ledger; no verdict before the agent posts one). | FEATURE · Claude |
+| **P3b** | **True 1:1 live screencast** *(optional upgrade)* — a frame-by-frame video/CDP screencast of the browser as the mission runs, streamed to the drawer. Separate, bigger build; only if the 2s step-view isn't enough. | FEATURE · Codex+Claude |
 | **P4** | Saved suite library (suite store + Suites panel + Run + run history) + the predefined/NL **+ New suite** paths. | FEATURE · Claude |
 | **P5** | The agent authoring paths — test-writer (C3) suite proposals + platform-agent suite requests (T6 gate). | FEATURE · Codex+Claude |
 | **P6** | Manifest: add the **ready-to-test inventory** — extend `GET /monitor/tester/capabilities` (`tester-capabilities.ts`) beyond flow *types* to list saved suites (name, flow, target, last-run verdict+ts), available targets/envs + reachability + mutation profile; keep per-flow `status` honest. | FEATURE · Claude+Codex |
 | **P7** | **Report-back to the requester** — when a mission carries `requesterAgent` (T6), make the structured report retrievable by it (`GET /monitor/testbed-missions/:id` returning the same MissionBody report / a callback). Read-only; no operator-private data leaks. | FEATURE · Codex |
 | **P8** | **Advertise the tester in the product repo** (`averray-agent/agent`, T7 follow-up) — a thin request helper + AGENTS.md pointer: discover (manifest) → request (T6, requester+reason) → read report (P7); operator-gated, request-only, read-only by default. | FEATURE · Claude |
 
-**Sequence:** P0 (readable) → P2 (gold-path can actually run authed) → P1 (easy launch) → P3 (follow it live) → P4/P5 (the library + agent authoring) → P6/P7/P8 (the external-agent invocation contract: manifest inventory → report-back → advertise). P0 first — the report-attachment bug is what makes the whole tester feel broken; P6–P8 turn the tester into a service other agents can discover and request.
+**Sequence:** P0 ✅ (readable) → **P0b (report detail — scope/conclusion/fix; the first thing now, so the end report says something)** → P2 ✅ (gold-path authed) → P1 (easy launch) → P3 (run lifecycle + live follow) → P3b (optional 1:1 screencast) → P4/P5 (library + agent authoring) → P6/P7/P8 (external-agent contract). With P0/P2 done, **P0b is the next move** — it completes the *end report* (scope + conclusion + fix suggestion) the operator can't yet see; P3 then makes the run *followable* through the dispatch→running→done lifecycle.
 
 **Invariants:** truth-boundary throughout (real runs only — no fabricated verdicts, no implied per-step streaming, honest "recent output"); testnet-only mutation, server-enforced; the UI can never enable mutation on a prod target; keys/sessions stay in the sidecar.
 
