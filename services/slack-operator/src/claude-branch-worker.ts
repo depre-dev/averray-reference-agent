@@ -350,7 +350,10 @@ const defaultExec: ExecFn = (command, args, options) =>
 
 function gitArgsWithAuth(command: string, args: string[], token?: string): string[] {
   if (command !== "git" || !token) return args;
-  return ["-c", `http.https://github.com/.extraheader=AUTHORIZATION: Bearer ${token}`, ...args];
+  // GitHub's git smart-HTTP endpoint rejects `Authorization: Bearer <PAT>`; it
+  // requires Basic auth with the token as the password (x-access-token user).
+  const basic = Buffer.from(`x-access-token:${token}`).toString("base64");
+  return ["-c", `http.https://github.com/.extraheader=AUTHORIZATION: Basic ${basic}`, ...args];
 }
 
 function resolveGithubTokenForRepo(repo: string, env: NodeJS.ProcessEnv): string | undefined {
