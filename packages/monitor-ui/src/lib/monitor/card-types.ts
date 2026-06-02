@@ -269,12 +269,26 @@ export interface MissionReport {
   recommendations: string[];
 }
 
+/** Live snapshot of a RUNNING mission (the rolling ~2s poll) — not a report. */
+export interface MissionProgress {
+  /** Latest stage line. */
+  message?: string;
+  /** Sanitized recent runner output — a rolling tail (older lines scroll off). */
+  output?: string;
+  /** When the latest progress was recorded (ISO). */
+  at?: string;
+  /** Latest screenshot URL — present only when a servable URL exists. */
+  screenshot?: string;
+}
+
 /** Browser mission card (testbed). */
 export interface MissionCard extends CardBase {
   type: "mission";
   mission?: MissionReport;
   /** requested missions are board-gated and cannot be claimed until approved. */
   missionStatus?: "requested" | "ready" | "running" | "completed" | "failed";
+  /** Live progress while running; absent once the terminal report lands. */
+  missionProgress?: MissionProgress;
 }
 
 /** Task lifecycle status (mirrors the serializer's TaskStatus). */

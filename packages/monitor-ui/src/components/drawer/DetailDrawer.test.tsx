@@ -379,6 +379,84 @@ describe("DetailDrawer — variants", () => {
     expect(queryByText(/success · clarity · latency/i)).toBeNull();
   });
 
+  function runningMission(progress?: Record<string, unknown>) {
+    return {
+      id: "mission run-9",
+      lane: "hermes-checking",
+      type: "mission",
+      agentType: "hermes",
+      title: "Verify checkout on staging",
+      summary: "running",
+      repo: "depre-dev/site",
+      freshness: 1,
+      state: "running",
+      risk: [],
+      waitingOn: { actor: "agent", tone: "info" },
+      missionStatus: "running",
+      ...(progress ? { missionProgress: progress } : {})
+    } as unknown as BoardCard;
+  }
+
+  test("a RUNNING mission shows live stage + recent output with honest copy, no verdict", () => {
+    const card = runningMission({
+      message: "Clicking safe visible control: Connect wallet",
+      output: "opened https://staging.averray.com/checkout\nclicked Connect wallet\n"
+    });
+    const { getByText, queryByText } = render(
+      <DetailDrawer card={card} cards={[{ id: card.id }]} onClose={noop} onNavigate={noop} />
+    );
+    expect(getByText("Mission · running")).toBeTruthy();
+    expect(getByText("Clicking safe visible control: Connect wallet")).toBeTruthy();
+    expect(getByText("Recent runner output")).toBeTruthy();
+    expect(getByText(/clicked Connect wallet/)).toBeTruthy();
+    // Honest copy: rolling tail + ~2s refresh + no verdict promise.
+    expect(getByText(/Rolling ~12KB tail/)).toBeTruthy();
+    expect(getByText(/Refreshes ~every 2s/)).toBeTruthy();
+    // No verdict / scores while running.
+    expect(queryByText("PARTIAL")).toBeNull();
+    expect(queryByText(/out of 10/)).toBeNull();
+  });
+
+  test("a running mission with no output yet stays honest (no fabricated steps)", () => {
+    const { getByText } = render(
+      <DetailDrawer card={runningMission({ message: "Runner claimed the mission." })} cards={[]} onClose={noop} onNavigate={noop} />
+    );
+    expect(getByText(/No output yet/)).toBeTruthy();
+  });
+
+  test("the SAME drawer auto-swaps from the live view to the full report on completion", () => {
+    const running = runningMission({ message: "step 1", output: "line\n" });
+    const { getByText, queryByText, rerender } = render(
+      <DetailDrawer card={running} cards={[{ id: running.id }]} onClose={noop} onNavigate={noop} />
+    );
+    expect(getByText("Mission · running")).toBeTruthy();
+
+    // The board.card.updated SSE replaces the card with the completed report.
+    const done = {
+      ...running,
+      state: "fresh",
+      missionStatus: "completed",
+      missionProgress: undefined,
+      mission: {
+        verdict: "OK",
+        verdictTone: "ok",
+        confidence: 0.9,
+        target: "https://staging.averray.com/checkout",
+        seed: "fresh · no memory",
+        path: [{ n: 1, status: "ok", desc: "Loaded checkout" }],
+        blockers: [],
+        evidence: [],
+        mutationBoundary: "Read-only mission — the agent stopped before any mutation.",
+        recommendations: []
+      }
+    } as unknown as BoardCard;
+    rerender(<DetailDrawer card={done} cards={[{ id: done.id }]} onClose={noop} onNavigate={noop} />);
+
+    expect(queryByText("Mission · running")).toBeNull();
+    expect(getByText("OK")).toBeTruthy();
+    expect(getByText("Loaded checkout")).toBeTruthy();
+  });
+
   // Regression: live cards cross an HTTP/JSON boundary and don't always carry
   // the type-required nested objects (the backend doesn't populate deploy
   // `verification` or a mission `mission` report yet). The drawer must render,

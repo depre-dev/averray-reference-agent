@@ -570,6 +570,65 @@ describe("enrichBoardCard", () => {
     ]);
   });
 
+  it("projects live progress (stage + recent output) for a RUNNING mission, with no verdict", () => {
+    const card = enrichBoardCard(
+      base({ id: "mission run-1", type: "mission", lane: "hermes-checking", title: "Verify checkout" }),
+      slim({ lane: "Hermes Checking" }),
+      {
+        missionRun: {
+          id: "mission run-1",
+          status: "running",
+          progressMessage: "Clicking safe visible control: Connect wallet",
+          stdoutTail: "opened https://staging.averray.com\nclicked Connect wallet\n",
+          progressAt: "2026-06-02T10:00:00.000Z"
+        }
+      }
+    );
+    expect(card.missionStatus).toBe("running");
+    expect(card.missionProgress).toEqual({
+      message: "Clicking safe visible control: Connect wallet",
+      output: "opened https://staging.averray.com\nclicked Connect wallet\n",
+      at: "2026-06-02T10:00:00.000Z"
+    });
+    // No verdict/report while running — the agent posts that only at the end.
+    expect(card.mission).toBeUndefined();
+  });
+
+  it("drops live progress once the mission has a terminal report (the swap to the end report)", () => {
+    const card = enrichBoardCard(
+      base({ id: "mission done-1", type: "mission", lane: "hermes-checking" }),
+      slim({ lane: "Hermes Checking" }),
+      {
+        missionRun: {
+          id: "mission done-1",
+          status: "completed",
+          progressMessage: "almost done",
+          stdoutTail: "x",
+          result: { verdict: "pass", confidence: 0.9, completedPath: ["Loaded checkout"] }
+        }
+      }
+    );
+    expect(card.missionStatus).toBe("completed");
+    expect(card.missionProgress).toBeUndefined();
+    expect(card.mission?.verdict).toBe("OK");
+  });
+
+  it("ignores a non-servable (local path) progress screenshot — never fakes an image", () => {
+    const card = enrichBoardCard(
+      base({ id: "mission run-2", type: "mission", lane: "hermes-checking" }),
+      slim({ lane: "Hermes Checking" }),
+      {
+        missionRun: {
+          id: "mission run-2",
+          status: "running",
+          progressMessage: "step",
+          progressScreenshotUrl: "/data/testbed-mission-artifacts/run-2/after.png"
+        }
+      }
+    );
+    expect(card.missionProgress?.screenshot).toBeUndefined();
+  });
+
   it("marks a card failed-fetch when the GitHub source read reported a real error", () => {
     const card = enrichBoardCard(base(), slim(), {
       summary: {
