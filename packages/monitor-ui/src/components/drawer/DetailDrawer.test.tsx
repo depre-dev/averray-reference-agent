@@ -326,6 +326,30 @@ describe("DetailDrawer — variants", () => {
     expect(getByText(/no structured report yet/i)).toBeTruthy();
     expect(getByText("Spec · /mission spawn flow")).toBeTruthy();
   });
+
+  test("completed mission with NO report renders honest report-unavailable coaching", () => {
+    const card = {
+      id: "mission browser-completed-no-report",
+      lane: "done",
+      type: "mission",
+      missionStatus: "completed",
+      agentType: "hermes",
+      title: "Fresh-agent browser mission",
+      summary: "Run finished without a structured report — see recent output.",
+      repo: "testbed/mission",
+      freshness: 15,
+      state: "fresh",
+      risk: ["testbed"],
+      waitingOn: { actor: "agent", tone: "neutral" },
+    } as unknown as BoardCard;
+    const { getByText, queryByText } = render(
+      <DetailDrawer card={card} cards={[{ id: card.id }]} onClose={noop} onNavigate={noop} />,
+    );
+    expect(getByText("Mission · report unavailable")).toBeTruthy();
+    expect(getByText(/run finished without a structured report/i)).toBeTruthy();
+    expect(queryByText("Mission · no report yet")).toBeNull();
+    expect(queryByText("FAILED")).toBeNull();
+  });
 });
 
 describe("DetailDrawer — footer actions (G2)", () => {

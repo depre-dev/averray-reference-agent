@@ -374,7 +374,7 @@ export function mapTagsToRisk(tags: ReadonlyArray<string> | undefined): RiskTag[
 
 /**
  * Infer the card type from the classifier output. Heuristics:
- *   - testbed tag or "mission" in the id → mission
+ *   - testbed tag or "mission" in the title → mission
  *   - codex-needed lane or owner Codex with a task shape → task
  *   - done lane → done
  *   - a deploy-flavored title/owner → deploy
@@ -383,8 +383,8 @@ export function mapTagsToRisk(tags: ReadonlyArray<string> | undefined): RiskTag[
 export function inferCardType(item: HermesBoardCardSnapshot, lane: Lane): CardType {
   const tags = (item.tags ?? []).map((t) => String(t).toLowerCase());
   const title = (item.title ?? "").toLowerCase();
-  if (lane === "done") return "done";
   if (tags.includes("testbed") || /\bmission\b/.test(title)) return "mission";
+  if (lane === "done") return "done";
   if (lane === "codex-needed") return "task";
   if (lane === "deploying" || /post-merge verify|deploy verif/.test(title)) return "deploy";
   if (lane === "drafts") return "draft";
@@ -1245,6 +1245,37 @@ function reportSource(run: Record<string, unknown>): Record<string, unknown> {
   return structured ?? result ?? {};
 }
 
+function missionReportMode(source: Record<string, unknown>, run: Record<string, unknown>): string {
+  const raw = firstString(
+    source.mode,
+    source.runnerMode,
+    source.executor,
+    source.pathName,
+    source.kind,
+    run.mode,
+    run.environment,
+  );
+  return raw ? raw.replace(/_/g, "-") : "mission";
+}
+
+function conciseMissionDetail(value: string): string {
+  const singleLine = value.replace(/\s+/g, " ").trim();
+  return singleLine.length <= 96 ? singleLine : `${singleLine.slice(0, 93)}...`;
+}
+
+function missionReportOneLine(run: Record<string, unknown>): string | undefined {
+  const report = testbedMissionStructuredReport(run as unknown as TestbedMissionRun);
+  if (!report) return undefined;
+  const source = reportSource(run);
+  const verdict = report.verdict.toUpperCase();
+  const mode = missionReportMode(source, run);
+  const blockerCount = report.blockers.length + report.confusingMoments.length;
+  const blockerLabel = blockerCount === 1 ? "blocker" : "blockers";
+  const topBlocker = report.blockers[0] ?? report.confusingMoments[0];
+  const base = `${verdict} · ${mode} · ${blockerCount} ${blockerLabel}`;
+  return topBlocker ? `${base} · ${conciseMissionDetail(topBlocker)}` : base;
+}
+
 function reportArrayEntry(source: Record<string, unknown>, key: string, index: number): Record<string, unknown> | undefined {
   const entry = asArray(source[key])[index];
   return asRecord(entry);
@@ -1447,7 +1478,11 @@ export function enrichBoardCard(
     const status = asString(ctx.missionRun.status);
     if (status) card.missionStatus = status as MissionStatus;
     const mission = mapMissionReport(ctx.missionRun);
-    if (mission) card.mission = mission;
+    if (mission) {
+      card.mission = mission;
+      const oneLine = missionReportOneLine(ctx.missionRun);
+      if (oneLine) card.summary = oneLine;
+    }
     const workingNow = workingNowFromMissionRun(ctx.missionRun);
     if (workingNow) card.workingNow = workingNow;
   }
