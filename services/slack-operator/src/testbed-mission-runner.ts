@@ -26,6 +26,7 @@ import {
   type GoldPathAutonomyDeps,
 } from "./gold-path-autonomy.js";
 import { executeSiweAuthMission, type SiweAuthMissionDeps } from "./testbed-auth-mission.js";
+import { executeCitationRepairMission } from "./testbed-citation-mission.js";
 import { executeSurfaceSweep, type SurfaceSweepDeps } from "./testbed-surface-sweep.js";
 import {
   parseTestbedLiveScreencastConfig,
@@ -449,6 +450,11 @@ export async function executeBrowserTestbedMission(
   }
   if (mission.mode === "gold_path") {
     return executeGoldPathTestbedMission(mission, config);
+  }
+  if (mission.mode === "citation_repair") {
+    // Not a browser mission: run the Wikipedia citation-repair workflow
+    // (dryRun forced server-side — a board mission never claims/submits).
+    return executeCitationRepairMission(mission, config);
   }
   return executePlaywrightTestbedMission(mission, config);
 }
