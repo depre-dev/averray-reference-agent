@@ -6,6 +6,7 @@ import {
   readTestbedMissionRunnerHeartbeat,
   recordTestbedMissionRunFromOperatorResult,
   summarizeTestbedMissionRunnerHeartbeat,
+  testbedMissionRequesterMissionBody,
   type TestbedMissionMode,
   type TestbedMissionRequesterAgent,
   type TestbedMissionRun,
@@ -202,12 +203,39 @@ export function getTestbedMissionForAgent(id: string, input: AgentTestbedMission
   const run = listTestbedMissionRuns({ limit: 50, path: input.path })
     .find((candidate) => candidate.id === id);
   if (!run) return undefined;
+  const report = run.status === "completed" || run.status === "failed"
+    ? testbedMissionRequesterMissionBody(run)
+    : undefined;
+  if (!report) {
+    return {
+      schemaVersion: 1,
+      kind: "hermes_testbed_agent_mission_report",
+      id: run.id,
+      status: run.status,
+      updatedAt: run.updatedAt,
+      runner,
+      nextStep: nextStepForRun(run, runner),
+    };
+  }
   return {
     schemaVersion: 1,
-    kind: "hermes_testbed_agent_mission",
+    kind: "hermes_testbed_agent_mission_report",
+    id: run.id,
+    status: run.status,
+    title: run.title,
+    targetUrl: run.targetUrl,
+    goal: run.goal,
+    ...(run.requesterAgent ? { requesterAgent: run.requesterAgent } : {}),
+    ...(run.requestReason ? { requestReason: run.requestReason } : {}),
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
+    ...(run.requestedAt ? { requestedAt: run.requestedAt } : {}),
+    ...(run.approvedAt ? { approvedAt: run.approvedAt } : {}),
+    ...(run.claimedAt ? { claimedAt: run.claimedAt } : {}),
+    ...(run.completedAt ? { completedAt: run.completedAt } : {}),
+    ...(run.failedAt ? { failedAt: run.failedAt } : {}),
     runner,
-    run,
-    mission: run.mission,
+    report,
     nextStep: nextStepForRun(run, runner),
   };
 }

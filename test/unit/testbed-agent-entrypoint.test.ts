@@ -5,6 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   __resetTestbedMissionRunsForTests,
+  acceptTestbedMissionFailure,
+  recordTestbedMissionReportFromMessage,
+  recordTestbedMissionIssueOpened,
   updateTestbedMissionRunnerHeartbeat,
 } from "../../services/slack-operator/src/monitor-testbed-missions.js";
 import {
@@ -306,7 +309,7 @@ describe("testbed agent entrypoint", () => {
     });
   });
 
-  it("returns one mission with the next useful agent action", () => {
+  it("returns a requester-safe status envelope before mission completion", () => {
     const created = createTestbedMissionFromAgent(
       {
         path,
@@ -319,17 +322,151 @@ describe("testbed agent entrypoint", () => {
     const detail = getTestbedMissionForAgent(created.run.id, { path });
 
     expect(detail).toMatchObject({
-      kind: "hermes_testbed_agent_mission",
-      run: {
-        id: created.run.id,
-        status: "ready",
-        targetUrl: "https://testbed.example/app",
-      },
-      mission: {
-        kind: "testbed_agent_browser_mission",
-      },
+      kind: "hermes_testbed_agent_mission_report",
+      id: created.run.id,
+      status: "ready",
     });
+    expect(detail).not.toHaveProperty("report");
+    expect(detail).not.toHaveProperty("run");
+    expect(detail).not.toHaveProperty("mission");
+    expect(detail).not.toHaveProperty("result");
+    expect(detail).not.toHaveProperty("targetUrl");
+    expect(detail).not.toHaveProperty("goal");
     expect(detail?.nextStep).toContain("Mission is ready");
     expect(getTestbedMissionForAgent("missing", { path })).toBeUndefined();
+  });
+
+  it("returns the requester MissionBody report after completion", () => {
+    const created = createTestbedMissionFromAgent(
+      {
+        path,
+        requester: "codex",
+        targetUrl: "https://testbed.example/app",
+        goal: "verify the app is understandable to a fresh tester",
+      },
+      Date.parse("2026-05-25T10:01:00.000Z")
+    );
+
+    recordTestbedMissionReportFromMessage(
+      {
+        path,
+        relatedCorrelationId: created.run.id,
+        text: JSON.stringify({
+          verdict: "pass",
+          confidence: 0.91,
+          stoppedBeforeMutation: true,
+          summary: "pass: the fresh tester completed the happy path",
+          completedPath: [
+            { desc: "Opened the app shell", status: "ok" },
+            { desc: "Followed the primary CTA", status: "ok" },
+          ],
+          blockers: [],
+          confusingMoments: [],
+          evidence: [
+            "what_i_tried: opened the page and followed the primary path",
+            "screenshot: https://example.test/screen.png",
+            "console: no errors",
+          ],
+          mutationBoundaryNotes: ["No mutation was attempted."],
+          recommendations: ["Keep the sandbox label visible."],
+          scores: { orientation: 5, trustBoundary: 4 },
+        }),
+      },
+      Date.parse("2026-05-25T10:07:00.000Z")
+    );
+
+    const detail = getTestbedMissionForAgent(created.run.id, { path });
+
+    expect(detail).toMatchObject({
+      kind: "hermes_testbed_agent_mission_report",
+      id: created.run.id,
+      status: "completed",
+      completedAt: "2026-05-25T10:07:00.000Z",
+      report: {
+        verdict: "OK",
+        verdictTone: "ok",
+        confidence: 0.91,
+        target: "https://testbed.example/app",
+        goal: "verify the app is understandable to a fresh tester",
+        narrative: "opened the page and followed the primary path",
+        conclusion: "OK — the fresh tester completed the happy path",
+        seed: "fresh · no memory",
+        path: [
+          { n: 1, status: "ok", desc: "Opened the app shell" },
+          { n: 2, status: "ok", desc: "Followed the primary CTA" },
+        ],
+        blockers: [],
+        evidence: [
+          { kind: "screenshot", label: "https://example.test/screen.png", href: "https://example.test/screen.png" },
+          { kind: "console", label: "no errors", href: "#" },
+        ],
+        mutationBoundary: "Read-only mission — the agent stopped before any mutation. No mutation was attempted.",
+        recommendations: ["Keep the sandbox label visible."],
+      },
+    });
+    expect(detail?.report?.scores).toEqual([
+      { label: "Orientation", value: 10 },
+      { label: "Trust Boundary", value: 8 },
+    ]);
+  });
+
+  it("does not leak operator-private mission fields to requesters", () => {
+    const created = createTestbedMissionFromAgent(
+      {
+        path,
+        requester: "claude",
+        targetUrl: "https://testbed.example/app",
+        goal: "find the confusing part of the app",
+      },
+      Date.parse("2026-05-25T10:01:00.000Z")
+    );
+
+    recordTestbedMissionReportFromMessage(
+      {
+        path,
+        relatedCorrelationId: created.run.id,
+        text: JSON.stringify({
+          verdict: "fail",
+          confidence: 0.8,
+          stoppedBeforeMutation: true,
+          completedPath: ["Opened the app"],
+          blockers: ["The tester could not find the next action."],
+          evidence: ["trace: https://example.test/trace.zip"],
+          mutationBoundaryNotes: ["No mutation was attempted."],
+          recommendations: ["Clarify the primary next action."],
+          scores: { completion: 1 },
+        }),
+      },
+      Date.parse("2026-05-25T10:07:00.000Z")
+    );
+    acceptTestbedMissionFailure(created.run.id, {
+      path,
+      acceptedBy: "operator",
+      now: new Date("2026-05-25T10:08:00.000Z"),
+    });
+    recordTestbedMissionIssueOpened(created.run.id, {
+      path,
+      issueUrl: "https://github.com/depre-dev/averray-reference-agent/issues/999",
+      issueNumber: 999,
+      openedBy: "operator",
+    });
+
+    const detail = getTestbedMissionForAgent(created.run.id, { path });
+    const serialized = JSON.stringify(detail);
+
+    expect(detail).not.toHaveProperty("run");
+    expect(detail).not.toHaveProperty("mission");
+    expect(detail).not.toHaveProperty("result");
+    expect(serialized).not.toContain("operatorAccepted");
+    expect(serialized).not.toContain("operatorIssue");
+    expect(serialized).not.toContain("missionPrompt");
+    expect(serialized).not.toContain("issues/999");
+    expect(detail).toMatchObject({
+      status: "failed",
+      report: {
+        verdict: "FAILED",
+        blockers: [{ head: "The tester could not find the next action." }],
+      },
+    });
   });
 });

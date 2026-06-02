@@ -144,6 +144,45 @@ export interface TestbedMissionStructuredReport {
   summary: string;
 }
 
+export interface TestbedMissionRequesterScore {
+  label: string;
+  value: number;
+}
+
+export interface TestbedMissionRequesterPathStep {
+  n: number;
+  status: "ok" | "warn" | "fail";
+  desc: string;
+}
+
+export interface TestbedMissionRequesterBlocker {
+  head: string;
+  body?: string;
+}
+
+export interface TestbedMissionRequesterEvidence {
+  kind: "screenshot" | "trace" | "console" | "video";
+  label: string;
+  href: string;
+}
+
+export interface TestbedMissionRequesterMissionBody {
+  verdict: "OK" | "PARTIAL" | "FAILED";
+  verdictTone: "ok" | "warn" | "fail";
+  confidence: number;
+  target: string;
+  goal?: string;
+  narrative?: string;
+  conclusion?: string;
+  scores?: TestbedMissionRequesterScore[];
+  seed: string;
+  path: TestbedMissionRequesterPathStep[];
+  blockers: TestbedMissionRequesterBlocker[];
+  evidence: TestbedMissionRequesterEvidence[];
+  mutationBoundary: string;
+  recommendations: string[];
+}
+
 export interface TestbedMissionBaselineComparison {
   baselineRunId: string;
   baselineCompletedAt?: string;
@@ -778,6 +817,55 @@ export function testbedMissionStructuredReport(run: TestbedMissionRun): TestbedM
   return normalizeTestbedMissionStructuredReport(result, run);
 }
 
+export function testbedMissionRequesterMissionBody(run: TestbedMissionRun): TestbedMissionRequesterMissionBody | undefined {
+  const report = testbedMissionStructuredReport(run);
+  if (!report) return undefined;
+  const source = reportSource(run);
+  const [verdict, verdictTone]: [TestbedMissionRequesterMissionBody["verdict"], TestbedMissionRequesterMissionBody["verdictTone"]] =
+    report.verdict === "pass"
+      ? ["OK", "ok"]
+      : report.verdict === "partial"
+        ? ["PARTIAL", "warn"]
+        : ["FAILED", "fail"];
+  const narrativeEntry = report.evidence.find((entry) => MISSION_NARRATIVE_RE.test(entry.trim()));
+  const narrative = narrativeEntry
+    ? narrativeEntry.trim().replace(MISSION_NARRATIVE_RE, "").trim()
+    : undefined;
+  const evidence = report.evidence
+    .filter((entry) => !MISSION_NARRATIVE_RE.test(entry.trim()))
+    .map(testbedMissionRequesterEvidence);
+  const notes = report.mutationBoundaryNotes.join(" ").trim();
+  const boundaryBase = report.stoppedBeforeMutation
+    ? "Read-only mission — the agent stopped before any mutation."
+    : "The agent crossed or attempted a mutation boundary.";
+  const conclusion = missionRequesterConclusion(report, source);
+  const scores = missionRequesterScoreList(report.scores);
+
+  return {
+    verdict,
+    verdictTone,
+    confidence: report.confidence,
+    target: run.targetUrl,
+    ...(run.goal ? { goal: run.goal } : {}),
+    ...(narrative ? { narrative } : {}),
+    ...(conclusion ? { conclusion } : {}),
+    ...(scores.length > 0 ? { scores } : {}),
+    seed: run.freshMemory === false ? "warm memory" : "fresh · no memory",
+    path: report.completedPath.map((desc, index) => ({
+      n: index + 1,
+      status: missionRequesterStepStatus(source, index),
+      desc: missionRequesterStepDesc(source, index, desc),
+    })),
+    blockers: [
+      ...report.blockers.map((head, index) => missionRequesterBlocker(source, "blockers", index, head)),
+      ...report.confusingMoments.map((head, index) => missionRequesterBlocker(source, "confusingMoments", index, head)),
+    ],
+    evidence,
+    mutationBoundary: notes ? `${boundaryBase} ${notes}` : boundaryBase,
+    recommendations: report.recommendations,
+  };
+}
+
 export function testbedMissionResultCoaching(run: TestbedMissionRun): string {
   const result = run.result ?? {};
   const verdict = typeof result.verdict === "string" ? result.verdict : run.status;
@@ -1108,6 +1196,124 @@ function missionFailedMs(run: TestbedMissionRun): number {
 function parseTestbedMissionMode(value: string | undefined): TestbedMissionMode | undefined {
   if (value === "surface_sweep" || value === "siwe_auth" || value === "gold_path") return value;
   return undefined;
+}
+
+const EVIDENCE_KINDS = new Set(["screenshot", "trace", "console", "video"]);
+const MISSION_NARRATIVE_RE = /^what[_ ]i[_ ]tried\s*:\s*/i;
+
+function testbedMissionRequesterEvidence(raw: string): TestbedMissionRequesterEvidence {
+  const match = /^(\w+):\s*(.+)$/.exec(raw.trim());
+  const kindRaw = match ? match[1]!.toLowerCase() : "";
+  const kind = (EVIDENCE_KINDS.has(kindRaw) ? kindRaw : "trace") as TestbedMissionRequesterEvidence["kind"];
+  const label = (match ? match[2]! : raw).trim();
+  const href = /^https?:\/\//i.test(label) ? label : "#";
+  return { kind, label, href };
+}
+
+function missionRequesterScoreList(scores: Record<string, number>): TestbedMissionRequesterScore[] {
+  return Object.entries(scores)
+    .filter(([, value]) => Number.isFinite(value))
+    .map(([key, value]) => ({ label: missionRequesterScoreLabel(key), value: Math.round(value * 2) }));
+}
+
+function missionRequesterScoreLabel(key: string): string {
+  return key
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .trim()
+    .replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+
+function reportSource(run: TestbedMissionRun): Record<string, unknown> {
+  const result = isRecord(run.result) ? run.result : {};
+  return result;
+}
+
+function missionRequesterArrayEntry(
+  source: Record<string, unknown>,
+  key: string,
+  index: number
+): Record<string, unknown> | undefined {
+  const value = source[key];
+  if (!Array.isArray(value)) return undefined;
+  const entry = value[index];
+  return isRecord(entry) ? entry : undefined;
+}
+
+function missionRequesterStepRecord(source: Record<string, unknown>, index: number): Record<string, unknown> | undefined {
+  return missionRequesterArrayEntry(source, "completedPath", index)
+    ?? missionRequesterArrayEntry(source, "path", index)
+    ?? missionRequesterArrayEntry(source, "steps", index)
+    ?? missionRequesterArrayEntry(source, "completedSteps", index);
+}
+
+function missionRequesterStepStatus(source: Record<string, unknown>, index: number): TestbedMissionRequesterPathStep["status"] {
+  const step = missionRequesterStepRecord(source, index);
+  const raw = firstString(step?.status, step?.verdict, step?.outcome, step?.state)?.toLowerCase();
+  if (!raw) return "ok";
+  if (/\b(fail|failed|error|blocked|blocker)\b/.test(raw)) return "fail";
+  if (/\b(warn|partial|slow|skip|skipped|pending)\b/.test(raw)) return "warn";
+  return "ok";
+}
+
+function missionRequesterStepDesc(source: Record<string, unknown>, index: number, fallback: string): string {
+  const step = missionRequesterStepRecord(source, index);
+  return firstString(step?.desc, step?.description, step?.action, step?.name, step?.value)
+    ?? (fallback === "[object Object]" ? "Step recorded by browser agent" : fallback);
+}
+
+function missionRequesterBlocker(
+  source: Record<string, unknown>,
+  key: "blockers" | "confusingMoments",
+  index: number,
+  fallback: string
+): TestbedMissionRequesterBlocker {
+  const entry = missionRequesterArrayEntry(source, key, index);
+  const evidence = Array.isArray(entry?.evidence)
+    ? entry.evidence.map((value) => asNonEmptyString(value)).filter((value): value is string => Boolean(value))
+    : [];
+  const head = firstString(entry?.head, entry?.title, entry?.summary, entry?.label, entry?.message)
+    ?? (fallback === "[object Object]" ? "Browser-agent finding" : fallback);
+  const body = firstString(
+    entry?.body,
+    entry?.detail,
+    entry?.details,
+    entry?.description,
+    entry?.message,
+    evidence.length ? evidence.join(" ") : undefined,
+  );
+  return { head, ...(body ? { body } : {}) };
+}
+
+function missionRequesterConclusion(
+  report: TestbedMissionStructuredReport,
+  source: Record<string, unknown>
+): string | undefined {
+  const verdict = report.verdict === "pass" ? "OK" : report.verdict === "partial" ? "PARTIAL" : "FAIL";
+  const detail = report.verdict === "pass"
+    ? firstString(source.conclusion, source.summary, report.summary, report.recommendations[0])
+    : firstString(
+      report.blockers[0],
+      report.confusingMoments[0],
+      report.recommendations[0],
+      source.conclusion,
+      source.summary,
+      report.summary,
+    );
+  const cleaned = detail ? detail.replace(/^(pass|partial|fail|failed|ok)\s*:\s*/i, "").trim() : "";
+  return cleaned ? `${verdict} — ${cleaned}` : undefined;
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    const text = asNonEmptyString(value);
+    if (text) return text;
+  }
+  return undefined;
+}
+
+function asNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
 function testbedMissionTitle(mode: TestbedMissionMode | undefined): string {
