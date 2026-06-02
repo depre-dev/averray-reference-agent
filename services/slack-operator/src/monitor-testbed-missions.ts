@@ -13,7 +13,7 @@ const MAX_MISSION_RUNS = 50;
 
 export type TestbedMissionStatus = "requested" | "ready" | "running" | "completed" | "failed";
 export type TestbedMissionVerdict = "pass" | "partial" | "fail";
-export type TestbedMissionMode = "explore" | "surface_sweep" | "siwe_auth" | "gold_path";
+export type TestbedMissionMode = "explore" | "surface_sweep" | "siwe_auth" | "gold_path" | "citation_repair";
 export type TestbedMissionRequesterAgent = "codex" | "claude" | "test-writer" | "security" | "docs" | "hermes" | "operator";
 export type TestbedMissionRunnerHeartbeatStatus =
   | "idle"
@@ -56,6 +56,9 @@ export interface TestbedMissionRun {
   /** Routes for a surface_sweep (relative to the app base URL, or absolute).
    *  Empty/absent ⇒ the default public surface list. */
   routes?: string[];
+  /** citation_repair: the Wikipedia job to repair. Absent ⇒ the workflow
+   *  auto-selects a claimable citation-repair job. */
+  jobId?: string;
   mission: Record<string, unknown>;
   result?: Record<string, unknown>;
   history: TestbedMissionHistoryEntry[];
@@ -276,6 +279,7 @@ export function recordTestbedMissionRunFromOperatorResult(
   const safety = isRecord(rawMission.safety) ? rawMission.safety : {};
   const createdAt = new Date(nowMs).toISOString();
   const mode = parseTestbedMissionMode(stringField(target, "mode"));
+  const jobId = stringField(target, "jobId");
   const binding = resolveTestbedMutationBinding({
     targetUrl: stringField(target, "url"),
     mode,
@@ -311,6 +315,7 @@ export function recordTestbedMissionRunFromOperatorResult(
     mutationBindingReason: binding.reason,
     ...(mode ? { mode } : {}),
     ...(routes.length > 0 ? { routes } : {}),
+    ...(jobId ? { jobId } : {}),
     mission,
     history: [
       {
@@ -1240,7 +1245,7 @@ function missionFailedMs(run: TestbedMissionRun): number {
 }
 
 function parseTestbedMissionMode(value: string | undefined): TestbedMissionMode | undefined {
-  if (value === "surface_sweep" || value === "siwe_auth" || value === "gold_path") return value;
+  if (value === "surface_sweep" || value === "siwe_auth" || value === "gold_path" || value === "citation_repair") return value;
   return undefined;
 }
 
@@ -1370,6 +1375,8 @@ function testbedMissionTitle(mode: TestbedMissionMode | undefined): string {
       return "SIWE auth role-gating mission";
     case "gold_path":
       return "Autonomous gold-path mission";
+    case "citation_repair":
+      return "Wikipedia citation-repair (dry run)";
     default:
       return "Fresh-agent browser mission";
   }

@@ -34,6 +34,8 @@ export interface AgentTestbedMissionInput {
   mode?: TestbedMissionMode;
   /** T1: routes for a surface sweep (relative to the app base URL, or absolute). */
   routes?: string[];
+  /** citation_repair: the Wikipedia job to repair; absent ⇒ workflow auto-selects. */
+  jobId?: string;
   /** When true, create the mission as `requested` (operator must approve before a
    *  runner can claim it) rather than auto-`ready`. Used for external agent
    *  requests; operator-scheduled gold-path runs rely on the spend/safety budget
@@ -54,6 +56,7 @@ export interface MonitorTestbedMissionPostInput {
   mode?: unknown;
   initialStatus?: unknown;
   routes?: unknown;
+  jobId?: unknown;
   path?: string;
 }
 
@@ -114,11 +117,17 @@ export function createMonitorTestbedMissionFromPayload(
   input: MonitorTestbedMissionPostInput,
   nowMs: number = Date.now()
 ): AgentTestbedMissionResult {
-  const targetUrl = parseHttpUrl(input.targetUrl);
   const mode = parseMonitorMissionMode(input.mode);
+  const jobId = cleanString(input.jobId);
+  // citation_repair selects a Wikipedia job (by jobId or auto), so it has no
+  // page URL to test up front; default to the Wikipedia base when none is given.
+  const targetUrl = mode === "citation_repair" && !cleanString(input.targetUrl)
+    ? "https://en.wikipedia.org/"
+    : parseHttpUrl(input.targetUrl);
   const initialStatus = cleanString(input.initialStatus);
   const missionInput: AgentTestbedMissionInput = {
     targetUrl,
+    ...(jobId ? { jobId } : {}),
     ...(cleanString(input.goal) ? { goal: cleanString(input.goal) } : {}),
     ...(cleanString(input.agentName) ? { agentName: cleanString(input.agentName) } : {}),
     ...(cleanString(input.requester) ? { requester: cleanString(input.requester) } : {}),
@@ -191,13 +200,14 @@ function createTestbedMissionRecord(
   // Carry executor selection onto the mission packet's target so the recorded
   // run picks up `mode` / `routes` (the averray-mcp packet generator is
   // deliberately agnostic to monitor-local executors).
-  if (input.mode || (input.routes && input.routes.length > 0)) {
+  if (input.mode || (input.routes && input.routes.length > 0) || input.jobId) {
     const target =
       mission.target && typeof mission.target === "object" && !Array.isArray(mission.target)
         ? (mission.target as Record<string, unknown>)
         : {};
     if (input.mode) target.mode = input.mode;
     if (input.routes && input.routes.length > 0) target.routes = input.routes;
+    if (input.jobId) target.jobId = input.jobId;
     mission.target = target;
   }
   const run = recordTestbedMissionRunFromOperatorResult(
@@ -342,7 +352,7 @@ function parseStringArray(value: unknown): string[] {
 
 function parseMonitorMissionMode(value: unknown): TestbedMissionMode | undefined {
   const mode = cleanString(value);
-  if (mode === "surface_sweep" || mode === "siwe_auth" || mode === "gold_path") return mode;
+  if (mode === "surface_sweep" || mode === "siwe_auth" || mode === "gold_path" || mode === "citation_repair") return mode;
   return undefined;
 }
 

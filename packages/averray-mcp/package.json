@@ -13,6 +13,10 @@
       "types": "./dist/default-workflow-runtime.d.ts",
       "import": "./dist/default-workflow-runtime.js"
     },
+    "./job-workflows": {
+      "types": "./dist/job-workflows.d.ts",
+      "import": "./dist/job-workflows.js"
+    },
     "./operator-handler": {
       "types": "./dist/operator-handler.d.ts",
       "import": "./dist/operator-handler.js"
