@@ -197,6 +197,10 @@ export interface CardMissionBlocker {
   head: string;
   body?: string;
 }
+export interface CardMissionScore {
+  label: string;
+  value: number;
+}
 export interface CardMissionEvidence {
   kind: "screenshot" | "trace" | "console" | "video";
   label: string;
@@ -213,6 +217,10 @@ export interface CardMissionReport {
   /** The agent's "what I tried" trace (newline-separated), pulled out of the
    *  evidence list so it reads as a narrative rather than a buried trace row. */
   narrative?: string;
+  /** One-line "VERDICT — why" conclusion derived from the report. */
+  conclusion?: string;
+  /** All labeled scores the report carried (0..10), beyond the fixed three. */
+  scores?: CardMissionScore[];
   seed: string;
   path: CardMissionStep[];
   blockers: CardMissionBlocker[];
@@ -1306,6 +1314,57 @@ function missionStepDesc(source: Record<string, unknown>, index: number, fallbac
     ?? (fallback === "[object Object]" ? "Step recorded by browser agent" : fallback);
 }
 
+/** Real per-step status when the report carries one; defaults to "ok" (a
+ *  completed step) rather than inventing a pass/fail the data doesn't have. */
+function missionStepStatus(source: Record<string, unknown>, index: number): CardMissionStep["status"] {
+  const step = reportArrayEntry(source, "completedPath", index)
+    ?? reportArrayEntry(source, "path", index)
+    ?? reportArrayEntry(source, "steps", index)
+    ?? reportArrayEntry(source, "completedSteps", index);
+  const raw = firstString(step?.status, step?.verdict, step?.outcome, step?.state)?.toLowerCase();
+  if (!raw) return "ok";
+  if (/\b(fail|failed|error|blocked|blocker)\b/.test(raw)) return "fail";
+  if (/\b(warn|partial|slow|skip|skipped|pending)\b/.test(raw)) return "warn";
+  return "ok";
+}
+
+/** Humanize a score key ("success_rate" → "Success Rate"). */
+function missionScoreLabel(key: string): string {
+  return key
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .trim()
+    .replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+
+/** Every labeled score the report carried, mapped 0..5 → 0..10. */
+function missionScoreList(scores: Record<string, number>): CardMissionScore[] {
+  return Object.entries(scores)
+    .filter(([, value]) => Number.isFinite(value))
+    .map(([key, value]) => ({ label: missionScoreLabel(key), value: Math.round(value * 2) }));
+}
+
+/** A one-line "VERDICT — why" conclusion derived from the report's own fields. */
+function missionConclusion(
+  report: ReturnType<typeof testbedMissionStructuredReport>,
+  source: Record<string, unknown>,
+): string | undefined {
+  if (!report) return undefined;
+  const verdict = report.verdict === "pass" ? "OK" : report.verdict === "partial" ? "PARTIAL" : "FAIL";
+  const detail = report.verdict === "pass"
+    ? firstString(source.conclusion, source.summary, report.summary, report.recommendations[0])
+    : firstString(
+      report.blockers[0],
+      report.confusingMoments[0],
+      report.recommendations[0],
+      source.conclusion,
+      source.summary,
+      report.summary,
+    );
+  const cleaned = detail ? detail.replace(/^(pass|partial|fail|failed|ok)\s*:\s*/i, "").trim() : "";
+  return cleaned ? `${verdict} — ${cleaned}` : undefined;
+}
+
 function missionBlockerHead(source: Record<string, unknown>, key: "blockers" | "confusingMoments", index: number, fallback: string): string {
   const entry = reportArrayEntry(source, key, index);
   return firstString(entry?.head, entry?.title, entry?.summary, entry?.label, entry?.message)
@@ -1361,7 +1420,7 @@ export function mapMissionReport(run: Record<string, unknown>): CardMissionRepor
     const lat = missionStepLatency(source, i);
     return {
       n: i + 1,
-      status: "ok" as const,
+      status: missionStepStatus(source, i),
       desc: missionStepDesc(source, i, desc),
       ...(lat ? { lat } : {}),
     };
@@ -1396,6 +1455,8 @@ export function mapMissionReport(run: Record<string, unknown>): CardMissionRepor
     : undefined;
   const evidenceForUi = report.evidence.filter((e) => !MISSION_NARRATIVE_RE.test(e.trim()));
   const goal = asString(run.goal);
+  const conclusion = missionConclusion(report, source);
+  const scores = missionScoreList(report.scores);
 
   return {
     verdict,
@@ -1404,6 +1465,8 @@ export function mapMissionReport(run: Record<string, unknown>): CardMissionRepor
     target: asString(run.targetUrl) ?? "",
     ...(goal ? { goal } : {}),
     ...(narrative ? { narrative } : {}),
+    ...(conclusion ? { conclusion } : {}),
+    ...(scores.length > 0 ? { scores } : {}),
     seed: run.freshMemory === false ? "warm memory" : "fresh · no memory",
     path,
     blockers,

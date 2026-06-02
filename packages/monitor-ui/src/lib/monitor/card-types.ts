@@ -229,6 +229,12 @@ export interface MissionEvidence {
   href: string;
 }
 
+/** One labeled 0..10 score from the structured report (beyond the fixed three). */
+export interface MissionScore {
+  label: string;
+  value: number;
+}
+
 export interface MissionReport {
   verdict: "OK" | "PARTIAL" | "FAILED";
   verdictTone: "ok" | "warn" | "fail";
@@ -242,6 +248,10 @@ export interface MissionReport {
   goal?: string;
   /** The agent's "what I tried" trace, newline-separated, as readable text. */
   narrative?: string;
+  /** One-line "VERDICT — why" conclusion derived from the report. */
+  conclusion?: string;
+  /** All labeled scores the report carried (0..10), beyond the fixed three. */
+  scores?: MissionScore[];
   /** e.g. "fresh · no memory" */
   seed: string;
   /** Attempt count. Optional — not carried by a live agent report. */

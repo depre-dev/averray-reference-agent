@@ -516,14 +516,28 @@ function MissionBody({ card }: { card: MissionCard }) {
     "Verdict" +
     (m.runs !== undefined ? ` · run #${m.runs}` : "") +
     (m.latency ? ` · ${m.latency}` : "");
+  // When the report carries a full labeled score list, show that (in its own
+  // section) and drop the fixed success/clarity/latency column to avoid showing
+  // the same numbers twice.
+  const hasGenericScores = (m.scores?.length ?? 0) > 0;
   const hasScores =
-    m.successScore !== undefined || m.clarityScore !== undefined || m.latencyScore !== undefined;
+    !hasGenericScores &&
+    (m.successScore !== undefined || m.clarityScore !== undefined || m.latencyScore !== undefined);
   const fmtScore = (n: number | undefined) => (n === undefined ? "—" : String(n));
 
   return (
     <>
       {m.goal ? (
         <VerdictBlock head="Scope" accent="var(--hm-hermes-deep)">{m.goal}</VerdictBlock>
+      ) : null}
+      {m.conclusion ? (
+        <VerdictBlock
+          head="Conclusion"
+          accent={verdictColor}
+          tone={m.verdictTone === "fail" ? "fail" : m.verdictTone === "warn" ? "warn" : undefined}
+        >
+          {m.conclusion}
+        </VerdictBlock>
       ) : null}
       <section>
         <div className="hm-section-h">{verdictHead}</div>
@@ -558,6 +572,23 @@ function MissionBody({ card }: { card: MissionCard }) {
           ) : null}
         </div>
       </section>
+
+      {hasGenericScores ? (
+        <section>
+          <div className="hm-section-h">Scores · out of 10</div>
+          <div className="hm-checklist">
+            {m.scores!.map((score) => (
+              <div className="row" key={score.label}>
+                <span className="box" style={{ borderColor: "var(--hm-hermes)", color: "transparent" }}>
+                  ✓
+                </span>
+                <span>{score.label}</span>
+                <span className="hint">{score.value}/10</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {m.narrative ? (
         <section>
