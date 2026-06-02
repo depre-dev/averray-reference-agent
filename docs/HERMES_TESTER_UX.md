@@ -115,7 +115,7 @@ How a product-repo (external) agent discovers what the tester can do, sees what'
    - `surface_sweep` · read_only · `available`
    - `authed_surface_sweep` · read_only · `available` | `ready_needs_session` (tells the agent if the T2 session is wired)
    - `siwe_auth` · read_only
-   - `gold_path` · testbed_mutation_only · `available_live_driver` | `available_fake_default` (tells the agent if the real driver is on)
+   - `gold_path` · testbed_mutation_only · `available_live_driver` | `ready_needs_live_driver` (tells the agent if the real driver is on)
    The `status` field is the truth-boundary — it never advertises a capability that isn't actually runnable.
 2. **REQUEST** — POST a mission with `initialStatus: "requested"` + `requesterAgent` + `requestReason` → it parks as a `requested` card. **External agents REQUEST, they cannot RUN** — the security boundary.
 3. **APPROVE** — the requested card appears on the board; the operator approves (`/approve`) or dismisses. The human decides whether to spend the run. (A future trust policy could auto-approve low-risk read-only requests.)

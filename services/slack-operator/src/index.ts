@@ -719,6 +719,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
     }
     writeJson(response, 200, buildTesterCapabilitiesManifest({
       runner: readTestbedMissionRunnerHeartbeat() ?? null,
+      missionRuns: listTestbedMissionRuns({ limit: 50 }),
     }));
     return;
   }
