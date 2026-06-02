@@ -164,6 +164,51 @@ describe("BoardView — rich-mix board (open stream)", () => {
     });
   });
 
+  test("renders requested agent-authored suites with operator approval actions", () => {
+    const onApproveSuite = vi.fn();
+    const onDismissSuite = vi.fn();
+    const board: MonitorBoard = {
+      at: "2026-06-02T08:00:00Z",
+      cards: [],
+      testbedSuites: [{
+        schemaVersion: 1,
+        kind: "testbed_suite",
+        id: "testbed-suite-settings-coverage-1",
+        status: "requested",
+        name: "Settings coverage gap",
+        target: "https://app.averray.com/settings",
+        mode: "surface_sweep",
+        goal: "Check settings affordances.",
+        author: "test-writer",
+        requesterAgent: "test-writer",
+        requestReason: "Changed surface has no saved regression suite.",
+        requestedAt: "2026-06-02T07:30:00.000Z",
+        createdAt: "2026-06-02T07:30:00.000Z",
+        updatedAt: "2026-06-02T07:30:00.000Z",
+        history: [],
+      }],
+    };
+    const { getByRole, getByText, queryByRole } = render(
+      <BoardView
+        board={board}
+        status="open"
+        onApproveSuite={onApproveSuite}
+        onDismissSuite={onDismissSuite}
+        keyboard={false}
+      />,
+    );
+
+    expect(getByText("Settings coverage gap")).toBeTruthy();
+    expect(getByText(/test-writer requested/)).toBeTruthy();
+    expect(getByText("requested")).toBeTruthy();
+    expect(queryByRole("button", { name: "Run" })).toBeNull();
+
+    fireEvent.click(getByRole("button", { name: "Approve" }));
+    fireEvent.click(getByRole("button", { name: "Dismiss" }));
+    expect(onApproveSuite).toHaveBeenCalledWith("testbed-suite-settings-coverage-1");
+    expect(onDismissSuite).toHaveBeenCalledWith("testbed-suite-settings-coverage-1");
+  });
+
   test("a calm board still expands lanes holding in-flight cards (regression: action==0 used to hide all but Done)", () => {
     const calm: MonitorBoard = {
       at: "2026-05-28T10:30:00Z",

@@ -523,6 +523,11 @@ body { margin: 0; }
   align-items: center;
   gap: 7px;
 }
+.hm-test-suite-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .hm-test-suite-verdict {
   font-family: var(--font-mono);
   text-transform: uppercase;

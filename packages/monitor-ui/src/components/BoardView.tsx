@@ -101,6 +101,8 @@ export interface BoardViewProps {
   onSpawnMission?: (input: MissionSpawnInput) => void;
   onSaveSuite?: (input: SaveTestSuiteInput) => void;
   onRunSuite?: (id: string) => void;
+  onApproveSuite?: (id: string) => void;
+  onDismissSuite?: (id: string) => void;
   /** Propose a greenfield Claude task (/claude <repo> <task>). */
   onSpawnClaudeTask?: (repo: string, prompt: string) => void;
   /** Propose a task — /task verb + the codex-needed create form (O3). */
@@ -147,6 +149,8 @@ export function BoardView({
   onSpawnMission,
   onSaveSuite,
   onRunSuite,
+  onApproveSuite,
+  onDismissSuite,
   onSpawnClaudeTask,
   onCreateTask,
   onApproveTask,
@@ -505,7 +509,13 @@ export function BoardView({
             onFilterChange={setFilter}
           />
           <LlmUsagePanel usage={board?.llmUsage} />
-          <TestSuitesPanel suites={board?.testbedSuites} onRunSuite={onRunSuite} onSaveSuite={onSaveSuite} />
+          <TestSuitesPanel
+            suites={board?.testbedSuites}
+            onRunSuite={onRunSuite}
+            onSaveSuite={onSaveSuite}
+            onApproveSuite={onApproveSuite}
+            onDismissSuite={onDismissSuite}
+          />
           {onSpawnMission ? <StartMissionLauncher onSpawnMission={onSpawnMission} onSaveSuite={onSaveSuite} /> : null}
           <Board
             grouped={displayGrouped}

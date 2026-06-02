@@ -7,9 +7,11 @@ export interface TestSuitesPanelProps {
   suites?: SavedTestSuite[];
   onRunSuite?: (id: string) => void;
   onSaveSuite?: (input: SaveTestSuiteInput) => void;
+  onApproveSuite?: (id: string) => void;
+  onDismissSuite?: (id: string) => void;
 }
 
-export function TestSuitesPanel({ suites = [], onRunSuite, onSaveSuite }: TestSuitesPanelProps) {
+export function TestSuitesPanel({ suites = [], onRunSuite, onSaveSuite, onApproveSuite, onDismissSuite }: TestSuitesPanelProps) {
   const nameId = useId();
   const targetId = useId();
   const goalId = useId();
@@ -75,14 +77,30 @@ export function TestSuitesPanel({ suites = [], onRunSuite, onSaveSuite }: TestSu
               <div>
                 <strong>{suite.name}</strong>
                 <span>{modeLabel(suite.mode)} · {targetLabel(suite.target)}</span>
+                {suite.status === "requested" ? (
+                  <small>{suite.requesterAgent ?? suite.author} requested · {suite.requestReason ?? "waiting for operator approval"}</small>
+                ) : null}
               </div>
               <div className="hm-test-suite-meta">
                 <span className={`hm-test-suite-verdict hm-test-suite-verdict--${verdictTone(suite.lastRun?.verdict)}`}>
-                  {suite.lastRun ? suite.lastRun.verdict : "never run"}
+                  {suite.status === "requested" ? "requested" : suite.lastRun ? suite.lastRun.verdict : "never run"}
                 </span>
                 <small>{suite.history.length} runs</small>
               </div>
-              {onRunSuite ? (
+              {suite.status === "requested" ? (
+                <div className="hm-test-suite-actions">
+                  {onApproveSuite ? (
+                    <button type="button" className="hm-btn hm-btn--action hm-btn--sm" onClick={() => onApproveSuite(suite.id)}>
+                      Approve
+                    </button>
+                  ) : null}
+                  {onDismissSuite ? (
+                    <button type="button" className="hm-btn hm-btn--sm" onClick={() => onDismissSuite(suite.id)}>
+                      Dismiss
+                    </button>
+                  ) : null}
+                </div>
+              ) : onRunSuite ? (
                 <button type="button" className="hm-btn hm-btn--action hm-btn--sm" onClick={() => onRunSuite(suite.id)}>
                   Run
                 </button>
