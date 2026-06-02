@@ -1282,6 +1282,33 @@ describe("mapMissionReport", () => {
     expect(m.evidence).toHaveLength(2);
   });
 
+  it("derives a one-line conclusion and a labeled score list, and reads real per-step status", () => {
+    const m = mapMissionReport({
+      ...run,
+      result: { ...run.result, steps: [{ status: "ok" }, { status: "fail" }] },
+    })!;
+    // "VERDICT — why" from the verdict + the top blocker.
+    expect(m.conclusion).toBe("PARTIAL — Sign-message modal latency");
+    // Every reported score, humanized + mapped 0..5 → 0..10.
+    expect(m.scores).toEqual([
+      { label: "Success", value: 8 },
+      { label: "Clarity", value: 6 },
+      { label: "Latency", value: 10 },
+    ]);
+    // Real per-step status, not a hardcoded "ok".
+    expect(m.path.map((s) => s.status)).toEqual(["ok", "fail"]);
+  });
+
+  it("omits the labeled score list when the report carries no scores (no padding)", () => {
+    const m = mapMissionReport({
+      id: "m2",
+      targetUrl: "https://x.test",
+      result: { verdict: "pass", confidence: 0.9, completedPath: ["Loaded"] },
+    })!;
+    expect(m.scores).toBeUndefined();
+    expect(m.path[0]!.status).toBe("ok"); // completed step, no invented fail
+  });
+
   it("maps 0–5 scores to 0–10 by key, omitting unknown ones", () => {
     const m = mapMissionReport(run)!;
     expect(m.successScore).toBe(8); // 4 × 2

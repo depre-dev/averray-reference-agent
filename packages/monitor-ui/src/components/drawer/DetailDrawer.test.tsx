@@ -333,6 +333,52 @@ describe("DetailDrawer — variants", () => {
     expect(getByText("Add a confirmation toast after submit")).toBeTruthy();
   });
 
+  test("mission drawer shows the derived conclusion + a labeled score list (suppressing the legacy 3-col)", () => {
+    const card = {
+      id: "mission scored-22",
+      lane: "hermes-checking",
+      type: "mission",
+      agentType: "hermes",
+      title: "Onboarding sweep",
+      summary: "agent report posted",
+      repo: "depre-dev/site",
+      freshness: 5,
+      state: "fresh",
+      risk: [],
+      waitingOn: { actor: "agent", tone: "info" },
+      mission: {
+        verdict: "PARTIAL",
+        verdictTone: "warn",
+        confidence: 0.8,
+        target: "https://staging.averray.com/onboarding",
+        conclusion: "PARTIAL — Sign-message modal latency slowed the claim path.",
+        seed: "fresh · no memory",
+        path: [{ n: 1, status: "ok", desc: "Loaded onboarding" }],
+        blockers: [],
+        evidence: [],
+        mutationBoundary: "Read-only mission — the agent stopped before any mutation.",
+        recommendations: [],
+        scores: [
+          { label: "Success", value: 8 },
+          { label: "Clarity", value: 6 },
+        ],
+        // legacy fixed scores also present — must NOT render once the list is shown
+        successScore: 8,
+        clarityScore: 6,
+      },
+    } as unknown as BoardCard;
+    const { getByText, queryByText } = render(
+      <DetailDrawer card={card} cards={[{ id: card.id }]} onClose={noop} onNavigate={noop} />,
+    );
+    expect(getByText("Conclusion")).toBeTruthy();
+    expect(getByText("PARTIAL — Sign-message modal latency slowed the claim path.")).toBeTruthy();
+    // Labeled score list renders…
+    expect(getByText("Success")).toBeTruthy();
+    expect(getByText("8/10")).toBeTruthy();
+    // …and the fixed "success · clarity · latency" column is suppressed (no double-show).
+    expect(queryByText(/success · clarity · latency/i)).toBeNull();
+  });
+
   // Regression: live cards cross an HTTP/JSON boundary and don't always carry
   // the type-required nested objects (the backend doesn't populate deploy
   // `verification` or a mission `mission` report yet). The drawer must render,
