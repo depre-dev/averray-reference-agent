@@ -655,12 +655,13 @@ function OperatorActions({
 
   if (!confirming) {
     return (
-      <div className="hm-card-cta hm-card-cta--operator" role="group" aria-label="Operator actions">
+      <div className="hm-card-cta hm-card-cta--operator hm-card-cta--actions" role="group" aria-label="Operator actions">
         {actions.map((action) => (
           <button
             type="button"
             className={`hm-btn ${action.kind === "action" ? "hm-btn--action" : "hm-btn--ghost"} hm-btn--sm`}
             key={action.key}
+            title={`${action.label} opens a confirmation before running.`}
             onClick={(e) => {
               stop(e);
               setConfirmingKey(action.key);
@@ -674,9 +675,10 @@ function OperatorActions({
   }
 
   return (
-    <div className="hm-card-cta hm-card-cta--operator" role="group" aria-label="Confirm operator action">
-      <span style={{ fontSize: 12, color: "var(--hm-ink-soft)", marginRight: "auto" }}>
+    <div className="hm-card-cta hm-card-cta--operator hm-card-cta--confirm" role="group" aria-label="Confirm operator action">
+      <span className="hm-card-confirm-copy">
         {confirming.confirm}
+        <small>Nothing runs until you confirm.</small>
       </span>
       <button
         type="button"
