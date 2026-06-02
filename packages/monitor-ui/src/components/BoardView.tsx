@@ -634,6 +634,10 @@ function formatClock(iso: string | undefined): string {
 }
 
 function LlmUsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
+  // Collapsed to a single line by default — the panel used to eat a full band
+  // of vertical space across the board. The headline (total · calls · live)
+  // stays glanceable; per-source detail + idle reasons are one click away.
+  const [expanded, setExpanded] = useState(false);
   const [showIdle, setShowIdle] = useState(false);
   const recorded = usage?.status === "recorded";
   const latestDay = usage?.byDay?.[0];
@@ -644,24 +648,32 @@ function LlmUsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
   const activeCalls = usage?.activeCalls ?? [];
   const emptyMessage = usage?.message
     ?? "No LLM usage counters have been recorded yet. Sources stay not reported until a real provider or runner emits whitelisted counters.";
+  const headline = recorded
+    ? `${formatCompactNumber(usage!.totalTokens)} tokens · ${formatNumber(usage!.runs)} calls`
+    : "usage not reported";
+  const lastLabel = recorded && usage!.lastActiveAt ? `last ${formatRelativeTime(usage!.lastActiveAt)}` : "";
+  // Keep the live signal glanceable without expanding.
+  const flightLabel = activeCalls.length > 0 ? `${activeCalls.length} in flight` : "idle";
 
   return (
     <section className="hm-llm-usage" aria-label="LLM usage">
-      {/* Headline: total tokens · calls, with the window/last-active context. */}
-      <div className="hm-llm-usage-head">
+      {/* One-line summary — leads with the total; the rest is behind the toggle. */}
+      <button
+        type="button"
+        className="hm-llm-usage-summary"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <span aria-hidden>{expanded ? "▾" : "▸"}</span>
         <span className="hm-kicker">LLM usage</span>
-        <strong className="hm-llm-usage-headline">
-          {recorded
-            ? `${formatCompactNumber(usage!.totalTokens)} tokens · ${formatNumber(usage!.runs)} calls`
-            : "usage not reported"}
-        </strong>
-        {recorded ? (
-          <span className="hm-llm-usage-window">
-            board window{usage!.lastActiveAt ? ` · last ${formatRelativeTime(usage!.lastActiveAt)}` : ""}
-          </span>
-        ) : null}
-      </div>
+        <strong className="hm-llm-usage-headline">{headline}</strong>
+        <span className="hm-llm-usage-summary-meta">
+          {[flightLabel, lastLabel].filter(Boolean).join(" · ")}
+        </span>
+      </button>
 
+      {expanded ? (
+      <div className="hm-llm-usage-detail">
       {/* What's running now (in-flight). */}
       <div className="hm-llm-usage-active">
         <span>What's running now</span>
@@ -730,6 +742,8 @@ function LlmUsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
       {/* Truth-boundary explanation when nothing reported and no idle list to carry it. */}
       {!recorded && models.length === 0 ? (
         <div className="hm-llm-usage-empty">{emptyMessage}</div>
+      ) : null}
+      </div>
       ) : null}
     </section>
   );

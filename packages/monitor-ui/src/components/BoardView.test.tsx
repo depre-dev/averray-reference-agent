@@ -259,9 +259,13 @@ describe("BoardView — rich-mix board (open stream)", () => {
     };
     const { getAllByText, getByRole, getByText, queryByText, queryAllByText } = render(<BoardView board={board} status="open" />);
     expect(getByRole("region", { name: "LLM usage" })).toBeTruthy();
-    // Leads with the headline: total tokens + call count.
+    // Collapsed by default: leads with the headline (total tokens + call count)…
     expect(getByText("59K tokens · 12 calls")).toBeTruthy();
-    // Active source is prominent (also surfaced as the in-flight call).
+    // …and the detail (per-source rows, idle line) is hidden until expanded.
+    expect(queryByText("48K in · 9K out")).toBeNull();
+    expect(queryByText(/source idle/)).toBeNull();
+    // Expand the panel to reveal the active source detail + collapsed idle line.
+    fireEvent.click(getByText("59K tokens · 12 calls"));
     expect(getAllByText("claude · claude-sonnet-4-5").length).toBeGreaterThan(0);
     expect(getByText("59K tokens")).toBeTruthy();
     expect(getByText("48K in · 9K out")).toBeTruthy();
@@ -270,7 +274,7 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(queryByText("Codex CLI does not report usage.")).toBeNull();
     // No flat per-source "not reported" row.
     expect(queryAllByText("not reported").length).toBe(0);
-    // Expanding reveals the honest reason (truth-boundary preserved).
+    // Expanding the idle line reveals the honest reason (truth-boundary preserved).
     fireEvent.click(getByText(/1 source idle: codex/));
     expect(getByText("Codex CLI does not report usage.")).toBeTruthy();
   });
@@ -295,7 +299,10 @@ describe("BoardView — rich-mix board (open stream)", () => {
 
     const { getByRole, getByText, queryByText } = render(<BoardView board={board} status="open" />);
     expect(getByRole("region", { name: "LLM usage" })).toBeTruthy();
+    // The one-line summary states "usage not reported" honestly without expanding.
     expect(getByText("usage not reported")).toBeTruthy();
+    // The full plain-language explanation is reachable on expand (truth-boundary).
+    fireEvent.click(getByText("usage not reported"));
     expect(getByText(/No LLM usage counters have been recorded yet/)).toBeTruthy();
     expect(queryByText("not_recorded")).toBeNull();
   });
