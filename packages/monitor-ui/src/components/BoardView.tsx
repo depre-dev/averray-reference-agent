@@ -412,6 +412,12 @@ export function BoardView({
         onCardClose?.();
         triggerAsk(card.id, card.title ?? card.id);
       },
+      // Triage a stuck/failed card off the board, then close the drawer (the
+      // card is filtered out, so leaving it open would show a stale shell).
+      onDismiss: (card) => {
+        onDismissCard(card);
+        onCardClose?.();
+      },
     };
     if (onRerunMission) {
       a.onRerunMission = (card, freshness) => {
@@ -446,7 +452,7 @@ export function BoardView({
       };
     }
     return a;
-  }, [onRerunMission, onApproveTask, onCreateTask, onCardClose]);
+  }, [onRerunMission, onApproveTask, onCreateTask, onCardClose, onDismissCard]);
 
   return (
     <div className="hm-board">

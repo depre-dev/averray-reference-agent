@@ -47,7 +47,8 @@ const missionCard = card({
 const actionCard = card({ type: "pr", id: "agent #548", isAction: true });
 const actionCardNoPr = card({ type: "pr", id: "action-no-pr", isAction: true });
 const doneCard = card({ type: "done", id: "rcpt-9", closedAt: "2026-06-01", mergeStatus: "MERGED" });
-const genericPr = card({ type: "pr", id: "agent #12", isAction: false });
+// A plain in-flight PR (NOT in an operator-decision lane) → the "pr" variant.
+const genericPr = card({ type: "pr", id: "agent #12", isAction: false, lane: "hermes-checking" });
 
 function find(buttons: ReturnType<typeof buildDrawerFooter>, key: string) {
   return buttons.find((b) => b.key === key)!;
@@ -110,10 +111,22 @@ describe("buildDrawerFooter — action (PR) variant", () => {
     expect(onApproveAndMerge).toHaveBeenCalledWith(actionCard);
   });
 
-  it("Approve & merge disables when there's no linked PR (no silent no-op)", () => {
-    const f = buildDrawerFooter(actionCardNoPr, { handlers: { onApproveAndMerge: vi.fn() } });
-    expect(find(f, "approve-merge").run).toBeUndefined();
-    expect(find(f, "approve-merge").disabledReason).toMatch(/no linked PR/i);
+  it("no-PR action card has NO dead 'Approve & merge' — it leads with a working 'Dismiss' primary", () => {
+    const onDismiss = vi.fn();
+    const f = buildDrawerFooter(actionCardNoPr, { handlers: { onDismiss } });
+    // The misleading "Approve & merge" is gone entirely (nothing to merge).
+    expect(f.find((b) => b.key === "approve-merge")).toBeUndefined();
+    // The working primary is Dismiss (triage it off the board).
+    const dismiss = find(f, "dismiss");
+    expect(dismiss.kind).toBe("action");
+    dismiss.run!();
+    expect(onDismiss).toHaveBeenCalledWith(actionCardNoPr);
+  });
+
+  it("Dismiss disables with a reason when no handler is wired (no silent no-op)", () => {
+    const f = buildDrawerFooter(actionCardNoPr, {});
+    expect(find(f, "dismiss").run).toBeUndefined();
+    expect(find(f, "dismiss").disabledReason).toMatch(/dismiss/i);
   });
 
   it("Send back to Codex requires a handler AND a PR number", () => {

@@ -19,6 +19,7 @@ import type {
 } from "../../lib/monitor/card-types.js";
 import { humanizeSignalText } from "../../lib/monitor/signal-labels.js";
 import { cleanFailureText } from "../../lib/monitor/mission-failure.js";
+import { laneFor } from "../../lib/monitor/lane-rules.js";
 import { ChecksBar } from "../cards/ChecksBar.js";
 import { OperatorNotes } from "./OperatorNotes.js";
 
@@ -43,10 +44,16 @@ export const DRAWER_ACCENT: Record<DrawerVariant, DrawerAccent> = {
   pr: { border: "var(--hm-sage)", pill: "hm-pill--ok", label: "Automation in flight" },
 };
 
-/** Pick the drawer variant. isAction wins, then closed, draft, and type. */
+/** Pick the drawer variant. Missions render their report; then any card that
+ *  is awaiting the operator's decision (isAction, or sitting in an
+ *  operator-decision lane) gets the "action" risk-decision treatment — so a
+ *  PR in operator-review no longer mislabels as "Automation in flight". Then
+ *  closed, draft, and type. */
 export function drawerVariant(card: BoardCard): DrawerVariant {
   if (card.type === "mission") return "mission";
   if (card.isAction) return "action";
+  const lane = laneFor(card);
+  if (lane === "operator-review" || lane === "needs-attention") return "action";
   if (card.type === "done") return "done";
   if (card.isDraft) return "draft"; // DraftCard always has isDraft:true; covers PRCards flagged draft too
   if (card.type === "task") return "task";
@@ -86,17 +93,35 @@ export function DrawerBody({ card, variant }: { card: BoardCard; variant: Drawer
 
 // ── Shared building blocks ──────────────────────────────────────────
 
-function VerdictBlock({ head, children, accent }: { head: string; children: React.ReactNode; accent?: string }) {
+function VerdictBlock({
+  head,
+  children,
+  accent,
+  tone,
+}: {
+  head: string;
+  children: React.ReactNode;
+  accent?: string;
+  /** "warn"/"fail" tint the block so a failure doesn't read as the green "ok" box. */
+  tone?: "warn" | "fail";
+}) {
   return (
     <section>
       <div className="hm-section-h" style={accent ? { color: accent } : undefined}>
         {head}
       </div>
-      <div className="hm-verdict-block">
+      <div className={"hm-verdict-block" + (tone ? ` hm-verdict-block--${tone}` : "")}>
         <div className="body">{children}</div>
       </div>
     </section>
   );
+}
+
+/** A card that represents a failure — its status box must not read as green/ok. */
+function isFailureCard(card: BoardCard): boolean {
+  if ("taskStatus" in card && (card as { taskStatus?: string }).taskStatus === "failed") return true;
+  if ("missionStatus" in card && (card as { missionStatus?: string }).missionStatus === "failed") return true;
+  return card.state === "failed-fetch";
 }
 
 /** Render a "+A -B" diff line as colored add/rm spans (matches the design). */
@@ -275,7 +300,9 @@ function PrBody({ card }: { card: BoardCard }) {
       {verdict ? (
         <VerdictBlock head="Hermes verdict">{verdict}</VerdictBlock>
       ) : (
-        <VerdictBlock head="Status">{card.summary || "No additional context yet."}</VerdictBlock>
+        <VerdictBlock head="Status" tone={isFailureCard(card) ? "warn" : undefined}>
+          {card.summary || "No additional context yet."}
+        </VerdictBlock>
       )}
       <ReviewRequestsSection requests={card.reviewRequests} />
       <RiskSignalsSection signals={card.riskSignals} />

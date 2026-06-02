@@ -1896,6 +1896,17 @@ button.hm-turn-pin {
   color: var(--hm-ink-soft);
 }
 .hm-verdict-block .body b { color: var(--hm-ink); font-weight: 600; }
+/* Failure/warn tint — a failed status must not read as the green "ok" box. */
+.hm-verdict-block--warn {
+  background: var(--hm-amber-wash, rgba(176,122,0,0.10));
+  border-color: var(--hm-amber, rgba(176,122,0,0.35));
+}
+.hm-verdict-block--warn .head { color: var(--hm-amber-deep, #8a5d00); }
+.hm-verdict-block--fail {
+  background: var(--hm-rose-wash, rgba(176,0,32,0.08));
+  border-color: var(--hm-rose, rgba(176,0,32,0.30));
+}
+.hm-verdict-block--fail .head { color: var(--hm-rose-deep, #9a1020); }
 
 .hm-checklist {
   display: grid; gap: 6px;
