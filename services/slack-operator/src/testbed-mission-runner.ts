@@ -28,6 +28,12 @@ import {
 import { executeSiweAuthMission, type SiweAuthMissionDeps } from "./testbed-auth-mission.js";
 import { executeSurfaceSweep, type SurfaceSweepDeps } from "./testbed-surface-sweep.js";
 import {
+  parseTestbedLiveScreencastConfig,
+  startPlaywrightLiveScreencast,
+  type TestbedLiveScreencastConfig,
+  type TestbedLiveScreencastController,
+} from "./testbed-live-screencast.js";
+import {
   basicAuthHeadersForUrl,
   basicAuthHttpCredentialsForUrl,
   cloudflareAccessHeaders,
@@ -73,6 +79,8 @@ export interface TestbedMissionRunnerConfig {
   /** T5 evidence capture toggles. Defaults on for the Playwright executor. */
   captureTrace?: boolean;
   captureVideo?: boolean;
+  /** Optional P3b live screencast. Testnet-only, bounded, and monitor-authenticated. */
+  liveScreencast?: TestbedLiveScreencastConfig;
   /** T2 pre-seeded session source (sidecar URL and/or manual storageState path/token). */
   session?: SweepSessionConfig;
   /** Cloudflare Access service-token headers for gated hosted app routes. */
@@ -147,6 +155,7 @@ export function parseTestbedMissionRunnerConfig(
       : {}),
     captureTrace: env.TESTBED_MISSION_CAPTURE_TRACE !== "0" && env.TESTBED_MISSION_CAPTURE_TRACE !== "false",
     captureVideo: env.TESTBED_MISSION_CAPTURE_VIDEO !== "0" && env.TESTBED_MISSION_CAPTURE_VIDEO !== "false",
+    liveScreencast: parseTestbedLiveScreencastConfig(env),
     session: parseSweepSessionConfig(env),
     ...(cloudflareAccess ? { cloudflareAccess } : {}),
     ...(basicAuth ? { basicAuth } : {}),
@@ -448,6 +457,17 @@ export async function executeGoldPathTestbedMission(
   mission: TestbedMissionRun,
   config: TestbedMissionRunnerConfig
 ): Promise<TestbedMissionRunResult> {
+  if (config.liveScreencast?.enabled) {
+    updateTestbedMissionProgress(mission.id, {
+      path: config.path,
+      progressMessage: "Gold-path live driver is running out-of-process; true browser screencast is unavailable for this driver boundary.",
+      liveScreencast: {
+        status: "unavailable",
+        reason: "gold_path_driver_out_of_process",
+        updatedAt: new Date().toISOString(),
+      },
+    });
+  }
   const result = await runGoldPathMissionEntry({
     ...process.env,
     TESTBED_MISSION_ID: mission.id,
@@ -571,6 +591,7 @@ export async function executePlaywrightTestbedMission(
   let page: Page | undefined;
   let tracePath: string | undefined;
   let traceRunning = false;
+  let liveScreencast: TestbedLiveScreencastController | undefined;
   try {
     browser = await chromium.launch({
       headless: true,
@@ -593,6 +614,25 @@ export async function executePlaywrightTestbedMission(
     });
     context = contextAndPage.context;
     page = contextAndPage.page;
+    if (config.liveScreencast?.enabled) {
+      liveScreencast = await startPlaywrightLiveScreencast({
+        mission,
+        page,
+        artifactsRoot: config.artifactsDir || "/tmp/averray-testbed-mission-artifacts",
+        config: config.liveScreencast,
+        update: (state) => {
+          updateTestbedMissionProgress(mission.id, {
+            path: config.path,
+            progressMessage:
+              state.status === "unavailable"
+                ? `Live browser screencast unavailable: ${state.reason ?? "not available"}.`
+                : undefined,
+            liveScreencast: state,
+            ...(state.latestFrameUrl ? { progressScreenshotUrl: state.latestFrameUrl } : {}),
+          });
+        },
+      });
+    }
     if (config.basicAuth) {
       await page.route("**/*", (route) => {
         const headers = basicAuthHeadersForUrl(route.request().url(), config.basicAuth, route.request().headers());
@@ -686,6 +726,8 @@ export async function executePlaywrightTestbedMission(
         ? "No real mutation boundary was crossed; only visibly safe testbed actions were allowed."
         : "No real mutation boundary was crossed; the run stayed browser-visible and read-only.");
     }
+    await liveScreencast?.stop("mission_finished");
+    liveScreencast = undefined;
     ({ traceRunning } = await finalizePlaywrightArtifacts({
       context,
       page,
@@ -787,6 +829,8 @@ export async function executePlaywrightTestbedMission(
       const failureText = await visiblePageText(page).catch(() => "");
       if (failureText) evidence.push({ type: "visible_text_failure", value: clip(failureText, 900) });
     }
+    await liveScreencast?.stop("mission_failed");
+    liveScreencast = undefined;
     ({ traceRunning } = await finalizePlaywrightArtifacts({
       context,
       page,
@@ -875,6 +919,7 @@ export async function executePlaywrightTestbedMission(
       summary: detail,
     };
   } finally {
+    await liveScreencast?.stop("mission_finished").catch(() => undefined);
     if (traceRunning && context && tracePath) await context.tracing.stop({ path: tracePath }).catch(() => undefined);
     await context?.close().catch(() => undefined);
     await browser?.close().catch(() => undefined);

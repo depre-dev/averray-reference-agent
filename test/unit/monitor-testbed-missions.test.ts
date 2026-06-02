@@ -21,6 +21,7 @@ import {
   testbedMissionRunToMonitorItem,
   testbedMissionSelfHealingDisposition,
   testbedMissionStructuredReport,
+  updateTestbedMissionProgress,
 } from "../../services/slack-operator/src/monitor-testbed-missions.js";
 
 describe("monitor testbed mission runs", () => {
@@ -49,6 +50,31 @@ describe("monitor testbed mission runs", () => {
     });
     expect(run?.id).toMatch(/^testbed-mission-/);
     expect(listTestbedMissionRuns()).toHaveLength(1);
+  });
+
+  it("persists live screencast progress metadata while a mission is running", () => {
+    const run = recordTestbedMissionRunFromOperatorResult(missionResult(), Date.parse("2026-05-22T10:00:00.000Z"));
+    const updated = updateTestbedMissionProgress(run!.id, {
+      progressMessage: "Capturing live browser frame.",
+      progressScreenshotUrl: "/monitor/testbed-missions/testbed-mission-1/screencast/latest.jpg",
+      liveScreencast: {
+        status: "running",
+        streamUrl: "/monitor/testbed-missions/testbed-mission-1/screencast",
+        latestFrameUrl: "/monitor/testbed-missions/testbed-mission-1/screencast/latest.jpg",
+        frameCount: 2,
+        updatedAt: "2026-05-22T10:00:02.000Z",
+      },
+    });
+
+    expect(updated).toMatchObject({
+      status: "running",
+      progressMessage: "Capturing live browser frame.",
+      progressScreenshotUrl: "/monitor/testbed-missions/testbed-mission-1/screencast/latest.jpg",
+      liveScreencast: {
+        status: "running",
+        frameCount: 2,
+      },
+    });
   });
 
   it("records a SIWE auth mission as a mission-native run", () => {

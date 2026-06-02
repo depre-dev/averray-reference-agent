@@ -98,6 +98,8 @@ On completion the drawer must read like a verdict you can act on: the **scope/go
 ### 4c. True 1:1 live *(optional upgrade — P3b)*
 The 2s poll panel gets you "watch the steps + latest screenshot advance." A literal frame-by-frame **live screencast of the browser** is a separate, bigger build (a video / CDP screencast stream) — offered as **P3b**, not pretended into the poll panel.
 
+Implementation note: the monitor can expose a bounded, monitor-authenticated `liveScreencast` stream for Playwright-owned testnet missions. The current gold-path live driver shells out to the Claude browser runtime and does not itself hold a Playwright `BrowserContext`; until that external driver publishes frames or exposes its context, gold-path missions must report `liveScreencast.status="unavailable"` and fall back to the P3 stage/output view instead of pretending to stream.
+
 ---
 
 ## 5. Gold-path flagship — the SIWE session *(prerequisite for the real flagship scope)*

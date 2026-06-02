@@ -216,9 +216,19 @@ export interface CardMissionProgress {
   /** When the latest progress was recorded (ISO). */
   at?: string;
   /** Latest screenshot URL — present only when an absolute, servable URL exists.
-   *  The runner does not publish one live today (no artifact endpoint), so this
-   *  is usually absent; the UI shows stage + output without faking an image. */
+   *  P3b screencast frames use relative monitor-authenticated URLs instead and
+   *  are exposed through `liveScreencast`. */
   screenshot?: string;
+  /** Optional P3b stream metadata. Present only when the runner published a
+   *  real bounded screencast stream or an honest unavailable reason. */
+  liveScreencast?: {
+    status: "running" | "ended" | "unavailable";
+    streamUrl?: string;
+    latestFrameUrl?: string;
+    frameCount?: number;
+    updatedAt?: string;
+    reason?: string;
+  };
 }
 export interface CardMissionReport {
   verdict: "OK" | "PARTIAL" | "FAILED";
@@ -678,12 +688,31 @@ function missionRunProgress(run: Record<string, unknown> | undefined): CardMissi
   // A servable absolute screenshot URL only — never a local artifact path.
   const screenshotRaw = asString(run.progressScreenshotUrl) ?? asString(run.liveScreenshotUrl);
   const screenshot = screenshotRaw && /^https?:\/\//i.test(screenshotRaw) ? screenshotRaw : undefined;
-  if (!message && !output && !screenshot) return undefined;
+  const liveScreencast = missionLiveScreencast(run);
+  if (!message && !output && !screenshot && !liveScreencast) return undefined;
   return {
     ...(message ? { message } : {}),
     ...(output ? { output } : {}),
     ...(at ? { at } : {}),
     ...(screenshot ? { screenshot } : {}),
+    ...(liveScreencast ? { liveScreencast } : {}),
+  };
+}
+
+function missionLiveScreencast(run: Record<string, unknown>): CardMissionProgress["liveScreencast"] | undefined {
+  const source = asRecord(run.liveScreencast);
+  if (!source) return undefined;
+  const status = asString(source.status);
+  if (status !== "running" && status !== "ended" && status !== "unavailable") return undefined;
+  const streamUrl = asString(source.streamUrl);
+  const latestFrameUrl = asString(source.latestFrameUrl);
+  return {
+    status,
+    ...(streamUrl && streamUrl.startsWith("/monitor/testbed-missions/") ? { streamUrl } : {}),
+    ...(latestFrameUrl && latestFrameUrl.startsWith("/monitor/testbed-missions/") ? { latestFrameUrl } : {}),
+    ...(typeof source.frameCount === "number" ? { frameCount: source.frameCount } : {}),
+    ...(asString(source.updatedAt) ? { updatedAt: asString(source.updatedAt) } : {}),
+    ...(asString(source.reason) ? { reason: asString(source.reason) } : {}),
   };
 }
 

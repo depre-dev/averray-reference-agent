@@ -182,6 +182,10 @@ import {
 } from "./testbed-agent-entrypoint.js";
 import { buildTesterCapabilitiesManifest } from "./tester-capabilities.js";
 import {
+  readTestbedScreencastManifest,
+  screencastLatestFramePath,
+} from "./testbed-live-screencast.js";
+import {
   formatStalePrAlertForSlack,
   shouldPostStalePrAlert,
   stalePrAlertItems,
@@ -892,6 +896,19 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       return;
     }
     await handleMonitorTestbedMissionOpenIssueRequest(testbedMissionOpenIssueId, request, response);
+    return;
+  }
+  const testbedMissionScreencastRoute = monitorTestbedMissionScreencastRoute(url.pathname);
+  if (request.method === "GET" && testbedMissionScreencastRoute) {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    await handleMonitorTestbedMissionScreencastRequest(testbedMissionScreencastRoute, request, response, url);
     return;
   }
   const testbedMissionId = monitorTestbedMissionId(url.pathname);
@@ -1921,6 +1938,103 @@ async function handleMonitorTestbedMissionOpenIssueRequest(
       message: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+async function handleMonitorTestbedMissionScreencastRequest(
+  route: { id: string; kind: "stream" | "latest" },
+  request: http.IncomingMessage,
+  response: http.ServerResponse,
+  url: URL
+): Promise<void> {
+  const run = listTestbedMissionRuns({ limit: 50 }).find((candidate) => candidate.id === route.id);
+  if (!run) {
+    writeJson(response, 404, { error: "testbed_mission_not_found", id: route.id });
+    return;
+  }
+  if (route.kind === "latest") {
+    const framePath = screencastLatestFramePath(testbedMissionArtifactsRoot(), route.id);
+    const body = await readFile(framePath).catch(() => undefined);
+    if (!body) {
+      writeJson(response, 404, { error: "testbed_screencast_frame_not_found", id: route.id });
+      return;
+    }
+    response.writeHead(200, {
+      "content-type": "image/jpeg",
+      "cache-control": "no-store",
+    });
+    response.end(body);
+    return;
+  }
+  await writeTestbedMissionScreencastStream(request, response, url, route.id);
+}
+
+async function writeTestbedMissionScreencastStream(
+  request: http.IncomingMessage,
+  response: http.ServerResponse,
+  url: URL,
+  missionId: string,
+): Promise<void> {
+  const intervalMs = Math.max(250, parseOptionalInteger(url.searchParams.get("intervalMs")) ?? 500);
+  let closed = false;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let lastFrameCount = -1;
+
+  response.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+    "x-accel-buffering": "no",
+  });
+  response.write(`retry: ${intervalMs}\n\n`);
+
+  const send = async () => {
+    const run = listTestbedMissionRuns({ limit: 50 }).find((candidate) => candidate.id === missionId);
+    const manifest = await readTestbedScreencastManifest(testbedMissionArtifactsRoot(), missionId);
+    if (!run) {
+      writeSseEvent(response, "screencast.error", { error: "testbed_mission_not_found", missionId });
+      return;
+    }
+    if (!manifest) {
+      writeSseEvent(response, "screencast.status", {
+        missionId,
+        status: run.liveScreencast?.status ?? "unavailable",
+        reason: run.liveScreencast?.reason ?? "no_screencast_frame_yet",
+        updatedAt: run.liveScreencast?.updatedAt ?? run.progressAt ?? run.updatedAt,
+      });
+      return;
+    }
+    if (manifest.frameCount === lastFrameCount && manifest.status === "running") return;
+    lastFrameCount = manifest.frameCount;
+    const latest = await readFile(screencastLatestFramePath(testbedMissionArtifactsRoot(), missionId)).catch(() => undefined);
+    if (!latest) {
+      writeSseEvent(response, "screencast.status", {
+        missionId,
+        status: manifest.status,
+        frameCount: manifest.frameCount,
+        reason: "latest_frame_missing",
+        updatedAt: manifest.updatedAt,
+      });
+      return;
+    }
+    writeSseEvent(response, "screencast.frame", {
+      missionId,
+      status: manifest.status,
+      contentType: manifest.contentType,
+      frameCount: manifest.frameCount,
+      updatedAt: manifest.updatedAt,
+      ...(manifest.endedAt ? { endedAt: manifest.endedAt } : {}),
+      ...(manifest.reason ? { reason: manifest.reason } : {}),
+      dataUrl: `data:${manifest.contentType};base64,${latest.toString("base64")}`,
+    });
+  };
+
+  request.on("close", () => {
+    closed = true;
+    if (timer) clearInterval(timer);
+  });
+
+  await send();
+  if (!closed) timer = setInterval(() => void send(), intervalMs);
 }
 
 function recordTestbedMissionCollaboration(run: TestbedMissionRun): void {
@@ -3602,6 +3716,27 @@ function monitorTestbedMissionId(pathname: string): string | undefined {
   if (!pathname.startsWith(prefix)) return undefined;
   const id = decodeURIComponent(pathname.slice(prefix.length)).trim();
   return id.length > 0 && !id.includes("/") ? id : undefined;
+}
+
+function monitorTestbedMissionScreencastRoute(pathname: string): { id: string; kind: "stream" | "latest" } | undefined {
+  const prefix = "/monitor/testbed-missions/";
+  if (!pathname.startsWith(prefix)) return undefined;
+  const rest = pathname.slice(prefix.length);
+  const streamSuffix = "/screencast";
+  const latestSuffix = "/screencast/latest.jpg";
+  if (rest.endsWith(latestSuffix)) {
+    const id = decodeURIComponent(rest.slice(0, -latestSuffix.length)).trim();
+    return id && !id.includes("/") ? { id, kind: "latest" } : undefined;
+  }
+  if (rest.endsWith(streamSuffix)) {
+    const id = decodeURIComponent(rest.slice(0, -streamSuffix.length)).trim();
+    return id && !id.includes("/") ? { id, kind: "stream" } : undefined;
+  }
+  return undefined;
+}
+
+function testbedMissionArtifactsRoot(): string {
+  return optionalEnv("TESTBED_MISSION_ARTIFACTS_DIR") ?? "/data/testbed-mission-artifacts";
 }
 
 /** Parse the card id from /monitor/cards/:id/operator-notes. */

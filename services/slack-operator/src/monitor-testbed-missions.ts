@@ -80,6 +80,17 @@ export interface TestbedMissionRun {
   stderrTail?: string;
   progressMessage?: string;
   progressAt?: string;
+  progressScreenshotUrl?: string;
+  liveScreencast?: {
+    status: "running" | "ended" | "unavailable";
+    streamUrl?: string;
+    latestFrameUrl?: string;
+    frameCount?: number;
+    startedAt?: string;
+    updatedAt?: string;
+    endedAt?: string;
+    reason?: string;
+  };
   goldPathAutonomy?: {
     budget?: {
       reservedAt: string;
@@ -602,6 +613,8 @@ export function updateTestbedMissionProgress(
     progressMessage?: string;
     stdoutTail?: string;
     stderrTail?: string;
+    progressScreenshotUrl?: string;
+    liveScreencast?: TestbedMissionRun["liveScreencast"];
   } = {}
 ): TestbedMissionRun | undefined {
   ensureMissionStoreLoaded(deps.path, { force: true });
@@ -615,6 +628,8 @@ export function updateTestbedMissionProgress(
   existing.updatedAt = now;
   if (deps.stdoutTail) existing.stdoutTail = deps.stdoutTail;
   if (deps.stderrTail) existing.stderrTail = deps.stderrTail;
+  if (deps.progressScreenshotUrl) existing.progressScreenshotUrl = deps.progressScreenshotUrl;
+  if (deps.liveScreencast) existing.liveScreencast = deps.liveScreencast;
   existing.history.push({
     at: now,
     status: "running",
