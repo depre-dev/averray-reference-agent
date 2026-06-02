@@ -450,6 +450,101 @@ body { margin: 0; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Compact panel (smart summary): headline + active sources + collapsed idle. */
+.hm-llm-usage-head {
+  display: grid;
+  gap: 1px;
+}
+.hm-llm-usage-headline {
+  font-family: var(--font-display);
+  font-size: 15px;
+  color: var(--hm-ink);
+}
+.hm-llm-usage-window {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--hm-muted);
+}
+.hm-llm-usage-sources {
+  display: grid;
+  gap: 9px;
+  padding-top: 6px;
+  border-top: 1px solid var(--hm-line-soft);
+}
+.hm-llm-usage-source {
+  display: grid;
+  gap: 3px;
+}
+.hm-llm-usage-source-head,
+.hm-llm-usage-source-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.hm-llm-usage-source-head strong {
+  font-family: var(--font-display);
+  font-size: 12px;
+  color: var(--hm-ink);
+}
+.hm-llm-usage-source-head span {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--hm-ink);
+}
+.hm-llm-usage-source-foot small {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--hm-muted);
+}
+.hm-llm-usage-bar {
+  display: flex;
+  height: 5px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--hm-line-soft);
+}
+.hm-llm-usage-bar-in { background: var(--hm-blue); }
+.hm-llm-usage-bar-out { background: var(--hm-blue-soft); }
+.hm-llm-usage-idle {
+  padding-top: 6px;
+  border-top: 1px solid var(--hm-line-soft);
+}
+.hm-llm-usage-idle-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--hm-muted);
+}
+.hm-llm-usage-idle-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.hm-llm-usage-idle-list li {
+  display: grid;
+  gap: 1px;
+}
+.hm-llm-usage-idle-list strong {
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  color: var(--hm-muted);
+}
+.hm-llm-usage-idle-list span {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--hm-muted);
+}
 .hm-backlog-suggestions {
   margin: 0 22px 10px;
   padding: 10px 12px;
