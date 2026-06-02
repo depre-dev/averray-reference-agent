@@ -29,11 +29,12 @@ import { useActionAlerts, type UseActionAlertsOptions } from "./hooks/useActionA
 import { useAutonomyMode, type UseAutonomyModeOptions } from "./hooks/useAutonomyMode.js";
 import { kpiCounts } from "./lib/monitor/board-state.js";
 import type { BoardCard, CreateTaskInput } from "./lib/monitor/card-types.js";
-import type { MissionSpawnInput } from "./lib/monitor/mission-launch.js";
+import type { MissionSpawnInput, SaveTestSuiteInput } from "./lib/monitor/mission-launch.js";
 import { BoardView } from "./components/BoardView.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 
 const MISSIONS_URL = "/monitor/testbed-missions";
+const SUITES_URL = "/monitor/testbed-suites";
 const CODEX_TASKS_URL = "/monitor/codex-tasks";
 const SELF_HEALING_PROPOSALS_URL = "/monitor/self-healing-proposals";
 const ALERT_MUTE_URL = "/monitor/alert-mute";
@@ -47,6 +48,10 @@ export interface MonitorPageProps {
   backlogSuggestions?: UseBacklogSuggestionsOptions;
   /** Override the /mission spawn (defaults to POST /monitor/testbed-missions). */
   onSpawnMission?: (input: MissionSpawnInput) => void;
+  /** Override saving a named suite (defaults to POST /monitor/testbed-suites). */
+  onSaveSuite?: (input: SaveTestSuiteInput) => void;
+  /** Override running a named suite (defaults to POST /monitor/testbed-suites/:id/run). */
+  onRunSuite?: (id: string) => void;
   /** Override the /claude propose (defaults to POST /monitor/codex-tasks). */
   onSpawnClaudeTask?: (repo: string, prompt: string) => void;
   /** Override the create-task dispatch (defaults to POST /monitor/codex-tasks propose). */
@@ -81,6 +86,8 @@ export function MonitorPage({
   options,
   backlogSuggestions,
   onSpawnMission = defaultSpawnMission,
+  onSaveSuite = defaultSaveSuite,
+  onRunSuite = defaultRunSuite,
   onSpawnClaudeTask = defaultSpawnClaudeTask,
   onCreateTask = defaultCreateTask,
   onApproveTask = defaultApproveTask,
@@ -131,6 +138,8 @@ export function MonitorPage({
         onCardClose={clearCard}
         onCardNavigate={setCard}
         onSpawnMission={onSpawnMission}
+        onSaveSuite={onSaveSuite}
+        onRunSuite={onRunSuite}
         onSpawnClaudeTask={onSpawnClaudeTask}
         onCreateTask={onCreateTask}
         onApproveTask={onApproveTask}
@@ -151,6 +160,25 @@ export function MonitorPage({
       />
     </ErrorBoundary>
   );
+}
+
+function defaultSaveSuite(input: SaveTestSuiteInput): void {
+  void fetch(SUITES_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  }).catch(() => {
+    /* surfaced via the board feed / degraded state, not thrown here */
+  });
+}
+
+function defaultRunSuite(id: string): void {
+  void fetch(`${SUITES_URL}/${encodeURIComponent(id)}/run`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+  }).catch(() => {
+    /* surfaced via the board feed / degraded state, not thrown here */
+  });
 }
 
 /**

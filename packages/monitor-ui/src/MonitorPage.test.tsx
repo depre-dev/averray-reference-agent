@@ -205,6 +205,86 @@ describe("MonitorPage — container", () => {
     }
   });
 
+  test("the board launcher can save the launched config as a suite", async () => {
+    const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({ cards: [], at: "2026-05-28T10:30:00Z" }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 202 }));
+    try {
+      const { getByRole, getByLabelText } = render(
+        <MonitorPage
+          options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }}
+          backlogSuggestions={{ enabled: false }}
+          collaboration={{ enabled: false }}
+          alerts={{ enabled: false }}
+          autonomy={{ fetchMode: async () => null }}
+        />,
+        { wrapper },
+      );
+      await waitFor(() => expect(getByRole("button", { name: "Start a mission" })).toBeTruthy());
+
+      fireEvent.click(getByRole("button", { name: "Start a mission" }));
+      fireEvent.change(getByLabelText("Target"), { target: { value: "https://app.averray.com/overview" } });
+      fireEvent.click(getByLabelText(/Save this config as a suite/));
+      fireEvent.change(getByLabelText("Suite name"), { target: { value: "Daily app sweep" } });
+      fireEvent.click(getByRole("button", { name: "Launch mission" }));
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      const [missionUrl] = fetchSpy.mock.calls[0] as [string, RequestInit];
+      const [suiteUrl, suiteInit] = fetchSpy.mock.calls[1] as [string, RequestInit];
+      expect(missionUrl).toBe("/monitor/testbed-missions");
+      expect(suiteUrl).toBe("/monitor/testbed-suites");
+      expect(JSON.parse(String(suiteInit.body))).toEqual({
+        name: "Daily app sweep",
+        target: "https://app.averray.com/overview",
+        mode: "surface_sweep",
+        author: "operator",
+      });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  test("the saved suite Run button POSTs to /monitor/testbed-suites/:id/run", async () => {
+    const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({
+      cards: [],
+      at: "2026-05-28T10:30:00Z",
+      testbedSuites: [{
+        schemaVersion: 1,
+        kind: "testbed_suite",
+        id: "testbed-suite-daily-app-sweep-1",
+        name: "Daily app sweep",
+        target: "https://app.averray.com",
+        mode: "surface_sweep",
+        author: "operator",
+        createdAt: "2026-05-28T10:00:00.000Z",
+        updatedAt: "2026-05-28T10:00:00.000Z",
+        history: [],
+      }],
+    }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 202 }));
+    try {
+      const { getByRole } = render(
+        <MonitorPage
+          options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }}
+          backlogSuggestions={{ enabled: false }}
+          collaboration={{ enabled: false }}
+          alerts={{ enabled: false }}
+          autonomy={{ fetchMode: async () => null }}
+        />,
+        { wrapper },
+      );
+      await waitFor(() => expect(getByRole("button", { name: "Run" })).toBeTruthy());
+
+      fireEvent.click(getByRole("button", { name: "Run" }));
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+      expect(calledUrl).toBe("/monitor/testbed-suites/testbed-suite-daily-app-sweep-1/run");
+      expect(init.method).toBe("POST");
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   test("the default mission approval POSTs to /monitor/testbed-missions/:id/approve", async () => {
     const requestedMission = {
       id: "testbed-mission-requested-1",

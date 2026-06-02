@@ -28,6 +28,7 @@ import {
   type LlmUsageAggregate,
   type LlmUsageEvent,
 } from "@avg/averray-mcp/llm-usage";
+import type { TestbedSuite } from "./monitor-testbed-suites.js";
 import type {
   HermesBoardCardSnapshot,
   HermesBoardSnapshot,
@@ -315,6 +316,7 @@ export interface BoardSnapshotV2 {
   at: string;
   repo: string;
   llmUsage: LlmUsageAggregate;
+  testbedSuites: TestbedSuite[];
   automationHealth?: AutomationHealth;
 }
 
@@ -1976,11 +1978,33 @@ export function buildV2BoardSnapshot(
     llmUsage: aggregateLlmUsage(usageEvents(asRecord(rawSnapshot)?.llmUsageEvents), {
       activeCalls: listActiveLlmUsageCalls(),
     }),
+    testbedSuites: testbedSuitesFromSnapshot(rawSnapshot),
     automationHealth: automationHealthForBoard(rawSnapshot, snapshotAt, process.env, {
       selfHealingCapacitySignals: quietSelfHealingCapacitySignals,
       taskHealthCapacitySignals: quietTaskHealthCapacitySignals,
     }),
   };
+}
+
+function testbedSuitesFromSnapshot(rawSnapshot: unknown): TestbedSuite[] {
+  const root = asRecord(rawSnapshot);
+  return asArray(root?.testbedSuites)
+    .flatMap((entry) => {
+      const suite = asRecord(entry);
+      if (
+        suite
+        && suite.schemaVersion === 1
+        && suite.kind === "testbed_suite"
+        && typeof suite.id === "string"
+        && typeof suite.name === "string"
+        && typeof suite.target === "string"
+        && (suite.mode === "surface_sweep" || suite.mode === "siwe_auth" || suite.mode === "gold_path")
+        && Array.isArray(suite.history)
+      ) {
+        return [suite as unknown as TestbedSuite];
+      }
+      return [];
+    });
 }
 
 /**

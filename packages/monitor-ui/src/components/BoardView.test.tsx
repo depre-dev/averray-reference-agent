@@ -97,6 +97,73 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(view.getAllByText("CLOSED").length).toBeGreaterThan(0);
   });
 
+  test("renders saved suites with run history and dispatches re-runs", () => {
+    const onRunSuite = vi.fn();
+    const board: MonitorBoard = {
+      at: "2026-06-02T08:00:00Z",
+      cards: [],
+      testbedSuites: [{
+        schemaVersion: 1,
+        kind: "testbed_suite",
+        id: "testbed-suite-daily-sweep-1",
+        name: "Daily app sweep",
+        target: "https://app.averray.com/overview",
+        mode: "surface_sweep",
+        author: "operator",
+        createdAt: "2026-06-02T07:00:00.000Z",
+        updatedAt: "2026-06-02T07:30:00.000Z",
+        history: [{ runId: "testbed-mission-1", verdict: "pass", ts: "2026-06-02T07:30:00.000Z" }],
+        lastRun: { runId: "testbed-mission-1", verdict: "pass", ts: "2026-06-02T07:30:00.000Z" },
+      }],
+    };
+    const { getByText, getByRole } = render(<BoardView board={board} status="open" onRunSuite={onRunSuite} keyboard={false} />);
+
+    expect(getByText("Daily app sweep")).toBeTruthy();
+    expect(getByText("pass")).toBeTruthy();
+    expect(getByText("1 runs")).toBeTruthy();
+
+    fireEvent.click(getByRole("button", { name: "Run" }));
+    expect(onRunSuite).toHaveBeenCalledWith("testbed-suite-daily-sweep-1");
+  });
+
+  test("promotes a launcher config into a named saved suite", () => {
+    const onSpawnMission = vi.fn();
+    const onSaveSuite = vi.fn();
+    const board: MonitorBoard = { at: "2026-06-02T08:00:00Z", cards: [] };
+    const { getByRole, getByLabelText } = render(
+      <BoardView
+        board={board}
+        status="open"
+        onSpawnMission={onSpawnMission}
+        onSaveSuite={onSaveSuite}
+        keyboard={false}
+      />,
+    );
+
+    fireEvent.click(getByRole("button", { name: "Start a mission" }));
+    fireEvent.change(getByLabelText("Target"), { target: { value: "https://app.averray.com/agents" } });
+    fireEvent.click(getByLabelText(/Role Gating/));
+    fireEvent.change(getByLabelText("Goal"), { target: { value: "verify role gates" } });
+    fireEvent.click(getByLabelText(/Save this config as a suite/));
+    fireEvent.change(getByLabelText("Suite name"), { target: { value: "Role gate sweep" } });
+    fireEvent.click(getByRole("button", { name: "Launch mission" }));
+
+    expect(onSpawnMission).toHaveBeenCalledWith({
+      targetUrl: "https://app.averray.com/agents",
+      mode: "siwe_auth",
+      freshMemory: true,
+      initialStatus: "ready",
+      goal: "verify role gates",
+    });
+    expect(onSaveSuite).toHaveBeenCalledWith({
+      name: "Role gate sweep",
+      target: "https://app.averray.com/agents",
+      mode: "siwe_auth",
+      author: "operator",
+      goal: "verify role gates",
+    });
+  });
+
   test("a calm board still expands lanes holding in-flight cards (regression: action==0 used to hide all but Done)", () => {
     const calm: MonitorBoard = {
       at: "2026-05-28T10:30:00Z",

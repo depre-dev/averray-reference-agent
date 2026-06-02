@@ -23,9 +23,10 @@ import type { LlmUsageAggregate, MonitorBoard } from "../lib/monitor/board-cache
 import type { BacklogSuggestionsResponse } from "../lib/monitor/backlog-suggestions.js";
 import type { StreamStatus } from "../lib/monitor/live-stream.js";
 import { LANES, type BoardCard, type CreateTaskInput } from "../lib/monitor/card-types.js";
-import type { MissionSpawnInput } from "../lib/monitor/mission-launch.js";
+import type { MissionSpawnInput, SaveTestSuiteInput } from "../lib/monitor/mission-launch.js";
 import { CreateTaskForm } from "./CreateTaskForm.js";
 import { StartMissionLauncher } from "./StartMissionLauncher.js";
+import { TestSuitesPanel } from "./TestSuitesPanel.js";
 import { laneFor } from "../lib/monitor/lane-rules.js";
 import { relatedPrForCard } from "../lib/monitor/collaboration.js";
 import { TopStrip } from "./TopStrip.js";
@@ -98,6 +99,8 @@ export interface BoardViewProps {
   onCardClose?: () => void;
   onCardNavigate?: (id: string) => void;
   onSpawnMission?: (input: MissionSpawnInput) => void;
+  onSaveSuite?: (input: SaveTestSuiteInput) => void;
+  onRunSuite?: (id: string) => void;
   /** Propose a greenfield Claude task (/claude <repo> <task>). */
   onSpawnClaudeTask?: (repo: string, prompt: string) => void;
   /** Propose a task — /task verb + the codex-needed create form (O3). */
@@ -142,6 +145,8 @@ export function BoardView({
   onCardClose,
   onCardNavigate,
   onSpawnMission,
+  onSaveSuite,
+  onRunSuite,
   onSpawnClaudeTask,
   onCreateTask,
   onApproveTask,
@@ -500,7 +505,8 @@ export function BoardView({
             onFilterChange={setFilter}
           />
           <LlmUsagePanel usage={board?.llmUsage} />
-          {onSpawnMission ? <StartMissionLauncher onSpawnMission={onSpawnMission} /> : null}
+          <TestSuitesPanel suites={board?.testbedSuites} onRunSuite={onRunSuite} onSaveSuite={onSaveSuite} />
+          {onSpawnMission ? <StartMissionLauncher onSpawnMission={onSpawnMission} onSaveSuite={onSaveSuite} /> : null}
           <Board
             grouped={displayGrouped}
             expanded={effectiveExpanded}
