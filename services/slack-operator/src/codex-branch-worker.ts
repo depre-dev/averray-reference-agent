@@ -3,6 +3,10 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  formatBranchWorkerOutcome,
+  type BranchWorkerOutcome,
+} from "./branch-worker-outcome.js";
 import { taskAgentBranchPrefix, taskAgentCommitPrefix, taskAgentPrBodyLabel } from "./specialist-agents.js";
 
 export interface CodexWorkerTask {
@@ -52,7 +56,7 @@ export interface GithubPullRequestForWorker {
   };
 }
 
-interface CommandResult {
+export interface CommandResult {
   exitCode: number;
   stdout: string;
   stderr: string;
@@ -62,6 +66,12 @@ export type ExecFn = (
   command: string,
   args: string[],
   options?: { cwd?: string; timeoutMs?: number; token?: string }
+) => Promise<CommandResult>;
+
+type CheckoutExecFn = (
+  command: string,
+  args: string[],
+  options: { cwd?: string; timeoutMs?: number; token?: string }
 ) => Promise<CommandResult>;
 
 export interface OpenedPullRequest {
@@ -252,7 +262,7 @@ export async function runCodexBranchWorker(
   task: CodexWorkerTask = parseCodexWorkerTask(),
   config: CodexWorkerConfig = parseCodexWorkerConfig(),
   deps: CodexBranchWorkerDeps = {}
-): Promise<void> {
+): Promise<BranchWorkerOutcome> {
   const exec = deps.exec ?? run;
   const openPullRequest = deps.openPullRequest ?? openPullRequestViaApi;
   if (task.pullRequestNumber === undefined) {
@@ -266,7 +276,9 @@ export async function runCodexBranchWorker(
   const workdir = await mkdtemp(join(config.workRoot, `${task.id}-`));
   let cleanup = !config.keepWorktree;
   try {
-    await exec("git", ["clone", "--no-tags", "--depth=50", cloneUrl, workdir], { token: config.githubToken });
+    const cloneResult = await exec("git", ["clone", "--no-tags", "--depth=50", cloneUrl, workdir], { token: config.githubToken });
+    const checkoutFailure = await gitCheckoutFailureReason(exec, workdir, cloneResult, "Codex");
+    if (checkoutFailure) return { opened: false, reason: checkoutFailure, summary: checkoutFailure };
     await exec("git", ["config", "user.name", config.gitUserName], { cwd: workdir });
     await exec("git", ["config", "user.email", config.gitUserEmail], { cwd: workdir });
     await exec("git", ["fetch", "origin", `${pr.head.ref}:${pr.head.ref}`], { cwd: workdir, token: config.githubToken });
@@ -292,10 +304,20 @@ export async function runCodexBranchWorker(
     if (afterSha !== beforeSha) {
       await exec("git", ["push", "origin", `HEAD:${pr.head.ref}`], { cwd: workdir, token: config.githubToken });
       console.log(`Codex pushed ${afterSha.slice(0, 12)} to ${headRepo}:${pr.head.ref}.`);
+      return {
+        opened: true,
+        pullRequestNumber: task.pullRequestNumber,
+        ...(pr.html_url ? { pullRequestUrl: pr.html_url } : {}),
+        summary: `Codex pushed changes to ${task.repo}#${task.pullRequestNumber}.`,
+      };
     } else {
       console.log("Codex completed without producing a new commit.");
+      return {
+        opened: false,
+        reason: "no_changes: Codex completed without producing a new commit.",
+        summary: "Codex completed without producing a new commit.",
+      };
     }
-    console.log(`Hermes should re-check ${task.repo}#${task.pullRequestNumber} after CI settles.`);
   } finally {
     if (cleanup) {
       await rm(workdir, { recursive: true, force: true });
@@ -310,7 +332,7 @@ async function runGreenfieldCodexBranchWorker(
     exec: ExecFn;
     openPullRequest: NonNullable<CodexBranchWorkerDeps["openPullRequest"]>;
   }
-): Promise<void> {
+): Promise<BranchWorkerOutcome> {
   const branch = codexBranchName(task);
   validateGreenfieldCodexWorkerTask(task, branch, config);
 
@@ -318,7 +340,9 @@ async function runGreenfieldCodexBranchWorker(
   await mkdir(config.workRoot, { recursive: true });
   const workdir = await mkdtemp(join(config.workRoot, `${slug(task.id)}-`));
   try {
-    await deps.exec("git", ["clone", "--no-tags", "--depth=50", cloneUrl, workdir], { token: config.githubToken });
+    const cloneResult = await deps.exec("git", ["clone", "--no-tags", "--depth=50", cloneUrl, workdir], { token: config.githubToken });
+    const checkoutFailure = await gitCheckoutFailureReason(deps.exec, workdir, cloneResult, "Codex");
+    if (checkoutFailure) return { opened: false, reason: checkoutFailure, summary: checkoutFailure };
     await deps.exec("git", ["config", "user.name", config.gitUserName], { cwd: workdir });
     await deps.exec("git", ["config", "user.email", config.gitUserEmail], { cwd: workdir });
     await deps.exec("git", ["fetch", "origin", config.baseBranch], { cwd: workdir, token: config.githubToken });
@@ -338,7 +362,11 @@ async function runGreenfieldCodexBranchWorker(
     assertNoForbiddenFiles(changedFiles);
     if (changedFiles.length === 0) {
       console.log(`Codex produced no changes for ${task.repo}; not opening a PR.`);
-      return;
+      return {
+        opened: false,
+        reason: `no_changes: Codex produced no changes for ${task.repo}; not opening a PR.`,
+        summary: `Codex produced no changes for ${task.repo}; not opening a PR.`,
+      };
     }
 
     await deps.exec("git", ["add", "-A"], { cwd: workdir });
@@ -352,6 +380,12 @@ async function runGreenfieldCodexBranchWorker(
       body: buildPullRequestBody(task),
     });
     console.log(`Codex opened PR #${pr.number} on ${task.repo} (${branch})${pr.html_url ? ` - ${pr.html_url}` : ""}.`);
+    return {
+      opened: true,
+      pullRequestNumber: pr.number,
+      ...(pr.html_url ? { pullRequestUrl: pr.html_url } : {}),
+      summary: `Codex opened PR #${pr.number} on ${task.repo}.`,
+    };
   } finally {
     if (!config.keepWorktree) await rm(workdir, { recursive: true, force: true });
   }
@@ -404,6 +438,54 @@ async function gitChangedFiles(cwd: string, exec: ExecFn = run): Promise<string[
     .filter(Boolean)
     .map((line) => line.slice(3).trim())
     .filter(Boolean);
+}
+
+export async function gitCheckoutFailureReason(
+  exec: CheckoutExecFn,
+  cwd: string,
+  cloneResult: CommandResult,
+  who = "worker",
+): Promise<string | undefined> {
+  if (cloneResult.exitCode !== 0) {
+    return `${who} clone failed before the agent ran: ${commandOutputSummary(cloneResult) || "git clone exited non-zero"}`;
+  }
+  const inside = await commandResultOrFailure(exec, "git", ["rev-parse", "--is-inside-work-tree"], { cwd });
+  if (!inside.ok || inside.result.exitCode !== 0 || inside.result.stdout.trim() !== "true") {
+    return checkoutFailureMessage(who, "git rev-parse did not find a worktree", cloneResult, inside.ok ? inside.result : undefined, inside.ok ? undefined : inside.reason);
+  }
+  const tracked = await commandResultOrFailure(exec, "git", ["ls-files"], { cwd });
+  if (!tracked.ok || tracked.result.exitCode !== 0 || tracked.result.stdout.trim().length === 0) {
+    return checkoutFailureMessage(who, "git ls-files found no tracked files", cloneResult, tracked.ok ? tracked.result : undefined, tracked.ok ? undefined : tracked.reason);
+  }
+  return undefined;
+}
+
+async function commandResultOrFailure(
+  exec: CheckoutExecFn,
+  command: string,
+  args: string[],
+  options: { cwd?: string; timeoutMs?: number; token?: string },
+): Promise<{ ok: true; result: CommandResult } | { ok: false; reason: string }> {
+  try {
+    return { ok: true, result: await exec(command, args, options) };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function checkoutFailureMessage(
+  who: string,
+  check: string,
+  cloneResult: CommandResult,
+  checkResult?: CommandResult,
+  checkError?: string,
+): string {
+  const details = [
+    checkError ? `check error: ${checkError}` : "",
+    checkResult ? `check output: ${commandOutputSummary(checkResult) || "empty"}` : "",
+    `clone output: ${commandOutputSummary(cloneResult) || "empty"}`,
+  ].filter(Boolean).join("; ");
+  return `${who} clone produced an unusable checkout (${check}); ${details}`;
 }
 
 // Exported so the Claude branch worker reuses the exact same secret-file
@@ -566,6 +648,16 @@ function lastNonEmptyLine(value: string): string {
   return value.trim().split(/\r?\n/).filter(Boolean).slice(-1)[0]?.trim() ?? "";
 }
 
+function commandOutputSummary(result: CommandResult): string {
+  return redact([result.stderr, result.stdout].join("\n"))
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .slice(-4)
+    .join("\n")
+    .trim();
+}
+
 export function redact(value: string): string {
   return value
     .replace(/-----BEGIN [^-]+PRIVATE KEY-----[\s\S]*?-----END [^-]+PRIVATE KEY-----/g, "[redacted private key]")
@@ -576,6 +668,10 @@ export function redact(value: string): string {
 
 if (fileURLToPath(import.meta.url) === process.argv[1]) {
   runCodexBranchWorker()
+    .then((outcome) => {
+      console.log(formatBranchWorkerOutcome(outcome));
+      if (!outcome.opened) process.exitCode = 2;
+    })
     .catch((error) => {
       console.error(error instanceof Error ? error.message : String(error));
       process.exitCode = 1;

@@ -3,6 +3,7 @@ import { hostname } from "node:os";
 import { fileURLToPath } from "node:url";
 import { beginLlmUsageCall, recordLlmUsageFromResult } from "@avg/averray-mcp/llm-usage";
 
+import { parseBranchWorkerOutcome, type BranchWorkerOutcome } from "./branch-worker-outcome.js";
 import type { CodexTask } from "./codex-task-queue.js";
 import {
   claimNextApprovedCodexTask,
@@ -30,6 +31,7 @@ export interface CodexTaskRunResult {
   stdout: string;
   stderr: string;
   summary?: string;
+  outcome?: BranchWorkerOutcome;
   usage?: unknown;
   model?: string;
   costUsd?: number;
@@ -120,8 +122,9 @@ export async function runCodexTaskRunnerOnce(
       ...(claimed.correlationId ? { runId: claimed.correlationId } : {}),
       result,
     }).catch(() => undefined);
-    if (result.exitCode === 0) {
-      const summary = sanitizeOutput(result.summary ?? summarizeCommandResult(result.stdout));
+    const outcome = result.outcome ?? parseBranchWorkerOutcome(result.stdout);
+    if (result.exitCode === 0 && outcome?.opened) {
+      const summary = openedPullRequestSummary(result, outcome, "Codex runner opened a pull request.");
       const task = await completeCodexTask(claimed.id, {
         path: config.path,
         completionSummary: summary,
@@ -138,7 +141,11 @@ export async function runCodexTaskRunnerOnce(
       );
       return { status: "completed", task: task ?? claimed };
     }
-    const reason = summarizeFailure(result);
+    const reason = outcome && !outcome.opened
+      ? noPullRequestFailureReason(outcome)
+      : result.exitCode === 0
+        ? "Codex task command exited successfully but did not report an opened pull request."
+        : summarizeFailure(result);
     const task = await failCodexTask(claimed.id, {
       path: config.path,
       failureReason: reason,
@@ -237,11 +244,13 @@ export async function executeCodexTaskCommand(
       finished = true;
       clearTimeout(timeout);
       progressWrites.finally(() => {
+        const outcome = parseBranchWorkerOutcome(stdout);
         resolve({
           exitCode: code ?? 1,
           stdout,
           stderr,
-          summary: summarizeCommandResult(stdout) || summarizeCommandResult(stderr),
+          summary: (outcome?.summary ?? summarizeCommandResult(stdout)) || summarizeCommandResult(stderr),
+          outcome,
         });
       });
     });
@@ -283,6 +292,17 @@ function summarizeFailure(result: CodexTaskRunResult): string {
   const stderr = sanitizeOutput(summarizeCommandResult(result.stderr));
   const stdout = sanitizeOutput(summarizeCommandResult(result.stdout));
   return stderr || stdout || `Codex task command exited with ${result.exitCode}.`;
+}
+
+function openedPullRequestSummary(result: CodexTaskRunResult, outcome: Extract<BranchWorkerOutcome, { opened: true }>, fallback: string): string {
+  const summary = sanitizeOutput((result.summary ?? outcome.summary ?? summarizeCommandResult(result.stdout)) || fallback);
+  const url = outcome.pullRequestUrl ? sanitizeOutput(outcome.pullRequestUrl) : "";
+  if (!url || summary.includes(url)) return summary;
+  return `${summary}\n${url}`.trim();
+}
+
+function noPullRequestFailureReason(outcome: Extract<BranchWorkerOutcome, { opened: false }>): string {
+  return sanitizeOutput(outcome.reason || outcome.summary || "Worker finished without opening a pull request.");
 }
 
 function summarizeCommandResult(value: string): string {
