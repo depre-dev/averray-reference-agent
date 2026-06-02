@@ -257,15 +257,21 @@ describe("BoardView — rich-mix board (open stream)", () => {
         ],
       },
     };
-    const { getAllByText, getByRole, getByText } = render(<BoardView board={board} status="open" />);
+    const { getAllByText, getByRole, getByText, queryByText, queryAllByText } = render(<BoardView board={board} status="open" />);
     expect(getByRole("region", { name: "LLM usage" })).toBeTruthy();
-    expect(getByText("12 calls in board window")).toBeTruthy();
-    expect(getByText("59K tokens total")).toBeTruthy();
+    // Leads with the headline: total tokens + call count.
+    expect(getByText("59K tokens · 12 calls")).toBeTruthy();
+    // Active source is prominent (also surfaced as the in-flight call).
     expect(getAllByText("claude · claude-sonnet-4-5").length).toBeGreaterThan(0);
-    expect(getByText("12 calls")).toBeTruthy();
-    expect(getByText("48K in")).toBeTruthy();
-    expect(getByText("9K out")).toBeTruthy();
-    expect(getByText("59K total")).toBeTruthy();
+    expect(getByText("59K tokens")).toBeTruthy();
+    expect(getByText("48K in · 9K out")).toBeTruthy();
+    // Idle sources collapse into ONE muted line; the reason is hidden until expand.
+    expect(getByText(/1 source idle: codex/)).toBeTruthy();
+    expect(queryByText("Codex CLI does not report usage.")).toBeNull();
+    // No flat per-source "not reported" row.
+    expect(queryAllByText("not reported").length).toBe(0);
+    // Expanding reveals the honest reason (truth-boundary preserved).
+    fireEvent.click(getByText(/1 source idle: codex/));
     expect(getByText("Codex CLI does not report usage.")).toBeTruthy();
   });
 

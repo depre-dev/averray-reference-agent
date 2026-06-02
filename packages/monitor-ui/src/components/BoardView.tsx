@@ -634,26 +634,35 @@ function formatClock(iso: string | undefined): string {
 }
 
 function LlmUsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
+  const [showIdle, setShowIdle] = useState(false);
+  const recorded = usage?.status === "recorded";
   const latestDay = usage?.byDay?.[0];
-  const models = (usage?.byModel?.length ? usage.byModel : latestDay?.byModel ?? []).slice(0, 5);
-  const missingSources = (usage?.sourceStatus ?? [])
-    .filter((entry) => entry.status === "not_reported")
-    .slice(0, Math.max(0, 5 - models.length));
+  // Active sources get the space — every (agent, model) that actually reported.
+  const models = usage?.byModel?.length ? usage.byModel : latestDay?.byModel ?? [];
+  // Idle sources collapse into ONE line; their honest reasons stay reachable on expand.
+  const idleSources = (usage?.sourceStatus ?? []).filter((entry) => entry.status === "not_reported");
   const activeCalls = usage?.activeCalls ?? [];
-  const hasRows = models.length > 0 || missingSources.length > 0;
   const emptyMessage = usage?.message
     ?? "No LLM usage counters have been recorded yet. Sources stay not reported until a real provider or runner emits whitelisted counters.";
+
   return (
     <section className="hm-llm-usage" aria-label="LLM usage">
+      {/* Headline: total tokens · calls, with the window/last-active context. */}
       <div className="hm-llm-usage-head">
-        <div>
-          <span className="hm-kicker">LLM usage</span>
-          <strong>{usage?.status === "recorded" ? `${formatNumber(usage.runs)} calls in board window` : "usage not reported"}</strong>
-        </div>
-        <span className="hm-llm-usage-total">
-          {usage?.status === "recorded" ? `${formatCompactNumber(usage.totalTokens)} tokens total` : "not reported"}
-        </span>
+        <span className="hm-kicker">LLM usage</span>
+        <strong className="hm-llm-usage-headline">
+          {recorded
+            ? `${formatCompactNumber(usage!.totalTokens)} tokens · ${formatNumber(usage!.runs)} calls`
+            : "usage not reported"}
+        </strong>
+        {recorded ? (
+          <span className="hm-llm-usage-window">
+            board window{usage!.lastActiveAt ? ` · last ${formatRelativeTime(usage!.lastActiveAt)}` : ""}
+          </span>
+        ) : null}
       </div>
+
+      {/* What's running now (in-flight). */}
       <div className="hm-llm-usage-active">
         <span>What's running now</span>
         {activeCalls.length > 0 ? (
@@ -662,37 +671,66 @@ function LlmUsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
           <strong>No in-flight LLM calls</strong>
         )}
       </div>
-      <div className="hm-llm-usage-grid">
-        {hasRows ? (
-          <>
-            {models.map((entry) => (
-              <div className="hm-llm-usage-row" key={`${entry.agent}:${entry.model}`}>
-                <span>
+
+      {/* Active sources — prominent: per-(agent, model) tokens + in/out bar. */}
+      {recorded && models.length > 0 ? (
+        <div className="hm-llm-usage-sources">
+          {models.map((entry) => {
+            const split = Math.max(1, entry.inputTokens + entry.outputTokens);
+            const inPct = Math.round((entry.inputTokens / split) * 100);
+            return (
+              <div className="hm-llm-usage-source" key={`${entry.agent}:${entry.model}`}>
+                <div className="hm-llm-usage-source-head">
                   <strong>{entry.agent} · {entry.model}</strong>
-                  <small>Last active {formatRelativeTime(entry.lastActiveAt)}</small>
-                </span>
-                <span>{formatNumber(entry.runs)} calls</span>
-                <span>{formatCompactNumber(entry.inputTokens)} in</span>
-                <span>{formatCompactNumber(entry.outputTokens)} out</span>
-                <span>{formatCompactNumber(entry.totalTokens)} total</span>
+                  <span>{formatCompactNumber(entry.totalTokens)} tokens</span>
+                </div>
+                <div
+                  className="hm-llm-usage-bar"
+                  role="img"
+                  aria-label={`${formatCompactNumber(entry.inputTokens)} in, ${formatCompactNumber(entry.outputTokens)} out`}
+                >
+                  <span className="hm-llm-usage-bar-in" style={{ width: `${inPct}%` }} />
+                  <span className="hm-llm-usage-bar-out" style={{ width: `${100 - inPct}%` }} />
+                </div>
+                <div className="hm-llm-usage-source-foot">
+                  <small>{formatCompactNumber(entry.inputTokens)} in · {formatCompactNumber(entry.outputTokens)} out</small>
+                  <small>{formatNumber(entry.runs)} calls · last {formatRelativeTime(entry.lastActiveAt)}</small>
+                </div>
               </div>
-            ))}
-            {missingSources.map((entry) => (
-              <div className="hm-llm-usage-row hm-llm-usage-row--muted" key={`missing:${entry.agent}`}>
-                <span>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {/* Idle sources — one muted, expandable line; reasons honest but quiet. */}
+      {idleSources.length > 0 ? (
+        <div className="hm-llm-usage-idle">
+          <button
+            type="button"
+            className="hm-llm-usage-idle-toggle"
+            aria-expanded={showIdle}
+            onClick={() => setShowIdle((value) => !value)}
+          >
+            <span aria-hidden>{showIdle ? "▾" : "▸"}</span>
+            {idleSources.length} source{idleSources.length === 1 ? "" : "s"} idle: {idleSources.map((entry) => entry.agent).join(" · ")}
+          </button>
+          {showIdle ? (
+            <ul className="hm-llm-usage-idle-list">
+              {idleSources.map((entry) => (
+                <li key={entry.agent}>
                   <strong>{entry.agent}</strong>
-                  <small>{entry.reason ?? `${entry.agent} usage counters have not arrived.`}</small>
-                </span>
-                <span>not reported</span>
-                <span>0 calls</span>
-                <span>0 tokens</span>
-              </div>
-            ))}
-          </>
-        ) : (
-          <div className="hm-llm-usage-empty">{emptyMessage}</div>
-        )}
-      </div>
+                  <span>{entry.reason ?? `${entry.agent} usage counters have not arrived.`}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Truth-boundary explanation when nothing reported and no idle list to carry it. */}
+      {!recorded && models.length === 0 ? (
+        <div className="hm-llm-usage-empty">{emptyMessage}</div>
+      ) : null}
     </section>
   );
 }
