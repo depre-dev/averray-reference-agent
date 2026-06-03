@@ -31,6 +31,17 @@ describe("Card — type coverage", () => {
     expect(view.queryByText("Send back to Codex")).toBeNull();
   });
 
+  test("cards classified into needs-attention get the action treatment even if isAction is missing", () => {
+    const card = {
+      ...fixture("agent #547"),
+      lane: "needs-attention",
+      isAction: false,
+      waitingOn: { actor: "operator", tone: "warn" },
+    } as BoardCard;
+    const { container } = render(<Card card={card} />);
+    expect(container.querySelector(".hm-card--action")).toBeTruthy();
+  });
+
   test("mission card renders its summary and checks bar", () => {
     const { container } = render(<Card card={fixture("mission browser-onboard-04")} />);
     const view = within(container);
