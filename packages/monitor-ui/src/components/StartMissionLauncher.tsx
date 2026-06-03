@@ -10,10 +10,12 @@ export interface StartMissionLauncherProps {
 
 export function StartMissionLauncher({ onSpawnMission, onSaveSuite }: StartMissionLauncherProps) {
   const targetId = useId();
+  const jobIdId = useId();
   const goalId = useId();
   const suiteNameId = useId();
   const [open, setOpen] = useState(false);
   const [targetUrl, setTargetUrl] = useState(DEFAULT_TARGET);
+  const [jobId, setJobId] = useState("");
   const [mode, setMode] = useState<MissionLaunchMode>("surface_sweep");
   const [freshMemory, setFreshMemory] = useState(true);
   const [requestApproval, setRequestApproval] = useState(false);
@@ -22,10 +24,15 @@ export function StartMissionLauncher({ onSpawnMission, onSaveSuite }: StartMissi
   const [goal, setGoal] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  const isCitation = mode === "citation_repair";
+
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const target = targetUrl.trim();
-    if (!isHttpUrl(target)) {
+    const trimmedJobId = jobId.trim();
+    // citation_repair keys off a Job ID (or auto-selects), not a URL — so it
+    // skips the http(s) target check.
+    if (!isCitation && !isHttpUrl(target)) {
       setError("Use an http:// or https:// target.");
       return;
     }
@@ -36,16 +43,18 @@ export function StartMissionLauncher({ onSpawnMission, onSaveSuite }: StartMissi
     setError(null);
     const trimmedGoal = goal.trim();
     onSpawnMission?.({
-      targetUrl: target,
+      // citation_repair omits the target server-side; the launch body drops it.
+      targetUrl: isCitation ? "" : target,
       mode,
       freshMemory,
       initialStatus: requestApproval ? "requested" : "ready",
+      ...(isCitation && trimmedJobId ? { jobId: trimmedJobId } : {}),
       ...(trimmedGoal ? { goal: trimmedGoal } : {}),
     });
     if (saveSuite) {
       onSaveSuite?.({
         name: suiteName.trim(),
-        target,
+        target: isCitation ? (trimmedJobId || "auto-select") : target,
         mode,
         author: "operator",
         ...(trimmedGoal ? { goal: trimmedGoal } : {}),
@@ -69,17 +78,31 @@ export function StartMissionLauncher({ onSpawnMission, onSaveSuite }: StartMissi
 
       {open ? (
         <form className="hm-mission-launcher-form" onSubmit={submit}>
-          <label className="hm-field hm-field--wide" htmlFor={targetId}>
-            <span>Target</span>
-            <input
-              id={targetId}
-              type="url"
-              required
-              value={targetUrl}
-              onChange={(event) => setTargetUrl(event.target.value)}
-              placeholder={DEFAULT_TARGET}
-            />
-          </label>
+          {isCitation ? (
+            <label className="hm-field hm-field--wide" htmlFor={jobIdId}>
+              <span>Job ID</span>
+              <input
+                id={jobIdId}
+                type="text"
+                value={jobId}
+                onChange={(event) => setJobId(event.target.value)}
+                placeholder="Leave empty to auto-select a claimable job"
+              />
+              <small>read-only analysis — no claim or edit (dry run)</small>
+            </label>
+          ) : (
+            <label className="hm-field hm-field--wide" htmlFor={targetId}>
+              <span>Target</span>
+              <input
+                id={targetId}
+                type="url"
+                required
+                value={targetUrl}
+                onChange={(event) => setTargetUrl(event.target.value)}
+                placeholder={DEFAULT_TARGET}
+              />
+            </label>
+          )}
 
           <fieldset className="hm-choice-group">
             <legend>Flow</legend>
@@ -111,6 +134,16 @@ export function StartMissionLauncher({ onSpawnMission, onSaveSuite }: StartMissi
                 onChange={() => setMode("siwe_auth")}
               />
               <span>Role Gating</span>
+              <small>read-only</small>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="mission-flow"
+                checked={mode === "citation_repair"}
+                onChange={() => setMode("citation_repair")}
+              />
+              <span>Citation Repair</span>
               <small>read-only</small>
             </label>
           </fieldset>
