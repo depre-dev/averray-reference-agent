@@ -161,6 +161,14 @@ SECURITY_TASK_RUNNER_ENABLED=1
 DOCS_TASK_RUNNER_ENABLED=1
 # Shared with the claude-runner; still fails closed when empty. Opt repos in:
 CLAUDE_BRANCH_WORKER_ALLOWED_REPOS=owner/repo
+# Defaults are observable + bounded: stream-json progress, verbose events,
+# max-turns 30, permission-mode acceptEdits. Override only if the installed
+# Claude Code build requires a different shape; unsupported stream-json flags
+# fall back once to bare text output.
+CLAUDE_BRANCH_WORKER_MAX_TURNS=30
+CLAUDE_BRANCH_WORKER_OUTPUT_FORMAT=stream-json
+CLAUDE_BRANCH_WORKER_PERMISSION_MODE=acceptEdits
+CLAUDE_BRANCH_WORKER_VERBOSE=1
 # Plus the same Claude worker auth/billing you use for the claude-runner
 # (CLAUDE_WORKER_AUTH_MODE + CLAUDE_CODE_OAUTH_TOKEN, or api-mode ANTHROPIC_API_KEY
 # + CLAUDE_WORKER_DAILY_BUDGET). The runner verifies the route at startup.

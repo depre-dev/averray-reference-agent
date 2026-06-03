@@ -68,6 +68,7 @@ export interface ClaudeWorkerConfig {
   baseBranch: string;
   claudeCommand: string;
   claudeArgs: string[];
+  maxTurns: number;
   commandTimeoutMs: number;
 }
 
@@ -77,11 +78,21 @@ export interface CommandResult {
   stderr: string;
 }
 
+export interface ExecOptions {
+  cwd?: string;
+  timeoutMs?: number;
+  token?: string;
+  onStdout?: (chunk: string) => void;
+  onStderr?: (chunk: string) => void;
+  suppressStdout?: boolean;
+  suppressStderr?: boolean;
+}
+
 /** Run a command. Injected in tests; `defaultExec` spawns for real. */
 export type ExecFn = (
   command: string,
   args: string[],
-  options: { cwd?: string; timeoutMs?: number; token?: string }
+  options: ExecOptions
 ) => Promise<CommandResult>;
 
 export interface OpenedPullRequest {
@@ -100,10 +111,13 @@ export interface ClaudeBranchWorkerDeps {
 }
 
 const PROTECTED_BRANCHES = new Set(["main", "master", "production", "prod"]);
-// `claude -p "<prompt>"` headless. The operator should tune permission /
-// allowed-tools flags for their security posture (Claude Code headless docs);
-// the worktree isolation + guards below are the in-code backstop regardless.
-const DEFAULT_CLAUDE_ARGS = ["-p", "{prompt}"];
+// Headless Claude Code defaults. `stream-json` gives the task runner live
+// progress lines instead of one silent blob; the bare `-p` fallback below keeps
+// older Claude Code builds working when a flag is unavailable.
+const DEFAULT_CLAUDE_OUTPUT_FORMAT = "stream-json";
+const DEFAULT_CLAUDE_PERMISSION_MODE = "acceptEdits";
+const DEFAULT_CLAUDE_MAX_TURNS = 30;
+const TEXT_FALLBACK_CLAUDE_ARGS = ["-p", "{prompt}"];
 
 export function parseClaudeWorkerTask(env: NodeJS.ProcessEnv = process.env): ClaudeWorkerTask {
   const prRaw = env.CLAUDE_TASK_PR?.trim();
@@ -123,6 +137,7 @@ export function parseClaudeWorkerTask(env: NodeJS.ProcessEnv = process.env): Cla
 }
 
 export function parseClaudeWorkerConfig(env: NodeJS.ProcessEnv = process.env): ClaudeWorkerConfig {
+  const maxTurns = positiveInt(env.CLAUDE_BRANCH_WORKER_MAX_TURNS, DEFAULT_CLAUDE_MAX_TURNS);
   return {
     apiBaseUrl: env.GITHUB_API_BASE_URL?.trim() || "https://api.github.com",
     githubToken: resolveGithubTokenForRepo(env.CLAUDE_TASK_REPO ?? "", env),
@@ -133,7 +148,8 @@ export function parseClaudeWorkerConfig(env: NodeJS.ProcessEnv = process.env): C
     gitUserEmail: env.CLAUDE_BRANCH_WORKER_GIT_USER_EMAIL?.trim() || "claude-worker@averray.local",
     baseBranch: env.CLAUDE_BRANCH_WORKER_BASE_BRANCH?.trim() || "main",
     claudeCommand: env.CLAUDE_BRANCH_WORKER_CLAUDE_COMMAND?.trim() || "claude",
-    claudeArgs: parseArgs(env.CLAUDE_BRANCH_WORKER_CLAUDE_ARGS, DEFAULT_CLAUDE_ARGS),
+    claudeArgs: parseArgs(env.CLAUDE_BRANCH_WORKER_CLAUDE_ARGS, defaultClaudeArgs(env)),
+    maxTurns,
     commandTimeoutMs: positiveInt(env.CLAUDE_BRANCH_WORKER_TIMEOUT_MS, 30 * 60_000),
   };
 }
@@ -187,7 +203,12 @@ export function buildGuardedClaudePrompt(task: ClaudeWorkerTask, branch: string)
   ].filter(Boolean).join("\n");
 }
 
-export function renderClaudeWorkerArgs(args: string[], prompt: string, task: ClaudeWorkerTask): string[] {
+export function renderClaudeWorkerArgs(
+  args: string[],
+  prompt: string,
+  task: ClaudeWorkerTask,
+  config?: Pick<ClaudeWorkerConfig, "maxTurns">
+): string[] {
   const replacements: Record<string, string> = {
     "{prompt}": prompt,
     "{taskId}": task.id,
@@ -196,6 +217,7 @@ export function renderClaudeWorkerArgs(args: string[], prompt: string, task: Cla
     "{correlationId}": task.correlationId ?? "",
     "{agent}": task.agent ?? "claude",
     "{agentLabel}": taskAgentLabel(task.agent ?? "claude"),
+    "{maxTurns}": String(config?.maxTurns ?? DEFAULT_CLAUDE_MAX_TURNS),
   };
   return args.map((arg) => {
     let value = arg;
@@ -246,10 +268,7 @@ export async function runClaudeBranchWorker(
 
     const prompt = buildGuardedClaudePrompt(task, branch);
     console.log(`${taskAgentLabel(task.agent ?? "claude")} worker starting ${task.repo} on ${branch}.`);
-    const claude = await exec(config.claudeCommand, renderClaudeWorkerArgs(config.claudeArgs, prompt, task), {
-      cwd: workdir,
-      timeoutMs: config.commandTimeoutMs,
-    });
+    const claude = await executeClaudeInvocation(exec, config, task, prompt, workdir);
     if (claude.exitCode !== 0) {
       throw new Error(lastNonEmptyLine(claude.stderr) || lastNonEmptyLine(claude.stdout) || `claude exited with ${claude.exitCode}.`);
     }
@@ -325,6 +344,246 @@ export async function listChangedFiles(exec: ExecFn, cwd: string): Promise<strin
     .filter(Boolean);
 }
 
+interface ClaudeInvocationResult extends CommandResult {
+  finalResultText?: string;
+  usage?: Record<string, unknown>;
+  usedTextFallback?: boolean;
+}
+
+interface ClaudeStreamState {
+  buffer: string;
+  sawJson: boolean;
+  progressMessages: string[];
+  finalResultText?: string;
+  usage?: Record<string, unknown>;
+  model?: string;
+}
+
+export interface ClaudeStreamParseResult {
+  progressMessages: string[];
+  finalResultText?: string;
+  usage?: Record<string, unknown>;
+  model?: string;
+  sawJson: boolean;
+}
+
+async function executeClaudeInvocation(
+  exec: ExecFn,
+  config: ClaudeWorkerConfig,
+  task: ClaudeWorkerTask,
+  prompt: string,
+  cwd: string
+): Promise<ClaudeInvocationResult> {
+  const renderedArgs = renderClaudeWorkerArgs(config.claudeArgs, prompt, task, config);
+  const wantsStreamJson = claudeArgsRequestStreamJson(renderedArgs);
+  if (!wantsStreamJson) {
+    return exec(config.claudeCommand, renderedArgs, { cwd, timeoutMs: config.commandTimeoutMs });
+  }
+
+  const streamState = createClaudeStreamState();
+  const streamResult = await exec(config.claudeCommand, renderedArgs, {
+    cwd,
+    timeoutMs: config.commandTimeoutMs,
+    suppressStdout: true,
+    onStdout: (chunk) => {
+      const updates = observeClaudeStreamChunk(streamState, chunk);
+      for (const message of updates.progressMessages) emitClaudeProgress(message);
+    },
+  });
+  const parsed = finalizeClaudeStreamState(streamState);
+  emitClaudeParsedResult(parsed);
+
+  if (streamResult.exitCode !== 0 && shouldFallbackToTextClaude(streamResult)) {
+    emitClaudeProgress("Claude stream-json flags were unavailable; retrying with text output.");
+    const fallback = await exec(
+      config.claudeCommand,
+      renderClaudeWorkerArgs(TEXT_FALLBACK_CLAUDE_ARGS, prompt, task, config),
+      { cwd, timeoutMs: config.commandTimeoutMs }
+    );
+    return {
+      ...fallback,
+      usedTextFallback: true,
+    };
+  }
+
+  return {
+    ...streamResult,
+    ...(parsed.finalResultText ? { finalResultText: parsed.finalResultText } : {}),
+    ...(parsed.usage ? { usage: parsed.usage } : {}),
+  };
+}
+
+function createClaudeStreamState(): ClaudeStreamState {
+  return {
+    buffer: "",
+    sawJson: false,
+    progressMessages: [],
+  };
+}
+
+export function parseClaudeStreamJsonOutput(output: string): ClaudeStreamParseResult {
+  const state = createClaudeStreamState();
+  observeClaudeStreamChunk(state, output);
+  return finalizeClaudeStreamState(state);
+}
+
+function observeClaudeStreamChunk(state: ClaudeStreamState, chunk: string): ClaudeStreamParseResult {
+  const startIndex = state.progressMessages.length;
+  state.buffer += chunk;
+  const lines = state.buffer.split(/\r?\n/);
+  state.buffer = lines.pop() ?? "";
+  for (const line of lines) observeClaudeStreamLine(state, line);
+  return snapshotClaudeStreamState(state, startIndex);
+}
+
+function finalizeClaudeStreamState(state: ClaudeStreamState): ClaudeStreamParseResult {
+  if (state.buffer.trim()) {
+    observeClaudeStreamLine(state, state.buffer);
+    state.buffer = "";
+  }
+  return snapshotClaudeStreamState(state, 0);
+}
+
+function snapshotClaudeStreamState(state: ClaudeStreamState, progressStart: number): ClaudeStreamParseResult {
+  return {
+    progressMessages: state.progressMessages.slice(progressStart),
+    ...(state.finalResultText ? { finalResultText: state.finalResultText } : {}),
+    ...(state.usage ? { usage: state.usage } : {}),
+    ...(state.model ? { model: state.model } : {}),
+    sawJson: state.sawJson,
+  };
+}
+
+function observeClaudeStreamLine(state: ClaudeStreamState, line: string): void {
+  const trimmed = line.trim();
+  if (!trimmed) return;
+  const event = parseJsonObject(trimmed);
+  if (!event) {
+    state.progressMessages.push(capForProgress(trimmed));
+    return;
+  }
+  state.sawJson = true;
+  const progress = progressFromClaudeEvent(event);
+  if (progress) state.progressMessages.push(progress);
+  const resultText = finalResultTextFromClaudeEvent(event);
+  if (resultText) state.finalResultText = resultText;
+  const usage = usageFromClaudeEvent(event);
+  if (usage) state.usage = usage;
+  const model = stringField(event, "model")
+    ?? stringField(recordField(event, "message"), "model")
+    ?? stringField(state.usage, "model");
+  if (model) state.model = model;
+}
+
+function progressFromClaudeEvent(event: Record<string, unknown>): string | undefined {
+  const type = stringField(event, "type");
+  const subtype = stringField(event, "subtype");
+  if (type === "system" && subtype === "init") return "Claude session initialized.";
+  if (type === "assistant") {
+    const text = textFromClaudeMessage(recordField(event, "message") ?? event);
+    if (text) return capForProgress(text);
+    const tool = toolNameFromContent(recordField(event, "message")?.content ?? event.content);
+    if (tool) return `Claude is using ${tool}.`;
+  }
+  if (type === "result") {
+    const text = finalResultTextFromClaudeEvent(event);
+    return text ? `Claude finished: ${capForProgress(text)}` : "Claude finished.";
+  }
+  const message = stringField(event, "progress")
+    ?? stringField(event, "message")
+    ?? stringField(event, "text")
+    ?? stringField(event, "summary");
+  return message ? capForProgress(message) : undefined;
+}
+
+function finalResultTextFromClaudeEvent(event: Record<string, unknown>): string | undefined {
+  if (stringField(event, "type") !== "result") return undefined;
+  return nonEmptyString(event.result)
+    ?? nonEmptyString(event.summary)
+    ?? nonEmptyString(event.message);
+}
+
+function usageFromClaudeEvent(event: Record<string, unknown>): Record<string, unknown> | undefined {
+  const carrier = recordField(event, "usage")
+    ?? recordField(recordField(event, "message"), "usage")
+    ?? recordField(recordField(event, "result"), "usage");
+  if (!carrier) return undefined;
+  const model = stringField(event, "model")
+    ?? stringField(recordField(event, "message"), "model")
+    ?? stringField(carrier, "model");
+  const costUsd = numberField(event, "costUsd")
+    ?? numberField(event, "cost_usd")
+    ?? numberField(event, "total_cost_usd")
+    ?? numberField(carrier, "costUsd")
+    ?? numberField(carrier, "cost_usd")
+    ?? numberField(carrier, "total_cost_usd");
+  return {
+    ...carrier,
+    ...(model ? { model } : {}),
+    ...(costUsd !== undefined ? { costUsd } : {}),
+  };
+}
+
+function emitClaudeParsedResult(parsed: ClaudeStreamParseResult): void {
+  if (parsed.usage) {
+    process.stdout.write(redact(`LLM_USAGE_JSON: ${JSON.stringify(parsed.usage)}\n`));
+  }
+  if (parsed.finalResultText) {
+    process.stdout.write(redact(`CLAUDE_RESULT: ${capForProgress(parsed.finalResultText, 600)}\n`));
+  }
+}
+
+function emitClaudeProgress(message: string): void {
+  process.stdout.write(redact(`CLAUDE_PROGRESS: ${capForProgress(message)}\n`));
+}
+
+function claudeArgsRequestStreamJson(args: readonly string[]): boolean {
+  return args.some((arg, index) =>
+    arg === "stream-json"
+    || arg === "--output-format=stream-json"
+    || (arg === "--output-format" && args[index + 1] === "stream-json")
+  );
+}
+
+function shouldFallbackToTextClaude(result: CommandResult): boolean {
+  const output = `${result.stderr}\n${result.stdout}`;
+  return /(?:unknown|unrecognized|invalid|unsupported|no such)\s+(?:option|argument|flag)|stream-json|output-format|permission-mode|max-turns|acceptEdits/i.test(output)
+    && /(?:stream-json|output-format|permission-mode|max-turns|acceptEdits|--verbose)/i.test(output);
+}
+
+function textFromClaudeMessage(message: Record<string, unknown>): string | undefined {
+  return textFromContent(message.content)
+    ?? nonEmptyString(message.text)
+    ?? nonEmptyString(message.result)
+    ?? nonEmptyString(message.summary);
+}
+
+function textFromContent(content: unknown): string | undefined {
+  if (typeof content === "string" && content.trim()) return content.trim();
+  if (!Array.isArray(content)) return undefined;
+  const text = content
+    .map((item) => {
+      if (typeof item === "string") return item;
+      if (!isRecord(item)) return "";
+      if (item.type === "text") return nonEmptyString(item.text) ?? "";
+      return "";
+    })
+    .join("\n")
+    .trim();
+  return text || undefined;
+}
+
+function toolNameFromContent(content: unknown): string | undefined {
+  if (!Array.isArray(content)) return undefined;
+  for (const item of content) {
+    if (!isRecord(item)) continue;
+    if (item.type === "tool_use") {
+      return nonEmptyString(item.name) ?? "a tool";
+    }
+  }
+  return undefined;
+}
+
 const defaultExec: ExecFn = (command, args, options) =>
   new Promise<CommandResult>((resolve, reject) => {
     const child = spawn(command, gitArgsWithAuth(command, args, options.token), {
@@ -335,12 +594,14 @@ const defaultExec: ExecFn = (command, args, options) =>
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let closed = false;
     const timeout = options.timeoutMs
       ? setTimeout(() => {
         if (settled) return;
+        settled = true;
         child.kill("SIGTERM");
         setTimeout(() => {
-          if (!settled) child.kill("SIGKILL");
+          if (!closed) child.kill("SIGKILL");
         }, 5_000).unref();
         reject(new Error(`${command} timed out after ${options.timeoutMs}ms.`));
       }, options.timeoutMs)
@@ -349,19 +610,24 @@ const defaultExec: ExecFn = (command, args, options) =>
     child.stdout?.on("data", (chunk: Buffer) => {
       const text = chunk.toString("utf8");
       stdout += text;
-      process.stdout.write(redact(text));
+      options.onStdout?.(text);
+      if (!options.suppressStdout) process.stdout.write(redact(text));
     });
     child.stderr?.on("data", (chunk: Buffer) => {
       const text = chunk.toString("utf8");
       stderr += text;
-      process.stderr.write(redact(text));
+      options.onStderr?.(text);
+      if (!options.suppressStderr) process.stderr.write(redact(text));
     });
     child.on("error", (error) => {
+      if (settled) return;
       settled = true;
       if (timeout) clearTimeout(timeout);
       reject(error);
     });
     child.on("close", (code) => {
+      closed = true;
+      if (settled) return;
       settled = true;
       if (timeout) clearTimeout(timeout);
       resolve({ exitCode: code ?? 1, stdout, stderr });
@@ -398,6 +664,25 @@ function parseTokenMap(value: string | undefined): Map<string, string> {
 
 function parseCsv(value: string | undefined): string[] {
   return (value ?? "").split(/[\n,;]+/).map((entry) => entry.trim()).filter(Boolean);
+}
+
+function defaultClaudeArgs(env: NodeJS.ProcessEnv): string[] {
+  const outputFormat = env.CLAUDE_BRANCH_WORKER_OUTPUT_FORMAT?.trim() || DEFAULT_CLAUDE_OUTPUT_FORMAT;
+  const permissionMode = env.CLAUDE_BRANCH_WORKER_PERMISSION_MODE?.trim() || DEFAULT_CLAUDE_PERMISSION_MODE;
+  const verbose = env.CLAUDE_BRANCH_WORKER_VERBOSE === "0" || env.CLAUDE_BRANCH_WORKER_VERBOSE === "false"
+    ? []
+    : ["--verbose"];
+  return [
+    "-p",
+    "{prompt}",
+    "--output-format",
+    outputFormat,
+    ...verbose,
+    "--max-turns",
+    "{maxTurns}",
+    "--permission-mode",
+    permissionMode,
+  ];
 }
 
 function parseArgs(value: string | undefined, fallback: string[]): string[] {
@@ -444,6 +729,44 @@ function pullRequestTitle(task: ClaudeWorkerTask): string {
 
 function lastNonEmptyLine(value: string): string {
   return value.trim().split(/\r?\n/).filter(Boolean).slice(-1)[0]?.trim() ?? "";
+}
+
+function parseJsonObject(value: string): Record<string, unknown> | undefined {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return isRecord(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function recordField(value: unknown, key: string): Record<string, unknown> | undefined {
+  return isRecord(value) && isRecord(value[key]) ? value[key] : undefined;
+}
+
+function stringField(value: unknown, key: string): string | undefined {
+  if (!isRecord(value)) return undefined;
+  return nonEmptyString(value[key]);
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function numberField(value: unknown, key: string): number | undefined {
+  if (!isRecord(value)) return undefined;
+  const raw = value[key];
+  const parsed = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : Number.NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function capForProgress(value: string, max = 240): string {
+  const compact = value.replace(/\s+/g, " ").trim();
+  return compact.length > max ? `${compact.slice(0, Math.max(0, max - 1))}...` : compact;
 }
 
 if (fileURLToPath(import.meta.url) === process.argv[1]) {

@@ -1,11 +1,12 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildGuardedClaudePrompt,
   claudeBranchName,
+  parseClaudeStreamJsonOutput,
   parseClaudeWorkerConfig,
   parseClaudeWorkerTask,
   renderClaudeWorkerArgs,
@@ -42,8 +43,41 @@ describe("claude branch worker — pure functions", () => {
     const c = parseClaudeWorkerConfig({ CLAUDE_BRANCH_WORKER_ALLOWED_REPOS: "a/b, c/d" });
     expect(c.baseBranch).toBe("main");
     expect(c.claudeCommand).toBe("claude");
-    expect(c.claudeArgs).toEqual(["-p", "{prompt}"]);
+    expect(c.maxTurns).toBe(30);
+    expect(c.claudeArgs).toEqual([
+      "-p",
+      "{prompt}",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--max-turns",
+      "{maxTurns}",
+      "--permission-mode",
+      "acceptEdits",
+    ]);
     expect(c.allowedRepos).toEqual(["a/b", "c/d"]);
+  });
+
+  it("lets operators override max turns and headless Claude flags", () => {
+    const c = parseClaudeWorkerConfig({
+      CLAUDE_BRANCH_WORKER_ALLOWED_REPOS: "a/b",
+      CLAUDE_BRANCH_WORKER_MAX_TURNS: "12",
+      CLAUDE_BRANCH_WORKER_OUTPUT_FORMAT: "text",
+      CLAUDE_BRANCH_WORKER_PERMISSION_MODE: "bypassPermissions",
+      CLAUDE_BRANCH_WORKER_VERBOSE: "0",
+    });
+
+    expect(c.maxTurns).toBe(12);
+    expect(c.claudeArgs).toEqual([
+      "-p",
+      "{prompt}",
+      "--output-format",
+      "text",
+      "--max-turns",
+      "{maxTurns}",
+      "--permission-mode",
+      "bypassPermissions",
+    ]);
   });
 
   it("derives a claude/<slug>-<idtail> branch", () => {
@@ -101,7 +135,46 @@ describe("claude branch worker — pure functions", () => {
   });
 
   it("renders {prompt} into the claude args", () => {
-    expect(renderClaudeWorkerArgs(["-p", "{prompt}"], "hello", task)).toEqual(["-p", "hello"]);
+    expect(renderClaudeWorkerArgs(["-p", "{prompt}", "--max-turns", "{maxTurns}"], "hello", task, { maxTurns: 7 }))
+      .toEqual(["-p", "hello", "--max-turns", "7"]);
+  });
+
+  it("parses stream-json progress, final result text, and usage", () => {
+    const parsed = parseClaudeStreamJsonOutput([
+      JSON.stringify({ type: "system", subtype: "init" }),
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          model: "claude-sonnet-4-5",
+          content: [{ type: "text", text: "Editing the worker now." }],
+        },
+      }),
+      JSON.stringify({
+        type: "result",
+        result: "Done; opened a pull request.",
+        total_cost_usd: 0.0123,
+        usage: {
+          input_tokens: 120,
+          output_tokens: 30,
+          cache_read_input_tokens: 15,
+        },
+      }),
+      "",
+    ].join("\n"));
+
+    expect(parsed.sawJson).toBe(true);
+    expect(parsed.progressMessages).toEqual([
+      "Claude session initialized.",
+      "Editing the worker now.",
+      "Claude finished: Done; opened a pull request.",
+    ]);
+    expect(parsed.finalResultText).toBe("Done; opened a pull request.");
+    expect(parsed.usage).toMatchObject({
+      input_tokens: 120,
+      output_tokens: 30,
+      cache_read_input_tokens: 15,
+      costUsd: 0.0123,
+    });
   });
 });
 
@@ -128,6 +201,7 @@ describe("claude branch worker — orchestration (injected exec + PR open)", () 
       baseBranch: "main",
       claudeCommand: "claude",
       claudeArgs: ["-p", "{prompt}"],
+      maxTurns: 30,
       commandTimeoutMs: 1_000,
       ...overrides,
     };
@@ -135,7 +209,7 @@ describe("claude branch worker — orchestration (injected exec + PR open)", () 
 
   function fakeExec(opts: { claudeExit?: number; changed?: string[]; claudeStderr?: string; emptyCheckout?: boolean; cloneStderr?: string } = {}) {
     const calls: { command: string; args: string[] }[] = [];
-    const exec: ExecFn = async (command, args) => {
+    const exec: ExecFn = async (command, args, options) => {
       calls.push({ command, args });
       if (command === "git" && args[0] === "clone") {
         return { exitCode: 0, stdout: "", stderr: opts.cloneStderr ?? "" } satisfies CommandResult;
@@ -151,6 +225,7 @@ describe("claude branch worker — orchestration (injected exec + PR open)", () 
         return { exitCode: 0, stdout: lines, stderr: "" } satisfies CommandResult;
       }
       if (command === "claude") {
+        options.onStdout?.("edited files\n");
         return { exitCode: opts.claudeExit ?? 0, stdout: "edited files", stderr: opts.claudeStderr ?? "" } satisfies CommandResult;
       }
       return { exitCode: 0, stdout: "", stderr: "" } satisfies CommandResult;
@@ -181,6 +256,106 @@ describe("claude branch worker — orchestration (injected exec + PR open)", () 
       opened: true,
       pullRequestUrl: "https://github.com/averray-agent/agent/pull/777",
     });
+  });
+
+  it("streams Claude JSON progress and usage to the parent runner", async () => {
+    const writes: string[] = [];
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
+      writes.push(String(chunk));
+      return true;
+    });
+    const streamOutput = [
+      JSON.stringify({ type: "system", subtype: "init" }),
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "text", text: "Applying a small patch." }] },
+      }),
+      JSON.stringify({
+        type: "result",
+        result: "Finished cleanly.",
+        model: "claude-sonnet-4-5",
+        total_cost_usd: 0.04,
+        usage: { input_tokens: 200, output_tokens: 40 },
+      }),
+      "",
+    ].join("\n");
+    const { exec } = fakeExec();
+    const streamingExec: ExecFn = async (command, args, options) => {
+      if (command === "claude") {
+        options.onStdout?.(streamOutput);
+        return { exitCode: 0, stdout: streamOutput, stderr: "" };
+      }
+      return exec(command, args, options);
+    };
+
+    try {
+      const outcome = await runClaudeBranchWorker(task, await config({
+        claudeArgs: [
+          "-p",
+          "{prompt}",
+          "--output-format",
+          "stream-json",
+          "--verbose",
+          "--max-turns",
+          "{maxTurns}",
+          "--permission-mode",
+          "acceptEdits",
+        ],
+      }), {
+        exec: streamingExec,
+        openPullRequest: async () => ({ number: 779 }),
+      });
+
+      const output = writes.join("");
+      expect(outcome).toMatchObject({ opened: true, pullRequestNumber: 779 });
+      expect(output).toContain("CLAUDE_PROGRESS: Claude session initialized.");
+      expect(output).toContain("CLAUDE_PROGRESS: Applying a small patch.");
+      expect(output).toContain("CLAUDE_RESULT: Finished cleanly.");
+      const usageLine = output.split(/\r?\n/).find((line) => line.startsWith("LLM_USAGE_JSON: "));
+      expect(usageLine).toBeTruthy();
+      expect(JSON.parse((usageLine as string).replace("LLM_USAGE_JSON: ", ""))).toMatchObject({
+        model: "claude-sonnet-4-5",
+        input_tokens: 200,
+        output_tokens: 40,
+        costUsd: 0.04,
+      });
+    } finally {
+      writeSpy.mockRestore();
+    }
+  });
+
+  it("falls back to bare text output when stream-json flags are unavailable", async () => {
+    const calls: { command: string; args: string[] }[] = [];
+    const { exec } = fakeExec();
+    const fallbackExec: ExecFn = async (command, args, options) => {
+      calls.push({ command, args });
+      if (command === "claude" && args.includes("stream-json")) {
+        return { exitCode: 1, stdout: "", stderr: "error: unknown option --output-format stream-json" };
+      }
+      return exec(command, args, options);
+    };
+
+    const outcome = await runClaudeBranchWorker(task, await config({
+      claudeArgs: [
+        "-p",
+        "{prompt}",
+        "--output-format",
+        "stream-json",
+        "--max-turns",
+        "{maxTurns}",
+        "--permission-mode",
+        "acceptEdits",
+      ],
+    }), {
+      exec: fallbackExec,
+      openPullRequest: async () => ({ number: 780 }),
+    });
+
+    const claudeCalls = calls.filter((call) => call.command === "claude");
+    expect(outcome).toMatchObject({ opened: true, pullRequestNumber: 780 });
+    expect(claudeCalls).toHaveLength(2);
+    expect(claudeCalls[0]?.args).toContain("stream-json");
+    expect(claudeCalls[1]?.args).toEqual(["-p", expect.stringContaining("Add GET /healthz returning 200.")]);
   });
 
   it("test-writer specialist opens a normal PR through the same harness", async () => {

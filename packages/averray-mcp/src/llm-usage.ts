@@ -203,6 +203,15 @@ export function llmUsageEventFromResult(input: LlmUsageCaptureInput): LlmUsageEv
     ?? integerField(usage, "evalCount");
   if (inputTokens === undefined || outputTokens === undefined) return undefined;
   const cacheTokens = cacheTokensFromUsage(usage);
+  const costUsd = numberField(usage, "costUsd")
+    ?? numberField(usage, "cost_usd")
+    ?? numberField(usage, "total_cost_usd")
+    ?? numberField(carrier, "costUsd")
+    ?? numberField(carrier, "cost_usd")
+    ?? numberField(carrier, "total_cost_usd")
+    ?? numberField(input.result, "costUsd")
+    ?? numberField(input.result, "cost_usd")
+    ?? numberField(input.result, "total_cost_usd");
 
   const model = stringField(usage, "model")
     ?? stringField(carrier, "model")
@@ -220,6 +229,7 @@ export function llmUsageEventFromResult(input: LlmUsageCaptureInput): LlmUsageEv
     inputTokens,
     outputTokens,
     ...(cacheTokens > 0 ? { cacheTokens } : {}),
+    ...(costUsd !== undefined ? { costUsd } : {}),
     ts: (input.ts ?? new Date()).toISOString(),
   };
   return sanitizeUsageEvent(event);
