@@ -58,6 +58,14 @@ export interface SlackRoutineConfig {
     /** Failed testbed missions older than this are treated as stale B2 inputs. */
     testbedFailureMaxAgeHours: number;
   };
+  /** ORCH-P4b — Hermes router: proposes roadmap-backed tasks. Off by default. */
+  hermesRouter: {
+    enabled: boolean;
+    intervalMs: number;
+    cooldownMs: number;
+    maxProposalsPerTick: number;
+    lookbackHours: number;
+  };
 }
 
 export function parseSlackRoutineConfig(
@@ -128,6 +136,14 @@ export function parseSlackRoutineConfig(
       maxOpenFixTasks: Math.max(1, positiveNumber(env.B2_SELF_HEALING_MAX_OPEN_FIXES) || 3),
       maxProposalsPerTick: Math.max(1, positiveNumber(env.B2_SELF_HEALING_MAX_PROPOSALS_PER_TICK) || 1),
       testbedFailureMaxAgeHours: Math.max(1, positiveNumber(env.B2_SELF_HEALING_TESTBED_FAILURE_MAX_AGE_HOURS) || 72),
+    },
+    hermesRouter: {
+      // Off by default — proposes only, never approves or dispatches.
+      enabled: env.HERMES_ROUTER_ENABLED === "1",
+      intervalMs: Math.max(60_000, (positiveNumber(env.HERMES_ROUTER_INTERVAL_MINUTES) || 5) * 60_000),
+      cooldownMs: Math.max(60_000, (positiveNumber(env.HERMES_ROUTER_COOLDOWN_MINUTES) || 30) * 60_000),
+      maxProposalsPerTick: Math.max(1, positiveNumber(env.HERMES_ROUTER_MAX_PROPOSALS_PER_TICK) || 1),
+      lookbackHours: Math.max(1, positiveNumber(env.HERMES_ROUTER_RECENTLY_DONE_LOOKBACK_HOURS) || 72),
     },
   };
 }

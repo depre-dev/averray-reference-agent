@@ -7,6 +7,7 @@ import { logger, optionalEnv, query } from "@avg/mcp-common";
 import { createDefaultWorkflowDeps } from "@avg/averray-mcp/default-workflow-runtime";
 import { invokeAgentTask } from "@avg/averray-mcp/agent-invocation";
 import { getHandoffMonitor, recordHandoffEvent } from "@avg/averray-mcp/handoff-events";
+import { getHermesBacklogPlan } from "@avg/averray-mcp/hermes-backlog";
 import { classifyTask } from "@avg/averray-mcp/dispatch-routing";
 import { buildAgentScorecard } from "@avg/averray-mcp/agent-scorecard";
 import { readLlmUsageEvents } from "@avg/averray-mcp/llm-usage";
@@ -126,12 +127,19 @@ import {
   targetForHermesBoardNarration,
 } from "./monitor-hermes-narration.js";
 import {
+  HERMES_PERSONA,
   appendHermesWhyTrace,
   applyHermesMemoryInfluence,
   generateHermesBoardNarration,
   generateHermesReply,
   requestHermesCompletion,
 } from "./monitor-hermes-voice.js";
+import {
+  fallbackHermesRouterNarration,
+  routerCorrelationId,
+  runHermesRouterOnce,
+  type HermesRouterAuditRecord,
+} from "./hermes-router-routine.js";
 import {
   approveCodexTask,
   annotateCodexTaskDecisionRecord,
@@ -247,6 +255,7 @@ logger.info({
     stalePrAlertIntervalMs: routineConfig.stalePrAlerts.enabled ? routineConfig.stalePrAlerts.intervalMs : 0,
     stalePrAlertAfterMinutes: routineConfig.stalePrAlerts.staleAfterMinutes,
     taskHealthIntervalMs: routineConfig.taskHealth.enabled ? routineConfig.taskHealth.intervalMs : 0,
+    hermesRouterIntervalMs: routineConfig.hermesRouter.enabled ? routineConfig.hermesRouter.intervalMs : 0,
   },
   monitor: {
     enabled: monitorConfig.enabled,
@@ -430,6 +439,11 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
           approvedStaleMs: routineConfig.taskHealth.approvedStaleMs,
           runningStaleMs: routineConfig.taskHealth.runningStaleMs,
           restartRecoveryMs: routineConfig.taskHealth.restartRecoveryMs,
+        },
+        hermesRouter: {
+          enabled: routineConfig.hermesRouter.enabled,
+          intervalMs: routineConfig.hermesRouter.enabled ? routineConfig.hermesRouter.intervalMs : 0,
+          maxProposalsPerTick: routineConfig.hermesRouter.maxProposalsPerTick,
         },
       },
       monitor: {
@@ -3384,6 +3398,51 @@ function startOperatorRoutines() {
     }
   };
 
+  // ORCH-P4b — Hermes router. On an idle scheduled tick it turns the
+  // roadmap-backed backlog plan into proposed tasks plus a Hermes narration.
+  // It never auto-approves, dispatches, merges, or deploys.
+  let hermesRouterRunning = false;
+  const hermesRouterCooldown = createCooldown(routineConfig.hermesRouter.cooldownMs);
+  const checkHermesRouter = async () => {
+    if (hermesRouterRunning || !routineConfig.hermesRouter.enabled) return;
+    hermesRouterRunning = true;
+    try {
+      const result = await runHermesRouterOnce({
+        enabled: routineConfig.hermesRouter.enabled,
+        intervalMs: routineConfig.hermesRouter.intervalMs,
+        cooldownMs: routineConfig.hermesRouter.cooldownMs,
+        maxProposalsPerTick: routineConfig.hermesRouter.maxProposalsPerTick,
+        lookbackMs: routineConfig.hermesRouter.lookbackHours * 60 * 60_000,
+      }, {
+        getBacklog: () => collectHermesRouterBacklog(),
+        listTasks: () => listCodexTasks(),
+        policy: () => loadDispatchPolicyConfig(),
+        classify: (input) => classifyTaskForWorkRouter(input),
+        propose: async (input) => {
+          const result = await proposeCodexTask(input);
+          if (result.created && result.task.status === "proposed") {
+            logger.info({ taskId: result.task.id, correlationId: result.task.correlationId }, "orch_p4b_router_proposed_waiting_for_operator");
+          }
+          return result;
+        },
+        narrate: (proposal, task) => narrateHermesRouterProposal(proposal, task),
+        audit: (record) => recordHermesRouterAudit(record),
+        isSuspended: () => isAutopilotSuspended(),
+        isHalt: () => isHaltFilePresent(),
+        inCooldown: (dedupeKey, nowMs) => hermesRouterCooldown.inCooldown(dedupeKey, nowMs),
+        markHandled: (dedupeKey, nowMs) => hermesRouterCooldown.markHandled(dedupeKey, nowMs),
+        now: () => new Date(),
+      });
+      if (result.proposed.length > 0) {
+        logger.info({ proposed: result.proposed }, "orch_p4b_router_proposed");
+      }
+    } catch (error) {
+      logger.error({ err: error }, "orch_p4b_router_failed");
+    } finally {
+      hermesRouterRunning = false;
+    }
+  };
+
   if (routineConfig.channelId && routineConfig.dailyBrief.enabled) {
     setTimeout(() => void checkDailyBrief(), 5_000);
     setInterval(() => void checkDailyBrief(), 60_000);
@@ -3419,6 +3478,10 @@ function startOperatorRoutines() {
   if (routineConfig.selfHealing.enabled) {
     setTimeout(() => void checkSelfHealing(), 13_000);
     setInterval(() => void checkSelfHealing(), routineConfig.selfHealing.intervalMs);
+  }
+  if (routineConfig.hermesRouter.enabled) {
+    setTimeout(() => void checkHermesRouter(), 15_000);
+    setInterval(() => void checkHermesRouter(), routineConfig.hermesRouter.intervalMs);
   }
 }
 
@@ -3762,6 +3825,130 @@ function hermesMemoryNotesForBoard(board: ReturnType<typeof buildHermesBoardSnap
     addNotes(listHermesMemoryNotes({ limit }).map((note) => note.text));
   }
   return notes;
+}
+
+function collectHermesRouterBacklog() {
+  const repo = optionalEnv("HERMES_ROUTER_DEFAULT_REPO")
+    ?? optionalEnv("B2_SELF_HEALING_REPO")
+    ?? optionalEnv("GITHUB_DEFAULT_REPO")
+    ?? "";
+  if (!repo) return [];
+  const limit = Math.max(1, Number.parseInt(optionalEnv("HERMES_ROUTER_BACKLOG_LIMIT", "12") ?? "12", 10) || 12);
+  return getHermesBacklogPlan({ limit }).items
+    .filter((item) => item.autoFlowEligible && item.owner !== "hermes")
+    .map((item) => ({
+      id: item.id,
+      repo,
+      title: item.title,
+      prompt: item.prompt,
+      stream: item.stream,
+      surface: item.title,
+      area: item.stream,
+      description: item.closeCriteria.join("; "),
+      shortDescription: item.scoreSignals[0] ?? item.title,
+    }));
+}
+
+function classifyTaskForWorkRouter(input: Parameters<typeof classifyTask>[0]) {
+  const decision = classifyTask(input);
+  if (decision.agent === "codex" || decision.agent === "claude") {
+    return { agent: decision.agent, riskTier: decision.riskTier, reason: decision.reason };
+  }
+  const text = [input.area, input.prompt, input.repo, ...(input.tags ?? [])].join(" ").toLowerCase();
+  const agent = decision.riskTier === "high" && !/\b(docs?|documentation|readme|ui|frontend|monitor|board|drawer)\b/.test(text)
+    ? "codex"
+    : "claude";
+  return {
+    agent,
+    riskTier: decision.riskTier,
+    reason: `${decision.reason}; router collapsed ${decision.agent} specialist hint to ${agent} for the current codex/claude worker lane`,
+  };
+}
+
+async function narrateHermesRouterProposal(
+  proposal: Parameters<typeof fallbackHermesRouterNarration>[0],
+  task: Parameters<typeof fallbackHermesRouterNarration>[1],
+): Promise<void> {
+  const fallback = fallbackHermesRouterNarration(proposal, task);
+  let text = fallback;
+  let hermesMode: "live" | "templated" = "templated";
+  const apiKey = optionalEnv("OLLAMA_API_KEY");
+  const baseUrl = optionalEnv("OLLAMA_BASE_URL") ?? "https://ollama.com/v1";
+  const model = optionalEnv("HERMES_MONITOR_REPLY_MODEL") ?? "deepseek-v4-pro:cloud";
+  if (apiKey) {
+    const llmText = await requestHermesCompletion({
+      messages: [
+        { role: "system", content: HERMES_PERSONA },
+        { role: "user", content: buildHermesRouterNarrationPrompt(proposal, task) },
+      ],
+      maxTokens: 90,
+      temperature: 0.45,
+    }, {
+      apiKey,
+      baseUrl,
+      model,
+      timeoutMs: 6_000,
+      taskId: task.id,
+      runId: "correlationId" in task && typeof task.correlationId === "string" ? task.correlationId : routerCorrelationId(proposal),
+    }).catch((error) => {
+      logger.warn({ err: error, taskId: task.id }, "orch_p4b_router_narration_llm_failed");
+      return null;
+    });
+    if (llmText) {
+      text = llmText;
+      hermesMode = "live";
+    }
+  }
+
+  recordCollaborationMessage({
+    author: "hermes",
+    kind: "proposal",
+    addressedTo: "operator",
+    text: text.replace(/\s+/g, " ").trim().slice(0, 1000),
+    hermesMode,
+    relatedCorrelationId: "correlationId" in task && typeof task.correlationId === "string" ? task.correlationId : routerCorrelationId(proposal),
+  });
+}
+
+function buildHermesRouterNarrationPrompt(
+  proposal: Parameters<typeof fallbackHermesRouterNarration>[0],
+  task: Parameters<typeof fallbackHermesRouterNarration>[1],
+): string {
+  return [
+    "Hermes just created a proposed task from the roadmap backlog. Write one concise, truthful sentence for the monitor co-pilot rail.",
+    "",
+    `Task id: ${task.id}`,
+    `Repo: ${proposal.repo}`,
+    `Surface/gap: ${proposal.surface}`,
+    `Agent: ${proposal.agent}`,
+    `Risk tier: ${proposal.riskTier}`,
+    `Why gap: ${proposal.why}`,
+    `Why agent: ${proposal.whyAgent}`,
+    "",
+    "Rules: say this is proposed-only and waiting for operator approval. Do not claim it ran, was approved, merged, or dispatched.",
+  ].join("\n");
+}
+
+async function recordHermesRouterAudit(record: HermesRouterAuditRecord): Promise<void> {
+  await recordHandoffEvent({
+    correlationId: `hermes-router:${record.dedupeKey}`,
+    requester: "hermes-router",
+    intent: "work_routing",
+    phase: "router",
+    status: "completed",
+    reason: `${record.action}: ${record.reason}`,
+    summary: {
+      kind: "hermes_router",
+      surface: record.surface,
+      agent: record.agent,
+      riskTier: record.riskTier,
+      why: record.why,
+      whyAgent: record.whyAgent,
+      repo: record.repo,
+      ...(record.taskId ? { taskId: record.taskId } : {}),
+    },
+    safety: { readOnly: record.action !== "propose", mutatesGithub: false, mutatesAverray: false, editsWikipedia: false },
+  }).catch((error) => logger.warn({ err: error }, "orch_p4b_router_audit_failed"));
 }
 
 async function loadCodexTaskQueueSummary() {
