@@ -109,7 +109,7 @@ export function Card({
   onOpenMissionIssue,
   onKeepWatching,
 }: CardProps) {
-  const isAction = Boolean(card.isAction);
+  const isAction = laneFor(card) === "needs-attention";
   const isStale = card.state === "stale";
   const isClosed = card.type === "done";
 

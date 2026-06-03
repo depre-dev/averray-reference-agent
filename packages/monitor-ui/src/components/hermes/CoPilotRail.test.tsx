@@ -137,7 +137,9 @@ describe("CoPilotRail", () => {
       />,
       { wrapper },
     );
-    expect(getByText(/Proposed Codex work for Repair failed mission/)).toBeTruthy();
+    const activityText = getByText(/Proposed Codex work for Repair failed mission/);
+    expect(activityText).toBeTruthy();
+    expect(activityText.closest(".hm-turn-body")).toBeTruthy();
     expect(getAllByText(/narration/).length).toBeGreaterThan(0);
     fireEvent.click(getByRole("button", { name: "Open referenced card task-activity-1" }));
     expect(onCardClick).toHaveBeenCalledWith("task-activity-1");
