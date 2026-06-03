@@ -506,65 +506,139 @@ export function buildWikipediaCitationRepairProposal(
   definition: unknown,
   evidence: WikipediaEvidenceBundle
 ): { output: Record<string, unknown>; confidence: number } {
-  const findings = evidence.citations
-    .filter((citation) => citation.urls.length > 0 || citation.deadLinkMarkers.length > 0)
-    .slice(0, 5)
-    .map((citation) => {
-      const evidenceUrl = citation.archiveUrls[0] ?? citation.urls[0] ?? evidence.revisionUrl ?? "";
-      return {
-        section: "References",
-        problem: citation.deadLinkMarkers.length > 0 ? "dead_link" : "weak_source",
-        current_claim: citation.context || citation.title || `Reference ${citation.index}`,
-        evidence_url: evidenceUrl,
-      };
-    });
-  const proposedChanges = evidence.citations
-    .filter((citation) => citation.urls.length > 0 || citation.archiveUrls.length > 0)
-    .slice(0, 5)
-    .map((citation) => {
-      const sourceUrl = citation.archiveUrls[0] ?? citation.urls[0] ?? evidence.revisionUrl ?? "";
-      return {
-        change_type: citation.archiveUrls.length > 0 ? "replace_citation" : "flag_for_editor_review",
-        target_text: citation.context || citation.title || `Reference ${citation.index}`,
-        replacement_text:
-          citation.archiveUrls.length > 0
-            ? `Use archived source ${citation.archiveUrls[0]} after editor review.`
-            : "Editor should verify and replace this citation with a live reliable source or archive.",
-        source_url: sourceUrl,
-      };
-    });
+  const sourceByUrl = new Map<string, WikipediaEvidenceBundle["sourceChecks"][number]>();
+  for (const check of evidence.sourceChecks) sourceByUrl.set(check.url, check);
 
-  if (findings.length === 0 && evidence.citations[0]) {
-    const citation = evidence.citations[0];
-    findings.push({
-      section: "References",
-      problem: "weak_source",
-      current_claim: citation.context || citation.title || `Reference ${citation.index}`,
-      evidence_url: citation.urls[0] ?? evidence.revisionUrl ?? "",
-    });
-    proposedChanges.push({
-      change_type: "flag_for_editor_review",
-      target_text: citation.context || citation.title || `Reference ${citation.index}`,
-      replacement_text: "Editor should review this citation before publishing any change.",
-      source_url: citation.urls[0] ?? evidence.revisionUrl ?? "",
-    });
-  }
+  const fallbackEvidenceUrl = firstNonEmpty(evidence.revisionUrl, "https://en.wikipedia.org/");
+  const anchorUrl = (citation: WikipediaCitation): string =>
+    firstNonEmpty(citation.urls[0], citation.archiveUrls[0], fallbackEvidenceUrl);
 
-  const hasDeadMarker = evidence.citations.some((citation) => citation.deadLinkMarkers.length > 0);
-  const hasSource = evidence.citations.some((citation) => citation.urls.length > 0 || citation.archiveUrls.length > 0);
-  const confidence = hasDeadMarker && hasSource ? 0.72 : hasSource ? 0.62 : 0.4;
+  // ONLY genuinely dead links are defects. A live `<ref>` (url-status=live / 200)
+  // is NOT a weak_source — flagging one and "replacing" it with an archive of
+  // itself is noise, so we never emit weak_source findings. Prefer fewer real
+  // findings (or an honest empty proposal) over manufactured work.
+  const deadCitations = evidence.citations
+    .filter((citation) => citation.deadLinkMarkers.length > 0)
+    .slice(0, 10);
+
+  const findings = deadCitations.map((citation) => ({
+    section: firstNonEmpty(citation.section, "References"),
+    problem: "dead_link" as const,
+    current_claim: coherentCitationText(citation),
+    evidence_url: anchorUrl(citation),
+  }));
+
+  const proposedChanges = deadCitations.map((citation) => {
+    const target = coherentCitationText(citation);
+    const primaryUrl = citation.urls[0];
+    const sourceCheck = primaryUrl ? sourceByUrl.get(primaryUrl) : undefined;
+    const archiveUrl = firstNonEmpty(citation.archiveUrls[0], sourceCheck?.archiveUrl ?? undefined) || undefined;
+    const archiveDate = archiveUrl ? archiveDateFromWaybackUrl(archiveUrl) : undefined;
+
+    // Applyable, HONEST fix: only when a real cite template carries the url AND a
+    // Wayback snapshot whose date plausibly supports the cited content exists.
+    if (archiveUrl && archiveDate && isCiteTemplate(target) && plausibleArchive(archiveDate, citation.accessDates)) {
+      const replacement = addArchiveParamsToCitation(target, archiveUrl, archiveDate);
+      if (replacement && replacement !== target) {
+        return {
+          change_type: "replace_citation" as const,
+          target_text: target,
+          replacement_text: replacement,
+          source_url: archiveUrl,
+        };
+      }
+    }
+
+    // Otherwise flag for an editor — never assert an unverified / wrong-date
+    // snapshot. (The output schema has no "verify_archive" change_type, so the
+    // schema-valid way to say "verify before applying" is flag_for_editor_review.)
+    const note = archiveUrl
+      ? `Dead link. A Wayback snapshot exists (${archiveUrl}${archiveDate ? `, dated ${archiveDate}` : ""}) but it was not verified to support the cited content; an editor should confirm it covers the claim before adding |archive-url= |archive-date= |url-status=dead.`
+      : "Dead link with no automatically reliable archive. An editor should find a live replacement source, or a verified Wayback snapshot that supports the cited content, before changing the citation.";
+    return {
+      change_type: "flag_for_editor_review" as const,
+      target_text: target,
+      replacement_text: note,
+      source_url: anchorUrl(citation),
+    };
+  });
+
+  const replaceCount = proposedChanges.filter((change) => change.change_type === "replace_citation").length;
 
   return {
     output: {
-      page_title: evidence.pageTitle || readPageTitle(definition) || "Unknown page",
-      revision_id: evidence.revisionId || readRevisionId(definition) || "unknown",
+      page_title: firstNonEmpty(evidence.pageTitle, readPageTitle(definition), "Unknown page"),
+      revision_id: firstNonEmpty(evidence.revisionId, readRevisionId(definition), "unknown"),
       citation_findings: findings,
       proposed_changes: proposedChanges,
-      review_notes:
-        "Averray-attributed proposal only. No Wikipedia edit was made. Human editor should verify the source/archive before publishing.",
+      review_notes: citationRepairReviewNotes(deadCitations.length, replaceCount),
     },
-    confidence,
+    confidence: citationRepairConfidence(deadCitations.length, replaceCount),
   };
+}
+
+/** The full citation wikitext (coherent), never an arbitrary slice. */
+function coherentCitationText(citation: WikipediaCitation): string {
+  return firstNonEmpty(citation.raw, citation.context, citation.title, `Reference ${citation.index}`);
+}
+
+function isCiteTemplate(raw: string | undefined): boolean {
+  return typeof raw === "string" && /\{\{\s*cite\b/i.test(raw);
+}
+
+/** Parse the snapshot date out of a Wayback URL (`/web/YYYYMMDD…/`). */
+function archiveDateFromWaybackUrl(url: string): string | undefined {
+  const match = url.match(/\/web\/(\d{4})(\d{2})(\d{2})/);
+  if (!match) return undefined;
+  return `${match[1]}-${match[2]}-${match[3]}`;
+}
+
+/** A snapshot "plausibly supports the cited date" only when there is a cited
+ *  access-date to compare AND the snapshot lands in a sane window around it
+ *  (≈ up to a year before, a few years after). With no cited date we cannot
+ *  verify support, so we decline (→ flag for editor) rather than assert. */
+function plausibleArchive(archiveDate: string, accessDates: string[]): boolean {
+  const archiveMs = Date.parse(archiveDate);
+  if (Number.isNaN(archiveMs)) return false;
+  for (const accessDate of accessDates) {
+    const accessMs = Date.parse(accessDate);
+    if (Number.isNaN(accessMs)) continue;
+    const days = (archiveMs - accessMs) / 86_400_000;
+    if (days >= -366 && days <= 366 * 5) return true;
+  }
+  return false;
+}
+
+/** Insert `|archive-url= |archive-date= |url-status=dead` into the citation's
+ *  cite template — applyable wikitext. Returns undefined if it already has an
+ *  archive or has no cite template to augment. */
+function addArchiveParamsToCitation(raw: string, archiveUrl: string, archiveDate: string): string | undefined {
+  if (/\|\s*archive-?url\s*=/i.test(raw)) return undefined;
+  const template = raw.match(/\{\{\s*cite\b[\s\S]*?\}\}/i)?.[0];
+  if (!template) return undefined;
+  const inner = template.replace(/\}\}\s*$/, "").trimEnd();
+  const augmented = `${inner} |archive-url=${archiveUrl} |archive-date=${archiveDate} |url-status=dead}}`;
+  return raw.replace(template, augmented);
+}
+
+function citationRepairConfidence(deadCount: number, replaceCount: number): number {
+  if (deadCount === 0) return 0.6; // honest "nothing to repair"
+  if (replaceCount > 0) return 0.78; // at least one applyable archive fix
+  return 0.55; // dead links found, but only editor flags → needs review
+}
+
+function citationRepairReviewNotes(deadCount: number, replaceCount: number): string {
+  if (deadCount === 0) {
+    return "Averray-attributed analysis only. After checking both <ref> and template-embedded citations, no dead-link markers were found in this revision, so no repair is proposed. No Wikipedia edit was made.";
+  }
+  return `Averray-attributed proposal only. Found ${deadCount} dead-link citation(s); ${replaceCount} have an applyable archived-source fix, the rest are flagged for an editor to verify. No Wikipedia edit was made — an editor must confirm each archive supports the cited content before publishing.`;
+}
+
+function firstNonEmpty(...values: Array<string | undefined>): string {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) return value.trim();
+  }
+  return "";
 }
 
 export function fixSchemaOnlyWikipediaProposal(output: Record<string, unknown>): Record<string, unknown> {
