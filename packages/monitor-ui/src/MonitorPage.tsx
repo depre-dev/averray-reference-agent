@@ -29,7 +29,7 @@ import { useActionAlerts, type UseActionAlertsOptions } from "./hooks/useActionA
 import { useAutonomyMode, type UseAutonomyModeOptions } from "./hooks/useAutonomyMode.js";
 import { kpiCounts } from "./lib/monitor/board-state.js";
 import type { BoardCard, CreateTaskInput } from "./lib/monitor/card-types.js";
-import type { MissionSpawnInput, SaveTestSuiteInput } from "./lib/monitor/mission-launch.js";
+import { missionLaunchBody, type MissionSpawnInput, type SaveTestSuiteInput } from "./lib/monitor/mission-launch.js";
 import { BoardView } from "./components/BoardView.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 
@@ -225,15 +225,7 @@ function defaultSpawnMission(input: MissionSpawnInput): void {
 }
 
 function missionSpawnBody(input: MissionSpawnInput): Record<string, unknown> {
-  if (typeof input === "string") return { targetUrl: input };
-  const body: Record<string, unknown> = {
-    targetUrl: input.targetUrl,
-    mode: input.mode,
-    freshMemory: input.freshMemory,
-    initialStatus: input.initialStatus,
-  };
-  if (input.goal) body.goal = input.goal;
-  return body;
+  return missionLaunchBody(input);
 }
 
 /**
