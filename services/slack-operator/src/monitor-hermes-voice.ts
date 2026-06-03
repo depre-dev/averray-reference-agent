@@ -168,8 +168,30 @@ export interface HermesOwnerAsk {
 
 let llmUsageDebugLogged = false;
 
-export async function generateHermesReply(
-  context: HermesReplyContext,
+/** One chat turn fed to the model. */
+export interface HermesCompletionMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+/** Knobs for a single completion (the answer-shaping params that vary per call). */
+export interface HermesCompletionRequest {
+  messages: HermesCompletionMessage[];
+  maxTokens?: number;
+  temperature?: number;
+}
+
+/**
+ * The single Hermes LLM transport: POST to the OpenAI-compatible
+ * `/chat/completions`, log usage, and extract the reply text (incl. the
+ * DeepSeek `reasoning` fallback via extractReplyText). Returns the raw reply
+ * text or null on any failure (no key, non-200, timeout, empty). This is the
+ * ONE place that talks to the model — generateHermesReply / board narration
+ * and the citation-repair verdict all funnel through it, so there is never a
+ * second LLM client. Callers apply their own post-processing on the text.
+ */
+export async function requestHermesCompletion(
+  request: HermesCompletionRequest,
   options: GenerateHermesReplyOptions
 ): Promise<string | null> {
   if (!options.apiKey) return null;
@@ -181,13 +203,10 @@ export async function generateHermesReply(
 
   const body = {
     model,
-    messages: [
-      { role: "system", content: HERMES_PERSONA },
-      { role: "user", content: buildUserPrompt(context) },
-    ],
+    messages: request.messages,
     stream: false,
-    max_tokens: 220,
-    temperature: 0.7,
+    max_tokens: request.maxTokens ?? 220,
+    temperature: request.temperature ?? 0.7,
     // Keep the token budget on the answer, not chain-of-thought (ollama.com/v1).
     reasoning_effort: options.reasoningEffort ?? "low",
   };
@@ -220,8 +239,7 @@ export async function generateHermesReply(
       ...(options.taskId ? { taskId: options.taskId } : {}),
       result: json,
     }, options);
-    const text = extractReplyText(json);
-    return text ? appendHermesWhyTrace(applyHermesMemoryInfluence(text, context), context) : null;
+    return extractReplyText(json);
   } catch {
     return null;
   } finally {
@@ -230,66 +248,40 @@ export async function generateHermesReply(
   }
 }
 
+export async function generateHermesReply(
+  context: HermesReplyContext,
+  options: GenerateHermesReplyOptions
+): Promise<string | null> {
+  const text = await requestHermesCompletion(
+    {
+      messages: [
+        { role: "system", content: HERMES_PERSONA },
+        { role: "user", content: buildUserPrompt(context) },
+      ],
+      maxTokens: 220,
+      temperature: 0.7,
+    },
+    options
+  );
+  return text ? appendHermesWhyTrace(applyHermesMemoryInfluence(text, context), context) : null;
+}
+
 export async function generateHermesBoardNarration(
   context: HermesBoardNarrationContext,
   options: GenerateHermesReplyOptions
 ): Promise<string | null> {
-  if (!options.apiKey) return null;
-  const baseUrl = options.baseUrl.replace(/\/+$/, "");
-  const url = `${baseUrl}/chat/completions`;
-  const model = options.model ?? "deepseek-v4-pro:cloud";
-  const timeoutMs = options.timeoutMs ?? 6_000;
-  const fetchImpl = options.fetchFn ?? fetch;
-
-  const body = {
-    model,
-    messages: [
-      { role: "system", content: HERMES_PERSONA },
-      { role: "user", content: buildBoardNarrationPrompt(context) },
-    ],
-    stream: false,
-    max_tokens: 180,
-    temperature: 0.65,
-    // Keep the token budget on the answer, not chain-of-thought (ollama.com/v1).
-    reasoning_effort: options.reasoningEffort ?? "low",
-  };
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const endLlmUsageCall = beginLlmUsageCall({
-    agent: "hermes",
-    model,
-    ...(options.runId ? { runId: options.runId } : {}),
-    ...(options.taskId ? { taskId: options.taskId } : {}),
-  });
-  try {
-    const response = await fetchImpl(url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${options.apiKey}`,
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    if (!response.ok) return null;
-    const json = await response.json().catch(() => null) as unknown;
-    maybeLogHermesUsageShape(json);
-    await recordHermesLlmUsage({
-      agent: "hermes",
-      model,
-      ...(options.runId ? { runId: options.runId } : {}),
-      ...(options.taskId ? { taskId: options.taskId } : {}),
-      result: json,
-    }, options);
-    const text = extractReplyText(json);
-    return text ? appendHermesWhyTrace(applyHermesMemoryInfluence(text, context), context) : null;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-    endLlmUsageCall();
-  }
+  const text = await requestHermesCompletion(
+    {
+      messages: [
+        { role: "system", content: HERMES_PERSONA },
+        { role: "user", content: buildBoardNarrationPrompt(context) },
+      ],
+      maxTokens: 180,
+      temperature: 0.65,
+    },
+    options
+  );
+  return text ? appendHermesWhyTrace(applyHermesMemoryInfluence(text, context), context) : null;
 }
 
 export function buildUserPrompt(context: HermesReplyContext): string {

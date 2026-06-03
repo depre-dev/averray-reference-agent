@@ -9,6 +9,25 @@ import {
   type TestbedMissionMutationMode,
 } from "./testbed-mutation-binding.js";
 
+// L2-PR2 — the quality-aware disposition for citation-repair missions (the
+// citation analogue of testbedMissionSelfHealingDisposition below). It lives in
+// its own module (heavy + LLM-touching); re-exported here so this file stays
+// the single entry point for mission dispositions.
+export {
+  citationRepairDisposition,
+  citationRepairQualityGate,
+  citationRepairAnalysisFromRun,
+  toCitationRepairAnalysis,
+  buildCitationRepairFailureSignal,
+  type CitationRepairDisposition,
+  type CitationRepairDispositionDeps,
+  type CitationRepairAnalysis,
+  type CitationRepairJobDefinition,
+  type CitationRepairQualityResult,
+  type CitationRepairVerdict,
+  type CitationRepairFailReason,
+} from "./citation-repair-disposition.js";
+
 const MAX_MISSION_RUNS = 50;
 
 export type TestbedMissionStatus = "requested" | "ready" | "running" | "completed" | "failed";

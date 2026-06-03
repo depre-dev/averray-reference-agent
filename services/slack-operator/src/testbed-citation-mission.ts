@@ -17,6 +17,7 @@ import {
 import { createDefaultWorkflowDeps } from "@avg/averray-mcp/default-workflow-runtime";
 import type { TestbedMissionRun } from "./monitor-testbed-missions.js";
 import type { TestbedMissionRunResult, TestbedMissionRunnerConfig } from "./testbed-mission-runner.js";
+import { toCitationRepairAnalysis, type CitationRepairAnalysis } from "./citation-repair-disposition.js";
 
 export interface CitationRepairMissionDeps {
   /** Injected for tests; defaults to the real workflow. */
@@ -40,6 +41,11 @@ interface CitationRepairMissionReport {
   recommendations: string[];
   evidence: string[];
   summary: string;
+  /** L2: the structured citation-repair signal, preserved so Hermes's
+   *  disposition (citationRepairDisposition) can read the REAL fields
+   *  (counts, findings, changes) instead of re-parsing the evidence strings.
+   *  Survives ingestion into run.result via the report spread. */
+  citationRepair?: CitationRepairAnalysis;
 }
 
 export async function executeCitationRepairMission(
@@ -138,6 +144,8 @@ export function citationRepairResultToReport(result: Record<string, unknown>): C
     recommendations: reviewNotes,
     evidence,
     summary,
+    // Preserve the structured signal for Hermes's downstream quality gate.
+    citationRepair: toCitationRepairAnalysis(result),
   };
 }
 

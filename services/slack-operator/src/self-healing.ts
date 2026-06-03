@@ -26,7 +26,16 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 export type HealingRiskTier = "high" | "low";
-export type HealingSource = "testbed_mission" | "post_deploy_verification" | "ci_main" | "ops_health";
+export type HealingSource =
+  | "testbed_mission"
+  | "post_deploy_verification"
+  | "ci_main"
+  | "ops_health"
+  // L2: a Hermes-analyzed citation-repair mission whose proposal failed the
+  // deterministic quality gate (missed dead links, garbled extraction, live-
+  // source noise, non-applyable fix). Unlike a browser mission, this points at
+  // a concrete code target (the citation-repair adapter), so it is auto-fixable.
+  | "citation_repair";
 
 export interface FailureSignal {
   /** Stable per-surface key for dedup + cooldown, e.g. "testbed:sweep-7". */
@@ -48,6 +57,10 @@ export interface FailureSignal {
   nonAutoFixableReason?: string;
   /** Source-specific prompt with enough context for a code agent to act. */
   fixPrompt?: string;
+  /** citation_repair: the Wikipedia job whose repair failed the quality gate. */
+  jobId?: string;
+  /** citation_repair: the analysis run id (for evidence/audit). */
+  runId?: string;
 }
 
 export interface HealingClassification {
@@ -207,6 +220,7 @@ function humanSource(source: HealingSource): string {
     case "post_deploy_verification": return "post-deploy verification";
     case "ci_main": return "CI on main";
     case "ops_health": return "ops-health check";
+    case "citation_repair": return "citation-repair mission";
   }
 }
 
