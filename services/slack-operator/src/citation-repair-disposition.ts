@@ -596,6 +596,114 @@ export async function citationRepairDisposition(
   };
 }
 
+// ── L2-PR3 — self-healing bridge (sync, no LLM) ─────────────────────
+
+export interface CitationRepairSignalOptions {
+  /** Repo a fix would target — required for the signal to be routable. */
+  repo?: string;
+  /** Board URL for the evidence deep-link. */
+  boardUrl?: string;
+  /** Override the derived job definition (taskType/categories). */
+  definition?: CitationRepairJobDefinition;
+}
+
+/**
+ * Synchronously derive the FailureSignal for a FAILED citation-repair run — the
+ * shape the B2 self-healing scan feeds to runSelfHealingOnce. Returns undefined
+ * unless Layer A's verdict is FAIL (a PASS / needs_review / unanalyzable run
+ * never dispatches). No LLM: the verdict prose was already posted at ingestion
+ * (L2-PR2); here we only need the deterministic, file-scoped fix-spec as the
+ * task prompt.
+ */
+export function citationRepairSignalFromRun(
+  run: { id?: string; jobId?: string; targetUrl?: string; result?: unknown },
+  options: CitationRepairSignalOptions = {}
+): FailureSignal | undefined {
+  const analysis = citationRepairAnalysisFromRun(run);
+  if (!analysis) return undefined;
+  const jobId = analysis.jobId ?? str(run.jobId);
+  const pageTitle = analysis.pageTitle ?? str(run.targetUrl);
+  const definition: CitationRepairJobDefinition =
+    options.definition ?? {
+      taskType: "citation_repair",
+      ...(jobId ? { jobId } : {}),
+      ...(pageTitle ? { pageTitle } : {}),
+    };
+  const gate = citationRepairQualityGate(analysis, definition);
+  if (gate.verdict !== "fail") return undefined;
+  const fixPrompt = buildCitationRepairFixSpec(gate, analysis, definition);
+  return buildCitationRepairFailureSignal({
+    run,
+    analysis,
+    gate,
+    fixPrompt,
+    ...(options.repo ? { repo: options.repo } : {}),
+    ...(options.boardUrl ? { boardUrl: options.boardUrl } : {}),
+  });
+}
+
+/** correlationId stamped on a citation self-heal task:
+ *  `self-heal:${source}:${surface}` = `self-heal:citation_repair:citation-repair:<jobId>`. */
+export const CITATION_REPAIR_SELF_HEAL_CORRELATION_PREFIX = "self-heal:citation_repair:";
+
+/** Recover the originating jobId from a citation self-heal task's correlationId. */
+export function citationRepairJobIdFromCorrelation(correlationId?: string): string | undefined {
+  if (!correlationId || !correlationId.startsWith(CITATION_REPAIR_SELF_HEAL_CORRELATION_PREFIX)) return undefined;
+  const marker = "citation-repair:";
+  const idx = correlationId.lastIndexOf(marker);
+  if (idx < 0) return undefined;
+  const jobId = correlationId.slice(idx + marker.length).trim();
+  return jobId.length > 0 ? jobId : undefined;
+}
+
+export interface CitationRepairRerunTask {
+  id: string;
+  status: string;
+  correlationId?: string;
+  completedAt?: string;
+}
+export interface CitationRepairRerunRun {
+  jobId?: string;
+  mode?: string;
+  createdAt?: string;
+}
+export interface CitationRepairRerunDecision {
+  jobId: string;
+  taskId: string;
+}
+
+/**
+ * Close-the-loop: decide which citation-repair jobs to RE-RUN. For each
+ * COMPLETED citation self-heal task, re-run its job (so the card re-runs and
+ * flips to PASS if the adapter fix worked) — UNLESS a citation_repair mission
+ * for that job was already created at/after the task completed (idempotent: the
+ * re-run we just spawned blocks the next tick). Keyed by jobId. Honors the B2
+ * relief valve: returns nothing when self-healing is disabled.
+ */
+export function decideCitationRepairReruns(input: {
+  tasks: ReadonlyArray<CitationRepairRerunTask>;
+  runs: ReadonlyArray<CitationRepairRerunRun>;
+  enabled?: boolean;
+}): CitationRepairRerunDecision[] {
+  if (input.enabled === false) return [];
+  const decisions: CitationRepairRerunDecision[] = [];
+  const seen = new Set<string>();
+  for (const task of input.tasks) {
+    if (task.status !== "completed" || !task.completedAt) continue;
+    const jobId = citationRepairJobIdFromCorrelation(task.correlationId);
+    if (!jobId || seen.has(jobId)) continue;
+    const completedMs = Date.parse(task.completedAt);
+    if (!Number.isFinite(completedMs)) continue;
+    const alreadyReran = input.runs.some(
+      (r) => r.mode === "citation_repair" && r.jobId === jobId && Boolean(r.createdAt) && Date.parse(r.createdAt!) >= completedMs
+    );
+    if (alreadyReran) continue;
+    seen.add(jobId);
+    decisions.push({ jobId, taskId: task.id });
+  }
+  return decisions;
+}
+
 // ── defensive readers ───────────────────────────────────────────────
 
 function isRec(value: unknown): value is Record<string, unknown> {

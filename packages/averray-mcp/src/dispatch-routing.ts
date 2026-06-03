@@ -64,6 +64,28 @@ const CLAUDE_SURFACES: SurfaceGroup[] = [
   { surface: "MCP tooling", keywords: ["mcp tool", "tool ergonomics", "tool schema"] },
 ];
 
+// Averray adapter logic (L2: the Wikipedia citation-repair adapter). Codex owns
+// correctness-sensitive adapter code, but it is REVERSIBLE app logic in this
+// repo — low risk. Keeping it low-risk is deliberate: a high-risk classification
+// escalates-only and never reaches the operator's approve button, but a
+// self-healing citation fix is meant to be PROPOSED for approval. Checked before
+// the high-risk surfaces so an incidental word in the fix-spec (e.g. "policy")
+// can't bump a citation-adapter task to high-risk.
+const ADAPTER_SURFACES: SurfaceGroup[] = [
+  {
+    surface: "citation-repair adapter",
+    keywords: [
+      "citation-repair-adapter",
+      "citation repair adapter",
+      "wiki-evidence.ts",
+      "job-workflows.ts",
+      "citation extractor",
+      "citation findings",
+      "buildwikipediacitationrepairproposal",
+    ],
+  },
+];
+
 const SPECIALIST_SURFACES: SurfaceGroup[] = [
   { surface: "tests", keywords: ["test", "tests", "spec", "vitest", "coverage", "test-writing", "playwright"] },
 ];
@@ -110,6 +132,18 @@ export function classifyTask(input: RoutingInput): RoutingDecision {
       agent: "security",
       riskTier: "high",
       reason: `${securitySurface} → security specialist, high-risk/operator-reviewed`,
+    };
+  }
+
+  // Reversible adapter logic → codex, low-risk (so it can be proposed, not just
+  // escalated). Checked before high-risk so the fix-spec's incidental keywords
+  // don't misroute a citation-adapter task.
+  const adapterSurface = firstSurface(haystack, ADAPTER_SURFACES);
+  if (adapterSurface) {
+    return {
+      agent: "codex",
+      riskTier: "low",
+      reason: `${adapterSurface} → codex, low-risk (reversible adapter logic)`,
     };
   }
 
