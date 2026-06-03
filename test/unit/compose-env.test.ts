@@ -81,4 +81,23 @@ describe("compose environment wiring", () => {
     expect(envExample).toContain("SECURITY_TASK_RUNNER_ENABLED=0");
     expect(envExample).toContain("DOCS_TASK_RUNNER_ENABLED=0");
   });
+
+  it("passes observable bounded Claude branch-worker defaults into Claude-family runners", () => {
+    const compose = parse(readText("../../ops/compose.yml")) as {
+      services?: Record<string, { environment?: Record<string, string> }>;
+    };
+    for (const serviceName of ["claude-task-runner", "test-writer-task-runner", "security-task-runner", "docs-task-runner"]) {
+      const env = compose.services?.[serviceName]?.environment;
+      expect(env?.CLAUDE_BRANCH_WORKER_OUTPUT_FORMAT).toBe("${CLAUDE_BRANCH_WORKER_OUTPUT_FORMAT:-stream-json}");
+      expect(env?.CLAUDE_BRANCH_WORKER_PERMISSION_MODE).toBe("${CLAUDE_BRANCH_WORKER_PERMISSION_MODE:-acceptEdits}");
+      expect(env?.CLAUDE_BRANCH_WORKER_MAX_TURNS).toBe("${CLAUDE_BRANCH_WORKER_MAX_TURNS:-30}");
+      expect(env?.CLAUDE_BRANCH_WORKER_VERBOSE).toBe("${CLAUDE_BRANCH_WORKER_VERBOSE:-1}");
+    }
+
+    const envExample = readText("../../ops/.env.example");
+    expect(envExample).toContain("CLAUDE_BRANCH_WORKER_OUTPUT_FORMAT=stream-json");
+    expect(envExample).toContain("CLAUDE_BRANCH_WORKER_PERMISSION_MODE=acceptEdits");
+    expect(envExample).toContain("CLAUDE_BRANCH_WORKER_MAX_TURNS=30");
+    expect(envExample).toContain("CLAUDE_BRANCH_WORKER_VERBOSE=1");
+  });
 });

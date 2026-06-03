@@ -183,6 +183,7 @@ describe("claude task runner", () => {
           input_tokens: 120,
           output_tokens: 30,
           cache_read_input_tokens: 15,
+          costUsd: 0.42,
         },
       }),
       log: () => {},
@@ -198,6 +199,7 @@ describe("claude task runner", () => {
       inputTokens: 120,
       outputTokens: 30,
       cacheTokens: 15,
+      costUsd: 0.42,
     });
   });
 
