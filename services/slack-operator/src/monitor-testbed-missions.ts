@@ -19,6 +19,10 @@ export {
   citationRepairAnalysisFromRun,
   toCitationRepairAnalysis,
   buildCitationRepairFailureSignal,
+  // L2-PR3 — self-healing bridge (sync signal + close-the-loop re-run).
+  citationRepairSignalFromRun,
+  citationRepairJobIdFromCorrelation,
+  decideCitationRepairReruns,
   type CitationRepairDisposition,
   type CitationRepairDispositionDeps,
   type CitationRepairAnalysis,
@@ -26,6 +30,7 @@ export {
   type CitationRepairQualityResult,
   type CitationRepairVerdict,
   type CitationRepairFailReason,
+  type CitationRepairRerunDecision,
 } from "./citation-repair-disposition.js";
 
 const MAX_MISSION_RUNS = 50;
@@ -389,6 +394,41 @@ export function failedTestbedMissionsForSelfHealing(
   }
 
   return Array.from(latestBySurface.values())
+    .filter((run) => run.status === "failed")
+    .filter((run) => {
+      const failedMs = missionFailedMs(run);
+      return Number.isFinite(failedMs) && nowMs - failedMs <= maxAgeMs;
+    })
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .map((run) => cloneRun(run));
+}
+
+/**
+ * L2-PR3 — the citation-repair analogue of failedTestbedMissionsForSelfHealing.
+ * Collect the latest FAILED citation-repair run PER JOB (deduped on jobId, not
+ * the per-run id, so re-runs of the same job collapse to one self-healing
+ * surface instead of swarming the queue), within the freshness window. The
+ * caller converts each into a FailureSignal (citationRepairSignalFromRun).
+ */
+export function failedCitationRepairRunsForSelfHealing(
+  runs: readonly TestbedMissionRun[],
+  options: SelfHealingTestbedMissionFilterOptions = {},
+): TestbedMissionRun[] {
+  const nowMs = (options.now ?? new Date()).getTime();
+  const maxAgeHours = Math.max(1, options.maxAgeHours ?? 72);
+  const maxAgeMs = maxAgeHours * 60 * 60 * 1000;
+  const latestByJob = new Map<string, TestbedMissionRun>();
+
+  for (const run of runs) {
+    if (run.mode !== "citation_repair") continue;
+    const key = run.jobId ?? run.id;
+    const current = latestByJob.get(key);
+    if (!current || missionUpdatedMs(run) > missionUpdatedMs(current)) {
+      latestByJob.set(key, run);
+    }
+  }
+
+  return Array.from(latestByJob.values())
     .filter((run) => run.status === "failed")
     .filter((run) => {
       const failedMs = missionFailedMs(run);

@@ -154,6 +154,7 @@ import {
   diagnoseTestbedMissionReportFromMessage,
   dismissRequestedTestbedMissionRun,
   failedTestbedMissionsForSelfHealing,
+  failedCitationRepairRunsForSelfHealing,
   listTestbedMissionRuns,
   readTestbedMissionRunnerHeartbeat,
   recordTestbedMissionIssueOpened,
@@ -165,6 +166,8 @@ import {
   testbedMissionResultCoaching,
   testbedMissionSelfHealingDisposition,
   citationRepairDisposition,
+  citationRepairSignalFromRun,
+  decideCitationRepairReruns,
   type CitationRepairJobDefinition,
   type TestbedMissionRun,
 } from "./monitor-testbed-missions.js";
@@ -2634,6 +2637,26 @@ async function collectSelfHealingSignals(boardUrl: string): Promise<FailureSigna
   }
 
   try {
+    // L2-PR3 — citation-repair FAILs flow through the SAME self-healing stream.
+    // The Layer-A gate is deterministic (no LLM here); the verdict prose was
+    // already posted at ingestion (L2-PR2). A FAIL carries the file-scoped
+    // fix-spec as the task prompt and routes (area "citation-repair-adapter") to
+    // Codex at low risk, so runSelfHealingOnce PROPOSES an operator-gated task.
+    const citationRuns = failedCitationRepairRunsForSelfHealing(listTestbedMissionRuns({ limit: 25 }), {
+      maxAgeHours: routineConfig.selfHealing.testbedFailureMaxAgeHours,
+    });
+    for (const run of citationRuns) {
+      const signal = citationRepairSignalFromRun(run, {
+        ...(fixRepo ? { repo: fixRepo } : {}),
+        boardUrl,
+      });
+      if (signal) signals.push(signal);
+    }
+  } catch (error) {
+    logger.warn({ err: error }, "b2_collect_citation_signals_failed");
+  }
+
+  try {
     const monitor = await getHandoffMonitor({ limit: 50, activeWindowMinutes: 24 * 60 });
     for (const c of monitor.recent ?? []) {
       const failed = c.status === "failed" || c.status === "blocked";
@@ -2656,6 +2679,30 @@ async function collectSelfHealingSignals(boardUrl: string): Promise<FailureSigna
   }
 
   return signals;
+}
+
+// L2-PR3 — close the loop. When a citation self-healing fix task COMPLETES,
+// re-run the citation_repair mission for that job (read-only dry-run analysis)
+// so the card re-runs and, if the adapter fix worked, flips to PASS and closes.
+// Keyed by jobId; idempotent (the re-run we spawn blocks the next tick). Honors
+// the relief valve via the `enabled` gate. Poll-based — the next B2 tick after
+// completion triggers it; the runners (claude/codex) only call completeCodexTask.
+async function reconcileCitationRepairReruns(): Promise<void> {
+  try {
+    const tasks = await listCodexTasks();
+    const runs = listTestbedMissionRuns({ limit: 50 });
+    const decisions = decideCitationRepairReruns({
+      tasks,
+      runs,
+      enabled: routineConfig.selfHealing.enabled,
+    });
+    for (const decision of decisions) {
+      createMonitorTestbedMissionFromPayload({ mode: "citation_repair", jobId: decision.jobId, initialStatus: "ready" });
+      logger.info({ jobId: decision.jobId, taskId: decision.taskId }, "citation_repair_rerun_after_fix");
+    }
+  } catch (error) {
+    logger.warn({ err: error }, "citation_repair_rerun_reconcile_failed");
+  }
 }
 
 // O4-PR3b — run a freshly-proposed task through the autopilot gate. Returns the
@@ -3328,6 +3375,8 @@ function startOperatorRoutines() {
       if (acted.length > 0) {
         logger.info({ handled: acted }, "b2_self_healing_acted");
       }
+      // Close the loop: re-run citation_repair missions whose fix task completed.
+      await reconcileCitationRepairReruns();
     } catch (error) {
       logger.error({ err: error }, "b2_self_healing_failed");
     } finally {
