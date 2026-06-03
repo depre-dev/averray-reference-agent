@@ -108,16 +108,16 @@ describe("compose environment wiring", () => {
     };
     for (const serviceName of ["claude-task-runner", "test-writer-task-runner", "security-task-runner", "docs-task-runner"]) {
       const env = compose.services?.[serviceName]?.environment;
+      expect(env?.CLAUDE_TASK_RUNNER_TIMEOUT_MS).toBe("${CLAUDE_TASK_RUNNER_TIMEOUT_MS:-5400000}");
       expect(env?.CLAUDE_BRANCH_WORKER_OUTPUT_FORMAT).toBe("${CLAUDE_BRANCH_WORKER_OUTPUT_FORMAT:-stream-json}");
       expect(env?.CLAUDE_BRANCH_WORKER_PERMISSION_MODE).toBe("${CLAUDE_BRANCH_WORKER_PERMISSION_MODE:-acceptEdits}");
-      expect(env?.CLAUDE_BRANCH_WORKER_MAX_TURNS).toBe("${CLAUDE_BRANCH_WORKER_MAX_TURNS:-30}");
       expect(env?.CLAUDE_BRANCH_WORKER_VERBOSE).toBe("${CLAUDE_BRANCH_WORKER_VERBOSE:-1}");
     }
 
     const envExample = readText("../../ops/.env.example");
     expect(envExample).toContain("CLAUDE_BRANCH_WORKER_OUTPUT_FORMAT=stream-json");
     expect(envExample).toContain("CLAUDE_BRANCH_WORKER_PERMISSION_MODE=acceptEdits");
-    expect(envExample).toContain("CLAUDE_BRANCH_WORKER_MAX_TURNS=30");
     expect(envExample).toContain("CLAUDE_BRANCH_WORKER_VERBOSE=1");
+    expect(envExample).toContain("CLAUDE_TASK_RUNNER_TIMEOUT_MS=5400000");
   });
 });

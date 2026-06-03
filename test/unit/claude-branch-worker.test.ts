@@ -43,7 +43,6 @@ describe("claude branch worker — pure functions", () => {
     const c = parseClaudeWorkerConfig({ CLAUDE_BRANCH_WORKER_ALLOWED_REPOS: "a/b, c/d" });
     expect(c.baseBranch).toBe("main");
     expect(c.claudeCommand).toBe("claude");
-    expect(c.maxTurns).toBe(30);
     expect(c.claudeArgs).toEqual([
       "-p",
       "{prompt}",
@@ -59,13 +58,11 @@ describe("claude branch worker — pure functions", () => {
   it("lets operators override headless Claude flags without adding a max-turns default", () => {
     const c = parseClaudeWorkerConfig({
       CLAUDE_BRANCH_WORKER_ALLOWED_REPOS: "a/b",
-      CLAUDE_BRANCH_WORKER_MAX_TURNS: "12",
       CLAUDE_BRANCH_WORKER_OUTPUT_FORMAT: "text",
       CLAUDE_BRANCH_WORKER_PERMISSION_MODE: "bypassPermissions",
       CLAUDE_BRANCH_WORKER_VERBOSE: "0",
     });
 
-    expect(c.maxTurns).toBe(12);
     expect(c.claudeArgs).toEqual([
       "-p",
       "{prompt}",
@@ -131,7 +128,7 @@ describe("claude branch worker — pure functions", () => {
   });
 
   it("renders placeholders into operator-supplied claude args", () => {
-    expect(renderClaudeWorkerArgs(["-p", "{prompt}", "--task-id", "{taskId}"], "hello", task, { maxTurns: 7 }))
+    expect(renderClaudeWorkerArgs(["-p", "{prompt}", "--task-id", "{taskId}"], "hello", task))
       .toEqual(["-p", "hello", "--task-id", task.id]);
   });
 
@@ -197,7 +194,6 @@ describe("claude branch worker — orchestration (injected exec + PR open)", () 
       baseBranch: "main",
       claudeCommand: "claude",
       claudeArgs: ["-p", "{prompt}"],
-      maxTurns: 30,
       commandTimeoutMs: 1_000,
       ...overrides,
     };
@@ -318,13 +314,22 @@ describe("claude branch worker — orchestration (injected exec + PR open)", () 
     }
   });
 
-  it("falls back to bare text output when stream-json flags are unavailable", async () => {
+  it("drops only an unsupported permission flag and keeps stream-json progress", async () => {
     const calls: { command: string; args: string[] }[] = [];
     const { exec } = fakeExec();
+    const streamOutput = [
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "Still streaming." }] } }),
+      JSON.stringify({ type: "result", result: "Finished.", usage: { input_tokens: 9, output_tokens: 3 } }),
+      "",
+    ].join("\n");
     const fallbackExec: ExecFn = async (command, args, options) => {
       calls.push({ command, args });
-      if (command === "claude" && args.includes("stream-json")) {
-        return { exitCode: 1, stdout: "", stderr: "error: unknown option --output-format stream-json" };
+      if (command === "claude" && args.includes("--permission-mode")) {
+        return { exitCode: 1, stdout: "", stderr: "error: unknown option --permission-mode" };
+      }
+      if (command === "claude") {
+        options.onStdout?.(streamOutput);
+        return { exitCode: 0, stdout: streamOutput, stderr: "" };
       }
       return exec(command, args, options);
     };
@@ -335,6 +340,7 @@ describe("claude branch worker — orchestration (injected exec + PR open)", () 
         "{prompt}",
         "--output-format",
         "stream-json",
+        "--verbose",
         "--permission-mode",
         "acceptEdits",
       ],
@@ -347,7 +353,93 @@ describe("claude branch worker — orchestration (injected exec + PR open)", () 
     expect(outcome).toMatchObject({ opened: true, pullRequestNumber: 780 });
     expect(claudeCalls).toHaveLength(2);
     expect(claudeCalls[0]?.args).toContain("stream-json");
-    expect(claudeCalls[1]?.args).toEqual(["-p", expect.stringContaining("Add GET /healthz returning 200.")]);
+    expect(claudeCalls[1]?.args).toContain("stream-json");
+    expect(claudeCalls[1]?.args).toContain("--verbose");
+    expect(claudeCalls[1]?.args).not.toContain("--permission-mode");
+  });
+
+  it("drops only a custom unsupported max-turns flag and preserves hardened defaults", async () => {
+    const calls: { command: string; args: string[] }[] = [];
+    const { exec } = fakeExec();
+    const streamOutput = [
+      JSON.stringify({ type: "result", result: "Finished.", usage: { input_tokens: 20, output_tokens: 5 } }),
+      "",
+    ].join("\n");
+    const fallbackExec: ExecFn = async (command, args, options) => {
+      calls.push({ command, args });
+      if (command === "claude" && args.includes("--max-turns")) {
+        return { exitCode: 1, stdout: "", stderr: "error: unrecognized flag --max-turns" };
+      }
+      if (command === "claude") {
+        options.onStdout?.(streamOutput);
+        return { exitCode: 0, stdout: streamOutput, stderr: "" };
+      }
+      return exec(command, args, options);
+    };
+
+    const outcome = await runClaudeBranchWorker(task, await config({
+      claudeArgs: [
+        "-p",
+        "{prompt}",
+        "--max-turns",
+        "30",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--permission-mode",
+        "acceptEdits",
+      ],
+    }), {
+      exec: fallbackExec,
+      openPullRequest: async () => ({ number: 781 }),
+    });
+
+    const claudeCalls = calls.filter((call) => call.command === "claude");
+    expect(outcome).toMatchObject({ opened: true, pullRequestNumber: 781 });
+    expect(claudeCalls).toHaveLength(2);
+    expect(claudeCalls[1]?.args).toContain("stream-json");
+    expect(claudeCalls[1]?.args).toContain("--verbose");
+    expect(claudeCalls[1]?.args).toContain("--permission-mode");
+    expect(claudeCalls[1]?.args).not.toContain("--max-turns");
+    expect(claudeCalls[1]?.args).not.toContain("30");
+  });
+
+  it("drops unsupported stream-json output-format without collapsing to bare -p", async () => {
+    const calls: { command: string; args: string[] }[] = [];
+    const { exec } = fakeExec();
+    const fallbackExec: ExecFn = async (command, args, options) => {
+      calls.push({ command, args });
+      if (command === "claude" && args.includes("--output-format")) {
+        return { exitCode: 1, stdout: "", stderr: "error: unknown option --output-format stream-json" };
+      }
+      return exec(command, args, options);
+    };
+
+    const outcome = await runClaudeBranchWorker(task, await config({
+      claudeArgs: [
+        "-p",
+        "{prompt}",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--permission-mode",
+        "acceptEdits",
+      ],
+    }), {
+      exec: fallbackExec,
+      openPullRequest: async () => ({ number: 782 }),
+    });
+
+    const claudeCalls = calls.filter((call) => call.command === "claude");
+    expect(outcome).toMatchObject({ opened: true, pullRequestNumber: 782 });
+    expect(claudeCalls).toHaveLength(2);
+    expect(claudeCalls[1]?.args).toEqual([
+      "-p",
+      expect.stringContaining("Add GET /healthz returning 200."),
+      "--verbose",
+      "--permission-mode",
+      "acceptEdits",
+    ]);
   });
 
   it("test-writer specialist opens a normal PR through the same harness", async () => {

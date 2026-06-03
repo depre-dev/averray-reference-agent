@@ -168,9 +168,9 @@ TypeScript monorepo: npm workspaces (`packages/*`, `services/*`), Node ≥ 22, E
   worker is greenfield (creates the branch + opens the PR); by default it runs
   Claude Code headless with `stream-json`, `--verbose`, and
   `--permission-mode acceptEdits`, emits live progress/usage for the monitor
-  drawer, and falls back to bare text `-p` only when the installed CLI does not
-  support those flags. The outer task-runner timeout is the execution bound. The
-  Codex worker iterates an existing PR.
+  drawer, and drops only an unsupported Claude CLI flag on retry if the installed
+  CLI rejects one of those flags. The outer task-runner timeout is the execution
+  bound. The Codex worker iterates an existing PR.
 - **Cross-agent review requests and C2 reviewer panels are advisory records.**
   Hermes, the operator, Codex, or Claude may request a second-agent review on a
   card. High-risk work uses a panel of independent Hermes/Codex/Claude verdicts;
