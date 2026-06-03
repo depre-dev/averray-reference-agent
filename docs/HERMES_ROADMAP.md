@@ -1,11 +1,13 @@
 # Hermes Orchestration — Roadmap & Naming Index (canonical)
 
 - **Status:** Code-backed planning index. This is the **single source of truth for work-item IDs and order.** It supersedes the old `P#` / `Phase #` labels.
-- **Date:** 2026-06-01
+- **Date:** 2026-06-03
 
 > **Naming:** one prefix per stream, numbered within it. **`P#` and `Phase #` are retired** — they collided (`P2` Claude worker vs `Phase 2` A+D). Use the IDs below in all handoff prompts and discussion.
 
 > **Reconciliation note (2026-06-01, rev 2):** This index was reconciled against merged PRs #252-#339, a fresh `gh pr list --state open` check showing **no open PRs**, and local code/ops evidence. It marks only code-backed shipped slices as done; where a row is a partial slice, the status says so and names the remaining follow-up. No row should imply active work unless an open PR exists. This revision marks **T4 live driver (#337)** and **C3 security/docs specialists (#339)** done, both verified in code.
+
+> **Reconciliation note (2026-06-03):** ORCH-P4b is the first default-off implementation slice for B1 idle-triggered auto-flow: Hermes can turn roadmap-backed backlog gaps into **proposed-only** Codex/Claude tasks and narrate why, while HALT/D3, dispatch policy, cooldown, and operator approval remain in front. This does **not** mark B1 fully done; supervised burn-in and any later enablement remain follow-up.
 
 ## Streams
 
@@ -36,7 +38,7 @@
 | D2 | Explainability / decision records | ✅ done (#296) — dispatch decision records and replay surface |
 | D3 | Anomaly auto-pause (tiered soft→hard) — owns the autopilot-suspended flag | ✅ done (#286) — anomaly auto-pause owns autopilot-suspended flag |
 | D4 | Off-device alert bridge (Slack now → push later; action-needed 0→≥1; quiet-hours/mute) — **O4 prerequisite** | ✅ done (#279) |
-| B1 | Backlog generation (roadmap auto-flow; net-new escalates) | ✅ first slices done — read-only board suggestions (#303; `services/slack-operator/src/backlog-suggestions.ts`) + roadmap-backed `averray_hermes_backlog_plan` (#306; `packages/averray-mcp/src/hermes-backlog.ts`). Idle-triggered auto-flow remains follow-up; no open PR as of 2026-06-01 |
+| B1 | Backlog generation (roadmap auto-flow; net-new escalates) | 🟠 first implementation slices — read-only board suggestions (#303; `services/slack-operator/src/backlog-suggestions.ts`) + roadmap-backed `averray_hermes_backlog_plan` (#306; `packages/averray-mcp/src/hermes-backlog.ts`) + ORCH-P4b default-off router routine in review (proposes+narrates only; operator-gated). Remaining: supervised burn-in / live enablement, no auto-dispatch |
 | B2 | Self-healing (auto-fix non-high-risk; rollback human) | ✅ shipped/live-capable — proposes-only self-healing core (#309; `services/slack-operator/src/self-healing.ts`), stable testbed target dedupe + open-fix cap (#313), duplicate/cap hardening (#314 + #317; `services/slack-operator/src/self-healing.ts`, `test/unit/self-healing.test.ts`), D3/HALT interlock and `b2_self_healing_acted` logging (`services/slack-operator/src/index.ts`), and `B2_SELF_HEALING_*` ops wiring (`services/slack-operator/src/routines.ts`, `ops/compose.yml`). Prod observation: B2 emitted `b2_self_healing_acted`; rollback/high-risk still escalates |
 | C1 | Cross-agent review (default) | ✅ first slice done — review request primitives + card/drawer attachment (#302; `services/slack-operator/src/monitor-collab.ts`, `services/slack-operator/src/monitor-v2.ts`, `packages/monitor-ui/src/components/cards/Card.tsx`). Automatic default reviewer dispatch remains follow-up; no open PR as of 2026-06-01 |
 | C2 | Reviewer panel (high-risk) | ✅ done (#308 + #315; `services/slack-operator/src/reviewer-panel.ts`, panel request/response wiring in `services/slack-operator/src/monitor-collab.ts`, action-needed escalation in `services/slack-operator/src/monitor-v2.ts`, tests in `test/unit/reviewer-panel.test.ts` and `test/unit/monitor-v2.test.ts`) |
@@ -50,7 +52,7 @@
 | T6 | Agent-requested tester runs — board-gated (request → approve → read-only run) | ✅ first slice done (#304; `POST /monitor/testbed-missions/request`, `/approve`, board approve UI, and runner ignores `requested` until approval) |
 | T7 | Tester capabilities manifest (+ platform-repo request helper) | ✅ reference-agent manifest done (#284; `GET /monitor/tester/capabilities`, `services/slack-operator/src/tester-capabilities.ts`). Platform-repo request helper remains follow-up outside this repo |
 
-*(Status as of 2026-06-01 (rev 2) — **shipped/code-backed:** O0–O5, A1–A4, D1–D4, B1 first slices, B2 proposes-only self-healing, C1 first slice, C2, **C3 (test-writer + security + docs specialists)**, C4 v1, T1–T3, **T4 (live gold-path driver)**, T5, T6 first slice, and the T7 reference-agent manifest. The **v2 monitor redesign also landed in full** — degraded card states (#331), mission-drawer polish (#333), operator checklist + private note (#338), co-pilot turn anatomy (#335), and the banner/filter/footer/composer wiring (#320–#332, #334). **No open PRs.** **Design / follow-up (no open PR):** B1 idle-triggered auto-flow and C1 automatic/default reviewer dispatch (both intended build-now-flag-off, enable only post-burn-in), T4's first hosted/live run proof, and the T7 platform-repo helper (lives in `averray-agent/agent`). Merge/deploy remain human-gated; autopilot approves dispatch only inside O4 guardrails.)*
+*(Status as of 2026-06-03 — **shipped/code-backed:** O0–O5, A1–A4, D1–D4, B1 first slices, B2 proposes-only self-healing, C1 first slice, C2, **C3 (test-writer + security + docs specialists)**, C4 v1, T1–T3, **T4 (live gold-path driver)**, T5, T6 first slice, and the T7 reference-agent manifest. The **v2 monitor redesign also landed in full** — degraded card states (#331), mission-drawer polish (#333), operator checklist + private note (#338), co-pilot turn anatomy (#335), and the banner/filter/footer/composer wiring (#320–#332, #334). **In review:** ORCH-P4b default-off Hermes router routine for B1 auto-flow. **Design / follow-up:** C1 automatic/default reviewer dispatch, T4's first hosted/live run proof, and the T7 platform-repo helper (lives in `averray-agent/agent`). Merge/deploy remain human-gated; autopilot approves dispatch only inside O4 guardrails.)*
 
 ## Post-2026-06-02 — autonomous dispatch proven + new work streams
 

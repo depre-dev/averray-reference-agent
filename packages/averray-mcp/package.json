@@ -29,6 +29,10 @@
       "types": "./dist/handoff-events.d.ts",
       "import": "./dist/handoff-events.js"
     },
+    "./hermes-backlog": {
+      "types": "./dist/hermes-backlog.d.ts",
+      "import": "./dist/hermes-backlog.js"
+    },
     "./agent-scorecard": {
       "types": "./dist/agent-scorecard.d.ts",
       "import": "./dist/agent-scorecard.js"

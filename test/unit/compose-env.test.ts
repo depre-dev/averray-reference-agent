@@ -82,6 +82,26 @@ describe("compose environment wiring", () => {
     expect(envExample).toContain("DOCS_TASK_RUNNER_ENABLED=0");
   });
 
+  it("wires ORCH-P4b Hermes router off by default with bounded proposal controls", () => {
+    const compose = parse(readText("../../ops/compose.yml")) as {
+      services?: Record<string, { environment?: Record<string, string> }>;
+    };
+
+    const env = compose.services?.["slack-operator"]?.environment;
+    expect(env?.HERMES_ROUTER_ENABLED).toBe("${HERMES_ROUTER_ENABLED:-0}");
+    expect(env?.HERMES_ROUTER_INTERVAL_MINUTES).toBe("${HERMES_ROUTER_INTERVAL_MINUTES:-5}");
+    expect(env?.HERMES_ROUTER_COOLDOWN_MINUTES).toBe("${HERMES_ROUTER_COOLDOWN_MINUTES:-30}");
+    expect(env?.HERMES_ROUTER_MAX_PROPOSALS_PER_TICK).toBe("${HERMES_ROUTER_MAX_PROPOSALS_PER_TICK:-1}");
+    expect(env?.HERMES_ROUTER_RECENTLY_DONE_LOOKBACK_HOURS).toBe("${HERMES_ROUTER_RECENTLY_DONE_LOOKBACK_HOURS:-72}");
+    expect(env?.HERMES_ROUTER_BACKLOG_LIMIT).toBe("${HERMES_ROUTER_BACKLOG_LIMIT:-12}");
+    expect(env?.HERMES_ROUTER_DEFAULT_REPO).toBe("${HERMES_ROUTER_DEFAULT_REPO:-}");
+
+    const envExample = readText("../../ops/.env.example");
+    expect(envExample).toContain("HERMES_ROUTER_ENABLED=0");
+    expect(envExample).toContain("HERMES_ROUTER_MAX_PROPOSALS_PER_TICK=1");
+    expect(envExample).toContain("HERMES_ROUTER_DEFAULT_REPO=");
+  });
+
   it("passes observable bounded Claude branch-worker defaults into Claude-family runners", () => {
     const compose = parse(readText("../../ops/compose.yml")) as {
       services?: Record<string, { environment?: Record<string, string> }>;

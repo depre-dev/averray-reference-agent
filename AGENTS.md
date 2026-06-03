@@ -122,6 +122,12 @@ TypeScript monorepo: npm workspaces (`packages/*`, `services/*`), Node ≥ 22, E
   (high-risk surface, any rollback, or while D3-suspended / HALT is set; rollback
   is always operator-confirmed). Deduped + cooldown'd; depends on D3 as the loop
   fail-safe. Same invariant #6 guardrail — it only proposes.
+- **Hermes router (ORCH-P4b, off by default).** When
+  `HERMES_ROUTER_ENABLED=1`, Hermes may turn the roadmap-backed backlog plan into
+  proposed Codex/Claude tasks and narrate why in the monitor co-pilot rail. It
+  reuses the dispatch allowlist/caps, same-tick and queue dedupe, cooldown,
+  HALT, and D3 suspension gates; it **never** approves, dispatches, merges, or
+  deploys. No backlog gap means no proposal and no chatter.
 - **Gold-path tester autonomy is budgeted, testnet-only.** Internal/operator
   scheduled gold-path missions may auto-post a sponsored starter job and run the
   claim→submit→verify→settle loop only when `TESTBED_GOLDPATH_AUTONOMY_ENABLED`

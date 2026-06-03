@@ -51,6 +51,7 @@ describe("slack operator routines", () => {
     });
     expect(config.selfHealing.enabled).toBe(true);
     expect(config.selfHealing.maxProposalsPerTick).toBe(3);
+    expect(config.hermesRouter.enabled).toBe(false);
   });
 
   it("lets an explicit routine channel override the allowed-channel fallback", () => {
@@ -78,6 +79,34 @@ describe("slack operator routines", () => {
     expect(config.selfHealing.maxProposalsPerTick).toBe(2);
     expect(config.selfHealing.maxOpenFixTasks).toBe(4);
     expect(config.selfHealing.testbedFailureMaxAgeHours).toBe(12);
+  });
+
+  it("parses ORCH-P4b Hermes router as default-off and bounded when enabled", () => {
+    const defaults = parseSlackRoutineConfig({}, new Set(["C1"]));
+
+    expect(defaults.hermesRouter).toMatchObject({
+      enabled: false,
+      intervalMs: 5 * 60_000,
+      cooldownMs: 30 * 60_000,
+      maxProposalsPerTick: 1,
+      lookbackHours: 72,
+    });
+
+    const enabled = parseSlackRoutineConfig({
+      HERMES_ROUTER_ENABLED: "1",
+      HERMES_ROUTER_INTERVAL_MINUTES: "2",
+      HERMES_ROUTER_COOLDOWN_MINUTES: "45",
+      HERMES_ROUTER_MAX_PROPOSALS_PER_TICK: "3",
+      HERMES_ROUTER_RECENTLY_DONE_LOOKBACK_HOURS: "24",
+    }, new Set(["C1"]));
+
+    expect(enabled.hermesRouter).toMatchObject({
+      enabled: true,
+      intervalMs: 2 * 60_000,
+      cooldownMs: 45 * 60_000,
+      maxProposalsPerTick: 3,
+      lookbackHours: 24,
+    });
   });
 
   it("parses O5 task health retry and stale thresholds", () => {
