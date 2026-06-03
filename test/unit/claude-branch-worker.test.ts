@@ -50,15 +50,13 @@ describe("claude branch worker — pure functions", () => {
       "--output-format",
       "stream-json",
       "--verbose",
-      "--max-turns",
-      "{maxTurns}",
       "--permission-mode",
       "acceptEdits",
     ]);
     expect(c.allowedRepos).toEqual(["a/b", "c/d"]);
   });
 
-  it("lets operators override max turns and headless Claude flags", () => {
+  it("lets operators override headless Claude flags without adding a max-turns default", () => {
     const c = parseClaudeWorkerConfig({
       CLAUDE_BRANCH_WORKER_ALLOWED_REPOS: "a/b",
       CLAUDE_BRANCH_WORKER_MAX_TURNS: "12",
@@ -73,8 +71,6 @@ describe("claude branch worker — pure functions", () => {
       "{prompt}",
       "--output-format",
       "text",
-      "--max-turns",
-      "{maxTurns}",
       "--permission-mode",
       "bypassPermissions",
     ]);
@@ -134,9 +130,9 @@ describe("claude branch worker — pure functions", () => {
     });
   });
 
-  it("renders {prompt} into the claude args", () => {
-    expect(renderClaudeWorkerArgs(["-p", "{prompt}", "--max-turns", "{maxTurns}"], "hello", task, { maxTurns: 7 }))
-      .toEqual(["-p", "hello", "--max-turns", "7"]);
+  it("renders placeholders into operator-supplied claude args", () => {
+    expect(renderClaudeWorkerArgs(["-p", "{prompt}", "--task-id", "{taskId}"], "hello", task, { maxTurns: 7 }))
+      .toEqual(["-p", "hello", "--task-id", task.id]);
   });
 
   it("parses stream-json progress, final result text, and usage", () => {
@@ -296,8 +292,6 @@ describe("claude branch worker — orchestration (injected exec + PR open)", () 
           "--output-format",
           "stream-json",
           "--verbose",
-          "--max-turns",
-          "{maxTurns}",
           "--permission-mode",
           "acceptEdits",
         ],
@@ -341,8 +335,6 @@ describe("claude branch worker — orchestration (injected exec + PR open)", () 
         "{prompt}",
         "--output-format",
         "stream-json",
-        "--max-turns",
-        "{maxTurns}",
         "--permission-mode",
         "acceptEdits",
       ],

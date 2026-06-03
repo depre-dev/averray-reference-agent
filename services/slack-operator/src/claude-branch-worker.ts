@@ -678,8 +678,6 @@ function defaultClaudeArgs(env: NodeJS.ProcessEnv): string[] {
     "--output-format",
     outputFormat,
     ...verbose,
-    "--max-turns",
-    "{maxTurns}",
     "--permission-mode",
     permissionMode,
   ];
