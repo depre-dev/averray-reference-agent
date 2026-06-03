@@ -36,6 +36,8 @@ const evidence = {
       accessDates: ["2020-01-02"],
       title: "Review",
       context: "A review citation with a dead source.",
+      raw: '<ref name="review">{{cite web |title=Review |url=https://dead.example/review |access-date=2020-01-02}}</ref>',
+      section: "Reception",
     },
   ],
   sourceChecks: [
@@ -98,7 +100,7 @@ describe("runWikipediaCitationRepairWorkflow", () => {
       jobId,
       sessionId,
       draftId: "draft-1",
-      confidence: 0.72,
+      confidence: 0.78,
       proposalSummary: {
         citationFindings: 1,
         proposedChanges: 1,

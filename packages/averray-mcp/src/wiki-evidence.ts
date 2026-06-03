@@ -44,6 +44,13 @@ export interface WikipediaCitation {
   accessDates: string[];
   title?: string;
   context: string;
+  /** The full, faithful citation wikitext — the entire `<ref>…</ref>` or the
+   *  template/table-row that carries the citation. Unlike `context` (an
+   *  arbitrary character window), this is coherent and editor-applyable, so it
+   *  is what a proposal uses for `current_claim` / `target_text`. */
+  raw?: string;
+  /** Nearest preceding section heading (e.g. "Charts"), when detectable. */
+  section?: string;
 }
 
 const WIKIPEDIA_API = "https://en.wikipedia.org/w/api.php";
@@ -134,12 +141,14 @@ export function extractWikipediaCitationsFromWikitext(
   options: { maxCitations: number; maxContextChars: number }
 ): WikipediaCitation[] {
   const citations: WikipediaCitation[] = [];
+  const refSpans: Array<[number, number]> = [];
   const refPattern = /<ref\b([^>/]*?)(?:\/>|>([\s\S]*?)<\/ref>)/gi;
   let match: RegExpExecArray | null;
   while ((match = refPattern.exec(wikitext)) && citations.length < options.maxCitations) {
     const attrs = match[1] ?? "";
     const body = match[2] ?? "";
     const raw = match[0];
+    refSpans.push([match.index, match.index + raw.length]);
     const context = contextAround(wikitext, match.index, raw.length, options.maxContextChars);
     const templateNames = extractTemplateNames(body);
     const bareUrls = extractBareUrls(body);
@@ -159,8 +168,51 @@ export function extractWikipediaCitationsFromWikitext(
       accessDates: extractTemplateParamValues(body, ["access-date", "accessdate"]),
       ...optionalString("title", firstTemplateParamValue(body, ["title"])),
       context,
+      raw,
+      ...optionalString("section", sectionAt(wikitext, match.index)),
     });
   }
+
+  // Template-embedded dead links — `{{dead link}}` / `{{link rot}}` markers that
+  // annotate a citation OUTSIDE a `<ref>` (e.g. `{{album chart|…}}{{dead link}}`
+  // rows in a Charts table). The `<ref>`-only pass above is blind to these, so
+  // a page whose dead links live on chart/cite templates reports 0 dead links.
+  // We attribute each marker to the table-row / line it sits on (coherent
+  // wikitext), skipping any marker already inside a counted `<ref>`.
+  const insideRef = (at: number) => refSpans.some(([start, end]) => at >= start && at < end);
+  const deadMarkerPattern = /\{\{\s*(?:dead link|dead-link|link rot|bare url inline)\b[^{}]*\}\}/gi;
+  const seenLineStarts = new Set<number>();
+  let marker: RegExpExecArray | null;
+  while ((marker = deadMarkerPattern.exec(wikitext)) && citations.length < options.maxCitations) {
+    const at = marker.index;
+    if (insideRef(at)) continue;
+    const lineStart = wikitext.lastIndexOf("\n", at) + 1;
+    if (seenLineStarts.has(lineStart)) continue;
+    seenLineStarts.add(lineStart);
+    const lineEndRaw = wikitext.indexOf("\n", at);
+    const lineEnd = lineEndRaw < 0 ? wikitext.length : lineEndRaw;
+    // Faithful row wikitext (template syntax preserved), trimmed of table markup.
+    const raw = wikitext.slice(lineStart, lineEnd).replace(/^[|*#:;!\s]+/, "").trim() || marker[0];
+    const bareUrls = extractBareUrls(raw);
+    const urls = unique([...extractTemplateParamValues(raw, ["url"]), ...bareUrls]).filter((url) => !isArchiveUrl(url));
+    const archiveUrls = unique([
+      ...extractTemplateParamValues(raw, ["archive-url", "archiveurl"]),
+      ...bareUrls.filter((url) => isArchiveUrl(url)),
+    ]);
+    citations.push({
+      index: citations.length + 1,
+      templateNames: extractTemplateNames(raw),
+      urls,
+      archiveUrls,
+      deadLinkMarkers: ["maintenance_template"],
+      accessDates: extractTemplateParamValues(raw, ["access-date", "accessdate"]),
+      ...optionalString("title", firstTemplateParamValue(raw, ["title"])),
+      context: cleanWikiValue(raw).slice(0, options.maxContextChars),
+      raw,
+      ...optionalString("section", sectionAt(wikitext, at)),
+    });
+  }
+
   return citations;
 }
 
@@ -339,6 +391,20 @@ function extractRefName(attrs: string): string | undefined {
   const quoted = attrs.match(/\bname\s*=\s*["']([^"']+)["']/i)?.[1];
   if (quoted) return cleanWikiValue(quoted);
   return attrs.match(/\bname\s*=\s*([^\s/>]+)/i)?.[1];
+}
+
+/** The nearest section heading (`== Heading ==`) at or before `index`, cleaned
+ *  of `=` markers. Lets a finding say where it lives (e.g. "Charts"). */
+function sectionAt(text: string, index: number): string | undefined {
+  const before = text.slice(0, index);
+  const headingPattern = /^[ \t]*(={2,6})[ \t]*(.+?)[ \t]*\1[ \t]*$/gm;
+  let last: string | undefined;
+  let m: RegExpExecArray | null;
+  while ((m = headingPattern.exec(before))) {
+    const title = cleanWikiValue(m[2]);
+    if (title) last = title;
+  }
+  return last;
 }
 
 function contextAround(text: string, index: number, length: number, maxChars: number): string {
