@@ -130,6 +130,7 @@ import {
   applyHermesMemoryInfluence,
   generateHermesBoardNarration,
   generateHermesReply,
+  requestHermesCompletion,
 } from "./monitor-hermes-voice.js";
 import {
   approveCodexTask,
@@ -163,6 +164,8 @@ import {
   testbedMissionReportValidationCoaching,
   testbedMissionResultCoaching,
   testbedMissionSelfHealingDisposition,
+  citationRepairDisposition,
+  type CitationRepairJobDefinition,
   type TestbedMissionRun,
 } from "./monitor-testbed-missions.js";
 import {
@@ -1571,7 +1574,62 @@ function recordTestbedMissionReportValidationCollaboration(
   }
 }
 
+// L2-PR2 — a citation-repair mission is not a browser/product run; route it to
+// Hermes's quality-aware disposition (Layer A gate + Layer B verdict prose),
+// which posts the verdict to the card and emits a FailureSignal on FAIL. We do
+// NOT dispatch here — L2-PR3 wires the signal into self-healing. Fire-and-forget
+// so report ingestion never blocks on the LLM.
+function surfaceCitationRepairDisposition(run: TestbedMissionRun): void {
+  const apiKey = optionalEnv("OLLAMA_API_KEY");
+  const baseUrl = optionalEnv("OLLAMA_BASE_URL") ?? "https://ollama.com/v1";
+  const model = optionalEnv("HERMES_MONITOR_REPLY_MODEL") ?? "deepseek-v4-pro:cloud";
+  const fixRepo = optionalEnv("B2_SELF_HEALING_REPO") || optionalEnv("GITHUB_DEFAULT_REPO");
+  const definition: CitationRepairJobDefinition = {
+    taskType: "citation_repair",
+    ...(run.jobId ? { jobId: run.jobId } : {}),
+    ...(run.targetUrl ? { pageTitle: run.targetUrl } : {}),
+  };
+  const llm = apiKey
+    ? (prompt: { system: string; user: string }) =>
+      requestHermesCompletion(
+        { messages: [{ role: "system", content: prompt.system }, { role: "user", content: prompt.user }], maxTokens: 600, temperature: 0.4 },
+        { apiKey, baseUrl, model, runId: run.id, taskId: run.id }
+      )
+    : undefined;
+  void citationRepairDisposition(run, definition, {
+    ...(llm ? { llm } : {}),
+    ...(fixRepo ? { repo: fixRepo } : {}),
+    postComment: (comment) => {
+      recordCollaborationMessage({
+        author: comment.author,
+        kind: comment.kind,
+        addressedTo: comment.addressedTo,
+        relatedCorrelationId: comment.relatedCorrelationId,
+        text: comment.text,
+        hermesMode: comment.hermesMode,
+      });
+    },
+  })
+    .then((disposition) => {
+      recordHermesMemoryNote({ text: `Citation-repair ${run.id}: ${disposition.verdict} (${disposition.reason}).`, relatedCorrelationId: run.id });
+      // Emit-only: the signal is available for L2-PR3 to collect; we log it here
+      // for visibility but never dispatch a fix from this PR.
+      for (const signal of disposition.signals) {
+        logger.info({ missionId: run.id, jobId: signal.jobId, area: signal.area, reasons: disposition.reason }, "citation_repair_failure_signal_emitted");
+      }
+    })
+    .catch((error) => {
+      logger.warn({ err: error, missionId: run.id }, "citation_repair_disposition_failed");
+    });
+}
+
 function recordTestbedMissionReportCollaboration(run: TestbedMissionRun): void {
+  // Citation-repair runs are analyzed by Hermes's quality gate, not the
+  // browser-mission product coaching below.
+  if (run.mode === "citation_repair") {
+    surfaceCitationRepairDisposition(run);
+    return;
+  }
   try {
     const verdict = typeof run.result?.verdict === "string" ? run.result.verdict : run.status;
     recordHermesMemoryNote({
