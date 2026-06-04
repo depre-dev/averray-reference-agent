@@ -7,21 +7,18 @@
 // mission (M7').
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import type { BoardCard, CreateTaskInput } from "../../lib/monitor/card-types.js";
 import type { BacklogSuggestion, BacklogSuggestionsResponse } from "../../lib/monitor/backlog-suggestions.js";
 import type { BoardNowBanner as BoardNowBannerData } from "../../lib/monitor/board-state.js";
 import {
-  actorLabel,
   formatTurnTime,
   relatedPrForCard,
   type CollaborationMessage,
 } from "../../lib/monitor/collaboration.js";
-import {
-  buildHermesActivityFeed,
-  type HermesActivityEntry,
-} from "../../lib/monitor/activity-feed.js";
 import { useCollaboration, type UseCollaborationOptions } from "../../hooks/useCollaboration.js";
 import { AskHermesComposer } from "./AskHermesComposer.js";
+import { HermesTurn } from "./HermesTurn.js";
 
 export interface CoPilotRailProps {
   onSpawnMission?: (url: string) => void;
@@ -90,19 +87,9 @@ export function CoPilotRail({
     setPrefill(text);
     setPrefillToken((t) => t + 1);
   };
-  const activity = useMemo(
-    () => buildHermesActivityFeed({
-      cards: boardCards ?? [],
-      messages,
-      banner: boardBanner ?? {
-        tone: "calm",
-        eyebrow: "Board now",
-        headline: "Nothing waits on you. Hermes will narrate real board events when they arrive.",
-        sub: "No current board summary was provided to the rail.",
-        primaryActionId: undefined,
-      },
-    }),
-    [boardBanner, boardCards, messages],
+  const roomThreads = useMemo(
+    () => buildRoomThreads(messages, boardCards ?? []),
+    [boardCards, messages],
   );
 
   const scopedConversationActive = useMemo(
@@ -121,7 +108,7 @@ export function CoPilotRail({
   useEffect(() => {
     const el = streamRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [activity.length]);
+  }, [messages.length, roomThreads.length]);
 
   return (
     <aside className="hm-hermes" role="complementary" aria-label="Hermes co-pilot">
@@ -152,20 +139,27 @@ export function CoPilotRail({
         </div>
       ) : null}
 
-      <section className="hm-activity" aria-label="Hermes activity">
+      <section className="hm-activity" aria-label="Multi-agent collaboration room">
         <div className="hm-activity-head">
-          <span className="hm-kicker">Activity</span>
-          <strong>What Hermes sees</strong>
+          <span className="hm-kicker">Room</span>
+          <strong>Agent collaboration</strong>
         </div>
         <div className="hm-hermes-stream hm-activity-stream" ref={streamRef} aria-live="polite">
-          {activity.map((entry) => (
-            <ActivityEntryRow
-              entry={entry}
-              onCardClick={onCardClick}
-              onUseInComposer={fillComposer}
-              key={entry.id}
-            />
-          ))}
+          {roomThreads.length > 0 ? (
+            roomThreads.map((thread) => (
+              <RoomThreadBlock
+                thread={thread}
+                onCardClick={onCardClick}
+                key={thread.key}
+              />
+            ))
+          ) : (
+            <RoomEmptyState />
+          )}
+          <BoardSummaryRow
+            banner={boardBanner}
+            onCardClick={onCardClick}
+          />
         </div>
       </section>
 
@@ -173,7 +167,7 @@ export function CoPilotRail({
         onSpawnMission={onSpawnMission}
         onSpawnClaudeTask={onSpawnClaudeTask}
         onCreateTask={onCreateTask}
-        onAsk={(text, opts) => ask(text, opts?.scope === "board" ? undefined : relatedPr)}
+        onAsk={(text, opts) => ask(text, opts?.scope === "board" ? undefined : relatedPr, opts?.target ?? "everyone")}
         onMute={onMute}
         onUnmute={onUnmute}
         muted={muted}
@@ -190,6 +184,216 @@ export function CoPilotRail({
       />
     </aside>
   );
+}
+
+interface RoomThread {
+  key: string;
+  label: string;
+  cardId?: string;
+  latestTs: number;
+  turns: CollaborationMessage[];
+}
+
+const ROOM_THREAD_STYLE: CSSProperties = {
+  display: "grid",
+  gap: 8,
+  padding: 8,
+  border: "1px solid var(--hm-line)",
+  borderRadius: 8,
+  background: "rgba(255, 253, 247, 0.7)",
+};
+
+const ROOM_THREAD_HEAD_STYLE: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  minWidth: 0,
+  color: "var(--hm-muted)",
+  fontSize: 11,
+  textTransform: "uppercase",
+  letterSpacing: ".08em",
+};
+
+const ROOM_THREAD_LABEL_STYLE: CSSProperties = {
+  flex: "1 1 auto",
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const ROOM_EMPTY_STYLE: CSSProperties = { opacity: 0.78 };
+const BOARD_SUMMARY_STYLE: CSSProperties = { opacity: 0.86 };
+
+function buildRoomThreads(messages: readonly CollaborationMessage[], cards: readonly BoardCard[]): RoomThread[] {
+  const threads = new Map<string, RoomThread>();
+  const sorted = [...messages].sort((a, b) => a.ts - b.ts);
+  for (const message of sorted) {
+    const key = threadKeyForMessage(message);
+    const existing = threads.get(key);
+    const label = threadLabelForMessage(message);
+    const cardId = cardIdForMessage(message, cards);
+    if (existing) {
+      existing.turns.push(message);
+      existing.latestTs = Math.max(existing.latestTs, message.ts);
+      if (!existing.cardId && cardId) existing.cardId = cardId;
+    } else {
+      threads.set(key, {
+        key,
+        label,
+        ...(cardId ? { cardId } : {}),
+        latestTs: message.ts,
+        turns: [message],
+      });
+    }
+  }
+  return [...threads.values()].sort((a, b) => a.latestTs - b.latestTs);
+}
+
+function threadKeyForMessage(message: CollaborationMessage): string {
+  if (message.relatedPr) return `pr:${message.relatedPr.repo}#${message.relatedPr.number}`;
+  if (message.relatedCorrelationId) return `correlation:${message.relatedCorrelationId}`;
+  return "room:whole-board";
+}
+
+function threadLabelForMessage(message: CollaborationMessage): string {
+  if (message.relatedPr) return `${message.relatedPr.repo} #${message.relatedPr.number}`;
+  if (message.relatedCorrelationId) return message.relatedCorrelationId;
+  return "Whole board";
+}
+
+function cardIdForMessage(message: CollaborationMessage, cards: readonly BoardCard[]): string | undefined {
+  if (message.relatedPr) {
+    const messagePr = message.relatedPr;
+    const card = cards.find((candidate) => {
+      const cardPr = relatedPrForCard(candidate);
+      return cardPr?.repo === messagePr.repo && cardPr.number === messagePr.number;
+    });
+    if (card) return card.id;
+  }
+  if (message.relatedCorrelationId) {
+    const card = cards.find((candidate) => (
+      candidate.id === message.relatedCorrelationId || candidate.correlationId === message.relatedCorrelationId
+    ));
+    if (card) return card.id;
+  }
+  return undefined;
+}
+
+function RoomThreadBlock({
+  thread,
+  onCardClick,
+}: {
+  thread: RoomThread;
+  onCardClick?: (id: string) => void;
+}) {
+  return (
+    <div
+      className="hm-room-thread"
+      style={ROOM_THREAD_STYLE}
+    >
+      <div
+        className="hm-room-thread-head"
+        style={ROOM_THREAD_HEAD_STYLE}
+      >
+        <span style={ROOM_THREAD_LABEL_STYLE}>
+          Thread · {thread.label}
+        </span>
+        <span>{thread.turns.length} turn{thread.turns.length === 1 ? "" : "s"}</span>
+      </div>
+      {thread.cardId ? (
+        <ActivityPin cardId={thread.cardId} onCardClick={onCardClick} />
+      ) : null}
+      {thread.turns.map((turn) => (
+        <HermesTurn
+          turn={turn}
+          onCardClick={onCardClick}
+          key={turn.id}
+        />
+      ))}
+    </div>
+  );
+}
+
+function RoomEmptyState() {
+  return (
+    <div
+      className="hm-turn hm-turn--system hm-turn--kind-status"
+      style={ROOM_EMPTY_STYLE}
+    >
+      <div className="hm-turn-head">
+        <span className="hm-turn-actor">
+          <span className="actor-dot" aria-hidden />
+          Room
+        </span>
+        <span className="hm-turn-kind">· empty</span>
+      </div>
+      <div className="hm-turn-body">
+        No agent chatter yet.
+        <small>Real Hermes, Codex, Claude, and specialist turns will appear here when recorded.</small>
+      </div>
+    </div>
+  );
+}
+
+function BoardSummaryRow({
+  banner,
+  onCardClick,
+}: {
+  banner?: BoardNowBannerData;
+  onCardClick?: (id: string) => void;
+}) {
+  const summary = boardSummaryCopy(banner);
+  return (
+    <div className="hm-turn hm-turn--system hm-turn--kind-status" style={BOARD_SUMMARY_STYLE}>
+      <div className="hm-turn-head">
+        <span className="hm-turn-actor">
+          <span className="actor-dot" aria-hidden />
+          Board
+        </span>
+        <span className="hm-turn-kind">· current summary</span>
+        <span className="hm-turn-time">{formatTurnTime(Date.now())}</span>
+      </div>
+      <div className="hm-turn-body">
+        <b>{summary.headline}:</b> {summary.text}
+        {banner?.sub ? <small>{banner.sub}</small> : null}
+      </div>
+      {banner?.primaryActionId ? (
+        <ActivityPin cardId={banner.primaryActionId} onCardClick={onCardClick} />
+      ) : null}
+    </div>
+  );
+}
+
+function boardSummaryCopy(banner: BoardNowBannerData | undefined): { headline: string; text: string } {
+  if (!banner) {
+    return {
+      headline: "Board summary",
+      text: "No current board summary was provided to the rail.",
+    };
+  }
+  if (banner.tone === "action") {
+    return {
+      headline: "Needs you",
+      text: `Operator review is waiting${banner.primaryActionId ? ` on ${banner.primaryActionId}` : " in the action lane"}.`,
+    };
+  }
+  if (banner.tone === "degraded") {
+    return {
+      headline: "Freshness warning",
+      text: "Reconnect or verify freshness before approving board state.",
+    };
+  }
+  if (banner.tone === "hermes-focus") {
+    return {
+      headline: "Active review thread",
+      text: `A scoped review conversation is active${banner.primaryActionId ? ` on ${banner.primaryActionId}` : ""}.`,
+    };
+  }
+  return {
+    headline: "Nothing urgent",
+    text: "No operator decision is waiting in the room right now.",
+  };
 }
 
 function hasScopedConversation(messages: readonly CollaborationMessage[], card: BoardCard | undefined): boolean {
@@ -213,53 +417,6 @@ function messageMatchesCard(message: CollaborationMessage, card: BoardCard): boo
   }
   const correlation = card.correlationId ?? card.id;
   return Boolean(message.relatedCorrelationId && message.relatedCorrelationId === correlation);
-}
-
-function ActivityEntryRow({
-  entry,
-  onCardClick,
-  onUseInComposer,
-}: {
-  entry: HermesActivityEntry;
-  onCardClick?: (id: string) => void;
-  onUseInComposer?: (text: string) => void;
-}) {
-  return (
-    <div className={`hm-turn hm-turn--${entry.actor} hm-turn--activity-${entry.tone}`}>
-      <div className="hm-turn-head">
-        <span className="hm-turn-actor">
-          <span className="actor-dot" aria-hidden />
-          {entry.actorDisplay ?? actorLabel(entry.actor)}
-        </span>
-        <span className="hm-turn-kind">· {entry.kindLabel}</span>
-        <span className="hm-turn-time">{formatTurnTime(entry.atMs)}</span>
-      </div>
-      <div className="hm-turn-body">
-        {entry.text}
-        {entry.meta ? <small>{entry.meta}</small> : null}
-      </div>
-      {entry.cardId ? (
-        <ActivityPin
-          cardId={entry.cardId}
-          onCardClick={onCardClick}
-        />
-      ) : null}
-      {onUseInComposer && entry.suggestions?.length ? (
-        <div className="hm-turn-actions" aria-label="Suggested prompts">
-          {entry.suggestions.map((suggestion) => (
-            <button
-              type="button"
-              className="hm-turn-suggest"
-              onClick={() => onUseInComposer(suggestion)}
-              key={suggestion}
-            >
-              {suggestion}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
 }
 
 function ActivityPin({

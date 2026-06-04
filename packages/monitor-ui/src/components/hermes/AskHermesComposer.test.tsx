@@ -81,7 +81,7 @@ describe("AskHermesComposer", () => {
     type(input, "what's blocking #548?");
     fireEvent.click(getByRole("button", { name: /Send/ }));
     // No focused card → the question is board-scoped.
-    expect(onAsk).toHaveBeenCalledWith("what's blocking #548?", { scope: "board" });
+    expect(onAsk).toHaveBeenCalledWith("what's blocking #548?", { scope: "board", target: "everyone" });
     expect(input.value).toBe("");
   });
 
@@ -169,18 +169,23 @@ describe("AskHermesComposer — G3 compose chips + prefill", () => {
     // Default: scoped to the focused card.
     type(input, "why did this fail?");
     fireEvent.click(getByRole("button", { name: /Send/ }));
-    expect(onAsk).toHaveBeenLastCalledWith("why did this fail?", { scope: "card" });
+    expect(onAsk).toHaveBeenLastCalledWith("why did this fail?", { scope: "card", target: "everyone" });
     // Toggle the scope chip → whole board.
     fireEvent.click(getByText(/^scope ·/).closest("button") as HTMLElement);
     type(input, "board status?");
     fireEvent.click(getByRole("button", { name: /Send/ }));
-    expect(onAsk).toHaveBeenLastCalledWith("board status?", { scope: "board" });
+    expect(onAsk).toHaveBeenLastCalledWith("board status?", { scope: "board", target: "everyone" });
   });
 
-  test("the 'to' chip is an honest recipient label, not a fake toggle", () => {
-    const { getByText } = render(<AskHermesComposer onAsk={vi.fn()} />);
-    const to = getByText("to · Hermes");
-    expect(to.tagName).toBe("SPAN"); // informational, not a button
+  test("the target selector sends a question to a chosen agent", () => {
+    const onAsk = vi.fn();
+    const { container, getByLabelText, getByRole } = render(<AskHermesComposer onAsk={onAsk} />);
+    const target = getByLabelText("Message target") as HTMLSelectElement;
+    fireEvent.change(target, { target: { value: "codex" } });
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    type(input, "can you inspect the failing card?");
+    fireEvent.click(getByRole("button", { name: /Send/ }));
+    expect(onAsk).toHaveBeenCalledWith("can you inspect the failing card?", { scope: "board", target: "codex" });
   });
 
   test("prefill drops suggestion text into the composer when the token bumps", () => {

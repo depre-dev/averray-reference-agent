@@ -18,7 +18,7 @@ const base: CollaborationMessage = {
 describe("HermesTurn", () => {
   test("renders actor label, kind, and body", () => {
     const { container, getByText } = render(<HermesTurn turn={base} />);
-    expect(getByText("Hermes")).toBeTruthy();
+    expect(getByText("Hermes → You")).toBeTruthy();
     expect(getByText(/status/)).toBeTruthy();
     expect(getByText("Pre-check passed on #548.")).toBeTruthy();
     expect((container.querySelector(".hm-turn") as HTMLElement).className).toContain("hm-turn--hermes");
@@ -26,24 +26,33 @@ describe("HermesTurn", () => {
 
   test("labels live and templated Hermes turns honestly", () => {
     const live = render(<HermesTurn turn={{ ...base, id: "live", hermesMode: "live" }} />);
-    expect(live.getByText("Hermes (live)")).toBeTruthy();
+    expect(live.getByText("Hermes (live) → You")).toBeTruthy();
     live.unmount();
 
     const templated = render(<HermesTurn turn={{ ...base, id: "templated", hermesMode: "templated" }} />);
-    expect(templated.getByText("Hermes (offline — templated)")).toBeTruthy();
+    expect(templated.getByText("Hermes (offline — templated) → You")).toBeTruthy();
   });
 
-  test("operator turns are labelled Pascal", () => {
+  test("operator turns are labelled as You", () => {
     const { getByText } = render(<HermesTurn turn={{ ...base, id: "2", author: "operator" }} />);
-    expect(getByText("Pascal")).toBeTruthy();
+    expect(getByText("You → You")).toBeTruthy();
   });
 
   test("Claude turns are attributed as agent messages", () => {
     const { container, getByText } = render(
       <HermesTurn turn={{ ...base, id: "claude-1", author: "claude", addressedTo: "codex" }} />,
     );
-    expect(getByText("Claude")).toBeTruthy();
+    expect(getByText("Claude → Codex")).toBeTruthy();
     expect((container.querySelector(".hm-turn") as HTMLElement).className).toContain("hm-turn--claude");
+  });
+
+  test("ranks request-help turns as prominent and status turns as muted", () => {
+    const help = render(<HermesTurn turn={{ ...base, id: "help", kind: "request_help" }} />);
+    expect((help.container.querySelector(".hm-turn") as HTMLElement).className).toContain("hm-turn--rank-prominent");
+    help.unmount();
+
+    const status = render(<HermesTurn turn={{ ...base, id: "status", kind: "status" }} />);
+    expect((status.container.querySelector(".hm-turn") as HTMLElement).className).toContain("hm-turn--rank-muted");
   });
 
   test("a relatedPr renders a real GitHub PR link", () => {
