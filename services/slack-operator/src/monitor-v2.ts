@@ -28,11 +28,14 @@ import {
   type LlmUsageAggregate,
   type LlmUsageEvent,
 } from "@avg/averray-mcp/llm-usage";
+import { buildAgentScorecard } from "@avg/averray-mcp/agent-scorecard";
 import type { TestbedSuite } from "./monitor-testbed-suites.js";
 import type {
   HermesBoardCardSnapshot,
   HermesBoardSnapshot,
 } from "./monitor-hermes-voice.js";
+import type { CodexRunnerHeartbeat, CodexTask } from "./codex-task-queue.js";
+import { summarizeTaskHealth, type TaskHealthDiagnostics } from "./task-health.js";
 import {
   testbedMissionStructuredReport,
   type TestbedMissionRun,
@@ -354,16 +357,40 @@ export type BoardCardStreamEvent =
   | { type: "board.card.archived"; id: string; fromLane?: Lane; at: string };
 
 export interface AutomationHealth {
+  /** Whether task-queue backed automation counts are known for this snapshot. */
+  sourceStatus: "ok" | "degraded";
   /** Non-terminal self-healing fix proposals currently open. */
-  selfHealingOpen: number;
+  selfHealingOpen: number | null;
   /** Hermes/system-managed task proposals created today. */
-  dispatchUsedToday: number;
+  dispatchUsedToday: number | null;
   /** Same cap used by the dispatch/self-healing backstops. */
   dispatchPerDayCap: number;
   /** Slack-only capacity/escalation signals kept off the decision lanes. */
-  quietSignalCount: number;
-  selfHealingCapacitySignals: number;
-  taskHealthCapacitySignals: number;
+  quietSignalCount: number | null;
+  selfHealingCapacitySignals: number | null;
+  taskHealthCapacitySignals: number | null;
+  /** O5 read-only task health summary: stuck means runner evidence says the task is not actually progressing. */
+  taskHealth: TaskHealthDiagnostics;
+  /** ORCH-P4c routing memory summary for auditability; hard taxonomy/policy still win. */
+  routing: {
+    status: "baseline_available" | "insufficient_data" | "unknown";
+    decisionsToday: number | null;
+    surfaces: number | null;
+    baselineSurfaces: number | null;
+    insufficientSurfaces: number | null;
+    top?: {
+      surface: string;
+      agent: string;
+      score: number;
+      samples: number;
+    };
+  };
+  guardrails: {
+    dispatchPolicy: "enforced";
+    haltInterlock: "enforced";
+    anomalyPause: "enforced";
+    authority: "human_merge_gate";
+  };
 }
 
 // ── Lane normalization ──────────────────────────────────────────────
@@ -2156,31 +2183,124 @@ interface AutomationCapacitySignalCounts {
 export function automationHealthForBoard(
   rawSnapshot: unknown,
   now: Date = new Date(),
-  env: { HERMES_DISPATCH_PER_DAY_MAX?: string | undefined } = process.env,
+  env: {
+    HERMES_DISPATCH_PER_DAY_MAX?: string | undefined;
+    O5_TASK_HEALTH_RESTART_RECOVERY_MINUTES?: string | undefined;
+  } = process.env,
   capacitySignals: AutomationCapacitySignalCounts = {},
 ): AutomationHealth {
   const selfHealingCapacitySignals = Math.max(0, Math.floor(capacitySignals.selfHealingCapacitySignals ?? 0));
   const taskHealthCapacitySignals = Math.max(0, Math.floor(capacitySignals.taskHealthCapacitySignals ?? 0));
   const quietSignalCount = selfHealingCapacitySignals + taskHealthCapacitySignals;
-  const tasks = asArray(asRecord(asRecord(rawSnapshot)?.codexTasks)?.items)
+  const root = asRecord(rawSnapshot);
+  const codexTasks = asRecord(root?.codexTasks);
+  const sourceAvailable = Array.isArray(codexTasks?.items);
+  const tasks = asArray(codexTasks?.items)
     .map(asRecord)
     .filter((task): task is Record<string, unknown> => Boolean(task));
   const today = now.toISOString().slice(0, 10);
-  const selfHealingOpen = tasks.filter((task) =>
+  const selfHealingOpen = sourceAvailable ? tasks.filter((task) =>
     asString(task.requester) === "hermes-self-healing"
     && !AUTOMATION_TERMINAL_TASK_STATUSES.has(asString(task.status) ?? "")
-  ).length;
-  const dispatchUsedToday = tasks.filter((task) =>
+  ).length : null;
+  const dispatchUsedToday = sourceAvailable ? tasks.filter((task) =>
     isAutomationDispatchTask(task)
     && asString(task.createdAt)?.slice(0, 10) === today
-  ).length;
+  ).length : null;
   return {
+    sourceStatus: sourceAvailable ? "ok" : "degraded",
     selfHealingOpen,
     dispatchUsedToday,
     dispatchPerDayCap: dispatchPerDayCap(env),
     quietSignalCount,
     selfHealingCapacitySignals,
     taskHealthCapacitySignals,
+    taskHealth: summarizeTaskHealth(tasks as unknown as CodexTask[], {
+      config: { restartRecoveryMs: taskHealthRestartRecoveryMs(env) },
+      now,
+      runner: sourceAvailable ? runnerFromSummary(codexTasks?.runner) : undefined,
+      sourceAvailable,
+    }),
+    routing: routingDiagnosticsForBoard(tasks, rawSnapshot, now, sourceAvailable),
+    guardrails: {
+      dispatchPolicy: "enforced",
+      haltInterlock: "enforced",
+      anomalyPause: "enforced",
+      authority: "human_merge_gate",
+    },
+  };
+}
+
+function runnerFromSummary(value: unknown): CodexRunnerHeartbeat | undefined {
+  const runner = asRecord(value);
+  if (!runner) return undefined;
+  const runnerId = asString(runner.runnerId);
+  const status = asString(runner.status);
+  const message = asString(runner.message);
+  const updatedAt = asString(runner.updatedAt);
+  if (!runnerId || !status || !message || !updatedAt) return undefined;
+  return {
+    schemaVersion: 1,
+    kind: "codex_runner_heartbeat",
+    runnerId,
+    status: status as CodexRunnerHeartbeat["status"],
+    message,
+    updatedAt,
+    ...(asString(runner.activeTaskId) ? { activeTaskId: asString(runner.activeTaskId) } : {}),
+  };
+}
+
+function taskHealthRestartRecoveryMs(env: { O5_TASK_HEALTH_RESTART_RECOVERY_MINUTES?: string | undefined }): number {
+  const parsed = Number.parseInt(env.O5_TASK_HEALTH_RESTART_RECOVERY_MINUTES ?? "", 10);
+  const minutes = Number.isFinite(parsed) && parsed > 0 ? parsed : 10;
+  return Math.max(60_000, minutes * 60_000);
+}
+
+function routingDiagnosticsForBoard(
+  tasks: Record<string, unknown>[],
+  rawSnapshot: unknown,
+  now: Date,
+  sourceAvailable: boolean,
+): AutomationHealth["routing"] {
+  if (!sourceAvailable) {
+    return {
+      status: "unknown",
+      decisionsToday: null,
+      surfaces: null,
+      baselineSurfaces: null,
+      insufficientSurfaces: null,
+    };
+  }
+  const today = now.toISOString().slice(0, 10);
+  const decisionsToday = tasks.filter((task) =>
+    isAutomationDispatchTask(task)
+    && asString(task.createdAt)?.slice(0, 10) === today
+    && Boolean(asString(task.routingReason) || asRecord(task.decisionRecord))
+  ).length;
+  const scorecard = buildAgentScorecard(rawSnapshot, { now });
+  const routingMemory = asRecord(scorecard.routingMemory);
+  const scores = asArray(routingMemory?.scores)
+    .map(asRecord)
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+  const baselineScores = scores.filter((score) => asString(score.status) === "baseline_available");
+  const insufficientScores = scores.filter((score) => asString(score.status) === "insufficient_data");
+  const surfaceCount = new Set(scores.map((score) => asString(score.surface)).filter(Boolean)).size;
+  const top = baselineScores
+    .map((score) => ({
+      surface: asString(score.surface) ?? "unknown",
+      agent: asString(score.agent) ?? "unknown",
+      score: asFiniteNumber(score.score) ?? 0,
+      samples: asFiniteNumber(score.samples) ?? 0,
+    }))
+    .filter((score) => Number.isFinite(score.score) && score.score > 0)
+    .sort((a, b) => b.score - a.score || b.samples - a.samples)[0];
+  return {
+    status: baselineScores.length > 0 ? "baseline_available" : "insufficient_data",
+    decisionsToday,
+    surfaces: surfaceCount,
+    baselineSurfaces: baselineScores.length,
+    insufficientSurfaces: insufficientScores.length,
+    ...(top ? { top } : {}),
   };
 }
 

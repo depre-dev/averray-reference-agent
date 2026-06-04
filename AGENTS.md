@@ -122,6 +122,13 @@ TypeScript monorepo: npm workspaces (`packages/*`, `services/*`), Node ≥ 22, E
   (high-risk surface, any rollback, or while D3-suspended / HALT is set; rollback
   is always operator-confirmed). Deduped + cooldown'd; depends on D3 as the loop
   fail-safe. Same invariant #6 guardrail — it only proposes.
+- **Self-management health (ORCH-P5).** Task-health may requeue failed/stale
+  tasks only within its configured retry cap and only through the same dispatch
+  policy, D3, and `HALT_FILE` gates; when the cap is spent, a runner heartbeat is
+  missing/stale, or a task target is not code-fixable, it escalates to
+  needs-attention instead of looping. The monitor's automation diagnostics are
+  read-only: they expose real retry/stuck/routing/budget state, mark unavailable
+  sources as unknown (`?`), and do not approve, merge, deploy, or create work.
 - **Hermes router (ORCH-P4b, off by default).** When
   `HERMES_ROUTER_ENABLED=1`, Hermes may turn the roadmap-backed backlog plan into
   proposed Codex/Claude tasks and narrate why in the monitor co-pilot rail. It

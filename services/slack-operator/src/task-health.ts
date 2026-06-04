@@ -36,6 +36,26 @@ export interface TaskHealthResult {
   actions: TaskHealthAction[];
 }
 
+export type TaskHealthDiagnosticStatus =
+  | "ok"
+  | "stuck"
+  | "degraded"
+  | "unknown";
+
+export interface TaskHealthDiagnostics {
+  status: TaskHealthDiagnosticStatus;
+  runningTasks: number;
+  stuckTasks: number;
+  retryWaitingTasks: number;
+  escalatedTasks: number;
+  runner: {
+    status: "online" | "missing" | "stale" | "unavailable" | "unknown";
+    reason: string;
+    activeTaskId?: string;
+    ageMs?: number;
+  };
+}
+
 const TERMINAL_NO_ACTION = new Set(["completed", "cancelled"]);
 
 export async function runTaskHealthOnce(
@@ -72,6 +92,65 @@ export async function runTaskHealthOnce(
   }
 
   return { actions };
+}
+
+export function summarizeTaskHealth(
+  tasks: CodexTask[],
+  ctx: {
+    config: Pick<TaskHealthConfig, "restartRecoveryMs">;
+    now: Date;
+    runner?: CodexRunnerHeartbeat;
+    sourceAvailable?: boolean;
+  },
+): TaskHealthDiagnostics {
+  if (ctx.sourceAvailable === false) {
+    return {
+      status: "unknown",
+      runningTasks: 0,
+      stuckTasks: 0,
+      retryWaitingTasks: 0,
+      escalatedTasks: 0,
+      runner: { status: "unknown", reason: "task_queue_unavailable" },
+    };
+  }
+
+  let runningTasks = 0;
+  let stuckTasks = 0;
+  let retryWaitingTasks = 0;
+  let escalatedTasks = 0;
+
+  for (const task of tasks) {
+    if (task.selfManagementEscalatedAt) escalatedTasks += 1;
+    if (task.status === "failed") {
+      const retryAfter = parseDate(task.retryAfter);
+      if (retryAfter && retryAfter.getTime() > ctx.now.getTime()) retryWaitingTasks += 1;
+    }
+    if (task.status !== "running") continue;
+    runningTasks += 1;
+    const staleAgeMs = ageMs(task.progressAt ?? task.startedAt ?? task.updatedAt, ctx.now);
+    const runner = runnerStateForTask(task, ctx.runner, ctx.now);
+    if (runner.unavailable && staleAgeMs >= ctx.config.restartRecoveryMs) {
+      stuckTasks += 1;
+    }
+  }
+
+  const runner = runnerSummary(ctx.runner, ctx.now);
+  const status: TaskHealthDiagnosticStatus = stuckTasks > 0
+    ? "stuck"
+    : runner.status === "missing" && runningTasks > 0
+      ? "degraded"
+      : runner.status === "stale" || runner.status === "unavailable"
+        ? "degraded"
+        : "ok";
+
+  return {
+    status,
+    runningTasks,
+    stuckTasks,
+    retryWaitingTasks,
+    escalatedTasks,
+    runner,
+  };
 }
 
 export async function decideTaskHealthAction(
@@ -162,13 +241,54 @@ function runnerStateForTask(
   task: CodexTask,
   runner: CodexRunnerHeartbeat | undefined,
   now: Date,
-): { unavailable: boolean; activeTaskMismatch: boolean } {
-  if (!runner) return { unavailable: true, activeTaskMismatch: false };
+): { unavailable: boolean; activeTaskMismatch: boolean; reason: string } {
+  if (!runner) return { unavailable: true, activeTaskMismatch: false, reason: "runner_missing" };
   const heartbeatAgeMs = ageMs(runner.updatedAt, now);
   const stale = heartbeatAgeMs > 90_000;
   const unavailable = stale || runner.status === "disabled" || runner.status === "misconfigured" || runner.status === "error" || runner.status === "failed";
   const activeTaskMismatch = Boolean(runner.activeTaskId && runner.activeTaskId !== task.id);
-  return { unavailable: unavailable || activeTaskMismatch, activeTaskMismatch };
+  return {
+    unavailable: unavailable || activeTaskMismatch,
+    activeTaskMismatch,
+    reason: activeTaskMismatch
+      ? "active_task_mismatch"
+      : stale
+        ? "runner_heartbeat_stale"
+        : unavailable
+          ? `runner_${runner.status}`
+          : "runner_available",
+  };
+}
+
+function runnerSummary(
+  runner: CodexRunnerHeartbeat | undefined,
+  now: Date,
+): TaskHealthDiagnostics["runner"] {
+  if (!runner) return { status: "missing", reason: "no_runner_heartbeat" };
+  const runnerAgeMs = ageMs(runner.updatedAt, now);
+  const stale = runnerAgeMs > 90_000;
+  if (stale) {
+    return {
+      status: "stale",
+      reason: "runner_heartbeat_stale",
+      activeTaskId: runner.activeTaskId,
+      ageMs: runnerAgeMs,
+    };
+  }
+  if (runner.status === "disabled" || runner.status === "misconfigured" || runner.status === "error" || runner.status === "failed") {
+    return {
+      status: "unavailable",
+      reason: `runner_${runner.status}`,
+      activeTaskId: runner.activeTaskId,
+      ageMs: runnerAgeMs,
+    };
+  }
+  return {
+    status: "online",
+    reason: `runner_${runner.status}`,
+    activeTaskId: runner.activeTaskId,
+    ageMs: runnerAgeMs,
+  };
 }
 
 function ageMs(value: string | undefined, now: Date): number {

@@ -22,12 +22,45 @@ export interface MonitorBoard {
 }
 
 export interface AutomationHealth {
-  selfHealingOpen: number;
-  dispatchUsedToday: number;
+  sourceStatus?: "ok" | "degraded";
+  selfHealingOpen: number | null;
+  dispatchUsedToday: number | null;
   dispatchPerDayCap: number;
-  quietSignalCount?: number;
-  selfHealingCapacitySignals?: number;
-  taskHealthCapacitySignals?: number;
+  quietSignalCount?: number | null;
+  selfHealingCapacitySignals?: number | null;
+  taskHealthCapacitySignals?: number | null;
+  taskHealth?: {
+    status: "ok" | "stuck" | "degraded" | "unknown";
+    runningTasks: number;
+    stuckTasks: number;
+    retryWaitingTasks: number;
+    escalatedTasks: number;
+    runner: {
+      status: "online" | "missing" | "stale" | "unavailable" | "unknown";
+      reason: string;
+      activeTaskId?: string;
+      ageMs?: number;
+    };
+  };
+  routing?: {
+    status: "baseline_available" | "insufficient_data" | "unknown";
+    decisionsToday: number | null;
+    surfaces: number | null;
+    baselineSurfaces: number | null;
+    insufficientSurfaces: number | null;
+    top?: {
+      surface: string;
+      agent: string;
+      score: number;
+      samples: number;
+    };
+  };
+  guardrails?: {
+    dispatchPolicy: "enforced";
+    haltInterlock: "enforced";
+    anomalyPause: "enforced";
+    authority: "human_merge_gate";
+  };
 }
 
 export interface LlmUsageModelRollup {
@@ -177,8 +210,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isAutomationHealth(value: unknown): value is AutomationHealth {
   if (!isRecord(value)) return false;
-  return Number.isFinite(value.selfHealingOpen)
-    && Number.isFinite(value.dispatchUsedToday)
+  const selfHealingKnown = value.selfHealingOpen === null || Number.isFinite(value.selfHealingOpen);
+  const dispatchKnown = value.dispatchUsedToday === null || Number.isFinite(value.dispatchUsedToday);
+  return selfHealingKnown
+    && dispatchKnown
     && Number.isFinite(value.dispatchPerDayCap);
 }
 
