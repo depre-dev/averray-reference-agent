@@ -467,9 +467,15 @@ export function BoardView({
     if (onCreateTask) {
       a.onCreateProductFix = (card) => {
         const report = missionReportText(card);
+        // Testbed mission cards carry the synthetic repo "testbed/mission",
+        // which is not a real GitHub repo and can't be cloned — the runner
+        // rejects it, so the proposed task is un-buildable. A tester finding's
+        // fix lives in the reference-agent (the adapter/workflow code), so
+        // route the product-fix task there instead of the mission's repo.
+        const repo = card.repo === "testbed/mission" ? "depre-dev/averray-reference-agent" : card.repo;
         onCreateTask({
           agent: "claude", // greenfield product fix — the worker opens its own PR
-          repo: card.repo,
+          repo,
           prompt: `Product fix proposed from a failed testbed mission.\n\n${card.title}\n\n${report ?? card.summary}`,
         });
       };
