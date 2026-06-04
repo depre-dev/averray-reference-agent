@@ -20,20 +20,26 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(container.querySelector(".hm-now--action")).toBeTruthy();
     expect(view.getByText(/your review decision/)).toBeTruthy();
     expect(view.getByText("sorted by next-action urgency")).toBeTruthy();
-    expect(view.getByRole("region", { name: "Lane grid" })).toBeTruthy();
+    expect(view.getByRole("region", { name: "DECIDE" })).toBeTruthy();
+    expect(view.getByRole("region", { name: "WATCH" })).toBeTruthy();
+    expect(view.getByRole("region", { name: "HIDE" })).toBeTruthy();
     expect(container.querySelectorAll(".hm-lane").length).toBe(8);
     expect(view.getByRole("complementary", { name: "Hermes co-pilot" })).toBeTruthy();
   });
 
-  test("every lane that holds cards is expanded; only empty lanes stay mini-rails", () => {
+  test("DECIDE/WATCH stay expanded while HIDE lanes collapse to reachable mini-rails", () => {
     const { container } = render(<BoardView board={richBoard} status="open" />);
-    // 7 of 8 lanes hold cards after grouping (the lone operator-review PR is an
-    // action card, promoted to needs-attention) → 7 expanded, 1 empty rail.
-    expect(container.querySelectorAll("section.hm-lane").length).toBe(7);
-    expect(container.querySelectorAll(".hm-lane--collapsed").length).toBe(1);
-    // drafts/codex-needed hold cards but aren't in the action preset — pre-fix
-    // they were hidden behind rails; now their card bodies render.
-    expect(within(container).getByText(/governance dispute UI/)).toBeTruthy();
+    const view = within(container);
+    expect(view.getByRole("region", { name: "Needs attention lane" })).toBeTruthy();
+    expect(view.getByRole("region", { name: "Codex needed lane" })).toBeTruthy();
+    expect(view.getByRole("region", { name: "Hermes checking lane" })).toBeTruthy();
+    expect(view.getByRole("region", { name: "Deploying lane" })).toBeTruthy();
+    expect(container.querySelectorAll("section.hm-lane").length).toBe(4);
+    expect(container.querySelectorAll(".hm-lane--collapsed").length).toBe(4);
+
+    expect(view.queryByText(/governance dispute UI/)).toBeNull();
+    fireEvent.click(view.getByRole("button", { name: /Drafts \(1 card\)/ }));
+    expect(view.getByText(/governance dispute UI/)).toBeTruthy();
   });
 
   test("renders the action card with one primary and Hermes verdict", () => {
@@ -94,6 +100,7 @@ describe("BoardView — rich-mix board (open stream)", () => {
     const view = within(container);
     expect(view.getByText("Verify onboarding flow on staging.averray.com")).toBeTruthy();
     expect(view.getByText(/Post-merge verify/)).toBeTruthy();
+    fireEvent.click(view.getByRole("button", { name: /Done \(11 cards\)/ }));
     expect(view.getAllByText("CLOSED").length).toBeGreaterThan(0);
   });
 
@@ -118,6 +125,7 @@ describe("BoardView — rich-mix board (open stream)", () => {
     };
     const { getByText, getByRole } = render(<BoardView board={board} status="open" onRunSuite={onRunSuite} keyboard={false} />);
 
+    fireEvent.click(getByRole("button", { name: /Utilities/ }));
     expect(getByText("Daily app sweep")).toBeTruthy();
     expect(getByText("pass")).toBeTruthy();
     expect(getByText("1 runs")).toBeTruthy();
@@ -140,6 +148,7 @@ describe("BoardView — rich-mix board (open stream)", () => {
       />,
     );
 
+    fireEvent.click(getByRole("button", { name: /Utilities/ }));
     fireEvent.click(getByRole("button", { name: "Start a mission" }));
     fireEvent.change(getByLabelText("Target"), { target: { value: "https://app.averray.com/agents" } });
     fireEvent.click(getByLabelText(/Role Gating/));
@@ -219,9 +228,40 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(container.querySelector(".hm-now--calm")).toBeTruthy();
     // The deploying lane (in-flight automation) is expanded and shows its body…
     expect(within(container).getByText(/Post-merge verify/)).toBeTruthy();
-    expect(container.querySelectorAll("section.hm-lane").length).toBe(2); // deploying + done
-    // …and the six empty lanes are mini-rails — not everything-but-Done collapsed.
-    expect(container.querySelectorAll(".hm-lane--collapsed").length).toBe(6);
+    expect(container.querySelectorAll("section.hm-lane").length).toBe(1); // deploying
+    // …and empty/quiet lanes (including Done history) are mini-rails.
+    expect(container.querySelectorAll(".hm-lane--collapsed").length).toBe(7);
+  });
+
+  test("groups near-identical deploy verification cards without hiding attention cards", () => {
+    const board: MonitorBoard = {
+      at: "2026-06-02T08:00:00Z",
+      cards: [
+        deployCard({ id: "deploy-1", deployId: "#1", title: "post-production-deploy verification after workflow run #1" }),
+        deployCard({ id: "deploy-2", deployId: "#2", title: "post-production-deploy verification after workflow run #2" }),
+        deployCard({ id: "deploy-3", deployId: "#3", title: "post-production-deploy verification after workflow run #3" }),
+      ],
+    };
+    const { getByRole, getByText, queryAllByRole } = render(<BoardView board={board} status="open" keyboard={false} />);
+
+    expect(getByRole("group", { name: /post-production-deploy verification after workflow run #1 group/i })).toBeTruthy();
+    expect(getByText("3 similar")).toBeTruthy();
+    expect(queryAllByRole("article").length).toBe(0);
+
+    fireEvent.click(getByRole("button", { name: "Expand" }));
+    expect(queryAllByRole("article").length).toBe(3);
+  });
+
+  test("an attention lane stays visible even after a collapse attempt", () => {
+    const board: MonitorBoard = {
+      at: "2026-06-02T08:00:00Z",
+      cards: [reviewCard({ id: "agent #901", title: "Review the settlement risk" })],
+    };
+    const { getByRole, getByText } = render(<BoardView board={board} status="open" keyboard={false} />);
+
+    fireEvent.click(getByRole("button", { name: "Collapse Needs attention lane" }));
+    expect(getByRole("region", { name: "Needs attention lane" })).toBeTruthy();
+    expect(getByText("Review the settlement risk")).toBeTruthy();
   });
 
   test("calm banner CTA filters to today's done cards and mutes alerts for one hour", () => {
@@ -370,6 +410,7 @@ describe("BoardView — rich-mix board (open stream)", () => {
       },
     };
     const { getAllByText, getByRole, getByText, queryByText, queryAllByText } = render(<BoardView board={board} status="open" />);
+    fireEvent.click(getByRole("button", { name: /Utilities/ }));
     expect(getByRole("region", { name: "LLM usage" })).toBeTruthy();
     // Collapsed by default: leads with the headline (total tokens + call count)…
     expect(getByText("59K tokens · 12 calls")).toBeTruthy();
@@ -410,6 +451,7 @@ describe("BoardView — rich-mix board (open stream)", () => {
     };
 
     const { getByRole, getByText, queryByText } = render(<BoardView board={board} status="open" />);
+    fireEvent.click(getByRole("button", { name: /Utilities/ }));
     expect(getByRole("region", { name: "LLM usage" })).toBeTruthy();
     // The one-line summary states "usage not reported" honestly without expanding.
     expect(getByText("usage not reported")).toBeTruthy();
@@ -611,6 +653,25 @@ function doneCard(overrides: Partial<BoardCard> = {}): BoardCard {
     waitingOn: { actor: "CI", tone: "neutral" },
     closedAt: "2026-06-01T08:00:00.000Z",
     mergeStatus: "MERGED",
+    ...overrides,
+  } as BoardCard;
+}
+
+function deployCard(overrides: Partial<BoardCard> = {}): BoardCard {
+  return {
+    id: "deploy-1",
+    lane: "deploying",
+    type: "deploy",
+    agentType: "ext",
+    title: "post-production-deploy verification after workflow run",
+    summary: "Verification is running.",
+    repo: "depre-dev/averray-reference-agent",
+    freshness: 1,
+    state: "fresh",
+    risk: ["workflow"],
+    waitingOn: { actor: "relay", tone: "info" },
+    deployId: "#1",
+    verification: { current: 1, total: 3, label: "post-deploy smoke" },
     ...overrides,
   } as BoardCard;
 }

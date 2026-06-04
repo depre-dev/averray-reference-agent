@@ -12,18 +12,19 @@
 //     <div.hm-main>              grid: lanes-wrap | hermes rail (420px)
 //       <div.hm-lanes-wrap>
 //         <LanesBar />           search + filter chips + urgency label
-//         <Board renderCard />   the eight lanes, cards via <CardRouter>
+//         <UtilityBar />         collapsed tester / suites / LLM usage
+//         <BoardTier />          DECIDE / WATCH / HIDE lane groups
 //       <CoPilotRail />          live narration + Ask-Hermes
 //   <DetailDrawer />             when ?card= resolves
 //   <KeyboardOverlay />          when ? is pressed
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { deriveBoardState, matchesBoardFilter, type BoardMode, type BoardFilter } from "../lib/monitor/board-state.js";
 import type { LlmUsageAggregate, MonitorBoard } from "../lib/monitor/board-cache.js";
 import type { BacklogSuggestionsResponse } from "../lib/monitor/backlog-suggestions.js";
 import type { StreamStatus } from "../lib/monitor/live-stream.js";
 import { LANES, type BoardCard, type CreateTaskInput } from "../lib/monitor/card-types.js";
-import type { MissionSpawnInput, SaveTestSuiteInput } from "../lib/monitor/mission-launch.js";
+import type { MissionSpawnInput, SavedTestSuite, SaveTestSuiteInput } from "../lib/monitor/mission-launch.js";
 import { CreateTaskForm } from "./CreateTaskForm.js";
 import { StartMissionLauncher } from "./StartMissionLauncher.js";
 import { TestSuitesPanel } from "./TestSuitesPanel.js";
@@ -33,7 +34,7 @@ import { TopStrip } from "./TopStrip.js";
 import { TopStripDegraded } from "./TopStripDegraded.js";
 import { BoardNowBanner } from "./BoardNowBanner.js";
 import { LanesBar } from "./LanesBar.js";
-import { Board, CALM_EXPANDED, DEFAULT_EXPANDED } from "./Board.js";
+import { Board } from "./Board.js";
 import type { LaneId } from "./Lane.js";
 import { CardRouter } from "./cards/CardRouter.js";
 import { HermesCheckingBody } from "./HermesCheckingBody.js";
@@ -43,42 +44,56 @@ import { CoPilotRail } from "./hermes/CoPilotRail.js";
 import { KeyboardOverlay } from "./shortcuts/KeyboardOverlay.js";
 import type { UseCollaborationOptions } from "../hooks/useCollaboration.js";
 import { useBoardKeyboard } from "../hooks/useBoardKeyboard.js";
+import { Badge, Button } from "./ui.js";
 
 // laneFor() promotes every isAction card into needs-attention, so the
 // action preset expands that lane (not operator-review) to keep the
 // action treatment — verdict + CTA — on screen.
-const ACTION_EXPANDED: ReadonlySet<LaneId> = new Set<LaneId>([
-  "needs-attention",
-  "hermes-checking",
-  "release-queue",
-  "deploying",
-  "done",
-]);
 const OPERATOR_CARD_SNOOZE_MS = 30 * 60_000;
 
-function expandedForMode(mode: BoardMode): ReadonlySet<LaneId> {
-  if (mode === "calm") return CALM_EXPANDED;
-  if (mode === "degraded") return DEFAULT_EXPANDED;
-  return ACTION_EXPANDED;
-}
-
 const ALL_LANES = LANES as readonly LaneId[];
+const DECIDE_LANES = ["needs-attention", "operator-review"] as const satisfies readonly LaneId[];
+const WATCH_LANES = ["codex-needed", "hermes-checking", "deploying"] as const satisfies readonly LaneId[];
+const HIDE_LANES = ["drafts", "release-queue", "done"] as const satisfies readonly LaneId[];
 
 /** Lanes that currently hold at least one card. */
 function lanesWithCards(grouped: Partial<Record<LaneId, BoardCard[]>>): LaneId[] {
   return ALL_LANES.filter((lane) => (grouped[lane]?.length ?? 0) > 0);
 }
 
-// A lane with cards is always shown — only empty lanes collapse to rails. The
-// mode preset just decides which EMPTY lanes stay open (e.g. Done as release
-// history). This is why a calm board with automation in flight still shows
-// those lanes' cards instead of hiding everything but Done.
+function hasCards(grouped: Partial<Record<LaneId, BoardCard[]>>, lane: LaneId): boolean {
+  return (grouped[lane]?.length ?? 0) > 0;
+}
+
+function mustSurfaceCard(card: BoardCard): boolean {
+  const lane = laneFor(card);
+  return (
+    lane === "needs-attention" ||
+    lane === "operator-review" ||
+    card.isAction === true ||
+    card.state === "failed-fetch" ||
+    card.state === "source-offline"
+  );
+}
+
+function mustSurfaceLanes(grouped: Partial<Record<LaneId, BoardCard[]>>): LaneId[] {
+  return ALL_LANES.filter((lane) => (grouped[lane] ?? []).some(mustSurfaceCard));
+}
+
+// Operator-focus defaults: DECIDE + WATCH lanes with cards are open; quiet
+// history/author lanes stay reachable as rails unless a degraded/action card
+// forces them open. Filters still reveal matching lanes below.
 function expandedForBoard(
-  mode: BoardMode,
+  _mode: BoardMode,
   grouped: Partial<Record<LaneId, BoardCard[]>>,
   alwaysOpen: readonly LaneId[] = [],
 ): Set<LaneId> {
-  return new Set<LaneId>([...expandedForMode(mode), ...lanesWithCards(grouped), ...alwaysOpen]);
+  return new Set<LaneId>([
+    ...DECIDE_LANES.filter((lane) => hasCards(grouped, lane)),
+    ...WATCH_LANES.filter((lane) => hasCards(grouped, lane)),
+    ...mustSurfaceLanes(grouped),
+    ...alwaysOpen,
+  ]);
 }
 
 function matchesQuery(card: BoardCard, q: string): boolean {
@@ -294,6 +309,9 @@ export function BoardView({
     if (filter === "all") return expanded;
     return new Set(LANES.filter((lane) => (displayGrouped[lane]?.length ?? 0) > 0));
   }, [filter, expanded, displayGrouped]);
+  const surfacedExpanded = useMemo<ReadonlySet<LaneId>>(() => (
+    new Set<LaneId>([...effectiveExpanded, ...mustSurfaceLanes(displayGrouped), ...alwaysOpen])
+  ), [alwaysOpen, displayGrouped, effectiveExpanded]);
 
   const orderedCards = useMemo<BoardCard[]>(
     () => LANES.flatMap((lane) => displayGrouped[lane] ?? []),
@@ -321,6 +339,15 @@ export function BoardView({
       onKeepWatching={(c) => onKeepWatchingCard(c.id)}
     />
   );
+  const renderLaneBody = (id: LaneId, laneCards: BoardCard[]) => {
+    const groupedItems = groupLaneCards(id, laneCards);
+    const hasGroupedCards = groupedItems.some((item) => item.kind === "group");
+    if (id === "hermes-checking" && !hasGroupedCards) {
+      return <HermesCheckingBody cards={laneCards} renderCard={renderCard} />;
+    }
+    if (!hasGroupedCards) return undefined;
+    return <GroupedLaneBody items={groupedItems} renderCard={renderCard} />;
+  };
 
   const drawerCard = focusedCardId ? orderedCards.find((c) => c.id === focusedCardId) : undefined;
   const boardFocusedCard = boardFocusId ? orderedCards.find((c) => c.id === boardFocusId) : undefined;
@@ -508,31 +535,73 @@ export function BoardView({
             activeFilter={filter}
             onFilterChange={setFilter}
           />
-          <LlmUsagePanel usage={board?.llmUsage} />
-          <TestSuitesPanel
+          <UtilityBar
+            usage={board?.llmUsage}
             suites={board?.testbedSuites}
             onRunSuite={onRunSuite}
             onSaveSuite={onSaveSuite}
             onApproveSuite={onApproveSuite}
             onDismissSuite={onDismissSuite}
+            onSpawnMission={onSpawnMission}
           />
-          {onSpawnMission ? <StartMissionLauncher onSpawnMission={onSpawnMission} onSaveSuite={onSaveSuite} /> : null}
-          <Board
-            grouped={displayGrouped}
-            expanded={effectiveExpanded}
-            onToggleLane={onToggleLane}
-            renderLaneHeader={
-              onCreateTask
-                ? (id) => (id === "codex-needed" ? <CreateTaskForm onCreate={onCreateTask} /> : null)
-                : undefined
-            }
-            renderCard={renderCard}
-            renderLaneBody={(id, laneCards) =>
-              id === "hermes-checking"
-                ? <HermesCheckingBody cards={laneCards} renderCard={renderCard} />
-                : undefined
-            }
-          />
+          <div className="hm-operator-board" aria-label="Operator workflow board">
+            <BoardTier
+              id="decide"
+              title="DECIDE"
+              description="What needs the operator."
+              count={tierCount(displayGrouped, DECIDE_LANES)}
+            >
+              <Board
+                grouped={displayGrouped}
+                lanes={DECIDE_LANES}
+                ariaLabel="DECIDE lane group"
+                className="hm-lanes--decide"
+                expanded={surfacedExpanded}
+                onToggleLane={onToggleLane}
+                renderCard={renderCard}
+                renderLaneBody={renderLaneBody}
+              />
+            </BoardTier>
+            <BoardTier
+              id="watch"
+              title="WATCH"
+              description="Agents and release automation still moving."
+              count={tierCount(displayGrouped, WATCH_LANES)}
+            >
+              <Board
+                grouped={displayGrouped}
+                lanes={WATCH_LANES}
+                ariaLabel="WATCH lane group"
+                className="hm-lanes--watch"
+                expanded={surfacedExpanded}
+                onToggleLane={onToggleLane}
+                renderLaneHeader={
+                  onCreateTask
+                    ? (id) => (id === "codex-needed" ? <CreateTaskForm onCreate={onCreateTask} /> : null)
+                    : undefined
+                }
+                renderCard={renderCard}
+                renderLaneBody={renderLaneBody}
+              />
+            </BoardTier>
+            <BoardTier
+              id="hide"
+              title="HIDE"
+              description="Quiet author work, branch protection, and release history."
+              count={tierCount(displayGrouped, HIDE_LANES)}
+            >
+              <Board
+                grouped={displayGrouped}
+                lanes={HIDE_LANES}
+                ariaLabel="HIDE lane group"
+                className="hm-lanes--hide"
+                expanded={surfacedExpanded}
+                onToggleLane={onToggleLane}
+                renderCard={renderCard}
+                renderLaneBody={renderLaneBody}
+              />
+            </BoardTier>
+          </div>
         </div>
 
         <CoPilotRail
@@ -591,6 +660,214 @@ export function BoardView({
       ) : null}
 
       {overlayOpen ? <KeyboardOverlay onClose={() => setOverlayOpen(false)} /> : null}
+    </div>
+  );
+}
+
+function tierCount(grouped: Partial<Record<LaneId, BoardCard[]>>, lanes: readonly LaneId[]): number {
+  return lanes.reduce((sum, lane) => sum + (grouped[lane]?.length ?? 0), 0);
+}
+
+function BoardTier({
+  id,
+  title,
+  description,
+  count,
+  children,
+}: {
+  id: "decide" | "watch" | "hide";
+  title: string;
+  description: string;
+  count: number;
+  children: ReactNode;
+}) {
+  return (
+    <section className={`hm-board-tier hm-board-tier--${id}`} aria-label={title}>
+      <div className="hm-board-tier-head">
+        <div>
+          <span className="hm-board-tier-kicker">{title}</span>
+          <strong>{description}</strong>
+        </div>
+        <Badge variant={count > 0 ? (id === "decide" ? "pending" : "neutral") : "ghost"}>
+          {count} {count === 1 ? "card" : "cards"}
+        </Badge>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function UtilityBar({
+  usage,
+  suites = [],
+  onRunSuite,
+  onSaveSuite,
+  onApproveSuite,
+  onDismissSuite,
+  onSpawnMission,
+}: {
+  usage?: LlmUsageAggregate;
+  suites?: SavedTestSuite[];
+  onRunSuite?: (id: string) => void;
+  onSaveSuite?: (input: SaveTestSuiteInput) => void;
+  onApproveSuite?: (id: string) => void;
+  onDismissSuite?: (id: string) => void;
+  onSpawnMission?: BoardViewProps["onSpawnMission"];
+}) {
+  const requestedSuites = suites.filter((suite) => suite.status === "requested").length;
+  const shouldOpen = requestedSuites > 0;
+  const [open, setOpen] = useState(shouldOpen);
+  useEffect(() => {
+    if (shouldOpen) setOpen(true);
+  }, [shouldOpen]);
+
+  const usageLabel = usage?.status === "recorded"
+    ? `${formatCompactNumber(usage.totalTokens)} tokens`
+    : "usage quiet";
+  const suitesLabel = suites.length > 0
+    ? `${suites.length} suite${suites.length === 1 ? "" : "s"}`
+    : "no suites";
+  const launcherLabel = onSpawnMission ? "tester ready" : "tester off";
+
+  return (
+    <section className={`hm-utility-bar${requestedSuites > 0 ? " hm-utility-bar--attention" : ""}`} aria-label="Board utilities">
+      <button
+        type="button"
+        className="hm-utility-bar-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span aria-hidden>{open ? "▾" : "▸"}</span>
+        <span className="hm-kicker">Utilities</span>
+        <strong>LLM usage · suites · tester launcher</strong>
+        <span className="hm-utility-bar-summary">
+          {usageLabel} · {suitesLabel} · {launcherLabel}
+        </span>
+        {requestedSuites > 0 ? <Badge variant="pending">{requestedSuites} requested</Badge> : null}
+      </button>
+      {open ? (
+        <div className="hm-utility-bar-body">
+          <LlmUsagePanel usage={usage} />
+          <TestSuitesPanel
+            suites={suites}
+            onRunSuite={onRunSuite}
+            onSaveSuite={onSaveSuite}
+            onApproveSuite={onApproveSuite}
+            onDismissSuite={onDismissSuite}
+          />
+          {onSpawnMission ? <StartMissionLauncher onSpawnMission={onSpawnMission} onSaveSuite={onSaveSuite} /> : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+type GroupedLaneItem =
+  | { kind: "card"; card: BoardCard }
+  | { kind: "group"; id: string; title: string; cards: BoardCard[] };
+
+function groupLaneCards(lane: LaneId, cards: BoardCard[]): GroupedLaneItem[] {
+  const buckets = new Map<string, BoardCard[]>();
+  const orderedKeys: string[] = [];
+  for (const card of cards) {
+    const key = groupKeyForCard(lane, card);
+    if (!key) continue;
+    if (!buckets.has(key)) orderedKeys.push(key);
+    buckets.set(key, [...(buckets.get(key) ?? []), card]);
+  }
+
+  const used = new Set<string>();
+  const groups = new Map<string, GroupedLaneItem>();
+  for (const key of orderedKeys) {
+    const bucket = buckets.get(key) ?? [];
+    if (bucket.length < 2) continue;
+    for (const card of bucket) used.add(card.id);
+    groups.set(key, {
+      kind: "group",
+      id: key,
+      title: bucket[0]?.title ?? "Similar cards",
+      cards: bucket,
+    });
+  }
+
+  const out: GroupedLaneItem[] = [];
+  const emittedGroups = new Set<string>();
+  for (const card of cards) {
+    if (!used.has(card.id)) {
+      out.push({ kind: "card", card });
+      continue;
+    }
+    const key = groupKeyForCard(lane, card);
+    if (key && !emittedGroups.has(key)) {
+      const group = groups.get(key);
+      if (group) out.push(group);
+      emittedGroups.add(key);
+    }
+  }
+  return out;
+}
+
+function groupKeyForCard(lane: LaneId, card: BoardCard): string | null {
+  if (mustSurfaceCard(card)) return null;
+  if (card.type !== "deploy") return null;
+  const normalized = card.title
+    .toLowerCase()
+    .replace(/#[0-9]+/g, "#")
+    .replace(/[a-f0-9]{6,}/g, "<hash>")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!/post[-\s](merge|production|deploy)|deploy verification|post-production-deploy/.test(normalized)) return null;
+  return `${lane}:${card.type}:${normalized}`;
+}
+
+function GroupedLaneBody({
+  items,
+  renderCard,
+}: {
+  items: GroupedLaneItem[];
+  renderCard: (card: BoardCard) => ReactNode;
+}) {
+  return (
+    <>
+      {items.map((item) => (
+        item.kind === "group"
+          ? <GroupedCard key={item.id} group={item} renderCard={renderCard} />
+          : renderCard(item.card)
+      ))}
+    </>
+  );
+}
+
+function GroupedCard({
+  group,
+  renderCard,
+}: {
+  group: Extract<GroupedLaneItem, { kind: "group" }>;
+  renderCard: (card: BoardCard) => ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="hm-card hm-card-group" role="group" aria-label={`${group.title} group`}>
+      <div className="hm-card-group-head">
+        <div>
+          <Badge variant="neutral">{group.cards.length} similar</Badge>
+          <strong>{group.title}</strong>
+          <span>{group.cards.length} near-identical verification cards grouped. Expand to inspect each one.</span>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? "Collapse" : "Expand"}
+        </Button>
+      </div>
+      {expanded ? (
+        <div className="hm-card-group-list">
+          {group.cards.map((card) => renderCard(card))}
+        </div>
+      ) : null}
     </div>
   );
 }
