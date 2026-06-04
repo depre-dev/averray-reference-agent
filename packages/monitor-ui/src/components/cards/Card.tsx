@@ -35,6 +35,7 @@ import { laneFor } from "../../lib/monitor/lane-rules.js";
 import { humanizedSignalParts } from "../../lib/monitor/signal-labels.js";
 import { missionFailureCardSummary } from "../../lib/monitor/mission-failure.js";
 import { relatedPrForCard } from "../../lib/monitor/collaboration.js";
+import { AgentTag, Badge, Button, CardHeader, StatusPill, type StateVariant } from "../ui.js";
 import { ChecksBar } from "./ChecksBar.js";
 import { AgentDiscussion } from "./AgentDiscussion.js";
 
@@ -88,10 +89,19 @@ function shortId(id: string): string {
 const HIGH_RISK_TAGS = new Set<RiskTag>(["contracts", "workflow", "review-gated", "secrets", "config"]);
 const SECRET_RISK_TAGS = new Set<RiskTag>(["secrets"]);
 
-function riskPillClass(tag: RiskTag): string {
-  if (SECRET_RISK_TAGS.has(tag)) return "hm-pill hm-pill--secret";
-  if (HIGH_RISK_TAGS.has(tag)) return "hm-pill hm-pill--risk";
-  return "hm-pill hm-pill--neutral";
+function riskBadgeVariant(tag: RiskTag): StateVariant {
+  if (SECRET_RISK_TAGS.has(tag)) return "secret";
+  if (HIGH_RISK_TAGS.has(tag)) return "risk";
+  return "neutral";
+}
+
+function freshnessVariant(card: BoardCard, isStale: boolean, isClosed: boolean): StateVariant {
+  if (isClosed) return "neutral";
+  if (isStale) return "age";
+  const tier = freshnessTier(card.freshness);
+  if (tier === "fresh") return "fresh";
+  if (tier === "warm") return "pending";
+  return "neutral";
 }
 
 // ── Card ───────────────────────────────────────────────────────────
@@ -195,11 +205,11 @@ export function Card({
       {!isClosed && card.risk && card.risk.length > 0 ? (
         <div className="hm-pillrow">
           {card.risk.map((r) => (
-            <span key={r} className={riskPillClass(r)}>
+            <Badge key={r} variant={riskBadgeVariant(r)}>
               {r}
-            </span>
+            </Badge>
           ))}
-          {card.isDraft ? <span className="hm-pill hm-pill--draft">draft</span> : null}
+          {card.isDraft ? <Badge variant="draft">draft</Badge> : null}
         </div>
       ) : null}
 
@@ -256,25 +266,17 @@ export function Card({
           >
             Hermes: archive in 4h?{" "}
             {onKeepWatching ? (
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="xs"
                 className="hm-keep-watching"
-                style={{
-                  color: "var(--hm-sage-deep)",
-                  cursor: "pointer",
-                  borderBottom: "1px dotted",
-                  background: "none",
-                  border: 0,
-                  padding: 0,
-                  font: "inherit",
-                }}
                 onClick={(e) => {
                   e.stopPropagation();
                   onKeepWatching(card);
                 }}
               >
                 Keep watching
-              </button>
+              </Button>
             ) : (
               // No handler wired ⇒ honest disabled label, not a fake link.
               <span style={{ color: "var(--hm-muted)" }} aria-disabled="true">
@@ -295,17 +297,13 @@ function CardHead({ card, isStale, isClosed }: { card: BoardCard; isStale: boole
   const freshnessLabel = isClosed ? "CLOSED" : isStale ? `STALE ${formatted ?? ""}` : `FRESH ${formatted ?? ""}`;
 
   return (
-    <div className="hm-card-head">
-      <span className="hm-card-id">
-        <span className={`agent-dot agent-dot--${card.agentType ?? "ext"}`} aria-hidden />
-        <span className="hm-mono">{agentLabel(card.agentType)}</span>
-        <strong className="hm-mono">{shortId(card.id)}</strong>
-      </span>
-      <span className={"hm-card-fresh " + freshClass(card)}>
-        <span className="fresh-dot" aria-hidden />
-        {freshnessLabel}
-      </span>
-    </div>
+    <CardHeader
+      agent={card.agentType}
+      id={shortId(card.id)}
+      status={freshnessLabel}
+      statusVariant={freshnessVariant(card, isStale, isClosed)}
+      statusClassName={freshClass(card)}
+    />
   );
 }
 
@@ -319,11 +317,10 @@ function ReviewRequestedLine({ card }: { card: BoardCard }) {
     ? active.map((request) => actorDisplayName(request.reviewer)).join(", ")
     : actorDisplayName(first.reviewer);
   return (
-    <div className="hm-review-request" aria-label={`${label} from ${reviewers}`}>
-      <span className="hm-review-request-dot" aria-hidden />
+    <Badge variant="info" dot className="hm-review-request" aria-label={`${label} from ${reviewers}`}>
       <span>{label}</span>
       <strong>{reviewers}</strong>
-    </div>
+    </Badge>
   );
 }
 
@@ -347,8 +344,7 @@ function WorkingNowLine({ workingNow }: { workingNow: CardWorkingNow }) {
 
   return (
     <div className="hm-working-now" aria-label={`Working now: ${workingNow.label}`} title={details || undefined}>
-      <span className={`agent-dot agent-dot--${workingNow.agent}`} aria-hidden />
-      working now
+      <AgentTag agent={workingNow.agent} label="working now" />
       <span className="target">{workingNow.label}</span>
     </div>
   );
@@ -367,7 +363,12 @@ function MissionRunSummary({ card }: { card: MissionCard }) {
     <div className={`hm-mission-run hm-mission-run--${tone}`} aria-label={`Tester run ${status}`}>
       <div className="hm-mission-run-top">
         <span className="hm-mission-run-kicker">Tester run</span>
-        <span className={`hm-mission-run-verdict hm-mission-run-verdict--${tone}`}>{status}</span>
+        <StatusPill
+          variant={missionToneVariant(tone)}
+          className={`hm-mission-run-verdict hm-mission-run-verdict--${tone}`}
+        >
+          {status}
+        </StatusPill>
         {target ? <span className="hm-mission-run-target">{target}</span> : null}
       </div>
 
@@ -418,6 +419,13 @@ function missionRunTone(card: MissionCard, mission: MissionReport | undefined): 
   if (card.missionStatus === "failed") return "fail";
   if (card.missionStatus === "completed") return "ok";
   if (card.missionStatus === "running") return "warn";
+  return "neutral";
+}
+
+function missionToneVariant(tone: "ok" | "warn" | "fail" | "neutral"): StateVariant {
+  if (tone === "ok") return "pass";
+  if (tone === "warn") return "pending";
+  if (tone === "fail") return "fail";
   return "neutral";
 }
 
@@ -533,9 +541,16 @@ function WaitingOnLine({ waitingOn }: { waitingOn: WaitingOn }) {
   return (
     <div className={`hm-waiting hm-waiting--${waitingOn.tone}`}>
       waiting on
-      <span className="target">→ {waitingOn.actor}</span>
+      <StatusPill variant={waitingToneVariant(waitingOn.tone)} className="target">
+        → {waitingOn.actor}
+      </StatusPill>
     </div>
   );
+}
+
+function waitingToneVariant(tone: WaitingOn["tone"]): StateVariant {
+  if (tone === "info") return "info";
+  return "pending";
 }
 
 // ── Operator actions ────────────────────────────────────────────────
@@ -657,9 +672,9 @@ function OperatorActions({
     return (
       <div className="hm-card-cta hm-card-cta--operator hm-card-cta--actions" role="group" aria-label="Operator actions">
         {actions.map((action) => (
-          <button
-            type="button"
-            className={`hm-btn ${action.kind === "action" ? "hm-btn--action" : "hm-btn--ghost"} hm-btn--sm`}
+          <Button
+            variant={action.kind === "action" ? "action" : "ghost"}
+            size="sm"
             key={action.key}
             title={`${action.label} opens a confirmation before running.`}
             onClick={(e) => {
@@ -668,7 +683,7 @@ function OperatorActions({
             }}
           >
             {action.label}
-          </button>
+          </Button>
         ))}
       </div>
     );
@@ -680,9 +695,9 @@ function OperatorActions({
         {confirming.confirm}
         <small>First click only arms this action. Confirm to send it to the live queue.</small>
       </span>
-      <button
-        type="button"
-        className="hm-btn hm-btn--action hm-btn--sm"
+      <Button
+        variant="action"
+        size="sm"
         onClick={(e) => {
           stop(e);
           setConfirmingKey(null);
@@ -690,17 +705,17 @@ function OperatorActions({
         }}
       >
         Confirm
-      </button>
-      <button
-        type="button"
-        className="hm-btn hm-btn--ghost hm-btn--sm"
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={(e) => {
           stop(e);
           setConfirmingKey(null);
         }}
       >
         Cancel
-      </button>
+      </Button>
     </div>
   );
 }

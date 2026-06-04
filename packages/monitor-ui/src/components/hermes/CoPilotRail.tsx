@@ -7,7 +7,6 @@
 // mission (M7').
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
 import type { BoardCard, CreateTaskInput } from "../../lib/monitor/card-types.js";
 import type { BacklogSuggestion, BacklogSuggestionsResponse } from "../../lib/monitor/backlog-suggestions.js";
 import type { BoardNowBanner as BoardNowBannerData } from "../../lib/monitor/board-state.js";
@@ -17,6 +16,7 @@ import {
   type CollaborationMessage,
 } from "../../lib/monitor/collaboration.js";
 import { useCollaboration, type UseCollaborationOptions } from "../../hooks/useCollaboration.js";
+import { AgentTag, Badge, Button, EmptyState, StatusPill, type AgentTagAgent, type StateVariant } from "../ui.js";
 import { AskHermesComposer } from "./AskHermesComposer.js";
 import { HermesTurn } from "./HermesTurn.js";
 
@@ -194,37 +194,6 @@ interface RoomThread {
   turns: CollaborationMessage[];
 }
 
-const ROOM_THREAD_STYLE: CSSProperties = {
-  display: "grid",
-  gap: 8,
-  padding: 8,
-  border: "1px solid var(--hm-line)",
-  borderRadius: 8,
-  background: "rgba(255, 253, 247, 0.7)",
-};
-
-const ROOM_THREAD_HEAD_STYLE: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  minWidth: 0,
-  color: "var(--hm-muted)",
-  fontSize: 11,
-  textTransform: "uppercase",
-  letterSpacing: ".08em",
-};
-
-const ROOM_THREAD_LABEL_STYLE: CSSProperties = {
-  flex: "1 1 auto",
-  minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-};
-
-const ROOM_EMPTY_STYLE: CSSProperties = { opacity: 0.78 };
-const BOARD_SUMMARY_STYLE: CSSProperties = { opacity: 0.86 };
-
 function buildRoomThreads(messages: readonly CollaborationMessage[], cards: readonly BoardCard[]): RoomThread[] {
   const threads = new Map<string, RoomThread>();
   const sorted = [...messages].sort((a, b) => a.ts - b.ts);
@@ -288,18 +257,14 @@ function RoomThreadBlock({
   onCardClick?: (id: string) => void;
 }) {
   return (
-    <div
-      className="hm-room-thread"
-      style={ROOM_THREAD_STYLE}
-    >
-      <div
-        className="hm-room-thread-head"
-        style={ROOM_THREAD_HEAD_STYLE}
-      >
-        <span style={ROOM_THREAD_LABEL_STYLE}>
+    <div className="hm-room-thread">
+      <div className="hm-room-thread-head">
+        <span className="hm-room-thread-label">
           Thread · {thread.label}
         </span>
-        <span>{thread.turns.length} turn{thread.turns.length === 1 ? "" : "s"}</span>
+        <StatusPill variant="neutral" className="hm-room-thread-count">
+          {thread.turns.length} turn{thread.turns.length === 1 ? "" : "s"}
+        </StatusPill>
       </div>
       {thread.cardId ? (
         <ActivityPin cardId={thread.cardId} onCardClick={onCardClick} />
@@ -317,22 +282,16 @@ function RoomThreadBlock({
 
 function RoomEmptyState() {
   return (
-    <div
-      className="hm-turn hm-turn--system hm-turn--kind-status"
-      style={ROOM_EMPTY_STYLE}
-    >
+    <EmptyState className="hm-turn hm-turn--system hm-turn--kind-status hm-room-empty">
       <div className="hm-turn-head">
-        <span className="hm-turn-actor">
-          <span className="actor-dot" aria-hidden />
-          Room
-        </span>
+        <AgentTag agent="room" label="Room" className="hm-turn-actor" />
         <span className="hm-turn-kind">· empty</span>
       </div>
       <div className="hm-turn-body">
         No agent chatter yet.
         <small>Real Hermes, Codex, Claude, and specialist turns will appear here when recorded.</small>
       </div>
-    </div>
+    </EmptyState>
   );
 }
 
@@ -345,12 +304,9 @@ function BoardSummaryRow({
 }) {
   const summary = boardSummaryCopy(banner);
   return (
-    <div className="hm-turn hm-turn--system hm-turn--kind-status" style={BOARD_SUMMARY_STYLE}>
+    <div className="hm-turn hm-turn--system hm-turn--kind-status hm-board-summary-row">
       <div className="hm-turn-head">
-        <span className="hm-turn-actor">
-          <span className="actor-dot" aria-hidden />
-          Board
-        </span>
+        <AgentTag agent="board" label="Board" className="hm-turn-actor" />
         <span className="hm-turn-kind">· current summary</span>
         <span className="hm-turn-time">{formatTurnTime(Date.now())}</span>
       </div>
@@ -523,36 +479,51 @@ function BacklogSuggestionRow({
         <small>{suggestion.reason}</small>
       </span>
       <span className="hm-backlog-suggestion-meta">
-        {suggestion.suggestedOwner} · {suggestion.riskTier} · {Math.round(suggestion.confidence * 100)}%
+        <AgentTag agent={suggestionOwnerAgent(suggestion.suggestedOwner)} label={suggestion.suggestedOwner} />
+        <Badge variant={suggestion.riskTier === "high" ? "risk" : "neutral"}>{suggestion.riskTier}</Badge>
+        <Badge variant={confidenceVariant(suggestion.confidence)}>{Math.round(suggestion.confidence * 100)}%</Badge>
       </span>
       {relatedCard ? (
         onCardClick ? (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="xs"
             className="hm-backlog-link"
             onClick={() => onCardClick(relatedCard.id)}
             aria-label={`Open related card ${relatedCard.id}`}
           >
             Open card
-          </button>
+          </Button>
         ) : (
           <span className="hm-backlog-link">linked card</span>
         )
       ) : null}
       {suggestion.suggestedPrompt && onUseInComposer ? (
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="xs"
           className="hm-backlog-use"
           onClick={() => onUseInComposer(suggestion.suggestedPrompt!)}
         >
           Use in composer
-        </button>
+        </Button>
       ) : null}
       {suggestion.suggestedPrompt ? (
-        <button type="button" className="hm-backlog-copy" onClick={copyPrompt}>
+        <Button variant="ghost" size="xs" className="hm-backlog-copy" onClick={copyPrompt}>
           Copy prompt
-        </button>
+        </Button>
       ) : null}
     </div>
   );
+}
+
+function suggestionOwnerAgent(owner: BacklogSuggestion["suggestedOwner"]): AgentTagAgent {
+  if (owner === "codex" || owner === "claude" || owner === "operator" || owner === "hermes") return owner;
+  return "system";
+}
+
+function confidenceVariant(confidence: number): StateVariant {
+  if (confidence >= 0.8) return "pass";
+  if (confidence >= 0.5) return "pending";
+  return "degraded";
 }

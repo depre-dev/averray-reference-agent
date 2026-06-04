@@ -12,6 +12,7 @@
 
 import type { ReactNode } from "react";
 import { MiniRail, type LaneDescriptor, type LaneId } from "./MiniRail.js";
+import { Button, EmptyState, LaneHeader } from "./ui.js";
 
 export type { LaneDescriptor, LaneId };
 
@@ -64,27 +65,26 @@ export function Lane({ lane, expanded, count, children, headerAccessory, onToggl
 
   return (
     <section className={classes} aria-label={`${lane.name} lane`}>
-      <div className="hm-lane-head">
-        <div className="hm-lane-head-row">
-          <span className="hm-lane-title">{lane.name}</span>
-          <span className="hm-lane-count">{count}</span>
-          {onToggle ? (
-            <button
-              type="button"
-              className="hm-lane-collapse"
-              onClick={() => onToggle(lane.id)}
-              aria-label={`Collapse ${lane.name} lane`}
-            >
-              collapse ‹
-            </button>
-          ) : null}
-        </div>
-        {lane.action ? <div className="hm-lane-action">{lane.action}</div> : null}
-      </div>
+      <LaneHeader
+        title={lane.name}
+        count={count}
+        action={lane.action ? <span>{lane.action}</span> : undefined}
+        collapse={onToggle ? (
+          <Button
+            variant="ghost"
+            size="xs"
+            className="hm-lane-collapse"
+            onClick={() => onToggle(lane.id)}
+            aria-label={`Collapse ${lane.name} lane`}
+          >
+            collapse ‹
+          </Button>
+        ) : undefined}
+      />
       <div className="hm-lane-body">
         {headerAccessory}
         {count === 0 ? (
-          <div className="hm-lane-empty">{laneEmptyMessage(lane)}</div>
+          <EmptyState className="hm-lane-empty">{laneEmptyMessage(lane)}</EmptyState>
         ) : (
           children
         )}

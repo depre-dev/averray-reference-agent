@@ -2,19 +2,7 @@
 
 import type { CollaborationAuthor, CollaborationMessage, CollaborationTarget } from "../../lib/monitor/collaboration.js";
 import { actorLabel, actorLabelForMessage, formatTurnTime } from "../../lib/monitor/collaboration.js";
-import type { CSSProperties } from "react";
-
-const PROMINENT_TURN_STYLE: CSSProperties = {
-  borderLeftColor: "var(--hm-amber)",
-  background: "var(--hm-amber-soft, #fff3df)",
-};
-
-const MUTED_TURN_STYLE: CSSProperties = {
-  opacity: 0.72,
-  background: "rgba(255, 253, 247, 0.58)",
-};
-
-const DEFAULT_TURN_STYLE: CSSProperties = {};
+import { AgentTag } from "../ui.js";
 
 export function HermesTurn({
   turn,
@@ -34,13 +22,9 @@ export function HermesTurn({
   return (
     <div
       className={`hm-turn hm-turn--${turn.author} hm-turn--kind-${turn.kind} hm-turn--rank-${rank}`}
-      style={turnStyleForKind(turn.kind)}
     >
       <div className="hm-turn-head">
-        <span className="hm-turn-actor">
-          <span className="actor-dot" aria-hidden />
-          {roomActorLabel(turn)}
-        </span>
+        <AgentTag agent={turn.author} label={roomActorLabel(turn)} className="hm-turn-actor" />
         <span className="hm-turn-kind">
           · {kindLabel(turn.kind)}
           {pending ? " · pending" : ""}
@@ -111,14 +95,4 @@ function rankForKind(kind: CollaborationMessage["kind"]): "prominent" | "normal"
   if (kind === "request_help" || kind === "proposal") return "prominent";
   if (kind === "status") return "muted";
   return "normal";
-}
-
-function turnStyleForKind(kind: CollaborationMessage["kind"]): CSSProperties {
-  if (kind === "request_help" || kind === "proposal") {
-    return PROMINENT_TURN_STYLE;
-  }
-  if (kind === "status") {
-    return MUTED_TURN_STYLE;
-  }
-  return DEFAULT_TURN_STYLE;
 }
