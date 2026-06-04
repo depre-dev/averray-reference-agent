@@ -48,7 +48,7 @@ describe("claude task runner", () => {
   }
 
   async function approvedClaudeTask(path: string, prompt = "Build the thing"): Promise<string> {
-    const { task } = await proposeCodexTask({ repo: "averray-agent/agent", agent: "claude", prompt }, { path });
+    const { task } = await proposeCodexTask({ repo: "averray-agent/agent", agent: "claude", surface: "ops hygiene", prompt }, { path });
     await approveCodexTask(task.id, { path, approvedBy: "operator" });
     return task.id;
   }
@@ -205,6 +205,23 @@ describe("claude task runner", () => {
       outputTokens: 30,
       cacheTokens: 15,
       costUsd: 0.42,
+    });
+    const [task] = await listCodexTasks({ path });
+    expect(task).toMatchObject({
+      id,
+      routingOutcome: {
+        agent: "claude",
+        surface: "ops hygiene",
+        outcome: "opened_pr",
+        tokenUsage: {
+          model: "claude-sonnet-4-5",
+          inputTokens: 120,
+          outputTokens: 30,
+          cacheTokens: 15,
+          totalTokens: 165,
+          costUsd: 0.42,
+        },
+      },
     });
   });
 

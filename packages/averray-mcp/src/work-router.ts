@@ -4,6 +4,16 @@ import type { HermesBacklogItem } from "./hermes-backlog.js";
 
 export type RoutedWorkAgent = "codex" | "claude";
 export type RoutedWorkStatus = "proposed" | "approved" | "running" | "completed" | "failed" | "cancelled" | string;
+export type WorkRouterRoutingScoreStatus = "baseline_available" | "insufficient_data";
+
+export interface WorkRouterRoutingScore {
+  status: WorkRouterRoutingScoreStatus;
+  score: number | null;
+  samples: number;
+  reason?: string;
+}
+
+export type WorkRouterRoutingScores = Record<string, Partial<Record<RoutedWorkAgent, WorkRouterRoutingScore>>>;
 
 export interface WorkRouterBacklogItem extends Partial<Pick<HermesBacklogItem, "id" | "title" | "prompt" | "stream">> {
   repo: string;
@@ -38,6 +48,8 @@ export interface PlanAndRouteWorkInput {
   recentlyDone: WorkRouterTaskSnapshot[];
   policy: WorkRouterPolicySnapshot;
   classify: WorkRouterClassifier;
+  /** ORCH-P4c: learned scorecard memory. Used only on soft surfaces. */
+  routingScores?: WorkRouterRoutingScores;
   maxProposals?: number;
 }
 
@@ -83,7 +95,12 @@ export function planAndRouteWork(input: PlanAndRouteWorkInput): RoutedProposal[]
       prompt: [title, description].filter(Boolean).join(": "),
       tags: item.stream ? [item.stream] : undefined,
     });
-    const agent = routedAgent(routing.agent);
+    const classifiedAgent = routedAgent(routing.agent);
+    const hardAgent = hardTaxonomyAgent(surface, title);
+    const learned = hardAgent
+      ? { agent: hardAgent, note: hardAgent === classifiedAgent ? undefined : `Hard taxonomy kept ${surface} with ${hardAgent}; learned routing and classifier output cannot override it.` }
+      : learnedRoutingChoice(surface, classifiedAgent, input.routingScores);
+    const agent = learned.agent;
     assertTaxonomy(surface, title, agent);
     if (!policyAllows(input.policy, { repo, agent, accepted: proposals.length, acceptedRepoCounts })) continue;
 
@@ -94,7 +111,7 @@ export function planAndRouteWork(input: PlanAndRouteWorkInput): RoutedProposal[]
       agent,
       riskTier: routing.riskTier,
       why: `Fills uncovered backlog gap: ${title}.`,
-      whyAgent: routing.reason,
+      whyAgent: [routing.reason, learned.note].filter(Boolean).join(" "),
       dedupeKey: proposalDedupeKey,
     };
     proposals.push(proposal);
@@ -133,13 +150,54 @@ function routedAgent(agent: string): RoutedWorkAgent {
 }
 
 function assertTaxonomy(surface: string, title: string, agent: RoutedWorkAgent): void {
+  const hardAgent = hardTaxonomyAgent(surface, title);
+  if (hardAgent && agent !== hardAgent) {
+    throw new Error(`routing_taxonomy_violation: ${surface} must route to ${hardAgent}`);
+  }
+}
+
+function hardTaxonomyAgent(surface: string, title: string): RoutedWorkAgent | undefined {
   const haystack = normalizeText(`${surface} ${title}`);
   if (matchesAny(haystack, ["chain", "settlement", "escrow", "contract", "contracts", "xcm", "polkadot", "substrate", "treasury"])) {
-    if (agent !== "codex") throw new Error(`routing_taxonomy_violation: ${surface} must route to codex`);
+    return "codex";
   }
   if (matchesAny(haystack, ["ui", "frontend", "front end", "docs", "documentation", "readme", "copy", "monitor", "drawer", "board"])) {
-    if (agent !== "claude") throw new Error(`routing_taxonomy_violation: ${surface} must route to claude`);
+    return "claude";
   }
+  return undefined;
+}
+
+function learnedRoutingChoice(
+  surface: string,
+  staticAgent: RoutedWorkAgent,
+  routingScores: WorkRouterRoutingScores | undefined,
+): { agent: RoutedWorkAgent; note?: string } {
+  const normalizedSurface = normalizeText(surface);
+  const surfaceScores = routingScores?.[normalizedSurface];
+  if (!surfaceScores) return { agent: staticAgent };
+  const otherAgent: RoutedWorkAgent = staticAgent === "codex" ? "claude" : "codex";
+  const staticScore = surfaceScores[staticAgent];
+  const otherScore = surfaceScores[otherAgent];
+  if (!isUsableRoutingScore(staticScore) || !isUsableRoutingScore(otherScore)) {
+    return {
+      agent: staticAgent,
+      note: `Learned routing has insufficient ${normalizedSurface || "general"} data; static fallback kept ${staticAgent}.`,
+    };
+  }
+  if ((otherScore.score ?? 0) > (staticScore.score ?? 0)) {
+    return {
+      agent: otherAgent,
+      note: `Learned routing preferred ${otherAgent} for ${normalizedSurface || "general"} (${otherAgent} ${otherScore.score} from ${otherScore.samples} sample(s), ${staticAgent} ${staticScore.score} from ${staticScore.samples}).`,
+    };
+  }
+  return {
+    agent: staticAgent,
+    note: `Learned routing kept ${staticAgent} for ${normalizedSurface || "general"} (${staticAgent} ${staticScore.score} from ${staticScore.samples} sample(s), ${otherAgent} ${otherScore.score} from ${otherScore.samples}).`,
+  };
+}
+
+function isUsableRoutingScore(score: WorkRouterRoutingScore | undefined): score is WorkRouterRoutingScore & { score: number } {
+  return score?.status === "baseline_available" && typeof score.score === "number" && Number.isFinite(score.score);
 }
 
 function matchesAny(haystack: string, needles: string[]): boolean {

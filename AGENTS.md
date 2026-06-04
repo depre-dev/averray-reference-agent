@@ -127,7 +127,12 @@ TypeScript monorepo: npm workspaces (`packages/*`, `services/*`), Node ≥ 22, E
   proposed Codex/Claude tasks and narrate why in the monitor co-pilot rail. It
   reuses the dispatch allowlist/caps, same-tick and queue dedupe, cooldown,
   HALT, and D3 suspension gates; it **never** approves, dispatches, merges, or
-  deploys. No backlog gap means no proposal and no chatter.
+  deploys. No backlog gap means no proposal and no chatter. ORCH-P4c adds
+  learned routing memory from real runner outcomes (`opened_pr`, `no_pr`,
+  `failed`) per agent × surface. That memory may break ties on soft/ambiguous
+  surfaces only; hard taxonomy still binds chain/settlement/treasury to Codex
+  and UI/docs/monitor to Claude, and the dispatch policy always remains the final
+  gate.
 - **Gold-path tester autonomy is budgeted, testnet-only.** Internal/operator
   scheduled gold-path missions may auto-post a sponsored starter job and run the
   claim→submit→verify→settle loop only when `TESTBED_GOLDPATH_AUTONOMY_ENABLED`

@@ -10,6 +10,34 @@ import {
 
 export type ScorecardAgent = "codex" | "claude" | "test-writer" | "security" | "docs" | "hermes" | "browser" | "unknown";
 export type ScorecardConfidence = "none" | "low" | "medium" | "high";
+export type AgentRoutingOutcomeKind = "opened_pr" | "no_pr" | "failed";
+export type AgentRoutingScoreStatus = "baseline_available" | "insufficient_data";
+
+export interface AgentRoutingSurfaceScore {
+  agent: ScorecardAgent;
+  surface: string;
+  status: AgentRoutingScoreStatus;
+  score: number | null;
+  samples: number;
+  openedPr: number;
+  noPr: number;
+  failed: number;
+  avgDurationMinutes: number | null;
+  tokenUsage: {
+    status: "recorded" | "not_recorded";
+    totalTokens: number | null;
+    costUsd: number | null;
+  };
+  lastOutcomeAt: string | null;
+  note: string;
+}
+
+export type WorkRouterScoreMap = Record<string, Partial<Record<"codex" | "claude", {
+  status: AgentRoutingScoreStatus;
+  score: number | null;
+  samples: number;
+  reason: string;
+}>>>;
 
 export interface AgentScorecardOptions {
   now?: Date;
@@ -50,8 +78,30 @@ interface MutableAgentStats {
   checkNeutral: number;
   verdicts: Record<string, number>;
   surfaces: Map<string, { count: number; ready: number; blocked: number }>;
+  routingOutcomes: AgentRoutingOutcome[];
   seenPrKeys: Set<string>;
 }
+
+interface AgentRoutingOutcome {
+  agent: ScorecardAgent;
+  surface: string;
+  outcome: AgentRoutingOutcomeKind;
+  ciPassed?: boolean;
+  merged?: boolean;
+  reverted?: boolean;
+  durationMs?: number;
+  tokenUsage?: {
+    model?: string;
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheTokens?: number;
+    totalTokens?: number;
+    costUsd?: number;
+  };
+  recordedAt: string;
+}
+
+const ROUTING_SCORE_MIN_SAMPLES = 2;
 
 export async function getAgentScorecard(options: AgentScorecardOptions = {}) {
   const now = options.now ?? new Date();
@@ -102,6 +152,7 @@ export function buildAgentScorecard(snapshot: unknown, options: { now?: Date } =
   const items = Array.from(agents.values())
     .map((agent) => finalizeAgent(agent, llmUsage))
     .sort((a, b) => agentSortKey(a.agent) - agentSortKey(b.agent) || b.sampleCount - a.sampleCount);
+  const routingMemory = buildRoutingMemory(Array.from(agents.values()));
 
   const totals = items.reduce(
     (acc, item) => {
@@ -119,24 +170,50 @@ export function buildAgentScorecard(snapshot: unknown, options: { now?: Date } =
     schemaVersion: 1,
     kind: "averray_agent_scorecard",
     generatedAt: now.toISOString(),
-    truthBoundary: "Read-only A1 scorecard from monitor events, task queue state, browser mission reports, and whitelisted LLM usage counters. Missing cost/token/autopilot-rework signals are marked as not_recorded, not inferred.",
+    truthBoundary: "Read-only scorecard from monitor events, task queue state, browser mission reports, runner completion outcomes, and whitelisted LLM usage counters. Missing cost/token/autopilot-rework/merge-webhook signals are marked as not_recorded, not inferred.",
     totals,
     llmUsage,
+    routingMemory,
     agents: items,
     gaps: [
       llmUsage.status === "recorded"
         ? "LLM usage only includes providers/runs that report whitelisted counters; missing providers stay not_recorded."
         : "Cost and token totals are not present in the current runner events.",
       "Autopilot auto-approval rework is not yet emitted as a durable signal.",
+      "PR merge/revert status is not pushed by a webhook yet; routing memory records it only when a task record already contains that evidence.",
       "Time-to-PR and time-to-merge need GitHub timeline evidence before they become routing inputs.",
     ],
     safety: {
       readOnly: true,
       mutatesGithub: false,
       mutatesRunnerQueue: false,
-      routingInfluence: "A1 only observes. A2 may use these baselines later with high-risk surfaces still rule-bound.",
+      routingInfluence: "ORCH-P4c may use routingMemory only on soft surfaces. Hard taxonomy and dispatch policy remain authoritative.",
     },
   };
+}
+
+export function routingScoresFromScorecard(scorecard: unknown): WorkRouterScoreMap {
+  const routingMemory = recordField(scorecard, "routingMemory");
+  const scores: WorkRouterScoreMap = {};
+  for (const entry of records(routingMemory?.scores)) {
+    const agent = scorecardAgent(stringField(entry, "agent") ?? "");
+    if (agent !== "codex" && agent !== "claude") continue;
+    const surface = normalizeSurface(stringField(entry, "surface"));
+    if (!surface) continue;
+    const status = stringField(entry, "status") === "baseline_available" ? "baseline_available" : "insufficient_data";
+    const score = numberField(entry, "score");
+    const samples = Math.max(0, numberField(entry, "samples") ?? 0);
+    scores[surface] = {
+      ...(scores[surface] ?? {}),
+      [agent]: {
+        status,
+        score: status === "baseline_available" && score !== undefined ? score : null,
+        samples,
+        reason: stringField(entry, "note") ?? `${agent} has ${samples} ${surface} routing sample(s).`,
+      },
+    };
+  }
+  return scores;
 }
 
 function recordHandoffItem(agents: Map<ScorecardAgent, MutableAgentStats>, item: Record<string, unknown>): void {
@@ -212,6 +289,16 @@ function recordTask(agents: Map<ScorecardAgent, MutableAgentStats>, task: Record
   if (durationMs !== undefined) {
     stats.taskDurationMsTotal += durationMs;
     stats.taskDurationCount += 1;
+  }
+
+  const routingOutcome = routingOutcomeForTask(task);
+  if (routingOutcome) {
+    stats.routingOutcomes.push(routingOutcome);
+    const surfaceStats = stats.surfaces.get(routingOutcome.surface) ?? { count: 0, ready: 0, blocked: 0 };
+    surfaceStats.count += 1;
+    if (routingOutcome.outcome === "opened_pr") surfaceStats.ready += 1;
+    if (routingOutcome.outcome === "failed") surfaceStats.blocked += 1;
+    stats.surfaces.set(routingOutcome.surface, surfaceStats);
   }
 }
 
@@ -337,7 +424,84 @@ function finalizeAgent(stats: MutableAgentStats, llmUsage: ReturnType<typeof agg
       .map(([surface, value]) => ({ surface, ...value }))
       .sort((a, b) => b.count - a.count || a.surface.localeCompare(b.surface))
       .slice(0, 8),
+    routingSurfaces: routingScoresForAgent(stats).slice(0, 8),
   };
+}
+
+function buildRoutingMemory(stats: MutableAgentStats[]) {
+  const scores = stats
+    .flatMap((agent) => routingScoresForAgent(agent))
+    .sort((a, b) => a.surface.localeCompare(b.surface) || agentSortKey(a.agent) - agentSortKey(b.agent));
+  const ready = scores.filter((score) => score.status === "baseline_available").length;
+  return {
+    status: ready > 0 ? "recorded" : "insufficient_data",
+    minSamples: ROUTING_SCORE_MIN_SAMPLES,
+    truthBoundary: "Only task records with explicit runner completion routing outcomes feed learned routing. Sparse surfaces stay insufficient_data; merge/revert is not inferred without a real upstream signal.",
+    scores,
+  };
+}
+
+function routingScoresForAgent(stats: MutableAgentStats): AgentRoutingSurfaceScore[] {
+  const bySurface = new Map<string, AgentRoutingOutcome[]>();
+  for (const outcome of stats.routingOutcomes) {
+    bySurface.set(outcome.surface, [...(bySurface.get(outcome.surface) ?? []), outcome]);
+  }
+  return Array.from(bySurface.entries())
+    .map(([surface, outcomes]) => routingSurfaceScore(stats.agent, surface, outcomes))
+    .sort((a, b) => (b.samples - a.samples) || a.surface.localeCompare(b.surface));
+}
+
+function routingSurfaceScore(agent: ScorecardAgent, surface: string, outcomes: AgentRoutingOutcome[]): AgentRoutingSurfaceScore {
+  const sorted = outcomes.slice().sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
+  const samples = sorted.length;
+  const openedPr = sorted.filter((outcome) => outcome.outcome === "opened_pr").length;
+  const noPr = sorted.filter((outcome) => outcome.outcome === "no_pr").length;
+  const failed = sorted.filter((outcome) => outcome.outcome === "failed").length;
+  const durations = sorted.map((outcome) => outcome.durationMs).filter((value): value is number => typeof value === "number");
+  const tokenTotals = sorted.map((outcome) => outcome.tokenUsage?.totalTokens).filter((value): value is number => typeof value === "number");
+  const costs = sorted.map((outcome) => outcome.tokenUsage?.costUsd).filter((value): value is number => typeof value === "number");
+  const status: AgentRoutingScoreStatus = samples >= ROUTING_SCORE_MIN_SAMPLES ? "baseline_available" : "insufficient_data";
+  const score = status === "baseline_available" ? weightedRoutingScore(sorted) : null;
+  return {
+    agent,
+    surface,
+    status,
+    score,
+    samples,
+    openedPr,
+    noPr,
+    failed,
+    avgDurationMinutes: durations.length > 0 ? round((durations.reduce((sum, value) => sum + value, 0) / durations.length) / 60_000, 2) : null,
+    tokenUsage: {
+      status: tokenTotals.length > 0 ? "recorded" : "not_recorded",
+      totalTokens: tokenTotals.length > 0 ? tokenTotals.reduce((sum, value) => sum + value, 0) : null,
+      costUsd: costs.length > 0 ? round(costs.reduce((sum, value) => sum + value, 0), 6) : null,
+    },
+    lastOutcomeAt: sorted[0]?.recordedAt ?? null,
+    note: status === "baseline_available"
+      ? `${agent} has ${samples} real ${surface} outcome(s); recent runs are weighted more heavily.`
+      : `${agent} has only ${samples} real ${surface} outcome(s); learned routing must fall back to static routing.`,
+  };
+}
+
+function weightedRoutingScore(outcomes: AgentRoutingOutcome[]): number {
+  let weighted = 0;
+  let totalWeight = 0;
+  outcomes.forEach((outcome, index) => {
+    const weight = Math.pow(0.72, index);
+    weighted += routingOutcomeValue(outcome) * weight;
+    totalWeight += weight;
+  });
+  return totalWeight > 0 ? clamp(Math.round((weighted / totalWeight) * 100), 0, 100) : 0;
+}
+
+function routingOutcomeValue(outcome: AgentRoutingOutcome): number {
+  if (outcome.reverted) return 0;
+  let value = outcome.outcome === "opened_pr" ? 1 : outcome.outcome === "no_pr" ? 0.35 : 0;
+  if (outcome.ciPassed === true) value += 0.05;
+  if (outcome.ciPassed === false) value -= 0.15;
+  if (outcome.merged === true) value += 0.05;
+  return clamp(value, 0, 1);
 }
 
 function ensureAgent(agents: Map<ScorecardAgent, MutableAgentStats>, agent: ScorecardAgent): MutableAgentStats {
@@ -371,6 +535,7 @@ function ensureAgent(agents: Map<ScorecardAgent, MutableAgentStats>, agent: Scor
     checkNeutral: 0,
     verdicts: {},
     surfaces: new Map(),
+    routingOutcomes: [],
     seenPrKeys: new Set(),
   };
   agents.set(agent, next);
@@ -431,6 +596,53 @@ function taskAgent(task: Record<string, unknown>): ScorecardAgent {
   const scorecard = scorecardAgent(agent);
   if (scorecard !== "unknown") return scorecard;
   return "codex";
+}
+
+function routingOutcomeForTask(task: Record<string, unknown>): AgentRoutingOutcome | undefined {
+  const explicit = recordField(task, "routingOutcome");
+  if (!explicit) return undefined;
+  const agent = scorecardAgent(stringField(explicit, "agent") ?? stringField(task, "agent") ?? "");
+  if (agent === "unknown") return undefined;
+  const surface = normalizeSurface(stringField(explicit, "surface") ?? stringField(task, "surface"));
+  if (!surface) return undefined;
+  const outcome = routingOutcomeKind(stringField(explicit, "outcome"));
+  if (!outcome) return undefined;
+  const recordedAt = stringField(explicit, "recordedAt") ?? stringField(task, "completedAt") ?? stringField(task, "failedAt");
+  if (!recordedAt) return undefined;
+  const tokenUsage = recordField(explicit, "tokenUsage");
+  return {
+    agent,
+    surface,
+    outcome,
+    ...(typeof booleanField(explicit, "ciPassed") === "boolean" ? { ciPassed: booleanField(explicit, "ciPassed") } : {}),
+    ...(typeof booleanField(explicit, "merged") === "boolean" ? { merged: booleanField(explicit, "merged") } : {}),
+    ...(typeof booleanField(explicit, "reverted") === "boolean" ? { reverted: booleanField(explicit, "reverted") } : {}),
+    ...(numberField(explicit, "durationMs") !== undefined ? { durationMs: numberField(explicit, "durationMs") } : {}),
+    ...(tokenUsage ? { tokenUsage: routingTokenUsage(tokenUsage) } : {}),
+    recordedAt,
+  };
+}
+
+function routingOutcomeKind(value: string | undefined): AgentRoutingOutcomeKind | undefined {
+  if (value === "opened_pr" || value === "no_pr" || value === "failed") return value;
+  return undefined;
+}
+
+function routingTokenUsage(value: Record<string, unknown>): AgentRoutingOutcome["tokenUsage"] | undefined {
+  const inputTokens = numberField(value, "inputTokens");
+  const outputTokens = numberField(value, "outputTokens");
+  const cacheTokens = numberField(value, "cacheTokens");
+  const totalTokens = numberField(value, "totalTokens");
+  const costUsd = numberField(value, "costUsd");
+  const usage = {
+    ...(stringField(value, "model") ? { model: stringField(value, "model") } : {}),
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(cacheTokens !== undefined ? { cacheTokens } : {}),
+    ...(totalTokens !== undefined ? { totalTokens } : {}),
+    ...(costUsd !== undefined ? { costUsd } : {}),
+  };
+  return Object.keys(usage).length > 0 ? usage : undefined;
 }
 
 function agentForMission(mission: Record<string, unknown>): ScorecardAgent {
@@ -575,6 +787,14 @@ function records(value: unknown): Record<string, unknown>[] {
 
 function arrayStrings(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0) : [];
+}
+
+function normalizeSurface(value: string | undefined): string {
+  return (value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9/._ -]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
 }
 
 function round(value: number, digits: number): number {

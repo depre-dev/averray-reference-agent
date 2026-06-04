@@ -28,6 +28,31 @@ export type CodexRunnerHeartbeatStatus =
  */
 export type TaskAgent = "codex" | "claude" | "test-writer" | "security" | "docs" | (string & {});
 
+export type CodexTaskRoutingOutcomeKind = "opened_pr" | "no_pr" | "failed";
+
+export interface CodexTaskRoutingTokenUsage {
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheTokens?: number;
+  totalTokens?: number;
+  costUsd?: number;
+}
+
+export interface CodexTaskRoutingOutcome {
+  agent: TaskAgent;
+  surface: string;
+  outcome: CodexTaskRoutingOutcomeKind;
+  ciPassed?: boolean;
+  merged?: boolean;
+  reverted?: boolean;
+  durationMs?: number;
+  tokenUsage?: CodexTaskRoutingTokenUsage;
+  recordedAt: string;
+  evidence: "runner_completion";
+  truthBoundary: string;
+}
+
 /** Resolve a task's agent, defaulting legacy/undefined tasks to "codex". */
 export function taskAgent(task: { agent?: TaskAgent | string }): TaskAgent {
   const agent = typeof task.agent === "string" ? task.agent.trim() : "";
@@ -36,6 +61,8 @@ export function taskAgent(task: { agent?: TaskAgent | string }): TaskAgent {
 
 export interface CodexTaskInput {
   repo: string;
+  /** ORCH-P4c: normalized work surface for learned routing memory. */
+  surface?: string;
   /**
    * The PR this task acts on. Optional: greenfield tasks (Claude opens
    * its own PR) have no PR number yet. When present, propose dedupes on
@@ -102,6 +129,7 @@ export interface CodexTask extends CodexTaskInput {
   operatorDismissedBy?: string;
   operatorSnoozedUntil?: string;
   operatorSnoozedBy?: string;
+  routingOutcome?: CodexTaskRoutingOutcome;
   events?: CodexTaskEvent[];
 }
 
@@ -148,6 +176,7 @@ export async function proposeCodexTask(
       ...existing,
       correlationId: input.correlationId ?? existing.correlationId,
       title: input.title ?? existing.title,
+      surface: input.surface ?? existing.surface,
       prompt: input.prompt || existing.prompt,
       reason: input.reason ?? existing.reason,
       requester: input.requester ?? existing.requester,
@@ -164,6 +193,7 @@ export async function proposeCodexTask(
     id: makeCodexTaskId(input.repo, input.pullRequestNumber, now),
     status: "proposed",
     repo: input.repo,
+    ...(input.surface ? { surface: input.surface } : {}),
     agent: input.agent ?? "codex",
     ...(input.pullRequestNumber !== undefined ? { pullRequestNumber: input.pullRequestNumber } : {}),
     ...(input.correlationId ? { correlationId: input.correlationId } : {}),
@@ -370,6 +400,7 @@ export async function completeCodexTask(
     exitCode?: number;
     stdoutTail?: string;
     stderrTail?: string;
+    routingOutcome?: Partial<CodexTaskRoutingOutcome>;
   } = {}
 ): Promise<CodexTask | undefined> {
   const path = queuePath(deps.path);
@@ -387,6 +418,7 @@ export async function completeCodexTask(
     ...(typeof deps.exitCode === "number" ? { exitCode: deps.exitCode } : {}),
     ...(deps.stdoutTail ? { stdoutTail: deps.stdoutTail } : {}),
     ...(deps.stderrTail ? { stderrTail: deps.stderrTail } : {}),
+    routingOutcome: buildTaskRoutingOutcome(existing, now, deps.routingOutcome?.outcome ?? "opened_pr", deps.routingOutcome),
     progressMessage: deps.completionSummary ?? `${taskAgentEventLabel(taskAgent(existing))} runner completed the task.`,
     progressAt: now,
     events: appendTaskEvent(existing, {
@@ -408,6 +440,7 @@ export async function failCodexTask(
     exitCode?: number;
     stdoutTail?: string;
     stderrTail?: string;
+    routingOutcome?: Partial<CodexTaskRoutingOutcome>;
   } = {}
 ): Promise<CodexTask | undefined> {
   const path = queuePath(deps.path);
@@ -427,6 +460,7 @@ export async function failCodexTask(
     ...(typeof deps.exitCode === "number" ? { exitCode: deps.exitCode } : {}),
     ...(deps.stdoutTail ? { stdoutTail: deps.stdoutTail } : {}),
     ...(deps.stderrTail ? { stderrTail: deps.stderrTail } : {}),
+    routingOutcome: buildTaskRoutingOutcome(existing, now, deps.routingOutcome?.outcome ?? "failed", deps.routingOutcome),
     progressMessage: failureReason,
     progressAt: now,
     events: appendTaskEvent(existing, {
@@ -684,6 +718,72 @@ function appendTaskEvent(task: CodexTask, event: CodexTaskEvent): CodexTaskEvent
   return [...(task.events ?? []), event]
     .filter((entry) => entry.at && entry.status && entry.message)
     .slice(-25);
+}
+
+function buildTaskRoutingOutcome(
+  task: CodexTask,
+  recordedAt: string,
+  outcome: CodexTaskRoutingOutcomeKind,
+  overrides: Partial<CodexTaskRoutingOutcome> | undefined,
+): CodexTaskRoutingOutcome {
+  const tokenUsage = cleanRoutingTokenUsage(overrides?.tokenUsage);
+  const durationMs = cleanNonNegativeNumber(overrides?.durationMs)
+    ?? durationBetween(task.startedAt, recordedAt);
+  return {
+    agent: taskAgent({ agent: overrides?.agent ?? task.agent }),
+    surface: normalizeRoutingSurface(overrides?.surface ?? task.surface ?? inferredTaskSurface(task)),
+    outcome,
+    ...(typeof overrides?.ciPassed === "boolean" ? { ciPassed: overrides.ciPassed } : {}),
+    ...(typeof overrides?.merged === "boolean" ? { merged: overrides.merged } : {}),
+    ...(typeof overrides?.reverted === "boolean" ? { reverted: overrides.reverted } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
+    ...(tokenUsage ? { tokenUsage } : {}),
+    recordedAt,
+    evidence: "runner_completion",
+    truthBoundary: "Recorded from the runner completion path. PR merge/revert and CI results are present only when an upstream caller supplied that evidence.",
+  };
+}
+
+function inferredTaskSurface(task: Pick<CodexTask, "title" | "routingReason" | "prompt">): string {
+  const titleSurface = task.title?.match(/^Hermes routed work:\s*(.+)$/i)?.[1]?.trim();
+  if (titleSurface) return titleSurface;
+  return "general";
+}
+
+function normalizeRoutingSurface(value: string | undefined): string {
+  const normalized = value?.trim().toLowerCase().replace(/[^a-z0-9/._ -]+/g, " ").replace(/\s+/g, " ").trim();
+  return normalized || "general";
+}
+
+function cleanRoutingTokenUsage(value: CodexTaskRoutingTokenUsage | undefined): CodexTaskRoutingTokenUsage | undefined {
+  if (!value) return undefined;
+  const inputTokens = cleanNonNegativeNumber(value.inputTokens);
+  const outputTokens = cleanNonNegativeNumber(value.outputTokens);
+  const cacheTokens = cleanNonNegativeNumber(value.cacheTokens);
+  const totalTokens = cleanNonNegativeNumber(value.totalTokens)
+    ?? [inputTokens, outputTokens, cacheTokens].reduce<number>((sum, item) => sum + (item ?? 0), 0);
+  const costUsd = cleanNonNegativeNumber(value.costUsd);
+  const tokenUsage: CodexTaskRoutingTokenUsage = {
+    ...(value.model ? { model: value.model } : {}),
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(cacheTokens !== undefined ? { cacheTokens } : {}),
+    ...(totalTokens > 0 ? { totalTokens } : {}),
+    ...(costUsd !== undefined ? { costUsd } : {}),
+  };
+  return Object.keys(tokenUsage).length > 0 ? tokenUsage : undefined;
+}
+
+function cleanNonNegativeNumber(value: number | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function durationBetween(start: string | undefined, end: string | undefined): number | undefined {
+  if (!start || !end) return undefined;
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return undefined;
+  return endMs - startMs;
 }
 
 function isCodexTask(value: unknown): value is CodexTask {

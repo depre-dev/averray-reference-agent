@@ -53,11 +53,24 @@ describe("planAndRouteWork", () => {
     expect(proposals.every((proposal) => proposal.dedupeKey.length > 0 && proposal.taskPrompt.length > 0)).toBe(true);
   });
 
-  it("asserts when the injected classifier violates the routing taxonomy", () => {
-    expect(() => planAndRouteWork(input({
+  it("keeps hard taxonomy authoritative when the classifier or learned memory disagrees", () => {
+    const proposals = planAndRouteWork(input({
       backlog: [item("Escrow settlement proof", "chain/settlement", "Verify invariants")],
       classify: () => ({ agent: "claude", riskTier: "low", reason: "wrong agent" }),
-    }))).toThrow(/routing_taxonomy_violation/);
+      routingScores: {
+        "chain/settlement": {
+          claude: { status: "baseline_available", score: 99, samples: 4 },
+          codex: { status: "baseline_available", score: 10, samples: 4 },
+        },
+      },
+    }));
+
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]).toMatchObject({
+      surface: "chain/settlement",
+      agent: "codex",
+    });
+    expect(proposals[0]?.whyAgent).toContain("Hard taxonomy kept chain/settlement with codex");
   });
 
   it("does not re-propose gaps covered by in-flight or recently-done tasks", () => {
@@ -105,6 +118,59 @@ describe("planAndRouteWork", () => {
       backlog: [item("Monitor drawer polish", "ui", "Tighten drawer")],
       policy: { ...POLICY, allowedAgents: ["codex"] },
     }))).toEqual([]);
+  });
+
+  it("prefers the higher learned score on soft surfaces only", () => {
+    const proposals = planAndRouteWork(input({
+      backlog: [item("Ops hygiene", "ops hygiene", "Tighten the routine guard")],
+      routingScores: {
+        "ops hygiene": {
+          codex: { status: "baseline_available", score: 88, samples: 3 },
+          claude: { status: "baseline_available", score: 42, samples: 3 },
+        },
+      },
+    }));
+
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]).toMatchObject({
+      surface: "ops hygiene",
+      agent: "codex",
+    });
+    expect(proposals[0]?.whyAgent).toContain("Learned routing preferred codex");
+  });
+
+  it("falls back to static routing when learned surface data is sparse", () => {
+    const proposals = planAndRouteWork(input({
+      backlog: [item("Ops hygiene", "ops hygiene", "Tighten the routine guard")],
+      routingScores: {
+        "ops hygiene": {
+          codex: { status: "baseline_available", score: 88, samples: 3 },
+          claude: { status: "insufficient_data", score: null, samples: 1 },
+        },
+      },
+    }));
+
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]).toMatchObject({
+      surface: "ops hygiene",
+      agent: "claude",
+    });
+    expect(proposals[0]?.whyAgent).toContain("insufficient ops hygiene data");
+  });
+
+  it("does not route around dispatch policy when learned memory picks a blocked agent", () => {
+    const proposals = planAndRouteWork(input({
+      backlog: [item("Ops hygiene", "ops hygiene", "Tighten the routine guard")],
+      policy: { ...POLICY, allowedAgents: ["claude"] },
+      routingScores: {
+        "ops hygiene": {
+          codex: { status: "baseline_available", score: 88, samples: 3 },
+          claude: { status: "baseline_available", score: 42, samples: 3 },
+        },
+      },
+    }));
+
+    expect(proposals).toEqual([]);
   });
 
   it("returns an empty array when there are no real gaps", () => {
