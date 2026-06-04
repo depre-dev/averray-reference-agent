@@ -46,8 +46,8 @@ describe("CoPilotRail", () => {
     const fetcher = vi.fn(async () => [msg("1", "hermes", "Pre-check passed on #548.")]);
     const { container } = render(<CoPilotRail collaboration={{ fetcher, refreshIntervalMs: 0 }} />, { wrapper });
     await waitFor(() => expect(within(container).getByText(/Pre-check passed on #548/)).toBeTruthy());
-    expect(within(container).getAllByText("Hermes").length).toBeGreaterThan(0);
-    expect(within(container).getAllByText(/reply/).length).toBeGreaterThan(0);
+    expect(within(container).getByText("Hermes → everyone")).toBeTruthy();
+    expect(within(container).getAllByText(/chat/).length).toBeGreaterThan(0);
     expect(container.querySelector(".hm-turn-time")).toBeTruthy();
   });
 
@@ -58,13 +58,13 @@ describe("CoPilotRail", () => {
     ]);
     const { container } = render(<CoPilotRail collaboration={{ fetcher, refreshIntervalMs: 0 }} />, { wrapper });
     await waitFor(() => expect(within(container).getByText(/Template answer from the board/)).toBeTruthy());
-    expect(within(container).getAllByText("Hermes (offline — templated)").length).toBeGreaterThan(0);
+    expect(within(container).getAllByText("Hermes (offline — templated) → everyone").length).toBeGreaterThan(0);
     expect(within(container).getAllByText(/replies are templated/)).toHaveLength(1);
   });
 
   test("is inert (no fetch, empty-state copy) when collaboration is omitted", () => {
     const { getByText } = render(<CoPilotRail />, { wrapper });
-    expect(getByText(/No real Hermes activity has been logged yet/)).toBeTruthy();
+    expect(getByText("No agent chatter yet.")).toBeTruthy();
   });
 
   test("the scope chip reflects the focused card", async () => {
@@ -86,7 +86,7 @@ describe("CoPilotRail", () => {
       <CoPilotRail focusedCard={card548} collaboration={{ fetcher, poster, refreshIntervalMs: 0 }} />,
       { wrapper },
     );
-    await waitFor(() => expect(within(container).getByText(/No real Hermes activity has been logged yet/)).toBeTruthy());
+    await waitFor(() => expect(within(container).getByText("No agent chatter yet.")).toBeTruthy());
 
     const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "what's blocking?" } });
@@ -94,6 +94,7 @@ describe("CoPilotRail", () => {
 
     expect(poster).toHaveBeenCalledWith({
       text: "what's blocking?",
+      addressedTo: "everyone",
       relatedPr: { repo: "depre-dev/agent", number: 548 },
     });
     // Hermes's reply lands on the revalidate triggered by ask().
@@ -114,38 +115,21 @@ describe("CoPilotRail", () => {
     expect(onSpawnMission).toHaveBeenCalledWith("https://staging.averray.com/x");
   });
 
-  test("shows proactive board activity and links it back to a card", () => {
+  test("shows the current board summary and links it back to a card", () => {
     const onCardClick = vi.fn();
-    const taskCard: BoardCard = {
-      ...card548,
-      id: "task-activity-1",
-      type: "task",
-      agentType: "codex",
-      title: "Repair failed mission",
-      summary: "Hermes self-healing proposal for a failed testbed mission.",
-      lane: "codex-needed",
-      prompt: "Repair the failed mission.",
-      taskStatus: "proposed",
-      riskTier: "low",
-    };
-    const { container, getAllByText, getByText, getByRole } = render(
+    const { getByText, getByRole } = render(
       <CoPilotRail
-        boardCards={[taskCard]}
+        boardCards={[card548]}
         boardBanner={banner}
         onCardClick={onCardClick}
         collaboration={{ fetcher: async () => [], refreshIntervalMs: 0 }}
       />,
       { wrapper },
     );
-    const activityText = getByText(/Proposed Codex work for Repair failed mission/);
-    expect(activityText).toBeTruthy();
-    expect(activityText.closest(".hm-turn-body")).toBeTruthy();
-    expect(getAllByText(/narration/).length).toBeGreaterThan(0);
-    fireEvent.click(getByRole("button", { name: "Open referenced card task-activity-1" }));
-    expect(onCardClick).toHaveBeenCalledWith("task-activity-1");
-    fireEvent.click(getByRole("button", { name: "Why this route?" }));
-    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
-    expect(input.value).toBe("Why this route?");
+    expect(getByText(/Needs you:/)).toBeTruthy();
+    expect(getByText(/Operator review is waiting on agent #548/)).toBeTruthy();
+    fireEvent.click(getByRole("button", { name: "Open referenced card agent #548" }));
+    expect(onCardClick).toHaveBeenCalledWith("agent #548");
   });
 
   test("card-scoped collaboration messages render with a real card pin", async () => {
@@ -164,10 +148,81 @@ describe("CoPilotRail", () => {
       { wrapper },
     );
     await waitFor(() => expect(within(container).getByText(/What is still blocking this/)).toBeTruthy());
-    expect(within(container).getByText("Pascal")).toBeTruthy();
-    expect(within(container).getByText(/question/)).toBeTruthy();
+    expect(within(container).getByText("You → everyone")).toBeTruthy();
+    expect(within(container).getAllByText(/chat/).length).toBeGreaterThan(0);
     fireEvent.click(getByRole("button", { name: "Open referenced card agent #548" }));
     expect(onCardClick).toHaveBeenCalledWith("agent #548");
+  });
+
+  test("renders a multi-agent room with directed turns and kind ranking", async () => {
+    const fetcher = vi.fn(async () => [
+      msg("codex-help", "codex", "Need a second read on the deploy edge.", {
+        kind: "request_help",
+        addressedTo: "claude",
+      }),
+      msg("claude-status", "claude", "I am reading the trace.", {
+        kind: "status",
+        addressedTo: "hermes",
+      }),
+      msg("tester-proposal", "test-writer", "Add a browser auth regression.", {
+        kind: "proposal",
+        addressedTo: "everyone",
+      }),
+      msg("security-chat", "security", "Secrets stay isolated.", { addressedTo: "docs" }),
+      msg("docs-chat", "docs", "Runbook note is ready.", { addressedTo: "operator" }),
+      msg("system-chat", "system", "Board snapshot refreshed.", { addressedTo: "everyone" }),
+    ]);
+    const { container } = render(<CoPilotRail collaboration={{ fetcher, refreshIntervalMs: 0 }} />, { wrapper });
+    await waitFor(() => expect(within(container).getByText("Codex → Claude")).toBeTruthy());
+    expect(within(container).getByText("Claude → Hermes")).toBeTruthy();
+    expect(within(container).getByText("Test-writer → everyone")).toBeTruthy();
+    expect(within(container).getByText("Security → Docs")).toBeTruthy();
+    expect(within(container).getByText("Docs → You")).toBeTruthy();
+    expect(within(container).getByText("System → everyone")).toBeTruthy();
+    expect(container.querySelector(".hm-turn--kind-request_help")?.className).toContain("hm-turn--rank-prominent");
+    expect(container.querySelector(".hm-turn--kind-status")?.className).toContain("hm-turn--rank-muted");
+  });
+
+  test("threads collaboration turns by their related card/task reference", async () => {
+    const onCardClick = vi.fn();
+    const fetcher = vi.fn(async () => [
+      msg("operator-question", "operator", "Can this move?", {
+        relatedPr: { repo: "depre-dev/agent", number: 548 },
+      }),
+      msg("hermes-reply", "hermes", "It needs one more review.", {
+        addressedTo: "operator",
+        relatedPr: { repo: "depre-dev/agent", number: 548 },
+      }),
+    ]);
+    const { container, getByRole } = render(
+      <CoPilotRail
+        boardCards={[card548]}
+        onCardClick={onCardClick}
+        collaboration={{ fetcher, refreshIntervalMs: 0 }}
+      />,
+      { wrapper },
+    );
+    await waitFor(() => expect(within(container).getByText("Thread · depre-dev/agent #548")).toBeTruthy());
+    expect(within(container).getByText("2 turns")).toBeTruthy();
+    fireEvent.click(getByRole("button", { name: "Open referenced card agent #548" }));
+    expect(onCardClick).toHaveBeenCalledWith("agent #548");
+  });
+
+  test("the composer can address a specific agent through the collaboration target field", async () => {
+    const poster = vi.fn(async () => undefined);
+    const { container, getByLabelText } = render(
+      <CoPilotRail collaboration={{ fetcher: async () => [], poster, refreshIntervalMs: 0 }} />,
+      { wrapper },
+    );
+    const target = getByLabelText("Message target") as HTMLSelectElement;
+    fireEvent.change(target, { target: { value: "codex" } });
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "please inspect this" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(poster).toHaveBeenCalledWith({
+      text: "please inspect this",
+      addressedTo: "codex",
+    });
   });
 });
 

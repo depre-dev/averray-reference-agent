@@ -37,8 +37,30 @@ describe("useCollaboration", () => {
       result.current.ask("what's blocking?", { repo: "depre-dev/agent", number: 548 });
     });
 
-    expect(poster).toHaveBeenCalledWith({ text: "what's blocking?", relatedPr: { repo: "depre-dev/agent", number: 548 } });
+    expect(poster).toHaveBeenCalledWith({
+      text: "what's blocking?",
+      addressedTo: "hermes",
+      relatedPr: { repo: "depre-dev/agent", number: 548 },
+    });
     await waitFor(() => expect(result.current.messages.map((m) => m.id)).toEqual(["q", "a"]));
+  });
+
+  test("ask can address a non-Hermes collaboration target", async () => {
+    const poster = vi.fn(async () => {});
+    const { result } = renderHook(
+      () => useCollaboration({ fetcher: async () => [], poster, refreshIntervalMs: 0 }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => result.current.ask("please inspect this", undefined, "codex"));
+
+    expect(poster).toHaveBeenCalledWith({ text: "please inspect this", addressedTo: "codex" });
+    expect(result.current.messages.at(-1)).toMatchObject({
+      author: "operator",
+      addressedTo: "codex",
+      text: "please inspect this",
+    });
   });
 
   test("a blank question does not post", async () => {

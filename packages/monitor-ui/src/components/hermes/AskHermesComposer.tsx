@@ -8,9 +8,10 @@
 // Enter sends, Shift+Enter inserts a newline. Parsing lives in the pure
 // hermes-commands helper; this component owns only input + dispatch.
 
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { parseHermesInput } from "../../lib/monitor/hermes-commands.js";
 import type { CreateTaskInput } from "../../lib/monitor/card-types.js";
+import type { CollaborationTarget } from "../../lib/monitor/collaboration.js";
 
 export interface AskHermesComposerProps {
   /** Spawn a browser mission against a URL (/mission <url>). */
@@ -20,7 +21,7 @@ export interface AskHermesComposerProps {
   /** Propose a task (/task <agent> [<repo>#<pr>] <prompt>). */
   onCreateTask?: (input: CreateTaskInput) => void;
   /** Ask Hermes a free-form question, scoped to the focused card or the whole board. */
-  onAsk?: (text: string, opts?: { scope: "card" | "board" }) => void;
+  onAsk?: (text: string, opts?: { scope: "card" | "board"; target: CollaborationTarget }) => void;
   /** Prefill the composer with this text (e.g. a suggestion chip). */
   prefill?: string;
   /** Bump to (re)apply `prefill` into the input + focus it. */
@@ -49,6 +50,23 @@ export interface AskHermesComposerProps {
   /** Inline error when the POST itself failed (question didn't send). */
   sendError?: string | null;
 }
+
+const TARGET_OPTIONS: Array<{ value: CollaborationTarget; label: string }> = [
+  { value: "everyone", label: "@everyone" },
+  { value: "codex", label: "@codex" },
+  { value: "claude", label: "@claude" },
+  { value: "hermes", label: "@hermes" },
+];
+
+const TARGET_SELECT_STYLE: CSSProperties = {
+  border: 0,
+  background: "transparent",
+  color: "inherit",
+  font: "inherit",
+  fontWeight: 700,
+  textTransform: "none",
+  outline: "none",
+};
 
 export function AskHermesComposer({
   onSpawnMission,
@@ -84,6 +102,7 @@ export function AskHermesComposer({
   // focused there's nothing to scope to, so it's board-only.
   const [scopeToCard, setScopeToCard] = useState(true);
   const effectiveScope: "card" | "board" = focusedCardId && scopeToCard ? "card" : "board";
+  const [target, setTarget] = useState<CollaborationTarget>("everyone");
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // The board's `a` shortcut bumps focusToken to bring focus here.
@@ -173,7 +192,7 @@ export function AskHermesComposer({
         if (!collaborationEnabled) {
           setError("Ask Hermes unavailable — the collaboration channel is offline.");
         } else if (onAsk) {
-          onAsk(command.text, { scope: effectiveScope });
+          onAsk(command.text, { scope: effectiveScope, target });
           setValue("");
           setError(null);
         } else {
@@ -193,10 +212,19 @@ export function AskHermesComposer({
   return (
     <div className="hm-compose">
       <div className="hm-compose-toolbar">
-        {/* Honest recipient label: a question posts to the Hermes collaboration
-            channel as the operator. Targeting other agents isn't a wired action,
-            so this is informational, not a fake toggle. */}
-        <span className="hm-compose-chip is-on">to · Hermes</span>
+        <label className="hm-compose-chip is-on" title="Choose who the room message addresses">
+          to ·{" "}
+          <select
+            aria-label="Message target"
+            value={target}
+            onChange={(event) => setTarget(event.target.value as CollaborationTarget)}
+            style={TARGET_SELECT_STYLE}
+          >
+            {TARGET_OPTIONS.map((option) => (
+              <option value={option.value} key={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
         {/* Scope toggle: actually controls whether a question is scoped to the
             focused card or the whole board on send. Board-only with no card. */}
         {focusedCardId ? (

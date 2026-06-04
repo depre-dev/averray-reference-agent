@@ -8,7 +8,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
-import type { CollaborationMessage, CollaborationRelatedPr } from "../lib/monitor/collaboration.js";
+import type { CollaborationMessage, CollaborationRelatedPr, CollaborationTarget } from "../lib/monitor/collaboration.js";
 
 const DEFAULT_URL = "/monitor/collaboration";
 const DEFAULT_REFRESH_MS = 4000;
@@ -16,6 +16,7 @@ const DEFAULT_REFRESH_MS = 4000;
 export interface AskInput {
   text: string;
   relatedPr?: CollaborationRelatedPr;
+  addressedTo?: CollaborationTarget;
 }
 
 export interface UseCollaborationOptions {
@@ -31,7 +32,7 @@ export interface UseCollaborationOptions {
 export interface CollaborationState {
   messages: CollaborationMessage[];
   /** Ask Hermes; optionally scoped to a PR. Records + triggers a revalidate. */
-  ask: (text: string, relatedPr?: CollaborationRelatedPr) => void;
+  ask: (text: string, relatedPr?: CollaborationRelatedPr, addressedTo?: CollaborationTarget) => void;
   isLoading: boolean;
   error: unknown;
   /** Whether the rail is wired to a live collaboration channel at all. */
@@ -61,7 +62,7 @@ function makeDefaultPoster(url: string): (input: AskInput) => Promise<void> {
       body: JSON.stringify({
         author: "operator",
         kind: "chat",
-        addressedTo: "hermes",
+        addressedTo: input.addressedTo ?? "hermes",
         text: input.text,
         ...(input.relatedPr ? { relatedPr: input.relatedPr } : {}),
       }),
@@ -108,7 +109,7 @@ export function useCollaboration(opts: UseCollaborationOptions = {}): Collaborat
   const clearSendError = useCallback(() => setSendError(null), []);
 
   const ask = useCallback(
-    (text: string, relatedPr?: CollaborationRelatedPr) => {
+    (text: string, relatedPr?: CollaborationRelatedPr, addressedTo: CollaborationTarget = "hermes") => {
       const trimmed = text.trim();
       if (!trimmed || !enabled) return;
       seq.current += 1;
@@ -119,13 +120,13 @@ export function useCollaboration(opts: UseCollaborationOptions = {}): Collaborat
         author: "operator",
         kind: "chat",
         text: trimmed,
-        addressedTo: "hermes",
+        addressedTo,
         ...(relatedPr ? { relatedPr } : {}),
       };
       setOptimistic((prev) => [...prev, optimisticMessage]);
       setSendError(null);
       setPending(true);
-      void poster({ text: trimmed, ...(relatedPr ? { relatedPr } : {}) })
+      void poster({ text: trimmed, addressedTo, ...(relatedPr ? { relatedPr } : {}) })
         .then(() => mutate())
         .catch(() => {
           // Do NOT swallow: roll back the optimistic message and surface
