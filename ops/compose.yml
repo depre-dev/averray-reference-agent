@@ -299,6 +299,13 @@ services:
       # settlement stays operator-gated in the hermes container. Testnet only.
       AGENT_WALLET_PRIVATE_KEY: ${AGENT_WALLET_PRIVATE_KEY}
       WALLET_NETWORK: testnet
+      # Citation-repair workflow preflight also reads the shared policy store
+      # (DATABASE_URL — mutation-policy checks prior claim/submit attempts;
+      # missing it surfaces as policy_store_unavailable) and records handoff
+      # events + reads the policy config. Read-only on dry-run; same shared DB.
+      DATABASE_URL: ${DATABASE_URL}
+      AVERRAY_HANDOFF_EVENTS_PATH: ${AVERRAY_HANDOFF_EVENTS_PATH:-/data/handoff-events.jsonl}
+      POLICY_CONFIG_PATH: /config/policy.yaml
       # T4 live gold-path driver. Default is off so CI/test deploys keep the
       # deterministic fake path; when enabled the runner invokes Claude with
       # Playwright-MCP/browser tooling and writes a structured report.
