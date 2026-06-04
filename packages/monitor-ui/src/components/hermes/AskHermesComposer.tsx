@@ -12,6 +12,7 @@ import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } f
 import { parseHermesInput } from "../../lib/monitor/hermes-commands.js";
 import type { CreateTaskInput } from "../../lib/monitor/card-types.js";
 import type { CollaborationTarget } from "../../lib/monitor/collaboration.js";
+import { Button } from "../ui.js";
 
 export interface AskHermesComposerProps {
   /** Spawn a browser mission against a URL (/mission <url>). */
@@ -283,15 +284,15 @@ export function AskHermesComposer({
           }}
           onKeyDown={onKeyDown}
         />
-        <button
-          type="button"
+        <Button
+          variant="primary"
           className="hm-compose-send"
           onClick={send}
           disabled={inputDisabled}
           title={inputDisabled ? "Ask Hermes unavailable" : undefined}
         >
           Send <span className="hm-kbd">⏎</span>
-        </button>
+        </Button>
       </div>
       {!collaborationEnabled ? (
         <div className="hm-compose-note" role="note" style={{ color: "var(--hm-muted)", fontSize: 12, marginTop: 6 }}>

@@ -17,6 +17,7 @@
 
 import type { ReactNode } from "react";
 import type { BoardCard } from "../../lib/monitor/card-types.js";
+import { Badge, Button, CardHeader, type StateVariant } from "../ui.js";
 
 export type DegradedCardKind = "failed-fetch" | "source-offline";
 
@@ -48,20 +49,12 @@ export function DegradedCard({ card, body, pills, action, onAction, onClick }: D
       role={onClick ? "button" : "article"}
       aria-label={`${card.id} — ${isErr ? "error" : "offline"}: ${card.title}`}
     >
-      <div className="hm-card-head">
-        <span className="hm-card-id">
-          <span className="agent-dot agent-dot--ext" aria-hidden />
-          <strong className="hm-mono">{card.id}</strong>
-        </span>
-        <span className="hm-card-fresh">
-          <span
-            className="fresh-dot"
-            style={{ background: isErr ? "var(--hm-rose)" : "var(--hm-offline)" }}
-            aria-hidden
-          />
-          {isErr ? "ERROR" : "OFFLINE"}
-        </span>
-      </div>
+      <CardHeader
+        agent="ext"
+        id={card.id}
+        status={isErr ? "ERROR" : "OFFLINE"}
+        statusVariant={isErr ? "fail" : "degraded"}
+      />
 
       <div className="hm-card-title" style={{ color: isErr ? "var(--hm-rose)" : "var(--hm-muted)" }}>
         {body}
@@ -69,16 +62,16 @@ export function DegradedCard({ card, body, pills, action, onAction, onClick }: D
 
       <div className="hm-pillrow">
         {pills.map(([cls, label]) => (
-          <span key={label} className={"hm-pill " + cls}>
+          <Badge key={label} variant={pillVariantFromClass(cls)} className={cls}>
             {label}
-          </span>
+          </Badge>
         ))}
       </div>
 
       <div className="hm-card-cta">
-        <button
-          type="button"
-          className="hm-btn hm-btn--ghost hm-btn--sm"
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={(e) => {
             e.stopPropagation();
             onAction?.();
@@ -86,8 +79,17 @@ export function DegradedCard({ card, body, pills, action, onAction, onClick }: D
           disabled={!onAction}
         >
           {action}
-        </button>
+        </Button>
       </div>
     </div>
   );
+}
+
+function pillVariantFromClass(cls: string): StateVariant {
+  if (cls.includes("--err")) return "fail";
+  if (cls.includes("--offline")) return "degraded";
+  if (cls.includes("--running")) return "pending";
+  if (cls.includes("--ok")) return "pass";
+  if (cls.includes("--info")) return "info";
+  return "neutral";
 }
