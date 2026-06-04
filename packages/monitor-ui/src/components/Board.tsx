@@ -52,6 +52,12 @@ export const ACTION_EXPANDED: ReadonlySet<LaneId> = new Set<LaneId>([
 export type BoardProps = {
   /** Lane → card[] grouping from `groupByLane(cards)`. */
   grouped: Record<LaneKey, BoardCard[]>;
+  /** Optional lane subset, preserving canonical descriptor order. */
+  lanes?: readonly LaneId[];
+  /** Accessible label for this lane group. */
+  ariaLabel?: string;
+  /** Optional class hook for tier-specific layout. */
+  className?: string;
   /** Initial expansion when Board is uncontrolled. */
   initialExpanded?: ReadonlySet<LaneId>;
   /** Controlled expansion. When provided, Board defers to the parent
@@ -71,6 +77,9 @@ export type BoardProps = {
 
 export function Board({
   grouped,
+  lanes,
+  ariaLabel = "Lane grid",
+  className,
   initialExpanded = DEFAULT_EXPANDED,
   expanded: controlledExpanded,
   onToggleLane,
@@ -98,9 +107,13 @@ export function Board({
     [isControlled, onToggleLane],
   );
 
+  const laneSet = lanes ? new Set<LaneId>(lanes) : null;
+  const descriptors = laneSet ? LANE_DESCRIPTORS.filter((lane) => laneSet.has(lane.id)) : LANE_DESCRIPTORS;
+  const classes = ["hm-lanes", className].filter(Boolean).join(" ");
+
   return (
-    <div className="hm-lanes" role="region" aria-label="Lane grid">
-      {LANE_DESCRIPTORS.map((lane) => {
+    <div className={classes} role="region" aria-label={ariaLabel}>
+      {descriptors.map((lane) => {
         const cards = grouped[lane.id] ?? [];
         const isExpanded = expanded.has(lane.id);
         const customBody = renderLaneBody?.(lane.id, cards);

@@ -178,6 +178,8 @@ describe("MonitorPage — container", () => {
         />,
         { wrapper },
       );
+      await waitFor(() => expect(getByRole("button", { name: /Utilities/ })).toBeTruthy());
+      fireEvent.click(getByRole("button", { name: /Utilities/ }));
       await waitFor(() => expect(getByRole("button", { name: "Start a mission" })).toBeTruthy());
 
       fireEvent.click(getByRole("button", { name: "Start a mission" }));
@@ -219,6 +221,8 @@ describe("MonitorPage — container", () => {
         />,
         { wrapper },
       );
+      await waitFor(() => expect(getByRole("button", { name: /Utilities/ })).toBeTruthy());
+      fireEvent.click(getByRole("button", { name: /Utilities/ }));
       await waitFor(() => expect(getByRole("button", { name: "Start a mission" })).toBeTruthy());
 
       fireEvent.click(getByRole("button", { name: "Start a mission" }));
@@ -272,6 +276,8 @@ describe("MonitorPage — container", () => {
         />,
         { wrapper },
       );
+      await waitFor(() => expect(getByRole("button", { name: /Utilities/ })).toBeTruthy());
+      fireEvent.click(getByRole("button", { name: /Utilities/ }));
       await waitFor(() => expect(getByRole("button", { name: "Run" })).toBeTruthy());
 
       fireEvent.click(getByRole("button", { name: "Run" }));
