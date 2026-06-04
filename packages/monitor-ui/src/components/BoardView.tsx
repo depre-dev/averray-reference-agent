@@ -13,7 +13,7 @@
 //       <div.hm-lanes-wrap>
 //         <LanesBar />           search + filter chips + urgency label
 //         <UtilityBar />         collapsed tester / suites / LLM usage
-//         <BoardTier />          DECIDE / WATCH / HIDE lane groups
+//         <Board />              kanban lanes, cards via <CardRouter>
 //       <CoPilotRail />          live narration + Ask-Hermes
 //   <DetailDrawer />             when ?card= resolves
 //   <KeyboardOverlay />          when ? is pressed
@@ -52,17 +52,10 @@ import { Badge, Button } from "./ui.js";
 const OPERATOR_CARD_SNOOZE_MS = 30 * 60_000;
 
 const ALL_LANES = LANES as readonly LaneId[];
-const DECIDE_LANES = ["needs-attention", "operator-review"] as const satisfies readonly LaneId[];
-const WATCH_LANES = ["codex-needed", "hermes-checking", "deploying"] as const satisfies readonly LaneId[];
-const HIDE_LANES = ["drafts", "release-queue", "done"] as const satisfies readonly LaneId[];
 
 /** Lanes that currently hold at least one card. */
 function lanesWithCards(grouped: Partial<Record<LaneId, BoardCard[]>>): LaneId[] {
   return ALL_LANES.filter((lane) => (grouped[lane]?.length ?? 0) > 0);
-}
-
-function hasCards(grouped: Partial<Record<LaneId, BoardCard[]>>, lane: LaneId): boolean {
-  return (grouped[lane]?.length ?? 0) > 0;
 }
 
 function mustSurfaceCard(card: BoardCard): boolean {
@@ -80,17 +73,16 @@ function mustSurfaceLanes(grouped: Partial<Record<LaneId, BoardCard[]>>): LaneId
   return ALL_LANES.filter((lane) => (grouped[lane] ?? []).some(mustSurfaceCard));
 }
 
-// Operator-focus defaults: DECIDE + WATCH lanes with cards are open; quiet
-// history/author lanes stay reachable as rails unless a degraded/action card
-// forces them open. Filters still reveal matching lanes below.
+// Kanban defaults: every lane with cards opens in the single horizontal board;
+// empty lanes stay reachable as mini-rails. Degraded/action cards force their
+// lane open even after a manual collapse attempt.
 function expandedForBoard(
   _mode: BoardMode,
   grouped: Partial<Record<LaneId, BoardCard[]>>,
   alwaysOpen: readonly LaneId[] = [],
 ): Set<LaneId> {
   return new Set<LaneId>([
-    ...DECIDE_LANES.filter((lane) => hasCards(grouped, lane)),
-    ...WATCH_LANES.filter((lane) => hasCards(grouped, lane)),
+    ...lanesWithCards(grouped),
     ...mustSurfaceLanes(grouped),
     ...alwaysOpen,
   ]);
@@ -544,64 +536,20 @@ export function BoardView({
             onDismissSuite={onDismissSuite}
             onSpawnMission={onSpawnMission}
           />
-          <div className="hm-operator-board" aria-label="Operator workflow board">
-            <BoardTier
-              id="decide"
-              title="DECIDE"
-              description="What needs the operator."
-              count={tierCount(displayGrouped, DECIDE_LANES)}
-            >
-              <Board
-                grouped={displayGrouped}
-                lanes={DECIDE_LANES}
-                ariaLabel="DECIDE lane group"
-                className="hm-lanes--decide"
-                expanded={surfacedExpanded}
-                onToggleLane={onToggleLane}
-                renderCard={renderCard}
-                renderLaneBody={renderLaneBody}
-              />
-            </BoardTier>
-            <BoardTier
-              id="watch"
-              title="WATCH"
-              description="Agents and release automation still moving."
-              count={tierCount(displayGrouped, WATCH_LANES)}
-            >
-              <Board
-                grouped={displayGrouped}
-                lanes={WATCH_LANES}
-                ariaLabel="WATCH lane group"
-                className="hm-lanes--watch"
-                expanded={surfacedExpanded}
-                onToggleLane={onToggleLane}
-                renderLaneHeader={
-                  onCreateTask
-                    ? (id) => (id === "codex-needed" ? <CreateTaskForm onCreate={onCreateTask} /> : null)
-                    : undefined
-                }
-                renderCard={renderCard}
-                renderLaneBody={renderLaneBody}
-              />
-            </BoardTier>
-            <BoardTier
-              id="hide"
-              title="HIDE"
-              description="Quiet author work, branch protection, and release history."
-              count={tierCount(displayGrouped, HIDE_LANES)}
-            >
-              <Board
-                grouped={displayGrouped}
-                lanes={HIDE_LANES}
-                ariaLabel="HIDE lane group"
-                className="hm-lanes--hide"
-                expanded={surfacedExpanded}
-                onToggleLane={onToggleLane}
-                renderCard={renderCard}
-                renderLaneBody={renderLaneBody}
-              />
-            </BoardTier>
-          </div>
+          <Board
+            grouped={displayGrouped}
+            ariaLabel="Kanban lane grid"
+            className="hm-lanes--kanban"
+            expanded={surfacedExpanded}
+            onToggleLane={onToggleLane}
+            renderLaneHeader={
+              onCreateTask
+                ? (id) => (id === "codex-needed" ? <CreateTaskForm onCreate={onCreateTask} /> : null)
+                : undefined
+            }
+            renderCard={renderCard}
+            renderLaneBody={renderLaneBody}
+          />
         </div>
 
         <CoPilotRail
@@ -661,39 +609,6 @@ export function BoardView({
 
       {overlayOpen ? <KeyboardOverlay onClose={() => setOverlayOpen(false)} /> : null}
     </div>
-  );
-}
-
-function tierCount(grouped: Partial<Record<LaneId, BoardCard[]>>, lanes: readonly LaneId[]): number {
-  return lanes.reduce((sum, lane) => sum + (grouped[lane]?.length ?? 0), 0);
-}
-
-function BoardTier({
-  id,
-  title,
-  description,
-  count,
-  children,
-}: {
-  id: "decide" | "watch" | "hide";
-  title: string;
-  description: string;
-  count: number;
-  children: ReactNode;
-}) {
-  return (
-    <section className={`hm-board-tier hm-board-tier--${id}`} aria-label={title}>
-      <div className="hm-board-tier-head">
-        <div>
-          <span className="hm-board-tier-kicker">{title}</span>
-          <strong>{description}</strong>
-        </div>
-        <Badge variant={count > 0 ? (id === "decide" ? "pending" : "neutral") : "ghost"}>
-          {count} {count === 1 ? "card" : "cards"}
-        </Badge>
-      </div>
-      {children}
-    </section>
   );
 }
 
