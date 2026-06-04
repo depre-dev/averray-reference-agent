@@ -293,6 +293,12 @@ services:
       TESTBED_BASIC_AUTH_USER: ${TESTBED_BASIC_AUTH_USER:-}
       TESTBED_BASIC_AUTH_PASS: ${TESTBED_BASIC_AUTH_PASS:-}
       TESTBED_BASIC_AUTH_HOSTS: ${TESTBED_BASIC_AUTH_HOSTS:-app.averray.com}
+      # Worker wallet — citation_repair / gold-path dry-run preflight calls
+      # wallet_status (reads AGENT_WALLET_PRIVATE_KEY) to derive the address.
+      # Board citation_repair runs are read-only/dry-run; real claim/submit
+      # settlement stays operator-gated in the hermes container. Testnet only.
+      AGENT_WALLET_PRIVATE_KEY: ${AGENT_WALLET_PRIVATE_KEY}
+      WALLET_NETWORK: testnet
       # T4 live gold-path driver. Default is off so CI/test deploys keep the
       # deterministic fake path; when enabled the runner invokes Claude with
       # Playwright-MCP/browser tooling and writes a structured report.
