@@ -113,7 +113,7 @@ export function buildDrawerFooter(card: BoardCard, deps: DrawerFooterDeps = {}):
     });
     buttons.push({
       key: "create-product-fix",
-      label: "Create product fix → Codex",
+      label: "Create product fix → Claude",
       kind: "action",
       ...(h.onCreateProductFix
         ? { run: () => h.onCreateProductFix!(card) }
