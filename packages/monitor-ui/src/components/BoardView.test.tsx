@@ -20,26 +20,26 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(container.querySelector(".hm-now--action")).toBeTruthy();
     expect(view.getByText(/your review decision/)).toBeTruthy();
     expect(view.getByText("sorted by next-action urgency")).toBeTruthy();
-    expect(view.getByRole("region", { name: "DECIDE" })).toBeTruthy();
-    expect(view.getByRole("region", { name: "WATCH" })).toBeTruthy();
-    expect(view.getByRole("region", { name: "HIDE" })).toBeTruthy();
+    expect(view.getByRole("region", { name: "Kanban lane grid" })).toBeTruthy();
     expect(container.querySelectorAll(".hm-lane").length).toBe(8);
     expect(view.getByRole("complementary", { name: "Hermes co-pilot" })).toBeTruthy();
   });
 
-  test("DECIDE/WATCH stay expanded while HIDE lanes collapse to reachable mini-rails", () => {
+  test("every lane with cards stays expanded in one Kanban row; empty lanes stay reachable mini-rails", () => {
     const { container } = render(<BoardView board={richBoard} status="open" />);
     const view = within(container);
     expect(view.getByRole("region", { name: "Needs attention lane" })).toBeTruthy();
+    expect(view.getByRole("region", { name: "Drafts lane" })).toBeTruthy();
     expect(view.getByRole("region", { name: "Codex needed lane" })).toBeTruthy();
     expect(view.getByRole("region", { name: "Hermes checking lane" })).toBeTruthy();
+    expect(view.getByRole("region", { name: "Release queue lane" })).toBeTruthy();
     expect(view.getByRole("region", { name: "Deploying lane" })).toBeTruthy();
-    expect(container.querySelectorAll("section.hm-lane").length).toBe(4);
-    expect(container.querySelectorAll(".hm-lane--collapsed").length).toBe(4);
+    expect(view.getByRole("region", { name: "Done lane" })).toBeTruthy();
+    expect(container.querySelectorAll("section.hm-lane").length).toBe(7);
+    expect(container.querySelectorAll(".hm-lane--collapsed").length).toBe(1);
 
-    expect(view.queryByText(/governance dispute UI/)).toBeNull();
-    fireEvent.click(view.getByRole("button", { name: /Drafts \(1 card\)/ }));
     expect(view.getByText(/governance dispute UI/)).toBeTruthy();
+    expect(view.getByRole("button", { name: /Operator review \(0 cards\)/ })).toBeTruthy();
   });
 
   test("renders the action card with one primary and Hermes verdict", () => {
@@ -100,7 +100,6 @@ describe("BoardView — rich-mix board (open stream)", () => {
     const view = within(container);
     expect(view.getByText("Verify onboarding flow on staging.averray.com")).toBeTruthy();
     expect(view.getByText(/Post-merge verify/)).toBeTruthy();
-    fireEvent.click(view.getByRole("button", { name: /Done \(11 cards\)/ }));
     expect(view.getAllByText("CLOSED").length).toBeGreaterThan(0);
   });
 
@@ -228,9 +227,9 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(container.querySelector(".hm-now--calm")).toBeTruthy();
     // The deploying lane (in-flight automation) is expanded and shows its body…
     expect(within(container).getByText(/Post-merge verify/)).toBeTruthy();
-    expect(container.querySelectorAll("section.hm-lane").length).toBe(1); // deploying
-    // …and empty/quiet lanes (including Done history) are mini-rails.
-    expect(container.querySelectorAll(".hm-lane--collapsed").length).toBe(7);
+    expect(container.querySelectorAll("section.hm-lane").length).toBe(2); // deploying + done
+    // …and empty lanes are mini-rails, so the full Kanban remains visible.
+    expect(container.querySelectorAll(".hm-lane--collapsed").length).toBe(6);
   });
 
   test("groups near-identical deploy verification cards without hiding attention cards", () => {
