@@ -4,6 +4,7 @@ import type { CodexTask } from "../../services/slack-operator/src/codex-task-que
 import {
   decideTaskHealthAction,
   runTaskHealthOnce,
+  summarizeTaskHealth,
   type TaskHealthConfig,
 } from "../../services/slack-operator/src/task-health.js";
 
@@ -258,6 +259,57 @@ describe("task health self-management", () => {
     expect(result).toMatchObject({
       action: "escalate",
       reason: "autopilot_suspended",
+    });
+  });
+
+  it("summarizes claimed-but-silent work as stuck, distinct from genuinely running", () => {
+    const now = new Date("2026-06-01T10:00:00.000Z");
+    const summary = summarizeTaskHealth([
+      task({
+        id: "running-stuck",
+        status: "running",
+        startedAt: "2026-06-01T09:40:00.000Z",
+        progressAt: "2026-06-01T09:40:00.000Z",
+        updatedAt: "2026-06-01T09:40:00.000Z",
+      }),
+      task({
+        id: "running-fresh",
+        status: "running",
+        startedAt: "2026-06-01T09:59:00.000Z",
+        progressAt: "2026-06-01T09:59:00.000Z",
+        updatedAt: "2026-06-01T09:59:00.000Z",
+      }),
+    ], {
+      config,
+      now,
+      sourceAvailable: true,
+    });
+
+    expect(summary).toMatchObject({
+      status: "stuck",
+      runningTasks: 2,
+      stuckTasks: 1,
+      runner: {
+        status: "missing",
+        reason: "no_runner_heartbeat",
+      },
+    });
+  });
+
+  it("marks task health unknown instead of zero when the queue source is unavailable", () => {
+    const summary = summarizeTaskHealth([], {
+      config,
+      now: new Date("2026-06-01T10:00:00.000Z"),
+      sourceAvailable: false,
+    });
+
+    expect(summary).toEqual({
+      status: "unknown",
+      runningTasks: 0,
+      stuckTasks: 0,
+      retryWaitingTasks: 0,
+      escalatedTasks: 0,
+      runner: { status: "unknown", reason: "task_queue_unavailable" },
     });
   });
 });

@@ -46,6 +46,45 @@ function slim(overrides: Partial<HermesBoardCardSnapshot> = {}): HermesBoardCard
   };
 }
 
+function routingTask(
+  id: string,
+  agent: "codex" | "claude",
+  surface: string,
+  outcome: "opened_pr" | "no_pr" | "failed",
+  recordedAt: string,
+  totalTokens: number,
+) {
+  return {
+    id,
+    schemaVersion: 1,
+    kind: "codex_task",
+    repo: "depre-dev/averray-reference-agent",
+    prompt: "route this work",
+    createdAt: recordedAt,
+    updatedAt: recordedAt,
+    agent,
+    surface,
+    status: outcome === "failed" ? "failed" : "completed",
+    startedAt: "2026-06-01T07:55:00.000Z",
+    completedAt: outcome === "failed" ? undefined : recordedAt,
+    failedAt: outcome === "failed" ? recordedAt : undefined,
+    routingOutcome: {
+      agent,
+      surface,
+      outcome,
+      durationMs: 10 * 60_000,
+      tokenUsage: {
+        model: `${agent}-model`,
+        inputTokens: totalTokens,
+        outputTokens: 0,
+        totalTokens,
+      },
+      recordedAt,
+      evidence: "runner_completion",
+    },
+  };
+}
+
 describe("normalizeLane", () => {
   it("maps every classifier label to the kebab-case enum", () => {
     expect(normalizeLane("Needs Attention")).toBe("needs-attention");
@@ -1835,13 +1874,106 @@ describe("synthesizeTaskCards (O3 — surface queued tasks)", () => {
 
     expect(automationHealthForBoard(raw, new Date("2026-06-01T12:00:00.000Z"), {
       HERMES_DISPATCH_PER_DAY_MAX: "5",
-    })).toEqual({
+    })).toMatchObject({
+      sourceStatus: "ok",
       selfHealingOpen: 1,
       dispatchUsedToday: 4,
       dispatchPerDayCap: 5,
       quietSignalCount: 0,
       selfHealingCapacitySignals: 0,
       taskHealthCapacitySignals: 0,
+      taskHealth: {
+        status: "ok",
+        runningTasks: 0,
+        stuckTasks: 0,
+      },
+      routing: {
+        status: "insufficient_data",
+        decisionsToday: 0,
+      },
+      guardrails: {
+        dispatchPolicy: "enforced",
+        haltInterlock: "enforced",
+        anomalyPause: "enforced",
+        authority: "human_merge_gate",
+      },
+    });
+  });
+
+  it("automation health exposes stuck runner-silent work and routing scorecard memory", () => {
+    const raw = {
+      codexTasks: {
+        runner: {
+          schemaVersion: 1,
+          kind: "codex_runner_heartbeat",
+          runnerId: "claude-runner",
+          status: "running",
+          message: "Runner is alive but on a different task.",
+          updatedAt: "2026-06-01T11:59:40.000Z",
+          activeTaskId: "other-task",
+        },
+        items: [
+          {
+            id: "running-stuck",
+            schemaVersion: 1,
+            kind: "codex_task",
+            status: "running",
+            repo: "depre-dev/averray-reference-agent",
+            agent: "claude",
+            prompt: "fix stale work",
+            createdAt: "2026-06-01T09:00:00.000Z",
+            startedAt: "2026-06-01T11:40:00.000Z",
+            progressAt: "2026-06-01T11:40:00.000Z",
+            updatedAt: "2026-06-01T11:40:00.000Z",
+          },
+          routingTask("codex-win-a", "codex", "ops hygiene", "opened_pr", "2026-06-01T08:00:00.000Z", 20),
+          routingTask("codex-win-b", "codex", "ops hygiene", "opened_pr", "2026-06-01T09:00:00.000Z", 22),
+        ],
+      },
+    };
+
+    expect(automationHealthForBoard(raw, new Date("2026-06-01T12:00:00.000Z"), {
+      HERMES_DISPATCH_PER_DAY_MAX: "5",
+      O5_TASK_HEALTH_RESTART_RECOVERY_MINUTES: "10",
+    })).toMatchObject({
+      sourceStatus: "ok",
+      taskHealth: {
+        status: "stuck",
+        runningTasks: 1,
+        stuckTasks: 1,
+        runner: {
+          status: "online",
+          activeTaskId: "other-task",
+        },
+      },
+      routing: {
+        status: "baseline_available",
+        decisionsToday: 0,
+        baselineSurfaces: 1,
+        top: {
+          agent: "codex",
+          surface: "ops hygiene",
+          samples: 2,
+        },
+      },
+    });
+  });
+
+  it("automation health uses unknown counts when the task queue source is unavailable", () => {
+    expect(automationHealthForBoard({ active: [], recent: [] }, new Date("2026-06-01T12:00:00.000Z")))
+      .toMatchObject({
+        sourceStatus: "degraded",
+        selfHealingOpen: null,
+        dispatchUsedToday: null,
+        quietSignalCount: 0,
+        taskHealth: {
+          status: "unknown",
+          runner: { status: "unknown" },
+        },
+        routing: {
+          status: "unknown",
+          decisionsToday: null,
+        },
     });
   });
 
