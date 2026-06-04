@@ -146,6 +146,7 @@ describe("Hermes router routine", () => {
     }]);
     expect(d.propose).toHaveBeenCalledWith(expect.objectContaining({
       repo: PROPOSAL.repo,
+      surface: PROPOSAL.surface,
       agent: "claude",
       prompt: PROPOSAL.taskPrompt,
       requester: "hermes-router",
@@ -161,6 +162,27 @@ describe("Hermes router routine", () => {
       reason: "routed_proposal",
       taskId: "task-router-1",
       surface: PROPOSAL.surface,
+    }));
+  });
+
+  it("passes learned routing scores into the planner", async () => {
+    const routingScores = {
+      "ops hygiene": {
+        codex: { status: "baseline_available" as const, score: 90, samples: 3 },
+        claude: { status: "baseline_available" as const, score: 40, samples: 3 },
+      },
+    };
+    const plan = vi.fn(() => []);
+    const d = deps({
+      routingScores: vi.fn(() => routingScores),
+      plan,
+    });
+
+    await runHermesRouterOnce(config(), d);
+
+    expect(d.routingScores).toHaveBeenCalled();
+    expect(plan).toHaveBeenCalledWith(expect.objectContaining({
+      routingScores,
     }));
   });
 

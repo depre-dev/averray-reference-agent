@@ -12,6 +12,7 @@ import {
   type PlanAndRouteWorkInput,
   type RoutedProposal,
   type WorkRouterBacklogItem,
+  type WorkRouterRoutingScores,
 } from "@avg/averray-mcp/work-router";
 import type { CodexTask, CodexTaskInput } from "./codex-task-queue.js";
 
@@ -41,6 +42,7 @@ export interface HermesRouterDeps {
   listTasks: () => Promise<CodexTask[]> | CodexTask[];
   policy: () => DispatchPolicyConfig;
   classify: (input: RoutingInput) => Pick<RoutingDecision, "agent" | "riskTier" | "reason">;
+  routingScores?: () => Promise<WorkRouterRoutingScores> | WorkRouterRoutingScores;
   plan?: (input: PlanAndRouteWorkInput) => RoutedProposal[];
   evaluatePolicy?: (config: DispatchPolicyConfig, input: Parameters<typeof evaluateDispatchPolicy>[1]) => DispatchPolicyDecision;
   propose: (input: CodexTaskInput) => Promise<{ task: CodexTask; created: boolean }> | { task: CodexTask; created: boolean };
@@ -75,12 +77,14 @@ export async function runHermesRouterOnce(config: HermesRouterConfig, deps: Herm
   const policy = deps.policy();
   const planner = deps.plan ?? planAndRouteWork;
   const evaluate = deps.evaluatePolicy ?? evaluateDispatchPolicy;
+  const routingScores = deps.routingScores ? await deps.routingScores() : undefined;
   const routed = planner({
     backlog,
     inFlight: tasks.filter((task) => ACTIVE_STATUSES.has(task.status)).map(taskSnapshot),
     recentlyDone: tasks.filter((task) => isRecentlyDone(task, nowMs, config.lookbackMs)).map(taskSnapshot),
     policy: buildPolicySnapshot(policy, tasks, now),
     classify: deps.classify,
+    ...(routingScores ? { routingScores } : {}),
     maxProposals: config.maxProposalsPerTick,
   });
 
@@ -132,6 +136,7 @@ export async function runHermesRouterOnce(config: HermesRouterConfig, deps: Herm
 
     const { task } = await deps.propose({
       repo: proposal.repo,
+      surface: proposal.surface,
       agent: proposal.agent,
       riskTier: proposal.riskTier,
       routingReason: proposal.whyAgent,
@@ -179,6 +184,7 @@ function taskSnapshot(task: CodexTask): PlanAndRouteWorkInput["inFlight"][number
     repo: task.repo,
     status: task.status,
     ...(task.title ? { title: task.title } : {}),
+    ...(task.surface ? { surface: task.surface } : {}),
     ...(task.prompt ? { prompt: task.prompt } : {}),
     ...(task.routingReason ? { area: task.routingReason } : {}),
   };

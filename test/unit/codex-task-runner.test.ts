@@ -53,6 +53,7 @@ describe("codex task runner", () => {
       repo: "averray-agent/agent",
       pullRequestNumber: 390,
       title: "Finish draft",
+      surface: "ops hygiene",
       prompt: "Finish PR #390.",
       correlationId: "github-pr-390",
       requester: "monitor",
@@ -96,6 +97,17 @@ describe("codex task runner", () => {
       attemptCount: 1,
       completionSummary: "ready for Hermes\nhttps://github.com/averray-agent/agent/pull/390",
       stdoutTail: "branch pushed\nready for Hermes\n",
+      routingOutcome: {
+        agent: "codex",
+        surface: "ops hygiene",
+        outcome: "opened_pr",
+        tokenUsage: {
+          model: "gpt-5-codex",
+          inputTokens: 20,
+          outputTokens: 8,
+          totalTokens: 28,
+        },
+      },
     });
     await expect(readCodexRunnerHeartbeat({ path })).resolves.toMatchObject({
       runnerId: "test-runner",
@@ -184,6 +196,7 @@ describe("codex task runner", () => {
     const proposed = await proposeCodexTask({
       repo: "averray-agent/agent",
       agent: "codex",
+      surface: "ops hygiene",
       title: "No diff",
       prompt: "Try the change.",
     }, { path });
@@ -207,6 +220,11 @@ describe("codex task runner", () => {
       failureReason: "no_changes",
       completionSummary: "no_changes",
       progressMessage: "no_changes",
+      routingOutcome: {
+        agent: "codex",
+        surface: "ops hygiene",
+        outcome: "no_pr",
+      },
     });
   });
 

@@ -23,7 +23,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { hostname } from "node:os";
 import { fileURLToPath } from "node:url";
-import { beginLlmUsageCall, recordLlmUsageFromResult } from "@avg/averray-mcp/llm-usage";
+import { beginLlmUsageCall, recordLlmUsageFromResult, type LlmUsageEvent } from "@avg/averray-mcp/llm-usage";
 
 import { parseBranchWorkerOutcome, type BranchWorkerOutcome } from "./branch-worker-outcome.js";
 import {
@@ -34,7 +34,7 @@ import {
   type ClaudeWorkerAuthEnv,
   type ClaudeWorkerAuthMode,
 } from "./claude-worker-auth.js";
-import type { CodexTask, TaskAgent } from "./codex-task-queue.js";
+import type { CodexTask, CodexTaskRoutingTokenUsage, TaskAgent } from "./codex-task-queue.js";
 import {
   claimNextApprovedCodexTask,
   completeCodexTask,
@@ -198,7 +198,7 @@ export async function runClaudeTaskRunnerOnce(
   });
   try {
     const result = await executor(claimed, config, { mode });
-    await recordLlmUsageFromResult({
+    const usageEvent = await recordLlmUsageFromResult({
       agent: config.agent,
       ...(config.model ? { model: config.model } : {}),
       taskId: claimed.id,
@@ -206,6 +206,7 @@ export async function runClaudeTaskRunnerOnce(
       result,
     }).catch(() => undefined);
     const outcome = result.outcome ?? parseBranchWorkerOutcome(result.stdout);
+    const tokenUsage = routingTokenUsage(usageEvent);
     if (result.exitCode === 0 && outcome?.opened) {
       const summary = openedPullRequestSummary(result, outcome, `${taskAgentLabel(config.agent)} runner opened a pull request.`);
       const task = await completeCodexTask(claimed.id, {
@@ -214,6 +215,10 @@ export async function runClaudeTaskRunnerOnce(
         exitCode: result.exitCode,
         stdoutTail: sanitizeTail(result.stdout, config.outputTailBytes),
         stderrTail: sanitizeTail(result.stderr, config.outputTailBytes),
+        routingOutcome: {
+          outcome: "opened_pr",
+          ...(tokenUsage ? { tokenUsage } : {}),
+        },
       });
       await heartbeat(config, "completed", summary || `${taskAgentLabel(config.agent)} runner completed ${taskLabel(claimed)}.`, undefined, claimed.id);
       return { status: "completed", task: task ?? claimed };
@@ -229,12 +234,20 @@ export async function runClaudeTaskRunnerOnce(
       exitCode: result.exitCode,
       stdoutTail: sanitizeTail(result.stdout, config.outputTailBytes),
       stderrTail: sanitizeTail(result.stderr, config.outputTailBytes),
+      routingOutcome: {
+        outcome: outcome && !outcome.opened ? "no_pr" : "failed",
+        ...(tokenUsage ? { tokenUsage } : {}),
+      },
     });
     await heartbeat(config, "failed", reason, undefined, claimed.id);
     return { status: "failed", task: task ?? claimed, reason };
   } catch (error) {
     const reason = sanitizeOutput(error instanceof Error ? error.message : String(error));
-    const task = await failCodexTask(claimed.id, { path: config.path, failureReason: reason });
+    const task = await failCodexTask(claimed.id, {
+      path: config.path,
+      failureReason: reason,
+      routingOutcome: { outcome: "failed" },
+    });
     await heartbeat(config, "error", reason, undefined, claimed.id);
     return { status: "failed", task: task ?? claimed, reason };
   } finally {
@@ -386,6 +399,18 @@ function openedPullRequestSummary(result: ClaudeTaskRunResult, outcome: Extract<
 
 function noPullRequestFailureReason(outcome: Extract<BranchWorkerOutcome, { opened: false }>): string {
   return sanitizeOutput(outcome.reason || outcome.summary || "Worker finished without opening a pull request.");
+}
+
+function routingTokenUsage(event: LlmUsageEvent | undefined): CodexTaskRoutingTokenUsage | undefined {
+  if (!event) return undefined;
+  return {
+    model: event.model,
+    inputTokens: event.inputTokens,
+    outputTokens: event.outputTokens,
+    ...(event.cacheTokens !== undefined ? { cacheTokens: event.cacheTokens } : {}),
+    totalTokens: event.inputTokens + event.outputTokens + (event.cacheTokens ?? 0),
+    ...(event.costUsd !== undefined ? { costUsd: event.costUsd } : {}),
+  };
 }
 
 function summarizeCommandResult(value: string): string {

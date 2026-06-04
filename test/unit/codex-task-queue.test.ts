@@ -254,6 +254,53 @@ describe("codex task queue", () => {
     expect(await claimNextApprovedCodexTask({ path })).toBeUndefined();
   });
 
+  it("stamps routing outcomes from runner completion without inventing CI or merge state", async () => {
+    const path = await tempQueuePath();
+    const proposed = await proposeCodexTask({
+      repo: "averray-agent/agent",
+      agent: "claude",
+      surface: "ops hygiene",
+      prompt: "Fix the routine wrapper.",
+    }, { path, now: new Date("2026-05-17T13:10:00.000Z") });
+    await approveCodexTask(proposed.task.id, { path, now: new Date("2026-05-17T13:11:00.000Z") });
+    await claimNextApprovedCodexTask({
+      path,
+      agent: "claude",
+      runnerId: "claude-runner",
+      now: new Date("2026-05-17T13:12:00.000Z"),
+    });
+
+    const completed = await completeCodexTask(proposed.task.id, {
+      path,
+      completionSummary: "Opened PR.",
+      routingOutcome: {
+        tokenUsage: {
+          model: "claude-sonnet-4-5",
+          inputTokens: 120,
+          outputTokens: 30,
+        },
+      },
+      now: new Date("2026-05-17T13:14:00.000Z"),
+    });
+
+    expect(completed?.routingOutcome).toMatchObject({
+      agent: "claude",
+      surface: "ops hygiene",
+      outcome: "opened_pr",
+      durationMs: 120_000,
+      tokenUsage: {
+        model: "claude-sonnet-4-5",
+        inputTokens: 120,
+        outputTokens: 30,
+        totalTokens: 150,
+      },
+      recordedAt: "2026-05-17T13:14:00.000Z",
+      evidence: "runner_completion",
+    });
+    expect(completed?.routingOutcome?.ciPassed).toBeUndefined();
+    expect(completed?.routingOutcome?.merged).toBeUndefined();
+  });
+
   it("rehydrates and requeues one orphaned running task after runner restart", async () => {
     const path = await tempQueuePath();
     const proposed = await proposeCodexTask({

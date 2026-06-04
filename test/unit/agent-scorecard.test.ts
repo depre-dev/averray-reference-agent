@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { buildAgentScorecard, getAgentScorecard } from "../../packages/averray-mcp/src/agent-scorecard.js";
+import {
+  buildAgentScorecard,
+  getAgentScorecard,
+  routingScoresFromScorecard,
+} from "../../packages/averray-mcp/src/agent-scorecard.js";
 
 describe("A1 agent scorecard", () => {
   it("aggregates PR, task, check, surface, and mission signals per agent", () => {
@@ -269,7 +273,66 @@ describe("A1 agent scorecard", () => {
     });
     expect(scorecard.agents).toEqual([]);
     expect(scorecard.gaps).toContain("Cost and token totals are not present in the current runner events.");
-    expect(scorecard.safety.routingInfluence).toContain("A1 only observes");
+    expect(scorecard.safety.routingInfluence).toContain("Hard taxonomy and dispatch policy remain authoritative");
+  });
+
+  it("computes per-agent surface routing memory from real runner outcomes", () => {
+    const scorecard = buildAgentScorecard({
+      codexTasks: {
+        items: [
+          routingTask("codex-old-win", "codex", "ops hygiene", "opened_pr", "2026-05-31T09:00:00.000Z", 100),
+          routingTask("codex-recent-fail", "codex", "ops hygiene", "failed", "2026-05-31T11:00:00.000Z", 80),
+          routingTask("claude-old-fail", "claude", "ops hygiene", "failed", "2026-05-31T09:05:00.000Z", 40),
+          routingTask("claude-recent-win", "claude", "ops hygiene", "opened_pr", "2026-05-31T11:05:00.000Z", 60),
+        ],
+      },
+    }, { now: new Date("2026-05-31T12:00:00.000Z") });
+
+    expect(scorecard.routingMemory).toMatchObject({
+      status: "recorded",
+      minSamples: 2,
+    });
+    const scores = routingScoresFromScorecard(scorecard);
+    expect(scores["ops hygiene"]?.codex).toMatchObject({
+      status: "baseline_available",
+      samples: 2,
+    });
+    expect(scores["ops hygiene"]?.claude).toMatchObject({
+      status: "baseline_available",
+      samples: 2,
+    });
+    expect(scores["ops hygiene"]?.claude?.score ?? 0).toBeGreaterThan(scores["ops hygiene"]?.codex?.score ?? 0);
+
+    const claude = scorecard.agents.find((agent) => agent.agent === "claude");
+    expect(claude?.routingSurfaces?.[0]).toMatchObject({
+      surface: "ops hygiene",
+      samples: 2,
+      openedPr: 1,
+      failed: 1,
+      tokenUsage: {
+        status: "recorded",
+        totalTokens: 100,
+      },
+    });
+  });
+
+  it("marks sparse routing memory insufficient instead of fabricating confidence", () => {
+    const scorecard = buildAgentScorecard({
+      codexTasks: {
+        items: [
+          routingTask("codex-one", "codex", "ops hygiene", "opened_pr", "2026-05-31T09:00:00.000Z", 20),
+        ],
+      },
+    }, { now: new Date("2026-05-31T12:00:00.000Z") });
+
+    expect(scorecard.routingMemory).toMatchObject({
+      status: "insufficient_data",
+    });
+    expect(routingScoresFromScorecard(scorecard)["ops hygiene"]?.codex).toMatchObject({
+      status: "insufficient_data",
+      score: null,
+      samples: 1,
+    });
   });
 
   it("reads task and browser mission stores without needing monitor internals", async () => {
@@ -332,3 +395,36 @@ describe("A1 agent scorecard", () => {
     }
   });
 });
+
+function routingTask(
+  id: string,
+  agent: "codex" | "claude",
+  surface: string,
+  outcome: "opened_pr" | "no_pr" | "failed",
+  recordedAt: string,
+  totalTokens: number,
+) {
+  return {
+    id,
+    agent,
+    surface,
+    status: outcome === "failed" ? "failed" : "completed",
+    startedAt: "2026-05-31T08:55:00.000Z",
+    completedAt: outcome === "failed" ? undefined : recordedAt,
+    failedAt: outcome === "failed" ? recordedAt : undefined,
+    routingOutcome: {
+      agent,
+      surface,
+      outcome,
+      durationMs: 10 * 60_000,
+      tokenUsage: {
+        model: `${agent}-model`,
+        inputTokens: totalTokens,
+        outputTokens: 0,
+        totalTokens,
+      },
+      recordedAt,
+      evidence: "runner_completion",
+    },
+  };
+}

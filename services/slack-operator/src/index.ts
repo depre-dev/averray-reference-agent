@@ -9,7 +9,7 @@ import { invokeAgentTask } from "@avg/averray-mcp/agent-invocation";
 import { getHandoffMonitor, recordHandoffEvent } from "@avg/averray-mcp/handoff-events";
 import { getHermesBacklogPlan } from "@avg/averray-mcp/hermes-backlog";
 import { classifyTask } from "@avg/averray-mcp/dispatch-routing";
-import { buildAgentScorecard } from "@avg/averray-mcp/agent-scorecard";
+import { buildAgentScorecard, routingScoresFromScorecard } from "@avg/averray-mcp/agent-scorecard";
 import { readLlmUsageEvents } from "@avg/averray-mcp/llm-usage";
 import { handleOperatorCommandText } from "@avg/averray-mcp/operator-handler";
 import {
@@ -3418,6 +3418,7 @@ function startOperatorRoutines() {
         listTasks: () => listCodexTasks(),
         policy: () => loadDispatchPolicyConfig(),
         classify: (input) => classifyTaskForWorkRouter(input),
+        routingScores: () => loadHermesRouterRoutingScores(),
         propose: async (input) => {
           const result = await proposeCodexTask(input);
           if (result.created && result.task.status === "proposed") {
@@ -3825,6 +3826,17 @@ function hermesMemoryNotesForBoard(board: ReturnType<typeof buildHermesBoardSnap
     addNotes(listHermesMemoryNotes({ limit }).map((note) => note.text));
   }
   return notes;
+}
+
+async function loadHermesRouterRoutingScores() {
+  const tasks = await listCodexTasks().catch(() => []);
+  return routingScoresFromScorecard(buildAgentScorecard({
+    codexTasks: {
+      schemaVersion: 1,
+      kind: "codex_task_queue",
+      items: tasks,
+    },
+  }));
 }
 
 function collectHermesRouterBacklog() {
