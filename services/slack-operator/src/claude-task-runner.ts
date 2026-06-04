@@ -117,7 +117,7 @@ export function parseClaudeTaskRunnerConfig(env: NodeJS.ProcessEnv = process.env
     ...(env.CLAUDE_TASK_RUNNER_CWD ? { cwd: env.CLAUDE_TASK_RUNNER_CWD } : {}),
     ...(env.CLAUDE_TASK_RUNNER_MODEL ? { model: env.CLAUDE_TASK_RUNNER_MODEL } : {}),
     pollIntervalMs: positiveInt(env.CLAUDE_TASK_RUNNER_POLL_INTERVAL_MS, 10_000),
-    timeoutMs: positiveInt(env.CLAUDE_TASK_RUNNER_TIMEOUT_MS, 30 * 60_000),
+    timeoutMs: positiveInt(env.CLAUDE_TASK_RUNNER_TIMEOUT_MS, 90 * 60_000),
     outputTailBytes: positiveInt(env.CLAUDE_TASK_RUNNER_OUTPUT_TAIL_BYTES, 12_000),
     authEnv: {
       ...(env.CLAUDE_WORKER_AUTH_MODE !== undefined ? { CLAUDE_WORKER_AUTH_MODE: env.CLAUDE_WORKER_AUTH_MODE } : {}),

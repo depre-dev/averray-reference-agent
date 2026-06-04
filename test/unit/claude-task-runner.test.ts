@@ -10,6 +10,7 @@ import {
   readCodexRunnerHeartbeat,
 } from "../../services/slack-operator/src/codex-task-queue.js";
 import {
+  parseClaudeTaskRunnerConfig,
   runClaudeTaskRunnerOnce,
   type ClaudeTaskRunnerConfig,
 } from "../../services/slack-operator/src/claude-task-runner.js";
@@ -63,6 +64,10 @@ describe("claude task runner", () => {
     await approveCodexTask(task.id, { path, approvedBy: "operator" });
     return task.id;
   }
+
+  it("defaults to a 90 minute outer execution timeout", () => {
+    expect(parseClaudeTaskRunnerConfig({}).timeoutMs).toBe(90 * 60_000);
+  });
 
   it("ROUTE GATE: mismatch (intent sub + ANTHROPIC_API_KEY) → refuses to claim, writes misconfigured heartbeat", async () => {
     const path = await tempQueuePath();

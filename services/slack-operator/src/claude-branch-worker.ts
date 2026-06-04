@@ -68,7 +68,6 @@ export interface ClaudeWorkerConfig {
   baseBranch: string;
   claudeCommand: string;
   claudeArgs: string[];
-  maxTurns: number;
   commandTimeoutMs: number;
 }
 
@@ -112,12 +111,10 @@ export interface ClaudeBranchWorkerDeps {
 
 const PROTECTED_BRANCHES = new Set(["main", "master", "production", "prod"]);
 // Headless Claude Code defaults. `stream-json` gives the task runner live
-// progress lines instead of one silent blob; the bare `-p` fallback below keeps
-// older Claude Code builds working when a flag is unavailable.
+// progress lines instead of one silent blob; fallback drops only the rejected
+// flag so one CLI mismatch does not discard the whole hardened arg set.
 const DEFAULT_CLAUDE_OUTPUT_FORMAT = "stream-json";
 const DEFAULT_CLAUDE_PERMISSION_MODE = "acceptEdits";
-const DEFAULT_CLAUDE_MAX_TURNS = 30;
-const TEXT_FALLBACK_CLAUDE_ARGS = ["-p", "{prompt}"];
 
 export function parseClaudeWorkerTask(env: NodeJS.ProcessEnv = process.env): ClaudeWorkerTask {
   const prRaw = env.CLAUDE_TASK_PR?.trim();
@@ -137,7 +134,6 @@ export function parseClaudeWorkerTask(env: NodeJS.ProcessEnv = process.env): Cla
 }
 
 export function parseClaudeWorkerConfig(env: NodeJS.ProcessEnv = process.env): ClaudeWorkerConfig {
-  const maxTurns = positiveInt(env.CLAUDE_BRANCH_WORKER_MAX_TURNS, DEFAULT_CLAUDE_MAX_TURNS);
   return {
     apiBaseUrl: env.GITHUB_API_BASE_URL?.trim() || "https://api.github.com",
     githubToken: resolveGithubTokenForRepo(env.CLAUDE_TASK_REPO ?? "", env),
@@ -149,7 +145,6 @@ export function parseClaudeWorkerConfig(env: NodeJS.ProcessEnv = process.env): C
     baseBranch: env.CLAUDE_BRANCH_WORKER_BASE_BRANCH?.trim() || "main",
     claudeCommand: env.CLAUDE_BRANCH_WORKER_CLAUDE_COMMAND?.trim() || "claude",
     claudeArgs: parseArgs(env.CLAUDE_BRANCH_WORKER_CLAUDE_ARGS, defaultClaudeArgs(env)),
-    maxTurns,
     commandTimeoutMs: positiveInt(env.CLAUDE_BRANCH_WORKER_TIMEOUT_MS, 30 * 60_000),
   };
 }
@@ -206,8 +201,7 @@ export function buildGuardedClaudePrompt(task: ClaudeWorkerTask, branch: string)
 export function renderClaudeWorkerArgs(
   args: string[],
   prompt: string,
-  task: ClaudeWorkerTask,
-  config?: Pick<ClaudeWorkerConfig, "maxTurns">
+  task: ClaudeWorkerTask
 ): string[] {
   const replacements: Record<string, string> = {
     "{prompt}": prompt,
@@ -217,7 +211,6 @@ export function renderClaudeWorkerArgs(
     "{correlationId}": task.correlationId ?? "",
     "{agent}": task.agent ?? "claude",
     "{agentLabel}": taskAgentLabel(task.agent ?? "claude"),
-    "{maxTurns}": String(config?.maxTurns ?? DEFAULT_CLAUDE_MAX_TURNS),
   };
   return args.map((arg) => {
     let value = arg;
@@ -374,10 +367,38 @@ async function executeClaudeInvocation(
   prompt: string,
   cwd: string
 ): Promise<ClaudeInvocationResult> {
-  const renderedArgs = renderClaudeWorkerArgs(config.claudeArgs, prompt, task, config);
+  let renderedArgs = renderClaudeWorkerArgs(config.claudeArgs, prompt, task);
+  const droppedFlags: string[] = [];
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const result = await executeClaudeAttempt(exec, config, renderedArgs, cwd);
+    if (result.exitCode === 0) return result;
+
+    const unsupported = unsupportedClaudeFlag(result);
+    if (!unsupported) return result;
+
+    const nextArgs = dropClaudeFlag(renderedArgs, unsupported.flag);
+    if (sameStringArray(nextArgs, renderedArgs)) return result;
+
+    droppedFlags.push(unsupported.flag);
+    emitClaudeProgress(`Claude flag ${unsupported.flag} was unavailable; retrying without it.`);
+    renderedArgs = nextArgs;
+  }
+
+  const finalResult = await executeClaudeAttempt(exec, config, renderedArgs, cwd);
+  return droppedFlags.length > 0 ? { ...finalResult, usedTextFallback: true } : finalResult;
+}
+
+async function executeClaudeAttempt(
+  exec: ExecFn,
+  config: ClaudeWorkerConfig,
+  renderedArgs: string[],
+  cwd: string,
+): Promise<ClaudeInvocationResult> {
   const wantsStreamJson = claudeArgsRequestStreamJson(renderedArgs);
   if (!wantsStreamJson) {
-    return exec(config.claudeCommand, renderedArgs, { cwd, timeoutMs: config.commandTimeoutMs });
+    const textResult = await exec(config.claudeCommand, renderedArgs, { cwd, timeoutMs: config.commandTimeoutMs });
+    return { ...textResult, usedTextFallback: true };
   }
 
   const streamState = createClaudeStreamState();
@@ -392,19 +413,6 @@ async function executeClaudeInvocation(
   });
   const parsed = finalizeClaudeStreamState(streamState);
   emitClaudeParsedResult(parsed);
-
-  if (streamResult.exitCode !== 0 && shouldFallbackToTextClaude(streamResult)) {
-    emitClaudeProgress("Claude stream-json flags were unavailable; retrying with text output.");
-    const fallback = await exec(
-      config.claudeCommand,
-      renderClaudeWorkerArgs(TEXT_FALLBACK_CLAUDE_ARGS, prompt, task, config),
-      { cwd, timeoutMs: config.commandTimeoutMs }
-    );
-    return {
-      ...fallback,
-      usedTextFallback: true,
-    };
-  }
 
   return {
     ...streamResult,
@@ -545,10 +553,51 @@ function claudeArgsRequestStreamJson(args: readonly string[]): boolean {
   );
 }
 
-function shouldFallbackToTextClaude(result: CommandResult): boolean {
+function unsupportedClaudeFlag(result: CommandResult): { flag: string } | undefined {
   const output = `${result.stderr}\n${result.stdout}`;
-  return /(?:unknown|unrecognized|invalid|unsupported|no such)\s+(?:option|argument|flag)|stream-json|output-format|permission-mode|max-turns|acceptEdits/i.test(output)
-    && /(?:stream-json|output-format|permission-mode|max-turns|acceptEdits|--verbose)/i.test(output);
+  if (!/(?:unknown|unrecognized|invalid|unsupported|no such)\s+(?:option|argument|flag)|unknown option|unrecognized option/i.test(output)) {
+    return undefined;
+  }
+  const direct = output.match(/(?:unknown|unrecognized|invalid|unsupported|no such)\s+(?:option|argument|flag)(?:\s+|=|:)?['"]?(--[a-z0-9-]+)/i)
+    ?? output.match(/(?:unknown|unrecognized)\s+option(?:\s+|=|:)?['"]?(--[a-z0-9-]+)/i);
+  if (direct?.[1]) return { flag: direct[1] };
+
+  const lower = output.toLowerCase();
+  if (lower.includes("max-turns") || lower.includes("--max-turns")) return { flag: "--max-turns" };
+  if (lower.includes("permission-mode") || lower.includes("acceptedits")) return { flag: "--permission-mode" };
+  if (lower.includes("output-format") || lower.includes("stream-json")) return { flag: "--output-format" };
+  if (lower.includes("verbose")) return { flag: "--verbose" };
+  return undefined;
+}
+
+function dropClaudeFlag(args: readonly string[], flag: string): string[] {
+  const aliases = flagAliases(flag);
+  const next: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? "";
+    const matchedFlag = aliases.find((candidate) => arg === candidate || arg.startsWith(`${candidate}=`));
+    if (!matchedFlag) {
+      next.push(arg);
+      continue;
+    }
+    if (arg === matchedFlag && claudeFlagTakesValue(matchedFlag) && index + 1 < args.length) index += 1;
+  }
+  return next;
+}
+
+function flagAliases(flag: string): string[] {
+  const normalized = flag.startsWith("--") ? flag : `--${flag}`;
+  if (normalized === "--stream-json") return ["--output-format"];
+  if (normalized === "--acceptEdits") return ["--permission-mode"];
+  return [normalized];
+}
+
+function claudeFlagTakesValue(flag: string): boolean {
+  return flag === "--output-format" || flag === "--permission-mode" || flag === "--max-turns";
+}
+
+function sameStringArray(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function textFromClaudeMessage(message: Record<string, unknown>): string | undefined {
