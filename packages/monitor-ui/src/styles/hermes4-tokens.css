@@ -1,0 +1,140 @@
+/* =========================================================
+   Hermes-4 design tokens (PR-D1) — EXTENDS averray-tokens.css.
+   FOUNDATION-FIRST + no-fork: every token here is namespaced
+   `--h4-*`, so it never clobbers the shipped board's `--hm-*`
+   / `--avy-*`. The new D1 shell / footer / kanban-tier layer
+   consumes these; the existing board is migrated onto them in
+   later D-PRs.
+
+   :root defaults below = the Midnight profile (D1 default), so
+   first paint matches before color-profile.ts runs; the engine
+   then rewrites the profile-dependent --h4-* at runtime and can
+   switch between all 6 profiles.
+
+     coral = act (needs you)   sage/green = healthy
+     amber = degraded          warm-gray  = telemetry
+   Agent identity uses a cool jewel palette kept deliberately
+   distinct from the warm status set (never status).
+   ========================================================= */
+
+:root {
+  /* ---- profile-dependent (Midnight defaults; runtime-overridden) ---- */
+  --h4-canvas:       #1A1714;
+  --h4-surface:      #1F1B18;
+  --h4-paper:        #241F1B;
+  --h4-paper-sunken: #201C18;
+  --h4-paper-veil:   rgba(36,31,27,0.72);
+
+  --h4-ink:    #EDE6DD;
+  --h4-ink-2:  #D8D1C8;
+  --h4-muted:  #8C857E;
+  --h4-faint:  #625C55;
+  --h4-line:        rgba(237,230,221,0.14);
+  --h4-line-2:      rgba(237,230,221,0.08);
+  --h4-line-strong: rgba(237,230,221,0.22);
+
+  --h4-act:        #E8865E;
+  --h4-act-deep:   #E8865E;
+  --h4-act-ink:    #ffffff;
+  --h4-act-text:   #EA926E;
+  --h4-act-soft:   rgba(232,134,94,0.18);
+  --h4-act-soft-2: rgba(232,134,94,0.30);
+  --h4-act-line:   rgba(232,134,94,0.50);
+
+  --h4-tier-decide-bg:   rgba(119,73,53,0.16);
+  --h4-tier-decide-line: rgba(150,90,64,0.34);
+  --h4-tier-decide-text: #C18267;
+
+  --h4-ok:      #7FB089;
+  --h4-ok-text: #8EB997;
+  --h4-ok-soft: rgba(127,176,137,0.20);
+  --h4-ok-line: rgba(127,176,137,0.42);
+
+  --h4-warn:      #E0A050;
+  --h4-warn-text: #E3AA62;
+  --h4-warn-soft: rgba(224,160,80,0.20);
+  --h4-warn-line: rgba(224,160,80,0.42);
+
+  --h4-tel:      #867F78;
+  --h4-tel-soft: rgba(107,99,90,0.18);
+  --h4-tel-chip: #322D28;
+
+  --h4-glow-1: rgba(232,134,94,0.10);
+  --h4-glow-2: rgba(127,176,137,0.07);
+  --h4-act-glow: none;
+
+  --h4-sh-sm:   0 1px 0 rgba(255,255,255,0.04) inset, 0 2px 8px rgba(0,0,0,0.40);
+  --h4-sh:      inset 0 1px 0 rgba(255,255,255,0.05), 0 10px 30px rgba(0,0,0,0.45);
+  --h4-sh-lift: inset 0 1px 0 rgba(255,255,255,0.06), 0 16px 44px rgba(0,0,0,0.55);
+  --h4-sh-coral: 0 6px 22px rgba(232,134,94,0.40), 0 0 14px rgba(232,134,94,0.32);
+  --h4-sh-inset: inset 0 1px 0 rgba(255,255,255,0.10);
+
+  /* ---- constants (not re-themed across profiles) ---- */
+
+  /* agent identity — cool jewel palette, kept distinct from status */
+  --h4-ag-hermes: #4b56c4;
+  --h4-ag-claude: #7048b6;
+  --h4-ag-codex:  #2f8f83;
+  --h4-ag-test:   #5d6b7d;
+  --h4-ag-op:     #2a2723;
+  --h4-ag-system: #8a8275;
+
+  /* type — reuse the #422 families (don't fork) */
+  --h4-font-display: var(--font-display);
+  --h4-font-body:    var(--font-body);
+  --h4-font-mono:    var(--font-mono);
+
+  /* radii — warm, rounded */
+  --h4-r-sm:   8px;
+  --h4-r-chip: 9px;
+  --h4-r-btn:  11px;
+  --h4-r-card: 15px;
+  --h4-r-lane: 19px;
+  --h4-r-pill: 999px;
+
+  /* motion intensity (0..1, runtime-driven by color-profile.ts) */
+  --h4-mi: 0.6;
+  --h4-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --h4-ease-spring: cubic-bezier(0.34, 1.62, 0.4, 1);
+  --h4-dur-fast: 150ms;
+  --h4-dur: 200ms;
+
+  /* density-scoped spacing (data-h4-density on <html>) */
+  --h4-pad-card: 18px;
+  --h4-pad-lane: 16px;
+  --h4-gap-cards: 14px;
+  --h4-gap-tier: 22px;
+  --h4-gap-room: 12px;
+}
+
+:root[data-h4-density="compact"] {
+  --h4-pad-card: 13px; --h4-pad-lane: 12px; --h4-gap-cards: 10px; --h4-gap-tier: 16px; --h4-gap-room: 9px;
+}
+:root[data-h4-density="comfy"] {
+  --h4-pad-card: 22px; --h4-pad-lane: 20px; --h4-gap-cards: 18px; --h4-gap-tier: 30px; --h4-gap-room: 16px;
+}
+
+/* ---- motion atoms (namespaced; gated on data-h4-motion + reduced-motion) ---- */
+@keyframes h4-slide-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes h4-live {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.45; transform: scale(0.82); }
+}
+
+.h4-advance { animation: h4-slide-in 320ms var(--h4-ease-spring) both; }
+.h4-live-dot { animation: h4-live calc(2.4s / max(var(--h4-mi), 0.4)) ease-in-out infinite; }
+:root[data-h4-dark="1"] .h4-live-dot { box-shadow: 0 0 9px currentColor; }
+:root[data-h4-glow="1"] .h4-live-dot { box-shadow: 0 0 13px currentColor; }
+
+/* off: kill all h4 motion; low: keep slide-ins, drop the live pulse */
+:root[data-h4-motion="off"] .h4-advance,
+:root[data-h4-motion="off"] .h4-live-dot { animation: none !important; }
+:root[data-h4-motion="low"] .h4-live-dot { animation: none; }
+
+/* reduced-motion always wins, regardless of bucket */
+@media (prefers-reduced-motion: reduce) {
+  .h4-advance, .h4-live-dot { animation: none !important; }
+}

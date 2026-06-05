@@ -10,6 +10,7 @@
 // block in styles/monitor.css.
 
 import type { Lane } from "../lib/monitor/card-types.js";
+import { tierFor } from "../lib/monitor/lane-rules.js";
 
 /** Canonical lane id — re-exported so <Lane>/<Board> share one source. */
 export type LaneId = Lane;
@@ -44,7 +45,7 @@ export function MiniRail({ lane, count, onToggle }: MiniRailProps) {
       aria-label={`${lane.name} (${count} ${count === 1 ? "card" : "cards"}) — click to expand`}
       title={`${lane.name} (${count})`}
     >
-      <div className="hm-lane-rail">
+      <div className="hm-lane-rail" data-h4-tier={tierFor(lane.id)}>
         <span className={"ct " + (count > 0 ? "ct--has" : "ct--zero")}>{count}</span>
         <span className="lbl">{lane.name}</span>
         <span className="icn" aria-hidden>

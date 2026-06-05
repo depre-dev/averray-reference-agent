@@ -45,6 +45,31 @@ export function isUnroutedCard(card: BoardCard | undefined | null): boolean {
   return !card.lane;
 }
 
+/**
+ * PR-D1 — DECIDE / WATCH / HIDE kanban tiers. Each of the 8 lanes belongs to
+ * one tier (a coloring/grouping layer over the existing flat lanes, not a
+ * re-routing of cards):
+ *   - DECIDE: the Decision Inbox — `needs-attention`, the single lane that
+ *     unions everything waiting on the operator (laneFor promotes isAction /
+ *     operator-waiting cards here). DECIDE-orange (--h4-act) is reserved for
+ *     this tier only.
+ *   - WATCH:  in-flight pipeline lanes (drafts → deploying).
+ *   - HIDE:   `done` (release history), de-emphasized.
+ */
+export type KanbanTier = "decide" | "watch" | "hide";
+
+export function tierFor(lane: Lane): KanbanTier {
+  if (lane === "needs-attention") return "decide";
+  if (lane === "done") return "hide";
+  return "watch";
+}
+
+/** Cards genuinely waiting on the human operator — the DECIDE workload. */
+export function isWaitingOnOperator(card: BoardCard | undefined | null): boolean {
+  if (!card) return false;
+  return card.isAction === true || card.waitingOn?.actor === "operator";
+}
+
 export type InflightStatus = "Pre-check" | "CI watching" | "Mission running";
 
 /**

@@ -23,6 +23,15 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(view.getByRole("region", { name: "Kanban lane grid" })).toBeTruthy();
     expect(container.querySelectorAll(".hm-lane").length).toBe(8);
     expect(view.getByRole("complementary", { name: "Hermes co-pilot" })).toBeTruthy();
+    // PR-D1: fixed-shell footer (END OF BOARD) with real counts.
+    const footer = container.querySelector(".h4-board-footer");
+    expect(footer).toBeTruthy();
+    expect(footer?.textContent).toMatch(/End of board/i);
+    expect(footer?.textContent).toMatch(/\d+ cards? · \d+ waiting on you · \d+ running/);
+    // PR-D1: DECIDE tier is reserved for the Decision Inbox (needs-attention) only.
+    const decideLanes = container.querySelectorAll('section.hm-lane[data-h4-tier="decide"]');
+    expect(decideLanes.length).toBe(1);
+    expect(decideLanes[0]?.getAttribute("aria-label")).toBe("Needs attention lane");
   });
 
   test("every lane with cards stays expanded in one Kanban row; empty lanes stay reachable mini-rails", () => {

@@ -27,6 +27,7 @@ import { useCardParam } from "./hooks/useCardParam.js";
 import type { UseCollaborationOptions } from "./hooks/useCollaboration.js";
 import { useActionAlerts, type UseActionAlertsOptions } from "./hooks/useActionAlerts.js";
 import { useAutonomyMode, type UseAutonomyModeOptions } from "./hooks/useAutonomyMode.js";
+import { useColorProfile } from "./hooks/useColorProfile.js";
 import { kpiCounts } from "./lib/monitor/board-state.js";
 import type { BoardCard, CreateTaskInput } from "./lib/monitor/card-types.js";
 import { missionLaunchBody, type MissionSpawnInput, type SaveTestSuiteInput } from "./lib/monitor/mission-launch.js";
@@ -110,6 +111,11 @@ export function MonitorPage({
   autonomy,
 }: MonitorPageProps = {}) {
   const { board, status, refresh } = useMonitorBoard(options);
+  // PR-D1: apply the Hermes-4 color profile (default Midnight) + motion/density
+  // to <html> as --h4-* tokens. Foundation-first — drives the new shell/footer/
+  // kanban-tier surfaces; the existing board keeps its --hm-* styling until
+  // later D-PRs migrate it.
+  useColorProfile();
   const { data: backlogSuggestionsData } = useBacklogSuggestions(backlogSuggestions);
   const { cardId, setCard, clearCard } = useCardParam();
   const { mode: autonomyMode, setAutopilot, setSupervised } = useAutonomyMode(autonomy);

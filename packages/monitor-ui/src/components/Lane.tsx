@@ -12,6 +12,7 @@
 
 import type { ReactNode } from "react";
 import { MiniRail, type LaneDescriptor, type LaneId } from "./MiniRail.js";
+import { tierFor } from "../lib/monitor/lane-rules.js";
 import { Button, EmptyState, LaneHeader } from "./ui.js";
 
 export type { LaneDescriptor, LaneId };
@@ -64,7 +65,7 @@ export function Lane({ lane, expanded, count, children, headerAccessory, onToggl
     .join(" ");
 
   return (
-    <section className={classes} aria-label={`${lane.name} lane`}>
+    <section className={classes} aria-label={`${lane.name} lane`} data-h4-tier={tierFor(lane.id)}>
       <LaneHeader
         title={lane.name}
         count={count}
