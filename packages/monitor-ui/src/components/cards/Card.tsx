@@ -23,7 +23,6 @@ import type {
   BoardCard,
   CardChecks,
   WaitingOn,
-  RiskTag,
   AgentType,
   HermesDecisionRecord,
   CardWorkingNow,
@@ -31,12 +30,13 @@ import type {
   MissionReport,
 } from "../../lib/monitor/card-types.js";
 import { formatFreshness, freshnessTier } from "../../lib/monitor/urgency.js";
-import { laneFor } from "../../lib/monitor/lane-rules.js";
+import { laneFor, isWaitingOnOperator } from "../../lib/monitor/lane-rules.js";
 import { humanizedSignalParts } from "../../lib/monitor/signal-labels.js";
 import { missionFailureCardSummary } from "../../lib/monitor/mission-failure.js";
 import { relatedPrForCard } from "../../lib/monitor/collaboration.js";
 import { AgentTag, Badge, Button, CardHeader, StatusPill, type StateVariant } from "../ui.js";
 import { ChecksBar } from "./ChecksBar.js";
+import { CardBadges } from "./CardBadges.js";
 import { AgentDiscussion } from "./AgentDiscussion.js";
 
 export type CardProps = {
@@ -86,15 +86,6 @@ function shortId(id: string): string {
 }
 
 // Risk-tag pill classification — matches the bundle's branching.
-const HIGH_RISK_TAGS = new Set<RiskTag>(["contracts", "workflow", "review-gated", "secrets", "config"]);
-const SECRET_RISK_TAGS = new Set<RiskTag>(["secrets"]);
-
-function riskBadgeVariant(tag: RiskTag): StateVariant {
-  if (SECRET_RISK_TAGS.has(tag)) return "secret";
-  if (HIGH_RISK_TAGS.has(tag)) return "risk";
-  return "neutral";
-}
-
 function freshnessVariant(card: BoardCard, isStale: boolean, isClosed: boolean): StateVariant {
   if (isClosed) return "neutral";
   if (isStale) return "age";
@@ -158,6 +149,9 @@ export function Card({
       // through dozens of cards) while staying programmatically reachable.
       tabIndex={-1}
       data-card-id={card.id}
+      // PR-D2: active (awaiting the operator → DECIDE-orange edge) vs passive
+      // mirror (someone/something else owns it → dimmed). Styled in --h4.
+      data-h4-card={isWaitingOnOperator(card) && !isClosed ? "active" : "mirror"}
       role={onClick ? "button" : "article"}
       aria-label={`${agentLabel(card.agentType)} ${shortId(card.id)} — ${card.title}`}
     >
@@ -202,16 +196,11 @@ export function Card({
         </div>
       ) : null}
 
-      {!isClosed && card.risk && card.risk.length > 0 ? (
-        <div className="hm-pillrow">
-          {card.risk.map((r) => (
-            <Badge key={r} variant={riskBadgeVariant(r)}>
-              {r}
-            </Badge>
-          ))}
-          {card.isDraft ? <Badge variant="draft">draft</Badge> : null}
-        </div>
-      ) : null}
+      {/* PR-D2: unified Hermes-4 badge families (State / Risk / Evidence /
+          Gate) in the --h4 palette, from real card fields. Supersedes the
+          ad-hoc risk pillrow. Not rendered on closed cards (compressed
+          history layout). */}
+      {!isClosed ? <CardBadges card={card} /> : null}
 
       {checks ? (
         <div className="hm-checks">

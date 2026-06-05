@@ -20,6 +20,8 @@ import "./styles/monitor.css";
 // win; namespaced so it never clobbers the shipped board's --hm-* tokens.
 import "./styles/hermes4-tokens.css";
 import "./styles/hermes4-shell.css";
+// PR-D2: card badge families + active/mirror treatment (--h4).
+import "./styles/hermes4-cards.css";
 
 const rootEl = document.getElementById("root");
 if (!rootEl) {
