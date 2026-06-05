@@ -325,12 +325,51 @@ function DraftBody({ card }: { card: BoardCard }) {
   );
 }
 
+/**
+ * PR-D2b — "if converted to a bug" preview for a Codex task. Drafts what a bug
+ * report would carry, entirely from the task's REAL fields (title / repo / risk
+ * area / first prompt line / failure reason). Honest awaiting-data when a field
+ * is missing; the whole section degrades to an awaiting-data slot when there's
+ * not enough task context.
+ */
+function TaskBugPreview({ card, failureReason }: { card: BoardCard; prompt?: string; failureReason?: string }) {
+  // Fields that aren't already shown verbatim elsewhere in the task drawer
+  // (title → header, prompt → its own section). The bug a Codex task would
+  // become carries its risk area + any failure reason; both are real.
+  const rows: Array<[string, string | undefined]> = [
+    ["area", card.risk?.[0]],
+    ["failure", failureReason],
+  ];
+  const known = rows.filter(([, v]) => typeof v === "string" && v.trim().length > 0);
+  return (
+    <section>
+      <div className="hm-section-h">If converted to a bug</div>
+      {known.length > 0 ? (
+        <div className="h4-bug">
+          {rows.map(([k, v]) => (
+            <div className="h4-bug-row" key={k}>
+              <span className="h4-bug-k">{k}</span>
+              <span className={"h4-bug-v" + (v && v.trim() ? "" : " is-empty")}>
+                {v && v.trim() ? v : "awaiting data"}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <AwaitingData label="Bug preview" note="not enough task context to draft a bug yet" />
+      )}
+    </section>
+  );
+}
+
 function TaskBody({ card }: { card: BoardCard }) {
   const prompt = "prompt" in card ? card.prompt : undefined;
   const heartbeat = "runnerHeartbeat" in card ? card.runnerHeartbeat : undefined;
+  const failureReason = "failureReason" in card ? (card as { failureReason?: string }).failureReason : undefined;
   return (
     <>
       <VerdictBlock head="Proposed Codex task">{card.summary || "Awaiting operator approval to dispatch."}</VerdictBlock>
+      <TaskBugPreview card={card} prompt={prompt} failureReason={failureReason} />
       {prompt ? (
         <section>
           <div className="hm-section-h">Task prompt</div>
@@ -544,16 +583,21 @@ function MissionRunInProgress({ card }: { card: MissionCard }) {
         </div>
       </section>
 
-      {screenshot ? (
-        <section>
-          <div className="hm-section-h">Latest screenshot</div>
+      {/* PR-D2b — live-follow frame from the #413 worker stream. Show the real
+          screenshot if the stream has pushed one; otherwise an honest
+          awaiting-data slot — never a fabricated frame. */}
+      <section>
+        <div className="hm-section-h">Latest frame</div>
+        {screenshot ? (
           <img
             src={screenshot}
             alt="Latest mission screenshot"
             style={{ width: "100%", borderRadius: "var(--hm-radius)", border: "1px solid var(--hm-line)", display: "block" }}
           />
-        </section>
-      ) : null}
+        ) : (
+          <AwaitingData label="Latest frame" note="the runner has not streamed a screenshot yet" />
+        )}
+      </section>
 
       <section>
         <div className="hm-section-h">Recent runner output</div>
@@ -572,6 +616,53 @@ function MissionRunInProgress({ card }: { card: MissionCard }) {
         </div>
       </section>
     </>
+  );
+}
+
+/**
+ * PR-D2b — Mission forensics: a compact "expected vs observed" reconciliation
+ * derived HONESTLY from the real report fields (the success criterion vs the
+ * observed value — never invented pairs), plus env/identity badges (--h4 agent
+ * jewel) and, on a failure, an honest awaiting-data failure-frame slot (no
+ * screenshot/frame stream is wired into the terminal report yet).
+ */
+function MissionForensics({ card, m }: { card: MissionCard; m: NonNullable<MissionCard["mission"]> }) {
+  // Honest derivations — the success criterion vs the observed value. (The bare
+  // verdict already has its own section, so it's not repeated here.)
+  const rows: Array<{ field: string; expected: string; observed: string; ok: boolean }> = [
+    // Observed = whether the success CRITERION held (the raw confidence % has
+    // its own section, so the table reports met/below — not the number again).
+    { field: "Confidence", expected: "≥ 70%", observed: m.confidence >= 0.7 ? "met" : "below", ok: m.confidence >= 0.7 },
+    { field: "Mutation boundary", expected: "stopped before mutation", observed: m.mutationBoundary ? "enforced" : "—", ok: Boolean(m.mutationBoundary) },
+  ];
+  return (
+    <section>
+      <div className="hm-section-h">Forensics · expected vs observed</div>
+      <div className="h4-eo" role="table" aria-label="Expected vs observed">
+        <div className="h4-eo-row h4-eo-head" role="row">
+          <span role="columnheader">field</span>
+          <span role="columnheader">expected</span>
+          <span role="columnheader">observed</span>
+          <span role="columnheader" aria-label="match" />
+        </div>
+        {rows.map((r) => (
+          <div className={"h4-eo-row" + (r.ok ? "" : " is-off")} role="row" key={r.field}>
+            <span role="cell">{r.field}</span>
+            <span className="mono" role="cell">{r.expected}</span>
+            <span className="mono" role="cell">{r.observed}</span>
+            <span role="cell" aria-hidden>{r.ok ? "✓" : "✕"}</span>
+          </div>
+        ))}
+      </div>
+      <div className="h4-env">
+        <span className="h4-badge h4-badge--state h4-tone--tel">agent · {card.agentType}</span>
+        {m.seed ? <span className="h4-badge h4-badge--state h4-tone--tel">{m.seed}</span> : null}
+        {m.target ? <span className="h4-badge h4-badge--state h4-tone--tel">{m.target}</span> : null}
+      </div>
+      {m.verdictTone === "fail" ? (
+        <AwaitingData label="Failure frame" note="no screenshot was captured at the failing step" />
+      ) : null}
+    </section>
   );
 }
 
@@ -688,6 +779,8 @@ function MissionBody({ card }: { card: MissionCard }) {
           </div>
         </section>
       ) : null}
+
+      <MissionForensics card={card} m={m} />
 
       {m.narrative ? (
         <section>
