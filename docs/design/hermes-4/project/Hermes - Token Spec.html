@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hermes — Token Spec</title>
+<link rel="stylesheet" href="hermes.css">
+<style>
+  body { overflow:auto; }
+  .doc { max-width:1040px; margin:0 auto; padding:48px 32px 120px; }
+  .h-eyebrow { font-family:var(--font-display); font-size:11px; font-weight:700; text-transform:uppercase; color:var(--act-text); letter-spacing:0; }
+  .h-title { font-family:var(--font-display); font-weight:700; font-size:40px; line-height:1.04; margin:8px 0 10px; }
+  .h-lede { font-size:16px; color:var(--hm-muted); max-width:64ch; line-height:1.6; }
+  .sec { margin-top:48px; }
+  .sec > h2 { font-family:var(--font-display); font-weight:700; font-size:13px; text-transform:uppercase; color:var(--hm-muted); margin:0 0 16px; padding-bottom:8px; border-bottom:1px solid var(--hm-line); }
+  .grid { display:grid; gap:14px; }
+  .c2 { grid-template-columns:repeat(2,1fr); }
+  .c3 { grid-template-columns:repeat(3,1fr); }
+  .c4 { grid-template-columns:repeat(4,1fr); }
+  .card2 { background:var(--hm-paper); border:1px solid var(--hm-line); border-radius:var(--r-card); padding:16px; box-shadow:var(--sh-sm); }
+  .sw { height:64px; border-radius:var(--r-sm); border:1px solid var(--hm-line); margin-bottom:10px; }
+  .name { font-family:var(--font-display); font-weight:600; font-size:13px; }
+  .mono2 { font-family:var(--font-mono); font-size:12px; color:var(--hm-muted); }
+  .role { font-size:12px; color:var(--hm-muted); margin-top:3px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; font-family:var(--font-display); font-size:10.5px; font-weight:700; text-transform:uppercase; color:var(--hm-muted); padding:8px 12px; border-bottom:1px solid var(--hm-line); }
+  td { padding:10px 12px; border-bottom:1px solid var(--hm-line-2); vertical-align:top; }
+  td.k { font-family:var(--font-mono); font-size:12px; color:var(--act-text); white-space:nowrap; }
+  td.v { font-family:var(--font-mono); font-size:12px; color:var(--hm-ink); }
+  td.d { color:var(--hm-muted); }
+  .specimen { font-family:var(--font-display); font-weight:700; line-height:1.05; color:var(--hm-ink); }
+  .pillrow { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .note { font-size:13px; color:var(--hm-muted); line-height:1.65; background:var(--hm-paper-sunken); border:1px solid var(--hm-line-2); border-left:3px solid var(--act); border-radius:var(--r-sm); padding:14px 16px; }
+  code { font-family:var(--font-mono); font-size:0.9em; }
+</style>
+</head>
+<body>
+<main class="doc">
+  <div class="h-eyebrow">Hermes · handoff monitor</div>
+  <h1 class="h-title">Token spec</h1>
+  <p class="h-lede">Everything an engineer needs to port the redesigned board + collaboration room into <code>monitor-ui</code>. Warm-ivory base; color is meaning; coral is reserved for the one action that needs the operator. All values are CSS custom properties — drop them into <code>:root</code>.</p>
+
+  <!-- color -->
+  <section class="sec">
+    <h2>Semantic color — color is meaning</h2>
+    <div class="grid c4">
+      <div class="card2"><div class="sw" style="background:var(--act)"></div><div class="name">Act / coral</div><div class="mono2">#D97757</div><div class="role">The action that needs you. Reserved.</div></div>
+      <div class="card2"><div class="sw" style="background:var(--ok)"></div><div class="name">Healthy / sage</div><div class="mono2">#1e6642</div><div class="role">Pass, deploy ok, online.</div></div>
+      <div class="card2"><div class="sw" style="background:var(--warn)"></div><div class="name">Degraded / amber</div><div class="mono2">#a76122</div><div class="role">Failed, blocked, timed out.</div></div>
+      <div class="card2"><div class="sw" style="background:var(--tel)"></div><div class="name">Telemetry / warm-gray</div><div class="mono2">#7c7464</div><div class="role">Quiet status, counts at 0.</div></div>
+    </div>
+    <div class="grid c4" style="margin-top:14px">
+      <div class="card2"><div class="sw" style="background:var(--hm-canvas)"></div><div class="name">Canvas</div><div class="mono2">#e9e4d9</div></div>
+      <div class="card2"><div class="sw" style="background:var(--hm-surface)"></div><div class="name">Surface (tier)</div><div class="mono2">#f1ede4</div></div>
+      <div class="card2"><div class="sw" style="background:var(--hm-paper)"></div><div class="name">Paper (card)</div><div class="mono2">#fffdf8</div></div>
+      <div class="card2"><div class="sw" style="background:var(--hm-paper-sunken)"></div><div class="name">Sunken (inset)</div><div class="mono2">#f6f3ea</div></div>
+    </div>
+    <table style="margin-top:18px">
+      <thead><tr><th>Token</th><th>Value</th><th>Use</th></tr></thead>
+      <tbody>
+        <tr><td class="k">--act / --act-deep</td><td class="v">#D97757 / #C15F3C</td><td class="d">Primary action fill + hover. Muted-terracotta alt: #B5651D.</td></tr>
+        <tr><td class="k">--act-soft / --act-line</td><td class="v">rgba(217,119,87,.12) / .34</td><td class="d">Coral wash + hairline (needs-you banner, prominent turns).</td></tr>
+        <tr><td class="k">--ok-soft / --warn-soft</td><td class="v">#d9ebdf / #f4e3cf</td><td class="d">Pill + chip washes (never translucent).</td></tr>
+        <tr><td class="k">--hm-ink / --hm-muted / --hm-faint</td><td class="v">#1b1a16 / #6b6557 / #948d7c</td><td class="d">Text primary / secondary / tertiary.</td></tr>
+        <tr><td class="k">--hm-line</td><td class="v">rgba(38,32,18,.10)</td><td class="d">Hairline borders everywhere.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- card grammar -->
+  <section class="sec">
+    <h2>Card grammar — one shape, five zones</h2>
+    <p class="h-lede" style="font-size:14px; margin-bottom:16px">Every kanban card (mission · task · deploy · done) uses the same five zones so the eye learns one pattern. More than this belongs in the drawer. Show only real fields — unknown is honest (<code>PR: —</code>, <code>?</code>), never fabricated.</p>
+    <div class="grid c2">
+      <div class="card2" style="padding:0; overflow:hidden">
+        <div style="padding:16px; border-bottom:1px solid var(--hm-line-2)">
+          <div style="display:flex; align-items:center; gap:6; font-size:12px"><span style="width:7px;height:7px;border-radius:50%;background:var(--ag-claude)"></span><span class="name" style="color:var(--ag-claude)">Claude</span><span style="color:var(--hm-faint)">·</span><span class="mono2">codex-task</span><span style="margin-left:auto" class="mono2">FRESH 5.2H</span></div>
+          <div class="font-display" style="font-weight:700; font-size:15.5px; margin-top:10px">Fix /auth/verify KMS-JWT auth</div>
+          <div class="mono2" style="margin-top:6px">depre-dev/averray-reference-agent</div>
+          <div style="font-size:12.5px; color:var(--hm-ink-2); margin-top:2px">proposed · waiting for your approval</div>
+          <div class="pillrow" style="margin-top:10px"><span class="pill pill--act" style="height:19px;font-size:9.5px"><span class="dot"></span>proposed</span><span class="pill pill--warn" style="height:19px;font-size:9.5px">risk: med</span><span class="pill pill--tel" style="height:19px;font-size:9.5px">no PR yet</span></div>
+          <div style="margin-top:12px"><span class="btn btn--act btn--sm" style="width:100%">Approve &amp; dispatch</span></div>
+        </div>
+      </div>
+      <div class="card2">
+        <table>
+          <tbody>
+            <tr><td class="k">1 · meta</td><td class="d">agent dot + name · type · age (<code>FRESH 5.2H</code>)</td></tr>
+            <tr><td class="k">2 · title</td><td class="d">the real human title — never "claude task"</td></tr>
+            <tr><td class="k">3 · context</td><td class="d">repo · current state / next step</td></tr>
+            <tr><td class="k">4 · signals</td><td class="d">≤3 chips: state/verdict · risk tier · PR# or "no PR yet" · CI · key metrics</td></tr>
+            <tr><td class="k">5 · action</td><td class="d">single next action (Approve &amp; dispatch / Decide → / Review →)</td></tr>
+          </tbody>
+        </table>
+        <div class="note" style="margin-top:14px; font-size:12.5px">Running cards swap the context zone for a <strong>checkpoint stepper</strong> (CI queued → install → unit tests → browser replay → Hermes review → ready) — concrete steps, not a fake %. Done cards dim + desaturate and carry only a verdict pill.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- decision-safety layer -->
+  <section class="sec">
+    <h2>Decision-safety layer</h2>
+    <p class="h-lede" style="font-size:14px; margin-bottom:16px">North star: <em>show exactly where the operator’s judgment changes the outcome — not everything the agents are doing.</em> The <strong>Decision Inbox</strong> ("Your decisions") is the single union of every card where <code>waitingOn === 'operator'</code>, pulled from all lanes — the ONE place to act. The same cards still appear in their pipeline lane, but <strong>read-only</strong> (a "→ In your decisions" pointer, never a CTA). Coral is reserved for the single most-urgent recommended action; everything else is ink/neutral.</p>
+    <div class="grid c2">
+      <div class="card2">
+        <div class="name" style="margin-bottom:10px">Four badge families (G) — one shape each</div>
+        <table><tbody>
+          <tr><td class="k">State</td><td class="d">failed · blocked · running · ready · done</td></tr>
+          <tr><td class="k">Risk</td><td class="d">low · med · high, typed: code / deploy / data / money</td></tr>
+          <tr><td class="k">Evidence</td><td class="d">traces · shots · video · PR · tests · CI</td></tr>
+          <tr><td class="k">Gate</td><td class="d">needs-you (act dot) · agent · system</td></tr>
+        </tbody></table>
+        <div class="name" style="margin:14px 0 8px">Failure class (D)</div>
+        <div class="pillrow">
+          <span class="chip" style="font-size:10px">Product</span><span class="chip" style="font-size:10px">Test</span><span class="chip" style="font-size:10px">Infra</span><span class="chip" style="font-size:10px">Agent</span><span class="chip" style="font-size:10px">Policy</span><span class="chip" style="font-size:10px">Unknown</span>
+        </div>
+      </div>
+      <div class="card2">
+        <div class="name" style="margin-bottom:10px">Decision bundle (B) — every inbox card answers</div>
+        <table><tbody>
+          <tr><td class="k">Recommended</td><td class="d">Hermes’s call — the primary (coral if most-urgent)</td></tr>
+          <tr><td class="k">Why now</td><td class="d">one sentence</td></tr>
+          <tr><td class="k">Risk</td><td class="d">typed + level</td></tr>
+          <tr><td class="k">Grants / does not</td><td class="d">exact scope + what it does NOT allow</td></tr>
+          <tr><td class="k">Blast radius</td><td class="d">repo · branch · env · area · users</td></tr>
+          <tr><td class="k">Rollback</td><td class="d">what happens if wrong</td></tr>
+          <tr><td class="k">Choices</td><td class="d">Approve · Reject · Rerun · Convert · Ask Hermes · Replay · Dismiss</td></tr>
+        </tbody></table>
+        <div class="note" style="margin-top:12px; font-size:12px">Plus <strong>“Why you’re seeing this”</strong> (C) on every inbox card and <strong>“Unblock”</strong> on every blocked one. Command-box preview (F) shows scope · mutation · budget · timeout · gates before any mutating command runs — budget is a run/step cap, never a fabricated $.</div>
+      </div>
+    </div>
+    <div class="note" style="margin-top:14px"><strong>Drawer lifecycle — requested → running (LIVE) → done, in place.</strong> Opening a running mission shows the <strong>live-follow</strong> view: a stage badge (current checkpoint, “no verdict yet”), the latest streamed frame (or an honest <code>awaiting first frame</code> placeholder before any frame arrives), a <strong>rolling output tail labeled “recent output (rolling tail) · ~2s”</strong>, and the lit checkpoint stepper. On completion the <em>same drawer</em> auto-swaps to the end-report (verdict, outcome, evidence, traces, discussion, the 3 actions) — no reload. The stream is clearly marked <span style="color:var(--ag-claude)">demo</span>; a real worker streams stage/output/frames and a verdict is never shown before the run posts one.</div>
+    <div class="note" style="margin-top:14px"><strong>Decision clarity layer.</strong> The Decision Inbox (“Your decisions”) holds the only human actions; pipeline mirror cards are passive — a quiet <em>“Awaiting your decision · in inbox”</em> label that jumps, never a CTA. Lanes read plainly: <em>Builder tasks</em> (agent shown as Claude / Codex), <em>Runs needing review</em>. Every inbox card carries a <strong>what-happens-next</strong> line; failed cards carry a <strong>failure class</strong>; missions carry <strong>env/identity badges</strong> (environment · identity · data-mode · browser · viewport) and a <strong>run contract</strong> (target/flow/mode/success/stop/budget/artifacts). The drawer orders evidence forensically — <em>verdict → Expected vs Observed → run timeline → failure frame → replay → diagnostics → raw</em> — and a <strong>convert-to-bug preview</strong> shows the exact card it would create. States carry a shape glyph as well as color (✕ failed · ▢ blocked · ◐ running · ▲ ready · ✓ done); every control has a visible focus ring. Global controls (<em>Mode: supervised</em>, <em>Pause agents</em>), the digest’s “since you last looked”, dedupe, heartbeat, real checkpoints and forensic data are <strong>design-only slots</strong> marked <code>preview</code> / <code>awaiting data</code> — never fabricated.</div>
+  </section>
+
+  <!-- color profiles -->
+  <section class="sec">
+    <h2>Color profiles — full themes (default: Midnight)</h2>
+    <p class="h-lede" style="font-size:14px; margin-bottom:16px">Six switchable profiles. Each defines base · surface · ink · the single act-accent · healthy · degraded · muted. <strong>Color = meaning and the accent stays single-purpose in every profile.</strong> All derived tokens (softs, lines, text variants, shadows, glow) are computed from these anchors — light profiles darken accent for on-surface text; dark profiles lighten it and add a reserved glow to act + live/active states only. Switching cross-fades surfaces (~0.5s).</p>
+    <div class="grid c3">
+      <div class="card2"><div style="display:flex; gap:0; height:48px; border-radius:8px; overflow:hidden; border:1px solid var(--hm-line); margin-bottom:10px"><i style="flex:2; background:#FAF7F2"></i><i style="flex:2; background:#FFFDFA"></i><i style="flex:1.4; background:#D97757"></i><i style="flex:1; background:#6B8F71"></i><i style="flex:1; background:#C8843C"></i></div><div class="name">Claude Warm</div><div class="mono2">act #D97757 · ok #6B8F71 · deg #C8843C</div></div>
+      <div class="card2"><div style="display:flex; gap:0; height:48px; border-radius:8px; overflow:hidden; border:1px solid var(--hm-line); margin-bottom:10px"><i style="flex:2; background:#1A1714"></i><i style="flex:2; background:#241F1B"></i><i style="flex:1.4; background:#E8865E"></i><i style="flex:1; background:#7FB089"></i><i style="flex:1; background:#E0A050"></i></div><div class="name">Midnight <span style="color:var(--act-text); font-size:10px">· default · warm dark</span></div><div class="mono2">act #E8865E · ok #7FB089 · deg #E0A050</div></div>
+      <div class="card2"><div style="display:flex; gap:0; height:48px; border-radius:8px; overflow:hidden; border:1px solid var(--hm-line); margin-bottom:10px"><i style="flex:2; background:#F4F5F7"></i><i style="flex:2; background:#FFFFFF"></i><i style="flex:1.4; background:#5B6CFF"></i><i style="flex:1; background:#3FA66A"></i><i style="flex:1; background:#D9911F"></i></div><div class="name">Slate Console <span style="color:var(--hm-faint); font-size:10px">· cool</span></div><div class="mono2">act #5B6CFF · ok #3FA66A · deg #D9911F</div></div>
+      <div class="card2"><div style="display:flex; gap:0; height:48px; border-radius:8px; overflow:hidden; border:1px solid var(--hm-line); margin-bottom:10px"><i style="flex:2; background:#FBFAF7"></i><i style="flex:2; background:#FFFFFF"></i><i style="flex:1.4; background:#B23A28"></i><i style="flex:1; background:#2F7D52"></i><i style="flex:1; background:#B5791E"></i></div><div class="name">Editorial <span style="color:var(--hm-faint); font-size:10px">· hi-contrast</span></div><div class="mono2">act #B23A28 · ok #2F7D52 · deg #B5791E</div></div>
+      <div class="card2"><div style="display:flex; gap:0; height:48px; border-radius:8px; overflow:hidden; border:1px solid var(--hm-line); margin-bottom:10px"><i style="flex:2; background:#F6F5F8"></i><i style="flex:2; background:#FFFFFF"></i><i style="flex:1.4; background:#E6007A"></i><i style="flex:1; background:#0FA67E"></i><i style="flex:1; background:#E0A030"></i></div><div class="name">Averray (Polkadot)</div><div class="mono2">act #E6007A → CTA #D6006E · ok #0FA67E</div></div>
+      <div class="card2"><div style="display:flex; gap:0; height:48px; border-radius:8px; overflow:hidden; border:1px solid var(--hm-line); margin-bottom:10px"><i style="flex:2; background:#14111C"></i><i style="flex:2; background:#201B2E"></i><i style="flex:1.4; background:#FF2D92"></i><i style="flex:1; background:#2DD4BF"></i><i style="flex:1; background:#F0B44C"></i></div><div class="name">Midnight × Polkadot <span style="color:var(--hm-faint); font-size:10px">· glow</span></div><div class="mono2">act #FF2D92 (ink on fill) · ok #2DD4BF</div></div>
+    </div>
+    <div class="note" style="margin-top:16px"><strong>Contrast guards baked in.</strong> Averray CTA fill drops to <code>#D6006E</code> so white labels stay ≥AA on the magenta; Midnight × Polkadot uses near-black ink (<code>#14111C</code>) on its luminous magenta fill. Degraded never collapses into healthy or empty — the <code>?</code> degraded state keeps its own amber/gold across all six. Dark profiles add a reserved bloom (<code>--act-glow</code>, <code>--sh-coral</code>) to the act-accent + LIVE/active dots only; everything else stays calm and dim.</div>
+  </section>
+
+  <!-- agent identity -->
+  <section class="sec">
+    <h2>Agent identity — cool jewel set, kept distinct from status</h2>
+    <p class="h-lede" style="font-size:14px; margin-bottom:16px">Identity colors live only in avatar tiles + the author's name. They are deliberately cooler than the warm status palette so identity never reads as a status signal.</p>
+    <div class="grid c4">
+      <div class="card2"><div class="sw" style="background:var(--ag-hermes); display:grid; place-items:center; color:#fff; font-family:var(--font-display); font-weight:700; font-size:24px">H</div><div class="name">Hermes</div><div class="mono2">#4b56c4</div><div class="role">orchestrator</div></div>
+      <div class="card2"><div class="sw" style="background:var(--ag-claude); display:grid; place-items:center; color:#fff; font-family:var(--font-display); font-weight:700; font-size:24px">C</div><div class="name">Claude</div><div class="mono2">#7048b6</div><div class="role">worker</div></div>
+      <div class="card2"><div class="sw" style="background:var(--ag-codex); display:grid; place-items:center; color:#fff; font-family:var(--font-display); font-weight:700; font-size:24px">X</div><div class="name">Codex</div><div class="mono2">#2f8f83</div><div class="role">worker</div></div>
+      <div class="card2"><div class="sw" style="background:var(--ag-test); display:grid; place-items:center; color:#fff; font-family:var(--font-display); font-weight:700; font-size:24px">T</div><div class="name">Test-writer</div><div class="mono2">#5d6b7d</div><div class="role">tester</div></div>
+    </div>
+    <div class="grid c2" style="margin-top:14px">
+      <div class="card2"><div class="sw" style="background:var(--ag-op); display:grid; place-items:center; color:#fff; font-family:var(--font-display); font-weight:700; font-size:20px">●</div><div class="name">Operator (You)</div><div class="mono2">#2a2723</div><div class="role">graphite — the participant</div></div>
+      <div class="card2"><div class="sw" style="background:var(--ag-system); display:grid; place-items:center; color:#fff; font-family:var(--font-display); font-weight:700; font-size:20px">S</div><div class="name">System</div><div class="mono2">#8a8275</div><div class="role">release automation</div></div>
+    </div>
+  </section>
+
+  <!-- type -->
+  <section class="sec">
+    <h2>Type scale</h2>
+    <div class="card2">
+      <div class="specimen" style="font-size:40px">Space Grotesk — display</div>
+      <div style="font-family:var(--font-body); font-size:16px; color:var(--hm-ink); margin-top:14px; line-height:1.6">Manrope — body. Calm, evidence-led, infrastructure-grade. Default 15px / 1.55.</div>
+      <div class="mono" style="font-size:14px; color:var(--hm-ink-2); margin-top:12px">JetBrains Mono — ids, traces, wallet, timestamps</div>
+    </div>
+    <table style="margin-top:16px">
+      <thead><tr><th>Role</th><th>Size</th><th>Token / notes</th></tr></thead>
+      <tbody>
+        <tr><td>Banner headline</td><td class="v">27px / 700</td><td class="d">Friendly display, line-height 1.14.</td></tr>
+        <tr><td>Card title</td><td class="v">19px / 700</td><td class="d">DECIDE card titles.</td></tr>
+        <tr><td>Lane title</td><td class="v">15px / 700</td><td class="d">—</td></tr>
+        <tr><td>Body</td><td class="v">13.5–15px / 400</td><td class="d">Turn text, descriptions.</td></tr>
+        <tr><td>Eyebrow</td><td class="v">11px / 700</td><td class="d">Uppercase, <code>letter-spacing:0</code> (global kill).</td></tr>
+        <tr><td>Mono meta</td><td class="v">11–12.5px</td><td class="d">Ids, times, traces.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- radii + shadow + pills -->
+  <section class="sec">
+    <h2>Radii · elevation · pills</h2>
+    <div class="grid c2">
+      <div class="card2">
+        <table>
+          <tbody>
+            <tr><td class="k">--r-sm</td><td class="v">8px</td><td class="d">inner elements</td></tr>
+            <tr><td class="k">--r-chip</td><td class="v">9px</td><td class="d">meta chips</td></tr>
+            <tr><td class="k">--r-btn</td><td class="v">11px</td><td class="d">buttons, inputs</td></tr>
+            <tr><td class="k">--r-card</td><td class="v">15px</td><td class="d">cards</td></tr>
+            <tr><td class="k">--r-lane</td><td class="v">19px</td><td class="d">tier lanes</td></tr>
+            <tr><td class="k">--r-pill</td><td class="v">999px</td><td class="d">status pills</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card2">
+        <table>
+          <tbody>
+            <tr><td class="k">--sh-sm</td><td class="d">resting cards</td></tr>
+            <tr><td class="k">--sh</td><td class="d">panels</td></tr>
+            <tr><td class="k">--sh-lift</td><td class="d">hover / drawer</td></tr>
+            <tr><td class="k">--sh-coral</td><td class="d">primary action glow</td></tr>
+          </tbody>
+        </table>
+        <div class="pillrow" style="margin-top:14px">
+          <span class="pill pill--act"><span class="dot"></span>→ Operator</span>
+          <span class="pill pill--ok"><span class="dot"></span>Deploy ok</span>
+          <span class="pill pill--warn"><span class="dot"></span>Failed 0%</span>
+          <span class="pill pill--tel">quiet 27</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- motion -->
+  <section class="sec">
+    <h2>Motion timings</h2>
+    <table>
+      <thead><tr><th>Token / anim</th><th>Value</th><th>Where</th></tr></thead>
+      <tbody>
+        <tr><td class="k">--ease</td><td class="v">cubic-bezier(.2,.7,.2,1)</td><td class="d">all transitions</td></tr>
+        <tr><td class="k">--dur-fast / --dur</td><td class="v">150ms / 200ms</td><td class="d">hover, press, color</td></tr>
+        <tr><td class="k">hm-slide-in</td><td class="v">320ms ease-out</td><td class="d">new turns + cards enter</td></tr>
+        <tr><td class="k">hm-breathe</td><td class="v">~4s loop (÷ intensity)</td><td class="d">needs-you banner + urgent card</td></tr>
+        <tr><td class="k">lane-spring (FLIP)</td><td class="v">500–780ms · cubic-bezier(.34,1.62,.4,1)</td><td class="d">card crossing columns on advance — overshoot spring + lift + scale(1.06). Runs at full regardless of the global intensity (it's a one-shot, not decorative), skipped only at motion 0 / reduced-motion.</td></tr>
+        <tr><td class="k">hm-live</td><td class="v">~2.4s loop</td><td class="d">LIVE clock + presence dots</td></tr>
+        <tr><td class="k">hm-shimmer</td><td class="v">~2.6s loop</td><td class="d">running / deploying items (high intensity only)</td></tr>
+        <tr><td class="k">hm-pop</td><td class="v">420ms</td><td class="d">counts on change</td></tr>
+      </tbody>
+    </table>
+    <div class="note" style="margin-top:16px"><strong>Intensity + reduced-motion.</strong>A single <code>--mi</code> (0–1) and <code>data-motion="off|low|med|high"</code> on <code>&lt;html&gt;</code> gate the decorative layers: <em>low</em> keeps only slide-ins + the live pulse, <em>med</em> (default, 60%) adds breathing + count pops, <em>high</em> turns on shimmer. <code>@media (prefers-reduced-motion: reduce)</code> hard-disables every animation regardless — fully supported.</div>
+  </section>
+
+  <!-- data model -->
+  <section class="sec">
+    <h2>Room data model — ports 1:1</h2>
+    <pre class="code-block" style="border-radius:var(--r-card)">Turn = {
+  author:  'hermes' | 'claude' | 'codex' | 'test-writer' | 'operator' | 'system',
+  target?: same set | 'everyone',          // directed message → arrow in UI
+  kind:    'chat' | 'proposal' | 'request_help' | 'status' | 'review',
+  time, text, pending?, demo?
+}
+// Threads group turns by the card/task they're about (thread.cardRef → opens drawer).
+// Ranking by kind: request_help / proposal / review = prominent (coral / sage, left border);
+//                  chat = normal;  status = dimmed muted telemetry.</pre>
+    <div class="note" style="margin-top:16px; border-left-color:var(--ag-claude)"><strong>Honesty contract — ship this, not the scaffold.</strong>The default room renders <em>only real turns</em>. The <code>demoTimeline</code> (synthetic <code>request_help</code> / <code>proposal</code> / typing) exists solely so this prototype's motion can be judged — every entry is <code>demo:true</code> and <strong>must be stripped from the production port</strong>. Truth-boundary holds: degraded shows <code>?</code> not <code>0</code>, empty is honestly empty ("no agent chatter yet"; "no saved suites yet"), a down telemetry source reads <code>?</code> + "source unavailable" (see Utilities → LLM usage) rather than a fabricated count, and nothing about agent-to-agent dialogue is fabricated at runtime.</div>
+  </section>
+</main>
+</body>
+</html>
