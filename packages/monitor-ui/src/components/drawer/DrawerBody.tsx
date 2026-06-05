@@ -354,6 +354,40 @@ function TaskBody({ card }: { card: BoardCard }) {
   );
 }
 
+/**
+ * PR-D2 — an honest "awaiting data" slot for a forensic field that isn't wired
+ * to a real backend signal yet. Truth-boundary: we show the field exists and is
+ * unwired, never a fabricated value. Styled in the --h4 palette.
+ */
+function AwaitingData({ label, note }: { label: string; note?: string }) {
+  return (
+    <div className="h4-awaiting" role="note">
+      <span className="h4-awaiting-label">{label}</span>
+      <span className="h4-awaiting-chip">awaiting data</span>
+      {note ? <span className="h4-awaiting-note">{note}</span> : null}
+    </div>
+  );
+}
+
+/**
+ * PR-D2 — deploy checkpoint stepper, from the REAL `verification` counters
+ * (current/total/label). Steps up to `current` are done; the rest pending. No
+ * fabricated step names — just the verified count.
+ */
+function CheckpointStepper({ current, total, label }: { current: number; total: number; label: string }) {
+  const steps = Math.max(0, Math.min(40, total));
+  return (
+    <div className="h4-stepper" aria-label={`${current} of ${total} checkpoints · ${label}`}>
+      <div className="h4-stepper-track">
+        {Array.from({ length: steps }).map((_, i) => (
+          <span key={i} className={"h4-stepper-dot" + (i < current ? " is-done" : "")} aria-hidden />
+        ))}
+      </div>
+      <div className="h4-stepper-label mono">{current}/{total} · {label}</div>
+    </div>
+  );
+}
+
 function DeployBody({ card }: { card: DeployCard }) {
   // `verification`/`deployId` are required on the UI type, but the live
   // backend doesn't always populate them (deploy verification is not wired
@@ -364,17 +398,17 @@ function DeployBody({ card }: { card: DeployCard }) {
   return (
     <>
       <VerdictBlock head="Post-merge verification">{card.summary || "Verifying the deploy."}</VerdictBlock>
-      {verification ? (
-        <section>
-          <div className="hm-section-h">Verification progress</div>
-          <div className="hm-verdict-block">
-            <div className="head">
-              {verification.current}/{verification.total} · {verification.label}
-            </div>
-            {deployId ? <div className="body">Deploy {deployId}.</div> : null}
-          </div>
-        </section>
-      ) : null}
+      <section>
+        <div className="hm-section-h">Checkpoints</div>
+        {verification ? (
+          <>
+            <CheckpointStepper current={verification.current} total={verification.total} label={verification.label} />
+            {deployId ? <div className="hm-card-meta">Deploy {deployId}.</div> : null}
+          </>
+        ) : (
+          <AwaitingData label="Post-merge verification" note="the deploy runner has not reported checkpoints yet" />
+        )}
+      </section>
       <ChecksSection checks={card.checks} checkRuns={card.checkRuns} />
     </>
   );

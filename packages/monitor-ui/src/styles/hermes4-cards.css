@@ -1,0 +1,90 @@
+/* =========================================================
+   Hermes-4 card surface (PR-D2) — badge families + active/
+   mirror treatment. Loaded after monitor.css; consumes the
+   PR-D1 --h4-* tokens. Additive: the rest of the card keeps
+   its --hm-* styling until later migration.
+   ========================================================= */
+
+/* ---- unified badge row (State / Risk / Evidence / Gate) ---- */
+.hm-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.h4-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 20px;
+  padding: 0 9px;
+  border-radius: var(--h4-r-pill);
+  font-family: var(--h4-font-display);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  white-space: nowrap;
+  letter-spacing: 0;
+}
+.h4-badge-glyph { font-size: 9px; line-height: 1; flex: none; }
+.h4-badge-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+
+/* tones — the --h4 semantic palette */
+.h4-tone--ok   { background: var(--h4-ok-soft);   color: var(--h4-ok-text); }
+.h4-tone--warn { background: var(--h4-warn-soft); color: var(--h4-warn-text); }
+.h4-tone--act  { background: var(--h4-act-soft);  color: var(--h4-act-text); }
+.h4-tone--tel  { background: var(--h4-tel-chip);  color: var(--h4-tel); }
+
+/* ---- active vs passive-mirror cards ----
+   Active = awaiting the operator → a coral (DECIDE-orange) left edge.
+   Mirror = someone/something else owns it → no coral edge (the absence is
+   the signal; we don't gray the whole board). Reserved coral, per the
+   design: only the operator's queue wears it. */
+.hm-card[data-h4-card="active"] {
+  border-left: 3px solid var(--h4-act);
+}
+
+/* ---- drawer: honest "awaiting data" slot (truth-boundary) ---- */
+.h4-awaiting {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  padding: 11px 12px;
+  border: 1px dashed var(--h4-line);
+  border-radius: var(--h4-r-sm);
+  background: var(--h4-paper-sunken);
+}
+.h4-awaiting-label {
+  font-family: var(--h4-font-display);
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--h4-ink-2);
+}
+.h4-awaiting-chip {
+  font-family: var(--h4-font-mono);
+  font-size: 10.5px;
+  color: var(--h4-faint);
+  padding: 1px 7px;
+  border: 1px solid var(--h4-line-2);
+  border-radius: var(--h4-r-pill);
+}
+.h4-awaiting-note { font-size: 11.5px; color: var(--h4-faint); }
+
+/* ---- drawer: deploy checkpoint stepper ---- */
+.h4-stepper { display: flex; flex-direction: column; gap: 8px; }
+.h4-stepper-track { display: flex; gap: 5px; flex-wrap: wrap; }
+.h4-stepper-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid var(--h4-line-strong);
+  background: transparent;
+}
+.h4-stepper-dot.is-done {
+  background: var(--h4-ok);
+  border-color: var(--h4-ok);
+}
+.h4-stepper-label { font-size: 12px; color: var(--h4-muted); }
