@@ -1,0 +1,89 @@
+/* =========================================================
+   Hermes-4 shell + kanban tier layer (PR-D1).
+   Loaded AFTER monitor.css so these additive rules win.
+   FOUNDATION-FIRST: only the NEW surfaces (the END OF BOARD
+   footer + the kanban tier accents + flex-fill) consume the
+   --h4-* tokens. The existing board chrome keeps its --hm-*
+   styling until later D-PRs migrate it.
+   ========================================================= */
+
+/* ---- fixed app shell: header → banner → utilities → board → footer ----
+   The board root is already 100vh / overflow:hidden with no page scroll
+   (monitor.css .hm-board). Add a trailing auto row for the footer so the
+   board region (1fr) keeps its internal column scroll and the footer pins
+   to the bottom. */
+.hm-board {
+  grid-template-rows: auto auto 1fr auto;
+}
+
+/* ---- "END OF BOARD" footer — a new --h4 surface ---- */
+.h4-board-footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 10px 22px;
+  border-top: 1px solid var(--h4-line);
+  background: var(--h4-paper-veil);
+  color: var(--h4-muted);
+  font-family: var(--h4-font-body);
+}
+.h4-board-footer-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--h4-font-display);
+  font-weight: 700;
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--h4-faint);
+}
+.h4-board-footer-end .dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--h4-line-strong);
+}
+.h4-board-footer-stat {
+  font-family: var(--h4-font-mono);
+  font-size: 11.5px;
+  color: var(--h4-muted);
+}
+.h4-board-footer-meta {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--h4-faint);
+}
+
+/* ---- DECIDE / WATCH / HIDE kanban: columns flex-fill the width ----
+   The lanes already live in a horizontal flex row (.hm-lanes); make the
+   expanded columns share the width evenly, with the Decision Inbox a touch
+   wider. Empty non-gate lanes still collapse to mini-rails (monitor.css). */
+.hm-lanes--kanban .hm-lane--expanded {
+  flex: 1 1 0;
+  min-width: 288px;
+}
+.hm-lanes--kanban .hm-lane--action.hm-lane--expanded {
+  flex: 1.25 1 0;
+  min-width: 340px;
+}
+
+/* DECIDE-orange (--h4-act) is RESERVED for the Decision Inbox (the one lane
+   that holds what needs the operator). A restrained left accent bar + header
+   tint — never a heavy wash that would blur with a true coral CTA. No other
+   tier gets coral. */
+.hm-lane--expanded[data-h4-tier="decide"] {
+  box-shadow: inset 3px 0 0 0 var(--h4-act);
+}
+.hm-lane--expanded[data-h4-tier="decide"] .hm-lane-head {
+  background: var(--h4-tier-decide-bg);
+}
+.hm-lane-rail[data-h4-tier="decide"] {
+  box-shadow: inset 3px 0 0 0 var(--h4-act-line);
+}
+
+/* WATCH / HIDE tiers stay neutral — telemetry-gray, never coral. */
+.hm-lane--expanded[data-h4-tier="hide"] {
+  opacity: 0.94;
+}

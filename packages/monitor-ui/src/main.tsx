@@ -15,6 +15,11 @@ import { MonitorPage } from "./MonitorPage.js";
 // alone left the board on fallback fonts.
 import "./styles/averray-tokens.css";
 import "./styles/monitor.css";
+// Hermes-4 design layer (PR-D1): the --h4-* token system + theme engine and
+// the new shell/footer/kanban-tier styles. Loaded LAST so its additive rules
+// win; namespaced so it never clobbers the shipped board's --hm-* tokens.
+import "./styles/hermes4-tokens.css";
+import "./styles/hermes4-shell.css";
 
 const rootEl = document.getElementById("root");
 if (!rootEl) {

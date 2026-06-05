@@ -28,7 +28,7 @@ import type { MissionSpawnInput, SavedTestSuite, SaveTestSuiteInput } from "../l
 import { CreateTaskForm } from "./CreateTaskForm.js";
 import { StartMissionLauncher } from "./StartMissionLauncher.js";
 import { TestSuitesPanel } from "./TestSuitesPanel.js";
-import { laneFor } from "../lib/monitor/lane-rules.js";
+import { laneFor, isWaitingOnOperator } from "../lib/monitor/lane-rules.js";
 import { relatedPrForCard } from "../lib/monitor/collaboration.js";
 import { TopStrip } from "./TopStrip.js";
 import { TopStripDegraded } from "./TopStripDegraded.js";
@@ -579,6 +579,11 @@ export function BoardView({
         />
       </div>
 
+      {/* PR-D1: fixed shell footer — the bottom edge of the no-scroll board.
+          Real counts only (total cards, how many wait on the operator, how
+          many are running). New --h4 surface. */}
+      <BoardFooter cards={cards} />
+
       {/* P0-4: transient confirmation that an Ask-Hermes action was received.
           aria-live so it's announced; visually a small floating toast. It
           self-clears after a few seconds (the composer carries the durable
@@ -615,6 +620,30 @@ export function BoardView({
 
       {overlayOpen ? <KeyboardOverlay onClose={() => setOverlayOpen(false)} /> : null}
     </div>
+  );
+}
+
+/**
+ * PR-D1 — the fixed shell's bottom edge. Honest, real-data counts only:
+ * total cards, how many wait on the operator (the DECIDE workload), and how
+ * many are running. No fabricated "last sync" clock (we have no real board-sync
+ * signal to show). Styled with the --h4 token system.
+ */
+function BoardFooter({ cards }: { cards: readonly BoardCard[] }) {
+  const total = cards.length;
+  const waiting = cards.filter((c) => isWaitingOnOperator(c)).length;
+  const running = cards.filter((c) => c.state === "running").length;
+  return (
+    <footer className="h4-board-footer" aria-label="Board footer">
+      <span className="h4-board-footer-end">
+        <span className="dot" aria-hidden />
+        End of board
+      </span>
+      <span className="h4-board-footer-stat">
+        {total} {total === 1 ? "card" : "cards"} · {waiting} waiting on you · {running} running
+      </span>
+      <span className="h4-board-footer-meta">Hermes · Averray</span>
+    </footer>
   );
 }
 
