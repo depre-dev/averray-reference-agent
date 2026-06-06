@@ -16,6 +16,7 @@ import {
   type CollaborationMessage,
 } from "../../lib/monitor/collaboration.js";
 import { useCollaboration, type UseCollaborationOptions } from "../../hooks/useCollaboration.js";
+import { derivePresence, activeCount, type PresencePeer } from "../../lib/monitor/presence.js";
 import { AgentTag, Badge, Button, EmptyState, StatusPill, type AgentTagAgent, type StateVariant } from "../ui.js";
 import { AskHermesComposer } from "./AskHermesComposer.js";
 import { HermesTurn } from "./HermesTurn.js";
@@ -91,6 +92,12 @@ export function CoPilotRail({
     () => buildRoomThreads(messages, boardCards ?? []),
     [boardCards, messages],
   );
+  // PR-D3c: who's in the room, from real signals only (workingNow → active,
+  // recent collaboration authors → online). Recomputes as messages/cards move.
+  const peers = useMemo(
+    () => derivePresence({ messages, cards: boardCards ?? [], nowMs: Date.now() }),
+    [boardCards, messages],
+  );
 
   const scopedConversationActive = useMemo(
     () => hasScopedConversation(messages, focusedCard),
@@ -143,6 +150,7 @@ export function CoPilotRail({
         <div className="hm-activity-head">
           <span className="hm-kicker">Room</span>
           <strong>Agent collaboration</strong>
+          <RoomPresence peers={peers} />
         </div>
         <div className="hm-hermes-stream hm-activity-stream" ref={streamRef} aria-live="polite">
           {roomThreads.length > 0 ? (
@@ -247,6 +255,34 @@ function cardIdForMessage(message: CollaborationMessage, cards: readonly BoardCa
     if (card) return card.id;
   }
   return undefined;
+}
+
+/**
+ * PR-D3c — multi-agent presence tiles for the room header. Renders only agents
+ * with a real live signal (active in-flight work, or a recent message); an
+ * empty room reads honestly as "quiet", never a fabricated always-on roster.
+ */
+function RoomPresence({ peers }: { peers: readonly PresencePeer[] }) {
+  if (peers.length === 0) {
+    return <span className="hm-room-presence hm-room-presence--quiet">quiet · no agents active</span>;
+  }
+  const active = activeCount(peers);
+  return (
+    <div className="hm-room-presence" role="list" aria-label="Agents present">
+      {peers.map((peer) => (
+        <span
+          className="hm-room-peer"
+          role="listitem"
+          key={peer.agent}
+          title={peer.detail ? `${peer.agent} · ${peer.detail}` : `${peer.agent} · ${peer.presence}`}
+        >
+          <span className={`hm-room-peer-dot is-${peer.presence}`} aria-hidden />
+          <span className="hm-room-peer-name">{peer.agent}</span>
+        </span>
+      ))}
+      {active > 0 ? <span className="hm-room-presence-count">{active} active</span> : null}
+    </div>
+  );
 }
 
 function RoomThreadBlock({
