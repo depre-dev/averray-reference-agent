@@ -177,7 +177,13 @@ export function Card({
           "Why Hermes did this". Renders nothing when there's no decision
           record — never a fabricated rationale. */}
       {!isClosed && card.decisionRecord && isDecisionLane(card) ? (
-        <CardDecisionLine record={card.decisionRecord} />
+        <>
+          <CardDecisionLine record={card.decisionRecord} />
+          {/* PR-D3b: the compact Decision-Inbox context — a 1-line grants chip
+              + "what happens next", from the real decision record. The full
+              bundle/forensics stay in the drawer. */}
+          <DecisionInboxContext record={card.decisionRecord} />
+        </>
       ) : null}
 
       {!isClosed && card.reviewRequests?.some((request) => request.status === "requested") ? (
@@ -518,6 +524,45 @@ function CardDecisionLine({ record }: { record: HermesDecisionRecord }) {
         <span className="hm-card-decision-reason">
           <span className="hm-card-decision-reason-dot" aria-hidden />
           <HumanizedText text={topReason} />
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/** A 1-line summary of what Hermes's decision is GRANTED to do, from the real
+ *  safety block. Read-only is the calm/ok case; anything that mutates names the
+ *  surface(s) it touches — never inflated. */
+function decisionGrants(safety: HermesDecisionRecord["safety"]): { text: string; mutating: boolean } {
+  if (safety.readOnly && !safety.mutates) return { text: "read-only", mutating: false };
+  const surfaces: string[] = [];
+  if (safety.mutatesGithub) surfaces.push("GitHub");
+  if (safety.mutatesAverray) surfaces.push("Averray");
+  if (safety.editsWikipedia) surfaces.push("Wikipedia");
+  if (surfaces.length > 0) return { text: `mutates ${surfaces.join(" · ")}`, mutating: true };
+  return safety.mutates ? { text: "mutates", mutating: true } : { text: "read-only", mutating: false };
+}
+
+/**
+ * PR-D3b — the compact Decision-Inbox context shown on DECIDE-lane cards: a
+ * grants chip (what the decision is allowed to do) + "what happens next" (from
+ * outcome.waitingNext). Both come straight from the real decision record — no
+ * fabricated authority or next-step. Renders nothing when neither is present.
+ */
+function DecisionInboxContext({ record }: { record: HermesDecisionRecord }) {
+  const whatNext = record.outcome.waitingNext?.trim();
+  const grants = decisionGrants(record.safety);
+  return (
+    <div className="hm-decision-inbox" data-h4>
+      <span
+        className={"h4-badge h4-badge--gate " + (grants.mutating ? "h4-tone--warn" : "h4-tone--ok")}
+        title="what this decision is granted to do"
+      >
+        {grants.text}
+      </span>
+      {whatNext ? (
+        <span className="hm-decision-next">
+          <span className="lbl">What happens next ·</span> <HumanizedText text={whatNext} />
         </span>
       ) : null}
     </div>
