@@ -17,6 +17,7 @@ import {
 } from "../../lib/monitor/collaboration.js";
 import { useCollaboration, type UseCollaborationOptions } from "../../hooks/useCollaboration.js";
 import { derivePresence, activeCount, type PresencePeer } from "../../lib/monitor/presence.js";
+import { railDigestCounts } from "../../lib/monitor/rail-digest.js";
 import { AgentTag, Badge, Button, EmptyState, StatusPill, type AgentTagAgent, type StateVariant } from "../ui.js";
 import { AskHermesComposer } from "./AskHermesComposer.js";
 import { HermesTurn } from "./HermesTurn.js";
@@ -132,6 +133,8 @@ export function CoPilotRail({
           </div>
         </div>
       </div>
+
+      <RailDigest cards={boardCards ?? []} />
 
       <BacklogSuggestionsRailBlock
         response={backlogSuggestions}
@@ -255,6 +258,44 @@ function cardIdForMessage(message: CollaborationMessage, cards: readonly BoardCa
     if (card) return card.id;
   }
   return undefined;
+}
+
+/**
+ * PR-D3d — the "Hermes digest" at the top of the rail. Leads with the figures
+ * we can compute from REAL board cards (needs-you, running). The
+ * since-you-last-looked marker + session deltas need a backend session signal
+ * we don't have, so they read as honest awaiting-data — never a fabricated
+ * count.
+ */
+function RailDigest({ cards }: { cards: readonly BoardCard[] }) {
+  const { needsYou, running } = railDigestCounts(cards);
+  return (
+    <section className="hm-rail-digest" aria-label="Hermes digest">
+      <div className="hm-rail-digest-head">
+        <span className="hm-kicker">Digest</span>
+        <strong>Hermes digest</strong>
+        <span
+          className="hm-rail-digest-since"
+          title="The since-you-last-looked marker needs a real session backend — not wired yet."
+        >
+          since last look · awaiting data
+        </span>
+      </div>
+      <div className="hm-rail-digest-stats">
+        <DigestStat label="needs you" value={needsYou} tone="act" />
+        <DigestStat label="running now" value={running} tone="ok" />
+      </div>
+    </section>
+  );
+}
+
+function DigestStat({ label, value, tone }: { label: string; value: number; tone: "act" | "ok" }) {
+  return (
+    <div className="hm-rail-digest-stat">
+      <span className="hm-rail-digest-value" data-tone={tone}>{value}</span>
+      <span className="hm-rail-digest-label">{label}</span>
+    </div>
+  );
 }
 
 /**
