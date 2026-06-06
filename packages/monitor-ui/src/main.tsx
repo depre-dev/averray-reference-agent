@@ -22,6 +22,9 @@ import "./styles/hermes4-tokens.css";
 import "./styles/hermes4-shell.css";
 // PR-D2: card badge families + active/mirror treatment (--h4).
 import "./styles/hermes4-cards.css";
+// PR-D3e: rail reskin — re-points the co-pilot rail's --hm-* surfaces to --h4-*
+// so the column tracks the active color profile. Cosmetic, additive, rail-only.
+import "./styles/hermes4-rail.css";
 
 const rootEl = document.getElementById("root");
 if (!rootEl) {
