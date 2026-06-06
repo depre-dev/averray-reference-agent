@@ -16,13 +16,15 @@ describe("AskHermesComposer", () => {
     const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
     type(input, "/mission https://staging.averray.com/onboarding");
     fireEvent.click(getByRole("button", { name: /Send/ }));
+    // PR-D3: a mutating command stages a Confirm gate before it fires.
+    fireEvent.click(getByRole("button", { name: "Confirm" }));
     expect(onSpawnMission).toHaveBeenCalledWith("https://staging.averray.com/onboarding");
     expect(input.value).toBe("");
   });
 
   test("Enter sends; Shift+Enter does not", () => {
     const onSpawnMission = vi.fn();
-    const { container } = render(<AskHermesComposer onSpawnMission={onSpawnMission} />);
+    const { container, getByRole } = render(<AskHermesComposer onSpawnMission={onSpawnMission} />);
     const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
 
     type(input, "/mission https://x.test/a");
@@ -30,6 +32,8 @@ describe("AskHermesComposer", () => {
     expect(onSpawnMission).not.toHaveBeenCalled();
 
     fireEvent.keyDown(input, { key: "Enter" });
+    // Enter stages the command; the operator confirms it before it fires.
+    fireEvent.click(getByRole("button", { name: "Confirm" }));
     expect(onSpawnMission).toHaveBeenCalledWith("https://x.test/a");
   });
 
@@ -51,6 +55,7 @@ describe("AskHermesComposer", () => {
     const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
     type(input, "/claude averray-agent/agent Add a HEALTHCHECK.md");
     fireEvent.click(getByRole("button", { name: /Send/ }));
+    fireEvent.click(getByRole("button", { name: "Confirm" }));
     expect(onSpawnClaudeTask).toHaveBeenCalledWith("averray-agent/agent", "Add a HEALTHCHECK.md");
     expect(input.value).toBe("");
   });
@@ -126,6 +131,7 @@ describe("AskHermesComposer", () => {
     const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
     type(input, "/task claude averray-agent/agent Add a HEALTHCHECK.md");
     fireEvent.click(getByRole("button", { name: /Send/ }));
+    fireEvent.click(getByRole("button", { name: "Confirm" }));
     expect(onCreateTask).toHaveBeenCalledWith({
       agent: "claude",
       repo: "averray-agent/agent",
@@ -140,6 +146,7 @@ describe("AskHermesComposer", () => {
     const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
     type(input, "/task codex averray-agent/agent#42 tighten it");
     fireEvent.click(getByRole("button", { name: /Send/ }));
+    fireEvent.click(getByRole("button", { name: "Confirm" }));
     expect(onCreateTask).toHaveBeenCalledWith({
       agent: "codex",
       repo: "averray-agent/agent",
@@ -156,6 +163,79 @@ describe("AskHermesComposer", () => {
     fireEvent.click(getByRole("button", { name: /Send/ }));
     expect(onCreateTask).not.toHaveBeenCalled();
     expect(within(container).getByRole("alert").textContent).toMatch(/not a valid agent/i);
+  });
+});
+
+describe("AskHermesComposer — PR-D3 command-preview gate", () => {
+  test("a mutating command stages a Confirm gate and does not fire on Send", () => {
+    const onSpawnMission = vi.fn();
+    const { container, getByRole, getByText } = render(<AskHermesComposer onSpawnMission={onSpawnMission} />);
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    type(input, "/mission https://x.test/a");
+    fireEvent.click(getByRole("button", { name: /Send/ }));
+    // staged, not fired
+    expect(onSpawnMission).not.toHaveBeenCalled();
+    expect(container.querySelector(".hm-compose-preview")).toBeTruthy();
+    expect(getByText("Spawn browser mission")).toBeTruthy();
+    expect(container.querySelector(".hm-compose-preview-detail")?.textContent).toMatch(/x\.test\/a/);
+  });
+
+  test("Cancel aborts the staged command and clears the input — nothing fires", () => {
+    const onSpawnMission = vi.fn();
+    const { container, getByRole } = render(<AskHermesComposer onSpawnMission={onSpawnMission} />);
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    type(input, "/mission https://x.test/a");
+    fireEvent.click(getByRole("button", { name: /Send/ }));
+    fireEvent.click(getByRole("button", { name: "Cancel" }));
+    expect(onSpawnMission).not.toHaveBeenCalled();
+    expect(container.querySelector(".hm-compose-preview")).toBeNull();
+    expect(input.value).toBe("");
+  });
+
+  test("Edit dismisses the gate but keeps the typed command for fixing", () => {
+    const onSpawnMission = vi.fn();
+    const { container, getByRole } = render(<AskHermesComposer onSpawnMission={onSpawnMission} />);
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    type(input, "/mission https://x.test/a");
+    fireEvent.click(getByRole("button", { name: /Send/ }));
+    fireEvent.click(getByRole("button", { name: "Edit" }));
+    expect(onSpawnMission).not.toHaveBeenCalled();
+    expect(container.querySelector(".hm-compose-preview")).toBeNull();
+    expect(input.value).toBe("/mission https://x.test/a");
+  });
+
+  test("autopilot is treated as mutating — it stages a confirm gate", () => {
+    const onSetAutopilot = vi.fn();
+    const onSetSupervised = vi.fn();
+    const { container, getByRole, getByText } = render(
+      <AskHermesComposer onSetAutopilot={onSetAutopilot} onSetSupervised={onSetSupervised} />
+    );
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    type(input, "/autopilot");
+    fireEvent.click(getByRole("button", { name: /Send/ }));
+    expect(onSetAutopilot).not.toHaveBeenCalled();
+    expect(getByText("Engage autopilot")).toBeTruthy();
+    fireEvent.click(getByRole("button", { name: "Confirm" }));
+    expect(onSetAutopilot).toHaveBeenCalledTimes(1);
+  });
+
+  test("benign commands (a question) never stage a gate — they fire directly", () => {
+    const onAsk = vi.fn();
+    const { container, getByRole } = render(<AskHermesComposer onAsk={onAsk} />);
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    type(input, "what is blocking the release?");
+    fireEvent.click(getByRole("button", { name: /Send/ }));
+    expect(container.querySelector(".hm-compose-preview")).toBeNull();
+    expect(onAsk).toHaveBeenCalledTimes(1);
+  });
+
+  test("an unwired mutating command shows its honest hint, not a gate", () => {
+    const { container, getByRole } = render(<AskHermesComposer onSpawnMission={vi.fn()} />);
+    const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
+    type(input, "/claude averray-agent/agent do x");
+    fireEvent.click(getByRole("button", { name: /Send/ }));
+    expect(container.querySelector(".hm-compose-preview")).toBeNull();
+    expect(within(container).getByRole("alert").textContent).toMatch(/isn't wired here/);
   });
 });
 

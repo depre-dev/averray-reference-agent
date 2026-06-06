@@ -69,6 +69,39 @@ const TARGET_SELECT_STYLE: CSSProperties = {
   outline: "none",
 };
 
+type HermesCommand = ReturnType<typeof parseHermesInput>;
+interface CommandPreview {
+  title: string;
+  detail: string;
+}
+
+/**
+ * PR-D3 — a command-preview for a MUTATING Ask-Hermes command (one that fires a
+ * real server action). Returns the human "this is what will happen" summary the
+ * Confirm/Edit/Cancel gate shows; null for benign commands (a question, mute,
+ * revert-to-supervised) which never need a confirm step.
+ */
+function mutatingPreview(command: HermesCommand): CommandPreview | null {
+  switch (command.kind) {
+    case "mission":
+      return { title: "Spawn browser mission", detail: `→ ${command.url}` };
+    case "claude":
+      return { title: "Propose Claude task", detail: `${command.repo} · ${command.prompt}` };
+    case "task":
+      return {
+        title: "Propose task",
+        detail: `@${command.agent} ${command.repo}${command.pullRequestNumber !== undefined ? `#${command.pullRequestNumber}` : ""} · ${command.prompt}`,
+      };
+    case "autopilot":
+      return {
+        title: "Engage autopilot",
+        detail: "Hermes may auto-approve non-high-risk actions for ~4h. Settlement & high-risk stay operator-gated.",
+      };
+    default:
+      return null;
+  }
+}
+
 export function AskHermesComposer({
   onSpawnMission,
   onSpawnClaudeTask,
@@ -104,6 +137,8 @@ export function AskHermesComposer({
   const [scopeToCard, setScopeToCard] = useState(true);
   const effectiveScope: "card" | "board" = focusedCardId && scopeToCard ? "card" : "board";
   const [target, setTarget] = useState<CollaborationTarget>("everyone");
+  // PR-D3: a pending mutating command awaiting Confirm/Edit/Cancel.
+  const [preview, setPreview] = useState<{ command: HermesCommand; view: CommandPreview } | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // The board's `a` shortcut bumps focusToken to bring focus here.
@@ -122,8 +157,7 @@ export function AskHermesComposer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillToken]);
 
-  const send = () => {
-    const command = parseHermesInput(value);
+  const dispatch = (command: HermesCommand) => {
     switch (command.kind) {
       case "empty":
         return;
@@ -201,6 +235,49 @@ export function AskHermesComposer({
         }
         return;
     }
+  };
+
+  // Is the handler for this mutating command actually wired? (We only gate a
+  // command that will really fire — an unwired one falls through to its honest
+  // "isn't wired here" hint, unchanged.)
+  const handlerWired = (command: HermesCommand): boolean =>
+    (command.kind === "mission" && Boolean(onSpawnMission)) ||
+    (command.kind === "claude" && Boolean(onSpawnClaudeTask)) ||
+    (command.kind === "task" && Boolean(onCreateTask)) ||
+    (command.kind === "autopilot" && Boolean(onSetAutopilot));
+
+  const send = () => {
+    const command = parseHermesInput(value);
+    if (command.kind === "empty") return;
+    if (command.kind === "error") {
+      setError(command.message);
+      return;
+    }
+    // PR-D3: a mutating command never fires straight from Enter — it stages a
+    // Confirm/Edit/Cancel preview first. Benign commands (ask, mute, supervised)
+    // and unwired ones dispatch directly.
+    const view = mutatingPreview(command);
+    if (view && handlerWired(command)) {
+      setPreview({ command, view });
+      setError(null);
+      return;
+    }
+    dispatch(command);
+  };
+
+  const confirmPreview = () => {
+    if (!preview) return;
+    const command = preview.command;
+    setPreview(null);
+    dispatch(command);
+  };
+  const editPreview = () => {
+    setPreview(null);
+    inputRef.current?.focus();
+  };
+  const cancelPreview = () => {
+    setPreview(null);
+    setValue("");
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -294,6 +371,25 @@ export function AskHermesComposer({
           Send <span className="hm-kbd">⏎</span>
         </Button>
       </div>
+      {/* PR-D3: command-preview gate — a mutating command stages here for an
+          explicit Confirm before it fires. Truth-boundary: nothing mutating
+          runs from a single keystroke. */}
+      {preview ? (
+        <div className="hm-compose-preview" role="group" aria-label="Confirm command">
+          <div className="hm-compose-preview-head">
+            <span className="eyebrow">Confirm command</span>
+            <strong>{preview.view.title}</strong>
+          </div>
+          <div className="hm-compose-preview-detail mono">{preview.view.detail}</div>
+          <div className="hm-compose-preview-actions">
+            <Button variant="primary" className="hm-compose-confirm" onClick={confirmPreview}>
+              Confirm
+            </Button>
+            <Button variant="ghost" onClick={editPreview}>Edit</Button>
+            <Button variant="ghost" onClick={cancelPreview}>Cancel</Button>
+          </div>
+        </div>
+      ) : null}
       {!collaborationEnabled ? (
         <div className="hm-compose-note" role="note" style={{ color: "var(--hm-muted)", fontSize: 12, marginTop: 6 }}>
           Ask Hermes unavailable — the collaboration channel is offline.{!askOnly ? " Commands like /mission and /mute still work." : ""}
