@@ -1,0 +1,73 @@
+/* =========================================================
+   Hermes-4 rail reskin (PR-D3e) — cosmetic only.
+
+   Re-points the co-pilot RAIL's existing .hm-* surfaces to the
+   --h4-* token system so the whole rail column tracks the active
+   color profile (Midnight by default), matching the --h4 digest,
+   presence, and composer-preview surfaces already living inside
+   it. Loaded LAST, so these win over monitor.css.
+
+   Strictly additive + appearance-only: no DOM, no class, no text
+   changes — every selector here already exists and is unchanged
+   structurally, so the className/text/role-based tests are
+   untouched. Scoped to the rail; the board lanes/cards keep their
+   shipped --hm-* warmth until a later, deliberate full migration.
+
+   Honest note: the warm baked rgba() surface values in monitor.css
+   (paper gradients, input fills) are replaced with profile tokens
+   here precisely so a dark profile doesn't show light artifacts.
+   ========================================================= */
+
+/* ---- rail container + header ---- */
+.hm-hermes {
+  background: var(--h4-paper);
+  border-left-color: var(--h4-line);
+}
+.hm-hermes-head {
+  background: var(--h4-paper);
+  border-bottom-color: var(--h4-line-2);
+}
+.hm-hermes-title { color: var(--h4-ink); }
+.hm-hermes-sub { color: var(--h4-muted); }
+.hm-hermes-mode-banner {
+  border-color: var(--h4-line-2);
+  background: var(--h4-paper-sunken);
+  color: var(--h4-ink-2);
+}
+.hm-hermes-tool {
+  border-color: var(--h4-line);
+  color: var(--h4-muted);
+}
+.hm-hermes-tool:hover {
+  color: var(--h4-ink);
+  background: var(--h4-paper-sunken);
+}
+.hm-hermes-stream::-webkit-scrollbar-thumb { background: var(--h4-line); }
+
+/* ---- activity / room ---- */
+.hm-activity {
+  background: var(--h4-paper-sunken);
+  border-bottom-color: var(--h4-line-2);
+}
+.hm-activity-head {
+  background: var(--h4-paper);
+  border-bottom-color: var(--h4-line-2);
+}
+.hm-activity-head strong { color: var(--h4-ink); }
+
+/* ---- composer ---- */
+.hm-compose {
+  background: var(--h4-paper);
+  border-top-color: var(--h4-line-2);
+}
+.hm-compose-input {
+  border-color: var(--h4-line);
+  background: var(--h4-paper-sunken);
+  color: var(--h4-ink);
+}
+.hm-compose-input:focus {
+  border-color: var(--h4-tel);
+  background: var(--h4-paper);
+}
+.hm-compose-input::placeholder { color: var(--h4-faint); }
+.hm-compose-toolbar { color: var(--h4-muted); }
