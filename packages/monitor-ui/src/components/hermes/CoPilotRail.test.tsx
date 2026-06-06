@@ -112,6 +112,8 @@ describe("CoPilotRail", () => {
     const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "/mission https://staging.averray.com/x" } });
     fireEvent.keyDown(input, { key: "Enter" });
+    // PR-D3: the mutating /mission stages a Confirm gate before it fires.
+    fireEvent.click(within(container).getByRole("button", { name: "Confirm" }));
     expect(onSpawnMission).toHaveBeenCalledWith("https://staging.averray.com/x");
   });
 

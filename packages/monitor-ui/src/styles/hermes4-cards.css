@@ -127,3 +127,23 @@
 .h4-bug-k { font-family: var(--h4-font-display); text-transform: uppercase; font-size: 10px; color: var(--h4-faint); align-self: center; }
 .h4-bug-v { color: var(--h4-ink-2); word-break: break-word; }
 .h4-bug-v.is-empty { color: var(--h4-faint); font-family: var(--h4-font-mono); }
+
+/* ---- D3: Ask-Hermes command-preview confirm gate ---- */
+.hm-compose-preview {
+  margin-top: 8px;
+  padding: 11px 12px;
+  border: 1px solid var(--h4-act-line);
+  border-radius: var(--h4-r-sm);
+  background: var(--h4-act-soft);
+}
+.hm-compose-preview-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.hm-compose-preview-head .eyebrow {
+  font-family: var(--h4-font-display);
+  font-weight: 700;
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--h4-act-text);
+}
+.hm-compose-preview-head strong { font-family: var(--h4-font-display); font-size: 13.5px; color: var(--h4-ink); }
+.hm-compose-preview-detail { margin-top: 6px; font-size: 12px; color: var(--h4-ink-2); word-break: break-word; }
+.hm-compose-preview-actions { display: flex; gap: 8px; margin-top: 10px; }

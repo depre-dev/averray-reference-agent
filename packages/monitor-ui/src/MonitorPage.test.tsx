@@ -127,6 +127,8 @@ describe("MonitorPage — container", () => {
     const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "/mission https://staging.averray.com/onboarding" } });
     fireEvent.keyDown(input, { key: "Enter" });
+    // PR-D3: a mutating command stages a Confirm gate before it fires.
+    fireEvent.click(within(container).getByRole("button", { name: "Confirm" }));
     expect(onSpawnMission).toHaveBeenCalledWith("https://staging.averray.com/onboarding");
   });
 
@@ -153,6 +155,8 @@ describe("MonitorPage — container", () => {
       const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
       fireEvent.change(input, { target: { value: "/mission https://x.test/y" } });
       fireEvent.keyDown(input, { key: "Enter" });
+      // PR-D3: confirm the staged mutating command before it POSTs.
+      fireEvent.click(within(container).getByRole("button", { name: "Confirm" }));
 
       expect(fetchSpy).toHaveBeenCalledTimes(1);
       const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
