@@ -188,6 +188,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* PR-G: read-only navigation affordance — quiet, NOT --act coral. Coral is
+   reserved for genuine primary actions; a mirror's "jump to inbox" only
+   navigates, so it reads as a calm telemetry-toned link, never an action. */
 .hm-pipeline-card-jump {
   display: flex;
   align-items: center;
@@ -196,13 +199,13 @@
   min-height: 30px;
   padding: 7px 9px;
   border-radius: 7px;
-  border: 1px solid var(--h4-act-line);
-  background: var(--h4-act);
-  color: var(--h4-act-ink);
+  border: 1px dashed var(--h4-line);
+  background: transparent;
+  color: var(--h4-tel);
   cursor: pointer;
   font-family: var(--h4-font-display);
   font-size: 10.5px;
-  font-weight: 800;
+  font-weight: 600;
 }
 .hm-pipeline-card-jump span,
 .hm-pipeline-card-jump strong {
@@ -214,9 +217,12 @@
 .hm-pipeline-card-jump strong {
   flex: none;
   text-transform: uppercase;
+  color: var(--h4-muted);
 }
 .hm-pipeline-card-jump:hover {
-  filter: brightness(0.96);
+  border-color: var(--h4-line-strong);
+  background: var(--h4-paper-sunken);
+  color: var(--h4-ink-2);
 }
 
 /* ---- empty state ---- */

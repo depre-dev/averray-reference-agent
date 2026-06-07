@@ -159,6 +159,26 @@
 }
 .h4-deploy-stepper--compact .h4-stepper-source { display: none; }
 
+/* PR-G: honest all-pending note — the stepper has no per-step telemetry wired
+   yet, so it reads as intentional ("awaiting"), not broken. Quiet/faint, never
+   an action tone, and never a fabricated ✓. */
+.h4-stepper-awaiting {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 4px;
+  font-family: var(--h4-font-mono);
+  font-size: 10px;
+  color: var(--h4-faint);
+}
+.h4-stepper-awaiting-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  border: 1px dashed var(--h4-line-strong);
+  flex: none;
+}
+
 /* ---- mission forensics: expected vs observed ---- */
 .h4-eo { border: 1px solid var(--h4-line-2); border-radius: var(--h4-r-sm); overflow: hidden; }
 .h4-eo-row {
@@ -268,6 +288,20 @@
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 7px;
   margin-top: 11px;
+}
+/* PR-G: the inbox recommended action is THE genuine primary — it wears --act
+   coral consistently on EVERY decision card (one coherent primary style), so no
+   inbox primary ever looks muted and the most-urgent is never the weakest. This
+   is the positive half of accent discipline: coral marks real primary actions
+   (here), and is removed from read-only affordances (the mirror jump). Scoped to
+   the inbox decision CTA so it does not recolour other action buttons. */
+.hm-card-cta--decision .hm-btn--action {
+  background: var(--h4-act);
+  border-color: var(--h4-act-line);
+  color: var(--h4-act-ink);
+}
+.hm-card-cta--decision .hm-btn--action:hover {
+  background: var(--h4-act-deep);
 }
 .hm-card-cta--decision .hm-decision-choices {
   grid-column: 1 / -1;

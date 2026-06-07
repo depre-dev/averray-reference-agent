@@ -19,6 +19,11 @@ export function DeployStepper({
   steps: readonly DeployStepView[];
   compact?: boolean;
 }) {
+  // PR-G: when no step has any real telemetry yet, every step is "pending".
+  // That's honest (we never fabricate a ✓), but an all-pending column can read
+  // as broken — so add an explicit note that the data, not the deploy, is what's
+  // missing. Per-step wiring is a separate future data task.
+  const allPending = steps.length > 0 && steps.every((step) => step.state === "pending");
   return (
     <div
       className={"h4-stepper h4-deploy-stepper" + (compact ? " h4-deploy-stepper--compact" : "")}
@@ -34,6 +39,12 @@ export function DeployStepper({
           <span className="h4-stepper-source">{step.detail}</span>
         </div>
       ))}
+      {allPending ? (
+        <div className="h4-stepper-awaiting" role="note">
+          <span className="h4-stepper-awaiting-dot" aria-hidden />
+          awaiting deploy telemetry
+        </div>
+      ) : null}
     </div>
   );
 }
