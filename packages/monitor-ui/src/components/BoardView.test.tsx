@@ -252,7 +252,7 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(container.querySelectorAll(".hm-col-rail").length).toBe(1);
   });
 
-  test("groups near-identical deploy verification cards without hiding attention cards", () => {
+  test("surfaces the active deploy with its stepper; older near-identical verifications still group (PR-F3)", () => {
     const board: MonitorBoard = {
       at: "2026-06-02T08:00:00Z",
       cards: [
@@ -261,11 +261,22 @@ describe("BoardView — rich-mix board (open stream)", () => {
         deployCard({ id: "deploy-3", deployId: "#3", title: "post-production-deploy verification after workflow run #3" }),
       ],
     };
-    const { getByRole, getByText, queryAllByRole } = render(<BoardView board={board} status="open" keyboard={false} />);
+    const { container, getByRole, getByText, getAllByText, queryAllByRole } = render(
+      <BoardView board={board} status="open" keyboard={false} />,
+    );
 
-    expect(getByRole("group", { name: /post-production-deploy verification after workflow run #1 group/i })).toBeTruthy();
-    expect(getByText("3 similar")).toBeTruthy();
-    expect(queryAllByRole("article").length).toBe(0);
+    // The active/current deploy is surfaced ungrouped, WITH its verification
+    // stepper — the dedupe group no longer shadows it.
+    expect(getByText("Current deploy · verifying")).toBeTruthy();
+    expect(container.querySelector(".h4-deploy-stepper")).toBeTruthy();
+    expect(getByText("CI queued")).toBeTruthy();
+    expect(getByText("browser replay")).toBeTruthy();
+    expect(getByText("ready")).toBeTruthy();
+    // Honest "awaiting data" for steps not wired to a real source — no fake ✓.
+    expect(getAllByText("awaiting data").length).toBeGreaterThan(0);
+    // Exactly the active deploy is ungrouped; the other two group behind "2 similar".
+    expect(queryAllByRole("article").length).toBe(1);
+    expect(getByText("2 similar")).toBeTruthy();
 
     fireEvent.click(getByRole("button", { name: "Expand" }));
     expect(queryAllByRole("article").length).toBe(3);

@@ -1,6 +1,8 @@
 import type { BoardCard } from "../lib/monitor/card-types.js";
 import { isDecision, type KanbanTier } from "../lib/monitor/lane-rules.js";
+import { deployStepsForCard } from "../lib/monitor/deploy-stepper.js";
 import { AgentTag, StatusPill, type StateVariant } from "./ui.js";
+import { DeployStepper } from "./DeployStepper.js";
 
 export type PipelineMirrorCardProps = {
   card: BoardCard;
@@ -8,6 +10,8 @@ export type PipelineMirrorCardProps = {
   focused?: boolean;
   inboxAvailable?: boolean;
   onJumpToInbox?: (card: BoardCard) => void;
+  /** PR-F3: render the deploy checkpoint stepper inline (the active deploy). */
+  showStepper?: boolean;
 };
 
 function shortId(id: string): string {
@@ -54,8 +58,10 @@ export function PipelineMirrorCard({
   focused = false,
   inboxAvailable = false,
   onJumpToInbox,
+  showStepper = false,
 }: PipelineMirrorCardProps) {
   const status = statusFor(card, tier);
+  const deploySteps = showStepper && card.type === "deploy" ? deployStepsForCard(card) : null;
   // PR-F1: the "jump to inbox" affordance + "awaiting" treatment use the shared
   // isDecision predicate, so a mirror only points to the inbox when the card is
   // genuinely there. Finished release-history cards (no live decision) stay
@@ -85,6 +91,12 @@ export function PipelineMirrorCard({
       <div className="hm-pipeline-card-meta">
         <span className="hm-pipeline-card-repo">{card.repo}</span>
       </div>
+      {deploySteps ? (
+        <div className="hm-pipeline-card-deploy">
+          <span className="hm-pipeline-card-deploy-label">Current deploy · verifying</span>
+          <DeployStepper steps={deploySteps} compact />
+        </div>
+      ) : null}
       {canJump ? (
         <button
           type="button"
