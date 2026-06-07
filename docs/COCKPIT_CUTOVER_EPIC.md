@@ -76,14 +76,21 @@ The Hermes-4 D-wave (#429–#438) already shipped the primitives:
 
 | PR  | Slice                                  | Primary files (confirm against code)                    | Depends | Status        |
 |-----|----------------------------------------|---------------------------------------------------------|---------|---------------|
-| E1  | Inbox-first layout cutover (keystone)  | `components/BoardView.tsx`, lane/board layout            | —       | ☐ not started |
-| E2  | Decision-card grammar                  | `components/cards/DecisionInbox.tsx` (+ `Card.tsx`)      | E1      | ☐ not started |
-| E3  | Read-only pipeline cards + jump        | `components/cards/CardRouter.tsx` + new pipeline card    | E1      | ☐ not started |
-| E4  | Decisions banner + most-urgent         | `components/BoardNowBanner.tsx`                          | E1      | ☐ not started |
-| E5  | Deploy stepper                         | `components/cards/ChecksBar.tsx` / new `DeployStepper`   | E1      | ☐ not started |
-| E6  | Rail two-tab (Digest / Agent room)     | `components/hermes/CoPilotRail.tsx`                      | E1      | ☐ not started |
+| E1  | Inbox-first layout cutover (keystone)  | `components/BoardView.tsx`, lane/board layout            | —       | ✅ merged #440 |
+| E2  | Decision-card grammar                  | `components/cards/DecisionInbox.tsx` (+ `Card.tsx`)      | E1      | ✅ merged #444 · ⚠ grammar partial → F3 |
+| E3  | Read-only pipeline cards + jump        | `components/cards/CardRouter.tsx` + new pipeline card    | E1      | ✅ merged #445 · ⚠ applied to done cards → F2 |
+| E4  | Decisions banner + most-urgent         | `components/BoardNowBanner.tsx`                          | E1      | ✅ merged #441 · ⚠ not wired into top slot → F2 |
+| E5  | Deploy stepper                         | `components/cards/ChecksBar.tsx` / new `DeployStepper`   | E1      | ✅ merged #442 · ⚠ shadowed by dedupe → F3 |
+| E6  | Rail two-tab (Digest / Agent room)     | `components/hermes/CoPilotRail.tsx`                      | E1      | ✅ merged #443 · ⚠ count not filtered → F1 |
 
 Status legend: ☐ not started · ◐ in progress (PR #) · ✅ merged (PR #) · ⚠ blocked (reason)
+
+> **E-wave shipped + deployed (main `76b0555`), but the cockpit is not yet
+> correct.** All six structural slices merged, but a post-deploy review found
+> the inbox, rail count, and banner disagree on what "an operator decision" is —
+> done/verified release-history leaks into the inbox and inflates the count (9
+> shown vs ~3 real), violating truth-boundary. The **PR-F correctness wave**
+> below fixes it. Read it before touching the board further.
 
 ## Slice detail
 
@@ -156,3 +163,84 @@ deltas honest-until-wired.
 > Unit-test every new component; keep existing tests green (structural tests you
 > intentionally change get *updated*, not deleted). Fresh worktree, **one narrow
 > PR, CI green, do NOT push to main** (human merges). Frontend → Claude runner.
+
+---
+
+# PR-F wave — Cockpit Correctness (follow-up)
+
+> The E-wave shipped the cockpit *structure*; this wave makes it *correct*.
+> Same hard rules + common preamble as above. **Verified deployed** (main
+> `76b0555`) before this review, so every item below is a real bug in merged
+> code, not a deploy lag.
+
+## Root cause (read first)
+
+There is **no single shared definition of "an operator decision."** Three
+surfaces compute it differently and disagree:
+
+- `lib/monitor/board-state.ts:255` has the *correct* predicate:
+  `card.waitingOn?.actor === "operator" && (card.lane === "operator-review" || card.isAction === true)`.
+- `lib/monitor/rail-digest.ts` has **no done/verified/closed exclusion** — so the
+  rail "WAITING ON YOU" count and the inbox union pull in release-history cards.
+- The banner still renders the **old** string `board-state.ts:229`
+  (*"No operator decision needed…"*) — E4's banner (#441) isn't wired into the
+  top slot.
+
+**Symptom:** the inbox + rail show **9 "waiting on you"** when only **~3** are
+real decisions (the rest are codex release-history cards that literally say
+*"keep as release history; no board action needed"*). That inflates the decision
+count — a **truth-boundary violation** and the opposite of "one place to act."
+
+## Ordering
+
+**F1 is the keystone — merge it FIRST** (the shared predicate). Then **F2 + F3
+in parallel**, rebased on merged F1.
+
+## Status board
+
+| PR  | Slice                                         | Primary files                                                  | Depends | Status        |
+|-----|-----------------------------------------------|----------------------------------------------------------------|---------|---------------|
+| F1  | Single source of truth: operator-decision     | `lib/monitor/rail-digest.ts`, `lib/monitor/board-state.ts`, inbox membership | —  | ☐ not started |
+| F2  | Banner cutover + done passive state           | `components/BoardNowBanner.tsx`, `components/cards/CardRouter.tsx` (done mirror) | F1 | ☐ not started |
+| F3  | Deploy stepper visibility + finish card grammar | deploy lane render, `components/cards/DecisionInbox.tsx`       | F1      | ☐ not started |
+
+Status legend: ☐ not started · ◐ in progress (PR #) · ✅ merged (PR #) · ⚠ blocked (reason)
+
+## Slice detail
+
+### F1 — Single source of truth for "operator decision" (KEYSTONE — merge first)
+Make **one** predicate the only definition of a card that's waiting on the
+operator — reuse/centralise `isDecision` (`board-state.ts:255`). Then make
+**all three** consumers use it and **exclude done / verified / closed**:
+(1) the **Decision Inbox membership** (the hero column must contain only real
+decisions, not release-history); (2) the **rail "WAITING ON YOU" list + count**
+(`rail-digest.ts` — add the exclusion it's missing); (3) the count the banner
+reads. After this, "N waiting" must equal the real operator-decision count
+(≈3 today), and no card that says "no board action needed" appears in the inbox
+or the count. Unit-test the predicate + each consumer with a done/verified card
+that must be excluded. **Acceptance:** inbox, rail count, and banner agree; zero
+release-history in the inbox; truth-boundary restored.
+
+### F2 — Banner cutover + done passive state (rebase on F1)
+(a) **Retire the old banner string** (`board-state.ts:229`) and render E4's
+(#441) **"N decisions waiting on you · Most urgent: …"** banner in the top slot,
+driven by the F1 count (so it can never again contradict the inbox). When the
+real count is 0, show an honest "nothing waiting" state — not a fabricated
+urgency. (b) **Done/verified cards** in the HIDE lane must show a **passive
+"VERIFIED" mirror** — remove the wrongly-applied *"Awaiting your decision in
+inbox · JUMP ›"* affordance from cards that have no live decision. **Acceptance:**
+banner matches the design + agrees with the inbox; Done cards are passive, no
+"awaiting decision" on finished work.
+
+### F3 — Deploy stepper visibility + finish decision-card grammar (rebase on F1)
+(a) **Deploy stepper:** ensure E5's stepper (CI queued → install → unit tests →
+browser replay → Hermes review → ready) actually renders for the active deploy —
+the dedupe "N SIMILAR … Expand" grouping is currently shadowing it. Decide the
+rule (e.g. the current/active deploy shows the stepper; *older* near-identical
+verifications may still group) and wire it; honest "awaiting data" for any
+unwired step — no fake ✓. (b) **Decision-card grammar:** the inbox cards show
+"Why you're seeing this" but are missing **"What happens next"**, the
+**recommended primary action** button, and **"Choices ↓"** (E2 #444 left these
+partial) — complete them per `parts.jsx`, derived from real card state.
+**Acceptance:** the active deploy shows the stepper; inbox cards carry the full
+grammar; nothing fabricated.
