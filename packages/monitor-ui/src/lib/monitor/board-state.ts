@@ -8,7 +8,7 @@
 
 import type { BoardCard, Lane } from "./card-types.js";
 import { groupByLane, laneCounts, laneFor } from "./lane-rules.js";
-import { sortByUrgency } from "./urgency.js";
+import { formatFreshness, sortByUrgency } from "./urgency.js";
 
 /** The state a LanesBar filter chip narrows the board to. */
 export type BoardFilter = "all" | "blocked" | "review" | "ready" | "running" | "done" | "today-done";
@@ -57,6 +57,12 @@ export interface KPICounts {
 
 export type BoardMode = "calm" | "action" | "hermes-focus" | "degraded";
 
+export interface MostUrgentReasonChip {
+  label: string;
+  tone: "neutral" | "risk" | "safe" | "warn";
+  title?: string;
+}
+
 export interface CalmBoardMetrics {
   avgTimeToDecision?: string;
   disputes?: number;
@@ -72,6 +78,7 @@ export interface BoardNowBanner {
   headline: string;
   sub: string;
   primaryActionId: string | undefined;
+  mostUrgentReasons?: MostUrgentReasonChip[];
 }
 
 export interface DeriveBoardOpts {
@@ -168,16 +175,18 @@ export function boardNowBanner(cards: BoardCard[], opts: DeriveBoardOpts = {}): 
     const actionCount = counts.action;
     const headline =
       actionCount === 1
-        ? `1 card needs your review decision; automation has gone as far as it safely can.`
-        : `${actionCount} cards need your review decision; automation has gone as far as it safely can.`;
+        ? "1 decision waiting on you"
+        : `${actionCount} decisions waiting on you`;
+    const suggestedAction = urgent ? suggestedActionFor(urgent) : undefined;
     return {
       tone: "action",
       eyebrow: now ? `Board now · ${now} · ${actionCount} action needed` : `Board now · ${actionCount} action needed`,
       headline,
       sub: urgent
-        ? `Most urgent: ${urgent.title}. Approve only if the risk and intent are clear.`
-        : `Approve only if the risk and intent are clear.`,
+        ? `Most urgent: ${urgent.title} — suggests ${suggestedAction}.`
+        : `Review the decision inbox before approving anything.`,
       primaryActionId: urgent?.id,
+      mostUrgentReasons: urgent ? mostUrgentReasonsFor(urgent) : undefined,
     };
   }
 
@@ -244,6 +253,77 @@ function pendingReviewCount(cards: BoardCard[]): number {
 
 function isPendingReviewCard(card: BoardCard): boolean {
   return card.waitingOn?.actor === "operator" && (card.lane === "operator-review" || card.isAction === true);
+}
+
+function suggestedActionFor(card: BoardCard): string {
+  if (card.type === "pr" && card.action?.primary) return card.action.primary;
+  if (card.type === "task") {
+    if (card.action?.primary) return card.action.primary;
+    if (card.taskStatus === "proposed") return "approve dispatch";
+    if (card.taskStatus === "failed") return "review failure";
+  }
+  if (card.type === "mission") {
+    if (card.missionStatus === "requested") return "approve mission";
+    if (card.missionStatus === "failed") return "review failure";
+    if (card.mission?.recommendations?.[0]) return "review suggested fix";
+  }
+  if (card.type === "deploy") return "review deployment";
+  if (card.next) return normalizeSuggestedAction(card.next);
+  if (card.decisionRecord?.outcome?.waitingNext) return normalizeSuggestedAction(card.decisionRecord.outcome.waitingNext);
+  return "review decision";
+}
+
+function normalizeSuggestedAction(value: string): string {
+  const trimmed = value.trim().replace(/\s+/g, " ");
+  if (!trimmed) return "review decision";
+  return trimmed.length > 72 ? `${trimmed.slice(0, 69).trim()}...` : trimmed;
+}
+
+function mostUrgentReasonsFor(card: BoardCard): MostUrgentReasonChip[] {
+  const chips: MostUrgentReasonChip[] = [];
+  const age = formatFreshness(card.freshness);
+  if (age) {
+    chips.push({
+      label: `blocked ${age.toLowerCase()}`,
+      tone: card.freshness >= 240 ? "warn" : "neutral",
+      title: "Minutes since this card entered its current lane.",
+    });
+  }
+
+  const risk = riskReasonFor(card);
+  if (risk) chips.push(risk);
+
+  const safety = safetyReasonFor(card);
+  if (safety) chips.push(safety);
+
+  return chips.slice(0, 4);
+}
+
+function riskReasonFor(card: BoardCard): MostUrgentReasonChip | undefined {
+  if (card.type === "task" && card.riskTier) {
+    return { label: `${card.riskTier} risk`, tone: card.riskTier === "high" ? "risk" : "neutral" };
+  }
+  const signal = card.riskSignals?.find((entry) => entry.severity === "high")
+    ?? card.riskSignals?.find((entry) => entry.severity === "medium")
+    ?? card.riskSignals?.[0];
+  if (signal) {
+    return {
+      label: `${signal.severity} risk`,
+      tone: signal.severity === "high" ? "risk" : "warn",
+      title: signal.message,
+    };
+  }
+  const [firstRisk] = card.risk ?? [];
+  if (!firstRisk) return undefined;
+  return { label: `risk: ${firstRisk.replace(/-/g, " ")}`, tone: "risk" };
+}
+
+function safetyReasonFor(card: BoardCard): MostUrgentReasonChip | undefined {
+  const safety = card.decisionRecord?.safety;
+  if (!safety) return undefined;
+  if (safety.readOnly && !safety.mutates) return { label: "safe: read-only", tone: "safe" };
+  if (safety.mutates) return { label: "mutates", tone: "warn" };
+  return undefined;
 }
 
 function doneClosedAt(card: BoardCard): string | undefined {

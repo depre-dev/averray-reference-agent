@@ -18,7 +18,7 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(container.querySelector(".hm-brand-name")?.textContent).toBe("Hermes");
     // action tone — the fixtures include action cards
     expect(container.querySelector(".hm-now--action")).toBeTruthy();
-    expect(view.getByText(/your review decision/)).toBeTruthy();
+    expect(view.getByText(/decisions waiting on you/)).toBeTruthy();
     expect(view.getByText("sorted by next-action urgency")).toBeTruthy();
     expect(view.getByRole("region", { name: "Kanban lane grid" })).toBeTruthy();
     // PR-E1: inbox-first columns replace the flat 8 lanes — a hero Decision
@@ -72,7 +72,7 @@ describe("BoardView — rich-mix board (open stream)", () => {
     };
     const { getByRole } = render(<BoardView board={board} status="open" onCardClick={onCardClick} keyboard={false} />);
 
-    fireEvent.click(getByRole("button", { name: /Jump to agent #548/ }));
+    fireEvent.click(getByRole("button", { name: /Review most urgent/ }));
     expect(onCardClick).toHaveBeenCalledWith("agent #548");
 
     fireEvent.click(getByRole("button", { name: "Open review checklist" }));

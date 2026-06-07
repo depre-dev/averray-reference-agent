@@ -65,4 +65,28 @@ describe("BoardNowBanner", () => {
     const noCta = render(<BoardNowBanner banner={banner("calm")} />);
     expect(noCta.container.querySelector(".hm-now-cta")).toBeNull();
   });
+
+  test("renders most-urgent reason chips only when the selector provides real reasons", () => {
+    const withReasons = render(
+      <BoardNowBanner
+        banner={{
+          ...banner("action"),
+          mostUrgentReasons: [
+            { label: "blocked 2h", tone: "warn", title: "Lane age" },
+            { label: "high risk", tone: "risk" },
+            { label: "safe: read-only", tone: "safe" },
+          ],
+        }}
+      />,
+    );
+    expect(withReasons.getByLabelText("Most urgent because")).toBeTruthy();
+    expect(withReasons.getByText("blocked 2h")).toBeTruthy();
+    expect(withReasons.getByText("high risk")).toBeTruthy();
+    expect(withReasons.getByText("safe: read-only")).toBeTruthy();
+    expect(withReasons.container.querySelector(".hm-now-reason--safe")).toBeTruthy();
+    withReasons.unmount();
+
+    const withoutReasons = render(<BoardNowBanner banner={banner("action")} />);
+    expect(withoutReasons.queryByLabelText("Most urgent because")).toBeNull();
+  });
 });

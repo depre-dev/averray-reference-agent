@@ -868,7 +868,7 @@ function renderBannerCta({
     <>
       <div className="button-row">
         <button type="button" className="hm-btn hm-btn--action" onClick={openCard}>
-          Jump to {card.id} <span className="hm-kbd">↵</span>
+          Review most urgent <span className="hm-kbd">↵</span>
         </button>
         <button type="button" className="hm-btn hm-btn--ghost" onClick={openCard}>
           Open review checklist
