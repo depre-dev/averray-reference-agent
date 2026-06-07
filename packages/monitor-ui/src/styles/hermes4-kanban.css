@@ -110,6 +110,114 @@
   gap: var(--h4-gap-cards);
   overflow-y: auto;
 }
+.hm-inbox-card-anchor {
+  display: contents;
+}
+
+/* ---- read-only pipeline mirrors (PR-E3) ---- */
+.hm-pipeline-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--h4-r-sm);
+  border: 1px solid var(--h4-line);
+  background: var(--h4-paper);
+  box-shadow: 0 1px 0 rgba(19, 24, 21, 0.04);
+}
+.hm-pipeline-card.is-focused {
+  outline: 2px solid var(--h4-act-line);
+  outline-offset: 2px;
+}
+.hm-pipeline-card.is-awaiting-inbox {
+  border-color: var(--h4-act-line);
+  background: var(--h4-tier-decide-bg);
+}
+.hm-pipeline-card--verified {
+  border-color: var(--h4-line-2);
+  background: var(--h4-surface);
+}
+.hm-pipeline-card-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.hm-pipeline-card-id,
+.hm-pipeline-card-status {
+  min-width: 0;
+}
+.hm-pipeline-card-id .hm-agent-tag-id,
+.hm-pipeline-card-id .hm-agent-tag-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hm-pipeline-card-status {
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--h4-font-display);
+  font-size: 9.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.hm-pipeline-card-title {
+  color: var(--h4-ink);
+  font-family: var(--h4-font-body);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.hm-pipeline-card-meta {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  color: var(--h4-muted);
+  font-family: var(--h4-font-display);
+  font-size: 10.5px;
+  font-weight: 650;
+}
+.hm-pipeline-card-repo {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hm-pipeline-card-jump {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 30px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--h4-act-line);
+  background: var(--h4-act);
+  color: var(--h4-act-ink);
+  cursor: pointer;
+  font-family: var(--h4-font-display);
+  font-size: 10.5px;
+  font-weight: 800;
+}
+.hm-pipeline-card-jump span,
+.hm-pipeline-card-jump strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hm-pipeline-card-jump strong {
+  flex: none;
+  text-transform: uppercase;
+}
+.hm-pipeline-card-jump:hover {
+  filter: brightness(0.96);
+}
 
 /* ---- empty state ---- */
 .hm-col-empty {

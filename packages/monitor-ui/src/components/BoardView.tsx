@@ -25,10 +25,10 @@ import type { BacklogSuggestionsResponse } from "../lib/monitor/backlog-suggesti
 import type { StreamStatus } from "../lib/monitor/live-stream.js";
 import { LANES, type BoardCard, type CreateTaskInput } from "../lib/monitor/card-types.js";
 import type { MissionSpawnInput, SavedTestSuite, SaveTestSuiteInput } from "../lib/monitor/mission-launch.js";
-import { CreateTaskForm } from "./CreateTaskForm.js";
 import { StartMissionLauncher } from "./StartMissionLauncher.js";
 import { TestSuitesPanel } from "./TestSuitesPanel.js";
-import { laneFor, isWaitingOnOperator } from "../lib/monitor/lane-rules.js";
+import { laneFor, isWaitingOnOperator, tierFor, type KanbanTier } from "../lib/monitor/lane-rules.js";
+import { inboxCards } from "../lib/monitor/board-columns.js";
 import { relatedPrForCard } from "../lib/monitor/collaboration.js";
 import { TopStrip } from "./TopStrip.js";
 import { TopStripDegraded } from "./TopStripDegraded.js";
@@ -37,6 +37,7 @@ import { LanesBar } from "./LanesBar.js";
 import { KanbanBoard } from "./KanbanBoard.js";
 import type { LaneId } from "./Lane.js";
 import { CardRouter } from "./cards/CardRouter.js";
+import { PipelineMirrorCard } from "./PipelineMirrorCard.js";
 import { HermesCheckingBody } from "./HermesCheckingBody.js";
 import { DetailDrawer } from "./drawer/DetailDrawer.js";
 import { missionReportText, type DrawerActionHandlers } from "../lib/monitor/drawer-footer.js";
@@ -92,6 +93,23 @@ function matchesQuery(card: BoardCard, q: string): boolean {
   if (!q) return true;
   const hay = `${card.id} ${card.title} ${card.repo} ${card.branch ?? ""} ${card.summary ?? ""}`.toLowerCase();
   return hay.includes(q);
+}
+
+function scheduleInboxFocus(cardId: string) {
+  if (typeof document === "undefined") return;
+  const focus = () => {
+    const anchors = Array.from(document.querySelectorAll<HTMLElement>("[data-inbox-card-id]"));
+    const anchor = anchors.find((node) => node.dataset.inboxCardId === cardId);
+    if (!anchor) return;
+    anchor.scrollIntoView?.({ block: "nearest", inline: "nearest", behavior: "smooth" });
+    const target = anchor.querySelector<HTMLElement>(".hm-card") ?? anchor;
+    target.focus?.({ preventScroll: true });
+  };
+  if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(focus));
+    return;
+  }
+  setTimeout(focus, 0);
 }
 
 export interface BoardViewProps {
@@ -309,9 +327,19 @@ export function BoardView({
     () => LANES.flatMap((lane) => displayGrouped[lane] ?? []),
     [displayGrouped],
   );
+  const inboxIds = useMemo(
+    () => new Set(inboxCards(displayGrouped).map((card) => card.id)),
+    [displayGrouped],
+  );
 
-  // Shared per-card renderer — used directly by most lanes and re-used by the
-  // hermes-checking lane body (P1-1) so unrouted cards still render the same way.
+  const jumpToInbox = useCallback((card: BoardCard) => {
+    setFilter("all");
+    setBoardFocusId(card.id);
+    scheduleInboxFocus(card.id);
+  }, []);
+
+  // Decision Inbox renderer — full CardRouter with action handlers. Pipeline
+  // lanes use read-only mirrors below, so actionable buttons live only here.
   const renderCard = (card: BoardCard) => (
     <CardRouter
       key={card.id}
@@ -331,14 +359,37 @@ export function BoardView({
       onKeepWatching={(c) => onKeepWatchingCard(c.id)}
     />
   );
+  const renderPipelineMirror = useCallback((
+    card: BoardCard,
+    tier: KanbanTier,
+    inboxAvailable: boolean,
+  ) => (
+    <PipelineMirrorCard
+      key={card.id}
+      card={card}
+      tier={tier}
+      focused={card.id === boardFocusId}
+      inboxAvailable={inboxAvailable}
+      onJumpToInbox={jumpToInbox}
+    />
+  ), [boardFocusId, jumpToInbox]);
+  const renderPipelineCard = useCallback((
+    card: BoardCard,
+    context: { tier: KanbanTier; inboxAvailable: boolean },
+  ) => renderPipelineMirror(card, context.tier, context.inboxAvailable), [renderPipelineMirror]);
+  const renderPipelineCardForLane = useCallback((
+    lane: LaneId,
+    card: BoardCard,
+  ) => renderPipelineMirror(card, tierFor(lane), inboxIds.has(card.id)), [inboxIds, renderPipelineMirror]);
   const renderLaneBody = (id: LaneId, laneCards: BoardCard[]) => {
     const groupedItems = groupLaneCards(id, laneCards);
     const hasGroupedCards = groupedItems.some((item) => item.kind === "group");
+    const renderMirror = (card: BoardCard) => renderPipelineCardForLane(id, card);
     if (id === "hermes-checking" && !hasGroupedCards) {
-      return <HermesCheckingBody cards={laneCards} renderCard={renderCard} />;
+      return <HermesCheckingBody cards={laneCards} renderCard={renderMirror} />;
     }
     if (!hasGroupedCards) return undefined;
-    return <GroupedLaneBody items={groupedItems} renderCard={renderCard} />;
+    return <GroupedLaneBody items={groupedItems} renderCard={renderMirror} />;
   };
 
   const drawerCard = focusedCardId ? orderedCards.find((c) => c.id === focusedCardId) : undefined;
@@ -547,12 +598,8 @@ export function BoardView({
             ariaLabel="Kanban lane grid"
             expanded={surfacedExpanded}
             onToggleLane={onToggleLane}
-            renderLaneHeader={
-              onCreateTask
-                ? (lane) => (lane === "codex-needed" ? <CreateTaskForm onCreate={onCreateTask} /> : null)
-                : undefined
-            }
             renderCard={renderCard}
+            renderPipelineCard={renderPipelineCard}
             renderLaneBody={renderLaneBody}
           />
         </div>

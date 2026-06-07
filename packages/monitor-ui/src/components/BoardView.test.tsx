@@ -119,7 +119,7 @@ describe("BoardView — rich-mix board (open stream)", () => {
     const view = within(container);
     expect(view.getByText("Verify onboarding flow on staging.averray.com")).toBeTruthy();
     expect(view.getByText(/Post-merge verify/)).toBeTruthy();
-    expect(view.getAllByText("CLOSED").length).toBeGreaterThan(0);
+    expect(view.getAllByText("VERIFIED").length).toBeGreaterThan(0);
   });
 
   test("renders saved suites with run history and dispatches re-runs", () => {
@@ -283,6 +283,57 @@ describe("BoardView — rich-mix board (open stream)", () => {
     const inbox = getByRole("region", { name: "Your decisions lane" });
     expect(inbox).toBeTruthy();
     expect(within(inbox).getByText("Review the settlement risk")).toBeTruthy();
+  });
+
+  test("pipeline cards are read-only mirrors that jump to the matching inbox decision", async () => {
+    const onApproveTask = vi.fn();
+    const board: MonitorBoard = {
+      at: "2026-06-02T08:00:00Z",
+      cards: [{
+        id: "task-action-1",
+        lane: "codex-needed",
+        type: "task",
+        agentType: "codex",
+        title: "Fix the failed mission",
+        summary: "Self-healing proposal awaiting a human dispatch call.",
+        repo: "depre-dev/averray-reference-agent",
+        freshness: 1,
+        state: "fresh",
+        risk: [],
+        waitingOn: { actor: "operator", tone: "warn" },
+        taskStatus: "proposed",
+        prompt: "Fix the failed mission.",
+      }],
+    };
+    const { container, getByRole } = render(
+      <BoardView board={board} status="open" onApproveTask={onApproveTask} keyboard={false} />,
+    );
+
+    const inbox = getByRole("region", { name: "Your decisions lane" });
+    const pipeline = getByRole("region", { name: "Builder tasks lane" });
+    expect(within(inbox).getByRole("button", { name: /Approve & dispatch/ })).toBeTruthy();
+    expect(within(pipeline).queryByRole("button", { name: /Approve & dispatch/ })).toBeNull();
+    expect(within(pipeline).getByText("Fix the failed mission")).toBeTruthy();
+
+    fireEvent.click(within(pipeline).getByRole("button", { name: /Awaiting your decision in inbox.*jump/i }));
+
+    await waitFor(() => {
+      const focused = container.querySelector('[data-inbox-card-id="task-action-1"] .hm-card.is-focused');
+      expect(focused).toBeTruthy();
+      expect(document.activeElement).toBe(focused);
+    });
+  });
+
+  test("HIDE-tier done cards render as VERIFIED read-only mirrors", () => {
+    const board: MonitorBoard = {
+      at: "2026-06-02T08:00:00Z",
+      cards: [doneCard({ id: "done-verified", title: "Merged release checklist" })],
+    };
+    const { getByRole } = render(<BoardView board={board} status="open" keyboard={false} />);
+    const done = getByRole("region", { name: "Done lane" });
+    expect(within(done).getByText("VERIFIED")).toBeTruthy();
+    expect(within(done).queryByText("CLOSED")).toBeNull();
+    expect(within(done).queryByRole("button", { name: /Approve|Re-run|Open issue|Accept failure/ })).toBeNull();
   });
 
   test("calm banner CTA filters to today's done cards and mutes alerts for one hour", () => {
@@ -514,7 +565,7 @@ describe("BoardView — rich-mix board (open stream)", () => {
     fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
     expect(onApproveTask).toHaveBeenCalledWith("task-action-1");
 
-    expect(boardLanes(container).getByText("Fix the failed mission")).toBeTruthy();
+    expect(boardLanes(container).getAllByText("Fix the failed mission").length).toBeGreaterThan(0);
   });
 
   test("renders backlog suggestions as a collapsed planner-only rail block", () => {
