@@ -289,10 +289,12 @@ test("boardNowBanner: calm board names Codex-owned work instead of claiming the 
   ];
   const banner = boardNowBanner(cards);
   assert.equal(banner.tone, "calm");
-  assert.match(banner.headline, /No operator decision needed/);
+  // PR-F2: the calm banner leads with the honest nothing-waiting state (no stale
+  // "No operator decision needed"), but still names the in-flight work.
+  assert.match(banner.headline, /Nothing needs you right now/);
+  assert.notMatch(banner.headline, /No operator decision needed/);
   assert.match(banner.headline, /1 Codex-owned card/);
   assert.match(banner.headline, /1 automation\/release card/);
-  assert.notMatch(banner.headline, /Nothing in your queue/);
 });
 
 test("boardNowBanner: degraded mode (stream offline)", () => {
