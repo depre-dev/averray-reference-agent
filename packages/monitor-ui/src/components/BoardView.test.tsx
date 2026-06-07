@@ -21,34 +21,38 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(view.getByText(/your review decision/)).toBeTruthy();
     expect(view.getByText("sorted by next-action urgency")).toBeTruthy();
     expect(view.getByRole("region", { name: "Kanban lane grid" })).toBeTruthy();
-    expect(container.querySelectorAll(".hm-lane").length).toBe(8);
+    // PR-E1: inbox-first columns replace the flat 8 lanes — a hero Decision
+    // Inbox + read-only tier columns (empty non-gate lanes hide; the
+    // operator-review gate stays a reachable rail).
+    expect(container.querySelectorAll("section.hm-col").length).toBe(7);
     expect(view.getByRole("complementary", { name: "Hermes co-pilot" })).toBeTruthy();
     // PR-D1: fixed-shell footer (END OF BOARD) with real counts.
     const footer = container.querySelector(".h4-board-footer");
     expect(footer).toBeTruthy();
     expect(footer?.textContent).toMatch(/End of board/i);
     expect(footer?.textContent).toMatch(/\d+ cards? · \d+ waiting on you · \d+ running/);
-    // PR-D1: DECIDE tier is reserved for the Decision Inbox (needs-attention) only.
-    const decideLanes = container.querySelectorAll('section.hm-lane[data-h4-tier="decide"]');
-    expect(decideLanes.length).toBe(1);
-    expect(decideLanes[0]?.getAttribute("aria-label")).toBe("Needs attention lane");
+    // PR-E1: DECIDE tier is reserved for the hero Decision Inbox only.
+    const decideCols = container.querySelectorAll('section.hm-col[data-h4-tier="decide"]');
+    expect(decideCols.length).toBe(1);
+    expect(decideCols[0]?.getAttribute("aria-label")).toBe("Your decisions lane");
   });
 
-  test("every lane with cards stays expanded in one Kanban row; empty lanes stay reachable mini-rails", () => {
+  test("renders inbox-first columns: hero Decision Inbox + read-only tier columns; the empty gate lane is a reachable rail", () => {
     const { container } = render(<BoardView board={richBoard} status="open" />);
     const view = within(container);
-    expect(view.getByRole("region", { name: "Needs attention lane" })).toBeTruthy();
+    expect(view.getByRole("region", { name: "Your decisions lane" })).toBeTruthy();
+    expect(view.getByRole("region", { name: "Builder tasks lane" })).toBeTruthy();
     expect(view.getByRole("region", { name: "Drafts lane" })).toBeTruthy();
-    expect(view.getByRole("region", { name: "Codex needed lane" })).toBeTruthy();
     expect(view.getByRole("region", { name: "Hermes checking lane" })).toBeTruthy();
     expect(view.getByRole("region", { name: "Release queue lane" })).toBeTruthy();
     expect(view.getByRole("region", { name: "Deploying lane" })).toBeTruthy();
     expect(view.getByRole("region", { name: "Done lane" })).toBeTruthy();
-    expect(container.querySelectorAll("section.hm-lane").length).toBe(7);
-    expect(container.querySelectorAll(".hm-lane--collapsed").length).toBe(1);
+    expect(container.querySelectorAll("section.hm-col").length).toBe(7);
+    expect(container.querySelectorAll(".hm-col-rail").length).toBe(1);
 
     expect(view.getByText(/governance dispute UI/)).toBeTruthy();
-    expect(view.getByRole("button", { name: /Operator review \(0 cards\)/ })).toBeTruthy();
+    // operator-review is empty + a gate → it stays as a reachable rail.
+    expect(view.getByRole("button", { name: /Runs needing review \(0 cards\)/ })).toBeTruthy();
   });
 
   test("renders the action card with one primary and Hermes verdict", () => {
@@ -236,9 +240,10 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(container.querySelector(".hm-now--calm")).toBeTruthy();
     // The deploying lane (in-flight automation) is expanded and shows its body…
     expect(within(container).getByText(/Post-merge verify/)).toBeTruthy();
-    expect(container.querySelectorAll("section.hm-lane").length).toBe(2); // deploying + done
-    // …and empty lanes are mini-rails, so the full Kanban remains visible.
-    expect(container.querySelectorAll(".hm-lane--collapsed").length).toBe(6);
+    // …columns: the always-present Decision Inbox (empty) + deploying + done.
+    expect(container.querySelectorAll("section.hm-col").length).toBe(3);
+    // PR-E1: empty non-gate lanes hide; the operator-review gate stays a rail.
+    expect(container.querySelectorAll(".hm-col-rail").length).toBe(1);
   });
 
   test("groups near-identical deploy verification cards without hiding attention cards", () => {
@@ -260,15 +265,16 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(queryAllByRole("article").length).toBe(3);
   });
 
-  test("an attention lane stays visible even after a collapse attempt", () => {
+  test("the Decision Inbox is the one actionable surface and never collapses", () => {
     const board: MonitorBoard = {
       at: "2026-06-02T08:00:00Z",
       cards: [reviewCard({ id: "agent #901", title: "Review the settlement risk" })],
     };
-    const { getByRole, getByText } = render(<BoardView board={board} status="open" keyboard={false} />);
+    const { getByRole, getByText, queryByRole } = render(<BoardView board={board} status="open" keyboard={false} />);
 
-    fireEvent.click(getByRole("button", { name: "Collapse Needs attention lane" }));
-    expect(getByRole("region", { name: "Needs attention lane" })).toBeTruthy();
+    // The inbox hero has no collapse chevron — attention can never be hidden.
+    expect(queryByRole("button", { name: /Collapse Your decisions/ })).toBeNull();
+    expect(getByRole("region", { name: "Your decisions lane" })).toBeTruthy();
     expect(getByText("Review the settlement risk")).toBeTruthy();
   });
 
@@ -357,7 +363,8 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(getByText("Self-heal 2 open · dispatch 4/5")).toBeTruthy();
     expect(getByLabelText("Automation health: Self-heal 2 open · dispatch 4/5")).toBeTruthy();
     expect(queryByRole("article")).toBeNull();
-    expect(container.querySelector(".hm-lane--needs-attention .hm-card")).toBeNull();
+    // …and never as a card in the Decision Inbox.
+    expect(container.querySelector(".hm-col--inbox .hm-card")).toBeNull();
   });
 
   test("renders LLM usage when the monitor snapshot reports counters", () => {
@@ -582,8 +589,10 @@ describe("BoardView — degraded + transient states", () => {
     const { container, getByText } = render(<BoardView board={undefined} status="connecting" />);
     expect(container.querySelector(".hm-now--degraded")).toBeNull();
     expect(getByText(/Nothing needs you right now/)).toBeTruthy();
-    // Still eight lanes, all empty.
-    expect(container.querySelectorAll(".hm-lane").length).toBe(8);
+    // PR-E1: just the Decision Inbox (empty success state) + the operator-review
+    // gate rail; empty non-gate lanes hide (design: no junk-drawer rails).
+    expect(container.querySelectorAll("section.hm-col").length).toBe(1);
+    expect(container.querySelector('section.hm-col[data-h4-tier="decide"]')).toBeTruthy();
   });
 
   test("zero-decision board renders a deliberate success empty state", () => {
