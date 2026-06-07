@@ -227,10 +227,13 @@ function calmHeadline(counts: KPICounts): string {
     counts.codex > 0 ? `${counts.codex} Codex-owned card(s)` : "",
     automationCount > 0 ? `${automationCount} automation/release card(s)` : "",
   ].filter(Boolean);
+  // PR-F2: lead with the honest "nothing waiting on you" state (the calm banner
+  // can never claim a decision the inbox doesn't have), while still naming the
+  // in-flight automation / Codex work so the board isn't claimed to be empty.
   if (parts.length === 0) {
-    return `${counts.total} card(s) are still in flight; Hermes is watching.`;
+    return `Nothing needs you right now — ${counts.total} card(s) in flight. Hermes is watching.`;
   }
-  return `No operator decision needed. ${parts.join(" and ")} are still in flight; Hermes is watching.`;
+  return `Nothing needs you right now — ${parts.join(" and ")} in flight. Hermes is watching.`;
 }
 
 function calmSub(counts: KPICounts, metrics?: CalmBoardMetrics): string {
