@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, test } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import { Card } from "./Card.js";
 import type { BoardCard, HermesDecisionRecord } from "../../lib/monitor/card-types.js";
 
@@ -66,6 +66,29 @@ describe("PR-E2 — Decision-Inbox card grammar", () => {
     card.freshness = 0;
     const { getByText } = render(<Card card={card} />);
     expect(getByText(/Reason not recorded; open the drawer before acting/)).toBeTruthy();
+  });
+
+  test("PR-F3: the full decision grammar — why + what-next + recommended action + Choices ↓", () => {
+    // A proposed task awaiting dispatch is a real inbox decision; wiring its
+    // approve handler surfaces the recommended primary action and the collapsed
+    // "Choices ↓" disclosure (E2 grammar completed; locked here).
+    const onApprove = vi.fn();
+    const task = {
+      id: "task-1", type: "task", lane: "needs-attention", agentType: "codex",
+      title: "Fix the failed mission", summary: "", repo: "depre-dev/averray-reference-agent",
+      freshness: 1, state: "fresh", risk: [], isAction: true,
+      waitingOn: { actor: "operator", tone: "warn" }, taskStatus: "proposed", prompt: "Fix it.",
+      decisionRecord: record({ outcome: { summary: "Proposed task awaiting dispatch", waitingNext: "Confirming dispatch queues the task." } }),
+    } as unknown as BoardCard;
+    const { container, getByRole, getByText } = render(<Card card={task} onApprove={onApprove} />);
+    expect(container.querySelector(".hm-decision-grammar")).toBeTruthy();
+    expect(getByText(/Why you're seeing this/)).toBeTruthy();
+    expect(getByText(/What happens next/)).toBeTruthy();
+    expect(getByRole("button", { name: /Approve & dispatch/ })).toBeTruthy();
+    const choices = getByRole("button", { name: /Choices/ });
+    expect(choices.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(choices);
+    expect(choices.getAttribute("aria-expanded")).toBe("true");
   });
 
   test("renders no inbox context on a non-decision lane card", () => {

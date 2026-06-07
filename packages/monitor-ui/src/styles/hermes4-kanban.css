@@ -271,3 +271,20 @@
   font-family: var(--h4-font-display); font-size: 8px; font-weight: 700; text-transform: uppercase;
   color: var(--h4-act-text);
 }
+
+/* ---- PR-F3: active deploy stepper inside the pipeline mirror ---- */
+.hm-pipeline-card-deploy {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--h4-line-2);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.hm-pipeline-card-deploy-label {
+  font-family: var(--h4-font-display);
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--h4-ok-text);
+}

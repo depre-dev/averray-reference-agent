@@ -28,6 +28,7 @@ import type { MissionSpawnInput, SavedTestSuite, SaveTestSuiteInput } from "../l
 import { StartMissionLauncher } from "./StartMissionLauncher.js";
 import { TestSuitesPanel } from "./TestSuitesPanel.js";
 import { laneFor, isDecision, tierFor, type KanbanTier } from "../lib/monitor/lane-rules.js";
+import { deployStepsForCard } from "../lib/monitor/deploy-stepper.js";
 import { inboxCards } from "../lib/monitor/board-columns.js";
 import { relatedPrForCard } from "../lib/monitor/collaboration.js";
 import { TopStrip } from "./TopStrip.js";
@@ -363,6 +364,7 @@ export function BoardView({
     card: BoardCard,
     tier: KanbanTier,
     inboxAvailable: boolean,
+    showStepper = false,
   ) => (
     <PipelineMirrorCard
       key={card.id}
@@ -371,6 +373,7 @@ export function BoardView({
       focused={card.id === boardFocusId}
       inboxAvailable={inboxAvailable}
       onJumpToInbox={jumpToInbox}
+      showStepper={showStepper}
     />
   ), [boardFocusId, jumpToInbox]);
   const renderPipelineCard = useCallback((
@@ -382,9 +385,26 @@ export function BoardView({
     card: BoardCard,
   ) => renderPipelineMirror(card, tierFor(lane), inboxIds.has(card.id)), [inboxIds, renderPipelineMirror]);
   const renderLaneBody = (id: LaneId, laneCards: BoardCard[]) => {
+    const renderMirror = (card: BoardCard) => renderPipelineCardForLane(id, card);
+    // PR-F3: the Deploying lane surfaces the active/current deploy ungrouped, with
+    // its verification stepper visible; older near-identical verifications still
+    // group behind "N similar" so the dedupe no longer shadows the live deploy.
+    if (id === "deploying") {
+      const active = pickActiveDeploy(laneCards);
+      const rest = active ? laneCards.filter((c) => c.id !== active.id) : laneCards;
+      const restItems = groupLaneCards(id, rest);
+      if (!active && !restItems.some((item) => item.kind === "group")) return undefined;
+      return (
+        <>
+          {active
+            ? renderPipelineMirror(active, tierFor(id), inboxIds.has(active.id), true)
+            : null}
+          <GroupedLaneBody items={restItems} renderCard={renderMirror} />
+        </>
+      );
+    }
     const groupedItems = groupLaneCards(id, laneCards);
     const hasGroupedCards = groupedItems.some((item) => item.kind === "group");
-    const renderMirror = (card: BoardCard) => renderPipelineCardForLane(id, card);
     if (id === "hermes-checking" && !hasGroupedCards) {
       return <HermesCheckingBody cards={laneCards} renderCard={renderMirror} />;
     }
@@ -763,6 +783,18 @@ function UtilityBar({
 type GroupedLaneItem =
   | { kind: "card"; card: BoardCard }
   | { kind: "group"; id: string; title: string; cards: BoardCard[] };
+
+/**
+ * PR-F3: the active/current deploy in the Deploying lane — the one being
+ * verified now (a step in progress), else the most recent deploy. It renders
+ * ungrouped with its stepper so the dedupe grouping can't shadow it.
+ */
+function pickActiveDeploy(cards: BoardCard[]): BoardCard | undefined {
+  const deploys = cards.filter((c) => c.type === "deploy");
+  if (deploys.length === 0) return undefined;
+  const verifying = deploys.find((c) => deployStepsForCard(c).some((s) => s.state === "in-progress"));
+  return verifying ?? deploys[0];
+}
 
 function groupLaneCards(lane: LaneId, cards: BoardCard[]): GroupedLaneItem[] {
   const buckets = new Map<string, BoardCard[]>();
