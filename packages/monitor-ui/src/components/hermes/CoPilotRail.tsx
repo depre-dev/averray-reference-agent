@@ -18,6 +18,7 @@ import {
 import { useCollaboration, type UseCollaborationOptions } from "../../hooks/useCollaboration.js";
 import { derivePresence, activeCount, type PresencePeer } from "../../lib/monitor/presence.js";
 import { railDigestCounts } from "../../lib/monitor/rail-digest.js";
+import { isWaitingOnOperator } from "../../lib/monitor/lane-rules.js";
 import { AgentTag, Badge, Button, EmptyState, StatusPill, type AgentTagAgent, type StateVariant } from "../ui.js";
 import { AskHermesComposer } from "./AskHermesComposer.js";
 import { HermesTurn } from "./HermesTurn.js";
@@ -82,6 +83,10 @@ export function CoPilotRail({
   );
   const relatedPr = relatedPrForCard(focusedCard);
   const streamRef = useRef<HTMLDivElement>(null);
+  const digestPanelId = useId();
+  const roomPanelId = useId();
+  const [railTab, setRailTab] = useState<"digest" | "room">("digest");
+  const [rosterOpen, setRosterOpen] = useState(false);
   // Suggestion chips fill the composer: hold the text + a bump token.
   const [prefill, setPrefill] = useState("");
   const [prefillToken, setPrefillToken] = useState(0);
@@ -134,45 +139,81 @@ export function CoPilotRail({
         </div>
       </div>
 
-      <RailDigest cards={boardCards ?? []} />
-
-      <BacklogSuggestionsRailBlock
-        response={backlogSuggestions}
-        boardCards={boardCards ?? []}
-        onCardClick={onCardClick}
-        onUseInComposer={fillComposer}
-      />
-
       {templateModeObserved ? (
         <div className="hm-hermes-mode-banner" role="status">
           Hermes is offline — replies are templated until the live model key is configured.
         </div>
       ) : null}
 
-      <section className="hm-activity" aria-label="Multi-agent collaboration room">
-        <div className="hm-activity-head">
-          <span className="hm-kicker">Room</span>
-          <strong>Agent collaboration</strong>
-          <RoomPresence peers={peers} />
-        </div>
-        <div className="hm-hermes-stream hm-activity-stream" ref={streamRef} aria-live="polite">
-          {roomThreads.length > 0 ? (
-            roomThreads.map((thread) => (
-              <RoomThreadBlock
-                thread={thread}
+      <div className="hm-rail-tabs" role="tablist" aria-label="Hermes rail views">
+        <RailTab
+          active={railTab === "digest"}
+          badge={railDigestCounts(boardCards ?? []).needsYou}
+          controls={digestPanelId}
+          label="Digest"
+          onClick={() => setRailTab("digest")}
+        />
+        <RailTab
+          active={railTab === "room"}
+          controls={roomPanelId}
+          label="Agent room"
+          onClick={() => setRailTab("room")}
+        />
+      </div>
+
+      <div className="hm-rail-tabpanels">
+        {railTab === "digest" ? (
+          <section
+            className="hm-rail-panel hm-rail-panel--digest"
+            id={digestPanelId}
+            role="tabpanel"
+            aria-label="Hermes digest"
+          >
+            <RailDigest
+              cards={boardCards ?? []}
+              onCardClick={onCardClick}
+              onGoRoom={() => setRailTab("room")}
+              onOpenRoster={() => setRosterOpen(true)}
+            />
+            <BacklogSuggestionsRailBlock
+              response={backlogSuggestions}
+              boardCards={boardCards ?? []}
+              onCardClick={onCardClick}
+              onUseInComposer={fillComposer}
+            />
+          </section>
+        ) : (
+          <section
+            className="hm-activity hm-rail-panel hm-rail-panel--room"
+            id={roomPanelId}
+            role="tabpanel"
+            aria-label="Multi-agent collaboration room"
+          >
+            <div className="hm-activity-head">
+              <span className="hm-kicker">Room</span>
+              <strong>Agent collaboration</strong>
+              <RoomPresence peers={peers} />
+            </div>
+            <div className="hm-hermes-stream hm-activity-stream" ref={streamRef} aria-live="polite">
+              {roomThreads.length > 0 ? (
+                roomThreads.map((thread) => (
+                  <RoomThreadBlock
+                    thread={thread}
+                    onCardClick={onCardClick}
+                    key={thread.key}
+                  />
+                ))
+              ) : (
+                <RoomEmptyState />
+              )}
+              <BoardSummaryRow
+                banner={boardBanner}
                 onCardClick={onCardClick}
-                key={thread.key}
               />
-            ))
-          ) : (
-            <RoomEmptyState />
-          )}
-          <BoardSummaryRow
-            banner={boardBanner}
-            onCardClick={onCardClick}
-          />
-        </div>
-      </section>
+            </div>
+          </section>
+        )}
+      </div>
 
       <AskHermesComposer
         onSpawnMission={onSpawnMission}
@@ -193,7 +234,36 @@ export function CoPilotRail({
         pending={pending}
         sendError={sendError}
       />
+      <RailRoster open={rosterOpen} onClose={() => setRosterOpen(false)} />
     </aside>
+  );
+}
+
+function RailTab({
+  active,
+  badge,
+  controls,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  badge?: number;
+  controls: string;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`hm-rail-tab${active ? " is-active" : ""}`}
+      role="tab"
+      aria-selected={active}
+      aria-controls={controls}
+      onClick={onClick}
+    >
+      <span>{label}</span>
+      {badge && badge > 0 ? <span className="hm-rail-tab-badge">{badge}</span> : null}
+    </button>
   );
 }
 
@@ -267,8 +337,19 @@ function cardIdForMessage(message: CollaborationMessage, cards: readonly BoardCa
  * we don't have, so they read as honest awaiting-data — never a fabricated
  * count.
  */
-function RailDigest({ cards }: { cards: readonly BoardCard[] }) {
+function RailDigest({
+  cards,
+  onCardClick,
+  onGoRoom,
+  onOpenRoster,
+}: {
+  cards: readonly BoardCard[];
+  onCardClick?: (id: string) => void;
+  onGoRoom: () => void;
+  onOpenRoster: () => void;
+}) {
   const { needsYou, running } = railDigestCounts(cards);
+  const waiting = cards.filter(isWaitingOnOperator);
   return (
     <section className="hm-rail-digest" aria-label="Hermes digest">
       <div className="hm-rail-digest-head">
@@ -278,22 +359,191 @@ function RailDigest({ cards }: { cards: readonly BoardCard[] }) {
           className="hm-rail-digest-since"
           title="The since-you-last-looked marker needs a real session backend — not wired yet."
         >
-          since last look · awaiting data
+          session deltas · honest until wired
         </span>
       </div>
       <div className="hm-rail-digest-stats">
-        <DigestStat label="needs you" value={needsYou} tone="act" />
-        <DigestStat label="running now" value={running} tone="ok" />
+        <DigestStat label="NEEDS YOU" value={needsYou} tone="act" />
+        <DigestStat label="RUNNING NOW" value={running} tone="ok" />
+        <DigestStat label="ADVANCED (SESSION)" needsData />
+        <DigestStat label="PROD CHANGES" needsData />
+      </div>
+      <p className="hm-rail-digest-note">
+        Advanced and production-change deltas need a real session marker; they stay blank until that source is wired.
+      </p>
+      <div className="hm-rail-waiting-head">{needsYou} waiting on you</div>
+      {waiting.length > 0 ? (
+        <div className="hm-rail-waiting-list">
+          {waiting.slice(0, 5).map((card) => (
+            <DigestWaitingCard
+              card={card}
+              onCardClick={onCardClick}
+              key={card.id}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="hm-rail-waiting-empty">
+          <strong>Inbox clear</strong>
+          <span>Nothing needs your judgment right now.</span>
+        </div>
+      )}
+      <div className="hm-rail-digest-actions">
+        <Button variant="secondary" size="sm" onClick={onGoRoom}>Open agent room →</Button>
+        <Button variant="ghost" size="sm" onClick={onOpenRoster}>Who&apos;s who</Button>
       </div>
     </section>
   );
 }
 
-function DigestStat({ label, value, tone }: { label: string; value: number; tone: "act" | "ok" }) {
+function DigestStat({
+  label,
+  value,
+  tone,
+  needsData,
+}: {
+  label: string;
+  value?: number;
+  tone?: "act" | "ok";
+  needsData?: boolean;
+}) {
   return (
     <div className="hm-rail-digest-stat">
-      <span className="hm-rail-digest-value" data-tone={tone}>{value}</span>
+      <span className="hm-rail-digest-value" data-tone={tone ?? "neutral"} data-needs-data={needsData ? "true" : undefined}>
+        {needsData ? "—" : value}
+      </span>
       <span className="hm-rail-digest-label">{label}</span>
+    </div>
+  );
+}
+
+function DigestWaitingCard({
+  card,
+  onCardClick,
+}: {
+  card: BoardCard;
+  onCardClick?: (id: string) => void;
+}) {
+  const rec = recommendationForCard(card);
+  const risk = riskLabelForCard(card);
+  const grants = grantsLabelForCard(card);
+  return (
+    <button
+      type="button"
+      className="hm-rail-waiting-card"
+      onClick={() => onCardClick?.(card.id)}
+      disabled={!onCardClick}
+      aria-label={`Open ${card.id}`}
+    >
+      <span className="hm-rail-waiting-dot" aria-hidden />
+      <span className="hm-rail-waiting-main">
+        <strong>{card.title}</strong>
+        <small>{card.agentType} · {card.id}</small>
+        {rec ? <span className="hm-rail-waiting-rec"><b>rec ·</b> {rec}</span> : null}
+        <span className="hm-rail-waiting-chips">
+          <Badge variant={risk.tone}>{risk.label}</Badge>
+          <Badge variant={grants.tone}>{grants.label}</Badge>
+        </span>
+      </span>
+      <span className="hm-rail-waiting-open">Open ›</span>
+    </button>
+  );
+}
+
+function recommendationForCard(card: BoardCard): string | undefined {
+  if (card.decisionRecord?.decision) return card.decisionRecord.decision;
+  if ("action" in card && card.action?.primary) return card.action.primary;
+  return card.next ?? card.summary;
+}
+
+function riskLabelForCard(card: BoardCard): { label: string; tone: StateVariant } {
+  if ("riskTier" in card && card.riskTier) {
+    return { label: `risk · ${card.riskTier}`, tone: card.riskTier === "high" ? "risk" : "neutral" };
+  }
+  if (card.risk.length > 0) {
+    const high = card.risk.some((tag) => tag === "contracts" || tag === "secrets" || tag === "xcm" || tag === "indexer");
+    return { label: `risk · ${card.risk.slice(0, 2).join(", ")}`, tone: high ? "risk" : "pending" };
+  }
+  return { label: "risk · not recorded", tone: "neutral" };
+}
+
+function grantsLabelForCard(card: BoardCard): { label: string; tone: StateVariant } {
+  const safety = card.decisionRecord?.safety;
+  if (!safety) return { label: "grants · not recorded", tone: "neutral" };
+  if (!safety.mutates) return { label: "grants · read-only", tone: "pass" };
+  return { label: "grants · gated mutation", tone: "pending" };
+}
+
+function RailRoster({ open, onClose }: { open: boolean; onClose: () => void }) {
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, open]);
+
+  if (!open) return null;
+
+  const roles = [
+    {
+      agent: "hermes" as const,
+      title: "Orchestrator",
+      body: "Reads the board, narrates handoffs, reviews evidence, and routes the next safe step.",
+      can: ["observe", "recommend", "route"],
+      cannot: ["merge", "deploy"],
+    },
+    {
+      agent: "codex" as const,
+      title: "Builder",
+      body: "Implements code fixes and opens PRs when a task is approved.",
+      can: ["branch", "test", "PR"],
+      cannot: ["merge"],
+    },
+    {
+      agent: "claude" as const,
+      title: "Builder / reviewer",
+      body: "Handles UI, docs, review, and collaboration turns when assigned.",
+      can: ["branch", "review", "PR"],
+      cannot: ["deploy"],
+    },
+    {
+      agent: "operator" as const,
+      title: "Final authority",
+      body: "Owns risky decisions, approvals, merge/deploy gates, and production judgment.",
+      can: ["approve", "merge", "deploy"],
+      cannot: ["be bypassed"],
+    },
+  ];
+
+  return (
+    <div className="hm-roster-layer" role="presentation">
+      <button type="button" className="hm-roster-scrim" aria-label="Close who's who" onClick={onClose} />
+      <section className="hm-roster-dialog" role="dialog" aria-modal="true" aria-label="Who's who">
+        <div className="hm-roster-head">
+          <div>
+            <strong>Who&apos;s who</strong>
+            <span>observe · mutate · approve</span>
+          </div>
+          <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
+        </div>
+        <div className="hm-roster-list">
+          {roles.map((role) => (
+            <div className="hm-roster-row" key={role.agent}>
+              <AgentTag agent={role.agent} label={role.agent === "operator" ? "You" : role.agent} />
+              <div>
+                <strong>{role.title}</strong>
+                <p>{role.body}</p>
+                <span>
+                  {role.can.map((capability) => <Badge variant="pass" key={capability}>✓ {capability}</Badge>)}
+                  {role.cannot.map((capability) => <Badge variant="neutral" key={capability}>not {capability}</Badge>)}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

@@ -22,18 +22,20 @@ function card(over: Record<string, unknown>): BoardCard {
 describe("PR-D3d — rail Hermes digest", () => {
   test("shows real needs-you / running counts and an honest awaiting-data since-marker", () => {
     const cards = [
-      card({ waitingOn: { actor: "operator", tone: "warn" } }),
-      card({ isAction: true }),
-      card({ state: "running" }),
+      card({ id: "operator-waiting", waitingOn: { actor: "operator", tone: "warn" } }),
+      card({ id: "action-card", isAction: true }),
+      card({ id: "running-card", state: "running" }),
     ];
     const { container } = render(<CoPilotRail boardCards={cards} collaboration={{ enabled: false }} />, { wrapper });
     const digest = container.querySelector(".hm-rail-digest") as HTMLElement;
     expect(digest).toBeTruthy();
     const view = within(digest);
     // needs-you = 2 (operator + isAction), running = 1
-    expect(view.getByText("needs you").parentElement?.querySelector(".hm-rail-digest-value")?.textContent).toBe("2");
-    expect(view.getByText("running now").parentElement?.querySelector(".hm-rail-digest-value")?.textContent).toBe("1");
+    expect(view.getByText("NEEDS YOU").parentElement?.querySelector(".hm-rail-digest-value")?.textContent).toBe("2");
+    expect(view.getByText("RUNNING NOW").parentElement?.querySelector(".hm-rail-digest-value")?.textContent).toBe("1");
     // No fabricated session deltas — the since-marker is honest awaiting-data.
-    expect(view.getByText(/since last look · awaiting data/i)).toBeTruthy();
+    expect(view.getByText(/session deltas · honest until wired/i)).toBeTruthy();
+    expect(view.getByText("ADVANCED (SESSION)").parentElement?.querySelector(".hm-rail-digest-value")?.textContent).toBe("—");
+    expect(view.getByText("PROD CHANGES").parentElement?.querySelector(".hm-rail-digest-value")?.textContent).toBe("—");
   });
 });

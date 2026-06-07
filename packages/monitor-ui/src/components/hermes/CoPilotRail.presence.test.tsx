@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, test } from "vitest";
 import type { ReactNode } from "react";
-import { cleanup, render, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, within } from "@testing-library/react";
 import { SWRConfig } from "swr";
 import { CoPilotRail } from "./CoPilotRail.js";
 import type { BoardCard } from "../../lib/monitor/card-types.js";
@@ -29,12 +29,17 @@ function workingCard(): BoardCard {
   } as unknown as BoardCard;
 }
 
+function openAgentRoom(container: HTMLElement) {
+  fireEvent.click(within(container).getByRole("tab", { name: /Agent room/ }));
+}
+
 describe("PR-D3c — room presence strip", () => {
   test("renders an active peer (from workingNow) with the active dot + count", () => {
     const { container } = render(
       <CoPilotRail boardCards={[workingCard()]} collaboration={{ enabled: false }} />,
       { wrapper },
     );
+    openAgentRoom(container);
     const presence = container.querySelector(".hm-room-presence");
     expect(presence).toBeTruthy();
     expect(within(presence as HTMLElement).getByText("codex")).toBeTruthy();
@@ -44,6 +49,7 @@ describe("PR-D3c — room presence strip", () => {
 
   test("reads honestly as 'quiet' when no agent has a live signal", () => {
     const { container } = render(<CoPilotRail boardCards={[]} collaboration={{ enabled: false }} />, { wrapper });
+    openAgentRoom(container);
     const presence = container.querySelector(".hm-room-presence--quiet");
     expect(presence?.textContent).toMatch(/quiet/i);
     expect(container.querySelector(".hm-room-peer")).toBeNull();

@@ -43,6 +43,12 @@ function wrapper({ children }: { children: ReactNode }) {
   return <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>{children}</SWRConfig>;
 }
 
+function boardLanes(container: HTMLElement) {
+  const lanes = container.querySelector(".hm-lanes-wrap");
+  expect(lanes).toBeTruthy();
+  return within(lanes as HTMLElement);
+}
+
 function taskCard(overrides: Partial<BoardCard> = {}): BoardCard {
   return {
     id: "codex-task-1",
@@ -75,7 +81,7 @@ describe("MonitorPage — container", () => {
 
     // Once the fetch resolves, the rich-mix board renders.
     await waitFor(() =>
-      expect(within(container).getByText("Allow operator override of agent claim-stake floor")).toBeTruthy(),
+      expect(boardLanes(container).getByText("Allow operator override of agent claim-stake floor")).toBeTruthy(),
     );
     expect(within(container).getByRole("banner")).toBeTruthy();
     expect(within(container).getByRole("complementary", { name: "Hermes co-pilot" })).toBeTruthy();
