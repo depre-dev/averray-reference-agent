@@ -244,3 +244,58 @@ unwired step — no fake ✓. (b) **Decision-card grammar:** the inbox cards sho
 partial) — complete them per `parts.jsx`, derived from real card state.
 **Acceptance:** the active deploy shows the stepper; inbox cards carry the full
 grammar; nothing fabricated.
+
+---
+
+# PR-G — Cockpit Polish (refinement)
+
+> The E + F waves made the cockpit *correct*. This is true polish — visual
+> discipline, not behaviour. Same hard rules + common preamble. **Verified
+> deployed** (main `402fb26`) before this review.
+
+## Why (post-F review of the live board)
+
+The cockpit is correct, but a close look found the **accent color is
+over-applied**, which both looks noisy and slightly misleads (read-only
+surfaces wearing the "act" color look actionable). `--act` (coral) is the
+single *"needs-you / act"* signal and should mark **only the one primary
+action**.
+
+## Status board
+
+| PR  | Slice                                                         | Primary files                                                                  | Depends | Status        |
+|-----|---------------------------------------------------------------|--------------------------------------------------------------------------------|---------|---------------|
+| G   | Accent discipline + button consistency + honest stepper label | `styles/hermes4-cards.css`, `styles/hermes4-kanban.css`, deploy-stepper render  | —       | ☐ not started |
+
+Status legend: ☐ not started · ◐ in progress (PR #) · ✅ merged (PR #) · ⚠ blocked (reason)
+
+> Note: the **"gate" badge is intentional** (`KanbanBoard.tsx:124`,
+> `.hm-col-gate`, title "Operator gate") — do **not** remove it.
+
+## Slice detail
+
+### PR-G — Accent discipline + button consistency + honest stepper label
+Three small, visual-only fixes (no behaviour change):
+
+1. **Quiet the read-only JUMP affordance.** The *"Awaiting your decision in
+   inbox · JUMP ›"* control on the read-only WATCH mirror cards is currently
+   painted in `--act` coral, so it shouts like an action. Restyle it as a
+   **quiet/ghost** navigation affordance (neutral/`--tel` tone). Reserve `--act`
+   coral for genuine primary actions only. (Mild honesty win: read-only must not
+   look actionable.)
+2. **Consistent inbox primary buttons.** The inbox "Approve & dispatch" buttons
+   render inconsistently — the top (most-urgent) card's button looks muted while
+   the others are bright. Make them consistent, and ensure the **most-urgent
+   card's CTA is the strongest**, never the weakest. One coherent primary-button
+   style across inbox cards.
+3. **Honest deploy-stepper label.** The stepper currently shows every step
+   "pending" because per-step deploy/CI telemetry isn't wired. That's honest —
+   keep it — but add a small explicit **"awaiting deploy telemetry"** affordance
+   so it reads as intentional, not broken. **Do NOT fabricate ✓ steps.** (Wiring
+   real per-step state is a separate future data task, out of scope here.)
+
+**Acceptance:** `--act` coral appears only on real primary actions; read-only
+JUMP is a quiet affordance; inbox primary buttons are consistent with the
+most-urgent strongest; the all-pending stepper carries an honest "awaiting
+telemetry" note. No behaviour change; truth-boundary preserved; existing tests
+green.
