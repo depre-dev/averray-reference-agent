@@ -681,9 +681,11 @@ describe("BoardView — filter chips (G1)", () => {
     expect(doneChip.tagName).toBe("BUTTON");
     fireEvent.click(doneChip);
 
-    // The live action card is filtered out; done-lane (CLOSED) cards remain.
+    // The live action card is filtered out; done-lane cards remain as passive
+    // VERIFIED mirrors (PR-F1: finished cards no longer leak into the inbox as
+    // "CLOSED" decisions — they show only in the read-only Done column).
     expect(view.queryByText("Allow operator override of agent claim-stake floor")).toBeNull();
-    expect(view.getAllByText("CLOSED").length).toBeGreaterThan(0);
+    expect(view.getAllByText("VERIFIED").length).toBeGreaterThan(0);
     expect(doneChip.getAttribute("aria-pressed")).toBe("true");
 
     // Clicking "All" restores the full board.

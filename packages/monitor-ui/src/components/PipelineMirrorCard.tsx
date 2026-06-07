@@ -1,5 +1,5 @@
 import type { BoardCard } from "../lib/monitor/card-types.js";
-import { isWaitingOnOperator, type KanbanTier } from "../lib/monitor/lane-rules.js";
+import { isDecision, type KanbanTier } from "../lib/monitor/lane-rules.js";
 import { AgentTag, StatusPill, type StateVariant } from "./ui.js";
 
 export type PipelineMirrorCardProps = {
@@ -56,11 +56,15 @@ export function PipelineMirrorCard({
   onJumpToInbox,
 }: PipelineMirrorCardProps) {
   const status = statusFor(card, tier);
-  const canJump = inboxAvailable && isWaitingOnOperator(card) && onJumpToInbox;
+  // PR-F1: the "jump to inbox" affordance + "awaiting" treatment use the shared
+  // isDecision predicate, so a mirror only points to the inbox when the card is
+  // genuinely there. Finished release-history cards (no live decision) stay
+  // passive — no broken jump to a card the inbox no longer holds.
+  const canJump = inboxAvailable && isDecision(card) && onJumpToInbox;
   const classes = [
     "hm-pipeline-card",
     tier === "hide" ? "hm-pipeline-card--verified" : "",
-    isWaitingOnOperator(card) ? "is-awaiting-inbox" : "",
+    isDecision(card) ? "is-awaiting-inbox" : "",
     focused ? "is-focused" : "",
   ].filter(Boolean).join(" ");
 

@@ -7,7 +7,7 @@
 // Per §5/§16 of docs/HERMES_MONITOR_REDESIGN_SPEC.md.
 
 import type { BoardCard, Lane } from "./card-types.js";
-import { groupByLane, laneCounts, laneFor } from "./lane-rules.js";
+import { groupByLane, laneCounts, laneFor, isDecision } from "./lane-rules.js";
 import { formatFreshness, sortByUrgency } from "./urgency.js";
 
 /** The state a LanesBar filter chip narrows the board to. */
@@ -112,7 +112,11 @@ export function kpiCounts(cards: BoardCard[]): KPICounts {
     counts["release-queue"] +
     counts["deploying"];
   return {
-    action: counts["needs-attention"],
+    // PR-F1: the action count is the real operator-decision count (isDecision),
+    // NOT the needs-attention lane size — so done/verified release-history cards
+    // that linger in the lane never inflate it. Drives the banner, board mode,
+    // and the TopStrip "action needed" pill, which now agree with the inbox/rail.
+    action: Array.isArray(cards) ? cards.filter(isDecision).length : 0,
     codex: counts["codex-needed"],
     review: counts["operator-review"],
     checking: counts["hermes-checking"],
@@ -142,7 +146,7 @@ export function boardMode(cards: BoardCard[], opts: DeriveBoardOpts = {}): Board
   if (!Array.isArray(cards) || cards.length === 0) return "calm";
   const counts = kpiCounts(cards);
   if (counts.blocked > 0) return "degraded";
-  if (opts.hermesFocusCardId && cards.some((card) => card.id === opts.hermesFocusCardId && isPendingReviewCard(card))) {
+  if (opts.hermesFocusCardId && cards.some((card) => card.id === opts.hermesFocusCardId && isDecision(card))) {
     return "hermes-focus";
   }
   if (counts.action > 0) return "action";
@@ -248,11 +252,10 @@ function calmSub(counts: KPICounts, metrics?: CalmBoardMetrics): string {
 }
 
 function pendingReviewCount(cards: BoardCard[]): number {
-  return cards.filter(isPendingReviewCard).length || 1;
-}
-
-function isPendingReviewCard(card: BoardCard): boolean {
-  return card.waitingOn?.actor === "operator" && (card.lane === "operator-review" || card.isAction === true);
+  // PR-F1: the shared isDecision predicate is the single source of truth (it
+  // also excludes done/verified/closed). The `|| 1` floor only applies in the
+  // hermes-focus prose, where a card is by definition under review.
+  return cards.filter(isDecision).length || 1;
 }
 
 function suggestedActionFor(card: BoardCard): string {

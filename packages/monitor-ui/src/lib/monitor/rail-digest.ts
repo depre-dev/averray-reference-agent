@@ -7,7 +7,7 @@
 // awaiting-data, never a fabricated count. Pure + deterministic.
 
 import type { BoardCard } from "./card-types.js";
-import { isWaitingOnOperator } from "./lane-rules.js";
+import { isDecision } from "./lane-rules.js";
 
 export interface RailDigestCounts {
   /** Cards awaiting the operator's decision (the DECIDE inbox). */
@@ -27,7 +27,7 @@ export function railDigestCounts(cards: readonly BoardCard[]): RailDigestCounts 
   let needsYou = 0;
   let running = 0;
   for (const card of cards) {
-    if (isWaitingOnOperator(card)) needsYou += 1;
+    if (isDecision(card)) needsYou += 1;
     if (isRunning(card)) running += 1;
   }
   return { needsYou, running };

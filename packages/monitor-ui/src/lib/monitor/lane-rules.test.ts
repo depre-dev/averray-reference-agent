@@ -3,7 +3,7 @@
 
 import { test, assert } from "vitest";
 
-import { laneFor, groupByLane, laneCounts, isUnroutedCard, inflightStatus } from "./lane-rules.js";
+import { laneFor, groupByLane, laneCounts, isUnroutedCard, inflightStatus, isDecision, isFinishedCard } from "./lane-rules.js";
 import { LANES } from "./card-types.js";
 
 // ── Test fixtures ───────────────────────────────────────────────────
@@ -298,4 +298,33 @@ test("laneCounts: mixed input returns correct per-lane totals", () => {
   assert.equal(result["hermes-checking"], 0);
   assert.equal(result["release-queue"], 0);
   assert.equal(result["deploying"], 0);
+});
+
+// ── PR-F1: isFinishedCard + isDecision (single source of truth) ──────
+
+test("isFinishedCard: done / closed / merged release history", () => {
+  assert.equal(isFinishedCard(prCard({ type: "done" })), true);
+  assert.equal(isFinishedCard(prCard({ closedAt: "5/27/2026" })), true);
+  assert.equal(isFinishedCard(prCard({ mergeStatus: "MERGED" })), true);
+  assert.equal(isFinishedCard(prCard({ mergeStatus: "CLOSED" })), true);
+  assert.equal(isFinishedCard(prCard()), false);
+  assert.equal(isFinishedCard(null), false);
+});
+
+test("isDecision: a real operator decision (operator-review PR or isAction)", () => {
+  assert.equal(isDecision(prCard({ lane: "operator-review", waitingOn: { actor: "operator" } })), true);
+  assert.equal(isDecision(prCard({ lane: "needs-attention", isAction: true, waitingOn: { actor: "operator" } })), true);
+  // operator-owned proposed task in codex-needed (isAction:false) is still a decision
+  assert.equal(isDecision(prCard({ type: "task", lane: "codex-needed", waitingOn: { actor: "operator" } })), true);
+});
+
+test("isDecision: not waiting on the operator → not a decision", () => {
+  assert.equal(isDecision(prCard({ lane: "hermes-checking", isAction: false, waitingOn: { actor: "CI" } })), false);
+  assert.equal(isDecision(null), false);
+});
+
+test("isDecision: finished release history is never a decision, even with a stale operator/isAction flag", () => {
+  // The "keep as release history; no board action needed" leak (truth-boundary).
+  assert.equal(isDecision(prCard({ type: "done", isAction: true, waitingOn: { actor: "operator" }, closedAt: "5/27/2026", mergeStatus: "MERGED" })), false);
+  assert.equal(isDecision(prCard({ mergeStatus: "MERGED", waitingOn: { actor: "operator" } })), false);
 });

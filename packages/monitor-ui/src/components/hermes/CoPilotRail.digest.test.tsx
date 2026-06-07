@@ -22,8 +22,8 @@ function card(over: Record<string, unknown>): BoardCard {
 describe("PR-D3d — rail Hermes digest", () => {
   test("shows real needs-you / running counts and an honest awaiting-data since-marker", () => {
     const cards = [
-      card({ id: "operator-waiting", waitingOn: { actor: "operator", tone: "warn" } }),
-      card({ id: "action-card", isAction: true }),
+      card({ id: "operator-waiting", lane: "operator-review", waitingOn: { actor: "operator", tone: "warn" } }),
+      card({ id: "action-card", isAction: true, waitingOn: { actor: "operator", tone: "warn" } }),
       card({ id: "running-card", state: "running" }),
     ];
     const { container } = render(<CoPilotRail boardCards={cards} collaboration={{ enabled: false }} />, { wrapper });

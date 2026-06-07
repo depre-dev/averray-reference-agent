@@ -70,6 +70,44 @@ export function isWaitingOnOperator(card: BoardCard | undefined | null): boolean
   return card.isAction === true || card.waitingOn?.actor === "operator";
 }
 
+/**
+ * A finished card — done / verified / closed release history. These are never
+ * operator decisions even when they still carry an `isAction` / operator-waiting
+ * flag left over from their active life (the "keep as release history; no board
+ * action needed" codex cards), so the decision predicate excludes them.
+ */
+export function isFinishedCard(card: BoardCard | undefined | null): boolean {
+  if (!card) return false;
+  if (card.type === "done") return true;
+  const c = card as { closedAt?: string | null; mergeStatus?: string | null };
+  return c.closedAt != null || c.mergeStatus != null;
+}
+
+/**
+ * PR-F1 — THE single definition of "a card waiting on an operator decision":
+ * the one actionable surface. Every decision surface (the Decision Inbox
+ * membership, the rail "WAITING ON YOU" list + count, the banner / KPI action
+ * count, the footer "waiting on you", the pipeline "jump to inbox" mirror) must
+ * use this predicate so they can never disagree again.
+ *
+ * "Waiting on the operator" = isAction (a needs-attention promotion) OR an
+ * explicit operator owner — this matches the design's inbox filter
+ * (`waitingOn === 'operator'`) and the cards that are genuinely actionable from
+ * the inbox today (operator-review PRs, operator-owned proposed tasks/missions
+ * awaiting dispatch). The narrower `(operator-review || isAction)` form in
+ * board-state was the banner's *pending-review* notion and would wrongly drop
+ * operator-owned proposed tasks, so it is NOT the decision predicate.
+ *
+ * The truth-boundary fix is the exclusion: a finished done/verified/closed card
+ * is never a decision even when it still carries a stale operator/isAction flag
+ * (the "keep as release history; no board action needed" leak).
+ */
+export function isDecision(card: BoardCard | undefined | null): boolean {
+  if (!card) return false;
+  if (isFinishedCard(card)) return false;
+  return isWaitingOnOperator(card);
+}
+
 export type InflightStatus = "Pre-check" | "CI watching" | "Mission running";
 
 /**

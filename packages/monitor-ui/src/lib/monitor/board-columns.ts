@@ -14,7 +14,7 @@
 
 import type { BoardCard, Lane } from "./card-types.js";
 import { LANES } from "./card-types.js";
-import { isWaitingOnOperator, tierFor, type KanbanTier } from "./lane-rules.js";
+import { isDecision, tierFor, type KanbanTier } from "./lane-rules.js";
 
 export interface BoardColumnDef {
   /** Stable column key (the lane id for pipeline columns; "inbox" for the hero). */
@@ -60,19 +60,20 @@ export function tierLabel(tier: KanbanTier): string {
 }
 
 /**
- * The Decision Inbox holds every card genuinely waiting on the human operator
- * — the single place to act. Most operator-waiting cards are promoted into
+ * The Decision Inbox holds every card that's a real operator decision
+ * (`isDecision`, PR-F1) — the single place to act. Most are promoted into
  * `needs-attention` by laneFor(), but cards can still mirror in pipeline lanes
  * (operator-review / codex-needed) while they await a decision; include them
  * here exactly once so pipeline "jump to inbox" links always target a real
- * actionable card.
+ * actionable card. `isDecision` excludes done / verified / closed release
+ * history, so the hero never inflates with finished work.
  */
 export function inboxCards(grouped: Partial<Record<Lane, BoardCard[]>>): BoardCard[] {
   const seen = new Set<string>();
   const out: BoardCard[] = [];
   for (const lane of LANES) {
     for (const card of grouped[lane] ?? []) {
-      if (!isWaitingOnOperator(card) || seen.has(card.id)) continue;
+      if (!isDecision(card) || seen.has(card.id)) continue;
       seen.add(card.id);
       out.push(card);
     }
