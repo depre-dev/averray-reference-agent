@@ -64,6 +64,10 @@ describe("Card — type coverage", () => {
     const view = within(container);
     expect(view.getByText(/Post-merge verify/)).toBeTruthy();
     expect(view.getByText("xcm")).toBeTruthy();
+    expect(view.getByText("Current deploy: verifying")).toBeTruthy();
+    expect(view.getByText("CI queued")).toBeTruthy();
+    expect(view.getByText("browser replay")).toBeTruthy();
+    expect(container.querySelectorAll(".h4-stepper-row.is-done").length).toBe(1);
   });
 
   test("codex task card renders without checks (no CI yet)", () => {

@@ -194,7 +194,9 @@ describe("DetailDrawer — variants", () => {
       <DetailDrawer card={card} cards={[{ id: card.id }]} onClose={noop} onNavigate={noop} />,
     );
     expect(getByText("Deploying · post-merge verification")).toBeTruthy();
-    expect(getByText(/3\/5 · indexer settle/)).toBeTruthy();
+    expect(getByText("Current deploy: verifying")).toBeTruthy();
+    expect(getByText("CI queued")).toBeTruthy();
+    expect(getByText("browser replay")).toBeTruthy();
   });
 
   test("codex task card shows its prompt", () => {
@@ -458,9 +460,8 @@ describe("DetailDrawer — variants", () => {
   });
 
   // Regression: live cards cross an HTTP/JSON boundary and don't always carry
-  // the type-required nested objects (the backend doesn't populate deploy
-  // `verification` or a mission `mission` report yet). The drawer must render,
-  // not crash — this is the bug that took the live board down on card click.
+  // deploy `verification` or a mission `mission` report. The drawer must
+  // render, not crash, and deploy steps must stay honest pending data.
   test("deploy card with NO verification (live shape) renders without crashing", () => {
     const card = {
       id: "post-production-deploy-verification-afte-3e4a",
@@ -480,6 +481,7 @@ describe("DetailDrawer — variants", () => {
     );
     expect(getByText("Deploying · post-merge verification")).toBeTruthy();
     expect(getByText("post_deploy_healthy")).toBeTruthy();
+    expect(getByText("Current deploy: verifying")).toBeTruthy();
     expect(queryByText("Verification progress")).toBeNull(); // omitted, not crashed
   });
 
