@@ -1,0 +1,103 @@
+/* =========================================================
+   Hermes-4 BOARD migration (PR-D4) — the full board card/lane
+   retheme onto the --h4 profile system.
+
+   Mechanism: the shipped board paints cards/lanes/chips/text via
+   the legacy --hm-* tokens. This layer REDEFINES those tokens as
+   aliases of the --h4-* token system, so the entire board tracks
+   the active color profile (Midnight default) and switches with
+   it — in one coherent move, with no DOM/class/text change. The
+   className/text/role-based tests stay green because nothing
+   structural moves; only the resolved colors do.
+
+   Loaded LAST (after monitor.css + the h4 layers), so this :root
+   wins by source order. color-profile.ts sets --h4-* as inline
+   styles on <html> at runtime, which beat this :root — so profile
+   switching flows through these aliases to the whole board.
+
+   Status families with no 1:1 --h4 equivalent (fail/info/brand-
+   teal) are remapped to dark-legible values chosen here and noted
+   inline — honest, documented choices, not silent guesses.
+
+   Baked rgba()/hex literals that bypass tokens (accent gradients,
+   on-color text) are handled per-site at the bottom — they can't
+   be reached by token aliasing and each needs its own context.
+   ========================================================= */
+
+:root {
+  /* ---- surfaces: cream → --h4 paper stack ---- */
+  --hm-paper:       var(--h4-paper);
+  --hm-paper-2:     var(--h4-surface);
+  --hm-paper-3:     var(--h4-paper-sunken);
+  --hm-rail:        var(--h4-paper-sunken);
+  --hm-rail-strong: var(--h4-tel-chip);
+
+  /* ---- ink: near-black → --h4 light ink stack ---- */
+  --hm-ink:        var(--h4-ink);
+  --hm-ink-soft:   var(--h4-ink-2);
+  --hm-muted:      var(--h4-muted);
+  --hm-muted-soft: var(--h4-faint);
+
+  /* ---- hairlines: dark-on-light → light-on-dark ---- */
+  --hm-line:        var(--h4-line);
+  --hm-line-soft:   var(--h4-line-2);
+  --hm-line-strong: var(--h4-line-strong);
+
+  /* ---- success / verdict → --h4 sage(ok) ---- */
+  --hm-sage:      var(--h4-ok);
+  --hm-sage-deep: var(--h4-ok-text);
+  --hm-sage-soft: var(--h4-ok-soft);
+  --hm-sage-wash: var(--h4-ok-soft);
+  --hm-fresh:     var(--h4-ok);
+
+  /* ---- degraded / pending → --h4 amber(warn) ---- */
+  --hm-amber:      var(--h4-warn);
+  --hm-amber-deep: var(--h4-warn-text);
+  --hm-amber-soft: var(--h4-warn-soft);
+  --hm-amber-wash: var(--h4-warn-soft);
+  --hm-amber-ring: var(--h4-warn-line);
+  --hm-clay:       var(--h4-warn-text);
+
+  /* ---- brand teal (Hermes) — no --h4 status equiv; dark-legible teals ---- */
+  --hm-hermes:      #2f8f83;                  /* fill/border, legible on dark */
+  --hm-hermes-deep: #74c2b4;                  /* text on dark */
+  --hm-hermes-soft: rgba(47,143,131,0.20);    /* wash on dark */
+
+  /* ---- info blue — no --h4 equiv; dark-legible blue ---- */
+  --hm-blue:      #7f9fde;
+  --hm-blue-soft: rgba(70,111,157,0.24);
+
+  /* ---- fail / error rose — no --h4 equiv; dark-legible red ---- */
+  --hm-rose:      #df9a9a;
+  --hm-rose-soft: rgba(162,58,58,0.26);
+
+  /* ---- offline / stale → --h4 telemetry/faint ---- */
+  --hm-offline:      var(--h4-muted);
+  --hm-offline-soft: var(--h4-tel-chip);
+  --hm-stale:        var(--h4-faint);
+
+  /* ---- card/pop shadows → --h4 dark-surface shadows ---- */
+  --hm-shadow-card: var(--h4-sh-sm);
+  --hm-shadow-pop:  var(--h4-sh-lift);
+
+  /* radii kept warm-rounded to match --h4 */
+  --hm-radius:    var(--h4-r-sm);
+  --hm-radius-sm: 6px;
+  --hm-radius-lg: var(--h4-r-card);
+}
+
+/* =========================================================
+   Per-site baked-literal overrides — accents that bypass tokens.
+   (Driven by the rendered board; each is a contextual choice.)
+   ========================================================= */
+
+/* action-needed card: warm cream gradient → coral DECIDE wash + edge */
+.hm-card--action {
+  background:
+    linear-gradient(90deg, var(--h4-act-soft-2) 0, var(--h4-act-soft) 54px),
+    var(--h4-paper) !important;
+  border-color: var(--h4-act-line) !important;
+  box-shadow: var(--h4-sh-sm) !important;
+}
+.hm-card--action::before { background: var(--h4-act) !important; }
+.hm-card--action:hover { box-shadow: var(--h4-sh) !important; }
