@@ -25,6 +25,9 @@ import "./styles/hermes4-cards.css";
 // PR-D3e: rail reskin — re-points the co-pilot rail's --hm-* surfaces to --h4-*
 // so the column tracks the active color profile. Cosmetic, additive, rail-only.
 import "./styles/hermes4-rail.css";
+// PR-D4: full board card/lane migration — aliases the legacy --hm-* tokens onto
+// the --h4 profile system so the whole board tracks the active profile.
+import "./styles/hermes4-board.css";
 
 const rootEl = document.getElementById("root");
 if (!rootEl) {
