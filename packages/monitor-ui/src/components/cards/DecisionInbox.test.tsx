@@ -41,32 +41,39 @@ function decisionCard(decisionRecord: HermesDecisionRecord): BoardCard {
   } as unknown as BoardCard;
 }
 
-describe("PR-D3b — compact Decision-Inbox context", () => {
-  test("a read-only decision shows an ok grants chip + 'what happens next'", () => {
+describe("PR-E2 — Decision-Inbox card grammar", () => {
+  test("a decision card shows reason + what-happens-next from the decision record", () => {
     const { container, getByText } = render(<Card card={decisionCard(record())} />);
-    const inbox = container.querySelector(".hm-decision-inbox");
-    expect(inbox).toBeTruthy();
-    const chip = inbox?.querySelector(".h4-badge--gate");
-    expect(chip?.textContent).toMatch(/read-only/);
-    expect(chip?.className).toContain("h4-tone--ok");
+    const context = container.querySelector(".hm-decision-grammar");
+    expect(context).toBeTruthy();
+    expect(getByText(/Why you're seeing this/)).toBeTruthy();
+    expect(getByText(/review-gated surface/)).toBeTruthy();
     expect(getByText(/What happens next/)).toBeTruthy();
     expect(getByText(/Hermes merges and verifies the deploy/)).toBeTruthy();
+    expect(container.querySelector(".hm-decision-inbox")).toBeNull();
   });
 
-  test("a mutating decision names the surfaces it touches with a warn chip", () => {
-    const { container } = render(
+  test("reason copy remains traceable on mutating decisions", () => {
+    const { getByText } = render(
       <Card card={decisionCard(record({ safety: { readOnly: false, mutates: true, mutatesGithub: true, mutatesAverray: true } }))} />
     );
-    const chip = container.querySelector(".hm-decision-inbox .h4-badge--gate");
-    expect(chip?.textContent).toMatch(/mutates GitHub · Averray/);
-    expect(chip?.className).toContain("h4-tone--warn");
+    expect(getByText(/review-gated surface/)).toBeTruthy();
+  });
+
+  test("uses an honest fallback when no reason was recorded", () => {
+    const noReason = record({ reasons: [] });
+    const card = decisionCard(noReason);
+    card.freshness = 0;
+    const { getByText } = render(<Card card={card} />);
+    expect(getByText(/Reason not recorded; open the drawer before acting/)).toBeTruthy();
   });
 
   test("renders no inbox context on a non-decision lane card", () => {
     const card = decisionCard(record());
     (card as { isAction?: boolean }).isAction = false;
     (card as { lane?: string }).lane = "hermes-checking";
+    card.waitingOn = { actor: "CI", tone: "info" };
     const { container } = render(<Card card={card} />);
-    expect(container.querySelector(".hm-decision-inbox")).toBeNull();
+    expect(container.querySelector(".hm-decision-grammar")).toBeNull();
   });
 });

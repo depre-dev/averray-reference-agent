@@ -229,6 +229,65 @@
 .hm-decision-next { font-size: 11.5px; color: var(--h4-muted); }
 .hm-decision-next .lbl { font-weight: 600; color: var(--h4-ink-2); }
 
+/* ---- E2: Decision-card body grammar ---- */
+.hm-decision-repo {
+  margin-top: 5px;
+  font-size: 11px;
+  color: var(--h4-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hm-decision-grammar {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--h4-line-2);
+}
+.hm-decision-grammar-row {
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--h4-ink-2);
+}
+.hm-decision-grammar-label {
+  font-family: var(--h4-font-display);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--h4-faint);
+}
+.hm-decision-grammar-fallback {
+  color: var(--h4-muted);
+}
+.hm-card-cta--decision {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
+  margin-top: 11px;
+}
+.hm-card-cta--decision .hm-decision-choices {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  gap: 6px;
+}
+.hm-decision-choices-toggle {
+  min-width: 86px;
+}
+.hm-decision-choices-empty {
+  grid-column: 1 / -1;
+  padding: 7px 8px;
+  border-radius: var(--h4-r-sm);
+  background: var(--h4-paper-sunken);
+  border: 1px solid var(--h4-line-2);
+  font-size: 11px;
+  color: var(--h4-muted);
+}
+
 /* ---- D3c: agent-room presence tiles ---- */
 .hm-room-presence {
   display: inline-flex;

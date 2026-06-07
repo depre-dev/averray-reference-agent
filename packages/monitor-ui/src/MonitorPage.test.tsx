@@ -427,7 +427,9 @@ describe("MonitorPage — container", () => {
         />,
         { wrapper },
       );
-      await waitFor(() => expect(getByRole("button", { name: "Dismiss" })).toBeTruthy());
+      await waitFor(() => expect(getByRole("button", { name: "Choices ↓" })).toBeTruthy());
+      fireEvent.click(getByRole("button", { name: "Choices ↓" }));
+      expect(getByRole("button", { name: "Dismiss" })).toBeTruthy();
       fireEvent.click(getByRole("button", { name: "Dismiss" }));
       expect(getByText(/Dismiss this requested tester mission/)).toBeTruthy();
       fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
@@ -486,7 +488,9 @@ describe("MonitorPage — container", () => {
         />,
         { wrapper },
       );
-      await waitFor(() => expect(getByRole("button", { name: "Accept failure" })).toBeTruthy());
+      await waitFor(() => expect(getByRole("button", { name: "Choices ↓" })).toBeTruthy());
+      fireEvent.click(getByRole("button", { name: "Choices ↓" }));
+      expect(getByRole("button", { name: "Accept failure" })).toBeTruthy();
 
       fireEvent.click(getByRole("button", { name: "Accept failure" }));
       expect(getByText(/Accept this failed mission/)).toBeTruthy();
