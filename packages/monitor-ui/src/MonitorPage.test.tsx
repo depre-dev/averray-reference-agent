@@ -111,7 +111,8 @@ describe("MonitorPage — container", () => {
 
     // Chrome is present even with no board data — no blank screen, no throw.
     await waitFor(() => expect(within(container).getByRole("banner")).toBeTruthy());
-    expect(container.querySelectorAll(".hm-lane").length).toBe(8);
+    // PR-E1: the inbox-first board still renders its hero Decision Inbox column.
+    expect(within(container).getByRole("region", { name: "Your decisions lane" })).toBeTruthy();
     expect(within(container).getByRole("complementary", { name: "Hermes co-pilot" })).toBeTruthy();
   });
 

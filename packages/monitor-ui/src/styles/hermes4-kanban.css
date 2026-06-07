@@ -1,0 +1,165 @@
+/* =========================================================
+   Hermes-4 inbox-first Kanban (PR-E1).
+
+   The "decision cockpit" column layout (docs/design/hermes-4/
+   project/kanban.jsx): a hero DECISION INBOX column + read-only
+   WATCH / HIDE tier columns + collapsed vertical rails. Consumes
+   the --h4 token system (profile-tracking); additive, namespaced
+   .hm-col* / .hm-kanban so it never clobbers the legacy lanes.
+   ========================================================= */
+
+.hm-kanban {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  padding: 2px 4px 14px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* ---- column shell ---- */
+.hm-col {
+  flex: 1 1 0;
+  min-width: min(266px, 78vw);
+  max-width: 420px;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--h4-surface);
+  border: 1px solid var(--h4-line);
+  border-radius: var(--h4-r-lane);
+  overflow: hidden;
+}
+.hm-col--inbox {
+  flex: 1.25 1 0;
+  min-width: min(320px, 82vw);
+  max-width: 470px;
+  box-shadow: var(--h4-sh-sm);
+  border-color: var(--h4-act-line);
+}
+
+/* ---- header (tier eyebrow + name + count + sub) ---- */
+.hm-col-head {
+  flex: none;
+  padding: 12px 14px 11px;
+  background: var(--h4-paper-sunken);
+  border-bottom: 1px solid var(--h4-line);
+}
+.hm-col-head[data-h4-tier="decide"] {
+  background: var(--h4-tier-decide-bg);
+  border-bottom-color: var(--h4-tier-decide-line);
+}
+.hm-col-head[data-h4-tier="hide"] { background: var(--h4-surface); border-bottom-color: var(--h4-line-2); }
+
+.hm-col-head-top { display: flex; align-items: center; justify-content: space-between; min-height: 16px; }
+.hm-col-eyebrow {
+  font-family: var(--h4-font-display);
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0;
+  color: var(--h4-muted);
+}
+.hm-col-head[data-h4-tier="decide"] .hm-col-eyebrow { color: var(--h4-tier-decide-text); }
+.hm-col-head[data-h4-tier="hide"] .hm-col-eyebrow { color: var(--h4-faint); }
+
+.hm-col-collapse {
+  width: 22px; height: 22px; flex: none;
+  border-radius: 6px;
+  border: 1px solid var(--h4-line);
+  background: var(--h4-paper);
+  color: var(--h4-muted);
+  cursor: pointer;
+  font-size: 12px; line-height: 1;
+}
+.hm-col-collapse:hover { color: var(--h4-ink); }
+
+.hm-col-title-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.hm-col-title { font-family: var(--h4-font-display); font-weight: 700; font-size: 15px; white-space: nowrap; color: var(--h4-ink); }
+.hm-col-count {
+  min-width: 20px; height: 20px; padding: 0 6px;
+  display: grid; place-items: center;
+  border-radius: var(--h4-r-pill);
+  font-family: var(--h4-font-display); font-size: 11px; font-weight: 700;
+  background: var(--h4-ink); color: var(--h4-paper);
+}
+.hm-col-count.is-empty { background: var(--h4-paper-sunken); color: var(--h4-faint); }
+[data-h4-tier="decide"] .hm-col-count:not(.is-empty) { background: var(--h4-act); color: var(--h4-act-ink); }
+[data-h4-tier="hide"] .hm-col-count:not(.is-empty) { background: var(--h4-faint); color: var(--h4-paper); }
+
+.hm-col-gate {
+  font-family: var(--h4-font-display); font-size: 8.5px; font-weight: 700; text-transform: uppercase;
+  color: var(--h4-act-text);
+}
+.hm-col-sub {
+  margin-top: 4px;
+  font-family: var(--h4-font-display); font-size: 9.5px; font-weight: 700; text-transform: uppercase;
+  color: var(--h4-faint);
+}
+
+/* ---- body ---- */
+.hm-col-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--h4-pad-lane);
+  display: flex;
+  flex-direction: column;
+  gap: var(--h4-gap-cards);
+  overflow-y: auto;
+}
+
+/* ---- empty state ---- */
+.hm-col-empty {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px;
+  border-radius: var(--h4-r-sm);
+  border: 1px dashed var(--h4-line);
+  background: var(--h4-paper-sunken);
+}
+.hm-col-empty-glyph {
+  width: 24px; height: 24px; flex: none;
+  display: grid; place-items: center;
+  border-radius: 7px;
+  background: var(--h4-paper); color: var(--h4-faint); font-size: 13px;
+}
+.hm-col-empty--inbox .hm-col-empty-glyph { background: var(--h4-ok-soft); color: var(--h4-ok-text); }
+.hm-col-empty-title { font-family: var(--h4-font-display); font-size: 12.5px; font-weight: 600; color: var(--h4-muted); }
+.hm-col-empty--inbox .hm-col-empty-title { color: var(--h4-ok-text); }
+.hm-col-empty-sub { font-size: 11px; color: var(--h4-faint); margin-top: 1px; }
+
+/* ---- collapsed rail ---- */
+.hm-col-rail {
+  flex: none;
+  width: 50px;
+  align-self: stretch;
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  padding: 14px 6px;
+  background: var(--h4-surface);
+  border: 1px solid var(--h4-line);
+  border-radius: var(--h4-r-lane);
+  cursor: pointer;
+}
+.hm-col-rail.is-empty { border-style: dashed; }
+.hm-col-rail-count {
+  min-width: 22px; height: 22px; padding: 0 5px;
+  display: grid; place-items: center;
+  border-radius: var(--h4-r-pill);
+  font-family: var(--h4-font-display); font-size: 11px; font-weight: 700;
+  background: var(--h4-ink); color: var(--h4-paper);
+}
+.hm-col-rail-count.is-empty { background: transparent; color: var(--h4-faint); border: 1px solid var(--h4-line); }
+[data-h4-tier="hide"] .hm-col-rail-count:not(.is-empty) { background: var(--h4-faint); color: var(--h4-paper); }
+.hm-col-rail-name {
+  writing-mode: vertical-rl; transform: rotate(180deg);
+  font-family: var(--h4-font-display); font-size: 11.5px; font-weight: 700; text-transform: uppercase;
+  white-space: nowrap; color: var(--h4-muted);
+}
+.hm-col-rail-gate {
+  writing-mode: vertical-rl; transform: rotate(180deg);
+  margin-top: auto;
+  font-family: var(--h4-font-display); font-size: 8px; font-weight: 700; text-transform: uppercase;
+  color: var(--h4-act-text);
+}

@@ -34,7 +34,7 @@ import { TopStrip } from "./TopStrip.js";
 import { TopStripDegraded } from "./TopStripDegraded.js";
 import { BoardNowBanner } from "./BoardNowBanner.js";
 import { LanesBar } from "./LanesBar.js";
-import { Board } from "./Board.js";
+import { KanbanBoard } from "./KanbanBoard.js";
 import type { LaneId } from "./Lane.js";
 import { CardRouter } from "./cards/CardRouter.js";
 import { HermesCheckingBody } from "./HermesCheckingBody.js";
@@ -542,15 +542,14 @@ export function BoardView({
             onDismissSuite={onDismissSuite}
             onSpawnMission={onSpawnMission}
           />
-          <Board
+          <KanbanBoard
             grouped={displayGrouped}
             ariaLabel="Kanban lane grid"
-            className="hm-lanes--kanban"
             expanded={surfacedExpanded}
             onToggleLane={onToggleLane}
             renderLaneHeader={
               onCreateTask
-                ? (id) => (id === "codex-needed" ? <CreateTaskForm onCreate={onCreateTask} /> : null)
+                ? (lane) => (lane === "codex-needed" ? <CreateTaskForm onCreate={onCreateTask} /> : null)
                 : undefined
             }
             renderCard={renderCard}

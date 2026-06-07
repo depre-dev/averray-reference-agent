@@ -28,6 +28,8 @@ import "./styles/hermes4-rail.css";
 // PR-D4: full board card/lane migration — aliases the legacy --hm-* tokens onto
 // the --h4 profile system so the whole board tracks the active profile.
 import "./styles/hermes4-board.css";
+// PR-E1: inbox-first Kanban — hero Decision Inbox + read-only tier columns.
+import "./styles/hermes4-kanban.css";
 
 const rootEl = document.getElementById("root");
 if (!rootEl) {
