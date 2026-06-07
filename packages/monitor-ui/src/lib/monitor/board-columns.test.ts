@@ -9,8 +9,8 @@ import {
 } from "./board-columns.js";
 import type { BoardCard, Lane } from "./card-types.js";
 
-function card(lane: Lane, id = lane): BoardCard {
-  return { id, lane, type: "pr", state: "fresh", waitingOn: { actor: "agent", tone: "neutral" } } as unknown as BoardCard;
+function card(lane: Lane, id = lane, actor: "operator" | "agent" = "agent"): BoardCard {
+  return { id, lane, type: "pr", state: "fresh", waitingOn: { actor, tone: actor === "operator" ? "warn" : "neutral" } } as unknown as BoardCard;
 }
 
 function grouped(partial: Partial<Record<Lane, BoardCard[]>>): Record<Lane, BoardCard[]> {
@@ -64,19 +64,19 @@ describe("columnTier / tierLabel", () => {
 });
 
 describe("inboxCards", () => {
-  it("unions every DECIDE-tier lane's cards (currently needs-attention)", () => {
+  it("unions every operator-waiting card exactly once, including pipeline mirrors", () => {
     const g = grouped({
-      "needs-attention": [card("needs-attention", "a1"), card("needs-attention", "a2")],
-      "operator-review": [card("operator-review", "o1")],
+      "needs-attention": [card("needs-attention", "a1", "operator"), card("needs-attention", "a2", "operator")],
+      "operator-review": [card("operator-review", "o1", "operator")],
+      "codex-needed": [card("codex-needed", "t1", "agent")],
     });
     const ids = inboxCards(g).map((c) => c.id);
-    expect(ids).toEqual(["a1", "a2"]);
-    // operator-review is WATCH-tier → not folded into the inbox.
-    expect(ids).not.toContain("o1");
+    expect(ids).toEqual(["a1", "a2", "o1"]);
+    expect(ids).not.toContain("t1");
   });
 
-  it("is empty when no decide-tier card exists", () => {
-    expect(inboxCards(grouped({ done: [card("done")] }))).toEqual([]);
+  it("is empty when no card waits on the operator", () => {
+    expect(inboxCards(grouped({ done: [card("done", "done", "agent")] }))).toEqual([]);
   });
 });
 

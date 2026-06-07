@@ -2,14 +2,15 @@
 //
 // The Hermes-4 "decision cockpit" layout (docs/design/hermes-4/project/
 // board.jsx + kanban.jsx): a hero DECISION INBOX column ("Your decisions" —
-// the union of every DECIDE-tier card, the single actionable surface), then
+// the union of every operator-waiting card, the single actionable surface), then
 // read-only WATCH / HIDE tier columns in pipeline position. Empty non-gate
 // pipeline lanes hide; gate / collapsed lanes show as reachable vertical rails.
 //
 // This component owns only the column STRUCTURE + chrome (tier eyebrows, count
-// pills, collapse chevrons, rails). Card internals come from the caller's
-// `renderCard` (the existing CardRouter) — richer inbox cards land in later
-// E-PRs. Card membership + visibility live in board-columns.ts (pure, tested).
+// pills, collapse chevrons, rails). Inbox card internals come from the caller's
+// `renderCard` (the existing CardRouter); pipeline lanes may use a separate
+// read-only mirror renderer. Card membership + visibility live in
+// board-columns.ts (pure, tested).
 
 import type { ReactNode } from "react";
 import type { BoardCard, Lane } from "../lib/monitor/card-types.js";
@@ -21,6 +22,7 @@ import {
   tierLabel,
   type BoardColumnDef,
 } from "../lib/monitor/board-columns.js";
+import type { KanbanTier } from "../lib/monitor/lane-rules.js";
 
 export interface KanbanBoardProps {
   /** Lane → card[] grouping from `groupByLane(cards)` (already search/filter-narrowed). */
@@ -31,6 +33,8 @@ export interface KanbanBoardProps {
   onToggleLane: (lane: Lane) => void;
   /** Render a single card (the shared CardRouter renderer). */
   renderCard: (card: BoardCard) => ReactNode;
+  /** Render a read-only pipeline mirror card. Defaults to renderCard for low-level tests. */
+  renderPipelineCard?: (card: BoardCard, context: { tier: KanbanTier; inboxAvailable: boolean }) => ReactNode;
   /** Optional per-lane header content (e.g. the codex-needed create form). */
   renderLaneHeader?: (lane: Lane) => ReactNode;
   /** Optional whole-body renderer for a pipeline lane (grouping). Return undefined for the default. */
@@ -44,11 +48,13 @@ export function KanbanBoard({
   expanded,
   onToggleLane,
   renderCard,
+  renderPipelineCard,
   renderLaneHeader,
   renderLaneBody,
   ariaLabel = "Kanban lane grid",
 }: KanbanBoardProps) {
   const inbox = inboxCards(grouped);
+  const inboxIds = new Set(inbox.map((card) => card.id));
 
   return (
     <div className="hm-kanban scroll-x" role="region" aria-label={ariaLabel}>
@@ -72,6 +78,8 @@ export function KanbanBoard({
             cards={cards}
             onCollapse={() => onToggleLane(lane)}
             renderCard={renderCard}
+            renderPipelineCard={renderPipelineCard}
+            inboxIds={inboxIds}
             laneHeader={renderLaneHeader?.(lane)}
             laneBody={renderLaneBody?.(lane, cards)}
           />
@@ -142,7 +150,11 @@ function InboxColumn({
         {cards.length === 0 ? (
           <EmptyColumn inbox />
         ) : (
-          cards.map((card) => renderCard(card))
+          cards.map((card) => (
+            <div className="hm-inbox-card-anchor" data-inbox-card-id={card.id} key={card.id}>
+              {renderCard(card)}
+            </div>
+          ))
         )}
       </div>
     </section>
@@ -155,6 +167,8 @@ function PipelineColumn({
   cards,
   onCollapse,
   renderCard,
+  renderPipelineCard,
+  inboxIds,
   laneHeader,
   laneBody,
 }: {
@@ -162,10 +176,15 @@ function PipelineColumn({
   cards: BoardCard[];
   onCollapse: () => void;
   renderCard: (card: BoardCard) => ReactNode;
+  renderPipelineCard?: (card: BoardCard, context: { tier: KanbanTier; inboxAvailable: boolean }) => ReactNode;
+  inboxIds: ReadonlySet<string>;
   laneHeader?: ReactNode;
   laneBody?: ReactNode;
 }) {
   const tier = columnTier(col);
+  const renderPipeline = renderPipelineCard
+    ? (card: BoardCard) => renderPipelineCard(card, { tier, inboxAvailable: inboxIds.has(card.id) })
+    : renderCard;
   return (
     <section
       className={`hm-col hm-col--${tier}`}
@@ -181,7 +200,7 @@ function PipelineColumn({
         ) : laneBody !== undefined ? (
           laneBody
         ) : (
-          cards.map((card) => renderCard(card))
+          cards.map((card) => renderPipeline(card))
         )}
       </div>
     </section>

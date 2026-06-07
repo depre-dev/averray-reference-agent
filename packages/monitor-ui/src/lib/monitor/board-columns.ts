@@ -3,7 +3,7 @@
 // The Hermes-4 "decision cockpit" replaces the flat 8-lane render with an
 // inbox-first column layout (docs/design/hermes-4/project/board.jsx +
 // kanban.jsx): a hero DECISION INBOX column holding the union of every card
-// in a DECIDE-tier lane (the one actionable surface), then read-only WATCH /
+// waiting on the operator (the one actionable surface), then read-only WATCH /
 // HIDE tier columns in pipeline position.
 //
 // This module is the pure mapping layer — the lane→column metadata (design
@@ -14,7 +14,7 @@
 
 import type { BoardCard, Lane } from "./card-types.js";
 import { LANES } from "./card-types.js";
-import { tierFor, type KanbanTier } from "./lane-rules.js";
+import { isWaitingOnOperator, tierFor, type KanbanTier } from "./lane-rules.js";
 
 export interface BoardColumnDef {
   /** Stable column key (the lane id for pipeline columns; "inbox" for the hero). */
@@ -60,12 +60,24 @@ export function tierLabel(tier: KanbanTier): string {
 }
 
 /**
- * The Decision Inbox holds the union of every card in a DECIDE-tier lane — the
- * single place to act. With the current tier map that's `needs-attention`, but
- * deriving it from `tierFor` keeps it correct if the tier of a lane changes.
+ * The Decision Inbox holds every card genuinely waiting on the human operator
+ * — the single place to act. Most operator-waiting cards are promoted into
+ * `needs-attention` by laneFor(), but cards can still mirror in pipeline lanes
+ * (operator-review / codex-needed) while they await a decision; include them
+ * here exactly once so pipeline "jump to inbox" links always target a real
+ * actionable card.
  */
 export function inboxCards(grouped: Partial<Record<Lane, BoardCard[]>>): BoardCard[] {
-  return LANES.filter((lane) => tierFor(lane) === "decide").flatMap((lane) => grouped[lane] ?? []);
+  const seen = new Set<string>();
+  const out: BoardCard[] = [];
+  for (const lane of LANES) {
+    for (const card of grouped[lane] ?? []) {
+      if (!isWaitingOnOperator(card) || seen.has(card.id)) continue;
+      seen.add(card.id);
+      out.push(card);
+    }
+  }
+  return out;
 }
 
 export type ColumnVisibility = "hidden" | "rail" | "column";

@@ -20,7 +20,7 @@ import { isUnroutedCard, inflightStatus } from "../lib/monitor/lane-rules.js";
 
 export type HermesCheckingBodyProps = {
   cards: BoardCard[];
-  /** The shared per-card renderer (CardRouter) supplied by BoardView. */
+  /** The per-card renderer supplied by BoardView (pipeline mirror or full card, depending on caller). */
   renderCard: (card: BoardCard) => ReactNode;
 };
 

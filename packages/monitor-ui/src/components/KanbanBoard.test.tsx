@@ -6,8 +6,8 @@ import type { BoardCard, Lane } from "../lib/monitor/card-types.js";
 
 afterEach(cleanup);
 
-function card(lane: Lane, id = lane): BoardCard {
-  return { id, lane, type: "pr", state: "fresh", waitingOn: { actor: "agent", tone: "neutral" } } as unknown as BoardCard;
+function card(lane: Lane, id = lane, actor: "operator" | "agent" = "agent"): BoardCard {
+  return { id, lane, type: "pr", state: "fresh", waitingOn: { actor, tone: actor === "operator" ? "warn" : "neutral" } } as unknown as BoardCard;
 }
 function grouped(partial: Partial<Record<Lane, BoardCard[]>>): Record<Lane, BoardCard[]> {
   return {
@@ -21,8 +21,8 @@ const renderCard = (c: BoardCard) => <div className="hm-card" key={c.id}>{c.id}<
 const expandedFor = (...lanes: Lane[]) => new Set<Lane>(lanes);
 
 describe("KanbanBoard", () => {
-  test("renders a hero Decision Inbox holding the DECIDE-tier cards", () => {
-    const g = grouped({ "needs-attention": [card("needs-attention", "act-1")], "codex-needed": [card("codex-needed", "t-1")] });
+  test("renders a hero Decision Inbox holding operator-waiting cards", () => {
+    const g = grouped({ "needs-attention": [card("needs-attention", "act-1", "operator")], "codex-needed": [card("codex-needed", "t-1")] });
     const { container } = render(
       <KanbanBoard grouped={g} expanded={expandedFor("codex-needed")} onToggleLane={() => {}} renderCard={renderCard} />,
     );
@@ -74,7 +74,7 @@ describe("KanbanBoard", () => {
 
   test("the header collapse chevron toggles a pipeline lane (but the inbox has none)", () => {
     const onToggleLane = vi.fn();
-    const g = grouped({ "needs-attention": [card("needs-attention")], "codex-needed": [card("codex-needed")] });
+    const g = grouped({ "needs-attention": [card("needs-attention", "needs-attention", "operator")], "codex-needed": [card("codex-needed")] });
     const { getByRole, queryByRole } = render(
       <KanbanBoard grouped={g} expanded={expandedFor("codex-needed")} onToggleLane={onToggleLane} renderCard={renderCard} />,
     );
