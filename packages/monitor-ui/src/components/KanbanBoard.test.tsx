@@ -7,7 +7,9 @@ import type { BoardCard, Lane } from "../lib/monitor/card-types.js";
 afterEach(cleanup);
 
 function card(lane: Lane, id = lane, actor: "operator" | "agent" = "agent"): BoardCard {
-  return { id, lane, type: "pr", state: "fresh", waitingOn: { actor, tone: actor === "operator" ? "warn" : "neutral" } } as unknown as BoardCard;
+  // A needs-attention card is isAction (laneFor promotes it there) — that's what
+  // makes it a real operator decision under the canonical isDecision predicate.
+  return { id, lane, type: "pr", state: "fresh", isAction: lane === "needs-attention", waitingOn: { actor, tone: actor === "operator" ? "warn" : "neutral" } } as unknown as BoardCard;
 }
 function grouped(partial: Partial<Record<Lane, BoardCard[]>>): Record<Lane, BoardCard[]> {
   return {

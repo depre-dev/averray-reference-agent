@@ -18,7 +18,7 @@ import {
 import { useCollaboration, type UseCollaborationOptions } from "../../hooks/useCollaboration.js";
 import { derivePresence, activeCount, type PresencePeer } from "../../lib/monitor/presence.js";
 import { railDigestCounts } from "../../lib/monitor/rail-digest.js";
-import { isWaitingOnOperator } from "../../lib/monitor/lane-rules.js";
+import { isDecision } from "../../lib/monitor/lane-rules.js";
 import { AgentTag, Badge, Button, EmptyState, StatusPill, type AgentTagAgent, type StateVariant } from "../ui.js";
 import { AskHermesComposer } from "./AskHermesComposer.js";
 import { HermesTurn } from "./HermesTurn.js";
@@ -349,7 +349,9 @@ function RailDigest({
   onOpenRoster: () => void;
 }) {
   const { needsYou, running } = railDigestCounts(cards);
-  const waiting = cards.filter(isWaitingOnOperator);
+  // PR-F1: the rail "WAITING ON YOU" list shares the isDecision predicate with
+  // the count (railDigestCounts) and the inbox — no release-history leak.
+  const waiting = cards.filter(isDecision);
   return (
     <section className="hm-rail-digest" aria-label="Hermes digest">
       <div className="hm-rail-digest-head">

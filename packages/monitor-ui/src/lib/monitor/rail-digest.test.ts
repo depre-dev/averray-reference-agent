@@ -7,13 +7,22 @@ function c(over: Record<string, unknown>): BoardCard {
 }
 
 describe("railDigestCounts", () => {
-  it("counts needs-you from operator-waiting / action cards", () => {
+  it("counts needs-you from real operator decisions only (PR-F1 isDecision)", () => {
     const counts = railDigestCounts([
-      c({ waitingOn: { actor: "operator", tone: "warn" } }),
-      c({ isAction: true }),
-      c({ waitingOn: { actor: "CI", tone: "info" } }),
+      c({ lane: "operator-review", waitingOn: { actor: "operator", tone: "warn" } }), // decision
+      c({ isAction: true, waitingOn: { actor: "operator", tone: "warn" } }),          // decision
+      c({ waitingOn: { actor: "CI", tone: "info" } }),                                 // not a decision
     ]);
     expect(counts.needsYou).toBe(2);
+  });
+
+  it("excludes done / verified / closed release history from the count (truth-boundary)", () => {
+    const counts = railDigestCounts([
+      c({ isAction: true, waitingOn: { actor: "operator", tone: "warn" } }),
+      // finished release-history card that still carries the operator flag
+      c({ type: "done", isAction: true, closedAt: "5/27/2026", mergeStatus: "MERGED", waitingOn: { actor: "operator", tone: "warn" } }),
+    ]);
+    expect(counts.needsYou).toBe(1);
   });
 
   it("counts running from state, mission status, or workingNow", () => {

@@ -27,7 +27,7 @@ import { LANES, type BoardCard, type CreateTaskInput } from "../lib/monitor/card
 import type { MissionSpawnInput, SavedTestSuite, SaveTestSuiteInput } from "../lib/monitor/mission-launch.js";
 import { StartMissionLauncher } from "./StartMissionLauncher.js";
 import { TestSuitesPanel } from "./TestSuitesPanel.js";
-import { laneFor, isWaitingOnOperator, tierFor, type KanbanTier } from "../lib/monitor/lane-rules.js";
+import { laneFor, isDecision, tierFor, type KanbanTier } from "../lib/monitor/lane-rules.js";
 import { inboxCards } from "../lib/monitor/board-columns.js";
 import { relatedPrForCard } from "../lib/monitor/collaboration.js";
 import { TopStrip } from "./TopStrip.js";
@@ -677,7 +677,9 @@ export function BoardView({
  */
 function BoardFooter({ cards }: { cards: readonly BoardCard[] }) {
   const total = cards.length;
-  const waiting = cards.filter((c) => isWaitingOnOperator(c)).length;
+  // PR-F1: the footer "waiting on you" uses the shared isDecision predicate so
+  // it agrees with the inbox, rail count, and banner (no release-history leak).
+  const waiting = cards.filter((c) => isDecision(c)).length;
   const running = cards.filter((c) => c.state === "running").length;
   return (
     <footer className="h4-board-footer" aria-label="Board footer">

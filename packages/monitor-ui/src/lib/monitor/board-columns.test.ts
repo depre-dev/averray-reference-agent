@@ -10,7 +10,13 @@ import {
 import type { BoardCard, Lane } from "./card-types.js";
 
 function card(lane: Lane, id = lane, actor: "operator" | "agent" = "agent"): BoardCard {
-  return { id, lane, type: "pr", state: "fresh", waitingOn: { actor, tone: actor === "operator" ? "warn" : "neutral" } } as unknown as BoardCard;
+  // A needs-attention card is isAction (laneFor promotes it there) — that's what
+  // makes it a real operator decision under the canonical isDecision predicate.
+  return {
+    id, lane, type: "pr", state: "fresh",
+    isAction: lane === "needs-attention",
+    waitingOn: { actor, tone: actor === "operator" ? "warn" : "neutral" },
+  } as unknown as BoardCard;
 }
 
 function grouped(partial: Partial<Record<Lane, BoardCard[]>>): Record<Lane, BoardCard[]> {
@@ -73,6 +79,22 @@ describe("inboxCards", () => {
     const ids = inboxCards(g).map((c) => c.id);
     expect(ids).toEqual(["a1", "a2", "o1"]);
     expect(ids).not.toContain("t1");
+  });
+
+  it("excludes done / verified / closed release-history cards (PR-F1 truth-boundary)", () => {
+    // A finished codex card that still carries an operator/isAction flag must
+    // never appear in the inbox — it's release history, not a live decision.
+    const finished = {
+      id: "rel-1", lane: "needs-attention", type: "done", state: "fresh",
+      isAction: true, closedAt: "5/27/2026", mergeStatus: "MERGED",
+      waitingOn: { actor: "operator", tone: "warn" },
+    } as unknown as BoardCard;
+    const g = grouped({
+      "needs-attention": [card("needs-attention", "live-1", "operator"), finished],
+    });
+    const ids = inboxCards(g).map((c) => c.id);
+    expect(ids).toEqual(["live-1"]);
+    expect(ids).not.toContain("rel-1");
   });
 
   it("is empty when no card waits on the operator", () => {
