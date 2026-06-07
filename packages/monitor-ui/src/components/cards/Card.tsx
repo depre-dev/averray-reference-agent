@@ -26,9 +26,11 @@ import type {
   AgentType,
   HermesDecisionRecord,
   CardWorkingNow,
+  DeployCard,
   MissionCard,
   MissionReport,
 } from "../../lib/monitor/card-types.js";
+import { deployStepsForCard } from "../../lib/monitor/deploy-stepper.js";
 import { formatFreshness, freshnessTier } from "../../lib/monitor/urgency.js";
 import { laneFor, isWaitingOnOperator } from "../../lib/monitor/lane-rules.js";
 import { humanizedSignalParts } from "../../lib/monitor/signal-labels.js";
@@ -38,6 +40,7 @@ import { AgentTag, Badge, Button, CardHeader, StatusPill, type StateVariant } fr
 import { ChecksBar } from "./ChecksBar.js";
 import { CardBadges } from "./CardBadges.js";
 import { AgentDiscussion } from "./AgentDiscussion.js";
+import { DeployStepper } from "../DeployStepper.js";
 
 export type CardProps = {
   card: BoardCard;
@@ -168,6 +171,8 @@ export function Card({
       ) : null}
 
       {!isClosed && card.type === "mission" ? <MissionRunSummary card={card} /> : null}
+
+      {!isClosed && card.type === "deploy" ? <DeployCardStepper card={card} /> : null}
 
       {/* P1-2: hoist the decision onto operator-facing cards. On the two
           lanes where the operator decides (needs-attention, codex-needed),
@@ -393,6 +398,18 @@ function MissionRunSummary({ card }: { card: MissionCard }) {
       )}
 
       {boundary ? <div className="hm-mission-run-boundary">{boundary}</div> : null}
+    </div>
+  );
+}
+
+function DeployCardStepper({ card }: { card: DeployCard }) {
+  const steps = deployStepsForCard(card);
+  return (
+    <div className="hm-deploy-stepper-card" aria-label="Current deploy verification">
+      <div className="hm-deploy-stepper-head">
+        <span>Current deploy: verifying</span>
+      </div>
+      <DeployStepper steps={steps} compact />
     </div>
   );
 }

@@ -20,6 +20,8 @@ import type {
 import { humanizeSignalText } from "../../lib/monitor/signal-labels.js";
 import { cleanFailureText } from "../../lib/monitor/mission-failure.js";
 import { laneFor } from "../../lib/monitor/lane-rules.js";
+import { deployStepsForCard } from "../../lib/monitor/deploy-stepper.js";
+import { DeployStepper } from "../DeployStepper.js";
 import { ChecksBar } from "../cards/ChecksBar.js";
 import { OperatorNotes } from "./OperatorNotes.js";
 
@@ -408,45 +410,24 @@ function AwaitingData({ label, note }: { label: string; note?: string }) {
   );
 }
 
-/**
- * PR-D2 — deploy checkpoint stepper, from the REAL `verification` counters
- * (current/total/label). Steps up to `current` are done; the rest pending. No
- * fabricated step names — just the verified count.
- */
-function CheckpointStepper({ current, total, label }: { current: number; total: number; label: string }) {
-  const steps = Math.max(0, Math.min(40, total));
-  return (
-    <div className="h4-stepper" aria-label={`${current} of ${total} checkpoints · ${label}`}>
-      <div className="h4-stepper-track">
-        {Array.from({ length: steps }).map((_, i) => (
-          <span key={i} className={"h4-stepper-dot" + (i < current ? " is-done" : "")} aria-hidden />
-        ))}
-      </div>
-      <div className="h4-stepper-label mono">{current}/{total} · {label}</div>
-    </div>
-  );
-}
-
 function DeployBody({ card }: { card: DeployCard }) {
-  // `verification`/`deployId` are required on the UI type, but the live
-  // backend doesn't always populate them (deploy verification is not wired
-  // yet). They cross an HTTP/JSON boundary, so read defensively — a
-  // verification-less deploy card must render, not crash the drawer.
+  // These fields cross an HTTP/JSON boundary and the live backend does not
+  // always populate them. A verification-less deploy card must render honest
+  // pending steps, not crash or invent completed checkpoints.
   const verification = (card as { verification?: DeployCard["verification"] }).verification;
   const deployId = (card as { deployId?: string }).deployId;
+  const steps = deployStepsForCard(card);
   return (
     <>
       <VerdictBlock head="Post-merge verification">{card.summary || "Verifying the deploy."}</VerdictBlock>
       <section>
         <div className="hm-section-h">Checkpoints</div>
-        {verification ? (
-          <>
-            <CheckpointStepper current={verification.current} total={verification.total} label={verification.label} />
-            {deployId ? <div className="hm-card-meta">Deploy {deployId}.</div> : null}
-          </>
-        ) : (
-          <AwaitingData label="Post-merge verification" note="the deploy runner has not reported checkpoints yet" />
-        )}
+        <div className="hm-deploy-stepper-head">
+          <span>Current deploy: verifying</span>
+          {verification?.label ? <span className="hm-deploy-stepper-source">source: {verification.label}</span> : null}
+        </div>
+        <DeployStepper steps={steps} />
+        {deployId ? <div className="hm-card-meta">Deploy {deployId}.</div> : null}
       </section>
       <ChecksSection checks={card.checks} checkRuns={card.checkRuns} />
     </>

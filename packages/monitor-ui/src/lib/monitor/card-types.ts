@@ -342,8 +342,21 @@ export interface CreateTaskInput {
 /** Deploy verification card. */
 export interface DeployCard extends CardBase {
   type: "deploy";
-  deployId: string;
-  verification: { current: number; total: number; label: string };
+  deployId?: string;
+  /**
+   * Legacy deploy progress. The live backend may omit it, and the numeric
+   * current/total values are not step-specific enough to prove completed named
+   * stages. The UI may use the label as a current-stage hint only.
+   */
+  verification?: { current: number; total: number; label: string };
+  /** Future exact deploy-step source. Omitted until the backend wires it. */
+  deploySteps?: {
+    id?: string;
+    label: string;
+    state: "done" | "in-progress" | "pending" | "current" | "running" | "pass" | "success";
+    detail?: string;
+    source?: string;
+  }[];
 }
 
 /** Draft card — author hasn't marked ready yet. */
