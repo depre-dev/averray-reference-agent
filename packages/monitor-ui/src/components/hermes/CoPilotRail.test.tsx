@@ -41,10 +41,15 @@ const banner: BoardNowBanner = {
   primaryActionId: "agent #548",
 };
 
+function openAgentRoom(container: HTMLElement) {
+  fireEvent.click(within(container).getByRole("tab", { name: /Agent room/ }));
+}
+
 describe("CoPilotRail", () => {
   test("renders the collaboration feed as turns", async () => {
     const fetcher = vi.fn(async () => [msg("1", "hermes", "Pre-check passed on #548.")]);
     const { container } = render(<CoPilotRail collaboration={{ fetcher, refreshIntervalMs: 0 }} />, { wrapper });
+    openAgentRoom(container);
     await waitFor(() => expect(within(container).getByText(/Pre-check passed on #548/)).toBeTruthy());
     expect(within(container).getByText("Hermes → everyone")).toBeTruthy();
     expect(within(container).getAllByText(/chat/).length).toBeGreaterThan(0);
@@ -57,14 +62,16 @@ describe("CoPilotRail", () => {
       msg("2", "hermes", "Another template answer.", { hermesMode: "templated" }),
     ]);
     const { container } = render(<CoPilotRail collaboration={{ fetcher, refreshIntervalMs: 0 }} />, { wrapper });
+    openAgentRoom(container);
     await waitFor(() => expect(within(container).getByText(/Template answer from the board/)).toBeTruthy());
     expect(within(container).getAllByText("Hermes (offline — templated) → everyone").length).toBeGreaterThan(0);
     expect(within(container).getAllByText(/replies are templated/)).toHaveLength(1);
   });
 
   test("is inert (no fetch, empty-state copy) when collaboration is omitted", () => {
-    const { getByText } = render(<CoPilotRail />, { wrapper });
-    expect(getByText("No agent chatter yet.")).toBeTruthy();
+    const { container } = render(<CoPilotRail />, { wrapper });
+    openAgentRoom(container);
+    expect(within(container).getByText("No agent chatter yet.")).toBeTruthy();
   });
 
   test("the scope chip reflects the focused card", async () => {
@@ -86,6 +93,7 @@ describe("CoPilotRail", () => {
       <CoPilotRail focusedCard={card548} collaboration={{ fetcher, poster, refreshIntervalMs: 0 }} />,
       { wrapper },
     );
+    openAgentRoom(container);
     await waitFor(() => expect(within(container).getByText("No agent chatter yet.")).toBeTruthy());
 
     const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
@@ -119,7 +127,7 @@ describe("CoPilotRail", () => {
 
   test("shows the current board summary and links it back to a card", () => {
     const onCardClick = vi.fn();
-    const { getByText, getByRole } = render(
+    const { container, getByText, getByRole } = render(
       <CoPilotRail
         boardCards={[card548]}
         boardBanner={banner}
@@ -128,6 +136,7 @@ describe("CoPilotRail", () => {
       />,
       { wrapper },
     );
+    openAgentRoom(container);
     expect(getByText(/Needs you:/)).toBeTruthy();
     expect(getByText(/Operator review is waiting on agent #548/)).toBeTruthy();
     fireEvent.click(getByRole("button", { name: "Open referenced card agent #548" }));
@@ -149,6 +158,7 @@ describe("CoPilotRail", () => {
       />,
       { wrapper },
     );
+    openAgentRoom(container);
     await waitFor(() => expect(within(container).getByText(/What is still blocking this/)).toBeTruthy());
     expect(within(container).getByText("You → everyone")).toBeTruthy();
     expect(within(container).getAllByText(/chat/).length).toBeGreaterThan(0);
@@ -175,6 +185,7 @@ describe("CoPilotRail", () => {
       msg("system-chat", "system", "Board snapshot refreshed.", { addressedTo: "everyone" }),
     ]);
     const { container } = render(<CoPilotRail collaboration={{ fetcher, refreshIntervalMs: 0 }} />, { wrapper });
+    openAgentRoom(container);
     await waitFor(() => expect(within(container).getByText("Codex → Claude")).toBeTruthy());
     expect(within(container).getByText("Claude → Hermes")).toBeTruthy();
     expect(within(container).getByText("Test-writer → everyone")).toBeTruthy();
@@ -204,6 +215,7 @@ describe("CoPilotRail", () => {
       />,
       { wrapper },
     );
+    openAgentRoom(container);
     await waitFor(() => expect(within(container).getByText("Thread · depre-dev/agent #548")).toBeTruthy());
     expect(within(container).getByText("2 turns")).toBeTruthy();
     fireEvent.click(getByRole("button", { name: "Open referenced card agent #548" }));
@@ -225,6 +237,48 @@ describe("CoPilotRail", () => {
       text: "please inspect this",
       addressedTo: "codex",
     });
+  });
+
+  test("defaults to the digest tab and opens the agent room from the digest action", () => {
+    const { container, getByRole } = render(<CoPilotRail boardCards={[card548]} collaboration={{ fetcher: async () => [], refreshIntervalMs: 0 }} />, { wrapper });
+    expect(getByRole("tab", { name: /Digest/ }).getAttribute("aria-selected")).toBe("true");
+    expect(within(container).getByText(/session deltas · honest until wired/i)).toBeTruthy();
+    fireEvent.click(getByRole("button", { name: "Open agent room →" }));
+    expect(getByRole("tab", { name: /Agent room/ }).getAttribute("aria-selected")).toBe("true");
+    expect(within(container).getByText("No agent chatter yet.")).toBeTruthy();
+  });
+
+  test("digest lists cards waiting on the operator with recommendation, risk, grants, and Open", () => {
+    const onCardClick = vi.fn();
+    const waitingCard = {
+      ...card548,
+      decisionRecord: {
+        schemaVersion: 1,
+        recordType: "hermes_decision_record",
+        id: "decision-1",
+        kind: "escalation",
+        subject: { type: "card", id: card548.id },
+        decision: "approve if rollout scope is acceptable",
+        reasons: [],
+        inputs: {},
+        outcome: { summary: "operator decision needed" },
+        safety: { readOnly: false, mutates: true },
+        generatedAt: "2026-06-07T08:00:00Z",
+      },
+      risk: ["secrets" as const],
+      waitingOn: { actor: "operator" as const, tone: "warn" as const },
+    };
+    const { getByText, getByRole } = render(
+      <CoPilotRail boardCards={[waitingCard]} onCardClick={onCardClick} collaboration={{ fetcher: async () => [], refreshIntervalMs: 0 }} />,
+      { wrapper },
+    );
+    expect(getByText("1 waiting on you")).toBeTruthy();
+    expect(getByText(/rec ·/i)).toBeTruthy();
+    expect(getByText("approve if rollout scope is acceptable")).toBeTruthy();
+    expect(getByText(/risk · secrets/i)).toBeTruthy();
+    expect(getByText(/grants · gated mutation/i)).toBeTruthy();
+    fireEvent.click(getByRole("button", { name: `Open ${card548.id}` }));
+    expect(onCardClick).toHaveBeenCalledWith(card548.id);
   });
 });
 

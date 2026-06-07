@@ -10,6 +10,12 @@ afterEach(cleanup);
 
 const richBoard: MonitorBoard = { cards: FIXTURE_CARDS, at: "2026-05-28T10:30:00Z" };
 
+function boardLanes(container: HTMLElement) {
+  const lanes = container.querySelector(".hm-lanes-wrap");
+  expect(lanes).toBeTruthy();
+  return within(lanes as HTMLElement);
+}
+
 describe("BoardView — rich-mix board (open stream)", () => {
   test("renders the full board chrome end-to-end", () => {
     const { container } = render(<BoardView board={richBoard} status="open" />);
@@ -57,7 +63,7 @@ describe("BoardView — rich-mix board (open stream)", () => {
 
   test("renders the action card with one primary and Hermes verdict", () => {
     const { container } = render(<BoardView board={richBoard} status="open" />);
-    const view = within(container);
+    const view = boardLanes(container);
     expect(view.getByText("Allow operator override of agent claim-stake floor")).toBeTruthy();
     expect(view.getAllByRole("button", { name: "Approve merge" }).length).toBeGreaterThan(0);
     expect(view.queryByText("Send back to Codex")).toBeNull();
@@ -270,12 +276,13 @@ describe("BoardView — rich-mix board (open stream)", () => {
       at: "2026-06-02T08:00:00Z",
       cards: [reviewCard({ id: "agent #901", title: "Review the settlement risk" })],
     };
-    const { getByRole, getByText, queryByRole } = render(<BoardView board={board} status="open" keyboard={false} />);
+    const { getByRole, queryByRole } = render(<BoardView board={board} status="open" keyboard={false} />);
 
     // The inbox hero has no collapse chevron — attention can never be hidden.
     expect(queryByRole("button", { name: /Collapse Your decisions/ })).toBeNull();
-    expect(getByRole("region", { name: "Your decisions lane" })).toBeTruthy();
-    expect(getByText("Review the settlement risk")).toBeTruthy();
+    const inbox = getByRole("region", { name: "Your decisions lane" });
+    expect(inbox).toBeTruthy();
+    expect(within(inbox).getByText("Review the settlement risk")).toBeTruthy();
   });
 
   test("calm banner CTA filters to today's done cards and mutes alerts for one hour", () => {
@@ -496,7 +503,7 @@ describe("BoardView — rich-mix board (open stream)", () => {
         prompt: "Fix the failed mission.",
       }],
     };
-    const { getByRole, getByText, queryByText } = render(
+    const { container, getByRole, queryByText } = render(
       <BoardView board={board} status="open" onApproveTask={onApproveTask} keyboard={false} />,
     );
     expect(getByRole("button", { name: /Approve & dispatch/ })).toBeTruthy();
@@ -507,7 +514,7 @@ describe("BoardView — rich-mix board (open stream)", () => {
     fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
     expect(onApproveTask).toHaveBeenCalledWith("task-action-1");
 
-    expect(getByText("Fix the failed mission")).toBeTruthy();
+    expect(boardLanes(container).getByText("Fix the failed mission")).toBeTruthy();
   });
 
   test("renders backlog suggestions as a collapsed planner-only rail block", () => {
@@ -613,7 +620,7 @@ describe("BoardView — degraded + transient states", () => {
 describe("BoardView — filter chips (G1)", () => {
   test("clicking a filter chip narrows the visible board to that state", () => {
     const { container } = render(<BoardView board={richBoard} status="open" />);
-    const view = within(container);
+    const view = boardLanes(container);
     // Baseline: the action card is visible.
     expect(view.getByText("Allow operator override of agent claim-stake floor")).toBeTruthy();
 
