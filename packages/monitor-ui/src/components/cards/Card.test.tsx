@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, within } from "@testing-library/react";
-import { Card } from "./Card.js";
+import { Card, deriveDecisionCardReason } from "./Card.js";
 import { FIXTURE_CARDS } from "../../lib/monitor/fixtures.js";
-import type { BoardCard, PRCard } from "../../lib/monitor/card-types.js";
+import type { BoardCard, MissionCard, PRCard } from "../../lib/monitor/card-types.js";
 
 afterEach(cleanup);
 
@@ -27,7 +27,7 @@ describe("Card — type coverage", () => {
     expect(container.querySelector(".hm-checks-bar")).toBeTruthy();
     // Hermes verdict + CTA
     expect(view.getByText("Hermes verdict")).toBeTruthy();
-    expect(view.getByRole("button", { name: "Approve merge" })).toBeTruthy();
+    expect(view.getByRole("button", { name: "Approve & merge" })).toBeTruthy();
     expect(view.queryByText("Send back to Codex")).toBeNull();
   });
 
@@ -277,7 +277,7 @@ describe("Card — interactivity", () => {
     expect(onClick).toHaveBeenCalledTimes(1);
 
     // Clicking the primary CTA must not also trigger the card's onClick.
-    fireEvent.click(within(container).getByText("Approve merge"));
+    fireEvent.click(within(container).getByText("Approve & merge"));
     expect(onClick).toHaveBeenCalledTimes(1);
     expect(onApproveMerge).not.toHaveBeenCalled(); // first click only arms confirm
   });
@@ -336,6 +336,7 @@ describe("Card — task approve (O3 dispatch)", () => {
     const card = {
       ...proposed,
       summary: "dispatch_budget_exhausted then duplicate_signal",
+      waitingOn: { actor: "agent", tone: "info" },
     } as unknown as BoardCard;
     const { getByText, getByTitle, queryByText } = render(<Card card={card} onApprove={vi.fn()} />);
     expect(getByText("Dispatch budget used up — paused until reset")).toBeTruthy();
@@ -421,8 +422,10 @@ describe("Card — requested tester mission approve (T6)", () => {
     );
     expect(getByText("Tester run requested")).toBeTruthy();
     expect(getByText("not started")).toBeTruthy();
+    expect(getByText("Why you're seeing this")).toBeTruthy();
+    expect(getByText("What happens next")).toBeTruthy();
     expect(getByRole("button", { name: /Approve & dispatch/ })).toBeTruthy();
-    expect(getByRole("button", { name: "Dismiss" })).toBeTruthy();
+    expect(getByRole("button", { name: "Choices ↓" })).toBeTruthy();
   });
 
   test("approving a tester mission requires confirm before dispatching to the runner queue", () => {
@@ -439,6 +442,7 @@ describe("Card — requested tester mission approve (T6)", () => {
   test("dismissing a tester mission requires confirm before clearing the request", () => {
     const onDismissMission = vi.fn();
     const { getByRole, getByText } = render(<Card card={requestedMission} onDismissMission={onDismissMission} />);
+    fireEvent.click(getByRole("button", { name: "Choices ↓" }));
     fireEvent.click(getByRole("button", { name: "Dismiss" }));
     expect(onDismissMission).not.toHaveBeenCalled();
     expect(getByText(/Dismiss this requested tester mission\?/)).toBeTruthy();
@@ -479,15 +483,87 @@ describe("Card — requested tester mission approve (T6)", () => {
       />,
     );
     expect(getByRole("button", { name: "Re-run" })).toBeTruthy();
+    expect(getByRole("button", { name: "Choices ↓" })).toBeTruthy();
+    expect(queryByRole("button", { name: "Accept failure" })).toBeNull();
+    expect(queryByRole("button", { name: "Open issue" })).toBeNull();
+    expect(queryByRole("button", { name: /Approve & dispatch/ })).toBeNull();
+    fireEvent.click(getByRole("button", { name: "Choices ↓" }));
     expect(getByRole("button", { name: "Accept failure" })).toBeTruthy();
     expect(getByRole("button", { name: "Open issue" })).toBeTruthy();
-    expect(queryByRole("button", { name: /Approve & dispatch/ })).toBeNull();
     fireEvent.click(getByRole("button", { name: "Re-run" }));
     expect(getByText(/Re-run as a fresh mission\?/)).toBeTruthy();
     fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
     expect(onRerunMission).toHaveBeenCalledWith(failedMission, "fresh");
     expect(onAcceptMissionFailure).not.toHaveBeenCalled();
     expect(onOpenMissionIssue).not.toHaveBeenCalled();
+  });
+});
+
+describe("Card — decision-card reason derivation (E2)", () => {
+  test("derives policy-store 503 from source failure fields", () => {
+    const card = {
+      ...fixture("agent #548"),
+      sourceFailure: { source: "runner", code: "503", message: "policy-store returned 503 Service Unavailable" },
+    } as BoardCard;
+    expect(deriveDecisionCardReason(card)).toEqual({
+      text: "policy store unavailable (503)",
+      source: "sourceFailure",
+      derived: true,
+    });
+  });
+
+  test("derives timed-out from a structured mission failure", () => {
+    const base = fixture("mission browser-checkout-12") as MissionCard;
+    const card = {
+      ...base,
+      mission: {
+        ...base.mission,
+        blockers: [{ head: "Timeout 30000ms exceeded waiting for navigation" }],
+      },
+    } as BoardCard;
+    expect(deriveDecisionCardReason(card)).toMatchObject({
+      text: "timed out",
+      source: "mission",
+      derived: true,
+    });
+  });
+
+  test("derives blocked age from waiting/freshness when no richer reason exists", () => {
+    const card = {
+      ...fixture("agent #548"),
+      sourceFailure: undefined,
+      decisionRecord: undefined,
+      riskSignals: undefined,
+      verdict: undefined,
+      freshness: 185,
+    } as BoardCard;
+    expect(deriveDecisionCardReason(card)).toEqual({
+      text: "blocked 3h waiting on operator",
+      source: "blockedAge",
+      derived: true,
+    });
+  });
+
+  test("falls back honestly when no reason field exists", () => {
+    const card = {
+      id: "x",
+      lane: "needs-attention",
+      type: "pr",
+      agentType: "codex",
+      title: "No reason",
+      summary: "",
+      repo: "depre-dev/example",
+      freshness: 0,
+      state: "fresh",
+      risk: [],
+      waitingOn: { actor: "operator", tone: "warn" },
+      files: [],
+    } as BoardCard;
+    expect(deriveDecisionCardReason(card)).toEqual({
+      text: "Reason not recorded; open the drawer before acting.",
+      source: "fallback",
+      derived: false,
+    });
   });
 });
 
@@ -506,25 +582,25 @@ describe("Card — archive hint 'Keep watching' (G4)", () => {
 });
 
 describe("Card — decision hoist (P1-2)", () => {
-  test("needs-attention card surfaces the decision summary + top reason in the body", () => {
+  test("needs-attention card surfaces the E2 reason grammar", () => {
     const card = fixture("agent #542"); // needs-attention, has a decisionRecord
     const { container } = render(<Card card={card} />);
-    const block = container.querySelector(".hm-card-decision");
+    const block = container.querySelector(".hm-decision-grammar");
     expect(block).toBeTruthy();
     const view = within(block as HTMLElement);
-    expect(view.getByText("Hermes decided")).toBeTruthy();
-    expect(view.getByText(/Escalated for triage/)).toBeTruthy();
-    // Top reason only — the full reason list stays in the drawer.
+    expect(view.getByText("Why you're seeing this")).toBeTruthy();
     expect(view.getByText(/no reviewer assigned/)).toBeTruthy();
+    // Top reason only — the full reason list stays in the drawer.
     expect(view.queryByText(/no activity for 48h/)).toBeNull();
+    expect(view.getByText("What happens next")).toBeTruthy();
   });
 
-  test("codex-needed card surfaces the decision in the body", () => {
+  test("codex-needed card surfaces the E2 reason grammar", () => {
     const card = fixture("task starter-coding-014"); // codex-needed, has a decisionRecord
     const { container } = render(<Card card={card} />);
-    const block = container.querySelector(".hm-card-decision");
+    const block = container.querySelector(".hm-decision-grammar");
     expect(block).toBeTruthy();
-    expect(within(block as HTMLElement).getByText(/Proposed a bounded Codex task/)).toBeTruthy();
+    expect(within(block as HTMLElement).getByText(/14 near-identical policy-attach entries/)).toBeTruthy();
   });
 
   test("a card without a decision record shows no hoist (no fabricated rationale)", () => {
@@ -557,12 +633,12 @@ describe("Card — decision hoist (P1-2)", () => {
 });
 
 describe("Card — failed mission readable summary", () => {
-  test("renders a clean one-liner, never raw stderr / box-drawing / pipes", () => {
+  test("renders a clean inbox reason, never raw stderr / box-drawing / pipes", () => {
     const card = fixture("mission browser-checkout-12"); // failed mission, raw dump in summary + blocker
     const { container } = render(<Card card={card} />);
-    const meta = container.querySelector(".hm-card-meta");
-    expect(meta).toBeTruthy();
-    const text = meta?.textContent ?? "";
+    const context = container.querySelector(".hm-decision-grammar");
+    expect(context).toBeTruthy();
+    const text = context?.textContent ?? "";
     // Clean, mapped one-liner.
     expect(text).toContain("Mission failed — browser binary not installed");
     // Zero raw noise on the card.
@@ -572,18 +648,16 @@ describe("Card — failed mission readable summary", () => {
     expect(text).not.toContain("ms-playwright");
   });
 
-  test("renders failed tester runs as a compact report, without raw runner output", () => {
+  test("renders failed tester runs as the decision grammar, without raw runner output", () => {
     const card = fixture("mission browser-checkout-12");
     const { container } = render(<Card card={card} />);
-    const run = container.querySelector(".hm-mission-run");
-    expect(run).toBeTruthy();
-    const text = run?.textContent ?? "";
-    expect(within(run as HTMLElement).getByText("Tester run")).toBeTruthy();
-    expect(within(run as HTMLElement).getByText("FAILED 0%")).toBeTruthy();
-    expect(within(run as HTMLElement).getByText("staging.averray.com/checkout")).toBeTruthy();
+    const context = container.querySelector(".hm-decision-grammar");
+    expect(context).toBeTruthy();
+    const text = context?.textContent ?? "";
+    expect(within(context as HTMLElement).getByText("Why you're seeing this")).toBeTruthy();
+    expect(within(context as HTMLElement).getByText("What happens next")).toBeTruthy();
     expect(text).toContain("browser binary not installed");
-    expect(text).toContain("no artifacts captured");
-    expect(text).toContain("No mutation");
+    expect(text).toContain("Re-run starts a fresh mission");
     expect(text).not.toContain("ms-playwright");
     expect(text).not.toContain("npx playwright install");
     expect(text).not.toContain("|");

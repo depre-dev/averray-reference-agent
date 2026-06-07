@@ -31,7 +31,7 @@ import type {
 } from "../../lib/monitor/card-types.js";
 import { formatFreshness, freshnessTier } from "../../lib/monitor/urgency.js";
 import { laneFor, isWaitingOnOperator } from "../../lib/monitor/lane-rules.js";
-import { humanizedSignalParts } from "../../lib/monitor/signal-labels.js";
+import { humanizedSignalParts, humanizeSignalText } from "../../lib/monitor/signal-labels.js";
 import { missionFailureCardSummary } from "../../lib/monitor/mission-failure.js";
 import { relatedPrForCard } from "../../lib/monitor/collaboration.js";
 import { AgentTag, Badge, Button, CardHeader, StatusPill, type StateVariant } from "../ui.js";
@@ -95,6 +95,92 @@ function freshnessVariant(card: BoardCard, isStale: boolean, isClosed: boolean):
   return "neutral";
 }
 
+export interface DecisionCardReason {
+  text: string;
+  source: "sourceFailure" | "mission" | "taskFailure" | "riskSignal" | "decisionRecord" | "verdict" | "blockedAge" | "fallback";
+  derived: boolean;
+}
+
+/** Derive the operator-facing reason from fields the card actually carries.
+ *  No matching source means an explicit unknown, not guessed copy. */
+export function deriveDecisionCardReason(card: BoardCard): DecisionCardReason {
+  if (card.sourceFailure) {
+    return {
+      text: reasonFromText(card.sourceFailure.message, `${card.sourceFailure.source} source failed: ${card.sourceFailure.message}`),
+      source: "sourceFailure",
+      derived: true,
+    };
+  }
+
+  const missionLine = missionFailureCardSummary(card);
+  if (missionLine) {
+    return { text: reasonFromText(missionLine, missionLine), source: "mission", derived: true };
+  }
+
+  const failureReason = "failureReason" in card ? (card as { failureReason?: string }).failureReason : undefined;
+  if (failureReason?.trim()) {
+    return { text: reasonFromText(failureReason, humanizeSignalText(compactSentence(failureReason, 140))), source: "taskFailure", derived: true };
+  }
+
+  const riskSignal = card.riskSignals?.find((signal) => signal.message.trim().length > 0);
+  if (riskSignal) {
+    return { text: humanizeSignalText(compactSentence(riskSignal.message, 150)), source: "riskSignal", derived: true };
+  }
+
+  const decisionReason = card.decisionRecord?.reasons.find((reason) => reason.trim().length > 0);
+  if (decisionReason) {
+    return { text: humanizeSignalText(compactSentence(decisionReason, 150)), source: "decisionRecord", derived: true };
+  }
+
+  const verdict = "verdict" in card ? (card as { verdict?: string }).verdict : undefined;
+  if (verdict?.trim()) {
+    return { text: humanizeSignalText(compactSentence(verdict, 150)), source: "verdict", derived: true };
+  }
+
+  if (card.waitingOn?.actor) {
+    const age = blockedAge(card.freshness);
+    if (age) {
+      return {
+        text: `blocked ${age} waiting on ${card.waitingOn.actor}`,
+        source: "blockedAge",
+        derived: true,
+      };
+    }
+  }
+
+  return {
+    text: "Reason not recorded; open the drawer before acting.",
+    source: "fallback",
+    derived: false,
+  };
+}
+
+function reasonFromText(raw: string, fallback: string): string {
+  if (/policy[-\s]?store|policy store/i.test(raw) && /\b(?:503|service unavailable|unavailable)\b/i.test(raw)) {
+    return /\b503\b/.test(raw) ? "policy store unavailable (503)" : "policy store unavailable";
+  }
+  if (/timed?\s*out|timeout (?:of )?\d|exceeded.*timeout|navigation timeout/i.test(raw)) {
+    return "timed out";
+  }
+  if (/\b(?:blocked|blocker)\b/i.test(raw)) {
+    return humanizeSignalText(compactSentence(raw, 140));
+  }
+  return humanizeSignalText(compactSentence(fallback, 140));
+}
+
+function blockedAge(freshnessMinutes: number): string | undefined {
+  if (!Number.isFinite(freshnessMinutes) || freshnessMinutes <= 0) return undefined;
+  const minutes = Math.max(1, Math.round(freshnessMinutes));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder >= 15 ? `${hours}h ${remainder}m` : `${hours}h`;
+}
+
+function isInboxDecisionCard(card: BoardCard, isClosed: boolean): boolean {
+  return !isClosed && isWaitingOnOperator(card);
+}
+
 // ── Card ───────────────────────────────────────────────────────────
 
 export function Card({
@@ -113,6 +199,7 @@ export function Card({
   const isAction = laneFor(card) === "needs-attention";
   const isStale = card.state === "stale";
   const isClosed = card.type === "done";
+  const isInboxCard = isInboxDecisionCard(card, isClosed);
 
   const classes = [
     "hm-card",
@@ -159,7 +246,13 @@ export function Card({
 
       <div className="hm-card-title">{card.title}</div>
 
-      {cardSummary && !isClosed ? (
+      {card.repo && !isClosed && isInboxCard ? (
+        <div className="hm-decision-repo hm-mono" title={card.repo}>
+          {card.repo}
+        </div>
+      ) : null}
+
+      {cardSummary && !isClosed && !isInboxCard ? (
         <div className="hm-card-meta" style={{ lineHeight: 1.5 }}>
           <span style={{ color: "var(--hm-ink-soft)", fontFamily: "var(--font-body)", fontSize: 12 }}>
             <HumanizedText text={cardSummary} />
@@ -167,7 +260,7 @@ export function Card({
         </div>
       ) : null}
 
-      {!isClosed && card.type === "mission" ? <MissionRunSummary card={card} /> : null}
+      {!isClosed && card.type === "mission" && !isInboxCard ? <MissionRunSummary card={card} /> : null}
 
       {/* P1-2: hoist the decision onto operator-facing cards. On the two
           lanes where the operator decides (needs-attention, codex-needed),
@@ -176,7 +269,7 @@ export function Card({
           record (all reasons, safety, changed) still lives in the drawer's
           "Why Hermes did this". Renders nothing when there's no decision
           record — never a fabricated rationale. */}
-      {!isClosed && card.decisionRecord && isDecisionLane(card) ? (
+      {!isClosed && card.decisionRecord && isDecisionLane(card) && !isInboxCard ? (
         <>
           <CardDecisionLine record={card.decisionRecord} />
           {/* PR-D3b: the compact Decision-Inbox context — a 1-line grants chip
@@ -190,9 +283,9 @@ export function Card({
         <ReviewRequestedLine card={card} />
       ) : null}
 
-      {!isClosed ? <AgentDiscussion messages={card.discussion} compact /> : null}
+      {!isClosed && !isInboxCard ? <AgentDiscussion messages={card.discussion} compact /> : null}
 
-      {!isClosed && card.workingNow ? <WorkingNowLine workingNow={card.workingNow} /> : null}
+      {!isClosed && card.workingNow && !isInboxCard ? <WorkingNowLine workingNow={card.workingNow} /> : null}
 
       {isClosed && verdictText ? (
         <div className="hm-card-meta">
@@ -208,6 +301,8 @@ export function Card({
           history layout). */}
       {!isClosed ? <CardBadges card={card} /> : null}
 
+      {isInboxCard ? <DecisionCardExplanation card={card} /> : null}
+
       {checks ? (
         <div className="hm-checks">
           <ChecksBar checks={checks} />
@@ -219,7 +314,7 @@ export function Card({
           close-time + verdict only) — they never show a waiting-on line,
           matching the design. Live data still carries a waitingOn on done
           cards, so gate it here rather than relying on the source. */}
-      {!isClosed && card.waitingOn ? <WaitingOnLine waitingOn={card.waitingOn} /> : null}
+      {!isClosed && card.waitingOn && !isInboxCard ? <WaitingOnLine waitingOn={card.waitingOn} /> : null}
 
       {card.type === "mission" && (card as { missionStatus?: string }).missionStatus === "requested" ? (
         <div className="hm-waiting hm-waiting--neutral">
@@ -231,6 +326,7 @@ export function Card({
       {!isClosed && card.waitingOn?.actor === "operator" ? (
         <OperatorActions
           card={card}
+          collapsedChoices={isInboxCard}
           onApprove={onApprove}
           onApproveMission={onApproveMission}
           onDismissMission={onDismissMission}
@@ -240,6 +336,8 @@ export function Card({
           onOpenMissionIssue={onOpenMissionIssue}
         />
       ) : null}
+
+      {!isClosed && isInboxCard ? <AgentDiscussion messages={card.discussion} compact /> : null}
 
       {isAction && verdict ? (
         <div className="hm-verdict">
@@ -569,6 +667,46 @@ function DecisionInboxContext({ record }: { record: HermesDecisionRecord }) {
   );
 }
 
+function DecisionCardExplanation({ card }: { card: BoardCard }) {
+  const reason = deriveDecisionCardReason(card);
+  const whatNext = deriveWhatHappensNext(card);
+  return (
+    <div className="hm-decision-grammar" aria-label="Decision context">
+      <div className="hm-decision-grammar-row">
+        <span className="hm-decision-grammar-label">Why you're seeing this</span>
+        <span className={reason.derived ? undefined : "hm-decision-grammar-fallback"}>
+          <HumanizedText text={reason.text} />
+        </span>
+      </div>
+      <div className="hm-decision-grammar-row">
+        <span className="hm-decision-grammar-label">What happens next</span>
+        <span>
+          <HumanizedText text={whatNext} />
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function deriveWhatHappensNext(card: BoardCard): string {
+  const waitingNext = card.decisionRecord?.outcome.waitingNext?.trim();
+  if (waitingNext) return waitingNext;
+  if (card.next?.trim()) return card.next.trim();
+  if (card.type === "mission" && (card as { missionStatus?: string }).missionStatus === "failed") {
+    return "Re-run starts a fresh mission; Accept failure clears this triage card; Open issue files the blocker.";
+  }
+  if (card.type === "mission" && (card as { missionStatus?: string }).missionStatus === "requested") {
+    return "Approval lets the tester runner claim the mission; dismissing leaves it unstarted.";
+  }
+  if (card.type === "task" && (card as { taskStatus?: string }).taskStatus === "proposed") {
+    return "Confirming dispatch queues the task for the selected agent; nothing runs until the confirmation.";
+  }
+  if (card.type === "pr" && (card as { action?: { primary?: string } }).action?.primary) {
+    return "Use the recommended action only after the risk and intent are clear; merge remains human-gated.";
+  }
+  return "Open the drawer for the full state before acting.";
+}
+
 // ── Waiting-on line ────────────────────────────────────────────────
 
 function WaitingOnLine({ waitingOn }: { waitingOn: WaitingOn }) {
@@ -593,6 +731,7 @@ function waitingToneVariant(tone: WaitingOn["tone"]): StateVariant {
 
 function OperatorActions({
   card,
+  collapsedChoices = false,
   onApprove,
   onApproveMission,
   onDismissMission,
@@ -602,6 +741,7 @@ function OperatorActions({
   onOpenMissionIssue,
 }: {
   card: BoardCard;
+  collapsedChoices?: boolean;
   onApprove?: (card: BoardCard) => void;
   onApproveMission?: (card: BoardCard) => void;
   onDismissMission?: (card: BoardCard) => void;
@@ -611,6 +751,7 @@ function OperatorActions({
   onOpenMissionIssue?: (card: BoardCard) => void;
 }) {
   const [confirmingKey, setConfirmingKey] = useState<string | null>(null);
+  const [choicesOpen, setChoicesOpen] = useState(false);
   const agent = agentLabel(card.agentType);
   const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
   const taskStatus = (card as { taskStatus?: string }).taskStatus;
@@ -700,9 +841,65 @@ function OperatorActions({
             : [];
 
   if (actions.length === 0) return null;
+  const recommendedPrimary = (card as { action?: { primary?: string } }).action?.primary;
+  const recommendedLabel = typeof recommendedPrimary === "string" && recommendedPrimary.trim()
+    ? recommendedPrimary.trim()
+    : undefined;
+  const [primaryAction, ...secondaryActions] = actions;
   const confirming = confirmingKey ? actions.find((action) => action.key === confirmingKey) : undefined;
 
   if (!confirming) {
+    if (collapsedChoices && primaryAction) {
+      return (
+        <div className="hm-card-cta hm-card-cta--operator hm-card-cta--decision" role="group" aria-label="Operator actions">
+          <Button
+            variant={primaryAction.kind === "action" ? "action" : "ghost"}
+            size="sm"
+            title={`${recommendedLabel ?? primaryAction.label} opens a confirmation before running.`}
+            onClick={(e) => {
+              stop(e);
+              setConfirmingKey(primaryAction.key);
+            }}
+          >
+            {recommendedLabel ?? primaryAction.label}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="hm-decision-choices-toggle"
+            aria-expanded={choicesOpen}
+            onClick={(e) => {
+              stop(e);
+              setChoicesOpen((open) => !open);
+            }}
+          >
+            Choices {choicesOpen ? "↑" : "↓"}
+          </Button>
+          {choicesOpen ? (
+            <div className="hm-decision-choices" role="group" aria-label="Alternative choices">
+              {secondaryActions.length > 0 ? (
+                secondaryActions.map((action) => (
+                  <Button
+                    variant={action.kind === "action" ? "action" : "ghost"}
+                    size="sm"
+                    key={action.key}
+                    title={`${action.label} opens a confirmation before running.`}
+                    onClick={(e) => {
+                      stop(e);
+                      setConfirmingKey(action.key);
+                    }}
+                  >
+                    {action.label}
+                  </Button>
+                ))
+              ) : (
+                <span className="hm-decision-choices-empty">No alternate action is wired for this card.</span>
+              )}
+            </div>
+          ) : null}
+        </div>
+      );
+    }
     return (
       <div className="hm-card-cta hm-card-cta--operator hm-card-cta--actions" role="group" aria-label="Operator actions">
         {actions.map((action) => (
