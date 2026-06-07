@@ -164,14 +164,41 @@ test("boardMode: streamOnline=true is a no-op (calm/action driven by cards)", ()
 
 test("boardNowBanner: action mode produces an action-toned banner with the most urgent card cited", () => {
   const cards = [
-    card({ id: "act-1", isAction: true, title: "Approve the thing" }),
+    card({
+      id: "act-1",
+      isAction: true,
+      title: "Approve the thing",
+      risk: ["secrets"],
+      action: { kind: "operator-review", primary: "Approve merge" },
+      decisionRecord: {
+        schemaVersion: 1,
+        recordType: "hermes_decision_record",
+        id: "dr-act-1",
+        kind: "auto_approval",
+        subject: { type: "pr", id: "act-1" },
+        decision: "escalated",
+        reasons: ["Secret-touching change requires operator review"],
+        inputs: {},
+        outcome: { summary: "Waiting on operator" },
+        safety: { readOnly: true, mutates: false },
+        generatedAt: "2026-06-07T10:00:00.000Z",
+      },
+    }),
   ];
   const banner = boardNowBanner(cards, { nowLabel: "14:32:08 utc" });
   assert.equal(banner.tone, "action");
   assert.match(banner.eyebrow, /1 action needed/);
-  assert.match(banner.headline, /1 card needs your review decision/);
-  assert.match(banner.sub, /Approve the thing/);
+  assert.equal(banner.headline, "1 decision waiting on you");
+  assert.equal(banner.sub, "Most urgent: Approve the thing — suggests Approve merge.");
   assert.equal(banner.primaryActionId, "act-1");
+  assert.deepEqual(
+    banner.mostUrgentReasons?.map((reason) => ({ label: reason.label, tone: reason.tone })),
+    [
+      { label: "blocked 5m", tone: "neutral" },
+      { label: "risk: secrets", tone: "risk" },
+      { label: "safe: read-only", tone: "safe" },
+    ],
+  );
 });
 
 test("boardNowBanner: multiple action cards pluralize correctly", () => {
@@ -181,7 +208,25 @@ test("boardNowBanner: multiple action cards pluralize correctly", () => {
   ];
   const banner = boardNowBanner(cards);
   assert.match(banner.eyebrow, /2 action needed/);
-  assert.match(banner.headline, /2 cards need your review decision/);
+  assert.equal(banner.headline, "2 decisions waiting on you");
+});
+
+test("boardNowBanner: action banner traces to existing most-urgent selection", () => {
+  const cards = [
+    card({ id: "later", isAction: true, title: "Later decision", freshness: 30 }),
+    card({ id: "urgent", isAction: true, title: "Urgent decision", freshness: 1, action: { kind: "operator-review", primary: "Review now" } }),
+  ];
+  const banner = boardNowBanner(cards);
+  assert.equal(mostUrgentCard(cards)?.id, "urgent");
+  assert.equal(banner.primaryActionId, "urgent");
+  assert.equal(banner.sub, "Most urgent: Urgent decision — suggests Review now.");
+});
+
+test("boardNowBanner: most-urgent reasons stay empty when the card has no real signals", () => {
+  const banner = boardNowBanner([
+    card({ id: "thin", isAction: true, title: "Thin card", freshness: undefined, risk: [] }),
+  ]);
+  assert.deepEqual(banner.mostUrgentReasons, []);
 });
 
 test("boardNowBanner: Hermes focus mode uses the scoped review card", () => {

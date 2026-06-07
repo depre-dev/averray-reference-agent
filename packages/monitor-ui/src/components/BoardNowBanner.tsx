@@ -18,6 +18,11 @@ export type BannerData = {
   headline: string;
   sub: string;
   primaryActionId: string | undefined;
+  mostUrgentReasons?: Array<{
+    label: string;
+    tone: "neutral" | "risk" | "safe" | "warn";
+    title?: string;
+  }>;
 };
 
 export type BoardNowBannerProps = {
@@ -34,6 +39,7 @@ const GLYPHS: Record<BannerData["tone"], string> = {
 };
 
 export function BoardNowBanner({ banner, cta }: BoardNowBannerProps) {
+  const reasons = banner.mostUrgentReasons ?? [];
   const toneClass =
     banner.tone === "action"
       ? "hm-now hm-now--action"
@@ -55,6 +61,20 @@ export function BoardNowBanner({ banner, cta }: BoardNowBannerProps) {
         </div>
         <h1 className="hm-now-head">{banner.headline}</h1>
         <p className="hm-now-sub">{banner.sub}</p>
+        {reasons.length > 0 ? (
+          <div className="hm-now-reasons" aria-label="Most urgent because">
+            <span className="hm-now-reasons-label">Most urgent because</span>
+            {reasons.map((reason) => (
+              <span
+                key={`${reason.tone}:${reason.label}`}
+                className={`hm-now-reason hm-now-reason--${reason.tone}`}
+                title={reason.title}
+              >
+                {reason.label}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
       {cta ? <div className="hm-now-cta">{cta}</div> : null}
     </div>
