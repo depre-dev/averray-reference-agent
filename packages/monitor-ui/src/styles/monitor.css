@@ -3096,7 +3096,11 @@ button.hm-turn-pin {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 14px 10px 12px;
   border-radius: 999px;
-  background: var(--hm-ink);
+  /* dark-mode: --hm-ink remaps to a LIGHT ink (#EDE6DD), which turned this
+     floating pill into a cream patch with near-invisible text bleeding up at
+     the board's bottom-right. It's the "Ask Hermes" CTA, so use the on-theme
+     coral action colour (--h4-act) with white text. */
+  background: var(--h4-act);
   color: #fffdf7;
   box-shadow: var(--hm-shadow-pop);
   cursor: pointer;
