@@ -114,6 +114,17 @@
   display: contents;
 }
 
+/* Inbox decision cards must keep their natural height so the column SCROLLS
+   (.hm-col-body is overflow-y:auto) rather than flex-shrinking the cards. The
+   anchor is display:contents, so each .hm-card is a direct flex child of the
+   column; .hm-card has overflow:hidden, so without flex-shrink:0 three tall
+   decision cards squish to fit and CLIP the "What happens next" body + the
+   Approve & dispatch / Choices actions. */
+.hm-col--inbox .hm-card,
+.hm-col-body > .hm-pipeline-card {
+  flex-shrink: 0;
+}
+
 /* ---- read-only pipeline mirrors (PR-E3) ---- */
 .hm-pipeline-card {
   display: flex;
