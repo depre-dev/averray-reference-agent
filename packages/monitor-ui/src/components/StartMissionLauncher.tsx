@@ -1,12 +1,20 @@
 import { useId, useState, type FormEvent } from "react";
-import type { MissionLaunchInput, MissionLaunchMode, SaveTestSuiteInput } from "../lib/monitor/mission-launch.js";
+import type {
+  MissionLaunchInput,
+  MissionLaunchMode,
+  MissionLaunchOutcome,
+  MissionLaunchResult,
+  SaveTestSuiteInput,
+} from "../lib/monitor/mission-launch.js";
 
 const DEFAULT_TARGET = "https://app.averray.com";
 
 export interface StartMissionLauncherProps {
-  onSpawnMission?: (input: MissionLaunchInput) => void;
+  onSpawnMission?: (input: MissionLaunchInput) => MissionLaunchOutcome;
   onSaveSuite?: (input: SaveTestSuiteInput) => void;
 }
+
+type LaunchFeedback = { ok: boolean; detail: string };
 
 export function StartMissionLauncher({ onSpawnMission, onSaveSuite }: StartMissionLauncherProps) {
   const targetId = useId();
@@ -23,8 +31,28 @@ export function StartMissionLauncher({ onSpawnMission, onSaveSuite }: StartMissi
   const [suiteName, setSuiteName] = useState("");
   const [goal, setGoal] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const [feedback, setFeedback] = useState<LaunchFeedback | null>(null);
 
   const isCitation = mode === "citation_repair";
+
+  // Turn the spawn outcome into honest feedback. `undefined` means the handler
+  // is fire-and-forget (the /mission command path or a test mock) — best-effort
+  // "requested". A reported { ok:false } becomes an explicit failure line.
+  const applyOutcome = (outcome: MissionLaunchResult | void) => {
+    setPending(false);
+    if (outcome && outcome.ok === false) {
+      const why = outcome.status ? `HTTP ${outcome.status}` : (outcome.error ?? "request failed");
+      setFeedback({ ok: false, detail: why });
+      return;
+    }
+    setFeedback({
+      ok: true,
+      detail: requestApproval
+        ? "queued — approve it in the Decision Inbox"
+        : "it’ll appear in the Hermes-checking lane",
+    });
+  };
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -41,8 +69,12 @@ export function StartMissionLauncher({ onSpawnMission, onSaveSuite }: StartMissi
       return;
     }
     setError(null);
+    setFeedback(null);
     const trimmedGoal = goal.trim();
-    onSpawnMission?.({
+    // Spawn first (so the mission POST precedes the suite POST), then the
+    // optional suite save — both fired synchronously before we await the
+    // outcome, so a fire-and-forget handler stays fully synchronous.
+    const outcome = onSpawnMission?.({
       // citation_repair omits the target server-side; the launch body drops it.
       targetUrl: isCitation ? "" : target,
       mode,
@@ -60,7 +92,20 @@ export function StartMissionLauncher({ onSpawnMission, onSaveSuite }: StartMissi
         ...(trimmedGoal ? { goal: trimmedGoal } : {}),
       });
     }
-    setOpen(false);
+    // A thenable result → await it for the real POST status; a sync/void handler
+    // resolves immediately. The panel stays open so the feedback is visible
+    // (the silent close was the "nothing happens" report).
+    if (outcome && typeof (outcome as { then?: unknown }).then === "function") {
+      setPending(true);
+      Promise.resolve(outcome as Promise<MissionLaunchResult | void>)
+        .then(applyOutcome)
+        .catch(() => {
+          setPending(false);
+          setFeedback({ ok: false, detail: "request failed" });
+        });
+    } else {
+      applyOutcome(outcome as MissionLaunchResult | void);
+    }
   };
 
   return (
@@ -215,10 +260,19 @@ export function StartMissionLauncher({ onSpawnMission, onSaveSuite }: StartMissi
           ) : null}
 
           {error ? <div className="hm-form-error" role="alert">{error}</div> : null}
+          {feedback ? (
+            feedback.ok ? (
+              <div className="hm-form-ok" role="status">Mission requested ✓ — {feedback.detail}.</div>
+            ) : (
+              <div className="hm-form-error" role="alert">
+                Launch failed — {feedback.detail}. The board can’t confirm it; check the tester runner.
+              </div>
+            )
+          ) : null}
 
           <div className="hm-mission-launcher-actions">
-            <button type="submit" className="hm-btn hm-btn--action">
-              Launch mission
+            <button type="submit" className="hm-btn hm-btn--action" disabled={pending}>
+              {pending ? "Launching…" : "Launch mission"}
             </button>
             <span>Server derives mutation safety from target, flow, and environment.</span>
           </div>
