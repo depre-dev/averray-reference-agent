@@ -104,6 +104,20 @@ export interface LlmUsageActiveCall {
   taskId?: string;
 }
 
+/** One per-model line in the live usage window; points are per-minute token sums. */
+export interface LlmUsageRecentSeries {
+  agent: string;
+  model: string;
+  points: number[];
+}
+
+/** Real "tokens/min · per model" window (null when there's no recent activity). */
+export interface LlmUsageRecent {
+  windowMinutes: number;
+  endsAt: string;
+  series: LlmUsageRecentSeries[];
+}
+
 export interface LlmUsageAggregate {
   status: "recorded" | "not_recorded";
   message?: string;
@@ -119,6 +133,7 @@ export interface LlmUsageAggregate {
   byDay: LlmUsageDayRollup[];
   sourceStatus?: LlmUsageSourceStatus[];
   activeCalls?: LlmUsageActiveCall[];
+  recent?: LlmUsageRecent | null;
 }
 
 export interface MonitorEvent {

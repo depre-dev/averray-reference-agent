@@ -328,4 +328,41 @@ describe("LLM usage tracker", () => {
     expect(serialized).not.toContain("sk-should-never-appear");
     expect(serialized).not.toContain("also-nope");
   });
+
+  it("builds a real per-minute, per-model recent window from event timestamps", () => {
+    const now = new Date("2026-06-09T12:30:00.000Z"); // window start = 11:30:00
+    const aggregate = aggregateLlmUsage(
+      [
+        { agent: "hermes", model: "deepseek-v4-pro", inputTokens: 50, outputTokens: 10, ts: "2026-06-09T11:30:30.000Z" }, // idx 0 → 60
+        { agent: "hermes", model: "deepseek-v4-pro", inputTokens: 100, outputTokens: 20, ts: "2026-06-09T12:29:30.000Z" }, // idx 59 → 120
+        { agent: "claude", model: "claude-sonnet-4-6", inputTokens: 30, outputTokens: 5, ts: "2026-06-09T12:29:45.000Z" }, // idx 59 → 35
+      ],
+      { now, recentWindowMinutes: 60 },
+    );
+    expect(aggregate.recent).not.toBeNull();
+    expect(aggregate.recent!.windowMinutes).toBe(60);
+    expect(aggregate.recent!.endsAt).toBe("2026-06-09T12:30:00.000Z");
+    const hermes = aggregate.recent!.series.find((s) => s.agent === "hermes");
+    expect(hermes!.points).toHaveLength(60);
+    expect(hermes!.points[0]).toBe(60);
+    expect(hermes!.points[59]).toBe(120);
+    const claude = aggregate.recent!.series.find((s) => s.agent === "claude");
+    expect(claude!.points[59]).toBe(35);
+  });
+
+  it("returns recent: null without a clock to anchor the window", () => {
+    const aggregate = aggregateLlmUsage([
+      { agent: "hermes", model: "x", inputTokens: 1, outputTokens: 1, ts: "2026-06-09T12:00:00.000Z" },
+    ]);
+    expect(aggregate.recent).toBeNull();
+  });
+
+  it("returns recent: null when no events fall inside the window", () => {
+    const now = new Date("2026-06-09T12:30:00.000Z");
+    const aggregate = aggregateLlmUsage(
+      [{ agent: "hermes", model: "x", inputTokens: 1, outputTokens: 1, ts: "2026-06-01T00:00:00.000Z" }],
+      { now },
+    );
+    expect(aggregate.recent).toBeNull();
+  });
 });

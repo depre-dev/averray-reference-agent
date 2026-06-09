@@ -54,6 +54,22 @@ export interface LlmUsageActiveCall {
   taskId?: string;
 }
 
+/** One per-model line in the recent (live) usage window. `points` are per-minute
+ *  total-token sums, oldest→newest, length === windowMinutes. */
+export interface LlmUsageRecentSeries {
+  agent: string;
+  model: string;
+  points: number[];
+}
+
+/** A real, live "tokens/min · per model" window built from event timestamps.
+ *  null when there is no clock to anchor the window or no events fell in it. */
+export interface LlmUsageRecent {
+  windowMinutes: number;
+  endsAt: string;
+  series: LlmUsageRecentSeries[];
+}
+
 export interface LlmUsageAggregate {
   status: "recorded" | "not_recorded";
   message: string;
@@ -69,6 +85,8 @@ export interface LlmUsageAggregate {
   byDay: LlmUsageDayRollup[];
   sourceStatus: LlmUsageSourceStatus[];
   activeCalls: LlmUsageActiveCall[];
+  /** Live per-minute per-model series for the recent window (null when idle). */
+  recent: LlmUsageRecent | null;
 }
 
 export interface LlmUsageCaptureInput {
@@ -84,6 +102,11 @@ export interface LlmUsageAggregateOptions {
   expectedAgents?: readonly string[];
   sourceReasons?: Readonly<Record<string, string>>;
   activeCalls?: readonly LlmUsageActiveCall[];
+  /** Anchor for the live "recent" window (server passes new Date()); when
+   *  omitted, `recent` is null (no clock to build a last-N-minutes window). */
+  now?: Date;
+  /** Recent-window length in minutes (default 60). */
+  recentWindowMinutes?: number;
 }
 
 export interface LlmUsageActiveCallInput {
@@ -243,6 +266,7 @@ export function aggregateLlmUsage(
   const byDay = rollupByDay(events);
   const total = totalsFor(events);
   const sourceStatus = sourceStatuses(events, options);
+  const recent = buildRecent(events, options.now, options.recentWindowMinutes ?? 60);
   const status = events.length > 0 ? "recorded" : "not_recorded";
   return {
     status,
@@ -255,7 +279,50 @@ export function aggregateLlmUsage(
     byDay,
     sourceStatus,
     activeCalls: [...(options.activeCalls ?? [])],
+    recent,
   };
+}
+
+/**
+ * Build the live "tokens/min · per model" window from real event timestamps.
+ * Returns null when there's no clock to anchor the window or no event fell in
+ * it — so the UI honestly falls back to the daily view instead of a flat fake.
+ */
+function buildRecent(
+  events: readonly LlmUsageEvent[],
+  now: Date | undefined,
+  windowMinutes: number,
+): LlmUsageRecent | null {
+  if (!now || !Number.isFinite(now.getTime()) || windowMinutes <= 0) return null;
+  const end = now.getTime();
+  const start = end - windowMinutes * 60_000;
+  const byKey = new Map<string, number[]>();
+  for (const event of events) {
+    const t = Date.parse(event.ts);
+    if (!Number.isFinite(t) || t < start || t > end) continue;
+    let idx = Math.floor((t - start) / 60_000);
+    if (idx < 0) idx = 0;
+    if (idx >= windowMinutes) idx = windowMinutes - 1;
+    const key = `${event.agent} ${event.model}`;
+    let points = byKey.get(key);
+    if (!points) {
+      points = new Array<number>(windowMinutes).fill(0);
+      byKey.set(key, points);
+    }
+    points[idx] += event.inputTokens + event.outputTokens + (event.cacheTokens ?? 0);
+  }
+  if (byKey.size === 0) return null;
+  const series = Array.from(byKey.entries())
+    .map(([key, points]) => {
+      const [agent = "unknown", model = "not_recorded"] = key.split(" ");
+      return { agent, model, points };
+    })
+    .sort((a, b) => sumPoints(b.points) - sumPoints(a.points) || a.agent.localeCompare(b.agent) || a.model.localeCompare(b.model));
+  return { windowMinutes, endsAt: new Date(end).toISOString(), series };
+}
+
+function sumPoints(points: readonly number[]): number {
+  return points.reduce((sum, value) => sum + value, 0);
 }
 
 export function aggregateLlmUsageForAgent(
@@ -288,6 +355,7 @@ export function aggregateLlmUsageForAgent(
       ...(byModel.length > 0 ? {} : { reason: sourceReason(agent, undefined) }),
     }],
     activeCalls: aggregate.activeCalls.filter((call) => call.agent === agent),
+    recent: null,
   };
 }
 
