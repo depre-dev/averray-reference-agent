@@ -14,6 +14,9 @@ interface BoardClassification {
 }
 
 const TERMINAL_CODEX_STATUSES = new Set(["completed", "cancelled", "failed", "terminal"]);
+// Density cap on the noisy PR/handoff cards. Active testbed missions are pinned
+// on top of this so a just-launched mission is never capped off a busy board.
+const MAX_BOARD_CARDS = 10;
 const QUIET_AUTOMATION_REASONS = [
   "dispatch_budget_exhausted",
   "open_fix_cap_reached",
@@ -33,10 +36,24 @@ export function buildHermesBoardSnapshotFromMonitor(snapshot: unknown): HermesBo
   const allRawItems = [...arrayRecords(snapshot.active), ...arrayRecords(snapshot.recent), ...missionItems];
   const quietSelfHealingCapacitySignals = allRawItems.filter(isQuietSelfHealingCapacityEvent).length;
   const rawItems = dedupeItems(allRawItems.filter((item) => !isQuietSelfHealingCapacityEvent(item)));
-  const cards = rawItems
-    .map((item) => boardCardFromItem(item, snapshot, activeTasks))
-    .filter((item): item is HermesBoardCardSnapshot => Boolean(item))
-    .slice(0, 10);
+  const classified = rawItems
+    .map((item) => ({ item, card: boardCardFromItem(item, snapshot, activeTasks) }))
+    .filter((entry): entry is { item: Record<string, unknown>; card: HermesBoardCardSnapshot } =>
+      Boolean(entry.card));
+  // A just-launched testbed mission is "active" (ready/running). It must stay
+  // visible in its lane even when the board is already busy: without this, an
+  // active mission appended after a full slate of PR/handoff cards is dropped by
+  // the board cap, so a successful (HTTP 200) launch surfaces no card at all.
+  // Pin active missions; everything else (PRs, recent handoffs, completed/failed
+  // missions) shares the MAX_BOARD_CARDS cap.
+  const pinnedMissionCards = classified
+    .filter((entry) => isActiveMissionItem(entry.item))
+    .map((entry) => entry.card);
+  const cappedCards = classified
+    .filter((entry) => !isActiveMissionItem(entry.item))
+    .map((entry) => entry.card)
+    .slice(0, MAX_BOARD_CARDS);
+  const cards = [...pinnedMissionCards, ...cappedCards];
 
   const counts = boardCounts(cards, snapshot, { quietSelfHealingCapacitySignals });
   const runner = runnerSummary(snapshot);
@@ -490,6 +507,17 @@ function reviewReasons(summary: Record<string, unknown>): string[] {
 
 function isRunningItem(item: Record<string, unknown>, status: string): boolean {
   return status === "running" || booleanProp(item, "active") || normalize(textProp(item, "activeState")) === "running";
+}
+
+/**
+ * An in-flight testbed mission (requested / ready / running) — the kind of card
+ * a successful launch produces and the operator is waiting to see. `intent` is
+ * set only by testbedMissionRunToMonitorItem; `active` is true while the run is
+ * awaiting approval or executing and false once it completes or fails. Pinned
+ * past the board cap so a launched mission stays visible even on a busy board.
+ */
+function isActiveMissionItem(item: Record<string, unknown>): boolean {
+  return normalize(textProp(item, "intent")) === "testbed_agent_mission" && booleanProp(item, "active");
 }
 
 function isDonePrState(prState: Record<string, unknown> | undefined): boolean {
