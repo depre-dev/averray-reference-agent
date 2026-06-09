@@ -12,7 +12,7 @@
 //     <div.hm-main>              grid: lanes-wrap | hermes rail (420px)
 //       <div.hm-lanes-wrap>
 //         <LanesBar />           search + filter chips + urgency label
-//         <UtilityBar />         collapsed tester / suites / LLM usage
+//         <UtilitiesPanel />     collapsed strip ⇄ 2-col: usage | launcher+suites
 //         <Board />              kanban lanes, cards via <CardRouter>
 //       <CoPilotRail />          live narration + Ask-Hermes
 //   <DetailDrawer />             when ?card= resolves
@@ -20,13 +20,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { deriveBoardState, matchesBoardFilter, type BoardMode, type BoardFilter } from "../lib/monitor/board-state.js";
-import type { LlmUsageAggregate, MonitorBoard } from "../lib/monitor/board-cache.js";
+import type { MonitorBoard } from "../lib/monitor/board-cache.js";
 import type { BacklogSuggestionsResponse } from "../lib/monitor/backlog-suggestions.js";
 import type { StreamStatus } from "../lib/monitor/live-stream.js";
 import { LANES, type BoardCard, type CreateTaskInput } from "../lib/monitor/card-types.js";
-import type { MissionSpawnInput, MissionLaunchOutcome, SavedTestSuite, SaveTestSuiteInput } from "../lib/monitor/mission-launch.js";
-import { StartMissionLauncher } from "./StartMissionLauncher.js";
-import { TestSuitesPanel } from "./TestSuitesPanel.js";
+import type { MissionSpawnInput, MissionLaunchOutcome, SaveTestSuiteInput } from "../lib/monitor/mission-launch.js";
+import { UtilitiesPanel } from "./UtilitiesPanel.js";
 import { laneFor, isDecision, tierFor, type KanbanTier } from "../lib/monitor/lane-rules.js";
 import { deployStepsForCard } from "../lib/monitor/deploy-stepper.js";
 import { inboxCards } from "../lib/monitor/board-columns.js";
@@ -604,7 +603,7 @@ export function BoardView({
             activeFilter={filter}
             onFilterChange={setFilter}
           />
-          <UtilityBar
+          <UtilitiesPanel
             usage={board?.llmUsage}
             suites={board?.testbedSuites}
             onRunSuite={onRunSuite}
@@ -712,71 +711,6 @@ function BoardFooter({ cards }: { cards: readonly BoardCard[] }) {
       </span>
       <span className="h4-board-footer-meta">Hermes · Averray</span>
     </footer>
-  );
-}
-
-function UtilityBar({
-  usage,
-  suites = [],
-  onRunSuite,
-  onSaveSuite,
-  onApproveSuite,
-  onDismissSuite,
-  onSpawnMission,
-}: {
-  usage?: LlmUsageAggregate;
-  suites?: SavedTestSuite[];
-  onRunSuite?: (id: string) => void;
-  onSaveSuite?: (input: SaveTestSuiteInput) => void;
-  onApproveSuite?: (id: string) => void;
-  onDismissSuite?: (id: string) => void;
-  onSpawnMission?: BoardViewProps["onSpawnMission"];
-}) {
-  const requestedSuites = suites.filter((suite) => suite.status === "requested").length;
-  const shouldOpen = requestedSuites > 0;
-  const [open, setOpen] = useState(shouldOpen);
-  useEffect(() => {
-    if (shouldOpen) setOpen(true);
-  }, [shouldOpen]);
-
-  const usageLabel = usage?.status === "recorded"
-    ? `${formatCompactNumber(usage.totalTokens)} tokens`
-    : "usage quiet";
-  const suitesLabel = suites.length > 0
-    ? `${suites.length} suite${suites.length === 1 ? "" : "s"}`
-    : "no suites";
-  const launcherLabel = onSpawnMission ? "tester ready" : "tester off";
-
-  return (
-    <section className={`hm-utility-bar${requestedSuites > 0 ? " hm-utility-bar--attention" : ""}`} aria-label="Board utilities">
-      <button
-        type="button"
-        className="hm-utility-bar-toggle"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <span aria-hidden>{open ? "▾" : "▸"}</span>
-        <span className="hm-kicker">Utilities</span>
-        <strong>LLM usage · suites · tester launcher</strong>
-        <span className="hm-utility-bar-summary">
-          {usageLabel} · {suitesLabel} · {launcherLabel}
-        </span>
-        {requestedSuites > 0 ? <Badge variant="pending">{requestedSuites} requested</Badge> : null}
-      </button>
-      {open ? (
-        <div className="hm-utility-bar-body">
-          <LlmUsagePanel usage={usage} />
-          <TestSuitesPanel
-            suites={suites}
-            onRunSuite={onRunSuite}
-            onSaveSuite={onSaveSuite}
-            onApproveSuite={onApproveSuite}
-            onDismissSuite={onDismissSuite}
-          />
-          {onSpawnMission ? <StartMissionLauncher onSpawnMission={onSpawnMission} onSaveSuite={onSaveSuite} /> : null}
-        </div>
-      ) : null}
-    </section>
   );
 }
 
@@ -967,142 +901,4 @@ function formatClock(iso: string | undefined): string {
   if (Number.isNaN(d.getTime())) return "";
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
-}
-
-function LlmUsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
-  // Collapsed to a single line by default — the panel used to eat a full band
-  // of vertical space across the board. The headline (total · calls · live)
-  // stays glanceable; per-source detail + idle reasons are one click away.
-  const [expanded, setExpanded] = useState(false);
-  const [showIdle, setShowIdle] = useState(false);
-  const recorded = usage?.status === "recorded";
-  const latestDay = usage?.byDay?.[0];
-  // Active sources get the space — every (agent, model) that actually reported.
-  const models = usage?.byModel?.length ? usage.byModel : latestDay?.byModel ?? [];
-  // Idle sources collapse into ONE line; their honest reasons stay reachable on expand.
-  const idleSources = (usage?.sourceStatus ?? []).filter((entry) => entry.status === "not_reported");
-  const activeCalls = usage?.activeCalls ?? [];
-  const emptyMessage = usage?.message
-    ?? "No LLM usage counters have been recorded yet. Sources stay not reported until a real provider or runner emits whitelisted counters.";
-  const headline = recorded
-    ? `${formatCompactNumber(usage!.totalTokens)} tokens · ${formatNumber(usage!.runs)} calls`
-    : "usage not reported";
-  const lastLabel = recorded && usage!.lastActiveAt ? `last ${formatRelativeTime(usage!.lastActiveAt)}` : "";
-  // Keep the live signal glanceable without expanding.
-  const flightLabel = activeCalls.length > 0 ? `${activeCalls.length} in flight` : "idle";
-
-  return (
-    <section className="hm-llm-usage" aria-label="LLM usage">
-      {/* One-line summary — leads with the total; the rest is behind the toggle. */}
-      <button
-        type="button"
-        className="hm-llm-usage-summary"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((value) => !value)}
-      >
-        <span aria-hidden>{expanded ? "▾" : "▸"}</span>
-        <span className="hm-kicker">LLM usage</span>
-        <strong className="hm-llm-usage-headline">{headline}</strong>
-        <span className="hm-llm-usage-summary-meta">
-          {[flightLabel, lastLabel].filter(Boolean).join(" · ")}
-        </span>
-      </button>
-
-      {expanded ? (
-      <div className="hm-llm-usage-detail">
-      {/* What's running now (in-flight). */}
-      <div className="hm-llm-usage-active">
-        <span>What's running now</span>
-        {activeCalls.length > 0 ? (
-          <strong>{activeCalls.map((call) => `${call.agent} · ${call.model}`).join(" · ")}</strong>
-        ) : (
-          <strong>No in-flight LLM calls</strong>
-        )}
-      </div>
-
-      {/* Active sources — prominent: per-(agent, model) tokens + in/out bar. */}
-      {recorded && models.length > 0 ? (
-        <div className="hm-llm-usage-sources">
-          {models.map((entry) => {
-            const split = Math.max(1, entry.inputTokens + entry.outputTokens);
-            const inPct = Math.round((entry.inputTokens / split) * 100);
-            return (
-              <div className="hm-llm-usage-source" key={`${entry.agent}:${entry.model}`}>
-                <div className="hm-llm-usage-source-head">
-                  <strong>{entry.agent} · {entry.model}</strong>
-                  <span>{formatCompactNumber(entry.totalTokens)} tokens</span>
-                </div>
-                <div
-                  className="hm-llm-usage-bar"
-                  role="img"
-                  aria-label={`${formatCompactNumber(entry.inputTokens)} in, ${formatCompactNumber(entry.outputTokens)} out`}
-                >
-                  <span className="hm-llm-usage-bar-in" style={{ width: `${inPct}%` }} />
-                  <span className="hm-llm-usage-bar-out" style={{ width: `${100 - inPct}%` }} />
-                </div>
-                <div className="hm-llm-usage-source-foot">
-                  <small>{formatCompactNumber(entry.inputTokens)} in · {formatCompactNumber(entry.outputTokens)} out</small>
-                  <small>{formatNumber(entry.runs)} calls · last {formatRelativeTime(entry.lastActiveAt)}</small>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : null}
-
-      {/* Idle sources — one muted, expandable line; reasons honest but quiet. */}
-      {idleSources.length > 0 ? (
-        <div className="hm-llm-usage-idle">
-          <button
-            type="button"
-            className="hm-llm-usage-idle-toggle"
-            aria-expanded={showIdle}
-            onClick={() => setShowIdle((value) => !value)}
-          >
-            <span aria-hidden>{showIdle ? "▾" : "▸"}</span>
-            {idleSources.length} source{idleSources.length === 1 ? "" : "s"} idle: {idleSources.map((entry) => entry.agent).join(" · ")}
-          </button>
-          {showIdle ? (
-            <ul className="hm-llm-usage-idle-list">
-              {idleSources.map((entry) => (
-                <li key={entry.agent}>
-                  <strong>{entry.agent}</strong>
-                  <span>{entry.reason ?? `${entry.agent} usage counters have not arrived.`}</span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      ) : null}
-
-      {/* Truth-boundary explanation when nothing reported and no idle list to carry it. */}
-      {!recorded && models.length === 0 ? (
-        <div className="hm-llm-usage-empty">{emptyMessage}</div>
-      ) : null}
-      </div>
-      ) : null}
-    </section>
-  );
-}
-
-function formatNumber(value: number): string {
-  return new Intl.NumberFormat("en-US").format(value);
-}
-
-function formatCompactNumber(value: number): string {
-  return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
-}
-
-function formatRelativeTime(iso: string | null | undefined): string {
-  if (!iso) return "last active unknown";
-  const time = Date.parse(iso);
-  if (!Number.isFinite(time)) return "last active unknown";
-  const seconds = Math.max(0, Math.round((Date.now() - time) / 1000));
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 48) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  return `${days}d ago`;
 }

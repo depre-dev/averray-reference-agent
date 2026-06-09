@@ -30,6 +30,9 @@ import "./styles/hermes4-rail.css";
 import "./styles/hermes4-board.css";
 // PR-E1: inbox-first Kanban — hero Decision Inbox + read-only tier columns.
 import "./styles/hermes4-kanban.css";
+// Utilities redesign: calm two-column card panel (LLM usage · suites · launcher)
+// + the redesigned mission-starter. Loaded last so its additive rules win.
+import "./styles/hermes4-utilities.css";
 
 const rootEl = document.getElementById("root");
 if (!rootEl) {

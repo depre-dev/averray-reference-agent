@@ -6,8 +6,22 @@ import type {
   MissionLaunchResult,
   SaveTestSuiteInput,
 } from "../lib/monitor/mission-launch.js";
+import { UtilCard } from "./UtilCard.js";
 
 const DEFAULT_TARGET = "https://app.averray.com";
+
+/**
+ * The mission flows, with a plain-language line each (the operator's #1 pain was
+ * bare radios with no hint what "Role Gating" or "Citation Repair" does). The
+ * tag mirrors the server's mutation posture; the description is the honest
+ * one-liner shown under the picker for the selected flow.
+ */
+const FLOWS: { mode: MissionLaunchMode; name: string; tag: string; desc: string }[] = [
+  { mode: "surface_sweep", name: "Surface Sweep", tag: "read-only", desc: "Read-only crawl — visits and observes, never mutates." },
+  { mode: "gold_path", name: "Gold Path", tag: "testnet", desc: "Runs a critical journey end-to-end on testnet — pass / fail." },
+  { mode: "siwe_auth", name: "Role Gating", tag: "read-only", desc: "Checks access controls hold for each role — read-only." },
+  { mode: "citation_repair", name: "Citation Repair", tag: "read-only", desc: "Read-only domain repair against a Job ID — dry run, no claim or edit." },
+];
 
 export interface StartMissionLauncherProps {
   onSpawnMission?: (input: MissionLaunchInput) => MissionLaunchOutcome;
@@ -21,12 +35,14 @@ export function StartMissionLauncher({ onSpawnMission, onSaveSuite }: StartMissi
   const jobIdId = useId();
   const goalId = useId();
   const suiteNameId = useId();
-  const [open, setOpen] = useState(false);
+  const flowDescId = useId();
   const [targetUrl, setTargetUrl] = useState(DEFAULT_TARGET);
   const [jobId, setJobId] = useState("");
   const [mode, setMode] = useState<MissionLaunchMode>("surface_sweep");
   const [freshMemory, setFreshMemory] = useState(true);
-  const [requestApproval, setRequestApproval] = useState(false);
+  // Propose-by-default: the first click PROPOSES the mission for review rather
+  // than auto-dispatching it (no accidental runs). Turn it off for auto-dispatch.
+  const [requestApproval, setRequestApproval] = useState(true);
   const [saveSuite, setSaveSuite] = useState(false);
   const [suiteName, setSuiteName] = useState("");
   const [goal, setGoal] = useState("");
@@ -35,6 +51,7 @@ export function StartMissionLauncher({ onSpawnMission, onSaveSuite }: StartMissi
   const [feedback, setFeedback] = useState<LaunchFeedback | null>(null);
 
   const isCitation = mode === "citation_repair";
+  const activeFlow = FLOWS.find((flow) => flow.mode === mode)!;
 
   // Turn the spawn outcome into honest feedback. `undefined` means the handler
   // is fire-and-forget (the /mission command path or a test mock) — best-effort
@@ -109,176 +126,164 @@ export function StartMissionLauncher({ onSpawnMission, onSaveSuite }: StartMissi
   };
 
   return (
-    <section className="hm-mission-launcher" aria-label="Start a mission">
-      <div className="hm-mission-launcher-head">
-        <div>
-          <span className="hm-mission-launcher-kicker">Tester</span>
-          <strong>Start a mission</strong>
-          <span>Launch a real browser run from the board.</span>
-        </div>
-        <button type="button" className="hm-btn hm-btn--primary hm-btn--sm" onClick={() => setOpen((value) => !value)}>
-          {open ? "Close" : "Start a mission"}
-        </button>
-      </div>
-
-      {open ? (
-        <form className="hm-mission-launcher-form" onSubmit={submit}>
-          {isCitation ? (
-            <label className="hm-field hm-field--wide" htmlFor={jobIdId}>
-              <span>Job ID</span>
-              <input
-                id={jobIdId}
-                type="text"
-                value={jobId}
-                onChange={(event) => setJobId(event.target.value)}
-                placeholder="Leave empty to auto-select a claimable job"
-              />
-              <small>read-only analysis — no claim or edit (dry run)</small>
-            </label>
-          ) : (
-            <label className="hm-field hm-field--wide" htmlFor={targetId}>
-              <span>Target</span>
-              <input
-                id={targetId}
-                type="url"
-                required
-                value={targetUrl}
-                onChange={(event) => setTargetUrl(event.target.value)}
-                placeholder={DEFAULT_TARGET}
-              />
-            </label>
-          )}
-
-          <fieldset className="hm-choice-group">
-            <legend>Flow</legend>
-            <label>
-              <input
-                type="radio"
-                name="mission-flow"
-                checked={mode === "surface_sweep"}
-                onChange={() => setMode("surface_sweep")}
-              />
-              <span>Surface Sweep</span>
-              <small>read-only</small>
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="mission-flow"
-                checked={mode === "gold_path"}
-                onChange={() => setMode("gold_path")}
-              />
-              <span>Gold Path</span>
-              <small>testnet</small>
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="mission-flow"
-                checked={mode === "siwe_auth"}
-                onChange={() => setMode("siwe_auth")}
-              />
-              <span>Role Gating</span>
-              <small>read-only</small>
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="mission-flow"
-                checked={mode === "citation_repair"}
-                onChange={() => setMode("citation_repair")}
-              />
-              <span>Citation Repair</span>
-              <small>read-only</small>
-            </label>
-          </fieldset>
-
-          <fieldset className="hm-choice-group hm-choice-group--compact">
-            <legend>Memory</legend>
-            <label>
-              <input
-                type="radio"
-                name="mission-memory"
-                checked={freshMemory}
-                onChange={() => setFreshMemory(true)}
-              />
-              <span>Fresh</span>
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="mission-memory"
-                checked={!freshMemory}
-                onChange={() => setFreshMemory(false)}
-              />
-              <span>Memory</span>
-            </label>
-          </fieldset>
-
-          <label className="hm-field hm-field--wide" htmlFor={goalId}>
-            <span>Goal</span>
-            <textarea
-              id={goalId}
-              value={goal}
-              onChange={(event) => setGoal(event.target.value)}
-              placeholder="Optional scope or question for the browser agent"
-              rows={2}
-            />
-          </label>
-
-          <label className="hm-checkbox-row">
-            <input
-              type="checkbox"
-              checked={requestApproval}
-              onChange={(event) => setRequestApproval(event.target.checked)}
-            />
-            <span>Request approval before the runner claims it</span>
-          </label>
-
-          {onSaveSuite ? (
-            <>
-              <label className="hm-checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={saveSuite}
-                  onChange={(event) => setSaveSuite(event.target.checked)}
-                />
-                <span>Save this config as a suite</span>
-              </label>
-              {saveSuite ? (
-                <label className="hm-field" htmlFor={suiteNameId}>
-                  <span>Suite name</span>
+    <UtilCard title="Start a mission" hint="tester launcher" ariaLabel="Start a mission">
+      <form className="hm-mission-launcher-form" onSubmit={submit}>
+        {/* Flow as labelled cards + one honest description for the active flow. */}
+        <div className="hm-flow-field">
+          <span className="hm-field-eyebrow">Flow</span>
+          <div className="hm-flow-grid" role="radiogroup" aria-label="Flow">
+            {FLOWS.map((flow) => {
+              const on = mode === flow.mode;
+              return (
+                <label key={flow.mode} className={`hm-flow-card${on ? " hm-flow-card--on" : ""}`}>
                   <input
-                    id={suiteNameId}
-                    value={suiteName}
-                    onChange={(event) => setSuiteName(event.target.value)}
-                    placeholder="Daily app sweep"
+                    type="radio"
+                    name="mission-flow"
+                    className="hm-visually-hidden"
+                    checked={on}
+                    onChange={() => setMode(flow.mode)}
+                    aria-describedby={flowDescId}
                   />
+                  <span className="hm-flow-dot" aria-hidden />
+                  <span className="hm-flow-name">{flow.name}</span>
+                  {flow.tag ? <span className="hm-flow-tag">{flow.tag}</span> : null}
                 </label>
-              ) : null}
-            </>
-          ) : null}
-
-          {error ? <div className="hm-form-error" role="alert">{error}</div> : null}
-          {feedback ? (
-            feedback.ok ? (
-              <div className="hm-form-ok" role="status">Mission requested ✓ — {feedback.detail}.</div>
-            ) : (
-              <div className="hm-form-error" role="alert">
-                Launch failed — {feedback.detail}. The board can’t confirm it; check the tester runner.
-              </div>
-            )
-          ) : null}
-
-          <div className="hm-mission-launcher-actions">
-            <button type="submit" className="hm-btn hm-btn--action" disabled={pending}>
-              {pending ? "Launching…" : "Launch mission"}
-            </button>
-            <span>Server derives mutation safety from target, flow, and environment.</span>
+              );
+            })}
           </div>
-        </form>
-      ) : null}
-    </section>
+          <p className="hm-flow-desc" id={flowDescId}>{activeFlow.desc}</p>
+        </div>
+
+        {/* target / job-id swap — citation_repair keys off a Job ID. */}
+        {isCitation ? (
+          <label className="hm-field hm-field--wide" htmlFor={jobIdId}>
+            <span>Job ID</span>
+            <input
+              id={jobIdId}
+              type="text"
+              value={jobId}
+              onChange={(event) => setJobId(event.target.value)}
+              placeholder="Leave empty to auto-select a claimable job"
+            />
+            <small>read-only analysis — no claim or edit (dry run)</small>
+          </label>
+        ) : (
+          <label className="hm-field hm-field--wide" htmlFor={targetId}>
+            <span>Target</span>
+            <input
+              id={targetId}
+              type="url"
+              required
+              value={targetUrl}
+              onChange={(event) => setTargetUrl(event.target.value)}
+              placeholder={DEFAULT_TARGET}
+            />
+          </label>
+        )}
+
+        <fieldset className="hm-choice-group">
+          <legend>Memory</legend>
+          <label>
+            <input
+              type="radio"
+              name="mission-memory"
+              checked={freshMemory}
+              onChange={() => setFreshMemory(true)}
+            />
+            <span>Fresh</span>
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="mission-memory"
+              checked={!freshMemory}
+              onChange={() => setFreshMemory(false)}
+            />
+            <span>Memory</span>
+          </label>
+        </fieldset>
+
+        <label className="hm-field hm-field--wide" htmlFor={goalId}>
+          <span>Goal</span>
+          <textarea
+            id={goalId}
+            value={goal}
+            onChange={(event) => setGoal(event.target.value)}
+            placeholder="Optional scope or question for the browser agent"
+            rows={2}
+          />
+        </label>
+
+        <div className="hm-toggle-row">
+          <ToggleChip checked={requestApproval} onChange={setRequestApproval}>
+            Request approval
+          </ToggleChip>
+          {onSaveSuite ? (
+            <ToggleChip checked={saveSuite} onChange={setSaveSuite}>
+              Save this config as a suite
+            </ToggleChip>
+          ) : null}
+        </div>
+
+        {saveSuite && onSaveSuite ? (
+          <label className="hm-field" htmlFor={suiteNameId}>
+            <span>Suite name</span>
+            <input
+              id={suiteNameId}
+              value={suiteName}
+              onChange={(event) => setSuiteName(event.target.value)}
+              placeholder="Daily app sweep"
+            />
+          </label>
+        ) : null}
+
+        {error ? <div className="hm-form-error" role="alert">{error}</div> : null}
+        {feedback ? (
+          feedback.ok ? (
+            <div className="hm-form-ok" role="status">Mission requested ✓ — {feedback.detail}.</div>
+          ) : (
+            <div className="hm-form-error" role="alert">
+              Launch failed — {feedback.detail}. The board can’t confirm it; check the tester runner.
+            </div>
+          )
+        ) : null}
+
+        <div className="hm-launcher-actions">
+          <button type="submit" className="hm-btn hm-btn--launch" disabled={pending}>
+            {pending ? "Launching…" : requestApproval ? "Propose mission" : "Launch mission"}
+          </button>
+          <p className="hm-launch-explainer">
+            {requestApproval
+              ? "Hermes reviews before any runner claims it — lands in Your decisions."
+              : "Auto-dispatch — runs immediately, without a review gate."}
+          </p>
+        </div>
+      </form>
+    </UtilCard>
+  );
+}
+
+/** A pill toggle that keeps a real, label-associated checkbox for a11y + tests. */
+function ToggleChip({
+  checked,
+  onChange,
+  children,
+}: {
+  checked: boolean;
+  onChange: (value: boolean) => void;
+  children: string;
+}) {
+  return (
+    <label className={`hm-toggle-chip${checked ? " hm-toggle-chip--on" : ""}`}>
+      <input
+        type="checkbox"
+        className="hm-visually-hidden"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span className="hm-toggle-dot" aria-hidden />
+      <span>{children}</span>
+    </label>
   );
 }
 

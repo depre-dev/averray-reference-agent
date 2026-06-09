@@ -1,5 +1,6 @@
 import { useId, useMemo, useState, type FormEvent } from "react";
 import type { MissionLaunchMode, SavedTestSuite, SaveTestSuiteInput } from "../lib/monitor/mission-launch.js";
+import { UtilCard } from "./UtilCard.js";
 
 const DEFAULT_TARGET = "https://app.averray.com";
 
@@ -55,21 +56,19 @@ export function TestSuitesPanel({ suites = [], onRunSuite, onSaveSuite, onApprov
     setOpen(false);
   };
 
-  return (
-    <section className="hm-test-suites" aria-label="Saved test suites">
-      <div className="hm-mission-launcher-head">
-        <div>
-          <span className="hm-mission-launcher-kicker">Suites</span>
-          <strong>Saved suite library</strong>
-          <span>{suites.length > 0 ? `${suites.length} named suites` : "No saved suites yet"}</span>
-        </div>
-        {onSaveSuite ? (
-          <button type="button" className="hm-btn hm-btn--sm" onClick={() => setOpen((value) => !value)}>
-            {open ? "Close" : "+ New suite"}
-          </button>
-        ) : null}
-      </div>
+  const newSuiteButton = onSaveSuite ? (
+    <button type="button" className="hm-btn hm-btn--sm hm-btn--dashed" onClick={() => setOpen((value) => !value)}>
+      {open ? "Close" : "+ New suite"}
+    </button>
+  ) : undefined;
 
+  return (
+    <UtilCard
+      title="Saved suites"
+      hint={suites.length > 0 ? `${suites.length} saved` : "library"}
+      action={newSuiteButton}
+      ariaLabel="Saved test suites"
+    >
       {sortedSuites.length > 0 ? (
         <div className="hm-test-suite-list">
           {sortedSuites.map((suite) => (
@@ -109,7 +108,13 @@ export function TestSuitesPanel({ suites = [], onRunSuite, onSaveSuite, onApprov
           ))}
         </div>
       ) : (
-        <p className="hm-test-suite-empty">Save a launcher config or create a named suite for repeat testbed runs.</p>
+        <div className="hm-suite-empty">
+          <span className="hm-suite-empty-icon" aria-hidden>·</span>
+          <div>
+            <strong>No saved suites yet</strong>
+            <span>Save a launcher config or create a named suite for repeat testbed runs.</span>
+          </div>
+        </div>
       )}
 
       {open ? (
@@ -173,7 +178,7 @@ export function TestSuitesPanel({ suites = [], onRunSuite, onSaveSuite, onApprov
           </div>
         </form>
       ) : null}
-    </section>
+    </UtilCard>
   );
 }
 

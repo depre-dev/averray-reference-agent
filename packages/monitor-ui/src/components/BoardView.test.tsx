@@ -167,12 +167,14 @@ describe("BoardView — rich-mix board (open stream)", () => {
     );
 
     fireEvent.click(getByRole("button", { name: /Utilities/ }));
-    fireEvent.click(getByRole("button", { name: "Start a mission" }));
+    // The launcher is always-expanded inside the Utilities panel now.
     fireEvent.change(getByLabelText("Target"), { target: { value: "https://app.averray.com/agents" } });
     fireEvent.click(getByLabelText(/Role Gating/));
     fireEvent.change(getByLabelText("Goal"), { target: { value: "verify role gates" } });
     fireEvent.click(getByLabelText(/Save this config as a suite/));
     fireEvent.change(getByLabelText("Suite name"), { target: { value: "Role gate sweep" } });
+    // Turn approval off → auto-dispatch (initialStatus "ready"); CTA reads "Launch mission".
+    fireEvent.click(getByLabelText(/Request approval/));
     fireEvent.click(getByRole("button", { name: "Launch mission" }));
 
     expect(onSpawnMission).toHaveBeenCalledWith({
@@ -493,25 +495,22 @@ describe("BoardView — rich-mix board (open stream)", () => {
         ],
       },
     };
-    const { getAllByText, getByRole, getByText, queryByText, queryAllByText } = render(<BoardView board={board} status="open" />);
+    const { getAllByText, getByRole, getByText, queryAllByText } = render(<BoardView board={board} status="open" />);
     fireEvent.click(getByRole("button", { name: /Utilities/ }));
     expect(getByRole("region", { name: "LLM usage" })).toBeTruthy();
-    // Collapsed by default: leads with the headline (total tokens + call count)…
-    expect(getByText("59K tokens · 12 calls")).toBeTruthy();
-    // …and the detail (per-source rows, idle line) is hidden until expanded.
-    expect(queryByText("48K in · 9K out")).toBeNull();
-    expect(queryByText(/source idle/)).toBeNull();
-    // Expand the panel to reveal the active source detail + collapsed idle line.
-    fireEvent.click(getByText("59K tokens · 12 calls"));
-    expect(getAllByText("claude · claude-sonnet-4-5").length).toBeGreaterThan(0);
-    expect(getByText("59K tokens")).toBeTruthy();
-    expect(getByText("48K in · 9K out")).toBeTruthy();
-    // Idle sources collapse into ONE muted line; the reason is hidden until expand.
+    // The card shows a real per-model table: an "All models" total + the row.
+    expect(getByText("All models")).toBeTruthy();
+    expect(getAllByText("59K").length).toBeGreaterThan(0); // total + the single model
+    expect(getByText("claude-sonnet-4-5")).toBeTruthy();
+    expect(getByText(/48K in · 9K out/)).toBeTruthy();
+    // Latency has no real source → an explicit "?" (never fabricated).
+    expect(getAllByText("?").length).toBeGreaterThan(0);
+    // The in-flight line names the live call.
+    expect(getByText("claude · claude-sonnet-4-5")).toBeTruthy();
+    // Idle sources show as ONE muted line in place; the honest reason is one
+    // click away (truth-boundary preserved), and there is no flat "not reported" row.
     expect(getByText(/1 source idle: codex/)).toBeTruthy();
-    expect(queryByText("Codex CLI does not report usage.")).toBeNull();
-    // No flat per-source "not reported" row.
     expect(queryAllByText("not reported").length).toBe(0);
-    // Expanding the idle line reveals the honest reason (truth-boundary preserved).
     fireEvent.click(getByText(/1 source idle: codex/));
     expect(getByText("Codex CLI does not report usage.")).toBeTruthy();
   });
@@ -537,10 +536,8 @@ describe("BoardView — rich-mix board (open stream)", () => {
     const { getByRole, getByText, queryByText } = render(<BoardView board={board} status="open" />);
     fireEvent.click(getByRole("button", { name: /Utilities/ }));
     expect(getByRole("region", { name: "LLM usage" })).toBeTruthy();
-    // The one-line summary states "usage not reported" honestly without expanding.
+    // Honest empty state, shown in place — no fabricated zero-filled rows.
     expect(getByText("usage not reported")).toBeTruthy();
-    // The full plain-language explanation is reachable on expand (truth-boundary).
-    fireEvent.click(getByText("usage not reported"));
     expect(getByText(/No LLM usage counters have been recorded yet/)).toBeTruthy();
     expect(queryByText("not_recorded")).toBeNull();
   });
