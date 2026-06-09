@@ -91,6 +91,11 @@
   padding: 8px 2px;
   border-top: 1px solid var(--h4-line-2);
 }
+/* with a real cost column the table is 5 across */
+.hm-usage-table--cost .hm-usage-row {
+  grid-template-columns: 1fr 52px 40px 58px 50px;
+  gap: 8px;
+}
 .hm-usage-row--head {
   border-top: 0;
   padding-bottom: 7px;
@@ -217,35 +222,44 @@
 .hm-usage-idle {
   margin-top: 9px;
 }
-.hm-usage-idle-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  padding: 2px 0;
-  font-family: var(--font-mono);
-  font-size: 11px;
+.hm-usage-idle-head {
+  display: block;
+  margin-bottom: 6px;
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--h4-faint);
 }
 .hm-usage-idle-list {
   list-style: none;
-  margin: 6px 0 0;
+  margin: 0;
   padding: 0;
   display: grid;
-  gap: 6px;
+  gap: 5px;
 }
 .hm-usage-idle-list li {
-  display: grid;
-  gap: 2px;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+.hm-usage-jewel--idle {
+  align-self: center;
+  opacity: 0.5;
 }
 .hm-usage-idle-list strong {
-  font-family: var(--font-display);
+  font-family: var(--font-mono);
   font-size: 11.5px;
   color: var(--h4-ink-2);
+  flex: none;
 }
-.hm-usage-idle-list span {
+/* the reason is the span AFTER the name — scoped so it doesn't also match the
+   jewel span (which must stay 6px, not grow). */
+.hm-usage-idle-list strong + span {
+  flex: 1;
+  min-width: 0;
   font-size: 11px;
   color: var(--h4-faint);
   line-height: 1.4;
@@ -295,6 +309,17 @@
   font-size: 10px;
   color: var(--h4-faint);
   pointer-events: none;
+}
+/* the daily chart carries real data — its chip + caption read as "live", and the
+   caption sits below the bars (static) rather than overlaying an empty frame. */
+.hm-usage-chart-chip--live {
+  color: var(--h4-tel);
+  border-color: var(--h4-tel);
+}
+.hm-usage-chart-note--live {
+  position: static;
+  text-align: left;
+  margin-top: 4px;
 }
 
 /* ── SuitePanel: honest-empty + rows inside the card ─────────────────────── */
