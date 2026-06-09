@@ -24,7 +24,7 @@ import type { LlmUsageAggregate, MonitorBoard } from "../lib/monitor/board-cache
 import type { BacklogSuggestionsResponse } from "../lib/monitor/backlog-suggestions.js";
 import type { StreamStatus } from "../lib/monitor/live-stream.js";
 import { LANES, type BoardCard, type CreateTaskInput } from "../lib/monitor/card-types.js";
-import type { MissionSpawnInput, SavedTestSuite, SaveTestSuiteInput } from "../lib/monitor/mission-launch.js";
+import type { MissionSpawnInput, MissionLaunchOutcome, SavedTestSuite, SaveTestSuiteInput } from "../lib/monitor/mission-launch.js";
 import { StartMissionLauncher } from "./StartMissionLauncher.js";
 import { TestSuitesPanel } from "./TestSuitesPanel.js";
 import { laneFor, isDecision, tierFor, type KanbanTier } from "../lib/monitor/lane-rules.js";
@@ -124,7 +124,7 @@ export interface BoardViewProps {
   onCardClick?: (id: string) => void;
   onCardClose?: () => void;
   onCardNavigate?: (id: string) => void;
-  onSpawnMission?: (input: MissionSpawnInput) => void;
+  onSpawnMission?: (input: MissionSpawnInput) => MissionLaunchOutcome;
   onSaveSuite?: (input: SaveTestSuiteInput) => void;
   onRunSuite?: (id: string) => void;
   onApproveSuite?: (id: string) => void;

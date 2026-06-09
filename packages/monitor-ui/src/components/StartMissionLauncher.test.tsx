@@ -69,3 +69,46 @@ describe("StartMissionLauncher — Citation Repair flow", () => {
     expect(arg).not.toHaveProperty("jobId");
   });
 });
+
+describe("StartMissionLauncher — launch feedback (no more silent close)", () => {
+  test("a reported success shows 'Mission requested ✓' and keeps the panel open", async () => {
+    const onSpawnMission = vi.fn(async () => ({ ok: true, status: 200 }));
+    const r = render(<StartMissionLauncher onSpawnMission={onSpawnMission} />);
+    openLauncher(r);
+    launch(r);
+
+    expect(await r.findByText(/Mission requested ✓/)).toBeTruthy();
+    // The panel stays open (the silent close was the "nothing happens" report).
+    expect(r.getByText("Target")).toBeTruthy();
+  });
+
+  test("a non-2xx POST shows an explicit failure instead of failing silently", async () => {
+    const onSpawnMission = vi.fn(async () => ({ ok: false, status: 500 }));
+    const r = render(<StartMissionLauncher onSpawnMission={onSpawnMission} />);
+    openLauncher(r);
+    launch(r);
+
+    const alert = await r.findByRole("alert");
+    expect(alert.textContent).toMatch(/Launch failed — HTTP 500/);
+    expect(r.getByText("Target")).toBeTruthy(); // still open so the operator can retry
+  });
+
+  test("a network failure ({ ok:false, error }) reads as a failure, not success", async () => {
+    const onSpawnMission = vi.fn(async () => ({ ok: false, error: "network" }));
+    const r = render(<StartMissionLauncher onSpawnMission={onSpawnMission} />);
+    openLauncher(r);
+    launch(r);
+
+    const alert = await r.findByRole("alert");
+    expect(alert.textContent).toMatch(/Launch failed — network/);
+  });
+
+  test("a fire-and-forget handler (returns void) still confirms best-effort", () => {
+    const onSpawnMission = vi.fn(() => {});
+    const r = render(<StartMissionLauncher onSpawnMission={onSpawnMission} />);
+    openLauncher(r);
+    launch(r);
+
+    expect(r.getByText(/Mission requested ✓/)).toBeTruthy(); // synchronous, no await
+  });
+});

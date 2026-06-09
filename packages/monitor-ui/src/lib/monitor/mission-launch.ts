@@ -18,6 +18,25 @@ export interface MissionLaunchInput {
 export type MissionSpawnInput = string | MissionLaunchInput;
 
 /**
+ * The result of a spawn POST, so the launcher can give the operator honest
+ * feedback instead of failing silently (PR — launch feedback). `ok` mirrors the
+ * HTTP response.ok; `status` is the code; `error` is set for a network failure.
+ */
+export interface MissionLaunchResult {
+  ok: boolean;
+  status?: number;
+  error?: string;
+}
+
+/**
+ * A spawn handler may be fire-and-forget (returns void — e.g. the /mission
+ * command path or a test mock) OR report the POST result so the UI can confirm
+ * it. Returning the result is what lets the launcher show "requested ✓" vs
+ * "launch failed" rather than silently closing.
+ */
+export type MissionLaunchOutcome = void | Promise<MissionLaunchResult | void>;
+
+/**
  * Build the POST body for /monitor/testbed-missions from a launch input. Pure
  * so the mode→body mapping is unit-tested. citation_repair keys off jobId, not
  * a URL — it omits targetUrl and carries jobId (empty jobId ⇒ the server-side

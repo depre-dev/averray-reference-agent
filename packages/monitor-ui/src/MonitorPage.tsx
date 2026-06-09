@@ -30,7 +30,7 @@ import { useAutonomyMode, type UseAutonomyModeOptions } from "./hooks/useAutonom
 import { useColorProfile } from "./hooks/useColorProfile.js";
 import { kpiCounts } from "./lib/monitor/board-state.js";
 import type { BoardCard, CreateTaskInput } from "./lib/monitor/card-types.js";
-import { missionLaunchBody, type MissionSpawnInput, type SaveTestSuiteInput } from "./lib/monitor/mission-launch.js";
+import { missionLaunchBody, type MissionSpawnInput, type MissionLaunchOutcome, type MissionLaunchResult, type SaveTestSuiteInput } from "./lib/monitor/mission-launch.js";
 import { BoardView } from "./components/BoardView.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 
@@ -47,8 +47,10 @@ export interface MonitorPageProps {
   options?: UseMonitorBoardOptions;
   /** Override the read-only backlog-suggestions endpoint wiring for tests. */
   backlogSuggestions?: UseBacklogSuggestionsOptions;
-  /** Override the /mission spawn (defaults to POST /monitor/testbed-missions). */
-  onSpawnMission?: (input: MissionSpawnInput) => void;
+  /** Override the /mission spawn (defaults to POST /monitor/testbed-missions).
+   *  May report a {@link MissionLaunchResult} so the launcher can confirm the
+   *  spawn instead of failing silently. */
+  onSpawnMission?: (input: MissionSpawnInput) => MissionLaunchOutcome;
   /** Override saving a named suite (defaults to POST /monitor/suites). */
   onSaveSuite?: (input: SaveTestSuiteInput) => void;
   /** Override running a named suite (defaults to POST /monitor/suites/:id/run). */
@@ -220,14 +222,22 @@ function defaultDismissSuite(id: string): void {
  * board — so the spawned card appears and updates through the live feed.
  * Fire-and-forget: the board feed, not this call, drives the UI.
  */
-function defaultSpawnMission(input: MissionSpawnInput): void {
-  void fetch(MISSIONS_URL, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(missionSpawnBody(input)),
-  }).catch(() => {
-    /* surfaced via the board feed / degraded state, not thrown here */
-  });
+async function defaultSpawnMission(input: MissionSpawnInput): Promise<MissionLaunchResult> {
+  // Reports the POST result so the launcher can confirm "requested ✓" or show
+  // "launch failed — <status>" instead of swallowing the outcome. We check
+  // response.ok explicitly (a 4xx/5xx does NOT reject fetch), and never throw —
+  // a network failure resolves to { ok: false } so callers that ignore the
+  // result (the /mission command path) can't trip an unhandled rejection.
+  try {
+    const res = await fetch(MISSIONS_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(missionSpawnBody(input)),
+    });
+    return { ok: res.ok, status: res.status };
+  } catch {
+    return { ok: false, error: "network" };
+  }
 }
 
 function missionSpawnBody(input: MissionSpawnInput): Record<string, unknown> {

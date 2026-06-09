@@ -796,6 +796,11 @@ body { margin: 0; }
 .hm-form-error {
   color: var(--hm-rose);
 }
+.hm-form-ok {
+  color: var(--hm-sage-deep);
+  font-size: 12px;
+  font-weight: 600;
+}
 @media (max-width: 1100px) {
   .hm-mission-launcher-form {
     grid-template-columns: 1fr;
