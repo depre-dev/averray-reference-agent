@@ -94,11 +94,37 @@ describe("UsagePanel", () => {
     expect(queryByText("not wired")).toBeNull();
   });
 
-  test("falls back to an honest awaiting-data frame when there's no daily series", () => {
+  test("renders the live per-minute per-model lines when there's recent activity", () => {
+    const points = new Array<number>(60).fill(0);
+    points[58] = 40;
+    points[59] = 120;
+    const claudePoints = new Array<number>(60).fill(0);
+    claudePoints[59] = 35;
+    const withRecent: LlmUsageAggregate = {
+      ...recorded,
+      recent: {
+        windowMinutes: 60,
+        endsAt: "2026-06-09T12:30:00.000Z",
+        series: [
+          { agent: "hermes", model: "deepseek-v4-pro", points },
+          { agent: "claude", model: "claude-sonnet-4-6", points: claudePoints },
+        ],
+      },
+    };
+    const { getByText, getByLabelText, queryByText } = render(<UsagePanel usage={withRecent} />);
+    expect(getByLabelText(/Live tokens per minute/)).toBeTruthy();
+    expect(getByText("Recent usage · tokens/min · per model")).toBeTruthy();
+    expect(getByText("live · 60m")).toBeTruthy();
+    // Per-model legend names both active models; no "idle"/"not wired" frame.
+    expect(queryByText("idle")).toBeNull();
+    expect(queryByText("not wired")).toBeNull();
+  });
+
+  test("falls back to an honest idle frame when there's no recent activity and no daily series", () => {
     const { getByText, getByLabelText } = render(<UsagePanel usage={recorded} />);
-    expect(getByLabelText("Usage over time — awaiting per-minute stream")).toBeTruthy();
-    expect(getByText("not wired")).toBeTruthy();
-    expect(getByText("awaiting per-minute usage stream")).toBeTruthy();
+    expect(getByLabelText("Usage over time — no recent activity")).toBeTruthy();
+    expect(getByText("idle")).toBeTruthy();
+    expect(getByText("no token usage in the last hour")).toBeTruthy();
   });
 
   test("renders the honest empty state when nothing is recorded", () => {

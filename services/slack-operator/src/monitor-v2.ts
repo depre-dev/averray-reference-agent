@@ -2074,6 +2074,8 @@ export function buildV2BoardSnapshot(
     repo: opts.repo ?? "",
     llmUsage: aggregateLlmUsage(usageEvents(asRecord(rawSnapshot)?.llmUsageEvents), {
       activeCalls: listActiveLlmUsageCalls(),
+      // Anchor the live "tokens/min" window to the snapshot time.
+      now: snapshotAt,
     }),
     testbedSuites: testbedSuitesFromSnapshot(rawSnapshot),
     automationHealth: automationHealthForBoard(rawSnapshot, snapshotAt, process.env, {

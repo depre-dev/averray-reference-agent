@@ -321,6 +321,27 @@
   text-align: left;
   margin-top: 4px;
 }
+/* per-model legend under the live tokens/min lines */
+.hm-usage-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+}
+.hm-usage-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.hm-usage-legend-item > span:last-child {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--h4-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* ── SuitePanel: honest-empty + rows inside the card ─────────────────────── */
 .hm-suite-empty {

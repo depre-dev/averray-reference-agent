@@ -1,4 +1,4 @@
-import type { LlmUsageAggregate } from "../lib/monitor/board-cache.js";
+import type { LlmUsageAggregate, LlmUsageRecent } from "../lib/monitor/board-cache.js";
 import { formatCompactNumber, formatNumber, formatRelativeTime } from "../lib/monitor/format.js";
 import { UtilCard } from "./UtilCard.js";
 
@@ -32,6 +32,9 @@ export function UsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
   // Real daily-tokens series (oldest→newest, last 14 days) — a chart, not a guess.
   const chartDays = (usage?.byDay ?? []).slice().sort((a, b) => a.day.localeCompare(b.day)).slice(-14);
   const hasChart = recorded && chartDays.length >= 2;
+  // Live per-minute per-model series — shown only when there's real recent activity.
+  const recent = usage?.recent ?? null;
+  const hasRecent = !!recent && recent.series.some((s) => s.points.some((p) => p > 0));
 
   return (
     <UtilCard title="LLM usage" hint="per model · all agents" fill ariaLabel="LLM usage">
@@ -128,15 +131,17 @@ export function UsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
         </div>
       ) : null}
 
-      {/* Time chart — REAL daily byDay tokens when we have ≥2 days; otherwise an
-          honest awaiting frame (the per-minute stream isn't wired). */}
-      {hasChart ? (
+      {/* Time chart — live per-minute per-model lines when there's recent activity,
+          else the real daily byDay bars, else an honest idle frame. */}
+      {hasRecent && recent ? (
+        <RecentLinesChart recent={recent} jewel={agentJewel} />
+      ) : hasChart ? (
         <DailyTokensChart days={chartDays} />
       ) : hasTable ? (
-        <div className="hm-usage-chart" role="img" aria-label="Usage over time — awaiting per-minute stream">
+        <div className="hm-usage-chart" role="img" aria-label="Usage over time — no recent activity">
           <div className="hm-usage-chart-head">
             <span className="hm-usage-chart-label">Usage over time · per minute</span>
-            <span className="hm-usage-chart-chip">not wired</span>
+            <span className="hm-usage-chart-chip">idle</span>
           </div>
           <svg className="hm-usage-chart-frame" viewBox="0 0 300 120" preserveAspectRatio="none" aria-hidden>
             {[0.25, 0.5, 0.75].map((g) => (
@@ -156,10 +161,71 @@ export function UsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
               </text>
             ))}
           </svg>
-          <span className="hm-usage-chart-note">awaiting per-minute usage stream</span>
+          <span className="hm-usage-chart-note">no token usage in the last hour</span>
         </div>
       ) : null}
     </UtilCard>
+  );
+}
+
+/** Live per-model lines — real per-minute token sums over the recent window. */
+function RecentLinesChart({ recent, jewel }: { recent: LlmUsageRecent; jewel: (agent: string) => string }) {
+  const padL = 4, padR = 4, padT = 8, padB = 18;
+  const w = 300, h = 120;
+  const plotW = w - padL - padR;
+  const plotH = h - padT - padB;
+  const n = Math.max(1, recent.windowMinutes);
+  const max = Math.max(1, ...recent.series.flatMap((s) => s.points));
+  const xAt = (i: number) => padL + (n <= 1 ? plotW : (i / (n - 1)) * plotW);
+  const yAt = (v: number) => padT + (1 - v / max) * plotH;
+  const linePath = (points: number[]) => points.map((v, i) => `${i ? "L" : "M"}${xAt(i).toFixed(1)} ${yAt(v).toFixed(1)}`).join(" ");
+  const ticks = [`-${n}m`, `-${Math.round(n * 0.75)}m`, `-${Math.round(n / 2)}m`, `-${Math.round(n / 4)}m`, "now"];
+  return (
+    <div className="hm-usage-chart" role="img" aria-label={`Live tokens per minute, last ${n} minutes, per model`}>
+      <div className="hm-usage-chart-head">
+        <span className="hm-usage-chart-label">Recent usage · tokens/min · per model</span>
+        <span className="hm-usage-chart-chip hm-usage-chart-chip--live">live · {n}m</span>
+      </div>
+      <svg className="hm-usage-chart-frame" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" aria-hidden>
+        {[0.25, 0.5, 0.75].map((g) => (
+          <line key={g} x1={padL} x2={w - padR} y1={padT + g * plotH} y2={padT + g * plotH} stroke="var(--h4-line-2)" strokeWidth="1" />
+        ))}
+        {recent.series.map((s) => (
+          <path
+            key={`${s.agent}:${s.model}`}
+            d={linePath(s.points)}
+            fill="none"
+            stroke={jewel(s.agent)}
+            strokeWidth="1.6"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            opacity="0.75"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+        {ticks.map((t, i) => (
+          <text
+            key={t}
+            x={padL + (i / 4) * plotW}
+            y={h - 5}
+            fill="var(--h4-faint)"
+            fontSize="8"
+            fontFamily="var(--font-mono)"
+            textAnchor={i === 0 ? "start" : i === 4 ? "end" : "middle"}
+          >
+            {t}
+          </text>
+        ))}
+      </svg>
+      <div className="hm-usage-chart-legend">
+        {recent.series.map((s) => (
+          <span className="hm-usage-legend-item" key={`${s.agent}:${s.model}`}>
+            <span className="hm-usage-jewel" style={{ background: jewel(s.agent) }} aria-hidden />
+            <span>{s.model}</span>
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 
