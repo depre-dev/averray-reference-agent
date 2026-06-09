@@ -1,47 +1,54 @@
-import { useState } from "react";
 import type { LlmUsageAggregate } from "../lib/monitor/board-cache.js";
 import { formatCompactNumber, formatNumber, formatRelativeTime } from "../lib/monitor/format.js";
 import { UtilCard } from "./UtilCard.js";
 
 /**
- * LLM usage card — the redesigned, design-faithful surface for the Utilities
- * panel. Binds ONLY to real LlmUsageAggregate: per-(agent, model) rows, an
- * "All models" total, the in-flight line, and idle sources with their honest
- * reasons one click away. Truth-boundary:
+ * LLM usage card — the design-faithful surface for the Utilities panel. Binds
+ * ONLY to real LlmUsageAggregate: per-(agent, model) rows, an "All models"
+ * total, the in-flight line, EVERY expected agent (active or idle — none
+ * hidden), real cost when recorded, and a real daily-tokens chart. Truth-boundary:
  *   - Latency renders "?" — LlmUsageModelRollup has no latency field.
- *   - Cost is never shown while costStatus is "not_recorded".
- *   - The recent-usage chart is an explicit awaiting-data frame, never the
- *     design's synthetic "demo shape" series (no real per-minute stream exists).
- *   - When nothing is recorded, the honest message replaces the table — no
- *     zero-filled fake rows.
+ *   - Cost shows only when costStatus is "recorded" (never fabricated); the Cost
+ *     column appears only when at least one source reports it.
+ *   - The time chart is REAL daily byDay tokens when ≥2 days exist; otherwise an
+ *     honest "awaiting per-minute stream" frame (that source isn't wired yet).
+ *   - When nothing is recorded, the honest message replaces the table.
  */
 export function UsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
-  const [showIdle, setShowIdle] = useState(false);
   const recorded = usage?.status === "recorded";
   const latestDay = usage?.byDay?.[0];
   // Every (agent, model) that actually reported counters.
   const models = usage?.byModel?.length ? usage.byModel : latestDay?.byModel ?? [];
-  // Idle sources collapse into ONE line; their honest reasons stay reachable.
+  // Every expected agent that has NOT reported — shown explicitly, never collapsed,
+  // so the full agent roster (claude · test-writer · security · docs · codex · hermes)
+  // is always accounted for.
   const idleSources = (usage?.sourceStatus ?? []).filter((entry) => entry.status === "not_reported");
   const activeCalls = usage?.activeCalls ?? [];
   const emptyMessage = usage?.message
     ?? "No LLM usage counters have been recorded yet. Sources stay not reported until a real provider or runner emits whitelisted counters.";
   const hasTable = recorded && models.length > 0;
+  // Cost column only when a real cost was recorded somewhere (never a column of "?").
+  const showCost = !!usage && (usage.costStatus === "recorded" || models.some((m) => m.costStatus === "recorded"));
+  // Real daily-tokens series (oldest→newest, last 14 days) — a chart, not a guess.
+  const chartDays = (usage?.byDay ?? []).slice().sort((a, b) => a.day.localeCompare(b.day)).slice(-14);
+  const hasChart = recorded && chartDays.length >= 2;
 
   return (
-    <UtilCard title="LLM usage" hint="per model · last 60 min" fill ariaLabel="LLM usage">
+    <UtilCard title="LLM usage" hint="per model · all agents" fill ariaLabel="LLM usage">
       {hasTable ? (
-        <div className="hm-usage-table">
+        <div className={`hm-usage-table${showCost ? " hm-usage-table--cost" : ""}`}>
           <div className="hm-usage-row hm-usage-row--head">
             <span className="hm-usage-c-model">Model</span>
             <span className="hm-usage-c-num">Tokens</span>
             <span className="hm-usage-c-num">Calls</span>
+            {showCost ? <span className="hm-usage-c-num">Cost</span> : null}
             <span className="hm-usage-c-num">Latency</span>
           </div>
           <div className="hm-usage-row hm-usage-row--total">
             <span className="hm-usage-c-model">All models</span>
             <span className="hm-usage-c-num">{formatCompactNumber(usage!.totalTokens)}</span>
             <span className="hm-usage-c-num">{formatNumber(usage!.runs)}</span>
+            {showCost ? <span className="hm-usage-c-num">{formatCost(usage!.costUsd, usage!.costStatus)}</span> : null}
             <span className="hm-usage-c-num hm-usage-c-na" title="latency not reported">?</span>
           </div>
           {models.map((entry) => (
@@ -53,6 +60,11 @@ export function UsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
               </span>
               <span className="hm-usage-c-num">{formatCompactNumber(entry.totalTokens)}</span>
               <span className="hm-usage-c-num">{formatNumber(entry.runs)}</span>
+              {showCost ? (
+                <span className={`hm-usage-c-num${entry.costStatus === "recorded" ? "" : " hm-usage-c-na"}`} title={entry.costStatus === "recorded" ? undefined : "cost not reported"}>
+                  {formatCost(entry.costUsd, entry.costStatus)}
+                </span>
+              ) : null}
               <span className="hm-usage-c-num hm-usage-c-na" title="latency not reported">?</span>
             </div>
           ))}
@@ -99,38 +111,31 @@ export function UsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
         </strong>
       </div>
 
-      {/* Idle sources — one muted line; honest reasons one click away. */}
+      {/* Idle agents — the rest of the roster, shown explicitly (not collapsed),
+          each with its honest reason. So every agent is accounted for. */}
       {idleSources.length > 0 ? (
         <div className="hm-usage-idle">
-          <button
-            type="button"
-            className="hm-usage-idle-toggle"
-            aria-expanded={showIdle}
-            onClick={() => setShowIdle((value) => !value)}
-          >
-            <span aria-hidden>{showIdle ? "▾" : "▸"}</span>
-            {idleSources.length} source{idleSources.length === 1 ? "" : "s"} idle: {idleSources.map((entry) => entry.agent).join(" · ")}
-          </button>
-          {showIdle ? (
-            <ul className="hm-usage-idle-list">
-              {idleSources.map((entry) => (
-                <li key={entry.agent}>
-                  <strong>{entry.agent}</strong>
-                  <span>{entry.reason ?? `${entry.agent} usage counters have not arrived.`}</span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
+          <span className="hm-usage-idle-head">Idle agents · {idleSources.length}</span>
+          <ul className="hm-usage-idle-list">
+            {idleSources.map((entry) => (
+              <li key={entry.agent}>
+                <span className="hm-usage-jewel hm-usage-jewel--idle" style={{ background: agentJewel(entry.agent) }} aria-hidden />
+                <strong>{entry.agent}</strong>
+                <span>{entry.reason ?? `${entry.agent} usage counters have not arrived.`}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
 
-      {/* Recent-usage chart slot — honest awaiting-data frame, never synthetic
-          data. Keeps the design's visual slot; a real per-minute stream renders
-          here when it lands. */}
-      {hasTable ? (
-        <div className="hm-usage-chart" role="img" aria-label="Recent per-model usage — awaiting data stream">
+      {/* Time chart — REAL daily byDay tokens when we have ≥2 days; otherwise an
+          honest awaiting frame (the per-minute stream isn't wired). */}
+      {hasChart ? (
+        <DailyTokensChart days={chartDays} />
+      ) : hasTable ? (
+        <div className="hm-usage-chart" role="img" aria-label="Usage over time — awaiting per-minute stream">
           <div className="hm-usage-chart-head">
-            <span className="hm-usage-chart-label">Recent usage · tokens/min · per model</span>
+            <span className="hm-usage-chart-label">Usage over time · per minute</span>
             <span className="hm-usage-chart-chip">not wired</span>
           </div>
           <svg className="hm-usage-chart-frame" viewBox="0 0 300 120" preserveAspectRatio="none" aria-hidden>
@@ -151,11 +156,64 @@ export function UsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
               </text>
             ))}
           </svg>
-          <span className="hm-usage-chart-note">awaiting per-model usage stream</span>
+          <span className="hm-usage-chart-note">awaiting per-minute usage stream</span>
         </div>
       ) : null}
     </UtilCard>
   );
+}
+
+/** Real daily-tokens bars from byDay (totalTokens per day). */
+function DailyTokensChart({ days }: { days: { day: string; totalTokens: number }[] }) {
+  const padL = 4, padR = 4, padT = 8, padB = 18;
+  const w = 300, h = 120;
+  const plotW = w - padL - padR;
+  const plotH = h - padT - padB;
+  const max = Math.max(1, ...days.map((d) => d.totalTokens));
+  const slot = plotW / days.length;
+  const barW = Math.min(28, slot * 0.62);
+  const tickIdx = days.length <= 4
+    ? days.map((_, i) => i)
+    : [0, Math.round((days.length - 1) / 2), days.length - 1];
+  return (
+    <div className="hm-usage-chart" role="img" aria-label={`Daily tokens, last ${days.length} days`}>
+      <div className="hm-usage-chart-head">
+        <span className="hm-usage-chart-label">Daily tokens · last {days.length} days</span>
+        <span className="hm-usage-chart-chip hm-usage-chart-chip--live">daily</span>
+      </div>
+      <svg className="hm-usage-chart-frame" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" aria-hidden>
+        {[0.5].map((g) => (
+          <line key={g} x1={padL} x2={w - padR} y1={padT + g * plotH} y2={padT + g * plotH} stroke="var(--h4-line-2)" strokeWidth="1" />
+        ))}
+        {days.map((d, i) => {
+          const bh = (d.totalTokens / max) * plotH;
+          const x = padL + i * slot + (slot - barW) / 2;
+          const y = padT + (plotH - bh);
+          return <rect key={d.day} x={x} y={y} width={barW} height={Math.max(0, bh)} rx="1.5" fill="var(--h4-tel)" opacity="0.72" />;
+        })}
+        {tickIdx.map((i) => (
+          <text
+            key={days[i]!.day}
+            x={padL + i * slot + slot / 2}
+            y={h - 5}
+            fill="var(--h4-faint)"
+            fontSize="8"
+            fontFamily="var(--font-mono)"
+            textAnchor={i === 0 ? "start" : i === days.length - 1 ? "end" : "middle"}
+          >
+            {days[i]!.day.slice(5)}
+          </text>
+        ))}
+      </svg>
+      <span className="hm-usage-chart-note hm-usage-chart-note--live">{formatCompactNumber(days.reduce((s, d) => s + d.totalTokens, 0))} tokens over {days.length} days</span>
+    </div>
+  );
+}
+
+function formatCost(usd: number | null | undefined, status: string): string {
+  if (status !== "recorded" || usd == null) return "?";
+  if (usd === 0) return "$0";
+  return usd < 0.01 ? "<$0.01" : `$${usd.toFixed(2)}`;
 }
 
 /**

@@ -507,12 +507,12 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(getAllByText("?").length).toBeGreaterThan(0);
     // The in-flight line names the live call.
     expect(getByText("claude · claude-sonnet-4-5")).toBeTruthy();
-    // Idle sources show as ONE muted line in place; the honest reason is one
-    // click away (truth-boundary preserved), and there is no flat "not reported" row.
-    expect(getByText(/1 source idle: codex/)).toBeTruthy();
-    expect(queryAllByText("not reported").length).toBe(0);
-    fireEvent.click(getByText(/1 source idle: codex/));
+    // Every expected agent is accounted for: idle ones are listed explicitly
+    // (not collapsed) with their honest reason; no flat "not reported" row.
+    expect(getByText("Idle agents · 1")).toBeTruthy();
+    // codex (idle) is named explicitly with its honest reason (unique to the usage card).
     expect(getByText("Codex CLI does not report usage.")).toBeTruthy();
+    expect(queryAllByText("not reported").length).toBe(0);
   });
 
   test("renders a plain-language usage explanation when no source emits counters", () => {
