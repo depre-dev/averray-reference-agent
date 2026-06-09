@@ -1,0 +1,537 @@
+/* Hermes-4 — Utilities panel redesign (LLM usage · suites · tester launcher).
+ *
+ * A calm, dim, two-column card surface that is secondary to the board. Coral
+ * (--h4-act*) appears exactly once: on the selected mission flow. Loaded last
+ * (after hermes4-board.css) so these additive rules win; every color comes from
+ * the active --h4-* profile so the panel tracks the theme. Markup that still
+ * lives in monitor.css (the suite authoring form, choice groups) is untouched.
+ */
+
+/* ── shared card chrome (UtilCard) ───────────────────────────────────────── */
+.hm-util-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 14px 15px;
+  background: var(--h4-paper);
+  border: 1px solid var(--h4-line-2);
+  border-radius: var(--h4-r-card);
+}
+.hm-util-card--fill {
+  height: 100%;
+}
+.hm-util-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.hm-util-card-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--h4-ink-2);
+  white-space: nowrap;
+  flex: none;
+}
+.hm-util-card-hint {
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--h4-faint);
+  flex: none;
+}
+.hm-util-card-action {
+  margin-left: auto;
+}
+
+/* ── the expanded panel grid: usage | (launcher over suites) ─────────────── */
+.hm-utility-bar-body {
+  /* override monitor.css's single-column stack */
+  grid-template-columns: 1fr 1fr;
+  align-items: stretch;
+  gap: 12px;
+  padding: 2px 14px 14px;
+}
+.hm-util-right {
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 12px;
+  min-width: 0;
+}
+/* the cards no longer carry their own band margins inside the grid */
+.hm-utility-bar-body .hm-llm-usage,
+.hm-utility-bar-body .hm-test-suites,
+.hm-utility-bar-body .hm-mission-launcher {
+  margin: 0;
+}
+/* Collapse on the PANEL's own width — it lives in the narrower lanes column
+   beside the co-pilot rail, not the full viewport, so a container query
+   measures the right axis (a viewport media query collapses too late). */
+.hm-utility-bar {
+  container-type: inline-size;
+}
+@container (max-width: 640px) {
+  .hm-utility-bar-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── UsagePanel: per-model table (real data) ─────────────────────────────── */
+.hm-usage-table {
+  display: flex;
+  flex-direction: column;
+}
+.hm-usage-row {
+  display: grid;
+  grid-template-columns: 1fr 56px 46px 62px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 2px;
+  border-top: 1px solid var(--h4-line-2);
+}
+.hm-usage-row--head {
+  border-top: 0;
+  padding-bottom: 7px;
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--h4-faint);
+}
+.hm-usage-row--total {
+  border-top: 1px solid var(--h4-line-2);
+  border-bottom: 1px solid var(--h4-line-2);
+}
+.hm-usage-row--total .hm-usage-c-model,
+.hm-usage-row--total .hm-usage-c-num {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--h4-ink);
+}
+.hm-usage-c-model {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.hm-usage-c-num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--h4-muted);
+}
+.hm-usage-c-na {
+  color: var(--h4-faint);
+}
+.hm-usage-jewel {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+.hm-usage-model {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--h4-ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hm-usage-owner {
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  color: var(--h4-faint);
+  flex: none;
+}
+.hm-usage-splits {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 9px;
+}
+.hm-usage-split {
+  display: grid;
+  gap: 3px;
+}
+.hm-usage-split small {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--h4-faint);
+}
+.hm-usage-bar {
+  display: flex;
+  height: 5px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--h4-paper-sunken);
+}
+/* in/out split uses the telemetry token (two opacities) — never --h4-act,
+   which is reserved for the one selected flow card. */
+.hm-usage-bar-in { background: var(--h4-tel); opacity: 0.8; }
+.hm-usage-bar-out { background: var(--h4-tel); opacity: 0.32; }
+
+.hm-usage-empty {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 4px 2px;
+}
+.hm-usage-empty strong {
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: var(--h4-muted);
+}
+.hm-usage-empty span {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--h4-faint);
+  text-wrap: pretty;
+}
+
+.hm-usage-active {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--h4-line-2);
+  flex-wrap: wrap;
+}
+.hm-usage-active > span {
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--h4-faint);
+  flex: none;
+}
+.hm-usage-active > strong {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--h4-ink-2);
+}
+
+.hm-usage-idle {
+  margin-top: 9px;
+}
+.hm-usage-idle-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 2px 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--h4-faint);
+}
+.hm-usage-idle-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.hm-usage-idle-list li {
+  display: grid;
+  gap: 2px;
+}
+.hm-usage-idle-list strong {
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  color: var(--h4-ink-2);
+}
+.hm-usage-idle-list span {
+  font-size: 11px;
+  color: var(--h4-faint);
+  line-height: 1.4;
+}
+
+/* recent-usage chart — honest awaiting-data frame (no synthetic series) */
+.hm-usage-chart {
+  margin-top: auto;
+  padding-top: 12px;
+  position: relative;
+}
+.hm-usage-chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.hm-usage-chart-label {
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--h4-faint);
+}
+.hm-usage-chart-chip {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 1px 7px;
+  border-radius: var(--h4-r-pill);
+  border: 1px solid var(--h4-line-2);
+  color: var(--h4-faint);
+}
+.hm-usage-chart-frame {
+  display: block;
+  width: 100%;
+  height: 90px;
+  overflow: visible;
+}
+.hm-usage-chart-note {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 34px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--h4-faint);
+  pointer-events: none;
+}
+
+/* ── SuitePanel: honest-empty + rows inside the card ─────────────────────── */
+.hm-suite-empty {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 2px;
+}
+.hm-suite-empty-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: var(--h4-paper-sunken);
+  border: 1px solid var(--h4-line-2);
+  color: var(--h4-faint);
+  font-size: 16px;
+}
+.hm-suite-empty > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.hm-suite-empty strong {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--h4-muted);
+}
+.hm-suite-empty span {
+  font-size: 12px;
+  color: var(--h4-faint);
+  line-height: 1.4;
+  text-wrap: pretty;
+}
+.hm-btn.hm-btn--dashed {
+  border-style: dashed;
+}
+/* suite rows read as calmer chips inside the card */
+.hm-util-card .hm-test-suite-list {
+  gap: 8px;
+}
+.hm-util-card .hm-test-suite-row {
+  border: 1px solid var(--h4-line-2);
+  border-radius: var(--h4-r-sm);
+  background: var(--h4-paper-sunken);
+}
+/* suite name truncates rather than overflowing the now half-width card. */
+.hm-util-card .hm-test-suite-row > div:first-child strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── LauncherPanel: flow cards + toggle pills + ink CTA ──────────────────── */
+/* The launcher now lives in a half-width card, not the full-width bar — so the
+   old 3-column form grid (≥640px min) overflows. Stack it vertically. */
+.hm-util-card .hm-mission-launcher-form {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 11px;
+  margin-top: 0;
+}
+.hm-util-card .hm-mission-launcher-form > * {
+  min-width: 0;
+  width: 100%;
+}
+/* In-card field labels read as calm faint eyebrows (matching the Flow eyebrow
+   + the design) — not the board's green sage labels that .hm-field spans and
+   .hm-choice-group legends inherit from monitor.css. */
+.hm-util-card .hm-field > span,
+.hm-util-card .hm-choice-group legend {
+  color: var(--h4-faint);
+  letter-spacing: 0.04em !important;
+}
+.hm-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.hm-field-eyebrow {
+  display: block;
+  margin-bottom: 6px;
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--h4-faint);
+}
+.hm-flow-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.hm-flow-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: var(--h4-r-sm);
+  border: 1px solid var(--h4-line);
+  background: var(--h4-paper-sunken);
+  cursor: pointer;
+  transition: border-color var(--h4-dur) var(--h4-ease), background var(--h4-dur) var(--h4-ease);
+}
+.hm-flow-card:focus-within {
+  outline: 2px solid var(--h4-act);
+  outline-offset: 1px;
+}
+.hm-flow-card--on {
+  /* the single coral accent in the whole utilities area */
+  border-color: var(--h4-act-line);
+  background: var(--h4-act-soft);
+}
+.hm-flow-dot {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 1.5px solid var(--h4-line-strong);
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+.hm-flow-card--on .hm-flow-dot {
+  border-color: var(--h4-act);
+}
+.hm-flow-card--on .hm-flow-dot::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--h4-act);
+}
+.hm-flow-name {
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--h4-ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hm-flow-card--on .hm-flow-name {
+  color: var(--h4-act-text);
+}
+.hm-flow-tag {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--h4-faint);
+  flex: none;
+}
+/* on the selected (coral-soft) card, lift the safety tag so read-only/testnet
+   clears contrast against the warm fill. */
+.hm-flow-card--on .hm-flow-tag {
+  color: var(--h4-act-text);
+}
+.hm-flow-desc {
+  margin: 7px 0 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--h4-muted);
+}
+
+.hm-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.hm-toggle-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: var(--h4-r-pill);
+  border: 1px solid var(--h4-line-2);
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--h4-faint);
+}
+.hm-toggle-chip:focus-within {
+  outline: 2px solid var(--h4-act);
+  outline-offset: 1px;
+}
+.hm-toggle-chip--on {
+  color: var(--h4-ok-text);
+  border-color: var(--h4-ok-line);
+  background: var(--h4-ok-soft);
+}
+.hm-toggle-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  flex: none;
+}
+.hm-toggle-chip--on .hm-toggle-dot {
+  background: currentColor;
+}
+
+.hm-launcher-actions {
+  display: grid;
+  gap: 6px;
+}
+.hm-btn.hm-btn--launch {
+  /* demoted to ink — never coral — so it never out-shouts the inbox Decide CTA */
+  width: 100%;
+  background: var(--h4-ink);
+  color: var(--h4-paper);
+  border: 1px solid transparent;
+}
+.hm-btn.hm-btn--launch:hover:not(:disabled) {
+  background: var(--h4-ink-2);
+}
+.hm-btn.hm-btn--launch:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.hm-launch-explainer {
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--h4-faint);
+  text-wrap: pretty;
+}

@@ -191,15 +191,15 @@ describe("MonitorPage — container", () => {
       );
       await waitFor(() => expect(getByRole("button", { name: /Utilities/ })).toBeTruthy());
       fireEvent.click(getByRole("button", { name: /Utilities/ }));
-      await waitFor(() => expect(getByRole("button", { name: "Start a mission" })).toBeTruthy());
+      // The launcher is always-expanded inside the Utilities panel now.
+      await waitFor(() => expect(getByLabelText("Target")).toBeTruthy());
 
-      fireEvent.click(getByRole("button", { name: "Start a mission" }));
       fireEvent.change(getByLabelText("Target"), { target: { value: "https://app.averray.com/agent" } });
       fireEvent.click(getByLabelText(/Gold Path/));
       fireEvent.click(getByLabelText("Memory"));
       fireEvent.change(getByLabelText("Goal"), { target: { value: "prove the signed-in receipt loop" } });
-      fireEvent.click(getByLabelText(/Request approval/));
-      fireEvent.click(getByRole("button", { name: "Launch mission" }));
+      // Approval is on by default (propose) → the CTA reads "Propose mission".
+      fireEvent.click(getByRole("button", { name: "Propose mission" }));
 
       expect(fetchSpy).toHaveBeenCalledTimes(1);
       const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
@@ -234,13 +234,12 @@ describe("MonitorPage — container", () => {
       );
       await waitFor(() => expect(getByRole("button", { name: /Utilities/ })).toBeTruthy());
       fireEvent.click(getByRole("button", { name: /Utilities/ }));
-      await waitFor(() => expect(getByRole("button", { name: "Start a mission" })).toBeTruthy());
+      await waitFor(() => expect(getByLabelText("Target")).toBeTruthy());
 
-      fireEvent.click(getByRole("button", { name: "Start a mission" }));
       fireEvent.change(getByLabelText("Target"), { target: { value: "https://app.averray.com/overview" } });
       fireEvent.click(getByLabelText(/Save this config as a suite/));
       fireEvent.change(getByLabelText("Suite name"), { target: { value: "Daily app sweep" } });
-      fireEvent.click(getByRole("button", { name: "Launch mission" }));
+      fireEvent.click(getByRole("button", { name: "Propose mission" }));
 
       expect(fetchSpy).toHaveBeenCalledTimes(2);
       const [missionUrl] = fetchSpy.mock.calls[0] as [string, RequestInit];
