@@ -207,7 +207,7 @@ import {
   shouldPostStalePrAlert,
   stalePrAlertItems,
 } from "./stale-pr-alerts.js";
-import { enrichMonitorWithGithubPrState } from "./github-pr-state.js";
+import { enrichMonitorWithGithubPrState, enrichMonitorWithDeployCheckRuns } from "./github-pr-state.js";
 
 const enabled = optionalEnv("SLACK_OPERATOR_ENABLED", "0") === "1";
 const httpPort = Number.parseInt(optionalEnv("SLACK_OPERATOR_HTTP_PORT", "8790"), 10);
@@ -3636,7 +3636,8 @@ async function loadMonitorSnapshot(
   const githubStartedAt = Date.now();
   try {
     enriched = await withTimeout(
-      enrichMonitorWithGithubPrState(monitor),
+      // PR checks for open PRs, then deploy check-runs for post-merge deploy SHAs.
+      enrichMonitorWithGithubPrState(monitor).then((m) => enrichMonitorWithDeployCheckRuns(m)),
       githubTimeoutMs,
       "monitor_github_enrichment_timeout"
     );
