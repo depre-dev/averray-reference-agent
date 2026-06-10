@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { enrichMonitorWithGithubPrState } from "../../services/slack-operator/src/github-pr-state.js";
+import { enrichMonitorWithGithubPrState, enrichMonitorWithDeployCheckRuns, deployTargetFromEntry } from "../../services/slack-operator/src/github-pr-state.js";
 import { buildHermesBoardSnapshotFromMonitor } from "../../services/slack-operator/src/monitor-hermes-board.js";
 
 describe("monitor GitHub PR state enrichment", () => {
@@ -326,5 +326,68 @@ describe("monitor GitHub PR state enrichment", () => {
       owner: "Operator",
       verdict: "needs review",
     });
+  });
+});
+
+describe("monitor deploy check-run enrichment", () => {
+  it("extracts {repo, sha} from a post-deploy verification entry's correlationId", () => {
+    expect(deployTargetFromEntry({ correlationId: "github-deploy-456-abc1234", repo: "averray-agent/agent" }))
+      .toEqual({ repo: "averray-agent/agent", sha: "abc1234" });
+    // Not a deploy handoff → ignored (PR entries are handled by the PR enrich).
+    expect(deployTargetFromEntry({ correlationId: "github-pr-123-abc-456", repo: "averray-agent/agent" })).toBeUndefined();
+    // No resolvable SHA → ignored.
+    expect(deployTargetFromEntry({ correlationId: "github-deploy-456", repo: "averray-agent/agent" })).toBeUndefined();
+  });
+
+  it("attaches the deployed SHA's check-runs as summary.checks (so the stepper lights up)", async () => {
+    const calls: string[] = [];
+    const monitor = await enrichMonitorWithDeployCheckRuns({
+      recent: [
+        { correlationId: "github-deploy-456-abc1234", repo: "averray-agent/agent", summary: { phase: "deploy" } },
+      ],
+    }, {
+      env: { GITHUB_TOKEN: "ghp_readonly" },
+      fetchFn: async (url, init) => {
+        calls.push(String(url));
+        expect(init?.headers).toMatchObject({ authorization: "Bearer ghp_readonly" });
+        return new Response(JSON.stringify({
+          check_runs: [
+            { name: "deploy production", status: "completed", conclusion: "success" },
+            { name: "unit tests", status: "in_progress", conclusion: null },
+          ],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+
+    expect(calls).toEqual(["https://api.github.com/repos/averray-agent/agent/commits/abc1234/check-runs?per_page=100"]);
+    expect((monitor.recent?.[0] as any).summary.checks).toEqual([
+      { name: "deploy production", status: "completed", conclusion: "success" },
+      { name: "unit tests", status: "in_progress" }, // null conclusion dropped
+    ]);
+  });
+
+  it("leaves the entry unchanged when the deploy SHA has no check-runs (honest 'awaiting')", async () => {
+    const monitor = await enrichMonitorWithDeployCheckRuns({
+      recent: [
+        { correlationId: "github-deploy-456-abc1234", repo: "averray-agent/agent", summary: { phase: "deploy" } },
+      ],
+    }, {
+      env: { GITHUB_TOKEN: "ghp_readonly" },
+      fetchFn: async () => new Response(JSON.stringify({ check_runs: [] }), { status: 200, headers: { "content-type": "application/json" } }),
+    });
+    expect((monitor.recent?.[0] as any).summary.checks).toBeUndefined();
+  });
+
+  it("never fetches for non-deploy entries", async () => {
+    const calls: string[] = [];
+    await enrichMonitorWithDeployCheckRuns({
+      recent: [
+        { correlationId: "github-pr-123-abc-456", repo: "averray-agent/agent", pullRequestNumber: 123, summary: {} },
+      ],
+    }, {
+      env: { GITHUB_TOKEN: "ghp_readonly" },
+      fetchFn: async (url) => { calls.push(String(url)); return new Response("{}", { status: 200 }); },
+    });
+    expect(calls).toEqual([]);
   });
 });
