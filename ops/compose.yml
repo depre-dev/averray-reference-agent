@@ -246,6 +246,24 @@ services:
       AVERRAY_CODEX_TASKS_PATH: ${AVERRAY_CODEX_TASKS_PATH:-/data/codex-tasks.json}
       AVERRAY_TESTBED_MISSIONS_PATH: ${AVERRAY_TESTBED_MISSIONS_PATH:-/data/testbed-missions.json}
       TESTBED_MISSION_ENVIRONMENT: ${TESTBED_MISSION_ENVIRONMENT:-}
+      # Tester-capability awareness for the monitor/API: it builds the
+      # /monitor/tester/capabilities manifest and gates mission dispatch on these.
+      # They MUST mirror the testbed-mission-runner service so one .env drives both;
+      # without them the monitor hardwired runnerEnabled:false (and reported the
+      # signer/session/gold-path as unavailable) even when the runner was online.
+      TESTBED_MISSION_RUNNER_ENABLED: ${TESTBED_MISSION_RUNNER_ENABLED:-0}
+      TESTBED_MISSION_RUNNER_EXECUTOR: ${TESTBED_MISSION_RUNNER_EXECUTOR:-playwright}
+      TESTBED_MISSION_RUNNER_COMMAND: ${TESTBED_MISSION_RUNNER_COMMAND:-}
+      TEST_WALLET_SIGNER_ENABLED: ${TEST_WALLET_SIGNER_ENABLED:-0}
+      TEST_WALLET_SIGNER_BASE_URL: ${TEST_WALLET_SIGNER_BASE_URL:-http://test-wallet-signer:8791}
+      TESTBED_SESSION_SIGNER_URL: ${TESTBED_SESSION_SIGNER_URL:-}
+      TESTBED_SESSION_ROLE: ${TESTBED_SESSION_ROLE:-agent}
+      TESTBED_SESSION_TYPE: ${TESTBED_SESSION_TYPE:-browser}
+      TESTBED_SESSION_STORAGE_STATE_PATH: ${TESTBED_SESSION_STORAGE_STATE_PATH:-}
+      TESTBED_SESSION_TOKEN: ${TESTBED_SESSION_TOKEN:-}
+      TESTBED_GOLDPATH_LIVE: ${TESTBED_GOLDPATH_LIVE:-0}
+      TESTBED_GOLDPATH_AUTONOMY_ENABLED: ${TESTBED_GOLDPATH_AUTONOMY_ENABLED:-0}
+      AVERRAY_TESTBED_ENVIRONMENT: ${AVERRAY_TESTBED_ENVIRONMENT:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - avg-data:/data
