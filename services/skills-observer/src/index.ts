@@ -8,9 +8,16 @@ const slackWebhookUrl = optionalEnv("SLACK_WEBHOOK_URL");
 
 logger.info({ skillsDir }, "skills_observer_starting");
 
-const watcher = chokidar.watch("**/*.md", {
+// chokidar v4 removed glob support: a "**/*.md" pattern is treated as a literal
+// (nonexistent) path, so the watcher established no persistent handle and the
+// process exited immediately -> restart loop. Watch the skills dir and filter to
+// .md via `ignored` (stats is undefined on the directory-scan pass, so folders
+// pass through and recursion still works). cwd keeps emitted paths relative, so
+// ingest's path.join(skillsDir, relativePath) is unchanged.
+const watcher = chokidar.watch(".", {
   cwd: skillsDir,
   ignoreInitial: false,
+  ignored: (testPath, stats) => Boolean(stats?.isFile()) && !testPath.endsWith(".md"),
   awaitWriteFinish: {
     stabilityThreshold: 500,
     pollInterval: 100
