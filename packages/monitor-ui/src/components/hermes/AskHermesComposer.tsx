@@ -10,6 +10,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { parseHermesInput } from "../../lib/monitor/hermes-commands.js";
+import { shortId } from "../../lib/monitor/card-id.js";
 import type { CreateTaskInput } from "../../lib/monitor/card-types.js";
 import type { CollaborationTarget } from "../../lib/monitor/collaboration.js";
 import { Button } from "../ui.js";
@@ -313,7 +314,7 @@ export function AskHermesComposer({
             title={scopeToCard ? "Scoped to this card — click for the whole board" : "Whole board — click to scope to this card"}
             onClick={() => setScopeToCard((s) => !s)}
           >
-            scope · {scopeToCard ? focusedCardId : "board"}
+            scope · {scopeToCard ? shortId(focusedCardId) : "board"}
           </button>
         ) : (
           <span className="hm-compose-chip">scope · board</span>

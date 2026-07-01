@@ -98,9 +98,9 @@ describe("AskHermesComposer", () => {
     expect(within(container).getByRole("alert").textContent).toMatch(/isn't wired here/);
   });
 
-  test("the scope chip reflects the focused card", () => {
+  test("the scope chip reflects the focused card (short handle, not the raw id)", () => {
     const { getByText } = render(<AskHermesComposer focusedCardId="agent #548" />);
-    expect(getByText("scope · agent #548")).toBeTruthy();
+    expect(getByText("scope · #548")).toBeTruthy();
   });
 
   test("/mute and /unmute dispatch to their handlers", () => {

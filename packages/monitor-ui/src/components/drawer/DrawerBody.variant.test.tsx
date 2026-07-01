@@ -47,6 +47,32 @@ describe("drawerVariant — operator-decision lanes get the risk-decision treatm
   });
 });
 
+describe("DrawerBody — 'What you can do' guidance on decision cards", () => {
+  test("surfaces the next move for a bare-verdict decision card (the deploy-failed case)", () => {
+    const c = card({
+      type: "deploy", lane: "operator-review", isAction: true,
+      verdict: "deploy failed",
+      next: "prepare a fix or rollback plan, then let deployment verification run again",
+    });
+    const { container } = render(<DrawerBody card={c} variant="action" />);
+    expect(container.textContent).toContain("What you can do");
+    expect(container.textContent).toContain("prepare a fix or rollback plan");
+  });
+
+  test("points at Ask Hermes when no reason is recorded anywhere", () => {
+    // no verdict / risk signals / record, and no waiting-on actor → nothing to derive a why from
+    const c = card({ type: "deploy", lane: "operator-review", isAction: true, waitingOn: undefined });
+    const { container } = render(<DrawerBody card={c} variant="action" />);
+    expect(container.textContent).toContain("Ask Hermes");
+  });
+
+  test("stays out of the way when the drawer already explains why and there's no next move", () => {
+    const c = card({ type: "pr", lane: "operator-review", isAction: true, verdict: "needs review" });
+    const { container } = render(<DrawerBody card={c} variant="action" />);
+    expect(container.textContent).not.toContain("What you can do");
+  });
+});
+
 describe("DrawerBody — a failed status doesn't render as the green 'ok' box (tone)", () => {
   test("a failed task's Status block carries the warn modifier", () => {
     const failed = card({ type: "task", taskStatus: "failed", lane: "needs-attention", summary: "Task failed in the runner." });
