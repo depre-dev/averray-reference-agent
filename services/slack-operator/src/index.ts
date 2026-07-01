@@ -142,8 +142,10 @@ import {
   runHermesRouterOnce,
   type HermesRouterAuditRecord,
 } from "./hermes-router-routine.js";
+import { narrateRouterProposal } from "./monitor-router-narration.js";
+import { chatWithHermesSession } from "./hermes-session-client.js";
 import { collectAgenticBacklog } from "./agentic-backlog.js";
-import type { WorkRouterBacklogItem } from "@avg/averray-mcp/work-router";
+import type { RoutedProposal, WorkRouterBacklogItem } from "@avg/averray-mcp/work-router";
 import {
   approveCodexTask,
   annotateCodexTaskDecisionRecord,
@@ -3973,67 +3975,53 @@ function classifyTaskForWorkRouter(input: Parameters<typeof classifyTask>[0]) {
 }
 
 async function narrateHermesRouterProposal(
-  proposal: Parameters<typeof fallbackHermesRouterNarration>[0],
-  task: Parameters<typeof fallbackHermesRouterNarration>[1],
+  proposal: RoutedProposal,
+  task: CodexTask,
 ): Promise<void> {
-  const fallback = fallbackHermesRouterNarration(proposal, task);
-  let text = fallback;
-  let hermesMode: "live" | "templated" = "templated";
   const apiKey = optionalEnv("OLLAMA_API_KEY");
   const baseUrl = optionalEnv("OLLAMA_BASE_URL") ?? "https://ollama.com/v1";
   const model = optionalEnv("HERMES_MONITOR_REPLY_MODEL") ?? "glm-5.2:cloud";
-  if (apiKey) {
-    const llmText = await requestHermesCompletion({
-      messages: [
-        { role: "system", content: HERMES_PERSONA },
-        { role: "user", content: buildHermesRouterNarrationPrompt(proposal, task) },
-      ],
-      maxTokens: 90,
-      temperature: 0.45,
-    }, {
-      apiKey,
-      baseUrl,
-      model,
-      timeoutMs: 6_000,
-      taskId: task.id,
-      runId: "correlationId" in task && typeof task.correlationId === "string" ? task.correlationId : routerCorrelationId(proposal),
-    }).catch((error) => {
-      logger.warn({ err: error, taskId: task.id }, "orch_p4b_router_narration_llm_failed");
-      return null;
-    });
-    if (llmText) {
-      text = llmText;
-      hermesMode = "live";
-    }
-  }
+  // FLAG-GATED (default OFF): only route through the real agentic Hermes when
+  // HERMES_ROUTER_AGENTIC_NARRATION is truthy AND a gateway config resolves.
+  const agenticEnabled = /^(1|true|yes|on)$/i.test((optionalEnv("HERMES_ROUTER_AGENTIC_NARRATION") ?? "").trim());
+  const sessionConfig = agenticEnabled ? resolveHermesSessionConfig() : null;
+  const runId = task.correlationId ?? routerCorrelationId(proposal);
 
-  recordCollaborationMessage({
-    author: "hermes",
-    kind: "proposal",
-    addressedTo: "operator",
-    text: text.replace(/\s+/g, " ").trim().slice(0, 1000),
-    hermesMode,
-    relatedCorrelationId: "correlationId" in task && typeof task.correlationId === "string" ? task.correlationId : routerCorrelationId(proposal),
+  await narrateRouterProposal(proposal, task, {
+    fallback: fallbackHermesRouterNarration,
+    sessionConfig,
+    agenticEnabled,
+    // Transport 1: the real agentic Hermes agent (MCP tools/skills/memory).
+    // Degraded-safe: chatWithHermesSession returns null on any failure.
+    runSession: (config, prompt) => chatWithHermesSession(config, prompt),
+    // Transport 2: the stateless Ollama persona completion (existing path).
+    runCompletion: apiKey
+      ? (prompt) =>
+          requestHermesCompletion(
+            {
+              messages: [
+                { role: "system", content: HERMES_PERSONA },
+                { role: "user", content: prompt },
+              ],
+              maxTokens: 90,
+              temperature: 0.45,
+            },
+            { apiKey, baseUrl, model, timeoutMs: 6_000, taskId: task.id, runId },
+          ).catch((error) => {
+            logger.warn({ err: error, taskId: task.id }, "orch_p4b_router_narration_llm_failed");
+            return null;
+          })
+      : undefined,
+    record: ({ text, hermesMode, relatedCorrelationId }) =>
+      recordCollaborationMessage({
+        author: "hermes",
+        kind: "proposal",
+        addressedTo: "operator",
+        text,
+        hermesMode,
+        relatedCorrelationId,
+      }),
   });
-}
-
-function buildHermesRouterNarrationPrompt(
-  proposal: Parameters<typeof fallbackHermesRouterNarration>[0],
-  task: Parameters<typeof fallbackHermesRouterNarration>[1],
-): string {
-  return [
-    "Hermes just created a proposed task from the roadmap backlog. Write one concise, truthful sentence for the monitor co-pilot rail.",
-    "",
-    `Task id: ${task.id}`,
-    `Repo: ${proposal.repo}`,
-    `Surface/gap: ${proposal.surface}`,
-    `Agent: ${proposal.agent}`,
-    `Risk tier: ${proposal.riskTier}`,
-    `Why gap: ${proposal.why}`,
-    `Why agent: ${proposal.whyAgent}`,
-    "",
-    "Rules: say this is proposed-only and waiting for operator approval. Do not claim it ran, was approved, merged, or dispatched.",
-  ].join("\n");
 }
 
 async function recordHermesRouterAudit(record: HermesRouterAuditRecord): Promise<void> {
