@@ -29,7 +29,7 @@ fi
 if [[ -z "${MODEL}" ]]; then
   MODEL="$(grep '^HERMES_DEFAULT_MODEL=' "${ENV_FILE}" | tail -n 1 | cut -d= -f2- || true)"
 fi
-MODEL="${MODEL:-deepseek-v4-pro:cloud}"
+MODEL="${MODEL:-glm-5.2:cloud}"
 
 if ! grep -Eq '^AGENT_WALLET_PRIVATE_KEY=0x[0-9a-fA-F]{64}$' "${ENV_FILE}"; then
   echo "AGENT_WALLET_PRIVATE_KEY is missing or malformed in ${ENV_FILE}." >&2

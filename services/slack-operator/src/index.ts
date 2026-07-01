@@ -1407,7 +1407,7 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
 
   const apiKey = optionalEnv("OLLAMA_API_KEY");
   const baseUrl = optionalEnv("OLLAMA_BASE_URL") ?? "https://ollama.com/v1";
-  const model = optionalEnv("HERMES_MONITOR_REPLY_MODEL") ?? "deepseek-v4-pro:cloud";
+  const model = optionalEnv("HERMES_MONITOR_REPLY_MODEL") ?? "glm-5.2:cloud";
   // Null unless HERMES_SESSION_API_ENABLED + URL + token are all set, so the
   // default transport stays the Ollama completion below.
   const sessionConfig = resolveHermesSessionConfig();
@@ -1626,7 +1626,7 @@ function recordTestbedMissionReportValidationCollaboration(
 function surfaceCitationRepairDisposition(run: TestbedMissionRun): void {
   const apiKey = optionalEnv("OLLAMA_API_KEY");
   const baseUrl = optionalEnv("OLLAMA_BASE_URL") ?? "https://ollama.com/v1";
-  const model = optionalEnv("HERMES_MONITOR_REPLY_MODEL") ?? "deepseek-v4-pro:cloud";
+  const model = optionalEnv("HERMES_MONITOR_REPLY_MODEL") ?? "glm-5.2:cloud";
   const fixRepo = optionalEnv("B2_SELF_HEALING_REPO") || optionalEnv("GITHUB_DEFAULT_REPO");
   const definition: CitationRepairJobDefinition = {
     taskType: "citation_repair",
@@ -3785,7 +3785,7 @@ function scheduleHermesBoardNarration(snapshot: unknown): void {
     let hermesMode: "live" | "templated" = "templated";
     const apiKey = optionalEnv("OLLAMA_API_KEY");
     const baseUrl = optionalEnv("OLLAMA_BASE_URL") ?? "https://ollama.com/v1";
-    const model = optionalEnv("HERMES_MONITOR_REPLY_MODEL") ?? "deepseek-v4-pro:cloud";
+    const model = optionalEnv("HERMES_MONITOR_REPLY_MODEL") ?? "glm-5.2:cloud";
     if (apiKey) {
       try {
         const llmText = await generateHermesBoardNarration(narrationContext, {
@@ -3914,7 +3914,7 @@ async function narrateHermesRouterProposal(
   let hermesMode: "live" | "templated" = "templated";
   const apiKey = optionalEnv("OLLAMA_API_KEY");
   const baseUrl = optionalEnv("OLLAMA_BASE_URL") ?? "https://ollama.com/v1";
-  const model = optionalEnv("HERMES_MONITOR_REPLY_MODEL") ?? "deepseek-v4-pro:cloud";
+  const model = optionalEnv("HERMES_MONITOR_REPLY_MODEL") ?? "glm-5.2:cloud";
   if (apiKey) {
     const llmText = await requestHermesCompletion({
       messages: [

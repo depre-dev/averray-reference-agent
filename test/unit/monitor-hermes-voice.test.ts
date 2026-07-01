@@ -508,7 +508,7 @@ describe("generateHermesReply", () => {
       const usageLogPath = join(dir, "llm-usage.jsonl");
       const fetchFn = async () =>
         jsonResponse({
-          model: "deepseek-v4-pro:cloud",
+          model: "glm-5.2:cloud",
           choices: [
             {
               message: {
@@ -527,7 +527,7 @@ describe("generateHermesReply", () => {
       const text = await generateHermesReply(baseContext(), {
         apiKey,
         baseUrl,
-        model: "deepseek-v4-pro:cloud",
+        model: "glm-5.2:cloud",
         runId: "deepseek-reasoning-1",
         taskId: "chat-message-2",
         usageLogPath,
@@ -538,7 +538,7 @@ describe("generateHermesReply", () => {
       expect(text).not.toContain("content");
       await expect(readFile(usageLogPath, "utf8").then((line) => JSON.parse(line))).resolves.toMatchObject({
         agent: "hermes",
-        model: "deepseek-v4-pro:cloud",
+        model: "glm-5.2:cloud",
         runId: "deepseek-reasoning-1",
         taskId: "chat-message-2",
         inputTokens: 93,
@@ -651,7 +651,7 @@ describe("generateHermesReply", () => {
     expect(captured.url).toBe("https://ollama.example.com/v1/chat/completions");
     expect(captured.headers?.authorization).toBe("Bearer test-key");
     const body = captured.body as { model: string; messages: Array<{ role: string; content: string }> };
-    expect(body.model).toBe("deepseek-v4-pro:cloud");
+    expect(body.model).toBe("glm-5.2:cloud");
     expect(body.messages[0].role).toBe("system");
     expect(body.messages[0].content).toMatch(/Hermes/);
     expect(body.messages[1].role).toBe("user");
@@ -678,7 +678,7 @@ describe("generateHermesReply", () => {
       const usageLogPath = join(dir, "llm-usage.jsonl");
       const fetchFn = async () =>
         jsonResponse({
-          model: "deepseek-v4-pro:cloud",
+          model: "glm-5.2:cloud",
           choices: [{ message: { content: "Watching it." } }],
           prompt_eval_count: 44,
           eval_count: 12,
@@ -687,7 +687,7 @@ describe("generateHermesReply", () => {
       const text = await generateHermesReply(baseContext(), {
         apiKey,
         baseUrl,
-        model: "deepseek-v4-pro:cloud",
+        model: "glm-5.2:cloud",
         runId: "chat-correlation-1",
         taskId: "chat-message-1",
         usageLogPath,
@@ -697,7 +697,7 @@ describe("generateHermesReply", () => {
       expect(text).toContain("Watching it.");
       await expect(readFile(usageLogPath, "utf8").then((line) => JSON.parse(line))).resolves.toMatchObject({
         agent: "hermes",
-        model: "deepseek-v4-pro:cloud",
+        model: "glm-5.2:cloud",
         runId: "chat-correlation-1",
         taskId: "chat-message-1",
         inputTokens: 44,
@@ -711,7 +711,7 @@ describe("generateHermesReply", () => {
   it("summarizes usage debug shape without logging message content", () => {
     const summary = summarizeHermesUsageDebugShape({
       id: "chatcmpl-1",
-      model: "deepseek-v4-pro:cloud",
+      model: "glm-5.2:cloud",
       choices: [
         {
           message: {
@@ -781,7 +781,7 @@ describe("generateHermesBoardNarration", () => {
         },
         recentMessages: [],
       },
-      { apiKey, baseUrl, model: "deepseek-v4-pro:cloud", fetchFn: fetchFn as typeof fetch }
+      { apiKey, baseUrl, model: "glm-5.2:cloud", fetchFn: fetchFn as typeof fetch }
     );
     const body = capturedBody as { max_tokens: number; messages: Array<{ role: string; content: string }> };
     expect(text).toMatch(/averray-agent\/agent#438/);
@@ -829,7 +829,7 @@ describe("generateHermesBoardNarration", () => {
       expect(text).toContain("Hermes is live on narration");
       await expect(readFile(usageLogPath, "utf8").then((line) => JSON.parse(line))).resolves.toMatchObject({
         agent: "hermes",
-        model: "deepseek-v4-pro:cloud",
+        model: "glm-5.2:cloud",
         inputTokens: 55,
         outputTokens: 13,
       });

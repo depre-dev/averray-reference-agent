@@ -125,7 +125,7 @@ export interface HermesBoardNarrationContext {
 export interface GenerateHermesReplyOptions {
   apiKey: string;
   baseUrl: string;
-  /** Defaults to deepseek-v4-pro:cloud (matches hermes/config/hermes.yaml). */
+  /** Defaults to glm-5.2:cloud (matches hermes/config/hermes.yaml). */
   model?: string;
   /** Hard cap so a slow LLM call can't wedge the chat. Default 6000ms. */
   timeoutMs?: number;
@@ -202,7 +202,7 @@ export async function requestHermesCompletion(
   if (!options.apiKey) return null;
   const baseUrl = options.baseUrl.replace(/\/+$/, "");
   const url = `${baseUrl}/chat/completions`;
-  const model = options.model ?? "deepseek-v4-pro:cloud";
+  const model = options.model ?? "glm-5.2:cloud";
   const timeoutMs = options.timeoutMs ?? 6_000;
   const fetchImpl = options.fetchFn ?? fetch;
 
