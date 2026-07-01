@@ -240,6 +240,16 @@ services:
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-https://ollama.com/v1}
       HERMES_MONITOR_REPLY_MODEL: ${HERMES_MONITOR_REPLY_MODEL:-deepseek-v4-pro:cloud}
+      # Preferred co-pilot transport: the real agentic Hermes via the gateway
+      # Session API (MCP tools + skills + memory), instead of the stateless Ollama
+      # completion above. OFF by default (fail-closed). Enable only with the
+      # command-center gateway up: set ENABLED=1, point URL at hermes-gateway:8642,
+      # reuse HERMES_GATEWAY_API_KEY as the token. Falls back to Ollama on any
+      # gateway failure, so flipping this on can never mute the co-pilot.
+      HERMES_SESSION_API_ENABLED: ${HERMES_SESSION_API_ENABLED:-0}
+      HERMES_API_URL: ${HERMES_API_URL:-}
+      HERMES_API_TOKEN: ${HERMES_API_TOKEN:-}
+      HERMES_SESSION_TIMEOUT_MS: ${HERMES_SESSION_TIMEOUT_MS:-}
       LLM_USAGE_LOG_PATH: ${LLM_USAGE_LOG_PATH:-/data/llm-usage.jsonl}
       HERMES_MONITOR_MEMORY_PATH: ${HERMES_MONITOR_MEMORY_PATH:-/data/hermes-monitor-memory.json}
       AVERRAY_HANDOFF_EVENTS_PATH: ${AVERRAY_HANDOFF_EVENTS_PATH:-/data/handoff-events.jsonl}

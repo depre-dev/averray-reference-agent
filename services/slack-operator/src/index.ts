@@ -132,7 +132,9 @@ import {
   applyHermesMemoryInfluence,
   generateHermesBoardNarration,
   generateHermesReply,
+  generateHermesReplyViaSession,
   requestHermesCompletion,
+  resolveHermesSessionConfig,
 } from "./monitor-hermes-voice.js";
 import {
   fallbackHermesRouterNarration,
@@ -1394,6 +1396,11 @@ async function handleCommand(envelope: SlackCommandEnvelope) {
 // own bubble paints first, then Hermes's reply lands 2-5s later.
 // timer.unref() so a slow LLM call can't keep the process alive on
 // shutdown.
+// Persists across operator posts so the gateway Session-API transport (when
+// enabled) keeps one continuous Hermes thread rather than a fresh session per
+// reply. Best-effort in-memory; recreated automatically if the id goes stale.
+let hermesCopilotSessionId: string | undefined;
+
 function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof recordCollaborationMessage>>) {
   const draft = synthesizeHermesReplyFor(operatorMessage);
   if (!draft) return;
@@ -1401,6 +1408,9 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
   const apiKey = optionalEnv("OLLAMA_API_KEY");
   const baseUrl = optionalEnv("OLLAMA_BASE_URL") ?? "https://ollama.com/v1";
   const model = optionalEnv("HERMES_MONITOR_REPLY_MODEL") ?? "deepseek-v4-pro:cloud";
+  // Null unless HERMES_SESSION_API_ENABLED + URL + token are all set, so the
+  // default transport stays the Ollama completion below.
+  const sessionConfig = resolveHermesSessionConfig();
 
   const timer = setTimeout(async () => {
     let text = draft.text;
@@ -1418,7 +1428,7 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
         kind: operatorMessage.kind,
         ...(operatorMessage.relatedPr ? { relatedPr: operatorMessage.relatedPr } : {}),
       },
-      recentMessages: apiKey
+      recentMessages: (apiKey || sessionConfig)
         ? listCollaborationMessages({ limit: 10 }).map((m) => ({ author: m.author, text: m.text, ts: m.ts }))
         : [],
       memoryNotes,
@@ -1430,26 +1440,43 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
       text = draft.text;
     } else if (memoryRequest !== "none") {
       text = hermesMemoryGovernanceReply(operatorMessage, memoryRequest, memoryNotes);
-    } else if (apiKey) {
-      try {
-        // replyContext carries the recent thread oldest-first so the
-        // model sees the conversation in natural order rather than reversed.
-        const llmText = await generateHermesReply(replyContext, {
-          apiKey,
-          baseUrl,
-          model,
-          taskId: operatorMessage.id,
-          runId: operatorMessage.relatedCorrelationId
-            ?? (operatorMessage.relatedPr ? `${operatorMessage.relatedPr.repo}#${operatorMessage.relatedPr.number}` : operatorMessage.id),
-        });
-        if (llmText) {
-          text = llmText;
-          hermesMode = "live";
-        } else {
-          logger.info({ id: operatorMessage.id }, "monitor_collaboration_llm_reply_unavailable_fell_back");
+    } else {
+      let llmText: string | null = null;
+      // Preferred transport: the real agentic Hermes via the gateway Session
+      // API — MCP tools + skills + memory, one persistent thread. Only runs when
+      // sessionConfig is set (flag-gated); otherwise this is a no-op.
+      if (sessionConfig) {
+        try {
+          const turn = await generateHermesReplyViaSession(replyContext, sessionConfig, hermesCopilotSessionId);
+          if (turn) {
+            hermesCopilotSessionId = turn.sessionId;
+            llmText = turn.text;
+          }
+        } catch (error) {
+          logger.warn({ err: error, id: operatorMessage.id }, "monitor_collaboration_session_reply_threw");
         }
-      } catch (error) {
-        logger.warn({ err: error, id: operatorMessage.id }, "monitor_collaboration_llm_reply_threw");
+      }
+      // Fallback transport: the stateless Ollama persona completion. replyContext
+      // carries the recent thread oldest-first so the model sees natural order.
+      if (!llmText && apiKey) {
+        try {
+          llmText = await generateHermesReply(replyContext, {
+            apiKey,
+            baseUrl,
+            model,
+            taskId: operatorMessage.id,
+            runId: operatorMessage.relatedCorrelationId
+              ?? (operatorMessage.relatedPr ? `${operatorMessage.relatedPr.repo}#${operatorMessage.relatedPr.number}` : operatorMessage.id),
+          });
+        } catch (error) {
+          logger.warn({ err: error, id: operatorMessage.id }, "monitor_collaboration_llm_reply_threw");
+        }
+      }
+      if (llmText) {
+        text = llmText;
+        hermesMode = "live";
+      } else if (sessionConfig || apiKey) {
+        logger.info({ id: operatorMessage.id }, "monitor_collaboration_llm_reply_unavailable_fell_back");
       }
     }
     if (memoryRequest !== "forget_pr") {
