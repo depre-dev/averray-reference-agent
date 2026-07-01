@@ -295,7 +295,7 @@ export async function enrichMonitorWithDeployCheckRuns<T extends MonitorPayload>
   for (const entry of entries) {
     if (entryHasChecks(entry)) continue;
     const target = deployTargetFromEntry(entry);
-    if (target) targets.set(`${target.repo} ${target.sha}`, target);
+    if (target) targets.set(`${target.repo}\0${target.sha}`, target);
   }
   if (targets.size === 0) return monitor;
 
@@ -304,7 +304,7 @@ export async function enrichMonitorWithDeployCheckRuns<T extends MonitorPayload>
     const token = resolveGithubTokenForRepo(repo, env);
     if (!token) return;
     const runs = await fetchDeployCheckRuns({ repo, sha, token, baseUrl, fetchFn, now }).catch(() => []);
-    if (runs.length > 0) checksByKey.set(`${repo} ${sha}`, runs);
+    if (runs.length > 0) checksByKey.set(`${repo}\0${sha}`, runs);
   }));
   if (checksByKey.size === 0) return monitor;
 
@@ -312,7 +312,7 @@ export async function enrichMonitorWithDeployCheckRuns<T extends MonitorPayload>
     if (!isRecord(raw) || entryHasChecks(raw)) return raw;
     const target = deployTargetFromEntry(raw as MonitorEntry);
     if (!target) return raw;
-    const runs = checksByKey.get(`${target.repo} ${target.sha}`);
+    const runs = checksByKey.get(`${target.repo}\0${target.sha}`);
     if (!runs) return raw;
     const summary = isRecord(raw.summary) ? raw.summary : {};
     return { ...raw, summary: { ...summary, checks: runs } };
