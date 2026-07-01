@@ -81,11 +81,21 @@ function freshClass(card: BoardCard): string {
 }
 
 /**
- * Strip the leading agent-type prefix from a card ID for the monospace
- * badge. `agent #548` → `#548`, `mission browser-X` → `browser-X`.
+ * Turn a card ID into the compact monospace badge the header shows next to the
+ * agent name. First strips the leading agent-type prefix (`agent #548` → `#548`,
+ * `mission browser-X` → `browser-X`). Then, for routed codex/claude task ids —
+ * long machine handles like `codex-task-averray-agent-agent-new-…Z-vfs58z` that
+ * carry no operator meaning and crush the agent label to a `c…` stub — collapse
+ * to a short stable handle (`task vfs58z`). PR refs (`#711`) and short slugs
+ * (`browser-onboard-04`, `starter-coding-014`) are left untouched.
  */
 function shortId(id: string): string {
-  return id.replace(/^[a-z-]+ /, "");
+  const withoutAgent = id.replace(/^[a-z-]+ /, "");
+  if (/(?:^|-)task-/.test(withoutAgent) && !withoutAgent.includes("#")) {
+    const tail = withoutAgent.match(/[a-z0-9]{4,12}$/i)?.[0];
+    if (tail) return `task ${tail}`;
+  }
+  return withoutAgent;
 }
 
 // Risk-tag pill classification — matches the bundle's branching.
