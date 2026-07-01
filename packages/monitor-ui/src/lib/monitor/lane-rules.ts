@@ -84,6 +84,21 @@ export function isFinishedCard(card: BoardCard | undefined | null): boolean {
 }
 
 /**
+ * Truth-boundary: a card whose backing source could NOT be refreshed
+ * (`failed-fetch` — a rate-limited / errored GitHub read; `source-offline` — an
+ * offline runner heartbeat). Its state is unverifiable, so it must NOT be
+ * presented as a live operator decision: a frozen pre-merge PR card that only
+ * *looks* like it's "waiting on operator" because we couldn't confirm it merged
+ * would otherwise sit in the Decision Inbox as fake work. These cards still
+ * render in their lane with the degraded/"SOURCE ISSUE" treatment (they are not
+ * hidden) — they are just excluded from the actionable decision surface.
+ */
+export function isUnverifiableCard(card: BoardCard | undefined | null): boolean {
+  if (!card) return false;
+  return card.state === "failed-fetch" || card.state === "source-offline";
+}
+
+/**
  * PR-F1 — THE single definition of "a card waiting on an operator decision":
  * the one actionable surface. Every decision surface (the Decision Inbox
  * membership, the rail "WAITING ON YOU" list + count, the banner / KPI action
@@ -100,11 +115,14 @@ export function isFinishedCard(card: BoardCard | undefined | null): boolean {
  *
  * The truth-boundary fix is the exclusion: a finished done/verified/closed card
  * is never a decision even when it still carries a stale operator/isAction flag
- * (the "keep as release history; no board action needed" leak).
+ * (the "keep as release history; no board action needed" leak), and a card whose
+ * source could not be refreshed (`isUnverifiableCard`) is never a decision either
+ * — we won't ask the operator to act on state we couldn't confirm.
  */
 export function isDecision(card: BoardCard | undefined | null): boolean {
   if (!card) return false;
   if (isFinishedCard(card)) return false;
+  if (isUnverifiableCard(card)) return false;
   return isWaitingOnOperator(card);
 }
 

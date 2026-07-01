@@ -2,6 +2,27 @@ import { describe, expect, it } from "vitest";
 
 import { enrichMonitorWithGithubPrState, enrichMonitorWithDeployCheckRuns, deployTargetFromEntry } from "../../services/slack-operator/src/github-pr-state.js";
 import { buildHermesBoardSnapshotFromMonitor } from "../../services/slack-operator/src/monitor-hermes-board.js";
+import { buildV2BoardSnapshot } from "../../services/slack-operator/src/monitor-v2.js";
+import { isDecision } from "../../packages/monitor-ui/src/lib/monitor/lane-rules.js";
+
+/** A 403 that GitHub only marks as a rate-limit via X-RateLimit-Remaining: 0. */
+function rateLimitResponse(resetEpochSeconds?: number): Response {
+  return new Response(JSON.stringify({ message: "API rate limit exceeded" }), {
+    status: 403,
+    headers: {
+      "content-type": "application/json",
+      "x-ratelimit-remaining": "0",
+      ...(resetEpochSeconds ? { "x-ratelimit-reset": String(resetEpochSeconds) } : {}),
+    },
+  });
+}
+
+/** A unique token per test isolates the module-global rate-limit breaker (keyed by token prefix). */
+let tokenSeq = 0;
+function freshToken(): string {
+  tokenSeq += 1;
+  return `ghp_test_${tokenSeq}_${Math.random().toString(36).slice(2, 8)}`;
+}
 
 describe("monitor GitHub PR state enrichment", () => {
   it("adds live GitHub PR state to matching monitor entries", async () => {
@@ -389,5 +410,243 @@ describe("monitor deploy check-run enrichment", () => {
       fetchFn: async (url) => { calls.push(String(url)); return new Response("{}", { status: 200 }); },
     });
     expect(calls).toEqual([]);
+  });
+});
+
+describe("monitor GitHub PR state — fail-stale on unrefreshable fetch (truth-boundary)", () => {
+  it("marks a frozen PR card stale (githubLive.fetchError) when its refresh is rate-limited", async () => {
+    const token = freshToken();
+    const monitor = await enrichMonitorWithGithubPrState({
+      recent: [
+        {
+          // A card frozen in its last-seen (pre-merge) lane. On the live board
+          // this is a MERGED PR still showing as "waiting on operator".
+          correlationId: "github-pr-711-abc",
+          repo: "averray-agent/agent",
+          pullRequestNumber: 711,
+          summary: { finalVerdict: "needs_review" },
+        },
+      ],
+    }, {
+      env: { GITHUB_TOKEN: token },
+      now: new Date("2026-07-01T10:00:00.000Z"),
+      fetchFn: async () => rateLimitResponse(),
+    });
+
+    const summary = (monitor.recent?.[0] as any).summary;
+    // The frozen pre-merge fields are NOT overwritten, but the card now carries a
+    // fetch-error marker so monitor-v2 demotes it to a degraded/stale state.
+    expect(summary.finalVerdict).toBe("needs_review");
+    expect(summary.currentPullRequest).toBeUndefined();
+    expect(summary.githubLive.fetchError).toMatchObject({
+      code: "403",
+      checkedAt: "2026-07-01T10:00:00.000Z",
+    });
+    expect(String(summary.githubLive.fetchError.message)).toMatch(/rate limit/i);
+  });
+
+  it("a rate-limited frozen decision drops OUT of the live Decision Inbox but stays visible (degraded)", async () => {
+    const token = freshToken();
+    // A frozen card the classifier had promoted to the operator decision lane.
+    const monitor = await enrichMonitorWithGithubPrState({
+      active: [
+        {
+          correlationId: "github-pr-708-def",
+          repo: "averray-agent/agent",
+          pullRequestNumber: 708,
+          owner: "Operator",
+          lane: "Operator Review",
+          title: "agent #708",
+          status: "blocked",
+          summary: {
+            finalVerdict: "needs_review",
+            pullRequest: { repo: "averray-agent/agent", number: 708, state: "open" },
+          },
+        },
+      ],
+      recent: [],
+    }, {
+      env: { GITHUB_TOKEN: token },
+      now: new Date("2026-07-01T10:00:00.000Z"),
+      fetchFn: async () => rateLimitResponse(),
+    });
+
+    const snap = buildV2BoardSnapshot(monitor, { now: () => new Date("2026-07-01T10:00:05.000Z") });
+    const card = snap.cards.find((c) => c.repo === "averray-agent/agent");
+    expect(card).toBeDefined();
+    // Truth-boundary: unverifiable → degraded, and NOT a live operator decision.
+    expect(card!.state).toBe("failed-fetch");
+    expect(card!.sourceFailure?.source).toBe("github");
+    expect(isDecision(card!)).toBe(false);
+    // But it is NOT hidden — it still renders as a card on the board.
+    expect(snap.cards.some((c) => c.id === card!.id)).toBe(true);
+  });
+
+  it("a genuinely-open PR that refreshes successfully stays a live decision (not demoted)", async () => {
+    const token = freshToken();
+    const monitor = await enrichMonitorWithGithubPrState({
+      active: [
+        {
+          correlationId: "github-pr-712-open",
+          repo: "averray-agent/agent",
+          pullRequestNumber: 712,
+          owner: "Operator",
+          lane: "Operator Review",
+          title: "agent #712",
+          status: "blocked",
+          summary: {
+            finalVerdict: "needs_review",
+            pullRequest: { repo: "averray-agent/agent", number: 712, state: "open" },
+          },
+        },
+      ],
+      recent: [],
+    }, {
+      env: { GITHUB_TOKEN: token },
+      now: new Date("2026-07-01T10:00:00.000Z"),
+      fetchFn: async () => new Response(JSON.stringify({
+        number: 712,
+        state: "open",
+        draft: false,
+        merged: false,
+        mergeable_state: "dirty",
+        head: { sha: "open712", ref: "codex/open" },
+        base: { ref: "main" },
+        updated_at: "2026-07-01T09:59:00.000Z",
+      }), { status: 200, headers: { "content-type": "application/json" } }),
+    });
+
+    const summary = (monitor.active?.[0] as any).summary;
+    expect(summary.githubLive?.fetchError).toBeUndefined();
+    expect(summary.currentPullRequest).toMatchObject({ number: 712, state: "open", merged: false });
+
+    const snap = buildV2BoardSnapshot(monitor, { now: () => new Date("2026-07-01T10:00:05.000Z") });
+    const card = snap.cards.find((c) => c.repo === "averray-agent/agent");
+    expect(card).toBeDefined();
+    expect(card!.state).not.toBe("failed-fetch");
+    // A verifiable operator-owned card is still a live decision.
+    expect(isDecision(card!)).toBe(true);
+  });
+
+  it("a definitive 404 (deleted PR) is NOT treated as stale — the card is left un-enriched, not degraded", async () => {
+    const token = freshToken();
+    const monitor = await enrichMonitorWithGithubPrState({
+      recent: [
+        {
+          correlationId: "github-pr-999-gone",
+          repo: "averray-agent/agent",
+          pullRequestNumber: 999,
+          summary: { finalVerdict: "needs_review" },
+        },
+      ],
+    }, {
+      env: { GITHUB_TOKEN: token },
+      now: new Date("2026-07-01T10:00:00.000Z"),
+      fetchFn: async () => new Response("Not Found", { status: 404 }),
+    });
+
+    const summary = (monitor.recent?.[0] as any).summary;
+    // 404 is a definitive answer (gone), not an unverifiable refresh failure.
+    expect(summary.githubLive?.fetchError).toBeUndefined();
+    expect(summary.currentPullRequest).toBeUndefined();
+    expect(summary.finalVerdict).toBe("needs_review");
+  });
+});
+
+describe("monitor GitHub PR state — rate-limit resilience (root-cause mitigation)", () => {
+  it("opens a circuit breaker after a rate-limit answer: later reads for the same token skip the network", async () => {
+    const token = freshToken();
+    let networkCalls = 0;
+    const fetchFn = async (url: string | URL | Request) => {
+      networkCalls += 1;
+      void url;
+      return rateLimitResponse();
+    };
+
+    const base = {
+      env: { GITHUB_TOKEN: token },
+      now: new Date("2026-07-01T10:00:00.000Z"),
+      fetchFn: fetchFn as unknown as typeof fetch,
+    };
+    // First refresh trips the breaker (one real network call).
+    await enrichMonitorWithGithubPrState({
+      recent: [{ correlationId: "github-pr-1-a", repo: "averray-agent/agent", pullRequestNumber: 1, summary: {} }],
+    }, base);
+    expect(networkCalls).toBe(1);
+
+    // A second refresh, still inside the cool-off window, must NOT hit GitHub
+    // again — it short-circuits and still yields a stale marker.
+    const second = await enrichMonitorWithGithubPrState({
+      recent: [{ correlationId: "github-pr-1-a", repo: "averray-agent/agent", pullRequestNumber: 1, summary: {} }],
+    }, { ...base, now: new Date("2026-07-01T10:00:10.000Z") });
+    expect(networkCalls).toBe(1); // unchanged — breaker suppressed the call
+    expect((second.recent?.[0] as any).summary.githubLive.fetchError.code).toBe("403");
+  });
+
+  it("sends If-None-Match and serves the cached body on 304 (conditional request saves rate-limit budget)", async () => {
+    const token = freshToken();
+    const repo = "averray-agent/etag-demo";
+    const seenHeaders: Array<Record<string, string> | undefined> = [];
+    let served = 0;
+    const fetchFn = async (_url: string | URL | Request, init?: RequestInit) => {
+      seenHeaders.push(init?.headers as Record<string, string> | undefined);
+      served += 1;
+      if (served === 1) {
+        return new Response(JSON.stringify({ number: 5, state: "open", draft: false, merged: false }), {
+          status: 200,
+          headers: { "content-type": "application/json", etag: 'W/"etag-abc"' },
+        });
+      }
+      // Second read: caller sent If-None-Match, GitHub answers 304 (free).
+      expect((init?.headers as Record<string, string>)["if-none-match"]).toBe('W/"etag-abc"');
+      return new Response(null, { status: 304 });
+    };
+
+    const first = await enrichMonitorWithGithubPrState({
+      recent: [{ correlationId: "e-1", repo, pullRequestNumber: 5, summary: {} }],
+    }, {
+      env: { GITHUB_TOKEN: token },
+      now: new Date("2026-07-01T10:00:00.000Z"),
+      fetchFn: fetchFn as unknown as typeof fetch,
+    });
+    expect((first.recent?.[0] as any).summary.currentPullRequest).toMatchObject({ number: 5, state: "open" });
+
+    // Advance beyond the 60s per-PR value cache so the fetch layer is exercised
+    // again; the ETag cache should turn it into a 304.
+    const second = await enrichMonitorWithGithubPrState({
+      recent: [{ correlationId: "e-1", repo, pullRequestNumber: 5, summary: {} }],
+    }, {
+      env: { GITHUB_TOKEN: token },
+      now: new Date("2026-07-01T10:05:00.000Z"),
+      fetchFn: fetchFn as unknown as typeof fetch,
+    });
+    expect(served).toBe(2);
+    // The 304 was resolved from the ETag cache into real state (still merged:false).
+    expect((second.recent?.[0] as any).summary.currentPullRequest).toMatchObject({ number: 5, state: "open" });
+    expect((second.recent?.[0] as any).summary.githubLive?.fetchError).toBeUndefined();
+  });
+
+  it("a permission 403 (no rate-limit signal) does NOT open the breaker (retrying later won't help)", async () => {
+    const token = freshToken();
+    let networkCalls = 0;
+    const fetchFn = async () => {
+      networkCalls += 1;
+      // 403 with no X-RateLimit-Remaining:0 / Retry-After → a scope/permission
+      // problem, NOT a rate limit. Must not trip the cool-off.
+      return new Response("Forbidden", { status: 403 });
+    };
+    const base = {
+      env: { GITHUB_TOKEN: token },
+      now: new Date("2026-07-01T10:00:00.000Z"),
+      fetchFn: fetchFn as unknown as typeof fetch,
+    };
+    await enrichMonitorWithGithubPrState({
+      recent: [{ correlationId: "p-1", repo: "averray-agent/perm", pullRequestNumber: 2, summary: {} }],
+    }, base);
+    await enrichMonitorWithGithubPrState({
+      recent: [{ correlationId: "p-1", repo: "averray-agent/perm", pullRequestNumber: 2, summary: {} }],
+    }, { ...base, now: new Date("2026-07-01T10:00:10.000Z") });
+    // Both refreshes hit the network — the breaker stayed closed.
+    expect(networkCalls).toBe(2);
   });
 });
