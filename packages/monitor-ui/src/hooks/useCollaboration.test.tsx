@@ -3,8 +3,12 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import type { ReactNode } from "react";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { SWRConfig } from "swr";
-import { useCollaboration } from "./useCollaboration.js";
-import type { CollaborationMessage } from "../lib/monitor/collaboration.js";
+import { reduceStreamingTurn, useCollaboration } from "./useCollaboration.js";
+import type {
+  CollaborationMessage,
+  CopilotStreamEvent,
+  CopilotStreamSource,
+} from "../lib/monitor/collaboration.js";
 
 afterEach(cleanup);
 
@@ -158,5 +162,161 @@ describe("useCollaboration", () => {
     // copy (server's), not the optimistic duplicate.
     await waitFor(() => expect(result.current.messages.map((m) => m.id)).toEqual(["q", "a"]));
     expect(result.current.messages.filter((m) => m.text === "status?")).toHaveLength(1);
+  });
+});
+
+// Feature #3 — live-token streaming. A synchronous delta source lets the test
+// push SSE events; the hook accumulates them into an in-progress Hermes turn.
+describe("useCollaboration — live-token streaming (feature #3)", () => {
+  /** A DI delta source that captures the handler so the test can drive events. */
+  function controllableSource(): { source: CopilotStreamSource; emit: (e: CopilotStreamEvent) => void; unsubscribed: () => boolean } {
+    let handler: ((e: CopilotStreamEvent) => void) | undefined;
+    let off = false;
+    return {
+      source: (onEvent) => {
+        handler = onEvent;
+        return () => {
+          off = true;
+        };
+      },
+      emit: (e) => handler?.(e),
+      unsubscribed: () => off,
+    };
+  }
+
+  test("accumulates hermes.delta into a live streaming turn, then finalizes on completion", async () => {
+    const { source, emit } = controllableSource();
+    const { result } = renderHook(
+      () => useCollaboration({ fetcher: async () => [], deltaSource: source, refreshIntervalMs: 0 }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => emit({ type: "hermes.delta", payload: { turnId: "t1", delta: "Operator ", addressedTo: "everyone" } }));
+    act(() => emit({ type: "hermes.delta", payload: { turnId: "t1", delta: "review is waiting." } }));
+
+    // Mid-stream: one Hermes turn, text accumulated, flagged streaming + live.
+    const streaming = result.current.messages.find((m) => m.id === "t1");
+    expect(streaming?.text).toBe("Operator review is waiting.");
+    expect(streaming?.author).toBe("hermes");
+    expect(streaming?.streaming).toBe(true);
+    expect(streaming?.hermesMode).toBe("live");
+
+    act(() =>
+      emit({ type: "hermes.turn.completed", payload: { turnId: "t1", text: "Operator review is waiting. Why: board.", hermesMode: "live" } }),
+    );
+
+    // Finalized: authoritative text, streaming flag cleared.
+    const done = result.current.messages.find((m) => m.id === "t1");
+    expect(done?.text).toBe("Operator review is waiting. Why: board.");
+    expect(done?.streaming).toBeUndefined();
+  });
+
+  test("reconciles the streamed turn away once the polled feed echoes the finalized text", async () => {
+    const { source, emit } = controllableSource();
+    // The feed starts empty, then (after the turn completes) the poll begins
+    // returning the same Hermes reply as a real server message.
+    let turns: CollaborationMessage[] = [];
+    const fetcher = vi.fn(async () => turns);
+    // A small refresh interval lets SWR re-poll so the echo lands on its own.
+    const { result } = renderHook(
+      () => useCollaboration({ fetcher, deltaSource: source, refreshIntervalMs: 20 }),
+      { wrapper },
+    );
+    await waitFor(() => expect(fetcher).toHaveBeenCalled());
+
+    act(() => emit({ type: "hermes.turn.completed", payload: { turnId: "t1", text: "all green", hermesMode: "live" } }));
+    // Before the echo: the streamed turn is the only copy of the reply.
+    expect(result.current.messages.filter((m) => m.text === "all green")).toHaveLength(1);
+    expect(result.current.messages.find((m) => m.text === "all green")?.id).toBe("t1");
+
+    // The server feed now carries the same Hermes reply under its own id.
+    turns = [{ id: "srv-a", ts: Date.now(), author: "hermes", kind: "chat", text: "all green", addressedTo: "everyone" }];
+
+    // Once the poll echoes it, the streamed turn drops — exactly one copy, the
+    // server's — so the reply never renders twice.
+    await waitFor(() => {
+      const green = result.current.messages.filter((m) => m.text === "all green");
+      expect(green).toHaveLength(1);
+      expect(green[0]?.id).toBe("srv-a");
+    });
+  });
+
+  test("finalizes an interrupted stream honestly as templated (no stuck live bubble)", async () => {
+    const { source, emit } = controllableSource();
+    const { result } = renderHook(
+      () => useCollaboration({ fetcher: async () => [], deltaSource: source, refreshIntervalMs: 0 }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    // Partial live tokens streamed…
+    act(() => emit({ type: "hermes.delta", payload: { turnId: "t1", delta: "half a th" } }));
+    expect(result.current.messages.find((m) => m.id === "t1")?.streaming).toBe(true);
+    expect(result.current.messages.find((m) => m.id === "t1")?.hermesMode).toBe("live");
+
+    // …then the gateway failed mid-stream and the co-pilot fell back to a
+    // templated reply. The terminal event carries the real text + mode.
+    act(() =>
+      emit({
+        type: "hermes.turn.completed",
+        payload: { turnId: "t1", text: "Operator review has 2 cards waiting.", hermesMode: "templated" },
+      }),
+    );
+    const done = result.current.messages.find((m) => m.id === "t1");
+    expect(done?.text).toBe("Operator review has 2 cards waiting."); // partial replaced
+    expect(done?.streaming).toBeUndefined(); // not stuck
+    expect(done?.hermesMode).toBe("templated"); // honest badge, not a live lie
+  });
+
+  test("renders exactly as before when no delta events ever arrive (degraded-safe)", async () => {
+    const { source } = controllableSource(); // never emits
+    const { result } = renderHook(
+      () => useCollaboration({ fetcher: async () => [{ id: "1", ts: 1, author: "hermes", kind: "chat", text: "hi", addressedTo: "everyone" }], deltaSource: source, refreshIntervalMs: 0 }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+    expect(result.current.messages[0]?.text).toBe("hi");
+    expect(result.current.messages[0]?.streaming).toBeUndefined();
+  });
+
+  test("unsubscribes from the delta source on unmount", async () => {
+    const { source, unsubscribed } = controllableSource();
+    const { unmount, result } = renderHook(
+      () => useCollaboration({ fetcher: async () => [], deltaSource: source, refreshIntervalMs: 0 }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    unmount();
+    expect(unsubscribed()).toBe(true);
+  });
+});
+
+describe("reduceStreamingTurn (pure)", () => {
+  const empty = () => new Map();
+
+  test("delta creates then appends to a turn, marking it streaming", () => {
+    let m = reduceStreamingTurn(empty(), { type: "hermes.delta", payload: { turnId: "t", delta: "ab" } });
+    m = reduceStreamingTurn(m, { type: "hermes.delta", payload: { turnId: "t", delta: "cd" } });
+    expect(m.get("t")).toMatchObject({ text: "abcd", streaming: true });
+  });
+
+  test("completion replaces text with the authoritative final and clears streaming", () => {
+    let m = reduceStreamingTurn(empty(), { type: "hermes.delta", payload: { turnId: "t", delta: "partial" } });
+    m = reduceStreamingTurn(m, { type: "hermes.turn.completed", payload: { turnId: "t", text: "final full text" } });
+    expect(m.get("t")).toMatchObject({ text: "final full text", streaming: false });
+  });
+
+  test("ignores malformed events (no turnId, non-string/empty delta, empty completed text)", () => {
+    const base = empty();
+    // @ts-expect-error — exercising a malformed payload at the boundary
+    expect(reduceStreamingTurn(base, { type: "hermes.delta", payload: {} })).toBe(base);
+    expect(reduceStreamingTurn(base, { type: "hermes.delta", payload: { turnId: "t", delta: "" } })).toBe(base);
+    expect(reduceStreamingTurn(base, { type: "hermes.turn.completed", payload: { turnId: "t", text: "" } })).toBe(base);
+  });
+
+  test("a completion for an unseen turn still renders (terminal text is authoritative)", () => {
+    const m = reduceStreamingTurn(empty(), { type: "hermes.turn.completed", payload: { turnId: "t", text: "solo" } });
+    expect(m.get("t")).toMatchObject({ text: "solo", streaming: false });
   });
 });

@@ -68,4 +68,23 @@ describe("HermesTurn", () => {
     const { queryByRole } = render(<HermesTurn turn={base} />);
     expect(queryByRole("link")).toBeNull();
   });
+
+  test("shows a live streaming affordance only while streaming (feature #3)", () => {
+    const streaming = render(
+      <HermesTurn turn={{ ...base, id: "s", kind: "chat", hermesMode: "live", streaming: true }} />,
+    );
+    const el = streaming.container.querySelector(".hm-turn") as HTMLElement;
+    expect(el.className).toContain("hm-turn--streaming");
+    expect(el.getAttribute("aria-busy")).toBe("true");
+    expect(streaming.getByText(/streaming/)).toBeTruthy();
+    expect(streaming.container.querySelector(".hm-turn-caret")).toBeTruthy();
+    streaming.unmount();
+
+    // A finalized (non-streaming) turn shows no caret and is not aria-busy.
+    const done = render(<HermesTurn turn={{ ...base, id: "d", kind: "chat", hermesMode: "live" }} />);
+    const doneEl = done.container.querySelector(".hm-turn") as HTMLElement;
+    expect(doneEl.className).not.toContain("hm-turn--streaming");
+    expect(doneEl.getAttribute("aria-busy")).toBeNull();
+    expect(done.container.querySelector(".hm-turn-caret")).toBeNull();
+  });
 });

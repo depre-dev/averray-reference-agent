@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   generateHermesReplyViaSession,
+  generateHermesReplyViaSessionStream,
   resolveHermesSessionConfig,
   type HermesReplyContext,
 } from "../../services/slack-operator/src/monitor-hermes-voice.js";
@@ -67,5 +71,81 @@ describe("generateHermesReplyViaSession", () => {
   it("returns null when the gateway is unreachable (caller falls back to Ollama)", async () => {
     const cfg = { baseUrl: "http://gw:8642", apiToken: "tok", fetchFn: fetchReturning({}, false) };
     expect(await generateHermesReplyViaSession(context, cfg)).toBeNull();
+  });
+});
+
+describe("generateHermesReplyViaSessionStream", () => {
+  const context: HermesReplyContext = {
+    operatorMessage: { text: "what's the state of the board?", addressedTo: "hermes", kind: "chat" },
+    recentMessages: [],
+  };
+
+  function sseFrame(event: string, data: unknown): string {
+    return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  }
+  function streamBody(chunks: string[]): ReadableStream<Uint8Array> {
+    const encoder = new TextEncoder();
+    return new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const c of chunks) controller.enqueue(encoder.encode(c));
+        controller.close();
+      },
+    });
+  }
+  /** Sequenced mock: JSON for /api/sessions, an SSE body for /chat/stream. */
+  function sequencedFetch(streamChunks: string[]): typeof fetch {
+    let i = 0;
+    return (async (url: unknown) => {
+      i += 1;
+      if (String(url).endsWith("/chat/stream")) {
+        return { ok: true, status: 200, body: streamBody(streamChunks) } as unknown as Response;
+      }
+      return { ok: true, status: 200, json: async () => ({ session: { id: "s9" } }) } as unknown as Response;
+    }) as unknown as typeof fetch;
+  }
+
+  it("streams deltas to onDelta and returns the finalized turn (usage recorded like sync)", async () => {
+    const cfg = {
+      baseUrl: "http://gw:8642",
+      apiToken: "tok",
+      fetchFn: sequencedFetch([
+        sseFrame("assistant.delta", { delta: "Operator review " }),
+        sseFrame("assistant.delta", { delta: "has 2 cards." }),
+        sseFrame("run.completed", {
+          session_id: "s9",
+          message: { content: "Operator review has 2 cards." },
+          usage: { input_tokens: 10, output_tokens: 6 },
+        }),
+      ]),
+    };
+    const deltas: string[] = [];
+    // Point usage recording at a temp JSONL so the shared recorder writes there
+    // instead of the container's /data path (keeps test output clean + proves
+    // the streaming path records usage exactly like the sync path).
+    const usageLogPath = join(tmpdir(), `hermes-stream-usage-${Date.now()}.jsonl`);
+    const turn = await generateHermesReplyViaSessionStream(context, cfg, (d) => deltas.push(d), undefined, {
+      usageLogPath,
+    });
+    expect(deltas).toEqual(["Operator review ", "has 2 cards."]);
+    expect(turn?.sessionId).toBe("s9");
+    expect(turn?.text).toBe("Operator review has 2 cards.");
+    // Usage was recorded (a non-empty JSONL line with the token counts).
+    const recorded = readFileSync(usageLogPath, "utf8").trim();
+    expect(recorded).toContain("output");
+    rmSync(usageLogPath, { force: true });
+  });
+
+  it("returns null on a streaming failure so the caller falls back to the sync path", async () => {
+    // Gateway reachable for session creation, but the stream 500s → null.
+    const failingStream = (async (url: unknown) => {
+      if (String(url).endsWith("/chat/stream")) {
+        return { ok: false, status: 500, body: null } as unknown as Response;
+      }
+      return { ok: true, status: 200, json: async () => ({ session: { id: "s9" } }) } as unknown as Response;
+    }) as unknown as typeof fetch;
+    const cfg = { baseUrl: "http://gw:8642", apiToken: "tok", fetchFn: failingStream };
+    const deltas: string[] = [];
+    expect(await generateHermesReplyViaSessionStream(context, cfg, (d) => deltas.push(d))).toBeNull();
+    expect(deltas).toEqual([]); // no tokens surfaced on failure
   });
 });

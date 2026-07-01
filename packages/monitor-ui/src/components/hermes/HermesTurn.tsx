@@ -17,21 +17,30 @@ export function HermesTurn({
     ? `https://github.com/${turn.relatedPr.repo}/pull/${turn.relatedPr.number}`
     : undefined;
   const pending = turn.id.startsWith("optimistic-");
+  // Feature #3 — a genuinely live-streaming Hermes turn (tokens still arriving).
+  const streaming = turn.streaming === true;
   const rank = rankForKind(turn.kind);
 
   return (
     <div
-      className={`hm-turn hm-turn--${turn.author} hm-turn--kind-${turn.kind} hm-turn--rank-${rank}`}
+      className={`hm-turn hm-turn--${turn.author} hm-turn--kind-${turn.kind} hm-turn--rank-${rank}${
+        streaming ? " hm-turn--streaming" : ""
+      }`}
+      {...(streaming ? { "aria-busy": true } : {})}
     >
       <div className="hm-turn-head">
         <AgentTag agent={turn.author} label={roomActorLabel(turn)} className="hm-turn-actor" />
         <span className="hm-turn-kind">
           · {kindLabel(turn.kind)}
           {pending ? " · pending" : ""}
+          {streaming ? " · streaming…" : ""}
         </span>
         <span className="hm-turn-time">{formatTurnTime(turn.ts)}</span>
       </div>
-      <div className="hm-turn-body">{turn.text}</div>
+      <div className="hm-turn-body">
+        {turn.text}
+        {streaming ? <span className="hm-turn-caret" aria-hidden>▍</span> : null}
+      </div>
       {cardId ? (
         <CardPin cardId={cardId} onCardClick={onCardClick} />
       ) : turn.relatedPr ? (

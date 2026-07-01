@@ -31,7 +31,53 @@ export interface CollaborationMessage {
   hermesMode?: HermesReplyMode;
   relatedPr?: CollaborationRelatedPr;
   relatedCorrelationId?: string;
+  /**
+   * True while this Hermes turn is still receiving live tokens over the
+   * co-pilot SSE (feature #3). Set only on the in-progress streaming turn so the
+   * UI can show a "streaming…" affordance; cleared when the terminal
+   * `hermes.turn.completed` finalizes the text. Absent for polled/templated
+   * turns, which render exactly as before.
+   */
+  streaming?: boolean;
 }
+
+// --- co-pilot live-token stream (feature #3) --------------------------------
+// The frontend's copy of the SSE event contract broadcast by slack-operator's
+// board stream while a co-pilot Hermes reply streams. Independent of the
+// backend declaration by design (they cross an HTTP/SSE boundary).
+
+/** Incremental token for an in-progress co-pilot Hermes turn (`hermes.delta`). */
+export interface CopilotDeltaEvent {
+  turnId: string;
+  delta: string;
+  addressedTo?: CollaborationTarget;
+  relatedPr?: CollaborationRelatedPr;
+  relatedCorrelationId?: string;
+}
+
+/** Terminal event for a co-pilot Hermes turn (`hermes.turn.completed`). */
+export interface CopilotTurnCompletedEvent {
+  turnId: string;
+  text: string;
+  hermesMode?: HermesReplyMode;
+  addressedTo?: CollaborationTarget;
+  relatedPr?: CollaborationRelatedPr;
+  relatedCorrelationId?: string;
+}
+
+export type CopilotStreamEvent =
+  | { type: "hermes.delta"; payload: CopilotDeltaEvent }
+  | { type: "hermes.turn.completed"; payload: CopilotTurnCompletedEvent };
+
+/**
+ * Subscribe to co-pilot live-token events. Returns an unsubscribe fn. The
+ * default implementation (in the hook) is EventSource-backed against the board
+ * SSE; tests inject a synchronous stub. A no-op source (returns a no-op
+ * unsubscribe and never calls the handler) keeps the rail on the poll path.
+ */
+export type CopilotStreamSource = (
+  onEvent: (event: CopilotStreamEvent) => void,
+) => () => void;
 
 export interface ReviewRequest {
   id: string;
