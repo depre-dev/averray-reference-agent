@@ -29,6 +29,11 @@ import {
   type LlmUsageEvent,
 } from "@avg/averray-mcp/llm-usage";
 import { logger } from "@avg/mcp-common";
+import {
+  chatWithHermesSession,
+  type HermesSessionConfig,
+  type HermesSessionTurn,
+} from "./hermes-session-client.js";
 
 export const HERMES_PERSONA = `You are Hermes, the board orchestrator for the Averray platform.
 
@@ -282,6 +287,49 @@ export async function generateHermesBoardNarration(
     options
   );
   return text ? appendHermesWhyTrace(applyHermesMemoryInfluence(text, context), context) : null;
+}
+
+/**
+ * Resolve the Hermes gateway Session-API transport from env. Returns null (=>
+ * caller uses the Ollama transport) unless the flag is on AND both the URL and
+ * token are set. Fail-closed: a half-configured gateway never activates.
+ *
+ * Env (set in .env.prod when the command-center gateway is up):
+ *   HERMES_SESSION_API_ENABLED=1
+ *   HERMES_API_URL=http://hermes-gateway:8642
+ *   HERMES_API_TOKEN=<API_SERVER_KEY>            (= HERMES_GATEWAY_API_KEY)
+ *   HERMES_SESSION_TIMEOUT_MS=45000              (optional)
+ */
+export function resolveHermesSessionConfig(
+  env: NodeJS.ProcessEnv = process.env
+): HermesSessionConfig | null {
+  if (!/^(1|true|yes|on)$/i.test((env.HERMES_SESSION_API_ENABLED ?? "").trim())) return null;
+  const baseUrl = (env.HERMES_API_URL ?? "").trim();
+  const apiToken = (env.HERMES_API_TOKEN ?? "").trim();
+  if (!baseUrl || !apiToken) return null;
+  const timeoutMs = Number(env.HERMES_SESSION_TIMEOUT_MS);
+  return {
+    baseUrl,
+    apiToken,
+    ...(Number.isFinite(timeoutMs) && timeoutMs > 0 ? { timeoutMs } : {}),
+  };
+}
+
+/**
+ * Co-pilot reply via the real agentic Hermes: send the operator's turn (with
+ * compact board context, via the shared buildUserPrompt) to a persistent
+ * gateway session and return its reply + the session id so the caller can keep
+ * the thread going. No persona is injected here — the session *is* Hermes, with
+ * its own system prompt, MCP tools, skills, and memory. Returns null on any
+ * failure so the caller falls back to the Ollama transport. Memory-influence +
+ * `Why:` post-processing is left to the caller for parity with that path.
+ */
+export async function generateHermesReplyViaSession(
+  context: HermesReplyContext,
+  config: HermesSessionConfig,
+  sessionId?: string
+): Promise<HermesSessionTurn | null> {
+  return chatWithHermesSession(config, buildUserPrompt(context), sessionId);
 }
 
 export function buildUserPrompt(context: HermesReplyContext): string {
