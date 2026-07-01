@@ -4,7 +4,7 @@ model:
   provider: ollama-cloud
   base_url: https://ollama.com/v1
   api_key_env: OLLAMA_API_KEY
-  default: deepseek-v4-pro:cloud
+  default: glm-5.2:cloud
 
 mcp_servers:
   averray:

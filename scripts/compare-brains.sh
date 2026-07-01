@@ -2,7 +2,7 @@
 set -euo pipefail
 
 TASK=""
-MODELS="deepseek-v4-pro:cloud,qwen3.5:cloud"
+MODELS="glm-5.2:cloud,qwen3.5:cloud"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
