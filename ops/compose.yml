@@ -256,6 +256,15 @@ services:
       HERMES_API_URL: ${HERMES_API_URL:-}
       HERMES_API_TOKEN: ${HERMES_API_TOKEN:-}
       HERMES_SESSION_TIMEOUT_MS: ${HERMES_SESSION_TIMEOUT_MS:-}
+      # #4 — co-pilot MCP elicitation (inline tool-call approvals in the rail).
+      # GROUNDWORK ONLY, OFF by default (fail-closed). The Hermes gateway does
+      # not expose MCP elicitation yet (Session API = create/chat/fork; stream =
+      # assistant.delta/run.completed only — no tool-confirmation event, no answer
+      # endpoint), so this gates NOTHING today: with the flag on it still falls
+      # closed to DENY. It is a dormant scaffold until the gateway support in
+      # docs/HERMES_COPILOT_ELICITATION.md lands. NEVER auto-approves a tool call.
+      HERMES_COPILOT_ELICITATION: ${HERMES_COPILOT_ELICITATION:-0}
+      HERMES_COPILOT_ELICITATION_TIMEOUT_MS: ${HERMES_COPILOT_ELICITATION_TIMEOUT_MS:-}
       # ORCH-P4c — agentic router backlog. When ON (needs the gateway session AND
       # a non-empty dispatch.allowed_repos), Hermes reasons over the live board to
       # propose board-grounded work gaps, augmenting the deterministic roadmap
