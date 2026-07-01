@@ -1447,7 +1447,7 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
       // sessionConfig is set (flag-gated); otherwise this is a no-op.
       if (sessionConfig) {
         try {
-          const turn = await generateHermesReplyViaSession(replyContext, sessionConfig, hermesCopilotSessionId);
+          const turn = await generateHermesReplyViaSession(replyContext, sessionConfig, hermesCopilotSessionId, { model });
           if (turn) {
             hermesCopilotSessionId = turn.sessionId;
             llmText = turn.text;

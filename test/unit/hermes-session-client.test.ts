@@ -86,7 +86,7 @@ describe("runHermesSessionTurn", () => {
       jsonResponse({ session_id: "s1", message: { role: "assistant", content: " hello " }, usage: {} }),
     ]);
     const turn = await runHermesSessionTurn(cfg(fetchFn), "s1", "hi");
-    expect(turn).toEqual({ sessionId: "s1", text: "hello" });
+    expect(turn).toMatchObject({ sessionId: "s1", text: "hello" });
     expect(calls[0]!.url).toBe("http://gw:8642/api/sessions/s1/chat");
     expect(calls[0]!.body).toEqual({ input: "hi" });
   });
@@ -120,7 +120,7 @@ describe("chatWithHermesSession", () => {
       jsonResponse({ message: { content: "reply" } }),
     ]);
     const turn = await chatWithHermesSession(cfg(fetchFn), "hi");
-    expect(turn).toEqual({ sessionId: "s2", text: "reply" });
+    expect(turn).toMatchObject({ sessionId: "s2", text: "reply" });
     expect(calls.map((c) => c.url)).toEqual([
       "http://gw:8642/api/sessions",
       "http://gw:8642/api/sessions/s2/chat",
@@ -130,7 +130,7 @@ describe("chatWithHermesSession", () => {
   it("reuses a supplied session id with a single turn call", async () => {
     const { fetchFn, calls } = mockFetch([jsonResponse({ session_id: "s1", message: { content: "ok" } })]);
     const turn = await chatWithHermesSession(cfg(fetchFn), "hi", "s1");
-    expect(turn).toEqual({ sessionId: "s1", text: "ok" });
+    expect(turn).toMatchObject({ sessionId: "s1", text: "ok" });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe("http://gw:8642/api/sessions/s1/chat");
   });
@@ -142,7 +142,7 @@ describe("chatWithHermesSession", () => {
       jsonResponse({ message: { content: "healed" } }), // retry turn
     ]);
     const turn = await chatWithHermesSession(cfg(fetchFn), "hi", "stale");
-    expect(turn).toEqual({ sessionId: "s3", text: "healed" });
+    expect(turn).toMatchObject({ sessionId: "s3", text: "healed" });
     expect(calls).toHaveLength(3);
   });
 

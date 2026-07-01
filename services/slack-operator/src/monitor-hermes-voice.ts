@@ -327,9 +327,35 @@ export function resolveHermesSessionConfig(
 export async function generateHermesReplyViaSession(
   context: HermesReplyContext,
   config: HermesSessionConfig,
-  sessionId?: string
+  sessionId?: string,
+  usageOptions?: { model?: string; usageLogPath?: string }
 ): Promise<HermesSessionTurn | null> {
-  return chatWithHermesSession(config, buildUserPrompt(context), sessionId);
+  // Mark the call live (the co-pilot "thinking" indicator) for the turn's
+  // duration — an agent turn is much slower than the Ollama completion.
+  const endLlmUsageCall = beginLlmUsageCall({
+    agent: "hermes",
+    ...(usageOptions?.model ? { model: usageOptions.model } : {}),
+  });
+  try {
+    const turn = await chatWithHermesSession(config, buildUserPrompt(context), sessionId);
+    // Record the agentic turn's token usage so the monitor's usage panel counts
+    // it. The Ollama transport records via requestHermesCompletion; without this
+    // the panel would under-report Hermes once session replies flow.
+    if (turn?.usage) {
+      const model = turn.model ?? usageOptions?.model;
+      await recordLlmUsageFromResult(
+        {
+          agent: "hermes",
+          ...(model ? { model } : {}),
+          result: { usage: turn.usage, ...(turn.model ? { model: turn.model } : {}) },
+        },
+        { path: usageOptions?.usageLogPath ?? llmUsageLogPath() }
+      ).catch((error) => logger.warn({ err: error }, "monitor_session_usage_record_failed"));
+    }
+    return turn;
+  } finally {
+    endLlmUsageCall();
+  }
 }
 
 export function buildUserPrompt(context: HermesReplyContext): string {

@@ -42,6 +42,11 @@ export interface HermesSessionConfig {
 export interface HermesSessionTurn {
   sessionId: string;
   text: string;
+  /** Raw `usage` block from the turn response ({input_tokens, output_tokens, …}).
+   *  Passed to the monitor's usage recorder so agentic replies show on the panel. */
+  usage?: Record<string, unknown> | null;
+  /** Model the gateway ran the turn on, when the response reports it. */
+  model?: string | null;
 }
 
 const DEFAULT_TIMEOUT_MS = 45_000;
@@ -90,7 +95,12 @@ export async function runHermesSessionTurn(
   const json = await postJson(cfg, `/api/sessions/${encodeURIComponent(sessionId)}/chat`, { input });
   const text = extractTurnText(json);
   if (!text) return null;
-  return { sessionId: extractTurnSessionId(json) ?? sessionId, text };
+  return {
+    sessionId: extractTurnSessionId(json) ?? sessionId,
+    text,
+    usage: extractTurnUsage(json),
+    model: extractTurnModel(json),
+  };
 }
 
 /**
@@ -170,6 +180,18 @@ function extractTurnSessionId(json: unknown): string | null {
   const root = asRecord(json);
   if (!root) return null;
   return asId(root.session_id) ?? asId(root.sessionId) ?? extractSessionId(json);
+}
+
+/** The raw `usage` object off a turn response, or null when absent. */
+export function extractTurnUsage(json: unknown): Record<string, unknown> | null {
+  return asRecord(asRecord(json)?.usage) ?? null;
+}
+
+/** The model the turn ran on, when the response reports it. */
+export function extractTurnModel(json: unknown): string | null {
+  const root = asRecord(json);
+  if (!root) return null;
+  return asId(root.model) ?? asId(asRecord(root.message)?.model) ?? asId(asRecord(root.usage)?.model);
 }
 
 function asRecord(v: unknown): Record<string, unknown> | undefined {
