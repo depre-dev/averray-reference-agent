@@ -107,6 +107,12 @@ services:
       dockerfile: ops/Dockerfile.node
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     restart: unless-stopped
+    # Hermes owns the skills volume as UID 10000 and continuously re-secures it to
+    # mode 0700 (owner-only) as it writes, so no chmod / hermes-permissions pass keeps
+    # it readable by the image's default appuser (10001) -- every inotify watch then
+    # fails EACCES and this service crash-loops. Read as that same owner UID. The
+    # mount below stays read-only; the observer only ever reads.
+    user: "10000:10000"
     depends_on:
       hermes-permissions:
         condition: service_completed_successfully
