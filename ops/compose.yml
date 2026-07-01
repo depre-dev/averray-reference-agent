@@ -256,6 +256,14 @@ services:
       HERMES_API_URL: ${HERMES_API_URL:-}
       HERMES_API_TOKEN: ${HERMES_API_TOKEN:-}
       HERMES_SESSION_TIMEOUT_MS: ${HERMES_SESSION_TIMEOUT_MS:-}
+      # ORCH-P4c — agentic router backlog. When ON (needs the gateway session AND
+      # a non-empty dispatch.allowed_repos), Hermes reasons over the live board to
+      # propose board-grounded work gaps, augmenting the deterministic roadmap
+      # backlog. Everything still flows through the hard taxonomy + dispatch-policy
+      # + operator gate. OFF by default; falls back to the roadmap backlog on any
+      # failure. One session turn per router tick.
+      HERMES_ROUTER_AGENTIC_BACKLOG: ${HERMES_ROUTER_AGENTIC_BACKLOG:-0}
+      HERMES_ROUTER_AGENTIC_MAX_ITEMS: ${HERMES_ROUTER_AGENTIC_MAX_ITEMS:-3}
       LLM_USAGE_LOG_PATH: ${LLM_USAGE_LOG_PATH:-/data/llm-usage.jsonl}
       HERMES_MONITOR_MEMORY_PATH: ${HERMES_MONITOR_MEMORY_PATH:-/data/hermes-monitor-memory.json}
       AVERRAY_HANDOFF_EVENTS_PATH: ${AVERRAY_HANDOFF_EVENTS_PATH:-/data/handoff-events.jsonl}
