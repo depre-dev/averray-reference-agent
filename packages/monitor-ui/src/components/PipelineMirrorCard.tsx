@@ -1,6 +1,7 @@
 import type { BoardCard } from "../lib/monitor/card-types.js";
 import { isDecision, type KanbanTier } from "../lib/monitor/lane-rules.js";
 import { deployStepsForCard } from "../lib/monitor/deploy-stepper.js";
+import { shortId } from "../lib/monitor/card-id.js";
 import { AgentTag, StatusPill, type StateVariant } from "./ui.js";
 import { DeployStepper } from "./DeployStepper.js";
 
@@ -13,10 +14,6 @@ export type PipelineMirrorCardProps = {
   /** PR-F3: render the deploy checkpoint stepper inline (the active deploy). */
   showStepper?: boolean;
 };
-
-function shortId(id: string): string {
-  return id.replace(/^[a-z-]+ /, "");
-}
 
 function statusFor(card: BoardCard, tier: KanbanTier): { label: string; variant: StateVariant } {
   if (tier === "hide" || card.type === "done") return { label: "VERIFIED", variant: "pass" };

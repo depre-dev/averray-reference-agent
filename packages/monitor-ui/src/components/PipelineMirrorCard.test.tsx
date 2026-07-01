@@ -34,6 +34,18 @@ describe("PipelineMirrorCard — PR-F2 done passive state", () => {
     expect(container.querySelector(".is-awaiting-inbox")).toBeNull();
   });
 
+  test("collapses a long routed-task id to a short handle in the mirror header", () => {
+    const card = mk({
+      id: "codex-task-averray-agent-agent-new-20260701T142620409Z-vfs58z",
+      type: "task", taskStatus: "proposed", agentType: "codex",
+      title: "Hermes routed work: deploy verification failure",
+    });
+    const { container } = render(<PipelineMirrorCard card={card} tier="watch" />);
+    const head = container.querySelector(".hm-pipeline-card-head");
+    expect(head?.textContent).toContain("task vfs58z"); // shared shortId — same as the full Card
+    expect(head?.textContent).not.toContain("codex-task-averray"); // raw machine id no longer crowds the header
+  });
+
   test("a card with a live operator decision keeps the jump-to-inbox affordance", () => {
     const onJumpToInbox = vi.fn();
     const live = mk({ lane: "operator-review", waitingOn: { actor: "operator", tone: "warn" } });

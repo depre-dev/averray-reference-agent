@@ -31,6 +31,7 @@ import type {
   MissionReport,
 } from "../../lib/monitor/card-types.js";
 import { deployStepsForCard } from "../../lib/monitor/deploy-stepper.js";
+import { shortId } from "../../lib/monitor/card-id.js";
 import { formatFreshness, freshnessTier } from "../../lib/monitor/urgency.js";
 import { laneFor, isWaitingOnOperator } from "../../lib/monitor/lane-rules.js";
 import { humanizedSignalParts, humanizeSignalText } from "../../lib/monitor/signal-labels.js";
@@ -80,23 +81,8 @@ function freshClass(card: BoardCard): string {
   return "";
 }
 
-/**
- * Turn a card ID into the compact monospace badge the header shows next to the
- * agent name. First strips the leading agent-type prefix (`agent #548` → `#548`,
- * `mission browser-X` → `browser-X`). Then, for routed codex/claude task ids —
- * long machine handles like `codex-task-averray-agent-agent-new-…Z-vfs58z` that
- * carry no operator meaning and crush the agent label to a `c…` stub — collapse
- * to a short stable handle (`task vfs58z`). PR refs (`#711`) and short slugs
- * (`browser-onboard-04`, `starter-coding-014`) are left untouched.
- */
-function shortId(id: string): string {
-  const withoutAgent = id.replace(/^[a-z-]+ /, "");
-  if (/(?:^|-)task-/.test(withoutAgent) && !withoutAgent.includes("#")) {
-    const tail = withoutAgent.match(/[a-z0-9]{4,12}$/i)?.[0];
-    if (tail) return `task ${tail}`;
-  }
-  return withoutAgent;
-}
+// `shortId` — the compact header id badge — is shared via
+// ../../lib/monitor/card-id.js so <Card> and <PipelineMirrorCard> can't drift.
 
 // Risk-tag pill classification — matches the bundle's branching.
 function freshnessVariant(card: BoardCard, isStale: boolean, isClosed: boolean): StateVariant {
