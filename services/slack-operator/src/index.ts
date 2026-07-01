@@ -133,9 +133,15 @@ import {
   generateHermesBoardNarration,
   generateHermesReply,
   generateHermesReplyViaSession,
+  generateHermesReplyViaSessionStream,
   requestHermesCompletion,
   resolveHermesSessionConfig,
 } from "./monitor-hermes-voice.js";
+import {
+  emitCopilotStreamEvent,
+  onCopilotStreamEvent,
+  type CopilotStreamEvent,
+} from "./monitor-copilot-stream.js";
 import {
   fallbackHermesRouterNarration,
   routerCorrelationId,
@@ -1413,6 +1419,10 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
   // Null unless HERMES_SESSION_API_ENABLED + URL + token are all set, so the
   // default transport stays the Ollama completion below.
   const sessionConfig = resolveHermesSessionConfig();
+  // Live-token streaming for the co-pilot's Hermes reply. FLAG-GATED (default
+  // off) and only meaningful when a gateway session config resolves. When off,
+  // the reply falls through to the sync session turn exactly as before.
+  const streamingEnabled = /^(1|true|yes|on)$/i.test((optionalEnv("HERMES_COPILOT_STREAMING") ?? "").trim());
 
   const timer = setTimeout(async () => {
     let text = draft.text;
@@ -1438,6 +1448,12 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
       ...(board ? { board } : {}),
     };
     const memoryRequest = classifyHermesMemoryRequest(operatorMessage);
+    // Stable id correlating this turn's deltas + terminal event on the SSE, and
+    // whether we broadcast at least one live token. Declared at the callback
+    // scope so the terminal-event emit below (outside the transport branch) can
+    // finalize the frontend's in-progress bubble even on a mid-stream fallback.
+    const turnId = `hermes-turn-${operatorMessage.id}`;
+    let sawStreamDelta = false;
     if (draft.force) {
       text = draft.text;
     } else if (memoryRequest !== "none") {
@@ -1449,7 +1465,28 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
       // sessionConfig is set (flag-gated); otherwise this is a no-op.
       if (sessionConfig) {
         try {
-          const turn = await generateHermesReplyViaSession(replyContext, sessionConfig, hermesCopilotSessionId, { model });
+          const streamMeta = {
+            addressedTo: draft.addressedTo,
+            ...(draft.relatedPr ? { relatedPr: draft.relatedPr } : {}),
+            ...(draft.relatedCorrelationId ? { relatedCorrelationId: draft.relatedCorrelationId } : {}),
+          };
+          // When streaming is on, forward each token to open board SSE
+          // connections as `hermes.delta`. TRUTH-BOUNDARY: deltas are broadcast
+          // only as they genuinely arrive from the gateway. On any streaming
+          // failure the streaming variant returns null and we fall back to the
+          // sync turn below with no partial/fake tokens surfaced as final.
+          const turn = streamingEnabled
+            ? await generateHermesReplyViaSessionStream(
+                replyContext,
+                sessionConfig,
+                (delta) => {
+                  sawStreamDelta = true;
+                  emitCopilotStreamEvent({ type: "hermes.delta", payload: { turnId, delta, ...streamMeta } });
+                },
+                hermesCopilotSessionId,
+                { model }
+              )
+            : await generateHermesReplyViaSession(replyContext, sessionConfig, hermesCopilotSessionId, { model });
           if (turn) {
             hermesCopilotSessionId = turn.sessionId;
             llmText = turn.text;
@@ -1483,6 +1520,29 @@ function scheduleHermesAutoReply(operatorMessage: Awaited<ReturnType<typeof reco
     }
     if (memoryRequest !== "forget_pr") {
       text = appendHermesWhyTrace(applyHermesMemoryInfluence(text, replyContext), replyContext);
+    }
+    // Terminal live-token event. Fires when streaming was on AND either (a) the
+    // reply came back genuinely live, or (b) we already broadcast partial tokens
+    // for this turn (so the frontend's in-progress bubble MUST be finalized/
+    // cleared rather than left stuck). Carries the AUTHORITATIVE final text +
+    // the REAL hermesMode so the frontend renders exactly the reply the next
+    // collaboration poll will echo — a mid-stream failure that fell back to a
+    // templated reply resolves honestly (real text, "templated" badge), never a
+    // frozen live bubble. When streaming was on but the gateway never streamed a
+    // token (pure fallback), no delta and no live turn ⇒ no terminal event, so a
+    // templated reply is never dressed up as streamed (truth-boundary).
+    if (streamingEnabled && (hermesMode === "live" || sawStreamDelta)) {
+      emitCopilotStreamEvent({
+        type: "hermes.turn.completed",
+        payload: {
+          turnId,
+          text,
+          hermesMode,
+          addressedTo: draft.addressedTo,
+          ...(draft.relatedPr ? { relatedPr: draft.relatedPr } : {}),
+          ...(draft.relatedCorrelationId ? { relatedCorrelationId: draft.relatedCorrelationId } : {}),
+        },
+      });
     }
     try {
       recordCollaborationMessage({
@@ -4196,10 +4256,20 @@ async function writeMonitorV2Stream(
     writeSseEvent(response, "board.card.added", { card, at: new Date().toISOString() });
   });
 
+  // Forward co-pilot live-token events (hermes.delta / hermes.turn.completed) to
+  // this SSE connection. Only emitted when HERMES_COPILOT_STREAMING is on and a
+  // reply genuinely streams from the gateway; otherwise this is a no-op and the
+  // co-pilot reply lands on the next collaboration poll exactly as today.
+  const offCopilot = onCopilotStreamEvent((event: CopilotStreamEvent) => {
+    if (closed) return;
+    writeSseEvent(response, event.type, event.payload);
+  });
+
   request.on("close", () => {
     closed = true;
     if (timer) clearInterval(timer);
     offSpawn();
+    offCopilot();
   });
 
   await send();

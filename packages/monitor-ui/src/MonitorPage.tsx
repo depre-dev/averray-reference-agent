@@ -113,6 +113,15 @@ export function MonitorPage({
   autonomy,
 }: MonitorPageProps = {}) {
   const { board, status, refresh } = useMonitorBoard(options);
+  // Feature #3 — let the co-pilot rail consume live Hermes tokens off the board
+  // SSE by default (opt-in to the EventSource delta source). DEGRADED-SAFE: the
+  // delta events only exist when the backend HERMES_COPILOT_STREAMING flag is
+  // on; with it off no events arrive and the rail renders off the poll exactly
+  // as before. Callers/tests can still fully override the wiring.
+  const collaborationWithStreaming = useMemo<UseCollaborationOptions>(
+    () => ({ live: true, ...collaboration }),
+    [collaboration],
+  );
   // PR-D1: apply the Hermes-4 color profile (default Midnight) + motion/density
   // to <html> as --h4-* tokens. Foundation-first — drives the new shell/footer/
   // kanban-tier surfaces; the existing board keeps its --hm-* styling until
@@ -166,7 +175,7 @@ export function MonitorPage({
         onRerunMission={onRerunMission}
         onAcceptMissionFailure={onAcceptMissionFailure}
         onOpenMissionIssue={onOpenMissionIssue}
-        collaboration={collaboration}
+        collaboration={collaborationWithStreaming}
         onMute={muteEverywhere}
         onUnmute={unmuteEverywhere}
         muted={muted}

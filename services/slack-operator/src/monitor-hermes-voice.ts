@@ -31,6 +31,7 @@ import {
 import { logger } from "@avg/mcp-common";
 import {
   chatWithHermesSession,
+  chatWithHermesSessionStream,
   type HermesSessionConfig,
   type HermesSessionTurn,
 } from "./hermes-session-client.js";
@@ -338,24 +339,66 @@ export async function generateHermesReplyViaSession(
   });
   try {
     const turn = await chatWithHermesSession(config, buildUserPrompt(context), sessionId);
-    // Record the agentic turn's token usage so the monitor's usage panel counts
-    // it. The Ollama transport records via requestHermesCompletion; without this
-    // the panel would under-report Hermes once session replies flow.
-    if (turn?.usage) {
-      const model = turn.model ?? usageOptions?.model;
-      await recordLlmUsageFromResult(
-        {
-          agent: "hermes",
-          ...(model ? { model } : {}),
-          result: { usage: turn.usage, ...(turn.model ? { model: turn.model } : {}) },
-        },
-        { path: usageOptions?.usageLogPath ?? llmUsageLogPath() }
-      ).catch((error) => logger.warn({ err: error }, "monitor_session_usage_record_failed"));
-    }
+    await recordHermesSessionTurnUsage(turn, usageOptions);
     return turn;
   } finally {
     endLlmUsageCall();
   }
+}
+
+/**
+ * Live-token variant of `generateHermesReplyViaSession`: streams the agentic
+ * turn over the gateway SSE endpoint, forwarding each token to `onDelta` as it
+ * arrives, and records the turn's usage identically to the sync path. Returns
+ * null on ANY failure so the caller falls back to the synchronous session turn
+ * (and then the Ollama completion, and then the template) — the co-pilot never
+ * breaks. FLAG-GATED at the caller; this function itself has no flag.
+ *
+ * TRUTH-BOUNDARY: deltas are forwarded ONLY as they genuinely stream from the
+ * gateway; if the stream fails before completing, this returns null WITHOUT a
+ * final turn, so the caller renders the eventual sync reply with no fake typing.
+ */
+export async function generateHermesReplyViaSessionStream(
+  context: HermesReplyContext,
+  config: HermesSessionConfig,
+  onDelta: (deltaText: string) => void,
+  sessionId?: string,
+  usageOptions?: { model?: string; usageLogPath?: string }
+): Promise<HermesSessionTurn | null> {
+  const endLlmUsageCall = beginLlmUsageCall({
+    agent: "hermes",
+    ...(usageOptions?.model ? { model: usageOptions.model } : {}),
+  });
+  try {
+    const turn = await chatWithHermesSessionStream(config, buildUserPrompt(context), onDelta, sessionId);
+    await recordHermesSessionTurnUsage(turn, usageOptions);
+    return turn;
+  } finally {
+    endLlmUsageCall();
+  }
+}
+
+/**
+ * Record an agentic turn's token usage so the monitor's usage panel counts it.
+ * The Ollama transport records via requestHermesCompletion; without this the
+ * panel would under-report Hermes once session replies flow. Shared by the sync
+ * and streaming session variants so both count identically. No-op when the turn
+ * is null or carries no usage.
+ */
+async function recordHermesSessionTurnUsage(
+  turn: HermesSessionTurn | null,
+  usageOptions?: { model?: string; usageLogPath?: string }
+): Promise<void> {
+  if (!turn?.usage) return;
+  const model = turn.model ?? usageOptions?.model;
+  await recordLlmUsageFromResult(
+    {
+      agent: "hermes",
+      ...(model ? { model } : {}),
+      result: { usage: turn.usage, ...(turn.model ? { model: turn.model } : {}) },
+    },
+    { path: usageOptions?.usageLogPath ?? llmUsageLogPath() }
+  ).catch((error) => logger.warn({ err: error }, "monitor_session_usage_record_failed"));
 }
 
 export function buildUserPrompt(context: HermesReplyContext): string {

@@ -2652,6 +2652,26 @@ button.hm-activity-row:hover {
   color: var(--hm-ink);
 }
 
+/* Feature #3 — live-token streaming affordance. Shown only while a Hermes turn
+ * is genuinely receiving tokens over the co-pilot SSE; the blinking caret is
+ * removed the moment the turn finalizes, so it never implies fake typing. */
+.hm-turn-caret {
+  display: inline-block;
+  margin-left: 1px;
+  color: var(--hm-accent, currentColor);
+  animation: hm-caret-blink 1s steps(2, start) infinite;
+}
+.hm-turn--streaming .hm-turn-kind {
+  color: var(--hm-accent, var(--hm-muted));
+}
+@keyframes hm-caret-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hm-turn-caret { animation: none; }
+}
+
 /* Pinned context card inside a Hermes turn */
 .hm-turn-pin {
   display: grid;

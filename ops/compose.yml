@@ -256,6 +256,13 @@ services:
       HERMES_API_URL: ${HERMES_API_URL:-}
       HERMES_API_TOKEN: ${HERMES_API_TOKEN:-}
       HERMES_SESSION_TIMEOUT_MS: ${HERMES_SESSION_TIMEOUT_MS:-}
+      # Feature #3 — live-token streaming for the co-pilot's "Ask Hermes" replies.
+      # When ON (and the gateway session transport above resolves), the co-pilot
+      # streams Hermes's reply token-by-token over the board SSE instead of
+      # landing it whole on the next poll. OFF by default; degraded-safe — any
+      # streaming failure falls back to the sync session turn, so the co-pilot
+      # reply is never muted or faked.
+      HERMES_COPILOT_STREAMING: ${HERMES_COPILOT_STREAMING:-0}
       # ORCH-P4c — agentic router backlog. When ON (needs the gateway session AND
       # a non-empty dispatch.allowed_repos), Hermes reasons over the live board to
       # propose board-grounded work gaps, augmenting the deterministic roadmap
