@@ -220,6 +220,55 @@ describe("planAndRouteWork", () => {
   });
 });
 
+describe("planAndRouteWork — Hermes soft-surface agent suggestion (B)", () => {
+  // "Soft" = surfaces the hard taxonomy pins to NEITHER agent (not chain/settlement/etc.
+  // → codex, not ui/docs/monitor/board → claude). Hermes may pick the agent only there.
+  it("honors Hermes's suggested agent on a residual soft surface, above classifier/learned routing", () => {
+    const proposals = planAndRouteWork(input({
+      backlog: [{ ...item("Add retry-path coverage", "test-coverage", "Cover the EACCES retry"), suggestedAgent: "codex" }],
+    }));
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]!.agent).toBe("codex"); // classifier defaulted claude; Hermes's suggestion wins on the soft surface
+    expect(proposals[0]!.whyAgent).toContain("Hermes suggested codex");
+    expect(proposals[0]!.whyAgent).toContain("leaned claude"); // transparency: notes the divergence
+  });
+
+  it("lets the hard taxonomy override Hermes's suggestion on a dangerous surface", () => {
+    const proposals = planAndRouteWork(input({
+      backlog: [{ ...item("Escrow settlement proof", "chain/settlement", "Verify invariants"), suggestedAgent: "claude" }],
+    }));
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]!.agent).toBe("codex"); // hard taxonomy forces codex despite the claude suggestion
+    expect(proposals[0]!.whyAgent).not.toContain("Hermes suggested"); // suggestion ignored on the hard surface
+  });
+
+  it("now lets Hermes override the agent on ui/docs (a soft default, no longer a hard pin)", () => {
+    const proposals = planAndRouteWork(input({
+      backlog: [{ ...item("Restructure the drawer internals", "ui", "Refactor drawer internals"), suggestedAgent: "codex" }],
+    }));
+    expect(proposals[0]!.agent).toBe("codex"); // ui defaults to claude but Hermes's suggestion wins
+    expect(proposals[0]!.whyAgent).toContain("Hermes suggested codex");
+  });
+
+  it("keeps dangerous surfaces (deploy/secrets/migrations) walled to Codex despite a claude suggestion", () => {
+    for (const surface of ["deploy verification", "secret rotation", "db migration"]) {
+      const proposals = planAndRouteWork(input({
+        backlog: [{ ...item(`Handle ${surface}`, surface, "do it"), suggestedAgent: "claude" }],
+      }));
+      expect(proposals[0]!.agent).toBe("codex");
+      expect(proposals[0]!.whyAgent).not.toContain("Hermes suggested");
+    }
+  });
+
+  it("falls back to classifier/learned routing when no agent is suggested (soft surface)", () => {
+    const proposals = planAndRouteWork(input({
+      backlog: [item("Add retry-path coverage", "test-coverage", "Cover the EACCES retry")],
+    }));
+    expect(proposals[0]!.agent).toBe("claude");
+    expect(proposals[0]!.whyAgent).not.toContain("Hermes suggested");
+  });
+});
+
 function input(overrides: Partial<PlanAndRouteWorkInput> = {}): PlanAndRouteWorkInput {
   return {
     backlog: [],
