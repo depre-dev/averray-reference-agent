@@ -19,6 +19,7 @@ import { useCollaboration, type UseCollaborationOptions } from "../../hooks/useC
 import { derivePresence, activeCount, type PresencePeer } from "../../lib/monitor/presence.js";
 import { railDigestCounts } from "../../lib/monitor/rail-digest.js";
 import { isDecision } from "../../lib/monitor/lane-rules.js";
+import { shortId } from "../../lib/monitor/card-id.js";
 import { AgentTag, Badge, Button, EmptyState, StatusPill, type AgentTagAgent, type StateVariant } from "../ui.js";
 import { AskHermesComposer } from "./AskHermesComposer.js";
 import { HermesTurn } from "./HermesTurn.js";
@@ -440,7 +441,7 @@ function DigestWaitingCard({
       <span className="hm-rail-waiting-dot" aria-hidden />
       <span className="hm-rail-waiting-main">
         <strong>{card.title}</strong>
-        <small>{card.agentType} · {card.id}</small>
+        <small>{card.agentType} · {shortId(card.id)}</small>
         {rec ? <span className="hm-rail-waiting-rec"><b>rec ·</b> {rec}</span> : null}
         <span className="hm-rail-waiting-chips">
           <Badge variant={risk.tone}>{risk.label}</Badge>
