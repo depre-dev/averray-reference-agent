@@ -77,6 +77,22 @@ describe("Card — type coverage", () => {
     expect(container.querySelector(".hm-checks-bar")).toBeNull();
   });
 
+  test("a routed task's long machine id collapses to a short handle in the header", () => {
+    const card = {
+      ...fixture("task starter-coding-014"),
+      id: "codex-task-averray-agent-agent-new-20260701T142620409Z-vfs58z",
+    } as BoardCard;
+    const { container } = render(<Card card={card} />);
+    const head = container.querySelector(".hm-card-head");
+    expect(head?.textContent).toContain("task vfs58z"); // short, operator-scannable handle
+    expect(head?.textContent).not.toContain("codex-task-averray"); // raw id no longer crowds the header
+  });
+
+  test("a short task slug is left as-is in the header", () => {
+    const { container } = render(<Card card={fixture("task starter-coding-014")} />);
+    expect(container.querySelector(".hm-card-head")?.textContent).toContain("starter-coding-014");
+  });
+
   test("card shows a small cross-agent review request indicator", () => {
     const card: BoardCard = {
       ...fixture("agent #547"),
