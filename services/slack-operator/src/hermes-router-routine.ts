@@ -22,6 +22,12 @@ export interface HermesRouterConfig {
   cooldownMs: number;
   maxProposalsPerTick: number;
   lookbackMs: number;
+  /**
+   * ORCH-P4c anti-entrenchment (flag-gated, default off). Passed to
+   * planAndRouteWork so learned routing can explore under-sampled agents on soft
+   * surfaces. The hard taxonomy wall + dispatch policy are unaffected.
+   */
+  explore?: boolean;
 }
 
 export interface HermesRouterAuditRecord {
@@ -85,6 +91,7 @@ export async function runHermesRouterOnce(config: HermesRouterConfig, deps: Herm
     policy: buildPolicySnapshot(policy, tasks, now),
     classify: deps.classify,
     ...(routingScores ? { routingScores } : {}),
+    ...(config.explore ? { explore: true } : {}),
     maxProposals: config.maxProposalsPerTick,
   });
 

@@ -269,6 +269,99 @@ describe("planAndRouteWork — Hermes soft-surface agent suggestion (B)", () => 
   });
 });
 
+describe("planAndRouteWork — learned-routing anti-entrenchment exploration (ORCH-P4c)", () => {
+  // The classifier defaults "ops hygiene" (a soft surface) to claude, so
+  // staticAgent = claude and the under-dog is codex. Exploration should give the
+  // under-sampled codex a chance to build a baseline — but only when opted in.
+  const undersampledCodex = {
+    "ops hygiene": {
+      claude: { status: "baseline_available" as const, score: 70, samples: 4 },
+      codex: { status: "insufficient_data" as const, score: null, samples: 1 },
+    },
+  };
+
+  it("explores the under-sampled agent on a soft surface so it can build a baseline", () => {
+    const proposals = planAndRouteWork(input({
+      explore: true,
+      backlog: [item("Ops hygiene", "ops hygiene", "Tighten the routine guard")],
+      routingScores: undersampledCodex,
+    }));
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]!.agent).toBe("codex"); // classifier leaned claude; exploration routes the under-sampled codex
+    expect(proposals[0]!.whyAgent).toContain("Anti-entrenchment");
+    expect(proposals[0]!.whyAgent).toContain("explored codex");
+  });
+
+  it("does not explore when the flag is off — learned routing stays pure exploitation", () => {
+    const proposals = planAndRouteWork(input({
+      // explore omitted → default off
+      backlog: [item("Ops hygiene", "ops hygiene", "Tighten the routine guard")],
+      routingScores: undersampledCodex,
+    }));
+    expect(proposals[0]!.agent).toBe("claude"); // insufficient-data fallback keeps the classifier's pick
+    expect(proposals[0]!.whyAgent).not.toContain("Anti-entrenchment");
+    expect(proposals[0]!.whyAgent).toContain("insufficient ops hygiene data");
+  });
+
+  it("stops exploring once the under-dog has a baseline (exploitation resumes)", () => {
+    const proposals = planAndRouteWork(input({
+      explore: true,
+      backlog: [item("Ops hygiene", "ops hygiene", "Tighten the routine guard")],
+      routingScores: {
+        "ops hygiene": {
+          claude: { status: "baseline_available", score: 42, samples: 3 },
+          codex: { status: "baseline_available", score: 88, samples: 2 },
+        },
+      },
+    }));
+    expect(proposals[0]!.agent).toBe("codex"); // both established → compare scores, not explore
+    expect(proposals[0]!.whyAgent).toContain("Learned routing preferred codex");
+    expect(proposals[0]!.whyAgent).not.toContain("Anti-entrenchment");
+  });
+
+  it("never explores to a dispatch-policy-blocked agent", () => {
+    const proposals = planAndRouteWork(input({
+      explore: true,
+      policy: { ...POLICY, allowedAgents: ["claude"] },
+      backlog: [item("Ops hygiene", "ops hygiene", "Tighten the routine guard")],
+      routingScores: undersampledCodex,
+    }));
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]!.agent).toBe("claude"); // codex is blocked → no exploration to it
+    expect(proposals[0]!.whyAgent).not.toContain("Anti-entrenchment");
+  });
+
+  it("does not explore during cold-start when neither agent is established", () => {
+    const proposals = planAndRouteWork(input({
+      explore: true,
+      backlog: [item("Ops hygiene", "ops hygiene", "Tighten the routine guard")],
+      routingScores: {
+        "ops hygiene": {
+          claude: { status: "insufficient_data", score: null, samples: 1 },
+          codex: { status: "insufficient_data", score: null, samples: 0 },
+        },
+      },
+    }));
+    expect(proposals[0]!.agent).toBe("claude"); // classifier default until data builds
+    expect(proposals[0]!.whyAgent).not.toContain("Anti-entrenchment");
+  });
+
+  it("never explores off the hard taxonomy wall, even with exploration on", () => {
+    const proposals = planAndRouteWork(input({
+      explore: true,
+      backlog: [item("Escrow settlement proof", "chain/settlement", "Verify invariants")],
+      routingScores: {
+        "chain settlement": {
+          codex: { status: "baseline_available", score: 90, samples: 4 },
+          claude: { status: "insufficient_data", score: null, samples: 0 },
+        },
+      },
+    }));
+    expect(proposals[0]!.agent).toBe("codex"); // hard wall forces codex; exploration never runs here
+    expect(proposals[0]!.whyAgent).not.toContain("Anti-entrenchment");
+  });
+});
+
 function input(overrides: Partial<PlanAndRouteWorkInput> = {}): PlanAndRouteWorkInput {
   return {
     backlog: [],

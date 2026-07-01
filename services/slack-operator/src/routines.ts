@@ -65,6 +65,7 @@ export interface SlackRoutineConfig {
     cooldownMs: number;
     maxProposalsPerTick: number;
     lookbackHours: number;
+    explore: boolean;
   };
 }
 
@@ -144,6 +145,8 @@ export function parseSlackRoutineConfig(
       cooldownMs: Math.max(60_000, (positiveNumber(env.HERMES_ROUTER_COOLDOWN_MINUTES) || 30) * 60_000),
       maxProposalsPerTick: Math.max(1, positiveNumber(env.HERMES_ROUTER_MAX_PROPOSALS_PER_TICK) || 1),
       lookbackHours: Math.max(1, positiveNumber(env.HERMES_ROUTER_RECENTLY_DONE_LOOKBACK_HOURS) || 72),
+      // ORCH-P4c anti-entrenchment: learned routing explores under-sampled agents on soft surfaces.
+      explore: env.HERMES_ROUTER_ANTI_ENTRENCHMENT === "1",
     },
   };
 }
