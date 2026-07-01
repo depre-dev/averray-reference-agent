@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { jsonContent, logger, optionalEnv, query, runStdioServer } from "@avg/mcp-common";
 import { recordHermesLlmUsageFromTraceEvent } from "./hermes-llm-usage.js";
+import { classifyIngestBindError } from "./ingest-errors.js";
 
 const server = new McpServer({
   name: "trace-mcp",
@@ -56,7 +57,7 @@ await runStdioServer(server);
 
 function startHttpIngest() {
   const port = Number(optionalEnv("TRACE_HTTP_PORT", "8789"));
-  http
+  const ingestServer = http
     .createServer(async (req, res) => {
       if (req.method !== "POST" || req.url !== "/hermes-event") {
         res.writeHead(404).end();
@@ -90,6 +91,19 @@ function startHttpIngest() {
       }
     })
     .listen(port, "0.0.0.0", () => logger.info({ port }, "trace_http_ingest_listening"));
+
+  // A stdio MCP server must never die because this auxiliary ingest port is
+  // taken. Under Hermes v0.17 the s6 supervisor spawns the MCP set for more than
+  // one service (main-hermes gateway + dashboard), so a second trace-mcp instance
+  // hits EADDRINUSE here; without this handler the unhandled 'error' event crashes
+  // the process and Hermes reports the MCP as "Connection closed". Degrade to
+  // stdio-only — whichever instance won the port handles HTTP ingest, and the
+  // stdio tools still work in every instance.
+  ingestServer.on("error", (error: NodeJS.ErrnoException) => {
+    const { retryable, logKey } = classifyIngestBindError(error);
+    if (retryable) logger.warn({ port }, logKey);
+    else logger.error({ err: error, port }, logKey);
+  });
 }
 
 async function ensureRun(hermesRunId: string | undefined, task: string): Promise<string> {
