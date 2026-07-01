@@ -56,6 +56,22 @@ describe("CoPilotRail", () => {
     expect(container.querySelector(".hm-turn-time")).toBeTruthy();
   });
 
+  test("digest waiting card collapses a long routed-task id to a short handle", () => {
+    const card = {
+      id: "codex-task-averray-agent-agent-new-20260701T191453225Z-ivp2v0",
+      lane: "codex-needed", type: "task", taskStatus: "proposed", agentType: "codex",
+      title: "Hermes routed work: PR security review", summary: "", repo: "averray-agent/agent",
+      freshness: 4, state: "fresh", risk: [], waitingOn: { actor: "operator", tone: "warn" }, files: [],
+    } as unknown as BoardCard;
+    const { container } = render(
+      <CoPilotRail boardCards={[card]} collaboration={{ fetcher: vi.fn(async () => []), refreshIntervalMs: 0 }} />,
+      { wrapper },
+    );
+    const waiting = container.querySelector(".hm-rail-waiting-card");
+    expect(waiting?.textContent).toContain("task ivp2v0"); // shared shortId — same as the cards
+    expect(waiting?.textContent).not.toContain("codex-task-averray"); // raw id no longer printed
+  });
+
   test("shows one template-mode banner and labels offline Hermes replies", async () => {
     const fetcher = vi.fn(async () => [
       msg("1", "hermes", "Template answer from the board.", { hermesMode: "templated" }),
