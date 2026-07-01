@@ -21,6 +21,12 @@ export interface WorkRouterBacklogItem extends Partial<Pick<HermesBacklogItem, "
   area?: string;
   description?: string;
   shortDescription?: string;
+  /**
+   * Agent Hermes suggested (agentic backlog). Honored ONLY on soft surfaces; the
+   * hard taxonomy always overrides on dangerous surfaces. Absent for
+   * deterministic/roadmap items (which route via the classifier + learned routing).
+   */
+  suggestedAgent?: RoutedWorkAgent;
 }
 
 export interface WorkRouterTaskSnapshot {
@@ -97,10 +103,29 @@ export function planAndRouteWork(input: PlanAndRouteWorkInput): RoutedProposal[]
     });
     const classifiedAgent = routedAgent(routing.agent);
     const hardAgent = hardTaxonomyAgent(surface, title);
-    const learned = hardAgent
-      ? { agent: hardAgent, note: hardAgent === classifiedAgent ? undefined : `Hard taxonomy kept ${surface} with ${hardAgent}; learned routing and classifier output cannot override it.` }
-      : learnedRoutingChoice(surface, classifiedAgent, input.routingScores);
-    const agent = learned.agent;
+    const suggested = item.suggestedAgent === "codex" || item.suggestedAgent === "claude" ? item.suggestedAgent : undefined;
+    let choice: { agent: RoutedWorkAgent; note?: string };
+    if (hardAgent) {
+      // Dangerous surface: the hard taxonomy is the wall. Nothing — not the
+      // classifier, not learned routing, not Hermes's suggestion — overrides it.
+      choice = {
+        agent: hardAgent,
+        note: hardAgent === classifiedAgent
+          ? undefined
+          : `Hard taxonomy kept ${surface} with ${hardAgent}; classifier, learned routing, and Hermes's suggestion cannot override it.`,
+      };
+    } else if (suggested) {
+      // Soft surface only: honor Hermes's suggested agent, above the classifier
+      // and learned routing. assertTaxonomy below is still the final guard.
+      const learnedAgent = learnedRoutingChoice(surface, classifiedAgent, input.routingScores).agent;
+      choice = {
+        agent: suggested,
+        note: `Hermes suggested ${suggested} for this soft surface.${learnedAgent !== suggested ? ` (classifier/learned leaned ${learnedAgent})` : ""}`,
+      };
+    } else {
+      choice = learnedRoutingChoice(surface, classifiedAgent, input.routingScores);
+    }
+    const agent = choice.agent;
     assertTaxonomy(surface, title, agent);
     if (!policyAllows(input.policy, { repo, agent, accepted: proposals.length, acceptedRepoCounts })) continue;
 
@@ -111,7 +136,7 @@ export function planAndRouteWork(input: PlanAndRouteWorkInput): RoutedProposal[]
       agent,
       riskTier: routing.riskTier,
       why: `Fills uncovered backlog gap: ${title}.`,
-      whyAgent: [routing.reason, learned.note].filter(Boolean).join(" "),
+      whyAgent: [routing.reason, choice.note].filter(Boolean).join(" "),
       dedupeKey: proposalDedupeKey,
     };
     proposals.push(proposal);
@@ -156,13 +181,23 @@ function assertTaxonomy(surface: string, title: string, agent: RoutedWorkAgent):
   }
 }
 
+// The hard-taxonomy WALL — the ONLY surfaces force-routed to an agent and
+// validated by assertTaxonomy (which throws on any violation). These are the
+// dangerous, correctness-critical, hard-to-reverse surfaces that must always be
+// Codex; nothing (classifier, learned routing, or Hermes's suggestion) overrides
+// them. Everything else (UI/docs/tests/residual) defaults to Claude via the
+// classifier but is Hermes-overridable on soft surfaces (agent suggestion).
+//
+// secrets/migrations/deploy are walled explicitly: they were only classifier-
+// defaulted to Codex, and once soft surfaces became Hermes-overridable they'd
+// otherwise be re-routable off Codex, which must never happen.
 function hardTaxonomyAgent(surface: string, title: string): RoutedWorkAgent | undefined {
   const haystack = normalizeText(`${surface} ${title}`);
-  if (matchesAny(haystack, ["chain", "settlement", "escrow", "contract", "contracts", "xcm", "polkadot", "substrate", "treasury"])) {
+  if (matchesAny(haystack, [
+    "chain", "settlement", "escrow", "contract", "contracts", "xcm", "polkadot", "substrate", "treasury",
+    "secret", "secrets", "credential", "credentials", "migration", "migrations", "deploy", "deployment",
+  ])) {
     return "codex";
-  }
-  if (matchesAny(haystack, ["ui", "frontend", "front end", "docs", "documentation", "readme", "copy", "monitor", "drawer", "board"])) {
-    return "claude";
   }
   return undefined;
 }
