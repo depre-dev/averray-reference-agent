@@ -142,6 +142,8 @@ import {
   runHermesRouterOnce,
   type HermesRouterAuditRecord,
 } from "./hermes-router-routine.js";
+import { collectAgenticBacklog } from "./agentic-backlog.js";
+import type { WorkRouterBacklogItem } from "@avg/averray-mcp/work-router";
 import {
   approveCodexTask,
   annotateCodexTaskDecisionRecord,
@@ -3441,7 +3443,7 @@ function startOperatorRoutines() {
         maxProposalsPerTick: routineConfig.hermesRouter.maxProposalsPerTick,
         lookbackMs: routineConfig.hermesRouter.lookbackHours * 60 * 60_000,
       }, {
-        getBacklog: () => collectHermesRouterBacklog(),
+        getBacklog: () => collectHermesRouterBacklogAugmented(),
         listTasks: () => listCodexTasks(),
         policy: () => loadDispatchPolicyConfig(),
         classify: (input) => classifyTaskForWorkRouter(input),
@@ -3887,6 +3889,71 @@ function collectHermesRouterBacklog() {
       description: item.closeCriteria.join("; "),
       shortDescription: item.scoreSignals[0] ?? item.title,
     }));
+}
+
+// ORCH-P4c — augment the deterministic roadmap backlog with a board-grounded
+// agentic layer when HERMES_ROUTER_AGENTIC_BACKLOG=1 and the gateway session is
+// configured. Degraded-safe: any failure falls back to the roadmap floor. The
+// items still flow through the UNCHANGED router (hard taxonomy + dispatch-policy
+// + operator gate), so Hermes gains no new authority — only a smarter backlog.
+async function collectHermesRouterBacklogAugmented(): Promise<WorkRouterBacklogItem[]> {
+  const roadmap: WorkRouterBacklogItem[] = collectHermesRouterBacklog();
+  const sessionConfig = resolveHermesSessionConfig();
+  const enabled = /^(1|true|yes|on)$/i.test((optionalEnv("HERMES_ROUTER_AGENTIC_BACKLOG") ?? "").trim());
+  if (!enabled || !sessionConfig) return roadmap;
+  try {
+    const board = await loadHermesRouterBoardSnapshot();
+    if (!board) return roadmap;
+    const policy = loadDispatchPolicyConfig();
+    if (policy.allowedRepos.length === 0) return roadmap; // fail-closed: nothing to propose
+    const maxItems = Math.max(1, Number.parseInt(optionalEnv("HERMES_ROUTER_AGENTIC_MAX_ITEMS", "3") ?? "3", 10) || 3);
+    const inFlight = (await listCodexTasks())
+      .filter((task) => task.status === "proposed" || task.status === "approved" || task.status === "running")
+      .map((task) => ({
+        repo: task.repo,
+        status: task.status,
+        ...(task.title ? { title: task.title } : {}),
+        ...(task.surface ? { surface: task.surface } : {}),
+      }));
+    const memoryNotes = listHermesMemoryNotes({ limit: 8 }).map((note) => note.text);
+    const agentic = await collectAgenticBacklog(
+      { session: sessionConfig, allowedRepos: policy.allowedRepos, maxItems },
+      { board, inFlight, memoryNotes },
+    );
+    if (agentic.length > 0) logger.info({ count: agentic.length }, "hermes_router_agentic_backlog_added");
+    return mergeRouterBacklog(roadmap, agentic);
+  } catch (error) {
+    logger.warn({ err: error }, "hermes_router_agentic_backlog_failed");
+    return roadmap;
+  }
+}
+
+async function loadHermesRouterBoardSnapshot() {
+  try {
+    const url = new URL("http://localhost/monitor/events?limit=40&activeWindowMinutes=240");
+    const snapshot = await withTimeout(
+      loadMonitorSnapshot(url, { suppressNarration: true }),
+      4_000,
+      "hermes_router_board_snapshot_timeout",
+    );
+    return buildHermesBoardSnapshotFromMonitor(snapshot);
+  } catch (error) {
+    logger.warn({ err: error }, "hermes_router_board_snapshot_unavailable");
+    return undefined;
+  }
+}
+
+function mergeRouterBacklog(roadmap: WorkRouterBacklogItem[], agentic: WorkRouterBacklogItem[]): WorkRouterBacklogItem[] {
+  const keyOf = (item: WorkRouterBacklogItem) => `${item.repo}::${item.surface ?? item.area ?? ""}`.toLowerCase();
+  const seen = new Set(roadmap.map(keyOf));
+  const merged: WorkRouterBacklogItem[] = [...roadmap];
+  for (const item of agentic) {
+    const k = keyOf(item);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    merged.push(item);
+  }
+  return merged;
 }
 
 function classifyTaskForWorkRouter(input: Parameters<typeof classifyTask>[0]) {
