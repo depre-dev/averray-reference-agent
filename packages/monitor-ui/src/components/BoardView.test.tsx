@@ -369,16 +369,19 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(onMute.mock.calls[0]?.[0]).toBeGreaterThan(Date.now() + 59 * 60_000);
   });
 
-  test("Ask Hermes float gives immediate feedback and focuses the composer (collaboration on)", () => {
+  test("the `a` Ask-Hermes shortcut gives immediate feedback and focuses the composer (collaboration on)", () => {
+    // The floating "Ask Hermes" pill was removed as a redundant duplicate of the
+    // rail composer (it bled out from under it). `a` — focus a card, then Ask
+    // about it — is the real remaining trigger for the same triggerAsk path.
     const { getByRole, getByText } = render(
       <BoardView
         board={richBoard}
         status="open"
-        keyboard={false}
         collaboration={{ fetcher: async () => [], poster: async () => {}, refreshIntervalMs: 0 }}
       />,
     );
-    fireEvent.click(getByRole("button", { name: "Ask Hermes" }));
+    fireEvent.keyDown(document.body, { key: "j" }); // focus the first card
+    fireEvent.keyDown(document.body, { key: "a" }); // Ask Hermes about it
     // P0-4: the action is visibly acknowledged (transient status line)…
     expect(getByText(/Asking Hermes/)).toBeTruthy();
     // …and the (enabled) composer takes focus.
@@ -390,11 +393,9 @@ describe("BoardView — rich-mix board (open stream)", () => {
     // input must stay usable for commands while the free-form Ask path is
     // honestly unavailable.
     const onMute = vi.fn();
-    const { getByRole, getByText, container } = render(
+    const { getByRole, container } = render(
       <BoardView board={richBoard} status="open" keyboard={false} onMute={onMute} />,
     );
-    fireEvent.click(getByRole("button", { name: "Ask Hermes" }));
-    expect(getByText(/Ask Hermes unavailable/)).toBeTruthy();
     const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
     expect(input.disabled).toBe(false);
     // A free-form question reports unavailable instead of silently dropping…
@@ -409,8 +410,7 @@ describe("BoardView — rich-mix board (open stream)", () => {
 
   test("Ask Hermes composer is fully disabled when it is Ask-only and collaboration is off", () => {
     // No command handlers wired → Ask-only → the input is honestly disabled.
-    const { getByRole, container } = render(<BoardView board={richBoard} status="open" keyboard={false} />);
-    fireEvent.click(getByRole("button", { name: "Ask Hermes" }));
+    const { container } = render(<BoardView board={richBoard} status="open" keyboard={false} />);
     const input = container.querySelector(".hm-compose-input") as HTMLTextAreaElement;
     expect(input.disabled).toBe(true);
     expect(input.getAttribute("aria-label")).toMatch(/Ask Hermes unavailable/);

@@ -95,7 +95,10 @@ describe("CoPilotRail", () => {
       <CoPilotRail focusedCard={card548} collaboration={{ fetcher: async () => [], refreshIntervalMs: 0 }} />,
       { wrapper },
     );
-    expect(getByText("scope · agent #548")).toBeTruthy();
+    // #481 switched the composer scope chip to shortId (`agent #548` → `#548`)
+    // and updated AskHermesComposer.test.tsx, but missed this sibling that renders
+    // the same composer — leaving it red on main. Match the shipped behaviour.
+    expect(getByText("scope · #548")).toBeTruthy();
   });
 
   test("asking a question scoped to the focused card posts relatedPr and renders the reply", async () => {
