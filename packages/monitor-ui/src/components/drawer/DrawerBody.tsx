@@ -88,10 +88,49 @@ export function DrawerBody({ card, variant }: { card: BoardCard; variant: Drawer
   return (
     <>
       {body}
+      <HermesReadSection card={card} />
       <DecisionContextSection card={card} />
       <DecisionRecordSection record={card.decisionRecord} />
       <OperatorNotes cardId={card.id} />
     </>
+  );
+}
+
+/**
+ * "Hermes's read" — the agentic failure analysis for a failed decision card:
+ * Hermes's grounded guess at WHY it failed + a recommended fix/rollback next
+ * step. Shown ONLY when the (flag-gated) failure-analysis routine produced one
+ * for this card's current failure (card.hermesAnalysis present). When absent,
+ * this renders nothing and the "What you can do" section keeps its existing "Ask
+ * Hermes" pointer — the drawer is byte-for-byte today's behavior.
+ *
+ * TRUTH-BOUNDARY: this is clearly labeled as Hermes's AGENTIC READ (not a
+ * verified fact) so the operator never mistakes a grounded guess for proof. The
+ * analysis text itself is grounded server-side ONLY in the card's real failure
+ * fields, and says "cause unclear from the available signals" when the data is
+ * thin — this section just surfaces that honest read verbatim.
+ */
+function HermesReadSection({ card }: { card: BoardCard }) {
+  const analysis = (card as { hermesAnalysis?: { text: string; model?: string; at: string } }).hermesAnalysis;
+  const text = analysis?.text?.trim();
+  if (!text) return null;
+  return (
+    <section>
+      <div className="hm-section-h" style={{ color: "var(--hm-hermes-deep)" }}>
+        Hermes's read
+        <span className="hm-pill hm-pill--hermes" style={{ marginLeft: 8 }}>
+          agentic analysis
+        </span>
+      </div>
+      <div className="hm-verdict-block" style={{ background: "var(--hm-hermes-soft)", borderColor: "rgba(15,107,90,0.18)" }}>
+        <div className="body">
+          <p style={{ margin: 0 }}>{text}</p>
+          <p style={{ margin: "8px 0 0", color: "var(--hm-muted)", fontSize: 12 }}>
+            Hermes's grounded read of the failure signals on this card — not a verified root cause. Confirm before acting.
+          </p>
+        </div>
+      </div>
+    </section>
   );
 }
 

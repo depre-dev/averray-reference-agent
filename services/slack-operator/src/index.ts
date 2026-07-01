@@ -56,7 +56,7 @@ import {
   type ReviewRequestStatus,
 } from "./monitor-collab.js";
 import { buildHermesBoardSnapshotFromMonitor } from "./monitor-hermes-board.js";
-import { buildV2BoardSnapshot, diffBoardSnapshots, type BoardSnapshotV2 } from "./monitor-v2.js";
+import { buildV2BoardSnapshot, diffBoardSnapshots, failureAnalysisCardFor, type BoardSnapshotV2 } from "./monitor-v2.js";
 import { buildBacklogSuggestionsResponse } from "./backlog-suggestions.js";
 import { listDecisionRecordsForMonitor } from "./decision-record-store.js";
 import {
@@ -154,6 +154,11 @@ import {
   type HermesRouterAuditRecord,
 } from "./hermes-router-routine.js";
 import { narrateRouterProposal } from "./monitor-router-narration.js";
+import { runFailureAnalysisOnce } from "./failure-analysis-routine.js";
+import {
+  readFreshCardFailureAnalysis,
+  writeCardFailureAnalysis,
+} from "./operator-card-failure-analysis.js";
 import { chatWithHermesSession } from "./hermes-session-client.js";
 import { collectAgenticBacklog } from "./agentic-backlog.js";
 import type { RoutedProposal, WorkRouterBacklogItem } from "@avg/averray-mcp/work-router";
@@ -365,7 +370,7 @@ async function emitAutopilotAwayDigest(session: EndedAutopilotAwaySession) {
     loadAuditEvents: loadAutopilotAwayAuditEvents,
     loadBoardCards: async () => {
       const raw = await loadMonitorSnapshot(new URL("http://localhost/monitor/events?limit=50&activeWindowMinutes=240"), { suppressNarration: true });
-      return buildV2BoardSnapshot(raw, { repo: monitorV2Repo() }).cards;
+      return buildV2BoardSnapshot(raw, monitorV2BoardOptions()).cards;
     },
     recordBoardDigest: async (_digest, text) => {
       recordCollaborationMessage({
@@ -547,7 +552,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       return;
     }
     const raw = await loadMonitorSnapshot(url, { suppressNarration: true });
-    writeJson(response, 200, mergeDebugCards(buildV2BoardSnapshot(raw, { repo: monitorV2Repo() })));
+    writeJson(response, 200, mergeDebugCards(buildV2BoardSnapshot(raw, monitorV2BoardOptions())));
     return;
   }
   // Dev-only acceptance vehicle: inject a synthetic card so the
@@ -682,7 +687,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       return;
     }
     const raw = await loadMonitorSnapshot(url, { suppressNarration: true });
-    const board = mergeDebugCards(buildV2BoardSnapshot(raw, { repo: monitorV2Repo() }));
+    const board = mergeDebugCards(buildV2BoardSnapshot(raw, monitorV2BoardOptions()));
     writeJson(response, 200, buildBacklogSuggestionsResponse(board.cards));
     return;
   }
@@ -3225,7 +3230,7 @@ function startOperatorRoutines() {
         new URL("http://localhost/monitor/events?limit=100&activeWindowMinutes=1440"),
         { suppressNarration: true },
       );
-      const board = buildV2BoardSnapshot(raw, { repo: monitorV2Repo() });
+      const board = buildV2BoardSnapshot(raw, monitorV2BoardOptions());
       const items: AlertItem[] = board.cards
         .filter((c) => c.lane === "needs-attention")
         .map((c) => ({ id: c.id, title: c.title }));
@@ -3541,6 +3546,93 @@ function startOperatorRoutines() {
     }
   };
 
+  // Hermes failure analysis. On a scheduled tick it reads the current board,
+  // picks the failed operator-decision cards lacking a FRESH cached analysis,
+  // and asks the real agentic Hermes for one grounded paragraph (why it likely
+  // failed + a fix/rollback next step, or an explicit "cause unclear"). It
+  // caches that per card and NEVER approves, dispatches, merges, or mutates a
+  // card. Degraded-safe: with the gateway session down it writes nothing and the
+  // drawer keeps its "Ask Hermes" pointer.
+  let failureAnalysisRunning = false;
+  const checkFailureAnalysis = async () => {
+    if (failureAnalysisRunning || !routineConfig.failureAnalysis.enabled) return;
+    failureAnalysisRunning = true;
+    try {
+      const model = optionalEnv("HERMES_MONITOR_REPLY_MODEL") ?? "glm-5.2:cloud";
+      // Only route through the real agentic Hermes; a canned "why it failed"
+      // would be a fabricated cause. So the transport is the gateway session
+      // ONLY — null (unconfigured / down) means no analysis this tick.
+      const sessionConfig = resolveHermesSessionConfig();
+      const result = await runFailureAnalysisOnce(
+        {
+          enabled: routineConfig.failureAnalysis.enabled,
+          intervalMs: routineConfig.failureAnalysis.intervalMs,
+          maxPerTick: routineConfig.failureAnalysis.maxPerTick,
+        },
+        {
+          listFailureCards: async () => {
+            const raw = await loadMonitorSnapshot(
+              new URL("http://localhost/monitor/events?limit=50&activeWindowMinutes=240"),
+              { suppressNarration: true },
+            );
+            // Build WITHOUT getAnalysis — the routine only needs each card's
+            // failure projection, not the threaded analyses (that would re-read
+            // the cache for nothing). Reuse the SAME projection the board
+            // threading uses, so "which cards get an analysis" is defined once.
+            return buildV2BoardSnapshot(raw, { repo: monitorV2Repo() }).cards
+              .map((card) => failureAnalysisCardFor(card))
+              .filter((c): c is NonNullable<typeof c> => Boolean(c));
+          },
+          readFresh: (cardId, failureHash) => readFreshCardFailureAnalysis(cardId, failureHash),
+          write: (cardId, value) => {
+            writeCardFailureAnalysis(cardId, value);
+            logger.info({ cardId }, "hermes_failure_analysis_written");
+          },
+          analysisDeps: {
+            enabled: routineConfig.failureAnalysis.enabled,
+            sessionConfig,
+            // Degraded-safe: chatWithHermesSession returns null on any failure.
+            // Bracketed with beginLlmUsageCall so the monitor shows Hermes
+            // "thinking" for the (slow) agent turn, mirroring the co-pilot /
+            // router-narration paths.
+            runSession: async (config, prompt) => {
+              const endLlmUsageCall = beginLlmUsageCall({ agent: "hermes", model });
+              try {
+                return await chatWithHermesSession(config, prompt);
+              } finally {
+                endLlmUsageCall();
+              }
+            },
+            // Record the agent turn's token usage so the monitor usage panel
+            // counts what this analysis actually spent. Fired only when the
+            // session produced usable text (mirrors router narration onSessionTurn).
+            onSessionTurn: (turn) => {
+              if (!turn.usage) return;
+              const usageModel = turn.model ?? model;
+              void recordLlmUsageFromResult(
+                {
+                  agent: "hermes",
+                  model: usageModel,
+                  result: { usage: turn.usage, ...(turn.model ? { model: turn.model } : {}) },
+                },
+                { path: llmUsageLogPath() },
+              ).catch((error) => logger.warn({ err: error }, "hermes_failure_analysis_usage_record_failed"));
+            },
+          },
+          isSuspended: () => isAutopilotSuspended(),
+          isHalt: () => isHaltFilePresent(),
+        },
+      );
+      if (result.analyzed.length > 0) {
+        logger.info({ analyzed: result.analyzed }, "hermes_failure_analysis_done");
+      }
+    } catch (error) {
+      logger.error({ err: error }, "hermes_failure_analysis_failed");
+    } finally {
+      failureAnalysisRunning = false;
+    }
+  };
+
   if (routineConfig.channelId && routineConfig.dailyBrief.enabled) {
     setTimeout(() => void checkDailyBrief(), 5_000);
     setInterval(() => void checkDailyBrief(), 60_000);
@@ -3580,6 +3672,10 @@ function startOperatorRoutines() {
   if (routineConfig.hermesRouter.enabled) {
     setTimeout(() => void checkHermesRouter(), 15_000);
     setInterval(() => void checkHermesRouter(), routineConfig.hermesRouter.intervalMs);
+  }
+  if (routineConfig.failureAnalysis.enabled) {
+    setTimeout(() => void checkFailureAnalysis(), 17_000);
+    setInterval(() => void checkFailureAnalysis(), routineConfig.failureAnalysis.intervalMs);
   }
 }
 
@@ -4224,6 +4320,31 @@ function monitorV2Repo(): string {
 }
 
 /**
+ * True when the Hermes failure-analysis feature is enabled (flag, default off).
+ * Uses the SAME predicate as parseSlackRoutineConfig (`=== "1"`) so the board
+ * threading and the routine/scheduler can never disagree about the flag.
+ */
+function isFailureAnalysisEnabled(): boolean {
+  return optionalEnv("HERMES_FAILURE_ANALYSIS") === "1";
+}
+
+/**
+ * Board-build options for every buildV2BoardSnapshot call. When the failure-
+ * analysis flag is ON, surfaces the FRESH cached Hermes analysis onto failure
+ * cards (keyed by card id + failure hash). When OFF (default), getAnalysis is
+ * omitted, so the board is byte-for-byte today's behavior — no analysis field,
+ * drawer keeps its "Ask Hermes" pointer.
+ */
+function monitorV2BoardOptions(): { repo: string; getAnalysis?: (cardId: string, failureHash: string) => { text: string; model?: string; at: string } | undefined } {
+  const repo = monitorV2Repo();
+  if (!isFailureAnalysisEnabled()) return { repo };
+  return {
+    repo,
+    getAnalysis: (cardId, failureHash) => readFreshCardFailureAnalysis(cardId, failureHash),
+  };
+}
+
+/**
  * v2 SSE stream — emits typed card-level events derived from consecutive
  * real BoardSnapshotV2 reads, followed by a reconciliation snapshot. Lane
  * movement is never simulated: a `board.card.moved` means the card's real
@@ -4253,7 +4374,7 @@ async function writeMonitorV2Stream(
     inFlight = true;
     try {
       const raw = await loadMonitorSnapshot(url, { suppressNarration: true });
-      const snapshot = mergeDebugCards(buildV2BoardSnapshot(raw, { repo: monitorV2Repo() }));
+      const snapshot = mergeDebugCards(buildV2BoardSnapshot(raw, monitorV2BoardOptions()));
       for (const event of diffBoardSnapshots(lastSnapshot, snapshot)) {
         writeSseEvent(response, event.type, event);
       }

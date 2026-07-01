@@ -200,6 +200,14 @@ export interface CardBase {
   sourceFailure?: CardSourceFailure;
   /** Agent currently working this in-flight card, backed by live runner/classifier state. */
   workingNow?: CardWorkingNow;
+  /**
+   * Hermes's grounded, agentic read of WHY a failed decision card likely failed
+   * plus a recommended next step. Present only on failure cards when the
+   * (flag-gated) failure-analysis routine produced one and it is still fresh for
+   * the card's current failure. Absent otherwise — the drawer then keeps its
+   * existing "Ask Hermes" pointer. Tagged as an agentic analysis in the UI.
+   */
+  hermesAnalysis?: { text: string; model?: string; at: string };
 }
 
 /** PR card — file changes, Hermes verdict, operator-review action. */
