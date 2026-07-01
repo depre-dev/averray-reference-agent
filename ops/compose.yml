@@ -263,6 +263,15 @@ services:
       # streaming failure falls back to the sync session turn, so the co-pilot
       # reply is never muted or faked.
       HERMES_COPILOT_STREAMING: ${HERMES_COPILOT_STREAMING:-0}
+      # #4 — co-pilot MCP elicitation (inline tool-call approvals in the rail).
+      # GROUNDWORK ONLY, OFF by default (fail-closed). The Hermes gateway does
+      # not expose MCP elicitation yet (Session API = create/chat/fork; stream =
+      # assistant.delta/run.completed only — no tool-confirmation event, no answer
+      # endpoint), so this gates NOTHING today: with the flag on it still falls
+      # closed to DENY. It is a dormant scaffold until the gateway support in
+      # docs/HERMES_COPILOT_ELICITATION.md lands. NEVER auto-approves a tool call.
+      HERMES_COPILOT_ELICITATION: ${HERMES_COPILOT_ELICITATION:-0}
+      HERMES_COPILOT_ELICITATION_TIMEOUT_MS: ${HERMES_COPILOT_ELICITATION_TIMEOUT_MS:-}
       # ORCH-P4c — agentic router backlog. When ON (needs the gateway session AND
       # a non-empty dispatch.allowed_repos), Hermes reasons over the live board to
       # propose board-grounded work gaps, augmenting the deterministic roadmap
@@ -271,6 +280,12 @@ services:
       # failure. One session turn per router tick.
       HERMES_ROUTER_AGENTIC_BACKLOG: ${HERMES_ROUTER_AGENTIC_BACKLOG:-0}
       HERMES_ROUTER_AGENTIC_MAX_ITEMS: ${HERMES_ROUTER_AGENTIC_MAX_ITEMS:-3}
+      # Feature #5 — agentic router narration. When ON (needs the gateway session),
+      # each router proposal is narrated by the real agentic Hermes (its own board
+      # context), grounded ONLY in the proposal fields. Tagged "live" on success;
+      # OFF by default and degraded-safe: falls back to the persona completion, then
+      # the canned template (tagged "templated"). One session turn per proposal.
+      HERMES_ROUTER_AGENTIC_NARRATION: ${HERMES_ROUTER_AGENTIC_NARRATION:-0}
       LLM_USAGE_LOG_PATH: ${LLM_USAGE_LOG_PATH:-/data/llm-usage.jsonl}
       HERMES_MONITOR_MEMORY_PATH: ${HERMES_MONITOR_MEMORY_PATH:-/data/hermes-monitor-memory.json}
       AVERRAY_HANDOFF_EVENTS_PATH: ${AVERRAY_HANDOFF_EVENTS_PATH:-/data/handoff-events.jsonl}
