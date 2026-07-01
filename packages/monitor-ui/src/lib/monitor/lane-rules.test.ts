@@ -3,7 +3,7 @@
 
 import { test, assert } from "vitest";
 
-import { laneFor, groupByLane, laneCounts, isUnroutedCard, inflightStatus, isDecision, isFinishedCard } from "./lane-rules.js";
+import { laneFor, groupByLane, laneCounts, isUnroutedCard, inflightStatus, isDecision, isFinishedCard, isUnverifiableCard } from "./lane-rules.js";
 import { LANES } from "./card-types.js";
 
 // ── Test fixtures ───────────────────────────────────────────────────
@@ -327,4 +327,17 @@ test("isDecision: finished release history is never a decision, even with a stal
   // The "keep as release history; no board action needed" leak (truth-boundary).
   assert.equal(isDecision(prCard({ type: "done", isAction: true, waitingOn: { actor: "operator" }, closedAt: "5/27/2026", mergeStatus: "MERGED" })), false);
   assert.equal(isDecision(prCard({ mergeStatus: "MERGED", waitingOn: { actor: "operator" } })), false);
+});
+
+test("isDecision: an unverifiable card (failed-fetch / source-offline) is never a live decision", () => {
+  // Truth-boundary: a PR whose GitHub state could not be refreshed (rate limit /
+  // fetch error) must not sit in the Decision Inbox as fake "waiting on operator"
+  // work — even though it still carries its last-seen operator/isAction flag.
+  assert.equal(isDecision(prCard({ state: "failed-fetch", isAction: true, waitingOn: { actor: "operator" } })), false);
+  assert.equal(isDecision(prCard({ state: "source-offline", isAction: true, waitingOn: { actor: "operator" } })), false);
+  assert.equal(isUnverifiableCard(prCard({ state: "failed-fetch" })), true);
+  assert.equal(isUnverifiableCard(prCard({ state: "fresh" })), false);
+  assert.equal(isUnverifiableCard(null), false);
+  // A verifiable (fresh) operator-owned card is still a real decision.
+  assert.equal(isDecision(prCard({ state: "fresh", isAction: true, waitingOn: { actor: "operator" } })), true);
 });
