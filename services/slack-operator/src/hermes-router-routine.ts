@@ -149,7 +149,11 @@ export async function runHermesRouterOnce(config: HermesRouterConfig, deps: Herm
       routingReason: proposal.whyAgent,
       prompt: proposal.taskPrompt,
       title: `Hermes routed work: ${proposal.surface}`,
-      reason: `${proposal.why} ${proposal.whyAgent}`,
+      // reason = the gap rationale ONLY. `whyAgent` (the agent-choice rationale)
+      // already rides on `routingReason`; appending it here too doubled it in
+      // every surface that renders routingReason + reason together (task summary,
+      // drawer "PROPOSED CODEX TASK", co-pilot digest rec).
+      reason: proposal.why,
       requester: HERMES_ROUTER_REQUESTER,
       correlationId: routerCorrelationId(proposal),
     });

@@ -77,7 +77,7 @@ function deps(overrides: Partial<HermesRouterDeps> = {}): HermesRouterDeps {
         riskTier: PROPOSAL.riskTier,
         routingReason: PROPOSAL.whyAgent,
         title: `Hermes routed work: ${PROPOSAL.surface}`,
-        reason: `${PROPOSAL.why} ${PROPOSAL.whyAgent}`,
+        reason: PROPOSAL.why,
         requester: "hermes-router",
         correlationId: routerCorrelationId(PROPOSAL),
       }),
@@ -151,7 +151,13 @@ describe("Hermes router routine", () => {
       prompt: PROPOSAL.taskPrompt,
       requester: "hermes-router",
       correlationId: routerCorrelationId(PROPOSAL),
+      // dedup: whyAgent rides on routingReason only; reason is the gap why alone,
+      // so surfaces that render routingReason + reason don't double whyAgent.
+      routingReason: PROPOSAL.whyAgent,
+      reason: PROPOSAL.why,
     }));
+    const proposeArg = vi.mocked(d.propose).mock.calls[0]?.[0] as { reason: string };
+    expect(proposeArg.reason).not.toContain(PROPOSAL.whyAgent);
     expect((vi.mocked(d.propose).mock.calls[0]?.[0] as Record<string, unknown>).status).toBeUndefined();
     expect(d.narrate).toHaveBeenCalledWith(PROPOSAL, expect.objectContaining({
       id: "task-router-1",
