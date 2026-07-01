@@ -23,6 +23,7 @@ import { laneFor } from "../../lib/monitor/lane-rules.js";
 import { deployStepsForCard } from "../../lib/monitor/deploy-stepper.js";
 import { DeployStepper } from "../DeployStepper.js";
 import { ChecksBar } from "../cards/ChecksBar.js";
+import { deriveDecisionCardReason, deriveWhatHappensNext } from "../cards/Card.js";
 import { OperatorNotes } from "./OperatorNotes.js";
 
 export type DrawerVariant = "mission" | "action" | "done" | "draft" | "task" | "deploy" | "pr";
@@ -87,9 +88,57 @@ export function DrawerBody({ card, variant }: { card: BoardCard; variant: Drawer
   return (
     <>
       {body}
+      <DecisionContextSection card={card} />
       <DecisionRecordSection record={card.decisionRecord} />
       <OperatorNotes cardId={card.id} />
     </>
+  );
+}
+
+/**
+ * "Why this needs you · what you can do" — the operator-facing situation + next
+ * move, shown on every card awaiting a decision. This is what was missing: a
+ * card whose verdict is just "deploy failed" would otherwise show a bare box and
+ * no path forward. Reuses the card's OWN honest derivations (deriveDecisionCardReason
+ * / deriveWhatHappensNext) — grounded in real fields, never fabricated. When the
+ * data is genuinely thin it says so and points at "Ask Hermes" rather than
+ * inventing a reason.
+ */
+function DecisionContextSection({ card }: { card: BoardCard }) {
+  const lane = laneFor(card);
+  const isDecisionCard = card.isAction || lane === "operator-review" || lane === "needs-attention";
+  if (!isDecisionCard || card.type === "done") return null;
+
+  const rawNext = deriveWhatHappensNext(card);
+  // deriveWhatHappensNext's no-data tail literally says "open the drawer" — nonsense here.
+  const next = rawNext === "Open the drawer for the full state before acting." ? undefined : rawNext;
+  // The drawer already explains the WHY (the verdict block, risk signals, decision
+  // record). What's missing on a bare card is the NEXT MOVE + a path to a deeper
+  // read — so that's all we add, no duplicating the reason.
+  const reason = deriveDecisionCardReason(card);
+  const hasWhy =
+    reason.derived
+    || (card.riskSignals?.length ?? 0) > 0
+    || Boolean(card.decisionRecord)
+    || Boolean((card as { verdict?: string }).verdict?.trim());
+
+  // If the drawer already shows a why and there's no next move to add, don't add an empty box.
+  if (!next && hasWhy) return null;
+
+  return (
+    <section>
+      <div className="hm-section-h">What you can do</div>
+      <div className="hm-verdict-block">
+        <div className="body">
+          {next ? <p style={{ margin: 0 }}>{humanizeSignalText(next)}</p> : null}
+          {!hasWhy ? (
+            <p style={{ margin: next ? "8px 0 0" : 0, color: "var(--hm-muted)", fontSize: 12 }}>
+              Hermes hasn't recorded a reason yet — use <b>Ask Hermes</b> below for an analysis and a suggested fix or rollback.
+            </p>
+          ) : null}
+        </div>
+      </div>
+    </section>
   );
 }
 

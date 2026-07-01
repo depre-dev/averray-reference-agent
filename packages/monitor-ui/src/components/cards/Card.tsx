@@ -701,7 +701,7 @@ function DecisionCardExplanation({ card }: { card: BoardCard }) {
   );
 }
 
-function deriveWhatHappensNext(card: BoardCard): string {
+export function deriveWhatHappensNext(card: BoardCard): string {
   const waitingNext = card.decisionRecord?.outcome.waitingNext?.trim();
   if (waitingNext) return waitingNext;
   if (card.next?.trim()) return card.next.trim();
