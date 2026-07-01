@@ -56,6 +56,14 @@ export interface PlanAndRouteWorkInput {
   classify: WorkRouterClassifier;
   /** ORCH-P4c: learned scorecard memory. Used only on soft surfaces. */
   routingScores?: WorkRouterRoutingScores;
+  /**
+   * ORCH-P4c anti-entrenchment (flag-gated, default off). When true, learned
+   * routing occasionally routes a soft surface to an under-explored *allowed*
+   * agent so it can build a baseline the classifier's default would otherwise
+   * starve. Off ⇒ learned routing is pure exploitation (today's behavior). The
+   * hard taxonomy wall is never affected either way.
+   */
+  explore?: boolean;
   maxProposals?: number;
 }
 
@@ -123,7 +131,10 @@ export function planAndRouteWork(input: PlanAndRouteWorkInput): RoutedProposal[]
         note: `Hermes suggested ${suggested} for this soft surface.${learnedAgent !== suggested ? ` (classifier/learned leaned ${learnedAgent})` : ""}`,
       };
     } else {
-      choice = learnedRoutingChoice(surface, classifiedAgent, input.routingScores);
+      choice = learnedRoutingChoice(surface, classifiedAgent, input.routingScores, {
+        explore: input.explore,
+        allowedAgents: input.policy.allowedAgents,
+      });
     }
     const agent = choice.agent;
     assertTaxonomy(surface, title, agent);
@@ -206,6 +217,7 @@ function learnedRoutingChoice(
   surface: string,
   staticAgent: RoutedWorkAgent,
   routingScores: WorkRouterRoutingScores | undefined,
+  opts: { explore?: boolean; allowedAgents?: readonly string[] } = {},
 ): { agent: RoutedWorkAgent; note?: string } {
   const normalizedSurface = normalizeText(surface);
   const surfaceScores = routingScores?.[normalizedSurface];
@@ -213,6 +225,29 @@ function learnedRoutingChoice(
   const otherAgent: RoutedWorkAgent = staticAgent === "codex" ? "claude" : "codex";
   const staticScore = surfaceScores[staticAgent];
   const otherScore = surfaceScores[otherAgent];
+
+  // ORCH-P4c anti-entrenchment (flag-gated via opts.explore; deterministic).
+  // The exploitation rules below only fire when BOTH agents have a baseline, so
+  // an agent the classifier never routes to can never earn samples — leaving
+  // learned routing permanently locked on the classifier's default. When the
+  // static agent is established but the OTHER agent is under-explored, route ONE
+  // exploratory task to it so it can build a baseline. Bounded: once it reaches
+  // the sample floor it becomes baseline_available and normal exploitation
+  // resumes (at most ~EXPLORATION_MIN_SAMPLES explorations per surface/agent).
+  // Soft surfaces only (this fn is never reached on the hard wall); never routes
+  // to a dispatch-policy-blocked agent; always explained in the note.
+  if (
+    opts.explore &&
+    agentAllowed(otherAgent, opts.allowedAgents) &&
+    isEstablishedRoutingScore(staticScore) &&
+    isUnderExploredRoutingScore(otherScore)
+  ) {
+    return {
+      agent: otherAgent,
+      note: `Anti-entrenchment: routing explored ${otherAgent} for ${normalizedSurface || "general"} to build a baseline (${otherAgent} has ${routingScoreSamples(otherScore)} sample(s) vs ${staticAgent}'s ${staticScore.samples}); learned routing needs data on both agents before it can compare them.`,
+    };
+  }
+
   if (!isUsableRoutingScore(staticScore) || !isUsableRoutingScore(otherScore)) {
     return {
       agent: staticAgent,
@@ -233,6 +268,30 @@ function learnedRoutingChoice(
 
 function isUsableRoutingScore(score: WorkRouterRoutingScore | undefined): score is WorkRouterRoutingScore & { score: number } {
   return score?.status === "baseline_available" && typeof score.score === "number" && Number.isFinite(score.score);
+}
+
+/** Sample floor for a usable baseline; mirrors the scorecard's ROUTING_SCORE_MIN_SAMPLES. */
+const EXPLORATION_MIN_SAMPLES = 2;
+
+/** Established = a usable baseline built from at least the sample floor. */
+function isEstablishedRoutingScore(
+  score: WorkRouterRoutingScore | undefined,
+): score is WorkRouterRoutingScore & { score: number } {
+  return isUsableRoutingScore(score) && score.samples >= EXPLORATION_MIN_SAMPLES;
+}
+
+/** Under-explored = absent, or fewer real samples than the floor (nothing to compare). */
+function isUnderExploredRoutingScore(score: WorkRouterRoutingScore | undefined): boolean {
+  return !score || score.samples < EXPLORATION_MIN_SAMPLES;
+}
+
+function routingScoreSamples(score: WorkRouterRoutingScore | undefined): number {
+  return score?.samples ?? 0;
+}
+
+/** A soft-surface exploration must never route to a dispatch-policy-blocked agent. */
+function agentAllowed(agent: RoutedWorkAgent, allowedAgents: readonly string[] | undefined): boolean {
+  return !allowedAgents || allowedAgents.includes(agent);
 }
 
 function matchesAny(haystack: string, needles: string[]): boolean {

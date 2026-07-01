@@ -230,6 +230,13 @@ services:
       HERMES_ROUTER_COOLDOWN_MINUTES: ${HERMES_ROUTER_COOLDOWN_MINUTES:-30}
       HERMES_ROUTER_MAX_PROPOSALS_PER_TICK: ${HERMES_ROUTER_MAX_PROPOSALS_PER_TICK:-1}
       HERMES_ROUTER_RECENTLY_DONE_LOOKBACK_HOURS: ${HERMES_ROUTER_RECENTLY_DONE_LOOKBACK_HOURS:-72}
+      # ORCH-P4c anti-entrenchment (learned routing). When ON, learned routing
+      # occasionally routes a soft surface to an under-sampled *allowed* agent so
+      # it can build a baseline the classifier's default would otherwise starve —
+      # deterministic, bounded, soft-surfaces-only, always explained on the card.
+      # OFF by default; the hard Codex wall + dispatch policy are never affected,
+      # and every explored task is still operator-approved before it runs.
+      HERMES_ROUTER_ANTI_ENTRENCHMENT: ${HERMES_ROUTER_ANTI_ENTRENCHMENT:-0}
       HERMES_ROUTER_BACKLOG_LIMIT: ${HERMES_ROUTER_BACKLOG_LIMIT:-12}
       HERMES_ROUTER_DEFAULT_REPO: ${HERMES_ROUTER_DEFAULT_REPO:-}
       SLACK_OPERATOR_MONITOR_ENABLED: ${SLACK_OPERATOR_MONITOR_ENABLED:-0}

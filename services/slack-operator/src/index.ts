@@ -3509,6 +3509,7 @@ function startOperatorRoutines() {
         cooldownMs: routineConfig.hermesRouter.cooldownMs,
         maxProposalsPerTick: routineConfig.hermesRouter.maxProposalsPerTick,
         lookbackMs: routineConfig.hermesRouter.lookbackHours * 60 * 60_000,
+        explore: routineConfig.hermesRouter.explore,
       }, {
         getBacklog: () => collectHermesRouterBacklogAugmented(),
         listTasks: () => listCodexTasks(),
