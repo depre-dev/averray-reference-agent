@@ -10,7 +10,12 @@ import { getHandoffMonitor, recordHandoffEvent } from "@avg/averray-mcp/handoff-
 import { getHermesBacklogPlan } from "@avg/averray-mcp/hermes-backlog";
 import { classifyTask } from "@avg/averray-mcp/dispatch-routing";
 import { buildAgentScorecard, routingScoresFromScorecard } from "@avg/averray-mcp/agent-scorecard";
-import { readLlmUsageEvents } from "@avg/averray-mcp/llm-usage";
+import {
+  beginLlmUsageCall,
+  llmUsageLogPath,
+  readLlmUsageEvents,
+  recordLlmUsageFromResult,
+} from "@avg/averray-mcp/llm-usage";
 import { handleOperatorCommandText } from "@avg/averray-mcp/operator-handler";
 import {
   formatOperatorResultForSlack,
@@ -3992,8 +3997,35 @@ async function narrateHermesRouterProposal(
     sessionConfig,
     agenticEnabled,
     // Transport 1: the real agentic Hermes agent (MCP tools/skills/memory).
-    // Degraded-safe: chatWithHermesSession returns null on any failure.
-    runSession: (config, prompt) => chatWithHermesSession(config, prompt),
+    // Degraded-safe: chatWithHermesSession returns null on any failure. The call
+    // is bracketed with beginLlmUsageCall so the monitor shows Hermes "thinking"
+    // for the (slow) agent turn, mirroring the co-pilot session reply.
+    runSession: async (config, prompt) => {
+      const endLlmUsageCall = beginLlmUsageCall({ agent: "hermes", model, taskId: task.id, runId });
+      try {
+        return await chatWithHermesSession(config, prompt);
+      } finally {
+        endLlmUsageCall();
+      }
+    },
+    // Record the agent turn's token usage so the monitor usage panel counts the
+    // tokens this narration actually spent. The completion path records via
+    // requestHermesCompletion; without this the panel under-reports Hermes once
+    // agentic narration flows. Fired only when the session produced usable text.
+    onSessionTurn: (turn) => {
+      if (!turn.usage) return;
+      const usageModel = turn.model ?? model;
+      void recordLlmUsageFromResult(
+        {
+          agent: "hermes",
+          model: usageModel,
+          taskId: task.id,
+          runId,
+          result: { usage: turn.usage, ...(turn.model ? { model: turn.model } : {}) },
+        },
+        { path: llmUsageLogPath() },
+      ).catch((error) => logger.warn({ err: error, taskId: task.id }, "orch_p4b_router_narration_usage_record_failed"));
+    },
     // Transport 2: the stateless Ollama persona completion (existing path).
     runCompletion: apiKey
       ? (prompt) =>

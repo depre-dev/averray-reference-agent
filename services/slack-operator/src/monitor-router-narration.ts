@@ -57,6 +57,14 @@ export interface RouterNarrationDeps {
   runSession?: (config: HermesSessionConfig, prompt: string) => Promise<HermesSessionTurn | null>;
   /** Runs the Ollama persona completion; returns null on any failure. */
   runCompletion?: (prompt: string) => Promise<string | null>;
+  /**
+   * Side effect fired ONLY when the agentic session produced usable narration
+   * text. index.ts uses it to record the agent turn's token usage on the monitor
+   * usage panel (the completion path records usage inside `runCompletion`; the
+   * template path spends no tokens). Kept as an injected side effect so this
+   * module stays a pure text+mode producer with no usage/IO logic of its own.
+   */
+  onSessionTurn?: (turn: HermesSessionTurn) => void;
   /** Records the finished narration onto the collaboration thread. */
   record: (result: RouterNarrationResult & { relatedCorrelationId: string }) => void;
 }
@@ -166,6 +174,8 @@ export async function narrateRouterProposal(
     if (turn?.text?.trim()) {
       text = turn.text;
       hermesMode = "live";
+      // Attribute the agent turn's token usage (side effect owned by index.ts).
+      deps.onSessionTurn?.(turn);
     }
   }
 

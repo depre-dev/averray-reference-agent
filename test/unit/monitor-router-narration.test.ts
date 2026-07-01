@@ -55,8 +55,16 @@ function deps(overrides: Partial<RouterNarrationDeps> = {}): RouterNarrationDeps
   };
 }
 
-function turn(text: string): HermesSessionTurn {
-  return { sessionId: "s1", text };
+function turn(
+  text: string,
+  extra: { usage?: Record<string, unknown> | null; model?: string | null } = {},
+): HermesSessionTurn {
+  return {
+    sessionId: "s1",
+    text,
+    ...(extra.usage !== undefined ? { usage: extra.usage } : {}),
+    ...(extra.model !== undefined ? { model: extra.model } : {}),
+  };
 }
 
 describe("routerProposalFactLines — truth boundary (no fabrication)", () => {
@@ -237,5 +245,58 @@ describe("narrateRouterProposal — honesty tagging never over-claims", () => {
     await narrateRouterProposal(PROPOSAL, { id: "task-9" }, d);
     expect(d.calls[0]!.relatedCorrelationId).toBe(routerNarrationCorrelationId(PROPOSAL, { id: "task-9" }));
     expect(d.calls[0]!.relatedCorrelationId).toBe("hermes-router:depre-dev/averray-reference-agent|monitor-board|monitor-board");
+  });
+});
+
+describe("narrateRouterProposal — agent-turn usage capture (no under-report)", () => {
+  it("forwards the successful agentic turn to onSessionTurn so index.ts can record its usage", async () => {
+    const onSessionTurn = vi.fn();
+    const produced = turn("Live narration for the rail.", { usage: { input_tokens: 120, output_tokens: 40 }, model: "hermes-4" });
+    const runSession = vi.fn(async () => produced);
+    const runCompletion = vi.fn(async () => "unused");
+    const d = deps({ agenticEnabled: true, sessionConfig: SESSION_CONFIG, runSession, runCompletion, onSessionTurn });
+
+    const result = await narrateRouterProposal(PROPOSAL, TASK, d);
+
+    expect(result.hermesMode).toBe("live");
+    // the whole turn (carrying usage + model) is handed to the recorder side effect
+    expect(onSessionTurn).toHaveBeenCalledTimes(1);
+    expect(onSessionTurn).toHaveBeenCalledWith(produced);
+    expect(onSessionTurn.mock.calls[0]![0]!.usage).toEqual({ input_tokens: 120, output_tokens: 40 });
+  });
+
+  it("does NOT record usage on the completion path (completion records its own; no double-count)", async () => {
+    const onSessionTurn = vi.fn();
+    const runSession = vi.fn(async () => null); // session fails -> completion used
+    const runCompletion = vi.fn(async () => "Completion narration.");
+    const d = deps({ agenticEnabled: true, sessionConfig: SESSION_CONFIG, runSession, runCompletion, onSessionTurn });
+
+    const result = await narrateRouterProposal(PROPOSAL, TASK, d);
+
+    expect(result.hermesMode).toBe("live");
+    expect(result.text).toBe("Completion narration.");
+    expect(onSessionTurn).not.toHaveBeenCalled();
+  });
+
+  it("does NOT record usage on the template path (no tokens spent)", async () => {
+    const onSessionTurn = vi.fn();
+    const runSession = vi.fn(async () => null);
+    const runCompletion = vi.fn(async () => null);
+    const d = deps({ agenticEnabled: true, sessionConfig: SESSION_CONFIG, runSession, runCompletion, onSessionTurn });
+
+    const result = await narrateRouterProposal(PROPOSAL, TASK, d);
+
+    expect(result.hermesMode).toBe("templated");
+    expect(onSessionTurn).not.toHaveBeenCalled();
+  });
+
+  it("does NOT fire onSessionTurn for a blank agentic reply (no usable text, so nothing to attribute here)", async () => {
+    const onSessionTurn = vi.fn();
+    const runSession = vi.fn(async () => turn("   ", { usage: { input_tokens: 5 } }));
+    const runCompletion = vi.fn(async () => "Completion fills in.");
+    const d = deps({ agenticEnabled: true, sessionConfig: SESSION_CONFIG, runSession, runCompletion, onSessionTurn });
+
+    await narrateRouterProposal(PROPOSAL, TASK, d);
+    expect(onSessionTurn).not.toHaveBeenCalled();
   });
 });
