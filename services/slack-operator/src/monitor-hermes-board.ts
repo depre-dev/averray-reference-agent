@@ -98,6 +98,7 @@ function boardCardFromItem(
   const why = reasonForItem(item, summary, prState, codexTaskStatus);
   const correlationId = textProp(item, "correlationId");
   const headBranch = headBranchForPr(prState, summary, item);
+  const realAreas = touchedAreasForItem(summary);
   return {
     ...identity,
     title: title || "Untitled handoff",
@@ -108,6 +109,7 @@ function boardCardFromItem(
     ...(why ? { why } : {}),
     next: classification.next,
     tags: tagsForItem(item, summary),
+    ...(realAreas.length > 0 ? { touchedAreas: realAreas.slice(0, 8) } : {}),
     ...(correlationId ? { correlationId } : {}),
     ...(headBranch ? { headBranch } : {}),
   };
@@ -357,11 +359,21 @@ function titleForItem(
   return "";
 }
 
-function tagsForItem(item: Record<string, unknown>, summary: Record<string, unknown>): string[] {
+/**
+ * The PR's real diff areas from the enriched github-live review signals — the
+ * categories the diff ACTUALLY touches (secrets/contracts/settlement/tests/…),
+ * NOT mixed with test-case ids like `tags`. Threaded onto the card so the
+ * agentic router sees the real areas and can't invent a category the PR doesn't
+ * touch. Empty when there is no review signal.
+ */
+function touchedAreasForItem(summary: Record<string, unknown>): string[] {
   const reviewSignals = recordProp(summary, "reviewSignals");
-  const touchedAreas = reviewSignals ? arrayStrings(reviewSignals.touchedAreas) : [];
+  return reviewSignals ? unique(arrayStrings(reviewSignals.touchedAreas)) : [];
+}
+
+function tagsForItem(item: Record<string, unknown>, summary: Record<string, unknown>): string[] {
   const testCaseIds = arrayStrings(item.testCaseIds);
-  return unique([...touchedAreas, ...testCaseIds]).slice(0, 6);
+  return unique([...touchedAreasForItem(summary), ...testCaseIds]).slice(0, 6);
 }
 
 function boardCounts(

@@ -149,6 +149,10 @@ function formatBoardForPrompt(board: HermesBoardSnapshot): string {
       card.ageLabel ? `age ${card.ageLabel}` : "",
       `title ${truncate(card.title, 120)}`,
       card.why ? `why ${truncate(card.why, 160)}` : "",
+      // The REAL diff areas (Stage 3). This is the definitive list of what the
+      // PR touches — grounds the model so it can't invent a category (secrets/
+      // migrations) the diff doesn't contain.
+      card.touchedAreas && card.touchedAreas.length > 0 ? `diff-areas ${card.touchedAreas.join(", ")}` : "",
       card.next ? `next ${truncate(card.next, 160)}` : "",
     ].filter(Boolean);
     out.push(`  - ${parts.join(" | ")}`);
