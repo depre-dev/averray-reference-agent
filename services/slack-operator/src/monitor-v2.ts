@@ -51,6 +51,7 @@ import {
   type ReviewPanelResponse,
   type ReviewPanelReviewer,
 } from "./reviewer-panel.js";
+import { hashFailureContext, type FailureAnalysisCard } from "./monitor-failure-analysis.js";
 
 // ── v2 typed model ──────────────────────────────────────────────────
 
@@ -339,6 +340,13 @@ export interface BoardCard {
   reviewRequests?: CardReviewRequest[];
   /** C4: real Hermes/agent discussion scoped to this card. */
   discussion?: CardDiscussionMessage[];
+  /**
+   * Hermes's grounded, agentic read of WHY this failed decision card likely
+   * failed + a recommended next step. Threaded on from the failure-analysis
+   * cache ONLY for failure cards, and ONLY when the cached analysis is still
+   * fresh for the card's current failure context. Absent otherwise.
+   */
+  hermesAnalysis?: { text: string; model?: string; at: string };
 }
 
 export interface BoardSnapshotV2 {
@@ -2004,9 +2012,121 @@ function minutesSince(value: string | undefined, now: Date): number {
   return Math.max(0, Math.floor((now.getTime() - ms) / 60_000));
 }
 
+// ── Failure-analysis card selection + projection ─────────────────────
+// The SINGLE definition of "which cards get a Hermes failure analysis": an
+// operator-decision card (isAction, or in an operator-review / needs-attention
+// lane) that represents a FAILURE. Reused by the board threading here and by the
+// failure-analysis routine, so the two never diverge.
+
+// A failure keyword in the verdict, but ONLY when it is NOT negated. The
+// negation guard is load-bearing for the truth-boundary: a passing verdict like
+// "Hermes pre-check passed, no errors" or "previously failing, now green" must
+// NOT be read as a failure (which would invite a fabricated "why it failed").
+// The structured signals below (state/taskStatus/checkRuns/...) are the primary,
+// reliable failure evidence; the verdict keyword is a last-resort fallback.
+const FAILURE_VERDICT = /\b(fail(?:ed|ing|ure)?|blocked|errored|broke|broken|regress(?:ed|ion)?)\b/i;
+// A recovery / negation cue anywhere in the verdict (either order) flips a
+// failure keyword to non-failure: "no errors", "error resolved", "previously
+// failing, now green", "all checks passed". The list is intentionally broad —
+// a false negative (skip a real failure) just leaves the drawer as today, while
+// a false positive would fabricate a "why it failed" on a passing card.
+const RECOVERY_CUE = /\b(no|not|zero|without|resolved|fixed|cleared|passed|passing|green|recovered|now|healthy|succeeded|success)\b/i;
+
+function verdictSignalsFailure(verdict: string): boolean {
+  const trimmed = verdict.trim();
+  if (!trimmed) return false;
+  if (!FAILURE_VERDICT.test(trimmed)) return false;
+  if (RECOVERY_CUE.test(trimmed)) return false; // negated / recovered — not a live failure
+  return true;
+}
+
+/** True when the card is an operator-decision card sitting in a decision lane. */
+function isDecisionCard(card: BoardCard): boolean {
+  return Boolean(card.isAction) || card.lane === "operator-review" || card.lane === "needs-attention";
+}
+
+/**
+ * True when the card carries a real failure signal (never a guess). Prefers the
+ * structured signals (degraded fetch, failed task/mission, failed checks); the
+ * free-text verdict is only a negation-guarded fallback.
+ */
+function hasFailureSignal(card: BoardCard): boolean {
+  if (card.state === "failed-fetch") return true;
+  if (card.taskStatus === "failed") return true;
+  if (card.missionStatus === "failed") return true;
+  if ((card.failureReason ?? "").trim()) return true;
+  if (card.sourceFailure && card.sourceFailure.message.trim()) return true;
+  if ((card.checkRuns ?? []).some((run) => run.status === "fail")) return true;
+  if ((card.checks?.fail ?? 0) > 0) return true;
+  if (verdictSignalsFailure(card.verdict ?? "")) return true;
+  return false;
+}
+
+/**
+ * Project a board card to the grounded failure fields the analysis may read, or
+ * undefined when the card is NOT a failure decision card (so it is skipped).
+ * Done / history cards are always skipped. Every field is copied straight from
+ * the real card — no derivation, no fabrication.
+ */
+export function failureAnalysisCardFor(card: BoardCard): FailureAnalysisCard | undefined {
+  if (card.type === "done") return undefined;
+  if (!isDecisionCard(card) || !hasFailureSignal(card)) return undefined;
+  const failedCheckNames = (card.checkRuns ?? [])
+    .filter((run) => run.status === "fail")
+    .map((run) => run.name);
+  const riskSignals = (card.riskSignals ?? []).map((s) => s.message);
+  return {
+    id: card.id,
+    title: card.title,
+    ...(card.repo ? { repo: card.repo } : {}),
+    ...(card.verdict ? { verdict: card.verdict } : {}),
+    ...(card.failureReason ? { failureReason: card.failureReason } : {}),
+    ...(card.sourceFailure
+      ? {
+          sourceFailure: {
+            source: card.sourceFailure.source,
+            ...(card.sourceFailure.code ? { code: card.sourceFailure.code } : {}),
+            message: card.sourceFailure.message,
+          },
+        }
+      : {}),
+    ...(failedCheckNames.length > 0 ? { failedCheckNames } : {}),
+    ...(card.state ? { state: card.state } : {}),
+    ...(riskSignals.length > 0 ? { riskSignals } : {}),
+    failureKind: failureKindFor(card),
+  };
+}
+
+/** A short, honest label for the kind of failure (derived from the card type). */
+function failureKindFor(card: BoardCard): string {
+  switch (card.type) {
+    case "deploy":
+      return "deploy verification";
+    case "mission":
+      return "browser mission";
+    case "task":
+      return "codex task";
+    case "pr":
+      return "pull request";
+    default:
+      return "board card";
+  }
+}
+
 export function buildV2BoardSnapshot(
   rawSnapshot: unknown,
-  opts: { repo?: string; now?: () => Date } = {}
+  opts: {
+    repo?: string;
+    now?: () => Date;
+    /**
+     * Optional reader for a FRESH cached Hermes failure analysis, keyed by card
+     * id + a failure-context hash. Threaded onto failure decision cards only.
+     * When omitted (the default), or when it returns undefined, cards carry no
+     * analysis and the drawer keeps its existing "Ask Hermes" pointer — so the
+     * feature is byte-for-byte a no-op unless the caller opts in.
+     */
+    getAnalysis?: (cardId: string, failureHash: string) => { text: string; model?: string; at: string } | undefined;
+  } = {}
 ): BoardSnapshotV2 {
   const now = opts.now ?? (() => new Date());
   const snapshotAt = now();
@@ -2068,8 +2188,22 @@ export function buildV2BoardSnapshot(
     return !correlationIds.some((id) => actionableTaskCorrelationIds.has(id));
   });
 
+  // Thread a FRESH cached Hermes failure analysis onto each failure decision
+  // card. No-op unless the caller supplied getAnalysis AND the cache is fresh for
+  // the card's CURRENT failure context (hash match) — a stale analysis for a
+  // changed failure is never surfaced.
+  const allCards = [...cards, ...taskCards];
+  if (opts.getAnalysis) {
+    for (const card of allCards) {
+      const projected = failureAnalysisCardFor(card);
+      if (!projected) continue;
+      const analysis = opts.getAnalysis(card.id, hashFailureContext(projected));
+      if (analysis && analysis.text.trim()) card.hermesAnalysis = analysis;
+    }
+  }
+
   return {
-    cards: [...cards, ...taskCards],
+    cards: allCards,
     at: snapshotAt.toISOString(),
     repo: opts.repo ?? "",
     llmUsage: aggregateLlmUsage(usageEvents(asRecord(rawSnapshot)?.llmUsageEvents), {

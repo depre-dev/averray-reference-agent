@@ -67,6 +67,16 @@ export interface SlackRoutineConfig {
     lookbackHours: number;
     explore: boolean;
   };
+  /**
+   * Hermes failure analysis: produces a grounded "why it failed + next step" read
+   * for failed operator-decision cards. Off by default; needs the gateway session
+   * to actually run (degraded-safe otherwise). Never mutates a card or the queue.
+   */
+  failureAnalysis: {
+    enabled: boolean;
+    intervalMs: number;
+    maxPerTick: number;
+  };
 }
 
 export function parseSlackRoutineConfig(
@@ -147,6 +157,12 @@ export function parseSlackRoutineConfig(
       lookbackHours: Math.max(1, positiveNumber(env.HERMES_ROUTER_RECENTLY_DONE_LOOKBACK_HOURS) || 72),
       // ORCH-P4c anti-entrenchment: learned routing explores under-sampled agents on soft surfaces.
       explore: env.HERMES_ROUTER_ANTI_ENTRENCHMENT === "1",
+    },
+    failureAnalysis: {
+      // Off by default — reads failed cards only, never mutates anything.
+      enabled: env.HERMES_FAILURE_ANALYSIS === "1",
+      intervalMs: Math.max(60_000, (positiveNumber(env.HERMES_FAILURE_ANALYSIS_INTERVAL_MINUTES) || 5) * 60_000),
+      maxPerTick: Math.max(1, positiveNumber(env.HERMES_FAILURE_ANALYSIS_MAX_PER_TICK) || 3),
     },
   };
 }
