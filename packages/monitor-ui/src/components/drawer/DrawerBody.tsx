@@ -8,7 +8,9 @@ import type {
   BoardCard,
   CardCheckRun,
   CardChecks,
+  CardClaimFlag,
   CardFile,
+  CardGroundTruth,
   CardReviewRequest,
   CardRiskSignal,
   DeployCard,
@@ -88,12 +90,126 @@ export function DrawerBody({ card, variant }: { card: BoardCard; variant: Drawer
   return (
     <>
       {body}
+      <GroundTruthSection card={card} />
       <HermesReadSection card={card} />
       <DecisionContextSection card={card} />
       <DecisionRecordSection record={card.decisionRecord} />
       <OperatorNotes cardId={card.id} />
     </>
   );
+}
+
+/**
+ * "Verify the claim" — for a proposed task whose free-text prompt cites a PR,
+ * show that PR's REAL signals (joined server-side, zero client fetch) next to
+ * Hermes's claim so a fabricated premise is caught at the decision point. This
+ * lives in the shared DrawerBody wrapper (not TaskBody) because an actionable
+ * task routes to the "action" variant → PrBody, not TaskBody; the wrapper shows
+ * it regardless of variant.
+ *
+ * TRUTH BOUNDARY:
+ *  - No cited PR ⇒ card.groundTruth is absent ⇒ this renders nothing (honest
+ *    absence — we never invent a PR to check).
+ *  - groundTruth.verified === false ⇒ a MUTED "couldn't verify" note carrying
+ *    only the honest reason. Never a green check, never read as agreement.
+ *  - verified ⇒ the PR's actual mergeable state / checks / touched areas /
+ *    verdict as plain fact. A prominent ⚠ warn block ONLY when the server
+ *    attached conservative claimFlags; otherwise a calm "consistent" line, which
+ *    is honest precisely because we DID verify against the real PR.
+ * Every value comes from the real joined summary — nothing here is fabricated.
+ */
+function GroundTruthSection({ card }: { card: BoardCard }) {
+  const gt = (card as { groundTruth?: CardGroundTruth }).groundTruth;
+  if (!gt) return null;
+
+  // Couldn't verify — muted, visually distinct from a verified/agreement state.
+  if (!gt.verified) {
+    return (
+      <section>
+        <div className="hm-section-h" style={{ color: "var(--hm-muted)" }}>
+          Verify the claim · PR #{gt.pr}
+        </div>
+        <div className="hm-verdict-block">
+          <div className="body" style={{ color: "var(--hm-muted)" }}>
+            Couldn't verify PR #{gt.pr}
+            {gt.repo ? <> in <b>{gt.repo}</b></> : null} — {gt.reason ?? "PR state unavailable."} Judge Hermes's claim yourself.
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  const flags = (card as { claimFlags?: CardClaimFlag[] }).claimFlags ?? [];
+  const rows = groundTruthRows(gt);
+  return (
+    <section>
+      <div className="hm-section-h">Verify the claim · PR #{gt.pr} ground truth</div>
+
+      {flags.length > 0 ? (
+        <div className="hm-verdict-block hm-verdict-block--warn" style={{ marginBottom: 10 }}>
+          <div className="head">⚠ Hermes's claim doesn't match the PR</div>
+          <div className="body">
+            <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+              {flags.map((f) => (
+                <li key={f.kind}>{f.detail}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      ) : (
+        <div className="hm-verdict-block" style={{ marginBottom: 10 }}>
+          <div className="body" style={{ color: "var(--hm-sage-deep)" }}>
+            Hermes's claim is consistent with the PR's real signals.
+          </div>
+        </div>
+      )}
+
+      <div className="h4-eo" role="table" aria-label="PR ground truth">
+        <div className="h4-eo-row h4-eo-head" role="row">
+          <span role="columnheader">signal</span>
+          <span role="columnheader" style={{ gridColumn: "span 3" }}>
+            real PR state
+          </span>
+        </div>
+        {rows.map((r) => (
+          <div className="h4-eo-row" role="row" key={r.label} style={{ gridTemplateColumns: "1.1fr 3fr" }}>
+            <span role="cell">{r.label}</span>
+            <span className="mono" role="cell" style={{ gridColumn: "span 3" }}>
+              {r.value}
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="hm-card-meta" style={{ marginTop: 8 }}>
+        Real signals from PR #{gt.pr}
+        {gt.repo ? <> in {gt.repo}</> : null} — joined from the fetched PR state, not from the task text.
+      </div>
+    </section>
+  );
+}
+
+/** Turn the verified ground-truth into plain label/value rows (only the fields
+ *  the join actually carried — never a fabricated placeholder). */
+function groundTruthRows(gt: CardGroundTruth): Array<{ label: string; value: string }> {
+  const rows: Array<{ label: string; value: string }> = [];
+  const mergeBits = [
+    gt.merged ? "merged" : undefined,
+    gt.draft ? "draft" : undefined,
+    gt.mergeableState,
+    gt.state && gt.state !== "open" ? gt.state : undefined,
+  ].filter(Boolean);
+  if (mergeBits.length > 0) rows.push({ label: "mergeable", value: mergeBits.join(" · ") });
+  if (gt.checks) {
+    rows.push({
+      label: "checks",
+      value: `${gt.checks.passed}/${gt.checks.total} passed${gt.checks.failed > 0 ? ` · ${gt.checks.failed} failed` : ""}`,
+    });
+  }
+  if (gt.touchedAreas && gt.touchedAreas.length > 0) {
+    rows.push({ label: "touched areas", value: gt.touchedAreas.join(", ") });
+  }
+  if (gt.verdict) rows.push({ label: "verdict", value: gt.verdict });
+  return rows;
 }
 
 /**

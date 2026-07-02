@@ -77,6 +77,33 @@ export interface CardRiskSignal {
   message: string;
 }
 
+/**
+ * Mirrors the backend CardGroundTruth (monitor-v2.ts). The REAL signals of the
+ * PR a proposed task's prompt cites, joined server-side from the already-fetched
+ * PR summary. `verified:false` carries ONLY the honest "couldn't verify" reason
+ * — the drawer must render that as a muted note, never a green/consistent state.
+ */
+export interface CardGroundTruth {
+  pr: number;
+  repo: string;
+  verified: boolean;
+  reason?: string;
+  mergeableState?: string;
+  state?: string;
+  draft?: boolean;
+  merged?: boolean;
+  checks?: { passed: number; failed: number; total: number };
+  touchedAreas?: string[];
+  verdict?: string;
+}
+
+/** Mirrors the backend CardClaimFlag — a conservative, high-confidence mismatch
+ *  between a task's claim and the PR's real signals. */
+export interface CardClaimFlag {
+  kind: "claimed_blocked_but_mergeable" | "claimed_category_absent";
+  detail: string;
+}
+
 export interface CardReviewRequest {
   id: string;
   requestedBy: "hermes" | "operator" | "codex" | "claude" | "test-writer" | "security" | "docs";
@@ -337,6 +364,11 @@ export interface CodexTaskCard extends CardBase {
   taskEvents?: TaskTimelineEvent[];
   output?: string;
   failureReason?: string;
+  /** Ground-truth of the PR this task's prompt cites (when it cites one). Drives
+   *  the drawer's "verify the claim against the real PR" panel. */
+  groundTruth?: CardGroundTruth;
+  /** Conservative, high-confidence claim-vs-reality mismatches for that PR. */
+  claimFlags?: CardClaimFlag[];
 }
 
 /** Payload for proposing a task from the board (O3 dispatch). */
