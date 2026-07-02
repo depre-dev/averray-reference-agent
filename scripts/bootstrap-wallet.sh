@@ -20,7 +20,7 @@ const agentAccount = privateKeyToAccount(agentPrivateKey);
 const adminAccount = privateKeyToAccount(adminPrivateKey);
 const verifierAccount = privateKeyToAccount(verifierPrivateKey);
 
-console.log(`HERMES_IMAGE=nousresearch/hermes-agent@sha256:b6e41c155d6bfce5ad83c5d0fec670086db8a43250e4511c9474134be5482d33`);
+console.log(`HERMES_IMAGE=nousresearch/hermes-agent:v2026.6.19`);
 console.log(`POSTGRES_USER=avg_agent`);
 console.log(`POSTGRES_PASSWORD=${randomUUID().replaceAll("-", "")}`);
 console.log(`POSTGRES_DB=avg_agent`);
