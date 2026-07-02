@@ -667,21 +667,13 @@ export function BoardView({
         />
       ) : null}
 
-      {!drawerCard ? (
-        <button
-          type="button"
-          className="hm-ask-float"
-          onClick={() => {
-            const nextFocusId = boardFocusId ?? state.banner.primaryActionId ?? state.mostUrgent?.id ?? orderedCards[0]?.id ?? null;
-            const card = nextFocusId ? orderedCards.find((c) => c.id === nextFocusId) : undefined;
-            triggerAsk(nextFocusId, card?.title ?? card?.id);
-          }}
-          aria-label="Ask Hermes"
-        >
-          <span className="mark" aria-hidden>H</span>
-          Ask Hermes <span className="hm-kbd">A</span>
-        </button>
-      ) : null}
+      {/* The old `.hm-ask-float` FAB was a fallback "Ask Hermes" button for a
+          layout with no co-pilot column. This board ALWAYS renders <CoPilotRail>
+          (above) with its own always-on Ask-Hermes composer in the same
+          bottom-right corner, so the FAB was permanently redundant — and its
+          coral pill bled out from under the composer. Removed. The `a` shortcut
+          still scopes + focuses the rail composer (useBoardKeyboard → onAsk →
+          triggerAsk), and the drawer's "Ask Hermes" action does the same. */}
 
       {overlayOpen ? <KeyboardOverlay onClose={() => setOverlayOpen(false)} /> : null}
     </div>

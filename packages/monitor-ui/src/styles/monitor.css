@@ -2824,7 +2824,10 @@ button.hm-turn-pin {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.hm-compose-chip.is-on { background: var(--hm-ink); color: #fffdf7; border-color: var(--hm-ink); }
+/* --hm-ink remaps to a LIGHT cream in this dark theme, so the active chip has a
+   light background — its text must be DARK (var(--hm-paper)), not white, or it's
+   invisible (white-on-cream). */
+.hm-compose-chip.is-on { background: var(--hm-ink); color: var(--hm-paper); border-color: var(--hm-ink); }
 
 /* ============================================================
    DETAIL DRAWER (over board)
@@ -3114,38 +3117,11 @@ button.hm-turn-pin {
   display: inline-flex; gap: 3px;
 }
 
-/* Persistent Ask Hermes floating composer (for board with no Hermes column) */
-.hm-ask-float {
-  position: absolute;
-  right: 22px; bottom: 22px;
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 14px 10px 12px;
-  border-radius: 999px;
-  /* dark-mode: --hm-ink remaps to a LIGHT ink (#EDE6DD), which turned this
-     floating pill into a cream patch with near-invisible text bleeding up at
-     the board's bottom-right. It's the "Ask Hermes" CTA, so use the on-theme
-     coral action colour (--h4-act) with white text. */
-  background: var(--h4-act);
-  color: #fffdf7;
-  box-shadow: var(--hm-shadow-pop);
-  cursor: pointer;
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 12.5px;
-  border: 0;
-}
-.hm-ask-float .mark {
-  width: 22px; height: 22px;
-  border-radius: 6px;
-  background: var(--hm-sage);
-  color: #fffdf7;
-  display: grid; place-items: center;
-  font-size: 11px; font-weight: 800;
-}
-.hm-ask-float .hm-kbd {
-  background: rgba(255,253,247,0.18);
-  color: #fffdf7;
-}
+/* The `.hm-ask-float` FAB was removed: the co-pilot rail is always present
+   with its own Ask-Hermes composer in this same bottom-right corner, so the
+   floating pill was redundant and bled out from under the composer. The `a`
+   shortcut and the drawer's "Ask Hermes" action drive the rail composer
+   directly. See BoardView.tsx for the note. */
 
 /* ============================================================
    TIMELINE STRIP (deploy timeline / activity)
@@ -3933,7 +3909,7 @@ button.hm-turn-pin {
 .hm-ask-status {
   position: absolute;
   right: 22px;
-  bottom: 72px; /* sits just above the .hm-ask-float pill */
+  bottom: 22px; /* bottom-right corner (the old .hm-ask-float pill is gone) */
   pointer-events: none;
   z-index: 20;
 }
