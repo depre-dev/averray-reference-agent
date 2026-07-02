@@ -188,6 +188,41 @@ export interface CardSourceFailure {
   lastGoodAt?: string;
 }
 
+/**
+ * The REAL signals of the PR a proposed task's prompt cites, joined from the
+ * already-fetched PR summary (zero new network calls). Lets the operator judge
+ * a task's free-text premise against the PR's actual state at the decision
+ * point. `verified:false` carries ONLY the honest "couldn't verify" reason —
+ * never a partial/fabricated signal set (see reconcileTaskClaim).
+ */
+export interface CardGroundTruth {
+  /** The PR number cited in the task prompt/reason (or task.pullRequestNumber). */
+  pr: number;
+  repo: string;
+  /** true ⇒ the PR was found among the fetched open PRs and its signals are real. */
+  verified: boolean;
+  /** Only when verified:false — why the PR state couldn't be confirmed. */
+  reason?: string;
+  mergeableState?: string;
+  state?: string;
+  draft?: boolean;
+  merged?: boolean;
+  checks?: { passed: number; failed: number; total: number };
+  touchedAreas?: string[];
+  verdict?: string;
+}
+
+/**
+ * A CONSERVATIVE, high-confidence mismatch between the task's free-text claim
+ * and the PR's real signals. Emitted only when unambiguous — a false "no
+ * mismatch" is fine (the operator still sees the real ground truth), a false
+ * "MISMATCH!" cries wolf, so when unsure we emit nothing.
+ */
+export interface CardClaimFlag {
+  kind: "claimed_blocked_but_mergeable" | "claimed_category_absent";
+  detail: string;
+}
+
 // ── Mission report (testbed browser missions) ───────────────────────
 // Mirrors the UI MissionReport. The optional numeric fields (runs,
 // latency, per-step latency, and the 0–10 scores) are populated only
@@ -320,6 +355,20 @@ export interface BoardCard {
   runnerHeartbeat?: CardRunnerHeartbeat;
   /** Real task lifecycle events recorded by the queue, used for Hermes timeline narration. */
   taskEvents?: TaskTimelineEvent[];
+  /**
+   * Proposed-task cards: the REAL signals of the PR the task's prompt cites,
+   * joined from the already-fetched PR summary (no new fetch). Present only when
+   * the task prose (or pullRequestNumber) references a PR. Lets the operator
+   * catch a fabricated premise at the decision point. Absent ⇒ no PR cited.
+   */
+  groundTruth?: CardGroundTruth;
+  /**
+   * Proposed-task cards: conservative, high-confidence mismatches between the
+   * task's claim and the PR's real signals. Only ever set alongside a
+   * `verified:true` groundTruth; empty/absent when the claim is consistent or
+   * the PR couldn't be verified.
+   */
+  claimFlags?: CardClaimFlag[];
   /** Agent currently working this in-flight card, backed by live runner/classifier state. */
   workingNow?: CardWorkingNow;
   /** Per-check CI breakdown (non-done cards) — the list under the bar. */
@@ -1742,6 +1791,158 @@ const REPEATED_FAILURE_ATTEMPTS = 2;
 const AUTOMATION_TERMINAL_TASK_STATUSES = new Set(["completed", "failed", "cancelled"]);
 const CARD_DISCUSSION_LIMIT = 4;
 
+/** Pull the first PR number a task's prose (or explicit field) cites. Honors
+ *  `#123` and `PR 123` / `PR#123` forms; prompt is checked before reason. */
+export function citedPrNumber(task: Record<string, unknown>): number | undefined {
+  const explicit = asFiniteNumber(task.pullRequestNumber);
+  if (explicit !== undefined) return explicit;
+  for (const field of [asString(task.prompt), asString(task.reason)]) {
+    if (!field) continue;
+    const match = field.match(/(?:PR\s*#?|#)(\d{1,7})\b/i);
+    if (match) {
+      const n = Number.parseInt(match[1]!, 10);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+  }
+  return undefined;
+}
+
+// A task asserts the PR is BLOCKED/gated. Kept deliberately tight — generic
+// mentions of "gate" in unrelated prose shouldn't trip it, but the phrasings
+// Hermes's router actually uses ("blocked PR", "blocks the merge", "cannot
+// merge", "merge-blocking", "gating") do.
+const CLAIMS_BLOCKED = /\b(blocked|block(?:s|ing)?\s+the\s+merge|blocks?\s+merge|cannot\s+merge|can't\s+merge|un-?mergeable|not\s+mergeable|merge[-\s]?block\w*|gat(?:e|es|ing|ed))\b/i;
+// Real PR states that mean "nothing is blocking the merge".
+const MERGEABLE_STATES = new Set(["mergeable", "clean", "has_hooks", "unstable"]);
+
+/**
+ * Reconcile a proposed task's free-text claim against the REAL PR summary it
+ * cites. Pure + side-effect-free so it unit-tests without the whole board.
+ *
+ * TRUTH BOUNDARY:
+ *  - No summary, or a fail-stale summary (githubLive.fetchError) ⇒
+ *    `groundTruth.verified:false` carrying ONLY the honest reason, and NEVER a
+ *    claimFlag (we can't contradict a claim we couldn't verify).
+ *  - Otherwise `groundTruth.verified:true` carries the PR's actual signals, and
+ *    claimFlags are computed CONSERVATIVELY (high-risk, unambiguous only).
+ *  - The caller passes `undefined` when the task cites no PR, in which case this
+ *    isn't called at all and the card carries no panel.
+ */
+export function reconcileTaskClaim(
+  task: Record<string, unknown>,
+  summary: Record<string, unknown> | undefined,
+  prNumber: number,
+): { groundTruth: CardGroundTruth; claimFlags?: CardClaimFlag[] } {
+  const repo = asString(task.repo) ?? "";
+  const githubLive = asRecord(summary?.githubLive);
+  // Missing from the fetched set, or a rate-limited sub-fetch ⇒ unverifiable.
+  if (!summary || githubLive?.fetchError) {
+    return {
+      groundTruth: {
+        pr: prNumber,
+        repo,
+        verified: false,
+        reason: "PR state unavailable — not among the fetched open PRs, rate-limited, or already closed. Judge Hermes's claim yourself.",
+      },
+    };
+  }
+
+  const pr = asRecord(summary.currentPullRequest) ?? asRecord(summary.pullRequest);
+  const totals = asRecord(githubLive?.checkTotals);
+  const checks = totals
+    ? {
+        passed: numberFieldV2(totals.passed),
+        failed: numberFieldV2(totals.failed),
+        total: numberFieldV2(totals.total),
+      }
+    : undefined;
+  const reviewSignals = asRecord(summary.reviewSignals);
+  const touchedAreas = asArray(reviewSignals?.touchedAreas)
+    .map((value) => asString(value))
+    .filter((value): value is string => Boolean(value));
+  const mergeableState = asString(pr?.mergeableState);
+  const verdict = asString(summary.finalVerdict);
+
+  const groundTruth: CardGroundTruth = {
+    pr: prNumber,
+    repo,
+    verified: true,
+    ...(mergeableState ? { mergeableState } : {}),
+    ...(asString(pr?.state) ? { state: asString(pr?.state) } : {}),
+    ...(typeof pr?.draft === "boolean" ? { draft: pr.draft } : {}),
+    ...(typeof pr?.merged === "boolean" ? { merged: pr.merged } : {}),
+    ...(checks ? { checks } : {}),
+    ...(touchedAreas.length > 0 ? { touchedAreas } : {}),
+    ...(verdict ? { verdict } : {}),
+  };
+
+  const claimText = [asString(task.prompt), asString(task.reason)].filter(Boolean).join(" ");
+  const flags: CardClaimFlag[] = [];
+
+  // (1) Claimed blocked, but the PR is actually mergeable with no failing checks
+  // and not held. Every clause must agree before we contradict the operator's
+  // task — a mergeable state we can't read (undefined) is NOT treated as green.
+  const noFailedChecks = !checks || checks.failed === 0;
+  const stateIsMergeable = mergeableState ? MERGEABLE_STATES.has(mergeableState.toLowerCase()) : false;
+  const notHeld = verdict !== "hold";
+  const notDraft = pr?.draft !== true;
+  const notMerged = pr?.merged !== true;
+  if (CLAIMS_BLOCKED.test(claimText) && stateIsMergeable && noFailedChecks && notHeld && notDraft && notMerged) {
+    const failedNote = checks ? `${checks.failed} failed checks` : "no failing checks";
+    flags.push({
+      kind: "claimed_blocked_but_mergeable",
+      detail: `Task says PR #${prNumber} is blocked, but it is ${mergeableState} with ${failedNote}.`,
+    });
+  }
+
+  // (2) Claimed a HIGH-RISK category (secrets / migrations / .env) that the real
+  // diff does not touch. Only these high-signal absentees are flagged — generic
+  // words like "backend" or "docs" are far too noisy to contradict on.
+  if (touchedAreas.length > 0) {
+    const missing = claimedHighRiskCategoriesAbsent(claimText, touchedAreas);
+    if (missing.length > 0) {
+      flags.push({
+        kind: "claimed_category_absent",
+        detail: `Task claims ${missing.map((m) => `'${m}'`).join(" + ")}, but PR #${prNumber}'s real diff touches: ${touchedAreas.join(", ")}.`,
+      });
+    }
+  }
+
+  return { groundTruth, ...(flags.length > 0 ? { claimFlags: flags } : {}) };
+}
+
+/** Coerce a summary numeric field, defaulting missing/non-finite to 0. */
+function numberFieldV2(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * Which HIGH-RISK categories a task's prose asserts that the PR's real
+ * `touchedAreas` do NOT contain. Deliberately narrow: only `secrets`,
+ * `migration(s)`, and `.env` — the categories whose false presence would most
+ * mislead a risk decision. A claim of `secrets` is satisfied by a real
+ * `secrets` area; a claim of `migration` maps to the `settlement`/`backend`
+ * areas the classifier uses, so we only assert absence when NO plausible area
+ * is present.
+ */
+function claimedHighRiskCategoriesAbsent(claimText: string, touchedAreas: string[]): string[] {
+  const text = claimText.toLowerCase();
+  const areas = new Set(touchedAreas.map((a) => a.toLowerCase()));
+  const missing: string[] = [];
+  // "secrets" / ".env": the classifier bucket is literally `secrets`.
+  if (/\bsecrets?\b/.test(text) && !areas.has("secrets")) missing.push("secrets");
+  if (/(?:^|[^.\w])\.env\b/.test(text) && !areas.has("secrets")) missing.push(".env");
+  // "migration(s)": the classifier folds DB migrations into the touched-area
+  // vocab as high-risk but has no dedicated `migration` bucket, so treat it as
+  // absent only when NONE of the areas a migration could live in are present.
+  if (/\bmigrations?\b/.test(text) && !MIGRATION_HOST_AREAS.some((a) => areas.has(a))) missing.push("migrations");
+  return missing;
+}
+
+// Areas a real DB migration would surface under (there's no dedicated bucket).
+// If none are present, a "migrations" claim is unsupported by the real diff.
+const MIGRATION_HOST_AREAS = ["backend", "indexer", "settlement", "ops"];
+
 /**
  * Synthesize `codex-needed` cards for queued tasks the classifier won't
  * surface on its own. Greenfield tasks (no PR yet) emit no monitor/handoff
@@ -1755,7 +1956,7 @@ const CARD_DISCUSSION_LIMIT = 4;
 export function synthesizeTaskCards(
   rawSnapshot: unknown,
   runner: Record<string, unknown> | undefined,
-  opts: { now?: Date } = {},
+  opts: { now?: Date; summaryIndex?: Map<string, Record<string, unknown>> } = {},
 ): BoardCard[] {
   const root = asRecord(rawSnapshot);
   const codexTasks = asRecord(root?.codexTasks);
@@ -1792,6 +1993,14 @@ export function synthesizeTaskCards(
         ? [{ severity: riskTier === "high" ? "high" as const : "low" as const, code: "routing", message: routingReason }]
         : []),
     ];
+    // Ground-truth check: if this greenfield task's prose cites a PR, join the
+    // PR's REAL signals from the already-fetched summary index so the operator
+    // can catch a fabricated premise. No PR cited ⇒ no panel (honest absence).
+    const citedPr = opts.summaryIndex ? citedPrNumber(task) : undefined;
+    const reconciled =
+      citedPr !== undefined
+        ? reconcileTaskClaim(task, opts.summaryIndex!.get(prKey(asString(task.repo), citedPr) ?? ""), citedPr)
+        : undefined;
     const card: BoardCard = {
       id,
       lane: health.lane,
@@ -1812,6 +2021,8 @@ export function synthesizeTaskCards(
       ...(health.sourceFailure ? { sourceFailure: health.sourceFailure } : {}),
       ...(prompt ? { prompt } : {}),
       ...(taskEvents.length > 0 ? { taskEvents } : {}),
+      ...(reconciled ? { groundTruth: reconciled.groundTruth } : {}),
+      ...(reconciled?.claimFlags ? { claimFlags: reconciled.claimFlags } : {}),
       ...(asString(task.correlationId) ? { correlationId: asString(task.correlationId) } : {}),
       ...(decisionRecord ? { decisionRecord } : {}),
     };
@@ -2168,7 +2379,7 @@ export function buildV2BoardSnapshot(
   // self-healing event also produced a task, keep the task card because it
   // owns the real approve/dispatch control; the handoff event is context.
   const existingIds = new Set(sourceCards.map((c) => c.id));
-  const taskCards = synthesizeTaskCards(rawSnapshot, runner, { now: snapshotAt })
+  const taskCards = synthesizeTaskCards(rawSnapshot, runner, { now: snapshotAt, summaryIndex })
     .filter((c) => !existingIds.has(c.id))
     .map((card) => {
       const scope = { correlationId: card.correlationId ?? card.id };

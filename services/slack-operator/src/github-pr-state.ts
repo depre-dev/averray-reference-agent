@@ -983,7 +983,13 @@ function numberField(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-function inferTouchedArea(path: string): string {
+/**
+ * Classify a changed file into a coarse risk area. Shared vocabulary: the
+ * board's proposed-task ground-truth check (monitor-v2) reconciles a task's
+ * free-text claim against the PR's REAL touched areas using the exact same
+ * classifier the live PR review does, so the two never disagree on wording.
+ */
+export function inferTouchedArea(path: string): string {
   const p = path.toLowerCase();
   if (p.includes("secret") || p.endsWith(".env") || p.includes(".env.")) return "secrets";
   if (p.startsWith("contracts/") || p.endsWith(".sol")) return "contracts";
@@ -998,7 +1004,7 @@ function inferTouchedArea(path: string): string {
   return "other";
 }
 
-function highRiskForFile(path: string): "high" | "medium" | "low" {
+export function highRiskForFile(path: string): "high" | "medium" | "low" {
   const p = path.toLowerCase();
   if (p.includes("secret") || p.endsWith(".env") || p.includes(".env.") || p.includes("migration") || p.startsWith("contracts/") || p.endsWith(".sol")) return "high";
   const area = inferTouchedArea(path);

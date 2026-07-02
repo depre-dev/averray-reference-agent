@@ -22,6 +22,8 @@ import {
   enrichBoardCard,
   mapMissionReport,
   synthesizeTaskCards,
+  reconcileTaskClaim,
+  citedPrNumber,
   taskHealthForBoard,
   automationHealthForBoard,
   diffBoardSnapshots,
@@ -2212,6 +2214,152 @@ describe("synthesizeTaskCards (O3 — surface queued tasks)", () => {
       isAction: true,
     });
     expect(snap.cards.some((card) => card.type === "task")).toBe(false);
+  });
+});
+
+describe("citedPrNumber (extract the PR a task's prose references)", () => {
+  it("prefers an explicit pullRequestNumber", () => {
+    expect(citedPrNumber({ pullRequestNumber: 717, prompt: "decompose PR #900" })).toBe(717);
+  });
+  it("parses '#N' and 'PR N' / 'PR#N' from prompt, then reason", () => {
+    expect(citedPrNumber({ prompt: "decompose blocked PR #717 — 3 files" })).toBe(717);
+    expect(citedPrNumber({ prompt: "look at PR 512 please" })).toBe(512);
+    expect(citedPrNumber({ prompt: "no ref here", reason: "relates to #48" })).toBe(48);
+  });
+  it("returns undefined when no PR is cited", () => {
+    expect(citedPrNumber({ prompt: "add a HEALTHCHECK.md", reason: "operator delegated" })).toBeUndefined();
+  });
+});
+
+describe("reconcileTaskClaim (ground-truth a proposed task's claim vs the real PR)", () => {
+  // The real #717 case: a task claims a merge-blocking premise, but the PR is
+  // green + mergeable and touches only contracts + a doc + a test.
+  const greenSummary717 = {
+    finalVerdict: "ok_to_merge",
+    currentPullRequest: { repo: "depre-dev/agent", number: 717, state: "open", draft: false, merged: false, mergeableState: "clean" },
+    githubLive: { checkTotals: { total: 5, passed: 5, failed: 0, active: 0, neutral: 0 } },
+    reviewSignals: { touchedAreas: ["contracts", "docs", "tests"] },
+  };
+
+  it("(a) flags claimed_blocked_but_mergeable when the task says blocked but the PR is mergeable + all-green (the #717 case)", () => {
+    const task = {
+      repo: "depre-dev/agent",
+      prompt: "decompose blocked PR #717 — 3 files touch secrets, contracts, AND database migrations, triggering pr_critical_files; it blocks the merge.",
+    };
+    const { groundTruth, claimFlags } = reconcileTaskClaim(task, greenSummary717, 717);
+    expect(groundTruth.verified).toBe(true);
+    expect(groundTruth.mergeableState).toBe("clean");
+    expect(groundTruth.checks).toEqual({ passed: 5, failed: 0, total: 5 });
+    expect(groundTruth.touchedAreas).toEqual(["contracts", "docs", "tests"]);
+    const kinds = (claimFlags ?? []).map((f) => f.kind);
+    expect(kinds).toContain("claimed_blocked_but_mergeable");
+  });
+
+  it("(b) flags claimed_category_absent when the task claims secrets+migrations but the real diff touches only contracts+tests", () => {
+    const task = {
+      repo: "depre-dev/agent",
+      prompt: "decompose PR #717 — it touches secrets and database migrations and needs splitting.",
+    };
+    // A neutral (non-blocked-claiming) prompt so only the category flag fires.
+    const summary = {
+      finalVerdict: "operator_review",
+      currentPullRequest: { repo: "depre-dev/agent", number: 717, state: "open", mergeableState: "unstable" },
+      githubLive: { checkTotals: { total: 4, passed: 3, failed: 1, active: 0, neutral: 0 } },
+      reviewSignals: { touchedAreas: ["contracts", "tests"] },
+    };
+    const { claimFlags } = reconcileTaskClaim(task, summary, 717);
+    const absent = (claimFlags ?? []).find((f) => f.kind === "claimed_category_absent");
+    expect(absent).toBeTruthy();
+    expect(absent?.detail).toMatch(/secrets/);
+    expect(absent?.detail).toMatch(/migrations/);
+    // it does NOT false-positive the blocked flag (checks show 1 failed).
+    expect((claimFlags ?? []).some((f) => f.kind === "claimed_blocked_but_mergeable")).toBe(false);
+  });
+
+  it("(c) emits NO flags when the claim is consistent with the real signals", () => {
+    const task = {
+      repo: "depre-dev/agent",
+      // Claims contracts (present) and does not assert a false block.
+      prompt: "PR #717 changes contracts — split the Solidity refactor into two commits.",
+    };
+    const { groundTruth, claimFlags } = reconcileTaskClaim(task, greenSummary717, 717);
+    expect(groundTruth.verified).toBe(true);
+    expect(claimFlags).toBeUndefined();
+  });
+
+  it("(c2) a 'blocked' claim does NOT flag when the PR genuinely has failing checks", () => {
+    const task = { repo: "depre-dev/agent", prompt: "PR #717 is blocked — CI is red." };
+    const redSummary = {
+      finalVerdict: "hold",
+      currentPullRequest: { repo: "depre-dev/agent", number: 717, state: "open", mergeableState: "clean" },
+      githubLive: { checkTotals: { total: 5, passed: 3, failed: 2, active: 0, neutral: 0 } },
+      reviewSignals: { touchedAreas: ["contracts"] },
+    };
+    const { claimFlags } = reconcileTaskClaim(task, redSummary, 717);
+    expect(claimFlags).toBeUndefined();
+  });
+
+  it("(d) verified:false with NO flags when the summary is missing", () => {
+    const task = { repo: "depre-dev/agent", prompt: "PR #717 is blocked and touches secrets." };
+    const { groundTruth, claimFlags } = reconcileTaskClaim(task, undefined, 717);
+    expect(groundTruth.verified).toBe(false);
+    expect(groundTruth.reason).toBeTruthy();
+    expect(claimFlags).toBeUndefined();
+  });
+
+  it("(d2) verified:false with NO flags when the summary is fail-stale (githubLive.fetchError)", () => {
+    const task = { repo: "depre-dev/agent", prompt: "PR #717 is blocked and touches migrations." };
+    const staleSummary = {
+      ...greenSummary717,
+      githubLive: { ...greenSummary717.githubLive, fetchError: { code: "rate_limited", message: "429" } },
+    };
+    const { groundTruth, claimFlags } = reconcileTaskClaim(task, staleSummary, 717);
+    expect(groundTruth.verified).toBe(false);
+    expect(claimFlags).toBeUndefined();
+  });
+
+  it("(e) synthesizeTaskCards attaches groundTruth only when a PR is cited AND the index is threaded", () => {
+    const rawSnapshot = {
+      codexTasks: {
+        items: [
+          {
+            id: "codex-task-depre-dev-agent-new-1-aa",
+            status: "proposed",
+            agent: "codex",
+            repo: "depre-dev/agent",
+            prompt: "decompose blocked PR #717 — it blocks the merge and touches secrets + migrations.",
+          },
+          {
+            id: "codex-task-depre-dev-agent-new-2-bb",
+            status: "proposed",
+            agent: "codex",
+            repo: "depre-dev/agent",
+            prompt: "add a HEALTHCHECK.md — no PR involved",
+          },
+        ],
+      },
+    };
+    const summaryIndex = new Map<string, Record<string, unknown>>([
+      ["depre-dev/agent#717", greenSummary717],
+    ]);
+    const cards = synthesizeTaskCards(rawSnapshot, undefined, { summaryIndex });
+    const cited = cards.find((c) => c.id.endsWith("-aa"));
+    const noRef = cards.find((c) => c.id.endsWith("-bb"));
+    expect(cited?.groundTruth?.verified).toBe(true);
+    expect((cited?.claimFlags ?? []).some((f) => f.kind === "claimed_blocked_but_mergeable")).toBe(true);
+    // No PR cited ⇒ no panel at all (honest absence).
+    expect(noRef?.groundTruth).toBeUndefined();
+    expect(noRef?.claimFlags).toBeUndefined();
+  });
+
+  it("(e2) attaches nothing when summaryIndex is not threaded (byte-for-byte prior behavior)", () => {
+    const rawSnapshot = {
+      codexTasks: {
+        items: [{ id: "t1", status: "proposed", agent: "codex", repo: "depre-dev/agent", prompt: "blocked PR #717" }],
+      },
+    };
+    const [card] = synthesizeTaskCards(rawSnapshot, undefined);
+    expect(card?.groundTruth).toBeUndefined();
   });
 });
 
