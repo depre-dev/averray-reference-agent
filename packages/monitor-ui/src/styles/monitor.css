@@ -517,7 +517,15 @@ body { margin: 0; }
   border: 1px solid var(--hm-line);
   border-radius: var(--hm-radius);
   background: var(--hm-paper-3);
-  overflow: hidden;
+  overflow-x: hidden;
+  /* The utility bar is a flex child of the fixed-height board column. Without
+     this, a full board's lanes shrink it (flex-shrink defaults to 1) and the
+     `overflow:hidden` clipped its expanded LLM-usage / tester content down to a
+     ~120px header strip. Keep its content height, but cap it so it can never
+     dominate the board — scroll past the cap instead of clipping. */
+  flex-shrink: 0;
+  max-height: 60vh;
+  overflow-y: auto;
 }
 .hm-utility-bar--attention {
   border-color: var(--hm-amber-ring);
