@@ -804,11 +804,16 @@ services:
       - ../hermes/profiles:/opt/data/browser-profiles
       - avg-hermes-skills:/opt/data/skills
     networks: [avg-internal]
-    ports:
-      - "127.0.0.1:9119:9119"
-    # Hermes requires --insecure for non-loopback container binds. The Docker
-    # port mapping above keeps this reachable only from VPS localhost.
-    command: ["dashboard", "--host", "0.0.0.0", "--port", "9119", "--insecure"]
+    # Headless backend only — the Hermes-native browser dashboard is retired.
+    # v0.18 made `dashboard --insecure` a no-op: a non-loopback dashboard/serve
+    # bind now refuses to start without an auth provider (that was the v0.17→
+    # v0.18 dashboard crash-loop). `dashboard` and `serve` boot the same
+    # start_server backend; the auth gate only engages on a NON-loopback bind.
+    # We operate via the slack-operator SPA behind Cloudflare Access, not the
+    # Hermes UI, so run `serve` (headless gateway backend) on container-loopback
+    # — crash-free, not exposed (no host port-map). The shared /opt/data backend
+    # keeps running exactly as the dashboard's backend did.
+    command: ["serve", "--host", "127.0.0.1", "--port", "9119"]
 
 volumes:
   avg-postgres:

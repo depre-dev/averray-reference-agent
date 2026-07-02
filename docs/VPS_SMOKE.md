@@ -427,17 +427,14 @@ curl -sS http://127.0.0.1:8790/health
 
 ## Dashboard Access
 
-Hermes dashboard is not exposed publicly. Docker binds it to
-`127.0.0.1:9119` on the VPS, so open the SSH tunnel from your laptop, not from
-inside the VPS shell. The Hermes dashboard command uses `--insecure` because
-Hermes requires it for the container-internal `0.0.0.0` bind; Docker still
-limits host access to VPS loopback.
+The Hermes-native browser dashboard is retired. Hermes v0.18 made
+`dashboard --insecure` a no-op — a non-loopback dashboard bind now refuses to
+start without an auth provider — so the `hermes` service runs `serve` (the
+headless gateway backend) bound to container-loopback only, not exposed.
 
-SSH tunnel:
-
-```bash
-ssh -L 9119:localhost:9119 ubuntu@YOUR_VPS
-```
+Operate the control plane via the slack-operator SPA behind Cloudflare Access
+(`https://monitor.averray.com/monitor/`), not the Hermes UI. The interactive
+brain (Session API) is `hermes-gateway` on `127.0.0.1:8642`.
 
 Then open:
 
