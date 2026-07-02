@@ -147,7 +147,7 @@ function GroundTruthSection({ card }: { card: BoardCard }) {
 
       {flags.length > 0 ? (
         <div className="hm-verdict-block hm-verdict-block--warn" style={{ marginBottom: 10 }}>
-          <div className="head">⚠ Hermes's claim doesn't match the PR</div>
+          <div className="head">⚠ Task text doesn't match PR #{gt.pr}'s real signals — check before approving</div>
           <div className="body">
             <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
               {flags.map((f) => (
@@ -159,7 +159,7 @@ function GroundTruthSection({ card }: { card: BoardCard }) {
       ) : (
         <div className="hm-verdict-block" style={{ marginBottom: 10 }}>
           <div className="body" style={{ color: "var(--hm-sage-deep)" }}>
-            Hermes's claim is consistent with the PR's real signals.
+            No mismatch detected between the task text and the PR's real signals below.
           </div>
         </div>
       )}
