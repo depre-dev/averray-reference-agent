@@ -55,6 +55,8 @@ Dormant-when-idle + wake-without-dropping-in-flight; external drain coordination
 
 The s6 / UID-remap heavy lifting is already done and verified, so this smoke focuses on **(a) the two unblock questions** and **(b) v0.18's breaking-change surface**. Isolated throwaway profile; touches no prod containers/volumes. ~20 min.
 
+> **Turnkey:** [`ops/smoke-hermes-v018.sh`](../ops/smoke-hermes-v018.sh) runs the bring-up + the two unblock tests (#1 delegate round-trip, #4 elicitation) automatically on a **throwaway box** (`OLLAMA_API_KEY=… ./ops/smoke-hermes-v018.sh`; isolated project + gateway on `:8643`; self-tearing-down). It reuses this repo's own compose so the config + model are exactly like prod. **Run it on a spare box/VM/local Docker — NOT the prod VPS** (it stands up a parallel ~6-container stack). The annotated steps below are the manual version + the extra breaking-change checks (§3.4) the script leaves to you.
+
 ### 3.0 Resolve the real digest (never `:latest`/`:main`)
 ```bash
 docker buildx imagetools inspect nousresearch/hermes-agent:v2026.7.1 | grep -i digest | head -1
