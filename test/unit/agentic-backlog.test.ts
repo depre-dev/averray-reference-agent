@@ -1,12 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  boardGroundingText,
   buildAgenticBacklogPrompt,
   collectAgenticBacklog,
   normalizeItem,
   parseWorkItems,
+  ungroundedHighRiskClaim,
   type AgenticBacklogConfig,
   type AgenticBacklogContext,
+  type AgenticBacklogItem,
 } from "../../services/slack-operator/src/agentic-backlog.js";
 
 const CFG = (over: Partial<AgenticBacklogConfig> = {}): AgenticBacklogConfig => ({
@@ -81,6 +84,19 @@ describe("collectAgenticBacklog", () => {
     const dupes = [VALID_ITEM, { ...VALID_ITEM }];
     expect(await collectAgenticBacklog(CFG(), CTX, { chat: chatReturning(JSON.stringify(dupes)) })).toHaveLength(1);
   });
+
+  it("drops an item asserting a high-risk category the board never mentions (source grounding guard)", async () => {
+    // The #717 shape: a fabricated "touches secrets + migrations" claim against a
+    // board (default CTX) whose evidence mentions neither.
+    const fabricated = { ...VALID_ITEM, surface: "contracts audit", prompt: "Decompose PR #717 — 3 files touch secrets, contracts, AND database migrations." };
+    expect(await collectAgenticBacklog(CFG(), CTX, { chat: chatReturning(JSON.stringify([fabricated])) })).toHaveLength(0);
+  });
+
+  it("keeps a high-risk item when the board evidence actually mentions it", async () => {
+    const grounded = { ...VALID_ITEM, surface: "secrets rotation", prompt: "Rotate the committed secrets flagged by the scan." };
+    const ctx: AgenticBacklogContext = { ...CTX, board: { ...CTX.board, headline: "secrets scan flagged a committed .env" } };
+    expect(await collectAgenticBacklog(CFG(), ctx, { chat: chatReturning(JSON.stringify([grounded])) })).toHaveLength(1);
+  });
 });
 
 describe("parseWorkItems", () => {
@@ -112,5 +128,53 @@ describe("buildAgenticBacklogPrompt", () => {
     expect(prompt).toContain("averray-agent/agent");
     expect(prompt).toContain("boardSignal");
     expect(prompt).toMatch(/JSON array/i);
+  });
+
+  it("includes the truth-boundary grounding rules (no menu→claim, no invented specifics)", () => {
+    const prompt = buildAgenticBacklogPrompt(CFG(), CTX);
+    expect(prompt).toMatch(/GROUND every factual claim/);
+    expect(prompt).toMatch(/MENU of what it looks for/);
+    expect(prompt).toMatch(/Never invent PR numbers/);
+  });
+});
+
+describe("ungroundedHighRiskClaim (source truth-boundary guard)", () => {
+  const allowed = new Set(["averray-agent/agent"]);
+  const item = (over: Partial<AgenticBacklogItem>): AgenticBacklogItem => ({
+    ...(normalizeItem(VALID_ITEM, allowed) as AgenticBacklogItem),
+    ...over,
+  });
+
+  it("flags a high-risk category the board never mentions (the #717 fabrication)", () => {
+    const claim = item({ prompt: "Decompose the PR — it touches secrets and database migrations." });
+    expect(ungroundedHighRiskClaim(claim, "deploy verification failed on paseo")).toBe("secrets");
+  });
+
+  it("passes a high-risk claim that IS grounded in the board evidence", () => {
+    const claim = item({ prompt: "Rotate the leaked secrets in the deploy pipeline." });
+    expect(ungroundedHighRiskClaim(claim, "needs-attention: secrets scan flagged a committed .env")).toBeNull();
+  });
+
+  it("ignores items that assert no high-risk category (contracts are NOT in the guard)", () => {
+    const claim = item({ prompt: "Fix the flaky monitor test and the contract selector.", title: "flaky test", description: "" });
+    expect(ungroundedHighRiskClaim(claim, "anything")).toBeNull();
+  });
+
+  it("flags an ungrounded migrations claim too", () => {
+    const claim = item({ prompt: "Write the DB migration for the new column.", title: "migration", description: "" });
+    expect(ungroundedHighRiskClaim(claim, "board with no db work")).toBe("migrations");
+  });
+});
+
+describe("boardGroundingText", () => {
+  it("flattens headline + card fields into one lowercase corpus", () => {
+    const text = boardGroundingText({
+      headline: "One SECRETS scan failed",
+      items: [{ title: "Rotate key", lane: "needs-attention", owner: "codex", why: "committed .env", next: "rotate then redeploy" }],
+    });
+    expect(text).toContain("secrets");
+    expect(text).toContain(".env");
+    expect(text).toContain("rotate then redeploy");
+    expect(text).toBe(text.toLowerCase());
   });
 });
