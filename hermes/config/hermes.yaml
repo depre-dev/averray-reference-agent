@@ -6,6 +6,14 @@ model:
   api_key_env: OLLAMA_API_KEY
   default: glm-5.2:cloud
 
+# Pin v0.18's post-turn background-review fork to our own provider. Left unset
+# it defaults to "auto" and falls through the auxiliary chain to OpenRouter →
+# Nous Portal (no credit) → repeated credit-error log spam. Same model as above.
+auxiliary:
+  background_review:
+    provider: ollama-cloud
+    model: glm-5.2:cloud
+
 mcp_servers:
   averray:
     command: /app/scripts/run-mcp-server.sh
