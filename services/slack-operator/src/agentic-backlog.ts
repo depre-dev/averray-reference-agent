@@ -79,12 +79,19 @@ export async function collectAgenticBacklog(
   if (!turnText) return [];
 
   const allowed = new Set(config.allowedRepos.map((repo) => repo.trim().toLowerCase()));
+  const boardText = boardGroundingText(context.board);
   const items: AgenticBacklogItem[] = [];
   const seen = new Set<string>();
   for (const raw of parseWorkItems(turnText)) {
     if (items.length >= config.maxItems) break;
     const item = normalizeItem(raw, allowed);
     if (!item) continue;
+    // Truth-boundary guard: a proposal that asserts a HIGH-RISK file category
+    // (secrets/.env/migrations) the board evidence never mentions is an
+    // ungrounded claim — drop it rather than surface a fabricated risk to the
+    // operator. The generic-menu → specific-claim case (the #717 near-miss) is
+    // addressed by the prompt's grounding rules + the card-side ground-truth panel.
+    if (ungroundedHighRiskClaim(item, boardText)) continue;
     const key = `${item.repo}::${item.surface ?? ""}`.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -118,6 +125,9 @@ export function buildAgenticBacklogPrompt(config: AgenticBacklogConfig, context:
   lines.push("");
   lines.push("Rules:");
   lines.push("- Propose only REAL gaps grounded in the board (a failed check needing a fix, a stuck draft, missing coverage, a follow-up a card asks for). Do NOT invent work.");
+  lines.push("- GROUND every factual claim in a specific card above — state only what that card's own fields (title/why/verdict/next) actually say about THAT card.");
+  lines.push("- A card's \"why\" may list risk categories as possibilities (a review-gate that checks for secrets, contracts, OR migrations is a MENU of what it looks for — NOT proof the PR touches them). Never restate such a menu as a definite claim: do not say a PR \"touches secrets/migrations/contracts\" or is \"blocked/gated\" unless the cited card states that specifically for that PR.");
+  lines.push("- Never invent PR numbers, file names, diff contents, error text, checks, or metrics that are not in the cited card. If you cannot ground a task's rationale in a specific card above, do not propose it.");
   lines.push("- Skip anything already in flight above. Skip merge/deploy — those stay with the human.");
   lines.push(`- At most ${config.maxItems} items, highest-leverage first. Fewer is fine. If nothing is genuinely needed, return [].`);
   lines.push("- suggestedAgent: 'codex' for chain/settlement/contracts/secrets/DB-migrations/deploy/ops; 'claude' for UI/frontend/monitor/docs/tests/non-financial. (The system enforces the dangerous ones regardless.)");
@@ -202,6 +212,41 @@ export function normalizeItem(raw: unknown, allowedRepos: ReadonlySet<string>): 
     shortDescription: why || title,
     ...(suggestedAgent ? { suggestedAgent } : {}),
   };
+}
+
+// --- grounding guard --------------------------------------------------------
+
+// High-risk file categories whose *false* assertion would most mislead a risk /
+// routing decision — the ones the #717 near-miss fabricated. Kept deliberately
+// tiny (secrets/.env and DB migrations). A proposal that asserts one of these
+// but the board evidence never mentions it is dropped as ungrounded.
+const HIGH_RISK_CLAIM_TOKENS: ReadonlyArray<{ label: string; pattern: RegExp }> = [
+  { label: "secrets", pattern: /\bsecrets?\b|(?:^|[^.\w])\.env\b/i },
+  { label: "migrations", pattern: /\bmigrations?\b/i },
+];
+
+/**
+ * The high-risk category an item's text asserts that the board evidence the
+ * model was shown NEVER mentions — or null when every asserted category is
+ * grounded in the board. Mirrors the existing "must cite a real board signal"
+ * guard: an ungrounded high-risk claim is a fabrication, so the caller drops it.
+ */
+export function ungroundedHighRiskClaim(item: AgenticBacklogItem, boardText: string): string | null {
+  const claim = `${item.prompt} ${item.title} ${item.description ?? ""}`;
+  for (const { label, pattern } of HIGH_RISK_CLAIM_TOKENS) {
+    if (pattern.test(claim) && !pattern.test(boardText)) return label;
+  }
+  return null;
+}
+
+/** The board evidence the model is shown, flattened to one lowercase corpus so a
+ *  proposal's high-risk claims can be checked for grounding against it. */
+export function boardGroundingText(board: HermesBoardSnapshot): string {
+  const parts: string[] = [board.headline ?? ""];
+  for (const card of board.items ?? []) {
+    parts.push(card.title ?? "", card.why ?? "", card.verdict ?? "", card.next ?? "", card.lane ?? "");
+  }
+  return parts.join(" \n ").toLowerCase();
 }
 
 function str(v: unknown): string {
