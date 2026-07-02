@@ -49,21 +49,21 @@ describe("DrawerBody — proposed-task ground-truth verification panel", () => {
       },
       claimFlags: [
         { kind: "claimed_blocked_but_mergeable", detail: "Task says PR #717 is blocked, but it is clean with 0 failed checks." },
-        { kind: "claimed_category_absent", detail: "Task claims 'secrets' + 'migrations', but PR #717's real diff touches: contracts, tests." },
+        { kind: "claimed_category_absent", detail: "Task text mentions 'secrets' + 'migrations', but PR #717's real diff doesn't touch that — real areas: contracts, tests." },
       ],
     });
     const { container } = render(<DrawerBody card={card} variant={drawerVariant(card)} />);
     const text = container.textContent ?? "";
     // The warn header + both flag details are surfaced.
-    expect(text).toMatch(/claim doesn't match the PR/i);
+    expect(text).toMatch(/doesn.t match PR #717.s real signals/i);
     expect(text).toMatch(/is blocked, but it is clean with 0 failed checks/);
-    expect(text).toMatch(/real diff touches: contracts, tests/);
+    expect(text).toMatch(/real areas: contracts, tests/);
     // The real ground-truth signals are shown as fact.
     expect(text).toMatch(/717 · ground truth|717 ground truth/);
     expect(text).toMatch(/5\/5 passed/);
     // The warn tint is applied (not the calm/green "consistent" line).
     expect(container.querySelector(".hm-verdict-block--warn")).toBeTruthy();
-    expect(text).not.toMatch(/consistent with the PR's real signals/);
+    expect(text).not.toMatch(/No mismatch detected/i);
   });
 
   test("verified card WITH NO flags renders the calm 'consistent' line, not a warning", () => {
@@ -81,7 +81,7 @@ describe("DrawerBody — proposed-task ground-truth verification panel", () => {
     });
     const { container } = render(<DrawerBody card={card} variant={drawerVariant(card)} />);
     const text = container.textContent ?? "";
-    expect(text).toMatch(/consistent with the PR's real signals/);
+    expect(text).toMatch(/No mismatch detected/i);
     expect(container.querySelector(".hm-verdict-block--warn")).toBeNull();
   });
 
@@ -99,7 +99,7 @@ describe("DrawerBody — proposed-task ground-truth verification panel", () => {
     expect(text).toMatch(/Couldn't verify PR #717/);
     expect(text).toMatch(/Judge Hermes's claim yourself/);
     // Truth boundary: no agreement, no warn, no ground-truth grid.
-    expect(text).not.toMatch(/consistent with the PR's real signals/);
+    expect(text).not.toMatch(/No mismatch detected/i);
     expect(container.querySelector(".hm-verdict-block--warn")).toBeNull();
     expect(container.querySelector(".h4-eo")).toBeNull();
   });

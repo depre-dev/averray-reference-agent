@@ -1903,7 +1903,7 @@ export function reconcileTaskClaim(
     if (missing.length > 0) {
       flags.push({
         kind: "claimed_category_absent",
-        detail: `Task claims ${missing.map((m) => `'${m}'`).join(" + ")}, but PR #${prNumber}'s real diff touches: ${touchedAreas.join(", ")}.`,
+        detail: `Task text mentions ${missing.map((m) => `'${m}'`).join(" + ")}, but PR #${prNumber}'s real diff doesn't touch that — real areas: ${touchedAreas.join(", ")}.`,
       });
     }
   }
