@@ -78,6 +78,14 @@ export interface HermesBoardCardSnapshot {
   next?: string;
   tags?: ReadonlyArray<string>;
   /**
+   * The PR's REAL diff areas from the enriched github-live review signals
+   * (secrets / contracts / settlement / indexer / tests / docs / …). Distinct
+   * from `tags` (which mixes in test-case ids). Threaded so the agentic router
+   * sees what the PR ACTUALLY touches and can't invent a category the diff
+   * doesn't contain. Absent for non-PR cards or when there's no review signal.
+   */
+  touchedAreas?: ReadonlyArray<string>;
+  /**
    * Stable correlation id for items without PR identity (deploy
    * verifications, missions, tasks). The classifier already keys these
    * by correlationId; forwarding it lets the v2 mapper build a unique

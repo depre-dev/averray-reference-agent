@@ -3,6 +3,61 @@ import { describe, expect, it } from "vitest";
 import { buildHermesBoardSnapshotFromMonitor } from "../../services/slack-operator/src/monitor-hermes-board.js";
 
 describe("buildHermesBoardSnapshotFromMonitor", () => {
+  it("threads the PR's REAL diff areas onto the card — not the generic critical-files menu (Stage 3)", () => {
+    const board = buildHermesBoardSnapshotFromMonitor({
+      generatedAt: "2026-07-02T08:54:42.000Z",
+      status: "attention",
+      counts: { active: 0, running: 0, recent: 1 },
+      recent: [
+        {
+          correlationId: "github-live-pr-averray-agent-agent-717",
+          repo: "averray-agent/agent",
+          pullRequestNumber: 717,
+          status: "completed",
+          reason: "pr_critical_files",
+          updatedAt: "2026-07-02T08:49:42.000Z",
+          summary: {
+            finalVerdict: "needs_review",
+            // The generic critical-files MENU — the phrasing the #717 near-miss fabricated from.
+            reviewReasons: [
+              { code: "pr_critical_files", message: "3 changed file(s) touch secrets, contracts, or database migrations." },
+            ],
+            currentPullRequest: { repo: "averray-agent/agent", number: 717, draft: false, state: "open", title: "rewire outflow breaker" },
+            // The REAL diff areas: only contracts + tests.
+            reviewSignals: { touchedAreas: ["contracts", "tests"] },
+          },
+        },
+      ],
+    });
+    const card = board?.items?.[0];
+    expect(card?.touchedAreas).toEqual(["contracts", "tests"]);
+    expect(card?.touchedAreas).not.toContain("secrets");
+    expect(card?.touchedAreas).not.toContain("migrations");
+  });
+
+  it("omits touchedAreas when the item carries no review signal (honest absence)", () => {
+    const board = buildHermesBoardSnapshotFromMonitor({
+      generatedAt: "2026-07-02T08:54:42.000Z",
+      status: "attention",
+      counts: { active: 0, running: 0, recent: 1 },
+      recent: [
+        {
+          correlationId: "github-live-pr-averray-agent-agent-720",
+          repo: "averray-agent/agent",
+          pullRequestNumber: 720,
+          status: "completed",
+          reason: "pr_is_draft",
+          updatedAt: "2026-07-02T08:49:42.000Z",
+          summary: {
+            finalVerdict: "needs_review",
+            currentPullRequest: { repo: "averray-agent/agent", number: 720, draft: true, state: "open", title: "wip" },
+          },
+        },
+      ],
+    });
+    expect(board?.items?.[0]?.touchedAreas).toBeUndefined();
+  });
+
   it("turns live monitor data into lane/owner context for Hermes", () => {
     const board = buildHermesBoardSnapshotFromMonitor({
       generatedAt: "2026-05-20T08:54:42.000Z",

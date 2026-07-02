@@ -114,3 +114,28 @@ describe("buildAgenticBacklogPrompt", () => {
     expect(prompt).toMatch(/JSON array/i);
   });
 });
+
+describe("buildAgenticBacklogPrompt — Stage 3 diff areas", () => {
+  it("surfaces a card's REAL diff-areas so the model can't invent categories the PR doesn't touch", () => {
+    const ctx: AgenticBacklogContext = {
+      ...CTX,
+      board: {
+        headline: "1 review",
+        items: [
+          {
+            repo: "averray-agent/agent",
+            number: 717,
+            title: "rewire outflow breaker",
+            lane: "Operator Review",
+            owner: "Operator",
+            verdict: "needs review",
+            why: "critical files gate",
+            touchedAreas: ["contracts", "tests"],
+          },
+        ],
+      },
+    };
+    const prompt = buildAgenticBacklogPrompt(CFG(), ctx);
+    expect(prompt).toContain("diff-areas contracts, tests");
+  });
+});
