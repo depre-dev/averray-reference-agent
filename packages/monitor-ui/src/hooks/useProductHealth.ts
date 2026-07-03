@@ -15,6 +15,8 @@ export interface UseProductHealthOptions {
   fetcher?: (url: string) => Promise<ProductHealth>;
   /** When false, the poll is not started (default true). */
   live?: boolean;
+  /** When false, the hook does NO fetching at all (tests / disabled contexts). */
+  enabled?: boolean;
 }
 
 export interface ProductHealthState {
@@ -31,10 +33,10 @@ async function defaultFetcher(url: string): Promise<ProductHealth> {
 }
 
 export function useProductHealth(options: UseProductHealthOptions = {}): ProductHealthState {
-  const { url = DEFAULT_URL, intervalMs = DEFAULT_INTERVAL_MS, fetcher = defaultFetcher, live = true } = options;
+  const { url = DEFAULT_URL, intervalMs = DEFAULT_INTERVAL_MS, fetcher = defaultFetcher, live = true, enabled = true } = options;
   const [health, setHealth] = useState<ProductHealth | undefined>(undefined);
   const [error, setError] = useState<unknown>(undefined);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(enabled);
   const mounted = useRef(true);
 
   const load = useCallback(async () => {
@@ -51,6 +53,7 @@ export function useProductHealth(options: UseProductHealthOptions = {}): Product
   }, [fetcher, url]);
 
   useEffect(() => {
+    if (!enabled) return;
     mounted.current = true;
     void load();
     if (!live) return () => void (mounted.current = false);
@@ -59,7 +62,7 @@ export function useProductHealth(options: UseProductHealthOptions = {}): Product
       mounted.current = false;
       clearInterval(timer);
     };
-  }, [load, live, intervalMs]);
+  }, [load, live, intervalMs, enabled]);
 
   return { health, error, isLoading, refresh: () => void load() };
 }
