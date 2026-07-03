@@ -106,12 +106,26 @@ function trimTrailingSlash(s: string): string {
   return s.replace(/\/+$/, "");
 }
 
+// Public Hub eth-rpc per network — so the monitor watches the SAME chain the
+// product settles on, with zero duplicated config. `WALLET_NETWORK` (the signal
+// the chain services already use) selects it; PRODUCT_HEALTH_RPC_URL overrides.
+// Mainnet is intentionally absent until Codex confirms its endpoint — set
+// PRODUCT_HEALTH_RPC_URL there. Testnet URL verified via docs.polkadot.com.
+const NETWORK_ETH_RPC: Record<string, string> = {
+  testnet: "https://testnet-passet-hub-eth-rpc.polkadot.io/",
+};
+
+/** Resolve the eth-rpc for the product's network (WALLET_NETWORK); testnet default. */
+export function networkEthRpc(walletNetwork: string | undefined): string | undefined {
+  return NETWORK_ETH_RPC[(walletNetwork || "testnet").toLowerCase()];
+}
+
 export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): ProductHealthConfig {
   const base = env.AVERRAY_API_BASE_URL;
   return {
     apiBaseUrl: base ? trimTrailingSlash(base) : undefined,
     apiHealthPath: env.PRODUCT_HEALTH_API_PATH || "/health",
-    rpcUrl: env.PRODUCT_HEALTH_RPC_URL || undefined,
+    rpcUrl: env.PRODUCT_HEALTH_RPC_URL || networkEthRpc(env.WALLET_NETWORK),
     signerAddress: env.PRODUCT_HEALTH_SIGNER_ADDRESS || undefined,
     usdcAddress: env.PRODUCT_HEALTH_USDC_ADDRESS || undefined,
     usdcDecimals: num(env.PRODUCT_HEALTH_USDC_DECIMALS, 6),

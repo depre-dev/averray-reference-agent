@@ -10,6 +10,7 @@ import {
   runProductHealthOnce,
   initialProductHealthAlertState,
   loadProductHealthConfig,
+  networkEthRpc,
   appendHistory,
   probeSparkline,
   type ProbeResult,
@@ -242,19 +243,27 @@ describe("runProductHealthOnce", () => {
   });
 });
 
+const TESTNET_RPC = "https://testnet-passet-hub-eth-rpc.polkadot.io/";
+
 describe("loadProductHealthConfig", () => {
-  it("is degraded-safe by default: API base optional, chain/liquidity unset", () => {
+  it("defaults the RPC to the network endpoint (Option B); signer/USDC resolve elsewhere", () => {
     const c = loadProductHealthConfig({});
     expect(c.apiBaseUrl).toBeUndefined();
-    expect(c.rpcUrl).toBeUndefined();
-    expect(c.signerAddress).toBeUndefined();
+    expect(c.rpcUrl).toBe(TESTNET_RPC); // WALLET_NETWORK absent → testnet
+    expect(c.signerAddress).toBeUndefined(); // derived in the wiring from AGENT_WALLET_PRIVATE_KEY, not here
+    expect(c.usdcAddress).toBeUndefined();
     expect(c.apiHealthPath).toBe("/health");
     expect(c.usdcDecimals).toBe(6);
     expect(c.minGasNative).toBe(0);
     expect(c.minUsdc).toBe(0);
   });
 
-  it("reads env overrides and trims the API base", () => {
+  it("selects the RPC by WALLET_NETWORK, leaving mainnet unset until confirmed", () => {
+    expect(loadProductHealthConfig({ WALLET_NETWORK: "testnet" }).rpcUrl).toBe(TESTNET_RPC);
+    expect(loadProductHealthConfig({ WALLET_NETWORK: "mainnet" }).rpcUrl).toBeUndefined();
+  });
+
+  it("reads env overrides; an explicit RPC wins over the network map", () => {
     const c = loadProductHealthConfig({
       AVERRAY_API_BASE_URL: "https://api.x/",
       PRODUCT_HEALTH_RPC_URL: "http://rpc",
@@ -265,6 +274,16 @@ describe("loadProductHealthConfig", () => {
     expect(c.rpcUrl).toBe("http://rpc");
     expect(c.minUsdc).toBe(5);
     expect(c.minGasNative).toBe(0.1);
+  });
+});
+
+describe("networkEthRpc", () => {
+  it("resolves testnet (default + case-insensitive), leaves mainnet/unknown unset", () => {
+    expect(networkEthRpc(undefined)).toBe(TESTNET_RPC);
+    expect(networkEthRpc("testnet")).toBe(TESTNET_RPC);
+    expect(networkEthRpc("TestNet")).toBe(TESTNET_RPC);
+    expect(networkEthRpc("mainnet")).toBeUndefined();
+    expect(networkEthRpc("weird")).toBeUndefined();
   });
 });
 

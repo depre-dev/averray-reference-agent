@@ -1,6 +1,16 @@
 import { privateKeyToAccount } from "viem/accounts";
 import { optionalEnv, requiredEnv } from "./config.js";
 
+/**
+ * Derive the H160 address for a private key. Read-only — the key never leaves
+ * memory. Lets the product-health monitor watch the agent signer's balance
+ * without maintaining a duplicate address in config.
+ */
+export function addressFromPrivateKey(privateKey: string): string {
+  const pk = (privateKey.startsWith("0x") ? privateKey : `0x${privateKey}`) as `0x${string}`;
+  return privateKeyToAccount(pk).address;
+}
+
 export interface AuthSession {
   wallet: string;
   token: string;
