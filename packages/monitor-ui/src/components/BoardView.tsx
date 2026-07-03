@@ -164,10 +164,13 @@ export interface BoardViewProps {
   autonomyMode?: "supervised" | "autopilot";
   /** Disable the global keyboard handler (tests rendering many boards). */
   keyboard?: boolean;
+  /** When false, skip the product-health poll (tests inject a board fetcher). Default true. */
+  monitoringEnabled?: boolean;
 }
 
 export function BoardView({
   board,
+  monitoringEnabled = true,
   backlogSuggestions,
   status,
   onRefresh,
@@ -231,7 +234,7 @@ export function BoardView({
   const [hermesFocusConversationActive, setHermesFocusConversationActive] = useState(false);
 
   // ── PR2: the right lane switches Delivery ⇆ Monitoring ──────────────
-  const { health: productHealth } = useProductHealth();
+  const { health: productHealth } = useProductHealth({ enabled: monitoringEnabled });
   const [deliveryMode, setDeliveryMode] = useState<LaneMode>(() => {
     try {
       return localStorage.getItem("hm-lane-mode") === "monitoring" ? "monitoring" : "delivery";
