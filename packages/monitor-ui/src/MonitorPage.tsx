@@ -153,6 +153,7 @@ export function MonitorPage({
     <ErrorBoundary>
       <BoardView
         board={board}
+        monitoringEnabled={!options?.fetcher}
         backlogSuggestions={backlogSuggestionsData}
         status={status}
         onRefresh={refresh}
