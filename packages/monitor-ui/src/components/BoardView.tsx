@@ -45,6 +45,10 @@ import { CoPilotRail } from "./hermes/CoPilotRail.js";
 import { KeyboardOverlay } from "./shortcuts/KeyboardOverlay.js";
 import type { UseCollaborationOptions } from "../hooks/useCollaboration.js";
 import { useBoardKeyboard } from "../hooks/useBoardKeyboard.js";
+import { useProductHealth } from "../hooks/useProductHealth.js";
+import { hasFreshRed, type ProductHealth } from "../lib/monitor/product-health.js";
+import { MonitoringLaneToggle, type LaneMode } from "./monitoring/MonitoringLaneToggle.js";
+import { MonitoringSurface } from "./monitoring/MonitoringSurface.js";
 import { Badge, Button } from "./ui.js";
 
 // laneFor() promotes every isAction card into needs-attention, so the
@@ -225,6 +229,32 @@ export function BoardView({
   const [overlayOpen, setOverlayOpen] = useState(false);
   const [askToken, setAskToken] = useState(0);
   const [hermesFocusConversationActive, setHermesFocusConversationActive] = useState(false);
+
+  // ── PR2: the right lane switches Delivery ⇆ Monitoring ──────────────
+  const { health: productHealth } = useProductHealth();
+  const [deliveryMode, setDeliveryMode] = useState<LaneMode>(() => {
+    try {
+      return localStorage.getItem("hm-lane-mode") === "monitoring" ? "monitoring" : "delivery";
+    } catch {
+      return "delivery";
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("hm-lane-mode", deliveryMode);
+    } catch {
+      /* ignore storage errors (private mode) */
+    }
+  }, [deliveryMode]);
+  // Auto-flip to Monitoring on a FRESH red (once per incident): a probe that was
+  // already red doesn't re-trigger, so a manual switch back to Delivery sticks.
+  const prevHealthRef = useRef<ProductHealth | undefined>(undefined);
+  useEffect(() => {
+    if (productHealth && hasFreshRed(prevHealthRef.current, productHealth)) {
+      setDeliveryMode("monitoring");
+    }
+    prevHealthRef.current = productHealth;
+  }, [productHealth]);
   const searchInputRef = useRef<HTMLInputElement>(null);
   // P0-4: every Ask-Hermes trigger must produce immediate visible feedback.
   // We bump askToken (focuses the composer, which scrolls it into view),
@@ -385,6 +415,17 @@ export function BoardView({
   ) => renderPipelineMirror(card, tierFor(lane), inboxIds.has(card.id)), [inboxIds, renderPipelineMirror]);
   const renderLaneBody = (id: LaneId, laneCards: BoardCard[]) => {
     const renderMirror = (card: BoardCard) => renderPipelineCardForLane(id, card);
+    // PR2: the Done lane doubles as the Monitoring lane. In monitoring mode its
+    // body IS the monitoring surface; in delivery mode the release history renders.
+    if (id === "done" && deliveryMode === "monitoring") {
+      return productHealth ? (
+        <MonitoringSurface health={productHealth} />
+      ) : (
+        <div className="hm-mon-empty">
+          <span className="hm-mon-empty-title">Loading health…</span>
+        </div>
+      );
+    }
     // PR-F3: the Deploying lane surfaces the active/current deploy ungrouped, with
     // its verification stepper visible; older near-identical verifications still
     // group behind "N similar" so the dedupe no longer shadows the live deploy.
@@ -410,6 +451,10 @@ export function BoardView({
     if (!hasGroupedCards) return undefined;
     return <GroupedLaneBody items={groupedItems} renderCard={renderMirror} />;
   };
+  const renderLaneHeader = (lane: LaneId): ReactNode =>
+    lane === "done" ? (
+      <MonitoringLaneToggle mode={deliveryMode} onChange={setDeliveryMode} health={productHealth} />
+    ) : null;
 
   const drawerCard = focusedCardId ? orderedCards.find((c) => c.id === focusedCardId) : undefined;
   const boardFocusedCard = boardFocusId ? orderedCards.find((c) => c.id === boardFocusId) : undefined;
@@ -620,6 +665,7 @@ export function BoardView({
             renderCard={renderCard}
             renderPipelineCard={renderPipelineCard}
             renderLaneBody={renderLaneBody}
+            renderLaneHeader={renderLaneHeader}
           />
         </div>
 
