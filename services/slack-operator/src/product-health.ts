@@ -88,6 +88,13 @@ export interface ProductHealthConfig {
   apiBaseUrl?: string;
   apiHealthPath: string;
   rpcUrl?: string;
+  /**
+   * chain_height goes RED if the latest block is older than this many seconds —
+   * a chain halt (blocks frozen) is a real settlement-down condition, not an RPC
+   * hiccup. 0 disables the freshness check (height-only, the pre-halt-detect
+   * behaviour). Env: PRODUCT_HEALTH_CHAIN_MAX_STALE_SECONDS (default 600).
+   */
+  chainMaxStaleSeconds: number;
   signerAddress?: string;
   usdcAddress?: string;
   usdcDecimals: number;
@@ -126,6 +133,7 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
     apiBaseUrl: base ? trimTrailingSlash(base) : undefined,
     apiHealthPath: env.PRODUCT_HEALTH_API_PATH || "/health",
     rpcUrl: env.PRODUCT_HEALTH_RPC_URL || networkEthRpc(env.WALLET_NETWORK),
+    chainMaxStaleSeconds: num(env.PRODUCT_HEALTH_CHAIN_MAX_STALE_SECONDS, 600),
     signerAddress: env.PRODUCT_HEALTH_SIGNER_ADDRESS || undefined,
     usdcAddress: env.PRODUCT_HEALTH_USDC_ADDRESS || undefined,
     usdcDecimals: num(env.PRODUCT_HEALTH_USDC_DECIMALS, 6),
@@ -164,13 +172,13 @@ export async function probeProductApi(input: {
   }
 }
 
-/** Minimal eth JSON-RPC call over the injected fetch. Throws on transport/RPC error. */
-async function ethRpc(
+/** Minimal eth JSON-RPC call; returns the raw `result` (may be a string or object). */
+async function ethRpcRaw(
   rpcUrl: string,
   method: string,
   params: unknown[],
   fetchImpl: typeof fetch,
-): Promise<string> {
+): Promise<unknown> {
   const res = await fetchImpl(rpcUrl, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -179,20 +187,63 @@ async function ethRpc(
   if (!res.ok) throw new Error(`${method} → HTTP ${res.status}`);
   const json = (await res.json()) as { result?: unknown; error?: { message?: string } };
   if (json.error) throw new Error(`${method}: ${json.error.message ?? "rpc error"}`);
-  if (typeof json.result !== "string") throw new Error(`${method}: missing result`);
+  if (json.result === undefined || json.result === null) throw new Error(`${method}: missing result`);
   return json.result;
 }
 
-/** Chain reachable + producing blocks. RPC hiccup → degraded (not a product-down page). */
-export async function probeChainHeight(input: { rpcUrl?: string; fetchImpl: typeof fetch }): Promise<ProbeResult> {
+/** eth JSON-RPC call whose result is a hex string (eth_call, eth_getBalance, …). */
+async function ethRpc(
+  rpcUrl: string,
+  method: string,
+  params: unknown[],
+  fetchImpl: typeof fetch,
+): Promise<string> {
+  const result = await ethRpcRaw(rpcUrl, method, params, fetchImpl);
+  if (typeof result !== "string") throw new Error(`${method}: expected a string result`);
+  return result;
+}
+
+/**
+ * Chain reachable + producing FRESH blocks. Reads the latest block for both its
+ * height and its timestamp: a halted chain (frozen block) still answers RPC, so a
+ * height-only check stays green straight through a settlement-stopping halt. If the
+ * latest block is older than `maxStaleSeconds`, that's RED (real product-down).
+ * An RPC hiccup → degraded (not a product-down page).
+ */
+export async function probeChainHeight(input: {
+  rpcUrl?: string;
+  maxStaleSeconds?: number;
+  fetchImpl: typeof fetch;
+  now?: () => number;
+}): Promise<ProbeResult> {
   if (!input.rpcUrl) {
     return { name: "chain_height", status: "degraded", detail: "PRODUCT_HEALTH_RPC_URL not configured" };
   }
   try {
-    const height = BigInt(await ethRpc(input.rpcUrl, "eth_blockNumber", [], input.fetchImpl));
-    return height > 0n
-      ? { name: "chain_height", status: "ok", detail: `block #${height.toString()}` }
-      : { name: "chain_height", status: "red", detail: "chain reports block 0" };
+    const block = (await ethRpcRaw(input.rpcUrl, "eth_getBlockByNumber", ["latest", false], input.fetchImpl)) as
+      | { number?: string; timestamp?: string }
+      | null;
+    if (!block || typeof block.number !== "string") {
+      return { name: "chain_height", status: "degraded", detail: "chain returned no latest block" };
+    }
+    const height = BigInt(block.number);
+    if (height <= 0n) {
+      return { name: "chain_height", status: "red", detail: "chain reports block 0" };
+    }
+    const maxStale = input.maxStaleSeconds ?? 0;
+    if (maxStale > 0 && typeof block.timestamp === "string") {
+      const nowSec = Math.floor((input.now?.() ?? Date.now()) / 1000);
+      const ageSec = nowSec - Number(BigInt(block.timestamp));
+      if (ageSec > maxStale) {
+        return {
+          name: "chain_height",
+          status: "red",
+          detail: `chain stalled: block #${height.toString()} last advanced ${Math.floor(ageSec / 60)}m ago (> ${Math.floor(maxStale / 60)}m)`,
+        };
+      }
+      return { name: "chain_height", status: "ok", detail: `block #${height.toString()} (${Math.max(0, ageSec)}s ago)` };
+    }
+    return { name: "chain_height", status: "ok", detail: `block #${height.toString()}` };
   } catch (err) {
     return { name: "chain_height", status: "degraded", detail: `RPC unreachable: ${errMsg(err)}` };
   }
@@ -266,7 +317,7 @@ export function buildProductHealthProbes(
 ): Array<() => Promise<ProbeResult>> {
   return [
     () => probeProductApi({ baseUrl: config.apiBaseUrl, healthPath: config.apiHealthPath, fetchImpl }),
-    () => probeChainHeight({ rpcUrl: config.rpcUrl, fetchImpl }),
+    () => probeChainHeight({ rpcUrl: config.rpcUrl, maxStaleSeconds: config.chainMaxStaleSeconds, fetchImpl }),
     () =>
       probeSignerLiquidity({
         rpcUrl: config.rpcUrl,
