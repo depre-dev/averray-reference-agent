@@ -3,7 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFile } from "node:fs/promises";
-import { logger, optionalEnv, query } from "@avg/mcp-common";
+import { addressFromPrivateKey, logger, optionalEnv, query } from "@avg/mcp-common";
 import { createDefaultWorkflowDeps } from "@avg/averray-mcp/default-workflow-runtime";
 import { invokeAgentTask } from "@avg/averray-mcp/agent-invocation";
 import { getHandoffMonitor, recordHandoffEvent } from "@avg/averray-mcp/handoff-events";
@@ -255,6 +255,19 @@ const routineConfig = parseSlackRoutineConfig(process.env, authConfig.allowedCha
 // Resets on restart; a monitoring sparkline doesn't need durability.
 const PRODUCT_HEALTH_HISTORY_MAX = 60;
 let productHealthHistory: ProductHealthSnapshot[] = [];
+
+/** The settlement signer's address, derived from the key the monitor already holds
+ *  (AGENT_WALLET_PRIVATE_KEY) so signer_liquidity needs no duplicated config. A
+ *  missing / all-zero placeholder key → undefined (the probe stays degraded). */
+function deriveProductHealthSigner(): string | undefined {
+  const pk = process.env.AGENT_WALLET_PRIVATE_KEY?.trim();
+  if (!pk || /^0x0+$/i.test(pk)) return undefined;
+  try {
+    return addressFromPrivateKey(pk);
+  } catch {
+    return undefined;
+  }
+}
 const monitorConfig = parseMonitorConfig(process.env);
 const missionSpawnRoles = parseMissionSpawnRoles(process.env);
 // The Vite-built redesigned monitor SPA, served as the default board at
@@ -3390,7 +3403,11 @@ function startOperatorRoutines() {
     if (productHealthRunning || !routineConfig.productHealth.enabled) return;
     productHealthRunning = true;
     try {
-      const probeFns = buildProductHealthProbes(loadProductHealthConfig());
+      const phConfig = loadProductHealthConfig();
+      // Derive the settlement signer from AGENT_WALLET_PRIVATE_KEY (already held) so
+      // signer_liquidity watches the real wallet with zero duplicated config.
+      const signerAddress = phConfig.signerAddress ?? deriveProductHealthSigner();
+      const probeFns = buildProductHealthProbes({ ...phConfig, signerAddress });
       const result = await runProductHealthOnce({
         runProbes: () => Promise.all(probeFns.map((p) => p())),
         alert: (payload) => alertChannel.dispatch(payload),
