@@ -1,0 +1,265 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  evaluateProductHealth,
+  redProbeKey,
+  probeProductApi,
+  probeChainHeight,
+  probeSignerLiquidity,
+  decideProductHealthAlert,
+  runProductHealthOnce,
+  initialProductHealthAlertState,
+  loadProductHealthConfig,
+  type ProbeResult,
+  type ProductHealthAlertState,
+  type ProductHealthDeps,
+} from "../../services/slack-operator/src/product-health.js";
+import type { AlertPayload } from "../../services/slack-operator/src/alert-bridge.js";
+
+// ── mock fetch (typed so the "Typecheck and test" job stays green) ──
+
+interface MockResponse {
+  ok?: boolean;
+  status?: number;
+  result?: string;
+  error?: string;
+}
+type FetchHandler = (url: string, init: RequestInit) => MockResponse;
+
+function mockFetch(handler: FetchHandler): typeof fetch {
+  return (async (url: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const r = handler(String(url), init ?? {});
+    const status = r.status ?? 200;
+    return {
+      ok: r.ok ?? (status >= 200 && status < 300),
+      status,
+      json: async () => (r.error ? { error: { message: r.error } } : { result: r.result }),
+    } as unknown as Response;
+  }) as unknown as typeof fetch;
+}
+
+function throwingFetch(): typeof fetch {
+  return (async () => {
+    throw new Error("network down");
+  }) as unknown as typeof fetch;
+}
+
+function rpcMethod(init: RequestInit): string {
+  try {
+    return (JSON.parse(String(init.body)) as { method?: string }).method ?? "";
+  } catch {
+    return "";
+  }
+}
+
+const probe = (name: string, status: ProbeResult["status"], detail = ""): ProbeResult => ({ name, status, detail });
+
+describe("evaluateProductHealth", () => {
+  it("overall status is the worst probe (red > degraded > ok)", () => {
+    expect(evaluateProductHealth([probe("a", "ok")]).status).toBe("healthy");
+    expect(evaluateProductHealth([probe("a", "ok"), probe("b", "degraded")]).status).toBe("degraded");
+    expect(evaluateProductHealth([probe("a", "degraded"), probe("b", "red")]).status).toBe("red");
+  });
+
+  it("collects the red probes that drive the alert", () => {
+    const e = evaluateProductHealth([probe("a", "red"), probe("b", "ok"), probe("c", "red")]);
+    expect(e.redProbes.map((p) => p.name)).toEqual(["a", "c"]);
+  });
+});
+
+describe("redProbeKey", () => {
+  it("is order-independent", () => {
+    const e1 = evaluateProductHealth([probe("c", "red"), probe("a", "red")]);
+    const e2 = evaluateProductHealth([probe("a", "red"), probe("c", "red")]);
+    expect(redProbeKey(e1)).toBe("a,c");
+    expect(redProbeKey(e1)).toBe(redProbeKey(e2));
+  });
+});
+
+describe("probeProductApi", () => {
+  it("degraded (never fake green) when the base url is unconfigured", async () => {
+    const r = await probeProductApi({ baseUrl: undefined, healthPath: "/health", fetchImpl: mockFetch(() => ({ status: 200 })) });
+    expect(r.status).toBe("degraded");
+  });
+
+  it("ok on a 2xx", async () => {
+    const r = await probeProductApi({ baseUrl: "https://api.x", healthPath: "/health", fetchImpl: mockFetch(() => ({ status: 200 })) });
+    expect(r.status).toBe("ok");
+  });
+
+  it("red on a non-2xx", async () => {
+    const r = await probeProductApi({ baseUrl: "https://api.x", healthPath: "/health", fetchImpl: mockFetch(() => ({ status: 503 })) });
+    expect(r.status).toBe("red");
+  });
+
+  it("red when the endpoint is unreachable", async () => {
+    const r = await probeProductApi({ baseUrl: "https://api.x", healthPath: "/health", fetchImpl: throwingFetch() });
+    expect(r.status).toBe("red");
+  });
+});
+
+describe("probeChainHeight", () => {
+  it("degraded when the RPC url is unconfigured", async () => {
+    const r = await probeChainHeight({ rpcUrl: undefined, fetchImpl: mockFetch(() => ({ result: "0x1" })) });
+    expect(r.status).toBe("degraded");
+  });
+
+  it("ok when the chain reports a positive height", async () => {
+    const r = await probeChainHeight({ rpcUrl: "http://rpc", fetchImpl: mockFetch(() => ({ result: "0x2a" })) });
+    expect(r.status).toBe("ok");
+    expect(r.detail).toContain("42");
+  });
+
+  it("red when the chain reports block 0", async () => {
+    const r = await probeChainHeight({ rpcUrl: "http://rpc", fetchImpl: mockFetch(() => ({ result: "0x0" })) });
+    expect(r.status).toBe("red");
+  });
+
+  it("degraded (not a page) on an RPC hiccup — our dependency, not a product outage", async () => {
+    const r = await probeChainHeight({ rpcUrl: "http://rpc", fetchImpl: mockFetch(() => ({ error: "upstream busy" })) });
+    expect(r.status).toBe("degraded");
+  });
+});
+
+describe("probeSignerLiquidity", () => {
+  const floors = { usdcDecimals: 6, minGasNative: 0.1, minUsdc: 5 };
+  // 1 ETH = 1e18 wei = 0xDE0B6B3A7640000 ; 0.01 ETH = 1e16 = 0x2386F26FC10000
+  // 10 USDC = 10_000_000 = 0x989680 ; 1 USDC = 1_000_000 = 0xF4240
+  const balances = (gasHex: string, usdcHex: string): typeof fetch =>
+    mockFetch((_url, init) => ({ result: rpcMethod(init) === "eth_getBalance" ? gasHex : usdcHex }));
+
+  it("degraded when RPC / signer address are unconfigured", async () => {
+    const r = await probeSignerLiquidity({ rpcUrl: undefined, signerAddress: undefined, usdcAddress: undefined, ...floors, fetchImpl: balances("0x0", "0x0") });
+    expect(r.status).toBe("degraded");
+  });
+
+  it("ok when gas and USDC are both above their floors", async () => {
+    const r = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: "0xabc", usdcAddress: "0xusdc", ...floors, fetchImpl: balances("0xDE0B6B3A7640000", "0x989680") });
+    expect(r.status).toBe("ok");
+    expect(r.detail).toContain("USDC 10.00");
+  });
+
+  it("red when native gas is below the floor", async () => {
+    const r = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: "0xabc", usdcAddress: "0xusdc", ...floors, fetchImpl: balances("0x2386F26FC10000", "0x989680") });
+    expect(r.status).toBe("red");
+    expect(r.detail).toContain("< 0.1");
+  });
+
+  it("red when USDC is below the floor", async () => {
+    const r = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: "0xabc", usdcAddress: "0xusdc", ...floors, fetchImpl: balances("0xDE0B6B3A7640000", "0xF4240") });
+    expect(r.status).toBe("red");
+    expect(r.detail).toContain("< 5");
+  });
+
+  it("degraded when the balance read fails", async () => {
+    const r = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: "0xabc", usdcAddress: "0xusdc", ...floors, fetchImpl: throwingFetch() });
+    expect(r.status).toBe("degraded");
+  });
+});
+
+describe("decideProductHealthAlert (de-dup)", () => {
+  const red = evaluateProductHealth([probe("product_api", "red", "down")]);
+  const healthy = evaluateProductHealth([probe("product_api", "ok")]);
+
+  it("alerts on the rising edge (was clear)", () => {
+    const d = decideProductHealthAlert({ evaluation: red, state: initialProductHealthAlertState(), nowMs: 1000, cooldownMs: 60_000 });
+    expect(d.alert).toBe(true);
+    expect(d.state.lastRedKey).toBe("product_api");
+  });
+
+  it("suppresses an unchanged red set within the cooldown", () => {
+    const state: ProductHealthAlertState = { lastRedKey: "product_api", lastAlertAtMs: 1000 };
+    expect(decideProductHealthAlert({ evaluation: red, state, nowMs: 2000, cooldownMs: 60_000 }).alert).toBe(false);
+  });
+
+  it("re-alerts after the cooldown elapses", () => {
+    const state: ProductHealthAlertState = { lastRedKey: "product_api", lastAlertAtMs: 1000 };
+    expect(decideProductHealthAlert({ evaluation: red, state, nowMs: 1000 + 60_000, cooldownMs: 60_000 }).alert).toBe(true);
+  });
+
+  it("alerts immediately when the red set changes", () => {
+    const red2 = evaluateProductHealth([probe("signer_liquidity", "red", "low")]);
+    const state: ProductHealthAlertState = { lastRedKey: "product_api", lastAlertAtMs: 1000 };
+    expect(decideProductHealthAlert({ evaluation: red2, state, nowMs: 2000, cooldownMs: 60_000 }).alert).toBe(true);
+  });
+
+  it("resets the episode when healthy", () => {
+    const state: ProductHealthAlertState = { lastRedKey: "product_api", lastAlertAtMs: 1000 };
+    const d = decideProductHealthAlert({ evaluation: healthy, state, nowMs: 2000, cooldownMs: 60_000 });
+    expect(d.alert).toBe(false);
+    expect(d.state.lastRedKey).toBe("");
+  });
+});
+
+describe("runProductHealthOnce", () => {
+  function harness(probes: ProbeResult[]): { alerts: AlertPayload[]; deps: ProductHealthDeps } {
+    let state = initialProductHealthAlertState();
+    const alerts: AlertPayload[] = [];
+    return {
+      alerts,
+      deps: {
+        runProbes: async () => probes,
+        alert: async (p) => {
+          alerts.push(p);
+          return true;
+        },
+        boardUrl: "https://board",
+        nowMs: () => 5000,
+        getAlertState: () => state,
+        setAlertState: (s) => {
+          state = s;
+        },
+        cooldownMs: 60_000,
+      },
+    };
+  }
+
+  it("does not alert when healthy", async () => {
+    const h = harness([probe("product_api", "ok")]);
+    const r = await runProductHealthOnce(h.deps);
+    expect(r.status).toBe("healthy");
+    expect(r.alerted).toBe(false);
+    expect(h.alerts).toHaveLength(0);
+  });
+
+  it("does not alert when only degraded (unconfigured probes)", async () => {
+    const h = harness([probe("chain_height", "degraded", "not configured")]);
+    const r = await runProductHealthOnce(h.deps);
+    expect(r.status).toBe("degraded");
+    expect(r.alerted).toBe(false);
+  });
+
+  it("alerts on red and renders the red probe detail", async () => {
+    const h = harness([probe("signer_liquidity", "red", "gas 0.01 < 0.1")]);
+    const r = await runProductHealthOnce(h.deps);
+    expect(r.alerted).toBe(true);
+    expect(h.alerts[0]?.text).toContain("signer_liquidity");
+    expect(h.alerts[0]?.text).toContain("gas 0.01");
+  });
+});
+
+describe("loadProductHealthConfig", () => {
+  it("is degraded-safe by default: API base optional, chain/liquidity unset", () => {
+    const c = loadProductHealthConfig({});
+    expect(c.apiBaseUrl).toBeUndefined();
+    expect(c.rpcUrl).toBeUndefined();
+    expect(c.signerAddress).toBeUndefined();
+    expect(c.apiHealthPath).toBe("/health");
+    expect(c.usdcDecimals).toBe(6);
+    expect(c.minGasNative).toBe(0);
+    expect(c.minUsdc).toBe(0);
+  });
+
+  it("reads env overrides and trims the API base", () => {
+    const c = loadProductHealthConfig({
+      AVERRAY_API_BASE_URL: "https://api.x/",
+      PRODUCT_HEALTH_RPC_URL: "http://rpc",
+      PRODUCT_HEALTH_MIN_USDC: "5",
+      PRODUCT_HEALTH_MIN_GAS_NATIVE: "0.1",
+    });
+    expect(c.apiBaseUrl).toBe("https://api.x");
+    expect(c.rpcUrl).toBe("http://rpc");
+    expect(c.minUsdc).toBe(5);
+    expect(c.minGasNative).toBe(0.1);
+  });
+});

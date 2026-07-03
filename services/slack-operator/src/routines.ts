@@ -77,6 +77,16 @@ export interface SlackRoutineConfig {
     intervalMs: number;
     maxPerTick: number;
   };
+  /**
+   * Product-health heartbeat: probes the LIVE product (API up, chain advancing,
+   * signer solvent) and fires the D4 alert bridge on a RED probe. Off by default;
+   * degraded-safe — unconfigured probes report `degraded`, never a fake green.
+   */
+  productHealth: {
+    enabled: boolean;
+    intervalMs: number;
+    cooldownMs: number;
+  };
 }
 
 export function parseSlackRoutineConfig(
@@ -163,6 +173,12 @@ export function parseSlackRoutineConfig(
       enabled: env.HERMES_FAILURE_ANALYSIS === "1",
       intervalMs: Math.max(60_000, (positiveNumber(env.HERMES_FAILURE_ANALYSIS_INTERVAL_MINUTES) || 5) * 60_000),
       maxPerTick: Math.max(1, positiveNumber(env.HERMES_FAILURE_ANALYSIS_MAX_PER_TICK) || 3),
+    },
+    productHealth: {
+      // Off by default — the operator enables it once the probe config is set.
+      enabled: env.PRODUCT_HEALTH_ENABLED === "1",
+      intervalMs: Math.max(30_000, (positiveNumber(env.PRODUCT_HEALTH_INTERVAL_MINUTES) || 2) * 60_000),
+      cooldownMs: Math.max(0, (positiveNumber(env.PRODUCT_HEALTH_ALERT_COOLDOWN_MINUTES) || 30) * 60_000),
     },
   };
 }

@@ -156,6 +156,12 @@ import {
 import { narrateRouterProposal } from "./monitor-router-narration.js";
 import { runFailureAnalysisOnce } from "./failure-analysis-routine.js";
 import {
+  buildProductHealthProbes,
+  initialProductHealthAlertState,
+  loadProductHealthConfig,
+  runProductHealthOnce,
+} from "./product-health.js";
+import {
   readFreshCardFailureAnalysis,
   writeCardFailureAnalysis,
 } from "./operator-card-failure-analysis.js";
@@ -3086,6 +3092,8 @@ function startOperatorRoutines() {
   let alertBridgeState: AlertBridgeState = initialAlertBridgeState();
   const alertChannel: AlertChannel = slackAlertChannel();
   let anomalyPauseRunning = false;
+  let productHealthRunning = false;
+  let productHealthAlertState = initialProductHealthAlertState();
   let taskHealthRunning = false;
   const anomalyConfig = loadAnomalyConfig();
   const dispatchPerDayCap = Number(process.env.HERMES_DISPATCH_PER_DAY_MAX) || 10;
@@ -3337,6 +3345,41 @@ function startOperatorRoutines() {
       logger.error({ err: error }, "d3_anomaly_autopause_failed");
     } finally {
       anomalyPauseRunning = false;
+    }
+  };
+
+  // Product-health heartbeat — probes the LIVE product (not the dev board): is
+  // the Averray API up, is the chain advancing, is the signer solvent? On a RED
+  // probe it fires the same D4 alert bridge. Degraded-safe: an unconfigured probe
+  // reports `degraded` (no alert) — only a configured, failing probe pages.
+  const checkProductHealth = async () => {
+    if (productHealthRunning || !routineConfig.productHealth.enabled) return;
+    productHealthRunning = true;
+    try {
+      const probeFns = buildProductHealthProbes(loadProductHealthConfig());
+      const result = await runProductHealthOnce({
+        runProbes: () => Promise.all(probeFns.map((p) => p())),
+        alert: (payload) => alertChannel.dispatch(payload),
+        boardUrl:
+          optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor") ??
+          "https://monitor.averray.com/monitor",
+        nowMs: () => Date.now(),
+        getAlertState: () => productHealthAlertState,
+        setAlertState: (s) => {
+          productHealthAlertState = s;
+        },
+        cooldownMs: routineConfig.productHealth.cooldownMs,
+      });
+      if (result.status !== "healthy") {
+        logger.warn(
+          { status: result.status, alerted: result.alerted, probes: result.evaluation.probes },
+          "product_health_probe",
+        );
+      }
+    } catch (error) {
+      logger.error({ err: error }, "product_health_probe_failed");
+    } finally {
+      productHealthRunning = false;
     }
   };
 
@@ -3660,6 +3703,10 @@ function startOperatorRoutines() {
   if (routineConfig.anomalyPause.enabled) {
     setTimeout(() => void checkAnomalies(), 11_000);
     setInterval(() => void checkAnomalies(), routineConfig.anomalyPause.intervalMs);
+  }
+  if (routineConfig.productHealth.enabled) {
+    setTimeout(() => void checkProductHealth(), 14_000);
+    setInterval(() => void checkProductHealth(), routineConfig.productHealth.intervalMs);
   }
   if (routineConfig.taskHealth.enabled) {
     setTimeout(() => void checkTaskHealth(), 12_000);
