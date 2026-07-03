@@ -49,6 +49,39 @@ export function redProbeKey(evaluation: ProductHealthEvaluation): string {
   return evaluation.redProbes.map((p) => p.name).sort().join(",");
 }
 
+// ── Rolling history (feeds the board's per-probe uptime sparkline) ──
+
+export interface ProductHealthSnapshot {
+  /** Epoch ms of the check. */
+  at: number;
+  status: ProductHealthStatus;
+  probes: ProbeResult[];
+}
+
+/** Append a snapshot to a bounded rolling history (oldest→newest). Pure. */
+export function appendHistory(
+  history: ReadonlyArray<ProductHealthSnapshot>,
+  snapshot: ProductHealthSnapshot,
+  maxLen: number,
+): ProductHealthSnapshot[] {
+  const next = [...history, snapshot];
+  return maxLen > 0 && next.length > maxLen ? next.slice(next.length - maxLen) : next;
+}
+
+/** The last `bins` statuses for one probe (oldest→newest), for a sparkline. Pure. */
+export function probeSparkline(
+  history: ReadonlyArray<ProductHealthSnapshot>,
+  probeName: string,
+  bins: number,
+): ProbeStatus[] {
+  const series: ProbeStatus[] = [];
+  for (const snap of history) {
+    const hit = snap.probes.find((p) => p.name === probeName);
+    if (hit) series.push(hit.status);
+  }
+  return bins > 0 && series.length > bins ? series.slice(series.length - bins) : series;
+}
+
 // ── Config (env-driven; chain/liquidity stay degraded until their keys are set) ──
 
 export interface ProductHealthConfig {

@@ -10,9 +10,13 @@ import {
   runProductHealthOnce,
   initialProductHealthAlertState,
   loadProductHealthConfig,
+  appendHistory,
+  probeSparkline,
   type ProbeResult,
   type ProductHealthAlertState,
   type ProductHealthDeps,
+  type ProductHealthSnapshot,
+  type ProductHealthStatus,
 } from "../../services/slack-operator/src/product-health.js";
 import type { AlertPayload } from "../../services/slack-operator/src/alert-bridge.js";
 
@@ -261,5 +265,50 @@ describe("loadProductHealthConfig", () => {
     expect(c.rpcUrl).toBe("http://rpc");
     expect(c.minUsdc).toBe(5);
     expect(c.minGasNative).toBe(0.1);
+  });
+});
+
+describe("appendHistory", () => {
+  const snap = (at: number, status: ProductHealthStatus): ProductHealthSnapshot => ({
+    at,
+    status,
+    probes: [probe("product_api", status === "healthy" ? "ok" : status === "red" ? "red" : "degraded")],
+  });
+
+  it("appends newest-last", () => {
+    const h = appendHistory([snap(1, "healthy")], snap(2, "red"), 10);
+    expect(h.map((s) => s.at)).toEqual([1, 2]);
+  });
+
+  it("bounds to maxLen, dropping the oldest", () => {
+    let h: ProductHealthSnapshot[] = [];
+    for (let i = 1; i <= 5; i++) h = appendHistory(h, snap(i, "healthy"), 3);
+    expect(h.map((s) => s.at)).toEqual([3, 4, 5]);
+  });
+
+  it("maxLen <= 0 keeps everything (unbounded)", () => {
+    expect(appendHistory([snap(1, "healthy")], snap(2, "healthy"), 0)).toHaveLength(2);
+  });
+});
+
+describe("probeSparkline", () => {
+  const history: ProductHealthSnapshot[] = [
+    { at: 1, status: "healthy", probes: [probe("api", "ok")] },
+    { at: 2, status: "red", probes: [probe("api", "red")] },
+    { at: 3, status: "degraded", probes: [probe("api", "degraded")] },
+  ];
+
+  it("returns the last N statuses, oldest to newest", () => {
+    expect(probeSparkline(history, "api", 10)).toEqual(["ok", "red", "degraded"]);
+    expect(probeSparkline(history, "api", 2)).toEqual(["red", "degraded"]);
+  });
+
+  it("skips checks where the probe is absent", () => {
+    const h: ProductHealthSnapshot[] = [...history, { at: 4, status: "healthy", probes: [probe("other", "ok")] }];
+    expect(probeSparkline(h, "api", 10)).toEqual(["ok", "red", "degraded"]);
+  });
+
+  it("returns empty for an unknown probe", () => {
+    expect(probeSparkline(history, "nope", 10)).toEqual([]);
   });
 });

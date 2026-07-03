@@ -3938,3 +3938,93 @@ button.hm-turn-pin {
   align-items: center;
   gap: 6px;
 }
+
+/* ── Product-health Monitoring lane (PR2) ─────────────────────────── */
+
+/* Delivery ⇆ Monitoring toggle in the Done lane head */
+.hm-lane-switch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--hm-paper-3);
+  border: 1px solid var(--hm-line);
+  border-radius: 999px;
+}
+.hm-lane-switch-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--hm-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  padding: 4px 11px;
+  cursor: pointer;
+}
+.hm-lane-switch-opt:hover { color: var(--hm-ink); }
+.hm-lane-switch-opt.is-on { color: var(--hm-paper); background: var(--hm-ink); }
+
+/* Status dot + pill (shared) */
+.hm-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; }
+.hm-dot--pass { background: var(--hm-state-pass); }
+.hm-dot--degraded { background: var(--hm-state-degraded); }
+.hm-dot--fail { background: var(--hm-state-fail); }
+.hm-dot--muted { background: var(--hm-muted-soft); }
+.hm-pill { font-size: 10.5px; font-weight: 500; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.hm-pill--pass { background: var(--hm-state-pass-bg); color: var(--hm-state-pass); }
+.hm-pill--degraded { background: var(--hm-state-degraded-bg); color: var(--hm-state-degraded); }
+.hm-pill--fail { background: var(--hm-state-fail-bg); color: var(--hm-state-fail); }
+.hm-pill--muted { background: var(--hm-paper-3); color: var(--hm-muted); }
+
+/* Monitoring surface — extensible section stack that fills the switched lane */
+.hm-mon-surface { display: flex; flex-direction: column; gap: 12px; }
+.hm-mon-section { display: flex; flex-direction: column; gap: 9px; }
+.hm-mon-section-head { display: flex; align-items: center; justify-content: space-between; }
+.hm-mon-section-title { font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--hm-muted-soft); }
+.hm-mon-probes { display: flex; flex-direction: column; gap: 9px; }
+
+/* One probe card */
+.hm-probe { background: var(--hm-paper-2); border: 1px solid var(--hm-line); border-radius: 11px; padding: 11px 12px; }
+.hm-probe--fail { border-color: var(--hm-state-fail); background: var(--hm-state-fail-bg); }
+.hm-probe-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.hm-probe-name { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--hm-ink-soft); }
+.hm-probe--fail .hm-probe-name { color: var(--hm-ink); font-weight: 500; }
+.hm-probe-detail {
+  font-size: 11.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--hm-muted);
+  margin-top: 7px;
+  overflow-wrap: anywhere;
+}
+.hm-probe--fail .hm-probe-detail { color: var(--hm-state-fail); }
+
+/* Uptime sparkline */
+.hm-spark { display: flex; gap: 2px; align-items: flex-end; }
+.hm-spark-cell { flex: 1 1 0; min-width: 3px; height: 16px; border-radius: 1.5px; opacity: 0.9; }
+.hm-spark-cell--pass { background: var(--hm-state-pass); }
+.hm-spark-cell--degraded { background: var(--hm-state-degraded); }
+.hm-spark-cell--fail { background: var(--hm-state-fail); }
+.hm-spark-cell--empty { background: var(--hm-line); opacity: 0.5; }
+
+/* Empty / off states + honest headroom */
+.hm-mon-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 12px;
+  text-align: center;
+  border: 1px dashed var(--hm-line);
+  border-radius: 11px;
+}
+.hm-mon-empty-title { font-size: 13px; color: var(--hm-ink-soft); }
+.hm-mon-empty-detail { font-size: 11.5px; color: var(--hm-muted); }
+.hm-mon-headroom {
+  font-size: 11px;
+  color: var(--hm-muted-soft);
+  text-align: center;
+  padding: 10px 8px;
+  border-top: 1px solid var(--hm-line);
+  margin: 0;
+}

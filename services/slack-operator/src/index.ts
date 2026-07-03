@@ -156,10 +156,13 @@ import {
 import { narrateRouterProposal } from "./monitor-router-narration.js";
 import { runFailureAnalysisOnce } from "./failure-analysis-routine.js";
 import {
+  appendHistory,
   buildProductHealthProbes,
   initialProductHealthAlertState,
   loadProductHealthConfig,
+  probeSparkline,
   runProductHealthOnce,
+  type ProductHealthSnapshot,
 } from "./product-health.js";
 import {
   readFreshCardFailureAnalysis,
@@ -248,6 +251,10 @@ const authConfig = {
   allowedUserIds: parseCsvSet(optionalEnv("SLACK_ALLOWED_USER_IDS")),
 };
 const routineConfig = parseSlackRoutineConfig(process.env, authConfig.allowedChannelIds);
+// Product-health heartbeat — in-memory rolling history (feeds /monitor/product-health).
+// Resets on restart; a monitoring sparkline doesn't need durability.
+const PRODUCT_HEALTH_HISTORY_MAX = 60;
+let productHealthHistory: ProductHealthSnapshot[] = [];
 const monitorConfig = parseMonitorConfig(process.env);
 const missionSpawnRoles = parseMissionSpawnRoles(process.env);
 // The Vite-built redesigned monitor SPA, served as the default board at
@@ -661,6 +668,33 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       return;
     }
     writeJson(response, 200, await loadCodexTaskQueueSummary());
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/monitor/product-health") {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    const last = productHealthHistory[productHealthHistory.length - 1];
+    writeJson(response, 200, {
+      // `enabled:false` is the honest "monitoring is off" signal — distinct from
+      // "enabled but no checks yet" (checks:0). The UI must not imply health data
+      // exists when the routine isn't running.
+      enabled: routineConfig.productHealth.enabled,
+      at: last?.at ?? null,
+      status: last?.status ?? "unknown",
+      checks: productHealthHistory.length,
+      probes: (last?.probes ?? []).map((p) => ({
+        name: p.name,
+        status: p.status,
+        detail: p.detail,
+        sparkline: probeSparkline(productHealthHistory, p.name, 30),
+      })),
+    });
     return;
   }
   if (request.method === "GET" && url.pathname === "/monitor/decision-records") {
@@ -3370,6 +3404,11 @@ function startOperatorRoutines() {
         },
         cooldownMs: routineConfig.productHealth.cooldownMs,
       });
+      productHealthHistory = appendHistory(
+        productHealthHistory,
+        { at: Date.now(), status: result.status, probes: result.evaluation.probes },
+        PRODUCT_HEALTH_HISTORY_MAX,
+      );
       if (result.status !== "healthy") {
         logger.warn(
           { status: result.status, alerted: result.alerted, probes: result.evaluation.probes },
