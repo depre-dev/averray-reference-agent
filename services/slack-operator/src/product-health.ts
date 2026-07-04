@@ -132,6 +132,12 @@ export interface ProductHealthConfig {
   /** Settlement counts older than this (minutes) ⇒ degraded (stale record). Env
    *  PRODUCT_HEALTH_SETTLEMENT_MAX_STALE_MINUTES. */
   settlementMaxStaleMinutes: number;
+  /** Treasury/pool USDC floors (whole tokens) → red when a pool drops below. 0 =
+   *  show the balance without paging. Env PRODUCT_HEALTH_MIN_REWARD_BANK /
+   *  PRODUCT_HEALTH_MIN_TREASURY_RESERVE / PRODUCT_HEALTH_MIN_AAC. */
+  minRewardBank: number;
+  minTreasuryReserve: number;
+  minAac: number;
 }
 
 function num(value: unknown, fallback: number): number {
@@ -192,6 +198,9 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
     maxStuck: num(env.PRODUCT_HEALTH_MAX_STUCK, 5),
     maxFailed24h: num(env.PRODUCT_HEALTH_MAX_FAILED_24H, 3),
     settlementMaxStaleMinutes: num(env.PRODUCT_HEALTH_SETTLEMENT_MAX_STALE_MINUTES, 15),
+    minRewardBank: num(env.PRODUCT_HEALTH_MIN_REWARD_BANK, 0),
+    minTreasuryReserve: num(env.PRODUCT_HEALTH_MIN_TREASURY_RESERVE, 5),
+    minAac: num(env.PRODUCT_HEALTH_MIN_AAC, 0),
   };
 }
 
@@ -220,6 +229,22 @@ export interface ProductHealthPayload {
     settled24h?: number;
     stuck?: number;
     failed24h?: number;
+    asOf?: string;
+  };
+  /** Contract addresses echoed from deployments/testnet.json (locked contract) so the
+   *  monitor's balanceOf reads auto-follow a chain retarget. */
+  addresses?: {
+    token?: string;
+    agentAccountCore?: string;
+    escrowCore?: string;
+    settlementSigner?: string;
+    treasuryReserve?: string;
+  };
+  /** Reward bank = AgentAccountCore.positions(signer,USDC).liquid, computed by the
+   *  product (so the monitor needs no positions() ABI). */
+  rewardBank?: {
+    liquid?: number | null;
+    decimals?: number;
     asOf?: string;
   };
 }
@@ -567,6 +592,58 @@ export async function probeSignerLiquidity(input: {
   }
 }
 
+/** Treasury / reward-pool headroom: USDC balanceOf(AAC / escrow / reserve) via direct
+ *  RPC + the reward bank (rewardBank.liquid the product computes on /health). Floors
+ *  page (red); escrow is informational (in-flight, fluctuates). Addresses absent (the
+ *  product hasn't shipped them) or a read fails → degraded (never a page for our hiccup). */
+export async function probeTreasuryLiquidity(input: {
+  addresses?: { token?: string; agentAccountCore?: string; escrowCore?: string; treasuryReserve?: string };
+  rewardBankLiquid?: number;
+  usdcDecimals: number;
+  minRewardBank: number;
+  minTreasuryReserve: number;
+  minAac: number;
+  rpcUrl?: string;
+  fetchImpl: typeof fetch;
+}): Promise<ProbeResult> {
+  const name = "treasury_liquidity";
+  const a = input.addresses;
+  if (!a || !a.token) return { name, status: "degraded", detail: "treasury addresses not exposed by /health yet" };
+  if (!input.rpcUrl) return { name, status: "degraded", detail: "PRODUCT_HEALTH_RPC_URL not configured" };
+  try {
+    const usdcOf = async (addr?: string): Promise<number | undefined> => {
+      if (!addr) return undefined;
+      const raw = await ethRpc(input.rpcUrl!, "eth_call", [{ to: a.token, data: encodeBalanceOf(addr) }, "latest"], input.fetchImpl);
+      return Number(BigInt(raw || "0x0")) / 10 ** input.usdcDecimals;
+    };
+    const [aac, escrow, reserve] = await Promise.all([
+      usdcOf(a.agentAccountCore),
+      usdcOf(a.escrowCore),
+      usdcOf(a.treasuryReserve),
+    ]);
+    const parts: string[] = [];
+    let red = false;
+    const withFloor = (label: string, val: number | undefined, floor: number): void => {
+      if (val === undefined) return;
+      const s = `${label} ${val.toFixed(2)}`;
+      if (floor > 0 && val < floor) {
+        red = true;
+        parts.push(`${s} < ${floor}`);
+      } else {
+        parts.push(s);
+      }
+    };
+    withFloor("reward", input.rewardBankLiquid, input.minRewardBank);
+    withFloor("reserve", reserve, input.minTreasuryReserve);
+    withFloor("AAC", aac, input.minAac);
+    if (escrow !== undefined) parts.push(`escrow ${escrow.toFixed(2)}`); // in-flight — informational, no floor
+    if (parts.length === 0) return { name, status: "degraded", detail: "no treasury balances readable" };
+    return { name, status: red ? "red" : "ok", detail: parts.join(", ") };
+  } catch (err) {
+    return { name, status: "degraded", detail: `treasury read failed: ${errMsg(err)}` };
+  }
+}
+
 // ── Collector: one /health fetch (api + chain) + the direct-RPC balance probe ──
 
 export interface ProductHealthCollection {
@@ -635,6 +712,16 @@ export async function collectProductHealthProbes(
     minUsdc: config.minUsdc,
     fetchImpl,
   });
+  const treasury = await probeTreasuryLiquidity({
+    addresses: h.body?.addresses,
+    rewardBankLiquid: pickNum(h.body?.rewardBank?.liquid),
+    usdcDecimals: config.usdcDecimals,
+    minRewardBank: config.minRewardBank,
+    minTreasuryReserve: config.minTreasuryReserve,
+    minAac: config.minAac,
+    rpcUrl: config.rpcUrl,
+    fetchImpl,
+  });
   return {
     probes: [
       deriveProductApiProbe(h),
@@ -651,6 +738,7 @@ export async function collectProductHealthProbes(
         maxStaleMinutes: config.settlementMaxStaleMinutes,
         nowMs: chainCtx.nowMs,
       }),
+      treasury,
     ],
     chainAdvance,
   };

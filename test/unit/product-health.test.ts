@@ -9,6 +9,7 @@ import {
   deriveCapabilityProbe,
   deriveLatencyProbe,
   deriveMoneyPathProbe,
+  probeTreasuryLiquidity,
   trackChainAdvance,
   chainHaltStatus,
   probeSignerLiquidity,
@@ -103,6 +104,8 @@ const HEALTHY_BODY: ProductHealthPayload = {
     blockchain: { ok: true, enabled: true, blockNumber: 10612201, signerConfigured: true },
   },
   settlement: { settled24h: 42, stuck: 0, failed24h: 0, asOf: "2026-07-04T00:00:00Z" },
+  addresses: { token: "0xusdc", agentAccountCore: "0xaac", escrowCore: "0xescrow", settlementSigner: "0xsigner", treasuryReserve: "0xreserve" },
+  rewardBank: { liquid: 100, decimals: 6, asOf: "2026-07-04T00:00:00Z" },
 };
 
 const fetched = (body: ProductHealthPayload, over: Partial<ProductHealthFetch> = {}): ProductHealthFetch => ({
@@ -135,6 +138,9 @@ const cfg = (over: Partial<ProductHealthConfig> = {}): ProductHealthConfig => ({
   maxStuck: 5,
   maxFailed24h: 3,
   settlementMaxStaleMinutes: 15,
+  minRewardBank: 0,
+  minTreasuryReserve: 5,
+  minAac: 0,
   ...over,
 });
 
@@ -415,6 +421,40 @@ describe("probeSignerLiquidity (direct RPC)", () => {
 const CHAIN_ID_HEX = "0x" + (420420417).toString(16); // matches HEALTHY_BODY auth.chainId
 const tsHex = (nowMs: number, secAgo: number): string => "0x" + BigInt(Math.floor(nowMs / 1000) - secAgo).toString(16);
 
+describe("probeTreasuryLiquidity (direct RPC + /health rewardBank)", () => {
+  const addresses = { token: "0xusdc", agentAccountCore: "0xaac", escrowCore: "0xescrow", treasuryReserve: "0xreserve" };
+  const base = { addresses, usdcDecimals: 6, minRewardBank: 0, minTreasuryReserve: 5, minAac: 0, rpcUrl: "http://rpc" };
+  // 10 USDC = 0x989680 ; 1 USDC = 0xF4240
+
+  it("degraded when addresses or RPC are absent (forward-compat)", async () => {
+    expect((await probeTreasuryLiquidity({ ...base, addresses: undefined, fetchImpl: balances("0x0", "0x989680") })).status).toBe("degraded");
+    expect((await probeTreasuryLiquidity({ ...base, rpcUrl: undefined, fetchImpl: balances("0x0", "0x989680") })).status).toBe("degraded");
+  });
+
+  it("ok when pools are above floors; escrow shown as informational", async () => {
+    const r = await probeTreasuryLiquidity({ ...base, rewardBankLiquid: 100, fetchImpl: balances("0x0", "0x989680") });
+    expect(r.status).toBe("ok");
+    expect(r.detail).toContain("reward 100.00");
+    expect(r.detail).toContain("escrow 10.00");
+  });
+
+  it("red when the treasury reserve is below its floor", async () => {
+    const r = await probeTreasuryLiquidity({ ...base, minTreasuryReserve: 50, rewardBankLiquid: 100, fetchImpl: balances("0x0", "0x989680") });
+    expect(r.status).toBe("red");
+    expect(r.detail).toContain("reserve 10.00 < 50");
+  });
+
+  it("red when the reward bank is below its floor", async () => {
+    const r = await probeTreasuryLiquidity({ ...base, minRewardBank: 50, rewardBankLiquid: 10, fetchImpl: balances("0x0", "0x989680") });
+    expect(r.status).toBe("red");
+    expect(r.detail).toContain("reward 10.00 < 50");
+  });
+
+  it("degraded when a balance read fails", async () => {
+    expect((await probeTreasuryLiquidity({ ...base, rewardBankLiquid: 100, fetchImpl: throwingFetch() })).status).toBe("degraded");
+  });
+});
+
 describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", () => {
   it("healthy: api ok (/health), chain ok (absolute block age), signer ok (direct RPC)", async () => {
     const { probes } = await collectProductHealthProbes(
@@ -422,14 +462,14 @@ describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", ()
       combinedFetch({ healthBody: HEALTHY_BODY, chainIdHex: CHAIN_ID_HEX, blockTimestampHex: tsHex(10_000_000, 12), gasHex: "0xDE0B6B3A7640000", usdcHex: "0x989680" }),
       { nowMs: 10_000_000 },
     );
-    expect(probes.map((p) => p.name)).toEqual(["product_api", "chain_height", "signer_liquidity", "capabilities", "api_latency", "money_path"]);
-    expect(probes.map((p) => p.status)).toEqual(["ok", "ok", "ok", "ok", "ok", "ok"]);
+    expect(probes.map((p) => p.name)).toEqual(["product_api", "chain_height", "signer_liquidity", "capabilities", "api_latency", "money_path", "treasury_liquidity"]);
+    expect(probes.map((p) => p.status)).toEqual(["ok", "ok", "ok", "ok", "ok", "ok", "ok"]);
     expect(probes[2]?.detail).toContain("USDC 10.00");
   });
 
   it("all degraded when nothing is configured (never fake green)", async () => {
     const { probes } = await collectProductHealthProbes(cfg({ apiBaseUrl: undefined, rpcUrl: undefined }), combinedFetch({ healthBody: HEALTHY_BODY }), { nowMs: 1000 });
-    expect(probes.map((p) => p.status)).toEqual(["degraded", "degraded", "degraded", "degraded", "degraded", "degraded"]);
+    expect(probes.map((p) => p.status)).toEqual(["degraded", "degraded", "degraded", "degraded", "degraded", "degraded", "degraded"]);
   });
 
   it("absolute age: a stale block halts IMMEDIATELY on a fresh start — no blind window (testnet → degraded)", async () => {
@@ -600,6 +640,9 @@ describe("loadProductHealthConfig", () => {
     expect(c.maxStuck).toBe(5);
     expect(c.maxFailed24h).toBe(3);
     expect(c.settlementMaxStaleMinutes).toBe(15);
+    expect(c.minTreasuryReserve).toBe(5);
+    expect(c.minRewardBank).toBe(0);
+    expect(c.minAac).toBe(0);
   });
 
   it("reads env overrides", () => {
