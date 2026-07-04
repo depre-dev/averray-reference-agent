@@ -10,6 +10,7 @@ import {
   chainHaltStatus,
   probeSignerLiquidity,
   collectProductHealthProbes,
+  chainBlockAge,
   decideProductHealthAlert,
   runProductHealthOnce,
   initialProductHealthAlertState,
@@ -38,12 +39,14 @@ function rpcMethod(init: RequestInit): string {
   }
 }
 
-/** GET /health returns `healthBody`; eth-RPC POSTs return the gas/usdc hex. */
+/** GET /health → healthBody; eth-RPC POSTs → chainId / latest-block / gas / usdc per method. */
 function combinedFetch(cfg: {
   healthBody?: unknown;
   healthStatus?: number;
   gasHex?: string;
   usdcHex?: string;
+  chainIdHex?: string;
+  blockTimestampHex?: string;
 }): typeof fetch {
   return (async (_url: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const method = init?.method ?? "GET";
@@ -51,7 +54,15 @@ function combinedFetch(cfg: {
       const status = cfg.healthStatus ?? 200;
       return { ok: status >= 200 && status < 300, status, json: async () => cfg.healthBody ?? {} } as unknown as Response;
     }
-    const result = rpcMethod(init ?? {}) === "eth_getBalance" ? cfg.gasHex : cfg.usdcHex;
+    const m = rpcMethod(init ?? {});
+    const result =
+      m === "eth_chainId"
+        ? cfg.chainIdHex
+        : m === "eth_getBlockByNumber"
+          ? { number: "0xa1e2c9", timestamp: cfg.blockTimestampHex }
+          : m === "eth_getBalance"
+            ? cfg.gasHex
+            : cfg.usdcHex;
     return { ok: true, status: 200, json: async () => ({ result }) } as unknown as Response;
   }) as unknown as typeof fetch;
 }
@@ -203,15 +214,25 @@ describe("deriveChainProbe (/health-derived)", () => {
     expect(deriveChainProbe(fetched({ ...HEALTHY_BODY, components: { blockchain: { ok: true, blockNumber: 0 } } })).status).toBe("red");
   });
 
-  it("halt severity is caller-supplied: degraded on a testnet freeze, red on a mainnet halt", () => {
-    const stale = (haltStatus: "red" | "degraded") => deriveChainProbe(fetched(HEALTHY_BODY), { staticForMs: 900_000, stalenessMs: 600_000, haltStatus });
+  it("tracker fallback: static past the window halts (severity caller-supplied)", () => {
+    const stale = (haltStatus: "red" | "degraded") => deriveChainProbe(fetched(HEALTHY_BODY), { staticForMs: 900_000, maxStaleSeconds: 600, haltStatus });
     expect(stale("degraded").status).toBe("degraded");
-    expect(stale("degraded").detail).toContain("not advancing");
+    expect(stale("degraded").detail).toContain("static for");
     expect(stale("red").status).toBe("red");
   });
 
-  it("ok when the block is fresh (static, but within the window)", () => {
-    expect(deriveChainProbe(fetched(HEALTHY_BODY), { staticForMs: 30_000, stalenessMs: 600_000, haltStatus: "red" }).status).toBe("ok");
+  it("absolute block age fires immediately — no blind window (staticForMs = 0)", () => {
+    const r = deriveChainProbe(fetched(HEALTHY_BODY), { staticForMs: 0, maxStaleSeconds: 600, haltStatus: "degraded", blockAgeSec: 3600 });
+    expect(r.status).toBe("degraded");
+    expect(r.detail).toContain("old");
+  });
+
+  it("a fresh absolute age wins over a stale tracker → ok", () => {
+    expect(deriveChainProbe(fetched(HEALTHY_BODY), { staticForMs: 900_000, maxStaleSeconds: 600, haltStatus: "red", blockAgeSec: 12 }).status).toBe("ok");
+  });
+
+  it("ok when static but within the window (no absolute age available)", () => {
+    expect(deriveChainProbe(fetched(HEALTHY_BODY), { staticForMs: 30_000, maxStaleSeconds: 600, haltStatus: "red" }).status).toBe("ok");
   });
 });
 
@@ -280,9 +301,16 @@ describe("probeSignerLiquidity (direct RPC)", () => {
   });
 });
 
+const CHAIN_ID_HEX = "0x" + (420420417).toString(16); // matches HEALTHY_BODY auth.chainId
+const tsHex = (nowMs: number, secAgo: number): string => "0x" + BigInt(Math.floor(nowMs / 1000) - secAgo).toString(16);
+
 describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", () => {
-  it("healthy: api ok (/health), chain ok (/health), signer ok (direct RPC)", async () => {
-    const { probes } = await collectProductHealthProbes(cfg(), combinedFetch({ healthBody: HEALTHY_BODY, gasHex: "0xDE0B6B3A7640000", usdcHex: "0x989680" }), { nowMs: 1000 });
+  it("healthy: api ok (/health), chain ok (absolute block age), signer ok (direct RPC)", async () => {
+    const { probes } = await collectProductHealthProbes(
+      cfg(),
+      combinedFetch({ healthBody: HEALTHY_BODY, chainIdHex: CHAIN_ID_HEX, blockTimestampHex: tsHex(10_000_000, 12), gasHex: "0xDE0B6B3A7640000", usdcHex: "0x989680" }),
+      { nowMs: 10_000_000 },
+    );
     expect(probes.map((p) => p.name)).toEqual(["product_api", "chain_height", "signer_liquidity"]);
     expect(probes.map((p) => p.status)).toEqual(["ok", "ok", "ok"]);
     expect(probes[2]?.detail).toContain("USDC 10.00");
@@ -293,28 +321,73 @@ describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", ()
     expect(probes.map((p) => p.status)).toEqual(["degraded", "degraded", "degraded"]);
   });
 
-  it("a frozen testnet chain → chain_height degraded (no page)", async () => {
-    const { probes } = await collectProductHealthProbes(cfg(), combinedFetch({ healthBody: HEALTHY_BODY, gasHex: "0x1", usdcHex: "0x1" }), {
-      advance: { lastBlock: 10612201, lastAdvanceAtMs: 0 },
-      nowMs: 700_000,
-    });
+  it("absolute age: a stale block halts IMMEDIATELY on a fresh start — no blind window (testnet → degraded)", async () => {
+    const { probes } = await collectProductHealthProbes(
+      cfg(),
+      combinedFetch({ healthBody: HEALTHY_BODY, chainIdHex: CHAIN_ID_HEX, blockTimestampHex: tsHex(10_000_000, 3600), gasHex: "0x1", usdcHex: "0x1" }),
+      { advance: undefined, nowMs: 10_000_000 }, // advance undefined ⇒ staticForMs 0; only the absolute age can flag it
+    );
     const chain = probes.find((p) => p.name === "chain_height");
     expect(chain?.status).toBe("degraded");
-    expect(chain?.detail).toContain("not advancing");
+    expect(chain?.detail).toContain("old");
   });
 
-  it("a frozen MAINNET chain → chain_height red (pages: settlement down)", async () => {
+  it("a stale block on MAINNET → chain_height red (pages: settlement down)", async () => {
     const mainnet: ProductHealthPayload = { ...HEALTHY_BODY, auth: { chainId: 420420419 } };
-    const { probes } = await collectProductHealthProbes(cfg(), combinedFetch({ healthBody: mainnet, gasHex: "0x1", usdcHex: "0x1" }), {
-      advance: { lastBlock: 10612201, lastAdvanceAtMs: 0 },
-      nowMs: 700_000,
-    });
+    const { probes } = await collectProductHealthProbes(
+      cfg(),
+      combinedFetch({ healthBody: mainnet, chainIdHex: "0x" + (420420419).toString(16), blockTimestampHex: tsHex(10_000_000, 3600), gasHex: "0x1", usdcHex: "0x1" }),
+      { nowMs: 10_000_000 },
+    );
     expect(probes.find((p) => p.name === "chain_height")?.status).toBe("red");
+  });
+
+  it("RPC on the WRONG chain is ignored (drift-safe) → falls back to the block-advance tracker", async () => {
+    const { probes } = await collectProductHealthProbes(
+      cfg(),
+      combinedFetch({ healthBody: HEALTHY_BODY, chainIdHex: "0x" + (999).toString(16), gasHex: "0x1", usdcHex: "0x1" }),
+      { advance: { lastBlock: 10612201, lastAdvanceAtMs: 0 }, nowMs: 700_000 },
+    );
+    const chain = probes.find((p) => p.name === "chain_height");
+    expect(chain?.status).toBe("degraded");
+    expect(chain?.detail).toContain("static for"); // tracker path, not absolute-age
   });
 
   it("returns an updated chain-advance tracker for the caller to persist", async () => {
     const { chainAdvance } = await collectProductHealthProbes(cfg(), combinedFetch({ healthBody: HEALTHY_BODY, gasHex: "0x1", usdcHex: "0x1" }), { advance: undefined, nowMs: 1000 });
     expect(chainAdvance).toEqual({ lastBlock: 10612201, lastAdvanceAtMs: 1000 });
+  });
+});
+
+describe("chainBlockAge (absolute freshness, chain-matched)", () => {
+  const NOW = 1_000_000; // nowSec = 1000
+
+  it("undefined when no RPC is configured", async () => {
+    expect(await chainBlockAge({ rpcUrl: undefined, expectedChainId: 420420417, nowMs: NOW, fetchImpl: combinedFetch({}) })).toBeUndefined();
+  });
+
+  it("returns the block age (s) when the RPC chainId matches /health", async () => {
+    const age = await chainBlockAge({
+      rpcUrl: "http://rpc",
+      expectedChainId: 420420417,
+      nowMs: NOW,
+      fetchImpl: combinedFetch({ chainIdHex: "0x" + (420420417).toString(16), blockTimestampHex: "0x" + (1000 - 42).toString(16) }),
+    });
+    expect(age).toBe(42);
+  });
+
+  it("undefined when the RPC is on a DIFFERENT chain (drift-safe)", async () => {
+    const age = await chainBlockAge({
+      rpcUrl: "http://rpc",
+      expectedChainId: 420420417,
+      nowMs: NOW,
+      fetchImpl: combinedFetch({ chainIdHex: "0x" + (420420419).toString(16), blockTimestampHex: "0x0" }),
+    });
+    expect(age).toBeUndefined();
+  });
+
+  it("undefined when the RPC read throws", async () => {
+    expect(await chainBlockAge({ rpcUrl: "http://rpc", expectedChainId: 420420417, nowMs: NOW, fetchImpl: throwingFetch() })).toBeUndefined();
   });
 });
 

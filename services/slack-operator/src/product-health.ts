@@ -291,7 +291,15 @@ export function deriveProductApiProbe(h: ProductHealthFetch): ProbeResult {
  *  testnet freeze), never a green on a stopped chain. */
 export function deriveChainProbe(
   h: ProductHealthFetch,
-  staleness?: { staticForMs: number; stalenessMs: number; haltStatus: ProbeStatus },
+  staleness?: {
+    staticForMs: number;
+    maxStaleSeconds: number;
+    haltStatus: ProbeStatus;
+    /** Absolute age (s) of the latest block from a chain-matched RPC. When present
+     *  it's authoritative (no startup blind window); undefined ⇒ fall back to the
+     *  cross-poll block-advance tracker. */
+    blockAgeSec?: number;
+  },
 ): ProbeResult {
   const name = "chain_height";
   if (!h.configured || !h.reachable || !h.httpOk) {
@@ -305,12 +313,25 @@ export function deriveChainProbe(
   const block = pickNum(bc.blockNumber);
   if (block === undefined) return { name, status: "degraded", detail: `blockchain healthy but no block height reported${tag}` };
   if (block <= 0) return { name, status: "red", detail: `chain reports block ${block}${tag}` };
-  if (staleness && staleness.stalenessMs > 0 && staleness.staticForMs >= staleness.stalenessMs) {
-    return {
-      name,
-      status: staleness.haltStatus,
-      detail: `chain not advancing — block #${formatInt(block)} static for ${formatDuration(staleness.staticForMs)}${tag}`,
-    };
+  if (staleness && staleness.maxStaleSeconds > 0) {
+    const { blockAgeSec, maxStaleSeconds, staticForMs, haltStatus } = staleness;
+    if (blockAgeSec !== undefined) {
+      // Absolute block age (chain-matched RPC) — fires immediately, no blind window.
+      if (blockAgeSec > maxStaleSeconds) {
+        return {
+          name,
+          status: haltStatus,
+          detail: `chain not advancing — last block ${formatDuration(blockAgeSec * 1000)} old (block #${formatInt(block)})${tag}`,
+        };
+      }
+    } else if (staticForMs >= maxStaleSeconds * 1000) {
+      // Fallback: no chain-matched RPC → cross-poll tracker (has a startup blind window).
+      return {
+        name,
+        status: haltStatus,
+        detail: `chain not advancing — block #${formatInt(block)} static for ${formatDuration(staticForMs)}${tag}`,
+      };
+    }
   }
   return { name, status: "ok", detail: `block #${formatInt(block)}${tag}` };
 }
@@ -417,6 +438,30 @@ export interface ProductHealthCollection {
   chainAdvance: ChainAdvance;
 }
 
+/** Absolute age (seconds) of the chain's latest block via the direct RPC — but
+ *  ONLY when that RPC reports the SAME chainId `/health` does, so a retarget-stale
+ *  endpoint can't false-halt on the wrong chain. undefined = no RPC / chain mismatch
+ *  / read error → the caller falls back to the cross-poll block-advance tracker. */
+export async function chainBlockAge(input: {
+  rpcUrl?: string;
+  expectedChainId?: number;
+  nowMs: number;
+  fetchImpl: typeof fetch;
+}): Promise<number | undefined> {
+  if (!input.rpcUrl) return undefined;
+  try {
+    const cid = Number(BigInt(await ethRpc(input.rpcUrl, "eth_chainId", [], input.fetchImpl)));
+    if (input.expectedChainId !== undefined && cid !== input.expectedChainId) return undefined;
+    const block = (await ethRpcRaw(input.rpcUrl, "eth_getBlockByNumber", ["latest", false], input.fetchImpl)) as
+      | { timestamp?: string }
+      | null;
+    if (!block || typeof block.timestamp !== "string") return undefined;
+    return Math.max(0, Math.floor(input.nowMs / 1000) - Number(BigInt(block.timestamp)));
+  } catch {
+    return undefined;
+  }
+}
+
 export async function collectProductHealthProbes(
   config: ProductHealthConfig,
   fetchImpl: typeof fetch = fetch,
@@ -430,10 +475,19 @@ export async function collectProductHealthProbes(
   const chainId = h.body?.auth?.chainId;
   const block = pickNum(h.body?.components?.blockchain?.blockNumber);
   const chainAdvance = trackChainAdvance(chainCtx.advance, block, chainCtx.nowMs);
+  // Absolute block age from the (chain-matched) settlement RPC — no startup blind
+  // window; falls back to the cross-poll tracker when the RPC is absent/mismatched.
+  const blockAgeSec = await chainBlockAge({
+    rpcUrl: config.rpcUrl,
+    expectedChainId: chainId,
+    nowMs: chainCtx.nowMs,
+    fetchImpl,
+  });
   const staleness = {
     staticForMs: chainCtx.nowMs - chainAdvance.lastAdvanceAtMs,
-    stalenessMs: config.chainMaxStaleSeconds * 1000,
+    maxStaleSeconds: config.chainMaxStaleSeconds,
     haltStatus: chainHaltStatus(chainId, config.haltSeverity),
+    blockAgeSec,
   };
   const signer = await probeSignerLiquidity({
     rpcUrl: config.rpcUrl,
