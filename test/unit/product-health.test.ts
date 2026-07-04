@@ -109,20 +109,53 @@ describe("probeChainHeight", () => {
     expect(r.status).toBe("degraded");
   });
 
-  it("ok when the chain reports a positive height", async () => {
-    const r = await probeChainHeight({ rpcUrl: "http://rpc", fetchImpl: mockFetch(() => ({ result: "0x2a" })) });
+  it("ok when the chain reports a positive height (height-only, no freshness threshold)", async () => {
+    const r = await probeChainHeight({ rpcUrl: "http://rpc", fetchImpl: mockFetch(() => ({ result: { number: "0x2a" } })) });
     expect(r.status).toBe("ok");
     expect(r.detail).toContain("42");
   });
 
   it("red when the chain reports block 0", async () => {
-    const r = await probeChainHeight({ rpcUrl: "http://rpc", fetchImpl: mockFetch(() => ({ result: "0x0" })) });
+    const r = await probeChainHeight({ rpcUrl: "http://rpc", fetchImpl: mockFetch(() => ({ result: { number: "0x0" } })) });
     expect(r.status).toBe("red");
   });
 
   it("degraded (not a page) on an RPC hiccup — our dependency, not a product outage", async () => {
     const r = await probeChainHeight({ rpcUrl: "http://rpc", fetchImpl: mockFetch(() => ({ error: "upstream busy" })) });
     expect(r.status).toBe("degraded");
+  });
+
+  // Halt detection — the whole point: a frozen chain still answers RPC.
+  const NOW_MS = 1_783_000_000_000; // fixed clock; NOW_MS/1000 = 1_783_000_000 s
+  const at = (secAgo: number) => "0x" + BigInt(Math.floor(NOW_MS / 1000) - secAgo).toString(16);
+
+  it("red when the latest block is stale beyond the freshness threshold (chain halted)", async () => {
+    const r = await probeChainHeight({
+      rpcUrl: "http://rpc",
+      maxStaleSeconds: 600,
+      now: () => NOW_MS,
+      fetchImpl: mockFetch(() => ({ result: { number: "0x2a", timestamp: at(3600) } })), // 60m old
+    });
+    expect(r.status).toBe("red");
+    expect(r.detail).toContain("stalled");
+    expect(r.detail).toContain("42");
+  });
+
+  it("ok when the latest block is fresh (advancing) under the threshold", async () => {
+    const r = await probeChainHeight({
+      rpcUrl: "http://rpc",
+      maxStaleSeconds: 600,
+      now: () => NOW_MS,
+      fetchImpl: mockFetch(() => ({ result: { number: "0x2a", timestamp: at(12) } })), // 12s old
+    });
+    expect(r.status).toBe("ok");
+    expect(r.detail).toContain("42");
+  });
+
+  it("degraded when the chain returns a block with no number", async () => {
+    const r = await probeChainHeight({ rpcUrl: "http://rpc", fetchImpl: mockFetch(() => ({ result: { hash: "0xabc" } })) });
+    expect(r.status).toBe("degraded");
+    expect(r.detail).toContain("no latest block");
   });
 });
 
