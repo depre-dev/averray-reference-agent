@@ -7,6 +7,7 @@ import {
   deriveProductApiProbe,
   deriveChainProbe,
   deriveCapabilityProbe,
+  deriveLatencyProbe,
   trackChainAdvance,
   chainHaltStatus,
   probeSignerLiquidity,
@@ -127,6 +128,8 @@ const cfg = (over: Partial<ProductHealthConfig> = {}): ProductHealthConfig => ({
   minUsdc: 0,
   requiredCapabilities: ["blockchain", "treasuryMutations"],
   expectedWarnings: ["xcm_observer_staged", "indexer_unavailable", "gas_sponsor_disabled"],
+  latencyWarnMs: 2000,
+  latencyRedMs: 10000,
   ...over,
 });
 
@@ -276,6 +279,30 @@ describe("chainHaltStatus", () => {
   });
 });
 
+describe("deriveLatencyProbe", () => {
+  const thresholds = { warnMs: 2000, redMs: 10000 };
+
+  it("degraded when unconfigured or no latency sample", () => {
+    expect(deriveLatencyProbe({ configured: false, reachable: false, httpOk: false, status: 0, url: "" }, thresholds).status).toBe("degraded");
+    expect(deriveLatencyProbe(fetched(HEALTHY_BODY), thresholds).status).toBe("degraded"); // no latencyMs
+  });
+
+  it("ok when fast", () => {
+    const r = deriveLatencyProbe(fetched(HEALTHY_BODY, { latencyMs: 120 }), thresholds);
+    expect(r.status).toBe("ok");
+    expect(r.detail).toContain("120ms");
+  });
+
+  it("degraded when slow (≥ warn), red when very slow (≥ red)", () => {
+    expect(deriveLatencyProbe(fetched(HEALTHY_BODY, { latencyMs: 3000 }), thresholds).status).toBe("degraded");
+    expect(deriveLatencyProbe(fetched(HEALTHY_BODY, { latencyMs: 12000 }), thresholds).status).toBe("red");
+  });
+
+  it("degraded (not red) when unreachable — product_api carries the red", () => {
+    expect(deriveLatencyProbe({ configured: true, reachable: false, httpOk: false, status: 0, url: "u", latencyMs: 12000 }, thresholds).status).toBe("degraded");
+  });
+});
+
 describe("deriveCapabilityProbe", () => {
   const capConfig = {
     requiredCapabilities: ["blockchain", "treasuryMutations"],
@@ -357,14 +384,14 @@ describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", ()
       combinedFetch({ healthBody: HEALTHY_BODY, chainIdHex: CHAIN_ID_HEX, blockTimestampHex: tsHex(10_000_000, 12), gasHex: "0xDE0B6B3A7640000", usdcHex: "0x989680" }),
       { nowMs: 10_000_000 },
     );
-    expect(probes.map((p) => p.name)).toEqual(["product_api", "chain_height", "signer_liquidity", "capabilities"]);
-    expect(probes.map((p) => p.status)).toEqual(["ok", "ok", "ok", "ok"]);
+    expect(probes.map((p) => p.name)).toEqual(["product_api", "chain_height", "signer_liquidity", "capabilities", "api_latency"]);
+    expect(probes.map((p) => p.status)).toEqual(["ok", "ok", "ok", "ok", "ok"]);
     expect(probes[2]?.detail).toContain("USDC 10.00");
   });
 
   it("all degraded when nothing is configured (never fake green)", async () => {
     const { probes } = await collectProductHealthProbes(cfg({ apiBaseUrl: undefined, rpcUrl: undefined }), combinedFetch({ healthBody: HEALTHY_BODY }), { nowMs: 1000 });
-    expect(probes.map((p) => p.status)).toEqual(["degraded", "degraded", "degraded", "degraded"]);
+    expect(probes.map((p) => p.status)).toEqual(["degraded", "degraded", "degraded", "degraded", "degraded"]);
   });
 
   it("absolute age: a stale block halts IMMEDIATELY on a fresh start — no blind window (testnet → degraded)", async () => {
@@ -530,6 +557,8 @@ describe("loadProductHealthConfig", () => {
     expect(c.minUsdc).toBe(0);
     expect(c.requiredCapabilities).toEqual(["blockchain", "treasuryMutations"]);
     expect(c.expectedWarnings).toContain("indexer_unavailable");
+    expect(c.latencyWarnMs).toBe(2000);
+    expect(c.latencyRedMs).toBe(10000);
   });
 
   it("reads env overrides", () => {

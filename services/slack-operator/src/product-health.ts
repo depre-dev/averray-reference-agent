@@ -120,6 +120,10 @@ export interface ProductHealthConfig {
    *  capabilities probe stays ok; a NEW code ⇒ degraded (red if error/critical). Env
    *  PRODUCT_HEALTH_EXPECTED_WARNINGS (csv). */
   expectedWarnings: string[];
+  /** /health round-trip latency thresholds (ms): degraded ≥ warn, red ≥ red. 0
+   *  disables. Env PRODUCT_HEALTH_LATENCY_WARN_MS / PRODUCT_HEALTH_LATENCY_RED_MS. */
+  latencyWarnMs: number;
+  latencyRedMs: number;
 }
 
 function num(value: unknown, fallback: number): number {
@@ -175,6 +179,8 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
     minUsdc: num(env.PRODUCT_HEALTH_MIN_USDC, 0),
     requiredCapabilities: csv(env.PRODUCT_HEALTH_REQUIRED_CAPABILITIES, "blockchain,treasuryMutations"),
     expectedWarnings: csv(env.PRODUCT_HEALTH_EXPECTED_WARNINGS, "xcm_observer_staged,indexer_unavailable,gas_sponsor_disabled"),
+    latencyWarnMs: num(env.PRODUCT_HEALTH_LATENCY_WARN_MS, 2000),
+    latencyRedMs: num(env.PRODUCT_HEALTH_LATENCY_RED_MS, 10000),
   };
 }
 
@@ -210,6 +216,8 @@ export interface ProductHealthFetch {
   url: string;
   body?: ProductHealthPayload;
   error?: string;
+  /** Wall-clock ms for the /health GET round-trip. undefined when unconfigured. */
+  latencyMs?: number;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -273,17 +281,19 @@ export async function fetchProductHealth(input: {
     return { configured: false, reachable: false, httpOk: false, status: 0, url: "" };
   }
   const url = joinUrl(input.baseUrl, input.healthPath);
+  const startedAt = Date.now();
   try {
     const res = await input.fetchImpl(url, { method: "GET", redirect: "follow" });
+    const latencyMs = Date.now() - startedAt;
     let body: ProductHealthPayload | undefined;
     try {
       body = (await res.json()) as ProductHealthPayload;
     } catch {
       body = undefined;
     }
-    return { configured: true, reachable: true, httpOk: res.ok, status: res.status, url, body };
+    return { configured: true, reachable: true, httpOk: res.ok, status: res.status, url, body, latencyMs };
   } catch (err) {
-    return { configured: true, reachable: false, httpOk: false, status: 0, url, error: errMsg(err) };
+    return { configured: true, reachable: false, httpOk: false, status: 0, url, error: errMsg(err), latencyMs: Date.now() - startedAt };
   }
 }
 
@@ -296,6 +306,20 @@ export function deriveProductApiProbe(h: ProductHealthFetch): ProbeResult {
   if (h.body?.serviceHealth?.ok === false) return { name, status: "red", detail: `${h.url} → service reports unhealthy` };
   const chainId = h.body?.auth?.chainId;
   return { name, status: "ok", detail: `${h.url} → ${h.status}${chainId ? ` · chain ${chainId}` : ""}` };
+}
+
+/** /health round-trip latency. Slow-but-reachable is degraded (working, just slow);
+ *  ≥ redMs is red (effectively down). Unreachable / no sample → degraded (product_api
+ *  carries the red for a hard outage). */
+export function deriveLatencyProbe(h: ProductHealthFetch, thresholds: { warnMs: number; redMs: number }): ProbeResult {
+  const name = "api_latency";
+  if (!h.configured) return { name, status: "degraded", detail: "AVERRAY_API_BASE_URL not configured" };
+  if (h.latencyMs === undefined) return { name, status: "degraded", detail: "no latency sample" };
+  const ms = h.latencyMs;
+  if (!h.reachable) return { name, status: "degraded", detail: `no response after ${ms}ms` };
+  if (thresholds.redMs > 0 && ms >= thresholds.redMs) return { name, status: "red", detail: `/health ${ms}ms (≥ ${thresholds.redMs}ms)` };
+  if (thresholds.warnMs > 0 && ms >= thresholds.warnMs) return { name, status: "degraded", detail: `/health ${ms}ms (≥ ${thresholds.warnMs}ms)` };
+  return { name, status: "ok", detail: `/health ${ms}ms` };
 }
 
 // A capabilityHealth value counts as "up" when it's one of these; anything else
@@ -565,6 +589,7 @@ export async function collectProductHealthProbes(
         requiredCapabilities: config.requiredCapabilities,
         expectedWarnings: config.expectedWarnings,
       }),
+      deriveLatencyProbe(h, { warnMs: config.latencyWarnMs, redMs: config.latencyRedMs }),
     ],
     chainAdvance,
   };
