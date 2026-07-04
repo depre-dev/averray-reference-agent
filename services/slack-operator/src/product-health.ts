@@ -113,11 +113,22 @@ export interface ProductHealthConfig {
   minGasNative: number;
   /** USDC floor in whole tokens (e.g. 5). 0 = don't threshold. */
   minUsdc: number;
+  /** capabilityHealth keys that MUST be up; one dropping ⇒ red. Env
+   *  PRODUCT_HEALTH_REQUIRED_CAPABILITIES (csv). Default blockchain,treasuryMutations. */
+  requiredCapabilities: string[];
+  /** Warning codes acknowledged as expected — while only these are present the
+   *  capabilities probe stays ok; a NEW code ⇒ degraded (red if error/critical). Env
+   *  PRODUCT_HEALTH_EXPECTED_WARNINGS (csv). */
+  expectedWarnings: string[];
 }
 
 function num(value: unknown, fallback: number): number {
   const n = typeof value === "number" ? value : Number(value);
   return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+function csv(value: string | undefined, fallback: string): string[] {
+  return (value ?? fallback).split(",").map((s) => s.trim()).filter(Boolean);
 }
 
 function trimTrailingSlash(s: string): string {
@@ -162,6 +173,8 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
     usdcDecimals: num(env.PRODUCT_HEALTH_USDC_DECIMALS, 6),
     minGasNative: num(env.PRODUCT_HEALTH_MIN_GAS_NATIVE, 0),
     minUsdc: num(env.PRODUCT_HEALTH_MIN_USDC, 0),
+    requiredCapabilities: csv(env.PRODUCT_HEALTH_REQUIRED_CAPABILITIES, "blockchain,treasuryMutations"),
+    expectedWarnings: csv(env.PRODUCT_HEALTH_EXPECTED_WARNINGS, "xcm_observer_staged,indexer_unavailable,gas_sponsor_disabled"),
   };
 }
 
@@ -283,6 +296,51 @@ export function deriveProductApiProbe(h: ProductHealthFetch): ProbeResult {
   if (h.body?.serviceHealth?.ok === false) return { name, status: "red", detail: `${h.url} → service reports unhealthy` };
   const chainId = h.body?.auth?.chainId;
   return { name, status: "ok", detail: `${h.url} → ${h.status}${chainId ? ` · chain ${chainId}` : ""}` };
+}
+
+// A capabilityHealth value counts as "up" when it's one of these; anything else
+// (unavailable / staged / disabled / degraded / …) is treated as not-operational.
+const HEALTHY_CAPABILITY_STATES = new Set(["enabled", "available", "ok", "ready", "healthy"]);
+const CRITICAL_WARNING_SEVERITIES = new Set(["error", "critical", "fatal"]);
+
+/** Product capability + dependency health, from /health's `capabilityHealth` +
+ *  `warnings[]`. RED if a REQUIRED capability isn't up (money path down); DEGRADED
+ *  on a NEW warning outside the acknowledged baseline (RED if it's error/critical);
+ *  OK while only the acknowledged warnings are present. Unreadable /health →
+ *  degraded (product_api carries the red). */
+export function deriveCapabilityProbe(
+  h: ProductHealthFetch,
+  config: { requiredCapabilities: string[]; expectedWarnings: string[] },
+): ProbeResult {
+  const name = "capabilities";
+  if (!h.configured || !h.reachable || !h.httpOk) {
+    return { name, status: "degraded", detail: "capability status unavailable (product /health not readable)" };
+  }
+  const caps = h.body?.capabilityHealth;
+  if (!caps) return { name, status: "degraded", detail: "product /health did not report capabilityHealth" };
+  const isUp = (v: unknown): boolean => HEALTHY_CAPABILITY_STATES.has(String(v ?? "").toLowerCase());
+  const requiredDown = config.requiredCapabilities.filter((k) => !isUp(caps[k]));
+  if (requiredDown.length > 0) {
+    return { name, status: "red", detail: `required capability down: ${requiredDown.map((k) => `${k}=${caps[k] ?? "missing"}`).join(", ")}` };
+  }
+  const expected = new Set(config.expectedWarnings);
+  const unexpected = (h.body?.warnings ?? []).filter((w) => w.code && !expected.has(w.code));
+  if (unexpected.length > 0) {
+    const critical = unexpected.some((w) => CRITICAL_WARNING_SEVERITIES.has(String(w.severity ?? "").toLowerCase()));
+    return {
+      name,
+      status: critical ? "red" : "degraded",
+      detail: `${critical ? "new CRITICAL" : "new"} capability warning: ${unexpected.map((w) => w.code).join(", ")}`,
+    };
+  }
+  const total = Object.keys(caps).length;
+  const up = Object.values(caps).filter(isUp).length;
+  const ackd = (h.body?.warnings ?? []).length;
+  return {
+    name,
+    status: "ok",
+    detail: `${up}/${total} capabilities up${ackd ? `, ${ackd} acknowledged warning${ackd === 1 ? "" : "s"}` : ""}`,
+  };
 }
 
 /** Chain reachable + producing blocks, per the product's own /health. Unreadable
@@ -499,7 +557,15 @@ export async function collectProductHealthProbes(
     fetchImpl,
   });
   return {
-    probes: [deriveProductApiProbe(h), deriveChainProbe(h, staleness), signer],
+    probes: [
+      deriveProductApiProbe(h),
+      deriveChainProbe(h, staleness),
+      signer,
+      deriveCapabilityProbe(h, {
+        requiredCapabilities: config.requiredCapabilities,
+        expectedWarnings: config.expectedWarnings,
+      }),
+    ],
     chainAdvance,
   };
 }

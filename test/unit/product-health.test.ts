@@ -6,6 +6,7 @@ import {
   fetchProductHealth,
   deriveProductApiProbe,
   deriveChainProbe,
+  deriveCapabilityProbe,
   trackChainAdvance,
   chainHaltStatus,
   probeSignerLiquidity,
@@ -90,6 +91,12 @@ const HEALTHY_BODY: ProductHealthPayload = {
   status: "ok",
   auth: { chainId: 420420417 },
   serviceHealth: { ok: true },
+  capabilityHealth: { blockchain: "enabled", treasuryMutations: "available", xcmObserver: "staged", indexer: "unavailable", gasSponsor: "disabled" },
+  warnings: [
+    { code: "xcm_observer_staged", severity: "warning", message: "XCM observer is staged." },
+    { code: "indexer_unavailable", severity: "warning", message: "Indexer capability is unavailable." },
+    { code: "gas_sponsor_disabled", severity: "warning", message: "Gas sponsor capability is disabled." },
+  ],
   components: {
     blockchain: { ok: true, enabled: true, blockNumber: 10612201, signerConfigured: true },
   },
@@ -118,6 +125,8 @@ const cfg = (over: Partial<ProductHealthConfig> = {}): ProductHealthConfig => ({
   usdcDecimals: 6,
   minGasNative: 0,
   minUsdc: 0,
+  requiredCapabilities: ["blockchain", "treasuryMutations"],
+  expectedWarnings: ["xcm_observer_staged", "indexer_unavailable", "gas_sponsor_disabled"],
   ...over,
 });
 
@@ -267,6 +276,43 @@ describe("chainHaltStatus", () => {
   });
 });
 
+describe("deriveCapabilityProbe", () => {
+  const capConfig = {
+    requiredCapabilities: ["blockchain", "treasuryMutations"],
+    expectedWarnings: ["xcm_observer_staged", "indexer_unavailable", "gas_sponsor_disabled"],
+  };
+
+  it("degraded when /health is unreadable or has no capabilityHealth", () => {
+    expect(deriveCapabilityProbe({ configured: true, reachable: false, httpOk: false, status: 0, url: "u" }, capConfig).status).toBe("degraded");
+    expect(deriveCapabilityProbe(fetched({ status: "ok" }), capConfig).status).toBe("degraded");
+  });
+
+  it("ok while only the acknowledged warnings are present (required caps up)", () => {
+    const r = deriveCapabilityProbe(fetched(HEALTHY_BODY), capConfig);
+    expect(r.status).toBe("ok");
+    expect(r.detail).toContain("acknowledged");
+  });
+
+  it("red when a REQUIRED capability isn't up (money path down)", () => {
+    const body: ProductHealthPayload = { ...HEALTHY_BODY, capabilityHealth: { ...HEALTHY_BODY.capabilityHealth, treasuryMutations: "unavailable" } };
+    const r = deriveCapabilityProbe(fetched(body), capConfig);
+    expect(r.status).toBe("red");
+    expect(r.detail).toContain("treasuryMutations");
+  });
+
+  it("degraded on a NEW warning outside the acknowledged baseline", () => {
+    const body: ProductHealthPayload = { ...HEALTHY_BODY, warnings: [...(HEALTHY_BODY.warnings ?? []), { code: "redis_lag", severity: "warning", message: "redis is lagging" }] };
+    const r = deriveCapabilityProbe(fetched(body), capConfig);
+    expect(r.status).toBe("degraded");
+    expect(r.detail).toContain("redis_lag");
+  });
+
+  it("red on a NEW error/critical-severity warning", () => {
+    const body: ProductHealthPayload = { ...HEALTHY_BODY, warnings: [...(HEALTHY_BODY.warnings ?? []), { code: "settlement_stalled", severity: "critical", message: "settlement stalled" }] };
+    expect(deriveCapabilityProbe(fetched(body), capConfig).status).toBe("red");
+  });
+});
+
 describe("probeSignerLiquidity (direct RPC)", () => {
   const floors = { usdcDecimals: 6, minGasNative: 0.1, minUsdc: 5 };
   // 1 ETH = 1e18 wei = 0xDE0B6B3A7640000 ; 0.01 ETH = 1e16 = 0x2386F26FC10000
@@ -311,14 +357,14 @@ describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", ()
       combinedFetch({ healthBody: HEALTHY_BODY, chainIdHex: CHAIN_ID_HEX, blockTimestampHex: tsHex(10_000_000, 12), gasHex: "0xDE0B6B3A7640000", usdcHex: "0x989680" }),
       { nowMs: 10_000_000 },
     );
-    expect(probes.map((p) => p.name)).toEqual(["product_api", "chain_height", "signer_liquidity"]);
-    expect(probes.map((p) => p.status)).toEqual(["ok", "ok", "ok"]);
+    expect(probes.map((p) => p.name)).toEqual(["product_api", "chain_height", "signer_liquidity", "capabilities"]);
+    expect(probes.map((p) => p.status)).toEqual(["ok", "ok", "ok", "ok"]);
     expect(probes[2]?.detail).toContain("USDC 10.00");
   });
 
   it("all degraded when nothing is configured (never fake green)", async () => {
     const { probes } = await collectProductHealthProbes(cfg({ apiBaseUrl: undefined, rpcUrl: undefined }), combinedFetch({ healthBody: HEALTHY_BODY }), { nowMs: 1000 });
-    expect(probes.map((p) => p.status)).toEqual(["degraded", "degraded", "degraded"]);
+    expect(probes.map((p) => p.status)).toEqual(["degraded", "degraded", "degraded", "degraded"]);
   });
 
   it("absolute age: a stale block halts IMMEDIATELY on a fresh start — no blind window (testnet → degraded)", async () => {
@@ -482,6 +528,8 @@ describe("loadProductHealthConfig", () => {
     expect(c.usdcDecimals).toBe(6);
     expect(c.minGasNative).toBe(0);
     expect(c.minUsdc).toBe(0);
+    expect(c.requiredCapabilities).toEqual(["blockchain", "treasuryMutations"]);
+    expect(c.expectedWarnings).toContain("indexer_unavailable");
   });
 
   it("reads env overrides", () => {
