@@ -6,13 +6,23 @@
 // reuses the D3/D4 plane: pure `evaluateProductHealth` + effect-injected
 // `runProductHealthOnce`, so detection + alerting unit-test with no fs/network.
 //
-// Chain/signer reads are raw JSON-RPC over an injected `fetch` (no viem dep in
-// slack-operator; mockable in tests).
+// Two data sources, deliberately:
+//  • API + chain height come from the product's OWN `GET /health` payload — the
+//    product self-reports block height + blockchain capability + signer status
+//    there, so the monitor always watches the EXACT chain the product runs on
+//    (it reads `auth.chainId`), with no separate endpoint that can drift to the
+//    wrong network. A frozen chain still reports its last block, so a block-advance
+//    tracker turns a static height into a halt signal.
+//  • Signer BALANCES come from a direct eth-RPC (eth_getBalance + erc20 balanceOf)
+//    — `/health` does not expose balances, so this is the only source of real
+//    solvency monitoring. Raw JSON-RPC over the injected `fetch` (no viem dep).
 //
-// TRUTH-BOUNDARY (the whole point): an UNCONFIGURED probe reports `degraded`,
-// never a fake green; a CONFIGURED probe that trips its threshold reports `red`.
-// Only `red` fires an alert. A probe that can't reach its dependency reports
-// `degraded` (our own RPC/network hiccup must not page as a product outage).
+// TRUTH-BOUNDARY (the whole point): an UNCONFIGURED or unreadable probe reports
+// `degraded`, never a fake green; a probe the product self-reports as failing (or a
+// balance below its floor) reports `red`. Only `red` fires an alert. A dependency
+// hiccup (our RPC, the /health fetch) → `degraded`, never a product-down page. A
+// chain HALT is network-conditional: a testnet freeze is `degraded` (no page — a
+// known reset happens), a mainnet halt is `red` (settlement down = page).
 
 import type { AlertPayload } from "./alert-bridge.js";
 
@@ -82,19 +92,20 @@ export function probeSparkline(
   return bins > 0 && series.length > bins ? series.slice(series.length - bins) : series;
 }
 
-// ── Config (env-driven; chain/liquidity stay degraded until their keys are set) ──
+// ── Config (env-driven; balances stay degraded until their RPC/USDC keys are set) ──
 
 export interface ProductHealthConfig {
   apiBaseUrl?: string;
   apiHealthPath: string;
+  /** Direct eth-RPC for the signer-balance probe (PRODUCT_HEALTH_RPC_URL, else the
+   *  per-network default). Chain HEIGHT no longer needs it — that reads /health. */
   rpcUrl?: string;
-  /**
-   * chain_height goes RED if the latest block is older than this many seconds —
-   * a chain halt (blocks frozen) is a real settlement-down condition, not an RPC
-   * hiccup. 0 disables the freshness check (height-only, the pre-halt-detect
-   * behaviour). Env: PRODUCT_HEALTH_CHAIN_MAX_STALE_SECONDS (default 600).
-   */
+  /** chain_height freshness window (seconds): block height static for longer than
+   *  this ⇒ "not advancing". 0 disables. Env: PRODUCT_HEALTH_CHAIN_MAX_STALE_SECONDS. */
   chainMaxStaleSeconds: number;
+  /** Halt severity: "auto" (mainnet chainId → red, testnet → degraded) | "red" |
+   *  "degraded". Env: PRODUCT_HEALTH_HALT_SEVERITY. */
+  haltSeverity: string;
   signerAddress?: string;
   usdcAddress?: string;
   usdcDecimals: number;
@@ -113,14 +124,12 @@ function trimTrailingSlash(s: string): string {
   return s.replace(/\/+$/, "");
 }
 
-// Public Hub eth-rpc per network — so the monitor watches the SAME chain the
-// product settles on, with zero duplicated config. `WALLET_NETWORK` (the signal
-// the chain services already use) selects it; PRODUCT_HEALTH_RPC_URL overrides.
-// Mainnet is intentionally absent until Codex confirms its endpoint — set
-// PRODUCT_HEALTH_RPC_URL there. Testnet uses the SAME canonical Hub eth-rpc the
-// product settles on (deployments/testnet.json, all three backend RPC vars, and
-// the indexer), verified live (chainId 420420417, USDC precompile answering).
-// The old `testnet-passet-hub-eth-rpc.polkadot.io` host no longer resolves.
+// Direct eth-rpc per network for the signer-BALANCE probe (chain height reads
+// /health instead). `WALLET_NETWORK` selects it; PRODUCT_HEALTH_RPC_URL overrides.
+// Testnet uses the SAME canonical Hub eth-rpc the product settles on
+// (deployments/testnet.json, all three backend RPC vars, and the indexer),
+// verified live (chainId 420420417, USDC precompile answering). The old
+// `testnet-passet-hub-eth-rpc.polkadot.io` host no longer resolves.
 const NETWORK_ETH_RPC: Record<string, string> = {
   testnet: "https://eth-rpc-testnet.polkadot.io/",
 };
@@ -130,6 +139,16 @@ export function networkEthRpc(walletNetwork: string | undefined): string | undef
   return NETWORK_ETH_RPC[(walletNetwork || "testnet").toLowerCase()];
 }
 
+// A chain HALT pages on mainnet (settlement down) but not on a testnet (resets
+// happen). `auth.chainId` from /health selects; PRODUCT_HEALTH_HALT_SEVERITY overrides.
+const MAINNET_CHAIN_IDS = new Set<number>([420420419]); // Polkadot Hub mainnet (DOT). Testnet 420420417 → degraded.
+
+/** Resolve halt severity: explicit override, else auto by chainId (mainnet → red). */
+export function chainHaltStatus(chainId: number | undefined, override: string | undefined): ProbeStatus {
+  if (override === "red" || override === "degraded") return override;
+  return chainId !== undefined && MAINNET_CHAIN_IDS.has(chainId) ? "red" : "degraded";
+}
+
 export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): ProductHealthConfig {
   const base = env.AVERRAY_API_BASE_URL;
   return {
@@ -137,6 +156,7 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
     apiHealthPath: env.PRODUCT_HEALTH_API_PATH || "/health",
     rpcUrl: env.PRODUCT_HEALTH_RPC_URL || networkEthRpc(env.WALLET_NETWORK),
     chainMaxStaleSeconds: num(env.PRODUCT_HEALTH_CHAIN_MAX_STALE_SECONDS, 600),
+    haltSeverity: env.PRODUCT_HEALTH_HALT_SEVERITY || "auto",
     signerAddress: env.PRODUCT_HEALTH_SIGNER_ADDRESS || undefined,
     usdcAddress: env.PRODUCT_HEALTH_USDC_ADDRESS || undefined,
     usdcDecimals: num(env.PRODUCT_HEALTH_USDC_DECIMALS, 6),
@@ -145,7 +165,41 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
   };
 }
 
-// ── Probes (each degraded-safe; fetch injected for testability) ──────
+// ── Product /health payload (the product self-reports chain + signer state) ──
+
+/** The slice of the Averray API `/health` payload the monitor reads. All optional
+ *  — the product may omit fields, and every derivation degrades safely if so. */
+export interface ProductHealthPayload {
+  status?: string;
+  auth?: { chainId?: number };
+  serviceHealth?: { ok?: boolean };
+  capabilityHealth?: Record<string, string>;
+  warnings?: Array<{ code?: string; severity?: string; message?: string }>;
+  components?: {
+    blockchain?: {
+      ok?: boolean;
+      enabled?: boolean;
+      blockNumber?: number;
+      signerConfigured?: boolean;
+      arbitratorSignerConfigured?: boolean;
+    };
+  };
+}
+
+export interface ProductHealthFetch {
+  /** AVERRAY_API_BASE_URL was set. */
+  configured: boolean;
+  /** The GET completed (any status). */
+  reachable: boolean;
+  /** Response was 2xx. */
+  httpOk: boolean;
+  status: number;
+  url: string;
+  body?: ProductHealthPayload;
+  error?: string;
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -155,25 +209,113 @@ function joinUrl(base: string, path: string): string {
   return `${trimTrailingSlash(base)}/${path.replace(/^\/+/, "")}`;
 }
 
-/** Is the Averray product API answering? REAL as soon as AVERRAY_API_BASE_URL is set. */
-export async function probeProductApi(input: {
+/** Coerce a number|numeric-string to a finite number, else undefined. */
+function pickNum(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function formatInt(n: number): string {
+  return n.toLocaleString("en-US");
+}
+
+function formatDuration(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `${h}h ${m % 60}m` : `${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
+// ── Chain-advance tracker (a frozen chain still reports its last block) ──
+
+/** Tracks when the chain's block height last advanced, so a frozen chain can be
+ *  told apart from a live one. Pure state transition; the caller persists it. */
+export interface ChainAdvance {
+  lastBlock: number;
+  lastAdvanceAtMs: number;
+}
+
+export function trackChainAdvance(
+  prev: ChainAdvance | undefined,
+  block: number | undefined,
+  nowMs: number,
+): ChainAdvance {
+  if (block === undefined) return prev ?? { lastBlock: -1, lastAdvanceAtMs: nowMs };
+  if (!prev || block > prev.lastBlock) return { lastBlock: block, lastAdvanceAtMs: nowMs };
+  return prev; // block <= lastBlock: no advance — keep the old timestamp so staleness accrues.
+}
+
+// ── /health-derived probes (product_api + chain_height) ─────────────
+
+/** Fetch the product's `/health` once; product_api + chain_height derive from it. */
+export async function fetchProductHealth(input: {
   baseUrl?: string;
   healthPath: string;
   fetchImpl: typeof fetch;
-}): Promise<ProbeResult> {
+}): Promise<ProductHealthFetch> {
   if (!input.baseUrl) {
-    return { name: "product_api", status: "degraded", detail: "AVERRAY_API_BASE_URL not configured" };
+    return { configured: false, reachable: false, httpOk: false, status: 0, url: "" };
   }
   const url = joinUrl(input.baseUrl, input.healthPath);
   try {
     const res = await input.fetchImpl(url, { method: "GET", redirect: "follow" });
-    return res.ok
-      ? { name: "product_api", status: "ok", detail: `${url} → ${res.status}` }
-      : { name: "product_api", status: "red", detail: `${url} → HTTP ${res.status}` };
+    let body: ProductHealthPayload | undefined;
+    try {
+      body = (await res.json()) as ProductHealthPayload;
+    } catch {
+      body = undefined;
+    }
+    return { configured: true, reachable: true, httpOk: res.ok, status: res.status, url, body };
   } catch (err) {
-    return { name: "product_api", status: "red", detail: `${url} unreachable: ${errMsg(err)}` };
+    return { configured: true, reachable: false, httpOk: false, status: 0, url, error: errMsg(err) };
   }
 }
+
+/** Is the Averray product API answering? REAL as soon as AVERRAY_API_BASE_URL is set. */
+export function deriveProductApiProbe(h: ProductHealthFetch): ProbeResult {
+  const name = "product_api";
+  if (!h.configured) return { name, status: "degraded", detail: "AVERRAY_API_BASE_URL not configured" };
+  if (!h.reachable) return { name, status: "red", detail: `${h.url} unreachable: ${h.error ?? "fetch failed"}` };
+  if (!h.httpOk) return { name, status: "red", detail: `${h.url} → HTTP ${h.status}` };
+  if (h.body?.serviceHealth?.ok === false) return { name, status: "red", detail: `${h.url} → service reports unhealthy` };
+  const chainId = h.body?.auth?.chainId;
+  return { name, status: "ok", detail: `${h.url} → ${h.status}${chainId ? ` · chain ${chainId}` : ""}` };
+}
+
+/** Chain reachable + producing blocks, per the product's own /health. Unreadable
+ *  /health → degraded (product_api carries the red; never double-page). A frozen
+ *  height (static past the window) → `haltStatus` (red on mainnet, degraded on a
+ *  testnet freeze), never a green on a stopped chain. */
+export function deriveChainProbe(
+  h: ProductHealthFetch,
+  staleness?: { staticForMs: number; stalenessMs: number; haltStatus: ProbeStatus },
+): ProbeResult {
+  const name = "chain_height";
+  if (!h.configured || !h.reachable || !h.httpOk) {
+    return { name, status: "degraded", detail: "chain status unavailable (product /health not readable)" };
+  }
+  const bc = h.body?.components?.blockchain;
+  if (!bc) return { name, status: "degraded", detail: "product /health did not report a blockchain component" };
+  const chainId = h.body?.auth?.chainId;
+  const tag = chainId ? ` · chain ${chainId}` : "";
+  if (bc.ok === false) return { name, status: "red", detail: `product reports its blockchain component unhealthy${tag}` };
+  const block = pickNum(bc.blockNumber);
+  if (block === undefined) return { name, status: "degraded", detail: `blockchain healthy but no block height reported${tag}` };
+  if (block <= 0) return { name, status: "red", detail: `chain reports block ${block}${tag}` };
+  if (staleness && staleness.stalenessMs > 0 && staleness.staticForMs >= staleness.stalenessMs) {
+    return {
+      name,
+      status: staleness.haltStatus,
+      detail: `chain not advancing — block #${formatInt(block)} static for ${formatDuration(staleness.staticForMs)}${tag}`,
+    };
+  }
+  return { name, status: "ok", detail: `block #${formatInt(block)}${tag}` };
+}
+
+// ── Direct eth-RPC signer-balance probe (the only source of real balances) ──
 
 /** Minimal eth JSON-RPC call; returns the raw `result` (may be a string or object). */
 async function ethRpcRaw(
@@ -204,52 +346,6 @@ async function ethRpc(
   const result = await ethRpcRaw(rpcUrl, method, params, fetchImpl);
   if (typeof result !== "string") throw new Error(`${method}: expected a string result`);
   return result;
-}
-
-/**
- * Chain reachable + producing FRESH blocks. Reads the latest block for both its
- * height and its timestamp: a halted chain (frozen block) still answers RPC, so a
- * height-only check stays green straight through a settlement-stopping halt. If the
- * latest block is older than `maxStaleSeconds`, that's RED (real product-down).
- * An RPC hiccup → degraded (not a product-down page).
- */
-export async function probeChainHeight(input: {
-  rpcUrl?: string;
-  maxStaleSeconds?: number;
-  fetchImpl: typeof fetch;
-  now?: () => number;
-}): Promise<ProbeResult> {
-  if (!input.rpcUrl) {
-    return { name: "chain_height", status: "degraded", detail: "PRODUCT_HEALTH_RPC_URL not configured" };
-  }
-  try {
-    const block = (await ethRpcRaw(input.rpcUrl, "eth_getBlockByNumber", ["latest", false], input.fetchImpl)) as
-      | { number?: string; timestamp?: string }
-      | null;
-    if (!block || typeof block.number !== "string") {
-      return { name: "chain_height", status: "degraded", detail: "chain returned no latest block" };
-    }
-    const height = BigInt(block.number);
-    if (height <= 0n) {
-      return { name: "chain_height", status: "red", detail: "chain reports block 0" };
-    }
-    const maxStale = input.maxStaleSeconds ?? 0;
-    if (maxStale > 0 && typeof block.timestamp === "string") {
-      const nowSec = Math.floor((input.now?.() ?? Date.now()) / 1000);
-      const ageSec = nowSec - Number(BigInt(block.timestamp));
-      if (ageSec > maxStale) {
-        return {
-          name: "chain_height",
-          status: "red",
-          detail: `chain stalled: block #${height.toString()} last advanced ${Math.floor(ageSec / 60)}m ago (> ${Math.floor(maxStale / 60)}m)`,
-        };
-      }
-      return { name: "chain_height", status: "ok", detail: `block #${height.toString()} (${Math.max(0, ageSec)}s ago)` };
-    }
-    return { name: "chain_height", status: "ok", detail: `block #${height.toString()}` };
-  } catch (err) {
-    return { name: "chain_height", status: "degraded", detail: `RPC unreachable: ${errMsg(err)}` };
-  }
 }
 
 // erc20 balanceOf(address) selector.
@@ -313,25 +409,45 @@ export async function probeSignerLiquidity(input: {
   }
 }
 
-/** Build the real probe set from config, all sharing one injected fetch. */
-export function buildProductHealthProbes(
+// ── Collector: one /health fetch (api + chain) + the direct-RPC balance probe ──
+
+export interface ProductHealthCollection {
+  probes: ProbeResult[];
+  /** Updated block-advance tracker — the caller persists it across ticks. */
+  chainAdvance: ChainAdvance;
+}
+
+export async function collectProductHealthProbes(
   config: ProductHealthConfig,
   fetchImpl: typeof fetch = fetch,
-): Array<() => Promise<ProbeResult>> {
-  return [
-    () => probeProductApi({ baseUrl: config.apiBaseUrl, healthPath: config.apiHealthPath, fetchImpl }),
-    () => probeChainHeight({ rpcUrl: config.rpcUrl, maxStaleSeconds: config.chainMaxStaleSeconds, fetchImpl }),
-    () =>
-      probeSignerLiquidity({
-        rpcUrl: config.rpcUrl,
-        signerAddress: config.signerAddress,
-        usdcAddress: config.usdcAddress,
-        usdcDecimals: config.usdcDecimals,
-        minGasNative: config.minGasNative,
-        minUsdc: config.minUsdc,
-        fetchImpl,
-      }),
-  ];
+  chainCtx: { advance?: ChainAdvance; nowMs: number } = { nowMs: 0 },
+): Promise<ProductHealthCollection> {
+  const h = await fetchProductHealth({
+    baseUrl: config.apiBaseUrl,
+    healthPath: config.apiHealthPath,
+    fetchImpl,
+  });
+  const chainId = h.body?.auth?.chainId;
+  const block = pickNum(h.body?.components?.blockchain?.blockNumber);
+  const chainAdvance = trackChainAdvance(chainCtx.advance, block, chainCtx.nowMs);
+  const staleness = {
+    staticForMs: chainCtx.nowMs - chainAdvance.lastAdvanceAtMs,
+    stalenessMs: config.chainMaxStaleSeconds * 1000,
+    haltStatus: chainHaltStatus(chainId, config.haltSeverity),
+  };
+  const signer = await probeSignerLiquidity({
+    rpcUrl: config.rpcUrl,
+    signerAddress: config.signerAddress,
+    usdcAddress: config.usdcAddress,
+    usdcDecimals: config.usdcDecimals,
+    minGasNative: config.minGasNative,
+    minUsdc: config.minUsdc,
+    fetchImpl,
+  });
+  return {
+    probes: [deriveProductApiProbe(h), deriveChainProbe(h, staleness), signer],
+    chainAdvance,
+  };
 }
 
 // ── Alert rendering (reuses the D4 AlertPayload) ────────────────────
