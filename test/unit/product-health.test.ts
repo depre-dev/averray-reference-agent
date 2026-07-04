@@ -276,7 +276,7 @@ describe("runProductHealthOnce", () => {
   });
 });
 
-const TESTNET_RPC = "https://testnet-passet-hub-eth-rpc.polkadot.io/";
+const TESTNET_RPC = "https://eth-rpc-testnet.polkadot.io/";
 
 describe("loadProductHealthConfig", () => {
   it("defaults the RPC to the network endpoint (Option B); signer/USDC resolve elsewhere", () => {

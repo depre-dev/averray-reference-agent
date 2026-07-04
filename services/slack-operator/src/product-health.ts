@@ -117,9 +117,12 @@ function trimTrailingSlash(s: string): string {
 // product settles on, with zero duplicated config. `WALLET_NETWORK` (the signal
 // the chain services already use) selects it; PRODUCT_HEALTH_RPC_URL overrides.
 // Mainnet is intentionally absent until Codex confirms its endpoint — set
-// PRODUCT_HEALTH_RPC_URL there. Testnet URL verified via docs.polkadot.com.
+// PRODUCT_HEALTH_RPC_URL there. Testnet uses the SAME canonical Hub eth-rpc the
+// product settles on (deployments/testnet.json, all three backend RPC vars, and
+// the indexer), verified live (chainId 420420417, USDC precompile answering).
+// The old `testnet-passet-hub-eth-rpc.polkadot.io` host no longer resolves.
 const NETWORK_ETH_RPC: Record<string, string> = {
-  testnet: "https://testnet-passet-hub-eth-rpc.polkadot.io/",
+  testnet: "https://eth-rpc-testnet.polkadot.io/",
 };
 
 /** Resolve the eth-rpc for the product's network (WALLET_NETWORK); testnet default. */
