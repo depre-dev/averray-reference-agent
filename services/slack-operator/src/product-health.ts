@@ -124,6 +124,14 @@ export interface ProductHealthConfig {
    *  disables. Env PRODUCT_HEALTH_LATENCY_WARN_MS / PRODUCT_HEALTH_LATENCY_RED_MS. */
   latencyWarnMs: number;
   latencyRedMs: number;
+  /** money_path: red at ≥ this many stuck (submitted-unsettled) jobs, or ≥ this many
+   *  settlement-EXECUTION failures in 24h. 0 disables that arm. Env
+   *  PRODUCT_HEALTH_MAX_STUCK / PRODUCT_HEALTH_MAX_FAILED_24H. */
+  maxStuck: number;
+  maxFailed24h: number;
+  /** Settlement counts older than this (minutes) ⇒ degraded (stale record). Env
+   *  PRODUCT_HEALTH_SETTLEMENT_MAX_STALE_MINUTES. */
+  settlementMaxStaleMinutes: number;
 }
 
 function num(value: unknown, fallback: number): number {
@@ -181,6 +189,9 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
     expectedWarnings: csv(env.PRODUCT_HEALTH_EXPECTED_WARNINGS, "xcm_observer_staged,indexer_unavailable,gas_sponsor_disabled"),
     latencyWarnMs: num(env.PRODUCT_HEALTH_LATENCY_WARN_MS, 2000),
     latencyRedMs: num(env.PRODUCT_HEALTH_LATENCY_RED_MS, 10000),
+    maxStuck: num(env.PRODUCT_HEALTH_MAX_STUCK, 5),
+    maxFailed24h: num(env.PRODUCT_HEALTH_MAX_FAILED_24H, 3),
+    settlementMaxStaleMinutes: num(env.PRODUCT_HEALTH_SETTLEMENT_MAX_STALE_MINUTES, 15),
   };
 }
 
@@ -202,6 +213,14 @@ export interface ProductHealthPayload {
       signerConfigured?: boolean;
       arbitratorSignerConfigured?: boolean;
     };
+  };
+  /** Settlement-flow counts (the backend's Redis record, not on-chain), per the
+   *  locked /health contract. Absent ⇒ money_path degrades until the product ships it. */
+  settlement?: {
+    settled24h?: number;
+    stuck?: number;
+    failed24h?: number;
+    asOf?: string;
   };
 }
 
@@ -320,6 +339,42 @@ export function deriveLatencyProbe(h: ProductHealthFetch, thresholds: { warnMs: 
   if (thresholds.redMs > 0 && ms >= thresholds.redMs) return { name, status: "red", detail: `/health ${ms}ms (≥ ${thresholds.redMs}ms)` };
   if (thresholds.warnMs > 0 && ms >= thresholds.warnMs) return { name, status: "degraded", detail: `/health ${ms}ms (≥ ${thresholds.warnMs}ms)` };
   return { name, status: "ok", detail: `/health ${ms}ms` };
+}
+
+/** Money-path FLOW, from /health's settlement counts (the backend's Redis record).
+ *  red on too many stuck (submitted-unsettled) jobs or settlement-EXECUTION failures
+ *  in 24h; degraded on any below those, on stale counts, or before the product
+ *  exposes the block. NOTE: failed24h must be execution failures (tx revert), NOT
+ *  verifier rejections — a rejection is the protocol working correctly. */
+export function deriveMoneyPathProbe(
+  h: ProductHealthFetch,
+  config: { maxStuck: number; maxFailed24h: number; maxStaleMinutes: number; nowMs: number },
+): ProbeResult {
+  const name = "money_path";
+  if (!h.configured || !h.reachable || !h.httpOk) {
+    return { name, status: "degraded", detail: "settlement status unavailable (product /health not readable)" };
+  }
+  const s = h.body?.settlement;
+  if (!s) return { name, status: "degraded", detail: "product /health does not expose settlement counts yet" };
+  const stuck = pickNum(s.stuck) ?? 0;
+  const failed = pickNum(s.failed24h) ?? 0;
+  const settled = pickNum(s.settled24h) ?? 0;
+  if (config.maxStaleMinutes > 0 && s.asOf) {
+    const ageMs = config.nowMs - Date.parse(s.asOf);
+    if (Number.isFinite(ageMs) && ageMs > config.maxStaleMinutes * 60_000) {
+      return { name, status: "degraded", detail: `settlement counts stale — asOf ${formatDuration(ageMs)} ago` };
+    }
+  }
+  if (config.maxStuck > 0 && stuck >= config.maxStuck) {
+    return { name, status: "red", detail: `${stuck} jobs stuck (submitted, unsettled ≥ ${config.maxStuck})` };
+  }
+  if (config.maxFailed24h > 0 && failed >= config.maxFailed24h) {
+    return { name, status: "red", detail: `${failed} settlement failures in 24h (≥ ${config.maxFailed24h})` };
+  }
+  if (stuck > 0 || failed > 0) {
+    return { name, status: "degraded", detail: `stuck ${stuck}, failed24h ${failed}, settled24h ${settled}` };
+  }
+  return { name, status: "ok", detail: `settled24h ${settled} (0 stuck, 0 failed)` };
 }
 
 // A capabilityHealth value counts as "up" when it's one of these; anything else
@@ -590,6 +645,12 @@ export async function collectProductHealthProbes(
         expectedWarnings: config.expectedWarnings,
       }),
       deriveLatencyProbe(h, { warnMs: config.latencyWarnMs, redMs: config.latencyRedMs }),
+      deriveMoneyPathProbe(h, {
+        maxStuck: config.maxStuck,
+        maxFailed24h: config.maxFailed24h,
+        maxStaleMinutes: config.settlementMaxStaleMinutes,
+        nowMs: chainCtx.nowMs,
+      }),
     ],
     chainAdvance,
   };

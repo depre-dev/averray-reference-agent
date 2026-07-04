@@ -8,6 +8,7 @@ import {
   deriveChainProbe,
   deriveCapabilityProbe,
   deriveLatencyProbe,
+  deriveMoneyPathProbe,
   trackChainAdvance,
   chainHaltStatus,
   probeSignerLiquidity,
@@ -101,6 +102,7 @@ const HEALTHY_BODY: ProductHealthPayload = {
   components: {
     blockchain: { ok: true, enabled: true, blockNumber: 10612201, signerConfigured: true },
   },
+  settlement: { settled24h: 42, stuck: 0, failed24h: 0, asOf: "2026-07-04T00:00:00Z" },
 };
 
 const fetched = (body: ProductHealthPayload, over: Partial<ProductHealthFetch> = {}): ProductHealthFetch => ({
@@ -130,6 +132,9 @@ const cfg = (over: Partial<ProductHealthConfig> = {}): ProductHealthConfig => ({
   expectedWarnings: ["xcm_observer_staged", "indexer_unavailable", "gas_sponsor_disabled"],
   latencyWarnMs: 2000,
   latencyRedMs: 10000,
+  maxStuck: 5,
+  maxFailed24h: 3,
+  settlementMaxStaleMinutes: 15,
   ...over,
 });
 
@@ -279,6 +284,39 @@ describe("chainHaltStatus", () => {
   });
 });
 
+describe("deriveMoneyPathProbe", () => {
+  const NOW = Date.parse("2026-07-04T00:20:00Z");
+  const base = { maxStuck: 5, maxFailed24h: 3, maxStaleMinutes: 15, nowMs: NOW };
+  const withSettlement = (s: NonNullable<ProductHealthPayload["settlement"]>): ProductHealthFetch =>
+    fetched({ ...HEALTHY_BODY, settlement: s });
+
+  it("degraded when /health unreadable or the settlement block is absent", () => {
+    expect(deriveMoneyPathProbe({ configured: true, reachable: false, httpOk: false, status: 0, url: "u" }, base).status).toBe("degraded");
+    expect(deriveMoneyPathProbe(fetched({ status: "ok" }), base).status).toBe("degraded");
+  });
+
+  it("ok when nothing is stuck or failed (fresh counts)", () => {
+    const r = deriveMoneyPathProbe(withSettlement({ settled24h: 42, stuck: 0, failed24h: 0, asOf: "2026-07-04T00:19:00Z" }), base);
+    expect(r.status).toBe("ok");
+    expect(r.detail).toContain("settled24h 42");
+  });
+
+  it("red when stuck ≥ maxStuck, or settlement failures ≥ maxFailed24h", () => {
+    expect(deriveMoneyPathProbe(withSettlement({ stuck: 5, failed24h: 0, asOf: "2026-07-04T00:19:00Z" }), base).status).toBe("red");
+    expect(deriveMoneyPathProbe(withSettlement({ stuck: 0, failed24h: 3, asOf: "2026-07-04T00:19:00Z" }), base).status).toBe("red");
+  });
+
+  it("degraded on some (below-threshold) stuck/failed", () => {
+    expect(deriveMoneyPathProbe(withSettlement({ stuck: 1, failed24h: 0, asOf: "2026-07-04T00:19:00Z" }), base).status).toBe("degraded");
+  });
+
+  it("degraded when the counts are stale (asOf too old)", () => {
+    const r = deriveMoneyPathProbe(withSettlement({ stuck: 0, failed24h: 0, asOf: "2026-07-04T00:00:00Z" }), base); // 20m > 15m
+    expect(r.status).toBe("degraded");
+    expect(r.detail).toContain("stale");
+  });
+});
+
 describe("deriveLatencyProbe", () => {
   const thresholds = { warnMs: 2000, redMs: 10000 };
 
@@ -384,14 +422,14 @@ describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", ()
       combinedFetch({ healthBody: HEALTHY_BODY, chainIdHex: CHAIN_ID_HEX, blockTimestampHex: tsHex(10_000_000, 12), gasHex: "0xDE0B6B3A7640000", usdcHex: "0x989680" }),
       { nowMs: 10_000_000 },
     );
-    expect(probes.map((p) => p.name)).toEqual(["product_api", "chain_height", "signer_liquidity", "capabilities", "api_latency"]);
-    expect(probes.map((p) => p.status)).toEqual(["ok", "ok", "ok", "ok", "ok"]);
+    expect(probes.map((p) => p.name)).toEqual(["product_api", "chain_height", "signer_liquidity", "capabilities", "api_latency", "money_path"]);
+    expect(probes.map((p) => p.status)).toEqual(["ok", "ok", "ok", "ok", "ok", "ok"]);
     expect(probes[2]?.detail).toContain("USDC 10.00");
   });
 
   it("all degraded when nothing is configured (never fake green)", async () => {
     const { probes } = await collectProductHealthProbes(cfg({ apiBaseUrl: undefined, rpcUrl: undefined }), combinedFetch({ healthBody: HEALTHY_BODY }), { nowMs: 1000 });
-    expect(probes.map((p) => p.status)).toEqual(["degraded", "degraded", "degraded", "degraded", "degraded"]);
+    expect(probes.map((p) => p.status)).toEqual(["degraded", "degraded", "degraded", "degraded", "degraded", "degraded"]);
   });
 
   it("absolute age: a stale block halts IMMEDIATELY on a fresh start — no blind window (testnet → degraded)", async () => {
@@ -559,6 +597,9 @@ describe("loadProductHealthConfig", () => {
     expect(c.expectedWarnings).toContain("indexer_unavailable");
     expect(c.latencyWarnMs).toBe(2000);
     expect(c.latencyRedMs).toBe(10000);
+    expect(c.maxStuck).toBe(5);
+    expect(c.maxFailed24h).toBe(3);
+    expect(c.settlementMaxStaleMinutes).toBe(15);
   });
 
   it("reads env overrides", () => {
