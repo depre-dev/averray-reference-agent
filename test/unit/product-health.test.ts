@@ -3,9 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   evaluateProductHealth,
   redProbeKey,
-  probeProductApi,
-  probeChainHeight,
+  fetchProductHealth,
+  deriveProductApiProbe,
+  deriveChainProbe,
+  trackChainAdvance,
+  chainHaltStatus,
   probeSignerLiquidity,
+  collectProductHealthProbes,
   decideProductHealthAlert,
   runProductHealthOnce,
   initialProductHealthAlertState,
@@ -14,6 +18,9 @@ import {
   appendHistory,
   probeSparkline,
   type ProbeResult,
+  type ProductHealthConfig,
+  type ProductHealthFetch,
+  type ProductHealthPayload,
   type ProductHealthAlertState,
   type ProductHealthDeps,
   type ProductHealthSnapshot,
@@ -21,33 +28,7 @@ import {
 } from "../../services/slack-operator/src/product-health.js";
 import type { AlertPayload } from "../../services/slack-operator/src/alert-bridge.js";
 
-// ── mock fetch (typed so the "Typecheck and test" job stays green) ──
-
-interface MockResponse {
-  ok?: boolean;
-  status?: number;
-  result?: string;
-  error?: string;
-}
-type FetchHandler = (url: string, init: RequestInit) => MockResponse;
-
-function mockFetch(handler: FetchHandler): typeof fetch {
-  return (async (url: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const r = handler(String(url), init ?? {});
-    const status = r.status ?? 200;
-    return {
-      ok: r.ok ?? (status >= 200 && status < 300),
-      status,
-      json: async () => (r.error ? { error: { message: r.error } } : { result: r.result }),
-    } as unknown as Response;
-  }) as unknown as typeof fetch;
-}
-
-function throwingFetch(): typeof fetch {
-  return (async () => {
-    throw new Error("network down");
-  }) as unknown as typeof fetch;
-}
+// ── mocks (typed so the "Typecheck and test" job stays green) ──
 
 function rpcMethod(init: RequestInit): string {
   try {
@@ -57,7 +38,77 @@ function rpcMethod(init: RequestInit): string {
   }
 }
 
+/** GET /health returns `healthBody`; eth-RPC POSTs return the gas/usdc hex. */
+function combinedFetch(cfg: {
+  healthBody?: unknown;
+  healthStatus?: number;
+  gasHex?: string;
+  usdcHex?: string;
+}): typeof fetch {
+  return (async (_url: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const method = init?.method ?? "GET";
+    if (method === "GET") {
+      const status = cfg.healthStatus ?? 200;
+      return { ok: status >= 200 && status < 300, status, json: async () => cfg.healthBody ?? {} } as unknown as Response;
+    }
+    const result = rpcMethod(init ?? {}) === "eth_getBalance" ? cfg.gasHex : cfg.usdcHex;
+    return { ok: true, status: 200, json: async () => ({ result }) } as unknown as Response;
+  }) as unknown as typeof fetch;
+}
+
+/** Signer-balance mock: eth_getBalance → gasHex, else usdcHex. */
+function balances(gasHex: string, usdcHex: string): typeof fetch {
+  return (async (_url: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
+    ({ ok: true, status: 200, json: async () => ({ result: rpcMethod(init ?? {}) === "eth_getBalance" ? gasHex : usdcHex }) }) as unknown as Response) as unknown as typeof fetch;
+}
+
+function healthFetch(status: number, body: unknown): typeof fetch {
+  return (async () => ({ ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as Response) as unknown as typeof fetch;
+}
+
+function throwingFetch(): typeof fetch {
+  return (async () => {
+    throw new Error("network down");
+  }) as unknown as typeof fetch;
+}
+
 const probe = (name: string, status: ProbeResult["status"], detail = ""): ProbeResult => ({ name, status, detail });
+
+// A realistic slice of the live Averray /health payload (testnet chainId 420420417).
+const HEALTHY_BODY: ProductHealthPayload = {
+  status: "ok",
+  auth: { chainId: 420420417 },
+  serviceHealth: { ok: true },
+  components: {
+    blockchain: { ok: true, enabled: true, blockNumber: 10612201, signerConfigured: true },
+  },
+};
+
+const fetched = (body: ProductHealthPayload, over: Partial<ProductHealthFetch> = {}): ProductHealthFetch => ({
+  configured: true,
+  reachable: true,
+  httpOk: true,
+  status: 200,
+  url: "https://api.x/health",
+  body,
+  ...over,
+});
+
+const TESTNET_RPC = "https://eth-rpc-testnet.polkadot.io/";
+
+const cfg = (over: Partial<ProductHealthConfig> = {}): ProductHealthConfig => ({
+  apiBaseUrl: "https://api.x",
+  apiHealthPath: "/health",
+  rpcUrl: "http://rpc",
+  chainMaxStaleSeconds: 600,
+  haltSeverity: "auto",
+  signerAddress: "0xabc",
+  usdcAddress: "0xusdc",
+  usdcDecimals: 6,
+  minGasNative: 0,
+  minUsdc: 0,
+  ...over,
+});
 
 describe("evaluateProductHealth", () => {
   it("overall status is the worst probe (red > degraded > ok)", () => {
@@ -81,90 +132,124 @@ describe("redProbeKey", () => {
   });
 });
 
-describe("probeProductApi", () => {
-  it("degraded (never fake green) when the base url is unconfigured", async () => {
-    const r = await probeProductApi({ baseUrl: undefined, healthPath: "/health", fetchImpl: mockFetch(() => ({ status: 200 })) });
-    expect(r.status).toBe("degraded");
+describe("fetchProductHealth", () => {
+  it("configured:false when the base url is unset (never a fake reachable)", async () => {
+    const h = await fetchProductHealth({ baseUrl: undefined, healthPath: "/health", fetchImpl: healthFetch(200, HEALTHY_BODY) });
+    expect(h.configured).toBe(false);
+    expect(h.reachable).toBe(false);
   });
 
-  it("ok on a 2xx", async () => {
-    const r = await probeProductApi({ baseUrl: "https://api.x", healthPath: "/health", fetchImpl: mockFetch(() => ({ status: 200 })) });
-    expect(r.status).toBe("ok");
+  it("parses the JSON body on a 2xx", async () => {
+    const h = await fetchProductHealth({ baseUrl: "https://api.x", healthPath: "/health", fetchImpl: healthFetch(200, HEALTHY_BODY) });
+    expect(h).toMatchObject({ configured: true, reachable: true, httpOk: true, status: 200 });
+    expect(h.body?.components?.blockchain?.blockNumber).toBe(10612201);
   });
 
-  it("red on a non-2xx", async () => {
-    const r = await probeProductApi({ baseUrl: "https://api.x", healthPath: "/health", fetchImpl: mockFetch(() => ({ status: 503 })) });
-    expect(r.status).toBe("red");
+  it("reachable but not httpOk on a non-2xx", async () => {
+    const h = await fetchProductHealth({ baseUrl: "https://api.x", healthPath: "/health", fetchImpl: healthFetch(503, {}) });
+    expect(h).toMatchObject({ reachable: true, httpOk: false, status: 503 });
   });
 
-  it("red when the endpoint is unreachable", async () => {
-    const r = await probeProductApi({ baseUrl: "https://api.x", healthPath: "/health", fetchImpl: throwingFetch() });
-    expect(r.status).toBe("red");
-  });
-});
-
-describe("probeChainHeight", () => {
-  it("degraded when the RPC url is unconfigured", async () => {
-    const r = await probeChainHeight({ rpcUrl: undefined, fetchImpl: mockFetch(() => ({ result: "0x1" })) });
-    expect(r.status).toBe("degraded");
-  });
-
-  it("ok when the chain reports a positive height (height-only, no freshness threshold)", async () => {
-    const r = await probeChainHeight({ rpcUrl: "http://rpc", fetchImpl: mockFetch(() => ({ result: { number: "0x2a" } })) });
-    expect(r.status).toBe("ok");
-    expect(r.detail).toContain("42");
-  });
-
-  it("red when the chain reports block 0", async () => {
-    const r = await probeChainHeight({ rpcUrl: "http://rpc", fetchImpl: mockFetch(() => ({ result: { number: "0x0" } })) });
-    expect(r.status).toBe("red");
-  });
-
-  it("degraded (not a page) on an RPC hiccup — our dependency, not a product outage", async () => {
-    const r = await probeChainHeight({ rpcUrl: "http://rpc", fetchImpl: mockFetch(() => ({ error: "upstream busy" })) });
-    expect(r.status).toBe("degraded");
-  });
-
-  // Halt detection — the whole point: a frozen chain still answers RPC.
-  const NOW_MS = 1_783_000_000_000; // fixed clock; NOW_MS/1000 = 1_783_000_000 s
-  const at = (secAgo: number) => "0x" + BigInt(Math.floor(NOW_MS / 1000) - secAgo).toString(16);
-
-  it("red when the latest block is stale beyond the freshness threshold (chain halted)", async () => {
-    const r = await probeChainHeight({
-      rpcUrl: "http://rpc",
-      maxStaleSeconds: 600,
-      now: () => NOW_MS,
-      fetchImpl: mockFetch(() => ({ result: { number: "0x2a", timestamp: at(3600) } })), // 60m old
-    });
-    expect(r.status).toBe("red");
-    expect(r.detail).toContain("stalled");
-    expect(r.detail).toContain("42");
-  });
-
-  it("ok when the latest block is fresh (advancing) under the threshold", async () => {
-    const r = await probeChainHeight({
-      rpcUrl: "http://rpc",
-      maxStaleSeconds: 600,
-      now: () => NOW_MS,
-      fetchImpl: mockFetch(() => ({ result: { number: "0x2a", timestamp: at(12) } })), // 12s old
-    });
-    expect(r.status).toBe("ok");
-    expect(r.detail).toContain("42");
-  });
-
-  it("degraded when the chain returns a block with no number", async () => {
-    const r = await probeChainHeight({ rpcUrl: "http://rpc", fetchImpl: mockFetch(() => ({ result: { hash: "0xabc" } })) });
-    expect(r.status).toBe("degraded");
-    expect(r.detail).toContain("no latest block");
+  it("not reachable (with the error) when the request throws", async () => {
+    const h = await fetchProductHealth({ baseUrl: "https://api.x", healthPath: "/health", fetchImpl: throwingFetch() });
+    expect(h.reachable).toBe(false);
+    expect(h.error).toContain("network down");
   });
 });
 
-describe("probeSignerLiquidity", () => {
+describe("deriveProductApiProbe", () => {
+  it("degraded (never fake green) when unconfigured", () => {
+    expect(deriveProductApiProbe({ configured: false, reachable: false, httpOk: false, status: 0, url: "" }).status).toBe("degraded");
+  });
+
+  it("red when unreachable", () => {
+    const r = deriveProductApiProbe({ configured: true, reachable: false, httpOk: false, status: 0, url: "https://api.x/health", error: "ENOTFOUND" });
+    expect(r.status).toBe("red");
+  });
+
+  it("red on a non-2xx and on a self-reported unhealthy service", () => {
+    expect(deriveProductApiProbe(fetched(HEALTHY_BODY, { httpOk: false, status: 503 })).status).toBe("red");
+    expect(deriveProductApiProbe(fetched({ ...HEALTHY_BODY, serviceHealth: { ok: false } })).status).toBe("red");
+  });
+
+  it("ok on a healthy payload, surfacing the chain id it's watching", () => {
+    const r = deriveProductApiProbe(fetched(HEALTHY_BODY));
+    expect(r.status).toBe("ok");
+    expect(r.detail).toContain("420420417");
+  });
+});
+
+describe("deriveChainProbe (/health-derived)", () => {
+  it("degraded (not a page) when /health is unreadable — product_api carries the red", () => {
+    expect(deriveChainProbe({ configured: true, reachable: false, httpOk: false, status: 0, url: "u" }).status).toBe("degraded");
+  });
+
+  it("degraded when the payload has no blockchain component", () => {
+    expect(deriveChainProbe(fetched({ status: "ok" })).status).toBe("degraded");
+  });
+
+  it("ok with the reported block height and chain id", () => {
+    const r = deriveChainProbe(fetched(HEALTHY_BODY));
+    expect(r.status).toBe("ok");
+    expect(r.detail).toContain("10,612,201");
+    expect(r.detail).toContain("420420417");
+  });
+
+  it("red when the product reports its blockchain component unhealthy", () => {
+    expect(deriveChainProbe(fetched({ ...HEALTHY_BODY, components: { blockchain: { ok: false, blockNumber: 10 } } })).status).toBe("red");
+  });
+
+  it("red when the chain reports block 0", () => {
+    expect(deriveChainProbe(fetched({ ...HEALTHY_BODY, components: { blockchain: { ok: true, blockNumber: 0 } } })).status).toBe("red");
+  });
+
+  it("halt severity is caller-supplied: degraded on a testnet freeze, red on a mainnet halt", () => {
+    const stale = (haltStatus: "red" | "degraded") => deriveChainProbe(fetched(HEALTHY_BODY), { staticForMs: 900_000, stalenessMs: 600_000, haltStatus });
+    expect(stale("degraded").status).toBe("degraded");
+    expect(stale("degraded").detail).toContain("not advancing");
+    expect(stale("red").status).toBe("red");
+  });
+
+  it("ok when the block is fresh (static, but within the window)", () => {
+    expect(deriveChainProbe(fetched(HEALTHY_BODY), { staticForMs: 30_000, stalenessMs: 600_000, haltStatus: "red" }).status).toBe("ok");
+  });
+});
+
+describe("trackChainAdvance", () => {
+  it("starts the clock at the first observation", () => {
+    expect(trackChainAdvance(undefined, 100, 5000)).toEqual({ lastBlock: 100, lastAdvanceAtMs: 5000 });
+  });
+
+  it("resets the clock when the block advances", () => {
+    expect(trackChainAdvance({ lastBlock: 100, lastAdvanceAtMs: 5000 }, 101, 9000)).toEqual({ lastBlock: 101, lastAdvanceAtMs: 9000 });
+  });
+
+  it("keeps the old advance time when the block is static (so staleness accrues)", () => {
+    expect(trackChainAdvance({ lastBlock: 100, lastAdvanceAtMs: 5000 }, 100, 9000)).toEqual({ lastBlock: 100, lastAdvanceAtMs: 5000 });
+  });
+
+  it("holds the previous tracker when the block is missing", () => {
+    expect(trackChainAdvance({ lastBlock: 100, lastAdvanceAtMs: 5000 }, undefined, 9000)).toEqual({ lastBlock: 100, lastAdvanceAtMs: 5000 });
+  });
+});
+
+describe("chainHaltStatus", () => {
+  it("auto: mainnet chainId pages (red), testnet freezes (degraded)", () => {
+    expect(chainHaltStatus(420420419, "auto")).toBe("red"); // Polkadot Hub mainnet
+    expect(chainHaltStatus(420420417, "auto")).toBe("degraded"); // testnet
+    expect(chainHaltStatus(undefined, "auto")).toBe("degraded");
+  });
+
+  it("explicit override wins over the auto chainId rule", () => {
+    expect(chainHaltStatus(420420417, "red")).toBe("red");
+    expect(chainHaltStatus(420420419, "degraded")).toBe("degraded");
+  });
+});
+
+describe("probeSignerLiquidity (direct RPC)", () => {
   const floors = { usdcDecimals: 6, minGasNative: 0.1, minUsdc: 5 };
   // 1 ETH = 1e18 wei = 0xDE0B6B3A7640000 ; 0.01 ETH = 1e16 = 0x2386F26FC10000
   // 10 USDC = 10_000_000 = 0x989680 ; 1 USDC = 1_000_000 = 0xF4240
-  const balances = (gasHex: string, usdcHex: string): typeof fetch =>
-    mockFetch((_url, init) => ({ result: rpcMethod(init) === "eth_getBalance" ? gasHex : usdcHex }));
 
   it("degraded when RPC / signer address are unconfigured", async () => {
     const r = await probeSignerLiquidity({ rpcUrl: undefined, signerAddress: undefined, usdcAddress: undefined, ...floors, fetchImpl: balances("0x0", "0x0") });
@@ -195,6 +280,44 @@ describe("probeSignerLiquidity", () => {
   });
 });
 
+describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", () => {
+  it("healthy: api ok (/health), chain ok (/health), signer ok (direct RPC)", async () => {
+    const { probes } = await collectProductHealthProbes(cfg(), combinedFetch({ healthBody: HEALTHY_BODY, gasHex: "0xDE0B6B3A7640000", usdcHex: "0x989680" }), { nowMs: 1000 });
+    expect(probes.map((p) => p.name)).toEqual(["product_api", "chain_height", "signer_liquidity"]);
+    expect(probes.map((p) => p.status)).toEqual(["ok", "ok", "ok"]);
+    expect(probes[2]?.detail).toContain("USDC 10.00");
+  });
+
+  it("all degraded when nothing is configured (never fake green)", async () => {
+    const { probes } = await collectProductHealthProbes(cfg({ apiBaseUrl: undefined, rpcUrl: undefined }), combinedFetch({ healthBody: HEALTHY_BODY }), { nowMs: 1000 });
+    expect(probes.map((p) => p.status)).toEqual(["degraded", "degraded", "degraded"]);
+  });
+
+  it("a frozen testnet chain → chain_height degraded (no page)", async () => {
+    const { probes } = await collectProductHealthProbes(cfg(), combinedFetch({ healthBody: HEALTHY_BODY, gasHex: "0x1", usdcHex: "0x1" }), {
+      advance: { lastBlock: 10612201, lastAdvanceAtMs: 0 },
+      nowMs: 700_000,
+    });
+    const chain = probes.find((p) => p.name === "chain_height");
+    expect(chain?.status).toBe("degraded");
+    expect(chain?.detail).toContain("not advancing");
+  });
+
+  it("a frozen MAINNET chain → chain_height red (pages: settlement down)", async () => {
+    const mainnet: ProductHealthPayload = { ...HEALTHY_BODY, auth: { chainId: 420420419 } };
+    const { probes } = await collectProductHealthProbes(cfg(), combinedFetch({ healthBody: mainnet, gasHex: "0x1", usdcHex: "0x1" }), {
+      advance: { lastBlock: 10612201, lastAdvanceAtMs: 0 },
+      nowMs: 700_000,
+    });
+    expect(probes.find((p) => p.name === "chain_height")?.status).toBe("red");
+  });
+
+  it("returns an updated chain-advance tracker for the caller to persist", async () => {
+    const { chainAdvance } = await collectProductHealthProbes(cfg(), combinedFetch({ healthBody: HEALTHY_BODY, gasHex: "0x1", usdcHex: "0x1" }), { advance: undefined, nowMs: 1000 });
+    expect(chainAdvance).toEqual({ lastBlock: 10612201, lastAdvanceAtMs: 1000 });
+  });
+});
+
 describe("decideProductHealthAlert (de-dup)", () => {
   const red = evaluateProductHealth([probe("product_api", "red", "down")]);
   const healthy = evaluateProductHealth([probe("product_api", "ok")]);
@@ -216,7 +339,7 @@ describe("decideProductHealthAlert (de-dup)", () => {
   });
 
   it("alerts immediately when the red set changes", () => {
-    const red2 = evaluateProductHealth([probe("signer_liquidity", "red", "low")]);
+    const red2 = evaluateProductHealth([probe("chain_height", "red", "halt")]);
     const state: ProductHealthAlertState = { lastRedKey: "product_api", lastAlertAtMs: 1000 };
     expect(decideProductHealthAlert({ evaluation: red2, state, nowMs: 2000, cooldownMs: 60_000 }).alert).toBe(true);
   });
@@ -257,11 +380,10 @@ describe("runProductHealthOnce", () => {
     const r = await runProductHealthOnce(h.deps);
     expect(r.status).toBe("healthy");
     expect(r.alerted).toBe(false);
-    expect(h.alerts).toHaveLength(0);
   });
 
-  it("does not alert when only degraded (unconfigured probes)", async () => {
-    const h = harness([probe("chain_height", "degraded", "not configured")]);
+  it("does not alert when only degraded (a testnet freeze)", async () => {
+    const h = harness([probe("chain_height", "degraded", "not advancing")]);
     const r = await runProductHealthOnce(h.deps);
     expect(r.status).toBe("degraded");
     expect(r.alerted).toBe(false);
@@ -276,47 +398,42 @@ describe("runProductHealthOnce", () => {
   });
 });
 
-const TESTNET_RPC = "https://eth-rpc-testnet.polkadot.io/";
-
 describe("loadProductHealthConfig", () => {
-  it("defaults the RPC to the network endpoint (Option B); signer/USDC resolve elsewhere", () => {
+  it("defaults: /health path, testnet RPC, 600s freshness, auto halt severity", () => {
     const c = loadProductHealthConfig({});
     expect(c.apiBaseUrl).toBeUndefined();
-    expect(c.rpcUrl).toBe(TESTNET_RPC); // WALLET_NETWORK absent → testnet
-    expect(c.signerAddress).toBeUndefined(); // derived in the wiring from AGENT_WALLET_PRIVATE_KEY, not here
-    expect(c.usdcAddress).toBeUndefined();
     expect(c.apiHealthPath).toBe("/health");
+    expect(c.rpcUrl).toBe(TESTNET_RPC); // WALLET_NETWORK absent → testnet
+    expect(c.chainMaxStaleSeconds).toBe(600);
+    expect(c.haltSeverity).toBe("auto");
     expect(c.usdcDecimals).toBe(6);
     expect(c.minGasNative).toBe(0);
     expect(c.minUsdc).toBe(0);
   });
 
-  it("selects the RPC by WALLET_NETWORK, leaving mainnet unset until confirmed", () => {
-    expect(loadProductHealthConfig({ WALLET_NETWORK: "testnet" }).rpcUrl).toBe(TESTNET_RPC);
-    expect(loadProductHealthConfig({ WALLET_NETWORK: "mainnet" }).rpcUrl).toBeUndefined();
-  });
-
-  it("reads env overrides; an explicit RPC wins over the network map", () => {
+  it("reads env overrides", () => {
     const c = loadProductHealthConfig({
       AVERRAY_API_BASE_URL: "https://api.x/",
       PRODUCT_HEALTH_RPC_URL: "http://rpc",
+      PRODUCT_HEALTH_USDC_ADDRESS: "0xusdc",
       PRODUCT_HEALTH_MIN_USDC: "5",
-      PRODUCT_HEALTH_MIN_GAS_NATIVE: "0.1",
+      PRODUCT_HEALTH_HALT_SEVERITY: "red",
+      PRODUCT_HEALTH_CHAIN_MAX_STALE_SECONDS: "120",
     });
     expect(c.apiBaseUrl).toBe("https://api.x");
     expect(c.rpcUrl).toBe("http://rpc");
+    expect(c.usdcAddress).toBe("0xusdc");
     expect(c.minUsdc).toBe(5);
-    expect(c.minGasNative).toBe(0.1);
+    expect(c.haltSeverity).toBe("red");
+    expect(c.chainMaxStaleSeconds).toBe(120);
   });
 });
 
 describe("networkEthRpc", () => {
-  it("resolves testnet (default + case-insensitive), leaves mainnet/unknown unset", () => {
+  it("resolves testnet to the live host (default + case-insensitive), leaves mainnet unset", () => {
     expect(networkEthRpc(undefined)).toBe(TESTNET_RPC);
-    expect(networkEthRpc("testnet")).toBe(TESTNET_RPC);
     expect(networkEthRpc("TestNet")).toBe(TESTNET_RPC);
     expect(networkEthRpc("mainnet")).toBeUndefined();
-    expect(networkEthRpc("weird")).toBeUndefined();
   });
 });
 

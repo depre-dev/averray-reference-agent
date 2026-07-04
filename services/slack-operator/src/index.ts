@@ -157,11 +157,12 @@ import { narrateRouterProposal } from "./monitor-router-narration.js";
 import { runFailureAnalysisOnce } from "./failure-analysis-routine.js";
 import {
   appendHistory,
-  buildProductHealthProbes,
+  collectProductHealthProbes,
   initialProductHealthAlertState,
   loadProductHealthConfig,
   probeSparkline,
   runProductHealthOnce,
+  type ChainAdvance,
   type ProductHealthSnapshot,
 } from "./product-health.js";
 import {
@@ -255,6 +256,8 @@ const routineConfig = parseSlackRoutineConfig(process.env, authConfig.allowedCha
 // Resets on restart; a monitoring sparkline doesn't need durability.
 const PRODUCT_HEALTH_HISTORY_MAX = 60;
 let productHealthHistory: ProductHealthSnapshot[] = [];
+// Block-advance tracker so a frozen chain (static height) isn't read as green.
+let productHealthChainAdvance: ChainAdvance | undefined;
 
 /** The settlement signer's address, derived from the key the monitor already holds
  *  (AGENT_WALLET_PRIVATE_KEY) so signer_liquidity needs no duplicated config. A
@@ -3404,12 +3407,18 @@ function startOperatorRoutines() {
     productHealthRunning = true;
     try {
       const phConfig = loadProductHealthConfig();
-      // Derive the settlement signer from AGENT_WALLET_PRIVATE_KEY (already held) so
-      // signer_liquidity watches the real wallet with zero duplicated config.
+      // Signer address for the balance probe: PRODUCT_HEALTH_SIGNER_ADDRESS or derived
+      // from AGENT_WALLET_PRIVATE_KEY (already held). Chain height reads /health.
       const signerAddress = phConfig.signerAddress ?? deriveProductHealthSigner();
-      const probeFns = buildProductHealthProbes({ ...phConfig, signerAddress });
+      // One /health fetch feeds product_api + chain_height; the block-advance tracker
+      // persists across ticks to catch a frozen chain. Balances come from direct RPC.
+      const collection = await collectProductHealthProbes({ ...phConfig, signerAddress }, fetch, {
+        advance: productHealthChainAdvance,
+        nowMs: Date.now(),
+      });
+      productHealthChainAdvance = collection.chainAdvance;
       const result = await runProductHealthOnce({
-        runProbes: () => Promise.all(probeFns.map((p) => p())),
+        runProbes: async () => collection.probes,
         alert: (payload) => alertChannel.dispatch(payload),
         boardUrl:
           optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor") ??
