@@ -43,6 +43,14 @@ describe("awaiting vs degraded tone", () => {
     expect(probeOpsTone(p)).toBe("awaiting");
   });
 
+  test("catches the live product's forward-compat wordings, not just 'awaiting'", () => {
+    // Live money_path phrases it "does not expose … yet"; treasury "not exposed
+    // by /health yet" — both must read as awaiting (grey), never amber degraded.
+    expect(isAwaitingProbe(probe("money_path", "degraded", "product /health does not expose settlement counts yet"))).toBe(true);
+    expect(isAwaitingProbe(probe("treasury_liquidity", "degraded", "treasury addresses not exposed by /health yet"))).toBe(true);
+    expect(isAwaitingProbe(probe("x", "degraded", "not wired yet"))).toBe(true);
+  });
+
   test("a genuine degradation stays degraded", () => {
     const p = probe("chain_height", "degraded", "chain not advancing — last block 3d 20h old");
     expect(isAwaitingProbe(p)).toBe(false);

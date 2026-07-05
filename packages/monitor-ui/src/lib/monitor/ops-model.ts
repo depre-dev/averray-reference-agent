@@ -23,7 +23,10 @@ import { OPS_PILLARS, OPS_PILLAR_LABELS, probePillar } from "./product-health.js
  */
 export type OpsTone = "ok" | "degraded" | "red" | "awaiting";
 
-const AWAITING_RE = /awaiting|not exposed|not configured|unconfigured|no data/i;
+// Catches the product's forward-compat phrasings: "awaiting …", "not exposed
+// [by /health] yet", "does not expose … yet", "not wired yet", etc. `not expose`
+// (no trailing d) matches both "not exposed" and "does not expose".
+const AWAITING_RE = /awaiting|not expose|not wired|not configured|unconfigured|no data/i;
 
 /** A probe whose degraded status is really "upstream data not wired yet". */
 export function isAwaitingProbe(probe: { status: ProbeStatus; detail: string }): boolean {
