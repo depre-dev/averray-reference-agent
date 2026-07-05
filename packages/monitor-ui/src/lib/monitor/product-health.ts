@@ -38,6 +38,23 @@ export interface SolvencySnapshot {
   pools: SolvencyPool[];
   /** Honest runway note, e.g. "≈ 6 payouts to floor" or "pending settlement data". */
   runwayNote?: string | null;
+  /** Per-pool time-to-floor projection — drives the pre-floor ops suggestion. */
+  runway?: RunwayPool[];
+}
+
+/** A floored pool's projected liquidity runway (mirrors the backend). */
+export interface RunwayPool {
+  key: string;
+  label: string;
+  unit: string;
+  current: number;
+  floor: number;
+  /** Depletion rate in units/hour; null = flat / refilling / not estimable. */
+  burnPerHour: number | null;
+  /** Hours until the balance hits the floor; null = stable/awaiting; 0 = at floor. */
+  hoursToFloor: number | null;
+  estimable: boolean;
+  status: ProbeStatus;
 }
 
 /** Money-path funnel counts. Any `null` → that step awaits data. */

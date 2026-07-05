@@ -23,7 +23,14 @@ import {
   appendHistory,
   probeSparkline,
   deriveProductHealthHistory,
+  deriveLiquidityRunway,
+  decideRunwayAlert,
+  buildRunwayAlertPayload,
+  initialRunwayAlertState,
   type ProbeResult,
+  type SolvencyPoolData,
+  type LiquidityRunway,
+  type LiquidityRunwayPool,
   type ProductHealthConfig,
   type ProductHealthFetch,
   type ProductHealthPayload,
@@ -875,5 +882,176 @@ describe("deriveProductHealthHistory", () => {
     expect(b.balanceSeries).toEqual([]);
     expect(b.uptimePct24h).toBeNull();
     expect(b.incidents).toEqual([]);
+  });
+});
+
+describe("deriveLiquidityRunway", () => {
+  const HOUR = 3_600_000;
+  const bal = (at: number, usdc: number | null, gas: number | null = null): ProductHealthSnapshot => ({
+    at,
+    status: "healthy",
+    probes: [],
+    signerUsdc: usdc,
+    signerGas: gas,
+  });
+  const usdcPool = (amount: number | null, floor: number | null = 1): SolvencyPoolData => ({
+    key: "signer_usdc",
+    label: "signer USDC",
+    amount,
+    unit: "USDC",
+    floor,
+    status: "ok",
+  });
+
+  it("projects a countdown from a steady drain (degraded band)", () => {
+    const now = 6 * HOUR;
+    // 19 → 13 over 6h = 1 USDC/h; floor 1 ⇒ (13-1)/1 = 12h ⇒ degraded
+    const history = Array.from({ length: 7 }, (_, i) => bal(i * HOUR, 19 - i));
+    const r = deriveLiquidityRunway(history, [usdcPool(13)], now);
+    expect(r.pools).toHaveLength(1);
+    expect(r.pools[0].burnPerHour).toBeCloseTo(1, 6);
+    expect(r.pools[0].hoursToFloor).toBeCloseTo(12, 6);
+    expect(r.pools[0].status).toBe("degraded");
+    expect(r.note).toBe("signer USDC ~12h to floor");
+  });
+
+  it("pages (red) when the floor is < 6h out", () => {
+    const now = 6 * HOUR;
+    // 13 → 5 over 4h = 2/h; current 5, floor 1 ⇒ (5-1)/2 = 2h ⇒ red
+    const history = [bal(2 * HOUR, 13), bal(3 * HOUR, 11), bal(4 * HOUR, 9), bal(5 * HOUR, 7), bal(6 * HOUR, 5)];
+    const r = deriveLiquidityRunway(history, [usdcPool(5)], now);
+    expect(r.pools[0].hoursToFloor).toBeCloseTo(2, 6);
+    expect(r.pools[0].status).toBe("red");
+    expect(r.note).toBe("signer USDC ~2h to floor");
+  });
+
+  it("reads stable — not a fake countdown — when the balance is flat", () => {
+    const now = 6 * HOUR;
+    const history = Array.from({ length: 7 }, (_, i) => bal(i * HOUR, 5));
+    const r = deriveLiquidityRunway(history, [usdcPool(5)], now);
+    expect(r.pools[0].hoursToFloor).toBeNull();
+    expect(r.pools[0].estimable).toBe(true);
+    expect(r.pools[0].status).toBe("ok");
+    expect(r.note).toBe("stable — no depletion trend");
+  });
+
+  it("reads stable when the balance is refilling (rising)", () => {
+    const now = 6 * HOUR;
+    const history = Array.from({ length: 7 }, (_, i) => bal(i * HOUR, 3 + i));
+    const r = deriveLiquidityRunway(history, [usdcPool(9)], now);
+    expect(r.pools[0].hoursToFloor).toBeNull();
+    expect(r.pools[0].burnPerHour ?? 0).toBeLessThanOrEqual(0);
+    expect(r.note).toBe("stable — no depletion trend");
+  });
+
+  it("awaits samples (not stable) when there is too little data", () => {
+    const now = 6 * HOUR;
+    const history = [bal(5 * HOUR, 8), bal(6 * HOUR, 7)]; // 2 samples < min 3
+    const r = deriveLiquidityRunway(history, [usdcPool(7)], now);
+    expect(r.pools[0].estimable).toBe(false);
+    expect(r.pools[0].hoursToFloor).toBeNull();
+    expect(r.note).toBeNull(); // no estimable pool ⇒ frontend shows awaiting-data
+  });
+
+  it("reports 0h at/below the floor regardless of trend", () => {
+    const now = 6 * HOUR;
+    const history = Array.from({ length: 7 }, (_, i) => bal(i * HOUR, 1));
+    const r = deriveLiquidityRunway(history, [usdcPool(1, 1)], now); // current == floor
+    expect(r.pools[0].hoursToFloor).toBe(0);
+    expect(r.pools[0].status).toBe("red");
+    expect(r.note).toBe("signer USDC at floor");
+  });
+
+  it("skips informational + series-less pools; the nearest depleting pool wins the note", () => {
+    const now = 6 * HOUR;
+    const history = Array.from({ length: 7 }, (_, i) => bal(i * HOUR, 19 - i, 5000)); // gas flat 5000
+    const pools: SolvencyPoolData[] = [
+      { key: "signer_gas", label: "signer gas", amount: 5000, unit: "PAS", floor: 1, status: "ok" }, // stable, kept
+      usdcPool(13), // draining ⇒ 12h
+      { key: "reward_bank", label: "Reward bank", amount: 100, unit: "USDC", floor: 25, status: "ok" }, // no series ⇒ skip
+      { key: "escrow", label: "Escrow", amount: 96, unit: "USDC", status: "ok", informational: true }, // informational ⇒ skip
+    ];
+    const r = deriveLiquidityRunway(history, pools, now);
+    expect(r.pools.map((p) => p.key)).toEqual(["signer_gas", "signer_usdc"]);
+    expect(r.note).toBe("signer USDC ~12h to floor"); // gas is stable ⇒ usdc is the nearest
+  });
+});
+
+describe("decideRunwayAlert", () => {
+  const HOUR = 3_600_000;
+  const pool = (key: string, status: ProbeResult["status"], hours: number | null = 5): LiquidityRunwayPool => ({
+    key,
+    label: key,
+    unit: "USDC",
+    current: 3,
+    floor: 1,
+    burnPerHour: 0.4,
+    hoursToFloor: hours,
+    estimable: true,
+    status,
+  });
+  const rw = (...pools: LiquidityRunwayPool[]): LiquidityRunway => ({ pools, note: null });
+
+  it("fires on the rising edge into the danger band, then stays quiet within cooldown", () => {
+    const first = decideRunwayAlert({ runway: rw(pool("signer_usdc", "degraded")), state: initialRunwayAlertState(), nowMs: 1000, cooldownMs: HOUR });
+    expect(first.alert).toBe(true);
+    const again = decideRunwayAlert({ runway: rw(pool("signer_usdc", "degraded")), state: first.state, nowMs: 1000 + 5 * 60_000, cooldownMs: HOUR });
+    expect(again.alert).toBe(false);
+  });
+
+  it("re-fires when the danger worsens (degraded → red) even within cooldown", () => {
+    const first = decideRunwayAlert({ runway: rw(pool("signer_usdc", "degraded")), state: initialRunwayAlertState(), nowMs: 0, cooldownMs: HOUR });
+    const worse = decideRunwayAlert({ runway: rw(pool("signer_usdc", "red", 2)), state: first.state, nowMs: 60_000, cooldownMs: HOUR });
+    expect(worse.alert).toBe(true);
+  });
+
+  it("re-fires after the cooldown while the danger persists", () => {
+    const first = decideRunwayAlert({ runway: rw(pool("signer_usdc", "degraded")), state: initialRunwayAlertState(), nowMs: 0, cooldownMs: HOUR });
+    const later = decideRunwayAlert({ runway: rw(pool("signer_usdc", "degraded")), state: first.state, nowMs: HOUR + 1, cooldownMs: HOUR });
+    expect(later.alert).toBe(true);
+  });
+
+  it("clears (no alert, key reset) once every pool is out of the band", () => {
+    const first = decideRunwayAlert({ runway: rw(pool("signer_usdc", "red", 2)), state: initialRunwayAlertState(), nowMs: 0, cooldownMs: HOUR });
+    const safe = decideRunwayAlert({ runway: rw(pool("signer_usdc", "ok", null)), state: first.state, nowMs: 60_000, cooldownMs: HOUR });
+    expect(safe.alert).toBe(false);
+    expect(safe.state.lastDangerKey).toBe("");
+  });
+
+  it("stays quiet when nothing is in the danger band", () => {
+    const d = decideRunwayAlert({ runway: rw(pool("signer_usdc", "ok", null), pool("signer_gas", "ok", null)), state: initialRunwayAlertState(), nowMs: 0, cooldownMs: HOUR });
+    expect(d.alert).toBe(false);
+  });
+});
+
+describe("buildRunwayAlertPayload", () => {
+  const pool = (key: string, status: ProbeResult["status"], hours: number): LiquidityRunwayPool => ({
+    key,
+    label: key === "signer_usdc" ? "signer USDC" : "signer gas",
+    unit: "USDC",
+    current: 3,
+    floor: 1,
+    burnPerHour: 0.4,
+    hoursToFloor: hours,
+    estimable: true,
+    status,
+  });
+
+  it("summarises the danger pools nearest-first with a board link", () => {
+    const runway: LiquidityRunway = { pools: [pool("signer_gas", "degraded", 20), pool("signer_usdc", "red", 3)], note: null };
+    const p = buildRunwayAlertPayload(runway, "https://board");
+    expect(p.count).toBe(2);
+    expect(p.items[0].id).toBe("runway-signer_usdc"); // nearest first
+    expect(p.items[0].title).toContain("~3h to floor");
+    expect(p.boardUrl).toBe("https://board");
+    expect(p.text).toContain("signer USDC ~3h to floor");
+    expect(p.text).toContain("operator action");
+  });
+
+  it("excludes stable pools from the payload", () => {
+    const runway: LiquidityRunway = { pools: [{ ...pool("signer_usdc", "ok", 0), hoursToFloor: null }, pool("signer_gas", "degraded", 10)], note: null };
+    const p = buildRunwayAlertPayload(runway, "https://board");
+    expect(p.count).toBe(1);
+    expect(p.items[0].id).toBe("runway-signer_gas");
   });
 });
