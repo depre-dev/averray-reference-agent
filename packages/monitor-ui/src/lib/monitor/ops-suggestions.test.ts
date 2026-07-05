@@ -48,4 +48,65 @@ describe("opsSuggestions", () => {
     };
     expect(opsSuggestions(health).find((s) => s.id === "chain-frozen")).toBeUndefined();
   });
+
+  test("runway projection → proactive pre-floor suggestion carrying a PREPARE task", () => {
+    const health: ProductHealth = {
+      enabled: true,
+      at: 1,
+      status: "degraded",
+      checks: 10,
+      probes: [{ name: "signer_liquidity", status: "ok", detail: "gas 4999.99, USDC 3.00", sparkline: [] }],
+      solvency: {
+        pools: [],
+        runway: [
+          { key: "signer_gas", label: "signer gas", unit: "PAS", current: 4999, floor: 1, burnPerHour: null, hoursToFloor: null, estimable: true, status: "ok" },
+          { key: "signer_usdc", label: "signer USDC", unit: "USDC", current: 3, floor: 1, burnPerHour: 0.4, hoursToFloor: 5, estimable: true, status: "red" },
+        ],
+      },
+    };
+    const byId = Object.fromEntries(opsSuggestions(health).map((s) => [s.id, s]));
+    expect(byId["signer-runway"]).toBeTruthy();
+    expect(byId["signer-runway"].tone).toBe("act"); // red projection
+    expect(byId["signer-runway"].text).toContain("signer USDC ~5h to floor");
+    expect(byId["signer-runway"].task?.prompt).toContain("PREPARE ONLY");
+    expect(byId["signer-runway"].task?.prompt).toContain("do NOT move funds");
+    expect(byId["signer-runway"].task?.repo).toContain("averray-reference-agent");
+    expect(byId["signer-floor"]).toBeUndefined(); // signer probe is healthy → no at-floor item
+  });
+
+  test("runway at floor (0h) does not double up — signer-floor owns the at-floor case", () => {
+    const health: ProductHealth = {
+      enabled: true,
+      at: 1,
+      status: "red",
+      checks: 10,
+      probes: [{ name: "signer_liquidity", status: "red", detail: "USDC 1.00 below floor 1.00", sparkline: [] }],
+      solvency: {
+        pools: [],
+        runway: [
+          { key: "signer_usdc", label: "signer USDC", unit: "USDC", current: 1, floor: 1, burnPerHour: 0.4, hoursToFloor: 0, estimable: true, status: "red" },
+        ],
+      },
+    };
+    const byId = Object.fromEntries(opsSuggestions(health).map((s) => [s.id, s]));
+    expect(byId["signer-floor"]).toBeTruthy(); // probe below floor
+    expect(byId["signer-runway"]).toBeUndefined(); // hoursToFloor 0 excluded from the proactive one
+  });
+
+  test("stable / awaiting runway → no proactive suggestion", () => {
+    const health: ProductHealth = {
+      enabled: true,
+      at: 1,
+      status: "healthy",
+      checks: 10,
+      probes: [{ name: "signer_liquidity", status: "ok", detail: "USDC 3.00", sparkline: [] }],
+      solvency: {
+        pools: [],
+        runway: [
+          { key: "signer_usdc", label: "signer USDC", unit: "USDC", current: 3, floor: 1, burnPerHour: 0, hoursToFloor: null, estimable: true, status: "ok" },
+        ],
+      },
+    };
+    expect(opsSuggestions(health).find((s) => s.id === "signer-runway")).toBeUndefined();
+  });
 });

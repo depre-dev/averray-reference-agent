@@ -363,6 +363,71 @@ function summariseRunway(pools: ReadonlyArray<LiquidityRunwayPool>): string | nu
   return pools.some((p) => p.estimable) ? "stable — no depletion trend" : null;
 }
 
+// ── Pre-floor runway alert (edge-triggered; mirrors decideProductHealthAlert) ──
+
+export interface RunwayAlertState {
+  /** The danger-set key at the previous alert ("" when last clear). */
+  lastDangerKey: string;
+  lastAlertAtMs: number;
+}
+
+export function initialRunwayAlertState(): RunwayAlertState {
+  return { lastDangerKey: "", lastAlertAtMs: 0 };
+}
+
+/** The danger set: floored pools projected into the warn/page band, keyed by
+ *  pool:status so a worsening (degraded→red) counts as a new edge. Empty = safe. */
+function runwayDangerKey(runway: LiquidityRunway): string {
+  return runway.pools
+    .filter((p) => p.status === "red" || p.status === "degraded")
+    .map((p) => `${p.key}:${p.status}`)
+    .sort()
+    .join(",");
+}
+
+/**
+ * Fire a pre-floor alert on the rising edge into the danger band (or a worsening
+ * within it), then re-fire only after the cooldown while it persists — so the
+ * operator hears about a projected floor BEFORE it halts settlement, without a
+ * page every poll. Clears (no alert) once every pool is out of the band.
+ */
+export function decideRunwayAlert(input: {
+  runway: LiquidityRunway;
+  state: RunwayAlertState;
+  nowMs: number;
+  cooldownMs: number;
+}): { alert: boolean; state: RunwayAlertState } {
+  const key = runwayDangerKey(input.runway);
+  if (key === "") {
+    return { alert: false, state: { lastDangerKey: "", lastAlertAtMs: input.state.lastAlertAtMs } };
+  }
+  const changed = key !== input.state.lastDangerKey;
+  const cooldownElapsed =
+    input.cooldownMs > 0 && input.nowMs - input.state.lastAlertAtMs >= input.cooldownMs;
+  if (changed || cooldownElapsed) {
+    return { alert: true, state: { lastDangerKey: key, lastAlertAtMs: input.nowMs } };
+  }
+  return { alert: false, state: { ...input.state, lastDangerKey: key } };
+}
+
+/** Build the D4 alert payload for the pools in the danger band (nearest-first). */
+export function buildRunwayAlertPayload(runway: LiquidityRunway, boardUrl: string): AlertPayload {
+  const danger = runway.pools
+    .filter((p) => p.status === "red" || p.status === "degraded")
+    .sort((a, b) => (a.hoursToFloor ?? 0) - (b.hoursToFloor ?? 0));
+  const items = danger.map((p) => ({
+    id: `runway-${p.key}`,
+    title: `${p.label} — ${formatRunwayHours(p.hoursToFloor ?? 0)}`,
+  }));
+  const lead = danger.length ? `${danger[0].label} ${formatRunwayHours(danger[0].hoursToFloor ?? 0)}` : "";
+  return {
+    count: danger.length,
+    items,
+    boardUrl,
+    text: `Liquidity runway — ${lead}. Top up before settlement halts (operator action).`,
+  };
+}
+
 // ── Config (env-driven; balances stay degraded until their RPC/USDC keys are set) ──
 
 export interface ProductHealthConfig {
@@ -968,6 +1033,8 @@ export interface SolvencyPoolData {
 export interface SolvencySnapshotData {
   pools: SolvencyPoolData[];
   runwayNote?: string | null;
+  /** Per-pool time-to-floor projection — drives the pre-floor ops suggestion. */
+  runway?: LiquidityRunwayPool[];
 }
 export interface MoneyPathData {
   settled24h?: number | null;

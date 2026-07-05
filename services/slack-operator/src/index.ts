@@ -159,10 +159,13 @@ import { narrateRouterProposal } from "./monitor-router-narration.js";
 import { runFailureAnalysisOnce } from "./failure-analysis-routine.js";
 import {
   appendHistory,
+  buildRunwayAlertPayload,
   collectProductHealthProbes,
+  decideRunwayAlert,
   deriveLiquidityRunway,
   deriveProductHealthHistory,
   initialProductHealthAlertState,
+  initialRunwayAlertState,
   loadProductHealthConfig,
   probeSparkline,
   runProductHealthOnce,
@@ -3176,6 +3179,7 @@ function startOperatorRoutines() {
   let anomalyPauseRunning = false;
   let productHealthRunning = false;
   let productHealthAlertState = initialProductHealthAlertState();
+  let runwayAlertState = initialRunwayAlertState();
   // Slice 3: previous overall product-health status, so the co-pilot narrates
   // only on an edge across the red boundary (entered-red / recovered).
   let prevProductHealthStatus: OpsStatus = "unknown";
@@ -3495,6 +3499,27 @@ function startOperatorRoutines() {
           Date.now(),
         );
         productHealthSnapshotBlocks.solvency.runwayNote = runway.note;
+        productHealthSnapshotBlocks.solvency.runway = runway.pools;
+        // Pre-floor alert: page the moment a pool's PROJECTED runway crosses into
+        // the danger band — before the balance actually hits the floor. Edge-
+        // triggered + cooldown-deduped so it warns once per crossing, not every
+        // poll. The operator tops up (funds are theirs); the board just warns.
+        const runwayDecision = decideRunwayAlert({
+          runway,
+          state: runwayAlertState,
+          nowMs: Date.now(),
+          cooldownMs: routineConfig.productHealth.cooldownMs,
+        });
+        runwayAlertState = runwayDecision.state;
+        if (runwayDecision.alert) {
+          await alertChannel.dispatch(
+            buildRunwayAlertPayload(
+              runway,
+              optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor") ??
+                "https://monitor.averray.com/monitor",
+            ),
+          );
+        }
       }
       // Slice 3: proactive ops narration — Hermes posts a co-pilot turn on a
       // fresh red / recovery edge (self-deduped by the transition; muted = quiet,
