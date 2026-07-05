@@ -4,10 +4,12 @@ import { opsSuggestions } from "./ops-suggestions.js";
 import { OPS_FIXTURE_LIVE, OPS_FIXTURE_RED } from "./ops-fixtures.js";
 
 describe("opsSuggestions", () => {
-  test("red board → signer-below-floor (informational) + money-path (proposed task)", () => {
+  test("red board → signer-below-floor (PREPARE task) + money-path (investigate task)", () => {
     const byId = Object.fromEntries(opsSuggestions(OPS_FIXTURE_RED).map((s) => [s.id, s]));
     expect(byId["signer-floor"]).toBeTruthy();
-    expect(byId["signer-floor"].task).toBeUndefined(); // funds = operator-only, never a task
+    // funds → PREPARE-only task (compute + draft), never a transfer
+    expect(byId["signer-floor"].task?.prompt).toContain("PREPARE ONLY");
+    expect(byId["signer-floor"].task?.prompt).toContain("do NOT move funds");
     expect(byId["money-stuck"]).toBeTruthy();
     expect(byId["money-stuck"].tone).toBe("act");
     expect(byId["money-stuck"].task?.prompt).toContain("money path");
@@ -108,5 +110,92 @@ describe("opsSuggestions", () => {
       },
     };
     expect(opsSuggestions(health).find((s) => s.id === "signer-runway")).toBeUndefined();
+  });
+
+  test("product API down → investigate task, ordered most-actionable first", () => {
+    const health: ProductHealth = {
+      enabled: true,
+      at: 1,
+      status: "red",
+      checks: 5,
+      probes: [
+        { name: "product_api", status: "red", detail: "503 from /health", sparkline: [] },
+        { name: "api_latency", status: "degraded", detail: "p95 1400ms", sparkline: [] },
+      ],
+    };
+    const s = opsSuggestions(health);
+    expect(s[0].id).toBe("product-api-down"); // most-actionable first
+    expect(s[0].tone).toBe("act");
+    expect(s[0].task?.prompt).toContain("503 from /health");
+    expect(s[0].task?.repo).toContain("averray-reference-agent");
+  });
+
+  test("elevated API latency → investigate task citing the detail", () => {
+    const health: ProductHealth = {
+      enabled: true,
+      at: 1,
+      status: "degraded",
+      checks: 5,
+      probes: [{ name: "api_latency", status: "degraded", detail: "p95 1400ms", sparkline: [] }],
+    };
+    const byId = Object.fromEntries(opsSuggestions(health).map((s) => [s.id, s]));
+    expect(byId["api-latency"].tone).toBe("warn");
+    expect(byId["api-latency"].task?.prompt).toContain("1400ms");
+  });
+
+  test("treasury reserve low → PREPARE-only task (never a transfer)", () => {
+    const health: ProductHealth = {
+      enabled: true,
+      at: 1,
+      status: "red",
+      checks: 5,
+      probes: [{ name: "treasury_liquidity", status: "red", detail: "reserve 40 below floor 100", sparkline: [] }],
+    };
+    const byId = Object.fromEntries(opsSuggestions(health).map((s) => [s.id, s]));
+    expect(byId["treasury-floor"].tone).toBe("act");
+    expect(byId["treasury-floor"].task?.prompt).toContain("PREPARE ONLY");
+    expect(byId["treasury-floor"].task?.prompt).toContain("do NOT move funds");
+  });
+
+  test("degraded capability now carries an investigate task naming the detail", () => {
+    const health: ProductHealth = {
+      enabled: true,
+      at: 1,
+      status: "degraded",
+      checks: 5,
+      probes: [{ name: "capabilities", status: "degraded", detail: "treasuryMutations down", sparkline: [] }],
+    };
+    const byId = Object.fromEntries(opsSuggestions(health).map((s) => [s.id, s]));
+    expect(byId["capabilities"].task?.prompt).toContain("treasuryMutations down");
+  });
+
+  test("mainnet chain halt → escalate task, not the testnet 'wait it out'", () => {
+    const health: ProductHealth = {
+      enabled: true,
+      at: 1,
+      status: "red",
+      checks: 5,
+      network: "mainnet",
+      probes: [{ name: "chain_height", status: "red", detail: "not advancing — 12m stall", sparkline: [] }],
+    };
+    const byId = Object.fromEntries(opsSuggestions(health).map((s) => [s.id, s]));
+    expect(byId["chain-halt"]).toBeTruthy();
+    expect(byId["chain-halt"].tone).toBe("act");
+    expect(byId["chain-halt"].task?.prompt).toContain("MAINNET");
+    expect(byId["chain-frozen"]).toBeUndefined();
+  });
+
+  test("awaiting-data probes produce nothing across the full catalog (truth-boundary)", () => {
+    const health: ProductHealth = {
+      enabled: true,
+      at: 1,
+      status: "degraded",
+      checks: 5,
+      probes: [
+        { name: "money_path", status: "degraded", detail: "product /health does not expose settlement counts yet", sparkline: [] },
+        { name: "treasury_liquidity", status: "degraded", detail: "treasury addresses not exposed by /health yet", sparkline: [] },
+      ],
+    };
+    expect(opsSuggestions(health)).toEqual([]);
   });
 });
