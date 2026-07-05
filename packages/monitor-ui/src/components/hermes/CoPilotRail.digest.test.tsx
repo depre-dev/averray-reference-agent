@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { ReactNode } from "react";
-import { cleanup, render, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, within } from "@testing-library/react";
 import { SWRConfig } from "swr";
 import { CoPilotRail } from "./CoPilotRail.js";
 import type { BoardCard } from "../../lib/monitor/card-types.js";
-import { OPS_FIXTURE_LIVE } from "../../lib/monitor/ops-fixtures.js";
+import { OPS_FIXTURE_LIVE, OPS_FIXTURE_RED } from "../../lib/monitor/ops-fixtures.js";
 
 afterEach(cleanup);
 
@@ -55,5 +55,20 @@ describe("PR-D3d — rail Hermes digest", () => {
   test("no ops line when product health is absent (rail stays delivery-only)", () => {
     const { container } = render(<CoPilotRail boardCards={[]} collaboration={{ enabled: false }} />, { wrapper });
     expect(container.querySelector(".hm-rail-ops")).toBeNull();
+  });
+
+  test("ops suggestions box: informational rows + a human-gated Propose task button", () => {
+    const onCreateTask = vi.fn();
+    const { container } = render(
+      <CoPilotRail boardCards={[]} collaboration={{ enabled: false }} productHealth={OPS_FIXTURE_RED} onCreateTask={onCreateTask} />,
+      { wrapper },
+    );
+    const box = container.querySelector(".hm-rail-ops-sugg") as HTMLElement;
+    expect(box).toBeTruthy();
+    expect(box.textContent).toContain("Signer USDC below floor");
+    const propose = within(box).getByText("Propose task");
+    fireEvent.click(propose);
+    expect(onCreateTask).toHaveBeenCalledTimes(1);
+    expect(onCreateTask.mock.calls[0][0].repo).toContain("averray-reference-agent");
   });
 });
