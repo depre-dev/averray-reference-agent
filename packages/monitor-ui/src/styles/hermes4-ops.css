@@ -1,0 +1,425 @@
+/* =========================================================
+   Hermes-4 Ops surface — the full-canvas operations board.
+   Consumes the --h4-* token system (never forks it). Tone is
+   driven by a per-element `--tone` custom property so dots,
+   meters, borders, and strokes all track one status color:
+
+     ok        sage    --h4-ok      (healthy)
+     degraded  amber   --h4-warn    (a real degradation)
+     red       coral   --h4-act     (page-worthy)
+     awaiting  gray    --h4-tel     (no data yet — never fake-green)
+
+   Loaded last in main.tsx so its additive rules win.
+   ========================================================= */
+
+/* ---- board-level switch bar (above the board, both modes) ---- */
+.ops-switch-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 18px 0;
+}
+.ops-switch {
+  display: inline-flex;
+  background: var(--h4-paper-sunken);
+  border: 1px solid var(--h4-line);
+  border-radius: var(--h4-r-pill);
+  padding: 2px;
+}
+.ops-switch-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 15px;
+  border: 0;
+  background: none;
+  border-radius: var(--h4-r-pill);
+  color: var(--h4-muted);
+  font-size: 12.5px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color var(--h4-dur) var(--h4-ease), background var(--h4-dur) var(--h4-ease);
+}
+.ops-switch-opt.is-on {
+  background: var(--h4-paper);
+  color: var(--h4-ink);
+  font-weight: 500;
+  box-shadow: var(--h4-sh-sm);
+}
+.ops-switch-opt:not(.is-on):hover {
+  color: var(--h4-ink);
+}
+.ops-switch .ops-dot {
+  width: 7px;
+  height: 7px;
+}
+
+/* ---- status dot (shared) ---- */
+.ops-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tone, var(--h4-tel));
+  flex: none;
+}
+.ops-dot--ok, .ops-dot--pass { --tone: var(--h4-ok); }
+.ops-dot--degraded { --tone: var(--h4-warn); }
+.ops-dot--red, .ops-dot--fail { --tone: var(--h4-act); }
+.ops-dot--awaiting, .ops-dot--muted { --tone: var(--h4-tel); }
+
+/* ---- board shell ---- */
+.ops-board {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 18px 22px;
+}
+.ops-board--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ops-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  text-align: center;
+  padding: 64px 20px;
+}
+.ops-empty-title { font-size: 15px; color: var(--h4-ink); font-weight: 500; }
+.ops-empty-detail { font-size: 12.5px; color: var(--h4-faint); }
+
+/* ---- sub-header ---- */
+.ops-subhead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 2px 2px 12px;
+  border-bottom: 1px solid var(--h4-line-2);
+}
+.ops-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--h4-ink);
+  --tone: var(--h4-tel);
+}
+.ops-status--pass { --tone: var(--h4-ok); }
+.ops-status--degraded { --tone: var(--h4-warn); }
+.ops-status--fail { --tone: var(--h4-act); }
+.ops-status--muted { --tone: var(--h4-tel); }
+.ops-status .ops-dot { background: var(--tone); }
+.ops-meta { font-size: 12px; color: var(--h4-muted); }
+.ops-subhead-right { margin-left: auto; }
+.ops-net {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: var(--h4-r-pill);
+  border: 1px solid var(--h4-line);
+}
+.ops-net--testnet { color: var(--h4-warn-text); border-color: var(--h4-warn-line); }
+.ops-net--mainnet { color: var(--h4-ok-text); border-color: var(--h4-ok-line); }
+
+/* ---- soft incident banner ---- */
+.ops-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 9px 12px;
+  border-radius: var(--h4-r-btn);
+  background: var(--h4-paper);
+  border: 1px solid var(--h4-line);
+  border-left: 3px solid var(--tone, var(--h4-warn));
+}
+.ops-banner--degraded { --tone: var(--h4-warn); }
+.ops-banner--red { --tone: var(--h4-act); }
+.ops-banner .ops-dot { background: var(--tone); }
+.ops-banner-text { flex: 1; font-size: 12.5px; color: var(--h4-ink-2); min-width: 0; }
+.ops-banner-sub { color: var(--h4-faint); }
+.ops-banner-x {
+  background: none;
+  border: 0;
+  color: var(--h4-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.ops-banner-x:hover { color: var(--h4-ink); }
+
+/* ---- zone grid ---- */
+.ops-grid {
+  display: grid;
+  gap: 13px;
+  grid-template-columns: 1fr;
+  margin-top: 13px;
+}
+@media (min-width: 1040px) {
+  .ops-grid {
+    grid-template-columns: 1.55fr 1fr;
+    grid-template-areas:
+      "probes solvency"
+      "flow trends"
+      "incidents deps";
+  }
+  .z-probes { grid-area: probes; }
+  .z-solvency { grid-area: solvency; }
+  .z-flow { grid-area: flow; }
+  .z-trends { grid-area: trends; }
+  .z-incidents { grid-area: incidents; }
+  .z-deps { grid-area: deps; }
+}
+
+/* ---- zone chrome ---- */
+.ops-zone {
+  background: var(--h4-paper);
+  border: 1px solid var(--h4-line);
+  border-radius: var(--h4-r-card);
+  padding: 13px 15px;
+}
+.ops-zone-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 11px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--h4-ink);
+}
+.ops-zone-icon { color: var(--h4-muted); display: inline-flex; }
+.ops-zone-title { font-weight: 500; }
+.ops-zone-meta { margin-left: auto; font-size: 11.5px; color: var(--h4-muted); font-weight: 400; }
+.ops-zone-sub {
+  color: var(--h4-faint);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 10.5px;
+}
+.ops-zone-note { margin: 9px 0 0; font-size: 11px; color: var(--h4-faint); }
+
+/* ---- awaiting-data ---- */
+.ops-await { color: var(--h4-faint); font-size: 12px; font-style: italic; margin: 0; }
+.ops-await--inline { margin-top: 6px; }
+.ops-await--tag {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--h4-muted);
+  background: var(--h4-tel-chip);
+  padding: 2px 8px;
+  border-radius: var(--h4-r-pill);
+}
+.ops-await--calm { color: var(--h4-muted); font-style: normal; }
+
+/* ---- probe grid ---- */
+.ops-pillar-label {
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--h4-faint);
+  margin: 11px 0 1px;
+}
+.ops-pillar:first-child .ops-pillar-label { margin-top: 0; }
+.ops-probe {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-top: 1px solid var(--h4-line-2);
+  --tone: var(--h4-tel);
+}
+.ops-probe--ok { --tone: var(--h4-ok); }
+.ops-probe--degraded { --tone: var(--h4-warn); }
+.ops-probe--red { --tone: var(--h4-act); }
+.ops-probe--awaiting { --tone: var(--h4-tel); }
+.ops-probe .ops-dot { background: var(--tone); }
+.ops-probe-name { min-width: 118px; color: var(--h4-ink); font-size: 12.5px; }
+.ops-probe-detail {
+  flex: 1;
+  color: var(--h4-muted);
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ops-probe--awaiting .ops-probe-detail { color: var(--h4-faint); font-style: italic; }
+/* Awaiting probes have no real history — grey the strip so amber cells don't
+   imply a degradation that never happened. */
+.ops-probe--awaiting .ops-spark-cell { background: var(--h4-tel); opacity: 0.4; }
+
+/* ---- sparklines ---- */
+.ops-spark {
+  display: inline-flex;
+  gap: 2px;
+  align-items: flex-end;
+  height: 12px;
+  margin-left: auto;
+}
+.ops-spark-cell { width: 4px; height: 10px; border-radius: 1px; background: var(--h4-tel); }
+.ops-spark-cell--ok { background: var(--h4-ok); }
+.ops-spark-cell--degraded { background: var(--h4-warn); }
+.ops-spark-cell--red { background: var(--h4-act); }
+.ops-spark-cell--empty { background: var(--h4-line); }
+
+.ops-linespark { width: 100%; height: 34px; display: block; }
+.ops-linespark polyline {
+  stroke: var(--h4-tel);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.ops-linespark--ok polyline { stroke: var(--h4-ok); }
+.ops-linespark--act polyline { stroke: var(--h4-act); }
+.ops-linespark--empty {
+  height: 34px;
+  border-bottom: 1px dashed var(--h4-line);
+}
+
+/* ---- solvency ---- */
+.ops-gauges { display: flex; flex-direction: column; gap: 9px; }
+.ops-gauge { --tone: var(--h4-ok); }
+.ops-gauge--ok { --tone: var(--h4-ok); }
+.ops-gauge--degraded { --tone: var(--h4-warn); }
+.ops-gauge--red { --tone: var(--h4-act); }
+.ops-gauge--awaiting, .ops-gauge--tel { --tone: var(--h4-tel); }
+.ops-gauge-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.ops-gauge-name { color: var(--h4-ink); }
+.ops-gauge-val { color: var(--h4-muted); font-variant-numeric: tabular-nums; text-align: right; }
+.ops-gauge-floor { color: var(--h4-faint); }
+.ops-meter {
+  height: 6px;
+  margin-top: 5px;
+  background: var(--h4-paper-sunken);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.ops-meter i { display: block; height: 100%; background: var(--tone); border-radius: 3px; }
+.ops-runway {
+  margin: 11px 0 0;
+  font-size: 12px;
+  color: var(--h4-muted);
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.ops-runway-label {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--h4-faint);
+}
+
+/* ---- money-path funnel ---- */
+.ops-funnel { display: flex; gap: 6px; }
+.ops-funnel.is-awaiting { opacity: 0.55; }
+.ops-fstep {
+  flex: 1;
+  background: var(--h4-paper-sunken);
+  border: 1px solid var(--h4-line-2);
+  border-radius: var(--h4-r-sm);
+  padding: 9px 6px;
+  text-align: center;
+  --tone: var(--h4-tel);
+}
+.ops-fstep--ok { --tone: var(--h4-ok); }
+.ops-fstep--degraded { --tone: var(--h4-warn); }
+.ops-fstep--red { --tone: var(--h4-act); }
+.ops-fstep--neutral { --tone: var(--h4-tel); }
+.ops-fstep-n {
+  font-size: 19px;
+  font-weight: 500;
+  color: var(--tone);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.ops-fstep-l {
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--h4-faint);
+  margin-top: 3px;
+}
+
+/* ---- trends ---- */
+.ops-trends { display: flex; flex-direction: column; gap: 11px; }
+.ops-trend-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--h4-muted);
+  margin-bottom: 4px;
+}
+.ops-trend-val { color: var(--h4-ink); font-variant-numeric: tabular-nums; }
+.ops-trend .ops-spark { display: flex; height: 15px; margin-left: 0; }
+.ops-trend .ops-spark-cell { height: 13px; }
+
+/* ---- incidents ---- */
+.ops-incidents { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.ops-incident {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 0;
+  border-top: 1px solid var(--h4-line-2);
+  font-size: 12px;
+  --tone: var(--h4-warn);
+}
+.ops-incident:first-child { border-top: 0; }
+.ops-incident--degraded { --tone: var(--h4-warn); }
+.ops-incident--red { --tone: var(--h4-act); }
+.ops-incident .ops-dot { background: var(--tone); }
+.ops-incident-probe { color: var(--h4-ink); min-width: 96px; }
+.ops-incident-note {
+  flex: 1;
+  color: var(--h4-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ops-incident-dur { color: var(--h4-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ---- dependencies & deploy ---- */
+.ops-deps { display: flex; flex-wrap: wrap; gap: 8px 14px; }
+.ops-dep {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--h4-ink-2);
+  --tone: var(--h4-tel);
+}
+.ops-dep--ok { --tone: var(--h4-ok); }
+.ops-dep--degraded { --tone: var(--h4-warn); }
+.ops-dep--red { --tone: var(--h4-act); }
+.ops-dep--awaiting { --tone: var(--h4-tel); }
+.ops-dep .ops-dot { background: var(--tone); }
+.ops-deploy {
+  margin-top: 11px;
+  padding-top: 10px;
+  border-top: 1px solid var(--h4-line-2);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ops-deploy-row { display: flex; align-items: center; gap: 9px; font-size: 12px; --tone: var(--h4-ok); }
+.ops-deploy-row--ok { --tone: var(--h4-ok); }
+.ops-deploy-row--awaiting { --tone: var(--h4-tel); }
+.ops-deploy-row .ops-dot { background: var(--tone); }
+.ops-deploy-name { color: var(--h4-ink); min-width: 118px; }
+.ops-deploy-val { color: var(--h4-muted); }
+
+/* ---- footer ---- */
+.ops-foot { margin: 14px 0 0; text-align: center; font-size: 11px; color: var(--h4-faint); }

@@ -33,6 +33,9 @@ import "./styles/hermes4-kanban.css";
 // Utilities redesign: calm two-column card panel (LLM usage · suites · launcher)
 // + the redesigned mission-starter. Loaded last so its additive rules win.
 import "./styles/hermes4-utilities.css";
+// Ops surface: the full-canvas operations board (--h4-tokened). Loaded last so
+// its additive rules win; scoped to `.ops-*` so it never touches the delivery board.
+import "./styles/hermes4-ops.css";
 
 const rootEl = document.getElementById("root");
 if (!rootEl) {

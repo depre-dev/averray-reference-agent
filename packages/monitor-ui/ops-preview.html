@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ops board — preview</title>
+    <!-- Dev-only harness for iterating the Ops surface against fixtures. Not a
+         Vite build input, so it never ships in the prod bundle. Canvas bg matches
+         --h4-canvas so there's no flash before the stylesheet loads. -->
+    <style>
+      html,
+      body,
+      #root {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        background: #1a1714;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/ops-preview.tsx"></script>
+  </body>
+</html>

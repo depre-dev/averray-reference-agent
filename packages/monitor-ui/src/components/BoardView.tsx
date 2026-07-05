@@ -47,8 +47,8 @@ import type { UseCollaborationOptions } from "../hooks/useCollaboration.js";
 import { useBoardKeyboard } from "../hooks/useBoardKeyboard.js";
 import { useProductHealth } from "../hooks/useProductHealth.js";
 import { hasFreshRed, type ProductHealth } from "../lib/monitor/product-health.js";
-import { MonitoringLaneToggle, type LaneMode } from "./monitoring/MonitoringLaneToggle.js";
-import { MonitoringSurface } from "./monitoring/MonitoringSurface.js";
+import { BoardSurfaceSwitch, type BoardSurface } from "./ops/BoardSurfaceSwitch.js";
+import { OpsBoard } from "./ops/OpsBoard.js";
 import { Badge, Button } from "./ui.js";
 
 // laneFor() promotes every isAction card into needs-attention, so the
@@ -233,28 +233,32 @@ export function BoardView({
   const [askToken, setAskToken] = useState(0);
   const [hermesFocusConversationActive, setHermesFocusConversationActive] = useState(false);
 
-  // ── PR2: the right lane switches Delivery ⇆ Monitoring ──────────────
+  // ── The board switches Delivery ⇆ Ops at the top level (board-wide). ──
   const { health: productHealth } = useProductHealth({ enabled: monitoringEnabled });
-  const [deliveryMode, setDeliveryMode] = useState<LaneMode>(() => {
+  const [boardSurface, setBoardSurface] = useState<BoardSurface>(() => {
     try {
-      return localStorage.getItem("hm-lane-mode") === "monitoring" ? "monitoring" : "delivery";
+      const stored = localStorage.getItem("hm-board-surface");
+      if (stored === "ops" || stored === "delivery") return stored;
+      // Migrate the previous lane-level "monitoring" flag → the ops surface.
+      if (localStorage.getItem("hm-lane-mode") === "monitoring") return "ops";
+      return "delivery";
     } catch {
       return "delivery";
     }
   });
   useEffect(() => {
     try {
-      localStorage.setItem("hm-lane-mode", deliveryMode);
+      localStorage.setItem("hm-board-surface", boardSurface);
     } catch {
       /* ignore storage errors (private mode) */
     }
-  }, [deliveryMode]);
-  // Auto-flip to Monitoring on a FRESH red (once per incident): a probe that was
-  // already red doesn't re-trigger, so a manual switch back to Delivery sticks.
+  }, [boardSurface]);
+  // Auto-flip to Ops on a FRESH red (once per incident): a probe that was already
+  // red doesn't re-trigger, so a manual switch back to Delivery sticks.
   const prevHealthRef = useRef<ProductHealth | undefined>(undefined);
   useEffect(() => {
     if (productHealth && hasFreshRed(prevHealthRef.current, productHealth)) {
-      setDeliveryMode("monitoring");
+      setBoardSurface("ops");
     }
     prevHealthRef.current = productHealth;
   }, [productHealth]);
@@ -418,17 +422,6 @@ export function BoardView({
   ) => renderPipelineMirror(card, tierFor(lane), inboxIds.has(card.id)), [inboxIds, renderPipelineMirror]);
   const renderLaneBody = (id: LaneId, laneCards: BoardCard[]) => {
     const renderMirror = (card: BoardCard) => renderPipelineCardForLane(id, card);
-    // PR2: the Done lane doubles as the Monitoring lane. In monitoring mode its
-    // body IS the monitoring surface; in delivery mode the release history renders.
-    if (id === "done" && deliveryMode === "monitoring") {
-      return productHealth ? (
-        <MonitoringSurface health={productHealth} />
-      ) : (
-        <div className="hm-mon-empty">
-          <span className="hm-mon-empty-title">Loading health…</span>
-        </div>
-      );
-    }
     // PR-F3: the Deploying lane surfaces the active/current deploy ungrouped, with
     // its verification stepper visible; older near-identical verifications still
     // group behind "N similar" so the dedupe no longer shadows the live deploy.
@@ -454,11 +447,6 @@ export function BoardView({
     if (!hasGroupedCards) return undefined;
     return <GroupedLaneBody items={groupedItems} renderCard={renderMirror} />;
   };
-  const renderLaneHeader = (lane: LaneId): ReactNode =>
-    lane === "done" ? (
-      <MonitoringLaneToggle mode={deliveryMode} onChange={setDeliveryMode} health={productHealth} />
-    ) : null;
-
   const drawerCard = focusedCardId ? orderedCards.find((c) => c.id === focusedCardId) : undefined;
   const boardFocusedCard = boardFocusId ? orderedCards.find((c) => c.id === boardFocusId) : undefined;
   const scopeCard = drawerCard ?? boardFocusedCard;
@@ -619,6 +607,27 @@ export function BoardView({
         {announcement}
       </div>
 
+      {/* Board-level Delivery ⇆ Ops switch — swaps the WHOLE board, above the
+          lanes (not a per-lane toggle). Always present, including when the
+          delivery SSE is degraded, since Ops reads product health from its own
+          poll rather than the board stream. */}
+      <div className="ops-switch-bar">
+        <BoardSurfaceSwitch surface={boardSurface} onChange={setBoardSurface} health={productHealth} />
+      </div>
+
+      {boardSurface === "ops" ? (
+        productHealth ? (
+          <OpsBoard health={productHealth} />
+        ) : (
+          <div className="ops-board ops-board--empty" data-testid="ops-board-loading">
+            <div className="ops-empty">
+              <span className="ops-empty-title">Loading health…</span>
+              <span className="ops-empty-detail">Polling the live product heartbeat.</span>
+            </div>
+          </div>
+        )
+      ) : (
+        <>
       {degraded ? (
         <TopStripDegraded
           lastKnownAt={liveLabel || undefined}
@@ -668,7 +677,6 @@ export function BoardView({
             renderCard={renderCard}
             renderPipelineCard={renderPipelineCard}
             renderLaneBody={renderLaneBody}
-            renderLaneHeader={renderLaneHeader}
           />
         </div>
 
@@ -697,6 +705,8 @@ export function BoardView({
           Real counts only (total cards, how many wait on the operator, how
           many are running). New --h4 surface. */}
       <BoardFooter cards={cards} />
+        </>
+      )}
 
       {/* P0-4: transient confirmation that an Ask-Hermes action was received.
           aria-live so it's announced; visually a small floating toast. It
@@ -706,7 +716,7 @@ export function BoardView({
         {askStatus ? <span className="hm-ask-status-toast">{askStatus}</span> : null}
       </div>
 
-      {drawerCard ? (
+      {drawerCard && boardSurface === "delivery" ? (
         <DetailDrawer
           card={drawerCard}
           cards={orderedCards}
