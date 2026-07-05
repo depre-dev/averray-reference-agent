@@ -22,6 +22,7 @@ import {
   networkEthRpc,
   appendHistory,
   probeSparkline,
+  deriveProductHealthHistory,
   type ProbeResult,
   type ProductHealthConfig,
   type ProductHealthFetch,
@@ -760,5 +761,119 @@ describe("probeSparkline", () => {
 
   it("returns empty for an unknown probe", () => {
     expect(probeSparkline(history, "nope", 10)).toEqual([]);
+  });
+});
+
+describe("deriveProductHealthHistory", () => {
+  const HOUR = 3_600_000;
+  const snap = (
+    at: number,
+    status: ProductHealthStatus,
+    opts: { probes?: ProbeResult[]; latencyMs?: number | null; signerUsdc?: number | null } = {},
+  ): ProductHealthSnapshot => ({
+    at,
+    status,
+    probes: opts.probes ?? [probe("product_api", status === "healthy" ? "ok" : status)],
+    latencyMs: opts.latencyMs,
+    signerUsdc: opts.signerUsdc,
+  });
+
+  it("builds the uptime / latency / balance series oldest→newest", () => {
+    const now = 100 * HOUR;
+    const history = [
+      snap(now - 2 * HOUR, "healthy", { latencyMs: 120, signerUsdc: 10 }),
+      snap(now - 1 * HOUR, "degraded", { latencyMs: 240, signerUsdc: 8 }),
+      snap(now, "red", { latencyMs: null, signerUsdc: null }),
+    ];
+    const b = deriveProductHealthHistory(history, now);
+    expect(b.uptimeSeries).toEqual(["ok", "degraded", "red"]);
+    expect(b.latencySeriesMs).toEqual([120, 240, null]);
+    expect(b.balanceSeries).toEqual([10, 8, null]);
+  });
+
+  it("uptimePct24h counts non-red checks; null when nothing is in-window", () => {
+    const now = 100 * HOUR;
+    // 4 checks in the last 24h: 3 non-red (healthy/degraded/healthy), 1 red → 75.0
+    const history = [
+      snap(now - 3 * HOUR, "healthy"),
+      snap(now - 2 * HOUR, "degraded"),
+      snap(now - 1 * HOUR, "red"),
+      snap(now, "healthy"),
+    ];
+    expect(deriveProductHealthHistory(history, now).uptimePct24h).toBe(75);
+    // a check older than the 24h window doesn't count → null
+    const stale = [snap(now - 30 * HOUR, "healthy")];
+    expect(deriveProductHealthHistory(stale, now).uptimePct24h).toBeNull();
+  });
+
+  it("bounds the series to maxSeries (newest-anchored); uptime% still spans the window", () => {
+    const now = 100 * HOUR;
+    const history = Array.from({ length: 60 }, (_, i) =>
+      snap(now - (60 - i) * 60_000, "healthy", { latencyMs: i }),
+    );
+    const b = deriveProductHealthHistory(history, now, { maxSeries: 10 });
+    expect(b.uptimeSeries).toHaveLength(10);
+    expect(b.latencySeriesMs).toEqual(Array.from({ length: 10 }, (_, i) => 50 + i));
+    expect(b.uptimePct24h).toBe(100); // all 60 in-window, none red
+  });
+
+  it("derives an incident episode — red severity wins, unrecovered stays open", () => {
+    const now = 100 * HOUR;
+    const history = [
+      snap(now - 4 * HOUR, "healthy", { probes: [probe("chain_height", "ok")] }),
+      snap(now - 3 * HOUR, "degraded", { probes: [probe("chain_height", "degraded", "chain not advancing")] }),
+      snap(now - 2 * HOUR, "red", { probes: [probe("chain_height", "red", "chain halted")] }),
+      snap(now - 1 * HOUR, "red", { probes: [probe("chain_height", "red", "chain halted")] }),
+    ];
+    const inc = deriveProductHealthHistory(history, now).incidents;
+    expect(inc).toHaveLength(1);
+    expect(inc[0]).toMatchObject({
+      probe: "chain_height",
+      severity: "red",
+      startedAt: now - 3 * HOUR,
+      endedAt: null,
+      note: "chain halted",
+    });
+  });
+
+  it("closes an incident on recovery and excludes awaiting-data degradations", () => {
+    const now = 100 * HOUR;
+    const history = [
+      // a real degradation that recovers
+      snap(now - 4 * HOUR, "degraded", { probes: [probe("api_latency", "degraded", "slow: 900ms")] }),
+      snap(now - 3 * HOUR, "healthy", { probes: [probe("api_latency", "ok")] }),
+      // an awaiting-data "degraded" (forward-compat gap) must NOT become an incident
+      snap(now - 2 * HOUR, "degraded", { probes: [probe("money_path", "degraded", "does not expose settlement counts yet")] }),
+      snap(now - 1 * HOUR, "degraded", { probes: [probe("money_path", "degraded", "does not expose settlement counts yet")] }),
+    ];
+    const inc = deriveProductHealthHistory(history, now).incidents;
+    expect(inc).toHaveLength(1);
+    expect(inc[0]).toMatchObject({
+      probe: "api_latency",
+      severity: "degraded",
+      startedAt: now - 4 * HOUR,
+      endedAt: now - 3 * HOUR,
+    });
+  });
+
+  it("sorts multiple incidents newest-first", () => {
+    const now = 100 * HOUR;
+    const history = [
+      snap(now - 5 * HOUR, "red", { probes: [probe("product_api", "red", "503")] }),
+      snap(now - 4 * HOUR, "healthy", { probes: [probe("product_api", "ok")] }),
+      snap(now - 2 * HOUR, "degraded", { probes: [probe("chain_height", "degraded", "chain not advancing")] }),
+      snap(now - 1 * HOUR, "degraded", { probes: [probe("chain_height", "degraded", "chain not advancing")] }),
+    ];
+    const inc = deriveProductHealthHistory(history, now).incidents;
+    expect(inc.map((i) => i.probe)).toEqual(["chain_height", "product_api"]);
+  });
+
+  it("no history → empty series, null uptime, no incidents", () => {
+    const b = deriveProductHealthHistory([], 100 * HOUR);
+    expect(b.uptimeSeries).toEqual([]);
+    expect(b.latencySeriesMs).toEqual([]);
+    expect(b.balanceSeries).toEqual([]);
+    expect(b.uptimePct24h).toBeNull();
+    expect(b.incidents).toEqual([]);
   });
 });
