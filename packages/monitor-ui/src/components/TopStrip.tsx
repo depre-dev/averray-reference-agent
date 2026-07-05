@@ -23,9 +23,12 @@ export type TopStripProps = {
   automationHealth?: AutomationHealth;
   /** Click handler for the refresh button (M5' wires the actual refresh). */
   onRefresh?: () => void;
+  /** When provided (Ops surface), the KPI cluster shows pillar-status chips
+      instead of the delivery lane counts — so the frame stays ops-relevant. */
+  opsPillars?: Array<{ label: string; tone: "ok" | "degraded" | "red" | "awaiting" }>;
 };
 
-export function TopStrip({ counts, liveAt, deployHealth = "OK", automationHealth, onRefresh }: TopStripProps) {
+export function TopStrip({ counts, liveAt, deployHealth = "OK", automationHealth, onRefresh, opsPillars }: TopStripProps) {
   return (
     <div className="hm-top" role="banner">
       <div className="hm-brand">
@@ -38,18 +41,34 @@ export function TopStrip({ counts, liveAt, deployHealth = "OK", automationHealth
         </div>
       </div>
 
-      <div className="hm-kpis" role="status" aria-live="polite" aria-label="Board KPI counts">
-        <Kpi count={counts.action} label="Action needed" tone={counts.action ? "action" : "zero"} />
-        <Kpi count={counts.codex} label="Codex needed" tone={counts.codex ? "default" : "zero"} />
-        <Kpi count={counts.review} label="Operator review" tone={counts.review ? "action" : "zero"} />
-        <Kpi count={counts.checking} label="Hermes checking" tone={counts.checking ? "default" : "zero"} />
-        <Kpi count={counts.queue} label="Release queue" tone={counts.queue ? "default" : "zero"} />
-        <Kpi count={counts.deploying} label="Deploying" tone={counts.deploying ? "default" : "zero"} />
-        <span className="hm-kpi hm-kpi--ok">
-          <span className="dot" aria-hidden />
-          Deploy {deployHealth}
-        </span>
-        {automationHealth ? <AutomationHealthPill health={automationHealth} /> : null}
+      <div
+        className="hm-kpis"
+        role="status"
+        aria-live="polite"
+        aria-label={opsPillars ? "Ops pillar status" : "Board KPI counts"}
+      >
+        {opsPillars ? (
+          opsPillars.map((pillar) => (
+            <span key={pillar.label} className={`hm-kpi hm-kpi--ops ops-kpi--${pillar.tone}`}>
+              <span className="dot" aria-hidden />
+              {pillar.label}
+            </span>
+          ))
+        ) : (
+          <>
+            <Kpi count={counts.action} label="Action needed" tone={counts.action ? "action" : "zero"} />
+            <Kpi count={counts.codex} label="Codex needed" tone={counts.codex ? "default" : "zero"} />
+            <Kpi count={counts.review} label="Operator review" tone={counts.review ? "action" : "zero"} />
+            <Kpi count={counts.checking} label="Hermes checking" tone={counts.checking ? "default" : "zero"} />
+            <Kpi count={counts.queue} label="Release queue" tone={counts.queue ? "default" : "zero"} />
+            <Kpi count={counts.deploying} label="Deploying" tone={counts.deploying ? "default" : "zero"} />
+            <span className="hm-kpi hm-kpi--ok">
+              <span className="dot" aria-hidden />
+              Deploy {deployHealth}
+            </span>
+            {automationHealth ? <AutomationHealthPill health={automationHealth} /> : null}
+          </>
+        )}
       </div>
 
       <div className="hm-top-right">
