@@ -66,6 +66,10 @@ export interface ProductHealthSnapshot {
   at: number;
   status: ProductHealthStatus;
   probes: ProbeResult[];
+  /** GET /health round-trip latency (ms) for this check — Trends latency series. */
+  latencyMs?: number | null;
+  /** Signer USDC balance at this check — Trends balance series. */
+  signerUsdc?: number | null;
 }
 
 /** Append a snapshot to a bounded rolling history (oldest→newest). Pure. */
@@ -90,6 +94,114 @@ export function probeSparkline(
     if (hit) series.push(hit.status);
   }
   return bins > 0 && series.length > bins ? series.slice(series.length - bins) : series;
+}
+
+// ── History-derived Ops blocks (Trends + Incidents) ──
+
+/** Mirrors the frontend's awaiting regex (ops-model `AWAITING_RE`): a degraded
+ *  probe whose detail is really "upstream data not wired yet". Excluded from
+ *  incidents so a forward-compat gap never masquerades as a live degradation. */
+const AWAITING_DETAIL_RE = /awaiting|not expose|not wired|not configured|unconfigured|no data/i;
+
+function isAwaitingDetail(status: ProbeStatus, detail: string): boolean {
+  return status !== "red" && AWAITING_DETAIL_RE.test(detail);
+}
+
+export interface ProductHealthIncident {
+  id: string;
+  probe: string;
+  severity: "degraded" | "red";
+  /** Epoch ms of the first check in the run. */
+  startedAt: number;
+  /** Epoch ms of recovery; null → still ongoing. */
+  endedAt?: number | null;
+  /** The probe's detail at the tail of the run — the incident description. */
+  note?: string;
+}
+
+export interface ProductHealthHistoryBlock {
+  /** Share of trailing-24h checks that were NOT red, 0..100; null under-window. */
+  uptimePct24h: number | null;
+  /** Per-check overall tone (oldest→newest), bounded to `maxSeries`. */
+  uptimeSeries: ProbeStatus[];
+  latencySeriesMs: (number | null)[];
+  balanceSeries: (number | null)[];
+  incidents: ProductHealthIncident[];
+}
+
+/** Overall check status → probe tone for the uptime sparkline. */
+function overallTone(status: ProductHealthStatus): ProbeStatus {
+  return status === "healthy" ? "ok" : status;
+}
+
+/**
+ * Derive the Ops Trends + Incidents block from the rolling history. Pure — the
+ * caller passes `nowMs`. The series are newest-anchored to `maxSeries` bins; the
+ * uptime% is over the trailing `uptimeWindowMs` and counts "not red" as up (a
+ * degraded product still serves; only red is a page-worthy outage).
+ */
+export function deriveProductHealthHistory(
+  history: ReadonlyArray<ProductHealthSnapshot>,
+  nowMs: number,
+  opts: { maxSeries?: number; uptimeWindowMs?: number } = {},
+): ProductHealthHistoryBlock {
+  const maxSeries = opts.maxSeries ?? 48;
+  const uptimeWindowMs = opts.uptimeWindowMs ?? 24 * 60 * 60 * 1000;
+  const series =
+    maxSeries > 0 && history.length > maxSeries ? history.slice(history.length - maxSeries) : history;
+
+  const windowStart = nowMs - uptimeWindowMs;
+  const inWindow = history.filter((s) => s.at >= windowStart);
+  const uptimePct24h =
+    inWindow.length > 0
+      ? Math.round((inWindow.filter((s) => s.status !== "red").length / inWindow.length) * 1000) / 10
+      : null;
+
+  return {
+    uptimePct24h,
+    uptimeSeries: series.map((s) => overallTone(s.status)),
+    latencySeriesMs: series.map((s) => s.latencyMs ?? null),
+    balanceSeries: series.map((s) => s.signerUsdc ?? null),
+    incidents: deriveIncidents(history),
+  };
+}
+
+/** Contiguous degraded/red runs per probe → incident episodes (newest-first,
+ *  capped). Awaiting-data degradations are excluded — a forward-compat gap is
+ *  not an incident. An unrecovered run stays open (`endedAt: null`). */
+function deriveIncidents(history: ReadonlyArray<ProductHealthSnapshot>): ProductHealthIncident[] {
+  const names: string[] = [];
+  for (const snap of history) {
+    for (const p of snap.probes) if (!names.includes(p.name)) names.push(p.name);
+  }
+  const incidents: ProductHealthIncident[] = [];
+  for (const name of names) {
+    let startedAt: number | null = null;
+    let severity: "degraded" | "red" = "degraded";
+    let note = "";
+    for (const snap of history) {
+      const probe = snap.probes.find((p) => p.name === name);
+      const bad =
+        !!probe &&
+        (probe.status === "red" ||
+          (probe.status === "degraded" && !isAwaitingDetail(probe.status, probe.detail)));
+      if (bad) {
+        if (startedAt === null) {
+          startedAt = snap.at;
+          severity = "degraded";
+        }
+        if (probe!.status === "red") severity = "red";
+        note = probe!.detail;
+      } else if (startedAt !== null) {
+        incidents.push({ id: `${name}-${startedAt}`, probe: name, severity, startedAt, endedAt: snap.at, note });
+        startedAt = null;
+      }
+    }
+    if (startedAt !== null) {
+      incidents.push({ id: `${name}-${startedAt}`, probe: name, severity, startedAt, endedAt: null, note });
+    }
+  }
+  return incidents.sort((a, b) => b.startedAt - a.startedAt).slice(0, 12);
 }
 
 // ── Config (env-driven; balances stay degraded until their RPC/USDC keys are set) ──
@@ -728,6 +840,8 @@ export interface ProductHealthCollection {
   chainAdvance: ChainAdvance;
   /** Structured blocks for the Ops board (chain id / network / solvency / flow). */
   snapshot: ProductHealthSnapshotBlocks;
+  /** GET /health round-trip latency (ms) — the caller records it on the history entry. */
+  latencyMs?: number;
 }
 
 /** Absolute age (seconds) of the chain's latest block via the direct RPC — but
@@ -837,6 +951,7 @@ export async function collectProductHealthProbes(
     ],
     chainAdvance,
     snapshot,
+    latencyMs: h.latencyMs,
   };
 }
 

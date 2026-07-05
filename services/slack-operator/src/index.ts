@@ -160,6 +160,7 @@ import { runFailureAnalysisOnce } from "./failure-analysis-routine.js";
 import {
   appendHistory,
   collectProductHealthProbes,
+  deriveProductHealthHistory,
   initialProductHealthAlertState,
   loadProductHealthConfig,
   probeSparkline,
@@ -719,6 +720,10 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       // emitted only when their data is actually available — else absent (the
       // frontend renders honest awaiting-data).
       ...(productHealthSnapshotBlocks ?? {}),
+      // History-derived Trends + Incidents (uptime% / latency / balance series +
+      // incident episodes) from the rolling buffer. Always present — the series
+      // are honestly short and uptimePct24h is null until a check lands in-window.
+      history: deriveProductHealthHistory(productHealthHistory, Date.now()),
     });
     return;
   }
@@ -3460,9 +3465,19 @@ function startOperatorRoutines() {
         },
         cooldownMs: routineConfig.productHealth.cooldownMs,
       });
+      // Enrich each entry with the samples the Trends zone graphs: the /health
+      // round-trip latency and the signer USDC balance (from the solvency block).
+      const signerUsdcSample =
+        collection.snapshot.solvency?.pools.find((p) => p.key === "signer_usdc")?.amount ?? null;
       productHealthHistory = appendHistory(
         productHealthHistory,
-        { at: Date.now(), status: result.status, probes: result.evaluation.probes },
+        {
+          at: Date.now(),
+          status: result.status,
+          probes: result.evaluation.probes,
+          latencyMs: collection.latencyMs ?? null,
+          signerUsdc: signerUsdcSample,
+        },
         PRODUCT_HEALTH_HISTORY_MAX,
       );
       // Slice 3: proactive ops narration — Hermes posts a co-pilot turn on a
