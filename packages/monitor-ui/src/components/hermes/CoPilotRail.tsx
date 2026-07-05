@@ -20,6 +20,7 @@ import { derivePresence, activeCount, type PresencePeer } from "../../lib/monito
 import { railDigestCounts } from "../../lib/monitor/rail-digest.js";
 import { isDecision } from "../../lib/monitor/lane-rules.js";
 import { opsDigestSummary } from "../../lib/monitor/ops-digest.js";
+import { opsSuggestions } from "../../lib/monitor/ops-suggestions.js";
 import type { ProductHealth } from "../../lib/monitor/product-health.js";
 import { shortId } from "../../lib/monitor/card-id.js";
 import { AgentTag, Badge, Button, EmptyState, StatusPill, type AgentTagAgent, type StateVariant } from "../ui.js";
@@ -179,6 +180,7 @@ export function CoPilotRail({
             <RailDigest
               cards={boardCards ?? []}
               health={productHealth}
+              onCreateTask={onCreateTask}
               onCardClick={onCardClick}
               onGoRoom={() => setRailTab("room")}
               onOpenRoster={() => setRosterOpen(true)}
@@ -348,12 +350,14 @@ function cardIdForMessage(message: CollaborationMessage, cards: readonly BoardCa
 function RailDigest({
   cards,
   health,
+  onCreateTask,
   onCardClick,
   onGoRoom,
   onOpenRoster,
 }: {
   cards: readonly BoardCard[];
   health?: ProductHealth;
+  onCreateTask?: (input: CreateTaskInput) => void;
   onCardClick?: (id: string) => void;
   onGoRoom: () => void;
   onOpenRoster: () => void;
@@ -375,6 +379,7 @@ function RailDigest({
         </span>
       </div>
       {health ? <RailOpsRow health={health} /> : null}
+      {health ? <RailOpsSuggestions health={health} onCreateTask={onCreateTask} /> : null}
       <div className="hm-rail-digest-stats">
         <DigestStat label="NEEDS YOU" value={needsYou} tone="act" />
         <DigestStat label="RUNNING NOW" value={running} tone="ok" />
@@ -421,6 +426,44 @@ function RailOpsRow({ health }: { health: ProductHealth }) {
       <span className="hm-rail-ops-dot" aria-hidden />
       <span className="hm-rail-ops-label">Ops · {label}</span>
       {detail ? <span className="hm-rail-ops-detail">{detail}</span> : null}
+    </div>
+  );
+}
+
+/**
+ * The Digest's "Ops suggestions" box — remediation Hermes SUGGESTS from the live
+ * probes. Informational rows (e.g. top up the signer — funds are operator-only)
+ * carry no action; actionable rows carry a human-gated "Propose task" button
+ * that proposes the task the operator approves. Hidden when there's nothing to
+ * suggest.
+ */
+function RailOpsSuggestions({
+  health,
+  onCreateTask,
+}: {
+  health: ProductHealth;
+  onCreateTask?: (input: CreateTaskInput) => void;
+}) {
+  const suggestions = opsSuggestions(health);
+  if (suggestions.length === 0) return null;
+  return (
+    <div className="hm-rail-ops-sugg" aria-label="Ops suggestions">
+      <div className="hm-rail-ops-sugg-head">
+        <span className="hm-kicker">Ops suggestions</span>
+      </div>
+      {suggestions.map((suggestion) => (
+        <div key={suggestion.id} className={`hm-rail-ops-sugg-row hm-rail-ops-sugg-row--${suggestion.tone}`}>
+          <span className="hm-rail-ops-dot" aria-hidden />
+          <span className="hm-rail-ops-sugg-text">{suggestion.text}</span>
+          {suggestion.task && onCreateTask ? (
+            <Button variant="secondary" size="sm" onClick={() => suggestion.task && onCreateTask(suggestion.task)}>
+              Propose task
+            </Button>
+          ) : (
+            <span className="hm-rail-ops-sugg-tag">info</span>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

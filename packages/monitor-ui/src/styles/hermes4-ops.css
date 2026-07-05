@@ -459,3 +459,36 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---- co-pilot Digest "Ops suggestions" box (Hermes suggests; you approve) ---- */
+.hm-rail-ops-sugg {
+  margin: 9px 0 2px;
+  background: var(--h4-paper);
+  border: 1px solid var(--h4-act-line);
+  border-radius: var(--h4-r-card);
+  padding: 9px 11px;
+}
+.hm-rail-ops-sugg-head { margin-bottom: 7px; }
+.hm-rail-ops-sugg-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 0;
+  border-top: 1px solid var(--h4-line-2);
+  --tone: var(--h4-tel);
+}
+.hm-rail-ops-sugg-row:first-of-type { border-top: 0; }
+.hm-rail-ops-sugg-row--warn { --tone: var(--h4-warn); }
+.hm-rail-ops-sugg-row--act { --tone: var(--h4-act); }
+.hm-rail-ops-sugg-row--tel { --tone: var(--h4-tel); }
+.hm-rail-ops-sugg-row .hm-rail-ops-dot { background: var(--tone); }
+.hm-rail-ops-sugg-text { flex: 1; font-size: 12px; color: var(--h4-ink-2); line-height: 1.35; min-width: 0; }
+.hm-rail-ops-sugg-tag {
+  font-size: 10.5px;
+  color: var(--h4-muted);
+  background: var(--h4-paper-sunken);
+  border: 1px solid var(--h4-line);
+  border-radius: var(--h4-r-pill);
+  padding: 2px 8px;
+  white-space: nowrap;
+}
