@@ -607,27 +607,15 @@ export function BoardView({
         {announcement}
       </div>
 
-      {/* Board-level Delivery ⇆ Ops switch — swaps the WHOLE board, above the
-          lanes (not a per-lane toggle). Always present, including when the
-          delivery SSE is degraded, since Ops reads product health from its own
-          poll rather than the board stream. */}
+      {/* Board-level Delivery ⇆ Ops switch — swaps the CENTER (lanes) region,
+          NOT the whole board: the top strip, co-pilot rail, and footer stay in
+          both views so Hermes keeps board + ops awareness and can narrate ops in
+          chat. Always present, including when the delivery SSE is degraded, since
+          Ops reads product health from its own poll rather than the board stream. */}
       <div className="ops-switch-bar">
         <BoardSurfaceSwitch surface={boardSurface} onChange={setBoardSurface} health={productHealth} />
       </div>
 
-      {boardSurface === "ops" ? (
-        productHealth ? (
-          <OpsBoard health={productHealth} />
-        ) : (
-          <div className="ops-board ops-board--empty" data-testid="ops-board-loading">
-            <div className="ops-empty">
-              <span className="ops-empty-title">Loading health…</span>
-              <span className="ops-empty-detail">Polling the live product heartbeat.</span>
-            </div>
-          </div>
-        )
-      ) : (
-        <>
       {degraded ? (
         <TopStripDegraded
           lastKnownAt={liveLabel || undefined}
@@ -647,37 +635,56 @@ export function BoardView({
         />
       )}
 
-      <BoardNowBanner banner={state.banner} cta={bannerCta} />
+      {/* Delivery-only hero sentence (it's about the card decisions). In Ops the
+          <OpsBoard> carries its own status sub-header + soft incident banner. */}
+      {boardSurface === "delivery" ? <BoardNowBanner banner={state.banner} cta={bannerCta} /> : null}
 
       <div className="hm-main">
+        {/* The lanes column swaps Delivery ⇆ Ops; the co-pilot rail is a sibling
+            that stays mounted in BOTH views. */}
         <div className="hm-lanes-wrap">
-          <LanesBar
-            counts={state.counts}
-            mode={state.mode}
-            searchValue={query}
-            onSearchChange={setQuery}
-            searchInputRef={searchInputRef}
-            activeFilter={filter}
-            onFilterChange={setFilter}
-          />
-          <UtilitiesPanel
-            usage={board?.llmUsage}
-            suites={board?.testbedSuites}
-            onRunSuite={onRunSuite}
-            onSaveSuite={onSaveSuite}
-            onApproveSuite={onApproveSuite}
-            onDismissSuite={onDismissSuite}
-            onSpawnMission={onSpawnMission}
-          />
-          <KanbanBoard
-            grouped={displayGrouped}
-            ariaLabel="Kanban lane grid"
-            expanded={surfacedExpanded}
-            onToggleLane={onToggleLane}
-            renderCard={renderCard}
-            renderPipelineCard={renderPipelineCard}
-            renderLaneBody={renderLaneBody}
-          />
+          {boardSurface === "ops" ? (
+            productHealth ? (
+              <OpsBoard health={productHealth} />
+            ) : (
+              <div className="ops-board ops-board--empty" data-testid="ops-board-loading">
+                <div className="ops-empty">
+                  <span className="ops-empty-title">Loading health…</span>
+                  <span className="ops-empty-detail">Polling the live product heartbeat.</span>
+                </div>
+              </div>
+            )
+          ) : (
+            <>
+              <LanesBar
+                counts={state.counts}
+                mode={state.mode}
+                searchValue={query}
+                onSearchChange={setQuery}
+                searchInputRef={searchInputRef}
+                activeFilter={filter}
+                onFilterChange={setFilter}
+              />
+              <UtilitiesPanel
+                usage={board?.llmUsage}
+                suites={board?.testbedSuites}
+                onRunSuite={onRunSuite}
+                onSaveSuite={onSaveSuite}
+                onApproveSuite={onApproveSuite}
+                onDismissSuite={onDismissSuite}
+                onSpawnMission={onSpawnMission}
+              />
+              <KanbanBoard
+                grouped={displayGrouped}
+                ariaLabel="Kanban lane grid"
+                expanded={surfacedExpanded}
+                onToggleLane={onToggleLane}
+                renderCard={renderCard}
+                renderPipelineCard={renderPipelineCard}
+                renderLaneBody={renderLaneBody}
+              />
+            </>
+          )}
         </div>
 
         <CoPilotRail
@@ -705,8 +712,6 @@ export function BoardView({
           Real counts only (total cards, how many wait on the operator, how
           many are running). New --h4 surface. */}
       <BoardFooter cards={cards} />
-        </>
-      )}
 
       {/* P0-4: transient confirmation that an Ask-Hermes action was received.
           aria-live so it's announced; visually a small floating toast. It
