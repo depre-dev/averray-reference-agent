@@ -370,6 +370,23 @@
   margin-bottom: 4px;
 }
 .ops-trend-val { color: var(--h4-ink); font-variant-numeric: tabular-nums; }
+
+/* Leading-indicator anomaly flag — a chip above the affected trend line. */
+.ops-anomaly {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 4px;
+  margin: 0 0 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.ops-anomaly--warn { color: var(--h4-warn); }
+.ops-anomaly--info { color: var(--h4-tel); }
 .ops-trend .ops-spark { display: flex; height: 15px; margin-left: 0; }
 .ops-trend .ops-spark-cell { height: 13px; }
 

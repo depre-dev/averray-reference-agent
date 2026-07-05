@@ -2,8 +2,14 @@
 // (SVG line), and signer USDC balance (SVG line). All fed by the server-side
 // history store; until that store has data the zone shows an honest accruing
 // state rather than a flat fake line.
+//
+// Each metric also carries a leading-indicator anomaly flag: when the latest
+// sample deviates from the metric's OWN recent baseline (latency spiking, balance
+// draining) beyond a robust threshold, a chip annotates that trend — a heads-up
+// before a fixed floor would trip.
 
 import type { HealthHistory } from "../../lib/monitor/product-health.js";
+import { detectAnomalies, anomalyPhrase, type MetricAnomaly } from "../../lib/monitor/ops-anomaly.js";
 import { OpsZone } from "./OpsZone.js";
 import { OpsSpark, LineSpark } from "./OpsSparks.js";
 
@@ -15,11 +21,26 @@ function hasSeries(values: (number | null)[] | undefined): boolean {
   return Array.isArray(values) && values.filter((v) => typeof v === "number").length >= 2;
 }
 
+function AnomalyChip({ a }: { a: MetricAnomaly | undefined }) {
+  if (!a) return null;
+  return (
+    <span
+      className={`ops-anomaly ops-anomaly--${a.severity}`}
+      data-testid={`ops-anomaly-${a.metric}`}
+      title={`${a.label}: ${a.current} vs ~${a.baseline} baseline · robust z ${a.z}`}
+    >
+      {anomalyPhrase(a)}
+    </span>
+  );
+}
+
 export function TrendsZone({ history }: TrendsZoneProps) {
   const uptime = history?.uptimeSeries ?? [];
   const latency = history?.latencySeriesMs;
   const balance = history?.balanceSeries;
   const anyData = uptime.length > 0 || hasSeries(latency) || hasSeries(balance);
+  const anomalies = detectAnomalies(history);
+  const anomalyOf = (metric: MetricAnomaly["metric"]) => anomalies.find((a) => a.metric === metric);
 
   return (
     <OpsZone className="z-trends" icon="chart" title="Trends" testId="ops-zone-trends">
@@ -48,6 +69,7 @@ export function TrendsZone({ history }: TrendsZoneProps) {
               <span>API latency</span>
               <span className="ops-trend-val">{lastNum(latency)}</span>
             </div>
+            <AnomalyChip a={anomalyOf("latency")} />
             {hasSeries(latency) ? (
               <LineSpark values={latency!} tone="tel" ariaLabel="API latency trend" />
             ) : (
@@ -60,6 +82,7 @@ export function TrendsZone({ history }: TrendsZoneProps) {
               <span>Signer USDC</span>
               <span className="ops-trend-val">{lastNum(balance, "")}</span>
             </div>
+            <AnomalyChip a={anomalyOf("balance")} />
             {hasSeries(balance) ? (
               <LineSpark values={balance!} tone="ok" ariaLabel="Signer USDC balance trend" />
             ) : (
