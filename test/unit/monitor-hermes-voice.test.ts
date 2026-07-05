@@ -139,6 +139,31 @@ describe("buildUserPrompt", () => {
     expect(prompt).toContain("trust the board");
   });
 
+  it("threads live product-health probes into the prompt so ops questions are answerable", () => {
+    const prompt = buildUserPrompt(baseContext({
+      board: {
+        status: "attention",
+        productHealth: {
+          status: "degraded",
+          probes: [
+            { name: "product_api", status: "ok", detail: "200 · chain 420420417" },
+            { name: "chain_height", status: "degraded", detail: "chain not advancing — last block 3d 22h old" },
+            { name: "signer_liquidity", status: "ok", detail: "gas 4999.99 PAS · USDC 2.00" },
+          ],
+        },
+      },
+    }));
+    expect(prompt).toContain("Live product health");
+    expect(prompt).toContain("overall: degraded");
+    expect(prompt).toContain("chain_height: degraded — chain not advancing");
+    expect(prompt).toContain("signer_liquidity: ok — gas 4999.99 PAS · USDC 2.00");
+  });
+
+  it("omits the product-health block when the snapshot carries none", () => {
+    const prompt = buildUserPrompt(baseContext({ board: { status: "calm" } }));
+    expect(prompt).not.toContain("Live product health");
+  });
+
   it("tells the model to reply as Hermes in 1-4 sentences", () => {
     const prompt = buildUserPrompt(baseContext());
     expect(prompt).toMatch(/1-4 conversational sentences/);

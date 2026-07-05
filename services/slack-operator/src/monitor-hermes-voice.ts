@@ -100,6 +100,17 @@ export interface HermesBoardCardSnapshot {
   headBranch?: string;
 }
 
+/**
+ * Compact live product-health for Hermes — the running product's probes so the
+ * co-pilot can answer ops / uptime / chain / solvency / settlement questions.
+ * `detail` carries the human-readable specifics ("chain not advancing — last
+ * block 3d 22h old", "gas 4999.99 PAS · USDC 2.00", etc.).
+ */
+export interface HermesProductHealthSnapshot {
+  status: string;
+  probes: ReadonlyArray<{ name: string; status: string; detail: string }>;
+}
+
 export interface HermesBoardSnapshot {
   generatedAt?: string;
   status?: string;
@@ -107,6 +118,8 @@ export interface HermesBoardSnapshot {
   counts?: Readonly<Record<string, number | string | boolean>>;
   runner?: string;
   items?: ReadonlyArray<HermesBoardCardSnapshot>;
+  /** Live product-health probes — lets Hermes answer ops questions with real state. */
+  productHealth?: HermesProductHealthSnapshot;
 }
 
 export interface HermesReplyContext {
@@ -414,6 +427,11 @@ export function buildUserPrompt(context: HermesReplyContext): string {
 
   if (context.board) {
     appendBoardSnapshotLines(lines, context.board);
+    lines.push("");
+  }
+
+  if (context.board?.productHealth) {
+    appendProductHealthLines(lines, context.board.productHealth);
     lines.push("");
   }
 
@@ -909,6 +927,16 @@ function selectedBoardItem(context: HermesWhyTraceContext): HermesBoardCardSnaps
 function tracePrLabel(item: HermesBoardCardSnapshot): string {
   if (item.repo && item.number) return `${item.repo}#${item.number}`;
   return item.repo || item.title || "card";
+}
+
+function appendProductHealthLines(lines: string[], health: HermesProductHealthSnapshot): void {
+  lines.push(
+    "Live product health (probes of the RUNNING Averray product — use these to answer ops / uptime / chain / signer-solvency / settlement questions; say \"not wired yet\" for anything not listed):",
+  );
+  lines.push(`- overall: ${health.status}`);
+  for (const probe of health.probes) {
+    lines.push(`  - ${probe.name}: ${probe.status}${probe.detail ? ` — ${truncate(probe.detail, 200)}` : ""}`);
+  }
 }
 
 function appendBoardSnapshotLines(lines: string[], board: HermesBoardSnapshot): void {
