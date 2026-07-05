@@ -57,7 +57,7 @@ describe("PR-D3d — rail Hermes digest", () => {
     expect(container.querySelector(".hm-rail-ops")).toBeNull();
   });
 
-  test("ops suggestions box: informational rows + a human-gated Propose task button", () => {
+  test("ops suggestions box: every incident row carries a human-gated Propose task button", () => {
     const onCreateTask = vi.fn();
     const { container } = render(
       <CoPilotRail boardCards={[]} collaboration={{ enabled: false }} productHealth={OPS_FIXTURE_RED} onCreateTask={onCreateTask} />,
@@ -66,8 +66,10 @@ describe("PR-D3d — rail Hermes digest", () => {
     const box = container.querySelector(".hm-rail-ops-sugg") as HTMLElement;
     expect(box).toBeTruthy();
     expect(box.textContent).toContain("Signer USDC below floor");
-    const propose = within(box).getByText("Propose task");
-    fireEvent.click(propose);
+    // Every incident now arrives pre-drafted — signer-floor + money-path both actionable.
+    const propose = within(box).getAllByText("Propose task");
+    expect(propose.length).toBeGreaterThan(1);
+    fireEvent.click(propose[0]);
     expect(onCreateTask).toHaveBeenCalledTimes(1);
     expect(onCreateTask.mock.calls[0][0].repo).toContain("averray-reference-agent");
   });

@@ -1,11 +1,16 @@
 // Ops remediation suggestions — pure derivation from product health for the
-// co-pilot's "Ops suggestions" box.
+// co-pilot's "Ops suggestions" box. Every incident type arrives PRE-DRAFTED: a
+// specific, probe-cited remediation the operator can act on the moment it opens.
 //
-// Hermes SUGGESTS, never executes. Two kinds:
-//   - informational (no task): anything the operator must do themselves —
-//     especially anything touching funds (topping up the signer is operator-only).
-//   - actionable (carries a `task`): a human-gated proposed task the operator
-//     approves; a worker then runs it. Hermes never runs it himself.
+// Hermes SUGGESTS, never executes. Every suggestion carries a human-gated `task`
+// the operator approves; a worker then runs it — Hermes never runs it himself.
+// Two flavours of task:
+//   - INVESTIGATE — a non-financial issue a worker can diagnose + propose a fix for
+//     (API down, latency, capability, money path, mainnet chain halt).
+//   - PREPARE-ONLY — anything touching funds (signer / treasury top-up). The worker
+//     computes the amount + drafts the exact steps; it NEVER moves money. Executing
+//     the transfer stays operator-only. (Testnet chain halt is text-only: the
+//     operator just waits out the reset — no worker task.)
 //
 // Derived from the probe status + detail (which already carry the human-readable
 // specifics), so it works today without the structured solvency/flow blocks.
@@ -40,69 +45,132 @@ export function opsSuggestions(health: ProductHealth | undefined): OpsSuggestion
   if (!health || !health.enabled || health.checks === 0) return [];
   const byName = new Map(health.probes.map((probe) => [probe.name, probe] as const));
   const out: OpsSuggestion[] = [];
+  // A probe is an incident only when it's a REAL degradation — an awaiting-data
+  // probe (upstream not wired yet) is telemetry, never a suggestion.
+  const live = (name: string) => {
+    const p = byName.get(name);
+    return p && !isAwaitingProbe(p) ? p : undefined;
+  };
+  const proposeTask = (prompt: string): CreateTaskInput => ({ agent: "claude", repo: OPS_INVESTIGATE_REPO, prompt });
 
-  const signer = byName.get("signer_liquidity");
-  if (signer && !isAwaitingProbe(signer) && (signer.status === "red" || /below floor/i.test(signer.detail))) {
+  // Every incident type below arrives pre-drafted: a specific, probe-cited
+  // remediation the operator can act on immediately — an INVESTIGATE task where a
+  // worker can help, or a PREPARE-only task for anything touching funds (compute +
+  // draft, never a transfer). Ordered most-actionable first.
+
+  // 1. Product API down — the product itself is failing its health check.
+  const api = live("product_api");
+  if (api && api.status === "red") {
+    out.push({
+      id: "product-api-down",
+      tone: "act",
+      text: `Product API down — ${api.detail}.`,
+      task: proposeTask(
+        `The live product API is failing its health check: "${api.detail}". Confirm from outside (curl /health), check whether a recent deploy regressed it, tail the product logs, find the root cause, and propose the fix — roll back if a deploy caused it.`,
+      ),
+    });
+  }
+
+  // 2. Signer at/below floor — settlement halts. Funds are operator-only, so the
+  //    task PREPARES the top-up (compute + draft); it never moves money.
+  const signer = live("signer_liquidity");
+  if (signer && (signer.status === "red" || /below floor/i.test(signer.detail))) {
     out.push({
       id: "signer-floor",
       tone: signer.status === "red" ? "act" : "warn",
       text: "Signer USDC below floor — top up before the next payout.",
+      task: proposeTask(
+        `Prepare a signer top-up — do NOT move funds, PREPARE ONLY. The signer is at/below its floor: "${signer.detail}". Compute how much to add to restore a safe buffer (≈ 5× floor) and draft the exact top-up steps/command for the operator to execute.`,
+      ),
     });
   }
 
-  // Proactive pre-floor warning from the runway projection — fires BEFORE the
-  // balance hits the floor (the signer-floor branch above owns the at-floor case,
-  // so we require hoursToFloor > 0). Topping up is operator-only, so the task
-  // PREPARES the fix (compute the amount + draft the steps); it never moves funds.
+  // 3. Signer runway — projected to hit the floor. Pre-floor only (hoursToFloor > 0;
+  //    the at-floor case above owns 0h). PREPARE task, never moves funds.
   const runwayDanger = (health.solvency?.runway ?? [])
     .filter((p) => (p.status === "red" || p.status === "degraded") && (p.hoursToFloor ?? 0) > 0)
     .sort((a, b) => (a.hoursToFloor ?? 0) - (b.hoursToFloor ?? 0));
   const nearest = runwayDanger[0];
   if (nearest && nearest.hoursToFloor != null) {
     const eta = runwayEta(nearest.hoursToFloor);
-    const burn =
-      nearest.burnPerHour != null ? ` (burning ~${nearest.burnPerHour.toFixed(2)} ${nearest.unit}/h)` : "";
+    const burn = nearest.burnPerHour != null ? ` (burning ~${nearest.burnPerHour.toFixed(2)} ${nearest.unit}/h)` : "";
     out.push({
       id: "signer-runway",
       tone: nearest.status === "red" ? "act" : "warn",
       text: `${nearest.label} ${eta} to floor — top up before settlement halts.`,
-      task: {
-        agent: "claude",
-        repo: OPS_INVESTIGATE_REPO,
-        prompt: `Prepare a signer top-up — do NOT move funds, PREPARE ONLY. ${nearest.label} is projected to reach its ${nearest.floor} ${nearest.unit} floor in ${eta} (current ${nearest.current} ${nearest.unit}${burn}). Compute how much ${nearest.unit} to add to reach a safe buffer (target ≈ 5× the floor) and draft the exact top-up steps/command for the operator to review and execute.`,
-      },
+      task: proposeTask(
+        `Prepare a signer top-up — do NOT move funds, PREPARE ONLY. ${nearest.label} is projected to reach its ${nearest.floor} ${nearest.unit} floor in ${eta} (current ${nearest.current} ${nearest.unit}${burn}). Compute how much ${nearest.unit} to add to reach a safe buffer (target ≈ 5× the floor) and draft the exact top-up steps/command for the operator to review and execute.`,
+      ),
     });
   }
 
-  const money = byName.get("money_path");
-  if (money && !isAwaitingProbe(money) && (money.status === "red" || money.status === "degraded")) {
+  // 4. Treasury reserve low — rewards can't be funded. Operator-only funds → PREPARE.
+  const treasury = live("treasury_liquidity");
+  if (treasury && treasury.status === "red") {
+    out.push({
+      id: "treasury-floor",
+      tone: "act",
+      text: `Treasury reserve low — ${treasury.detail}. Refill (operator action).`,
+      task: proposeTask(
+        `Prepare a treasury refill — do NOT move funds, PREPARE ONLY. Treasury probe: "${treasury.detail}". Compute how much to move to restore a safe reserve and draft the exact steps for the operator to execute.`,
+      ),
+    });
+  }
+
+  // 5. Money path — stuck / failed settlements. A worker traces + proposes a fix.
+  const money = live("money_path");
+  if (money && (money.status === "red" || money.status === "degraded")) {
     out.push({
       id: "money-stuck",
       tone: money.status === "red" ? "act" : "warn",
       text: `Money path — ${money.detail}`,
-      task: {
-        agent: "claude",
-        repo: OPS_INVESTIGATE_REPO,
-        prompt: `Investigate the live product money path. Health probe: ${money.detail}. Trace the stuck/failed settlements and propose a fix.`,
-      },
+      task: proposeTask(
+        `Investigate the live product money path. Health probe: "${money.detail}". Trace the stuck/failed settlements and propose a fix.`,
+      ),
     });
   }
 
-  const chain = byName.get("chain_height");
-  if (chain && !isAwaitingProbe(chain) && chain.status === "degraded" && health.network !== "mainnet") {
-    out.push({
-      id: "chain-frozen",
-      tone: "tel",
-      text: "Chain not advancing — testnet reset, wait it out.",
-    });
-  }
-
-  const caps = byName.get("capabilities");
-  if (caps && !isAwaitingProbe(caps) && caps.status === "degraded") {
+  // 6. Capability degraded — name the capability + why it dropped.
+  const caps = live("capabilities");
+  if (caps && caps.status === "degraded") {
     out.push({
       id: "capabilities",
       tone: "warn",
       text: `Capabilities — ${caps.detail}. Check config.`,
+      task: proposeTask(
+        `A product capability is degraded: "${caps.detail}". Identify which capability dropped and why (missing/expired cred, config, or upstream) and propose the config fix.`,
+      ),
+    });
+  }
+
+  // 7. Chain not advancing. Testnet: the operator waits it out (no worker task).
+  //    Mainnet: a halt is page-worthy — investigate + escalate.
+  const chain = live("chain_height");
+  if (chain && chain.status !== "ok" && /advanc|halt|frozen|stall/i.test(chain.detail)) {
+    if (health.network === "mainnet") {
+      out.push({
+        id: "chain-halt",
+        tone: "act",
+        text: `Chain not advancing (mainnet) — ${chain.detail}. Escalate.`,
+        task: proposeTask(
+          `MAINNET chain is not advancing: "${chain.detail}" — settlement is down. Check the RPC + chain status, confirm it isn't our endpoint, and escalate / propose the recovery step.`,
+        ),
+      });
+    } else {
+      out.push({ id: "chain-frozen", tone: "tel", text: "Chain not advancing — testnet reset, wait it out." });
+    }
+  }
+
+  // 8. API latency elevated — profile the slow path.
+  const latency = live("api_latency");
+  if (latency && (latency.status === "red" || latency.status === "degraded")) {
+    out.push({
+      id: "api-latency",
+      tone: latency.status === "red" ? "act" : "warn",
+      text: `API latency elevated — ${latency.detail}.`,
+      task: proposeTask(
+        `Product API latency is elevated: "${latency.detail}". Profile the slow path — RPC round-trips, DB/gateway saturation, recent traffic — and propose what to tune or scale.`,
+      ),
     });
   }
 
