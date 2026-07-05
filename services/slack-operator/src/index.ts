@@ -174,6 +174,12 @@ import {
   type ProductHealthSnapshotBlocks,
 } from "./product-health.js";
 import {
+  loadRemediationConfig,
+  decideRpcRemediation,
+  initialRpcRemediationState,
+  buildRemediationAlert,
+} from "./ops-remediation.js";
+import {
   readFreshCardFailureAnalysis,
   writeCardFailureAnalysis,
 } from "./operator-card-failure-analysis.js";
@@ -3180,6 +3186,7 @@ function startOperatorRoutines() {
   let productHealthRunning = false;
   let productHealthAlertState = initialProductHealthAlertState();
   let runwayAlertState = initialRunwayAlertState();
+  let rpcRemediationState = initialRpcRemediationState();
   // Slice 3: previous overall product-health status, so the co-pilot narrates
   // only on an edge across the red boundary (entered-red / recovered).
   let prevProductHealthStatus: OpsStatus = "unknown";
@@ -3449,14 +3456,35 @@ function startOperatorRoutines() {
       // Signer address for the balance probe: PRODUCT_HEALTH_SIGNER_ADDRESS or derived
       // from AGENT_WALLET_PRIVATE_KEY (already held). Chain height reads /health.
       const signerAddress = phConfig.signerAddress ?? deriveProductHealthSigner();
+      // Auto-remediation: the direct-RPC read uses the currently-active endpoint
+      // (primary, or a backup we failed over to), never necessarily the configured
+      // primary. Off unless OPS_AUTOREMEDIATE_ENABLED + PRODUCT_HEALTH_RPC_BACKUPS.
+      const remediationConfig = loadRemediationConfig(process.env, phConfig.rpcUrl);
+      const activeRpc = remediationConfig.endpoints[rpcRemediationState.activeIndex] ?? phConfig.rpcUrl;
       // One /health fetch feeds product_api + chain_height; the block-advance tracker
       // persists across ticks to catch a frozen chain. Balances come from direct RPC.
-      const collection = await collectProductHealthProbes({ ...phConfig, signerAddress }, fetch, {
+      const collection = await collectProductHealthProbes({ ...phConfig, signerAddress, rpcUrl: activeRpc }, fetch, {
         advance: productHealthChainAdvance,
         nowMs: Date.now(),
       });
       productHealthChainAdvance = collection.chainAdvance;
       productHealthSnapshotBlocks = collection.snapshot;
+      // Decide + apply RPC auto-remediation from this cycle's read health. Pure
+      // decision; the only effect is rotating which endpoint we read next tick
+      // (state.activeIndex) + dispatching an audit (failover) or page (escalate).
+      const remediation = decideRpcRemediation({
+        rpcHealthy: collection.rpcOk,
+        state: rpcRemediationState,
+        config: remediationConfig,
+        nowMs: Date.now(),
+      });
+      rpcRemediationState = remediation.state;
+      const remediationAlert = buildRemediationAlert(
+        remediation.outcome,
+        optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor") ??
+          "https://monitor.averray.com/monitor",
+      );
+      if (remediationAlert) await alertChannel.dispatch(remediationAlert);
       const result = await runProductHealthOnce({
         runProbes: async () => collection.probes,
         alert: (payload) => alertChannel.dispatch(payload),
