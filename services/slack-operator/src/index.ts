@@ -143,6 +143,7 @@ import {
   resolveHermesSessionConfig,
   type HermesProductHealthSnapshot,
 } from "./monitor-hermes-voice.js";
+import { decideOpsNarration, type OpsStatus } from "./ops-narration.js";
 import {
   emitCopilotStreamEvent,
   onCopilotStreamEvent,
@@ -3162,6 +3163,9 @@ function startOperatorRoutines() {
   let anomalyPauseRunning = false;
   let productHealthRunning = false;
   let productHealthAlertState = initialProductHealthAlertState();
+  // Slice 3: previous overall product-health status, so the co-pilot narrates
+  // only on an edge across the red boundary (entered-red / recovered).
+  let prevProductHealthStatus: OpsStatus = "unknown";
   let taskHealthRunning = false;
   const anomalyConfig = loadAnomalyConfig();
   const dispatchPerDayCap = Number(process.env.HERMES_DISPATCH_PER_DAY_MAX) || 10;
@@ -3453,6 +3457,28 @@ function startOperatorRoutines() {
         { at: Date.now(), status: result.status, probes: result.evaluation.probes },
         PRODUCT_HEALTH_HISTORY_MAX,
       );
+      // Slice 3: proactive ops narration — Hermes posts a co-pilot turn on a
+      // fresh red / recovery edge (self-deduped by the transition; muted = quiet,
+      // the Digest still shows state). Network tunes the wording.
+      const opsNarration = decideOpsNarration({
+        prev: prevProductHealthStatus,
+        curr: result.status as OpsStatus,
+        probes: result.evaluation.probes,
+        network:
+          (process.env.WALLET_NETWORK ?? "").trim().toLowerCase() === "mainnet" ? "mainnet" : "testnet",
+        muted: getServerAlertMuteUntilMs() > Date.now(),
+      });
+      prevProductHealthStatus = result.status as OpsStatus;
+      if (opsNarration.post && opsNarration.text) {
+        try {
+          recordCollaborationMessage({ author: "hermes", text: opsNarration.text, kind: "chat" });
+          logger.info({ edge: opsNarration.edge }, "ops_narration_posted");
+        } catch (err) {
+          logger.warn({ err }, "ops_narration_post_failed");
+        }
+      } else if (opsNarration.suppressed) {
+        logger.info({ edge: opsNarration.edge, suppressed: opsNarration.suppressed }, "ops_narration_suppressed");
+      }
       if (result.status !== "healthy") {
         logger.warn(
           { status: result.status, alerted: result.alerted, probes: result.evaluation.probes },
