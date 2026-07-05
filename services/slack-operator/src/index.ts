@@ -141,6 +141,7 @@ import {
   generateHermesReplyViaSessionStream,
   requestHermesCompletion,
   resolveHermesSessionConfig,
+  type HermesProductHealthSnapshot,
 } from "./monitor-hermes-voice.js";
 import {
   emitCopilotStreamEvent,
@@ -1663,6 +1664,21 @@ function shortMemoryNote(note: string): string {
   return compact.length > 180 ? `${compact.slice(0, 179)}…` : compact;
 }
 
+/**
+ * The current live product-health snapshot, compacted for Hermes's reply context
+ * so ops questions get answered from real probes (not guesses). undefined when
+ * the heartbeat is off or has no checks yet — Hermes then simply has no ops data.
+ */
+function currentProductHealthForHermes(): HermesProductHealthSnapshot | undefined {
+  if (!routineConfig.productHealth.enabled) return undefined;
+  const last = productHealthHistory[productHealthHistory.length - 1];
+  if (!last) return undefined;
+  return {
+    status: last.status ?? "unknown",
+    probes: (last.probes ?? []).map((p) => ({ name: p.name, status: p.status, detail: p.detail })),
+  };
+}
+
 async function loadHermesBoardSnapshotForReply(
   operatorMessage: Awaited<ReturnType<typeof recordCollaborationMessage>>
 ) {
@@ -1673,7 +1689,9 @@ async function loadHermesBoardSnapshotForReply(
       4_000,
       "monitor_reply_board_snapshot_timeout"
     );
-    return buildHermesBoardSnapshotFromMonitor(snapshot);
+    const board = buildHermesBoardSnapshotFromMonitor(snapshot);
+    const productHealth = currentProductHealthForHermes();
+    return productHealth ? { ...board, productHealth } : board;
   } catch (error) {
     logger.warn({ err: error, id: operatorMessage.id }, "monitor_collaboration_board_snapshot_unavailable");
     return undefined;
