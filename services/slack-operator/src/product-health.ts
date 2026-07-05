@@ -68,8 +68,10 @@ export interface ProductHealthSnapshot {
   probes: ProbeResult[];
   /** GET /health round-trip latency (ms) for this check — Trends latency series. */
   latencyMs?: number | null;
-  /** Signer USDC balance at this check — Trends balance series. */
+  /** Signer USDC balance at this check — Trends balance series + USDC runway. */
   signerUsdc?: number | null;
+  /** Signer native-gas balance at this check — gas runway (matters on mainnet). */
+  signerGas?: number | null;
 }
 
 /** Append a snapshot to a bounded rolling history (oldest→newest). Pure. */
@@ -202,6 +204,163 @@ function deriveIncidents(history: ReadonlyArray<ProductHealthSnapshot>): Product
     }
   }
   return incidents.sort((a, b) => b.startedAt - a.startedAt).slice(0, 12);
+}
+
+// ── Liquidity runway (projects time-to-floor from the balance series) ──
+
+/** Per-pool balance accessor into a history entry — only the live signer pools
+ *  carry a stored series; treasury pools are forward-compat (no series yet). */
+const RUNWAY_SERIES: Record<string, (s: ProductHealthSnapshot) => number | null | undefined> = {
+  signer_gas: (s) => s.signerGas,
+  signer_usdc: (s) => s.signerUsdc,
+};
+
+export interface LiquidityRunwayPool {
+  key: string;
+  label: string;
+  unit: string;
+  current: number;
+  floor: number;
+  /** Depletion rate in units/hour; null = flat, refilling, or not estimable. */
+  burnPerHour: number | null;
+  /** Projected hours until the balance hits the floor; null = stable / refilling
+   *  / awaiting samples; 0 = already at or below the floor. */
+  hoursToFloor: number | null;
+  /** Did we have enough data to project? false = awaiting samples (not "stable"). */
+  estimable: boolean;
+  status: ProbeStatus;
+}
+
+export interface LiquidityRunway {
+  pools: LiquidityRunwayPool[];
+  /** Honest one-line summary of the nearest pool — feeds SolvencySnapshot.runwayNote. */
+  note: string | null;
+}
+
+export interface LiquidityRunwayOptions {
+  /** Trailing window the burn rate is fit over (default 6h). */
+  windowMs?: number;
+  /** Minimum non-null samples needed to project (default 3). */
+  minSamples?: number;
+  /** Minimum elapsed span across those samples (default 15m) — rejects a burst. */
+  minSpanMs?: number;
+  /** A projection beyond this is treated as "stable" — rejects noise (default 240h). */
+  stableCapHours?: number;
+  /** hoursToFloor ≤ this ⇒ degraded (default 24h). */
+  warnHours?: number;
+  /** hoursToFloor ≤ this ⇒ red (default 6h). */
+  redHours?: number;
+}
+
+/** Least-squares slope of value-vs-time (units per ms); null if undetermined. */
+function seriesSlopePerMs(samples: ReadonlyArray<{ t: number; v: number }>): number | null {
+  const n = samples.length;
+  if (n < 2) return null;
+  let sumT = 0;
+  let sumV = 0;
+  for (const s of samples) {
+    sumT += s.t;
+    sumV += s.v;
+  }
+  const meanT = sumT / n;
+  const meanV = sumV / n;
+  let num = 0;
+  let den = 0;
+  for (const s of samples) {
+    const dt = s.t - meanT;
+    num += dt * (s.v - meanV);
+    den += dt * dt;
+  }
+  return den === 0 ? null : num / den;
+}
+
+function formatRunwayHours(hours: number): string {
+  if (hours <= 0) return "at floor";
+  if (hours < 1) return `~${Math.max(1, Math.round(hours * 60))}m to floor`;
+  if (hours < 48) return `~${Math.round(hours)}h to floor`;
+  return `~${Math.round(hours / 24)}d to floor`;
+}
+
+/**
+ * Project liquidity runway for each floored signer pool from its balance series.
+ * Pure — the caller passes `nowMs`. Honest by construction: too few samples / too
+ * short a span read as "awaiting"; a flat or refilling trend, or a projection past
+ * `stableCapHours`, reads as "stable" — never a fabricated countdown off sensor
+ * noise. Only floored, live signer pools (with a stored series) get a runway;
+ * informational + forward-compat treasury pools are skipped.
+ */
+export function deriveLiquidityRunway(
+  history: ReadonlyArray<ProductHealthSnapshot>,
+  pools: ReadonlyArray<SolvencyPoolData>,
+  nowMs: number,
+  opts: LiquidityRunwayOptions = {},
+): LiquidityRunway {
+  const windowMs = opts.windowMs ?? 6 * 60 * 60 * 1000;
+  const minSamples = opts.minSamples ?? 3;
+  const minSpanMs = opts.minSpanMs ?? 15 * 60 * 1000;
+  const stableCapHours = opts.stableCapHours ?? 240;
+  const warnHours = opts.warnHours ?? 24;
+  const redHours = opts.redHours ?? 6;
+  const windowStart = nowMs - windowMs;
+
+  const out: LiquidityRunwayPool[] = [];
+  for (const pool of pools) {
+    const accessor = RUNWAY_SERIES[pool.key];
+    if (!accessor || pool.informational || pool.amount == null || pool.floor == null || pool.floor <= 0) {
+      continue;
+    }
+    const current = pool.amount;
+    const floor = pool.floor;
+    const mk = (
+      extra: Pick<LiquidityRunwayPool, "burnPerHour" | "hoursToFloor" | "estimable" | "status">,
+    ): LiquidityRunwayPool => ({ key: pool.key, label: pool.label, unit: pool.unit, current, floor, ...extra });
+
+    // Already at/below floor — the balance probe owns the red; runway is 0.
+    if (current <= floor) {
+      out.push(mk({ burnPerHour: null, hoursToFloor: 0, estimable: true, status: "red" }));
+      continue;
+    }
+    const samples: { t: number; v: number }[] = [];
+    for (const snap of history) {
+      if (snap.at < windowStart) continue;
+      const v = accessor(snap);
+      if (typeof v === "number" && Number.isFinite(v)) samples.push({ t: snap.at, v });
+    }
+    const spanMs = samples.length ? samples[samples.length - 1].t - samples[0].t : 0;
+    if (samples.length < minSamples || spanMs < minSpanMs) {
+      out.push(mk({ burnPerHour: null, hoursToFloor: null, estimable: false, status: "ok" }));
+      continue;
+    }
+    const slope = seriesSlopePerMs(samples);
+    const burnPerHour = slope == null ? null : -slope * 3_600_000; // +ve = depleting
+    if (burnPerHour == null || burnPerHour <= 0) {
+      out.push(mk({ burnPerHour, hoursToFloor: null, estimable: true, status: "ok" })); // stable / refilling
+      continue;
+    }
+    const hoursToFloor = (current - floor) / burnPerHour;
+    if (hoursToFloor > stableCapHours) {
+      out.push(mk({ burnPerHour, hoursToFloor: null, estimable: true, status: "ok" })); // effectively stable
+      continue;
+    }
+    const status: ProbeStatus = hoursToFloor <= redHours ? "red" : hoursToFloor <= warnHours ? "degraded" : "ok";
+    out.push(mk({ burnPerHour, hoursToFloor, estimable: true, status }));
+  }
+
+  return { pools: out, note: summariseRunway(out) };
+}
+
+/** The honest one-liner: the nearest depleting pool, else stable, else awaiting. */
+function summariseRunway(pools: ReadonlyArray<LiquidityRunwayPool>): string | null {
+  const trending = pools
+    .filter((p) => p.hoursToFloor != null)
+    .sort((a, b) => (a.hoursToFloor as number) - (b.hoursToFloor as number));
+  if (trending.length) {
+    const p = trending[0];
+    return `${p.label} ${formatRunwayHours(p.hoursToFloor as number)}`;
+  }
+  // Enough data but no downward trend → a real, honest "stable". No estimable
+  // pool at all → null (awaiting) so the board shows its awaiting-data line.
+  return pools.some((p) => p.estimable) ? "stable — no depletion trend" : null;
 }
 
 // ── Config (env-driven; balances stay degraded until their RPC/USDC keys are set) ──

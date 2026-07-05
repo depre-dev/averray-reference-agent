@@ -23,7 +23,9 @@ import {
   appendHistory,
   probeSparkline,
   deriveProductHealthHistory,
+  deriveLiquidityRunway,
   type ProbeResult,
+  type SolvencyPoolData,
   type ProductHealthConfig,
   type ProductHealthFetch,
   type ProductHealthPayload,
@@ -875,5 +877,97 @@ describe("deriveProductHealthHistory", () => {
     expect(b.balanceSeries).toEqual([]);
     expect(b.uptimePct24h).toBeNull();
     expect(b.incidents).toEqual([]);
+  });
+});
+
+describe("deriveLiquidityRunway", () => {
+  const HOUR = 3_600_000;
+  const bal = (at: number, usdc: number | null, gas: number | null = null): ProductHealthSnapshot => ({
+    at,
+    status: "healthy",
+    probes: [],
+    signerUsdc: usdc,
+    signerGas: gas,
+  });
+  const usdcPool = (amount: number | null, floor: number | null = 1): SolvencyPoolData => ({
+    key: "signer_usdc",
+    label: "signer USDC",
+    amount,
+    unit: "USDC",
+    floor,
+    status: "ok",
+  });
+
+  it("projects a countdown from a steady drain (degraded band)", () => {
+    const now = 6 * HOUR;
+    // 19 → 13 over 6h = 1 USDC/h; floor 1 ⇒ (13-1)/1 = 12h ⇒ degraded
+    const history = Array.from({ length: 7 }, (_, i) => bal(i * HOUR, 19 - i));
+    const r = deriveLiquidityRunway(history, [usdcPool(13)], now);
+    expect(r.pools).toHaveLength(1);
+    expect(r.pools[0].burnPerHour).toBeCloseTo(1, 6);
+    expect(r.pools[0].hoursToFloor).toBeCloseTo(12, 6);
+    expect(r.pools[0].status).toBe("degraded");
+    expect(r.note).toBe("signer USDC ~12h to floor");
+  });
+
+  it("pages (red) when the floor is < 6h out", () => {
+    const now = 6 * HOUR;
+    // 13 → 5 over 4h = 2/h; current 5, floor 1 ⇒ (5-1)/2 = 2h ⇒ red
+    const history = [bal(2 * HOUR, 13), bal(3 * HOUR, 11), bal(4 * HOUR, 9), bal(5 * HOUR, 7), bal(6 * HOUR, 5)];
+    const r = deriveLiquidityRunway(history, [usdcPool(5)], now);
+    expect(r.pools[0].hoursToFloor).toBeCloseTo(2, 6);
+    expect(r.pools[0].status).toBe("red");
+    expect(r.note).toBe("signer USDC ~2h to floor");
+  });
+
+  it("reads stable — not a fake countdown — when the balance is flat", () => {
+    const now = 6 * HOUR;
+    const history = Array.from({ length: 7 }, (_, i) => bal(i * HOUR, 5));
+    const r = deriveLiquidityRunway(history, [usdcPool(5)], now);
+    expect(r.pools[0].hoursToFloor).toBeNull();
+    expect(r.pools[0].estimable).toBe(true);
+    expect(r.pools[0].status).toBe("ok");
+    expect(r.note).toBe("stable — no depletion trend");
+  });
+
+  it("reads stable when the balance is refilling (rising)", () => {
+    const now = 6 * HOUR;
+    const history = Array.from({ length: 7 }, (_, i) => bal(i * HOUR, 3 + i));
+    const r = deriveLiquidityRunway(history, [usdcPool(9)], now);
+    expect(r.pools[0].hoursToFloor).toBeNull();
+    expect(r.pools[0].burnPerHour ?? 0).toBeLessThanOrEqual(0);
+    expect(r.note).toBe("stable — no depletion trend");
+  });
+
+  it("awaits samples (not stable) when there is too little data", () => {
+    const now = 6 * HOUR;
+    const history = [bal(5 * HOUR, 8), bal(6 * HOUR, 7)]; // 2 samples < min 3
+    const r = deriveLiquidityRunway(history, [usdcPool(7)], now);
+    expect(r.pools[0].estimable).toBe(false);
+    expect(r.pools[0].hoursToFloor).toBeNull();
+    expect(r.note).toBeNull(); // no estimable pool ⇒ frontend shows awaiting-data
+  });
+
+  it("reports 0h at/below the floor regardless of trend", () => {
+    const now = 6 * HOUR;
+    const history = Array.from({ length: 7 }, (_, i) => bal(i * HOUR, 1));
+    const r = deriveLiquidityRunway(history, [usdcPool(1, 1)], now); // current == floor
+    expect(r.pools[0].hoursToFloor).toBe(0);
+    expect(r.pools[0].status).toBe("red");
+    expect(r.note).toBe("signer USDC at floor");
+  });
+
+  it("skips informational + series-less pools; the nearest depleting pool wins the note", () => {
+    const now = 6 * HOUR;
+    const history = Array.from({ length: 7 }, (_, i) => bal(i * HOUR, 19 - i, 5000)); // gas flat 5000
+    const pools: SolvencyPoolData[] = [
+      { key: "signer_gas", label: "signer gas", amount: 5000, unit: "PAS", floor: 1, status: "ok" }, // stable, kept
+      usdcPool(13), // draining ⇒ 12h
+      { key: "reward_bank", label: "Reward bank", amount: 100, unit: "USDC", floor: 25, status: "ok" }, // no series ⇒ skip
+      { key: "escrow", label: "Escrow", amount: 96, unit: "USDC", status: "ok", informational: true }, // informational ⇒ skip
+    ];
+    const r = deriveLiquidityRunway(history, pools, now);
+    expect(r.pools.map((p) => p.key)).toEqual(["signer_gas", "signer_usdc"]);
+    expect(r.note).toBe("signer USDC ~12h to floor"); // gas is stable ⇒ usdc is the nearest
   });
 });

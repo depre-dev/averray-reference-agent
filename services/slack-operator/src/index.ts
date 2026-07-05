@@ -160,6 +160,7 @@ import { runFailureAnalysisOnce } from "./failure-analysis-routine.js";
 import {
   appendHistory,
   collectProductHealthProbes,
+  deriveLiquidityRunway,
   deriveProductHealthHistory,
   initialProductHealthAlertState,
   loadProductHealthConfig,
@@ -3465,10 +3466,12 @@ function startOperatorRoutines() {
         },
         cooldownMs: routineConfig.productHealth.cooldownMs,
       });
-      // Enrich each entry with the samples the Trends zone graphs: the /health
-      // round-trip latency and the signer USDC balance (from the solvency block).
-      const signerUsdcSample =
-        collection.snapshot.solvency?.pools.find((p) => p.key === "signer_usdc")?.amount ?? null;
+      // Enrich each entry with the samples the Trends zone graphs + the runway
+      // projection reads: the /health round-trip latency and the signer USDC / gas
+      // balances (from the solvency block).
+      const signerPools = collection.snapshot.solvency?.pools ?? [];
+      const signerUsdcSample = signerPools.find((p) => p.key === "signer_usdc")?.amount ?? null;
+      const signerGasSample = signerPools.find((p) => p.key === "signer_gas")?.amount ?? null;
       productHealthHistory = appendHistory(
         productHealthHistory,
         {
@@ -3477,9 +3480,22 @@ function startOperatorRoutines() {
           probes: result.evaluation.probes,
           latencyMs: collection.latencyMs ?? null,
           signerUsdc: signerUsdcSample,
+          signerGas: signerGasSample,
         },
         PRODUCT_HEALTH_HISTORY_MAX,
       );
+      // Liquidity runway: project time-to-floor from the balance series (incl. the
+      // sample just appended) and write the honest note into the solvency block —
+      // "signer USDC ≈ 6h to floor" / "stable" / awaiting. Suggest-only: the board
+      // tells the operator when to top up; it never moves funds.
+      if (productHealthSnapshotBlocks?.solvency) {
+        const runway = deriveLiquidityRunway(
+          productHealthHistory,
+          productHealthSnapshotBlocks.solvency.pools,
+          Date.now(),
+        );
+        productHealthSnapshotBlocks.solvency.runwayNote = runway.note;
+      }
       // Slice 3: proactive ops narration — Hermes posts a co-pilot turn on a
       // fresh red / recovery edge (self-deduped by the transition; muted = quiet,
       // the Digest still shows state). Network tunes the wording.
