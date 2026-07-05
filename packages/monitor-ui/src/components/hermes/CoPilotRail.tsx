@@ -19,6 +19,8 @@ import { useCollaboration, type UseCollaborationOptions } from "../../hooks/useC
 import { derivePresence, activeCount, type PresencePeer } from "../../lib/monitor/presence.js";
 import { railDigestCounts } from "../../lib/monitor/rail-digest.js";
 import { isDecision } from "../../lib/monitor/lane-rules.js";
+import { opsDigestSummary } from "../../lib/monitor/ops-digest.js";
+import type { ProductHealth } from "../../lib/monitor/product-health.js";
 import { shortId } from "../../lib/monitor/card-id.js";
 import { AgentTag, Badge, Button, EmptyState, StatusPill, type AgentTagAgent, type StateVariant } from "../ui.js";
 import { AskHermesComposer } from "./AskHermesComposer.js";
@@ -36,6 +38,9 @@ export interface CoPilotRailProps {
   boardCards?: readonly BoardCard[];
   /** Current board "what needs you" summary. Appended to the activity feed. */
   boardBanner?: BoardNowBannerData;
+  /** Live product-health snapshot — drives the Digest ops line so ops status is
+      glanceable from the Delivery view too. Omit to hide the ops line. */
+  productHealth?: ProductHealth;
   /** Focused card — scopes Ask-Hermes questions + the scope chip. */
   focusedCard?: BoardCard;
   /** Open a related card from a linked follow-up suggestion. */
@@ -67,6 +72,7 @@ export function CoPilotRail({
   backlogSuggestions,
   boardCards,
   boardBanner,
+  productHealth,
   focusedCard,
   onCardClick,
   collaboration,
@@ -172,6 +178,7 @@ export function CoPilotRail({
           >
             <RailDigest
               cards={boardCards ?? []}
+              health={productHealth}
               onCardClick={onCardClick}
               onGoRoom={() => setRailTab("room")}
               onOpenRoster={() => setRosterOpen(true)}
@@ -340,11 +347,13 @@ function cardIdForMessage(message: CollaborationMessage, cards: readonly BoardCa
  */
 function RailDigest({
   cards,
+  health,
   onCardClick,
   onGoRoom,
   onOpenRoster,
 }: {
   cards: readonly BoardCard[];
+  health?: ProductHealth;
   onCardClick?: (id: string) => void;
   onGoRoom: () => void;
   onOpenRoster: () => void;
@@ -365,6 +374,7 @@ function RailDigest({
           session deltas · honest until wired
         </span>
       </div>
+      {health ? <RailOpsRow health={health} /> : null}
       <div className="hm-rail-digest-stats">
         <DigestStat label="NEEDS YOU" value={needsYou} tone="act" />
         <DigestStat label="RUNNING NOW" value={running} tone="ok" />
@@ -396,6 +406,22 @@ function RailDigest({
         <Button variant="ghost" size="sm" onClick={onOpenRoster}>Who&apos;s who</Button>
       </div>
     </section>
+  );
+}
+
+/**
+ * The Digest's ops line — a compact product-health summary so ops status is
+ * visible from the Delivery view (the rail is mounted in both surfaces). Honest
+ * off/awaiting tones; a detail line appears only for a real incident.
+ */
+function RailOpsRow({ health }: { health: ProductHealth }) {
+  const { toneClass, label, detail } = opsDigestSummary(health);
+  return (
+    <div className={`hm-rail-ops hm-rail-ops--${toneClass}`} aria-label="Product ops status">
+      <span className="hm-rail-ops-dot" aria-hidden />
+      <span className="hm-rail-ops-label">Ops · {label}</span>
+      {detail ? <span className="hm-rail-ops-detail">{detail}</span> : null}
+    </div>
   );
 }
 

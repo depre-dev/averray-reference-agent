@@ -423,3 +423,31 @@
 
 /* ---- footer ---- */
 .ops-foot { margin: 14px 0 0; text-align: center; font-size: 11px; color: var(--h4-faint); }
+
+/* ---- co-pilot Digest ops line (rail is mounted in both surfaces) ---- */
+.hm-rail-ops {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  margin: 9px 0 2px;
+  border-radius: var(--h4-r-btn);
+  background: var(--h4-paper-sunken);
+  border: 1px solid var(--h4-line);
+  border-left: 3px solid var(--tone, var(--h4-tel));
+  font-size: 12px;
+  min-width: 0;
+}
+.hm-rail-ops--pass { --tone: var(--h4-ok); }
+.hm-rail-ops--degraded { --tone: var(--h4-warn); }
+.hm-rail-ops--fail { --tone: var(--h4-act); }
+.hm-rail-ops--muted { --tone: var(--h4-tel); }
+.hm-rail-ops-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--tone); flex: none; }
+.hm-rail-ops-label { color: var(--h4-ink); font-weight: 500; white-space: nowrap; }
+.hm-rail-ops-detail {
+  color: var(--h4-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

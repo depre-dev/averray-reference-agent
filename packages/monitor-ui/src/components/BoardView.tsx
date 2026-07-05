@@ -694,6 +694,7 @@ export function BoardView({
           backlogSuggestions={backlogSuggestions}
           boardCards={cards}
           boardBanner={state.banner}
+          productHealth={productHealth}
           focusedCard={scopeCard}
           onCardClick={onCardClick}
           collaboration={collaboration}

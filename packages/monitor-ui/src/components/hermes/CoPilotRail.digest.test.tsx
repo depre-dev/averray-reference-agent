@@ -5,6 +5,7 @@ import { cleanup, render, within } from "@testing-library/react";
 import { SWRConfig } from "swr";
 import { CoPilotRail } from "./CoPilotRail.js";
 import type { BoardCard } from "../../lib/monitor/card-types.js";
+import { OPS_FIXTURE_LIVE } from "../../lib/monitor/ops-fixtures.js";
 
 afterEach(cleanup);
 
@@ -37,5 +38,22 @@ describe("PR-D3d — rail Hermes digest", () => {
     expect(view.getByText(/session deltas · honest until wired/i)).toBeTruthy();
     expect(view.getByText("ADVANCED (SESSION)").parentElement?.querySelector(".hm-rail-digest-value")?.textContent).toBe("—");
     expect(view.getByText("PROD CHANGES").parentElement?.querySelector(".hm-rail-digest-value")?.textContent).toBe("—");
+  });
+
+  test("surfaces a compact ops line when product health is provided", () => {
+    const { container } = render(
+      <CoPilotRail boardCards={[]} collaboration={{ enabled: false }} productHealth={OPS_FIXTURE_LIVE} />,
+      { wrapper },
+    );
+    const ops = container.querySelector(".hm-rail-ops") as HTMLElement;
+    expect(ops).toBeTruthy();
+    expect(ops.className).toContain("hm-rail-ops--degraded");
+    expect(ops.textContent).toContain("Ops · degraded · safe");
+    expect(ops.textContent).toContain("chain not advancing");
+  });
+
+  test("no ops line when product health is absent (rail stays delivery-only)", () => {
+    const { container } = render(<CoPilotRail boardCards={[]} collaboration={{ enabled: false }} />, { wrapper });
+    expect(container.querySelector(".hm-rail-ops")).toBeNull();
   });
 });
