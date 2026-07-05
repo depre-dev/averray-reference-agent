@@ -547,7 +547,7 @@ export async function probeSignerLiquidity(input: {
   minGasNative: number;
   minUsdc: number;
   fetchImpl: typeof fetch;
-}): Promise<ProbeResult> {
+}): Promise<ProbeResult & { pools?: SolvencyPoolData[] }> {
   if (!input.rpcUrl || !input.signerAddress) {
     return {
       name: "signer_liquidity",
@@ -569,6 +569,7 @@ export async function probeSignerLiquidity(input: {
       parts.push(gasPart);
     }
 
+    let usdc: number | undefined;
     if (input.usdcAddress) {
       const usdcRaw = await ethRpc(
         input.rpcUrl,
@@ -576,7 +577,7 @@ export async function probeSignerLiquidity(input: {
         [{ to: input.usdcAddress, data: encodeBalanceOf(input.signerAddress) }, "latest"],
         input.fetchImpl,
       );
-      const usdc = Number(BigInt(usdcRaw || "0x0")) / 10 ** input.usdcDecimals;
+      usdc = Number(BigInt(usdcRaw || "0x0")) / 10 ** input.usdcDecimals;
       const usdcPart = `USDC ${usdc.toFixed(2)}`;
       if (input.minUsdc > 0 && usdc < input.minUsdc) {
         red = true;
@@ -586,7 +587,28 @@ export async function probeSignerLiquidity(input: {
       }
     }
 
-    return { name: "signer_liquidity", status: red ? "red" : "ok", detail: parts.join(", ") };
+    const pools: SolvencyPoolData[] = [
+      {
+        key: "signer_gas",
+        label: "Signer gas",
+        amount: gasNative,
+        unit: "PAS",
+        floor: input.minGasNative > 0 ? input.minGasNative : null,
+        status: input.minGasNative > 0 && gasNative < input.minGasNative ? "red" : "ok",
+      },
+    ];
+    if (usdc !== undefined) {
+      pools.push({
+        key: "signer_usdc",
+        label: "Signer USDC",
+        amount: usdc,
+        unit: "USDC",
+        floor: input.minUsdc > 0 ? input.minUsdc : null,
+        status: input.minUsdc > 0 && usdc < input.minUsdc ? "red" : "ok",
+      });
+    }
+
+    return { name: "signer_liquidity", status: red ? "red" : "ok", detail: parts.join(", "), pools };
   } catch (err) {
     return { name: "signer_liquidity", status: "degraded", detail: `balance read failed: ${errMsg(err)}` };
   }
@@ -605,7 +627,7 @@ export async function probeTreasuryLiquidity(input: {
   minAac: number;
   rpcUrl?: string;
   fetchImpl: typeof fetch;
-}): Promise<ProbeResult> {
+}): Promise<ProbeResult & { pools?: SolvencyPoolData[] }> {
   const name = "treasury_liquidity";
   const a = input.addresses;
   if (!a || !a.token) return { name, status: "degraded", detail: "treasury addresses not exposed by /health yet" };
@@ -637,8 +659,19 @@ export async function probeTreasuryLiquidity(input: {
     withFloor("reserve", reserve, input.minTreasuryReserve);
     withFloor("AAC", aac, input.minAac);
     if (escrow !== undefined) parts.push(`escrow ${escrow.toFixed(2)}`); // in-flight — informational, no floor
+
+    const pools: SolvencyPoolData[] = [];
+    const pool = (key: string, label: string, val: number | undefined, floor: number): void => {
+      if (val === undefined) return;
+      pools.push({ key, label, amount: val, unit: "USDC", floor: floor > 0 ? floor : null, status: floor > 0 && val < floor ? "red" : "ok" });
+    };
+    pool("reward_bank", "Reward bank", input.rewardBankLiquid, input.minRewardBank);
+    pool("reserve", "Treasury reserve", reserve, input.minTreasuryReserve);
+    pool("aac", "Agent core", aac, input.minAac);
+    if (escrow !== undefined) pools.push({ key: "escrow", label: "Escrow (in-flight)", amount: escrow, unit: "USDC", status: "ok", informational: true });
+
     if (parts.length === 0) return { name, status: "degraded", detail: "no treasury balances readable" };
-    return { name, status: red ? "red" : "ok", detail: parts.join(", ") };
+    return { name, status: red ? "red" : "ok", detail: parts.join(", "), pools };
   } catch (err) {
     return { name, status: "degraded", detail: `treasury read failed: ${errMsg(err)}` };
   }
@@ -646,10 +679,55 @@ export async function probeTreasuryLiquidity(input: {
 
 // ── Collector: one /health fetch (api + chain) + the direct-RPC balance probe ──
 
+// ── Structured "snapshot" blocks the Ops board consumes forward-compat ──
+// Each is emitted only when its data is actually available: signer solvency is
+// always readable via direct RPC; treasury pools + settlement flow arrive when
+// the product /health exposes addresses + settlement (until then the frontend
+// shows honest awaiting-data, never a fabricated zero).
+
+export interface SolvencyPoolData {
+  key: string;
+  label: string;
+  amount: number | null;
+  unit: string;
+  floor?: number | null;
+  status: ProbeStatus;
+  informational?: boolean;
+}
+export interface SolvencySnapshotData {
+  pools: SolvencyPoolData[];
+  runwayNote?: string | null;
+}
+export interface MoneyPathData {
+  settled24h?: number | null;
+  stuck?: number | null;
+  failed24h?: number | null;
+  asOf?: number | null;
+}
+export interface ProductHealthSnapshotBlocks {
+  chainId?: number | null;
+  network?: "testnet" | "mainnet" | "unknown";
+  solvency?: SolvencySnapshotData;
+  flow?: MoneyPathData;
+}
+
+function resolveProductHealthNetwork(chainId: number | undefined): "testnet" | "mainnet" | "unknown" {
+  if (chainId === undefined) return "unknown";
+  return MAINNET_CHAIN_IDS.has(chainId) ? "mainnet" : "testnet";
+}
+
+function parseHealthAsOf(asOf: string | undefined): number | null {
+  if (!asOf) return null;
+  const t = Date.parse(asOf);
+  return Number.isNaN(t) ? null : t;
+}
+
 export interface ProductHealthCollection {
   probes: ProbeResult[];
   /** Updated block-advance tracker — the caller persists it across ticks. */
   chainAdvance: ChainAdvance;
+  /** Structured blocks for the Ops board (chain id / network / solvency / flow). */
+  snapshot: ProductHealthSnapshotBlocks;
 }
 
 /** Absolute age (seconds) of the chain's latest block via the direct RPC — but
@@ -722,6 +800,23 @@ export async function collectProductHealthProbes(
     rpcUrl: config.rpcUrl,
     fetchImpl,
   });
+  const solvencyPools = [...(signer.pools ?? []), ...(treasury.pools ?? [])];
+  const settlement = h.body?.settlement;
+  const snapshot: ProductHealthSnapshotBlocks = {
+    chainId: chainId ?? null,
+    network: resolveProductHealthNetwork(chainId),
+    ...(solvencyPools.length ? { solvency: { pools: solvencyPools } } : {}),
+    ...(settlement
+      ? {
+          flow: {
+            settled24h: settlement.settled24h ?? null,
+            stuck: settlement.stuck ?? null,
+            failed24h: settlement.failed24h ?? null,
+            asOf: parseHealthAsOf(settlement.asOf),
+          },
+        }
+      : {}),
+  };
   return {
     probes: [
       deriveProductApiProbe(h),
@@ -741,6 +836,7 @@ export async function collectProductHealthProbes(
       treasury,
     ],
     chainAdvance,
+    snapshot,
   };
 }
 

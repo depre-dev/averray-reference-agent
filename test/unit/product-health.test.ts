@@ -400,6 +400,15 @@ describe("probeSignerLiquidity (direct RPC)", () => {
     expect(r.detail).toContain("USDC 10.00");
   });
 
+  it("exposes structured signer pools (gas + USDC) for the Ops board", async () => {
+    const r = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: "0xabc", usdcAddress: "0xusdc", ...floors, fetchImpl: balances("0xDE0B6B3A7640000", "0x989680") });
+    expect(r.pools?.map((p) => p.key)).toEqual(["signer_gas", "signer_usdc"]);
+    const usdc = r.pools?.find((p) => p.key === "signer_usdc");
+    expect(usdc?.amount).toBe(10);
+    expect(usdc?.unit).toBe("USDC");
+    expect(usdc?.floor).toBe(5);
+  });
+
   it("red when native gas is below the floor", async () => {
     const r = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: "0xabc", usdcAddress: "0xusdc", ...floors, fetchImpl: balances("0x2386F26FC10000", "0x989680") });
     expect(r.status).toBe("red");
@@ -436,6 +445,15 @@ describe("probeTreasuryLiquidity (direct RPC + /health rewardBank)", () => {
     expect(r.status).toBe("ok");
     expect(r.detail).toContain("reward 100.00");
     expect(r.detail).toContain("escrow 10.00");
+  });
+
+  it("exposes structured treasury pools (reward / reserve / aac / escrow-informational)", async () => {
+    const r = await probeTreasuryLiquidity({ ...base, rewardBankLiquid: 100, fetchImpl: balances("0x0", "0x989680") });
+    const byKey = Object.fromEntries((r.pools ?? []).map((p) => [p.key, p]));
+    expect(byKey.reward_bank.amount).toBe(100);
+    expect(byKey.reserve.amount).toBe(10);
+    expect(byKey.escrow.informational).toBe(true);
+    expect(byKey.escrow.floor).toBeUndefined();
   });
 
   it("red when the treasury reserve is below its floor", async () => {
@@ -507,6 +525,35 @@ describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", ()
   it("returns an updated chain-advance tracker for the caller to persist", async () => {
     const { chainAdvance } = await collectProductHealthProbes(cfg(), combinedFetch({ healthBody: HEALTHY_BODY, gasHex: "0x1", usdcHex: "0x1" }), { advance: undefined, nowMs: 1000 });
     expect(chainAdvance).toEqual({ lastBlock: 10612201, lastAdvanceAtMs: 1000 });
+  });
+
+  it("assembles the structured snapshot: chainId / network / solvency, and flow when settlement is present", async () => {
+    const { snapshot } = await collectProductHealthProbes(
+      cfg(),
+      combinedFetch({
+        healthBody: { ...HEALTHY_BODY, settlement: { settled24h: 37, stuck: 1, failed24h: 0, asOf: "2026-07-05T00:00:00.000Z" } },
+        chainIdHex: CHAIN_ID_HEX,
+        blockTimestampHex: tsHex(10_000_000, 12),
+        gasHex: "0xDE0B6B3A7640000",
+        usdcHex: "0x989680",
+      }),
+      { nowMs: 10_000_000 },
+    );
+    expect(snapshot.chainId).toBe(420420417);
+    expect(snapshot.network).toBe("testnet");
+    expect(snapshot.solvency?.pools.some((p) => p.key === "signer_usdc" && p.amount === 10)).toBe(true);
+    expect(snapshot.flow?.settled24h).toBe(37);
+    expect(snapshot.flow?.stuck).toBe(1);
+  });
+
+  it("omits the flow block when the product /health exposes no settlement (honest awaiting)", async () => {
+    const { snapshot } = await collectProductHealthProbes(
+      cfg(),
+      combinedFetch({ healthBody: { ...HEALTHY_BODY, settlement: undefined }, gasHex: "0x1", usdcHex: "0x1" }),
+      { nowMs: 1000 },
+    );
+    expect(snapshot.flow).toBeUndefined();
+    expect(snapshot.network).toBe("testnet");
   });
 });
 
