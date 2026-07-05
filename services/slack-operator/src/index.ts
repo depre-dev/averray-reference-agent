@@ -166,6 +166,7 @@ import {
   runProductHealthOnce,
   type ChainAdvance,
   type ProductHealthSnapshot,
+  type ProductHealthSnapshotBlocks,
 } from "./product-health.js";
 import {
   readFreshCardFailureAnalysis,
@@ -260,6 +261,8 @@ const PRODUCT_HEALTH_HISTORY_MAX = 60;
 let productHealthHistory: ProductHealthSnapshot[] = [];
 // Block-advance tracker so a frozen chain (static height) isn't read as green.
 let productHealthChainAdvance: ChainAdvance | undefined;
+// Structured snapshot blocks (chain id / network / solvency / flow) for the Ops board.
+let productHealthSnapshotBlocks: ProductHealthSnapshotBlocks | undefined;
 
 /** The settlement signer's address, derived from the key the monitor already holds
  *  (AGENT_WALLET_PRIVATE_KEY) so signer_liquidity needs no duplicated config. A
@@ -712,6 +715,10 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
         detail: p.detail,
         sparkline: probeSparkline(productHealthHistory, p.name, 30),
       })),
+      // Structured Ops-board blocks (chain id / network / solvency / flow),
+      // emitted only when their data is actually available — else absent (the
+      // frontend renders honest awaiting-data).
+      ...(productHealthSnapshotBlocks ?? {}),
     });
     return;
   }
@@ -3439,6 +3446,7 @@ function startOperatorRoutines() {
         nowMs: Date.now(),
       });
       productHealthChainAdvance = collection.chainAdvance;
+      productHealthSnapshotBlocks = collection.snapshot;
       const result = await runProductHealthOnce({
         runProbes: async () => collection.probes,
         alert: (payload) => alertChannel.dispatch(payload),
