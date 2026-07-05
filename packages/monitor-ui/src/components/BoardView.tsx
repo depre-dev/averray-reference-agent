@@ -49,6 +49,7 @@ import { useProductHealth } from "../hooks/useProductHealth.js";
 import { hasFreshRed, type ProductHealth } from "../lib/monitor/product-health.js";
 import { BoardSurfaceSwitch, type BoardSurface } from "./ops/BoardSurfaceSwitch.js";
 import { OpsBoard } from "./ops/OpsBoard.js";
+import { opsBannerData, pillarStatuses } from "./ops/ops-frame.js";
 import { Badge, Button } from "./ui.js";
 
 // laneFor() promotes every isAction card into needs-attention, so the
@@ -632,17 +633,55 @@ export function BoardView({
           liveAt={status === "open" ? liveLabel || undefined : undefined}
           automationHealth={board?.automationHealth}
           onRefresh={onRefresh}
+          opsPillars={boardSurface === "ops" && productHealth ? pillarStatuses(productHealth.probes) : undefined}
         />
       )}
 
-      {/* Delivery-only hero sentence (it's about the card decisions). In Ops the
-          <OpsBoard> carries its own status sub-header + soft incident banner. */}
-      {boardSurface === "delivery" ? <BoardNowBanner banner={state.banner} cta={bannerCta} /> : null}
+      {/* The hero "board now" banner persists in BOTH surfaces (this frame stays,
+          only its content adapts): delivery decisions in Delivery, product-health
+          importance in Ops. */}
+      {boardSurface === "ops" ? (
+        <BoardNowBanner
+          banner={
+            productHealth
+              ? opsBannerData(productHealth, Date.now())
+              : {
+                  tone: "calm",
+                  eyebrow: "OPS NOW",
+                  headline: "Loading health…",
+                  sub: "Polling the live product heartbeat.",
+                  primaryActionId: undefined,
+                }
+          }
+        />
+      ) : (
+        <BoardNowBanner banner={state.banner} cta={bannerCta} />
+      )}
 
       <div className="hm-main">
         {/* The lanes column swaps Delivery ⇆ Ops; the co-pilot rail is a sibling
             that stays mounted in BOTH views. */}
         <div className="hm-lanes-wrap">
+          {/* Persistent operator toolbar — search + filter + utilities stay in
+              BOTH surfaces; only the lane columns below swap (kanban ⇆ ops zones). */}
+          <LanesBar
+            counts={state.counts}
+            mode={state.mode}
+            searchValue={query}
+            onSearchChange={setQuery}
+            searchInputRef={searchInputRef}
+            activeFilter={filter}
+            onFilterChange={setFilter}
+          />
+          <UtilitiesPanel
+            usage={board?.llmUsage}
+            suites={board?.testbedSuites}
+            onRunSuite={onRunSuite}
+            onSaveSuite={onSaveSuite}
+            onApproveSuite={onApproveSuite}
+            onDismissSuite={onDismissSuite}
+            onSpawnMission={onSpawnMission}
+          />
           {boardSurface === "ops" ? (
             productHealth ? (
               <OpsBoard health={productHealth} />
@@ -655,35 +694,15 @@ export function BoardView({
               </div>
             )
           ) : (
-            <>
-              <LanesBar
-                counts={state.counts}
-                mode={state.mode}
-                searchValue={query}
-                onSearchChange={setQuery}
-                searchInputRef={searchInputRef}
-                activeFilter={filter}
-                onFilterChange={setFilter}
-              />
-              <UtilitiesPanel
-                usage={board?.llmUsage}
-                suites={board?.testbedSuites}
-                onRunSuite={onRunSuite}
-                onSaveSuite={onSaveSuite}
-                onApproveSuite={onApproveSuite}
-                onDismissSuite={onDismissSuite}
-                onSpawnMission={onSpawnMission}
-              />
-              <KanbanBoard
-                grouped={displayGrouped}
-                ariaLabel="Kanban lane grid"
-                expanded={surfacedExpanded}
-                onToggleLane={onToggleLane}
-                renderCard={renderCard}
-                renderPipelineCard={renderPipelineCard}
-                renderLaneBody={renderLaneBody}
-              />
-            </>
+            <KanbanBoard
+              grouped={displayGrouped}
+              ariaLabel="Kanban lane grid"
+              expanded={surfacedExpanded}
+              onToggleLane={onToggleLane}
+              renderCard={renderCard}
+              renderPipelineCard={renderPipelineCard}
+              renderLaneBody={renderLaneBody}
+            />
           )}
         </div>
 

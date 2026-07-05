@@ -135,6 +135,18 @@ export function formatAmount(n: number): string {
   return n.toFixed(2);
 }
 
+/** Relative "checked Ns ago" label from an epoch-ms timestamp. */
+export function formatAgo(at: number | null, nowMs: number): string {
+  if (at == null) return "—";
+  const s = Math.max(0, Math.round((nowMs - at) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
 /** Coarse duration label: 3d 20h, 4h 12m, 7m, 45s. */
 export function formatDuration(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));
