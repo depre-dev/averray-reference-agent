@@ -883,7 +883,7 @@ export async function probeSignerLiquidity(input: {
   minGasNative: number;
   minUsdc: number;
   fetchImpl: typeof fetch;
-}): Promise<ProbeResult & { pools?: SolvencyPoolData[] }> {
+}): Promise<ProbeResult & { pools?: SolvencyPoolData[]; rpcOk?: boolean }> {
   if (!input.rpcUrl || !input.signerAddress) {
     return {
       name: "signer_liquidity",
@@ -944,9 +944,11 @@ export async function probeSignerLiquidity(input: {
       });
     }
 
-    return { name: "signer_liquidity", status: red ? "red" : "ok", detail: parts.join(", "), pools };
+    return { name: "signer_liquidity", status: red ? "red" : "ok", detail: parts.join(", "), pools, rpcOk: true };
   } catch (err) {
-    return { name: "signer_liquidity", status: "degraded", detail: `balance read failed: ${errMsg(err)}` };
+    // The direct RPC read itself failed (timeout / 1006 / bad endpoint) — distinct
+    // from a low balance. rpcOk:false is the auto-remediation failover signal.
+    return { name: "signer_liquidity", status: "degraded", detail: `balance read failed: ${errMsg(err)}`, rpcOk: false };
   }
 }
 
@@ -1068,6 +1070,9 @@ export interface ProductHealthCollection {
   snapshot: ProductHealthSnapshotBlocks;
   /** GET /health round-trip latency (ms) — the caller records it on the history entry. */
   latencyMs?: number;
+  /** Did the direct read RPC respond this cycle? true/false/undefined(=can't judge).
+   *  The auto-remediation failover signal. */
+  rpcOk?: boolean;
 }
 
 /** Absolute age (seconds) of the chain's latest block via the direct RPC — but
@@ -1178,6 +1183,7 @@ export async function collectProductHealthProbes(
     chainAdvance,
     snapshot,
     latencyMs: h.latencyMs,
+    rpcOk: signer.rpcOk,
   };
 }
 
