@@ -54,6 +54,14 @@
   height: 7px;
 }
 
+/* ---- Ops top-strip KPI chips (reuse the .hm-kpi pill shell, tone the dot) ---- */
+.hm-kpi--ops { --tone: var(--h4-tel); }
+.hm-kpi--ops .dot { background: var(--tone); }
+.ops-kpi--ok { --tone: var(--h4-ok); }
+.ops-kpi--degraded { --tone: var(--h4-warn); }
+.ops-kpi--red { --tone: var(--h4-act); }
+.ops-kpi--awaiting { --tone: var(--h4-tel); }
+
 /* ---- status dot (shared) ---- */
 .ops-dot {
   width: 8px;
