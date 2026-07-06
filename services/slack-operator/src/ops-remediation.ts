@@ -177,3 +177,52 @@ export function buildRemediationAlert(outcome: RpcRemediationOutcome, boardUrl: 
   }
   return null;
 }
+
+/** Board-facing snapshot of the remediation state, for the Ops "RPC failover" row. */
+export interface RemediationStatus {
+  /** off = disabled · armed = on primary, healthy · failover = reading a backup ·
+   *  halted = breaker tripped, needs an operator. */
+  state: "off" | "armed" | "failover" | "halted";
+  enabled: boolean;
+  /** The RPC endpoint currently in use. */
+  activeEndpoint: string | null;
+  onBackup: boolean;
+  /** One-line board detail. */
+  detail: string;
+}
+
+function hostOf(url: string | null): string {
+  if (!url) return "—";
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+/** Derive the board status from the live config + state. Pure. `lastReason` is the
+ *  most recent failover/escalate reason (index.ts threads it) for the halted line. */
+export function describeRemediationStatus(input: {
+  config: RemediationConfig;
+  state: RpcRemediationState;
+  lastReason?: string;
+}): RemediationStatus {
+  const active = input.config.endpoints[input.state.activeIndex] ?? input.config.endpoints[0] ?? null;
+  const onBackup = input.state.activeIndex > 0;
+  if (!input.config.enabled) {
+    return { state: "off", enabled: false, activeEndpoint: active, onBackup, detail: "auto-remediation off" };
+  }
+  if (input.state.breakerTripped) {
+    return {
+      state: "halted",
+      enabled: true,
+      activeEndpoint: active,
+      onBackup,
+      detail: input.lastReason ? `halted — ${input.lastReason}` : "halted — RPC unhealthy, needs an operator",
+    };
+  }
+  if (onBackup) {
+    return { state: "failover", enabled: true, activeEndpoint: active, onBackup, detail: `reading backup ${hostOf(active)}` };
+  }
+  return { state: "armed", enabled: true, activeEndpoint: active, onBackup, detail: `armed · primary ${hostOf(active)}` };
+}

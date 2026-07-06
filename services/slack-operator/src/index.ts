@@ -178,6 +178,8 @@ import {
   decideRpcRemediation,
   initialRpcRemediationState,
   buildRemediationAlert,
+  describeRemediationStatus,
+  type RemediationStatus,
 } from "./ops-remediation.js";
 import {
   readFreshCardFailureAnalysis,
@@ -274,6 +276,7 @@ let productHealthHistory: ProductHealthSnapshot[] = [];
 let productHealthChainAdvance: ChainAdvance | undefined;
 // Structured snapshot blocks (chain id / network / solvency / flow) for the Ops board.
 let productHealthSnapshotBlocks: ProductHealthSnapshotBlocks | undefined;
+let productHealthRemediation: RemediationStatus | undefined;
 
 /** The settlement signer's address, derived from the key the monitor already holds
  *  (AGENT_WALLET_PRIVATE_KEY) so signer_liquidity needs no duplicated config. A
@@ -734,6 +737,9 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       // incident episodes) from the rolling buffer. Always present — the series
       // are honestly short and uptimePct24h is null until a check lands in-window.
       history: deriveProductHealthHistory(productHealthHistory, Date.now()),
+      // RPC auto-remediation status for the Ops "RPC failover" row (undefined =
+      // omitted by JSON when the routine hasn't run a cycle yet).
+      remediation: productHealthRemediation,
     });
     return;
   }
@@ -3187,6 +3193,7 @@ function startOperatorRoutines() {
   let productHealthAlertState = initialProductHealthAlertState();
   let runwayAlertState = initialRunwayAlertState();
   let rpcRemediationState = initialRpcRemediationState();
+  let lastRemediationReason: string | undefined;
   // Slice 3: previous overall product-health status, so the co-pilot narrates
   // only on an edge across the red boundary (entered-red / recovered).
   let prevProductHealthStatus: OpsStatus = "unknown";
@@ -3485,6 +3492,17 @@ function startOperatorRoutines() {
           "https://monitor.averray.com/monitor",
       );
       if (remediationAlert) await alertChannel.dispatch(remediationAlert);
+      if (remediation.outcome.kind === "failover" || remediation.outcome.kind === "escalate") {
+        lastRemediationReason = remediation.outcome.reason;
+      } else if (remediation.outcome.kind === "resolved") {
+        lastRemediationReason = undefined;
+      }
+      // Board status for the Ops "RPC failover" row (armed / failover / halted / off).
+      productHealthRemediation = describeRemediationStatus({
+        config: remediationConfig,
+        state: rpcRemediationState,
+        lastReason: lastRemediationReason,
+      });
       const result = await runProductHealthOnce({
         runProbes: async () => collection.probes,
         alert: (payload) => alertChannel.dispatch(payload),

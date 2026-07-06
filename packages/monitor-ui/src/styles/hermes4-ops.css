@@ -442,6 +442,8 @@
 .ops-deploy-row { display: flex; align-items: center; gap: 9px; font-size: 12px; --tone: var(--h4-ok); }
 .ops-deploy-row--ok { --tone: var(--h4-ok); }
 .ops-deploy-row--awaiting { --tone: var(--h4-tel); }
+.ops-deploy-row--degraded { --tone: var(--h4-warn); }
+.ops-deploy-row--red { --tone: var(--h4-act); }
 .ops-deploy-row .ops-dot { background: var(--tone); }
 .ops-deploy-name { color: var(--h4-ink); min-width: 118px; }
 .ops-deploy-val { color: var(--h4-muted); }

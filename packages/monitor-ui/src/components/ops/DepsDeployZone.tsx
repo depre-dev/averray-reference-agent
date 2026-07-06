@@ -49,7 +49,22 @@ export function DepsDeployZone({ health }: DepsDeployZoneProps) {
             {structuredLive ? "structured blocks live" : "awaiting structured blocks"}
           </span>
         </div>
+        {health.remediation && health.remediation.state !== "off" && (
+          <div
+            className={`ops-deploy-row ops-deploy-row--${remediationTone(health.remediation.state)}`}
+            data-testid="ops-remediation"
+          >
+            <span className="ops-dot" aria-hidden />
+            <span className="ops-deploy-name">RPC failover</span>
+            <span className="ops-deploy-val">{health.remediation.detail}</span>
+          </div>
+        )}
       </div>
     </OpsZone>
   );
+}
+
+/** armed → sage · failover → amber · halted → coral (the row only renders when enabled). */
+function remediationTone(state: "armed" | "failover" | "halted" | "off"): string {
+  return state === "halted" ? "red" : state === "failover" ? "degraded" : "ok";
 }
