@@ -4,6 +4,7 @@ import {
   initialRpcRemediationState,
   buildRemediationAlert,
   loadRemediationConfig,
+  describeRemediationStatus,
   type RemediationConfig,
 } from "../../services/slack-operator/src/ops-remediation.js";
 
@@ -103,5 +104,37 @@ describe("loadRemediationConfig", () => {
   it("enables only on an explicit 'true'", () => {
     expect(loadRemediationConfig({ OPS_AUTOREMEDIATE_ENABLED: "true" }, "rpc-a").enabled).toBe(true);
     expect(loadRemediationConfig({ OPS_AUTOREMEDIATE_ENABLED: "1" }, "rpc-a").enabled).toBe(false);
+  });
+});
+
+describe("describeRemediationStatus", () => {
+  it("off when disabled", () => {
+    const s = describeRemediationStatus({ config: cfg({ enabled: false }), state: initialRpcRemediationState() });
+    expect(s.state).toBe("off");
+    expect(s.enabled).toBe(false);
+  });
+
+  it("armed on the primary when enabled + healthy", () => {
+    const s = describeRemediationStatus({ config: cfg(), state: initialRpcRemediationState() });
+    expect(s.state).toBe("armed");
+    expect(s.activeEndpoint).toBe("rpc-a");
+    expect(s.onBackup).toBe(false);
+  });
+
+  it("failover when reading a backup", () => {
+    const s = describeRemediationStatus({ config: cfg(), state: { ...initialRpcRemediationState(), activeIndex: 1 } });
+    expect(s.state).toBe("failover");
+    expect(s.onBackup).toBe(true);
+    expect(s.activeEndpoint).toBe("rpc-b");
+  });
+
+  it("halted with the reason when the breaker tripped", () => {
+    const s = describeRemediationStatus({
+      config: cfg(),
+      state: { ...initialRpcRemediationState(), breakerTripped: true },
+      lastReason: "no backup RPC endpoint configured",
+    });
+    expect(s.state).toBe("halted");
+    expect(s.detail).toContain("no backup");
   });
 });

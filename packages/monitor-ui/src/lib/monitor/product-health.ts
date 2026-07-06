@@ -112,6 +112,18 @@ export interface ProductHealth {
   solvency?: SolvencySnapshot;
   flow?: MoneyPathSnapshot;
   history?: HealthHistory;
+  remediation?: RemediationStatus;
+}
+
+/** RPC auto-remediation status — drives the Ops "RPC failover" row. */
+export interface RemediationStatus {
+  /** off = disabled · armed = on primary, healthy · failover = reading a backup ·
+   *  halted = breaker tripped, needs an operator. */
+  state: "off" | "armed" | "failover" | "halted";
+  enabled: boolean;
+  activeEndpoint: string | null;
+  onBackup: boolean;
+  detail: string;
 }
 
 const PROBE_LABELS: Record<string, string> = {
