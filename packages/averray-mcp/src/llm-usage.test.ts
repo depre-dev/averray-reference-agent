@@ -3,124 +3,130 @@ import { describe, expect, it } from "vitest";
 import {
   aggregateLlmUsage,
   llmBillingClass,
+  resolveCodexPlan,
   resolveOllamaPlan,
+  resolveSubscriptionPlans,
+  subscriptionProviderOf,
   type LlmUsageEvent,
+  type SubscriptionPlanConfig,
 } from "./llm-usage.js";
 
 function evt(over: Partial<LlmUsageEvent> & Pick<LlmUsageEvent, "agent" | "model" | "ts">): LlmUsageEvent {
-  return {
-    inputTokens: 0,
-    outputTokens: 0,
-    ...over,
-  };
+  return { inputTokens: 0, outputTokens: 0, ...over };
 }
 
-describe("resolveOllamaPlan", () => {
-  it("maps free/pro/max to their flat monthly price (case-insensitive)", () => {
-    expect(resolveOllamaPlan({ OLLAMA_PLAN: "pro" } as NodeJS.ProcessEnv)).toEqual({
-      plan: "pro",
-      monthlyUsd: 20,
-      configured: true,
-    });
-    expect(resolveOllamaPlan({ OLLAMA_PLAN: "MAX" } as NodeJS.ProcessEnv)).toEqual({
-      plan: "max",
-      monthlyUsd: 100,
-      configured: true,
-    });
-    expect(resolveOllamaPlan({ OLLAMA_PLAN: "free" } as NodeJS.ProcessEnv)).toEqual({
-      plan: "free",
-      monthlyUsd: 0,
-      configured: true,
-    });
+const OLLAMA_PRO: SubscriptionPlanConfig = { provider: "ollama", label: "Ollama", plan: "pro", planLabel: "Pro", monthlyUsd: 20, configured: true };
+const CODEX_PRO5X: SubscriptionPlanConfig = { provider: "codex", label: "Codex", plan: "pro5x", planLabel: "Pro 5×", monthlyUsd: 100, configured: true };
+const OLLAMA_UNSET: SubscriptionPlanConfig = { provider: "ollama", label: "Ollama", plan: "none", planLabel: "", monthlyUsd: null, configured: false };
+const CODEX_UNSET: SubscriptionPlanConfig = { provider: "codex", label: "Codex", plan: "none", planLabel: "", monthlyUsd: null, configured: false };
+
+describe("resolveOllamaPlan / resolveCodexPlan / resolveSubscriptionPlans", () => {
+  it("maps each provider's plan to its flat monthly price (case-insensitive, dash/underscore tolerant)", () => {
+    expect(resolveOllamaPlan({ OLLAMA_PLAN: "pro" } as NodeJS.ProcessEnv)).toEqual(OLLAMA_PRO);
+    expect(resolveOllamaPlan({ OLLAMA_PLAN: "MAX" } as NodeJS.ProcessEnv)).toMatchObject({ plan: "max", monthlyUsd: 100, configured: true });
+    expect(resolveCodexPlan({ CODEX_PLAN: "pro5x" } as NodeJS.ProcessEnv)).toEqual(CODEX_PRO5X);
+    expect(resolveCodexPlan({ CODEX_PLAN: "pro-5x" } as NodeJS.ProcessEnv)).toEqual(CODEX_PRO5X); // normalised
+    expect(resolveCodexPlan({ CODEX_PLAN: "plus" } as NodeJS.ProcessEnv)).toMatchObject({ plan: "plus", monthlyUsd: 20, planLabel: "Plus" });
   });
 
   it("treats unset / unknown plans as not configured (never invents a cost)", () => {
-    expect(resolveOllamaPlan({} as NodeJS.ProcessEnv)).toEqual({ plan: "none", monthlyUsd: null, configured: false });
-    expect(resolveOllamaPlan({ OLLAMA_PLAN: "enterprise" } as NodeJS.ProcessEnv)).toEqual({
-      plan: "none",
-      monthlyUsd: null,
-      configured: false,
-    });
+    expect(resolveOllamaPlan({} as NodeJS.ProcessEnv)).toEqual(OLLAMA_UNSET);
+    expect(resolveCodexPlan({ CODEX_PLAN: "enterprise" } as NodeJS.ProcessEnv)).toEqual(CODEX_UNSET);
+  });
+
+  it("resolveSubscriptionPlans returns both providers from env", () => {
+    const plans = resolveSubscriptionPlans({ OLLAMA_PLAN: "pro", CODEX_PLAN: "pro5x" } as NodeJS.ProcessEnv);
+    expect(plans.map((p) => p.provider)).toEqual(["ollama", "codex"]);
+    expect(plans).toEqual([OLLAMA_PRO, CODEX_PRO5X]);
   });
 });
 
-describe("llmBillingClass", () => {
-  it("classes Ollama Cloud (:cloud / ollama / hermes) as subscription", () => {
-    expect(llmBillingClass("hermes", "glm-5.2:cloud")).toBe("subscription");
-    expect(llmBillingClass("hermes", "deepseek-v4-pro:cloud")).toBe("subscription");
-    expect(llmBillingClass("worker", "some-ollama-model")).toBe("subscription");
-    expect(llmBillingClass("hermes", "not_recorded")).toBe("subscription");
+describe("subscriptionProviderOf / llmBillingClass", () => {
+  it("attributes events to their subscription provider", () => {
+    expect(subscriptionProviderOf("hermes", "glm-5.2:cloud")).toBe("ollama");
+    expect(subscriptionProviderOf("worker", "some-ollama-model")).toBe("ollama");
+    expect(subscriptionProviderOf("codex", "gpt-5.5-codex")).toBe("codex");
+    expect(subscriptionProviderOf("claude", "claude-opus")).toBeNull();
   });
 
-  it("classes the Claude SDK agents as metered, everything else unknown", () => {
+  it("classes both Ollama and Codex as subscription, Claude agents as metered, else unknown", () => {
+    expect(llmBillingClass("hermes", "glm-5.2:cloud")).toBe("subscription");
+    expect(llmBillingClass("codex", "gpt-5.5-codex")).toBe("subscription");
     expect(llmBillingClass("claude", "not_recorded")).toBe("metered");
     expect(llmBillingClass("test-writer", "claude-opus-4")).toBe("metered");
-    expect(llmBillingClass("security", "claude-sonnet")).toBe("metered");
-    expect(llmBillingClass("codex", "gpt-x")).toBe("unknown");
+    expect(llmBillingClass("someone-else", "mystery")).toBe("unknown");
   });
 });
 
-describe("aggregateLlmUsage — billing block", () => {
+describe("aggregateLlmUsage — billing block (multi-provider)", () => {
   const NOW = new Date("2026-07-07T12:00:00.000Z");
-  // Ollama (subscription) events at varying ages.
-  const subA = evt({ agent: "hermes", model: "glm-5.2:cloud", ts: "2026-07-07T11:00:00.000Z", inputTokens: 100, outputTokens: 50, cacheTokens: 1000 }); // 1h ago → 1150 tok
-  const subB = evt({ agent: "hermes", model: "deepseek-v4-pro:cloud", ts: "2026-07-07T09:00:00.000Z", inputTokens: 8, outputTokens: 2700 }); // 3h ago → 2708 tok
-  const subC = evt({ agent: "hermes", model: "glm-5.2:cloud", ts: "2026-07-07T05:00:00.000Z", inputTokens: 10, outputTokens: 20, cacheTokens: 100 }); // 7h ago → 130 tok, outside 5h
-  const subOld = evt({ agent: "hermes", model: "glm-5.2:cloud", ts: "2026-06-15T00:00:00.000Z", inputTokens: 5, outputTokens: 5 }); // last month
-  // Claude (metered) event with a recorded cost, this month.
+  const ollamaA = evt({ agent: "hermes", model: "glm-5.2:cloud", ts: "2026-07-07T11:00:00.000Z", inputTokens: 100, outputTokens: 50, cacheTokens: 1000 }); // 1h → 1150
+  const ollamaB = evt({ agent: "hermes", model: "deepseek-v4-pro:cloud", ts: "2026-07-07T09:00:00.000Z", inputTokens: 8, outputTokens: 2700 }); // 3h → 2708
+  const codexA = evt({ agent: "codex", model: "gpt-5.5-codex", ts: "2026-07-07T11:30:00.000Z", inputTokens: 1000, outputTokens: 500 }); // 30m → 1500
   const metered = evt({ agent: "claude", model: "not_recorded", ts: "2026-07-06T00:00:00.000Z", inputTokens: 8, outputTokens: 2700, cacheTokens: 160000, costUsd: 0.16 });
 
-  it("splits subscription windows and metered $, and totals them honestly for a configured plan", () => {
-    const agg = aggregateLlmUsage([subA, subB, subC, subOld, metered], {
+  it("builds one entry per configured/active provider and totals every flat plan + metered $", () => {
+    const b = aggregateLlmUsage([ollamaA, ollamaB, codexA, metered], {
       now: NOW,
-      subscription: { plan: "pro", monthlyUsd: 20, configured: true },
-    });
-    const b = agg.billing;
+      subscriptions: [OLLAMA_PRO, CODEX_PRO5X],
+    }).billing;
 
-    // Subscription side — flat Ollama Pro, active, correct windows (tokens = in+out+cache).
-    expect(b.subscription.provider).toBe("ollama");
-    expect(b.subscription.plan).toBe("pro");
-    expect(b.subscription.monthlyUsd).toBe(20);
-    expect(b.subscription.configured).toBe(true);
-    expect(b.subscription.active).toBe(true);
-    expect(b.subscription.models).toContain("glm-5.2:cloud");
+    expect(b.subscriptions.map((s) => s.provider)).toEqual(["ollama", "codex"]);
 
-    const w = b.subscription.windows!;
-    // 5h session excludes subC (7h old) and subOld.
-    expect(w.session5h.calls).toBe(2);
-    expect(w.session5h.tokens).toBe(1150 + 2708);
-    // 7d week + this month include subA/B/C but not last-month subOld.
-    expect(w.week7d.calls).toBe(3);
-    expect(w.week7d.tokens).toBe(1150 + 2708 + 130);
-    expect(w.month.calls).toBe(3);
-    expect(w.month.tokens).toBe(1150 + 2708 + 130);
+    const ollama = b.subscriptions.find((s) => s.provider === "ollama")!;
+    expect(ollama.monthlyUsd).toBe(20);
+    expect(ollama.active).toBe(true);
+    expect(ollama.windows!.session5h.tokens).toBe(1150 + 2708);
+    expect(ollama.windows!.session5h.calls).toBe(2);
+    expect(ollama.note).toMatch(/GPU-time/i);
 
-    // Metered side — real recorded $ this month.
+    const codex = b.subscriptions.find((s) => s.provider === "codex")!;
+    expect(codex.monthlyUsd).toBe(100);
+    expect(codex.planLabel).toBe("Pro 5×");
+    expect(codex.active).toBe(true);
+    expect(codex.windows!.session5h.tokens).toBe(1500);
+    expect(codex.windows!.session5h.calls).toBe(1);
+    expect(codex.note).toMatch(/ChatGPT/i);
+
     expect(b.metered.monthCostUsd).toBe(0.16);
-    expect(b.metered.costStatus).toBe("recorded");
-
-    // Honest month total = flat plan + metered $, and it's complete.
-    expect(b.monthlyTotalUsd).toBe(20.16);
+    expect(b.monthlyTotalUsd).toBe(120.16); // 20 + 100 + 0.16
     expect(b.monthlyTotalComplete).toBe(true);
-    expect(b.note).toMatch(/GPU-time/i);
   });
 
-  it("never invents a subscription cost when the plan is unset — total is metered-only + flagged incomplete", () => {
-    const agg = aggregateLlmUsage([subA, metered], { now: NOW }); // no subscription option
-    const b = agg.billing;
-    expect(b.subscription.configured).toBe(false);
-    expect(b.subscription.monthlyUsd).toBeNull();
-    expect(b.subscription.plan).toBe("none");
-    // Total excludes the (unknown) Ollama cost, so it's incomplete.
+  it("shows a configured provider that reports NO usage as flat-cost-only (no windows, honest note)", () => {
+    const b = aggregateLlmUsage([ollamaA, metered], {
+      now: NOW,
+      subscriptions: [OLLAMA_PRO, CODEX_PRO5X], // Codex configured but no codex events
+    }).billing;
+
+    const codex = b.subscriptions.find((s) => s.provider === "codex")!;
+    expect(codex.active).toBe(false);
+    expect(codex.windows).toBeNull();
+    expect(codex.monthlyUsd).toBe(100); // flat cost still counted
+    expect(codex.note).toMatch(/isn't emitting|no burn proxy/i);
+    expect(b.monthlyTotalUsd).toBe(120.16);
+    expect(b.monthlyTotalComplete).toBe(true);
+  });
+
+  it("omits a provider that is neither configured nor active, and flags an unconfigured-but-active one", () => {
+    const b = aggregateLlmUsage([ollamaA, metered], {
+      now: NOW,
+      subscriptions: [OLLAMA_UNSET, CODEX_UNSET], // neither configured
+    }).billing;
+    // Ollama has usage → shown (active, unconfigured); Codex has neither → omitted.
+    expect(b.subscriptions.map((s) => s.provider)).toEqual(["ollama"]);
+    expect(b.subscriptions[0]!.configured).toBe(false);
+    expect(b.subscriptions[0]!.active).toBe(true);
+    // Total is metered-only and flagged incomplete (an active plan has no price).
     expect(b.monthlyTotalUsd).toBe(0.16);
     expect(b.monthlyTotalComplete).toBe(false);
   });
 
-  it("leaves windows null when there is no clock to anchor them", () => {
-    const agg = aggregateLlmUsage([subA], { subscription: { plan: "pro", monthlyUsd: 20, configured: true } });
-    expect(agg.billing.subscription.windows).toBeNull();
-    // A configured flat plan still surfaces its price even without a clock.
-    expect(agg.billing.monthlyTotalUsd).toBe(20);
-    expect(agg.billing.monthlyTotalComplete).toBe(true);
+  it("keeps a configured flat cost even with no clock to anchor windows", () => {
+    const b = aggregateLlmUsage([codexA], { subscriptions: [CODEX_PRO5X] }).billing;
+    const codex = b.subscriptions.find((s) => s.provider === "codex")!;
+    expect(codex.windows).toBeNull();
+    expect(b.monthlyTotalUsd).toBe(100);
+    expect(b.monthlyTotalComplete).toBe(true);
   });
 });

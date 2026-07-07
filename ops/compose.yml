@@ -255,6 +255,9 @@ services:
       # Ollama Cloud subscription tier (free|pro|max) — sets the flat monthly cost
       # the LLM-usage panel shows as real recurring spend. Unset → "plan not set".
       OLLAMA_PLAN: ${OLLAMA_PLAN:-}
+      # Codex/ChatGPT subscription tier (free|go|plus|pro5x|pro) — flat monthly cost
+      # for the codex agent in the same panel. Unset → "plan not set".
+      CODEX_PLAN: ${CODEX_PLAN:-}
       HERMES_MONITOR_REPLY_MODEL: ${HERMES_MONITOR_REPLY_MODEL:-glm-5.2:cloud}
       # Preferred co-pilot transport: the real agentic Hermes via the gateway
       # Session API (MCP tools + skills + memory), instead of the stateless Ollama

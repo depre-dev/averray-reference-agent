@@ -128,29 +128,34 @@ export interface LlmUsageWindow {
   since: string;
 }
 
-/** Cost split by billing model + Ollama subscription-burn windows. */
+/** One flat-rate subscription provider (Ollama, Codex/ChatGPT) + its burn windows. */
+export interface SubscriptionBilling {
+  provider: "ollama" | "codex";
+  label: string;
+  plan: string;
+  planLabel: string;
+  monthlyUsd: number | null;
+  configured: boolean;
+  active: boolean;
+  models: string[];
+  windows: {
+    session5h: LlmUsageWindow;
+    week7d: LlmUsageWindow;
+    month: LlmUsageWindow;
+  } | null;
+  note: string;
+}
+
+/** Cost split by billing model + per-subscription burn windows. */
 export interface LlmUsageBilling {
   metered: {
     models: string[];
     monthCostUsd: number | null;
     costStatus: "recorded" | "not_recorded";
   };
-  subscription: {
-    provider: "ollama";
-    plan: "free" | "pro" | "max" | "none";
-    monthlyUsd: number | null;
-    configured: boolean;
-    active: boolean;
-    models: string[];
-    windows: {
-      session5h: LlmUsageWindow;
-      week7d: LlmUsageWindow;
-      month: LlmUsageWindow;
-    } | null;
-  };
+  subscriptions: SubscriptionBilling[];
   monthlyTotalUsd: number | null;
   monthlyTotalComplete: boolean;
-  note: string;
 }
 
 export interface LlmUsageAggregate {

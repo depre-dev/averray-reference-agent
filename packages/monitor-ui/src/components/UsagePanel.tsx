@@ -4,6 +4,7 @@ import type {
   LlmUsageModelRollup,
   LlmUsageRecent,
   LlmUsageWindow,
+  SubscriptionBilling,
 } from "../lib/monitor/board-cache.js";
 import { formatCompactNumber, formatNumber, formatRelativeTime } from "../lib/monitor/format.js";
 import { UtilCard } from "./UtilCard.js";
@@ -117,12 +118,12 @@ export function UsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
         </p>
       )}
 
-      {/* Ollama subscription burn — flat-plan usage against its real reset windows.
-          Tokens/calls stand in for GPU-time (which Ollama doesn't expose); never a
-          fabricated per-token dollar figure. */}
-      {billing && billing.subscription.active && billing.subscription.windows ? (
-        <OllamaBurn billing={billing} />
-      ) : null}
+      {/* Subscription burn — one block per active flat-plan provider (Ollama,
+          Codex), usage against its real reset windows. Tokens/calls stand in for
+          the plan's metered unit; never a fabricated per-token dollar figure. */}
+      {billing?.subscriptions
+        .filter((sub) => sub.active && sub.windows)
+        .map((sub) => <SubscriptionBurn key={sub.provider} subscription={sub} />)}
 
       {/* What's running now (in-flight) — always glanceable. */}
       <div className="hm-usage-active">
@@ -298,33 +299,31 @@ function DailyTokensChart({ days }: { days: { day: string; totalTokens: number }
 
 /**
  * Cost-this-month headline — the honest picture the old single "$0.16" total
- * couldn't give: the flat Ollama subscription (already paid, doesn't grow per
- * call) plus the genuinely-metered Claude API dollars, and their month total.
+ * couldn't give: each flat subscription (Ollama, Codex — already paid, doesn't
+ * grow per call) plus the genuinely-metered Claude API dollars, and the total.
  */
 function CostSummary({ billing }: { billing: LlmUsageBilling }) {
-  const { subscription, metered } = billing;
-  const planName = subscription.configured
-    ? `Ollama ${capitalize(subscription.plan)}`
-    : "Ollama Cloud";
-  const subAmount = subscription.configured
-    ? `${formatPlanUsd(subscription.monthlyUsd ?? 0)}/mo`
-    : "plan not set";
-  const meteredAmount = metered.monthCostUsd != null ? formatUsd(metered.monthCostUsd) : "$0";
+  const anyConfigured = billing.subscriptions.some((sub) => sub.configured);
+  const meteredAmount = billing.metered.monthCostUsd != null ? formatUsd(billing.metered.monthCostUsd) : "$0";
   const totalText = billing.monthlyTotalUsd != null
-    ? `${subscription.configured ? "≈ " : ""}${formatUsd(billing.monthlyTotalUsd)}${billing.monthlyTotalComplete ? "" : " +"}`
+    ? `${anyConfigured ? "≈ " : ""}${formatUsd(billing.monthlyTotalUsd)}${billing.monthlyTotalComplete ? "" : " +"}`
     : "—";
   return (
     <div className="hm-usage-cost" role="group" aria-label="Cost this month">
       <div className="hm-usage-cost-head">
         <span className="hm-usage-cost-label">Cost this month</span>
-        <span className="hm-usage-cost-total" title={billing.monthlyTotalComplete ? undefined : "Excludes the Ollama subscription — set OLLAMA_PLAN to include it."}>{totalText}</span>
+        <span className="hm-usage-cost-total" title={billing.monthlyTotalComplete ? undefined : "Excludes a subscription with no plan set — set OLLAMA_PLAN / CODEX_PLAN to include it."}>{totalText}</span>
       </div>
       <div className="hm-usage-cost-rows">
-        <div className="hm-usage-cost-row">
-          <span className="hm-usage-jewel" style={{ background: "var(--h4-ag-hermes)" }} aria-hidden />
-          <span className="hm-usage-cost-name">{planName} · flat</span>
-          <span className={`hm-usage-cost-amt${subscription.configured ? "" : " hm-usage-c-na"}`}>{subAmount}</span>
-        </div>
+        {billing.subscriptions.map((sub) => (
+          <div className="hm-usage-cost-row" key={sub.provider}>
+            <span className="hm-usage-jewel" style={{ background: providerJewel(sub.provider) }} aria-hidden />
+            <span className="hm-usage-cost-name">{planLine(sub)} · flat</span>
+            <span className={`hm-usage-cost-amt${sub.configured ? "" : " hm-usage-c-na"}`}>
+              {sub.configured ? `${formatPlanUsd(sub.monthlyUsd ?? 0)}/mo` : "plan not set"}
+            </span>
+          </div>
+        ))}
         <div className="hm-usage-cost-row">
           <span className="hm-usage-jewel" style={{ background: "var(--h4-ag-claude)" }} aria-hidden />
           <span className="hm-usage-cost-name">Metered · Claude API</span>
@@ -336,9 +335,9 @@ function CostSummary({ billing }: { billing: LlmUsageBilling }) {
 }
 
 /**
- * Per-row cost cell, billing-aware. Subscription (Ollama) rows show a muted
- * "flat" tag instead of a misleading "?" — their cost lives in the flat plan,
- * not per call. Metered rows show the real recorded dollars (or "?" if a
+ * Per-row cost cell, billing-aware. Subscription (Ollama, Codex) rows show a
+ * muted "flat" tag instead of a misleading "?" — their cost lives in the flat
+ * plan, not per call. Metered rows show the real recorded dollars (or "?" if a
  * metered provider didn't emit cost). Unknown rows stay "?".
  */
 function RowCost({ entry }: { entry: LlmUsageModelRollup }) {
@@ -346,7 +345,7 @@ function RowCost({ entry }: { entry: LlmUsageModelRollup }) {
     return (
       <span
         className="hm-usage-c-num hm-usage-c-flat"
-        title="Included in your flat Ollama subscription — billed by GPU-time, not per call."
+        title="Included in a flat subscription plan — billed by the plan, not per call."
       >
         flat
       </span>
@@ -359,22 +358,21 @@ function RowCost({ entry }: { entry: LlmUsageModelRollup }) {
 }
 
 /**
- * Ollama subscription burn — how much of the plan's allocation you've used in
- * Ollama's real reset windows (5h session · 7d week · this month). Tokens/calls
- * are a proxy for GPU-time (the real metered unit, which Ollama doesn't expose),
- * flagged as such — never dressed up as dollars.
+ * Subscription burn — how much of a plan's allocation you've used in its real
+ * reset windows (5h session · 7d week · this month). Tokens/calls are a proxy
+ * for the plan's real metered unit (GPU-time / rolling-window usage), flagged as
+ * such — never dressed up as dollars. Rendered once per active subscription.
  */
-function OllamaBurn({ billing }: { billing: LlmUsageBilling }) {
-  const { subscription } = billing;
+function SubscriptionBurn({ subscription }: { subscription: SubscriptionBilling }) {
   const windows = subscription.windows;
   if (!windows) return null;
-  const planName = subscription.configured ? `${capitalize(subscription.plan)} plan` : "Cloud";
+  const planName = subscription.planLabel ? `${subscription.planLabel} plan` : subscription.label;
   const cells: LlmUsageWindow[] = [windows.session5h, windows.week7d, windows.month];
   return (
-    <div className="hm-usage-burn" role="group" aria-label="Ollama subscription burn">
+    <div className="hm-usage-burn" role="group" aria-label={`${subscription.label} subscription burn`}>
       <div className="hm-usage-burn-head">
-        <span className="hm-usage-burn-title">Ollama burn · {planName}</span>
-        <span className="hm-usage-burn-chip" title="Tokens/calls are a proxy for GPU-time — Ollama's real metered unit — not dollars.">proxy</span>
+        <span className="hm-usage-burn-title">{subscription.label} burn · {planName}</span>
+        <span className="hm-usage-burn-chip" title="Tokens/calls are a proxy for the plan's real metered unit — not dollars.">proxy</span>
       </div>
       <div className="hm-usage-burn-windows">
         {cells.map((win) => (
@@ -385,27 +383,33 @@ function OllamaBurn({ billing }: { billing: LlmUsageBilling }) {
           </div>
         ))}
       </div>
-      <small className="hm-usage-burn-note">{billing.note}</small>
+      <small className="hm-usage-burn-note">{subscription.note}</small>
     </div>
   );
 }
 
+/** "Ollama Pro", "Codex Pro 5×", or just the label when the plan isn't set. */
+function planLine(sub: SubscriptionBilling): string {
+  return sub.planLabel ? `${sub.label} ${sub.planLabel}` : sub.label;
+}
+
+/** Provider jewel — Ollama rides the hermes token, Codex its own. */
+function providerJewel(provider: "ollama" | "codex"): string {
+  return provider === "codex" ? "var(--h4-ag-codex)" : "var(--h4-ag-hermes)";
+}
+
 /**
- * Billing model for an (agent, model) — mirrors the backend llmBillingClass so
- * a row's cost cell matches how the aggregate classed it. Ollama Cloud (`:cloud`
- * suffix / ollama-tagged / the hermes agent) is flat-rate subscription; the
- * Claude SDK agents are metered; everything else is unknown.
+ * Billing model for an (agent, model) — mirrors the backend llmBillingClass so a
+ * row's cost cell matches how the aggregate classed it. Flat-rate subscriptions
+ * (the codex agent, or Ollama via the hermes agent / `:cloud` / ollama-tagged
+ * models) show "flat"; the Claude SDK agents are metered; else unknown.
  */
 function billingClassOf(agent: string, model: string): "subscription" | "metered" | "unknown" {
   const a = agent.trim().toLowerCase();
   const m = model.trim().toLowerCase();
-  if (m.endsWith(":cloud") || m.includes("ollama") || a === "hermes") return "subscription";
+  if (a === "codex" || a === "hermes" || m.endsWith(":cloud") || m.includes("ollama")) return "subscription";
   if (a === "claude" || a === "test-writer" || a === "security" || a === "docs") return "metered";
   return "unknown";
-}
-
-function capitalize(value: string): string {
-  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
 }
 
 /** Format a known dollar amount (assumes a real number, unlike formatCost). */
