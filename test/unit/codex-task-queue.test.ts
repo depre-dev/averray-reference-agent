@@ -85,6 +85,38 @@ describe("codex task queue", () => {
     });
   });
 
+  it("dedupes greenfield (no-PR) tasks on repo + normalized prompt — a flap can't flood the board", async () => {
+    const path = await tempQueuePath();
+    const first = await proposeCodexTask(
+      { repo: "depre-dev/averray-reference-agent", prompt: "Investigate the /health 500.", requester: "hermes" },
+      { path, now: new Date("2026-07-07T07:41:00.000Z") },
+    );
+    expect(first.created).toBe(true);
+
+    // Same repo + same prompt (modulo whitespace) while the first is still open → deduped.
+    const dup = await proposeCodexTask(
+      { repo: "depre-dev/averray-reference-agent", prompt: "  Investigate the   /health 500.  ", requester: "hermes" },
+      { path, now: new Date("2026-07-07T07:41:30.000Z") },
+    );
+    expect(dup.created).toBe(false);
+    expect(dup.task.id).toBe(first.task.id);
+    expect(dup.task.updatedAt).toBe("2026-07-07T07:41:30.000Z");
+
+    // A different prompt → a distinct task; a different repo (same prompt) → distinct (per-repo).
+    const otherPrompt = await proposeCodexTask(
+      { repo: "depre-dev/averray-reference-agent", prompt: "Investigate the money path.", requester: "hermes" },
+      { path, now: new Date("2026-07-07T07:42:00.000Z") },
+    );
+    expect(otherPrompt.created).toBe(true);
+    const otherRepo = await proposeCodexTask(
+      { repo: "averray-agent/agent", prompt: "Investigate the /health 500.", requester: "hermes" },
+      { path, now: new Date("2026-07-07T07:42:30.000Z") },
+    );
+    expect(otherRepo.created).toBe(true);
+
+    expect(await listCodexTasks({ path })).toHaveLength(3); // deduped first + other-prompt + other-repo
+  });
+
   it("records explicit operator delegation in the initial task event", async () => {
     const path = await tempQueuePath();
     const result = await proposeCodexTask({
