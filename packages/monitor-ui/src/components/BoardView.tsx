@@ -741,7 +741,9 @@ export function BoardView({
         {askStatus ? <span className="hm-ask-status-toast">{askStatus}</span> : null}
       </div>
 
-      {drawerCard && boardSurface === "delivery" ? (
+      {/* The drawer renders on BOTH surfaces — a proposed task opened from the
+          Ops co-pilot digest must be approvable in place, not only from Delivery. */}
+      {drawerCard ? (
         <DetailDrawer
           card={drawerCard}
           cards={orderedCards}

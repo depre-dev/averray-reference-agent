@@ -87,6 +87,38 @@ export function buildDrawerFooter(card: BoardCard, deps: DrawerFooterDeps = {}):
   const url = githubUrlForCard(card);
   const buttons: FooterButton[] = [];
 
+  // A PROPOSED task hasn't dispatched yet — there is no PR to merge, so the
+  // resolving action is to APPROVE + DISPATCH it to the runner (the O3 operator
+  // gate). This makes the gate reachable from the drawer on ANY surface, incl.
+  // Ops, where the lane cards that normally carry Approve are hidden.
+  // onApproveAndMerge is wired to the task-approve dispatch in BoardView.
+  const taskStatus = (card as { taskStatus?: string }).taskStatus;
+  if (card.type === "task" && taskStatus === "proposed") {
+    buttons.push({
+      key: "approve-dispatch",
+      label: "Approve & dispatch",
+      kind: "action",
+      ...(h.onApproveAndMerge
+        ? { run: () => h.onApproveAndMerge!(card) }
+        : { disabledReason: "Approving a task isn't available here." }),
+    });
+    buttons.push({
+      key: "dismiss-task",
+      label: "Dismiss",
+      kind: "ghost",
+      ...(h.onDismiss
+        ? { run: () => h.onDismiss!(card) }
+        : { disabledReason: "Dismissing isn't available here." }),
+    });
+    buttons.push({
+      key: "ask-hermes",
+      label: "Ask Hermes",
+      kind: "ghost",
+      ...(h.onAskHermes ? { run: () => h.onAskHermes!(card) } : { disabledReason: "Ask Hermes isn't available here." }),
+    });
+    return buttons;
+  }
+
   if (variant === "mission") {
     buttons.push({
       key: "fresh-run",

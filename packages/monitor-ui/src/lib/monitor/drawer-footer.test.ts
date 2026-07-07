@@ -159,14 +159,41 @@ describe("buildDrawerFooter — done + generic variants", () => {
     expect(openUrl).toHaveBeenCalledWith("https://github.com/averray-agent/agent/pull/12");
   });
 
-  it("no-PR task card → Open on github is DISABLED, never the repo-root fallback (P0-3)", () => {
-    // A proposed task has a repo but no resolved PR yet. The old code fell back
-    // to githubUrlForCard()'s repo root; now it must be disabled with a reason.
-    const taskNoPr = card({ type: "task", id: "claude-task-x1", taskStatus: "proposed" });
+  it("non-proposed no-PR task → Open on github is DISABLED, never the repo-root fallback (P0-3)", () => {
+    // A task with a repo but no resolved PR must NOT fall back to the repo root.
+    // (A *proposed* task gets the dedicated approve footer instead — tested below.)
+    const taskNoPr = card({ type: "task", id: "claude-task-x1", lane: "hermes-checking" });
     const f = buildDrawerFooter(taskNoPr, {});
     const open = find(f, "open-github");
     expect(open.run).toBeUndefined();
     expect(open.disabledReason).toBe("No PR yet — opens once the task proposes a change.");
+  });
+});
+
+describe("buildDrawerFooter — proposed task (approve gate, reachable from Ops)", () => {
+  const proposed = card({ type: "task", id: "codex-task-x-new-1", taskStatus: "proposed", lane: "codex-needed" });
+
+  it("leads with Approve & dispatch wired to onApproveAndMerge; no PR merge/open actions", () => {
+    const onApproveAndMerge = vi.fn();
+    const f = buildDrawerFooter(proposed, { handlers: { onApproveAndMerge, onDismiss: vi.fn(), onAskHermes: vi.fn() } });
+    expect(f.map((b) => b.key)).toEqual(["approve-dispatch", "dismiss-task", "ask-hermes"]);
+    expect(f.find((b) => b.key === "approve-merge")).toBeUndefined();
+    expect(f.find((b) => b.key === "open-github")).toBeUndefined();
+    const approve = find(f, "approve-dispatch");
+    expect(approve.label).toBe("Approve & dispatch");
+    approve.run!();
+    expect(onApproveAndMerge).toHaveBeenCalledWith(proposed);
+  });
+
+  it("disables Approve with a reason when no handler is wired (no silent no-op)", () => {
+    const approve = find(buildDrawerFooter(proposed, {}), "approve-dispatch");
+    expect(approve.run).toBeUndefined();
+    expect(approve.disabledReason).toMatch(/Approving/);
+  });
+
+  it("a non-proposed task does NOT get the approve-dispatch gate", () => {
+    const running = card({ type: "task", id: "codex-task-x-running-1", taskStatus: "running" });
+    expect(buildDrawerFooter(running, {}).find((b) => b.key === "approve-dispatch")).toBeUndefined();
   });
 });
 
