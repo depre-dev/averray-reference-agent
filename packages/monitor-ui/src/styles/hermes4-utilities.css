@@ -85,15 +85,15 @@
 }
 .hm-usage-row {
   display: grid;
-  grid-template-columns: 1fr 56px 46px 62px;
+  grid-template-columns: 1fr 64px 52px;
   align-items: center;
   gap: 10px;
   padding: 8px 2px;
   border-top: 1px solid var(--h4-line-2);
 }
-/* with a real cost column the table is 5 across */
+/* with a cost column the table is 4 across */
 .hm-usage-table--cost .hm-usage-row {
-  grid-template-columns: 1fr 52px 40px 58px 50px;
+  grid-template-columns: 1fr 60px 46px 64px;
   gap: 8px;
 }
 .hm-usage-row--head {

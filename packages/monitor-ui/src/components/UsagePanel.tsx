@@ -15,9 +15,10 @@ import { UtilCard } from "./UtilCard.js";
  * ONLY to real LlmUsageAggregate: per-(agent, model) rows, an "All models"
  * total, the in-flight line, EVERY expected agent (active or idle — none
  * hidden), real cost when recorded, and a real daily-tokens chart. Truth-boundary:
- *   - Latency renders "?" — LlmUsageModelRollup has no latency field.
- *   - Cost shows only when costStatus is "recorded" (never fabricated); the Cost
- *     column appears only when at least one source reports it.
+ *   - No latency column — the usage events carry no per-call duration, so rather
+ *     than a column of "?" there's no column (add it back if runners emit latency).
+ *   - The table-total Cost is the would-be API cost (subscriptions cover it);
+ *     per-row cost is "flat" for a subscription, real $ only when truly metered.
  *   - The time chart is REAL daily byDay tokens when ≥2 days exist; otherwise an
  *     honest "awaiting per-minute stream" frame (that source isn't wired yet).
  *   - When nothing is recorded, the honest message replaces the table.
@@ -37,9 +38,9 @@ export function UsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
   const hasTable = recorded && models.length > 0;
   // Cost split by billing model (metered $ vs flat Ollama subscription + burn windows).
   const billing = usage?.billing;
-  // Cost column: when billing is present every row has a meaningful cell (metered $,
-  // "flat" for subscription, or "?"), so show it. Otherwise fall back to the old
-  // "only when something recorded" rule so we never paint a bare column of "?".
+  // Cost column: when billing is present every row has a meaningful cell ("flat"
+  // for a subscription, real $ if metered), so show it. Otherwise fall back to the
+  // old "only when something recorded" rule so we never paint a bare column of "?".
   const showCost = !!usage && (
     !!billing || usage.costStatus === "recorded" || models.some((m) => m.costStatus === "recorded")
   );
@@ -60,18 +61,16 @@ export function UsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
             <span className="hm-usage-c-num">Tokens</span>
             <span className="hm-usage-c-num">Calls</span>
             {showCost ? <span className="hm-usage-c-num">Cost</span> : null}
-            <span className="hm-usage-c-num">Latency</span>
           </div>
           <div className="hm-usage-row hm-usage-row--total">
             <span className="hm-usage-c-model">All models</span>
             <span className="hm-usage-c-num">{formatCompactNumber(usage!.totalTokens)}</span>
             <span className="hm-usage-c-num">{formatNumber(usage!.runs)}</span>
             {showCost ? (
-              <span className="hm-usage-c-num" title="Recorded metered cost (Claude API, all time). Ollama runs on a flat subscription — see Cost this month above.">
-                {formatCost(usage!.costUsd, usage!.costStatus)}
+              <span className="hm-usage-c-num" title="Would-be cost at API rates from providers that report it (e.g. Claude's total_cost_usd). Your subscriptions cover it — it's NOT in the 'cost this month' total above.">
+                {formatWouldBeCost(usage!.costUsd, usage!.costStatus)}
               </span>
             ) : null}
-            <span className="hm-usage-c-num hm-usage-c-na" title="latency not reported">?</span>
           </div>
           {models.map((entry) => (
             <div className="hm-usage-row" key={`${entry.agent}:${entry.model}`}>
@@ -83,7 +82,6 @@ export function UsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
               <span className="hm-usage-c-num">{formatCompactNumber(entry.totalTokens)}</span>
               <span className="hm-usage-c-num">{formatNumber(entry.runs)}</span>
               {showCost ? <RowCost entry={entry} /> : null}
-              <span className="hm-usage-c-num hm-usage-c-na" title="latency not reported">?</span>
             </div>
           ))}
           {/* in/out split + last-active live below the table, per active source */}
@@ -468,6 +466,17 @@ function formatCost(usd: number | null | undefined, status: string): string {
   if (status !== "recorded" || usd == null) return "?";
   if (usd === 0) return "$0";
   return usd < 0.01 ? "<$0.01" : `$${usd.toFixed(2)}`;
+}
+
+/**
+ * Table-total cost = the would-be API cost from providers that report it (Claude's
+ * total_cost_usd); the subscriptions cover it, so it's never real spend. Prefixed
+ * "≈" to signal that, em-dash when nothing reports a cost.
+ */
+function formatWouldBeCost(usd: number | null | undefined, status: string): string {
+  if (status !== "recorded" || usd == null) return "—";
+  if (usd === 0) return "$0";
+  return usd < 0.01 ? "≈ <$0.01" : `≈ $${usd.toFixed(2)}`;
 }
 
 /**
