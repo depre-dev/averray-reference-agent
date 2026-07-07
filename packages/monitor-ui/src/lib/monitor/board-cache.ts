@@ -139,6 +139,8 @@ export interface SubscriptionBilling {
   active: boolean;
   /** Dedicated to this app (counts in the total) vs shared (context only). */
   dedicated: boolean;
+  /** Burn windows measure "tokens" (Ollama) or "runs" (Codex — no token counters). */
+  unit: "tokens" | "runs";
   models: string[];
   windows: {
     session5h: LlmUsageWindow;
