@@ -82,16 +82,19 @@ export interface LlmUsageWindow {
   since: string;
 }
 
+/** Flat-rate subscription providers whose usage isn't billed per token. */
+export type SubscriptionProvider = "ollama" | "codex" | "claude";
+
 /**
- * One flat-rate subscription provider (Ollama Cloud, Codex/ChatGPT). Billed by a
- * fixed monthly plan — GPU-time / rolling-window usage, NOT per token — so there
- * is no truthful per-call $. We surface the flat plan price plus a token/call
- * burn proxy against the provider's real reset windows, but only when the
- * provider actually reports usage (`active`); Codex's CLI may not, in which case
- * `windows` is null and the flat cost stands alone.
+ * One flat-rate subscription provider (Ollama Cloud, Codex/ChatGPT, Claude
+ * Pro/Max). Billed by a fixed monthly plan — usage draws from the plan's limits,
+ * NOT per token — so there is no truthful per-call $. We surface the flat plan
+ * price plus a token/run burn proxy against the provider's real reset windows,
+ * but only when the provider actually reports usage (`active`); Codex's CLI may
+ * not, in which case `windows` is null and the flat cost stands alone.
  */
 export interface SubscriptionBilling {
-  provider: "ollama" | "codex";
+  provider: SubscriptionProvider;
   label: string;
   plan: string;
   planLabel: string;
@@ -119,6 +122,14 @@ export interface SubscriptionBilling {
     week7d: LlmUsageWindow;
     month: LlmUsageWindow;
   } | null;
+  /**
+   * For a subscription whose usage IS covered by the flat plan but whose runner
+   * still reports a per-call dollar figure (Claude's SDK `total_cost_usd`): the
+   * month-to-date sum of those figures — i.e. what this usage WOULD cost at API
+   * rates. Shown as context ("≈ covered by your plan"), never summed into the
+   * total. null when the provider reports no cost (Ollama, Codex).
+   */
+  apiEquivalentUsd: number | null;
   note: string;
 }
 
@@ -147,7 +158,7 @@ export interface LlmUsageBilling {
 
 /** Resolved flat-rate subscription plan for one provider (caller reads env). */
 export interface SubscriptionPlanConfig {
-  provider: "ollama" | "codex";
+  provider: SubscriptionProvider;
   label: string;
   plan: string;
   planLabel: string;
@@ -202,7 +213,7 @@ export interface LlmUsageAggregateOptions {
   /** Run timestamps (ISO) per subscription provider that reports RUNS not tokens.
    *  Codex's CLI emits no token counters, but the monitor knows every Codex task
    *  it dispatched — pass those `startedAt`s so the burn windows show run counts. */
-  subscriptionRuns?: Partial<Record<"ollama" | "codex", readonly string[]>>;
+  subscriptionRuns?: Partial<Record<SubscriptionProvider, readonly string[]>>;
 }
 
 export interface LlmUsageActiveCallInput {
@@ -230,11 +241,22 @@ const OLLAMA_PLAN_LABELS: Readonly<Record<string, string>> = { free: "Free", pro
 // Codex draws from the ChatGPT plan: Free/Go/Plus, Pro 5× ($100, Apr 2026), Pro ($200).
 const CODEX_PLAN_MONTHLY_USD: Readonly<Record<string, number>> = { free: 0, go: 8, plus: 20, pro5x: 100, pro: 200 };
 const CODEX_PLAN_LABELS: Readonly<Record<string, string>> = { free: "Free", go: "Go", plus: "Plus", pro5x: "Pro 5×", pro: "Pro" };
+// Claude Code draws from the Claude plan: Pro ($20), Max 5× ($100), Max 20× ($200).
+const CLAUDE_PLAN_MONTHLY_USD: Readonly<Record<string, number>> = { pro: 20, max5x: 100, max20x: 200 };
+const CLAUDE_PLAN_LABELS: Readonly<Record<string, string>> = { pro: "Pro", max5x: "Max 5×", max20x: "Max 20×" };
 /** Real usage reset windows shared by these subscriptions: 5-hour session, 7-day week. */
 const SESSION_WINDOW_MS = 5 * 60 * 60 * 1000;
 const WEEK_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
-/** Agents whose usage is metered per token (Claude Agent SDK reports real cost). */
-const METERED_AGENTS: ReadonlySet<string> = new Set(["claude", "test-writer", "security", "docs"]);
+/**
+ * Agents metered per token (charged real $ per call). Empty today: the Claude
+ * runner authenticates by SUBSCRIPTION (sub mode), and after Anthropic PAUSED
+ * the June-15-2026 Agent-SDK-credit change, that usage is included in the flat
+ * Claude plan — so Claude is a subscription provider (see subscriptionProviderOf),
+ * not metered. Kept as a seam for a genuine API-key deployment.
+ */
+const METERED_AGENTS: ReadonlySet<string> = new Set<string>();
+/** Claude Agent SDK agents — all run on the Claude plan (claude + specialists). */
+const CLAUDE_AGENTS: ReadonlySet<string> = new Set(["claude", "test-writer", "security", "docs"]);
 const OLLAMA_BURN_NOTE =
   "Ollama Cloud bills a flat monthly plan metered by GPU-time — not tokens or per-call dollars. "
   + "The token/call counts here are a burn proxy; Ollama emails you near 90% of your allocation "
@@ -249,6 +271,12 @@ const CODEX_RUNS_NOTE =
   "Codex task runs this monitor dispatched — the Codex CLI reports no tokens, so this counts runs "
   + "(each ≈ one coding session against your shared ChatGPT plan), not tokens. Use it to gauge how much "
   + "of Codex is driven from here.";
+const CLAUDE_BURN_NOTE =
+  "Claude Code draws from your Claude plan's shared 5h/weekly limits — included, not billed per token "
+  + "(Anthropic paused the June-15-2026 Agent-SDK-credit change). The $ figure is what this usage WOULD "
+  + "cost at API rates; your plan covers it, so it's not in the total.";
+const CLAUDE_NO_USAGE_NOTE =
+  "Claude Code draws from your Claude plan's shared 5h/weekly limits. No Claude usage recorded yet.";
 
 const activeCalls = new Map<string, LlmUsageActiveCall>();
 let nextActiveCallId = 0;
@@ -275,13 +303,22 @@ export function resolveCodexPlan(env: NodeJS.ProcessEnv = process.env): Subscrip
   return resolvePlan("codex", "Codex", false, env.CODEX_PLAN, CODEX_PLAN_MONTHLY_USD, CODEX_PLAN_LABELS);
 }
 
-/** Both known subscription providers, resolved from env — for aggregateLlmUsage. */
+/**
+ * Resolve the Claude (Anthropic) subscription plan from env
+ * (CLAUDE_PLAN=pro|max5x|max20x). Shared: Claude Code draws from your Claude plan,
+ * which you also use interactively elsewhere — flat cost is context, not summed.
+ */
+export function resolveClaudePlan(env: NodeJS.ProcessEnv = process.env): SubscriptionPlanConfig {
+  return resolvePlan("claude", "Claude", false, env.CLAUDE_PLAN, CLAUDE_PLAN_MONTHLY_USD, CLAUDE_PLAN_LABELS);
+}
+
+/** Every known subscription provider, resolved from env — for aggregateLlmUsage. */
 export function resolveSubscriptionPlans(env: NodeJS.ProcessEnv = process.env): SubscriptionPlanConfig[] {
-  return [resolveOllamaPlan(env), resolveCodexPlan(env)];
+  return [resolveOllamaPlan(env), resolveCodexPlan(env), resolveClaudePlan(env)];
 }
 
 function resolvePlan(
-  provider: "ollama" | "codex",
+  provider: SubscriptionProvider,
   label: string,
   dedicated: boolean,
   raw: string | undefined,
@@ -300,19 +337,22 @@ function resolvePlan(
  * isn't a subscription:
  *   - ollama → the hermes agent, a `:cloud` model suffix, or an ollama-tagged model.
  *   - codex  → the codex agent.
+ *   - claude → the Claude Agent SDK agents (claude + specialists), which run on
+ *     the Claude plan (sub mode; usage is plan-covered while the credit is paused).
  */
-export function subscriptionProviderOf(agent: string, model: string): "ollama" | "codex" | null {
+export function subscriptionProviderOf(agent: string, model: string): SubscriptionProvider | null {
   const a = agent.trim().toLowerCase();
   const m = model.trim().toLowerCase();
   if (a === "codex") return "codex";
+  if (CLAUDE_AGENTS.has(a)) return "claude";
   if (a === "hermes" || m.endsWith(":cloud") || m.includes("ollama")) return "ollama";
   return null;
 }
 
 /**
  * Classify an (agent, model) into its billing model:
- *   - subscription → a flat-rate provider (Ollama or Codex). No per-token $.
- *   - metered → Claude Agent SDK agents (claude + specialists) that report cost.
+ *   - subscription → a flat-rate provider (Ollama, Codex, or Claude). No per-token $.
+ *   - metered → genuine per-token API usage (none today — see METERED_AGENTS).
  *   - unknown → anything else (counted for tokens, never assigned a cost).
  */
 export function llmBillingClass(agent: string, model: string): "subscription" | "metered" | "unknown" {
@@ -487,7 +527,7 @@ function buildBilling(
   events: readonly LlmUsageEvent[],
   now: Date | undefined,
   plans: readonly SubscriptionPlanConfig[] | undefined,
-  runs: Partial<Record<"ollama" | "codex", readonly string[]>> | undefined,
+  runs: Partial<Record<SubscriptionProvider, readonly string[]>> | undefined,
 ): LlmUsageBilling {
   const anchor = now && Number.isFinite(now.getTime()) ? now : undefined;
   const endMs = anchor ? anchor.getTime() : undefined;
@@ -520,6 +560,19 @@ function buildBilling(
     const active = hasTokens || hasRuns;
     if (!plan.configured && !active) continue;
     const unit: "tokens" | "runs" = hasTokens ? "tokens" : "runs";
+    // What this plan-covered usage WOULD cost at API rates this month (Claude's
+    // SDK reports total_cost_usd even though the flat plan covers it). Context
+    // only — never summed into the total. null when the provider reports no cost.
+    let apiEquivalentUsd: number | null = null;
+    if (endMs !== undefined && monthStartMs !== undefined) {
+      const priced = provEvents.filter((event) => {
+        const t = Date.parse(event.ts);
+        return typeof event.costUsd === "number" && Number.isFinite(t) && t >= monthStartMs && t <= endMs;
+      });
+      if (priced.length > 0) {
+        apiEquivalentUsd = round(priced.reduce((sum, event) => sum + (event.costUsd ?? 0), 0), 6);
+      }
+    }
     const windowsReady = endMs !== undefined && monthStartMs !== undefined && active;
     const windows = windowsReady
       ? hasTokens
@@ -546,6 +599,7 @@ function buildBilling(
       unit,
       models: uniqueStrings(provEvents.map((event) => event.model)),
       windows,
+      apiEquivalentUsd,
       note: subscriptionNote(plan.provider, active, unit),
     });
   }
@@ -575,11 +629,12 @@ function buildBilling(
 }
 
 /** Per-provider honest note, aware of whether we're showing tokens or run counts. */
-function subscriptionNote(provider: "ollama" | "codex", active: boolean, unit: "tokens" | "runs"): string {
+function subscriptionNote(provider: SubscriptionProvider, active: boolean, unit: "tokens" | "runs"): string {
   if (provider === "codex") {
     if (!active) return CODEX_NO_USAGE_NOTE;
     return unit === "runs" ? CODEX_RUNS_NOTE : CODEX_BURN_NOTE;
   }
+  if (provider === "claude") return active ? CLAUDE_BURN_NOTE : CLAUDE_NO_USAGE_NOTE;
   return OLLAMA_BURN_NOTE;
 }
 

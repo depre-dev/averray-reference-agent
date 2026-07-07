@@ -128,9 +128,12 @@ export interface LlmUsageWindow {
   since: string;
 }
 
-/** One flat-rate subscription provider (Ollama, Codex/ChatGPT) + its burn windows. */
+/** Flat-rate subscription providers whose usage isn't billed per token. */
+export type SubscriptionProvider = "ollama" | "codex" | "claude";
+
+/** One flat-rate subscription provider (Ollama, Codex, Claude) + its burn windows. */
 export interface SubscriptionBilling {
-  provider: "ollama" | "codex";
+  provider: SubscriptionProvider;
   label: string;
   plan: string;
   planLabel: string;
@@ -139,7 +142,7 @@ export interface SubscriptionBilling {
   active: boolean;
   /** Dedicated to this app (counts in the total) vs shared (context only). */
   dedicated: boolean;
-  /** Burn windows measure "tokens" (Ollama) or "runs" (Codex — no token counters). */
+  /** Burn windows measure "tokens" (Ollama, Claude) or "runs" (Codex — no token counters). */
   unit: "tokens" | "runs";
   models: string[];
   windows: {
@@ -147,6 +150,9 @@ export interface SubscriptionBilling {
     week7d: LlmUsageWindow;
     month: LlmUsageWindow;
   } | null;
+  /** Month-to-date would-be API cost for a plan-covered provider (Claude's
+   *  total_cost_usd); shown as "≈ covered by your plan", never in the total. */
+  apiEquivalentUsd: number | null;
   note: string;
 }
 

@@ -258,6 +258,10 @@ services:
       # Codex/ChatGPT subscription tier (free|go|plus|pro5x|pro) — flat monthly cost
       # for the codex agent in the same panel. Unset → "plan not set".
       CODEX_PLAN: ${CODEX_PLAN:-}
+      # Claude subscription tier (pro|max5x|max20x) — flat monthly cost for the
+      # Claude runner (sub mode; usage is plan-covered). Shown as shared context,
+      # NOT summed into the total. Unset → "plan not set".
+      CLAUDE_PLAN: ${CLAUDE_PLAN:-}
       HERMES_MONITOR_REPLY_MODEL: ${HERMES_MONITOR_REPLY_MODEL:-glm-5.2:cloud}
       # Preferred co-pilot transport: the real agentic Hermes via the gateway
       # Session API (MCP tools + skills + memory), instead of the stateless Ollama
