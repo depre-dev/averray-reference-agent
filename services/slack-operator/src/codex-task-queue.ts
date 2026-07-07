@@ -155,6 +155,13 @@ export async function listCodexTasks(deps: CodexTaskQueueDeps = {}): Promise<Cod
   return tasks.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 }
 
+/** Collapse whitespace for greenfield dedupe — two prompts identical modulo
+ *  spacing target the same work, so re-proposing one while it's still open
+ *  updates it in place instead of piling on a duplicate. */
+function normalizeTaskPrompt(prompt: string): string {
+  return prompt.trim().replace(/\s+/g, " ");
+}
+
 export async function proposeCodexTask(
   input: CodexTaskInput,
   deps: CodexTaskQueueDeps = {}
@@ -162,15 +169,19 @@ export async function proposeCodexTask(
   const path = queuePath(deps.path);
   const tasks = await readCodexTasks(path);
   const now = (deps.now ?? new Date()).toISOString();
-  // Dedupe only when the task targets a specific PR. Greenfield tasks
-  // (no PR yet) are each distinct, so they always create a new entry.
-  const existing = input.pullRequestNumber === undefined
-    ? undefined
-    : tasks.find((task) =>
-        !TERMINAL_STATUSES.has(task.status)
-        && task.repo === input.repo
-        && task.pullRequestNumber === input.pullRequestNumber
-      );
+  // Dedupe a NON-terminal task so a flapping product can't flood the board with
+  // identical proposals: on repo + PR when a PR is targeted; on repo + normalized
+  // prompt for GREENFIELD tasks (no PR). Previously greenfield tasks were always
+  // distinct, so an intermittent /health 500 spawned dozens of the same
+  // "investigate" task. An open (proposed / approved / running) match is updated
+  // in place (bumps updatedAt) rather than duplicated.
+  const normalizedPrompt = normalizeTaskPrompt(input.prompt);
+  const existing = tasks.find((task) => {
+    if (TERMINAL_STATUSES.has(task.status) || task.repo !== input.repo) return false;
+    return input.pullRequestNumber !== undefined
+      ? task.pullRequestNumber === input.pullRequestNumber
+      : task.pullRequestNumber === undefined && normalizeTaskPrompt(task.prompt) === normalizedPrompt;
+  });
   if (existing) {
     const updated: CodexTask = {
       ...existing,
