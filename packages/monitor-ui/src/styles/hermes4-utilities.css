@@ -326,6 +326,14 @@
   font-size: 10px;
   color: var(--h4-faint);
 }
+.hm-usage-burn-apieq {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--h4-muted);
+}
+.hm-usage-burn-apieq span {
+  color: var(--h4-faint);
+}
 .hm-usage-burn-note {
   font-family: var(--font-mono);
   font-size: 10px;

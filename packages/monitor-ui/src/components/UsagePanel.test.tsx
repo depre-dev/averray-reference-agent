@@ -148,7 +148,7 @@ describe("UsagePanel", () => {
   });
 });
 
-// ── Cost & subscription burn (Ollama + Codex flat plans + metered Claude $) ──
+// ── Cost & subscription burn (Ollama + Codex + Claude flat plans) ───────────
 const ollamaSub: SubscriptionBilling = {
   provider: "ollama",
   label: "Ollama",
@@ -165,6 +165,7 @@ const ollamaSub: SubscriptionBilling = {
     week7d: { label: "7d week", tokens: 2_000_000, calls: 92, inputTokens: 1_800_000, outputTokens: 200_000, since: "2026-06-30T12:00:00.000Z" },
     month: { label: "this month", tokens: 2_000_000, calls: 92, inputTokens: 1_800_000, outputTokens: 200_000, since: "2026-07-01T00:00:00.000Z" },
   },
+  apiEquivalentUsd: null,
   note: "Ollama Cloud bills a flat monthly plan metered by GPU-time — not tokens or per-call dollars.",
 };
 // Codex configured (Pro 5× $100) but its CLI isn't reporting usage → flat cost only.
@@ -180,12 +181,34 @@ const codexSub: SubscriptionBilling = {
   unit: "runs", // Codex reports no tokens — usage proxy is run counts
   models: [],
   windows: null,
+  apiEquivalentUsd: null,
   note: "Codex draws from your ChatGPT plan. The Codex CLI isn't emitting token counters, so there's no burn proxy yet.",
 };
+// Claude: shared Max 5× plan, usage plan-covered (paused credit change) but token
+// counts ARE reported — token burn windows + a would-be API-cost of $0.16.
+const claudeSub: SubscriptionBilling = {
+  provider: "claude",
+  label: "Claude",
+  plan: "max5x",
+  planLabel: "Max 5×",
+  monthlyUsd: 100,
+  configured: true,
+  active: true,
+  dedicated: false, // you use Claude interactively elsewhere too
+  unit: "tokens",
+  models: ["not_recorded"],
+  windows: {
+    session5h: { label: "5h session", tokens: 800_000, calls: 30, inputTokens: 700_000, outputTokens: 100_000, since: "2026-07-07T07:00:00.000Z" },
+    week7d: { label: "7d week", tokens: 1_500_000, calls: 70, inputTokens: 1_300_000, outputTokens: 200_000, since: "2026-06-30T12:00:00.000Z" },
+    month: { label: "this month", tokens: 1_500_000, calls: 70, inputTokens: 1_300_000, outputTokens: 200_000, since: "2026-07-01T00:00:00.000Z" },
+  },
+  apiEquivalentUsd: 0.16,
+  note: "Claude Code draws from your Claude plan's shared 5h/weekly limits — included, not billed per token.",
+};
 const proBilling: LlmUsageBilling = {
-  metered: { models: ["not_recorded"], monthCostUsd: 0.16, costStatus: "recorded" },
-  subscriptions: [ollamaSub, codexSub],
-  monthlyTotalUsd: 20.16, // dedicated Ollama $20 + Claude $0.16 (Codex shared, excluded)
+  metered: { models: [], monthCostUsd: null, costStatus: "not_recorded" }, // nothing metered — Claude is a subscription now
+  subscriptions: [ollamaSub, codexSub, claudeSub],
+  monthlyTotalUsd: 20, // dedicated Ollama $20 only (Codex + Claude shared, excluded; Claude's $0.16 is plan-covered)
   monthlyTotalComplete: true,
 };
 
@@ -200,40 +223,46 @@ const withBilling: LlmUsageAggregate = {
   billing: proBilling,
 };
 
-// text matcher tolerant of the "×" glyph in "Pro 5×"
+// text matcher tolerant of the "×" glyph in plan labels
 const hasText = (needle: string) => (content: string) => content.includes(needle);
 
 describe("UsagePanel — cost & subscription burn", () => {
-  test("totals only DEDICATED spend (Ollama + Claude); shows shared Codex separately, not summed", () => {
-    const { getByText } = render(<UsagePanel usage={withBilling} />);
+  test("totals only DEDICATED spend (Ollama); Codex + Claude are shared context, not summed", () => {
+    const { getByText, getAllByText, queryByText } = render(<UsagePanel usage={withBilling} />);
     expect(getByText("Cost this month")).toBeTruthy();
-    // Total is the app's real cost: Ollama $20 + Claude $0.16 — NOT the shared Codex $100.
-    expect(getByText(/≈\s*\$20\.16/)).toBeTruthy();
+    // Total is the app's real dedicated cost: Ollama $20 — NOT Codex or Claude ($100 each, shared).
+    expect(getByText(/≈\s*\$20\.00/)).toBeTruthy();
     expect(getByText("Ollama Pro · flat")).toBeTruthy();
     expect(getByText("$20/mo")).toBeTruthy();
-    expect(getByText("Metered · Claude API")).toBeTruthy();
-    // Codex is still visible, but under a "shared" heading and excluded from the total.
+    // Claude is no longer a metered line — its usage is plan-covered.
+    expect(queryByText(hasText("Metered"))).toBeNull();
+    // Codex + Claude under the "shared" heading, each $100/mo, excluded from the total.
     expect(getByText(hasText("used beyond this monitor"))).toBeTruthy();
     expect(getByText(hasText("Codex Pro"))).toBeTruthy(); // "Codex Pro 5× · flat"
-    expect(getByText("$100/mo")).toBeTruthy();
+    expect(getByText(hasText("Claude Max"))).toBeTruthy(); // "Claude Max 5× · flat"
+    expect(getAllByText("$100/mo").length).toBe(2); // Codex + Claude
   });
 
-  test("a subscription (:cloud) row shows a muted 'flat' tag, not a misleading '?'", () => {
-    const { getByText } = render(<UsagePanel usage={withBilling} />);
-    expect(getByText("flat")).toBeTruthy(); // the glm-5.2:cloud row
-    const dollars = getByText("Cost this month").ownerDocument.body.textContent ?? "";
-    expect(dollars).toContain("$0.16");
+  test("subscription rows (Ollama + Claude) show a muted 'flat' tag, not a misleading '?'", () => {
+    const { getAllByText, getByText } = render(<UsagePanel usage={withBilling} />);
+    expect(getAllByText("flat").length).toBeGreaterThanOrEqual(2); // glm + claude model rows
+    // The would-be $0.16 surfaces as Claude context, not as a metered charge.
+    const body = getByText("Cost this month").ownerDocument.body.textContent ?? "";
+    expect(body).toContain("$0.16");
   });
 
-  test("renders the Ollama burn block; a configured-but-idle Codex shows cost only (no burn block)", () => {
+  test("renders token burn blocks for Ollama and Claude; idle Codex shows no burn block", () => {
     const { getByText, getAllByText, queryByText } = render(<UsagePanel usage={withBilling} />);
     expect(getByText("Ollama burn · Pro plan")).toBeTruthy();
-    expect(getByText("5h session")).toBeTruthy();
-    expect(getByText("40 calls")).toBeTruthy();
-    expect(getAllByText("92 calls").length).toBe(2);
-    expect(getByText(/GPU-time/)).toBeTruthy();
-    // Codex reports no usage → its cost shows in the strip but no burn windows.
+    expect(getByText(hasText("Claude burn"))).toBeTruthy(); // "Claude burn · Max 5× plan"
+    expect(getAllByText("5h session").length).toBe(2); // Ollama + Claude token blocks
+    expect(getByText("40 calls")).toBeTruthy(); // Ollama 5h
+    // Claude's would-be API cost is shown as context, never in the total.
+    expect(getByText(hasText("$0.16 at API rates"))).toBeTruthy();
+    expect(getByText(hasText("covered by your plan"))).toBeTruthy();
+    // Codex reports no usage → no burn block for it.
     expect(queryByText(hasText("Codex burn"))).toBeNull();
+    expect(queryByText(hasText("Codex runs"))).toBeNull();
   });
 
   test("shows Codex RUNS as a second burn block — the monitor's own Codex usage (not tokens)", () => {

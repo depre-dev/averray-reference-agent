@@ -5,6 +5,7 @@ import type {
   LlmUsageRecent,
   LlmUsageWindow,
   SubscriptionBilling,
+  SubscriptionProvider,
 } from "../lib/monitor/board-cache.js";
 import { formatCompactNumber, formatNumber, formatRelativeTime } from "../lib/monitor/format.js";
 import { UtilCard } from "./UtilCard.js";
@@ -308,7 +309,6 @@ function CostSummary({ billing }: { billing: LlmUsageBilling }) {
   const dedicated = billing.subscriptions.filter((sub) => sub.dedicated);
   const shared = billing.subscriptions.filter((sub) => !sub.dedicated);
   const anyDedicatedCost = dedicated.some((sub) => sub.configured) || billing.metered.monthCostUsd != null;
-  const meteredAmount = billing.metered.monthCostUsd != null ? formatUsd(billing.metered.monthCostUsd) : "$0";
   const totalText = billing.monthlyTotalUsd != null
     ? `${anyDedicatedCost ? "≈ " : ""}${formatUsd(billing.monthlyTotalUsd)}${billing.monthlyTotalComplete ? "" : " +"}`
     : "—";
@@ -320,11 +320,15 @@ function CostSummary({ billing }: { billing: LlmUsageBilling }) {
       </div>
       <div className="hm-usage-cost-rows">
         {dedicated.map((sub) => <CostRow key={sub.provider} sub={sub} />)}
-        <div className="hm-usage-cost-row">
-          <span className="hm-usage-jewel" style={{ background: "var(--h4-ag-claude)" }} aria-hidden />
-          <span className="hm-usage-cost-name">Metered · Claude API</span>
-          <span className="hm-usage-cost-amt">{meteredAmount}</span>
-        </div>
+        {/* Metered row only when there's genuine per-token API spend. Today there
+            is none — Claude runs on a subscription (plan-covered) — so it hides. */}
+        {billing.metered.monthCostUsd != null ? (
+          <div className="hm-usage-cost-row">
+            <span className="hm-usage-jewel" style={{ background: "var(--h4-ag-system)" }} aria-hidden />
+            <span className="hm-usage-cost-name">Metered · API</span>
+            <span className="hm-usage-cost-amt">{formatUsd(billing.metered.monthCostUsd)}</span>
+          </div>
+        ) : null}
       </div>
       {shared.length > 0 ? (
         <div className="hm-usage-cost-shared">
@@ -411,6 +415,11 @@ function SubscriptionBurn({ subscription }: { subscription: SubscriptionBilling 
           </div>
         ))}
       </div>
+      {subscription.apiEquivalentUsd != null ? (
+        <div className="hm-usage-burn-apieq" title="What this month's usage would cost at API rates — your plan covers it, so it isn't in the total.">
+          ≈ {formatUsd(subscription.apiEquivalentUsd)} at API rates <span>· covered by your plan</span>
+        </div>
+      ) : null}
       <small className="hm-usage-burn-note">{subscription.note}</small>
     </div>
   );
@@ -421,22 +430,25 @@ function planLine(sub: SubscriptionBilling): string {
   return sub.planLabel ? `${sub.label} ${sub.planLabel}` : sub.label;
 }
 
-/** Provider jewel — Ollama rides the hermes token, Codex its own. */
-function providerJewel(provider: "ollama" | "codex"): string {
-  return provider === "codex" ? "var(--h4-ag-codex)" : "var(--h4-ag-hermes)";
+/** Provider jewel — Ollama rides the hermes token, Codex + Claude their own. */
+function providerJewel(provider: SubscriptionProvider): string {
+  if (provider === "codex") return "var(--h4-ag-codex)";
+  if (provider === "claude") return "var(--h4-ag-claude)";
+  return "var(--h4-ag-hermes)";
 }
 
 /**
  * Billing model for an (agent, model) — mirrors the backend llmBillingClass so a
  * row's cost cell matches how the aggregate classed it. Flat-rate subscriptions
- * (the codex agent, or Ollama via the hermes agent / `:cloud` / ollama-tagged
- * models) show "flat"; the Claude SDK agents are metered; else unknown.
+ * (codex, the Claude SDK agents, or Ollama via hermes / `:cloud` / ollama-tagged
+ * models) show "flat" — Claude included, since it runs on a plan (see
+ * subscriptionProviderOf). Everything else is unknown.
  */
 function billingClassOf(agent: string, model: string): "subscription" | "metered" | "unknown" {
   const a = agent.trim().toLowerCase();
   const m = model.trim().toLowerCase();
   if (a === "codex" || a === "hermes" || m.endsWith(":cloud") || m.includes("ollama")) return "subscription";
-  if (a === "claude" || a === "test-writer" || a === "security" || a === "docs") return "metered";
+  if (a === "claude" || a === "test-writer" || a === "security" || a === "docs") return "subscription";
   return "unknown";
 }
 
