@@ -83,14 +83,39 @@ export interface LlmUsageWindow {
 }
 
 /**
+ * One flat-rate subscription provider (Ollama Cloud, Codex/ChatGPT). Billed by a
+ * fixed monthly plan — GPU-time / rolling-window usage, NOT per token — so there
+ * is no truthful per-call $. We surface the flat plan price plus a token/call
+ * burn proxy against the provider's real reset windows, but only when the
+ * provider actually reports usage (`active`); Codex's CLI may not, in which case
+ * `windows` is null and the flat cost stands alone.
+ */
+export interface SubscriptionBilling {
+  provider: "ollama" | "codex";
+  label: string;
+  plan: string;
+  planLabel: string;
+  monthlyUsd: number | null;
+  configured: boolean;
+  active: boolean;
+  models: string[];
+  windows: {
+    session5h: LlmUsageWindow;
+    week7d: LlmUsageWindow;
+    month: LlmUsageWindow;
+  } | null;
+  note: string;
+}
+
+/**
  * How usage maps to money, split by the two billing models actually in play:
  *   - metered   → per-token providers that report a real dollar cost (Claude SDK).
- *   - subscription → flat-rate providers (Ollama Cloud) billed by GPU-time, NOT
- *     per token. There is no truthful per-call $, so we surface the flat plan
- *     price plus a token/call burn proxy against Ollama's real reset windows.
- * `monthlyTotalUsd` is the honest month-to-date picture (flat plan + metered $);
- * `monthlyTotalComplete` is false when the Ollama plan isn't configured, so the
- * UI can say the total excludes the (unknown) subscription cost.
+ *   - subscriptions → flat-rate providers (Ollama, Codex/ChatGPT) billed by a
+ *     fixed monthly plan, NOT per token. Each surfaces its flat price plus a burn
+ *     proxy against its reset windows (when it reports usage).
+ * `monthlyTotalUsd` is the honest month-to-date picture (every configured flat
+ * plan + metered $); `monthlyTotalComplete` is false when a shown subscription's
+ * plan isn't configured, so the UI can flag that the total is missing a cost.
  */
 export interface LlmUsageBilling {
   metered: {
@@ -98,27 +123,17 @@ export interface LlmUsageBilling {
     monthCostUsd: number | null;
     costStatus: "recorded" | "not_recorded";
   };
-  subscription: {
-    provider: "ollama";
-    plan: "free" | "pro" | "max" | "none";
-    monthlyUsd: number | null;
-    configured: boolean;
-    active: boolean;
-    models: string[];
-    windows: {
-      session5h: LlmUsageWindow;
-      week7d: LlmUsageWindow;
-      month: LlmUsageWindow;
-    } | null;
-  };
+  subscriptions: SubscriptionBilling[];
   monthlyTotalUsd: number | null;
   monthlyTotalComplete: boolean;
-  note: string;
 }
 
-/** Resolved Ollama Cloud subscription plan (caller reads it from env). */
-export interface OllamaPlanConfig {
-  plan: "free" | "pro" | "max" | "none";
+/** Resolved flat-rate subscription plan for one provider (caller reads env). */
+export interface SubscriptionPlanConfig {
+  provider: "ollama" | "codex";
+  label: string;
+  plan: string;
+  planLabel: string;
   monthlyUsd: number | null;
   configured: boolean;
 }
@@ -162,9 +177,9 @@ export interface LlmUsageAggregateOptions {
   now?: Date;
   /** Recent-window length in minutes (default 60). */
   recentWindowMinutes?: number;
-  /** Ollama Cloud subscription plan for the billing block (caller resolves it
-   *  from env via resolveOllamaPlan). Omitted → treated as not configured. */
-  subscription?: OllamaPlanConfig;
+  /** Flat-rate subscription plans (Ollama, Codex) for the billing block — caller
+   *  resolves them from env via resolveSubscriptionPlans. Omitted → none. */
+  subscriptions?: readonly SubscriptionPlanConfig[];
 }
 
 export interface LlmUsageActiveCallInput {
@@ -186,9 +201,13 @@ const DEFAULT_SOURCE_REASONS: Readonly<Record<string, string>> = {
   hermes: "Hermes monitor replies may be templated when OLLAMA_API_KEY is unset; live Hermes agent usage is recorded from post_llm_call traces when provider counters are present.",
 };
 
-/** Ollama Cloud flat monthly plan prices (USD). Free/Pro/Max — no per-token bill. */
+/** Flat monthly plan prices (USD) per provider — no per-token bill for these. */
 const OLLAMA_PLAN_MONTHLY_USD: Readonly<Record<string, number>> = { free: 0, pro: 20, max: 100 };
-/** Ollama's real usage reset windows: a 5-hour session window and a 7-day week. */
+const OLLAMA_PLAN_LABELS: Readonly<Record<string, string>> = { free: "Free", pro: "Pro", max: "Max" };
+// Codex draws from the ChatGPT plan: Free/Go/Plus, Pro 5× ($100, Apr 2026), Pro ($200).
+const CODEX_PLAN_MONTHLY_USD: Readonly<Record<string, number>> = { free: 0, go: 8, plus: 20, pro5x: 100, pro: 200 };
+const CODEX_PLAN_LABELS: Readonly<Record<string, string>> = { free: "Free", go: "Go", plus: "Plus", pro5x: "Pro 5×", pro: "Pro" };
+/** Real usage reset windows shared by these subscriptions: 5-hour session, 7-day week. */
 const SESSION_WINDOW_MS = 5 * 60 * 60 * 1000;
 const WEEK_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 /** Agents whose usage is metered per token (Claude Agent SDK reports real cost). */
@@ -197,6 +216,12 @@ const OLLAMA_BURN_NOTE =
   "Ollama Cloud bills a flat monthly plan metered by GPU-time — not tokens or per-call dollars. "
   + "The token/call counts here are a burn proxy; Ollama emails you near 90% of your allocation "
   + "(session resets ~5h, weekly resets ~7d).";
+const CODEX_BURN_NOTE =
+  "Codex draws from your ChatGPT plan, metered against a rolling ~5-hour window — not per-call dollars. "
+  + "The token/call counts here are a burn proxy.";
+const CODEX_NO_USAGE_NOTE =
+  "Codex draws from your ChatGPT plan (rolling ~5-hour window). The Codex CLI isn't emitting token "
+  + "counters, so there's no burn proxy yet — the flat plan price is your spend.";
 
 const activeCalls = new Map<string, LlmUsageActiveCall>();
 let nextActiveCallId = 0;
@@ -206,26 +231,61 @@ let nextActiveCallId = 0;
  * Unknown/unset → not configured, so the UI shows an honest "plan not set" state
  * instead of inventing a subscription cost.
  */
-export function resolveOllamaPlan(env: NodeJS.ProcessEnv = process.env): OllamaPlanConfig {
-  const raw = env.OLLAMA_PLAN?.trim().toLowerCase();
-  if (raw && raw in OLLAMA_PLAN_MONTHLY_USD) {
-    return { plan: raw as "free" | "pro" | "max", monthlyUsd: OLLAMA_PLAN_MONTHLY_USD[raw]!, configured: true };
+export function resolveOllamaPlan(env: NodeJS.ProcessEnv = process.env): SubscriptionPlanConfig {
+  return resolvePlan("ollama", "Ollama", env.OLLAMA_PLAN, OLLAMA_PLAN_MONTHLY_USD, OLLAMA_PLAN_LABELS);
+}
+
+/**
+ * Resolve the Codex (ChatGPT) subscription plan from env
+ * (CODEX_PLAN=free|go|plus|pro5x|pro; "pro-5x"/"pro_5x" normalise to pro5x).
+ * Unknown/unset → not configured.
+ */
+export function resolveCodexPlan(env: NodeJS.ProcessEnv = process.env): SubscriptionPlanConfig {
+  return resolvePlan("codex", "Codex", env.CODEX_PLAN, CODEX_PLAN_MONTHLY_USD, CODEX_PLAN_LABELS);
+}
+
+/** Both known subscription providers, resolved from env — for aggregateLlmUsage. */
+export function resolveSubscriptionPlans(env: NodeJS.ProcessEnv = process.env): SubscriptionPlanConfig[] {
+  return [resolveOllamaPlan(env), resolveCodexPlan(env)];
+}
+
+function resolvePlan(
+  provider: "ollama" | "codex",
+  label: string,
+  raw: string | undefined,
+  prices: Readonly<Record<string, number>>,
+  labels: Readonly<Record<string, string>>,
+): SubscriptionPlanConfig {
+  const key = raw?.trim().toLowerCase().replace(/[-_\s]/g, "");
+  if (key && key in prices) {
+    return { provider, label, plan: key, planLabel: labels[key] ?? key, monthlyUsd: prices[key]!, configured: true };
   }
-  return { plan: "none", monthlyUsd: null, configured: false };
+  return { provider, label, plan: "none", planLabel: "", monthlyUsd: null, configured: false };
+}
+
+/**
+ * The flat-rate subscription provider for an (agent, model), or null when it
+ * isn't a subscription:
+ *   - ollama → the hermes agent, a `:cloud` model suffix, or an ollama-tagged model.
+ *   - codex  → the codex agent.
+ */
+export function subscriptionProviderOf(agent: string, model: string): "ollama" | "codex" | null {
+  const a = agent.trim().toLowerCase();
+  const m = model.trim().toLowerCase();
+  if (a === "codex") return "codex";
+  if (a === "hermes" || m.endsWith(":cloud") || m.includes("ollama")) return "ollama";
+  return null;
 }
 
 /**
  * Classify an (agent, model) into its billing model:
- *   - subscription → Ollama Cloud (`:cloud` model suffix, an ollama-tagged model,
- *     or the hermes agent, which runs on Ollama). Flat-rate, no per-token $.
+ *   - subscription → a flat-rate provider (Ollama or Codex). No per-token $.
  *   - metered → Claude Agent SDK agents (claude + specialists) that report cost.
  *   - unknown → anything else (counted for tokens, never assigned a cost).
  */
 export function llmBillingClass(agent: string, model: string): "subscription" | "metered" | "unknown" {
-  const a = agent.trim().toLowerCase();
-  const m = model.trim().toLowerCase();
-  if (m.endsWith(":cloud") || m.includes("ollama") || a === "hermes") return "subscription";
-  if (METERED_AGENTS.has(a)) return "metered";
+  if (subscriptionProviderOf(agent, model)) return "subscription";
+  if (METERED_AGENTS.has(agent.trim().toLowerCase())) return "metered";
   return "unknown";
 }
 
@@ -365,7 +425,7 @@ export function aggregateLlmUsage(
   const total = totalsFor(events);
   const sourceStatus = sourceStatuses(events, options);
   const recent = buildRecent(events, options.now, options.recentWindowMinutes ?? 60);
-  const billing = buildBilling(events, options.now, options.subscription);
+  const billing = buildBilling(events, options.now, options.subscriptions);
   const status = events.length > 0 ? "recorded" : "not_recorded";
   return {
     status,
@@ -384,23 +444,22 @@ export function aggregateLlmUsage(
 }
 
 /**
- * Build the billing block: split usage into metered (real recorded $) and
- * subscription (Ollama flat plan + token/call burn windows), plus an honest
- * month-to-date total. No per-token dollar figure is ever invented for the
- * subscription side — Ollama meters GPU-time, which we don't have, so tokens
- * and calls stand in as the burn proxy.
+ * Build the billing block: split usage into metered (real recorded $) and one
+ * entry per flat-rate subscription provider (Ollama, Codex), each with its flat
+ * plan price and a token/call burn proxy against its reset windows — plus an
+ * honest month-to-date total. No per-token dollar figure is ever invented for a
+ * subscription; when a provider reports no usage (e.g. the Codex CLI), its
+ * windows are null and the flat price stands alone.
  */
 function buildBilling(
   events: readonly LlmUsageEvent[],
   now: Date | undefined,
-  plan: OllamaPlanConfig | undefined,
+  plans: readonly SubscriptionPlanConfig[] | undefined,
 ): LlmUsageBilling {
-  const resolved: OllamaPlanConfig = plan ?? { plan: "none", monthlyUsd: null, configured: false };
   const anchor = now && Number.isFinite(now.getTime()) ? now : undefined;
   const endMs = anchor ? anchor.getTime() : undefined;
   const monthStartMs = anchor ? startOfUtcMonthMs(anchor) : undefined;
 
-  const subscriptionEvents = events.filter((event) => llmBillingClass(event.agent, event.model) === "subscription");
   const meteredEvents = events.filter((event) => llmBillingClass(event.agent, event.model) === "metered");
 
   // Metered $ this month — recorded costs only (never fabricated).
@@ -415,17 +474,40 @@ function buildBilling(
     }
   }
 
-  const windows = endMs !== undefined && monthStartMs !== undefined
-    ? {
-        session5h: usageWindowFor(subscriptionEvents, endMs - SESSION_WINDOW_MS, endMs, "5h session"),
-        week7d: usageWindowFor(subscriptionEvents, endMs - WEEK_WINDOW_MS, endMs, "7d week"),
-        month: usageWindowFor(subscriptionEvents, monthStartMs, endMs, "this month"),
-      }
-    : null;
+  // One entry per provider that's either configured (has a flat cost to show) or
+  // active (has usage). Providers that are neither are omitted — no clutter.
+  const subscriptions: SubscriptionBilling[] = [];
+  for (const plan of plans ?? []) {
+    const provEvents = events.filter((event) => subscriptionProviderOf(event.agent, event.model) === plan.provider);
+    const active = provEvents.length > 0;
+    if (!plan.configured && !active) continue;
+    const windows = endMs !== undefined && monthStartMs !== undefined && active
+      ? {
+          session5h: usageWindowFor(provEvents, endMs - SESSION_WINDOW_MS, endMs, "5h session"),
+          week7d: usageWindowFor(provEvents, endMs - WEEK_WINDOW_MS, endMs, "7d week"),
+          month: usageWindowFor(provEvents, monthStartMs, endMs, "this month"),
+        }
+      : null;
+    subscriptions.push({
+      provider: plan.provider,
+      label: plan.label,
+      plan: plan.plan,
+      planLabel: plan.planLabel,
+      monthlyUsd: plan.monthlyUsd,
+      configured: plan.configured,
+      active,
+      models: uniqueStrings(provEvents.map((event) => event.model)),
+      windows,
+      note: subscriptionNote(plan.provider, active),
+    });
+  }
 
-  const flatUsd = resolved.configured ? (resolved.monthlyUsd ?? 0) : null;
-  const monthlyTotalUsd = flatUsd !== null || monthCostUsd !== null
-    ? round((flatUsd ?? 0) + (monthCostUsd ?? 0), 6)
+  const flatSum = subscriptions
+    .filter((sub) => sub.configured)
+    .reduce((sum, sub) => sum + (sub.monthlyUsd ?? 0), 0);
+  const anyFlat = subscriptions.some((sub) => sub.configured);
+  const monthlyTotalUsd = anyFlat || monthCostUsd !== null
+    ? round((anyFlat ? flatSum : 0) + (monthCostUsd ?? 0), 6)
     : null;
 
   return {
@@ -434,21 +516,18 @@ function buildBilling(
       monthCostUsd,
       costStatus: meteredEvents.some((event) => typeof event.costUsd === "number") ? "recorded" : "not_recorded",
     },
-    subscription: {
-      provider: "ollama",
-      plan: resolved.plan,
-      monthlyUsd: resolved.monthlyUsd,
-      configured: resolved.configured,
-      active: subscriptionEvents.length > 0,
-      models: uniqueStrings(subscriptionEvents.map((event) => event.model)),
-      windows,
-    },
+    subscriptions,
     monthlyTotalUsd,
-    // Complete only when the flat subscription cost is known; otherwise the
-    // total is metered-only and the UI flags the Ollama gap.
-    monthlyTotalComplete: flatUsd !== null,
-    note: OLLAMA_BURN_NOTE,
+    // Complete only when every shown subscription's flat cost is known; an
+    // active-but-unconfigured provider makes the total incomplete (flagged in UI).
+    monthlyTotalComplete: subscriptions.every((sub) => sub.configured),
   };
+}
+
+/** Per-provider honest note: Ollama meters GPU-time; Codex may not report usage. */
+function subscriptionNote(provider: "ollama" | "codex", active: boolean): string {
+  if (provider === "codex") return active ? CODEX_BURN_NOTE : CODEX_NO_USAGE_NOTE;
+  return OLLAMA_BURN_NOTE;
 }
 
 /** Tokens/calls for subscription events inside [startMs, endMs] — the burn proxy. */
