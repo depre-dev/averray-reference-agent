@@ -1,4 +1,10 @@
-import type { LlmUsageAggregate, LlmUsageRecent } from "../lib/monitor/board-cache.js";
+import type {
+  LlmUsageAggregate,
+  LlmUsageBilling,
+  LlmUsageModelRollup,
+  LlmUsageRecent,
+  LlmUsageWindow,
+} from "../lib/monitor/board-cache.js";
 import { formatCompactNumber, formatNumber, formatRelativeTime } from "../lib/monitor/format.js";
 import { UtilCard } from "./UtilCard.js";
 
@@ -27,8 +33,14 @@ export function UsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
   const emptyMessage = usage?.message
     ?? "No LLM usage counters have been recorded yet. Sources stay not reported until a real provider or runner emits whitelisted counters.";
   const hasTable = recorded && models.length > 0;
-  // Cost column only when a real cost was recorded somewhere (never a column of "?").
-  const showCost = !!usage && (usage.costStatus === "recorded" || models.some((m) => m.costStatus === "recorded"));
+  // Cost split by billing model (metered $ vs flat Ollama subscription + burn windows).
+  const billing = usage?.billing;
+  // Cost column: when billing is present every row has a meaningful cell (metered $,
+  // "flat" for subscription, or "?"), so show it. Otherwise fall back to the old
+  // "only when something recorded" rule so we never paint a bare column of "?".
+  const showCost = !!usage && (
+    !!billing || usage.costStatus === "recorded" || models.some((m) => m.costStatus === "recorded")
+  );
   // Real daily-tokens series (oldest→newest, last 14 days) — a chart, not a guess.
   const chartDays = (usage?.byDay ?? []).slice().sort((a, b) => a.day.localeCompare(b.day)).slice(-14);
   const hasChart = recorded && chartDays.length >= 2;
@@ -38,6 +50,7 @@ export function UsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
 
   return (
     <UtilCard title="LLM usage" hint="per model · all agents" fill ariaLabel="LLM usage">
+      {hasTable && billing ? <CostSummary billing={billing} /> : null}
       {hasTable ? (
         <div className={`hm-usage-table${showCost ? " hm-usage-table--cost" : ""}`}>
           <div className="hm-usage-row hm-usage-row--head">
@@ -51,7 +64,11 @@ export function UsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
             <span className="hm-usage-c-model">All models</span>
             <span className="hm-usage-c-num">{formatCompactNumber(usage!.totalTokens)}</span>
             <span className="hm-usage-c-num">{formatNumber(usage!.runs)}</span>
-            {showCost ? <span className="hm-usage-c-num">{formatCost(usage!.costUsd, usage!.costStatus)}</span> : null}
+            {showCost ? (
+              <span className="hm-usage-c-num" title="Recorded metered cost (Claude API, all time). Ollama runs on a flat subscription — see Cost this month above.">
+                {formatCost(usage!.costUsd, usage!.costStatus)}
+              </span>
+            ) : null}
             <span className="hm-usage-c-num hm-usage-c-na" title="latency not reported">?</span>
           </div>
           {models.map((entry) => (
@@ -63,11 +80,7 @@ export function UsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
               </span>
               <span className="hm-usage-c-num">{formatCompactNumber(entry.totalTokens)}</span>
               <span className="hm-usage-c-num">{formatNumber(entry.runs)}</span>
-              {showCost ? (
-                <span className={`hm-usage-c-num${entry.costStatus === "recorded" ? "" : " hm-usage-c-na"}`} title={entry.costStatus === "recorded" ? undefined : "cost not reported"}>
-                  {formatCost(entry.costUsd, entry.costStatus)}
-                </span>
-              ) : null}
+              {showCost ? <RowCost entry={entry} /> : null}
               <span className="hm-usage-c-num hm-usage-c-na" title="latency not reported">?</span>
             </div>
           ))}
@@ -103,6 +116,13 @@ export function UsagePanel({ usage }: { usage?: LlmUsageAggregate }) {
           <span>{emptyMessage}</span>
         </p>
       )}
+
+      {/* Ollama subscription burn — flat-plan usage against its real reset windows.
+          Tokens/calls stand in for GPU-time (which Ollama doesn't expose); never a
+          fabricated per-token dollar figure. */}
+      {billing && billing.subscription.active && billing.subscription.windows ? (
+        <OllamaBurn billing={billing} />
+      ) : null}
 
       {/* What's running now (in-flight) — always glanceable. */}
       <div className="hm-usage-active">
@@ -274,6 +294,130 @@ function DailyTokensChart({ days }: { days: { day: string; totalTokens: number }
       <span className="hm-usage-chart-note hm-usage-chart-note--live">{formatCompactNumber(days.reduce((s, d) => s + d.totalTokens, 0))} tokens over {days.length} days</span>
     </div>
   );
+}
+
+/**
+ * Cost-this-month headline — the honest picture the old single "$0.16" total
+ * couldn't give: the flat Ollama subscription (already paid, doesn't grow per
+ * call) plus the genuinely-metered Claude API dollars, and their month total.
+ */
+function CostSummary({ billing }: { billing: LlmUsageBilling }) {
+  const { subscription, metered } = billing;
+  const planName = subscription.configured
+    ? `Ollama ${capitalize(subscription.plan)}`
+    : "Ollama Cloud";
+  const subAmount = subscription.configured
+    ? `${formatPlanUsd(subscription.monthlyUsd ?? 0)}/mo`
+    : "plan not set";
+  const meteredAmount = metered.monthCostUsd != null ? formatUsd(metered.monthCostUsd) : "$0";
+  const totalText = billing.monthlyTotalUsd != null
+    ? `${subscription.configured ? "≈ " : ""}${formatUsd(billing.monthlyTotalUsd)}${billing.monthlyTotalComplete ? "" : " +"}`
+    : "—";
+  return (
+    <div className="hm-usage-cost" role="group" aria-label="Cost this month">
+      <div className="hm-usage-cost-head">
+        <span className="hm-usage-cost-label">Cost this month</span>
+        <span className="hm-usage-cost-total" title={billing.monthlyTotalComplete ? undefined : "Excludes the Ollama subscription — set OLLAMA_PLAN to include it."}>{totalText}</span>
+      </div>
+      <div className="hm-usage-cost-rows">
+        <div className="hm-usage-cost-row">
+          <span className="hm-usage-jewel" style={{ background: "var(--h4-ag-hermes)" }} aria-hidden />
+          <span className="hm-usage-cost-name">{planName} · flat</span>
+          <span className={`hm-usage-cost-amt${subscription.configured ? "" : " hm-usage-c-na"}`}>{subAmount}</span>
+        </div>
+        <div className="hm-usage-cost-row">
+          <span className="hm-usage-jewel" style={{ background: "var(--h4-ag-claude)" }} aria-hidden />
+          <span className="hm-usage-cost-name">Metered · Claude API</span>
+          <span className="hm-usage-cost-amt">{meteredAmount}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Per-row cost cell, billing-aware. Subscription (Ollama) rows show a muted
+ * "flat" tag instead of a misleading "?" — their cost lives in the flat plan,
+ * not per call. Metered rows show the real recorded dollars (or "?" if a
+ * metered provider didn't emit cost). Unknown rows stay "?".
+ */
+function RowCost({ entry }: { entry: LlmUsageModelRollup }) {
+  if (billingClassOf(entry.agent, entry.model) === "subscription") {
+    return (
+      <span
+        className="hm-usage-c-num hm-usage-c-flat"
+        title="Included in your flat Ollama subscription — billed by GPU-time, not per call."
+      >
+        flat
+      </span>
+    );
+  }
+  if (entry.costStatus === "recorded") {
+    return <span className="hm-usage-c-num">{formatCost(entry.costUsd, entry.costStatus)}</span>;
+  }
+  return <span className="hm-usage-c-num hm-usage-c-na" title="cost not reported">?</span>;
+}
+
+/**
+ * Ollama subscription burn — how much of the plan's allocation you've used in
+ * Ollama's real reset windows (5h session · 7d week · this month). Tokens/calls
+ * are a proxy for GPU-time (the real metered unit, which Ollama doesn't expose),
+ * flagged as such — never dressed up as dollars.
+ */
+function OllamaBurn({ billing }: { billing: LlmUsageBilling }) {
+  const { subscription } = billing;
+  const windows = subscription.windows;
+  if (!windows) return null;
+  const planName = subscription.configured ? `${capitalize(subscription.plan)} plan` : "Cloud";
+  const cells: LlmUsageWindow[] = [windows.session5h, windows.week7d, windows.month];
+  return (
+    <div className="hm-usage-burn" role="group" aria-label="Ollama subscription burn">
+      <div className="hm-usage-burn-head">
+        <span className="hm-usage-burn-title">Ollama burn · {planName}</span>
+        <span className="hm-usage-burn-chip" title="Tokens/calls are a proxy for GPU-time — Ollama's real metered unit — not dollars.">proxy</span>
+      </div>
+      <div className="hm-usage-burn-windows">
+        {cells.map((win) => (
+          <div className="hm-usage-burn-win" key={win.label}>
+            <span className="hm-usage-burn-win-label">{win.label}</span>
+            <strong className="hm-usage-burn-win-tok">{formatCompactNumber(win.tokens)}</strong>
+            <small className="hm-usage-burn-win-calls">{formatNumber(win.calls)} calls</small>
+          </div>
+        ))}
+      </div>
+      <small className="hm-usage-burn-note">{billing.note}</small>
+    </div>
+  );
+}
+
+/**
+ * Billing model for an (agent, model) — mirrors the backend llmBillingClass so
+ * a row's cost cell matches how the aggregate classed it. Ollama Cloud (`:cloud`
+ * suffix / ollama-tagged / the hermes agent) is flat-rate subscription; the
+ * Claude SDK agents are metered; everything else is unknown.
+ */
+function billingClassOf(agent: string, model: string): "subscription" | "metered" | "unknown" {
+  const a = agent.trim().toLowerCase();
+  const m = model.trim().toLowerCase();
+  if (m.endsWith(":cloud") || m.includes("ollama") || a === "hermes") return "subscription";
+  if (a === "claude" || a === "test-writer" || a === "security" || a === "docs") return "metered";
+  return "unknown";
+}
+
+function capitalize(value: string): string {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+}
+
+/** Format a known dollar amount (assumes a real number, unlike formatCost). */
+function formatUsd(usd: number): string {
+  if (usd === 0) return "$0";
+  return usd < 0.01 ? "<$0.01" : `$${usd.toFixed(2)}`;
+}
+
+/** Plan price — drops the ".00" on whole-dollar tiers so "$20/mo" reads clean. */
+function formatPlanUsd(usd: number): string {
+  if (usd === 0) return "$0";
+  return Number.isInteger(usd) ? `$${usd}` : `$${usd.toFixed(2)}`;
 }
 
 function formatCost(usd: number | null | undefined, status: string): string {
