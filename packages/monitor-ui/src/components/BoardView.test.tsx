@@ -503,8 +503,8 @@ describe("BoardView — rich-mix board (open stream)", () => {
     expect(getAllByText("59K").length).toBeGreaterThan(0); // total + the single model
     expect(getByText("claude-sonnet-4-5")).toBeTruthy();
     expect(getByText(/48K in · 9K out/)).toBeTruthy();
-    // Latency has no real source → an explicit "?" (never fabricated).
-    expect(getAllByText("?").length).toBeGreaterThan(0);
+    // The latency column (no data source) is gone — no fabricated "?" placeholder.
+    expect(queryAllByText("Latency").length).toBe(0);
     // The in-flight line names the live call.
     expect(getByText("claude · claude-sonnet-4-5")).toBeTruthy();
     // Every expected agent is accounted for: idle ones are listed explicitly

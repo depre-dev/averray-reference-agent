@@ -41,13 +41,15 @@ const recorded: LlmUsageAggregate = {
 };
 
 describe("UsagePanel", () => {
-  test("renders the real per-model table with a '?' latency (never fabricated)", () => {
-    const { getByText, getAllByText, getByRole } = render(<UsagePanel usage={recorded} />);
+  test("renders the real per-model table (tokens + calls); no latency column of '?'", () => {
+    const { getByText, getAllByText, getByRole, queryByText } = render(<UsagePanel usage={recorded} />);
     expect(getByRole("region", { name: "LLM usage" })).toBeTruthy();
     expect(getByText("All models")).toBeTruthy();
     expect(getByText("deepseek-v4-pro")).toBeTruthy();
     expect(getAllByText("10K").length).toBeGreaterThan(0); // total + model row, compact
-    expect(getAllByText("?").length).toBeGreaterThan(0); // latency has no source
+    // The latency column (all "?", no data source) is gone — not a placeholder.
+    expect(queryByText("Latency")).toBeNull();
+    expect(queryByText("?")).toBeNull();
   });
 
   test("shows EVERY expected agent — idle ones listed explicitly with reasons, never collapsed", () => {
@@ -60,16 +62,18 @@ describe("UsagePanel", () => {
     expect(getByText("Codex CLI does not report usage.")).toBeTruthy();
   });
 
-  test("renders a real Cost column only when costStatus is recorded", () => {
+  test("real per-row $ for a genuinely-metered row; the table total is a would-be ≈", () => {
     const withCost: LlmUsageAggregate = {
       ...recorded,
       costUsd: 0.42,
       costStatus: "recorded",
-      byModel: [{ ...recorded.byModel[0]!, costUsd: 0.42, costStatus: "recorded" }],
+      // agent "mystery" → unknown billing class → a real per-token $ shows on the row.
+      byModel: [{ ...recorded.byModel[0]!, agent: "mystery", costUsd: 0.42, costStatus: "recorded" }],
     };
-    const { getByText, getAllByText } = render(<UsagePanel usage={withCost} />);
+    const { getByText } = render(<UsagePanel usage={withCost} />);
     expect(getByText("Cost")).toBeTruthy();
-    expect(getAllByText("$0.42").length).toBeGreaterThan(0); // total + model row
+    expect(getByText("$0.42")).toBeTruthy(); // the metered row
+    expect(getByText("≈ $0.42")).toBeTruthy(); // the would-be table total
   });
 
   test("omits the Cost column entirely when no source reports cost (no column of '?')", () => {
