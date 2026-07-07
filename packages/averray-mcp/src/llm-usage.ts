@@ -98,6 +98,14 @@ export interface SubscriptionBilling {
   monthlyUsd: number | null;
   configured: boolean;
   active: boolean;
+  /**
+   * True when this plan is dedicated to this app (Hermes/Ollama is only used
+   * inside the monitor), so its flat cost belongs in "cost this month". False
+   * when it's a shared plan used beyond this app (Codex draws from your ChatGPT
+   * plan, which you also use elsewhere) — its cost is shown as context but NOT
+   * summed into the app total, which would overstate what the app costs.
+   */
+  dedicated: boolean;
   models: string[];
   windows: {
     session5h: LlmUsageWindow;
@@ -113,9 +121,11 @@ export interface SubscriptionBilling {
  *   - subscriptions → flat-rate providers (Ollama, Codex/ChatGPT) billed by a
  *     fixed monthly plan, NOT per token. Each surfaces its flat price plus a burn
  *     proxy against its reset windows (when it reports usage).
- * `monthlyTotalUsd` is the honest month-to-date picture (every configured flat
- * plan + metered $); `monthlyTotalComplete` is false when a shown subscription's
- * plan isn't configured, so the UI can flag that the total is missing a cost.
+ * `monthlyTotalUsd` is the honest month-to-date picture — every DEDICATED flat
+ * plan (used only inside this app) + metered $. Shared plans (Codex, used beyond
+ * this app) are listed as context but NOT summed, so the total never overstates
+ * what the app costs. `monthlyTotalComplete` is false when a dedicated plan isn't
+ * configured, so the UI can flag that the total is missing a cost.
  */
 export interface LlmUsageBilling {
   metered: {
@@ -136,6 +146,8 @@ export interface SubscriptionPlanConfig {
   planLabel: string;
   monthlyUsd: number | null;
   configured: boolean;
+  /** See SubscriptionBilling.dedicated — dedicated plans count in the app total. */
+  dedicated: boolean;
 }
 
 export interface LlmUsageAggregate {
@@ -232,7 +244,9 @@ let nextActiveCallId = 0;
  * instead of inventing a subscription cost.
  */
 export function resolveOllamaPlan(env: NodeJS.ProcessEnv = process.env): SubscriptionPlanConfig {
-  return resolvePlan("ollama", "Ollama", env.OLLAMA_PLAN, OLLAMA_PLAN_MONTHLY_USD, OLLAMA_PLAN_LABELS);
+  // Dedicated: Hermes/Ollama is only used inside the monitor, so its flat cost
+  // is genuinely this app's spend and counts in the "cost this month" total.
+  return resolvePlan("ollama", "Ollama", true, env.OLLAMA_PLAN, OLLAMA_PLAN_MONTHLY_USD, OLLAMA_PLAN_LABELS);
 }
 
 /**
@@ -241,7 +255,9 @@ export function resolveOllamaPlan(env: NodeJS.ProcessEnv = process.env): Subscri
  * Unknown/unset → not configured.
  */
 export function resolveCodexPlan(env: NodeJS.ProcessEnv = process.env): SubscriptionPlanConfig {
-  return resolvePlan("codex", "Codex", env.CODEX_PLAN, CODEX_PLAN_MONTHLY_USD, CODEX_PLAN_LABELS);
+  // Shared: Codex draws from your ChatGPT plan, which you also use beyond this
+  // app — so its flat cost is shown as context but NOT summed into the app total.
+  return resolvePlan("codex", "Codex", false, env.CODEX_PLAN, CODEX_PLAN_MONTHLY_USD, CODEX_PLAN_LABELS);
 }
 
 /** Both known subscription providers, resolved from env — for aggregateLlmUsage. */
@@ -252,15 +268,16 @@ export function resolveSubscriptionPlans(env: NodeJS.ProcessEnv = process.env): 
 function resolvePlan(
   provider: "ollama" | "codex",
   label: string,
+  dedicated: boolean,
   raw: string | undefined,
   prices: Readonly<Record<string, number>>,
   labels: Readonly<Record<string, string>>,
 ): SubscriptionPlanConfig {
   const key = raw?.trim().toLowerCase().replace(/[-_\s]/g, "");
   if (key && key in prices) {
-    return { provider, label, plan: key, planLabel: labels[key] ?? key, monthlyUsd: prices[key]!, configured: true };
+    return { provider, label, dedicated, plan: key, planLabel: labels[key] ?? key, monthlyUsd: prices[key]!, configured: true };
   }
-  return { provider, label, plan: "none", planLabel: "", monthlyUsd: null, configured: false };
+  return { provider, label, dedicated, plan: "none", planLabel: "", monthlyUsd: null, configured: false };
 }
 
 /**
@@ -496,16 +513,19 @@ function buildBilling(
       monthlyUsd: plan.monthlyUsd,
       configured: plan.configured,
       active,
+      dedicated: plan.dedicated,
       models: uniqueStrings(provEvents.map((event) => event.model)),
       windows,
       note: subscriptionNote(plan.provider, active),
     });
   }
 
-  const flatSum = subscriptions
-    .filter((sub) => sub.configured)
-    .reduce((sum, sub) => sum + (sub.monthlyUsd ?? 0), 0);
-  const anyFlat = subscriptions.some((sub) => sub.configured);
+  // Only DEDICATED flat plans (used solely inside this app) count toward the
+  // month total — a shared plan (Codex/ChatGPT, used elsewhere too) is shown as
+  // context but summing it would overstate what this app actually costs.
+  const dedicatedFlat = subscriptions.filter((sub) => sub.dedicated && sub.configured);
+  const flatSum = dedicatedFlat.reduce((sum, sub) => sum + (sub.monthlyUsd ?? 0), 0);
+  const anyFlat = dedicatedFlat.length > 0;
   const monthlyTotalUsd = anyFlat || monthCostUsd !== null
     ? round((anyFlat ? flatSum : 0) + (monthCostUsd ?? 0), 6)
     : null;
@@ -518,9 +538,9 @@ function buildBilling(
     },
     subscriptions,
     monthlyTotalUsd,
-    // Complete only when every shown subscription's flat cost is known; an
-    // active-but-unconfigured provider makes the total incomplete (flagged in UI).
-    monthlyTotalComplete: subscriptions.every((sub) => sub.configured),
+    // Complete only when every DEDICATED subscription's flat cost is known; a
+    // shared plan (excluded from the total) never gates completeness.
+    monthlyTotalComplete: subscriptions.filter((sub) => sub.dedicated).every((sub) => sub.configured),
   };
 }
 

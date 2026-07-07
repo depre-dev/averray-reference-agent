@@ -137,6 +137,8 @@ export interface SubscriptionBilling {
   monthlyUsd: number | null;
   configured: boolean;
   active: boolean;
+  /** Dedicated to this app (counts in the total) vs shared (context only). */
+  dedicated: boolean;
   models: string[];
   windows: {
     session5h: LlmUsageWindow;
