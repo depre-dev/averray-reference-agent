@@ -252,6 +252,9 @@ services:
       GITHUB_HELPER_LIMIT: ${GITHUB_HELPER_LIMIT:-5}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-https://ollama.com/v1}
+      # Ollama Cloud subscription tier (free|pro|max) — sets the flat monthly cost
+      # the LLM-usage panel shows as real recurring spend. Unset → "plan not set".
+      OLLAMA_PLAN: ${OLLAMA_PLAN:-}
       HERMES_MONITOR_REPLY_MODEL: ${HERMES_MONITOR_REPLY_MODEL:-glm-5.2:cloud}
       # Preferred co-pilot transport: the real agentic Hermes via the gateway
       # Session API (MCP tools + skills + memory), instead of the stateless Ollama

@@ -118,6 +118,41 @@ export interface LlmUsageRecent {
   series: LlmUsageRecentSeries[];
 }
 
+/** A bounded usage window — tokens/calls between `since` and the snapshot anchor. */
+export interface LlmUsageWindow {
+  label: string;
+  tokens: number;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  since: string;
+}
+
+/** Cost split by billing model + Ollama subscription-burn windows. */
+export interface LlmUsageBilling {
+  metered: {
+    models: string[];
+    monthCostUsd: number | null;
+    costStatus: "recorded" | "not_recorded";
+  };
+  subscription: {
+    provider: "ollama";
+    plan: "free" | "pro" | "max" | "none";
+    monthlyUsd: number | null;
+    configured: boolean;
+    active: boolean;
+    models: string[];
+    windows: {
+      session5h: LlmUsageWindow;
+      week7d: LlmUsageWindow;
+      month: LlmUsageWindow;
+    } | null;
+  };
+  monthlyTotalUsd: number | null;
+  monthlyTotalComplete: boolean;
+  note: string;
+}
+
 export interface LlmUsageAggregate {
   status: "recorded" | "not_recorded";
   message?: string;
@@ -134,6 +169,9 @@ export interface LlmUsageAggregate {
   sourceStatus?: LlmUsageSourceStatus[];
   activeCalls?: LlmUsageActiveCall[];
   recent?: LlmUsageRecent | null;
+  /** Cost split by billing model + Ollama subscription-burn windows (optional:
+   *  absent on older cached payloads, so the UI must degrade gracefully). */
+  billing?: LlmUsageBilling;
 }
 
 export interface MonitorEvent {

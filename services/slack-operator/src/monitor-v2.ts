@@ -25,6 +25,7 @@ import {
 import {
   aggregateLlmUsage,
   listActiveLlmUsageCalls,
+  resolveOllamaPlan,
   type LlmUsageAggregate,
   type LlmUsageEvent,
 } from "@avg/averray-mcp/llm-usage";
@@ -2421,6 +2422,8 @@ export function buildV2BoardSnapshot(
       activeCalls: listActiveLlmUsageCalls(),
       // Anchor the live "tokens/min" window to the snapshot time.
       now: snapshotAt,
+      // Ollama Cloud flat-plan cost + subscription-burn windows (env: OLLAMA_PLAN).
+      subscription: resolveOllamaPlan(process.env),
     }),
     testbedSuites: testbedSuitesFromSnapshot(rawSnapshot),
     automationHealth: automationHealthForBoard(rawSnapshot, snapshotAt, process.env, {

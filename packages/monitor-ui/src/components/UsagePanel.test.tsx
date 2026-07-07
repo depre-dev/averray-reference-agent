@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, test } from "vitest";
 import { cleanup, render } from "@testing-library/react";
 import { UsagePanel } from "./UsagePanel.js";
-import type { LlmUsageAggregate } from "../lib/monitor/board-cache.js";
+import type { LlmUsageAggregate, LlmUsageBilling } from "../lib/monitor/board-cache.js";
 
 afterEach(cleanup);
 
@@ -145,5 +145,93 @@ describe("UsagePanel", () => {
     expect(getByText(/No LLM usage counters have been recorded yet/)).toBeTruthy();
     // No awaiting-data chart and no fabricated rows when there's nothing real.
     expect(queryByText("not wired")).toBeNull();
+  });
+});
+
+// ── Cost & subscription burn (Ollama flat plan + metered Claude $) ──────────
+const proBilling: LlmUsageBilling = {
+  metered: { models: ["not_recorded"], monthCostUsd: 0.16, costStatus: "recorded" },
+  subscription: {
+    provider: "ollama",
+    plan: "pro",
+    monthlyUsd: 20,
+    configured: true,
+    active: true,
+    models: ["glm-5.2:cloud", "deepseek-v4-pro:cloud"],
+    windows: {
+      session5h: { label: "5h session", tokens: 1_200_000, calls: 40, inputTokens: 1_000_000, outputTokens: 200_000, since: "2026-07-07T07:00:00.000Z" },
+      week7d: { label: "7d week", tokens: 2_000_000, calls: 92, inputTokens: 1_800_000, outputTokens: 200_000, since: "2026-06-30T12:00:00.000Z" },
+      month: { label: "this month", tokens: 2_000_000, calls: 92, inputTokens: 1_800_000, outputTokens: 200_000, since: "2026-07-01T00:00:00.000Z" },
+    },
+  },
+  monthlyTotalUsd: 20.16,
+  monthlyTotalComplete: true,
+  note: "Ollama Cloud bills a flat monthly plan metered by GPU-time — not tokens or per-call dollars.",
+};
+
+const withBilling: LlmUsageAggregate = {
+  ...recorded,
+  costUsd: 0.16,
+  costStatus: "recorded",
+  byModel: [
+    { agent: "hermes", model: "glm-5.2:cloud", inputTokens: 2_000_000, outputTokens: 16_300, totalTokens: 2_000_000, costUsd: null, costStatus: "not_recorded", runs: 92, lastActiveAt: "2026-07-07T11:59:00.000Z" },
+    { agent: "claude", model: "not_recorded", inputTokens: 8, outputTokens: 2_700, totalTokens: 161_600, costUsd: 0.16, costStatus: "recorded", runs: 1, lastActiveAt: "2026-07-07T11:00:00.000Z" },
+  ],
+  billing: proBilling,
+};
+
+describe("UsagePanel — cost & subscription burn", () => {
+  test("headlines an honest 'cost this month' = flat Ollama plan + metered Claude $", () => {
+    const { getByText } = render(<UsagePanel usage={withBilling} />);
+    expect(getByText("Cost this month")).toBeTruthy();
+    expect(getByText(/≈\s*\$20\.16/)).toBeTruthy(); // flat $20 + metered $0.16
+    expect(getByText("Ollama Pro · flat")).toBeTruthy();
+    expect(getByText("$20/mo")).toBeTruthy();
+    expect(getByText("Metered · Claude API")).toBeTruthy();
+  });
+
+  test("a subscription (:cloud) row shows a muted 'flat' tag, not a misleading '?'", () => {
+    const { getByText } = render(<UsagePanel usage={withBilling} />);
+    expect(getByText("flat")).toBeTruthy(); // the glm-5.2:cloud row
+    // The metered Claude row still shows its real recorded dollars.
+    const dollars = getByText("Cost this month").ownerDocument.body.textContent ?? "";
+    expect(dollars).toContain("$0.16");
+  });
+
+  test("renders the Ollama burn block against its real reset windows (tokens/calls as a proxy)", () => {
+    const { getByText, getAllByText } = render(<UsagePanel usage={withBilling} />);
+    expect(getByText("Ollama burn · Pro plan")).toBeTruthy();
+    expect(getByText("proxy")).toBeTruthy();
+    expect(getByText("5h session")).toBeTruthy();
+    expect(getByText("7d week")).toBeTruthy();
+    expect(getByText("this month")).toBeTruthy();
+    expect(getByText("40 calls")).toBeTruthy(); // 5h session
+    expect(getAllByText("92 calls").length).toBe(2); // week + month
+    expect(getByText(/GPU-time/)).toBeTruthy(); // the honest note
+  });
+
+  test("when the plan is unset, shows 'plan not set' and flags the total incomplete — never invents a subscription $", () => {
+    const unset: LlmUsageAggregate = {
+      ...withBilling,
+      billing: {
+        ...proBilling,
+        subscription: { ...proBilling.subscription, plan: "none", monthlyUsd: null, configured: false },
+        monthlyTotalUsd: 0.16,
+        monthlyTotalComplete: false,
+      },
+    };
+    const { getByText } = render(<UsagePanel usage={unset} />);
+    expect(getByText("Ollama Cloud · flat")).toBeTruthy();
+    expect(getByText("plan not set")).toBeTruthy();
+    expect(getByText(/\$0\.16 \+/)).toBeTruthy(); // metered-only total, "+" signals the missing sub cost
+  });
+
+  test("omits the burn block when there's no subscription activity or no window clock", () => {
+    const idleSub: LlmUsageAggregate = {
+      ...withBilling,
+      billing: { ...proBilling, subscription: { ...proBilling.subscription, active: false } },
+    };
+    const { queryByText } = render(<UsagePanel usage={idleSub} />);
+    expect(queryByText(/Ollama burn/)).toBeNull();
   });
 });
