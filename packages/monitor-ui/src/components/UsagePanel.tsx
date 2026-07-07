@@ -374,27 +374,40 @@ function RowCost({ entry }: { entry: LlmUsageModelRollup }) {
 
 /**
  * Subscription burn — how much of a plan's allocation you've used in its real
- * reset windows (5h session · 7d week · this month). Tokens/calls are a proxy
- * for the plan's real metered unit (GPU-time / rolling-window usage), flagged as
- * such — never dressed up as dollars. Rendered once per active subscription.
+ * reset windows (5h session · 7d week · this month). For a token-reporting plan
+ * (Ollama) each cell shows tokens + calls; for a runs-only plan (Codex, whose
+ * CLI reports no tokens) each cell shows the count of Codex task runs this
+ * monitor dispatched — a truthful usage proxy, never fabricated tokens.
  */
 function SubscriptionBurn({ subscription }: { subscription: SubscriptionBilling }) {
   const windows = subscription.windows;
   if (!windows) return null;
+  const isRuns = subscription.unit === "runs";
   const planName = subscription.planLabel ? `${subscription.planLabel} plan` : subscription.label;
+  const title = `${subscription.label} ${isRuns ? "runs" : "burn"} · ${planName}`;
+  const chip = isRuns ? "runs" : "proxy";
+  const chipTitle = isRuns
+    ? "The Codex CLI reports no tokens, so this counts Codex task runs this monitor dispatched."
+    : "Tokens/calls are a proxy for the plan's real metered unit — not dollars.";
   const cells: LlmUsageWindow[] = [windows.session5h, windows.week7d, windows.month];
   return (
-    <div className="hm-usage-burn" role="group" aria-label={`${subscription.label} subscription burn`}>
+    <div className="hm-usage-burn" role="group" aria-label={`${subscription.label} subscription ${isRuns ? "runs" : "burn"}`}>
       <div className="hm-usage-burn-head">
-        <span className="hm-usage-burn-title">{subscription.label} burn · {planName}</span>
-        <span className="hm-usage-burn-chip" title="Tokens/calls are a proxy for the plan's real metered unit — not dollars.">proxy</span>
+        <span className="hm-usage-burn-title">{title}</span>
+        <span className="hm-usage-burn-chip" title={chipTitle}>{chip}</span>
       </div>
       <div className="hm-usage-burn-windows">
         {cells.map((win) => (
           <div className="hm-usage-burn-win" key={win.label}>
             <span className="hm-usage-burn-win-label">{win.label}</span>
-            <strong className="hm-usage-burn-win-tok">{formatCompactNumber(win.tokens)}</strong>
-            <small className="hm-usage-burn-win-calls">{formatNumber(win.calls)} calls</small>
+            {isRuns ? (
+              <strong className="hm-usage-burn-win-tok">{formatNumber(win.calls)} runs</strong>
+            ) : (
+              <>
+                <strong className="hm-usage-burn-win-tok">{formatCompactNumber(win.tokens)}</strong>
+                <small className="hm-usage-burn-win-calls">{formatNumber(win.calls)} calls</small>
+              </>
+            )}
           </div>
         ))}
       </div>

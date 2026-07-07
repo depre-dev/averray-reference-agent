@@ -92,6 +92,9 @@ describe("aggregateLlmUsage — billing block (multi-provider)", () => {
     // Ollama is dedicated to this app; Codex is a shared ChatGPT plan.
     expect(ollama.dedicated).toBe(true);
     expect(codex.dedicated).toBe(false);
+    // Both measured in tokens here (codexA carries token counters).
+    expect(ollama.unit).toBe("tokens");
+    expect(codex.unit).toBe("tokens");
 
     expect(b.metered.monthCostUsd).toBe(0.16);
     // Total = Ollama (dedicated $20) + Claude metered $0.16 — NOT Codex's shared $100.
@@ -127,6 +130,29 @@ describe("aggregateLlmUsage — billing block (multi-provider)", () => {
     // Total is metered-only and flagged incomplete (an active plan has no price).
     expect(b.monthlyTotalUsd).toBe(0.16);
     expect(b.monthlyTotalComplete).toBe(false);
+  });
+
+  it("shows Codex RUNS as the burn proxy when it reports no tokens (usage, not cost)", () => {
+    // 1h + 3h ago (both in the 5h window); 3d ago (in week/month, not session).
+    const runs = ["2026-07-07T11:00:00.000Z", "2026-07-07T09:00:00.000Z", "2026-07-04T00:00:00.000Z"];
+    const b = aggregateLlmUsage([ollamaA, metered], {
+      now: NOW,
+      subscriptions: [OLLAMA_PRO, CODEX_PRO5X],
+      subscriptionRuns: { codex: runs }, // Codex emits no token events
+    }).billing;
+
+    const codex = b.subscriptions.find((s) => s.provider === "codex")!;
+    expect(codex.active).toBe(true);
+    expect(codex.unit).toBe("runs");
+    expect(codex.windows!.session5h.calls).toBe(2); // the two runs inside 5h
+    expect(codex.windows!.session5h.tokens).toBe(0); // never a fabricated token count
+    expect(codex.windows!.week7d.calls).toBe(3);
+    expect(codex.windows!.month.calls).toBe(3);
+    expect(codex.note).toMatch(/runs/i);
+
+    // Runs are USAGE, not cost — Codex stays shared and out of the total.
+    expect(codex.dedicated).toBe(false);
+    expect(b.monthlyTotalUsd).toBe(20.16);
   });
 
   it("keeps a dedicated flat cost with no clock; a shared plan alone yields no app total", () => {

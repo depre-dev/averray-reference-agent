@@ -106,6 +106,13 @@ export interface SubscriptionBilling {
    * summed into the app total, which would overstate what the app costs.
    */
   dedicated: boolean;
+  /**
+   * What the burn windows measure. "tokens" when the provider emits token
+   * counters (Ollama); "runs" when it doesn't but the monitor still knows how
+   * many times it invoked it (Codex — the CLI reports no tokens, so we count the
+   * Codex task runs this app dispatched, `LlmUsageWindow.calls`, as the proxy).
+   */
+  unit: "tokens" | "runs";
   models: string[];
   windows: {
     session5h: LlmUsageWindow;
@@ -192,6 +199,10 @@ export interface LlmUsageAggregateOptions {
   /** Flat-rate subscription plans (Ollama, Codex) for the billing block — caller
    *  resolves them from env via resolveSubscriptionPlans. Omitted → none. */
   subscriptions?: readonly SubscriptionPlanConfig[];
+  /** Run timestamps (ISO) per subscription provider that reports RUNS not tokens.
+   *  Codex's CLI emits no token counters, but the monitor knows every Codex task
+   *  it dispatched — pass those `startedAt`s so the burn windows show run counts. */
+  subscriptionRuns?: Partial<Record<"ollama" | "codex", readonly string[]>>;
 }
 
 export interface LlmUsageActiveCallInput {
@@ -233,7 +244,11 @@ const CODEX_BURN_NOTE =
   + "The token/call counts here are a burn proxy.";
 const CODEX_NO_USAGE_NOTE =
   "Codex draws from your ChatGPT plan (rolling ~5-hour window). The Codex CLI isn't emitting token "
-  + "counters, so there's no burn proxy yet — the flat plan price is your spend.";
+  + "counters, and this monitor hasn't dispatched any Codex runs yet — so there's no usage to show.";
+const CODEX_RUNS_NOTE =
+  "Codex task runs this monitor dispatched — the Codex CLI reports no tokens, so this counts runs "
+  + "(each ≈ one coding session against your shared ChatGPT plan), not tokens. Use it to gauge how much "
+  + "of Codex is driven from here.";
 
 const activeCalls = new Map<string, LlmUsageActiveCall>();
 let nextActiveCallId = 0;
@@ -442,7 +457,7 @@ export function aggregateLlmUsage(
   const total = totalsFor(events);
   const sourceStatus = sourceStatuses(events, options);
   const recent = buildRecent(events, options.now, options.recentWindowMinutes ?? 60);
-  const billing = buildBilling(events, options.now, options.subscriptions);
+  const billing = buildBilling(events, options.now, options.subscriptions, options.subscriptionRuns);
   const status = events.length > 0 ? "recorded" : "not_recorded";
   return {
     status,
@@ -472,6 +487,7 @@ function buildBilling(
   events: readonly LlmUsageEvent[],
   now: Date | undefined,
   plans: readonly SubscriptionPlanConfig[] | undefined,
+  runs: Partial<Record<"ollama" | "codex", readonly string[]>> | undefined,
 ): LlmUsageBilling {
   const anchor = now && Number.isFinite(now.getTime()) ? now : undefined;
   const endMs = anchor ? anchor.getTime() : undefined;
@@ -492,18 +508,31 @@ function buildBilling(
   }
 
   // One entry per provider that's either configured (has a flat cost to show) or
-  // active (has usage). Providers that are neither are omitted — no clutter.
+  // active (has usage). Usage is token counters when the provider emits them
+  // (Ollama), else the run timestamps the monitor dispatched (Codex). Providers
+  // that are neither configured nor active are omitted — no clutter.
   const subscriptions: SubscriptionBilling[] = [];
   for (const plan of plans ?? []) {
     const provEvents = events.filter((event) => subscriptionProviderOf(event.agent, event.model) === plan.provider);
-    const active = provEvents.length > 0;
+    const provRuns = runs?.[plan.provider] ?? [];
+    const hasTokens = provEvents.length > 0;
+    const hasRuns = provRuns.length > 0;
+    const active = hasTokens || hasRuns;
     if (!plan.configured && !active) continue;
-    const windows = endMs !== undefined && monthStartMs !== undefined && active
-      ? {
-          session5h: usageWindowFor(provEvents, endMs - SESSION_WINDOW_MS, endMs, "5h session"),
-          week7d: usageWindowFor(provEvents, endMs - WEEK_WINDOW_MS, endMs, "7d week"),
-          month: usageWindowFor(provEvents, monthStartMs, endMs, "this month"),
-        }
+    const unit: "tokens" | "runs" = hasTokens ? "tokens" : "runs";
+    const windowsReady = endMs !== undefined && monthStartMs !== undefined && active;
+    const windows = windowsReady
+      ? hasTokens
+        ? {
+            session5h: usageWindowFor(provEvents, endMs! - SESSION_WINDOW_MS, endMs!, "5h session"),
+            week7d: usageWindowFor(provEvents, endMs! - WEEK_WINDOW_MS, endMs!, "7d week"),
+            month: usageWindowFor(provEvents, monthStartMs!, endMs!, "this month"),
+          }
+        : {
+            session5h: usageRunWindow(provRuns, endMs! - SESSION_WINDOW_MS, endMs!, "5h session"),
+            week7d: usageRunWindow(provRuns, endMs! - WEEK_WINDOW_MS, endMs!, "7d week"),
+            month: usageRunWindow(provRuns, monthStartMs!, endMs!, "this month"),
+          }
       : null;
     subscriptions.push({
       provider: plan.provider,
@@ -514,9 +543,10 @@ function buildBilling(
       configured: plan.configured,
       active,
       dedicated: plan.dedicated,
+      unit,
       models: uniqueStrings(provEvents.map((event) => event.model)),
       windows,
-      note: subscriptionNote(plan.provider, active),
+      note: subscriptionNote(plan.provider, active, unit),
     });
   }
 
@@ -544,9 +574,12 @@ function buildBilling(
   };
 }
 
-/** Per-provider honest note: Ollama meters GPU-time; Codex may not report usage. */
-function subscriptionNote(provider: "ollama" | "codex", active: boolean): string {
-  if (provider === "codex") return active ? CODEX_BURN_NOTE : CODEX_NO_USAGE_NOTE;
+/** Per-provider honest note, aware of whether we're showing tokens or run counts. */
+function subscriptionNote(provider: "ollama" | "codex", active: boolean, unit: "tokens" | "runs"): string {
+  if (provider === "codex") {
+    if (!active) return CODEX_NO_USAGE_NOTE;
+    return unit === "runs" ? CODEX_RUNS_NOTE : CODEX_BURN_NOTE;
+  }
   return OLLAMA_BURN_NOTE;
 }
 
@@ -570,6 +603,26 @@ function usageWindowFor(
     calls += 1;
   }
   return { label, tokens, calls, inputTokens, outputTokens, since: new Date(startMs).toISOString() };
+}
+
+/**
+ * Count of runs whose timestamp falls in [startMs, endMs] — the burn proxy for a
+ * provider that reports no tokens (Codex). The count lands in `calls`; token
+ * fields stay 0 so the UI shows "N runs", never a fabricated token figure.
+ */
+function usageRunWindow(
+  runTimestamps: readonly string[],
+  startMs: number,
+  endMs: number,
+  label: string,
+): LlmUsageWindow {
+  let calls = 0;
+  for (const ts of runTimestamps) {
+    const t = Date.parse(ts);
+    if (!Number.isFinite(t) || t < startMs || t > endMs) continue;
+    calls += 1;
+  }
+  return { label, tokens: 0, calls, inputTokens: 0, outputTokens: 0, since: new Date(startMs).toISOString() };
 }
 
 /** UTC start-of-month for the anchor — the metered billing cycle boundary. */
@@ -650,9 +703,9 @@ export function aggregateLlmUsageForAgent(
     }],
     activeCalls: aggregate.activeCalls.filter((call) => call.agent === agent),
     recent: null,
-    // Per-agent sub-view: no clock/plan is threaded here, so windows stay null
+    // Per-agent sub-view: no clock/plan/runs threaded here, so windows stay null
     // and the subscription cost is "not configured" (honest, never fabricated).
-    billing: buildBilling(events, undefined, undefined),
+    billing: buildBilling(events, undefined, undefined, undefined),
   };
 }
 

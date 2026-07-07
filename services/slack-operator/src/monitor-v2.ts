@@ -1001,6 +1001,20 @@ function usageEvents(value: unknown): LlmUsageEvent[] {
 }
 
 /**
+ * Timestamps of Codex task runs this monitor dispatched — every codex-agent task
+ * that reached "running" (has `startedAt`). Claude-run tasks (agent === "claude")
+ * are excluded so the Codex burn proxy counts only genuine Codex invocations.
+ */
+function codexRunTimestamps(rawSnapshot: unknown): string[] {
+  return asArray(asRecord(rawSnapshot)?.codexTasks)
+    .map((entry) => asRecord(entry))
+    .filter((task): task is Record<string, unknown> => Boolean(task))
+    .filter((task) => (asString(task.agent) ?? "codex") === "codex")
+    .map((task) => asString(task.startedAt))
+    .filter((ts): ts is string => Boolean(ts));
+}
+
+/**
  * High-risk file predicate. Mirrors the "high" branch of
  * github-pr-state.ts `highRiskForFile` (which is module-private), so the
  * `critical` flag on a card file matches the review-gating logic.
@@ -2425,6 +2439,9 @@ export function buildV2BoardSnapshot(
       // Flat-plan cost + burn windows per subscription provider
       // (env: OLLAMA_PLAN, CODEX_PLAN).
       subscriptions: resolveSubscriptionPlans(process.env),
+      // Codex reports no tokens, so its burn proxy is the count of Codex task
+      // runs this monitor dispatched (each `startedAt` = one run).
+      subscriptionRuns: { codex: codexRunTimestamps(rawSnapshot) },
     }),
     testbedSuites: testbedSuitesFromSnapshot(rawSnapshot),
     automationHealth: automationHealthForBoard(rawSnapshot, snapshotAt, process.env, {

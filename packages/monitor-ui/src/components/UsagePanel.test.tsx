@@ -158,6 +158,7 @@ const ollamaSub: SubscriptionBilling = {
   configured: true,
   active: true,
   dedicated: true, // Hermes/Ollama is used only inside the monitor
+  unit: "tokens",
   models: ["glm-5.2:cloud", "deepseek-v4-pro:cloud"],
   windows: {
     session5h: { label: "5h session", tokens: 1_200_000, calls: 40, inputTokens: 1_000_000, outputTokens: 200_000, since: "2026-07-07T07:00:00.000Z" },
@@ -176,6 +177,7 @@ const codexSub: SubscriptionBilling = {
   configured: true,
   active: false,
   dedicated: false, // Codex draws from your shared ChatGPT plan
+  unit: "runs", // Codex reports no tokens — usage proxy is run counts
   models: [],
   windows: null,
   note: "Codex draws from your ChatGPT plan. The Codex CLI isn't emitting token counters, so there's no burn proxy yet.",
@@ -234,23 +236,26 @@ describe("UsagePanel — cost & subscription burn", () => {
     expect(queryByText(hasText("Codex burn"))).toBeNull();
   });
 
-  test("renders a SECOND burn block for Codex once it reports usage", () => {
-    const codexActive: SubscriptionBilling = {
+  test("shows Codex RUNS as a second burn block — the monitor's own Codex usage (not tokens)", () => {
+    // Codex reports no tokens, so its windows count runs the monitor dispatched.
+    const codexRuns: SubscriptionBilling = {
       ...codexSub,
       active: true,
+      unit: "runs",
       models: ["gpt-5.5-codex"],
       windows: {
-        session5h: { label: "5h session", tokens: 500_000, calls: 12, inputTokens: 400_000, outputTokens: 100_000, since: "2026-07-07T07:00:00.000Z" },
-        week7d: { label: "7d week", tokens: 900_000, calls: 30, inputTokens: 700_000, outputTokens: 200_000, since: "2026-06-30T12:00:00.000Z" },
-        month: { label: "this month", tokens: 900_000, calls: 30, inputTokens: 700_000, outputTokens: 200_000, since: "2026-07-01T00:00:00.000Z" },
+        session5h: { label: "5h session", tokens: 0, calls: 3, inputTokens: 0, outputTokens: 0, since: "2026-07-07T07:00:00.000Z" },
+        week7d: { label: "7d week", tokens: 0, calls: 18, inputTokens: 0, outputTokens: 0, since: "2026-06-30T12:00:00.000Z" },
+        month: { label: "this month", tokens: 0, calls: 40, inputTokens: 0, outputTokens: 0, since: "2026-07-01T00:00:00.000Z" },
       },
-      note: "Codex draws from your ChatGPT plan, metered against a rolling ~5-hour window.",
+      note: "Codex task runs this monitor dispatched — the Codex CLI reports no tokens, so this counts runs.",
     };
-    const usage: LlmUsageAggregate = { ...withBilling, billing: { ...proBilling, subscriptions: [ollamaSub, codexActive] } };
+    const usage: LlmUsageAggregate = { ...withBilling, billing: { ...proBilling, subscriptions: [ollamaSub, codexRuns] } };
     const { getByText, getAllByText } = render(<UsagePanel usage={usage} />);
     expect(getByText("Ollama burn · Pro plan")).toBeTruthy();
-    expect(getByText(hasText("Codex burn"))).toBeTruthy(); // "Codex burn · Pro 5× plan"
-    expect(getByText("12 calls")).toBeTruthy(); // codex 5h session
+    expect(getByText(hasText("Codex runs"))).toBeTruthy(); // title "Codex runs · Pro 5× plan"
+    expect(getByText(hasText("3 runs"))).toBeTruthy(); // 5h session run count
+    expect(getByText(hasText("40 runs"))).toBeTruthy(); // this month
     expect(getAllByText("5h session").length).toBe(2); // one window row per block
   });
 
