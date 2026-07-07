@@ -54,7 +54,7 @@ function githubUrlForCard(card: BoardCard): string | undefined {
 function footerHint(key: string): "A" | "B" | undefined {
   // The action variant's primary is "approve-merge" (PR present) or "dismiss"
   // (no PR) — they're mutually exclusive, so both take the "A" badge.
-  if (key === "approve-merge" || key === "dismiss") return "A";
+  if (key === "approve-merge" || key === "dismiss" || key === "approve-dispatch") return "A";
   if (key === "send-back-codex") return "B";
   return undefined;
 }
