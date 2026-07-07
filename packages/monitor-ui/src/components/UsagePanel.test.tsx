@@ -157,6 +157,7 @@ const ollamaSub: SubscriptionBilling = {
   monthlyUsd: 20,
   configured: true,
   active: true,
+  dedicated: true, // Hermes/Ollama is used only inside the monitor
   models: ["glm-5.2:cloud", "deepseek-v4-pro:cloud"],
   windows: {
     session5h: { label: "5h session", tokens: 1_200_000, calls: 40, inputTokens: 1_000_000, outputTokens: 200_000, since: "2026-07-07T07:00:00.000Z" },
@@ -174,6 +175,7 @@ const codexSub: SubscriptionBilling = {
   monthlyUsd: 100,
   configured: true,
   active: false,
+  dedicated: false, // Codex draws from your shared ChatGPT plan
   models: [],
   windows: null,
   note: "Codex draws from your ChatGPT plan. The Codex CLI isn't emitting token counters, so there's no burn proxy yet.",
@@ -181,7 +183,7 @@ const codexSub: SubscriptionBilling = {
 const proBilling: LlmUsageBilling = {
   metered: { models: ["not_recorded"], monthCostUsd: 0.16, costStatus: "recorded" },
   subscriptions: [ollamaSub, codexSub],
-  monthlyTotalUsd: 120.16,
+  monthlyTotalUsd: 20.16, // dedicated Ollama $20 + Claude $0.16 (Codex shared, excluded)
   monthlyTotalComplete: true,
 };
 
@@ -200,15 +202,18 @@ const withBilling: LlmUsageAggregate = {
 const hasText = (needle: string) => (content: string) => content.includes(needle);
 
 describe("UsagePanel — cost & subscription burn", () => {
-  test("headlines an honest 'cost this month' = each flat plan (Ollama + Codex) + metered Claude $", () => {
+  test("totals only DEDICATED spend (Ollama + Claude); shows shared Codex separately, not summed", () => {
     const { getByText } = render(<UsagePanel usage={withBilling} />);
     expect(getByText("Cost this month")).toBeTruthy();
-    expect(getByText(/≈\s*\$120\.16/)).toBeTruthy(); // $20 + $100 + $0.16
+    // Total is the app's real cost: Ollama $20 + Claude $0.16 — NOT the shared Codex $100.
+    expect(getByText(/≈\s*\$20\.16/)).toBeTruthy();
     expect(getByText("Ollama Pro · flat")).toBeTruthy();
     expect(getByText("$20/mo")).toBeTruthy();
+    expect(getByText("Metered · Claude API")).toBeTruthy();
+    // Codex is still visible, but under a "shared" heading and excluded from the total.
+    expect(getByText(hasText("used beyond this monitor"))).toBeTruthy();
     expect(getByText(hasText("Codex Pro"))).toBeTruthy(); // "Codex Pro 5× · flat"
     expect(getByText("$100/mo")).toBeTruthy();
-    expect(getByText("Metered · Claude API")).toBeTruthy();
   });
 
   test("a subscription (:cloud) row shows a muted 'flat' tag, not a misleading '?'", () => {

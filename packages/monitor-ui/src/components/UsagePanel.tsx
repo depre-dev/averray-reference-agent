@@ -298,38 +298,53 @@ function DailyTokensChart({ days }: { days: { day: string; totalTokens: number }
 }
 
 /**
- * Cost-this-month headline — the honest picture the old single "$0.16" total
- * couldn't give: each flat subscription (Ollama, Codex — already paid, doesn't
- * grow per call) plus the genuinely-metered Claude API dollars, and the total.
+ * Cost-this-month headline. The total counts only what this app actually spends:
+ * dedicated flat plans (Ollama, used only inside the monitor) + metered Claude $.
+ * Shared plans (Codex draws from your ChatGPT plan, used beyond this app too) are
+ * listed separately as context and NOT summed — folding a shared subscription
+ * into the total would overstate what the app costs.
  */
 function CostSummary({ billing }: { billing: LlmUsageBilling }) {
-  const anyConfigured = billing.subscriptions.some((sub) => sub.configured);
+  const dedicated = billing.subscriptions.filter((sub) => sub.dedicated);
+  const shared = billing.subscriptions.filter((sub) => !sub.dedicated);
+  const anyDedicatedCost = dedicated.some((sub) => sub.configured) || billing.metered.monthCostUsd != null;
   const meteredAmount = billing.metered.monthCostUsd != null ? formatUsd(billing.metered.monthCostUsd) : "$0";
   const totalText = billing.monthlyTotalUsd != null
-    ? `${anyConfigured ? "≈ " : ""}${formatUsd(billing.monthlyTotalUsd)}${billing.monthlyTotalComplete ? "" : " +"}`
+    ? `${anyDedicatedCost ? "≈ " : ""}${formatUsd(billing.monthlyTotalUsd)}${billing.monthlyTotalComplete ? "" : " +"}`
     : "—";
   return (
     <div className="hm-usage-cost" role="group" aria-label="Cost this month">
       <div className="hm-usage-cost-head">
         <span className="hm-usage-cost-label">Cost this month</span>
-        <span className="hm-usage-cost-total" title={billing.monthlyTotalComplete ? undefined : "Excludes a subscription with no plan set — set OLLAMA_PLAN / CODEX_PLAN to include it."}>{totalText}</span>
+        <span className="hm-usage-cost-total" title={billing.monthlyTotalComplete ? undefined : "A dedicated plan has no price set — set OLLAMA_PLAN. Shared plans are intentionally excluded."}>{totalText}</span>
       </div>
       <div className="hm-usage-cost-rows">
-        {billing.subscriptions.map((sub) => (
-          <div className="hm-usage-cost-row" key={sub.provider}>
-            <span className="hm-usage-jewel" style={{ background: providerJewel(sub.provider) }} aria-hidden />
-            <span className="hm-usage-cost-name">{planLine(sub)} · flat</span>
-            <span className={`hm-usage-cost-amt${sub.configured ? "" : " hm-usage-c-na"}`}>
-              {sub.configured ? `${formatPlanUsd(sub.monthlyUsd ?? 0)}/mo` : "plan not set"}
-            </span>
-          </div>
-        ))}
+        {dedicated.map((sub) => <CostRow key={sub.provider} sub={sub} />)}
         <div className="hm-usage-cost-row">
           <span className="hm-usage-jewel" style={{ background: "var(--h4-ag-claude)" }} aria-hidden />
           <span className="hm-usage-cost-name">Metered · Claude API</span>
           <span className="hm-usage-cost-amt">{meteredAmount}</span>
         </div>
       </div>
+      {shared.length > 0 ? (
+        <div className="hm-usage-cost-shared">
+          <span className="hm-usage-cost-shared-head">Shared · used beyond this monitor · not in the total</span>
+          {shared.map((sub) => <CostRow key={sub.provider} sub={sub} />)}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** One subscription row in the cost summary — jewel, plan line, flat price. */
+function CostRow({ sub }: { sub: SubscriptionBilling }) {
+  return (
+    <div className="hm-usage-cost-row">
+      <span className="hm-usage-jewel" style={{ background: providerJewel(sub.provider) }} aria-hidden />
+      <span className="hm-usage-cost-name">{planLine(sub)} · flat</span>
+      <span className={`hm-usage-cost-amt${sub.configured ? "" : " hm-usage-c-na"}`}>
+        {sub.configured ? `${formatPlanUsd(sub.monthlyUsd ?? 0)}/mo` : "plan not set"}
+      </span>
     </div>
   );
 }

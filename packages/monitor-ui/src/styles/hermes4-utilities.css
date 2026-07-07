@@ -236,6 +236,26 @@
 .hm-usage-cost-amt.hm-usage-c-na {
   color: var(--h4-faint);
 }
+/* shared subscriptions — shown as context, kept visually apart from the counted
+   rows so a shared plan (Codex) never reads as part of the app's total */
+.hm-usage-cost-shared {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--h4-line-2);
+}
+.hm-usage-cost-shared-head {
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--h4-faint);
+}
+.hm-usage-cost-shared .hm-usage-cost-amt {
+  color: var(--h4-faint);
+}
 
 /* the "flat" tag on a subscription row — muted telemetry, not a dead "?" */
 .hm-usage-c-flat {

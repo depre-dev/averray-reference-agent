@@ -15,10 +15,11 @@ function evt(over: Partial<LlmUsageEvent> & Pick<LlmUsageEvent, "agent" | "model
   return { inputTokens: 0, outputTokens: 0, ...over };
 }
 
-const OLLAMA_PRO: SubscriptionPlanConfig = { provider: "ollama", label: "Ollama", plan: "pro", planLabel: "Pro", monthlyUsd: 20, configured: true };
-const CODEX_PRO5X: SubscriptionPlanConfig = { provider: "codex", label: "Codex", plan: "pro5x", planLabel: "Pro 5×", monthlyUsd: 100, configured: true };
-const OLLAMA_UNSET: SubscriptionPlanConfig = { provider: "ollama", label: "Ollama", plan: "none", planLabel: "", monthlyUsd: null, configured: false };
-const CODEX_UNSET: SubscriptionPlanConfig = { provider: "codex", label: "Codex", plan: "none", planLabel: "", monthlyUsd: null, configured: false };
+// Ollama is dedicated (monitor-only); Codex is shared (used beyond this app).
+const OLLAMA_PRO: SubscriptionPlanConfig = { provider: "ollama", label: "Ollama", plan: "pro", planLabel: "Pro", monthlyUsd: 20, configured: true, dedicated: true };
+const CODEX_PRO5X: SubscriptionPlanConfig = { provider: "codex", label: "Codex", plan: "pro5x", planLabel: "Pro 5×", monthlyUsd: 100, configured: true, dedicated: false };
+const OLLAMA_UNSET: SubscriptionPlanConfig = { provider: "ollama", label: "Ollama", plan: "none", planLabel: "", monthlyUsd: null, configured: false, dedicated: true };
+const CODEX_UNSET: SubscriptionPlanConfig = { provider: "codex", label: "Codex", plan: "none", planLabel: "", monthlyUsd: null, configured: false, dedicated: false };
 
 describe("resolveOllamaPlan / resolveCodexPlan / resolveSubscriptionPlans", () => {
   it("maps each provider's plan to its flat monthly price (case-insensitive, dash/underscore tolerant)", () => {
@@ -88,8 +89,13 @@ describe("aggregateLlmUsage — billing block (multi-provider)", () => {
     expect(codex.windows!.session5h.calls).toBe(1);
     expect(codex.note).toMatch(/ChatGPT/i);
 
+    // Ollama is dedicated to this app; Codex is a shared ChatGPT plan.
+    expect(ollama.dedicated).toBe(true);
+    expect(codex.dedicated).toBe(false);
+
     expect(b.metered.monthCostUsd).toBe(0.16);
-    expect(b.monthlyTotalUsd).toBe(120.16); // 20 + 100 + 0.16
+    // Total = Ollama (dedicated $20) + Claude metered $0.16 — NOT Codex's shared $100.
+    expect(b.monthlyTotalUsd).toBe(20.16);
     expect(b.monthlyTotalComplete).toBe(true);
   });
 
@@ -102,9 +108,10 @@ describe("aggregateLlmUsage — billing block (multi-provider)", () => {
     const codex = b.subscriptions.find((s) => s.provider === "codex")!;
     expect(codex.active).toBe(false);
     expect(codex.windows).toBeNull();
-    expect(codex.monthlyUsd).toBe(100); // flat cost still counted
+    expect(codex.monthlyUsd).toBe(100); // flat cost shown as context
     expect(codex.note).toMatch(/isn't emitting|no burn proxy/i);
-    expect(b.monthlyTotalUsd).toBe(120.16);
+    // Codex (shared) stays out of the total whether or not it reports usage.
+    expect(b.monthlyTotalUsd).toBe(20.16);
     expect(b.monthlyTotalComplete).toBe(true);
   });
 
@@ -122,11 +129,17 @@ describe("aggregateLlmUsage — billing block (multi-provider)", () => {
     expect(b.monthlyTotalComplete).toBe(false);
   });
 
-  it("keeps a configured flat cost even with no clock to anchor windows", () => {
-    const b = aggregateLlmUsage([codexA], { subscriptions: [CODEX_PRO5X] }).billing;
-    const codex = b.subscriptions.find((s) => s.provider === "codex")!;
-    expect(codex.windows).toBeNull();
-    expect(b.monthlyTotalUsd).toBe(100);
-    expect(b.monthlyTotalComplete).toBe(true);
+  it("keeps a dedicated flat cost with no clock; a shared plan alone yields no app total", () => {
+    const dedicated = aggregateLlmUsage([ollamaA], { subscriptions: [OLLAMA_PRO] }).billing;
+    expect(dedicated.subscriptions[0]!.windows).toBeNull();
+    expect(dedicated.monthlyTotalUsd).toBe(20);
+    expect(dedicated.monthlyTotalComplete).toBe(true);
+
+    // Codex alone is shared → its $100 is context, so there's nothing to total.
+    const sharedOnly = aggregateLlmUsage([codexA], { subscriptions: [CODEX_PRO5X] }).billing;
+    expect(sharedOnly.subscriptions[0]!.provider).toBe("codex");
+    expect(sharedOnly.subscriptions[0]!.monthlyUsd).toBe(100);
+    expect(sharedOnly.monthlyTotalUsd).toBeNull();
+    expect(sharedOnly.monthlyTotalComplete).toBe(true); // no dedicated plan to be missing
   });
 });
