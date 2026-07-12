@@ -6,6 +6,7 @@ import {
   buildHermesRouterAgenticNarrationPrompt,
   buildHermesRouterNarrationPrompt,
   narrateRouterProposal,
+  routerNarrationAgenticEnabled,
   routerNarrationCorrelationId,
   routerProposalFactLines,
   type RouterNarrationDeps,
@@ -176,6 +177,20 @@ describe("narrateRouterProposal — agentic path", () => {
     expect(runCompletion).toHaveBeenCalledTimes(1);
     expect(result.hermesMode).toBe("live");
     expect(result.text).toBe("Completion narration.");
+  });
+});
+
+describe("router narration token budget", () => {
+  it("keeps routine narration compact unless agentic mode is explicit", () => {
+    expect(routerNarrationAgenticEnabled({ HERMES_ROUTER_AGENTIC_NARRATION: "1" } as NodeJS.ProcessEnv)).toBe(false);
+    expect(routerNarrationAgenticEnabled({
+      HERMES_ROUTER_AGENTIC_NARRATION: "1",
+      HERMES_ROUTER_NARRATION_MODE: "compact",
+    } as NodeJS.ProcessEnv)).toBe(false);
+    expect(routerNarrationAgenticEnabled({
+      HERMES_ROUTER_AGENTIC_NARRATION: "1",
+      HERMES_ROUTER_NARRATION_MODE: "agentic",
+    } as NodeJS.ProcessEnv)).toBe(true);
   });
 });
 

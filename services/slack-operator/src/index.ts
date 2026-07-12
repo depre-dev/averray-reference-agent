@@ -155,7 +155,10 @@ import {
   runHermesRouterOnce,
   type HermesRouterAuditRecord,
 } from "./hermes-router-routine.js";
-import { narrateRouterProposal } from "./monitor-router-narration.js";
+import {
+  narrateRouterProposal,
+  routerNarrationAgenticEnabled,
+} from "./monitor-router-narration.js";
 import { runFailureAnalysisOnce } from "./failure-analysis-routine.js";
 import {
   appendHistory,
@@ -185,8 +188,12 @@ import {
   readFreshCardFailureAnalysis,
   writeCardFailureAnalysis,
 } from "./operator-card-failure-analysis.js";
-import { chatWithHermesSession } from "./hermes-session-client.js";
-import { collectAgenticBacklog } from "./agentic-backlog.js";
+import { chatWithHermesSession, type HermesSessionTurn } from "./hermes-session-client.js";
+import {
+  collectAgenticBacklog,
+  createAgenticBacklogPlanner,
+  resolveAgenticBacklogMode,
+} from "./agentic-backlog.js";
 import type { RoutedProposal, WorkRouterBacklogItem } from "@avg/averray-mcp/work-router";
 import {
   approveCodexTask,
@@ -4322,21 +4329,37 @@ function collectHermesRouterBacklog() {
 }
 
 // ORCH-P4c — augment the deterministic roadmap backlog with a board-grounded
-// agentic layer when HERMES_ROUTER_AGENTIC_BACKLOG=1 and the gateway session is
-// configured. Degraded-safe: any failure falls back to the roadmap floor. The
+// model layer when HERMES_ROUTER_AGENTIC_BACKLOG=1. Routine planning uses the
+// compact Ollama completion by default; the full gateway session is an explicit
+// operator-selected mode. Degraded-safe: any failure falls back to the roadmap floor. The
 // items still flow through the UNCHANGED router (hard taxonomy + dispatch-policy
 // + operator gate), so Hermes gains no new authority — only a smarter backlog.
+const agenticBacklogPlanner = createAgenticBacklogPlanner();
+
 async function collectHermesRouterBacklogAugmented(): Promise<WorkRouterBacklogItem[]> {
   const roadmap: WorkRouterBacklogItem[] = collectHermesRouterBacklog();
-  const sessionConfig = resolveHermesSessionConfig();
   const enabled = /^(1|true|yes|on)$/i.test((optionalEnv("HERMES_ROUTER_AGENTIC_BACKLOG") ?? "").trim());
-  if (!enabled || !sessionConfig) return roadmap;
+  if (!enabled) return roadmap;
   try {
     const board = await loadHermesRouterBoardSnapshot();
     if (!board) return roadmap;
     const policy = loadDispatchPolicyConfig();
     if (policy.allowedRepos.length === 0) return roadmap; // fail-closed: nothing to propose
     const maxItems = Math.max(1, Number.parseInt(optionalEnv("HERMES_ROUTER_AGENTIC_MAX_ITEMS", "3") ?? "3", 10) || 3);
+    const minIntervalMinutes = Math.max(
+      5,
+      Number.parseInt(optionalEnv("HERMES_ROUTER_AGENTIC_BACKLOG_MIN_INTERVAL_MINUTES", "120") ?? "120", 10) || 120,
+    );
+    const mode = resolveAgenticBacklogMode();
+    const apiKey = optionalEnv("OLLAMA_API_KEY");
+    const baseUrl = optionalEnv("OLLAMA_BASE_URL") ?? "https://ollama.com/v1";
+    const model = optionalEnv("HERMES_MONITOR_REPLY_MODEL") ?? "glm-5.2:cloud";
+    const sessionConfig = mode === "agentic" ? resolveHermesSessionConfig() : null;
+    // Compact mode intentionally does not fall through to a full session when
+    // the API key is absent: the deterministic roadmap remains available at
+    // zero model cost, which is safer than an accidental 20k-token turn.
+    if (mode === "compact" && !apiKey) return roadmap;
+    if (mode === "agentic" && !sessionConfig) return roadmap;
     const inFlight = (await listCodexTasks())
       .filter((task) => task.status === "proposed" || task.status === "approved" || task.status === "running")
       .map((task) => ({
@@ -4346,9 +4369,59 @@ async function collectHermesRouterBacklogAugmented(): Promise<WorkRouterBacklogI
         ...(task.surface ? { surface: task.surface } : {}),
       }));
     const memoryNotes = listHermesMemoryNotes({ limit: 8 }).map((note) => note.text);
-    const agentic = await collectAgenticBacklog(
-      { session: sessionConfig, allowedRepos: policy.allowedRepos, maxItems },
+    const agentic = await agenticBacklogPlanner.collect(
+      {
+        ...(sessionConfig ? { session: sessionConfig } : {}),
+        allowedRepos: policy.allowedRepos,
+        maxItems,
+      },
       { board, inFlight, memoryNotes },
+      {
+        ...(mode === "compact" && apiKey
+          ? {
+              complete: async (prompt: string) => {
+                const text = await requestHermesCompletion(
+                  {
+                    messages: [
+                      { role: "system", content: HERMES_PERSONA },
+                      { role: "user", content: prompt },
+                    ],
+                    maxTokens: 650,
+                    temperature: 0.2,
+                  },
+                  {
+                    apiKey,
+                    baseUrl,
+                    model,
+                    timeoutMs: 12_000,
+                    reasoningEffort: "low",
+                    taskId: "hermes-router-agentic-backlog",
+                    runId: "hermes-router:agentic-backlog",
+                  },
+                );
+                return text ? { sessionId: "compact-router-planner", text, model } : null;
+              },
+            }
+          : {}),
+        ...(mode === "agentic"
+          ? {
+              onTurn: (turn: HermesSessionTurn) => {
+                if (!turn.usage) return;
+                void recordLlmUsageFromResult(
+                  {
+                    agent: "hermes",
+                    model: turn.model ?? model,
+                    taskId: "hermes-router-agentic-backlog",
+                    runId: "hermes-router:agentic-backlog",
+                    result: { usage: turn.usage, ...(turn.model ? { model: turn.model } : {}) },
+                  },
+                  { path: llmUsageLogPath() },
+                ).catch((error) => logger.warn({ err: error }, "hermes_router_agentic_backlog_usage_record_failed"));
+              },
+            }
+          : {}),
+      },
+      { minIntervalMs: minIntervalMinutes * 60_000 },
     );
     if (agentic.length > 0) logger.info({ count: agentic.length }, "hermes_router_agentic_backlog_added");
     return mergeRouterBacklog(roadmap, agentic);
@@ -4409,9 +4482,9 @@ async function narrateHermesRouterProposal(
   const apiKey = optionalEnv("OLLAMA_API_KEY");
   const baseUrl = optionalEnv("OLLAMA_BASE_URL") ?? "https://ollama.com/v1";
   const model = optionalEnv("HERMES_MONITOR_REPLY_MODEL") ?? "glm-5.2:cloud";
-  // FLAG-GATED (default OFF): only route through the real agentic Hermes when
-  // HERMES_ROUTER_AGENTIC_NARRATION is truthy AND a gateway config resolves.
-  const agenticEnabled = /^(1|true|yes|on)$/i.test((optionalEnv("HERMES_ROUTER_AGENTIC_NARRATION") ?? "").trim());
+  // Routine one-line narration stays compact by default. Full agentic Hermes
+  // requires both the legacy enable flag and an explicit `agentic` mode.
+  const agenticEnabled = routerNarrationAgenticEnabled();
   const sessionConfig = agenticEnabled ? resolveHermesSessionConfig() : null;
   const runId = task.correlationId ?? routerCorrelationId(proposal);
 

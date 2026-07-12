@@ -2,9 +2,10 @@
  * ORCH-P4c — agentic backlog source for the Hermes router.
  *
  * The router's deterministic backlog (roadmap plan) is the predictable FLOOR.
- * This adds a board-grounded layer: Hermes (glm-5.2, over the gateway session
- * with its MCP tools + memory) reasons about the LIVE board and proposes genuine
- * work gaps. Those items are AUGMENTED onto the roadmap floor and flow through
+ * This adds a board-grounded layer: Hermes reasons over a compact LIVE-board
+ * packet and proposes genuine work gaps. Routine ticks use the stateless model
+ * transport; a full gateway session is an explicit deep-planning option. Those
+ * items are AUGMENTED onto the roadmap floor and flow through
  * the UNCHANGED router path — hard taxonomy (`assertTaxonomy`) + dispatch-policy
  * allowlist/budget + operator approval. Hermes gains NO new authority: it only
  * answers "what's worth proposing," grounded in board evidence it must cite.
@@ -22,11 +23,16 @@
  */
 
 import type { RoutedWorkAgent, WorkRouterBacklogItem } from "@avg/averray-mcp/work-router";
-import { chatWithHermesSession, type HermesSessionConfig } from "./hermes-session-client.js";
+import {
+  chatWithHermesSession,
+  type HermesSessionConfig,
+  type HermesSessionTurn,
+} from "./hermes-session-client.js";
 import type { HermesBoardSnapshot } from "./monitor-hermes-voice.js";
 
 export interface AgenticBacklogConfig {
-  session: HermesSessionConfig;
+  /** Required only for the explicit full-agent transport. */
+  session?: HermesSessionConfig;
   /** dispatch.allowed_repos — Hermes may only propose for these (pre-filtered). */
   allowedRepos: readonly string[];
   /** Hard cap on items accepted from one router tick. */
@@ -51,6 +57,21 @@ export interface AgenticBacklogContext {
 export interface AgenticBacklogDeps {
   /** Injection point so tests never hit the gateway. */
   chat?: typeof chatWithHermesSession;
+  /** Compact routine transport. When present it wins over the full session. */
+  complete?: (prompt: string) => Promise<HermesSessionTurn | null>;
+  /** Optional usage recorder for full-session turns. */
+  onTurn?: (turn: HermesSessionTurn) => void;
+}
+
+export type AgenticBacklogMode = "compact" | "agentic";
+
+export interface AgenticBacklogPlanner {
+  collect: (
+    config: AgenticBacklogConfig,
+    context: AgenticBacklogContext,
+    deps: AgenticBacklogDeps,
+    options: { minIntervalMs: number; nowMs?: number },
+  ) => Promise<AgenticBacklogItem[]>;
 }
 
 /**
@@ -69,13 +90,19 @@ export async function collectAgenticBacklog(
   if (config.allowedRepos.length === 0 || config.maxItems <= 0) return [];
   const chat = deps.chat ?? chatWithHermesSession;
 
-  let turnText: string | null = null;
+  let turn: HermesSessionTurn | null = null;
   try {
-    const turn = await chat(config.session, buildAgenticBacklogPrompt(config, context));
-    turnText = turn?.text ?? null;
+    const prompt = buildAgenticBacklogPrompt(config, context);
+    turn = deps.complete
+      ? await deps.complete(prompt)
+      : config.session
+        ? await chat(config.session, prompt)
+        : null;
   } catch {
     return [];
   }
+  if (turn) deps.onTurn?.(turn);
+  const turnText = turn?.text ?? null;
   if (!turnText) return [];
 
   const allowed = new Set(config.allowedRepos.map((repo) => repo.trim().toLowerCase()));
@@ -98,6 +125,69 @@ export async function collectAgenticBacklog(
     items.push(item);
   }
   return items;
+}
+
+/**
+ * Routine planning defaults to a compact completion. The full Hermes session
+ * remains an explicit escape hatch for a deliberately deep planner run; the
+ * legacy enable flag alone must not silently opt every scheduler tick into a
+ * 20k-token agent context.
+ */
+export function resolveAgenticBacklogMode(env: NodeJS.ProcessEnv = process.env): AgenticBacklogMode {
+  return env.HERMES_ROUTER_AGENTIC_BACKLOG_MODE?.trim().toLowerCase() === "agentic"
+    ? "agentic"
+    : "compact";
+}
+
+/**
+ * Cache the planner result for a semantically identical board. When the board
+ * changes repeatedly, a minimum interval bounds model calls; during that short
+ * hold we return no agentic additions and let the deterministic roadmap floor
+ * continue normally rather than replaying stale suggestions.
+ */
+export function createAgenticBacklogPlanner(): AgenticBacklogPlanner {
+  let lastSignature: string | undefined;
+  let lastRunAtMs: number | undefined;
+  let cachedItems: AgenticBacklogItem[] = [];
+
+  return {
+    async collect(config, context, deps, options) {
+      const signature = agenticBacklogContextSignature(context);
+      const nowMs = options.nowMs ?? Date.now();
+      const minIntervalMs = Math.max(0, options.minIntervalMs);
+      if (signature === lastSignature && cachedItems.length > 0) return cachedItems;
+      if (lastRunAtMs !== undefined && nowMs - lastRunAtMs < minIntervalMs) return [];
+
+      lastRunAtMs = nowMs;
+      cachedItems = await collectAgenticBacklog(config, context, deps);
+      lastSignature = signature;
+      return cachedItems;
+    },
+  };
+}
+
+/** Stable semantic signature: excludes age labels and timestamps that drift. */
+export function agenticBacklogContextSignature(context: AgenticBacklogContext): string {
+  const counts = Object.entries(context.board.counts ?? {})
+    .filter(([, value]) => value !== undefined)
+    .sort(([a], [b]) => a.localeCompare(b));
+  const cards = (context.board.items ?? [])
+    .map((card) => ({
+      repo: card.repo ?? "",
+      number: card.number ?? null,
+      lane: card.lane ?? "",
+      owner: card.owner ?? "",
+      title: card.title ?? "",
+      verdict: card.verdict ?? "",
+      why: card.why ?? "",
+      next: card.next ?? "",
+      touchedAreas: [...(card.touchedAreas ?? [])].sort(),
+    }))
+    .sort((a, b) => `${a.repo}#${a.number}:${a.title}`.localeCompare(`${b.repo}#${b.number}:${b.title}`));
+  const inFlight = context.inFlight
+    .map((task) => ({ repo: task.repo, status: task.status, title: task.title ?? "", surface: task.surface ?? "" }))
+    .sort((a, b) => `${a.repo}:${a.surface}:${a.title}`.localeCompare(`${b.repo}:${b.surface}:${b.title}`));
+  return JSON.stringify({ counts, cards, inFlight, memoryNotes: [...context.memoryNotes].sort() });
 }
 
 // --- prompt -----------------------------------------------------------------
