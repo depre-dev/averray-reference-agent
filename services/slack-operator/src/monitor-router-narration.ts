@@ -7,8 +7,8 @@
  *
  * Three transports, tried in order — every step is DEGRADED-SAFE, falling back
  * to the next on any failure so the rail never breaks:
- *   1. Agentic session (flag `HERMES_ROUTER_AGENTIC_NARRATION` + a resolved
- *      gateway config): the real Hermes agent (MCP tools/skills/memory) narrates
+ *   1. Agentic session (explicit `HERMES_ROUTER_NARRATION_MODE=agentic`, legacy
+ *      enable flag, and a resolved gateway config): the real Hermes agent narrates
  *      the WHY in its own board-aware voice. Tagged `hermesMode: "live"`.
  *   2. Ollama persona completion (existing behaviour): a stateless persona-only
  *      completion. Also tagged `"live"` — it is a real model turn.
@@ -43,6 +43,18 @@ export interface RouterNarrationResult {
 }
 
 /**
+ * One-line scheduler narration is compact by default. A full Hermes session is
+ * available only when the operator explicitly selects `agentic`; the legacy
+ * boolean flag alone no longer turns every routine proposal into a full-context
+ * agent call.
+ */
+export function routerNarrationAgenticEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const mode = env.HERMES_ROUTER_NARRATION_MODE?.trim().toLowerCase() || "compact";
+  const legacyEnabled = /^(1|true|yes|on)$/i.test((env.HERMES_ROUTER_AGENTIC_NARRATION ?? "").trim());
+  return mode === "agentic" && legacyEnabled;
+}
+
+/**
  * Injected transports/recorder so the orchestrator is testable without touching
  * the network or the collaboration store. index.ts supplies the real impls.
  */
@@ -51,7 +63,7 @@ export interface RouterNarrationDeps {
   fallback: (proposal: RoutedProposal, task: RouterNarrationTask) => string;
   /** Resolved gateway config, or null when the session transport is unavailable. */
   sessionConfig: HermesSessionConfig | null;
-  /** True when `HERMES_ROUTER_AGENTIC_NARRATION` is truthy. */
+  /** True only when the operator explicitly selected full agentic narration. */
   agenticEnabled: boolean;
   /** Runs one agentic session turn; returns null on any failure (degraded-safe). */
   runSession?: (config: HermesSessionConfig, prompt: string) => Promise<HermesSessionTurn | null>;

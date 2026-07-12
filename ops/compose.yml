@@ -289,20 +289,22 @@ services:
       # docs/HERMES_COPILOT_ELICITATION.md lands. NEVER auto-approves a tool call.
       HERMES_COPILOT_ELICITATION: ${HERMES_COPILOT_ELICITATION:-0}
       HERMES_COPILOT_ELICITATION_TIMEOUT_MS: ${HERMES_COPILOT_ELICITATION_TIMEOUT_MS:-}
-      # ORCH-P4c — agentic router backlog. When ON (needs the gateway session AND
-      # a non-empty dispatch.allowed_repos), Hermes reasons over the live board to
+      # ORCH-P4c — agentic router backlog. When ON (and dispatch.allowed_repos is
+      # non-empty), Hermes reasons over the live board to
       # propose board-grounded work gaps, augmenting the deterministic roadmap
       # backlog. Everything still flows through the hard taxonomy + dispatch-policy
       # + operator gate. OFF by default; falls back to the roadmap backlog on any
-      # failure. One session turn per router tick.
+      # failure. Routine planning defaults to a compact completion and caches an
+      # unchanged board; `agentic` opts back into the full gateway session.
       HERMES_ROUTER_AGENTIC_BACKLOG: ${HERMES_ROUTER_AGENTIC_BACKLOG:-0}
       HERMES_ROUTER_AGENTIC_MAX_ITEMS: ${HERMES_ROUTER_AGENTIC_MAX_ITEMS:-3}
-      # Feature #5 — agentic router narration. When ON (needs the gateway session),
-      # each router proposal is narrated by the real agentic Hermes (its own board
-      # context), grounded ONLY in the proposal fields. Tagged "live" on success;
-      # OFF by default and degraded-safe: falls back to the persona completion, then
-      # the canned template (tagged "templated"). One session turn per proposal.
+      HERMES_ROUTER_AGENTIC_BACKLOG_MODE: ${HERMES_ROUTER_AGENTIC_BACKLOG_MODE:-compact}
+      HERMES_ROUTER_AGENTIC_BACKLOG_MIN_INTERVAL_MINUTES: ${HERMES_ROUTER_AGENTIC_BACKLOG_MIN_INTERVAL_MINUTES:-120}
+      # Feature #5 — router narration. Compact completion is the normal path;
+      # selecting `agentic` plus the legacy enable flag opts a proposal into the
+      # full gateway session. Both remain grounded only in proposal fields.
       HERMES_ROUTER_AGENTIC_NARRATION: ${HERMES_ROUTER_AGENTIC_NARRATION:-0}
+      HERMES_ROUTER_NARRATION_MODE: ${HERMES_ROUTER_NARRATION_MODE:-compact}
       # Hermes failure analysis — when ON (needs the gateway session), a scheduled
       # routine asks the real agentic Hermes for ONE grounded paragraph on WHY a
       # failed operator-decision card likely failed + a fix/rollback next step

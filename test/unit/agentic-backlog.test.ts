@@ -4,8 +4,11 @@ import {
   boardGroundingText,
   buildAgenticBacklogPrompt,
   collectAgenticBacklog,
+  createAgenticBacklogPlanner,
+  agenticBacklogContextSignature,
   normalizeItem,
   parseWorkItems,
+  resolveAgenticBacklogMode,
   ungroundedHighRiskClaim,
   type AgenticBacklogConfig,
   type AgenticBacklogContext,
@@ -54,6 +57,15 @@ describe("collectAgenticBacklog", () => {
     expect(items[0]!.description).toContain("board:");
   });
 
+  it("prefers the compact completion transport over the full gateway session", async () => {
+    const chat = chatReturning("should not run");
+    const complete = chatReturning(JSON.stringify([VALID_ITEM]));
+    const items = await collectAgenticBacklog(CFG(), CTX, { chat, complete });
+    expect(complete).toHaveBeenCalledOnce();
+    expect(chat).not.toHaveBeenCalled();
+    expect(items).toHaveLength(1);
+  });
+
   it("drops items for non-allowlisted repos", async () => {
     const chat = chatReturning(JSON.stringify([{ ...VALID_ITEM, repo: "someone/else" }]));
     expect(await collectAgenticBacklog(CFG(), CTX, { chat })).toHaveLength(0);
@@ -96,6 +108,59 @@ describe("collectAgenticBacklog", () => {
     const grounded = { ...VALID_ITEM, surface: "secrets rotation", prompt: "Rotate the committed secrets flagged by the scan." };
     const ctx: AgenticBacklogContext = { ...CTX, board: { ...CTX.board, headline: "secrets scan flagged a committed .env" } };
     expect(await collectAgenticBacklog(CFG(), ctx, { chat: chatReturning(JSON.stringify([grounded])) })).toHaveLength(1);
+  });
+});
+
+describe("agentic backlog token budget", () => {
+  it("defaults routine planning to compact even when the legacy feature is enabled", () => {
+    expect(resolveAgenticBacklogMode({ HERMES_ROUTER_AGENTIC_BACKLOG: "1" } as NodeJS.ProcessEnv)).toBe("compact");
+    expect(resolveAgenticBacklogMode({ HERMES_ROUTER_AGENTIC_BACKLOG_MODE: "agentic" } as NodeJS.ProcessEnv)).toBe("agentic");
+  });
+
+  it("reuses one result across unchanged scheduler ticks", async () => {
+    const planner = createAgenticBacklogPlanner();
+    const complete = chatReturning(JSON.stringify([VALID_ITEM]));
+    const first = await planner.collect(CFG(), CTX, { complete }, { minIntervalMs: 120 * 60_000, nowMs: 0 });
+    const second = await planner.collect(CFG(), CTX, { complete }, { minIntervalMs: 120 * 60_000, nowMs: 5 * 60_000 });
+    expect(first).toHaveLength(1);
+    expect(second).toEqual(first);
+    expect(complete).toHaveBeenCalledTimes(1);
+  });
+
+  it("rate-limits a changed board and refreshes after the minimum interval", async () => {
+    const planner = createAgenticBacklogPlanner();
+    const complete = chatReturning(JSON.stringify([VALID_ITEM]));
+    await planner.collect(CFG(), CTX, { complete }, { minIntervalMs: 60_000, nowMs: 0 });
+    const changed = { ...CTX, board: { ...CTX.board, counts: { needsAttention: 2 } } };
+    expect(await planner.collect(CFG(), changed, { complete }, { minIntervalMs: 60_000, nowMs: 30_000 })).toEqual([]);
+    expect(await planner.collect(CFG(), changed, { complete }, { minIntervalMs: 60_000, nowMs: 60_000 })).toHaveLength(1);
+    expect(complete).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries an empty or failed result only after the minimum interval", async () => {
+    const planner = createAgenticBacklogPlanner();
+    const complete = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ sessionId: "compact", text: JSON.stringify([VALID_ITEM]) });
+    expect(await planner.collect(CFG(), CTX, { complete }, { minIntervalMs: 60_000, nowMs: 0 })).toEqual([]);
+    expect(await planner.collect(CFG(), CTX, { complete }, { minIntervalMs: 60_000, nowMs: 30_000 })).toEqual([]);
+    expect(await planner.collect(CFG(), CTX, { complete }, { minIntervalMs: 60_000, nowMs: 60_000 })).toHaveLength(1);
+    expect(complete).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores age-label churn when deciding whether board meaning changed", () => {
+    const card = {
+      repo: "averray-agent/agent",
+      number: 42,
+      lane: "Hermes Checking",
+      owner: "Hermes",
+      title: "Review PR",
+      ageLabel: "1m",
+    };
+    const before = { ...CTX, board: { ...CTX.board, items: [card] } };
+    const after = { ...CTX, board: { ...CTX.board, items: [{ ...card, ageLabel: "6m" }] } };
+    expect(agenticBacklogContextSignature(before)).toBe(agenticBacklogContextSignature(after));
   });
 });
 
