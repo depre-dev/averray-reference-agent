@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "kind": "agent_run_projection",
+  "workItemId": "work-001",
+  "correlationId": "correlation-001",
+  "harnessRunId": "run-001",
+  "taskVersion": 1,
+  "source": {
+    "system": "agent-harness",
+    "health": "healthy",
+    "observedAt": "2026-07-23T12:10:30.000Z",
+    "sourceUpdatedAt": "2026-07-23T12:10:25.000Z"
+  },
+  "heartbeat": {
+    "status": "active",
+    "lastEventAt": "2026-07-23T12:10:25.000Z",
+    "ageSeconds": 5
+  },
+  "run": {
+    "state": "executing",
+    "attempt": 1,
+    "terminal": false,
+    "lastEventAt": "2026-07-23T12:10:25.000Z"
+  },
+  "manifest": {
+    "hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "profile": "coding-change",
+    "riskClass": "low",
+    "effectiveCapabilities": [
+      "fs.write_file"
+    ],
+    "network": "deny",
+    "policyHash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verifierHash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "modelBindings": [
+      {
+        "role": "executor",
+        "adapter": "openai-compatible",
+        "provider": "example-provider",
+        "modelRef": "example-model",
+        "profileHash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+    ],
+    "skillVersions": []
+  },
+  "progress": {
+    "phase": "executing",
+    "summary": "Executing the bounded task.",
+    "completedUnits": 1,
+    "totalUnits": 3
+  },
+  "budget": {
+    "elapsedSecondsUsed": 300,
+    "elapsedSecondsLimit": 1800,
+    "modelTokensUsed": 12000,
+    "modelTokensLimit": 50000,
+    "toolCallsUsed": 20,
+    "toolCallsLimit": 100,
+    "estimatedUsdMicrosUsed": 1200000,
+    "estimatedUsdMicrosLimit": 5000000,
+    "exhausted": false
+  },
+  "artifacts": [],
+  "verification": {
+    "status": "pending"
+  },
+  "bindings": {
+    "harnessRunId": "run-001"
+  }
+}

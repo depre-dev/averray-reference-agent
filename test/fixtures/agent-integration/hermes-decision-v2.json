@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 2,
+  "kind": "hermes_decision",
+  "decisionId": "decision-001",
+  "correlationId": "correlation-001",
+  "workItemId": "work-001",
+  "decisionType": "task_proposal",
+  "proposal": {
+    "what": "Propose one bounded schema test.",
+    "why": [
+      "The contract boundary needs executable evidence."
+    ],
+    "whyNow": "The charter is ready for contract implementation.",
+    "evidenceRefs": []
+  },
+  "inputs": [
+    {
+      "name": "task-intent-template",
+      "ref": {
+        "uri": "artifact://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "observedAt": "2026-07-23T12:00:00.000Z"
+    }
+  ],
+  "routing": {
+    "executor": "harness",
+    "reason": "The bounded coding-change profile is supported."
+  },
+  "risk": {
+    "tier": "low",
+    "reasons": [
+      "Schema and test files only."
+    ],
+    "irreversible": false
+  },
+  "approval": {
+    "required": "operator",
+    "decision": "pending",
+    "policyVersion": "dispatch-policy-v1",
+    "policyHash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "effects": {
+    "mutates": false,
+    "mutations": [],
+    "authorityChanged": false,
+    "budgetChanged": false
+  },
+  "next": {
+    "action": "Wait for the operator to approve or deny the exact task hash.",
+    "owner": "operator"
+  },
+  "generatedAt": "2026-07-23T12:00:01.000Z"
+}

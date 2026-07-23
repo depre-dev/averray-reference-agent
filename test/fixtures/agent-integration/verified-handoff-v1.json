@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "kind": "verified_handoff",
+  "workItemId": "work-001",
+  "correlationId": "correlation-001",
+  "harnessRunId": "run-001",
+  "taskVersion": 1,
+  "taskHash": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "taskIntentRef": {
+    "uri": "artifact://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "taskIntentHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "runManifestRef": {
+    "uri": "artifact://sha256/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "runManifestHash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "outcome": "completed",
+  "deliverables": {
+    "patchRef": {
+      "uri": "artifact://sha256/1111111111111111111111111111111111111111111111111111111111111111",
+      "sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "mediaType": "text/x-diff"
+    },
+    "commitSha": "1111111111111111111111111111111111111111",
+    "summaryRef": {
+      "uri": "artifact://sha256/2222222222222222222222222222222222222222222222222222222222222222",
+      "sha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "mediaType": "text/markdown"
+    },
+    "structuredSubmissionRef": {
+      "uri": "artifact://sha256/3333333333333333333333333333333333333333333333333333333333333333",
+      "sha256": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "mediaType": "application/json"
+    },
+    "artifacts": []
+  },
+  "checks": [
+    {
+      "name": "schemas typecheck",
+      "commandHash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "status": "passed",
+      "evidenceRef": {
+        "uri": "artifact://sha256/5555555555555555555555555555555555555555555555555555555555555555",
+        "sha256": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "mediaType": "text/plain"
+      }
+    }
+  ],
+  "verification": {
+    "verified": true,
+    "decision": "accept",
+    "verifier": {
+      "type": "verifier",
+      "id": "independent-verifier"
+    },
+    "planHash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "decisionRef": {
+      "uri": "artifact://sha256/6666666666666666666666666666666666666666666666666666666666666666",
+      "sha256": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+      "mediaType": "application/json"
+    },
+    "decisionHash": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+    "evidenceRefs": [
+      {
+        "uri": "artifact://sha256/5555555555555555555555555555555555555555555555555555555555555555",
+        "sha256": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "mediaType": "text/plain"
+      }
+    ],
+    "verifiedAt": "2026-07-23T12:30:00.000Z"
+  },
+  "openQuestions": [],
+  "eligibleForPrOpen": true,
+  "generatedAt": "2026-07-23T12:30:01.000Z"
+}

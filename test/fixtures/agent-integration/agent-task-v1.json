@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "kind": "agent_task",
+  "workItemId": "work-001",
+  "taskVersion": 1,
+  "correlationId": "correlation-001",
+  "taskKind": "coding-change",
+  "lifecycle": "proposed",
+  "proposal": {
+    "title": "Add a bounded schema test",
+    "objective": "Add one focused schema test without changing runtime behavior.",
+    "whyNow": "The contract boundary needs deterministic acceptance evidence.",
+    "requestedBy": {
+      "type": "hermes",
+      "id": "hermes-ops"
+    },
+    "createdAt": "2026-07-23T12:00:00.000Z",
+    "sourceRefs": []
+  },
+  "repository": {
+    "provider": "github",
+    "nameWithOwner": "owner/repo",
+    "baseRevision": "5869af7bf2fc7e6168fbe070744f7d37fdf8c52a",
+    "allowedPaths": [
+      "packages/schemas",
+      "test/unit"
+    ],
+    "forbiddenPaths": [
+      "ops",
+      "contracts"
+    ]
+  },
+  "intent": {
+    "apiVersion": "harness/v1alpha1",
+    "profile": "coding-change",
+    "templateRef": {
+      "uri": "artifact://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "mediaType": "application/yaml"
+    },
+    "templateHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "acceptance": {
+    "criteria": [
+      {
+        "id": "schemas-typecheck",
+        "type": "command",
+        "command": "npm --workspace @avg/schemas run typecheck",
+        "required": true
+      }
+    ],
+    "verifierPlanRef": {
+      "uri": "artifact://sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "mediaType": "application/json"
+    },
+    "verifierPlanHash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "risk": {
+    "tier": "low",
+    "reasons": [
+      "Schema and test files only."
+    ],
+    "irreversible": false
+  },
+  "requestedAuthority": {
+    "grants": [
+      {
+        "capabilityId": "fs.write_file",
+        "resource": "owner/repo",
+        "constraints": {
+          "allowedPaths": [
+            "packages/schemas",
+            "test/unit"
+          ]
+        },
+        "expiresAt": "2026-07-23T14:00:00.000Z"
+      }
+    ],
+    "network": "deny",
+    "maxChildren": 0,
+    "maxConcurrentChildren": 0,
+    "delegable": false
+  },
+  "budget": {
+    "elapsedSeconds": 1800,
+    "modelTokens": 50000,
+    "toolCalls": 100,
+    "estimatedUsdMicros": 5000000
+  },
+  "deadline": "2026-07-23T14:00:00.000Z",
+  "executor": {
+    "kind": "harness",
+    "selectionReason": "The bounded coding-change profile is supported."
+  },
+  "approval": {
+    "required": "operator",
+    "status": "pending",
+    "policyVersion": "dispatch-policy-v1",
+    "policyHash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "timestamps": {
+    "proposedAt": "2026-07-23T12:00:00.000Z",
+    "updatedAt": "2026-07-23T12:00:00.000Z"
+  }
+}
