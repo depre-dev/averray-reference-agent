@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "recordType": "hermes_decision_record",
+  "id": "hdr-routing-task-legacy",
+  "kind": "routing",
+  "subject": {
+    "type": "task",
+    "id": "codex-task-owner-repo-new-legacy",
+    "repo": "owner/repo"
+  },
+  "decision": "routed to codex",
+  "reasons": [
+    "The historical hard taxonomy selected Codex."
+  ],
+  "inputs": {
+    "riskTier": "low"
+  },
+  "outcome": {
+    "summary": "Task proposed.",
+    "waitingNext": "Operator approval."
+  },
+  "safety": {
+    "readOnly": true,
+    "mutates": false
+  },
+  "generatedAt": "2026-07-22T12:00:01.000Z"
+}
