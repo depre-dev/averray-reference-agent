@@ -52,6 +52,19 @@ describe("slack operator routines", () => {
     expect(config.selfHealing.enabled).toBe(true);
     expect(config.selfHealing.maxProposalsPerTick).toBe(3);
     expect(config.hermesRouter.enabled).toBe(false);
+    expect(config.productHealth.cooldownMs).toBe(6 * 60 * 60_000);
+  });
+
+  it("supports edge-only product-health alerts and an explicit repeat interval", () => {
+    const edgeOnly = parseSlackRoutineConfig({
+      PRODUCT_HEALTH_ALERT_COOLDOWN_MINUTES: "0",
+    }, new Set(["C1"]));
+    expect(edgeOnly.productHealth.cooldownMs).toBe(0);
+
+    const repeating = parseSlackRoutineConfig({
+      PRODUCT_HEALTH_ALERT_COOLDOWN_MINUTES: "45",
+    }, new Set(["C1"]));
+    expect(repeating.productHealth.cooldownMs).toBe(45 * 60_000);
   });
 
   it("lets an explicit routine channel override the allowed-channel fallback", () => {
