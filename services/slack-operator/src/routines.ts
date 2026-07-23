@@ -85,6 +85,7 @@ export interface SlackRoutineConfig {
   productHealth: {
     enabled: boolean;
     intervalMs: number;
+    /** Repeat interval for an unchanged RED episode. Zero keeps alerts edge-only. */
     cooldownMs: number;
   };
 }
@@ -178,7 +179,10 @@ export function parseSlackRoutineConfig(
       // Off by default — the operator enables it once the probe config is set.
       enabled: env.PRODUCT_HEALTH_ENABLED === "1",
       intervalMs: Math.max(30_000, (positiveNumber(env.PRODUCT_HEALTH_INTERVAL_MINUTES) || 2) * 60_000),
-      cooldownMs: Math.max(0, (positiveNumber(env.PRODUCT_HEALTH_ALERT_COOLDOWN_MINUTES) || 30) * 60_000),
+      // Keep the probes frequent, but do not page the same unchanged incident
+      // twice an hour. Zero is an explicit edge-only mode.
+      cooldownMs:
+        nonNegativeNumber(env.PRODUCT_HEALTH_ALERT_COOLDOWN_MINUTES, 360) * 60_000,
     },
   };
 }
@@ -260,6 +264,12 @@ function parseUtcTime(value: string): { hour: number; minute: number } {
 function positiveNumber(value: string | undefined): number {
   const parsed = Number.parseFloat(value ?? "0");
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function nonNegativeNumber(value: string | undefined, fallback: number): number {
+  if (value == null || value.trim() === "") return fallback;
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 function shouldRunDailySchedule(
