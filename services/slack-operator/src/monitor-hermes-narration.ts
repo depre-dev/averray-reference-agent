@@ -54,6 +54,12 @@ export function buildHermesBoardNarrationSignature(board: HermesBoardSnapshot | 
     item.verdict || "",
     item.why || "",
     item.next || "",
+    item.harnessRun?.runId || "",
+    item.harnessRun?.state || "",
+    item.harnessRun?.sourceHealth || "",
+    item.harnessRun?.verification || "",
+    item.harnessRun?.artifactCount ?? "",
+    item.harnessRun?.failure || "",
   ].join(":"));
   return [counts, ...cards].filter(Boolean).join("|");
 }
@@ -75,6 +81,18 @@ function fallbackHermesBoardNarrationBase(board: HermesBoardSnapshot): string {
     return board.headline || "The board is quiet right now. I do not see a live handoff that needs a next move.";
   }
   const label = prLabel(primary);
+  if (primary.harnessRun) {
+    const run = primary.harnessRun;
+    const evidence = [
+      run.state ? `state ${run.state}` : "",
+      run.verification ? `verification ${run.verification}` : "",
+      `${run.artifactCount ?? 0} immutable artifact${run.artifactCount === 1 ? "" : "s"}`,
+    ].filter(Boolean).join(", ");
+    return ownerAskNarration(
+      primary,
+      `${label} is a read-only Harness projection: ${sentence(run.progress || primary.why || evidence)} Source is ${run.sourceHealth}; ${evidence}.`,
+    );
+  }
   if (primary.lane === "Waiting / Drafts") {
     return decisionNarration(
       primary,
@@ -96,7 +114,7 @@ function fallbackHermesBoardNarrationBase(board: HermesBoardSnapshot): string {
   if (primary.lane === "Codex Needed") {
     return ownerAskNarration(
       primary,
-      `${label} is Codex-owned now: ${sentence(primary.why || "the board has a task for Codex")}`
+      `${label} is in the work queue: ${sentence(primary.why || "the board has a builder task")}`
     );
   }
   if (primary.lane === "Release Queue") {

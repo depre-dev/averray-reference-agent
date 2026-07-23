@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "kind": "harness_run_registry",
+  "bindings": [
+    {
+      "workItemId": "work-harness-success-001",
+      "correlationId": "correlation-harness-success-001",
+      "harnessRunId": "11111111-1111-4111-8111-111111111111",
+      "taskVersion": 1,
+      "repository": "depre-dev/agent",
+      "title": "Successful Harness pilot fixture",
+      "summary": "A representative bounded coding run for the read-only Harness CLI adapter.",
+      "registeredAt": "2026-07-23T12:00:00.000Z",
+      "staleAfterSeconds": 300,
+      "manifest": {
+        "hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "profile": "coding-change",
+        "riskClass": "low",
+        "effectiveCapabilities": [
+          "fs.write_file"
+        ],
+        "network": "deny",
+        "policyHash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "verifierHash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "modelBindings": [
+          {
+            "role": "executor",
+            "adapter": "openai-compatible",
+            "provider": "example-provider",
+            "modelRef": "example-model",
+            "profileHash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+          }
+        ],
+        "skillVersions": [
+          "coding-change@1.0.0"
+        ]
+      },
+      "budget": {
+        "elapsedSecondsLimit": 1800,
+        "modelTokensLimit": 50000,
+        "toolCallsLimit": 100,
+        "estimatedUsdMicrosLimit": 5000000
+      }
+    },
+    {
+      "workItemId": "work-harness-failed-001",
+      "correlationId": "correlation-harness-failed-001",
+      "harnessRunId": "22222222-2222-4222-8222-222222222222",
+      "taskVersion": 1,
+      "repository": "depre-dev/agent",
+      "title": "Failed Harness pilot fixture",
+      "registeredAt": "2026-07-23T12:00:00.000Z",
+      "staleAfterSeconds": 300,
+      "manifest": {
+        "hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "profile": "coding-change",
+        "riskClass": "low",
+        "effectiveCapabilities": [
+          "fs.write_file"
+        ],
+        "network": "deny",
+        "policyHash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "verifierHash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "modelBindings": [
+          {
+            "role": "executor",
+            "adapter": "openai-compatible",
+            "provider": "example-provider",
+            "modelRef": "example-model",
+            "profileHash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+          }
+        ],
+        "skillVersions": [
+          "coding-change@1.0.0"
+        ]
+      },
+      "budget": {
+        "elapsedSecondsLimit": 1800,
+        "modelTokensLimit": 50000,
+        "toolCallsLimit": 100,
+        "estimatedUsdMicrosLimit": 5000000
+      }
+    },
+    {
+      "workItemId": "work-harness-quarantined-001",
+      "correlationId": "correlation-harness-quarantined-001",
+      "harnessRunId": "33333333-3333-4333-8333-333333333333",
+      "taskVersion": 1,
+      "repository": "depre-dev/agent",
+      "title": "Quarantined Harness pilot fixture",
+      "registeredAt": "2026-07-23T12:00:00.000Z",
+      "staleAfterSeconds": 300,
+      "manifest": {
+        "hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "profile": "coding-change",
+        "riskClass": "low",
+        "effectiveCapabilities": [
+          "fs.write_file"
+        ],
+        "network": "deny",
+        "policyHash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "verifierHash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "modelBindings": [
+          {
+            "role": "executor",
+            "adapter": "openai-compatible",
+            "provider": "example-provider",
+            "modelRef": "example-model",
+            "profileHash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+          }
+        ],
+        "skillVersions": [
+          "coding-change@1.0.0"
+        ]
+      },
+      "budget": {
+        "elapsedSecondsLimit": 1800,
+        "modelTokensLimit": 50000,
+        "toolCallsLimit": 100,
+        "estimatedUsdMicrosLimit": 5000000
+      }
+    }
+  ]
+}

@@ -282,7 +282,7 @@ test("boardNowBanner: calm board with in-flight automation reads correctly", () 
   assert.match(banner.headline, /2 automation\/release card/);
 });
 
-test("boardNowBanner: calm board names Codex-owned work instead of claiming the board is empty", () => {
+test("boardNowBanner: calm board names work-queue activity instead of claiming the board is empty", () => {
   const cards = [
     card({ id: "codex-1", type: "task", lane: "codex-needed", title: "Fix a failing check" }),
     card({ id: "deploy-1", type: "deploy", deployId: "#1", verification: { current: 1, total: 3, label: "" } }),
@@ -293,7 +293,7 @@ test("boardNowBanner: calm board names Codex-owned work instead of claiming the 
   // "No operator decision needed"), but still names the in-flight work.
   assert.match(banner.headline, /Nothing needs you right now/);
   assert.notMatch(banner.headline, /No operator decision needed/);
-  assert.match(banner.headline, /1 Codex-owned card/);
+  assert.match(banner.headline, /1 work-queue card/);
   assert.match(banner.headline, /1 automation\/release card/);
 });
 

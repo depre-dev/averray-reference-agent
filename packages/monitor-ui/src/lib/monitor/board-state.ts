@@ -224,7 +224,7 @@ function calmHeadline(counts: KPICounts): string {
 
   const automationCount = counts.checking + counts.queue + counts.deploying;
   const parts = [
-    counts.codex > 0 ? `${counts.codex} Codex-owned card(s)` : "",
+    counts.codex > 0 ? `${counts.codex} work-queue card(s)` : "",
     automationCount > 0 ? `${automationCount} automation/release card(s)` : "",
   ].filter(Boolean);
   // PR-F2: lead with the honest "nothing waiting on you" state (the calm banner

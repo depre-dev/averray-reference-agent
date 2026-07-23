@@ -101,6 +101,19 @@ describe("buildDrawerFooter — mission variant", () => {
   });
 });
 
+describe("buildDrawerFooter — Harness read-only variant", () => {
+  it("exposes no dispatch, retry, approval, merge, or send-back control", () => {
+    const buttons = buildDrawerFooter(card({
+      type: "task",
+      agentType: "harness",
+      harnessRun: {},
+      lane: "needs-attention",
+      isAction: true,
+    }), { handlers: { onAskHermes: vi.fn(), onDismiss: vi.fn(), onApproveAndMerge: vi.fn() } });
+    expect(buttons.map((button) => button.key)).toEqual(["ask-hermes"]);
+  });
+});
+
 describe("buildDrawerFooter — action (PR) variant", () => {
   it("Approve & merge OPENS GitHub and records approval — the board never merges", () => {
     const openUrl = vi.fn();

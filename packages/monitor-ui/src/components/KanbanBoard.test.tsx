@@ -49,7 +49,7 @@ describe("KanbanBoard", () => {
     const { getByRole } = render(
       <KanbanBoard grouped={g} expanded={expandedFor("codex-needed", "done")} onToggleLane={() => {}} renderCard={renderCard} />,
     );
-    expect(getByRole("region", { name: "Builder tasks lane" })).toBeTruthy();
+    expect(getByRole("region", { name: "Work queue lane" })).toBeTruthy();
     expect(getByRole("region", { name: "Done lane" })).toBeTruthy();
   });
 
@@ -81,7 +81,7 @@ describe("KanbanBoard", () => {
       <KanbanBoard grouped={g} expanded={expandedFor("codex-needed")} onToggleLane={onToggleLane} renderCard={renderCard} />,
     );
     expect(queryByRole("button", { name: /Collapse Your decisions lane/ })).toBeNull();
-    fireEvent.click(getByRole("button", { name: "Collapse Builder tasks lane" }));
+    fireEvent.click(getByRole("button", { name: "Collapse Work queue lane" }));
     expect(onToggleLane).toHaveBeenCalledWith("codex-needed");
   });
 

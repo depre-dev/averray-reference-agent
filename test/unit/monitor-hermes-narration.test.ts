@@ -170,4 +170,37 @@ describe("Hermes proactive board narration", () => {
     expect(text).toContain("smallest verifiable fix");
     expect(text).toContain("waiting for the red signal to disappear");
   });
+
+  it("narrates only structured Harness facts in Hermes's voice", () => {
+    const text = fallbackHermesBoardNarration(board({
+      counts: { codex: 1 },
+      items: [
+        {
+          workItemId: "work-harness-1",
+          title: "Bounded Harness pilot",
+          lane: "Codex Needed",
+          owner: "Harness",
+          verdict: "Harness executing",
+          why: "Harness is executing the bounded task.",
+          next: "follow the read-only Harness progress",
+          correlationId: "correlation-harness-1",
+          harnessRun: {
+            runId: "run-harness-1",
+            state: "executing",
+            sourceHealth: "healthy",
+            phase: "executing",
+            progress: "Harness is executing the bounded task.",
+            verification: "pending",
+            artifactCount: 0,
+          },
+        },
+      ],
+    }));
+
+    expect(text).toContain("read-only Harness projection");
+    expect(text).toContain("Source is healthy");
+    expect(text).toContain("Harness, keep the bounded run moving");
+    expect(text).toContain("this board has no Harness mutation authority");
+    expect(text).not.toContain("Codex-owned");
+  });
 });

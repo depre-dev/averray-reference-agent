@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, test } from "vitest";
 import { cleanup, render } from "@testing-library/react";
 import { DrawerBody, drawerVariant } from "./DrawerBody.js";
 import type { BoardCard } from "../../lib/monitor/card-types.js";
+import type { AgentRunProjectionV1 } from "@avg/schemas";
 
 afterEach(cleanup);
 
@@ -24,6 +26,12 @@ function card(over: Record<string, unknown>): BoardCard {
   } as BoardCard;
 }
 
+function projection(): AgentRunProjectionV1 {
+  return JSON.parse(
+    readFileSync("test/fixtures/agent-integration/agent-run-projection-v1.json", "utf8"),
+  ) as AgentRunProjectionV1;
+}
+
 describe("drawerVariant — operator-decision lanes get the risk-decision treatment (P1-1/P0)", () => {
   test("a PR in operator-review (isAction=false) is 'action', not 'pr'/'Automation in flight'", () => {
     expect(drawerVariant(card({ type: "pr", lane: "operator-review", isAction: false }))).toBe("action");
@@ -42,8 +50,35 @@ describe("drawerVariant — operator-decision lanes get the risk-decision treatm
     expect(drawerVariant(card({ type: "task", lane: "codex-needed", isAction: false }))).toBe("task");
   });
 
+  test("a Harness projection keeps its read-only Harness variant even in attention", () => {
+    expect(drawerVariant(card({
+      type: "task",
+      lane: "needs-attention",
+      harnessRun: projection(),
+    }))).toBe("harness");
+  });
+
   test("a plain in-flight PR (hermes-checking) stays 'pr'", () => {
     expect(drawerVariant(card({ type: "pr", lane: "hermes-checking", isAction: false }))).toBe("pr");
+  });
+});
+
+describe("DrawerBody — Harness evidence", () => {
+  test("shows state, manifest, budgets, artifacts, and the no-mutation boundary", () => {
+    const c = card({
+      id: "work-001",
+      type: "task",
+      agentType: "harness",
+      lane: "codex-needed",
+      harnessRun: projection(),
+    });
+    const { container } = render(<DrawerBody card={c} variant="harness" />);
+    expect(container.textContent).toContain("Read-only Harness run");
+    expect(container.textContent).toContain("Pinned manifest");
+    expect(container.textContent).toContain("coding-change");
+    expect(container.textContent).toContain("model tokens");
+    expect(container.textContent).toContain("read only");
+    expect(container.textContent).toContain("cannot submit, approve, cancel, release");
   });
 });
 

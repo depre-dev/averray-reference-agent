@@ -34,6 +34,7 @@ export function buildHermesBoardSnapshotFromMonitor(snapshot: unknown): HermesBo
   const missionItems = arrayRecords(snapshot.testbedMissions)
     .map((run) => testbedMissionRunToMonitorItem(run as unknown as TestbedMissionRun));
   const allRawItems = [...arrayRecords(snapshot.active), ...arrayRecords(snapshot.recent), ...missionItems];
+  const harnessCards = harnessBoardCards(snapshot);
   const quietSelfHealingCapacitySignals = allRawItems.filter(isQuietSelfHealingCapacityEvent).length;
   const rawItems = dedupeItems(allRawItems.filter((item) => !isQuietSelfHealingCapacityEvent(item)));
   const classified = rawItems
@@ -53,7 +54,7 @@ export function buildHermesBoardSnapshotFromMonitor(snapshot: unknown): HermesBo
     .filter((entry) => !isActiveMissionItem(entry.item))
     .map((entry) => entry.card)
     .slice(0, MAX_BOARD_CARDS);
-  const cards = [...pinnedMissionCards, ...cappedCards];
+  const cards = mergeHarnessCards([...pinnedMissionCards, ...cappedCards], harnessCards);
 
   const counts = boardCounts(cards, snapshot, { quietSelfHealingCapacitySignals });
   const runner = runnerSummary(snapshot);
@@ -65,6 +66,194 @@ export function buildHermesBoardSnapshotFromMonitor(snapshot: unknown): HermesBo
     ...(runner ? { runner } : {}),
     items: cards,
   };
+}
+
+function harnessBoardCards(snapshot: Record<string, unknown>): HermesBoardCardSnapshot[] {
+  const harnessRuns = recordProp(snapshot, "harnessRuns");
+  if (!harnessRuns || harnessRuns.enabled !== true) return [];
+  const cards: HermesBoardCardSnapshot[] = [];
+  for (const item of arrayRecords(harnessRuns.items)) {
+    const binding = recordProp(item, "binding");
+    const projection = recordProp(item, "projection");
+    if (!binding || !projection) continue;
+    const run = recordProp(projection, "run") ?? {};
+    const source = recordProp(projection, "source") ?? {};
+    const progress = recordProp(projection, "progress") ?? {};
+    const verification = recordProp(projection, "verification");
+    const failure = recordProp(projection, "failure");
+    const heartbeat = recordProp(projection, "heartbeat");
+    const workItemId = textProp(projection, "workItemId") || textProp(binding, "workItemId");
+    const correlationId = textProp(projection, "correlationId") || textProp(binding, "correlationId");
+    const runId = textProp(projection, "harnessRunId") || textProp(binding, "harnessRunId");
+    const title = textProp(binding, "title");
+    if (!workItemId || !correlationId || !runId || !title) continue;
+    const state = normalize(textProp(run, "state"));
+    const outcome = normalize(textProp(run, "outcome"));
+    const sourceHealth = normalize(textProp(source, "health")) || "unavailable";
+    const verificationStatus = normalize(textProp(verification ?? {}, "status"));
+    const failureMessage = textProp(failure ?? {}, "message");
+    const classification = classifyHarnessProjection({
+      state,
+      outcome,
+      sourceHealth,
+      verification: verificationStatus,
+      failure: failureMessage,
+    });
+    const ageSeconds = numberProp(heartbeat ?? {}, "ageSeconds");
+    const progressSummary = textProp(progress, "summary");
+    const artifactCount = Array.isArray(projection.artifacts) ? projection.artifacts.length : 0;
+    cards.push({
+      workItemId,
+      title,
+      lane: classification.lane,
+      owner: classification.owner,
+      verdict: classification.verdict,
+      why: [
+        progressSummary,
+        sourceHealth !== "healthy" ? `Harness source ${sourceHealth}` : "",
+        failureMessage,
+      ].filter(Boolean).join(" · "),
+      next: classification.next,
+      repo: textProp(binding, "repository"),
+      correlationId,
+      tags: ["harness"],
+      ...(ageSeconds !== undefined ? { ageLabel: ageLabelFromSeconds(ageSeconds) } : {}),
+      harnessRun: {
+        runId,
+        ...(state ? { state } : {}),
+        ...(outcome ? { outcome } : {}),
+        sourceHealth,
+        ...(textProp(progress, "phase") ? { phase: textProp(progress, "phase") } : {}),
+        ...(progressSummary ? { progress: progressSummary } : {}),
+        ...(verificationStatus ? { verification: verificationStatus } : {}),
+        artifactCount,
+        ...(failureMessage ? { failure: failureMessage } : {}),
+      },
+    });
+  }
+  for (const entry of arrayRecords(harnessRuns.failures)) {
+    const binding = recordProp(entry, "binding");
+    if (!binding) continue;
+    const workItemId = textProp(binding, "workItemId");
+    const correlationId = textProp(binding, "correlationId");
+    const runId = textProp(binding, "harnessRunId");
+    const title = textProp(binding, "title");
+    const message = textProp(entry, "message");
+    if (!workItemId || !correlationId || !runId || !title || !message) continue;
+    cards.push({
+      workItemId,
+      title,
+      lane: "Needs Attention",
+      owner: "Operator",
+      verdict: "Harness source degraded",
+      why: message,
+      next: "restore the read-only Harness source or correct the pinned pilot binding",
+      repo: textProp(binding, "repository"),
+      correlationId,
+      tags: ["harness"],
+      harnessRun: {
+        runId,
+        sourceHealth: "unavailable",
+        failure: message,
+      },
+    });
+  }
+  return cards;
+}
+
+function classifyHarnessProjection(input: {
+  state: string;
+  outcome: string;
+  sourceHealth: string;
+  verification: string;
+  failure: string;
+}): BoardClassification {
+  if (input.sourceHealth !== "healthy") {
+    return {
+      lane: "Needs Attention",
+      owner: "Operator",
+      verdict: `Harness source ${input.sourceHealth}`,
+      next: "restore the read-only Harness source before trusting newer run state",
+    };
+  }
+  if (
+    input.failure
+    || input.state === "failed"
+    || input.state === "partial"
+    || input.state === "cancelled"
+    || input.state === "quarantined"
+    || input.state === "approval_required"
+    || input.state === "suspended"
+    || input.verification === "failed"
+    || input.verification === "inconclusive"
+  ) {
+    return {
+      lane: "Needs Attention",
+      owner: "Operator",
+      verdict: input.failure ? "Harness run failed" : `Harness ${input.state || input.verification}`,
+      next: "inspect the immutable Harness evidence and decide the next bounded step",
+    };
+  }
+  if (input.state === "verifying" || input.state === "finalizing") {
+    return {
+      lane: "Hermes Checking",
+      owner: "Harness",
+      verdict: `Harness ${input.state}`,
+      next: "wait for Harness verification and immutable deliverables",
+    };
+  }
+  if (input.outcome === "completed" && input.verification === "passed") {
+    return {
+      lane: "Codex Needed",
+      owner: "Harness",
+      verdict: "Harness run verified",
+      next: "review the verified evidence before any GitHub or Averray mutation",
+    };
+  }
+  return {
+    lane: "Codex Needed",
+    owner: "Harness",
+    verdict: input.state ? `Harness ${input.state}` : "Harness run observed",
+    next: "follow the read-only Harness progress until verification completes",
+  };
+}
+
+function mergeHarnessCards(
+  sourceCards: HermesBoardCardSnapshot[],
+  harnessCards: HermesBoardCardSnapshot[],
+): HermesBoardCardSnapshot[] {
+  const byCorrelation = new Map(
+    harnessCards
+      .filter((card) => card.correlationId)
+      .map((card) => [card.correlationId!, card] as const),
+  );
+  const consumed = new Set<string>();
+  const merged = sourceCards.map((card) => {
+    const harness = card.correlationId ? byCorrelation.get(card.correlationId) : undefined;
+    if (!harness) return card;
+    consumed.add(harness.workItemId ?? harness.correlationId ?? "");
+    // Once a PR exists, GitHub remains lane-authoritative. Add only the safe
+    // Harness facts so the correlated work item stays a single card.
+    if (card.repo && card.number) {
+      return {
+        ...card,
+        workItemId: harness.workItemId,
+        harnessRun: harness.harnessRun,
+        tags: unique([...(card.tags ?? []), "harness"]),
+      };
+    }
+    return harness;
+  });
+  return [
+    ...merged,
+    ...harnessCards.filter((card) => !consumed.has(card.workItemId ?? card.correlationId ?? "")),
+  ];
+}
+
+function ageLabelFromSeconds(seconds: number): string {
+  if (seconds < 120) return "fresh";
+  if (seconds < 3_600) return `${Math.floor(seconds / 60)}m`;
+  return `${Math.floor(seconds / 3_600)}h`;
 }
 
 export function isQuietAutomationCapacityReason(value: unknown): boolean {
@@ -425,7 +614,7 @@ function boardHeadline(counts: Readonly<Record<string, number | string | boolean
   const deploying = numericCount(counts.deploying);
   if (attention > 0) parts.push(`${attention} blocked/attention item${attention === 1 ? "" : "s"}`);
   if (waiting > 0) parts.push(`${waiting} draft${waiting === 1 ? "" : "s"} parked`);
-  if (codex > 0) parts.push(`${codex} Codex-owned item${codex === 1 ? "" : "s"}`);
+  if (codex > 0) parts.push(`${codex} work-queue item${codex === 1 ? "" : "s"}`);
   if (operator > 0) parts.push(`${operator} operator decision${operator === 1 ? "" : "s"}`);
   if (queue > 0) parts.push(`${queue} ready for merge stewardship`);
   if (deploying > 0) parts.push(`${deploying} deploy verification${deploying === 1 ? "" : "s"}`);

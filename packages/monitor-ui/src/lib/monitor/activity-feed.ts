@@ -439,6 +439,7 @@ function cardTitle(card: BoardCard): string {
 
 function agentLabel(agent: AgentType | CardReviewRequest["requestedBy"] | CardReviewRequest["reviewer"]): string {
   if (agent === "hermes") return "Hermes";
+  if (agent === "harness") return "Harness";
   if (agent === "operator") return "Pascal";
   if (agent === "claude") return "Claude";
   if (agent === "test-writer") return "Test-writer";

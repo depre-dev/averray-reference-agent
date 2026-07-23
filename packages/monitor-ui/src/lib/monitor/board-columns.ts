@@ -39,7 +39,7 @@ export interface BoardColumnDef {
  */
 export const BOARD_COLUMNS: readonly BoardColumnDef[] = [
   { id: "inbox", inbox: true, gate: true, name: "Your decisions", sub: "Everything waiting on you" },
-  { id: "codex-needed", lane: "codex-needed", name: "Builder tasks", sub: "Proposed by Claude / Codex" },
+  { id: "codex-needed", lane: "codex-needed", name: "Work queue", sub: "Harness and builder work" },
   { id: "drafts", lane: "drafts", name: "Drafts", sub: "Author finishes" },
   { id: "hermes-checking", lane: "hermes-checking", name: "Hermes checking", sub: "Verifying" },
   { id: "operator-review", lane: "operator-review", gate: true, name: "Runs needing review", sub: "Failed / finished runs" },

@@ -7,7 +7,8 @@
   },
   "references": [
     { "path": "../../packages/mcp-common" },
-    { "path": "../../packages/averray-mcp" }
+    { "path": "../../packages/averray-mcp" },
+    { "path": "../../packages/schemas" }
   ],
   "include": ["src/**/*.ts"]
 }

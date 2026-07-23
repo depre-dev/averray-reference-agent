@@ -28,7 +28,7 @@ import { ChecksBar } from "../cards/ChecksBar.js";
 import { deriveDecisionCardReason, deriveWhatHappensNext } from "../cards/Card.js";
 import { OperatorNotes } from "./OperatorNotes.js";
 
-export type DrawerVariant = "mission" | "action" | "done" | "draft" | "task" | "deploy" | "pr";
+export type DrawerVariant = "mission" | "action" | "done" | "draft" | "task" | "harness" | "deploy" | "pr";
 
 export interface DrawerAccent {
   /** Border + eyebrow accent variable. */
@@ -45,6 +45,7 @@ export const DRAWER_ACCENT: Record<DrawerVariant, DrawerAccent> = {
   done: { border: "var(--hm-sage)", pill: "hm-pill--ok", label: "Closed · in release history" },
   draft: { border: "var(--hm-muted)", pill: "hm-pill--draft", label: "Draft · author finishes" },
   task: { border: "var(--hm-sage)", pill: "hm-pill--neutral", label: "Codex task · awaiting dispatch" },
+  harness: { border: "var(--hm-hermes)", pill: "hm-pill--hermes", label: "Harness run · read-only projection" },
   deploy: { border: "var(--hm-sage)", pill: "hm-pill--neutral", label: "Deploying · post-merge verification" },
   pr: { border: "var(--hm-sage)", pill: "hm-pill--ok", label: "Automation in flight" },
 };
@@ -56,6 +57,7 @@ export const DRAWER_ACCENT: Record<DrawerVariant, DrawerAccent> = {
  *  closed, draft, and type. */
 export function drawerVariant(card: BoardCard): DrawerVariant {
   if (card.type === "mission") return "mission";
+  if (card.harnessRun) return "harness";
   if (card.isAction) return "action";
   const lane = laneFor(card);
   if (lane === "operator-review" || lane === "needs-attention") return "action";
@@ -80,6 +82,9 @@ export function DrawerBody({ card, variant }: { card: BoardCard; variant: Drawer
       break;
     case "task":
       body = <TaskBody card={card} />;
+      break;
+    case "harness":
+      body = <HarnessTaskBody card={card} />;
       break;
     case "draft":
       body = <DraftBody card={card} />;
@@ -569,6 +574,7 @@ function TaskBugPreview({ card, failureReason }: { card: BoardCard; prompt?: str
 }
 
 function TaskBody({ card }: { card: BoardCard }) {
+  if (card.harnessRun) return <HarnessTaskBody card={card} />;
   const prompt = "prompt" in card ? card.prompt : undefined;
   const heartbeat = "runnerHeartbeat" in card ? card.runnerHeartbeat : undefined;
   const failureReason = "failureReason" in card ? (card as { failureReason?: string }).failureReason : undefined;
@@ -597,6 +603,115 @@ function TaskBody({ card }: { card: BoardCard }) {
       ) : null}
     </>
   );
+}
+
+function HarnessTaskBody({ card }: { card: BoardCard }) {
+  const projection = card.harnessRun!;
+  const network = projection.manifest.network === "deny"
+    ? "deny all"
+    : projection.manifest.network.allowlist.join(", ");
+  const budgetRows = [
+    ["elapsed", budgetPair(projection.budget.elapsedSecondsUsed, projection.budget.elapsedSecondsLimit, "s")],
+    ["model tokens", budgetPair(projection.budget.modelTokensUsed, projection.budget.modelTokensLimit)],
+    ["tool calls", budgetPair(projection.budget.toolCallsUsed, projection.budget.toolCallsLimit)],
+  ] as const;
+  return (
+    <>
+      <VerdictBlock head="Read-only Harness run">{projection.progress.summary}</VerdictBlock>
+      <section>
+        <div className="hm-section-h">Run state</div>
+        <div className="hm-verdict-block">
+          <div className="head">{projection.run.state.toUpperCase()}</div>
+          <div className="body">
+            source {projection.source.health} · verification {projection.verification?.status ?? "pending"} · attempt {projection.run.attempt}
+            {projection.run.outcome ? ` · outcome ${projection.run.outcome}` : ""}
+          </div>
+          <div className="body hm-mono">
+            run {projection.harnessRunId} · work item {projection.workItemId} · correlation {projection.correlationId}
+          </div>
+          <div className="body hm-mono">
+            observed {projection.source.observedAt}
+            {projection.source.sourceUpdatedAt ? ` · source updated ${projection.source.sourceUpdatedAt}` : ""}
+          </div>
+        </div>
+      </section>
+      <section>
+        <div className="hm-section-h">Pinned manifest</div>
+        <div className="h4-bug">
+          <HarnessFact label="profile" value={`${projection.manifest.profile} · ${projection.manifest.riskClass} risk`} />
+          <HarnessFact label="manifest" value={projection.manifest.hash} mono />
+          <HarnessFact label="policy" value={projection.manifest.policyHash} mono />
+          <HarnessFact label="verifier" value={projection.manifest.verifierHash} mono />
+          <HarnessFact label="network" value={network} />
+          <HarnessFact
+            label="capabilities"
+            value={projection.manifest.effectiveCapabilities.length
+              ? projection.manifest.effectiveCapabilities.join(", ")
+              : "none"}
+          />
+          <HarnessFact
+            label="models"
+            value={projection.manifest.modelBindings.length
+              ? projection.manifest.modelBindings
+                .map((binding) =>
+                  `${binding.role}: ${binding.provider}/${binding.modelRef} via ${binding.adapter} · ${binding.profileHash}`)
+                .join(", ")
+              : "none"}
+          />
+          <HarnessFact
+            label="skills"
+            value={projection.manifest.skillVersions.length
+              ? projection.manifest.skillVersions.join(", ")
+              : "none"}
+          />
+        </div>
+      </section>
+      <section>
+        <div className="hm-section-h">Budget</div>
+        <div className="h4-bug">
+          {budgetRows.map(([label, value]) => <HarnessFact key={label} label={label} value={value} />)}
+          <HarnessFact label="exhausted" value={projection.budget.exhausted ? "yes" : "no"} />
+        </div>
+      </section>
+      <section>
+        <div className="hm-section-h">Immutable artifacts</div>
+        {projection.artifacts.length > 0 ? (
+          <div className="hm-files">
+            {projection.artifacts.map((artifact) => (
+              <div className="hm-file-row" key={artifact.uri}>
+                <span className="hm-mono">{artifact.uri}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <AwaitingData label="Artifacts" note="Harness has not recorded a deliverable artifact yet" />
+        )}
+      </section>
+      {projection.failure ? (
+        <VerdictBlock head={`Failure · ${projection.failure.code}`}>{projection.failure.message}</VerdictBlock>
+      ) : null}
+      <div className="h4-awaiting" role="note">
+        <span className="h4-awaiting-label">Authority</span>
+        <span className="h4-awaiting-chip">read only</span>
+        <span className="h4-awaiting-note">This view cannot submit, approve, cancel, release, or mutate the Harness run.</span>
+      </div>
+    </>
+  );
+}
+
+function HarnessFact({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="h4-bug-row">
+      <span className="h4-bug-k">{label}</span>
+      <span className={`h4-bug-v${mono ? " hm-mono" : ""}`}>{value}</span>
+    </div>
+  );
+}
+
+function budgetPair(used: number | undefined, limit: number | undefined, suffix = ""): string {
+  const usedText = used === undefined ? "unknown" : `${used}${suffix}`;
+  const limitText = limit === undefined ? "limit not projected" : `${limit}${suffix}`;
+  return `${usedText} / ${limitText}`;
 }
 
 /**

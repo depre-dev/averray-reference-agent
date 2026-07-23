@@ -41,7 +41,7 @@ describe("BOARD_COLUMNS", () => {
   });
 
   it("carries the design eyebrows for the named columns", () => {
-    expect(col("codex-needed").name).toBe("Builder tasks");
+    expect(col("codex-needed").name).toBe("Work queue");
     expect(col("operator-review").name).toBe("Runs needing review");
     expect(col("deploying").name).toBe("Deploying");
     expect(col("done").name).toBe("Done");

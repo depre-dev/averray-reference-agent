@@ -1473,6 +1473,7 @@ body { margin: 0; }
 .agent-dot--security { background: #a3414f; }
 .agent-dot--docs { background: #6b5b9a; }
 .agent-dot--hermes { background: var(--hm-hermes); }
+.agent-dot--harness { background: #2f7f72; }
 .agent-dot--operator { background: var(--hm-ink); }
 .agent-dot--system { background: var(--hm-muted-soft); }
 .agent-dot--room { background: var(--hm-hermes); }
@@ -1698,6 +1699,32 @@ body { margin: 0; }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.hm-harness-run {
+  display: grid;
+  gap: 6px;
+  padding: 8px 0 2px;
+  border-top: 1px solid var(--hm-line-soft);
+  min-width: 0;
+}
+.hm-harness-run-top,
+.hm-harness-run-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+.hm-harness-run-progress {
+  color: var(--hm-ink-soft);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.hm-harness-run-meta {
+  color: var(--hm-muted);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
 }
 
 .hm-mission-run {
