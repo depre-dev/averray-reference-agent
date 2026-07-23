@@ -67,6 +67,8 @@ export interface HermesReplyPrSnapshot {
 }
 
 export interface HermesBoardCardSnapshot {
+  /** Stable integration work item id for a projected Harness run. */
+  workItemId?: string;
   repo?: string;
   number?: number;
   title: string;
@@ -98,6 +100,21 @@ export interface HermesBoardCardSnapshot {
    * via the branch-prefix convention. Absent for non-PR cards.
    */
   headBranch?: string;
+  /**
+   * Safe, structured Harness facts only. Raw event payloads and model messages
+   * never cross into Hermes narration context.
+   */
+  harnessRun?: {
+    runId: string;
+    state?: string;
+    outcome?: string;
+    sourceHealth: string;
+    phase?: string;
+    progress?: string;
+    verification?: string;
+    artifactCount?: number;
+    failure?: string;
+  };
 }
 
 /**
@@ -558,7 +575,7 @@ export function hermesMemoryInfluence(context: HermesWhyTraceContext): HermesMem
   const lowerNote = cleaned.toLowerCase();
   const lane = item?.lane ?? context.selectedPr?.lane ?? "";
   const owner = item?.owner ?? "";
-  const boardSaysCodex = owner === "Codex" || lane === "Codex Needed";
+  const boardSaysCodex = owner === "Codex" || (lane === "Codex Needed" && !item?.harnessRun);
   const noteSaysExternalDraftWait = saysExternalDraftShouldWait(lowerNote);
   const noteSaysDelegatedCodex = saysDelegatedCodex(lowerNote);
 
@@ -654,6 +671,19 @@ export function hermesDecisionCoachForCard(item: HermesBoardCardSnapshot): Herme
 }
 
 export function hermesOwnerAskForCard(item: HermesBoardCardSnapshot): HermesOwnerAsk | null {
+  if (item.harnessRun) {
+    const unhealthy = item.harnessRun.sourceHealth !== "healthy";
+    return {
+      target: unhealthy ? "Pascal" : "Harness",
+      ask: unhealthy
+        ? "restore the read-only Harness source or correct the allowlisted binding"
+        : "keep the bounded run moving and record verification plus immutable deliverables",
+      waitingFor: unhealthy
+        ? "a healthy read before treating newer run state as current"
+        : "a terminal Harness outcome; this board has no Harness mutation authority",
+    };
+  }
+
   if (item.lane === "Waiting / Drafts") {
     return {
       target: "PR author or owning agent",

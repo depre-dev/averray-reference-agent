@@ -42,7 +42,7 @@ describe("TopStrip", () => {
     const { getByText } = render(<TopStrip counts={busyCounts} />);
     // Each KPI label is present; the count lives in the sibling `.n` span.
     expect(getByText("Action needed")).toBeTruthy();
-    expect(getByText("Codex needed")).toBeTruthy();
+    expect(getByText("Work queue")).toBeTruthy();
     expect(getByText("Operator review")).toBeTruthy();
     expect(getByText("Hermes checking")).toBeTruthy();
     expect(getByText("Release queue")).toBeTruthy();

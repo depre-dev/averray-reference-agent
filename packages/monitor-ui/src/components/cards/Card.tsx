@@ -68,7 +68,7 @@ export type CardProps = {
 // ── Helpers (mirror the bundle's small inline helpers) ──────────────
 
 function agentLabel(t: AgentType | undefined): string {
-  if (t === "codex" || t === "claude" || t === "test-writer" || t === "security" || t === "docs" || t === "hermes") return t;
+  if (t === "codex" || t === "claude" || t === "test-writer" || t === "security" || t === "docs" || t === "hermes" || t === "harness") return t;
   return "ext";
 }
 
@@ -251,13 +251,15 @@ export function Card({
         </div>
       ) : null}
 
-      {cardSummary && !isClosed && !isInboxCard ? (
+      {cardSummary && !isClosed && !isInboxCard && !card.harnessRun ? (
         <div className="hm-card-meta" style={{ lineHeight: 1.5 }}>
           <span style={{ color: "var(--hm-ink-soft)", fontFamily: "var(--font-body)", fontSize: 12 }}>
             <HumanizedText text={cardSummary} />
           </span>
         </div>
       ) : null}
+
+      {!isClosed && card.harnessRun && !isInboxCard ? <HarnessRunSummary card={card} /> : null}
 
       {!isClosed && card.type === "mission" && !isInboxCard ? <MissionRunSummary card={card} /> : null}
 
@@ -440,6 +442,37 @@ function WorkingNowLine({ workingNow }: { workingNow: CardWorkingNow }) {
     <div className="hm-working-now" aria-label={`Working now: ${workingNow.label}`} title={details || undefined}>
       <AgentTag agent={workingNow.agent} label="working now" />
       <span className="target">{workingNow.label}</span>
+    </div>
+  );
+}
+
+function HarnessRunSummary({ card }: { card: BoardCard }) {
+  const run = card.harnessRun;
+  if (!run) return null;
+  const sourceTone: StateVariant = run.source.health === "healthy"
+    ? "pass"
+    : run.source.health === "stale"
+      ? "age"
+      : "degraded";
+  const verification = run.verification?.status ?? "pending";
+  const verificationTone: StateVariant = verification === "passed"
+    ? "pass"
+    : verification === "failed" || verification === "inconclusive"
+      ? "fail"
+      : "pending";
+  return (
+    <div className="hm-harness-run" aria-label={`Harness run ${run.run.state}`}>
+      <div className="hm-harness-run-top">
+        <Badge variant="info" dot>Harness</Badge>
+        <StatusPill variant={run.run.terminal ? "neutral" : "running"}>{run.run.state}</StatusPill>
+        <StatusPill variant={sourceTone}>{run.source.health}</StatusPill>
+      </div>
+      <div className="hm-harness-run-progress">{run.progress.summary}</div>
+      <div className="hm-harness-run-meta">
+        <StatusPill variant={verificationTone}>verification {verification}</StatusPill>
+        <span>{run.artifacts.length} artifact{run.artifacts.length === 1 ? "" : "s"}</span>
+        <span>attempt {run.run.attempt}</span>
+      </div>
     </div>
   );
 }

@@ -24,7 +24,7 @@ export type { LaneDescriptor, LaneId };
 const LANE_EMPTY_COPY: Partial<Record<LaneId, string>> = {
   "needs-attention": "Nothing needs your review right now.",
   drafts: "No drafts in progress.",
-  "codex-needed": "No tasks waiting to be created.",
+  "codex-needed": "No Harness or builder work queued.",
   "hermes-checking": "Nothing in pre-check right now.",
   "operator-review": "Nothing waiting on your risk decision.",
   "release-queue": "Release queue is empty.",

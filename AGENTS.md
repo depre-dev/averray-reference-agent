@@ -115,6 +115,17 @@ TypeScript monorepo: npm workspaces (`packages/*`, `services/*`), Node ≥ 22, E
   not merge, deploy, submit work, or run guarded live mutations during a handoff:
   its powers stay inside the **Durable invariants** above — gated, budgeted, and
   never extending to auto-merge or auto-deploy.
+- **Generic Agent Harness projection is observation-only (INT-1, off by
+  default).** When `HARNESS_PROJECTION_ENABLED` is explicitly enabled, the
+  Slack operator may inspect only allowlisted immutable Harness run IDs through
+  fixed `run status`, `run events`, and terminal `run deliverables` CLI reads.
+  The secret-free registry pins the final manifest metadata used by the board.
+  Unknown states/events, source denial, stale reads, or pin mismatches fail
+  visibly; they never become healthy cards. This path cannot submit, approve,
+  deny, cancel, release, dispatch, mutate GitHub/Averray, or read artifact
+  contents. Harness contributes structured run facts and a card tag; Hermes
+  remains the only conversational board voice. No Harness dispatcher exists
+  until a later separately guarded packet.
 - **Self-healing (B2, off by default).** On a failure signal (failed testbed
   mission, failed deploy/verification), Hermes auto-**proposes** a routed fix
   task (non-high-risk) — which still lands `proposed` and flows through the same

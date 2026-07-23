@@ -21,7 +21,7 @@ import type { BoardCard, Lane as LaneKey } from "../lib/monitor/card-types.js";
 export const LANE_DESCRIPTORS: readonly LaneDescriptor[] = [
   { id: "needs-attention", name: "Needs attention", action: "Review decision waiting", isAction: true },
   { id: "drafts", name: "Drafts", action: "Author finishes" },
-  { id: "codex-needed", name: "Codex needed", action: "Create / approve task" },
+  { id: "codex-needed", name: "Work queue", action: "Harness and builder work" },
   { id: "hermes-checking", name: "Hermes checking", action: "Pre-check in flight" },
   { id: "operator-review", name: "Operator review", action: "Risk decision" },
   { id: "release-queue", name: "Release queue", action: "Branch protection" },

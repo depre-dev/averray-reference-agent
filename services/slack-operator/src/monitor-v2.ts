@@ -47,6 +47,10 @@ import {
   type HermesDecisionRecord,
 } from "@avg/averray-mcp/decision-records";
 import {
+  agentRunProjectionV1Schema,
+  type AgentRunProjectionV1,
+} from "@avg/schemas";
+import {
   evaluateReviewPanel,
   type ReviewPanelEvaluation,
   type ReviewPanelResponse,
@@ -68,7 +72,7 @@ export type Lane =
 
 export type CardType = "pr" | "mission" | "task" | "deploy" | "draft" | "done";
 
-export type AgentType = "claude" | "codex" | "test-writer" | "security" | "docs" | "hermes" | "ext";
+export type AgentType = "claude" | "codex" | "test-writer" | "security" | "docs" | "hermes" | "harness" | "ext";
 
 export type CardState = "fresh" | "stale" | "failed-fetch" | "source-offline" | "running";
 
@@ -133,7 +137,7 @@ export interface CardRunnerHeartbeat {
 export interface CardWorkingNow {
   agent: AgentType;
   label: string;
-  source: "runner" | "mission" | "classifier";
+  source: "runner" | "mission" | "classifier" | "harness";
   runnerId?: string;
   taskId?: string;
   since?: string;
@@ -184,7 +188,7 @@ export interface CardDiscussionMessage {
 
 export interface CardSourceFailure {
   code: string;
-  source: "github" | "runner" | "deploy" | "codex";
+  source: "github" | "runner" | "deploy" | "codex" | "harness";
   message: string;
   lastGoodAt?: string;
 }
@@ -350,6 +354,8 @@ export interface BoardCard {
   output?: string;
   /** Codex task cards: failure reason when the task failed. */
   failureReason?: string;
+  /** Read-only, schema-validated projection of an allowlisted generic Harness run. */
+  harnessRun?: AgentRunProjectionV1;
   /** Source read / heartbeat failure behind a degraded card. */
   sourceFailure?: CardSourceFailure;
   /** Codex task cards: runner liveness. */
@@ -510,6 +516,7 @@ export function mapTagsToRisk(tags: ReadonlyArray<string> | undefined): RiskTag[
 export function inferCardType(item: HermesBoardCardSnapshot, lane: Lane): CardType {
   const tags = (item.tags ?? []).map((t) => String(t).toLowerCase());
   const title = (item.title ?? "").toLowerCase();
+  if (item.harnessRun) return "task";
   if (tags.includes("testbed") || /\bmission\b/.test(title)) return "mission";
   if (lane === "done") return "done";
   if (lane === "codex-needed") return "task";
@@ -542,6 +549,7 @@ export function agentTypeFromBranch(headBranch?: string): AgentType | undefined 
  */
 export function inferAgentType(item: HermesBoardCardSnapshot, type: CardType): AgentType {
   if (type === "mission") return "hermes";
+  if (item.harnessRun) return "harness";
   const fromBranch = agentTypeFromBranch(item.headBranch);
   if (fromBranch) return fromBranch;
   const owner = (item.owner ?? "").toLowerCase();
@@ -602,6 +610,7 @@ export function cardId(item: HermesBoardCardSnapshot): string {
   if (item.repo && typeof item.number === "number") {
     return `${shortRepo(item.repo)} #${item.number}`;
   }
+  if (item.workItemId) return item.workItemId;
   const slug = slugify(item.title ?? "card").slice(0, 40);
   // Identity-less cards (deploy verifications, missions, tasks) often
   // share a generic title — e.g. every "post-deploy verification" card.
@@ -699,6 +708,103 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+interface IndexedHarnessProjection {
+  projection?: AgentRunProjectionV1;
+  failure?: {
+    code: string;
+    message: string;
+    observedAt?: string;
+  };
+}
+
+function indexHarnessProjections(rawSnapshot: unknown): Map<string, IndexedHarnessProjection> {
+  const root = asRecord(rawSnapshot);
+  const harnessRuns = asRecord(root?.harnessRuns);
+  const index = new Map<string, IndexedHarnessProjection>();
+  if (harnessRuns?.enabled !== true) return index;
+  for (const entry of asArray(harnessRuns.items)) {
+    const item = asRecord(entry);
+    const parsed = agentRunProjectionV1Schema.safeParse(item?.projection);
+    if (!parsed.success) continue;
+    index.set(parsed.data.workItemId, { projection: parsed.data });
+  }
+  for (const entry of asArray(harnessRuns.failures)) {
+    const failure = asRecord(entry);
+    const binding = asRecord(failure?.binding);
+    const workItemId = asString(binding?.workItemId);
+    const code = asString(failure?.code);
+    const message = asString(failure?.message);
+    if (!workItemId || !code || !message) continue;
+    index.set(workItemId, {
+      failure: {
+        code,
+        message,
+        ...(asString(failure?.observedAt) ? { observedAt: asString(failure?.observedAt) } : {}),
+      },
+    });
+  }
+  return index;
+}
+
+function attachHarnessProjection(
+  card: BoardCard,
+  item: HermesBoardCardSnapshot,
+  indexed: IndexedHarnessProjection | undefined,
+): BoardCard {
+  if (!item.harnessRun || !indexed) return card;
+  if (indexed.failure) {
+    card.state = "source-offline";
+    card.sourceFailure = {
+      source: "harness",
+      code: indexed.failure.code,
+      message: indexed.failure.message,
+    };
+    card.taskStatus = "failed";
+    card.failureReason = indexed.failure.message;
+    return card;
+  }
+  const projection = indexed.projection;
+  if (!projection) return card;
+  card.harnessRun = projection;
+  if (card.type === "task") card.agentType = "harness";
+  card.taskStatus = harnessTaskStatus(projection);
+  if (projection.failure) card.failureReason = projection.failure.message;
+  if (projection.source.health !== "healthy") {
+    card.state = projection.source.health === "stale"
+      ? "stale"
+      : projection.source.health === "unavailable"
+        ? "source-offline"
+        : "failed-fetch";
+    card.sourceFailure = {
+      source: "harness",
+      code: `harness_source_${projection.source.health}`,
+      message: projection.source.reason ?? `Harness source is ${projection.source.health}`,
+      ...(projection.source.sourceUpdatedAt
+        ? { lastGoodAt: projection.source.sourceUpdatedAt }
+        : {}),
+    };
+  } else if (!projection.run.terminal) {
+    card.state = "running";
+  }
+  if (!projection.run.terminal && projection.source.health === "healthy") {
+    card.workingNow = {
+      agent: "harness",
+      label: projection.progress.summary,
+      source: "harness",
+      taskId: projection.harnessRunId,
+      since: projection.source.sourceUpdatedAt,
+    };
+  }
+  return card;
+}
+
+function harnessTaskStatus(projection: AgentRunProjectionV1): TaskStatus {
+  if (projection.run.outcome === "completed") return "completed";
+  if (projection.run.outcome === "cancelled") return "cancelled";
+  if (projection.run.outcome === "failed" || projection.run.outcome === "partial") return "failed";
+  return "running";
+}
+
 function mapTaskEvents(task: Record<string, unknown>): TaskTimelineEvent[] {
   return asArray(task.events).flatMap((entry) => {
     const event = asRecord(entry);
@@ -738,6 +844,7 @@ function defaultWorkingNowLabel(agent: AgentType): string {
   if (agent === "security") return "Security reviewing";
   if (agent === "docs") return "Docs updating";
   if (agent === "hermes") return "Hermes reviewing";
+  if (agent === "harness") return "Harness executing";
   return "External agent working";
 }
 
@@ -2061,6 +2168,7 @@ function agentTypeFromTaskAgent(value: unknown): AgentType {
   if (value === "security") return "security";
   if (value === "docs") return "docs";
   if (value === "hermes") return "hermes";
+  if (value === "harness") return "harness";
   if (value === "ext") return "ext";
   return "codex";
 }
@@ -2361,6 +2469,7 @@ export function buildV2BoardSnapshot(
   const items = classified?.items ?? [];
   const summaryIndex = indexRawSummaries(rawSnapshot);
   const codexIndex = indexCodexTasks(rawSnapshot);
+  const harnessIndex = indexHarnessProjections(rawSnapshot);
   const missionIndex = indexTestbedMissions(rawSnapshot);
   const reviewRequests = reviewRequestsFromSnapshot(rawSnapshot);
   const discussionMessages = discussionMessagesFromSnapshot(rawSnapshot);
@@ -2370,7 +2479,7 @@ export function buildV2BoardSnapshot(
   const sourceCards = items.map((item) => {
     const base = toBoardCard(item);
     const key = prKey(item.repo, item.number);
-    const enriched = enrichBoardCard(base, item, {
+    const enriched = attachHarnessProjection(enrichBoardCard(base, item, {
       summary: key ? summaryIndex.get(key) : undefined,
       codexTask: key ? codexIndex.get(key) : undefined,
       runner,
@@ -2378,7 +2487,7 @@ export function buildV2BoardSnapshot(
         base.type === "mission" && item.correlationId
           ? missionIndex.get(item.correlationId)
           : undefined,
-    });
+    }), item, item.workItemId ? harnessIndex.get(item.workItemId) : undefined);
     const withReviews = attachReviewRequests(enriched, reviewRequests, {
       ...(key ? { relatedPrKey: key } : {}),
       ...(base.type === "mission" && item.correlationId ? { relatedMissionId: item.correlationId } : {}),

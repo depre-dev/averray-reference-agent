@@ -199,7 +199,7 @@ export function buildDrawerFooter(card: BoardCard, deps: DrawerFooterDeps = {}):
       kind: "ghost",
       run: () => copy(card.id),
     });
-  } else {
+  } else if (variant !== "harness") {
     // Open the SPECIFIC PR — never the repo-root fallback. A task with no
     // resolved PR has nothing to open yet; silently linking to the repo root
     // sends the operator to the wrong target, so disable with an honest reason.

@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, within } from "@testing-library/react";
 import { Card, deriveDecisionCardReason } from "./Card.js";
 import { FIXTURE_CARDS } from "../../lib/monitor/fixtures.js";
 import type { BoardCard, MissionCard, PRCard } from "../../lib/monitor/card-types.js";
+import type { AgentRunProjectionV1 } from "@avg/schemas";
 
 afterEach(cleanup);
 
@@ -11,6 +13,27 @@ function fixture(id: string): BoardCard {
   const card = FIXTURE_CARDS.find((c) => c.id === id);
   if (!card) throw new Error(`fixture not found: ${id}`);
   return card;
+}
+
+function harnessCard(): BoardCard {
+  const harnessRun = JSON.parse(
+    readFileSync("test/fixtures/agent-integration/agent-run-projection-v1.json", "utf8"),
+  ) as AgentRunProjectionV1;
+  return {
+    id: harnessRun.workItemId,
+    lane: "codex-needed",
+    type: "task",
+    agentType: "harness",
+    title: "Bounded Harness run",
+    summary: harnessRun.progress.summary,
+    repo: "depre-dev/agent",
+    freshness: 0,
+    state: "running",
+    risk: [],
+    waitingOn: { actor: "agent", tone: "info" },
+    taskStatus: "running",
+    harnessRun,
+  };
 }
 
 describe("Card — type coverage", () => {
@@ -75,6 +98,16 @@ describe("Card — type coverage", () => {
     const view = within(container);
     expect(view.getByText("Reduce audit-log noise when policy auto-applies")).toBeTruthy();
     expect(container.querySelector(".hm-checks-bar")).toBeNull();
+  });
+
+  test("Harness card renders an explicit tag and structured read-only progress", () => {
+    const { container } = render(<Card card={harnessCard()} />);
+    const view = within(container);
+    expect(view.getAllByText("Harness").length).toBeGreaterThan(0);
+    expect(view.getByText("executing")).toBeTruthy();
+    expect(view.getByText("Executing the bounded task.")).toBeTruthy();
+    expect(view.getByText("verification pending")).toBeTruthy();
+    expect(view.getByText("0 artifacts")).toBeTruthy();
   });
 
   test("a routed task's long machine id collapses to a short handle in the header", () => {

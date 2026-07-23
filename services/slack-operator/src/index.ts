@@ -57,6 +57,13 @@ import {
 } from "./monitor-collab.js";
 import { buildHermesBoardSnapshotFromMonitor } from "./monitor-hermes-board.js";
 import { buildV2BoardSnapshot, diffBoardSnapshots, failureAnalysisCardFor, type BoardSnapshotV2 } from "./monitor-v2.js";
+import { createHarnessCliReadPort } from "./harness-read-port.js";
+import { collectHarnessRunProjections, type HarnessProjectionSnapshot } from "./harness-run-projection.js";
+import {
+  harnessProjectionEnabled,
+  harnessProjectionReadTimeoutMs,
+  loadHarnessRunRegistry,
+} from "./harness-run-registry.js";
 import { buildBacklogSuggestionsResponse } from "./backlog-suggestions.js";
 import { listDecisionRecordsForMonitor } from "./decision-record-store.js";
 import {
@@ -4141,6 +4148,38 @@ async function loadMonitorSnapshot(
       error: error instanceof Error ? error.message : String(error),
     });
   }
+  let harnessRuns: HarnessProjectionSnapshot | undefined;
+  if (harnessProjectionEnabled()) {
+    const harnessStartedAt = Date.now();
+    try {
+      const registry = await loadHarnessRunRegistry(optionalEnv("HARNESS_PROJECTION_BINDINGS_PATH"));
+      harnessRuns = await collectHarnessRunProjections(
+        registry,
+        createHarnessCliReadPort({
+          command: optionalEnv("HARNESS_CLI_COMMAND", "harness"),
+          timeoutMs: harnessProjectionReadTimeoutMs(),
+        }),
+      );
+      const failed = harnessRuns.failures.length;
+      phases.push({
+        name: "harness_run_projection",
+        status: failed > 0 ? "skipped" : "ok",
+        durationMs: Date.now() - harnessStartedAt,
+        bindings: registry.bindings.length,
+        projected: harnessRuns.items.length,
+        failed,
+        ...(failed > 0 ? { error: `${failed} Harness run read(s) degraded` } : {}),
+      });
+    } catch (error) {
+      logger.warn({ err: error }, "monitor_harness_projection_skipped");
+      phases.push({
+        name: "harness_run_projection",
+        status: "skipped",
+        durationMs: Date.now() - harnessStartedAt,
+        error: error instanceof Error ? error.message : "Harness projection failed",
+      });
+    }
+  }
   const llmUsageStartedAt = Date.now();
   let llmUsageEvents: Awaited<ReturnType<typeof readLlmUsageEvents>> = [];
   try {
@@ -4173,6 +4212,7 @@ async function loadMonitorSnapshot(
   const snapshot = {
     ...enriched,
     codexTasks,
+    ...(harnessRuns ? { harnessRuns } : {}),
     testbedMissions: listTestbedMissionRuns({ limit: 20 }),
     testbedSuites: listTestbedSuites({ missionRuns: listTestbedMissionRuns({ limit: 50 }) }).suites,
     testbedMissionRunner: summarizeTestbedMissionRunnerHeartbeat(readTestbedMissionRunnerHeartbeat()),

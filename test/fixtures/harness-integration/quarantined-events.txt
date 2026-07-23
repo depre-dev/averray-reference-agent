@@ -1,0 +1,3 @@
+1 TaskAccepted payload={"task_id":"pilot-quarantined"}
+2 ContractCompiled payload={"draft_manifest_hash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","risk_class":"low","task_hash":"sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+3 SafetyTripwireTriggered payload={"action":"quarantine","reason":"protected_path_write"}

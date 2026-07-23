@@ -39,6 +39,7 @@ export function agentDisplayName(agent: AgentTagAgent | undefined): string {
   if (agent === "security") return "security";
   if (agent === "docs") return "docs";
   if (agent === "hermes") return "hermes";
+  if (agent === "harness") return "harness";
   if (agent === "codex") return "codex";
   if (agent === "claude") return "claude";
   if (agent === "room") return "room";

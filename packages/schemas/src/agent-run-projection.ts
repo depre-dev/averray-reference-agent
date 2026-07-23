@@ -20,6 +20,27 @@ import {
 
 const terminalOutcomeSchema = z.enum(["completed", "partial", "failed", "cancelled"]);
 
+export const agentRunManifestProjectionSchema = z.object({
+  ref: artifactRefSchema.optional(),
+  hash: sha256Schema,
+  profile: integrationIdSchema,
+  riskClass: z.enum(["low", "standard", "elevated"]),
+  effectiveCapabilities: uniqueNonEmptyStrings(200),
+  network: agentTaskNetworkPolicySchema,
+  policyHash: sha256Schema,
+  verifierHash: sha256Schema,
+  modelBindings: z.array(modelBindingMetadataSchema).max(100),
+  skillVersions: uniqueNonEmptyStrings(200),
+}).strict().superRefine((manifest, context) => {
+  if (manifest.ref && manifest.ref.sha256 !== manifest.hash) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "manifest ref hash must match manifest hash",
+      path: ["hash"],
+    });
+  }
+});
+
 export const agentRunProjectionV1Schema = z.object({
   schemaVersion: z.literal(1),
   kind: z.literal("agent_run_projection"),
@@ -47,18 +68,7 @@ export const agentRunProjectionV1Schema = z.object({
     reason: integrationTextSchema.optional(),
     lastEventAt: integrationTimestampSchema.optional(),
   }).strict(),
-  manifest: z.object({
-    ref: artifactRefSchema.optional(),
-    hash: sha256Schema,
-    profile: integrationIdSchema,
-    riskClass: z.enum(["low", "standard", "elevated"]),
-    effectiveCapabilities: uniqueNonEmptyStrings(200),
-    network: agentTaskNetworkPolicySchema,
-    policyHash: sha256Schema,
-    verifierHash: sha256Schema,
-    modelBindings: z.array(modelBindingMetadataSchema).max(100),
-    skillVersions: uniqueNonEmptyStrings(200),
-  }).strict(),
+  manifest: agentRunManifestProjectionSchema,
   progress: z.object({
     phase: integrationIdSchema,
     summary: integrationTextSchema,
@@ -115,13 +125,6 @@ export const agentRunProjectionV1Schema = z.object({
       path: ["source", "reason"],
     });
   }
-  if (projection.manifest.ref && projection.manifest.ref.sha256 !== projection.manifest.hash) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "manifest ref hash must match manifest hash",
-      path: ["manifest", "hash"],
-    });
-  }
   if (projection.run.terminal !== (projection.run.outcome !== undefined)) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
@@ -164,6 +167,7 @@ export const agentRunProjectionV1Schema = z.object({
 });
 
 export type AgentRunProjectionV1 = z.infer<typeof agentRunProjectionV1Schema>;
+export type AgentRunManifestProjection = z.infer<typeof agentRunManifestProjectionSchema>;
 
 export function assertAgentRunProjectionWithinTask(
   taskInput: AgentTaskV1,

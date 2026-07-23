@@ -47,7 +47,7 @@ describe("BoardView — rich-mix board (open stream)", () => {
     const { container } = render(<BoardView board={richBoard} status="open" />);
     const view = within(container);
     expect(view.getByRole("region", { name: "Your decisions lane" })).toBeTruthy();
-    expect(view.getByRole("region", { name: "Builder tasks lane" })).toBeTruthy();
+    expect(view.getByRole("region", { name: "Work queue lane" })).toBeTruthy();
     expect(view.getByRole("region", { name: "Drafts lane" })).toBeTruthy();
     expect(view.getByRole("region", { name: "Hermes checking lane" })).toBeTruthy();
     expect(view.getByRole("region", { name: "Release queue lane" })).toBeTruthy();
@@ -323,7 +323,7 @@ describe("BoardView — rich-mix board (open stream)", () => {
     );
 
     const inbox = getByRole("region", { name: "Your decisions lane" });
-    const pipeline = getByRole("region", { name: "Builder tasks lane" });
+    const pipeline = getByRole("region", { name: "Work queue lane" });
     expect(within(inbox).getByRole("button", { name: /Approve & dispatch/ })).toBeTruthy();
     expect(within(pipeline).queryByRole("button", { name: /Approve & dispatch/ })).toBeNull();
     expect(within(pipeline).getByText("Fix the failed mission")).toBeTruthy();

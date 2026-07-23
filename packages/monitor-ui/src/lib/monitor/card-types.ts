@@ -1,13 +1,14 @@
 // Hermes Handoff Monitor — shared card-type definitions.
 //
 // Mirrors the data shapes the slack-operator /monitor/v2/board endpoint
-// returns (see services/slack-operator/src/monitor-v2.ts). This is the
-// frontend's copy of the contract; the two cross an HTTP/JSON boundary,
-// so they're intentionally independent declarations rather than a shared
-// import.
+// returns (see services/slack-operator/src/monitor-v2.ts). Most UI fields are
+// boundary-local; the generic Harness projection stays on the shared INT-0
+// contract so the browser cannot drift into a second definition.
 //
 // Data model documented in §5 of docs/HERMES_MONITOR_REDESIGN_SPEC.md.
 // Lane derivation: lane-rules.ts. Freshness math: urgency.ts.
+
+import type { AgentRunProjectionV1 } from "@avg/schemas";
 
 export type Lane =
   | "needs-attention"
@@ -21,7 +22,7 @@ export type Lane =
 
 export type CardType = "pr" | "mission" | "task" | "deploy" | "draft" | "done";
 
-export type AgentType = "claude" | "codex" | "test-writer" | "security" | "docs" | "hermes" | "ext";
+export type AgentType = "claude" | "codex" | "test-writer" | "security" | "docs" | "hermes" | "harness" | "ext";
 
 export type RiskTag =
   | "workflow"
@@ -136,7 +137,7 @@ export interface CardDiscussionMessage {
 
 export interface CardSourceFailure {
   code: string;
-  source: "github" | "runner" | "deploy" | "codex";
+  source: "github" | "runner" | "deploy" | "codex" | "harness";
   message: string;
   lastGoodAt?: string;
 }
@@ -144,7 +145,7 @@ export interface CardSourceFailure {
 export interface CardWorkingNow {
   agent: AgentType;
   label: string;
-  source: "runner" | "mission" | "classifier";
+  source: "runner" | "mission" | "classifier" | "harness";
   runnerId?: string;
   taskId?: string;
   since?: string;
@@ -227,6 +228,8 @@ export interface CardBase {
   sourceFailure?: CardSourceFailure;
   /** Agent currently working this in-flight card, backed by live runner/classifier state. */
   workingNow?: CardWorkingNow;
+  /** Shared, schema-validated read projection for an allowlisted generic Harness run. */
+  harnessRun?: AgentRunProjectionV1;
   /**
    * Hermes's grounded, agentic read of WHY a failed decision card likely failed
    * plus a recommended next step. Present only on failure cards when the
