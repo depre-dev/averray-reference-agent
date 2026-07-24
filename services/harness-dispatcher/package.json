@@ -1,0 +1,14 @@
+{
+  "name": "@avg/harness-dispatcher",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@avg/schemas": "0.1.0"
+  }
+}
