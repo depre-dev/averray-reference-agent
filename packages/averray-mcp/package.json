@@ -65,6 +65,18 @@
       "types": "./dist/agent-task-store.d.ts",
       "import": "./dist/agent-task-store.js"
     },
+    "./dispatch-claim": {
+      "types": "./dist/dispatch-claim.d.ts",
+      "import": "./dist/dispatch-claim.js"
+    },
+    "./run-binding-outbox": {
+      "types": "./dist/run-binding-outbox.d.ts",
+      "import": "./dist/run-binding-outbox.js"
+    },
+    "./decision-record-store": {
+      "types": "./dist/decision-record-store.d.ts",
+      "import": "./dist/decision-record-store.js"
+    },
     "./task-intent-mapping": {
       "types": "./dist/task-intent-mapping.d.ts",
       "import": "./dist/task-intent-mapping.js"

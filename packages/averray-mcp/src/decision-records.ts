@@ -1,3 +1,10 @@
+import { createHash } from "node:crypto";
+
+import {
+  hermesDecisionRecordV2Schema,
+  type HermesDecisionRecordV2,
+} from "@avg/schemas";
+
 export type HermesDecisionKind =
   | "routing"
   | "auto_approval"
@@ -67,6 +74,13 @@ export interface ExtendHermesDecisionRecordInput {
   safety?: HermesDecisionSafety;
 }
 
+export type BuildHermesDecisionRecordV2Input = Omit<
+  HermesDecisionRecordV2,
+  "schemaVersion" | "kind" | "decisionId" | "generatedAt"
+> & {
+  generatedAt: Date | string;
+};
+
 const SECRET_KEY_PATTERN = /(token|secret|private.?key|password|credential|mnemonic|authorization|cookie|webhook|api.?key|bearer)/i;
 const BEARER_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi;
 const PRIVATE_KEY_PATTERN = /\b(?:private[_ -]?key|secret|token|password)\s*[:=]\s*([^\s,;]+)/gi;
@@ -88,6 +102,41 @@ export function createHermesDecisionRecord(input: CreateHermesDecisionRecordInpu
     safety: sanitizeSafety(input.safety),
     generatedAt,
   };
+}
+
+export function buildHermesDecisionRecordV2(
+  input: BuildHermesDecisionRecordV2Input,
+): HermesDecisionRecordV2 {
+  const generatedAt = normalizeGeneratedAt(input.generatedAt);
+  const correlationId = sanitizeText(input.correlationId);
+  const workItemId = input.workItemId === undefined
+    ? undefined
+    : sanitizeText(input.workItemId);
+  const sanitized = sanitizeDecisionValue({
+    correlationId,
+    ...(workItemId !== undefined ? { workItemId } : {}),
+    decisionType: input.decisionType,
+    proposal: input.proposal,
+    inputs: input.inputs,
+    ...(input.routing !== undefined ? { routing: input.routing } : {}),
+    risk: input.risk,
+    approval: input.approval,
+    effects: input.effects,
+    next: input.next,
+    generatedAt,
+  }) as Record<string, unknown>;
+  const decisionId = v2DecisionRecordId(
+    input.decisionType,
+    correlationId,
+    workItemId,
+    generatedAt,
+  );
+  return hermesDecisionRecordV2Schema.parse({
+    schemaVersion: 2,
+    kind: "hermes_decision",
+    decisionId,
+    ...sanitized,
+  });
 }
 
 export function extendHermesDecisionRecord(
@@ -206,6 +255,18 @@ function decisionRecordId(kind: HermesDecisionKind, subject: HermesDecisionSubje
     .replace(/^-|-$/g, "")
     .slice(0, 120);
   return `hdr-${slug || "decision"}`;
+}
+
+function v2DecisionRecordId(
+  decisionType: string,
+  correlationId: string,
+  workItemId: string | undefined,
+  generatedAt: string,
+): string {
+  const digest = createHash("sha256")
+    .update(`${decisionType}\0${correlationId}\0${workItemId ?? ""}\0${generatedAt}`, "utf8")
+    .digest("hex");
+  return `hdr-v2-${digest}`;
 }
 
 function isDecisionKind(value: unknown): value is HermesDecisionKind {
