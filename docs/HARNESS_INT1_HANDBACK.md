@@ -1,10 +1,12 @@
 # INT-1 handback — read-only Harness projection
 
-**Status:** implementation complete; pending review and live-pilot proof
+**Status:** live pilot complete; acceptance pending live-compatibility follow-up merge
 
-**Branch:** `codex/harness-int1-projection`
+**Original branch:** `codex/harness-int1-projection` (merged as `304c979`)
 
-**Baseline:** `3e559b85d99219ef3dc9ff174f30e9275af92512` (`origin/main`, merged INT-0)
+**Live-compatibility follow-up:** `codex/harness-int1-live-compat`
+
+**Follow-up baseline:** `304c9790e73be79622d173f72f3c1ef1f17ed5cd`
 
 **Runtime authority change:** read-only observation only, off by default
 
@@ -78,8 +80,9 @@ must not be copied into that file, logs, prompts, or the board.
    GitHub-write, Averray-mutation, or dispatch command exists in the adapter.
 4. Unknown Harness states or event types fail visibly rather than being coerced
    into current state.
-5. The live egress policy, compiled risk class, and observed model role/ref must
-   agree with the pinned manifest when the CLI exposes them.
+5. The final manifest hash, live egress policy, compiled risk class, and
+   observed model role/ref must agree with the pinned manifest when the CLI
+   exposes them.
 6. Terminal deliverables are content-addressed references only; INT-1 does not
    read artifact contents.
 7. Failed and quarantined records require structured failure detail.
@@ -89,25 +92,60 @@ must not be copied into that file, logs, prompts, or the board.
    “Ask Hermes” remains advisory.
 10. The flag defaults off and no `HARNESS_DISPATCH_ENABLED` path exists.
 
-## Live-pilot proof still required
+## Live-pilot proof — 2026-07-23
 
-This development environment had no `HARNESS_DATABASE_URL`, Harness CLI
-executable, or operator-selected immutable pilot IDs. The included successful,
-failed, and quarantined fixtures validate the current generic CLI grammar and
-projection behavior, but they are not claimed as production run evidence.
+The operator authorized a supervised local ceremony against Agent Harness
+`8ca7a27` using an isolated Postgres 18 database, the real Harness worker/CLI,
+and a deterministic scripted model. Both task intents were low risk, limited to
+30 seconds / 10,000 model tokens / 20 tool calls, and used deny-all network.
+No external model, production database, repository write, or dispatcher was
+involved.
 
-Before INT-1 is accepted for rollout, an operator must:
+| Case | Immutable run ID | Durable outcome | Verification report |
+|---|---|---|---|
+| Success | `9fa03502-2518-4023-a697-5ccf4c318b4c` | `completed` | `sha256:14798e631855ec89036e33568024e9337e9c9a2cfa1359e7390b6c1e336d7cb8` |
+| Intentional required-check failure | `ee4213a8-ace1-42dd-9694-71e091ff307b` | `failed` / `verification_failed` | `sha256:cacd7b2d3597c07637b7563b0aab06dfce94c2fb032954e1fdb50bfc63430106` |
 
-1. create/select one real successful and one real failed bounded Harness run;
-2. record their immutable IDs and final manifest pins in a secret-free registry;
-3. enable the flag in a non-production or supervised pilot environment;
-4. capture the board proof for both cards;
-5. deny/stop the read source once and confirm the card becomes degraded rather
-   than healthy;
-6. disable the flag after the proof unless the operator explicitly approves the
-   continued read-only pilot.
+The secret-free registry pinned the typed final manifests:
 
-This is a rollout proof, not a reason to add a dispatcher or broaden authority.
+- success manifest
+  `sha256:ed422b86eb9762ec4be00d5c1a44408209d179130f0096a448c30b73b9da70d5`;
+- failed manifest
+  `sha256:7067df6d9b07c2b3b14cd64aebb6125ba391f38bbb7c951abcb7e53c3dbc27e9`;
+- deny-all egress, low risk, the actual capability set, policy/verifier hashes,
+  and the `scripted-model` executor binding for each run.
+
+### Compatibility finding and correction
+
+The first read with merged `304c979` failed closed with `projection_invalid` for
+both runs. Current Harness emits a metadata-only
+`ArtifactCreated {"kind":"episode"}` after `RunCompleted`; the mapper incorrectly
+required every `ArtifactCreated` event to carry a deliverable URI. No card was
+reported healthy.
+
+The follow-up mapper now:
+
+- ignores metadata-only artifact lifecycle events while continuing to reject
+  malformed explicit artifact URIs/hashes;
+- binds verification decisions to the typed `verification_report` deliverable
+  when `VerificationCompleted` omits a `report_ref`;
+- rejects a live final-manifest hash that differs from the registry pin.
+
+With that correction, the success card projected as completed with passed
+verification and the failed card projected to `needs-attention` with failed
+verification. Both carried the correct report artifact, budget, final manifest,
+attempt, source, and Harness attribution.
+
+### Source-loss drill
+
+After the healthy read, the disposable Postgres source was stopped and removed.
+The next projection returned zero healthy items and two retryable `cli_failed`
+source failures. Both cards moved to `needs-attention` with
+`state=source-offline`; neither retained healthy state.
+
+The worker was then stopped, the projection flag remained disabled outside the
+scoped ceremony, and no pilot service or database was left running. This proof
+does not authorize a dispatcher or broaden Harness authority.
 
 ## Affected surfaces
 
