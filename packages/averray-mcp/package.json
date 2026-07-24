@@ -60,6 +60,10 @@
     "./decision-records": {
       "types": "./dist/decision-records.d.ts",
       "import": "./dist/decision-records.js"
+    },
+    "./agent-task-store": {
+      "types": "./dist/agent-task-store.d.ts",
+      "import": "./dist/agent-task-store.js"
     }
   },
   "scripts": {
