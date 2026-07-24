@@ -52,8 +52,8 @@ function capturedExecutor(calls: string[][]): HarnessCommandExecutor {
       ? `${prefix}-status.txt`
       : verb === "events"
         ? `${prefix}-events.txt`
-        : prefix === "successful"
-          ? "successful-deliverables.txt"
+        : prefix !== "quarantined"
+          ? `${prefix}-deliverables.txt`
           : undefined;
     return {
       code: 0,
@@ -112,9 +112,13 @@ describe("INT-1 fixed Harness read port", () => {
       outcome: "completed",
       egressPolicy: "deny",
     });
-    expect(read.events.at(-1)?.type).toBe("RunCompleted");
+    expect(read.events.some((event) => event.type === "RunCompleted")).toBe(true);
+    expect(read.events.at(-1)).toMatchObject({
+      type: "ArtifactCreated",
+      payload: { kind: "episode" },
+    });
     expect(read.deliverables[0]?.artifact.sha256)
-      .toBe("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+      .toBe("sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
     expect(calls).toEqual([
       ["run", "status", "11111111-1111-4111-8111-111111111111"],
       ["run", "events", "11111111-1111-4111-8111-111111111111"],
@@ -188,7 +192,10 @@ describe("INT-1 deterministic AgentRunProjection", () => {
       workItemId: "work-harness-success-001",
       run: { state: "completed", terminal: true, outcome: "completed" },
       source: { health: "healthy" },
-      verification: { status: "passed" },
+      verification: {
+        status: "passed",
+        decisionHash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      },
       budget: { modelTokensUsed: 150, toolCallsUsed: 1 },
     });
     expect(first.artifacts).toHaveLength(1);
@@ -200,7 +207,10 @@ describe("INT-1 deterministic AgentRunProjection", () => {
     );
     expect(failed).toMatchObject({
       run: { state: "failed", terminal: true, outcome: "failed" },
-      verification: { status: "failed" },
+      verification: {
+        status: "failed",
+        decisionHash: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      },
       failure: {
         code: "verification_failed",
         message: "verification_failed",
@@ -271,6 +281,18 @@ describe("INT-1 deterministic AgentRunProjection", () => {
       read,
       { now: NOW },
     )).toThrow(/does not match the pinned/);
+
+    expect(() => projectHarnessRun(
+      {
+        ...bindingAt(0),
+        manifest: {
+          ...bindingAt(0).manifest,
+          hash: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        },
+      },
+      read,
+      { now: NOW },
+    )).toThrow(/final manifest hash/);
   });
 
   it("turns source denial into a visible unavailable failure, never a healthy projection", async () => {

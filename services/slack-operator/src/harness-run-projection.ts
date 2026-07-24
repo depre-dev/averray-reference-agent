@@ -118,7 +118,7 @@ export function projectHarnessRun(
     : stale
       ? `Harness source has not updated for ${ageSeconds} seconds`
       : undefined;
-  const verification = verificationFromEvents(read.events);
+  const verification = verificationFromRead(read);
   const artifacts = artifactsFromRead(read);
   const failure = failureFromRead(read);
   const budget = budgetFromRead(binding, read);
@@ -198,6 +198,15 @@ function assertManifestMatchesLiveRead(
         throw new HarnessProjectionError(
           "manifest_mismatch",
           "Harness compiled risk class does not match the pinned pilot manifest",
+        );
+      }
+    }
+    if (event.type === "EnvironmentPrepared") {
+      const manifestHash = stringField(event.payload, "manifest_hash");
+      if (manifestHash && manifestHash !== binding.manifest.hash) {
+        throw new HarnessProjectionError(
+          "manifest_mismatch",
+          "Harness final manifest hash does not match the pinned pilot manifest",
         );
       }
     }
@@ -287,8 +296,12 @@ function artifactsFromRead(read: HarnessRunReadSnapshot): ArtifactRef[] {
   for (const event of read.events) {
     if (event.type !== "ArtifactCreated") continue;
     const uri = stringField(event.payload, "artifact_uri");
+    // Harness also emits metadata-only ArtifactCreated records for internal
+    // episode lifecycle. Only events carrying an immutable artifact URI are
+    // part of the board's artifact projection.
+    if (!uri) continue;
     const artifact = artifactFromUri(uri);
-    if (!uri || !artifact) {
+    if (!artifact) {
       throw new HarnessProjectionError(
         "projection_invalid",
         "Harness ArtifactCreated event has an unsupported artifact reference",
@@ -306,10 +319,10 @@ function artifactsFromRead(read: HarnessRunReadSnapshot): ArtifactRef[] {
   return [...artifacts.values()].sort((left, right) => left.uri.localeCompare(right.uri));
 }
 
-function verificationFromEvents(
-  events: HarnessEventRead[],
+function verificationFromRead(
+  read: HarnessRunReadSnapshot,
 ): AgentRunProjectionV1["verification"] {
-  const event = [...events].reverse().find((candidate) =>
+  const event = [...read.events].reverse().find((candidate) =>
     candidate.type === "VerificationCompleted"
     && stringField(candidate.payload, "scope") !== "plan_node"
   );
@@ -324,13 +337,34 @@ function verificationFromEvents(
         : "inconclusive"
       : "inconclusive";
   const reportUri = stringField(event.payload, "report_ref");
-  const decisionRef = artifactFromUri(reportUri);
-  if (reportUri && !decisionRef) {
+  const eventDecisionRef = artifactFromUri(reportUri);
+  if (reportUri && !eventDecisionRef) {
     throw new HarnessProjectionError(
       "projection_invalid",
       "Harness verification report has an unsupported artifact reference",
     );
   }
+  const deliverableReports = read.deliverables
+    .filter((deliverable) => deliverable.deliverableType === "verification_report")
+    .map((deliverable) => deliverable.artifact);
+  const uniqueDeliverableReports = new Map(
+    deliverableReports.map((artifact) => [artifact.uri, artifact] as const),
+  );
+  if (uniqueDeliverableReports.size > 1) {
+    throw new HarnessProjectionError(
+      "projection_invalid",
+      "Harness returned multiple verification report deliverables",
+    );
+  }
+  const deliverableDecisionRef = [...uniqueDeliverableReports.values()][0];
+  if (eventDecisionRef && deliverableDecisionRef
+      && eventDecisionRef.uri !== deliverableDecisionRef.uri) {
+    throw new HarnessProjectionError(
+      "projection_invalid",
+      "Harness verification event and deliverable references do not match",
+    );
+  }
+  const decisionRef = eventDecisionRef ?? deliverableDecisionRef;
   return {
     status,
     ...(decisionRef

@@ -1,8 +1,10 @@
 1 TaskAccepted payload={"task_id":"pilot-success"}
 2 ContractCompiled payload={"draft_manifest_hash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","risk_class":"low","task_hash":"sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
-3 ModelRequested payload={"model_ref":"example-model","role":"executor"}
-4 ModelResponded payload={"usage":{"input_tokens":100,"output_tokens":50,"requests":1}}
-5 CapabilityDispatched payload={"capability":"fs.write_file"}
-6 ArtifactCreated payload={"artifact_hash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","artifact_uri":"artifact://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","deliverable_type":"patch"}
-7 VerificationCompleted payload={"passed":true,"report_ref":"artifact://sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","verdict":"completed"}
-8 RunCompleted payload={"deliverables":{"patch":"artifact://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"outcome":"completed","reason":null}
+3 EnvironmentPrepared payload={"manifest_hash":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","provider":"local"}
+4 ModelRequested payload={"model_ref":"example-model","role":"executor"}
+5 ModelResponded payload={"usage":{"input_tokens":100,"output_tokens":50,"requests":1}}
+6 CapabilityDispatched payload={"capability":"fs.write_file"}
+7 VerificationCompleted payload={"passed":true,"verdict":"completed"}
+8 ArtifactCreated payload={"artifact_hash":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","artifact_uri":"artifact://sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","deliverable_type":"verification_report"}
+9 RunCompleted payload={"deliverables":{"verification_report":"artifact://sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"outcome":"completed","reason":null}
+10 ArtifactCreated payload={"kind":"episode"}
