@@ -17,6 +17,7 @@ import {
   recordLlmUsageFromResult,
 } from "@avg/averray-mcp/llm-usage";
 import { handleOperatorCommandText } from "@avg/averray-mcp/operator-handler";
+import { listAgentTasks } from "@avg/averray-mcp/agent-task-store";
 import {
   formatOperatorResultForSlack,
   isAuthorizedSlackCommand,
@@ -218,6 +219,10 @@ import {
   taskAgent,
   type CodexTask,
 } from "./codex-task-queue.js";
+import {
+  countAgentTaskBoardItems,
+  mergeAgentTaskBoardItems,
+} from "./agent-task-board.js";
 import { parseProposeTaskPayload } from "./codex-task-request.js";
 import {
   acceptTestbedMissionFailure,
@@ -4139,6 +4144,15 @@ async function loadMonitorSnapshot(
       status: "ok",
       durationMs: Date.now() - codexStartedAt,
     });
+    phases.push({
+      name: "agent_task_store",
+      status: codexTasks.agentTaskStore.status === "ok" ? "ok" : "skipped",
+      durationMs: codexTasks.agentTaskStore.durationMs,
+      rows: codexTasks.agentTaskStore.rows,
+      ...(codexTasks.agentTaskStore.status === "unavailable"
+        ? { error: codexTasks.agentTaskStore.reason }
+        : {}),
+    });
   } catch (error) {
     logger.warn({ err: error }, "monitor_codex_task_queue_skipped");
     phases.push({
@@ -4615,9 +4629,42 @@ async function recordHermesRouterAudit(record: HermesRouterAuditRecord): Promise
 }
 
 async function loadCodexTaskQueueSummary() {
-  const codexTasks = await listCodexTasks();
-  const codexRunner = await readCodexRunnerHeartbeat().catch(() => undefined);
-  return summarizeCodexTasks(codexTasks, 100, { runner: codexRunner });
+  const [codexTasks, codexRunner] = await Promise.all([
+    listCodexTasks(),
+    readCodexRunnerHeartbeat().catch(() => undefined),
+  ]);
+  const agentTaskStartedAt = Date.now();
+  let agentTasks: Awaited<ReturnType<typeof listAgentTasks>> = [];
+  let agentTaskStore: {
+    status: "ok" | "unavailable";
+    durationMs: number;
+    rows: number;
+    reason?: string;
+  };
+  try {
+    agentTasks = await listAgentTasks();
+    agentTaskStore = {
+      status: "ok",
+      durationMs: Date.now() - agentTaskStartedAt,
+      rows: agentTasks.length,
+    };
+  } catch (error) {
+    logger.warn({ err: error }, "monitor_agent_task_store_unavailable");
+    agentTaskStore = {
+      status: "unavailable",
+      durationMs: Date.now() - agentTaskStartedAt,
+      rows: 0,
+      reason: "AgentTask store read failed; legacy task records remain available.",
+    };
+  }
+  const legacySummary = summarizeCodexTasks(codexTasks, 100, { runner: codexRunner });
+  const items = mergeAgentTaskBoardItems(codexTasks, agentTasks, 100);
+  return {
+    ...legacySummary,
+    counts: countAgentTaskBoardItems(items),
+    items,
+    agentTaskStore,
+  };
 }
 
 function monitorGithubEnrichTimeoutMs(): number {
