@@ -1,0 +1,93 @@
+{
+  "apiVersion": "harness/v1alpha1",
+  "kind": "TaskIntent",
+  "metadata": {
+    "id": "migrate-auth-tests",
+    "labels": {
+      "project": "auth-service"
+    }
+  },
+  "spec": {
+    "profile": "coding-change",
+    "objective": "Migrate the auth service tests without changing production behavior.",
+    "deliverables": [
+      {
+        "type": "workspace_patch",
+        "scope": "auth-service/tests"
+      },
+      {
+        "type": "verification_report"
+      },
+      {
+        "type": "change_summary"
+      }
+    ],
+    "context": {
+      "workspace": {
+        "path": "./auth-service",
+        "revision": "HEAD"
+      },
+      "references": [
+        {
+          "path": "./docs/testing.md",
+          "authority": "project_guidance"
+        }
+      ]
+    },
+    "constraints": {
+      "allowed_paths": [
+        "auth-service/tests/**",
+        "auth-service/pyproject.toml"
+      ],
+      "forbidden_paths": [
+        "auth-service/src/**"
+      ],
+      "network": "deny"
+    },
+    "acceptance": [
+      {
+        "id": "tests",
+        "type": "command",
+        "command": "pytest tests/ -x",
+        "working_directory": "auth-service",
+        "required": true
+      },
+      {
+        "id": "no-unittest",
+        "type": "search",
+        "include": [
+          "auth-service/tests/**/*.py"
+        ],
+        "pattern": "\\bimport unittest\\b|\\bfrom unittest\\b",
+        "expected_matches": 0,
+        "required": true
+      },
+      {
+        "id": "behavior",
+        "type": "baseline_comparison",
+        "rule": "no_new_failures",
+        "required": true
+      }
+    ],
+    "approvals": [
+      {
+        "when": "before_external_publish"
+      },
+      {
+        "when": "change_outside_allowed_paths"
+      }
+    ],
+    "budgets": {
+      "elapsed": "PT45M",
+      "model_tokens": 2000000,
+      "tool_calls": 400,
+      "max_children": 2,
+      "max_concurrent_children": 2
+    },
+    "learning": {
+      "episode_capture": true,
+      "memory_write": "candidate_only",
+      "skill_generation": "eligible"
+    }
+  }
+}
