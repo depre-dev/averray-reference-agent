@@ -64,6 +64,14 @@
     "./agent-task-store": {
       "types": "./dist/agent-task-store.d.ts",
       "import": "./dist/agent-task-store.js"
+    },
+    "./task-intent-mapping": {
+      "types": "./dist/task-intent-mapping.d.ts",
+      "import": "./dist/task-intent-mapping.js"
+    },
+    "./attenuation": {
+      "types": "./dist/attenuation.d.ts",
+      "import": "./dist/attenuation.js"
     }
   },
   "scripts": {
