@@ -37,11 +37,12 @@ services:
       [
         "/bin/sh",
         "-lc",
-        "mkdir -p /opt/data/skills /opt/data/browser-profiles /data && chmod -R 0777 /opt/data /data"
+        "mkdir -p /opt/data/skills /opt/data/browser-profiles /data /harness-dispatcher/workspaces && chmod -R 0777 /opt/data /data /harness-dispatcher"
       ]
     volumes:
       - avg-hermes:/opt/data
       - avg-data:/data
+      - harness-dispatch-workspaces:/harness-dispatcher
       - ../hermes/profiles:/opt/data/browser-profiles
       - avg-hermes-skills:/opt/data/skills
     networks: [avg-internal]
@@ -563,6 +564,45 @@ services:
       - avg-data:/data
     networks: [avg-internal]
 
+  # INT-2 supervised Harness dispatcher. DORMANT by construction: Compose
+  # excludes this service unless the operator selects profile "dispatch", and
+  # the independent runtime authority flag remains false unless explicitly set.
+  harness-dispatcher:
+    init: true
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.node
+    image: ${AVERRAY_IMAGE:-avg-node-runtime}
+    profiles: ["dispatch"]
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      hermes-permissions:
+        condition: service_completed_successfully
+      mcp-bundle:
+        condition: service_completed_successfully
+    command: ["node", "services/harness-dispatcher/dist/index.js"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      HARNESS_DATABASE_URL: ${HARNESS_DATABASE_URL:-}
+      HALT_FILE: ${HALT_FILE:-/data/HALT}
+      HARNESS_BIN: ${HARNESS_BIN:-harness}
+      HARNESS_PROFILES_ROOT: ${HARNESS_PROFILES_ROOT:-}
+      HARNESS_PROFILE_SHA256: ${HARNESS_PROFILE_SHA256:-}
+      HARNESS_DISPATCH_ENABLED: ${HARNESS_DISPATCH_ENABLED:-false}
+      HARNESS_DISPATCHER_ID: ${HARNESS_DISPATCHER_ID:-vps-harness-dispatcher}
+      HARNESS_DISPATCH_POLL_INTERVAL_MS: ${HARNESS_DISPATCH_POLL_INTERVAL_MS:-15000}
+      HARNESS_DISPATCH_LEASE_TTL_SECONDS: ${HARNESS_DISPATCH_LEASE_TTL_SECONDS:-120}
+      HARNESS_DISPATCH_INTENT_DIR: ${HARNESS_DISPATCH_INTENT_DIR:-/data/harness-dispatch-intents}
+      HARNESS_DISPATCH_HEARTBEAT_PATH: ${HARNESS_DISPATCH_HEARTBEAT_PATH:-/data/harness-dispatcher-heartbeat.json}
+    volumes:
+      - avg-data:/data
+      - harness-dispatch-workspaces:/var/lib/harness-dispatcher
+    networks: [avg-internal]
+
   # Claude task runner (O2). Mirrors codex-task-runner; claims approved
   # agent="claude" tasks. The startup route gate (claude-worker-auth) refuses
   # to claim on a billing-route mismatch. Disabled by default; the operator
@@ -863,6 +903,7 @@ services:
 volumes:
   avg-postgres:
   avg-data:
+  harness-dispatch-workspaces:
   avg-app:
   avg-mcp-env:
   avg-hermes:
