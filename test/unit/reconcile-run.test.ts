@@ -56,7 +56,7 @@ describe("dispatched Harness run reconciliation", () => {
     ["completed", "handoff_ready"],
     ["partial", "failed"],
     ["failed", "failed"],
-    ["quarantined", "failed"],
+    ["quarantined", "blocked"],
     ["cancel_requested", "cancelled"],
     ["compensating", "cancelled"],
     ["cancelled", "cancelled"],
@@ -76,15 +76,33 @@ describe("dispatched Harness run reconciliation", () => {
       if (expectedLifecycle !== task.lifecycle) {
         expect(savedTasks(deps).at(-1)?.lifecycle).toBe(expectedLifecycle);
       }
-      if (state === "approval_required" || state === "suspended") {
+      if (
+        state === "approval_required"
+        || state === "suspended"
+        || state === "quarantined"
+      ) {
         expect(recordedDecisions(deps).at(-1)?.decisionType)
-          .toBe("anomaly_pause");
+          .toBe("dispatch_refusal");
         expect(reconciled?.healthy).toBe(false);
+        expect(deps.controlPort.cancel).toHaveBeenCalledWith(RUN_ID);
+        expect(deps.alertSink).toHaveBeenCalledOnce();
+        expect(deps.alertSink).toHaveBeenCalledWith(
+          expect.objectContaining({
+            severity: "critical",
+            code: state === "approval_required"
+              ? "approval_required"
+              : state === "suspended"
+                ? "run_suspended"
+                : "run_quarantined",
+          }),
+        );
       }
       if (state === "quarantined") {
-        expect(deps.logger?.warn).toHaveBeenCalledWith(
-          expect.objectContaining({ alert: true }),
-          expect.stringContaining("ALERT"),
+        expect(deps.alertSink).toHaveBeenCalledWith(
+          expect.objectContaining({
+            code: "run_quarantined",
+            severity: "critical",
+          }),
         );
       }
     },
@@ -141,7 +159,7 @@ describe("dispatched Harness run reconciliation", () => {
     const [reconciled] = await reconcileDispatchedRuns(deps);
 
     expect(reconciled).toMatchObject({
-      outcome: "refused",
+      outcome: "advanced",
       lifecycle: "blocked",
       healthy: false,
     });
@@ -152,10 +170,143 @@ describe("dispatched Harness run reconciliation", () => {
     });
     expect(recordedDecisions(deps).at(-1)?.proposal.why[0])
       .toContain("projection_containment_failed");
-    expect(deps.logger?.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ alert: true }),
-      expect.stringContaining("ALERT"),
+    expect(deps.controlPort.cancel).toHaveBeenCalledWith(RUN_ID);
+    expect(deps.alertSink).toHaveBeenCalledOnce();
+    expect(deps.alertSink).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: "containment_expansion",
+        severity: "critical",
+      }),
     );
+  });
+
+  it("cancels and fails an overdue non-terminal task with one alert", async () => {
+    const task = agentTaskV1Schema.parse({
+      ...await runningTask(),
+      deadline: "2026-07-25T12:29:59.000Z",
+    });
+    const deps = reconcileDeps(task, snapshot("executing"));
+
+    const [reconciled] = await reconcileDispatchedRuns(deps);
+
+    expect(reconciled).toMatchObject({
+      outcome: "advanced",
+      lifecycle: "failed",
+      healthy: false,
+      reason: "deadline_exceeded",
+    });
+    expect(deps.readPort.readRun).not.toHaveBeenCalled();
+    expect(deps.controlPort.cancel).toHaveBeenCalledOnce();
+    expect(deps.controlPort.cancel).toHaveBeenCalledWith(RUN_ID);
+    expect(savedTasks(deps).at(-1)).toMatchObject({
+      lifecycle: "failed",
+      timestamps: { terminalAt: NOW.toISOString() },
+    });
+    expect(recordedDecisions(deps).at(-1)).toMatchObject({
+      decisionType: "dispatch_refusal",
+      proposal: {
+        why: ["deadline_exceeded", "harness_cancel_acknowledged"],
+      },
+    });
+    expect(deps.alertSink).toHaveBeenCalledOnce();
+    expect(deps.alertSink).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: "critical",
+        code: "deadline_exceeded",
+      }),
+    );
+  });
+
+  it("cancels and fails a budget-exhausted run with one alert", async () => {
+    const task = await runningTask();
+    const projection = projectionFor(task, "executing");
+    const exhausted = agentRunProjectionV1Schema.parse({
+      ...projection,
+      budget: {
+        ...projection.budget,
+        elapsedSecondsUsed: task.budget.elapsedSeconds,
+        exhausted: true,
+      },
+    });
+    const deps = reconcileDeps(task, snapshot("executing"), {
+      projectRun: vi.fn(() => exhausted),
+    });
+
+    const [reconciled] = await reconcileDispatchedRuns(deps);
+
+    expect(reconciled).toMatchObject({
+      outcome: "advanced",
+      lifecycle: "failed",
+      healthy: false,
+      reason: "budget_exhausted",
+    });
+    expect(deps.controlPort.cancel).toHaveBeenCalledOnce();
+    expect(savedTasks(deps).at(-1)?.lifecycle).toBe("failed");
+    expect(recordedDecisions(deps).at(-1)?.proposal.why).toEqual([
+      "budget_exhausted",
+      "harness_cancel_acknowledged",
+    ]);
+    expect(deps.alertSink).toHaveBeenCalledOnce();
+    expect(deps.alertSink).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: "critical",
+        code: "budget_exhausted",
+      }),
+    );
+  });
+
+  it("treats an ApprovalPacket event as a cancel-and-block anomaly", async () => {
+    const task = await runningTask();
+    const read = snapshot("executing");
+    read.events.push({
+      seq: 3,
+      type: "ApprovalRequested",
+      payload: { capability: "external_effect" },
+    });
+    const deps = reconcileDeps(task, read);
+
+    const [reconciled] = await reconcileDispatchedRuns(deps);
+
+    expect(reconciled).toMatchObject({
+      lifecycle: "blocked",
+      healthy: false,
+      reason: "approval_packet_detected",
+    });
+    expect(deps.controlPort.cancel).toHaveBeenCalledWith(RUN_ID);
+    expect(deps.alertSink).toHaveBeenCalledOnce();
+    expect(deps.alertSink).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: "critical",
+        code: "approval_packet_detected",
+      }),
+    );
+  });
+
+  it("cancels one live bound run on HALT and never dispatches", async () => {
+    const task = await runningTask();
+    const deps = reconcileDeps(task, snapshot("executing"), {
+      isHalted: vi.fn(() => true),
+    });
+
+    const [reconciled] = await reconcileDispatchedRuns(deps);
+
+    expect(reconciled).toMatchObject({
+      outcome: "advanced",
+      lifecycle: "cancelled",
+      healthy: false,
+      reason: "halt_active_run_cancelled",
+    });
+    expect(deps.controlPort.cancel).toHaveBeenCalledOnce();
+    expect(savedTasks(deps).at(-1)?.lifecycle).toBe("cancelled");
+    expect(recordedDecisions(deps).at(-1)?.decisionType).toBe("escalation");
+    expect(deps.alertSink).toHaveBeenCalledOnce();
+    expect(deps.alertSink).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: "critical",
+        code: "halt_active_run_cancelled",
+      }),
+    );
+    expect("submit" in deps.controlPort).toBe(false);
   });
 
   it("marks completed-but-unverified work failed without a handoff", async () => {
@@ -221,7 +372,6 @@ describe("dispatched Harness run reconciliation", () => {
       /\.(?:submit|approve|deny|release|openPullRequest)\s*\(/,
     );
     expect(moduleSource).not.toMatch(/\baverray_(?:claim|submit)\b/i);
-    expect(moduleSource).not.toContain("HarnessControlPort");
     expect(moduleSource).not.toContain("@octokit");
   });
 
@@ -258,6 +408,14 @@ describe("dispatched Harness run reconciliation", () => {
       lifecycle: "running",
       bindings: { harnessRunId: intendedRunId },
     });
+    expect(deps.alertSink).toHaveBeenCalledOnce();
+    expect(deps.alertSink).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: "critical",
+        code: "orphan_run_detected",
+        harnessRunId: intendedRunId,
+      }),
+    );
     expect("submit" in deps).toBe(false);
     expect(recordedDecisions(deps)).toEqual([]);
   });
@@ -376,7 +534,7 @@ describe("dispatcher tick reconciliation order", () => {
     });
   });
 
-  it("does not reconcile or dispatch while HALT is present", async () => {
+  it("runs stop-only reconciliation and does not dispatch while HALT is present", async () => {
     const deps = processDeps({
       isHalted: vi.fn(() => true),
     });
@@ -384,7 +542,7 @@ describe("dispatcher tick reconciliation order", () => {
 
     await expect(process.tick()).resolves.toEqual({ outcome: "halted" });
 
-    expect(deps.runReconcile).not.toHaveBeenCalled();
+    expect(deps.runReconcile).toHaveBeenCalledOnce();
     expect(deps.runAttempt).not.toHaveBeenCalled();
     expect(heartbeats(deps).at(-1)).toMatchObject({
       status: "halted",
@@ -431,6 +589,7 @@ async function runningTask(): Promise<AgentTaskV1> {
   const candidate = {
     ...raw,
     lifecycle: "running",
+    deadline: "2026-07-26T12:00:00.000Z",
     approval: {
       ...raw.approval,
       status: "approved",
@@ -503,8 +662,13 @@ function reconcileDeps(
     readPort: overrides.readPort ?? {
       readRun: vi.fn(async () => read),
     },
+    controlPort: overrides.controlPort ?? {
+      cancel: vi.fn(async () => undefined),
+    },
     recordDecision:
       overrides.recordDecision ?? vi.fn(async () => undefined),
+    alertSink:
+      overrides.alertSink ?? vi.fn(async () => undefined),
     logger: overrides.logger ?? {
       warn: vi.fn(),
     },

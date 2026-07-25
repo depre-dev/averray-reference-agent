@@ -28,6 +28,9 @@ import { closePool } from "@avg/mcp-common";
 import { taskIntentSchema } from "@avg/schemas";
 
 import {
+  createDispatchAlertSink,
+} from "./alerts.js";
+import {
   readHaltFile,
   runSingleDispatch,
   type DispatchAttemptResult,
@@ -207,14 +210,17 @@ export function createDispatcherProcess(
       const enabled = deps.isDispatchEnabled();
       const halted = deps.isHalted();
       if (halted) {
+        const reconciled = await deps.runReconcile();
         const result: DispatchAttemptResult = { outcome: "halted" };
         lastOutcome = result.outcome;
-        lastReconciledCount = 0;
+        lastReconciledCount = reconciled.length;
+        logReconcile(deps.logger, reconciled);
         logAttempt(deps.logger, result);
         await writeHeartbeatBestEffort(
           "halted",
-          "Harness dispatcher is halted; reconciliation and dispatch were skipped.",
+          "Harness dispatcher is halted; active-run stop reconciliation completed and no dispatch was attempted.",
           result.outcome,
+          reconciled.length,
         );
         return result;
       }
@@ -378,6 +384,10 @@ export function createProductionDispatcher(
     command: config.harnessBin,
     enabled: harnessDispatchEnabled(environment),
   });
+  const alertSink = createDispatchAlertSink({
+    environment,
+    logger,
+  });
   const dispatchDeps: DispatchDeps = {
     now: () => new Date(),
     dispatcherId: config.dispatcherId,
@@ -398,6 +408,7 @@ export function createProductionDispatcher(
     writeIntentArtifact: createIntentArtifactWriter(config.intentDir),
     controlPort,
     recordDecision: recordHermesDecision,
+    alertSink,
     logger: {
       warn(object, message) {
         logger.warn(asLogFields(object), message);
@@ -417,7 +428,9 @@ export function createProductionDispatcher(
     readPort: createHarnessCliReadPort({
       command: config.harnessBin,
     }),
+    controlPort,
     recordDecision: recordHermesDecision,
+    alertSink,
     logger: {
       warn(fields, message) {
         logger.warn(fields, message);

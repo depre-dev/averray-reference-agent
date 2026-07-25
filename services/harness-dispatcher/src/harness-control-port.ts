@@ -5,6 +5,12 @@
  * may already exist. The caller must reconcile with `run status <same runId>`
  * and, if needed, re-submit the SAME run id, which DBOS safely deduplicates.
  * Never mint a new run id when retrying an ambiguous submit.
+ *
+ * The dispatch flag gates submit only. HALT and a disabled dispatcher prevent
+ * new work from starting, but neither can stop a run that is already active.
+ * `run cancel` is authority-reducing: it cannot start work, broaden a grant,
+ * approve, deny, release, or invoke any other control operation. Keeping cancel
+ * available is therefore required for an emergency stop.
  */
 
 import { spawn } from "node:child_process";
@@ -123,7 +129,6 @@ export function createHarnessControlPort(options: {
     },
 
     async cancel(runId) {
-      assertEnabled();
       assertCanonicalRunId(runId);
 
       await runControlCommand(
