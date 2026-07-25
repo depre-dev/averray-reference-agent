@@ -6,10 +6,13 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc -b",
-    "typecheck": "tsc -b --pretty false"
+    "typecheck": "tsc -b --pretty false",
+    "start": "node dist/index.js"
   },
   "dependencies": {
     "@avg/averray-mcp": "0.1.0",
-    "@avg/schemas": "0.1.0"
+    "@avg/mcp-common": "0.1.0",
+    "@avg/schemas": "0.1.0",
+    "yaml": "^2.7.0"
   }
 }

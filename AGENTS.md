@@ -124,8 +124,12 @@ TypeScript monorepo: npm workspaces (`packages/*`, `services/*`), Node ≥ 22, E
   visibly; they never become healthy cards. This path cannot submit, approve,
   deny, cancel, release, dispatch, mutate GitHub/Averray, or read artifact
   contents. Harness contributes structured run facts and a card tag; Hermes
-  remains the only conversational board voice. No Harness dispatcher exists
-  until a later separately guarded packet.
+  remains the only conversational board voice. A separate Harness dispatcher
+  service exists but is dormant: it is isolated behind the non-default
+  `dispatch` Compose profile and `HARNESS_DISPATCH_ENABLED=false` by default.
+  At concurrency one it acts only on operator-approved, hash-pinned AgentTasks,
+  honors `HALT_FILE`, and cannot approve, deny, release, merge, deploy, or open
+  a PR.
 - **Self-healing (B2, off by default).** On a failure signal (failed testbed
   mission, failed deploy/verification), Hermes auto-**proposes** a routed fix
   task (non-high-risk) — which still lands `proposed` and flows through the same
