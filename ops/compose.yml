@@ -325,11 +325,30 @@ services:
       # Repeat an unchanged RED incident at most every 6h. Set 0 for edge-only alerts.
       PRODUCT_HEALTH_ALERT_COOLDOWN_MINUTES: ${PRODUCT_HEALTH_ALERT_COOLDOWN_MINUTES:-360}
       PRODUCT_HEALTH_API_PATH: ${PRODUCT_HEALTH_API_PATH:-/health}
+      # No per-network default outside testnet, and none is guessed: the balance
+      # probe refuses any endpoint whose eth_chainId != the chainId /health reports
+      # (product-health.ts chain guard), so a wrong URL fails loudly instead of
+      # reporting another chain's balances. Take it from deployments/<network>.json.
+      # Mainnet (chainId 420420419), verified on-chain: https://eth-rpc.polkadot.io/
       PRODUCT_HEALTH_RPC_URL: ${PRODUCT_HEALTH_RPC_URL:-}
       PRODUCT_HEALTH_SIGNER_ADDRESS: ${PRODUCT_HEALTH_SIGNER_ADDRESS:-}
+      # ⚠ The mainnet USDC address is DELIBERATELY IDENTICAL to testnet's:
+      #   0x0000053900000000000000000000000001200000
+      # Trust-Backed asset precompiles derive deterministically from the asset ID —
+      # `0x` + asset 1337 as 8 hex (00000539) + 24 zeros + 01200000 = 40 hex chars.
+      # It is NOT a copy-paste error and must NOT be "corrected" per network.
+      # Confirmed against the official docs and by live balanceOf calls (2026-07-25).
       PRODUCT_HEALTH_USDC_ADDRESS: ${PRODUCT_HEALTH_USDC_ADDRESS:-}
       PRODUCT_HEALTH_USDC_DECIMALS: ${PRODUCT_HEALTH_USDC_DECIMALS:-6}
+      # Floors default to 0 = that probe can NEVER go red. Fine for a testnet, but
+      # on a live network a 0 floor means no warning before you run dry. Mainnet
+      # values in use (2026-07-25, sized off live balances): GAS_NATIVE=1 DOT (low
+      # signer gas caused the 2026-06-30 canary failure; 1 DOT ≈ days of settlement
+      # runway after the alert), REWARD_BANK=2 USDC (~5–10 jobs at 0.2–0.4/job), AAC=1.
       PRODUCT_HEALTH_MIN_GAS_NATIVE: ${PRODUCT_HEALTH_MIN_GAS_NATIVE:-0}
+      # NB: this is the SIGNER's own USDC (the reward-bank account) — distinct from
+      # MIN_REWARD_BANK below, which reads the treasury view. At 0 the USDC half of
+      # signer_liquidity is unfireable, so set it whenever MIN_REWARD_BANK is set.
       PRODUCT_HEALTH_MIN_USDC: ${PRODUCT_HEALTH_MIN_USDC:-0}
       PRODUCT_HEALTH_REQUIRED_CAPABILITIES: ${PRODUCT_HEALTH_REQUIRED_CAPABILITIES:-blockchain,treasuryMutations}
       PRODUCT_HEALTH_EXPECTED_WARNINGS: ${PRODUCT_HEALTH_EXPECTED_WARNINGS:-xcm_observer_staged,indexer_unavailable,gas_sponsor_disabled}
@@ -345,6 +364,13 @@ services:
       # until OPS_AUTOREMEDIATE_ENABLED=true AND at least one PRODUCT_HEALTH_RPC_BACKUPS
       # endpoint is set. Only action: rotate the monitor's read RPC off a dead endpoint.
       OPS_AUTOREMEDIATE_ENABLED: ${OPS_AUTOREMEDIATE_ENABLED:-false}
+      # Every backup MUST be on the same chain as the product. Failover picks on
+      # liveness alone, so a leftover other-network endpoint would be rotated onto;
+      # the chain guard then refuses its balances rather than trusting them. Empty
+      # is honest — a dead or wrong-chain backup is worse than none.
+      # Mainnet: empty as of 2026-07-25 — polkadot-asset-hub-eth-rpc.polkadot.io and
+      # asset-hub-polkadot-eth-rpc.polkadot.io were probed and did not respond.
+      # TODO: add a second verified mainnet eth-rpc (Dwellir/OnFinality-class).
       PRODUCT_HEALTH_RPC_BACKUPS: ${PRODUCT_HEALTH_RPC_BACKUPS:-}
       OPS_AUTOREMEDIATE_FAIL_THRESHOLD: ${OPS_AUTOREMEDIATE_FAIL_THRESHOLD:-2}
       OPS_AUTOREMEDIATE_MAX_ATTEMPTS: ${OPS_AUTOREMEDIATE_MAX_ATTEMPTS:-3}
