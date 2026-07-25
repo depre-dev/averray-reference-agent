@@ -93,7 +93,7 @@ services:
       TRACE_HTTP_URL: http://127.0.0.1:${TRACE_HTTP_PORT:-8789}/hermes-event
       POLICY_CONFIG_PATH: /config/policy.yaml
       HALT_FILE: ${HALT_FILE:-/data/HALT}
-      WALLET_NETWORK: testnet
+      WALLET_NETWORK: ${WALLET_NETWORK:-testnet}
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
@@ -147,7 +147,7 @@ services:
       AVERRAY_API_BASE_URL: ${AVERRAY_API_BASE_URL}
       AGENT_WALLET_PRIVATE_KEY: ${AGENT_WALLET_PRIVATE_KEY}
       HALT_FILE: ${HALT_FILE:-/data/HALT}
-      WALLET_NETWORK: testnet
+      WALLET_NETWORK: ${WALLET_NETWORK:-testnet}
       SLACK_OPERATOR_ENABLED: ${SLACK_OPERATOR_ENABLED:-0}
       SLACK_OPERATOR_HTTP_PORT: ${SLACK_OPERATOR_HTTP_PORT:-8790}
       SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
@@ -428,7 +428,7 @@ services:
       # Board citation_repair runs are read-only/dry-run; real claim/submit
       # settlement stays operator-gated in the hermes container. Testnet only.
       AGENT_WALLET_PRIVATE_KEY: ${AGENT_WALLET_PRIVATE_KEY}
-      WALLET_NETWORK: testnet
+      WALLET_NETWORK: ${WALLET_NETWORK:-testnet}
       # Citation-repair workflow preflight also reads the shared policy store
       # (DATABASE_URL — mutation-policy checks prior claim/submit attempts;
       # missing it surfaces as policy_store_unavailable) and records handoff
@@ -875,7 +875,7 @@ services:
       AVERRAY_HANDOFF_EVENTS_PATH: ${AVERRAY_HANDOFF_EVENTS_PATH:-/data/handoff-events.jsonl}
       POLICY_CONFIG_PATH: /config/policy.yaml
       HALT_FILE: ${HALT_FILE:-/data/HALT}
-      WALLET_NETWORK: testnet
+      WALLET_NETWORK: ${WALLET_NETWORK:-testnet}
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:

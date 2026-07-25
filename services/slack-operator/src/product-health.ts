@@ -882,16 +882,41 @@ export async function probeSignerLiquidity(input: {
   usdcDecimals: number;
   minGasNative: number;
   minUsdc: number;
+  /** The chainId `/health` reports. When set, the RPC must agree before we trust
+   *  any balance it returns (chain guard below). */
+  expectedChainId?: number;
   fetchImpl: typeof fetch;
 }): Promise<ProbeResult & { pools?: SolvencyPoolData[]; rpcOk?: boolean }> {
   if (!input.rpcUrl || !input.signerAddress) {
+    // Name the missing piece: at a network cutover this is the difference between
+    // "monitor is fine" and "solvency has been unmonitored since the flip".
     return {
       name: "signer_liquidity",
       status: "degraded",
-      detail: "PRODUCT_HEALTH_RPC_URL / signer address not configured",
+      detail: !input.rpcUrl
+        ? "PRODUCT_HEALTH_RPC_URL not set (no built-in default outside testnet)"
+        : "PRODUCT_HEALTH_SIGNER_ADDRESS not set",
     };
   }
   try {
+    // CHAIN GUARD — mirrors chainBlockAge: never report a balance from an endpoint
+    // that isn't on the product's chain. Without it, a leftover testnet endpoint
+    // (a stale PRODUCT_HEALTH_RPC_BACKUPS entry, or a failover onto one) reads the
+    // TESTNET signer and paints solvency GREEN while the mainnet signer is dry.
+    // `rpcOk: false` also drives the failover loop, so a mismatched endpoint is
+    // rotated past and ultimately escalated to a human rather than trusted.
+    if (input.expectedChainId !== undefined) {
+      const actualChainId = Number(BigInt(await ethRpc(input.rpcUrl, "eth_chainId", [], input.fetchImpl)));
+      if (actualChainId !== input.expectedChainId) {
+        return {
+          name: "signer_liquidity",
+          // Same escalation rule as chainHaltStatus: being blind on mainnet pages.
+          status: MAINNET_CHAIN_IDS.has(input.expectedChainId) ? "red" : "degraded",
+          detail: `RPC chain mismatch — endpoint is on chain ${actualChainId}, product is on ${input.expectedChainId}; balances NOT trusted`,
+          rpcOk: false,
+        };
+      }
+    }
     const gasWei = BigInt(await ethRpc(input.rpcUrl, "eth_getBalance", [input.signerAddress, "latest"], input.fetchImpl));
     const gasNative = Number(gasWei) / 1e18;
     const parts: string[] = [];
@@ -1133,6 +1158,8 @@ export async function collectProductHealthProbes(
     usdcDecimals: config.usdcDecimals,
     minGasNative: config.minGasNative,
     minUsdc: config.minUsdc,
+    // Balances are only trusted from an RPC on the product's own chain.
+    expectedChainId: chainId,
     fetchImpl,
   });
   const treasury = await probeTreasuryLiquidity({
