@@ -1,0 +1,54 @@
+{
+  "workItemId": "ceremony-docs-fix-001",
+  "correlationId": "ceremony-docs-fix-001",
+  "taskKind": "docs_fix",
+  "title": "Clarify one bounded integration document",
+  "objective": "Correct a small documentation inconsistency and keep the surrounding guidance accurate.",
+  "whyNow": "The supervised-dispatch ceremony needs a reversible documentation-family task.",
+  "requestedBy": {
+    "type": "operator",
+    "id": "pilot-operator"
+  },
+  "repository": {
+    "nameWithOwner": "depre-dev/averray-reference-agent",
+    "baseRevision": "8b94278578913b7cd7aa1acb276db48613090c7b",
+    "allowedPaths": [
+      "docs/**",
+      "test/**"
+    ],
+    "forbiddenPaths": [
+      "contracts/**",
+      "ops/**",
+      "scripts/ops/**",
+      ".github/**"
+    ]
+  },
+  "profile": "coding-change-pilot",
+  "acceptanceCriteria": [
+    {
+      "id": "docs-command",
+      "type": "command",
+      "command": "npm run typecheck",
+      "required": true
+    },
+    {
+      "id": "docs-search",
+      "type": "search",
+      "include": [
+        "docs/**"
+      ],
+      "pattern": "supervised",
+      "expectedMatches": 1,
+      "required": true
+    }
+  ],
+  "budget": {
+    "elapsedSeconds": 120,
+    "modelTokens": 10000,
+    "toolCalls": 40,
+    "estimatedUsdMicros": null
+  },
+  "deadline": "2027-12-31T23:59:59.000Z",
+  "riskTier": "low",
+  "selectionReason": "A bounded documentation edit is suitable for the supervised Harness pilot."
+}

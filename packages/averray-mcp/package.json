@@ -65,6 +65,10 @@
       "types": "./dist/agent-task-store.d.ts",
       "import": "./dist/agent-task-store.js"
     },
+    "./agent-task-proposal": {
+      "types": "./dist/agent-task-proposal.d.ts",
+      "import": "./dist/agent-task-proposal.js"
+    },
     "./dispatch-claim": {
       "types": "./dist/dispatch-claim.d.ts",
       "import": "./dist/dispatch-claim.js"

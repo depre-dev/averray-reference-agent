@@ -1,0 +1,51 @@
+{
+  "workItemId": "ceremony-add-unit-test-001",
+  "correlationId": "ceremony-add-unit-test-001",
+  "taskKind": "add_unit_test",
+  "title": "Add one focused unit regression test",
+  "objective": "Add a narrowly scoped unit test for an existing behavior without changing production authority.",
+  "whyNow": "The supervised-dispatch ceremony needs a test-writing family with measurable regression evidence.",
+  "requestedBy": {
+    "type": "operator",
+    "id": "pilot-operator"
+  },
+  "repository": {
+    "nameWithOwner": "depre-dev/averray-reference-agent",
+    "baseRevision": "8b94278578913b7cd7aa1acb276db48613090c7b",
+    "allowedPaths": [
+      "docs/**",
+      "test/**"
+    ],
+    "forbiddenPaths": [
+      "contracts/**",
+      "ops/**",
+      "scripts/ops/**",
+      ".github/**"
+    ]
+  },
+  "profile": "coding-change-pilot",
+  "acceptanceCriteria": [
+    {
+      "id": "unit-test-command",
+      "type": "command",
+      "command": "npm test",
+      "required": true
+    },
+    {
+      "id": "unit-test-baseline",
+      "type": "baseline_comparison",
+      "rule": "no_new_failures",
+      "baselineCommand": "npm test",
+      "required": true
+    }
+  ],
+  "budget": {
+    "elapsedSeconds": 120,
+    "modelTokens": 12000,
+    "toolCalls": 50,
+    "estimatedUsdMicros": null
+  },
+  "deadline": "2027-12-31T23:59:59.000Z",
+  "riskTier": "low",
+  "selectionReason": "A test-only change is reversible and independently verifiable."
+}
