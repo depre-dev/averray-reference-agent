@@ -196,7 +196,13 @@ export async function runSingleDispatch(
       workspacePath = await deps.prepareWorkspace(task);
     } catch (error) {
       if (error instanceof WorkspacePrepError) {
-        return refuse(deps, task, intendedRunId, "workspace_prep_failed");
+        return refuse(
+          deps,
+          task,
+          intendedRunId,
+          "workspace_prep_failed",
+          dependencyRefusalAlert(error),
+        );
       }
       throw error;
     }
@@ -325,8 +331,9 @@ async function refuse(
   task: AgentTaskV1,
   intendedRunId: string,
   reason: string,
+  alert?: RefusalAlert,
 ): Promise<DispatchAttemptResult> {
-  await blockAndRecordRefusal(deps, task, intendedRunId, reason);
+  await blockAndRecordRefusal(deps, task, intendedRunId, reason, alert);
   return {
     outcome: "refused",
     workItemId: task.workItemId,
@@ -341,6 +348,7 @@ async function blockAndRecordRefusal(
   task: AgentTaskV1,
   intendedRunId: string | undefined,
   reason: string,
+  alert?: RefusalAlert,
 ): Promise<void> {
   const updatedAt = deps.now().toISOString();
   const blockedTask: AgentTaskV1 = {
@@ -356,12 +364,12 @@ async function blockAndRecordRefusal(
     buildDispatchDecision(blockedTask, "dispatch_refusal", reason, deps.now()),
   );
   await deps.alertSink({
-    severity: "warn",
-    code: "dispatch_refusal",
+    severity: alert?.severity ?? "warn",
+    code: alert?.code ?? "dispatch_refusal",
     workItemId: task.workItemId,
     taskVersion: task.taskVersion,
     ...(intendedRunId ? { harnessRunId: intendedRunId } : {}),
-    message: `Harness dispatch was refused: ${reason}.`,
+    message: alert?.message ?? `Harness dispatch was refused: ${reason}.`,
     at: deps.now().toISOString(),
   });
   deps.logger?.warn({
@@ -370,6 +378,29 @@ async function blockAndRecordRefusal(
     ...(intendedRunId ? { intendedRunId } : {}),
     reason,
   }, "Harness dispatch refused");
+}
+
+interface RefusalAlert {
+  severity: "warn" | "critical";
+  code: string;
+  message: string;
+}
+
+function dependencyRefusalAlert(
+  error: WorkspacePrepError,
+): RefusalAlert | undefined {
+  if (
+    error.reason !== "dependency_cache_missing"
+    && error.reason !== "dependency_cache_stale"
+    && error.reason !== "dependency_seed_failed"
+  ) {
+    return undefined;
+  }
+  return {
+    severity: error.reason === "dependency_cache_stale" ? "critical" : "warn",
+    code: error.reason,
+    message: `Harness dispatch dependency preparation failed: ${error.message}.`,
+  };
 }
 
 function buildDispatchDecision(
