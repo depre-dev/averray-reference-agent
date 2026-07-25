@@ -92,6 +92,14 @@
     "./workspace-path": {
       "types": "./dist/workspace-path.d.ts",
       "import": "./dist/workspace-path.js"
+    },
+    "./harness-read-port": {
+      "types": "./dist/harness-read-port.d.ts",
+      "import": "./dist/harness-read-port.js"
+    },
+    "./harness-run-projection": {
+      "types": "./dist/harness-run-projection.d.ts",
+      "import": "./dist/harness-run-projection.js"
     }
   },
   "scripts": {

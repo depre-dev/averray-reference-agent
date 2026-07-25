@@ -83,6 +83,7 @@ describe("Harness dispatcher process", () => {
     });
 
     expect(harness.deps.runAttempt).toHaveBeenCalledOnce();
+    expect(harness.deps.runReconcile).toHaveBeenCalledOnce();
     expect(attemptDeps.acquireLease).not.toHaveBeenCalled();
     expect(attemptDeps.listDispatchable).not.toHaveBeenCalled();
     expect(heartbeats(harness.deps)).toEqual([
@@ -113,7 +114,8 @@ describe("Harness dispatcher process", () => {
       outcome: "halted",
     });
 
-    expect(harness.deps.runAttempt).toHaveBeenCalledOnce();
+    expect(harness.deps.runAttempt).not.toHaveBeenCalled();
+    expect(harness.deps.runReconcile).not.toHaveBeenCalled();
     expect(attemptDeps.acquireLease).not.toHaveBeenCalled();
     expect(attemptDeps.listDispatchable).not.toHaveBeenCalled();
     expect(heartbeats(harness.deps)).toEqual([
@@ -249,7 +251,7 @@ describe("Harness dispatcher process", () => {
     );
     expect(harness.deps.logger.warn).toHaveBeenCalledWith(
       { errorName: "Error" },
-      "Harness dispatch attempt failed",
+      "Harness dispatcher tick failed",
     );
 
     callbacks.shift()?.();
@@ -309,6 +311,8 @@ function processHarness(
   deps: DispatcherProcessDeps;
 } {
   const deps: DispatcherProcessDeps = {
+    runReconcile:
+      overrides.runReconcile ?? vi.fn(async () => []),
     runAttempt: overrides.runAttempt ?? vi.fn(async () => ({ outcome: "idle" })),
     isDispatchEnabled:
       overrides.isDispatchEnabled ?? vi.fn(() => true),

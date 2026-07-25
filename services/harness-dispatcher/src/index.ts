@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  listAgentTasks,
   listDispatchableAgentTasks,
   putAgentTask,
 } from "@avg/averray-mcp/agent-task-store";
@@ -20,6 +21,9 @@ import {
   bindRunToWorkItem,
   getRunBinding,
 } from "@avg/averray-mcp/run-binding-outbox";
+import {
+  createHarnessCliReadPort,
+} from "@avg/averray-mcp/harness-read-port";
 import { closePool } from "@avg/mcp-common";
 import { taskIntentSchema } from "@avg/schemas";
 
@@ -34,6 +38,11 @@ import {
   harnessDispatchEnabled,
 } from "./harness-control-port.js";
 import { loadProfileManifest } from "./profile-manifest.js";
+import {
+  reconcileDispatchedRuns,
+  type ReconcileResult,
+  type ReconcileRunDeps,
+} from "./reconcile-run.js";
 import { prepareTaskWorkspace } from "./workspace-prep.js";
 
 const DEFAULT_POLL_INTERVAL_MS = 15_000;
@@ -57,6 +66,7 @@ export interface DispatcherHeartbeat {
   status: DispatcherHeartbeatStatus;
   message: string;
   updatedAt: string;
+  reconciledCount: number;
   lastOutcome?: string;
 }
 
@@ -84,6 +94,7 @@ export type DispatcherTickResult =
   | { outcome: "error"; reason: "attempt_failed" };
 
 export interface DispatcherProcessDeps {
+  runReconcile(): Promise<ReconcileResult[]>;
   runAttempt(): Promise<DispatchAttemptResult>;
   isDispatchEnabled(): boolean;
   isHalted(): boolean;
@@ -155,11 +166,13 @@ export function createDispatcherProcess(
   let inFlight: Promise<DispatcherTickResult> | undefined;
   let shutdownPromise: Promise<void> | undefined;
   let lastOutcome: string | undefined;
+  let lastReconciledCount = 0;
 
   const heartbeat = async (
     status: DispatcherHeartbeatStatus,
     message: string,
     outcome = lastOutcome,
+    reconciledCount = lastReconciledCount,
   ): Promise<void> => {
     await deps.writeHeartbeat({
       schemaVersion: 1,
@@ -168,6 +181,7 @@ export function createDispatcherProcess(
       status,
       message,
       updatedAt: deps.now().toISOString(),
+      reconciledCount,
       ...(outcome ? { lastOutcome: outcome } : {}),
     });
   };
@@ -176,9 +190,10 @@ export function createDispatcherProcess(
     status: DispatcherHeartbeatStatus,
     message: string,
     outcome = lastOutcome,
+    reconciledCount = lastReconciledCount,
   ): Promise<void> => {
     try {
-      await heartbeat(status, message, outcome);
+      await heartbeat(status, message, outcome, reconciledCount);
     } catch (error) {
       deps.logger.warn(
         { errorName: errorName(error), status },
@@ -190,31 +205,48 @@ export function createDispatcherProcess(
   const performTick = async (): Promise<DispatcherTickResult> => {
     try {
       const enabled = deps.isDispatchEnabled();
-      const halted = enabled && deps.isHalted();
+      const halted = deps.isHalted();
+      if (halted) {
+        const result: DispatchAttemptResult = { outcome: "halted" };
+        lastOutcome = result.outcome;
+        lastReconciledCount = 0;
+        logAttempt(deps.logger, result);
+        await writeHeartbeatBestEffort(
+          "halted",
+          "Harness dispatcher is halted; reconciliation and dispatch were skipped.",
+          result.outcome,
+        );
+        return result;
+      }
       if (enabled && !halted) {
         await writeHeartbeatBestEffort(
           "dispatching",
-          "A single supervised dispatch attempt is in progress.",
+          "Read-only reconciliation and one supervised dispatch attempt are in progress.",
         );
       }
+      const reconciled = await deps.runReconcile();
+      lastReconciledCount = reconciled.length;
+      logReconcile(deps.logger, reconciled);
       const result = await deps.runAttempt();
       lastOutcome = result.outcome;
       logAttempt(deps.logger, result);
+      const reconcileUnhealthy = reconciled.some((item) => !item.healthy);
       await writeHeartbeatBestEffort(
-        heartbeatStatusForResult(result),
-        attemptMessage(result),
+        reconcileUnhealthy ? "error" : heartbeatStatusForResult(result),
+        tickMessage(result, reconciled),
         result.outcome,
+        reconciled.length,
       );
       return result;
     } catch (error) {
       lastOutcome = "error";
       deps.logger.warn(
         { errorName: errorName(error) },
-        "Harness dispatch attempt failed",
+        "Harness dispatcher tick failed",
       );
       await writeHeartbeatBestEffort(
         "error",
-        "Harness dispatch attempt failed; the next tick may retry polling.",
+        "Harness dispatcher tick failed; the next tick may retry polling.",
         "error",
       );
       return { outcome: "error", reason: "attempt_failed" };
@@ -255,7 +287,7 @@ export function createDispatcherProcess(
       }
       if (inFlight) await inFlight;
       const enabled = deps.isDispatchEnabled();
-      const halted = enabled && deps.isHalted();
+      const halted = deps.isHalted();
       if (enabled) {
         try {
           await deps.releaseLease(config.dispatcherId);
@@ -266,10 +298,10 @@ export function createDispatcherProcess(
           );
         }
       }
-      const status = !enabled
-        ? "disabled"
-        : halted
-          ? "halted"
+      const status = halted
+        ? "halted"
+        : !enabled
+          ? "disabled"
           : "idle";
       try {
         await heartbeat(
@@ -372,8 +404,29 @@ export function createProductionDispatcher(
       },
     },
   };
+  const reconcileDeps: ReconcileRunDeps = {
+    now: dispatchDeps.now,
+    isHalted: dispatchDeps.isHalted,
+    listTasks: () => listAgentTasks({
+      executorKind: "harness",
+      limit: 1_000,
+    }),
+    saveTask: putAgentTask,
+    getRunBinding,
+    bindRun: bindRunToWorkItem,
+    readPort: createHarnessCliReadPort({
+      command: config.harnessBin,
+    }),
+    recordDecision: recordHermesDecision,
+    logger: {
+      warn(fields, message) {
+        logger.warn(fields, message);
+      },
+    },
+  };
 
   return createDispatcherProcess(config, {
+    runReconcile: () => reconcileDispatchedRuns(reconcileDeps),
     runAttempt: () => runSingleDispatch(dispatchDeps),
     isDispatchEnabled: dispatchDeps.isDispatchEnabled,
     isHalted: dispatchDeps.isHalted,
@@ -412,6 +465,35 @@ function heartbeatStatusForResult(
 function attemptMessage(result: DispatchAttemptResult): string {
   const reason = "reason" in result ? ` (${result.reason})` : "";
   return `Harness dispatch attempt finished: ${result.outcome}${reason}.`;
+}
+
+function tickMessage(
+  result: DispatchAttemptResult,
+  reconciled: ReconcileResult[],
+): string {
+  const unhealthy = reconciled.filter((item) => !item.healthy).length;
+  const reconciliation = `Reconciled ${reconciled.length} Harness run${reconciled.length === 1 ? "" : "s"}`
+    + (unhealthy > 0 ? `; ${unhealthy} require attention` : "");
+  return `${reconciliation}. ${attemptMessage(result)}`;
+}
+
+function logReconcile(
+  logger: DispatcherLogger,
+  reconciled: ReconcileResult[],
+): void {
+  if (reconciled.length === 0) return;
+  const unhealthy = reconciled.filter((item) => !item.healthy);
+  logger.info({
+    reconciledCount: reconciled.length,
+    unhealthyCount: unhealthy.length,
+  }, "Harness run reconciliation completed");
+  if (unhealthy.length > 0) {
+    logger.warn({
+      reconciledCount: reconciled.length,
+      unhealthyCount: unhealthy.length,
+      outcomes: unhealthy.map((item) => item.outcome),
+    }, "Harness run reconciliation requires attention");
+  }
 }
 
 function logAttempt(
