@@ -433,6 +433,70 @@ describe("probeSignerLiquidity (direct RPC)", () => {
     const r = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: "0xabc", usdcAddress: "0xusdc", ...floors, fetchImpl: throwingFetch() });
     expect(r.status).toBe("degraded");
   });
+
+  it("names WHICH piece is unconfigured (a cutover leaves solvency unmonitored)", async () => {
+    const noRpc = await probeSignerLiquidity({ rpcUrl: undefined, signerAddress: "0xabc", usdcAddress: undefined, ...floors, fetchImpl: balances("0x0", "0x0") });
+    expect(noRpc.detail).toContain("PRODUCT_HEALTH_RPC_URL");
+    const noSigner = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: undefined, usdcAddress: undefined, ...floors, fetchImpl: balances("0x0", "0x0") });
+    expect(noSigner.detail).toContain("PRODUCT_HEALTH_SIGNER_ADDRESS");
+  });
+
+  // ── chain guard ───────────────────────────────────────────────────────────
+  // A healthy-but-WRONG-chain endpoint returns perfectly good balances for the
+  // wrong signer. Never trust them: that's a fake-green on the money pillar.
+  const TESTNET = "0x190f1b41"; // 420420417
+  const MAINNET = "0x190f1b43"; // 420420419
+  function chainedBalances(chainIdHex: string, gasHex: string, usdcHex: string): typeof fetch {
+    return (async (_url: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const method = rpcMethod(init ?? {});
+      const result = method === "eth_chainId" ? chainIdHex : method === "eth_getBalance" ? gasHex : usdcHex;
+      return { ok: true, status: 200, json: async () => ({ result }) } as unknown as Response;
+    }) as unknown as typeof fetch;
+  }
+
+  it("reads balances normally when the RPC is on the product's chain", async () => {
+    const r = await probeSignerLiquidity({
+      rpcUrl: "http://rpc", signerAddress: "0xabc", usdcAddress: "0xusdc", ...floors,
+      expectedChainId: 420420417,
+      fetchImpl: chainedBalances(TESTNET, "0xDE0B6B3A7640000", "0x989680"),
+    });
+    expect(r.status).toBe("ok");
+    expect(r.detail).toContain("USDC 10.00");
+  });
+
+  it("RED + rpcOk:false when the product is on MAINNET but the RPC is a leftover testnet endpoint", async () => {
+    // The exact cutover hazard: healthy testnet RPC, flush testnet signer, and the
+    // mainnet signer could be dry. Must NOT report those balances as green.
+    const r = await probeSignerLiquidity({
+      rpcUrl: "http://rpc", signerAddress: "0xabc", usdcAddress: "0xusdc", ...floors,
+      expectedChainId: 420420419, // product is live on mainnet
+      fetchImpl: chainedBalances(TESTNET, "0xDE0B6B3A7640000", "0x989680"), // fat testnet balances
+    });
+    expect(r.status).toBe("red"); // blind on mainnet pages
+    expect(r.detail).toContain("chain mismatch");
+    expect(r.detail).toContain("420420419");
+    expect(r.detail).not.toContain("USDC 10.00"); // the wrong chain's balance never surfaces
+    expect(r.rpcOk).toBe(false); // drives failover past this endpoint, then escalates
+  });
+
+  it("degraded (not red) on a mismatch while the product is still on a testnet", async () => {
+    const r = await probeSignerLiquidity({
+      rpcUrl: "http://rpc", signerAddress: "0xabc", usdcAddress: "0xusdc", ...floors,
+      expectedChainId: 420420417,
+      fetchImpl: chainedBalances(MAINNET, "0xDE0B6B3A7640000", "0x989680"),
+    });
+    expect(r.status).toBe("degraded");
+    expect(r.rpcOk).toBe(false);
+  });
+
+  it("skips the guard when the product's chainId is unknown (no /health chainId)", async () => {
+    const r = await probeSignerLiquidity({
+      rpcUrl: "http://rpc", signerAddress: "0xabc", usdcAddress: "0xusdc", ...floors,
+      expectedChainId: undefined,
+      fetchImpl: chainedBalances(TESTNET, "0xDE0B6B3A7640000", "0x989680"),
+    });
+    expect(r.status).toBe("ok");
+  });
 });
 
 const CHAIN_ID_HEX = "0x" + (420420417).toString(16); // matches HEALTHY_BODY auth.chainId
