@@ -6,6 +6,7 @@
     "composite": true
   },
   "references": [
+    { "path": "../../packages/averray-mcp" },
     { "path": "../../packages/schemas" }
   ],
   "include": ["src/**/*.ts"]
