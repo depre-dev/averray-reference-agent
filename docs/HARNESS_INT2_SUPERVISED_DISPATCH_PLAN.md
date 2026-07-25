@@ -374,11 +374,22 @@ Reuse the existing kill switch: `HALT_FILE` (env, default `/data/HALT`; `assertN
 - `HARNESS_PROJECTION_ENABLED` (INT-1 read-only projection), or
 - the O4 `HERMES_DISPATCH_*` **proposal** guardrail flags (`dispatch-policy.ts`, which gate Hermes *proposing*, not *executing*).
 
+**As built:** the flag gates `run submit`, not `run cancel`. Disable and HALT
+stop the dispatcher from starting work, but only cancellation stops an already
+active run. Cancellation is authority-reducing and cannot approve, deny,
+release, broaden grants, or start work, so it remains available as the emergency
+stop while dispatch is disabled.
+
 ### 13.3 Concurrency one
 Enforced by the single-writer lease (§10.2): at most one active Harness run. `max_concurrent_children` is moot (children disabled, §8.3).
 
 ### 13.4 Cancellation (bounded)
 Operator cancel → `harness run cancel <run_id>` → the workflow observes it at every state boundary → `CANCEL_REQUESTED → COMPENSATING → CANCELLED` (`control/client.py:84-107`, `run_workflow.py:2652-2674`). Bounded and cooperative. AgentTask → `cancelled`. (The cancel fan-out to children is a no-op here — children disabled.)
+
+The dispatcher records an operator cancellation even if the Harness control
+request is not acknowledged, and explicitly alerts that the run state remains
+uncertain. HALT uses the same cancel-only authority during stop-only
+reconciliation; it never submits replacement work.
 
 ### 13.5 Timeout (bounded; must actively cancel the two indefinite-wait traps)
 - The dispatcher enforces a **wall-clock deadline** on its poll loop from `deadline` + `budget.elapsedSeconds`.
@@ -480,26 +491,46 @@ New files are **bold**; existing files are amended. Tests listed in §19.
 - **`packages/averray-mcp/src/attenuation.ts`** (`assertTaskIntentWithinApprovedAuthority`, §9)
 - **`packages/schemas/src/task-intent.ts`** (a TS TaskIntent schema/serializer mirroring `contracts/task.py` for round-trip + hashing)
 
-**INT-2d — write-capable Harness control port (behind flag, no wiring)**
-- **`services/harness-dispatcher/src/harness-control-port.ts`** (`submit(runId, intentPath)`, `cancel(runId)`, reuse INT-1 read parsing for status/events/deliverables). Fixed-argv, no shell interpolation, timeout + output cap, mirrors `harness-read-port.ts` hardening.
+**INT-2d — write-capable Harness control port (submit flag-gated, no wiring)**
+- **`services/harness-dispatcher/src/harness-control-port.ts`** (`submit(runId, intentPath)`, `cancel(runId)`, reuse INT-1 read parsing for status/events/deliverables). Fixed-argv, no shell interpolation, timeout + output cap, mirrors `harness-read-port.ts` hardening. INT-2k leaves submit gated and makes authority-reducing cancel available while disabled.
 
-**INT-2e — the dispatcher process (flag default-off)**
-- **`services/harness-dispatcher/package.json`**, **`tsconfig.json`**, **`src/index.ts`** (single-lease loop)
-- **`src/dispatch-claim.ts`** (lease + claim + outbox, §10)
-- **`src/dispatch-lifecycle.ts`** (state machine §6)
-- **`packages/averray-mcp/src/decision-records.ts`** (amend: **V2 builder**, §15.1)
-- **`packages/averray-mcp/src/decision-record-store.ts`** *(or reuse `services/slack-operator/src/decision-record-store.ts`)* (persist V2)
-- **`ops/migrations/00xx_dispatch_claims_outbox_decisions.sql`**
-- **`ops/compose`** service entry `harness-dispatcher` (env `HARNESS_DISPATCH_*`, default flag off)
+> **As-built packet split:** implementation was narrowed further than the
+> original proposal. INT-2e shipped claim/lease/outbox/audit; INT-2f shipped
+> single-attempt orchestration; INT-2g shipped workspace preparation; INT-2h
+> shipped the dormant dispatcher process; INT-2i shipped proposal writing and
+> explicit operator approval; INT-2j shipped read projection and lifecycle
+> advancement; INT-2k ships cancellation, timeout, and alerts.
 
-**INT-2f — projection wiring of dispatched runs (read-only board)**
-- amend `services/slack-operator/src/harness-run-projection.ts` / `harness-run-registry.ts` to accept dispatcher-written bindings (dynamic, alongside the static pilot registry)
-- amend the board read path (Work queue lane) — no new surface
+**INT-2e — durable coordination and audit stores**
+- `packages/averray-mcp/src/{dispatch-claim,run-binding-outbox,decision-records,decision-record-store}.ts`
+- `ops/migrations/003_dispatch_claims_outbox_decisions.sql`
 
-**INT-2g — cancellation/timeout/retry + explicit fallback + alerts**
-- amend `services/harness-dispatcher/src/index.ts` (deadline, cancel-on-HALT, quarantine/approval-anomaly handling)
-- amend the alert bridge wiring (§15.3)
-- amend `AGENTS.md` (§16.5)
+**INT-2f — single-attempt dispatch orchestration**
+- `services/harness-dispatcher/src/dispatch-attempt.ts`
+- dispatcher workspace dependency/reference metadata
+
+**INT-2g — per-work-item workspace preparation**
+- `services/harness-dispatcher/src/workspace-prep.ts`
+- `packages/averray-mcp/src/workspace-path.ts`
+
+**INT-2h — dormant dispatcher process and Compose service**
+- `services/harness-dispatcher/src/{index,profile-manifest}.ts`
+- `ops/compose.yml`, `ops/compose.prod.yml`, and the default-off dispatch profile
+
+**INT-2i — proposal writer and explicit operator approval**
+- `packages/averray-mcp/src/agent-task-proposal.ts`
+- content-addressed proposal/intent/verifier artifacts and ceremony fixtures
+
+**INT-2j — shared read projection and lifecycle advancement**
+- `packages/averray-mcp/src/{harness-read-port,harness-run-projection}.ts`
+- `services/harness-dispatcher/src/reconcile-run.ts`
+- Slack operator compatibility re-export shims
+
+**INT-2k — bounded cancellation, timeout, and alerts**
+- **`services/harness-dispatcher/src/cancel-task.ts`**
+- **`services/harness-dispatcher/src/alerts.ts`**
+- amend `services/harness-dispatcher/src/{harness-control-port,reconcile-run,index,dispatch-attempt}.ts`
+- amend this plan (§13, §17, §18)
 
 ---
 
@@ -513,10 +544,14 @@ New files are **bold**; existing files are amended. Tests listed in §19.
 | **INT-2b** | *(harness)* `run submit --run-id` | harness `2f60cab` | **No** (adds an optional flag; default unchanged) | Revert; CLI reverts to `uuid4`. |
 | **INT-2c** | TaskIntent mapping + attenuation proof (pure) | INT-2a | **No** (pure functions + tests) | Revert PR. |
 | **INT-2d** | write-capable control port (flag-gated) | INT-2b, INT-2c | **No** (code only; not wired; flag off) | Revert PR. |
-| **INT-2e** | dispatcher process + claim/lease/outbox + decision V2 (flag default-off) | INT-2a–d | **No while `HARNESS_DISPATCH_ENABLED=false`** | Set flag off (instant); revert PR; drop dispatch tables. |
-| **INT-2f** | projection wiring of dispatched runs (read-only) | INT-2e | **No** (read-only projection) | `HARNESS_PROJECTION_ENABLED=false`; revert PR. |
-| **INT-2g** | cancellation/timeout/retry + explicit fallback + alerts + AGENTS.md | INT-2e, INT-2f | **No while flag off** | Set flag off; revert PR. |
-| **INT-2-ENABLE** | *(ops, not code)* operator enables `HARNESS_DISPATCH_ENABLED=true` for the ceremony | INT-2a–g green + operator sign-off | **Yes — first real dispatch authority** | Set flag off (instant, global) + `HALT_FILE`. |
+| **INT-2e** | claim/lease/outbox + decision-record V2 persistence | INT-2a–d | **No** (stores and pure coordination helpers only) | Revert code; leave additive audit tables in place. |
+| **INT-2f** | single-attempt dispatch orchestration | INT-2e | **No** (no process or call site) | Revert PR. |
+| **INT-2g** | per-work-item workspace preparation | INT-2f | **No** (invoked only by the dormant orchestration path) | Revert PR. |
+| **INT-2h** | dormant dispatcher process + Compose profile, flag default-off | INT-2g | **No while `HARNESS_DISPATCH_ENABLED=false` and the profile is unselected** | Leave profile unselected/set flag off; revert PR. |
+| **INT-2i** | AgentTask proposal writer + explicit operator approval | INT-2h | **No** (no production proposal/approval call site) | Revert PR; unused artifacts may remain. |
+| **INT-2j** | read projection + lifecycle advancement | INT-2i | **No new external authority** (read-only Harness port; coordination-state writes only) | Leave dispatch profile unselected; revert PR. |
+| **INT-2k** | bounded operator/HALT/deadline cancellation + anomaly containment + durable alerts | INT-2j | **No new start authority**; cancel is authority-reducing and submit remains default-off | HALT/set flag off; revert PR. |
+| **INT-2-ENABLE** | *(ops, not code)* operator enables `HARNESS_DISPATCH_ENABLED=true` for the ceremony | INT-2a–k green + operator sign-off | **Yes — first real dispatch authority** | Set flag off (instant, global) + `HALT_FILE`; cancellation remains available. |
 
 **Enablement is separated from code (PLAN §9):** the last row is an operator-run ops action, not a PR, gated on the ceremony (§20).
 

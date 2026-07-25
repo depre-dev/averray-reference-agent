@@ -30,6 +30,9 @@ import {
 } from "@avg/averray-mcp/workspace-path";
 
 import {
+  type AlertSink,
+} from "./alerts.js";
+import {
   HarnessControlError,
   type HarnessControlErrorCode,
   type HarnessControlPort,
@@ -62,6 +65,7 @@ export interface DispatchDeps {
   writeIntentArtifact(bytes: string, workItemId: string): Promise<string>;
   controlPort: HarnessControlPort;
   recordDecision(record: HermesDecisionRecordV2): Promise<unknown>;
+  alertSink: AlertSink;
   logger?: { warn(object: unknown, message: string): void };
 }
 
@@ -351,6 +355,15 @@ async function blockAndRecordRefusal(
   await deps.recordDecision(
     buildDispatchDecision(blockedTask, "dispatch_refusal", reason, deps.now()),
   );
+  await deps.alertSink({
+    severity: "warn",
+    code: "dispatch_refusal",
+    workItemId: task.workItemId,
+    taskVersion: task.taskVersion,
+    ...(intendedRunId ? { harnessRunId: intendedRunId } : {}),
+    message: `Harness dispatch was refused: ${reason}.`,
+    at: deps.now().toISOString(),
+  });
   deps.logger?.warn({
     workItemId: task.workItemId,
     taskVersion: task.taskVersion,

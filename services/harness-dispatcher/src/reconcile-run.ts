@@ -1,6 +1,7 @@
 import {
   assertAgentRunProjectionWithinTask,
   assertVerifiedHandoffMatchesTaskAndRun,
+  agentTaskV1Schema,
   artifactRefSchema,
   verifiedHandoffV1Schema,
   type AgentRunProjectionV1,
@@ -9,6 +10,7 @@ import {
   type ArtifactRef,
   type HarnessRunState,
   type HermesDecisionRecordV2,
+  type MutationRef,
   type VerifiedHandoffV1,
 } from "@avg/schemas";
 import {
@@ -30,6 +32,15 @@ import type {
   BindRunInput,
   RunBinding,
 } from "@avg/averray-mcp/run-binding-outbox";
+
+import {
+  type AlertSink,
+  type DispatchAlert,
+} from "./alerts.js";
+import {
+  HarnessControlError,
+  type HarnessControlPort,
+} from "./harness-control-port.js";
 
 const ACTIVE_LIFECYCLES = new Set<AgentTaskLifecycle>([
   "dispatching",
@@ -71,7 +82,9 @@ export interface ReconcileRunDeps {
   getRunBinding(workItemId: string): Promise<RunBinding | undefined>;
   bindRun(input: BindRunInput): Promise<unknown>;
   readPort: HarnessReadPort;
+  controlPort: Pick<HarnessControlPort, "cancel">;
   recordDecision(record: HermesDecisionRecordV2): Promise<unknown>;
+  alertSink: AlertSink;
   logger?: ReconcileLogger;
   projectRun?: (
     binding: HarnessProjectionBinding,
@@ -103,12 +116,16 @@ export interface ReconcileResult {
 export async function reconcileDispatchedRuns(
   deps: ReconcileRunDeps,
 ): Promise<ReconcileResult[]> {
-  if (deps.isHalted()) return [];
-
-  const tasks = (await deps.listTasks()).filter(isReconcileCandidate);
+  const haltedAtStart = deps.isHalted();
+  const tasks = (await deps.listTasks()).filter(
+    haltedAtStart ? isHaltCandidate : isReconcileCandidate,
+  );
   const results: ReconcileResult[] = [];
   for (const task of tasks) {
-    if (deps.isHalted()) break;
+    if (deps.isHalted()) {
+      results.push(await cancelTaskForHalt(deps, task));
+      continue;
+    }
     results.push(
       isAmbiguousSubmitCandidate(task)
         ? await recoverAmbiguousSubmit(deps, task)
@@ -116,6 +133,13 @@ export async function reconcileDispatchedRuns(
     );
   }
   return results;
+}
+
+function isHaltCandidate(task: AgentTaskV1): boolean {
+  return task.executor.kind === "harness"
+    && task.lifecycle !== "handoff_ready"
+    && task.lifecycle !== "failed"
+    && task.lifecycle !== "cancelled";
 }
 
 function isReconcileCandidate(task: AgentTaskV1): boolean {
@@ -149,6 +173,19 @@ async function recoverAmbiguousSubmit(
     task.taskVersion,
     approvedTaskHash,
   );
+  if (deps.now().getTime() > Date.parse(task.deadline)) {
+    return forceCancelTask(deps, task, intendedRunId, {
+      lifecycle: "failed",
+      decisionType: "dispatch_refusal",
+      reason: "deadline_exceeded",
+      alert: {
+        severity: "critical",
+        code: "deadline_exceeded",
+        message:
+          "The ambiguous AgentTask exceeded its deadline; cancellation was issued and the task failed.",
+      },
+    });
+  }
 
   try {
     await deps.readPort.readRun({ harnessRunId: intendedRunId });
@@ -191,11 +228,76 @@ async function recoverAmbiguousSubmit(
     },
   };
   await deps.saveTask(recovered);
+  await emitTaskAlert(deps, recovered, {
+    severity: "critical",
+    code: "orphan_run_detected",
+    harnessRunId: intendedRunId,
+    message:
+      "An existing Harness run was detected for an ambiguous submit and its immutable binding was recovered.",
+  });
   return result(task, {
     outcome: "recovered",
     lifecycle: "running",
     healthy: true,
     reason: "submit_ambiguous_run_recovered",
+  });
+}
+
+async function cancelTaskForHalt(
+  deps: ReconcileRunDeps,
+  task: AgentTaskV1,
+): Promise<ReconcileResult> {
+  const outboxBinding = await deps.getRunBinding(task.workItemId);
+  const taskRunId = task.bindings?.harnessRunId;
+  if (
+    outboxBinding
+    && taskRunId
+    && outboxBinding.harnessRunId !== taskRunId
+  ) {
+    return refuseTask(deps, task, "binding_conflict");
+  }
+  const harnessRunId = outboxBinding?.harnessRunId
+    ?? taskRunId
+    ?? intendedRunIdForAmbiguousTask(task);
+  if (!harnessRunId) {
+    return result(task, {
+      outcome: "unchanged",
+      healthy: true,
+      reason: "halt_no_active_run_binding",
+    });
+  }
+
+  try {
+    const read = await deps.readPort.readRun({ harnessRunId });
+    if (read.status.outcome !== undefined) {
+      return result(task, {
+        outcome: "unchanged",
+        healthy: true,
+        reason: "halt_run_already_terminal",
+      });
+    }
+  } catch (error) {
+    if (isRunMissing(error)) {
+      return result(task, {
+        outcome: "run_missing",
+        healthy: false,
+        reason: "halt_run_not_found",
+      });
+    }
+    // A degraded read must not prevent an emergency stop for a bound run.
+  }
+
+  return forceCancelTask(deps, task, harnessRunId, {
+    lifecycle: "cancelled",
+    decisionType: "escalation",
+    reason: "halt_active_run_cancelled",
+    alert: {
+      severity: "critical",
+      code: "halt_active_run_cancelled",
+      message:
+        "HALT was present with an active Harness run; cancellation was issued and the AgentTask was cancelled.",
+    },
+    outboxBinding,
   });
 }
 
@@ -223,6 +325,20 @@ async function reconcileTask(
       "run_binding_missing",
       "Harness run reconciliation has no immutable run binding",
     );
+  }
+  if (deps.now().getTime() > Date.parse(task.deadline)) {
+    return forceCancelTask(deps, task, harnessRunId, {
+      lifecycle: "failed",
+      decisionType: "dispatch_refusal",
+      reason: "deadline_exceeded",
+      alert: {
+        severity: "critical",
+        code: "deadline_exceeded",
+        message:
+          "The AgentTask deadline was exceeded; the active Harness run was cancelled and the task failed.",
+      },
+      outboxBinding,
+    });
   }
 
   let read: HarnessRunReadSnapshot;
@@ -262,11 +378,18 @@ async function reconcileTask(
     );
     assertAgentRunProjectionWithinTask(task, projection);
   } catch (error) {
-    return refuseTask(
-      deps,
-      task,
-      `projection_containment_failed: ${safeErrorMessage(error)}`,
-    );
+    return forceCancelTask(deps, task, harnessRunId, {
+      lifecycle: "blocked",
+      decisionType: "dispatch_refusal",
+      reason: `projection_containment_failed: ${safeErrorMessage(error)}`,
+      alert: {
+        severity: "critical",
+        code: "containment_expansion",
+        message:
+          "Harness projection exceeded the approved task authority; the run was cancelled and blocked.",
+      },
+      outboxBinding,
+    });
   }
 
   if (projection.source.health !== "healthy") {
@@ -277,6 +400,21 @@ async function reconcileTask(
       "Harness run projection is degraded",
       projection,
     );
+  }
+  if (projection.budget.exhausted) {
+    return forceCancelTask(deps, task, harnessRunId, {
+      lifecycle: "failed",
+      decisionType: "dispatch_refusal",
+      reason: "budget_exhausted",
+      alert: {
+        severity: "critical",
+        code: "budget_exhausted",
+        message:
+          "The approved Harness budget was exhausted; the run was cancelled and the task failed.",
+      },
+      projection,
+      outboxBinding,
+    });
   }
 
   const nextLifecycle = lifecycleForProjection(task.lifecycle, projection);
@@ -310,33 +448,57 @@ async function reconcileTask(
     outboxBinding,
   );
 
-  if (
-    projection.run.state === "approval_required"
-    || projection.run.state === "suspended"
-  ) {
-    await deps.saveTask(updatedTask);
-    const reason = `unexpected_harness_state_${projection.run.state}`;
-    await deps.recordDecision(
-      buildReconcileDecision(
-        updatedTask,
-        "anomaly_pause",
-        reason,
-        deps.now(),
-        projection.artifacts,
-      ),
-    );
-    alert(deps, updatedTask, reason);
-    return result(task, {
-      outcome: "advanced",
+  const approvalPacketObserved = read.events.some(
+    (event) => event.type === "ApprovalRequested",
+  );
+  if (approvalPacketObserved || projection.run.state === "approval_required") {
+    return forceCancelTask(deps, task, harnessRunId, {
       lifecycle: "blocked",
-      healthy: false,
-      reason,
+      decisionType: "dispatch_refusal",
+      reason: approvalPacketObserved
+        ? "approval_packet_detected"
+        : "unexpected_harness_state_approval_required",
+      alert: {
+        severity: "critical",
+        code: approvalPacketObserved
+          ? "approval_packet_detected"
+          : "approval_required",
+        message:
+          "An unexpected Harness approval boundary appeared; the run was cancelled without approving or denying it.",
+      },
       projection,
+      outboxBinding,
     });
   }
-
+  if (projection.run.state === "suspended") {
+    return forceCancelTask(deps, task, harnessRunId, {
+      lifecycle: "blocked",
+      decisionType: "dispatch_refusal",
+      reason: "unexpected_harness_state_suspended",
+      alert: {
+        severity: "critical",
+        code: "run_suspended",
+        message:
+          "The Harness run suspended unexpectedly; it was cancelled and blocked for operator review.",
+      },
+      projection,
+      outboxBinding,
+    });
+  }
   if (projection.run.state === "quarantined") {
-    alert(deps, updatedTask, "harness_run_quarantined");
+    return forceCancelTask(deps, task, harnessRunId, {
+      lifecycle: "blocked",
+      decisionType: "dispatch_refusal",
+      reason: "harness_run_quarantined",
+      alert: {
+        severity: "critical",
+        code: "run_quarantined",
+        message:
+          "The Harness run was quarantined; it was cancelled and blocked for operator review.",
+      },
+      projection,
+      outboxBinding,
+    });
   }
 
   if (nextLifecycle === "handoff_ready") {
@@ -380,11 +542,88 @@ async function reconcileTask(
   return result(task, {
     outcome: changed ? "advanced" : "unchanged",
     lifecycle: nextLifecycle,
-    healthy: projection.run.state !== "quarantined",
-    ...(projection.run.state === "quarantined"
-      ? { reason: "harness_run_quarantined" }
-      : {}),
+    healthy: true,
     projection,
+  });
+}
+
+interface ForceCancelOptions {
+  lifecycle: "blocked" | "failed" | "cancelled";
+  decisionType: "dispatch_refusal" | "escalation";
+  reason: string;
+  alert: Pick<DispatchAlert, "severity" | "code" | "message">;
+  projection?: AgentRunProjectionV1;
+  outboxBinding?: RunBinding;
+}
+
+async function forceCancelTask(
+  deps: ReconcileRunDeps,
+  task: AgentTaskV1,
+  harnessRunId: string,
+  options: ForceCancelOptions,
+): Promise<ReconcileResult> {
+  let controlAcknowledged = true;
+  let controlReason = "harness_cancel_acknowledged";
+  try {
+    await deps.controlPort.cancel(harnessRunId);
+  } catch (error) {
+    const code = harnessControlErrorCode(error);
+    if (!code) throw error;
+    controlAcknowledged = false;
+    controlReason = `harness_cancel_unacknowledged_${code}`;
+  }
+
+  const now = deps.now();
+  const updatedTask = options.projection
+    ? taskWithProjectionFacts(
+        task,
+        harnessRunId,
+        options.lifecycle,
+        options.projection,
+        now,
+        options.outboxBinding,
+      )
+    : agentTaskV1Schema.parse({
+        ...task,
+        lifecycle: options.lifecycle,
+        timestamps: {
+          ...task.timestamps,
+          ...(options.lifecycle === "failed" || options.lifecycle === "cancelled"
+            ? { terminalAt: task.timestamps.terminalAt ?? now.toISOString() }
+            : {}),
+          updatedAt: now.toISOString(),
+        },
+        bindings: {
+          ...task.bindings,
+          harnessRunId,
+        },
+      });
+  await deps.saveTask(updatedTask);
+  await deps.recordDecision(
+    buildForcedCancelDecision(
+      updatedTask,
+      options.decisionType,
+      options.reason,
+      controlReason,
+      harnessRunId,
+      controlAcknowledged,
+      now,
+      options.projection,
+    ),
+  );
+  await emitTaskAlert(deps, updatedTask, {
+    ...options.alert,
+    harnessRunId,
+    message: controlAcknowledged
+      ? options.alert.message
+      : `${options.alert.message} Harness did not acknowledge the cancel request.`,
+  });
+  return result(task, {
+    outcome: "advanced",
+    lifecycle: options.lifecycle,
+    healthy: false,
+    reason: options.reason,
+    ...(options.projection ? { projection: options.projection } : {}),
   });
 }
 
@@ -625,12 +864,89 @@ async function refuseTask(
       deps.now(),
     ),
   );
-  alert(deps, blocked, reason);
+  await emitTaskAlert(deps, blocked, {
+    severity: "warn",
+    code: "dispatch_refusal",
+    message: `Harness reconciliation refused to proceed: ${reason}.`,
+  });
   return result(task, {
     outcome: "refused",
     lifecycle: "blocked",
     healthy: false,
     reason,
+  });
+}
+
+function buildForcedCancelDecision(
+  task: AgentTaskV1,
+  decisionType: "dispatch_refusal" | "escalation",
+  reason: string,
+  controlReason: string,
+  harnessRunId: string,
+  controlAcknowledged: boolean,
+  generatedAt: Date,
+  projection?: AgentRunProjectionV1,
+): HermesDecisionRecordV2 {
+  const approval = task.approval;
+  const mutations: MutationRef[] = [{
+    system: "agent-task",
+    action: task.lifecycle,
+    target: `${task.workItemId}@${task.taskVersion}`,
+  }];
+  if (controlAcknowledged) {
+    mutations.push({
+      system: "agent-harness",
+      action: "cancel",
+      target: harnessRunId,
+      idempotencyKey: harnessRunId,
+    });
+  }
+  return buildHermesDecisionRecordV2({
+    correlationId: task.correlationId,
+    workItemId: task.workItemId,
+    decisionType,
+    proposal: {
+      what: decisionType === "escalation"
+        ? "Stop active Harness work under the global HALT control."
+        : "Refuse continued execution and stop the active Harness run.",
+      why: [reason, controlReason],
+      evidenceRefs: uniqueArtifacts([
+        ...task.proposal.sourceRefs,
+        ...(projection?.artifacts ?? []),
+      ]),
+    },
+    inputs: [{
+      name: "approved-task",
+      ...(approval.approvedTaskHash
+        ? { hash: approval.approvedTaskHash }
+        : {}),
+      observedAt: generatedAt.toISOString(),
+    }],
+    risk: task.risk,
+    approval: {
+      required: approval.required,
+      decision: approval.status,
+      ...(approval.actor ? { actor: approval.actor } : {}),
+      policyVersion: approval.policyVersion,
+      policyHash: approval.policyHash,
+      ...(approval.decidedAt ? { decidedAt: approval.decidedAt } : {}),
+    },
+    effects: {
+      mutates: true,
+      mutations,
+      authorityChanged: false,
+      budgetChanged: false,
+    },
+    next: {
+      action: controlAcknowledged
+        ? "Operator reviews the stopped task before any new task version."
+        : "Operator verifies that the Harness run stopped before any new task version.",
+      owner: "operator",
+      blockedBy: controlAcknowledged
+        ? [reason]
+        : [reason, controlReason],
+    },
+    generatedAt,
   });
 }
 
@@ -767,6 +1083,13 @@ function result(
 
 function intendedRunIdForDispatching(task: AgentTaskV1): string | undefined {
   if (task.lifecycle !== "dispatching") return undefined;
+  return intendedRunIdForAmbiguousTask(task);
+}
+
+function intendedRunIdForAmbiguousTask(
+  task: AgentTaskV1,
+): string | undefined {
+  if (!task.timestamps.dispatchClaimedAt) return undefined;
   const approvedTaskHash = task.approval.approvedTaskHash;
   return approvedTaskHash
     ? deriveIntendedRunId(task.workItemId, task.taskVersion, approvedTaskHash)
@@ -859,15 +1182,33 @@ function safeErrorMessage(error: unknown): string {
     .slice(0, 1_000);
 }
 
-function alert(
+function harnessControlErrorCode(
+  error: unknown,
+): HarnessControlError["code"] | undefined {
+  if (error instanceof HarnessControlError) return error.code;
+  if (
+    error instanceof Error
+    && error.name === "HarnessControlError"
+    && "code" in error
+    && typeof error.code === "string"
+  ) {
+    return error.code as HarnessControlError["code"];
+  }
+  return undefined;
+}
+
+async function emitTaskAlert(
   deps: ReconcileRunDeps,
   task: AgentTaskV1,
-  reason: string,
-): void {
-  deps.logger?.warn({
-    alert: true,
+  alert: Pick<
+    DispatchAlert,
+    "severity" | "code" | "message" | "harnessRunId"
+  >,
+): Promise<void> {
+  await deps.alertSink({
+    ...alert,
     workItemId: task.workItemId,
     taskVersion: task.taskVersion,
-    reason,
-  }, "ALERT: Harness run reconciliation requires operator attention");
+    at: deps.now().toISOString(),
+  });
 }

@@ -17,7 +17,7 @@ const INTENT_PATH = path.resolve(
 );
 
 describe("INT-2d Harness control port", () => {
-  it("defaults dispatch off and never executes submit or cancel while disabled", async () => {
+  it("keeps submit disabled while allowing authority-reducing cancel", async () => {
     const prior = process.env.HARNESS_DISPATCH_ENABLED;
     delete process.env.HARNESS_DISPATCH_ENABLED;
     try {
@@ -32,11 +32,15 @@ describe("INT-2d Harness control port", () => {
         code: "dispatch_disabled",
         retryable: false,
       });
-      await expect(port.cancel(RUN_ID)).rejects.toMatchObject({
-        code: "dispatch_disabled",
-        retryable: false,
-      });
       expect(execute).not.toHaveBeenCalled();
+
+      await expect(port.cancel(RUN_ID)).resolves.toBeUndefined();
+      expect(execute).toHaveBeenCalledOnce();
+      expect(execute).toHaveBeenCalledWith(
+        "harness",
+        ["run", "cancel", RUN_ID],
+        { timeoutMs: 15_000, maxOutputBytes: 256 * 1024 },
+      );
     } finally {
       if (prior === undefined) delete process.env.HARNESS_DISPATCH_ENABLED;
       else process.env.HARNESS_DISPATCH_ENABLED = prior;

@@ -103,7 +103,7 @@ describe("Harness dispatcher process", () => {
     });
   });
 
-  it("reports HALT honestly without starting store work", async () => {
+  it("reports HALT after stop-only reconciliation without starting dispatch", async () => {
     const attemptDeps = dispatchAttemptDeps(true, true);
     const harness = processHarness({
       runAttempt: vi.fn(() => runSingleDispatch(attemptDeps)),
@@ -115,7 +115,7 @@ describe("Harness dispatcher process", () => {
     });
 
     expect(harness.deps.runAttempt).not.toHaveBeenCalled();
-    expect(harness.deps.runReconcile).not.toHaveBeenCalled();
+    expect(harness.deps.runReconcile).toHaveBeenCalledOnce();
     expect(attemptDeps.acquireLease).not.toHaveBeenCalled();
     expect(attemptDeps.listDispatchable).not.toHaveBeenCalled();
     expect(heartbeats(harness.deps)).toEqual([
@@ -380,6 +380,7 @@ function dispatchAttemptDeps(
       cancel: vi.fn(async () => undefined),
     },
     recordDecision: vi.fn(async () => undefined),
+    alertSink: vi.fn(async () => undefined),
   };
 }
 

@@ -535,6 +535,7 @@ function dispatchDeps(task: AgentTaskV1): DispatchDeps {
       cancel: vi.fn(async () => undefined),
     },
     recordDecision: vi.fn(async () => undefined),
+    alertSink: vi.fn(async () => undefined),
     logger: { warn: vi.fn() },
   };
 }
@@ -556,6 +557,15 @@ function assertDecision(deps: DispatchDeps, reason: string): void {
     effects: { mutates: false },
     next: { owner: "operator" },
   });
+  expect(deps.alertSink).toHaveBeenCalledOnce();
+  expect(deps.alertSink).toHaveBeenCalledWith(
+    expect.objectContaining({
+      severity: "warn",
+      code: "dispatch_refusal",
+      workItemId: expect.any(String),
+      message: expect.stringContaining(reason),
+    }),
+  );
 }
 
 function savedTask(deps: DispatchDeps, call: number): AgentTaskV1 {
