@@ -272,6 +272,44 @@ describe("single-attempt Harness dispatch orchestration", () => {
     expect(deps.writeIntentArtifact).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["dependency_cache_missing", "warn"],
+    ["dependency_cache_stale", "critical"],
+    ["dependency_seed_failed", "warn"],
+  ] as const)("emits one distinct %s alert and never submits", async (
+    workspaceReason,
+    severity,
+  ) => {
+    const task = await approvedTask();
+    const deps = dispatchDeps(task);
+    const expectedHash = `sha256:${"a".repeat(64)}`;
+    vi.mocked(deps.prepareWorkspace).mockRejectedValue(
+      new WorkspacePrepError(
+        workspaceReason,
+        `Dependency preparation failed for expected ${expectedHash}`,
+      ),
+    );
+
+    await expect(runSingleDispatch(deps)).resolves.toMatchObject({
+      outcome: "refused",
+      reason: "workspace_prep_failed",
+      intendedRunId: intendedId(task),
+    });
+
+    assertRefusal(deps, "workspace_prep_failed", {
+      severity,
+      code: workspaceReason,
+    });
+    expect(deps.alertSink).toHaveBeenCalledOnce();
+    expect(deps.alertSink).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining(expectedHash),
+      }),
+    );
+    expect(deps.controlPort.submit).not.toHaveBeenCalled();
+    expect(deps.writeIntentArtifact).not.toHaveBeenCalled();
+  });
+
   it("refuses a prepared path that differs from the shared deterministic path", async () => {
     const task = await approvedTask();
     const deps = dispatchDeps(task);
@@ -540,15 +578,29 @@ function dispatchDeps(task: AgentTaskV1): DispatchDeps {
   };
 }
 
-function assertRefusal(deps: DispatchDeps, reason: string): void {
+function assertRefusal(
+  deps: DispatchDeps,
+  reason: string,
+  alert: { severity: "warn" | "critical"; code: string } = {
+    severity: "warn",
+    code: "dispatch_refusal",
+  },
+): void {
   expect(deps.controlPort.submit).not.toHaveBeenCalled();
   expect(deps.saveTask).toHaveBeenCalledOnce();
   expect(savedTask(deps, 0).lifecycle).toBe("blocked");
-  assertDecision(deps, reason);
+  assertDecision(deps, reason, alert);
   expect(deps.releaseLease).toHaveBeenCalledOnce();
 }
 
-function assertDecision(deps: DispatchDeps, reason: string): void {
+function assertDecision(
+  deps: DispatchDeps,
+  reason: string,
+  alert: { severity: "warn" | "critical"; code: string } = {
+    severity: "warn",
+    code: "dispatch_refusal",
+  },
+): void {
   const records = decisionRecords(deps);
   expect(records).toHaveLength(1);
   expect(records[0]).toMatchObject({
@@ -560,10 +612,9 @@ function assertDecision(deps: DispatchDeps, reason: string): void {
   expect(deps.alertSink).toHaveBeenCalledOnce();
   expect(deps.alertSink).toHaveBeenCalledWith(
     expect.objectContaining({
-      severity: "warn",
-      code: "dispatch_refusal",
+      severity: alert.severity,
+      code: alert.code,
       workItemId: expect.any(String),
-      message: expect.stringContaining(reason),
     }),
   );
 }

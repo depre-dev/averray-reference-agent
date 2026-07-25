@@ -46,7 +46,10 @@ import {
   type ReconcileResult,
   type ReconcileRunDeps,
 } from "./reconcile-run.js";
-import { prepareTaskWorkspace } from "./workspace-prep.js";
+import {
+  prepareTaskWorkspace,
+  seedWorkspaceDependencies,
+} from "./workspace-prep.js";
 
 const DEFAULT_POLL_INTERVAL_MS = 15_000;
 const MIN_POLL_INTERVAL_MS = 5_000;
@@ -404,7 +407,18 @@ export function createProductionDispatcher(
     bindRun: bindRunToWorkItem,
     loadProfileManifest: (profileId) =>
       loadProfileManifest(profileId, environment),
-    prepareWorkspace: prepareTaskWorkspace,
+    prepareWorkspace: (task) =>
+      prepareTaskWorkspace(task, {
+        seedDependencies: (candidate, workspacePath) =>
+          seedWorkspaceDependencies(candidate, workspacePath, {
+            environment,
+          }),
+        logger: {
+          info(fields, message) {
+            logger.info(fields, message);
+          },
+        },
+      }),
     writeIntentArtifact: createIntentArtifactWriter(config.intentDir),
     controlPort,
     recordDecision: recordHermesDecision,

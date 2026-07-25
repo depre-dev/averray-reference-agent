@@ -1,6 +1,18 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm as removePath,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   agentTaskV1Schema,
@@ -10,14 +22,27 @@ import {
   workspacePathForTask,
 } from "../../packages/averray-mcp/src/workspace-path.js";
 import {
+  buildTaskIntentArtifact,
+} from "../../packages/averray-mcp/src/task-intent-mapping.js";
+import {
   disposeTaskWorkspace,
   prepareTaskWorkspace,
+  seedWorkspaceDependencies,
   WorkspacePrepError,
+  type DependencySeedOutcome,
   type GitCommandResult,
   type WorkspacePrepDeps,
 } from "../../services/harness-dispatcher/src/workspace-prep.js";
 
 const FAKE_CREDENTIAL = "ghp_this-must-never-appear";
+const temporaryRoots: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    temporaryRoots.splice(0).map((root) =>
+      removePath(root, { recursive: true, force: true })),
+  );
+});
 
 describe("task workspace preparation", () => {
   it("cleans first, uses fixed Git argv, verifies HEAD, and returns the path", async () => {
@@ -37,11 +62,16 @@ describe("task workspace preparation", () => {
       mkdir: vi.fn(async () => {
         order.push("mkdir");
       }),
+      seedDependencies: vi.fn(async () => {
+        order.push("seed:skipped");
+        return "skipped";
+      }),
     });
 
     await expect(prepareTaskWorkspace(task, deps)).resolves.toBe(target);
 
     expect(order.slice(0, 3)).toEqual(["rm", "mkdir", "git:init"]);
+    expect(order.at(-1)).toBe("seed:skipped");
     expect(deps.runGit).toHaveBeenCalledTimes(5);
     expect(deps.runGit).toHaveBeenNthCalledWith(1, ["init"], target);
     expect(deps.runGit).toHaveBeenNthCalledWith(
@@ -100,6 +130,7 @@ describe("task workspace preparation", () => {
     );
 
     expect(error.reason).toBe("revision_mismatch");
+    expect(deps.seedDependencies).not.toHaveBeenCalled();
   });
 
   it("maps a non-zero Git exit without exposing raw stderr credentials", async () => {
@@ -173,6 +204,198 @@ describe("task workspace preparation", () => {
     expect(deps.mkdir).not.toHaveBeenCalled();
     expect(deps.runGit).not.toHaveBeenCalled();
   });
+
+  it("seeds only after revision verification and proves Git status is unchanged", async () => {
+    const task = agentTaskFixture();
+    const order: string[] = [];
+    const deps = workspacePrepDeps({
+      runGit: vi.fn(async (args) => {
+        order.push(`git:${args.join(" ")}`);
+        return gitResult(
+          args[0] === "rev-parse" ? task.repository.baseRevision : "",
+        );
+      }),
+      seedDependencies: vi.fn(async () => {
+        order.push("seed");
+        return "seeded";
+      }),
+    });
+
+    await prepareTaskWorkspace(task, deps);
+
+    expect(order.indexOf("git:rev-parse HEAD")).toBeLessThan(
+      order.indexOf("seed"),
+    );
+    expect(order.at(-1)).toBe("git:status --porcelain --untracked-files=all");
+    expect(deps.runGit).toHaveBeenCalledTimes(6);
+  });
+
+  it("fails closed when seeded dependencies appear in Git status", async () => {
+    const task = agentTaskFixture();
+    const deps = workspacePrepDeps({
+      runGit: vi.fn(async (args) => {
+        if (args[0] === "rev-parse") {
+          return gitResult(task.repository.baseRevision);
+        }
+        if (args[0] === "status") {
+          return gitResult("?? node_modules/\n");
+        }
+        return gitResult();
+      }),
+      seedDependencies: vi.fn(async () => "seeded"),
+    });
+
+    const error = await capturedWorkspacePrepError(
+      prepareTaskWorkspace(task, deps),
+    );
+
+    expect(error.reason).toBe("dependency_seed_failed");
+  });
+
+  it("keeps the TaskIntent template hash identical with or without seeding", async () => {
+    const task = agentTaskFixture();
+    const skippedPath = await prepareTaskWorkspace(
+      task,
+      workspacePrepDeps({
+        seedDependencies: vi.fn(async () => "skipped"),
+      }),
+    );
+    const seededPath = await prepareTaskWorkspace(
+      task,
+      workspacePrepDeps({
+        seedDependencies: vi.fn(async () => "seeded"),
+      }),
+    );
+
+    const [skipped, seeded] = await Promise.all([
+      buildTaskIntentArtifact(task, { workspacePath: skippedPath }),
+      buildTaskIntentArtifact(task, { workspacePath: seededPath }),
+    ]);
+
+    expect(seeded.templateHash).toBe(skipped.templateHash);
+    expect(seeded.canonicalBytes).toBe(skipped.canonicalBytes);
+  });
+});
+
+describe("offline workspace dependency seeding", () => {
+  it("skips without a configured cache and never copies", async () => {
+    const cp = vi.fn(async () => undefined);
+
+    await expect(seedWorkspaceDependencies(
+      agentTaskFixture(),
+      "/workspace/does-not-need-to-exist",
+      { environment: {}, cp },
+    )).resolves.toBe("skipped");
+
+    expect(cp).not.toHaveBeenCalled();
+  });
+
+  it("skips a prepared workspace without package-lock.json", async () => {
+    const { workspace, cacheRoot } = await emptySeedFixture();
+    const cp = vi.fn(async () => undefined);
+
+    await expect(seedWorkspaceDependencies(
+      agentTaskFixture(),
+      workspace,
+      {
+        environment: { HARNESS_DISPATCH_DEP_CACHE_DIR: cacheRoot },
+        cp,
+      },
+    )).resolves.toBe("skipped");
+
+    expect(cp).not.toHaveBeenCalled();
+  });
+
+  it("copies the exact lockfile cache into workspace node_modules", async () => {
+    const fixture = await populatedSeedFixture();
+
+    await expect(seedWorkspaceDependencies(
+      agentTaskFixture(),
+      fixture.workspace,
+      {
+        environment: {
+          HARNESS_DISPATCH_DEP_CACHE_DIR: fixture.cacheRoot,
+        },
+      },
+    )).resolves.toBe("seeded");
+
+    await expect(readFile(
+      path.join(fixture.workspace, "node_modules", "example", "index.js"),
+      "utf8",
+    )).resolves.toBe("export const seeded = true;\n");
+  });
+
+  it("refuses a missing exact lockfile cache as stale without copying or networking", async () => {
+    const { workspace, cacheRoot } = await emptySeedFixture();
+    await writeFile(
+      path.join(workspace, "package-lock.json"),
+      "{\"lockfileVersion\":3}\n",
+    );
+    const cp = vi.fn(async () => undefined);
+
+    const error = await capturedWorkspacePrepError(
+      seedWorkspaceDependencies(agentTaskFixture(), workspace, {
+        environment: { HARNESS_DISPATCH_DEP_CACHE_DIR: cacheRoot },
+        cp,
+      }),
+    );
+
+    const expectedHash = createHash("sha256")
+      .update("{\"lockfileVersion\":3}\n")
+      .digest("hex");
+    expect(error.reason).toBe("dependency_cache_stale");
+    expect(error.message).toContain(`sha256:${expectedHash}`);
+    expect(cp).not.toHaveBeenCalled();
+
+    const source = readFileSync(
+      new URL(
+        "../../services/harness-dispatcher/src/workspace-prep.ts",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    expect(source).not.toContain("npm install");
+    expect(source).not.toContain("npm ci");
+    expect(source).not.toMatch(/\bfetch\s*\(/);
+  });
+
+  it("reports a configured but unavailable cache root as missing", async () => {
+    const { workspace, root } = await emptySeedFixture();
+    await writeFile(path.join(workspace, "package-lock.json"), "{}\n");
+
+    const error = await capturedWorkspacePrepError(
+      seedWorkspaceDependencies(agentTaskFixture(), workspace, {
+        environment: {
+          HARNESS_DISPATCH_DEP_CACHE_DIR: path.join(root, "missing-cache"),
+        },
+      }),
+    );
+
+    expect(error.reason).toBe("dependency_cache_missing");
+  });
+
+  it("rejects a cached symlink that resolves outside node_modules", async () => {
+    const fixture = await populatedSeedFixture();
+    const external = path.join(fixture.root, "outside.js");
+    await writeFile(external, "do not copy\n");
+    await symlink(
+      external,
+      path.join(fixture.cacheNodeModules, "escape.js"),
+    );
+
+    const error = await capturedWorkspacePrepError(
+      seedWorkspaceDependencies(agentTaskFixture(), fixture.workspace, {
+        environment: {
+          HARNESS_DISPATCH_DEP_CACHE_DIR: fixture.cacheRoot,
+        },
+      }),
+    );
+
+    expect(error.reason).toBe("dependency_seed_failed");
+    await expect(
+      stat(path.join(fixture.workspace, "node_modules")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
 });
 
 function workspacePrepDeps(
@@ -185,7 +408,59 @@ function workspacePrepDeps(
         : "")),
     rm: overrides.rm ?? vi.fn(async () => undefined),
     mkdir: overrides.mkdir ?? vi.fn(async () => undefined),
+    seedDependencies: overrides.seedDependencies
+      ?? vi.fn(async (): Promise<DependencySeedOutcome> => "skipped"),
+    ...(overrides.logger ? { logger: overrides.logger } : {}),
   };
+}
+
+async function emptySeedFixture(): Promise<{
+  root: string;
+  workspace: string;
+  cacheRoot: string;
+}> {
+  const root = await mkdtemp(path.join(tmpdir(), "harness-dep-seed-"));
+  temporaryRoots.push(root);
+  const workspace = path.join(root, "workspace");
+  const cacheRoot = path.join(root, "cache");
+  await Promise.all([
+    mkdir(workspace, { recursive: true }),
+    mkdir(cacheRoot, { recursive: true }),
+  ]);
+  return { root, workspace, cacheRoot };
+}
+
+async function populatedSeedFixture(): Promise<{
+  root: string;
+  workspace: string;
+  cacheRoot: string;
+  cacheNodeModules: string;
+}> {
+  const fixture = await emptySeedFixture();
+  const lockfile = "{\"lockfileVersion\":3,\"packages\":{}}\n";
+  await writeFile(
+    path.join(fixture.workspace, "package-lock.json"),
+    lockfile,
+  );
+  const hash = createHash("sha256").update(lockfile).digest("hex");
+  const cacheEntry = path.join(fixture.cacheRoot, hash);
+  const cacheNodeModules = path.join(cacheEntry, "node_modules");
+  await mkdir(path.join(cacheNodeModules, "example"), { recursive: true });
+  await Promise.all([
+    writeFile(
+      path.join(cacheNodeModules, "example", "index.js"),
+      "export const seeded = true;\n",
+    ),
+    writeFile(
+      path.join(cacheEntry, "manifest.json"),
+      `${JSON.stringify({
+        lockfileSha256: hash,
+        createdAt: "2026-07-25T12:00:00.000Z",
+        sourceRevision: agentTaskFixture().repository.baseRevision,
+      })}\n`,
+    ),
+  ]);
+  return { ...fixture, cacheNodeModules };
 }
 
 function gitResult(

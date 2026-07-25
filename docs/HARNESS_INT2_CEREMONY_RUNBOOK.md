@@ -97,14 +97,14 @@ done
 
 ### 1.3 Create and pin the pilot profile
 
-Build or select a locally available, immutable pilot image that contains Node
-22, Git, and all dependencies required by the fixture's offline `npm`
-verification commands. Because Harness bind-mounts the task checkout at
-`/workspace` and runs with `--network none`, the image must make those
-dependencies available inside that mounted workspace without downloading
-anything at run time. Keep the image build recipe and clean source revision in
-the evidence bundle. It must contain no credentials. Do not use a floating tag
-in the evidence ceremony:
+Build or select a locally available, immutable pilot image that contains only
+the runtime tools needed by these fixtures: Node 22 and Git. Do not bake the
+reference agent's `node_modules` into `/workspace`: Harness bind-mounts the
+prepared task checkout there, which shadows image-baked workspace contents.
+The host-side cache flow in §1.4 seeds exact lockfile-matched dependencies
+before the offline run starts. Keep the image build recipe and clean source
+revision in the evidence bundle. It must contain no credentials. Do not use a
+floating tag in the evidence ceremony:
 
 ```sh
 export PILOT_IMAGE="reference-agent-pilot@sha256:<operator-recorded-digest>"
@@ -178,6 +178,7 @@ export HARNESS_DISPATCH_ARTIFACT_DIR="$CEREMONY_ROOT/dispatch-artifacts"
 export HARNESS_DISPATCH_INTENT_DIR="$CEREMONY_ROOT/dispatch-intents"
 export HARNESS_DISPATCH_HEARTBEAT_PATH="$CEREMONY_ROOT/dispatcher-heartbeat.json"
 export HARNESS_DISPATCH_ALERTS_PATH="$CEREMONY_ROOT/dispatcher-alerts.jsonl"
+export HARNESS_DISPATCH_DEP_CACHE_DIR="$CEREMONY_ROOT/dispatch-dependency-cache"
 export HALT_FILE="$CEREMONY_ROOT/HALT"
 export POLICY_CONFIG_PATH="$REFERENCE_CHECKOUT/hermes/config/policy.yaml"
 export HERMES_DISPATCH_ALLOWED_REPOS="depre-dev/averray-reference-agent"
@@ -189,6 +190,7 @@ export HARNESS_DISPATCH_ENABLED=false
 mkdir -p \
   "$HARNESS_DISPATCH_ARTIFACT_DIR" \
   "$HARNESS_DISPATCH_INTENT_DIR" \
+  "$HARNESS_DISPATCH_DEP_CACHE_DIR" \
   /var/lib/harness-dispatcher/workspaces
 ```
 
@@ -196,6 +198,47 @@ The final `mkdir` may require the operator to create the directory once with
 local administrator privileges and grant only their ceremony user write
 access. Do not change `DISPATCH_WORKSPACE_ROOT`: it is part of the approved task
 hash.
+
+The `lint-format` fixture uses only `git diff --check`, so it can run with
+`HARNESS_DISPATCH_DEP_CACHE_DIR` unset. The `docs-fix`, `add-unit-test`, and
+`small-refactor` fixtures execute `npm` verification and require the exact
+offline cache. Populate it once from a clean checkout of the fixture revision:
+
+```sh
+export PILOT_SOURCE_REVISION="8b94278578913b7cd7aa1acb276db48613090c7b"
+export PILOT_DEP_CHECKOUT="$CEREMONY_ROOT/reference-agent-dependency-source"
+
+for fixture in docs-fix add-unit-test small-refactor lint-format; do
+  grep -F \
+    "\"baseRevision\": \"$PILOT_SOURCE_REVISION\"" \
+    "$REFERENCE_CHECKOUT/test/fixtures/agent-integration/ceremony/$fixture.json" \
+    > /dev/null
+done
+
+git clone --local --no-hardlinks \
+  "$REFERENCE_CHECKOUT" "$PILOT_DEP_CHECKOUT"
+git -C "$PILOT_DEP_CHECKOUT" checkout --detach "$PILOT_SOURCE_REVISION"
+test "$(git -C "$PILOT_DEP_CHECKOUT" rev-parse HEAD)" = \
+  "$PILOT_SOURCE_REVISION"
+test -z "$(git -C "$PILOT_DEP_CHECKOUT" status --porcelain)"
+
+cd "$REFERENCE_CHECKOUT"
+node scripts/ops/build-dispatch-dep-cache.mjs \
+  --checkout "$PILOT_DEP_CHECKOUT" \
+  --cache-root "$HARNESS_DISPATCH_DEP_CACHE_DIR" \
+  > "$CEREMONY_ROOT/evidence/dependency-cache.json"
+```
+
+The builder copies the clean checkout to a temporary host directory, runs
+`npm ci` there, then atomically publishes
+`<cache-root>/<package-lock-sha256>/{node_modules,manifest.json}`. This is the
+only dependency-cache population step allowed to use network access. Re-running
+it for an already valid exact hash leaves that cache entry untouched. The
+dispatcher never runs `npm`, never falls back to another cache entry, and
+copies dependencies only after it has verified the prepared Git revision.
+Harness still runs with `--network none`. If the lockfile hash is absent or the
+cache is incomplete/stale, dispatch stops before submit and records one
+operator-visible alert.
 
 Start the local monitor in a dedicated terminal for projection snapshots. It
 has no Slack token, and every routine/mutation flag remains off:
