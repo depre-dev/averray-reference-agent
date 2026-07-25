@@ -84,6 +84,10 @@
     "./attenuation": {
       "types": "./dist/attenuation.d.ts",
       "import": "./dist/attenuation.js"
+    },
+    "./workspace-path": {
+      "types": "./dist/workspace-path.d.ts",
+      "import": "./dist/workspace-path.js"
     }
   },
   "scripts": {
