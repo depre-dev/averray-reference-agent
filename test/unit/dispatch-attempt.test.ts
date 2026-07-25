@@ -19,6 +19,9 @@ import {
   buildTaskIntentArtifact,
 } from "../../packages/averray-mcp/src/task-intent-mapping.js";
 import {
+  workspacePathForTask,
+} from "../../packages/averray-mcp/src/workspace-path.js";
+import {
   readHaltFile,
   runSingleDispatch,
   type DispatchDeps,
@@ -26,10 +29,12 @@ import {
 import {
   HarnessControlError,
 } from "../../services/harness-dispatcher/src/harness-control-port.js";
+import {
+  WorkspacePrepError,
+} from "../../services/harness-dispatcher/src/workspace-prep.js";
 
 const NOW = "2026-07-24T12:00:00.000Z";
 const DEADLINE = "2026-07-24T13:00:00.000Z";
-const WORKSPACE_PATH = "/workspaces/task-checkout";
 const OTHER_HASH = `sha256:${"f".repeat(64)}`;
 const OTHER_RUN_ID = "22222222-2222-4222-8222-222222222222";
 
@@ -248,6 +253,41 @@ describe("single-attempt Harness dispatch orchestration", () => {
     expect(deps.writeIntentArtifact).not.toHaveBeenCalled();
   });
 
+  it("refuses a workspace preparation error after claiming without submitting", async () => {
+    const task = await approvedTask();
+    const deps = dispatchDeps(task);
+    vi.mocked(deps.prepareWorkspace).mockRejectedValue(
+      new WorkspacePrepError("clone_failed", "Public checkout failed"),
+    );
+
+    await expect(runSingleDispatch(deps)).resolves.toMatchObject({
+      outcome: "refused",
+      reason: "workspace_prep_failed",
+      intendedRunId: intendedId(task),
+    });
+
+    assertRefusal(deps, "workspace_prep_failed");
+    expect(deps.claimDispatch).toHaveBeenCalledOnce();
+    expect(deps.prepareWorkspace).toHaveBeenCalledOnce();
+    expect(deps.writeIntentArtifact).not.toHaveBeenCalled();
+  });
+
+  it("refuses a prepared path that differs from the shared deterministic path", async () => {
+    const task = await approvedTask();
+    const deps = dispatchDeps(task);
+    vi.mocked(deps.prepareWorkspace).mockResolvedValue(
+      "/var/lib/harness-dispatcher/workspaces/unapproved-v1",
+    );
+
+    await expect(runSingleDispatch(deps)).resolves.toMatchObject({
+      outcome: "refused",
+      reason: "workspace_prep_failed",
+    });
+
+    assertRefusal(deps, "workspace_prep_failed");
+    expect(deps.writeIntentArtifact).not.toHaveBeenCalled();
+  });
+
   it("refuses a conflicting recovery binding without claiming or submitting", async () => {
     const task = await approvedTask();
     const deps = dispatchDeps(task);
@@ -305,6 +345,8 @@ describe("single-attempt Harness dispatch orchestration", () => {
     expect(deps.listDispatchable).toHaveBeenCalledOnce();
     expect(deps.renewLease).not.toHaveBeenCalled();
     expect(deps.claimDispatch).toHaveBeenCalledOnce();
+    expect(deps.prepareWorkspace).toHaveBeenCalledOnce();
+    expect(deps.prepareWorkspace).toHaveBeenCalledWith(task);
     expect(deps.controlPort.submit).toHaveBeenCalledOnce();
     expect(deps.controlPort.submit).toHaveBeenCalledWith(
       intendedRunId,
@@ -312,6 +354,13 @@ describe("single-attempt Harness dispatch orchestration", () => {
     );
     const intentPath = vi.mocked(deps.controlPort.submit).mock.calls[0]?.[1];
     expect(intentPath && path.isAbsolute(intentPath)).toBe(true);
+    const intentBytes = vi.mocked(deps.writeIntentArtifact).mock.calls[0]?.[0];
+    const writtenIntent = JSON.parse(intentBytes ?? "{}") as {
+      spec?: { context?: { workspace?: { path?: string } } };
+    };
+    expect(writtenIntent.spec?.context?.workspace?.path).toBe(
+      workspacePathForTask(task.workItemId, task.taskVersion),
+    );
     expect(deps.bindRun).toHaveBeenCalledOnce();
     expect(deps.bindRun).toHaveBeenCalledWith({
       workItemId: task.workItemId,
@@ -346,6 +395,7 @@ describe("single-attempt Harness dispatch orchestration", () => {
     });
 
     expect(deps.claimDispatch).not.toHaveBeenCalled();
+    expect(deps.prepareWorkspace).not.toHaveBeenCalled();
     expect(deps.controlPort.submit).not.toHaveBeenCalled();
     expect(deps.bindRun).not.toHaveBeenCalled();
     expect(deps.saveTask).toHaveBeenCalledOnce();
@@ -476,6 +526,8 @@ function dispatchDeps(task: AgentTaskV1): DispatchDeps {
     getRunBinding: vi.fn(async () => undefined),
     bindRun: vi.fn(async () => undefined),
     loadProfileManifest: vi.fn(async () => profileFor(task)),
+    prepareWorkspace: vi.fn(async (candidate) =>
+      workspacePathForTask(candidate.workItemId, candidate.taskVersion)),
     writeIntentArtifact: vi.fn(async (_bytes, workItemId) =>
       `/tmp/${workItemId}-intent.json`),
     controlPort: {
@@ -560,7 +612,10 @@ async function approvedTask(): Promise<AgentTaskV1> {
     },
   } as AgentTaskV1;
   const artifact = await buildTaskIntentArtifact(withApproval, {
-    workspacePath: WORKSPACE_PATH,
+    workspacePath: workspacePathForTask(
+      withApproval.workItemId,
+      withApproval.taskVersion,
+    ),
   });
   return reapprove({
     ...withApproval,

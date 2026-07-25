@@ -25,14 +25,16 @@ import {
 import {
   buildTaskIntentArtifact,
 } from "@avg/averray-mcp/task-intent-mapping";
+import {
+  workspacePathForTask,
+} from "@avg/averray-mcp/workspace-path";
 
 import {
   HarnessControlError,
   type HarnessControlErrorCode,
   type HarnessControlPort,
 } from "./harness-control-port.js";
-
-const DISPATCH_WORKSPACE_PATH = "/workspaces/task-checkout";
+import { WorkspacePrepError } from "./workspace-prep.js";
 
 const DEFINITELY_NO_RUN_CODES = new Set<HarnessControlErrorCode>([
   "dispatch_disabled",
@@ -56,6 +58,7 @@ export interface DispatchDeps {
   getRunBinding(workItemId: string): Promise<RunBinding | undefined>;
   bindRun(input: BindRunInput): Promise<unknown>;
   loadProfileManifest(profileId: string): Promise<PilotProfileManifest>;
+  prepareWorkspace(task: AgentTaskV1): Promise<string>;
   writeIntentArtifact(bytes: string, workItemId: string): Promise<string>;
   controlPort: HarnessControlPort;
   recordDecision(record: HermesDecisionRecordV2): Promise<unknown>;
@@ -184,8 +187,24 @@ export async function runSingleDispatch(
       throw error;
     }
 
+    let workspacePath: string;
+    try {
+      workspacePath = await deps.prepareWorkspace(task);
+    } catch (error) {
+      if (error instanceof WorkspacePrepError) {
+        return refuse(deps, task, intendedRunId, "workspace_prep_failed");
+      }
+      throw error;
+    }
+    if (
+      workspacePath
+      !== workspacePathForTask(task.workItemId, task.taskVersion)
+    ) {
+      return refuse(deps, task, intendedRunId, "workspace_prep_failed");
+    }
+
     const artifact = await buildTaskIntentArtifact(task, {
-      workspacePath: DISPATCH_WORKSPACE_PATH,
+      workspacePath,
     });
     if (artifact.templateHash !== task.intent.templateHash) {
       return refuse(deps, task, intendedRunId, "template_hash_mismatch");
