@@ -37,11 +37,12 @@ import {
 const NOW = new Date("2026-07-25T12:00:00.000Z");
 
 describe("Harness dispatcher process", () => {
-  it("parses startup config once with bounded polling and lease values", () => {
+  it("parses startup config once with bounded polling, lease, and read timeout values", () => {
     expect(parseDispatcherConfig({
       HARNESS_DISPATCHER_ID: "dispatcher-one",
       HARNESS_DISPATCH_POLL_INTERVAL_MS: "1",
       HARNESS_DISPATCH_LEASE_TTL_SECONDS: "9999",
+      HARNESS_DISPATCH_READ_TIMEOUT_MS: "999999",
       HARNESS_DISPATCH_INTENT_DIR: "./intents",
       HARNESS_DISPATCH_HEARTBEAT_PATH: "./heartbeat.json",
       HARNESS_BIN: "/opt/harness/bin/harness",
@@ -53,6 +54,7 @@ describe("Harness dispatcher process", () => {
       dispatcherId: "dispatcher-one",
       pollIntervalMs: 5_000,
       leaseTtlSeconds: 900,
+      readTimeoutMs: 30_000,
       harnessBin: "/opt/harness/bin/harness",
     });
 
@@ -64,11 +66,20 @@ describe("Harness dispatcher process", () => {
       dispatcherId: "host-42",
       pollIntervalMs: 15_000,
       leaseTtlSeconds: 120,
+      readTimeoutMs: 15_000,
       intentDir: "/tmp/averray-reference-agent/harness-dispatch-intents",
       heartbeatPath:
         "/tmp/averray-reference-agent/harness-dispatcher-heartbeat.json",
       harnessBin: "harness",
     });
+
+    expect(parseDispatcherConfig({
+      HARNESS_DISPATCH_READ_TIMEOUT_MS: "1",
+    }, {
+      hostname: "host",
+      pid: 42,
+      tmpdir: "/tmp",
+    }).readTimeoutMs).toBe(1_000);
   });
 
   it("reports disabled honestly while the guarded attempt touches no store dependency", async () => {
@@ -344,6 +355,7 @@ function dispatcherConfig(): DispatcherConfig {
     dispatcherId: "dispatcher-one",
     pollIntervalMs: 15_000,
     leaseTtlSeconds: 120,
+    readTimeoutMs: 15_000,
     intentDir: "/tmp/harness-intents",
     heartbeatPath: "/tmp/harness-heartbeat.json",
     harnessBin: "harness",
