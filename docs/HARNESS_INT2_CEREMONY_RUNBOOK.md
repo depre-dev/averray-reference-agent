@@ -179,6 +179,7 @@ export HARNESS_DISPATCH_INTENT_DIR="$CEREMONY_ROOT/dispatch-intents"
 export HARNESS_DISPATCH_HEARTBEAT_PATH="$CEREMONY_ROOT/dispatcher-heartbeat.json"
 export HARNESS_DISPATCH_ALERTS_PATH="$CEREMONY_ROOT/dispatcher-alerts.jsonl"
 export HARNESS_DISPATCH_DEP_CACHE_DIR="$CEREMONY_ROOT/dispatch-dependency-cache"
+export HARNESS_DISPATCH_READ_TIMEOUT_MS=15000
 export HALT_FILE="$CEREMONY_ROOT/HALT"
 export POLICY_CONFIG_PATH="$REFERENCE_CHECKOUT/hermes/config/policy.yaml"
 export HERMES_DISPATCH_ALLOWED_REPOS="depre-dev/averray-reference-agent"
@@ -198,6 +199,9 @@ The final `mkdir` may require the operator to create the directory once with
 local administrator privileges and grant only their ceremony user write
 access. Do not change `DISPATCH_WORKSPACE_ROOT`: it is part of the approved task
 hash.
+
+`HARNESS_DISPATCH_READ_TIMEOUT_MS` is bounded to 1–30 seconds. Keep the
+15-second pilot default when the Harness CLI crosses a container boundary.
 
 The `lint-format` fixture uses only `git diff --check`, so it can run with
 `HARNESS_DISPATCH_DEP_CACHE_DIR` unset. The `docs-fix`, `add-unit-test`, and

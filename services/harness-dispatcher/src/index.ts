@@ -57,6 +57,9 @@ const MAX_POLL_INTERVAL_MS = 300_000;
 const DEFAULT_LEASE_TTL_SECONDS = 120;
 const MIN_LEASE_TTL_SECONDS = 30;
 const MAX_LEASE_TTL_SECONDS = 900;
+const DEFAULT_READ_TIMEOUT_MS = 15_000;
+const MIN_READ_TIMEOUT_MS = 1_000;
+const MAX_READ_TIMEOUT_MS = 30_000;
 
 export type DispatcherHeartbeatStatus =
   | "disabled"
@@ -80,6 +83,7 @@ export interface DispatcherConfig {
   dispatcherId: string;
   pollIntervalMs: number;
   leaseTtlSeconds: number;
+  readTimeoutMs: number;
   intentDir: string;
   heartbeatPath: string;
   harnessBin: string;
@@ -156,6 +160,12 @@ export function parseDispatcherConfig(
       DEFAULT_LEASE_TTL_SECONDS,
       MIN_LEASE_TTL_SECONDS,
       MAX_LEASE_TTL_SECONDS,
+    ),
+    readTimeoutMs: boundedInteger(
+      environment.HARNESS_DISPATCH_READ_TIMEOUT_MS,
+      DEFAULT_READ_TIMEOUT_MS,
+      MIN_READ_TIMEOUT_MS,
+      MAX_READ_TIMEOUT_MS,
     ),
     intentDir,
     heartbeatPath,
@@ -441,6 +451,7 @@ export function createProductionDispatcher(
     bindRun: bindRunToWorkItem,
     readPort: createHarnessCliReadPort({
       command: config.harnessBin,
+      timeoutMs: config.readTimeoutMs,
     }),
     controlPort,
     recordDecision: recordHermesDecision,

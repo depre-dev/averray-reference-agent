@@ -876,6 +876,7 @@ function dispatcherConfig(): DispatcherConfig {
     dispatcherId: "dispatcher-one",
     pollIntervalMs: 15_000,
     leaseTtlSeconds: 120,
+    readTimeoutMs: 15_000,
     intentDir: "/tmp/harness-intents",
     heartbeatPath: "/tmp/harness-heartbeat.json",
     harnessBin: "harness",
