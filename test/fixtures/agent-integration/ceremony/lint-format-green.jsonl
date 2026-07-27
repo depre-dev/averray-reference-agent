@@ -1,0 +1,2 @@
+{"tool_calls":[{"id":"int2-green-write","name":"fs_write_file","arguments":{"path":"docs/harness-int2-green-path-proof.md","content":"# INT-2 green-path proof\n\nThis deterministic change verifies the supervised handoff path.\n"}}],"usage":{"input_tokens":2,"output_tokens":1,"requests":1},"finish_reason":"tool_call"}
+{"text":"Wrote the deterministic allowlisted proof file.","usage":{"input_tokens":2,"output_tokens":2,"requests":1},"finish_reason":"stop"}
