@@ -30,9 +30,9 @@ export HARNESS_CHECKOUT="$CEREMONY_ROOT/agent-harness"
 export REFERENCE_CHECKOUT="/absolute/path/to/averray-reference-agent"
 
 git clone https://github.com/averray-agent/agent-harness.git "$HARNESS_CHECKOUT"
-git -C "$HARNESS_CHECKOUT" checkout --detach be55b34
+git -C "$HARNESS_CHECKOUT" checkout --detach 0890a1f
 test "$(git -C "$HARNESS_CHECKOUT" rev-parse HEAD)" = \
-  "be55b348d365e7939b51ea979cee61d7cb210d15"
+  "0890a1f04c2729cbd310e21f66dd9dc6fbc66dc2"
 test -z "$(git -C "$HARNESS_CHECKOUT" status --porcelain)"
 
 cd "$HARNESS_CHECKOUT"
@@ -431,6 +431,16 @@ If this drill broadens authority instead of tightening it, abort.
 
 An unverified handoff or any PR is an immediate abort.
 
+> **Re-run ordering after the PKT-040 kernel fix (2026-07-27).** Both §2.5 and
+> §2.6 must be re-run on the new pin, and **§2.5 must run first**. Before the
+> fix, `git diff --check` could not execute at all under the Docker provider
+> (`exit_128`), so §2.5's recorded `verification_failed` may have been that
+> environmental error rather than a judgement about the model's output. If §2.5
+> now **passes**, it never demonstrated its gate statement and needs a fixture
+> that fails for a substantive reason. Running §2.6 first would produce a green
+> positive proof beside an unexamined negative one — which reads as complete
+> while resting on the result under doubt.
+
 ### 2.6 Verified green handoff is complete but unactuated
 
 This positive proof and §2.5's negative proof are both required for acceptance.
@@ -542,7 +552,16 @@ go/no-go of `go`.
    export HARNESS_MODEL_API_KEY="<secret-kept-out-of-evidence>"
    ```
 
-4. Start exactly one Harness worker.
+4. Prove **no** Harness worker is already running, then start exactly one:
+
+   ```sh
+   pgrep -af "harness worker" && exit 1 || true
+   ```
+
+   A stale worker from an earlier session carries that session's
+   `HARNESS_TEST_MODEL_SCRIPT` and can claim this run, producing a result
+   attributed to the wrong fixture. "Start one" is not the same as "only one
+   exists" — assert the second.
 5. Propose exactly one `lint-format` or `docs-fix` task with a new work-item id
    and a near-term deadline. Verify the fixture remains low-risk, deny-network,
    `maxChildren: 0`, `maxConcurrentChildren: 0`, and within its fixed elapsed,
