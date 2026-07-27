@@ -107,7 +107,7 @@ export function detectAnomalies(history: HealthHistory | undefined, config?: Par
   if (bal) {
     out.push({
       metric: "balance",
-      label: "Signer USDC",
+      label: "Reward bank",
       direction: "down",
       current: round(bal.current, 2),
       baseline: round(bal.baseline, 2),

@@ -33,6 +33,7 @@ export function SolvencyZone({ solvency }: SolvencyZoneProps) {
                       {row.floorLabel ? <span className="ops-gauge-floor"> · {row.floorLabel}</span> : null}
                     </span>
                   </div>
+                  {row.note ? <span className="ops-gauge-note">{row.note}</span> : null}
                   {row.fill == null ? null : (
                     <div className="ops-meter">
                       <i style={{ width: `${Math.round(row.fill * 100)}%` }} />

@@ -71,16 +71,16 @@ export function opsSuggestions(health: ProductHealth | undefined): OpsSuggestion
     });
   }
 
-  // 2. Signer at/below floor — settlement halts. Funds are operator-only, so the
+  // 2. Reward bank at/below floor — settlement halts. Funds are operator-only, so the
   //    task PREPARES the top-up (compute + draft); it never moves money.
   const signer = live("signer_liquidity");
   if (signer && (signer.status === "red" || /below floor/i.test(signer.detail))) {
     out.push({
       id: "signer-floor",
       tone: signer.status === "red" ? "act" : "warn",
-      text: "Signer USDC below floor — top up before the next payout.",
+      text: "Reward bank below floor — top up before the next payout.",
       task: proposeTask(
-        `Prepare a signer top-up — do NOT move funds, PREPARE ONLY. The signer is at/below its floor: "${signer.detail}". Compute how much to add to restore a safe buffer (≈ 5× floor) and draft the exact top-up steps/command for the operator to execute.`,
+        `Prepare a reward-bank top-up — do NOT move funds, PREPARE ONLY. The in-contract reward bank is at/below its floor: "${signer.detail}". Compute how much to add to restore a safe buffer (≈ 5× floor) and draft the exact brokered deposit steps/command for the operator to execute.`,
       ),
     });
   }
@@ -99,7 +99,7 @@ export function opsSuggestions(health: ProductHealth | undefined): OpsSuggestion
       tone: nearest.status === "red" ? "act" : "warn",
       text: `${nearest.label} ${eta} to floor — top up before settlement halts.`,
       task: proposeTask(
-        `Prepare a signer top-up — do NOT move funds, PREPARE ONLY. ${nearest.label} is projected to reach its ${nearest.floor} ${nearest.unit} floor in ${eta} (current ${nearest.current} ${nearest.unit}${burn}). Compute how much ${nearest.unit} to add to reach a safe buffer (target ≈ 5× the floor) and draft the exact top-up steps/command for the operator to review and execute.`,
+        `Prepare a reward-bank top-up — do NOT move funds, PREPARE ONLY. ${nearest.label} is projected to reach its ${nearest.floor} ${nearest.unit} floor in ${eta} (current ${nearest.current} ${nearest.unit}${burn}). Compute how much ${nearest.unit} to add to reach a safe buffer (target ≈ 5× the floor) and draft the exact brokered deposit steps/command for the operator to review and execute.`,
       ),
     });
   }

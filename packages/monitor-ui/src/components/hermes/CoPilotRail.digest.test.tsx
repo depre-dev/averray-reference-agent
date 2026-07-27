@@ -65,7 +65,7 @@ describe("PR-D3d — rail Hermes digest", () => {
     );
     const box = container.querySelector(".hm-rail-ops-sugg") as HTMLElement;
     expect(box).toBeTruthy();
-    expect(box.textContent).toContain("Signer USDC below floor");
+    expect(box.textContent).toContain("Reward bank below floor");
     // Every incident now arrives pre-drafted — signer-floor + money-path both actionable.
     const propose = within(box).getAllByText("Propose task");
     expect(propose.length).toBeGreaterThan(1);
