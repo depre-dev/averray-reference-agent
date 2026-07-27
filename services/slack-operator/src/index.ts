@@ -2399,7 +2399,9 @@ async function handleMonitorTestbedMissionScreencastRequest(
   if (route.kind === "latest") {
     const framePath = screencastLatestFramePath(testbedMissionArtifactsRoot(), route.id);
     const body = await readFile(framePath).catch(() => undefined);
-    if (!body) {
+    // An empty Buffer is truthy, so check the length too: a zero-byte frame must
+    // read as missing rather than be served as a valid-looking JPEG.
+    if (!body || body.byteLength === 0) {
       writeJson(response, 404, { error: "testbed_screencast_frame_not_found", id: route.id });
       return;
     }
@@ -2451,7 +2453,9 @@ async function writeTestbedMissionScreencastStream(
     if (manifest.frameCount === lastFrameCount && manifest.status === "running") return;
     lastFrameCount = manifest.frameCount;
     const latest = await readFile(screencastLatestFramePath(testbedMissionArtifactsRoot(), missionId)).catch(() => undefined);
-    if (!latest) {
+    // An empty Buffer is truthy, so check the length too: a zero-byte frame must
+    // surface as `latest_frame_missing` rather than be streamed as a good frame.
+    if (!latest || latest.byteLength === 0) {
       writeSseEvent(response, "screencast.status", {
         missionId,
         status: manifest.status,

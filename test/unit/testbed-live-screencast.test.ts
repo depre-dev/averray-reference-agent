@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,6 +10,7 @@ import {
   liveScreencastAllowedForMission,
   parseTestbedLiveScreencastConfig,
   readTestbedScreencastManifest,
+  screencastArtifactsDir,
   screencastLatestFramePath,
   startPlaywrightLiveScreencast,
 } from "../../services/slack-operator/src/testbed-live-screencast.js";
@@ -176,6 +177,151 @@ describe("testbed live screencast", () => {
     } finally {
       await controller?.stop("test_finished");
     }
+  });
+  it("never publishes a torn frame while the next capture is in flight", async () => {
+    const root = mkdtempSync(join(tmpdir(), "averray-screencast-test-"));
+    const mission = missionRun({
+      id: "mission-live-torn-frame",
+      targetUrl: "https://app.testnet.example/gold",
+      environment: "testnet",
+    });
+    let captures = 0;
+    let secondFramePartial!: () => void;
+    let releaseSecondFrame!: () => void;
+    const secondFrameIsPartial = new Promise<void>((resolve) => { secondFramePartial = resolve; });
+    const secondFrameReleased = new Promise<void>((resolve) => { releaseSecondFrame = resolve; });
+    const page = {
+      url: () => "https://app.testnet.example/gold",
+      screenshot: vi.fn(async ({ path }: { path: string }) => {
+        captures += 1;
+        if (captures === 1) {
+          writeFileSync(path, Buffer.from("complete-frame-one"));
+          return;
+        }
+        // Playwright streams the JPEG into `path`; hold the window where only
+        // part of the next frame is on disk.
+        writeFileSync(path, Buffer.from("torn"));
+        secondFramePartial();
+        await secondFrameReleased;
+        writeFileSync(path, Buffer.from("complete-frame-two"));
+      }),
+    } as unknown as Page;
+
+    const controller = await startPlaywrightLiveScreencast({
+      mission,
+      page,
+      artifactsRoot: root,
+      config: { enabled: true, intervalMs: 1, maxFrames: 10, jpegQuality: 40 },
+      update: () => {},
+    });
+
+    try {
+      await secondFrameIsPartial;
+      // The monitor routes read latest.jpg on every poll — the SSE stream
+      // base64-encodes it into a frame event and /latest.jpg serves it directly.
+      // Mid-capture they must still see the last complete frame.
+      expect(readFileSync(screencastLatestFramePath(root, mission.id), "utf8")).toBe("complete-frame-one");
+      releaseSecondFrame();
+      await vi.waitFor(() => {
+        expect(readFileSync(screencastLatestFramePath(root, mission.id), "utf8")).toBe("complete-frame-two");
+      });
+    } finally {
+      releaseSecondFrame();
+      await controller?.stop("test_finished");
+    }
+  });
+
+  it("captures into a sibling temp file and leaves no temp residue", async () => {
+    const root = mkdtempSync(join(tmpdir(), "averray-screencast-test-"));
+    const mission = missionRun({
+      id: "mission-live-temp-publish",
+      targetUrl: "https://app.testnet.example/gold",
+      environment: "testnet",
+    });
+    const capturedPaths: string[] = [];
+    const page = {
+      url: () => "https://app.testnet.example/gold",
+      screenshot: vi.fn(async ({ path }: { path: string }) => {
+        capturedPaths.push(path);
+        writeFileSync(path, Buffer.from("jpeg-frame"));
+      }),
+    } as unknown as Page;
+
+    const controller = await startPlaywrightLiveScreencast({
+      mission,
+      page,
+      artifactsRoot: root,
+      config: { enabled: true, intervalMs: 1, maxFrames: 3, jpegQuality: 40 },
+      update: () => {},
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(capturedPaths.length).toBeGreaterThanOrEqual(1);
+      });
+    } finally {
+      await controller?.stop("test_finished");
+    }
+
+    const latestFramePath = screencastLatestFramePath(root, mission.id);
+    // Nothing may capture directly onto the published path.
+    expect(capturedPaths).not.toContain(latestFramePath);
+    for (const path of capturedPaths) {
+      expect(path.startsWith(`${latestFramePath}.`)).toBe(true);
+      expect(path.endsWith(".tmp")).toBe(true);
+    }
+    await vi.waitFor(() => {
+      expect(readdirSync(screencastArtifactsDir(root, mission.id)).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+    });
+    expect(readFileSync(latestFramePath, "utf8")).toBe("jpeg-frame");
+  });
+
+  it("keeps the last good frame published when a capture fails partway through", async () => {
+    const root = mkdtempSync(join(tmpdir(), "averray-screencast-test-"));
+    const mission = missionRun({
+      id: "mission-live-failed-capture",
+      targetUrl: "https://app.testnet.example/gold",
+      environment: "testnet",
+    });
+    let captures = 0;
+    const reasons: (string | undefined)[] = [];
+    const page = {
+      url: () => "https://app.testnet.example/gold",
+      screenshot: vi.fn(async ({ path }: { path: string }) => {
+        captures += 1;
+        if (captures === 1) {
+          writeFileSync(path, Buffer.from("complete-frame"));
+          return;
+        }
+        if (captures === 2) {
+          // Half a frame on disk, then the page goes away.
+          writeFileSync(path, Buffer.from("half"));
+          throw new Error("target page closed mid-frame");
+        }
+        throw new Error("target page closed");
+      }),
+    } as unknown as Page;
+
+    const controller = await startPlaywrightLiveScreencast({
+      mission,
+      page,
+      artifactsRoot: root,
+      config: { enabled: true, intervalMs: 1, maxFrames: 10, jpegQuality: 40 },
+      update: (state) => reasons.push(state.reason),
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(reasons).toContain("frame_capture_failed");
+      });
+    } finally {
+      await controller?.stop("test_finished");
+    }
+
+    // A failed capture must not leave a truncated frame published, and must not
+    // leave its temp file behind either.
+    expect(readFileSync(screencastLatestFramePath(root, mission.id), "utf8")).toBe("complete-frame");
+    expect(readdirSync(screencastArtifactsDir(root, mission.id)).filter((name) => name.endsWith(".tmp"))).toEqual([]);
   });
 });
 
