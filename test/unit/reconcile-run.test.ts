@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import {
   agentRunProjectionV1Schema,
   agentTaskV1Schema,
+  harnessRunStateSchema,
   hashAgentTaskApprovalPayload,
   type AgentRunProjectionV1,
   type AgentTaskLifecycle,
@@ -38,6 +39,14 @@ const MANIFEST_REF = {
   sha256: MANIFEST_HASH,
   mediaType: "application/json",
 } as const;
+const TERMINAL_LIFECYCLES = new Set<AgentTaskLifecycle>([
+  "handoff_ready",
+  "failed",
+  "cancelled",
+]);
+type TerminalOutcome = NonNullable<
+  AgentRunProjectionV1["run"]["outcome"]
+>;
 
 describe("dispatched Harness run reconciliation", () => {
   it.each([
@@ -60,8 +69,6 @@ describe("dispatched Harness run reconciliation", () => {
     ["cancel_requested", "cancelled"],
     ["compensating", "cancelled"],
     ["cancelled", "cancelled"],
-    ["learning_queued", "running"],
-    ["learning_processed", "running"],
   ] satisfies Array<[HarnessRunState, AgentTaskLifecycle]>)(
     "projects Harness state %s to AgentTask lifecycle %s",
     async (state, expectedLifecycle) => {
@@ -107,6 +114,124 @@ describe("dispatched Harness run reconciliation", () => {
       }
     },
   );
+
+  it.each([
+    ["completed", true, "handoff_ready"],
+    ["completed", false, "failed"],
+    ["partial", undefined, "failed"],
+    ["failed", undefined, "failed"],
+    ["cancelled", undefined, "cancelled"],
+  ] satisfies Array<
+    [TerminalOutcome, boolean | undefined, AgentTaskLifecycle]
+  >)(
+    "projects terminal learning_processed outcome %s (verification=%s) to %s",
+    async (outcome, verificationPassed, expectedLifecycle) => {
+      const task = await runningTask();
+      const deps = reconcileDeps(
+        task,
+        snapshot("learning_processed", {
+          outcome,
+          ...(verificationPassed === undefined
+            ? {}
+            : { verificationPassed }),
+        }),
+      );
+
+      const [reconciled] = await reconcileDispatchedRuns(deps);
+
+      expect(reconciled?.lifecycle).toBe(expectedLifecycle);
+      expect(reconciled?.projection?.run).toMatchObject({
+        state: "learning_processed",
+        terminal: true,
+        outcome,
+      });
+      expect(TERMINAL_LIFECYCLES.has(reconciled!.lifecycle)).toBe(true);
+      expect(savedTasks(deps).at(-1)?.lifecycle).toBe(expectedLifecycle);
+      expect(deps.controlPort.cancel).not.toHaveBeenCalled();
+      expect(deps.alertSink).not.toHaveBeenCalled();
+    },
+  );
+
+  it("projects terminal learning_queued from its outcome", async () => {
+    const task = await runningTask();
+    const deps = reconcileDeps(
+      task,
+      snapshot("learning_queued", { outcome: "partial" }),
+    );
+
+    const [reconciled] = await reconcileDispatchedRuns(deps);
+
+    expect(reconciled).toMatchObject({
+      lifecycle: "failed",
+      healthy: true,
+      projection: {
+        run: {
+          state: "learning_queued",
+          terminal: true,
+          outcome: "partial",
+        },
+      },
+    });
+    expect(savedTasks(deps).at(-1)?.lifecycle).toBe("failed");
+  });
+
+  it.each(harnessRunStateSchema.options)(
+    "resolves terminal Harness state %s to a terminal lifecycle",
+    async (state) => {
+      const task = await runningTask();
+      const deps = reconcileDeps(
+        task,
+        snapshot(state, { outcome: "failed" }),
+      );
+
+      const [reconciled] = await reconcileDispatchedRuns(deps);
+
+      expect(reconciled?.projection?.run).toMatchObject({
+        state,
+        terminal: true,
+        outcome: "failed",
+      });
+      expect(reconciled?.lifecycle).toBe("failed");
+      expect(TERMINAL_LIFECYCLES.has(reconciled!.lifecycle)).toBe(true);
+      expect(reconciled?.lifecycle).not.toBe(task.lifecycle);
+      expect(deps.controlPort.cancel).not.toHaveBeenCalled();
+      expect(deps.alertSink).not.toHaveBeenCalled();
+    },
+  );
+
+  it("alerts and blocks an unresolvable terminal projection", async () => {
+    const task = await runningTask();
+    const unresolved: AgentRunProjectionV1 = {
+      ...projectionFor(task, "learning_processed"),
+      run: {
+        state: "learning_processed",
+        attempt: 1,
+        terminal: true,
+      },
+    };
+    const deps = reconcileDeps(task, snapshot("learning_processed"), {
+      projectRun: vi.fn(() => unresolved),
+    });
+
+    const [reconciled] = await reconcileDispatchedRuns(deps);
+
+    expect(reconciled).toMatchObject({
+      outcome: "refused",
+      lifecycle: "blocked",
+      healthy: false,
+      reason: expect.stringContaining("terminal_projection_unresolved"),
+    });
+    expect(savedTasks(deps).at(-1)?.lifecycle).toBe("blocked");
+    expect(deps.controlPort.cancel).not.toHaveBeenCalled();
+    expect(deps.alertSink).toHaveBeenCalledOnce();
+    expect(deps.alertSink).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: "critical",
+        code: "terminal_projection_unresolved",
+        harnessRunId: RUN_ID,
+      }),
+    );
+  });
 
   it.each([
     {
@@ -683,17 +808,19 @@ function snapshot(
   options: {
     verificationPassed?: boolean;
     runId?: string;
+    outcome?: TerminalOutcome;
   } = {},
 ): HarnessRunReadSnapshot {
-  const terminalOutcome = state === "completed"
-    ? "completed"
-    : state === "partial"
-      ? "partial"
-      : state === "failed"
-        ? "failed"
-        : state === "cancelled"
-          ? "cancelled"
-          : undefined;
+  const terminalOutcome = options.outcome
+    ?? (state === "completed"
+      ? "completed"
+      : state === "partial"
+        ? "partial"
+        : state === "failed"
+          ? "failed"
+          : state === "cancelled"
+            ? "cancelled"
+            : undefined);
   const verificationPassed = options.verificationPassed;
   const events: HarnessRunReadSnapshot["events"] = [
     {
@@ -748,7 +875,7 @@ function snapshot(
       state,
       attempt: 1,
       ...(terminalOutcome ? { outcome: terminalOutcome } : {}),
-      ...(state === "failed" || state === "quarantined"
+      ...(terminalOutcome === "failed" || state === "quarantined"
         ? { outcomeReason: "verification_failed" }
         : {}),
       egressPolicy: "deny",

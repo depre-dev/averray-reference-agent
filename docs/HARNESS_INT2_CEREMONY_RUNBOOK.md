@@ -178,7 +178,6 @@ export HARNESS_DISPATCH_ARTIFACT_DIR="$CEREMONY_ROOT/dispatch-artifacts"
 export HARNESS_DISPATCH_INTENT_DIR="$CEREMONY_ROOT/dispatch-intents"
 export HARNESS_DISPATCH_HEARTBEAT_PATH="$CEREMONY_ROOT/dispatcher-heartbeat.json"
 export HARNESS_DISPATCH_ALERTS_PATH="$CEREMONY_ROOT/dispatcher-alerts.jsonl"
-export HARNESS_DISPATCH_DEP_CACHE_DIR="$CEREMONY_ROOT/dispatch-dependency-cache"
 export HARNESS_DISPATCH_READ_TIMEOUT_MS=15000
 export HALT_FILE="$CEREMONY_ROOT/HALT"
 export POLICY_CONFIG_PATH="$REFERENCE_CHECKOUT/hermes/config/policy.yaml"
@@ -191,7 +190,6 @@ export HARNESS_DISPATCH_ENABLED=false
 mkdir -p \
   "$HARNESS_DISPATCH_ARTIFACT_DIR" \
   "$HARNESS_DISPATCH_INTENT_DIR" \
-  "$HARNESS_DISPATCH_DEP_CACHE_DIR" \
   /var/lib/harness-dispatcher/workspaces
 ```
 
@@ -204,11 +202,15 @@ hash.
 15-second pilot default when the Harness CLI crosses a container boundary.
 
 The `lint-format` fixture uses only `git diff --check`, so it can run with
-`HARNESS_DISPATCH_DEP_CACHE_DIR` unset. The `docs-fix`, `add-unit-test`, and
-`small-refactor` fixtures execute `npm` verification and require the exact
-offline cache. Populate it once from a clean checkout of the fixture revision:
+`HARNESS_DISPATCH_DEP_CACHE_DIR` unset; leave it unset for that fixture. The
+`docs-fix`, `add-unit-test`, and `small-refactor` fixtures execute `npm`
+verification and require the exact offline cache. For one of those fixtures,
+set the cache directory and populate it once from a clean checkout of the
+fixture revision:
 
 ```sh
+export HARNESS_DISPATCH_DEP_CACHE_DIR="$CEREMONY_ROOT/dispatch-dependency-cache"
+mkdir -p "$HARNESS_DISPATCH_DEP_CACHE_DIR"
 export PILOT_SOURCE_REVISION="8b94278578913b7cd7aa1acb276db48613090c7b"
 export PILOT_DEP_CHECKOUT="$CEREMONY_ROOT/reference-agent-dependency-source"
 
