@@ -19,6 +19,52 @@ describe("compose environment wiring", () => {
     expect(env?.LLM_USAGE_LOG_PATH).toBe("${LLM_USAGE_LOG_PATH:-/data/llm-usage.jsonl}");
   });
 
+  it("forwards every product-health source control into slack-operator", () => {
+    const compose = parse(readText("../../ops/compose.yml")) as {
+      services?: Record<string, { environment?: Record<string, string> }>;
+    };
+    const env = compose.services?.["slack-operator"]?.environment;
+    const source = [
+      readText("../../services/slack-operator/src/product-health.ts"),
+      readText("../../services/slack-operator/src/routines.ts"),
+      readText("../../services/slack-operator/src/ops-remediation.ts"),
+    ].join("\n");
+    const sourceControls = new Set(
+      source.match(/(?:PRODUCT_HEALTH|OPS_AUTOREMEDIATE)_[A-Z0-9_]+/g) ?? [],
+    );
+
+    for (const control of sourceControls) {
+      expect(env, `${control} is present in source but missing from Compose`).toHaveProperty(control);
+    }
+
+    expect(env?.PRODUCT_HEALTH_INTERVAL_MINUTES).toBe("${PRODUCT_HEALTH_INTERVAL_MINUTES:-2}");
+    expect(env?.PRODUCT_HEALTH_ALERT_COOLDOWN_MINUTES).toBe("${PRODUCT_HEALTH_ALERT_COOLDOWN_MINUTES:-360}");
+    expect(env?.PRODUCT_HEALTH_CHAIN_MAX_STALE_SECONDS).toBe("${PRODUCT_HEALTH_CHAIN_MAX_STALE_SECONDS:-600}");
+    expect(env?.PRODUCT_HEALTH_HALT_SEVERITY).toBe("${PRODUCT_HEALTH_HALT_SEVERITY:-auto}");
+    expect(env?.PRODUCT_HEALTH_MIN_GAS_NATIVE).toBe("${PRODUCT_HEALTH_MIN_GAS_NATIVE:-0}");
+    expect(env?.PRODUCT_HEALTH_MIN_REWARD_BANK).toBe("${PRODUCT_HEALTH_MIN_REWARD_BANK:-0}");
+    expect(env?.PRODUCT_HEALTH_MIN_TREASURY_RESERVE).toBe("${PRODUCT_HEALTH_MIN_TREASURY_RESERVE:-5}");
+    expect(env?.PRODUCT_HEALTH_TREASURY_RESERVE_ZERO_REASON).toBe("${PRODUCT_HEALTH_TREASURY_RESERVE_ZERO_REASON:-}");
+    expect(env?.PRODUCT_HEALTH_RPC_BACKUPS).toBe("${PRODUCT_HEALTH_RPC_BACKUPS:-}");
+    expect(env?.OPS_AUTOREMEDIATE_ENABLED).toBe("${OPS_AUTOREMEDIATE_ENABLED:-false}");
+    expect(env?.GITHUB_MONITOR_ENRICH_TIMEOUT_MS).toBe("${GITHUB_MONITOR_ENRICH_TIMEOUT_MS:-2500}");
+  });
+
+  it("records the mainnet-only monitor calibration without changing testnet defaults", () => {
+    const calibration = readText("../../ops/.env.mainnet-monitor.example");
+
+    expect(calibration).toContain("PRODUCT_HEALTH_INTERVAL_MINUTES=5");
+    expect(calibration).toContain("PRODUCT_HEALTH_ALERT_COOLDOWN_MINUTES=30");
+    expect(calibration).toContain("PRODUCT_HEALTH_MIN_TREASURY_RESERVE=0");
+    expect(calibration).toContain(
+      "PRODUCT_HEALTH_TREASURY_RESERVE_ZERO_REASON=Mainnet payouts are funded from the signer reward bank; the treasury multisig intentionally holds no USDC float.",
+    );
+    expect(calibration).toContain("PRODUCT_HEALTH_RPC_URL=https://services.polkadothub-rpc.com/mainnet/");
+    expect(calibration).toContain("PRODUCT_HEALTH_RPC_BACKUPS=https://eth-rpc.polkadot.io/");
+    expect(calibration).toContain("OPS_AUTOREMEDIATE_ENABLED=true");
+    expect(calibration).toContain("GITHUB_MONITOR_ENRICH_TIMEOUT_MS=5000");
+  });
+
   it("passes the shared LLM usage log path into Hermes and its MCP env", () => {
     const compose = parse(readText("../../ops/compose.yml")) as {
       services?: Record<string, { environment?: Record<string, string> }>;

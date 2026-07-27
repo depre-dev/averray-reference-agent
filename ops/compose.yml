@@ -324,7 +324,13 @@ services:
       PRODUCT_HEALTH_INTERVAL_MINUTES: ${PRODUCT_HEALTH_INTERVAL_MINUTES:-2}
       # Repeat an unchanged RED incident at most every 6h. Set 0 for edge-only alerts.
       PRODUCT_HEALTH_ALERT_COOLDOWN_MINUTES: ${PRODUCT_HEALTH_ALERT_COOLDOWN_MINUTES:-360}
+      # Monitor snapshots fan out across open PRs and their check runs. Keep the
+      # timeout operator-tunable; the live mainnet calibration raises it from the
+      # conservative generic default without changing testnet behaviour.
+      GITHUB_MONITOR_ENRICH_TIMEOUT_MS: ${GITHUB_MONITOR_ENRICH_TIMEOUT_MS:-2500}
       PRODUCT_HEALTH_API_PATH: ${PRODUCT_HEALTH_API_PATH:-/health}
+      PRODUCT_HEALTH_CHAIN_MAX_STALE_SECONDS: ${PRODUCT_HEALTH_CHAIN_MAX_STALE_SECONDS:-600}
+      PRODUCT_HEALTH_HALT_SEVERITY: ${PRODUCT_HEALTH_HALT_SEVERITY:-auto}
       # No per-network default outside testnet, and none is guessed: the balance
       # probe refuses any endpoint whose eth_chainId != the chainId /health reports
       # (product-health.ts chain guard), so a wrong URL fails loudly instead of
@@ -370,9 +376,8 @@ services:
       # liveness alone, so a leftover other-network endpoint would be rotated onto;
       # the chain guard then refuses its balances rather than trusting them. Empty
       # is honest — a dead or wrong-chain backup is worse than none.
-      # Mainnet: empty as of 2026-07-25 — polkadot-asset-hub-eth-rpc.polkadot.io and
-      # asset-hub-polkadot-eth-rpc.polkadot.io were probed and did not respond.
-      # TODO: add a second verified mainnet eth-rpc (Dwellir/OnFinality-class).
+      # Mainnet has two official HTTP endpoints. Keep their ordering in the
+      # mainnet-only calibration overlay; never make either a testnet default.
       PRODUCT_HEALTH_RPC_BACKUPS: ${PRODUCT_HEALTH_RPC_BACKUPS:-}
       OPS_AUTOREMEDIATE_FAIL_THRESHOLD: ${OPS_AUTOREMEDIATE_FAIL_THRESHOLD:-2}
       OPS_AUTOREMEDIATE_MAX_ATTEMPTS: ${OPS_AUTOREMEDIATE_MAX_ATTEMPTS:-3}
