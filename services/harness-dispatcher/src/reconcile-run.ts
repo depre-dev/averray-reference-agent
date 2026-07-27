@@ -369,7 +369,7 @@ async function reconcileTask(
     });
   }
 
-  let projection: AgentRunProjectionV1;
+  let projection: AgentRunProjectionV1 | undefined;
   try {
     projection = (deps.projectRun ?? projectHarnessRun)(
       projectionBinding,
@@ -378,6 +378,21 @@ async function reconcileTask(
     );
     assertAgentRunProjectionWithinTask(task, projection);
   } catch (error) {
+    if (
+      projection?.run.terminal
+      && !isTerminalOutcome(projection.run.outcome)
+    ) {
+      const reason =
+        `terminal_projection_unresolved: ${safeErrorMessage(error)}`;
+      return refuseTask(deps, task, reason, {
+        severity: "critical",
+        code: "terminal_projection_unresolved",
+        harnessRunId,
+        message:
+          "A terminal Harness projection had no resolvable outcome; "
+          + "reconciliation stopped for operator review.",
+      });
+    }
     return forceCancelTask(deps, task, harnessRunId, {
       lifecycle: "blocked",
       decisionType: "dispatch_refusal",
@@ -451,7 +466,13 @@ async function reconcileTask(
   const approvalPacketObserved = read.events.some(
     (event) => event.type === "ApprovalRequested",
   );
-  if (approvalPacketObserved || projection.run.state === "approval_required") {
+  if (
+    approvalPacketObserved
+    || (
+      !projection.run.terminal
+      && projection.run.state === "approval_required"
+    )
+  ) {
     return forceCancelTask(deps, task, harnessRunId, {
       lifecycle: "blocked",
       decisionType: "dispatch_refusal",
@@ -470,7 +491,7 @@ async function reconcileTask(
       outboxBinding,
     });
   }
-  if (projection.run.state === "suspended") {
+  if (!projection.run.terminal && projection.run.state === "suspended") {
     return forceCancelTask(deps, task, harnessRunId, {
       lifecycle: "blocked",
       decisionType: "dispatch_refusal",
@@ -485,7 +506,7 @@ async function reconcileTask(
       outboxBinding,
     });
   }
-  if (projection.run.state === "quarantined") {
+  if (!projection.run.terminal && projection.run.state === "quarantined") {
     return forceCancelTask(deps, task, harnessRunId, {
       lifecycle: "blocked",
       decisionType: "dispatch_refusal",
@@ -719,6 +740,26 @@ function lifecycleForProjection(
   current: AgentTaskLifecycle,
   projection: AgentRunProjectionV1,
 ): AgentTaskLifecycle {
+  if (projection.run.terminal) {
+    const outcome = projection.run.outcome;
+    if (outcome === undefined) {
+      throw new Error("terminal Harness projection has no outcome");
+    }
+    switch (outcome) {
+      case "completed":
+        return projection.verification?.status === "passed"
+          ? "handoff_ready"
+          : "failed";
+      case "partial":
+      case "failed":
+        return "failed";
+      case "cancelled":
+        return "cancelled";
+      default:
+        return assertNever(outcome);
+    }
+  }
+
   const state = projection.run.state;
   if (RUNNING_STATES.has(state)) return "running";
   if (VERIFYING_STATES.has(state)) return "verifying";
@@ -735,6 +776,21 @@ function lifecycleForProjection(
   }
   if (CANCELLED_STATES.has(state)) return "cancelled";
   return current;
+}
+
+function isTerminalOutcome(
+  value: AgentRunProjectionV1["run"]["outcome"],
+): value is NonNullable<AgentRunProjectionV1["run"]["outcome"]> {
+  return value === "completed"
+    || value === "partial"
+    || value === "failed"
+    || value === "cancelled";
+}
+
+function assertNever(value: never): never {
+  throw new Error(
+    `terminal Harness projection has unknown outcome: ${String(value)}`,
+  );
 }
 
 function taskWithProjectionFacts(
@@ -845,6 +901,10 @@ async function refuseTask(
   deps: ReconcileRunDeps,
   task: AgentTaskV1,
   reason: string,
+  alert?: Pick<
+    DispatchAlert,
+    "severity" | "code" | "harnessRunId" | "message"
+  >,
 ): Promise<ReconcileResult> {
   const updatedAt = deps.now().toISOString();
   const blocked: AgentTaskV1 = {
@@ -864,11 +924,15 @@ async function refuseTask(
       deps.now(),
     ),
   );
-  await emitTaskAlert(deps, blocked, {
-    severity: "warn",
-    code: "dispatch_refusal",
-    message: `Harness reconciliation refused to proceed: ${reason}.`,
-  });
+  await emitTaskAlert(
+    deps,
+    blocked,
+    alert ?? {
+      severity: "warn",
+      code: "dispatch_refusal",
+      message: `Harness reconciliation refused to proceed: ${reason}.`,
+    },
+  );
   return result(task, {
     outcome: "refused",
     lifecycle: "blocked",
