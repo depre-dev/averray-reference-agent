@@ -1,0 +1,44 @@
+# INT-2 supervised-ceremony pilot image.
+#
+# Runbook §1.3 requires an immutable image containing ONLY the runtime tools the
+# ceremony fixtures need — Node 22 and Git — with no credentials. This is
+# deliberately NOT ops/Dockerfile.node: that is the application image and
+# carries Chromium, Playwright, and the Codex/Claude CLIs, none of which a
+# confined lint/docs/test fixture may have.
+#
+# Do not add anything here without re-running the ceremony. In particular:
+#   - no credentials, tokens, or SSH keys;
+#   - no agent CLIs or anything that can actuate GitHub, Averray, or a wallet;
+#   - no application node_modules — Harness bind-mounts the prepared task
+#     checkout over /workspace, which shadows image-baked contents, and the
+#     dispatcher seeds lockfile-matched dependencies host-side (§1.4).
+#
+# Build and record the digest (the ceremony pins by digest, never by tag):
+#
+#   docker build -f ops/Dockerfile.pilot -t reference-agent-pilot:ceremony .
+#   docker images --digests | grep reference-agent-pilot
+#
+# A locally built image has no registry digest until it is pushed. For a local
+# ceremony, pin the image ID instead and record it in evidence:
+#
+#   docker image inspect --format '{{.Id}}' reference-agent-pilot:ceremony
+#
+# For full reproducibility the base should itself be digest-pinned; replace the
+# FROM below with the resolved digest and record it alongside the build recipe.
+
+FROM node:22-bookworm-slim
+
+# git only. ca-certificates is present for git's own TLS verification, not for
+# network access: the pilot profile is egress deny_all and the Harness Docker
+# provider runs the container with no network.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends git ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+# No USER directive: the ceremony runs the worker as the operator's own uid and
+# the workspace must share that identity. Introducing an image user (as the
+# application image does with uid 10001) is what produced the dubious-ownership
+# failure in the first attempt.
+
+WORKDIR /workspace
+CMD ["sleep", "infinity"]
