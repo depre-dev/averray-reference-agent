@@ -476,15 +476,36 @@ describe("dispatched Harness run reconciliation", () => {
         },
       },
     });
-    expect(recordedDecisions(deps).at(-1)).toMatchObject({
+    const handoff = reconciled?.handoff;
+    if (!handoff) throw new Error("Expected a verified handoff");
+    expect(handoff.runManifestRef.sha256).toBe(handoff.runManifestHash);
+    expect(handoff.deliverables.patchRef).toBeDefined();
+    expect(handoff).not.toHaveProperty("pullRequest");
+
+    const handoffDecisions = recordedDecisions(deps).filter(
+      (record) => record.decisionType === "handoff",
+    );
+    expect(handoffDecisions).toHaveLength(1);
+    expect(handoffDecisions[0]).toMatchObject({
       decisionType: "handoff",
+      proposal: {
+        why: [
+          "verified_handoff_ready_for_operator",
+          "eligible_for_pr_open=true",
+          "eligible_for_pr_open_reason=completed_outcome_verified_acceptance_all_checks_passed",
+        ],
+      },
       next: { owner: "operator" },
       effects: {
         mutates: false,
+        mutations: [],
         authorityChanged: false,
         budgetChanged: false,
       },
     });
+    expect(handoffDecisions[0]?.proposal.evidenceRefs).toEqual(
+      expect.arrayContaining(handoff.verification.evidenceRefs),
+    );
 
     const moduleSource = await readFile(
       new URL(

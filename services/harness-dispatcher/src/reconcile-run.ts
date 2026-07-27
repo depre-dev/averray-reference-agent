@@ -547,6 +547,10 @@ async function reconcileTask(
         deps.now(),
         handoff.verification.evidenceRefs,
         projection,
+        [
+          `eligible_for_pr_open=${handoff.eligibleForPrOpen}`,
+          "eligible_for_pr_open_reason=completed_outcome_verified_acceptance_all_checks_passed",
+        ],
       ),
     );
     return result(task, {
@@ -1021,6 +1025,7 @@ function buildReconcileDecision(
   generatedAt: Date,
   evidenceRefs: ArtifactRef[] = [],
   projection?: AgentRunProjectionV1,
+  additionalReasons: string[] = [],
 ): HermesDecisionRecordV2 {
   const approval = task.approval;
   const inputs: Array<{
@@ -1059,7 +1064,7 @@ function buildReconcileDecision(
       what: decisionType === "handoff"
         ? "Record a verified handoff for operator review."
         : "Pause supervised execution for operator review.",
-      why: [reason],
+      why: [reason, ...additionalReasons],
       evidenceRefs: uniqueArtifacts([
         ...task.proposal.sourceRefs,
         ...evidenceRefs,

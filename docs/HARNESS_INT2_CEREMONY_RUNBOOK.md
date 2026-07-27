@@ -214,7 +214,7 @@ mkdir -p "$HARNESS_DISPATCH_DEP_CACHE_DIR"
 export PILOT_SOURCE_REVISION="8b94278578913b7cd7aa1acb276db48613090c7b"
 export PILOT_DEP_CHECKOUT="$CEREMONY_ROOT/reference-agent-dependency-source"
 
-for fixture in docs-fix add-unit-test small-refactor lint-format; do
+for fixture in docs-fix add-unit-test small-refactor lint-format lint-format-green; do
   grep -F \
     "\"baseRevision\": \"$PILOT_SOURCE_REVISION\"" \
     "$REFERENCE_CHECKOUT/test/fixtures/agent-integration/ceremony/$fixture.json" \
@@ -431,6 +431,99 @@ If this drill broadens authority instead of tightening it, abort.
 
 An unverified handoff or any PR is an immediate abort.
 
+### 2.6 Verified green handoff is complete but unactuated
+
+This positive proof and §2.5's negative proof are both required for acceptance.
+They use sibling fixtures and separate work-item ids so the negative evidence
+remains reproducible and unchanged.
+
+1. Stop the dispatcher and worker. Confirm `HARNESS_DISPATCH_ENABLED=false`.
+   Copy the committed two-turn script into the ceremony root, record both
+   copies' hashes, and point the next worker at the ceremony-root copy:
+
+   ```sh
+   export GREEN_MODEL_SCRIPT="$CEREMONY_ROOT/lint-format-green.jsonl"
+   cp \
+     "$REFERENCE_CHECKOUT/test/fixtures/agent-integration/ceremony/lint-format-green.jsonl" \
+     "$GREEN_MODEL_SCRIPT"
+   shasum -a 256 \
+     "$REFERENCE_CHECKOUT/test/fixtures/agent-integration/ceremony/lint-format-green.jsonl" \
+     "$GREEN_MODEL_SCRIPT" \
+     > "$CEREMONY_ROOT/evidence/lint-format-green-script.sha256"
+   test "$(sed -n '1s/ .*//p' \
+     "$CEREMONY_ROOT/evidence/lint-format-green-script.sha256")" = \
+     "$(sed -n '2s/ .*//p' \
+     "$CEREMONY_ROOT/evidence/lint-format-green-script.sha256")"
+   export HARNESS_TEST_MODEL_SCRIPT="$GREEN_MODEL_SCRIPT"
+   unset HARNESS_DISPATCH_DEP_CACHE_DIR
+   ```
+
+   Start one worker from the same pinned Harness checkout used by every other
+   case. The script path is under `CEREMONY_ROOT`; it is not a kernel fixture
+   and does not change the Harness pin.
+2. Propose `lint-format-green` as `ceremony-lint-format-green-001`. Before
+   approval, verify the immutable base revision, `docs/**` and `test/**`
+   allowlist, deny-all network, the unchanged `git diff --check` criterion,
+   and the fixed 60-second / 8,000-token / 30-tool-call budget. Approve once
+   with the exact `--confirm` flag, record the printed intended run id, then
+   enable and start one dispatcher.
+3. Wait for both the Harness run and AgentTask to become terminal. Stop the
+   dispatcher immediately and restore `HARNESS_DISPATCH_ENABLED=false`.
+   The task lifecycle must be `handoff_ready`, its bound run id must equal the
+   intended run id, and `harness run status` must show attempt `1`.
+4. Save the standard §4 evidence. Extract the non-empty patch artifact and
+   inspect it against a clean checkout of the fixture's base revision:
+
+   ```sh
+   export GREEN_EVIDENCE="$CEREMONY_ROOT/evidence/ceremony-lint-format-green-001"
+   export GREEN_PATCH_REF="$(
+     awk '$1 == "workspace_patch" { print $2 }' \
+       "$GREEN_EVIDENCE/harness-deliverables.txt"
+   )"
+   test -n "$GREEN_PATCH_REF"
+   "$HARNESS_BIN" artifacts get "$GREEN_PATCH_REF" \
+     --out "$GREEN_EVIDENCE/workspace.patch"
+   test -s "$GREEN_EVIDENCE/workspace.patch"
+
+   export GREEN_PATCH_CHECKOUT="$CEREMONY_ROOT/green-patch-checkout"
+   git clone --local --no-hardlinks \
+     "$REFERENCE_CHECKOUT" "$GREEN_PATCH_CHECKOUT"
+   git -C "$GREEN_PATCH_CHECKOUT" checkout --detach \
+     8b94278578913b7cd7aa1acb276db48613090c7b
+   git -C "$GREEN_PATCH_CHECKOUT" apply --check \
+     "$GREEN_EVIDENCE/workspace.patch"
+   test "$(
+     git -C "$GREEN_PATCH_CHECKOUT" apply --numstat \
+       "$GREEN_EVIDENCE/workspace.patch" |
+       awk '{ print $3 }'
+   )" = "docs/harness-int2-green-path-proof.md"
+   ```
+
+   Any empty patch, second path, or path outside `docs/**` and `test/**` fails
+   the gate.
+5. Inspect the reference-database rows. Require exactly one dispatch claim,
+   exactly one outbox row, exactly one `dispatch_approval` decision whose first
+   reason is `dispatch_succeeded`, and exactly one `handoff` decision whose
+   reasons include all three of:
+
+   - `verified_handoff_ready_for_operator`
+   - `eligible_for_pr_open=true`
+   - `eligible_for_pr_open_reason=completed_outcome_verified_acceptance_all_checks_passed`
+
+   Save the handoff decision's `proposal.evidenceRefs` separately. They must be
+   non-empty and include every verification evidence ref reported by the
+   completed run. The handoff decision remains non-mutating:
+   `effects.mutates=false`, `mutations=[]`.
+6. Compare the AgentTask binding, outbox row, and handoff decision input. The
+   `runManifestRef` and `runManifestHash` must both be present, the ref's
+   `sha256` must equal the hash, and every source must identify the same
+   manifest.
+7. Record `eligibleForPrOpen=true` and its predicate reason, but do not actuate
+   it. Confirm there is no `pullRequest` on the handoff evidence, no GitHub
+   mutation reference, no mutating decision, and no submission or PR. Do not
+   run a GitHub CLI or API command during this proof. Eligibility is evidence
+   for an operator; it is not permission to open a PR.
+
 ## 3. One budget-capped real-model task
 
 Proceed only if every scripted proof is green and the operator records a
@@ -502,6 +595,7 @@ The following mapping is the acceptance checklist for plan section 21.1:
 | No wallet/settlement/deploy/GitHub-merge capability | The exact eight-grant AgentTask and compiled run manifest, with `delegable:false`, `maxChildren:0`, `maxConcurrentChildren:0`, and deny-all egress. Review the manifest, not just the profile source. |
 | Representative low-risk tasks complete through supervision | At least docs/comment, unit-test, and small-refactor families, each with proposal output, explicit operator approval, `dispatch_approval` decision, run events, verifier evidence, budget actuals, and terminal projection. |
 | Failed verification produces no submission | Failed verifier event and failed lifecycle; no `handoff` decision, no VerifiedHandoff actuation, and no PR/submission evidence. |
+| Verified work produces a correct unactuated handoff | The `lint-format-green` case reaches `handoff_ready`; non-empty allowlisted patch; matching manifest ref/hash; one attempt, claim, and outbox; exactly one `dispatch_approval` plus one `handoff`; recorded eligibility value/reason and handoff verification evidence refs; no PR or GitHub mutation. §2.5 and §2.6 must both pass. |
 | Restart and duplicate delivery remain idempotent | Dispatcher restart timestamps, unchanged claim/outbox rows, same immutable run id, and one Harness attempt. |
 
 A successful verified task should have a `dispatch_approval` decision and, when
@@ -537,8 +631,9 @@ evidence green.
 
 Finish with an evidence index containing the Harness SHA, image digest, profile
 SHA, policy hash/version, every work-item/version, run id, task/template/
-verifier/manifest hash, decision ids, outbox row, alerts file hash, projection
-snapshot hashes, operator id, and the operator's gate verdict.
+verifier/manifest hash, decision ids and counts by type, handoff verification
+evidence refs, outbox row, alerts file hash, projection snapshot hashes,
+operator id, and the operator's gate verdict.
 
 ## 5. Teardown and prove nothing remains armed
 

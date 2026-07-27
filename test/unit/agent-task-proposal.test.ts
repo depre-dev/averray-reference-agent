@@ -53,6 +53,7 @@ const CEREMONY_FIXTURES = [
   "add-unit-test",
   "small-refactor",
   "lint-format",
+  "lint-format-green",
 ] as const;
 const temporaryRoots: string[] = [];
 
@@ -477,6 +478,73 @@ describe("pilot ceremony proposal fixtures", () => {
       expect(built.templateHash).toBe(task.intent.templateHash);
     },
   );
+
+  it("pins the green-path scripted write inside its unchanged acceptance fence", async () => {
+    const input = await ceremonyFixture("lint-format-green");
+    const scriptBytes = await readFile(
+      new URL(
+        "../fixtures/agent-integration/ceremony/lint-format-green.jsonl",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const lines = scriptBytes.trimEnd().split("\n");
+
+    expect(input.acceptanceCriteria).toEqual([{
+      id: "format-command",
+      type: "command",
+      command: "git diff --check",
+      required: true,
+    }]);
+    expect(input.budget).toEqual({
+      elapsedSeconds: 60,
+      modelTokens: 8_000,
+      toolCalls: 30,
+      estimatedUsdMicros: null,
+    });
+    expect(lines).toHaveLength(2);
+
+    const writeTurn = JSON.parse(lines[0] ?? "{}") as {
+      tool_calls?: Array<{
+        id?: string;
+        name?: string;
+        arguments?: { path?: string; content?: string };
+      }>;
+      finish_reason?: string;
+      usage?: Record<string, number>;
+    };
+    const stopTurn = JSON.parse(lines[1] ?? "{}") as {
+      text?: string;
+      tool_calls?: unknown;
+      finish_reason?: string;
+      usage?: Record<string, number>;
+    };
+    expect(writeTurn).toEqual({
+      tool_calls: [{
+        id: "int2-green-write",
+        name: "fs_write_file",
+        arguments: {
+          path: "docs/harness-int2-green-path-proof.md",
+          content:
+            "# INT-2 green-path proof\n\nThis deterministic change verifies the supervised handoff path.\n",
+        },
+      }],
+      usage: { input_tokens: 2, output_tokens: 1, requests: 1 },
+      finish_reason: "tool_call",
+    });
+    expect(stopTurn).toEqual({
+      text: "Wrote the deterministic allowlisted proof file.",
+      usage: { input_tokens: 2, output_tokens: 2, requests: 1 },
+      finish_reason: "stop",
+    });
+
+    const write = writeTurn.tool_calls?.[0]?.arguments;
+    expect(write?.path).toMatch(/^(?:docs|test)\//);
+    expect(input.repository.allowedPaths).toContain("docs/**");
+    expect(write?.content).toMatch(/\n$/);
+    expect(write?.content).not.toMatch(/[ \t]+$/mu);
+    expect(write?.content).not.toContain(" \t");
+  });
 });
 
 function proposalInput(): ProposeAgentTaskInput {

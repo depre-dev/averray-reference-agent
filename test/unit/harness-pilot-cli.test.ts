@@ -295,6 +295,17 @@ describe("Harness pilot CLI", () => {
       deadline: "2026-07-25T13:00:00.000Z",
     });
   });
+
+  it("accepts the separate deterministic green-path fixture", () => {
+    expect(parsePilotArgs([
+      "propose",
+      "--fixture",
+      "lint-format-green",
+    ])).toEqual({
+      command: "propose",
+      fixture: "lint-format-green",
+    });
+  });
 });
 
 function pilotServices(overrides: Record<string, unknown> = {}) {

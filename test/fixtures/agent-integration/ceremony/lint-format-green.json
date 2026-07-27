@@ -1,0 +1,44 @@
+{
+  "workItemId": "ceremony-lint-format-green-001",
+  "correlationId": "ceremony-lint-format-green-001",
+  "taskKind": "lint_format",
+  "title": "Create one bounded formatting proof",
+  "objective": "Create the deterministic green-path proof document within the pilot path allowlist.",
+  "whyNow": "The supervised-dispatch ceremony needs a verified positive handoff without changing the negative fixture.",
+  "requestedBy": {
+    "type": "operator",
+    "id": "pilot-operator"
+  },
+  "repository": {
+    "nameWithOwner": "depre-dev/averray-reference-agent",
+    "baseRevision": "8b94278578913b7cd7aa1acb276db48613090c7b",
+    "allowedPaths": [
+      "docs/**",
+      "test/**"
+    ],
+    "forbiddenPaths": [
+      "contracts/**",
+      "ops/**",
+      "scripts/ops/**",
+      ".github/**"
+    ]
+  },
+  "profile": "coding-change-pilot",
+  "acceptanceCriteria": [
+    {
+      "id": "format-command",
+      "type": "command",
+      "command": "git diff --check",
+      "required": true
+    }
+  ],
+  "budget": {
+    "elapsedSeconds": 60,
+    "modelTokens": 8000,
+    "toolCalls": 30,
+    "estimatedUsdMicros": null
+  },
+  "deadline": "2027-12-31T23:59:59.000Z",
+  "riskTier": "low",
+  "selectionReason": "A deterministic allowlisted write is the narrowest reversible positive Harness ceremony case."
+}
