@@ -25,7 +25,7 @@ export interface SolvencyPool {
   key: string;
   label: string;
   amount: number | null;
-  /** Display unit, e.g. "USDC" | "PAS". */
+  /** Display unit, e.g. "USDC" | "PAS" | "DOT" | "native". */
   unit: string;
   /** Minimum-healthy floor; drives the meter fill + status. Absent → no floor. */
   floor?: number | null;

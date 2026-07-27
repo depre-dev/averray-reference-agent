@@ -181,7 +181,11 @@ export const OPS_FIXTURE_RED: ProductHealth = {
   },
   solvency: {
     pools: SOLVENCY_POOLS.map((p) =>
-      p.key === "reward_bank" ? { ...p, amount: 0.8, status: "red" } : p,
+      p.key === "reward_bank"
+        ? { ...p, amount: 0.8, status: "red" }
+        : p.key === "signer_gas"
+          ? { ...p, unit: "DOT" }
+          : p,
     ),
     runwayNote: "reward bank below floor — top up before next payout",
   },

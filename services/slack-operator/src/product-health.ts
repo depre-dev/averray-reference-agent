@@ -744,7 +744,7 @@ export function deriveMoneyPathProbe(
 
 // A capabilityHealth value counts as "up" when it's one of these; anything else
 // (unavailable / staged / disabled / degraded / …) is treated as not-operational.
-const HEALTHY_CAPABILITY_STATES = new Set(["enabled", "available", "ok", "ready", "healthy"]);
+const HEALTHY_CAPABILITY_STATES = new Set(["enabled", "available", "ok", "ready", "healthy", "synced"]);
 const CRITICAL_WARNING_SEVERITIES = new Set(["error", "critical", "fatal"]);
 
 /** Product capability + dependency health, from /health's `capabilityHealth` +
@@ -878,6 +878,17 @@ function encodeBalanceOf(address: string): string {
   return BALANCE_OF_SELECTOR + address.toLowerCase().replace(/^0x/, "").padStart(64, "0");
 }
 
+const NATIVE_GAS_SYMBOL_BY_CHAIN_ID = new Map<number, string>([
+  [420420417, "PAS"],
+  [420420419, "DOT"],
+]);
+
+function nativeGasSymbol(chainId: number | undefined): string {
+  return chainId === undefined
+    ? "native"
+    : NATIVE_GAS_SYMBOL_BY_CHAIN_ID.get(chainId) ?? "native";
+}
+
 /** Signer solvency: native wallet gas + the in-contract reward bank.
  *
  * USDC intentionally lives in AgentAccountCore.positions[signer][USDC].liquid
@@ -929,7 +940,7 @@ export async function probeSignerLiquidity(input: {
     }
     const gasWei = BigInt(await ethRpc(input.rpcUrl, "eth_getBalance", [input.signerAddress, "latest"], input.fetchImpl));
     const gasNative = Number(gasWei) / 1e18;
-    const gasUnit = input.expectedChainId === 420420419 ? "DOT" : "PAS";
+    const gasUnit = nativeGasSymbol(input.expectedChainId);
     const parts: string[] = [];
     let red = false;
     let degraded = false;

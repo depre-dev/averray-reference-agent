@@ -371,6 +371,26 @@ describe("deriveCapabilityProbe", () => {
     expect(r.detail).toContain("acknowledged");
   });
 
+  it("counts the live indexer synced state as healthy", () => {
+    const body: ProductHealthPayload = {
+      ...HEALTHY_BODY,
+      capabilityHealth: {
+        blockchain: "enabled",
+        treasuryMutations: "available",
+        xcmObserver: "staged",
+        indexer: "synced",
+        gasSponsor: "disabled",
+      },
+      warnings: [
+        { code: "xcm_observer_staged", severity: "warning" },
+        { code: "gas_sponsor_disabled", severity: "warning" },
+      ],
+    };
+    const r = deriveCapabilityProbe(fetched(body), capConfig);
+    expect(r.status).toBe("ok");
+    expect(r.detail).toBe("3/5 capabilities up, 2 acknowledged warnings");
+  });
+
   it("red when a REQUIRED capability isn't up (money path down)", () => {
     const body: ProductHealthPayload = { ...HEALTHY_BODY, capabilityHealth: { ...HEALTHY_BODY.capabilityHealth, treasuryMutations: "unavailable" } };
     const r = deriveCapabilityProbe(fetched(body), capConfig);
@@ -467,6 +487,17 @@ describe("probeSignerLiquidity (direct RPC)", () => {
     });
     expect(r.status).toBe("ok");
     expect(r.detail).toContain("reward bank 10.00 USDC");
+    expect(r.pools?.find((p) => p.key === "signer_gas")?.unit).toBe("PAS");
+  });
+
+  it("labels mainnet gas as DOT from the product chainId", async () => {
+    const r = await probeSignerLiquidity({
+      rpcUrl: "http://rpc", signerAddress: "0xabc", rewardBankLiquid: 10, ...floors,
+      expectedChainId: 420420419,
+      fetchImpl: chainedBalances(MAINNET, "0xDE0B6B3A7640000", "0x989680"),
+    });
+    expect(r.status).toBe("ok");
+    expect(r.pools?.find((p) => p.key === "signer_gas")?.unit).toBe("DOT");
   });
 
   it("RED + rpcOk:false when the product is on MAINNET but the RPC is a leftover testnet endpoint", async () => {
@@ -501,6 +532,7 @@ describe("probeSignerLiquidity (direct RPC)", () => {
       fetchImpl: chainedBalances(TESTNET, "0xDE0B6B3A7640000", "0x989680"),
     });
     expect(r.status).toBe("ok");
+    expect(r.pools?.find((p) => p.key === "signer_gas")?.unit).toBe("native");
   });
 });
 

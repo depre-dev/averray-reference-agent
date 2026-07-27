@@ -6,6 +6,7 @@ import { BoardSurfaceSwitch } from "./BoardSurfaceSwitch.js";
 import {
   OPS_FIXTURE_LIVE,
   OPS_FIXTURE_POPULATED,
+  OPS_FIXTURE_RED,
   FIXTURE_NOW,
 } from "../../lib/monitor/ops-fixtures.js";
 
@@ -89,6 +90,14 @@ describe("OpsBoard — populated fixture", () => {
     expect(getByTestId("ops-pool-reserve").textContent).toContain(
       "Intentionally unfunded: pre-revenue reserve",
     );
+  });
+});
+
+describe("OpsBoard — mainnet fixture", () => {
+  test("renders native signer gas as DOT", () => {
+    const { getByTestId } = render(<OpsBoard health={OPS_FIXTURE_RED} nowMs={FIXTURE_NOW} />);
+    expect(getByTestId("ops-pool-signer_gas").textContent).toContain("DOT");
+    expect(getByTestId("ops-pool-signer_gas").textContent).not.toContain("PAS");
   });
 });
 
