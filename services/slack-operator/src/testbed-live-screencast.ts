@@ -41,6 +41,7 @@ export interface TestbedLiveScreencastController {
 }
 
 let manifestWriteSequence = 0;
+let frameWriteSequence = 0;
 
 const DEFAULT_INTERVAL_MS = 500;
 const DEFAULT_MAX_FRAMES = 240;
@@ -178,13 +179,13 @@ export async function startPlaywrightLiveScreencast(input: {
       return;
     }
     try {
-      await input.page.screenshot({
-        path: latestFramePath,
+      await captureFrameAtomically(latestFramePath, (path) => input.page.screenshot({
+        path,
         type: "jpeg",
         quality: input.config.jpegQuality,
         fullPage: false,
         animations: "disabled",
-      });
+      }));
       frameCount += 1;
       await queueManifestWrite({ status: "running", frameCount, updatedAt: now });
       publishState({ status: "running", frameCount, startedAt, updatedAt: now });
@@ -230,6 +231,34 @@ export async function startPlaywrightLiveScreencast(input: {
       return stopRequest;
     },
   };
+}
+
+/**
+ * Publish a frame atomically: capture into a sibling temp file, then `rename` it
+ * onto `latest.jpg`, mirroring how `writeManifest` publishes the manifest.
+ *
+ * Screenshotting straight to `latest.jpg` truncates and rewrites it in place on
+ * every frame, and the monitor routes read that same file concurrently — the
+ * `/screencast` SSE poll base64-encodes it into a `screencast.frame` event and
+ * `/screencast/latest.jpg` serves it directly. A read landing mid-write returns a
+ * truncated JPEG that is then presented to the viewer as a good frame. `rename`
+ * is atomic within a directory, so a reader sees either the previous or the next
+ * complete frame. It also keeps the last good frame published when a capture
+ * fails partway through, instead of leaving a truncated one in its place.
+ */
+async function captureFrameAtomically(
+  latestFramePath: string,
+  capture: (tempPath: string) => Promise<unknown>,
+): Promise<void> {
+  frameWriteSequence += 1;
+  const tempPath = `${latestFramePath}.${process.pid}.${frameWriteSequence}.tmp`;
+  try {
+    await capture(tempPath);
+    await rename(tempPath, latestFramePath);
+  } catch (error) {
+    await unlink(tempPath).catch(() => undefined);
+    throw error;
+  }
 }
 
 async function writeManifest(input: {
