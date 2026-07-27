@@ -125,25 +125,32 @@ export interface ProductHealthIncident {
 }
 
 export interface ProductHealthHistoryBlock {
-  /** Share of trailing-24h checks that were NOT red, 0..100; null under-window. */
+  /** Share of determinate trailing-24h product_api checks that were reachable
+   *  and healthy, 0..100. Unknown monitor samples are excluded; null means the
+   *  window contains no determinate product-availability evidence. */
   uptimePct24h: number | null;
-  /** Per-check overall tone (oldest→newest), bounded to `maxSeries`. */
+  /** Per-check product_api availability (oldest→newest), bounded to `maxSeries`.
+   *  Missing/unknown product_api evidence is degraded/grey, never fake-green. */
   uptimeSeries: ProbeStatus[];
   latencySeriesMs: (number | null)[];
   balanceSeries: (number | null)[];
   incidents: ProductHealthIncident[];
 }
 
-/** Overall check status → probe tone for the uptime sparkline. */
-function overallTone(status: ProductHealthStatus): ProbeStatus {
-  return status === "healthy" ? "ok" : status;
+/** Product reachability is deliberately independent from the overall monitor
+ * status. RPC, GitHub, or balance-reader failures can degrade the monitor while
+ * the product's own /health endpoint remains available. */
+function productAvailabilityTone(snapshot: ProductHealthSnapshot): ProbeStatus {
+  const probe = snapshot.probes.find((p) => p.name === "product_api");
+  return probe?.status === "ok" || probe?.status === "red" ? probe.status : "degraded";
 }
 
 /**
  * Derive the Ops Trends + Incidents block from the rolling history. Pure — the
  * caller passes `nowMs`. The series are newest-anchored to `maxSeries` bins; the
- * uptime% is over the trailing `uptimeWindowMs` and counts "not red" as up (a
- * degraded product still serves; only red is a page-worthy outage).
+ * uptime% is over determinate product_api checks in the trailing
+ * `uptimeWindowMs`. A degraded/missing product_api sample is unknown and is
+ * excluded from the percentage rather than being counted as either up or down.
  */
 export function deriveProductHealthHistory(
   history: ReadonlyArray<ProductHealthSnapshot>,
@@ -157,23 +164,48 @@ export function deriveProductHealthHistory(
 
   const windowStart = nowMs - uptimeWindowMs;
   const inWindow = history.filter((s) => s.at >= windowStart);
+  const availability = inWindow
+    .map(productAvailabilityTone)
+    .filter((status): status is "ok" | "red" => status === "ok" || status === "red");
   const uptimePct24h =
-    inWindow.length > 0
-      ? Math.round((inWindow.filter((s) => s.status !== "red").length / inWindow.length) * 1000) / 10
+    availability.length > 0
+      ? Math.round((availability.filter((status) => status === "ok").length / availability.length) * 1000) / 10
       : null;
 
   return {
     uptimePct24h,
-    uptimeSeries: series.map((s) => overallTone(s.status)),
+    uptimeSeries: series.map(productAvailabilityTone),
     latencySeriesMs: series.map((s) => s.latencyMs ?? null),
     balanceSeries: series.map((s) => s.signerUsdc ?? null),
     incidents: deriveIncidents(history),
   };
 }
 
+const PRODUCT_API_DEPENDENT_PROBES = new Set([
+  "chain_height",
+  "capabilities",
+  "api_latency",
+  "money_path",
+]);
+
+/** These probe failures carry no evidence beyond an unreadable product /health.
+ * Keep the product_api incident as the root instead of multiplying one outage
+ * into four nominal incidents. Independent probe failures remain visible. */
+function isProductApiDependentFailure(
+  snapshot: ProductHealthSnapshot,
+  probe: ProbeResult | undefined,
+): boolean {
+  if (!probe || !PRODUCT_API_DEPENDENT_PROBES.has(probe.name)) return false;
+  const productApi = snapshot.probes.find((candidate) => candidate.name === "product_api");
+  if (!productApi || productApi.status === "ok") return false;
+  return /product \/health not readable|no response after/i.test(probe.detail);
+}
+
 /** Contiguous degraded/red runs per probe → incident episodes (newest-first,
  *  capped). Awaiting-data degradations are excluded — a forward-compat gap is
- *  not an incident. An unrecovered run stays open (`endedAt: null`). */
+ *  not an incident. Failures derived solely from an unreadable product_api are
+ *  folded into that root incident. An unrecovered run stays open
+ *  (`endedAt: null`). */
 function deriveIncidents(history: ReadonlyArray<ProductHealthSnapshot>): ProductHealthIncident[] {
   const names: string[] = [];
   for (const snap of history) {
@@ -186,6 +218,9 @@ function deriveIncidents(history: ReadonlyArray<ProductHealthSnapshot>): Product
     let note = "";
     for (const snap of history) {
       const probe = snap.probes.find((p) => p.name === name);
+      // Do not treat root-cause suppression as recovery for a pre-existing
+      // independent incident; wait for an observable sample to close it.
+      if (isProductApiDependentFailure(snap, probe)) continue;
       const bad =
         !!probe &&
         (probe.status === "red" ||
@@ -852,7 +887,17 @@ async function ethRpcRaw(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
   });
-  if (!res.ok) throw new Error(`${method} → HTTP ${res.status}`);
+  if (!res.ok) {
+    if (res.status === 404) {
+      throw new Error(
+        `${method} → RPC endpoint misconfigured (HTTP 404: JSON-RPC route not found)`,
+      );
+    }
+    if (res.status === 429) {
+      throw new Error(`${method} → RPC endpoint throttled (HTTP 429)`);
+    }
+    throw new Error(`${method} → RPC endpoint HTTP ${res.status}`);
+  }
   const json = (await res.json()) as { result?: unknown; error?: { message?: string } };
   if (json.error) throw new Error(`${method}: ${json.error.message ?? "rpc error"}`);
   if (json.result === undefined || json.result === null) throw new Error(`${method}: missing result`);
@@ -1202,6 +1247,7 @@ export async function collectProductHealthProbes(
     fetchImpl,
   });
   const chainId = h.body?.auth?.chainId;
+  const rewardBankLiquid = pickNum(h.body?.rewardBank?.liquid);
   const block = pickNum(h.body?.components?.blockchain?.blockNumber);
   const chainAdvance = trackChainAdvance(chainCtx.advance, block, chainCtx.nowMs);
   // Absolute block age from the (chain-matched) settlement RPC — no startup blind
@@ -1221,7 +1267,7 @@ export async function collectProductHealthProbes(
   const signer = await probeSignerLiquidity({
     rpcUrl: config.rpcUrl,
     signerAddress: config.signerAddress,
-    rewardBankLiquid: pickNum(h.body?.rewardBank?.liquid),
+    rewardBankLiquid,
     minGasNative: config.minGasNative,
     minRewardBank: config.minRewardBank,
     // Balances are only trusted from an RPC on the product's own chain.
@@ -1230,7 +1276,7 @@ export async function collectProductHealthProbes(
   });
   const treasury = await probeTreasuryLiquidity({
     addresses: h.body?.addresses,
-    rewardBankLiquid: pickNum(h.body?.rewardBank?.liquid),
+    rewardBankLiquid,
     usdcDecimals: config.usdcDecimals,
     minRewardBank: config.minRewardBank,
     minTreasuryReserve: config.minTreasuryReserve,
@@ -1241,10 +1287,29 @@ export async function collectProductHealthProbes(
   });
   // signer_liquidity and treasury_liquidity intentionally share the same
   // /health reward-bank position. Keep one board row while retaining both
-  // independently actionable probes.
+  // independently actionable probes. The direct /health row is added last so
+  // RPC-only gas/treasury failures cannot erase reward-bank data the product
+  // already supplied; absent /health data still remains honestly absent.
+  const rewardBankPool: SolvencyPoolData[] =
+    rewardBankLiquid === undefined
+      ? []
+      : [
+          {
+            key: "reward_bank",
+            label: "Reward bank",
+            amount: rewardBankLiquid,
+            unit: "USDC",
+            floor: config.minRewardBank > 0 ? config.minRewardBank : null,
+            status:
+              config.minRewardBank > 0 && rewardBankLiquid < config.minRewardBank ? "red" : "ok",
+          },
+        ];
   const solvencyPools = [
     ...new Map(
-      [...(signer.pools ?? []), ...(treasury.pools ?? [])].map((pool) => [pool.key, pool]),
+      [...(signer.pools ?? []), ...(treasury.pools ?? []), ...rewardBankPool].map((pool) => [
+        pool.key,
+        pool,
+      ]),
     ).values(),
   ];
   const settlement = h.body?.settlement;

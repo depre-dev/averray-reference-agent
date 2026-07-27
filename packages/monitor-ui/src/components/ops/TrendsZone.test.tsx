@@ -16,6 +16,11 @@ const base = (over: Partial<HealthHistory>): HealthHistory => ({
 });
 
 describe("TrendsZone anomaly flags", () => {
+  test("labels availability as product uptime, not overall monitor success", () => {
+    const { getByText } = render(<TrendsZone history={base({})} />);
+    expect(getByText("Product uptime 24h")).toBeTruthy();
+  });
+
   test("renders a leading-indicator flag when latency spikes off its baseline", () => {
     const history = base({ latencySeriesMs: [...Array(10).fill(75), 320] });
     const { getByTestId } = render(<TrendsZone history={history} />);

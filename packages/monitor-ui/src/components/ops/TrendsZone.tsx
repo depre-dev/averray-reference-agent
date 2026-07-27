@@ -52,7 +52,7 @@ export function TrendsZone({ history }: TrendsZoneProps) {
         <div className="ops-trends">
           <div className="ops-trend">
             <div className="ops-trend-head">
-              <span>Uptime 24h</span>
+              <span>Product uptime 24h</span>
               <span className="ops-trend-val">
                 {typeof history?.uptimePct24h === "number" ? `${history.uptimePct24h.toFixed(1)}%` : "—"}
               </span>

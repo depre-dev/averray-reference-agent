@@ -55,6 +55,7 @@ function rpcMethod(init: RequestInit): string {
 function combinedFetch(cfg: {
   healthBody?: unknown;
   healthStatus?: number;
+  rpcStatus?: number;
   gasHex?: string;
   usdcHex?: string;
   chainIdHex?: string;
@@ -65,6 +66,10 @@ function combinedFetch(cfg: {
     if (method === "GET") {
       const status = cfg.healthStatus ?? 200;
       return { ok: status >= 200 && status < 300, status, json: async () => cfg.healthBody ?? {} } as unknown as Response;
+    }
+    const status = cfg.rpcStatus ?? 200;
+    if (status < 200 || status >= 300) {
+      return { ok: false, status, json: async () => ({}) } as unknown as Response;
     }
     const m = rpcMethod(init ?? {});
     const result =
@@ -459,6 +464,27 @@ describe("probeSignerLiquidity (direct RPC)", () => {
     expect(r.status).toBe("degraded");
   });
 
+  it("distinguishes a misconfigured JSON-RPC route from endpoint throttling", async () => {
+    const withHttpStatus = (status: number): typeof fetch =>
+      (async () =>
+        ({ ok: false, status, json: async () => ({}) }) as unknown as Response) as unknown as typeof fetch;
+    const base = {
+      rpcUrl: "http://rpc",
+      signerAddress: "0xabc",
+      rewardBankLiquid: 10,
+      expectedChainId: 420420419,
+      ...floors,
+    };
+
+    const wrongEndpoint = await probeSignerLiquidity({ ...base, fetchImpl: withHttpStatus(404) });
+    expect(wrongEndpoint.detail).toContain("RPC endpoint misconfigured");
+    expect(wrongEndpoint.detail).toContain("HTTP 404");
+
+    const throttled = await probeSignerLiquidity({ ...base, fetchImpl: withHttpStatus(429) });
+    expect(throttled.detail).toContain("RPC endpoint throttled");
+    expect(throttled.detail).toContain("HTTP 429");
+  });
+
   it("names WHICH piece is unconfigured (a cutover leaves solvency unmonitored)", async () => {
     const noRpc = await probeSignerLiquidity({ rpcUrl: undefined, signerAddress: "0xabc", rewardBankLiquid: 10, ...floors, fetchImpl: balances("0x0", "0x0") });
     expect(noRpc.detail).toContain("PRODUCT_HEALTH_RPC_URL");
@@ -678,6 +704,26 @@ describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", ()
     expect(snapshot.solvency?.pools.some((p) => p.key === "reward_bank" && p.amount === 100)).toBe(true);
     expect(snapshot.flow?.settled24h).toBe(37);
     expect(snapshot.flow?.stuck).toBe(1);
+  });
+
+  it("keeps /health reward-bank solvency visible when direct RPC reads fail", async () => {
+    const { probes, snapshot } = await collectProductHealthProbes(
+      cfg(),
+      combinedFetch({
+        healthBody: HEALTHY_BODY,
+        rpcStatus: 429,
+      }),
+      { nowMs: 10_000_000 },
+    );
+
+    expect(probes.find((p) => p.name === "signer_liquidity")?.status).toBe("degraded");
+    expect(snapshot.solvency?.pools).toContainEqual(
+      expect.objectContaining({
+        key: "reward_bank",
+        amount: 100,
+        unit: "USDC",
+      }),
+    );
   });
 
   it("omits the flow block when the product /health exposes no settlement (honest awaiting)", async () => {
@@ -927,19 +973,36 @@ describe("deriveProductHealthHistory", () => {
     expect(b.balanceSeries).toEqual([10, 8, null]);
   });
 
-  it("uptimePct24h counts non-red checks; null when nothing is in-window", () => {
+  it("uptimePct24h uses only determinate product-api availability samples", () => {
     const now = 100 * HOUR;
-    // 4 checks in the last 24h: 3 non-red (healthy/degraded/healthy), 1 red → 75.0
+    // A degraded product_api result is unknown, not evidence of either uptime or
+    // downtime: two reachable samples / three determinate samples → 66.7%.
     const history = [
       snap(now - 3 * HOUR, "healthy"),
       snap(now - 2 * HOUR, "degraded"),
       snap(now - 1 * HOUR, "red"),
       snap(now, "healthy"),
     ];
-    expect(deriveProductHealthHistory(history, now).uptimePct24h).toBe(75);
+    expect(deriveProductHealthHistory(history, now).uptimePct24h).toBe(66.7);
     // a check older than the 24h window doesn't count → null
     const stale = [snap(now - 30 * HOUR, "healthy")];
     expect(deriveProductHealthHistory(stale, now).uptimePct24h).toBeNull();
+  });
+
+  it("does not count monitor/RPC failures as product downtime", () => {
+    const now = 100 * HOUR;
+    const history = Array.from({ length: 5 }, (_, i) =>
+      snap(now - (4 - i) * HOUR, "red", {
+        probes: [
+          probe("product_api", "ok", "HTTP 200 · service ok"),
+          probe("signer_liquidity", "red", "balance read failed: RPC endpoint throttled (HTTP 429)"),
+        ],
+      }),
+    );
+
+    const block = deriveProductHealthHistory(history, now);
+    expect(block.uptimePct24h).toBe(100);
+    expect(block.uptimeSeries).toEqual(["ok", "ok", "ok", "ok", "ok"]);
   });
 
   it("bounds the series to maxSeries (newest-anchored); uptime% still spans the window", () => {
@@ -989,6 +1052,26 @@ describe("deriveProductHealthHistory", () => {
       severity: "degraded",
       startedAt: now - 4 * HOUR,
       endedAt: now - 3 * HOUR,
+    });
+  });
+
+  it("records one root incident when an unreadable /health fans out to dependent probes", () => {
+    const now = 100 * HOUR;
+    const probes: ProbeResult[] = [
+      probe("product_api", "red", "unreachable: fetch failed"),
+      probe("chain_height", "degraded", "chain status unavailable (product /health not readable)"),
+      probe("capabilities", "degraded", "capability status unavailable (product /health not readable)"),
+      probe("api_latency", "degraded", "no response after 45ms"),
+      probe("money_path", "degraded", "settlement status unavailable (product /health not readable)"),
+    ];
+    const history = [snap(now, "red", { probes })];
+
+    const incidents = deriveProductHealthHistory(history, now).incidents;
+    expect(incidents).toHaveLength(1);
+    expect(incidents[0]).toMatchObject({
+      probe: "product_api",
+      severity: "red",
+      note: "unreachable: fetch failed",
     });
   });
 
