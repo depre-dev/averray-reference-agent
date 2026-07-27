@@ -72,8 +72,25 @@ Reaching `handoff_ready` is necessary but not sufficient. The ceremony must show
 - **no pull request is opened and no GitHub mutation occurs.** The pilot CLI never actuates, and
   this ceremony must not either. If the green path can open a PR, that is a finding — stop and
   report it rather than letting it happen.
-- exactly one run, `attempt=1`, one decision record, one outbox entry — the same exactly-once
-  invariants the failure path already demonstrated.
+- exactly one run, `attempt=1`, one outbox entry — the same exactly-once invariants the failure
+  path already demonstrated;
+- **exactly one `dispatch_approval` decision record AND exactly one `handoff` decision record.**
+
+> **ERRATUM (architect).** An earlier revision of this line said "one decision record", which was
+> wrong and would have destroyed evidence if implemented. That count was lifted from the `-004`
+> **failure**-path run, where only `dispatch_approval` is written because the run never reaches
+> handoff. A green path legitimately writes **two**: `dispatch_approval` / `dispatch_succeeded`
+> (`dispatch-attempt.ts:319`) and `handoff` / `verified_handoff_ready_for_operator`
+> (`reconcile-run.ts:542`). Runbook §4 requires `hermes_decision_records` for the work item ordered
+> by `generated_at` — i.e. both. Reducing them to one would remove required evidence and expand
+> scope beyond a ceremony fixture.
+>
+> The `handoff` record carries `handoff.verification.evidenceRefs`. **Capture those refs in the
+> evidence bundle** — they are the substance behind "the handoff is correct, not merely present",
+> and worth more than the record count itself.
+>
+> Generalising a count observed on the failure path into a spec for the success path was the
+> error. Where an invariant is stated as a number, it must name the path it was observed on.
 
 ## 3. Deliverable D3 — runbook integration
 
