@@ -92,6 +92,91 @@ describe("testbed live screencast", () => {
     });
     expect(manifest?.frameCount).toBeGreaterThanOrEqual(1);
   });
+
+  it("publishes the terminal manifest last when stop() lands mid-capture", async () => {
+    const root = mkdtempSync(join(tmpdir(), "averray-screencast-test-"));
+    const mission = missionRun({
+      id: "mission-live-stop-race",
+      targetUrl: "https://app.testnet.example/gold",
+      environment: "testnet",
+    });
+    let captureStarted!: () => void;
+    let releaseCapture!: () => void;
+    let framePublished!: () => void;
+    const captureInFlight = new Promise<void>((resolve) => { captureStarted = resolve; });
+    const captureReleased = new Promise<void>((resolve) => { releaseCapture = resolve; });
+    const framePersisted = new Promise<void>((resolve) => { framePublished = resolve; });
+    const page = {
+      url: () => "https://app.testnet.example/gold",
+      screenshot: vi.fn(async ({ path }: { path: string }) => {
+        captureStarted();
+        await captureReleased;
+        writeFileSync(path, Buffer.from("jpeg-frame"));
+      }),
+    } as unknown as Page;
+
+    const controller = await startPlaywrightLiveScreencast({
+      mission,
+      page,
+      artifactsRoot: root,
+      config: { enabled: true, intervalMs: 1, maxFrames: 10, jpegQuality: 40 },
+      update: (state) => {
+        if (state.status === "running" && state.frameCount === 1) framePublished();
+      },
+    });
+
+    await captureInFlight;
+    const stopping = controller?.stop("test_finished");
+    releaseCapture();
+    await stopping;
+    // The frame that was in flight has written its own "running" manifest by
+    // now; stop() must still be the last writer to land on disk.
+    await framePersisted;
+
+    expect(await readTestbedScreencastManifest(root, mission.id)).toMatchObject({
+      status: "ended",
+      reason: "test_finished",
+    });
+  });
+
+  it("never exposes a torn manifest to a concurrent reader", async () => {
+    const root = mkdtempSync(join(tmpdir(), "averray-screencast-test-"));
+    const mission = missionRun({
+      id: "mission-live-torn-read",
+      targetUrl: "https://app.testnet.example/gold",
+      environment: "testnet",
+    });
+    const page = {
+      url: () => "https://app.testnet.example/gold",
+      screenshot: vi.fn(async ({ path }: { path: string }) => {
+        writeFileSync(path, Buffer.from("jpeg-frame"));
+      }),
+    } as unknown as Page;
+
+    const controller = await startPlaywrightLiveScreencast({
+      mission,
+      page,
+      artifactsRoot: root,
+      config: { enabled: true, intervalMs: 0, maxFrames: 1000, jpegQuality: 40 },
+      update: () => {},
+    });
+
+    try {
+      await vi.waitFor(async () => {
+        expect(await readTestbedScreencastManifest(root, mission.id)).toBeDefined();
+      });
+      // The monitor SSE route polls this manifest while the runner rewrites it
+      // on every frame; once written it must never read back as missing.
+      for (let round = 0; round < 20; round += 1) {
+        const reads = await Promise.all(
+          Array.from({ length: 20 }, () => readTestbedScreencastManifest(root, mission.id)),
+        );
+        expect(reads.filter((manifest) => manifest === undefined)).toEqual([]);
+      }
+    } finally {
+      await controller?.stop("test_finished");
+    }
+  });
 });
 
 function missionRun(overrides: Partial<TestbedMissionRun>): TestbedMissionRun {

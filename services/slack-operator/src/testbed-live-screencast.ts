@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { Page } from "playwright-core";
@@ -39,6 +39,8 @@ export interface TestbedScreencastManifest {
 export interface TestbedLiveScreencastController {
   stop: (reason?: string) => Promise<void>;
 }
+
+let manifestWriteSequence = 0;
 
 const DEFAULT_INTERVAL_MS = 500;
 const DEFAULT_MAX_FRAMES = 240;
@@ -116,9 +118,16 @@ export async function startPlaywrightLiveScreencast(input: {
   const startedAt = (input.now?.() ?? new Date()).toISOString();
   const streamUrl = `/monitor/testbed-missions/${encodeURIComponent(input.mission.id)}/screencast`;
   const latestFrameUrl = `${streamUrl}/latest.jpg`;
+  /** No further frames will be captured or scheduled. */
   let stopped = false;
+  /** A terminal ("ended") manifest has already been published. */
+  let terminated = false;
   let frameCount = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  /** Settles when the capture started by the last fired timer has finished writing. */
+  let inFlightCapture: Promise<void> = Promise.resolve();
+  let manifestWrites: Promise<void> = Promise.resolve();
+  let stopRequest: Promise<void> | undefined;
 
   const publishState = (state: Omit<TestbedLiveScreencastState, "streamUrl" | "latestFrameUrl">) => {
     input.update({
@@ -128,20 +137,37 @@ export async function startPlaywrightLiveScreencast(input: {
     });
   };
 
+  // Manifest writes are serialized so the file on disk always ends up matching
+  // the last state we published, in publish order.
+  const queueManifestWrite = (state: {
+    status: "running" | "ended";
+    frameCount: number;
+    updatedAt: string;
+    endedAt?: string;
+    reason?: string;
+  }): Promise<void> => {
+    const write = manifestWrites.then(() => writeManifest({
+      ...state,
+      missionId: input.mission.id,
+      artifactsRoot: input.artifactsRoot,
+    }));
+    manifestWrites = write.catch(() => undefined);
+    return write;
+  };
+
   const capture = async () => {
     if (stopped) return;
     const now = (input.now?.() ?? new Date()).toISOString();
     if (frameCount >= input.config.maxFrames) {
       stopped = true;
-      await writeManifest({
-        missionId: input.mission.id,
+      terminated = true;
+      await queueManifestWrite({
         status: "ended",
         frameCount,
         updatedAt: now,
         endedAt: now,
         reason: "max_frames_reached",
-        artifactsRoot: input.artifactsRoot,
-      });
+      }).catch(() => undefined);
       publishState({ status: "ended", frameCount, updatedAt: now, endedAt: now, reason: "max_frames_reached" });
       return;
     }
@@ -160,13 +186,7 @@ export async function startPlaywrightLiveScreencast(input: {
         animations: "disabled",
       });
       frameCount += 1;
-      await writeManifest({
-        missionId: input.mission.id,
-        status: "running",
-        frameCount,
-        updatedAt: now,
-        artifactsRoot: input.artifactsRoot,
-      });
+      await queueManifestWrite({ status: "running", frameCount, updatedAt: now });
       publishState({ status: "running", frameCount, startedAt, updatedAt: now });
     } catch {
       publishState({ status: "running", frameCount, startedAt, updatedAt: now, reason: "frame_capture_failed" });
@@ -176,29 +196,38 @@ export async function startPlaywrightLiveScreencast(input: {
 
   const schedule = () => {
     if (stopped) return;
-    timer = setTimeout(() => void capture(), input.config.intervalMs);
+    // Captures are strictly sequential: the next one is only scheduled once the
+    // previous has settled, so tracking the latest is enough for stop() to know
+    // whether a capture is still writing.
+    timer = setTimeout(() => {
+      inFlightCapture = capture().catch(() => undefined);
+    }, input.config.intervalMs);
     timer.unref?.();
+  };
+
+  const stopStream = async (reason: string): Promise<void> => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+    timer = undefined;
+    // A capture that started before stop() can still be mid-write. Let it settle
+    // first so the terminal manifest below is the last write to land on disk.
+    await inFlightCapture;
+    if (terminated) return;
+    terminated = true;
+    const now = (input.now?.() ?? new Date()).toISOString();
+    await queueManifestWrite({ status: "ended", frameCount, updatedAt: now, endedAt: now, reason }).catch(() => undefined);
+    publishState({ status: "ended", frameCount, startedAt, updatedAt: now, endedAt: now, reason });
   };
 
   publishState({ status: "running", frameCount: 0, startedAt, updatedAt: startedAt });
   schedule();
 
   return {
-    async stop(reason = "mission_finished") {
-      if (stopped) return;
-      stopped = true;
-      if (timer) clearTimeout(timer);
-      const now = (input.now?.() ?? new Date()).toISOString();
-      await writeManifest({
-        missionId: input.mission.id,
-        status: "ended",
-        frameCount,
-        updatedAt: now,
-        endedAt: now,
-        reason,
-        artifactsRoot: input.artifactsRoot,
-      }).catch(() => undefined);
-      publishState({ status: "ended", frameCount, startedAt, updatedAt: now, endedAt: now, reason });
+    stop(reason = "mission_finished") {
+      // Repeat callers await the same shutdown rather than returning before the
+      // terminal manifest has been written.
+      stopRequest ??= stopStream(reason);
+      return stopRequest;
     },
   };
 }
@@ -224,7 +253,18 @@ async function writeManifest(input: {
     ...(input.endedAt ? { endedAt: input.endedAt } : {}),
     ...(input.reason ? { reason: input.reason } : {}),
   };
-  await writeFile(screencastManifestPath(input.artifactsRoot, input.missionId), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  // Publish atomically: readers (the monitor routes, tests) must never observe a
+  // truncated manifest, which is what a plain overwrite exposes mid-write.
+  const path = screencastManifestPath(input.artifactsRoot, input.missionId);
+  manifestWriteSequence += 1;
+  const tempPath = `${path}.${process.pid}.${manifestWriteSequence}.tmp`;
+  try {
+    await writeFile(tempPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    await rename(tempPath, path);
+  } catch (error) {
+    await unlink(tempPath).catch(() => undefined);
+    throw error;
+  }
 }
 
 function isCaptureablePageUrl(value: string): boolean {
