@@ -2,15 +2,16 @@
 // co-pilot turn about a product-health change, and what to say.
 //
 // Fires ONLY on an overall-status edge across the red boundary (entered-red /
-// recovered). This is self-deduping (transitions only), so a probe staying red
-// never re-posts. It stays silent on the boot transition (prev "unknown", so a
-// restart doesn't spam), on routine degraded↔healthy moves (those live in the
-// Digest ops line), and while the operator is muted. Network tunes the wording:
-// a mainnet red pages on-call; a testnet red is informational.
+// recovered). A probe staying red never re-posts, and the operator-configured
+// product-health cooldown damps rapid red/recovered/red edge churn. It stays
+// silent on the boot transition (prev "unknown", so a restart doesn't spam), on
+// routine degraded↔healthy moves (those live in the Digest ops line), and while
+// the operator is muted. Network tunes the wording: a mainnet red pages on-call;
+// a testnet red is informational.
 //
 // Kept pure (no I/O, no @avg deps) so it runs in the local unit suite; the
 // caller (index.ts checkProductHealth) supplies prev/curr, the probes, the
-// resolved network, and the current mute state.
+// resolved network, current mute state, and the last successful narration time.
 
 export type OpsStatus = "healthy" | "degraded" | "red" | "unknown";
 export type OpsNetwork = "testnet" | "mainnet" | "unknown";
@@ -27,6 +28,11 @@ export interface DecideOpsNarrationInput {
   probes: readonly OpsNarrationProbe[];
   network: OpsNetwork;
   muted: boolean;
+  /** Timestamp of the last successfully persisted narration post. */
+  lastPostedAtMs?: number;
+  nowMs?: number;
+  /** Reuses PRODUCT_HEALTH_ALERT_COOLDOWN_MINUTES for transition narration. */
+  cooldownMs?: number;
 }
 
 export interface OpsNarrationDecision {
@@ -36,7 +42,7 @@ export interface OpsNarrationDecision {
   /** The Hermes turn text — present only when `post` is true. */
   text?: string;
   /** Why a real edge did not post (for observability). */
-  suppressed?: "muted";
+  suppressed?: "muted" | "cooldown";
 }
 
 const PROBE_LABELS: Record<string, string> = {
@@ -72,6 +78,20 @@ export function decideOpsNarration(input: DecideOpsNarrationInput): OpsNarration
 
   // Mute = quiet everywhere; the state still shows passively in the Digest ops line.
   if (muted) return { post: false, edge, suppressed: "muted" };
+
+  // A health probe can briefly cross red and recover when its upstream flakes.
+  // Use the same operator-configured cooldown as D4 alerts so those edges remain
+  // visible on the board without producing a red → recovered → red chat storm.
+  const lastPostedAtMs = input.lastPostedAtMs ?? 0;
+  const nowMs = input.nowMs ?? Date.now();
+  const cooldownMs = Math.max(0, input.cooldownMs ?? 0);
+  if (
+    cooldownMs > 0
+    && lastPostedAtMs > 0
+    && nowMs - lastPostedAtMs < cooldownMs
+  ) {
+    return { post: false, edge, suppressed: "cooldown" };
+  }
 
   if (edge === "red") {
     const reds = probes.filter((p) => p.status === "red");

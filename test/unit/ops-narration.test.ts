@@ -55,4 +55,36 @@ describe("decideOpsNarration", () => {
     expect(d.edge).toBe("red");
     expect(d.suppressed).toBe("muted");
   });
+
+  it("uses the product-health cooldown to damp red/recovered narration thrash", () => {
+    const lastPostedAtMs = 1_000;
+    const recovered = decideOpsNarration({
+      prev: "red",
+      curr: "healthy",
+      probes: probes(),
+      network: "mainnet",
+      muted: false,
+      lastPostedAtMs,
+      nowMs: 2_000,
+      cooldownMs: 60_000,
+    });
+    expect(recovered).toMatchObject({
+      post: false,
+      edge: "recovered",
+      suppressed: "cooldown",
+    });
+
+    const redAgain = decideOpsNarration({
+      prev: "healthy",
+      curr: "red",
+      probes: probes({ money_path: "red" }),
+      network: "mainnet",
+      muted: false,
+      lastPostedAtMs,
+      nowMs: 61_000,
+      cooldownMs: 60_000,
+    });
+    expect(redAgain.post).toBe(true);
+    expect(redAgain.edge).toBe("red");
+  });
 });

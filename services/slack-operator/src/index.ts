@@ -3220,6 +3220,7 @@ function startOperatorRoutines() {
   // Slice 3: previous overall product-health status, so the co-pilot narrates
   // only on an edge across the red boundary (entered-red / recovered).
   let prevProductHealthStatus: OpsStatus = "unknown";
+  let lastOpsNarrationPostedAtMs = 0;
   let taskHealthRunning = false;
   const anomalyConfig = loadAnomalyConfig();
   const dispatchPerDayCap = Number(process.env.HERMES_DISPATCH_PER_DAY_MAX) || 10;
@@ -3593,8 +3594,10 @@ function startOperatorRoutines() {
         }
       }
       // Slice 3: proactive ops narration — Hermes posts a co-pilot turn on a
-      // fresh red / recovery edge (self-deduped by the transition; muted = quiet,
-      // the Digest still shows state). Network tunes the wording.
+      // fresh red / recovery edge, with the product-health alert cooldown damping
+      // rapid transition churn (muted = quiet; the Digest still shows state).
+      // Network tunes the wording.
+      const opsNarrationNowMs = Date.now();
       const opsNarration = decideOpsNarration({
         prev: prevProductHealthStatus,
         curr: result.status as OpsStatus,
@@ -3602,11 +3605,15 @@ function startOperatorRoutines() {
         network:
           (process.env.WALLET_NETWORK ?? "").trim().toLowerCase() === "mainnet" ? "mainnet" : "testnet",
         muted: getServerAlertMuteUntilMs() > Date.now(),
+        lastPostedAtMs: lastOpsNarrationPostedAtMs,
+        nowMs: opsNarrationNowMs,
+        cooldownMs: routineConfig.productHealth.cooldownMs,
       });
       prevProductHealthStatus = result.status as OpsStatus;
       if (opsNarration.post && opsNarration.text) {
         try {
           recordCollaborationMessage({ author: "hermes", text: opsNarration.text, kind: "chat" });
+          lastOpsNarrationPostedAtMs = opsNarrationNowMs;
           logger.info({ edge: opsNarration.edge }, "ops_narration_posted");
         } catch (err) {
           logger.warn({ err }, "ops_narration_post_failed");
