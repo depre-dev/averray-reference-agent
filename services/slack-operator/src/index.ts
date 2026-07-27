@@ -3536,10 +3536,12 @@ function startOperatorRoutines() {
         cooldownMs: routineConfig.productHealth.cooldownMs,
       });
       // Enrich each entry with the samples the Trends zone graphs + the runway
-      // projection reads: the /health round-trip latency and the signer USDC / gas
+      // projection reads: the /health round-trip latency and the reward bank / gas
       // balances (from the solvency block).
       const signerPools = collection.snapshot.solvency?.pools ?? [];
-      const signerUsdcSample = signerPools.find((p) => p.key === "signer_usdc")?.amount ?? null;
+      // Historical field name retained for stored-data compatibility; the
+      // sample is the in-contract reward bank, never signer wallet USDC.
+      const signerUsdcSample = signerPools.find((p) => p.key === "reward_bank")?.amount ?? null;
       const signerGasSample = signerPools.find((p) => p.key === "signer_gas")?.amount ?? null;
       productHealthHistory = appendHistory(
         productHealthHistory,
@@ -3555,7 +3557,7 @@ function startOperatorRoutines() {
       );
       // Liquidity runway: project time-to-floor from the balance series (incl. the
       // sample just appended) and write the honest note into the solvency block —
-      // "signer USDC ≈ 6h to floor" / "stable" / awaiting. Suggest-only: the board
+      // "reward bank ≈ 6h to floor" / "stable" / awaiting. Suggest-only: the board
       // tells the operator when to top up; it never moves funds.
       if (productHealthSnapshotBlocks?.solvency) {
         const runway = deriveLiquidityRunway(

@@ -138,7 +138,6 @@ const cfg = (over: Partial<ProductHealthConfig> = {}): ProductHealthConfig => ({
   usdcAddress: "0xusdc",
   usdcDecimals: 6,
   minGasNative: 0,
-  minUsdc: 0,
   requiredCapabilities: ["blockchain", "treasuryMutations"],
   expectedWarnings: ["xcm_observer_staged", "indexer_unavailable", "gas_sponsor_disabled"],
   latencyWarnMs: 2000,
@@ -393,51 +392,57 @@ describe("deriveCapabilityProbe", () => {
 });
 
 describe("probeSignerLiquidity (direct RPC)", () => {
-  const floors = { usdcDecimals: 6, minGasNative: 0.1, minUsdc: 5 };
+  const floors = { minGasNative: 0.1, minRewardBank: 5 };
   // 1 ETH = 1e18 wei = 0xDE0B6B3A7640000 ; 0.01 ETH = 1e16 = 0x2386F26FC10000
   // 10 USDC = 10_000_000 = 0x989680 ; 1 USDC = 1_000_000 = 0xF4240
 
   it("degraded when RPC / signer address are unconfigured", async () => {
-    const r = await probeSignerLiquidity({ rpcUrl: undefined, signerAddress: undefined, usdcAddress: undefined, ...floors, fetchImpl: balances("0x0", "0x0") });
+    const r = await probeSignerLiquidity({ rpcUrl: undefined, signerAddress: undefined, rewardBankLiquid: 10, ...floors, fetchImpl: balances("0x0", "0x0") });
     expect(r.status).toBe("degraded");
   });
 
-  it("ok when gas and USDC are both above their floors", async () => {
-    const r = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: "0xabc", usdcAddress: "0xusdc", ...floors, fetchImpl: balances("0xDE0B6B3A7640000", "0x989680") });
+  it("ok when gas and the in-contract reward bank are both above their floors", async () => {
+    const r = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: "0xabc", rewardBankLiquid: 10, ...floors, fetchImpl: balances("0xDE0B6B3A7640000", "0x989680") });
     expect(r.status).toBe("ok");
-    expect(r.detail).toContain("USDC 10.00");
+    expect(r.detail).toContain("reward bank 10.00 USDC");
   });
 
-  it("exposes structured signer pools (gas + USDC) for the Ops board", async () => {
-    const r = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: "0xabc", usdcAddress: "0xusdc", ...floors, fetchImpl: balances("0xDE0B6B3A7640000", "0x989680") });
-    expect(r.pools?.map((p) => p.key)).toEqual(["signer_gas", "signer_usdc"]);
-    const usdc = r.pools?.find((p) => p.key === "signer_usdc");
-    expect(usdc?.amount).toBe(10);
-    expect(usdc?.unit).toBe("USDC");
-    expect(usdc?.floor).toBe(5);
+  it("exposes structured signer gas + reward-bank pools for the Ops board", async () => {
+    const r = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: "0xabc", rewardBankLiquid: 10, ...floors, fetchImpl: balances("0xDE0B6B3A7640000", "0x989680") });
+    expect(r.pools?.map((p) => p.key)).toEqual(["signer_gas", "reward_bank"]);
+    const reward = r.pools?.find((p) => p.key === "reward_bank");
+    expect(reward?.amount).toBe(10);
+    expect(reward?.unit).toBe("USDC");
+    expect(reward?.floor).toBe(5);
   });
 
   it("red when native gas is below the floor", async () => {
-    const r = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: "0xabc", usdcAddress: "0xusdc", ...floors, fetchImpl: balances("0x2386F26FC10000", "0x989680") });
+    const r = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: "0xabc", rewardBankLiquid: 10, ...floors, fetchImpl: balances("0x2386F26FC10000", "0x989680") });
     expect(r.status).toBe("red");
     expect(r.detail).toContain("< 0.1");
   });
 
-  it("red when USDC is below the floor", async () => {
-    const r = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: "0xabc", usdcAddress: "0xusdc", ...floors, fetchImpl: balances("0xDE0B6B3A7640000", "0xF4240") });
+  it("red when the reward-bank position is below the floor", async () => {
+    const r = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: "0xabc", rewardBankLiquid: 1, ...floors, fetchImpl: balances("0xDE0B6B3A7640000", "0xF4240") });
     expect(r.status).toBe("red");
     expect(r.detail).toContain("< 5");
   });
 
+  it("degrades rather than reading wallet USDC when /health omits the reward bank", async () => {
+    const r = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: "0xabc", rewardBankLiquid: undefined, ...floors, fetchImpl: balances("0xDE0B6B3A7640000", "0x989680") });
+    expect(r.status).toBe("degraded");
+    expect(r.detail).toContain("reward bank unreadable");
+  });
+
   it("degraded when the balance read fails", async () => {
-    const r = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: "0xabc", usdcAddress: "0xusdc", ...floors, fetchImpl: throwingFetch() });
+    const r = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: "0xabc", rewardBankLiquid: 10, ...floors, fetchImpl: throwingFetch() });
     expect(r.status).toBe("degraded");
   });
 
   it("names WHICH piece is unconfigured (a cutover leaves solvency unmonitored)", async () => {
-    const noRpc = await probeSignerLiquidity({ rpcUrl: undefined, signerAddress: "0xabc", usdcAddress: undefined, ...floors, fetchImpl: balances("0x0", "0x0") });
+    const noRpc = await probeSignerLiquidity({ rpcUrl: undefined, signerAddress: "0xabc", rewardBankLiquid: 10, ...floors, fetchImpl: balances("0x0", "0x0") });
     expect(noRpc.detail).toContain("PRODUCT_HEALTH_RPC_URL");
-    const noSigner = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: undefined, usdcAddress: undefined, ...floors, fetchImpl: balances("0x0", "0x0") });
+    const noSigner = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: undefined, rewardBankLiquid: 10, ...floors, fetchImpl: balances("0x0", "0x0") });
     expect(noSigner.detail).toContain("PRODUCT_HEALTH_SIGNER_ADDRESS");
   });
 
@@ -456,32 +461,32 @@ describe("probeSignerLiquidity (direct RPC)", () => {
 
   it("reads balances normally when the RPC is on the product's chain", async () => {
     const r = await probeSignerLiquidity({
-      rpcUrl: "http://rpc", signerAddress: "0xabc", usdcAddress: "0xusdc", ...floors,
+      rpcUrl: "http://rpc", signerAddress: "0xabc", rewardBankLiquid: 10, ...floors,
       expectedChainId: 420420417,
       fetchImpl: chainedBalances(TESTNET, "0xDE0B6B3A7640000", "0x989680"),
     });
     expect(r.status).toBe("ok");
-    expect(r.detail).toContain("USDC 10.00");
+    expect(r.detail).toContain("reward bank 10.00 USDC");
   });
 
   it("RED + rpcOk:false when the product is on MAINNET but the RPC is a leftover testnet endpoint", async () => {
     // The exact cutover hazard: healthy testnet RPC, flush testnet signer, and the
     // mainnet signer could be dry. Must NOT report those balances as green.
     const r = await probeSignerLiquidity({
-      rpcUrl: "http://rpc", signerAddress: "0xabc", usdcAddress: "0xusdc", ...floors,
+      rpcUrl: "http://rpc", signerAddress: "0xabc", rewardBankLiquid: 10, ...floors,
       expectedChainId: 420420419, // product is live on mainnet
       fetchImpl: chainedBalances(TESTNET, "0xDE0B6B3A7640000", "0x989680"), // fat testnet balances
     });
     expect(r.status).toBe("red"); // blind on mainnet pages
     expect(r.detail).toContain("chain mismatch");
     expect(r.detail).toContain("420420419");
-    expect(r.detail).not.toContain("USDC 10.00"); // the wrong chain's balance never surfaces
+    expect(r.detail).not.toContain("reward bank 10.00"); // no balance is trusted through a wrong-chain RPC
     expect(r.rpcOk).toBe(false); // drives failover past this endpoint, then escalates
   });
 
   it("degraded (not red) on a mismatch while the product is still on a testnet", async () => {
     const r = await probeSignerLiquidity({
-      rpcUrl: "http://rpc", signerAddress: "0xabc", usdcAddress: "0xusdc", ...floors,
+      rpcUrl: "http://rpc", signerAddress: "0xabc", rewardBankLiquid: 10, ...floors,
       expectedChainId: 420420417,
       fetchImpl: chainedBalances(MAINNET, "0xDE0B6B3A7640000", "0x989680"),
     });
@@ -491,7 +496,7 @@ describe("probeSignerLiquidity (direct RPC)", () => {
 
   it("skips the guard when the product's chainId is unknown (no /health chainId)", async () => {
     const r = await probeSignerLiquidity({
-      rpcUrl: "http://rpc", signerAddress: "0xabc", usdcAddress: "0xusdc", ...floors,
+      rpcUrl: "http://rpc", signerAddress: "0xabc", rewardBankLiquid: 10, ...floors,
       expectedChainId: undefined,
       fetchImpl: chainedBalances(TESTNET, "0xDE0B6B3A7640000", "0x989680"),
     });
@@ -540,6 +545,30 @@ describe("probeTreasuryLiquidity (direct RPC + /health rewardBank)", () => {
     expect(r.detail).toContain("reward 10.00 < 50");
   });
 
+  it("declares an intentionally unfunded reserve when its floor is explicitly zero", async () => {
+    const r = await probeTreasuryLiquidity({
+      ...base,
+      minTreasuryReserve: 0,
+      treasuryReserveZeroReason: "pre-revenue reserve; payouts use the reward bank",
+      rewardBankLiquid: 100,
+      fetchImpl: balances("0x0", "0x0"),
+    });
+    expect(r.status).toBe("ok");
+    expect(r.detail).toContain("intentionally unfunded: pre-revenue reserve");
+    expect(r.pools?.find((pool) => pool.key === "reserve")?.note).toContain("Intentionally unfunded");
+  });
+
+  it("degrades when a zero reserve floor has no declared reason", async () => {
+    const r = await probeTreasuryLiquidity({
+      ...base,
+      minTreasuryReserve: 0,
+      rewardBankLiquid: 100,
+      fetchImpl: balances("0x0", "0x0"),
+    });
+    expect(r.status).toBe("degraded");
+    expect(r.detail).toContain("floor disabled without a declared reason");
+  });
+
   it("degraded when a balance read fails", async () => {
     expect((await probeTreasuryLiquidity({ ...base, rewardBankLiquid: 100, fetchImpl: throwingFetch() })).status).toBe("degraded");
   });
@@ -554,7 +583,7 @@ describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", ()
     );
     expect(probes.map((p) => p.name)).toEqual(["product_api", "chain_height", "signer_liquidity", "capabilities", "api_latency", "money_path", "treasury_liquidity"]);
     expect(probes.map((p) => p.status)).toEqual(["ok", "ok", "ok", "ok", "ok", "ok", "ok"]);
-    expect(probes[2]?.detail).toContain("USDC 10.00");
+    expect(probes[2]?.detail).toContain("reward bank 100.00 USDC");
   });
 
   it("all degraded when nothing is configured (never fake green)", async () => {
@@ -613,7 +642,8 @@ describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", ()
     );
     expect(snapshot.chainId).toBe(420420417);
     expect(snapshot.network).toBe("testnet");
-    expect(snapshot.solvency?.pools.some((p) => p.key === "signer_usdc" && p.amount === 10)).toBe(true);
+    expect(snapshot.solvency?.pools.filter((p) => p.key === "reward_bank")).toHaveLength(1);
+    expect(snapshot.solvency?.pools.some((p) => p.key === "reward_bank" && p.amount === 100)).toBe(true);
     expect(snapshot.flow?.settled24h).toBe(37);
     expect(snapshot.flow?.stuck).toBe(1);
   });
@@ -751,7 +781,6 @@ describe("loadProductHealthConfig", () => {
     expect(c.haltSeverity).toBe("auto");
     expect(c.usdcDecimals).toBe(6);
     expect(c.minGasNative).toBe(0);
-    expect(c.minUsdc).toBe(0);
     expect(c.requiredCapabilities).toEqual(["blockchain", "treasuryMutations"]);
     expect(c.expectedWarnings).toContain("indexer_unavailable");
     expect(c.latencyWarnMs).toBe(2000);
@@ -769,14 +798,18 @@ describe("loadProductHealthConfig", () => {
       AVERRAY_API_BASE_URL: "https://api.x/",
       PRODUCT_HEALTH_RPC_URL: "http://rpc",
       PRODUCT_HEALTH_USDC_ADDRESS: "0xusdc",
-      PRODUCT_HEALTH_MIN_USDC: "5",
+      PRODUCT_HEALTH_MIN_REWARD_BANK: "5",
+      PRODUCT_HEALTH_MIN_TREASURY_RESERVE: "0",
+      PRODUCT_HEALTH_TREASURY_RESERVE_ZERO_REASON: "pre-revenue reserve",
       PRODUCT_HEALTH_HALT_SEVERITY: "red",
       PRODUCT_HEALTH_CHAIN_MAX_STALE_SECONDS: "120",
     });
     expect(c.apiBaseUrl).toBe("https://api.x");
     expect(c.rpcUrl).toBe("http://rpc");
     expect(c.usdcAddress).toBe("0xusdc");
-    expect(c.minUsdc).toBe(5);
+    expect(c.minRewardBank).toBe(5);
+    expect(c.minTreasuryReserve).toBe(0);
+    expect(c.treasuryReserveZeroReason).toBe("pre-revenue reserve");
     expect(c.haltSeverity).toBe("red");
     expect(c.chainMaxStaleSeconds).toBe(120);
   });
@@ -959,8 +992,8 @@ describe("deriveLiquidityRunway", () => {
     signerGas: gas,
   });
   const usdcPool = (amount: number | null, floor: number | null = 1): SolvencyPoolData => ({
-    key: "signer_usdc",
-    label: "signer USDC",
+    key: "reward_bank",
+    label: "reward bank",
     amount,
     unit: "USDC",
     floor,
@@ -976,7 +1009,7 @@ describe("deriveLiquidityRunway", () => {
     expect(r.pools[0].burnPerHour).toBeCloseTo(1, 6);
     expect(r.pools[0].hoursToFloor).toBeCloseTo(12, 6);
     expect(r.pools[0].status).toBe("degraded");
-    expect(r.note).toBe("signer USDC ~12h to floor");
+    expect(r.note).toBe("reward bank ~12h to floor");
   });
 
   it("pages (red) when the floor is < 6h out", () => {
@@ -986,7 +1019,7 @@ describe("deriveLiquidityRunway", () => {
     const r = deriveLiquidityRunway(history, [usdcPool(5)], now);
     expect(r.pools[0].hoursToFloor).toBeCloseTo(2, 6);
     expect(r.pools[0].status).toBe("red");
-    expect(r.note).toBe("signer USDC ~2h to floor");
+    expect(r.note).toBe("reward bank ~2h to floor");
   });
 
   it("reads stable — not a fake countdown — when the balance is flat", () => {
@@ -1023,7 +1056,7 @@ describe("deriveLiquidityRunway", () => {
     const r = deriveLiquidityRunway(history, [usdcPool(1, 1)], now); // current == floor
     expect(r.pools[0].hoursToFloor).toBe(0);
     expect(r.pools[0].status).toBe("red");
-    expect(r.note).toBe("signer USDC at floor");
+    expect(r.note).toBe("reward bank at floor");
   });
 
   it("skips informational + series-less pools; the nearest depleting pool wins the note", () => {
@@ -1032,12 +1065,12 @@ describe("deriveLiquidityRunway", () => {
     const pools: SolvencyPoolData[] = [
       { key: "signer_gas", label: "signer gas", amount: 5000, unit: "PAS", floor: 1, status: "ok" }, // stable, kept
       usdcPool(13), // draining ⇒ 12h
-      { key: "reward_bank", label: "Reward bank", amount: 100, unit: "USDC", floor: 25, status: "ok" }, // no series ⇒ skip
+      { key: "reserve", label: "Treasury reserve", amount: 100, unit: "USDC", floor: 25, status: "ok" }, // no series ⇒ skip
       { key: "escrow", label: "Escrow", amount: 96, unit: "USDC", status: "ok", informational: true }, // informational ⇒ skip
     ];
     const r = deriveLiquidityRunway(history, pools, now);
-    expect(r.pools.map((p) => p.key)).toEqual(["signer_gas", "signer_usdc"]);
-    expect(r.note).toBe("signer USDC ~12h to floor"); // gas is stable ⇒ usdc is the nearest
+    expect(r.pools.map((p) => p.key)).toEqual(["signer_gas", "reward_bank"]);
+    expect(r.note).toBe("reward bank ~12h to floor"); // gas is stable ⇒ usdc is the nearest
   });
 });
 
@@ -1057,33 +1090,33 @@ describe("decideRunwayAlert", () => {
   const rw = (...pools: LiquidityRunwayPool[]): LiquidityRunway => ({ pools, note: null });
 
   it("fires on the rising edge into the danger band, then stays quiet within cooldown", () => {
-    const first = decideRunwayAlert({ runway: rw(pool("signer_usdc", "degraded")), state: initialRunwayAlertState(), nowMs: 1000, cooldownMs: HOUR });
+    const first = decideRunwayAlert({ runway: rw(pool("reward_bank", "degraded")), state: initialRunwayAlertState(), nowMs: 1000, cooldownMs: HOUR });
     expect(first.alert).toBe(true);
-    const again = decideRunwayAlert({ runway: rw(pool("signer_usdc", "degraded")), state: first.state, nowMs: 1000 + 5 * 60_000, cooldownMs: HOUR });
+    const again = decideRunwayAlert({ runway: rw(pool("reward_bank", "degraded")), state: first.state, nowMs: 1000 + 5 * 60_000, cooldownMs: HOUR });
     expect(again.alert).toBe(false);
   });
 
   it("re-fires when the danger worsens (degraded → red) even within cooldown", () => {
-    const first = decideRunwayAlert({ runway: rw(pool("signer_usdc", "degraded")), state: initialRunwayAlertState(), nowMs: 0, cooldownMs: HOUR });
-    const worse = decideRunwayAlert({ runway: rw(pool("signer_usdc", "red", 2)), state: first.state, nowMs: 60_000, cooldownMs: HOUR });
+    const first = decideRunwayAlert({ runway: rw(pool("reward_bank", "degraded")), state: initialRunwayAlertState(), nowMs: 0, cooldownMs: HOUR });
+    const worse = decideRunwayAlert({ runway: rw(pool("reward_bank", "red", 2)), state: first.state, nowMs: 60_000, cooldownMs: HOUR });
     expect(worse.alert).toBe(true);
   });
 
   it("re-fires after the cooldown while the danger persists", () => {
-    const first = decideRunwayAlert({ runway: rw(pool("signer_usdc", "degraded")), state: initialRunwayAlertState(), nowMs: 0, cooldownMs: HOUR });
-    const later = decideRunwayAlert({ runway: rw(pool("signer_usdc", "degraded")), state: first.state, nowMs: HOUR + 1, cooldownMs: HOUR });
+    const first = decideRunwayAlert({ runway: rw(pool("reward_bank", "degraded")), state: initialRunwayAlertState(), nowMs: 0, cooldownMs: HOUR });
+    const later = decideRunwayAlert({ runway: rw(pool("reward_bank", "degraded")), state: first.state, nowMs: HOUR + 1, cooldownMs: HOUR });
     expect(later.alert).toBe(true);
   });
 
   it("clears (no alert, key reset) once every pool is out of the band", () => {
-    const first = decideRunwayAlert({ runway: rw(pool("signer_usdc", "red", 2)), state: initialRunwayAlertState(), nowMs: 0, cooldownMs: HOUR });
-    const safe = decideRunwayAlert({ runway: rw(pool("signer_usdc", "ok", null)), state: first.state, nowMs: 60_000, cooldownMs: HOUR });
+    const first = decideRunwayAlert({ runway: rw(pool("reward_bank", "red", 2)), state: initialRunwayAlertState(), nowMs: 0, cooldownMs: HOUR });
+    const safe = decideRunwayAlert({ runway: rw(pool("reward_bank", "ok", null)), state: first.state, nowMs: 60_000, cooldownMs: HOUR });
     expect(safe.alert).toBe(false);
     expect(safe.state.lastDangerKey).toBe("");
   });
 
   it("stays quiet when nothing is in the danger band", () => {
-    const d = decideRunwayAlert({ runway: rw(pool("signer_usdc", "ok", null), pool("signer_gas", "ok", null)), state: initialRunwayAlertState(), nowMs: 0, cooldownMs: HOUR });
+    const d = decideRunwayAlert({ runway: rw(pool("reward_bank", "ok", null), pool("signer_gas", "ok", null)), state: initialRunwayAlertState(), nowMs: 0, cooldownMs: HOUR });
     expect(d.alert).toBe(false);
   });
 });
@@ -1091,7 +1124,7 @@ describe("decideRunwayAlert", () => {
 describe("buildRunwayAlertPayload", () => {
   const pool = (key: string, status: ProbeResult["status"], hours: number): LiquidityRunwayPool => ({
     key,
-    label: key === "signer_usdc" ? "signer USDC" : "signer gas",
+    label: key === "reward_bank" ? "reward bank" : "signer gas",
     unit: "USDC",
     current: 3,
     floor: 1,
@@ -1102,18 +1135,18 @@ describe("buildRunwayAlertPayload", () => {
   });
 
   it("summarises the danger pools nearest-first with a board link", () => {
-    const runway: LiquidityRunway = { pools: [pool("signer_gas", "degraded", 20), pool("signer_usdc", "red", 3)], note: null };
+    const runway: LiquidityRunway = { pools: [pool("signer_gas", "degraded", 20), pool("reward_bank", "red", 3)], note: null };
     const p = buildRunwayAlertPayload(runway, "https://board");
     expect(p.count).toBe(2);
-    expect(p.items[0].id).toBe("runway-signer_usdc"); // nearest first
+    expect(p.items[0].id).toBe("runway-reward_bank"); // nearest first
     expect(p.items[0].title).toContain("~3h to floor");
     expect(p.boardUrl).toBe("https://board");
-    expect(p.text).toContain("signer USDC ~3h to floor");
+    expect(p.text).toContain("reward bank ~3h to floor");
     expect(p.text).toContain("operator action");
   });
 
   it("excludes stable pools from the payload", () => {
-    const runway: LiquidityRunway = { pools: [{ ...pool("signer_usdc", "ok", 0), hoursToFloor: null }, pool("signer_gas", "degraded", 10)], note: null };
+    const runway: LiquidityRunway = { pools: [{ ...pool("reward_bank", "ok", 0), hoursToFloor: null }, pool("signer_gas", "degraded", 10)], note: null };
     const p = buildRunwayAlertPayload(runway, "https://board");
     expect(p.count).toBe(1);
     expect(p.items[0].id).toBe("runway-signer_gas");

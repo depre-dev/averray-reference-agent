@@ -92,7 +92,6 @@ export const OPS_FIXTURE_LIVE: ProductHealth = {
 
 // ── fully wired — every zone has real data ───────────────────────────────────
 const SOLVENCY_POOLS: SolvencyPool[] = [
-  { key: "signer_usdc", label: "Signer USDC", amount: 2.0, unit: "USDC", floor: 1.0, status: "degraded" },
   { key: "signer_gas", label: "Signer gas", amount: 4999.99, unit: "PAS", floor: 50, status: "ok" },
   { key: "reward_bank", label: "Reward bank", amount: 184.5, unit: "USDC", floor: 25, status: "ok" },
   { key: "aac", label: "Agent core", amount: 512.0, unit: "USDC", floor: 100, status: "ok" },
@@ -182,8 +181,8 @@ export const OPS_FIXTURE_RED: ProductHealth = {
   },
   solvency: {
     pools: SOLVENCY_POOLS.map((p) =>
-      p.key === "signer_usdc" ? { ...p, amount: 0.8, status: "red" } : p,
+      p.key === "reward_bank" ? { ...p, amount: 0.8, status: "red" } : p,
     ),
-    runwayNote: "signer USDC below floor — top up before next payout",
+    runwayNote: "reward bank below floor — top up before next payout",
   },
 };

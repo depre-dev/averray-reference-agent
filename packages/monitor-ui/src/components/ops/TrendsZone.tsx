@@ -1,5 +1,5 @@
 // Trends — the rolling-history zone. Uptime (a status strip + 24h %), API latency
-// (SVG line), and signer USDC balance (SVG line). All fed by the server-side
+// (SVG line), and reward bank balance (SVG line). All fed by the server-side
 // history store; until that store has data the zone shows an honest accruing
 // state rather than a flat fake line.
 //
@@ -79,12 +79,12 @@ export function TrendsZone({ history }: TrendsZoneProps) {
 
           <div className="ops-trend">
             <div className="ops-trend-head">
-              <span>Signer USDC</span>
+              <span>Reward bank</span>
               <span className="ops-trend-val">{lastNum(balance, "")}</span>
             </div>
             <AnomalyChip a={anomalyOf("balance")} />
             {hasSeries(balance) ? (
-              <LineSpark values={balance!} tone="ok" ariaLabel="Signer USDC balance trend" />
+              <LineSpark values={balance!} tone="ok" ariaLabel="Reward bank balance trend" />
             ) : (
               <p className="ops-await ops-await--inline">accruing</p>
             )}

@@ -13,9 +13,10 @@
 //    (it reads `auth.chainId`), with no separate endpoint that can drift to the
 //    wrong network. A frozen chain still reports its last block, so a block-advance
 //    tracker turns a static height into a halt signal.
-//  • Signer BALANCES come from a direct eth-RPC (eth_getBalance + erc20 balanceOf)
-//    — `/health` does not expose balances, so this is the only source of real
-//    solvency monitoring. Raw JSON-RPC over the injected `fetch` (no viem dep).
+//  • Signer gas comes from direct eth-RPC (`eth_getBalance`). Payout liquidity
+//    comes from `/health.rewardBank.liquid`, the authoritative
+//    AgentAccountCore.positions[signer][USDC].liquid position. Raw JSON-RPC uses
+//    the injected `fetch` (no viem dependency).
 //
 // TRUTH-BOUNDARY (the whole point): an UNCONFIGURED or unreadable probe reports
 // `degraded`, never a fake green; a probe the product self-reports as failing (or a
@@ -68,7 +69,9 @@ export interface ProductHealthSnapshot {
   probes: ProbeResult[];
   /** GET /health round-trip latency (ms) for this check — Trends latency series. */
   latencyMs?: number | null;
-  /** Signer USDC balance at this check — Trends balance series + USDC runway. */
+  /** Reward-bank USDC at this check — Trends balance series + payout runway.
+   *  The field name is retained for stored-history compatibility; the value is
+   *  AgentAccountCore.positions[signer][USDC].liquid, never wallet USDC. */
   signerUsdc?: number | null;
   /** Signer native-gas balance at this check — gas runway (matters on mainnet). */
   signerGas?: number | null;
@@ -208,11 +211,11 @@ function deriveIncidents(history: ReadonlyArray<ProductHealthSnapshot>): Product
 
 // ── Liquidity runway (projects time-to-floor from the balance series) ──
 
-/** Per-pool balance accessor into a history entry — only the live signer pools
- *  carry a stored series; treasury pools are forward-compat (no series yet). */
+/** Per-pool balance accessor into a history entry — only live payout/gas pools
+ *  carry a stored series; other treasury pools are forward-compat. */
 const RUNWAY_SERIES: Record<string, (s: ProductHealthSnapshot) => number | null | undefined> = {
   signer_gas: (s) => s.signerGas,
-  signer_usdc: (s) => s.signerUsdc,
+  reward_bank: (s) => s.signerUsdc,
 };
 
 export interface LiquidityRunwayPool {
@@ -447,8 +450,6 @@ export interface ProductHealthConfig {
   usdcDecimals: number;
   /** Native-gas floor in whole tokens (e.g. 0.1 DOT). 0 = don't threshold. */
   minGasNative: number;
-  /** USDC floor in whole tokens (e.g. 5). 0 = don't threshold. */
-  minUsdc: number;
   /** capabilityHealth keys that MUST be up; one dropping ⇒ red. Env
    *  PRODUCT_HEALTH_REQUIRED_CAPABILITIES (csv). Default blockchain,treasuryMutations. */
   requiredCapabilities: string[];
@@ -473,6 +474,9 @@ export interface ProductHealthConfig {
    *  PRODUCT_HEALTH_MIN_TREASURY_RESERVE / PRODUCT_HEALTH_MIN_AAC. */
   minRewardBank: number;
   minTreasuryReserve: number;
+  /** Required explanation when the treasury-reserve floor is deliberately 0.
+   *  Without it the reserve probe degrades instead of silently painting green. */
+  treasuryReserveZeroReason?: string;
   minAac: number;
 }
 
@@ -526,7 +530,6 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
     usdcAddress: env.PRODUCT_HEALTH_USDC_ADDRESS || undefined,
     usdcDecimals: num(env.PRODUCT_HEALTH_USDC_DECIMALS, 6),
     minGasNative: num(env.PRODUCT_HEALTH_MIN_GAS_NATIVE, 0),
-    minUsdc: num(env.PRODUCT_HEALTH_MIN_USDC, 0),
     requiredCapabilities: csv(env.PRODUCT_HEALTH_REQUIRED_CAPABILITIES, "blockchain,treasuryMutations"),
     expectedWarnings: csv(env.PRODUCT_HEALTH_EXPECTED_WARNINGS, "xcm_observer_staged,indexer_unavailable,gas_sponsor_disabled"),
     latencyWarnMs: num(env.PRODUCT_HEALTH_LATENCY_WARN_MS, 2000),
@@ -536,6 +539,7 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
     settlementMaxStaleMinutes: num(env.PRODUCT_HEALTH_SETTLEMENT_MAX_STALE_MINUTES, 15),
     minRewardBank: num(env.PRODUCT_HEALTH_MIN_REWARD_BANK, 0),
     minTreasuryReserve: num(env.PRODUCT_HEALTH_MIN_TREASURY_RESERVE, 5),
+    treasuryReserveZeroReason: env.PRODUCT_HEALTH_TREASURY_RESERVE_ZERO_REASON?.trim() || undefined,
     minAac: num(env.PRODUCT_HEALTH_MIN_AAC, 0),
   };
 }
@@ -874,14 +878,20 @@ function encodeBalanceOf(address: string): string {
   return BALANCE_OF_SELECTOR + address.toLowerCase().replace(/^0x/, "").padStart(64, "0");
 }
 
-/** Signer solvency: native gas + (optionally) USDC vs floors. Read fails → degraded. */
+/** Signer solvency: native wallet gas + the in-contract reward bank.
+ *
+ * USDC intentionally lives in AgentAccountCore.positions[signer][USDC].liquid
+ * after funding. Reading ERC-20 balanceOf(signer) here alarms on the wrong
+ * number: it stays zero while payouts are healthy and does not fall when the
+ * reward bank drains. The product already exposes the authoritative position as
+ * /health.rewardBank.liquid, shared with treasury_liquidity below.
+ */
 export async function probeSignerLiquidity(input: {
   rpcUrl?: string;
   signerAddress?: string;
-  usdcAddress?: string;
-  usdcDecimals: number;
+  rewardBankLiquid?: number;
   minGasNative: number;
-  minUsdc: number;
+  minRewardBank: number;
   /** The chainId `/health` reports. When set, the RPC must agree before we trust
    *  any balance it returns (chain guard below). */
   expectedChainId?: number;
@@ -919,10 +929,12 @@ export async function probeSignerLiquidity(input: {
     }
     const gasWei = BigInt(await ethRpc(input.rpcUrl, "eth_getBalance", [input.signerAddress, "latest"], input.fetchImpl));
     const gasNative = Number(gasWei) / 1e18;
+    const gasUnit = input.expectedChainId === 420420419 ? "DOT" : "PAS";
     const parts: string[] = [];
     let red = false;
+    let degraded = false;
 
-    const gasPart = `gas ${gasNative.toFixed(4)}`;
+    const gasPart = `gas ${gasNative.toFixed(4)} ${gasUnit}`;
     if (input.minGasNative > 0 && gasNative < input.minGasNative) {
       red = true;
       parts.push(`${gasPart} < ${input.minGasNative}`);
@@ -930,21 +942,16 @@ export async function probeSignerLiquidity(input: {
       parts.push(gasPart);
     }
 
-    let usdc: number | undefined;
-    if (input.usdcAddress) {
-      const usdcRaw = await ethRpc(
-        input.rpcUrl,
-        "eth_call",
-        [{ to: input.usdcAddress, data: encodeBalanceOf(input.signerAddress) }, "latest"],
-        input.fetchImpl,
-      );
-      usdc = Number(BigInt(usdcRaw || "0x0")) / 10 ** input.usdcDecimals;
-      const usdcPart = `USDC ${usdc.toFixed(2)}`;
-      if (input.minUsdc > 0 && usdc < input.minUsdc) {
+    if (input.rewardBankLiquid === undefined) {
+      degraded = true;
+      parts.push("reward bank unreadable");
+    } else {
+      const rewardPart = `reward bank ${input.rewardBankLiquid.toFixed(2)} USDC`;
+      if (input.minRewardBank > 0 && input.rewardBankLiquid < input.minRewardBank) {
         red = true;
-        parts.push(`${usdcPart} < ${input.minUsdc}`);
+        parts.push(`${rewardPart} < ${input.minRewardBank}`);
       } else {
-        parts.push(usdcPart);
+        parts.push(rewardPart);
       }
     }
 
@@ -953,23 +960,29 @@ export async function probeSignerLiquidity(input: {
         key: "signer_gas",
         label: "Signer gas",
         amount: gasNative,
-        unit: "PAS",
+        unit: gasUnit,
         floor: input.minGasNative > 0 ? input.minGasNative : null,
         status: input.minGasNative > 0 && gasNative < input.minGasNative ? "red" : "ok",
       },
     ];
-    if (usdc !== undefined) {
+    if (input.rewardBankLiquid !== undefined) {
       pools.push({
-        key: "signer_usdc",
-        label: "Signer USDC",
-        amount: usdc,
+        key: "reward_bank",
+        label: "Reward bank",
+        amount: input.rewardBankLiquid,
         unit: "USDC",
-        floor: input.minUsdc > 0 ? input.minUsdc : null,
-        status: input.minUsdc > 0 && usdc < input.minUsdc ? "red" : "ok",
+        floor: input.minRewardBank > 0 ? input.minRewardBank : null,
+        status: input.minRewardBank > 0 && input.rewardBankLiquid < input.minRewardBank ? "red" : "ok",
       });
     }
 
-    return { name: "signer_liquidity", status: red ? "red" : "ok", detail: parts.join(", "), pools, rpcOk: true };
+    return {
+      name: "signer_liquidity",
+      status: red ? "red" : degraded ? "degraded" : "ok",
+      detail: parts.join(", "),
+      pools,
+      rpcOk: true,
+    };
   } catch (err) {
     // The direct RPC read itself failed (timeout / 1006 / bad endpoint) — distinct
     // from a low balance. rpcOk:false is the auto-remediation failover signal.
@@ -987,6 +1000,7 @@ export async function probeTreasuryLiquidity(input: {
   usdcDecimals: number;
   minRewardBank: number;
   minTreasuryReserve: number;
+  treasuryReserveZeroReason?: string;
   minAac: number;
   rpcUrl?: string;
   fetchImpl: typeof fetch;
@@ -1008,6 +1022,7 @@ export async function probeTreasuryLiquidity(input: {
     ]);
     const parts: string[] = [];
     let red = false;
+    let degraded = false;
     const withFloor = (label: string, val: number | undefined, floor: number): void => {
       if (val === undefined) return;
       const s = `${label} ${val.toFixed(2)}`;
@@ -1019,22 +1034,61 @@ export async function probeTreasuryLiquidity(input: {
       }
     };
     withFloor("reward", input.rewardBankLiquid, input.minRewardBank);
-    withFloor("reserve", reserve, input.minTreasuryReserve);
+    if (input.minTreasuryReserve === 0) {
+      if (input.treasuryReserveZeroReason) {
+        if (reserve !== undefined) {
+          parts.push(
+            `reserve ${reserve.toFixed(2)} (intentionally unfunded: ${input.treasuryReserveZeroReason})`,
+          );
+        }
+      } else {
+        degraded = true;
+        if (reserve !== undefined) {
+          parts.push(`reserve ${reserve.toFixed(2)} (floor disabled without a declared reason)`);
+        }
+      }
+    } else {
+      withFloor("reserve", reserve, input.minTreasuryReserve);
+    }
     withFloor("AAC", aac, input.minAac);
     if (escrow !== undefined) parts.push(`escrow ${escrow.toFixed(2)}`); // in-flight — informational, no floor
 
     const pools: SolvencyPoolData[] = [];
-    const pool = (key: string, label: string, val: number | undefined, floor: number): void => {
+    const pool = (
+      key: string,
+      label: string,
+      val: number | undefined,
+      floor: number,
+      note?: string,
+    ): void => {
       if (val === undefined) return;
-      pools.push({ key, label, amount: val, unit: "USDC", floor: floor > 0 ? floor : null, status: floor > 0 && val < floor ? "red" : "ok" });
+      pools.push({
+        key,
+        label,
+        amount: val,
+        unit: "USDC",
+        floor: floor > 0 ? floor : null,
+        status: floor > 0 && val < floor ? "red" : "ok",
+        ...(note ? { note } : {}),
+      });
     };
     pool("reward_bank", "Reward bank", input.rewardBankLiquid, input.minRewardBank);
-    pool("reserve", "Treasury reserve", reserve, input.minTreasuryReserve);
+    pool(
+      "reserve",
+      "Treasury reserve",
+      reserve,
+      input.minTreasuryReserve,
+      input.minTreasuryReserve === 0
+        ? input.treasuryReserveZeroReason
+          ? `Intentionally unfunded: ${input.treasuryReserveZeroReason}`
+          : "Floor disabled without a declared reason"
+        : undefined,
+    );
     pool("aac", "Agent core", aac, input.minAac);
     if (escrow !== undefined) pools.push({ key: "escrow", label: "Escrow (in-flight)", amount: escrow, unit: "USDC", status: "ok", informational: true });
 
     if (parts.length === 0) return { name, status: "degraded", detail: "no treasury balances readable" };
-    return { name, status: red ? "red" : "ok", detail: parts.join(", "), pools };
+    return { name, status: red ? "red" : degraded ? "degraded" : "ok", detail: parts.join(", "), pools };
   } catch (err) {
     return { name, status: "degraded", detail: `treasury read failed: ${errMsg(err)}` };
   }
@@ -1056,6 +1110,8 @@ export interface SolvencyPoolData {
   floor?: number | null;
   status: ProbeStatus;
   informational?: boolean;
+  /** Operator-declared context for a deliberately unfloored pool. */
+  note?: string;
 }
 export interface SolvencySnapshotData {
   pools: SolvencyPoolData[];
@@ -1154,10 +1210,9 @@ export async function collectProductHealthProbes(
   const signer = await probeSignerLiquidity({
     rpcUrl: config.rpcUrl,
     signerAddress: config.signerAddress,
-    usdcAddress: config.usdcAddress,
-    usdcDecimals: config.usdcDecimals,
+    rewardBankLiquid: pickNum(h.body?.rewardBank?.liquid),
     minGasNative: config.minGasNative,
-    minUsdc: config.minUsdc,
+    minRewardBank: config.minRewardBank,
     // Balances are only trusted from an RPC on the product's own chain.
     expectedChainId: chainId,
     fetchImpl,
@@ -1168,11 +1223,19 @@ export async function collectProductHealthProbes(
     usdcDecimals: config.usdcDecimals,
     minRewardBank: config.minRewardBank,
     minTreasuryReserve: config.minTreasuryReserve,
+    treasuryReserveZeroReason: config.treasuryReserveZeroReason,
     minAac: config.minAac,
     rpcUrl: config.rpcUrl,
     fetchImpl,
   });
-  const solvencyPools = [...(signer.pools ?? []), ...(treasury.pools ?? [])];
+  // signer_liquidity and treasury_liquidity intentionally share the same
+  // /health reward-bank position. Keep one board row while retaining both
+  // independently actionable probes.
+  const solvencyPools = [
+    ...new Map(
+      [...(signer.pools ?? []), ...(treasury.pools ?? [])].map((pool) => [pool.key, pool]),
+    ).values(),
+  ];
   const settlement = h.body?.settlement;
   const snapshot: ProductHealthSnapshotBlocks = {
     chainId: chainId ?? null,

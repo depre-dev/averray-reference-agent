@@ -32,6 +32,8 @@ export interface SolvencyPool {
   status: ProbeStatus;
   /** Shown for context but not floored (e.g. escrow balance). */
   informational?: boolean;
+  /** Operator-declared context for an intentionally unfloored pool. */
+  note?: string;
 }
 
 export interface SolvencySnapshot {
@@ -91,7 +93,7 @@ export interface HealthHistory {
   uptimeSeries?: ProbeStatus[];
   /** Per-check API latency ms (null = missing sample), oldest → newest. */
   latencySeriesMs?: (number | null)[];
-  /** Signer USDC balance over time (null = missing), oldest → newest. */
+  /** Reward bank balance over time (null = missing), oldest → newest. */
   balanceSeries?: (number | null)[];
   incidents?: OpsIncident[];
 }

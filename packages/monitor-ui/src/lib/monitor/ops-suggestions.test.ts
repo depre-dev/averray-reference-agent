@@ -62,14 +62,14 @@ describe("opsSuggestions", () => {
         pools: [],
         runway: [
           { key: "signer_gas", label: "signer gas", unit: "PAS", current: 4999, floor: 1, burnPerHour: null, hoursToFloor: null, estimable: true, status: "ok" },
-          { key: "signer_usdc", label: "signer USDC", unit: "USDC", current: 3, floor: 1, burnPerHour: 0.4, hoursToFloor: 5, estimable: true, status: "red" },
+          { key: "reward_bank", label: "reward bank", unit: "USDC", current: 3, floor: 1, burnPerHour: 0.4, hoursToFloor: 5, estimable: true, status: "red" },
         ],
       },
     };
     const byId = Object.fromEntries(opsSuggestions(health).map((s) => [s.id, s]));
     expect(byId["signer-runway"]).toBeTruthy();
     expect(byId["signer-runway"].tone).toBe("act"); // red projection
-    expect(byId["signer-runway"].text).toContain("signer USDC ~5h to floor");
+    expect(byId["signer-runway"].text).toContain("reward bank ~5h to floor");
     expect(byId["signer-runway"].task?.prompt).toContain("PREPARE ONLY");
     expect(byId["signer-runway"].task?.prompt).toContain("do NOT move funds");
     expect(byId["signer-runway"].task?.repo).toContain("averray-reference-agent");
@@ -86,7 +86,7 @@ describe("opsSuggestions", () => {
       solvency: {
         pools: [],
         runway: [
-          { key: "signer_usdc", label: "signer USDC", unit: "USDC", current: 1, floor: 1, burnPerHour: 0.4, hoursToFloor: 0, estimable: true, status: "red" },
+          { key: "reward_bank", label: "reward bank", unit: "USDC", current: 1, floor: 1, burnPerHour: 0.4, hoursToFloor: 0, estimable: true, status: "red" },
         ],
       },
     };
@@ -105,7 +105,7 @@ describe("opsSuggestions", () => {
       solvency: {
         pools: [],
         runway: [
-          { key: "signer_usdc", label: "signer USDC", unit: "USDC", current: 3, floor: 1, burnPerHour: 0, hoursToFloor: null, estimable: true, status: "ok" },
+          { key: "reward_bank", label: "reward bank", unit: "USDC", current: 3, floor: 1, burnPerHour: 0, hoursToFloor: null, estimable: true, status: "ok" },
         ],
       },
     };

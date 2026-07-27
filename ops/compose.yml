@@ -346,10 +346,9 @@ services:
       # signer gas caused the 2026-06-30 canary failure; 1 DOT ≈ days of settlement
       # runway after the alert), REWARD_BANK=2 USDC (~5–10 jobs at 0.2–0.4/job), AAC=1.
       PRODUCT_HEALTH_MIN_GAS_NATIVE: ${PRODUCT_HEALTH_MIN_GAS_NATIVE:-0}
-      # NB: this is the SIGNER's own USDC (the reward-bank account) — distinct from
-      # MIN_REWARD_BANK below, which reads the treasury view. At 0 the USDC half of
-      # signer_liquidity is unfireable, so set it whenever MIN_REWARD_BANK is set.
-      PRODUCT_HEALTH_MIN_USDC: ${PRODUCT_HEALTH_MIN_USDC:-0}
+      # signer_liquidity reads the in-contract reward-bank position exposed by
+      # /health, not balanceOf(signer). PRODUCT_HEALTH_MIN_REWARD_BANK is the one
+      # payout floor shared with treasury_liquidity.
       PRODUCT_HEALTH_REQUIRED_CAPABILITIES: ${PRODUCT_HEALTH_REQUIRED_CAPABILITIES:-blockchain,treasuryMutations}
       PRODUCT_HEALTH_EXPECTED_WARNINGS: ${PRODUCT_HEALTH_EXPECTED_WARNINGS:-xcm_observer_staged,indexer_unavailable,gas_sponsor_disabled}
       PRODUCT_HEALTH_LATENCY_WARN_MS: ${PRODUCT_HEALTH_LATENCY_WARN_MS:-2000}
@@ -359,6 +358,9 @@ services:
       PRODUCT_HEALTH_SETTLEMENT_MAX_STALE_MINUTES: ${PRODUCT_HEALTH_SETTLEMENT_MAX_STALE_MINUTES:-15}
       PRODUCT_HEALTH_MIN_REWARD_BANK: ${PRODUCT_HEALTH_MIN_REWARD_BANK:-0}
       PRODUCT_HEALTH_MIN_TREASURY_RESERVE: ${PRODUCT_HEALTH_MIN_TREASURY_RESERVE:-5}
+      # Required when the reserve floor is deliberately 0. Without a reason the
+      # probe degrades rather than silently painting an unfunded reserve green.
+      PRODUCT_HEALTH_TREASURY_RESERVE_ZERO_REASON: ${PRODUCT_HEALTH_TREASURY_RESERVE_ZERO_REASON:-}
       PRODUCT_HEALTH_MIN_AAC: ${PRODUCT_HEALTH_MIN_AAC:-0}
       # Ops auto-remediation (docs/OPS_AUTO_REMEDIATION.md). OFF by default — a no-op
       # until OPS_AUTOREMEDIATE_ENABLED=true AND at least one PRODUCT_HEALTH_RPC_BACKUPS

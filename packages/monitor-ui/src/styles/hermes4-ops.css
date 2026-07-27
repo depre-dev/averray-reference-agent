@@ -306,6 +306,12 @@
 .ops-gauge-name { color: var(--h4-ink); }
 .ops-gauge-val { color: var(--h4-muted); font-variant-numeric: tabular-nums; text-align: right; }
 .ops-gauge-floor { color: var(--h4-faint); }
+.ops-gauge-note {
+  display: block;
+  margin-top: 3px;
+  color: var(--h4-faint);
+  font-size: 11.5px;
+}
 .ops-meter {
   height: 6px;
   margin-top: 5px;

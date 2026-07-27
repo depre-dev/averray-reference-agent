@@ -55,7 +55,7 @@ describe("OpsBoard — live (today) fixture", () => {
 describe("OpsBoard — populated fixture", () => {
   test("solvency, funnel, trends, incidents, and deploy all render real data", () => {
     const { getByTestId, getByText } = render(<OpsBoard health={OPS_FIXTURE_POPULATED} nowMs={FIXTURE_NOW} />);
-    expect(getByTestId("ops-pool-signer_usdc")).toBeTruthy();
+    expect(getByTestId("ops-pool-reward_bank")).toBeTruthy();
     expect(getByTestId("ops-runway")).toBeTruthy();
     expect(within(getByTestId("ops-fstep-settled")).getByText("37")).toBeTruthy();
     expect(getByTestId("ops-zone-trends")).toBeTruthy();
@@ -66,6 +66,29 @@ describe("OpsBoard — populated fixture", () => {
   test("the ongoing chain incident shows an ongoing duration", () => {
     const { getByTestId } = render(<OpsBoard health={OPS_FIXTURE_POPULATED} nowMs={FIXTURE_NOW} />);
     expect(getByTestId("ops-incidents").textContent).toContain("ongoing");
+  });
+
+  test("shows the declared reason for an intentionally unfunded reserve", () => {
+    const health = {
+      ...OPS_FIXTURE_POPULATED,
+      solvency: {
+        ...OPS_FIXTURE_POPULATED.solvency!,
+        pools: OPS_FIXTURE_POPULATED.solvency!.pools.map((pool) =>
+          pool.key === "reserve"
+            ? {
+                ...pool,
+                amount: 0,
+                floor: null,
+                note: "Intentionally unfunded: pre-revenue reserve",
+              }
+            : pool,
+        ),
+      },
+    };
+    const { getByTestId } = render(<OpsBoard health={health} nowMs={FIXTURE_NOW} />);
+    expect(getByTestId("ops-pool-reserve").textContent).toContain(
+      "Intentionally unfunded: pre-revenue reserve",
+    );
   });
 });
 
