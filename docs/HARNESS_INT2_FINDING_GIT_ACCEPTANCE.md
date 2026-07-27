@@ -134,14 +134,25 @@ The run workspace must be a **self-contained git repository** inside the
 container, or git must be able to resolve its gitdir there. Options, roughly in
 order of preference:
 
-1. **Absorb the gitdir.** After `git worktree add`, replace the pointer file
-   with a real `.git` directory (git's own `--separate-git-dir` inverse), so the
-   workspace stands alone. Deterministic and needs no mount changes.
-2. **Provision by clone** (`git clone --local --no-hardlinks --detach`) for
-   containerized providers. Slower, obviously correct, no pointer at all.
-3. **Mount the source `.git/worktrees/<name>`** into the container at the exact
-   absolute path the pointer names. Fragile — it depends on host/container path
-   identity, which on macOS already differs (`/var` vs `/private/var`).
+1. **Provision by local clone.** `git clone --local <source> <dest>` then
+   `git checkout --detach <revision>`. Self-contained by construction: a real
+   `.git` directory, its own `objects/`, no `alternates`. `--local` hardlinks
+   objects, and the hardlinks live *inside* the destination, so the cost is
+   negligible and they survive a bind mount.
+2. **Mount the source `.git/worktrees/<name>`** at the exact absolute path the
+   pointer names. Fragile — it depends on host/container path identity, which on
+   macOS already differs (`/var` vs `/private/var`).
+
+**Rejected: "absorb the gitdir" into a real `.git` directory.** I proposed this
+first and it does not work. A linked worktree keeps **no object database of its
+own** — it shares the source's. Verified directly: with the source removed, a
+worktree stops working while a `--local` clone keeps working. Absorbing the
+metadata without the objects yields a `.git` directory that still cannot resolve
+a single commit, so the fix must copy objects, which is a clone.
+
+**Do NOT use `--shared`, `--reference`, or `objects/info/alternates`.** Each
+recreates precisely the external dependency being removed, and each looks correct
+on the host while failing inside the container.
 
 Whichever is chosen, the acceptance step must fail **loudly and distinctly** when
 the workspace is not a usable git repository. Right now that condition is
