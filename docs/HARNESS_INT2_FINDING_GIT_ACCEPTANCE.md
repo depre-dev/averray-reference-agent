@@ -123,10 +123,18 @@ the preserved evidence saved only run-level state (`harness-runs.txt`), not the
 the defect below is fixed and inspect `reason`. If it is `exit_128`, §2.5 must be
 re-run to count.
 
-**Evidence lesson:** the ceremony's §4 capture saves run state but not the
-verifier's per-criterion detail. Add `harness run events` (or the verification
-report artifact) to the required capture — without it a failure cannot be
-distinguished from a *different* failure after the fact.
+**CORRECTION (this doc's first version was wrong on this point).** I wrote that
+§4 saves run state but not verifier per-criterion detail, and that
+`harness run events` should be *added* to the required capture. That is false:
+§4 already requires `harness run status`, `run events`, **and**
+`run deliverables`. The `VerificationCompleted` event carries exactly the
+per-criterion detail in question.
+
+The real gap was in **execution**, not the runbook. The 2026-07-27 replay was
+driven by an ad-hoc preflight script and preserved only database rows and
+identity files — no `harness-*.txt` outputs at all — so it did not follow §4.
+That is why the `-003` verdict is unrecoverable. The fix is therefore to run the
+capture from automation that cannot skip it, not to change the runbook.
 
 ## The fix (shape, not implementation)
 
