@@ -319,6 +319,62 @@ describe("deriveMoneyPathProbe", () => {
     expect(r.detail).toContain("settled24h 42");
   });
 
+  it("degrades only after submitted-not-settled work persists across two probes", () => {
+    const settlement = {
+      claimed24h: 2,
+      submitted24h: 2,
+      claimedNotSubmitted: 0,
+      submittedNotSettled: 1,
+      settled24h: 2,
+      stuck: 0,
+      failed24h: 0,
+      asOf: "2026-07-04T00:19:00Z",
+    };
+    const first = deriveMoneyPathProbe(withSettlement(settlement), base);
+    const sustained = deriveMoneyPathProbe(
+      withSettlement(settlement),
+      { ...base, previousSubmittedNotSettled: 1 },
+    );
+
+    expect(first.status).toBe("ok");
+    expect(first.detail).toContain("submittedNotSettled 1");
+    expect(sustained.status).toBe("degraded");
+    expect(sustained.detail).toContain("submittedNotSettled 1 across 2 consecutive probes");
+  });
+
+  it("keeps claimed-not-submitted informational and omits zero gauges from detail", () => {
+    const active = deriveMoneyPathProbe(
+      withSettlement({
+        claimed24h: 2,
+        submitted24h: 1,
+        claimedNotSubmitted: 1,
+        submittedNotSettled: 0,
+        settled24h: 1,
+        stuck: 0,
+        failed24h: 0,
+        asOf: "2026-07-04T00:19:00Z",
+      }),
+      base,
+    );
+    const idle = deriveMoneyPathProbe(
+      withSettlement({
+        claimed24h: 2,
+        submitted24h: 2,
+        claimedNotSubmitted: 0,
+        submittedNotSettled: 0,
+        settled24h: 2,
+        stuck: 0,
+        failed24h: 0,
+        asOf: "2026-07-04T00:19:00Z",
+      }),
+      base,
+    );
+
+    expect(active.status).toBe("ok");
+    expect(active.detail).toContain("claimedNotSubmitted 1");
+    expect(idle.detail).toBe("settled24h 2 (0 stuck, 0 failed)");
+  });
+
   it("red when stuck ≥ maxStuck, or settlement failures ≥ maxFailed24h", () => {
     expect(deriveMoneyPathProbe(withSettlement({ stuck: 5, failed24h: 0, asOf: "2026-07-04T00:19:00Z" }), base).status).toBe("red");
     expect(deriveMoneyPathProbe(withSettlement({ stuck: 0, failed24h: 3, asOf: "2026-07-04T00:19:00Z" }), base).status).toBe("red");
@@ -690,7 +746,19 @@ describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", ()
     const { snapshot } = await collectProductHealthProbes(
       cfg(),
       combinedFetch({
-        healthBody: { ...HEALTHY_BODY, settlement: { settled24h: 37, stuck: 1, failed24h: 0, asOf: "2026-07-05T00:00:00.000Z" } },
+        healthBody: {
+          ...HEALTHY_BODY,
+          settlement: {
+            claimed24h: 41,
+            submitted24h: 39,
+            claimedNotSubmitted: 2,
+            submittedNotSettled: 1,
+            settled24h: 37,
+            stuck: 1,
+            failed24h: 0,
+            asOf: "2026-07-05T00:00:00.000Z",
+          },
+        },
         chainIdHex: CHAIN_ID_HEX,
         blockTimestampHex: tsHex(10_000_000, 12),
         gasHex: "0xDE0B6B3A7640000",
@@ -702,8 +770,83 @@ describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", ()
     expect(snapshot.network).toBe("testnet");
     expect(snapshot.solvency?.pools.filter((p) => p.key === "reward_bank")).toHaveLength(1);
     expect(snapshot.solvency?.pools.some((p) => p.key === "reward_bank" && p.amount === 100)).toBe(true);
+    expect(snapshot.flow?.claimed24h).toBe(41);
+    expect(snapshot.flow?.submitted24h).toBe(39);
+    expect(snapshot.flow?.claimedNotSubmitted).toBe(2);
+    expect(snapshot.flow?.submittedNotSettled).toBe(1);
     expect(snapshot.flow?.settled24h).toBe(37);
     expect(snapshot.flow?.stuck).toBe(1);
+  });
+
+  it("keeps new funnel fields absent for an older backend instead of fabricating zeros", async () => {
+    const { snapshot } = await collectProductHealthProbes(
+      cfg(),
+      combinedFetch({
+        healthBody: {
+          ...HEALTHY_BODY,
+          settlement: {
+            settled24h: 2,
+            stuck: 0,
+            failed24h: 0,
+            asOf: "2026-07-05T00:00:00.000Z",
+          },
+        },
+        gasHex: "0x1",
+        usdcHex: "0x1",
+      }),
+      { nowMs: 1000 },
+    );
+
+    expect(snapshot.flow).toMatchObject({
+      claimed24h: null,
+      submitted24h: null,
+      claimedNotSubmitted: null,
+      submittedNotSettled: null,
+      settled24h: 2,
+    });
+    expect(
+      deriveMoneyPathProbe(
+        fetched({
+          ...HEALTHY_BODY,
+          settlement: {
+            settled24h: 2,
+            stuck: 0,
+            failed24h: 0,
+            asOf: "2026-07-04T00:19:00Z",
+          },
+        }),
+        { maxStuck: 5, maxFailed24h: 3, maxStaleMinutes: 15, nowMs: Date.parse("2026-07-04T00:20:00Z") },
+      ),
+    ).toMatchObject({ status: "ok", detail: "settled24h 2 (0 stuck, 0 failed)" });
+  });
+
+  it("degrades the collected money-path probe when the submitted backlog repeats", async () => {
+    const { probes } = await collectProductHealthProbes(
+      cfg(),
+      combinedFetch({
+        healthBody: {
+          ...HEALTHY_BODY,
+          settlement: {
+            claimed24h: 2,
+            submitted24h: 2,
+            claimedNotSubmitted: 0,
+            submittedNotSettled: 1,
+            settled24h: 2,
+            stuck: 0,
+            failed24h: 0,
+            asOf: "2026-07-05T00:00:00.000Z",
+          },
+        },
+        gasHex: "0x1",
+        usdcHex: "0x1",
+      }),
+      { nowMs: 1000, previousSubmittedNotSettled: 1 },
+    );
+
+    expect(probes.find((probe) => probe.name === "money_path")).toMatchObject({
+      status: "degraded",
+      detail: expect.stringContaining("submittedNotSettled 1 across 2 consecutive probes"),
+    });
   });
 
   it("keeps /health reward-bank solvency visible when direct RPC reads fail", async () => {

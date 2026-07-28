@@ -601,6 +601,10 @@ export interface ProductHealthPayload {
   /** Settlement-flow counts (the backend's Redis record, not on-chain), per the
    *  locked /health contract. Absent ⇒ money_path degrades until the product ships it. */
   settlement?: {
+    claimed24h?: number;
+    submitted24h?: number;
+    claimedNotSubmitted?: number;
+    submittedNotSettled?: number;
     settled24h?: number;
     stuck?: number;
     failed24h?: number;
@@ -748,7 +752,15 @@ export function deriveLatencyProbe(h: ProductHealthFetch, thresholds: { warnMs: 
  *  verifier rejections — a rejection is the protocol working correctly. */
 export function deriveMoneyPathProbe(
   h: ProductHealthFetch,
-  config: { maxStuck: number; maxFailed24h: number; maxStaleMinutes: number; nowMs: number },
+  config: {
+    maxStuck: number;
+    maxFailed24h: number;
+    maxStaleMinutes: number;
+    nowMs: number;
+    /** Previous poll's current-state gauge. A positive value on both polls is
+     *  a sustained verification/payout backlog rather than a transient handoff. */
+    previousSubmittedNotSettled?: number | null;
+  },
 ): ProbeResult {
   const name = "money_path";
   if (!h.configured || !h.reachable || !h.httpOk) {
@@ -759,22 +771,64 @@ export function deriveMoneyPathProbe(
   const stuck = pickNum(s.stuck) ?? 0;
   const failed = pickNum(s.failed24h) ?? 0;
   const settled = pickNum(s.settled24h) ?? 0;
+  const claimedNotSubmitted = pickNum(s.claimedNotSubmitted);
+  const submittedNotSettled = pickNum(s.submittedNotSettled);
+  const previousSubmittedNotSettled = pickNum(config.previousSubmittedNotSettled);
+  const submittedBacklogSustained =
+    submittedNotSettled !== undefined &&
+    submittedNotSettled > 0 &&
+    previousSubmittedNotSettled !== undefined &&
+    previousSubmittedNotSettled > 0;
+  const withGauges = (detail: string): string => {
+    const gauges: string[] = [];
+    if (claimedNotSubmitted !== undefined && claimedNotSubmitted > 0) {
+      gauges.push(`claimedNotSubmitted ${claimedNotSubmitted}`);
+    }
+    if (submittedNotSettled !== undefined && submittedNotSettled > 0) {
+      gauges.push(
+        submittedBacklogSustained
+          ? `submittedNotSettled ${submittedNotSettled} across 2 consecutive probes`
+          : `submittedNotSettled ${submittedNotSettled} (first observation)`,
+      );
+    }
+    return gauges.length > 0 ? `${detail}; ${gauges.join(", ")}` : detail;
+  };
   if (config.maxStaleMinutes > 0 && s.asOf) {
     const ageMs = config.nowMs - Date.parse(s.asOf);
     if (Number.isFinite(ageMs) && ageMs > config.maxStaleMinutes * 60_000) {
-      return { name, status: "degraded", detail: `settlement counts stale — asOf ${formatDuration(ageMs)} ago` };
+      return {
+        name,
+        status: "degraded",
+        detail: withGauges(`settlement counts stale — asOf ${formatDuration(ageMs)} ago`),
+      };
     }
   }
   if (config.maxStuck > 0 && stuck >= config.maxStuck) {
-    return { name, status: "red", detail: `${stuck} jobs stuck (submitted, unsettled ≥ ${config.maxStuck})` };
+    return {
+      name,
+      status: "red",
+      detail: withGauges(`${stuck} jobs stuck (submitted, unsettled ≥ ${config.maxStuck})`),
+    };
   }
   if (config.maxFailed24h > 0 && failed >= config.maxFailed24h) {
-    return { name, status: "red", detail: `${failed} settlement failures in 24h (≥ ${config.maxFailed24h})` };
+    return {
+      name,
+      status: "red",
+      detail: withGauges(`${failed} settlement failures in 24h (≥ ${config.maxFailed24h})`),
+    };
   }
   if (stuck > 0 || failed > 0) {
-    return { name, status: "degraded", detail: `stuck ${stuck}, failed24h ${failed}, settled24h ${settled}` };
+    return {
+      name,
+      status: "degraded",
+      detail: withGauges(`stuck ${stuck}, failed24h ${failed}, settled24h ${settled}`),
+    };
   }
-  return { name, status: "ok", detail: `settled24h ${settled} (0 stuck, 0 failed)` };
+  const healthyDetail = withGauges(`settled24h ${settled} (0 stuck, 0 failed)`);
+  if (submittedBacklogSustained) {
+    return { name, status: "degraded", detail: healthyDetail };
+  }
+  return { name, status: "ok", detail: healthyDetail };
 }
 
 // A capabilityHealth value counts as "up" when it's one of these; anything else
@@ -1176,6 +1230,10 @@ export interface SolvencySnapshotData {
   runway?: LiquidityRunwayPool[];
 }
 export interface MoneyPathData {
+  claimed24h?: number | null;
+  submitted24h?: number | null;
+  claimedNotSubmitted?: number | null;
+  submittedNotSettled?: number | null;
   settled24h?: number | null;
   stuck?: number | null;
   failed24h?: number | null;
@@ -1239,7 +1297,11 @@ export async function chainBlockAge(input: {
 export async function collectProductHealthProbes(
   config: ProductHealthConfig,
   fetchImpl: typeof fetch = fetch,
-  chainCtx: { advance?: ChainAdvance; nowMs: number } = { nowMs: 0 },
+  chainCtx: {
+    advance?: ChainAdvance;
+    nowMs: number;
+    previousSubmittedNotSettled?: number | null;
+  } = { nowMs: 0 },
 ): Promise<ProductHealthCollection> {
   const h = await fetchProductHealth({
     baseUrl: config.apiBaseUrl,
@@ -1320,6 +1382,10 @@ export async function collectProductHealthProbes(
     ...(settlement
       ? {
           flow: {
+            claimed24h: settlement.claimed24h ?? null,
+            submitted24h: settlement.submitted24h ?? null,
+            claimedNotSubmitted: settlement.claimedNotSubmitted ?? null,
+            submittedNotSettled: settlement.submittedNotSettled ?? null,
             settled24h: settlement.settled24h ?? null,
             stuck: settlement.stuck ?? null,
             failed24h: settlement.failed24h ?? null,
@@ -1343,6 +1409,7 @@ export async function collectProductHealthProbes(
         maxFailed24h: config.maxFailed24h,
         maxStaleMinutes: config.settlementMaxStaleMinutes,
         nowMs: chainCtx.nowMs,
+        previousSubmittedNotSettled: chainCtx.previousSubmittedNotSettled,
       }),
       treasury,
     ],

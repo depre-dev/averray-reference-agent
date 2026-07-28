@@ -70,8 +70,18 @@ describe("awaiting vs degraded tone", () => {
 
 describe("funnelSteps", () => {
   test("tones settled ok, stuck>0 amber, failed>0 coral", () => {
-    const steps = funnelSteps({ claimed: 41, submitted: 39, settled24h: 37, stuck: 1, failed24h: 2 });
+    const steps = funnelSteps({
+      claimed24h: 41,
+      submitted24h: 39,
+      claimedNotSubmitted: 2,
+      submittedNotSettled: 1,
+      settled24h: 37,
+      stuck: 1,
+      failed24h: 2,
+    });
     const byKey = Object.fromEntries(steps.map((s) => [s.key, s]));
+    expect(byKey.claimed.value).toBe(41);
+    expect(byKey.submitted.value).toBe(39);
     expect(byKey.settled.value).toBe(37);
     expect(byKey.settled.tone).toBe("ok");
     expect(byKey.stuck.tone).toBe("degraded");
@@ -94,6 +104,7 @@ describe("funnelSteps", () => {
 describe("hasFlowData", () => {
   test("true once any count is present", () => {
     expect(hasFlowData({ settled24h: 3 })).toBe(true);
+    expect(hasFlowData({ submittedNotSettled: 1 })).toBe(true);
   });
   test("false for undefined or all-null", () => {
     expect(hasFlowData(undefined)).toBe(false);

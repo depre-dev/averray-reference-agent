@@ -3497,6 +3497,8 @@ function startOperatorRoutines() {
       const collection = await collectProductHealthProbes({ ...phConfig, signerAddress, rpcUrl: activeRpc }, fetch, {
         advance: productHealthChainAdvance,
         nowMs: Date.now(),
+        previousSubmittedNotSettled:
+          productHealthSnapshotBlocks?.flow?.submittedNotSettled,
       });
       productHealthChainAdvance = collection.chainAdvance;
       productHealthSnapshotBlocks = collection.snapshot;

@@ -365,6 +365,29 @@
   color: var(--h4-faint);
   margin-top: 3px;
 }
+.ops-flow-gauges {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 7px;
+}
+.ops-flow-gauges.is-awaiting { opacity: 0.55; }
+.ops-flow-gauge {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 7px;
+  border-radius: var(--h4-r-sm);
+  background: var(--h4-paper-sunken);
+  color: var(--h4-faint);
+  font-size: 10.5px;
+}
+.ops-flow-gauge strong {
+  color: var(--h4-tel);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.ops-flow-gauge--warn strong { color: var(--h4-warn); }
 
 /* ---- trends ---- */
 .ops-trends { display: flex; flex-direction: column; gap: 11px; }
