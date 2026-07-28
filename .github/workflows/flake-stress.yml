@@ -1,0 +1,94 @@
+name: Flake stress
+
+# Concurrency-sensitive tests only fail under full-suite parallel load. Two
+# screencast races reached main because a single suite run is a ~19% coin flip:
+#
+#   #561  manifest publication race     (torn manifest / late overwrite)
+#   #562  atomic frame publish          (introduced an ENOENT race on latest.jpg)
+#
+# NOTE ON DESIGN: running the affected file alone, or with `--repeat`, does NOT
+# reproduce these. Measured against the known-broken commit 0d6912a: the file
+# alone failed 0/15 runs and `--repeat 40` passed, while the FULL suite failed
+# ~3/16. A per-file stress job would therefore have been green against broken
+# code — an un-fireable check. The whole suite must run, repeatedly.
+#
+# Verified the loop below detects the known flake: it fired on run 2 of 10
+# against 0d6912a.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"      # nightly
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: "Full-suite iterations"
+        required: false
+        default: "10"
+  pull_request:
+    # PR-time coverage only for the areas whose races we have actually seen.
+    paths:
+      - "services/slack-operator/src/testbed-live-screencast.ts"
+      - "test/unit/testbed-live-screencast.test.ts"
+      - "services/slack-operator/src/index.ts"
+
+permissions:
+  contents: read
+
+jobs:
+  stress:
+    name: Full-suite stress
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Repeat the full suite
+        env:
+          ITERATIONS: ${{ github.event.inputs.iterations || '10' }}
+        run: |
+          set -u
+          failures=0
+          ran=0
+          for i in $(seq 1 "$ITERATIONS"); do
+            echo "::group::full-suite run $i / $ITERATIONS"
+            if npx vitest run > "run-$i.log" 2>&1; then
+              echo "run $i: pass"
+            else
+              failures=$((failures + 1))
+              echo "run $i: FAIL"
+              grep -E "^ FAIL |Error:|AssertionError" "run-$i.log" | head -20 || true
+            fi
+            ran=$((ran + 1))
+            echo "::endgroup::"
+          done
+
+          echo "completed $ran run(s), $failures failure(s)"
+
+          # A stress job that silently ran zero iterations is green by absence,
+          # which reads as evidence. Fail closed instead.
+          if [ "$ran" -eq 0 ]; then
+            echo "::error::stress job executed no iterations"
+            exit 1
+          fi
+          if [ "$failures" -gt 0 ]; then
+            echo "::error::$failures of $ran full-suite runs failed — a concurrency-sensitive test is flaky"
+            exit 1
+          fi
+
+      - name: Upload failing run logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flake-stress-logs
+          path: run-*.log
+          retention-days: 7
