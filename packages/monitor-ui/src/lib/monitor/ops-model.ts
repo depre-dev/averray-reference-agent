@@ -73,8 +73,8 @@ export function funnelSteps(flow: MoneyPathSnapshot | undefined): FunnelStep[] {
   const stuck = v(flow?.stuck);
   const failed = v(flow?.failed24h);
   return [
-    { key: "claimed", label: "Claimed", value: v(flow?.claimed), tone: "neutral" },
-    { key: "submitted", label: "Submitted", value: v(flow?.submitted), tone: "neutral" },
+    { key: "claimed", label: "Claimed 24h", value: v(flow?.claimed24h), tone: "neutral" },
+    { key: "submitted", label: "Submitted 24h", value: v(flow?.submitted24h), tone: "neutral" },
     { key: "settled", label: "Settled 24h", value: v(flow?.settled24h), tone: "ok" },
     { key: "stuck", label: "Stuck", value: stuck, tone: stuck != null && stuck > 0 ? "degraded" : "neutral" },
     { key: "failed", label: "Failed 24h", value: failed, tone: failed != null && failed > 0 ? "red" : "neutral" },
@@ -84,9 +84,15 @@ export function funnelSteps(flow: MoneyPathSnapshot | undefined): FunnelStep[] {
 /** True once any funnel count is present — gates the "awaiting settlement" veil. */
 export function hasFlowData(flow: MoneyPathSnapshot | undefined): boolean {
   if (!flow) return false;
-  return [flow.claimed, flow.submitted, flow.settled24h, flow.stuck, flow.failed24h].some(
-    (n) => typeof n === "number",
-  );
+  return [
+    flow.claimed24h,
+    flow.submitted24h,
+    flow.claimedNotSubmitted,
+    flow.submittedNotSettled,
+    flow.settled24h,
+    flow.stuck,
+    flow.failed24h,
+  ].some((n) => typeof n === "number");
 }
 
 export interface SolvencyRow extends SolvencyPool {

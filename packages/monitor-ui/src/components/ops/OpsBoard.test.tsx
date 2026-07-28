@@ -43,7 +43,11 @@ describe("OpsBoard — live (today) fixture", () => {
     expect(getByTestId("ops-trends-awaiting")).toBeTruthy();
     const funnel = getByTestId("ops-funnel");
     expect(funnel.className).toContain("is-awaiting");
+    expect(within(getByTestId("ops-fstep-claimed")).getByText("—")).toBeTruthy();
+    expect(within(getByTestId("ops-fstep-submitted")).getByText("—")).toBeTruthy();
     expect(within(getByTestId("ops-fstep-settled")).getByText("—")).toBeTruthy();
+    expect(within(getByTestId("ops-flow-gauge-claimedNotSubmitted")).getByText("—")).toBeTruthy();
+    expect(within(getByTestId("ops-flow-gauge-submittedNotSettled")).getByText("—")).toBeTruthy();
   });
 
   test("awaiting probes read as awaiting tone, not amber degraded", () => {
@@ -58,7 +62,11 @@ describe("OpsBoard — populated fixture", () => {
     const { getByTestId, getByText } = render(<OpsBoard health={OPS_FIXTURE_POPULATED} nowMs={FIXTURE_NOW} />);
     expect(getByTestId("ops-pool-reward_bank")).toBeTruthy();
     expect(getByTestId("ops-runway")).toBeTruthy();
+    expect(within(getByTestId("ops-fstep-claimed")).getByText("41")).toBeTruthy();
+    expect(within(getByTestId("ops-fstep-submitted")).getByText("39")).toBeTruthy();
     expect(within(getByTestId("ops-fstep-settled")).getByText("37")).toBeTruthy();
+    expect(within(getByTestId("ops-flow-gauge-claimedNotSubmitted")).getByText("2")).toBeTruthy();
+    expect(within(getByTestId("ops-flow-gauge-submittedNotSettled")).getByText("1")).toBeTruthy();
     expect(getByTestId("ops-zone-trends")).toBeTruthy();
     expect(getByTestId("ops-incidents")).toBeTruthy();
     expect(getByText("structured blocks live")).toBeTruthy();

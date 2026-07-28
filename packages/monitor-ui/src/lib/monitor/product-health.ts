@@ -3,9 +3,9 @@
 // types + helpers only; the hook (useProductHealth) and components consume these.
 //
 // The `probes[]` array + the top-level fields are what the backend emits today.
-// The `solvency` / `flow` / `history` blocks are OPTIONAL and forward-compat: the
-// Ops surface renders honest "awaiting data" placeholders until the backend PR
-// starts emitting them, so nothing is ever fake-green.
+// The `solvency` / `flow` / `history` blocks are OPTIONAL for compatibility with
+// older monitor snapshots. The Ops surface renders honest "awaiting data"
+// placeholders whenever a field is absent, so nothing is ever fake-green.
 
 export type ProbeStatus = "ok" | "degraded" | "red";
 export type ProductHealthStatus = "healthy" | "degraded" | "red" | "unknown";
@@ -61,8 +61,12 @@ export interface RunwayPool {
 
 /** Money-path funnel counts. Any `null` → that step awaits data. */
 export interface MoneyPathSnapshot {
-  claimed?: number | null;
-  submitted?: number | null;
+  claimed24h?: number | null;
+  submitted24h?: number | null;
+  /** Current claims whose worker has not submitted yet; informational only. */
+  claimedNotSubmitted?: number | null;
+  /** Current submissions not yet settled; sustained nonzero is a backlog. */
+  submittedNotSettled?: number | null;
   settled24h?: number | null;
   stuck?: number | null;
   failed24h?: number | null;
