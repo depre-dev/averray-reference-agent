@@ -10,6 +10,7 @@ const FIXTURES = new Set([
   "small-refactor",
   "lint-format",
   "lint-format-green",
+  "lint-format-red",
 ]);
 const POLICY_VERSION = "dispatch-policy-v1";
 const DEFAULT_ALERTS_PATH = "/data/harness-dispatch-alerts.jsonl";
@@ -611,7 +612,7 @@ function helpText() {
   return `Usage: node scripts/ops/harness-pilot.mjs <subcommand> [options]
 
 Human-operated supervised-pilot commands:
-  propose --fixture <docs-fix|add-unit-test|small-refactor|lint-format|lint-format-green>
+  propose --fixture <docs-fix|add-unit-test|small-refactor|lint-format|lint-format-green|lint-format-red>
           [--work-item <id>] [--deadline <iso>]
   approve --work-item <id> --version <n> --operator <id> --confirm
   cancel  --work-item <id> --version <n> --operator <id> --confirm
