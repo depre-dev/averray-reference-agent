@@ -214,7 +214,7 @@ mkdir -p "$HARNESS_DISPATCH_DEP_CACHE_DIR"
 export PILOT_SOURCE_REVISION="8b94278578913b7cd7aa1acb276db48613090c7b"
 export PILOT_DEP_CHECKOUT="$CEREMONY_ROOT/reference-agent-dependency-source"
 
-for fixture in docs-fix add-unit-test small-refactor lint-format lint-format-green; do
+for fixture in docs-fix add-unit-test small-refactor lint-format lint-format-green lint-format-red; do
   grep -F \
     "\"baseRevision\": \"$PILOT_SOURCE_REVISION\"" \
     "$REFERENCE_CHECKOUT/test/fixtures/agent-integration/ceremony/$fixture.json" \
@@ -420,14 +420,43 @@ If this drill broadens authority instead of tightening it, abort.
 
 ### 2.5 Intentional failed verification produces no handoff
 
-1. Restart the worker with `finish.jsonl`, which makes no workspace change.
-2. Propose `docs-fix` with a unique work-item id. Inspect its command and search
-   criteria, then approve.
+Use the **`lint-format-red`** fixture. It writes one file inside the allowlist
+containing trailing whitespace, so `git diff --check` **executes and rejects the
+work on its merits** (exit 2, `trailing whitespace`).
+
+1. Prove no worker is running, then start exactly one with
+   `lint-format-red.jsonl`. This fixture needs **no** dependency cache — leave
+   `HARNESS_DISPATCH_DEP_CACHE_DIR` unset, as for `lint-format-green`.
+2. Propose `lint-format-red` with a unique work-item id. Inspect containment,
+   then approve once.
 3. Enable and start the dispatcher.
-4. The unchanged workspace must fail at least one required criterion. Confirm:
-   the Harness run outcome is `failed`; the AgentTask lifecycle becomes
-   `failed`; no `handoff` decision is recorded; no `VerifiedHandoff` is
-   actuated; no submission or pull request exists.
+4. Confirm: the Harness run outcome is `failed`; the AgentTask lifecycle becomes
+   `failed`; **no** `handoff` decision; no `VerifiedHandoff`; no submission or
+   pull request.
+5. **Confirm the criterion actually ran.** The failing check must report a
+   content rejection — `trailing whitespace` — and **`exit_128` must not appear
+   anywhere in the run events.** `exit_128` means git never started, which is an
+   environment fault wearing a verdict's clothes and proves nothing. See
+   `HARNESS_INT2_FINDING_GIT_ACCEPTANCE.md`.
+
+`lint-format-red` and `lint-format-green` are a controlled pair: identical
+acceptance criterion, allowlist, budget, base revision and profile. The **only**
+variable between the negative and positive proofs is the written content.
+
+> **Why not `docs-fix`, which earlier versions of this runbook prescribed.**
+> Its search criterion (`include: ["docs/**"]`, `expectedMatches: 1`) can never
+> pass. `evaluate_search` selects files with `root.glob(include)`, and in
+> pathlib `**` matches *directories*, which the subsequent `is_file()` filter
+> discards — so **zero files are scanned**, the count is always 0, and an exact
+> comparison against 1 always fails. `docs-fix` therefore fails regardless of
+> what the model does, which is the same uninformative failure as `exit_128`.
+> It cannot serve as a negative proof, and it cannot have served as a positive
+> one either. A kernel fix is tracked separately; until then do not use
+> `docs-fix` for any ceremony case.
+>
+> The related hazard: a `search` check with `expectedMatches: 0` — the natural
+> shape for a guard such as "no secrets in the tree" — would **pass vacuously**
+> while scanning nothing.
 
 An unverified handoff or any PR is an immediate abort.
 
@@ -613,7 +642,7 @@ The following mapping is the acceptance checklist for plan section 21.1:
 | HALT wins | Before/after task and run snapshots; halted heartbeat; cancellation acknowledgement or critical alert; no later run started while HALT existed. |
 | No wallet/settlement/deploy/GitHub-merge capability | The exact eight-grant AgentTask and compiled run manifest, with `delegable:false`, `maxChildren:0`, `maxConcurrentChildren:0`, and deny-all egress. Review the manifest, not just the profile source. |
 | Representative low-risk tasks complete through supervision | At least docs/comment, unit-test, and small-refactor families, each with proposal output, explicit operator approval, `dispatch_approval` decision, run events, verifier evidence, budget actuals, and terminal projection. |
-| Failed verification produces no submission | Failed verifier event and failed lifecycle; no `handoff` decision, no VerifiedHandoff actuation, and no PR/submission evidence. |
+| Failed verification produces no submission | The `lint-format-red` case: failed verifier event and failed lifecycle; no `handoff` decision, no VerifiedHandoff actuation, no PR/submission evidence; **and the failing check reports a content rejection (`trailing whitespace`), with no `exit_128` anywhere** — proving the criterion ran rather than erroring. |
 | Verified work produces a correct unactuated handoff | The `lint-format-green` case reaches `handoff_ready`; non-empty allowlisted patch; matching manifest ref/hash; one attempt, claim, and outbox; exactly one `dispatch_approval` plus one `handoff`; recorded eligibility value/reason and handoff verification evidence refs; no PR or GitHub mutation. §2.5 and §2.6 must both pass. |
 | Restart and duplicate delivery remain idempotent | Dispatcher restart timestamps, unchanged claim/outbox rows, same immutable run id, and one Harness attempt. |
 

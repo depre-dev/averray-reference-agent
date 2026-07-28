@@ -54,6 +54,7 @@ const CEREMONY_FIXTURES = [
   "small-refactor",
   "lint-format",
   "lint-format-green",
+  "lint-format-red",
 ] as const;
 const temporaryRoots: string[] = [];
 
@@ -544,6 +545,47 @@ describe("pilot ceremony proposal fixtures", () => {
     expect(write?.content).toMatch(/\n$/);
     expect(write?.content).not.toMatch(/[ \t]+$/mu);
     expect(write?.content).not.toContain(" \t");
+  });
+
+  it("pins the red-path scripted write as a real acceptance violation", async () => {
+    const input = await ceremonyFixture("lint-format-red");
+    const scriptBytes = await readFile(
+      new URL(
+        "../fixtures/agent-integration/ceremony/lint-format-red.jsonl",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const lines = scriptBytes.trimEnd().split("\n");
+    expect(lines).toHaveLength(2);
+
+    // The acceptance fence is IDENTICAL to the green case. The only variable
+    // between the positive and negative ceremony proofs is the written content.
+    expect(input.acceptanceCriteria).toEqual([{
+      id: "format-command",
+      type: "command",
+      command: "git diff --check",
+      required: true,
+    }]);
+    expect(input.repository.allowedPaths).toEqual(["docs/**", "test/**"]);
+    expect(input.budget).toEqual({
+      elapsedSeconds: 60,
+      modelTokens: 8_000,
+      toolCalls: 30,
+      estimatedUsdMicros: null,
+    });
+
+    const write = (JSON.parse(lines[0] ?? "{}") as {
+      tool_calls?: Array<{ arguments?: { path?: string; content?: string } }>;
+    }).tool_calls?.[0]?.arguments;
+
+    // Inside the allowlist — containment is NOT what this case tests.
+    expect(write?.path).toMatch(/^(?:docs|test)\//);
+
+    // And it must genuinely violate `git diff --check`: trailing whitespace on
+    // a line. Without this the "negative" proof would pass and prove nothing.
+    expect(write?.content).toMatch(/[ \t]+$/mu);
+    expect(write?.content).toMatch(/\n$/);
   });
 });
 
