@@ -73,7 +73,13 @@ describe("testbed live screencast", () => {
     expect(controller).toBeDefined();
     await vi.advanceTimersByTimeAsync(5);
     expect(page.screenshot).toHaveBeenCalledOnce();
-    expect(readFileSync(screencastLatestFramePath(root, mission.id), "utf8")).toBe("jpeg-frame");
+    // The frame is published atomically: `screenshot` writes a sibling temp file
+    // and a separate `await rename` makes it visible as latest.jpg. So the frame
+    // appears one continuation AFTER `screenshot` resolves, not synchronously
+    // with it. Reading straight through raced that rename and hit ENOENT.
+    await vi.waitFor(() => {
+      expect(readFileSync(screencastLatestFramePath(root, mission.id), "utf8")).toBe("jpeg-frame");
+    });
     await vi.waitFor(() => {
       expect(updates).toEqual(expect.arrayContaining([
         expect.objectContaining({
