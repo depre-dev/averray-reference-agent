@@ -1464,11 +1464,28 @@ describe("decidePayoutEvidence (pure verdict)", () => {
 });
 
 describe("readPayoutTransfers (chain-guarded log read)", () => {
+  const USDC = "0x0000053900000000000000000000000001200000";
   const cfg = {
-    rpcUrl: "http://rpc", sourceAddress: "0xaac", usdcAddress: "0xusdc",
+    rpcUrl: "http://rpc", sourceAddress: "0xaac", usdcAddress: USDC,
     usdcDecimals: 6, lookbackBlocks: 100,
   };
-  // eth_chainId → chain, eth_blockNumber → height, eth_getLogs → transfers.
+  const word = (v: string) => v.replace(/^0x/, "").padStart(64, "0");
+  /**
+   * A ReservationSettled log, shaped exactly as mainnet emits it:
+   * data = [asset, amount]. Captured from a real payout on 2026-07-29
+   * (0.1 USDC, block ~18.8M) — the layout this probe has to parse.
+   */
+  const settled = (usdc: number, asset: string = USDC) => ({
+    topics: [
+      "0x3cdc0be5ec7141f2342208f6404c1b1852936343f0edf1fda179e6c9f46573ee",
+      `0x${word("0xj0b")}`,
+      `0x${word("0x5a6836c6d4d293f6e5377e6c28054f4171915813")}`,
+      `0x${word("0x1734cd78a79cb3c1d926af5ae0ab466d9dfddc55")}`,
+    ],
+    data: `0x${word(asset)}${word(`0x${Math.round(usdc * 1e6).toString(16)}`)}`,
+  });
+
+  // eth_chainId → chain, eth_blockNumber → height, eth_getLogs → payout events.
   function rpc(chainIdHex: string, logs: unknown): typeof fetch {
     return (async (_u: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const m = rpcMethod(init ?? {});
@@ -1477,16 +1494,41 @@ describe("readPayoutTransfers (chain-guarded log read)", () => {
     }) as unknown as typeof fetch;
   }
 
-  it("counts transfers and sums the USDC actually moved", async () => {
-    const logs = [{ data: "0xf4240" }, { data: "0x1e8480" }]; // 1 + 2 USDC
+  it("counts payout events and sums the USDC actually moved", async () => {
+    const logs = [settled(1), settled(2)];
     const r = await readPayoutTransfers({ ...cfg, expectedChainId: 420420419, fetchImpl: rpc("0x190f1b43", logs) });
     expect(r.count).toBe(2);
     expect(r.usdc).toBeCloseTo(3, 6);
     expect(r.windowBlocks).toBe(100);
   });
 
+  // The amount is the SECOND data word. Reading the whole 64-byte `data` as one
+  // integer — correct for a single-word ERC-20 Transfer — is off by ~10^48 and
+  // would put an absurd USDC figure on a live money board.
+  it("reads the amount from data[1], not from the whole data blob", async () => {
+    const r = await readPayoutTransfers({ ...cfg, expectedChainId: 420420419, fetchImpl: rpc("0x190f1b43", [settled(0.1)]) });
+    expect(r.usdc).toBeCloseTo(0.1, 6);
+  });
+
+  // Invariant 9: a settlement in another asset is NOT USDC. Folding it into the
+  // USDC total is the same class of error as the DOT/USDC display math (#…).
+  it("skips a settlement in a DIFFERENT asset rather than counting it as USDC", async () => {
+    const other = "0x0000006400000000000000000000000001200000";
+    const logs = [settled(1), settled(99, other)];
+    const r = await readPayoutTransfers({ ...cfg, expectedChainId: 420420419, fetchImpl: rpc("0x190f1b43", logs) });
+    expect(r.count).toBe(1);
+    expect(r.usdc).toBeCloseTo(1, 6);
+  });
+
+  it("a truncated log is skipped, never counted as a zero-value payout", async () => {
+    const logs = [settled(1), { topics: [], data: "0x" }];
+    const r = await readPayoutTransfers({ ...cfg, expectedChainId: 420420419, fetchImpl: rpc("0x190f1b43", logs) });
+    expect(r.count).toBe(1);
+    expect(r.usdc).toBeCloseTo(1, 6);
+  });
+
   it("refuses logs from the WRONG CHAIN — same guard as balances (#543)", async () => {
-    const logs = [{ data: "0xf4240" }];
+    const logs = [settled(1)];
     const r = await readPayoutTransfers({ ...cfg, expectedChainId: 420420419, fetchImpl: rpc("0x190f1b41", logs) });
     expect(r.count).toBeNull(); // a wrong-chain payout count would be confidently wrong
     expect(r.reason).toContain("chain 420420417");
@@ -1520,7 +1562,7 @@ describe("decidePayoutEvidence — a 100% miss is a broken filter, not lost mone
   it("zero confirmed against real settled jobs is UNVERIFIED, never a shortfall", () => {
     const r = decidePayoutEvidence({ ...base, confirmedCount: 0, confirmedUsdc: 0, settledCount: 12 });
     expect(r.status).toBe("unverified"); // was "shortfall" — the false alarm
-    expect(r.detail).toContain("check the source address");
+    expect(r.detail).toContain("check the contract address and event topic");
     expect(r.detail).not.toContain("unaccounted for");
   });
 
