@@ -89,6 +89,38 @@ describe("MobileBoard", () => {
     expect(queryByText("Escrow (in-flight)")).toBeNull();
   });
 
+  test("a ZERO pool draws NO bar — a full green meter on an empty pool is a fake-green", () => {
+    // Shipped exactly this on "Treasury reserve · 0 USDC" (floor null → pct 100).
+    const { getByText, container } = render(<MobileBoard health={healthyMainnet} cards={[]} nowMs={NOW} />);
+    const reserve: ProductHealth = {
+      ...healthyMainnet,
+      solvency: {
+        pools: [
+          { key: "reserve", label: "Treasury reserve", amount: 0, unit: "USDC", status: "ok", note: "Intentionally unfunded." },
+          { key: "reward_bank", label: "Reward bank", amount: 17.2, unit: "USDC", floor: 2, status: "ok" },
+        ],
+      },
+    };
+    cleanup();
+    const r = render(<MobileBoard health={reserve} cards={[]} nowMs={NOW} />);
+    // The zero pool still reports its number and its reason...
+    expect(r.getByText("Treasury reserve")).toBeTruthy();
+    expect(r.getByText("Intentionally unfunded.")).toBeTruthy();
+    // ...but exactly ONE bar is drawn, for the funded pool that has a scale.
+    expect(r.container.querySelectorAll(".hm-mb-bar")).toHaveLength(1);
+    expect(container).toBeTruthy();
+  });
+
+  test("a pool with no floor has no scale, so it gets no meter either", () => {
+    const noFloor: ProductHealth = {
+      ...healthyMainnet,
+      solvency: { pools: [{ key: "x", label: "Unfloored", amount: 99, unit: "USDC", status: "ok" }] },
+    };
+    const { container, getByText } = render(<MobileBoard health={noFloor} cards={[]} nowMs={NOW} />);
+    expect(getByText(/99\.00 USDC/)).toBeTruthy(); // the number is still real
+    expect(container.querySelectorAll(".hm-mb-bar")).toHaveLength(0);
+  });
+
   test("a pool awaiting data says so — never a bar we can't justify", () => {
     const awaiting: ProductHealth = {
       ...healthyMainnet,

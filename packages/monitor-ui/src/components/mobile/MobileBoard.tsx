@@ -136,9 +136,15 @@ function PoolRow({ pool }: { pool: SolvencyPool }) {
     );
   }
   const floor = pool.floor ?? null;
+  // A meter needs a scale. Without a floor there's nothing to fill against, and
+  // an empty pool has nothing to show — so draw NO bar rather than a full one.
+  // Shipped as a full green bar on "Treasury reserve · 0 USDC", which read as
+  // "healthy and full" for a pool that is deliberately empty. A meter you can't
+  // justify is a fake-green, same rule as the awaiting-data branch above.
+  const scalable = floor !== null && floor > 0 && pool.amount > 0;
   // Fill is share-of-a-safe-buffer (5× floor), capped — a floored pool at 5×
   // reads full, and one at its floor reads nearly empty.
-  const pct = floor && floor > 0 ? Math.max(4, Math.min(100, Math.round((pool.amount / (floor * 5)) * 100))) : 100;
+  const pct = scalable ? Math.max(4, Math.min(100, Math.round((pool.amount / (floor * 5)) * 100))) : 0;
   const tone = pool.status === "red" ? "red" : pool.status === "degraded" ? "warn" : "ok";
   return (
     <div className="hm-mb-pool">
@@ -149,9 +155,11 @@ function PoolRow({ pool }: { pool: SolvencyPool }) {
           {floor !== null ? ` · floor ${formatFloor(floor)}` : ""}
         </span>
       </div>
-      <div className="hm-mb-bar" role="img" aria-label={`${pool.label} ${pool.amount} ${pool.unit}`}>
-        <span className={`hm-mb-bar-fill hm-mb-bar-fill--${tone}`} style={{ width: `${pct}%` }} />
-      </div>
+      {scalable ? (
+        <div className="hm-mb-bar" role="img" aria-label={`${pool.label} ${pool.amount} ${pool.unit}`}>
+          <span className={`hm-mb-bar-fill hm-mb-bar-fill--${tone}`} style={{ width: `${pct}%` }} />
+        </div>
+      ) : null}
       {pool.note ? <p className="hm-mb-note">{pool.note}</p> : null}
     </div>
   );
