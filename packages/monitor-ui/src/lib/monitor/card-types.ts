@@ -149,6 +149,12 @@ export interface CardWorkingNow {
   runnerId?: string;
   taskId?: string;
   since?: string;
+  /** WHAT the agent is attempting, verbatim from the task title/prompt. */
+  intent?: string;
+  /** The agent's own last reported step, verbatim from the runner stream. */
+  progress?: string;
+  /** When `progress` was reported — lets the UI age it instead of implying live. */
+  progressAt?: string;
 }
 
 export interface HermesDecisionSubject {

@@ -36,6 +36,7 @@ import { deployStepsForCard } from "../../lib/monitor/deploy-stepper.js";
 import { shortId } from "../../lib/monitor/card-id.js";
 import { formatFreshness, freshnessTier } from "../../lib/monitor/urgency.js";
 import { laneFor, isWaitingOnOperator } from "../../lib/monitor/lane-rules.js";
+import { describeWorkingNow } from "../../lib/monitor/working-now.js";
 import { humanizedSignalParts, humanizeSignalText } from "../../lib/monitor/signal-labels.js";
 import { missionFailureCardSummary } from "../../lib/monitor/mission-failure.js";
 import { relatedPrForCard } from "../../lib/monitor/collaboration.js";
@@ -437,18 +438,31 @@ function actorDisplayName(actor: "hermes" | "operator" | "codex" | "claude" | "t
   return "Codex";
 }
 
-function WorkingNowLine({ workingNow }: { workingNow: CardWorkingNow }) {
+function WorkingNowLine({ workingNow, nowMs = Date.now() }: { workingNow: CardWorkingNow; nowMs?: number }) {
   const details = [
     workingNow.runnerId ? `runner: ${workingNow.runnerId}` : undefined,
     workingNow.taskId ? `task: ${workingNow.taskId}` : undefined,
     workingNow.since ? `since: ${workingNow.since}` : undefined,
     `source: ${workingNow.source}`,
   ].filter(Boolean).join(" · ");
+  // What it is ATTEMPTING and what it last REPORTED — the half `label` never
+  // said. Each line renders only when the payload actually carried it.
+  const view = describeWorkingNow(workingNow, nowMs);
 
   return (
     <div className="hm-working-now" aria-label={`Working now: ${workingNow.label}`} title={details || undefined}>
-      <AgentTag agent={workingNow.agent} label="working now" />
-      <span className="target">{workingNow.label}</span>
+      <div className="hm-wn-head">
+        <AgentTag agent={workingNow.agent} label="working now" />
+        <span className="target">{workingNow.label}</span>
+      </div>
+      {view?.intent ? <div className="hm-wn-intent">{view.intent}</div> : null}
+      {view?.progress ? (
+        <div className={`hm-wn-step${view.stale ? " is-stale" : ""}`}>
+          <span className="hm-wn-step-text">{view.progress}</span>
+          {view.progressAge ? <span className="hm-wn-step-age">{view.progressAge}</span> : null}
+        </div>
+      ) : null}
+      {view?.emptyNote ? <div className="hm-wn-step is-empty">{view.emptyNote}</div> : null}
     </div>
   );
 }

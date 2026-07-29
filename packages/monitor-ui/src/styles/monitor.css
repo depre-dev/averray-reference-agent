@@ -4055,3 +4055,31 @@ button.hm-turn-pin {
   border-top: 1px solid var(--hm-line);
   margin: 0;
 }
+
+/* Agent intent + last reported step (#135). `label` alone said an agent was
+   busy; these two lines say what it is busy WITH. */
+.hm-working-now { flex-direction: column; align-items: stretch; gap: 4px; }
+.hm-wn-head { display: flex; align-items: center; gap: 8px; }
+.hm-wn-intent {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--h4-ink-2, #d7d3cb);
+  text-wrap: pretty;
+}
+.hm-wn-step {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--h4-muted, #9b968c);
+  text-wrap: pretty;
+}
+.hm-wn-step-text { min-width: 0; overflow-wrap: anywhere; }
+.hm-wn-step-age { color: var(--h4-faint, #6f6a61); white-space: nowrap; flex: none; }
+/* Warm-grey = awaiting/aged, the same token the ops board uses. A step going
+   quiet is a fact about the data, not proof the agent is stuck — so it is
+   toned DOWN, never coloured as an alarm. */
+.hm-wn-step.is-stale, .hm-wn-step.is-stale .hm-wn-step-text { color: var(--h4-tel, #867F78); }
+.hm-wn-step.is-empty { color: var(--h4-faint, #6f6a61); font-style: italic; }
