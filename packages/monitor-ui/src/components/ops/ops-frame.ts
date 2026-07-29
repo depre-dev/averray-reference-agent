@@ -9,7 +9,7 @@
 // Pure + nowMs-injected so it's deterministic to test.
 
 import type { BannerData } from "../BoardNowBanner.js";
-import type { ProductHealth } from "../../lib/monitor/product-health.js";
+import type { ProductHealth, RunwayPool } from "../../lib/monitor/product-health.js";
 import { probeLabel } from "../../lib/monitor/product-health.js";
 import {
   groupProbesByPillar,
@@ -21,6 +21,37 @@ import {
 
 function shortDetail(detail: string): string {
   return detail.length > 88 ? `${detail.slice(0, 85)}…` : detail;
+}
+
+/**
+ * Pools projected to reach their floor, nearest first.
+ *
+ * Runway is a LEADING indicator: the probes can all sit above their floors — so
+ * the banner reads "all nominal" — while a pool is visibly draining toward one.
+ * That was live on mainnet: 7 probes green with the co-pilot simultaneously
+ * saying "Signer gas ~13h to floor — top up before settlement halts".
+ *
+ * `estimable` + a non-null `hoursToFloor` are the backend's own honesty gates
+ * (too few samples / too short a window / flat / refilling all resolve to
+ * not-estimable), so a single reading can't manufacture urgency here.
+ */
+function drainingPools(health: ProductHealth): RunwayPool[] {
+  return (health.solvency?.runway ?? [])
+    .filter((p) => p.estimable && p.hoursToFloor !== null && (p.status === "red" || p.status === "degraded"))
+    .sort((a, b) => (a.hoursToFloor ?? 0) - (b.hoursToFloor ?? 0));
+}
+
+function hoursToFloorPhrase(hours: number): string {
+  if (hours <= 0) return "at its floor";
+  if (hours < 1) return "<1h to floor";
+  return `~${Math.round(hours)}h to floor`;
+}
+
+/** The burn that produced the projection — the evidence, so it can be judged. */
+function burnPhrase(pool: RunwayPool): string | undefined {
+  const burn = pool.burnPerHour;
+  if (burn === null || burn <= 0) return undefined;
+  return `${burn >= 1 ? burn.toFixed(1) : burn.toFixed(2)} ${pool.unit}/h`;
 }
 
 function eyebrowFor(health: ProductHealth, nowMs: number): string {
@@ -89,6 +120,32 @@ export function opsBannerData(health: ProductHealth, nowMs: number): BannerData 
       primaryActionId: undefined,
       mostUrgentReasons: [
         { label: "degraded", tone: "warn" },
+        ...(net ? ([{ label: net, tone: "neutral" }] as const) : []),
+      ],
+    };
+  }
+
+  // Nothing has breached — but a pool may be draining toward its floor. A
+  // projection is NOT a breach, so this never takes the rose/page tone; it only
+  // stops the banner claiming "all nominal" while the co-pilot is telling the
+  // operator to top up. An actual red/degraded probe still outranks it above.
+  const draining = drainingPools(health);
+  if (draining.length > 0) {
+    const lead = draining[0]!;
+    const extra = draining.length > 1 ? ` +${draining.length - 1}` : "";
+    const burn = burnPhrase(lead);
+    const projected = burn ? `Projected from a ${burn} trend` : "Projected from the recent trend";
+    return {
+      tone: "action",
+      eyebrow,
+      headline: `${lead.label} ${hoursToFloorPhrase(lead.hoursToFloor ?? 0)}${extra}`,
+      sub: mainnet
+        ? `${projected} — top up before settlement halts. Nothing has breached yet.`
+        : `${projected} — nothing has breached yet.`,
+      primaryActionId: undefined,
+      mostUrgentReasons: [
+        // "projected", not "degraded": the balance is still above its floor.
+        { label: "projected", tone: "warn" },
         ...(net ? ([{ label: net, tone: "neutral" }] as const) : []),
       ],
     };
