@@ -14,7 +14,7 @@ import {
   chainHaltStatus,
   probeSignerLiquidity,
   decidePayoutEvidence,
-  readSignerPayouts,
+  readPayoutTransfers,
   collectProductHealthProbes,
   chainBlockAge,
   decideProductHealthAlert,
@@ -1463,9 +1463,9 @@ describe("decidePayoutEvidence (pure verdict)", () => {
   });
 });
 
-describe("readSignerPayouts (chain-guarded log read)", () => {
+describe("readPayoutTransfers (chain-guarded log read)", () => {
   const cfg = {
-    rpcUrl: "http://rpc", signerAddress: "0xabc", usdcAddress: "0xusdc",
+    rpcUrl: "http://rpc", sourceAddress: "0xaac", usdcAddress: "0xusdc",
     usdcDecimals: 6, lookbackBlocks: 100,
   };
   // eth_chainId → chain, eth_blockNumber → height, eth_getLogs → transfers.
@@ -1479,7 +1479,7 @@ describe("readSignerPayouts (chain-guarded log read)", () => {
 
   it("counts transfers and sums the USDC actually moved", async () => {
     const logs = [{ data: "0xf4240" }, { data: "0x1e8480" }]; // 1 + 2 USDC
-    const r = await readSignerPayouts({ ...cfg, expectedChainId: 420420419, fetchImpl: rpc("0x190f1b43", logs) });
+    const r = await readPayoutTransfers({ ...cfg, expectedChainId: 420420419, fetchImpl: rpc("0x190f1b43", logs) });
     expect(r.count).toBe(2);
     expect(r.usdc).toBeCloseTo(3, 6);
     expect(r.windowBlocks).toBe(100);
@@ -1487,20 +1487,50 @@ describe("readSignerPayouts (chain-guarded log read)", () => {
 
   it("refuses logs from the WRONG CHAIN — same guard as balances (#543)", async () => {
     const logs = [{ data: "0xf4240" }];
-    const r = await readSignerPayouts({ ...cfg, expectedChainId: 420420419, fetchImpl: rpc("0x190f1b41", logs) });
+    const r = await readPayoutTransfers({ ...cfg, expectedChainId: 420420419, fetchImpl: rpc("0x190f1b41", logs) });
     expect(r.count).toBeNull(); // a wrong-chain payout count would be confidently wrong
     expect(r.reason).toContain("chain 420420417");
   });
 
   it("a failed/rate-limited read is unverified, never zero", async () => {
-    const r = await readSignerPayouts({ ...cfg, fetchImpl: throwingFetch() });
+    const r = await readPayoutTransfers({ ...cfg, fetchImpl: throwingFetch() });
     expect(r.count).toBeNull();
     expect(r.reason).toContain("log read failed");
   });
 
   it("unconfigured is unverified too", async () => {
-    const r = await readSignerPayouts({ ...cfg, usdcAddress: undefined, fetchImpl: rpc("0x190f1b43", []) });
+    const r = await readPayoutTransfers({ ...cfg, usdcAddress: undefined, fetchImpl: rpc("0x190f1b43", []) });
     expect(r.count).toBeNull();
     expect(r.reason).toContain("not configured");
+  });
+
+  it("names the payout SOURCE when that's what's missing — the bug that shipped", async () => {
+    const r = await readPayoutTransfers({ ...cfg, sourceAddress: undefined, fetchImpl: rpc("0x190f1b43", []) });
+    expect(r.count).toBeNull();
+    expect(r.reason).toContain("agentAccountCore");
+  });
+});
+
+// Regression: the first live run watched the signer EOA instead of
+// AgentAccountCore, found zero transfers, and put "12 unaccounted for" on a
+// live money board. A total miss must accuse the INSTRUMENT, not the money.
+describe("decidePayoutEvidence — a 100% miss is a broken filter, not lost money", () => {
+  const base = { windowBlocks: 14400, tolerance: 1 };
+
+  it("zero confirmed against real settled jobs is UNVERIFIED, never a shortfall", () => {
+    const r = decidePayoutEvidence({ ...base, confirmedCount: 0, confirmedUsdc: 0, settledCount: 12 });
+    expect(r.status).toBe("unverified"); // was "shortfall" — the false alarm
+    expect(r.detail).toContain("check the source address");
+    expect(r.detail).not.toContain("unaccounted for");
+  });
+
+  it("but ONE observed transfer proves the filter works — then a shortfall is trustworthy", () => {
+    const r = decidePayoutEvidence({ ...base, confirmedCount: 1, confirmedUsdc: 0.3, settledCount: 12 });
+    expect(r.status).toBe("shortfall");
+    expect(r.detail).toContain("11 unaccounted for");
+  });
+
+  it("zero settled AND zero confirmed is a quiet period, not an alarm", () => {
+    expect(decidePayoutEvidence({ ...base, confirmedCount: 0, confirmedUsdc: 0, settledCount: 0 }).status).toBe("unverified");
   });
 });
