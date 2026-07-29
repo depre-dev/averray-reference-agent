@@ -14,6 +14,8 @@ import {
   chainHaltStatus,
   probeSignerLiquidity,
   decidePayoutEvidence,
+  decideWindowFit,
+  measureBlockSeconds,
   readPayoutTransfers,
   collectProductHealthProbes,
   chainBlockAge,
@@ -1574,5 +1576,125 @@ describe("decidePayoutEvidence — a 100% miss is a broken filter, not lost mone
 
   it("zero settled AND zero confirmed is a quiet period, not an alarm", () => {
     expect(decidePayoutEvidence({ ...base, confirmedCount: 0, confirmedUsdc: 0, settledCount: 0 }).status).toBe("unverified");
+  });
+});
+
+describe("decideWindowFit — measure the chain, don't assume it", () => {
+  // The real 2026-07-29 defect: sized "~24h at 6s/block" on a ~2.1s chain.
+  it("flags the shipped 14400/6s assumption against real ~2.1s blocks", () => {
+    const fit = decideWindowFit({ blockSeconds: 2.11, lookbackBlocks: 14400, targetHours: 24 });
+    expect(fit.status).toBe("suspect");
+    expect(fit.spanHours).toBeCloseTo(8.4, 1);
+    expect(fit.detail).toContain("too SHORT");
+    expect(fit.detail).toMatch(/~40\d{3} blocks would match|~4[01]\d{3} blocks/);
+  });
+
+  it("accepts the corrected 43200 window", () => {
+    const fit = decideWindowFit({ blockSeconds: 2.11, lookbackBlocks: 43200, targetHours: 24 });
+    expect(fit.status).toBe("ok");
+    expect(fit.spanHours).toBeCloseTo(25.3, 1);
+  });
+
+  it("an UNMEASURED chain is 'unknown', never a silent pass", () => {
+    const fit = decideWindowFit({ blockSeconds: null, lookbackBlocks: 43200, targetHours: 24 });
+    expect(fit.status).toBe("unknown");
+    expect(fit.detail).toContain("not measured");
+    expect(fit.spanHours).toBeNull();
+  });
+
+  it.each([[0], [-1], [Number.NaN], [Number.POSITIVE_INFINITY]])(
+    "a nonsense block time (%s) degrades to unknown rather than dividing by it",
+    (bs) => {
+      expect(decideWindowFit({ blockSeconds: bs as number, lookbackBlocks: 43200, targetHours: 24 }).status).toBe("unknown");
+    },
+  );
+
+  it("names the direction — long is safe, short manufactures the alarm", () => {
+    const long = decideWindowFit({ blockSeconds: 2.11, lookbackBlocks: 200000, targetHours: 24 });
+    expect(long.status).toBe("suspect");
+    expect(long.detail).toContain("longer than the comparison period");
+  });
+});
+
+describe("a suspect window SUPPRESSES a shortfall — instrument is not money", () => {
+  const base = { confirmedUsdc: 0.2, windowBlocks: 14400, tolerance: 1 };
+
+  it("the exact shipped false alarm becomes unverified, not a payout accusation", () => {
+    const r = decidePayoutEvidence({
+      ...base, confirmedCount: 2, settledCount: 14,
+      window: decideWindowFit({ blockSeconds: 2.11, lookbackBlocks: 14400, targetHours: 24 }),
+    });
+    expect(r.status).toBe("unverified"); // NOT "shortfall"
+    expect(r.detail).toContain("cannot compare");
+    expect(r.detail).not.toMatch(/^14 jobs marked settled/);
+  });
+
+  it("a REAL shortfall still reports when the window is sound", () => {
+    const r = decidePayoutEvidence({
+      ...base, confirmedCount: 2, settledCount: 14, windowBlocks: 43200,
+      window: decideWindowFit({ blockSeconds: 2.11, lookbackBlocks: 43200, targetHours: 24 }),
+    });
+    expect(r.status).toBe("shortfall");
+  });
+
+  it("an UNKNOWN window does not suppress — we only suppress on positive evidence of a bad instrument", () => {
+    const r = decidePayoutEvidence({
+      ...base, confirmedCount: 2, settledCount: 14,
+      window: decideWindowFit({ blockSeconds: null, lookbackBlocks: 43200, targetHours: 24 }),
+    });
+    expect(r.status).toBe("shortfall");
+  });
+
+  it("a suspect window never turns a healthy count INTO a problem", () => {
+    const r = decidePayoutEvidence({
+      ...base, confirmedCount: 14, settledCount: 14,
+      window: decideWindowFit({ blockSeconds: 2.11, lookbackBlocks: 14400, targetHours: 24 }),
+    });
+    expect(r.status).toBe("confirmed");
+  });
+
+  it("the fit rides along on the evidence for the board to render", () => {
+    const window = decideWindowFit({ blockSeconds: 2.11, lookbackBlocks: 43200, targetHours: 24 });
+    expect(decidePayoutEvidence({ ...base, confirmedCount: 14, settledCount: 14, window }).window).toEqual(window);
+  });
+});
+
+describe("measureBlockSeconds", () => {
+  function rpc(head: number, stamps: Record<number, number>): typeof fetch {
+    return (async (_u: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const body = JSON.parse(String((init as { body?: string })?.body ?? "{}"));
+      let result: unknown = null;
+      if (body.method === "eth_blockNumber") result = `0x${head.toString(16)}`;
+      if (body.method === "eth_getBlockByNumber") {
+        const n = Number(BigInt(body.params[0]));
+        result = stamps[n] === undefined ? null : { timestamp: `0x${stamps[n].toString(16)}` };
+      }
+      return { ok: true, status: 200, json: async () => ({ result }) } as unknown as Response;
+    }) as unknown as typeof fetch;
+  }
+
+  it("derives seconds per block from two real timestamps", async () => {
+    const s = await measureBlockSeconds({
+      rpcUrl: "http://rpc", sampleBlocks: 1000,
+      fetchImpl: rpc(11000, { 11000: 1_000_000 + 2110, 10000: 1_000_000 }),
+    });
+    expect(s).toBeCloseTo(2.11, 3);
+  });
+
+  it("a missing block yields null, so the fit reads 'unchecked' not 'fine'", async () => {
+    expect(await measureBlockSeconds({ rpcUrl: "http://rpc", sampleBlocks: 1000, fetchImpl: rpc(11000, { 11000: 5 }) }))
+      .toBeNull();
+  });
+
+  it("non-advancing timestamps yield null rather than 0 or a negative rate", async () => {
+    expect(await measureBlockSeconds({
+      rpcUrl: "http://rpc", sampleBlocks: 1000,
+      fetchImpl: rpc(11000, { 11000: 1_000_000, 10000: 1_000_000 }),
+    })).toBeNull();
+  });
+
+  it("no rpc url, or a throwing endpoint, is null — never an invented rate", async () => {
+    expect(await measureBlockSeconds({ sampleBlocks: 1000, fetchImpl: rpc(1, {}) })).toBeNull();
+    expect(await measureBlockSeconds({ rpcUrl: "http://rpc", sampleBlocks: 1000, fetchImpl: throwingFetch() })).toBeNull();
   });
 });

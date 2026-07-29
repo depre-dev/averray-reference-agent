@@ -1025,6 +1025,11 @@ async function ethRpc(
  *   topic1 jobId · topic2 account · topic3 recipient
  *   data[0] asset · data[1] amount
  */
+/** settled24h is a rolling 24h count, so that is what the window must span. */
+const PAYOUT_COMPARISON_HOURS = 24;
+/** Blocks sampled to measure block time — long enough to smooth jitter. */
+const PAYOUT_BLOCK_TIME_SAMPLE = 2000;
+
 const RESERVATION_SETTLED_TOPIC = "0x3cdc0be5ec7141f2342208f6404c1b1852936343f0edf1fda179e6c9f46573ee";
 
 /** Pad an address to a 32-byte topic. */
@@ -1052,6 +1057,93 @@ function dataWord(data: unknown, index: number): string | undefined {
  * NOT as red: the window really is approximate, and "investigate" is the true
  * instruction, not "settlement is down".
  */
+/** How far the real span may drift from the target before we distrust it. */
+const WINDOW_FIT_TOLERANCE = 0.2;
+
+/**
+ * Does the configured block lookback actually span the period it is compared
+ * against? PURE — the measurement is injected, so the boundary is testable.
+ *
+ * Reports on the INSTRUMENT, never on the money. "suspect" means this probe may
+ * be misconfigured; it never means a payout failed.
+ */
+export function decideWindowFit(input: {
+  /** Measured seconds per block; null when the chain could not be sampled. */
+  blockSeconds: number | null;
+  lookbackBlocks: number;
+  /** The period the count is compared against — settled24h ⇒ 24. */
+  targetHours: number;
+}): WindowFit {
+  if (input.blockSeconds === null || !Number.isFinite(input.blockSeconds) || input.blockSeconds <= 0) {
+    return {
+      status: "unknown",
+      // Unmeasured is NOT "fine". Say we could not check rather than implying a pass.
+      detail: "block time not measured — window fit unchecked",
+      blockSeconds: null,
+      spanHours: null,
+    };
+  }
+  const spanHours = (input.lookbackBlocks * input.blockSeconds) / 3600;
+  const ratio = spanHours / input.targetHours;
+  const blockSeconds = Number(input.blockSeconds.toFixed(3));
+  const span = Number(spanHours.toFixed(1));
+  if (Math.abs(ratio - 1) <= WINDOW_FIT_TOLERANCE) {
+    return {
+      status: "ok",
+      detail: `window spans ~${span}h at ${blockSeconds}s/block (target ${input.targetHours}h)`,
+      blockSeconds,
+      spanHours: span,
+    };
+  }
+  // Short is the dangerous direction: it under-counts and manufactures a
+  // shortfall. Long merely over-counts, which decidePayoutEvidence reads as
+  // "confirmed". Name the direction so the fix is obvious.
+  const suggested = Math.round((input.targetHours * 3600) / input.blockSeconds);
+  return {
+    status: "suspect",
+    detail: `window spans ~${span}h at a measured ${blockSeconds}s/block, not the ${input.targetHours}h it is compared against — ${
+      ratio < 1 ? "too SHORT, which under-counts payouts" : "longer than the comparison period"
+    }; ~${suggested} blocks would match`,
+    blockSeconds,
+    spanHours: span,
+  };
+}
+
+/**
+ * Measure seconds per block from two real block timestamps.
+ *
+ * Never throws and never guesses: any failure returns null, which
+ * decideWindowFit reports as "unchecked" rather than as a pass.
+ */
+export async function measureBlockSeconds(input: {
+  rpcUrl?: string;
+  sampleBlocks: number;
+  fetchImpl: typeof fetch;
+}): Promise<number | null> {
+  if (!input.rpcUrl || input.sampleBlocks <= 0) return null;
+  try {
+    const head = Number(BigInt(await ethRpc(input.rpcUrl, "eth_blockNumber", [], input.fetchImpl)));
+    const earlier = Math.max(0, head - input.sampleBlocks);
+    if (earlier >= head) return null;
+    const [a, b] = await Promise.all([
+      blockTimestamp(input.rpcUrl, head, input.fetchImpl),
+      blockTimestamp(input.rpcUrl, earlier, input.fetchImpl),
+    ]);
+    if (a === null || b === null || a <= b) return null;
+    return (a - b) / (head - earlier);
+  } catch {
+    return null;
+  }
+}
+
+async function blockTimestamp(rpcUrl: string, block: number, fetchImpl: typeof fetch): Promise<number | null> {
+  const raw = await ethRpcRaw(rpcUrl, "eth_getBlockByNumber", [`0x${block.toString(16)}`, false], fetchImpl);
+  const ts = (raw as { timestamp?: unknown } | null)?.timestamp;
+  if (typeof ts !== "string") return null;
+  const parsed = Number(BigInt(ts));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export function decidePayoutEvidence(input: {
   confirmedCount: number | null;
   confirmedUsdc: number | null;
@@ -1059,12 +1151,15 @@ export function decidePayoutEvidence(input: {
   windowBlocks: number | null;
   tolerance: number;
   unverifiedReason?: string;
+  /** Whether the block window really spans the comparison period. */
+  window?: WindowFit;
 }): PayoutEvidence {
   const base = {
     confirmedCount: input.confirmedCount,
     confirmedUsdc: input.confirmedUsdc,
     settledCount: input.settledCount,
     windowBlocks: input.windowBlocks,
+    ...(input.window ? { window: input.window } : {}),
   };
   if (input.confirmedCount === null) {
     return {
@@ -1100,6 +1195,19 @@ export function decidePayoutEvidence(input: {
   }
   const shortfall = input.settledCount - input.confirmedCount;
   if (shortfall > input.tolerance) {
+    // A shortfall computed over a window that does not span the comparison
+    // period is not evidence about money — it is arithmetic on mismatched
+    // units. This exact case shipped: a lookback sized for 6s blocks on a
+    // ~2.1s chain covered 8h against a 24h settled count and would have posted
+    // a permanent "12 unaccounted for" on a system paying every job. An
+    // untrustworthy instrument SUPPRESSES the accusation; it never creates one.
+    if (input.window?.status === "suspect") {
+      return {
+        ...base,
+        status: "unverified",
+        detail: `cannot compare: ${input.window.detail} — fix the window before reading ${shortfall} unaccounted for as a payout problem`,
+      };
+    }
     return {
       ...base,
       status: "shortfall",
@@ -1501,6 +1609,26 @@ export interface PayoutEvidence {
   settledCount: number | null;
   /** Blocks scanned. The window is approximate — the verdict allows for it. */
   windowBlocks: number | null;
+  /** Does the block window actually span what it is compared against? */
+  window?: WindowFit;
+}
+
+/**
+ * Whether the configured block lookback really covers the period it is being
+ * compared to — checked against MEASURED block time, not an assumed one.
+ *
+ * This exists because the assumption was wrong in production: the lookback was
+ * sized "~24h at 6s/block" on a chain that runs at ~2.1s, so it spanned 8h26m
+ * and made a fully-paying system look like it had 12 unaccounted payouts.
+ * Nobody had measured the chain.
+ */
+export interface WindowFit {
+  status: "ok" | "suspect" | "unknown";
+  detail: string;
+  /** Measured seconds per block; null when the chain could not be sampled. */
+  blockSeconds: number | null;
+  /** Hours the configured lookback actually spans at that rate. */
+  spanHours: number | null;
 }
 
 export interface ProductHealthSnapshotBlocks {
@@ -1661,6 +1789,20 @@ export async function collectProductHealthProbes(
         fetchImpl,
       })
     : { count: null, usdc: null, windowBlocks: null, reason: "payout evidence off (set PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED=true)" };
+  // Check the INSTRUMENT against the chain, not against an assumption. The
+  // lookback is compared to settled24h, so it has to actually span 24h at the
+  // chain's real block time — an assumed one has already been wrong in prod.
+  const windowFit = config.payoutEvidenceEnabled
+    ? decideWindowFit({
+        blockSeconds: await measureBlockSeconds({
+          rpcUrl: config.rpcUrl,
+          sampleBlocks: PAYOUT_BLOCK_TIME_SAMPLE,
+          fetchImpl,
+        }),
+        lookbackBlocks: config.payoutLookbackBlocks,
+        targetHours: PAYOUT_COMPARISON_HOURS,
+      })
+    : undefined;
   const payout = decidePayoutEvidence({
     confirmedCount: payoutRead.count,
     confirmedUsdc: payoutRead.usdc,
@@ -1668,6 +1810,7 @@ export async function collectProductHealthProbes(
     windowBlocks: payoutRead.windowBlocks,
     tolerance: config.payoutTolerance,
     ...(payoutRead.reason ? { unverifiedReason: payoutRead.reason } : {}),
+    ...(windowFit ? { window: windowFit } : {}),
   });
   // The monitor's own version. Degraded-safe: any failure is "unknown", which
   // must never render as up to date.
