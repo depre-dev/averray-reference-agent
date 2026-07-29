@@ -300,6 +300,50 @@ body { margin: 0; }
   box-shadow: 0 0 0 3px rgba(30,102,66,0.18);
   animation: hm-pulse 2.4s infinite;
 }
+/* Block ticker — sits beside the Live clock. Same pill grammar as
+   .hm-deploy-pill; tabular numerals so the ticking age doesn't jitter the
+   width. The ledge pulses ONLY on tone-ok: a stale or awaiting reading must
+   not radiate liveness it doesn't have. */
+.hm-chain-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  background: var(--hm-sage-wash);
+  border: 1px solid rgba(30,102,66,0.18);
+  color: var(--hm-sage-deep);
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em !important;
+  font-variant-numeric: tabular-nums;
+}
+.hm-chain-pill .ledge {
+  width: 8px; height: 8px; border-radius: 999px;
+  background: var(--hm-sage);
+  box-shadow: 0 0 0 3px rgba(30,102,66,0.18);
+}
+.hm-chain-pill.tone-ok .ledge { animation: hm-pulse 2.4s infinite; }
+.hm-chain-pill .hm-chain-age { font-weight: 650; opacity: 0.85; }
+.hm-chain-pill.tone-degraded {
+  background: var(--hm-amber-wash);
+  border-color: var(--hm-amber-ring);
+  color: var(--hm-amber-deep);
+}
+.hm-chain-pill.tone-degraded .ledge { background: var(--hm-amber); box-shadow: 0 0 0 3px rgba(167,97,34,0.20); }
+.hm-chain-pill.tone-red {
+  background: var(--hm-rose-soft);
+  border-color: rgba(162,58,58,0.35);
+  color: var(--hm-rose);
+}
+.hm-chain-pill.tone-red .ledge { background: var(--hm-rose); box-shadow: 0 0 0 3px rgba(162,58,58,0.20); }
+.hm-chain-pill.tone-awaiting {
+  background: var(--hm-paper-3);
+  border-color: var(--hm-line);
+  color: var(--hm-muted);
+}
+.hm-chain-pill.tone-awaiting .ledge { background: var(--hm-muted-soft); box-shadow: 0 0 0 3px var(--hm-line-soft); }
+.hm-chain-pill.is-stale { border-style: dashed; }
+
 @keyframes hm-pulse {
   0%, 100% { box-shadow: 0 0 0 3px rgba(30,102,66,0.16); }
   50%      { box-shadow: 0 0 0 5px rgba(30,102,66,0.06); }

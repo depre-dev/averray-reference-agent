@@ -237,7 +237,7 @@ export function BoardView({
   const [hermesFocusConversationActive, setHermesFocusConversationActive] = useState(false);
 
   // ── The board switches Delivery ⇆ Ops at the top level (board-wide). ──
-  const { health: productHealth } = useProductHealth({ enabled: monitoringEnabled });
+  const { health: productHealth, error: productHealthError } = useProductHealth({ enabled: monitoringEnabled });
   // Phone-width → the dedicated mobile surface (see the branch before `return`).
   const isMobileViewport = useIsMobileViewport();
   const [boardSurface, setBoardSurface] = useState<BoardSurface>(() => {
@@ -655,6 +655,18 @@ export function BoardView({
           automationHealth={board?.automationHealth}
           onRefresh={onRefresh}
           opsPillars={boardSurface === "ops" && productHealth ? pillarStatuses(productHealth.probes) : undefined}
+          chainTick={
+            // Only when the heartbeat routine is actually running — a board
+            // without product monitoring shows no chain chip at all rather
+            // than a permanently-awaiting one.
+            productHealth?.enabled
+              ? {
+                  chain: productHealth.chain,
+                  probe: productHealth.probes.find((p) => p.name === "chain_height"),
+                  pollError: Boolean(productHealthError),
+                }
+              : undefined
+          }
         />
       )}
 

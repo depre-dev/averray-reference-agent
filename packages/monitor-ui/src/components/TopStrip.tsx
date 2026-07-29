@@ -11,6 +11,7 @@
 
 import type { KPICounts } from "../lib/monitor/board-state.js";
 import type { AutomationHealth } from "../lib/monitor/board-cache.js";
+import { ChainTicker, type ChainTickerProps } from "./ChainTicker.js";
 
 export type TopStripProps = {
   /** Current KPI counts from `kpiCounts(cards)`. */
@@ -26,9 +27,12 @@ export type TopStripProps = {
   /** When provided (Ops surface), the KPI cluster shows pillar-status chips
       instead of the delivery lane counts — so the frame stays ops-relevant. */
   opsPillars?: Array<{ label: string; tone: "ok" | "degraded" | "red" | "awaiting" }>;
+  /** When provided, renders the block-height ticker beside the Live clock
+      (data from the product-health poll; absent → no chip at all). */
+  chainTick?: ChainTickerProps;
 };
 
-export function TopStrip({ counts, liveAt, deployHealth = "OK", automationHealth, onRefresh, opsPillars }: TopStripProps) {
+export function TopStrip({ counts, liveAt, deployHealth = "OK", automationHealth, onRefresh, opsPillars, chainTick }: TopStripProps) {
   return (
     <div className="hm-top" role="banner">
       <div className="hm-brand">
@@ -72,6 +76,7 @@ export function TopStrip({ counts, liveAt, deployHealth = "OK", automationHealth
       </div>
 
       <div className="hm-top-right">
+        {chainTick ? <ChainTicker {...chainTick} /> : null}
         <span className="hm-deploy-pill" aria-label={liveAt ? `Live as of ${liveAt}` : "Live indicator"}>
           <span className="ledge" aria-hidden />
           Live · {liveAt ?? "—"}
