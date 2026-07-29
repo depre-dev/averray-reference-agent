@@ -116,6 +116,7 @@ jobs:
         run: scripts/ceremony/run-int2-automated-suite.sh
 
       - name: Prove the suite did not skip
+        if: always()
         run: test "$(tr -d '[:space:]' < '${{ runner.temp }}/int2-suite-evidence/executed-count.txt')" = "9"
 
       - name: Upload INT-2 evidence

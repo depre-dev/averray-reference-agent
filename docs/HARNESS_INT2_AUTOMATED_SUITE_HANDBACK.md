@@ -41,6 +41,9 @@ The amendment:
 - creates `bootstrap.log` before attempting the private checkout and records the
   final suite exit code, so the always-uploaded artifact is non-empty even when
   checkout fails;
+- runs the separate nine-case non-skip assertion under `if: always()`, so an
+  absent credential cannot bypass the assertion merely by failing an earlier
+  step;
 - uses the read-only deploy key through strict SSH with GitHub's pinned
   published Ed25519 host key, `IdentitiesOnly`, `BatchMode`, and
   `StrictHostKeyChecking`; the secret is unset before Git or any later child
