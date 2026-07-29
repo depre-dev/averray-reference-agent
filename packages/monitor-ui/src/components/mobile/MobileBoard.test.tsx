@@ -130,46 +130,57 @@ describe("MobileBoard", () => {
     expect(getByText("awaiting data")).toBeTruthy();
   });
 
-  test("decisions come from isDecision (same selector as the desktop inbox) and cap with a +N", () => {
+  test("non-approvable work becomes a DELIVERY COUNT, not seven demands", () => {
     const many = Array.from({ length: 7 }, (_, i) => taskCard({ id: `t${i}`, title: `Decision ${i}` }));
-    const { getByText } = render(<MobileBoard health={healthyMainnet} cards={many} nowMs={NOW} />);
-    expect(getByText("Needs you · 7")).toBeTruthy();
-    expect(getByText("Decision 0")).toBeTruthy();
-    expect(getByText("+2 more on the full board.")).toBeTruthy();
+    const { getByText, getByTestId } = render(<MobileBoard health={healthyMainnet} cards={many} nowMs={NOW} />);
+    // None are proposed, so none are actionable from a phone...
+    expect(getByText("Nothing needs you right now.")).toBeTruthy();
+    // ...but the count is real and tappable. Collapsed, never hidden.
+    expect(getByTestId("mobile-delivery-line")).toBeTruthy();
+    expect(getByText("7")).toBeTruthy();
+    expect(getByText(/delivery items waiting/)).toBeTruthy();
   });
 
-  test("uses the shared money-first order and shows why the first decision leads", () => {
-    const routine = taskCard({
-      id: "routine",
-      title: "post-production-deploy verification after workflow run #40",
-      isAction: true,
-    });
-    const unknown = taskCard({ id: "unknown", title: "Review an unclassified task" });
-    const money = taskCard({
-      id: "money",
-      type: "pr",
-      title: "Review settlement changes",
-      files: [{ path: "services/settlement/submit.ts", diff: "+3 -1", critical: false }],
-    });
-    const { container, getByText } = render(
-      <MobileBoard health={healthyMainnet} cards={[routine, unknown, money]} nowMs={NOW} />,
-    );
+  test("an explicable PROPOSED task reaches Act now and states what it does", () => {
+    const card = taskCard({
+      id: "real", title: "codex task", taskStatus: "proposed",
+      prompt: "Rotate the hosted smoke token",
+      reason: "admin JWT expires in 3 days",
+      riskTier: "low",
+    } as Partial<BoardCard>);
+    const { getByText } = render(<MobileBoard health={healthyMainnet} cards={[card]} nowMs={NOW} />);
+    expect(getByText("Act now · 1")).toBeTruthy();
+    expect(getByText("Rotate the hosted smoke token")).toBeTruthy();
+    expect(getByText("admin JWT expires in 3 days")).toBeTruthy();
+    expect(getByText(/low risk/)).toBeTruthy();
+    expect(getByText("Approve")).toBeTruthy();
+  });
 
-    expect(
-      [...container.querySelectorAll(".hm-mb-item-title")].map((node) => node.textContent),
-    ).toEqual([
-      "Review settlement changes",
-      "Review an unclassified task",
-      "post-production-deploy verification after workflow run #40",
-    ]);
-    expect(getByText("Money first · settlement path").getAttribute("data-decision-tier"))
-      .toBe("money-blocking");
+  // THE SHIPPED BOARD (operator screenshot, 2026-07-29 17:42): a green Approve
+  // button under a card whose only title was "codex task".
+  test("a task that cannot say what it does offers NO Approve button", () => {
+    const opaque = taskCard({ id: "opaque", title: "codex task", taskStatus: "proposed" } as Partial<BoardCard>);
+    const { queryByText, getByText } = render(
+      <MobileBoard health={healthyMainnet} cards={[opaque]} nowMs={NOW} onApproveTask={vi.fn()} />,
+    );
+    expect(queryByText("Approve")).toBeNull();
+    expect(getByText(/review on the full board/i)).toBeTruthy();
+  });
+
+  test("routine deploy verifications never reach Act now", () => {
+    const v = taskCard({
+      id: "v", type: "deploy", taskStatus: undefined,
+      title: "post-production-deploy verification after workflow run",
+    } as Partial<BoardCard>);
+    const { getByText, getByTestId } = render(<MobileBoard health={healthyMainnet} cards={[v]} nowMs={NOW} />);
+    expect(getByText("Nothing needs you right now.")).toBeTruthy();
+    expect(getByTestId("mobile-delivery-line")).toBeTruthy();
   });
 
   test("a PROPOSED task exposes Approve/Dismiss and wires them to the operator gate", () => {
     const onApproveTask = vi.fn();
     const onDismissCard = vi.fn();
-    const card = taskCard({ taskStatus: "proposed" } as Partial<BoardCard>);
+    const card = taskCard({ taskStatus: "proposed", prompt: "Rotate the smoke token" } as Partial<BoardCard>);
     const { getByText } = render(
       <MobileBoard
         health={healthyMainnet}
@@ -195,9 +206,14 @@ describe("MobileBoard", () => {
   test("tapping a decision opens it rather than acting on it", () => {
     const onCardClick = vi.fn();
     const { getByText } = render(
-      <MobileBoard health={healthyMainnet} cards={[taskCard()]} nowMs={NOW} onCardClick={onCardClick} />,
+      <MobileBoard
+        health={healthyMainnet}
+        cards={[taskCard({ taskStatus: "proposed", prompt: "Rotate the smoke token" } as Partial<BoardCard>)]}
+        nowMs={NOW}
+        onCardClick={onCardClick}
+      />,
     );
-    fireEvent.click(getByText("Hermes routed work: ops pre-check"));
+    fireEvent.click(getByText("Rotate the smoke token"));
     expect(onCardClick).toHaveBeenCalledWith("codex-task-1");
   });
 
@@ -219,8 +235,8 @@ describe("MobileBoard", () => {
 
   test("empty states stay honest instead of blank", () => {
     const { getByText } = render(<MobileBoard health={healthyMainnet} cards={[]} nowMs={NOW} />);
-    expect(getByText("Nothing waiting on you.")).toBeTruthy();
-    expect(within(getByText("Nothing waiting on you.").closest("section")!).getByText(/Needs you/)).toBeTruthy();
+    expect(getByText("Nothing needs you right now.")).toBeTruthy();
+    expect(within(getByText("Nothing needs you right now.").closest("section")!).getByText(/Act now/)).toBeTruthy();
   });
 
   // #135: "Claude fixing" said an agent was busy but never what it was busy

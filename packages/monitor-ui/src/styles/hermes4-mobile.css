@@ -218,3 +218,57 @@
 .hm-mb-agent-step.is-stale { color: var(--h4-tel); }
 .hm-mb-agent-step.is-empty { color: var(--h4-faint); font-style: italic; }
 .hm-mb-agent-age { color: var(--h4-faint); }
+
+/* ── act now / delivery (#141) ───────────────────────────────────────────── */
+/* The basis lines. `why` is the reason Hermes proposed it; without a `what`
+   there is no Approve button at all — see phone-triage.ts. */
+.hm-mb-item-why {
+  display: block;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--h4-muted);
+  margin-top: 4px;
+  text-wrap: pretty;
+}
+.hm-mb-chip {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 5px;
+  margin-top: 5px;
+  border: 1px solid transparent;
+}
+.hm-mb-chip--act { color: var(--h4-act); border-color: var(--h4-act); }
+.hm-mb-chip--warn { color: var(--h4-warn); border-color: var(--h4-warn); }
+/* Honest dead-end: we cannot describe it, so we do not offer the decision. */
+.hm-mb-nobasis {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--h4-tel);
+  margin: 9px 0 0;
+  font-style: italic;
+}
+/* Delivery is a COUNT, not a demand — flat, quiet, tappable. */
+.hm-mb-delivery {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 1px dashed var(--h4-line-2);
+  border-radius: 12px;
+  padding: 11px 13px;
+  cursor: pointer;
+  font: inherit;
+}
+.hm-mb-delivery-n {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--h4-ink-2);
+  flex: none;
+}
+.hm-mb-delivery-t { font-size: 11.5px; line-height: 1.4; color: var(--h4-faint); }
