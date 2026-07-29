@@ -66,7 +66,9 @@ The amendment:
 - emits a diagnostic JSON bundle on either timeout or an unexpected terminal
   lifecycle, including Harness state/outcome, selected events, worker output,
   and dispatcher logs;
-- parses every operator script with both `bash -n` and `zsh -n`.
+- installs `zsh` explicitly in the Ubuntu fast-test job and parses every
+  operator script with both `bash -n` and `zsh -n`. The test is never skipped
+  merely because the runner image omitted the operator shell.
 
 No acceptance criterion, case count, evidence invariant, fixture mutation,
 dispatcher production path, kernel source, Harness pin, dependency, or lockfile

@@ -25,6 +25,11 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Install zsh syntax-check shell
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends zsh
+
       - name: Install dependencies
         run: npm ci
 
