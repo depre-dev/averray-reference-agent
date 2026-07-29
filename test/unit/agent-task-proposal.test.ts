@@ -1,9 +1,12 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import {
+  mkdir,
   mkdtemp,
   readdir,
   readFile,
   rm,
+  writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -480,113 +483,104 @@ describe("pilot ceremony proposal fixtures", () => {
     },
   );
 
-  it("pins the green-path scripted write inside its unchanged acceptance fence", async () => {
-    const input = await ceremonyFixture("lint-format-green");
-    const scriptBytes = await readFile(
-      new URL(
-        "../fixtures/agent-integration/ceremony/lint-format-green.jsonl",
-        import.meta.url,
-      ),
-      "utf8",
-    );
-    const lines = scriptBytes.trimEnd().split("\n");
 
-    expect(input.acceptanceCriteria).toEqual([{
-      id: "format-command",
-      type: "command",
-      command: "git diff --check",
-      required: true,
-    }]);
-    expect(input.budget).toEqual({
-      elapsedSeconds: 60,
-      modelTokens: 8_000,
-      toolCalls: 30,
-      estimatedUsdMicros: null,
-    });
-    expect(lines).toHaveLength(2);
+  // Both ceremony scripts APPEND to a tracked file. `git diff --check` inspects
+  // only tracked files with unstaged modifications, so a fixture that creates a
+  // NEW file makes the criterion vacuous: git never examines the content and the
+  // check passes whatever was written. These tests therefore run the real
+  // criterion against a real repository rather than asserting on the JSON.
+  for (
+    const scenario of [
+      { fixture: "lint-format-green", mustReject: false },
+      { fixture: "lint-format-red", mustReject: true },
+    ]
+  ) {
+    it(`${scenario.fixture}: the real acceptance criterion ${
+      scenario.mustReject ? "rejects" : "accepts"
+    } what the script writes`, async () => {
+      const input = await ceremonyFixture(scenario.fixture);
+      expect(input.repository.baseRevision).toMatch(/^[0-9a-f]{40}$/);
+      const scriptBytes = await readFile(
+        new URL(
+          `../fixtures/agent-integration/ceremony/${scenario.fixture}.jsonl`,
+          import.meta.url,
+        ),
+        "utf8",
+      );
+      const lines = scriptBytes.trimEnd().split("\n");
+      expect(lines).toHaveLength(2);
 
-    const writeTurn = JSON.parse(lines[0] ?? "{}") as {
-      tool_calls?: Array<{
-        id?: string;
-        name?: string;
-        arguments?: { path?: string; content?: string };
-      }>;
-      finish_reason?: string;
-      usage?: Record<string, number>;
-    };
-    const stopTurn = JSON.parse(lines[1] ?? "{}") as {
-      text?: string;
-      tool_calls?: unknown;
-      finish_reason?: string;
-      usage?: Record<string, number>;
-    };
-    expect(writeTurn).toEqual({
-      tool_calls: [{
-        id: "int2-green-write",
-        name: "fs_write_file",
-        arguments: {
-          path: "docs/harness-int2-green-path-proof.md",
-          content:
-            "# INT-2 green-path proof\n\nThis deterministic change verifies the supervised handoff path.\n",
-        },
-      }],
-      usage: { input_tokens: 2, output_tokens: 1, requests: 1 },
-      finish_reason: "tool_call",
-    });
-    expect(stopTurn).toEqual({
-      text: "Wrote the deterministic allowlisted proof file.",
-      usage: { input_tokens: 2, output_tokens: 2, requests: 1 },
-      finish_reason: "stop",
-    });
+      // Identical fence for both — the written content is the only variable.
+      expect(input.acceptanceCriteria).toEqual([{
+        id: "format-command",
+        type: "command",
+        command: "git diff --check",
+        required: true,
+      }]);
+      expect(input.repository.allowedPaths).toEqual(["docs/**", "test/**"]);
 
-    const write = writeTurn.tool_calls?.[0]?.arguments;
-    expect(write?.path).toMatch(/^(?:docs|test)\//);
-    expect(input.repository.allowedPaths).toContain("docs/**");
-    expect(write?.content).toMatch(/\n$/);
-    expect(write?.content).not.toMatch(/[ \t]+$/mu);
-    expect(write?.content).not.toContain(" \t");
-  });
+      const call = (JSON.parse(lines[0] ?? "{}") as {
+        tool_calls?: Array<{ name?: string; arguments?: { command?: string } }>;
+      }).tool_calls?.[0];
+      expect(call?.name).toBe("shell_run");
+      const command = call?.arguments?.command ?? "";
+      expect(command).toMatch(/^printf /);
+      expect(command).toMatch(/>> (docs|test)\//);
 
-  it("pins the red-path scripted write as a real acceptance violation", async () => {
-    const input = await ceremonyFixture("lint-format-red");
-    const scriptBytes = await readFile(
-      new URL(
-        "../fixtures/agent-integration/ceremony/lint-format-red.jsonl",
-        import.meta.url,
-      ),
-      "utf8",
-    );
-    const lines = scriptBytes.trimEnd().split("\n");
-    expect(lines).toHaveLength(2);
+      const target = (/>> (\S+)/.exec(command) ?? [])[1] ?? "";
+      expect(target).toMatch(/^(docs|test)\//);
 
-    // The acceptance fence is IDENTICAL to the green case. The only variable
-    // between the positive and negative ceremony proofs is the written content.
-    expect(input.acceptanceCriteria).toEqual([{
-      id: "format-command",
-      type: "command",
-      command: "git diff --check",
-      required: true,
-    }]);
-    expect(input.repository.allowedPaths).toEqual(["docs/**", "test/**"]);
-    expect(input.budget).toEqual({
-      elapsedSeconds: 60,
-      modelTokens: 8_000,
-      toolCalls: 30,
-      estimatedUsdMicros: null,
-    });
+      // PROPERTY 1 — the target must already be TRACKED IN THIS REPOSITORY.
+      // `git diff --check` inspects only tracked files with unstaged changes, so
+      // appending to a NEW file makes the criterion vacuous: it passes having
+      // examined nothing. This must be checked against the real repository; a
+      // synthetic one would make every target tracked and prove nothing.
+      // `ls-files` works on a shallow checkout, unlike a base-revision lookup.
+      expect(() =>
+        execFileSync("git", ["ls-files", "--error-unmatch", target], {
+          cwd: process.cwd(),
+          stdio: "pipe",
+        })
+      ).not.toThrow();
 
-    const write = (JSON.parse(lines[0] ?? "{}") as {
-      tool_calls?: Array<{ arguments?: { path?: string; content?: string } }>;
-    }).tool_calls?.[0]?.arguments;
+      // PROPERTY 2 — the appended content produces the expected verdict. A
+      // synthetic repository is correct here: the semantics of the content are
+      // independent of which file it lands in, and CI checks out shallow so the
+      // fixture's base revision is unavailable.
+      const workspace = await mkdtemp(path.join(tmpdir(), "int2-criterion-"));
+      try {
+        const repo = path.join(workspace, "repo");
+        await mkdir(path.join(repo, path.dirname(target)), { recursive: true });
+        execFileSync("git", ["init", "-q", repo]);
+        execFileSync("git", ["-C", repo, "config", "user.email", "ceremony@test"]);
+        execFileSync("git", ["-C", repo, "config", "user.name", "ceremony"]);
+        await writeFile(path.join(repo, target), "# pre-existing tracked content\n", "utf8");
+        execFileSync("git", ["-C", repo, "add", "-A"]);
+        execFileSync("git", ["-C", repo, "commit", "-qm", "base"]);
 
-    // Inside the allowlist — containment is NOT what this case tests.
-    expect(write?.path).toMatch(/^(?:docs|test)\//);
+        execFileSync("sh", ["-c", command], { cwd: repo });
 
-    // And it must genuinely violate `git diff --check`: trailing whitespace on
-    // a line. Without this the "negative" proof would pass and prove nothing.
-    expect(write?.content).toMatch(/[ \t]+$/mu);
-    expect(write?.content).toMatch(/\n$/);
-  });
+        const numstat = execFileSync("git", ["-C", repo, "diff", "--numstat"], { encoding: "utf8" });
+        expect(numstat.trim()).not.toBe("");
+
+        let rejected = false;
+        let output = "";
+        try {
+          output = execFileSync("git", ["-C", repo, "diff", "--check"], { encoding: "utf8" });
+        } catch (error) {
+          rejected = true;
+          output = String((error as { stdout?: string }).stdout ?? "");
+        }
+        expect(rejected).toBe(scenario.mustReject);
+        if (scenario.mustReject) {
+          expect(output).toMatch(/trailing whitespace/);
+        }
+      } finally {
+        await rm(workspace, { recursive: true, force: true });
+      }
+    }, 30_000);
+  }
+
 });
 
 function proposalInput(): ProposeAgentTaskInput {

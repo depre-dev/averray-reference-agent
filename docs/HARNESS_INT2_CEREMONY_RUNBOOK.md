@@ -420,9 +420,24 @@ If this drill broadens authority instead of tightening it, abort.
 
 ### 2.5 Intentional failed verification produces no handoff
 
-Use the **`lint-format-red`** fixture. It writes one file inside the allowlist
-containing trailing whitespace, so `git diff --check` **executes and rejects the
-work on its merits** (exit 2, `trailing whitespace`).
+Use the **`lint-format-red`** fixture. It **appends a line with trailing
+whitespace to a file that is already tracked**, so `git diff --check` executes
+and rejects the work on its merits (exit 2, `trailing whitespace`).
+
+> **Why it appends to a tracked file rather than creating a new one.**
+> `git diff --check` inspects only tracked files with unstaged modifications. A
+> newly created file is untracked and therefore **invisible** to it: the command
+> exits 0 having examined nothing, and the criterion passes whatever was
+> written. The first `lint-format-red` made exactly this mistake — the run
+> completed with `handoff_ready` and a `handoff` decision while the workspace
+> patch contained the intended violation. A criterion that cannot see the change
+> proves nothing, in either direction, so `lint-format-green` had the same defect
+> and was corrected with it.
+>
+> Note the deliverable and the criterion disagree about what counts as "the
+> change": `workspace_patch` captures untracked files, `git diff --check` does
+> not. Any command criterion that inspects the tree through git will miss
+> precisely the content the patch will ship, when the change is a new file.
 
 1. Prove no worker is running, then start exactly one with
    `lint-format-red.jsonl`. This fixture needs **no** dependency cache — leave
@@ -433,11 +448,10 @@ work on its merits** (exit 2, `trailing whitespace`).
 4. Confirm: the Harness run outcome is `failed`; the AgentTask lifecycle becomes
    `failed`; **no** `handoff` decision; no `VerifiedHandoff`; no submission or
    pull request.
-5. **Confirm the criterion actually ran.** The failing check must report a
-   content rejection — `trailing whitespace` — and **`exit_128` must not appear
-   anywhere in the run events.** `exit_128` means git never started, which is an
-   environment fault wearing a verdict's clothes and proves nothing. See
-   `HARNESS_INT2_FINDING_GIT_ACCEPTANCE.md`.
+5. **Confirm the criterion actually ran and had something to inspect.** The
+   failing check must report `trailing whitespace`; **`exit_128` must not appear
+   anywhere**; and the workspace patch must show a **modification to a tracked
+   file**, not a new file. An empty `git diff` is the vacuous case above.
 
 `lint-format-red` and `lint-format-green` are a controlled pair: identical
 acceptance criterion, allowlist, budget, base revision and profile. The **only**
