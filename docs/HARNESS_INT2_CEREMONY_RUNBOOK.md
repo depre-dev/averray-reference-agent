@@ -400,23 +400,77 @@ failure.
 Do not repair the same task version. Stop the dispatcher and move to a new work
 item.
 
-### 2.4 Attenuation refuses a tighter manifest mismatch
+### 2.4 An over-broad profile is refused; a narrower one is accepted
 
-This proof tightens containment; it must never add a capability.
+> **ERRATUM (2026-07-29), corrected twice.** Both earlier versions of this drill
+> specified a mutation that could not produce the refusal they named.
+>
+> **First version** told the operator to *remove* `fs.write_file` and expect a
+> refusal. The implemented rule is **profile ⊆ approved**
+> (`attenuation.ts`), so removal is *narrowing* — correct, and it must be
+> **accepted**. Run against the real function:
+> `{"result":"accepted","approvedGrants":8,"profileCapabilities":7}`.
+> The old text assumed a rule `approved ⊆ profile` that does not exist and
+> semantically should not; `TaskIntent` carries no capability set at all.
+>
+> **Second version** (mine) told the operator to *add* `memory.propose` and
+> expect `capability_not_granted`. That is also wrong, and for the same class of
+> reason: it was written after checking the **kernel's** capability catalogue
+> without checking the **dispatcher's** profile loader, which runs first. Run
+> against the real loader:
+> `{"candidate":"memory.propose","name":"ProfileManifestError","reason":"unvetted_capability"}`.
 
-1. Propose and approve a fresh task against the pinned eight-capability profile
-   while dispatch is disabled.
-2. Copy the profile evidence file, then temporarily remove
-   `fs.write_file` from the live profile and recompute
-   `HARNESS_PROFILE_SHA256`.
-3. Start the dispatcher. The seven-capability profile is still vetted, but it
-   cannot satisfy the approved TaskIntent's capability set.
-4. Expect a `dispatch_refusal` attenuation reason, no Harness run, no outbox
-   binding, and no handoff.
-5. Stop the dispatcher. Restore the byte-identical eight-capability profile and
-   its original SHA-256 before any later case.
+**What the code actually does — two layers, not one.**
 
-If this drill broadens authority instead of tightening it, abort.
+1. `services/harness-dispatcher/src/profile-manifest.ts` holds a frozen
+   `VETTED_CAPABILITIES` allowlist and throws `unvetted_capability` for anything
+   outside it, **before** attenuation runs (`dispatch-attempt.ts`).
+2. `attenuation.ts` then enforces **profile ⊆ approved**.
+
+`VETTED_CAPABILITIES` and `PILOT_CAPABILITY_IDS` are the **same eight
+capabilities** (verified as sets). Therefore `profile ⊆ VETTED == approved`
+always holds, and **`capability_not_granted` is unreachable through any profile
+mutation.** The same is true of `capability_effect_external`: an external-effect
+capability is rejected as unvetted first.
+
+**This is a property, not a gap.** The outer allowlist is strictly stronger than
+the inner check — it refuses by construction rather than by comparison. But the
+evidence bundle must say so plainly, because "attenuation refusal proven" would
+otherwise read as a production-path demonstration of a guard the production path
+cannot reach.
+
+#### Production-path cases (both required — the pair is the proof)
+
+1. **Over-broad profile is refused.** Propose and approve against the pinned
+   eight-capability profile with dispatch disabled. Copy the profile evidence
+   file, add `memory.propose`, recompute `HARNESS_PROFILE_SHA256`, start the
+   dispatcher. Expect **`unvetted_capability`**, no Harness run, no outbox
+   binding, no handoff. Note this is a `ProfileManifestError` and sits **outside**
+   the attenuation catch block, so it does not produce an attenuation-flavoured
+   `dispatch_refusal` — assert the refusal that actually occurs, not the one the
+   old text predicted.
+2. **Narrower profile is accepted.** Remove `fs.write_file` instead, and assert
+   the task is **accepted** with narrower effective authority. Without this, the
+   drill proves something can be refused, not that the rule discriminates — the
+   same reason §2.5 and §2.6 are only meaningful together.
+
+Restore the byte-identical eight-capability profile and its original SHA-256
+after each case.
+
+#### Attenuation guards, tested at their own boundary
+
+`capability_not_granted` and `capability_effect_external` are unreachable from
+the production path, so they are covered as typed unit cases against
+`attenuation.ts` directly: an AgentTask carrying **seven** approved grants beside
+an eight-capability profile, and a profile capability with an external effect
+class. A task with fewer than eight grants is a schema-valid `AgentTask` that the
+CLI simply never emits — this is exercising a real input, not injecting a fault.
+
+**Do not widen `VETTED_CAPABILITIES` to make this reachable.** That would weaken a
+security boundary for a test's convenience, which is the wrong direction of
+trade.
+
+If this drill broadens authority instead of refusing it, abort.
 
 ### 2.5 Intentional failed verification produces no handoff
 
