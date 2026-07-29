@@ -14,6 +14,7 @@ import {
   chainHaltStatus,
   probeSignerLiquidity,
   decidePayoutEvidence,
+  buildProductHealthAlert,
   decideWindowFit,
   measureBlockSeconds,
   readPayoutTransfers,
@@ -1696,5 +1697,60 @@ describe("measureBlockSeconds", () => {
   it("no rpc url, or a throwing endpoint, is null — never an invented rate", async () => {
     expect(await measureBlockSeconds({ sampleBlocks: 1000, fetchImpl: rpc(1, {}) })).toBeNull();
     expect(await measureBlockSeconds({ rpcUrl: "http://rpc", sampleBlocks: 1000, fetchImpl: throwingFetch() })).toBeNull();
+  });
+});
+
+describe("a payout shortfall pages even with every probe green", () => {
+  const green = evaluateProductHealth([
+    { name: "product_api", status: "ok", detail: "" },
+    { name: "money_path", status: "ok", detail: "" },
+  ]);
+  const shortfallSnap = {
+    chainId: 420420419,
+    flow: { payout: { status: "shortfall", detail: "14 settled, only 2 confirmed — 12 unaccounted for", settledCount: 14, confirmedCount: 2 } },
+  } as never;
+
+  it("fires — it is not a probe, so it could never reach the gate before", () => {
+    const r = decideProductHealthAlert({
+      evaluation: green, state: initialProductHealthAlertState(), nowMs: 1_000, cooldownMs: 60_000,
+      snapshot: shortfallSnap,
+    });
+    expect(r.alert).toBe(true);
+  });
+
+  it("does NOT re-fire on the next cycle while the gap is unchanged", () => {
+    const first = decideProductHealthAlert({
+      evaluation: green, state: initialProductHealthAlertState(), nowMs: 1_000, cooldownMs: 60_000, snapshot: shortfallSnap,
+    });
+    const second = decideProductHealthAlert({
+      evaluation: green, state: first.state, nowMs: 2_000, cooldownMs: 60_000, snapshot: shortfallSnap,
+    });
+    expect(second.alert).toBe(false);
+  });
+
+  it("UNVERIFIED stays silent — our blind spot is not a page", () => {
+    const r = decideProductHealthAlert({
+      evaluation: green, state: initialProductHealthAlertState(), nowMs: 1_000, cooldownMs: 60_000,
+      snapshot: { chainId: 1, flow: { payout: { status: "unverified", detail: "cannot compare", settledCount: 14, confirmedCount: null } } } as never,
+    });
+    expect(r.alert).toBe(false);
+  });
+
+  it("the page leads with money and stamps the monitor version", () => {
+    const mixed = evaluateProductHealth([
+      { name: "api_latency", status: "red", detail: "2100ms" },
+      { name: "money_path", status: "red", detail: "3 stuck" },
+    ]);
+    const text = buildProductHealthAlert(mixed, "http://board", {
+      chainId: 420420419,
+      flow: { payout: { status: "shortfall", detail: "12 unaccounted for", settledCount: 14, confirmedCount: 2 } },
+      self: { status: "behind", detail: "", runningSha: "824ae4c1f2d3", behindBy: 9, oldestUnshippedAt: null },
+    } as never).text;
+    const lines = text.split("\n");
+    expect(lines[1]).toContain("payout shortfall");        // money leads
+    expect(lines[2]).toContain("money_path");              // then money probes
+    expect(lines[3]).toContain("api_latency");             // latency last
+    expect(text).toContain("9 commits behind main");       // provenance
+    expect(text).toContain("3 money-blocking signals");
   });
 });

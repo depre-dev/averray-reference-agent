@@ -3544,6 +3544,9 @@ function startOperatorRoutines() {
       });
       const result = await runProductHealthOnce({
         runProbes: async () => collection.probes,
+        // Money signals that are not probes (payout evidence) + the monitor's
+        // own version reach the alert path through here.
+        getSnapshot: () => collection.snapshot,
         alert: (payload) => alertChannel.dispatch(payload),
         boardUrl:
           optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor") ??

@@ -29,6 +29,7 @@ import type { AlertPayload } from "./alert-bridge.js";
 
 // ── Probe result model ──────────────────────────────────────────────
 
+import { alertProvenance, decideMoneyAlert } from "./money-alert.js";
 import { decideSelfFreshness, fetchSelfCompare } from "./self-freshness.js";
 import type { SelfFreshness } from "./self-freshness.js";
 
@@ -1914,14 +1915,34 @@ async function deriveSelfFreshnessProbe(input: {
 
 // ── Alert rendering (reuses the D4 AlertPayload) ────────────────────
 
-export function buildProductHealthAlert(evaluation: ProductHealthEvaluation, boardUrl: string): AlertPayload {
-  const lines = evaluation.redProbes.map((p) => `• 🔴 ${p.name}: ${p.detail}`).join("\n");
+/** Probes whose failure is a MONEY failure — these lead the page. */
+const MONEY_PROBE_NAMES = new Set(["money_path", "signer_liquidity", "treasury_liquidity", "chain_height"]);
+
+export function buildProductHealthAlert(
+  evaluation: ProductHealthEvaluation,
+  boardUrl: string,
+  snapshot?: ProductHealthSnapshotBlocks,
+): AlertPayload {
+  // Money first. A red api_latency and a red money_path used to render
+  // identically, so the thing that costs money could sit below the thing that
+  // costs milliseconds.
+  const ordered = [...evaluation.redProbes].sort(
+    (a, b) => Number(MONEY_PROBE_NAMES.has(b.name)) - Number(MONEY_PROBE_NAMES.has(a.name)),
+  );
+  const money = decideMoneyAlert(snapshot);
+  const probeLines = ordered.map((p) => `• 🔴 ${p.name}: ${p.detail}`);
+  const lines = [...money.lines, ...probeLines];
+  const count = evaluation.redProbes.length + money.lines.length;
   const head =
-    evaluation.redProbes.length === 1
-      ? "1 product-health probe is RED"
-      : `${evaluation.redProbes.length} product-health probes are RED`;
-  const text = `:rotating_light: Averray product health — ${head}\n${lines}\nInspect: ${boardUrl}`;
-  return { count: evaluation.redProbes.length, items: [], boardUrl, text };
+    count === 1 ? "1 money-blocking signal" : `${count} money-blocking signals`;
+  const provenance = alertProvenance(snapshot);
+  const text = [
+    `:rotating_light: Averray product health — ${head}`,
+    ...lines,
+    `Inspect: ${boardUrl}`,
+    ...(provenance ? [provenance] : []),
+  ].join("\n");
+  return { count, items: [], boardUrl, text };
 }
 
 // ── De-dup: alert on a rising edge or a changed red-set, else after cooldown ──
@@ -1946,9 +1967,16 @@ export function decideProductHealthAlert(input: {
   state: ProductHealthAlertState;
   nowMs: number;
   cooldownMs: number;
+  /** Snapshot blocks, so a money signal that is not a probe can still page. */
+  snapshot?: ProductHealthSnapshotBlocks;
 }): { alert: boolean; state: ProductHealthAlertState } {
-  const key = redProbeKey(input.evaluation);
-  if (input.evaluation.status !== "red" || key === "") {
+  const money = decideMoneyAlert(input.snapshot);
+  // A payout shortfall is not a probe, so it never reached this gate: the
+  // system could see "14 settled, 2 confirmed" and stay silent. Fold it in so
+  // it pages on its own, and so a CHANGE in the gap re-pages.
+  const key = [redProbeKey(input.evaluation), money.key].filter(Boolean).join("|");
+  const worthPaging = input.evaluation.status === "red" || money.key !== "";
+  if (!worthPaging || key === "") {
     return { alert: false, state: { lastRedKey: "", lastAlertAtMs: input.state.lastAlertAtMs } };
   }
   const changed = key !== input.state.lastRedKey;
@@ -1964,6 +1992,12 @@ export function decideProductHealthAlert(input: {
 
 export interface ProductHealthDeps {
   runProbes: () => Promise<ProbeResult[]>;
+  /**
+   * The snapshot blocks for this cycle. Carries the money signals that are NOT
+   * probes (payout evidence) and the monitor's own version, so a page can fire
+   * on a shortfall and can state which build it speaks for.
+   */
+  getSnapshot?: () => ProductHealthSnapshotBlocks | undefined;
   alert: (payload: AlertPayload) => Promise<boolean>;
   boardUrl: string;
   nowMs: () => number;
@@ -1981,16 +2015,18 @@ export interface ProductHealthResult {
 export async function runProductHealthOnce(deps: ProductHealthDeps): Promise<ProductHealthResult> {
   const probes = await deps.runProbes();
   const evaluation = evaluateProductHealth(probes);
+  const snapshot = deps.getSnapshot?.();
   const { alert, state } = decideProductHealthAlert({
     evaluation,
     state: deps.getAlertState(),
     nowMs: deps.nowMs(),
     cooldownMs: deps.cooldownMs,
+    ...(snapshot ? { snapshot } : {}),
   });
   deps.setAlertState(state);
   let alerted = false;
   if (alert) {
-    await deps.alert(buildProductHealthAlert(evaluation, deps.boardUrl));
+    await deps.alert(buildProductHealthAlert(evaluation, deps.boardUrl, snapshot));
     alerted = true;
   }
   return { status: evaluation.status, evaluation, alerted };
