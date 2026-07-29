@@ -54,6 +54,12 @@ npm test          # vitest run — must pass
 npm run build     # tsc -b emit (only needed to validate emit / run dist)
 ```
 
+Changes that can affect supervised Harness dispatch are additionally gated in
+CI by `scripts/ceremony/run-int2-automated-suite.sh`. It runs the deterministic
+INT-2 cases against the real dispatcher, disposable Postgres databases, the
+pinned Harness and Docker. Local `npm test` skips that slow tier unless its
+explicit environment is present; CI fails if the suite skips.
+
 If you touched `ops/`, the `Dockerfile`, or compose files, also validate what CI validates:
 
 ```bash
@@ -89,6 +95,7 @@ that SSH in to invoke Hermes. Don't edit the platform repo from here.
 | `ops/` | Docker Compose stack (`compose.yml`, `compose.prod.yml`, `compose.command-center.yml`, `compose.cloudflare-access.yml`), migrations |
 | `hermes/` | Hermes config (`hermes.yaml`, `policy.yaml`) + trace plugin |
 | `test/unit/` | Vitest suites (alongside `*.test.ts(x)` colocated in packages) |
+| `test/integration/` | Postgres and supervised-dispatch integration suites; slow external prerequisites are explicit and fail-required in their CI jobs |
 
 TypeScript monorepo: npm workspaces (`packages/*`, `services/*`), Node ≥ 22, ESM
 (`"type": "module"`, `NodeNext`), `strict` on.
@@ -238,6 +245,9 @@ CODEX_HANDOFF_PROTOCOL) is a separate release signal.
 1. **Typecheck + unit tests** on Node 22 (`npm ci` → `npm run typecheck` → `npm test`).
 2. **Docker build** of `ops/Dockerfile.node` (also builds the in-image Vite SPA) +
    **compose config validation**. On `main` it also pushes the runtime image to GHCR.
+3. **INT-2 supervised dispatch** in a separate required job: real dispatcher,
+   two disposable Postgres databases, Harness pin `0890a1f0`, Docker-isolated
+   scripted runs, and an executed-count assertion so skipping cannot pass.
 
 Run the smallest relevant subset locally before opening a PR. **Do not bypass
 failing checks.**

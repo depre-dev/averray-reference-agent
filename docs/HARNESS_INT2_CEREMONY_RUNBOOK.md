@@ -676,6 +676,21 @@ evidence.
 
 ## 4. Evidence mapped to the INT-2 gate
 
+The deterministic mechanism proofs now run in CI through
+`scripts/ceremony/run-int2-automated-suite.sh`. CI uses the real production
+dispatcher, two disposable Postgres databases, the pinned Harness and the
+Docker provider. It proves the suite executed rather than treating a skipped
+suite as green. The six operator helpers are versioned beside it under
+`scripts/ceremony/`; both their verification path and CI call
+`int2-evidence.mjs`, so there is one definition of the evidence.
+
+CI does **not** replace the human ceremony. The operator still performs and
+records the containment inspection, the approval decision and the §3
+budget-capped real-model run once per release. CI proves the approval mechanism
+by invoking the exact `harness-pilot approve --confirm` implementation and its
+task hash; it does not claim a person reviewed the task. Recorded/scripted
+evidence and human-practice evidence remain separate in the bundle.
+
 For every work item, start with:
 
 ```sh
@@ -703,21 +718,23 @@ Export these reference-database rows as JSON without including the DSN:
 
 The following mapping is the acceptance checklist for plan section 21.1:
 
-| §21.1 gate statement | Required captured proof |
-|---|---|
-| Concurrent/replayed dispatch creates exactly one run | One immutable `intendedRunId`; one Harness run at attempt 1; one claim; one outbox binding; identical run id from duplicate submit; restart/replay does not change any identity. |
-| Approval/hash/policy/grant mismatches refuse | `dispatch_refusal` decisions for the approval-hash and attenuation drills; no Harness run or outbox row for either; the pinned task, policy, verifier, profile, capability-catalog, and manifest hashes. |
-| HALT wins | Before/after task and run snapshots; halted heartbeat; cancellation acknowledgement or critical alert; no later run started while HALT existed. |
-| No wallet/settlement/deploy/GitHub-merge capability | The exact eight-grant AgentTask and compiled run manifest, with `delegable:false`, `maxChildren:0`, `maxConcurrentChildren:0`, and deny-all egress. Review the manifest, not just the profile source. |
-| Representative low-risk tasks complete through supervision | At least docs/comment, unit-test, and small-refactor families, each with proposal output, explicit operator approval, `dispatch_approval` decision, run events, verifier evidence, budget actuals, and terminal projection. |
-| Failed verification produces no submission | The `lint-format-red` case: failed verifier event and failed lifecycle; no `handoff` decision, no VerifiedHandoff actuation, no PR/submission evidence; **and the failing check reports a content rejection (`trailing whitespace`), with no `exit_128` anywhere** — proving the criterion ran rather than erroring. |
-| Verified work produces a correct unactuated handoff | The `lint-format-green` case reaches `handoff_ready`; non-empty allowlisted patch; matching manifest ref/hash; one attempt, claim, and outbox; exactly one `dispatch_approval` plus one `handoff`; recorded eligibility value/reason and handoff verification evidence refs; no PR or GitHub mutation. §2.5 and §2.6 must both pass. |
-| Restart and duplicate delivery remain idempotent | Dispatcher restart timestamps, unchanged claim/outbox rows, same immutable run id, and one Harness attempt. |
+| §21.1 gate statement | Required captured proof | Evidence source |
+|---|---|---|
+| Concurrent/replayed dispatch creates exactly one run | One immutable `intendedRunId`; one Harness run at attempt 1; one claim; one outbox binding; restart/replay does not change any identity. | CI re-submits the same run id and restarts before reconciliation on every PR and `main`; the operator ceremony retains the two-dispatcher concurrency drill. |
+| Approval/hash/policy/grant mismatches refuse | Approval-hash mismatch produces `dispatch_refusal` before claim. `memory.propose` is refused earlier by the production profile loader as `unvetted_capability`, with no run/outbox/handoff; removing `fs.write_file` is accepted and the compiled manifest is strictly narrower. The currently unreachable `capability_not_granted` and `capability_effect_external` guards are typed boundary tests, not presented as production-path refusals. | CI mechanism suite plus typed unit tests. Human approval **practice** remains operator evidence. |
+| HALT wins | Before/after task and run snapshots; halted heartbeat; cancellation acknowledgement or critical alert; no handoff. | CI mechanism suite; operator repeats emergency-stop practice once per release. |
+| No wallet/settlement/deploy/GitHub-merge capability | The exact eight-grant AgentTask and compiled run manifest, with `delegable:false`, `maxChildren:0`, `maxConcurrentChildren:0`, and deny-all egress. Review the manifest, not just the profile source. | CI asserts the bytes and manifest; human inspection of containment remains operator evidence. |
+| Representative low-risk tasks complete through supervision | At least docs/comment, unit-test, and small-refactor families, each with proposal output, explicit operator approval, `dispatch_approval` decision, run events, verifier evidence, budget actuals, and terminal projection. | Human ceremony. CI deliberately covers the deterministic lint pair, not representative real-model breadth. |
+| Failed verification produces no submission | The `lint-format-red` case: failed verifier event and failed lifecycle; no `handoff`, PR or submission evidence; **the failing check reports `trailing whitespace`, with no `exit_128` anywhere**. | CI on every PR and `main`. |
+| Verified work produces a correct unactuated handoff | The `lint-format-green` case reaches `handoff_ready`; non-empty allowlisted patch; matching manifest ref/hash; one attempt, claim and outbox; exactly one `dispatch_approval` plus one `handoff`; eligibility value/reason and evidence refs; no PR or GitHub mutation. | CI on every PR and `main`; §2.5 and §2.6 are a controlled pair. |
+| Restart and duplicate delivery remain idempotent | Dispatcher restart, unchanged claim/outbox rows, same immutable run id and one Harness attempt. | CI on every PR and `main`. |
 
 A successful verified task should have a `dispatch_approval` decision and, when
 the projection constructs an unactuated handoff, a `handoff` decision. A
-negative case should have `dispatch_refusal`. Missing expected decision records
-fail the gate.
+pre-dispatch policy refusal should have `dispatch_refusal`; an intentional
+verification failure has `dispatch_approval` and no handoff; the outer profile
+loader failure occurs before attenuation's refusal-record catch and is recorded
+as such. Missing or misclassified expected evidence fails the gate.
 
 ### Source-loss projection drill
 

@@ -15,8 +15,14 @@ import {
   AttenuationError,
 } from "../../packages/averray-mcp/src/attenuation.js";
 import {
+  PILOT_CAPABILITY_IDS,
+} from "../../packages/averray-mcp/src/agent-task-proposal.js";
+import {
   mapAgentTaskToTaskIntent,
 } from "../../packages/averray-mcp/src/task-intent-mapping.js";
+import {
+  VETTED_CAPABILITIES,
+} from "../../services/harness-dispatcher/src/profile-manifest.js";
 
 const CAPABILITIES: PilotProfileManifest["capabilities"] = [
   { id: "fs.read_file", effectClass: "none", delegable: false },
@@ -30,6 +36,12 @@ const CAPABILITIES: PilotProfileManifest["capabilities"] = [
 ];
 
 describe("pre-dispatch TaskIntent attenuation", () => {
+  it("records why profile capability checks are unreachable after production loading", () => {
+    expect(new Set(VETTED_CAPABILITIES.keys())).toEqual(
+      new Set(PILOT_CAPABILITY_IDS),
+    );
+  });
+
   it("accepts a hash-bound intent inside approved direct-execution authority", async () => {
     const setup = await passingSetup();
 
@@ -232,17 +244,22 @@ describe("pre-dispatch TaskIntent attenuation", () => {
     );
   });
 
-  it("rejects profile capabilities absent from approved grants", async () => {
+  it("rejects an eight-capability profile beside seven approved grants", async () => {
     const setup = await passingSetup();
-    const capabilities: PilotProfileManifest["capabilities"] = [
-      ...setup.profile.capabilities,
-      { id: "unapproved.capability", effectClass: "local", delegable: false },
-    ];
+    const task = agentTaskV1Schema.parse({
+      ...setup.task,
+      requestedAuthority: {
+        ...setup.task.requestedAuthority,
+        grants: setup.task.requestedAuthority.grants.filter(
+          (grant) => grant.capabilityId !== "fs.write_file",
+        ),
+      },
+    });
 
     await expectReason(
-      setup.task,
+      task,
       setup.intent,
-      { ...setup.profile, capabilities },
+      setup.profile,
       "capability_not_granted",
     );
   });

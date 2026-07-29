@@ -65,9 +65,9 @@ describe("pinned Harness profile manifests", () => {
     }).toThrow("Vetted capability registry is immutable");
   });
 
-  it("fails closed on an unvetted capability id", async () => {
+  it("refuses memory.propose before the production attenuation boundary", async () => {
     const fixture = await profileFixture(
-      validProfile(["fs.read_file", "network.fetch"]),
+      validProfile([...PILOT_CAPABILITIES, "memory.propose"]),
     );
 
     await expectProfileError(

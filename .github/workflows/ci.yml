@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -76,3 +78,44 @@ jobs:
       - name: Validate Compose file
         run: docker compose --env-file ops/.env.example -f ops/compose.yml -f ops/compose.prod.yml config
 
+  int2-supervised-dispatch:
+    name: INT-2 real dispatcher integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          # The scripted fixtures pin an older approved revision. A shallow
+          # checkout makes the local-only Git remote unable to serve it.
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install reference dependencies
+        run: npm ci
+
+      - name: Run required INT-2 mechanism suite
+        env:
+          INT2_SUITE_EVIDENCE_DIR: ${{ runner.temp }}/int2-suite-evidence
+        run: scripts/ceremony/run-int2-automated-suite.sh
+
+      - name: Prove the suite did not skip
+        run: test "$(tr -d '[:space:]' < '${{ runner.temp }}/int2-suite-evidence/executed-count.txt')" = "9"
+
+      - name: Upload INT-2 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: int2-supervised-dispatch-evidence
+          path: ${{ runner.temp }}/int2-suite-evidence
+          if-no-files-found: error
