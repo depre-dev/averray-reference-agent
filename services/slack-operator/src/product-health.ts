@@ -486,6 +486,9 @@ export interface ProductHealthConfig {
   /** Verify settled jobs against real on-chain transfers. OFF by default: the
    *  log read is rate-limit sensitive, so the operator arms it deliberately. */
   payoutEvidenceEnabled: boolean;
+  /** Override the payout SOURCE address. Defaults to /health's
+   *  addresses.agentAccountCore — the contract USDC actually leaves. */
+  payoutSourceAddress?: string;
   /** Blocks scanned for Transfer logs (~24h at the chain's block time). */
   payoutLookbackBlocks: number;
   /** Settled-minus-confirmed gap tolerated as a window-boundary artifact. */
@@ -577,6 +580,7 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
     usdcAddress: env.PRODUCT_HEALTH_USDC_ADDRESS || undefined,
     usdcDecimals: num(env.PRODUCT_HEALTH_USDC_DECIMALS, 6),
     payoutEvidenceEnabled: truthy(env.PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED),
+    payoutSourceAddress: env.PRODUCT_HEALTH_PAYOUT_SOURCE_ADDRESS || undefined,
     // ~24h at a 6s block time. Lower it if the RPC caps eth_getLogs ranges.
     payoutLookbackBlocks: num(env.PRODUCT_HEALTH_PAYOUT_LOOKBACK_BLOCKS, 14400),
     payoutTolerance: num(env.PRODUCT_HEALTH_PAYOUT_TOLERANCE, 1),
@@ -1034,6 +1038,20 @@ export function decidePayoutEvidence(input: {
     // Real evidence, nothing to compare it against — say exactly that.
     return { ...base, status: "confirmed", detail: `${paid} · no settled count to compare` };
   }
+  // A 100% miss is overwhelmingly a MISCONFIGURED FILTER, not 100% payout
+  // failure: point this at the wrong source address and you observe exactly
+  // zero transfers, which is indistinguishable from total failure. That is not
+  // hypothetical — the first live run watched the signer EOA instead of
+  // AgentAccountCore and put "12 unaccounted for" on a live money board.
+  // Refuse to accuse the money until the instrument has proven it can see
+  // anything at all; one observed transfer is enough to trust it.
+  if (input.confirmedCount === 0) {
+    return {
+      ...base,
+      status: "unverified",
+      detail: `no transfers found from the configured payout source while ${input.settledCount} job${input.settledCount === 1 ? " is" : "s are"} marked settled — check the source address before suspecting the payouts`,
+    };
+  }
   const shortfall = input.settledCount - input.confirmedCount;
   if (shortfall > input.tolerance) {
     return {
@@ -1053,17 +1071,30 @@ export function decidePayoutEvidence(input: {
  * a confident, wrong payout count. Any failure → null (unverified), never a
  * zero that would read as "nothing paid".
  */
-export async function readSignerPayouts(input: {
+export async function readPayoutTransfers(input: {
   rpcUrl?: string;
-  signerAddress?: string;
+  /**
+   * The address USDC actually LEAVES on a payout — AgentAccountCore, not the
+   * signer EOA. The reward bank is an in-contract position (see #558), so the
+   * signer merely SENDS the transaction and pays the gas; the Transfer event's
+   * `from` is the contract holding the funds. Filtering on the signer finds
+   * nothing and looks exactly like total payout failure — which is precisely
+   * what it did on the first live run (12 settled, 0 found).
+   */
+  sourceAddress?: string;
   usdcAddress?: string;
   usdcDecimals: number;
   lookbackBlocks: number;
   expectedChainId?: number;
   fetchImpl: typeof fetch;
 }): Promise<{ count: number | null; usdc: number | null; windowBlocks: number | null; reason?: string }> {
-  if (!input.rpcUrl || !input.signerAddress || !input.usdcAddress) {
-    return { count: null, usdc: null, windowBlocks: null, reason: "payout evidence not configured (RPC / signer / USDC address)" };
+  if (!input.rpcUrl || !input.sourceAddress || !input.usdcAddress) {
+    return {
+      count: null, usdc: null, windowBlocks: null,
+      reason: !input.sourceAddress
+        ? "payout evidence not configured — no payout source address (/health addresses.agentAccountCore, or PRODUCT_HEALTH_PAYOUT_SOURCE_ADDRESS)"
+        : "payout evidence not configured (RPC / USDC address)",
+    };
   }
   try {
     if (input.expectedChainId !== undefined) {
@@ -1084,7 +1115,7 @@ export async function readSignerPayouts(input: {
         fromBlock: `0x${fromBlock.toString(16)}`,
         toBlock: "latest",
         address: input.usdcAddress,
-        topics: [TRANSFER_TOPIC, addressTopic(input.signerAddress)],
+        topics: [TRANSFER_TOPIC, addressTopic(input.sourceAddress)],
       }],
       input.fetchImpl,
     );
@@ -1554,9 +1585,11 @@ export async function collectProductHealthProbes(
   // is rate-limit sensitive, so while it's off the block stays honestly
   // "unverified" rather than reporting a zero that would read as nothing-paid.
   const payoutRead = config.payoutEvidenceEnabled
-    ? await readSignerPayouts({
+    ? await readPayoutTransfers({
         rpcUrl: config.rpcUrl,
-        signerAddress: config.signerAddress,
+        // USDC leaves AgentAccountCore, not the signer EOA — the reward bank is
+        // an in-contract position and the signer only sends the tx (#558).
+        sourceAddress: config.payoutSourceAddress || h.body?.addresses?.agentAccountCore,
         usdcAddress: config.usdcAddress,
         usdcDecimals: config.usdcDecimals,
         lookbackBlocks: config.payoutLookbackBlocks,

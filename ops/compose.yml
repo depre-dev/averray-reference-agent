@@ -360,6 +360,12 @@ services:
       PRODUCT_HEALTH_INCIDENT_LOG_PATH: ${PRODUCT_HEALTH_INCIDENT_LOG_PATH:-/data/product-health-incidents.jsonl}
       PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED: ${PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED:-false}
       # ~24h at a 6s block time. Lower it if the RPC caps eth_getLogs ranges.
+      # The address USDC actually LEAVES on a payout. Defaults to /health's
+      # addresses.agentAccountCore — the reward bank is an IN-CONTRACT position,
+      # so the signer EOA only sends the tx and pays gas; it is never the
+      # Transfer `from`. Filtering on the signer finds zero and looks exactly
+      # like total payout failure (it did, on the first live run).
+      PRODUCT_HEALTH_PAYOUT_SOURCE_ADDRESS: ${PRODUCT_HEALTH_PAYOUT_SOURCE_ADDRESS:-}
       PRODUCT_HEALTH_PAYOUT_LOOKBACK_BLOCKS: ${PRODUCT_HEALTH_PAYOUT_LOOKBACK_BLOCKS:-14400}
       # settled-minus-confirmed gap tolerated as a window-boundary artifact — the
       # product's rolling 24h and the block window don't share a clock.
