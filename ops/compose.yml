@@ -353,6 +353,11 @@ services:
       # OFF by default: eth_getLogs is rate-limit sensitive (see the #564
       # calibration). While off the block reads "unverified" — never a zero,
       # which would look like nothing-paid.
+      # Durable incident memory. Incidents used to be DERIVED from the 60-slot
+      # sample ring, so one aged out after ~5h and became unrecoverable. This log
+      # keeps the records themselves; /data is a volume, so they survive the
+      # redeploys that would wipe any in-memory retention.
+      PRODUCT_HEALTH_INCIDENT_LOG_PATH: ${PRODUCT_HEALTH_INCIDENT_LOG_PATH:-/data/product-health-incidents.jsonl}
       PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED: ${PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED:-false}
       # ~24h at a 6s block time. Lower it if the RPC caps eth_getLogs ranges.
       PRODUCT_HEALTH_PAYOUT_LOOKBACK_BLOCKS: ${PRODUCT_HEALTH_PAYOUT_LOOKBACK_BLOCKS:-14400}
