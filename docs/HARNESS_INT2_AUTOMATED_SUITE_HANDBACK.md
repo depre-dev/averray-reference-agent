@@ -1,7 +1,8 @@
 # INT-2 handback — automated supervised-dispatch suite
 
-**Status:** implementation and clean-checkout gates complete; independent review
-pending
+**Status:** CI/authentication and model-environment fixes implemented; clean
+fast gates green; clean Docker re-gate exposed the separately flagged
+intermittent provider-mount failure below
 
 **Baseline:** `47de9f3bdb25eda7354297a951b9927368194791`
 
@@ -138,8 +139,63 @@ INT2_HARNESS_DEPLOY_KEY_MISSING: CI requires the read-only private Harness deplo
 INT2_SUITE_EXIT_CODE=20
 ```
 
-The full suite output above is the implementation-worktree gate. A second
-clean-checkout run is recorded below before handback.
+The full suite output above is the implementation-worktree gate.
+
+### Detached clean-checkout result
+
+The second gate ran at commit `8d4df94` from
+`/private/tmp/int2-ci-fix-clean.dHm8Mp/checkout`.
+
+```text
+$ git status --porcelain
+# no output
+
+$ npm ci
+added 312 packages in 3s
+# exit 0
+
+$ npm run typecheck
+> tsc -b --pretty false packages/* services/*
+# exit 0
+
+$ npm run build
+> tsc -b packages/* services/*
+# exit 0
+
+$ npm test
+Test Files  199 passed | 2 skipped (201)
+Tests       2532 passed | 13 skipped (2545)
+Duration    15.39s
+# exit 0
+
+$ HARNESS_CHECKOUT=/Users/pascalkuriger/repo/agent-harness \
+    INT2_SUITE_EVIDENCE_DIR=/private/tmp/int2-suite-evidence-clean-8d4df94 \
+    scripts/ceremony/run-int2-automated-suite.sh
+✓ controlled pair
+✓ unapproved
+✓ approval-hash mismatch
+× negative: expected exit_2, got exit_129
+✓ green
+× restart: terminal failed; VerificationCompleted exit_129
+✓ HALT
+✓ narrower profile
+✓ unvetted profile
+Test Files  1 failed (1)
+Tests       2 failed | 7 passed (9)
+Duration    145.21s
+# exit 1
+```
+
+Both failures have the same natural Harness evidence:
+
+```text
+warning: Not a git repository. Use --no-index to compare two paths outside a working tree
+```
+
+The scripted commands were selected deterministically and ran; the later
+unchanged `git diff --check` criterion could not see `.git`. This is the
+intermittent mount observation below reproduced from a detached clean checkout,
+so this handback does **not** label all gates green and does not tune around it.
 
 ### Diagnostic observation kept separate from the fix
 
