@@ -13,6 +13,8 @@ import {
   trackChainAdvance,
   chainHaltStatus,
   probeSignerLiquidity,
+  decidePayoutEvidence,
+  readSignerPayouts,
   collectProductHealthProbes,
   chainBlockAge,
   decideProductHealthAlert,
@@ -1408,5 +1410,97 @@ describe("buildRunwayAlertPayload", () => {
     const p = buildRunwayAlertPayload(runway, "https://board");
     expect(p.count).toBe(1);
     expect(p.items[0].id).toBe("runway-signer_gas");
+  });
+});
+
+// ── payout evidence ────────────────────────────────────────────────────────
+// `settled24h` counts rows in the product's DB. These prove money actually
+// moved, and the DISCREPANCY between the two is the signal.
+describe("decidePayoutEvidence (pure verdict)", () => {
+  const base = { windowBlocks: 14400, tolerance: 1 };
+
+  it("confirmed when on-chain transfers match the settled count", () => {
+    const r = decidePayoutEvidence({ ...base, confirmedCount: 13, confirmedUsdc: 4.2, settledCount: 13 });
+    expect(r.status).toBe("confirmed");
+    expect(r.detail).toContain("13 payouts confirmed on-chain");
+    expect(r.detail).toContain("4.20 USDC");
+  });
+
+  it("SHORTFALL when jobs are marked settled but the money never moved", () => {
+    // The failure nothing else on the board can see today.
+    const r = decidePayoutEvidence({ ...base, confirmedCount: 9, confirmedUsdc: 2.7, settledCount: 13 });
+    expect(r.status).toBe("shortfall");
+    expect(r.detail).toContain("13 jobs marked settled");
+    expect(r.detail).toContain("4 unaccounted for");
+    expect(r.detail).toContain("investigate");
+  });
+
+  it("tolerates a 1-job gap — the two windows have different clocks", () => {
+    // settled24h is a rolling 24h; the log read is an approximate block window.
+    // Crying wolf on a boundary artifact trains the operator to ignore the real one.
+    const r = decidePayoutEvidence({ ...base, confirmedCount: 12, confirmedUsdc: 3.6, settledCount: 13 });
+    expect(r.status).toBe("confirmed");
+  });
+
+  it("more transfers than settled jobs is never a shortfall", () => {
+    expect(decidePayoutEvidence({ ...base, confirmedCount: 20, confirmedUsdc: 6, settledCount: 13 }).status).toBe("confirmed");
+  });
+
+  it("UNVERIFIED (never 'nothing paid') when the read failed or is off", () => {
+    const r = decidePayoutEvidence({
+      ...base, confirmedCount: null, confirmedUsdc: null, settledCount: 13, windowBlocks: null,
+      unverifiedReason: "payout evidence off (set PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED=true)",
+    });
+    expect(r.status).toBe("unverified");
+    expect(r.detail).toContain("PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED");
+    expect(r.confirmedCount).toBeNull(); // never 0 — 0 would read as "nothing paid"
+  });
+
+  it("reports real evidence even with nothing to compare against", () => {
+    const r = decidePayoutEvidence({ ...base, confirmedCount: 3, confirmedUsdc: 1.5, settledCount: null });
+    expect(r.status).toBe("confirmed");
+    expect(r.detail).toContain("no settled count to compare");
+  });
+});
+
+describe("readSignerPayouts (chain-guarded log read)", () => {
+  const cfg = {
+    rpcUrl: "http://rpc", signerAddress: "0xabc", usdcAddress: "0xusdc",
+    usdcDecimals: 6, lookbackBlocks: 100,
+  };
+  // eth_chainId → chain, eth_blockNumber → height, eth_getLogs → transfers.
+  function rpc(chainIdHex: string, logs: unknown): typeof fetch {
+    return (async (_u: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const m = rpcMethod(init ?? {});
+      const result = m === "eth_chainId" ? chainIdHex : m === "eth_blockNumber" ? "0x3e8" : logs;
+      return { ok: true, status: 200, json: async () => ({ result }) } as unknown as Response;
+    }) as unknown as typeof fetch;
+  }
+
+  it("counts transfers and sums the USDC actually moved", async () => {
+    const logs = [{ data: "0xf4240" }, { data: "0x1e8480" }]; // 1 + 2 USDC
+    const r = await readSignerPayouts({ ...cfg, expectedChainId: 420420419, fetchImpl: rpc("0x190f1b43", logs) });
+    expect(r.count).toBe(2);
+    expect(r.usdc).toBeCloseTo(3, 6);
+    expect(r.windowBlocks).toBe(100);
+  });
+
+  it("refuses logs from the WRONG CHAIN — same guard as balances (#543)", async () => {
+    const logs = [{ data: "0xf4240" }];
+    const r = await readSignerPayouts({ ...cfg, expectedChainId: 420420419, fetchImpl: rpc("0x190f1b41", logs) });
+    expect(r.count).toBeNull(); // a wrong-chain payout count would be confidently wrong
+    expect(r.reason).toContain("chain 420420417");
+  });
+
+  it("a failed/rate-limited read is unverified, never zero", async () => {
+    const r = await readSignerPayouts({ ...cfg, fetchImpl: throwingFetch() });
+    expect(r.count).toBeNull();
+    expect(r.reason).toContain("log read failed");
+  });
+
+  it("unconfigured is unverified too", async () => {
+    const r = await readSignerPayouts({ ...cfg, usdcAddress: undefined, fetchImpl: rpc("0x190f1b43", []) });
+    expect(r.count).toBeNull();
+    expect(r.reason).toContain("not configured");
   });
 });
