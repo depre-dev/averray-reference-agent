@@ -346,6 +346,19 @@ services:
       # Confirmed against the official docs and by live balanceOf calls (2026-07-25).
       PRODUCT_HEALTH_USDC_ADDRESS: ${PRODUCT_HEALTH_USDC_ADDRESS:-}
       PRODUCT_HEALTH_USDC_DECIMALS: ${PRODUCT_HEALTH_USDC_DECIMALS:-6}
+      # Payout evidence — proves jobs marked settled ACTUALLY PAID, by reading
+      # USDC Transfer logs from the signer. settled24h counts rows in the
+      # product's own DB; this counts money that moved, and the GAP between them
+      # is the signal (settled jobs with no transfer = a silent money failure).
+      # OFF by default: eth_getLogs is rate-limit sensitive (see the #564
+      # calibration). While off the block reads "unverified" — never a zero,
+      # which would look like nothing-paid.
+      PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED: ${PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED:-false}
+      # ~24h at a 6s block time. Lower it if the RPC caps eth_getLogs ranges.
+      PRODUCT_HEALTH_PAYOUT_LOOKBACK_BLOCKS: ${PRODUCT_HEALTH_PAYOUT_LOOKBACK_BLOCKS:-14400}
+      # settled-minus-confirmed gap tolerated as a window-boundary artifact — the
+      # product's rolling 24h and the block window don't share a clock.
+      PRODUCT_HEALTH_PAYOUT_TOLERANCE: ${PRODUCT_HEALTH_PAYOUT_TOLERANCE:-1}
       # Floors default to 0 = that probe can NEVER go red. Fine for a testnet, but
       # on a live network a 0 floor means no warning before you run dry. Mainnet
       # values in use (2026-07-25, sized off live balances): GAS_NATIVE=1 DOT (low

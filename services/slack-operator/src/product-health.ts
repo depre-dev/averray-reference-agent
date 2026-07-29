@@ -483,6 +483,13 @@ export interface ProductHealthConfig {
   signerAddress?: string;
   usdcAddress?: string;
   usdcDecimals: number;
+  /** Verify settled jobs against real on-chain transfers. OFF by default: the
+   *  log read is rate-limit sensitive, so the operator arms it deliberately. */
+  payoutEvidenceEnabled: boolean;
+  /** Blocks scanned for Transfer logs (~24h at the chain's block time). */
+  payoutLookbackBlocks: number;
+  /** Settled-minus-confirmed gap tolerated as a window-boundary artifact. */
+  payoutTolerance: number;
   /** Native-gas floor in whole tokens (e.g. 0.1 DOT). 0 = don't threshold. */
   minGasNative: number;
   /** capabilityHealth keys that MUST be up; one dropping ⇒ red. Env
@@ -518,6 +525,11 @@ export interface ProductHealthConfig {
 function num(value: unknown, fallback: number): number {
   const n = typeof value === "number" ? value : Number(value);
   return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+/** Opt-in switch, same spelling as OPS_AUTOREMEDIATE_ENABLED. */
+function truthy(value: string | undefined): boolean {
+  return (value ?? "").trim().toLowerCase() === "true";
 }
 
 function csv(value: string | undefined, fallback: string): string[] {
@@ -564,6 +576,10 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
     signerAddress: env.PRODUCT_HEALTH_SIGNER_ADDRESS || undefined,
     usdcAddress: env.PRODUCT_HEALTH_USDC_ADDRESS || undefined,
     usdcDecimals: num(env.PRODUCT_HEALTH_USDC_DECIMALS, 6),
+    payoutEvidenceEnabled: truthy(env.PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED),
+    // ~24h at a 6s block time. Lower it if the RPC caps eth_getLogs ranges.
+    payoutLookbackBlocks: num(env.PRODUCT_HEALTH_PAYOUT_LOOKBACK_BLOCKS, 14400),
+    payoutTolerance: num(env.PRODUCT_HEALTH_PAYOUT_TOLERANCE, 1),
     minGasNative: num(env.PRODUCT_HEALTH_MIN_GAS_NATIVE, 0),
     requiredCapabilities: csv(env.PRODUCT_HEALTH_REQUIRED_CAPABILITIES, "blockchain,treasuryMutations"),
     expectedWarnings: csv(env.PRODUCT_HEALTH_EXPECTED_WARNINGS, "xcm_observer_staged,indexer_unavailable,gas_sponsor_disabled"),
@@ -970,6 +986,136 @@ async function ethRpc(
   return result;
 }
 
+// keccak256("Transfer(address,address,uint256)") — the ERC-20 Transfer topic.
+const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+
+/** Pad an address to a 32-byte topic (topic1 = indexed `from`). */
+function addressTopic(address: string): string {
+  return `0x${address.toLowerCase().replace(/^0x/, "").padStart(64, "0")}`;
+}
+
+/**
+ * The payout verdict. PURE — the tolerance reasoning is the delicate part, so
+ * it's testable without a chain.
+ *
+ * The two counts come from different clocks: `settled24h` is the product's
+ * rolling 24h, the log read is an approximate block window. A small mismatch is
+ * a boundary artifact, not a lost payout, so a shortfall inside `tolerance` is
+ * still "confirmed" — crying wolf on an off-by-one would train the operator to
+ * ignore the one that matters. A material shortfall is reported honestly but
+ * NOT as red: the window really is approximate, and "investigate" is the true
+ * instruction, not "settlement is down".
+ */
+export function decidePayoutEvidence(input: {
+  confirmedCount: number | null;
+  confirmedUsdc: number | null;
+  settledCount: number | null;
+  windowBlocks: number | null;
+  tolerance: number;
+  unverifiedReason?: string;
+}): PayoutEvidence {
+  const base = {
+    confirmedCount: input.confirmedCount,
+    confirmedUsdc: input.confirmedUsdc,
+    settledCount: input.settledCount,
+    windowBlocks: input.windowBlocks,
+  };
+  if (input.confirmedCount === null) {
+    return {
+      ...base,
+      status: "unverified",
+      detail: input.unverifiedReason ?? "payout evidence unverified",
+    };
+  }
+  const paid = `${input.confirmedCount} payout${input.confirmedCount === 1 ? "" : "s"} confirmed on-chain${
+    input.confirmedUsdc !== null ? ` (${input.confirmedUsdc.toFixed(2)} USDC)` : ""
+  }`;
+  if (input.settledCount === null) {
+    // Real evidence, nothing to compare it against — say exactly that.
+    return { ...base, status: "confirmed", detail: `${paid} · no settled count to compare` };
+  }
+  const shortfall = input.settledCount - input.confirmedCount;
+  if (shortfall > input.tolerance) {
+    return {
+      ...base,
+      status: "shortfall",
+      detail: `${input.settledCount} jobs marked settled but only ${paid} — ${shortfall} unaccounted for; windows are approximate, investigate`,
+    };
+  }
+  return { ...base, status: "confirmed", detail: `${paid} · ${input.settledCount} marked settled` };
+}
+
+/**
+ * Read USDC Transfer logs FROM the signer over a recent block window.
+ *
+ * Guarded the same way balances are (#543): logs are only trusted from an
+ * endpoint on the product's chain, because a wrong-chain endpoint would return
+ * a confident, wrong payout count. Any failure → null (unverified), never a
+ * zero that would read as "nothing paid".
+ */
+export async function readSignerPayouts(input: {
+  rpcUrl?: string;
+  signerAddress?: string;
+  usdcAddress?: string;
+  usdcDecimals: number;
+  lookbackBlocks: number;
+  expectedChainId?: number;
+  fetchImpl: typeof fetch;
+}): Promise<{ count: number | null; usdc: number | null; windowBlocks: number | null; reason?: string }> {
+  if (!input.rpcUrl || !input.signerAddress || !input.usdcAddress) {
+    return { count: null, usdc: null, windowBlocks: null, reason: "payout evidence not configured (RPC / signer / USDC address)" };
+  }
+  try {
+    if (input.expectedChainId !== undefined) {
+      const actual = Number(BigInt(await ethRpc(input.rpcUrl, "eth_chainId", [], input.fetchImpl)));
+      if (actual !== input.expectedChainId) {
+        return {
+          count: null, usdc: null, windowBlocks: null,
+          reason: `payout evidence unverified — RPC is on chain ${actual}, product is on ${input.expectedChainId}`,
+        };
+      }
+    }
+    const latest = Number(BigInt(await ethRpc(input.rpcUrl, "eth_blockNumber", [], input.fetchImpl)));
+    const fromBlock = Math.max(0, latest - input.lookbackBlocks);
+    const logs = await ethRpcRaw(
+      input.rpcUrl,
+      "eth_getLogs",
+      [{
+        fromBlock: `0x${fromBlock.toString(16)}`,
+        toBlock: "latest",
+        address: input.usdcAddress,
+        topics: [TRANSFER_TOPIC, addressTopic(input.signerAddress)],
+      }],
+      input.fetchImpl,
+    );
+    if (!Array.isArray(logs)) {
+      return { count: null, usdc: null, windowBlocks: null, reason: "payout evidence unverified — eth_getLogs returned no array" };
+    }
+    let total = 0n;
+    for (const entry of logs) {
+      const data = (entry as { data?: unknown }).data;
+      if (typeof data === "string" && data.length > 2) {
+        try {
+          total += BigInt(data);
+        } catch {
+          // A malformed value is not a reason to under-report the count.
+        }
+      }
+    }
+    return {
+      count: logs.length,
+      usdc: Number(total) / 10 ** input.usdcDecimals,
+      windowBlocks: latest - fromBlock,
+    };
+  } catch (error) {
+    // Rate limit, capped range, dead endpoint — all unverified, never "0 paid".
+    return {
+      count: null, usdc: null, windowBlocks: null,
+      reason: `payout evidence unverified — log read failed (${error instanceof Error ? error.message : String(error)})`,
+    };
+  }
+}
+
 // erc20 balanceOf(address) selector.
 const BALANCE_OF_SELECTOR = "0x70a08231";
 
@@ -1238,7 +1384,36 @@ export interface MoneyPathData {
   stuck?: number | null;
   failed24h?: number | null;
   asOf?: number | null;
+  /** Independent on-chain proof that the settled jobs actually PAID. */
+  payout?: PayoutEvidence;
 }
+
+/**
+ * Evidence that rewards were actually PAID, not merely marked settled.
+ *
+ * `settled24h` and friends are job-state counts from the product's own
+ * database — "13 rows say settled". That is not proof any money moved. This
+ * reads USDC Transfer logs FROM the signer straight off the chain, so the two
+ * numbers come from independent sources, and THE DISCREPANCY IS THE SIGNAL:
+ * matching → genuinely paid; fewer transfers than settled jobs → jobs marked
+ * settled that never paid, which nothing else on the board can currently see.
+ *
+ * `confirmedCount: null` means UNVERIFIED (disabled, unconfigured, or the log
+ * read failed). It never falls back to inferring payment from job state.
+ */
+export interface PayoutEvidence {
+  status: "confirmed" | "shortfall" | "unverified";
+  detail: string;
+  /** Transfers observed on-chain in the window; null = unverified. */
+  confirmedCount: number | null;
+  /** Summed USDC actually transferred; null = unverified. */
+  confirmedUsdc: number | null;
+  /** The product's own settled count, for the comparison. */
+  settledCount: number | null;
+  /** Blocks scanned. The window is approximate — the verdict allows for it. */
+  windowBlocks: number | null;
+}
+
 export interface ProductHealthSnapshotBlocks {
   chainId?: number | null;
   network?: "testnet" | "mainnet" | "unknown";
@@ -1375,6 +1550,28 @@ export async function collectProductHealthProbes(
     ).values(),
   ];
   const settlement = h.body?.settlement;
+  // Independent proof that the settled jobs actually PAID. Opt-in: the log read
+  // is rate-limit sensitive, so while it's off the block stays honestly
+  // "unverified" rather than reporting a zero that would read as nothing-paid.
+  const payoutRead = config.payoutEvidenceEnabled
+    ? await readSignerPayouts({
+        rpcUrl: config.rpcUrl,
+        signerAddress: config.signerAddress,
+        usdcAddress: config.usdcAddress,
+        usdcDecimals: config.usdcDecimals,
+        lookbackBlocks: config.payoutLookbackBlocks,
+        expectedChainId: chainId,
+        fetchImpl,
+      })
+    : { count: null, usdc: null, windowBlocks: null, reason: "payout evidence off (set PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED=true)" };
+  const payout = decidePayoutEvidence({
+    confirmedCount: payoutRead.count,
+    confirmedUsdc: payoutRead.usdc,
+    settledCount: settlement?.settled24h ?? null,
+    windowBlocks: payoutRead.windowBlocks,
+    tolerance: config.payoutTolerance,
+    ...(payoutRead.reason ? { unverifiedReason: payoutRead.reason } : {}),
+  });
   const snapshot: ProductHealthSnapshotBlocks = {
     chainId: chainId ?? null,
     network: resolveProductHealthNetwork(chainId),
@@ -1390,6 +1587,7 @@ export async function collectProductHealthProbes(
             stuck: settlement.stuck ?? null,
             failed24h: settlement.failed24h ?? null,
             asOf: parseHealthAsOf(settlement.asOf),
+            payout,
           },
         }
       : {}),
