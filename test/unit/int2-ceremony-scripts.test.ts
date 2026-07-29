@@ -1,5 +1,7 @@
 import { execFileSync } from "node:child_process";
 import {
+  chmod,
+  mkdir,
   mkdtemp,
   readFile,
   rm,
@@ -15,9 +17,16 @@ import {
   expectationsForCase,
   verifyScriptedPairPreflight,
 } from "../../scripts/ceremony/int2-evidence.mjs";
+import {
+  createInt2WorkerEnvironment,
+} from "../../scripts/ceremony/int2-worker-environment.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const SCRIPT_ROOT = path.join(ROOT, "scripts/ceremony");
+const CHECKOUT_HELPER = path.join(
+  SCRIPT_ROOT,
+  "lib/int2-harness-checkout.sh",
+);
 const OPERATOR_SCRIPTS = [
   "int2-bringup.sh",
   "int2-green-setup.sh",
@@ -41,6 +50,7 @@ describe("committed INT-2 ceremony mechanics", () => {
       OPERATOR_SCRIPTS.map(async (name) => {
         const target = path.join(SCRIPT_ROOT, name);
         execFileSync("bash", ["-n", target]);
+        execFileSync("zsh", ["-n", target]);
         return [name, await readFile(target, "utf8")] as const;
       }),
     );
@@ -99,5 +109,144 @@ describe("committed INT-2 ceremony mechanics", () => {
       runCount: 1,
       effectiveCapabilities: expect.not.arrayContaining(["fs.write_file"]),
     });
+  });
+
+  it("fails CI with a named error when the private Harness key is absent", async () => {
+    const temporary = await mkdtemp(path.join(tmpdir(), "int2-checkout-missing-"));
+    temporaryRoots.push(temporary);
+    const log = path.join(temporary, "bootstrap.log");
+    let stderr = "";
+    let exitCode: number | undefined;
+    try {
+      execFileSync(
+        "bash",
+        [
+          "-c",
+          'source "$1"; int2_checkout_harness "$2" "$3" "$4"',
+          "int2-checkout-test",
+          CHECKOUT_HELPER,
+          path.join(temporary, "agent-harness"),
+          "0890a1f04c2729cbd310e21f66dd9dc6fbc66dc2",
+          log,
+        ],
+        {
+          env: {
+            ...process.env,
+            CI: "true",
+            INT2_HARNESS_DEPLOY_KEY: "",
+          },
+          stdio: ["ignore", "ignore", "pipe"],
+        },
+      );
+    } catch (error) {
+      exitCode = (error as { status?: number }).status;
+      stderr = String((error as { stderr?: Buffer }).stderr ?? "");
+    }
+    expect(exitCode).toBe(20);
+    expect(stderr).toContain("INT2_HARNESS_DEPLOY_KEY_MISSING");
+    expect(await readFile(log, "utf8")).toContain(
+      "INT2_HARNESS_DEPLOY_KEY_MISSING",
+    );
+  });
+
+  it("uses the deploy key only for a strict authenticated Harness checkout", async () => {
+    const temporary = await mkdtemp(path.join(tmpdir(), "int2-checkout-key-"));
+    temporaryRoots.push(temporary);
+    const fakeBin = path.join(temporary, "bin");
+    const fakeGit = path.join(fakeBin, "git");
+    const fakeGitLog = path.join(temporary, "git.log");
+    const bootstrapLog = path.join(temporary, "bootstrap.log");
+    const checkout = path.join(temporary, "agent-harness");
+    await mkdir(fakeBin, { recursive: true });
+    await writeFile(
+      fakeGit,
+      [
+        "#!/bin/sh",
+        'printf "key=%s\\nssh=%s\\nargs=%s\\n" \\',
+        '  "${INT2_HARNESS_DEPLOY_KEY:-absent}" \\',
+        '  "${GIT_SSH_COMMAND:-missing}" "$*" >> "$INT2_FAKE_GIT_LOG"',
+        'for value in "$@"; do destination="$value"; done',
+        'mkdir -p "$destination/.git"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await chmod(fakeGit, 0o755);
+
+    execFileSync(
+      "bash",
+      [
+        "-c",
+        'source "$1"; int2_checkout_harness "$2" "$3" "$4"',
+        "int2-checkout-test",
+        CHECKOUT_HELPER,
+        checkout,
+        "0890a1f04c2729cbd310e21f66dd9dc6fbc66dc2",
+        bootstrapLog,
+      ],
+      {
+        env: {
+          ...process.env,
+          CI: "true",
+          INT2_FAKE_GIT_LOG: fakeGitLog,
+          INT2_HARNESS_DEPLOY_KEY: "test-only-private-key",
+          PATH: `${fakeBin}:${process.env.PATH}`,
+        },
+      },
+    );
+
+    const invocation = await readFile(fakeGitLog, "utf8");
+    expect(invocation).toContain("key=absent");
+    expect(invocation).toContain(
+      "args=clone --quiet git@github.com:averray-agent/agent-harness.git",
+    );
+    expect(invocation).toContain("IdentitiesOnly=yes");
+    expect(invocation).toContain("BatchMode=yes");
+    expect(invocation).toContain("StrictHostKeyChecking=yes");
+    expect(await readFile(bootstrapLog, "utf8")).toContain(
+      "INT2_HARNESS_CHECKOUT_AUTHENTICATED method=read-only-deploy-key",
+    );
+  });
+
+  it("removes inherited live-model and script-precedence ambiguity", () => {
+    const controlled = createInt2WorkerEnvironment(
+      {
+        PATH: "/test/bin",
+        HARNESS_APP_VERSION: "foreign-version",
+        HARNESS_BASELINE_MODEL: "live-model",
+        HARNESS_MODEL_ADAPTER: "gemini",
+        HARNESS_MODEL_API_KEY: "secret",
+        HARNESS_TEST_EXECUTOR_MODEL_SCRIPT_OPENAI_COMPATIBLE:
+          "/wrong/highest-precedence.jsonl",
+        HARNESS_TEST_MODEL_SCRIPT: "/wrong/generic.jsonl",
+        HARNESS_TEST_MODEL_FACTORY_COUNTER: "/wrong/counter",
+      },
+      {
+        databaseUrl: "postgresql://test",
+        profilesRoot: "/profiles",
+        modelScriptPath: "/controlled/model.jsonl",
+        artifactRoot: "/artifacts",
+      },
+    );
+
+    expect(controlled).toMatchObject({
+      PATH: "/test/bin",
+      HARNESS_APP_VERSION: "pkt-003",
+      HARNESS_DATABASE_URL: "postgresql://test",
+      HARNESS_MODEL_ADAPTER: "openai-compatible",
+      HARNESS_MODEL_BASE_URL: "http://127.0.0.1",
+      HARNESS_MODEL_REF: "int2-scripted-model",
+      HARNESS_TEST_EXECUTOR_MODEL_SCRIPT_OPENAI_COMPATIBLE:
+        "/controlled/model.jsonl",
+      HARNESS_TEST_EXECUTOR_MODEL_SCRIPT: "/controlled/model.jsonl",
+      HARNESS_TEST_MODEL_SCRIPT_OPENAI_COMPATIBLE:
+        "/controlled/model.jsonl",
+      HARNESS_TEST_MODEL_SCRIPT: "/controlled/model.jsonl",
+    });
+    expect(controlled).not.toHaveProperty("HARNESS_BASELINE_MODEL");
+    expect(controlled).not.toHaveProperty("HARNESS_MODEL_API_KEY");
+    expect(controlled).not.toHaveProperty(
+      "HARNESS_TEST_MODEL_FACTORY_COUNTER",
+    );
   });
 });

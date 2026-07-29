@@ -106,6 +106,7 @@ jobs:
 
       - name: Run required INT-2 mechanism suite
         env:
+          INT2_HARNESS_DEPLOY_KEY: ${{ secrets.INT2_HARNESS_DEPLOY_KEY }}
           INT2_SUITE_EVIDENCE_DIR: ${{ runner.temp }}/int2-suite-evidence
         run: scripts/ceremony/run-int2-automated-suite.sh
 

@@ -10,9 +10,13 @@ _int2_harness_db="int2-suite-harness-${_int2_suffix}"
 _int2_reference_db="int2-suite-reference-${_int2_suffix}"
 _int2_evidence="${INT2_SUITE_EVIDENCE_DIR:-$_int2_root/evidence}"
 _int2_marker="$_int2_evidence/executed-count.txt"
+_int2_bootstrap_log="$_int2_evidence/bootstrap.log"
 _int2_started="$(date +%s)"
 
 _int2_cleanup() {
+  _int2_exit="$?"
+  printf '%s\n' "INT2_SUITE_EXIT_CODE=$_int2_exit" \
+    >> "$_int2_bootstrap_log" 2>/dev/null || true
   docker stop "$_int2_harness_db" "$_int2_reference_db" \
     >/dev/null 2>&1 || true
   rm -rf "$_int2_root"
@@ -24,6 +28,36 @@ for _int2_command in docker git node npm uv; do
     || { echo "INT-2 suite requires $_int2_command" >&2; exit 2; }
 done
 mkdir -p "$_int2_evidence"
+printf '%s\n' \
+  "INT2_SUITE_BOOTSTRAP_STARTED pin=0890a1f04c2729cbd310e21f66dd9dc6fbc66dc2" \
+  > "$_int2_bootstrap_log"
+
+export HARNESS_CHECKOUT="${HARNESS_CHECKOUT:-$_int2_root/agent-harness}"
+_int2_pin="0890a1f04c2729cbd310e21f66dd9dc6fbc66dc2"
+# shellcheck source=scripts/ceremony/lib/int2-harness-checkout.sh
+source "$_int2_repo/scripts/ceremony/lib/int2-harness-checkout.sh"
+int2_checkout_harness "$HARNESS_CHECKOUT" "$_int2_pin" "$_int2_bootstrap_log"
+test -z "$(git -C "$HARNESS_CHECKOUT" status --porcelain)" \
+  || {
+    echo "INT2_HARNESS_CHECKOUT_DIRTY: the private Harness checkout is not clean" \
+      | tee -a "$_int2_bootstrap_log" >&2
+    exit 23
+  }
+git -C "$HARNESS_CHECKOUT" checkout --quiet --detach "$_int2_pin" \
+  2>> "$_int2_bootstrap_log" \
+  || {
+    echo "INT2_HARNESS_PIN_UNAVAILABLE: checkout does not contain the required pinned revision" \
+      | tee -a "$_int2_bootstrap_log" >&2
+    exit 24
+  }
+test "$(git -C "$HARNESS_CHECKOUT" rev-parse HEAD)" = "$_int2_pin" \
+  || {
+    echo "INT2_HARNESS_PIN_MISMATCH: checkout did not resolve to the required revision" \
+      | tee -a "$_int2_bootstrap_log" >&2
+    exit 25
+  }
+printf '%s\n' "INT2_HARNESS_PIN_VERIFIED pin=$_int2_pin" \
+  >> "$_int2_bootstrap_log"
 
 docker run --rm --detach --name "$_int2_harness_db" \
   --publish 127.0.0.1::5432 \
@@ -60,15 +94,6 @@ _int2_reference_port="$(
 export HARNESS_TEST_DATABASE_URL="postgresql://postgres:int2-suite@127.0.0.1:${_int2_harness_port}/harness_suite"
 export DISPATCH_TEST_DATABASE_URL="postgresql://postgres:int2-suite@127.0.0.1:${_int2_reference_port}/reference_suite"
 
-export HARNESS_CHECKOUT="${HARNESS_CHECKOUT:-$_int2_root/agent-harness}"
-_int2_pin="0890a1f04c2729cbd310e21f66dd9dc6fbc66dc2"
-if [ ! -d "$HARNESS_CHECKOUT/.git" ]; then
-  git clone --quiet https://github.com/averray-agent/agent-harness.git \
-    "$HARNESS_CHECKOUT"
-fi
-test -z "$(git -C "$HARNESS_CHECKOUT" status --porcelain)"
-git -C "$HARNESS_CHECKOUT" checkout --quiet --detach "$_int2_pin"
-test "$(git -C "$HARNESS_CHECKOUT" rev-parse HEAD)" = "$_int2_pin"
 (
   cd "$HARNESS_CHECKOUT"
   uv sync --frozen
@@ -77,6 +102,7 @@ test "$(git -C "$HARNESS_CHECKOUT" rev-parse HEAD)" = "$_int2_pin"
 )
 export HARNESS_BIN="$HARNESS_CHECKOUT/.venv/bin/harness"
 "$HARNESS_BIN" --help >/dev/null
+printf '%s\n' "INT2_HARNESS_RUNTIME_READY" >> "$_int2_bootstrap_log"
 
 for _int2_migration in "$_int2_repo"/ops/migrations/*.sql; do
   docker exec -i "$_int2_reference_db" \
@@ -96,6 +122,7 @@ export INT2_REPOSITORY_ROOT="$_int2_repo"
 export INT2_SUITE_EVIDENCE_DIR="$_int2_evidence"
 export INT2_SUITE_EXECUTION_MARKER="$_int2_marker"
 
+printf '%s\n' "INT2_CASES_STARTED expected=9" >> "$_int2_bootstrap_log"
 (
   cd "$_int2_repo"
   npm run build
@@ -111,4 +138,6 @@ test "$_int2_executed" = "9" \
   }
 _int2_elapsed="$(( $(date +%s) - _int2_started ))"
 printf '%s\n' "$_int2_elapsed" > "$_int2_evidence/wall-time-seconds.txt"
+printf '%s\n' "INT2_CASES_COMPLETED executed=$_int2_executed elapsed=$_int2_elapsed" \
+  >> "$_int2_bootstrap_log"
 echo "INT-2 automated suite: $_int2_executed cases executed in ${_int2_elapsed}s"

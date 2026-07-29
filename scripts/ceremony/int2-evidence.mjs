@@ -42,6 +42,11 @@ export const INT2_CAPABILITY_BOUNDARY = Object.freeze({
 
 const DISPATCH_WORKSPACE_ROOT =
   "/var/lib/harness-dispatcher/workspaces";
+const GREEN_TOOL_COMMAND =
+  "printf '%b' '\\nINT-2 green-path proof line, cleanly formatted.\\n' >> docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md";
+const NEGATIVE_TOOL_COMMAND =
+  "printf '%b' '\\nINT-2 negative-path proof line with trailing whitespace.   \\n' >> docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md";
+const HALT_TOOL_COMMAND = "sleep 30";
 const CASE_EXPECTATIONS = Object.freeze({
   green: Object.freeze({
     lifecycle: "handoff_ready",
@@ -63,6 +68,7 @@ const CASE_EXPECTATIONS = Object.freeze({
     requirePatch: true,
     requireManifest: true,
     requireFence: true,
+    expectedToolCommand: GREEN_TOOL_COMMAND,
   }),
   negative: Object.freeze({
     lifecycle: "failed",
@@ -84,6 +90,7 @@ const CASE_EXPECTATIONS = Object.freeze({
     requirePatch: true,
     requireManifest: true,
     requireFence: true,
+    expectedToolCommand: NEGATIVE_TOOL_COMMAND,
   }),
   restart: Object.freeze({
     lifecycle: "handoff_ready",
@@ -105,6 +112,7 @@ const CASE_EXPECTATIONS = Object.freeze({
     requirePatch: true,
     requireManifest: true,
     requireFence: true,
+    expectedToolCommand: GREEN_TOOL_COMMAND,
   }),
   halt: Object.freeze({
     lifecycle: "cancelled",
@@ -123,6 +131,9 @@ const CASE_EXPECTATIONS = Object.freeze({
     requireFence: true,
     decisionReason: "halt_active_run_cancelled",
     expectedAuthorityReducingCancellation: true,
+    expectedToolCommand: HALT_TOOL_COMMAND,
+    expectedToolError: "command_timeout",
+    minimumToolDurationSeconds: 29,
   }),
   "hash-mismatch": Object.freeze({
     lifecycle: "blocked",
@@ -179,6 +190,7 @@ const CASE_EXPECTATIONS = Object.freeze({
         (capability) => capability !== "fs.write_file",
       ),
     ),
+    expectedToolCommand: GREEN_TOOL_COMMAND,
   }),
   unapproved: Object.freeze({
     lifecycle: "proposed",
@@ -772,6 +784,80 @@ export function verifyInt2Evidence(
         && verification.requiredFailed.includes("format-command"),
         "required_failed_names_format",
         `required_failed=${JSON.stringify(verification?.requiredFailed)}`,
+      );
+    }
+  }
+
+  if (expectations.expectedToolCommand) {
+    const proposed = evidence?.events?.find(
+      (event) =>
+        event?.type === "CapabilityProposed"
+        && event?.payload?.capability_id === "shell.run"
+        && event?.payload?.arguments?.command
+          === expectations.expectedToolCommand,
+    );
+    const dispatched = proposed
+      ? evidence?.events?.find(
+          (event) =>
+            event?.type === "CapabilityDispatched"
+            && event?.payload?.capability_id === "shell.run"
+            && event?.payload?.args_hash === proposed.payload?.args_hash,
+        )
+      : undefined;
+    const completed = dispatched
+      ? evidence?.events?.find(
+          (event) =>
+            event?.type === "CapabilityCompleted"
+            && event?.payload?.capability_id === "shell.run"
+            && event?.payload?.invocation_id
+              === dispatched.payload?.invocation_id,
+        )
+      : undefined;
+    check(
+      proposed !== undefined,
+      "scripted_tool_proposed",
+      `the exact ${JSON.stringify(expectations.expectedToolCommand)} command was not proposed`,
+    );
+    check(
+      dispatched !== undefined,
+      "scripted_tool_dispatched",
+      "the exact scripted shell command was not dispatched",
+    );
+    check(
+      completed !== undefined,
+      "scripted_tool_completed",
+      "the exact scripted shell command has no completion evidence",
+    );
+    if (expectations.minimumToolDurationSeconds !== undefined) {
+      check(
+        completed?.payload?.outcome?.duration_seconds
+          >= expectations.minimumToolDurationSeconds,
+        "scripted_tool_duration",
+        `expected at least ${expectations.minimumToolDurationSeconds}s, got ${
+          completed?.payload?.outcome?.duration_seconds ?? "missing"
+        }`,
+      );
+      check(
+        completed?.payload?.outcome?.error?.code
+          === expectations.expectedToolError,
+        "scripted_tool_terminal_error",
+        `expected ${expectations.expectedToolError}, got ${
+          completed?.payload?.outcome?.error?.code ?? "missing"
+        }`,
+      );
+    } else {
+      check(
+        completed?.payload?.outcome?.ok === true,
+        "scripted_tool_succeeded",
+        "the exact scripted shell command did not complete successfully",
+      );
+      check(
+        completed?.payload?.outcome?.output_inline?.exit_code === 0
+          && completed?.payload?.action?.exit_code === 0,
+        "scripted_tool_exit_zero",
+        `expected the exact scripted shell command to exit 0, got ${
+          completed?.payload?.outcome?.output_inline?.exit_code ?? "missing"
+        }`,
       );
     }
   }

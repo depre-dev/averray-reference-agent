@@ -36,6 +36,9 @@ import {
   verifyScriptedPairPreflight,
 } from "../../scripts/ceremony/int2-evidence.mjs";
 import {
+  createInt2WorkerEnvironment,
+} from "../../scripts/ceremony/int2-worker-environment.mjs";
+import {
   createProductionDispatcher,
   type DispatcherLogger,
   type DispatcherProcess,
@@ -73,6 +76,8 @@ const FIXTURE_ROOT = path.join(
 const EXPECTED_CASE_COUNT = 9;
 const TEST_TIMEOUT_MS = 240_000;
 const TERMINAL_WAIT_MS = 180_000;
+const HARNESS_STATE_WAIT_MS = 90_000;
+const HALT_COMMAND = "sleep 30";
 const SENTINEL_RUN_ID = "00000000-0000-4000-8000-000000000000";
 
 describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
@@ -325,7 +330,13 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
     expect(replay.stdout.trim()).toBe(approval.intendedRunId);
 
     const restarted = createDispatcher();
-    await waitForLifecycle(restarted, workItemId, "handoff_ready");
+    await waitForLifecycle(
+      restarted,
+      workItemId,
+      "handoff_ready",
+      approval.intendedRunId,
+      worker,
+    );
     await restarted.shutdown();
     await stopWorker(worker);
 
@@ -358,7 +369,10 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
         outcome: "dispatched",
         intendedRunId: approval.intendedRunId,
       });
-      await waitForHarnessState(approval.intendedRunId, "executing");
+      await waitForHarnessToolDispatch(
+        approval.intendedRunId,
+        HALT_COMMAND,
+      );
       await writeFile(haltFile, "INT-2 automated HALT drill\n", "utf8");
       await expect(dispatcher.tick()).resolves.toMatchObject({ outcome: "halted" });
       await waitForHarnessState(approval.intendedRunId, "cancelled");
@@ -493,7 +507,13 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
     const worker = await startWorker();
     const dispatcher = createDispatcher();
     try {
-      await waitForLifecycle(dispatcher, workItemId, lifecycle);
+      await waitForLifecycle(
+        dispatcher,
+        workItemId,
+        lifecycle,
+        approval.intendedRunId,
+        worker,
+      );
     } finally {
       await dispatcher.shutdown();
       await stopWorker(worker);
@@ -618,6 +638,8 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
     dispatcher: DispatcherProcess,
     workItemId: string,
     expected: string,
+    intendedRunId: string,
+    worker: HarnessWorker,
   ): Promise<void> {
     const deadline = Date.now() + TERMINAL_WAIT_MS;
     let lastLifecycle = "<missing>";
@@ -635,16 +657,33 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
       if (["blocked", "cancelled", "failed", "handoff_ready"].includes(
         lastLifecycle,
       )) {
+        const diagnostics = await writeLifecycleDiagnostics({
+          workItemId,
+          intendedRunId,
+          expectedLifecycle: expected,
+          lastLifecycle,
+          worker,
+        });
         throw new Error(
           `${workItemId} reached unexpected terminal lifecycle `
-            + `${lastLifecycle}; expected ${expected}`,
+            + `${lastLifecycle}; expected ${expected}; harness=${
+              diagnostics.harnessRun?.state ?? "<missing>"
+            }; diagnostics=${diagnostics.path}`,
         );
       }
       await delay(500);
     }
+    const diagnostics = await writeLifecycleDiagnostics({
+      workItemId,
+      intendedRunId,
+      expectedLifecycle: expected,
+      lastLifecycle,
+      worker,
+    });
     throw new Error(
       `Timed out waiting for ${workItemId} lifecycle ${expected}; `
-        + `last=${lastLifecycle}`,
+        + `last=${lastLifecycle}; harness=${diagnostics.harnessRun?.state
+          ?? "<missing>"}; diagnostics=${diagnostics.path}`,
     );
   }
 
@@ -694,7 +733,7 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
           tool_calls: [{
             id: "int2-halt-sleep",
             name: "shell_run",
-            arguments: { command: "sleep 30" },
+            arguments: { command: HALT_COMMAND },
           }],
           usage: { input_tokens: 2, output_tokens: 1, requests: 1 },
           finish_reason: "tool_call",
@@ -714,12 +753,12 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
     const output: string[] = [];
     const child = spawn(process.env.HARNESS_BIN!, ["worker"], {
       cwd: process.env.HARNESS_CHECKOUT,
-      env: {
-        ...process.env,
-        HARNESS_DATABASE_URL: process.env.HARNESS_TEST_DATABASE_URL,
-        HARNESS_PROFILES_ROOT: profilesRoot,
-        HARNESS_TEST_MODEL_SCRIPT: modelScriptPath,
-      },
+      env: createInt2WorkerEnvironment(process.env, {
+        databaseUrl: process.env.HARNESS_TEST_DATABASE_URL!,
+        profilesRoot,
+        modelScriptPath,
+        artifactRoot: process.env.HARNESS_ARTIFACT_ROOT!,
+      }),
       stdio: ["ignore", "pipe", "pipe"],
     });
     child.stdout?.on("data", (chunk) => output.push(String(chunk)));
@@ -832,7 +871,7 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
     runId: string,
     expected: string,
   ): Promise<void> {
-    const deadline = Date.now() + 45_000;
+    const deadline = Date.now() + HARNESS_STATE_WAIT_MS;
     let lastState = "<missing>";
     while (Date.now() < deadline) {
       const result = await harnessPool.query<{ state: string }>(
@@ -855,6 +894,136 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
     );
   }
 
+  async function waitForHarnessToolDispatch(
+    runId: string,
+    command: string,
+  ): Promise<void> {
+    const deadline = Date.now() + HARNESS_STATE_WAIT_MS;
+    let lastState = "<missing>";
+    while (Date.now() < deadline) {
+      const [runResult, eventResult] = await Promise.all([
+        harnessPool.query<{ state: string }>(
+          "select state from runs where run_id = $1",
+          [runId],
+        ),
+        harnessPool.query<{
+          event_type: string;
+          payload: Record<string, any>;
+        }>(
+          `select event_type, payload
+           from domain_events
+           where run_id = $1
+             and event_type in ('CapabilityProposed', 'CapabilityDispatched')
+           order by seq`,
+          [runId],
+        ),
+      ]);
+      lastState = runResult.rows[0]?.state ?? "<missing>";
+      const proposed = eventResult.rows.find(
+        (event) =>
+          event.event_type === "CapabilityProposed"
+          && event.payload?.capability_id === "shell.run"
+          && event.payload?.arguments?.command === command,
+      );
+      const dispatched = proposed
+        ? eventResult.rows.find(
+            (event) =>
+              event.event_type === "CapabilityDispatched"
+              && event.payload?.capability_id === "shell.run"
+              && event.payload?.args_hash === proposed.payload?.args_hash,
+          )
+        : undefined;
+      if (dispatched) return;
+      if (["cancelled", "failed", "learning_processed"].includes(lastState)) {
+        throw new Error(
+          `Harness run ${runId} reached ${lastState} before dispatching `
+            + `the exact ${JSON.stringify(command)} shell command`,
+        );
+      }
+      await delay(100);
+    }
+    throw new Error(
+      `Timed out waiting for Harness run ${runId} to dispatch `
+        + `${JSON.stringify(command)}; last=${lastState}`,
+    );
+  }
+
+  async function writeLifecycleDiagnostics({
+    workItemId,
+    intendedRunId,
+    expectedLifecycle,
+    lastLifecycle,
+    worker,
+  }: {
+    workItemId: string;
+    intendedRunId: string;
+    expectedLifecycle: string;
+    lastLifecycle: string;
+    worker: HarnessWorker;
+  }): Promise<{
+    path: string;
+    harnessRun: { state: string; outcome: string | null } | undefined;
+  }> {
+    const [runResult, eventResult] = await Promise.all([
+      harnessPool.query<{
+        state: string;
+        outcome: string | null;
+        outcome_reason: string | null;
+      }>(
+        "select state, outcome, outcome_reason from runs where run_id = $1",
+        [intendedRunId],
+      ),
+      harnessPool.query<{
+        seq: number;
+        event_type: string;
+        payload: Record<string, any>;
+      }>(
+        `select seq, event_type, payload
+         from domain_events
+         where run_id = $1
+           and event_type in (
+             'EnvironmentPrepared',
+             'ModelResponded',
+             'CapabilityProposed',
+             'PolicyDecisionMade',
+             'CapabilityDispatched',
+             'CapabilityCompleted',
+             'VerificationCompleted',
+             'RunCompleted'
+           )
+         order by seq desc
+         limit 25`,
+        [intendedRunId],
+      ),
+    ]);
+    const target = path.join(
+      evidenceRoot,
+      "diagnostics",
+      `${workItemId}.json`,
+    );
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(
+      target,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        kind: "int2_lifecycle_failure",
+        workItemId,
+        intendedRunId,
+        expectedLifecycle,
+        lastLifecycle,
+        harnessRun: runResult.rows[0] ?? null,
+        latestEvents: eventResult.rows.reverse(),
+        workerOutputTail: worker.outputTail(),
+        dispatcherLogTail: loggerRecords.slice(-50),
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    return {
+      path: target,
+      harnessRun: runResult.rows[0],
+    };
+  }
+
   const suiteLogger: DispatcherLogger = {
     info(fields, message) {
       loggerRecords.push({ level: "info", fields, message });
@@ -872,6 +1041,10 @@ class HarnessWorker {
     private readonly child: ChildProcess,
     private readonly output: string[],
   ) {}
+
+  outputTail(): string {
+    return this.output.join("").slice(-8_000);
+  }
 
   async stop(): Promise<void> {
     if (this.stopped) return;

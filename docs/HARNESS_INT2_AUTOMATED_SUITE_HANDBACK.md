@@ -12,6 +12,176 @@ pending
 **Runtime authority change:** none; this adds evidence, operator scripts, tests,
 and CI wiring without changing dispatcher or kernel runtime code
 
+## Re-gate amendment — CI checkout and cross-machine determinism
+
+**Fix baseline:** `734a520`
+
+**Required GitHub Actions secret:** `INT2_HARNESS_DEPLOY_KEY`, containing the
+private half of a read-only deploy key registered on the private pinned Harness
+repository.
+
+The main-branch failure and the independent-review run-completion split had
+separate causes:
+
+1. The runner cloned the private Harness over unauthenticated HTTPS. A developer
+   checkout or credential helper hid that dependency locally, while a GitHub
+   runner failed with Git exit 128 before creating the evidence directory.
+2. The suite passed the staged script only through
+   `HARNESS_TEST_MODEL_SCRIPT`, but the pinned Harness resolves executor-role
+   and adapter-specific script variables first. The worker inherited the entire
+   operator environment, so an existing higher-precedence script or live-model
+   configuration could shadow the staged JSONL. This explains the review
+   machine's apparently contradictory results: terminal cases followed
+   uncontrolled model behavior, while the HALT case reached
+   `learning_processed` without ever dispatching its intended `sleep 30`.
+
+The amendment:
+
+- creates `bootstrap.log` before attempting the private checkout and records the
+  final suite exit code, so the always-uploaded artifact is non-empty even when
+  checkout fails;
+- uses the read-only deploy key through strict SSH with GitHub's pinned
+  published Ed25519 host key, `IdentitiesOnly`, `BatchMode`, and
+  `StrictHostKeyChecking`; the secret is unset before Git or any later child
+  process is started;
+- exits 20 with the named
+  `INT2_HARNESS_DEPLOY_KEY_MISSING` error when CI has neither an existing
+  checkout nor the key, and exits with a separate named checkout error when
+  authenticated cloning fails;
+- preserves developer behavior: an explicitly supplied clean
+  `HARNESS_CHECKOUT` is reused, otherwise local Git credentials may supply the
+  HTTPS checkout outside CI;
+- constructs a controlled worker environment that removes inherited model
+  credentials, model selection, scripted-model precedence variables, and
+  factory counters, then sets all four applicable executor/adapter script
+  precedence levels to the one staged JSONL and pins the model identity to
+  `openai-compatible/int2-scripted-model`;
+- waits for the exact `CapabilityProposed` →
+  matching-`args_hash` `CapabilityDispatched` chain for `sleep 30`, instead of
+  treating the broad `executing` state as proof;
+- verifies the exact command chain for every scripted run. Ordinary fixture
+  commands must have a broker-successful completion and exit 0. HALT must record
+  at least 29 seconds and the expected `command_timeout`;
+- emits a diagnostic JSON bundle on either timeout or an unexpected terminal
+  lifecycle, including Harness state/outcome, selected events, worker output,
+  and dispatcher logs;
+- parses every operator script with both `bash -n` and `zsh -n`.
+
+No acceptance criterion, case count, evidence invariant, fixture mutation,
+dispatcher production path, kernel source, Harness pin, dependency, or lockfile
+was changed.
+
+The definitive HALT record from the re-gate contains:
+
+```json
+{
+  "command": "sleep 30",
+  "duration_seconds": 30.058548083063215,
+  "outcome": {
+    "ok": false,
+    "error": {
+      "code": "command_timeout"
+    }
+  }
+}
+```
+
+That is the expected bounded-shell result: the command ran for the full bound
+and timed out. It is not reported as a successful command exit, and a
+fast/no-op execution fails `scripted_tool_duration`.
+
+### Re-gate output
+
+```text
+$ npm run typecheck
+> tsc -b --pretty false packages/* services/*
+# exit 0
+
+$ npm test
+Test Files  199 passed | 2 skipped (201)
+Tests       2532 passed | 13 skipped (2545)
+Duration    10.96s
+# exit 0
+
+$ npm run build
+> tsc -b packages/* services/*
+# exit 0
+
+$ HARNESS_CHECKOUT=/Users/pascalkuriger/repo/agent-harness \
+    INT2_SUITE_EVIDENCE_DIR=/private/tmp/int2-suite-evidence-ci-repro-fix-5 \
+    scripts/ceremony/run-int2-automated-suite.sh
+✓ preflights the controlled red/green pair against a real tracked diff
+✓ keeps an unapproved task outside the production dispatchable set
+✓ refuses an approval-hash mismatch before claim or submit
+✓ rejects the negative fixture on its merits with no handoff
+✓ produces one verified, unactuated green handoff
+✓ restarts between submit and reconcile without duplicating the run
+✓ HALT cancels a bound live run and never creates a handoff
+✓ accepts a seven-capability profile with strictly narrower authority
+✓ rejects memory.propose in the outer production profile loader
+Test Files  1 passed (1)
+Tests       9 passed (9)
+Duration    138.10s
+INT-2 automated suite: 9 cases executed in 145s
+# exit 0
+
+$ env -u HARNESS_CHECKOUT -u INT2_HARNESS_DEPLOY_KEY \
+    CI=true \
+    INT2_SUITE_EVIDENCE_DIR=/private/tmp/int2-missing-key-evidence-fix \
+    scripts/ceremony/run-int2-automated-suite.sh
+INT2_HARNESS_DEPLOY_KEY_MISSING: CI requires the read-only private Harness deploy key
+# exit 20
+
+$ cat /private/tmp/int2-missing-key-evidence-fix/bootstrap.log
+INT2_SUITE_BOOTSTRAP_STARTED pin=0890a1f04c2729cbd310e21f66dd9dc6fbc66dc2
+INT2_HARNESS_DEPLOY_KEY_MISSING: CI requires the read-only private Harness deploy key
+INT2_SUITE_EXIT_CODE=20
+```
+
+The full suite output above is the implementation-worktree gate. A second
+clean-checkout run is recorded below before handback.
+
+### Diagnostic observation kept separate from the fix
+
+During diagnosis, repeated runs on the local Colima host also exposed an
+intermittent provider-mount symptom: a scripted file write completed, but a
+later `git diff --check` sometimes saw no `.git` and exited 129. The pin is
+already the PKT-040 self-contained-workspace merge; no pin advance or acceptance
+relaxation can honestly address it. An instrumented run observed the
+self-contained `.git` directory from both host and live container during the
+tool call and then completed green, while the finalized uninstrumented suite
+also completed 9/9. The new failure diagnostics retain the natural event
+evidence if this host-specific symptom recurs. It is not conflated with the
+review machine's 180-second `running` timeouts, which the model-environment
+precedence fix addresses.
+
+### Re-gate decisions
+
+1. **Raw read-only deploy key, not a token or job skip.** This grants the one
+   private repository read needed by the mandatory job and leaves the
+   fail-required semantics intact.
+2. **Pin GitHub's published host key.** An unauthenticated `ssh-keyscan` during
+   the gate would merely move the trust problem.
+3. **Close only the worker's model environment.** Database, profile, artifact,
+   Docker, and dispatcher settings remain inherited as before; only sources
+   capable of changing which model/script executes are stripped.
+4. **Treat shell exit separately from broker completion.** A `shell.run`
+   capability can be broker-successful while its command exits nonzero. The
+   evidence now asserts exit 0 for ordinary fixture commands and the exact
+   bounded timeout for HALT.
+5. **Preserve the 180-second lifecycle ceiling.** The review failure was not
+   solved by making a structural misconfiguration wait longer.
+
+### Re-gate open questions
+
+- Pascal must provision `INT2_HARNESS_DEPLOY_KEY` before the GitHub-hosted job
+  can pass. Absence is intentionally red and produces a named evidence
+  artifact.
+- The intermittent local Docker mount observation above is outside this
+  repository's runtime surface. If it reproduces on an otherwise controlled
+  clean gate, it should become a separate kernel/provider finding rather than a
+  retry or weakened criterion here.
+
 ## Built
 
 - Added a fail-required INT-2 integration suite that drives the real production
