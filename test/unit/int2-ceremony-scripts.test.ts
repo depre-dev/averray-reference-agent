@@ -29,6 +29,11 @@ const CHECKOUT_HELPER = path.join(
   SCRIPT_ROOT,
   "lib/int2-harness-checkout.sh",
 );
+const AUTOMATED_SUITE = path.join(
+  SCRIPT_ROOT,
+  "run-int2-automated-suite.sh",
+);
+const PILOT_DOCKERFILE = path.join(ROOT, "ops/Dockerfile.pilot");
 const OPERATOR_SCRIPTS = [
   "int2-bringup.sh",
   "int2-green-setup.sh",
@@ -344,5 +349,25 @@ describe("committed INT-2 ceremony mechanics", () => {
     expect(controlled).not.toHaveProperty(
       "HARNESS_TEST_MODEL_FACTORY_COUNTER",
     );
+  });
+
+  it("trusts only the fixed sandbox workspace and probes Git before running cases", async () => {
+    const [dockerfile, suite] = await Promise.all([
+      readFile(PILOT_DOCKERFILE, "utf8"),
+      readFile(AUTOMATED_SUITE, "utf8"),
+    ]);
+
+    expect(dockerfile).toContain(
+      "git config --system --add safe.directory /workspace",
+    );
+    expect(dockerfile).not.toMatch(
+      /safe\.directory\s+(?:"|')?\*(?:"|')?/u,
+    );
+    expect(suite).toContain("INT2_PILOT_GIT_OWNERSHIP_FAILED");
+    expect(suite).toContain("INT2_PILOT_GIT_OWNERSHIP_VERIFIED");
+    expect(suite).toContain(
+      'git config --system --get-all safe.directory',
+    );
+    expect(suite).toContain("git diff --check");
   });
 });
