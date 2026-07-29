@@ -381,7 +381,16 @@ services:
       # topic0 above is the first thing to re-derive against the deployed
       # contract, not the last.
       PRODUCT_HEALTH_PAYOUT_SOURCE_ADDRESS: ${PRODUCT_HEALTH_PAYOUT_SOURCE_ADDRESS:-}
-      PRODUCT_HEALTH_PAYOUT_LOOKBACK_BLOCKS: ${PRODUCT_HEALTH_PAYOUT_LOOKBACK_BLOCKS:-14400}
+      # ~24h of blocks. Polkadot Hub mainnet runs at ~2.1s/block, NOT the 6s
+      # this was originally sized against — measured 2026-07-29: 14400 blocks
+      # spanned 8h26m, so the old default compared ~8h of payouts against the
+      # product's 24h settled count and under-reported by ~3x. That is a FALSE
+      # SHORTFALL on the money board, which trains the operator to ignore the
+      # one that matters. Verified at 43200: 14 payouts vs settled24h 14 —
+      # an exact match, where 14400 saw only 2 of the same 14.
+      # Erring LONG is safe (confirmed > settled still reads "confirmed");
+      # erring short manufactures an alarm. Lower only if the RPC caps ranges.
+      PRODUCT_HEALTH_PAYOUT_LOOKBACK_BLOCKS: ${PRODUCT_HEALTH_PAYOUT_LOOKBACK_BLOCKS:-43200}
       # settled-minus-confirmed gap tolerated as a window-boundary artifact — the
       # product's rolling 24h and the block window don't share a clock.
       PRODUCT_HEALTH_PAYOUT_TOLERANCE: ${PRODUCT_HEALTH_PAYOUT_TOLERANCE:-1}
