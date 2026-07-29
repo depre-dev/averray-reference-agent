@@ -1,8 +1,8 @@
 # INT-2 handback — automated supervised-dispatch suite
 
-**Status:** CI/authentication and model-environment fixes implemented; clean
-fast gates green; clean Docker re-gate exposed the separately flagged
-intermittent provider-mount failure below
+**Status:** CI authentication, model-environment, and hosted Linux Git ownership
+fixes implemented; fast gates and the real nine-case Docker/Postgres suite are
+green locally; hosted re-gate pending
 
 **Baseline:** `47de9f3bdb25eda7354297a951b9927368194791`
 
@@ -12,6 +12,137 @@ intermittent provider-mount failure below
 
 **Runtime authority change:** none; this adds evidence, operator scripts, tests,
 and CI wiring without changing dispatcher or kernel runtime code
+
+## Hosted Linux Git ownership amendment
+
+**Fix baseline:** `e7c21806b6e2a7a2b2a46863a0f63f31f927c0bb`
+
+**Source evidence:** GitHub Actions run `30476014572`, main
+`0b0b1d7f0470f1215ca27fea059fcaf11f6a4c13`, artifact
+`int2-supervised-dispatch-evidence` id `8733742749`, archive digest
+`sha256:6921c1c6f9a4556e5fe037ec099dac1d26fa433f57a6e5a6ce9e03f61469ab4b`.
+
+The deploy-key checkout, pin verification, databases, image build, dispatcher,
+script selection, tool dispatch, and tool completion were correct. The four
+failed cases all crossed the same remaining hosted-runner boundary:
+
+- the green, restart, and narrowed-authority cases wrote the expected file with
+  tool exit 0, then failed their required `git diff --check` with exit 129;
+- the negative case wrote its intended whitespace violation with tool exit 0,
+  but the in-run criterion returned exit 129 rather than the expected exit 2;
+- the uploaded criterion stderr was identical in all four cases:
+  `warning: Not a git repository. Use --no-index...`;
+- the evidence collector subsequently reconstructed each patch from the same
+  host workspace and ran the same criterion correctly, proving the repository
+  and mutation survived. The mismatch was specifically inside the sandbox.
+
+A controlled Linux-container reproduction established the cause. The pilot
+image has no `USER`, so the sandbox runs as root. A Git repository owned by the
+GitHub runner uid is bind-mounted at `/workspace`. With no trust entry,
+`git diff --check` emits the artifact's generic warning and returns 129;
+`git status` exposes the underlying
+`fatal: detected dubious ownership in repository`. Adding the exact
+system-level safe directory `/workspace` makes the same foreign-owned
+repository return exit 0. This was not SIGHUP, a missing verdict, or dispatcher
+failure.
+
+The amendment:
+
+- adds `safe.directory=/workspace` to the ceremony-only pilot image's system
+  Git config. It does not use `*`, trust another path, add a credential, change
+  the image user, or change the network-none runtime;
+- corrects the image comment: the sandbox runs as the image's default root
+  user, not as the host operator uid;
+- adds a real pre-case ownership probe. The script creates a self-contained Git
+  repository under `$HOME/.agent-runtime`, the same Docker-visible root the
+  pinned Harness uses, mounts it at `/workspace` under `--network none`, and
+  requires `git diff --check` to pass;
+- exits 26 with
+  `INT2_PILOT_GIT_OWNERSHIP_FAILED` before any case if that property fails, and
+  records `INT2_PILOT_GIT_OWNERSHIP_VERIFIED` when it holds;
+- prefix-validates cleanup of the disposable probe directory;
+- pins the exact `/workspace` trust entry, forbids a wildcard entry, and pins
+  both probe markers in the fast unit suite.
+
+No acceptance criterion, expected verdict, evidence invariant, fixture,
+capability, dispatcher path, kernel source, Harness pin, dependency, or lockfile
+changed.
+
+### Hosted Linux amendment gate output
+
+```text
+$ npm ci
+added 312 packages in 3s
+# exit 0
+
+$ npm run typecheck
+> tsc -b --pretty false packages/* services/*
+# exit 0
+
+$ npm test
+Test Files  204 passed | 2 skipped (206)
+Tests       2613 passed | 13 skipped (2626)
+Duration    13.83s
+# exit 0
+
+$ npm run build
+> tsc -b packages/* services/*
+# exit 0
+
+$ HARNESS_CHECKOUT=/Users/pascalkuriger/repo/agent-harness \
+    INT2_SUITE_EVIDENCE_DIR=/private/tmp/int2-suite-evidence-docker-mount-fix-3 \
+    scripts/ceremony/run-int2-automated-suite.sh
+INT2_PILOT_GIT_OWNERSHIP_VERIFIED
+✓ preflights the controlled red/green pair against a real tracked diff
+✓ keeps an unapproved task outside the production dispatchable set
+✓ refuses an approval-hash mismatch before claim or submit
+✓ rejects the negative fixture on its merits with no handoff
+✓ produces one verified, unactuated green handoff
+✓ restarts between submit and reconcile without duplicating the run
+✓ HALT cancels a bound live run and never creates a handoff
+✓ accepts a seven-capability profile with strictly narrower authority
+✓ rejects memory.propose in the outer production profile loader
+Test Files  1 passed (1)
+Tests       9 passed (9)
+Duration    142.00s
+INT-2 automated suite: 9 cases executed in 150s
+# exit 0
+```
+
+The evidence bootstrap terminates with:
+
+```text
+INT2_HARNESS_PIN_VERIFIED pin=0890a1f04c2729cbd310e21f66dd9dc6fbc66dc2
+INT2_HARNESS_RUNTIME_READY
+INT2_PILOT_GIT_OWNERSHIP_VERIFIED
+INT2_CASES_STARTED expected=9
+INT2_CASES_COMPLETED executed=9 elapsed=150
+INT2_SUITE_EXIT_CODE=0
+```
+
+### Hosted Linux amendment decisions
+
+1. **Trust the fixed mount point, never every repository.** The container has
+   one network-disabled workspace mount. `/workspace` is the minimum Git trust
+   boundary that makes its checked-out metadata usable across host uid
+   mappings; `safe.directory=*` would be needlessly broad.
+2. **Keep the image's root user.** Selecting a fixed image uid would merely
+   exchange the Git refusal for cross-host write failures. The exact safe path
+   preserves the existing write behavior without adding authority.
+3. **Probe the property before the cases.** A static Dockerfile assertion alone
+   cannot prove the built image and bind mount work together. The runtime probe
+   turns the prior four-case ambiguity into one named bootstrap failure.
+4. **Use the Docker-visible home root for the probe.** A first local probe under
+   the script's `mktemp` root correctly failed because Colima does not share
+   that host path. Moving only the disposable probe under the same root used by
+   Harness makes the probe portable without changing Harness workspace
+   placement.
+
+### Hosted Linux amendment open questions
+
+- The exact GitHub-hosted re-gate remains pending until this branch is pushed.
+  Local gates exercise the complete mechanism, but the Linux uid split is the
+  environment that discriminates this fix.
 
 ## Re-gate amendment — CI checkout and cross-machine determinism
 

@@ -12,6 +12,8 @@ _int2_evidence="${INT2_SUITE_EVIDENCE_DIR:-$_int2_root/evidence}"
 _int2_marker="$_int2_evidence/executed-count.txt"
 _int2_bootstrap_log="$_int2_evidence/bootstrap.log"
 _int2_started="$(date +%s)"
+_int2_docker_shared_root="${HOME:?}/.agent-runtime"
+_int2_git_probe=""
 
 _int2_cleanup() {
   _int2_exit="$?"
@@ -19,6 +21,11 @@ _int2_cleanup() {
     >> "$_int2_bootstrap_log" 2>/dev/null || true
   docker stop "$_int2_harness_db" "$_int2_reference_db" \
     >/dev/null 2>&1 || true
+  case "$_int2_git_probe" in
+    "$_int2_docker_shared_root"/int2-pilot-git-probe.*)
+      rm -rf "$_int2_git_probe"
+      ;;
+  esac
   rm -rf "$_int2_root"
 }
 trap _int2_cleanup EXIT INT TERM
@@ -116,6 +123,32 @@ docker build --quiet -f "$_int2_repo/ops/Dockerfile.pilot" \
 export INT2_PILOT_IMAGE="$(
   docker image inspect --format '{{.Id}}' "$_int2_image_tag"
 )"
+mkdir -p "$_int2_docker_shared_root"
+_int2_git_probe="$(
+  mktemp -d "$_int2_docker_shared_root/int2-pilot-git-probe.XXXXXX"
+)"
+git -C "$_int2_git_probe" init --quiet
+printf '%s\n' "INT-2 pilot Git ownership probe" \
+  > "$_int2_git_probe/tracked.txt"
+git -C "$_int2_git_probe" add tracked.txt
+git -C "$_int2_git_probe" \
+  -c user.name=int2-suite \
+  -c user.email=int2-suite.invalid \
+  commit --quiet -m "INT-2 pilot Git ownership probe"
+docker run --rm --network none \
+  --volume "$_int2_git_probe:/workspace" \
+  --workdir /workspace \
+  "$INT2_PILOT_IMAGE" \
+  /bin/sh -lc \
+    'test "$(git config --system --get-all safe.directory)" = "/workspace" && git diff --check' \
+  >> "$_int2_bootstrap_log" 2>&1 \
+  || {
+    echo "INT2_PILOT_GIT_OWNERSHIP_FAILED: pilot cannot run Git in the mounted workspace" \
+      | tee -a "$_int2_bootstrap_log" >&2
+    exit 26
+  }
+printf '%s\n' "INT2_PILOT_GIT_OWNERSHIP_VERIFIED" \
+  >> "$_int2_bootstrap_log"
 
 export INT2_SUITE_REQUIRED=1
 export INT2_REPOSITORY_ROOT="$_int2_repo"
