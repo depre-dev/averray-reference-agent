@@ -109,6 +109,17 @@ jobs:
       - name: Install reference dependencies
         run: npm ci
 
+      - name: Prepare the dispatcher workspace root
+        # DISPATCH_WORKSPACE_ROOT is a FIXED path baked into every approved task
+        # hash (packages/averray-mcp/src/workspace-path.ts), so it cannot be
+        # relocated to the runner temp — it must exist and be writable by the
+        # runner. Without this, workspace preparation fails and the dispatcher
+        # refuses with `workspace_prep_failed` before any Harness run is created.
+        run: |
+          sudo mkdir -p /var/lib/harness-dispatcher/workspaces
+          sudo chown -R "$(id -u):$(id -g)" /var/lib/harness-dispatcher
+          test -w /var/lib/harness-dispatcher/workspaces
+
       - name: Run required INT-2 mechanism suite
         env:
           INT2_HARNESS_DEPLOY_KEY: ${{ secrets.INT2_HARNESS_DEPLOY_KEY }}
