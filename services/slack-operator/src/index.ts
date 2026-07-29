@@ -181,9 +181,11 @@ import {
   probeSparkline,
   runProductHealthOnce,
   type ChainAdvance,
+  type ProductHealthIncident,
   type ProductHealthSnapshot,
   type ProductHealthSnapshotBlocks,
 } from "./product-health.js";
+import { appendIncidents, readIncidents, reconcileIncidents } from "./product-health-incidents.js";
 import {
   loadRemediationConfig,
   decideRpcRemediation,
@@ -291,6 +293,11 @@ const routineConfig = parseSlackRoutineConfig(process.env, authConfig.allowedCha
 // Resets on restart; a monitoring sparkline doesn't need durability.
 const PRODUCT_HEALTH_HISTORY_MAX = 60;
 let productHealthHistory: ProductHealthSnapshot[] = [];
+/** Durable incident memory — outlives both the sample ring and a redeploy.
+ *  Hydrated from disk on the first health tick. */
+let productHealthIncidents: ProductHealthIncident[] = [];
+let productHealthIncidentsHydrated = false;
+const PRODUCT_HEALTH_INCIDENT_MAX = 200;
 // Block-advance tracker so a frozen chain (static height) isn't read as green.
 let productHealthChainAdvance: ChainAdvance | undefined;
 // Structured snapshot blocks (chain id / network / solvency / flow) for the Ops board.
@@ -755,7 +762,13 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       // History-derived Trends + Incidents (uptime% / latency / balance series +
       // incident episodes) from the rolling buffer. Always present — the series
       // are honestly short and uptimePct24h is null until a check lands in-window.
-      history: deriveProductHealthHistory(productHealthHistory, Date.now()),
+      // Incidents come from the DURABLE log, not just this buffer: an incident
+      // whose samples aged out (or that predates a deploy) must still be
+      // investigable. See product-health-incidents.ts.
+      history: {
+        ...deriveProductHealthHistory(productHealthHistory, Date.now()),
+        incidents: productHealthIncidents,
+      },
       // RPC auto-remediation status for the Ops "RPC failover" row (undefined =
       // omitted by JSON when the routine hasn't run a cycle yet).
       remediation: productHealthRemediation,
@@ -3562,6 +3575,28 @@ function startOperatorRoutines() {
         },
         PRODUCT_HEALTH_HISTORY_MAX,
       );
+      // Durable incidents: reconcile what this buffer currently derives against
+      // the persisted log, then write only what changed. Without this, an
+      // incident vanished once its samples aged out of the ring — a real 10.2s
+      // /health spike was detected, shown, and then unrecoverable ~5h later.
+      try {
+        if (!productHealthIncidentsHydrated) {
+          productHealthIncidents = await readIncidents();
+          productHealthIncidentsHydrated = true;
+        }
+        const derived = deriveProductHealthHistory(productHealthHistory, Date.now()).incidents;
+        const reconciled = reconcileIncidents({
+          persisted: productHealthIncidents,
+          derived,
+          limit: PRODUCT_HEALTH_INCIDENT_MAX,
+        });
+        productHealthIncidents = reconciled.merged;
+        await appendIncidents(reconciled.writes);
+      } catch (error) {
+        // Incident memory is forensics, not a probe — a write failure must never
+        // take down the health tick that the alert bridge depends on.
+        logger.warn({ err: error }, "product_health_incident_log_skipped");
+      }
       // Liquidity runway: project time-to-floor from the balance series (incl. the
       // sample just appended) and write the honest note into the solvency block —
       // "reward bank ≈ 6h to floor" / "stable" / awaiting. Suggest-only: the board
