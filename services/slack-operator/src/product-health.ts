@@ -990,12 +990,40 @@ async function ethRpc(
   return result;
 }
 
-// keccak256("Transfer(address,address,uint256)") — the ERC-20 Transfer topic.
-const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+/**
+ * keccak256("ReservationSettled(bytes32,address,address,address,uint256)") — the
+ * AgentAccountCore event a reward payout emits.
+ *
+ * NOT the ERC-20 Transfer topic. USDC here is asset 1337 behind the precompile
+ * at 0x…1200000, which bridges to the Substrate assets pallet: a transfer is a
+ * PALLET event and never enters EVM log space. Verified on mainnet 2026-07-29 —
+ * that address has emitted zero logs, and there is not a single ERC-20 Transfer
+ * topic anywhere on the chain. Watching for one finds nothing forever, which is
+ * indistinguishable from total payout failure.
+ *
+ * `eth_getLogs` itself works fine (368 logs over a ~130k-block window); an
+ * earlier 200-block sample of a mostly-empty chain wrongly suggested otherwise.
+ * Our own contracts emit normally, so the payout is read from OUR event — which
+ * is better evidence anyway: it is semantic, correlates 1:1 with a settlement,
+ * and is independent of the backend's own claim, which is the entire point.
+ *
+ * Layout (indexed → topics, the rest → data):
+ *   topic1 jobId · topic2 account · topic3 recipient
+ *   data[0] asset · data[1] amount
+ */
+const RESERVATION_SETTLED_TOPIC = "0x3cdc0be5ec7141f2342208f6404c1b1852936343f0edf1fda179e6c9f46573ee";
 
-/** Pad an address to a 32-byte topic (topic1 = indexed `from`). */
+/** Pad an address to a 32-byte topic. */
 function addressTopic(address: string): string {
   return `0x${address.toLowerCase().replace(/^0x/, "").padStart(64, "0")}`;
+}
+
+/** One 32-byte word of a log's `data`, or undefined when it is not there. */
+function dataWord(data: unknown, index: number): string | undefined {
+  if (typeof data !== "string") return undefined;
+  const body = data.replace(/^0x/, "");
+  const start = index * 64;
+  return body.length >= start + 64 ? body.slice(start, start + 64) : undefined;
 }
 
 /**
@@ -1039,17 +1067,21 @@ export function decidePayoutEvidence(input: {
     return { ...base, status: "confirmed", detail: `${paid} · no settled count to compare` };
   }
   // A 100% miss is overwhelmingly a MISCONFIGURED FILTER, not 100% payout
-  // failure: point this at the wrong source address and you observe exactly
-  // zero transfers, which is indistinguishable from total failure. That is not
-  // hypothetical — the first live run watched the signer EOA instead of
-  // AgentAccountCore and put "12 unaccounted for" on a live money board.
+  // failure: point this at the wrong address or topic and you observe exactly
+  // zero events, which is indistinguishable from total failure. That is not
+  // hypothetical, and it has now happened twice — first watching the signer EOA
+  // instead of AgentAccountCore ("12 unaccounted for" on a live money board),
+  // then watching for an ERC-20 Transfer the USDC precompile never emits. The
+  // deployed event signature can also drift from the contract source (it has:
+  // the live ReservationSettled carries a jobId the checked-in source lacks),
+  // so a silent zero stays a question about the INSTRUMENT, not the money.
   // Refuse to accuse the money until the instrument has proven it can see
   // anything at all; one observed transfer is enough to trust it.
   if (input.confirmedCount === 0) {
     return {
       ...base,
       status: "unverified",
-      detail: `no transfers found from the configured payout source while ${input.settledCount} job${input.settledCount === 1 ? " is" : "s are"} marked settled — check the source address before suspecting the payouts`,
+      detail: `no payout events found on the configured payout contract while ${input.settledCount} job${input.settledCount === 1 ? " is" : "s are"} marked settled — check the contract address and event topic before suspecting the payouts`,
     };
   }
   const shortfall = input.settledCount - input.confirmedCount;
@@ -1064,7 +1096,8 @@ export function decidePayoutEvidence(input: {
 }
 
 /**
- * Read USDC Transfer logs FROM the signer over a recent block window.
+ * Read AgentAccountCore `ReservationSettled` logs over a recent block window —
+ * the on-chain record of a reward actually leaving the reward bank.
  *
  * Guarded the same way balances are (#543): logs are only trusted from an
  * endpoint on the product's chain, because a wrong-chain endpoint would return
@@ -1074,12 +1107,11 @@ export function decidePayoutEvidence(input: {
 export async function readPayoutTransfers(input: {
   rpcUrl?: string;
   /**
-   * The address USDC actually LEAVES on a payout — AgentAccountCore, not the
-   * signer EOA. The reward bank is an in-contract position (see #558), so the
-   * signer merely SENDS the transaction and pays the gas; the Transfer event's
-   * `from` is the contract holding the funds. Filtering on the signer finds
-   * nothing and looks exactly like total payout failure — which is precisely
-   * what it did on the first live run (12 settled, 0 found).
+   * The contract that EMITS the payout event — AgentAccountCore, which is also
+   * where the reward bank lives as an in-contract position (see #558). The
+   * signer EOA merely sends the transaction and pays gas, so watching the
+   * signer finds nothing and looks exactly like total payout failure — which is
+   * precisely what it did on the first live run (12 settled, 0 found).
    */
   sourceAddress?: string;
   usdcAddress?: string;
@@ -1114,8 +1146,9 @@ export async function readPayoutTransfers(input: {
       [{
         fromBlock: `0x${fromBlock.toString(16)}`,
         toBlock: "latest",
-        address: input.usdcAddress,
-        topics: [TRANSFER_TOPIC, addressTopic(input.sourceAddress)],
+        // The CONTRACT THAT EMITS the payout event, not the token.
+        address: input.sourceAddress,
+        topics: [RESERVATION_SETTLED_TOPIC],
       }],
       input.fetchImpl,
     );
@@ -1123,18 +1156,29 @@ export async function readPayoutTransfers(input: {
       return { count: null, usdc: null, windowBlocks: null, reason: "payout evidence unverified — eth_getLogs returned no array" };
     }
     let total = 0n;
+    let counted = 0;
+    const wantAsset = input.usdcAddress.toLowerCase().replace(/^0x/, "").padStart(64, "0");
     for (const entry of logs) {
       const data = (entry as { data?: unknown }).data;
-      if (typeof data === "string" && data.length > 2) {
-        try {
-          total += BigInt(data);
-        } catch {
-          // A malformed value is not a reason to under-report the count.
-        }
+      // data[0] is the ASSET. Counting a DOT settlement as USDC would break the
+      // unit invariant the same way the display math once did, so a payout in
+      // another asset is skipped rather than folded into a USDC total.
+      const asset = dataWord(data, 0);
+      if (asset === undefined || asset.toLowerCase() !== wantAsset) continue;
+      // data[1] is the AMOUNT. Reading the whole `data` as one integer — which
+      // is right for a single-word Transfer — would be off by ~10^48 here.
+      const amount = dataWord(data, 1);
+      if (amount === undefined) continue;
+      try {
+        total += BigInt(`0x${amount}`);
+        counted += 1;
+      } catch {
+        // A malformed value is not a reason to under-report the count.
+        counted += 1;
       }
     }
     return {
-      count: logs.length,
+      count: counted,
       usdc: Number(total) / 10 ** input.usdcDecimals,
       windowBlocks: latest - fromBlock,
     };

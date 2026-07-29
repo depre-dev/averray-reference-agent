@@ -359,12 +359,27 @@ services:
       # redeploys that would wipe any in-memory retention.
       PRODUCT_HEALTH_INCIDENT_LOG_PATH: ${PRODUCT_HEALTH_INCIDENT_LOG_PATH:-/data/product-health-incidents.jsonl}
       PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED: ${PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED:-false}
-      # ~24h at a 6s block time. Lower it if the RPC caps eth_getLogs ranges.
-      # The address USDC actually LEAVES on a payout. Defaults to /health's
+      # The contract that EMITS the payout event. Defaults to /health's
       # addresses.agentAccountCore — the reward bank is an IN-CONTRACT position,
-      # so the signer EOA only sends the tx and pays gas; it is never the
-      # Transfer `from`. Filtering on the signer finds zero and looks exactly
-      # like total payout failure (it did, on the first live run).
+      # so the signer EOA only sends the tx and pays gas. Filtering on the
+      # signer finds zero and looks exactly like total payout failure (it did,
+      # on the first live run).
+      #
+      # The probe watches AgentAccountCore's
+      #   ReservationSettled(bytes32 jobId, address account, address recipient,
+      #                      address asset, uint256 amount)
+      # topic0 0x3cdc0be5ec7141f2342208f6404c1b1852936343f0edf1fda179e6c9f46573ee
+      # — NOT an ERC-20 Transfer. USDC is asset 1337 behind the precompile at
+      # 0x…1200000, which bridges to the Substrate assets pallet: transfers are
+      # PALLET events and never reach EVM log space. Verified on mainnet
+      # 2026-07-29 — that address has emitted zero logs, and there is not one
+      # ERC-20 Transfer topic anywhere on the chain.
+      #
+      # WATCH OUT: the DEPLOYED signature has drifted from contracts/*.sol —
+      # the live event carries a leading bytes32 jobId the checked-in source
+      # does not. If payouts ever read "unverified" with a healthy chain, the
+      # topic0 above is the first thing to re-derive against the deployed
+      # contract, not the last.
       PRODUCT_HEALTH_PAYOUT_SOURCE_ADDRESS: ${PRODUCT_HEALTH_PAYOUT_SOURCE_ADDRESS:-}
       PRODUCT_HEALTH_PAYOUT_LOOKBACK_BLOCKS: ${PRODUCT_HEALTH_PAYOUT_LOOKBACK_BLOCKS:-14400}
       # settled-minus-confirmed gap tolerated as a window-boundary artifact — the
