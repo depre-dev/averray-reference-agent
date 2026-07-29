@@ -102,7 +102,13 @@ export function decisionPriorityFor(
     return { tier: "money-blocking", reason: "Money first · critical file" };
   }
 
-  if (ROUTINE_VERIFICATION_PATTERN.test(cardEvidenceText(card))) {
+  // Routine verification only sinks while it is actually routine. A verification
+  // card that is REPORTING A FAILURE is the opposite of routine, and demoting it
+  // on its title alone buries a red production deploy underneath trivia — the
+  // same class of harm as hiding it, just slower to notice. Failure evidence
+  // therefore cancels the demotion and the card falls through to be tiered on
+  // its money evidence like anything else.
+  if (ROUTINE_VERIFICATION_PATTERN.test(cardEvidenceText(card)) && !hasFailureEvidence(card)) {
     return { tier: "routine-verification", reason: "Routine verification" };
   }
 
@@ -111,6 +117,21 @@ export function decisionPriorityFor(
   }
 
   return { tier: "unknown", reason: "Money relevance unknown" };
+}
+
+/**
+ * Is this card reporting a failure? Reads only signals the payload already
+ * carries — a failing check run, a high-severity Hermes finding, an upstream
+ * blocked state, a task failure reason, or a FAILED verdict. Nothing here is
+ * inferred; absence of evidence stays absence, not "fine".
+ */
+function hasFailureEvidence(card: BoardCard): boolean {
+  if (card.state === "failed-fetch" || card.state === "source-offline") return true;
+  if ((card.checkRuns ?? []).some((run) => run.status === "fail")) return true;
+  if ((card.riskSignals ?? []).some((signal) => signal.severity === "high")) return true;
+  if (card.type === "task" && (card.failureReason ?? "").length > 0) return true;
+  if (card.type === "pr" && /\bfail(?:ed|ure|ing)?\b/i.test(card.verdict ?? "")) return true;
+  return false;
 }
 
 function cardFiles(card: BoardCard): CardFile[] {

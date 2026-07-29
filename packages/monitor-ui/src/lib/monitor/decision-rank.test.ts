@@ -137,4 +137,45 @@ describe("money-first decision ranking", () => {
     expect(rankDecisionCards(input).map((card) => card.id)).toEqual(["money", "unknown"]);
     expect(input).toEqual(snapshot);
   });
+
+  // GATE (#579): the demotion is title-driven, so on its own it sank a RED
+  // production deploy below "rename a label". Demoting a card that is reporting
+  // a failure is the same class of harm as hiding it — the board stops
+  // representing what is actually urgent.
+  test("a FAILING verification is not routine — failure evidence cancels the demotion", () => {
+    const failing = decision({
+      id: "failing",
+      type: "deploy",
+      title: "post-production-deploy verification after workflow run #41",
+      checkRuns: [{ name: "smoke", status: "fail" }],
+    });
+    const trivial = decision({ id: "trivial", title: "rename a label" });
+
+    expect(decisionPriorityFor(failing).tier).not.toBe("routine-verification");
+    expect(rankDecisionCards([failing, trivial]).map((card) => card.id)).toEqual([
+      "failing",
+      "trivial",
+    ]);
+  });
+
+  test.each([
+    ["a failing check run", { checkRuns: [{ name: "smoke", status: "fail" }] }],
+    ["a high-severity finding", { riskSignals: [{ severity: "high", code: "X", message: "m" }] }],
+    ["an offline upstream", { state: "source-offline" }],
+    ["a task failure reason", { type: "task", failureReason: "runner exited 1" }],
+    ["a FAILED verdict", { type: "pr", verdict: "FAILED — smoke red" }],
+  ])("%s keeps a verification card out of the bottom tier", (_label, over) => {
+    const card = decision({ title: "post-deploy verification", ...over });
+    expect(decisionPriorityFor(card).tier).not.toBe("routine-verification");
+  });
+
+  test("a CLEAN verification still sinks — the demotion itself is intact", () => {
+    const clean = decision({
+      id: "clean",
+      type: "deploy",
+      title: "post-production-deploy verification after workflow run #42",
+      checkRuns: [{ name: "smoke", status: "pass" }],
+    });
+    expect(decisionPriorityFor(clean).tier).toBe("routine-verification");
+  });
 });
