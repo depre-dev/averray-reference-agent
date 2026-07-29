@@ -16,6 +16,12 @@ ARG CODEX_CLI_PACKAGE=@openai/codex
 # Claude Code CLI — the entrypoint the Claude worker (claude-branch-worker, O2)
 # shells out to. Pinned via this build arg so the runtime image is reproducible.
 ARG CLAUDE_CLI_PACKAGE=@anthropic-ai/claude-code
+# The commit this image was built from, so the monitor can report its OWN
+# version. `.git` is in .dockerignore, so the build cannot discover this itself
+# — it has to be passed in. The default is the honest "unknown", which the
+# self-freshness probe reports as unknown rather than as up-to-date.
+ARG GIT_SHA=unknown
+ENV AVERRAY_GIT_SHA=${GIT_SHA}
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates chromium git openssh-client \
   && rm -rf /var/lib/apt/lists/*

@@ -29,6 +29,9 @@ import type { AlertPayload } from "./alert-bridge.js";
 
 // ── Probe result model ──────────────────────────────────────────────
 
+import { decideSelfFreshness, fetchSelfCompare } from "./self-freshness.js";
+import type { SelfFreshness } from "./self-freshness.js";
+
 export type ProbeStatus = "ok" | "degraded" | "red";
 
 export interface ProbeResult {
@@ -489,6 +492,13 @@ export interface ProductHealthConfig {
   /** Override the payout SOURCE address. Defaults to /health's
    *  addresses.agentAccountCore — the contract USDC actually leaves. */
   payoutSourceAddress?: string;
+  /** "owner/repo" of the MONITOR itself, for the self-freshness comparison. */
+  selfRepo?: string;
+  /** The commit this build came from — baked in as AVERRAY_GIT_SHA. */
+  selfSha?: string;
+  /** Token for the compare call; a private repo returns 404 without one. */
+  selfGithubToken?: string;
+  githubApiBaseUrl?: string;
   /** Blocks scanned for Transfer logs (~24h at the chain's block time). */
   payoutLookbackBlocks: number;
   /** Settled-minus-confirmed gap tolerated as a window-boundary artifact. */
@@ -581,6 +591,10 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
     usdcDecimals: num(env.PRODUCT_HEALTH_USDC_DECIMALS, 6),
     payoutEvidenceEnabled: truthy(env.PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED),
     payoutSourceAddress: env.PRODUCT_HEALTH_PAYOUT_SOURCE_ADDRESS || undefined,
+    selfRepo: env.PRODUCT_HEALTH_SELF_REPO || env.MONITOR_REPO || undefined,
+    selfSha: env.AVERRAY_GIT_SHA || undefined,
+    selfGithubToken: env.PRODUCT_HEALTH_SELF_GITHUB_TOKEN || env.GITHUB_TOKEN || undefined,
+    githubApiBaseUrl: env.GITHUB_API_BASE_URL || undefined,
     // ~24h at a 6s block time. Lower it if the RPC caps eth_getLogs ranges.
     payoutLookbackBlocks: num(env.PRODUCT_HEALTH_PAYOUT_LOOKBACK_BLOCKS, 14400),
     payoutTolerance: num(env.PRODUCT_HEALTH_PAYOUT_TOLERANCE, 1),
@@ -1491,6 +1505,12 @@ export interface PayoutEvidence {
 
 export interface ProductHealthSnapshotBlocks {
   chainId?: number | null;
+  /**
+   * The MONITOR's own version. Deliberately NOT a probe: a stale monitor is not
+   * a degraded product, and folding it into the probe list would flip the board
+   * (and the phone headline) to degraded over a fact about ourselves.
+   */
+  self?: SelfFreshness;
   network?: "testnet" | "mainnet" | "unknown";
   solvency?: SolvencySnapshotData;
   flow?: MoneyPathData;
@@ -1649,8 +1669,19 @@ export async function collectProductHealthProbes(
     tolerance: config.payoutTolerance,
     ...(payoutRead.reason ? { unverifiedReason: payoutRead.reason } : {}),
   });
+  // The monitor's own version. Degraded-safe: any failure is "unknown", which
+  // must never render as up to date.
+  const selfFreshness = await deriveSelfFreshnessProbe({
+    ...(config.selfRepo ? { repo: config.selfRepo } : {}),
+    ...(config.selfSha ? { runningSha: config.selfSha } : {}),
+    ...(config.selfGithubToken ? { token: config.selfGithubToken } : {}),
+    ...(config.githubApiBaseUrl ? { baseUrl: config.githubApiBaseUrl } : {}),
+    nowMs: chainCtx.nowMs,
+    fetchImpl,
+  });
   const snapshot: ProductHealthSnapshotBlocks = {
     chainId: chainId ?? null,
+    ...(selfFreshness.selfFreshness ? { self: selfFreshness.selfFreshness } : {}),
     network: resolveProductHealthNetwork(chainId),
     ...(solvencyPools.length ? { solvency: { pools: solvencyPools } } : {}),
     ...(settlement
@@ -1669,6 +1700,7 @@ export async function collectProductHealthProbes(
         }
       : {}),
   };
+
   return {
     probes: [
       deriveProductApiProbe(h),
@@ -1693,6 +1725,48 @@ export async function collectProductHealthProbes(
     latencyMs: h.latencyMs,
     rpcOk: signer.rpcOk,
   };
+}
+
+/**
+ * Is the MONITOR itself current? It reported on everything but its own version
+ * until the VPS was found six commits behind with four merged PRs live nowhere.
+ *
+ * "behind" is DEGRADED, never red: stale code is not an outage, and colouring
+ * it as one would be the false-alarm that gets scrolled past. "unknown" is a
+ * real third state — it must never render as up to date.
+ */
+async function deriveSelfFreshnessProbe(input: {
+  repo?: string;
+  runningSha?: string;
+  token?: string;
+  baseUrl?: string;
+  nowMs: number;
+  fetchImpl: typeof fetch;
+}): Promise<{ selfFreshness: SelfFreshness }> {
+  const sha = input.runningSha ?? null;
+  if (!input.repo) {
+    const verdict = decideSelfFreshness({ runningSha: sha, compare: null, unknownReason: "no repo configured", nowMs: input.nowMs });
+    return { selfFreshness: verdict };
+  }
+  const normalized = (sha ?? "").trim().toLowerCase();
+  if (!normalized || normalized === "unknown") {
+    const verdict = decideSelfFreshness({ runningSha: null, compare: null, nowMs: input.nowMs });
+    return { selfFreshness: verdict };
+  }
+  const { compare, reason } = await fetchSelfCompare({
+    repo: input.repo,
+    runningSha: normalized,
+    ...(input.token ? { token: input.token } : {}),
+    ...(input.baseUrl ? { baseUrl: input.baseUrl } : {}),
+    fetchFn: input.fetchImpl,
+  });
+  const verdict = decideSelfFreshness({
+    runningSha: normalized,
+    compare,
+    ...(reason ? { unknownReason: reason } : {}),
+    nowMs: input.nowMs,
+  });
+  return { selfFreshness: verdict };
 }
 
 // ── Alert rendering (reuses the D4 AlertPayload) ────────────────────

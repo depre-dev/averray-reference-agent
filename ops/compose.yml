@@ -51,6 +51,10 @@ services:
     build:
       context: ..
       dockerfile: ops/Dockerfile.node
+      args:
+        # Prefix the deploy with GIT_SHA=$(git rev-parse HEAD) so the monitor
+        # can report its own version. Unset = "unknown", reported honestly.
+        GIT_SHA: ${GIT_SHA:-unknown}
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     depends_on:
       hermes-permissions:
@@ -106,6 +110,10 @@ services:
     build:
       context: ..
       dockerfile: ops/Dockerfile.node
+      args:
+        # Prefix the deploy with GIT_SHA=$(git rev-parse HEAD) so the monitor
+        # can report its own version. Unset = "unknown", reported honestly.
+        GIT_SHA: ${GIT_SHA:-unknown}
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     restart: unless-stopped
     # Hermes owns the skills volume as UID 10000 and continuously re-secures it to
@@ -132,6 +140,10 @@ services:
     build:
       context: ..
       dockerfile: ops/Dockerfile.node
+      args:
+        # Prefix the deploy with GIT_SHA=$(git rev-parse HEAD) so the monitor
+        # can report its own version. Unset = "unknown", reported honestly.
+        GIT_SHA: ${GIT_SHA:-unknown}
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     restart: unless-stopped
     depends_on:
@@ -357,6 +369,13 @@ services:
       # sample ring, so one aged out after ~5h and became unrecoverable. This log
       # keeps the records themselves; /data is a volume, so they survive the
       # redeploys that would wipe any in-memory retention.
+      # Self-freshness: is the MONITOR itself running current code? It tracked
+      # the PRODUCT's deploy sha while being blind to its own, and the VPS sat
+      # six commits behind with four merged PRs live nowhere. Unset repo or an
+      # unbaked GIT_SHA reports "unknown" — never "up to date".
+      PRODUCT_HEALTH_SELF_REPO: ${PRODUCT_HEALTH_SELF_REPO:-depre-dev/averray-reference-agent}
+      # The compare call 404s on a private repo without a token.
+      PRODUCT_HEALTH_SELF_GITHUB_TOKEN: ${PRODUCT_HEALTH_SELF_GITHUB_TOKEN:-}
       PRODUCT_HEALTH_INCIDENT_LOG_PATH: ${PRODUCT_HEALTH_INCIDENT_LOG_PATH:-/data/product-health-incidents.jsonl}
       PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED: ${PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED:-false}
       # The contract that EMITS the payout event. Defaults to /health's
@@ -468,6 +487,10 @@ services:
     build:
       context: ..
       dockerfile: ops/Dockerfile.node
+      args:
+        # Prefix the deploy with GIT_SHA=$(git rev-parse HEAD) so the monitor
+        # can report its own version. Unset = "unknown", reported honestly.
+        GIT_SHA: ${GIT_SHA:-unknown}
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     profiles: ["testbed-runner"]
     restart: unless-stopped
@@ -570,6 +593,10 @@ services:
     build:
       context: ..
       dockerfile: ops/Dockerfile.node
+      args:
+        # Prefix the deploy with GIT_SHA=$(git rev-parse HEAD) so the monitor
+        # can report its own version. Unset = "unknown", reported honestly.
+        GIT_SHA: ${GIT_SHA:-unknown}
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     profiles: ["test-wallet-signer"]
     restart: unless-stopped
@@ -608,6 +635,10 @@ services:
     build:
       context: ..
       dockerfile: ops/Dockerfile.node
+      args:
+        # Prefix the deploy with GIT_SHA=$(git rev-parse HEAD) so the monitor
+        # can report its own version. Unset = "unknown", reported honestly.
+        GIT_SHA: ${GIT_SHA:-unknown}
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     profiles: ["codex-runner"]
     restart: unless-stopped
@@ -653,6 +684,10 @@ services:
     build:
       context: ..
       dockerfile: ops/Dockerfile.node
+      args:
+        # Prefix the deploy with GIT_SHA=$(git rev-parse HEAD) so the monitor
+        # can report its own version. Unset = "unknown", reported honestly.
+        GIT_SHA: ${GIT_SHA:-unknown}
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     profiles: ["dispatch"]
     restart: unless-stopped
@@ -697,6 +732,10 @@ services:
     build:
       context: ..
       dockerfile: ops/Dockerfile.node
+      args:
+        # Prefix the deploy with GIT_SHA=$(git rev-parse HEAD) so the monitor
+        # can report its own version. Unset = "unknown", reported honestly.
+        GIT_SHA: ${GIT_SHA:-unknown}
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     profiles: ["claude-runner"]
     restart: unless-stopped
@@ -764,6 +803,10 @@ services:
     build:
       context: ..
       dockerfile: ops/Dockerfile.node
+      args:
+        # Prefix the deploy with GIT_SHA=$(git rev-parse HEAD) so the monitor
+        # can report its own version. Unset = "unknown", reported honestly.
+        GIT_SHA: ${GIT_SHA:-unknown}
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     profiles: ["test-writer-runner"]
     restart: unless-stopped
@@ -826,6 +869,10 @@ services:
     build:
       context: ..
       dockerfile: ops/Dockerfile.node
+      args:
+        # Prefix the deploy with GIT_SHA=$(git rev-parse HEAD) so the monitor
+        # can report its own version. Unset = "unknown", reported honestly.
+        GIT_SHA: ${GIT_SHA:-unknown}
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     profiles: ["security-runner"]
     restart: unless-stopped
@@ -879,6 +926,10 @@ services:
     build:
       context: ..
       dockerfile: ops/Dockerfile.node
+      args:
+        # Prefix the deploy with GIT_SHA=$(git rev-parse HEAD) so the monitor
+        # can report its own version. Unset = "unknown", reported honestly.
+        GIT_SHA: ${GIT_SHA:-unknown}
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     profiles: ["docs-runner"]
     restart: unless-stopped
