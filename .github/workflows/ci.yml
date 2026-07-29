@@ -25,6 +25,11 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Install zsh syntax-check shell
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends zsh
+
       - name: Install dependencies
         run: npm ci
 
@@ -106,10 +111,12 @@ jobs:
 
       - name: Run required INT-2 mechanism suite
         env:
+          INT2_HARNESS_DEPLOY_KEY: ${{ secrets.INT2_HARNESS_DEPLOY_KEY }}
           INT2_SUITE_EVIDENCE_DIR: ${{ runner.temp }}/int2-suite-evidence
         run: scripts/ceremony/run-int2-automated-suite.sh
 
       - name: Prove the suite did not skip
+        if: always()
         run: test "$(tr -d '[:space:]' < '${{ runner.temp }}/int2-suite-evidence/executed-count.txt')" = "9"
 
       - name: Upload INT-2 evidence
