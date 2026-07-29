@@ -16,7 +16,8 @@
 import type { ReactNode } from "react";
 import type { BoardCard, CardWorkingNow } from "../../lib/monitor/card-types.js";
 import type { ProductHealth, SolvencyPool } from "../../lib/monitor/product-health.js";
-import { decisionPriorityFor, rankDecisionCards } from "../../lib/monitor/decision-rank.js";
+import { decisionPriorityFor } from "../../lib/monitor/decision-rank.js";
+import { approvalBasisFor, triageForPhone } from "../../lib/monitor/phone-triage.js";
 import { describeWorkingNow } from "../../lib/monitor/working-now.js";
 import { opsBannerData } from "../ops/ops-frame.js";
 
@@ -41,7 +42,10 @@ export function MobileBoard({
   onApproveTask,
   onDismissCard,
 }: MobileBoardProps) {
-  const decisions = rankDecisionCards(cards, health);
+  // A phone is an ACTION surface, not a triage board: ops-blocking work and
+  // approvals that can explain themselves earn a slot; the rest is an honest
+  // count. Nothing is dropped — see phone-triage.ts.
+  const { actNow, delivery } = triageForPhone(cards, health);
   return (
     <div className="hm-mb" data-testid="mobile-board">
       <header className="hm-mb-top">
@@ -56,13 +60,14 @@ export function MobileBoard({
         {/* Add a card here to add a feature. Each returns null when empty. */}
         <MobileStatusCard health={health} nowMs={nowMs} />
         <MobileMoneyCard health={health} />
-        <MobileNeedsYouCard
-          decisions={decisions}
+        <MobileActNowCard
+          decisions={actNow}
           health={health}
           onCardClick={onCardClick}
           onApproveTask={onApproveTask}
           onDismissCard={onDismissCard}
         />
+        <MobileDeliveryLine delivery={delivery} onCardClick={onCardClick} />
         <MobileAgentsCard cards={cards} nowMs={nowMs} />
       </div>
 
@@ -178,14 +183,15 @@ function formatFloor(value: number): string {
 }
 
 /**
- * The decisions waiting on the operator. Uses `rankDecisionCards`, which owns
- * the shared `isDecision` filter and money-first order used by the desktop
- * inbox, so the phone cannot show a different backlog or priority order.
+ * ACT NOW — money-blocking work plus approvals that can state their basis.
  *
- * SAFETY: only approve/dismiss of already-proposed work is reachable here. The
- * phone never moves funds; a prepare-only task stays prepare-only.
+ * The shipped version listed every decision and put a green Approve button
+ * under a card whose only title was "codex task". The operator's words: "what
+ * should I approve here if I have no clue what it is". An approval you cannot
+ * identify is worse than one you were never shown, so the button is now GATED
+ * on the card being able to say what it will do.
  */
-export function MobileNeedsYouCard({
+export function MobileActNowCard({
   decisions,
   health,
   onCardClick,
@@ -200,15 +206,15 @@ export function MobileNeedsYouCard({
 }) {
   if (decisions.length === 0) {
     return (
-      <MobileCard label="Needs you">
-        <p className="hm-mb-empty">Nothing waiting on you.</p>
+      <MobileCard label="Act now">
+        <p className="hm-mb-empty">Nothing needs you right now.</p>
       </MobileCard>
     );
   }
   const shown = decisions.slice(0, DECISION_LIMIT);
   const rest = decisions.length - shown.length;
   return (
-    <MobileCard label={`Needs you · ${decisions.length}`}>
+    <MobileCard label={`Act now · ${decisions.length}`}>
       {shown.map((card) => (
         <DecisionRow
           key={card.id}
@@ -221,6 +227,35 @@ export function MobileNeedsYouCard({
       ))}
       {rest > 0 ? <p className="hm-mb-note">+{rest} more on the full board.</p> : null}
     </MobileCard>
+  );
+}
+
+/**
+ * Delivery work, as a number rather than a demand. Renders nothing when there
+ * is none. This is a COLLAPSE, not a hide: the count is real and the desktop
+ * board still lists every one of these cards unchanged.
+ */
+export function MobileDeliveryLine({
+  delivery,
+  onCardClick,
+}: {
+  delivery: BoardCard[];
+  onCardClick?: (id: string) => void;
+}) {
+  if (delivery.length === 0) return null;
+  const first = delivery[0]!;
+  return (
+    <button
+      type="button"
+      className="hm-mb-delivery"
+      onClick={onCardClick ? () => onCardClick(first.id) : undefined}
+      data-testid="mobile-delivery-line"
+    >
+      <span className="hm-mb-delivery-n">{delivery.length}</span>
+      <span className="hm-mb-delivery-t">
+        delivery item{delivery.length === 1 ? "" : "s"} waiting · review on the full board
+      </span>
+    </button>
   );
 }
 
@@ -237,25 +272,27 @@ function DecisionRow({
   onApproveTask?: (id: string) => void;
   onDismissCard?: (card: BoardCard) => void;
 }) {
-  const taskStatus = (card as { taskStatus?: string }).taskStatus;
-  const proposed = card.type === "task" && taskStatus === "proposed";
   const priority = decisionPriorityFor(card, health);
+  const basis = approvalBasisFor(card);
+  const proposed = card.type === "task" && (card as { taskStatus?: string }).taskStatus === "proposed";
+  // Approve requires a basis. Without one the row says so and sends you to the
+  // desktop rather than offering a decision you cannot make.
+  const approvable = proposed && basis !== undefined;
   return (
     <div className="hm-mb-item">
       <button type="button" className="hm-mb-item-open" onClick={onCardClick ? () => onCardClick(card.id) : undefined}>
-        <span className="hm-mb-item-title">{card.title}</span>
-        <span
-          className={`hm-mb-priority hm-mb-priority--${priority.tier}`}
-          data-decision-tier={priority.tier}
-        >
+        <span className="hm-mb-item-title">{basis?.what ?? card.title}</span>
+        <span className={`hm-mb-chip hm-mb-chip--${priority.tier === "money-blocking" ? "act" : "warn"}`}>
           {priority.reason}
         </span>
+        {basis?.why ? <span className="hm-mb-item-why">{basis.why}</span> : null}
         <span className="hm-mb-item-meta">
           {card.agentType}
           {card.repo ? ` · ${card.repo.split("/").pop()}` : ""}
+          {basis?.risk ? ` · ${basis.risk} risk` : ""}
         </span>
       </button>
-      {proposed ? (
+      {approvable ? (
         <div className="hm-mb-acts">
           <button
             type="button"
@@ -274,6 +311,8 @@ function DecisionRow({
             Dismiss
           </button>
         </div>
+      ) : proposed ? (
+        <p className="hm-mb-nobasis">Can&rsquo;t say what this does — review on the full board.</p>
       ) : null}
     </div>
   );
