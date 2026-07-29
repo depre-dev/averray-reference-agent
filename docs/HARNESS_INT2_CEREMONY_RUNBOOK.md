@@ -201,7 +201,8 @@ hash.
 `HARNESS_DISPATCH_READ_TIMEOUT_MS` is bounded to 1–30 seconds. Keep the
 15-second pilot default when the Harness CLI crosses a container boundary.
 
-The `lint-format` fixture uses only `git diff --check`, so it can run with
+The `lint-format` fixture uses only
+`test -n "$(git diff --numstat)" && git diff --check`, so it can run with
 `HARNESS_DISPATCH_DEP_CACHE_DIR` unset; leave it unset for that fixture. The
 `docs-fix`, `add-unit-test`, and `small-refactor` fixtures execute `npm`
 verification and require the exact offline cache. For one of those fixtures,
@@ -636,20 +637,115 @@ remains reproducible and unchanged.
 Proceed only if every scripted proof is green and the operator records a
 go/no-go of `go`.
 
+This paid run has an additional hard gate: the git-based criterion must be
+green through the actual containerized ceremony path. The host pre-flight
+below is necessary, but it does not lift that gate. Record evidence that a
+clean non-empty diff returns `exit_0`, trailing whitespace returns `exit_2`
+with the offence named, an empty diff returns `exit_1`, and neither `exit_128`
+nor `exit_129` occurs. While the container path still reproduces `exit_129`
+(the state recorded for #589), **stop here and do not export a model
+credential**. Only the operator may record the evidence reference and lift
+this gate.
+
 1. Stop the scripted worker.
-2. Unset `HARNESS_TEST_MODEL_SCRIPT`.
-3. Select one approved real-model endpoint and keep its credential only in the
-   worker's local environment. Do not paste it into evidence or CLI arguments:
+2. Unset every model credential, then run the free three-case pre-flight
+   against the real `lint-format` fixture and its pinned `baseRevision`. This
+   clones three clean checkouts and fails unless all three verdicts
+   discriminate exactly:
 
    ```sh
    unset HARNESS_TEST_MODEL_SCRIPT
+   unset HARNESS_MODEL_API_KEY
+   test -z "${HARNESS_MODEL_API_KEY:-}"
+
+   node "$REFERENCE_CHECKOUT/scripts/ceremony/int2-evidence.mjs" \
+     preflight-section3 --repository-root "$REFERENCE_CHECKOUT" \
+     > "$CEREMONY_ROOT/evidence/section3-preflight.json"
+
+   jq -e \
+     '.correct.exitCode == 0
+      and .incorrect.exitCode == 2
+      and (.incorrect.details | test("trailing whitespace"; "i"))
+      and .noChange.exitCode == 1
+      and .exit128Present == false
+      and .exit129Present == false' \
+     "$CEREMONY_ROOT/evidence/section3-preflight.json" > /dev/null
+   ```
+
+3. Select one approved real-model endpoint without exporting its credential.
+   Record its published uncached input and output rates in USD per million
+   tokens, plus the authoritative pricing URL:
+
+   ```sh
    export HARNESS_MODEL_ADAPTER=openai-compatible
    export HARNESS_MODEL_REF="<operator-approved-model>"
    export HARNESS_MODEL_BASE_URL="<operator-approved-endpoint>"
+   export SECTION3_INPUT_USD_PER_MILLION="<published-input-rate>"
+   export SECTION3_OUTPUT_USD_PER_MILLION="<published-output-rate>"
+   export SECTION3_RATE_SOURCE="<authoritative-pricing-url>"
+   ```
+
+4. The fixture's `modelTokens: 8000` is the operative spend limit.
+   `estimatedUsdMicros` is `null` and is **not** a monetary enforcement
+   control. Compute a conservative worst case by charging all 8,000 tokens at
+   the higher published rate, then record the model identity, endpoint host,
+   rates, source, and result before approval:
+
+   ```sh
+   export SECTION3_TOKEN_CAP=8000
+   export SECTION3_WORST_CASE_USD="$(
+     node --input-type=module -e '
+       const [tokens, inputRate, outputRate] = process.argv.slice(1).map(Number);
+       if (![tokens, inputRate, outputRate].every(Number.isFinite)
+           || tokens <= 0 || inputRate < 0 || outputRate < 0) {
+         throw new Error("invalid token cap or published model rate");
+       }
+       process.stdout.write(
+         (tokens * Math.max(inputRate, outputRate) / 1_000_000).toFixed(6),
+       );
+     ' "$SECTION3_TOKEN_CAP" \
+       "$SECTION3_INPUT_USD_PER_MILLION" \
+       "$SECTION3_OUTPUT_USD_PER_MILLION"
+   )"
+   export SECTION3_ENDPOINT_HOST="$(
+     node --input-type=module -e \
+       'process.stdout.write(new URL(process.argv[1]).host)' \
+       "$HARNESS_MODEL_BASE_URL"
+   )"
+
+   jq -n \
+     --arg modelRef "$HARNESS_MODEL_REF" \
+     --arg endpointHost "$SECTION3_ENDPOINT_HOST" \
+     --arg rateSource "$SECTION3_RATE_SOURCE" \
+     --argjson tokenCap "$SECTION3_TOKEN_CAP" \
+     --argjson inputUsdPerMillion "$SECTION3_INPUT_USD_PER_MILLION" \
+     --argjson outputUsdPerMillion "$SECTION3_OUTPUT_USD_PER_MILLION" \
+     --argjson worstCaseUsd "$SECTION3_WORST_CASE_USD" \
+     '{
+       modelRef: $modelRef,
+       endpointHost: $endpointHost,
+       rateSource: $rateSource,
+       tokenCap: $tokenCap,
+       inputUsdPerMillion: $inputUsdPerMillion,
+       outputUsdPerMillion: $outputUsdPerMillion,
+       worstCaseUsd: $worstCaseUsd,
+       calculation: "tokenCap * max(inputRate, outputRate) / 1000000"
+     }' > "$CEREMONY_ROOT/evidence/section3-model-budget.json"
+   ```
+
+   Stop if the model, endpoint host, published-rate source, or computed ceiling
+   is missing. The evidence file must never contain the endpoint path, query,
+   user information, or credential.
+5. Only after the container-path gate, fixture pre-flight, and budget evidence
+   are green, keep `HARNESS_MODEL_API_KEY` in the worker's local environment.
+   Never paste it into chat or evidence, print it, commit it, or pass it as a
+   CLI argument:
+
+   ```sh
    export HARNESS_MODEL_API_KEY="<secret-kept-out-of-evidence>"
    ```
 
-4. Prove **no** Harness worker is already running, then start exactly one:
+6. Prove **no** Harness worker is already running, then start exactly one:
 
    ```sh
    pgrep -af "harness worker" && exit 1 || true
@@ -659,16 +755,22 @@ go/no-go of `go`.
    `HARNESS_TEST_MODEL_SCRIPT` and can claim this run, producing a result
    attributed to the wrong fixture. "Start one" is not the same as "only one
    exists" — assert the second.
-5. Propose exactly one `lint-format` or `docs-fix` task with a new work-item id
-   and a near-term deadline. Verify the fixture remains low-risk, deny-network,
-   `maxChildren: 0`, `maxConcurrentChildren: 0`, and within its fixed elapsed,
-   token, tool-call, and cost budget.
-6. Approve once with `--confirm`, then explicitly enable and start one
+7. Propose exactly one `lint-format` task with a new work-item id and a
+   near-term deadline. `docs-fix` is prohibited for §3 because its search
+   criterion scans no files. Verify `lint-format` remains low-risk,
+   deny-network, `maxChildren: 0`, `maxConcurrentChildren: 0`, and within its
+   fixed 60-second, 8,000-token, and 30-tool-call limits. Confirm its
+   `estimatedUsdMicros` is `null`; do not describe it as an enforced cost
+   budget.
+8. Approve once with `--confirm`, then explicitly enable and start one
    dispatcher.
-7. Capture the run status, events, deliverables, manifest hashes, actual budget
-   use, verifier result, task projection, decisions, binding, heartbeat, and
-   alerts. The ceremony does not open a PR even when verification succeeds.
-8. Stop the dispatcher immediately after the task reaches a terminal
+9. Capture the run status, events, deliverables, manifest hashes, actual tokens
+   against the 8,000-token cap, wall time against 60 seconds, tool calls
+   against 30, resolved model identity, the verifier's own `details` payload,
+   task projection, decisions, binding, heartbeat, and alerts **before
+   judging the result**. The ceremony does not open a PR even when verification
+   succeeds.
+10. Stop the dispatcher immediately after the task reaches a terminal
    lifecycle, then set `HARNESS_DISPATCH_ENABLED=false`.
 
 Do not run a second real-model task to improve the result. A failure is
