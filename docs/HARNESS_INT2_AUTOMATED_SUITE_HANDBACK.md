@@ -2,7 +2,7 @@
 
 **Status:** CI authentication, model-environment, and hosted Linux Git ownership
 fixes implemented; fast gates and the real nine-case Docker/Postgres suite are
-green locally; hosted re-gate pending
+green locally and on the GitHub-hosted Linux runner
 
 **Baseline:** `47de9f3bdb25eda7354297a951b9927368194791`
 
@@ -120,6 +120,28 @@ INT2_CASES_COMPLETED executed=9 elapsed=150
 INT2_SUITE_EXIT_CODE=0
 ```
 
+### GitHub-hosted re-gate
+
+Run `30478826796` at
+`0f8b7373acea503d1e07b38531468fbbb88fa4b7` reproduced the Linux uid split
+and passed:
+
+```text
+Typecheck and test                 success
+Docker build                       success
+INT-2 real dispatcher integration success
+Prove the suite did not skip       success
+Upload INT-2 evidence              success
+
+Test Files  1 passed (1)
+Tests       9 passed (9)
+Duration    170.55s
+INT-2 automated suite: 9 cases executed in 241s
+```
+
+The hosted evidence artifact is id `8734856204`, size `89,645` bytes, digest
+`sha256:dbce3fa64e50b98f502f143eb87267c5f3bf242eb6fbbbbc1f0281be0766bb3d`.
+
 ### Hosted Linux amendment decisions
 
 1. **Trust the fixed mount point, never every repository.** The container has
@@ -140,9 +162,7 @@ INT2_SUITE_EXIT_CODE=0
 
 ### Hosted Linux amendment open questions
 
-- The exact GitHub-hosted re-gate remains pending until this branch is pushed.
-  Local gates exercise the complete mechanism, but the Linux uid split is the
-  environment that discriminates this fix.
+None.
 
 ## Re-gate amendment — CI checkout and cross-machine determinism
 
@@ -366,9 +386,8 @@ precedence fix addresses.
 
 ### Re-gate open questions
 
-- Pascal must provision `INT2_HARNESS_DEPLOY_KEY` before the GitHub-hosted job
-  can pass. Absence is intentionally red and produces a named evidence
-  artifact.
+- Resolved: `INT2_HARNESS_DEPLOY_KEY` is provisioned. Hosted run `30478826796`
+  authenticated the pinned private checkout and completed all nine cases.
 - The intermittent local Docker mount observation above is outside this
   repository's runtime surface. If it reproduces on an otherwise controlled
   clean gate, it should become a separate kernel/provider finding rather than a
