@@ -19,6 +19,8 @@ export const INT2_HARNESS_PIN =
   "0890a1f04c2729cbd310e21f66dd9dc6fbc66dc2";
 export const INT2_EXPECTED_PATH =
   "docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md";
+export const INT2_SECTION3_CRITERION =
+  "test -n \"$(git diff --numstat)\" && git diff --check";
 export const INT2_PILOT_CAPABILITIES = Object.freeze([
   "fs.read_file",
   "fs.write_file",
@@ -46,6 +48,10 @@ const GREEN_TOOL_COMMAND =
   "printf '%b' '\\nINT-2 green-path proof line, cleanly formatted.\\n' >> docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md";
 const NEGATIVE_TOOL_COMMAND =
   "printf '%b' '\\nINT-2 negative-path proof line with trailing whitespace.   \\n' >> docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md";
+const SECTION3_CORRECT_TOOL_COMMAND =
+  "printf '%b' '\\nA paid real-model ceremony requires a three-case acceptance pre-flight before credentials are exported.\\n' >> docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md";
+const SECTION3_INCORRECT_TOOL_COMMAND =
+  "printf '%b' '\\nA paid real-model ceremony requires a three-case acceptance pre-flight before credentials are exported.   \\n' >> docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md";
 const HALT_TOOL_COMMAND = "sleep 30";
 const CASE_EXPECTATIONS = Object.freeze({
   green: Object.freeze({
@@ -290,13 +296,13 @@ export async function verifyScriptedPairPreflight({
   const [green, negative] = await Promise.all([
     runFixtureCriterion({
       repositoryRoot,
-      command: greenAction.command,
+      changeCommand: greenAction.command,
       expectedPath: greenAction.targetPath,
       baseRevision: greenFence.repository.baseRevision,
     }),
     runFixtureCriterion({
       repositoryRoot,
-      command: negativeAction.command,
+      changeCommand: negativeAction.command,
       expectedPath: negativeAction.targetPath,
       baseRevision: negativeFence.repository.baseRevision,
     }),
@@ -332,6 +338,138 @@ export async function verifyScriptedPairPreflight({
       numstat: negative.numstat,
       exitCode: negative.exitCode,
     },
+  };
+}
+
+export async function verifySection3Preflight({
+  repositoryRoot,
+  fixturePath = path.join(
+    repositoryRoot,
+    "test/fixtures/agent-integration/ceremony/lint-format.json",
+  ),
+} = {}) {
+  if (!repositoryRoot) {
+    throw new Error("repositoryRoot is required");
+  }
+  const fixture = await readJson(fixturePath);
+  const criterion = fixture?.acceptanceCriteria?.[0]?.command;
+  assertEqual(
+    fixture?.acceptanceCriteria,
+    [{
+      id: "format-command",
+      type: "command",
+      command: INT2_SECTION3_CRITERION,
+      required: true,
+    }],
+    "section 3 fixture does not use the discriminating criterion",
+  );
+  if (
+    fixture?.taskKind !== "lint_format"
+    || typeof fixture?.objective !== "string"
+    || !fixture.objective.startsWith("Append ")
+    || !fixture.objective.includes(INT2_EXPECTED_PATH)
+  ) {
+    throw new Error(
+      "section 3 fixture objective is not a tracked-file construction",
+    );
+  }
+  assertEqual(
+    fixture?.budget,
+    {
+      elapsedSeconds: 60,
+      modelTokens: 8000,
+      toolCalls: 30,
+      estimatedUsdMicros: null,
+    },
+    "section 3 fixture budget changed",
+  );
+
+  const baseRevision = fixture?.repository?.baseRevision;
+  if (
+    typeof baseRevision !== "string"
+    || !/^[0-9a-f]{40}$/u.test(baseRevision)
+  ) {
+    throw new Error("section 3 fixture baseRevision is not a full commit SHA");
+  }
+
+  const [correct, incorrect, noChange] = await Promise.all([
+    runFixtureCriterion({
+      repositoryRoot,
+      changeCommand: SECTION3_CORRECT_TOOL_COMMAND,
+      criterionCommand: criterion,
+      expectedPath: INT2_EXPECTED_PATH,
+      baseRevision,
+    }),
+    runFixtureCriterion({
+      repositoryRoot,
+      changeCommand: SECTION3_INCORRECT_TOOL_COMMAND,
+      criterionCommand: criterion,
+      expectedPath: INT2_EXPECTED_PATH,
+      baseRevision,
+    }),
+    runFixtureCriterion({
+      repositoryRoot,
+      criterionCommand: criterion,
+      expectedPath: INT2_EXPECTED_PATH,
+      baseRevision,
+    }),
+  ]);
+
+  const cases = [correct, incorrect, noChange];
+  if (cases.some((result) => result.baseRevision !== baseRevision)) {
+    throw new Error("section 3 pre-flight did not run at the fixture revision");
+  }
+  if (cases.some((result) => result.exitCode === 128)) {
+    throw new Error("section 3 criterion produced exit_128");
+  }
+  if (cases.some((result) => result.exitCode === 129)) {
+    throw new Error("section 3 criterion produced exit_129");
+  }
+  if (correct.numstat.length === 0 || correct.exitCode !== 0) {
+    throw new Error(
+      `section 3 correct change was not accepted with exit_0; got exit_${correct.exitCode}`,
+    );
+  }
+  if (incorrect.numstat.length === 0 || incorrect.exitCode !== 2) {
+    throw new Error(
+      `section 3 incorrect change was not refused with exit_2; got exit_${incorrect.exitCode}`,
+    );
+  }
+  const incorrectDetails = `${incorrect.stdout}\n${incorrect.stderr}`.trim();
+  if (!/trailing whitespace/iu.test(incorrectDetails)) {
+    throw new Error(
+      "section 3 incorrect change did not name trailing whitespace",
+    );
+  }
+  if (noChange.numstat.length !== 0 || noChange.exitCode !== 1) {
+    throw new Error(
+      `section 3 empty diff was not refused with exit_1; got exit_${noChange.exitCode}`,
+    );
+  }
+
+  return {
+    fixture: "lint-format",
+    baseRevision,
+    targetPath: INT2_EXPECTED_PATH,
+    criterion,
+    correct: {
+      numstat: correct.numstat,
+      exitCode: correct.exitCode,
+      reason: "clean_non_empty_diff",
+    },
+    incorrect: {
+      numstat: incorrect.numstat,
+      exitCode: incorrect.exitCode,
+      reason: "trailing_whitespace",
+      details: incorrectDetails,
+    },
+    noChange: {
+      numstat: noChange.numstat,
+      exitCode: noChange.exitCode,
+      reason: "empty_diff",
+    },
+    exit128Present: false,
+    exit129Present: false,
   };
 }
 
@@ -999,7 +1137,8 @@ async function inspectWorkspacePatch({
 
 async function runFixtureCriterion({
   repositoryRoot,
-  command: fixtureCommand,
+  changeCommand,
+  criterionCommand = "git diff --check",
   expectedPath,
   baseRevision,
 }) {
@@ -1034,20 +1173,28 @@ async function runFixtureCriterion({
         `append target is not tracked in the checkout: ${expectedPath}`,
       );
     }
-    await command("sh", ["-c", fixtureCommand], { cwd: checkout });
+    const head = (await command("git", [
+      "-C",
+      checkout,
+      "rev-parse",
+      "HEAD",
+    ])).stdout.trim();
+    if (changeCommand) {
+      await command("sh", ["-c", changeCommand], { cwd: checkout });
+    }
     const numstat = (await command("git", [
       "-C",
       checkout,
       "diff",
       "--numstat",
     ])).stdout.trim();
-    const criterion = await command("git", [
-      "-C",
-      checkout,
-      "diff",
-      "--check",
-    ], { allowFailure: true });
+    const criterion = await command(
+      "sh",
+      ["-c", criterionCommand],
+      { cwd: checkout, allowFailure: true },
+    );
     return {
+      baseRevision: head,
       numstat,
       exitCode: criterion.code,
       stdout: criterion.stdout,
@@ -1414,6 +1561,13 @@ async function runCli(argv) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return;
   }
+  if (commandName === "preflight-section3") {
+    const result = await verifySection3Preflight({
+      repositoryRoot: values["repository-root"] ?? process.cwd(),
+    });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
   if (commandName === "verify") {
     const caseName = values.case;
     const evidence = await collectInt2Evidence({
@@ -1435,6 +1589,8 @@ async function runCli(argv) {
   }
   throw new Error(
     "Usage: int2-evidence.mjs preflight-pair --repository-root <path>\n"
+    + "   or: int2-evidence.mjs preflight-section3 "
+    + "--repository-root <path>\n"
     + "   or: int2-evidence.mjs verify --case <name> --work-item <id> "
     + "--run-id <id> [--evidence-dir <path>]",
   );

@@ -14,7 +14,9 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   INT2_EXPECTED_PATH,
+  INT2_SECTION3_CRITERION,
   expectationsForCase,
+  verifySection3Preflight,
   verifyScriptedPairPreflight,
 } from "../../scripts/ceremony/int2-evidence.mjs";
 import {
@@ -97,6 +99,100 @@ describe("committed INT-2 ceremony mechanics", () => {
         negativeScriptPath: mutatedNegative,
       }),
     ).rejects.toThrow("controlled pair appended content must differ");
+  });
+
+  it("preflights all three paid-task criterion outcomes at the pinned revision", async () => {
+    const result = await verifySection3Preflight({
+      repositoryRoot: ROOT,
+    });
+
+    expect(result).toMatchObject({
+      fixture: "lint-format",
+      targetPath: INT2_EXPECTED_PATH,
+      criterion: INT2_SECTION3_CRITERION,
+      correct: {
+        exitCode: 0,
+        reason: "clean_non_empty_diff",
+      },
+      incorrect: {
+        exitCode: 2,
+        reason: "trailing_whitespace",
+        details: expect.stringMatching(/trailing whitespace/iu),
+      },
+      noChange: {
+        exitCode: 1,
+        reason: "empty_diff",
+      },
+      exit128Present: false,
+      exit129Present: false,
+    });
+    expect(result.correct.numstat).not.toBe("");
+    expect(result.incorrect.numstat).not.toBe("");
+    expect(result.noChange.numstat).toBe("");
+
+    const temporary = await mkdtemp(
+      path.join(tmpdir(), "int2-section3-mutation-"),
+    );
+    temporaryRoots.push(temporary);
+    const fixture = JSON.parse(
+      await readFile(
+        path.join(
+          ROOT,
+          "test/fixtures/agent-integration/ceremony/lint-format.json",
+        ),
+        "utf8",
+      ),
+    ) as {
+      acceptanceCriteria: Array<{ command: string }>;
+    };
+    fixture.acceptanceCriteria[0]!.command = "git diff --check";
+    const mutatedFixture = path.join(temporary, "lint-format.json");
+    await writeFile(mutatedFixture, `${JSON.stringify(fixture, null, 2)}\n`);
+
+    await expect(
+      verifySection3Preflight({
+        repositoryRoot: ROOT,
+        fixturePath: mutatedFixture,
+      }),
+    ).rejects.toThrow("does not use the discriminating criterion");
+  }, 30_000);
+
+  it("keeps the paid run behind pre-flight, container-path, and spend gates", async () => {
+    const runbook = await readFile(
+      path.join(ROOT, "docs/HARNESS_INT2_CEREMONY_RUNBOOK.md"),
+      "utf8",
+    );
+    const sectionStart = runbook.indexOf(
+      "## 3. One budget-capped real-model task",
+    );
+    const sectionEnd = runbook.indexOf(
+      "## 4. Evidence mapped to the INT-2 gate",
+    );
+    const section = runbook.slice(sectionStart, sectionEnd);
+    const preflight = section.indexOf("preflight-section3");
+    const credential = section.indexOf(
+      'export HARNESS_MODEL_API_KEY="<secret-kept-out-of-evidence>"',
+    );
+
+    expect(sectionStart).toBeGreaterThanOrEqual(0);
+    expect(sectionEnd).toBeGreaterThan(sectionStart);
+    expect(preflight).toBeGreaterThanOrEqual(0);
+    expect(credential).toBeGreaterThan(preflight);
+    expect(section).toContain("actual containerized ceremony path");
+    expect(section).toContain("exit_129");
+    expect(section).toContain(
+      "`modelTokens: 8000` is the operative spend limit",
+    );
+    expect(section).toContain(
+      "`estimatedUsdMicros` is `null` and is **not** a monetary enforcement",
+    );
+    expect(section).toContain("Propose exactly one `lint-format` task");
+    expect(section).not.toContain(
+      "Propose exactly one `lint-format` or `docs-fix` task",
+    );
+    expect(section).toContain(
+      "Do not run a second real-model task to improve the result. A failure is",
+    );
   });
 
   it("records the production-loader and typed-attenuation split", () => {

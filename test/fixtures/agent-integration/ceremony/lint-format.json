@@ -2,9 +2,9 @@
   "workItemId": "ceremony-lint-format-001",
   "correlationId": "ceremony-lint-format-001",
   "taskKind": "lint_format",
-  "title": "Repair one bounded formatting defect",
-  "objective": "Correct a small formatting-only defect within the pilot path allowlist.",
-  "whyNow": "The supervised-dispatch ceremony needs a minimal lint and formatting family.",
+  "title": "Add one bounded paid-ceremony pre-flight note",
+  "objective": "Append one concise paragraph to docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md stating that a paid real-model ceremony requires a three-case acceptance pre-flight before credentials are exported, while preserving the surrounding guidance and clean formatting.",
+  "whyNow": "The supervised-dispatch ceremony needs a genuine construction task whose verifier refuses empty or malformed work.",
   "requestedBy": {
     "type": "operator",
     "id": "pilot-operator"
@@ -28,7 +28,7 @@
     {
       "id": "format-command",
       "type": "command",
-      "command": "git diff --check",
+      "command": "test -n \"$(git diff --numstat)\" && git diff --check",
       "required": true
     }
   ],
@@ -40,5 +40,5 @@
   },
   "deadline": "2027-12-31T23:59:59.000Z",
   "riskTier": "low",
-  "selectionReason": "A formatting-only task is the narrowest reversible Harness ceremony case."
+  "selectionReason": "A required paragraph in a tracked allowlisted plan is bounded, reversible, and produces a verifier-visible diff."
 }
