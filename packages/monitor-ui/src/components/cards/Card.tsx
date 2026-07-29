@@ -30,6 +30,8 @@ import type {
   MissionCard,
   MissionReport,
 } from "../../lib/monitor/card-types.js";
+import type { ProductHealth } from "../../lib/monitor/product-health.js";
+import { decisionPriorityFor } from "../../lib/monitor/decision-rank.js";
 import { deployStepsForCard } from "../../lib/monitor/deploy-stepper.js";
 import { shortId } from "../../lib/monitor/card-id.js";
 import { formatFreshness, freshnessTier } from "../../lib/monitor/urgency.js";
@@ -45,6 +47,8 @@ import { DeployStepper } from "../DeployStepper.js";
 
 export type CardProps = {
   card: BoardCard;
+  /** Live probe evidence for the shared money-first decision reason. */
+  decisionHealth?: ProductHealth;
   focused?: boolean;
   onClick?: (card: BoardCard) => void;
   /** Approve a proposed task card (O3). Operator-only; runs through a confirm. */
@@ -184,6 +188,7 @@ function isInboxDecisionCard(card: BoardCard, isClosed: boolean): boolean {
 
 export function Card({
   card,
+  decisionHealth,
   focused = false,
   onClick,
   onApprove,
@@ -244,6 +249,8 @@ export function Card({
       <CardHead card={card} isStale={isStale} isClosed={isClosed} />
 
       <div className="hm-card-title">{card.title}</div>
+
+      {isInboxCard ? <DecisionPriorityChip card={card} health={decisionHealth} /> : null}
 
       {card.repo && !isClosed && isInboxCard ? (
         <div className="hm-decision-repo hm-mono" title={card.repo}>
@@ -731,6 +738,25 @@ function DecisionCardExplanation({ card }: { card: BoardCard }) {
         </span>
       </div>
     </div>
+  );
+}
+
+function DecisionPriorityChip({
+  card,
+  health,
+}: {
+  card: BoardCard;
+  health?: ProductHealth;
+}) {
+  const priority = decisionPriorityFor(card, health);
+  return (
+    <span
+      className={`hm-decision-priority hm-decision-priority--${priority.tier}`}
+      data-decision-tier={priority.tier}
+      title="Money-first decision queue reason"
+    >
+      {priority.reason}
+    </span>
   );
 }
 

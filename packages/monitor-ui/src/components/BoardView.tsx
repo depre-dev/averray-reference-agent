@@ -302,8 +302,9 @@ export function BoardView({
         ? { hermesFocusCardId: scopeCandidateId(cards, focusedCardId, boardFocusId) }
         : {}),
       ...(board?.calmMetrics ? { calmMetrics: board.calmMetrics } : {}),
+      productHealth,
     }),
-    [board?.calmMetrics, boardFocusId, cards, focusedCardId, hermesFocusConversationActive, streamOnline, liveLabel],
+    [board?.calmMetrics, boardFocusId, cards, focusedCardId, hermesFocusConversationActive, streamOnline, liveLabel, productHealth],
   );
 
   // §14: announce the action-needed 0→>0 edge once, assertively, for
@@ -370,8 +371,8 @@ export function BoardView({
     [displayGrouped],
   );
   const inboxIds = useMemo(
-    () => new Set(inboxCards(displayGrouped).map((card) => card.id)),
-    [displayGrouped],
+    () => new Set(inboxCards(displayGrouped, productHealth).map((card) => card.id)),
+    [displayGrouped, productHealth],
   );
 
   const jumpToInbox = useCallback((card: BoardCard) => {
@@ -386,6 +387,7 @@ export function BoardView({
     <CardRouter
       key={card.id}
       card={card}
+      decisionHealth={productHealth}
       focused={card.id === boardFocusId}
       onClick={onCardClick ? (c) => onCardClick(c.id) : undefined}
       onApprove={onApproveTask ? (c) => onApproveTask(c.id) : undefined}
@@ -715,6 +717,7 @@ export function BoardView({
           ) : (
             <KanbanBoard
               grouped={displayGrouped}
+              decisionHealth={productHealth}
               ariaLabel="Kanban lane grid"
               expanded={surfacedExpanded}
               onToggleLane={onToggleLane}

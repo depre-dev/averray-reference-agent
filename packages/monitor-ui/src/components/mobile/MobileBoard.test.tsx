@@ -138,6 +138,34 @@ describe("MobileBoard", () => {
     expect(getByText("+2 more on the full board.")).toBeTruthy();
   });
 
+  test("uses the shared money-first order and shows why the first decision leads", () => {
+    const routine = taskCard({
+      id: "routine",
+      title: "post-production-deploy verification after workflow run #40",
+      isAction: true,
+    });
+    const unknown = taskCard({ id: "unknown", title: "Review an unclassified task" });
+    const money = taskCard({
+      id: "money",
+      type: "pr",
+      title: "Review settlement changes",
+      files: [{ path: "services/settlement/submit.ts", diff: "+3 -1", critical: false }],
+    });
+    const { container, getByText } = render(
+      <MobileBoard health={healthyMainnet} cards={[routine, unknown, money]} nowMs={NOW} />,
+    );
+
+    expect(
+      [...container.querySelectorAll(".hm-mb-item-title")].map((node) => node.textContent),
+    ).toEqual([
+      "Review settlement changes",
+      "Review an unclassified task",
+      "post-production-deploy verification after workflow run #40",
+    ]);
+    expect(getByText("Money first · settlement path").getAttribute("data-decision-tier"))
+      .toBe("money-blocking");
+  });
+
   test("a PROPOSED task exposes Approve/Dismiss and wires them to the operator gate", () => {
     const onApproveTask = vi.fn();
     const onDismissCard = vi.fn();

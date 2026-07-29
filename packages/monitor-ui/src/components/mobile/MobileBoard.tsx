@@ -16,7 +16,7 @@
 import type { ReactNode } from "react";
 import type { BoardCard } from "../../lib/monitor/card-types.js";
 import type { ProductHealth, SolvencyPool } from "../../lib/monitor/product-health.js";
-import { isDecision } from "../../lib/monitor/lane-rules.js";
+import { decisionPriorityFor, rankDecisionCards } from "../../lib/monitor/decision-rank.js";
 import { opsBannerData } from "../ops/ops-frame.js";
 
 export interface MobileBoardProps {
@@ -40,7 +40,7 @@ export function MobileBoard({
   onApproveTask,
   onDismissCard,
 }: MobileBoardProps) {
-  const decisions = cards.filter(isDecision);
+  const decisions = rankDecisionCards(cards, health);
   return (
     <div className="hm-mb" data-testid="mobile-board">
       <header className="hm-mb-top">
@@ -57,6 +57,7 @@ export function MobileBoard({
         <MobileMoneyCard health={health} />
         <MobileNeedsYouCard
           decisions={decisions}
+          health={health}
           onCardClick={onCardClick}
           onApproveTask={onApproveTask}
           onDismissCard={onDismissCard}
@@ -176,20 +177,22 @@ function formatFloor(value: number): string {
 }
 
 /**
- * The decisions waiting on the operator. Uses `isDecision` — the same selector
- * the desktop inbox and the "waiting on you" count use — so the phone can't
- * show a different backlog than the board.
+ * The decisions waiting on the operator. Uses `rankDecisionCards`, which owns
+ * the shared `isDecision` filter and money-first order used by the desktop
+ * inbox, so the phone cannot show a different backlog or priority order.
  *
  * SAFETY: only approve/dismiss of already-proposed work is reachable here. The
  * phone never moves funds; a prepare-only task stays prepare-only.
  */
 export function MobileNeedsYouCard({
   decisions,
+  health,
   onCardClick,
   onApproveTask,
   onDismissCard,
 }: {
   decisions: BoardCard[];
+  health?: ProductHealth;
   onCardClick?: (id: string) => void;
   onApproveTask?: (id: string) => void;
   onDismissCard?: (card: BoardCard) => void;
@@ -209,6 +212,7 @@ export function MobileNeedsYouCard({
         <DecisionRow
           key={card.id}
           card={card}
+          health={health}
           onCardClick={onCardClick}
           onApproveTask={onApproveTask}
           onDismissCard={onDismissCard}
@@ -221,21 +225,30 @@ export function MobileNeedsYouCard({
 
 function DecisionRow({
   card,
+  health,
   onCardClick,
   onApproveTask,
   onDismissCard,
 }: {
   card: BoardCard;
+  health?: ProductHealth;
   onCardClick?: (id: string) => void;
   onApproveTask?: (id: string) => void;
   onDismissCard?: (card: BoardCard) => void;
 }) {
   const taskStatus = (card as { taskStatus?: string }).taskStatus;
   const proposed = card.type === "task" && taskStatus === "proposed";
+  const priority = decisionPriorityFor(card, health);
   return (
     <div className="hm-mb-item">
       <button type="button" className="hm-mb-item-open" onClick={onCardClick ? () => onCardClick(card.id) : undefined}>
         <span className="hm-mb-item-title">{card.title}</span>
+        <span
+          className={`hm-mb-priority hm-mb-priority--${priority.tier}`}
+          data-decision-tier={priority.tier}
+        >
+          {priority.reason}
+        </span>
         <span className="hm-mb-item-meta">
           {card.agentType}
           {card.repo ? ` · ${card.repo.split("/").pop()}` : ""}

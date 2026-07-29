@@ -250,6 +250,34 @@
 .hm-decision-next .lbl { font-weight: 600; color: var(--h4-ink-2); }
 
 /* ---- E2: Decision-card body grammar ---- */
+.hm-decision-priority {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 7px;
+  padding: 3px 7px;
+  border: 1px solid var(--h4-line);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--h4-muted);
+  background: var(--h4-paper);
+}
+.hm-decision-priority--money-blocking {
+  border-color: var(--h4-act-line);
+  color: var(--h4-act-text);
+  background: var(--h4-act-soft);
+}
+.hm-decision-priority--unknown {
+  border-color: var(--h4-warn-line);
+  color: var(--h4-warn-text);
+  background: var(--h4-warn-soft);
+}
+.hm-decision-priority--routine-verification {
+  color: var(--h4-faint);
+  background: transparent;
+}
 .hm-decision-repo {
   margin-top: 5px;
   font-size: 11px;

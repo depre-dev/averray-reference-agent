@@ -109,6 +109,27 @@ test("mostUrgentCard: picks the action card when one exists", () => {
   assert.equal(urgent.id, "action-1");
 });
 
+test("mostUrgentCard: money-blocking decision outranks a fresher routine verification", () => {
+  const cards = [
+    card({
+      id: "routine",
+      isAction: true,
+      freshness: 1,
+      title: "post-production-deploy verification after workflow run #40",
+    }),
+    card({
+      id: "money",
+      isAction: true,
+      freshness: 500,
+      title: "Review payout worker",
+      files: [{ path: "services/payout/worker.ts", diff: "+2 -1", critical: false }],
+    }),
+  ];
+  const urgent = mostUrgentCard(cards);
+  assert.equal(urgent.id, "money");
+  assert.equal(boardNowBanner(cards).primaryActionId, "money");
+});
+
 test("mostUrgentCard: falls back to freshest non-action card when nothing needs the operator", () => {
   const cards = [
     card({ id: "older", freshness: 60 }),
@@ -194,6 +215,7 @@ test("boardNowBanner: action mode produces an action-toned banner with the most 
   assert.deepEqual(
     banner.mostUrgentReasons?.map((reason) => ({ label: reason.label, tone: reason.tone })),
     [
+      { label: "Money relevance unknown", tone: "warn" },
       { label: "blocked 5m", tone: "neutral" },
       { label: "risk: secrets", tone: "risk" },
       { label: "safe: read-only", tone: "safe" },
@@ -222,11 +244,14 @@ test("boardNowBanner: action banner traces to existing most-urgent selection", (
   assert.equal(banner.sub, "Most urgent: Urgent decision — suggests Review now.");
 });
 
-test("boardNowBanner: most-urgent reasons stay empty when the card has no real signals", () => {
+test("boardNowBanner: a thin card reports unknown money relevance instead of implying safety", () => {
   const banner = boardNowBanner([
     card({ id: "thin", isAction: true, title: "Thin card", freshness: undefined, risk: [] }),
   ]);
-  assert.deepEqual(banner.mostUrgentReasons, []);
+  assert.deepEqual(
+    banner.mostUrgentReasons?.map((reason) => ({ label: reason.label, tone: reason.tone })),
+    [{ label: "Money relevance unknown", tone: "warn" }],
+  );
 });
 
 test("boardNowBanner: Hermes focus mode uses the scoped review card", () => {

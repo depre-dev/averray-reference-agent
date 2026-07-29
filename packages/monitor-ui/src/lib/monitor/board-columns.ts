@@ -13,7 +13,9 @@
 // board-columns.test.ts so the structure is litigated here, not in the view.
 
 import type { BoardCard, Lane } from "./card-types.js";
+import type { ProductHealth } from "./product-health.js";
 import { LANES } from "./card-types.js";
+import { rankDecisionCards } from "./decision-rank.js";
 import { isDecision, tierFor, type KanbanTier } from "./lane-rules.js";
 
 export interface BoardColumnDef {
@@ -68,7 +70,10 @@ export function tierLabel(tier: KanbanTier): string {
  * actionable card. `isDecision` excludes done / verified / closed release
  * history, so the hero never inflates with finished work.
  */
-export function inboxCards(grouped: Partial<Record<Lane, BoardCard[]>>): BoardCard[] {
+export function inboxCards(
+  grouped: Partial<Record<Lane, BoardCard[]>>,
+  health?: ProductHealth,
+): BoardCard[] {
   const seen = new Set<string>();
   const out: BoardCard[] = [];
   for (const lane of LANES) {
@@ -78,7 +83,7 @@ export function inboxCards(grouped: Partial<Record<Lane, BoardCard[]>>): BoardCa
       out.push(card);
     }
   }
-  return out;
+  return rankDecisionCards(out, health);
 }
 
 export type ColumnVisibility = "hidden" | "rail" | "column";
