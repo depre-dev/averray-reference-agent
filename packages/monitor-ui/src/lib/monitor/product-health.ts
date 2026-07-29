@@ -104,6 +104,21 @@ export interface HealthHistory {
 
 export type OpsNetwork = "testnet" | "mainnet" | "unknown";
 
+/** Structured reading behind the chain_height probe (mirrors the backend's
+ *  ChainTickData) — drives the TopStrip block ticker. Absent → awaiting-data. */
+export interface ChainTick {
+  /** Block height as reported by the product's /health at the last check. */
+  height: number;
+  /** Epoch ms when that height was observed (server clock). */
+  observedAtMs: number;
+  /** Age (s) of the latest block at observation; null = not measurable. */
+  blockAgeSec?: number | null;
+  /** Epoch ms when the height was last seen to advance (tracker fallback). */
+  lastAdvanceAtMs?: number | null;
+  /** Producer's freshness window (s) — the ticker's stale threshold. */
+  freshSeconds?: number;
+}
+
 export interface ProductHealth {
   /** false = the heartbeat routine is off (honest "monitoring off", not a green). */
   enabled: boolean;
@@ -115,6 +130,7 @@ export interface ProductHealth {
   // ── optional structured blocks (forward-compat) ──
   chainId?: number | null;
   network?: OpsNetwork;
+  chain?: ChainTick;
   solvency?: SolvencySnapshot;
   flow?: MoneyPathSnapshot;
   history?: HealthHistory;

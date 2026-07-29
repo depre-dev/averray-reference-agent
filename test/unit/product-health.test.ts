@@ -747,6 +747,42 @@ describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", ()
     expect(chainAdvance).toEqual({ lastBlock: 10612201, lastAdvanceAtMs: 1000 });
   });
 
+  it("emits the structured chain tick (height + observation + measured age) for the board ticker", async () => {
+    const { snapshot } = await collectProductHealthProbes(
+      cfg(),
+      combinedFetch({
+        healthBody: HEALTHY_BODY,
+        chainIdHex: CHAIN_ID_HEX,
+        blockTimestampHex: tsHex(10_000_000, 12),
+        gasHex: "0xDE0B6B3A7640000",
+        usdcHex: "0x989680",
+      }),
+      { nowMs: 10_000_000 },
+    );
+    expect(snapshot.chain).toBeDefined();
+    expect(snapshot.chain?.height).toBe(10612201);
+    expect(snapshot.chain?.observedAtMs).toBe(10_000_000);
+    expect(snapshot.chain?.blockAgeSec).toBe(12);
+    expect(snapshot.chain?.lastAdvanceAtMs).toBe(10_000_000);
+    expect(snapshot.chain?.freshSeconds).toBe(600);
+  });
+
+  it("omits the chain tick when /health reports no block height (never a placeholder number)", async () => {
+    const { snapshot } = await collectProductHealthProbes(
+      cfg(),
+      combinedFetch({
+        healthBody: { ...HEALTHY_BODY, components: { blockchain: { ok: true, enabled: true, signerConfigured: true } } },
+        chainIdHex: CHAIN_ID_HEX,
+        gasHex: "0xDE0B6B3A7640000",
+        usdcHex: "0x989680",
+      }),
+      { nowMs: 10_000_000 },
+    );
+    expect(snapshot.chain).toBeUndefined();
+    // The rest of the snapshot still assembles — the ticker gap never blanks the board.
+    expect(snapshot.chainId).toBe(420420417);
+  });
+
   it("assembles the structured snapshot: chainId / network / solvency, and flow when settlement is present", async () => {
     const { snapshot } = await collectProductHealthProbes(
       cfg(),

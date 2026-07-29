@@ -1632,6 +1632,25 @@ export interface WindowFit {
   spanHours: number | null;
 }
 
+/** Structured reading behind the chain_height probe — drives the board's block
+ *  ticker (TopStrip, beside the clock). Emitted only when the product /health
+ *  reported a real height this cycle; absent otherwise, so the ticker renders
+ *  awaiting-data instead of a number nobody observed. */
+export interface ChainTickData {
+  /** Block height as reported by the product's /health this cycle. */
+  height: number;
+  /** Epoch ms when this cycle observed that height (server clock). */
+  observedAtMs: number;
+  /** Age (s) of the latest block per the chain-matched RPC at observation;
+   *  null = RPC absent/mismatched (UI falls back to lastAdvanceAtMs). */
+  blockAgeSec?: number | null;
+  /** Epoch ms when the cross-poll tracker last saw the height advance. */
+  lastAdvanceAtMs?: number | null;
+  /** The chain_height probe's freshness window (s). The UI's stale threshold
+   *  reads this so producer config stays the single authority. */
+  freshSeconds?: number;
+}
+
 export interface ProductHealthSnapshotBlocks {
   chainId?: number | null;
   /**
@@ -1641,6 +1660,7 @@ export interface ProductHealthSnapshotBlocks {
    */
   self?: SelfFreshness;
   network?: "testnet" | "mainnet" | "unknown";
+  chain?: ChainTickData;
   solvency?: SolvencySnapshotData;
   flow?: MoneyPathData;
 }
@@ -1827,6 +1847,20 @@ export async function collectProductHealthProbes(
     chainId: chainId ?? null,
     ...(selfFreshness.selfFreshness ? { self: selfFreshness.selfFreshness } : {}),
     network: resolveProductHealthNetwork(chainId),
+    // Block ticker data — same values the chain_height probe judged this cycle,
+    // structured instead of embedded in the detail string. Only emitted when a
+    // real height was observed (never a placeholder number).
+    ...(block !== undefined && block > 0
+      ? {
+          chain: {
+            height: block,
+            observedAtMs: chainCtx.nowMs,
+            blockAgeSec: blockAgeSec ?? null,
+            lastAdvanceAtMs: chainAdvance.lastAdvanceAtMs,
+            freshSeconds: config.chainMaxStaleSeconds,
+          },
+        }
+      : {}),
     ...(solvencyPools.length ? { solvency: { pools: solvencyPools } } : {}),
     ...(settlement
       ? {

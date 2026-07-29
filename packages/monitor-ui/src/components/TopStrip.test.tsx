@@ -204,4 +204,28 @@ describe("TopStrip", () => {
     expect(getByText("unknown · task_queue_unavailable")).toBeTruthy();
     expect(getByText("Dispatch ? of 10")).toBeTruthy();
   });
+
+  test("renders the chain ticker beside the Live pill when chainTick is provided", () => {
+    const t0 = 1_700_000_000_000;
+    const { container } = render(
+      <TopStrip
+        counts={calmCounts}
+        liveAt="14:32:08"
+        chainTick={{
+          chain: { height: 18_812_345, observedAtMs: t0, blockAgeSec: 3, lastAdvanceAtMs: t0, freshSeconds: 600 },
+          probe: { name: "chain_height", status: "ok", detail: "block #18,812,345 · 3s old", sparkline: ["ok"] },
+          now: () => t0,
+        }}
+      />,
+    );
+    const pill = container.querySelector(".hm-chain-pill");
+    expect(pill?.textContent).toContain("#18,812,345");
+    // Sits in the top-right cluster, beside the Live clock.
+    expect(pill?.closest(".hm-top-right")?.textContent).toContain("Live · 14:32:08");
+  });
+
+  test("shows no chain chip at all when chainTick is absent (monitoring off)", () => {
+    const { container } = render(<TopStrip counts={calmCounts} />);
+    expect(container.querySelector(".hm-chain-pill")).toBeNull();
+  });
 });
