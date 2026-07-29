@@ -222,4 +222,45 @@ describe("MobileBoard", () => {
     expect(getByText("Nothing waiting on you.")).toBeTruthy();
     expect(within(getByText("Nothing waiting on you.").closest("section")!).getByText(/Needs you/)).toBeTruthy();
   });
+
+  // #135: "Claude fixing" said an agent was busy but never what it was busy
+  // WITH. Both lines are payload passthrough — nothing here is inferred.
+  test("an agent row states what it is ATTEMPTING and its last reported step", () => {
+    const card = taskCard({
+      workingNow: {
+        agent: "claude",
+        label: "Claude fixing",
+        source: "runner",
+        intent: "Fix the settlement rounding drift",
+        progress: "Claude is using Edit.",
+        progressAt: new Date(NOW - 30_000).toISOString(),
+      },
+    } as Partial<BoardCard>);
+    const { getByText } = render(<MobileBoard health={healthyMainnet} cards={[card]} nowMs={NOW} />);
+    expect(getByText("Fix the settlement rounding drift")).toBeTruthy();
+    expect(getByText(/Claude is using Edit\./)).toBeTruthy();
+    expect(getByText(/just now/)).toBeTruthy();
+  });
+
+  test("a step that has gone quiet is toned down, not presented as current", () => {
+    const card = taskCard({
+      workingNow: {
+        agent: "claude", label: "Claude fixing", source: "runner",
+        progress: "Claude is using Bash.",
+        progressAt: new Date(NOW - 40 * 60 * 1000).toISOString(),
+      },
+    } as Partial<BoardCard>);
+    const { container, getByText } = render(<MobileBoard health={healthyMainnet} cards={[card]} nowMs={NOW} />);
+    expect(getByText(/40m ago/)).toBeTruthy();
+    expect(container.querySelector(".hm-mb-agent-step.is-stale")).toBeTruthy();
+  });
+
+  test("a runner that reported nothing says so instead of showing an empty line", () => {
+    const card = taskCard({
+      workingNow: { agent: "codex", label: "Codex fixing", source: "runner", intent: "Rotate the smoke token" },
+    } as Partial<BoardCard>);
+    const { getByText } = render(<MobileBoard health={healthyMainnet} cards={[card]} nowMs={NOW} />);
+    expect(getByText("Rotate the smoke token")).toBeTruthy();
+    expect(getByText("No step reported yet.")).toBeTruthy();
+  });
 });

@@ -14,9 +14,10 @@
 // two surfaces cannot drift apart or disagree about what is wrong.
 
 import type { ReactNode } from "react";
-import type { BoardCard } from "../../lib/monitor/card-types.js";
+import type { BoardCard, CardWorkingNow } from "../../lib/monitor/card-types.js";
 import type { ProductHealth, SolvencyPool } from "../../lib/monitor/product-health.js";
 import { decisionPriorityFor, rankDecisionCards } from "../../lib/monitor/decision-rank.js";
+import { describeWorkingNow } from "../../lib/monitor/working-now.js";
 import { opsBannerData } from "../ops/ops-frame.js";
 
 export interface MobileBoardProps {
@@ -62,7 +63,7 @@ export function MobileBoard({
           onApproveTask={onApproveTask}
           onDismissCard={onDismissCard}
         />
-        <MobileAgentsCard cards={cards} />
+        <MobileAgentsCard cards={cards} nowMs={nowMs} />
       </div>
 
       <p className="hm-mb-foot">Grey is awaiting data, never fake-green.</p>
@@ -278,23 +279,42 @@ function DecisionRow({
   );
 }
 
-/** Who is actually working right now — real `workingNow` only, never inferred. */
-export function MobileAgentsCard({ cards }: { cards: BoardCard[] }) {
+/**
+ * Who is actually working right now — real `workingNow` only, never inferred.
+ * Away from the desk the useful question isn't "is something running" but
+ * "what is it trying to do", so each row carries the agent's own intent and its
+ * last reported step, aged. A step past the staleness bound is toned down
+ * rather than presented as current.
+ */
+export function MobileAgentsCard({ cards, nowMs }: { cards: BoardCard[]; nowMs: number }) {
   const working = cards
-    .map((card) => (card as { workingNow?: { agent?: string; label?: string } }).workingNow)
-    .filter((w): w is { agent?: string; label?: string } => Boolean(w));
+    .map((card) => (card as { workingNow?: CardWorkingNow }).workingNow)
+    .filter((w): w is CardWorkingNow => Boolean(w));
   return (
     <MobileCard label="Agents">
       {working.length === 0 ? (
         <p className="hm-mb-empty">No agent is running right now.</p>
       ) : (
-        working.map((w, i) => (
-          <div className="hm-mb-agent" key={`${w.agent ?? "agent"}-${i}`}>
-            <span className="hm-mb-jewel" aria-hidden />
-            <span className="hm-mb-agent-name">{w.agent ?? "agent"}</span>
-            <span className="hm-mb-agent-state">{w.label ?? "working"}</span>
-          </div>
-        ))
+        working.map((w, i) => {
+          const view = describeWorkingNow(w, nowMs);
+          return (
+            <div className="hm-mb-agent-row" key={`${w.agent ?? "agent"}-${i}`}>
+              <div className="hm-mb-agent">
+                <span className="hm-mb-jewel" aria-hidden />
+                <span className="hm-mb-agent-name">{w.agent ?? "agent"}</span>
+                <span className="hm-mb-agent-state">{w.label ?? "working"}</span>
+              </div>
+              {view?.intent ? <p className="hm-mb-agent-intent">{view.intent}</p> : null}
+              {view?.progress ? (
+                <p className={`hm-mb-agent-step${view.stale ? " is-stale" : ""}`}>
+                  {view.progress}
+                  {view.progressAge ? <span className="hm-mb-agent-age"> · {view.progressAge}</span> : null}
+                </p>
+              ) : null}
+              {view?.emptyNote ? <p className="hm-mb-agent-step is-empty">{view.emptyNote}</p> : null}
+            </div>
+          );
+        })
       )}
     </MobileCard>
   );

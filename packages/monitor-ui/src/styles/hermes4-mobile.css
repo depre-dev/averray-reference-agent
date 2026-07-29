@@ -195,3 +195,26 @@
   padding: 4px 12px 18px;
   margin: 0;
 }
+
+/* ── agent intent (#135) ─────────────────────────────────────────────────── */
+.hm-mb-agent-row + .hm-mb-agent-row { border-top: 1px solid var(--h4-line-2); margin-top: 9px; padding-top: 9px; }
+.hm-mb-agent-intent {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--h4-ink-2);
+  margin: 3px 0 0 15px;
+  text-wrap: pretty;
+}
+.hm-mb-agent-step {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--h4-muted);
+  margin: 4px 0 0 15px;
+  text-wrap: pretty;
+}
+/* A step nobody has refreshed is warm-grey, the awaiting-data colour — it is
+   NOT evidence the agent is stuck, so it must not read as an alarm either. */
+.hm-mb-agent-step.is-stale { color: var(--h4-tel); }
+.hm-mb-agent-step.is-empty { color: var(--h4-faint); font-style: italic; }
+.hm-mb-agent-age { color: var(--h4-faint); }

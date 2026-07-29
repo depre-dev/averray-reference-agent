@@ -715,4 +715,56 @@ describe("Card — failed mission readable summary", () => {
     expect(text).not.toContain("npx playwright install");
     expect(text).not.toContain("|");
   });
+
+  // #135: the desktop card said "Codex fixing" and stopped there. Both new
+  // lines are payload passthrough; neither is rendered when absent.
+  test("the working-now line states the intent and the last reported step", () => {
+    const running = {
+      id: "pr-562", lane: "hermes-checking", type: "pr", agentType: "claude",
+      title: "PR", summary: "", repo: "depre-dev/agent", freshness: 2,
+      state: "running", risk: [], waitingOn: { actor: "agent", tone: "info" }, files: [],
+      workingNow: {
+        agent: "codex", label: "Codex fixing", source: "runner",
+        intent: "Fix the settlement rounding drift",
+        progress: "Codex is using Edit.",
+        progressAt: new Date(Date.now() - 30_000).toISOString(),
+      },
+    } as unknown as BoardCard;
+
+    const { container } = render(<Card card={running} />);
+    const view = within(container);
+    expect(view.getByText("Fix the settlement rounding drift")).toBeTruthy();
+    expect(view.getByText("Codex is using Edit.")).toBeTruthy();
+    expect(view.getByText("just now")).toBeTruthy();
+    expect(container.querySelector(".hm-wn-step.is-stale")).toBeNull();
+  });
+
+  test("a step that has gone quiet is marked stale rather than shown as current", () => {
+    const running = {
+      id: "pr-563", lane: "hermes-checking", type: "pr", agentType: "claude",
+      title: "PR", summary: "", repo: "depre-dev/agent", freshness: 2,
+      state: "running", risk: [], waitingOn: { actor: "agent", tone: "info" }, files: [],
+      workingNow: {
+        agent: "codex", label: "Codex fixing", source: "runner",
+        progress: "Codex is using Bash.",
+        progressAt: new Date(Date.now() - 40 * 60 * 1000).toISOString(),
+      },
+    } as unknown as BoardCard;
+
+    const { container } = render(<Card card={running} />);
+    expect(container.querySelector(".hm-wn-step.is-stale")).toBeTruthy();
+    expect(within(container).getByText("40m ago")).toBeTruthy();
+  });
+
+  test("a runner with nothing reported says so instead of rendering a blank step", () => {
+    const running = {
+      id: "pr-564", lane: "hermes-checking", type: "pr", agentType: "claude",
+      title: "PR", summary: "", repo: "depre-dev/agent", freshness: 2,
+      state: "running", risk: [], waitingOn: { actor: "agent", tone: "info" }, files: [],
+      workingNow: { agent: "codex", label: "Codex fixing", source: "runner", intent: "Rotate the smoke token" },
+    } as unknown as BoardCard;
+
+    const { container } = render(<Card card={running} />);
+    expect(within(container).getByText("No step reported yet.")).toBeTruthy();
+  });
 });

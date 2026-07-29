@@ -766,7 +766,61 @@ describe("enrichBoardCard", () => {
       taskId: "task-1",
       runnerId: "runner-a",
       since: "2026-05-28T11:55:00Z",
+      // #135: a titleless task states its objective in the prompt's first line.
+      intent: "Coalesce repeated policy-attach entries",
     });
+  });
+
+  // #135: the task record already carried WHAT it was asked to do and WHAT the
+  // runner last reported; neither was ever projected onto the card, so the
+  // board could only ever say "Codex fixing".
+  it("projects the agent's intent and its last reported step onto a running task", () => {
+    const card = enrichBoardCard(base({ type: "task", lane: "codex-needed" }), slim({ lane: "Codex Needed" }), {
+      codexTask: {
+        id: "task-2",
+        status: "running",
+        title: "Fix the settlement rounding drift",
+        prompt: "Long prompt body that must NOT win over the title.",
+        progressMessage: "Codex is using Edit.",
+        progressAt: "2026-05-28T12:00:30Z",
+        workingNow: { agent: "codex", runnerId: "runner-a", label: "Codex fixing", since: "2026-05-28T11:55:00Z" },
+      },
+      runner: { status: "running", runnerId: "runner-a", updatedAt: "2026-05-28T12:00:00Z", activeTaskId: "task-2" },
+    });
+    expect(card.workingNow).toMatchObject({
+      intent: "Fix the settlement rounding drift",
+      progress: "Codex is using Edit.",
+      progressAt: "2026-05-28T12:00:30Z",
+    });
+  });
+
+  it("omits progress entirely when the runner has reported nothing", () => {
+    const card = enrichBoardCard(base({ type: "task", lane: "codex-needed" }), slim({ lane: "Codex Needed" }), {
+      codexTask: {
+        id: "task-3",
+        status: "running",
+        title: "Rotate the smoke token",
+        workingNow: { agent: "codex", runnerId: "runner-a", label: "Codex fixing", since: "2026-05-28T11:55:00Z" },
+      },
+      runner: { status: "running", runnerId: "runner-a", updatedAt: "2026-05-28T12:00:00Z", activeTaskId: "task-3" },
+    });
+    expect(card.workingNow?.intent).toBe("Rotate the smoke token");
+    expect(card.workingNow?.progress).toBeUndefined();
+    expect(card.workingNow?.progressAt).toBeUndefined();
+  });
+
+  it("drops a progress timestamp that arrives without its message", () => {
+    const card = enrichBoardCard(base({ type: "task", lane: "codex-needed" }), slim({ lane: "Codex Needed" }), {
+      codexTask: {
+        id: "task-4",
+        status: "running",
+        title: "T",
+        progressAt: "2026-05-28T12:00:30Z",
+        workingNow: { agent: "codex", runnerId: "runner-a", label: "Codex fixing", since: "2026-05-28T11:55:00Z" },
+      },
+      runner: { status: "running", runnerId: "runner-a", updatedAt: "2026-05-28T12:00:00Z", activeTaskId: "task-4" },
+    });
+    expect(card.workingNow?.progressAt).toBeUndefined();
   });
 
   it("shows the runner currently working a PR separately from branch author attribution", () => {

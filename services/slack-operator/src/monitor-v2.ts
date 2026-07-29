@@ -141,6 +141,21 @@ export interface CardWorkingNow {
   runnerId?: string;
   taskId?: string;
   since?: string;
+  /**
+   * WHAT the agent is attempting, as the operator wrote it — the task title, or
+   * the opening line of the prompt when a task carries no title. `label` alone
+   * ("Claude fixing") says an agent is busy but never what it is busy WITH.
+   * Absent when the task carries neither; we do not summarise or invent one.
+   */
+  intent?: string;
+  /**
+   * The agent's own last reported step, verbatim from the runner's stream
+   * ("Claude is using Edit.", or its assistant text). Never synthesised — when
+   * the runner has reported nothing, this is absent and the UI says so.
+   */
+  progress?: string;
+  /** When `progress` was reported, so the UI can age it instead of implying it is live. */
+  progressAt?: string;
 }
 
 /** One CI check run, for the per-check breakdown under the checks bar. */
@@ -861,6 +876,12 @@ function workingNowFromRunningTask(
   const label = asString(persisted?.label) ?? defaultWorkingNowLabel(agent);
   const runnerId = asString(persisted?.runnerId) ?? asString(task.runnerId) ?? asString(runner.runnerId);
   const since = asString(persisted?.since) ?? asString(task.startedAt) ?? asString(runner.updatedAt);
+  // The task already carries WHAT it was asked to do and WHAT the runner last
+  // reported; both were simply never projected onto the card. Read them
+  // straight through — no summarising, no inference.
+  const intent = workingNowIntent(task);
+  const progress = asString(task.progressMessage);
+  const progressAt = asString(task.progressAt);
   return {
     agent,
     label,
@@ -868,7 +889,29 @@ function workingNowFromRunningTask(
     taskId,
     ...(runnerId ? { runnerId } : {}),
     ...(since ? { since } : {}),
+    ...(intent ? { intent } : {}),
+    ...(progress ? { progress } : {}),
+    ...(progress && progressAt ? { progressAt } : {}),
   };
+}
+
+/** Longest intent we put on a card before the drawer takes over. */
+const WORKING_NOW_INTENT_MAX = 140;
+
+/**
+ * What the agent is attempting, taken verbatim from the task. Prefers the
+ * operator-facing title; falls back to the prompt's first non-empty line, which
+ * is where a titleless task states its objective. Truncation is marked with an
+ * ellipsis so a clipped intent never reads as the whole instruction.
+ */
+function workingNowIntent(task: Record<string, unknown>): string | undefined {
+  const title = asString(task.title);
+  const raw = title ?? asString(task.prompt)?.split("\n").map((line) => line.trim()).find(Boolean);
+  if (!raw) return undefined;
+  const text = humanizeTaskTitle(raw);
+  return text.length > WORKING_NOW_INTENT_MAX
+    ? `${text.slice(0, WORKING_NOW_INTENT_MAX - 1).trimEnd()}…`
+    : text;
 }
 
 /** Project a running mission's live poll snapshot (stage + recent output). */
