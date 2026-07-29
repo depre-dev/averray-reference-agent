@@ -7,12 +7,14 @@
 // broken" (§16).
 
 import type { BoardCard } from "../../lib/monitor/card-types.js";
+import type { ProductHealth } from "../../lib/monitor/product-health.js";
 import { pickRenderer, defaultDegradedContent } from "../../lib/monitor/card-router.js";
 import { Card } from "./Card.js";
 import { DegradedCard } from "./DegradedCard.js";
 
 export type CardRouterProps = {
   card: BoardCard;
+  decisionHealth?: ProductHealth;
   focused?: boolean;
   onClick?: (card: BoardCard) => void;
   /** Click handler for the degraded card's primary action (Retry / View last known). */
@@ -37,6 +39,7 @@ export type CardRouterProps = {
 
 export function CardRouter({
   card,
+  decisionHealth,
   focused,
   onClick,
   onDegradedAction,
@@ -68,6 +71,7 @@ export function CardRouter({
   return (
     <Card
       card={card}
+      decisionHealth={decisionHealth}
       focused={focused}
       onClick={onClick}
       onApprove={onApprove}

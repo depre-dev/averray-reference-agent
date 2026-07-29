@@ -136,6 +136,28 @@
   cursor: pointer;
 }
 .hm-mb-item-title { display: block; font-size: 13px; line-height: 1.4; color: var(--h4-ink-2); }
+.hm-mb-priority {
+  display: inline-block;
+  margin-top: 5px;
+  padding: 2px 6px;
+  border: 1px solid var(--h4-line);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--h4-muted);
+}
+.hm-mb-priority--money-blocking {
+  border-color: var(--h4-act-line);
+  color: var(--h4-act-text);
+  background: var(--h4-act-soft);
+}
+.hm-mb-priority--unknown {
+  border-color: var(--h4-warn-line);
+  color: var(--h4-warn-text);
+  background: var(--h4-warn-soft);
+}
+.hm-mb-priority--routine-verification { color: var(--h4-faint); }
 .hm-mb-item-meta {
   display: block;
   font-family: var(--font-mono);

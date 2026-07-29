@@ -14,6 +14,7 @@
 
 import type { ReactNode } from "react";
 import type { BoardCard, Lane } from "../lib/monitor/card-types.js";
+import type { ProductHealth } from "../lib/monitor/product-health.js";
 import {
   BOARD_COLUMNS,
   columnTier,
@@ -41,6 +42,8 @@ export interface KanbanBoardProps {
   renderLaneBody?: (lane: Lane, cards: BoardCard[]) => ReactNode | undefined;
   /** Accessible label for the column row region. */
   ariaLabel?: string;
+  /** Live probe evidence used by the shared money-first decision ranker. */
+  decisionHealth?: ProductHealth;
 }
 
 export function KanbanBoard({
@@ -52,8 +55,9 @@ export function KanbanBoard({
   renderLaneHeader,
   renderLaneBody,
   ariaLabel = "Kanban lane grid",
+  decisionHealth,
 }: KanbanBoardProps) {
-  const inbox = inboxCards(grouped);
+  const inbox = inboxCards(grouped, decisionHealth);
   const inboxIds = new Set(inbox.map((card) => card.id));
 
   return (

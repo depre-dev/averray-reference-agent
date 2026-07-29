@@ -7,6 +7,8 @@
 // Per §5/§16 of docs/HERMES_MONITOR_REDESIGN_SPEC.md.
 
 import type { BoardCard, Lane } from "./card-types.js";
+import type { ProductHealth } from "./product-health.js";
+import { decisionPriorityFor, rankDecisionCards } from "./decision-rank.js";
 import { groupByLane, laneCounts, laneFor, isDecision } from "./lane-rules.js";
 import { formatFreshness, sortByUrgency } from "./urgency.js";
 
@@ -87,6 +89,7 @@ export interface DeriveBoardOpts {
   lastGoodLabel?: string;
   hermesFocusCardId?: string;
   calmMetrics?: CalmBoardMetrics;
+  productHealth?: ProductHealth;
 }
 
 export interface DerivedBoardState {
@@ -129,8 +132,13 @@ export function kpiCounts(cards: BoardCard[]): KPICounts {
 }
 
 /** The single most urgent live card, or undefined when calm. */
-export function mostUrgentCard(cards: BoardCard[]): BoardCard | undefined {
+export function mostUrgentCard(
+  cards: BoardCard[],
+  health?: ProductHealth,
+): BoardCard | undefined {
   if (!Array.isArray(cards) || cards.length === 0) return undefined;
+  const [decision] = rankDecisionCards(cards, health);
+  if (decision) return decision;
   const live = cards.filter((c) => c && c.lane !== "done" && c.type !== "done");
   if (live.length === 0) return undefined;
   const [first] = sortByUrgency(live);
@@ -175,7 +183,7 @@ export function boardNowBanner(cards: BoardCard[], opts: DeriveBoardOpts = {}): 
   }
 
   if (mode === "action") {
-    const urgent = mostUrgentCard(cards);
+    const urgent = mostUrgentCard(cards, opts.productHealth);
     const actionCount = counts.action;
     const headline =
       actionCount === 1
@@ -190,7 +198,7 @@ export function boardNowBanner(cards: BoardCard[], opts: DeriveBoardOpts = {}): 
         ? `Most urgent: ${urgent.title} — suggests ${suggestedAction}.`
         : `Review the decision inbox before approving anything.`,
       primaryActionId: urgent?.id,
-      mostUrgentReasons: urgent ? mostUrgentReasonsFor(urgent) : undefined,
+      mostUrgentReasons: urgent ? mostUrgentReasonsFor(urgent, opts.productHealth) : undefined,
     };
   }
 
@@ -285,8 +293,21 @@ function normalizeSuggestedAction(value: string): string {
   return trimmed.length > 72 ? `${trimmed.slice(0, 69).trim()}...` : trimmed;
 }
 
-function mostUrgentReasonsFor(card: BoardCard): MostUrgentReasonChip[] {
-  const chips: MostUrgentReasonChip[] = [];
+function mostUrgentReasonsFor(
+  card: BoardCard,
+  health?: ProductHealth,
+): MostUrgentReasonChip[] {
+  const priority = decisionPriorityFor(card, health);
+  const chips: MostUrgentReasonChip[] = [{
+    label: priority.reason,
+    tone:
+      priority.tier === "money-blocking"
+        ? "risk"
+        : priority.tier === "unknown"
+          ? "warn"
+          : "neutral",
+    title: "Money-first decision queue tier.",
+  }];
   const age = formatFreshness(card.freshness);
   if (age) {
     chips.push({
@@ -351,6 +372,6 @@ export function deriveBoardState(cards: BoardCard[], opts: DeriveBoardOpts = {})
     counts: kpiCounts(cards),
     mode: boardMode(cards, opts),
     banner: boardNowBanner(cards, opts),
-    mostUrgent: mostUrgentCard(cards),
+    mostUrgent: mostUrgentCard(cards, opts.productHealth),
   };
 }

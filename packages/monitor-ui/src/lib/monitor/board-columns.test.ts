@@ -100,6 +100,25 @@ describe("inboxCards", () => {
   it("is empty when no card waits on the operator", () => {
     expect(inboxCards(grouped({ done: [card("done", "done", "agent")] }))).toEqual([]);
   });
+
+  it("applies the shared money-first rank after preserving inbox membership", () => {
+    const routine = {
+      ...card("needs-attention", "routine", "operator"),
+      title: "post-production-deploy verification after workflow run #40",
+      repo: "depre-dev/averray-reference-agent",
+    } as BoardCard;
+    const money = {
+      ...card("operator-review", "money", "operator"),
+      title: "Review change",
+      repo: "depre-dev/averray-reference-agent",
+      files: [{ path: "services/payout/settle.ts", diff: "+1 -0", critical: false }],
+    } as BoardCard;
+
+    expect(inboxCards(grouped({
+      "needs-attention": [routine],
+      "operator-review": [money],
+    })).map((entry) => entry.id)).toEqual(["money", "routine"]);
+  });
 });
 
 describe("columnVisibility", () => {

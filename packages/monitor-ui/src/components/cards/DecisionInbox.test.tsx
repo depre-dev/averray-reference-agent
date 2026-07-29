@@ -68,6 +68,16 @@ describe("PR-E2 — Decision-Inbox card grammar", () => {
     expect(getByText(/Reason not recorded; open the drawer before acting/)).toBeTruthy();
   });
 
+  test("shows the shared money-first reason chip on the decision card", () => {
+    const card = decisionCard(record());
+    (card as BoardCard & { files: Array<{ path: string; diff: string; critical: boolean }> }).files = [
+      { path: "services/settlement/submit.ts", diff: "+3 -1", critical: false },
+    ];
+    const { getByText } = render(<Card card={card} />);
+    const chip = getByText("Money first · settlement path");
+    expect(chip.getAttribute("data-decision-tier")).toBe("money-blocking");
+  });
+
   test("PR-F3: the full decision grammar — why + what-next + recommended action + Choices ↓", () => {
     // A proposed task awaiting dispatch is a real inbox decision; wiring its
     // approve handler surfaces the recommended primary action and the collapsed
