@@ -36,6 +36,9 @@ import "./styles/hermes4-utilities.css";
 // Ops surface: the full-canvas operations board (--h4-tokened). Loaded last so
 // its additive rules win; scoped to `.ops-*` so it never touches the delivery board.
 import "./styles/hermes4-ops.css";
+// Mobile surface: the dedicated phone board. Scoped to `.hm-mb-*` and only
+// mounted below MOBILE_MAX_WIDTH, so it never touches the desktop surfaces.
+import "./styles/hermes4-mobile.css";
 
 const rootEl = document.getElementById("root");
 if (!rootEl) {

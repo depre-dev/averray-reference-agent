@@ -50,6 +50,8 @@ import { hasFreshRed, type ProductHealth } from "../lib/monitor/product-health.j
 import { BoardSurfaceSwitch, type BoardSurface } from "./ops/BoardSurfaceSwitch.js";
 import { OpsBoard } from "./ops/OpsBoard.js";
 import { opsBannerData, pillarStatuses } from "./ops/ops-frame.js";
+import { MobileBoard } from "./mobile/MobileBoard.js";
+import { useIsMobileViewport } from "../lib/monitor/use-mobile-viewport.js";
 import { Badge, Button } from "./ui.js";
 
 // laneFor() promotes every isAction card into needs-attention, so the
@@ -236,6 +238,8 @@ export function BoardView({
 
   // ── The board switches Delivery ⇆ Ops at the top level (board-wide). ──
   const { health: productHealth } = useProductHealth({ enabled: monitoringEnabled });
+  // Phone-width → the dedicated mobile surface (see the branch before `return`).
+  const isMobileViewport = useIsMobileViewport();
   const [boardSurface, setBoardSurface] = useState<BoardSurface>(() => {
     try {
       const stored = localStorage.getItem("hm-board-surface");
@@ -600,6 +604,21 @@ export function BoardView({
     }
     return a;
   }, [onRerunMission, onApproveTask, onCreateTask, onCardClose, onDismissCard]);
+
+  // Phone → the dedicated mobile surface instead of the desktop chrome. Placed
+  // AFTER every hook (rules of hooks) and additive: without matchMedia this is
+  // always false, so existing renders and tests are untouched.
+  if (isMobileViewport) {
+    return (
+      <MobileBoard
+        health={productHealth}
+        cards={cards}
+        onCardClick={onCardClick}
+        onApproveTask={onApproveTask}
+        onDismissCard={onDismissCard}
+      />
+    );
+  }
 
   return (
     <div className="hm-board">
