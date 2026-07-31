@@ -17,10 +17,11 @@ closed 2026-07-29; v0.19.1 notes list *"continued platform work (Buzz/Nostr
 channel …)"*). It is **not backportable to v0.18** — the upgrade gates the Buzz
 work entirely.
 
-**⚠ v0.19.1 is ~1 day old and rolls up ~2,789 commits / ~4,748 files changed
-since v0.19.0.** Our last bump needed two follow-up fixes (#491 `dashboard`→
-`serve` + aux-model pin, #492 CI bootstrap-pin sync). Recommendation: stage it,
-and prefer v0.19.2 for prod if it appears before we finish the smoke.
+**⚠ VERDICT AFTER THE SMOKE (2026-07-31): WAIT FOR v0.19.2. NO-GO on v0.19.1.**
+The Session API our monitor depends on never binds — see §3.5.4. Two open
+upstream bugs match the symptom, v0.19.1 is ~1 day old rolling up ~2,789
+commits with 8+ open `api_server` issues, and **v0.18 works fine today**, so
+there is no pressure. Our last bump needed two follow-ups (#491, #492).
 
 ## 1. What we actually depend on
 
@@ -192,11 +193,48 @@ And the upstream docs say platforms live in `~/.hermes/gateway-config.yaml`;
 would have created a file Hermes never reads. Same lesson as the deployed
 contract ABI: the artifact beats the description.
 
-### 3.5.4 What still has NOT been proven
+### 3.5.4 The opt-in was NECESSARY BUT NOT SUFFICIENT — verdict: WAIT
 
-The four endpoints in §3.2 have **not** returned 201 yet — the smoke never got
-past platform registration. Re-run §3.2 with the `platforms:` block present
-before calling the upgrade green. **Still a no-go until that passes.**
+With the `platforms:` block live and mounted (verified inside the container),
+`No messaging platforms enabled` **drops to 0** — the platform registers. But
+**8642 still never binds**, and the gateway log is silent: no error, no bind
+attempt, no traceback. §3.2's four endpoints have therefore **never returned
+201**. The Session API is UNTESTED, not proven.
+
+Black-box probing was exhausted at that point (see §3.5.3 — four wrong turns).
+Searching upstream issues gave the vocabulary that container archaeology could
+not, and two open bugs match the symptom exactly:
+
+- **[#74505](https://github.com/NousResearch/hermes-agent/issues/74505)**
+  *"bridge api_server key/cors_origins/model_name from YAML top-level to
+  `extra`"* — api_server settings belong in a nested `extra` dict, and
+  top-level YAML keys are NOT being bridged into it. Matches
+  `_ensure_platform_extra_dict(platforms_data, name)` in `gateway/config.py`.
+- **[#75348](https://github.com/NousResearch/hermes-agent/issues/75348)**
+  *"Baileys whatsapp platform binds 127.0.0.1:3000 but is absent from
+  `PORT_BINDING_PLATFORM_VALUES`"* — there is an allowlist governing which
+  platforms may bind a port at all.
+
+Either produces precisely what we saw: platform registers, logs nothing, binds
+nothing.
+
+**RECOMMENDATION: stay on v0.18.0 and wait for v0.19.2.** v0.19.1 is a ~1-day-old
+release rolling up ~2,789 commits with 8+ open `api_server` bugs. Nothing about
+our current setup is broken — v0.18 serves the Session API correctly today — so
+there is no pressure to take a release still settling.
+
+**The deciding check, if we want to close it sooner:** is `api_server` present
+in `PORT_BINDING_PLATFORM_VALUES`? Absent ⇒ upstream bug, wait. Present ⇒ the
+fix is `extra:` nesting in our config and the upgrade is viable now. Worth
+running regardless, because **the same `extra` mechanism will govern the Buzz
+platform config** — this is not throwaway knowledge, it is a Buzz prerequisite.
+
+### 3.5.5 What is BANKED regardless
+
+- `platforms.api_server` opt-in — merged, verified necessary, harmless on v0.18.
+- The s6 supervision change (§3.5.1) — decide it before any bump.
+- The digest pin and the v0.18 rollback pin (§4.5).
+- This smoke recipe, reusable verbatim against v0.19.2.
 
 ## 4. Buzz replaces Slack as the control surface
 
