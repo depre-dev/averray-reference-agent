@@ -29,6 +29,7 @@ import type { AlertPayload } from "./alert-bridge.js";
 
 // ── Probe result model ──────────────────────────────────────────────
 
+import { decideDiskHeadroom, readDiskUsage } from "./disk-headroom.js";
 import { alertProvenance, decideMoneyAlert } from "./money-alert.js";
 import { decideSelfFreshness, fetchSelfCompare } from "./self-freshness.js";
 import type { SelfFreshness } from "./self-freshness.js";
@@ -504,6 +505,12 @@ export interface ProductHealthConfig {
   payoutLookbackBlocks: number;
   /** Settled-minus-confirmed gap tolerated as a window-boundary artifact. */
   payoutTolerance: number;
+  /** Filesystem the monitor writes to. Container `/` sees real host capacity. */
+  diskPath: string;
+  /** Free-space floor in GiB — below this the disk probe goes red. */
+  minDiskFreeGb: number;
+  /** Free-space warning line in GiB. */
+  warnDiskFreeGb: number;
   /** Native-gas floor in whole tokens (e.g. 0.1 DOT). 0 = don't threshold. */
   minGasNative: number;
   /** capabilityHealth keys that MUST be up; one dropping ⇒ red. Env
@@ -599,6 +606,13 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
     // ~24h at a 6s block time. Lower it if the RPC caps eth_getLogs ranges.
     payoutLookbackBlocks: num(env.PRODUCT_HEALTH_PAYOUT_LOOKBACK_BLOCKS, 14400),
     payoutTolerance: num(env.PRODUCT_HEALTH_PAYOUT_TOLERANCE, 1),
+    diskPath: env.PRODUCT_HEALTH_DISK_PATH || "/",
+    // Unlike the token floors (which default to 0 = can-never-go-red, because a
+    // sensible balance is deployment-specific), disk exhaustion is universally
+    // fatal, so these carry real defaults. Sized against the live box: 155 GiB
+    // free, so 10/25 cannot fire spuriously.
+    minDiskFreeGb: num(env.PRODUCT_HEALTH_MIN_DISK_FREE_GB, 10),
+    warnDiskFreeGb: num(env.PRODUCT_HEALTH_WARN_DISK_FREE_GB, 25),
     minGasNative: num(env.PRODUCT_HEALTH_MIN_GAS_NATIVE, 0),
     requiredCapabilities: csv(env.PRODUCT_HEALTH_REQUIRED_CAPABILITIES, "blockchain,treasuryMutations"),
     expectedWarnings: csv(env.PRODUCT_HEALTH_EXPECTED_WARNINGS, "xcm_observer_staged,indexer_unavailable,gas_sponsor_disabled"),
@@ -1889,6 +1903,14 @@ export async function collectProductHealthProbes(
         expectedWarnings: config.expectedWarnings,
       }),
       deriveLatencyProbe(h, { warnMs: config.latencyWarnMs, redMs: config.latencyRedMs }),
+      // The pillar nobody was watching. A full disk is a CORRELATED failure —
+      // it takes the monitor, the money board and the alert path together, so
+      // the thing meant to warn you dies with the thing it watches.
+      decideDiskHeadroom({
+        usage: readDiskUsage(config.diskPath),
+        minFreeGb: config.minDiskFreeGb,
+        warnFreeGb: config.warnDiskFreeGb,
+      }),
       deriveMoneyPathProbe(h, {
         maxStuck: config.maxStuck,
         maxFailed24h: config.maxFailed24h,

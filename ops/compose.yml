@@ -413,6 +413,18 @@ services:
       # settled-minus-confirmed gap tolerated as a window-boundary artifact — the
       # product's rolling 24h and the block window don't share a clock.
       PRODUCT_HEALTH_PAYOUT_TOLERANCE: ${PRODUCT_HEALTH_PAYOUT_TOLERANCE:-1}
+      # Disk headroom. A full disk is a CORRELATED failure: it takes the monitor,
+      # the money board and the alert path in the same moment, so the thing meant
+      # to warn you dies with the thing it watches — silently, with no red probe.
+      # Verified 2026-07-31: the container's overlay `/` reports the SAME
+      # capacity as the host (193G/155G), so no host mount is needed.
+      # Judged on ABSOLUTE GiB, never percent: 5% of 2TB is comfort, 20% of 20GB
+      # is about to fail. Unlike the token floors, these default to REAL values —
+      # disk exhaustion is universally fatal, and at 155 GiB free 10/25 cannot
+      # fire spuriously. Raise them once MinIO (Buzz) starts storing media.
+      PRODUCT_HEALTH_DISK_PATH: ${PRODUCT_HEALTH_DISK_PATH:-/}
+      PRODUCT_HEALTH_MIN_DISK_FREE_GB: ${PRODUCT_HEALTH_MIN_DISK_FREE_GB:-10}
+      PRODUCT_HEALTH_WARN_DISK_FREE_GB: ${PRODUCT_HEALTH_WARN_DISK_FREE_GB:-25}
       # Floors default to 0 = that probe can NEVER go red. Fine for a testnet, but
       # on a live network a 0 floor means no warning before you run dry. Mainnet
       # values in use (2026-07-25, sized off live balances): GAS_NATIVE=1 DOT (low
