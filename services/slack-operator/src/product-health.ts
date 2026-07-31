@@ -1335,6 +1335,55 @@ function encodeBalanceOf(address: string): string {
   return BALANCE_OF_SELECTOR + address.toLowerCase().replace(/^0x/, "").padStart(64, "0");
 }
 
+// Protocol revenue = the fee treasury's AgentAccountCore *position*, not an
+// ERC20 balanceOf. treasuryAccount() (0x339b2cff) is read off the live
+// EscrowCore so the address is derived from chain, never hardcoded; then
+// positions(treasury, USDC) (0x4bd21445) returns 6 words, [0] = liquid.
+const TREASURY_ACCOUNT_SELECTOR = "0x339b2cff";
+const POSITIONS_SELECTOR = "0x4bd21445";
+
+function encodePositions(account: string, asset: string): string {
+  const pad = (a: string) => a.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+  return POSITIONS_SELECTOR + pad(account) + pad(asset);
+}
+
+/** Read the protocol-fee treasury's liquid USDC position (fees accrued). Best-effort:
+ *  any failure returns undefined so the treasury probe still reports the rest. The
+ *  address is derived from EscrowCore.treasuryAccount(), so it follows a contract
+ *  cutover automatically. */
+async function readProtocolRevenueUsdc(input: {
+  rpcUrl: string;
+  escrowCore?: string;
+  agentAccountCore?: string;
+  token?: string;
+  usdcDecimals: number;
+  fetchImpl: typeof fetch;
+}): Promise<number | undefined> {
+  if (!input.escrowCore || !input.agentAccountCore || !input.token) return undefined;
+  try {
+    const rawTreasury = await ethRpc(
+      input.rpcUrl,
+      "eth_call",
+      [{ to: input.escrowCore, data: TREASURY_ACCOUNT_SELECTOR }, "latest"],
+      input.fetchImpl,
+    );
+    if (!rawTreasury || rawTreasury.length < 66) return undefined;
+    const treasury = "0x" + rawTreasury.slice(-40);
+    if (/^0x0+$/.test(treasury)) return undefined;
+    const rawPos = await ethRpc(
+      input.rpcUrl,
+      "eth_call",
+      [{ to: input.agentAccountCore, data: encodePositions(treasury, input.token) }, "latest"],
+      input.fetchImpl,
+    );
+    if (!rawPos || rawPos.length < 2 + 64) return undefined;
+    const liquid = BigInt("0x" + rawPos.replace(/^0x/, "").slice(0, 64));
+    return Number(liquid) / 10 ** input.usdcDecimals;
+  } catch {
+    return undefined;
+  }
+}
+
 const NATIVE_GAS_SYMBOL_BY_CHAIN_ID = new Map<number, string>([
   [420420417, "PAS"],
   [420420419, "DOT"],
@@ -1554,6 +1603,31 @@ export async function probeTreasuryLiquidity(input: {
     );
     pool("aac", "Agent core", aac, input.minAac);
     if (escrow !== undefined) pools.push({ key: "escrow", label: "Escrow (in-flight)", amount: escrow, unit: "USDC", status: "ok", informational: true });
+
+    // Protocol revenue — the 5% poster-side fee accrued in the treasury
+    // multisig's position. Internal ops metric (Hermes-only); informational, no
+    // floor. Omitted entirely if unreadable — never shown as a fake zero, since
+    // a zero here is a real "no fees yet" statement.
+    const protocolRevenue = await readProtocolRevenueUsdc({
+      rpcUrl: input.rpcUrl,
+      escrowCore: a.escrowCore,
+      agentAccountCore: a.agentAccountCore,
+      token: a.token,
+      usdcDecimals: input.usdcDecimals,
+      fetchImpl: input.fetchImpl,
+    });
+    if (protocolRevenue !== undefined) {
+      pools.push({
+        key: "protocol_revenue",
+        label: "Protocol revenue (fees)",
+        amount: protocolRevenue,
+        unit: "USDC",
+        status: "ok",
+        informational: true,
+        note: "5% poster-side fee, held under the 2-of-3 treasury",
+      });
+      parts.push(`revenue ${protocolRevenue.toFixed(2)}`);
+    }
 
     if (parts.length === 0) return { name, status: "degraded", detail: "no treasury balances readable" };
     return { name, status: red ? "red" : degraded ? "degraded" : "ok", detail: parts.join(", "), pools };

@@ -691,6 +691,47 @@ describe("probeTreasuryLiquidity (direct RPC + /health rewardBank)", () => {
   it("degraded when a balance read fails", async () => {
     expect((await probeTreasuryLiquidity({ ...base, rewardBankLiquid: 100, fetchImpl: throwingFetch() })).status).toBe("degraded");
   });
+
+  // Selector-aware mock: balanceOf → usdcHex; treasuryAccount() → an address;
+  // positions() → six words with liquid first. Lets us assert the derived
+  // protocol_revenue pool without touching the balanceOf path.
+  function revenueFetch(cfg: { usdcHex: string; treasury?: string; positionsLiquidHex?: string }): typeof fetch {
+    return (async (_url: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const data = String((JSON.parse(String((init as RequestInit).body)) as { params: [{ data?: string }] }).params[0]?.data ?? "");
+      let result: string = cfg.usdcHex;
+      if (data.startsWith("0x339b2cff") && cfg.treasury) result = "0x" + cfg.treasury.replace(/^0x/, "").padStart(64, "0");
+      else if (data.startsWith("0x4bd21445")) result = cfg.positionsLiquidHex ?? "0x" + "0".repeat(64 * 6);
+      return { ok: true, status: 200, json: async () => ({ result }) } as unknown as Response;
+    }) as unknown as typeof fetch;
+  }
+
+  it("emits a protocol_revenue pool from the treasury's derived AAC position", async () => {
+    // treasuryAccount() → 0x01e6…; positions().liquid = 0x1388 = 5000 raw = 0.005 USDC
+    const r = await probeTreasuryLiquidity({
+      ...base,
+      rewardBankLiquid: 100,
+      fetchImpl: revenueFetch({
+        usdcHex: "0x989680",
+        treasury: "0x01E6eed856e989201F4FF6346E18EAb7e46C874C",
+        positionsLiquidHex: "0x" + (5000).toString(16).padStart(64, "0") + "0".repeat(64 * 5),
+      }),
+    });
+    const revenue = (r.pools ?? []).find((p) => p.key === "protocol_revenue");
+    expect(revenue).toBeDefined();
+    expect(revenue?.amount).toBe(0.005);
+    expect(revenue?.informational).toBe(true);
+    expect(revenue?.status).toBe("ok"); // informational, never pages
+  });
+
+  it("omits protocol_revenue rather than faking a zero when the treasury read fails", async () => {
+    // treasuryAccount() returns the zero address → reading is abandoned, no pool.
+    const r = await probeTreasuryLiquidity({
+      ...base,
+      rewardBankLiquid: 100,
+      fetchImpl: revenueFetch({ usdcHex: "0x989680", treasury: "0x0000000000000000000000000000000000000000" }),
+    });
+    expect((r.pools ?? []).some((p) => p.key === "protocol_revenue")).toBe(false);
+  });
 });
 
 describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", () => {
