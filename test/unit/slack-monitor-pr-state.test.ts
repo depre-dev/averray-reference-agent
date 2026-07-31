@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { enrichMonitorWithGithubPrState, enrichMonitorWithDeployCheckRuns, deployTargetFromEntry } from "../../services/slack-operator/src/github-pr-state.js";
 import { buildHermesBoardSnapshotFromMonitor } from "../../services/slack-operator/src/monitor-hermes-board.js";
 import { buildV2BoardSnapshot } from "../../services/slack-operator/src/monitor-v2.js";
-import { isDecision } from "../../packages/monitor-ui/src/lib/monitor/lane-rules.js";
 
 /** A 403 that GitHub only marks as a rate-limit via X-RateLimit-Remaining: 0. */
 function rateLimitResponse(resetEpochSeconds?: number): Response {
@@ -474,10 +473,13 @@ describe("monitor GitHub PR state — fail-stale on unrefreshable fetch (truth-b
     const snap = buildV2BoardSnapshot(monitor, { now: () => new Date("2026-07-01T10:00:05.000Z") });
     const card = snap.cards.find((c) => c.repo === "averray-agent/agent");
     expect(card).toBeDefined();
-    // Truth-boundary: unverifiable → degraded, and NOT a live operator decision.
+    // Truth-boundary (#477 fail-stale): an unverifiable card is marked degraded
+    // at the SOURCE, so nothing downstream can present it as a live decision.
+    // The `isDecision(card) === false` restatement went with the frontend
+    // predicate when the delivery lane was retired — these two assertions are
+    // the same guarantee, checked where it is actually produced.
     expect(card!.state).toBe("failed-fetch");
     expect(card!.sourceFailure?.source).toBe("github");
-    expect(isDecision(card!)).toBe(false);
     // But it is NOT hidden — it still renders as a card on the board.
     expect(snap.cards.some((c) => c.id === card!.id)).toBe(true);
   });
@@ -523,9 +525,11 @@ describe("monitor GitHub PR state — fail-stale on unrefreshable fetch (truth-b
     const snap = buildV2BoardSnapshot(monitor, { now: () => new Date("2026-07-01T10:00:05.000Z") });
     const card = snap.cards.find((c) => c.repo === "averray-agent/agent");
     expect(card).toBeDefined();
+    // The positive half of the same guarantee: a card that DID refresh is not
+    // demoted. Asserted at the source (state), not via the retired frontend
+    // `isDecision` predicate.
     expect(card!.state).not.toBe("failed-fetch");
-    // A verifiable operator-owned card is still a live decision.
-    expect(isDecision(card!)).toBe(true);
+    expect(card!.sourceFailure).toBeUndefined();
   });
 
   it("a definitive 404 (deleted PR) is NOT treated as stale — the card is left un-enriched, not degraded", async () => {
