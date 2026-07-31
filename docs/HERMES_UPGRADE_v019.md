@@ -117,6 +117,87 @@ by design.
 Go only if §3.2 is fully green. A partial pass is a no-go: our client fails
 degraded-safe, so partial breakage looks like calm.
 
+## 3.5 SMOKE RESULTS — run 2026-07-31 against v0.19.1
+
+Image pinned by digest, isolated container/volume, loopback port 18642, prod
+`v2026.7.1` never touched.
+
+```
+nousresearch/hermes-agent:v2026.7.30
+sha256:b869e64d6496d4763d5e4fb675b5f504cb23b0e35ec9b790481a56118602b10f
+→ boots, self-reports "v0.19.1 (2026.7.30) · upstream cc4cab2f"
+```
+
+**Two undocumented changes found. Neither appears in any release note.**
+
+### 3.5.1 The gateway now runs under s6 supervision
+
+v0.19.1 supervises the gateway (`gateway run --replace` under s6, auto-restart
+on crash) instead of running it as the container's foreground process.
+`--no-supervise` / `HERMES_GATEWAY_NO_SUPERVISE=1` restores the old behaviour.
+
+**Why it matters to us specifically:** `Deploy Production` execs into the
+`avg-hermes` sidecar, and today a Hermes crash reds a deploy. Under s6 the
+gateway restarts and the container stays up, so the container exit code no
+longer reflects gateway health and that failure signature changes. Decide
+deliberately which we want; do not inherit it by accident.
+
+### 3.5.2 ★ `API_SERVER_ENABLED` alone no longer enables the Session API
+
+The blocker, and the fix is a config file — not code.
+
+`gateway/config.py` resolves **`env > config > default`**: the `API_SERVER_*`
+env vars are an OVERRIDE LAYER on top of a `platforms:` opt-in that must already
+exist in `config.yaml`. Our config had `model`, `auxiliary`, `mcp_servers`,
+`paths` — no `platforms:` key. So there was nothing to override, the platform
+never registered, the gateway logged `No messaging platforms enabled`, bound
+nothing, and **reported healthy the whole time**.
+
+v0.18 enabled it from container env alone, which is why the missing block was
+invisible for as long as it has existed.
+
+Fix (landed separately, harmless on v0.18 which ignores it):
+
+```yaml
+platforms:
+  api_server:
+    enabled: true
+```
+
+Key, port and bind address stay in the environment. Note `/opt/data/config.yaml`
+is mounted READ-ONLY from `hermes/config/hermes.yaml`, so `hermes gateway setup`
+cannot write it — it has to be a committed file change.
+
+### 3.5.3 Four wrong turns, recorded so nobody repeats them
+
+Each was plausible and each cost a cycle:
+
+1. **"v0.19 broke the Session API."** No — it was never enabled in the smoke.
+2. **"The API server needs a model configured."** No — it stayed dead with a
+   model present.
+3. **"The home was empty (the `gateway.py:2976` docstring describes exactly
+   this)."** No — the symptom persisted with a byte copy of the prod home. That
+   docstring is about systemd units baking a temp `HERMES_HOME`; it matched our
+   *symptom*, not our *cause*.
+4. **"It needs `/opt/data/.env` (doctor says so)."** No — writing one changed
+   nothing.
+
+Also: `hermes migrate` handles **xAI model retirement only**, and
+`gateway migrate-legacy` removes **systemd units** — neither migrates config.
+So doctor's `Config version outdated (v0 → v33)` is ADVISORY, not the blocker,
+and there is no general config-migration command to run.
+
+And the upstream docs say platforms live in `~/.hermes/gateway-config.yaml`;
+**the code says a `platforms:` section in `config.yaml`.** Following the docs
+would have created a file Hermes never reads. Same lesson as the deployed
+contract ABI: the artifact beats the description.
+
+### 3.5.4 What still has NOT been proven
+
+The four endpoints in §3.2 have **not** returned 201 yet — the smoke never got
+past platform registration. Re-run §3.2 with the `platforms:` block present
+before calling the upgrade green. **Still a no-go until that passes.**
+
 ## 4. Buzz replaces Slack as the control surface
 
 **Decision (operator, 2026-07-31):** Buzz becomes the control + monitoring
