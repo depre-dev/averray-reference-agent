@@ -171,13 +171,63 @@ Therefore:
    alarm must itself be monitored. A `buzz_relay` probe belongs next to the
    other seven.
 
-### 4.4 Ops weight — be honest about it
+### 4.4 Ops weight — MEASURED 2026-07-31, it fits
 
-Buzz is a Rust relay plus **Postgres, Redis and S3/MinIO**. The VPS already runs
-the monitor, its Postgres, the Hermes sidecar and the task runners. This is not
-a plugin; it is a second stack. Size the box before, not after.
+Buzz is a Rust relay plus **Postgres, Redis and S3/MinIO** — a second stack, not
+a plugin. So we measured the box rather than guessing.
 
-### 4.5 Why it is nonetheless the right direction
+| | |
+|---|---|
+| CPU | 8 cores, load 0.85 → **~10% utilised** |
+| RAM | 22 GiB total, 6.2 used, **16 GiB available**, no swap |
+| Disk | **155 GB free / 21% used** (after the prune below) |
+| Running | 17 containers — two Postgres *and* two Redis already |
+
+Sized against what comparable services already cost **on this box**, not docs:
+
+| component | local evidence | estimate |
+|---|---|---|
+| Rust relay (Axum) | — | 100–300 MiB |
+| Postgres | `avg-postgres` **50 MiB**, `agent-postgres` 1.03 GiB | 50 MiB–1 GiB |
+| Redis | both live instances **~22 MiB** | ~25 MiB |
+| MinIO | — | 200–400 MiB |
+
+**≈0.5–1.5 GiB against 16 GiB free — 3–9% of headroom.** Postgres and Redis are
+already proven cheap here, so the stack is heavier in *components* than in
+resources. CPU is a non-issue at our message volume. **Verdict: it fits.**
+
+Disk was the only sore point and it was mostly garbage: 76 GB build cache +
+32.8 GB stale images. One prune took it from **126 GB used (66%) → 39 GB (21%)**,
+reclaiming ~74 GB, with all 17 containers still up:
+
+```bash
+docker builder prune -f && docker image prune -af --filter "until=168h" && df -h /
+```
+
+**But nothing watches disk.** The seven probes are `product_api`, `chain_height`,
+`signer_liquidity`, `capabilities`, `api_latency`, `money_path`,
+`treasury_liquidity` — no disk. MinIO stores media, which grows with use rather
+than staying flat, and a full disk is a *correlated* failure: it takes the
+monitor, the money board and the alert path at the same moment, so the thing
+meant to warn you dies with the thing it watches. A `disk_headroom` probe is a
+prerequisite for MinIO, on the same logic as `buzz_relay` in §4.3.
+
+### 4.5 Rollback pin — record it BEFORE upgrading
+
+The prune deleted older Hermes images (`v2026.6.19`, and a digest-pinned tag),
+so old versions demonstrably do get cleaned. The current image survives only
+because it is in use. Rollback target, captured 2026-07-31:
+
+```
+nousresearch/hermes-agent:v2026.7.1
+sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f
+```
+
+Confirm that digest is present (or re-pullable) **before** starting §3, not
+after a bad bump. Monitor rollback images are also retained: `sha-9ff2d56`
+(current), `sha-8e69416`, `sha-cb6da52`.
+
+### 4.6 Why it is nonetheless the right direction
 
 Every Buzz participant — human or agent — is a **keypair**, and every message is
 a signed event on a relay we control. That is the same identity model Averray
