@@ -10,32 +10,22 @@ afterEach(cleanup);
 const board: MonitorBoard = { cards: FIXTURE_CARDS, at: "2026-05-28T10:30:00Z" };
 const emptyBoard: MonitorBoard = { cards: [], at: "2026-05-28T10:30:00Z" };
 
+// The two surviving tests are the stream-honesty guarantee, not delivery:
+// a degraded stream must replace the normal strip. The action-count live
+// region went with the cards it counted (docs/OPS_ONLY_PIVOT.md).
 describe("BoardView — degraded top strip", () => {
   test("open stream → normal top strip (no degraded header)", () => {
-    const { container } = render(<BoardView board={board} status="open" keyboard={false} />);
+    const { container } = render(<BoardView board={board} status="open" />);
     expect(container.querySelector(".hm-top--degraded")).toBeNull();
     expect(container.querySelector(".hm-top")).toBeTruthy();
   });
 
   test("reconnecting / closed → degraded header replaces the normal strip", () => {
-    const reconnecting = render(<BoardView board={board} status="reconnecting" keyboard={false} />);
+    const reconnecting = render(<BoardView board={board} status="reconnecting" />);
     expect(reconnecting.container.querySelector(".hm-top--degraded")).toBeTruthy();
     expect(reconnecting.getByText("UNTRUSTED")).toBeTruthy();
 
-    const closed = render(<BoardView board={board} status="closed" keyboard={false} />);
+    const closed = render(<BoardView board={board} status="closed" />);
     expect(closed.container.querySelector(".hm-top--degraded")).toBeTruthy();
-  });
-});
-
-describe("BoardView — action announcement (§14)", () => {
-  test("announces the action 0→>0 edge in an assertive live region", () => {
-    const { container, rerender } = render(<BoardView board={emptyBoard} status="open" keyboard={false} />);
-    const live = container.querySelector(".hm-sr-only") as HTMLElement;
-    expect(live.getAttribute("aria-live")).toBe("assertive");
-    expect(live.textContent).toBe(""); // baseline — no announcement on first paint
-
-    // Live data arrives with two action cards (#548, #542 → needs-attention).
-    rerender(<BoardView board={board} status="open" keyboard={false} />);
-    expect(container.querySelector(".hm-sr-only")?.textContent).toMatch(/need your review/);
   });
 });
