@@ -645,18 +645,31 @@ export function BoardView({
         />
       )}
 
-      {/* The hero banner is the ops verdict — the one-glance answer. */}
+      {/* The hero banner is the ops verdict — EXCEPT when the stream itself is
+          untrusted. A health verdict computed from data we cannot trust is not a
+          verdict, so a degraded stream OVERRIDES it rather than rendering calm
+          over stale numbers. (Regression caught by BoardView.ops.test.tsx: the
+          delivery banner used to carry this signal, and the first ops-only cut
+          dropped it.) */}
       <BoardNowBanner
         banner={
-          productHealth
-            ? opsBannerData(productHealth, Date.now())
-            : {
-                tone: "calm",
-                eyebrow: "OPS NOW",
-                headline: "Loading health…",
-                sub: "Polling the live product heartbeat.",
+          degraded
+            ? {
+                tone: "degraded",
+                eyebrow: "STREAM",
+                headline: "Live stream disconnected — board data is UNTRUSTED",
+                sub: "Anything below is the last snapshot received, not the product now.",
                 primaryActionId: undefined,
               }
+            : productHealth
+              ? opsBannerData(productHealth, Date.now())
+              : {
+                  tone: "calm",
+                  eyebrow: "OPS NOW",
+                  headline: "Loading health…",
+                  sub: "Polling the live product heartbeat.",
+                  primaryActionId: undefined,
+                }
         }
       />
 
