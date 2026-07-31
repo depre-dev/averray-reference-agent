@@ -47,7 +47,6 @@ import type { UseCollaborationOptions } from "../hooks/useCollaboration.js";
 import { useBoardKeyboard } from "../hooks/useBoardKeyboard.js";
 import { useProductHealth } from "../hooks/useProductHealth.js";
 import { hasFreshRed, type ProductHealth } from "../lib/monitor/product-health.js";
-import { BoardSurfaceSwitch, type BoardSurface } from "./ops/BoardSurfaceSwitch.js";
 import { OpsBoard } from "./ops/OpsBoard.js";
 import { opsBannerData, pillarStatuses } from "./ops/ops-frame.js";
 import { MobileBoard } from "./mobile/MobileBoard.js";
@@ -240,33 +239,10 @@ export function BoardView({
   const { health: productHealth, error: productHealthError } = useProductHealth({ enabled: monitoringEnabled });
   // Phone-width → the dedicated mobile surface (see the branch before `return`).
   const isMobileViewport = useIsMobileViewport();
-  const [boardSurface, setBoardSurface] = useState<BoardSurface>(() => {
-    try {
-      const stored = localStorage.getItem("hm-board-surface");
-      if (stored === "ops" || stored === "delivery") return stored;
-      // Migrate the previous lane-level "monitoring" flag → the ops surface.
-      if (localStorage.getItem("hm-lane-mode") === "monitoring") return "ops";
-      return "delivery";
-    } catch {
-      return "delivery";
-    }
-  });
-  useEffect(() => {
-    try {
-      localStorage.setItem("hm-board-surface", boardSurface);
-    } catch {
-      /* ignore storage errors (private mode) */
-    }
-  }, [boardSurface]);
-  // Auto-flip to Ops on a FRESH red (once per incident): a probe that was already
-  // red doesn't re-trigger, so a manual switch back to Delivery sticks.
-  const prevHealthRef = useRef<ProductHealth | undefined>(undefined);
-  useEffect(() => {
-    if (productHealth && hasFreshRed(prevHealthRef.current, productHealth)) {
-      setBoardSurface("ops");
-    }
-    prevHealthRef.current = productHealth;
-  }, [productHealth]);
+  // OPS-ONLY (docs/OPS_ONLY_PIVOT.md): the board no longer switches surfaces.
+  // A kanban board models work moving through stages; ops is state you watch and
+  // act on. There is nothing to switch TO, so the switch, its localStorage
+  // persistence and the auto-flip-on-fresh-red are all gone.
   const searchInputRef = useRef<HTMLInputElement>(null);
   // P0-4: every Ask-Hermes trigger must produce immediate visible feedback.
   // We bump askToken (focuses the composer, which scrolls it into view),
@@ -635,7 +611,6 @@ export function BoardView({
           chat. Always present, including when the delivery SSE is degraded, since
           Ops reads product health from its own poll rather than the board stream. */}
       <div className="ops-switch-bar">
-        <BoardSurfaceSwitch surface={boardSurface} onChange={setBoardSurface} health={productHealth} />
       </div>
 
       {degraded ? (
@@ -654,7 +629,7 @@ export function BoardView({
           liveAt={status === "open" ? liveLabel || undefined : undefined}
           automationHealth={board?.automationHealth}
           onRefresh={onRefresh}
-          opsPillars={boardSurface === "ops" && productHealth ? pillarStatuses(productHealth.probes) : undefined}
+          opsPillars={productHealth ? pillarStatuses(productHealth.probes) : undefined}
           chainTick={
             // Only when the heartbeat routine is actually running — a board
             // without product monitoring shows no chain chip at all rather
@@ -670,13 +645,23 @@ export function BoardView({
         />
       )}
 
-      {/* The hero "board now" banner persists in BOTH surfaces (this frame stays,
-          only its content adapts): delivery decisions in Delivery, product-health
-          importance in Ops. */}
-      {boardSurface === "ops" ? (
-        <BoardNowBanner
-          banner={
-            productHealth
+      {/* The hero banner is the ops verdict — EXCEPT when the stream itself is
+          untrusted. A health verdict computed from data we cannot trust is not a
+          verdict, so a degraded stream OVERRIDES it rather than rendering calm
+          over stale numbers. (Regression caught by BoardView.ops.test.tsx: the
+          delivery banner used to carry this signal, and the first ops-only cut
+          dropped it.) */}
+      <BoardNowBanner
+        banner={
+          degraded
+            ? {
+                tone: "degraded",
+                eyebrow: "STREAM",
+                headline: "Live stream disconnected — board data is UNTRUSTED",
+                sub: "Anything below is the last snapshot received, not the product now.",
+                primaryActionId: undefined,
+              }
+            : productHealth
               ? opsBannerData(productHealth, Date.now())
               : {
                   tone: "calm",
@@ -685,11 +670,8 @@ export function BoardView({
                   sub: "Polling the live product heartbeat.",
                   primaryActionId: undefined,
                 }
-          }
-        />
-      ) : (
-        <BoardNowBanner banner={state.banner} cta={bannerCta} />
-      )}
+        }
+      />
 
       <div className="hm-main">
         {/* The lanes column swaps Delivery ⇆ Ops; the co-pilot rail is a sibling
@@ -715,28 +697,15 @@ export function BoardView({
             onDismissSuite={onDismissSuite}
             onSpawnMission={onSpawnMission}
           />
-          {boardSurface === "ops" ? (
-            productHealth ? (
-              <OpsBoard health={productHealth} />
-            ) : (
-              <div className="ops-board ops-board--empty" data-testid="ops-board-loading">
-                <div className="ops-empty">
-                  <span className="ops-empty-title">Loading health…</span>
-                  <span className="ops-empty-detail">Polling the live product heartbeat.</span>
-                </div>
-              </div>
-            )
+          {productHealth ? (
+            <OpsBoard health={productHealth} />
           ) : (
-            <KanbanBoard
-              grouped={displayGrouped}
-              decisionHealth={productHealth}
-              ariaLabel="Kanban lane grid"
-              expanded={surfacedExpanded}
-              onToggleLane={onToggleLane}
-              renderCard={renderCard}
-              renderPipelineCard={renderPipelineCard}
-              renderLaneBody={renderLaneBody}
-            />
+            <div className="ops-board ops-board--empty" data-testid="ops-board-loading">
+              <div className="ops-empty">
+                <span className="ops-empty-title">Loading health…</span>
+                <span className="ops-empty-detail">Polling the live product heartbeat.</span>
+              </div>
+            </div>
           )}
         </div>
 

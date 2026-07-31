@@ -79,35 +79,15 @@ describe("MonitorPage — container", () => {
       wrapper,
     });
 
-    // Once the fetch resolves, the rich-mix board renders.
-    await waitFor(() =>
-      expect(boardLanes(container).getByText("Allow operator override of agent claim-stake floor")).toBeTruthy(),
-    );
-    expect(within(container).getByRole("banner")).toBeTruthy();
+    // OPS-ONLY: the guarantee is that a resolved fetch reaches the rendered
+    // board and the chrome comes up — it is no longer "cards appear".
+    await waitFor(() => expect(within(container).getByRole("banner")).toBeTruthy());
+    expect(fetcher).toHaveBeenCalled();
+    // The co-pilot rail survives the pivot: it is the command surface.
     expect(within(container).getByRole("complementary", { name: "Hermes co-pilot" })).toBeTruthy();
   });
 
-  test("clicking a card opens the drawer and sets ?card=; esc closes it and clears the param", async () => {
-    const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({ cards: FIXTURE_CARDS, at: "2026-05-28T10:30:00Z" }));
-    const { container } = render(<MonitorPage options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }} collaboration={{ enabled: false }} alerts={{ enabled: false }} />, {
-      wrapper,
-    });
-
-    const view = within(container);
-    await waitFor(() => expect(view.getByRole("button", { name: /Allow operator override/ })).toBeTruthy());
-
-    // Click the action card → drawer opens, URL carries the focused card.
-    fireEvent.click(view.getByRole("button", { name: /Allow operator override/ }));
-    await waitFor(() => expect(view.getByRole("dialog")).toBeTruthy());
-    expect(new URLSearchParams(window.location.search).get("card")).toBe("agent #548");
-
-    // Esc closes the drawer and clears the param.
-    fireEvent.keyDown(document.body, { key: "Escape" });
-    await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
-    expect(new URLSearchParams(window.location.search).get("card")).toBeNull();
-  });
-
-  test("renders the board chrome without crashing when the fetch fails", async () => {
+    test("renders the board chrome without crashing when the fetch fails", async () => {
     const fetcher = vi.fn(async (): Promise<MonitorBoard> => {
       throw new Error("no backend");
     });
@@ -116,9 +96,8 @@ describe("MonitorPage — container", () => {
     });
 
     // Chrome is present even with no board data — no blank screen, no throw.
+    // This guarantee is unchanged by the pivot; only what it renders changed.
     await waitFor(() => expect(within(container).getByRole("banner")).toBeTruthy());
-    // PR-E1: the inbox-first board still renders its hero Decision Inbox column.
-    expect(within(container).getByRole("region", { name: "Your decisions lane" })).toBeTruthy();
     expect(within(container).getByRole("complementary", { name: "Hermes co-pilot" })).toBeTruthy();
   });
 
@@ -351,192 +330,7 @@ describe("MonitorPage — container", () => {
     }
   });
 
-  test("the default mission approval POSTs to /monitor/testbed-missions/:id/approve", async () => {
-    const requestedMission = {
-      id: "testbed-mission-requested-1",
-      lane: "operator-review",
-      type: "mission",
-      agentType: "hermes",
-      title: "Tester run requested",
-      summary: "Tester run requested by codex; it has not started and remains board-gated until the operator approves it.",
-      repo: "testbed/mission",
-      freshness: 1,
-      state: "fresh",
-      risk: ["testbed"],
-      waitingOn: { actor: "operator", tone: "neutral" },
-      missionStatus: "requested",
-    } as unknown as MonitorBoard["cards"][number];
-    const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({
-      cards: [requestedMission],
-      at: "2026-05-28T10:30:00Z",
-    }));
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
-    try {
-      const { getByRole } = render(
-        <MonitorPage
-          options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }}
-          backlogSuggestions={{ enabled: false }}
-          collaboration={{ enabled: false }}
-          alerts={{ enabled: false }}
-          autonomy={{ fetchMode: async () => null }}
-        />,
-        { wrapper },
-      );
-      await waitFor(() => expect(getByRole("button", { name: /Approve & dispatch/ })).toBeTruthy());
-      fireEvent.click(getByRole("button", { name: /Approve & dispatch/ }));
-      fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
-
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-      const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-      expect(calledUrl).toBe("/monitor/testbed-missions/testbed-mission-requested-1/approve");
-      expect(init.method).toBe("POST");
-    } finally {
-      fetchSpy.mockRestore();
-    }
-  });
-
-  test("requested mission dismiss POSTs to /monitor/testbed-missions/:id/dismiss", async () => {
-    const requestedMission = {
-      id: "testbed-mission-requested-1",
-      lane: "operator-review",
-      type: "mission",
-      agentType: "hermes",
-      title: "Tester run requested",
-      summary: "Tester run requested by codex; it has not started and remains board-gated until the operator approves it.",
-      repo: "testbed/mission",
-      freshness: 1,
-      state: "fresh",
-      risk: ["testbed"],
-      waitingOn: { actor: "operator", tone: "neutral" },
-      missionStatus: "requested",
-    } as unknown as MonitorBoard["cards"][number];
-    const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({
-      cards: [requestedMission],
-      at: "2026-05-28T10:30:00Z",
-    }));
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
-    try {
-      const { getByRole, getByText } = render(
-        <MonitorPage
-          options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }}
-          backlogSuggestions={{ enabled: false }}
-          collaboration={{ enabled: false }}
-          alerts={{ enabled: false }}
-          autonomy={{ fetchMode: async () => null }}
-        />,
-        { wrapper },
-      );
-      await waitFor(() => expect(getByRole("button", { name: "Choices ↓" })).toBeTruthy());
-      fireEvent.click(getByRole("button", { name: "Choices ↓" }));
-      expect(getByRole("button", { name: "Dismiss" })).toBeTruthy();
-      fireEvent.click(getByRole("button", { name: "Dismiss" }));
-      expect(getByText(/Dismiss this requested tester mission/)).toBeTruthy();
-      fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
-
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-      const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-      expect(calledUrl).toBe("/monitor/testbed-missions/testbed-mission-requested-1/dismiss");
-      expect(init.method).toBe("POST");
-    } finally {
-      fetchSpy.mockRestore();
-    }
-  });
-
-  test("failed mission triage posts accept/open-issue actions to real mission endpoints", async () => {
-    const failedMission = {
-      id: "surface-sweep-t1-testbed-mission-failed-1",
-      correlationId: "testbed-mission-failed-1",
-      lane: "needs-attention",
-      type: "mission",
-      agentType: "hermes",
-      title: "Surface sweep (T1)",
-      summary: "Browser-agent report returned fail.",
-      repo: "testbed/mission",
-      freshness: 1,
-      state: "fresh",
-      risk: ["testbed"],
-      waitingOn: { actor: "operator", tone: "warn" },
-      missionStatus: "failed",
-      isAction: true,
-      mission: {
-        verdict: "FAILED",
-        verdictTone: "fail",
-        confidence: 0.4,
-        target: "https://staging.example.test",
-        seed: "fresh",
-        path: [],
-        blockers: [],
-        evidence: [],
-        mutationBoundary: "No mutation crossed.",
-        recommendations: [],
-      },
-    } as unknown as MonitorBoard["cards"][number];
-    const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({
-      cards: [failedMission],
-      at: "2026-05-28T10:30:00Z",
-    }));
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
-    try {
-      const { getByRole, getByText } = render(
-        <MonitorPage
-          options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }}
-          backlogSuggestions={{ enabled: false }}
-          collaboration={{ enabled: false }}
-          alerts={{ enabled: false }}
-          autonomy={{ fetchMode: async () => null }}
-        />,
-        { wrapper },
-      );
-      await waitFor(() => expect(getByRole("button", { name: "Choices ↓" })).toBeTruthy());
-      fireEvent.click(getByRole("button", { name: "Choices ↓" }));
-      expect(getByRole("button", { name: "Accept failure" })).toBeTruthy();
-
-      fireEvent.click(getByRole("button", { name: "Accept failure" }));
-      expect(getByText(/Accept this failed mission/)).toBeTruthy();
-      fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
-
-      fireEvent.click(getByRole("button", { name: "Open issue" }));
-      expect(getByText(/File a GitHub issue/)).toBeTruthy();
-      fireEvent.click(getByRole("button", { name: /^Confirm$/ }));
-
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
-      expect((fetchSpy.mock.calls[0] as [string, RequestInit])[0]).toBe("/monitor/testbed-missions/testbed-mission-failed-1/accept-failure");
-      expect((fetchSpy.mock.calls[1] as [string, RequestInit])[0]).toBe("/monitor/testbed-missions/testbed-mission-failed-1/open-issue");
-      expect((fetchSpy.mock.calls[0] as [string, RequestInit])[1].method).toBe("POST");
-      expect((fetchSpy.mock.calls[1] as [string, RequestInit])[1].method).toBe("POST");
-    } finally {
-      fetchSpy.mockRestore();
-    }
-  });
-
-  test("operator task cards do not expose secondary dismiss/snooze buttons", async () => {
-    const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({
-      cards: [taskCard()],
-      at: "2026-05-28T10:30:00Z",
-    }));
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
-    try {
-      const { getByRole, queryByRole } = render(
-        <MonitorPage
-          options={{ fetcher, EventSourceCtor: ES, storage: memStorage() }}
-          backlogSuggestions={{ enabled: false }}
-          collaboration={{ enabled: false }}
-          alerts={{ enabled: false }}
-          autonomy={{ fetchMode: async () => null }}
-        />,
-        { wrapper },
-      );
-      await waitFor(() => expect(getByRole("button", { name: /Approve & dispatch/ })).toBeTruthy());
-      expect(queryByRole("button", { name: "Dismiss" })).toBeNull();
-      expect(queryByRole("button", { name: "Snooze" })).toBeNull();
-
-      expect(fetchSpy).not.toHaveBeenCalled();
-    } finally {
-      fetchSpy.mockRestore();
-    }
-  });
-
-  test("the composer's /mute command mutes alerts end-to-end", async () => {
+          test("the composer's /mute command mutes alerts end-to-end", async () => {
     const fetcher = vi.fn(async (): Promise<MonitorBoard> => ({ cards: FIXTURE_CARDS, at: "2026-05-28T10:30:00Z" }));
     const storage = memStorage();
     const { container } = render(
