@@ -700,14 +700,23 @@ describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", ()
       combinedFetch({ healthBody: HEALTHY_BODY, chainIdHex: CHAIN_ID_HEX, blockTimestampHex: tsHex(10_000_000, 12), gasHex: "0xDE0B6B3A7640000", usdcHex: "0x989680" }),
       { nowMs: 10_000_000 },
     );
-    expect(probes.map((p) => p.name)).toEqual(["product_api", "chain_height", "signer_liquidity", "capabilities", "api_latency", "money_path", "treasury_liquidity"]);
-    expect(probes.map((p) => p.status)).toEqual(["ok", "ok", "ok", "ok", "ok", "ok", "ok"]);
+    expect(probes.map((p) => p.name)).toEqual(["product_api", "chain_height", "signer_liquidity", "capabilities", "api_latency", "disk_headroom", "money_path", "treasury_liquidity"]);
+    expect(probes.map((p) => p.status)).toEqual(["ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok"]);
     expect(probes[2]?.detail).toContain("reward bank 100.00 USDC");
   });
 
-  it("all degraded when nothing is configured (never fake green)", async () => {
+  it("every CONFIG-DEPENDENT probe degrades when nothing is configured (never fake green)", async () => {
     const { probes } = await collectProductHealthProbes(cfg({ apiBaseUrl: undefined, rpcUrl: undefined }), combinedFetch({ healthBody: HEALTHY_BODY }), { nowMs: 1000 });
-    expect(probes.map((p) => p.status)).toEqual(["degraded", "degraded", "degraded", "degraded", "degraded", "degraded", "degraded"]);
+    // disk_headroom is deliberately excluded: it does not depend on product
+    // config at all. It measures the local filesystem, that measurement
+    // genuinely succeeds here, and the disk genuinely is fine — so reporting
+    // "ok" is the honest answer, not a fake green. The invariant this test
+    // protects is "a probe that CANNOT SEE must not report calm", and
+    // disk_headroom can see. Its own unreadable→degraded path is covered in
+    // disk-headroom.test.ts.
+    const configDependent = probes.filter((p) => p.name !== "disk_headroom");
+    expect(configDependent.map((p) => p.status)).toEqual(["degraded", "degraded", "degraded", "degraded", "degraded", "degraded", "degraded"]);
+    expect(probes.find((p) => p.name === "disk_headroom")).toBeDefined();
   });
 
   it("absolute age: a stale block halts IMMEDIATELY on a fresh start — no blind window (testnet → degraded)", async () => {
