@@ -35,3 +35,25 @@ paths:
   skills: /opt/data/skills
   memory: /opt/data/memory.db
   plugins: /opt/data/plugins
+
+# The Session API our monitor speaks to (POST /api/sessions, /chat, /chat/stream,
+# /fork) is served by the `api_server` PLATFORM, and a platform has to be opted
+# in HERE before any env var can turn it on.
+#
+# v0.18 enabled it from container env alone, so this block was never needed and
+# its absence was invisible. v0.19.1 does not: gateway/config.py resolves
+# `env > config > default`, meaning API_SERVER_* are an OVERRIDE LAYER on top of
+# a config opt-in that must already exist. With no `platforms:` key there is
+# nothing to override, the platform never registers, and the gateway logs
+# "No messaging platforms enabled" and binds nothing — while reporting healthy.
+#
+# Proven on a v0.19.1 smoke against a COPY of the prod home (2026-07-31): with
+# API_SERVER_ENABLED/HOST/PORT/KEY all set and a model configured, nothing
+# listened on 8642 until this block existed. Harmless on v0.18, which simply
+# ignores it — so it is safe to land BEFORE the upgrade.
+#
+# Key, port and bind address stay in the environment (ops/compose.command-center.yml);
+# only the opt-in lives here.
+platforms:
+  api_server:
+    enabled: true
