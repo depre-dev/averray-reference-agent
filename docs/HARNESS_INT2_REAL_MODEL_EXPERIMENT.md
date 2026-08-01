@@ -107,3 +107,77 @@ evidence.
 Changing the criterion or the objective · relaxing the fence · opening a PR ·
 anything touching the money rail, wallet, signer, claim or submission paths ·
 re-running to improve a result.
+
+---
+
+# Addendum — the second run, and an operator decision that supersedes the hypothesis
+
+## What the second run showed
+
+**The model completed the task and the verifier accepted it.**
+
+```
+call 8:     cat >> docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md << 'PARA_EOF'
+criterion:  passed=True   reason=exit_0   required_failed: []
+run:        outcome=completed
+```
+
+The original hypothesis — that the budget, not the model, was the binding
+constraint — is **confirmed on its substance**. Given room, `glm-5.2` reads the
+file, writes the paragraph, and produces work this system verifies.
+
+It still ended `lifecycle=failed` with **zero handoffs**, because it used 29,701
+of 24,000 approved tokens.
+
+## The result that mattered more than the hypothesis
+
+| dimension | used | approved | breached |
+|---|---|---|---|
+| `elapsedSeconds` | **40s** | 180 | no |
+| `toolCalls` | **8** | 30 | no |
+| `modelTokens` | **29,701** | 24,000 | **yes** |
+
+The run sat at roughly a quarter of both *predictable* limits and breached only
+the one nobody can predict. My 24,000 estimate was derived from measured data
+and was still 24% low, because context growth is driven by tool-output size
+rather than turn count — input jumped from 2,450 to 6,145 in a single step when
+a large read landed.
+
+## The decision
+
+**The token cap is not a per-task budget. It is an absolute runaway ceiling.**
+
+Made by the operator on the evidence above. Three reasons it holds:
+
+1. **Token cost per task is not knowable in advance.** Two attempts to size it
+   from measurement were both wrong. `elapsedSeconds` and `toolCalls` are
+   estimable — "under three minutes, under thirty actions" — and tokens are not.
+2. **It is the wrong unit for cost.** Money is the unit, and on a capacity-tier
+   provider there is no per-token money to cap at all.
+3. **It does not bound harm.** An agent holding `fs.write_file` and `shell.run`
+   can do everything it is capable of doing in very few tokens. Blast radius is
+   contained by the capability fence — eight grants, `network: deny`, path
+   allowlist, non-delegating — not by token accounting.
+
+`modelTokens` moves to **200,000**: about 7× a completing run, and below the
+~450,000 a pathological thirty-call run with large outputs could reach. It
+should never bind on legitimate work, and it still stops an agent that has
+genuinely lost control. `elapsedSeconds` and `toolCalls` remain the operative
+limits, and both were already doing the containment work.
+
+## Why this is not "raising the number because we did not like the result"
+
+That distinction matters, and the record should carry the reasoning rather than
+the assertion.
+
+A retry raises the number so the same measurement passes. This changes what the
+number *is for*, on evidence that the previous framing was measuring something
+unknowable: the run breached **only** the unpredictable dimension while idling
+inside both predictable ones. Had it breached `elapsedSeconds` or `toolCalls`,
+the honest conclusion would have been that the task is too big for the fence —
+and nothing here would have changed.
+
+## Still open
+
+No real model has yet produced a **handoff**. Verified work, yes; a handoff, no.
+The operator has gated INT-3b's first real send on closing that gap.
