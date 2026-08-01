@@ -1,123 +1,217 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, within } from "@testing-library/react";
+//
+// What the ops board must render, and what it must refuse to render.
+//
+// The pure decisions are covered in ops-spec.test.ts; these assert that the
+// decisions actually reach the screen — that a "no meter" decision produces no
+// bar element, that a shortfall and an unverified read do not look alike, and
+// that a clean funnel next to contradicting proof shows BOTH numbers.
+import { afterEach, describe, expect, test } from "vitest";
+import { cleanup, render, within } from "@testing-library/react";
+
 import { OpsBoard } from "./OpsBoard.js";
-import { BoardSurfaceSwitch } from "./BoardSurfaceSwitch.js";
 import {
   OPS_FIXTURE_LIVE,
-  OPS_FIXTURE_POPULATED,
-  OPS_FIXTURE_RED,
+  OPS_FIXTURE_NOMINAL,
+  OPS_FIXTURE_STRESS,
+  OPS_FIXTURE_UNVERIFIED,
   FIXTURE_NOW,
 } from "../../lib/monitor/ops-fixtures.js";
 
 afterEach(cleanup);
 
-describe("OpsBoard — empty states", () => {
-  test("monitoring off", () => {
-    const { getByText, queryByTestId } = render(
-      <OpsBoard health={{ enabled: false, at: null, status: "unknown", checks: 0, probes: [] }} nowMs={FIXTURE_NOW} />,
+/** Render at the fixture's own check time so nothing reads as stale. */
+const fresh = (health: typeof OPS_FIXTURE_NOMINAL) => (health.at ?? FIXTURE_NOW) + 2_000;
+
+describe("OpsBoard — the honest empty states", () => {
+  test("monitoring off says so instead of showing a green board", () => {
+    const { getByTestId } = render(
+      <OpsBoard
+        health={{ enabled: false, at: null, status: "unknown", checks: 0, probes: [] }}
+        nowMs={FIXTURE_NOW}
+      />,
     );
-    expect(getByText("Monitoring is off")).toBeTruthy();
-    expect(queryByTestId("ops-probe-grid")).toBeNull();
+    expect(getByTestId("ops-verdict").textContent).toBe("NOT WATCHING");
   });
 
-  test("awaiting first check", () => {
-    const { getByText } = render(
-      <OpsBoard health={{ enabled: true, at: null, status: "unknown", checks: 0, probes: [] }} nowMs={FIXTURE_NOW} />,
+  test("awaiting the first check is NO DATA YET, not nominal", () => {
+    const { getByTestId } = render(
+      <OpsBoard
+        health={{ enabled: true, at: null, status: "unknown", checks: 0, probes: [] }}
+        nowMs={FIXTURE_NOW}
+      />,
     );
-    expect(getByText("Awaiting first check")).toBeTruthy();
-  });
-});
-
-describe("OpsBoard — live (today) fixture", () => {
-  test("renders the grouped probe grid", () => {
-    const { getByTestId } = render(<OpsBoard health={OPS_FIXTURE_LIVE} nowMs={FIXTURE_NOW} />);
-    expect(getByTestId("ops-probe-grid")).toBeTruthy();
-    expect(getByTestId("ops-probe-product_api")).toBeTruthy();
-    expect(getByTestId("ops-probe-money_path")).toBeTruthy();
+    expect(getByTestId("ops-verdict").textContent).toBe("NO DATA YET");
   });
 
-  test("money zones show honest awaiting-data, never fabricated numbers", () => {
-    const { getByTestId } = render(<OpsBoard health={OPS_FIXTURE_LIVE} nowMs={FIXTURE_NOW} />);
+  test("without structured blocks the money panels await data, never fabricate it", () => {
+    const { getByTestId, container } = render(
+      <OpsBoard health={OPS_FIXTURE_LIVE} nowMs={fresh(OPS_FIXTURE_LIVE)} />,
+    );
     expect(getByTestId("ops-solvency-awaiting")).toBeTruthy();
-    expect(getByTestId("ops-trends-awaiting")).toBeTruthy();
-    const funnel = getByTestId("ops-funnel");
-    expect(funnel.className).toContain("is-awaiting");
-    expect(within(getByTestId("ops-fstep-claimed")).getByText("—")).toBeTruthy();
-    expect(within(getByTestId("ops-fstep-submitted")).getByText("—")).toBeTruthy();
-    expect(within(getByTestId("ops-fstep-settled")).getByText("—")).toBeTruthy();
-    expect(within(getByTestId("ops-flow-gauge-claimedNotSubmitted")).getByText("—")).toBeTruthy();
-    expect(within(getByTestId("ops-flow-gauge-submittedNotSettled")).getByText("—")).toBeTruthy();
-  });
-
-  test("awaiting probes read as awaiting tone, not amber degraded", () => {
-    const { getByTestId } = render(<OpsBoard health={OPS_FIXTURE_LIVE} nowMs={FIXTURE_NOW} />);
-    expect(getByTestId("ops-probe-treasury_liquidity").className).toContain("ops-probe--awaiting");
-    expect(getByTestId("ops-probe-chain_height").className).toContain("ops-probe--degraded");
+    // No pools at all → no meters at all.
+    expect(container.querySelectorAll(".ops-meter")).toHaveLength(0);
+    // Funnel counts read "—", not "0".
+    const flow = getByTestId("ops-flow");
+    expect(within(flow).getAllByText("—").length).toBeGreaterThan(0);
+    expect(within(flow).queryByText("0")).toBeNull();
   });
 });
 
-describe("OpsBoard — populated fixture", () => {
-  test("solvency, funnel, trends, incidents, and deploy all render real data", () => {
-    const { getByTestId, getByText } = render(<OpsBoard health={OPS_FIXTURE_POPULATED} nowMs={FIXTURE_NOW} />);
-    expect(getByTestId("ops-pool-reward_bank")).toBeTruthy();
-    expect(getByTestId("ops-runway")).toBeTruthy();
-    expect(within(getByTestId("ops-fstep-claimed")).getByText("41")).toBeTruthy();
-    expect(within(getByTestId("ops-fstep-submitted")).getByText("39")).toBeTruthy();
-    expect(within(getByTestId("ops-fstep-settled")).getByText("37")).toBeTruthy();
-    expect(within(getByTestId("ops-flow-gauge-claimedNotSubmitted")).getByText("2")).toBeTruthy();
-    expect(within(getByTestId("ops-flow-gauge-submittedNotSettled")).getByText("1")).toBeTruthy();
-    expect(getByTestId("ops-zone-trends")).toBeTruthy();
-    expect(getByTestId("ops-incidents")).toBeTruthy();
-    expect(getByText("structured blocks live")).toBeTruthy();
-  });
-
-  test("the ongoing chain incident shows an ongoing duration", () => {
-    const { getByTestId } = render(<OpsBoard health={OPS_FIXTURE_POPULATED} nowMs={FIXTURE_NOW} />);
-    expect(getByTestId("ops-incidents").textContent).toContain("ongoing");
-  });
-
-  test("shows the declared reason for an intentionally unfunded reserve", () => {
-    const health = {
-      ...OPS_FIXTURE_POPULATED,
-      solvency: {
-        ...OPS_FIXTURE_POPULATED.solvency!,
-        pools: OPS_FIXTURE_POPULATED.solvency!.pools.map((pool) =>
-          pool.key === "reserve"
-            ? {
-                ...pool,
-                amount: 0,
-                floor: null,
-                note: "Intentionally unfunded: pre-revenue reserve",
-              }
-            : pool,
-        ),
-      },
-    };
-    const { getByTestId } = render(<OpsBoard health={health} nowMs={FIXTURE_NOW} />);
-    expect(getByTestId("ops-pool-reserve").textContent).toContain(
-      "Intentionally unfunded: pre-revenue reserve",
+describe("OpsBoard — solvency meters", () => {
+  test("only floored pools draw a bar", () => {
+    const { container } = render(
+      <OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
     );
+    // 3 floored pools (gas, reward bank, AAC) → exactly 3 meters, and the
+    // reserve / escrow / revenue rows get none.
+    expect(container.querySelectorAll(".ops-meter")).toHaveLength(3);
   });
-});
 
-describe("OpsBoard — mainnet fixture", () => {
-  test("renders native signer gas as DOT", () => {
-    const { getByTestId } = render(<OpsBoard health={OPS_FIXTURE_RED} nowMs={FIXTURE_NOW} />);
-    expect(getByTestId("ops-pool-signer_gas").textContent).toContain("DOT");
-    expect(getByTestId("ops-pool-signer_gas").textContent).not.toContain("PAS");
-  });
-});
-
-describe("BoardSurfaceSwitch", () => {
-  test("renders both tabs and reports the selection", () => {
-    const onChange = vi.fn();
-    const { getByRole } = render(
-      <BoardSurfaceSwitch surface="delivery" onChange={onChange} health={OPS_FIXTURE_LIVE} />,
+  // THE SHIPPED BUG, pinned: the treasury reserve is intentionally at 0.00 with
+  // no floor. It once rendered as a FULL bar and read "healthy and full".
+  test("the intentionally-empty reserve gets no meter and keeps its reason", () => {
+    const { getByTestId } = render(
+      <OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
     );
-    const opsTab = getByRole("tab", { name: /Ops/ });
-    expect(opsTab.getAttribute("aria-selected")).toBe("false");
-    fireEvent.click(opsTab);
-    expect(onChange).toHaveBeenCalledWith("ops");
+    const reserve = getByTestId("ops-pool-reserve");
+    expect(reserve.querySelector(".ops-meter")).toBeNull();
+    expect(reserve.textContent).toContain("intentionally unfunded");
+  });
+
+  test("a breached floor is coral and states the absolute shortfall", () => {
+    const { getByTestId } = render(<OpsBoard health={OPS_FIXTURE_STRESS} nowMs={FIXTURE_NOW} />);
+    const bank = getByTestId("ops-pool-reward_bank");
+    expect(bank.getAttribute("data-tone")).toBe("red");
+    expect(bank.textContent).toContain("BELOW FLOOR · short 0.58");
+  });
+});
+
+describe("OpsBoard — payout evidence", () => {
+  test("confirmed shows both sources so the operator can check the match", () => {
+    const { getByTestId } = render(
+      <OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    const evidence = getByTestId("ops-evidence");
+    expect(getByTestId("ops-evidence-status").textContent).toBe("CONFIRMED");
+    expect(evidence.textContent).toContain("14 payouts confirmed on-chain");
+    expect(evidence.textContent).toContain("14 marked settled");
+    expect(evidence.getAttribute("data-emphasis")).toBe("off");
+  });
+
+  // THE POINT OF THE ROW: the funnel still reads a clean 9 → 9 → 9 while the
+  // chain can only account for 12 of 14. The board must show the contradiction,
+  // not average it away.
+  test("a clean funnel beside a shortfall shows BOTH numbers and names the gap", () => {
+    const { getByTestId } = render(<OpsBoard health={OPS_FIXTURE_STRESS} nowMs={FIXTURE_NOW} />);
+    const flow = getByTestId("ops-flow");
+    expect(within(flow).getAllByText("9").length).toBe(3); // claimed / submitted / settled
+    expect(getByTestId("ops-evidence-status").textContent).toBe("SHORTFALL −2");
+    expect(getByTestId("ops-evidence").textContent).toContain(
+      "2 settled jobs have no on-chain proof",
+    );
+    expect(flow.textContent).toContain("evidence below disagrees");
+  });
+
+  // "We cannot see" must never look like "we can see, and money is missing".
+  test("unverified does NOT look like shortfall", () => {
+    const { getByTestId } = render(
+      <OpsBoard health={OPS_FIXTURE_UNVERIFIED} nowMs={fresh(OPS_FIXTURE_UNVERIFIED)} />,
+    );
+    const status = getByTestId("ops-evidence-status");
+    expect(status.textContent).toBe("UNVERIFIED");
+    expect(status.getAttribute("data-tone")).toBe("awaiting");
+    expect(getByTestId("ops-evidence").getAttribute("data-emphasis")).toBe("off");
+    expect(getByTestId("ops-evidence").textContent).not.toMatch(/money did not move/i);
+  });
+
+  test("the confirmed / shortfall / unverified key is permanently on screen", () => {
+    const { getByTestId } = render(
+      <OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    const evidence = getByTestId("ops-evidence").textContent ?? "";
+    expect(evidence).toContain("instrument broken, not money");
+    expect(evidence).toContain("proof missing: money broken");
+  });
+});
+
+describe("OpsBoard — pillars and footer", () => {
+  test("every probe reaches the pillar strip with its detail", () => {
+    const { getByTestId } = render(
+      <OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    const pillars = getByTestId("ops-pillars").textContent ?? "";
+    for (const probe of OPS_FIXTURE_NOMINAL.probes) {
+      expect(pillars).toContain(probe.name);
+      expect(pillars).toContain(probe.detail);
+    }
+  });
+
+  test("an awaiting probe is counted as awaiting, not folded into degraded", () => {
+    const { getByTestId } = render(
+      <OpsBoard health={OPS_FIXTURE_LIVE} nowMs={fresh(OPS_FIXTURE_LIVE)} />,
+    );
+    expect(getByTestId("ops-pillars").textContent).toContain("awaiting");
+  });
+
+  // A line through two points is a fabricated trend.
+  test("the latency trend refuses to draw without enough history", () => {
+    const { getByTestId } = render(
+      <OpsBoard health={OPS_FIXTURE_LIVE} nowMs={fresh(OPS_FIXTURE_LIVE)} />,
+    );
+    expect(getByTestId("ops-trend-awaiting").textContent).toContain("awaiting history");
+  });
+
+  test("an empty incident log says 'none recorded', not 'all clear'", () => {
+    const { container } = render(
+      <OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    expect(container.querySelector(".ops-foot")?.textContent).toContain("none recorded");
+  });
+
+  // Demoted from the tallest column on the board to one footer line.
+  test("LLM spend is a single footer line, and admits what it excludes", () => {
+    const { container } = render(
+      <OpsBoard
+        health={OPS_FIXTURE_NOMINAL}
+        nowMs={fresh(OPS_FIXTURE_NOMINAL)}
+        board={{
+          cards: [],
+          at: "2026-07-31T09:41:05Z",
+          llmUsage: {
+            status: "recorded",
+            inputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+            costUsd: 20,
+            costStatus: "recorded",
+            runs: 3,
+            byModel: [],
+            byDay: [],
+            billing: {
+              metered: { models: [], monthCostUsd: 20, costStatus: "recorded" },
+              subscriptions: [
+                { provider: "ollama", label: "shared A", plan: "flat", planLabel: "Flat", monthlyUsd: null, configured: true, active: true, dedicated: false, unit: "tokens", models: [], windows: {} },
+                { provider: "codex", label: "shared B", plan: "flat", planLabel: "Flat", monthlyUsd: null, configured: true, active: true, dedicated: false, unit: "runs", models: [], windows: {} },
+              ],
+              monthlyTotalUsd: 20,
+              monthlyTotalComplete: false,
+            },
+          },
+        } as never}
+      />,
+    );
+    const foot = container.querySelector(".ops-foot")?.textContent ?? "";
+    expect(foot).toContain("LLM SPEND ≈ $20.00 this month");
+    expect(foot).toContain("2 shared plans excluded from total");
+  });
+
+  test("no usage data says so instead of showing $0.00", () => {
+    const { container } = render(
+      <OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    const foot = container.querySelector(".ops-foot")?.textContent ?? "";
+    expect(foot).toContain("LLM SPEND — not recorded");
+    expect(foot).not.toContain("$0.00");
   });
 });

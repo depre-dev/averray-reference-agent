@@ -1,542 +1,641 @@
 /* =========================================================
-   Hermes-4 Ops surface — the full-canvas operations board.
-   Consumes the --h4-* token system (never forks it). Tone is
-   driven by a per-element `--tone` custom property so dots,
-   meters, borders, and strokes all track one status color:
+   Hermes ops board — the whole canvas, laid out by priority.
 
-     ok        sage    --h4-ok      (healthy)
-     degraded  amber   --h4-warn    (a real degradation)
-     red       coral   --h4-act     (page-worthy)
-     awaiting  gray    --h4-tel     (no data yet — never fake-green)
+   One screen an operator watches all day. Warm, low-glare, no
+   decoration that isn't carrying information. Numbers are the
+   content: monospace, aligned, never ornamental.
+
+   Tone is carried by a single `data-tone` attribute so dots,
+   meters, text and borders all track one status colour:
+
+     ok        sage   --h4-ok    healthy
+     degraded  amber  --h4-warn  a real degradation
+     red       coral  --h4-act   page-worthy / breached
+     awaiting  grey   --h4-tel   NO DATA YET — never fake-green,
+                                 and never a false alarm either
 
    Loaded last in main.tsx so its additive rules win.
    ========================================================= */
 
-/* ---- board-level switch bar (above the board, both modes) ---- */
-.ops-switch-bar {
+.ops-board {
+  --ops-hair: rgba(237, 230, 221, 0.10);
+  --ops-rule: rgba(237, 230, 221, 0.16);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  padding: 14px 22px 12px;
+  background: var(--h4-surface);
+  color: var(--h4-ink);
+  font-family: var(--h4-font-body);
+}
+
+/* One tone scale, resolved once. Everything below just sets data-tone. */
+.ops-board [data-tone="ok"]       { --tone: var(--h4-ok); }
+.ops-board [data-tone="degraded"] { --tone: var(--h4-warn); }
+.ops-board [data-tone="red"]      { --tone: var(--h4-act); }
+.ops-board [data-tone="awaiting"] { --tone: var(--h4-tel); }
+
+/* ---- meta line ------------------------------------------------ */
+.ops-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  font-family: var(--h4-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--h4-muted);
+}
+.ops-refresh {
+  border: 0;
+  padding: 0;
+  background: none;
+  font: inherit;
+  color: var(--h4-ink-2);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.ops-refresh:hover { color: var(--h4-ink); }
+
+/* ---- stale banner ---------------------------------------------
+   Hatched, not solid: it must not be mistakable for a normal
+   panel, because it invalidates every number under it.          */
+.ops-stale {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 9px 18px 0;
+  gap: 14px;
+  padding: 7px 14px;
+  border: 1px solid var(--h4-act);
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(232, 134, 94, 0.16) 0 10px,
+    rgba(232, 134, 94, 0.04) 10px 20px
+  );
 }
-.ops-switch {
-  display: inline-flex;
+.ops-stale strong {
+  font-family: var(--h4-font-display);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--h4-act);
+}
+.ops-stale span {
+  font-family: var(--h4-font-mono);
+  font-size: 12px;
+  color: var(--h4-ink);
+}
+.ops-stale .ops-stale-right {
+  margin-left: auto;
+  color: var(--h4-act);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ops-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+}
+/* Untrusted data has to LOOK untrusted, not merely be labelled so. */
+.ops-content[data-dim="yes"] { opacity: 0.72; }
+
+/* ---- verdict + trust ------------------------------------------ */
+.ops-verdict-row {
+  display: flex;
+  gap: 24px;
+  align-items: stretch;
+}
+.ops-verdict { flex: 1; min-width: 0; }
+.ops-verdict-kicker {
+  font-family: var(--h4-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--tone, var(--h4-tel));
+}
+/* The only oversized element on the board. It earns that from priority. */
+.ops-verdict-line {
+  margin: 2px 0 0;
+  font-family: var(--h4-font-display);
+  font-weight: 600;
+  font-size: clamp(38px, 4.1vw, 62px);
+  line-height: 0.98;
+  letter-spacing: 0.005em;
+  color: var(--tone, var(--h4-ink));
+}
+.ops-verdict-sub {
+  margin: 6px 0 0;
+  font-family: var(--h4-font-mono);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--tone, var(--h4-muted));
+}
+
+.ops-trust {
+  width: 440px;
+  flex: none;
+  display: grid;
+  gap: 6px;
+  align-content: center;
+  padding: 10px 14px;
+  border: 1px solid var(--ops-rule);
+}
+.ops-trust-row {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 10px;
+  align-items: baseline;
+}
+.ops-trust-key {
+  font-family: var(--h4-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--h4-muted);
+}
+.ops-trust-val {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-family: var(--h4-font-mono);
+  font-size: 12px;
+}
+.ops-trust-val > span[data-tone] {
+  color: var(--tone, var(--h4-ink-2));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- shared tone dot ------------------------------------------ */
+.ops-dot {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--tone, var(--h4-tel));
+}
+.ops-dot--sm { width: 7px; height: 7px; }
+
+/* ---- the money band ------------------------------------------- */
+.ops-money {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  border: 1px solid var(--ops-rule);
+}
+.ops-solvency {
+  width: 46%;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 16px;
+  border-right: 1px solid var(--ops-rule);
+  overflow: hidden;
+}
+.ops-flow {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 16px;
+  overflow: hidden;
+}
+
+.ops-panel-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.ops-panel-title {
+  margin: 0;
+  font-family: var(--h4-font-display);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  color: var(--h4-ink);
+}
+.ops-panel-note {
+  margin-left: auto;
+  font-family: var(--h4-font-mono);
+  font-size: 10px;
+  color: var(--tone, var(--h4-muted));
+}
+.ops-chip {
+  padding: 2px 8px;
+  border: 1px dashed var(--ops-rule);
+  font-family: var(--h4-font-mono);
+  font-size: 10px;
+  white-space: nowrap;
+  color: var(--tone, var(--h4-muted));
+}
+.ops-awaiting {
+  margin: 8px 0 0;
+  font-family: var(--h4-font-mono);
+  font-size: 11px;
+  color: var(--h4-tel);
+}
+
+/* ---- solvency pools -------------------------------------------
+   A meter exists only where a floor exists. Unfloored pools fall
+   through to .ops-pool--unfloored, which has no bar at all.     */
+.ops-pool {
+  display: grid;
+  grid-template-columns: minmax(120px, 168px) 1fr minmax(120px, 176px);
+  gap: 16px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--ops-hair);
+}
+.ops-pool-name {
+  display: block;
+  font-family: var(--h4-font-display);
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.05em;
+  color: var(--h4-ink);
+}
+.ops-pool-margin {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--h4-font-mono);
+  font-size: 10px;
+  color: var(--tone, var(--h4-muted));
+}
+.ops-pool-amount {
+  text-align: right;
+  font-family: var(--h4-font-mono);
+  font-weight: 700;
+  font-size: clamp(19px, 1.7vw, 27px);
+  white-space: nowrap;
+  color: var(--tone, var(--h4-ink));
+}
+.ops-pool-unit {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--h4-muted);
+}
+
+.ops-meter {
+  position: relative;
+  height: 12px;
   background: var(--h4-paper-sunken);
-  border: 1px solid var(--h4-line);
-  border-radius: var(--h4-r-pill);
-  padding: 2px;
+  border: 1px solid var(--ops-rule);
 }
-.ops-switch-opt {
+.ops-meter-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--tone, var(--h4-tel));
+}
+/* The floor tick. Fixed per rung, so a draining pool moves and it doesn't. */
+.ops-meter-floor {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  background: var(--h4-ink);
+}
+/* Balance past the top rung: the bar is pegged, and says so rather than
+   pretending the scale still means something. */
+.ops-meter-over {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 5px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--h4-ink) 0 1px,
+    transparent 1px 3px
+  );
+}
+.ops-meter-scale {
+  position: relative;
+  height: 14px;
+  margin-top: 3px;
+  font-family: var(--h4-font-mono);
+  font-size: 9px;
+  color: var(--h4-muted);
+}
+.ops-meter-scale .at-zero  { position: absolute; left: 0; }
+.ops-meter-scale .at-floor { position: absolute; white-space: nowrap; }
+.ops-meter-scale .at-scale { position: absolute; right: 0; }
+
+.ops-solvency-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  font-family: var(--h4-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--h4-muted);
+}
+.ops-solvency-divider i {
+  flex: 1;
+  height: 1px;
+  background: var(--ops-hair);
+}
+.ops-pool--unfloored {
+  align-items: baseline;
+  padding: 4px 0;
+  border-bottom: 0;
+}
+.ops-pool--unfloored .ops-pool-name {
+  font-size: 12.5px;
+  color: var(--h4-ink-2);
+}
+.ops-pool-note {
+  font-family: var(--h4-font-mono);
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--h4-muted);
+}
+.ops-pool-amount--quiet {
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--h4-muted);
+}
+
+/* ---- flow funnel ----------------------------------------------- */
+.ops-funnel {
+  display: flex;
+  align-items: center;
+  margin-top: 10px;
+  padding: 0 8px;
+}
+.ops-funnel-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 96px;
+}
+.ops-funnel-label {
+  font-family: var(--h4-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--h4-muted);
+}
+.ops-funnel-value {
+  font-family: var(--h4-font-mono);
+  font-weight: 700;
+  font-size: clamp(28px, 2.6vw, 42px);
+  line-height: 1.12;
+  /* Sage would read as "9 good things happened". A count is not a verdict —
+     the verdict is upstairs — so the numerals stay ink and only an absent
+     count changes colour. */
+  color: var(--h4-ink);
+}
+.ops-funnel-value[data-tone="awaiting"] { color: var(--h4-tel); }
+.ops-funnel-gap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+  padding: 0 12px;
+}
+.ops-funnel-arrow {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  color: var(--h4-muted);
+  font-size: 11px;
+}
+.ops-funnel-arrow i {
+  flex: 1;
+  height: 1px;
+  background: var(--ops-rule);
+}
+.ops-funnel-gap-label {
+  padding: 2px 8px;
+  border: 1px solid var(--ops-rule);
+  font-family: var(--h4-font-mono);
+  font-size: 10px;
+  white-space: nowrap;
+  color: var(--tone, var(--h4-muted));
+}
+
+/* ---- payout evidence ------------------------------------------
+   Welded to the funnel above it: same panel, no gap, an explicit
+   "corroborates" line. When the two disagree the board shows both
+   numbers rather than averaging them into one reassuring figure. */
+.ops-evidence {
+  margin-top: auto;
+  border: 1px solid var(--ops-rule);
+}
+.ops-evidence[data-emphasis="on"] { border-color: var(--h4-act); }
+.ops-evidence-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 14px;
+  border-bottom: 1px dashed var(--ops-rule);
+}
+.ops-evidence-head h3 {
+  margin: 0;
+  font-family: var(--h4-font-display);
+  font-weight: 600;
+  font-size: 12.5px;
+  letter-spacing: 0.1em;
+  color: var(--h4-ink);
+}
+.ops-evidence-head span {
+  font-family: var(--h4-font-mono);
+  font-size: 10px;
+  color: var(--h4-muted);
+}
+.ops-evidence-body {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 10px 14px;
+}
+.ops-evidence-status {
+  min-width: 210px;
+  font-family: var(--h4-font-display);
+  font-weight: 600;
+  font-size: clamp(22px, 2vw, 32px);
+  letter-spacing: 0.02em;
+  color: var(--tone, var(--h4-ink));
+}
+.ops-evidence-lines {
+  font-family: var(--h4-font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--h4-ink-2);
+}
+.ops-evidence-delta {
+  margin-left: auto;
+  max-width: 280px;
+  text-align: right;
+  font-family: var(--h4-font-mono);
+  font-size: 12px;
+  color: var(--tone, var(--h4-muted));
+}
+.ops-evidence-key {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 7px 14px;
+  border-top: 1px dashed var(--ops-rule);
+}
+.ops-evidence-key span {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 15px;
-  border: 0;
-  background: none;
-  border-radius: var(--h4-r-pill);
+  font-family: var(--h4-font-mono);
+  font-size: 10px;
   color: var(--h4-muted);
-  font-size: 12.5px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: color var(--h4-dur) var(--h4-ease), background var(--h4-dur) var(--h4-ease);
 }
-.ops-switch-opt.is-on {
-  background: var(--h4-paper);
-  color: var(--h4-ink);
-  font-weight: 500;
-  box-shadow: var(--h4-sh-sm);
-}
-.ops-switch-opt:not(.is-on):hover {
-  color: var(--h4-ink);
-}
-.ops-switch .ops-dot {
-  width: 7px;
-  height: 7px;
-}
-
-/* ---- Ops top-strip KPI chips (reuse the .hm-kpi pill shell, tone the dot) ---- */
-.hm-kpi--ops { --tone: var(--h4-tel); }
-.hm-kpi--ops .dot { background: var(--tone); }
-.ops-kpi--ok { --tone: var(--h4-ok); }
-.ops-kpi--degraded { --tone: var(--h4-warn); }
-.ops-kpi--red { --tone: var(--h4-act); }
-.ops-kpi--awaiting { --tone: var(--h4-tel); }
-
-/* ---- status dot (shared) ---- */
-.ops-dot {
+.ops-evidence-key i {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
-  background: var(--tone, var(--h4-tel));
   flex: none;
+  background: var(--tone, var(--h4-tel));
 }
-.ops-dot--ok, .ops-dot--pass { --tone: var(--h4-ok); }
-.ops-dot--degraded { --tone: var(--h4-warn); }
-.ops-dot--red, .ops-dot--fail { --tone: var(--h4-act); }
-.ops-dot--awaiting, .ops-dot--muted { --tone: var(--h4-tel); }
 
-/* ---- board shell ---- */
-.ops-board {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 14px 18px 22px;
+/* ---- pillars ---------------------------------------------------- */
+.ops-pillars {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  padding: 10px 16px;
+  border: 1px solid var(--ops-rule);
 }
-.ops-board--empty {
+.ops-pillar {
+  padding: 0 16px;
+  min-width: 0;
+}
+.ops-pillar + .ops-pillar { border-left: 1px dashed var(--ops-hair); }
+.ops-pillar-head {
   display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ops-pillar-name {
+  font-family: var(--h4-font-display);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: var(--h4-ink);
+}
+.ops-pillar-rollup {
+  margin-left: auto;
+  text-align: right;
+  font-family: var(--h4-font-mono);
+  font-size: 9.5px;
+  color: var(--h4-muted);
+}
+.ops-pillar-probes {
+  display: grid;
+  gap: 7px;
+  margin-top: 9px;
+}
+.ops-probe {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+.ops-probe .ops-dot { position: relative; top: -1px; }
+.ops-probe-id {
+  font-family: var(--h4-font-mono);
+  font-size: 11.5px;
+  white-space: nowrap;
+  color: var(--h4-ink);
+}
+.ops-probe-detail {
+  font-family: var(--h4-font-mono);
+  font-size: 10.5px;
+  line-height: 1.4;
+  min-width: 0;
+  color: var(--h4-ink-2);
+}
+.ops-probe-detail[data-tone="red"]      { color: var(--h4-act); }
+.ops-probe-detail[data-tone="degraded"] { color: var(--h4-warn); }
+.ops-probe-detail[data-tone="awaiting"] { color: var(--h4-tel); }
+.ops-pillar-trend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 9px 0 0;
+  font-family: var(--h4-font-mono);
+  font-size: 9.5px;
+  color: var(--h4-muted);
+}
+.ops-pillar-trend[data-tone="awaiting"] { color: var(--h4-tel); }
+.ops-pillar-trend .ops-linespark { flex: none; }
+
+/* ---- footer ------------------------------------------------------
+   LLM spend lives here — one line. It is the least urgent number on
+   the board and used to occupy the tallest column on it.           */
+.ops-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  font-family: var(--h4-font-mono);
+  font-size: 11px;
+  color: var(--h4-muted);
+}
+.ops-foot span { white-space: nowrap; }
+.ops-foot span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- empty / loading -------------------------------------------- */
+.ops-board--empty {
   align-items: center;
   justify-content: center;
 }
 .ops-empty {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  align-items: center;
-  text-align: center;
-  padding: 64px 20px;
-}
-.ops-empty-title { font-size: 15px; color: var(--h4-ink); font-weight: 500; }
-.ops-empty-detail { font-size: 12.5px; color: var(--h4-faint); }
-
-/* ---- sub-header ---- */
-.ops-subhead {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 2px 2px 12px;
-  border-bottom: 1px solid var(--h4-line-2);
-}
-.ops-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-weight: 500;
-  font-size: 13px;
-  color: var(--h4-ink);
-  --tone: var(--h4-tel);
-}
-.ops-status--pass { --tone: var(--h4-ok); }
-.ops-status--degraded { --tone: var(--h4-warn); }
-.ops-status--fail { --tone: var(--h4-act); }
-.ops-status--muted { --tone: var(--h4-tel); }
-.ops-status .ops-dot { background: var(--tone); }
-.ops-meta { font-size: 12px; color: var(--h4-muted); }
-.ops-subhead-right { margin-left: auto; }
-.ops-net {
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 2px 7px;
-  border-radius: var(--h4-r-pill);
-  border: 1px solid var(--h4-line);
-}
-.ops-net--testnet { color: var(--h4-warn-text); border-color: var(--h4-warn-line); }
-.ops-net--mainnet { color: var(--h4-ok-text); border-color: var(--h4-ok-line); }
-
-/* ---- soft incident banner ---- */
-.ops-banner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 12px;
-  padding: 9px 12px;
-  border-radius: var(--h4-r-btn);
-  background: var(--h4-paper);
-  border: 1px solid var(--h4-line);
-  border-left: 3px solid var(--tone, var(--h4-warn));
-}
-.ops-banner--degraded { --tone: var(--h4-warn); }
-.ops-banner--red { --tone: var(--h4-act); }
-.ops-banner .ops-dot { background: var(--tone); }
-.ops-banner-text { flex: 1; font-size: 12.5px; color: var(--h4-ink-2); min-width: 0; }
-.ops-banner-sub { color: var(--h4-faint); }
-.ops-banner-x {
-  background: none;
-  border: 0;
-  color: var(--h4-muted);
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0 2px;
-}
-.ops-banner-x:hover { color: var(--h4-ink); }
-
-/* ---- zone grid ---- */
-.ops-grid {
   display: grid;
-  gap: 13px;
-  grid-template-columns: 1fr;
-  margin-top: 13px;
+  gap: 6px;
+  justify-items: center;
+  text-align: center;
 }
-@media (min-width: 1040px) {
-  .ops-grid {
-    grid-template-columns: 1.55fr 1fr;
-    grid-template-areas:
-      "probes solvency"
-      "flow trends"
-      "incidents deps";
-  }
-  .z-probes { grid-area: probes; }
-  .z-solvency { grid-area: solvency; }
-  .z-flow { grid-area: flow; }
-  .z-trends { grid-area: trends; }
-  .z-incidents { grid-area: incidents; }
-  .z-deps { grid-area: deps; }
-}
-
-/* ---- zone chrome ---- */
-.ops-zone {
-  background: var(--h4-paper);
-  border: 1px solid var(--h4-line);
-  border-radius: var(--h4-r-card);
-  padding: 13px 15px;
-}
-.ops-zone-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 11px;
-  font-size: 13px;
-  font-weight: 500;
+.ops-empty-title {
+  font-family: var(--h4-font-display);
+  font-size: 20px;
   color: var(--h4-ink);
 }
-.ops-zone-icon { color: var(--h4-muted); display: inline-flex; }
-.ops-zone-title { font-weight: 500; }
-.ops-zone-meta { margin-left: auto; font-size: 11.5px; color: var(--h4-muted); font-weight: 400; }
-.ops-zone-sub {
-  color: var(--h4-faint);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  font-size: 10.5px;
-}
-.ops-zone-note { margin: 9px 0 0; font-size: 11px; color: var(--h4-faint); }
-
-/* ---- awaiting-data ---- */
-.ops-await { color: var(--h4-faint); font-size: 12px; font-style: italic; margin: 0; }
-.ops-await--inline { margin-top: 6px; }
-.ops-await--tag {
-  font-style: normal;
-  font-size: 11px;
-  color: var(--h4-muted);
-  background: var(--h4-tel-chip);
-  padding: 2px 8px;
-  border-radius: var(--h4-r-pill);
-}
-.ops-await--calm { color: var(--h4-muted); font-style: normal; }
-
-/* ---- probe grid ---- */
-.ops-pillar-label {
-  font-size: 10.5px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--h4-faint);
-  margin: 11px 0 1px;
-}
-.ops-pillar:first-child .ops-pillar-label { margin-top: 0; }
-.ops-probe {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 0;
-  border-top: 1px solid var(--h4-line-2);
-  --tone: var(--h4-tel);
-}
-.ops-probe--ok { --tone: var(--h4-ok); }
-.ops-probe--degraded { --tone: var(--h4-warn); }
-.ops-probe--red { --tone: var(--h4-act); }
-.ops-probe--awaiting { --tone: var(--h4-tel); }
-.ops-probe .ops-dot { background: var(--tone); }
-.ops-probe-name { min-width: 118px; color: var(--h4-ink); font-size: 12.5px; }
-.ops-probe-detail {
-  flex: 1;
-  color: var(--h4-muted);
+.ops-empty-detail {
+  font-family: var(--h4-font-mono);
   font-size: 12px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--h4-tel);
 }
-.ops-probe--awaiting .ops-probe-detail { color: var(--h4-faint); font-style: italic; }
-/* Awaiting probes have no real history — grey the strip so amber cells don't
-   imply a degradation that never happened. */
-.ops-probe--awaiting .ops-spark-cell { background: var(--h4-tel); opacity: 0.4; }
 
-/* ---- sparklines ---- */
-.ops-spark {
-  display: inline-flex;
-  gap: 2px;
-  align-items: flex-end;
-  height: 12px;
-  margin-left: auto;
-}
-.ops-spark-cell { width: 4px; height: 10px; border-radius: 1px; background: var(--h4-tel); }
-.ops-spark-cell--ok { background: var(--h4-ok); }
-.ops-spark-cell--degraded { background: var(--h4-warn); }
-.ops-spark-cell--red { background: var(--h4-act); }
-.ops-spark-cell--empty { background: var(--h4-line); }
-
-.ops-linespark { width: 100%; height: 34px; display: block; }
-.ops-linespark polyline {
-  stroke: var(--h4-tel);
-  stroke-width: 1.5;
-  vector-effect: non-scaling-stroke;
-}
-.ops-linespark--ok polyline { stroke: var(--h4-ok); }
+/* ---- sparkline (shared with OpsSparks) --------------------------- */
+.ops-linespark { display: block; overflow: visible; }
+.ops-linespark polyline { stroke-width: 1.5; }
+.ops-linespark--ok  polyline { stroke: var(--h4-ok); }
+.ops-linespark--tel polyline { stroke: var(--h4-tel); }
 .ops-linespark--act polyline { stroke: var(--h4-act); }
 .ops-linespark--empty {
-  height: 34px;
-  border-bottom: 1px dashed var(--h4-line);
+  display: inline-block;
+  width: 96px;
+  height: 20px;
 }
 
-/* ---- solvency ---- */
-.ops-gauges { display: flex; flex-direction: column; gap: 9px; }
-.ops-gauge { --tone: var(--h4-ok); }
-.ops-gauge--ok { --tone: var(--h4-ok); }
-.ops-gauge--degraded { --tone: var(--h4-warn); }
-.ops-gauge--red { --tone: var(--h4-act); }
-.ops-gauge--awaiting, .ops-gauge--tel { --tone: var(--h4-tel); }
-.ops-gauge-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
-  font-size: 12.5px;
-}
-.ops-gauge-name { color: var(--h4-ink); }
-.ops-gauge-val { color: var(--h4-muted); font-variant-numeric: tabular-nums; text-align: right; }
-.ops-gauge-floor { color: var(--h4-faint); }
-.ops-gauge-note {
-  display: block;
-  margin-top: 3px;
-  color: var(--h4-faint);
-  font-size: 11.5px;
-}
-.ops-meter {
-  height: 6px;
-  margin-top: 5px;
-  background: var(--h4-paper-sunken);
-  border-radius: 3px;
-  overflow: hidden;
-}
-.ops-meter i { display: block; height: 100%; background: var(--tone); border-radius: 3px; }
-.ops-runway {
-  margin: 11px 0 0;
-  font-size: 12px;
-  color: var(--h4-muted);
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-}
-.ops-runway-label {
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--h4-faint);
-}
-
-/* ---- money-path funnel ---- */
-.ops-funnel { display: flex; gap: 6px; }
-.ops-funnel.is-awaiting { opacity: 0.55; }
-.ops-fstep {
-  flex: 1;
-  background: var(--h4-paper-sunken);
-  border: 1px solid var(--h4-line-2);
-  border-radius: var(--h4-r-sm);
-  padding: 9px 6px;
-  text-align: center;
-  --tone: var(--h4-tel);
-}
-.ops-fstep--ok { --tone: var(--h4-ok); }
-.ops-fstep--degraded { --tone: var(--h4-warn); }
-.ops-fstep--red { --tone: var(--h4-act); }
-.ops-fstep--neutral { --tone: var(--h4-tel); }
-.ops-fstep-n {
-  font-size: 19px;
-  font-weight: 500;
-  color: var(--tone);
-  font-variant-numeric: tabular-nums;
-  line-height: 1.1;
-}
-.ops-fstep-l {
-  font-size: 9.5px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--h4-faint);
-  margin-top: 3px;
-}
-.ops-flow-gauges {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-  margin-top: 7px;
-}
-.ops-flow-gauges.is-awaiting { opacity: 0.55; }
-.ops-flow-gauge {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 5px 7px;
-  border-radius: var(--h4-r-sm);
-  background: var(--h4-paper-sunken);
-  color: var(--h4-faint);
-  font-size: 10.5px;
-}
-.ops-flow-gauge strong {
-  color: var(--h4-tel);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-.ops-flow-gauge--warn strong { color: var(--h4-warn); }
-
-/* ---- trends ---- */
-.ops-trends { display: flex; flex-direction: column; gap: 11px; }
-.ops-trend-head {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  color: var(--h4-muted);
-  margin-bottom: 4px;
-}
-.ops-trend-val { color: var(--h4-ink); font-variant-numeric: tabular-nums; }
-
-/* Leading-indicator anomaly flag — a chip above the affected trend line. */
-.ops-anomaly {
-  display: inline-flex;
-  align-items: center;
-  align-self: flex-start;
-  gap: 4px;
-  margin: 0 0 4px;
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
-  background: color-mix(in srgb, currentColor 12%, transparent);
-}
-.ops-anomaly--warn { color: var(--h4-warn); }
-.ops-anomaly--info { color: var(--h4-tel); }
-.ops-trend .ops-spark { display: flex; height: 15px; margin-left: 0; }
-.ops-trend .ops-spark-cell { height: 13px; }
-
-/* ---- incidents ---- */
-.ops-incidents { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.ops-incident {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 6px 0;
-  border-top: 1px solid var(--h4-line-2);
-  font-size: 12px;
-  --tone: var(--h4-warn);
-}
-.ops-incident:first-child { border-top: 0; }
-.ops-incident--degraded { --tone: var(--h4-warn); }
-.ops-incident--red { --tone: var(--h4-act); }
-.ops-incident .ops-dot { background: var(--tone); }
-.ops-incident-probe { color: var(--h4-ink); min-width: 96px; }
-.ops-incident-note {
-  flex: 1;
-  color: var(--h4-muted);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ops-incident-dur { color: var(--h4-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
-
-/* ---- dependencies & deploy ---- */
-.ops-deps { display: flex; flex-wrap: wrap; gap: 8px 14px; }
-.ops-dep {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--h4-ink-2);
-  --tone: var(--h4-tel);
-}
-.ops-dep--ok { --tone: var(--h4-ok); }
-.ops-dep--degraded { --tone: var(--h4-warn); }
-.ops-dep--red { --tone: var(--h4-act); }
-.ops-dep--awaiting { --tone: var(--h4-tel); }
-.ops-dep .ops-dot { background: var(--tone); }
-.ops-deploy {
-  margin-top: 11px;
-  padding-top: 10px;
-  border-top: 1px solid var(--h4-line-2);
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.ops-deploy-row { display: flex; align-items: center; gap: 9px; font-size: 12px; --tone: var(--h4-ok); }
-.ops-deploy-row--ok { --tone: var(--h4-ok); }
-.ops-deploy-row--awaiting { --tone: var(--h4-tel); }
-.ops-deploy-row--degraded { --tone: var(--h4-warn); }
-.ops-deploy-row--red { --tone: var(--h4-act); }
-.ops-deploy-row .ops-dot { background: var(--tone); }
-.ops-deploy-name { color: var(--h4-ink); min-width: 118px; }
-.ops-deploy-val { color: var(--h4-muted); }
-
-/* ---- footer ---- */
-.ops-foot { margin: 14px 0 0; text-align: center; font-size: 11px; color: var(--h4-faint); }
-
-/* ---- co-pilot Digest ops line (rail is mounted in both surfaces) ---- */
-.hm-rail-ops {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  margin: 9px 0 2px;
-  border-radius: var(--h4-r-btn);
-  background: var(--h4-paper-sunken);
-  border: 1px solid var(--h4-line);
-  border-left: 3px solid var(--tone, var(--h4-tel));
-  font-size: 12px;
-  min-width: 0;
-}
-.hm-rail-ops--pass { --tone: var(--h4-ok); }
-.hm-rail-ops--degraded { --tone: var(--h4-warn); }
-.hm-rail-ops--fail { --tone: var(--h4-act); }
-.hm-rail-ops--muted { --tone: var(--h4-tel); }
-.hm-rail-ops-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--tone); flex: none; }
-.hm-rail-ops-label { color: var(--h4-ink); font-weight: 500; white-space: nowrap; }
-.hm-rail-ops-detail {
-  color: var(--h4-muted);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ---- co-pilot Digest "Ops suggestions" box (Hermes suggests; you approve) ---- */
-.hm-rail-ops-sugg {
-  margin: 9px 0 2px;
-  background: var(--h4-paper);
-  border: 1px solid var(--h4-act-line);
-  border-radius: var(--h4-r-card);
-  padding: 9px 11px;
-}
-.hm-rail-ops-sugg-head { margin-bottom: 7px; }
-.hm-rail-ops-sugg-row {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 6px 0;
-  border-top: 1px solid var(--h4-line-2);
-  --tone: var(--h4-tel);
-}
-.hm-rail-ops-sugg-row:first-of-type { border-top: 0; }
-.hm-rail-ops-sugg-row--warn { --tone: var(--h4-warn); }
-.hm-rail-ops-sugg-row--act { --tone: var(--h4-act); }
-.hm-rail-ops-sugg-row--tel { --tone: var(--h4-tel); }
-.hm-rail-ops-sugg-row .hm-rail-ops-dot { background: var(--tone); }
-.hm-rail-ops-sugg-text { flex: 1; font-size: 12px; color: var(--h4-ink-2); line-height: 1.35; min-width: 0; }
-.hm-rail-ops-sugg-tag {
-  font-size: 10.5px;
-  color: var(--h4-muted);
-  background: var(--h4-paper-sunken);
-  border: 1px solid var(--h4-line);
-  border-radius: var(--h4-r-pill);
-  padding: 2px 8px;
-  white-space: nowrap;
+/* ---- narrow desktop / split screen ------------------------------- */
+@media (max-width: 1240px) {
+  .ops-verdict-row { flex-direction: column; }
+  .ops-trust { width: auto; }
+  .ops-money { flex-direction: column; }
+  .ops-solvency {
+    width: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--ops-rule);
+  }
+  .ops-pillars { grid-template-columns: repeat(2, 1fr); }
+  .ops-pillar:nth-child(3) { border-left: 0; }
+  .ops-foot { flex-wrap: wrap; }
 }

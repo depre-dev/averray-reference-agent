@@ -33,6 +33,26 @@ export function isAwaitingProbe(probe: { status: ProbeStatus; detail: string }):
   return probe.status !== "red" && AWAITING_RE.test(probe.detail);
 }
 
+// A degradation the operator has already triaged and declared expected. On
+// mainnet `capabilities` reads "4/7 up · 2 warnings acknowledged", and has done
+// for weeks.
+const ACKNOWLEDGED_RE = /\backnowledged\b/i;
+
+/**
+ * Has this degradation already been looked at and accepted?
+ *
+ * A permanently-lit alarm is one the operator learns to scroll past, and that
+ * makes the NEXT alarm invisible — so a false red costs as much as a false
+ * green. An acknowledged probe therefore does not take the headline verdict.
+ *
+ * It is not hidden: it keeps its amber dot in the pillar strip and is counted
+ * by name in the verdict's subline. Only the shouting stops. A `red` probe is
+ * never acknowledgeable — page-worthy always leads, whatever its detail says.
+ */
+export function isAcknowledgedProbe(probe: { status: ProbeStatus; detail: string }): boolean {
+  return probe.status === "degraded" && ACKNOWLEDGED_RE.test(probe.detail);
+}
+
 /** Resolve a probe to its ops tone (awaiting overrides a bare degraded). */
 export function probeOpsTone(probe: { status: ProbeStatus; detail: string }): OpsTone {
   return isAwaitingProbe(probe) ? "awaiting" : probe.status;

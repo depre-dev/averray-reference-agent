@@ -1,38 +1,27 @@
-// The ops board — the whole product surface (docs/OPS_ONLY_PIVOT.md).
+// The ops board shell (docs/OPS_ONLY_PIVOT.md) — data in, one screen out.
 //
-// This replaced a 1,016-line shell that wired a kanban grid, a decision inbox,
-// card renderers, a detail drawer, card keyboard-traversal and a conversational
-// co-pilot rail. All of it is retired:
+// This used to compose a top strip, a hero banner, the ops zone grid and a tall
+// LLM-usage rail as four independent bands, each unaware of the others. The
+// redesign folds all four into <OpsBoard>, because the hierarchy only works if
+// one component decides it: the verdict has to know the stream is down in order
+// to relabel itself, and the LLM spend has to be demoted relative to the money
+// it was competing with.
 //
-//   · the DELIVERY LANE, because a kanban board models work moving through
-//     stages while ops is state you watch and act on — forcing one into the
-//     other produced a decision inbox nobody could decide from;
-//   · the CO-PILOT RAIL, because all conversation now happens in Buzz. The
-//     board does not talk. It shows what is true and gets out of the way.
-//
-// The payoff is the layout: with no lanes column and no rail competing for the
-// canvas, the ops board gets the whole of it.
-//
-// Hermes is not absent — it is simply not HERE. It reads the same health
-// snapshot this renders (`/monitor/product-health`) and speaks in Buzz.
-
-import { useMemo } from "react";
+// So this file is now just the seam: resolve health (polled, or injected by a
+// test), decide whether the transport is trustworthy, and hand both to the
+// board. Phone width routes to the separate mobile surface, which is designed
+// independently and is deliberately untouched here.
 
 import type { MonitorBoard } from "../lib/monitor/board-cache.js";
 import type { ProductHealth } from "../lib/monitor/product-health.js";
 import type { StreamStatus } from "../lib/monitor/live-stream.js";
 import { useProductHealth } from "../hooks/useProductHealth.js";
 import { useIsMobileViewport } from "../lib/monitor/use-mobile-viewport.js";
-import { BoardNowBanner } from "./BoardNowBanner.js";
 import { MobileBoard } from "./mobile/MobileBoard.js";
 import { OpsBoard } from "./ops/OpsBoard.js";
-import { opsBannerData, pillarStatuses } from "./ops/ops-frame.js";
-import { TopStrip } from "./TopStrip.js";
-import { TopStripDegraded } from "./TopStripDegraded.js";
-import { UsagePanel } from "./UsagePanel.js";
 
 export interface BoardViewProps {
-  /** The monitor snapshot. Only its clock and usage are read now. */
+  /** The monitor snapshot. Only its clock and LLM usage are read now. */
   board: MonitorBoard | undefined;
   status: StreamStatus;
   onRefresh?: () => void;
@@ -46,77 +35,51 @@ export function BoardView({ board, status, onRefresh, health }: BoardViewProps) 
   const isMobileViewport = useIsMobileViewport();
 
   // A stream we cannot trust must not render as a calm board — the fake-green
-  // rule applied to the transport itself.
+  // rule applied to the transport itself. <OpsBoard> takes this as an input
+  // rather than inferring it, so the override happens where the verdict is
+  // decided instead of in a banner bolted above it.
   const degraded = status === "reconnecting" || status === "closed";
-
-  const liveLabel = useMemo(() => {
-    if (!board?.at) return "";
-    const d = new Date(board.at);
-    return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(11, 19);
-  }, [board?.at]);
 
   if (isMobileViewport) return <MobileBoard health={productHealth} />;
 
+  // No health payload yet. A dead stream STILL has to say so here — "loading"
+  // over a disconnected transport is the calmest possible lie, and the earlier
+  // cut of this branch shipped exactly that.
+  if (!productHealth) {
+    return (
+      <div className="hm-shell">
+        <div className="ops-board ops-board--empty" data-testid="ops-board-loading">
+          {degraded ? (
+            <div className="ops-stale" role="alert" data-testid="ops-stale-banner">
+              <strong>STREAM DISCONNECTED</strong>
+              <span>no health data received — nothing on this screen is confirmed</span>
+              <span className="ops-stale-right">reconnecting · {status}</span>
+            </div>
+          ) : null}
+          <div className="ops-empty">
+            <span className="ops-empty-title">
+              {degraded ? "Health unknown" : "Loading health…"}
+            </span>
+            <span className="ops-empty-detail">
+              {degraded
+                ? "The live stream is down. Values will return when it reconnects."
+                : "Polling the live product heartbeat."}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="hm-shell">
-      {degraded ? (
-        <TopStripDegraded
-          lastKnownAt={liveLabel || undefined}
-          reason={
-            liveLabel
-              ? `Live SSE ${status} · last good read ${liveLabel} · health unknown until reconnect · auto-reconnecting`
-              : `Live SSE ${status} · no good read yet · health unknown until reconnect · auto-reconnecting`
-          }
-          onReconnect={onRefresh}
-        />
-      ) : (
-        <TopStrip
-          liveAt={status === "open" ? liveLabel || undefined : undefined}
-          onRefresh={onRefresh}
-          opsPillars={productHealth ? pillarStatuses(productHealth.probes) : undefined}
-        />
-      )}
-
-      {/* The hero banner is the ops verdict — EXCEPT when the stream itself is
-          untrusted. A verdict computed from data we cannot trust is not a
-          verdict, so a degraded stream OVERRIDES it rather than rendering calm
-          over stale numbers. (Regression caught by BoardView.ops.test.tsx.) */}
-      <BoardNowBanner
-        banner={
-          degraded
-            ? {
-                tone: "degraded",
-                eyebrow: "STREAM",
-                headline: "Live stream disconnected — board data is UNTRUSTED",
-                sub: "Anything below is the last snapshot received, not the product now.",
-                primaryActionId: undefined,
-              }
-            : productHealth
-              ? opsBannerData(productHealth, Date.now())
-              : {
-                  tone: "calm",
-                  eyebrow: "OPS NOW",
-                  headline: "Loading health…",
-                  sub: "Polling the live product heartbeat.",
-                  primaryActionId: undefined,
-                }
-        }
+      <OpsBoard
+        health={productHealth}
+        board={board}
+        streamStatus={status}
+        streamDegraded={degraded}
+        onRefresh={onRefresh}
       />
-
-      <div className="hm-main hm-main--ops">
-        {productHealth ? (
-          <OpsBoard health={productHealth} />
-        ) : (
-          <div className="ops-board ops-board--empty" data-testid="ops-board-loading">
-            <div className="ops-empty">
-              <span className="ops-empty-title">Loading health…</span>
-              <span className="ops-empty-detail">Polling the live product heartbeat.</span>
-            </div>
-          </div>
-        )}
-        <UsagePanel usage={board?.llmUsage} />
-      </div>
-
     </div>
   );
 }

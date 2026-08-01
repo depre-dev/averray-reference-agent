@@ -194,3 +194,167 @@ export const OPS_FIXTURE_RED: ProductHealth = {
     runwayNote: "reward bank below floor — top up before next payout",
   },
 };
+
+// ── the two spec-sheet states, on real mainnet values ────────────────────────
+//
+// These are the board's reference renders (FIG. 1 / FIG. 2 of the design):
+// NOMINAL is the all-day state, taken from a real 2026-07-31 mainnet reading.
+// STRESS is the same board with a breached floor, a payout shortfall and a dead
+// stream at once — the hierarchy has to hold under load, not only when green.
+
+const MAINNET_POOLS: SolvencyPool[] = [
+  { key: "signer_gas", label: "Signer gas", amount: 2.6931, unit: "DOT", floor: 1, status: "ok" },
+  { key: "reward_bank", label: "Reward bank", amount: 15.89, unit: "USDC", floor: 2, status: "ok" },
+  { key: "aac", label: "Agent core (AAC)", amount: 26.15, unit: "USDC", floor: 1, status: "ok" },
+  // Deliberately unfunded, and it must never render as a full meter. The note is
+  // the operator's own declaration of why the zero is correct.
+  {
+    key: "reserve",
+    label: "Treasury reserve",
+    amount: 0,
+    unit: "USDC",
+    status: "ok",
+    note: "no floor — intentionally unfunded: payouts fund from the signer reward bank; the treasury multisig holds no USDC float",
+  },
+  {
+    key: "escrow",
+    label: "Escrow (in-flight)",
+    amount: 0,
+    unit: "USDC",
+    status: "ok",
+    informational: true,
+    note: "informational — funds currently between claim and settlement",
+  },
+  {
+    key: "revenue",
+    label: "Protocol revenue",
+    amount: 0.01,
+    unit: "USDC",
+    status: "ok",
+    note: "5% poster-side fee · held under the 2-of-3 treasury multisig",
+  },
+];
+
+const MAINNET_PROBES: ProductHealthProbe[] = [
+  { name: "product_api", status: "ok", detail: "api.averray.com/health → 200 · chain 420420419", sparkline: spark("ok") },
+  { name: "api_latency", status: "ok", detail: "/health 51 ms", sparkline: spark("ok") },
+  { name: "disk_headroom", status: "ok", detail: "142.3 GiB free of 193 GiB (26% used)", sparkline: spark("ok") },
+  { name: "chain_height", status: "ok", detail: "block #18,894,637 · chain 420420419", sparkline: spark("ok") },
+  { name: "capabilities", status: "degraded", detail: "4/7 capabilities up · 2 warnings acknowledged", sparkline: spark("degraded") },
+  { name: "signer_liquidity", status: "ok", detail: "gas 2.6931 DOT · reward bank 15.89 USDC", sparkline: spark("ok") },
+  { name: "treasury_liquidity", status: "ok", detail: "reward 15.89 · reserve 0.00 · AAC 26.15 · escrow 0.00 · revenue 0.01", sparkline: spark("ok") },
+  { name: "money_path", status: "ok", detail: "settled24h 9 (0 stuck · 0 failed)", sparkline: spark("ok") },
+];
+
+export const OPS_FIXTURE_NOMINAL: ProductHealth = {
+  enabled: true,
+  at: FIXTURE_NOW - 2_000,
+  status: "degraded",
+  checks: 1_284,
+  chainId: 420420419,
+  network: "mainnet",
+  probes: MAINNET_PROBES,
+  self: {
+    status: "current",
+    detail: "865942ef · current",
+    runningSha: "865942ef2d1c4b7a9f30",
+    behindBy: 0,
+    oldestUnshippedAt: null,
+  },
+  remediation: {
+    state: "armed",
+    enabled: true,
+    activeEndpoint: "rpc-1",
+    onBackup: false,
+    detail: "rpc-1 primary · failover armed",
+  },
+  solvency: { pools: MAINNET_POOLS },
+  flow: {
+    claimed24h: 9,
+    submitted24h: 9,
+    claimedNotSubmitted: 0,
+    submittedNotSettled: 0,
+    settled24h: 9,
+    stuck: 0,
+    failed24h: 0,
+    asOf: FIXTURE_NOW - 90_000,
+    payout: {
+      status: "confirmed",
+      detail: "14 confirmed · 1.70 USDC over 43200 blocks",
+      confirmedCount: 14,
+      confirmedUsdc: 1.7,
+      settledCount: 14,
+      windowBlocks: 43200,
+      window: { status: "ok", detail: "43200 blocks ≈ 25.3h at 2.112s/block", blockSeconds: 2.112, spanHours: 25.3 },
+    },
+  },
+  history: {
+    uptimePct24h: 100,
+    uptimeSeries: Array.from({ length: 48 }, () => "ok" as ProbeStatus),
+    latencySeriesMs: ramp(48, (i) => 48 + Math.round(9 * Math.abs(Math.sin(i / 2.7)))),
+    balanceSeries: ramp(48, () => 15.89),
+    incidents: [],
+  },
+};
+
+/**
+ * FIG. 2 — floor breach + payout shortfall + dead stream, all at once.
+ *
+ * The funnel deliberately still reads a clean 9 → 9 → 9 while the chain can
+ * only account for 12 of the 14 settled payouts. The board's job here is to put
+ * those two numbers next to each other and name the gap.
+ */
+export const OPS_FIXTURE_STRESS: ProductHealth = {
+  ...OPS_FIXTURE_NOMINAL,
+  at: FIXTURE_NOW - 4 * MIN - 12_000,
+  status: "red",
+  probes: MAINNET_PROBES.map((p) =>
+    p.name === "signer_liquidity"
+      ? { ...p, status: "red" as ProbeStatus, detail: "gas 2.6931 DOT · reward bank 1.42 USDC — floor 2.00 breached" }
+      : p,
+  ),
+  remediation: {
+    state: "failover",
+    enabled: true,
+    activeEndpoint: "rpc-2",
+    onBackup: true,
+    detail: "rpc-2 active — failed over from rpc-1",
+  },
+  solvency: {
+    pools: MAINNET_POOLS.map((p) =>
+      p.key === "reward_bank" ? { ...p, amount: 1.42, status: "red" as ProbeStatus } : p,
+    ),
+  },
+  flow: {
+    ...OPS_FIXTURE_NOMINAL.flow,
+    payout: {
+      status: "shortfall",
+      detail: "12 confirmed vs 14 settled over 43200 blocks",
+      confirmedCount: 12,
+      confirmedUsdc: 1.44,
+      settledCount: 14,
+      windowBlocks: 43200,
+      window: { status: "ok", detail: "43200 blocks ≈ 25.3h at 2.112s/block", blockSeconds: 2.112, spanHours: 25.3 },
+    },
+  },
+};
+
+/**
+ * The instrument is blind, the money may be perfectly fine. This must NOT look
+ * like OPS_FIXTURE_STRESS — that distinction is the reason the fixture exists.
+ */
+export const OPS_FIXTURE_UNVERIFIED: ProductHealth = {
+  ...OPS_FIXTURE_NOMINAL,
+  flow: {
+    ...OPS_FIXTURE_NOMINAL.flow,
+    payout: {
+      status: "unverified",
+      detail: "chain log read failed — cannot compare against 14 settled",
+      confirmedCount: null,
+      confirmedUsdc: null,
+      settledCount: 14,
+      windowBlocks: null,
+      window: { status: "unknown", detail: "block time not sampled", blockSeconds: null, spanHours: null },
+    },
+  },
+};

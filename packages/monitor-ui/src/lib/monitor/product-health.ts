@@ -72,6 +72,72 @@ export interface MoneyPathSnapshot {
   failed24h?: number | null;
   /** Epoch ms of the settlement snapshot. */
   asOf?: number | null;
+  /** Independent on-chain proof that the settled jobs actually PAID. */
+  payout?: PayoutEvidence;
+}
+
+/**
+ * Evidence that rewards were actually PAID, not merely marked settled.
+ *
+ * The funnel counts above are job-state rows from the product's own database —
+ * "9 rows say settled". That is not proof any money moved. `payout` counts
+ * `ReservationSettled` logs straight off the chain, so the two numbers come
+ * from independent sources and THE DISCREPANCY IS THE SIGNAL. The board renders
+ * them side by side and shows the contradiction rather than averaging it away.
+ *
+ * The three statuses are NOT a severity ramp, and the UI must never draw them
+ * as one:
+ *   confirmed  — proof matches the ledger;
+ *   shortfall  — we can see the chain and it is short. MONEY is broken;
+ *   unverified — we cannot see the chain at all. The INSTRUMENT is broken.
+ * `unverified` is warm grey, never coral: paging on a blind instrument is the
+ * false red that teaches an operator to ignore the real one.
+ */
+export interface PayoutEvidence {
+  status: "confirmed" | "shortfall" | "unverified";
+  detail: string;
+  /** Settlement logs observed on-chain in the window; null = unverified. */
+  confirmedCount: number | null;
+  /** Summed USDC actually transferred; null = unverified. */
+  confirmedUsdc: number | null;
+  /** The product's own settled count, for the comparison. */
+  settledCount: number | null;
+  /** Blocks scanned. The window is approximate — the verdict allows for it. */
+  windowBlocks: number | null;
+  /** Does the block window actually span the period being compared? */
+  window?: WindowFit;
+}
+
+/**
+ * Whether the configured block lookback really covers the period it is compared
+ * to — checked against MEASURED block time, not an assumed one. The assumption
+ * was wrong in production: a lookback sized "24h at 6s/block" on a ~2.11s chain
+ * spanned 8h26m and made a fully-paying system look like it had 12 unaccounted
+ * payouts. A `suspect` window suppresses a shortfall verdict for that reason.
+ */
+export interface WindowFit {
+  status: "ok" | "suspect" | "unknown";
+  detail: string;
+  /** Measured seconds per block; null when the chain could not be sampled. */
+  blockSeconds: number | null;
+  /** Hours the configured lookback actually spans at that rate. */
+  spanHours: number | null;
+}
+
+/**
+ * The monitor's own version — is the board you are reading built from current
+ * code? Degraded-safe by construction: any failure resolves to `unknown`, which
+ * must never render as up to date.
+ */
+export interface SelfFreshness {
+  status: "current" | "behind" | "unknown";
+  detail: string;
+  /** The sha actually running, when it was baked into the image. */
+  runningSha: string | null;
+  /** Commits on main this build does not contain; null when unknown. */
+  behindBy: number | null;
+  /** When the OLDEST unshipped commit landed — how long we have been stale. */
+  oldestUnshippedAt: string | null;
 }
 
 export interface OpsIncident {
@@ -135,6 +201,8 @@ export interface ProductHealth {
   flow?: MoneyPathSnapshot;
   history?: HealthHistory;
   remediation?: RemediationStatus;
+  /** The monitor's own build vs main — "is this board current?". */
+  self?: SelfFreshness;
 }
 
 /** RPC auto-remediation status — drives the Ops "RPC failover" row. */
