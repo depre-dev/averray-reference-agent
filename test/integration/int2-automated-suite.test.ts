@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
+import { appendFileSync } from "node:fs";
 import {
   copyFile,
   mkdir,
@@ -137,9 +138,13 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
   }, TEST_TIMEOUT_MS);
 
   afterAll(async () => {
-    for (const worker of workers) {
-      await worker.stop();
-    }
+    // Every worker gets stopped even when an earlier one refuses to. The
+    // sequential `await` this replaces abandoned the rest of the set on the
+    // first throw, so one stuck worker leaked all the others behind it.
+    // Failures are re-raised below, after the evidence is written.
+    const stops = await Promise.allSettled(
+      [...workers].map((worker) => worker.stop()),
+    );
     await referencePool?.end();
     await harnessPool?.end();
     await Promise.all(
@@ -179,6 +184,13 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
       );
     }
     await rm(root, { recursive: true, force: true });
+    const stuck = stops.filter((stop) => stop.status === "rejected");
+    if (stuck.length > 0) {
+      throw new Error(
+        `${stuck.length} Harness worker(s) could not be stopped: `
+          + stuck.map((stop) => String(stop.reason)).join("; "),
+      );
+    }
   }, TEST_TIMEOUT_MS);
 
   it("preflights the controlled red/green pair against a real tracked diff", async () => {
@@ -785,7 +797,11 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
         artifactRoot: process.env.HARNESS_ARTIFACT_ROOT!,
       }),
       stdio: ["ignore", "pipe", "pipe"],
+      // Leads its own process group, so the suite script's cleanup trap can
+      // take the worker and everything it spawned with one signal to -pid.
+      detached: true,
     });
+    recordWorkerPid(child.pid);
     child.stdout?.on("data", (chunk) => output.push(String(chunk)));
     child.stderr?.on("data", (chunk) => output.push(String(chunk)));
     const deadline = Date.now() + 15_000;
@@ -1059,6 +1075,20 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
   };
 });
 
+// Hand the pid to the suite script's cleanup trap, which is the only reaper
+// that still runs when this process dies without reaching afterAll.
+//
+// Synchronous and appended the instant the child exists — before it is known
+// healthy, and before anything can await. A worker that never reports ready
+// still has to be reaped, and a crash one line later must still leave the trap
+// something to act on. The file is the trap's whole picture of what to kill:
+// what is not written here leaks.
+function recordWorkerPid(pid: number | undefined): void {
+  const pidfile = process.env.INT2_SUITE_WORKER_PIDFILE;
+  if (pidfile === undefined || pid === undefined) return;
+  appendFileSync(pidfile, `${pid}\n`, "utf8");
+}
+
 class HarnessWorker {
   private stopped = false;
 
@@ -1071,18 +1101,23 @@ class HarnessWorker {
     return this.output.join("").slice(-8_000);
   }
 
+  // Two SIGINTs then SIGTERM is the Harness worker's own documented shutdown
+  // ladder. SIGKILL is the addition: without it this threw and left the
+  // process running, which is one of the two ways a worker used to outlive the
+  // suite. A process that survives SIGKILL is genuinely stuck rather than
+  // merely slow, and the suite script's trap has no better move either, so
+  // that alone is worth failing the run over.
   async stop(): Promise<void> {
     if (this.stopped) return;
     this.stopped = true;
-    if (this.child.exitCode !== null) return;
-    this.child.kill("SIGINT");
-    if (await waitForExit(this.child, 2_000)) return;
-    this.child.kill("SIGINT");
-    if (await waitForExit(this.child, 2_000)) return;
-    this.child.kill("SIGTERM");
-    if (await waitForExit(this.child, 2_000)) return;
+    for (const signal of ["SIGINT", "SIGINT", "SIGTERM", "SIGKILL"] as const) {
+      if (this.child.exitCode !== null || this.child.signalCode !== null) return;
+      this.child.kill(signal);
+      if (await waitForExit(this.child, 2_000)) return;
+    }
     throw new Error(
-      `Harness worker did not stop: ${this.output.join("").slice(-4_000)}`,
+      `Harness worker survived SIGKILL (pid ${this.child.pid}): `
+        + this.output.join("").slice(-4_000),
     );
   }
 }
