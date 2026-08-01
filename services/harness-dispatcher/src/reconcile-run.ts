@@ -8,6 +8,7 @@ import {
   type AgentTaskLifecycle,
   type AgentTaskV1,
   type ArtifactRef,
+  type GithubPullRequestRef,
   type HarnessRunState,
   type HermesDecisionRecordV2,
   type MutationRef,
@@ -111,6 +112,59 @@ export interface ReconcileResult {
   reason?: string;
   projection?: AgentRunProjectionV1;
   handoff?: VerifiedHandoffV1;
+}
+
+export interface PullRequestActuationDecisionInput {
+  outcome: "opened" | "adopted";
+  pullRequest: GithubPullRequestRef;
+  payloadArtifact: ArtifactRef;
+  githubIdentity: string;
+  githubRepository: string;
+  mutation?: MutationRef;
+}
+
+/**
+ * Builds the post-actuation evidence record without giving reconciliation any
+ * GitHub transport capability. An adopted PR is observable but non-mutating;
+ * a PR opened by this actuation must carry its concrete mutation ref.
+ */
+export function buildPullRequestActuationDecision(
+  task: AgentTaskV1,
+  input: PullRequestActuationDecisionInput,
+  generatedAt: Date,
+): HermesDecisionRecordV2 {
+  if (input.pullRequest.repository !== input.githubRepository) {
+    throw new Error("pull request and authorization repository disagree");
+  }
+  if (input.outcome === "opened" && !input.mutation) {
+    throw new Error("opened pull request requires a mutation ref");
+  }
+  if (input.outcome === "adopted" && input.mutation) {
+    throw new Error("adopted pull request cannot claim a local mutation");
+  }
+  const mutations = input.mutation ? [input.mutation] : [];
+  return buildReconcileDecision(
+    task,
+    "handoff",
+    input.outcome === "opened"
+      ? "verified_payload_pull_request_opened"
+      : "verified_payload_pull_request_adopted",
+    generatedAt,
+    [input.payloadArtifact],
+    undefined,
+    [
+      `pull_request=${input.pullRequest.repository}#${input.pullRequest.number}`,
+      `github_identity=${input.githubIdentity}`,
+      `github_repository_scope=${input.githubRepository}`,
+    ],
+    {
+      mutations,
+      proposal: input.outcome === "opened"
+        ? "Record the pull request opened from the verified payload."
+        : "Record the existing pull request adopted for the verified payload.",
+      nextAction: "Operator reviews the pull request; merge remains human-only.",
+    },
+  );
 }
 
 export async function reconcileDispatchedRuns(
@@ -1026,6 +1080,11 @@ function buildReconcileDecision(
   evidenceRefs: ArtifactRef[] = [],
   projection?: AgentRunProjectionV1,
   additionalReasons: string[] = [],
+  actuation?: {
+    mutations: MutationRef[];
+    proposal: string;
+    nextAction: string;
+  },
 ): HermesDecisionRecordV2 {
   const approval = task.approval;
   const inputs: Array<{
@@ -1056,14 +1115,15 @@ function buildReconcileDecision(
       observedAt: projection.source.observedAt,
     });
   }
+  const mutations = actuation?.mutations ?? [];
   return buildHermesDecisionRecordV2({
     correlationId: task.correlationId,
     workItemId: task.workItemId,
     decisionType,
     proposal: {
-      what: decisionType === "handoff"
+      what: actuation?.proposal ?? (decisionType === "handoff"
         ? "Record a verified handoff for operator review."
-        : "Pause supervised execution for operator review.",
+        : "Pause supervised execution for operator review."),
       why: [reason, ...additionalReasons],
       evidenceRefs: uniqueArtifacts([
         ...task.proposal.sourceRefs,
@@ -1081,15 +1141,15 @@ function buildReconcileDecision(
       ...(approval.decidedAt ? { decidedAt: approval.decidedAt } : {}),
     },
     effects: {
-      mutates: false,
-      mutations: [],
+      mutates: mutations.length > 0,
+      mutations,
       authorityChanged: false,
       budgetChanged: false,
     },
     next: {
-      action: decisionType === "handoff"
+      action: actuation?.nextAction ?? (decisionType === "handoff"
         ? "Operator reviews the verified handoff; no PR is opened automatically."
-        : "Operator reviews the blocked task before any further action.",
+        : "Operator reviews the blocked task before any further action."),
       owner: "operator",
       ...(decisionType === "handoff" ? {} : { blockedBy: [reason] }),
     },

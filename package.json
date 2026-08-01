@@ -13,6 +13,7 @@
     "typecheck": "tsc -b --pretty false packages/* services/*",
     "test": "vitest run",
     "test:int3a": "vitest run test/integration/int3a-payload-actuator.test.ts",
+    "test:int3b": "vitest run test/integration/int3b-payload-sender.test.ts",
     "dev:trace": "tsx packages/trace-mcp/src/index.ts",
     "dev:policy": "tsx packages/policy-mcp/src/index.ts",
     "dev:observer": "tsx services/skills-observer/src/index.ts"
