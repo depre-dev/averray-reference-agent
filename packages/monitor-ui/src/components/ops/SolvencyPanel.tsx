@@ -94,7 +94,6 @@ function FlooredPool({ view }: { view: PoolView }) {
           {view.margin}
         </span>
       </div>
-      <PoolAddress view={view} />
 
       <div className="ops-pool-meter">
         <div
@@ -128,6 +127,9 @@ function FlooredPool({ view }: { view: PoolView }) {
         {view.amountLabel}
         <span className="ops-pool-unit">{view.unit}</span>
       </div>
+      {/* LAST on purpose: .ops-pool is a three-column grid, so anything
+          placed before the amount pushes it onto a second row. */}
+      <PoolAddress view={view} />
     </div>
   );
 }
@@ -141,12 +143,12 @@ function UnflooredPool({ view }: { view: PoolView }) {
           there is no note we say we do not know, rather than implying it's fine. */}
       <span className="ops-pool-note">
         {view.pool.note ?? (view.pool.informational ? "informational — not floored" : "no floor declared for this pool")}
-        <PoolAddress view={view} />
       </span>
       <span className="ops-pool-amount ops-pool-amount--quiet">
         {view.amountLabel}
         <span className="ops-pool-unit">{view.unit}</span>
       </span>
+      <PoolAddress view={view} />
     </div>
   );
 }
