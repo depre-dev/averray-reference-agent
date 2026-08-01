@@ -30,6 +30,7 @@ import type { AlertPayload } from "./alert-bridge.js";
 // ── Probe result model ──────────────────────────────────────────────
 
 import { decideDiskHeadroom, readDiskUsage } from "./disk-headroom.js";
+import { probeExternalFunnel } from "./external-funnel.js";
 import { alertProvenance, decideMoneyAlert } from "./money-alert.js";
 import { decideSelfFreshness, fetchSelfCompare } from "./self-freshness.js";
 import type { SelfFreshness } from "./self-freshness.js";
@@ -522,6 +523,10 @@ export interface ProductHealthConfig {
   /** Halt severity: "auto" (mainnet chainId → red, testnet → degraded) | "red" |
    *  "degraded". Env: PRODUCT_HEALTH_HALT_SEVERITY. */
   haltSeverity: string;
+  /** 0-based word index of `rejectedAt` in the EscrowCore job struct.
+   *  Defaults to the calibrated 17 — verified against the chain, not an ABI.
+   *  See external-funnel.ts for the three confirmations. */
+  escrowRejectedAtWord?: number;
   signerAddress?: string;
   usdcAddress?: string;
   usdcDecimals: number;
@@ -633,6 +638,9 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
     rpcUrl: env.PRODUCT_HEALTH_RPC_URL || networkEthRpc(env.WALLET_NETWORK),
     chainMaxStaleSeconds: num(env.PRODUCT_HEALTH_CHAIN_MAX_STALE_SECONDS, 600),
     haltSeverity: env.PRODUCT_HEALTH_HALT_SEVERITY || "auto",
+    ...(env.PRODUCT_HEALTH_ESCROW_REJECTED_AT_WORD
+      ? { escrowRejectedAtWord: Number(env.PRODUCT_HEALTH_ESCROW_REJECTED_AT_WORD) }
+      : {}),
     signerAddress: env.PRODUCT_HEALTH_SIGNER_ADDRESS || undefined,
     usdcAddress: env.PRODUCT_HEALTH_USDC_ADDRESS || undefined,
     usdcDecimals: num(env.PRODUCT_HEALTH_USDC_DECIMALS, 6),
@@ -2020,6 +2028,19 @@ export async function collectProductHealthProbes(
     nowMs: chainCtx.nowMs,
     fetchImpl,
   });
+  // The external poster door. The only probe watching a TIME-FUSED obligation:
+  // a rejected job's dispute window runs down toward a bond slash whether or not
+  // anyone is looking. Degraded-safe — an unreadable catalog reports unknown,
+  // never an empty funnel.
+  const externalFunnel = await probeExternalFunnel({
+    ...(config.apiBaseUrl ? { apiBaseUrl: config.apiBaseUrl } : {}),
+    ...(config.rpcUrl ? { rpcUrl: config.rpcUrl } : {}),
+    ...(h.body?.addresses?.escrowCore ? { escrowCore: h.body.addresses.escrowCore } : {}),
+    ...(config.escrowRejectedAtWord !== undefined ? { rejectedAtWord: config.escrowRejectedAtWord } : {}),
+    nowMs: chainCtx.nowMs,
+    haltStatus: chainHaltStatus(chainId, config.haltSeverity),
+    fetchImpl,
+  });
   const snapshot: ProductHealthSnapshotBlocks = {
     chainId: chainId ?? null,
     ...(selfFreshness.selfFreshness ? { self: selfFreshness.selfFreshness } : {}),
@@ -2082,6 +2103,7 @@ export async function collectProductHealthProbes(
         previousSubmittedNotSettled: chainCtx.previousSubmittedNotSettled,
       }),
       treasury,
+      externalFunnel.probe,
     ],
     chainAdvance,
     snapshot,

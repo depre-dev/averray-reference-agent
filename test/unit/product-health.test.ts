@@ -65,12 +65,34 @@ function combinedFetch(cfg: {
   usdcHex?: string;
   chainIdHex?: string;
   blockTimestampHex?: string;
+  /** external_funnel catalog rows. Default empty — an empty funnel is a real,
+   *  honest state, which is what the healthy scenario should exercise. */
+  externalJobs?: unknown[];
+  /** Live dispute window (seconds). The probe reads it; it is never hardcoded. */
+  disputeWindowSeconds?: number;
 }): typeof fetch {
-  return (async (_url: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  return (async (url: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const method = init?.method ?? "GET";
     if (method === "GET") {
       const status = cfg.healthStatus ?? 200;
-      return { ok: status >= 200 && status < 300, status, json: async () => cfg.healthBody ?? {} } as unknown as Response;
+      const ok = status >= 200 && status < 300;
+      // The funnel probe reads two endpoints besides /health. Serving them by
+      // URL keeps the mock honest: a GET that ignores its URL would make every
+      // scenario look like whatever /health returned.
+      const href = String(url);
+      if (href.includes("/jobs")) {
+        return { ok, status, json: async () => ({ jobs: cfg.externalJobs ?? [] }) } as unknown as Response;
+      }
+      if (href.includes("/poster/onboarding")) {
+        return {
+          ok,
+          status,
+          json: async () => ({
+            workerFacts: { disputeWindow: { available: true, seconds: cfg.disputeWindowSeconds ?? 604800 } },
+          }),
+        } as unknown as Response;
+      }
+      return { ok, status, json: async () => cfg.healthBody ?? {} } as unknown as Response;
     }
     const status = cfg.rpcStatus ?? 200;
     if (status < 200 || status >= 300) {
@@ -777,8 +799,8 @@ describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", ()
       combinedFetch({ healthBody: HEALTHY_BODY, chainIdHex: CHAIN_ID_HEX, blockTimestampHex: tsHex(10_000_000, 12), gasHex: "0xDE0B6B3A7640000", usdcHex: "0x989680" }),
       { nowMs: 10_000_000 },
     );
-    expect(probes.map((p) => p.name)).toEqual(["product_api", "chain_height", "signer_liquidity", "capabilities", "api_latency", "disk_headroom", "money_path", "treasury_liquidity"]);
-    expect(probes.map((p) => p.status)).toEqual(["ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok"]);
+    expect(probes.map((p) => p.name)).toEqual(["product_api", "chain_height", "signer_liquidity", "capabilities", "api_latency", "disk_headroom", "money_path", "treasury_liquidity", "external_funnel"]);
+    expect(probes.map((p) => p.status)).toEqual(["ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok"]);
     expect(probes[2]?.detail).toContain("reward bank 100.00 USDC");
   });
 
@@ -792,7 +814,7 @@ describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", ()
     // disk_headroom can see. Its own unreadable→degraded path is covered in
     // disk-headroom.test.ts.
     const configDependent = probes.filter((p) => p.name !== "disk_headroom");
-    expect(configDependent.map((p) => p.status)).toEqual(["degraded", "degraded", "degraded", "degraded", "degraded", "degraded", "degraded"]);
+    expect(configDependent.map((p) => p.status)).toEqual(["degraded", "degraded", "degraded", "degraded", "degraded", "degraded", "degraded", "degraded"]);
     expect(probes.find((p) => p.name === "disk_headroom")).toBeDefined();
   });
 
