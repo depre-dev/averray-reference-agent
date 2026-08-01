@@ -36,19 +36,30 @@ Requires Docker Compose ≥ **2.24.4** (the TLS override uses `!reset`).
 
 ## What it needs that we have to decide
 
-**1. A hostname.** `BUZZ_DOMAIN`, `RELAY_URL` (wss://), `BUZZ_MEDIA_BASE_URL`
-and `BUZZ_CORS_ORIGINS` all key off one domain. Needs a subdomain and a DNS
-record.
+**1. A hostname — RESOLVED.** `buzz.averray.com` has no DNS record today, so it
+is free. `monitor.averray.com` answers with `server: cloudflare` + a `cf-ray`,
+and the origin is the VPS at `141.94.121.188` — so the house pattern is
+Cloudflare-proxied, TLS terminated at the edge.
 
-**2. Ports 80/443, or not.** `BUZZ_COMPOSE_TLS=true` runs Caddy with Let's
-Encrypt on 80/443. The VPS already fronts services through Cloudflare Access.
-Either Buzz gets its own Caddy on those ports (conflict risk with whatever holds
-them now) or it stays on `BUZZ_HTTP_PORT=3000` behind the existing edge. The
-second is almost certainly right here, and means `BUZZ_COMPOSE_TLS` stays off.
+Follow it: `buzz.averray.com` proxied to the VPS, Buzz listening on
+`BUZZ_HTTP_PORT=3000`. `BUZZ_COMPOSE_TLS` stays **off** — no second Caddy, no
+contest for 80/443 with whatever holds them now.
 
-**3. Memory headroom.** Disk is fine — 131 GiB free of 193. RAM is unmeasured,
-and four more containers including a second Postgres and a MinIO is not nothing.
-**Measure before starting** (`free -h`); do not assume it fits.
+**2. Cloudflare Access vs a WebSocket relay — DECIDE THIS.** Buzz is a Nostr
+relay; `RELAY_URL` is `wss://`. Cloudflare proxies WebSockets fine, but **Access**
+(the auth layer sitting in front of the monitor) will reject a bot or a desktop
+client that has no browser session. If `buzz.averray.com` goes behind Access as
+the other hosts do, every non-browser participant needs a service token or a
+bypass rule.
+
+This is the same shape as the env-scoped-secret footgun: a protection applied by
+default in the wrong place, failing in a way that looks like the app is broken.
+Settle it before P2, when the bot first tries to connect.
+
+**3. Memory headroom — UNMEASURED, and I cannot measure it.** Disk is fine
+(131 GiB free of 193). RAM is not something I can see from here, and this adds a
+*second* Postgres plus a MinIO to a box already running the averray stack,
+Hermes, and a Postgres. Run `free -h` before P1. Do not assume it fits.
 
 **4. Image pin.** The example defaults to `ghcr.io/block/buzz:main`, which the
 README itself calls "for early testing".
@@ -58,10 +69,22 @@ confuse: the release list is almost entirely `Buzz Desktop` (`v0.5.3`, `v0.5.2`
 …). The Docker workflow only publishes `:latest` on a `relay-v*` tag, and there
 are exactly **two** of those:
 
-| tag | date | commit |
+| git tag | date | commit |
 |---|---|---|
 | `relay-v0.1.1` | 2026-06-25 | `68a0cc8` |
 | `relay-v0.2.0` | 2026-07-10 | `0d9be2f` |
+
+**The git tag is NOT the image tag.** The workflow strips the `relay-v` prefix,
+so `ghcr.io/block/buzz:relay-v0.2.0` 404s. Verified against the registry
+directly rather than inferred:
+
+```
+relay-v0.2.0  404      ← the obvious guess, and wrong
+0.2.0         200      ← the actual pin
+v0.5.3        404      ← Desktop ships no relay image, confirming the two
+                         product lines really are separate
+main/latest   200
+```
 
 So the relay's newest release is **v0.2.0, three weeks old**, while `main` moves
 daily (HEAD `3d7712c`, same day this was written). That gap is the actual
@@ -73,8 +96,8 @@ decision:
 - **`:sha-3d7712c`** — current, and immutable once pinned. Not blessed as a
   release.
 
-Recommendation: **pin `relay-v0.2.0` for P1**. If something we need turns out to
-postdate it, move to a specific `:sha-<7>` deliberately — never to `:main`,
+Recommendation: **`BUZZ_IMAGE=ghcr.io/block/buzz:0.2.0`** for P1. If something we
+need postdates it, move to a named `:sha-<7>` deliberately — never `:main`,
 which upgrades itself under a running integration.
 
 ## Integration: how narration reaches Buzz
