@@ -152,6 +152,7 @@ import {
   type HermesProductHealthSnapshot,
 } from "./monitor-hermes-voice.js";
 import { decideOpsNarration, type OpsStatus } from "./ops-narration.js";
+import { publishNarration, readBuzzConfig } from "./buzz-client.js";
 import {
   emitCopilotStreamEvent,
   onCopilotStreamEvent,
@@ -3709,6 +3710,34 @@ function startOperatorRoutines() {
           logger.info({ edge: opsNarration.edge }, "ops_narration_posted");
         } catch (err) {
           logger.warn({ err }, "ops_narration_post_failed");
+        }
+        // Deliver to Buzz, where a human will actually see it. The collaboration
+        // record above is the local, durable copy and stays regardless: it is
+        // written synchronously and cannot fail because a relay is unreachable.
+        //
+        // The cooldown is stamped on the LOCAL record, not on this delivery. A
+        // Buzz outage must not re-arm the edge and produce a burst of duplicates
+        // once the relay comes back.
+        //
+        // Awaited rather than fired-and-forgotten: an unhandled rejection inside
+        // the heartbeat is exactly how a monitor dies of a notification channel.
+        const buzz = readBuzzConfig();
+        if (buzz.config) {
+          const delivery = await publishNarration(buzz.config, opsNarration.text);
+          if (delivery.ok) {
+            logger.info({ edge: opsNarration.edge, eventId: delivery.eventId }, "ops_narration_buzz_published");
+          } else {
+            // WARN, not INFO: a narration channel that is silent because it is
+            // broken looks exactly like one that is silent because all is well.
+            // Whoever reads these logs must be able to tell those apart.
+            logger.warn(
+              { edge: opsNarration.edge, reason: delivery.reason, detail: delivery.detail },
+              "ops_narration_buzz_failed",
+            );
+          }
+        } else if (buzz.problem) {
+          // Absent config is silent by design; a BROKEN one is not.
+          logger.warn({ problem: buzz.problem }, "ops_narration_buzz_misconfigured");
         }
       } else if (opsNarration.suppressed) {
         logger.info({ edge: opsNarration.edge, suppressed: opsNarration.suppressed }, "ops_narration_suppressed");

@@ -345,6 +345,19 @@ services:
       PRODUCT_HEALTH_INTERVAL_MINUTES: ${PRODUCT_HEALTH_INTERVAL_MINUTES:-2}
       # Repeat an unchanged RED incident at most every 6h. Set 0 for edge-only alerts.
       PRODUCT_HEALTH_ALERT_COOLDOWN_MINUTES: ${PRODUCT_HEALTH_ALERT_COOLDOWN_MINUTES:-360}
+      # Buzz narration delivery. ALL FOUR or none: a partial set is treated as a
+      # misconfiguration and logged, because somebody meaning to turn this on and
+      # leaving it half-done must not look identical to leaving it off.
+      #
+      # BUZZ_OWNER_AUTH_TAG is a NIP-OA capability signed by the operator's key —
+      # not the key itself, which never reaches this box. BUZZ_AGENT_SECRET_KEY
+      # IS a credential: anyone holding it can post as Hermes.
+      #
+      # The channel is addressed by UUID, not name (see buzz-event.ts).
+      BUZZ_RELAY_URL: ${BUZZ_RELAY_URL:-}
+      BUZZ_AGENT_SECRET_KEY: ${BUZZ_AGENT_SECRET_KEY:-}
+      BUZZ_OWNER_AUTH_TAG: ${BUZZ_OWNER_AUTH_TAG:-}
+      BUZZ_OPS_CHANNEL_ID: ${BUZZ_OPS_CHANNEL_ID:-}
       # Monitor snapshots fan out across open PRs and their check runs. Keep the
       # timeout operator-tunable; the live mainnet calibration raises it from the
       # conservative generic default without changing testnet behaviour.
