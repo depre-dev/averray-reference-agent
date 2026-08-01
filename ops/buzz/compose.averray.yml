@@ -1,7 +1,16 @@
 # Averray's overrides on top of the upstream Buzz deploy/compose bundle.
 #
+#   cd /srv/buzz/deploy/compose
 #   docker compose -f compose.yml \
 #     -f /srv/averray-reference-agent/ops/buzz/compose.averray.yml up -d
+#
+# ALWAYS that exact form — never upstream's ./run.sh. compose.yml line 1 declares
+# `name: buzz-prod`, but run.sh passes `-p buzz` and overrides it. Mixing the two
+# does not reconfigure one stack, it builds a SECOND one: a `./run.sh start`
+# followed by a plain `docker compose up -d` left `buzz` AND `buzz-prod` running
+# side by side, with separate networks and separate database volumes. The old
+# containers keep their old logs, which is a good way to read a stale failure and
+# think a fix did not work.
 #
 # Two jobs: reach the relay through the existing Cloudflare Tunnel, and stop a
 # Buzz problem from killing the money monitor.
