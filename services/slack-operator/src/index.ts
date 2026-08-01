@@ -185,6 +185,7 @@ import {
   type ProductHealthSnapshot,
   type ProductHealthSnapshotBlocks,
 } from "./product-health.js";
+import { deriveOpsVerdict } from "@avg/schemas";
 import { appendIncidents, readIncidents, reconcileIncidents } from "./product-health-incidents.js";
 import {
   loadRemediationConfig,
@@ -749,6 +750,36 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       at: last?.at ?? null,
       status: last?.status ?? "unknown",
       checks: productHealthHistory.length,
+      // THE OPERATOR VERDICT — the same `deriveOpsVerdict` the board renders,
+      // from @avg/schemas, so this endpoint carries the board's CONCLUSION and
+      // not merely the facts behind it.
+      //
+      // This exists for readers that are not the board. An agent watching the
+      // product must not have to form its own opinion from raw probes, because
+      // then there are two verdict systems — one deterministic and tested, one
+      // that can hallucinate — and they will disagree. The first time an agent
+      // calls the deliberately-unfunded treasury reserve a problem, or reports
+      // long-acknowledged capability warnings as a new fault, the operator
+      // stops believing it; an unbelieved monitor still costs attention while
+      // returning nothing.
+      //
+      // `reason` is the machine contract (floor-breach | probe-red |
+      // payout-shortfall | probe-degraded | nominal | no-data | not-watching).
+      // `headline` is prose for a human and may be reworded — never match on it.
+      //
+      // Deliberately absent: staleness. How old this snapshot is is a property
+      // of the READER, not of the product, so each consumer judges it against
+      // `at` (the board relabels the verdict "last known state" when its own
+      // stream is down).
+      verdict: deriveOpsVerdict({
+        enabled: routineConfig.productHealth.enabled,
+        checks: productHealthHistory.length,
+        probes: last?.probes ?? [],
+        pools: productHealthSnapshotBlocks?.solvency?.pools ?? [],
+        ...(productHealthSnapshotBlocks?.flow?.payout
+          ? { payout: productHealthSnapshotBlocks.flow.payout }
+          : {}),
+      }),
       probes: (last?.probes ?? []).map((p) => ({
         name: p.name,
         status: p.status,

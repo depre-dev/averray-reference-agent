@@ -33,6 +33,7 @@ import { decideDiskHeadroom, readDiskUsage } from "./disk-headroom.js";
 import { alertProvenance, decideMoneyAlert } from "./money-alert.js";
 import { decideSelfFreshness, fetchSelfCompare } from "./self-freshness.js";
 import type { SelfFreshness } from "./self-freshness.js";
+import { isAwaitingProbe } from "@avg/schemas";
 
 export type ProbeStatus = "ok" | "degraded" | "red";
 
@@ -108,13 +109,13 @@ export function probeSparkline(
 
 // ── History-derived Ops blocks (Trends + Incidents) ──
 
-/** Mirrors the frontend's awaiting regex (ops-model `AWAITING_RE`): a degraded
- *  probe whose detail is really "upstream data not wired yet". Excluded from
- *  incidents so a forward-compat gap never masquerades as a live degradation. */
-const AWAITING_DETAIL_RE = /awaiting|not expose|not wired|not configured|unconfigured|no data/i;
-
+/** A degraded probe whose detail is really "upstream data not wired yet".
+ *  Excluded from incidents so a forward-compat gap never masquerades as a live
+ *  degradation. The classifier lives in @avg/schemas because the BOARD applies
+ *  the same rule — it used to be copied here under a comment reading "mirrors
+ *  the frontend's awaiting regex", which is a drift bug with a countdown on it. */
 function isAwaitingDetail(status: ProbeStatus, detail: string): boolean {
-  return status !== "red" && AWAITING_DETAIL_RE.test(detail);
+  return isAwaitingProbe({ status, detail });
 }
 
 export interface ProductHealthIncident {

@@ -4,6 +4,7 @@ export * from "./agent-run-projection.js";
 export * from "./agent-task.js";
 export * from "./hermes-decision-record.js";
 export * from "./legacy-agent-task.js";
+export * from "./ops-verdict.js";
 export * from "./task-intent.js";
 export * from "./verified-handoff.js";
 export * from "./wikipedia.js";

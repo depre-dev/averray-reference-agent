@@ -10,6 +10,10 @@
 // The two guarantees that are NOT delivery are carried over verbatim in intent:
 // the container must wire a resolved fetch through to the board, and it must
 // still render chrome when the fetch FAILS rather than showing a blank page.
+//
+// Both used to assert on role="banner" from the old top strip. The strip was
+// absorbed into <OpsBoard> by the spec-sheet redesign, so they now assert on
+// the board surface itself — same guarantee, current anchor.
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, render, waitFor, within } from "@testing-library/react";
 
@@ -35,7 +39,7 @@ describe("MonitorPage — ops container", () => {
       <MonitorPage options={{ fetcher, EventSourceCtor: ES as never }} />,
     );
 
-    await waitFor(() => expect(within(container).getByRole("banner")).toBeTruthy());
+    await waitFor(() => expect(within(container).getByTestId(/^ops-board/)).toBeTruthy());
     expect(fetcher).toHaveBeenCalled();
   });
 
@@ -48,6 +52,6 @@ describe("MonitorPage — ops container", () => {
       <MonitorPage options={{ fetcher, EventSourceCtor: ES as never }} />,
     );
 
-    await waitFor(() => expect(within(container).getByRole("banner")).toBeTruthy());
+    await waitFor(() => expect(within(container).getByTestId(/^ops-board/)).toBeTruthy());
   });
 });

@@ -23,15 +23,14 @@ import { OPS_PILLARS, OPS_PILLAR_LABELS, probePillar } from "./product-health.js
  */
 export type OpsTone = "ok" | "degraded" | "red" | "awaiting";
 
-// Catches the product's forward-compat phrasings: "awaiting …", "not exposed
-// [by /health] yet", "does not expose … yet", "not wired yet", etc. `not expose`
-// (no trailing d) matches both "not exposed" and "does not expose".
-const AWAITING_RE = /awaiting|not expose|not wired|not configured|unconfigured|no data/i;
-
-/** A probe whose degraded status is really "upstream data not wired yet". */
-export function isAwaitingProbe(probe: { status: ProbeStatus; detail: string }): boolean {
-  return probe.status !== "red" && AWAITING_RE.test(probe.detail);
-}
+// These two classifiers live in @avg/schemas because the SERVICE needs them
+// too — it emits the verdict on /monitor/product-health so an agent reads the
+// board's conclusion rather than re-deriving one. They were briefly duplicated
+// on both sides (the service carried a comment reading "mirrors the frontend's
+// awaiting regex", which is a drift bug waiting to happen). Re-exported here so
+// existing frontend imports keep working.
+import { isAcknowledgedProbe, isAwaitingProbe } from "@avg/schemas/ops-verdict";
+export { isAcknowledgedProbe, isAwaitingProbe };
 
 /** Resolve a probe to its ops tone (awaiting overrides a bare degraded). */
 export function probeOpsTone(probe: { status: ProbeStatus; detail: string }): OpsTone {

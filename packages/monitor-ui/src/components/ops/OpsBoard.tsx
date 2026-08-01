@@ -1,67 +1,169 @@
-// OpsBoard — the operations surface that fills the board's lanes region when the
-// board is switched to Ops (the top strip, hero banner, and co-pilot rail stay
-// around it — see BoardView). Composes the six zones: grouped probe grid,
-// solvency & runway, money-path funnel, trends, incidents, dependencies & deploy.
-// Status/chain/checked context lives in the shared hero banner + top-strip chips,
-// so this is purely the zone grid. Every zone owns its truth-boundary: real data,
-// honest awaiting-data, or a calm empty state.
+// The ops board — one read-only screen, laid out by priority.
 //
-// Pure/presentational: it takes a ProductHealth snapshot and a `nowMs` clock, so
-// the whole surface is deterministic to test against the ops fixtures.
+//   meta line      what you are looking at, and when it last refreshed
+//   stale banner   only when the data is untrustworthy (hatched, overrides all)
+//   VERDICT        the one oversized element · TRUST panel beside it
+//   SOLVENCY       pools vs floors      │  FLOW  funnel + welded payout evidence
+//   PILLARS        the 8 probes, grouped, with their details
+//   footer         incidents · LLM spend · "refresh is the only control"
+//
+// Size follows priority, not chronology: the verdict is the only thing sized to
+// be read across a room, the money owns the middle band, the probe details sit
+// under it, and the least urgent number on the board — LLM spend — is one line
+// in the footer rather than the tall column it used to be.
+//
+// There are no controls here beyond Refresh. Commands and discussion live in
+// Buzz (docs/OPS_ONLY_PIVOT.md).
 
+import type { MonitorBoard } from "../../lib/monitor/board-cache.js";
 import type { ProductHealth } from "../../lib/monitor/product-health.js";
-import { OpsZone } from "./OpsZone.js";
-import { ProbeGrid } from "./ProbeGrid.js";
-import { SolvencyZone } from "./SolvencyZone.js";
-import { MoneyPathZone } from "./MoneyPathZone.js";
-import { TrendsZone } from "./TrendsZone.js";
-import { IncidentsZone } from "./IncidentsZone.js";
-import { DepsDeployZone } from "./DepsDeployZone.js";
+import { formatAgo, incidentRows } from "../../lib/monitor/ops-model.js";
+import { DATA_STALE_MS, opsVerdict, trustRows } from "../../lib/monitor/ops-spec.js";
+import { FlowPanel } from "./FlowPanel.js";
+import { PillarStrip } from "./PillarStrip.js";
+import { SolvencyPanel } from "./SolvencyPanel.js";
 
 export interface OpsBoardProps {
   health: ProductHealth;
-  /** Injected clock so incident durations are deterministic. */
+  /** The monitor snapshot — only its clock and LLM usage are read. */
+  board?: MonitorBoard | undefined;
+  /** SSE transport state. A stream we cannot trust invalidates the screen. */
+  streamStatus?: string;
+  streamDegraded?: boolean;
+  onRefresh?: (() => void) | undefined;
+  /** Injected clock so every age label is deterministic to test. */
   nowMs?: number;
 }
 
-export function OpsBoard({ health, nowMs = Date.now() }: OpsBoardProps) {
-  if (!health.enabled) {
-    return (
-      <OpsEmpty
-        title="Monitoring is off"
-        detail="Set PRODUCT_HEALTH_ENABLED to start probing the live product."
-      />
-    );
-  }
-  if (health.checks === 0) {
-    return <OpsEmpty title="Awaiting first check" detail="The heartbeat runs every couple of minutes." />;
-  }
+export function OpsBoard({
+  health,
+  board,
+  streamStatus = "open",
+  streamDegraded = false,
+  onRefresh,
+  nowMs = Date.now(),
+}: OpsBoardProps) {
+  const verdict = opsVerdict({ health, streamDegraded, nowMs });
+  const trust = trustRows({ health, streamDegraded, streamStatus, streamAt: board?.at, nowMs });
+  const ageMs = health.at == null ? null : Math.max(0, nowMs - health.at);
+  const dataStale = ageMs != null && ageMs > DATA_STALE_MS;
+  // "Untrusted" is broader than "disconnected": a stream that is nominally open
+  // but has not delivered a check in minutes is equally unsafe to read calmly.
+  const untrusted = streamDegraded || dataStale;
 
   return (
-    <div className="ops-board" data-testid="ops-board">
-      <div className="ops-grid">
-        <OpsZone className="z-probes" icon="pulse" title="Health" meta={<span className="ops-zone-sub">by pillar</span>}>
-          <ProbeGrid probes={health.probes} />
-        </OpsZone>
-        <SolvencyZone solvency={health.solvency} />
-        <MoneyPathZone flow={health.flow} />
-        <TrendsZone history={health.history} />
-        <IncidentsZone history={health.history} nowMs={nowMs} />
-        <DepsDeployZone health={health} />
+    <div className="ops-board" data-testid="ops-board" data-untrusted={untrusted ? "yes" : "no"}>
+      <div className="ops-meta">
+        <span>{metaLine(health)}</span>
+        <span>
+          {health.at == null
+            ? "no check yet"
+            : `${untrusted ? "last successful refresh" : "last refresh"} ${formatAgo(health.at, nowMs)}`}
+          {onRefresh ? (
+            <>
+              {" · "}
+              <button type="button" className="ops-refresh" onClick={onRefresh}>
+                refresh
+              </button>
+            </>
+          ) : null}
+        </span>
       </div>
 
-      <p className="ops-foot">Ops · watching the live product · grey is awaiting data, never fake-green</p>
+      {untrusted ? (
+        <div className="ops-stale" role="alert" data-testid="ops-stale-banner">
+          <strong>{streamDegraded ? "STREAM DISCONNECTED" : "DATA STALE"}</strong>
+          <span>
+            {health.at == null
+              ? "no successful check yet — nothing below is confirmed"
+              : `last update ${formatAgo(health.at, nowMs)} — every value below is STALE and may be wrong`}
+          </span>
+          <span className="ops-stale-right">{streamDegraded ? `reconnecting · ${streamStatus}` : "poll failing"}</span>
+        </div>
+      ) : null}
+
+      {/* Everything below dims while untrusted: stale data must LOOK stale, not
+          merely be labelled stale somewhere above it. */}
+      <div className="ops-content" data-dim={untrusted ? "yes" : "no"}>
+        <div className="ops-verdict-row">
+          <div className="ops-verdict">
+            <div className="ops-verdict-kicker" data-tone={verdict.kickerTone}>
+              {verdict.kicker}
+            </div>
+            <h1 className="ops-verdict-line" data-tone={verdict.verdictTone} data-testid="ops-verdict">
+              {verdict.verdict}
+            </h1>
+            <p className="ops-verdict-sub" data-tone={verdict.subTone}>
+              {verdict.sub}
+            </p>
+          </div>
+
+          <div className="ops-trust" data-testid="ops-trust">
+            {trust.map((row) => (
+              <div className="ops-trust-row" key={row.key}>
+                <span className="ops-trust-key">{row.key}</span>
+                <span className="ops-trust-val">
+                  <i className="ops-dot ops-dot--sm" data-tone={row.tone} aria-hidden />
+                  <span data-tone={row.tone}>{row.value}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="ops-money">
+          <SolvencyPanel solvency={health.solvency} />
+          <FlowPanel flow={health.flow} />
+        </div>
+
+        <PillarStrip probes={health.probes} history={health.history} />
+
+        <div className="ops-foot">
+          <span>INCIDENTS — {incidentSummary(health, nowMs)}</span>
+          <span>{llmSummary(board)}</span>
+          <span>refresh is the only control · everything else is read-only</span>
+        </div>
+      </div>
     </div>
   );
 }
 
-function OpsEmpty({ title, detail }: { title: string; detail: string }) {
-  return (
-    <div className="ops-board ops-board--empty" data-testid="ops-board-empty">
-      <div className="ops-empty">
-        <span className="ops-empty-title">{title}</span>
-        <span className="ops-empty-detail">{detail}</span>
-      </div>
-    </div>
-  );
+function metaLine(health: ProductHealth): string {
+  const net = health.network && health.network !== "unknown" ? health.network.toUpperCase() : "NETWORK UNKNOWN";
+  const chain = typeof health.chainId === "number" ? `CHAIN ${health.chainId}` : "CHAIN UNKNOWN";
+  return `HERMES · AVERRAY ${net} · ${chain} · READ-ONLY — COMMANDS LIVE IN BUZZ`;
+}
+
+/** Ongoing incidents lead; an empty durable log says so rather than "all clear". */
+function incidentSummary(health: ProductHealth, nowMs: number): string {
+  const rows = incidentRows(health.history, nowMs);
+  if (rows.length === 0) return "none recorded in this window";
+  const ongoing = rows.filter((r) => r.ongoing);
+  if (ongoing.length > 0) {
+    const lead = ongoing[0]!;
+    return `${ongoing.length} ongoing · ${lead.probe} ${lead.severity} for ${lead.durationLabel}`;
+  }
+  const lead = rows[0]!;
+  return `${rows.length} in window · latest ${lead.probe} ${lead.severity}, ${lead.durationLabel}`;
+}
+
+/**
+ * The least urgent number on the board, in one line.
+ *
+ * `monthlyTotalComplete: false` means shared plans are deliberately excluded
+ * from the figure, so the line says so — a total that quietly omits some of its
+ * inputs is a wrong number, however small.
+ */
+function llmSummary(board: MonitorBoard | undefined): string {
+  const billing = board?.llmUsage?.billing;
+  if (!billing) return "LLM SPEND — not recorded";
+  const total = billing.monthlyTotalUsd;
+  if (total == null) return "LLM SPEND — cost not recorded by any provider";
+  const excluded = (billing.subscriptions ?? []).filter((s) => s.configured && !s.dedicated).length;
+  const tail = billing.monthlyTotalComplete
+    ? "complete"
+    : excluded > 0
+      ? `${excluded} shared plan${excluded === 1 ? "" : "s"} excluded from total`
+      : "partial — some costs unrecorded";
+  return `LLM SPEND ≈ $${total.toFixed(2)} this month · ${tail}`;
 }
