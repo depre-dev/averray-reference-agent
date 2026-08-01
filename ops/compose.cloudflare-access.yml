@@ -34,9 +34,16 @@ services:
     networks: [avg-internal, buzz-net]
 
 networks:
-  # Created by the `buzz` compose project (deploy/compose + ops/buzz overrides).
+  # Created by the Buzz compose project. The project is `buzz-prod`, NOT `buzz` —
+  # upstream's compose.yml declares `name: buzz-prod` on line 1, so every Docker
+  # object is prefixed with that. The first stand-up used upstream's ./run.sh,
+  # which passes `-p buzz` and overrides it, producing a `buzz`-prefixed stack
+  # that a later plain `docker compose -f compose.yml -f <override>` did not
+  # reuse — it built a SECOND, parallel stack instead. Hence: always invoke Buzz
+  # with the plain form (see ops/buzz/compose.averray.yml), never run.sh.
+  #
   # Optional-by-profile: this overlay only runs under the command-center profile,
   # and the network must already exist when it does.
   buzz-net:
     external: true
-    name: buzz_buzz-net
+    name: buzz-prod_buzz-net
