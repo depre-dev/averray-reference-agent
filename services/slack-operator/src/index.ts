@@ -154,6 +154,7 @@ import {
 import { decideOpsNarration, type OpsStatus } from "./ops-narration.js";
 import { publishNarration, readBuzzConfig } from "./buzz-client.js";
 import { decideProbeTransitions } from "./probe-transitions.js";
+import { describeBuzzDelivery, recordBuzzDelivery, type BuzzDeliveryState } from "./buzz-delivery.js";
 import type { ProbeResult } from "./product-health.js";
 import {
   emitCopilotStreamEvent,
@@ -306,6 +307,10 @@ const PRODUCT_HEALTH_INCIDENT_MAX = 200;
 let productHealthChainAdvance: ChainAdvance | undefined;
 // Structured snapshot blocks (chain id / network / solvency / flow) for the Ops board.
 let productHealthSnapshotBlocks: ProductHealthSnapshotBlocks | undefined;
+// Buzz delivery outcomes. Module scope so the endpoint can report it without
+// the heartbeat having to thread it through — and in memory on purpose: after a
+// restart the honest answer is "nothing delivered yet", not a stale success.
+let buzzDeliveryState: BuzzDeliveryState = {};
 let productHealthRemediation: RemediationStatus | undefined;
 
 /** The settlement signer's address, derived from the key the monitor already holds
@@ -805,6 +810,21 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       // Structured Ops-board blocks (chain id / network / solvency / flow),
       // emitted only when their data is actually available — else absent (the
       // frontend renders honest awaiting-data).
+      // Can the #Ops channel actually receive anything? Narration and probe
+      // alerts only log their failures, and a silently-broken channel looks
+      // exactly like a quiet healthy one — which is the failure this monitor
+      // exists to prevent, pointed at its own alerting. Reported as instrument
+      // health beside DATA AGE and MONITOR; it never moves the verdict, because
+      // an unreachable relay does not mean the money path is broken.
+      buzz: (() => {
+        const cfg = readBuzzConfig();
+        return describeBuzzDelivery({
+          configured: cfg.config !== null,
+          problem: cfg.config === null ? (cfg as { problem: string | null }).problem : null,
+          state: buzzDeliveryState,
+          nowMs: Date.now(),
+        });
+      })(),
       ...(productHealthSnapshotBlocks ?? {}),
       // History-derived Trends + Incidents (uptime% / latency / balance series +
       // incident episodes) from the rolling buffer. Always present — the series
@@ -3731,6 +3751,12 @@ function startOperatorRoutines() {
         const buzz = readBuzzConfig();
         if (buzz.config) {
           const delivery = await publishNarration(buzz.config, opsNarration.text);
+          buzzDeliveryState = recordBuzzDelivery(buzzDeliveryState, {
+            ok: delivery.ok,
+            reason: delivery.reason,
+            detail: delivery.detail,
+            atMs: Date.now(),
+          });
           if (delivery.ok) {
             logger.info({ edge: opsNarration.edge, eventId: delivery.eventId }, "ops_narration_buzz_published");
           } else {
@@ -3771,6 +3797,12 @@ function startOperatorRoutines() {
             continue;
           }
           const delivery = await publishNarration(buzzForProbes.config, alert.text);
+          buzzDeliveryState = recordBuzzDelivery(buzzDeliveryState, {
+            ok: delivery.ok,
+            reason: delivery.reason,
+            detail: delivery.detail,
+            atMs: Date.now(),
+          });
           if (delivery.ok) {
             logger.info({ probe: alert.probe, kind: alert.kind, eventId: delivery.eventId }, "probe_transition_published");
           } else {

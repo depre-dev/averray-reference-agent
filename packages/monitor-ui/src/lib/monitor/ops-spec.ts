@@ -225,6 +225,7 @@ export function trustRows(input: {
   }
 
   rows.push(monitorRow(health.self));
+  rows.push(buzzRow(health.buzz));
 
   const rem = health.remediation;
   if (!rem || !rem.enabled || rem.state === "off") {
@@ -245,6 +246,25 @@ function shortRpcDetail(rem: NonNullable<ProductHealth["remediation"]>): string 
   const host = shortEndpoint(rem.activeEndpoint);
   if (!host) return rem.detail;
   return rem.detail.replace(/https?:\/\/\S+/g, host);
+}
+
+/**
+ * The #Ops delivery row.
+ *
+ * "armed" is deliberately NOT ok-toned: a configured channel that has never
+ * delivered anything is untested, and showing it green would be the same lie
+ * as a fake healthy probe — worse, because the thing it would be lying about
+ * is whether you will be TOLD when something breaks.
+ *
+ * An absent block means an older backend that does not report this. Silence is
+ * right there: inventing a status for a field the server never sent is exactly
+ * the fabrication this panel exists to avoid.
+ */
+function buzzRow(buzz: ProductHealth["buzz"]): TrustRow {
+  if (!buzz) return { key: "OPS CHANNEL", value: "not reported by this build", tone: "awaiting" };
+  const tone: OpsTone =
+    buzz.status === "ok" ? "ok" : buzz.status === "failing" ? "red" : "awaiting";
+  return { key: "OPS CHANNEL", value: buzz.detail, tone };
 }
 
 function monitorRow(self: SelfFreshness | undefined): TrustRow {

@@ -306,6 +306,8 @@ export const OPS_FIXTURE_NOMINAL: ProductHealth = {
     onBackup: false,
     detail: "rpc-1 primary · failover armed",
   },
+  // Configured and delivering — the state after the first real narration lands.
+  buzz: { status: "ok", detail: "delivered 4m ago" },
   solvency: { pools: MAINNET_POOLS },
   flow: {
     claimed24h: 9,
