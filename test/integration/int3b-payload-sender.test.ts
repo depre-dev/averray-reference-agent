@@ -531,6 +531,39 @@ describe.sequential("INT-3b pull-request sending ceremony", () => {
     );
   });
 
+  it("refuses a created pull request that does not match the payload", async () => {
+    const actuation = await createActuation();
+
+    // The one check in the sender whose refusal nothing exercised. It runs on
+    // the PR GitHub hands back after creation, and it is the last thing
+    // standing between "the PR we opened" and "the PR we verified" — so it
+    // must be seen refusing, not merely seen running.
+    //
+    // A server that returns a different head than the one requested is
+    // unlikely. That is exactly why the path needs a test: it will never be
+    // exercised by accident, and an unfireable check is indistinguishable
+    // from a working one.
+    class MismatchingGitHubClient extends FakeGitHubClient {
+      override async openPullRequest(
+        ...args: Parameters<FakeGitHubClient["openPullRequest"]>
+      ): ReturnType<FakeGitHubClient["openPullRequest"]> {
+        const opened = await super.openPullRequest(...args);
+        return {
+          ...opened,
+          head: {
+            ...opened.head,
+            treeSha: "0000000000000000000000000000000000000000",
+          },
+        };
+      }
+    }
+
+    const fakeGitHub = new MismatchingGitHubClient(baseRevision);
+    const refusal = await captureSendRefusal(actuation, senderDeps(fakeGitHub));
+    expect(refusal.reason).toBe("pull_request_identity_mismatch");
+    expect(fakeGitHub.createCalls).toBe(1);
+  });
+
   it("guards 3a imports, the computed mutation invariant, and PR-only authority", async () => {
     const actuatorSource = await source("pr-payload-actuator.ts");
     const localPortsSource = await source("pr-payload-local-ports.ts");
