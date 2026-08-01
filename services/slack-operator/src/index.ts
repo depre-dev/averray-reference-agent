@@ -153,6 +153,8 @@ import {
 } from "./monitor-hermes-voice.js";
 import { decideOpsNarration, type OpsStatus } from "./ops-narration.js";
 import { publishNarration, readBuzzConfig } from "./buzz-client.js";
+import { decideProbeTransitions } from "./probe-transitions.js";
+import type { ProbeResult } from "./product-health.js";
 import {
   emitCopilotStreamEvent,
   onCopilotStreamEvent,
@@ -3279,6 +3281,11 @@ function startOperatorRoutines() {
   // only on an edge across the red boundary (entered-red / recovered).
   let prevProductHealthStatus: OpsStatus = "unknown";
   let lastOpsNarrationPostedAtMs = 0;
+  // Per-probe edge detection. Held in memory on purpose: after a restart every
+  // probe is "first sight" and says nothing, which is the correct behaviour —
+  // a redeploy must not page the operator about states that have not changed.
+  let prevProbes = new Map<string, ProbeResult>();
+  let postedProbeKeys = new Set<string>();
   let taskHealthRunning = false;
   const anomalyConfig = loadAnomalyConfig();
   const dispatchPerDayCap = Number(process.env.HERMES_DISPATCH_PER_DAY_MAX) || 10;
@@ -3741,6 +3748,41 @@ function startOperatorRoutines() {
         }
       } else if (opsNarration.suppressed) {
         logger.info({ edge: opsNarration.edge, suppressed: opsNarration.suppressed }, "ops_narration_suppressed");
+      }
+      // Per-probe transitions. Distinct from the narration above, which speaks
+      // only when the OVERALL verdict crosses red. "external_funnel says a bond
+      // slashes in 9h" is actionable and specific and may not move the overall
+      // verdict at all — that is precisely the alert worth having.
+      const transitions = decideProbeTransitions({
+        previous: prevProbes,
+        current: result.evaluation.probes,
+        posted: postedProbeKeys,
+        muted: getServerAlertMuteUntilMs() > Date.now(),
+      });
+      // State advances even while muted, so unmuting does not replay an edge
+      // that happened hours ago.
+      prevProbes = transitions.next;
+      postedProbeKeys = transitions.keys;
+      if (transitions.alerts.length > 0) {
+        const buzzForProbes = readBuzzConfig();
+        for (const alert of transitions.alerts) {
+          if (!buzzForProbes.config) {
+            logger.info({ probe: alert.probe, kind: alert.kind }, "probe_transition_undelivered");
+            continue;
+          }
+          const delivery = await publishNarration(buzzForProbes.config, alert.text);
+          if (delivery.ok) {
+            logger.info({ probe: alert.probe, kind: alert.kind, eventId: delivery.eventId }, "probe_transition_published");
+          } else {
+            // The key was already retained above, so a failed post is not
+            // retried forever — but it must be loud, because a transition
+            // nobody heard is the failure this whole channel exists to avoid.
+            logger.warn(
+              { probe: alert.probe, kind: alert.kind, reason: delivery.reason, detail: delivery.detail },
+              "probe_transition_publish_failed",
+            );
+          }
+        }
       }
       if (result.status !== "healthy") {
         logger.warn(
