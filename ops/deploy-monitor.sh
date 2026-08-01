@@ -43,16 +43,50 @@ fi
 
 GIT_SHA="$(git rev-parse HEAD)"
 GIT_DIRTY=false
-if [ -n "$(git status --porcelain)" ]; then
+
+# WHAT ACTUALLY MAKES THE SHA A LIE.
+#
+# The first cut of this guard used `git status --porcelain`, which counts
+# untracked files — and a long-lived VPS accumulates those permanently
+# (.env.prod.bak.<epoch> × 8, a hand-rolled deploy.sh). It refused the very
+# first real deploy, and it would have refused every one after it, which turns
+# --allow-dirty into muscle memory and leaves the guard doing nothing. A check
+# that always fires is a check nobody reads; that is the same failure this
+# board has spent a week removing.
+#
+# So distinguish by whether the file can actually reach the image:
+#
+#   tracked modifications        → YES. The image is HEAD plus edits nobody can
+#                                  see. This is the un-popped-stash incident.
+#   untracked under packages/,
+#     services/, scripts/        → YES. `COPY . .` puts them in the build stage
+#                                  and the final stage copies those trees back
+#                                  out, so they compile and ship.
+#   untracked anywhere else      → NO. The runtime image only takes those three
+#                                  trees plus the package manifests, so root
+#                                  cruft cannot change what runs. Reported, not
+#                                  refused.
+TRACKED_DIRT="$(git status --porcelain --untracked-files=no)"
+SHIPPED_UNTRACKED="$(git ls-files --others --exclude-standard -- packages services scripts)"
+OTHER_UNTRACKED="$(git ls-files --others --exclude-standard -- ':!packages' ':!services' ':!scripts')"
+
+if [ -n "$OTHER_UNTRACKED" ]; then
+  echo "note: untracked files outside the shipped trees (cannot affect the image):"
+  echo "$OTHER_UNTRACKED" | sed 's/^/  /'
+  echo
+fi
+
+if [ -n "$TRACKED_DIRT" ] || [ -n "$SHIPPED_UNTRACKED" ]; then
   GIT_DIRTY=true
   if [ "$ALLOW_DIRTY" != true ]; then
-    echo "ERROR: working tree is dirty — refusing to build." >&2
+    echo "ERROR: the build would not match ${GIT_SHA:0:8} — refusing." >&2
     echo >&2
-    git status --short >&2
+    [ -n "$TRACKED_DIRT" ] && { echo "modified tracked files:" >&2; echo "$TRACKED_DIRT" | sed 's/^/  /' >&2; }
+    [ -n "$SHIPPED_UNTRACKED" ] && { echo "untracked files that WOULD be built and shipped:" >&2; echo "$SHIPPED_UNTRACKED" | sed 's/^/  /' >&2; }
     echo >&2
-    echo "The image would be ${GIT_SHA:0:8} PLUS these uncommitted changes, so the" >&2
-    echo "sha would not describe what is running. This has bitten before: an" >&2
-    echo "un-popped stash on this box silently reverted a built asset." >&2
+    echo "The image would be ${GIT_SHA:0:8} PLUS these, so the sha would not" >&2
+    echo "describe what is running. An un-popped stash on this box once silently" >&2
+    echo "reverted a built asset while everything downstream reported healthy." >&2
     echo >&2
     echo "Commit/stash them, or re-run with --allow-dirty (the board will then" >&2
     echo "report its version as unknown, which is the truth)." >&2
