@@ -110,7 +110,7 @@ _int2_start_db() {
     || {
       echo "INT2_DB_START_FAILED: $1 ($3) did not start" \
         | tee -a "$_int2_bootstrap_log" >&2
-      exit 26
+      exit 31
     }
 }
 
@@ -136,7 +136,7 @@ _int2_wait_db() {
   echo "INT2_DB_NEVER_READY: $1 did not answer a TCP query within 60s" \
     | tee -a "$_int2_bootstrap_log" >&2
   _int2_db_diagnostics "$1"
-  exit 27
+  exit 32
 }
 
 # Sets _int2_port_value. Deliberately NOT called in a command substitution:
@@ -154,7 +154,7 @@ _int2_db_port() {
       echo "INT2_DB_PORT_UNMAPPED: $1 published no usable 5432/tcp port" \
         | tee -a "$_int2_bootstrap_log" >&2
       _int2_db_diagnostics "$1"
-      exit 28
+      exit 33
       ;;
   esac
 }
