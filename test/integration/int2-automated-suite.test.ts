@@ -73,7 +73,7 @@ const FIXTURE_ROOT = path.join(
   REPOSITORY_ROOT,
   "test/fixtures/agent-integration/ceremony",
 );
-const EXPECTED_CASE_COUNT = 9;
+const EXPECTED_CASE_COUNT = 10;
 const TEST_TIMEOUT_MS = 240_000;
 const TERMINAL_WAIT_MS = 180_000;
 const HARNESS_STATE_WAIT_MS = 90_000;
@@ -277,6 +277,28 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
       },
       "events_have_no_exit_128",
       "inject exit_128 into the recorded verifier evidence",
+    );
+  }, TEST_TIMEOUT_MS);
+
+  it("refuses an idle model on the exact paid-task criterion", async () => {
+    executedCases += 1;
+    const evidence = await runScriptedTerminalCase({
+      caseName: "idle",
+      fixture: "lint-format",
+      script: "lint-format-idle.jsonl",
+      lifecycle: "failed",
+    });
+    assertD3Mutation(
+      "idle",
+      evidence,
+      (mutated) => {
+        const format = mutated.verification.details.find(
+          (detail: any) => detail.id === "format-command",
+        );
+        format.reason = "exit_0";
+      },
+      "required_criterion_reason",
+      "change the recorded criterion reason from exit_1 to exit_0",
     );
   }, TEST_TIMEOUT_MS);
 
@@ -492,9 +514,12 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
     lifecycle,
     preserveProfile = false,
   }: {
-    caseName: "green" | "negative" | "narrow";
-    fixture: "lint-format-green" | "lint-format-red";
-    script: "lint-format-green.jsonl" | "lint-format-red.jsonl";
+    caseName: "green" | "idle" | "negative" | "narrow";
+    fixture: "lint-format" | "lint-format-green" | "lint-format-red";
+    script:
+      | "lint-format-green.jsonl"
+      | "lint-format-idle.jsonl"
+      | "lint-format-red.jsonl";
     lifecycle: "handoff_ready" | "failed";
     preserveProfile?: boolean;
   }): Promise<any> {

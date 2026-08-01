@@ -225,7 +225,7 @@ export INT2_REPOSITORY_ROOT="$_int2_repo"
 export INT2_SUITE_EVIDENCE_DIR="$_int2_evidence"
 export INT2_SUITE_EXECUTION_MARKER="$_int2_marker"
 
-printf '%s\n' "INT2_CASES_STARTED expected=9" >> "$_int2_bootstrap_log"
+printf '%s\n' "INT2_CASES_STARTED expected=10" >> "$_int2_bootstrap_log"
 (
   cd "$_int2_repo"
   npm run build
@@ -234,9 +234,9 @@ printf '%s\n' "INT2_CASES_STARTED expected=9" >> "$_int2_bootstrap_log"
 )
 
 _int2_executed="$(tr -d '[:space:]' < "$_int2_marker")"
-test "$_int2_executed" = "9" \
+test "$_int2_executed" = "10" \
   || {
-    echo "INT-2 suite executed $_int2_executed cases; expected 9" >&2
+    echo "INT-2 suite executed $_int2_executed cases; expected 10" >&2
     exit 1
   }
 _int2_elapsed="$(( $(date +%s) - _int2_started ))"
