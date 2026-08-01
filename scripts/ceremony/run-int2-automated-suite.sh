@@ -18,6 +18,12 @@ _int2_git_probe=""
 # the evidence directory: they are transient, and CI uploads the evidence.
 _int2_worker_pidfile="$_int2_root/worker-pids.txt"
 _int2_run_containers_before="$_int2_root/run-containers-before.txt"
+# The workspace half of the same leak family (#625): the Harness Docker tier
+# roots run workspaces under a persistent shared directory, and a run that
+# dies before destroy() leaves its agent-runtime-<run_id> directory behind.
+# INT2_WORKSPACE_ROOT exists for the unit tests; operators never set it.
+_int2_workspaces_before="$_int2_root/workspaces-before.txt"
+_int2_workspace_root="${INT2_WORKSPACE_ROOT:-$HOME/.agent-runtime/environments}"
 
 # shellcheck source=scripts/ceremony/lib/int2-reap.sh
 source "$_int2_repo/scripts/ceremony/lib/int2-reap.sh"
@@ -53,6 +59,11 @@ _int2_cleanup() {
   # The workers are gone, so no new run container can appear underneath this.
   int2_reap_run_containers \
     "$_int2_run_containers_before" "$_int2_bootstrap_log" || true
+  # After the containers, so no removed container's bind mount still points
+  # at a directory being deleted (#625 — the workspace half of the reap).
+  int2_reap_workspaces \
+    "$_int2_workspaces_before" "$_int2_workspace_root" "$_int2_bootstrap_log" \
+    || true
   docker rm --force "$_int2_harness_db" "$_int2_reference_db" \
     >/dev/null 2>&1 || true
   case "$_int2_git_probe" in
@@ -261,6 +272,18 @@ int2_reap_snapshot_run_containers "$_int2_run_containers_before" \
   }
 printf '%s\n' "INT2_RUN_CONTAINER_SNAPSHOT spared=$(
   grep -c . "$_int2_run_containers_before" 2>/dev/null || echo 0
+)" >> "$_int2_bootstrap_log"
+# The workspace snapshot shares the container snapshot's boundary: everything
+# under the root right now is somebody else's — possibly an operator's live
+# ceremony workspace — and the trap must not touch it.
+int2_reap_snapshot_workspaces "$_int2_workspaces_before" "$_int2_workspace_root" \
+  || {
+    echo "INT2_WORKSPACE_SNAPSHOT_FAILED: cannot list existing agent-runtime-* workspaces" \
+      | tee -a "$_int2_bootstrap_log" >&2
+    exit 35
+  }
+printf '%s\n' "INT2_WORKSPACE_SNAPSHOT spared=$(
+  grep -c . "$_int2_workspaces_before" 2>/dev/null || echo 0
 )" >> "$_int2_bootstrap_log"
 
 printf '%s\n' "INT2_CASES_STARTED expected=10" >> "$_int2_bootstrap_log"
