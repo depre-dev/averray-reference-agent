@@ -90,9 +90,27 @@ cd "$REFERENCE_CHECKOUT"
 npm ci
 npm run build
 
+# Piped into the container rather than run with a host `psql`: the ceremony
+# needs no host Postgres client, and on a machine without one the naive loop
+# fails per-migration while the surrounding `&&` chain still reports success.
+# This is the form the automated suite already proves works.
+int2_migrations_ok=1
 for migration in ops/migrations/*.sql; do
-  psql "$DATABASE_URL" --set ON_ERROR_STOP=1 --file "$migration"
+  docker exec -i int2-reference-postgres \
+    psql -U postgres -d reference_ceremony \
+      --set ON_ERROR_STOP=1 -q < "$migration" >/dev/null \
+    || { echo "FAILED: $(basename "$migration")" >&2; int2_migrations_ok=0; break; }
 done
+test "$int2_migrations_ok" = 1 || { echo "migrations failed; stop here" >&2; }
+```
+
+Verify the outcome rather than the exit code — `agent_tasks` must exist:
+
+```sh
+docker exec int2-reference-postgres \
+  psql -U postgres -d reference_ceremony -At \
+  -c "select table_name from information_schema.tables
+      where table_schema='public' order by 1"
 ```
 
 ### 1.3 Create and pin the pilot profile
@@ -741,6 +759,42 @@ container.
    **capacity** provider, skip the worst-case computation — there is no rate to
    multiply — and record the tier and quota unit instead, with the same
    identity and endpoint-host fields:
+
+   For a **capacity** provider there is no rate to multiply, so the worst-case
+   computation is skipped entirely and the evidence records what was actually
+   bought:
+
+   ```sh
+   export SECTION3_TOKEN_CAP=8000
+   export SECTION3_ENDPOINT_HOST="$(
+     node --input-type=module -e \
+       'process.stdout.write(new URL(process.argv[1]).host)' \
+       "$HARNESS_MODEL_BASE_URL"
+   )"
+
+   jq -n \
+     --arg modelRef "$HARNESS_MODEL_REF" \
+     --arg endpointHost "$SECTION3_ENDPOINT_HOST" \
+     --arg costModel "$SECTION3_COST_MODEL" \
+     --arg rateSource "$SECTION3_RATE_SOURCE" \
+     --arg capacityTier "$SECTION3_CAPACITY_TIER" \
+     --arg quotaUnit "$SECTION3_CAPACITY_QUOTA_UNIT" \
+     --argjson tokenCap "$SECTION3_TOKEN_CAP" \
+     --argjson marginalUsd "$SECTION3_MARGINAL_USD" \
+     '{
+       modelRef: $modelRef,
+       endpointHost: $endpointHost,
+       costModel: $costModel,
+       rateSource: $rateSource,
+       capacityTier: $capacityTier,
+       capacityQuotaUnit: $quotaUnit,
+       tokenCap: $tokenCap,
+       marginalUsd: $marginalUsd,
+       calculation: "capacity tier: no per-token rate exists; modelTokens is the operative limit"
+     }' > "$CEREMONY_ROOT/evidence/section3-model-budget.json"
+   ```
+
+   For a **per_token** provider, compute the ceiling and record the rates:
 
    ```sh
    export SECTION3_TOKEN_CAP=8000
