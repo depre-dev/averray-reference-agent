@@ -44,6 +44,14 @@ export interface SolvencyPool {
   addressLabel?: string;
 }
 
+/** Can the #Ops channel receive anything? Instrument health, not product health. */
+export interface BuzzDeliveryView {
+  status: "off" | "armed" | "ok" | "failing";
+  detail: string;
+  lastOkAt?: number;
+  lastFailureAt?: number;
+}
+
 export interface SolvencySnapshot {
   pools: SolvencyPool[];
   /** Honest runway note, e.g. "≈ 6 payouts to floor" or "pending settlement data". */
@@ -223,6 +231,8 @@ export interface ProductHealth {
   flow?: MoneyPathSnapshot;
   history?: HealthHistory;
   remediation?: RemediationStatus;
+  /** #Ops delivery health — see BuzzDeliveryView. */
+  buzz?: BuzzDeliveryView;
   /** The monitor's own build vs main — "is this board current?". */
   self?: SelfFreshness;
   /**
