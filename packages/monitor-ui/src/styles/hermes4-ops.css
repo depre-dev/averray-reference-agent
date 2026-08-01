@@ -376,6 +376,35 @@ body,
   line-height: 1.45;
   color: var(--h4-muted);
 }
+/* ---- pool source address ---------------------------------------
+   The wallet a balance was read from. Deliberately quiet: it is reference
+   material an operator goes looking for, not something that should pull the
+   eye away from the number or the floor. Shown in full — a truncated address
+   cannot answer "which multisig is this?", which is the only reason to put it
+   on the board at all. */
+.ops-pool-addr {
+  display: block;
+  font-family: var(--h4-font-mono);
+  font-size: 9.5px;
+  line-height: 1.5;
+  color: var(--h4-muted);
+  /* Long hex must never widen the panel and force the meters to reflow. */
+  overflow-wrap: anywhere;
+}
+.ops-pool-addr-hex {
+  /* Selectable as one unit so a double-click copies the whole address. */
+  user-select: all;
+  color: var(--h4-ink-2);
+  opacity: 0.75;
+}
+.ops-pool-addr-label::before {
+  content: " · ";
+  opacity: 0.6;
+}
+.ops-pool--unfloored .ops-pool-addr {
+  margin-top: 2px;
+}
+
 .ops-pool-amount--quiet {
   font-size: 16px;
   font-weight: 400;
