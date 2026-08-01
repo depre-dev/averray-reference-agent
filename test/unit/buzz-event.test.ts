@@ -4,11 +4,13 @@ import { schnorr } from "@noble/curves/secp256k1";
 import {
   BuzzEventError,
   KIND_CLIENT_AUTH,
+  KIND_PROFILE,
   KIND_STREAM_MESSAGE,
   MAX_CONTENT_BYTES,
   agentPubkey,
   authTagFromConfig,
   buildAuthEvent,
+  buildProfileEvent,
   buildStreamMessage,
   computeEventId,
   serializeForId,
@@ -150,6 +152,55 @@ describe("buildStreamMessage", () => {
   it("omits the auth tag when none is supplied", () => {
     const event = buildStreamMessage({ agentPubkeyHex: AGENT_PUBKEY, channelId: CHANNEL, content: "x", createdAt: 1 });
     expect(event.tags).toEqual([["h", CHANNEL]]);
+  });
+});
+
+describe("buildProfileEvent", () => {
+  it("is kind 0 with a JSON object of the set fields and no channel tag", () => {
+    // A profile is not addressed to a channel — it describes the KEY, and every
+    // client that renders any of its messages reads it.
+    const event = buildProfileEvent({
+      agentPubkeyHex: AGENT_PUBKEY,
+      profile: { displayName: "Hermes", name: "hermes", about: "Averray ops monitor." },
+      createdAt: 1713956400,
+      authTag: AUTH_TAG,
+    });
+    expect(event.kind).toBe(KIND_PROFILE);
+    expect(event.tags).toEqual([AUTH_TAG]);
+    expect(JSON.parse(event.content)).toEqual({
+      display_name: "Hermes",
+      name: "hermes",
+      about: "Averray ops monitor.",
+    });
+  });
+
+  it("omits unset and empty fields rather than writing empty strings", () => {
+    // An empty string is a VALUE in kind 0 — it would blank the field for every
+    // reader, which is not the same as leaving it alone.
+    const event = buildProfileEvent({
+      agentPubkeyHex: AGENT_PUBKEY,
+      profile: { displayName: "Hermes", about: "", picture: undefined },
+      createdAt: 1,
+    });
+    expect(JSON.parse(event.content)).toEqual({ display_name: "Hermes" });
+    expect(event.tags).toEqual([]);
+  });
+
+  it("refuses a wholly empty profile", () => {
+    // Publishing {} would REPLACE the existing profile with nothing, since kind
+    // 0 is replaceable. Silently erasing a name is worse than refusing.
+    expect(() =>
+      buildProfileEvent({ agentPubkeyHex: AGENT_PUBKEY, profile: {}, createdAt: 1 }),
+    ).toThrow(/empty profile/);
+  });
+
+  it("signs and verifies like any other event", () => {
+    const signed = signEvent(
+      buildProfileEvent({ agentPubkeyHex: AGENT_PUBKEY, profile: { displayName: "Hermes" }, createdAt: 1 }),
+      AGENT_SECRET,
+    );
+    expect(signed.id).toMatch(/^[0-9a-f]{64}$/);
+    expect(signed.sig).toHaveLength(128);
   });
 });
 
