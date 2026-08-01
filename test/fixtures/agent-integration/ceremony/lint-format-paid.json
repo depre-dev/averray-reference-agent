@@ -1,0 +1,44 @@
+{
+  "workItemId": "ceremony-lint-format-paid-001",
+  "correlationId": "ceremony-lint-format-paid-001",
+  "taskKind": "lint_format",
+  "title": "Add one bounded paid-ceremony pre-flight note (adequate budget)",
+  "objective": "Append one concise paragraph to docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md stating that a paid real-model ceremony requires a three-case acceptance pre-flight before credentials are exported, while preserving the surrounding guidance and clean formatting.",
+  "whyNow": "The 2026-08-01 \u00a73 run exhausted an 8000-token budget on reconnaissance before it could write. This fixture tests whether the budget, not the model, was the binding constraint.",
+  "requestedBy": {
+    "type": "operator",
+    "id": "pilot-operator"
+  },
+  "repository": {
+    "nameWithOwner": "depre-dev/averray-reference-agent",
+    "baseRevision": "8b94278578913b7cd7aa1acb276db48613090c7b",
+    "allowedPaths": [
+      "docs/**",
+      "test/**"
+    ],
+    "forbiddenPaths": [
+      "contracts/**",
+      "ops/**",
+      "scripts/ops/**",
+      ".github/**"
+    ]
+  },
+  "profile": "coding-change-pilot",
+  "acceptanceCriteria": [
+    {
+      "id": "format-command",
+      "type": "command",
+      "command": "test -n \"$(git diff --numstat)\" && git diff --check",
+      "required": true
+    }
+  ],
+  "budget": {
+    "elapsedSeconds": 180,
+    "modelTokens": 24000,
+    "toolCalls": 30,
+    "estimatedUsdMicros": null
+  },
+  "deadline": "2027-12-31T23:59:59.000Z",
+  "riskTier": "low",
+  "selectionReason": "A required paragraph in a tracked allowlisted plan is bounded, reversible, and produces a verifier-visible diff."
+}

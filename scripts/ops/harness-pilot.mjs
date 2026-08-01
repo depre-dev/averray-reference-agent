@@ -9,6 +9,7 @@ const FIXTURES = new Set([
   "add-unit-test",
   "small-refactor",
   "lint-format",
+  "lint-format-paid",
   "lint-format-green",
   "lint-format-red",
 ]);
