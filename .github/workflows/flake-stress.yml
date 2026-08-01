@@ -61,6 +61,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build workspace packages
+        # `tsc -b` produces the dist entries that @avg/* imports resolve to.
+        # Without it vitest fails to COLLECT every suite file with
+        # "Failed to resolve entry for package @avg/mcp-common" — which reads
+        # as a mass test failure rather than a missing build. ci.yml's node job
+        # gets this from its Typecheck step; this job runs the same suite and
+        # needs the same prerequisite.
+        run: npm run typecheck
+
       - name: Repeat the full suite
         env:
           ITERATIONS: ${{ github.event.inputs.iterations || '10' }}
