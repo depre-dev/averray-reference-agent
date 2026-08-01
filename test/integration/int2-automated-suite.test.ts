@@ -33,6 +33,7 @@ import {
   INT2_HARNESS_PIN,
   INT2_PILOT_CAPABILITIES,
   Int2EvidenceError,
+  HALT_TOOL_COMMAND,
   verifyInt2Evidence,
   verifyScriptedPairPreflight,
 } from "../../scripts/ceremony/int2-evidence.mjs";
@@ -78,7 +79,11 @@ const EXPECTED_CASE_COUNT = 10;
 const TEST_TIMEOUT_MS = 240_000;
 const TERMINAL_WAIT_MS = 180_000;
 const HARNESS_STATE_WAIT_MS = 90_000;
-const HALT_COMMAND = "sleep 30";
+// The one definition lives in int2-evidence.mjs, which is also what the
+// verifier asserts against. Two copies drifted the moment one was widened
+// past the kernel's shell.run ceiling — that is what turned a one-line
+// fixture change into a red INT-2 job.
+const HALT_COMMAND = HALT_TOOL_COMMAND;
 const SENTINEL_RUN_ID = "00000000-0000-4000-8000-000000000000";
 
 describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {

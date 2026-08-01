@@ -52,7 +52,14 @@ const SECTION3_CORRECT_TOOL_COMMAND =
   "printf '%b' '\\nA paid real-model ceremony requires a three-case acceptance pre-flight before credentials are exported.\\n' >> docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md";
 const SECTION3_INCORRECT_TOOL_COMMAND =
   "printf '%b' '\\nA paid real-model ceremony requires a three-case acceptance pre-flight before credentials are exported.   \\n' >> docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md";
-const HALT_TOOL_COMMAND = "sleep 30";
+// Must EXCEED the kernel's shell.run ceiling, not equal it. That ceiling is
+// `min(timeout_seconds or 30, 30)` in capabilities/native.py, so `sleep 30` is
+// a literal tie and the tie decides whether the capability completes or times
+// out — different run paths from ~10ms of scheduler noise. Exported so the
+// integration suite uses THIS definition rather than keeping its own copy:
+// the two drifted once already, and the second copy is what turned a one-line
+// fixture change into a red INT-2 job.
+export const HALT_TOOL_COMMAND = "sleep 45";
 const CASE_EXPECTATIONS = Object.freeze({
   green: Object.freeze({
     lifecycle: "handoff_ready",
