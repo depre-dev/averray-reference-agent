@@ -76,6 +76,27 @@ function clockOf(at: number | null | undefined): string {
   return Number.isNaN(d.getTime()) ? "—" : `${d.toISOString().slice(11, 19)}Z`;
 }
 
+/**
+ * An RPC endpoint, short enough to sit on one line.
+ *
+ * `remediation.activeEndpoint` is a full URL in production —
+ * "https://services.polkadothub-rpc.com/mainnet/" — which the desktop hid
+ * behind an ellipsis and the phone could not hide at all: it became the longest
+ * thing on the trust line. The host is the part that identifies WHICH endpoint
+ * we are on, which is the only question the row answers.
+ */
+export function shortEndpoint(endpoint: string | null | undefined): string | null {
+  const raw = (endpoint ?? "").trim();
+  if (!raw) return null;
+  try {
+    return new URL(raw).host || raw;
+  } catch {
+    // Already a short name ("rpc-1") or something unparseable — show it as-is
+    // rather than dropping the only identifying detail on the row.
+    return raw;
+  }
+}
+
 /** "10:30:00" from an ISO string, or undefined when there is nothing to show. */
 function isoClock(iso: string | undefined): string | undefined {
   if (!iso) return undefined;
@@ -211,12 +232,19 @@ export function trustRows(input: {
   } else {
     rows.push({
       key: "RPC",
-      value: rem.detail,
+      value: shortRpcDetail(rem),
       tone: rem.state === "halted" ? "red" : rem.state === "failover" ? "degraded" : "ok",
     });
   }
 
   return rows;
+}
+
+/** The remediation detail with any full URL in it reduced to its host. */
+function shortRpcDetail(rem: NonNullable<ProductHealth["remediation"]>): string {
+  const host = shortEndpoint(rem.activeEndpoint);
+  if (!host) return rem.detail;
+  return rem.detail.replace(/https?:\/\/\S+/g, host);
 }
 
 function monitorRow(self: SelfFreshness | undefined): TrustRow {

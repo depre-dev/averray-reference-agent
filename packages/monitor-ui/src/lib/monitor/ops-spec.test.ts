@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   DATA_STALE_FALLBACK_MS,
   METER_RUNGS,
+  shortEndpoint,
   staleAfterMs,
   opsVerdict,
   payoutView,
@@ -336,6 +337,34 @@ describe("trustRows", () => {
       nowMs: NOW,
     });
     expect(rows.find((r) => r.key === "STREAM")!.value).toBe("live · last event 10:30:00");
+  });
+
+  // Caught on the phone, which cannot hide it behind an ellipsis the way the
+  // desktop did: activeEndpoint is a full URL in prod and took the whole line.
+  test("the RPC endpoint shows its host, not the whole URL", () => {
+    expect(shortEndpoint("https://services.polkadothub-rpc.com/mainnet/")).toBe(
+      "services.polkadothub-rpc.com",
+    );
+    const health: ProductHealth = {
+      ...OPS_FIXTURE_NOMINAL,
+      remediation: {
+        state: "armed",
+        enabled: true,
+        activeEndpoint: "https://services.polkadothub-rpc.com/mainnet/",
+        onBackup: false,
+        detail: "armed · primary https://services.polkadothub-rpc.com/mainnet/",
+      },
+    };
+    const rpc = trustRows({ health, streamDegraded: false, streamStatus: "open", nowMs: health.at! })
+      .find((r) => r.key === "RPC")!;
+    expect(rpc.value).toBe("armed · primary services.polkadothub-rpc.com");
+    expect(rpc.value).not.toContain("https://");
+  });
+
+  test("a short endpoint name is left exactly as it is", () => {
+    expect(shortEndpoint("rpc-1")).toBe("rpc-1");
+    expect(shortEndpoint("")).toBeNull();
+    expect(shortEndpoint(null)).toBeNull();
   });
 
   test("no failover configured is awaiting, not a green 'armed'", () => {

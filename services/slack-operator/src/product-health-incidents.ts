@@ -40,11 +40,17 @@ export function reconcileIncidents(input: {
   persisted: readonly ProductHealthIncident[];
   derived: readonly ProductHealthIncident[];
   limit: number;
+  /** Probe → status in the LATEST snapshot. Lets an episode whose samples are
+   *  gone be closed on present evidence. Omit it and nothing closes this way. */
+  currentProbeStatus?: ReadonlyMap<string, "ok" | "degraded" | "red">;
+  /** Clock for the recovery stamp; injected so the close is deterministic. */
+  nowMs?: number;
 }): { merged: ProductHealthIncident[]; writes: ProductHealthIncident[] } {
   const byId = new Map<string, ProductHealthIncident>();
   for (const incident of input.persisted) byId.set(incident.id, incident);
 
   const writes: ProductHealthIncident[] = [];
+  const derivedIds = new Set(input.derived.map((i) => i.id));
   for (const incident of input.derived) {
     const existing = byId.get(incident.id);
     // New incident, or one that changed state (usually open → closed). Comparing
@@ -52,6 +58,42 @@ export function reconcileIncidents(input: {
     if (!existing || !sameIncident(existing, incident)) {
       writes.push(incident);
       byId.set(incident.id, incident);
+    }
+  }
+
+  // ORPHANS — an episode that was open when the process restarted.
+  //
+  // The header above says the worst case is "an incident that stays open until
+  // the next tick reconciles it". The next tick cannot. Closing is driven by the
+  // DERIVED set, which is computed from the in-memory ring, and a restart empties
+  // that ring — so the episode simply stops being derived, the persisted open
+  // record is never overwritten, and it stays open forever.
+  //
+  // Seen on mainnet: the board read "money_path degraded for 1h 33m" beside a
+  // green money_path probe, counting upward. That is a permanently-lit alarm,
+  // and a board that grows those teaches its operator to ignore the footer.
+  //
+  // So an open record is closed when its probe is CURRENTLY ok and this buffer
+  // no longer knows about the episode. The recovery time is stamped now and the
+  // note says the real one is unknown, because the samples that would have told
+  // us are gone. An honest approximate close beats an eternal open one — and
+  // inventing a plausible recovery time would be worse than either.
+  const status = input.currentProbeStatus;
+  if (status) {
+    const closedAt = input.nowMs ?? Date.now();
+    for (const incident of byId.values()) {
+      if (incident.endedAt != null) continue;
+      if (derivedIds.has(incident.id)) continue; // this buffer still sees it
+      // Not ok, or a probe we have no reading for at all → leave it open. An
+      // incident must never be closed by absence of evidence.
+      if (status.get(incident.probe) !== "ok") continue;
+      const closed: ProductHealthIncident = {
+        ...incident,
+        endedAt: closedAt,
+        note: `${incident.note ? `${incident.note} · ` : ""}recovered while the monitor was restarting — exact recovery time unknown`,
+      };
+      writes.push(closed);
+      byId.set(closed.id, closed);
     }
   }
 

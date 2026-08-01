@@ -19,7 +19,7 @@
 import type { HealthHistory, ProductHealth, SolvencyPool } from "./product-health.js";
 import { deriveOpsVerdict, verdictProbeLabel } from "@avg/schemas/ops-verdict";
 import { formatAgo, formatAmount, formatDuration, groupProbesByPillar, probeOpsTone, type OpsTone } from "./ops-model.js";
-import { poolMeter, staleAfterMs, type MeterView } from "./ops-spec.js";
+import { poolMeter, shortEndpoint, staleAfterMs, type MeterView } from "./ops-spec.js";
 
 // ── the verdict field ───────────────────────────────────────────────────────
 
@@ -161,7 +161,9 @@ export function phoneTrust(input: {
 
   const rem = health.remediation;
   if (rem?.enabled && rem.state !== "off") {
-    parts.push(rem.activeEndpoint ?? rem.state);
+    // The host, not the URL — in prod this is a full endpoint and it took the
+    // whole line, which on a phone is the entire trust budget.
+    parts.push(shortEndpoint(rem.activeEndpoint) ?? rem.state);
   }
 
   const tone: OpsTone = streamDegraded
