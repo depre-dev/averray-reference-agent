@@ -136,7 +136,18 @@ TypeScript monorepo: npm workspaces (`packages/*`, `services/*`), Node ≥ 22, E
   `dispatch` Compose profile and `HARNESS_DISPATCH_ENABLED=false` by default.
   At concurrency one it acts only on operator-approved, hash-pinned AgentTasks,
   honors `HALT_FILE`, and cannot approve, deny, release, merge, deploy, or open
-  a PR.
+  a PR through the dispatch/reconciliation loop. INT-3a can construct a verified,
+  content-addressed PR payload but has no network client. INT-3b adds a separate,
+  operator-side sender that consumes only that result; it is not wired into the
+  agent container, dispatcher loop, production Compose profile, or a CLI. Before
+  its single PR-create call it re-reads the live base and HALT, verifies an actual
+  selected-repository GitHub App scope for exactly one repository, and adopts an
+  existing exact PR by deterministic head. It can create the verified head and
+  open a PR, but cannot merge, force-push, close, reopen, comment, edit branch
+  protection, push a default branch, or address another repository. The first
+  live send remains an explicit operator ceremony; no credential is provisioned
+  by the build. See
+  [docs/HARNESS_INT3B_CREDENTIAL_RUNBOOK.md](docs/HARNESS_INT3B_CREDENTIAL_RUNBOOK.md).
 - **Self-healing (B2, off by default).** On a failure signal (failed testbed
   mission, failed deploy/verification), Hermes auto-**proposes** a routed fix
   task (non-high-risk) — which still lands `proposed` and flows through the same
@@ -284,7 +295,15 @@ security-sensitive surface.
   move real funds, never raise policy budgets to enable spend without explicit
   operator sign-off.
 - **`HALT_FILE` is the kill switch.** Mutating MCP tools fail closed when the halt
-  file exists (`assertNoKillSwitch`). Don't add code paths that bypass it.
+  file exists (`assertNoKillSwitch`). The INT-3b sender independently re-reads
+  global/repository HALT immediately before its PR-create call. Don't add code
+  paths that bypass either check.
+- **INT-3b GitHub write stays operator-side and single-repository.** Its short-lived
+  GitHub App installation token is injected only into the operator-owned sender
+  process, never the agent/model/Compose environments or a CLI argument. Safe
+  evidence records the installation identity, selected repository, and actual
+  issued permissions but never the token. Rotation and revocation are defined in
+  [docs/HARNESS_INT3B_CREDENTIAL_RUNBOOK.md](docs/HARNESS_INT3B_CREDENTIAL_RUNBOOK.md).
 
 ---
 
