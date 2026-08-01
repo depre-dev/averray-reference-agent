@@ -12,25 +12,42 @@
 // hardcoded 604800 — the window is a live on-chain read and a constant here
 // would silently diverge the day it changes.
 //
-// The rejected DEADLINE needs `rejectedAt` from EscrowCore, and this probe does
-// not have it. Investigated against mainnet rather than assumed:
+// The rejected DEADLINE comes from EscrowCore's job struct, word 17. That index
+// was CALIBRATED against the chain, not taken on trust — three independent
+// confirmations agree:
 //
-//   · `jobs(bytes32)` is selector 0x38ed7cfc and DOES answer on EscrowCore
-//     0x590EbE30…C3fC — it returns 25 words, and word[23]=500 (protocolFeeBps,
-//     the live 5% fee) confirms the struct is the right one.
-//   · In a completed job, words[17] and [18] hold timestamps 808s and 3040s
-//     after the catalog's claimedAt. Both are plausible submit/resolve stamps.
-//     Every other timestamp slot is zero.
-//   · No external job has EVER been rejected, so there is nothing to calibrate
-//     which word is `rejectedAt` against.
+//   · word[23] = 500 — the live protocolFeeBps, proving the struct is the right one
+//   · word[17] = 1785580752 — exactly the timestamp of block 18,926,650, the
+//     block containing the rejection transaction
+//   · word[18] = 1785582984 — exactly the timestamp of block 18,927,696, the
+//     block containing the openDispute transaction
 //
-// Guessing the word would produce a confident countdown to the wrong instant on
-// the one number where being wrong costs a worker their bond. So the deadline
-// read is CONFIGURABLE and unset by default, and this probe reports rejected
-// rows it cannot time as DEGRADED with an explicit reason — never as green, and
-// never with an invented deadline. See PRODUCT_HEALTH_ESCROW_REJECTED_AT_WORD.
+// Slot map (25 words, zero-indexed):
 //
-// To close it: one rejected job to calibrate against, or the EscrowCore ABI.
+//    0 poster            7 opsReserve          14 claimFeeBps          21 protocolFee
+//    1 worker            8 contingencyReserve  15 claimEconomicsWaived 22 protocolFeeReleased
+//    2 asset             9 released            16 rejectingVerifier    23 protocolFeeBps
+//    3 verifierMode     10 claimExpiry         17 rejectedAt           24 protocolFeeWaived
+//    4 category         11 claimStake          18 disputedAt
+//    5 specHash         12 claimStakeBps       19 payoutMode
+//    6 reward           13 claimFee            20 state
+//
+// ── WHY `rejectedAt != 0` IS NOT THE TRIGGER ────────────────────────────────
+//
+// The job that supplied the calibration also taught the trap: it was rejected
+// and THEN disputed, which is why both stamps are set. A disputed job keeps its
+// rejectedAt forever, but once it reaches Disputed the slash window is DEAD —
+// finalizeRejectedJob requires state Rejected.
+//
+// So the catalog's `state` gates the bucket and word[17] only supplies the
+// arithmetic. Keying on a non-zero rejectedAt would count down toward a slash
+// that can no longer happen, and a permanently-lit false alarm costs exactly
+// what a false green costs: an operator who stops reading the board.
+//
+// Belt and braces on top of that: word[20] is the ON-CHAIN state, and 4
+// (Rejected) is the only value where the countdown is real. The catalog is a
+// projection and can lag the chain, so a row it still calls "rejected" may
+// already be disputed on-chain. The chain wins.
 
 import type { ProbeResult, ProbeStatus } from "./product-health.js";
 
@@ -144,13 +161,29 @@ function humanise(ms: number): string {
   return `${Math.round(hours / 24)}d`;
 }
 
+/** EscrowCore job state where a slash countdown is real. */
+export const CHAIN_STATE_REJECTED = 4;
+
+/** Word 17 — calibrated against two known transaction blocks. See the header. */
+export const DEFAULT_REJECTED_AT_WORD = 17;
+/** Word 20 — the on-chain state, used to cross-check the catalog projection. */
+export const STATE_WORD = 20;
+
+export interface RejectionRead {
+  /** word[17] as epoch ms. Undefined when the read failed. */
+  rejectedAtMs?: number;
+  /** word[20]. Undefined when the read failed. */
+  chainState?: number;
+}
+
 export interface DecideExternalFunnelInput {
   /** Catalog rows. `null` means the fetch FAILED — never an empty funnel. */
   rows: readonly ExternalJobRow[] | null;
   /** From /poster/onboarding.workerFacts.disputeWindow.seconds. Null if unread. */
   disputeWindowSeconds: number | null;
-  /** rejectedAt per job id (epoch ms), for rows we could time. Absent = unreadable. */
-  rejectedAtMs?: ReadonlyMap<string, number>;
+  /** Per-job chain read. A missing entry means UNREADABLE, which is not the
+   *  same as a window that is closed — see decideExternalFunnel. */
+  rejections?: ReadonlyMap<string, RejectionRead>;
   nowMs: number;
   /** chainHaltStatus(chainId, override) — red on mainnet, degraded on testnet. */
   haltStatus: ProbeStatus;
@@ -180,6 +213,11 @@ export function decideExternalFunnel(input: DecideExternalFunnelInput): External
   }
 
   const buckets = emptyBuckets();
+  // Rejected rows split three ways, and conflating any two would lie:
+  // a live countdown, a window the chain says is already closed, and one we
+  // simply could not read.
+  let unreadableRejections = 0;
+  let windowClosed = 0;
   for (const row of input.rows) {
     const bucket = bucketFor(row);
     const summary = buckets[bucket];
@@ -203,13 +241,21 @@ export function decideExternalFunnel(input: DecideExternalFunnelInput): External
       }
     }
     if (bucket === "rejected_window_running") {
-      const rejectedAt = id ? input.rejectedAtMs?.get(id) : undefined;
-      if (rejectedAt !== undefined && input.disputeWindowSeconds !== null) {
-        const deadline = rejectedAt + input.disputeWindowSeconds * 1000;
+      const read = id ? input.rejections?.get(id) : undefined;
+      // The chain overrules the catalog. A row the projection still calls
+      // "rejected" may already be Disputed on-chain, and finalizeRejectedJob
+      // cannot fire in that state — counting down toward it would be a false
+      // alarm, which costs the same trust as a false green.
+      if (read?.chainState !== undefined && read.chainState !== CHAIN_STATE_REJECTED) {
+        windowClosed += 1;
+      } else if (read?.rejectedAtMs !== undefined && input.disputeWindowSeconds !== null) {
+        const deadline = read.rejectedAtMs + input.disputeWindowSeconds * 1000;
         if (summary.oldestDeadlineMs === undefined || deadline < summary.oldestDeadlineMs) {
           summary.oldestDeadlineMs = deadline;
           if (id) summary.leadJobId = id;
         }
+      } else {
+        unreadableRejections += 1;
       }
     }
   }
@@ -226,7 +272,7 @@ export function decideExternalFunnel(input: DecideExternalFunnelInput): External
 
   const rejected = buckets.rejected_window_running;
   if (rejected.count > 0) {
-    if (rejected.oldestDeadlineMs === undefined) {
+    if (rejected.oldestDeadlineMs === undefined && unreadableRejections > 0) {
       // Rejected rows exist but we cannot time them. NOT green: a bond may be
       // counting down and we would be reporting silence as safety.
       return {
@@ -234,13 +280,17 @@ export function decideExternalFunnel(input: DecideExternalFunnelInput): External
           name,
           status: "degraded",
           detail:
-            `${rejected.count} rejected in the dispute window, deadline UNREADABLE`
-            + ` — set PRODUCT_HEALTH_ESCROW_REJECTED_AT_WORD once the field is calibrated · ${detailParts.join(" · ")}`,
+            `${unreadableRejections} rejected with UNREADABLE deadline`
+            + ` — EscrowCore job read failed; a slash may be counting down unseen · ${detailParts.join(" · ")}`,
         },
         buckets,
         disputeWindowSeconds: input.disputeWindowSeconds,
       };
     }
+    // Every remaining rejected row is one the chain says is already past the
+    // slash window (disputed or resolved). Nothing is counting down, so nothing
+    // to raise — but it is worth saying so rather than reporting a bare zero.
+    if (rejected.oldestDeadlineMs !== undefined) {
     const remaining = rejected.oldestDeadlineMs - input.nowMs;
     const who = rejected.leadJobId ? `${shortJobId(rejected.leadJobId)} ` : "";
     if (remaining <= DISPUTE_HALT_MS) {
@@ -268,6 +318,12 @@ export function decideExternalFunnel(input: DecideExternalFunnelInput): External
         disputeWindowSeconds: input.disputeWindowSeconds,
       };
     }
+    }
+  }
+  // Say when a rejected row is NOT a risk, so a nonzero count in the detail
+  // line cannot be misread as a live countdown.
+  if (windowClosed > 0) {
+    detailParts.push(`${windowClosed} past the slash window (chain)`);
   }
 
   const review = buckets.submitted_awaiting_review;
@@ -355,20 +411,19 @@ async function getJson(
 }
 
 /**
- * Read `rejectedAt` for one job.
+ * Read a job's rejection facts from EscrowCore in ONE call.
  *
- * `word` is the 0-based index into the returned struct. It is deliberately
- * REQUIRED and has no default: the field could not be identified from live data
- * (no external job has ever been rejected), and a guessed index would produce a
- * confident countdown to the wrong instant. See the header.
+ * Both words come from the same 25-word struct, so reading `state` alongside
+ * `rejectedAt` is free — and it is the cross-check that stops a lagging catalog
+ * projection from producing a countdown toward a slash that can no longer fire.
  */
-export async function readRejectedAt(input: {
+export async function readJobRejection(input: {
   rpcUrl: string;
   escrowCore: string;
   jobId: string;
-  word: number;
+  rejectedAtWord: number;
   fetchImpl: typeof fetch;
-}): Promise<number | undefined> {
+}): Promise<RejectionRead> {
   const id = input.jobId.replace(/^0x/, "").padStart(64, "0");
   const res = await input.fetchImpl(input.rpcUrl, {
     method: "POST",
@@ -380,17 +435,24 @@ export async function readRejectedAt(input: {
       params: [{ to: input.escrowCore, data: `${ESCROW_JOBS_SELECTOR}${id}` }, "latest"],
     }),
   });
-  if (!res.ok) return undefined;
+  if (!res.ok) return {};
   const json = (await res.json()) as { result?: unknown };
-  if (typeof json.result !== "string") return undefined;
+  if (typeof json.result !== "string") return {};
   const hex = json.result.slice(2);
-  const raw = hex.slice(input.word * 64, (input.word + 1) * 64);
-  if (raw.length !== 64) return undefined;
-  const seconds = Number(BigInt(`0x${raw}`));
-  // Zero means "never rejected"; a nonsensical value means we read the wrong
-  // word and must not be treated as a deadline.
-  if (!Number.isFinite(seconds) || seconds <= 0) return undefined;
-  return seconds * 1000;
+  const word = (index: number): bigint | undefined => {
+    const raw = hex.slice(index * 64, (index + 1) * 64);
+    return raw.length === 64 ? BigInt(`0x${raw}`) : undefined;
+  };
+  const rejectedAt = word(input.rejectedAtWord);
+  const state = word(STATE_WORD);
+  const out: RejectionRead = {};
+  // Zero means never rejected; a wildly out-of-range value means we read the
+  // wrong word and must not become a deadline.
+  if (rejectedAt !== undefined && rejectedAt > 0n && rejectedAt < 4294967295n) {
+    out.rejectedAtMs = Number(rejectedAt) * 1000;
+  }
+  if (state !== undefined && state <= 255n) out.chainState = Number(state);
+  return out;
 }
 
 /**
@@ -401,7 +463,7 @@ export async function probeExternalFunnel(input: {
   apiBaseUrl?: string;
   rpcUrl?: string;
   escrowCore?: string;
-  /** PRODUCT_HEALTH_ESCROW_REJECTED_AT_WORD. Unset = deadlines unreadable. */
+  /** PRODUCT_HEALTH_ESCROW_REJECTED_AT_WORD. Defaults to the calibrated 17. */
   rejectedAtWord?: number;
   catalogLimit?: number;
   nowMs: number;
@@ -428,21 +490,21 @@ export async function probeExternalFunnel(input: {
   const disputeWindowSeconds = disputeWindowFrom(onboarding.body);
 
   // Chain reads only for rejected rows, and only when the field is calibrated.
-  const rejectedAtMs = new Map<string, number>();
-  if (rows && input.rpcUrl && input.escrowCore && input.rejectedAtWord !== undefined) {
+  const rejections = new Map<string, RejectionRead>();
+  if (rows && input.rpcUrl && input.escrowCore) {
     for (const row of rows) {
       if (bucketFor(row) !== "rejected_window_running") continue;
       const jobId = typeof row.id === "string" ? row.id : undefined;
       if (!jobId) continue;
       try {
-        const at = await readRejectedAt({
+        const read = await readJobRejection({
           rpcUrl: input.rpcUrl,
           escrowCore: input.escrowCore,
           jobId,
-          word: input.rejectedAtWord,
+          rejectedAtWord: input.rejectedAtWord ?? DEFAULT_REJECTED_AT_WORD,
           fetchImpl: input.fetchImpl,
         });
-        if (at !== undefined) rejectedAtMs.set(jobId, at);
+        rejections.set(jobId, read);
       } catch {
         // Leave it unread — decideExternalFunnel reports that honestly rather
         // than letting one RPC hiccup hide a running slash countdown.
@@ -453,7 +515,7 @@ export async function probeExternalFunnel(input: {
   return decideExternalFunnel({
     rows,
     disputeWindowSeconds,
-    rejectedAtMs,
+    rejections,
     nowMs: input.nowMs,
     haltStatus: input.haltStatus,
     ...(catalog.error ? { fetchError: catalog.error } : {}),

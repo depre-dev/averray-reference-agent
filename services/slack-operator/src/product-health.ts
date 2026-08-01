@@ -524,9 +524,8 @@ export interface ProductHealthConfig {
    *  "degraded". Env: PRODUCT_HEALTH_HALT_SEVERITY. */
   haltSeverity: string;
   /** 0-based word index of `rejectedAt` in the EscrowCore job struct.
-   *  UNSET by default and deliberately so — the field could not be identified
-   *  from live data, and a guessed index would produce a confident countdown to
-   *  the wrong instant on a bond slash. See external-funnel.ts. */
+   *  Defaults to the calibrated 17 — verified against the chain, not an ABI.
+   *  See external-funnel.ts for the three confirmations. */
   escrowRejectedAtWord?: number;
   signerAddress?: string;
   usdcAddress?: string;

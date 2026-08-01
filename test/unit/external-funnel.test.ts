@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CHAIN_STATE_REJECTED,
   CLAIM_EXPIRY_WARN_MS,
   DISPUTE_HALT_MS,
   DISPUTE_WARN_MS,
@@ -20,6 +21,9 @@ const HOUR = 3_600_000;
 const WINDOW = 604800; // seconds — the live mainnet value, read not assumed
 
 const iso = (ms: number) => new Date(ms).toISOString();
+/** A chain read where the slash window is genuinely LIVE (state 4 = Rejected). */
+const live = (jobId: string, rejectedAtMs: number) =>
+  new Map([[jobId, { rejectedAtMs, chainState: CHAIN_STATE_REJECTED }]]);
 const decide = (over: Partial<Parameters<typeof decideExternalFunnel>[0]> = {}) =>
   decideExternalFunnel({
     rows: [],
@@ -83,28 +87,28 @@ describe("decideExternalFunnel — rejected dispute window", () => {
   const rejected = (id: string): ExternalJobRow => ({ id, state: "rejected" });
 
   it("names the item and the time in the verdict", () => {
-    const rejectedAtMs = new Map([[REAL_ID, NOW + 9 * HOUR - WINDOW * 1000]]);
-    const r = decide({ rows: [rejected(REAL_ID)], rejectedAtMs });
+    const rejections = live(REAL_ID, NOW + 9 * HOUR - WINDOW * 1000);
+    const r = decide({ rows: [rejected(REAL_ID)], rejections });
     expect(r.probe.status).toBe("red");
     expect(r.probe.detail).toContain("0xaa4b…");
     expect(r.probe.detail).toContain("slashes in 9h");
   });
 
   it("escalates to halt severity inside 12h and only degrades inside 48h", () => {
-    const at = (remaining: number) => new Map([[id("j"), NOW + remaining - WINDOW * 1000]]);
-    expect(decide({ rows: [rejected(id("j"))], rejectedAtMs: at(DISPUTE_HALT_MS - HOUR) }).probe.status).toBe("red");
-    expect(decide({ rows: [rejected(id("j"))], rejectedAtMs: at(DISPUTE_WARN_MS - HOUR) }).probe.status).toBe("degraded");
-    expect(decide({ rows: [rejected(id("j"))], rejectedAtMs: at(DISPUTE_WARN_MS + HOUR) }).probe.status).toBe("ok");
+    const at = (remaining: number) => live(id("j"), NOW + remaining - WINDOW * 1000);
+    expect(decide({ rows: [rejected(id("j"))], rejections: at(DISPUTE_HALT_MS - HOUR) }).probe.status).toBe("red");
+    expect(decide({ rows: [rejected(id("j"))], rejections: at(DISPUTE_WARN_MS - HOUR) }).probe.status).toBe("degraded");
+    expect(decide({ rows: [rejected(id("j"))], rejections: at(DISPUTE_WARN_MS + HOUR) }).probe.status).toBe("ok");
   });
 
   it("follows chainHaltStatus — a testnet halt is degraded, not red", () => {
-    const rejectedAtMs = new Map([[id("j"), NOW + HOUR - WINDOW * 1000]]);
-    expect(decide({ rows: [rejected(id("j"))], rejectedAtMs, haltStatus: "degraded" }).probe.status).toBe("degraded");
+    const rejections = live(id("j"), NOW + HOUR - WINDOW * 1000);
+    expect(decide({ rows: [rejected(id("j"))], rejections, haltStatus: "degraded" }).probe.status).toBe("degraded");
   });
 
   it("says LAPSED rather than a negative countdown once the window has passed", () => {
-    const rejectedAtMs = new Map([[id("j"), NOW - 2 * HOUR - WINDOW * 1000]]);
-    const r = decide({ rows: [rejected(id("j"))], rejectedAtMs });
+    const rejections = live(id("j"), NOW - 2 * HOUR - WINDOW * 1000);
+    const r = decide({ rows: [rejected(id("j"))], rejections });
     expect(r.probe.status).toBe("red");
     expect(r.probe.detail).toContain("LAPSED");
     expect(r.probe.detail).toContain("slashable now");
@@ -114,32 +118,77 @@ describe("decideExternalFunnel — rejected dispute window", () => {
     // Same rejectedAt, a shorter window → sooner deadline. If 604800 were baked
     // in, this would not move.
     const rejectedAt = NOW - 6 * HOUR;
-    const rejectedAtMs = new Map([[id("j"), rejectedAt]]);
-    const short = decide({ rows: [rejected(id("j"))], rejectedAtMs, disputeWindowSeconds: 8 * 3600 });
+    const rejections = live(id("j"), rejectedAt);
+    const short = decide({ rows: [rejected(id("j"))], rejections, disputeWindowSeconds: 8 * 3600 });
     expect(short.probe.status).toBe("red");
     expect(short.probe.detail).toContain("slashes in 2h");
-    const long = decide({ rows: [rejected(id("j"))], rejectedAtMs, disputeWindowSeconds: WINDOW });
+    const long = decide({ rows: [rejected(id("j"))], rejections, disputeWindowSeconds: WINDOW });
     expect(long.probe.status).toBe("ok");
   });
 
   it("rejected rows with UNREADABLE deadlines are degraded, never green", () => {
-    // The live gap: `rejectedAt`'s word offset in the EscrowCore struct is not
-    // yet calibrated. A bond may be counting down; reporting silence as safety
-    // would be the exact failure this probe exists to prevent.
-    const r = decide({ rows: [rejected(id("j"))], rejectedAtMs: new Map() });
+    // The word offset is calibrated now, so this is the RPC-failure path: the
+    // read did not come back. A bond may be counting down; reporting silence as
+    // safety would be the exact failure this probe exists to prevent.
+    const r = decide({ rows: [rejected(id("j"))], rejections: new Map() });
     expect(r.probe.status).toBe("degraded");
     expect(r.probe.detail).toContain("UNREADABLE");
-    expect(r.probe.detail).toContain("PRODUCT_HEALTH_ESCROW_REJECTED_AT_WORD");
+    expect(r.probe.detail).toContain("counting down unseen");
   });
 
   it("does not invent a deadline when the window itself is unreadable", () => {
     const r = decide({
       rows: [rejected(id("j"))],
-      rejectedAtMs: new Map([[id("j"), NOW - HOUR]]),
+      rejections: live(id("j"), NOW - HOUR),
       disputeWindowSeconds: null,
     });
     expect(r.probe.status).toBe("degraded");
     expect(r.probe.detail).toContain("UNREADABLE");
+  });
+});
+
+describe("decideExternalFunnel — the chain overrules the catalog", () => {
+  const rejected = (jobId: string): ExternalJobRow => ({ id: jobId, state: "rejected" });
+
+  it("does NOT count down when the chain says the job is already disputed", () => {
+    // The calibration job itself: rejected, then disputed. rejectedAt stays set
+    // forever, but finalizeRejectedJob requires state Rejected — so nothing can
+    // be slashed and a countdown here would be a false alarm.
+    const rejections = new Map([
+      [id("d15"), { rejectedAtMs: NOW - 6 * 24 * HOUR, chainState: 5 }],
+    ]);
+    const r = decide({ rows: [rejected(id("d15"))], rejections });
+    expect(r.probe.status).toBe("ok");
+    expect(r.probe.detail).toContain("past the slash window");
+  });
+
+  it("still counts down when the chain confirms state Rejected", () => {
+    const r = decide({ rows: [rejected(id("d15"))], rejections: live(id("d15"), NOW + 5 * HOUR - WINDOW * 1000) });
+    expect(r.probe.status).toBe("red");
+    expect(r.probe.detail).toContain("slashes in 5h");
+  });
+
+  it("separates a closed window from an unreadable one", () => {
+    // Both leave no deadline, but they mean opposite things: one is safe, the
+    // other is a slash that may be running unseen.
+    const closed = decide({
+      rows: [rejected(id("c1"))],
+      rejections: new Map([[id("c1"), { rejectedAtMs: NOW, chainState: 5 }]]),
+    });
+    expect(closed.probe.status).toBe("ok");
+    const unread = decide({ rows: [rejected(id("u1"))], rejections: new Map([[id("u1"), {}]]) });
+    expect(unread.probe.status).toBe("degraded");
+    expect(unread.probe.detail).toContain("UNREADABLE");
+  });
+
+  it("a live countdown outranks a sibling whose window has closed", () => {
+    const rejections = new Map([
+      [id("c1"), { rejectedAtMs: NOW, chainState: 5 }],
+      [id("l1"), { rejectedAtMs: NOW + 4 * HOUR - WINDOW * 1000, chainState: CHAIN_STATE_REJECTED }],
+    ]);
+    const r = decide({ rows: [rejected(id("c1")), rejected(id("l1"))], rejections });
+    expect(r.probe.status).toBe("red");
+    expect(r.probe.detail).toContain("slashes in 4h");
   });
 });
 
@@ -176,7 +225,7 @@ describe("decideExternalFunnel — review and claim queues", () => {
       { id: id("5ab"), state: "submitted", claimedAt: iso(NOW - REVIEW_STALE_WARN_MS - HOUR) },
       { id: id("re7"), state: "rejected" },
     ];
-    const r = decide({ rows, rejectedAtMs: new Map([[id("re7"), NOW + 3 * HOUR - WINDOW * 1000]]) });
+    const r = decide({ rows, rejections: live(id("re7"), NOW + 3 * HOUR - WINDOW * 1000) });
     expect(r.probe.status).toBe("red");
     expect(r.probe.detail).toContain("slashes in 3h");
   });

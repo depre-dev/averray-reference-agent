@@ -366,12 +366,13 @@ services:
       PRODUCT_HEALTH_CHAIN_MAX_STALE_SECONDS: ${PRODUCT_HEALTH_CHAIN_MAX_STALE_SECONDS:-600}
       PRODUCT_HEALTH_HALT_SEVERITY: ${PRODUCT_HEALTH_HALT_SEVERITY:-auto}
       # 0-based word index of `rejectedAt` in the EscrowCore job struct, for the
-      # external_funnel probe's dispute-window countdown. UNSET on purpose: the
-      # field could not be identified from live data (no external job has ever
-      # been rejected), and a guessed index would produce a confident countdown
-      # to the WRONG instant on a bond slash. Until it is calibrated the probe
-      # reports rejected rows as degraded-with-reason rather than green.
-      PRODUCT_HEALTH_ESCROW_REJECTED_AT_WORD: ${PRODUCT_HEALTH_ESCROW_REJECTED_AT_WORD:-}
+      # external_funnel probe's dispute-window countdown. Defaults to 17, which
+      # was CALIBRATED against the chain rather than taken from an ABI: word[17]
+      # matches the timestamp of the block carrying the rejection tx exactly, and
+      # word[18] matches the openDispute block, and word[23] is the live 5% fee.
+      # Only override if the contract layout changes — and recalibrate the same
+      # way, against a real transaction, before you do.
+      PRODUCT_HEALTH_ESCROW_REJECTED_AT_WORD: ${PRODUCT_HEALTH_ESCROW_REJECTED_AT_WORD:-17}
       # No per-network default outside testnet, and none is guessed: the balance
       # probe refuses any endpoint whose eth_chainId != the chainId /health reports
       # (product-health.ts chain guard), so a wrong URL fails loudly instead of
