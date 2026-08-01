@@ -19,7 +19,21 @@ _int2_cleanup() {
   _int2_exit="$?"
   printf '%s\n' "INT2_SUITE_EXIT_CODE=$_int2_exit" \
     >> "$_int2_bootstrap_log" 2>/dev/null || true
-  docker stop "$_int2_harness_db" "$_int2_reference_db" \
+  # On any failure, preserve why the databases were unhappy before removing
+  # them. Containers outlive their crash on purpose (no --rm) so this works.
+  if [ "$_int2_exit" -ne 0 ]; then
+    for _int2_dead in "$_int2_harness_db" "$_int2_reference_db"; do
+      docker inspect "$_int2_dead" >/dev/null 2>&1 || continue
+      printf '%s\n' "INT2_DB_POSTMORTEM name=$_int2_dead" \
+        >> "$_int2_bootstrap_log" 2>/dev/null || true
+      docker inspect \
+        --format 'state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' \
+        "$_int2_dead" >> "$_int2_bootstrap_log" 2>&1 || true
+      docker logs --tail 50 "$_int2_dead" \
+        >> "$_int2_bootstrap_log" 2>&1 || true
+    done
+  fi
+  docker rm --force "$_int2_harness_db" "$_int2_reference_db" \
     >/dev/null 2>&1 || true
   case "$_int2_git_probe" in
     "$_int2_docker_shared_root"/int2-pilot-git-probe.*)
@@ -66,38 +80,94 @@ test "$(git -C "$HARNESS_CHECKOUT" rev-parse HEAD)" = "$_int2_pin" \
 printf '%s\n' "INT2_HARNESS_PIN_VERIFIED pin=$_int2_pin" \
   >> "$_int2_bootstrap_log"
 
-docker run --rm --detach --name "$_int2_harness_db" \
-  --publish 127.0.0.1::5432 \
-  --env POSTGRES_PASSWORD=int2-suite \
-  --env POSTGRES_DB=harness_suite \
-  postgres:18 >/dev/null
-docker run --rm --detach --name "$_int2_reference_db" \
-  --publish 127.0.0.1::5432 \
-  --env POSTGRES_PASSWORD=int2-suite \
-  --env POSTGRES_DB=reference_suite \
-  postgres:16-alpine >/dev/null
+# --- database bring-up -------------------------------------------------------
+# Every failure below names itself, like the checkout failures above it.
+#
+# It did not always. A CI failure exited 1 in this region having printed
+# NOTHING: `pg_isready` reports on STDOUT, so `>/dev/null` swallowed the reason
+# entirely, and a twelve-second failure was undiagnosable from a full job log.
+# The bootstrap log jumped straight from INT2_HARNESS_PIN_VERIFIED to
+# INT2_SUITE_EXIT_CODE=1.
+#
+# Containers are NOT started with --rm: a crashed container must survive long
+# enough for `docker logs` to explain why. Cleanup removes them.
 
-for _int2_i in $(seq 1 60); do
-  docker exec "$_int2_harness_db" \
-    pg_isready -U postgres -d harness_suite >/dev/null 2>&1 && break
-  sleep 1
-done
-for _int2_i in $(seq 1 60); do
-  docker exec "$_int2_reference_db" \
-    pg_isready -U postgres -d reference_suite >/dev/null 2>&1 && break
-  sleep 1
-done
-docker exec "$_int2_harness_db" \
-  pg_isready -U postgres -d harness_suite >/dev/null
-docker exec "$_int2_reference_db" \
-  pg_isready -U postgres -d reference_suite >/dev/null
+_int2_db_diagnostics() {
+  printf '%s\n' "INT2_DB_DIAGNOSTICS name=$1" >> "$_int2_bootstrap_log"
+  docker inspect \
+    --format 'state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' \
+    "$1" >> "$_int2_bootstrap_log" 2>&1 || true
+  docker logs --tail 50 "$1" >> "$_int2_bootstrap_log" 2>&1 || true
+}
 
-_int2_harness_port="$(
-  docker port "$_int2_harness_db" 5432/tcp | sed -n '1s/.*://p'
-)"
-_int2_reference_port="$(
-  docker port "$_int2_reference_db" 5432/tcp | sed -n '1s/.*://p'
-)"
+_int2_start_db() {
+  # $1 container name, $2 database name, $3 image
+  docker run --detach --name "$1" \
+    --publish 127.0.0.1::5432 \
+    --env POSTGRES_PASSWORD=int2-suite \
+    --env POSTGRES_DB="$2" \
+    "$3" >/dev/null 2>>"$_int2_bootstrap_log" \
+    || {
+      echo "INT2_DB_START_FAILED: $1 ($3) did not start" \
+        | tee -a "$_int2_bootstrap_log" >&2
+      exit 26
+    }
+}
+
+_int2_wait_db() {
+  # $1 container name, $2 database name.
+  #
+  # Probes over TCP with a real authenticated query, because that is what the
+  # suite itself does. `pg_isready` with no -h probes the UNIX SOCKET, which
+  # answers "accepting connections" while initdb's temporary server is up —
+  # before the real TCP listener exists. A host-side TCP connect is no better:
+  # docker's port proxy accepts connections before postgres is listening at all.
+  # Only an authenticated query proves the database is actually usable.
+  for _int2_i in $(seq 1 60); do
+    if docker exec --env PGPASSWORD=int2-suite "$1" \
+        psql -h 127.0.0.1 -U postgres -d "$2" -tAc 'select 1' \
+        >/dev/null 2>&1; then
+      printf '%s\n' "INT2_DB_READY name=$1 after=${_int2_i}s" \
+        >> "$_int2_bootstrap_log"
+      return 0
+    fi
+    sleep 1
+  done
+  echo "INT2_DB_NEVER_READY: $1 did not answer a TCP query within 60s" \
+    | tee -a "$_int2_bootstrap_log" >&2
+  _int2_db_diagnostics "$1"
+  exit 27
+}
+
+# Sets _int2_port_value. Deliberately NOT called in a command substitution:
+# `exit` inside `$( )` leaves only the subshell, so a failure there would be
+# swallowed and the caller would continue with an empty port.
+_int2_db_port() {
+  # `docker port` EXITS 1 when nothing is published, so without the `|| :=""`
+  # fallback `set -e` aborts on this assignment and the named guard below is
+  # unreachable — a guard that cannot fire. Verified by provoking it.
+  _int2_port_value="$(
+    docker port "$1" 5432/tcp 2>>"$_int2_bootstrap_log" | sed -n '1s/.*://p'
+  )" || _int2_port_value=""
+  case "$_int2_port_value" in
+    '' | *[!0-9]*)
+      echo "INT2_DB_PORT_UNMAPPED: $1 published no usable 5432/tcp port" \
+        | tee -a "$_int2_bootstrap_log" >&2
+      _int2_db_diagnostics "$1"
+      exit 28
+      ;;
+  esac
+}
+
+_int2_start_db "$_int2_harness_db"   harness_suite   postgres:18
+_int2_start_db "$_int2_reference_db" reference_suite postgres:16-alpine
+_int2_wait_db  "$_int2_harness_db"   harness_suite
+_int2_wait_db  "$_int2_reference_db" reference_suite
+
+_int2_db_port "$_int2_harness_db"
+_int2_harness_port="$_int2_port_value"
+_int2_db_port "$_int2_reference_db"
+_int2_reference_port="$_int2_port_value"
 export HARNESS_TEST_DATABASE_URL="postgresql://postgres:int2-suite@127.0.0.1:${_int2_harness_port}/harness_suite"
 export DISPATCH_TEST_DATABASE_URL="postgresql://postgres:int2-suite@127.0.0.1:${_int2_reference_port}/reference_suite"
 
