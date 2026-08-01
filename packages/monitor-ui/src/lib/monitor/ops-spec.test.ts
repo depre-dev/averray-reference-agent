@@ -249,7 +249,7 @@ describe("opsVerdict", () => {
     const health: ProductHealth = {
       ...OPS_FIXTURE_NOMINAL,
       probes: OPS_FIXTURE_NOMINAL.probes.map((p) =>
-        p.name === "capabilities" ? { ...p, detail: "4/7 capabilities up · 2 warnings" } : p,
+        p.name === "capabilities" ? { ...p, detail: "2/2 required up · xcmObserver staged" } : p,
       ),
     };
     const v = opsVerdict({ health, streamDegraded: false, nowMs: health.at! + 2_000 });

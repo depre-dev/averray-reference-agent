@@ -955,14 +955,62 @@ export function deriveCapabilityProbe(
       detail: `${critical ? "new CRITICAL" : "new"} capability warning: ${unexpected.map((w) => w.code).join(", ")}`,
     };
   }
-  const total = Object.keys(caps).length;
-  const up = Object.values(caps).filter(isUp).length;
-  const ackd = (h.body?.warnings ?? []).length;
-  return {
-    name,
-    status: "ok",
-    detail: `${up}/${total} capabilities up${ackd ? `, ${ackd} acknowledged warning${ackd === 1 ? "" : "s"}` : ""}`,
-  };
+  return { name, status: "ok", detail: describeHealthyCapabilities(caps, h.body?.warnings ?? [], config) };
+}
+
+/**
+ * The detail line for a HEALTHY capability probe.
+ *
+ * It used to read "4/7 capabilities up, 2 acknowledged warnings", which was
+ * arithmetically right and wrong three times over:
+ *
+ *  · `externalPostingWatcherLagSeconds: 160` shares the capabilityHealth object
+ *    but is a METRIC, not a capability. It has no healthy state, so it counted
+ *    as "not up" forever and made 7/7 unreachable by construction;
+ *  · `xcmObserver: staged` and `gasSponsor: disabled` are deliberate, already
+ *    acknowledged states — reading them as 2-of-3-broken invites someone to go
+ *    fix a decision;
+ *  · and the denominator buried the only number that gates money: whether the
+ *    REQUIRED capabilities are up. That is what the probe reds on.
+ *
+ * So: lead with required, name the rest as the states they are, and show any
+ * metric without judging it — nobody has decided what watcher lag is too much,
+ * and inventing a threshold would manufacture an alarm.
+ */
+function describeHealthyCapabilities(
+  caps: Record<string, unknown>,
+  warnings: ReadonlyArray<{ code?: string; severity?: string }>,
+  config: { requiredCapabilities: string[] },
+): string {
+  const isUp = (v: unknown): boolean => HEALTHY_CAPABILITY_STATES.has(String(v ?? "").toLowerCase());
+  // A capability reports a STATE (a string). Anything numeric riding along in
+  // the same object is telemetry, and must not be counted as a capability.
+  const states = Object.entries(caps).filter(([, v]) => typeof v === "string");
+  const metrics = Object.entries(caps).filter(([, v]) => typeof v === "number");
+
+  const required = config.requiredCapabilities;
+  const requiredUp = required.filter((k) => isUp(caps[k])).length;
+  const parts = [`${requiredUp}/${required.length} required up`];
+
+  const notUp = states.filter(([, v]) => !isUp(v));
+  if (notUp.length > 0) {
+    const named = notUp.map(([k, v]) => `${k} ${String(v).toLowerCase()}`).join(", ");
+    // Every warning is on the expected list in this branch (an unexpected one
+    // returns degraded above), so the states are accounted-for by definition.
+    parts.push(`${named}${warnings.length > 0 ? " (acknowledged)" : ""}`);
+  }
+
+  for (const [key, value] of metrics) parts.push(`${describeMetricKey(key)} ${value}${key.endsWith("Seconds") ? "s" : ""}`);
+  return parts.join(" · ");
+}
+
+/** `externalPostingWatcherLagSeconds` → "external-posting watcher lag". */
+function describeMetricKey(key: string): string {
+  return key
+    .replace(/Seconds$/, "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .replace(/^external posting/, "external-posting");
 }
 
 /** Chain reachable + producing blocks, per the product's own /health. Unreadable
