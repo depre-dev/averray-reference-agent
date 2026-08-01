@@ -235,6 +235,7 @@ const MAINNET_POOLS: SolvencyPool[] = [
     floor: 1,
     status: "ok",
     address: "0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57",
+    addressSs58: "151MENb3J9ZiBv147yhNkPDiY8rXF7TrWc13PqWYJeLuupBd",
     addressLabel: "AgentAccountCore",
   },
   // Deliberately unfunded, and it must never render as a full meter. The note is
@@ -247,6 +248,7 @@ const MAINNET_POOLS: SolvencyPool[] = [
     status: "ok",
     note: "no floor — intentionally unfunded: payouts fund from the signer reward bank; the treasury multisig holds no USDC float",
     address: "0x01e6eed856e989201f4ff6346e18eab7e46c874c",
+    addressSs58: "13VefHVLFhdvis2hA75gVSrAR6psiRqaqBzFPdwxW6GG6aJ",
     addressLabel: "treasury reserve",
   },
   {
@@ -258,6 +260,7 @@ const MAINNET_POOLS: SolvencyPool[] = [
     informational: true,
     note: "informational — funds currently between claim and settlement",
     address: "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC",
+    addressSs58: "131meCLjePjUWf9dRC7RuhNcsGx9nHa1wasKVfy6u3M7mZBL",
     addressLabel: "EscrowCore",
   },
   {
@@ -268,6 +271,7 @@ const MAINNET_POOLS: SolvencyPool[] = [
     status: "ok",
     note: "5% poster-side fee · held under the 2-of-3 treasury multisig",
       address: "0x01e6eed856e989201f4ff6346e18eab7e46c874c",
+    addressSs58: "13VefHVLFhdvis2hA75gVSrAR6psiRqaqBzFPdwxW6GG6aJ",
     addressLabel: "treasury multisig",
 },
 ];

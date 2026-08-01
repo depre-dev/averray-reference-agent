@@ -69,13 +69,25 @@ export function SolvencyPanel({ solvency }: SolvencyPanelProps) {
  * provenance the number does not have.
  */
 function PoolAddress({ view }: { view: PoolView }) {
-  const { address, addressLabel } = view.pool;
+  const { address, addressLabel, addressSs58 } = view.pool;
   if (!address) return null;
   return (
-    <span className="ops-pool-addr" data-testid={`ops-pool-addr-${view.pool.key}`}>
-      <span className="ops-pool-addr-hex">{address}</span>
-      {addressLabel ? <span className="ops-pool-addr-label">{addressLabel}</span> : null}
-    </span>
+    <>
+      <span className="ops-pool-addr" data-testid={`ops-pool-addr-${view.pool.key}`}>
+        <span className="ops-pool-addr-hex">{address}</span>
+        {addressLabel ? <span className="ops-pool-addr-label">{addressLabel}</span> : null}
+      </span>
+      {/* The SAME account, in the form a Substrate wallet accepts. Both are
+          shown because the board cannot know which wallet the operator will
+          reach for, and converting an address by hand is exactly where a wrong
+          character costs real money. */}
+      {addressSs58 ? (
+        <span className="ops-pool-addr ops-pool-addr--ss58" data-testid={`ops-pool-ss58-${view.pool.key}`}>
+          <span className="ops-pool-addr-hex">{addressSs58}</span>
+          <span className="ops-pool-addr-label">SS58 · same account</span>
+        </span>
+      ) : null}
+    </>
   );
 }
 

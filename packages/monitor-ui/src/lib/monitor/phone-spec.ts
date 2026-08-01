@@ -159,6 +159,15 @@ export function phoneTrust(input: {
           : "build unknown",
   );
 
+  // Whether the alert channel works belongs on the PHONE more than anywhere
+  // else: this screen is what an operator reaches for after a notification, so
+  // "you would not have been told" is the one fact that changes what they do
+  // next. Only said when it is not fine — a healthy channel does not need to
+  // spend a phone's trust line saying so.
+  const buzz = health.buzz;
+  if (buzz && buzz.status === "failing") parts.push("#ops NOT DELIVERING");
+  else if (buzz && buzz.status === "armed") parts.push("#ops untested");
+
   const rem = health.remediation;
   if (rem?.enabled && rem.state !== "off") {
     // The host, not the URL — in prod this is a full endpoint and it took the
@@ -170,9 +179,14 @@ export function phoneTrust(input: {
     ? "red"
     : isUntrusted({ health, streamDegraded, nowMs })
       ? "red"
-      : self && self.status === "behind"
+      // A channel that cannot deliver means the next alert will not arrive.
+      // Degraded, not red: the product is fine and colouring it red would be
+      // the false alarm this board is careful never to raise.
+      : health.buzz?.status === "failing"
         ? "degraded"
-        : "ok";
+        : self && self.status === "behind"
+          ? "degraded"
+          : "ok";
 
   return { line: parts.join(" · "), tone };
 }
@@ -194,7 +208,21 @@ export interface BreachCard {
   stillTrueTone: OpsTone;
   /** What happens if it empties. */
   consequence: string;
+  /** Where to send funds, when the breached pool is one you can top up.
+   *  Absent for pools that are not wallets — see topUpAddress. */
+  topUp?: { evm: string; ss58?: string };
 }
+
+/**
+ * Which breached pools an operator can actually FUND from their phone.
+ *
+ * Only signer gas. The reward bank is an in-contract position with no address
+ * of its own, and the rest are contracts — DOT sent to EscrowCore lands
+ * somewhere with no way back. Showing an address beside a pool you cannot top
+ * up would invite exactly that mistake, at the worst moment, on the smallest
+ * screen.
+ */
+const TOP_UP_POOLS = new Set(["signer_gas"]);
 
 const POOL_CONSEQUENCE: Record<string, string> = {
   reward_bank: "payouts halt — the reward bank funds every payout",
@@ -240,6 +268,14 @@ export function breachCard(input: {
       : `yes — confirmed ${health.at == null ? "—" : formatAgo(health.at, nowMs)}`,
     stillTrueTone: untrusted ? "degraded" : "ok",
     consequence: POOL_CONSEQUENCE[breached.key] ?? "this pool is below the level the system needs",
+    ...(TOP_UP_POOLS.has(breached.key) && breached.address
+      ? {
+          topUp: {
+            evm: breached.address,
+            ...(breached.addressSs58 ? { ss58: breached.addressSs58 } : {}),
+          },
+        }
+      : {}),
   };
 }
 

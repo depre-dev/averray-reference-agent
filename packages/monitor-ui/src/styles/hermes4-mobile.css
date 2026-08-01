@@ -207,6 +207,30 @@
   font-size: 11px;
   line-height: 1.5;
 }
+/* Top-up addresses on the breach card. Full, wrapping, selectable — on a phone
+   the operator is going to long-press this and paste it into a wallet, so it
+   must be complete and it must be grabbable. Truncation would make the row
+   decorative, which is worse than omitting it. */
+.hm-ph-topup {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.hm-ph-addr {
+  font-family: var(--h4-font-mono);
+  font-size: 10px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  user-select: all;
+  color: var(--h4-ink-2);
+}
+.hm-ph-addr-tag {
+  font-family: var(--h4-font-mono);
+  font-size: 9px;
+  color: var(--h4-muted);
+  margin-bottom: 4px;
+}
+
 .hm-ph-facts dt {
   letter-spacing: 0.1em;
   color: var(--h4-muted);

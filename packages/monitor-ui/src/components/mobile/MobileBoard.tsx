@@ -179,6 +179,28 @@ function BreachPanel({ breach }: { breach: BreachCard }) {
           <dd data-tone={breach.stillTrueTone}>{breach.stillTrue}</dd>
           <dt>IF IT EMPTIES</dt>
           <dd>{breach.consequence}</dd>
+          {/* The only ACTIONABLE thing on this screen. An alert that tells you
+              the signer is dry and makes you go find the address elsewhere has
+              stopped short of the point. Both encodings, because the wallet on
+              this phone may speak either — and converting one by hand is where
+              a wrong character costs real money.
+
+              Only ever present for a pool that IS a wallet; see TOP_UP_POOLS. */}
+          {breach.topUp ? (
+            <>
+              <dt>TOP UP</dt>
+              <dd className="hm-ph-topup" data-testid="mobile-breach-topup">
+                <span className="hm-ph-addr">{breach.topUp.evm}</span>
+                <span className="hm-ph-addr-tag">EVM</span>
+                {breach.topUp.ss58 ? (
+                  <>
+                    <span className="hm-ph-addr">{breach.topUp.ss58}</span>
+                    <span className="hm-ph-addr-tag">SS58 · same account</span>
+                  </>
+                ) : null}
+              </dd>
+            </>
+          ) : null}
         </dl>
       </div>
     </section>

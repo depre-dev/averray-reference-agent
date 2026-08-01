@@ -247,3 +247,78 @@ describe("phone board — degraded transports", () => {
     expect(getByTestId("mobile-verdict").textContent).toContain("NOT WATCHING");
   });
 });
+
+describe("phone board — what you can act on, and what you would not be told", () => {
+  // A breached pool that IS a wallet, with both encodings the way the backend
+  // emits them.
+  const breachedSigner: SolvencyPool = {
+    key: "signer_gas",
+    label: "Signer gas",
+    amount: 0.42,
+    unit: "DOT",
+    floor: 1,
+    status: "red",
+    address: "0x5a6836c6D4d293F6E5377E6c28054F4171915813",
+    addressSs58: "133YGXLeo4Rf2aWc7JXUbq7rmDnTrFp7tLj7Q9xdCt4bcYcg",
+  };
+  const withBreach = (pool: SolvencyPool): ProductHealth => ({
+    ...OPS_FIXTURE_STRESS,
+    solvency: { pools: [pool] },
+  });
+
+  test("a dry signer shows where to send funds, in BOTH encodings", () => {
+    // An alert that says the signer is empty and makes you go find the address
+    // somewhere else has stopped short of the point.
+    const { getByTestId } = render(<MobileBoard health={withBreach(breachedSigner)} nowMs={STRESS_NOW} />);
+    const topUp = getByTestId("mobile-breach-topup");
+    expect(topUp.textContent).toContain("0x5a6836c6D4d293F6E5377E6c28054F4171915813");
+    expect(topUp.textContent).toContain("133YGXLeo4Rf2aWc7JXUbq7rmDnTrFp7tLj7Q9xdCt4bcYcg");
+  });
+
+  test("a breached pool that is NOT a wallet offers no address", () => {
+    // Reward bank is an in-contract position; a contract address beside it
+    // would invite sending DOT somewhere with no way back, at the worst moment,
+    // on the smallest screen.
+    const { queryByTestId } = render(
+      <MobileBoard
+        health={withBreach({ key: "reward_bank", label: "Reward bank", amount: 0.5, unit: "USDC", floor: 2, status: "red" })}
+        nowMs={STRESS_NOW}
+      />,
+    );
+    expect(queryByTestId("mobile-breach-topup")).toBeNull();
+  });
+
+  test("a failing #ops channel is stated — you would not have been told", () => {
+    // The fact that changes what the operator does next: the next alert will
+    // not arrive. It belongs on the phone more than anywhere else.
+    const { container } = render(
+      <MobileBoard
+        health={{ ...OPS_FIXTURE_NOMINAL, buzz: { status: "failing", detail: "FAILING 2m ago — auth-rejected" } }}
+        nowMs={fresh(OPS_FIXTURE_NOMINAL)}
+      />,
+    );
+    expect(container.textContent).toContain("#ops NOT DELIVERING");
+  });
+
+  test("an untested channel says so rather than staying silent", () => {
+    const { container } = render(
+      <MobileBoard
+        health={{ ...OPS_FIXTURE_NOMINAL, buzz: { status: "armed", detail: "armed · nothing delivered yet" } }}
+        nowMs={fresh(OPS_FIXTURE_NOMINAL)}
+      />,
+    );
+    expect(container.textContent).toContain("#ops untested");
+  });
+
+  test("a HEALTHY channel does not spend the phone's trust line saying so", () => {
+    // Space on this screen is the scarcest thing it has.
+    const { container } = render(
+      <MobileBoard
+        health={{ ...OPS_FIXTURE_NOMINAL, buzz: { status: "ok", detail: "delivered 4m ago" } }}
+        nowMs={fresh(OPS_FIXTURE_NOMINAL)}
+      />,
+    );
+    expect(container.textContent).not.toContain("#ops");
+  });
+});
+
