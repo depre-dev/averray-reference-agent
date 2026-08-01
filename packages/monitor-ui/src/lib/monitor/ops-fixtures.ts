@@ -202,9 +202,17 @@ export const OPS_FIXTURE_RED: ProductHealth = {
 // STRESS is the same board with a breached floor, a payout shortfall and a dead
 // stream at once — the hierarchy has to hold under load, not only when green.
 
-// Addresses are the REAL mainnet ones (already public via GET /health.addresses).
-// A made-up hex would not exercise the wrapping that 42 real characters cause in
-// a narrow panel, which is the layout risk this feature actually carries.
+// The three CONTRACT addresses are the real mainnet ones, taken from GET
+// /health.addresses and each verified against the chain: balanceOf returns
+// exactly the figure beside it here. A made-up hex would not exercise the
+// wrapping that 42 real characters cause in a narrow panel, which is the layout
+// risk this feature carries.
+//
+// The signer is a PLACEHOLDER of the right shape, and deliberately so. The real
+// signer lives only in PRODUCT_HEALTH_SIGNER_ADDRESS on the box, and an earlier
+// draft of this fixture used an address recalled from memory that turned out to
+// hold zero DOT — a wrong address in a fixture is one copy-paste away from being
+// a wrong address someone sends funds to.
 const MAINNET_POOLS: SolvencyPool[] = [
   {
     key: "signer_gas",
@@ -213,7 +221,7 @@ const MAINNET_POOLS: SolvencyPool[] = [
     unit: "DOT",
     floor: 1,
     status: "ok",
-    address: "0x9Ab8531F5DfE6C3F0F1C4E9B0F7A1c2E3D4B4239",
+    address: "0x00000000000000000000000000000000000f1x7e",
     addressLabel: "signer EOA",
   },
   // No address: this figure comes from the product's own /health, not a balance
