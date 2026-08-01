@@ -22,4 +22,21 @@ services:
       hermes-workspace:
         condition: service_started
     command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARED_TUNNEL_TOKEN:?Set CLOUDFLARED_TUNNEL_TOKEN in .env.prod}"]
-    networks: [avg-internal]
+    # buzz-net carries the Buzz relay, published as buzz.averray.com. The tunnel
+    # reaches INTO that stack rather than the relay reaching out into this one:
+    # both stacks run a service called `postgres`, so a container on both
+    # networks resolves that name unpredictably — which is exactly how the relay
+    # ended up authenticating against avg-postgres-1 and failing.
+    #
+    # cloudflared needs only one name from Buzz (`relay`), and buzz-net holds
+    # nothing that shadows a name cloudflared already uses, so the asymmetry is
+    # safe in this direction and not in the other.
+    networks: [avg-internal, buzz-net]
+
+networks:
+  # Created by the `buzz` compose project (deploy/compose + ops/buzz overrides).
+  # Optional-by-profile: this overlay only runs under the command-center profile,
+  # and the network must already exist when it does.
+  buzz-net:
+    external: true
+    name: buzz_buzz-net
