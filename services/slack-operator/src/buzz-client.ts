@@ -20,9 +20,12 @@ import {
   agentPubkey,
   authTagFromConfig,
   buildAuthEvent,
+  buildProfileEvent,
   buildStreamMessage,
   signEvent,
+  type AgentProfile,
   type NostrEvent,
+  type UnsignedEvent,
 } from "./buzz-event.js";
 
 export interface BuzzConfig {
@@ -129,6 +132,52 @@ export async function publishNarration(
   content: string,
   options: PublishOptions = {},
 ): Promise<BuzzPublishResult> {
+  return await publishBuilt(
+    config,
+    options,
+    (pubkey, createdAt) =>
+      buildStreamMessage({
+        agentPubkeyHex: pubkey,
+        channelId: config.channelId,
+        content,
+        createdAt,
+        authTag: config.authTag,
+      }),
+  );
+}
+
+/**
+ * Publish the agent's profile (kind 0), so clients show a name instead of a
+ * pubkey. Replaceable — publishing again supersedes the previous one.
+ *
+ * Deliberately NOT called on startup. Kind 0 is replaceable, so a boot-time
+ * publish would be harmless but pointless chatter on every deploy; a profile
+ * changes when someone decides it should, which is what a one-shot entry point
+ * models.
+ */
+export async function publishAgentProfile(
+  config: BuzzConfig,
+  profile: AgentProfile,
+  options: PublishOptions = {},
+): Promise<BuzzPublishResult> {
+  return await publishBuilt(
+    config,
+    options,
+    (pubkey, createdAt) =>
+      buildProfileEvent({ agentPubkeyHex: pubkey, profile, createdAt, authTag: config.authTag }),
+  );
+}
+
+/**
+ * Shared publish path: build, sign, then run the one handshake both callers
+ * need. Kept as a single implementation so the profile publish rides the exact
+ * code the narration publish proved, rather than a second copy that could drift.
+ */
+async function publishBuilt(
+  config: BuzzConfig,
+  options: PublishOptions,
+  build: (agentPubkeyHex: string, createdAt: number) => UnsignedEvent,
+): Promise<BuzzPublishResult> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_PUBLISH_TIMEOUT_MS;
   const createdAt = options.nowSeconds ?? Math.floor(Date.now() / 1000);
   const openSocket = options.openSocket ?? defaultOpenSocket;
@@ -137,16 +186,7 @@ export async function publishNarration(
   let pubkey: string;
   try {
     pubkey = agentPubkey(config.agentSecretKeyHex);
-    message = signEvent(
-      buildStreamMessage({
-        agentPubkeyHex: pubkey,
-        channelId: config.channelId,
-        content,
-        createdAt,
-        authTag: config.authTag,
-      }),
-      config.agentSecretKeyHex,
-    );
+    message = signEvent(build(pubkey, createdAt), config.agentSecretKeyHex);
   } catch (error) {
     // Building the event cannot fail transiently — bad config or bad content.
     return {

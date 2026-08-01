@@ -154,6 +154,61 @@ export function buildStreamMessage(input: {
   };
 }
 
+/** NIP-01 profile metadata. Replaceable: publishing again supersedes. */
+export const KIND_PROFILE = 0;
+
+export interface AgentProfile {
+  displayName?: string;
+  name?: string;
+  about?: string;
+  picture?: string;
+  nip05?: string;
+}
+
+/**
+ * Build the agent's profile. Mirrors upstream `build_profile`: kind 0, no tags,
+ * a JSON object of the set fields.
+ *
+ * WHY IT MATTERS: without this, clients have nothing to show but the pubkey, so
+ * narration arrives authored by `775a0f0a…a1af`. An alert read at 3am should say
+ * who is speaking. This is the difference between a message that reads like a
+ * colleague and one that reads like a hash.
+ *
+ * Fields are emitted in a fixed order because the content string is part of the
+ * signed event id — not because any reader depends on it, but because a stable
+ * input makes a republished profile diffable.
+ */
+export function buildProfileEvent(input: {
+  agentPubkeyHex: string;
+  profile: AgentProfile;
+  createdAt: number;
+  authTag?: string[];
+}): UnsignedEvent {
+  const fields: Array<[string, string | undefined]> = [
+    ["display_name", input.profile.displayName],
+    ["name", input.profile.name],
+    ["picture", input.profile.picture],
+    ["about", input.profile.about],
+    ["nip05", input.profile.nip05],
+  ];
+  const map: Record<string, string> = {};
+  for (const [key, value] of fields) {
+    if (typeof value === "string" && value.length > 0) map[key] = value;
+  }
+  if (Object.keys(map).length === 0) {
+    throw new BuzzEventError("refusing to publish an empty profile — it would erase the current one");
+  }
+  return {
+    pubkey: input.agentPubkeyHex,
+    created_at: input.createdAt,
+    kind: KIND_PROFILE,
+    // Provenance here too: the profile is where a reader looks to find out what
+    // this key is, so "authorized by <owner>" belongs on it.
+    tags: input.authTag ? [input.authTag] : [],
+    content: JSON.stringify(map),
+  };
+}
+
 /**
  * Build the NIP-42 AUTH event. On this closed relay the NIP-OA tag rides HERE —
  * upstream extracts it from the signed AUTH event and uses it to prove the
