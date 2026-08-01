@@ -49,6 +49,22 @@
 // projection and can lag the chain, so a row it still calls "rejected" may
 // already be disputed on-chain. The chain wins.
 
+// ── A WORD THIS DETAIL MAY NOT USE ─────────────────────────────────────────
+//
+// Probe details are not only prose: `isAwaitingProbe` in @avg/schemas matches
+// /awaiting|not expose|not wired|not configured|unconfigured|no data/ against
+// the detail to decide that a probe HAS NO DATA YET, and tones it grey in the
+// board's census.
+//
+// This probe first shipped saying "1 awaiting review" — describing submissions
+// waiting on a poster, not missing data. The board read the word, greyed a
+// perfectly healthy probe, and the operator verdict counted "8 ok / 1 awaiting
+// data" against a probe that was reporting fine. Hence "in review".
+//
+// Keep those words out of this detail. A probe that reports its subject in
+// language the verdict layer reserves for its own state will be misread, and it
+// fails silently — the JSON says ok while the screen says otherwise.
+
 import type { ProbeResult, ProbeStatus } from "./product-health.js";
 
 /** A row of the public catalog projection (`GET /jobs?source=external`). */
@@ -263,7 +279,7 @@ export function decideExternalFunnel(input: DecideExternalFunnelInput): External
   const detailParts = [
     `${buckets.open_claimable.count} claimable`,
     `${buckets.claimed_active.count} claimed`,
-    `${buckets.submitted_awaiting_review.count} awaiting review`,
+    `${buckets.submitted_awaiting_review.count} in review`,
     `${buckets.rejected_window_running.count} in dispute window`,
   ];
   if (buckets.other.count > 0) detailParts.push(`${buckets.other.count} other`);

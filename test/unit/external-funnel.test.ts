@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isAwaitingProbe } from "@avg/schemas/ops-verdict";
 
 import {
   CHAIN_STATE_REJECTED,
@@ -264,5 +265,46 @@ describe("disputeWindowFrom", () => {
     expect(disputeWindowFrom({ workerFacts: {} })).toBeNull();
     expect(disputeWindowFrom({ workerFacts: { disputeWindow: { seconds: "604800" } } })).toBeNull();
     expect(disputeWindowFrom({ workerFacts: { disputeWindow: { seconds: 0 } } })).toBeNull();
+  });
+});
+
+describe("the detail must not trip the board's awaiting detector", () => {
+  // REGRESSION. isAwaitingProbe matches /awaiting|not expose|not wired|not
+  // configured|unconfigured|no data/ on the DETAIL to decide a probe has no
+  // data yet. This probe shipped saying "1 awaiting review" — about submissions
+  // waiting on a poster — and the board greyed a healthy probe and counted
+  // "1 awaiting data" in the operator verdict. The JSON said ok the whole time,
+  // so it looked like a UI bug.
+  const details = (rows: ExternalJobRow[], over = {}) => decide({ rows, ...over }).probe;
+
+  it("an ok funnel is never read as awaiting data", () => {
+    const probe = details([
+      { id: REAL_ID, state: "open", effectiveState: "claimable" },
+      { id: id("5ab"), state: "submitted", claimedAt: iso(NOW - HOUR) },
+      { id: id("a436"), state: "exhausted" },
+    ]);
+    expect(probe.status).toBe("ok");
+    expect(isAwaitingProbe(probe)).toBe(false);
+  });
+
+  it("holds for every branch that can report ok or degraded", () => {
+    const cases = [
+      details([]),
+      details([{ id: id("j"), state: "rejected" }], { rejections: new Map() }),
+      details([{ id: id("c"), state: "claimed", claimExpiresAt: iso(NOW + 60_000) }]),
+      details([{ id: id("5ab"), state: "submitted", claimedAt: iso(NOW - REVIEW_STALE_WARN_MS - HOUR) }]),
+    ];
+    for (const probe of cases) {
+      expect({ detail: probe.detail, awaiting: isAwaitingProbe(probe) }).toEqual({
+        detail: probe.detail,
+        awaiting: false,
+      });
+    }
+  });
+
+  it("the catalog-unreadable branch is the ONE case that may read as awaiting", () => {
+    // Here it is correct: the probe genuinely has no data.
+    const probe = decide({ rows: null, fetchError: "HTTP 503" }).probe;
+    expect(probe.status).toBe("degraded");
   });
 });

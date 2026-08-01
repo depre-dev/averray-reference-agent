@@ -300,6 +300,10 @@ const PROBE_PILLAR: Record<string, OpsPillar> = {
   signer_liquidity: "solvency",
   treasury_liquidity: "solvency",
   money_path: "flow",
+  // The external door is a money-path concern: it watches a dispute window
+  // counting down toward a bond slash. Unregistered it defaulted to
+  // "availability", where it read as a health check rather than a money one.
+  external_funnel: "flow",
 };
 
 /** Which operational pillar a probe belongs to (unknown probes → availability). */
