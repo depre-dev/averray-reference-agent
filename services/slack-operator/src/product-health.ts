@@ -31,6 +31,7 @@ import type { AlertPayload } from "./alert-bridge.js";
 
 import { decideDiskHeadroom, readDiskUsage } from "./disk-headroom.js";
 import { probeExternalFunnel } from "./external-funnel.js";
+import { h160ToSs58 } from "./hub-address.js";
 import { alertProvenance, decideMoneyAlert } from "./money-alert.js";
 import { decideSelfFreshness, fetchSelfCompare } from "./self-freshness.js";
 import type { SelfFreshness } from "./self-freshness.js";
@@ -1785,6 +1786,9 @@ export interface SolvencyPoolData {
   address?: string;
   /** What that address IS, so the hex is legible without a block explorer. */
   addressLabel?: string;
+  /** The SAME account in SS58, for Substrate wallets. Derived, not read — see
+   *  hub-address.ts for why that derivation is safe and how it was verified. */
+  addressSs58?: string;
 }
 export interface SolvencySnapshotData {
   pools: SolvencyPoolData[];
@@ -2004,6 +2008,14 @@ export async function collectProductHealthProbes(
               config.minRewardBank > 0 && rewardBankLiquid < config.minRewardBank ? "red" : "ok",
           },
         ];
+  // Every address gets its SS58 twin here rather than at each construction
+  // site: one derivation, no chance of a pool shipping an EVM address without
+  // the form a Substrate wallet can actually accept.
+  const withSs58 = (pool: SolvencyPoolData): SolvencyPoolData => {
+    if (!pool.address) return pool;
+    const ss58 = h160ToSs58(pool.address);
+    return ss58 ? { ...pool, addressSs58: ss58 } : pool;
+  };
   const solvencyPools = [
     ...new Map(
       [...(signer.pools ?? []), ...(treasury.pools ?? []), ...rewardBankPool].map((pool) => [
@@ -2011,7 +2023,7 @@ export async function collectProductHealthProbes(
         pool,
       ]),
     ).values(),
-  ];
+  ].map(withSs58);
   const settlement = h.body?.settlement;
   // Independent proof that the settled jobs actually PAID. Opt-in: the log read
   // is rate-limit sensitive, so while it's off the block stays honestly

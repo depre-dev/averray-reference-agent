@@ -42,6 +42,8 @@ export interface SolvencyPool {
   address?: string;
   /** What the address is, so the hex is legible without a block explorer. */
   addressLabel?: string;
+  /** The same account in SS58, for Substrate wallets (Nova, Talisman, …). */
+  addressSs58?: string;
 }
 
 /** Can the #Ops channel receive anything? Instrument health, not product health. */

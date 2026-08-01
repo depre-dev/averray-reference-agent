@@ -414,6 +414,11 @@ body,
   content: " · ";
   opacity: 0.6;
 }
+.ops-pool-addr--ss58 {
+  /* Sits directly under its EVM twin with no gap, so the pair reads as one
+     block belonging to the balance above rather than two separate facts. */
+  margin-top: -3px;
+}
 .ops-pool--unfloored .ops-pool-addr {
   /* This row has smaller padding than a floored one, so it needs less pull-up. */
   margin-top: -6px;
