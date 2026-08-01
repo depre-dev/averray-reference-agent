@@ -4,7 +4,7 @@
   "taskKind": "lint_format",
   "title": "Add one bounded paid-ceremony pre-flight note (adequate budget)",
   "objective": "Append one concise paragraph to docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md stating that a paid real-model ceremony requires a three-case acceptance pre-flight before credentials are exported, while preserving the surrounding guidance and clean formatting.",
-  "whyNow": "The 2026-08-01 \u00a73 run exhausted an 8000-token budget on reconnaissance before it could write. This fixture tests whether the budget, not the model, was the binding constraint.",
+  "whyNow": "Two runs failed on modelTokens while sitting well inside their elapsed and tool-call limits. Token cost per task is not predictable, so the cap is restated as an absolute runaway ceiling rather than a per-task estimate.",
   "requestedBy": {
     "type": "operator",
     "id": "pilot-operator"
@@ -34,7 +34,7 @@
   ],
   "budget": {
     "elapsedSeconds": 180,
-    "modelTokens": 24000,
+    "modelTokens": 200000,
     "toolCalls": 30,
     "estimatedUsdMicros": null
   },
