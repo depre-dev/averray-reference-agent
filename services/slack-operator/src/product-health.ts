@@ -145,6 +145,11 @@ export interface ProductHealthHistoryBlock {
   /** Per-check product_api availability (oldest→newest), bounded to `maxSeries`.
    *  Missing/unknown product_api evidence is degraded/grey, never fake-green. */
   uptimeSeries: ProbeStatus[];
+  /** Epoch ms of each sample in the series above, same index, same length.
+   *  Without it every series is a bare array of numbers that cannot be labelled
+   *  with WHEN — and a reader that needs "was 2.31 at 09:15Z" has to invent the
+   *  clock time. Emit it rather than let anyone guess. */
+  seriesAt: number[];
   latencySeriesMs: (number | null)[];
   balanceSeries: (number | null)[];
   incidents: ProductHealthIncident[];
@@ -211,6 +216,7 @@ export function deriveProductHealthHistory(
     /** The window the percentage CLAIMS to cover, so the two can be compared. */
     uptimeWindowMs,
     uptimeSeries: series.map(productAvailabilityTone),
+    seriesAt: series.map((s) => s.at),
     latencySeriesMs: series.map((s) => s.latencyMs ?? null),
     balanceSeries: series.map((s) => s.signerUsdc ?? null),
     incidents: deriveIncidents(history),

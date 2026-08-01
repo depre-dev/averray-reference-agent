@@ -1,136 +1,249 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, within } from "@testing-library/react";
+//
+// The phone board's contract.
+//
+// Carried across the spec-sheet redesign rather than rewritten: every guarantee
+// the previous phone board asserted is still asserted here, against the new
+// markup. One of them — "a runway projection reaches the phone" — caught a real
+// regression during this rewrite: the desktop redesign had dropped the
+// draining-pool warning from BOTH surfaces, and only this test noticed.
+import { afterEach, describe, expect, test } from "vitest";
+import { cleanup, render, within } from "@testing-library/react";
+
 import { MobileBoard } from "./MobileBoard.js";
-import type { BoardCard } from "../../lib/monitor/card-types.js";
-import type { ProductHealth } from "../../lib/monitor/product-health.js";
+import type { ProductHealth, SolvencyPool } from "../../lib/monitor/product-health.js";
+import { OPS_FIXTURE_NOMINAL, OPS_FIXTURE_STRESS } from "../../lib/monitor/ops-fixtures.js";
 
 afterEach(cleanup);
 
-const NOW = Date.parse("2026-07-29T10:00:00Z");
+const fresh = (h: ProductHealth) => (h.at ?? 0) + 2_000;
+const STRESS_NOW = OPS_FIXTURE_STRESS.at! + 4 * 60_000;
 
-/** The live mainnet snapshot: probes green, pools above their floors. */
-const healthyMainnet: ProductHealth = {
-  enabled: true,
-  at: NOW,
-  status: "healthy",
-  checks: 60,
-  network: "mainnet",
-  chainId: 420420419,
-  probes: [
-    { name: "product_api", status: "ok", detail: "200 · chain 420420419", sparkline: [] },
-    { name: "signer_liquidity", status: "ok", detail: "gas 3.9585 DOT, reward bank 17.20 USDC", sparkline: [] },
-  ],
-  solvency: {
-    pools: [
-      { key: "signer_gas", label: "Signer gas", amount: 3.9584888, unit: "DOT", floor: 1, status: "ok" },
-      { key: "reward_bank", label: "Reward bank", amount: 17.2, unit: "USDC", floor: 2, status: "ok" },
-      { key: "escrow", label: "Escrow (in-flight)", amount: 0, unit: "USDC", status: "ok", informational: true },
-    ],
-    runwayNote: "stable — no depletion trend",
-  },
-};
-
-function taskCard(over: Partial<BoardCard> = {}): BoardCard {
-  return {
-    id: "codex-task-1",
-    lane: "codex-needed",
-    type: "task",
-    agentType: "codex",
-    title: "Hermes routed work: ops pre-check",
-    summary: "",
-    repo: "depre-dev/averray-reference-agent",
-    freshness: 2,
-    state: "fresh",
-    risk: [],
-    waitingOn: { actor: "operator", tone: "warn" },
-    files: [],
-    ...over,
-  } as BoardCard;
-}
-
-// The phone is now status + money only. Decisions, the delivery count and
-// agent rows are retired — all conversation happens in Buzz. The fake-green
-// guards on PoolRow are UNCHANGED and still asserted below.
-describe("MobileBoard", () => {
-  test("leads with the one-glance status, then money, decisions, agents", () => {
-    const { getByTestId, getByText } = render(
-      <MobileBoard health={healthyMainnet} cards={[]} nowMs={NOW} />,
+describe("phone board — the check-in", () => {
+  test("the verdict is the first thing, as a filled field", () => {
+    const { getByTestId } = render(
+      <MobileBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
     );
-    expect(getByTestId("mobile-board")).toBeTruthy();
-    expect(getByText("All product health nominal")).toBeTruthy();
-    expect(getByText("mainnet · 420420419")).toBeTruthy();
-    expect(getByText("Signer gas")).toBeTruthy();
-    // Amount at 2dp, floor without noise decimals ("floor 1", not "floor 1.00").
-    expect(getByText(/3\.96 DOT · floor 1$/)).toBeTruthy();
-    expect(getByText(/17\.20 USDC · floor 2$/)).toBeTruthy();
-    expect(getByText("stable — no depletion trend")).toBeTruthy();
+    const verdict = getByTestId("mobile-verdict");
+    expect(verdict.getAttribute("data-tone")).toBe("ok");
+    expect(within(verdict).getByRole("heading").textContent).toBe("NOMINAL");
   });
 
-  test("the status card reuses opsBannerData, so a runway projection reaches the phone too", () => {
-    // Same source as the desktop banner (#571) — the two surfaces cannot disagree.
-    const draining: ProductHealth = {
-      ...healthyMainnet,
+  test("trust is compressed but never cut — it matters more here, not less", () => {
+    const { getByTestId } = render(
+      <MobileBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    const trust = getByTestId("mobile-trust").textContent ?? "";
+    expect(trust).toContain("live");
+    expect(trust).toContain("865942ef");
+  });
+
+  test("an unknown monitor build says so rather than implying current", () => {
+    const health: ProductHealth = { ...OPS_FIXTURE_NOMINAL, self: undefined };
+    const { getByTestId } = render(<MobileBoard health={health} nowMs={fresh(health)} />);
+    expect(getByTestId("mobile-trust").textContent).toContain("build unknown");
+  });
+
+  // THE SHIPPED BUG, still unrepresentable: the deliberately-empty treasury
+  // reserve once drew a full green bar and read "healthy and full".
+  test("a ZERO no-floor pool draws NO meter and is named on the collapsed line", () => {
+    const { getByTestId, container } = render(
+      <MobileBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    // Three floored pools → exactly three meters. Reserve/escrow/revenue get none.
+    expect(container.querySelectorAll(".hm-ph-meter")).toHaveLength(3);
+    const collapsed = getByTestId("mobile-unfloored").textContent ?? "";
+    expect(collapsed).toContain("treasury reserve");
+    expect(collapsed).toContain("no floor, no meter");
+  });
+
+  test("a pool with no floor has no scale, so it gets no meter either", () => {
+    const pools: SolvencyPool[] = [
+      { key: "odd", label: "Unfloored", amount: 99, unit: "USDC", status: "ok" },
+    ];
+    const health: ProductHealth = { ...OPS_FIXTURE_NOMINAL, solvency: { pools } };
+    const { container, getByTestId } = render(<MobileBoard health={health} nowMs={fresh(health)} />);
+    expect(container.querySelectorAll(".hm-ph-meter")).toHaveLength(0);
+    expect(getByTestId("mobile-unfloored").textContent).toContain("99.00");
+  });
+
+  test("an unreadable balance is '—', never 0", () => {
+    const pools: SolvencyPool[] = [
+      { key: "bank", label: "Reward bank", amount: null, unit: "USDC", floor: 2, status: "ok" },
+    ];
+    const health: ProductHealth = { ...OPS_FIXTURE_NOMINAL, solvency: { pools } };
+    const { getByTestId } = render(<MobileBoard health={health} nowMs={fresh(health)} />);
+    const text = getByTestId("mobile-unfloored").textContent ?? "";
+    expect(text).toContain("—");
+    expect(text).not.toMatch(/\b0\.00\b/);
+  });
+
+  // Funnel and proof are one card on purpose: a contradiction the operator has
+  // to scroll between is one they will miss.
+  test("the funnel and its on-chain proof are never split apart", () => {
+    const { getByTestId } = render(
+      <MobileBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    const flow = getByTestId("mobile-flow");
+    expect(flow.textContent).toContain("settled");
+    expect(within(flow).getByTestId("mobile-evidence").textContent).toContain("CONFIRMED");
+  });
+
+  // THE REGRESSION THIS FILE CAUGHT. A pool can drain toward its floor while
+  // every probe still reads green — seven probes green on mainnet while the
+  // co-pilot said "signer gas ~13h to floor". The redesign dropped it; this
+  // test is why it came back, in the shared verdict, for both surfaces.
+  test("a draining pool stops the board saying NOMINAL", () => {
+    const health: ProductHealth = {
+      ...OPS_FIXTURE_NOMINAL,
       solvency: {
-        ...healthyMainnet.solvency!,
+        pools: OPS_FIXTURE_NOMINAL.solvency!.pools,
         runway: [
           {
-            key: "signer_gas", label: "Signer gas", unit: "DOT",
-            current: 3.9584888, floor: 1, burnPerHour: 0.229, hoursToFloor: 12.9,
-            estimable: true, status: "degraded",
+            key: "signer_gas",
+            label: "Signer gas",
+            unit: "DOT",
+            current: 2.69,
+            floor: 1,
+            burnPerHour: 0.13,
+            hoursToFloor: 13,
+            estimable: true,
+            status: "degraded",
           },
         ],
       },
     };
-    const { getByText, queryByText } = render(<MobileBoard health={draining} cards={[]} nowMs={NOW} />);
-    expect(getByText("Signer gas ~13h to floor")).toBeTruthy();
-    expect(queryByText("All product health nominal")).toBeNull();
+    const { getByTestId } = render(<MobileBoard health={health} nowMs={fresh(health)} />);
+    const verdict = getByTestId("mobile-verdict");
+    expect(verdict.textContent).toContain("13H TO FLOOR");
+    // A projection is not a breach: amber, never red.
+    expect(verdict.getAttribute("data-tone")).toBe("degraded");
+    expect(verdict.textContent).toContain("nothing has breached yet");
   });
 
-  test("an informational pool is context, not a floored meter", () => {
-    const { queryByText } = render(<MobileBoard health={healthyMainnet} cards={[]} nowMs={NOW} />);
-    expect(queryByText("Escrow (in-flight)")).toBeNull();
-  });
-
-  test("a ZERO pool draws NO bar — a full green meter on an empty pool is a fake-green", () => {
-    // Shipped exactly this on "Treasury reserve · 0 USDC" (floor null → pct 100).
-    const { getByText, container } = render(<MobileBoard health={healthyMainnet} cards={[]} nowMs={NOW} />);
-    const reserve: ProductHealth = {
-      ...healthyMainnet,
+  test("a projection that is not estimable makes no claim at all", () => {
+    const health: ProductHealth = {
+      ...OPS_FIXTURE_NOMINAL,
       solvency: {
-        pools: [
-          { key: "reserve", label: "Treasury reserve", amount: 0, unit: "USDC", status: "ok", note: "Intentionally unfunded." },
-          { key: "reward_bank", label: "Reward bank", amount: 17.2, unit: "USDC", floor: 2, status: "ok" },
+        pools: OPS_FIXTURE_NOMINAL.solvency!.pools,
+        runway: [
+          {
+            key: "signer_gas",
+            label: "Signer gas",
+            unit: "DOT",
+            current: 2.69,
+            floor: 1,
+            burnPerHour: null,
+            hoursToFloor: null,
+            estimable: false,
+            status: "degraded",
+          },
         ],
       },
     };
-    cleanup();
-    const r = render(<MobileBoard health={reserve} cards={[]} nowMs={NOW} />);
-    // The zero pool still reports its number and its reason...
-    expect(r.getByText("Treasury reserve")).toBeTruthy();
-    expect(r.getByText("Intentionally unfunded.")).toBeTruthy();
-    // ...but exactly ONE bar is drawn, for the funded pool that has a scale.
-    expect(r.container.querySelectorAll(".hm-mb-bar")).toHaveLength(1);
-    expect(container).toBeTruthy();
+    const { getByTestId } = render(<MobileBoard health={health} nowMs={fresh(health)} />);
+    expect(getByTestId("mobile-verdict").textContent).toContain("NOMINAL");
+  });
+});
+
+describe("phone board — the alert landing", () => {
+  test("leads with the breach, answering how bad / since when / still true", () => {
+    const { getByTestId } = render(
+      <MobileBoard health={OPS_FIXTURE_STRESS} streamDegraded streamStatus="reconnecting" nowMs={STRESS_NOW} />,
+    );
+    const breach = getByTestId("mobile-breach").textContent ?? "";
+    expect(breach).toContain("1.42");
+    expect(breach).toContain("short 0.58");
+    expect(breach).toContain("SINCE");
+    expect(breach).toContain("STILL TRUE?");
+    expect(breach).toContain("payouts halt");
   });
 
-  test("a pool with no floor has no scale, so it gets no meter either", () => {
-    const noFloor: ProductHealth = {
-      ...healthyMainnet,
-      solvency: { pools: [{ key: "x", label: "Unfloored", amount: 99, unit: "USDC", status: "ok" }] },
-    };
-    const { container, getByText } = render(<MobileBoard health={noFloor} cards={[]} nowMs={NOW} />);
-    expect(getByText(/99\.00 USDC/)).toBeTruthy(); // the number is still real
-    expect(container.querySelectorAll(".hm-mb-bar")).toHaveLength(0);
+  // With the stream down we cannot see the pool any more. Saying "yes, still
+  // breached" asserts something we stopped being able to observe.
+  test("with the stream down, STILL TRUE is honestly unknown", () => {
+    const { getByTestId } = render(
+      <MobileBoard health={OPS_FIXTURE_STRESS} streamDegraded streamStatus="reconnecting" nowMs={STRESS_NOW} />,
+    );
+    expect(getByTestId("mobile-breach").textContent).toContain("unknown");
   });
 
-  test("a pool awaiting data says so — never a bar we can't justify", () => {
-    const awaiting: ProductHealth = {
-      ...healthyMainnet,
-      solvency: { pools: [{ key: "reserve", label: "Treasury reserve", amount: null, unit: "USDC", status: "degraded" }] },
-    };
-    const { getByText } = render(<MobileBoard health={awaiting} cards={[]} nowMs={NOW} />);
-    expect(getByText("awaiting data")).toBeTruthy();
+  test("the breach card replaces the pool list — it does not sit under it", () => {
+    const { queryByTestId } = render(
+      <MobileBoard health={OPS_FIXTURE_STRESS} streamDegraded nowMs={STRESS_NOW} />,
+    );
+    expect(queryByTestId("mobile-breach")).toBeTruthy();
+    expect(queryByTestId("mobile-solvency")).toBeNull();
   });
 
-                        });
+  test("the clean funnel and the shortfall proof stay in one card", () => {
+    const { getByTestId } = render(
+      <MobileBoard health={OPS_FIXTURE_STRESS} streamDegraded nowMs={STRESS_NOW} />,
+    );
+    const flow = getByTestId("mobile-flow").textContent ?? "";
+    expect(flow).toContain("9 → 9 → 9");
+    expect(flow).toContain("SHORTFALL −2");
+  });
+
+  // Deliberate divergence from desktop: no 72% dim, because this screen gets
+  // read in sunlight. The fence is the band + re-captioned verdict instead.
+  test("untrusted data is fenced, NOT dimmed", () => {
+    const { getByTestId, container } = render(
+      <MobileBoard health={OPS_FIXTURE_STRESS} streamDegraded streamStatus="reconnecting" nowMs={STRESS_NOW} />,
+    );
+    expect(getByTestId("mobile-stale").textContent).toContain("STREAM DOWN");
+    expect(getByTestId("mobile-verdict").textContent).toContain("LAST KNOWN");
+    expect(container.querySelector('[data-dim="yes"]')).toBeNull();
+  });
+});
+
+describe("phone board — the cuts", () => {
+  test("eight probes become four one-line pillars, detail only when not ok", () => {
+    const { container, getByTestId } = render(
+      <MobileBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    expect(container.querySelectorAll(".hm-ph-pillar")).toHaveLength(4);
+    // CHAIN carries the acknowledged capabilities warning, so it earns a detail
+    // line; AVAILABILITY is all-ok and gets one line only.
+    expect(getByTestId("mobile-pillar-CHAIN").textContent).toContain("capabilities");
+    expect(getByTestId("mobile-pillar-AVAILABILITY").querySelector("p")).toBeNull();
+  });
+
+  test("failing pillars sort to the top — reading order is the only hierarchy left", () => {
+    const { container } = render(
+      <MobileBoard health={OPS_FIXTURE_STRESS} streamDegraded nowMs={STRESS_NOW} />,
+    );
+    expect(container.querySelector(".hm-ph-pillar")?.textContent).toContain("SOLVENCY");
+  });
+
+  test("LLM spend is gone from this surface entirely", () => {
+    const { container } = render(
+      <MobileBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    expect(container.textContent).not.toMatch(/LLM/i);
+  });
+
+  // Read-only on every surface. An earlier phone board offered Approve on a
+  // card that could not say what it was approving; removing it was the fix.
+  test("there are no controls at all", () => {
+    const { container } = render(
+      <MobileBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    expect(container.querySelectorAll("button")).toHaveLength(0);
+    expect(container.textContent).toContain("READ-ONLY");
+  });
+});
+
+describe("phone board — degraded transports", () => {
+  test("no health payload does not crash, and a dead stream still says so", () => {
+    const { getByTestId, getByText } = render(<MobileBoard streamDegraded streamStatus="closed" />);
+    expect(getByTestId("mobile-loading")).toBeTruthy();
+    expect(getByText("Health unknown")).toBeTruthy();
+  });
+
+  test("monitoring off reads NOT WATCHING, not a green board", () => {
+    const health: ProductHealth = { enabled: false, at: null, status: "unknown", checks: 0, probes: [] };
+    const { getByTestId } = render(<MobileBoard health={health} nowMs={1} />);
+    expect(getByTestId("mobile-verdict").textContent).toContain("NOT WATCHING");
+  });
+});

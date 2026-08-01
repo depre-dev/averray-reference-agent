@@ -331,6 +331,31 @@ export const OPS_FIXTURE_STRESS: ProductHealth = {
       p.key === "reward_bank" ? { ...p, amount: 1.42, status: "red" as ProbeStatus } : p,
     ),
   },
+  // A breach opens an incident and leaves a balance trail — without both, the
+  // phone's "SINCE" row correctly falls back to "start not recorded", which is
+  // honest but never exercises the real path.
+  history: {
+    ...OPS_FIXTURE_NOMINAL.history,
+    balanceSeries: [15.89, 12.4, 8.1, 4.02, 2.31, 1.42],
+    seriesAt: [
+      FIXTURE_NOW - 90 * MIN,
+      FIXTURE_NOW - 75 * MIN,
+      FIXTURE_NOW - 60 * MIN,
+      FIXTURE_NOW - 45 * MIN,
+      FIXTURE_NOW - 30 * MIN,
+      FIXTURE_NOW - 10 * MIN,
+    ],
+    incidents: [
+      {
+        id: "reward-bank-floor",
+        probe: "signer_liquidity",
+        severity: "red",
+        startedAt: FIXTURE_NOW - 14 * MIN,
+        endedAt: null,
+        note: "reward bank 1.42 below floor 2.00",
+      },
+    ],
+  },
   flow: {
     ...OPS_FIXTURE_NOMINAL.flow,
     payout: {

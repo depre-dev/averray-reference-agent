@@ -41,6 +41,22 @@ export interface VerdictPayout {
   settledCount: number | null;
 }
 
+/**
+ * A floored pool's projected time to its floor.
+ *
+ * `estimable` and a non-null `hoursToFloor` are the producer's own honesty
+ * gates — too few samples, too short a window, flat, or refilling all resolve
+ * to not-estimable — so a single reading cannot manufacture urgency.
+ */
+export interface VerdictRunway {
+  label: string;
+  hoursToFloor: number | null;
+  burnPerHour: number | null;
+  unit: string;
+  estimable: boolean;
+  status: VerdictStatus;
+}
+
 export interface VerdictInput {
   /** false = the heartbeat routine is off. Not a healthy state — an unknown one. */
   enabled: boolean;
@@ -48,6 +64,8 @@ export interface VerdictInput {
   probes: VerdictProbe[];
   pools?: VerdictPool[];
   payout?: VerdictPayout;
+  /** Time-to-floor projections. Absent → no projection is made. */
+  runway?: VerdictRunway[];
 }
 
 /**
@@ -63,6 +81,7 @@ export type VerdictReason =
   | "probe-red"
   | "payout-shortfall"
   | "probe-degraded"
+  | "pool-draining"
   | "nominal";
 
 export interface OpsVerdict {
@@ -159,6 +178,7 @@ export function verdictProbeLabel(name: string): string {
  *   red probe       — page-worthy
  *   payout shortfall— the chain says money did not move
  *   degradation     — watch it
+ *   draining pool   — nothing has breached, but one is heading for its floor
  *   nominal
  *
  * `unverified` payout evidence is NOT in that list. It means we cannot see the
@@ -171,7 +191,7 @@ export function verdictProbeLabel(name: string): string {
  * and an agent polling the endpoint applies its own staleness judgement.
  */
 export function deriveOpsVerdict(input: VerdictInput): OpsVerdict {
-  const { enabled, checks, probes, pools = [], payout } = input;
+  const { enabled, checks, probes, pools = [], payout, runway = [] } = input;
 
   if (!enabled) {
     return {
@@ -253,6 +273,40 @@ export function deriveOpsVerdict(input: VerdictInput): OpsVerdict {
       sub: `${lead.detail} · ${census}`,
       census,
       reason: "probe-degraded",
+    };
+  }
+
+  // Nothing has BREACHED — but a pool can be visibly draining toward its floor
+  // while every probe still reads green. That was live on mainnet: seven probes
+  // green while the co-pilot was simultaneously saying "signer gas ~13h to
+  // floor, top up before settlement halts". A board that says NOMINAL through
+  // that is technically correct and operationally useless.
+  //
+  // A projection is NOT a breach, so this never takes the red tone and never
+  // outranks a real degradation — it only stops the board claiming all-clear
+  // while something is heading for a cliff.
+  const draining = runway
+    .filter((r) => r.estimable && r.hoursToFloor !== null && (r.status === "red" || r.status === "degraded"))
+    .sort((a, b) => (a.hoursToFloor ?? 0) - (b.hoursToFloor ?? 0));
+  if (draining.length > 0) {
+    const lead = draining[0]!;
+    const extra = draining.length > 1 ? ` +${draining.length - 1}` : "";
+    const hours = lead.hoursToFloor ?? 0;
+    const when = hours <= 0 ? "at its floor" : hours < 1 ? "<1h to floor" : `~${Math.round(hours)}h to floor`;
+    const burn =
+      lead.burnPerHour && lead.burnPerHour > 0
+        ? `${lead.burnPerHour >= 1 ? lead.burnPerHour.toFixed(1) : lead.burnPerHour.toFixed(2)} ${lead.unit}/h`
+        : null;
+    return {
+      headline: `${lead.label.toUpperCase()} ${when.toUpperCase()}${extra}`,
+      tone: "degraded",
+      sub: [
+        burn ? `projected from a ${burn} trend` : "projected from the recent trend",
+        "nothing has breached yet",
+        census,
+      ].join(" · "),
+      census,
+      reason: "pool-draining",
     };
   }
 
