@@ -98,6 +98,30 @@ const CASE_EXPECTATIONS = Object.freeze({
     requireFence: true,
     expectedToolCommand: NEGATIVE_TOOL_COMMAND,
   }),
+  idle: Object.freeze({
+    lifecycle: "failed",
+    runCount: 1,
+    runOutcome: "failed",
+    runState: "learning_processed",
+    claimCount: 1,
+    outboxCount: 1,
+    decisions: {
+      dispatch_approval: 1,
+      handoff: 0,
+      dispatch_refusal: 0,
+    },
+    criterion: {
+      passed: false,
+      reason: "exit_1",
+      verdict: "failed",
+    },
+    requirePatch: false,
+    expectEmptyOrAbsentPatch: true,
+    requireManifest: true,
+    requireFence: true,
+    expectedAcceptanceCommand: INT2_SECTION3_CRITERION,
+    expectNoCapabilityEvents: true,
+  }),
   restart: Object.freeze({
     lifecycle: "handoff_ready",
     runCount: 1,
@@ -806,7 +830,11 @@ export function verifyInt2Evidence(
   }
 
   if (expectations.requireFence) {
-    verifyFence(evidence.task, check);
+    verifyFence(
+      evidence.task,
+      check,
+      expectations.expectedAcceptanceCommand,
+    );
   }
   if (expectations.requireManifest) {
     const binding = outbox[0];
@@ -864,6 +892,20 @@ export function verifyInt2Evidence(
       "reconstructed criterion returned exit 128",
     );
   }
+  if (expectations.expectEmptyOrAbsentPatch) {
+    const patch = evidence?.patch;
+    const patchAbsent = patch === null
+      && evidence?.deliverables?.workspace_patch === undefined;
+    const patchEmpty = patch?.byteLength === 0
+      && (patch?.numstat ?? "").trim().length === 0
+      && Array.isArray(patch?.touchedPaths)
+      && patch.touchedPaths.length === 0;
+    check(
+      patchAbsent || patchEmpty,
+      "workspace_patch_empty_or_absent",
+      `workspace patch=${JSON.stringify(patch)}`,
+    );
+  }
 
   if (expectations.criterion) {
     const verification = evidence?.verification;
@@ -903,20 +945,22 @@ export function verifyInt2Evidence(
         `required_failed=${JSON.stringify(verification?.requiredFailed)}`,
       );
     } else {
-      check(
-        evidence?.patch?.criterionExitCode !== 0
-        && evidence?.patch?.criterionExitCode !== 128,
-        "criterion_reconstruction_red",
-        `reconstructed exit ${evidence?.patch?.criterionExitCode}`,
-      );
-      check(
-        /whitespace/iu.test(
-          `${evidence?.patch?.criterionStdout ?? ""}\n`
-          + `${evidence?.patch?.criterionStderr ?? ""}`,
-        ),
-        "criterion_rejected_whitespace",
-        "reconstructed rejection did not name whitespace",
-      );
+      if (!expectations.expectEmptyOrAbsentPatch) {
+        check(
+          evidence?.patch?.criterionExitCode !== 0
+          && evidence?.patch?.criterionExitCode !== 128,
+          "criterion_reconstruction_red",
+          `reconstructed exit ${evidence?.patch?.criterionExitCode}`,
+        );
+        check(
+          /whitespace/iu.test(
+            `${evidence?.patch?.criterionStdout ?? ""}\n`
+            + `${evidence?.patch?.criterionStderr ?? ""}`,
+          ),
+          "criterion_rejected_whitespace",
+          "reconstructed rejection did not name whitespace",
+        );
+      }
       check(
         Array.isArray(verification?.requiredFailed)
         && verification.requiredFailed.includes("format-command"),
@@ -924,6 +968,17 @@ export function verifyInt2Evidence(
         `required_failed=${JSON.stringify(verification?.requiredFailed)}`,
       );
     }
+  }
+
+  if (expectations.expectNoCapabilityEvents) {
+    const capabilityEvents = (evidence?.events ?? []).filter(
+      (event) => /^Capability/u.test(event?.type ?? ""),
+    );
+    check(
+      capabilityEvents.length === 0,
+      "idle_model_no_tool_calls",
+      `found ${capabilityEvents.length} capability events`,
+    );
   }
 
   if (expectations.expectedToolCommand) {
@@ -1205,7 +1260,11 @@ async function runFixtureCriterion({
   }
 }
 
-function verifyFence(task, check) {
+function verifyFence(
+  task,
+  check,
+  expectedAcceptanceCommand = "git diff --check",
+) {
   check(
     task?.repository?.nameWithOwner ===
       "depre-dev/averray-reference-agent",
@@ -1248,7 +1307,7 @@ function verifyFence(task, check) {
     equal(task?.acceptance?.criteria, [{
       id: "format-command",
       type: "command",
-      command: "git diff --check",
+      command: expectedAcceptanceCommand,
       required: true,
     }]),
     "fence_acceptance",

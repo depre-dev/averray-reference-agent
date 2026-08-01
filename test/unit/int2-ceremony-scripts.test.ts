@@ -109,6 +109,47 @@ describe("committed INT-2 ceremony mechanics", () => {
     expect(suite).not.toMatch(/pg_isready -U postgres -d \S+ >\/dev\/null$/m);
   });
 
+  it("keeps the idle model text-only and all three suite counts at ten", async () => {
+    const [idleScript, integrationSuite, shellSuite, workflow] =
+      await Promise.all([
+        readFile(
+          path.join(
+            ROOT,
+            "test/fixtures/agent-integration/ceremony/lint-format-idle.jsonl",
+          ),
+          "utf8",
+        ),
+        readFile(
+          path.join(ROOT, "test/integration/int2-automated-suite.test.ts"),
+          "utf8",
+        ),
+        readFile(AUTOMATED_SUITE, "utf8"),
+        readFile(path.join(ROOT, ".github/workflows/ci.yml"), "utf8"),
+      ]);
+    const turns = idleScript.trimEnd().split("\n").map((line) =>
+      JSON.parse(line) as Record<string, unknown>
+    );
+
+    expect(turns).toEqual([expect.objectContaining({
+      text: expect.any(String),
+      finish_reason: "stop",
+    })]);
+    expect(turns[0]).not.toHaveProperty("tool_calls");
+    expect(expectationsForCase("idle")).toMatchObject({
+      lifecycle: "failed",
+      criterion: { passed: false, reason: "exit_1", verdict: "failed" },
+      decisions: { dispatch_approval: 1, handoff: 0 },
+      expectEmptyOrAbsentPatch: true,
+      expectedAcceptanceCommand: INT2_SECTION3_CRITERION,
+      expectNoCapabilityEvents: true,
+    });
+
+    expect(integrationSuite).toContain("const EXPECTED_CASE_COUNT = 10;");
+    expect(shellSuite).toContain("INT2_CASES_STARTED expected=10");
+    expect(shellSuite).toContain('test "$_int2_executed" = "10"');
+    expect(workflow).toContain("executed-count.txt')\" = \"10\"");
+  });
+
   it("proves the controlled pair passes and a non-discriminating mutation fails", async () => {
     const result = await verifyScriptedPairPreflight({
       repositoryRoot: ROOT,
