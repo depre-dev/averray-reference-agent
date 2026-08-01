@@ -202,10 +202,33 @@ export const OPS_FIXTURE_RED: ProductHealth = {
 // STRESS is the same board with a breached floor, a payout shortfall and a dead
 // stream at once — the hierarchy has to hold under load, not only when green.
 
+// Addresses are the REAL mainnet ones (already public via GET /health.addresses).
+// A made-up hex would not exercise the wrapping that 42 real characters cause in
+// a narrow panel, which is the layout risk this feature actually carries.
 const MAINNET_POOLS: SolvencyPool[] = [
-  { key: "signer_gas", label: "Signer gas", amount: 2.6931, unit: "DOT", floor: 1, status: "ok" },
+  {
+    key: "signer_gas",
+    label: "Signer gas",
+    amount: 2.6931,
+    unit: "DOT",
+    floor: 1,
+    status: "ok",
+    address: "0x9Ab8531F5DfE6C3F0F1C4E9B0F7A1c2E3D4B4239",
+    addressLabel: "signer EOA",
+  },
+  // No address: this figure comes from the product's own /health, not a balance
+  // read, so the row must show none rather than borrow the AAC's.
   { key: "reward_bank", label: "Reward bank", amount: 15.89, unit: "USDC", floor: 2, status: "ok" },
-  { key: "aac", label: "Agent core (AAC)", amount: 26.15, unit: "USDC", floor: 1, status: "ok" },
+  {
+    key: "aac",
+    label: "Agent core (AAC)",
+    amount: 26.15,
+    unit: "USDC",
+    floor: 1,
+    status: "ok",
+    address: "0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57",
+    addressLabel: "AgentAccountCore",
+  },
   // Deliberately unfunded, and it must never render as a full meter. The note is
   // the operator's own declaration of why the zero is correct.
   {
@@ -215,6 +238,8 @@ const MAINNET_POOLS: SolvencyPool[] = [
     unit: "USDC",
     status: "ok",
     note: "no floor — intentionally unfunded: payouts fund from the signer reward bank; the treasury multisig holds no USDC float",
+    address: "0x01e6eed856e989201f4ff6346e18eab7e46c874c",
+    addressLabel: "treasury reserve",
   },
   {
     key: "escrow",
@@ -224,6 +249,8 @@ const MAINNET_POOLS: SolvencyPool[] = [
     status: "ok",
     informational: true,
     note: "informational — funds currently between claim and settlement",
+    address: "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC",
+    addressLabel: "EscrowCore",
   },
   {
     key: "revenue",

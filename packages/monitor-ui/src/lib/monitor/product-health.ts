@@ -36,6 +36,12 @@ export interface SolvencyPool {
   informational?: boolean;
   /** Operator-declared context for an intentionally unfloored pool. */
   note?: string;
+  /** The address this amount was READ FROM — present only when the figure came
+   *  from that address's balance. A pool sourced elsewhere carries none, and the
+   *  row shows no address rather than borrowing a plausible one. */
+  address?: string;
+  /** What the address is, so the hex is legible without a block explorer. */
+  addressLabel?: string;
 }
 
 export interface SolvencySnapshot {

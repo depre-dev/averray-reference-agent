@@ -1454,7 +1454,7 @@ async function readProtocolRevenueUsdc(input: {
   token?: string;
   usdcDecimals: number;
   fetchImpl: typeof fetch;
-}): Promise<number | undefined> {
+}): Promise<{ usdc: number; treasuryAccount: string } | undefined> {
   if (!input.escrowCore || !input.agentAccountCore || !input.token) return undefined;
   try {
     const rawTreasury = await ethRpc(
@@ -1474,7 +1474,10 @@ async function readProtocolRevenueUsdc(input: {
     );
     if (!rawPos || rawPos.length < 2 + 64) return undefined;
     const liquid = BigInt("0x" + rawPos.replace(/^0x/, "").slice(0, 64));
-    return Number(liquid) / 10 ** input.usdcDecimals;
+    // The treasury account travels WITH the amount: it is the address the
+    // position was read for, and returning it separately would invite pairing a
+    // figure with an address that came from a different call.
+    return { usdc: Number(liquid) / 10 ** input.usdcDecimals, treasuryAccount: treasury };
   } catch {
     return undefined;
   }
@@ -1576,6 +1579,7 @@ export async function probeSignerLiquidity(input: {
         unit: gasUnit,
         floor: input.minGasNative > 0 ? input.minGasNative : null,
         status: input.minGasNative > 0 && gasNative < input.minGasNative ? "red" : "ok",
+        ...(input.signerAddress ? { address: input.signerAddress, addressLabel: "signer EOA" } : {}),
       },
     ];
     if (input.rewardBankLiquid !== undefined) {
@@ -1673,6 +1677,9 @@ export async function probeTreasuryLiquidity(input: {
       val: number | undefined,
       floor: number,
       note?: string,
+      // The address whose balanceOf produced `val`. Omitted where the figure did
+      // not come from a balance read — see the SolvencyPoolData doc.
+      source?: { address?: string; addressLabel: string },
     ): void => {
       if (val === undefined) return;
       pools.push({
@@ -1683,8 +1690,12 @@ export async function probeTreasuryLiquidity(input: {
         floor: floor > 0 ? floor : null,
         status: floor > 0 && val < floor ? "red" : "ok",
         ...(note ? { note } : {}),
+        ...(source?.address ? { address: source.address, addressLabel: source.addressLabel } : {}),
       });
     };
+    // NO ADDRESS on reward_bank, deliberately. Its figure comes from the
+    // product's own /health.rewardBank.liquid, not from a balance read, so any
+    // address here would claim a provenance the number does not have.
     pool("reward_bank", "Reward bank", input.rewardBankLiquid, input.minRewardBank);
     pool(
       "reserve",
@@ -1696,9 +1707,23 @@ export async function probeTreasuryLiquidity(input: {
           ? `Intentionally unfunded: ${input.treasuryReserveZeroReason}`
           : "Floor disabled without a declared reason"
         : undefined,
+      { ...(a.treasuryReserve ? { address: a.treasuryReserve } : {}), addressLabel: "treasury reserve" },
     );
-    pool("aac", "Agent core", aac, input.minAac);
-    if (escrow !== undefined) pools.push({ key: "escrow", label: "Escrow (in-flight)", amount: escrow, unit: "USDC", status: "ok", informational: true });
+    pool("aac", "Agent core", aac, input.minAac, undefined, {
+      ...(a.agentAccountCore ? { address: a.agentAccountCore } : {}),
+      addressLabel: "AgentAccountCore",
+    });
+    if (escrow !== undefined) {
+      pools.push({
+        key: "escrow",
+        label: "Escrow (in-flight)",
+        amount: escrow,
+        unit: "USDC",
+        status: "ok",
+        informational: true,
+        ...(a.escrowCore ? { address: a.escrowCore, addressLabel: "EscrowCore" } : {}),
+      });
+    }
 
     // Protocol revenue — the 5% poster-side fee accrued in the treasury
     // multisig's position. Internal ops metric (Hermes-only); informational, no
@@ -1716,13 +1741,15 @@ export async function probeTreasuryLiquidity(input: {
       pools.push({
         key: "protocol_revenue",
         label: "Protocol revenue (fees)",
-        amount: protocolRevenue,
+        amount: protocolRevenue.usdc,
         unit: "USDC",
         status: "ok",
         informational: true,
         note: "5% poster-side fee, held under the 2-of-3 treasury",
+        address: protocolRevenue.treasuryAccount,
+        addressLabel: "treasury multisig (position in AAC)",
       });
-      parts.push(`revenue ${protocolRevenue.toFixed(2)}`);
+      parts.push(`revenue ${protocolRevenue.usdc.toFixed(2)}`);
     }
 
     if (parts.length === 0) return { name, status: "degraded", detail: "no treasury balances readable" };
@@ -1750,6 +1777,14 @@ export interface SolvencyPoolData {
   informational?: boolean;
   /** Operator-declared context for a deliberately unfloored pool. */
   note?: string;
+  /** The on-chain address this amount was READ FROM. Present only when the
+   *  number came from a balance of that exact address — never a plausible
+   *  address attached for decoration. A pool whose figure comes from elsewhere
+   *  (the product's own /health, say) carries no address at all, because
+   *  showing one would claim a provenance the reading does not have. */
+  address?: string;
+  /** What that address IS, so the hex is legible without a block explorer. */
+  addressLabel?: string;
 }
 export interface SolvencySnapshotData {
   pools: SolvencyPoolData[];

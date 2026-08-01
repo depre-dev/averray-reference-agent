@@ -56,6 +56,29 @@ export function SolvencyPanel({ solvency }: SolvencyPanelProps) {
   );
 }
 
+/**
+ * The address a pool's number was read from.
+ *
+ * Shown in FULL, not truncated: the point of putting a wallet on the board is
+ * that an operator can check which one it is, and a 6-character prefix does not
+ * settle "is this the treasury multisig or the reserve". It renders quiet so it
+ * informs without competing with the balance.
+ *
+ * Absent for any pool whose figure did not come from a balance read — the row
+ * simply shows no address, rather than borrowing a plausible one and implying a
+ * provenance the number does not have.
+ */
+function PoolAddress({ view }: { view: PoolView }) {
+  const { address, addressLabel } = view.pool;
+  if (!address) return null;
+  return (
+    <span className="ops-pool-addr" data-testid={`ops-pool-addr-${view.pool.key}`}>
+      <span className="ops-pool-addr-hex">{address}</span>
+      {addressLabel ? <span className="ops-pool-addr-label">{addressLabel}</span> : null}
+    </span>
+  );
+}
+
 function FlooredPool({ view }: { view: PoolView }) {
   const meter = view.meter;
   if (!meter) return null;
@@ -71,6 +94,7 @@ function FlooredPool({ view }: { view: PoolView }) {
           {view.margin}
         </span>
       </div>
+      <PoolAddress view={view} />
 
       <div className="ops-pool-meter">
         <div
@@ -117,6 +141,7 @@ function UnflooredPool({ view }: { view: PoolView }) {
           there is no note we say we do not know, rather than implying it's fine. */}
       <span className="ops-pool-note">
         {view.pool.note ?? (view.pool.informational ? "informational — not floored" : "no floor declared for this pool")}
+        <PoolAddress view={view} />
       </span>
       <span className="ops-pool-amount ops-pool-amount--quiet">
         {view.amountLabel}
