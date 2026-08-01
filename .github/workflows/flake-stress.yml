@@ -25,8 +25,13 @@ on:
         required: false
         default: "10"
   pull_request:
-    # PR-time coverage only for the areas whose races we have actually seen.
+    # PR-time coverage only for the areas whose races we have actually seen —
+    # plus this workflow itself, so a change to the job is exercised by the PR
+    # that makes it. Without that last path the job never ran on its own PRs,
+    # which is why three setup gaps (missing zsh, shallow checkout, missing
+    # build) each merged green and surfaced only on a later dispatched run.
     paths:
+      - ".github/workflows/flake-stress.yml"
       - "services/slack-operator/src/testbed-live-screencast.ts"
       - "test/unit/testbed-live-screencast.test.ts"
       - "services/slack-operator/src/index.ts"
