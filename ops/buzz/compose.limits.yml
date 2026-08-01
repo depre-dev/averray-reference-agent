@@ -1,0 +1,41 @@
+# Memory ceilings for the Buzz stack.
+#
+# Overlay on the upstream deploy/compose bundle:
+#   docker compose -f compose.yml -f /srv/averray-reference-agent/ops/buzz/compose.limits.yml up -d
+#
+# WHY THIS EXISTS. The box has 22 GiB with ~19 GiB available, so Buzz is not
+# short of room — that is not what these are for.
+#
+# It has NO SWAP. Without swap a memory spike is not degradation, it is an
+# immediate OOM kill, and the kernel picks the victim. This box also runs the
+# monitor that watches a live USDC money path, so an unbounded neighbour can
+# take out the thing whose whole job is to notice when the money stops moving.
+# That is the failure this stack has spent a week designing against: the
+# instrument dying alongside what it measures.
+#
+# The numbers are deliberately generous — roughly 2.3 GiB ceiling against 19
+# available. They are a blast radius, not a diet. If a service is genuinely
+# hitting its limit that is a signal worth reading, not a number to raise
+# reflexively.
+services:
+  relay:
+    mem_limit: 1g
+    # Restart on OOM rather than staying dead: a relay that dies at 3am should
+    # come back, and the incident log is what tells you it happened.
+    restart: unless-stopped
+
+  postgres:
+    # The second Postgres on this box. Default shared_buffers are modest and
+    # this instance carries relay traffic only, not the averray workload.
+    mem_limit: 512m
+    restart: unless-stopped
+
+  redis:
+    mem_limit: 256m
+    restart: unless-stopped
+
+  minio:
+    # Media/attachment storage. Grows with usage, so this is the limit most
+    # likely to need revisiting — revisit it with evidence.
+    mem_limit: 512m
+    restart: unless-stopped
