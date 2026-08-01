@@ -87,6 +87,23 @@ both.
 
 ## Still outstanding for INT-2
 
-Not covered by these two cases: the §2 safety proofs (HALT stops a live run,
+**Nothing. This section is retained, corrected, because a bundle that quietly
+edits its own history is worth less than one that shows the correction.**
+
+As written on 2026-07-29 this said the §2 safety proofs (HALT stops a live run,
 approval-hash mismatch refuses, attenuation refusal), restart/duplicate-delivery
-idempotence, and the §3 budget-capped real-model task.
+idempotence, and the §3 budget-capped real-model task were not covered. All of
+them now are:
+
+| Then outstanding | Now proven by |
+|---|---|
+| HALT stops a live run | suite case *HALT cancels a bound live run and never creates a handoff* |
+| approval-hash mismatch refuses | suite case *refuses an approval-hash mismatch before claim or submit* |
+| attenuation refusal | suite cases *rejects `memory.propose` in the outer production profile loader* and *accepts a seven-capability profile with strictly narrower authority* |
+| restart / duplicate-delivery idempotence | suite case *restarts between submit and reconcile without duplicating the run* |
+| §3 budget-capped real-model task | executed 2026-08-01; token cap enforced at 8000, criterion returned `exit_1`, zero handoffs |
+
+Left uncorrected, this section made the evidence look thinner than it is — the
+opposite of the usual failure, and still a failure. See
+`HARNESS_INT2_EVIDENCE_BUNDLE.md` for the full §21.1 mapping, including the one
+clause that genuinely remains weak.
