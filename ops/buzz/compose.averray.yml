@@ -1,0 +1,70 @@
+# Averray's overrides on top of the upstream Buzz deploy/compose bundle.
+#
+#   docker compose -f compose.yml \
+#     -f /srv/averray-reference-agent/ops/buzz/compose.averray.yml up -d
+#
+# Two jobs: reach the relay through the existing Cloudflare Tunnel, and stop a
+# Buzz problem from killing the money monitor.
+#
+# ── REACHABILITY ────────────────────────────────────────────────────────────
+# This VPS publishes NO inbound ports. `monitor.averray.com` and
+# `command.averray.com` are served by a `cloudflared` tunnel that dials internal
+# service URLs (see ops/compose.cloudflare-access.yml), which is why they
+# resolve to Cloudflare IPs while `api`/`app` point at the origin directly.
+#
+# That rules out the obvious setup. A proxied A record to the VPS would make
+# Cloudflare dial 141.94.121.188:443, where nothing listens — and Cloudflare
+# will not proxy to port 3000 anyway; its origin ports are 80/8080/8880/2052…
+# and 443/2053/2083/8443.
+#
+# So the relay joins the tunnel's network and is published as a tunnel public
+# hostname (`buzz.averray.com` → `http://relay:3000`), exactly as the monitor
+# is. Cloudflare creates that DNS itself as a CNAME to cfargotunnel.com — no
+# hand-made A record, and none should be left lying around.
+#
+# The host port is kept but bound to LOOPBACK only: enough for
+# `curl 127.0.0.1:3000/_liveness` from the box, with no public listener. The
+# upstream bundle binds 0.0.0.0, which on a box with no firewall in front would
+# expose the relay beside the tunnel it is supposed to arrive through.
+#
+# ── BLAST RADIUS ────────────────────────────────────────────────────────────
+# 22 GiB total with ~19 available, so these ceilings are not about scarcity.
+# There is NO SWAP: a spike is not slowness, it is an immediate OOM kill with
+# the kernel choosing the victim — and this box also runs the monitor watching a
+# live USDC money path. ~2.3 GiB of ceilings keep a Buzz problem from taking out
+# the process whose whole job is noticing when the money stops.
+#
+# A service actually hitting its limit is a signal to read, not a number to
+# raise reflexively.
+services:
+  relay:
+    # `!override` replaces the upstream list instead of appending to it —
+    # compose ≥ 2.24.4, which this bundle already requires.
+    ports: !override
+      - "127.0.0.1:${BUZZ_HTTP_PORT:-3000}:3000"
+    networks:
+      - buzz-net
+      - avg-internal
+    mem_limit: 1g
+    restart: unless-stopped
+
+  postgres:
+    mem_limit: 512m
+    restart: unless-stopped
+
+  redis:
+    mem_limit: 256m
+    restart: unless-stopped
+
+  minio:
+    # Media storage — grows with use, so this is the ceiling most likely to need
+    # revisiting. Revisit it with evidence.
+    mem_limit: 512m
+    restart: unless-stopped
+
+networks:
+  # Created by the `avg` compose project; Docker prefixes the project name.
+  # Verify with `docker network ls | grep avg` before first start.
+  avg-internal:
+    external: true
+    name: avg_avg-internal
