@@ -33,6 +33,7 @@ import {
   INT2_HARNESS_PIN,
   INT2_PILOT_CAPABILITIES,
   Int2EvidenceError,
+  HALT_TOOL_COMMAND,
   verifyInt2Evidence,
   verifyScriptedPairPreflight,
 } from "../../scripts/ceremony/int2-evidence.mjs";
@@ -78,18 +79,11 @@ const EXPECTED_CASE_COUNT = 10;
 const TEST_TIMEOUT_MS = 240_000;
 const TERMINAL_WAIT_MS = 180_000;
 const HARNESS_STATE_WAIT_MS = 90_000;
-// Must exceed the kernel's shell.run ceiling, not equal it. That ceiling is
-// `min(timeout_seconds or 30, 30)` in capabilities/native.py, so `sleep 30` is
-// a literal tie: whichever side wins by milliseconds decides whether the
-// capability COMPLETES or TIMES OUT, and those are different run paths. One
-// observed run recorded duration 30.0099 with ok:true where the reference
-// record has 30.0585 with command_timeout — a ~10ms coin flip that failed this
-// case on code identical to two runs that passed.
-//
-// 45 always loses to the ceiling, so the command always times out at 30s and
-// the run reliably sits in `executing` for the whole window the HALT drill
-// needs. Do not lower this to 30. See the guard in int2-ceremony-scripts.test.
-const HALT_COMMAND = "sleep 45";
+// The one definition lives in int2-evidence.mjs, which is also what the
+// verifier asserts against. Two copies drifted the moment one was widened
+// past the kernel's shell.run ceiling — that is what turned a one-line
+// fixture change into a red INT-2 job.
+const HALT_COMMAND = HALT_TOOL_COMMAND;
 const SENTINEL_RUN_ID = "00000000-0000-4000-8000-000000000000";
 
 describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {

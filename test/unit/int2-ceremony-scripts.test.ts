@@ -272,19 +272,31 @@ describe("committed INT-2 ceremony mechanics", () => {
   // These two are also the only tests in the suite anywhere near the default:
   // across all 24 runs every other test topped out at 412ms.
   it("keeps the HALT fixture clear of the kernel's shell.run ceiling", async () => {
+    const evidence = await readFile(
+      path.join(ROOT, "scripts/ceremony/int2-evidence.mjs"),
+      "utf8",
+    );
     const suite = await readFile(
       path.join(ROOT, "test/integration/int2-automated-suite.test.ts"),
       "utf8",
     );
-    const match = suite.match(/const HALT_COMMAND = "sleep (\d+)";/u);
-    expect(match).not.toBeNull();
 
     // The kernel caps shell.run at `min(timeout_seconds or 30, 30)`. A fixture
     // that sleeps exactly 30 ties with that ceiling, and the tie decides
     // whether the capability completes or times out — two different run paths
-    // from a ~10ms race. It cost one suite run on code that passed twice more.
-    // Strictly greater keeps the outcome deterministic.
+    // from a ~10ms race. Strictly greater keeps the outcome deterministic.
+    const match = evidence.match(
+      /export const HALT_TOOL_COMMAND = "sleep (\d+)";/u,
+    );
+    expect(match).not.toBeNull();
     expect(Number(match![1])).toBeGreaterThan(30);
+
+    // And there must be exactly one definition. The verifier asserts the
+    // proposed command against HALT_TOOL_COMMAND while the suite spawns
+    // HALT_COMMAND; when those were separate literals, widening one and not
+    // the other turned a one-line fixture change into a red INT-2 job.
+    expect(suite).toContain("const HALT_COMMAND = HALT_TOOL_COMMAND;");
+    expect(suite).not.toMatch(/const HALT_COMMAND = "sleep/u);
   });
 
   it("proves the controlled pair passes and a non-discriminating mutation fails", async () => {
