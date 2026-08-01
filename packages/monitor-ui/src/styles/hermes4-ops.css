@@ -383,13 +383,26 @@ body,
    cannot answer "which multisig is this?", which is the only reason to put it
    on the board at all. */
 .ops-pool-addr {
+  /* SPAN THE WHOLE ROW. .ops-pool is a three-column grid — name | meter |
+     amount — and an address dropped in as a fourth item became a second grid
+     ROW, pushing the amount below the meter and tripling every row's height.
+     Spanning to the end keeps those three cells on one line and puts the
+     address on a quiet line of its own beneath them. */
+  grid-column: 1 / -1;
   display: block;
+  /* .ops-pool sets gap:16px, which applies BETWEEN grid rows too and left the
+     address floating halfway to the next pool. Pull it back under its own row
+     so it reads as belonging to the balance above it. */
+  margin-top: -11px;
   font-family: var(--h4-font-mono);
   font-size: 9.5px;
-  line-height: 1.5;
+  line-height: 1.4;
   color: var(--h4-muted);
-  /* Long hex must never widen the panel and force the meters to reflow. */
-  overflow-wrap: anywhere;
+  /* One line: 42 hex characters do not fit the 168px name column, and letting
+     them wrap is what made this ugly in the first place. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ops-pool-addr-hex {
   /* Selectable as one unit so a double-click copies the whole address. */
@@ -402,10 +415,19 @@ body,
   opacity: 0.6;
 }
 .ops-pool--unfloored .ops-pool-addr {
-  margin-top: 2px;
+  /* This row has smaller padding than a floored one, so it needs less pull-up. */
+  margin-top: -6px;
 }
 
+.ops-pool--unfloored .ops-pool-note {
+  /* The note column takes the slack; the amount must not. A long address in
+     here clipped the "USDC" off protocol revenue — the one row where the unit
+     is doing real work — which is why the address moved out of this column. */
+  min-width: 0;
+}
 .ops-pool-amount--quiet {
+  flex: 0 0 auto;
+  white-space: nowrap;
   font-size: 16px;
   font-weight: 400;
   color: var(--h4-muted);

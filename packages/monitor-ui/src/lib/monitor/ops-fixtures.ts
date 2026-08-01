@@ -267,7 +267,9 @@ const MAINNET_POOLS: SolvencyPool[] = [
     unit: "USDC",
     status: "ok",
     note: "5% poster-side fee · held under the 2-of-3 treasury multisig",
-  },
+      address: "0x01e6eed856e989201f4ff6346e18eab7e46c874c",
+    addressLabel: "treasury multisig",
+},
 ];
 
 const MAINNET_PROBES: ProductHealthProbe[] = [

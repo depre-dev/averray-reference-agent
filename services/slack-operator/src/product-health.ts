@@ -1747,7 +1747,7 @@ export async function probeTreasuryLiquidity(input: {
         informational: true,
         note: "5% poster-side fee, held under the 2-of-3 treasury",
         address: protocolRevenue.treasuryAccount,
-        addressLabel: "treasury multisig (position in AAC)",
+        addressLabel: "treasury multisig",
       });
       parts.push(`revenue ${protocolRevenue.usdc.toFixed(2)}`);
     }
