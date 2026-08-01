@@ -52,6 +52,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Workspace packages are consumed through their `exports` map, which points
+      # at dist/ — so an unbuilt checkout cannot resolve `@avg/schemas` or
+      # `@avg/averray-mcp/*` at all, and 55 of 144 test files fail to load. That
+      # is a resolution error, not a race, but this job reports every failure as
+      # "a concurrency-sensitive test is flaky", so it read as flake and stayed
+      # red on main for days while the real suite was green.
+      #
+      # The CI job that passes gets this for free: its `Typecheck` step is
+      # `tsc -b`, which EMITS. This job went straight from `npm ci` to vitest.
+      - name: Build workspace packages
+        run: npm run build
+
       - name: Repeat the full suite
         env:
           ITERATIONS: ${{ github.event.inputs.iterations || '10' }}
@@ -66,7 +78,11 @@ jobs:
             else
               failures=$((failures + 1))
               echo "run $i: FAIL"
-              grep -E "^ FAIL |Error:|AssertionError" "run-$i.log" | head -20 || true
+              # `Failed to load url` is the unbuilt-workspace signature and is
+              # NOT an assertion failure, so it has to be grepped for explicitly
+              # — without it the log showed a bare "FAIL" with no cause, which is
+              # how this job stayed red and unread.
+              grep -E "^ FAIL |Failed to load url|Error:|AssertionError" "run-$i.log" | head -20 || true
             fi
             ran=$((ran + 1))
             echo "::endgroup::"
@@ -78,6 +94,14 @@ jobs:
           # which reads as evidence. Fail closed instead.
           if [ "$ran" -eq 0 ]; then
             echo "::error::stress job executed no iterations"
+            exit 1
+          fi
+          # EVERY run failing is not a race — a race that fires 100% of the time
+          # is a broken build. Calling it flake sent the reader looking for a
+          # concurrency bug that did not exist, so the two cases now name
+          # themselves differently.
+          if [ "$failures" -eq "$ran" ] && [ "$ran" -gt 1 ]; then
+            echo "::error::ALL $ran full-suite runs failed — this is deterministic, not flake. Check the run logs for a build/resolution error before hunting a race."
             exit 1
           fi
           if [ "$failures" -gt 0 ]; then
