@@ -23,14 +23,8 @@ import type {
   SelfFreshness,
   SolvencyPool,
 } from "./product-health.js";
-import { probeLabel } from "./product-health.js";
-import {
-  formatAgo,
-  formatAmount,
-  isAcknowledgedProbe,
-  isAwaitingProbe,
-  type OpsTone,
-} from "./ops-model.js";
+import { deriveOpsVerdict, payoutGap } from "@avg/schemas/ops-verdict";
+import { formatAgo, formatAmount, type OpsTone } from "./ops-model.js";
 
 /** Beyond this, a snapshot is old enough that the board says so out loud. */
 export const DATA_STALE_MS = 3 * 60 * 1000;
@@ -62,46 +56,22 @@ function isoClock(iso: string | undefined): string | undefined {
   return Number.isNaN(d.getTime()) ? undefined : d.toISOString().slice(11, 19);
 }
 
-/** Degraded, and nobody has signed it off yet — the ones that earn the headline. */
-function unacknowledgedDegraded(health: ProductHealth) {
-  return health.probes.filter(
-    (p) => p.status === "degraded" && !isAwaitingProbe(p) && !isAcknowledgedProbe(p),
-  );
-}
-
 /**
- * "7 ok / 1 degraded (acknowledged) / 0 red" — the honest census.
+ * The one-glance verdict, as the board shows it.
  *
- * Acknowledged degradations are counted and LABELLED, never dropped. The
- * verdict stops shouting about them; the count never stops mentioning them.
- */
-function probeCensus(health: ProductHealth): string {
-  const awaiting = health.probes.filter(isAwaitingProbe).length;
-  const red = health.probes.filter((p) => p.status === "red").length;
-  const acked = health.probes.filter((p) => isAcknowledgedProbe(p) && !isAwaitingProbe(p)).length;
-  const degraded = unacknowledgedDegraded(health).length;
-  const ok = health.probes.length - red - degraded - acked - awaiting;
-  const parts = [`${ok} ok`];
-  if (degraded > 0) parts.push(`${degraded} degraded`);
-  if (acked > 0) parts.push(`${acked} degraded (acknowledged)`);
-  if (awaiting > 0) parts.push(`${awaiting} awaiting data`);
-  parts.push(`${red} red`);
-  return parts.join(" / ");
-}
-
-/**
- * The one-glance verdict.
+ * The verdict ITSELF is decided once, in `@avg/schemas`, and the very same
+ * function runs server-side so `/monitor/product-health` emits exactly this
+ * headline, tone and reason. An agent reading that endpoint therefore reads
+ * the board's conclusion instead of forming a competing one — two verdict
+ * systems, one of which can hallucinate, is how an operator learns to distrust
+ * both.
  *
- * Ordering is deliberate and is the whole hierarchy: a breached floor or a red
- * probe outranks a payout shortfall outranks a real degradation. A stale stream
- * does not produce its own verdict — it RE-LABELS whatever verdict we last had
- * as "last known state" (the banner above carries the alarm), because a calm
+ * What stays here is only what a server cannot know, because it is a property
+ * of the READER rather than of the product: how old this snapshot is in front
+ * of this screen, and whether this browser's stream is alive. Those never
+ * change the verdict — they RE-LABEL it as "last known state", because a calm
  * verdict rendered over four-minute-old numbers is the exact lie this board
- * exists to not tell.
- *
- * `unverified` payout evidence deliberately does NOT raise the verdict: we
- * cannot see the chain, which is an instrument fault, not a money fault. It
- * shows in its own row, in warm grey.
+ * exists not to tell.
  */
 export function opsVerdict(input: {
   health: ProductHealth;
@@ -110,124 +80,50 @@ export function opsVerdict(input: {
 }): VerdictView {
   const { health, streamDegraded, nowMs } = input;
 
-  if (!health.enabled) {
+  const core = deriveOpsVerdict({
+    enabled: health.enabled,
+    checks: health.checks,
+    probes: health.probes,
+    pools: health.solvency?.pools ?? [],
+    ...(health.flow?.payout ? { payout: health.flow.payout } : {}),
+  });
+  // A red/degraded verdict tones its own subline; a calm one leaves the
+  // subline warm grey so the counts read as context, not as reassurance.
+  const subTone: OpsTone = core.tone === "ok" ? "awaiting" : core.tone;
+
+  if (core.reason === "not-watching") {
     return {
       kicker: "MONITORING OFF",
       kickerTone: "awaiting",
-      verdict: "NOT WATCHING",
-      verdictTone: "awaiting",
-      sub: "PRODUCT_HEALTH_ENABLED is unset — this board is not probing the live product.",
+      verdict: core.headline,
+      verdictTone: core.tone,
+      sub: core.sub,
       subTone: "awaiting",
     };
   }
-  if (health.checks === 0) {
+  if (core.reason === "no-data") {
     return {
       kicker: "AWAITING FIRST CHECK",
       kickerTone: "awaiting",
-      verdict: "NO DATA YET",
-      verdictTone: "awaiting",
-      sub: "The heartbeat runs every couple of minutes. Nothing is known until it does.",
+      verdict: core.headline,
+      verdictTone: core.tone,
+      sub: core.sub,
       subTone: "awaiting",
     };
   }
 
   const ageMs = health.at == null ? null : Math.max(0, nowMs - health.at);
   const stale = streamDegraded || (ageMs != null && ageMs > DATA_STALE_MS);
-  const kicker = stale
-    ? `LAST KNOWN STATE — ${streamDegraded ? "STREAM DOWN" : "DATA STALE"} · ${health.at == null ? "age unknown" : formatAgo(health.at, nowMs)}`
-    : `OPERATOR VERDICT · ${clockOf(health.at)}`;
-  const kickerTone: OpsTone = stale ? "red" : "awaiting";
-  const census = probeCensus(health);
-
-  const breached = (health.solvency?.pools ?? []).filter(
-    (p) => p.status === "red" && p.amount != null && p.floor != null && p.floor > 0,
-  );
-  const reds = health.probes.filter((p) => p.status === "red");
-  const payout = health.flow?.payout;
-  const shortfall = payout?.status === "shortfall";
-
-  if (breached.length > 0) {
-    const lead = breached[0]!;
-    const extra = breached.length > 1 ? ` +${breached.length - 1}` : "";
-    return {
-      kicker,
-      kickerTone,
-      verdict: `${lead.label.toUpperCase()} BELOW FLOOR${extra}`,
-      verdictTone: "red",
-      sub: [
-        shortfall ? `on-chain payout shortfall (${shortfallGap(payout)})` : null,
-        census,
-        "payouts halt when the reward bank empties",
-      ]
-        .filter(Boolean)
-        .join(" · "),
-      subTone: "red",
-    };
-  }
-
-  if (reds.length > 0) {
-    const lead = reds[0]!;
-    const extra = reds.length > 1 ? ` +${reds.length - 1}` : "";
-    return {
-      kicker,
-      kickerTone,
-      verdict: `${probeLabel(lead.name).toUpperCase()} RED${extra}`,
-      verdictTone: "red",
-      sub: `${lead.detail} · ${census}`,
-      subTone: "red",
-    };
-  }
-
-  if (shortfall) {
-    return {
-      kicker,
-      kickerTone,
-      verdict: "PAYOUT SHORTFALL",
-      verdictTone: "red",
-      // The funnel can read perfectly clean while this is true — say so, because
-      // the operator is about to look at a funnel that disagrees.
-      sub: `${shortfallGap(payout)} settled jobs have no on-chain proof · the funnel reads clean · ${census}`,
-      subTone: "red",
-    };
-  }
-
-  // Acknowledged degradations are excluded here on purpose — see
-  // isAcknowledgedProbe. They stay amber in the pillar strip and counted in the
-  // census; they just don't get to own the headline forever.
-  const degraded = unacknowledgedDegraded(health);
-  if (degraded.length > 0) {
-    const lead = degraded[0]!;
-    const extra = degraded.length > 1 ? ` +${degraded.length - 1}` : "";
-    return {
-      kicker,
-      kickerTone,
-      verdict: `${probeLabel(lead.name).toUpperCase()} DEGRADED${extra}`,
-      verdictTone: "degraded",
-      sub: `${lead.detail} · ${census}`,
-      subTone: "degraded",
-    };
-  }
-
-  const proven = payout?.status === "confirmed";
   return {
-    kicker,
-    kickerTone,
-    verdict: "NOMINAL",
-    verdictTone: "ok",
-    sub: [
-      proven ? "money is moving and proven on-chain" : null,
-      "all floors clear",
-      census,
-    ]
-      .filter(Boolean)
-      .join(" · "),
-    subTone: "awaiting",
+    kicker: stale
+      ? `LAST KNOWN STATE — ${streamDegraded ? "STREAM DOWN" : "DATA STALE"} · ${health.at == null ? "age unknown" : formatAgo(health.at, nowMs)}`
+      : `OPERATOR VERDICT · ${clockOf(health.at)}`,
+    kickerTone: stale ? "red" : "awaiting",
+    verdict: core.headline,
+    verdictTone: core.tone,
+    sub: core.sub,
+    subTone,
   };
-}
-
-function shortfallGap(payout: PayoutEvidence | undefined): string {
-  if (!payout || payout.confirmedCount == null || payout.settledCount == null) return "gap unknown";
-  return `−${Math.max(0, payout.settledCount - payout.confirmedCount)}`;
 }
 
 // ── 4. can I trust this screen? ─────────────────────────────────────────────
@@ -512,7 +408,7 @@ export function payoutView(payout: PayoutEvidence | undefined): EvidenceView {
       : `${payout.settledCount} marked settled by the monitor`;
 
   if (payout.status === "shortfall") {
-    const gap = shortfallGap(payout);
+    const gap = payoutGap(payout);
     return {
       status: `SHORTFALL ${gap}`,
       tone: "red",

@@ -7,6 +7,8 @@
 // older monitor snapshots. The Ops surface renders honest "awaiting data"
 // placeholders whenever a field is absent, so nothing is ever fake-green.
 
+import type { OpsVerdict } from "@avg/schemas/ops-verdict";
+
 export type ProbeStatus = "ok" | "degraded" | "red";
 export type ProductHealthStatus = "healthy" | "degraded" | "red" | "unknown";
 
@@ -203,6 +205,20 @@ export interface ProductHealth {
   remediation?: RemediationStatus;
   /** The monitor's own build vs main — "is this board current?". */
   self?: SelfFreshness;
+  /**
+   * The server's copy of the operator verdict (`deriveOpsVerdict`, @avg/schemas).
+   *
+   * The board does NOT read this — it calls the same shared function itself,
+   * because it layers reader-side staleness on top ("last known state" when
+   * this browser's stream is down), which a server cannot know. Same function,
+   * same inputs, same answer.
+   *
+   * The field exists for readers that are not the board — chiefly an agent
+   * polling this endpoint, which must consume the board's conclusion rather
+   * than forming a competing one. Declared here so it is visible in the payload
+   * contract rather than being an undocumented extra key.
+   */
+  verdict?: OpsVerdict;
 }
 
 /** RPC auto-remediation status — drives the Ops "RPC failover" row. */
