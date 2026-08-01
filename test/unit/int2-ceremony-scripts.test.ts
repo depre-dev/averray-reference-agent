@@ -80,6 +80,35 @@ describe("committed INT-2 ceremony mechanics", () => {
     expect(byName["int2-negative-verify.sh"]).toContain("int2-evidence.mjs");
   });
 
+  it("gives every automated-suite failure a distinct, self-naming exit code", async () => {
+    const suite = await readFile(AUTOMATED_SUITE, "utf8");
+
+    // Two unrelated failures sharing an exit code make the code useless for
+    // telling them apart. This caught a real collision: a new database
+    // failure was assigned 26, already held by the pilot Git ownership probe.
+    const codes = [...suite.matchAll(/^\s+exit (\d+)$/gm)]
+      .map((match) => Number(match[1]))
+      .filter((code) => code !== 1);
+    expect(codes.length).toBeGreaterThan(0);
+    expect(new Set(codes).size).toBe(codes.length);
+
+    // The bring-up region once failed in CI having printed nothing at all,
+    // because pg_isready reports on stdout and stdout was sent to /dev/null.
+    // Each of these must survive as a named marker, and readiness must be
+    // probed over TCP — the transport the suite itself uses — rather than the
+    // unix socket, which answers during initdb's temporary server.
+    for (const marker of [
+      "INT2_DB_START_FAILED",
+      "INT2_DB_NEVER_READY",
+      "INT2_DB_PORT_UNMAPPED",
+      "INT2_DB_DIAGNOSTICS",
+    ]) {
+      expect(suite).toContain(marker);
+    }
+    expect(suite).toContain("psql -h 127.0.0.1");
+    expect(suite).not.toMatch(/pg_isready -U postgres -d \S+ >\/dev\/null$/m);
+  });
+
   it("proves the controlled pair passes and a non-discriminating mutation fails", async () => {
     const result = await verifyScriptedPairPreflight({
       repositoryRoot: ROOT,
