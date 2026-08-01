@@ -17,10 +17,24 @@
 # will not proxy to port 3000 anyway; its origin ports are 80/8080/8880/2052…
 # and 443/2053/2083/8443.
 #
-# So the relay joins the tunnel's network and is published as a tunnel public
-# hostname (`buzz.averray.com` → `http://relay:3000`), exactly as the monitor
-# is. Cloudflare creates that DNS itself as a CNAME to cfargotunnel.com — no
-# hand-made A record, and none should be left lying around.
+# So `buzz.averray.com` is a tunnel published route to `http://relay:3000`,
+# exactly as the monitor is. Cloudflare creates that DNS itself as a CNAME to
+# cfargotunnel.com — no hand-made A record, and none should be left lying around.
+#
+# The tunnel joins BUZZ's network, not the other way round. The first cut had it
+# backwards — the relay was attached to avg-internal so cloudflared could see it,
+# and that broke the relay outright:
+#
+#   Failed to connect to Postgres: password authentication failed for user "buzz"
+#
+# The avg stack has its own `postgres` service. With the relay on both networks,
+# `postgres` in DATABASE_URL resolved to avg-postgres-1 instead of buzz's own,
+# where the `buzz` role does not exist. A container on buzz-net ALONE connected
+# with the identical URL — which is what finally located it.
+#
+# Joining two stacks' namespaces makes every generic service name a coin flip.
+# So Buzz keeps its namespace to itself, and cloudflared gains one network where
+# the only name it needs is `relay` (see ops/compose.cloudflare-access.yml).
 #
 # NO host port at all. The upstream bundle binds 0.0.0.0:3000, which on a box
 # whose entire exposure model is "no open ports" quietly undoes that model — and
@@ -46,9 +60,6 @@ services:
     # `!reset` removes the upstream list rather than appending to it —
     # compose ≥ 2.24.4, which this bundle already requires.
     ports: !reset null
-    networks:
-      - buzz-net
-      - avg-internal
     mem_limit: 1g
     restart: unless-stopped
 
@@ -65,10 +76,3 @@ services:
     # revisiting. Revisit it with evidence.
     mem_limit: 512m
     restart: unless-stopped
-
-networks:
-  # Created by the `avg` compose project; Docker prefixes the project name.
-  # Verify with `docker network ls | grep avg` before first start.
-  avg-internal:
-    external: true
-    name: avg_avg-internal
