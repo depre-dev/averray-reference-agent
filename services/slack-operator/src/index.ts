@@ -3636,6 +3636,14 @@ function startOperatorRoutines() {
           persisted: productHealthIncidents,
           derived,
           limit: PRODUCT_HEALTH_INCIDENT_MAX,
+          // Present-tense evidence, so an episode orphaned by a restart can be
+          // closed on it. Without this the footer counts upward forever beside a
+          // green probe — the buffer that would have closed it is gone.
+          currentProbeStatus: new Map(
+            (productHealthHistory[productHealthHistory.length - 1]?.probes ?? []).map(
+              (p) => [p.name, p.status] as const,
+            ),
+          ),
         });
         productHealthIncidents = reconciled.merged;
         await appendIncidents(reconciled.writes);
