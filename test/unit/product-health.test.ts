@@ -454,7 +454,43 @@ describe("deriveCapabilityProbe", () => {
     };
     const r = deriveCapabilityProbe(fetched(body), capConfig);
     expect(r.status).toBe("ok");
-    expect(r.detail).toBe("3/5 capabilities up, 2 acknowledged warnings");
+    // Required leads; the two deliberate states are NAMED rather than reduced
+    // to "3/5 up", which read as two things being broken.
+    expect(r.detail).toBe(
+      "2/2 required up · xcmObserver staged, gasSponsor disabled (acknowledged)",
+    );
+  });
+
+  // THE LIVE MAINNET PAYLOAD, exactly. `externalPostingWatcherLagSeconds` shares
+  // the capabilityHealth object but is a METRIC — it has no healthy state, so it
+  // counted as "not up" forever and made 7/7 unreachable by construction. The
+  // board read "4/7 capabilities up" while every required capability was fine.
+  it("does not count a metric as a capability, and shows it without judging it", () => {
+    const body: ProductHealthPayload = {
+      ...HEALTHY_BODY,
+      capabilityHealth: {
+        blockchain: "enabled",
+        treasuryMutations: "available",
+        xcmObserver: "staged",
+        indexer: "synced",
+        gasSponsor: "disabled",
+        externalPosting: "enabled",
+        externalPostingWatcherLagSeconds: 160,
+      } as ProductHealthPayload["capabilityHealth"],
+      warnings: [
+        { code: "xcm_observer_staged", severity: "warning" },
+        { code: "gas_sponsor_disabled", severity: "warning" },
+      ],
+    };
+    const r = deriveCapabilityProbe(fetched(body), capConfig);
+    expect(r.status).toBe("ok");
+    expect(r.detail).toBe(
+      "2/2 required up · xcmObserver staged, gasSponsor disabled (acknowledged) · external-posting watcher lag 160s",
+    );
+    // No threshold on the lag: nobody has decided what "too laggy" means, and
+    // inventing one would manufacture an alarm.
+    expect(r.status).not.toBe("degraded");
+    expect(r.detail).not.toContain("4/7");
   });
 
   it("red when a REQUIRED capability isn't up (money path down)", () => {

@@ -240,7 +240,7 @@ const MAINNET_PROBES: ProductHealthProbe[] = [
   { name: "api_latency", status: "ok", detail: "/health 51 ms", sparkline: spark("ok") },
   { name: "disk_headroom", status: "ok", detail: "142.3 GiB free of 193 GiB (26% used)", sparkline: spark("ok") },
   { name: "chain_height", status: "ok", detail: "block #18,894,637 · chain 420420419", sparkline: spark("ok") },
-  { name: "capabilities", status: "degraded", detail: "4/7 capabilities up · 2 warnings acknowledged", sparkline: spark("degraded") },
+  { name: "capabilities", status: "degraded", detail: "2/2 required up · xcmObserver staged, gasSponsor disabled (acknowledged) · external-posting watcher lag 160s", sparkline: spark("degraded") },
   { name: "signer_liquidity", status: "ok", detail: "gas 2.6931 DOT · reward bank 15.89 USDC", sparkline: spark("ok") },
   { name: "treasury_liquidity", status: "ok", detail: "reward 15.89 · reserve 0.00 · AAC 26.15 · escrow 0.00 · revenue 0.01", sparkline: spark("ok") },
   { name: "money_path", status: "ok", detail: "settled24h 9 (0 stuck · 0 failed)", sparkline: spark("ok") },
