@@ -22,10 +22,15 @@
 # is. Cloudflare creates that DNS itself as a CNAME to cfargotunnel.com — no
 # hand-made A record, and none should be left lying around.
 #
-# The host port is kept but bound to LOOPBACK only: enough for
-# `curl 127.0.0.1:3000/_liveness` from the box, with no public listener. The
-# upstream bundle binds 0.0.0.0, which on a box with no firewall in front would
-# expose the relay beside the tunnel it is supposed to arrive through.
+# NO host port at all. The upstream bundle binds 0.0.0.0:3000, which on a box
+# whose entire exposure model is "no open ports" quietly undoes that model — and
+# the tunnel never needed it, since it dials the container over the network.
+#
+# A first pass kept it on loopback for `curl 127.0.0.1:3000/_liveness`
+# convenience. That collided on the first start: something already holds :3000
+# on this host (hermes-workspace, which this same tunnel serves as
+# command.averray.com), and the relay refused to start. Convenience was not
+# worth a port collision, nor the contradiction with the paragraph above.
 #
 # ── BLAST RADIUS ────────────────────────────────────────────────────────────
 # 22 GiB total with ~19 available, so these ceilings are not about scarcity.
@@ -38,10 +43,9 @@
 # raise reflexively.
 services:
   relay:
-    # `!override` replaces the upstream list instead of appending to it —
+    # `!reset` removes the upstream list rather than appending to it —
     # compose ≥ 2.24.4, which this bundle already requires.
-    ports: !override
-      - "127.0.0.1:${BUZZ_HTTP_PORT:-3000}:3000"
+    ports: !reset null
     networks:
       - buzz-net
       - avg-internal

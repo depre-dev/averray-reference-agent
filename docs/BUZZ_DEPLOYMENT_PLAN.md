@@ -135,10 +135,20 @@ handing that judgement to a message bus re-opens a fixed bug.
 
 ## Phasing
 
-**P1 — stand it up, empty.** Compose bundle on the VPS, pinned image, behind the
-existing edge on 3000, `BUZZ_AUTO_MIGRATE=true` for the first boot. Verify
-`/_liveness`. Nothing integrated. Confirms capacity and networking before any
-code depends on it.
+**P1 — stand it up, empty.** Compose bundle on the VPS, pinned image, reached
+only through the tunnel, `BUZZ_AUTO_MIGRATE=true` for the first boot. Nothing
+integrated. Confirms capacity and networking before any code depends on it.
+
+The relay publishes NO host port, so verify from inside its network:
+
+```bash
+docker run --rm --network buzz_buzz-net curlimages/curl -fsS http://relay:3000/_liveness
+curl -fsS https://buzz.averray.com/_liveness      # and through the tunnel
+```
+
+Run them separately: the first proves the relay booted, the second proves the
+tunnel route and the shared-network attachment. First passes and second does
+not → the fault is networking, not Buzz.
 
 **P2 — the bot can speak.** Bot keypair, signing client in slack-operator,
 publish one hand-triggered test message. Proves the whole path with no
