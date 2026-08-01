@@ -22,6 +22,13 @@ ARG CLAUDE_CLI_PACKAGE=@anthropic-ai/claude-code
 # self-freshness probe reports as unknown rather than as up-to-date.
 ARG GIT_SHA=unknown
 ENV AVERRAY_GIT_SHA=${GIT_SHA}
+# Was the working tree dirty when this image was built? A sha alone would then
+# be a LIE — the image is HEAD plus uncommitted changes, and self-freshness
+# would happily report "up to date with main" while running code that is in no
+# commit at all. This has bitten before: an un-popped stash on the VPS silently
+# reverted a built asset. Default false; ops/deploy-monitor.sh sets it.
+ARG GIT_DIRTY=false
+ENV AVERRAY_GIT_DIRTY=${GIT_DIRTY}
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates chromium git openssh-client \
   && rm -rf /var/lib/apt/lists/*

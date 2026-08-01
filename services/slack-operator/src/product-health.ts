@@ -535,6 +535,8 @@ export interface ProductHealthConfig {
   selfRepo?: string;
   /** The commit this build came from — baked in as AVERRAY_GIT_SHA. */
   selfSha?: string;
+  /** Working tree was dirty at image build — the sha alone would be a lie. */
+  selfDirty?: boolean;
   /** Token for the compare call; a private repo returns 404 without one. */
   selfGithubToken?: string;
   githubApiBaseUrl?: string;
@@ -638,6 +640,7 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
     payoutSourceAddress: env.PRODUCT_HEALTH_PAYOUT_SOURCE_ADDRESS || undefined,
     selfRepo: env.PRODUCT_HEALTH_SELF_REPO || env.MONITOR_REPO || undefined,
     selfSha: env.AVERRAY_GIT_SHA || undefined,
+    selfDirty: truthy(env.AVERRAY_GIT_DIRTY),
     selfGithubToken: env.PRODUCT_HEALTH_SELF_GITHUB_TOKEN || env.GITHUB_TOKEN || undefined,
     githubApiBaseUrl: env.GITHUB_API_BASE_URL || undefined,
     // ~24h at a 6s block time. Lower it if the RPC caps eth_getLogs ranges.
@@ -1963,6 +1966,7 @@ export async function collectProductHealthProbes(
   const selfFreshness = await deriveSelfFreshnessProbe({
     ...(config.selfRepo ? { repo: config.selfRepo } : {}),
     ...(config.selfSha ? { runningSha: config.selfSha } : {}),
+    ...(config.selfDirty ? { dirty: true } : {}),
     ...(config.selfGithubToken ? { token: config.selfGithubToken } : {}),
     ...(config.githubApiBaseUrl ? { baseUrl: config.githubApiBaseUrl } : {}),
     nowMs: chainCtx.nowMs,
@@ -2049,12 +2053,19 @@ export async function collectProductHealthProbes(
 async function deriveSelfFreshnessProbe(input: {
   repo?: string;
   runningSha?: string;
+  dirty?: boolean;
   token?: string;
   baseUrl?: string;
   nowMs: number;
   fetchImpl: typeof fetch;
 }): Promise<{ selfFreshness: SelfFreshness }> {
   const sha = input.runningSha ?? null;
+  // A dirty build short-circuits BEFORE the GitHub compare — there is nothing
+  // to usefully compare, and a clean "0 behind" answer would launder the fact
+  // that the running code is in no commit at all.
+  if (input.dirty) {
+    return { selfFreshness: decideSelfFreshness({ runningSha: sha, compare: null, dirty: true, nowMs: input.nowMs }) };
+  }
   if (!input.repo) {
     const verdict = decideSelfFreshness({ runningSha: sha, compare: null, unknownReason: "no repo configured", nowMs: input.nowMs });
     return { selfFreshness: verdict };
