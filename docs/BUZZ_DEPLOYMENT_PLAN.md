@@ -45,21 +45,33 @@ Follow it: `buzz.averray.com` proxied to the VPS, Buzz listening on
 `BUZZ_HTTP_PORT=3000`. `BUZZ_COMPOSE_TLS` stays **off** — no second Caddy, no
 contest for 80/443 with whatever holds them now.
 
-**2. Cloudflare Access vs a WebSocket relay — DECIDE THIS.** Buzz is a Nostr
-relay; `RELAY_URL` is `wss://`. Cloudflare proxies WebSockets fine, but **Access**
-(the auth layer sitting in front of the monitor) will reject a bot or a desktop
-client that has no browser session. If `buzz.averray.com` goes behind Access as
-the other hosts do, every non-browser participant needs a service token or a
-bypass rule.
+**2. Cloudflare Access — RESOLVED: do NOT put it in front of the relay.**
+Buzz is a Nostr relay spoken over `wss://` by bots and desktop clients that have
+no browser session. Access would reject all of them, and it would fail looking
+like the app is broken rather than like an auth policy — the same shape as the
+env-scoped-secret footgun.
 
-This is the same shape as the env-scoped-secret footgun: a protection applied by
-default in the wrong place, failing in a way that looks like the app is broken.
-Settle it before P2, when the bot first tries to connect.
+It is also redundant, which is the deciding argument. Buzz authenticates
+participants itself: `BUZZ_REQUIRE_AUTH_TOKEN=true`,
+`BUZZ_REQUIRE_RELAY_MEMBERSHIP=true`, and closed-relay mode keyed on
+`RELAY_OWNER_PUBKEY`. Membership is by Nostr key. Fronting that with a second,
+browser-shaped auth layer breaks the working one to duplicate it.
 
-**3. Memory headroom — UNMEASURED, and I cannot measure it.** Disk is fine
-(131 GiB free of 193). RAM is not something I can see from here, and this adds a
-*second* Postgres plus a MinIO to a box already running the averray stack,
-Hermes, and a Postgres. Run `free -h` before P1. Do not assume it fits.
+So: Cloudflare **proxied** (TLS + DDoS) but **not Access**, with Buzz's own
+closed-relay mode carrying authorization. That is a real decision to make
+deliberately, not a default to inherit.
+
+**3. Memory headroom — MEASURED, and it fits.** 22 GiB total, 3.2 GiB used,
+**19 GiB available**; disk 131 GiB free of 193. Buzz's four containers want
+1–2 GiB at this scale. Not close to tight.
+
+But **swap is 0**. There is no cushion: a spike is not slowness, it is an
+immediate OOM kill — and this box also runs the monitor that watches the money
+path. A Buzz problem must not be able to kill it.
+
+So set explicit `mem_limit` on every Buzz service. Not because the box is
+short, but because unbounded neighbours plus no swap is exactly how the thing
+meant to warn you dies alongside the thing it watches.
 
 **4. Image pin.** The example defaults to `ghcr.io/block/buzz:main`, which the
 README itself calls "for early testing".
