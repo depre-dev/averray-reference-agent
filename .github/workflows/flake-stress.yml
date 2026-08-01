@@ -84,7 +84,11 @@ jobs:
             else
               failures=$((failures + 1))
               echo "run $i: FAIL"
-              grep -E "^ FAIL |Error:|AssertionError" "run-$i.log" | head -20 || true
+              # A resolution failure ("Failed to load url @avg/…", "Failed to
+              # resolve entry for package") matched none of these patterns, so
+              # an unbuilt checkout printed a bare "FAIL" with no cause. That is
+              # how the missing-build bug #606 fixed stayed red and unread.
+              grep -E "^ FAIL |Failed to (load url|resolve)|Error:|AssertionError" "run-$i.log" | head -20 || true
             fi
             ran=$((ran + 1))
             echo "::endgroup::"
@@ -96,6 +100,14 @@ jobs:
           # which reads as evidence. Fail closed instead.
           if [ "$ran" -eq 0 ]; then
             echo "::error::stress job executed no iterations"
+            exit 1
+          fi
+          # EVERY run failing is not a race. A flake that fires 100% of the time
+          # is a broken build, and asserting "flaky" regardless of the ratio
+          # sent the reader hunting a concurrency bug that did not exist — for
+          # days, while the suite itself was green. Name the two cases apart.
+          if [ "$failures" -eq "$ran" ] && [ "$ran" -gt 1 ]; then
+            echo "::error::ALL $ran full-suite runs failed — deterministic, not flake. Look for a build/resolution error in the logs before hunting a race."
             exit 1
           fi
           if [ "$failures" -gt 0 ]; then
