@@ -271,6 +271,22 @@ describe("committed INT-2 ceremony mechanics", () => {
   //
   // These two are also the only tests in the suite anywhere near the default:
   // across all 24 runs every other test topped out at 412ms.
+  it("keeps the HALT fixture clear of the kernel's shell.run ceiling", async () => {
+    const suite = await readFile(
+      path.join(ROOT, "test/integration/int2-automated-suite.test.ts"),
+      "utf8",
+    );
+    const match = suite.match(/const HALT_COMMAND = "sleep (\d+)";/u);
+    expect(match).not.toBeNull();
+
+    // The kernel caps shell.run at `min(timeout_seconds or 30, 30)`. A fixture
+    // that sleeps exactly 30 ties with that ceiling, and the tie decides
+    // whether the capability completes or times out — two different run paths
+    // from a ~10ms race. It cost one suite run on code that passed twice more.
+    // Strictly greater keeps the outcome deterministic.
+    expect(Number(match![1])).toBeGreaterThan(30);
+  });
+
   it("proves the controlled pair passes and a non-discriminating mutation fails", async () => {
     const result = await verifyScriptedPairPreflight({
       repositoryRoot: ROOT,

@@ -78,7 +78,18 @@ const EXPECTED_CASE_COUNT = 10;
 const TEST_TIMEOUT_MS = 240_000;
 const TERMINAL_WAIT_MS = 180_000;
 const HARNESS_STATE_WAIT_MS = 90_000;
-const HALT_COMMAND = "sleep 30";
+// Must exceed the kernel's shell.run ceiling, not equal it. That ceiling is
+// `min(timeout_seconds or 30, 30)` in capabilities/native.py, so `sleep 30` is
+// a literal tie: whichever side wins by milliseconds decides whether the
+// capability COMPLETES or TIMES OUT, and those are different run paths. One
+// observed run recorded duration 30.0099 with ok:true where the reference
+// record has 30.0585 with command_timeout — a ~10ms coin flip that failed this
+// case on code identical to two runs that passed.
+//
+// 45 always loses to the ceiling, so the command always times out at 30s and
+// the run reliably sits in `executing` for the whole window the HALT drill
+// needs. Do not lower this to 30. See the guard in int2-ceremony-scripts.test.
+const HALT_COMMAND = "sleep 45";
 const SENTINEL_RUN_ID = "00000000-0000-4000-8000-000000000000";
 
 describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
