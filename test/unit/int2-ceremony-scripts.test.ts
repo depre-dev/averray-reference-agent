@@ -150,6 +150,44 @@ describe("committed INT-2 ceremony mechanics", () => {
     expect(workflow).toContain("executed-count.txt')\" = \"10\"");
   });
 
+  // verifyScriptedPairPreflight runs two full `git clone --local
+  // --no-hardlinks` of this repository concurrently, so this test's wall time
+  // tracks whole-suite disk and CPU contention rather than its own logic. It
+  // was landed on vitest's 5000ms default and outgrew it: on main it failed 1
+  // of 4 back-to-back full-suite runs at 5025ms — the timeout firing, not a
+  // wrong assertion.
+  //
+  // Measured over 24 full-suite runs on a 12-core host, part of them with the
+  // timeout lifted to 120s so the true cost was observable: 2628-4108ms, idle
+  // and under eight competing CPU burners alike. Every run finished inside
+  // that bounded window and passed, which is what rules out a race — a
+  // deadlock would not have a ceiling. The worst case was 82% of the 5000ms
+  // budget — no useful margin.
+  //
+  // The failures show up on high-core development hosts rather than in CI,
+  // which reads backwards until you account for vitest sizing its worker pool
+  // from CPU count: a 12-core box runs more test FILES concurrently, so more
+  // clones overlap and contend for disk than on a 4-core runner. CI has stayed
+  // green throughout and the 10-iteration flake-stress job passed 10/10 — both
+  // consistent with that explanation, and neither consistent with CI being the
+  // host nearest the cliff.
+  //
+  // 30_000 is not arbitrary: the section-3 test below does strictly MORE clone
+  // work (three fixture criteria, measured 3379-4530ms against this one's
+  // 2628-4108ms), has carried 30_000 since #594, and is green nightly. Same
+  // workload class, same budget.
+  //
+  // Raising the ceiling is the whole fix — the cost itself is irreducible
+  // here. Cloning with --no-checkout, so the tree is materialised once at
+  // baseRevision instead of at HEAD and again on detach, was measured at only
+  // ~100ms of ~850ms per clone, which does not justify editing a production
+  // evidence script. Dropping --no-hardlinks was measured too and is a
+  // REGRESSION, not a saving: hardlinked local cloning of this repository ran
+  // 484ms against 288ms for --no-hardlinks over three runs each. Both obvious
+  // avenues are therefore closed, and the ceiling is the fix.
+  //
+  // These two are also the only tests in the suite anywhere near the default:
+  // across all 24 runs every other test topped out at 412ms.
   it("proves the controlled pair passes and a non-discriminating mutation fails", async () => {
     const result = await verifyScriptedPairPreflight({
       repositoryRoot: ROOT,
@@ -174,7 +212,7 @@ describe("committed INT-2 ceremony mechanics", () => {
         negativeScriptPath: mutatedNegative,
       }),
     ).rejects.toThrow("controlled pair appended content must differ");
-  });
+  }, 30_000);
 
   it("preflights all three paid-task criterion outcomes at the pinned revision", async () => {
     const result = await verifySection3Preflight({
