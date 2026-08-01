@@ -26,8 +26,35 @@ import type {
 import { deriveOpsVerdict, payoutGap } from "@avg/schemas/ops-verdict";
 import { formatAgo, formatAmount, type OpsTone } from "./ops-model.js";
 
-/** Beyond this, a snapshot is old enough that the board says so out loud. */
-export const DATA_STALE_MS = 3 * 60 * 1000;
+/**
+ * When is a snapshot old enough to say so out loud?
+ *
+ * This was a flat 3 minutes, picked by intuition. The heartbeat runs every 2 —
+ * so a single late check lit "DATA STALE · every value below may be wrong" over
+ * a perfectly healthy mainnet, and it was lit most of the time. That is exactly
+ * the false red the board's own rules forbid: an alarm that is always on is one
+ * the operator learns to scroll past, which makes the next one invisible.
+ *
+ * The threshold now comes from the cadence the SERVER reports, so it follows a
+ * config change instead of drifting out of agreement with one. Two and a half
+ * intervals tolerates one missed check and not two.
+ *
+ * Same lesson as the block-time bug: measure the thing you are comparing
+ * against, don't assume it.
+ */
+export const STALE_INTERVAL_MULTIPLE = 2.5;
+
+/** Fallback when the server reports no cadence — generous on purpose, because a
+ *  too-tight guess produces precisely the false alarm described above. */
+export const DATA_STALE_FALLBACK_MS = 10 * 60 * 1000;
+
+export function staleAfterMs(health: Pick<ProductHealth, "checkIntervalMs">): number {
+  const interval = health.checkIntervalMs;
+  if (typeof interval !== "number" || !Number.isFinite(interval) || interval <= 0) {
+    return DATA_STALE_FALLBACK_MS;
+  }
+  return interval * STALE_INTERVAL_MULTIPLE;
+}
 
 // ── 1. the verdict ──────────────────────────────────────────────────────────
 
@@ -113,7 +140,7 @@ export function opsVerdict(input: {
   }
 
   const ageMs = health.at == null ? null : Math.max(0, nowMs - health.at);
-  const stale = streamDegraded || (ageMs != null && ageMs > DATA_STALE_MS);
+  const stale = streamDegraded || (ageMs != null && ageMs > staleAfterMs(health));
   return {
     kicker: stale
       ? `LAST KNOWN STATE — ${streamDegraded ? "STREAM DOWN" : "DATA STALE"} · ${health.at == null ? "age unknown" : formatAgo(health.at, nowMs)}`
@@ -167,7 +194,7 @@ export function trustRows(input: {
     rows.push({ key: "DATA AGE", value: "no check yet", tone: "awaiting" });
   } else {
     const ageMs = Math.max(0, nowMs - health.at);
-    const stale = ageMs > DATA_STALE_MS;
+    const stale = ageMs > staleAfterMs(health);
     rows.push({
       key: "DATA AGE",
       value: `${formatAgo(health.at, nowMs)} — ${stale ? "STALE" : "fresh"}`,

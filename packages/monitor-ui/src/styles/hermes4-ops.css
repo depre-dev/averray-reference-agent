@@ -17,9 +17,29 @@
    Loaded last in main.tsx so its additive rules win.
    ========================================================= */
 
+/* The board is sized to fill the window, so the money band can stretch and the
+   footer sits on the bottom edge. `height: 100%` needs an unbroken chain to
+   resolve against, and there wasn't one — nothing in the stylesheets gave
+   html/body/#root a height, so the board collapsed to its content and left the
+   lower third of the screen empty. `100dvh` so mobile browser chrome doesn't
+   push the footer under the address bar. */
+html,
+body,
+#root {
+  height: 100%;
+}
+.hm-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .ops-board {
   --ops-hair: rgba(237, 230, 221, 0.10);
   --ops-rule: rgba(237, 230, 221, 0.16);
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -366,6 +386,11 @@
 .ops-funnel {
   display: flex;
   align-items: center;
+  /* Take the slack between the header and the evidence rather than leaving it
+     all in one gap underneath. `align-items: center` then keeps the numerals
+     optically centred in whatever height the panel ends up with. */
+  flex: 1;
+  min-height: 0;
   margin-top: 10px;
   padding: 0 8px;
 }
@@ -571,7 +596,16 @@
   color: var(--h4-muted);
 }
 .ops-pillar-trend[data-tone="awaiting"] { color: var(--h4-tel); }
-.ops-pillar-trend .ops-linespark { flex: none; }
+/* LineSpark sets a viewBox but no width/height attributes, so the <svg> takes
+   whatever space it is given. Once the board filled the viewport that became a
+   lot — the 96×20 sparkline rendered ~4× oversized and shoved its own label
+   into a one-word-per-line column. Pin the box here. */
+.ops-pillar-trend .ops-linespark {
+  flex: none;
+  width: 96px;
+  height: 20px;
+}
+.ops-pillar-trend > span { min-width: 0; }
 
 /* ---- footer ------------------------------------------------------
    LLM spend lives here — one line. It is the least urgent number on

@@ -1,7 +1,9 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  DATA_STALE_FALLBACK_MS,
   METER_RUNGS,
+  staleAfterMs,
   opsVerdict,
   payoutView,
   poolMeter,
@@ -168,8 +170,44 @@ describe("opsVerdict", () => {
   });
 
   test("stale data alone is enough to relabel, even on an open stream", () => {
-    const v = opsVerdict({ health: OPS_FIXTURE_NOMINAL, streamDegraded: false, nowMs: OPS_FIXTURE_NOMINAL.at! + 10 * 60_000 });
+    const health = { ...OPS_FIXTURE_NOMINAL, checkIntervalMs: 2 * 60_000 };
+    const v = opsVerdict({ health, streamDegraded: false, nowMs: health.at! + 6 * 60_000 });
     expect(v.kicker).toContain("DATA STALE");
+  });
+
+  // THE FALSE RED, PINNED. The threshold was a flat 3 minutes against a
+  // 2-minute heartbeat, so one late check lit "every value below may be wrong"
+  // over a healthy mainnet — and it was lit most of the time. An alarm that is
+  // always on is one the operator learns to scroll past.
+  test("one missed check does NOT raise a stale alarm", () => {
+    const health = { ...OPS_FIXTURE_NOMINAL, checkIntervalMs: 2 * 60_000 };
+    // 3 minutes old: a late check on a 2-minute cadence. Not an incident.
+    const v = opsVerdict({ health, streamDegraded: false, nowMs: health.at! + 3 * 60_000 });
+    expect(v.kicker).toContain("OPERATOR VERDICT");
+    expect(v.kicker).not.toContain("STALE");
+  });
+
+  test("the threshold follows the reported cadence rather than a constant", () => {
+    const slow = { ...OPS_FIXTURE_NOMINAL, checkIntervalMs: 10 * 60_000 };
+    // 20 minutes is two intervals on a 10-minute cadence — still not stale…
+    expect(
+      opsVerdict({ health: slow, streamDegraded: false, nowMs: slow.at! + 20 * 60_000 }).kicker,
+    ).toContain("OPERATOR VERDICT");
+    // …while the same age on a 2-minute cadence is long past it.
+    const fast = { ...OPS_FIXTURE_NOMINAL, checkIntervalMs: 2 * 60_000 };
+    expect(
+      opsVerdict({ health: fast, streamDegraded: false, nowMs: fast.at! + 20 * 60_000 }).kicker,
+    ).toContain("DATA STALE");
+  });
+
+  // A too-tight guess is what produced the false alarm, so an unknown cadence
+  // errs generous rather than crying stale.
+  test("an unreported cadence falls back generously, not tightly", () => {
+    const health = { ...OPS_FIXTURE_NOMINAL, checkIntervalMs: undefined };
+    expect(staleAfterMs(health)).toBe(DATA_STALE_FALLBACK_MS);
+    expect(
+      opsVerdict({ health, streamDegraded: false, nowMs: health.at! + 5 * 60_000 }).kicker,
+    ).toContain("OPERATOR VERDICT");
   });
 
   // Being unable to SEE the money must not be shouted as money being broken.
@@ -309,12 +347,24 @@ describe("trustRows", () => {
   });
 
   test("a stale snapshot marks DATA AGE red even while the stream is open", () => {
+    const health = { ...OPS_FIXTURE_NOMINAL, checkIntervalMs: 2 * 60_000 };
     const rows = trustRows({
-      health: OPS_FIXTURE_NOMINAL,
+      health,
       streamDegraded: false,
       streamStatus: "open",
-      nowMs: OPS_FIXTURE_NOMINAL.at! + 10 * 60_000,
+      nowMs: health.at! + 10 * 60_000,
     });
     expect(rows.find((r) => r.key === "DATA AGE")!.tone).toBe("red");
+  });
+
+  test("a merely-late check keeps DATA AGE green", () => {
+    const health = { ...OPS_FIXTURE_NOMINAL, checkIntervalMs: 2 * 60_000 };
+    const rows = trustRows({
+      health,
+      streamDegraded: false,
+      streamStatus: "open",
+      nowMs: health.at! + 3 * 60_000,
+    });
+    expect(rows.find((r) => r.key === "DATA AGE")!.tone).toBe("ok");
   });
 });

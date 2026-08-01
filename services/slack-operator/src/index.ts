@@ -750,6 +750,18 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       at: last?.at ?? null,
       status: last?.status ?? "unknown",
       checks: productHealthHistory.length,
+      // How often this endpoint is expected to update.
+      //
+      // Without it a reader has to GUESS how old is too old, and the board
+      // guessed 3 minutes against a 2-minute heartbeat — one minute of slack, so
+      // a single late check lit "DATA STALE · every value below may be wrong"
+      // over a perfectly healthy system. A permanently-lit alarm is one the
+      // operator learns to scroll past, which makes the next one invisible; a
+      // false red costs as much as a false green.
+      //
+      // Publish the cadence and let each reader derive its own threshold from
+      // the measurement instead of from an assumption.
+      checkIntervalMs: routineConfig.productHealth.intervalMs,
       // THE OPERATOR VERDICT — the same `deriveOpsVerdict` the board renders,
       // from @avg/schemas, so this endpoint carries the board's CONCLUSION and
       // not merely the facts behind it.
