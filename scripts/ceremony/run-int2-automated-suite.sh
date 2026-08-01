@@ -14,11 +14,28 @@ _int2_bootstrap_log="$_int2_evidence/bootstrap.log"
 _int2_started="$(date +%s)"
 _int2_docker_shared_root="${HOME:?}/.agent-runtime"
 _int2_git_probe=""
+# Bookkeeping the cleanup trap reaps from. Both live under the temp root, not
+# the evidence directory: they are transient, and CI uploads the evidence.
+_int2_worker_pidfile="$_int2_root/worker-pids.txt"
+_int2_run_containers_before="$_int2_root/run-containers-before.txt"
+
+# shellcheck source=scripts/ceremony/lib/int2-reap.sh
+source "$_int2_repo/scripts/ceremony/lib/int2-reap.sh"
 
 _int2_cleanup() {
   _int2_exit="$?"
   printf '%s\n' "INT2_SUITE_EXIT_CODE=$_int2_exit" \
     >> "$_int2_bootstrap_log" 2>/dev/null || true
+  # First: stop the workers this run spawned. Ahead of the postmortem so
+  # nothing is still writing to the databases it is about to read, and ahead of
+  # everything else because a vitest crash never reaches the suite's own
+  # afterAll — which is how one of these came to outlive its own temp root by
+  # three days. Reaping is by recorded pid with re-verified identity; see
+  # lib/int2-reap.sh for why `pkill -f "harness worker"` is not an option.
+  int2_reap_workers \
+    "$_int2_worker_pidfile" \
+    "${HARNESS_BIN:-} worker" \
+    "$_int2_bootstrap_log" || true
   # On any failure, preserve why the databases were unhappy before removing
   # them. Containers outlive their crash on purpose (no --rm) so this works.
   if [ "$_int2_exit" -ne 0 ]; then
@@ -33,6 +50,9 @@ _int2_cleanup() {
         >> "$_int2_bootstrap_log" 2>&1 || true
     done
   fi
+  # The workers are gone, so no new run container can appear underneath this.
+  int2_reap_run_containers \
+    "$_int2_run_containers_before" "$_int2_bootstrap_log" || true
   docker rm --force "$_int2_harness_db" "$_int2_reference_db" \
     >/dev/null 2>&1 || true
   case "$_int2_git_probe" in
@@ -224,6 +244,24 @@ export INT2_SUITE_REQUIRED=1
 export INT2_REPOSITORY_ROOT="$_int2_repo"
 export INT2_SUITE_EVIDENCE_DIR="$_int2_evidence"
 export INT2_SUITE_EXECUTION_MARKER="$_int2_marker"
+# The suite spawns its Harness workers from inside vitest, so the trap cannot
+# see their pids unless the tests hand them over. Each worker appends its own
+# the instant it exists.
+export INT2_SUITE_WORKER_PIDFILE="$_int2_worker_pidfile"
+
+# Everything from here on is "during the run": nothing above this line starts a
+# Harness run, so anything named harness-run-* that exists now belongs to
+# somebody else and the trap must not touch it. Recorded immediately before the
+# cases start so the window is as narrow as it can be made.
+int2_reap_snapshot_run_containers "$_int2_run_containers_before" \
+  || {
+    echo "INT2_RUN_CONTAINER_SNAPSHOT_FAILED: cannot list existing harness-run-* containers" \
+      | tee -a "$_int2_bootstrap_log" >&2
+    exit 34
+  }
+printf '%s\n' "INT2_RUN_CONTAINER_SNAPSHOT spared=$(
+  grep -c . "$_int2_run_containers_before" 2>/dev/null || echo 0
+)" >> "$_int2_bootstrap_log"
 
 printf '%s\n' "INT2_CASES_STARTED expected=10" >> "$_int2_bootstrap_log"
 (

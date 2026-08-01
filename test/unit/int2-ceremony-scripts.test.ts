@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import {
   chmod,
   mkdir,
@@ -9,6 +9,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -33,6 +34,7 @@ const AUTOMATED_SUITE = path.join(
   SCRIPT_ROOT,
   "run-int2-automated-suite.sh",
 );
+const REAP_HELPER = path.join(SCRIPT_ROOT, "lib/int2-reap.sh");
 const PILOT_DOCKERFILE = path.join(ROOT, "ops/Dockerfile.pilot");
 const OPERATOR_SCRIPTS = [
   "int2-bringup.sh",
@@ -43,13 +45,94 @@ const OPERATOR_SCRIPTS = [
   "int2-teardown.sh",
 ] as const;
 const temporaryRoots: string[] = [];
+const strayProcesses: ChildProcess[] = [];
 
 afterEach(async () => {
+  // A test about not leaking processes must not leak processes.
+  for (const stray of strayProcesses.splice(0)) {
+    if (stray.exitCode === null && stray.signalCode === null) {
+      try {
+        process.kill(-stray.pid!, "SIGKILL");
+      } catch {
+        stray.kill("SIGKILL");
+      }
+    }
+  }
   await Promise.all(
     temporaryRoots.splice(0).map((value) =>
       rm(value, { recursive: true, force: true })),
   );
 });
+
+// A stand-in for `<checkout>/.venv/bin/harness`, laid out at the real path so
+// the identifying fragment the suite passes has the real shape. Extensionless,
+// like the console script it imitates, so Node loads it as CommonJS whatever
+// this package declares.
+const FAKE_WORKER = [
+  'if (process.argv[2] !== "worker") process.exit(2);',
+  "if (process.env.FAKE_WORKER_GRANDCHILD) {",
+  '  import("node:child_process").then(({ spawn }) => {',
+  "    const child = spawn(",
+  '      process.execPath, ["-e", "setInterval(() => {}, 1 << 30)"],',
+  '      { stdio: "ignore" },',
+  "    );",
+  '    import("node:fs").then((fs) => fs.writeFileSync(',
+  "      process.env.FAKE_WORKER_GRANDCHILD, `${child.pid}\\n`,",
+  "    ));",
+  "  });",
+  "}",
+  "setInterval(() => {}, 1 << 30);",
+].join("\n");
+
+async function fakeHarnessBin(root: string, name: string): Promise<string> {
+  const directory = path.join(root, name, "agent-harness/.venv/bin");
+  await mkdir(directory, { recursive: true });
+  const bin = path.join(directory, "harness");
+  await writeFile(bin, `${FAKE_WORKER}\n`, "utf8");
+  return bin;
+}
+
+// Spawned exactly the way the suite spawns a real worker: detached, so it
+// leads its own process group. `node <bin> worker` puts "<bin> worker" in the
+// command line, which is the fragment the reaper matches on — the same
+// substring the kernel leaves behind after resolving the real shim's shebang.
+function startFakeWorker(
+  bin: string,
+  environment: NodeJS.ProcessEnv = {},
+): ChildProcess {
+  const child = spawn(process.execPath, [bin, "worker"], {
+    stdio: "ignore",
+    detached: true,
+    env: { ...process.env, ...environment },
+  });
+  child.unref();
+  strayProcesses.push(child);
+  return child;
+}
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitUntilDead(pid: number, timeoutMs = 15_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline && isAlive(pid)) await delay(50);
+}
+
+// Drive one reaper function out of the committed library, in bash, exactly as
+// the suite's cleanup trap does.
+function runReaper(call: string, environment: NodeJS.ProcessEnv = {}): string {
+  return execFileSync(
+    "bash",
+    ["-euo", "pipefail", "-c", `source "${REAP_HELPER}"\n${call}`],
+    { encoding: "utf8", env: { ...process.env, ...environment } },
+  );
+}
 
 describe("committed INT-2 ceremony mechanics", () => {
   it("keeps all six operator scripts parseable and on the shared evidence definition", async () => {
@@ -477,5 +560,259 @@ describe("committed INT-2 ceremony mechanics", () => {
       'git config --system --get-all safe.directory',
     );
     expect(suite).toContain("git diff --check");
+  });
+});
+
+describe("INT-2 suite reaping", () => {
+  it("kills the worker it recorded and spares an operator's worker at a recorded pid", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "int2-reap-workers-"));
+    temporaryRoots.push(root);
+    const [mine, operator] = await Promise.all([
+      fakeHarnessBin(root, "suite-run"),
+      fakeHarnessBin(root, "operator-ceremony"),
+    ]);
+
+    const suiteWorker = startFakeWorker(mine);
+    const operatorWorker = startFakeWorker(operator);
+    await delay(500);
+    expect(isAlive(suiteWorker.pid!)).toBe(true);
+    expect(isAlive(operatorWorker.pid!)).toBe(true);
+
+    // The pidfile is DELIBERATELY poisoned with the operator's pid, which is
+    // the worst case the design has to survive: a pid recorded by an earlier
+    // run, whose worker has since exited and whose number the OS has recycled
+    // onto somebody else's process. Tracking pids is not on its own enough —
+    // it is tracking plus re-identification that makes this safe. A reaper
+    // built on `pkill -f "harness worker"` fails this test on the first line,
+    // and that is the failure that blocked a live paid run.
+    const pidfile = path.join(root, "worker-pids.txt");
+    const log = path.join(root, "bootstrap.log");
+    await writeFile(
+      pidfile,
+      `${suiteWorker.pid}\n${operatorWorker.pid}\n`,
+      "utf8",
+    );
+
+    runReaper(
+      `int2_reap_workers "${pidfile}" "${mine} worker" "${log}"`,
+    );
+
+    await waitUntilDead(suiteWorker.pid!);
+    expect(isAlive(suiteWorker.pid!)).toBe(false);
+    expect(isAlive(operatorWorker.pid!)).toBe(true);
+
+    const reaped = await readFile(log, "utf8");
+    expect(reaped).toContain(`INT2_WORKER_REAPED pid=${suiteWorker.pid}`);
+    expect(reaped).not.toContain(`pid=${operatorWorker.pid}`);
+  }, 30_000);
+
+  it("refuses a non-discriminating identity rather than killing everything", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "int2-reap-blank-"));
+    temporaryRoots.push(root);
+    const bin = await fakeHarnessBin(root, "suite-run");
+    const worker = startFakeWorker(bin);
+    await delay(500);
+
+    const pidfile = path.join(root, "worker-pids.txt");
+    await writeFile(pidfile, `${worker.pid}\n`, "utf8");
+
+    // What an unset HARNESS_BIN composes: " worker", which as a substring
+    // matches every Harness worker on the machine. A reaper that accepted it
+    // would be `pkill -f "harness worker"` wearing a pidfile.
+    runReaper(`int2_reap_workers "${pidfile}" " worker" /dev/null`);
+    await delay(500);
+    expect(isAlive(worker.pid!)).toBe(true);
+
+    runReaper(`int2_reap_workers "${pidfile}" "${bin} worker" /dev/null`);
+    await waitUntilDead(worker.pid!);
+    expect(isAlive(worker.pid!)).toBe(false);
+  }, 30_000);
+
+  it("takes what the worker spawned with it", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "int2-reap-group-"));
+    temporaryRoots.push(root);
+    const bin = await fakeHarnessBin(root, "suite-run");
+    const grandchildPidfile = path.join(root, "grandchild.pid");
+
+    const worker = startFakeWorker(bin, {
+      FAKE_WORKER_GRANDCHILD: grandchildPidfile,
+    });
+    const deadline = Date.now() + 10_000;
+    let grandchild = 0;
+    while (Date.now() < deadline && grandchild === 0) {
+      grandchild = Number(
+        await readFile(grandchildPidfile, "utf8").catch(() => ""),
+      );
+      if (grandchild === 0) await delay(50);
+    }
+    expect(grandchild).toBeGreaterThan(0);
+    expect(isAlive(grandchild)).toBe(true);
+
+    const pidfile = path.join(root, "worker-pids.txt");
+    await writeFile(pidfile, `${worker.pid}\n`, "utf8");
+    runReaper(`int2_reap_workers "${pidfile}" "${bin} worker" /dev/null`);
+
+    // Signalling -pid rather than pid is the whole point of spawning workers
+    // detached: a worker reaped alone leaves its own children orphaned, which
+    // is the leak one level down.
+    await Promise.all([
+      waitUntilDead(worker.pid!),
+      waitUntilDead(grandchild),
+    ]);
+    expect(isAlive(worker.pid!)).toBe(false);
+    expect(isAlive(grandchild)).toBe(false);
+  }, 30_000);
+
+  it("removes only the run containers that appeared during the run", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "int2-reap-containers-"));
+    temporaryRoots.push(root);
+    const removals = path.join(root, "removed.txt");
+    const listing = path.join(root, "listing.txt");
+    const before = path.join(root, "before.txt");
+    const log = path.join(root, "bootstrap.log");
+    const fakeBin = path.join(root, "bin");
+    await mkdir(fakeBin, { recursive: true });
+    await writeFile(
+      path.join(fakeBin, "docker"),
+      [
+        "#!/usr/bin/env bash",
+        'if [ "$1" = "ps" ]; then cat "$INT2_FAKE_DOCKER_LISTING"; exit 0; fi',
+        'if [ "$1" = "rm" ]; then',
+        '  printf "%s\\n" "$3" >> "$INT2_FAKE_DOCKER_REMOVALS"; exit 0',
+        "fi",
+        "exit 0",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await chmod(path.join(fakeBin, "docker"), 0o755);
+
+    // Two leaks predating the run — the days-old ones this fix does not
+    // retroactively own — plus a container an operator's concurrent ceremony
+    // owns. All three are in the snapshot, so all three survive.
+    const preexisting = [
+      "harness-run-docker-lifecycle-17e77683d9934e4b84604c100d938777",
+      "harness-run-cd16137f-4a63-49f0-8820-40550904afa9",
+      "harness-run-0aa6914b-b9b2-4f32-bc09-45894222107b",
+    ];
+    await writeFile(before, `${preexisting.join("\n")}\n`, "utf8");
+    await writeFile(
+      listing,
+      `${[
+        ...preexisting,
+        "harness-run-63882cbb-0aa3-5b3b-8459-f11fdb09717b",
+        "harness-run-11111111-2222-3333-4444-555555555555-check-1",
+      ].join("\n")}\n`,
+      "utf8",
+    );
+    await writeFile(removals, "", "utf8");
+
+    runReaper(`int2_reap_run_containers "${before}" "${log}"`, {
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      INT2_FAKE_DOCKER_LISTING: listing,
+      INT2_FAKE_DOCKER_REMOVALS: removals,
+    });
+
+    // The `-check-1` name is why this is a snapshot diff and not a list of run
+    // ids read out of the runs table: verification runs derive ids that no
+    // table holds, so a query-driven reaper would leak exactly that container.
+    expect((await readFile(removals, "utf8")).trim().split("\n")).toEqual([
+      "harness-run-63882cbb-0aa3-5b3b-8459-f11fdb09717b",
+      "harness-run-11111111-2222-3333-4444-555555555555-check-1",
+    ]);
+    expect(await readFile(log, "utf8")).not.toContain("docker-lifecycle");
+  });
+
+  it("removes nothing at all when it never got to take a snapshot", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "int2-reap-nosnapshot-"));
+    temporaryRoots.push(root);
+    const removals = path.join(root, "removed.txt");
+    const listing = path.join(root, "listing.txt");
+    const fakeBin = path.join(root, "bin");
+    await mkdir(fakeBin, { recursive: true });
+    await writeFile(
+      path.join(fakeBin, "docker"),
+      [
+        "#!/usr/bin/env bash",
+        'if [ "$1" = "ps" ]; then cat "$INT2_FAKE_DOCKER_LISTING"; exit 0; fi',
+        'if [ "$1" = "rm" ]; then',
+        '  printf "%s\\n" "$3" >> "$INT2_FAKE_DOCKER_REMOVALS"; exit 0',
+        "fi",
+        "exit 0",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await chmod(path.join(fakeBin, "docker"), 0o755);
+    await writeFile(
+      listing,
+      "harness-run-cd16137f-4a63-49f0-8820-40550904afa9\n",
+      "utf8",
+    );
+    await writeFile(removals, "", "utf8");
+
+    // Wiping every harness-run-* container because the suite died before it
+    // could look is strictly worse than leaking, so a missing snapshot is
+    // inaction, not licence.
+    runReaper(
+      `int2_reap_run_containers "${path.join(root, "absent.txt")}" /dev/null`,
+      {
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        INT2_FAKE_DOCKER_LISTING: listing,
+        INT2_FAKE_DOCKER_REMOVALS: removals,
+      },
+    );
+
+    expect(await readFile(removals, "utf8")).toBe("");
+  });
+
+  it("wires the suite to hand its workers and its snapshot to the trap", async () => {
+    const [suite, reaper, integration] = await Promise.all([
+      readFile(AUTOMATED_SUITE, "utf8"),
+      readFile(REAP_HELPER, "utf8"),
+      readFile(
+        path.join(ROOT, "test/integration/int2-automated-suite.test.ts"),
+        "utf8",
+      ),
+    ]);
+    execFileSync("bash", ["-n", REAP_HELPER]);
+
+    // Pattern-killing is the fix that looks right and is not: an operator's
+    // ceremony worker matches "harness worker" just as well as the suite's.
+    // Comments are stripped first — both files discuss `pkill` at length, and
+    // an assertion that forbids naming the trap is an assertion that will be
+    // deleted rather than satisfied.
+    const withoutComments = (source: string): string =>
+      source
+        .split("\n")
+        .filter((line) => !line.trimStart().startsWith("#"))
+        .join("\n");
+    for (const source of [suite, reaper]) {
+      expect(withoutComments(source)).not.toContain("pkill");
+      expect(withoutComments(source)).not.toMatch(
+        /pgrep -f ["']?harness worker/u,
+      );
+    }
+
+    expect(suite).toContain("lib/int2-reap.sh");
+    expect(suite).toContain("int2_reap_workers");
+    expect(suite).toContain("int2_reap_run_containers");
+    expect(suite).toContain("export INT2_SUITE_WORKER_PIDFILE=");
+
+    // The snapshot has to be the last thing before the cases: it defines
+    // "during the run", and every container born after it is the suite's.
+    const snapshotAt = suite.indexOf("int2_reap_snapshot_run_containers ");
+    expect(snapshotAt).toBeGreaterThan(-1);
+    expect(snapshotAt).toBeLessThan(suite.indexOf("INT2_CASES_STARTED"));
+    expect(snapshotAt).toBeGreaterThan(suite.indexOf("npx vitest run") === -1
+      ? -1
+      : suite.indexOf("INT2_PILOT_GIT_OWNERSHIP_VERIFIED"));
+
+    // A worker whose pid never reached the pidfile is a worker the trap cannot
+    // reap, so recording must not be able to slip behind an await.
+    expect(integration).toContain("detached: true");
+    expect(integration).toContain("recordWorkerPid(child.pid)");
+    expect(integration).toContain("appendFileSync(pidfile");
+    expect(integration).toContain('"SIGKILL"');
   });
 });
