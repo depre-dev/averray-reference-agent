@@ -10,7 +10,7 @@
 // amber count is how a board acquires a permanently-lit warning.
 
 import type { ProductHealthProbe, HealthHistory } from "../../lib/monitor/product-health.js";
-import { groupProbesByPillar, probeOpsTone, type OpsTone } from "../../lib/monitor/ops-model.js";
+import { formatDuration, groupProbesByPillar, probeOpsTone, type OpsTone } from "../../lib/monitor/ops-model.js";
 import { LineSpark } from "./OpsSparks.js";
 
 export interface PillarStripProps {
@@ -80,6 +80,38 @@ function rollup(tones: OpsTone[]): string {
 }
 
 /**
+ * Uptime, labelled with the span it was actually measured over.
+ *
+ * "uptime 100.0%" is a claim about a WINDOW, and the history buffer lives in
+ * memory — so a deploy empties it and a minute later that figure rested on one
+ * check while the board called it 24h. It even rendered beside "awaiting
+ * history" on the same line, the two halves contradicting each other.
+ *
+ * Nothing was wrong with the number; the span was. So the span is stated
+ * whenever it falls short of the window, and the percentage is withheld
+ * entirely below a couple of samples, where it carries no information at all
+ * (one check that passed is "100%", which is true and useless).
+ */
+function uptimeText(history: HealthHistory | undefined): string {
+  const pct = history?.uptimePct24h;
+  if (typeof pct !== "number") return "uptime accruing";
+
+  const samples = history?.uptimeSamples;
+  if (typeof samples === "number" && samples < 2) return "uptime — too few checks";
+
+  const span = history?.uptimeSpanMs;
+  const window = history?.uptimeWindowMs;
+  // No span reported (older snapshot) → say the coverage is unknown rather than
+  // silently implying the full window.
+  if (typeof span !== "number" || typeof window !== "number" || window <= 0) {
+    return `uptime ${pct.toFixed(1)}% · span unknown`;
+  }
+  // Within ~5% of the window is the window, allowing for check jitter.
+  if (span >= window * 0.95) return `uptime ${pct.toFixed(1)}%`;
+  return `uptime ${pct.toFixed(1)}% over ${formatDuration(span)}`;
+}
+
+/**
  * The one trend that earns space on this board: 24h latency + uptime. Both stay
  * honestly absent until the ring buffer has enough samples — a line drawn
  * through two points is a fabricated trend, so it reads "awaiting history"
@@ -88,8 +120,7 @@ function rollup(tones: OpsTone[]): string {
 function AvailabilityTrend({ history }: { history: HealthHistory | undefined }) {
   const series = history?.latencySeriesMs ?? [];
   const samples = series.filter((n): n is number => typeof n === "number");
-  const uptime = history?.uptimePct24h;
-  const uptimeLabel = typeof uptime === "number" ? `uptime ${uptime.toFixed(1)}%` : "uptime accruing";
+  const uptimeLabel = uptimeText(history);
 
   if (samples.length < 2) {
     return (

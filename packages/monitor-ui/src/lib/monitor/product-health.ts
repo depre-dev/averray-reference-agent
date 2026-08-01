@@ -159,8 +159,16 @@ export interface OpsIncident {
  * and Incidents zones render their honest "history accruing" placeholders.
  */
 export interface HealthHistory {
-  /** 0..100 over the trailing 24h, or null if under 24h of data. */
+  /** 0..100 over the trailing window. Read `uptimeSpanMs` before labelling it:
+   *  the percentage does NOT imply the window is covered, and calling it "24h"
+   *  when one check backs it is a claim about a span we never observed. */
   uptimePct24h?: number | null;
+  /** Determinate samples behind the percentage. */
+  uptimeSamples?: number | null;
+  /** Elapsed time those samples actually span; null/absent = coverage unknown. */
+  uptimeSpanMs?: number | null;
+  /** The window the percentage claims to cover, for comparison against the span. */
+  uptimeWindowMs?: number | null;
   /** Per-check overall status, oldest → newest. */
   uptimeSeries?: ProbeStatus[];
   /** Per-check API latency ms (null = missing sample), oldest → newest. */
@@ -194,6 +202,9 @@ export interface ProductHealth {
   at: number | null;
   status: ProductHealthStatus;
   checks: number;
+  /** How often the heartbeat is expected to update this payload. Absent on
+   *  older snapshots — readers must fall back, never assume a value. */
+  checkIntervalMs?: number | null;
   probes: ProductHealthProbe[];
   // ── optional structured blocks (forward-compat) ──
   chainId?: number | null;

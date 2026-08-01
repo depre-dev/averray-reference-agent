@@ -135,6 +135,13 @@ export interface ProductHealthHistoryBlock {
    *  and healthy, 0..100. Unknown monitor samples are excluded; null means the
    *  window contains no determinate product-availability evidence. */
   uptimePct24h: number | null;
+  /** Determinate samples behind that percentage. */
+  uptimeSamples: number;
+  /** Elapsed time those samples actually span; null = none in-window. A
+   *  percentage without this is a claim about a window it may not cover. */
+  uptimeSpanMs: number | null;
+  /** The window the percentage claims — so a reader can compare the two. */
+  uptimeWindowMs: number;
   /** Per-check product_api availability (oldest→newest), bounded to `maxSeries`.
    *  Missing/unknown product_api evidence is degraded/grey, never fake-green. */
   uptimeSeries: ProbeStatus[];
@@ -178,8 +185,31 @@ export function deriveProductHealthHistory(
       ? Math.round((availability.filter((status) => status === "ok").length / availability.length) * 1000) / 10
       : null;
 
+  // HOW MUCH of the window those samples actually cover.
+  //
+  // This buffer is in memory, so a deploy empties it — and a minute later the
+  // percentage above is a confident "100.0" computed from one check, which the
+  // board rendered as "uptime 24h". Nobody lied about the value; the SPAN was
+  // wrong. Same shape as sizing a block lookback at 6s/block on a 2.11s chain,
+  // and worse in one way: the figure is most reassuring exactly when it is
+  // least earned — right after a deploy, when something is most likely broken.
+  //
+  // So the span travels with the number and the reader labels it honestly.
+  // A single sample spans zero: a point covers no interval, and rounding that
+  // up to "24h" is the bug again.
+  const uptimeSpanMs =
+    inWindow.length > 0
+      ? Math.max(0, (inWindow[inWindow.length - 1]?.at ?? 0) - (inWindow[0]?.at ?? 0))
+      : null;
+
   return {
     uptimePct24h,
+    /** Determinate samples behind the percentage (degraded/unknown excluded). */
+    uptimeSamples: availability.length,
+    /** Elapsed time the samples span. Null = nothing observed in-window. */
+    uptimeSpanMs,
+    /** The window the percentage CLAIMS to cover, so the two can be compared. */
+    uptimeWindowMs,
     uptimeSeries: series.map(productAvailabilityTone),
     latencySeriesMs: series.map((s) => s.latencyMs ?? null),
     balanceSeries: series.map((s) => s.signerUsdc ?? null),

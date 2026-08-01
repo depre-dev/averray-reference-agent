@@ -18,7 +18,7 @@
 import type { MonitorBoard } from "../../lib/monitor/board-cache.js";
 import type { ProductHealth } from "../../lib/monitor/product-health.js";
 import { formatAgo, incidentRows } from "../../lib/monitor/ops-model.js";
-import { DATA_STALE_MS, opsVerdict, trustRows } from "../../lib/monitor/ops-spec.js";
+import { opsVerdict, staleAfterMs, trustRows } from "../../lib/monitor/ops-spec.js";
 import { FlowPanel } from "./FlowPanel.js";
 import { PillarStrip } from "./PillarStrip.js";
 import { SolvencyPanel } from "./SolvencyPanel.js";
@@ -46,7 +46,7 @@ export function OpsBoard({
   const verdict = opsVerdict({ health, streamDegraded, nowMs });
   const trust = trustRows({ health, streamDegraded, streamStatus, streamAt: board?.at, nowMs });
   const ageMs = health.at == null ? null : Math.max(0, nowMs - health.at);
-  const dataStale = ageMs != null && ageMs > DATA_STALE_MS;
+  const dataStale = ageMs != null && ageMs > staleAfterMs(health);
   // "Untrusted" is broader than "disconnected": a stream that is nominally open
   // but has not delivered a check in minutes is equally unsafe to read calmly.
   const untrusted = streamDegraded || dataStale;
@@ -70,14 +70,15 @@ export function OpsBoard({
         </span>
       </div>
 
+      {/* The banner must claim exactly the fault that exists. A dead stream and
+          stale data are different failures and can occur separately: with the
+          stream down but the last check a couple of minutes old, "every value
+          below is STALE" contradicted the trust panel's own "4m ago — fresh"
+          two lines to the right. Frozen is not the same as wrong. */}
       {untrusted ? (
         <div className="ops-stale" role="alert" data-testid="ops-stale-banner">
           <strong>{streamDegraded ? "STREAM DISCONNECTED" : "DATA STALE"}</strong>
-          <span>
-            {health.at == null
-              ? "no successful check yet — nothing below is confirmed"
-              : `last update ${formatAgo(health.at, nowMs)} — every value below is STALE and may be wrong`}
-          </span>
+          <span>{staleBannerDetail({ health, nowMs, streamDegraded, dataStale })}</span>
           <span className="ops-stale-right">{streamDegraded ? `reconnecting · ${streamStatus}` : "poll failing"}</span>
         </div>
       ) : null}
@@ -126,6 +127,32 @@ export function OpsBoard({
       </div>
     </div>
   );
+}
+
+/**
+ * Say which thing is actually broken.
+ *
+ * Three distinct cases, and collapsing them into one sentence produced a banner
+ * that argued with the trust panel beside it:
+ *   · never checked  — nothing is confirmed, and nothing is stale either
+ *   · stream down, reading still recent — FROZEN, not wrong. It was true when
+ *     it was taken and it will not move until the stream returns
+ *   · genuinely old   — stale, and may no longer describe the product
+ */
+function staleBannerDetail(input: {
+  health: ProductHealth;
+  nowMs: number;
+  streamDegraded: boolean;
+  dataStale: boolean;
+}): string {
+  const { health, nowMs, streamDegraded, dataStale } = input;
+  if (health.at == null) return "no successful check yet — nothing below is confirmed";
+  const age = formatAgo(health.at, nowMs);
+  if (dataStale) return `last update ${age} — every value below is STALE and may be wrong`;
+  if (streamDegraded) {
+    return `last update ${age} — values below are FROZEN at that reading and will not update until the stream returns`;
+  }
+  return `last update ${age}`;
 }
 
 function metaLine(health: ProductHealth): string {

@@ -58,6 +58,81 @@ describe("OpsBoard — the honest empty states", () => {
   });
 });
 
+describe("OpsBoard — the banner must not argue with the trust panel", () => {
+  // Caught on screen: the banner said "every value below is STALE" while the
+  // trust row two inches right said "4m ago — fresh". Both were computed
+  // correctly from different facts; the SENTENCE was the bug. A dead stream
+  // with a recent reading means frozen, not wrong.
+  test("stream down + a recent check says FROZEN, not stale", () => {
+    const health = { ...OPS_FIXTURE_NOMINAL, checkIntervalMs: 2 * 60_000 };
+    const nowMs = health.at! + 60_000;
+    const { getByTestId } = render(
+      <OpsBoard health={health} streamDegraded streamStatus="reconnecting" nowMs={nowMs} />,
+    );
+    const banner = getByTestId("ops-stale-banner").textContent ?? "";
+    expect(banner).toContain("FROZEN");
+    expect(banner).not.toContain("STALE and may be wrong");
+    // …and the trust row agrees rather than contradicting it.
+    expect(getByTestId("ops-trust").textContent).toContain("fresh");
+  });
+
+  test("a genuinely old check does say STALE", () => {
+    const health = { ...OPS_FIXTURE_NOMINAL, checkIntervalMs: 2 * 60_000 };
+    const nowMs = health.at! + 30 * 60_000;
+    const { getByTestId } = render(<OpsBoard health={health} nowMs={nowMs} />);
+    expect(getByTestId("ops-stale-banner").textContent).toContain("STALE and may be wrong");
+    expect(getByTestId("ops-trust").textContent).toContain("STALE");
+  });
+
+  // The regression that started this: a 3-minute threshold against a 2-minute
+  // heartbeat lit the alarm over a healthy system, most of the time.
+  test("a merely-late check raises NO banner at all", () => {
+    const health = { ...OPS_FIXTURE_NOMINAL, checkIntervalMs: 2 * 60_000 };
+    const { queryByTestId } = render(<OpsBoard health={health} nowMs={health.at! + 3 * 60_000} />);
+    expect(queryByTestId("ops-stale-banner")).toBeNull();
+  });
+});
+
+describe("OpsBoard — uptime states its span", () => {
+  // "uptime 100.0%" off one check, labelled 24h, printed beside "awaiting
+  // history" on the same line. The number was fine; the span was a claim we
+  // never observed.
+  test("a short buffer names the span it actually covers", () => {
+    const health = {
+      ...OPS_FIXTURE_NOMINAL,
+      history: {
+        ...OPS_FIXTURE_NOMINAL.history,
+        uptimePct24h: 100,
+        uptimeSamples: 6,
+        uptimeSpanMs: 12 * 60_000,
+        uptimeWindowMs: 24 * 3_600_000,
+      },
+    };
+    const { getByTestId } = render(<OpsBoard health={health} nowMs={fresh(health)} />);
+    expect(getByTestId("ops-pillars").textContent).toContain("uptime 100.0% over 12m");
+  });
+
+  test("a single check withholds the percentage entirely", () => {
+    const health = {
+      ...OPS_FIXTURE_NOMINAL,
+      history: { ...OPS_FIXTURE_NOMINAL.history, uptimePct24h: 100, uptimeSamples: 1, uptimeSpanMs: 0 },
+    };
+    const { getByTestId } = render(<OpsBoard health={health} nowMs={fresh(health)} />);
+    const pillars = getByTestId("ops-pillars").textContent ?? "";
+    expect(pillars).toContain("too few checks");
+    expect(pillars).not.toContain("100.0%");
+  });
+
+  test("a full window drops the qualifier", () => {
+    const { getByTestId } = render(
+      <OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    const pillars = getByTestId("ops-pillars").textContent ?? "";
+    expect(pillars).toContain("uptime 100.0%");
+    expect(pillars).not.toContain("over ");
+  });
+});
+
 describe("OpsBoard — solvency meters", () => {
   test("only floored pools draw a bar", () => {
     const { container } = render(

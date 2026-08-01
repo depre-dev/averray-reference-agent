@@ -251,6 +251,7 @@ export const OPS_FIXTURE_NOMINAL: ProductHealth = {
   at: FIXTURE_NOW - 2_000,
   status: "degraded",
   checks: 1_284,
+  checkIntervalMs: 2 * 60_000,
   chainId: 420420419,
   network: "mainnet",
   probes: MAINNET_PROBES,
@@ -290,6 +291,11 @@ export const OPS_FIXTURE_NOMINAL: ProductHealth = {
   },
   history: {
     uptimePct24h: 100,
+    // A full window's worth — so the label reads a bare "uptime 100.0%". Drop
+    // uptimeSpanMs below the window and it becomes "100.0% over 47m" instead.
+    uptimeSamples: 48,
+    uptimeSpanMs: 24 * 3_600_000,
+    uptimeWindowMs: 24 * 3_600_000,
     uptimeSeries: Array.from({ length: 48 }, () => "ok" as ProbeStatus),
     latencySeriesMs: ramp(48, (i) => 48 + Math.round(9 * Math.abs(Math.sin(i / 2.7)))),
     balanceSeries: ramp(48, () => 15.89),
