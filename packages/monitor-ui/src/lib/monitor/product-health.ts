@@ -171,6 +171,9 @@ export interface HealthHistory {
   uptimeWindowMs?: number | null;
   /** Per-check overall status, oldest → newest. */
   uptimeSeries?: ProbeStatus[];
+  /** Epoch ms per sample, same index/length as the series. Absent → a series
+   *  point cannot be labelled with a time, and must not be given one. */
+  seriesAt?: number[];
   /** Per-check API latency ms (null = missing sample), oldest → newest. */
   latencySeriesMs?: (number | null)[];
   /** Reward bank balance over time (null = missing), oldest → newest. */

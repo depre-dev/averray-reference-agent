@@ -788,6 +788,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
         checks: productHealthHistory.length,
         probes: last?.probes ?? [],
         pools: productHealthSnapshotBlocks?.solvency?.pools ?? [],
+        runway: productHealthSnapshotBlocks?.solvency?.runway ?? [],
         ...(productHealthSnapshotBlocks?.flow?.payout
           ? { payout: productHealthSnapshotBlocks.flow.payout }
           : {}),

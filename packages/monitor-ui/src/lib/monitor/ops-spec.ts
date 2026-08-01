@@ -112,6 +112,7 @@ export function opsVerdict(input: {
     checks: health.checks,
     probes: health.probes,
     pools: health.solvency?.pools ?? [],
+    runway: health.solvency?.runway ?? [],
     ...(health.flow?.payout ? { payout: health.flow.payout } : {}),
   });
   // A red/degraded verdict tones its own subline; a calm one leaves the

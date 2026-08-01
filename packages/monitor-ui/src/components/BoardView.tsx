@@ -40,7 +40,14 @@ export function BoardView({ board, status, onRefresh, health }: BoardViewProps) 
   // decided instead of in a banner bolted above it.
   const degraded = status === "reconnecting" || status === "closed";
 
-  if (isMobileViewport) return <MobileBoard health={productHealth} />;
+  // The phone gets the transport state too — its whole stale treatment (band,
+  // re-captioned verdict, "still true?" honesty) depends on knowing whether the
+  // stream is alive, and it used to be handed health alone.
+  if (isMobileViewport) {
+    return (
+      <MobileBoard health={productHealth} streamStatus={status} streamDegraded={degraded} />
+    );
+  }
 
   // No health payload yet. A dead stream STILL has to say so here — "loading"
   // over a disconnected transport is the calmest possible lie, and the earlier
