@@ -163,3 +163,64 @@ int2_reap_run_containers() {
   done
   return 0
 }
+
+# Record the agent-runtime-* workspace directories that exist BEFORE the run,
+# into $1, from workspace root $2 (issue #625, the workspace half of the
+# container reap above). The root — default_workspace_root() resolves to
+# ~/.agent-runtime/environments — is persistent and SHARED: an operator's
+# ceremony run and this suite write side by side, so anything present now is
+# somebody's workspace, possibly live, and must be spared.
+#
+# A root that does not exist yet is a legitimately empty set — the snapshot
+# is written empty and the run proceeds. A root that exists but cannot be
+# listed fails WITHOUT creating the file, which keeps the reap below
+# fail-safe: no snapshot, nothing removed.
+int2_reap_snapshot_workspaces() {
+  _int2_reap_ws_root="${2:-}"
+  [ -n "${1:-}" ] && [ -n "$_int2_reap_ws_root" ] || return 1
+  if [ ! -d "$_int2_reap_ws_root" ]; then
+    : > "$1"
+    return 0
+  fi
+  _int2_reap_ws_existing="$(
+    find "$_int2_reap_ws_root" -mindepth 1 -maxdepth 1 -type d \
+      -name 'agent-runtime-*' -exec basename {} \; 2>/dev/null
+  )" || return 1
+  printf '%s\n' "$_int2_reap_ws_existing" > "$1"
+}
+
+# $1 the snapshot file, $2 the workspace root, $3 log path. Removes every
+# agent-runtime-* directory under the root that was not in the snapshot.
+#
+# DockerEnvironment.destroy() removes the container AND the workspace, so the
+# happy path leaves nothing. Anything that died before destroy() leaves both —
+# and the container reap above, on its own, turns that pair into an orphaned
+# directory (#624 removed the container half only; #625 is this half). Runs
+# only after int2_reap_run_containers so no removed container's bind mount is
+# still attached to a directory being deleted.
+#
+# Same snapshot-diff reasoning as containers: child and verification runs
+# derive their own ids, so the suite cannot enumerate what it created — but it
+# can state exactly what it did NOT create, and everything in the snapshot is
+# spared. A missing or unreadable snapshot removes nothing at all; deleting an
+# operator's live workspace because the suite failed before it could look is
+# the one outcome worse than leaking 42 MB.
+int2_reap_workspaces() {
+  _int2_reap_ws_before="${1:-}"
+  _int2_reap_ws_root="${2:-}"
+  _int2_reap_ws_log="${3:-/dev/null}"
+  [ -n "$_int2_reap_ws_before" ] && [ -f "$_int2_reap_ws_before" ] || return 0
+  [ -n "$_int2_reap_ws_root" ] && [ -d "$_int2_reap_ws_root" ] || return 0
+  for _int2_reap_ws_dir in "$_int2_reap_ws_root"/agent-runtime-*/; do
+    [ -d "$_int2_reap_ws_dir" ] || continue
+    _int2_reap_ws_name="$(basename "$_int2_reap_ws_dir")"
+    case "$_int2_reap_ws_name" in agent-runtime-?*) ;; *) continue ;; esac
+    if grep -qxF "$_int2_reap_ws_name" "$_int2_reap_ws_before" 2>/dev/null; then
+      continue
+    fi
+    rm -rf "$_int2_reap_ws_root/$_int2_reap_ws_name" 2>/dev/null || continue
+    printf '%s\n' "INT2_WORKSPACE_REAPED name=$_int2_reap_ws_name" \
+      >> "$_int2_reap_ws_log" 2>/dev/null || true
+  done
+  return 0
+}

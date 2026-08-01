@@ -3,6 +3,7 @@ import {
   chmod,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   writeFile,
@@ -842,5 +843,79 @@ describe("INT-2 suite reaping", () => {
     expect(integration).toContain("recordWorkerPid(child.pid)");
     expect(integration).toContain("appendFileSync(pidfile");
     expect(integration).toContain('"SIGKILL"');
+
+    // #625: the workspace half rides the same snapshot boundary and the same
+    // trap, after the container reap (bind mounts released first), with its
+    // own self-naming failure code.
+    expect(suite).toContain("int2_reap_snapshot_workspaces ");
+    expect(suite).toContain("int2_reap_workspaces ");
+    expect(suite).toContain("INT2_WORKSPACE_SNAPSHOT_FAILED");
+    expect(suite).toContain("exit 35");
+    expect(suite).toContain('INT2_WORKSPACE_ROOT:-$HOME/.agent-runtime/environments');
+    expect(suite.indexOf("int2_reap_workspaces ")).toBeGreaterThan(
+      suite.indexOf("int2_reap_run_containers "),
+    );
+  });
+
+  it("removes only the workspaces born during the run and spares the snapshot", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "int2-reap-workspaces-"));
+    temporaryRoots.push(root);
+    const workspaceRoot = path.join(root, "environments");
+    const before = path.join(root, "before.txt");
+    const log = path.join(root, "reap.log");
+    // An operator's pre-existing workspace and a days-old leak this run does
+    // not own: both are in the snapshot, both must survive.
+    await mkdir(path.join(workspaceRoot, "agent-runtime-operator-live"), { recursive: true });
+    await mkdir(path.join(workspaceRoot, "agent-runtime-old-leak"), { recursive: true });
+    runReaper(`int2_reap_snapshot_workspaces "${before}" "${workspaceRoot}"`);
+
+    // Born during the run: a top-level run and a derived verification run —
+    // the unknowable-up-front name shape that makes this a snapshot diff.
+    await mkdir(path.join(workspaceRoot, "agent-runtime-suite-run", "repo"), { recursive: true });
+    await writeFile(
+      path.join(workspaceRoot, "agent-runtime-suite-run", "repo", "file.txt"),
+      "contents",
+    );
+    await mkdir(path.join(workspaceRoot, "agent-runtime-suite-run-check-1"), { recursive: true });
+    // Not the reap's shape at all — spared regardless of the snapshot.
+    await mkdir(path.join(workspaceRoot, "unrelated-dir"), { recursive: true });
+
+    runReaper(`int2_reap_workspaces "${before}" "${workspaceRoot}" "${log}"`);
+
+    const survivors = (await readdir(workspaceRoot)).sort();
+    expect(survivors).toEqual([
+      "agent-runtime-old-leak",
+      "agent-runtime-operator-live",
+      "unrelated-dir",
+    ]);
+    const logged = await readFile(log, "utf8");
+    expect(logged).toContain("INT2_WORKSPACE_REAPED name=agent-runtime-suite-run");
+    expect(logged).toContain("INT2_WORKSPACE_REAPED name=agent-runtime-suite-run-check-1");
+  });
+
+  it("treats a root that does not exist yet as an empty snapshot, not a failure", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "int2-reap-ws-fresh-"));
+    temporaryRoots.push(root);
+    const workspaceRoot = path.join(root, "environments");
+    const before = path.join(root, "before.txt");
+    // Root absent: snapshot succeeds and is empty — nothing existed to spare.
+    runReaper(`int2_reap_snapshot_workspaces "${before}" "${workspaceRoot}"`);
+    // The run then creates the root and a workspace; both are the suite's.
+    await mkdir(path.join(workspaceRoot, "agent-runtime-first"), { recursive: true });
+    runReaper(`int2_reap_workspaces "${before}" "${workspaceRoot}" /dev/null`);
+    expect(await readdir(workspaceRoot)).toEqual([]);
+  });
+
+  it("removes no workspace at all when it never got to take a snapshot", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "int2-reap-ws-nosnap-"));
+    temporaryRoots.push(root);
+    const workspaceRoot = path.join(root, "environments");
+    await mkdir(path.join(workspaceRoot, "agent-runtime-unattributed"), { recursive: true });
+    // Same fail-safe as containers: deleting somebody's workspace because the
+    // suite failed before it could look is strictly worse than leaking.
+    runReaper(
+      `int2_reap_workspaces "${path.join(root, "absent.txt")}" "${workspaceRoot}" /dev/null`,
+    );
+    expect(await readdir(workspaceRoot)).toEqual(["agent-runtime-unattributed"]);
   });
 });
