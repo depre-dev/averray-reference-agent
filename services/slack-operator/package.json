@@ -13,6 +13,7 @@
     "@avg/averray-mcp": "0.1.0",
     "@avg/mcp-common": "0.1.0",
     "@avg/schemas": "0.1.0",
-    "zod": "^3.24.1"
+    "zod": "^3.24.1",
+    "@noble/curves": "^1.9.1"
   }
 }
