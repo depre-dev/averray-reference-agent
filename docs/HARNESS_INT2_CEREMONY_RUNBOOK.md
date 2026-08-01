@@ -642,10 +642,29 @@ green through the actual containerized ceremony path. The host pre-flight
 below is necessary, but it does not lift that gate. Record evidence that a
 clean non-empty diff returns `exit_0`, trailing whitespace returns `exit_2`
 with the offence named, an empty diff returns `exit_1`, and neither `exit_128`
-nor `exit_129` occurs. While the container path still reproduces `exit_129`
-(the state recorded for #589), **stop here and do not export a model
-credential**. Only the operator may record the evidence reference and lift
-this gate.
+nor `exit_129` occurs.
+
+**This gate is LIFTED as of 2026-08-01.** All four conditions are now proven
+through the real containerized path by the automated INT-2 suite, which runs on
+every PR and executed 10/10 on `main` at `420c577a`:
+
+| Condition | Proven in-container by |
+|---|---|
+| clean non-empty diff -> `exit_0` | `green`, `narrow`, `restart` |
+| trailing whitespace -> `exit_2`, offence named | `negative` (`…PLAN.md:704: trailing whitespace`) |
+| empty diff -> `exit_1` | `idle` (the tenth case, #612) |
+| no `exit_128` / `exit_129` | `exit128Present: false` and no `exit_129` in any of the nine evidence records |
+
+The `exit_129` state recorded for #589 no longer reproduces. The missing row
+was the empty-diff case, which was previously proven only by the host
+pre-flight; #612 added a scripted model that makes no tool call and asserted
+`exit_1` through the container, on this same `lint-format` fixture and its
+discriminating criterion.
+
+Evidence: `INT-2 automated suite: 10 cases executed` on CI run for `420c577a`,
+plus the per-case `evidence.json` records. The host pre-flight in step 2 below
+remains required — it is cheap, and it checks the fixture rather than the
+container.
 
 1. Stop the scripted worker.
 2. Unset every model credential, then run the free three-case pre-flight
@@ -672,24 +691,56 @@ this gate.
      "$CEREMONY_ROOT/evidence/section3-preflight.json" > /dev/null
    ```
 
-3. Select one approved real-model endpoint without exporting its credential.
-   Record its published uncached input and output rates in USD per million
-   tokens, plus the authoritative pricing URL:
+3. Select one approved real-model endpoint without exporting its credential,
+   then record its cost model.
+
+   **If the provider publishes per-token rates**, record the uncached input and
+   output rates in USD per million tokens plus the authoritative pricing URL,
+   and use the `per_token` block below.
+
+   **If the provider sells capacity rather than tokens** — a subscription or
+   quota tier, as Ollama Cloud does — there is no USD-per-million rate to
+   record. Do not invent one, and do not write `0`: the first is fabricated
+   evidence and the second claims a run is free when capacity was purchased.
+   Record the tier, the quota unit, and the marginal cost of this run against
+   already-purchased capacity, using the `capacity` block below. In both cases
+   the operative technical limit is the fixture's `modelTokens` cap, not the
+   money.
 
    ```sh
    export HARNESS_MODEL_ADAPTER=openai-compatible
    export HARNESS_MODEL_REF="<operator-approved-model>"
    export HARNESS_MODEL_BASE_URL="<operator-approved-endpoint>"
+   export SECTION3_COST_MODEL="per_token"   # or: capacity
+   export SECTION3_RATE_SOURCE="<authoritative-pricing-url>"
+
+   # per_token providers only:
    export SECTION3_INPUT_USD_PER_MILLION="<published-input-rate>"
    export SECTION3_OUTPUT_USD_PER_MILLION="<published-output-rate>"
-   export SECTION3_RATE_SOURCE="<authoritative-pricing-url>"
+
+   # capacity providers only (subscription / quota tiers):
+   export SECTION3_CAPACITY_TIER="<e.g. Ollama Cloud Pro, USD 20/month>"
+   export SECTION3_CAPACITY_QUOTA_UNIT="<e.g. GPU-time against 5-hour session and weekly limits>"
+   export SECTION3_MARGINAL_USD="0"   # against already-purchased capacity
    ```
+
+   For a capacity provider, `SECTION3_MARGINAL_USD=0` is the honest figure and
+   is **not** the same claim as "this run is free" — the tier is recorded
+   alongside it, so the evidence states what was bought and what this run added
+   to it. The exposure a capacity tier does carry is quota, not currency;
+   8,000 tokens is negligible against a monthly allowance, which is worth
+   recording precisely because it is the reason no dollar ceiling applies.
 
 4. The fixture's `modelTokens: 8000` is the operative spend limit.
    `estimatedUsdMicros` is `null` and is **not** a monetary enforcement
-   control. Compute a conservative worst case by charging all 8,000 tokens at
-   the higher published rate, then record the model identity, endpoint host,
-   rates, source, and result before approval:
+   control.
+
+   For a **per_token** provider, compute a conservative worst case by charging
+   all 8,000 tokens at the higher published rate, then record the model
+   identity, endpoint host, rates, source, and result before approval. For a
+   **capacity** provider, skip the worst-case computation — there is no rate to
+   multiply — and record the tier and quota unit instead, with the same
+   identity and endpoint-host fields:
 
    ```sh
    export SECTION3_TOKEN_CAP=8000
