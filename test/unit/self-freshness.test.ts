@@ -9,6 +9,51 @@ function ago(hours: number): string {
   return new Date(NOW - hours * 3_600_000).toISOString();
 }
 
+// A DIRTY build is its own state, and the most dangerous one: it HAS a sha, so
+// a naive compare would answer "0 behind → up to date" for code that exists in
+// no commit anywhere. An un-popped stash on the VPS once silently reverted a
+// built asset while everything downstream reported healthy.
+describe("decideSelfFreshness — dirty builds", () => {
+  it("never claims up-to-date, even when the sha compares clean", () => {
+    const r = decideSelfFreshness({
+      runningSha: "abcdef1234567890",
+      compare: { behindBy: 0 },
+      dirty: true,
+      nowMs: 0,
+    });
+    expect(r.status).toBe("unknown");
+    expect(r.status).not.toBe("current");
+    expect(r.detail).toContain("uncommitted changes");
+    expect(r.behindBy).toBeNull();
+  });
+
+  it("keeps the sha visible so the operator knows the base commit", () => {
+    const r = decideSelfFreshness({
+      runningSha: "abcdef1234567890",
+      compare: null,
+      dirty: true,
+      nowMs: 0,
+    });
+    expect(r.runningSha).toBe("abcdef1234567890");
+    expect(r.detail).toContain("abcdef12");
+  });
+
+  it("a dirty build with no sha at all still reads unknown", () => {
+    const r = decideSelfFreshness({ runningSha: null, compare: null, dirty: true, nowMs: 0 });
+    expect(r.status).toBe("unknown");
+    expect(r.detail).toContain("uncommitted changes");
+  });
+
+  it("clean builds are unaffected — dirty defaults to false", () => {
+    const r = decideSelfFreshness({
+      runningSha: "abcdef1234567890",
+      compare: { behindBy: 0 },
+      nowMs: 0,
+    });
+    expect(r.status).toBe("current");
+  });
+});
+
 describe("decideSelfFreshness", () => {
   // THE REAL INCIDENT: the VPS sat 6 commits behind main and nothing said so.
   it("names how far behind it is and how long it has been stale", () => {

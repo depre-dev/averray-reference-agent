@@ -52,9 +52,12 @@ services:
       context: ..
       dockerfile: ops/Dockerfile.node
       args:
-        # Prefix the deploy with GIT_SHA=$(git rev-parse HEAD) so the monitor
-        # can report its own version. Unset = "unknown", reported honestly.
+        # Baked so the monitor can report its own version. Use
+        # ops/deploy-monitor.sh — it computes both and refuses a dirty tree.
+        # Deploying by hand leaves these unset, which is why self-freshness
+        # read "unknown" from the day it shipped until 2026-08-01.
         GIT_SHA: ${GIT_SHA:-unknown}
+        GIT_DIRTY: ${GIT_DIRTY:-false}
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     depends_on:
       hermes-permissions:
@@ -111,9 +114,12 @@ services:
       context: ..
       dockerfile: ops/Dockerfile.node
       args:
-        # Prefix the deploy with GIT_SHA=$(git rev-parse HEAD) so the monitor
-        # can report its own version. Unset = "unknown", reported honestly.
+        # Baked so the monitor can report its own version. Use
+        # ops/deploy-monitor.sh — it computes both and refuses a dirty tree.
+        # Deploying by hand leaves these unset, which is why self-freshness
+        # read "unknown" from the day it shipped until 2026-08-01.
         GIT_SHA: ${GIT_SHA:-unknown}
+        GIT_DIRTY: ${GIT_DIRTY:-false}
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     restart: unless-stopped
     # Hermes owns the skills volume as UID 10000 and continuously re-secures it to
@@ -141,9 +147,12 @@ services:
       context: ..
       dockerfile: ops/Dockerfile.node
       args:
-        # Prefix the deploy with GIT_SHA=$(git rev-parse HEAD) so the monitor
-        # can report its own version. Unset = "unknown", reported honestly.
+        # Baked so the monitor can report its own version. Use
+        # ops/deploy-monitor.sh — it computes both and refuses a dirty tree.
+        # Deploying by hand leaves these unset, which is why self-freshness
+        # read "unknown" from the day it shipped until 2026-08-01.
         GIT_SHA: ${GIT_SHA:-unknown}
+        GIT_DIRTY: ${GIT_DIRTY:-false}
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     restart: unless-stopped
     depends_on:
@@ -500,9 +509,12 @@ services:
       context: ..
       dockerfile: ops/Dockerfile.node
       args:
-        # Prefix the deploy with GIT_SHA=$(git rev-parse HEAD) so the monitor
-        # can report its own version. Unset = "unknown", reported honestly.
+        # Baked so the monitor can report its own version. Use
+        # ops/deploy-monitor.sh — it computes both and refuses a dirty tree.
+        # Deploying by hand leaves these unset, which is why self-freshness
+        # read "unknown" from the day it shipped until 2026-08-01.
         GIT_SHA: ${GIT_SHA:-unknown}
+        GIT_DIRTY: ${GIT_DIRTY:-false}
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     profiles: ["testbed-runner"]
     restart: unless-stopped
@@ -606,9 +618,12 @@ services:
       context: ..
       dockerfile: ops/Dockerfile.node
       args:
-        # Prefix the deploy with GIT_SHA=$(git rev-parse HEAD) so the monitor
-        # can report its own version. Unset = "unknown", reported honestly.
+        # Baked so the monitor can report its own version. Use
+        # ops/deploy-monitor.sh — it computes both and refuses a dirty tree.
+        # Deploying by hand leaves these unset, which is why self-freshness
+        # read "unknown" from the day it shipped until 2026-08-01.
         GIT_SHA: ${GIT_SHA:-unknown}
+        GIT_DIRTY: ${GIT_DIRTY:-false}
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     profiles: ["test-wallet-signer"]
     restart: unless-stopped
@@ -648,9 +663,12 @@ services:
       context: ..
       dockerfile: ops/Dockerfile.node
       args:
-        # Prefix the deploy with GIT_SHA=$(git rev-parse HEAD) so the monitor
-        # can report its own version. Unset = "unknown", reported honestly.
+        # Baked so the monitor can report its own version. Use
+        # ops/deploy-monitor.sh — it computes both and refuses a dirty tree.
+        # Deploying by hand leaves these unset, which is why self-freshness
+        # read "unknown" from the day it shipped until 2026-08-01.
         GIT_SHA: ${GIT_SHA:-unknown}
+        GIT_DIRTY: ${GIT_DIRTY:-false}
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     profiles: ["codex-runner"]
     restart: unless-stopped
@@ -697,9 +715,12 @@ services:
       context: ..
       dockerfile: ops/Dockerfile.node
       args:
-        # Prefix the deploy with GIT_SHA=$(git rev-parse HEAD) so the monitor
-        # can report its own version. Unset = "unknown", reported honestly.
+        # Baked so the monitor can report its own version. Use
+        # ops/deploy-monitor.sh — it computes both and refuses a dirty tree.
+        # Deploying by hand leaves these unset, which is why self-freshness
+        # read "unknown" from the day it shipped until 2026-08-01.
         GIT_SHA: ${GIT_SHA:-unknown}
+        GIT_DIRTY: ${GIT_DIRTY:-false}
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     profiles: ["dispatch"]
     restart: unless-stopped
@@ -745,9 +766,12 @@ services:
       context: ..
       dockerfile: ops/Dockerfile.node
       args:
-        # Prefix the deploy with GIT_SHA=$(git rev-parse HEAD) so the monitor
-        # can report its own version. Unset = "unknown", reported honestly.
+        # Baked so the monitor can report its own version. Use
+        # ops/deploy-monitor.sh — it computes both and refuses a dirty tree.
+        # Deploying by hand leaves these unset, which is why self-freshness
+        # read "unknown" from the day it shipped until 2026-08-01.
         GIT_SHA: ${GIT_SHA:-unknown}
+        GIT_DIRTY: ${GIT_DIRTY:-false}
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     profiles: ["claude-runner"]
     restart: unless-stopped
@@ -816,9 +840,12 @@ services:
       context: ..
       dockerfile: ops/Dockerfile.node
       args:
-        # Prefix the deploy with GIT_SHA=$(git rev-parse HEAD) so the monitor
-        # can report its own version. Unset = "unknown", reported honestly.
+        # Baked so the monitor can report its own version. Use
+        # ops/deploy-monitor.sh — it computes both and refuses a dirty tree.
+        # Deploying by hand leaves these unset, which is why self-freshness
+        # read "unknown" from the day it shipped until 2026-08-01.
         GIT_SHA: ${GIT_SHA:-unknown}
+        GIT_DIRTY: ${GIT_DIRTY:-false}
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     profiles: ["test-writer-runner"]
     restart: unless-stopped
@@ -882,9 +909,12 @@ services:
       context: ..
       dockerfile: ops/Dockerfile.node
       args:
-        # Prefix the deploy with GIT_SHA=$(git rev-parse HEAD) so the monitor
-        # can report its own version. Unset = "unknown", reported honestly.
+        # Baked so the monitor can report its own version. Use
+        # ops/deploy-monitor.sh — it computes both and refuses a dirty tree.
+        # Deploying by hand leaves these unset, which is why self-freshness
+        # read "unknown" from the day it shipped until 2026-08-01.
         GIT_SHA: ${GIT_SHA:-unknown}
+        GIT_DIRTY: ${GIT_DIRTY:-false}
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     profiles: ["security-runner"]
     restart: unless-stopped
@@ -939,9 +969,12 @@ services:
       context: ..
       dockerfile: ops/Dockerfile.node
       args:
-        # Prefix the deploy with GIT_SHA=$(git rev-parse HEAD) so the monitor
-        # can report its own version. Unset = "unknown", reported honestly.
+        # Baked so the monitor can report its own version. Use
+        # ops/deploy-monitor.sh — it computes both and refuses a dirty tree.
+        # Deploying by hand leaves these unset, which is why self-freshness
+        # read "unknown" from the day it shipped until 2026-08-01.
         GIT_SHA: ${GIT_SHA:-unknown}
+        GIT_DIRTY: ${GIT_DIRTY:-false}
     image: ${AVERRAY_IMAGE:-avg-node-runtime}
     profiles: ["docs-runner"]
     restart: unless-stopped

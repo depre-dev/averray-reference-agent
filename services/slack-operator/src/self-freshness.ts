@@ -42,10 +42,33 @@ export function decideSelfFreshness(input: {
   runningSha: string | null;
   /** null ⇒ the comparison could not be made (not ⇒ "no drift"). */
   compare: SelfCompare | null;
+  /** The working tree had uncommitted changes when the image was built. */
+  dirty?: boolean;
   unknownReason?: string;
   nowMs: number;
 }): SelfFreshness {
   const runningSha = normalizeSha(input.runningSha);
+
+  // A DIRTY build has a sha, and the sha is a lie: the image is that commit
+  // PLUS uncommitted changes, so comparing it against main would report "up to
+  // date" for code that exists in no commit anywhere. That is the fake-green
+  // this probe exists to prevent, and it is not hypothetical — an un-popped
+  // stash on the VPS once silently reverted a built asset while everything
+  // downstream reported healthy.
+  //
+  // Checked BEFORE the compare, because a clean comparison is exactly what
+  // would launder the lie.
+  if (input.dirty) {
+    const short = runningSha ? `${runningSha.slice(0, 8)} + ` : "";
+    return {
+      status: "unknown",
+      detail: `${short}uncommitted changes — the running code is not any commit, so it cannot be compared to main`,
+      runningSha,
+      behindBy: null,
+      oldestUnshippedAt: null,
+    };
+  }
+
   if (!runningSha) {
     return {
       status: "unknown",
