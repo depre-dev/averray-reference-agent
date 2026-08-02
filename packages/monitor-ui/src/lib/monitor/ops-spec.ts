@@ -597,258 +597,184 @@ export const EVIDENCE_KEY: readonly { tone: OpsTone; text: string }[] = [
   { tone: "awaiting", text: "UNVERIFIED — chain unreadable: instrument broken, not money" },
 ];
 
-// ── gas attribution ─────────────────────────────────────────────────────────
+// ── facts that sit BESIDE their subject ─────────────────────────────────────
+//
+// These were four prose lines in a strip at the bottom of the board. Read
+// together — which is the only way anyone reads them — they were a wall of
+// dot-separated sentences on a screen whose entire visual language is a label
+// and a number in a column. They also repeated each other and the footer.
+//
+// So each now sits with its subject: gas and payout runway under the pools they
+// describe, the dispute clock in the flow panel, and only the per-job economics
+// as a line of its own. The pool row already shows balance, floor and margin, so
+// none of that is repeated here.
+//
+// ── CAVEATS APPEAR ONLY WHEN THEY BITE ────────────────────────────────────
+//
+// The old lines carried their methodology on the face: "DOT and USDC not summed
+// — no price assumed" was the longest phrase on the row and it was a footnote
+// about arithmetic. Honest, and in the worst possible place — it crowded out the
+// numbers it was qualifying.
+//
+// A caveat now shows only when it changes what the number MEANS: figures frozen,
+// a truncated total, fees that could not be separated, an age old enough to
+// matter. Everything else moves to a tooltip or disappears. Silence is the
+// correct rendering of "nothing is wrong with this number".
+
+/** Beyond this, the age of a gas snapshot is worth saying out loud. */
+const GAS_STALE_AFTER_MS = 60 * 60 * 1000;
 
 /**
- * The gas line: what the burn is going ON, not just how fast it burns.
+ * The gas footnote, shown under the signer-gas pool.
  *
- * The solvency panel already meters the signer pool and projects a runway. That
- * answers "when do I run out" — this answers "on what", which is the difference
- * between topping up and finding out something regressed. `perSettlement` leads
- * because gas as a UNIT COST can be held against the reward a job pays; gas as
- * a total can only be compared with yesterday's total.
- *
- * Every caveat that would make the number wrong is appended rather than hidden:
- * a truncated read UNDERSTATES spend, a second signing key means this is not
- * the whole cost of running the system, and a failed refresh means the figures
- * stopped moving at some point in the past.
+ * The pool row above it already gives the balance and the margin, so this
+ * answers only the question the meter cannot: what is draining it.
  */
-export function gasLine(gas: GasSpendView | undefined, nowMs: number): { text: string; tone: OpsTone } {
-  void nowMs;
-  // Absent is not zero. Before the first read there is nothing to say, and
-  // "0 DOT" would read as free rather than as not-yet-measured.
-  if (!gas) return { text: "GAS — not measured", tone: "awaiting" };
-  if (gas.txCount === 0) return { text: "GAS — no signer transactions in the window", tone: "awaiting" };
+export function gasPoolNote(gas: GasSpendView | undefined): { text: string; tone: OpsTone } | null {
+  if (!gas) return null;
+  if (gas.txCount === 0) return { text: "no signer transactions in the window", tone: "awaiting" };
 
-  const parts = [`GAS ${gas.totalDot.toFixed(3)} DOT / ${gas.txCount} txs`];
-  if (gas.perSettlement != null) parts.push(`${gas.perSettlement.toFixed(4)} DOT per settlement`);
+  const parts = [`${gas.totalDot.toFixed(3)} DOT burned`];
+  if (gas.perSettlement != null) parts.push(`${gas.perSettlement.toFixed(3)} per settlement`);
   const top = gas.buckets[0];
   if (top) parts.push(`${top.label} ${top.sharePct.toFixed(0)}%`);
 
-  // Reverted gas bought nothing. Named only when it exists — a permanent
-  // "0 failed" is the noise that trains a reader to skip the line.
-  if (gas.failedCount > 0) parts.push(`${gas.failedDot.toFixed(3)} DOT REVERTED`);
-  if (gas.truncated) parts.push("capped — spend UNDERSTATED");
-  if (gas.otherSenders.length > 0) parts.push(`+${gas.otherSenders.length} other signer${gas.otherSenders.length === 1 ? "" : "s"} not counted`);
-  if (gas.staleReason) parts.push(`figures frozen — ${gas.staleReason}`);
-  else if (gas.ageMs > 0) parts.push(`${Math.round(gas.ageMs / 60000)}m old`);
+  // Only what changes the meaning of the numbers above.
+  const caveats: string[] = [];
+  if (gas.failedCount > 0) caveats.push(`${gas.failedDot.toFixed(3)} DOT REVERTED`);
+  if (gas.truncated) caveats.push("capped — UNDERSTATED");
+  if (gas.staleReason) caveats.push(`frozen — ${gas.staleReason}`);
+  else if (gas.ageMs > GAS_STALE_AFTER_MS) caveats.push(`${Math.round(gas.ageMs / 60000)}m old`);
+  if (gas.otherSenders.length > 0) caveats.push(`+${gas.otherSenders.length} other signer${gas.otherSenders.length === 1 ? "" : "s"}`);
 
-  // Only a genuine problem tones amber: reverted gas, an understated total, or
-  // a reader that has stopped working. Cost itself is a fact, not an alarm.
-  const tone: OpsTone = gas.failedCount > 0 || gas.truncated || gas.staleReason ? "degraded" : "awaiting";
-  return { text: parts.join(" · "), tone };
+  const tone: OpsTone = caveats.length > 0 ? "degraded" : "awaiting";
+  return { text: [...parts, ...caveats].join(" · "), tone };
 }
 
-// ── economics: what a job costs against what it earns ───────────────────────
-
-export interface EconomicsInput {
-  /** On-chain payout evidence for the window. */
-  payout?: PayoutEvidence | undefined;
-  /** Gas attribution for the same window. */
-  gas?: GasSpendView | undefined;
-  /** Month-to-date LLM cost in USD, when recorded. */
-  llmMonthlyUsd?: number | null | undefined;
+/** The unreadable case, so a failed read is a sentence rather than an absence. */
+export function gasUnreadableNote(reason: string): { text: string; tone: OpsTone } {
+  return { text: `gas unreadable — ${reason}`, tone: "degraded" };
 }
 
 /**
- * The two numbers that are the business, in one place.
+ * The reward-bank footnote: how many more payouts, not how many hours.
  *
- * The board meters gas as a runway and LLM spend as a footnote, and states
- * revenue in a solvency pool — three places, never adjacent, so the relationship
- * between them has never been on screen. Per settled job it is stark, and this
- * is the internal board, which is exactly where an uncomfortable number belongs.
- *
- * ── WHAT IT REFUSES TO DO ─────────────────────────────────────────────────
- *
- * It does NOT add these together. Gas is DOT, revenue and payouts are USDC, LLM
- * spend is USD. Summing them needs a DOT price this monitor does not have and
- * must not invent — a made-up exchange rate would turn an honest set of figures
- * into one confident wrong one, and it would be invisible because the output
- * would look tidier than the truth.
- *
- * So the units stay side by side and the reader applies the price they believe.
- * The whole point is the RATIO being visible, and it is visible without one.
+ * Payouts are event-driven, so an hours figure goes stale the moment the
+ * pipeline pauses while a payout count stays true. The balance and floor are on
+ * the meter directly above and are deliberately not repeated.
  */
-export function economicsLine(input: EconomicsInput): { text: string; tone: OpsTone } {
-  const { payout, gas } = input;
-  const settled = payout?.confirmedCount ?? null;
-
-  const parts: string[] = [];
-  const missing: string[] = [];
-
-  // Reward paid per job — what the work costs in the currency it is paid in.
-  if (settled != null && settled > 0 && payout?.confirmedUsdc != null) {
-    parts.push(`${(payout.confirmedUsdc / settled).toFixed(3)} USDC paid out`);
-  } else missing.push("payouts");
-
-  // Gas per job — the unit cost that can sit beside the reward.
-  if (gas?.perSettlement != null) parts.push(`${gas.perSettlement.toFixed(4)} DOT gas`);
-  else missing.push("gas");
-
-  // Fee revenue per job. Averaged over ALL settlements, not only fee-bearing
-  // ones: the question is what the platform earns per unit of work done, and
-  // most work is deliberately fee-waived. `feesSeparated` false means the split
-  // could not be made, which is not the same as zero revenue.
-  if (payout?.feesSeparated === true && payout.feeUsdc != null && settled != null && settled > 0) {
-    parts.push(`${(payout.feeUsdc / settled).toFixed(4)} USDC fee revenue`);
-  } else if (payout?.feesSeparated === false) missing.push("fee split");
-  else missing.push("fees");
-
-  if (parts.length === 0) {
-    return { text: `ECONOMICS — not measurable (${missing.join(", ")} unavailable)`, tone: "awaiting" };
-  }
-
-  const head = `ECONOMICS / settled job — ${parts.join(" · ")}`;
-  const tail: string[] = [];
-  if (typeof input.llmMonthlyUsd === "number") tail.push(`LLM $${input.llmMonthlyUsd.toFixed(2)}/mo`);
-  // Named so nobody reads the figures as addable. The absent DOT price is the
-  // reason, and stating it is cheaper than someone assuming one.
-  tail.push("DOT and USDC not summed — no price assumed");
-  if (missing.length > 0) tail.push(`${missing.join(", ")} unavailable`);
-
-  // A cost is a fact, not an alarm. Nothing here tones amber: the board already
-  // has a runway meter for "you are running out", and duplicating that urgency
-  // in a line about unit economics would make both easier to ignore.
-  return { text: `${head} · ${tail.join(" · ")}`, tone: "awaiting" };
-}
-
-// ── how much longer can we pay? ─────────────────────────────────────────────
-
-/**
- * The reward bank, denominated in PAYOUTS rather than in hours.
- *
- * The solvency panel shows 13.79 USDC against a 2.00 floor and leaves the
- * division to the reader. The runway projection next to it is in hours — right
- * for signer gas, which drains continuously, and wrong for the reward bank,
- * which drains PER PAYOUT. If the pipeline pauses overnight, "3d to floor"
- * silently becomes false while "≈ 11 more payouts" stays exactly true.
- *
- * So this counts payouts. The time note is carried alongside when the server
- * produced one — it was being computed and rendered nowhere, which is the third
- * value tonight found shipped into the payload and displayed by nobody.
- *
- * ── WHAT IT WILL NOT DO ───────────────────────────────────────────────────
- *
- * It will not project from an average it cannot support. The sample size is
- * stated on the line, because "≈ 11 more payouts" derived from two observations
- * is a guess wearing a number's clothes, and the reader deserves to see which
- * they are looking at.
- */
-export function payoutRunwayLine(input: {
-  /** The reward bank pool — the hard spend cap on payouts. */
+export function payoutRunwayNote(input: {
   pool: SolvencyPool | undefined;
-  /** On-chain payout evidence, for the observed average payout. */
   payout: PayoutEvidence | undefined;
-  /** The server's time-based note, when it made one. */
   runwayNote?: string | null | undefined;
-}): { text: string; tone: OpsTone } {
+}): { text: string; tone: OpsTone } | null {
   const { pool, payout } = input;
-  const note = input.runwayNote ? ` · ${input.runwayNote}` : "";
+  if (!pool || pool.amount == null) return null;
 
-  if (!pool) return { text: "PAYOUT RUNWAY — reward bank not reported", tone: "awaiting" };
-  // null is unreadable, NOT empty. Coercing it to 0 would render a funded bank
-  // as exhausted, which is the alarm that costs most to get wrong.
-  if (pool.amount == null) return { text: "PAYOUT RUNWAY — reward bank balance unreadable", tone: "awaiting" };
-
-  const floor = pool.floor ?? 0;
-  const usable = pool.amount - floor;
-  if (usable <= 0) {
-    return { text: `PAYOUT RUNWAY — reward bank BELOW FLOOR (${pool.amount.toFixed(2)} / ${floor.toFixed(2)} USDC)${note}`, tone: "red" };
-  }
+  const usable = pool.amount - (pool.floor ?? 0);
+  if (usable <= 0) return { text: "BELOW FLOOR — payouts will fail", tone: "red" };
 
   const count = payout?.confirmedCount ?? 0;
   const total = payout?.confirmedUsdc ?? null;
   if (count <= 0 || total == null || total <= 0) {
-    // No observed average means no projection. Saying how much is spendable is
-    // still useful and is a fact rather than a forecast.
-    return { text: `PAYOUT RUNWAY — ${usable.toFixed(2)} USDC above floor · no payout average yet${note}`, tone: "awaiting" };
+    return { text: "no payout average yet — cannot project", tone: "awaiting" };
   }
-
   const average = total / count;
   const payouts = Math.floor(usable / average);
-  // Sample size on the line: a projection from two payouts and one from fifty
-  // must not read identically.
-  const basis = `avg ${average.toFixed(3)} USDC from ${count} payout${count === 1 ? "" : "s"}`;
-  const tone: OpsTone = payouts <= 5 ? "degraded" : "awaiting";
+  const note = input.runwayNote ? ` · ${input.runwayNote}` : "";
   return {
-    text: `PAYOUT RUNWAY ≈ ${payouts} more payout${payouts === 1 ? "" : "s"} · ${usable.toFixed(2)} USDC above floor · ${basis}${note}`,
-    tone,
+    text: `≈ ${payouts} more payout${payouts === 1 ? "" : "s"} at ${average.toFixed(3)} avg${note}`,
+    tone: payouts <= 5 ? "degraded" : "awaiting",
   };
 }
 
-// ── the one clock where doing nothing costs money ───────────────────────────
+/**
+ * Per-job economics — the only genuinely new line, and the only one that keeps
+ * a row of its own.
+ *
+ * Units are on every figure, so the reader is not going to add DOT to USDC by
+ * accident; the "not summed, no price assumed" caveat that used to dominate this
+ * line now lives in `title` where it is available and out of the way.
+ */
+export function economicsLine(input: {
+  payout?: PayoutEvidence | undefined;
+  gas?: GasSpendView | undefined;
+}): { text: string; title: string; tone: OpsTone } | null {
+  const { payout, gas } = input;
+  const settled = payout?.confirmedCount ?? null;
+  const parts: string[] = [];
+
+  if (settled != null && settled > 0 && payout?.confirmedUsdc != null) {
+    parts.push(`${(payout.confirmedUsdc / settled).toFixed(3)} USDC out`);
+  }
+  if (gas?.perSettlement != null) parts.push(`${gas.perSettlement.toFixed(3)} DOT gas`);
+  if (payout?.feesSeparated === true && payout.feeUsdc != null && settled != null && settled > 0) {
+    parts.push(`${(payout.feeUsdc / settled).toFixed(3)} USDC in`);
+  }
+
+  // Nothing measurable is nothing to show. An empty row is worse than no row.
+  if (parts.length === 0) return null;
+
+  // The one caveat that still changes the meaning: an unmade fee split is not
+  // zero revenue, and without saying so the missing figure reads as nothing
+  // earned rather than nothing known.
+  const unsplit = payout?.feesSeparated === false ? " · fee split unavailable" : "";
+  return {
+    text: `PER JOB — ${parts.join(" · ")}${unsplit}`,
+    title: "DOT and USDC are not summed: this monitor has no DOT price and will not assume one.",
+    tone: "awaiting",
+  };
+}
 
 /**
- * The dispute countdown, surfaced whenever it is running.
+ * The dispute countdown, shown in the flow panel and only while it is running.
  *
- * `external_funnel` is a probe like any other, so it sits eighth in a pillar
- * footer — and it is the ONLY thing on this board where inaction has a price. A
- * rejected submission opens a window; if it lapses unopened, the worker's bond
- * is slashed. Nothing else here degrades by being ignored.
+ * This is the only clock on the board where doing nothing costs money: a
+ * rejected submission opens a window, and if it lapses the worker's bond is
+ * slashed. The probe escalates under 48h and takes halt severity under 12h, so
+ * urgency is handled — what was missing is visibility while the clock is still
+ * comfortable, which is exactly when acting is cheapest.
  *
- * The probe already escalates under 48h and takes halt severity under 12h, so
- * urgency is handled. What was missing is VISIBILITY while the clock is still
- * comfortable: at 60 hours the probe is correctly `ok` and the countdown is
- * invisible, which is precisely when acting is cheapest.
- *
- * So this line appears whenever the bucket is non-zero and stays calm until the
- * probe's own thresholds say otherwise. It does not invent a second severity
- * ladder — a countdown shown twice in two different colours is how an operator
- * learns to trust neither.
+ * Absent when nothing is counting down. A row that is always present and almost
+ * always says "0" is one nobody reads on the day it matters.
  */
 export function disputeClockLine(
   funnel: ExternalFunnelView | undefined,
   nowMs: number,
 ): { text: string; tone: OpsTone } | null {
   const bucket = funnel?.buckets?.rejected_window_running;
-  // Nothing counting down. Return null rather than a row saying "0" — a line
-  // that is always present and almost always says nothing is a line nobody
-  // reads on the day it matters.
   if (!bucket || bucket.count === 0) return null;
 
   const job = bucket.leadJobId ? ` ${bucket.leadJobId.slice(0, 10)}…` : "";
   const plural = bucket.count === 1 ? "" : "s";
 
   if (bucket.oldestDeadlineMs == null) {
-    // Jobs are in the window but the deadline could not be read. That is an
-    // instrument fault and must NOT read as "no bond at risk".
-    return {
-      text: `DISPUTE CLOCK — ${bucket.count} bond${plural} in the window, deadline UNREADABLE${job}`,
-      tone: "degraded",
-    };
+    // Bonds are in the window and the clock cannot be read. An instrument
+    // fault, and it must NOT render as "no bond at risk".
+    return { text: `${bucket.count} bond${plural} in dispute window · deadline UNREADABLE${job}`, tone: "degraded" };
   }
-
   const msLeft = bucket.oldestDeadlineMs - nowMs;
-  if (msLeft <= 0) {
-    return { text: `DISPUTE CLOCK — window LAPSED${job} · bond slashable now`, tone: "red" };
-  }
+  if (msLeft <= 0) return { text: `dispute window LAPSED${job} · bond slashable now`, tone: "red" };
+
   const hours = msLeft / 3_600_000;
   const left = hours < 1 ? `${Math.max(1, Math.round(hours * 60))}m` : hours < 48 ? `${Math.round(hours)}h` : `${Math.round(hours / 24)}d`;
-  // Tone mirrors the probe's own thresholds rather than inventing new ones.
-  const tone: OpsTone = hours <= 12 ? "red" : hours <= 48 ? "degraded" : "awaiting";
   return {
-    text: `DISPUTE CLOCK — ${bucket.count} bond${plural} in the window · slashes in ${left}${job}`,
-    tone,
+    text: `${bucket.count} bond${plural} in dispute window · slashes in ${left}${job}`,
+    tone: hours <= 12 ? "red" : hours <= 48 ? "degraded" : "awaiting",
   };
 }
 
 /**
- * Every money line the board must render, by name.
+ * Every renderer the board must call, by name.
  *
- * THIS EXISTS BECAUSE I SHIPPED FOUR VIEW MODELS THAT NOTHING CALLED. gasLine,
- * economicsLine, payoutRunwayLine and disputeClockLine were each written,
- * tested, reviewed and merged — and rendered by no component. The unit tests
- * passed because they called the functions directly, which is exactly what a
- * component was not doing.
- *
- * A list is not a fix on its own. Paired with the test that asserts OpsBoard
- * references every name in it, it makes "built but not wired" a failing build
- * rather than something an operator discovers by looking at a screen and asking
- * why nothing changed.
+ * I shipped four of these unwired — written, tested, merged, rendered by
+ * nobody — and the operator found it by looking at the screen and saying
+ * nothing had changed. The paired test asserts each name appears in a
+ * component, so "built but not wired" fails the build instead.
  */
 export const MONEY_LINE_RENDERERS = [
   "disputeClockLine",
-  "payoutRunwayLine",
-  "gasLine",
+  "payoutRunwayNote",
+  "gasPoolNote",
   "economicsLine",
 ] as const;

@@ -6,10 +6,12 @@ import { describe, expect, it } from "vitest";
 
 import { MONEY_LINE_RENDERERS } from "../../lib/monitor/ops-spec.js";
 
-const board = fs.readFileSync(
-  path.join(path.dirname(fileURLToPath(import.meta.url)), "OpsBoard.tsx"),
-  "utf8",
-);
+const dir = path.dirname(fileURLToPath(import.meta.url));
+/** Every ops component, since each fact now lives beside its subject rather
+ *  than in one strip — a renderer may legitimately be called from any of them. */
+const board = ["OpsBoard.tsx", "SolvencyPanel.tsx", "FlowPanel.tsx"]
+  .map((f) => fs.readFileSync(path.join(dir, f), "utf8"))
+  .join("\n");
 
 /**
  * THE REGRESSION, and it happened four times in one session.
