@@ -93,3 +93,89 @@ the money rail, wallet, signer, claim or submission paths.
    behaviour and belongs with the other ten, re-proving itself on every PR.
 3. **The bundle is amended, never rewritten.** Acceptance happened at ten; the
    record should keep saying so.
+
+---
+
+# Addendum — the packet is unsatisfiable with the pinned kernel, and why that is itself a finding
+
+**Status: not implemented. Superseded by the finding below.**
+
+Codex attempted this and stopped rather than weaken the handoff invariant. That
+was the correct call, and the reason is worth more than the case would have been.
+
+## What was tried
+
+The green script measures exactly **7 model tokens**. With the cap set to 6:
+
+- normal reconciliation correctly cancelled the still-live run;
+- deferring reconciliation until terminal produced a completed, verified run and
+  the correct warning — `model_tokens used=7 limit=6 over_by=1`;
+- **but** Harness omitted `change_summary`, so the dispatcher correctly refused
+  the handoff as `verified_handoff_invalid` and set lifecycle `blocked`.
+
+So with this kernel:
+
+```
+cap <= 7  ->  token exhaustion, no change summary, no valid handoff
+cap >  7  ->  valid handoff, no budget exhaustion
+```
+
+There is no value that produces both.
+
+## Why: the kernel discards completed work on budget termination
+
+`control/executor.py` computes `budget_status(state)` after each model turn and
+returns immediately when `terminated_by` is set — **before** the response becomes
+`final_text`. The work is done and then thrown away.
+
+**That is the same defect this repository just fixed one layer up.** #653 stopped
+the *dispatcher* discarding a verified run because its budget was exceeded; the
+*kernel* discards a completed model response for the same reason. Same shape,
+different layer.
+
+That reframes what "fix the kernel" means here. It is not a change made so a test
+can pass. It is a real defect on its own merits, and the live proof becoming
+available is a side effect of fixing it.
+
+## Why the elapsed path was not taken instead
+
+`terminated_by` covers `model_tokens | tool_calls | elapsed | max_turns`, so
+elapsed short-circuits the same way — *during* execution. But the real defect ran
+`-003`, and its recorded timings show the overrun happened **after** the executor
+finished:
+
+```
+run start              0s
+last ModelResponded  181s   <- executor loop finished, final_text produced
+VerificationCompleted 184s
+last event           185s   <- what the dispatcher measures
+```
+
+Verification pushed the run past its limit. That is the only shape where a valid
+handoff and a budget overrun coexist, and reproducing it deliberately means
+threading a window: the executor must finish *under* the limit while verification
+pushes *over* it. On a scripted local run that is roughly 2s of executor against
+3s of verification; on a loaded runner it inverts and the executor is truncated
+instead.
+
+This repository spent 2026-08-01 removing a fixture that raced a kernel constant
+by ~10ms. Deliberately reintroducing that class to obtain a green check would be
+a bad trade.
+
+## Where that leaves #653
+
+Unit-proven, not live-proven, and the record should say so rather than imply
+otherwise. The tests are real — all four D4 rows fail against pre-fix `main`,
+verified by reverting only `reconcile-run.ts` and keeping the new tests — but no
+run has exercised the fixed path end to end, and none can until the kernel stops
+discarding the work.
+
+The gap is acknowledged rather than closed. That is a worse outcome than a live
+proof and a better one than a flaky test.
+
+## Next
+
+A kernel packet in `averray-agent/agent-harness`: a budget-terminated run should
+retain the response it had already produced. Once that lands and the pin moves,
+this work order becomes satisfiable as originally written and should be revisited
+rather than deleted.
