@@ -18,6 +18,7 @@ import {
   decideWindowFit,
   measureBlockSeconds,
   readPayoutTransfers,
+  withFeeSplit,
   collectProductHealthProbes,
   chainBlockAge,
   decideProductHealthAlert,
@@ -1607,6 +1608,43 @@ describe("decidePayoutEvidence (pure verdict)", () => {
     const r = decidePayoutEvidence({ ...base, confirmedCount: 3, confirmedUsdc: 1.5, settledCount: null });
     expect(r.status).toBe("confirmed");
     expect(r.detail).toContain("no settled count to compare");
+  });
+});
+
+describe("withFeeSplit — the split must actually reach the payload", () => {
+  // THE REGRESSION, found on the live board. readPayoutTransfers computed
+  // feeCount/feeUsdc/feesSeparated correctly and PayoutEvidence never carried
+  // them, so /monitor/product-health shipped with the fields simply absent.
+  // The full suite stayed green because nothing asserted the assembly — the
+  // split was right and invisible.
+  const verdict = {
+    status: "confirmed" as const, detail: "ok",
+    confirmedCount: 16, confirmedUsdc: 2.9, settledCount: 16, windowBlocks: 43200,
+  };
+
+  it("carries the fee numbers through to the evidence", () => {
+    const r = withFeeSplit(verdict, { feeCount: 3, feeUsdc: 0.105, feesSeparated: true });
+    expect(r.feeCount).toBe(3);
+    expect(r.feeUsdc).toBeCloseTo(0.105, 6);
+    expect(r.feesSeparated).toBe(true);
+  });
+
+  it("preserves the verdict untouched", () => {
+    // Fees explain which settlements were counted; they must not alter whether
+    // payouts reconcile.
+    const r = withFeeSplit(verdict, { feeCount: 3, feeUsdc: 0.105, feesSeparated: true });
+    expect(r.status).toBe("confirmed");
+    expect(r.confirmedCount).toBe(16);
+    expect(r.settledCount).toBe(16);
+  });
+
+  it("passes through NULL when fees could not be separated", () => {
+    const r = withFeeSplit(verdict, { feeCount: null, feeUsdc: null, feesSeparated: false });
+    expect(r.feeCount).toBeNull();
+    expect(r.feesSeparated).toBe(false);
+    // null, not absent: a reader must be able to tell "could not look" from
+    // "this build does not report fees at all".
+    expect("feeCount" in r).toBe(true);
   });
 });
 
