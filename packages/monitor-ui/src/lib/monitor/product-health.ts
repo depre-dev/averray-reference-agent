@@ -46,6 +46,24 @@ export interface SolvencyPool {
   addressSs58?: string;
 }
 
+/** One funnel bucket: how many, and the soonest deadline among them. */
+export interface FunnelBucketView {
+  count: number;
+  /** Soonest deadline in the bucket (epoch ms), when it has one. */
+  oldestDeadlineMs?: number;
+  /** The job driving that deadline — named so the line is actionable. */
+  leadJobId?: string;
+}
+
+export interface ExternalFunnelView {
+  buckets: Partial<Record<
+    "open_claimable" | "claimed_active" | "submitted_awaiting_review" | "rejected_window_running" | "other",
+    FunnelBucketView
+  >>;
+  /** The dispute window in force, as read from chain. Null when unreadable. */
+  disputeWindowSeconds: number | null;
+}
+
 /** Gas spend by operation. Mirrors the server snapshot; see ops-spec gasLine(). */
 export interface GasSpendView {
   totalDot: number;
@@ -300,6 +318,13 @@ export interface ProductHealth {
    * carries its own age.
    */
   gas?: GasSpendView;
+  /**
+   * External-job funnel counts, structured — the numbers behind the probe's
+   * prose. `rejected_window_running` is the one that matters: while it is
+   * non-zero a worker's bond is counting down toward being lost to inaction,
+   * and that is the only clock on this board where doing nothing costs money.
+   */
+  externalFunnel?: ExternalFunnelView;
   /** The monitor's own build vs main — "is this board current?". */
   self?: SelfFreshness;
   /**

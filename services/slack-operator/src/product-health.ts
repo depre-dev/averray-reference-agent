@@ -30,7 +30,7 @@ import type { AlertPayload } from "./alert-bridge.js";
 // ── Probe result model ──────────────────────────────────────────────
 
 import { decideDiskHeadroom, readDiskUsage } from "./disk-headroom.js";
-import { probeExternalFunnel } from "./external-funnel.js";
+import { probeExternalFunnel, type BucketSummary, type FunnelBucket } from "./external-funnel.js";
 import { h160ToSs58 } from "./hub-address.js";
 import { ESCROW_V2_SELECTORS } from "./escrow-selectors.js";
 import { readGasSpend } from "./gas-spend-read.js";
@@ -2143,6 +2143,19 @@ export interface ChainTickData {
 }
 
 export interface ProductHealthSnapshotBlocks {
+  /**
+   * External-job funnel counts, structured.
+   *
+   * The probe's prose detail is for humans; these are the numbers the board
+   * needs to surface the dispute countdown without parsing its own sentence
+   * back. `rejected_window_running` is the one that matters: a bond is being
+   * lost to inaction while it is non-zero.
+   */
+  externalFunnel?: {
+    buckets: Record<FunnelBucket, BucketSummary>;
+    /** The dispute window in force, as read from chain. Null when unreadable. */
+    disputeWindowSeconds: number | null;
+  };
   chainId?: number | null;
   /**
    * The MONITOR's own version. Deliberately NOT a probe: a stale monitor is not
@@ -2398,6 +2411,17 @@ export async function collectProductHealthProbes(
         }
       : {}),
     ...(solvencyPools.length ? { solvency: { pools: solvencyPools } } : {}),
+    // The external funnel's STRUCTURED counts, not just its prose detail.
+    //
+    // probeExternalFunnel already computes buckets with the soonest deadline and
+    // the job id driving it; only `probe` was being emitted, so the one clock on
+    // the board where inaction costs money reached the screen as a sentence to
+    // be parsed. Emitting the numbers lets the board show the countdown without
+    // reading its own prose back.
+    externalFunnel: {
+      buckets: externalFunnel.buckets,
+      disputeWindowSeconds: externalFunnel.disputeWindowSeconds,
+    },
     // Gas attribution: what the burn went ON. Read on its OWN cadence — a pass
     // is ~174 RPC calls, far too heavy for the heartbeat — so this returns the
     // last snapshot immediately and refreshes in the background. Absent until
