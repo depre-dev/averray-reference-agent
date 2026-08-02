@@ -25,7 +25,8 @@ Do not inherit production configuration. In a fresh shell:
 unset HARNESS_DISPATCH_ENABLED
 test "${HARNESS_DISPATCH_ENABLED:-false}" != "true"
 
-export CEREMONY_ROOT="$(mktemp -d -t harness-int2-ceremony.XXXXXX)"
+export CEREMONY_ROOT="$HOME/int2-ceremony-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$CEREMONY_ROOT"
 export HARNESS_CHECKOUT="$CEREMONY_ROOT/agent-harness"
 export REFERENCE_CHECKOUT="/absolute/path/to/averray-reference-agent"
 
@@ -38,6 +39,17 @@ test -z "$(git -C "$HARNESS_CHECKOUT" status --porcelain)"
 cd "$HARNESS_CHECKOUT"
 uv sync --frozen
 ```
+
+**Do not use `mktemp -d` for this.** On macOS it lands the root in
+`/var/folders`, which the OS reaps on its own schedule. A ceremony that spans
+more than a session comes back to a partly-eaten virtualenv: on 2026-08-02 the
+`opentelemetry_api` dist-info had been stripped to `INSTALLER`, `REQUESTED` and
+`licenses`, with over a hundred packages missing their `RECORD`, and the worker
+died on a `StopIteration` inside `_load_runtime_context()` — a stack trace that
+names nothing relevant. Recovery is `uv sync --frozen --reinstall`.
+
+"Disposable" is a property of what you do with the root at the end, not of where
+the filesystem chooses to put it. Keep it under `$HOME` and delete it yourself.
 
 Record the full Harness commit in the evidence directory. Stop if the checkout
 is not clean or the commit differs.
@@ -303,6 +315,12 @@ export HARNESS_MODEL_BASE_URL=http://127.0.0.1:11434/v1
 export HARNESS_TEST_MODEL_SCRIPT="$HARNESS_CHECKOUT/tests/fixtures/model_scripts/finish.jsonl"
 ```
 
+The worker connects to the Harness database at launch, so **§1.2 must already
+be running**. Started against stopped containers it does not wait or degrade —
+DBOS fails to launch on `connection refused` and the process exits. That is the
+correct behaviour and the only step in bring-up whose ordering is load-bearing,
+so it is worth stating rather than discovering.
+
 In a dedicated worker terminal with the same exported environment:
 
 ```sh
@@ -312,6 +330,15 @@ uv run harness worker
 
 Wait for `worker ready`. A worker that exits or reports a different commit,
 profile, database, provider, or image pin aborts the ceremony.
+
+If the worker was provisioned in an earlier session, assert the virtualenv still
+imports before trusting it — a `uv sync` that exited 0 days ago is not evidence
+it works today:
+
+```sh
+"$HARNESS_CHECKOUT/.venv/bin/harness" --help >/dev/null \
+  || (cd "$HARNESS_CHECKOUT" && uv sync --frozen --reinstall)
+```
 
 ### 1.6 The only dispatch enablement step
 
