@@ -167,10 +167,27 @@ describe("rate limiting", () => {
 });
 
 describe("the prompt", () => {
-  it("tells the agent to check the board rather than answer from memory", () => {
+  it("NAMES the board tool rather than describing it", () => {
+    // THE REGRESSION. The first version said "current state must come from the
+    // ops board" without naming a tool. Asked "is averray ok right now?" in
+    // #Ops, the agent answered from `averray_ops_health` — the Postgres
+    // control-plane read — reporting wallet readiness and operator-event counts,
+    // and signed off with "No issues on the board" having never read the board.
+    //
+    // Describing a source is not routing to one. The same lesson the skill
+    // description taught an hour earlier: name the thing.
     const prompt = buildInboundPrompt("is averray ok?");
-    expect(prompt).toContain("not from memory");
+    expect(prompt).toContain("averray_board_health");
+    expect(prompt).toContain("verdict.reason");
     expect(prompt).toContain("is averray ok?");
+  });
+
+  it("names the tool that must NOT answer it, and why", () => {
+    const prompt = buildInboundPrompt("x");
+    expect(prompt).toContain("averray_ops_health");
+    expect(prompt).toContain("Postgres");
+    // The specific false claim observed in production.
+    expect(prompt).toContain("the board");
   });
 
   it("says UNKNOWN is the answer when the board cannot be reached", () => {
