@@ -289,43 +289,46 @@ describe("OpsBoard — pillars and footer", () => {
     expect(foot).toContain("LLM SPEND — not recorded");
     expect(foot).not.toContain("$0.00");
   });
-  test("wallets live in their OWN strip, not inside the solvency rows", () => {
-    // They were interleaved with the meters and, on a 1440x900 laptop, pushed
-    // two real pools off a board that has no scroll. Reference data must not
-    // displace measurements.
-    const { getByTestId, queryByTestId } = render(
+  test("both encodings sit on ONE line under the balance they belong to", () => {
+    // Under the number, not in a separate strip — reading an address in one
+    // place while looking at its balance in another is what made the strip
+    // wrong. One line is what makes that affordable: ~100 monospace glyphs fit
+    // the pool row, where two lines did not fit the board.
+    const { getByTestId } = render(
       <OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
     );
-    expect(queryByTestId("ops-pool-addr-aac")).toBeNull();
-    const aac = getByTestId("ops-wallet-aac");
-    expect(aac.textContent).toContain("0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57");
-    expect(aac.textContent).toContain("151MENb3J9ZiBv147yhNkPDiY8rXF7TrWc13PqWYJeLuupBd");
-    expect(aac.textContent).toContain("AgentAccountCore");
+    const addr = getByTestId("ops-pool-addr-aac");
+    expect(addr.textContent).toContain("0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57");
+    expect(addr.textContent).toContain("151MENb3J9ZiBv147yhNkPDiY8rXF7TrWc13PqWYJeLuupBd");
+    expect(addr.textContent).toContain("AgentAccountCore");
+    // It lives inside the pool row, not somewhere else on the board.
+    expect(getByTestId("ops-pool-aac").contains(addr)).toBe(true);
   });
 
-  test("a pool whose figure did NOT come from a balance read gets no wallet row", () => {
+  test("a pool whose figure did NOT come from a balance read gets no address", () => {
     // reward_bank is reported by the product's own /health. Borrowing the AAC's
     // address to fill the gap would claim a provenance the number does not have
     // — the same class of lie as a fake green.
     const { queryByTestId } = render(
       <OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
     );
-    expect(queryByTestId("ops-wallet-reward_bank")).toBeNull();
+    expect(queryByTestId("ops-pool-addr-reward_bank")).toBeNull();
   });
 
-  test("a wallet with no derivable SS58 says so rather than showing nothing", () => {
+  test("a pool with no derivable SS58 says so rather than showing nothing", () => {
     // Silence would read as "this account has no SS58 form", which is false —
     // it means we could not derive one, and those are different facts.
     const { getByTestId } = render(
       <OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
     );
-    expect(getByTestId("ops-wallet-signer_gas").textContent).toContain("SS58 unavailable");
+    expect(getByTestId("ops-pool-addr-signer_gas").textContent).toContain("SS58 unavailable");
   });
 
-  test("every pool still renders — the strip must not cost a measurement", () => {
+  test("every pool still renders — an address must never cost a measurement", () => {
+    // The first attempt at this pushed two pools off a 1440x900 board.
     const { getAllByTestId } = render(
       <OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
     );
-    expect(getAllByTestId(/^ops-pool-/).length).toBe(6);
+    expect(getAllByTestId(/^ops-pool-[a-z_]+$/).length).toBe(6);
   });
 });

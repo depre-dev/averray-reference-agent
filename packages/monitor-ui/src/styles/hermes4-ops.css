@@ -268,7 +268,10 @@ body,
   grid-template-columns: minmax(120px, 168px) 1fr minmax(120px, 176px);
   gap: 16px;
   align-items: center;
-  padding: 8px 0;
+  /* 8px -> 6px. Each pool now carries an address line, and the board has no
+     spare height; two pixels a side across six pools is 24px, which is most of
+     what that line costs. Cheaper than truncating anything. */
+  padding: 6px 0;
   border-bottom: 1px dashed var(--ops-hair);
 }
 .ops-pool-name {
@@ -376,69 +379,57 @@ body,
   line-height: 1.45;
   color: var(--h4-muted);
 }
-/* ---- wallets strip ---------------------------------------------
-   Full board width, one line per wallet, both encodings side by side. At
-   ~1400px a 42-char and a 48-char monospace address fit on one row without
-   truncation — which is the whole reason this is a strip and not a column
-   inside the solvency panel, where they wrapped and clipped real balances. */
-/* The money row is a fixed budget on a 100vh board. When the content genuinely
-   exceeds it, the panel SCROLLS rather than clips: a hidden pool is a pool the
-   operator believes does not exist, which is the one outcome this board must
-   never produce. Scrolling is an inconvenience; silent omission is a lie. */
-.ops-solvency {
-  overflow-y: auto;
-  min-height: 0;
-}
+/* ---- pool address ----------------------------------------------
+   One line under the balance, spanning the whole pool row. .ops-pool is a
+   three-column grid, so anything that does not span becomes a fourth cell and
+   wraps the row — which is how the first attempt pushed amounts under meters.
 
-.ops-wallets {
-  border: 1px solid var(--ops-rule);
-  padding: 8px 14px 10px;
-  /* Fixed content height: .ops-money above is flex:1 and yields to this. */
-  flex: 0 0 auto;
-}
-.ops-wallets-head {
+   Both encodings share the line because they fit: ~100 monospace glyphs at
+   9px is ~540px inside a ~620px row. Two lines cost 138px of a board that had
+   17px spare; one costs about half that and stays where it is useful. */
+.ops-pool-addr {
+  grid-column: 1 / -1;
   display: flex;
   align-items: baseline;
-  gap: 12px;
-  margin-bottom: 6px;
-}
-.ops-wallets-head h2 {
-  margin: 0;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  color: var(--h4-ink);
-}
-.ops-wallet {
-  display: grid;
-  grid-template-columns: minmax(120px, 168px) minmax(0, auto) minmax(0, auto) 1fr;
-  gap: 14px;
-  align-items: baseline;
-  padding: 2px 0;
+  gap: 6px;
+  /* .ops-pool sets gap:16px, which applies between grid ROWS too. */
+  margin-top: -13px;
   font-family: var(--h4-font-mono);
-  font-size: 10px;
-  line-height: 1.5;
+  font-size: 9px;
+  line-height: 1.35;
+  color: var(--h4-muted);
+  min-width: 0;
 }
-.ops-wallet-label {
-  color: var(--h4-ink-2);
-}
-.ops-wallet-addr {
+.ops-pool-addr-hex {
   /* Selectable as one unit so a double-click grabs the whole address. */
   user-select: all;
   color: var(--h4-ink-2);
-  opacity: 0.8;
+  opacity: 0.78;
   white-space: nowrap;
 }
-.ops-wallet-addr--ss58 {
-  opacity: 0.62;
+.ops-pool-addr-hex--ss58 {
+  opacity: 0.6;
 }
-.ops-wallet-missing {
-  color: var(--h4-muted);
+.ops-pool-addr-sep {
+  opacity: 0.45;
+}
+.ops-pool-addr-none {
   font-style: italic;
-  user-select: auto;
+  opacity: 0.7;
 }
-.ops-wallet-pool {
-  color: var(--h4-muted);
-  text-align: right;
+.ops-pool-addr-label {
+  /* Pushed right and first to yield: the addresses are the payload, the label
+     is the gloss. At a narrow width the gloss truncates, never the hex. */
+  margin-left: auto;
+  padding-left: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.8;
+}
+.ops-pool--unfloored .ops-pool-addr {
+  margin-top: -6px;
 }
 
 .ops-pool-amount--quiet {

@@ -320,5 +320,23 @@ describe("phone board — what you can act on, and what you would not be told", 
     );
     expect(container.textContent).not.toContain("#ops");
   });
-});
 
+  test("a phone pool shows its address under the balance, stacked to stay legible", () => {
+    // Same placement rule as the desktop — under the number it belongs to — but
+    // stacked, because 100 monospace glyphs do not fit 390px. This board
+    // scrolls, so the extra line costs nothing that matters.
+    const { getByTestId } = render(
+      <MobileBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    const addr = getByTestId("mobile-pool-addr-aac");
+    expect(addr.textContent).toContain("0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57");
+    expect(addr.textContent).toContain("151MENb3J9ZiBv147yhNkPDiY8rXF7TrWc13PqWYJeLuupBd");
+  });
+
+  test("a phone pool with no balance-read address shows none", () => {
+    const { queryByTestId } = render(
+      <MobileBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    expect(queryByTestId("mobile-pool-addr-reward_bank")).toBeNull();
+  });
+});

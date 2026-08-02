@@ -56,6 +56,37 @@ export function SolvencyPanel({ solvency }: SolvencyPanelProps) {
   );
 }
 
+/**
+ * Both encodings of a pool's address, on ONE line, directly under its balance.
+ *
+ * They belong beside the number — an address in a separate strip means reading
+ * one while looking at the other. The reason they can be here is arithmetic:
+ * 42 hex characters plus 48 SS58 characters plus a label is ~100 monospace
+ * glyphs, which at 9px is ~540px inside a ~620px pool row. Two lines did not
+ * fit the board's height budget; one does, at half the cost.
+ *
+ * .ops-pool is a three-column grid, so this spans 1/-1 and must be rendered
+ * LAST — anything before the amount pushes it onto its own row.
+ *
+ * Absent entirely for a pool whose figure did not come from a balance read.
+ */
+function PoolAddress({ view }: { view: PoolView }) {
+  const { address, addressLabel, addressSs58 } = view.pool;
+  if (!address) return null;
+  return (
+    <span className="ops-pool-addr" data-testid={`ops-pool-addr-${view.pool.key}`}>
+      <span className="ops-pool-addr-hex">{address}</span>
+      <span className="ops-pool-addr-sep">·</span>
+      {addressSs58 ? (
+        <span className="ops-pool-addr-hex ops-pool-addr-hex--ss58">{addressSs58}</span>
+      ) : (
+        <span className="ops-pool-addr-none">SS58 unavailable</span>
+      )}
+      {addressLabel ? <span className="ops-pool-addr-label">{addressLabel}</span> : null}
+    </span>
+  );
+}
+
 function FlooredPool({ view }: { view: PoolView }) {
   const meter = view.meter;
   if (!meter) return null;
@@ -104,6 +135,7 @@ function FlooredPool({ view }: { view: PoolView }) {
         {view.amountLabel}
         <span className="ops-pool-unit">{view.unit}</span>
       </div>
+      <PoolAddress view={view} />
     </div>
   );
 }
@@ -122,6 +154,7 @@ function UnflooredPool({ view }: { view: PoolView }) {
         {view.amountLabel}
         <span className="ops-pool-unit">{view.unit}</span>
       </span>
+      <PoolAddress view={view} />
     </div>
   );
 }
