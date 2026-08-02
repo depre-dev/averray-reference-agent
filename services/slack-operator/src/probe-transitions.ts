@@ -108,8 +108,19 @@ export function decideProbeTransitions(input: DecideProbeTransitionsInput): Prob
     next.set(probe.name, probe);
     const before = input.previous.get(probe.name);
 
-    // First sight — record it, say nothing.
-    if (!before) continue;
+    // First sight — say nothing, but REMEMBER what it was.
+    //
+    // Silence here is right: a probe already broken when the process started is
+    // not news, and alerting would page on every redeploy. But the key has to be
+    // retained anyway. Without it the posted set comes back empty, and on the
+    // NEXT tick the same unchanged alarm looks brand new and posts.
+    //
+    // Production found this, not the tests: three deploys in one night produced
+    // three duplicate money_path alerts, each one tick after a restart.
+    if (!before) {
+      if (isAlarm(probe.status)) keys.add(reasonClass(probe));
+      continue;
+    }
     if (before.status === probe.status && !isAlarm(probe.status)) continue;
 
     const enteringAlarm = isAlarm(probe.status) && before.status !== probe.status;
