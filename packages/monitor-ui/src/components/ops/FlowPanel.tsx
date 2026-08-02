@@ -16,12 +16,20 @@ import {
   type FunnelView,
 } from "../../lib/monitor/ops-spec.js";
 import type { MoneyPathSnapshot } from "../../lib/monitor/product-health.js";
+import { disputeClockLine } from "../../lib/monitor/ops-spec.js";
+import type { ExternalFunnelView } from "../../lib/monitor/product-health.js";
 
 export interface FlowPanelProps {
   flow: MoneyPathSnapshot | undefined;
+  /** External funnel counts — drives the dispute clock. */
+  externalFunnel?: ExternalFunnelView | undefined;
+  nowMs?: number;
 }
 
-export function FlowPanel({ flow }: FlowPanelProps) {
+export function FlowPanel({ flow, externalFunnel, nowMs }: FlowPanelProps) {
+  // The one clock on this board where doing nothing costs money. Rendered only
+  // while it is running; absence is correct, not a missing feature.
+  const clock = disputeClockLine(externalFunnel, nowMs ?? Date.now());
   const funnel = flowFunnel(flow);
   const evidence = payoutView(flow?.payout);
 
@@ -41,6 +49,12 @@ export function FlowPanel({ flow }: FlowPanelProps) {
             : "gaps between stages are the signal"}
         </span>
       </header>
+
+      {clock ? (
+        <p className="ops-dispute-clock" data-tone={clock.tone} data-testid="ops-dispute-clock">
+          ⏳ {clock.text}
+        </p>
+      ) : null}
 
       <Funnel funnel={funnel} />
 

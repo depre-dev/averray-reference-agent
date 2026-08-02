@@ -13,14 +13,34 @@
 // Percentages never lead here. 5% of 2 TB is comfort; 20% of 20 GB is about to
 // fail — so the absolute number is the status.
 
-import type { SolvencySnapshot } from "../../lib/monitor/product-health.js";
+import type { GasSpendView, PayoutEvidence, SolvencySnapshot } from "../../lib/monitor/product-health.js";
 import { splitPools, type PoolView } from "../../lib/monitor/ops-spec.js";
+import { gasPoolNote, gasUnreadableNote, payoutRunwayNote } from "../../lib/monitor/ops-spec.js";
+import type { OpsTone } from "../../lib/monitor/ops-model.js";
 
 export interface SolvencyPanelProps {
   solvency: SolvencySnapshot | undefined;
+  /** Gas attribution, for the signer pool's footnote. */
+  gas?: GasSpendView | { unreadable: true; reason: string } | undefined;
+  /** Payout evidence, for the reward bank's payouts-remaining footnote. */
+  payout?: PayoutEvidence | undefined;
 }
 
-export function SolvencyPanel({ solvency }: SolvencyPanelProps) {
+/**
+ * The signer pool's footnote, or the reason there isn't one.
+ *
+ * An unreadable gas read is a SENTENCE, not an absence — a missing footnote and
+ * a failed read look identical on screen, and only one of them is actionable.
+ */
+function gasNoteFor(
+  gas: GasSpendView | { unreadable: true; reason: string } | undefined,
+): { text: string; tone: OpsTone } | null {
+  if (!gas) return null;
+  if ("unreadable" in gas) return gasUnreadableNote(gas.reason);
+  return gasPoolNote(gas);
+}
+
+export function SolvencyPanel({ solvency, gas, payout }: SolvencyPanelProps) {
   const pools = solvency?.pools ?? [];
   const { floored, unfloored } = splitPools(pools);
 
@@ -37,9 +57,27 @@ export function SolvencyPanel({ solvency }: SolvencyPanelProps) {
         </p>
       ) : null}
 
-      {floored.map((view) => (
-        <FlooredPool key={view.pool.key} view={view} />
-      ))}
+      {floored.map((view) => {
+        // Each pool's footnote answers what its meter cannot: the signer's is
+        // what is draining it, the reward bank's is how many more payouts it
+        // funds. Balance, floor and margin are on the meter and never repeated.
+        const note =
+          view.pool.key === "signer_gas"
+            ? gasNoteFor(gas)
+            : view.pool.key === "reward_bank"
+              ? payoutRunwayNote({ pool: view.pool, payout, runwayNote: solvency?.runwayNote })
+              : null;
+        return (
+          <div key={view.pool.key}>
+            <FlooredPool view={view} />
+            {note ? (
+              <p className="ops-pool-note" data-tone={note.tone} data-testid={`ops-pool-note-${view.pool.key}`}>
+                {note.text}
+              </p>
+            ) : null}
+          </div>
+        );
+      })}
 
       {unfloored.length > 0 ? (
         <>
