@@ -15,6 +15,7 @@ import { evaluateClaimMutationPolicy, evaluateSubmitMutationPolicy, isUuid } fro
 import { postSlackAlert, validationFailureDetails } from "./slack-alerts.js";
 import { buildSubmitRequestBody } from "./submit-payload.js";
 import { validateSubmissionLocally } from "./validate-submission.js";
+import { getBoardHealth } from "./board-health.js";
 import {
   getDraftSubmission,
   listDraftSubmissions,
@@ -238,8 +239,17 @@ server.tool(
 );
 
 server.tool(
+  "averray_board_health",
+  "THE authoritative answer to whether Averray is working. Returns the ops board's own verdict — the same payload and the same tested deriveOpsVerdict the operator is looking at — plus the probes, solvency pools, money-path flow, on-chain payout proof, #Ops delivery state and incident log behind it. Read `verdict.reason` (nominal, probe-degraded, probe-red, floor-breach, pool-draining, payout-shortfall, no-data, not-watching); never match on the prose headline. Use this for any question about system health, the money path, payouts, settlements, solvency, liquidity floors, probes, incidents, or the dispute window on external jobs. Prefer it over averray_ops_health for product state: that one reads Postgres control-plane data and answers a different question. Read-only; mutates nothing.",
+  {},
+  async () => {
+    return jsonContent(await getBoardHealth());
+  }
+);
+
+server.tool(
   "averray_ops_health",
-  "Canonical read-only operator health snapshot for humans, Slack, Command Center, and other agents. Summarizes wallet/budget readiness, latest run state, control-plane table counts, recent operator events, and recent failures. Does not claim, submit, request approval, edit Wikipedia, or mutate Averray state.",
+  "Read-only DATABASE and control-plane health: wallet/budget readiness, latest run state, control-plane table counts, recent operator events, and recent failures, read from Postgres. This is NOT the product health verdict and NOT what the ops board shows — for whether Averray is actually working, whether money is moving, or why the board shows a verdict, use averray_board_health instead. The two read different sources and can legitimately disagree; if you quote this one, say so. Does not claim, submit, request approval, edit Wikipedia, or mutate Averray state.",
   {},
   async () => {
     return jsonContent(await getOpsHealth({ query, workflowDeps: workflowDeps() }));
