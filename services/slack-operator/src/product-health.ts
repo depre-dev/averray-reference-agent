@@ -1925,6 +1925,46 @@ export interface PayoutEvidence {
   windowBlocks: number | null;
   /** Does the block window actually span what it is compared against? */
   window?: WindowFit;
+  /**
+   * Protocol-fee credits in the SAME window — settlements whose recipient was
+   * the fee treasury, and the reason `confirmedCount` is not simply every
+   * settlement found on chain.
+   *
+   * Surfaced so a reader can SEE the split that produced the payout count
+   * instead of having to trust it. Excluding fees silently changes a number the
+   * operator has been reading for weeks, with nothing on screen to explain why —
+   * and an unexplained change in a money figure is its own kind of dishonesty.
+   *
+   * null means fees could not be told apart (no readable fee recipient), NOT
+   * that none were taken.
+   */
+  feeCount?: number | null;
+  feeUsdc?: number | null;
+  /** False → `confirmedCount` may still include fees. Stated, never implied. */
+  feesSeparated?: boolean;
+}
+
+/**
+ * Attach the fee split to the verdict.
+ *
+ * A named seam rather than an inline spread, because the first version of this
+ * change computed the split correctly and then dropped it: the payload shipped
+ * with no fee fields at all, and the whole suite stayed green because nothing
+ * asserted the assembly. A separate function is a thing a test can hold.
+ *
+ * Carried ALONGSIDE the verdict, never into it: fees do not change whether
+ * payouts reconcile, they explain which settlements were counted.
+ */
+export function withFeeSplit(
+  evidence: PayoutEvidence,
+  read: { feeCount: number | null; feeUsdc: number | null; feesSeparated: boolean },
+): PayoutEvidence {
+  return {
+    ...evidence,
+    feeCount: read.feeCount,
+    feeUsdc: read.feeUsdc,
+    feesSeparated: read.feesSeparated,
+  };
 }
 
 /**
@@ -2155,15 +2195,18 @@ export async function collectProductHealthProbes(
         targetHours: PAYOUT_COMPARISON_HOURS,
       })
     : undefined;
-  const payout = decidePayoutEvidence({
-    confirmedCount: payoutRead.count,
-    confirmedUsdc: payoutRead.usdc,
-    settledCount: settlement?.settled24h ?? null,
-    windowBlocks: payoutRead.windowBlocks,
-    tolerance: config.payoutTolerance,
-    ...(payoutRead.reason ? { unverifiedReason: payoutRead.reason } : {}),
-    ...(windowFit ? { window: windowFit } : {}),
-  });
+  const payout = withFeeSplit(
+    decidePayoutEvidence({
+      confirmedCount: payoutRead.count,
+      confirmedUsdc: payoutRead.usdc,
+      settledCount: settlement?.settled24h ?? null,
+      windowBlocks: payoutRead.windowBlocks,
+      tolerance: config.payoutTolerance,
+      ...(payoutRead.reason ? { unverifiedReason: payoutRead.reason } : {}),
+      ...(windowFit ? { window: windowFit } : {}),
+    }),
+    payoutRead,
+  );
   // The monitor's own version. Degraded-safe: any failure is "unknown", which
   // must never render as up to date.
   const selfFreshness = await deriveSelfFreshnessProbe({
