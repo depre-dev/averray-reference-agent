@@ -689,3 +689,67 @@ export function economicsLine(input: EconomicsInput): { text: string; tone: OpsT
   // in a line about unit economics would make both easier to ignore.
   return { text: `${head} · ${tail.join(" · ")}`, tone: "awaiting" };
 }
+
+// ── how much longer can we pay? ─────────────────────────────────────────────
+
+/**
+ * The reward bank, denominated in PAYOUTS rather than in hours.
+ *
+ * The solvency panel shows 13.79 USDC against a 2.00 floor and leaves the
+ * division to the reader. The runway projection next to it is in hours — right
+ * for signer gas, which drains continuously, and wrong for the reward bank,
+ * which drains PER PAYOUT. If the pipeline pauses overnight, "3d to floor"
+ * silently becomes false while "≈ 11 more payouts" stays exactly true.
+ *
+ * So this counts payouts. The time note is carried alongside when the server
+ * produced one — it was being computed and rendered nowhere, which is the third
+ * value tonight found shipped into the payload and displayed by nobody.
+ *
+ * ── WHAT IT WILL NOT DO ───────────────────────────────────────────────────
+ *
+ * It will not project from an average it cannot support. The sample size is
+ * stated on the line, because "≈ 11 more payouts" derived from two observations
+ * is a guess wearing a number's clothes, and the reader deserves to see which
+ * they are looking at.
+ */
+export function payoutRunwayLine(input: {
+  /** The reward bank pool — the hard spend cap on payouts. */
+  pool: SolvencyPool | undefined;
+  /** On-chain payout evidence, for the observed average payout. */
+  payout: PayoutEvidence | undefined;
+  /** The server's time-based note, when it made one. */
+  runwayNote?: string | null | undefined;
+}): { text: string; tone: OpsTone } {
+  const { pool, payout } = input;
+  const note = input.runwayNote ? ` · ${input.runwayNote}` : "";
+
+  if (!pool) return { text: "PAYOUT RUNWAY — reward bank not reported", tone: "awaiting" };
+  // null is unreadable, NOT empty. Coercing it to 0 would render a funded bank
+  // as exhausted, which is the alarm that costs most to get wrong.
+  if (pool.amount == null) return { text: "PAYOUT RUNWAY — reward bank balance unreadable", tone: "awaiting" };
+
+  const floor = pool.floor ?? 0;
+  const usable = pool.amount - floor;
+  if (usable <= 0) {
+    return { text: `PAYOUT RUNWAY — reward bank BELOW FLOOR (${pool.amount.toFixed(2)} / ${floor.toFixed(2)} USDC)${note}`, tone: "red" };
+  }
+
+  const count = payout?.confirmedCount ?? 0;
+  const total = payout?.confirmedUsdc ?? null;
+  if (count <= 0 || total == null || total <= 0) {
+    // No observed average means no projection. Saying how much is spendable is
+    // still useful and is a fact rather than a forecast.
+    return { text: `PAYOUT RUNWAY — ${usable.toFixed(2)} USDC above floor · no payout average yet${note}`, tone: "awaiting" };
+  }
+
+  const average = total / count;
+  const payouts = Math.floor(usable / average);
+  // Sample size on the line: a projection from two payouts and one from fifty
+  // must not read identically.
+  const basis = `avg ${average.toFixed(3)} USDC from ${count} payout${count === 1 ? "" : "s"}`;
+  const tone: OpsTone = payouts <= 5 ? "degraded" : "awaiting";
+  return {
+    text: `PAYOUT RUNWAY ≈ ${payouts} more payout${payouts === 1 ? "" : "s"} · ${usable.toFixed(2)} USDC above floor · ${basis}${note}`,
+    tone,
+  };
+}
