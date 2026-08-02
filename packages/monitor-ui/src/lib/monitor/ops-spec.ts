@@ -831,3 +831,24 @@ export function disputeClockLine(
     tone,
   };
 }
+
+/**
+ * Every money line the board must render, by name.
+ *
+ * THIS EXISTS BECAUSE I SHIPPED FOUR VIEW MODELS THAT NOTHING CALLED. gasLine,
+ * economicsLine, payoutRunwayLine and disputeClockLine were each written,
+ * tested, reviewed and merged — and rendered by no component. The unit tests
+ * passed because they called the functions directly, which is exactly what a
+ * component was not doing.
+ *
+ * A list is not a fix on its own. Paired with the test that asserts OpsBoard
+ * references every name in it, it makes "built but not wired" a failing build
+ * rather than something an operator discovers by looking at a screen and asking
+ * why nothing changed.
+ */
+export const MONEY_LINE_RENDERERS = [
+  "disputeClockLine",
+  "payoutRunwayLine",
+  "gasLine",
+  "economicsLine",
+] as const;
