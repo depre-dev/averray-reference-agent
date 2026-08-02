@@ -1,6 +1,6 @@
 ---
 name: averray-ops
-description: Read and explain the Averray ops board — the live health of a system that settles real USDC on Polkadot Hub mainnet. Use whenever asked whether Averray is working, or about the money path, payouts, settlements, solvency, liquidity floors, probes, incidents, the dispute window on external jobs, or why the board shows a particular verdict. Also use before answering any question that implies the system's current state, so the answer comes from the board rather than from memory.
+description: Read and explain the Averray ops board — the live health of a system that settles real USDC on Polkadot Hub mainnet. Use for any question about the operator's wallets, addresses or balances: where to send DOT or USDC, topping up signer gas, funding the reward bank, which address is safe to send funds to. The agent's own wallet tools answer a different question and must not be used for those. Use it whenever asked whether Averray is working, or about the money path, payouts, settlements, solvency, liquidity floors, probes, incidents, the dispute window on external jobs, or why the board shows a particular verdict. Use it before answering anything that implies the system's current state, so the answer comes from the board rather than from memory.
 ---
 
 # Watching Averray
@@ -234,9 +234,25 @@ Substrate wallets), and `addressLabel`. Two rules:
 - Only the **signer** is a wallet somebody should send funds to. The others are
   contracts; DOT sent to `EscrowCore` lands somewhere with no way back. If asked
   where to top up gas, give the signer and say the others are contracts.
+- **The `wallet_*` tools are not this.** `wallet_export_address` /
+  `wallet_status` return the *agent's own* SIWE identity — the key it logs into
+  the Averray API with, reported as `siweFallbackMode`. It is not operator
+  infrastructure and it is not the gas signer. The word "signer" means two
+  different things across these tools, and that collision has already produced a
+  confident wrong answer: asked where to send DOT for gas, the agent returned
+  its own login wallet. Funds sent there do not top up gas. Operator balances
+  come from `solvency.pools[]` and nowhere else.
 
 Native DOT reads as 18 decimals over eth-rpc, and funds must be on **Asset Hub**,
 not the relay chain — relay DOT needs teleporting first.
+
+**No bridge is involved, and do not invent one.** The `0x…` and the `1…` SS58 on
+a pool are the SAME account: pallet_revive maps H160 → AccountId32 by appending
+twelve `0xEE` bytes, and this was verified against mainnet by cross-checking the
+nonce on both RPCs (both returned 222). So a Substrate wallet sends DOT to the
+SS58 form and it lands as that account's gas — no bridge, no wrapper, no
+contract call. Telling an operator otherwise strands a top-up during an outage,
+which is when the question always gets asked.
 
 ---
 
