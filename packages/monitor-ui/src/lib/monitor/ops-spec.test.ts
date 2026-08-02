@@ -127,6 +127,40 @@ describe("askHermesRow — can Hermes answer?", () => {
   });
 });
 
+describe("payoutView — whether to believe the comparison at all", () => {
+  const base = {
+    status: "confirmed" as const, detail: "ok",
+    confirmedCount: 18, confirmedUsdc: 3.1, settledCount: 18, windowBlocks: 40000,
+  };
+
+  test("stays silent when the window actually fits", () => {
+    // A permanent "~24h at 2.16s/block" is always-true text a reader stops
+    // seeing, and the caption is only useful when it carries doubt.
+    const view = payoutView({ ...base, window: { status: "ok", detail: "window spans ~24h", blockSeconds: 2.16, spanHours: 24 } });
+    expect(view.line2).not.toContain("window");
+  });
+
+  test("says SUSPECT when the window is not the window it claims to be", () => {
+    // A count from an 8h window held against a 24h ledger figure is two
+    // different questions rendered as one answer.
+    const view = payoutView({
+      ...base,
+      window: { status: "suspect", detail: "spans ~8.4h, not the 24h it is compared against", blockSeconds: 2.11, spanHours: 8.4 },
+    });
+    expect(view.line2).toContain("WINDOW SUSPECT");
+    expect(view.line2).toContain("8.4h");
+  });
+
+  test("says UNCHECKED rather than implying a pass", () => {
+    const view = payoutView({ ...base, window: { status: "unknown", detail: "block time not measured", blockSeconds: null, spanHours: null } });
+    expect(view.line2).toContain("UNCHECKED");
+  });
+
+  test("an older payload with no fit says nothing", () => {
+    expect(payoutView(base).line2).not.toContain("window");
+  });
+});
+
 describe("payoutView — the fee exclusion is explained on screen", () => {
   const base = {
     status: "confirmed" as const, detail: "ok",

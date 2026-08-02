@@ -17,6 +17,7 @@
 // deterministic to test — including the age phrasing.
 
 import type {
+  ExternalFunnelView,
   GasSpendView,
   MoneyPathSnapshot,
   PayoutEvidence,
@@ -501,6 +502,27 @@ export interface EvidenceView {
  * none occurred in the window. `feesSeparated: false` is NOT that case — it
  * means the count may still include fees, and saying so is the whole point.
  */
+/**
+ * Whether the window being compared is the window it claims to be.
+ *
+ * `decideWindowFit` has always computed this and the board has never shown it —
+ * so the one sentence that says whether to BELIEVE the comparison above lived
+ * only in JSON. A payout count from a window that does not span 24h, held
+ * against a 24h ledger figure, is two different questions rendered as one
+ * answer.
+ *
+ * Silent when the fit is `ok`: a window that matches needs no caption, and a
+ * permanent "~24h at 2.16s/block" is the kind of always-true text a reader
+ * stops seeing. Spoken when it is suspect or unchecked, which are the two cases
+ * where the numbers beside it deserve doubt.
+ */
+function windowNote(payout: PayoutEvidence): string {
+  const fit = payout.window;
+  if (!fit || fit.status === "ok") return "";
+  if (fit.status === "unknown") return " · window fit UNCHECKED — block time not measured";
+  return ` · WINDOW SUSPECT — ${fit.detail}`;
+}
+
 function feeNote(payout: PayoutEvidence): string {
   if (payout.feesSeparated === false) return " · fees not separated — count may include them";
   if (payout.feesSeparated !== true) return ""; // older payload, nothing claimed
@@ -531,7 +553,7 @@ export function payoutView(payout: PayoutEvidence | undefined): EvidenceView {
   const ledgerLine =
     payout.settledCount == null
       ? "settled count unavailable"
-      : `${payout.settledCount} marked settled by the monitor`;
+      : `${payout.settledCount} marked settled by the monitor${windowNote(payout)}`;
 
   if (payout.status === "shortfall") {
     const gap = payoutGap(payout);
@@ -750,6 +772,62 @@ export function payoutRunwayLine(input: {
   const tone: OpsTone = payouts <= 5 ? "degraded" : "awaiting";
   return {
     text: `PAYOUT RUNWAY ≈ ${payouts} more payout${payouts === 1 ? "" : "s"} · ${usable.toFixed(2)} USDC above floor · ${basis}${note}`,
+    tone,
+  };
+}
+
+// ── the one clock where doing nothing costs money ───────────────────────────
+
+/**
+ * The dispute countdown, surfaced whenever it is running.
+ *
+ * `external_funnel` is a probe like any other, so it sits eighth in a pillar
+ * footer — and it is the ONLY thing on this board where inaction has a price. A
+ * rejected submission opens a window; if it lapses unopened, the worker's bond
+ * is slashed. Nothing else here degrades by being ignored.
+ *
+ * The probe already escalates under 48h and takes halt severity under 12h, so
+ * urgency is handled. What was missing is VISIBILITY while the clock is still
+ * comfortable: at 60 hours the probe is correctly `ok` and the countdown is
+ * invisible, which is precisely when acting is cheapest.
+ *
+ * So this line appears whenever the bucket is non-zero and stays calm until the
+ * probe's own thresholds say otherwise. It does not invent a second severity
+ * ladder — a countdown shown twice in two different colours is how an operator
+ * learns to trust neither.
+ */
+export function disputeClockLine(
+  funnel: ExternalFunnelView | undefined,
+  nowMs: number,
+): { text: string; tone: OpsTone } | null {
+  const bucket = funnel?.buckets?.rejected_window_running;
+  // Nothing counting down. Return null rather than a row saying "0" — a line
+  // that is always present and almost always says nothing is a line nobody
+  // reads on the day it matters.
+  if (!bucket || bucket.count === 0) return null;
+
+  const job = bucket.leadJobId ? ` ${bucket.leadJobId.slice(0, 10)}…` : "";
+  const plural = bucket.count === 1 ? "" : "s";
+
+  if (bucket.oldestDeadlineMs == null) {
+    // Jobs are in the window but the deadline could not be read. That is an
+    // instrument fault and must NOT read as "no bond at risk".
+    return {
+      text: `DISPUTE CLOCK — ${bucket.count} bond${plural} in the window, deadline UNREADABLE${job}`,
+      tone: "degraded",
+    };
+  }
+
+  const msLeft = bucket.oldestDeadlineMs - nowMs;
+  if (msLeft <= 0) {
+    return { text: `DISPUTE CLOCK — window LAPSED${job} · bond slashable now`, tone: "red" };
+  }
+  const hours = msLeft / 3_600_000;
+  const left = hours < 1 ? `${Math.max(1, Math.round(hours * 60))}m` : hours < 48 ? `${Math.round(hours)}h` : `${Math.round(hours / 24)}d`;
+  // Tone mirrors the probe's own thresholds rather than inventing new ones.
+  const tone: OpsTone = hours <= 12 ? "red" : hours <= 48 ? "degraded" : "awaiting";
+  return {
+    text: `DISPUTE CLOCK — ${bucket.count} bond${plural} in the window · slashes in ${left}${job}`,
     tone,
   };
 }
