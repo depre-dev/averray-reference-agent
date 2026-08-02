@@ -1,6 +1,12 @@
 /**
  * Decide whether a drift check should announce anything.
  *
+ * Shared by both of this service's checks — the skills volume against the repo,
+ * and the consumers' MCP tool registries against the published bundle
+ * (bundle-drift.ts). Each keeps its own state; the three failure modes below
+ * are identical for both, and having two copies of this reasoning is how one of
+ * them quietly stops obeying it.
+ *
  * Logging every result is free and always truthful; a Slack message is not, and
  * three ways of getting this wrong all end with the alert being worthless:
  *

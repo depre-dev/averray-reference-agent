@@ -22,10 +22,13 @@ packages/
   mcp-common/  schemas/
 services/
   slack-operator/   ← serves the live /monitor board, the Codex task queue + runner, testbed mission runner
-  skills-observer/  ← sidecar ingesting Hermes skill files, and reporting when the
-                      skills volume stops matching the repo. Also holds `skills-sync`
-                      (dist/sync.js), the one-shot that copies hermes/skills/** into
-                      the avg-hermes-skills volume before Hermes starts.
+  skills-observer/  ← sidecar ingesting Hermes skill files, and reporting when either
+                      of the agent's two volumes stops matching what shipped: the
+                      skills tree vs the repo, and the consumers' MCP tool registries
+                      vs the published bundle (src/bundle-drift.ts). Also holds
+                      `skills-sync` (dist/sync.js), the one-shot that copies
+                      hermes/skills/** into the avg-hermes-skills volume before
+                      Hermes starts.
 ops/                ← Docker compose stack (base, prod, command-center, cloudflare-access)
 hermes/             ← Hermes config (hermes.yaml, policy.yaml), trace plugin, and
                       skills/ — the source of truth for what the agent loads
@@ -106,6 +109,14 @@ Two existing guardrail layers, **both about job/mission execution, neither about
 operator_command | testbed_e2e_read_only | testbed_suite | testbed_case
 | pr_code_review | pr_handoff | post_deploy_verification
 ```
+
+**⚠ KEY FINDING — shipping a tool is not the same as the agent having it.** The MCP servers do not live in any consumer's image. They live in the **`avg-app` volume**, which the `mcp-bundle` service rewrites (`rm -rf` + `cp -a`) on every deploy, and which `hermes` (`ops/compose.yml`) and `hermes-gateway` (`ops/compose.command-center.yml`) mount read-only at `/app`. **An MCP client registers its tool list once, at process startup.** So a deploy that ships a new tool leaves every consumer that was not restarted advertising the previous list — with nothing erroring. Worse, because the rewrite unlinks the old files, a consumer that later respawns an MCP subprocess gets *new* code behind an *old* registration.
+
+This bit twice on 2026-08-02 with `averray_board_health` (#657): `hermes` picked it up only because someone restarted it by hand; `hermes-gateway`, up nine hours, did not, so the Buzz inbound listener answered an operator's health question from `averray_ops_health` (the Postgres control plane, **not** the board) and reported "No issues on the board" having never read the board. It surfaced only because #666 made the prompt name the tool. Same class as the skills volume in #664.
+
+Two mechanisms now cover it, and **neither is allowed to fail quietly**:
+- `ops/deploy-monitor.sh` restarts every running consumer of the volume after republishing it, discovered with `docker ps --filter volume=avg_avg-app` — deliberately a *runtime* lookup, because `hermes-gateway` is behind `--profile command-center` and a Compose-level restart would silently miss it (and miss the next profiled consumer too). It restarts only when the bundle's id actually changed, and warns loudly when it restarts nothing.
+- Each MCP server process stamps which bundle it loaded (`packages/mcp-common/src/bundle-registry.ts`); `skills-observer` compares those stamps against the volume and reports a mismatch to Slack. Absence of stamps reads as **unknown**, never as agreement.
 
 **⚠ KEY FINDING.** There is **no dispatch/enqueue intent** — `invoke_agent_task` only reviews and tests. Today Hermes literally **cannot enqueue a worker task through MCP**; tasks enter only via the monitor HTTP endpoint (Q2). So Rung B/C requires either a **new intent** (e.g. `enqueue_agent_task`) or a Hermes path to the `POST /monitor/codex-tasks` endpoint — gated by the new guardrail from Q4.
 
