@@ -47,6 +47,26 @@ services:
       - avg-hermes-skills:/opt/data/skills
     networks: [avg-internal]
 
+  # Publishes the built monorepo into the avg-app volume, which is where the
+  # five MCP servers actually live. `hermes` and `hermes-gateway` mount it
+  # read-only at /app and spawn the servers from it.
+  #
+  # THE COPY IS NOT THE DELIVERY. An MCP client registers its tool list once,
+  # at process startup, so rewriting this volume under a consumer that keeps
+  # running changes the files and not the tool surface — the consumer keeps
+  # advertising the previous list, and nothing errors. Worse, the rewrite is an
+  # `rm -rf` + `cp -a`: a consumer that later respawns an MCP subprocess gets
+  # NEW code behind an OLD registration, so the running system is not "safely
+  # stale", it is undefined.
+  #
+  # This bit twice on 2026-08-02. `averray_board_health` (#657) shipped while
+  # hermes-gateway had been up nine hours; the gateway never saw the tool, so
+  # the Buzz listener answered an operator's question about system health from
+  # `averray_ops_health` — the Postgres control plane, explicitly not the board
+  # — and said "No issues on the board" having never read the board.
+  #
+  # So the copy stamps its own identity, and ops/deploy-monitor.sh restarts
+  # every consumer whose stamp it changed. See .mcp-bundle-id below.
   mcp-bundle:
     build:
       context: ..
@@ -63,12 +83,38 @@ services:
       hermes-permissions:
         condition: service_completed_successfully
     user: root
+    # `$$` keeps these for the container's shell — a single `$` would be
+    # substituted by Compose from the HOST environment, where AVERRAY_GIT_SHA
+    # is not set and the stamp would silently read "sha:".
     command:
-      [
-        "/bin/sh",
-        "-lc",
-        "rm -rf /runtime-app/* && cp -a /app/. /runtime-app/ && chmod -R a+rX /runtime-app"
-      ]
+      - /bin/sh
+      - -lc
+      - |
+        set -e
+        rm -rf /runtime-app/*
+        cp -a /app/. /runtime-app/
+        # WHAT THE STAMP HAS TO MEAN: "consumers loaded from a copy carrying a
+        # different id are stale." So it may only be stable across two copies
+        # when their CONTENTS are provably identical.
+        #
+        # A clean build is exactly that case — the tree is the commit — so it
+        # identifies by sha, and re-running a deploy at the same sha therefore
+        # leaves Hermes alone instead of bouncing the agent for nothing.
+        #
+        # A dirty or unstamped build is the case where the sha is a lie: the
+        # image is HEAD plus edits nobody can see. It cannot claim identity
+        # with anything, so every copy gets a fresh id and every consumer is
+        # restarted. Truthfully pessimistic beats cheaply wrong.
+        if [ "$$AVERRAY_GIT_DIRTY" = false ] && [ "$$AVERRAY_GIT_SHA" != unknown ]; then
+          BUNDLE_ID="sha:$$AVERRAY_GIT_SHA"
+        elif [ "$$AVERRAY_GIT_SHA" != unknown ]; then
+          BUNDLE_ID="dirty:$$AVERRAY_GIT_SHA@$$(date -u +%Y%m%dT%H%M%SZ)"
+        else
+          BUNDLE_ID="unknown:@$$(date -u +%Y%m%dT%H%M%SZ)"
+        fi
+        printf '%s\n' "$$BUNDLE_ID" > /runtime-app/.mcp-bundle-id
+        chmod -R a+rX /runtime-app
+        echo "mcp bundle published: $$BUNDLE_ID"
     volumes:
       - avg-app:/runtime-app
     networks: [avg-internal]
@@ -180,6 +226,11 @@ services:
     depends_on:
       hermes-permissions:
         condition: service_completed_successfully
+      # So the bundle stamp exists before the first check looks for it. Without
+      # this the observer's opening verdict on a cold box is UNKNOWN, which is
+      # true but is an alert nobody needed.
+      mcp-bundle:
+        condition: service_completed_successfully
     command: ["node", "services/skills-observer/dist/index.js"]
     environment:
       DATABASE_URL: ${DATABASE_URL}
@@ -188,12 +239,21 @@ services:
       # volume stops matching git. skills-sync makes the copy right; this makes
       # a later divergence visible instead of silent.
       REPO_SKILLS_DIR: /repo-skills
+      # The published MCP bundle and the stamps its consumers leave behind. See
+      # the second half of this service's job in src/bundle-drift.ts.
+      MCP_BUNDLE_DIR: /bundle
+      MCP_BUNDLE_REGISTRY_DIR: /data/mcp-bundle-registry
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - avg-hermes:/opt/data:ro
       - avg-hermes-skills:/hermes-skills:ro
       - ../hermes/skills:/repo-skills:ro
+      # Read-only on both: this service reports, it never repairs. The bundle is
+      # what mcp-bundle published; the registry is what the consumers' own MCP
+      # server processes recorded about which copy they started from.
+      - avg-app:/bundle:ro
+      - avg-data:/data:ro
     networks: [avg-internal]
 
   slack-operator:

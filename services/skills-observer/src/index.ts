@@ -4,6 +4,14 @@ import chokidar from "chokidar";
 import { logger, optionalEnv, query, sha256Text } from "@avg/mcp-common";
 import { describeWatchError } from "./watch-error.js";
 import { decideDriftAlert, initialDriftAlertState } from "./drift-alert.js";
+import {
+  compareBundle,
+  describeBundleObservation,
+  readMcpProcessRegistry,
+  readPublishedBundleId,
+  type BundleObservation,
+  type RegistryReading
+} from "./bundle-drift.js";
 import { errorCode } from "./skills-sync.js";
 import {
   describeDrift,
@@ -17,6 +25,8 @@ import {
 
 const skillsDir = optionalEnv("HERMES_SKILLS_DIR", "/opt/data/skills");
 const repoSkillsDir = optionalEnv("REPO_SKILLS_DIR", "/repo-skills");
+const bundleDir = optionalEnv("MCP_BUNDLE_DIR", "/bundle");
+const bundleRegistryDir = optionalEnv("MCP_BUNDLE_REGISTRY_DIR", "/data/mcp-bundle-registry");
 const slackWebhookUrl = optionalEnv("SLACK_WEBHOOK_URL");
 const watchRetryMs = Number(optionalEnv("SKILLS_OBSERVER_WATCH_RETRY_MS", "30000"));
 const driftCheckMs = Number(optionalEnv("SKILLS_DRIFT_CHECK_MS", "900000"));
@@ -249,9 +259,128 @@ async function checkDrift(): Promise<void> {
   });
 }
 
+/**
+ * Report when a running consumer's MCP tool registry is older than the bundle.
+ *
+ * Second, unrelated volume; same shape of bug, and the same reason it lives
+ * here. `avg-app` is rewritten on every deploy, but an MCP client registers its
+ * tool list once at process startup, so a consumer that is not restarted keeps
+ * answering from the previous tool list with nothing erroring — which is how
+ * hermes-gateway came to answer a health question from the wrong tool on
+ * 2026-08-02. ops/deploy-monitor.sh restarts the consumers; this catches every
+ * path that is not that script.
+ *
+ * The name of this service predates the second check. It is still the right
+ * home: long-running, already holds the Slack route and the alert state
+ * machine, and mounts both sides read-only. It repairs neither.
+ */
+let bundleAlertState = initialDriftAlertState;
+
+/**
+ * Never throws. Anything that stops the comparison from being made comes back
+ * as `unknown` rather than as an exception, because an exception here would
+ * reject driftLoop's promise and take the process down — and a crash loop
+ * resets both state machines, whose first pass deliberately only observes. A
+ * fast enough loop would then never reach a pass that announces, and drift
+ * would go unreported while looking merely flaky.
+ */
+async function observeBundle(): Promise<{
+  observation: BundleObservation;
+  publishedBundleId: string | undefined;
+}> {
+  let publishedBundleId: string | undefined;
+  try {
+    publishedBundleId = await readPublishedBundleId(bundleDir);
+    let reading: RegistryReading = { live: [], unreadable: [] };
+    try {
+      reading = await readMcpProcessRegistry(bundleRegistryDir, Date.now());
+    } catch (error) {
+      // An absent registry directory is not a failure to look — it is nobody
+      // having recorded anything yet, which compareBundle already words
+      // honestly. Anything else means the check itself could not run.
+      if (errorCode(error) !== "ENOENT") throw error;
+    }
+    return { observation: compareBundle(publishedBundleId, reading), publishedBundleId };
+  } catch (error) {
+    logger.warn({ err: error, bundleDir, bundleRegistryDir }, "mcp_bundle_check_failed");
+    return {
+      observation: {
+        kind: "unknown",
+        reason:
+          "the MCP process registry could not be read, so which bundle the consumers loaded is unknown"
+      },
+      publishedBundleId
+    };
+  }
+}
+
+async function checkBundleDrift(): Promise<void> {
+  const { observation, publishedBundleId } = await observeBundle();
+  const live = observation.kind === "unknown" ? [] : observation.live;
+  const description = describeBundleObservation(observation, publishedBundleId);
+
+  const decision = decideDriftAlert(
+    bundleAlertState,
+    observation.kind === "current"
+      ? { kind: "in-sync" }
+      : observation.kind === "stale"
+        ? { kind: "drifted", signature: observation.signature }
+        : { kind: "unavailable" }
+  );
+  bundleAlertState = decision.state;
+
+  if (observation.kind === "current") {
+    logger.info({ bundleId: publishedBundleId, live: live.length }, "mcp_bundle_current");
+    if (decision.announce === "recovery") {
+      await postSlack({ text: `MCP tool registries are back in sync with the bundle: ${description}.` });
+    }
+    return;
+  }
+
+  if (observation.kind === "unknown") {
+    logger.warn({ bundleDir, bundleRegistryDir }, `mcp_bundle_check_unavailable: ${description}`);
+    if (decision.announce === "unavailable") {
+      await postSlack({
+        text:
+          `Cannot tell whether the running agent's MCP tool list matches the deployed bundle — ${description}. ` +
+          "Until this reads again, a tool shipped by a deploy may be invisible to the agent with nothing erroring."
+      });
+    }
+    return;
+  }
+
+  // Logged on every check whether or not it is announced, so the condition is
+  // always recoverable from the logs.
+  logger.error(
+    { stale: observation.stale.map((entry) => ({ host: entry.host, entry: entry.entry, bundleId: entry.bundleId })) },
+    `mcp_bundle_stale: ${description}. Those processes registered their tool list at startup and ` +
+      "have not restarted since, so tools shipped by later deploys are invisible to them. Restart " +
+      "the consumers: `ops/deploy-monitor.sh` does it, or `docker restart <container>`."
+  );
+  if (decision.announce !== "drift") return;
+  await postSlack({
+    text: `MCP tool registry is stale: ${description}`,
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text:
+            `*MCP tool registry is stale*\n${description}\n\n` +
+            "An MCP client registers its tool list once, at startup. Those processes are serving " +
+            "the list from an older bundle, so a tool shipped since then does not exist as far as " +
+            "the agent is concerned — and it will answer from whatever tool it *does* have.\n" +
+            "Restart the consumers: `ops/deploy-monitor.sh` does this, or `docker restart <container>`."
+        }
+      }
+    ]
+  });
+}
+
 async function driftLoop(): Promise<void> {
   const settling = !driftAlertState.settled;
   await checkDrift();
+  await checkBundleDrift();
   // The first pass only observes (skills-sync may still be copying), so follow
   // it up quickly rather than a full interval later — otherwise a divergence
   // that is real goes unannounced for the whole period.
