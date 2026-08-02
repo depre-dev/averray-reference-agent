@@ -825,11 +825,17 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       // an unreachable relay does not mean the money path is broken.
       buzz: (() => {
         const cfg = readBuzzConfig();
+        // The inbound listener holds a live socket to the same relay on the same
+        // credentials, so it can DISPROVE a stale connect/auth failure that
+        // nothing has retried since. `undefined` when no listener is running —
+        // no evidence either way, which is not the same as "not reachable".
+        const phase = buzzInbound.subscription?.state().phase;
         return describeBuzzDelivery({
           configured: cfg.config !== null,
           problem: cfg.config === null ? (cfg as { problem: string | null }).problem : null,
           state: buzzDeliveryState,
           nowMs: Date.now(),
+          ...(phase === undefined ? {} : { relayReachableNow: phase === "listening" }),
         });
       })(),
       ...(productHealthSnapshotBlocks ?? {}),
