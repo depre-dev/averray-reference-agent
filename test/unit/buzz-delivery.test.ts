@@ -75,6 +75,95 @@ describe("describeBuzzDelivery", () => {
   });
 });
 
+describe("a past failure stops being a claim about now", () => {
+  const HOUR = 60 * MIN;
+
+  it("the listener DISPROVES a stale connect failure", () => {
+    // The inbound listener holds a socket to the same relay on the same key and
+    // NIP-OA tag. While it reports listening, "connect-failed 5h ago" is a fact
+    // about the past, and asserting it as current is a fake red — which costs
+    // exactly what a fake green costs: the row gets scrolled past.
+    const r = describe_({
+      state: { lastFailureAt: NOW - 5 * HOUR, lastFailureReason: "connect-failed" },
+      relayReachableNow: true,
+    });
+    expect(r.status).toBe("armed");
+    expect(r.detail).toContain("relay reachable now");
+    expect(r.detail).toContain("nothing delivered since");
+  });
+
+  it("lands on ARMED, never ok — nothing has actually been delivered", () => {
+    // The distinction that matters: the relay being reachable is not a
+    // delivery. `armed` renders grey and reads "#ops untested", not green.
+    const r = describe_({
+      state: { lastFailureAt: NOW - 5 * HOUR, lastFailureReason: "timeout" },
+      relayReachableNow: true,
+    });
+    expect(r.status).not.toBe("ok");
+    expect(r.status).toBe("armed");
+  });
+
+  it("does NOT clear a publish-rejection, which the listener cannot speak to", () => {
+    // THE LINE THAT MATTERS. A reachable relay disproves connect/auth/timeout.
+    // `publish-rejected` means the relay accepted our auth and refused the
+    // MESSAGE — a healthy listener says nothing about that, so clearing it
+    // would be inventing evidence.
+    const r = describe_({
+      state: { lastFailureAt: NOW - 5 * HOUR, lastFailureReason: "publish-rejected" },
+      relayReachableNow: true,
+    });
+    expect(r.status).toBe("failing");
+    expect(r.detail).toContain("publish-rejected");
+  });
+
+  it("keeps FAILING while the listener agrees the relay is unreachable", () => {
+    // The four-hour outage: the row read FAILING throughout and that was
+    // correct and useful. Nothing here may weaken that case.
+    const r = describe_({
+      state: { lastFailureAt: NOW - 3 * HOUR, lastFailureReason: "connect-failed" },
+      relayReachableNow: false,
+    });
+    expect(r.status).toBe("failing");
+  });
+
+  it("ages an untested failure into UNKNOWN when nobody is listening", () => {
+    // Deliveries are edge-triggered, so hours pass between attempts. After long
+    // enough with no retry we do not know it is failing — only that it failed
+    // once and was never tried again. Say the unknown out loud.
+    const r = describe_({
+      state: { lastFailureAt: NOW - 7 * HOUR, lastFailureReason: "connect-failed" },
+    });
+    expect(r.status).toBe("armed");
+    expect(r.detail).toContain("untested since");
+    expect(r.detail).toContain("UNKNOWN");
+  });
+
+  it("still reports a RECENT failure as failing with no listener", () => {
+    const r = describe_({
+      state: { lastFailureAt: NOW - 2 * HOUR, lastFailureReason: "connect-failed" },
+    });
+    expect(r.status).toBe("failing");
+    expect(r.detail).toContain("FAILING");
+  });
+
+  it("treats no-listener as no evidence, not as unreachable", () => {
+    // `undefined` and `false` must not collapse: one is "we did not look", the
+    // other is "we looked and it is down". A recent failure with no listener
+    // stays failing rather than being cleared by absent evidence.
+    const recent = { lastFailureAt: NOW - 10 * MIN, lastFailureReason: "connect-failed" };
+    expect(describe_({ state: recent }).status).toBe("failing");
+    expect(describe_({ state: recent, relayReachableNow: false }).status).toBe("failing");
+    expect(describe_({ state: recent, relayReachableNow: true }).status).toBe("armed");
+  });
+
+  it("notes reachability even when nothing was ever sent", () => {
+    const r = describe_({ relayReachableNow: true });
+    expect(r.status).toBe("armed");
+    expect(r.detail).toContain("relay reachable");
+    expect(r.detail).toContain("nothing delivered yet");
+  });
+});
+
 describe("recordBuzzDelivery", () => {
   it("keeps the last success and the last failure independently", () => {
     let state = recordBuzzDelivery({}, { ok: true, atMs: NOW - 10 * MIN });

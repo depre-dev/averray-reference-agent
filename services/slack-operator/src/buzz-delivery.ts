@@ -37,6 +37,36 @@ export interface BuzzDeliveryState {
   lastFailureDetail?: string;
 }
 
+/**
+ * After this long with no fresh attempt, a past failure stops being a claim
+ * about NOW.
+ *
+ * Deliveries are edge-triggered — narration speaks when the verdict crosses,
+ * probe alerts when a probe does — so hours can pass between attempts, and the
+ * row would otherwise keep asserting FAILING long after the relay recovered.
+ * That is a fake red, and this codebase treats one as costing exactly what a
+ * fake green costs: the operator learns to scroll past the row, and the next
+ * real failure is invisible.
+ *
+ * Six hours is deliberately generous. The one real outage so far ran four hours
+ * and reading FAILING throughout was correct and useful.
+ */
+export const FAILURE_GOES_STALE_AFTER_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Failures the inbound listener can DISPROVE.
+ *
+ * The listener holds a persistent socket to the same relay, authenticated with
+ * the same key and the same NIP-OA tag. So while it reports `listening`, the
+ * relay is reachable and those credentials are accepted — which contradicts a
+ * stored connect/auth/timeout failure directly.
+ *
+ * `publish-rejected` is NOT in this set, and that is the important part: the
+ * relay accepted our auth and refused the message itself. A healthy listener
+ * says nothing about that, so it must not clear it.
+ */
+const LISTENER_DISPROVABLE = new Set(["connect-failed", "auth-rejected", "timeout"]);
+
 function ago(fromMs: number, nowMs: number): string {
   const mins = Math.max(0, Math.round((nowMs - fromMs) / 60_000));
   if (mins < 1) return "just now";
@@ -58,6 +88,14 @@ export function describeBuzzDelivery(input: {
   problem?: string | null;
   state: BuzzDeliveryState;
   nowMs: number;
+  /**
+   * Is the relay reachable RIGHT NOW, per the inbound listener's live socket?
+   *
+   * `undefined` means nobody is listening and there is no live evidence either
+   * way — which is different from `false` (we looked, it is not reachable) and
+   * must not be collapsed into it.
+   */
+  relayReachableNow?: boolean;
 }): BuzzDelivery {
   const { state, nowMs } = input;
 
@@ -83,11 +121,42 @@ export function describeBuzzDelivery(input: {
   if (failedAt !== undefined && (okAt === undefined || failedAt >= okAt)) {
     const reason = state.lastFailureReason ? `${state.lastFailureReason}` : "unknown reason";
     const since = okAt === undefined ? "never delivered" : `last delivered ${ago(okAt, nowMs)}`;
+    const carry = {
+      lastFailureAt: failedAt,
+      ...(okAt !== undefined ? { lastOkAt: okAt } : {}),
+    };
+
+    // The listener disproves it. Its socket is open to the same relay on the
+    // same credentials, so a stored connect/auth/timeout failure is a fact
+    // about the past, not a claim about now.
+    //
+    // `armed` rather than `ok` is the honest landing: nothing has actually been
+    // published since the failure, so the delivery path itself is untested —
+    // which is exactly what armed has always meant here. It renders grey and
+    // reads "#ops untested", not green.
+    if (input.relayReachableNow === true && LISTENER_DISPROVABLE.has(reason)) {
+      return {
+        status: "armed",
+        detail: `last attempt failed ${ago(failedAt, nowMs)} (${reason}) — relay reachable now · nothing delivered since`,
+        ...carry,
+      };
+    }
+
+    // Nobody has tried in a long time. We do not know that it is failing; we
+    // know it failed once and was never retried. Say the unknown out loud
+    // instead of asserting a red we cannot currently support.
+    if (input.relayReachableNow === undefined && nowMs - failedAt > FAILURE_GOES_STALE_AFTER_MS) {
+      return {
+        status: "armed",
+        detail: `last attempt failed ${ago(failedAt, nowMs)} (${reason}) · untested since — delivery is UNKNOWN`,
+        ...carry,
+      };
+    }
+
     return {
       status: "failing",
       detail: `FAILING ${ago(failedAt, nowMs)} — ${reason} · ${since}`,
-      lastFailureAt: failedAt,
-      ...(okAt !== undefined ? { lastOkAt: okAt } : {}),
+      ...carry,
     };
   }
 
@@ -96,6 +165,11 @@ export function describeBuzzDelivery(input: {
   }
 
   // Configured, credentials loaded, nothing ever sent. NOT ok — see the header.
+  // A listening socket proves the relay accepts these credentials, which is
+  // worth saying, but it is still not a delivery.
+  if (input.relayReachableNow === true) {
+    return { status: "armed", detail: "armed · relay reachable, nothing delivered yet" };
+  }
   return { status: "armed", detail: "armed · nothing delivered yet" };
 }
 
