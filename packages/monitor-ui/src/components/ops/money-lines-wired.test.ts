@@ -7,46 +7,63 @@ import { describe, expect, it } from "vitest";
 import { MONEY_LINE_RENDERERS } from "../../lib/monitor/ops-spec.js";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
-/** Every ops component, since each fact now lives beside its subject rather
- *  than in one strip — a renderer may legitimately be called from any of them. */
-const board = ["OpsBoard.tsx", "SolvencyPanel.tsx", "FlowPanel.tsx"]
+const desktop = ["OpsBoard.tsx", "SolvencyPanel.tsx", "FlowPanel.tsx"]
   .map((f) => fs.readFileSync(path.join(dir, f), "utf8"))
   .join("\n");
-/** The phone is a SEPARATE surface with its own components — a fact wired into
- *  the desktop and not the phone is still invisible to an operator who is away
- *  from the desk, which is when they need it most. */
 const phone = fs.readFileSync(path.join(dir, "..", "mobile", "MobileBoard.tsx"), "utf8");
 
 /**
- * THE REGRESSION, and it happened four times in one session.
+ * Renderers that are DELIBERATELY desktop-only, each with the reason.
  *
- * gasLine, economicsLine, payoutRunwayLine and disputeClockLine were each
- * written, unit-tested, reviewed and merged — and called by no component. The
- * tests passed because they invoked the functions directly. The board showed
- * nothing, twice, and the operator had to say "nothing new added on the board"
- * before anyone noticed.
- *
- * A view model nobody renders is dead code that looks like a feature. This makes
- * that a failing build.
+ * Empty on purpose. Every fact currently on the board is one an operator might
+ * need while away from their desk, so none has earned an exemption. Adding a
+ * name here is a decision that has to be argued in the diff, which is the point
+ * — the previous state was that desktop-only happened silently, by forgetting.
  */
-describe("every money line is actually rendered", () => {
+const DESKTOP_ONLY: Record<string, string> = {};
+
+/**
+ * THE REGRESSION, twice.
+ *
+ * First: four renderers were written, tested, reviewed and merged while being
+ * called by no component at all. The unit tests passed because they invoked the
+ * functions directly — exactly what a component was not doing.
+ *
+ * Then, after that was fixed: three of the five were wired to the DESKTOP only.
+ * The two that reached the phone were the two added after the operator pointed
+ * out that design work kept skipping it. The guard at the time asserted the
+ * phone for only those two — the hole was in the same place as the blind spot.
+ *
+ * A fact on one surface is missing precisely when the operator is not at their
+ * machine, which is when a dispute countdown or a floor breach matters most. So
+ * both surfaces are required by default and an exemption must be declared.
+ */
+describe("every money line reaches BOTH surfaces", () => {
   for (const fn of MONEY_LINE_RENDERERS) {
-    it(`OpsBoard calls ${fn}`, () => {
-      expect(board, `${fn} is exported and tested but no component calls it`).toContain(`${fn}(`);
+    it(`desktop renders ${fn}`, () => {
+      expect(desktop, `${fn} is exported and tested but no desktop component calls it`).toContain(`${fn}(`);
     });
+
+    const reason = DESKTOP_ONLY[fn];
+    if (reason) {
+      it(`${fn} is desktop-only on purpose — ${reason}`, () => {
+        expect(phone).not.toContain(`${fn}(`);
+      });
+    } else {
+      it(`phone renders ${fn}`, () => {
+        expect(
+          phone,
+          `${fn} is on the desktop board and not the phone. Wire it, or add it to DESKTOP_ONLY with a reason.`,
+        ).toContain(`${fn}(`);
+      });
+    }
   }
 
-  for (const fn of ["lifecycleNote", "disputeClockLine"] as const) {
-    it(`the PHONE board also calls ${fn}`, () => {
-      // Both are time-critical: a dispute clock and a latency figure are exactly
-      // what gets checked from a phone, away from the desk.
-      expect(phone, `${fn} is on the desktop board but not the phone`).toContain(`${fn}(`);
-    });
-  }
-
-  it("imports them from ops-spec rather than redefining them", () => {
-    // A local reimplementation would satisfy the check above while drifting from
-    // the tested one — the same two-verdict-systems problem the board forbids.
-    expect(board).toContain('from "../../lib/monitor/ops-spec.js"');
+  it("both surfaces import from ops-spec rather than reimplementing", () => {
+    // A local copy would satisfy the checks above while drifting from the tested
+    // one — the two-verdict-systems problem the board forbids everywhere else.
+    for (const [name, src] of [["desktop", desktop], ["phone", phone]] as const) {
+      expect(src, `${name} should import the shared renderers`).toContain("lib/monitor/ops-spec.js");
+    }
   });
 });

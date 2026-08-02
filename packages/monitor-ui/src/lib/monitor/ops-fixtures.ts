@@ -73,6 +73,32 @@ const AWAITING_TREASURY: ProductHealthProbe = {
 
 // ── today's reality — structured blocks absent → the money zones await data ──
 export const OPS_FIXTURE_LIVE: ProductHealth = {
+  // Gas attribution, job lifecycle and the inbound listener, at REAL mainnet
+  // magnitudes (2026-08-02). The fixture carries them so the DENSE case is what
+  // gets reviewed — a preview that only ever shows the sparse path is how a
+  // layout passes review and then fails on the operator's actual screen.
+  gas: {
+    totalDot: 2.0497,
+    txCount: 103,
+    perSettlement: 0.0976,
+    buckets: [
+      { label: "resolveSinglePayout", count: 21, dot: 0.866, avgDot: 0.0412, sharePct: 42.2, failed: 0 },
+      { label: "createSinglePayoutJobFeeWaived", count: 20, dot: 0.675, avgDot: 0.0338, sharePct: 32.9, failed: 0 },
+      { label: "claimJobFor", count: 21, dot: 0.3113, avgDot: 0.0148, sharePct: 15.2, failed: 0 },
+    ],
+    failedDot: 0,
+    failedCount: 0,
+    ageMs: 12 * 60_000,
+    truncated: false,
+    otherSenders: [{ address: "0x089a0a57d001bacb8473161e007f0babc1768cee", count: 4 }],
+  },
+  lifecycle: {
+    selfPosted: { count: 16, medianSeconds: 19, slowestSeconds: 41 },
+    external: { count: 2, medianSeconds: 8040, slowestSeconds: 71280 },
+    externalPct: 11,
+    unmeasurable: 3,
+  },
+  buzzInbound: { phase: "listening", detail: "subscribed to channel 8aed98d2", failures: 0 },
   enabled: true,
   at: FIXTURE_NOW - 24_000,
   status: "degraded",

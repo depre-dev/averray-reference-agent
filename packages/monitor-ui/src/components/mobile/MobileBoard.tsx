@@ -30,7 +30,14 @@ import {
   pillarRollups,
   type BreachCard,
 } from "../../lib/monitor/phone-spec.js";
-import { disputeClockLine, lifecycleNote } from "../../lib/monitor/ops-spec.js";
+import {
+  disputeClockLine,
+  economicsLine,
+  gasPoolNote,
+  gasUnreadableNote,
+  lifecycleNote,
+  payoutRunwayNote,
+} from "../../lib/monitor/ops-spec.js";
 
 export interface MobileBoardProps {
   health?: ProductHealth;
@@ -209,7 +216,17 @@ function BreachPanel({ breach }: { breach: BreachCard }) {
 }
 
 /** Check-in: the three floored meters, then every unfloored pool on ONE line. */
+/** Gas note, or the reason there is none — an unreadable read is a sentence. */
+function phoneGasNote(gas: ProductHealth["gas"] | { unreadable: true; reason: string } | undefined) {
+  if (!gas) return null;
+  if ("unreadable" in gas) return gasUnreadableNote(gas.reason);
+  return gasPoolNote(gas);
+}
+
 function SolvencyPanel({ health }: { health: ProductHealth }) {
+  const gas = health.gas;
+  const payout = health.flow?.payout;
+  const runwayNote = health.solvency?.runwayNote;
   const { floored, unfloored } = splitPools(health.solvency?.pools ?? []);
   if (floored.length === 0 && unfloored.length === 0) {
     return <p className="hm-ph-awaiting">awaiting balances — /health has not reported pools yet</p>;
@@ -221,7 +238,18 @@ function SolvencyPanel({ health }: { health: ProductHealth }) {
         <span>absolute · floor = tick</span>
       </div>
 
-      {floored.map((view) => (
+      {floored.map((view) => {
+        // The SAME footnotes the desktop shows under each meter. They were
+        // desktop-only until this: gas burn and payouts-remaining are exactly
+        // what gets checked away from the desk, and a fact on one surface only
+        // is missing precisely when the operator is not at their machine.
+        const note =
+          view.pool.key === "signer_gas"
+            ? phoneGasNote(gas)
+            : view.pool.key === "reward_bank"
+              ? payoutRunwayNote({ pool: view.pool, payout, runwayNote })
+              : null;
+        return (
         <div className="hm-ph-pool" key={view.pool.key} data-testid={`mobile-pool-${view.pool.key}`}>
           <div className="hm-ph-pool-top">
             <strong>{view.pool.label.toUpperCase()}</strong>
@@ -245,8 +273,14 @@ function SolvencyPanel({ health }: { health: ProductHealth }) {
               {view.pool.addressLabel ? <em>{view.pool.addressLabel}</em> : null}
             </div>
           ) : null}
+          {note ? (
+            <p className="hm-ph-pool-note" data-tone={note.tone} data-testid={`mobile-pool-note-${view.pool.key}`}>
+              {note.text}
+            </p>
+          ) : null}
         </div>
-      ))}
+        );
+      })}
 
       {/* On desktop "a meter needs a scale" means these pools get no BAR. On a
           phone the same rule costs them their rows: one grey line, because
@@ -275,6 +309,7 @@ function FlowPanel({ health, emphasise, nowMs }: { health: ProductHealth; emphas
   const evidence = payoutView(health.flow?.payout);
   const timing = lifecycleNote(health.lifecycle);
   const clock = disputeClockLine(health.externalFunnel, nowMs);
+  const economics = economicsLine({ payout: health.flow?.payout, gas: health.gas });
   return (
     <section
       className={`hm-ph-card${evidence.emphasised || emphasise ? " hm-ph-card--red" : ""}`}
@@ -303,6 +338,11 @@ function FlowPanel({ health, emphasise, nowMs }: { health: ProductHealth; emphas
         {clock ? (
           <span data-tone={clock.tone} data-testid="mobile-dispute-clock">
             ⏳ {clock.text}
+          </span>
+        ) : null}
+        {economics ? (
+          <span className="hm-ph-quiet" data-testid="mobile-economics" title={economics.title}>
+            {economics.text}
           </span>
         ) : null}
       </div>
