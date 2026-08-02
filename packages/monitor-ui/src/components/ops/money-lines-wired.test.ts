@@ -12,6 +12,10 @@ const dir = path.dirname(fileURLToPath(import.meta.url));
 const board = ["OpsBoard.tsx", "SolvencyPanel.tsx", "FlowPanel.tsx"]
   .map((f) => fs.readFileSync(path.join(dir, f), "utf8"))
   .join("\n");
+/** The phone is a SEPARATE surface with its own components — a fact wired into
+ *  the desktop and not the phone is still invisible to an operator who is away
+ *  from the desk, which is when they need it most. */
+const phone = fs.readFileSync(path.join(dir, "..", "mobile", "MobileBoard.tsx"), "utf8");
 
 /**
  * THE REGRESSION, and it happened four times in one session.
@@ -29,6 +33,14 @@ describe("every money line is actually rendered", () => {
   for (const fn of MONEY_LINE_RENDERERS) {
     it(`OpsBoard calls ${fn}`, () => {
       expect(board, `${fn} is exported and tested but no component calls it`).toContain(`${fn}(`);
+    });
+  }
+
+  for (const fn of ["lifecycleNote", "disputeClockLine"] as const) {
+    it(`the PHONE board also calls ${fn}`, () => {
+      // Both are time-critical: a dispute clock and a latency figure are exactly
+      // what gets checked from a phone, away from the desk.
+      expect(phone, `${fn} is on the desktop board but not the phone`).toContain(`${fn}(`);
     });
   }
 

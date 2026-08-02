@@ -30,6 +30,7 @@ import {
   pillarRollups,
   type BreachCard,
 } from "../../lib/monitor/phone-spec.js";
+import { disputeClockLine, lifecycleNote } from "../../lib/monitor/ops-spec.js";
 
 export interface MobileBoardProps {
   health?: ProductHealth;
@@ -100,7 +101,7 @@ export function MobileBoard({
 
       <div className="hm-ph-body">
         {breach ? <BreachPanel breach={breach} /> : <SolvencyPanel health={health} />}
-        <FlowPanel health={health} emphasise={Boolean(breach)} />
+        <FlowPanel health={health} emphasise={Boolean(breach)} nowMs={nowMs} />
       </div>
 
       <p className="hm-ph-scroll" aria-hidden>
@@ -269,9 +270,11 @@ function SolvencyPanel({ health }: { health: ProductHealth }) {
  * The whole point of the evidence row is that it can contradict the funnel, and
  * a contradiction the operator has to scroll between is one they will miss.
  */
-function FlowPanel({ health, emphasise }: { health: ProductHealth; emphasise: boolean }) {
+function FlowPanel({ health, emphasise, nowMs }: { health: ProductHealth; emphasise: boolean; nowMs: number }) {
   const funnel = flowFunnel(health.flow);
   const evidence = payoutView(health.flow?.payout);
+  const timing = lifecycleNote(health.lifecycle);
+  const clock = disputeClockLine(health.externalFunnel, nowMs);
   return (
     <section
       className={`hm-ph-card${evidence.emphasised || emphasise ? " hm-ph-card--red" : ""}`}
@@ -288,6 +291,20 @@ function FlowPanel({ health, emphasise }: { health: ProductHealth; emphasise: bo
         <span className="hm-ph-quiet">
           stuck {funnel.stuck} · failed {funnel.failed}
         </span>
+        {/* Same facts as the desktop flow panel: how long the funnel above
+            actually takes, split by who posted the work, plus the dispute clock
+            when a bond is counting down. The phone is where this is read when
+            away from the desk, so it must not be desktop-only. */}
+        {timing ? (
+          <span className="hm-ph-quiet" data-tone={timing.tone} data-testid="mobile-lifecycle">
+            {timing.text}
+          </span>
+        ) : null}
+        {clock ? (
+          <span data-tone={clock.tone} data-testid="mobile-dispute-clock">
+            ⏳ {clock.text}
+          </span>
+        ) : null}
       </div>
       <div className="hm-ph-proof" data-testid="mobile-evidence">
         <div>

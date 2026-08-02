@@ -115,7 +115,7 @@ export function OpsBoard({
 
         <div className="ops-money">
           <SolvencyPanel solvency={health.solvency} gas={health.gas} payout={health.flow?.payout} />
-          <FlowPanel flow={health.flow} externalFunnel={health.externalFunnel} nowMs={nowMs} />
+          <FlowPanel flow={health.flow} externalFunnel={health.externalFunnel} lifecycle={health.lifecycle} nowMs={nowMs} />
         </div>
 
         <PillarStrip probes={health.probes} history={health.history} />
