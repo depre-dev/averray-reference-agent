@@ -34,6 +34,8 @@ import { probeExternalFunnel, type BucketSummary, type FunnelBucket } from "./ex
 import { h160ToSs58 } from "./hub-address.js";
 import { ESCROW_V2_SELECTORS } from "./escrow-selectors.js";
 import { readGasSpend } from "./gas-spend-read.js";
+import { readJobLifecycle } from "./job-lifecycle-read.js";
+import { summarizeLifecycle, type LifecycleSummary } from "./job-lifecycle.js";
 import { createGasSpendCache, type GasSpendCache, type GasSpendSnapshot, type GasUnreadable } from "./gas-spend-cache.js";
 import { alertProvenance, decideMoneyAlert } from "./money-alert.js";
 import { decideSelfFreshness, fetchSelfCompare } from "./self-freshness.js";
@@ -2151,6 +2153,15 @@ export interface ProductHealthSnapshotBlocks {
    * back. `rejected_window_running` is the one that matters: a bond is being
    * lost to inaction while it is non-zero.
    */
+  /**
+   * How long jobs take, split by who posted them.
+   *
+   * Blended it would be meaningless: pipeline work auto-verifies in seconds
+   * while external bounties wait on a human for hours, so one median would move
+   * with the MIX rather than with either population's speed. The split is also
+   * the demand-mix answer — how much of this volume is real posters.
+   */
+  lifecycle?: LifecycleSummary;
   externalFunnel?: {
     buckets: Record<FunnelBucket, BucketSummary>;
     /** The dispute window in force, as read from chain. Null when unreadable. */
@@ -2418,6 +2429,25 @@ export async function collectProductHealthProbes(
     // the board where inaction costs money reached the screen as a sentence to
     // be parsed. Emitting the numbers lets the board show the countdown without
     // reading its own prose back.
+    ...(await (async () => {
+      // Two log sweeps, no receipts — cheap enough for the heartbeat, unlike gas
+      // attribution which needs a receipt per transaction.
+      const read = await readJobLifecycle({
+        rpcUrl: config.rpcUrl,
+        escrowCore: h.body?.addresses?.escrowCore,
+        agentAccountCore: h.body?.addresses?.agentAccountCore,
+        ...(feeRecipient ? { feeRecipient } : {}),
+        lookbackBlocks: lookback.blocks,
+        fetchImpl,
+      });
+      if (read.reason) return {};
+      const summary = summarizeLifecycle({
+        jobs: read.jobs,
+        blockSeconds,
+        unmeasurable: read.unmeasurable,
+      });
+      return summary ? { lifecycle: summary } : {};
+    })()),
     externalFunnel: {
       buckets: externalFunnel.buckets,
       disputeWindowSeconds: externalFunnel.disputeWindowSeconds,

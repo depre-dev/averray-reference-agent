@@ -16,20 +16,24 @@ import {
   type FunnelView,
 } from "../../lib/monitor/ops-spec.js";
 import type { MoneyPathSnapshot } from "../../lib/monitor/product-health.js";
-import { disputeClockLine } from "../../lib/monitor/ops-spec.js";
-import type { ExternalFunnelView } from "../../lib/monitor/product-health.js";
+import { disputeClockLine, lifecycleNote } from "../../lib/monitor/ops-spec.js";
+import type { ExternalFunnelView, LifecycleView } from "../../lib/monitor/product-health.js";
 
 export interface FlowPanelProps {
   flow: MoneyPathSnapshot | undefined;
   /** External funnel counts — drives the dispute clock. */
   externalFunnel?: ExternalFunnelView | undefined;
+  /** Job durations + demand mix, shown under the funnel they describe. */
+  lifecycle?: LifecycleView | undefined;
   nowMs?: number;
 }
 
-export function FlowPanel({ flow, externalFunnel, nowMs }: FlowPanelProps) {
+export function FlowPanel({ flow, externalFunnel, lifecycle, nowMs }: FlowPanelProps) {
   // The one clock on this board where doing nothing costs money. Rendered only
   // while it is running; absence is correct, not a missing feature.
   const clock = disputeClockLine(externalFunnel, nowMs ?? Date.now());
+  // How long the funnel above actually takes, split by who posted the work.
+  const timing = lifecycleNote(lifecycle);
   const funnel = flowFunnel(flow);
   const evidence = payoutView(flow?.payout);
 
@@ -49,6 +53,12 @@ export function FlowPanel({ flow, externalFunnel, nowMs }: FlowPanelProps) {
             : "gaps between stages are the signal"}
         </span>
       </header>
+
+      {timing ? (
+        <p className="ops-lifecycle" data-tone={timing.tone} data-testid="ops-lifecycle">
+          {timing.text}
+        </p>
+      ) : null}
 
       {clock ? (
         <p className="ops-dispute-clock" data-tone={clock.tone} data-testid="ops-dispute-clock">

@@ -46,6 +46,23 @@ export interface SolvencyPool {
   addressSs58?: string;
 }
 
+/** Durations for one class of job. Nulls mean none settled, never "instant". */
+export interface LifecycleClassView {
+  count: number;
+  medianSeconds: number | null;
+  /** The slowest, because a median hides the case that made someone give up. */
+  slowestSeconds: number | null;
+}
+
+export interface LifecycleView {
+  selfPosted: LifecycleClassView;
+  external: LifecycleClassView;
+  /** External share of settled jobs, 0-100. null when nothing settled. */
+  externalPct: number | null;
+  /** Settled but posted outside the window — counted, never timed. */
+  unmeasurable: number;
+}
+
 /** One funnel bucket: how many, and the soonest deadline among them. */
 export interface FunnelBucketView {
   count: number;
@@ -325,6 +342,13 @@ export interface ProductHealth {
    * and that is the only clock on this board where doing nothing costs money.
    */
   externalFunnel?: ExternalFunnelView;
+  /**
+   * Job duration, split by who posted it. Blended it would be meaningless —
+   * pipeline work auto-verifies in seconds, external bounties wait hours on a
+   * human — so one median would track the MIX rather than either speed. The
+   * split is also the demand-mix answer.
+   */
+  lifecycle?: LifecycleView;
   /** The monitor's own build vs main — "is this board current?". */
   self?: SelfFreshness;
   /**

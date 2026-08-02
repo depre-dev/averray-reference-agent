@@ -18,6 +18,8 @@
 
 import type {
   ExternalFunnelView,
+  LifecycleClassView,
+  LifecycleView,
   GasSpendView,
   MoneyPathSnapshot,
   PayoutEvidence,
@@ -773,8 +775,62 @@ export function disputeClockLine(
  * component, so "built but not wired" fails the build instead.
  */
 export const MONEY_LINE_RENDERERS = [
+  "lifecycleNote",
   "disputeClockLine",
   "payoutRunwayNote",
   "gasPoolNote",
   "economicsLine",
 ] as const;
+
+/**
+ * How long jobs take, and how much of the work is somebody else's.
+ *
+ * Two facts in one line because they are one measurement. Pipeline work
+ * auto-verifies in seconds; external bounties wait on a human for hours. A
+ * blended median would move with the mix rather than with either speed — a day
+ * with more dogfood would read as the system getting faster.
+ *
+ * The slowest is shown beside the median because a median of 19s with a slowest
+ * of 20h is a different system from one where both are 19s, and only one of them
+ * loses the worker who waited.
+ */
+export function lifecycleNote(
+  lifecycle: LifecycleView | undefined,
+): { text: string; tone: OpsTone } | null {
+  if (!lifecycle) return null;
+  const { selfPosted, external } = lifecycle;
+  if (selfPosted.count === 0 && external.count === 0) return null;
+
+  const part = (label: string, c: LifecycleClassView): string | null => {
+    if (c.count === 0) return null;
+    const median = formatSeconds(c.medianSeconds);
+    // One sample is not a median. Say so rather than dressing it as a statistic.
+    const basis = c.count === 1 ? "" : c.slowestSeconds != null && c.slowestSeconds > (c.medianSeconds ?? 0) * 2
+      ? `, slowest ${formatSeconds(c.slowestSeconds)}`
+      : "";
+    return `${c.count} ${label} ${median}${basis}`;
+  };
+
+  const parts = [part("self-posted", selfPosted), part("external", external)].filter(Boolean);
+  if (lifecycle.externalPct != null) parts.push(`${lifecycle.externalPct}% external`);
+  // Untimed jobs are named: silently excluding them would make the sample look
+  // more complete than it is.
+  if (lifecycle.unmeasurable > 0) parts.push(`${lifecycle.unmeasurable} not timeable`);
+
+  return { text: parts.join(" · "), tone: "awaiting" };
+}
+
+/** "19s" · "2h 14m" · "5d" — read without converting. */
+export function formatSeconds(seconds: number | null): string {
+  if (seconds == null) return "—";
+  if (seconds < 90) return `${Math.round(seconds)}s`;
+  const m = seconds / 60;
+  if (m < 90) return `${Math.round(m)}m`;
+  const h = m / 60;
+  if (h < 48) {
+    const wh = Math.floor(h);
+    const wm = Math.round((h - wh) * 60);
+    return wm === 0 ? `${wh}h` : `${wh}h ${wm}m`;
+  }
+  return `${Math.round(h / 24)}d`;
+}
