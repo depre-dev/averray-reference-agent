@@ -268,7 +268,10 @@ body,
   grid-template-columns: minmax(120px, 168px) 1fr minmax(120px, 176px);
   gap: 16px;
   align-items: center;
-  padding: 8px 0;
+  /* 8px -> 6px. Each pool now carries an address line, and the board has no
+     spare height; two pixels a side across six pools is 24px, which is most of
+     what that line costs. Cheaper than truncating anything. */
+  padding: 6px 0;
   border-bottom: 1px dashed var(--ops-hair);
 }
 .ops-pool-name {
@@ -376,60 +379,59 @@ body,
   line-height: 1.45;
   color: var(--h4-muted);
 }
-/* ---- pool source address ---------------------------------------
-   The wallet a balance was read from. Deliberately quiet: it is reference
-   material an operator goes looking for, not something that should pull the
-   eye away from the number or the floor. Shown in full — a truncated address
-   cannot answer "which multisig is this?", which is the only reason to put it
-   on the board at all. */
+/* ---- pool address ----------------------------------------------
+   One line under the balance, spanning the whole pool row. .ops-pool is a
+   three-column grid, so anything that does not span becomes a fourth cell and
+   wraps the row — which is how the first attempt pushed amounts under meters.
+
+   Both encodings share the line because they fit: ~100 monospace glyphs at
+   9px is ~540px inside a ~620px row. Two lines cost 138px of a board that had
+   17px spare; one costs about half that and stays where it is useful. */
 .ops-pool-addr {
-  /* SPAN THE WHOLE ROW. .ops-pool is a three-column grid — name | meter |
-     amount — and an address dropped in as a fourth item became a second grid
-     ROW, pushing the amount below the meter and tripling every row's height.
-     Spanning to the end keeps those three cells on one line and puts the
-     address on a quiet line of its own beneath them. */
   grid-column: 1 / -1;
-  display: block;
-  /* .ops-pool sets gap:16px, which applies BETWEEN grid rows too and left the
-     address floating halfway to the next pool. Pull it back under its own row
-     so it reads as belonging to the balance above it. */
-  margin-top: -11px;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  /* .ops-pool sets gap:16px, which applies between grid ROWS too. */
+  margin-top: -13px;
   font-family: var(--h4-font-mono);
-  font-size: 9.5px;
-  line-height: 1.4;
+  font-size: 9px;
+  line-height: 1.35;
   color: var(--h4-muted);
-  /* One line: 42 hex characters do not fit the 168px name column, and letting
-     them wrap is what made this ugly in the first place. */
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 0;
 }
 .ops-pool-addr-hex {
-  /* Selectable as one unit so a double-click copies the whole address. */
+  /* Selectable as one unit so a double-click grabs the whole address. */
   user-select: all;
   color: var(--h4-ink-2);
-  opacity: 0.75;
+  opacity: 0.78;
+  white-space: nowrap;
 }
-.ops-pool-addr-label::before {
-  content: " · ";
+.ops-pool-addr-hex--ss58 {
   opacity: 0.6;
 }
-.ops-pool-addr--ss58 {
-  /* Sits directly under its EVM twin with no gap, so the pair reads as one
-     block belonging to the balance above rather than two separate facts. */
-  margin-top: -3px;
+.ops-pool-addr-sep {
+  opacity: 0.45;
+}
+.ops-pool-addr-none {
+  font-style: italic;
+  opacity: 0.7;
+}
+.ops-pool-addr-label {
+  /* Pushed right and first to yield: the addresses are the payload, the label
+     is the gloss. At a narrow width the gloss truncates, never the hex. */
+  margin-left: auto;
+  padding-left: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.8;
 }
 .ops-pool--unfloored .ops-pool-addr {
-  /* This row has smaller padding than a floored one, so it needs less pull-up. */
   margin-top: -6px;
 }
 
-.ops-pool--unfloored .ops-pool-note {
-  /* The note column takes the slack; the amount must not. A long address in
-     here clipped the "USDC" off protocol revenue — the one row where the unit
-     is doing real work — which is why the address moved out of this column. */
-  min-width: 0;
-}
 .ops-pool-amount--quiet {
   flex: 0 0 auto;
   white-space: nowrap;

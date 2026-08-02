@@ -289,20 +289,23 @@ describe("OpsBoard — pillars and footer", () => {
     expect(foot).toContain("LLM SPEND — not recorded");
     expect(foot).not.toContain("$0.00");
   });
-  test("a pool shows the address its balance was read from, in full", () => {
-    // Full, not truncated: the reason to put a wallet on an ops board is so an
-    // operator can tell WHICH wallet it is, and a 6-character prefix does not
-    // settle "treasury multisig or reserve?".
+  test("both encodings sit on ONE line under the balance they belong to", () => {
+    // Under the number, not in a separate strip — reading an address in one
+    // place while looking at its balance in another is what made the strip
+    // wrong. One line is what makes that affordable: ~100 monospace glyphs fit
+    // the pool row, where two lines did not fit the board.
     const { getByTestId } = render(
       <OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
     );
-    const aac = getByTestId("ops-pool-addr-aac");
-    expect(aac.textContent).toContain("0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57");
-    expect(aac.textContent).toContain("AgentAccountCore");
-    expect(getByTestId("ops-pool-addr-signer_gas").textContent).toContain("signer EOA");
+    const addr = getByTestId("ops-pool-addr-aac");
+    expect(addr.textContent).toContain("0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57");
+    expect(addr.textContent).toContain("151MENb3J9ZiBv147yhNkPDiY8rXF7TrWc13PqWYJeLuupBd");
+    expect(addr.textContent).toContain("AgentAccountCore");
+    // It lives inside the pool row, not somewhere else on the board.
+    expect(getByTestId("ops-pool-aac").contains(addr)).toBe(true);
   });
 
-  test("a pool whose figure did NOT come from a balance read shows no address", () => {
+  test("a pool whose figure did NOT come from a balance read gets no address", () => {
     // reward_bank is reported by the product's own /health. Borrowing the AAC's
     // address to fill the gap would claim a provenance the number does not have
     // — the same class of lie as a fake green.
@@ -312,15 +315,20 @@ describe("OpsBoard — pillars and footer", () => {
     expect(queryByTestId("ops-pool-addr-reward_bank")).toBeNull();
   });
 
-  test("an unfloored pool carries its address too", () => {
-    // Treasury reserve reads 0.00 and is intentionally unfunded — exactly the
-    // row where an operator most wants to check they are looking at the right
-    // wallet before concluding anything from a zero.
+  test("a pool with no derivable SS58 says so rather than showing nothing", () => {
+    // Silence would read as "this account has no SS58 form", which is false —
+    // it means we could not derive one, and those are different facts.
     const { getByTestId } = render(
       <OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
     );
-    expect(getByTestId("ops-pool-addr-reserve").textContent).toContain(
-      "0x01e6eed856e989201f4ff6346e18eab7e46c874c",
+    expect(getByTestId("ops-pool-addr-signer_gas").textContent).toContain("SS58 unavailable");
+  });
+
+  test("every pool still renders — an address must never cost a measurement", () => {
+    // The first attempt at this pushed two pools off a 1440x900 board.
+    const { getAllByTestId } = render(
+      <OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
     );
+    expect(getAllByTestId(/^ops-pool-[a-z_]+$/).length).toBe(6);
   });
 });

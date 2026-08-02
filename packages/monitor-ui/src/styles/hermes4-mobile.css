@@ -207,6 +207,32 @@
   font-size: 11px;
   line-height: 1.5;
 }
+/* Pool addresses, under the balance. Stacked and wrapping — a phone has 390px
+   and an address is 42 or 48 characters, so the one-line trick that works on the
+   desktop board does not apply here. This board scrolls, so the extra lines cost
+   nothing that matters; illegible hex would. */
+.hm-ph-pool-addr {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: 4px;
+  font-family: var(--h4-font-mono);
+  font-size: 9px;
+  line-height: 1.4;
+  color: var(--h4-ink-2);
+  opacity: 0.72;
+  overflow-wrap: anywhere;
+}
+.hm-ph-pool-addr span {
+  /* Long-press selects the whole address, which is how it gets into a wallet. */
+  user-select: all;
+}
+.hm-ph-pool-addr em {
+  font-style: normal;
+  opacity: 0.72;
+  color: var(--h4-muted);
+}
+
 /* Top-up addresses on the breach card. Full, wrapping, selectable — on a phone
    the operator is going to long-press this and paste it into a wallet, so it
    must be complete and it must be grabbable. Truncation would make the row

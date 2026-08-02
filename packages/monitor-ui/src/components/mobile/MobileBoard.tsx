@@ -233,6 +233,17 @@ function SolvencyPanel({ health }: { health: ProductHealth }) {
             <i className="fill" data-tone={view.tone} style={{ width: `${view.meter!.fillPct}%` }} />
             <i className="floor" style={{ left: `${view.meter!.floorPct}%` }} />
           </div>
+          {/* Under the balance, same as the desktop. STACKED rather than on one
+              line: 100 monospace glyphs do not fit 390px, and this board scrolls
+              — height is cheap here in a way it is not on the fixed desktop, so
+              the addresses can be legible instead of clever. */}
+          {view.pool.address ? (
+            <div className="hm-ph-pool-addr" data-testid={`mobile-pool-addr-${view.pool.key}`}>
+              <span>{view.pool.address}</span>
+              {view.pool.addressSs58 ? <span>{view.pool.addressSs58}</span> : null}
+              {view.pool.addressLabel ? <em>{view.pool.addressLabel}</em> : null}
+            </div>
+          ) : null}
         </div>
       ))}
 
