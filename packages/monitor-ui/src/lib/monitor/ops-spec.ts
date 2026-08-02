@@ -479,6 +479,8 @@ export interface EvidenceView {
   line2: string;
   /** The comparison — the reason this row exists. */
   delta: string;
+  /** Whether the two counts were measured over the same period. Never absent. */
+  fit: { text: string; tone: OpsTone };
   /** Only a real shortfall gets the alarming frame. */
   emphasised: boolean;
 }
@@ -505,24 +507,45 @@ export interface EvidenceView {
  * means the count may still include fees, and saying so is the whole point.
  */
 /**
- * Whether the window being compared is the window it claims to be.
+ * Whether the two counts above were measured over the same period.
  *
- * `decideWindowFit` has always computed this and the board has never shown it —
- * so the one sentence that says whether to BELIEVE the comparison above lived
- * only in JSON. A payout count from a window that does not span 24h, held
- * against a 24h ledger figure, is two different questions rendered as one
- * answer.
+ * ── WHY THIS IS NOW ALWAYS ON SCREEN ──────────────────────────────────────
  *
- * Silent when the fit is `ok`: a window that matches needs no caption, and a
- * permanent "~24h at 2.16s/block" is the kind of always-true text a reader
- * stops seeing. Spoken when it is suspect or unchecked, which are the two cases
- * where the numbers beside it deserve doubt.
+ * This used to render nothing when the fit was `ok`, on the reasoning that a
+ * matching window needs no caption and a permanent "~24h at 2.16s/block" is
+ * the kind of always-true text a reader stops seeing.
+ *
+ * That reasoning fails in precisely the case that matters. On 2026-08-02 the
+ * live board read SHORTFALL −2 — "2 settled jobs have no on-chain proof, money
+ * did not move" — while saying nothing whatsoever about the window, because
+ * the fit was `ok` and therefore silent. The operator got the accusation and
+ * was denied the fact that decides whether to believe it: whether the chain
+ * count and the ledger count cover the same 24 hours, or whether a job simply
+ * sat on the edge of one of them.
+ *
+ * A caveat that hides while things look fine is a caveat that is missing every
+ * time it would have carried weight. It costs one quiet line.
+ *
+ * Tone follows meaning, not alarm. A good fit is stated in grey: it is
+ * reassurance about the METHOD, not about the money, and only the line above
+ * is entitled to be red.
  */
-function windowNote(payout: PayoutEvidence): string {
+export function windowFitLine(payout: PayoutEvidence): { text: string; tone: OpsTone } {
   const fit = payout.window;
-  if (!fit || fit.status === "ok") return "";
-  if (fit.status === "unknown") return " · window fit UNCHECKED — block time not measured";
-  return ` · WINDOW SUSPECT — ${fit.detail}`;
+  if (!fit) return { text: "window fit not reported by this build", tone: "awaiting" };
+  if (fit.status === "unknown") {
+    return { text: "window fit UNCHECKED — block time not measured", tone: "degraded" };
+  }
+  if (fit.status !== "ok") return { text: `WINDOW SUSPECT — ${fit.detail}`, tone: "degraded" };
+  // State what was actually compared, so "same window" is a claim with numbers
+  // behind it rather than a reassuring adjective.
+  const blocks = payout.windowBlocks == null ? "" : `${payout.windowBlocks.toLocaleString()} blocks · `;
+  const span = fit.spanHours == null ? "window" : `~${fit.spanHours}h`;
+  const rate = fit.blockSeconds == null ? "" : ` at ${fit.blockSeconds}s/block`;
+  return {
+    text: `window fit ok — chain read over ${blocks}${span}${rate}, against a 24h ledger count`,
+    tone: "awaiting",
+  };
 }
 
 function feeNote(payout: PayoutEvidence): string {
@@ -542,6 +565,9 @@ export function payoutView(payout: PayoutEvidence | undefined): EvidenceView {
       line1: "no on-chain read configured",
       line2: "the funnel above is the product's own ledger, uncorroborated",
       delta: "nothing independent is checking that payouts landed",
+      // Nothing was compared, so there is no fit to report — and saying so is
+      // not the same as reporting a good one.
+      fit: { text: "no comparison window — nothing was read from the chain", tone: "awaiting" },
       emphasised: false,
     };
   }
@@ -555,7 +581,8 @@ export function payoutView(payout: PayoutEvidence | undefined): EvidenceView {
   const ledgerLine =
     payout.settledCount == null
       ? "settled count unavailable"
-      : `${payout.settledCount} marked settled by the monitor${windowNote(payout)}`;
+      : `${payout.settledCount} marked settled by the monitor`;
+  const fit = windowFitLine(payout);
 
   if (payout.status === "shortfall") {
     const gap = payoutGap(payout);
@@ -565,6 +592,7 @@ export function payoutView(payout: PayoutEvidence | undefined): EvidenceView {
       line1: chainLine,
       line2: ledgerLine,
       delta: `${gap.replace("−", "")} settled jobs have no on-chain proof — money did not move`,
+      fit,
       emphasised: true,
     };
   }
@@ -578,6 +606,7 @@ export function payoutView(payout: PayoutEvidence | undefined): EvidenceView {
       // Say which thing is broken, in words, so it cannot be misread as a
       // money problem at a glance.
       delta: payout.detail || "chain unreadable — instrument broken, not money",
+      fit,
       emphasised: false,
     };
   }
@@ -588,6 +617,7 @@ export function payoutView(payout: PayoutEvidence | undefined): EvidenceView {
     line1: chainLine,
     line2: ledgerLine,
     delta: "proof matches ledger — no gap",
+    fit,
     emphasised: false,
   };
 }

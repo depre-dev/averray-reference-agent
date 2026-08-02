@@ -133,11 +133,32 @@ describe("payoutView — whether to believe the comparison at all", () => {
     confirmedCount: 18, confirmedUsdc: 3.1, settledCount: 18, windowBlocks: 40000,
   };
 
-  test("stays silent when the window actually fits", () => {
-    // A permanent "~24h at 2.16s/block" is always-true text a reader stops
-    // seeing, and the caption is only useful when it carries doubt.
+  test("states the fit even when it is fine, with the numbers behind it", () => {
+    // This used to render nothing on a good fit — and on 2026-08-02 the live
+    // board showed SHORTFALL −2 with no window information at all, because
+    // the fit was ok and therefore silent. A caveat that hides while things
+    // look fine is missing every time it would have mattered.
     const view = payoutView({ ...base, window: { status: "ok", detail: "window spans ~24h", blockSeconds: 2.16, spanHours: 24 } });
-    expect(view.line2).not.toContain("window");
+    expect(view.fit.text).toContain("window fit ok");
+    expect(view.fit.text).toContain("40,000 blocks");
+    expect(view.fit.text).toContain("2.16s/block");
+    // Grey, not green: it is reassurance about the METHOD. Only the money
+    // line above is entitled to a status colour.
+    expect(view.fit.tone).toBe("awaiting");
+  });
+
+  test("a good fit never softens a shortfall above it", () => {
+    const view = payoutView({
+      ...base,
+      status: "shortfall",
+      confirmedCount: 19,
+      settledCount: 21,
+      window: { status: "ok", detail: "window spans ~24h", blockSeconds: 2.22, spanHours: 24 },
+    });
+    expect(view.status).toBe("SHORTFALL −2");
+    expect(view.tone).toBe("red");
+    expect(view.emphasised).toBe(true);
+    expect(view.fit.text).toContain("window fit ok");
   });
 
   test("says SUSPECT when the window is not the window it claims to be", () => {
@@ -147,17 +168,27 @@ describe("payoutView — whether to believe the comparison at all", () => {
       ...base,
       window: { status: "suspect", detail: "spans ~8.4h, not the 24h it is compared against", blockSeconds: 2.11, spanHours: 8.4 },
     });
-    expect(view.line2).toContain("WINDOW SUSPECT");
-    expect(view.line2).toContain("8.4h");
+    expect(view.fit.text).toContain("WINDOW SUSPECT");
+    expect(view.fit.text).toContain("8.4h");
+    expect(view.fit.tone).toBe("degraded");
   });
 
   test("says UNCHECKED rather than implying a pass", () => {
     const view = payoutView({ ...base, window: { status: "unknown", detail: "block time not measured", blockSeconds: null, spanHours: null } });
-    expect(view.line2).toContain("UNCHECKED");
+    expect(view.fit.text).toContain("UNCHECKED");
+    expect(view.fit.tone).toBe("degraded");
   });
 
-  test("an older payload with no fit says nothing", () => {
-    expect(payoutView(base).line2).not.toContain("window");
+  test("an older payload with no fit says so, rather than claiming a good one", () => {
+    // Absent is not ok. A build that never reported a fit must not render as
+    // one that reported a passing fit.
+    const view = payoutView(base);
+    expect(view.fit.text).toContain("not reported by this build");
+    expect(view.fit.text).not.toContain("ok —");
+  });
+
+  test("nothing read from the chain is not a passing window", () => {
+    expect(payoutView(undefined).fit.text).toContain("no comparison window");
   });
 });
 

@@ -50,3 +50,33 @@ describe("every money line is actually rendered", () => {
     expect(board).toContain('from "../../lib/monitor/ops-spec.js"');
   });
 });
+
+/**
+ * Facts that qualify a money figure must reach BOTH surfaces.
+ *
+ * The window fit says whether to believe the payout comparison. It is needed
+ * most on the phone — that is where a SHORTFALL gets read at 2am, away from
+ * any means of checking it — so a desktop-only fit is the wrong way round.
+ */
+describe("the qualifiers travel with the numbers they qualify", () => {
+  for (const [surface, source] of [
+    ["desktop", board],
+    ["phone", phone],
+  ] as const) {
+    it(`${surface} renders the payout window fit`, () => {
+      expect(source, `evidence.fit is computed but ${surface} never renders it`).toContain("evidence.fit");
+    });
+  }
+
+  for (const [surface, source] of [
+    ["desktop", board],
+    ["phone", phone],
+  ] as const) {
+    it(`${surface} names which address encoding is which`, () => {
+      // Two unlabelled 40-character strings, one EVM and one SS58, are not
+      // interchangeable — and the phone is where they get pasted into a wallet.
+      expect(source).toContain("SS58");
+      expect(source, `${surface} shows an address with no EVM/SS58 key`).toContain("EVM");
+    });
+  }
+});

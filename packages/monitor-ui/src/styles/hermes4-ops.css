@@ -39,13 +39,35 @@ body,
 .ops-board {
   --ops-hair: rgba(237, 230, 221, 0.10);
   --ops-rule: rgba(237, 230, 221, 0.16);
+  /* ---- the scaled pixel ------------------------------------------
+     The board had exactly two media queries and both were `max-width`
+     guards, so it rendered at identical size on a 1440 laptop and a
+     3840 wall. On the 4K it was mostly void: a 795px FLOW panel
+     showing a 64px row.
+
+     `--ops-u` is one scaled pixel. Below 1920 it is exactly 1px, so
+     every size written as `calc(N * var(--ops-u))` is byte-identical
+     to what shipped — 1440×900 is the regression floor and it stays
+     untouched. Above 1920 it grows with the viewport and everything
+     expressed in it grows together, in proportion, from one number.
+
+     Capped at 1.85 rather than the 2.0 the ratio would give at 3840:
+     type that scales perfectly linearly with a very wide viewport
+     outruns comfortable line length before it outruns the panel.
+
+     WHAT DOES NOT SCALE: hairlines, panel borders, the floor tick.
+     A 2px floor tick at 3840 is still the same fact as at 1440, and
+     a hairline that thickens with the window stops reading as a rule
+     and starts reading as a border. Those stay in real px, on
+     purpose — if you are tempted to convert one, don't. */
+  --ops-u: clamp(1px, calc(100vw / 1920), 1.85px);
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: calc(10 * var(--ops-u));
   height: 100%;
   min-height: 0;
-  padding: 14px 22px 12px;
+  padding: calc(14 * var(--ops-u)) calc(22 * var(--ops-u)) calc(12 * var(--ops-u));
   background: var(--h4-surface);
   color: var(--h4-ink);
   font-family: var(--h4-font-body);
@@ -61,9 +83,9 @@ body,
 .ops-meta {
   display: flex;
   justify-content: space-between;
-  gap: 24px;
+  gap: calc(24 * var(--ops-u));
   font-family: var(--h4-font-mono);
-  font-size: 11px;
+  font-size: calc(11 * var(--ops-u));
   letter-spacing: 0.06em;
   color: var(--h4-muted);
 }
@@ -85,8 +107,8 @@ body,
 .ops-stale {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 7px 14px;
+  gap: calc(14 * var(--ops-u));
+  padding: calc(7 * var(--ops-u)) calc(14 * var(--ops-u));
   border: 1px solid var(--h4-act);
   background: repeating-linear-gradient(
     135deg,
@@ -96,27 +118,27 @@ body,
 }
 .ops-stale strong {
   font-family: var(--h4-font-display);
-  font-size: 19px;
+  font-size: calc(19 * var(--ops-u));
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--h4-act);
 }
 .ops-stale span {
   font-family: var(--h4-font-mono);
-  font-size: 12px;
+  font-size: calc(12 * var(--ops-u));
   color: var(--h4-ink);
 }
 .ops-stale .ops-stale-right {
   margin-left: auto;
   color: var(--h4-act);
-  font-size: 11px;
+  font-size: calc(11 * var(--ops-u));
   white-space: nowrap;
 }
 
 .ops-content {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: calc(10 * var(--ops-u));
   flex: 1;
   min-height: 0;
 }
@@ -126,62 +148,67 @@ body,
 /* ---- verdict + trust ------------------------------------------ */
 .ops-verdict-row {
   display: flex;
-  gap: 24px;
+  gap: calc(24 * var(--ops-u));
   align-items: stretch;
 }
 .ops-verdict { flex: 1; min-width: 0; }
 .ops-verdict-kicker {
   font-family: var(--h4-font-mono);
-  font-size: 11px;
+  font-size: calc(11 * var(--ops-u));
   letter-spacing: 0.12em;
   color: var(--tone, var(--h4-tel));
 }
-/* The only oversized element on the board. It earns that from priority. */
+/* The only oversized element on the board. It earns that from priority.
+   One number changed here — the ceiling, 62px → 148px — and that alone
+   is the difference between a verdict you read across a room and one
+   that stays laptop-sized on a wall. 4.1vw tracks the design's stated
+   "≈ viewport / 26" closely enough to be the same rule: 59px at 1440
+   (unchanged), 105px at 2560, and it meets the ceiling at 3610. */
 .ops-verdict-line {
   margin: 2px 0 0;
   font-family: var(--h4-font-display);
   font-weight: 600;
-  font-size: clamp(38px, 4.1vw, 62px);
+  font-size: clamp(38px, 4.1vw, 148px);
   line-height: 0.98;
   letter-spacing: 0.005em;
   color: var(--tone, var(--h4-ink));
 }
 .ops-verdict-sub {
-  margin: 6px 0 0;
+  margin: calc(6 * var(--ops-u)) 0 0;
   font-family: var(--h4-font-mono);
-  font-size: 13px;
+  font-size: calc(13 * var(--ops-u));
   line-height: 1.45;
   color: var(--tone, var(--h4-muted));
 }
 
 .ops-trust {
-  width: 440px;
+  width: calc(440 * var(--ops-u));
   flex: none;
   display: grid;
-  gap: 6px;
+  gap: calc(6 * var(--ops-u));
   align-content: center;
-  padding: 10px 14px;
+  padding: calc(10 * var(--ops-u)) calc(14 * var(--ops-u));
   border: 1px solid var(--ops-rule);
 }
 .ops-trust-row {
   display: grid;
-  grid-template-columns: 96px 1fr;
-  gap: 10px;
+  grid-template-columns: calc(96 * var(--ops-u)) 1fr;
+  gap: calc(10 * var(--ops-u));
   align-items: baseline;
 }
 .ops-trust-key {
   font-family: var(--h4-font-mono);
-  font-size: 10px;
+  font-size: calc(10 * var(--ops-u));
   letter-spacing: 0.12em;
   color: var(--h4-muted);
 }
 .ops-trust-val {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8 * var(--ops-u));
   min-width: 0;
   font-family: var(--h4-font-mono);
-  font-size: 12px;
+  font-size: calc(12 * var(--ops-u));
 }
 .ops-trust-val > span[data-tone] {
   color: var(--tone, var(--h4-ink-2));
@@ -192,13 +219,13 @@ body,
 
 /* ---- shared tone dot ------------------------------------------ */
 .ops-dot {
-  width: 9px;
-  height: 9px;
+  width: calc(9 * var(--ops-u));
+  height: calc(9 * var(--ops-u));
   flex: none;
   border-radius: 50%;
   background: var(--tone, var(--h4-tel));
 }
-.ops-dot--sm { width: 7px; height: 7px; }
+.ops-dot--sm { width: calc(7 * var(--ops-u)); height: calc(7 * var(--ops-u)); }
 
 /* ---- the money band ------------------------------------------- */
 .ops-money {
@@ -212,7 +239,7 @@ body,
   flex: none;
   display: flex;
   flex-direction: column;
-  padding: 10px 16px;
+  padding: calc(10 * var(--ops-u)) calc(16 * var(--ops-u));
   border-right: 1px solid var(--ops-rule);
   overflow: hidden;
 }
@@ -221,42 +248,42 @@ body,
   min-width: 0;
   display: flex;
   flex-direction: column;
-  padding: 10px 16px;
+  padding: calc(10 * var(--ops-u)) calc(16 * var(--ops-u));
   overflow: hidden;
 }
 
 .ops-panel-head {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: calc(10 * var(--ops-u));
   flex-wrap: wrap;
 }
 .ops-panel-title {
   margin: 0;
   font-family: var(--h4-font-display);
   font-weight: 600;
-  font-size: 15px;
+  font-size: calc(15 * var(--ops-u));
   letter-spacing: 0.08em;
   color: var(--h4-ink);
 }
 .ops-panel-note {
   margin-left: auto;
   font-family: var(--h4-font-mono);
-  font-size: 10px;
+  font-size: calc(10 * var(--ops-u));
   color: var(--tone, var(--h4-muted));
 }
 .ops-chip {
-  padding: 2px 8px;
+  padding: calc(2 * var(--ops-u)) calc(8 * var(--ops-u));
   border: 1px dashed var(--ops-rule);
   font-family: var(--h4-font-mono);
-  font-size: 10px;
+  font-size: calc(10 * var(--ops-u));
   white-space: nowrap;
   color: var(--tone, var(--h4-muted));
 }
 .ops-awaiting {
-  margin: 8px 0 0;
+  margin: calc(8 * var(--ops-u)) 0 0;
   font-family: var(--h4-font-mono);
-  font-size: 11px;
+  font-size: calc(11 * var(--ops-u));
   color: var(--h4-tel);
 }
 
@@ -265,48 +292,53 @@ body,
    through to .ops-pool--unfloored, which has no bar at all.     */
 .ops-pool {
   display: grid;
-  grid-template-columns: minmax(120px, 168px) 1fr minmax(120px, 176px);
-  gap: 16px;
+  grid-template-columns:
+    minmax(calc(120 * var(--ops-u)), calc(168 * var(--ops-u)))
+    1fr
+    minmax(calc(120 * var(--ops-u)), calc(176 * var(--ops-u)));
+  gap: calc(16 * var(--ops-u));
   align-items: center;
   /* 8px -> 6px. Each pool now carries an address line, and the board has no
      spare height; two pixels a side across six pools is 24px, which is most of
      what that line costs. Cheaper than truncating anything. */
-  padding: 6px 0;
+  padding: calc(6 * var(--ops-u)) 0;
   border-bottom: 1px dashed var(--ops-hair);
 }
 .ops-pool-name {
   display: block;
   font-family: var(--h4-font-display);
   font-weight: 600;
-  font-size: 14px;
+  font-size: calc(14 * var(--ops-u));
   letter-spacing: 0.05em;
   color: var(--h4-ink);
 }
 .ops-pool-margin {
   display: block;
-  margin-top: 2px;
+  margin-top: calc(2 * var(--ops-u));
   font-family: var(--h4-font-mono);
-  font-size: 10px;
+  font-size: calc(10 * var(--ops-u));
   color: var(--tone, var(--h4-muted));
 }
+/* The vw term still governs below 1920 — the scaled ceiling only lifts the cap
+   that used to freeze this at 27px from 1588px upward. */
 .ops-pool-amount {
   text-align: right;
   font-family: var(--h4-font-mono);
   font-weight: 700;
-  font-size: clamp(19px, 1.7vw, 27px);
+  font-size: clamp(19px, 1.7vw, calc(27 * var(--ops-u)));
   white-space: nowrap;
   color: var(--tone, var(--h4-ink));
 }
 .ops-pool-unit {
-  margin-left: 6px;
-  font-size: 12px;
+  margin-left: calc(6 * var(--ops-u));
+  font-size: calc(12 * var(--ops-u));
   font-weight: 400;
   color: var(--h4-muted);
 }
 
 .ops-meter {
   position: relative;
-  height: 12px;
+  height: calc(12 * var(--ops-u));
   background: var(--h4-paper-sunken);
   border: 1px solid var(--ops-rule);
 }
@@ -315,11 +347,14 @@ body,
   inset: 0 auto 0 0;
   background: var(--tone, var(--h4-tel));
 }
-/* The floor tick. Fixed per rung, so a draining pool moves and it doesn't. */
+/* The floor tick. Fixed per rung, so a draining pool moves and it doesn't.
+   Its WIDTH stays 2px at every viewport — it marks a threshold, and a
+   threshold that gets fatter on a bigger screen marks a fuzzier one. The
+   overhang scales, so it keeps clearing a taller meter by the same look. */
 .ops-meter-floor {
   position: absolute;
-  top: -4px;
-  bottom: -4px;
+  top: calc(-4 * var(--ops-u));
+  bottom: calc(-4 * var(--ops-u));
   width: 2px;
   background: var(--h4-ink);
 }
@@ -330,7 +365,7 @@ body,
   top: 0;
   right: 0;
   bottom: 0;
-  width: 5px;
+  width: calc(5 * var(--ops-u));
   background: repeating-linear-gradient(
     90deg,
     var(--h4-ink) 0 1px,
@@ -339,10 +374,10 @@ body,
 }
 .ops-meter-scale {
   position: relative;
-  height: 14px;
-  margin-top: 3px;
+  height: calc(14 * var(--ops-u));
+  margin-top: calc(3 * var(--ops-u));
   font-family: var(--h4-font-mono);
-  font-size: 9px;
+  font-size: calc(9 * var(--ops-u));
   color: var(--h4-muted);
 }
 .ops-meter-scale .at-zero  { position: absolute; left: 0; }
@@ -352,10 +387,10 @@ body,
 .ops-solvency-divider {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 8px;
+  gap: calc(10 * var(--ops-u));
+  margin-top: calc(8 * var(--ops-u));
   font-family: var(--h4-font-mono);
-  font-size: 10px;
+  font-size: calc(10 * var(--ops-u));
   letter-spacing: 0.12em;
   color: var(--h4-muted);
 }
@@ -366,19 +401,41 @@ body,
 }
 .ops-pool--unfloored {
   align-items: baseline;
-  padding: 4px 0;
+  padding: calc(4 * var(--ops-u)) 0;
   border-bottom: 0;
 }
 .ops-pool--unfloored .ops-pool-name {
-  font-size: 12.5px;
+  font-size: calc(12.5 * var(--ops-u));
   color: var(--h4-ink-2);
 }
 .ops-pool-note {
   font-family: var(--h4-font-mono);
-  font-size: 10px;
+  font-size: calc(10 * var(--ops-u));
   line-height: 1.45;
   color: var(--h4-muted);
 }
+/* ---- pool sub-fact key -----------------------------------------
+   BURN under the signer, RUNWAY under the reward bank. The note used
+   to be one undifferentiated grey line, which meant the eye had to
+   read it to find out what it was about; the key says that before
+   you start reading, and lines up down the column so two pools'
+   sub-facts are visibly answering two different questions.
+
+   Scoped to --keyed: the unfloored pools reuse .ops-pool-note as a
+   plain grid cell and must stay a plain grid cell. */
+.ops-pool-note--keyed {
+  display: flex;
+  align-items: baseline;
+  gap: calc(8 * var(--ops-u));
+}
+.ops-pool-note-key {
+  flex: none;
+  min-width: calc(52 * var(--ops-u));
+  font-size: calc(9 * var(--ops-u));
+  letter-spacing: 0.14em;
+  color: var(--h4-tel);
+}
+.ops-pool-note-val { min-width: 0; }
 /* ---- pool address ----------------------------------------------
    One line under the balance, spanning the whole pool row. .ops-pool is a
    three-column grid, so anything that does not span becomes a fourth cell and
@@ -391,11 +448,13 @@ body,
   grid-column: 1 / -1;
   display: flex;
   align-items: baseline;
-  gap: 6px;
-  /* .ops-pool sets gap:16px, which applies between grid ROWS too. */
-  margin-top: -13px;
+  gap: calc(6 * var(--ops-u));
+  /* .ops-pool sets gap:16px, which applies between grid ROWS too — so this
+     cancellation has to scale with that gap or the address drifts off the
+     row it belongs to as the board grows. */
+  margin-top: calc(-13 * var(--ops-u));
   font-family: var(--h4-font-mono);
-  font-size: 9px;
+  font-size: calc(9 * var(--ops-u));
   line-height: 1.35;
   color: var(--h4-muted);
   min-width: 0;
@@ -410,6 +469,19 @@ body,
 .ops-pool-addr-hex--ss58 {
   opacity: 0.6;
 }
+/* ---- which encoding is which -----------------------------------
+   Two 40-odd-character strings separated by a dot, and nothing said
+   which was which. They are not interchangeable: one is what a block
+   explorer and an EVM wallet want, the other is what a Substrate
+   wallet wants, and sending to the wrong form is the sort of mistake
+   this board exists to prevent. The key is small and permanent. */
+.ops-pool-addr-key {
+  flex: none;
+  font-size: calc(8 * var(--ops-u));
+  letter-spacing: 0.14em;
+  color: var(--h4-tel);
+  opacity: 0.85;
+}
 .ops-pool-addr-sep {
   opacity: 0.45;
 }
@@ -421,7 +493,7 @@ body,
   /* Pushed right and first to yield: the addresses are the payload, the label
      is the gloss. At a narrow width the gloss truncates, never the hex. */
   margin-left: auto;
-  padding-left: 8px;
+  padding-left: calc(8 * var(--ops-u));
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -429,45 +501,49 @@ body,
   opacity: 0.8;
 }
 .ops-pool--unfloored .ops-pool-addr {
-  margin-top: -6px;
+  margin-top: calc(-6 * var(--ops-u));
 }
 
 .ops-pool-amount--quiet {
   flex: 0 0 auto;
   white-space: nowrap;
-  font-size: 16px;
+  font-size: calc(16 * var(--ops-u));
   font-weight: 400;
   color: var(--h4-muted);
 }
 
 /* ---- flow funnel ----------------------------------------------- */
+/* Take the slack between the header and the evidence rather than leaving it
+   all in one gap underneath — but only up to a point. `flex: 1` with no
+   ceiling meant that on a tall 4K window this row claimed 564px to display
+   64px of numerals: 63% of the FLOW panel was empty, and the emptiest part
+   of the board was the part about money. It now grows to a bounded height
+   and stops, and the evidence block below rises to meet it. */
 .ops-funnel {
   display: flex;
   align-items: center;
-  /* Take the slack between the header and the evidence rather than leaving it
-     all in one gap underneath. `align-items: center` then keeps the numerals
-     optically centred in whatever height the panel ends up with. */
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
-  margin-top: 10px;
-  padding: 0 8px;
+  max-height: calc(150 * var(--ops-u));
+  margin-top: calc(10 * var(--ops-u));
+  padding: 0 calc(8 * var(--ops-u));
 }
 .ops-funnel-stage {
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-width: 96px;
+  min-width: calc(96 * var(--ops-u));
 }
 .ops-funnel-label {
   font-family: var(--h4-font-mono);
-  font-size: 10px;
+  font-size: calc(10 * var(--ops-u));
   letter-spacing: 0.14em;
   color: var(--h4-muted);
 }
 .ops-funnel-value {
   font-family: var(--h4-font-mono);
   font-weight: 700;
-  font-size: clamp(28px, 2.6vw, 42px);
+  font-size: clamp(28px, 2.6vw, calc(47 * var(--ops-u)));
   line-height: 1.12;
   /* Sage would read as "9 good things happened". A count is not a verdict —
      the verdict is upstairs — so the numerals stay ink and only an absent
@@ -480,16 +556,16 @@ body,
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 5px;
-  margin-top: 10px;
-  padding: 0 12px;
+  gap: calc(5 * var(--ops-u));
+  margin-top: calc(10 * var(--ops-u));
+  padding: 0 calc(12 * var(--ops-u));
 }
 .ops-funnel-arrow {
   display: flex;
   align-items: center;
   width: 100%;
   color: var(--h4-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--ops-u));
 }
 .ops-funnel-arrow i {
   flex: 1;
@@ -497,90 +573,130 @@ body,
   background: var(--ops-rule);
 }
 .ops-funnel-gap-label {
-  padding: 2px 8px;
+  padding: calc(2 * var(--ops-u)) calc(8 * var(--ops-u));
   border: 1px solid var(--ops-rule);
   font-family: var(--h4-font-mono);
-  font-size: 10px;
+  font-size: calc(10 * var(--ops-u));
   white-space: nowrap;
   color: var(--tone, var(--h4-muted));
+}
+
+/* ---- the two lines under the panel head -------------------------
+   Shipped in #686/#687 with no rules of their own, so they inherited
+   the board's BODY font while every other fact on the board is
+   monospace — the two newest money facts were the two that did not
+   look like they belonged to it.
+
+   The dispute clock is the one line here where doing nothing costs
+   money, so it is boxed and toned; the lifecycle line is context for
+   the funnel beneath it and stays quiet. */
+.ops-lifecycle {
+  margin: calc(6 * var(--ops-u)) 0 0;
+  font-family: var(--h4-font-mono);
+  font-size: calc(11 * var(--ops-u));
+  line-height: 1.45;
+  color: var(--tone, var(--h4-ink-2));
+}
+.ops-dispute-clock {
+  display: flex;
+  align-items: baseline;
+  gap: calc(8 * var(--ops-u));
+  margin: calc(8 * var(--ops-u)) 0 0;
+  padding: calc(5 * var(--ops-u)) calc(10 * var(--ops-u));
+  border: 1px solid var(--tone, var(--h4-warn));
+  font-family: var(--h4-font-mono);
+  font-size: calc(11.5 * var(--ops-u));
+  color: var(--tone, var(--h4-warn));
 }
 
 /* ---- payout evidence ------------------------------------------
    Welded to the funnel above it: same panel, no gap, an explicit
    "corroborates" line. When the two disagree the board shows both
    numbers rather than averaging them into one reassuring figure. */
+/* `margin-top: auto` pinned this to the panel's bottom edge, which is the
+   opposite of the weld the comment above describes: it put the panel's whole
+   surplus height between the funnel and the proof that corroborates it. The
+   two now sit together and the surplus falls below both, where it reads as
+   margin instead of as a gap between two things that belong to each other. */
 .ops-evidence {
-  margin-top: auto;
+  margin-top: calc(12 * var(--ops-u));
   border: 1px solid var(--ops-rule);
 }
 .ops-evidence[data-emphasis="on"] { border-color: var(--h4-act); }
 .ops-evidence-head {
   display: flex;
   align-items: baseline;
-  gap: 12px;
-  padding: 8px 14px;
+  gap: calc(12 * var(--ops-u));
+  padding: calc(8 * var(--ops-u)) calc(14 * var(--ops-u));
   border-bottom: 1px dashed var(--ops-rule);
 }
 .ops-evidence-head h3 {
   margin: 0;
   font-family: var(--h4-font-display);
   font-weight: 600;
-  font-size: 12.5px;
+  font-size: calc(12.5 * var(--ops-u));
   letter-spacing: 0.1em;
   color: var(--h4-ink);
 }
 .ops-evidence-head span {
   font-family: var(--h4-font-mono);
-  font-size: 10px;
+  font-size: calc(10 * var(--ops-u));
   color: var(--h4-muted);
 }
 .ops-evidence-body {
   display: flex;
   align-items: center;
-  gap: 24px;
-  padding: 10px 14px;
+  gap: calc(24 * var(--ops-u));
+  padding: calc(10 * var(--ops-u)) calc(14 * var(--ops-u));
 }
 .ops-evidence-status {
-  min-width: 210px;
+  min-width: calc(210 * var(--ops-u));
   font-family: var(--h4-font-display);
   font-weight: 600;
-  font-size: clamp(22px, 2vw, 32px);
+  font-size: clamp(22px, 2vw, calc(32 * var(--ops-u)));
   letter-spacing: 0.02em;
   color: var(--tone, var(--h4-ink));
 }
 .ops-evidence-lines {
   font-family: var(--h4-font-mono);
-  font-size: 12px;
+  font-size: calc(12 * var(--ops-u));
   line-height: 1.6;
   color: var(--h4-ink-2);
 }
+/* The window-fit caption, under the ledger line it qualifies. Quieter than
+   the counts — it is about whether to believe them, not about the money. */
+.ops-evidence-fit {
+  margin-top: calc(2 * var(--ops-u));
+  font-size: calc(10 * var(--ops-u));
+  color: var(--tone, var(--h4-tel));
+}
 .ops-evidence-delta {
   margin-left: auto;
-  max-width: 280px;
+  max-width: calc(280 * var(--ops-u));
   text-align: right;
   font-family: var(--h4-font-mono);
-  font-size: 12px;
+  font-size: calc(12 * var(--ops-u));
   color: var(--tone, var(--h4-muted));
 }
 .ops-evidence-key {
   display: flex;
-  gap: 18px;
+  gap: calc(18 * var(--ops-u));
   align-items: center;
   flex-wrap: wrap;
-  padding: 7px 14px;
+  padding: calc(7 * var(--ops-u)) calc(14 * var(--ops-u));
   border-top: 1px dashed var(--ops-rule);
 }
 .ops-evidence-key span {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6 * var(--ops-u));
   font-family: var(--h4-font-mono);
-  font-size: 10px;
+  font-size: calc(10 * var(--ops-u));
   color: var(--h4-muted);
 }
 .ops-evidence-key i {
-  width: 8px;
-  height: 8px;
+  width: calc(8 * var(--ops-u));
+  height: calc(8 * var(--ops-u));
   flex: none;
   background: var(--tone, var(--h4-tel));
 }
@@ -589,23 +705,23 @@ body,
 .ops-pillars {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  padding: 10px 16px;
+  padding: calc(10 * var(--ops-u)) calc(16 * var(--ops-u));
   border: 1px solid var(--ops-rule);
 }
 .ops-pillar {
-  padding: 0 16px;
+  padding: 0 calc(16 * var(--ops-u));
   min-width: 0;
 }
 .ops-pillar + .ops-pillar { border-left: 1px dashed var(--ops-hair); }
 .ops-pillar-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8 * var(--ops-u));
 }
 .ops-pillar-name {
   font-family: var(--h4-font-display);
   font-weight: 600;
-  font-size: 13px;
+  font-size: calc(13 * var(--ops-u));
   letter-spacing: 0.1em;
   color: var(--h4-ink);
 }
@@ -613,30 +729,30 @@ body,
   margin-left: auto;
   text-align: right;
   font-family: var(--h4-font-mono);
-  font-size: 9.5px;
+  font-size: calc(9.5 * var(--ops-u));
   color: var(--h4-muted);
 }
 .ops-pillar-probes {
   display: grid;
-  gap: 7px;
-  margin-top: 9px;
+  gap: calc(7 * var(--ops-u));
+  margin-top: calc(9 * var(--ops-u));
 }
 .ops-probe {
   display: flex;
-  gap: 8px;
+  gap: calc(8 * var(--ops-u));
   align-items: baseline;
   min-width: 0;
 }
-.ops-probe .ops-dot { position: relative; top: -1px; }
+.ops-probe .ops-dot { position: relative; top: calc(-1 * var(--ops-u)); }
 .ops-probe-id {
   font-family: var(--h4-font-mono);
-  font-size: 11.5px;
+  font-size: calc(11.5 * var(--ops-u));
   white-space: nowrap;
   color: var(--h4-ink);
 }
 .ops-probe-detail {
   font-family: var(--h4-font-mono);
-  font-size: 10.5px;
+  font-size: calc(10.5 * var(--ops-u));
   line-height: 1.4;
   min-width: 0;
   color: var(--h4-ink-2);
@@ -647,10 +763,10 @@ body,
 .ops-pillar-trend {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin: 9px 0 0;
+  gap: calc(10 * var(--ops-u));
+  margin: calc(9 * var(--ops-u)) 0 0;
   font-family: var(--h4-font-mono);
-  font-size: 9.5px;
+  font-size: calc(9.5 * var(--ops-u));
   color: var(--h4-muted);
 }
 .ops-pillar-trend[data-tone="awaiting"] { color: var(--h4-tel); }
@@ -660,10 +776,22 @@ body,
    into a one-word-per-line column. Pin the box here. */
 .ops-pillar-trend .ops-linespark {
   flex: none;
-  width: 96px;
-  height: 20px;
+  width: calc(96 * var(--ops-u));
+  height: calc(20 * var(--ops-u));
 }
 .ops-pillar-trend > span { min-width: 0; }
+
+/* ---- per-job economics -------------------------------------------
+   What one job costs and earns, on one line between the probes and
+   the footer. Also shipped unstyled; also monospace now, because it
+   is three numbers and numbers on this board are monospace.        */
+.ops-economics {
+  padding: calc(4 * var(--ops-u)) 0;
+  font-family: var(--h4-font-mono);
+  font-size: calc(12 * var(--ops-u));
+  letter-spacing: 0.02em;
+  color: var(--tone, var(--h4-ink-2));
+}
 
 /* ---- footer ------------------------------------------------------
    LLM spend lives here — one line. It is the least urgent number on
@@ -672,9 +800,9 @@ body,
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 24px;
+  gap: calc(24 * var(--ops-u));
   font-family: var(--h4-font-mono);
-  font-size: 11px;
+  font-size: calc(11 * var(--ops-u));
   color: var(--h4-muted);
 }
 .ops-foot span { white-space: nowrap; }
@@ -690,18 +818,18 @@ body,
 }
 .ops-empty {
   display: grid;
-  gap: 6px;
+  gap: calc(6 * var(--ops-u));
   justify-items: center;
   text-align: center;
 }
 .ops-empty-title {
   font-family: var(--h4-font-display);
-  font-size: 20px;
+  font-size: calc(20 * var(--ops-u));
   color: var(--h4-ink);
 }
 .ops-empty-detail {
   font-family: var(--h4-font-mono);
-  font-size: 12px;
+  font-size: calc(12 * var(--ops-u));
   color: var(--h4-tel);
 }
 
@@ -713,8 +841,8 @@ body,
 .ops-linespark--act polyline { stroke: var(--h4-act); }
 .ops-linespark--empty {
   display: inline-block;
-  width: 96px;
-  height: 20px;
+  width: calc(96 * var(--ops-u));
+  height: calc(20 * var(--ops-u));
 }
 
 /* ---- narrow desktop / split screen ------------------------------- */

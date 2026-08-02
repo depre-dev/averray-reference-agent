@@ -81,6 +81,13 @@ export function FlowPanel({ flow, externalFunnel, lifecycle, nowMs }: FlowPanelP
           <div className="ops-evidence-lines">
             <div>{evidence.line1}</div>
             <div>{evidence.line2}</div>
+            {/* Whether the two counts above cover the same period. Always
+                present — this board once showed SHORTFALL −2 with no window
+                information at all, which is an accusation without the one
+                fact that decides whether to believe it. */}
+            <div className="ops-evidence-fit" data-tone={evidence.fit.tone} data-testid="ops-evidence-fit">
+              {evidence.fit.text}
+            </div>
           </div>
           <div className="ops-evidence-delta" data-tone={evidence.tone}>
             {evidence.delta}
