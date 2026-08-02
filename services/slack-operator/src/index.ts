@@ -838,6 +838,22 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
           ...(phase === undefined ? {} : { relayReachableNow: phase === "listening" }),
         });
       })(),
+      // Can Hermes ANSWER? The row above reports outbound narration; without
+      // this one, a dead listener is discovered by asking a question and getting
+      // silence — which is the failure this board exists to prevent, pointed at
+      // the newest part of it.
+      //
+      // Absent (not "off") when the feature was never started, so an older build
+      // and a stopped listener do not render identically.
+      ...(() => {
+        const state = buzzInbound.subscription?.state();
+        if (!state) {
+          return buzzInbound.started
+            ? {}
+            : { buzzInbound: { phase: "off" as const, detail: buzzInbound.reason, failures: 0 } };
+        }
+        return { buzzInbound: { phase: state.phase, detail: state.detail, failures: state.failures } };
+      })(),
       ...(productHealthSnapshotBlocks ?? {}),
       // History-derived Trends + Incidents (uptime% / latency / balance series +
       // incident episodes) from the rolling buffer. Always present — the series

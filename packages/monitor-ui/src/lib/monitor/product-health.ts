@@ -54,6 +54,14 @@ export interface BuzzDeliveryView {
   lastFailureAt?: number;
 }
 
+/** The inbound listener's live socket state. `listening` is the only one that answers. */
+export interface BuzzInboundView {
+  phase: "off" | "connecting" | "authenticating" | "listening" | "retrying" | "closed" | "misconfigured";
+  detail: string;
+  /** Consecutive failed connection attempts; zero once listening. */
+  failures: number;
+}
+
 export interface SolvencySnapshot {
   pools: SolvencyPool[];
   /** Honest runway note, e.g. "≈ 6 payouts to floor" or "pending settlement data". */
@@ -250,6 +258,19 @@ export interface ProductHealth {
   remediation?: RemediationStatus;
   /** #Ops delivery health — see BuzzDeliveryView. */
   buzz?: BuzzDeliveryView;
+  /**
+   * Whether Hermes can ANSWER in #Ops — the inbound listener's live socket.
+   *
+   * `buzz` above reports OUTBOUND narration: whether alerts get delivered. This
+   * is the other direction, and it fails differently. A dead listener produces
+   * no alert and no error; you discover it by asking a question and getting
+   * silence, which is indistinguishable from the agent having nothing to say.
+   *
+   * Absent when the build predates the feature. `phase: "off"` means it was
+   * deliberately not started, and `detail` carries which precondition was
+   * missing — those two must not render the same.
+   */
+  buzzInbound?: BuzzInboundView;
   /** The monitor's own build vs main — "is this board current?". */
   self?: SelfFreshness;
   /**
