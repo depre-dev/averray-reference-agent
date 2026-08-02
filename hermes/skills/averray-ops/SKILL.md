@@ -1,3 +1,8 @@
+---
+name: averray-ops
+description: Read the Averray ops board and explain its verdict honestly.
+---
+
 # Watching Averray
 
 You are watching a live system that moves real money. Averray settles USDC
@@ -5,8 +10,15 @@ payouts to AI agents on Polkadot Hub mainnet (chain 420420419). There is one
 operator. Your job is to notice when something is wrong, explain it, and stay
 quiet when it isn't.
 
-Copied into `/opt/data/skills/` from `hermes/skills/averray-ops.md` in
-`depre-dev/averray-reference-agent`. Edit it there, not in the volume.
+Lives at `/opt/data/skills/averray-ops/SKILL.md`, copied from
+`hermes/skills/averray-ops/SKILL.md` in `depre-dev/averray-reference-agent`.
+Edit it there, not in the volume.
+
+The directory and the exact filename matter: Hermes discovers skills with
+`skills_dir.rglob("SKILL.md")` (`hermes_cli/profile_distribution.py`). A flat
+`averray-ops.md` is never found — and it does not error, it is simply never
+loaded, which reads as the agent ignoring its guidance rather than as a missing
+file. This document spent its first weeks in exactly that state.
 
 ---
 
@@ -49,6 +61,7 @@ Read **`reason`**. It is the machine contract:
 | `payout-shortfall` | the chain cannot account for payouts the ledger says settled |
 | `probe-red` | page-worthy probe failure |
 | `floor-breach` | a liquidity pool is below the level at which the system stops working |
+| `pool-draining` | nothing has breached, but a pool is falling toward its floor |
 | `no-data` | the heartbeat has not run yet |
 | `not-watching` | monitoring is switched off |
 
@@ -77,9 +90,10 @@ item here has looked like a problem to someone before.
   has no floor and draws no meter. Zero here is correct.
 - **Escrow reads `0.00 USDC`.** Informational — it is money currently between
   claim and settlement. Zero means nothing is mid-flight right now.
-- **`capabilities` sits at `4/7 up · 2 warnings acknowledged`.** Triaged and
-  accepted, and has read that way for weeks. It stays amber on the board and is
-  counted in the census as `degraded (acknowledged)`, but it does not raise the
+- **`capabilities` carries acknowledged warnings.** It reads
+  `2/2 required up · xcmObserver staged, gasSponsor disabled (acknowledged)`.
+  The word `acknowledged` in a detail is a contract: the operator has already
+  triaged that degradation. It is counted in the census but does not raise the
   verdict. Do not re-raise it.
 - **`gasSponsor: disabled`.** This is a separate, deliberately-off Pimlico 4337
   paymaster. It does **not** break new agents earning from zero — starter gas is
@@ -92,6 +106,39 @@ item here has looked like a problem to someone before.
 If something in this list changes in a way that looks *newly* wrong — the
 reserve suddenly holding funds, capabilities moving to 2/7 — that *is* worth
 mentioning. The rule is "not a fault by default", not "never speak of it".
+
+---
+
+## `external_funnel` — the one probe watching a clock
+
+Every other probe reports a state. This one reports a **countdown**, and it is
+the only place on the board where doing nothing costs somebody money.
+
+A worker who claims an external job posts a bond. If their submission is
+rejected, a dispute window opens; if it lapses unopened, `finalizeRejectedJob`
+slashes that bond. Nobody is watching that window except this probe.
+
+Its detail reads like `0 claimable · 0 claimed · 1 in review · 0 in dispute
+window · 1 other`. What each part means when it is NOT zero:
+
+- **`in dispute window`** — the dangerous one. The verdict names the job and the
+  time: `rejected 0xaa4b… slashes in 9h`. Under 48h it degrades; under 12h it
+  takes halt severity. This is worth interrupting the operator for.
+- **`LAPSED … bond slashable now`** — the window has already closed. Say so
+  plainly; do not soften it into a countdown that no longer exists.
+- **`UNREADABLE deadline`** — rejected jobs exist and the EscrowCore read
+  failed. **This is an instrument fault, not safety.** A bond may be counting
+  down unseen. Never report it as "no jobs at risk".
+- **`N past the slash window (chain)`** — the chain says those jobs are already
+  disputed or resolved, so nothing can be slashed. Genuinely fine.
+- **`in review`** — submissions waiting on a human poster. Over 48h it degrades;
+  it costs nobody a bond, it just means someone is waiting.
+- **`other`** — a lifecycle state the probe does not model (`exhausted`, today).
+  Counted separately on purpose rather than folded into a bucket it does not
+  belong to. Not a fault.
+
+The dispute window length is read live from the product, never assumed. If you
+quote a deadline, it came from `workerFacts.disputeWindow`, not from "7 days".
 
 ---
 
@@ -138,6 +185,25 @@ check exists.
 | `history.incidents[]` | durable incident log; `endedAt: null` = ongoing |
 | `self` | the monitor's own build vs main. `behind` = you may be reading stale code |
 | `remediation` | RPC failover state |
+| `buzz` | whether #Ops can actually receive your messages |
+
+**`buzz` — can you even be heard?** This block reports the monitor's own
+delivery path into `#Ops`.
+
+- `ok` — delivered recently.
+- `armed` — configured but nothing has been delivered yet. **Not the same as
+  working.** It reads this way after every restart, because the state is held in
+  memory rather than carried across a deploy as a stale success.
+- `failing` — the last attempt failed, with the reason (`connect-failed`,
+  `auth-rejected`). It has been wrong-looking-correct before: on 2026-08-02 the
+  relay hung at startup and `#Ops` was silently dead for four hours while
+  `money_path` was degraded. This block is what surfaced it.
+- `off` — not configured. A choice, not a fault.
+
+Note it reports the last delivery *attempt*, and deliveries only happen on a
+transition. A `failing` that is hours old may describe a channel that has since
+recovered. Say "the last attempt failed 4h ago", not "the channel is down", when
+that is all you actually know.
 
 **Pools and floors.** A floor is the level below which that pool stops the
 system working. `signer gas` (DOT) pays transaction fees; the **reward bank**
@@ -145,6 +211,20 @@ system working. `signer gas` (DOT) pays transaction fees; the **reward bank**
 operator-prefunded, so its balance is a hard spend cap, and when it empties,
 payouts halt. A pool with no floor is not floored *on purpose* (see the
 intentional list); it cannot "breach".
+
+**Wallet addresses.** Each pool in `solvency.pools[]` may carry `address` (the
+EVM `0x…` the balance was READ from), `addressSs58` (the same account for
+Substrate wallets), and `addressLabel`. Two rules:
+
+- A pool with **no** `address` did not get its figure from a balance read — the
+  reward bank comes from the product's own `/health`. Do not offer a nearby
+  contract address as if it were that pool's wallet.
+- Only the **signer** is a wallet somebody should send funds to. The others are
+  contracts; DOT sent to `EscrowCore` lands somewhere with no way back. If asked
+  where to top up gas, give the signer and say the others are contracts.
+
+Native DOT reads as 18 decimals over eth-rpc, and funds must be on **Asset Hub**,
+not the relay chain — relay DOT needs teleporting first.
 
 ---
 
@@ -226,8 +306,16 @@ the board draws.
 
 ## Note on this file
 
-The skill *format* here has not been verified against a running Hermes — the
-observer watches `.md` files in `/opt/data/skills`, but whether Hermes expects
-frontmatter or a particular heading structure is unconfirmed. If Hermes does not
-pick this up, that is the first thing to check; the content is independent of
-the wrapper.
+The format IS now verified against the running image
+(`nousresearch/hermes-agent:v2026.7.1`): Hermes discovers skills by
+`skills_dir.rglob("SKILL.md")`, so this must live in its own directory under
+`/opt/data/skills/` and be named exactly `SKILL.md`.
+
+Our `skills-observer` is a separate thing — it records any `.md` under that
+volume into Postgres so a change is auditable. It watching a file is NOT
+evidence Hermes loaded it, and conflating the two is how the earlier flat
+`averray-ops.md` looked installed while being invisible to the agent.
+
+If guidance here seems to be ignored, check that first: a wrongly-shaped skill
+fails silently, and silent failure reads as an unreliable model rather than a
+misplaced file.
