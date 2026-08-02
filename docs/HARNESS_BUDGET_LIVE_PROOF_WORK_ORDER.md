@@ -98,7 +98,21 @@ the money rail, wallet, signer, claim or submission paths.
 
 # Addendum — the packet is unsatisfiable with the pinned kernel, and why that is itself a finding
 
-**Status: not implemented. Superseded by the finding below.**
+**Status: UNBLOCKED as of 2026-08-02 and satisfiable as originally written.
+Implement the packet above.** The addendum below is retained as the record of
+why it could not be built the first time.
+
+The blocker was removed by kernel PR #32 (`averray-agent/agent-harness`), which
+stopped the executor discarding a completed model response on a budget stop, and
+by #676, which moved this repository's pin from `0890a1f0` to `f010c993`. CI has
+run the suite 10/10 against the new kernel with
+`INT2_HARNESS_PIN_VERIFIED pin=f010c993…` in its evidence.
+
+What changed concretely: with the kernel preserving `final_text` on a budget
+stop, `change_summary` is now rendered for a run that exhausted its budget after
+producing text. A cap below the green script's measured usage therefore yields
+**both** an overrun **and** a valid handoff — the combination that did not exist
+before, and the reason the packet was unsatisfiable.
 
 Codex attempted this and stopped rather than weaken the handoff invariant. That
 was the correct call, and the reason is worth more than the case would have been.
@@ -175,7 +189,6 @@ proof and a better one than a flaky test.
 
 ## Next
 
-A kernel packet in `averray-agent/agent-harness`: a budget-terminated run should
-retain the response it had already produced. Once that lands and the pin moves,
-this work order becomes satisfiable as originally written and should be revisited
-rather than deleted.
+~~A kernel packet in `averray-agent/agent-harness`~~ — **done.** Kernel #32
+merged 2026-08-02 and the pin moved in #676. This work order is live again; see
+the status note at the top of this addendum.
