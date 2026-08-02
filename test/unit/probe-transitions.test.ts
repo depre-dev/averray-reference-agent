@@ -164,4 +164,38 @@ describe("decideProbeTransitions", () => {
     });
     expect(r.alerts.map((x) => `${x.probe}:${x.kind}`).sort()).toEqual(["a:opened", "b:recovered"]);
   });
+
+  it("a restart does not re-announce an alarm that never changed", () => {
+    // THE REGRESSION. Tick 1 after a restart sees the probe for the first time
+    // and is correctly silent — but it must also REMEMBER, or tick 2 finds an
+    // empty posted set and treats the same unchanged alarm as fresh news.
+    // Production posted three duplicate money_path alerts this way, one per
+    // deploy, before this was caught.
+    const broken = p("money_path", "degraded", "stuck 1, settled24h 12");
+
+    // tick 1 — cold start, probe already degraded
+    const first = decide({ previous: new Map(), current: [broken] });
+    expect(first.alerts).toEqual([]);
+    expect(first.keys.has(reasonClass(broken))).toBe(true);
+
+    // tick 2 — nothing changed; the retained key must suppress it
+    const second = decide({ previous: first.next, current: [broken], posted: first.keys });
+    expect(second.alerts).toEqual([]);
+  });
+
+  it("a restart still lets a LATER genuine change through", () => {
+    // The fix must not over-suppress: a cold start followed by a real
+    // escalation is news, and staying quiet would be the opposite failure.
+    const degraded = p("money_path", "degraded", "stuck 1");
+    const first = decide({ previous: new Map(), current: [degraded] });
+    const worse = p("money_path", "red", "stuck 9, settlement stalled");
+    const second = decide({ previous: first.next, current: [worse], posted: first.keys });
+    expect(second.alerts).toHaveLength(1);
+    expect(second.alerts[0]?.to).toBe("red");
+  });
+
+  it("a probe that is HEALTHY at first sight retains nothing", () => {
+    const first = decide({ previous: new Map(), current: [p("x", "ok", "fine")] });
+    expect([...first.keys]).toEqual([]);
+  });
 });
