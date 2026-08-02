@@ -93,6 +93,51 @@ describe("splitPools", () => {
   });
 });
 
+describe("payoutView — the fee exclusion is explained on screen", () => {
+  const base = {
+    status: "confirmed" as const, detail: "ok",
+    confirmedCount: 19, confirmedUsdc: 3.1, settledCount: 16, windowBlocks: 43200,
+  };
+
+  test("names the fee credits that were excluded from the count", () => {
+    // Excluding fees moved a number the operator had been reading for weeks.
+    // Without this the count silently drops and nothing explains why — which is
+    // its own kind of dishonesty about a money figure.
+    const view = payoutView({ ...base, feeCount: 1, feeUsdc: 0.05, feesSeparated: true });
+    expect(view.line1).toContain("1 fee credit");
+    expect(view.line1).toContain("excluded");
+  });
+
+  test("says so when fees could NOT be separated", () => {
+    // The count may still include fees. Silence here would let a conflated
+    // number read as a clean one.
+    const view = payoutView({ ...base, feeCount: null, feeUsdc: null, feesSeparated: false });
+    expect(view.line1).toContain("fees not separated");
+  });
+
+  test("stays quiet when fees were separable and there were none", () => {
+    // Nothing to explain. A permanent "0 fees excluded" is the noise that
+    // teaches an operator to stop reading the line.
+    const view = payoutView({ ...base, feeCount: 0, feeUsdc: 0, feesSeparated: true });
+    expect(view.line1).not.toContain("fee");
+  });
+
+  test("stays quiet on a payload that predates the split", () => {
+    // An older monitor claims nothing either way; inventing a note would be a
+    // statement it never made.
+    expect(payoutView(base).line1).not.toContain("fee");
+  });
+
+  test("does not change the verdict", () => {
+    // Fees explain WHICH settlements were counted. They must not affect whether
+    // payouts reconcile.
+    const view = payoutView({ ...base, feeCount: 3, feeUsdc: 0.105, feesSeparated: true });
+    expect(view.status).toBe("CONFIRMED");
+    expect(view.tone).toBe("ok");
+    expect(view.emphasised).toBe(false);
+  });
+});
+
 describe("payoutView — instrument broken vs money broken", () => {
   // The distinction the whole row exists for. `unverified` means we cannot see
   // the chain; paging on it is the false red that teaches an operator to ignore
