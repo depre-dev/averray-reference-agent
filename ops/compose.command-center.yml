@@ -14,6 +14,10 @@ services:
         condition: service_completed_successfully
       mcp-env:
         condition: service_completed_successfully
+      # Mounts the same skills volume below, so it needs the guarantee the
+      # `hermes` service has: the tree is current before the agent reads it.
+      skills-sync:
+        condition: service_completed_successfully
       skills-observer:
         condition: service_started
     environment:

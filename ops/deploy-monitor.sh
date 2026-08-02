@@ -101,6 +101,44 @@ COMPOSE=(docker compose -p avg --env-file .env.prod
   -f ops/compose.command-center.yml
   -f ops/compose.cloudflare-access.yml)
 
+# SYNC THE SKILL TREE FIRST — on every deploy, whatever service is being
+# deployed.
+#
+# hermes/skills/** is not baked into any image. It reaches the agent by being
+# bind-mounted in and copied into the avg-hermes-skills volume, and until that
+# copy happens a merged SKILL.md edit is live nowhere. Compose gates `hermes`
+# on skills-sync, but that only fires when Hermes itself restarts, which a
+# monitor deploy does not do — so the sync would run days late, or not at all.
+#
+# This is the same lesson as GIT_SHA above: a correctness-critical step must not
+# depend on an operator remembering to type it, so it lives here.
+#
+# ADVISORY, not fatal. Deploying the board is how the operator sees the money
+# path, and the board reads none of these skills; failing that deploy because a
+# skill file could not be copied would be the coupling #657 removed. A stale
+# tree still fails closed where it matters (Hermes will not boot onto one) and
+# skills-observer keeps reporting the drift until it is fixed.
+#
+# --no-deps is deliberate. skills-sync depends on hermes-permissions, which is
+# a one-shot that has already exited by the time anyone deploys; pulling it in
+# here would re-run its `chmod -R 0777 /opt/data` and re-open the Hermes data
+# volume that Hermes spends its life securing to 0700 — a permissions change
+# nobody asked a monitor deploy to make. The volume already exists on any box
+# being deployed to, and the first-boot ordering is handled by compose's
+# dependency graph, not by this script.
+echo "syncing hermes/skills -> the skills volume"
+if GIT_SHA="$GIT_SHA" GIT_DIRTY="$GIT_DIRTY" "${COMPOSE[@]}" run --rm --no-deps --build skills-sync; then
+  echo
+else
+  echo >&2
+  echo "WARNING: the skills sync did not complete — the running agent may be" >&2
+  echo "         reading a skill tree that does not match this commit. The" >&2
+  echo "         deploy of ${SERVICE} continues (it does not read these files)." >&2
+  echo "         Check the log above; skills-observer will keep reporting the" >&2
+  echo "         drift until it is resolved." >&2
+  echo >&2
+fi
+
 echo "deploying ${SERVICE} at ${GIT_SHA:0:8}$([ "$GIT_DIRTY" = true ] && echo ' (dirty)')"
 
 # NEVER --remove-orphans here: this compose project shares a network with

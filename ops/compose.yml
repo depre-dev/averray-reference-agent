@@ -109,6 +109,55 @@ services:
     entrypoint: ["/bin/sh", "/write-mcp-env.sh", "/mcp-env/reference-agent.env"]
     networks: [avg-internal]
 
+  # Copies hermes/skills/** from the git checkout into the skills volume, so
+  # that merging a change to a SKILL.md actually reaches the running agent.
+  #
+  # Before this existed nothing connected the two: the volume copy was placed by
+  # hand, so a merged edit had no effect and the live copy could diverge from
+  # git with no error and no signal. One skill sat unreachable for weeks in a
+  # misnamed location, and the agent answered a production question wrongly
+  # because of it. Hermes is gated on this completing (see its depends_on) so it
+  # cannot boot onto a stale tree.
+  #
+  # The mount is a bind of ../hermes/skills, matching how hermes.yaml,
+  # policy.yaml and plugins already reach the container. Directory structure is
+  # copied verbatim: Hermes discovers skills with skills_dir.rglob("SKILL.md")
+  # and takes the NAME from the parent directory and the CATEGORY from its
+  # grandparent, so ops/averray-ops/SKILL.md must land at exactly that path.
+  #
+  # It never deletes: Hermes writes its own skills into this volume at runtime
+  # and mirroring the repo would destroy them.
+  skills-sync:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.node
+      args:
+        # Baked so the monitor can report its own version. Use
+        # ops/deploy-monitor.sh — it computes both and refuses a dirty tree.
+        # Deploying by hand leaves these unset, which is why self-freshness
+        # read "unknown" from the day it shipped until 2026-08-01.
+        GIT_SHA: ${GIT_SHA:-unknown}
+        GIT_DIRTY: ${GIT_DIRTY:-false}
+    image: ${AVERRAY_IMAGE:-avg-node-runtime}
+    # Same reason as skills-observer below: Hermes owns this volume as UID 10000
+    # and continuously re-secures it to 0700, so this is the only user that can
+    # write it once Hermes has run. Writes that lose that race are retried, and
+    # the exit code comes from re-reading the volume afterwards rather than from
+    # whether every individual write succeeded.
+    user: "10000:10000"
+    depends_on:
+      hermes-permissions:
+        condition: service_completed_successfully
+    command: ["node", "services/skills-observer/dist/sync.js"]
+    environment:
+      REPO_SKILLS_DIR: /repo-skills
+      HERMES_SKILLS_DIR: /opt/data/skills
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - ../hermes/skills:/repo-skills:ro
+      - avg-hermes-skills:/opt/data/skills
+    networks: [avg-internal]
+
   skills-observer:
     build:
       context: ..
@@ -135,11 +184,16 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       HERMES_SKILLS_DIR: /hermes-skills
+      # Second copy of the tree, read-only, so the observer can report when the
+      # volume stops matching git. skills-sync makes the copy right; this makes
+      # a later divergence visible instead of silent.
+      REPO_SKILLS_DIR: /repo-skills
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - avg-hermes:/opt/data:ro
       - avg-hermes-skills:/hermes-skills:ro
+      - ../hermes/skills:/repo-skills:ro
     networks: [avg-internal]
 
   slack-operator:
@@ -1051,6 +1105,14 @@ services:
       mcp-bundle:
         condition: service_completed_successfully
       mcp-env:
+        condition: service_completed_successfully
+      # Gate the agent on the skill tree being current. Hermes reads
+      # /opt/data/skills at startup, so syncing after it boots would leave it
+      # running the previous copy until the next restart. A failed sync holds
+      # Hermes back rather than letting it answer from a stale skill; the ops
+      # board does not depend on Hermes, so this costs the agent, not the
+      # money path. To start it anyway: `up -d --no-deps hermes`.
+      skills-sync:
         condition: service_completed_successfully
       skills-observer:
         condition: service_started
