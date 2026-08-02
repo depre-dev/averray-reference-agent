@@ -18,6 +18,12 @@
 import type { MonitorBoard } from "../../lib/monitor/board-cache.js";
 import type { ProductHealth } from "../../lib/monitor/product-health.js";
 import { formatAgo, incidentRows } from "../../lib/monitor/ops-model.js";
+import {
+  disputeClockLine,
+  economicsLine,
+  gasLine,
+  payoutRunwayLine,
+} from "../../lib/monitor/ops-spec.js";
 import { opsVerdict, staleAfterMs, trustRows } from "../../lib/monitor/ops-spec.js";
 import { FlowPanel } from "./FlowPanel.js";
 import { PillarStrip } from "./PillarStrip.js";
@@ -118,6 +124,38 @@ export function OpsBoard({
         </div>
 
         <PillarStrip probes={health.probes} history={health.history} />
+
+        {/* The money lines. Each is its own row so a caveat cannot be pushed
+            off the end of a shared line — the failure the wallet strip hit. */}
+        <div className="ops-money-lines">
+          {(() => {
+            // Only rendered when a bond is actually counting down. Absence here
+            // is CORRECT, not a missing feature: a permanently-present row that
+            // almost always says "0" is one nobody reads on the day it matters.
+            const clock = disputeClockLine(health.externalFunnel, nowMs);
+            return clock ? <span data-tone={clock.tone}>{clock.text}</span> : null;
+          })()}
+          {(() => {
+            const runway = payoutRunwayLine({
+              pool: (health.solvency?.pools ?? []).find((p) => p.key === "reward_bank"),
+              payout: health.flow?.payout,
+              runwayNote: health.solvency?.runwayNote,
+            });
+            return <span data-tone={runway.tone}>{runway.text}</span>;
+          })()}
+          {(() => {
+            const g = gasLine(health.gas, nowMs);
+            return <span data-tone={g.tone}>{g.text}</span>;
+          })()}
+          {(() => {
+            const e = economicsLine({
+              payout: health.flow?.payout,
+              gas: health.gas,
+              llmMonthlyUsd: board?.llmUsage?.billing?.monthlyTotalUsd ?? null,
+            });
+            return <span data-tone={e.tone}>{e.text}</span>;
+          })()}
+        </div>
 
         <div className="ops-foot">
           <span>INCIDENTS — {incidentSummary(health, nowMs)}</span>

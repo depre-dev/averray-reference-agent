@@ -42,9 +42,31 @@ export interface GasSpendSnapshot extends GasSpend {
   staleReason?: string;
 }
 
+/**
+ * A read that has never succeeded, with the reason it has not.
+ *
+ * Before this existed, a first read that failed produced no snapshot, no log
+ * and no payload field — the board simply said nothing, forever, and the only
+ * way to discover it was to ask why a number was missing. That is the failure
+ * mode this whole board exists to prevent, and I built it into the board.
+ */
+export interface GasUnreadable {
+  unreadable: true;
+  reason: string;
+  /** When the failing attempt happened. */
+  at: number;
+}
+
+export function isGasUnreadable(v: GasSpendSnapshot | GasUnreadable | null): v is GasUnreadable {
+  return v !== null && (v as GasUnreadable).unreadable === true;
+}
+
 export interface GasSpendCache {
-  /** The current snapshot with a fresh age, or null before the first success. */
-  read(nowMs: number): GasSpendSnapshot | null;
+  /**
+   * The current snapshot, or — when no read has ever succeeded — the reason
+   * why. Null only before the first attempt has finished.
+   */
+  read(nowMs: number): GasSpendSnapshot | GasUnreadable | null;
   /**
    * Refresh if the snapshot has aged out. Returns immediately; the work happens
    * in the background. Safe to call every heartbeat.
@@ -66,6 +88,9 @@ export function createGasSpendCache(deps: {
 }): GasSpendCache {
   const refreshMs = deps.refreshMs ?? DEFAULT_GAS_REFRESH_MS;
   let snapshot: GasSpendSnapshot | null = null;
+  // Kept separately: a failure BEFORE any success has no snapshot to attach to,
+  // and dropping it is what made the whole feature silent in production.
+  let firstError: { reason: string; at: number } | null = null;
   // One refresh at a time. Without this a slow read plus a fast heartbeat
   // stacks passes, and each is 174 RPC calls against an endpoint that
   // rate-limits by answering 404.
@@ -73,8 +98,12 @@ export function createGasSpendCache(deps: {
 
   return {
     read(nowMs) {
-      if (!snapshot) return null;
-      return { ...snapshot, ageMs: Math.max(0, nowMs - snapshot.at) };
+      if (snapshot) return { ...snapshot, ageMs: Math.max(0, nowMs - snapshot.at) };
+      // Never succeeded. Say why rather than nothing — "the board shows no gas
+      // line" and "gas could not be read" are different facts and only one of
+      // them is actionable.
+      if (firstError) return { unreadable: true, reason: firstError.reason, at: firstError.at };
+      return null;
     },
 
     maybeRefresh(nowMs) {
@@ -88,6 +117,7 @@ export function createGasSpendCache(deps: {
             // Keep the previous figures and say why they stopped moving. An
             // unreadable chain is not zero spend.
             if (snapshot) snapshot = { ...snapshot, staleReason: result.reason };
+            else firstError = { reason: result.reason, at: nowMs };
             deps.onError?.(result.reason);
             return;
           }
@@ -95,6 +125,7 @@ export function createGasSpendCache(deps: {
             ...(deps.labels ? { labels: deps.labels } : {}),
             settledCount: deps.settledCount(),
           });
+          firstError = null;
           snapshot = {
             ...summary,
             at: nowMs,
@@ -106,6 +137,7 @@ export function createGasSpendCache(deps: {
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           if (snapshot) snapshot = { ...snapshot, staleReason: message };
+          else firstError = { reason: message, at: nowMs };
           deps.onError?.(message);
         } finally {
           running = false;

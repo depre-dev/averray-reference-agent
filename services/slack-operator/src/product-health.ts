@@ -34,7 +34,7 @@ import { probeExternalFunnel, type BucketSummary, type FunnelBucket } from "./ex
 import { h160ToSs58 } from "./hub-address.js";
 import { ESCROW_V2_SELECTORS } from "./escrow-selectors.js";
 import { readGasSpend } from "./gas-spend-read.js";
-import { createGasSpendCache, type GasSpendCache, type GasSpendSnapshot } from "./gas-spend-cache.js";
+import { createGasSpendCache, type GasSpendCache, type GasSpendSnapshot, type GasUnreadable } from "./gas-spend-cache.js";
 import { alertProvenance, decideMoneyAlert } from "./money-alert.js";
 import { decideSelfFreshness, fetchSelfCompare } from "./self-freshness.js";
 import type { SelfFreshness } from "./self-freshness.js";
@@ -1571,7 +1571,7 @@ export async function readGasAttributionCache(input: {
   agentAccountCore?: string;
   fetchImpl: typeof fetch;
   nowMs: number;
-}): Promise<GasSpendSnapshot | null> {
+}): Promise<GasSpendSnapshot | GasUnreadable | null> {
   return gasAttribution(input);
 }
 
@@ -1599,7 +1599,7 @@ function gasAttribution(input: {
   agentAccountCore?: string;
   fetchImpl: typeof fetch;
   nowMs: number;
-}): GasSpendSnapshot | null {
+}): GasSpendSnapshot | GasUnreadable | null {
   const { config } = input;
   if (!config.gasAttributionEnabled) return null;
   const contracts = [input.escrowCore, input.agentAccountCore].filter(
