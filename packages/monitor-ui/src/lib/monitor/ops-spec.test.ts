@@ -6,6 +6,7 @@ import {
   shortEndpoint,
   staleAfterMs,
   opsVerdict,
+  askHermesRow,
   payoutView,
   poolMeter,
   splitPools,
@@ -90,6 +91,39 @@ describe("splitPools", () => {
     const { floored } = splitPools([pool({ amount: 1.42, floor: 2, status: "red" })]);
     expect(floored[0]!.margin).toBe("BELOW FLOOR · short 0.58");
     expect(floored[0]!.marginTone).toBe("red");
+  });
+});
+
+describe("askHermesRow — can Hermes answer?", () => {
+  test("only listening counts as ok", () => {
+    // Every other phase means a question asked right now goes unanswered.
+    expect(askHermesRow({ phase: "listening", detail: "subscribed", failures: 0 }).tone).toBe("ok");
+    for (const phase of ["connecting", "authenticating", "retrying", "misconfigured"] as const) {
+      const row = askHermesRow({ phase, detail: "why", failures: 2 });
+      expect(row.tone).toBe("degraded");
+      expect(row.value).toContain("NOT answering");
+    }
+  });
+
+  test("off is not a fault", () => {
+    // A feature nobody enabled must never render as broken, or the row becomes
+    // one more permanently-lit thing to scroll past.
+    const row = askHermesRow({ phase: "off", detail: "BUZZ_INBOUND_ENABLED is not set", failures: 0 });
+    expect(row.tone).toBe("awaiting");
+    expect(row.value).toContain("BUZZ_INBOUND_ENABLED");
+  });
+
+  test("an older build says so instead of inventing a status", () => {
+    const row = askHermesRow(undefined);
+    expect(row.value).toBe("not reported by this build");
+    expect(row.tone).toBe("awaiting");
+  });
+
+  test("a retrying listener does not look like a quiet one", () => {
+    // THE POINT. Without this row a dead listener is found by asking a question
+    // and getting silence — indistinguishable from having nothing to say.
+    const row = askHermesRow({ phase: "retrying", detail: "relay closed", failures: 3 });
+    expect(row.value).toContain("3 failed attempts");
   });
 });
 

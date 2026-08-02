@@ -226,6 +226,7 @@ export function trustRows(input: {
 
   rows.push(monitorRow(health.self));
   rows.push(buzzRow(health.buzz));
+  rows.push(askHermesRow(health.buzzInbound));
 
   const rem = health.remediation;
   if (!rem || !rem.enabled || rem.state === "off") {
@@ -265,6 +266,33 @@ function buzzRow(buzz: ProductHealth["buzz"]): TrustRow {
   const tone: OpsTone =
     buzz.status === "ok" ? "ok" : buzz.status === "failing" ? "red" : "awaiting";
   return { key: "OPS CHANNEL", value: buzz.detail, tone };
+}
+
+/**
+ * Can Hermes ANSWER? — the other half of the ops channel.
+ *
+ * `OPS CHANNEL` above says whether alerts get OUT. This says whether a question
+ * gets IN, and the two fail differently: a dead listener emits no alert and no
+ * error, so it is found by asking something and getting silence — which reads
+ * as the agent having nothing to say.
+ *
+ * Only `listening` is ok. Every other phase means questions go unanswered, and
+ * a retrying listener looks exactly like a channel nobody has posted in.
+ * `off` is not a fault — a feature nobody enabled must never render as broken,
+ * or the row becomes one more permanently-lit thing to scroll past.
+ */
+export function askHermesRow(inbound: ProductHealth["buzzInbound"]): TrustRow {
+  // Absent means this build predates the feature. Inventing a status for a
+  // field the server never sent is the fabrication this panel exists to avoid.
+  if (!inbound) return { key: "ASK HERMES", value: "not reported by this build", tone: "awaiting" };
+  if (inbound.phase === "listening") return { key: "ASK HERMES", value: "listening — questions answered", tone: "ok" };
+  if (inbound.phase === "off" || inbound.phase === "closed") {
+    return { key: "ASK HERMES", value: inbound.detail || "not enabled", tone: "awaiting" };
+  }
+  // connecting / authenticating / retrying / misconfigured — all mean a question
+  // asked right now goes unanswered. Say which, and say it is not answering.
+  const retries = inbound.failures > 0 ? ` · ${inbound.failures} failed attempt${inbound.failures === 1 ? "" : "s"}` : "";
+  return { key: "ASK HERMES", value: `${inbound.phase} — NOT answering${retries}`, tone: "degraded" };
 }
 
 function monitorRow(self: SelfFreshness | undefined): TrustRow {
