@@ -652,8 +652,17 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
     selfDirty: truthy(env.AVERRAY_GIT_DIRTY),
     selfGithubToken: env.PRODUCT_HEALTH_SELF_GITHUB_TOKEN || env.GITHUB_TOKEN || undefined,
     githubApiBaseUrl: env.GITHUB_API_BASE_URL || undefined,
-    // ~24h at a 6s block time. Lower it if the RPC caps eth_getLogs ranges.
-    payoutLookbackBlocks: num(env.PRODUCT_HEALTH_PAYOUT_LOOKBACK_BLOCKS, 14400),
+    // A CEILING, not the window. The window itself is derived from the chain's
+    // MEASURED block time (see resolvePayoutLookback) so it actually spans the
+    // 24h it is compared against; this only bounds how far we are willing to
+    // ask the RPC to scan. Lower it if eth_getLogs ranges are capped.
+    //
+    // Was 14400 with the comment "~24h at a 6s block time". The measured rate is
+    // 2.112s, so that default spanned 8.4 HOURS while being compared against a
+    // 24h ledger count — the short direction, which under-counts payouts and
+    // manufactures a shortfall. Any deployment on the default was exposed to it;
+    // mainnet only escaped by overriding to 43200 (still 25.3h, 5% long).
+    payoutLookbackBlocks: num(env.PRODUCT_HEALTH_PAYOUT_LOOKBACK_BLOCKS, 60000),
     payoutTolerance: num(env.PRODUCT_HEALTH_PAYOUT_TOLERANCE, 1),
     diskPath: env.PRODUCT_HEALTH_DISK_PATH || "/",
     // Unlike the token floors (which default to 0 = can-never-go-red, because a
@@ -1238,6 +1247,42 @@ export function decideWindowFit(input: {
     blockSeconds,
     spanHours: span,
   };
+}
+
+/**
+ * Size the log window from the chain's MEASURED block time.
+ *
+ * decideWindowFit already computed the right number and only ever printed it:
+ * `~40909 blocks would match`. Reporting the correct window while continuing to
+ * scan the wrong one leaves the operator to reconcile two numbers by hand,
+ * every day, forever.
+ *
+ * The configured value becomes a CEILING rather than the window. It exists for
+ * RPCs that cap eth_getLogs ranges, and that is a limit on what we may ask for —
+ * not a statement about how long 24 hours is.
+ *
+ * Falling back to the ceiling when the chain cannot be sampled is deliberate:
+ * an unmeasured block time is exactly when a guess is least trustworthy, so the
+ * behaviour stays what the operator configured, and decideWindowFit reports the
+ * fit as "unchecked" rather than implying a pass.
+ *
+ * When the ceiling binds, the window is SHORT — the dangerous direction, which
+ * under-counts payouts and manufactures a shortfall. That is not silently
+ * accepted: the same decideWindowFit call flags it as `suspect` and names the
+ * direction.
+ */
+export function resolvePayoutLookback(input: {
+  blockSeconds: number | null;
+  /** Upper bound on blocks we are willing to scan. */
+  maxBlocks: number;
+  targetHours: number;
+}): { blocks: number; derived: boolean } {
+  const { blockSeconds, maxBlocks, targetHours } = input;
+  if (blockSeconds === null || !Number.isFinite(blockSeconds) || blockSeconds <= 0) {
+    return { blocks: maxBlocks, derived: false };
+  }
+  const wanted = Math.round((targetHours * 3600) / blockSeconds);
+  return { blocks: Math.min(wanted, maxBlocks), derived: true };
 }
 
 /**
@@ -2167,6 +2212,17 @@ export async function collectProductHealthProbes(
         fetchImpl,
       })
     : null;
+  // Measure BEFORE reading logs, so the window is sized by the chain's real
+  // rate rather than merely checked against it afterwards. One sample serves
+  // both the sizing and the fit report.
+  const blockSeconds = config.payoutEvidenceEnabled
+    ? await measureBlockSeconds({ rpcUrl: config.rpcUrl, sampleBlocks: PAYOUT_BLOCK_TIME_SAMPLE, fetchImpl })
+    : null;
+  const lookback = resolvePayoutLookback({
+    blockSeconds,
+    maxBlocks: config.payoutLookbackBlocks,
+    targetHours: PAYOUT_COMPARISON_HOURS,
+  });
   const payoutRead = config.payoutEvidenceEnabled
     ? await readPayoutTransfers({
         rpcUrl: config.rpcUrl,
@@ -2175,7 +2231,7 @@ export async function collectProductHealthProbes(
         sourceAddress: config.payoutSourceAddress || h.body?.addresses?.agentAccountCore,
         usdcAddress: config.usdcAddress,
         usdcDecimals: config.usdcDecimals,
-        lookbackBlocks: config.payoutLookbackBlocks,
+        lookbackBlocks: lookback.blocks,
         expectedChainId: chainId,
         ...(feeRecipient ? { feeRecipientAddress: feeRecipient } : {}),
         fetchImpl,
@@ -2184,14 +2240,13 @@ export async function collectProductHealthProbes(
   // Check the INSTRUMENT against the chain, not against an assumption. The
   // lookback is compared to settled24h, so it has to actually span 24h at the
   // chain's real block time — an assumed one has already been wrong in prod.
+  // Checks the window we ACTUALLY scanned, not the ceiling. Sizing it from the
+  // measurement should make this read "ok" — and when it does not, the ceiling
+  // is binding and the window is genuinely short, which is worth saying.
   const windowFit = config.payoutEvidenceEnabled
     ? decideWindowFit({
-        blockSeconds: await measureBlockSeconds({
-          rpcUrl: config.rpcUrl,
-          sampleBlocks: PAYOUT_BLOCK_TIME_SAMPLE,
-          fetchImpl,
-        }),
-        lookbackBlocks: config.payoutLookbackBlocks,
+        blockSeconds,
+        lookbackBlocks: lookback.blocks,
         targetHours: PAYOUT_COMPARISON_HOURS,
       })
     : undefined;
