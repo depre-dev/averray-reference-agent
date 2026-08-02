@@ -16,7 +16,7 @@ import { pathToFileURL } from "node:url";
 import { Pool } from "pg";
 
 export const INT2_HARNESS_PIN =
-  "0890a1f04c2729cbd310e21f66dd9dc6fbc66dc2";
+  "f010c993b0adfe55899b84a60777b0a4331fd972";
 export const INT2_EXPECTED_PATH =
   "docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md";
 export const INT2_SECTION3_CRITERION =
