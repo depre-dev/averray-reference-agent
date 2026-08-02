@@ -1,6 +1,6 @@
 ---
 name: averray-ops
-description: Read the Averray ops board and explain its verdict honestly.
+description: Read and explain the Averray ops board — the live health of a system that settles real USDC on Polkadot Hub mainnet. Use whenever asked whether Averray is working, or about the money path, payouts, settlements, solvency, liquidity floors, probes, incidents, the dispute window on external jobs, or why the board shows a particular verdict. Also use before answering any question that implies the system's current state, so the answer comes from the board rather than from memory.
 ---
 
 # Watching Averray
@@ -10,15 +10,27 @@ payouts to AI agents on Polkadot Hub mainnet (chain 420420419). There is one
 operator. Your job is to notice when something is wrong, explain it, and stay
 quiet when it isn't.
 
-Lives at `/opt/data/skills/averray-ops/SKILL.md`, copied from
-`hermes/skills/averray-ops/SKILL.md` in `depre-dev/averray-reference-agent`.
+Lives at `/opt/data/skills/ops/averray-ops/SKILL.md`, copied from
+`hermes/skills/ops/averray-ops/SKILL.md` in `depre-dev/averray-reference-agent`.
 Edit it there, not in the volume.
 
-The directory and the exact filename matter: Hermes discovers skills with
-`skills_dir.rglob("SKILL.md")` (`hermes_cli/profile_distribution.py`). A flat
-`averray-ops.md` is never found — and it does not error, it is simply never
-loaded, which reads as the agent ignoring its guidance rather than as a missing
-file. This document spent its first weeks in exactly that state.
+The layout is not decoration, and all three levels were checked against the
+running image rather than assumed:
+
+- Hermes discovers skills with `skills_dir.rglob("SKILL.md")`
+  (`hermes_cli/profile_distribution.py`), so the file must be named exactly
+  `SKILL.md`. A flat `averray-ops.md` is never found.
+- The parent directory is the skill NAME and its grandparent is the CATEGORY —
+  the shipped `codex` skill sits at
+  `/opt/data/skills/autonomous-ai-agents/codex/SKILL.md` and lists under that
+  category.
+- The `description` is a TRIGGER, not a label. It is what decides whether this
+  skill is reached for at all, so it names the questions it should answer
+  instead of summarising the file.
+
+None of this errors when wrong. A misplaced skill is simply never loaded, which
+reads as the agent ignoring its guidance rather than as a missing file. This
+document spent its first weeks in exactly that state.
 
 ---
 
@@ -307,9 +319,10 @@ the board draws.
 ## Note on this file
 
 The format IS now verified against the running image
-(`nousresearch/hermes-agent:v2026.7.1`): Hermes discovers skills by
-`skills_dir.rglob("SKILL.md")`, so this must live in its own directory under
-`/opt/data/skills/` and be named exactly `SKILL.md`.
+(`nousresearch/hermes-agent:v2026.7.1`) — filename, directory depth and
+frontmatter all checked against a skill Hermes already loads, not against
+convention. `hermes skills list` is the confirmation: this should appear as
+`averray-ops`, category `ops`, source `local`.
 
 Our `skills-observer` is a separate thing — it records any `.md` under that
 volume into Postgres so a change is auditable. It watching a file is NOT
