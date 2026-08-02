@@ -447,7 +447,7 @@ describe("committed INT-2 ceremony mechanics", () => {
           "int2-checkout-test",
           CHECKOUT_HELPER,
           path.join(temporary, "agent-harness"),
-          "0890a1f04c2729cbd310e21f66dd9dc6fbc66dc2",
+          "f010c993b0adfe55899b84a60777b0a4331fd972",
           log,
         ],
         {
@@ -502,7 +502,7 @@ describe("committed INT-2 ceremony mechanics", () => {
         "int2-checkout-test",
         CHECKOUT_HELPER,
         checkout,
-        "0890a1f04c2729cbd310e21f66dd9dc6fbc66dc2",
+        "f010c993b0adfe55899b84a60777b0a4331fd972",
         bootstrapLog,
       ],
       {

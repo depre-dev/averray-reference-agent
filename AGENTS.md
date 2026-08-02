@@ -257,7 +257,7 @@ CODEX_HANDOFF_PROTOCOL) is a separate release signal.
 2. **Docker build** of `ops/Dockerfile.node` (also builds the in-image Vite SPA) +
    **compose config validation**. On `main` it also pushes the runtime image to GHCR.
 3. **INT-2 supervised dispatch** in a separate required job: real dispatcher,
-   two disposable Postgres databases, Harness pin `0890a1f0`, Docker-isolated
+   two disposable Postgres databases, Harness pin `f010c99`, Docker-isolated
    scripted runs, and an executed-count assertion so skipping cannot pass.
 
 Run the smallest relevant subset locally before opening a PR. **Do not bypass
