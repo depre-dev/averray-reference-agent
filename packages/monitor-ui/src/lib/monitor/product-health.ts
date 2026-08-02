@@ -46,6 +46,26 @@ export interface SolvencyPool {
   addressSs58?: string;
 }
 
+/** Gas spend by operation. Mirrors the server snapshot; see ops-spec gasLine(). */
+export interface GasSpendView {
+  totalDot: number;
+  txCount: number;
+  /** DOT per settlement — gas as a unit cost, holdable against the reward. */
+  perSettlement: number | null;
+  buckets: Array<{ label: string; count: number; dot: number; avgDot: number; sharePct: number; failed: number }>;
+  /** Gas burned by reverted transactions. Bought nothing. */
+  failedDot: number;
+  failedCount: number;
+  /** Age of these figures. Disclosed, never laundered. */
+  ageMs: number;
+  /** True when the tx cap bit — the total UNDERSTATES spend. */
+  truncated: boolean;
+  /** Other signing keys seen; their gas is excluded from these totals. */
+  otherSenders: Array<{ address: string; count: number }>;
+  /** Set when the last refresh failed; the figures are the previous ones. */
+  staleReason?: string;
+}
+
 /** Can the #Ops channel receive anything? Instrument health, not product health. */
 export interface BuzzDeliveryView {
   status: "off" | "armed" | "ok" | "failing";
@@ -271,6 +291,15 @@ export interface ProductHealth {
    * missing — those two must not render the same.
    */
   buzzInbound?: BuzzInboundView;
+  /**
+   * What the signer's gas went ON, over the payout window.
+   *
+   * Absent until the first read succeeds — and absent is NOT zero. An empty
+   * breakdown would render "0 DOT spent", which reads as free rather than as
+   * not-yet-measured. Read on its own cadence (a pass is ~174 RPC calls), so it
+   * carries its own age.
+   */
+  gas?: GasSpendView;
   /** The monitor's own build vs main — "is this board current?". */
   self?: SelfFreshness;
   /**

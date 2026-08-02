@@ -32,6 +32,9 @@ import type { AlertPayload } from "./alert-bridge.js";
 import { decideDiskHeadroom, readDiskUsage } from "./disk-headroom.js";
 import { probeExternalFunnel } from "./external-funnel.js";
 import { h160ToSs58 } from "./hub-address.js";
+import { ESCROW_V2_SELECTORS } from "./escrow-selectors.js";
+import { readGasSpend } from "./gas-spend-read.js";
+import { createGasSpendCache, type GasSpendCache, type GasSpendSnapshot } from "./gas-spend-cache.js";
 import { alertProvenance, decideMoneyAlert } from "./money-alert.js";
 import { decideSelfFreshness, fetchSelfCompare } from "./self-freshness.js";
 import type { SelfFreshness } from "./self-freshness.js";
@@ -548,6 +551,10 @@ export interface ProductHealthConfig {
   githubApiBaseUrl?: string;
   /** Blocks scanned for Transfer logs (~24h at the chain's block time). */
   payoutLookbackBlocks: number;
+  /** Gas attribution is off by default: a pass is ~174 RPC calls. */
+  gasAttributionEnabled: boolean;
+  /** How stale the gas snapshot may get before a background refresh. */
+  gasRefreshMs: number;
   /** Settled-minus-confirmed gap tolerated as a window-boundary artifact. */
   payoutTolerance: number;
   /** Filesystem the monitor writes to. Container `/` sees real host capacity. */
@@ -664,6 +671,10 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
     // mainnet only escaped by overriding to 43200 (still 25.3h, 5% long).
     payoutLookbackBlocks: num(env.PRODUCT_HEALTH_PAYOUT_LOOKBACK_BLOCKS, 60000),
     payoutTolerance: num(env.PRODUCT_HEALTH_PAYOUT_TOLERANCE, 1),
+    // Off by default. A pass is ~174 RPC calls against an endpoint that
+    // rate-limits by answering 404, so the operator opts in knowingly.
+    gasAttributionEnabled: truthy(env.PRODUCT_HEALTH_GAS_ATTRIBUTION_ENABLED),
+    gasRefreshMs: num(env.PRODUCT_HEALTH_GAS_REFRESH_MS, 30 * 60 * 1000),
     diskPath: env.PRODUCT_HEALTH_DISK_PATH || "/",
     // Unlike the token floors (which default to 0 = can-never-go-red, because a
     // sensible balance is deployment-specific), disk exhaustion is universally
@@ -1553,6 +1564,88 @@ const POSITIONS_SELECTOR = "0x4bd21445";
  * Returns null on any failure, so the caller reports "cannot separate fees"
  * rather than splitting on a guess.
  */
+export async function readGasAttributionCache(input: {
+  config: ProductHealthConfig;
+  settledCount: number | null;
+  escrowCore?: string;
+  agentAccountCore?: string;
+  fetchImpl: typeof fetch;
+  nowMs: number;
+}): Promise<GasSpendSnapshot | null> {
+  return gasAttribution(input);
+}
+
+/**
+ * Gas attribution, held ACROSS heartbeats.
+ *
+ * A module-level singleton because the cache is the entire point: a pass is
+ * ~174 RPC calls, and rebuilding it per heartbeat would defeat the cadence it
+ * exists to provide. Created on the first call that has the contract addresses,
+ * since those come from the product's /health rather than from config.
+ *
+ * Returns the last snapshot immediately — never blocking — or null before the
+ * first success. Null renders as "not measured"; an empty breakdown would
+ * render as "0 DOT", which reads as free.
+ */
+let gasCache: GasSpendCache | null = null;
+/** Read through a closure so the per-job divisor is the CURRENT settled count,
+ *  not whatever it happened to be when the cache was first built. */
+let gasSettledCount: number | null = null;
+
+function gasAttribution(input: {
+  config: ProductHealthConfig;
+  settledCount: number | null;
+  escrowCore?: string;
+  agentAccountCore?: string;
+  fetchImpl: typeof fetch;
+  nowMs: number;
+}): GasSpendSnapshot | null {
+  const { config } = input;
+  if (!config.gasAttributionEnabled) return null;
+  const contracts = [input.escrowCore, input.agentAccountCore].filter(
+    (a): a is string => typeof a === "string" && a.length > 0,
+  );
+  if (contracts.length === 0 || !config.rpcUrl || !config.signerAddress) return null;
+
+  gasSettledCount = input.settledCount;
+  gasCache ??= createGasSpendCache({
+    read: () =>
+      readGasSpend({
+        rpcUrl: config.rpcUrl,
+        contracts,
+        signerAddress: config.signerAddress,
+        lookbackBlocks: config.payoutLookbackBlocks,
+        fetchImpl: input.fetchImpl,
+      }),
+    settledCount: () => gasSettledCount,
+    labels: ESCROW_V2_SELECTORS,
+    refreshMs: config.gasRefreshMs,
+    // No logger dependency here: this module is imported by tests that do not
+    // stand one up, and a probe module quietly acquiring a logging side effect
+    // is how a pure-ish boundary erodes. The reason is carried ON the snapshot
+    // as `staleReason`, which is where a reader will actually see it.
+    onError: () => {},
+  });
+
+  gasCache.maybeRefresh(input.nowMs);
+  return gasCache.read(input.nowMs);
+}
+
+/** Test seam: forget the singleton so each test starts from no snapshot. */
+export function __resetGasAttributionForTests(): void {
+  gasCache = null;
+  gasSettledCount = null;
+}
+
+/** Who receives the protocol fee, according to the contract that charges it.
+ *
+ * Read from EscrowCore rather than /health.addresses.treasuryReserve — those are
+ * the same account on mainnet today and the split would be silently wrong the
+ * moment they are not.
+ *
+ * Returns null on any failure, so the caller reports "cannot separate fees"
+ * rather than splitting on a guess.
+ */
 export async function readFeeRecipient(input: {
   rpcUrl?: string;
   escrowCore?: string;
@@ -2305,6 +2398,21 @@ export async function collectProductHealthProbes(
         }
       : {}),
     ...(solvencyPools.length ? { solvency: { pools: solvencyPools } } : {}),
+    // Gas attribution: what the burn went ON. Read on its OWN cadence — a pass
+    // is ~174 RPC calls, far too heavy for the heartbeat — so this returns the
+    // last snapshot immediately and refreshes in the background. Absent until
+    // the first read succeeds; absent is not zero.
+    ...(() => {
+      const gas = gasAttribution({
+        config,
+        settledCount: settlement?.settled24h ?? null,
+        escrowCore: h.body?.addresses?.escrowCore,
+        agentAccountCore: h.body?.addresses?.agentAccountCore,
+        fetchImpl,
+        nowMs: Date.now(),
+      });
+      return gas ? { gas } : {};
+    })(),
     ...(settlement
       ? {
           flow: {

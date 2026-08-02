@@ -17,6 +17,7 @@
 // deterministic to test — including the age phrasing.
 
 import type {
+  GasSpendView,
   MoneyPathSnapshot,
   PayoutEvidence,
   ProductHealth,
@@ -575,20 +576,6 @@ export const EVIDENCE_KEY: readonly { tone: OpsTone; text: string }[] = [
 ];
 
 // ── gas attribution ─────────────────────────────────────────────────────────
-
-/** Gas spend by operation, as the board shows it. Mirrors the server snapshot. */
-export interface GasSpendView {
-  totalDot: number;
-  txCount: number;
-  perSettlement: number | null;
-  buckets: Array<{ label: string; count: number; dot: number; avgDot: number; sharePct: number; failed: number }>;
-  failedDot: number;
-  failedCount: number;
-  ageMs: number;
-  truncated: boolean;
-  otherSenders: Array<{ address: string; count: number }>;
-  staleReason?: string;
-}
 
 /**
  * The gas line: what the burn is going ON, not just how fast it burns.

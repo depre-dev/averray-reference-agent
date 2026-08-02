@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
-import { gasLine, type GasSpendView } from "./ops-spec.js";
+import { gasLine } from "./ops-spec.js";
+import type { GasSpendView } from "./product-health.js";
 
 const base: GasSpendView = {
   totalDot: 1.6535, txCount: 83, perSettlement: 0.0995,
