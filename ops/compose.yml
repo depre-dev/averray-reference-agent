@@ -577,6 +577,15 @@ services:
       # settled-minus-confirmed gap tolerated as a window-boundary artifact — the
       # product's rolling 24h and the block window don't share a clock.
       PRODUCT_HEALTH_PAYOUT_TOLERANCE: ${PRODUCT_HEALTH_PAYOUT_TOLERANCE:-1}
+      # Gas attribution — what the signer's burn went ON, by operation.
+      #
+      # OFF by default and deliberately opt-in: one pass is ~174 RPC calls (a
+      # receipt AND a transaction for each of ~87 daily txs) against an endpoint
+      # that rate-limits by answering 404 rather than 429. It never runs on the
+      # heartbeat — the snapshot refreshes in the background on its own cadence
+      # and the board renders it with its age.
+      PRODUCT_HEALTH_GAS_ATTRIBUTION_ENABLED: ${PRODUCT_HEALTH_GAS_ATTRIBUTION_ENABLED:-}
+      PRODUCT_HEALTH_GAS_REFRESH_MS: ${PRODUCT_HEALTH_GAS_REFRESH_MS:-1800000}
       # Disk headroom. A full disk is a CORRELATED failure: it takes the monitor,
       # the money board and the alert path in the same moment, so the thing meant
       # to warn you dies with the thing it watches — silently, with no red probe.
