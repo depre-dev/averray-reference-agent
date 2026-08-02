@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 
 import {
   agentRunProjectionV1Schema,
@@ -28,7 +29,7 @@ import {
   type ReconcileResult,
   type ReconcileRunDeps,
 } from "../../services/harness-dispatcher/src/reconcile-run.js";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 const NOW = new Date("2026-07-25T12:30:00.000Z");
 const RUN_ID = "11111111-1111-4111-8111-111111111111";
@@ -47,6 +48,50 @@ const TERMINAL_LIFECYCLES = new Set<AgentTaskLifecycle>([
 type TerminalOutcome = NonNullable<
   AgentRunProjectionV1["run"]["outcome"]
 >;
+
+type BudgetD4Case =
+  | "live-over-budget"
+  | "terminal-verified-over-budget"
+  | "terminal-verification-failed-over-budget"
+  | "terminal-inside-budget";
+
+interface BudgetD4Evidence {
+  case: BudgetD4Case;
+  lifecycle: AgentTaskLifecycle;
+  cancelled: boolean;
+  failureSource: "budget_exhausted" | "verification_failed" | "none";
+  alertSeverity: "warn" | "critical" | "none";
+  alertMessage: string;
+  decisionReasons: string[];
+}
+
+interface BudgetD4MutationEvidence {
+  case: BudgetD4Case;
+  mutation: string;
+  observedFailure: string;
+}
+
+class BudgetD4EvidenceError extends Error {}
+
+const budgetD4Evidence: BudgetD4Evidence[] = [];
+const budgetD4Mutations: BudgetD4MutationEvidence[] = [];
+
+afterAll(async () => {
+  const evidenceDir = process.env.HARNESS_BUDGET_OVERRUN_EVIDENCE_DIR?.trim();
+  if (!evidenceDir) return;
+  await mkdir(evidenceDir, { recursive: true });
+  await writeFile(
+    path.join(evidenceDir, "suite-summary.json"),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      executedCases: budgetD4Evidence.length,
+      expectedCases: 4,
+      cases: budgetD4Evidence,
+      mutations: budgetD4Mutations,
+    }, null, 2)}\n`,
+    "utf8",
+  );
+});
 
 describe("dispatched Harness run reconciliation", () => {
   it.each([
@@ -342,14 +387,14 @@ describe("dispatched Harness run reconciliation", () => {
     );
   });
 
-  it("cancels and fails a budget-exhausted run with one alert", async () => {
+  it("D4: cancels and fails a live budget-exhausted run with one alert", async () => {
     const task = await runningTask();
     const projection = projectionFor(task, "executing");
     const exhausted = agentRunProjectionV1Schema.parse({
       ...projection,
       budget: {
         ...projection.budget,
-        elapsedSecondsUsed: task.budget.elapsedSeconds,
+        elapsedSecondsUsed: task.budget.elapsedSeconds + 5,
         exhausted: true,
       },
     });
@@ -370,14 +415,175 @@ describe("dispatched Harness run reconciliation", () => {
     expect(recordedDecisions(deps).at(-1)?.proposal.why).toEqual([
       "budget_exhausted",
       "harness_cancel_acknowledged",
+      `budget_exhaustion_dimension=elapsed_seconds used=${task.budget.elapsedSeconds + 5} limit=${task.budget.elapsedSeconds} over_by=5`,
     ]);
     expect(deps.alertSink).toHaveBeenCalledOnce();
     expect(deps.alertSink).toHaveBeenCalledWith(
       expect.objectContaining({
         severity: "critical",
         code: "budget_exhausted",
+        message: expect.stringContaining(
+          `elapsed_seconds used=${task.budget.elapsedSeconds + 5} limit=${task.budget.elapsedSeconds} over_by=5`,
+        ),
       }),
     );
+
+    recordBudgetD4Evidence(
+      budgetEvidence("live-over-budget", reconciled!, deps),
+      (mutated) => {
+        mutated.cancelled = false;
+      },
+      "live_cancelled",
+      "invert the live-overrun guard so cancellation is skipped",
+    );
+  });
+
+  it("D4: preserves a verified terminal outcome and records its token overrun", async () => {
+    const task = await runningTask();
+    const projection = terminalProjection(task, true, {
+      modelTokensUsed: task.budget.modelTokens + 1_049,
+      exhausted: true,
+    });
+    const deps = reconcileDeps(
+      task,
+      snapshot("learning_processed", {
+        outcome: "completed",
+        verificationPassed: true,
+      }),
+      { projectRun: vi.fn(() => projection) },
+    );
+
+    const [reconciled] = await reconcileDispatchedRuns(deps);
+
+    expect(reconciled).toMatchObject({
+      outcome: "handoff_ready",
+      lifecycle: "handoff_ready",
+      healthy: true,
+      handoff: {
+        verification: { verified: true, decision: "accept" },
+      },
+    });
+    expect(deps.controlPort.cancel).not.toHaveBeenCalled();
+    expect(savedTasks(deps).at(-1)?.lifecycle).toBe("handoff_ready");
+    expect(deps.alertSink).toHaveBeenCalledOnce();
+    expect(deps.alertSink).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: "warn",
+        code: "budget_exhausted",
+        message: expect.stringContaining(
+          `model_tokens used=${task.budget.modelTokens + 1_049} limit=${task.budget.modelTokens} over_by=1049`,
+        ),
+      }),
+    );
+    expect(recordedDecisions(deps).at(-1)?.proposal.why).toEqual([
+      "verified_handoff_ready_for_operator",
+      "eligible_for_pr_open=true",
+      "eligible_for_pr_open_reason=completed_outcome_verified_acceptance_all_checks_passed",
+      "budget_status=exhausted",
+      `budget_exhaustion_dimension=model_tokens used=${task.budget.modelTokens + 1_049} limit=${task.budget.modelTokens} over_by=1049`,
+    ]);
+
+    recordBudgetD4Evidence(
+      budgetEvidence("terminal-verified-over-budget", reconciled!, deps),
+      (mutated) => {
+        mutated.lifecycle = "failed";
+        mutated.cancelled = true;
+      },
+      "terminal_completed_lifecycle",
+      "remove the terminal guard so the completed verified run is cancelled and failed",
+    );
+  });
+
+  it("D4: fails a terminal over-budget run on verification, not budget", async () => {
+    const task = await runningTask();
+    const projection = terminalProjection(task, false, {
+      toolCallsUsed: task.budget.toolCalls + 2,
+      exhausted: true,
+    });
+    const deps = reconcileDeps(
+      task,
+      snapshot("learning_processed", {
+        outcome: "completed",
+        verificationPassed: false,
+      }),
+      { projectRun: vi.fn(() => projection) },
+    );
+
+    const [reconciled] = await reconcileDispatchedRuns(deps);
+
+    expect(reconciled).toMatchObject({
+      outcome: "advanced",
+      lifecycle: "failed",
+      healthy: true,
+      projection: { verification: { status: "failed" } },
+    });
+    expect(reconciled?.reason).not.toBe("budget_exhausted");
+    expect(reconciled?.handoff).toBeUndefined();
+    expect(deps.controlPort.cancel).not.toHaveBeenCalled();
+    expect(recordedDecisions(deps)).toEqual([]);
+    expect(deps.alertSink).toHaveBeenCalledOnce();
+    expect(deps.alertSink).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: "warn",
+        code: "budget_exhausted",
+        message: expect.stringContaining(
+          `tool_calls used=${task.budget.toolCalls + 2} limit=${task.budget.toolCalls} over_by=2`,
+        ),
+      }),
+    );
+
+    recordBudgetD4Evidence(
+      budgetEvidence(
+        "terminal-verification-failed-over-budget",
+        reconciled!,
+        deps,
+      ),
+      (mutated) => {
+        mutated.failureSource = "budget_exhausted";
+        mutated.cancelled = true;
+      },
+      "verification_failed_lifecycle",
+      "remove the terminal guard so budget cancellation pre-empts verification",
+    );
+  });
+
+  it("D4: leaves a verified terminal run inside budget unchanged", async () => {
+    const task = await runningTask();
+    const projection = terminalProjection(task, true, { exhausted: false });
+    const deps = reconcileDeps(
+      task,
+      snapshot("learning_processed", {
+        outcome: "completed",
+        verificationPassed: true,
+      }),
+      { projectRun: vi.fn(() => projection) },
+    );
+
+    const [reconciled] = await reconcileDispatchedRuns(deps);
+
+    expect(reconciled).toMatchObject({
+      outcome: "handoff_ready",
+      lifecycle: "handoff_ready",
+      healthy: true,
+    });
+    expect(deps.controlPort.cancel).not.toHaveBeenCalled();
+    expect(deps.alertSink).not.toHaveBeenCalled();
+    expect(recordedDecisions(deps).at(-1)?.proposal.why).toContain(
+      "budget_status=within_limits",
+    );
+
+    recordBudgetD4Evidence(
+      budgetEvidence("terminal-inside-budget", reconciled!, deps),
+      (mutated) => {
+        mutated.alertSeverity = "warn";
+        mutated.alertMessage = "budget exhausted";
+        mutated.decisionReasons = ["budget_status=exhausted"];
+      },
+      "inside_budget_alert",
+      "make the non-exhausted projection enter the terminal-overrun branch",
+    );
+    expect(budgetD4Evidence).toHaveLength(4);
+    expect(budgetD4Mutations).toHaveLength(4);
   });
 
   it("treats an ApprovalPacket event as a cancel-and-block anomaly", async () => {
@@ -493,6 +699,7 @@ describe("dispatched Harness run reconciliation", () => {
           "verified_handoff_ready_for_operator",
           "eligible_for_pr_open=true",
           "eligible_for_pr_open_reason=completed_outcome_verified_acceptance_all_checks_passed",
+          "budget_status=within_limits",
         ],
       },
       next: { owner: "operator" },
@@ -979,6 +1186,181 @@ function projectionFor(
       runManifestHash: MANIFEST_HASH,
     },
   });
+}
+
+function terminalProjection(
+  task: AgentTaskV1,
+  verificationPassed: boolean,
+  budget: Partial<AgentRunProjectionV1["budget"]>,
+): AgentRunProjectionV1 {
+  const base = projectionFor(task, "learning_processed");
+  const verificationRef = deliverable(
+    "verification_report",
+    "6666666666666666666666666666666666666666666666666666666666666666",
+  ).artifact;
+  return agentRunProjectionV1Schema.parse({
+    ...base,
+    heartbeat: {
+      status: "terminal",
+      lastEventAt: "2026-07-25T12:29:00.000Z",
+      ageSeconds: 60,
+    },
+    run: {
+      state: "learning_processed",
+      attempt: 1,
+      terminal: true,
+      outcome: "completed",
+      lastEventAt: "2026-07-25T12:29:00.000Z",
+    },
+    budget: {
+      ...base.budget,
+      modelTokensUsed: 1,
+      ...budget,
+    },
+    artifacts: [verificationRef],
+    verification: {
+      status: verificationPassed ? "passed" : "failed",
+      decisionRef: verificationRef,
+      decisionHash: verificationRef.sha256,
+    },
+  });
+}
+
+function budgetEvidence(
+  caseName: BudgetD4Case,
+  reconciled: ReconcileResult,
+  deps: ReconcileRunDeps,
+): BudgetD4Evidence {
+  const alert = vi.mocked(deps.alertSink).mock.calls.at(-1)?.[0];
+  const reasons = recordedDecisions(deps).flatMap(
+    (decision) => decision.proposal.why,
+  );
+  const verificationFailed =
+    reconciled.projection?.verification?.status === "failed";
+  return {
+    case: caseName,
+    lifecycle: reconciled.lifecycle,
+    cancelled: vi.mocked(deps.controlPort.cancel).mock.calls.length > 0,
+    failureSource: reconciled.reason === "budget_exhausted"
+      ? "budget_exhausted"
+      : verificationFailed
+        ? "verification_failed"
+        : "none",
+    alertSeverity: alert?.severity ?? "none",
+    alertMessage: alert?.message ?? "",
+    decisionReasons: reasons,
+  };
+}
+
+function recordBudgetD4Evidence(
+  evidence: BudgetD4Evidence,
+  mutate: (value: BudgetD4Evidence) => void,
+  expectedFailure: string,
+  mutation: string,
+): void {
+  expect(() => verifyBudgetD4Evidence(evidence)).not.toThrow();
+  budgetD4Evidence.push(evidence);
+
+  const mutated = structuredClone(evidence);
+  mutate(mutated);
+  let observed = "";
+  try {
+    verifyBudgetD4Evidence(mutated);
+  } catch (error) {
+    expect(error).toBeInstanceOf(BudgetD4EvidenceError);
+    observed = (error as Error).message;
+  }
+  expect(observed).toContain(expectedFailure);
+  budgetD4Mutations.push({
+    case: evidence.case,
+    mutation,
+    observedFailure: expectedFailure,
+  });
+}
+
+function verifyBudgetD4Evidence(evidence: BudgetD4Evidence): void {
+  switch (evidence.case) {
+    case "live-over-budget":
+      assertBudgetD4(evidence.lifecycle === "failed", "live_lifecycle");
+      assertBudgetD4(evidence.cancelled, "live_cancelled");
+      assertBudgetD4(
+        evidence.failureSource === "budget_exhausted",
+        "live_failure_source",
+      );
+      assertBudgetD4(
+        evidence.alertSeverity === "critical",
+        "live_alert_severity",
+      );
+      assertBudgetD4(
+        evidence.alertMessage.includes("elapsed_seconds")
+          && evidence.alertMessage.includes("over_by=5")
+          && evidence.decisionReasons.some(
+            (reason) => reason.includes("elapsed_seconds")
+              && reason.includes("over_by=5"),
+          ),
+        "live_dimension_evidence",
+      );
+      return;
+    case "terminal-verified-over-budget":
+      assertBudgetD4(
+        evidence.lifecycle === "handoff_ready" && !evidence.cancelled,
+        "terminal_completed_lifecycle",
+      );
+      assertBudgetD4(evidence.failureSource === "none", "terminal_failure_source");
+      assertBudgetD4(
+        evidence.alertSeverity === "warn"
+          && evidence.alertMessage.includes("model_tokens")
+          && evidence.alertMessage.includes("over_by=1049"),
+        "terminal_overrun_alert",
+      );
+      assertBudgetD4(
+        evidence.decisionReasons.includes("budget_status=exhausted")
+          && evidence.decisionReasons.some(
+            (reason) => reason.includes("model_tokens")
+              && reason.includes("over_by=1049"),
+          ),
+        "terminal_overrun_decision",
+      );
+      return;
+    case "terminal-verification-failed-over-budget":
+      assertBudgetD4(
+        evidence.lifecycle === "failed" && !evidence.cancelled,
+        "verification_failed_lifecycle",
+      );
+      assertBudgetD4(
+        evidence.failureSource === "verification_failed",
+        "verification_failure_source",
+      );
+      assertBudgetD4(
+        evidence.alertSeverity === "warn"
+          && evidence.alertMessage.includes("tool_calls")
+          && evidence.alertMessage.includes("over_by=2"),
+        "verification_failed_overrun_alert",
+      );
+      return;
+    case "terminal-inside-budget":
+      assertBudgetD4(
+        evidence.lifecycle === "handoff_ready" && !evidence.cancelled,
+        "inside_budget_lifecycle",
+      );
+      assertBudgetD4(evidence.alertSeverity === "none", "inside_budget_alert");
+      assertBudgetD4(
+        evidence.decisionReasons.includes("budget_status=within_limits")
+          && !evidence.decisionReasons.includes("budget_status=exhausted"),
+        "within_budget_marker",
+      );
+      return;
+    default:
+      return assertNeverBudgetCase(evidence.case);
+  }
+}
+
+function assertBudgetD4(condition: boolean, reason: string): asserts condition {
+  if (!condition) throw new BudgetD4EvidenceError(reason);
+}
+
+function assertNeverBudgetCase(value: never): never {
+  throw new BudgetD4EvidenceError(`unknown_case:${String(value)}`);
 }
 
 function savedTasks(deps: ReconcileRunDeps): AgentTaskV1[] {
