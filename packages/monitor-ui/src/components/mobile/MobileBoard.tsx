@@ -33,8 +33,6 @@ import {
 import {
   disputeClockLine,
   economicsLine,
-  gasPoolNote,
-  gasUnreadableNote,
   lifecycleNote,
   payoutRunwayNote,
 } from "../../lib/monitor/ops-spec.js";
@@ -216,15 +214,7 @@ function BreachPanel({ breach }: { breach: BreachCard }) {
 }
 
 /** Check-in: the three floored meters, then every unfloored pool on ONE line. */
-/** Gas note, or the reason there is none — an unreadable read is a sentence. */
-function phoneGasNote(gas: ProductHealth["gas"] | { unreadable: true; reason: string } | undefined) {
-  if (!gas) return null;
-  if ("unreadable" in gas) return gasUnreadableNote(gas.reason);
-  return gasPoolNote(gas);
-}
-
 function SolvencyPanel({ health }: { health: ProductHealth }) {
-  const gas = health.gas;
   const payout = health.flow?.payout;
   const runwayNote = health.solvency?.runwayNote;
   const { floored, unfloored } = splitPools(health.solvency?.pools ?? []);
@@ -243,12 +233,15 @@ function SolvencyPanel({ health }: { health: ProductHealth }) {
         // desktop-only until this: gas burn and payouts-remaining are exactly
         // what gets checked away from the desk, and a fact on one surface only
         // is missing precisely when the operator is not at their machine.
+        // Payouts-remaining only. The gas BURN breakdown is desk-only by design
+        // decision: it is tuning information, not a 2am call, and the signer
+        // meter directly above already carries the urgent part (is it near the
+        // floor). Recorded in DESKTOP_ONLY so the argument is a test, not a
+        // memory.
         const note =
-          view.pool.key === "signer_gas"
-            ? phoneGasNote(gas)
-            : view.pool.key === "reward_bank"
-              ? payoutRunwayNote({ pool: view.pool, payout, runwayNote })
-              : null;
+          view.pool.key === "reward_bank"
+            ? payoutRunwayNote({ pool: view.pool, payout, runwayNote })
+            : null;
         return (
         <div className="hm-ph-pool" key={view.pool.key} data-testid={`mobile-pool-${view.pool.key}`}>
           <div className="hm-ph-pool-top">

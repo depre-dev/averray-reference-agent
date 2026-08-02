@@ -20,7 +20,14 @@ const phone = fs.readFileSync(path.join(dir, "..", "mobile", "MobileBoard.tsx"),
  * name here is a decision that has to be argued in the diff, which is the point
  * — the previous state was that desktop-only happened silently, by forgetting.
  */
-const DESKTOP_ONLY: Record<string, string> = {};
+const DESKTOP_ONLY: Record<string, string> = {
+  // Design decision (board-spec-sheet-review, surface map): gas diagnostics
+  // inform TUNING, not a night decision, and the signer meter already carries
+  // the urgent part — how close the pool is to its floor. Putting the burn
+  // breakdown on the phone spends the scarcest space there on the least
+  // actionable fact.
+  gasPoolNote: "gas burn is tuning information; the signer meter carries the 2am fact",
+};
 
 /**
  * THE REGRESSION, twice.
