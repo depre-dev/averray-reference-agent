@@ -39,6 +39,34 @@ describe("classifiers", () => {
     expect(isAcknowledgedProbe(probe({ status: "red", detail: "2 warnings acknowledged" }))).toBe(false);
   });
 
+  // THE REGRESSION. The predicate read `status !== "red"`, which also swept in
+  // `ok` — so a healthy probe whose prose happened to contain one of these words
+  // was demoted to grey and dropped from the ok count.
+  //
+  // external_funnel did exactly this in production: `ok`, detail "1 awaiting
+  // review", meaning one job genuinely under review. Nothing was missing, and
+  // the board greyed it anyway. Renaming the string fixed that probe and left
+  // every future one exposed.
+  //
+  // An ok probe HAS its data. That is what ok means.
+  test("an ok probe is NEVER awaiting, whatever its prose says", () => {
+    expect(isAwaitingProbe(probe({ status: "ok", detail: "1 awaiting review" }))).toBe(false);
+    expect(isAwaitingProbe(probe({ status: "ok", detail: "0 claimable · 2 awaiting settlement" }))).toBe(false);
+    expect(isAwaitingProbe(probe({ status: "ok", detail: "no data older than 5m" }))).toBe(false);
+    expect(isAwaitingProbe(probe({ status: "ok", detail: "gasSponsor not configured (by design)" }))).toBe(false);
+  });
+
+  test("an ok probe with awaiting prose still counts as ok in the census", () => {
+    // The consequence that reaches the screen: it was subtracted from green and
+    // labelled awaiting, so a fully healthy board read "8 ok · 1 awaiting".
+    const census = probeCensus([
+      probe({ name: "a", status: "ok", detail: "fine" }),
+      probe({ name: "external_funnel", status: "ok", detail: "1 awaiting review" }),
+    ]);
+    expect(census).toBe("2 ok / 0 red");
+    expect(census).not.toContain("awaiting");
+  });
+
   test("acknowledged only applies to a degraded probe that says so", () => {
     expect(isAcknowledgedProbe(probe({ status: "degraded", detail: "4/7 up · 2 warnings acknowledged" }))).toBe(true);
     expect(isAcknowledgedProbe(probe({ status: "degraded", detail: "4/7 up · 2 warnings" }))).toBe(false);
