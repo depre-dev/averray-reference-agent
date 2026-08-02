@@ -22,6 +22,7 @@ import { opsVerdict, staleAfterMs, trustRows } from "../../lib/monitor/ops-spec.
 import { FlowPanel } from "./FlowPanel.js";
 import { PillarStrip } from "./PillarStrip.js";
 import { SolvencyPanel } from "./SolvencyPanel.js";
+import { WalletStrip } from "./WalletStrip.js";
 
 export interface OpsBoardProps {
   health: ProductHealth;
@@ -116,6 +117,12 @@ export function OpsBoard({
           <SolvencyPanel solvency={health.solvency} />
           <FlowPanel flow={health.flow} />
         </div>
+
+        {/* Between the meters and the pillars on purpose: .ops-money is flex:1,
+            so a fixed-height strip here SHRINKS the panels instead of
+            overflowing them — which is exactly what interleaving these
+            addresses into the pool rows did. */}
+        <WalletStrip solvency={health.solvency} />
 
         <PillarStrip probes={health.probes} history={health.history} />
 

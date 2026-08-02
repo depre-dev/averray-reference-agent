@@ -56,41 +56,6 @@ export function SolvencyPanel({ solvency }: SolvencyPanelProps) {
   );
 }
 
-/**
- * The address a pool's number was read from.
- *
- * Shown in FULL, not truncated: the point of putting a wallet on the board is
- * that an operator can check which one it is, and a 6-character prefix does not
- * settle "is this the treasury multisig or the reserve". It renders quiet so it
- * informs without competing with the balance.
- *
- * Absent for any pool whose figure did not come from a balance read — the row
- * simply shows no address, rather than borrowing a plausible one and implying a
- * provenance the number does not have.
- */
-function PoolAddress({ view }: { view: PoolView }) {
-  const { address, addressLabel, addressSs58 } = view.pool;
-  if (!address) return null;
-  return (
-    <>
-      <span className="ops-pool-addr" data-testid={`ops-pool-addr-${view.pool.key}`}>
-        <span className="ops-pool-addr-hex">{address}</span>
-        {addressLabel ? <span className="ops-pool-addr-label">{addressLabel}</span> : null}
-      </span>
-      {/* The SAME account, in the form a Substrate wallet accepts. Both are
-          shown because the board cannot know which wallet the operator will
-          reach for, and converting an address by hand is exactly where a wrong
-          character costs real money. */}
-      {addressSs58 ? (
-        <span className="ops-pool-addr ops-pool-addr--ss58" data-testid={`ops-pool-ss58-${view.pool.key}`}>
-          <span className="ops-pool-addr-hex">{addressSs58}</span>
-          <span className="ops-pool-addr-label">SS58 · same account</span>
-        </span>
-      ) : null}
-    </>
-  );
-}
-
 function FlooredPool({ view }: { view: PoolView }) {
   const meter = view.meter;
   if (!meter) return null;
@@ -139,9 +104,6 @@ function FlooredPool({ view }: { view: PoolView }) {
         {view.amountLabel}
         <span className="ops-pool-unit">{view.unit}</span>
       </div>
-      {/* LAST on purpose: .ops-pool is a three-column grid, so anything
-          placed before the amount pushes it onto a second row. */}
-      <PoolAddress view={view} />
     </div>
   );
 }
@@ -160,7 +122,6 @@ function UnflooredPool({ view }: { view: PoolView }) {
         {view.amountLabel}
         <span className="ops-pool-unit">{view.unit}</span>
       </span>
-      <PoolAddress view={view} />
     </div>
   );
 }

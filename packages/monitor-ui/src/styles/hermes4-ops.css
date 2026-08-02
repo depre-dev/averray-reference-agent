@@ -376,60 +376,71 @@ body,
   line-height: 1.45;
   color: var(--h4-muted);
 }
-/* ---- pool source address ---------------------------------------
-   The wallet a balance was read from. Deliberately quiet: it is reference
-   material an operator goes looking for, not something that should pull the
-   eye away from the number or the floor. Shown in full — a truncated address
-   cannot answer "which multisig is this?", which is the only reason to put it
-   on the board at all. */
-.ops-pool-addr {
-  /* SPAN THE WHOLE ROW. .ops-pool is a three-column grid — name | meter |
-     amount — and an address dropped in as a fourth item became a second grid
-     ROW, pushing the amount below the meter and tripling every row's height.
-     Spanning to the end keeps those three cells on one line and puts the
-     address on a quiet line of its own beneath them. */
-  grid-column: 1 / -1;
-  display: block;
-  /* .ops-pool sets gap:16px, which applies BETWEEN grid rows too and left the
-     address floating halfway to the next pool. Pull it back under its own row
-     so it reads as belonging to the balance above it. */
-  margin-top: -11px;
-  font-family: var(--h4-font-mono);
-  font-size: 9.5px;
-  line-height: 1.4;
-  color: var(--h4-muted);
-  /* One line: 42 hex characters do not fit the 168px name column, and letting
-     them wrap is what made this ugly in the first place. */
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.ops-pool-addr-hex {
-  /* Selectable as one unit so a double-click copies the whole address. */
-  user-select: all;
-  color: var(--h4-ink-2);
-  opacity: 0.75;
-}
-.ops-pool-addr-label::before {
-  content: " · ";
-  opacity: 0.6;
-}
-.ops-pool-addr--ss58 {
-  /* Sits directly under its EVM twin with no gap, so the pair reads as one
-     block belonging to the balance above rather than two separate facts. */
-  margin-top: -3px;
-}
-.ops-pool--unfloored .ops-pool-addr {
-  /* This row has smaller padding than a floored one, so it needs less pull-up. */
-  margin-top: -6px;
+/* ---- wallets strip ---------------------------------------------
+   Full board width, one line per wallet, both encodings side by side. At
+   ~1400px a 42-char and a 48-char monospace address fit on one row without
+   truncation — which is the whole reason this is a strip and not a column
+   inside the solvency panel, where they wrapped and clipped real balances. */
+/* The money row is a fixed budget on a 100vh board. When the content genuinely
+   exceeds it, the panel SCROLLS rather than clips: a hidden pool is a pool the
+   operator believes does not exist, which is the one outcome this board must
+   never produce. Scrolling is an inconvenience; silent omission is a lie. */
+.ops-solvency {
+  overflow-y: auto;
+  min-height: 0;
 }
 
-.ops-pool--unfloored .ops-pool-note {
-  /* The note column takes the slack; the amount must not. A long address in
-     here clipped the "USDC" off protocol revenue — the one row where the unit
-     is doing real work — which is why the address moved out of this column. */
-  min-width: 0;
+.ops-wallets {
+  border: 1px solid var(--ops-rule);
+  padding: 8px 14px 10px;
+  /* Fixed content height: .ops-money above is flex:1 and yields to this. */
+  flex: 0 0 auto;
 }
+.ops-wallets-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.ops-wallets-head h2 {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--h4-ink);
+}
+.ops-wallet {
+  display: grid;
+  grid-template-columns: minmax(120px, 168px) minmax(0, auto) minmax(0, auto) 1fr;
+  gap: 14px;
+  align-items: baseline;
+  padding: 2px 0;
+  font-family: var(--h4-font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.ops-wallet-label {
+  color: var(--h4-ink-2);
+}
+.ops-wallet-addr {
+  /* Selectable as one unit so a double-click grabs the whole address. */
+  user-select: all;
+  color: var(--h4-ink-2);
+  opacity: 0.8;
+  white-space: nowrap;
+}
+.ops-wallet-addr--ss58 {
+  opacity: 0.62;
+}
+.ops-wallet-missing {
+  color: var(--h4-muted);
+  font-style: italic;
+  user-select: auto;
+}
+.ops-wallet-pool {
+  color: var(--h4-muted);
+  text-align: right;
+}
+
 .ops-pool-amount--quiet {
   flex: 0 0 auto;
   white-space: nowrap;
