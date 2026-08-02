@@ -17,21 +17,22 @@ The new pin is two commits ahead: the fix and its merge. Nothing else changed.
 
 ## The trap
 
-The old pin appears in **twelve places across eight files**, and they are not
-the same kind of thing.
+The old pin appears in **fourteen places across nine files** (excluding this
+document's own two), and they are not the same kind of thing.
 
-**Live sites select which kernel actually runs. Change these:**
+**Live sites select which kernel actually runs. Change these — nine of them:**
 
-| file | line |
-|---|---|
-| `scripts/ceremony/int2-bringup.sh` | 30 |
-| `scripts/ceremony/int2-evidence.mjs` | 19 |
-| `scripts/ceremony/run-int2-automated-suite.sh` | 84, 88 |
-| `test/unit/int2-ceremony-scripts.test.ts` | 450, 505 |
-| `docs/HARNESS_INT2_CEREMONY_RUNBOOK.md` | 36 |
-| `AGENTS.md` | 260 |
+| file | line | form |
+|---|---|---|
+| `scripts/ceremony/int2-bringup.sh` | 30 | full |
+| `scripts/ceremony/int2-evidence.mjs` | 19 | full |
+| `scripts/ceremony/run-int2-automated-suite.sh` | 84, 88 | full |
+| `test/unit/int2-ceremony-scripts.test.ts` | 450, 505 | full |
+| `docs/HARNESS_INT2_CEREMONY_RUNBOOK.md` | **34** | **short — the actual `git checkout --detach`** |
+| `docs/HARNESS_INT2_CEREMONY_RUNBOOK.md` | 36 | full — the assertion that checks line 34 |
+| `AGENTS.md` | 260 | short |
 
-**Historical records state what was run on a given day. Do NOT change these:**
+**Historical records state what was run on a given day. Do NOT change these — five occurrences across three files:**
 
 | file | why |
 |---|---|
@@ -45,6 +46,32 @@ and the result still passes every test.
 
 If a site's classification looks wrong, say so rather than following the table.
 The table is my judgement and it is the part of this packet most worth checking.
+
+## 0. Correction — this order shipped wrong, and the check caught it
+
+The first version of this document listed **eight** live sites and missed
+`docs/HARNESS_INT2_CEREMONY_RUNBOOK.md:34`:
+
+```sh
+git -C "$HARNESS_CHECKOUT" checkout --detach 0890a1f       # line 34 — MISSED
+test "$(git -C "$HARNESS_CHECKOUT" rev-parse HEAD)" = \
+  "0890a1f04c2729cbd310e21f66dd9dc6fbc66dc2"               # line 36 — listed
+```
+
+Following it literally would have checked out the **old** kernel on line 34 and
+then asserted the **new** revision on line 36 — a contradiction the operator
+would hit mid-ceremony.
+
+The cause was a search for `0890a1f0` (eight characters) against a short form
+written as `0890a1f` (seven). The pattern silently matched nothing on that line,
+and a miss looks identical to an absence.
+
+It was found because this order told the implementer to **challenge the
+classification rather than follow it**, and they did, and stopped before editing
+anything. That instruction earned its place; the table it guards was wrong.
+
+The counts below are corrected: nine live, five historical, fourteen occurrences
+across nine files.
 
 ## 1. Deliverable D1 — move the live sites
 
