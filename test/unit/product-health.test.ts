@@ -18,6 +18,7 @@ import {
   decideWindowFit,
   measureBlockSeconds,
   readPayoutTransfers,
+  resolvePayoutLookback,
   withFeeSplit,
   collectProductHealthProbes,
   chainBlockAge,
@@ -1608,6 +1609,47 @@ describe("decidePayoutEvidence (pure verdict)", () => {
     const r = decidePayoutEvidence({ ...base, confirmedCount: 3, confirmedUsdc: 1.5, settledCount: null });
     expect(r.status).toBe("confirmed");
     expect(r.detail).toContain("no settled count to compare");
+  });
+});
+
+describe("resolvePayoutLookback — size the window, do not assume it", () => {
+  // decideWindowFit already computed the right number and only ever PRINTED it
+  // ("~40909 blocks would match"). Reporting the correct window while scanning
+  // the wrong one leaves the operator reconciling two numbers by hand forever.
+  it("derives the window from the measured block time", () => {
+    // Mainnet 2026-08-02: 2.112s/block, so 24h is 40909 blocks — not the 43200
+    // that was configured for an assumed 2.0s.
+    const r = resolvePayoutLookback({ blockSeconds: 2.112, maxBlocks: 60000, targetHours: 24 });
+    expect(r.blocks).toBe(40909);
+    expect(r.derived).toBe(true);
+  });
+
+  it("treats the configured value as a CEILING, never as the window", () => {
+    // It exists for RPCs that cap eth_getLogs ranges — a limit on what we may
+    // ask for, not a statement about how long 24 hours is.
+    const r = resolvePayoutLookback({ blockSeconds: 2.112, maxBlocks: 10000, targetHours: 24 });
+    expect(r.blocks).toBe(10000);
+    expect(r.derived).toBe(true);
+  });
+
+  it("falls back to the ceiling when the chain could not be sampled", () => {
+    // An unmeasured block time is exactly when a guess is least trustworthy, so
+    // behaviour stays what the operator configured and the fit reads unchecked.
+    for (const bad of [null, 0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const r = resolvePayoutLookback({ blockSeconds: bad, maxBlocks: 43200, targetHours: 24 });
+      expect(r.blocks).toBe(43200);
+      expect(r.derived).toBe(false);
+    }
+  });
+
+  it("would have caught the 6s assumption that shipped as the default", () => {
+    // The old default was 14400 with the comment "~24h at a 6s block time". At
+    // the real 2.112s that spans 8.4 HOURS against a 24h ledger count — the
+    // SHORT direction, which under-counts payouts and manufactures a shortfall.
+    const span = (14400 * 2.112) / 3600;
+    expect(span).toBeLessThan(9);
+    const r = resolvePayoutLookback({ blockSeconds: 2.112, maxBlocks: 14400, targetHours: 24 });
+    expect(r.blocks).toBe(14400); // ceiling binds — and decideWindowFit says "suspect"
   });
 });
 
