@@ -616,3 +616,76 @@ export function gasLine(gas: GasSpendView | undefined, nowMs: number): { text: s
   const tone: OpsTone = gas.failedCount > 0 || gas.truncated || gas.staleReason ? "degraded" : "awaiting";
   return { text: parts.join(" · "), tone };
 }
+
+// ── economics: what a job costs against what it earns ───────────────────────
+
+export interface EconomicsInput {
+  /** On-chain payout evidence for the window. */
+  payout?: PayoutEvidence | undefined;
+  /** Gas attribution for the same window. */
+  gas?: GasSpendView | undefined;
+  /** Month-to-date LLM cost in USD, when recorded. */
+  llmMonthlyUsd?: number | null | undefined;
+}
+
+/**
+ * The two numbers that are the business, in one place.
+ *
+ * The board meters gas as a runway and LLM spend as a footnote, and states
+ * revenue in a solvency pool — three places, never adjacent, so the relationship
+ * between them has never been on screen. Per settled job it is stark, and this
+ * is the internal board, which is exactly where an uncomfortable number belongs.
+ *
+ * ── WHAT IT REFUSES TO DO ─────────────────────────────────────────────────
+ *
+ * It does NOT add these together. Gas is DOT, revenue and payouts are USDC, LLM
+ * spend is USD. Summing them needs a DOT price this monitor does not have and
+ * must not invent — a made-up exchange rate would turn an honest set of figures
+ * into one confident wrong one, and it would be invisible because the output
+ * would look tidier than the truth.
+ *
+ * So the units stay side by side and the reader applies the price they believe.
+ * The whole point is the RATIO being visible, and it is visible without one.
+ */
+export function economicsLine(input: EconomicsInput): { text: string; tone: OpsTone } {
+  const { payout, gas } = input;
+  const settled = payout?.confirmedCount ?? null;
+
+  const parts: string[] = [];
+  const missing: string[] = [];
+
+  // Reward paid per job — what the work costs in the currency it is paid in.
+  if (settled != null && settled > 0 && payout?.confirmedUsdc != null) {
+    parts.push(`${(payout.confirmedUsdc / settled).toFixed(3)} USDC paid out`);
+  } else missing.push("payouts");
+
+  // Gas per job — the unit cost that can sit beside the reward.
+  if (gas?.perSettlement != null) parts.push(`${gas.perSettlement.toFixed(4)} DOT gas`);
+  else missing.push("gas");
+
+  // Fee revenue per job. Averaged over ALL settlements, not only fee-bearing
+  // ones: the question is what the platform earns per unit of work done, and
+  // most work is deliberately fee-waived. `feesSeparated` false means the split
+  // could not be made, which is not the same as zero revenue.
+  if (payout?.feesSeparated === true && payout.feeUsdc != null && settled != null && settled > 0) {
+    parts.push(`${(payout.feeUsdc / settled).toFixed(4)} USDC fee revenue`);
+  } else if (payout?.feesSeparated === false) missing.push("fee split");
+  else missing.push("fees");
+
+  if (parts.length === 0) {
+    return { text: `ECONOMICS — not measurable (${missing.join(", ")} unavailable)`, tone: "awaiting" };
+  }
+
+  const head = `ECONOMICS / settled job — ${parts.join(" · ")}`;
+  const tail: string[] = [];
+  if (typeof input.llmMonthlyUsd === "number") tail.push(`LLM $${input.llmMonthlyUsd.toFixed(2)}/mo`);
+  // Named so nobody reads the figures as addable. The absent DOT price is the
+  // reason, and stating it is cheaper than someone assuming one.
+  tail.push("DOT and USDC not summed — no price assumed");
+  if (missing.length > 0) tail.push(`${missing.join(", ")} unavailable`);
+
+  // A cost is a fact, not an alarm. Nothing here tones amber: the board already
+  // has a runway meter for "you are running out", and duplicating that urgency
+  // in a line about unit economics would make both easier to ignore.
+  return { text: `${head} · ${tail.join(" · ")}`, tone: "awaiting" };
+}
