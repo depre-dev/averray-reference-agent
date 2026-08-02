@@ -573,3 +573,59 @@ export const EVIDENCE_KEY: readonly { tone: OpsTone; text: string }[] = [
   { tone: "red", text: "SHORTFALL — proof missing: money broken" },
   { tone: "awaiting", text: "UNVERIFIED — chain unreadable: instrument broken, not money" },
 ];
+
+// ── gas attribution ─────────────────────────────────────────────────────────
+
+/** Gas spend by operation, as the board shows it. Mirrors the server snapshot. */
+export interface GasSpendView {
+  totalDot: number;
+  txCount: number;
+  perSettlement: number | null;
+  buckets: Array<{ label: string; count: number; dot: number; avgDot: number; sharePct: number; failed: number }>;
+  failedDot: number;
+  failedCount: number;
+  ageMs: number;
+  truncated: boolean;
+  otherSenders: Array<{ address: string; count: number }>;
+  staleReason?: string;
+}
+
+/**
+ * The gas line: what the burn is going ON, not just how fast it burns.
+ *
+ * The solvency panel already meters the signer pool and projects a runway. That
+ * answers "when do I run out" — this answers "on what", which is the difference
+ * between topping up and finding out something regressed. `perSettlement` leads
+ * because gas as a UNIT COST can be held against the reward a job pays; gas as
+ * a total can only be compared with yesterday's total.
+ *
+ * Every caveat that would make the number wrong is appended rather than hidden:
+ * a truncated read UNDERSTATES spend, a second signing key means this is not
+ * the whole cost of running the system, and a failed refresh means the figures
+ * stopped moving at some point in the past.
+ */
+export function gasLine(gas: GasSpendView | undefined, nowMs: number): { text: string; tone: OpsTone } {
+  void nowMs;
+  // Absent is not zero. Before the first read there is nothing to say, and
+  // "0 DOT" would read as free rather than as not-yet-measured.
+  if (!gas) return { text: "GAS — not measured", tone: "awaiting" };
+  if (gas.txCount === 0) return { text: "GAS — no signer transactions in the window", tone: "awaiting" };
+
+  const parts = [`GAS ${gas.totalDot.toFixed(3)} DOT / ${gas.txCount} txs`];
+  if (gas.perSettlement != null) parts.push(`${gas.perSettlement.toFixed(4)} DOT per settlement`);
+  const top = gas.buckets[0];
+  if (top) parts.push(`${top.label} ${top.sharePct.toFixed(0)}%`);
+
+  // Reverted gas bought nothing. Named only when it exists — a permanent
+  // "0 failed" is the noise that trains a reader to skip the line.
+  if (gas.failedCount > 0) parts.push(`${gas.failedDot.toFixed(3)} DOT REVERTED`);
+  if (gas.truncated) parts.push("capped — spend UNDERSTATED");
+  if (gas.otherSenders.length > 0) parts.push(`+${gas.otherSenders.length} other signer${gas.otherSenders.length === 1 ? "" : "s"} not counted`);
+  if (gas.staleReason) parts.push(`figures frozen — ${gas.staleReason}`);
+  else if (gas.ageMs > 0) parts.push(`${Math.round(gas.ageMs / 60000)}m old`);
+
+  // Only a genuine problem tones amber: reverted gas, an understated total, or
+  // a reader that has stopped working. Cost itself is a fact, not an alarm.
+  const tone: OpsTone = gas.failedCount > 0 || gas.truncated || gas.staleReason ? "degraded" : "awaiting";
+  return { text: parts.join(" · "), tone };
+}
