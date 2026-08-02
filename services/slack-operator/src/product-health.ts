@@ -1134,8 +1134,27 @@ async function ethRpc(
  * and is independent of the backend's own claim, which is the entire point.
  *
  * Layout (indexed → topics, the rest → data):
- *   topic1 jobId · topic2 account · topic3 recipient
+ *   topic1 reservationId · topic2 account · topic3 recipient
  *   data[0] asset · data[1] amount
+ *
+ * topic1 is a RESERVATION id, not a job id — this said jobId until a mainnet
+ * read disproved it. One settlement transaction emits a payout leg and a fee leg
+ * with DIFFERENT topic1 values (tx 0x7afd7fbf: 0x50f48b3a and 0xf541d2ab), so
+ * joining settlements to jobs on topic1 silently matches nothing. Bridge through
+ * the transaction hash instead.
+ *
+ * ── NOT EVERY SETTLEMENT IS A PAYOUT ───────────────────────────────────────
+ *
+ * The 5% protocol fee is credited by this SAME event, distinguished only by
+ * topic3 being the fee treasury. Counting those as payouts inflates the
+ * on-chain side of the comparison — and because a fee arrives on every
+ * fee-bearing settlement, the inflation is PERMANENT: three genuinely missing
+ * payouts plus three fee credits net to zero, and `shortfall` can never fire.
+ *
+ * Verified on mainnet 2026-08-02: the panel read 19 confirmed against 16
+ * settled, and the excess of exactly 3 was exactly the 3 fee credits. So the
+ * recipient is checked here, and fees are reported separately rather than
+ * folded into the payout total.
  */
 /** settled24h is a rolling 24h count, so that is what the window must span. */
 const PAYOUT_COMPARISON_HOURS = 24;
@@ -1352,11 +1371,30 @@ export async function readPayoutTransfers(input: {
   usdcDecimals: number;
   lookbackBlocks: number;
   expectedChainId?: number;
+  /**
+   * The protocol-fee treasury. A settlement to THIS recipient is revenue, not a
+   * payout, and must not be counted as one — see the header.
+   *
+   * Optional, and its absence is reported rather than assumed away: without it
+   * the two cannot be told apart, so `feesSeparated` is false and the caller
+   * must not claim the payout count is fee-free.
+   */
+  feeRecipientAddress?: string;
   fetchImpl: typeof fetch;
-}): Promise<{ count: number | null; usdc: number | null; windowBlocks: number | null; reason?: string }> {
+}): Promise<{
+  count: number | null;
+  usdc: number | null;
+  windowBlocks: number | null;
+  /** Settlements whose recipient was the fee treasury. null when unknowable. */
+  feeCount: number | null;
+  feeUsdc: number | null;
+  /** False when no treasury address was supplied — count may include fees. */
+  feesSeparated: boolean;
+  reason?: string;
+}> {
   if (!input.rpcUrl || !input.sourceAddress || !input.usdcAddress) {
     return {
-      count: null, usdc: null, windowBlocks: null,
+      count: null, usdc: null, windowBlocks: null, feeCount: null, feeUsdc: null, feesSeparated: false,
       reason: !input.sourceAddress
         ? "payout evidence not configured — no payout source address (/health addresses.agentAccountCore, or PRODUCT_HEALTH_PAYOUT_SOURCE_ADDRESS)"
         : "payout evidence not configured (RPC / USDC address)",
@@ -1367,7 +1405,7 @@ export async function readPayoutTransfers(input: {
       const actual = Number(BigInt(await ethRpc(input.rpcUrl, "eth_chainId", [], input.fetchImpl)));
       if (actual !== input.expectedChainId) {
         return {
-          count: null, usdc: null, windowBlocks: null,
+          count: null, usdc: null, windowBlocks: null, feeCount: null, feeUsdc: null, feesSeparated: false,
           reason: `payout evidence unverified — RPC is on chain ${actual}, product is on ${input.expectedChainId}`,
         };
       }
@@ -1387,11 +1425,17 @@ export async function readPayoutTransfers(input: {
       input.fetchImpl,
     );
     if (!Array.isArray(logs)) {
-      return { count: null, usdc: null, windowBlocks: null, reason: "payout evidence unverified — eth_getLogs returned no array" };
+      return { count: null, usdc: null, windowBlocks: null, feeCount: null, feeUsdc: null, feesSeparated: false, reason: "payout evidence unverified — eth_getLogs returned no array" };
     }
     let total = 0n;
     let counted = 0;
+    let feeTotal = 0n;
+    let feeCounted = 0;
     const wantAsset = input.usdcAddress.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+    // Padded to a 32-byte topic so it compares against topic3 directly.
+    const feeTopic = input.feeRecipientAddress
+      ? `0x${input.feeRecipientAddress.toLowerCase().replace(/^0x/, "").padStart(64, "0")}`
+      : null;
     for (const entry of logs) {
       const data = (entry as { data?: unknown }).data;
       // data[0] is the ASSET. Counting a DOT settlement as USDC would break the
@@ -1403,23 +1447,37 @@ export async function readPayoutTransfers(input: {
       // is right for a single-word Transfer — would be off by ~10^48 here.
       const amount = dataWord(data, 1);
       if (amount === undefined) continue;
+
+      // topic3 is the recipient. A settlement to the fee treasury is REVENUE,
+      // and folding it into payouts is what let the on-chain side run
+      // permanently ahead of the ledger.
+      const topics = (entry as { topics?: unknown }).topics;
+      const recipient = Array.isArray(topics) && typeof topics[3] === "string" ? topics[3].toLowerCase() : null;
+      const isFee = feeTopic !== null && recipient === feeTopic;
+
       try {
-        total += BigInt(`0x${amount}`);
-        counted += 1;
+        const value = BigInt(`0x${amount}`);
+        if (isFee) { feeTotal += value; feeCounted += 1; } else { total += value; counted += 1; }
       } catch {
         // A malformed value is not a reason to under-report the count.
-        counted += 1;
+        if (isFee) feeCounted += 1; else counted += 1;
       }
     }
     return {
       count: counted,
       usdc: Number(total) / 10 ** input.usdcDecimals,
       windowBlocks: latest - fromBlock,
+      // null, not 0, when we cannot tell fees from payouts: zero would be a
+      // claim that no fees were taken, which is a different statement from
+      // "we could not look".
+      feeCount: feeTopic === null ? null : feeCounted,
+      feeUsdc: feeTopic === null ? null : Number(feeTotal) / 10 ** input.usdcDecimals,
+      feesSeparated: feeTopic !== null,
     };
   } catch (error) {
     // Rate limit, capped range, dead endpoint — all unverified, never "0 paid".
     return {
-      count: null, usdc: null, windowBlocks: null,
+      count: null, usdc: null, windowBlocks: null, feeCount: null, feeUsdc: null, feesSeparated: false,
       reason: `payout evidence unverified — log read failed (${error instanceof Error ? error.message : String(error)})`,
     };
   }
@@ -1438,6 +1496,38 @@ function encodeBalanceOf(address: string): string {
 // positions(treasury, USDC) (0x4bd21445) returns 6 words, [0] = liquid.
 const TREASURY_ACCOUNT_SELECTOR = "0x339b2cff";
 const POSITIONS_SELECTOR = "0x4bd21445";
+
+/**
+ * Who receives the protocol fee, according to the contract that charges it.
+ *
+ * Read from EscrowCore rather than taken from `/health.addresses.treasuryReserve`
+ * — those two happen to be the same account on mainnet today, and the payout
+ * split would be silently wrong the moment they are not. The contract is the
+ * authority on where its own fee goes.
+ *
+ * Returns null on any failure, so the caller reports "cannot separate fees"
+ * rather than splitting on a guess.
+ */
+export async function readFeeRecipient(input: {
+  rpcUrl?: string;
+  escrowCore?: string;
+  fetchImpl: typeof fetch;
+}): Promise<string | null> {
+  if (!input.rpcUrl || !input.escrowCore) return null;
+  try {
+    const raw = await ethRpc(
+      input.rpcUrl,
+      "eth_call",
+      [{ to: input.escrowCore, data: TREASURY_ACCOUNT_SELECTOR }, "latest"],
+      input.fetchImpl,
+    );
+    if (!raw || raw.length < 66) return null;
+    const address = `0x${raw.slice(-40)}`;
+    return /^0x0+$/.test(address) ? null : address;
+  } catch {
+    return null;
+  }
+}
 
 function encodePositions(account: string, asset: string): string {
   const pad = (a: string) => a.toLowerCase().replace(/^0x/, "").padStart(64, "0");
@@ -2028,6 +2118,15 @@ export async function collectProductHealthProbes(
   // Independent proof that the settled jobs actually PAID. Opt-in: the log read
   // is rate-limit sensitive, so while it's off the block stays honestly
   // "unverified" rather than reporting a zero that would read as nothing-paid.
+  // Ask the contract who receives its fee, so fee credits can be told apart
+  // from payouts. Both are the SAME event; only the recipient differs.
+  const feeRecipient = config.payoutEvidenceEnabled
+    ? await readFeeRecipient({
+        rpcUrl: config.rpcUrl,
+        escrowCore: h.body?.addresses?.escrowCore,
+        fetchImpl,
+      })
+    : null;
   const payoutRead = config.payoutEvidenceEnabled
     ? await readPayoutTransfers({
         rpcUrl: config.rpcUrl,
@@ -2038,9 +2137,10 @@ export async function collectProductHealthProbes(
         usdcDecimals: config.usdcDecimals,
         lookbackBlocks: config.payoutLookbackBlocks,
         expectedChainId: chainId,
+        ...(feeRecipient ? { feeRecipientAddress: feeRecipient } : {}),
         fetchImpl,
       })
-    : { count: null, usdc: null, windowBlocks: null, reason: "payout evidence off (set PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED=true)" };
+    : { count: null, usdc: null, windowBlocks: null, feeCount: null, feeUsdc: null, feesSeparated: false, reason: "payout evidence off (set PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED=true)" };
   // Check the INSTRUMENT against the chain, not against an assumption. The
   // lookback is compared to settled24h, so it has to actually span 24h at the
   // chain's real block time — an assumed one has already been wrong in prod.
