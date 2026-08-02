@@ -1649,6 +1649,74 @@ describe("readPayoutTransfers (chain-guarded log read)", () => {
     expect(r.windowBlocks).toBe(100);
   });
 
+  // ── Fees ride the SAME event, distinguished only by recipient ────────────
+  const TREASURY = "0x01e6eed856e989201f4ff6346e18eab7e46c874c";
+  /** Same event, recipient = the fee treasury. Revenue, not a payout. */
+  const feeCredit = (usdc: number) => ({
+    ...settled(usdc),
+    topics: [
+      "0x3cdc0be5ec7141f2342208f6404c1b1852936343f0edf1fda179e6c9f46573ee",
+      `0x${word("0xfee")}`,
+      `0x${word("0x5a6836c6d4d293f6e5377e6c28054f4171915813")}`,
+      `0x${word(TREASURY)}`,
+    ],
+  });
+
+  it("does NOT count a fee credit as a payout", async () => {
+    // THE DEFECT, from mainnet 2026-08-02: the panel read 19 confirmed against
+    // 16 settled and called it "no gap". The excess of exactly 3 was exactly
+    // the 3 fee credits — same ReservationSettled event, recipient = treasury.
+    const logs = [settled(1), settled(1), feeCredit(0.05)];
+    const r = await readPayoutTransfers({
+      ...cfg, expectedChainId: 420420419, feeRecipientAddress: TREASURY,
+      fetchImpl: rpc("0x190f1b43", logs),
+    });
+    expect(r.count).toBe(2);
+    expect(r.usdc).toBeCloseTo(2, 6);
+    expect(r.feeCount).toBe(1);
+    expect(r.feeUsdc).toBeCloseTo(0.05, 6);
+    expect(r.feesSeparated).toBe(true);
+  });
+
+  it("keeps a real shortfall visible instead of letting fees mask it", async () => {
+    // WHY IT MATTERS. A fee arrives on every fee-bearing settlement, so the
+    // inflation is permanent: three missing payouts plus three fee credits net
+    // to zero and `shortfall` can never fire. Ledger claims 5; the chain has 2
+    // payouts and 3 fees. Conflated that reads 5 — clean. Split, the gap lives.
+    const logs = [settled(1), settled(1), feeCredit(0.05), feeCredit(0.05), feeCredit(0.05)];
+    const r = await readPayoutTransfers({
+      ...cfg, expectedChainId: 420420419, feeRecipientAddress: TREASURY,
+      fetchImpl: rpc("0x190f1b43", logs),
+    });
+    expect(r.count).toBe(2);
+    expect(r.count! + (r.feeCount ?? 0)).toBe(5); // what it used to report
+  });
+
+  it("says it CANNOT separate fees rather than assuming none", async () => {
+    // Without a treasury address the two are indistinguishable. Reporting 0
+    // fees would claim none were taken; null says we could not look — the same
+    // unverified-vs-shortfall distinction the rest of the board makes.
+    const r = await readPayoutTransfers({
+      ...cfg, expectedChainId: 420420419, fetchImpl: rpc("0x190f1b43", [settled(1), feeCredit(0.05)]),
+    });
+    expect(r.feesSeparated).toBe(false);
+    expect(r.feeCount).toBeNull();
+    expect(r.feeUsdc).toBeNull();
+    expect(r.count).toBe(2); // legacy behaviour, honestly flagged
+  });
+
+  it("matches the recipient case-insensitively", async () => {
+    // topic3 arrives lowercase from the RPC; a checksummed address in config
+    // must still match, or the split silently never fires.
+    const r = await readPayoutTransfers({
+      ...cfg, expectedChainId: 420420419,
+      feeRecipientAddress: "0x01E6EEd856E989201F4fF6346E18eAb7e46C874C",
+      fetchImpl: rpc("0x190f1b43", [settled(1), feeCredit(0.05)]),
+    });
+    expect(r.feeCount).toBe(1);
+    expect(r.count).toBe(1);
+  });
+
   // The amount is the SECOND data word. Reading the whole 64-byte `data` as one
   // integer — correct for a single-word ERC-20 Transfer — is off by ~10^48 and
   // would put an absurd USDC figure on a live money board.
