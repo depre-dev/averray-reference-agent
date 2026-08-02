@@ -100,9 +100,32 @@ export interface OpsVerdict {
 // trailing d) matches both "not exposed" and "does not expose".
 const AWAITING_RE = /awaiting|not expose|not wired|not configured|unconfigured|no data/i;
 
-/** A probe whose degraded status is really "upstream data not wired yet". */
+/**
+ * A probe whose degraded status is really "upstream data not wired yet".
+ *
+ * ONLY `degraded`. This read `status !== "red"` until it was found to also sweep
+ * in `ok` — and matching here is not cosmetic. An awaiting probe is dropped from
+ * `unacknowledgedDegraded` (so it cannot raise the verdict) and is subtracted
+ * from the ok count, rendering grey.
+ *
+ * So an `ok` probe whose prose merely contained one of these words was silently
+ * demoted. `external_funnel` hit exactly that: it reported `ok` with the detail
+ * "1 awaiting review" — a real job under review, nothing missing — and the board
+ * greyed it and stopped counting it green. Renaming that one string fixed the
+ * symptom and left the mechanism armed for the next probe to word itself badly.
+ *
+ * The rule that makes it unrepresentable: a probe reporting `ok` HAS its data.
+ * That is what ok means, so prose cannot demote it. Only a `degraded` probe can
+ * be degraded *because* something upstream is missing. `red` was already
+ * excluded for the mirror-image reason — page-worthy leads whatever its detail
+ * says.
+ *
+ * Note this now matches the shape of `isAcknowledgedProbe` below, which has
+ * required `degraded` all along. They are siblings and should never have
+ * differed.
+ */
 export function isAwaitingProbe(probe: { status: VerdictStatus; detail: string }): boolean {
-  return probe.status !== "red" && AWAITING_RE.test(probe.detail);
+  return probe.status === "degraded" && AWAITING_RE.test(probe.detail);
 }
 
 // A degradation the operator has already triaged and declared expected. On
