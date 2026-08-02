@@ -124,6 +124,21 @@ export interface PayoutEvidence {
   windowBlocks: number | null;
   /** Does the block window actually span the period being compared? */
   window?: WindowFit;
+  /**
+   * Protocol-fee credits in the SAME window — the reason `confirmedCount` is
+   * not simply every settlement on chain. Fees ride the identical event and
+   * differ only in recipient.
+   *
+   * RENDERED, not merely carried: excluding fees changed a number the operator
+   * had been reading for weeks, and a money figure that moves with nothing on
+   * screen to explain it is its own kind of dishonesty.
+   *
+   * null = could not be told apart. NOT "none were taken".
+   */
+  feeCount?: number | null;
+  feeUsdc?: number | null;
+  /** False → `confirmedCount` may still include fees. Said, never implied. */
+  feesSeparated?: boolean;
 }
 
 /**

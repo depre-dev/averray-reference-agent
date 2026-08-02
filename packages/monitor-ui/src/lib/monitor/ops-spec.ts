@@ -460,6 +460,27 @@ export interface EvidenceView {
  * may be perfectly fine). Collapsing the last two into one alarm is how a board
  * trains its operator to ignore it.
  */
+/**
+ * Why the payout count is not simply every settlement on chain.
+ *
+ * The protocol fee is credited by the SAME event as a payout and differs only
+ * in recipient, so it is excluded from the count. That exclusion moved a number
+ * the operator had been reading for weeks, and a money figure that changes with
+ * nothing on screen to explain it is its own kind of dishonesty.
+ *
+ * Silent only when there is genuinely nothing to say: fees were separable and
+ * none occurred in the window. `feesSeparated: false` is NOT that case — it
+ * means the count may still include fees, and saying so is the whole point.
+ */
+function feeNote(payout: PayoutEvidence): string {
+  if (payout.feesSeparated === false) return " · fees not separated — count may include them";
+  if (payout.feesSeparated !== true) return ""; // older payload, nothing claimed
+  const n = payout.feeCount ?? 0;
+  if (n === 0) return "";
+  const amount = payout.feeUsdc == null ? "" : ` ${formatAmount(payout.feeUsdc)} USDC`;
+  return ` · ${n} fee credit${n === 1 ? "" : "s"}${amount} excluded`;
+}
+
 export function payoutView(payout: PayoutEvidence | undefined): EvidenceView {
   if (!payout) {
     return {
@@ -477,7 +498,7 @@ export function payoutView(payout: PayoutEvidence | undefined): EvidenceView {
       ? "chain not readable in this window"
       : `${payout.confirmedCount} payout${payout.confirmedCount === 1 ? "" : "s"} confirmed on-chain${
           payout.confirmedUsdc == null ? "" : ` · ${formatAmount(payout.confirmedUsdc)} USDC`
-        }`;
+        }${feeNote(payout)}`;
   const ledgerLine =
     payout.settledCount == null
       ? "settled count unavailable"
