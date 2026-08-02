@@ -12,7 +12,15 @@ quiet when it isn't.
 
 Lives at `/opt/data/skills/ops/averray-ops/SKILL.md`, copied from
 `hermes/skills/ops/averray-ops/SKILL.md` in `depre-dev/averray-reference-agent`.
-Edit it there, not in the volume.
+Edit it there, not in the volume: the `skills-sync` service copies the repo tree
+in before Hermes starts and on every `ops/deploy-monitor.sh` run, so an edit
+made in the volume is overwritten, and one made only in the volume is invisible
+to everyone reading the repo. `skills-observer` reports when the two diverge.
+
+That sync is recent. Before it, the copy was placed by hand, nothing checked it,
+and a merged edit reached the running agent only if someone remembered to
+re-copy it — which is how this file came to be weeks stale while still being
+read as current.
 
 The layout is not decoration, and all three levels were checked against the
 running image rather than assumed:

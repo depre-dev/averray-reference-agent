@@ -3,12 +3,28 @@ import path from "node:path";
 import chokidar from "chokidar";
 import { logger, optionalEnv, query, sha256Text } from "@avg/mcp-common";
 import { describeWatchError } from "./watch-error.js";
+import { decideDriftAlert, initialDriftAlertState } from "./drift-alert.js";
+import { errorCode } from "./skills-sync.js";
+import {
+  describeDrift,
+  diffSkillTrees,
+  driftSignature,
+  hashBytes,
+  isInSync,
+  readSkillTree,
+  type SkillDrift
+} from "./skills-tree.js";
 
 const skillsDir = optionalEnv("HERMES_SKILLS_DIR", "/opt/data/skills");
+const repoSkillsDir = optionalEnv("REPO_SKILLS_DIR", "/repo-skills");
 const slackWebhookUrl = optionalEnv("SLACK_WEBHOOK_URL");
 const watchRetryMs = Number(optionalEnv("SKILLS_OBSERVER_WATCH_RETRY_MS", "30000"));
+const driftCheckMs = Number(optionalEnv("SKILLS_DRIFT_CHECK_MS", "900000"));
+// Gap before the second check only — the first runs while skills-sync may still
+// be copying, so it observes without announcing.
+const driftSettleMs = Number(optionalEnv("SKILLS_DRIFT_SETTLE_MS", "60000"));
 
-logger.info({ skillsDir }, "skills_observer_starting");
+logger.info({ skillsDir, repoSkillsDir }, "skills_observer_starting");
 
 let retryTimer: NodeJS.Timeout | undefined;
 
@@ -41,8 +57,14 @@ function startWatcher(): void {
     }
   });
 
-  watcher.on("add", ingest);
-  watcher.on("change", ingest);
+  // `ingest` is async, so an unhandled rejection from it takes the whole
+  // process down — a Postgres blip during the initial scan is enough. That now
+  // costs more than a lost ingest: the drift check shares this process, and a
+  // restart resets its state machine, whose first pass deliberately only
+  // observes. A fast enough crash loop would therefore never reach a pass that
+  // announces, and drift would go unreported while looking merely flaky.
+  watcher.on("add", (relativePath) => void ingestSafely(relativePath));
+  watcher.on("change", (relativePath) => void ingestSafely(relativePath));
   watcher.on("error", (error) => {
     const disposition = describeWatchError(error);
     if (!disposition.retryable) {
@@ -62,6 +84,51 @@ function startWatcher(): void {
 
 startWatcher();
 
+/**
+ * Who wrote the file that just landed in the volume.
+ *
+ * Before skills-sync existed, everything appearing here came from Hermes, so
+ * the watcher could announce it as such. Now the sync writes into the same
+ * directory, and announcing its copies as "Hermes wrote a skill" would report
+ * agent behaviour that never happened. Classify by comparing against the repo
+ * copy instead of assuming.
+ *
+ * `repo`  — byte-identical to what the repo ships: our own sync landing.
+ * `edited-over-repo` — a repo-managed path the agent has since changed. This is
+ *   drift; the periodic check owns that message so it is not said twice.
+ * `agent` — no repo counterpart, so the agent genuinely authored it.
+ * `unknown` — the repo tree could not be consulted. Nothing is claimed either
+ *   way; notably NOT folded into `agent`, or a broken repo mount would report
+ *   every file the sync just copied as the agent having written it.
+ */
+type SkillOrigin = "repo" | "edited-over-repo" | "agent" | "unknown";
+
+async function classifyOrigin(relativePath: string, content: string): Promise<SkillOrigin> {
+  let repoBytes: Buffer;
+  try {
+    repoBytes = await fs.readFile(path.join(repoSkillsDir, relativePath));
+  } catch (error) {
+    // Only "the repo does not ship this path" means the agent wrote it. Any
+    // other error means we could not look.
+    return errorCode(error) === "ENOENT" ? "agent" : "unknown";
+  }
+  // The watcher only ever ingests .md, so re-encoding the text it already read
+  // reproduces the bytes on disk exactly.
+  return hashBytes(repoBytes) === hashBytes(Buffer.from(content, "utf8"))
+    ? "repo"
+    : "edited-over-repo";
+}
+
+async function ingestSafely(relativePath: string): Promise<void> {
+  try {
+    await ingest(relativePath);
+  } catch (error) {
+    // Chokidar re-emits on the next change, and a restart re-scans, so a failed
+    // ingest is recoverable. Losing the process is not worth it.
+    logger.error({ err: error, filePath: relativePath }, "skill_ingest_failed");
+  }
+}
+
 async function ingest(relativePath: string) {
   const filePath = path.join(skillsDir, relativePath);
   const content = await fs.readFile(filePath, "utf8");
@@ -75,7 +142,12 @@ async function ingest(relativePath: string) {
     [relativePath, sha256, content, stat.mtime.toISOString()]
   );
   if (!rows[0]) return;
-  logger.info({ filePath: relativePath, sha256 }, "skill_observed");
+  const origin = await classifyOrigin(relativePath, content);
+  logger.info({ filePath: relativePath, sha256, origin }, "skill_observed");
+  // Every version is recorded above regardless of origin — that audit trail is
+  // the point. Only a skill the agent demonstrably authored is news worth a
+  // notification, and `unknown` is not a demonstration.
+  if (origin !== "agent") return;
   await postSlack({
     text: `Hermes wrote or updated a skill: ${relativePath}`,
     blocks: [
@@ -89,6 +161,107 @@ async function ingest(relativePath: string) {
     ]
   });
 }
+
+/**
+ * Report when the volume copy stops matching the repo.
+ *
+ * skills-sync makes the copy correct at boot and on deploy; this makes a later
+ * divergence visible. Both failure modes it catches used to be silent: a sync
+ * that could not write (Hermes re-secures the volume to 0700 as it works), and
+ * the agent editing a skill the repo owns.
+ *
+ * Detection lives here rather than in skills-sync because it is a standing
+ * condition, not a boot step, and this service is already the long-running
+ * reader of that volume — it holds the right UID, the Slack route, and a
+ * read-only mount of both trees. It writes to neither.
+ */
+let driftAlertState = initialDriftAlertState;
+
+async function checkDrift(): Promise<void> {
+  let signature: string;
+  let drift: SkillDrift;
+  try {
+    const [repoTree, volumeTree] = await Promise.all([
+      readSkillTree(repoSkillsDir),
+      readSkillTree(skillsDir)
+    ]);
+    drift = diffSkillTrees(repoTree, volumeTree);
+    signature = driftSignature(drift);
+  } catch (error) {
+    // Unreadable is NOT in sync. Say only what was established — that the check
+    // could not run — and announce that, because a drift check that has quietly
+    // stopped working is the same silence this mechanism exists to end.
+    const decision = decideDriftAlert(driftAlertState, { kind: "unavailable" });
+    driftAlertState = decision.state;
+    logger.warn(
+      { err: error, skillsDir, repoSkillsDir },
+      "skills_drift_check_unavailable: could not compare the volume against the repo, so " +
+        "whether they match is currently unknown."
+    );
+    if (decision.announce === "unavailable") {
+      await postSlack({
+        text:
+          "Cannot check the skills volume against the repo, so whether the agent is loading " +
+          "current skills is unknown. Check the /repo-skills and skills volume mounts on " +
+          "skills-observer."
+      });
+    }
+    return;
+  }
+
+  const decision = decideDriftAlert(
+    driftAlertState,
+    isInSync(drift) ? { kind: "in-sync" } : { kind: "drifted", signature }
+  );
+  driftAlertState = decision.state;
+
+  if (isInSync(drift)) {
+    logger.info({ skillsDir }, "skills_drift_none");
+    if (decision.announce === "recovery") {
+      await postSlack({ text: "Skills volume is back in sync with the repo." });
+    }
+    return;
+  }
+
+  // Logged on every check regardless of whether it is announced, so the
+  // condition is always recoverable from the logs.
+  logger.error(
+    { missing: drift.missing, modified: drift.modified },
+    `skills_drift_detected: ${describeDrift(drift)}. The running agent is not loading what the ` +
+      "repo says it is. Re-run ops/deploy-monitor.sh (it syncs first), or " +
+      "`docker compose -p avg run --rm --no-deps skills-sync`."
+  );
+  if (decision.announce !== "drift") return;
+  await postSlack({
+    text: `Skills volume has drifted from the repo: ${describeDrift(drift)}`,
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text:
+            `*Skills volume has drifted from the repo*\n${describeDrift(drift)}\n\n` +
+            "The running agent is not loading what `hermes/skills/**` says it is. " +
+            "Re-run `ops/deploy-monitor.sh`, which syncs before it deploys."
+        }
+      }
+    ]
+  });
+}
+
+async function driftLoop(): Promise<void> {
+  const settling = !driftAlertState.settled;
+  await checkDrift();
+  // The first pass only observes (skills-sync may still be copying), so follow
+  // it up quickly rather than a full interval later — otherwise a divergence
+  // that is real goes unannounced for the whole period.
+  // Not unref'd, for the same reason as the watch-retry timer above: a pending
+  // timer keeps the process alive, so an unreadable volume degrades to periodic
+  // re-checks instead of the process exiting into a Docker restart loop.
+  setTimeout(() => void driftLoop(), settling ? driftSettleMs : driftCheckMs);
+}
+
+void driftLoop();
 
 async function postSlack(payload: unknown) {
   if (!slackWebhookUrl) return;

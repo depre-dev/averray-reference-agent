@@ -22,9 +22,13 @@ packages/
   mcp-common/  schemas/
 services/
   slack-operator/   ← serves the live /monitor board, the Codex task queue + runner, testbed mission runner
-  skills-observer/  ← sidecar ingesting Hermes skill files
+  skills-observer/  ← sidecar ingesting Hermes skill files, and reporting when the
+                      skills volume stops matching the repo. Also holds `skills-sync`
+                      (dist/sync.js), the one-shot that copies hermes/skills/** into
+                      the avg-hermes-skills volume before Hermes starts.
 ops/                ← Docker compose stack (base, prod, command-center, cloudflare-access)
-hermes/             ← Hermes config (hermes.yaml, policy.yaml) + trace plugin
+hermes/             ← Hermes config (hermes.yaml, policy.yaml), trace plugin, and
+                      skills/ — the source of truth for what the agent loads
 ```
 
 ---
