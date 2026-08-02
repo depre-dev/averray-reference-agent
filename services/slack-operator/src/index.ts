@@ -153,6 +153,7 @@ import {
 } from "./monitor-hermes-voice.js";
 import { decideOpsNarration, type OpsStatus } from "./ops-narration.js";
 import { publishNarration, readBuzzConfig } from "./buzz-client.js";
+import { startBuzzInbound } from "./buzz-inbound-start.js";
 import { decideProbeTransitions } from "./probe-transitions.js";
 import { describeBuzzDelivery, recordBuzzDelivery, type BuzzDeliveryState } from "./buzz-delivery.js";
 import type { ProbeResult } from "./product-health.js";
@@ -374,6 +375,12 @@ const server = http.createServer((request, response) => {
 server.listen(httpPort, "0.0.0.0", () => {
   logger.info({ httpPort }, "slack_operator_http_listening");
 });
+
+// Buzz inbound: answer operator questions in #Ops. Default OFF, and it declines
+// to open a socket at all unless it could actually answer — see
+// buzz-inbound-start.ts for why a listener that cannot answer must not listen.
+const buzzInbound = startBuzzInbound();
+logger.info({ started: buzzInbound.started, reason: buzzInbound.reason }, "buzz_inbound_start");
 
 let autonomyMaintenanceRunning = false;
 let awayDigestTrackerState = initialAutopilotAwayDigestTrackerState();

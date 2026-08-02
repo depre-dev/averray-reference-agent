@@ -412,6 +412,26 @@ services:
       BUZZ_AGENT_SECRET_KEY: ${BUZZ_AGENT_SECRET_KEY:-}
       BUZZ_OWNER_AUTH_TAG: ${BUZZ_OWNER_AUTH_TAG:-}
       BUZZ_OPS_CHANNEL_ID: ${BUZZ_OPS_CHANNEL_ID:-}
+      # Buzz INBOUND — answering questions in #Ops. Default OFF, and separate
+      # from the four above on purpose: publishing narration is safe, while
+      # listening hands an LLM turn to whatever is typed in the channel.
+      #
+      # The prompt tells Hermes to answer rather than act, but that is guidance,
+      # not enforcement — the session carries its own MCP tools. What actually
+      # bounds this is that the relay is closed and the channel has ONE member,
+      # so the only person who can ask is the operator. If Buzz ever gains
+      # members, this needs tool-level scoping before it goes back on.
+      #
+      # It refuses to open a socket unless HERMES_SESSION_API_ENABLED and the
+      # gateway credentials are also set: a listener that cannot answer would
+      # report the same configuration problem once per question.
+      BUZZ_INBOUND_ENABLED: ${BUZZ_INBOUND_ENABLED:-}
+      # Answer only messages naming the agent. Off is right for a private
+      # one-member channel; turn it on the moment anyone else joins.
+      BUZZ_INBOUND_REQUIRE_MENTION: ${BUZZ_INBOUND_REQUIRE_MENTION:-}
+      # Backstop for a loop the self-pubkey check somehow fails to catch.
+      # Bounds the blast radius to a known number of messages, not a runaway.
+      BUZZ_INBOUND_MAX_REPLIES_PER_HOUR: ${BUZZ_INBOUND_MAX_REPLIES_PER_HOUR:-}
       # Monitor snapshots fan out across open PRs and their check runs. Keep the
       # timeout operator-tunable; the live mainnet calibration raises it from the
       # conservative generic default without changing testnet behaviour.
