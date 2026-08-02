@@ -71,6 +71,15 @@ const CANCELLED_STATES = new Set<HarnessRunState>([
   "cancelled",
 ]);
 
+type BudgetDimension = "elapsed_seconds" | "model_tokens" | "tool_calls";
+
+interface BudgetExhaustion {
+  dimension: BudgetDimension;
+  used: number;
+  limit: number;
+  overBy: number;
+}
+
 export interface ReconcileLogger {
   warn(fields: Record<string, unknown>, message: string): void;
 }
@@ -470,16 +479,20 @@ async function reconcileTask(
       projection,
     );
   }
-  if (projection.budget.exhausted) {
+  const budgetExhaustions = projection.budget.exhausted
+    ? exhaustedBudgetDimensions(projection)
+    : [];
+  const budgetReasons = budgetDecisionReasons(budgetExhaustions);
+  if (projection.budget.exhausted && !projection.run.terminal) {
     return forceCancelTask(deps, task, harnessRunId, {
       lifecycle: "failed",
       decisionType: "dispatch_refusal",
       reason: "budget_exhausted",
+      additionalReasons: budgetReasons,
       alert: {
         severity: "critical",
         code: "budget_exhausted",
-        message:
-          "The approved Harness budget was exhausted; the run was cancelled and the task failed.",
+        message: `${budgetAlertSummary(budgetExhaustions)}; the live run was cancelled and the task failed.`,
       },
       projection,
       outboxBinding,
@@ -576,6 +589,15 @@ async function reconcileTask(
     });
   }
 
+  if (projection.budget.exhausted) {
+    await emitTaskAlert(deps, updatedTask, {
+      severity: "warn",
+      code: "budget_exhausted",
+      harnessRunId,
+      message: `${budgetAlertSummary(budgetExhaustions)}; the run was already terminal, so its outcome was preserved.`,
+    });
+  }
+
   if (nextLifecycle === "handoff_ready") {
     let handoff: VerifiedHandoffV1;
     try {
@@ -604,6 +626,9 @@ async function reconcileTask(
         [
           `eligible_for_pr_open=${handoff.eligibleForPrOpen}`,
           "eligible_for_pr_open_reason=completed_outcome_verified_acceptance_all_checks_passed",
+          ...(projection.budget.exhausted
+            ? ["budget_status=exhausted", ...budgetReasons]
+            : ["budget_status=within_limits"]),
         ],
       ),
     );
@@ -630,6 +655,7 @@ interface ForceCancelOptions {
   lifecycle: "blocked" | "failed" | "cancelled";
   decisionType: "dispatch_refusal" | "escalation";
   reason: string;
+  additionalReasons?: string[];
   alert: Pick<DispatchAlert, "severity" | "code" | "message">;
   projection?: AgentRunProjectionV1;
   outboxBinding?: RunBinding;
@@ -688,6 +714,7 @@ async function forceCancelTask(
       controlAcknowledged,
       now,
       options.projection,
+      options.additionalReasons,
     ),
   );
   await emitTaskAlert(deps, updatedTask, {
@@ -792,6 +819,61 @@ function buildProjectionBinding(
       ? { pullRequest: task.bindings.pullRequest }
       : {}),
   };
+}
+
+function exhaustedBudgetDimensions(
+  projection: AgentRunProjectionV1,
+): BudgetExhaustion[] {
+  const candidates: Array<{
+    dimension: BudgetDimension;
+    used: number | undefined;
+    limit: number | undefined;
+  }> = [
+    {
+      dimension: "elapsed_seconds",
+      used: projection.budget.elapsedSecondsUsed,
+      limit: projection.budget.elapsedSecondsLimit,
+    },
+    {
+      dimension: "model_tokens",
+      used: projection.budget.modelTokensUsed,
+      limit: projection.budget.modelTokensLimit,
+    },
+    {
+      dimension: "tool_calls",
+      used: projection.budget.toolCallsUsed,
+      limit: projection.budget.toolCallsLimit,
+    },
+  ];
+  const exhausted = candidates.flatMap(({ dimension, used, limit }) => {
+    if (used === undefined || limit === undefined || used < limit) return [];
+    return [{
+      dimension,
+      used,
+      limit,
+      overBy: used - limit,
+    }];
+  });
+  if (projection.budget.exhausted && exhausted.length === 0) {
+    throw new Error(
+      "exhausted Harness budget did not identify a used and limit dimension",
+    );
+  }
+  return exhausted;
+}
+
+function budgetDecisionReasons(exhaustions: BudgetExhaustion[]): string[] {
+  return exhaustions.map(
+    ({ dimension, used, limit, overBy }) =>
+      `budget_exhaustion_dimension=${dimension} used=${used} limit=${limit} over_by=${overBy}`,
+  );
+}
+
+function budgetAlertSummary(exhaustions: BudgetExhaustion[]): string {
+  return `The approved Harness budget was exhausted: ${exhaustions.map(
+    ({ dimension, used, limit, overBy }) =>
+      `${dimension} used=${used} limit=${limit} over_by=${overBy}`,
+  ).join("; ")}`;
 }
 
 function lifecycleForProjection(
@@ -1008,6 +1090,7 @@ function buildForcedCancelDecision(
   controlAcknowledged: boolean,
   generatedAt: Date,
   projection?: AgentRunProjectionV1,
+  additionalReasons: string[] = [],
 ): HermesDecisionRecordV2 {
   const approval = task.approval;
   const mutations: MutationRef[] = [{
@@ -1031,7 +1114,7 @@ function buildForcedCancelDecision(
       what: decisionType === "escalation"
         ? "Stop active Harness work under the global HALT control."
         : "Refuse continued execution and stop the active Harness run.",
-      why: [reason, controlReason],
+      why: [reason, controlReason, ...additionalReasons],
       evidenceRefs: uniqueArtifacts([
         ...task.proposal.sourceRefs,
         ...(projection?.artifacts ?? []),
