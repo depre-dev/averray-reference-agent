@@ -21,7 +21,13 @@
 
 import type { ProductHealth } from "../../lib/monitor/product-health.js";
 import { formatAgo, formatAmount } from "../../lib/monitor/ops-model.js";
-import { flowFunnel, payoutRunwayNote, payoutView, splitPools } from "../../lib/monitor/ops-spec.js";
+import {
+  flowFunnel,
+  payoutRunwayNote,
+  payoutView,
+  splitPools,
+  volumeMixNote,
+} from "../../lib/monitor/ops-spec.js";
 import {
   breachCard,
   isUntrusted,
@@ -307,6 +313,7 @@ function FlowPanel({ health, emphasise, nowMs }: { health: ProductHealth; emphas
   const funnel = flowFunnel(health.flow);
   const evidence = payoutView(health.flow?.payout);
   const timing = lifecycleNote(health.lifecycle);
+  const mix = volumeMixNote({ lifecycle: health.lifecycle, settledCount: health.flow?.settled24h ?? null });
   const clock = disputeClockLine(health.externalFunnel, nowMs);
   return (
     <section
@@ -324,6 +331,14 @@ function FlowPanel({ health, emphasise, nowMs }: { health: ProductHealth; emphas
         <span className="hm-ph-quiet">
           stuck {funnel.stuck} · failed {funnel.failed}
         </span>
+        {/* Who posted the work. Belongs on BOTH surfaces: the phone is the
+            screen most likely to be glanced at by someone who does not carry
+            the context, and self-posted volume reads as demand without it. */}
+        {mix ? (
+          <span data-tone={mix.tone} data-testid="mobile-volume-mix">
+            {mix.text}
+          </span>
+        ) : null}
         {/* Same facts as the desktop flow panel: how long the funnel above
             actually takes, split by who posted the work, plus the dispute clock
             when a bond is counting down. The phone is where this is read when

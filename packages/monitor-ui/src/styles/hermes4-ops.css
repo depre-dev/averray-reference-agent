@@ -590,6 +590,16 @@ body,
    The dispute clock is the one line here where doing nothing costs
    money, so it is boxed and toned; the lifecycle line is context for
    the funnel beneath it and stays quiet. */
+/* Who posted the work. Slightly louder than the latency line beneath it —
+   the composition is the fact a stranger most needs and is least likely to
+   infer, and "0 external" should be readable without hunting for it. */
+.ops-volume-mix {
+  margin: calc(7 * var(--ops-u)) 0 0;
+  font-family: var(--h4-font-mono);
+  font-size: calc(12 * var(--ops-u));
+  line-height: 1.45;
+  color: var(--tone, var(--h4-ink));
+}
 .ops-lifecycle {
   margin: calc(6 * var(--ops-u)) 0 0;
   font-family: var(--h4-font-mono);
@@ -760,6 +770,23 @@ body,
   font-size: calc(12 * var(--ops-u));
   color: var(--tone, var(--h4-muted));
 }
+/* Provenance. Deliberately the quietest thing in the panel: it answers
+   "whose proof is this", which matters when a number is disputed and at no
+   other time. It must be present and it must not compete. */
+.ops-evidence-provenance {
+  display: flex;
+  align-items: baseline;
+  gap: calc(14 * var(--ops-u));
+  flex-wrap: wrap;
+  padding: calc(5 * var(--ops-u)) calc(14 * var(--ops-u));
+  border-top: 1px dashed var(--ops-rule);
+  font-family: var(--h4-font-mono);
+  font-size: calc(9.5 * var(--ops-u));
+  color: var(--tone, var(--h4-tel));
+}
+.ops-evidence-source { color: var(--h4-tel); }
+.ops-evidence-provenance > span[data-tone] { color: var(--tone, var(--h4-tel)); }
+
 .ops-evidence-key {
   display: flex;
   gap: calc(18 * var(--ops-u));

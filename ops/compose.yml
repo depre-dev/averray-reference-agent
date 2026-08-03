@@ -577,6 +577,15 @@ services:
       # settled-minus-confirmed gap tolerated as a window-boundary artifact — the
       # product's rolling 24h and the block window don't share a clock.
       PRODUCT_HEALTH_PAYOUT_TOLERANCE: ${PRODUCT_HEALTH_PAYOUT_TOLERANCE:-1}
+      # A SECOND provider, so "independent on-chain proof" is not one endpoint's
+      # opinion. Point it at a DIFFERENT operator than the primary — two hosts
+      # behind the same infrastructure agree for reasons that have nothing to do
+      # with the chain.
+      #
+      # Unset by default, and absent reads as "no second endpoint configured",
+      # which the panel states plainly and does NOT treat as a fault. The
+      # comparison is weekly and three RPC calls, so enabling it costs nothing.
+      PRODUCT_HEALTH_PAYOUT_CROSSCHECK_RPC_URL: ${PRODUCT_HEALTH_PAYOUT_CROSSCHECK_RPC_URL:-}
       # Gas attribution — what the signer's burn went ON, by operation.
       #
       # OFF by default and deliberately opt-in: one pass is ~174 RPC calls (a
