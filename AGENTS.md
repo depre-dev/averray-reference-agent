@@ -54,6 +54,13 @@ npm test          # vitest run — must pass
 npm run build     # tsc -b emit (only needed to validate emit / run dist)
 ```
 
+**Run `typecheck` before `test`, in that order, in a fresh checkout or worktree.**
+`typecheck` is `tsc -b`, which emits the workspace packages' declarations. Without
+it `vitest` cannot resolve `@avg/*` imports and fails with module-not-found errors
+that read like broken code rather than a missing build. This catches out every new
+worktree — don't take a wall of `@avg/*` resolution failures as a real defect until
+you have built.
+
 Changes that can affect supervised Harness dispatch are additionally gated in
 CI by `scripts/ceremony/run-int2-automated-suite.sh`. It runs the deterministic
 INT-2 cases against the real dispatcher, disposable Postgres databases, the
