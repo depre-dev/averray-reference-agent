@@ -192,6 +192,41 @@ describe("payoutView — whether to believe the comparison at all", () => {
   });
 });
 
+describe("CONFIRMED says what it actually confirmed", () => {
+  const base = { status: "confirmed" as const, detail: "ok", confirmedUsdc: 1.8, windowBlocks: 40909 };
+
+  test("no gap is stated as no gap", () => {
+    const view = payoutView({ ...base, confirmedCount: 16, settledCount: 16 });
+    expect(view.delta).toBe("proof matches ledger — no gap");
+    expect(view.tone).toBe("ok");
+  });
+
+  test("a TOLERATED gap is not described as no gap", () => {
+    // The live board on 2026-08-03: 15 confirmed, 16 settled, status confirmed
+    // because the default tolerance is 1 — printed under the words "no gap",
+    // with 15 and 16 on the row above it.
+    const view = payoutView({ ...base, confirmedCount: 15, settledCount: 16 });
+    expect(view.delta).not.toContain("no gap");
+    expect(view.delta).toContain("1 settled job not yet proven on-chain");
+    expect(view.delta).toContain("not a shortfall");
+    // Still sage, still unemphasised: the tolerance exists because a job on the
+    // window edge is expected, and paging for it would be a false red.
+    expect(view.tone).toBe("ok");
+    expect(view.emphasised).toBe(false);
+  });
+
+  test("more proof than ledger reads as a window edge, not a discrepancy", () => {
+    const view = payoutView({ ...base, confirmedCount: 17, settledCount: 16 });
+    expect(view.delta).toContain("1 more payout on-chain than settled");
+    expect(view.delta).not.toContain("no gap");
+  });
+
+  test("nothing to compare against never claims a match with a ledger", () => {
+    const view = payoutView({ ...base, confirmedCount: 15, settledCount: null });
+    expect(view.delta).not.toContain("no gap");
+  });
+});
+
 describe("payoutView — the fee exclusion is explained on screen", () => {
   const base = {
     status: "confirmed" as const, detail: "ok",
