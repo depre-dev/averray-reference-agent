@@ -616,10 +616,44 @@ export function payoutView(payout: PayoutEvidence | undefined): EvidenceView {
     tone: "ok",
     line1: chainLine,
     line2: ledgerLine,
-    delta: "proof matches ledger — no gap",
+    delta: confirmedDelta(payout),
     fit,
     emphasised: false,
   };
+}
+
+/**
+ * What CONFIRMED actually means, given the numbers printed beside it.
+ *
+ * "proof matches ledger — no gap" was hard-coded, and `confirmed` does not mean
+ * zero gap — it means the gap is within `PRODUCT_HEALTH_PAYOUT_TOLERANCE`,
+ * which defaults to 1. So the live board showed
+ *
+ *     CONFIRMED · 15 payouts confirmed on-chain · 16 marked settled
+ *                 proof matches ledger — no gap
+ *
+ * with 15 and 16 on the same row. Anyone who subtracts gets a different answer
+ * from the board's own summary of itself, and the summary is the part written
+ * in the reassuring voice.
+ *
+ * The tolerance is right — a job settling within seconds of the window edge
+ * lands on one side of the chain read and the other side of the ledger count,
+ * and paging someone for that would be a false red. What was wrong was
+ * describing a tolerated gap as no gap. It stays sage, because the money is
+ * fine; it just stops claiming more than the evidence does.
+ */
+function confirmedDelta(payout: PayoutEvidence): string {
+  const { settledCount, confirmedCount } = payout;
+  if (settledCount == null || confirmedCount == null) return "proof matches ledger";
+  const gap = settledCount - confirmedCount;
+  if (gap === 0) return "proof matches ledger — no gap";
+  if (gap > 0) {
+    return `${gap} settled job${gap === 1 ? "" : "s"} not yet proven on-chain — inside the boundary tolerance, not a shortfall`;
+  }
+  // More proof than ledger: normal at a window edge, where the chain read
+  // reaches back slightly further than the 24h settled count.
+  const extra = -gap;
+  return `${extra} more payout${extra === 1 ? "" : "s"} on-chain than settled in the window — window edge, not a discrepancy`;
 }
 
 /** The permanent key under the evidence row — the distinction, always on screen. */
