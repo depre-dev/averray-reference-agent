@@ -45,7 +45,6 @@ import {
   PrPayloadSendError,
   sendPullRequestPayload,
   preflightPullRequestPayload,
-  type GitHubWriteAuthorization,
   type PrPayloadGitHubClient,
   type PrPayloadSendRefusalReason,
   type PrPayloadSendResult,
@@ -57,6 +56,9 @@ import {
 import {
   createGitHubPrClient,
 } from "../../services/harness-dispatcher/src/pr-payload-github-client.js";
+import {
+  FakeGitHubClient,
+} from "../helpers/fake-github-client.js";
 
 const execFileAsync = promisify(execFile);
 const PINNED_REPOSITORY = "depre-dev/averray-reference-agent";
@@ -117,70 +119,6 @@ interface CeremonyEvidence {
 }
 
 class Int3bEvidenceError extends Error {}
-
-class FakeGitHubClient implements PrPayloadGitHubClient {
-  authorization: GitHubWriteAuthorization = {
-    identity: "ceremony-app#installation-1001",
-    repositorySelection: "selected",
-    writeRepositories: [PINNED_REPOSITORY],
-    permissions: {
-      contents: "write",
-      pullRequests: "write",
-      extraWriteScopes: [],
-    },
-  };
-  baseRevision: string;
-  remoteCalls = 0;
-  materializeCalls = 0;
-  createCalls = 0;
-  crashAfterCreate = false;
-  onMaterialize?: () => void;
-  readonly pullRequests: RemotePullRequest[] = [];
-
-  constructor(baseRevision: string) {
-    this.baseRevision = baseRevision;
-  }
-
-  async readWriteAuthorization(): Promise<GitHubWriteAuthorization> {
-    this.remoteCalls += 1;
-    return structuredClone(this.authorization);
-  }
-
-  async readCurrentBase(repository: string, baseRef: string) {
-    this.remoteCalls += 1;
-    expect(repository).toBe(PINNED_REPOSITORY);
-    return { ref: baseRef, revision: this.baseRevision };
-  }
-
-  async listPullRequestsByHead(repository: string, headRef: string) {
-    this.remoteCalls += 1;
-    return structuredClone(this.pullRequests.filter(
-      (pullRequest) => pullRequest.repository === repository
-        && pullRequest.head.ref === headRef,
-    ));
-  }
-
-  async materializeHead(): Promise<void> {
-    this.remoteCalls += 1;
-    this.materializeCalls += 1;
-    this.onMaterialize?.();
-  }
-
-  async openPullRequest(actuation: PrPayloadActuationResult) {
-    this.remoteCalls += 1;
-    this.createCalls += 1;
-    const opened = remotePullRequest(
-      actuation,
-      this.pullRequests.length + 1,
-    );
-    this.pullRequests.push(opened);
-    if (this.crashAfterCreate) {
-      this.crashAfterCreate = false;
-      throw new Error("simulated process loss after remote create");
-    }
-    return structuredClone(opened);
-  }
-}
 
 describe.sequential("INT-3b pull-request sending ceremony", () => {
   let root: string;
