@@ -38,6 +38,7 @@ import { readJobLifecycle } from "./job-lifecycle-read.js";
 import { summarizeLifecycle, type LifecycleSummary } from "./job-lifecycle.js";
 import { bucketPayoutsByHour, isHistogramUnavailable, type PayoutHistogram } from "./payout-histogram.js";
 import { endpointHost, pinnedCompareRange, type CrossCheckView } from "./payout-crosscheck.js";
+import { burnBasisLabel, isBurnUnmeasurable, type MeasuredBurn } from "./gas-burn-rate.js";
 import { createCrossCheckCache, type CrossCheckCache } from "./payout-crosscheck-cache.js";
 import { createGasSpendCache, type GasSpendCache, type GasSpendSnapshot, type GasUnreadable } from "./gas-spend-cache.js";
 import { alertProvenance, decideMoneyAlert } from "./money-alert.js";
@@ -318,6 +319,20 @@ export interface LiquidityRunwayPool {
   hoursToFloor: number | null;
   /** Did we have enough data to project? false = awaiting samples (not "stable"). */
   estimable: boolean;
+  /**
+   * WHERE the rate came from, because the two are not equally trustworthy.
+   *
+   * `measured-spend` is consumption read from receipts — a top-up cannot cancel
+   * it and a restart cannot forget it. `balance-slope` is a regression over
+   * balance samples, which a deposit inside the window turns into "refilling"
+   * and which resets whenever the monitor restarts.
+   *
+   * Rendered, not merely carried: a reader is entitled to know whether a
+   * countdown was measured or inferred.
+   */
+  basis: "measured-spend" | "balance-slope";
+  /** Hours the rate was measured over, when it was measured. */
+  basisWindowHours?: number;
   status: ProbeStatus;
 }
 
@@ -328,6 +343,16 @@ export interface LiquidityRunway {
 }
 
 export interface LiquidityRunwayOptions {
+  /**
+   * Consumption actually observed, per pool key — preferred over the balance
+   * slope wherever it is available.
+   *
+   * The slope is a fallback, not a peer. It reads a TOP-UP as refilling and so
+   * makes the burn vanish exactly when the operator is most engaged with the
+   * pool; see gas-burn-rate.ts. Anything here has already refused itself if it
+   * might understate spend.
+   */
+  measuredBurn?: Readonly<Record<string, MeasuredBurn>>;
   /** Trailing window the burn rate is fit over (default 6h). */
   windowMs?: number;
   /** Minimum non-null samples needed to project (default 3). */
@@ -401,15 +426,43 @@ export function deriveLiquidityRunway(
     }
     const current = pool.amount;
     const floor = pool.floor;
+    // Consumption beats inference. When a measured rate exists for this pool we
+    // use it and skip the sample machinery entirely — the minimum-samples and
+    // minimum-span guards exist to stop the SLOPE lying, and a rate read from
+    // receipts is not subject to either failure.
+    const measured = opts.measuredBurn?.[pool.key];
     const mk = (
       extra: Pick<LiquidityRunwayPool, "burnPerHour" | "hoursToFloor" | "estimable" | "status">,
-    ): LiquidityRunwayPool => ({ key: pool.key, label: pool.label, unit: pool.unit, current, floor, ...extra });
+      basis: LiquidityRunwayPool["basis"] = measured ? "measured-spend" : "balance-slope",
+    ): LiquidityRunwayPool => ({
+      key: pool.key, label: pool.label, unit: pool.unit, current, floor, basis,
+      ...(basis === "measured-spend" && measured ? { basisWindowHours: measured.windowHours } : {}),
+      ...extra,
+    });
 
     // Already at/below floor — the balance probe owns the red; runway is 0.
     if (current <= floor) {
       out.push(mk({ burnPerHour: null, hoursToFloor: 0, estimable: true, status: "red" }));
       continue;
     }
+    if (measured) {
+      const burnPerHour = measured.perHour;
+      if (burnPerHour <= 0) {
+        // A real zero: nothing was spent in the window. Distinct from the
+        // slope's "refilling", which is what a deposit looks like.
+        out.push(mk({ burnPerHour, hoursToFloor: null, estimable: true, status: "ok" }));
+        continue;
+      }
+      const hoursToFloor = (current - floor) / burnPerHour;
+      if (hoursToFloor > stableCapHours) {
+        out.push(mk({ burnPerHour, hoursToFloor: null, estimable: true, status: "ok" }));
+        continue;
+      }
+      const status: ProbeStatus = hoursToFloor <= redHours ? "red" : hoursToFloor <= warnHours ? "degraded" : "ok";
+      out.push(mk({ burnPerHour, hoursToFloor, estimable: true, status }));
+      continue;
+    }
+
     const samples: { t: number; v: number }[] = [];
     for (const snap of history) {
       if (snap.at < windowStart) continue;
@@ -446,7 +499,20 @@ function summariseRunway(pools: ReadonlyArray<LiquidityRunwayPool>): string | nu
     .sort((a, b) => (a.hoursToFloor as number) - (b.hoursToFloor as number));
   if (trending.length) {
     const p = trending[0];
-    return `${p.label} ${formatRunwayHours(p.hoursToFloor as number)}`;
+    // The qualifier is the honesty. "~5d to floor" invites a long-run reading
+    // of a short-run number; "~5d at the last 24h of measured burn" is the same
+    // number with its scope attached, and lets the reader judge whether the
+    // last day was typical. The board cannot know that; the operator can.
+    // Only a PROJECTION carries a basis. At or below the floor there is no rate
+    // and nothing was inferred — the balance simply is what it is — so a
+    // qualifier there would be noise attached to a fact.
+    const basis =
+      p.burnPerHour == null
+        ? ""
+        : p.basis === "measured-spend" && p.basisWindowHours != null
+          ? ` ${burnBasisLabel({ perHour: p.burnPerHour, windowHours: p.basisWindowHours })}`
+          : " from the balance trend";
+    return `${p.label} ${formatRunwayHours(p.hoursToFloor as number)}${basis}`;
   }
   // Enough data but no downward trend → a real, honest "stable". No estimable
   // pool at all → null (awaiting) so the board shows its awaiting-data line.
@@ -2365,6 +2431,15 @@ export interface ProductHealthSnapshotBlocks {
   chain?: ChainTickData;
   solvency?: SolvencySnapshotData;
   flow?: MoneyPathData;
+  /**
+   * Gas attribution, when it is readable.
+   *
+   * Spread onto the payload since #672 but never declared here, so nothing
+   * in-process could consume it — the runway had no way to reach the one
+   * measurement of actual consumption on the board and fell back to fitting a
+   * slope through balances. Declared now because the projection reads it.
+   */
+  gas?: GasSpendSnapshot | GasUnreadable;
 }
 
 function resolveProductHealthNetwork(chainId: number | undefined): "testnet" | "mainnet" | "unknown" {
