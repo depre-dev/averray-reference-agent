@@ -286,7 +286,7 @@ printf '%s\n' "INT2_WORKSPACE_SNAPSHOT spared=$(
   grep -c . "$_int2_workspaces_before" 2>/dev/null || echo 0
 )" >> "$_int2_bootstrap_log"
 
-printf '%s\n' "INT2_CASES_STARTED expected=10" >> "$_int2_bootstrap_log"
+printf '%s\n' "INT2_CASES_STARTED expected=11" >> "$_int2_bootstrap_log"
 (
   cd "$_int2_repo"
   npm run build
@@ -295,9 +295,9 @@ printf '%s\n' "INT2_CASES_STARTED expected=10" >> "$_int2_bootstrap_log"
 )
 
 _int2_executed="$(tr -d '[:space:]' < "$_int2_marker")"
-test "$_int2_executed" = "10" \
+test "$_int2_executed" = "11" \
   || {
-    echo "INT-2 suite executed $_int2_executed cases; expected 10" >&2
+    echo "INT-2 suite executed $_int2_executed cases; expected 11" >&2
     exit 1
   }
 _int2_elapsed="$(( $(date +%s) - _int2_started ))"

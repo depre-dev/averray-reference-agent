@@ -228,10 +228,10 @@ describe("committed INT-2 ceremony mechanics", () => {
       expectNoCapabilityEvents: true,
     });
 
-    expect(integrationSuite).toContain("const EXPECTED_CASE_COUNT = 10;");
-    expect(shellSuite).toContain("INT2_CASES_STARTED expected=10");
-    expect(shellSuite).toContain('test "$_int2_executed" = "10"');
-    expect(workflow).toContain("executed-count.txt')\" = \"10\"");
+    expect(integrationSuite).toContain("const EXPECTED_CASE_COUNT = 11;");
+    expect(shellSuite).toContain("INT2_CASES_STARTED expected=11");
+    expect(shellSuite).toContain('test "$_int2_executed" = "11"');
+    expect(workflow).toContain("executed-count.txt')\" = \"11\"");
   });
 
   // verifyScriptedPairPreflight runs two full `git clone --local
