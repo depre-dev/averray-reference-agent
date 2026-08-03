@@ -288,6 +288,24 @@ const MAINNET_PROBES: ProductHealthProbe[] = [
 ];
 
 export const OPS_FIXTURE_NOMINAL: ProductHealth = {
+  // The lane as it stands TODAY: leg 1 executed, 149,412 raw of asset 22 live
+  // at the converted account, and the position still honestly unverified
+  // because leg 2 has not yet proven the aToken read path.
+  bank: {
+    lane: {
+      position: {
+        status: "unverified" as const,
+        raw: null,
+        detail:
+          "zero from erc20:0x2ec48840…acfa93.balanceOf(0x98f0033e…fcb68e), and this read path has never observed funds — not yet evidence of an empty position",
+      },
+      float: { text: "0.149412 USDC · 149,412 raw", tone: "ok" as const },
+      postage: { text: "1.51 DOT · 15,100,000,000 raw · committed postage, no withdraw path", tone: "ok" as const },
+      requests: { text: "no requests in flight", tone: "ok" as const },
+      overdueRequestId: null,
+      tone: "degraded" as const,
+    },
+  },
   enabled: true,
   at: FIXTURE_NOW - 2_000,
   status: "degraded",

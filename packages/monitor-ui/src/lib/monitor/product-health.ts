@@ -235,6 +235,34 @@ export interface CrossCheckView {
   lastAgreedAtMs: number | null;
 }
 
+/**
+ * The Bank lane, decided server-side.
+ *
+ * The lines arrive already rendered because the view is decided once, beside
+ * the data — the same rule as the ops verdict. A board that re-derived them
+ * would be a second opinion on money, and two opinions is how an operator
+ * learns to trust neither.
+ */
+export interface BankLine {
+  text: string;
+  tone: "ok" | "degraded" | "red" | "awaiting";
+}
+
+export interface BankLaneView {
+  position: { status: "funded" | "empty" | "unverified"; raw: string | null; detail: string } | null;
+  float: BankLine;
+  postage: BankLine;
+  requests: BankLine;
+  overdueRequestId: string | null;
+  tone: "ok" | "degraded" | "red" | "awaiting";
+}
+
+export interface BankBlock {
+  lane?: BankLaneView;
+  /** A CONFIGURED feed that failed. Absent block ⇒ never wired ⇒ no lane. */
+  unavailable?: string;
+}
+
 /** One hour of chain, counting back from the head at read time. */
 export interface HourSlice {
   /** 1 = the most recent hour, ascending into the past. */
@@ -365,6 +393,11 @@ export interface ProductHealth {
   solvency?: SolvencySnapshot;
   flow?: MoneyPathSnapshot;
   history?: HealthHistory;
+  /**
+   * The Bank lane. ABSENT means no feed was ever configured — the lane does
+   * not render at all, and says nothing. Only `unavailable` is a fault.
+   */
+  bank?: BankBlock;
   remediation?: RemediationStatus;
   /** #Ops delivery health — see BuzzDeliveryView. */
   buzz?: BuzzDeliveryView;

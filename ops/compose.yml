@@ -586,6 +586,14 @@ services:
       # which the panel states plainly and does NOT treat as a fault. The
       # comparison is weekly and three RPC calls, so enabling it costs nothing.
       PRODUCT_HEALTH_PAYOUT_CROSSCHECK_RPC_URL: ${PRODUCT_HEALTH_PAYOUT_CROSSCHECK_RPC_URL:-}
+      # The Bank lane feed — the backend's read-only, credential-free observer
+      # snapshot, reachable only on the private Compose network. Hermes renders
+      # it; it never reads Hydration itself.
+      #
+      # Unset by default, and absent means the lane does not render AT ALL —
+      # not a row of "awaiting" tiles and not a complaint about its own
+      # absence. Only a configured feed that fails is worth a line on screen.
+      PRODUCT_HEALTH_BANK_FEED_URL: ${PRODUCT_HEALTH_BANK_FEED_URL:-}
       # Gas attribution — what the signer's burn went ON, by operation.
       #
       # OFF by default and deliberately opt-in: one pass is ~174 RPC calls (a
