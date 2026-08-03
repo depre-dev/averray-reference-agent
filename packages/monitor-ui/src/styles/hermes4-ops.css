@@ -890,6 +890,76 @@ body,
 }
 .ops-pillar-trend > span { min-width: 0; }
 
+/* ---- BANK lane -------------------------------------------------
+   A second money path beside the funnel's. Compact by design: four
+   facts, one line each, label column aligned so the eye can drop
+   straight to the value it came for.
+
+   Renders only when a feed exists. A lane nobody configured occupies
+   no space and makes no claim — the same treatment as the payout
+   cross-check's not-configured state. */
+.ops-bank {
+  display: flex;
+  flex-direction: column;
+  gap: calc(4 * var(--ops-u));
+  padding: calc(8 * var(--ops-u)) calc(14 * var(--ops-u));
+  border: 1px solid var(--ops-rule);
+}
+.ops-bank[data-tone="red"] { border-color: var(--h4-act); }
+.ops-bank-head {
+  display: flex;
+  align-items: baseline;
+  gap: calc(12 * var(--ops-u));
+}
+.ops-bank-title {
+  margin: 0;
+  font-family: var(--h4-font-display);
+  font-weight: 600;
+  font-size: calc(12.5 * var(--ops-u));
+  letter-spacing: 0.1em;
+  color: var(--h4-ink);
+}
+/* Hoisted so the one state that costs money while ignored is legible
+   before any row is read. */
+.ops-bank-alarm {
+  margin-left: auto;
+  font-family: var(--h4-font-mono);
+  font-size: calc(11 * var(--ops-u));
+  color: var(--tone, var(--h4-act));
+}
+.ops-bank-rows {
+  display: grid;
+  gap: calc(2 * var(--ops-u));
+  margin: 0;
+}
+.ops-bank-row {
+  display: grid;
+  grid-template-columns: calc(72 * var(--ops-u)) 1fr;
+  gap: calc(10 * var(--ops-u));
+  align-items: baseline;
+}
+.ops-bank-row dt {
+  font-family: var(--h4-font-mono);
+  font-size: calc(9 * var(--ops-u));
+  letter-spacing: 0.14em;
+  color: var(--h4-tel);
+}
+.ops-bank-row dd {
+  margin: 0;
+  min-width: 0;
+  font-family: var(--h4-font-mono);
+  font-size: calc(11 * var(--ops-u));
+  line-height: 1.45;
+  color: var(--tone, var(--h4-ink-2));
+}
+/* A configured feed that failed. Absent block renders nothing at all. */
+.ops-bank-absent {
+  margin: 0;
+  font-family: var(--h4-font-mono);
+  font-size: calc(10 * var(--ops-u));
+  color: var(--tone, var(--h4-tel));
+}
+
 /* ---- per-job economics -------------------------------------------
    What one job costs and earns, on one line between the probes and
    the footer. Also shipped unstyled; also monospace now, because it

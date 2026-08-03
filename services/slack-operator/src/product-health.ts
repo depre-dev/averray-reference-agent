@@ -39,6 +39,8 @@ import { summarizeLifecycle, type LifecycleSummary } from "./job-lifecycle.js";
 import { bucketPayoutsByHour, isHistogramUnavailable, type PayoutHistogram } from "./payout-histogram.js";
 import { endpointHost, pinnedCompareRange, type CrossCheckView } from "./payout-crosscheck.js";
 import { burnBasisLabel, isBurnUnmeasurable, type MeasuredBurn } from "./gas-burn-rate.js";
+import { readBankFeed } from "./bank-feed-fetch.js";
+import { bankLaneView, BANK_FEED_ABSENT, type BankLaneView } from "./bank-lane.js";
 import { createCrossCheckCache, type CrossCheckCache } from "./payout-crosscheck-cache.js";
 import { createGasSpendCache, type GasSpendCache, type GasSpendSnapshot, type GasUnreadable } from "./gas-spend-cache.js";
 import { alertProvenance, decideMoneyAlert } from "./money-alert.js";
@@ -630,6 +632,8 @@ export interface ProductHealthConfig {
   payoutTolerance: number;
   /** A SECOND provider, so the proof is not one endpoint's opinion. */
   payoutCrossCheckRpcUrl: string;
+  /** Internal URL of the backend's read-only Bank lane feed. Empty ⇒ no lane. */
+  bankFeedUrl: string;
   /** Filesystem the monitor writes to. Container `/` sees real host capacity. */
   diskPath: string;
   /** Free-space floor in GiB — below this the disk probe goes red. */
@@ -745,6 +749,7 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
     payoutLookbackBlocks: num(env.PRODUCT_HEALTH_PAYOUT_LOOKBACK_BLOCKS, 60000),
     payoutTolerance: num(env.PRODUCT_HEALTH_PAYOUT_TOLERANCE, 1),
     payoutCrossCheckRpcUrl: (env.PRODUCT_HEALTH_PAYOUT_CROSSCHECK_RPC_URL ?? "").trim(),
+    bankFeedUrl: (env.PRODUCT_HEALTH_BANK_FEED_URL ?? "").trim(),
     // Off by default. A pass is ~174 RPC calls against an endpoint that
     // rate-limits by answering 404, so the operator opts in knowingly.
     gasAttributionEnabled: truthy(env.PRODUCT_HEALTH_GAS_ATTRIBUTION_ENABLED),
@@ -2440,6 +2445,19 @@ export interface ProductHealthSnapshotBlocks {
    * slope through balances. Declared now because the projection reads it.
    */
   gas?: GasSpendSnapshot | GasUnreadable;
+  /**
+   * The Bank lane, or the reason it cannot be shown.
+   *
+   * Absent entirely when no feed URL is configured: a lane nobody wired must
+   * not produce a line complaining about itself. `unavailable` only ever means
+   * a CONFIGURED feed that failed, which is worth saying out loud.
+   */
+  bank?: BankBlock;
+}
+
+export interface BankBlock {
+  lane?: BankLaneView;
+  unavailable?: string;
 }
 
 function resolveProductHealthNetwork(chainId: number | undefined): "testnet" | "mainnet" | "unknown" {
@@ -2679,10 +2697,20 @@ export async function collectProductHealthProbes(
     haltStatus: chainHaltStatus(chainId, config.haltSeverity),
     fetchImpl,
   });
+  // The Bank lane. The view is decided HERE so the board renders one answer
+  // rather than forming its own — same rule as the ops verdict.
+  const bankRead = await readBankFeed({ url: config.bankFeedUrl, fetchImpl });
+  const bank: BankBlock | undefined = bankRead.feed
+    ? { lane: bankLaneView({ feed: bankRead.feed, nowMs: chainCtx.nowMs }) ?? undefined }
+    : bankRead.reason
+      ? { unavailable: bankRead.reason }
+      : undefined; // not configured — no lane at all, and no complaint
+
   const snapshot: ProductHealthSnapshotBlocks = {
     chainId: chainId ?? null,
     ...(selfFreshness.selfFreshness ? { self: selfFreshness.selfFreshness } : {}),
     network: resolveProductHealthNetwork(chainId),
+    ...(bank ? { bank } : {}),
     // Block ticker data — same values the chain_height probe judged this cycle,
     // structured instead of embedded in the detail string. Only emitted when a
     // real height was observed (never a placeholder number).

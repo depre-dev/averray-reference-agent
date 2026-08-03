@@ -9,7 +9,7 @@ import { MONEY_LINE_RENDERERS } from "../../lib/monitor/ops-spec.js";
 const dir = path.dirname(fileURLToPath(import.meta.url));
 /** Every ops component, since each fact now lives beside its subject rather
  *  than in one strip — a renderer may legitimately be called from any of them. */
-const board = ["OpsBoard.tsx", "SolvencyPanel.tsx", "FlowPanel.tsx"]
+const board = ["OpsBoard.tsx", "SolvencyPanel.tsx", "FlowPanel.tsx", "BankLane.tsx"]
   .map((f) => fs.readFileSync(path.join(dir, f), "utf8"))
   .join("\n");
 /** The phone is a SEPARATE surface with its own components — a fact wired into
@@ -80,6 +80,23 @@ describe("every money line is actually rendered", () => {
     // the tested one — the same two-verdict-systems problem the board forbids.
     expect(board).toContain('from "../../lib/monitor/ops-spec.js"');
   });
+});
+
+/**
+ * A PANEL can be built-but-unwired too, not just a view model.
+ *
+ * The Bank lane's own tests pass by rendering the component directly, which
+ * says nothing about whether the board ever mounts it. I shipped exactly that
+ * and only caught it by opening the preview — the same failure the money-line
+ * guard above exists for, one level up.
+ */
+describe("every ops panel is mounted by the board", () => {
+  for (const panel of ["SolvencyPanel", "FlowPanel", "BankLane", "PillarStrip"] as const) {
+    it(`OpsBoard mounts <${panel}>`, () => {
+      const opsBoard = fs.readFileSync(path.join(dir, "OpsBoard.tsx"), "utf8");
+      expect(opsBoard, `${panel} exists and is tested but the board never renders it`).toContain(`<${panel}`);
+    });
+  }
 });
 
 /**

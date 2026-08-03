@@ -69,6 +69,12 @@ export interface PositionView {
 export const POSITION_STALE_AFTER_MS = 15 * 60 * 1000;
 
 export function decidePositionDisplay(input: {
+  /**
+   * Renders the source for HUMAN text only. Comparison always uses the full
+   * string — shortening before comparison would let two different addresses
+   * share one proof, which is the retarget hole this rule closes.
+   */
+  shorten?: (source: string) => string;
   /** Raw units read, as a decimal string. Null when the read failed. */
   raw: string | null;
   /** Why the read failed, when it did. */
@@ -82,7 +88,8 @@ export function decidePositionDisplay(input: {
   nowMs: number;
   staleAfterMs?: number;
 }): PositionView {
-  const src = input.source || "an unnamed source";
+  const full = input.source || "an unnamed source";
+  const src = input.shorten ? input.shorten(full) : full;
 
   if (input.readError) {
     return { status: "unverified", raw: null, detail: `position unreadable — ${input.readError}` };
@@ -120,13 +127,15 @@ export function decidePositionDisplay(input: {
       detail: `zero from ${src}, and this read path has never observed funds — not yet evidence of an empty position`,
     };
   }
-  if (cal.provenSource !== input.source) {
+  if (cal.provenSource !== full) {
     // A retarget invalidates the proof: the old path's calibration says nothing
     // about a new address or a different ledger.
     return {
       status: "unverified",
       raw: null,
-      detail: `zero from ${src}, but the proof was taken against ${cal.provenSource} — recalibrate before believing a zero here`,
+      detail: `zero from ${src}, but the proof was taken against ${
+        input.shorten ? input.shorten(cal.provenSource) : cal.provenSource
+      } — recalibrate before believing a zero here`,
     };
   }
   return {

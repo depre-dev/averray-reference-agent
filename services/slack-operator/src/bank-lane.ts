@@ -76,6 +76,27 @@ function amount(read: SourcedRead, decimals: number, unit: string, nowMs: number
   return { text: `${formatUnits(value, decimals)} ${unit} · ${groupDigits(value)} raw`, tone: "ok" };
 }
 
+/**
+ * A read source, short enough to sit inside a sentence.
+ *
+ * The producer emits an exact, machine-shaped identifier —
+ * `erc20:0x2ec4884088d84e5c2970a034732e5209b0acfa93.balanceOf(0x98f0033e…)` —
+ * which is precisely right for the job it must be exact for: deciding whether
+ * a calibration proof still applies after a retarget. It is ~100 characters,
+ * and interpolated into "zero from X, and this read path has never observed
+ * funds" it buries the sentence.
+ *
+ * So the FULL string is compared and the SHORT string is displayed. Never the
+ * other way round: shortening before comparison would let two different
+ * addresses share a proof, which is the retarget hole this rule exists to
+ * close.
+ */
+export function shortSource(source: string): string {
+  // Keep the ledger tag and elide the middle of every long hex run, so both
+  // ends of every address stay legible and greppable.
+  return source.replace(/0x[a-fA-F0-9]{16,}/g, (hex) => `${hex.slice(0, 10)}…${hex.slice(-6)}`);
+}
+
 /** 28463 → "28,463". String grouping, so a large bigint cannot lose precision. */
 export function groupDigits(value: bigint): string {
   const negative = value < 0n;
@@ -127,6 +148,7 @@ export function bankLaneView(input: {
     raw: feed.position.raw,
     ...(feed.position.lastError ? { readError: feed.position.lastError } : {}),
     source: feed.position.source,
+    shorten: shortSource,
     calibration: feed.calibration ?? null,
     readAtMs: feed.position.readAtMs,
     nowMs,
@@ -207,18 +229,33 @@ function requestLine(requests: BankRequests, nowMs: number, staleAfterMs: number
   if (overdue.length > 0) {
     const lead = overdue.reduce((a, b) => (b.ageSeconds > a.ageSeconds ? b : a));
     return {
-      text: `${overdue.length} OVERDUE · ${lead.id} ${lead.phase} for ${formatAge(lead.ageSeconds)}`,
+      text: `${overdue.length} OVERDUE · ${lead.id} ${lead.phase} ${describeAge(lead)}`,
       tone: "red",
     };
   }
   const lead = live.reduce((a, b) => (b.ageSeconds > a.ageSeconds ? b : a));
-  const base = `${live.length} in flight · oldest ${lead.id} ${lead.phase} ${formatAge(lead.ageSeconds)}`;
+  const base = `${live.length} in flight · oldest ${lead.id} ${lead.phase} ${describeAge(lead)}`;
   if (unknown.length > 0) {
     // Verbatim, so the value is searchable against the observer's own source.
     const u = unknown[0]!;
     return { text: `${base} · UNRECOGNISED PHASE "${u.phase}" on ${u.id}`, tone: "degraded" };
   }
   return { text: base, tone: "ok" };
+}
+
+/**
+ * How long it has been in flight — or that we cannot say.
+ *
+ * The producer sends `ageSeconds: 0` when a request's `startedAt` is
+ * unparseable, because the field is a number and zero is the only available
+ * placeholder. Rendered literally that becomes "OVERDUE · req-x for 0s", which
+ * states an age nobody measured — absence-as-zero, in miniature, on an alarm.
+ *
+ * It always arrives paired with `phase: "timing-unknown"`, so the honest
+ * rendering is available: say the age is unknown rather than say it is none.
+ */
+function describeAge(request: BankRequest): string {
+  return request.phase === "timing-unknown" ? "· age unknown" : `for ${formatAge(request.ageSeconds)}`;
 }
 
 function formatAge(seconds: number): string {
