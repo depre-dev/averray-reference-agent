@@ -16,7 +16,15 @@ import {
   type FunnelView,
 } from "../../lib/monitor/ops-spec.js";
 import type { MoneyPathSnapshot } from "../../lib/monitor/product-health.js";
-import { disputeClockLine, lifecycleNote, settledByHourReason, settledByHourView } from "../../lib/monitor/ops-spec.js";
+import {
+  crossCheckLine,
+  disputeClockLine,
+  lifecycleNote,
+  payoutProvenanceLine,
+  settledByHourReason,
+  settledByHourView,
+  volumeMixNote,
+} from "../../lib/monitor/ops-spec.js";
 import type { ExternalFunnelView, LifecycleView } from "../../lib/monitor/product-health.js";
 
 export interface FlowPanelProps {
@@ -34,8 +42,14 @@ export function FlowPanel({ flow, externalFunnel, lifecycle, nowMs }: FlowPanelP
   const clock = disputeClockLine(externalFunnel, nowMs ?? Date.now());
   // How long the funnel above actually takes, split by who posted the work.
   const timing = lifecycleNote(lifecycle);
+  // Reconciled against the LEDGER's settled count, not against itself — the
+  // split is read from the chain and the total from the product, and where
+  // they disagree that gap is the information.
+  const mix = volumeMixNote({ lifecycle, settledCount: flow?.settled24h ?? null });
   const funnel = flowFunnel(flow);
   const evidence = payoutView(flow?.payout);
+  const provenance = payoutProvenanceLine(flow?.payout);
+  const cross = crossCheckLine(flow?.payout, nowMs ?? Date.now());
 
   return (
     <section className="ops-flow" aria-label="Flow — money path over 24 hours" data-testid="ops-flow">
@@ -53,6 +67,16 @@ export function FlowPanel({ flow, externalFunnel, lifecycle, nowMs }: FlowPanelP
             : "gaps between stages are the signal"}
         </span>
       </header>
+
+      {/* Who posted the work, beside the count of it. "18 settled" is honest
+          and unexplained, and volume Averray posted to itself reads as demand
+          to anyone who does not already know better — including a future
+          reader of a screenshot. */}
+      {mix ? (
+        <p className="ops-volume-mix" data-tone={mix.tone} data-testid="ops-volume-mix">
+          {mix.text}
+        </p>
+      ) : null}
 
       {timing ? (
         <p className="ops-lifecycle" data-tone={timing.tone} data-testid="ops-lifecycle">
@@ -95,6 +119,20 @@ export function FlowPanel({ flow, externalFunnel, lifecycle, nowMs }: FlowPanelP
             {evidence.delta}
           </div>
         </div>
+
+        {/* Where this proof came from, and whether anyone else can see the
+            same thing. "Independent" has meant "whatever RPC we were pointed
+            at" — proof without provenance is one endpoint's opinion. */}
+        {provenance || cross ? (
+          <div className="ops-evidence-provenance" data-testid="ops-evidence-provenance">
+            {provenance ? <span className="ops-evidence-source">{provenance}</span> : null}
+            {cross ? (
+              <span data-tone={cross.tone} data-testid="ops-evidence-crosscheck">
+                {cross.text}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
 
         {/* Permanent key. "we cannot see" and "we can see, and it is short" are
             different facts, and the operator should never have to remember

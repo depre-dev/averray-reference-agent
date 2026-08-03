@@ -584,6 +584,30 @@ export function payoutView(payout: PayoutEvidence | undefined): EvidenceView {
       : `${payout.settledCount} marked settled by the monitor`;
   const fit = windowFitLine(payout);
 
+  // ── A DISAGREEMENT OUTRANKS BOTH VERDICTS ────────────────────────────────
+  //
+  // If two providers read the same pinned range and return different counts,
+  // the instrument is unreliable — and an unreliable instrument cannot assert
+  // a shortfall any more than it can assert a confirmation. Suspending the
+  // comparison is the honest outcome in BOTH directions.
+  //
+  // This is the same rule that already makes a `suspect` window suppress a
+  // shortfall server-side, applied one layer out.
+  if (payout.crossCheck?.status === "disagree") {
+    return {
+      status: "ENDPOINTS DISAGREE",
+      tone: "degraded",
+      line1: chainLine,
+      line2: ledgerLine,
+      delta: payout.crossCheck.detail,
+      fit,
+      // Not the alarming frame: nothing here says money is missing, and
+      // dressing an instrument fault as one is the false red this board keeps
+      // having to remove.
+      emphasised: false,
+    };
+  }
+
   if (payout.status === "shortfall") {
     const gap = payoutGap(payout);
     return {
@@ -737,7 +761,56 @@ export const EVIDENCE_KEY: readonly { tone: OpsTone; text: string }[] = [
   { tone: "ok", text: "CONFIRMED — proof matches the ledger" },
   { tone: "red", text: "SHORTFALL — proof missing: money broken" },
   { tone: "awaiting", text: "UNVERIFIED — chain unreadable: instrument broken, not money" },
+  // A fourth fact, not a fourth severity. Two providers reading the same
+  // pinned range and returning different counts means the proof cannot be
+  // trusted in EITHER direction — it suspends the comparison rather than
+  // resolving it, which is why it is not coral.
+  { tone: "degraded", text: "ENDPOINTS DISAGREE — two providers, two answers: proof suspended" },
 ];
+
+/**
+ * The provenance line: which endpoint served this proof, at what height.
+ *
+ * "Independent on-chain proof" has meant "whatever RPC the monitor happened to
+ * be pointed at", and one week produced three separate endpoint-lens surprises
+ * — WSS 1006s on the default host, native accounts invisible to the EVM lens,
+ * an Erc20 ledger split. Proof without provenance is one endpoint's opinion.
+ *
+ * Absent on an older payload: silence rather than a claim about a source we
+ * were not told.
+ */
+export function payoutProvenanceLine(payout: PayoutEvidence | undefined): string | null {
+  const e = payout?.endpoint;
+  if (!e || !e.host) return null;
+  const at = e.block == null ? "" : ` · block ${e.block.toLocaleString()}`;
+  return `proved via ${e.host}${at}`;
+}
+
+/**
+ * Whether a second provider agrees — always rendered, never a silent tick.
+ *
+ * "cross-checked ✓" with no date is indistinguishable from a check that
+ * stopped running months ago, so every state carries its own age and an
+ * agreement past its budget reports overdue. A check being broken is a
+ * finding, not an absence.
+ */
+export function crossCheckLine(
+  payout: PayoutEvidence | undefined,
+  nowMs: number,
+): { text: string; tone: OpsTone } | null {
+  const c = payout?.crossCheck;
+  if (!c) return null; // older payload — do not invent a fault
+  if (c.status === "agree") {
+    const age = c.lastAgreedAtMs == null ? "" : ` · ${formatAgo(c.lastAgreedAtMs, nowMs)}`;
+    return { text: `cross-checked ✓ ${c.detail}${age}`, tone: "awaiting" };
+  }
+  if (c.status === "disagree") return { text: c.detail, tone: "degraded" };
+  if (c.status === "not-configured") return { text: c.detail, tone: "awaiting" };
+  // unavailable / never-run: overdue is the part that decides the tone, because
+  // a check that has been failing for a fortnight is a different fact from one
+  // that failed this morning.
+  return { text: `${c.detail}${c.overdue ? " · CROSS-CHECK OVERDUE" : ""}`, tone: c.overdue ? "degraded" : "awaiting" };
+}
 
 // ── facts that sit BESIDE their subject ─────────────────────────────────────
 //
@@ -921,6 +994,9 @@ export const MONEY_LINE_RENDERERS = [
   "gasPoolNote",
   "economicsLine",
   "settledByHourView",
+  "volumeMixNote",
+  "payoutProvenanceLine",
+  "crossCheckLine",
 ] as const;
 
 /**
@@ -959,6 +1035,74 @@ export function lifecycleNote(
   if (lifecycle.unmeasurable > 0) parts.push(`${lifecycle.unmeasurable} not timeable`);
 
   return { text: parts.join(" · "), tone: "awaiting" };
+}
+
+/**
+ * WHO POSTED THE WORK — the composition of the settled count, reconciled.
+ *
+ * ── WHY THIS IS A LINE OF ITS OWN ─────────────────────────────────────────
+ *
+ * "18 settled" is honest and unexplained, and unexplained is how a number
+ * gets misread later. Three months from now — or in a screenshot tomorrow —
+ * volume Averray posted to itself reads as demand. The board should not need
+ * a footnote in someone's memory to be read correctly, so the composition
+ * sits beside the count rather than being inferrable from a latency line.
+ *
+ * ── IT RECONCILES, OR IT SAYS IT DOESN'T ──────────────────────────────────
+ *
+ * The parts must sum to the ledger's settled count. They come from different
+ * instruments — the split is read from the CHAIN (a fee-bearing settlement is
+ * an external bounty; a fee-waived one is Averray's own), the total from the
+ * product's own ledger — so they can disagree, and the difference is real
+ * information rather than a rounding nuisance.
+ *
+ * A job the chain read did not see is `unclassified`. It is never folded into
+ * either bucket: "external" is the one number on this board that nobody
+ * should be able to inflate by accident.
+ *
+ * ── WHAT THIS CANNOT SAY ──────────────────────────────────────────────────
+ *
+ * Not canary-vs-ingestion. The chain knows only whether a settlement paid a
+ * protocol fee, and both canary walks and ingestion jobs are fee-waived
+ * Averray postings — they are identical on-chain. The product's /health
+ * settlement block carries counts and no origin, so that split needs a
+ * product contract change, not a board change. Guessing it from job ids or
+ * titles would be a pattern match that silently reassigns volume the first
+ * time something is renamed.
+ */
+export function volumeMixNote(input: {
+  lifecycle: LifecycleView | undefined;
+  /** The product's own settled count — the total the parts must reconcile to. */
+  settledCount: number | null | undefined;
+}): { text: string; tone: OpsTone } | null {
+  const { lifecycle } = input;
+  if (!lifecycle) return null;
+  const self = lifecycle.selfPosted.count;
+  const external = lifecycle.external.count;
+  const classified = self + external;
+  if (classified === 0 && !input.settledCount) return null;
+
+  const total = input.settledCount ?? classified;
+  const parts = [
+    // Spelled out rather than "self-posted": the whole point of the line is
+    // that a reader who knows nothing about the system cannot mistake it.
+    `${self} posted by Averray`,
+    `${external} external`,
+  ];
+
+  const gap = total - classified;
+  let tone: OpsTone = "awaiting";
+  if (gap > 0) {
+    // Settled per the ledger, not seen by the chain read. Named, never absorbed.
+    parts.push(`${gap} unclassified`);
+    tone = "degraded";
+  } else if (gap < 0) {
+    // The chain read reached slightly further back than the ledger's 24h — a
+    // window edge, not a discrepancy, and it must not read as one.
+    parts.push(`${-gap} beyond the ledger window`);
+  }
+
+  return { text: `${total} settled — ${parts.join(" · ")}`, tone };
 }
 
 /** "19s" · "2h 14m" · "5d" — read without converting. */

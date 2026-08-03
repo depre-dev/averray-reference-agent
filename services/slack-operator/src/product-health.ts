@@ -37,6 +37,8 @@ import { readGasSpend } from "./gas-spend-read.js";
 import { readJobLifecycle } from "./job-lifecycle-read.js";
 import { summarizeLifecycle, type LifecycleSummary } from "./job-lifecycle.js";
 import { bucketPayoutsByHour, isHistogramUnavailable, type PayoutHistogram } from "./payout-histogram.js";
+import { endpointHost, pinnedCompareRange, type CrossCheckView } from "./payout-crosscheck.js";
+import { createCrossCheckCache, type CrossCheckCache } from "./payout-crosscheck-cache.js";
 import { createGasSpendCache, type GasSpendCache, type GasSpendSnapshot, type GasUnreadable } from "./gas-spend-cache.js";
 import { alertProvenance, decideMoneyAlert } from "./money-alert.js";
 import { decideSelfFreshness, fetchSelfCompare } from "./self-freshness.js";
@@ -560,6 +562,8 @@ export interface ProductHealthConfig {
   gasRefreshMs: number;
   /** Settled-minus-confirmed gap tolerated as a window-boundary artifact. */
   payoutTolerance: number;
+  /** A SECOND provider, so the proof is not one endpoint's opinion. */
+  payoutCrossCheckRpcUrl: string;
   /** Filesystem the monitor writes to. Container `/` sees real host capacity. */
   diskPath: string;
   /** Free-space floor in GiB — below this the disk probe goes red. */
@@ -674,6 +678,7 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
     // mainnet only escaped by overriding to 43200 (still 25.3h, 5% long).
     payoutLookbackBlocks: num(env.PRODUCT_HEALTH_PAYOUT_LOOKBACK_BLOCKS, 60000),
     payoutTolerance: num(env.PRODUCT_HEALTH_PAYOUT_TOLERANCE, 1),
+    payoutCrossCheckRpcUrl: (env.PRODUCT_HEALTH_PAYOUT_CROSSCHECK_RPC_URL ?? "").trim(),
     // Off by default. A pass is ~174 RPC calls against an endpoint that
     // rate-limits by answering 404, so the operator opts in knowingly.
     gasAttributionEnabled: truthy(env.PRODUCT_HEALTH_GAS_ATTRIBUTION_ENABLED),
@@ -1460,6 +1465,15 @@ export async function readPayoutTransfers(input: {
    * must not claim the payout count is fee-free.
    */
   feeRecipientAddress?: string;
+  /**
+   * Read this EXACT block range instead of "the last N blocks up to latest".
+   *
+   * The cross-check asks two providers the same question, and "the last N
+   * blocks" is not the same question twice: each resolves `latest` against its
+   * own view of the tip. Pinning both sides is what makes a difference in the
+   * answers mean something.
+   */
+  range?: { fromBlock: number; toBlock: number };
   fetchImpl: typeof fetch;
 }): Promise<{
   count: number | null;
@@ -1498,14 +1512,18 @@ export async function readPayoutTransfers(input: {
         );
       }
     }
-    const latest = Number(BigInt(await ethRpc(input.rpcUrl, "eth_blockNumber", [], input.fetchImpl)));
-    const fromBlock = Math.max(0, latest - input.lookbackBlocks);
+    // A pinned range skips the head read entirely — asking each provider for
+    // its own `latest` is precisely what the pin exists to avoid.
+    const latest = input.range
+      ? input.range.toBlock
+      : Number(BigInt(await ethRpc(input.rpcUrl, "eth_blockNumber", [], input.fetchImpl)));
+    const fromBlock = input.range ? input.range.fromBlock : Math.max(0, latest - input.lookbackBlocks);
     const logs = await ethRpcRaw(
       input.rpcUrl,
       "eth_getLogs",
       [{
         fromBlock: `0x${fromBlock.toString(16)}`,
-        toBlock: "latest",
+        toBlock: input.range ? `0x${input.range.toBlock.toString(16)}` : "latest",
         // The CONTRACT THAT EMITS the payout event, not the token.
         address: input.sourceAddress,
         topics: [RESERVATION_SETTLED_TOPIC],
@@ -1677,6 +1695,68 @@ function gasAttribution(input: {
 
   gasCache.maybeRefresh(input.nowMs);
   return gasCache.read(input.nowMs);
+}
+
+let crossCheckCache: CrossCheckCache | null = null;
+
+/**
+ * Ask a SECOND provider the same pinned question, weekly.
+ *
+ * Both reads use one range, computed once from the primary's head and ending
+ * `SAFE_HEAD_LAG_BLOCKS` behind it. Letting each provider resolve its own
+ * `latest` would compare two different questions and disagree most times it
+ * ran — see payout-crosscheck.ts.
+ */
+function payoutCrossCheck(input: {
+  config: ProductHealthConfig;
+  sourceAddress?: string;
+  chainId?: number;
+  fetchImpl: typeof fetch;
+  nowMs: number;
+}): CrossCheckView {
+  const { config } = input;
+  const configured = Boolean(
+    config.payoutCrossCheckRpcUrl && config.rpcUrl && input.sourceAddress && config.usdcAddress,
+  );
+  crossCheckCache ??= createCrossCheckCache({
+    configured,
+    run: async () => {
+      // Re-checked inside the closure rather than trusted from `configured`:
+      // this cache is a module singleton and outlives any one call's type
+      // narrowing, so this is the guard that actually holds at run time.
+      const primaryUrl = config.rpcUrl;
+      const secondUrl = config.payoutCrossCheckRpcUrl;
+      const source = input.sourceAddress;
+      if (!primaryUrl || !secondUrl || !source) {
+        return { primary: null, secondary: null, secondaryReason: "cross-check lost its configuration between runs" };
+      }
+      const latest = Number(BigInt(await ethRpc(primaryUrl, "eth_blockNumber", [], input.fetchImpl)));
+      const range = pinnedCompareRange({ latestBlock: latest, lookbackBlocks: config.payoutLookbackBlocks });
+      if (!range) return { primary: null, secondary: null, secondaryReason: "chain too short to compare behind the head" };
+      const shared = {
+        sourceAddress: source,
+        usdcAddress: config.usdcAddress,
+        usdcDecimals: config.usdcDecimals,
+        lookbackBlocks: config.payoutLookbackBlocks,
+        ...(input.chainId !== undefined ? { expectedChainId: input.chainId } : {}),
+        range,
+        fetchImpl: input.fetchImpl,
+      };
+      const [primary, secondary] = await Promise.all([
+        readPayoutTransfers({ ...shared, rpcUrl: primaryUrl }),
+        readPayoutTransfers({ ...shared, rpcUrl: secondUrl }),
+      ]);
+      return {
+        primary: { host: endpointHost(primaryUrl) ?? "primary", count: primary.count },
+        secondary: { host: endpointHost(secondUrl) ?? "secondary", count: secondary.count },
+        ...(secondary.reason ? { secondaryReason: secondary.reason } : {}),
+        range,
+      };
+    },
+    onError: () => {},
+  });
+  crossCheckCache.maybeRefresh(input.nowMs);
+  return crossCheckCache.read();
 }
 
 /** Test seam: forget the singleton so each test starts from no snapshot. */
@@ -2122,6 +2202,17 @@ export interface PayoutEvidence {
    */
   byHour?: PayoutHistogram | { reason: string };
   /**
+   * WHICH endpoint served this proof, and at what height.
+   *
+   * "Independent on-chain proof" has meant "whatever RPC the monitor was
+   * pointed at". One week produced three separate endpoint-lens surprises, so
+   * the panel names its source rather than implying the chain speaks with one
+   * voice. Host only — provider URLs carry API keys.
+   */
+  endpoint?: { host: string | null; block: number | null };
+  /** Whether a SECOND provider agrees. Never absent — see payout-crosscheck. */
+  crossCheck?: CrossCheckView;
+  /**
    * Protocol-fee credits in the SAME window — settlements whose recipient was
    * the fee treasury, and the reason `confirmedCount` is not simply every
    * settlement found on chain.
@@ -2162,6 +2253,7 @@ export function withFeeSplit(
     fromBlock?: number | null;
   },
   blockSeconds?: number | null,
+  provenance?: { host: string | null; crossCheck: CrossCheckView },
 ): PayoutEvidence {
   return {
     ...evidence,
@@ -2169,6 +2261,12 @@ export function withFeeSplit(
     feeUsdc: read.feeUsdc,
     feesSeparated: read.feesSeparated,
     byHour: sliceIntoHours(read, blockSeconds ?? null),
+    ...(provenance
+      ? {
+          endpoint: { host: provenance.host, block: read.latestBlock ?? null },
+          crossCheck: provenance.crossCheck,
+        }
+      : {}),
   };
 }
 
@@ -2429,12 +2527,15 @@ export async function collectProductHealthProbes(
     maxBlocks: config.payoutLookbackBlocks,
     targetHours: PAYOUT_COMPARISON_HOURS,
   });
+  // Named once: the cross-check must read the SAME contract, and a second
+  // inline copy of this expression is how the two silently drift apart.
+  const payoutSource = config.payoutSourceAddress || h.body?.addresses?.agentAccountCore;
   const payoutRead = config.payoutEvidenceEnabled
     ? await readPayoutTransfers({
         rpcUrl: config.rpcUrl,
         // USDC leaves AgentAccountCore, not the signer EOA — the reward bank is
         // an in-contract position and the signer only sends the tx (#558).
-        sourceAddress: config.payoutSourceAddress || h.body?.addresses?.agentAccountCore,
+        sourceAddress: payoutSource,
         usdcAddress: config.usdcAddress,
         usdcDecimals: config.usdcDecimals,
         lookbackBlocks: lookback.blocks,
@@ -2468,6 +2569,16 @@ export async function collectProductHealthProbes(
     }),
     payoutRead,
     blockSeconds,
+    {
+      host: endpointHost(config.rpcUrl),
+      crossCheck: payoutCrossCheck({
+        config,
+        ...(payoutSource ? { sourceAddress: payoutSource } : {}),
+        ...(chainId !== undefined ? { chainId } : {}),
+        fetchImpl,
+        nowMs: chainCtx.nowMs,
+      }),
+    },
   );
   // The monitor's own version. Degraded-safe: any failure is "unknown", which
   // must never render as up to date.

@@ -2,6 +2,9 @@ import { describe, expect, test } from "vitest";
 
 import {
   DATA_STALE_FALLBACK_MS,
+  EVIDENCE_KEY,
+  crossCheckLine,
+  payoutProvenanceLine,
   METER_RUNGS,
   shortEndpoint,
   staleAfterMs,
@@ -13,6 +16,7 @@ import {
   settledByHourView,
   splitPools,
   trustRows,
+  volumeMixNote,
 } from "./ops-spec.js";
 import type { ProductHealth, SolvencyPool } from "./product-health.js";
 import { OPS_FIXTURE_NOMINAL, OPS_FIXTURE_STRESS } from "./ops-fixtures.js";
@@ -191,6 +195,179 @@ describe("payoutView — whether to believe the comparison at all", () => {
 
   test("nothing read from the chain is not a passing window", () => {
     expect(payoutView(undefined).fit.text).toContain("no comparison window");
+  });
+});
+
+describe("provenance — proof without a source is one endpoint's opinion", () => {
+  const base = {
+    status: "confirmed" as const, detail: "ok", confirmedCount: 18, confirmedUsdc: 3.1,
+    settledCount: 18, windowBlocks: 40909,
+  };
+
+  test("names the host and the height it was read at", () => {
+    const line = payoutProvenanceLine({
+      ...base,
+      endpoint: { host: "services.polkadothub-rpc.com", block: 19_000_081 },
+    });
+    expect(line).toBe("proved via services.polkadothub-rpc.com · block 19,000,081");
+  });
+
+  test("an older payload claims no source rather than a wrong one", () => {
+    expect(payoutProvenanceLine(base)).toBeNull();
+    expect(payoutProvenanceLine({ ...base, endpoint: { host: null, block: 19_000_081 } })).toBeNull();
+  });
+});
+
+describe("crossCheckLine — a tick must never age silently", () => {
+  const base = {
+    status: "confirmed" as const, detail: "ok", confirmedCount: 18, confirmedUsdc: 3.1,
+    settledCount: 18, windowBlocks: 40909,
+  };
+  const at = (over: Record<string, unknown>) => ({ ...base, crossCheck: { overdue: false, lastAgreedAtMs: null, ...over } as never });
+
+  test("an agreement carries its age, so a stale tick cannot pass as fresh", () => {
+    const line = crossCheckLine(
+      at({ status: "agree", detail: "A and B agree on 18", lastAgreedAtMs: NOW - 3 * 24 * 3600_000 }),
+      NOW,
+    )!;
+    expect(line.text).toContain("cross-checked ✓");
+    expect(line.text).toContain("ago");
+    expect(line.tone).toBe("awaiting");
+  });
+
+  test("an overdue check says so and goes amber", () => {
+    const line = crossCheckLine(
+      at({ status: "unavailable", detail: "cross-check could not run — unreachable", overdue: true }),
+      NOW,
+    )!;
+    expect(line.text).toContain("CROSS-CHECK OVERDUE");
+    expect(line.tone).toBe("degraded");
+  });
+
+  test("a check that failed once is not overdue and stays quiet", () => {
+    const line = crossCheckLine(at({ status: "unavailable", detail: "429 rate limited", overdue: false }), NOW)!;
+    expect(line.text).not.toContain("OVERDUE");
+    expect(line.tone).toBe("awaiting");
+  });
+
+  test("not configured is stated, not alarmed", () => {
+    // A check nobody enabled is not a check that broke.
+    const line = crossCheckLine(at({ status: "not-configured", detail: "no second endpoint configured" }), NOW)!;
+    expect(line.tone).toBe("awaiting");
+  });
+
+  test("an older payload invents no cross-check state", () => {
+    expect(crossCheckLine(base, NOW)).toBeNull();
+  });
+});
+
+describe("a disagreement suspends the comparison in BOTH directions", () => {
+  const disagree = {
+    status: "disagree" as const,
+    detail: "A reads 18 · B reads 15 — same range, two answers",
+    overdue: false,
+    lastAgreedAtMs: null,
+  };
+
+  test("it overrides CONFIRMED — the instrument cannot vouch for itself", () => {
+    const view = payoutView({
+      status: "confirmed", detail: "ok", confirmedCount: 18, confirmedUsdc: 3.1,
+      settledCount: 18, windowBlocks: 40909, crossCheck: disagree,
+    });
+    expect(view.status).toBe("ENDPOINTS DISAGREE");
+    expect(view.delta).toContain("two answers");
+  });
+
+  test("it ALSO overrides SHORTFALL — an unreliable instrument cannot accuse", () => {
+    // The same rule that makes a suspect window suppress a shortfall
+    // server-side. A shortfall measured by an instrument two providers cannot
+    // agree on is not evidence about money.
+    const view = payoutView({
+      status: "shortfall", detail: "short", confirmedCount: 15, confirmedUsdc: 2.4,
+      settledCount: 18, windowBlocks: 40909, crossCheck: disagree,
+    });
+    expect(view.status).toBe("ENDPOINTS DISAGREE");
+    expect(view.status).not.toContain("SHORTFALL");
+  });
+
+  test("it is amber and unemphasised — an instrument fault is not a money alarm", () => {
+    const view = payoutView({
+      status: "confirmed", detail: "ok", confirmedCount: 18, confirmedUsdc: 3.1,
+      settledCount: 18, windowBlocks: 40909, crossCheck: disagree,
+    });
+    expect(view.tone).toBe("degraded");
+    expect(view.emphasised).toBe(false);
+  });
+
+  test("agreement leaves the verdict entirely alone", () => {
+    const view = payoutView({
+      status: "shortfall", detail: "short", confirmedCount: 15, confirmedUsdc: 2.4,
+      settledCount: 18, windowBlocks: 40909,
+      crossCheck: { status: "agree", detail: "A and B agree on 15", overdue: false, lastAgreedAtMs: NOW },
+    });
+    expect(view.status).toBe("SHORTFALL −3");
+    expect(view.tone).toBe("red");
+  });
+
+  test("the permanent key names all four states", () => {
+    // The key exists so the operator never has to remember which colour meant
+    // which. A fourth state that is not in it is a colour with no legend.
+    expect(EVIDENCE_KEY).toHaveLength(4);
+    expect(EVIDENCE_KEY.map((e) => e.text).join(" ")).toContain("ENDPOINTS DISAGREE");
+  });
+});
+
+describe("volumeMixNote — self-generated volume must not read as demand", () => {
+  const lifecycle = (self: number, external: number) => ({
+    selfPosted: { count: self, medianSeconds: 20, slowestSeconds: 79 },
+    external: { count: external, medianSeconds: 176, slowestSeconds: 176 },
+    externalPct: self + external === 0 ? null : Math.round((external / (self + external)) * 100),
+    unmeasurable: 0,
+  });
+
+  test("names Averray as the poster, in words a stranger cannot misread", () => {
+    // "18 self-posted" needs context the reader may not have. Someone glancing
+    // at this — or at a screenshot of it months later — must not read Averray's
+    // own pipeline volume as third-party demand.
+    const v = volumeMixNote({ lifecycle: lifecycle(18, 0), settledCount: 18 })!;
+    expect(v.text).toBe("18 settled — 18 posted by Averray · 0 external");
+  });
+
+  test("zero external is stated, never omitted", () => {
+    // Dropping an empty bucket is how "no external demand yet" becomes
+    // invisible, which is the one fact the line exists to keep visible.
+    const v = volumeMixNote({ lifecycle: lifecycle(9, 0), settledCount: 9 })!;
+    expect(v.text).toContain("0 external");
+  });
+
+  test("the parts sum to the ledger count", () => {
+    const v = volumeMixNote({ lifecycle: lifecycle(17, 1), settledCount: 18 })!;
+    const nums = [...v.text.matchAll(/(\d+) (?:posted by Averray|external|unclassified)/g)].map((m) => Number(m[1]));
+    expect(nums.reduce((a, b) => a + b, 0)).toBe(18);
+  });
+
+  test("a job the chain never saw is UNCLASSIFIED, never folded into a bucket", () => {
+    // The split comes from the chain, the total from the product's ledger.
+    // They can disagree — and "external" is the one number on this board that
+    // nobody should be able to inflate by accident.
+    const v = volumeMixNote({ lifecycle: lifecycle(17, 1), settledCount: 21 })!;
+    expect(v.text).toContain("3 unclassified");
+    expect(v.text).toContain("1 external");
+    expect(v.tone).toBe("degraded");
+  });
+
+  test("more chain settlements than ledger reads as a window edge", () => {
+    const v = volumeMixNote({ lifecycle: lifecycle(19, 1), settledCount: 18 })!;
+    expect(v.text).toContain("2 beyond the ledger window");
+    expect(v.text).not.toContain("unclassified");
+  });
+
+  test("a clean reconciliation stays quiet", () => {
+    expect(volumeMixNote({ lifecycle: lifecycle(18, 0), settledCount: 18 })!.tone).toBe("awaiting");
+  });
+
+  test("no lifecycle, no line — rather than a line claiming zero of everything", () => {
+    expect(volumeMixNote({ lifecycle: undefined, settledCount: 18 })).toBeNull();
   });
 });
 

@@ -213,6 +213,26 @@ export interface PayoutEvidence {
    * instrument could not slice look exactly like a day nothing paid out.
    */
   byHour?: PayoutHistogram | { reason: string };
+  /**
+   * WHICH endpoint served this proof, and at what height.
+   *
+   * "Independent on-chain proof" has meant "whatever RPC the monitor was
+   * pointed at". Host only — provider URLs carry API keys, and a board is a
+   * thing people screenshot.
+   */
+  endpoint?: { host: string | null; block: number | null };
+  /** Whether a SECOND provider agrees over the same pinned range. */
+  crossCheck?: CrossCheckView;
+}
+
+/** Does a second provider see the same payouts? */
+export interface CrossCheckView {
+  status: "agree" | "disagree" | "unavailable" | "not-configured" | "never-run";
+  /** Names both endpoints and both counts when they differ. */
+  detail: string;
+  /** The last agreement is older than the budget — or never happened. */
+  overdue: boolean;
+  lastAgreedAtMs: number | null;
 }
 
 /** One hour of chain, counting back from the head at read time. */

@@ -57,6 +57,10 @@ describe("every money line is actually rendered", () => {
       "24 bars is a shape you study, not a fact you act on — and 24 columns across 390px is a smear. The phone keeps the funnel counts and the proof, which are the actionable parts.",
     economicsLine:
       "unit economics is a question you sit down with. Nothing about 0.163 USDC per job changes what you would do in the next ten minutes, which is the only thing the phone is for.",
+    payoutProvenanceLine:
+      "which host served the read is forensics for when a number is disputed, and the dispute happens at a desk. The phone already carries the window fit, which is the part that qualifies the number.",
+    crossCheckLine:
+      "a weekly agreement between providers is not a 2am fact. The one case that IS — endpoints disagreeing — reaches the phone anyway, because it overrides the evidence status itself.",
   };
 
   for (const fn of MONEY_LINE_RENDERERS) {
