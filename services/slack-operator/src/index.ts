@@ -157,6 +157,7 @@ import { startBuzzInbound } from "./buzz-inbound-start.js";
 import { decideProbeTransitions } from "./probe-transitions.js";
 import { describeBuzzDelivery, recordBuzzDelivery, type BuzzDeliveryState } from "./buzz-delivery.js";
 import type { ProbeResult } from "./product-health.js";
+import { isBurnUnmeasurable, measuredGasBurn } from "./gas-burn-rate.js";
 import {
   emitCopilotStreamEvent,
   onCopilotStreamEvent,
@@ -3714,10 +3715,27 @@ function startOperatorRoutines() {
       // "reward bank ≈ 6h to floor" / "stable" / awaiting. Suggest-only: the board
       // tells the operator when to top up; it never moves funds.
       if (productHealthSnapshotBlocks?.solvency) {
+        // Signer gas projects from CONSUMPTION, not from its balance. A
+        // balance slope reads a top-up as refilling and makes the burn vanish;
+        // measuredGasBurn refuses itself rather than understate spend, and a
+        // refusal falls through to the slope with the basis said out loud.
+        const gasBurn = (() => {
+          const g = productHealthSnapshotBlocks?.gas;
+          if (!g || "unreadable" in g) return undefined;
+          const rate = measuredGasBurn({
+            totalDot: g.totalDot,
+            blocksScanned: g.blocksScanned,
+            blockSeconds: productHealthSnapshotBlocks?.flow?.payout?.window?.blockSeconds ?? null,
+            truncated: g.truncated,
+            ageMs: g.ageMs,
+          });
+          return isBurnUnmeasurable(rate) ? undefined : { signer_gas: rate };
+        })();
         const runway = deriveLiquidityRunway(
           productHealthHistory,
           productHealthSnapshotBlocks.solvency.pools,
           Date.now(),
+          gasBurn ? { measuredBurn: gasBurn } : {},
         );
         productHealthSnapshotBlocks.solvency.runwayNote = runway.note;
         productHealthSnapshotBlocks.solvency.runway = runway.pools;

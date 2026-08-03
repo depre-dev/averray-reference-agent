@@ -1409,6 +1409,57 @@ describe("deriveLiquidityRunway", () => {
     status: "ok",
   });
 
+  const gasPool = (amount: number, floor = 1): SolvencyPoolData => ({
+    key: "signer_gas", label: "signer gas", amount, unit: "DOT", floor, status: "ok",
+  });
+
+  it("a TOP-UP no longer cancels the burn — measured spend has no balance in it", () => {
+    // THE DEFECT. A slope fitted to balances reads a deposit as refilling, so
+    // burn <= 0, hoursToFloor null, "stable". The burn does not shrink; it
+    // vanishes — exactly when the operator is most engaged with the pool.
+    // Observed live: 1.9622728 + 5 − 2.049685 = 4.9125877, a rising balance
+    // while gas was being spent the whole time.
+    const now = 10 * HOUR;
+    const risingBalance = [
+      bal(now - 6 * HOUR, null, 2.0),
+      bal(now - 3 * HOUR, null, 6.5), // the top-up lands
+      bal(now, null, 6.2),
+    ];
+    const slopeOnly = deriveLiquidityRunway(risingBalance, [gasPool(6.2)], now);
+    expect(slopeOnly.pools[0]!.hoursToFloor, "the slope hides the burn").toBeNull();
+    expect(slopeOnly.pools[0]!.basis).toBe("balance-slope");
+
+    // Same window, same top-up, measured consumption: the countdown survives.
+    const measured = deriveLiquidityRunway(risingBalance, [gasPool(6.2)], now, {
+      measuredBurn: { signer_gas: { perHour: 0.0702, windowHours: 24 } },
+    });
+    expect(measured.pools[0]!.basis).toBe("measured-spend");
+    expect(measured.pools[0]!.hoursToFloor).toBeCloseTo((6.2 - 1) / 0.0702, 0);
+    expect(measured.note).toContain("at the last 24h of measured burn");
+  });
+
+  it("a measured rate projects even with NO history at all", () => {
+    // The slope needs 3 samples over 15 minutes held in memory, and that memory
+    // resets on every deploy — so right after a restart the board could not
+    // project anything. A rate read from chain does not care.
+    const r = deriveLiquidityRunway([], [gasPool(9.52)], 10 * HOUR, {
+      measuredBurn: { signer_gas: { perHour: 0.0702, windowHours: 24 } },
+    });
+    expect(r.pools[0]!.estimable).toBe(true);
+    // 8.52 DOT above floor at 0.0702/h ≈ 121h ≈ 5 days, against the ~3d the
+    // six-hour balance regression was reporting on the live board.
+    expect(r.pools[0]!.hoursToFloor! / 24).toBeGreaterThan(4.5);
+  });
+
+  it("zero measured spend is stable, and says so without a countdown", () => {
+    const r = deriveLiquidityRunway([], [gasPool(9.52)], 10 * HOUR, {
+      measuredBurn: { signer_gas: { perHour: 0, windowHours: 24 } },
+    });
+    expect(r.pools[0]!.hoursToFloor).toBeNull();
+    expect(r.pools[0]!.status).toBe("ok");
+    expect(r.pools[0]!.estimable).toBe(true);
+  });
+
   it("projects a countdown from a steady drain (degraded band)", () => {
     const now = 6 * HOUR;
     // 19 → 13 over 6h = 1 USDC/h; floor 1 ⇒ (13-1)/1 = 12h ⇒ degraded
@@ -1418,7 +1469,7 @@ describe("deriveLiquidityRunway", () => {
     expect(r.pools[0].burnPerHour).toBeCloseTo(1, 6);
     expect(r.pools[0].hoursToFloor).toBeCloseTo(12, 6);
     expect(r.pools[0].status).toBe("degraded");
-    expect(r.note).toBe("reward bank ~12h to floor");
+    expect(r.note).toBe("reward bank ~12h to floor from the balance trend");
   });
 
   it("pages (red) when the floor is < 6h out", () => {
@@ -1428,7 +1479,7 @@ describe("deriveLiquidityRunway", () => {
     const r = deriveLiquidityRunway(history, [usdcPool(5)], now);
     expect(r.pools[0].hoursToFloor).toBeCloseTo(2, 6);
     expect(r.pools[0].status).toBe("red");
-    expect(r.note).toBe("reward bank ~2h to floor");
+    expect(r.note).toBe("reward bank ~2h to floor from the balance trend");
   });
 
   it("reads stable — not a fake countdown — when the balance is flat", () => {
@@ -1479,7 +1530,7 @@ describe("deriveLiquidityRunway", () => {
     ];
     const r = deriveLiquidityRunway(history, pools, now);
     expect(r.pools.map((p) => p.key)).toEqual(["signer_gas", "reward_bank"]);
-    expect(r.note).toBe("reward bank ~12h to floor"); // gas is stable ⇒ usdc is the nearest
+    expect(r.note).toBe("reward bank ~12h to floor from the balance trend"); // gas is stable ⇒ usdc is the nearest
   });
 });
 
