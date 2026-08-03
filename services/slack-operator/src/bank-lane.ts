@@ -16,8 +16,10 @@
 import {
   PLANCK_PER_DOT,
   POSTAGE_FLOOR_DOT,
+  isKnownPhase,
   type BankFeed,
   type BankRequest,
+  type BankRequests,
   type SourcedRead,
 } from "./bank-feed.js";
 import { decidePositionDisplay, type PositionView } from "./position-display.js";
@@ -66,7 +68,19 @@ function amount(read: SourcedRead, decimals: number, unit: string, nowMs: number
   } catch {
     return { text: `${unit} read was not a number`, tone: "awaiting" };
   }
-  return { text: `${formatUnits(value, decimals)} ${unit}`, tone: "ok" };
+  // Raw beside the decimal. Every fee constant this float is reconciled
+  // against was MEASURED in raw units — 602 funding, 20,201 sell, 1,402 home —
+  // so raw is the unit the arithmetic actually happens in and the decimal is
+  // the courtesy for humans. Showing only the decimal makes the tile readable
+  // and useless for the one job it has.
+  return { text: `${formatUnits(value, decimals)} ${unit} · ${groupDigits(value)} raw`, tone: "ok" };
+}
+
+/** 28463 → "28,463". String grouping, so a large bigint cannot lose precision. */
+export function groupDigits(value: bigint): string {
+  const negative = value < 0n;
+  const digits = (negative ? -value : value).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return negative ? `-${digits}` : digits;
 }
 
 /**
@@ -121,15 +135,18 @@ export function bankLaneView(input: {
 
   const float = amount(feed.float, 6, "USDC", nowMs, stale);
   const postage = postageLine(feed.postage, nowMs, stale, input.postageFloorDot ?? POSTAGE_FLOOR_DOT);
-  const requests = requestLine(feed.requests);
-  const overdue = feed.requests.find((r) => r.overdue) ?? null;
+  const requests = requestLine(feed.requests, nowMs, stale);
+  const overdue = feed.requests.items.find((r) => r.overdue) ?? null;
 
   // The lane's verdict. An overdue request or an unusable position read are the
   // two states worth a degraded pillar — the rest is display.
   const tone: BankTone =
     overdue || postage.tone === "red"
       ? "red"
-      : position.status === "unverified" || float.tone === "degraded" || postage.tone === "degraded"
+      : position.status === "unverified" ||
+          float.tone === "degraded" ||
+          postage.tone === "degraded" ||
+          requests.tone === "degraded"
         ? "degraded"
         : "ok";
 
@@ -162,9 +179,30 @@ function postageLine(read: SourcedRead, nowMs: number, staleAfterMs: number, flo
  * disagree with the service that owns it, and then there are two answers to a
  * question that must have one.
  */
-function requestLine(requests: readonly BankRequest[]): BankLine {
-  const live = requests.filter((r) => r.phase !== "terminal");
-  if (live.length === 0) return { text: "no requests in flight", tone: "ok" };
+function requestLine(requests: BankRequests, nowMs: number, staleAfterMs: number): BankLine {
+  // An unreadable table must NEVER render as "no requests in flight". This is
+  // the tile whose entire job is the stuck-pending alarm, so "all clear" from
+  // an absent read is the worst version of absence-is-not-zero on this lane.
+  if (requests.lastError) {
+    return { text: `request table unreadable — ${requests.lastError}`, tone: "degraded" };
+  }
+  if (requests.readAtMs === null) {
+    return { text: "request table not read yet — in-flight state unknown", tone: "awaiting" };
+  }
+  if (nowMs - requests.readAtMs > staleAfterMs) {
+    const mins = Math.round((nowMs - requests.readAtMs) / 60_000);
+    return { text: `request table is ${mins}m old — in-flight state not current`, tone: "degraded" };
+  }
+
+  // An unrecognized phase is NOT dropped and NOT treated as terminal. The
+  // observer owns this vocabulary and may extend it; a request in a phase this
+  // board has never heard of is the most unusual one in the table, which makes
+  // hiding it exactly backwards.
+  const unknown = requests.items.filter((r) => !isKnownPhase(r.phase));
+  const live = requests.items.filter((r) => r.phase !== "terminal");
+  if (live.length === 0) {
+    return { text: "no requests in flight", tone: "ok" };
+  }
   const overdue = live.filter((r) => r.overdue);
   if (overdue.length > 0) {
     const lead = overdue.reduce((a, b) => (b.ageSeconds > a.ageSeconds ? b : a));
@@ -174,7 +212,13 @@ function requestLine(requests: readonly BankRequest[]): BankLine {
     };
   }
   const lead = live.reduce((a, b) => (b.ageSeconds > a.ageSeconds ? b : a));
-  return { text: `${live.length} in flight · oldest ${lead.id} ${lead.phase} ${formatAge(lead.ageSeconds)}`, tone: "ok" };
+  const base = `${live.length} in flight · oldest ${lead.id} ${lead.phase} ${formatAge(lead.ageSeconds)}`;
+  if (unknown.length > 0) {
+    // Verbatim, so the value is searchable against the observer's own source.
+    const u = unknown[0]!;
+    return { text: `${base} · UNRECOGNISED PHASE "${u.phase}" on ${u.id}`, tone: "degraded" };
+  }
+  return { text: base, tone: "ok" };
 }
 
 function formatAge(seconds: number): string {

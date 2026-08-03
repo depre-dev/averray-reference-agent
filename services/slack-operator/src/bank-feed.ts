@@ -56,11 +56,47 @@ export interface BankRequest {
   /** Short id — enough to name the request in an alert. */
   id: string;
   kind: string;
-  phase: "leg1-dispatched" | "leg2-dispatched" | "pending-finalize" | "terminal";
+  /**
+   * The observer's state machine value, DELIBERATELY not a closed union.
+   *
+   * The four known phases are listed in `KNOWN_PHASES`, but the observer owns
+   * this vocabulary and may extend it — `recovery-pending` is plausible given
+   * the recovery bucket. A board that hard-failed or silently dropped an
+   * unrecognized phase would hide precisely the unusual request, which is the
+   * one worth seeing. Unknown values are rendered verbatim and flagged.
+   */
+  phase: string;
   /** How long it has been in flight, per the observer. */
   ageSeconds: number;
   /** Past its observer deadline. THE stuck-pending alarm. */
   overdue: boolean;
+}
+
+/** The observer's vocabulary as of today. Not exhaustive by construction. */
+export const KNOWN_PHASES = [
+  "leg1-dispatched",
+  "leg2-dispatched",
+  "pending-finalize",
+  "terminal",
+] as const;
+
+export function isKnownPhase(phase: string): boolean {
+  return (KNOWN_PHASES as readonly string[]).includes(phase);
+}
+
+/**
+ * The request table, WITH its own provenance.
+ *
+ * A bare array cannot distinguish "no requests in flight" from "the request
+ * table could not be read" — the absence-is-not-zero problem, sitting on the
+ * one tile whose entire job is the stuck-pending alarm. An unreadable table
+ * rendering as "all clear" is the worst version of this failure on this lane.
+ */
+export interface BankRequests {
+  items: BankRequest[];
+  /** Epoch ms of the request read. Null ⇒ never read; the tile says so. */
+  readAtMs: number | null;
+  lastError?: string | null;
 }
 
 export interface BankFeed {
@@ -78,7 +114,7 @@ export interface BankFeed {
    * delivery fees, with no withdraw path. Committed postage, not treasury.
    */
   postage: SourcedRead;
-  requests: BankRequest[];
+  requests: BankRequests;
   /**
    * What the POSITION read path has proven about itself, owned by the service
    * that performs the read.
