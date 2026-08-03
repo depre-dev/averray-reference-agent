@@ -9,6 +9,8 @@ import {
   askHermesRow,
   payoutView,
   poolMeter,
+  settledByHourReason,
+  settledByHourView,
   splitPools,
   trustRows,
 } from "./ops-spec.js";
@@ -189,6 +191,78 @@ describe("payoutView — whether to believe the comparison at all", () => {
 
   test("nothing read from the chain is not a passing window", () => {
     expect(payoutView(undefined).fit.text).toContain("no comparison window");
+  });
+});
+
+describe("settledByHourView — an unread hour is a hole, not a quiet hour", () => {
+  const slices = (spec: Array<[count: number, covered: boolean]>) =>
+    spec.map(([count, covered], i) => ({ hoursAgo: i + 1, count, covered }));
+  const withHours = (spec: Array<[number, boolean]>, peak: number, total: number) => ({
+    status: "confirmed" as const, detail: "ok", confirmedCount: total, confirmedUsdc: 1,
+    settledCount: total, windowBlocks: 40909,
+    byHour: { slices: slices(spec), total, peak, coveredHours: spec.filter((s) => s[1]).length, blocksPerHour: 1704 },
+  });
+
+  test("oldest hour reads leftmost, so the row runs forward in time", () => {
+    const view = settledByHourView(withHours([[4, true], [1, true], [0, true]], 4, 5))!;
+    expect(view.bars.map((b) => b.hoursAgo)).toEqual([3, 2, 1]);
+  });
+
+  test("an unobserved hour gets NO bar and is flagged, not drawn at zero", () => {
+    // Zero height beside real hours reads as "nothing paid out then" — a claim
+    // the instrument never made, and the exact class of lie this board exists
+    // to prevent.
+    const view = settledByHourView(withHours([[3, true], [0, false], [0, false]], 3, 3))!;
+    const unread = view.bars.filter((b) => !b.covered);
+    expect(unread).toHaveLength(2);
+    for (const b of unread) {
+      expect(b.heightPct).toBe(0);
+      expect(b.title).toContain("not read");
+    }
+    expect(view.gapNote).toBe("2h not read");
+  });
+
+  test("a genuinely quiet observed hour is a real zero and says so", () => {
+    const view = settledByHourView(withHours([[3, true], [0, true]], 3, 3))!;
+    const quiet = view.bars.find((b) => b.hoursAgo === 2)!;
+    expect(quiet.covered).toBe(true);
+    expect(quiet.heightPct).toBe(0);
+    expect(quiet.title).toContain("0 confirmed on-chain");
+    expect(view.gapNote).toBe("");
+  });
+
+  test("a single-payout hour beside a busy one is still visible", () => {
+    // 1/40 rounds to 3% — under a pixel on a 46px row. "Too small to draw" and
+    // "did not happen" must not look the same.
+    const view = settledByHourView(withHours([[40, true], [1, true]], 40, 41))!;
+    expect(view.bars.find((b) => b.hoursAgo === 2)!.heightPct).toBeGreaterThanOrEqual(8);
+  });
+
+  test("the caption names the chain, never the ledger", () => {
+    // These bars are the independent read. Calling them "settled" would
+    // reattribute them to the funnel's own count.
+    const view = settledByHourView(withHours([[2, true]], 2, 2))!;
+    expect(view.caption).toContain("confirmed on-chain");
+    expect(view.caption).not.toContain("settled");
+  });
+
+  test("no chart at all when it could not be sliced — with the reason", () => {
+    const payout = {
+      status: "confirmed" as const, detail: "ok", confirmedCount: 3, confirmedUsdc: 1,
+      settledCount: 3, windowBlocks: 40909,
+      byHour: { reason: "block time not measured — hours cannot be derived from block numbers" },
+    };
+    expect(settledByHourView(payout)).toBeNull();
+    expect(settledByHourReason(payout)).toContain("block time not measured");
+  });
+
+  test("an older payload invents neither a chart nor a fault", () => {
+    const payout = {
+      status: "confirmed" as const, detail: "ok", confirmedCount: 3, confirmedUsdc: 1,
+      settledCount: 3, windowBlocks: 40909,
+    };
+    expect(settledByHourView(payout)).toBeNull();
+    expect(settledByHourReason(payout)).toBeNull();
   });
 });
 

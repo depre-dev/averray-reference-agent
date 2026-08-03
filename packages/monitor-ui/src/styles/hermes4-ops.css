@@ -609,6 +609,88 @@ body,
   color: var(--tone, var(--h4-warn));
 }
 
+/* ---- confirmed on-chain by hour ---------------------------------
+   The row that fills the space the funnel used to leave empty — and
+   the only thing on this panel with a shape rather than a number.
+
+   These bars are the INDEPENDENT read, the same logs the evidence
+   block below is built from. Never "settled": that word belongs to
+   the funnel's own ledger, and a row drawn from the ledger would
+   agree with the funnel by construction.
+
+   An hour the log read never reached gets NO BAR — see the
+   [data-covered="no"] rule. Zero height beside real hours would read
+   as "nothing paid out then", which the instrument never claimed. */
+.ops-byhour {
+  display: flex;
+  flex-direction: column;
+  margin-top: calc(10 * var(--ops-u));
+  padding-top: calc(8 * var(--ops-u));
+  border-top: 1px dashed var(--ops-hair);
+}
+.ops-byhour-head {
+  display: flex;
+  align-items: baseline;
+  gap: calc(10 * var(--ops-u));
+}
+.ops-byhour-title {
+  font-family: var(--h4-font-mono);
+  font-size: calc(10 * var(--ops-u));
+  letter-spacing: 0.14em;
+  color: var(--h4-muted);
+}
+.ops-byhour-caption {
+  margin-left: auto;
+  font-family: var(--h4-font-mono);
+  font-size: calc(10 * var(--ops-u));
+  color: var(--h4-ink-2);
+}
+.ops-byhour-gap {
+  font-family: var(--h4-font-mono);
+  font-size: calc(10 * var(--ops-u));
+  color: var(--tone, var(--h4-warn));
+}
+.ops-byhour-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: calc(3 * var(--ops-u));
+  height: calc(46 * var(--ops-u));
+  margin-top: calc(6 * var(--ops-u));
+}
+.ops-byhour-bar {
+  flex: 1;
+  min-height: 0;
+  background: var(--h4-ok);
+  opacity: 0.72;
+}
+/* NOT OBSERVED. A hatched column the full height of the row, so an
+   hour nobody read is visibly a hole in the record rather than a
+   quiet hour — the distinction this whole board is built on. */
+.ops-byhour-bar[data-covered="no"] {
+  height: 100% !important;
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(237, 230, 221, 0.10) 0 3px,
+    transparent 3px 6px
+  );
+  opacity: 1;
+}
+.ops-byhour-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: calc(3 * var(--ops-u));
+  font-family: var(--h4-font-mono);
+  font-size: calc(9 * var(--ops-u));
+  color: var(--h4-muted);
+}
+/* The reason there is no row. A sentence, never an empty chart. */
+.ops-byhour-absent {
+  margin: calc(10 * var(--ops-u)) 0 0;
+  font-family: var(--h4-font-mono);
+  font-size: calc(10 * var(--ops-u));
+  color: var(--h4-tel);
+}
+
 /* ---- payout evidence ------------------------------------------
    Welded to the funnel above it: same panel, no gap, an explicit
    "corroborates" line. When the two disagree the board shows both

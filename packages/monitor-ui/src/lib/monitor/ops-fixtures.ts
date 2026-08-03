@@ -330,6 +330,13 @@ export const OPS_FIXTURE_NOMINAL: ProductHealth = {
       settledCount: 14,
       windowBlocks: 43200,
       window: { status: "ok", detail: "43200 blocks ≈ 25.3h at 2.112s/block", blockSeconds: 2.112, spanHours: 25.3 },
+      // A whole day read, with real texture: busy stretches and hours where
+      // genuinely nothing paid out. Both are covered — a quiet hour observed
+      // is a fact, and it must look different from an hour nobody read.
+      byHour: {
+        slices: [{ hoursAgo: 1, count: 0, covered: true }, { hoursAgo: 2, count: 1, covered: true }, { hoursAgo: 3, count: 0, covered: true }, { hoursAgo: 4, count: 2, covered: true }, { hoursAgo: 5, count: 1, covered: true }, { hoursAgo: 6, count: 0, covered: true }, { hoursAgo: 7, count: 0, covered: true }, { hoursAgo: 8, count: 1, covered: true }, { hoursAgo: 9, count: 3, covered: true }, { hoursAgo: 10, count: 0, covered: true }, { hoursAgo: 11, count: 1, covered: true }, { hoursAgo: 12, count: 0, covered: true }, { hoursAgo: 13, count: 2, covered: true }, { hoursAgo: 14, count: 0, covered: true }, { hoursAgo: 15, count: 1, covered: true }, { hoursAgo: 16, count: 0, covered: true }, { hoursAgo: 17, count: 0, covered: true }, { hoursAgo: 18, count: 2, covered: true }, { hoursAgo: 19, count: 0, covered: true }, { hoursAgo: 20, count: 1, covered: true }, { hoursAgo: 21, count: 0, covered: true }, { hoursAgo: 22, count: 0, covered: true }, { hoursAgo: 23, count: 1, covered: true }, { hoursAgo: 24, count: 0, covered: true }],
+        total: 16, peak: 3, coveredHours: 24, blocksPerHour: 1704.5,
+      },
     },
   },
   history: {
@@ -409,6 +416,13 @@ export const OPS_FIXTURE_STRESS: ProductHealth = {
       settledCount: 14,
       windowBlocks: 43200,
       window: { status: "ok", detail: "43200 blocks ≈ 25.3h at 2.112s/block", blockSeconds: 2.112, spanHours: 25.3 },
+      // THE CASE THE HATCHING EXISTS FOR: the lookback ceiling bound and only
+      // 9 hours were ever read. The other 15 are not quiet — they are unread,
+      // and drawing them as zero-height bars would be a claim nobody made.
+      byHour: {
+        slices: [{ hoursAgo: 1, count: 0, covered: true }, { hoursAgo: 2, count: 2, covered: true }, { hoursAgo: 3, count: 1, covered: true }, { hoursAgo: 4, count: 0, covered: true }, { hoursAgo: 5, count: 3, covered: true }, { hoursAgo: 6, count: 1, covered: true }, { hoursAgo: 7, count: 0, covered: true }, { hoursAgo: 8, count: 1, covered: true }, { hoursAgo: 9, count: 0, covered: true }, { hoursAgo: 10, count: 0, covered: false }, { hoursAgo: 11, count: 0, covered: false }, { hoursAgo: 12, count: 0, covered: false }, { hoursAgo: 13, count: 0, covered: false }, { hoursAgo: 14, count: 0, covered: false }, { hoursAgo: 15, count: 0, covered: false }, { hoursAgo: 16, count: 0, covered: false }, { hoursAgo: 17, count: 0, covered: false }, { hoursAgo: 18, count: 0, covered: false }, { hoursAgo: 19, count: 0, covered: false }, { hoursAgo: 20, count: 0, covered: false }, { hoursAgo: 21, count: 0, covered: false }, { hoursAgo: 22, count: 0, covered: false }, { hoursAgo: 23, count: 0, covered: false }, { hoursAgo: 24, count: 0, covered: false }],
+        total: 8, peak: 3, coveredHours: 9, blocksPerHour: 1704.5,
+      },
     },
   },
 };

@@ -202,6 +202,41 @@ export interface PayoutEvidence {
   feeUsdc?: number | null;
   /** False → `confirmedCount` may still include fees. Said, never implied. */
   feesSeparated?: boolean;
+  /**
+   * Confirmed payouts sliced into hours of chain, from the SAME logs as
+   * `confirmedCount`. This is the INDEPENDENT read, never the funnel's own
+   * count — a row drawn from the product's ledger would agree with the funnel
+   * by construction and could never show the thing worth seeing.
+   *
+   * `{ reason }` when it could not be sliced; absent on an older payload.
+   * Neither renders as an empty chart: flat zeroes drawn because the
+   * instrument could not slice look exactly like a day nothing paid out.
+   */
+  byHour?: PayoutHistogram | { reason: string };
+}
+
+/** One hour of chain, counting back from the head at read time. */
+export interface HourSlice {
+  /** 1 = the most recent hour, ascending into the past. */
+  hoursAgo: number;
+  count: number;
+  /**
+   * Whether the log read reached this far back. False means NOT OBSERVED —
+   * the count is 0 because nobody looked, and that must never be drawn as a
+   * quiet hour.
+   */
+  covered: boolean;
+}
+
+export interface PayoutHistogram {
+  /** Most recent hour first. */
+  slices: HourSlice[];
+  /** Payouts across the COVERED slices only. */
+  total: number;
+  /** Busiest covered slice, for scaling the bars. */
+  peak: number;
+  coveredHours: number;
+  blocksPerHour: number;
 }
 
 /**

@@ -21,7 +21,7 @@
 
 import type { ProductHealth } from "../../lib/monitor/product-health.js";
 import { formatAgo, formatAmount } from "../../lib/monitor/ops-model.js";
-import { flowFunnel, payoutView, splitPools } from "../../lib/monitor/ops-spec.js";
+import { flowFunnel, payoutRunwayNote, payoutView, splitPools } from "../../lib/monitor/ops-spec.js";
 import {
   breachCard,
   isUntrusted,
@@ -234,6 +234,25 @@ function SolvencyPanel({ health }: { health: ProductHealth }) {
             <i className="fill" data-tone={view.tone} style={{ width: `${view.meter!.fillPct}%` }} />
             <i className="floor" style={{ left: `${view.meter!.floorPct}%` }} />
           </div>
+          {/* What the balance BUYS, not just what it is.
+              "12.89 USDC" is a level; "≈ 90 more payouts · signer gas ~3d to
+              floor" is a countdown, and a countdown is the one thing worth
+              waking up for. It was desktop-only, which is the wrong way round:
+              the desk is where you can already work it out. */}
+          {view.pool.key === "reward_bank"
+            ? (() => {
+                const runway = payoutRunwayNote({
+                  pool: view.pool,
+                  payout: health.flow?.payout,
+                  runwayNote: health.solvency?.runwayNote,
+                });
+                return runway ? (
+                  <p className="hm-ph-pool-note" data-tone={runway.tone} data-testid="mobile-runway">
+                    <b>RUNWAY</b> {runway.text}
+                  </p>
+                ) : null;
+              })()
+            : null}
           {/* Under the balance, same as the desktop. STACKED rather than on one
               line: 100 monospace glyphs do not fit 390px, and this board scrolls
               — height is cheap here in a way it is not on the fixed desktop, so

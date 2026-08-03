@@ -656,6 +656,82 @@ function confirmedDelta(payout: PayoutEvidence): string {
   return `${extra} more payout${extra === 1 ? "" : "s"} on-chain than settled in the window — window edge, not a discrepancy`;
 }
 
+export interface HourBarView {
+  hoursAgo: number;
+  count: number;
+  /** 0–100. Zero for an unobserved slice, which draws as a gap, not a bar. */
+  heightPct: number;
+  covered: boolean;
+  /** Hover text — the only place the exact count of a 1px bar is legible. */
+  title: string;
+}
+
+export interface SettledByHourView {
+  bars: HourBarView[];
+  /** e.g. "Σ 18 confirmed on-chain · peak 4/h" */
+  caption: string;
+  /** Said out loud when part of the day was never read. Empty otherwise. */
+  gapNote: string;
+}
+
+/**
+ * The hourly row under the funnel — throughput, from the chain.
+ *
+ * ── IT IS NOT THE FUNNEL'S NUMBER, AND SAYS SO ────────────────────────────
+ *
+ * These bars come from `ReservationSettled` logs, the same independent read
+ * that can contradict the funnel. Labelling them "settled" would quietly
+ * reattribute them to the product's own ledger and throw away the only
+ * property that makes the row worth its space.
+ *
+ * ── AN UNOBSERVED HOUR IS A GAP, NOT A SHORT BAR ──────────────────────────
+ *
+ * A slice the log read never reached has `count: 0` because nobody looked.
+ * Drawn at zero height beside real hours it reads as "nothing paid out then",
+ * which is a claim the instrument never made. Those slices get no bar at all
+ * and the row says how many hours it actually covered.
+ *
+ * Returns null when there is nothing honest to draw, so the caller can render
+ * the reason as a sentence instead.
+ */
+export function settledByHourView(payout: PayoutEvidence | undefined): SettledByHourView | null {
+  const h = payout?.byHour;
+  if (!h || "reason" in h) return null;
+  if (h.slices.length === 0) return null;
+
+  // Scale against the busiest COVERED hour. Scaling against a peak that
+  // included unobserved slices would flatten every real bar toward nothing.
+  const peak = Math.max(1, h.peak);
+  // Oldest on the left, so the row reads left-to-right as time moving forward.
+  const bars = [...h.slices].reverse().map((s) => ({
+    hoursAgo: s.hoursAgo,
+    count: s.count,
+    // A covered hour with payouts always gets a visible bar: a 1-payout hour
+    // beside a 40-payout hour rounds to nothing, and "too small to draw" and
+    // "did not happen" must not look the same.
+    heightPct: !s.covered ? 0 : s.count === 0 ? 0 : Math.max(8, Math.round((s.count / peak) * 100)),
+    covered: s.covered,
+    title: s.covered
+      ? `${s.hoursAgo}h ago · ${s.count} confirmed on-chain`
+      : `${s.hoursAgo}h ago · not read — the log window did not reach this far back`,
+  }));
+
+  const unread = h.slices.filter((s) => !s.covered).length;
+  return {
+    bars,
+    caption: `Σ ${h.total} confirmed on-chain · peak ${h.peak}/h`,
+    gapNote: unread === 0 ? "" : `${unread}h not read`,
+  };
+}
+
+/** Why there is no hourly row, when there isn't one. Never an empty chart. */
+export function settledByHourReason(payout: PayoutEvidence | undefined): string | null {
+  const h = payout?.byHour;
+  if (!h) return null; // older payload — say nothing rather than invent a fault
+  if ("reason" in h) return h.reason;
+  return h.slices.length === 0 ? "no hours to slice" : null;
+}
+
 /** The permanent key under the evidence row — the distinction, always on screen. */
 export const EVIDENCE_KEY: readonly { tone: OpsTone; text: string }[] = [
   { tone: "ok", text: "CONFIRMED — proof matches the ledger" },
@@ -844,6 +920,7 @@ export const MONEY_LINE_RENDERERS = [
   "payoutRunwayNote",
   "gasPoolNote",
   "economicsLine",
+  "settledByHourView",
 ] as const;
 
 /**
