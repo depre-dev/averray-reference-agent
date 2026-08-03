@@ -1074,6 +1074,19 @@ export function volumeMixNote(input: {
   lifecycle: LifecycleView | undefined;
   /** The product's own settled count — the total the parts must reconcile to. */
   settledCount: number | null | undefined;
+  /**
+   * Gap treated as the expected window-edge artifact rather than a fault.
+   *
+   * Observed live on three separate reads — 14/15, 15/16, 17/18 — always
+   * exactly one: the most recently settled job, confirmed by the ledger before
+   * its log is inside the block window. It is structural, it is benign, and
+   * lighting it amber on every read forever is how an operator learns to scroll
+   * past the line — which would cost exactly the case the line exists for.
+   *
+   * Same boundary and same reasoning as PRODUCT_HEALTH_PAYOUT_TOLERANCE. The
+   * gap is still COUNTED and still NAMED at any size; only the alarm waits.
+   */
+  edgeTolerance?: number;
 }): { text: string; tone: OpsTone } | null {
   const { lifecycle } = input;
   if (!lifecycle) return null;
@@ -1091,11 +1104,14 @@ export function volumeMixNote(input: {
   ];
 
   const gap = total - classified;
+  const tolerance = input.edgeTolerance ?? 1;
   let tone: OpsTone = "awaiting";
   if (gap > 0) {
-    // Settled per the ledger, not seen by the chain read. Named, never absorbed.
+    // Settled per the ledger, not seen by the chain read. Named, never absorbed
+    // — but only ALARMING past the window-edge tolerance, because one is the
+    // steady state and a permanent amber is a line nobody reads.
     parts.push(`${gap} unclassified`);
-    tone = "degraded";
+    if (gap > tolerance) tone = "degraded";
   } else if (gap < 0) {
     // The chain read reached slightly further back than the ledger's 24h — a
     // window edge, not a discrepancy, and it must not read as one.
