@@ -238,10 +238,24 @@ function SolvencyPanel({ health }: { health: ProductHealth }) {
               line: 100 monospace glyphs do not fit 390px, and this board scrolls
               — height is cheap here in a way it is not on the fixed desktop, so
               the addresses can be legible instead of clever. */}
+          {/* Which encoding is which — and this matters MORE here than on the
+              desktop. The phone is where the address gets long-pressed and
+              pasted into a wallet, and the two forms are not interchangeable:
+              the hex is for an EVM wallet, the SS58 for a Substrate one. Two
+              unlabelled 40-character strings is the setup for pasting the
+              wrong one while standing somewhere with a phone in one hand. */}
           {view.pool.address ? (
             <div className="hm-ph-pool-addr" data-testid={`mobile-pool-addr-${view.pool.key}`}>
-              <span>{view.pool.address}</span>
-              {view.pool.addressSs58 ? <span>{view.pool.addressSs58}</span> : null}
+              <span>
+                <b>EVM</b> {view.pool.address}
+              </span>
+              {view.pool.addressSs58 ? (
+                <span>
+                  <b>SS58</b> {view.pool.addressSs58}
+                </span>
+              ) : (
+                <em>SS58 unavailable</em>
+              )}
               {view.pool.addressLabel ? <em>{view.pool.addressLabel}</em> : null}
             </div>
           ) : null}
@@ -313,6 +327,12 @@ function FlowPanel({ health, emphasise, nowMs }: { health: ProductHealth; emphas
           <span className="hm-ph-quiet">{evidence.line1}</span>
         </div>
         <p>{evidence.delta}</p>
+        {/* Whether to believe the line above. The phone is where a SHORTFALL is
+            read at 2am, away from any way to check it — which makes this the
+            surface that needs it most, not least. */}
+        <p className="hm-ph-fit" data-tone={evidence.fit.tone} data-testid="mobile-evidence-fit">
+          {evidence.fit.text}
+        </p>
       </div>
     </section>
   );

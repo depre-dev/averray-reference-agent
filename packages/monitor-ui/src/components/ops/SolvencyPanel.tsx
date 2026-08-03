@@ -40,6 +40,19 @@ function gasNoteFor(
   return gasPoolNote(gas);
 }
 
+/**
+ * What each pool's sub-fact is ABOUT, named before it is read.
+ *
+ * Deliberately keyed by pool rather than derived from the note text: a key that
+ * guessed from the words would silently mislabel a note that changed wording,
+ * and the two notes here answer questions the reader picked the pool to ask.
+ * A pool with no entry gets no key and renders exactly as it did before.
+ */
+const POOL_NOTE_KEY: Readonly<Record<string, string>> = {
+  signer_gas: "BURN",
+  reward_bank: "RUNWAY",
+};
+
 export function SolvencyPanel({ solvency, gas, payout }: SolvencyPanelProps) {
   const pools = solvency?.pools ?? [];
   const { floored, unfloored } = splitPools(pools);
@@ -67,12 +80,21 @@ export function SolvencyPanel({ solvency, gas, payout }: SolvencyPanelProps) {
             : view.pool.key === "reward_bank"
               ? payoutRunwayNote({ pool: view.pool, payout, runwayNote: solvency?.runwayNote })
               : null;
+        // The key names the question before the eye starts reading the answer.
+        // Two pools' sub-facts answer two different questions and used to look
+        // like one continuous grey paragraph running down the panel.
+        const noteKey = POOL_NOTE_KEY[view.pool.key];
         return (
           <div key={view.pool.key}>
             <FlooredPool view={view} />
             {note ? (
-              <p className="ops-pool-note" data-tone={note.tone} data-testid={`ops-pool-note-${view.pool.key}`}>
-                {note.text}
+              <p
+                className={`ops-pool-note${noteKey ? " ops-pool-note--keyed" : ""}`}
+                data-tone={note.tone}
+                data-testid={`ops-pool-note-${view.pool.key}`}
+              >
+                {noteKey ? <span className="ops-pool-note-key">{noteKey}</span> : null}
+                <span className="ops-pool-note-val">{note.text}</span>
               </p>
             ) : null}
           </div>
@@ -113,10 +135,23 @@ function PoolAddress({ view }: { view: PoolView }) {
   if (!address) return null;
   return (
     <span className="ops-pool-addr" data-testid={`ops-pool-addr-${view.pool.key}`}>
+      {/* Which encoding is which. Two 40-odd-character strings separated by a
+          dot told the reader nothing about which wallet each one belongs in,
+          and they are not interchangeable — the hex is what an EVM wallet and
+          a block explorer take, the SS58 is what a Substrate wallet takes.
+          Sending to the wrong form is the class of mistake this board exists
+          to prevent, so the encoding is named rather than inferred. */}
+      <span className="ops-pool-addr-key">EVM</span>
       <span className="ops-pool-addr-hex">{address}</span>
       <span className="ops-pool-addr-sep">·</span>
+      {/* The key rides with the value it names. The absent case already says
+          "SS58 unavailable" in words, and a key in front of it read as the
+          stutter it was: "SS58 SS58 unavailable". */}
       {addressSs58 ? (
-        <span className="ops-pool-addr-hex ops-pool-addr-hex--ss58">{addressSs58}</span>
+        <>
+          <span className="ops-pool-addr-key">SS58</span>
+          <span className="ops-pool-addr-hex ops-pool-addr-hex--ss58">{addressSs58}</span>
+        </>
       ) : (
         <span className="ops-pool-addr-none">SS58 unavailable</span>
       )}

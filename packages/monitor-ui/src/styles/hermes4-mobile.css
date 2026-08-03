@@ -227,6 +227,17 @@
   /* Long-press selects the whole address, which is how it gets into a wallet. */
   user-select: all;
 }
+/* The encoding key. Deliberately OUTSIDE the long-press selection: the whole
+   point of `user-select: all` above is that the grab yields a pasteable
+   address, and a key inside it would yield "EVM 0x…" instead. */
+.hm-ph-pool-addr b {
+  display: inline-block;
+  min-width: 30px;
+  user-select: none;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  color: var(--h4-tel);
+}
 .hm-ph-pool-addr em {
   font-style: normal;
   opacity: 0.72;
@@ -392,6 +403,13 @@
   font-size: 11px;
   line-height: 1.55;
   color: var(--h4-ink-2);
+}
+/* Quieter than the verdict it qualifies. It is about the METHOD, not the
+   money, and must never compete with a red sitting above it. */
+.hm-ph-proof p.hm-ph-fit {
+  margin-top: 4px;
+  font-size: 9.5px;
+  color: var(--tone, var(--h4-tel));
 }
 .hm-ph-sq {
   width: 8px;
