@@ -36,6 +36,41 @@ Every Codex-authored PR should include:
 
 Codex should not rely on green CI alone. The Hermes handoff is a separate release signal.
 
+## Commit attribution and the head SHA
+
+Two rules, both cheap, both about making the record say who did what.
+
+**1. Every Codex commit carries its own trailer.**
+
+```
+Co-Authored-By: Codex <codex@openai.com>
+```
+
+Squash-merge rewrites the author of every commit on `main` to the account that
+merged it, so the author field carries no information about who wrote the change.
+The trailer is the only part that survives. Without one, Codex's work is recorded
+as an *absence* of a trailer — which is indistinguishable from a hand-written
+commit, or from a trailer dropped in a rebase. An absence is not evidence.
+
+**2. The handback states the head commit SHA, in full, before review begins.**
+
+When the implementer cannot publish — a missing or expired token, a sandbox
+without network — someone else pushes the branch on their behalf. That is fine,
+and it should stay checkable: if the SHA was stated up front, the published head
+either matches it or it does not, and anyone can verify that without trusting
+either party.
+
+State the full 40-character SHA. A short prefix is not enough; a too-short match
+pattern has silently missed the real value here before.
+
+### Why this matters more than push access
+
+The separation this protocol depends on is that implementer and reviewer are
+independently verifiable. Push identity never provided that — squash-merge
+flattens it. What provides it is a SHA committed to in advance, plus a reviewer
+who reproduces the load-bearing claim rather than reading the diff and agreeing.
+Both hold even when the implementer has no working credentials at all.
+
 ## What Hermes Checks
 
 Hermes PR review is read-only and recommendation-only. It checks:
