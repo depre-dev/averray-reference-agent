@@ -356,6 +356,23 @@ describe("volumeMixNote — self-generated volume must not read as demand", () =
     expect(v.tone).toBe("degraded");
   });
 
+  test("a gap of ONE is named but not alarmed — it is the steady state", () => {
+    // Seen live on three separate reads: 14/15, 15/16, 17/18, always exactly
+    // one. It is the most recently settled job, confirmed by the ledger before
+    // its log is inside the block window. Structural and benign — and a line
+    // that is amber on every read forever is a line nobody reads, which would
+    // cost precisely the case it exists for.
+    const v = volumeMixNote({ lifecycle: lifecycle(14, 0), settledCount: 15 })!;
+    expect(v.text).toContain("1 unclassified");
+    expect(v.tone).toBe("awaiting");
+  });
+
+  test("past the tolerance it DOES alarm — the count is never suppressed", () => {
+    const v = volumeMixNote({ lifecycle: lifecycle(14, 0), settledCount: 17 })!;
+    expect(v.text).toContain("3 unclassified");
+    expect(v.tone).toBe("degraded");
+  });
+
   test("more chain settlements than ledger reads as a window edge", () => {
     const v = volumeMixNote({ lifecycle: lifecycle(19, 1), settledCount: 18 })!;
     expect(v.text).toContain("2 beyond the ledger window");
