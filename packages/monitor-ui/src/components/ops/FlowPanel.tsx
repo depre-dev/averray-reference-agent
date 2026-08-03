@@ -16,7 +16,7 @@ import {
   type FunnelView,
 } from "../../lib/monitor/ops-spec.js";
 import type { MoneyPathSnapshot } from "../../lib/monitor/product-health.js";
-import { disputeClockLine, lifecycleNote } from "../../lib/monitor/ops-spec.js";
+import { disputeClockLine, lifecycleNote, settledByHourReason, settledByHourView } from "../../lib/monitor/ops-spec.js";
 import type { ExternalFunnelView, LifecycleView } from "../../lib/monitor/product-health.js";
 
 export interface FlowPanelProps {
@@ -68,6 +68,8 @@ export function FlowPanel({ flow, externalFunnel, lifecycle, nowMs }: FlowPanelP
 
       <Funnel funnel={funnel} />
 
+      <SettledByHour payout={flow?.payout} />
+
       <div className="ops-evidence" data-emphasis={evidence.emphasised ? "on" : "off"} data-testid="ops-evidence">
         <div className="ops-evidence-head">
           <h3>PAYOUT EVIDENCE — INDEPENDENT ON-CHAIN PROOF</h3>
@@ -107,6 +109,59 @@ export function FlowPanel({ flow, externalFunnel, lifecycle, nowMs }: FlowPanelP
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * Throughput by hour — and whose number it is.
+ *
+ * Titled "CONFIRMED ON-CHAIN BY HOUR", never "settled": these bars are built
+ * from the settlement LOGS, the same independent read as the evidence block
+ * below. A row drawn from the funnel's own count would agree with the funnel
+ * by construction and could never show the thing worth looking at.
+ *
+ * When it cannot be sliced — no measured block time, no block range read — it
+ * says why in a sentence. It never draws a flat row of zeroes, which looks
+ * exactly like a day on which nothing paid out.
+ */
+function SettledByHour({ payout }: { payout: MoneyPathSnapshot["payout"] | undefined }) {
+  const view = settledByHourView(payout);
+  if (!view) {
+    const reason = settledByHourReason(payout);
+    if (!reason) return null; // older payload: say nothing rather than invent a fault
+    return (
+      <p className="ops-byhour-absent" data-testid="ops-byhour-absent">
+        hourly throughput unavailable — {reason}
+      </p>
+    );
+  }
+  return (
+    <div className="ops-byhour" data-testid="ops-byhour">
+      <div className="ops-byhour-head">
+        <span className="ops-byhour-title">CONFIRMED ON-CHAIN BY HOUR</span>
+        <span className="ops-byhour-caption">{view.caption}</span>
+        {view.gapNote ? (
+          <span className="ops-byhour-gap" data-tone="degraded" data-testid="ops-byhour-gap">
+            {view.gapNote}
+          </span>
+        ) : null}
+      </div>
+      <div className="ops-byhour-bars" role="img" aria-label={`Confirmed payouts by hour. ${view.caption}`}>
+        {view.bars.map((bar) => (
+          <i
+            key={bar.hoursAgo}
+            className="ops-byhour-bar"
+            data-covered={bar.covered ? "yes" : "no"}
+            style={{ height: `${bar.heightPct}%` }}
+            title={bar.title}
+          />
+        ))}
+      </div>
+      <div className="ops-byhour-axis" aria-hidden>
+        <span>−{view.bars.length}h</span>
+        <span>now</span>
+      </div>
+    </div>
   );
 }
 

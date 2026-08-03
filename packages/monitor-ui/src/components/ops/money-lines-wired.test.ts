@@ -44,6 +44,33 @@ describe("every money line is actually rendered", () => {
     });
   }
 
+  /**
+   * Desk-only, and each entry has to carry the argument for why.
+   *
+   * The default is BOTH surfaces — a fact wired into the desktop and not the
+   * phone is invisible exactly when the operator is away from the desk. An
+   * exemption is a decision, so it gets written down next to the name.
+   */
+  const DESKTOP_ONLY: Record<string, string> = {
+    gasPoolNote: "gas burn is tuning information; the signer meter carries the 2am fact",
+    settledByHourView:
+      "24 bars is a shape you study, not a fact you act on — and 24 columns across 390px is a smear. The phone keeps the funnel counts and the proof, which are the actionable parts.",
+    economicsLine:
+      "unit economics is a question you sit down with. Nothing about 0.163 USDC per job changes what you would do in the next ten minutes, which is the only thing the phone is for.",
+  };
+
+  for (const fn of MONEY_LINE_RENDERERS) {
+    const reason = DESKTOP_ONLY[fn];
+    it(reason ? `${fn} is deliberately desk-only` : `the PHONE board also calls ${fn}`, () => {
+      if (reason) {
+        expect(reason.length, `${fn} needs a real argument for skipping the phone`).toBeGreaterThan(30);
+        expect(phone, `${fn} is listed desk-only but the phone renders it`).not.toContain(`${fn}(`);
+      } else {
+        expect(phone, `${fn} is on the desktop board but not the phone`).toContain(`${fn}(`);
+      }
+    });
+  }
+
   it("imports them from ops-spec rather than redefining them", () => {
     // A local reimplementation would satisfy the check above while drifting from
     // the tested one — the same two-verdict-systems problem the board forbids.

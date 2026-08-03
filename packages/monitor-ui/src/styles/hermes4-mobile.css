@@ -211,6 +211,29 @@
    and an address is 42 or 48 characters, so the one-line trick that works on the
    desktop board does not apply here. This board scrolls, so the extra lines cost
    nothing that matters; illegible hex would. */
+/* What the balance buys, under the meter that shows the balance. Monospace
+   like every other number on this board — the desktop shipped three lines
+   with no rules at all and they inherited the body font, which is how you
+   discover a fact was added by someone who never looked at it. */
+.hm-ph-pool-note {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 4px 0 0;
+  font-family: var(--h4-font-mono);
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--tone, var(--h4-ink-2));
+}
+.hm-ph-pool-note b {
+  flex: none;
+  min-width: 46px;
+  font-weight: 400;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--h4-tel);
+}
+
 .hm-ph-pool-addr {
   display: flex;
   flex-direction: column;

@@ -36,6 +36,7 @@ import { ESCROW_V2_SELECTORS } from "./escrow-selectors.js";
 import { readGasSpend } from "./gas-spend-read.js";
 import { readJobLifecycle } from "./job-lifecycle-read.js";
 import { summarizeLifecycle, type LifecycleSummary } from "./job-lifecycle.js";
+import { bucketPayoutsByHour, isHistogramUnavailable, type PayoutHistogram } from "./payout-histogram.js";
 import { createGasSpendCache, type GasSpendCache, type GasSpendSnapshot, type GasUnreadable } from "./gas-spend-cache.js";
 import { alertProvenance, decideMoneyAlert } from "./money-alert.js";
 import { decideSelfFreshness, fetchSelfCompare } from "./self-freshness.js";
@@ -1415,6 +1416,27 @@ export function decidePayoutEvidence(input: {
  * a confident, wrong payout count. Any failure → null (unverified), never a
  * zero that would read as "nothing paid".
  */
+/**
+ * The shape of "no payout evidence", in one place.
+ *
+ * Five separate exits return it — unconfigured, wrong chain, malformed
+ * response, read failure, feature off — and each used to spell the literal
+ * out. Adding a field meant remembering all five, and a missed one is not a
+ * type error when the field is optional. It is a seam so they cannot drift.
+ */
+function noPayoutRead(reason?: string): {
+  count: null; usdc: null; windowBlocks: null; feeCount: null; feeUsdc: null;
+  feesSeparated: false; payoutBlocks: number[]; latestBlock: null; fromBlock: null; reason?: string;
+} {
+  return {
+    count: null, usdc: null, windowBlocks: null, feeCount: null, feeUsdc: null,
+    // Empty, never a populated array: no read means no observations, and an
+    // hourly row built from [] must render as "not read", not as a quiet day.
+    feesSeparated: false, payoutBlocks: [], latestBlock: null, fromBlock: null,
+    ...(reason ? { reason } : {}),
+  };
+}
+
 export async function readPayoutTransfers(input: {
   rpcUrl?: string;
   /**
@@ -1448,24 +1470,32 @@ export async function readPayoutTransfers(input: {
   feeUsdc: number | null;
   /** False when no treasury address was supplied — count may include fees. */
   feesSeparated: boolean;
+  /**
+   * Block number of each counted PAYOUT, so throughput can be sliced into
+   * hours. Fee settlements are excluded exactly as they are from `count` — a
+   * revenue credit drawn in the payout row would overstate throughput on
+   * precisely the fee-bearing jobs the external funnel exists to watch.
+   */
+  payoutBlocks: number[];
+  /** The range actually read, so a slice knows whether it was observed. */
+  latestBlock: number | null;
+  fromBlock: number | null;
   reason?: string;
 }> {
   if (!input.rpcUrl || !input.sourceAddress || !input.usdcAddress) {
-    return {
-      count: null, usdc: null, windowBlocks: null, feeCount: null, feeUsdc: null, feesSeparated: false,
-      reason: !input.sourceAddress
+    return noPayoutRead(
+      !input.sourceAddress
         ? "payout evidence not configured — no payout source address (/health addresses.agentAccountCore, or PRODUCT_HEALTH_PAYOUT_SOURCE_ADDRESS)"
         : "payout evidence not configured (RPC / USDC address)",
-    };
+    );
   }
   try {
     if (input.expectedChainId !== undefined) {
       const actual = Number(BigInt(await ethRpc(input.rpcUrl, "eth_chainId", [], input.fetchImpl)));
       if (actual !== input.expectedChainId) {
-        return {
-          count: null, usdc: null, windowBlocks: null, feeCount: null, feeUsdc: null, feesSeparated: false,
-          reason: `payout evidence unverified — RPC is on chain ${actual}, product is on ${input.expectedChainId}`,
-        };
+        return noPayoutRead(
+          `payout evidence unverified — RPC is on chain ${actual}, product is on ${input.expectedChainId}`,
+        );
       }
     }
     const latest = Number(BigInt(await ethRpc(input.rpcUrl, "eth_blockNumber", [], input.fetchImpl)));
@@ -1483,12 +1513,15 @@ export async function readPayoutTransfers(input: {
       input.fetchImpl,
     );
     if (!Array.isArray(logs)) {
-      return { count: null, usdc: null, windowBlocks: null, feeCount: null, feeUsdc: null, feesSeparated: false, reason: "payout evidence unverified — eth_getLogs returned no array" };
+      return noPayoutRead("payout evidence unverified — eth_getLogs returned no array");
     }
     let total = 0n;
     let counted = 0;
     let feeTotal = 0n;
     let feeCounted = 0;
+    // Where each PAYOUT landed, for slicing throughput into hours. Pushed only
+    // on the payout branch, so a fee credit can never inflate an hour.
+    const payoutBlocks: number[] = [];
     const wantAsset = input.usdcAddress.toLowerCase().replace(/^0x/, "").padStart(64, "0");
     // Padded to a 32-byte topic so it compares against topic3 directly.
     const feeTopic = input.feeRecipientAddress
@@ -1513,18 +1546,32 @@ export async function readPayoutTransfers(input: {
       const recipient = Array.isArray(topics) && typeof topics[3] === "string" ? topics[3].toLowerCase() : null;
       const isFee = feeTopic !== null && recipient === feeTopic;
 
+      // Absent on a pending log, which cannot be placed in an hour. The COUNT
+      // still includes it — a payout with no block is still a payout — so the
+      // hourly total can legitimately trail the headline count. The renderer
+      // says so rather than letting the two quietly disagree.
+      const rawBlock = (entry as { blockNumber?: unknown }).blockNumber;
+      const blockNumber = typeof rawBlock === "string" ? Number(BigInt(rawBlock)) : null;
+
+      const countPayout = () => {
+        counted += 1;
+        if (blockNumber !== null && Number.isFinite(blockNumber)) payoutBlocks.push(blockNumber);
+      };
       try {
         const value = BigInt(`0x${amount}`);
-        if (isFee) { feeTotal += value; feeCounted += 1; } else { total += value; counted += 1; }
+        if (isFee) { feeTotal += value; feeCounted += 1; } else { total += value; countPayout(); }
       } catch {
         // A malformed value is not a reason to under-report the count.
-        if (isFee) feeCounted += 1; else counted += 1;
+        if (isFee) feeCounted += 1; else countPayout();
       }
     }
     return {
       count: counted,
       usdc: Number(total) / 10 ** input.usdcDecimals,
       windowBlocks: latest - fromBlock,
+      payoutBlocks,
+      latestBlock: latest,
+      fromBlock,
       // null, not 0, when we cannot tell fees from payouts: zero would be a
       // claim that no fees were taken, which is a different statement from
       // "we could not look".
@@ -1534,10 +1581,9 @@ export async function readPayoutTransfers(input: {
     };
   } catch (error) {
     // Rate limit, capped range, dead endpoint — all unverified, never "0 paid".
-    return {
-      count: null, usdc: null, windowBlocks: null, feeCount: null, feeUsdc: null, feesSeparated: false,
-      reason: `payout evidence unverified — log read failed (${error instanceof Error ? error.message : String(error)})`,
-    };
+    return noPayoutRead(
+      `payout evidence unverified — log read failed (${error instanceof Error ? error.message : String(error)})`,
+    );
   }
 }
 
@@ -2066,6 +2112,16 @@ export interface PayoutEvidence {
   /** Does the block window actually span what it is compared against? */
   window?: WindowFit;
   /**
+   * Confirmed payouts sliced into hours, built from the SAME logs as
+   * `confirmedCount` — the independent read, not the product's ledger.
+   *
+   * A string instead is the reason there is no row. Absent entirely on an
+   * older payload. Neither is an empty chart: a row of flat zeroes drawn
+   * because the instrument could not slice is indistinguishable from a day on
+   * which nothing paid out.
+   */
+  byHour?: PayoutHistogram | { reason: string };
+  /**
    * Protocol-fee credits in the SAME window — settlements whose recipient was
    * the fee treasury, and the reason `confirmedCount` is not simply every
    * settlement found on chain.
@@ -2097,14 +2153,47 @@ export interface PayoutEvidence {
  */
 export function withFeeSplit(
   evidence: PayoutEvidence,
-  read: { feeCount: number | null; feeUsdc: number | null; feesSeparated: boolean },
+  read: {
+    feeCount: number | null;
+    feeUsdc: number | null;
+    feesSeparated: boolean;
+    payoutBlocks?: number[];
+    latestBlock?: number | null;
+    fromBlock?: number | null;
+  },
+  blockSeconds?: number | null,
 ): PayoutEvidence {
   return {
     ...evidence,
     feeCount: read.feeCount,
     feeUsdc: read.feeUsdc,
     feesSeparated: read.feesSeparated,
+    byHour: sliceIntoHours(read, blockSeconds ?? null),
   };
+}
+
+/**
+ * The hourly row, or the reason there isn't one.
+ *
+ * Attached through `withFeeSplit` rather than beside it on purpose: this seam
+ * exists BECAUSE an inline spread once silently dropped the fee fields, and a
+ * second assignment beside it would recreate exactly that hazard. One place
+ * where chain detail joins the verdict.
+ */
+function sliceIntoHours(
+  read: { payoutBlocks?: number[]; latestBlock?: number | null; fromBlock?: number | null },
+  blockSeconds: number | null,
+): PayoutHistogram | { reason: string } {
+  if (read.latestBlock == null || read.fromBlock == null) {
+    return { reason: "no block range was read" };
+  }
+  const result = bucketPayoutsByHour({
+    blocks: read.payoutBlocks ?? [],
+    latestBlock: read.latestBlock,
+    fromBlock: read.fromBlock,
+    blockSeconds,
+  });
+  return isHistogramUnavailable(result) ? { reason: result.reason } : result;
 }
 
 /**
@@ -2353,7 +2442,7 @@ export async function collectProductHealthProbes(
         ...(feeRecipient ? { feeRecipientAddress: feeRecipient } : {}),
         fetchImpl,
       })
-    : { count: null, usdc: null, windowBlocks: null, feeCount: null, feeUsdc: null, feesSeparated: false, reason: "payout evidence off (set PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED=true)" };
+    : noPayoutRead("payout evidence off (set PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED=true)");
   // Check the INSTRUMENT against the chain, not against an assumption. The
   // lookback is compared to settled24h, so it has to actually span 24h at the
   // chain's real block time — an assumed one has already been wrong in prod.
@@ -2378,6 +2467,7 @@ export async function collectProductHealthProbes(
       ...(windowFit ? { window: windowFit } : {}),
     }),
     payoutRead,
+    blockSeconds,
   );
   // The monitor's own version. Degraded-safe: any failure is "unknown", which
   // must never render as up to date.
