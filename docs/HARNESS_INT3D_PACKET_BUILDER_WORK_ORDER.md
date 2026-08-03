@@ -28,16 +28,41 @@ from a program.
 
 `scripts/ops/int3d-build-packet.mjs`:
 
+> **Amended 2026-08-03.** The original D1 said to read the projection and handoff
+> "from the dispatcher's store." They are not there. Neither appears in any
+> migration; `buildVerifiedHandoff` is private and its result lives only in the
+> reconciliation call frame, with the stored decision keeping evidence refs rather
+> than the handoff. The ports I called "already wired" are used only by tests.
+> See §8.5 for why reconstruction is the answer rather than persistence.
+
 ```
 node scripts/ops/int3d-build-packet.mjs \
-  --work-item <id> --authorization <path> --out <path>
+  --work-item <id> --repository-root <path> --base-ref <ref> \
+  --patch-artifact-root <path> --payload-artifact-root <path> \
+  --authorization <path> --out <path>
 ```
 
-It reads the `AgentTaskV1`, `AgentRunProjectionV1`, and `VerifiedHandoffV1` for
-one work item from the dispatcher's store, calls `actuatePullRequestPayload` with
-the artifact and repository ports the dispatcher already wires for its own use,
-and writes the `int3c_operator_handoff` envelope that `loadAndValidatePacket`
-accepts.
+It reads the `AgentTaskV1` for one work item from the dispatcher's store — that
+one *is* persisted — then **reconstructs** the rest from durable inputs:
+
+1. read the bound Harness run through `HarnessReadPort`
+   (`@avg/averray-mcp/harness-read-port`) to get a `HarnessRunReadSnapshot`;
+2. build the `AgentRunProjectionV1` with the exported `projectHarnessRun`
+   (`@avg/averray-mcp/harness-run-projection`) — the same function
+   `reconcile-run.ts:437` uses;
+3. build the `VerifiedHandoffV1` with `buildVerifiedHandoff`, then validate it
+   with `assertVerifiedHandoffMatchesTaskAndRun`, which is already a shared
+   export;
+4. call `actuatePullRequestPayload` with ports built from the four path
+   arguments above; and
+5. write the `int3c_operator_handoff` envelope `loadAndValidatePacket` accepts.
+
+**Reuse the dispatcher's own functions. Do not reimplement any of them.** A
+second derivation of a handoff would be a second source of truth about whether
+work is eligible to ship, and the two would drift.
+
+Refuse unless the bound run is terminal. A non-terminal run's snapshot can still
+change, and reconstruction is only sound over data that has stopped moving.
 
 Non-overwriting, like the INT-3c evidence file. Re-running against an existing
 `--out` path refuses rather than replaces.
@@ -95,6 +120,12 @@ proves nothing about whether it would notice disagreement.
 - **`int3c-send.mjs`.** Merged in #699. If `loadAndValidatePacket` needs to be
   exported to make D4 possible, that is an acceptable and expected change; adding
   a behaviour to it is not.
+- **`reconcile-run.ts` — with one exception.** Adding `export` to
+  `buildVerifiedHandoff` is authorised and expected: D1 must call the dispatcher's
+  own function rather than reimplement it. Widening its visibility is the whole
+  change. Altering what it computes, when reconciliation calls it, or what the
+  decision record stores is not, and the eleven INT-2 cases must stay green
+  without amendment.
 - **The fence.** Operator-side, outside the agent container, not reachable from a
   profile, capability grant, or the dispatch profile.
 - **The INT-2 suite** — eleven cases, count asserted in four places.
@@ -117,6 +148,30 @@ submission paths.
 3. **The round trip is the deliverable, not the builder.** Both halves already
    worked in isolation. What was missing was anything that ran one into the
    other — which is exactly why this gap survived a passing gate.
+4. **Reconstruct the handoff; do not persist it.** *(added 2026-08-03)* The
+   dispatcher stores the task and the decision record's evidence refs. The
+   projection and handoff are derived, and every input they derive from is
+   durable: the task in the dispatcher, the run in Harness behind
+   `HarnessReadPort`. Persisting a derived value means a migration, a write path,
+   and a stored copy that can drift from the run it describes. Reconstruction
+   over a terminal run costs one `export` keyword.
+5. **Reconstruction does not weaken the truth boundary.** `verifiedAt` comes from
+   `read.status.updatedAt` — the Harness run's own timestamp — so it stays
+   accurate however long afterwards the packet is built. `generatedAt` becomes
+   the reconstruction time, which is exactly what that field claims to mean. No
+   field asserts something that did not happen when it says it did.
+
+   This holds *because* the run is terminal, which is why D1 refuses otherwise.
+   Rebuilding from a live run could produce a handoff describing a state that has
+   since moved, and no timestamp field would reveal it.
+
+### If this becomes routine
+
+Reconstruction is right for a one-shot operator ceremony. If the send is ever
+automated, persisting the handoff at reconciliation time becomes the better
+answer — a durable record of what was accepted beats re-deriving it, and the
+audit trail stops depending on Harness retaining the run. That is a separate
+decision, and this packet does not foreclose it.
 
 ### Operator note
 
