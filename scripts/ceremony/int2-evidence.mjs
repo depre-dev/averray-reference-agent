@@ -83,6 +83,43 @@ const CASE_EXPECTATIONS = Object.freeze({
     requireFence: true,
     expectedToolCommand: GREEN_TOOL_COMMAND,
   }),
+  "budget-overrun": Object.freeze({
+    lifecycle: "handoff_ready",
+    runCount: 1,
+    runOutcome: "completed",
+    runState: "learning_processed",
+    claimCount: 1,
+    outboxCount: 1,
+    decisions: {
+      dispatch_approval: 1,
+      handoff: 1,
+      dispatch_refusal: 0,
+    },
+    criterion: {
+      passed: true,
+      reason: "exit_0",
+      verdict: "completed",
+    },
+    requirePatch: true,
+    requireManifest: true,
+    requireFence: true,
+    expectedBudget: Object.freeze({
+      elapsedSeconds: 60,
+      modelTokens: 6,
+      toolCalls: 30,
+      estimatedUsdMicros: null,
+    }),
+    expectedBudgetStatus: "budget_status=exhausted",
+    expectedBudgetDimension:
+      "budget_exhaustion_dimension=model_tokens used=7 limit=6 over_by=1",
+    expectRunNotCancelled: true,
+    alert: Object.freeze({
+      severity: "warn",
+      code: "budget_exhausted",
+      message: "model_tokens used=7 limit=6 over_by=1",
+    }),
+    expectedToolCommand: GREEN_TOOL_COMMAND,
+  }),
   negative: Object.freeze({
     lifecycle: "failed",
     runCount: 1,
@@ -513,6 +550,7 @@ export async function collectInt2Evidence({
   expectedPath = INT2_EXPECTED_PATH,
   evidenceDir,
   profileLoadError,
+  alertsPath = process.env.HARNESS_DISPATCH_ALERTS_PATH,
 } = {}) {
   requireValue(workItemId, "workItemId");
   requireValue(intendedRunId, "intendedRunId");
@@ -612,6 +650,9 @@ export async function collectInt2Evidence({
       })
     : null;
   const verification = verificationFromEvents(events);
+  const alerts = alertsPath
+    ? await readDispatchAlerts(alertsPath, workItemId)
+    : [];
   const evidence = {
     schemaVersion: 1,
     kind: "int2_automated_evidence",
@@ -624,6 +665,7 @@ export async function collectInt2Evidence({
     dispatchClaims: raw.dispatchClaims,
     outbox: raw.outbox,
     decisions: raw.decisions,
+    alerts,
     runs: raw.runs,
     status: parseKeyValueLines(statusText),
     events,
@@ -720,6 +762,13 @@ export function verifyInt2Evidence(
         run?.state === expectations.runState,
         "run_terminal_state",
         `expected ${expectations.runState}, got ${run?.state}`,
+      );
+    }
+    if (expectations.expectRunNotCancelled) {
+      check(
+        run?.state !== "cancelled" && run?.outcome !== "cancelled",
+        "run_not_cancelled",
+        `run state=${run?.state} outcome=${run?.outcome}`,
       );
     }
     if (expectations.effectiveCapabilities) {
@@ -820,6 +869,64 @@ export function verifyInt2Evidence(
       `missing ${expectations.decisionReason}`,
     );
   }
+  const handoff = decisions.find(
+    (decision) => decision?.decisionType === "handoff",
+  );
+  if (expectations.expectedBudgetStatus) {
+    check(
+      handoff?.proposal?.why?.includes(expectations.expectedBudgetStatus),
+      "handoff_budget_status",
+      `missing ${expectations.expectedBudgetStatus}`,
+    );
+  }
+  if (expectations.expectedBudgetDimension) {
+    check(
+      handoff?.proposal?.why?.includes(expectations.expectedBudgetDimension),
+      "handoff_budget_dimension",
+      `missing ${expectations.expectedBudgetDimension}`,
+    );
+  }
+  if (expectations.expectRunNotCancelled) {
+    check(
+      decisions.every((decision) =>
+        !decision?.effects?.mutations?.some(
+          (mutation) =>
+            mutation?.system === "agent-harness"
+            && mutation?.action === "cancel",
+        )),
+      "no_cancel_mutation",
+      "a decision records Harness cancellation",
+    );
+  }
+  if (expectations.alert) {
+    const alerts = Array.isArray(evidence?.alerts) ? evidence.alerts : [];
+    check(
+      alerts.length === 1,
+      "one_budget_alert",
+      `expected 1 work-item alert, got ${alerts.length}`,
+    );
+    const alert = alerts[0];
+    check(
+      alert?.severity === expectations.alert.severity,
+      "budget_alert_severity",
+      `expected ${expectations.alert.severity}, got ${alert?.severity}`,
+    );
+    check(
+      alert?.code === expectations.alert.code,
+      "budget_alert_code",
+      `expected ${expectations.alert.code}, got ${alert?.code}`,
+    );
+    check(
+      alert?.harnessRunId === evidence?.intendedRunId,
+      "budget_alert_run_identity",
+      `expected ${evidence?.intendedRunId}, got ${alert?.harnessRunId}`,
+    );
+    check(
+      alert?.message?.includes(expectations.alert.message),
+      "budget_alert_dimension",
+      `missing ${expectations.alert.message}`,
+    );
+  }
   if (expectations.profileLoadErrorReason) {
     check(
       evidence?.profileLoadError?.name === "ProfileManifestError"
@@ -841,6 +948,7 @@ export function verifyInt2Evidence(
       evidence.task,
       check,
       expectations.expectedAcceptanceCommand,
+      expectations.expectedBudget,
     );
   }
   if (expectations.requireManifest) {
@@ -1271,6 +1379,12 @@ function verifyFence(
   task,
   check,
   expectedAcceptanceCommand = "git diff --check",
+  expectedBudget = {
+    elapsedSeconds: 60,
+    modelTokens: 8000,
+    toolCalls: 30,
+    estimatedUsdMicros: null,
+  },
 ) {
   check(
     task?.repository?.nameWithOwner ===
@@ -1321,15 +1435,25 @@ function verifyFence(
     `unexpected acceptance ${JSON.stringify(task?.acceptance?.criteria)}`,
   );
   check(
-    equal(task?.budget, {
-      elapsedSeconds: 60,
-      modelTokens: 8000,
-      toolCalls: 30,
-      estimatedUsdMicros: null,
-    }),
+    equal(task?.budget, expectedBudget),
     "fence_budget",
     `unexpected budget ${JSON.stringify(task?.budget)}`,
   );
+}
+
+async function readDispatchAlerts(target, workItemId) {
+  let bytes;
+  try {
+    bytes = await readFile(target, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+  return bytes
+    .split(/\r?\n/u)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .filter((alert) => alert?.workItemId === workItemId);
 }
 
 function fixtureFence(fixture) {

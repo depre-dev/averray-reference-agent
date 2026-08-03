@@ -306,6 +306,17 @@ describe("Harness pilot CLI", () => {
       fixture: "lint-format-green",
     });
   });
+
+  it("accepts the dedicated terminal budget-overrun fixture", () => {
+    expect(parsePilotArgs([
+      "propose",
+      "--fixture",
+      "lint-format-budget-overrun",
+    ])).toEqual({
+      command: "propose",
+      fixture: "lint-format-budget-overrun",
+    });
+  });
 });
 
 function pilotServices(overrides: Record<string, unknown> = {}) {

@@ -57,6 +57,7 @@ const CEREMONY_FIXTURES = [
   "small-refactor",
   "lint-format",
   "lint-format-green",
+  "lint-format-budget-overrun",
   "lint-format-red",
 ] as const;
 const temporaryRoots: string[] = [];

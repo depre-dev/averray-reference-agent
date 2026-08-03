@@ -11,6 +11,7 @@ const FIXTURES = new Set([
   "lint-format",
   "lint-format-paid",
   "lint-format-green",
+  "lint-format-budget-overrun",
   "lint-format-red",
 ]);
 const POLICY_VERSION = "dispatch-policy-v1";
@@ -613,7 +614,7 @@ function helpText() {
   return `Usage: node scripts/ops/harness-pilot.mjs <subcommand> [options]
 
 Human-operated supervised-pilot commands:
-  propose --fixture <docs-fix|add-unit-test|small-refactor|lint-format|lint-format-green|lint-format-red>
+  propose --fixture <docs-fix|add-unit-test|small-refactor|lint-format|lint-format-green|lint-format-budget-overrun|lint-format-red>
           [--work-item <id>] [--deadline <iso>]
   approve --work-item <id> --version <n> --operator <id> --confirm
   cancel  --work-item <id> --version <n> --operator <id> --confirm

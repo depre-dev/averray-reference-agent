@@ -75,7 +75,7 @@ const FIXTURE_ROOT = path.join(
   REPOSITORY_ROOT,
   "test/fixtures/agent-integration/ceremony",
 );
-const EXPECTED_CASE_COUNT = 10;
+const EXPECTED_CASE_COUNT = 11;
 const TEST_TIMEOUT_MS = 240_000;
 const TERMINAL_WAIT_MS = 180_000;
 const HARNESS_STATE_WAIT_MS = 90_000;
@@ -338,6 +338,26 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
     );
   }, TEST_TIMEOUT_MS);
 
+  it("preserves a verified terminal handoff after a measured token overrun", async () => {
+    executedCases += 1;
+    const evidence = await runScriptedTerminalCase({
+      caseName: "budget-overrun",
+      fixture: "lint-format-budget-overrun",
+      script: "lint-format-green.jsonl",
+      lifecycle: "handoff_ready",
+      reconcileAfterHarnessTerminal: true,
+    });
+    assertD3Mutation(
+      "budget-overrun",
+      evidence,
+      (mutated) => {
+        mutated.task.lifecycle = "failed";
+      },
+      "terminal_lifecycle",
+      "change the over-budget terminal lifecycle from handoff_ready to failed",
+    );
+  }, TEST_TIMEOUT_MS);
+
   it("restarts between submit and reconcile without duplicating the run", async () => {
     executedCases += 1;
     await writePilotProfile(INT2_PILOT_CAPABILITIES);
@@ -530,15 +550,21 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
     script,
     lifecycle,
     preserveProfile = false,
+    reconcileAfterHarnessTerminal = false,
   }: {
-    caseName: "green" | "idle" | "negative" | "narrow";
-    fixture: "lint-format" | "lint-format-green" | "lint-format-red";
+    caseName: "budget-overrun" | "green" | "idle" | "negative" | "narrow";
+    fixture:
+      | "lint-format"
+      | "lint-format-budget-overrun"
+      | "lint-format-green"
+      | "lint-format-red";
     script:
       | "lint-format-green.jsonl"
       | "lint-format-idle.jsonl"
       | "lint-format-red.jsonl";
     lifecycle: "handoff_ready" | "failed";
     preserveProfile?: boolean;
+    reconcileAfterHarnessTerminal?: boolean;
   }): Promise<any> {
     if (!preserveProfile) {
       await writePilotProfile(INT2_PILOT_CAPABILITIES);
@@ -549,6 +575,16 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
     const worker = await startWorker();
     const dispatcher = createDispatcher();
     try {
+      if (reconcileAfterHarnessTerminal) {
+        await expect(dispatcher.tick()).resolves.toMatchObject({
+          outcome: "dispatched",
+          intendedRunId: approval.intendedRunId,
+        });
+        await waitForHarnessState(
+          approval.intendedRunId,
+          "learning_processed",
+        );
+      }
       await waitForLifecycle(
         dispatcher,
         workItemId,

@@ -18,6 +18,13 @@
 The suite is the load-bearing part: it is the only evidence that re-proves
 itself on every change. The two ceremonies are point-in-time.
 
+> **Post-acceptance note (2026-08-03):** The automated suite grew from 10 to
+> 11 cases after acceptance. The added case proves through the real dispatcher,
+> pinned Harness, Postgres, and Docker path that a terminal, verified run which
+> exceeded its measured model-token budget still reaches `handoff_ready`, while
+> recording the named overrun and a warning. The original 10-case claim above
+> remains the accepted point-in-time record.
+
 ## 2. §21.1 gate — clause by clause
 
 ### "Concurrent/replayed dispatch creates exactly one Harness run"
