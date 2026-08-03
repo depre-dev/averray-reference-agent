@@ -975,7 +975,7 @@ function taskWithProjectionFacts(
   };
 }
 
-function buildVerifiedHandoff(
+export function buildVerifiedHandoff(
   task: AgentTaskV1,
   projection: AgentRunProjectionV1,
   read: HarnessRunReadSnapshot,

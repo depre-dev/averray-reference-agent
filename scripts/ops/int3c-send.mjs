@@ -202,7 +202,7 @@ function parseArguments(argv) {
   };
 }
 
-async function loadAndValidatePacket(packetPath) {
+export async function loadAndValidatePacket(packetPath) {
   let input;
   try {
     input = JSON.parse(await readFile(packetPath, "utf8"));
