@@ -156,11 +156,17 @@ a decision a script should take.
 ## 5. Still unverified
 
 - ~~Whether v0.20.0 binds.~~ **Verified 2026-08-04: 201, see §6.**
-- **The MCP schema cache's effect on bundle-consumer restarts.** The surface is
-  verified healthy (§6), but `deploy-monitor.sh` still restarts bundle consumers
-  by hand because tool lists registered once at startup. Under LAZY startup that
-  compensation may now be redundant — or still necessary if the fingerprint
-  cache does not notice a republished bundle. Untested either way.
+- ~~The MCP schema cache's effect on bundle-consumer restarts.~~ **TESTED
+  2026-08-04 — the compensation is NOT redundant, it became INSUFFICIENT.**
+  `tools/mcp_schema_cache.py` keys on `config_fingerprint(command, args, url,
+  transport, tool filters)` and does **not** hash server code, so republishing
+  the bundle leaves the fingerprint identical and the cache serves the old
+  manifest. It refreshes on a live connect, so a CHANGED tool self-heals on
+  first use — but a NEWLY ADDED tool cannot: the model never learns it exists,
+  so it never calls it, so the refreshing connect never happens. The cache lives
+  at `/opt/data/cache/mcp_schema_cache.json` on the persisted `avg-hermes`
+  volume (confirmed on the live box), so it survives restarts *and* recreates.
+  `deploy-monitor.sh` now deletes it whenever the bundle id changes.
 - **The SessionState consolidation** (19 session-keyed dicts → one scoped
   object) sits under `HermesSessionClient`. No breaking changes are documented,
   which is not the same as none.
