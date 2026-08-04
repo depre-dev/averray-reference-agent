@@ -57,3 +57,49 @@ paths:
 platforms:
   api_server:
     enabled: true
+
+# ── THE TOOL SURFACE THIS DEPLOYMENT ACTUALLY NEEDS ───────────────────────
+#
+# Hermes ships a full personal-assistant toolset. This is a headless ops box
+# that answers questions from five MCP servers and one skill, so most of that
+# surface is unusable here — and one piece of it is a live escalation path.
+#
+# THE PATH: a message in the Buzz #Ops channel reaches a Hermes session with
+# the whole tool surface (buzz-inbound.ts hands the question straight to one;
+# its SELF/ECHO/RATE/mention guards are anti-loop, not authority). The gateway
+# boots warning that api_server binds 0.0.0.0 with terminal.backend `local`,
+# unsandboxed — "agent work dispatched through this endpoint runs as the host
+# user with full terminal/file access". That host also runs the money-rail
+# monitor, the Buzz relay, postgres and cloudflared.
+#
+# WHY NOT terminal.backend: docker, which is what the warning suggests. That
+# backend shells out to `docker run`, so it needs a reachable daemon, and no
+# docker socket is mounted into this container. Granting one would give Hermes
+# root on the host — strictly worse than the local user it was meant to fix.
+# Upstream agrees: /var/run/docker.sock is in its own tools' sensitive-path
+# list. So the fix is not to sandbox the terminal. It is to not have one.
+#
+# SECOND, SMALLER BENEFIT: every enabled toolset's schemas ride in the context
+# on every turn. Removing what cannot be used here makes each answer cheaper
+# and the choice among remaining tools sharper.
+#
+# DELIBERATELY NOT DISABLED — each has a plausible use and deserves its own
+# considered pass rather than being swept up here: file, code_execution,
+# browser/browser-cdp (testbed missions), delegation, memory, skills, web,
+# session_search, cronjob, project, todo, clarify.
+agent:
+  disabled_toolsets:
+    # The escalation path. Our answers come from MCP tools, never a shell.
+    - terminal
+    # GUI control of a machine with no GUI.
+    - computer_use
+    # Not ops functions, and unusable on a headless server.
+    - image_gen
+    - video_gen
+    - video
+    - tts
+    - vision
+    # We keep our own orchestration control plane (O1-O5, dispatch-policy.ts,
+    # autopilot). Adopting upstream Kanban would regress those guardrails —
+    # decided in docs/HERMES_UPGRADE_v017.md and still true.
+    - kanban
