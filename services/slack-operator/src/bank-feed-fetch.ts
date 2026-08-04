@@ -179,18 +179,30 @@ function terminalReconciliation(raw: unknown): BankRequest["reconciliation"] | u
     "stagedRaw",
     "leg1TransferFeeRaw",
     "trappedWriteOff3Raw",
-    "remoteRecoverableRaw",
     "unexplainedRaw",
   ] as const;
   if (keys.some((key) => typeof r[key] !== "string" || !/^\d+$/.test(r[key]))) return undefined;
   if (typeof r.artifactLabel !== "string" || !r.artifactLabel.trim()) return undefined;
+  const remoteShape = typeof r.remoteRecoverableRaw === "string" && /^\d+$/.test(r.remoteRecoverableRaw);
+  const finalKeys = [
+    "actualTreasuryReturnRaw",
+    "recoveryReturnFeeRaw",
+    "finalRawRecoverySlotResidueRaw",
+  ] as const;
+  const finalShape = finalKeys.every((key) => typeof r[key] === "string" && /^\d+$/.test(r[key]));
+  if (!remoteShape && !finalShape) return undefined;
   return {
     stagedRaw: r.stagedRaw as string,
     leg1TransferFeeRaw: r.leg1TransferFeeRaw as string,
     trappedWriteOff3Raw: r.trappedWriteOff3Raw as string,
-    remoteRecoverableRaw: r.remoteRecoverableRaw as string,
     unexplainedRaw: r.unexplainedRaw as string,
     artifactLabel: r.artifactLabel,
+    ...(remoteShape ? { remoteRecoverableRaw: r.remoteRecoverableRaw as string } : {}),
+    ...(finalShape ? {
+      actualTreasuryReturnRaw: r.actualTreasuryReturnRaw as string,
+      recoveryReturnFeeRaw: r.recoveryReturnFeeRaw as string,
+      finalRawRecoverySlotResidueRaw: r.finalRawRecoverySlotResidueRaw as string,
+    } : {}),
   };
 }
 

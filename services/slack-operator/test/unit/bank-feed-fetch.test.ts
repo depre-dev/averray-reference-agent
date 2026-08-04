@@ -96,10 +96,12 @@ describe("nothing that crossed the network is trusted", () => {
           overdue: false,
           reconciliation: {
             stagedRaw: "150000",
+            actualTreasuryReturnRaw: "130200",
             leg1TransferFeeRaw: "525",
             trappedWriteOff3Raw: "17932",
-            remoteRecoverableRaw: "131543",
+            recoveryReturnFeeRaw: "1343",
             unexplainedRaw: "0",
+            finalRawRecoverySlotResidueRaw: "19800",
             artifactLabel: "v2.1 accounting artifact, known-unrecoverable",
             rawRecoveryAssetsOutstandingRaw: "150000",
           },
@@ -109,10 +111,12 @@ describe("nothing that crossed the network is trusted", () => {
     });
     expect(r.feed!.requests.items[0]!.reconciliation).toEqual({
       stagedRaw: "150000",
+      actualTreasuryReturnRaw: "130200",
       leg1TransferFeeRaw: "525",
       trappedWriteOff3Raw: "17932",
-      remoteRecoverableRaw: "131543",
+      recoveryReturnFeeRaw: "1343",
       unexplainedRaw: "0",
+      finalRawRecoverySlotResidueRaw: "19800",
       artifactLabel: "v2.1 accounting artifact, known-unrecoverable",
     });
     expect(r.feed!.requests.items[0]!.reconciliation).not.toHaveProperty("rawRecoveryAssetsOutstandingRaw");

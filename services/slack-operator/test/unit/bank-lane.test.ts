@@ -210,10 +210,12 @@ describe("an overdue request is the stuck-pending alarm, named", () => {
             status: "failed",
             reconciliation: {
               stagedRaw: "150000",
+              actualTreasuryReturnRaw: "130200",
               leg1TransferFeeRaw: "525",
               trappedWriteOff3Raw: "17932",
-              remoteRecoverableRaw: "131543",
+              recoveryReturnFeeRaw: "1343",
               unexplainedRaw: "0",
+              finalRawRecoverySlotResidueRaw: "19800",
               artifactLabel: "v2.1 accounting artifact, known-unrecoverable",
             },
           })],
@@ -222,10 +224,11 @@ describe("an overdue request is the stuck-pending alarm, named", () => {
       }),
       nowMs: NOW,
     })!;
-    expect(v.requests.text).toContain("150000 staged");
+    expect(v.requests.text).toContain("150000 staged = 130200 treasury");
     expect(v.requests.text).toContain("17932 trapped write-off #3");
-    expect(v.requests.text).toContain("131543 recoverable");
+    expect(v.requests.text).toContain("1343 recovery fee");
     expect(v.requests.text).toContain("0 unexplained");
+    expect(v.requests.text).toContain("19800 residue");
     expect(v.requests.text).toContain("v2.1 accounting artifact, known-unrecoverable");
     expect(v.requests.text).not.toContain("recoveryAssetsOutstanding");
     expect(v.requests.tone).toBe("degraded");

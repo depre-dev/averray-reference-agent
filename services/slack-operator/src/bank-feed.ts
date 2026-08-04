@@ -80,9 +80,12 @@ export interface BankRequest {
     stagedRaw: string;
     leg1TransferFeeRaw: string;
     trappedWriteOff3Raw: string;
-    remoteRecoverableRaw: string;
     unexplainedRaw: string;
     artifactLabel: string;
+    remoteRecoverableRaw?: string;
+    actualTreasuryReturnRaw?: string;
+    recoveryReturnFeeRaw?: string;
+    finalRawRecoverySlotResidueRaw?: string;
   };
 }
 
