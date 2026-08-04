@@ -1,0 +1,57 @@
+# The Bank lane's one wire — the board reaching the platform backend's
+# read-only feed over the BACKEND's own private network.
+#
+# `PRODUCT_HEALTH_BANK_FEED_URL` points at `agent-mainnet-backend:8787`, which
+# is a name only the platform stack's network resolves. Without this file the
+# URL is configured and unreachable, and the lane says so forever.
+#
+# ── WHY A FILE AND NOT `docker network connect` ───────────────────────────
+#
+# The imperative command works instantly and vanishes on the next container
+# recreate: the lane would read fine today and silently stop after a deploy,
+# with nothing in the tree recording that it was ever connected. Attachment is
+# configuration, so it belongs in configuration.
+#
+# ── WHY A SEPARATE FILE AND NOT THE BASE COMPOSE ──────────────────────────
+#
+# `external: true` is a hard start-time precondition. In ops/compose.yml, a
+# missing `agent-mainnet-internal` would stop THE WHOLE monitor stack from
+# coming up — including the board that exists to tell you the platform is
+# down. A read-only display must never make its own availability depend on the
+# network of the thing it watches; that is the coupling #657 removed when a
+# Hermes crash could red a deploy.
+#
+# So it lives here, and ops/deploy-monitor.sh adds it only when the network is
+# actually present. Network gone ⇒ overlay skipped ⇒ the board still boots and
+# the lane reports the feed unreachable. One line of text instead of an outage.
+#
+# ── WHY THIS DIRECTION ────────────────────────────────────────────────────
+#
+# The board joins the platform's network; never the reverse. Putting the
+# money-rail backend onto `avg_avg-internal` would hand it reach to
+# avg-postgres, avg-cloudflared and every task runner — a real widening of the
+# platform's blast radius, to make a display work. This direction adds one
+# read-only consumer to a network the backend can already be reached from, and
+# nothing else.
+
+services:
+  slack-operator:
+    # BOTH networks spelled out in full, deliberately.
+    #
+    # Compose normalises the short list form to a mapping and unions the keys,
+    # so restating avg-internal is redundant under today's merge rule — and
+    # still correct under a replace rule. Getting that wrong silently would cut
+    # the board off from Postgres, which is a worse failure than the one this
+    # file fixes.
+    networks: [avg-internal, agent-mainnet-internal]
+
+networks:
+  # Created and owned by the platform stack (averray-agent/agent), whose
+  # compose names it. Nothing here creates it, and `compose down` in this
+  # project must never remove it — `external: true` is what guarantees both.
+  #
+  # The name is the platform's to change. If it does, `docker network inspect`
+  # in deploy-monitor.sh stops finding it, the overlay is skipped with a note,
+  # and the lane reports unreachable — visible, and not an outage.
+  agent-mainnet-internal:
+    external: true

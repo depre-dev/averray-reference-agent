@@ -83,6 +83,16 @@ jobs:
       - name: Validate Compose file
         run: docker compose --env-file ops/.env.example -f ops/compose.yml -f ops/compose.prod.yml config
 
+      # The Bank lane overlay is conditional at deploy time (deploy-monitor.sh
+      # adds it only when the platform network exists), so nothing else here
+      # would ever parse it. `config` does not contact the daemon about an
+      # external network, so this validates the merge on a runner that has no
+      # such network — which is the point.
+      - name: Validate Compose file (with the Bank lane overlay)
+        run: >-
+          docker compose --env-file ops/.env.example
+          -f ops/compose.yml -f ops/compose.prod.yml -f ops/compose.bank-feed.yml config
+
   int2-supervised-dispatch:
     name: INT-2 real dispatcher integration
     runs-on: ubuntu-latest
