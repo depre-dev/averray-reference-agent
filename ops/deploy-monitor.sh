@@ -281,6 +281,51 @@ else
   fi
   echo "restarting everything that runs from it, so its tool list matches:"
 
+  # CLEAR HERMES'S ON-DISK TOOL-SCHEMA CACHE FIRST — since v0.20.0 a restart
+  # alone no longer makes the tool list match.
+  #
+  # Hermes registers MCP tools from a persistent cache
+  # (/opt/data/cache/mcp_schema_cache.json, in the avg-hermes volume) so lazy
+  # startup need not spawn every stdio child at boot. The key is `server name +
+  # config_fingerprint(command, args, url, transport, tool filters)` — it does
+  # NOT hash the server's CODE. All five of our servers run the same
+  # /app/scripts/run-mcp-server.sh, so republishing the bundle leaves the
+  # fingerprint identical and the cache keeps serving the OLD manifest.
+  #
+  # It refreshes on a live connect, so a CHANGED tool self-heals the first time
+  # something calls it. A NEWLY ADDED tool does not: the model never learns it
+  # exists, so it never calls it, so the connect that would refresh the cache
+  # never happens. Self-sustaining — and exactly the 2026-08-02 failure, where
+  # averray_board_health shipped in #657 and hermes-gateway went on answering
+  # from the previous list.
+  #
+  # What changed is that the stale list now sits on the PERSISTED volume, so it
+  # outlives both the restart below and a container recreate. The consumer
+  # restart stopped being sufficient at the v0.20.0 upgrade; deleting the cache
+  # is what restores it. No cache ⇒ Hermes connects to enumerate, which is the
+  # pre-lazy behaviour and the correct one here.
+  #
+  # ADVISORY, like the skills sync above: a monitor deploy must not fail because
+  # a cache file could not be removed, and a stale tool list announces itself
+  # (a tool that "does not exist"). Same call #657 made.
+  # The existence check is NOT defensive padding, for the reason read_bundle_id
+  # gives above: `docker run -v <name>:...` CREATES a missing volume, and a
+  # volume created outside Compose carries none of Compose's labels — the exact
+  # state Compose then refuses to adopt. Clearing a cache must not be able to
+  # break the stack it is tidying.
+  HERMES_VOLUME="${PROJECT}_avg-hermes"
+  echo "  clearing the MCP tool-schema cache (v0.20.0 keys it on config, not code)"
+  if ! docker volume inspect "${HERMES_VOLUME}" >/dev/null 2>&1; then
+    echo "  no ${HERMES_VOLUME} volume — nothing cached, nothing to clear"
+  elif docker run --rm -v "${HERMES_VOLUME}:/d" alpine:3.20 \
+      rm -f /d/cache/mcp_schema_cache.json 2>/dev/null; then
+    echo "  cache cleared — consumers re-enumerate on boot"
+  else
+    echo "  WARNING: could not clear the MCP schema cache. A tool ADDED by this" >&2
+    echo "           bundle may stay invisible even after the restart below." >&2
+    echo "           Check with: ops/upgrade-hermes.sh --check-only" >&2
+  fi
+
   BUNDLE_CONSUMERS="$(docker ps \
     --filter "volume=${BUNDLE_VOLUME}" \
     --filter "label=com.docker.compose.project=${PROJECT}" \
