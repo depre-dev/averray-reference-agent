@@ -5,7 +5,7 @@ import { normalizeBankFeed, readBankFeed } from "../../src/bank-feed-fetch.js";
 const good = {
   position: { raw: "0", source: "erc20:0x2ec4…fa93.balanceOf(0x98f0…b68e)", readAtMs: 1_785_900_000_000 },
   float: { raw: "149412", source: "substrate_tokens:22", readAtMs: 1_785_900_000_000 },
-  postage: { raw: "15100000000", source: "substrate_system:15Xbeap…", readAtMs: 1_785_900_000_000 },
+  postage: { raw: "2697000000", source: "substrate_system:1yKNU414…", readAtMs: 1_785_900_000_000 },
   requests: { items: [], readAtMs: 1_785_900_000_000, lastError: null },
   calibration: null,
 };

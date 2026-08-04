@@ -4,13 +4,18 @@ import { BANK_STALE_AFTER_MS, bankLaneView } from "../../src/bank-lane.js";
 import type { BankFeed, BankRequest } from "../../src/bank-feed.js";
 
 const NOW = 1_785_900_000_000;
-const POS_SRC = "aUSDC 0x2ec48840…fa93 · balanceOf(0x98f0033E…B68E)";
+// v2.1 converted account, truncate20'd for the aUSDC balanceOf. Used
+// symmetrically as the calibration proven-source, so the retarget tests below
+// exercise the mechanism regardless of which generation it names.
+const POS_SRC = "aUSDC 0x2ec48840…fa93 · balanceOf(0x85663dfd…99f8f4)";
 
 const feed = (over: Partial<BankFeed> = {}): BankFeed => ({
   position: { raw: "0", source: POS_SRC, readAtMs: NOW - 30_000 },
   float: { raw: "28463", source: "asset 22 · Tokens.accounts(convertedAccount)", readAtMs: NOW - 30_000 },
-  // 1.51 DOT — the wrapper postage account as funded at the arming ceremony.
-  postage: { raw: "15100000000", source: "15Xbeap…SMAK", readAtMs: NOW - 30_000 },
+  // 0.2697 DOT at the v2.1 wrapper image — 0.3 committed at the arming
+  // ceremony, less leg 1's delivery fees. The v2.0 image (15Xbeap…SMAK, 1.51
+  // DOT) is retired and written off; reading it was the 2026-08-04 incident.
+  postage: { raw: "2697000000", source: "1yKNU414…UKBaZ", readAtMs: NOW - 30_000 },
   requests: { items: [], readAtMs: NOW - 30_000 },
   ...over,
 });
@@ -89,16 +94,16 @@ describe("float is displayed, or it reads as money that vanished", () => {
 });
 
 describe("postage is committed, and has its own floor", () => {
-  test("1.51 DOT reads as committed postage with no withdraw path", () => {
+  test("0.2697 DOT reads as committed postage with no withdraw path", () => {
     const v = bankLaneView({ feed: feed(), nowMs: NOW })!;
-    expect(v.postage.text).toContain("1.51 DOT");
+    expect(v.postage.text).toContain("0.2697 DOT");
     expect(v.postage.text).toContain("no withdraw path");
     expect(v.postage.tone).toBe("ok");
   });
 
   test("below the floor the wrapper cannot pay delivery — that stops the lane", () => {
     const v = bankLaneView({
-      feed: feed({ postage: { raw: "600000000", source: "15Xbeap…SMAK", readAtMs: NOW } }), // 0.06 DOT
+      feed: feed({ postage: { raw: "600000000", source: "1yKNU414…UKBaZ", readAtMs: NOW } }), // 0.06 DOT
       nowMs: NOW,
     })!;
     expect(v.postage.tone).toBe("red");
