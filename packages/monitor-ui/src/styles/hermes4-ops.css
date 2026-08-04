@@ -1085,3 +1085,38 @@ body,
   .ops-pillar:nth-child(3) { border-left: 0; }
   .ops-foot { flex-wrap: wrap; }
 }
+
+/* ---- NEXT — what to do about it ----------------------------------------
+   The board named eleven things that were wrong and never once said what to
+   do. This strip is the answer, and it sits directly above the footer that
+   promises "refresh is the only control" — deliberately: it TELLS, it does not
+   ACT. The suggestions carry an approvable task; this surface renders only
+   their sentence. */
+.ops-next {
+  display: flex;
+  align-items: baseline;
+  gap: calc(14 * var(--ops-u));
+  padding-top: calc(8 * var(--ops-u));
+  border-top: 1px solid var(--ops-hair);
+  font-family: var(--h4-font-mono);
+  font-size: calc(11 * var(--ops-u));
+  line-height: 1.5;
+}
+.ops-next-key {
+  flex: none;
+  letter-spacing: 0.14em;
+  color: var(--h4-muted);
+}
+.ops-next ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: calc(3 * var(--ops-u));
+}
+/* Tone follows the suggestion's own urgency — `act` is the one that costs
+   money if ignored. Never louder than the fact it refers to. */
+.ops-next li { color: var(--h4-ink); }
+.ops-next li[data-tone="warn"] { color: var(--h4-warn); }
+.ops-next li[data-tone="act"] { color: var(--h4-act); }
+.ops-next li[data-tone="tel"] { color: var(--h4-muted); }
