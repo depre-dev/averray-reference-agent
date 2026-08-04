@@ -138,7 +138,7 @@ jobs:
 
       - name: Prove the suite did not skip
         if: always()
-        run: test "$(tr -d '[:space:]' < '${{ runner.temp }}/int2-suite-evidence/executed-count.txt')" = "11"
+        run: test "$(tr -d '[:space:]' < '${{ runner.temp }}/int2-suite-evidence/executed-count.txt')" = "14"
 
       - name: Upload INT-2 evidence
         if: always()
