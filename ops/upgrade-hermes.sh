@@ -123,15 +123,36 @@ check_session_api() {
 # us on 2026-08-02, when hermes-gateway kept advertising a stale list and
 # answered an operator's health question from the wrong tool.
 #
-# A CACHE keyed by fingerprint could fix that, or could add a second stale
-# layer. This does not guess: it prints what the container reports so the
-# operator can compare it against the previous run. Reported, not asserted —
-# the same honesty the v0.18 smoke used for undocumented shapes.
+# THIS WAS A LOG GREP, AND A LOG GREP CANNOT WORK HERE.
+#
+# The 2026-08-04 run proved it: on v0.20.0 the gateway logs NOTHING about MCP at
+# boot, because lazy startup means nothing has connected yet. Silence is the
+# HEALTHY output — and it is also what a totally broken server would produce, so
+# the check could not tell them apart. It reported "no MCP lines" against a
+# gateway whose tool surface turned out to be perfectly fine.
+#
+# `mcp test` inverts that: it CONNECTS and enumerates, so the act of asking is
+# what proves the path. `mcp list` is not a substitute — that reports what is
+# CONFIGURED, and configured is not working (it listed all five as "enabled"
+# while none had connected).
 check_mcp_tools() {
-  echo "  CHECK 2 (report, not verdict) — MCP registration lines from the gateway:"
-  "${COMPOSE[@]}" logs --tail 400 hermes-gateway 2>/dev/null \
-    | grep -iE 'mcp|tool.*(cache|schema|registered)' | tail -12 | sed 's/^/    /' \
-    || echo "    (no MCP lines in the last 400 log lines — worth a closer look)"
+  local out count
+  out="$("${COMPOSE[@]}" exec -T hermes-gateway hermes mcp test averray 2>&1)" || true
+  if ! printf '%s' "$out" | grep -q "Tools discovered"; then
+    echo "  CHECK 2 FAIL: could not enumerate the averray MCP server." >&2
+    printf '%s\n' "$out" | tail -8 | sed 's/^/    /' >&2
+    return 1
+  fi
+  count="$(printf '%s' "$out" | sed -n 's/.*Tools discovered: \([0-9][0-9]*\).*/\1/p' | head -1)"
+  # Name the specific tool rather than trusting a count. A cache that served a
+  # stale or truncated schema would still report SOME number, and the 2026-08-02
+  # incident was precisely a plausible-looking tool list missing the one that
+  # answers "is Averray working?".
+  if ! printf '%s' "$out" | grep -q "averray_board_health"; then
+    echo "  CHECK 2 FAIL: averray connected (${count} tools) but averray_board_health is MISSING." >&2
+    return 1
+  fi
+  echo "  CHECK 2 PASS: averray MCP connected, ${count} tools, averray_board_health present"
 }
 
 run_checks() {
@@ -139,7 +160,7 @@ run_checks() {
   echo "── checks ──────────────────────────────────────────────────────────"
   local failed=false
   check_session_api || failed=true
-  check_mcp_tools
+  check_mcp_tools || failed=true
   echo
   [ "$failed" = false ]
 }
