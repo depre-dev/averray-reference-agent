@@ -161,6 +161,32 @@ already-tested, currently-inert feature real.
 **P4 — Hermes reads and answers there.** Separate work; see
 [[project_hermes_buzz_architecture]]. Read-only first, allowlist deferred.
 
+> **⚠ SUPERSEDED — STATUS AS OF 2026-08-04. P4 IS LIVE AND NOT READ-ONLY.**
+>
+> `BUZZ_INBOUND_ENABLED=true`, `BUZZ_INBOUND_REQUIRE_MENTION=true`,
+> `BUZZ_INBOUND_MAX_REPLIES_PER_HOUR=10`. A question in the ops channel is
+> handed to a **full Hermes session with its whole tool surface** — the guards
+> in `buzz-inbound.ts` (SELF / ECHO / RATE / mention) are anti-loop and
+> anti-spam, **not authority**. Authority lives downstream in
+> `hermes/config/policy.yaml` and averray-mcp's mutation policy.
+>
+> **"Allowlist deferred" is misleading and was never actioned as written** — it
+> was *delegated to the relay*, which runs closed: verified on the live relay
+> 2026-08-04, `BUZZ_REQUIRE_AUTH_TOKEN=true`, `BUZZ_ALLOW_NIP_OA_AUTH=true`,
+> `RELAY_OWNER_PUBKEY` set. Membership by issued credential IS the allowlist,
+> exactly as §"redundant" above argued it should be. The posture is sound; the
+> sentence describing it was not.
+>
+> Residual, and operator knowledge rather than config: **who holds issued relay
+> credentials.** `REQUIRE_AUTH_TOKEN=true` says a credential is needed, not how
+> many exist.
+>
+> **DO NOT enable Hermes v0.20.0's bundled Buzz gateway platform.** It is a
+> second Buzz→agent path answering only to Hermes's own allowlist, bypassing the
+> ops-channel scoping, mention requirement and rate limit above. Two paths with
+> different gates is how the strict one becomes optional (AGENTS.md invariant
+> #6). Keep it as a fallback if our client ever needs replacing.
+
 ## Risks worth naming up front
 
 - **Second Postgres.** We already run one. Two database servers on one small box

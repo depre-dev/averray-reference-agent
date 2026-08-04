@@ -17,6 +17,16 @@ closed 2026-07-29; v0.19.1 notes list *"continued platform work (Buzz/Nostr
 channel …)"*). It is **not backportable to v0.18** — the upgrade gates the Buzz
 work entirely.
 
+> **⚠ OVERTAKEN 2026-08-01, one day after this was written.** We built our own
+> Buzz client in `services/slack-operator` (`buzz-client` / `buzz-inbound` /
+> `buzz-subscribe` / `buzz-profile`) against the relay directly. The upgrade
+> gated nothing: as of 2026-08-04 the control plane is live and two-way on
+> v0.18 — `BUZZ_INBOUND_ENABLED=true`, mention required, 10 replies/hour.
+>
+> So this premise justified part of a month of waiting after it had already
+> stopped being true. When an upgrade is held for a capability, re-check whether
+> the capability arrived by another route before the next deferral.
+
 **⚠ VERDICT AFTER THE SMOKE (2026-07-31): WAIT FOR v0.19.2. NO-GO on v0.19.1.**
 The Session API our monitor depends on never binds — see §3.5.4. Two open
 upstream bugs match the symptom, v0.19.1 is ~1 day old rolling up ~2,789
