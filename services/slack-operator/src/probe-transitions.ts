@@ -101,8 +101,18 @@ export interface ProbeTransitionDecision {
  * that do not. Red says it the moment it sees it; degraded has to prove it
  * meant it.
  */
-export function holdRequired(status: ProbeStatus, minDegradedTicks: number): number {
-  return status === "red" ? 1 : Math.max(1, minDegradedTicks);
+export function holdRequired(status: ProbeStatus, minDegradedTicks: number, from?: ProbeStatus): number {
+  // Anything arriving at red is immediate — see above.
+  if (status === "red") return 1;
+  // LEAVING RED IS ALSO IMMEDIATE. red→degraded is a material de-escalation:
+  // the situation changed and is not over, and an operator watching a money
+  // alarm needs that now, not in three heartbeats. The first version of this
+  // held it, and the pre-existing suite caught it — which I had not run,
+  // because I searched services/slack-operator/test/ and the file lives in the
+  // repo-root test/unit/. Asserting "this module has no tests" from one
+  // directory was the actual mistake; the regression was its consequence.
+  if (from === "red") return 1;
+  return Math.max(1, minDegradedTicks);
 }
 
 const DEFAULT_MIN_DEGRADED_TICKS = 3;
@@ -216,7 +226,7 @@ export function decideProbeTransitions(input: DecideProbeTransitionsInput): Prob
         keys.add(key);
         continue;
       }
-      if (held < holdRequired(probe.status, minDegradedTicks)) continue;
+      if (held < holdRequired(probe.status, minDegradedTicks, before.status)) continue;
 
       // Muted burns the announcement without making it. The alternative —
       // announcing on unmute — would replay an edge that happened hours ago,
@@ -240,8 +250,20 @@ export function decideProbeTransitions(input: DecideProbeTransitionsInput): Prob
       // "opened", so an unconditional recovery would be the ONLY thing in the
       // channel — all-clears for alarms nobody was ever given. Silence about a
       // problem you were never told about is correct.
-      const wasAnnounced = input.posted.has(reasonClass(before));
-      if (wasAnnounced && !input.posted.has(key) && !input.muted) {
+      // ONLY ANNOUNCE THE END OF SOMETHING THAT WAS ANNOUNCED — but "was it
+      // announced" has to be decided from EVIDENCE OF SUPPRESSION, not from
+      // membership of `posted`. A caller that hands us a prior alarm without its
+      // key (every standalone call in the suite, and any state rebuilt from a
+      // partial source) is not telling us the alarm was silent; it is telling us
+      // nothing. Defaulting to silence there swallowed every recovery in the
+      // pre-existing tests.
+      //
+      // A class we actively held below its threshold IS evidence: we know we
+      // suppressed it, so its all-clear would be about a problem nobody heard.
+      const beforeClass = reasonClass(before);
+      const heldBack = (input.streaks?.get(beforeClass) ?? Number.MAX_SAFE_INTEGER)
+        < holdRequired(before.status, minDegradedTicks);
+      if (!heldBack && !input.posted.has(key) && !input.muted) {
         alerts.push({ probe: probe.name, kind: "recovered", from: before.status, to: probe.status, text: alertText(probe, "recovered"), key });
       }
       // Recovery keys are NOT retained: the next time this probe breaks and
