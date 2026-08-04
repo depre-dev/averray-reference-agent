@@ -54,9 +54,32 @@ paths:
 #
 # Key, port and bind address stay in the environment (ops/compose.command-center.yml);
 # only the opt-in lives here.
+#
+# ── model_name: WHY THIS IS A REAL MODEL AND NOT A LABEL ──────────────────
+#
+# The api_server is an OpenAI-compatible endpoint, so it advertises a model in
+# GET /v1/models and clients send that id back on every request. Left unset it
+# advertises the string `hermes-agent` — a VIRTUAL name that Hermes is supposed
+# to recognise as its own and swap for the configured model before calling the
+# provider (gateway/platforms/api_server.py passes it as `virtual_model=` and
+# only treats a request as a route when `model != self._model_name`).
+#
+# On v0.20.0 that swap stopped happening. The virtual name reached the provider
+# verbatim and Ollama Cloud answered, correctly, `model "hermes-agent" not
+# found` — so every question asked in Buzz #Ops failed with a 404 for six
+# hours on 2026-08-04 while the gateway, the Session API and the MCP surface
+# were all healthy. Config was right; env was right; only the name on the wire
+# was wrong.
+#
+# Naming a REAL model here fixes it in a way that does not depend on upstream:
+# whether or not the virtual-model swap works, the string clients send is now
+# one the provider will honour. The pass-through stops being a failure mode
+# instead of merely being avoided. Keep it equal to `model.default` above —
+# test/unit/hermes-config.test.ts fails if the two drift apart.
 platforms:
   api_server:
     enabled: true
+    model_name: glm-5.2:cloud
 
 # ── THE TOOL SURFACE THIS DEPLOYMENT ACTUALLY NEEDS ───────────────────────
 #
