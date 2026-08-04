@@ -306,12 +306,20 @@ function requestLine(requests: BankRequests, nowMs: number, staleAfterMs: number
     const terminal = requests.items.find((request) => request.phase === "terminal" && request.reconciliation);
     if (terminal?.reconciliation) {
       const r = terminal.reconciliation;
+      const final = r.actualTreasuryReturnRaw !== undefined &&
+        r.recoveryReturnFeeRaw !== undefined &&
+        r.finalRawRecoverySlotResidueRaw !== undefined;
       return {
-        text:
-          `TERMINAL ${String(terminal.status ?? "recorded").toUpperCase()} · ${terminal.id} · ` +
-          `${r.stagedRaw} staged − ${r.leg1TransferFeeRaw} leg-1 fee − ` +
-          `${r.trappedWriteOff3Raw} trapped write-off #3 = ${r.remoteRecoverableRaw} recoverable · ` +
-          `${r.unexplainedRaw} unexplained · ${r.artifactLabel}`,
+        text: final
+          ? `TERMINAL ${String(terminal.status ?? "recorded").toUpperCase()} · ${terminal.id} · ` +
+            `${r.stagedRaw} staged = ${r.actualTreasuryReturnRaw} treasury + ` +
+            `${r.leg1TransferFeeRaw} leg-1 fee + ${r.trappedWriteOff3Raw} trapped write-off #3 + ` +
+            `${r.recoveryReturnFeeRaw} recovery fee · ${r.unexplainedRaw} unexplained · ` +
+            `${r.finalRawRecoverySlotResidueRaw} residue — ${r.artifactLabel}`
+          : `TERMINAL ${String(terminal.status ?? "recorded").toUpperCase()} · ${terminal.id} · ` +
+            `${r.stagedRaw} staged − ${r.leg1TransferFeeRaw} leg-1 fee − ` +
+            `${r.trappedWriteOff3Raw} trapped write-off #3 = ${r.remoteRecoverableRaw} recoverable · ` +
+            `${r.unexplainedRaw} unexplained · ${r.artifactLabel}`,
         tone: "degraded",
       };
     }
