@@ -269,7 +269,7 @@ describe("committed INT-2 ceremony mechanics", () => {
     expect(shellSuite).toContain("INT2_PILOT_ENVIRONMENT_VERIFIED");
     expect(shellSuite).not.toContain("build-dispatch-dep-cache.mjs");
     expect(integrationSuite).toContain(
-      "preflight_command: \"npm run typecheck && npm exec --offline -- vitest --version\"",
+      "preflight_command: \"npm run typecheck && /node_modules/.bin/vitest --version\"",
     );
   });
 
@@ -610,7 +610,7 @@ describe("committed INT-2 ceremony mechanics", () => {
     );
   });
 
-  it("trusts only the fixed sandbox workspace and probes Git before running cases", async () => {
+  it("trusts only the fixed workspace and proves sandbox outputs stay removable", async () => {
     const [dockerfile, suite] = await Promise.all([
       readFile(PILOT_DOCKERFILE, "utf8"),
       readFile(AUTOMATED_SUITE, "utf8"),
@@ -622,8 +622,11 @@ describe("committed INT-2 ceremony mechanics", () => {
     expect(dockerfile).not.toMatch(
       /safe\.directory\s+(?:"|')?\*(?:"|')?/u,
     );
+    expect(dockerfile).toContain("setpriv --reuid");
     expect(suite).toContain("INT2_PILOT_ENVIRONMENT_FAILED");
+    expect(suite).toContain("INT2_PILOT_WORKSPACE_OWNERSHIP_FAILED");
     expect(suite).toContain("INT2_PILOT_GIT_OWNERSHIP_VERIFIED");
+    expect(suite).toContain("INT2_PILOT_WORKSPACE_OWNERSHIP_VERIFIED");
     expect(suite).toContain(
       'git config --system --get-all safe.directory',
     );

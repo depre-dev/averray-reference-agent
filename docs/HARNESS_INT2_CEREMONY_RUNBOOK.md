@@ -183,7 +183,7 @@ capabilities:
   - artifact.get
 verification:
   baseline_command: null
-  preflight_command: "npm run typecheck && npm exec --offline -- vitest --version"
+  preflight_command: "npm run typecheck && /node_modules/.bin/vitest --version"
   protected_paths: []
 strategies:
   - direct_execution
@@ -257,7 +257,7 @@ docker run --rm --network none \
   --volume "$PILOT_DEP_CHECKOUT:/workspace" \
   --workdir /workspace \
   "$PILOT_IMAGE" /bin/sh -lc \
-  'npm exec --offline -- tsc --version && npm exec --offline -- vitest --version' \
+  '/node_modules/.bin/tsc --version && /node_modules/.bin/vitest --version' \
   > "$CEREMONY_ROOT/evidence/pilot-toolchain.txt"
 ```
 
@@ -267,6 +267,13 @@ prepared environment result in `EnvironmentPrepared`; a missing binary must
 produce a non-zero `baseline_failures` count and stop before model execution.
 The normal task-family runs must record zero baseline failures before their
 ordinary command criteria run again after the scripted change.
+
+On Linux, the image entrypoint drops from root to the uid/gid that owns the
+mounted workspace before it invokes a command. This prevents `tsc` and other
+tools from leaving root-owned output that the durable cleanup step cannot
+remove. The automated bootstrap creates a nested output through the image and
+then removes it as the host user; it refuses with
+`INT2_PILOT_WORKSPACE_OWNERSHIP_FAILED` before case 1 if that property is false.
 
 Start the local monitor in a dedicated terminal for projection snapshots. It
 has no Slack token, and every routine/mutation flag remains off:

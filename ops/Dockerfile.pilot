@@ -30,11 +30,11 @@
 
 FROM node:22-bookworm-slim
 
-# git only. ca-certificates is present for git's own TLS verification, not for
-# network access: the pilot profile is egress deny_all and the Harness Docker
-# provider runs the container with no network.
+# git plus util-linux's setpriv only. ca-certificates is present for git's own
+# TLS verification, not for network access: the pilot profile is egress
+# deny_all and the Harness Docker provider runs the container with no network.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates \
+  && apt-get install -y --no-install-recommends git ca-certificates util-linux \
   && git config --system --add safe.directory /workspace \
   && rm -rf /var/lib/apt/lists/*
 
@@ -56,12 +56,18 @@ RUN npm ci --ignore-scripts \
   && rm -rf packages services package.json package-lock.json
 
 ENV PATH="/node_modules/.bin:${PATH}"
+ENV HOME="/tmp/pilot-home"
+ENV NPM_CONFIG_CACHE="/tmp/pilot-npm-cache"
+RUN mkdir -p "$HOME" "$NPM_CONFIG_CACHE" \
+  && chmod 1777 "$HOME" "$NPM_CONFIG_CACHE"
 
-# No USER directive: Harness starts this sandbox as the image's default root
-# user so it can write a bind-mounted workspace across both desktop and Linux
-# Docker hosts. On Linux CI the checkout remains owned by the runner uid, so Git
-# otherwise refuses it as dubious ownership. The system exception above trusts
-# only the fixed, network-disabled sandbox mount point — never a wildcard.
+# Docker bind mounts retain the runner's uid/gid on Linux. Execute each Harness
+# command as that mounted workspace owner so compilers cannot leave root-owned
+# outputs that the durable cleanup step cannot remove. Docker Desktop commonly
+# presents the mount as root-owned; in that case no uid transition is needed.
+# The system Git exception above still trusts only the fixed, network-disabled
+# sandbox mount point — never a wildcard.
+ENTRYPOINT ["/bin/sh", "-c", "uid=$(stat -c %u /workspace); gid=$(stat -c %g /workspace); if [ \"$uid:$gid\" = \"0:0\" ]; then exec \"$@\"; fi; exec setpriv --reuid \"$uid\" --regid \"$gid\" --clear-groups \"$@\"", "pilot-entrypoint"]
 
 WORKDIR /workspace
 CMD ["sleep", "infinity"]

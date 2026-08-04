@@ -911,7 +911,7 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
       ...capabilities.map((capability) => `  - ${capability}`),
       "verification:",
       "  baseline_command: null",
-      '  preflight_command: "npm run typecheck && npm exec --offline -- vitest --version"',
+      '  preflight_command: "npm run typecheck && /node_modules/.bin/vitest --version"',
       "  protected_paths: []",
       "strategies:",
       "  - direct_execution",

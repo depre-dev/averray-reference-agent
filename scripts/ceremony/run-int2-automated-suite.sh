@@ -262,14 +262,23 @@ docker run --rm --network none \
   --workdir /workspace \
   "$INT2_PILOT_IMAGE" \
   /bin/sh -lc \
-    'test "$(git config --system --get-all safe.directory)" = "/workspace" && git diff --check && npm exec --offline -- tsc --version && npm exec --offline -- vitest --version' \
+    'test "$(git config --system --get-all safe.directory)" = "/workspace" && git diff --check && /node_modules/.bin/tsc --version && /node_modules/.bin/vitest --version && mkdir -p .int2-owner-probe/nested && touch .int2-owner-probe/nested/compiled.js' \
   >> "$_int2_bootstrap_log" 2>&1 \
   || {
     echo "INT2_PILOT_ENVIRONMENT_FAILED: pilot cannot run Git and the pinned toolchain in the mounted workspace" \
       | tee -a "$_int2_bootstrap_log" >&2
     exit 26
   }
+_int2_owner_probe="$_int2_git_probe/.int2-owner-probe"
+if ! chmod -R u+w "$_int2_owner_probe" 2>/dev/null \
+  || ! rm -rf "$_int2_owner_probe" 2>/dev/null; then
+  echo "INT2_PILOT_WORKSPACE_OWNERSHIP_FAILED: pilot outputs are not removable by the workspace owner" \
+    | tee -a "$_int2_bootstrap_log" >&2
+  exit 29
+fi
 printf '%s\n' "INT2_PILOT_GIT_OWNERSHIP_VERIFIED" \
+  >> "$_int2_bootstrap_log"
+printf '%s\n' "INT2_PILOT_WORKSPACE_OWNERSHIP_VERIFIED" \
   >> "$_int2_bootstrap_log"
 printf '%s\n' \
   "INT2_PILOT_ENVIRONMENT_VERIFIED base=$_int2_fixture_base" \
