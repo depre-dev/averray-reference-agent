@@ -619,6 +619,22 @@ services:
       # disk exhaustion is universally fatal, and at 155 GiB free 10/25 cannot
       # fire spuriously. Raise them once MinIO (Buzz) starts storing media.
       PRODUCT_HEALTH_DISK_PATH: ${PRODUCT_HEALTH_DISK_PATH:-/}
+      # Credential expiry — OBSERVED from the artefacts, never from a written
+      # date. A date in a file is right the day it is written and silently wrong
+      # from the next rotation onward; a cert's own notAfter and a JWT's own
+      # `exp` cannot go stale.
+      #
+      # Both UNSET by default, and absent means the probe DOES NOT EXIST rather
+      # than existing with nothing to watch. A permanently-degraded probe on
+      # every deployment that never configured it is the panel nobody reads.
+      #
+      # CERT_HOSTS: comma-separated hostnames, TLS 443. A lapsed certificate is
+      # a total public outage, which is why it leads the list.
+      # EXPIRY_JWT_ENV_KEYS: comma-separated env var names to try as JWTs. An
+      # unset key is skipped; an opaque non-JWT reports "no expiry declared",
+      # which is a fact about the credential, not a failure to read it.
+      PRODUCT_HEALTH_CERT_HOSTS: ${PRODUCT_HEALTH_CERT_HOSTS:-}
+      PRODUCT_HEALTH_EXPIRY_JWT_ENV_KEYS: ${PRODUCT_HEALTH_EXPIRY_JWT_ENV_KEYS:-}
       PRODUCT_HEALTH_MIN_DISK_FREE_GB: ${PRODUCT_HEALTH_MIN_DISK_FREE_GB:-10}
       PRODUCT_HEALTH_WARN_DISK_FREE_GB: ${PRODUCT_HEALTH_WARN_DISK_FREE_GB:-25}
       # Floors default to 0 = that probe can NEVER go red. Fine for a testnet, but
