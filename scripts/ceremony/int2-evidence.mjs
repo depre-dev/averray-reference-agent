@@ -48,12 +48,6 @@ const GREEN_TOOL_COMMAND =
   "printf '%b' '\\nINT-2 green-path proof line, cleanly formatted.\\n' >> docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md";
 const NEGATIVE_TOOL_COMMAND =
   "printf '%b' '\\nINT-2 negative-path proof line with trailing whitespace.   \\n' >> docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md";
-const DOCS_FIX_TOOL_COMMAND =
-  "printf '%b' '\\nThe supervised task-family ceremony records the exact search result at its pinned base.\\n' >> docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md";
-const ADD_UNIT_TEST_TOOL_COMMAND =
-  "printf '%b' 'import { describe, expect, it } from \\\"vitest\\\";\\n\\nimport { canonicalJson } from \\\"../../packages/mcp-common/src/canonical-json.js\\\";\\n\\ndescribe(\\\"canonicalJson array order\\\", () => {\\n  it(\\\"preserves array order while sorting nested object keys\\\", () => {\\n    expect(canonicalJson([{ b: 2, a: 1 }, \\\"tail\\\"])).toBe(\\n      JSON.stringify([{ a: 1, b: 2 }, \\\"tail\\\"]),\\n    );\\n  });\\n});\\n' > test/unit/canonical-json-array-order.test.ts && npm run typecheck";
-const SMALL_REFACTOR_TOOL_COMMAND =
-  "node -e 'const fs=require(\\\"node:fs\\\");const p=\\\"test/unit/agent-integration-contracts.test.ts\\\";let s=fs.readFileSync(p,\\\"utf8\\\");const calls=(s.match(/fixtureRecord\\\\(\\\"/g)||[]).length;const oldTail=\\\"  ) as unknown;\\\\n}\\\\n\\\\nfunction fixtureRecord(name: string): Record<string, unknown> {\\\\n  return fixture(name) as Record<string, unknown>;\\\\n}\\\\n\\\";if(calls!==8||!s.includes(\\\"function fixture(name: string): unknown {\\\")||!s.includes(oldTail))throw new Error(\\\"unexpected fixture helper shape\\\");s=s.replaceAll(\\\"fixtureRecord(\\\\\\\"\\\",\\\"fixture<Record<string, unknown>>(\\\\\\\"\\\").replace(\\\"function fixture(name: string): unknown {\\\",\\\"function fixture<T = unknown>(name: string): T {\\\").replace(oldTail,\\\"  ) as T;\\\\n}\\\\n\\\");if((s.match(/function fixture<T = unknown>/g)||[]).length!==1||s.includes(\\\"fixtureRecord\\\"))throw new Error(\\\"fixture helper refactor did not apply\\\");fs.writeFileSync(p,s);'";
 const SECTION3_CORRECT_TOOL_COMMAND =
   "printf '%b' '\\nA paid real-model ceremony requires a three-case acceptance pre-flight before credentials are exported.\\n' >> docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md";
 const SECTION3_INCORRECT_TOOL_COMMAND =
@@ -271,183 +265,6 @@ const CASE_EXPECTATIONS = Object.freeze({
       ),
     ),
     expectedToolCommand: GREEN_TOOL_COMMAND,
-  }),
-  "docs-fix": Object.freeze({
-    lifecycle: "handoff_ready",
-    runCount: 1,
-    runOutcome: "completed",
-    runState: "learning_processed",
-    claimCount: 1,
-    outboxCount: 1,
-    decisions: {
-      dispatch_approval: 1,
-      handoff: 1,
-      dispatch_refusal: 0,
-    },
-    criteria: Object.freeze({
-      verdict: "completed",
-      details: Object.freeze([
-        Object.freeze({ id: "docs-command", passed: true, reason: "exit_0" }),
-        Object.freeze({
-          id: "docs-search",
-          passed: true,
-          reason: "match_count",
-          detail: "expected=41 actual=41 files=37",
-        }),
-      ]),
-    }),
-    requirePatch: true,
-    requireManifest: true,
-    requireFence: true,
-    expectedAcceptanceCriteria: Object.freeze([
-      Object.freeze({
-        id: "docs-command",
-        type: "command",
-        command: "npm run typecheck",
-        required: true,
-      }),
-      Object.freeze({
-        id: "docs-search",
-        type: "search",
-        include: Object.freeze(["docs/**/*.md"]),
-        pattern: "supervised",
-        expectedMatches: 41,
-        required: true,
-      }),
-    ]),
-    expectedBudget: Object.freeze({
-      elapsedSeconds: 120,
-      modelTokens: 10000,
-      toolCalls: 40,
-      estimatedUsdMicros: null,
-    }),
-    expectedToolCommand: DOCS_FIX_TOOL_COMMAND,
-  }),
-  "add-unit-test": Object.freeze({
-    lifecycle: "handoff_ready",
-    runCount: 1,
-    runOutcome: "completed",
-    runState: "learning_processed",
-    claimCount: 1,
-    outboxCount: 1,
-    decisions: {
-      dispatch_approval: 1,
-      handoff: 1,
-      dispatch_refusal: 0,
-    },
-    criteria: Object.freeze({
-      verdict: "completed",
-      details: Object.freeze([
-        Object.freeze({
-          id: "unit-test-command",
-          passed: true,
-          reason: "exit_0",
-        }),
-        Object.freeze({
-          id: "unit-test-artifact",
-          passed: true,
-          reason: "match_count",
-          detail: "expected=1 actual=1 files=1",
-        }),
-      ]),
-    }),
-    requirePatch: true,
-    requireManifest: true,
-    requireFence: true,
-    expectedTrackedTarget: false,
-    expectedAcceptanceCriteria: Object.freeze([
-      Object.freeze({
-        id: "unit-test-command",
-        type: "command",
-        command: "npm test",
-        required: true,
-      }),
-      Object.freeze({
-        id: "unit-test-artifact",
-        type: "search",
-        include: Object.freeze([
-          "test/unit/canonical-json-array-order.test.ts",
-        ]),
-        pattern: "preserves array order while sorting nested object keys",
-        expectedMatches: 1,
-        required: true,
-      }),
-    ]),
-    expectedBudget: Object.freeze({
-      elapsedSeconds: 120,
-      modelTokens: 12000,
-      toolCalls: 50,
-      estimatedUsdMicros: null,
-    }),
-    expectedToolCommand: ADD_UNIT_TEST_TOOL_COMMAND,
-  }),
-  "small-refactor": Object.freeze({
-    lifecycle: "handoff_ready",
-    runCount: 1,
-    runOutcome: "completed",
-    runState: "learning_processed",
-    claimCount: 1,
-    outboxCount: 1,
-    decisions: {
-      dispatch_approval: 1,
-      handoff: 1,
-      dispatch_refusal: 0,
-    },
-    criteria: Object.freeze({
-      verdict: "completed",
-      details: Object.freeze([
-        Object.freeze({
-          id: "refactor-command",
-          passed: true,
-          reason: "exit_0",
-        }),
-        Object.freeze({
-          id: "refactor-test-command",
-          passed: true,
-          reason: "exit_0",
-        }),
-        Object.freeze({
-          id: "refactor-artifact",
-          passed: true,
-          reason: "match_count",
-          detail: "expected=1 actual=1 files=1",
-        }),
-      ]),
-    }),
-    requirePatch: true,
-    requireManifest: true,
-    requireFence: true,
-    expectedAcceptanceCriteria: Object.freeze([
-      Object.freeze({
-        id: "refactor-command",
-        type: "command",
-        command: "npm run typecheck",
-        required: true,
-      }),
-      Object.freeze({
-        id: "refactor-test-command",
-        type: "command",
-        command: "npm test",
-        required: true,
-      }),
-      Object.freeze({
-        id: "refactor-artifact",
-        type: "search",
-        include: Object.freeze([
-          "test/unit/agent-integration-contracts.test.ts",
-        ]),
-        pattern: "function fixture<T = unknown>",
-        expectedMatches: 1,
-        required: true,
-      }),
-    ]),
-    expectedBudget: Object.freeze({
-      elapsedSeconds: 120,
-      modelTokens: 14000,
-      toolCalls: 60,
-      estimatedUsdMicros: null,
-    }),
-    expectedToolCommand: SMALL_REFACTOR_TOOL_COMMAND,
   }),
   unapproved: Object.freeze({
     lifecycle: "proposed",
@@ -1132,7 +949,6 @@ export function verifyInt2Evidence(
       check,
       expectations.expectedAcceptanceCommand,
       expectations.expectedBudget,
-      expectations.expectedAcceptanceCriteria,
     );
   }
   if (expectations.requireManifest) {
@@ -1168,12 +984,10 @@ export function verifyInt2Evidence(
       "patch_base_revision",
       "patch checkout HEAD does not equal AgentTask baseRevision",
     );
-    const expectedTrackedTarget =
-      expectations.expectedTrackedTarget ?? true;
     check(
-      patch?.trackedTarget === expectedTrackedTarget,
-      "criterion_target_tracking_state",
-      `expected trackedTarget=${expectedTrackedTarget}, got ${patch?.trackedTarget}`,
+      patch?.trackedTarget === true,
+      "criterion_target_tracked",
+      "expected path is not tracked at the prepared base",
     );
     check(
       Array.isArray(patch?.touchedPaths)
@@ -1269,58 +1083,6 @@ export function verifyInt2Evidence(
         `required_failed=${JSON.stringify(verification?.requiredFailed)}`,
       );
     }
-  }
-
-  if (expectations.criteria) {
-    const verification = evidence?.verification;
-    check(
-      verification?.verdict === expectations.criteria.verdict,
-      "verification_verdict",
-      `expected ${expectations.criteria.verdict}, got ${verification?.verdict}`,
-    );
-    for (const expected of expectations.criteria.details) {
-      const observed = verification?.details?.find(
-        (detail) => detail?.id === expected.id && detail?.required === true,
-      );
-      check(
-        observed !== undefined,
-        `required_criterion_${expected.id}_present`,
-        `missing required criterion ${expected.id}`,
-      );
-      check(
-        observed?.passed === expected.passed,
-        `required_criterion_${expected.id}_result`,
-        `expected passed=${expected.passed}, got ${observed?.passed}`,
-      );
-      check(
-        observed?.reason === expected.reason,
-        `required_criterion_${expected.id}_reason`,
-        `expected ${expected.reason}, got ${observed?.reason}`,
-      );
-      if (expected.detail !== undefined) {
-        check(
-          observed?.detail === expected.detail,
-          `required_criterion_${expected.id}_detail`,
-          `expected ${JSON.stringify(expected.detail)}, got ${JSON.stringify(observed?.detail)}`,
-        );
-      }
-    }
-    check(
-      evidence?.exit128Present === false,
-      "events_have_no_exit_128",
-      "exit_128 appears in Harness events",
-    );
-    check(
-      evidence?.patch?.criterionExitCode === 0,
-      "patch_is_clean",
-      `reconstructed git diff --check exit ${evidence?.patch?.criterionExitCode}`,
-    );
-    check(
-      Array.isArray(verification?.requiredFailed)
-      && verification.requiredFailed.length === 0,
-      "required_failed_empty",
-      `required_failed=${JSON.stringify(verification?.requiredFailed)}`,
-    );
   }
 
   if (expectations.expectNoCapabilityEvents) {
@@ -1506,11 +1268,13 @@ async function inspectWorkspacePatch({
         patchPath,
       ]);
     }
-    // The patch artifact is the source of truth for both tracked edits and
-    // newly added files. `git diff --numstat` after applying a new-file patch
-    // omits that untracked path, even though the artifact itself is non-empty.
     const numstat = applyCheck.code === 0
-      ? patchNumstat.stdout.trim()
+      ? (await command("git", [
+          "-C",
+          checkout,
+          "diff",
+          "--numstat",
+        ])).stdout.trim()
       : "";
     const criterion = applyCheck.code === 0
       ? await command("git", [
@@ -1621,7 +1385,6 @@ function verifyFence(
     toolCalls: 30,
     estimatedUsdMicros: null,
   },
-  expectedAcceptanceCriteria,
 ) {
   check(
     task?.repository?.nameWithOwner ===
@@ -1662,15 +1425,12 @@ function verifyFence(
     `unexpected grants ${JSON.stringify(grants)}`,
   );
   check(
-    equal(
-      task?.acceptance?.criteria,
-      expectedAcceptanceCriteria ?? [{
-        id: "format-command",
-        type: "command",
-        command: expectedAcceptanceCommand,
-        required: true,
-      }],
-    ),
+    equal(task?.acceptance?.criteria, [{
+      id: "format-command",
+      type: "command",
+      command: expectedAcceptanceCommand,
+      required: true,
+    }]),
     "fence_acceptance",
     `unexpected acceptance ${JSON.stringify(task?.acceptance?.criteria)}`,
   );

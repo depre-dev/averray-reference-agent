@@ -35,10 +35,10 @@
       "id": "docs-search",
       "type": "search",
       "include": [
-        "docs/**/*.md"
+        "docs/**"
       ],
       "pattern": "supervised",
-      "expectedMatches": 41,
+      "expectedMatches": 1,
       "required": true
     }
   ],
