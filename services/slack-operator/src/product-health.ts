@@ -40,6 +40,7 @@ import { bucketPayoutsByHour, isHistogramUnavailable, type PayoutHistogram } fro
 import { endpointHost, pinnedCompareRange, type CrossCheckView } from "./payout-crosscheck.js";
 import { burnBasisLabel, isBurnUnmeasurable, type MeasuredBurn } from "./gas-burn-rate.js";
 import { readBankFeed } from "./bank-feed-fetch.js";
+import { collectCredentialExpiries, credentialExpiryProbe, tlsCertReader } from "./credential-expiry.js";
 import { bankFeedIsDisabled } from "./bank-feed.js";
 import { bankLaneView, BANK_FEED_DISABLED, type BankLaneView } from "./bank-lane.js";
 import { createCrossCheckCache, type CrossCheckCache } from "./payout-crosscheck-cache.js";
@@ -637,6 +638,10 @@ export interface ProductHealthConfig {
   bankFeedUrl: string;
   /** Filesystem the monitor writes to. Container `/` sees real host capacity. */
   diskPath: string;
+  /** Hostnames whose TLS leaf certificate expiry is watched. Empty ⇒ no probe. */
+  certHosts: string[];
+  /** Env keys tried as JWTs for their own `exp`. Unset keys are skipped. */
+  expiryJwtEnvKeys: string[];
   /** Free-space floor in GiB — below this the disk probe goes red. */
   minDiskFreeGb: number;
   /** Free-space warning line in GiB. */
@@ -756,6 +761,11 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
     gasAttributionEnabled: truthy(env.PRODUCT_HEALTH_GAS_ATTRIBUTION_ENABLED),
     gasRefreshMs: num(env.PRODUCT_HEALTH_GAS_REFRESH_MS, 30 * 60 * 1000),
     diskPath: env.PRODUCT_HEALTH_DISK_PATH || "/",
+    // Absent ⇒ the probe does not exist, rather than existing and reporting
+    // that it has nothing to watch. A permanently-degraded probe on every
+    // deployment that never configured it is the panel nobody reads.
+    certHosts: (env.PRODUCT_HEALTH_CERT_HOSTS ?? "").split(",").map((h) => h.trim()).filter(Boolean),
+    expiryJwtEnvKeys: (env.PRODUCT_HEALTH_EXPIRY_JWT_ENV_KEYS ?? "").split(",").map((k) => k.trim()).filter(Boolean),
     // Unlike the token floors (which default to 0 = can-never-go-red, because a
     // sensible balance is deployment-specific), disk exhaustion is universally
     // fatal, so these carry real defaults. Sized against the live box: 155 GiB
@@ -2700,6 +2710,27 @@ export async function collectProductHealthProbes(
   });
   // The Bank lane. The view is decided HERE so the board renders one answer
   // rather than forming its own — same rule as the ops verdict.
+  // Credential expiries, OBSERVED from the artefacts (cert notAfter, JWT exp).
+  // Collected here rather than inside the probe because it is I/O, and the
+  // probe itself stays pure and testable.
+  //
+  // `?? []` is load-bearing, not defensive noise: callers construct this config
+  // by hand (every product-health test does), and an unguarded `.length` on an
+  // absent field threw inside collectProductHealthProbes — taking down the whole
+  // health collection, i.e. the entire board. A credential watchdog that kills
+  // the monitor is worse than no watchdog. Caught by the existing suite.
+  const certHosts = config.certHosts ?? [];
+  const jwtEnvKeys = config.expiryJwtEnvKeys ?? [];
+  const credentialExpiries =
+    certHosts.length > 0 || jwtEnvKeys.length > 0
+      ? await collectCredentialExpiries({
+          certHosts,
+          env: process.env,
+          jwtEnvKeys,
+          readCert: tlsCertReader(),
+        })
+      : null; // nothing configured ⇒ no probe at all, not a probe with nothing to say
+
   const bankRead = await readBankFeed({ url: config.bankFeedUrl, fetchImpl });
   const bank: BankBlock | undefined = bankRead.feed
     ? // A switched-off feed is a VALID payload full of read errors, shaped
@@ -2813,6 +2844,17 @@ export async function collectProductHealthProbes(
         minFreeGb: config.minDiskFreeGb,
         warnFreeGb: config.warnDiskFreeGb,
       }),
+      // A credential that expires on a Thursday is an outage scheduled in
+      // advance, and no other probe would see it coming: chain, money, API and
+      // self-freshness all read green right up to the moment it lapses.
+      ...(credentialExpiries
+        ? [
+            {
+              name: "credential_expiry",
+              ...credentialExpiryProbe({ credentials: credentialExpiries, nowMs: chainCtx.nowMs }),
+            },
+          ]
+        : []),
       deriveMoneyPathProbe(h, {
         maxStuck: config.maxStuck,
         maxFailed24h: config.maxFailed24h,
