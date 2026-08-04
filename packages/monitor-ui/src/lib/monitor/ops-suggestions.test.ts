@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import type { ProductHealth } from "./product-health.js";
 import { opsSuggestions } from "./ops-suggestions.js";
-import { OPS_FIXTURE_LIVE, OPS_FIXTURE_RED } from "./ops-fixtures.js";
+import { OPS_FIXTURE_LIVE, OPS_FIXTURE_NOMINAL, OPS_FIXTURE_RED } from "./ops-fixtures.js";
 
 describe("opsSuggestions", () => {
   test("red board → signer-below-floor (PREPARE task) + money-path (investigate task)", () => {
@@ -197,5 +197,45 @@ describe("opsSuggestions", () => {
       ],
     };
     expect(opsSuggestions(health)).toEqual([]);
+  });
+});
+
+// ── THE BANK LANE, AND THE STRIP THAT FINALLY RENDERS ANY OF THIS ─────────
+//
+// On 2026-08-04 the desk board carried `1 OVERDUE · leg2-dispatched for 8.7h`,
+// still aging, and nothing anywhere told the operator what to do about it —
+// because this module, which has derived probe-cited remediations for eight
+// incident types since 2026-07, was imported by NOTHING. It was wired to the
+// co-pilot board the ops-only pivot replaced.
+describe("bank — an overdue venue request", () => {
+  const withOverdue = (over: Partial<{ overdueRequestId: string | null; text: string }> = {}) =>
+    ({
+      ...OPS_FIXTURE_NOMINAL,
+      bank: {
+        lane: {
+          ...OPS_FIXTURE_NOMINAL.bank!.lane!,
+          overdueRequestId: over.overdueRequestId === undefined ? "0xb609f4d8…f57ecaac" : over.overdueRequestId,
+          requests: { text: over.text ?? "1 OVERDUE · 0xb609f4d8…f57ecaac leg2-dispatched for 8.7h", tone: "red" as const },
+        },
+      },
+    }) as ProductHealth;
+
+  test("an overdue request produces a suggestion carrying the probe's own words", () => {
+    const s = opsSuggestions(withOverdue()).find((x) => x.id === "bank-overdue");
+    expect(s).toBeTruthy();
+    expect(s!.text).toContain("8.7h");
+    expect(s!.text).toContain("leg 2");
+  });
+
+  test("its task INVESTIGATES and is explicit about not moving funds", () => {
+    // Money is operator-only. A worker traces and drafts; it never transfers.
+    const s = opsSuggestions(withOverdue()).find((x) => x.id === "bank-overdue")!;
+    expect(s.task?.prompt).toMatch(/do NOT move funds/i);
+    expect(s.task?.prompt).toMatch(/INVESTIGATE ONLY/i);
+  });
+
+  test("no overdue request, no suggestion — a healthy lane says nothing", () => {
+    const s = opsSuggestions(withOverdue({ overdueRequestId: null })).find((x) => x.id === "bank-overdue");
+    expect(s).toBeUndefined();
   });
 });

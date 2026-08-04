@@ -130,6 +130,27 @@ export function opsSuggestions(health: ProductHealth | undefined): OpsSuggestion
     });
   }
 
+  // 5b. BANK — an overdue venue request. Money-adjacent and time-based: leg 2
+  //     was dispatched and has not landed, and the longer it sits the more
+  //     likely it needs a human rather than patience. Not a fund movement, so
+  //     this INVESTIGATES; the recovery ceremony itself stays operator-only.
+  //
+  //     Added 2026-08-04, when the desk board carried `1 OVERDUE …
+  //     leg2-dispatched for 8.7h`, still aging, and nothing anywhere told the
+  //     operator what to do about it.
+  const overdueRequestId = health.bank?.lane?.overdueRequestId ?? null;
+  if (overdueRequestId) {
+    const requests = health.bank?.lane?.requests?.text ?? "an overdue request";
+    out.push({
+      id: "bank-overdue",
+      tone: "warn",
+      text: `Bank request overdue — ${requests}. Check whether leg 2 landed on the destination chain.`,
+      task: proposeTask(
+        `A Hydration bank request is overdue: "${requests}". Do NOT move funds — INVESTIGATE ONLY. Trace the leg-2 dispatch for request ${overdueRequestId} on both chains, determine whether it landed, stalled, or failed, and draft the exact recovery steps for the operator to review.`,
+      ),
+    });
+  }
+
   // 6. Capability degraded — name the capability + why it dropped.
   const caps = live("capabilities");
   if (caps && caps.status === "degraded") {

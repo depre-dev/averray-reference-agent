@@ -15,6 +15,7 @@
 // There are no controls here beyond Refresh. Commands and discussion live in
 // Buzz (docs/OPS_ONLY_PIVOT.md).
 
+import { opsSuggestions } from "../../lib/monitor/ops-suggestions.js";
 import type { MonitorBoard } from "../../lib/monitor/board-cache.js";
 import type { ProductHealth } from "../../lib/monitor/product-health.js";
 import { formatAgo, incidentRows } from "../../lib/monitor/ops-model.js";
@@ -136,6 +137,39 @@ export function OpsBoard({
               {e.text}
             </div>
           ) : null;
+        })()}
+
+        {/* ── NEXT ────────────────────────────────────────────────────────
+            The board says WHAT is wrong in eleven places and never once said
+            what to DO. `opsSuggestions` has derived probe-cited, pre-drafted
+            remediations for eight incident types since 2026-07; until now it
+            was imported by NOTHING — it was wired to the co-pilot board the
+            ops-only pivot replaced, and the content simply stopped reaching a
+            person. The fourth instance in one day of this system discarding
+            words it had already written.
+
+            TEXT ONLY. Each suggestion carries a `task` the operator could
+            approve, and this board is read-only by design — "refresh is the
+            only control" is one line below. Rendering the button here would
+            break that promise; the sentence is the whole value anyway.
+
+            NOTHING WHEN THERE IS NOTHING. An all-clear board shows no NEXT
+            strip rather than a reassuring empty box. */}
+        {(() => {
+          const next = opsSuggestions(health).slice(0, 3);
+          if (next.length === 0) return null;
+          return (
+            <div className="ops-next" data-testid="ops-next">
+              <span className="ops-next-key">NEXT</span>
+              <ul>
+                {next.map((s) => (
+                  <li key={s.id} data-tone={s.tone} data-testid={`ops-next-${s.id}`}>
+                    {s.text}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
         })()}
 
         <div className="ops-foot">

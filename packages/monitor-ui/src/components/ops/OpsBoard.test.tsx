@@ -332,3 +332,31 @@ describe("OpsBoard — pillars and footer", () => {
     expect(getAllByTestId(/^ops-pool-[a-z_]+$/).length).toBe(6);
   });
 });
+
+// The board named what was wrong in eleven places and never said what to do.
+describe("NEXT — what to do about it", () => {
+  test("a board with something wrong says what to do next", () => {
+    const { getByTestId } = render(<OpsBoard health={OPS_FIXTURE_STRESS} nowMs={OPS_FIXTURE_STRESS.at! + 2000} />);
+    expect(getByTestId("ops-next").textContent).toContain("NEXT");
+  });
+
+  test("an all-clear board shows NO strip — not a reassuring empty box", () => {
+    // NOMINAL is not all-clear — it carries a degraded capability, so the
+    // strip correctly appears for it. A genuinely clean board has to be built.
+    const health = {
+      ...OPS_FIXTURE_NOMINAL,
+      bank: undefined,
+      probes: OPS_FIXTURE_NOMINAL.probes.map((p) => ({ ...p, status: "ok" as const })),
+      solvency: { ...OPS_FIXTURE_NOMINAL.solvency, runway: [] },
+    };
+    const { queryByTestId } = render(<OpsBoard health={health} nowMs={health.at! + 2000} />);
+    expect(queryByTestId("ops-next")).toBeNull();
+  });
+
+  test("it TELLS, it does not ACT — no button reaches this read-only board", () => {
+    // Every suggestion carries an approvable task. Rendering it here would
+    // break the promise one line below: "refresh is the only control".
+    const { getByTestId } = render(<OpsBoard health={OPS_FIXTURE_STRESS} nowMs={OPS_FIXTURE_STRESS.at! + 2000} />);
+    expect(getByTestId("ops-next").querySelector("button")).toBeNull();
+  });
+});
