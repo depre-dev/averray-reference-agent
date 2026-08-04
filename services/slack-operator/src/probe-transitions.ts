@@ -48,6 +48,16 @@ export interface DecideProbeTransitionsInput {
   posted: ReadonlySet<string>;
   /** Operator mute — quiet everywhere, same rule the narration follows. */
   muted: boolean;
+  /**
+   * Consecutive ticks each reason class has held, carried from the last call.
+   * The caller threads this exactly like `posted` and `previous`.
+   */
+  streaks?: ReadonlyMap<string, number>;
+  /**
+   * How many consecutive ticks a DEGRADED class must hold before it is worth
+   * saying. Default 3. `red` ignores this entirely — see holdRequired().
+   */
+  minDegradedTicks?: number;
 }
 
 export interface ProbeTransitionDecision {
@@ -56,7 +66,46 @@ export interface ProbeTransitionDecision {
   keys: Set<string>;
   /** Probe state to carry into the next tick. */
   next: Map<string, ProbeResult>;
+  /** Consecutive-tick counts to carry into the next tick. */
+  streaks: Map<string, number>;
 }
+
+/**
+ * How long a class must hold before it is worth saying out loud.
+ *
+ * ── WHY THIS EXISTS ────────────────────────────────────────────────────────
+ *
+ * On 2026-08-04 the #Ops channel carried eight near-identical capability
+ * alerts, three of them inside the same minute:
+ *
+ *   1:25 PM  ⚠ new capability warning: indexer_lagging, external_posting_staged
+ *   1:25 PM  ⚠ new capability warning: external_posting_staged
+ *   1:25 PM  ⚠ new capability warning: indexer_lagging, external_posting_staged
+ *   1:25 PM  ✓ capabilities recovered …
+ *
+ * Nothing was happening. One warning was entering and leaving the product's
+ * warnings array as a watcher lag crossed a threshold, and because the reason
+ * class is built from the detail text, each flip read as a NEW problem. The
+ * existing `reasonClass` blanking handles a number that drifts; it cannot help
+ * when the words themselves alternate.
+ *
+ * Keying more cleverly is the wrong fix — it means guessing which text changes
+ * are meaningful, and guessing wrong in the quiet direction is how a real alert
+ * gets swallowed. Requiring a state to PERSIST is the honest test: a condition
+ * that cannot survive three polls was not worth waking someone for.
+ *
+ * ── WHY RED IS EXEMPT ──────────────────────────────────────────────────────
+ *
+ * `red` means the money path. Delaying that by three heartbeats to spare the
+ * channel some noise is trading the only alert that matters against the ones
+ * that do not. Red says it the moment it sees it; degraded has to prove it
+ * meant it.
+ */
+export function holdRequired(status: ProbeStatus, minDegradedTicks: number): number {
+  return status === "red" ? 1 : Math.max(1, minDegradedTicks);
+}
+
+const DEFAULT_MIN_DEGRADED_TICKS = 3;
 
 /**
  * Collapse a probe's detail to its SHAPE, so a moving number is not mistaken
@@ -103,6 +152,23 @@ export function decideProbeTransitions(input: DecideProbeTransitionsInput): Prob
   const alerts: ProbeTransitionAlert[] = [];
   const keys = new Set<string>();
   const next = new Map<string, ProbeResult>();
+  const streaks = new Map<string, number>();
+  const minDegradedTicks = input.minDegradedTicks ?? DEFAULT_MIN_DEGRADED_TICKS;
+  const priorStreaks = input.streaks ?? new Map<string, number>();
+
+  // `posted` NOW MEANS ANNOUNCED, WHICH IS WHAT IT WAS ALWAYS CALLED.
+  //
+  // It used to mean "this class was present last tick" — the old code added to
+  // it whether or not it actually posted, because with no streak map that set
+  // was the only persistence bookkeeping available. The hold collides with that
+  // reading head-on: a class gets marked on its first tick, and by the time it
+  // earns the right to speak the dedupe guard has already silenced it forever.
+  // Caught by the tests below, not by reading.
+  //
+  // `streaks` does the persistence bookkeeping now, so the set is free to carry
+  // the meaning its name implies, and both the dedupe guard and the recovery
+  // gate can rely on it.
+  const heldFor = (key: string): number => priorStreaks.get(key) ?? 0;
 
   for (const probe of input.current) {
     next.set(probe.name, probe);
@@ -118,37 +184,64 @@ export function decideProbeTransitions(input: DecideProbeTransitionsInput): Prob
     // Production found this, not the tests: three deploys in one night produced
     // three duplicate money_path alerts, each one tick after a restart.
     if (!before) {
-      if (isAlarm(probe.status)) keys.add(reasonClass(probe));
+      if (isAlarm(probe.status)) {
+        // Marked ANNOUNCED on first sight, deliberately. An alarm that was
+        // already burning when this process started is not news, and without
+        // this it would simply re-earn its hold and page three ticks after every
+        // redeploy — which is the "three deploys, three duplicate money_path
+        // alerts" bug production found, rediscovered by a different route.
+        const key = reasonClass(probe);
+        keys.add(key);
+        streaks.set(key, heldFor(key) + 1);
+      }
       continue;
     }
     if (before.status === probe.status && !isAlarm(probe.status)) continue;
 
-    const enteringAlarm = isAlarm(probe.status) && before.status !== probe.status;
     const recovered = !isAlarm(probe.status) && isAlarm(before.status);
 
     if (isAlarm(probe.status)) {
-      // Carry the key forward whether or not we post: a probe that stays in the
-      // same reason class must not re-post when some other probe changes.
       const key = reasonClass(probe);
-      keys.add(key);
-      if (!enteringAlarm && !input.posted.has(key)) {
-        // Status unchanged but the reason CLASS moved — a different problem
-        // wearing the same severity. Worth saying; the operator's next action
-        // differs.
-        if (!input.muted) {
-          alerts.push({ probe: probe.name, kind: "opened", from: before.status, to: probe.status, text: alertText(probe, "opened"), key });
-        }
+
+      // THE HOLD. A class that keeps flipping never accumulates a streak, so it
+      // never speaks — which is the whole point. A class that persists reaches
+      // the threshold and says it once. Red's threshold is 1, so this is a
+      // no-op for anything on the money path.
+      const held = heldFor(key) + 1;
+      streaks.set(key, held);
+
+      // An already-announced class stays announced for as long as it persists,
+      // so it is never said twice.
+      if (input.posted.has(key)) {
+        keys.add(key);
         continue;
       }
-      if (enteringAlarm && !input.posted.has(key) && !input.muted) {
-        alerts.push({ probe: probe.name, kind: "opened", from: before.status, to: probe.status, text: alertText(probe, "opened"), key });
-      }
+      if (held < holdRequired(probe.status, minDegradedTicks)) continue;
+
+      // Muted burns the announcement without making it. The alternative —
+      // announcing on unmute — would replay an edge that happened hours ago,
+      // which is the behaviour index.ts documents as deliberately avoided. The
+      // operator unmutes to a board that already shows the state; the channel
+      // does not owe them the history.
+      keys.add(key);
+      if (input.muted) continue;
+
+      alerts.push({ probe: probe.name, kind: "opened", from: before.status, to: probe.status, text: alertText(probe, "opened"), key });
       continue;
     }
 
     if (recovered) {
       const key = `${probe.name}:recovered:${reasonClass(before)}`;
-      if (!input.posted.has(key) && !input.muted) {
+      // ONLY ANNOUNCE THE END OF SOMETHING THAT WAS ANNOUNCED.
+      //
+      // Half of 2026-08-04's noise was `✓ capabilities recovered` for a warning
+      // that had never been worth mentioning in the first place. Under the hold
+      // above that gets worse, not better: a flapping class now never posts an
+      // "opened", so an unconditional recovery would be the ONLY thing in the
+      // channel — all-clears for alarms nobody was ever given. Silence about a
+      // problem you were never told about is correct.
+      const wasAnnounced = input.posted.has(reasonClass(before));
+      if (wasAnnounced && !input.posted.has(key) && !input.muted) {
         alerts.push({ probe: probe.name, kind: "recovered", from: before.status, to: probe.status, text: alertText(probe, "recovered"), key });
       }
       // Recovery keys are NOT retained: the next time this probe breaks and
@@ -156,5 +249,5 @@ export function decideProbeTransitions(input: DecideProbeTransitionsInput): Prob
     }
   }
 
-  return { alerts, keys, next };
+  return { alerts, keys, next, streaks };
 }

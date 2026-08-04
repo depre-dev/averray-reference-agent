@@ -1071,10 +1071,47 @@ export function deriveCapabilityProbe(
     return {
       name,
       status: critical ? "red" : "degraded",
-      detail: `${critical ? "new CRITICAL" : "new"} capability warning: ${unexpected.map((w) => w.code).join(", ")}`,
+      detail: `${critical ? "new CRITICAL" : "new"} capability warning: ${describeWarnings(unexpected)}`,
     };
   }
   return { name, status: "ok", detail: describeHealthyCapabilities(caps, h.body?.warnings ?? [], config) };
+}
+
+/**
+ * Warnings in the words the PRODUCT already wrote, not its identifiers.
+ *
+ * This line reached a human as `new capability warning: external_posting_staged`
+ * — a symbol out of a config file that says nothing about what is staged,
+ * whether money is affected, or whether to act. Meanwhile /health was sending:
+ *
+ *   { "code": "xcm_observer_staged", "severity": "warning",
+ *     "message": "XCM observer is staged." }
+ *
+ * The sentence was in the payload the whole time and this function is the layer
+ * that dropped it. The operator's verdict on 2026-08-04 was "half of these I do
+ * not even understand", which is the correct reading of a channel that speaks in
+ * enum values.
+ *
+ * SORTED, because the identity of this line matters downstream. `probe-
+ * transitions` keys an alert on the detail's shape, so `a, b` and `b, a` are two
+ * different problems to it, and a warnings array that reorders would re-alert
+ * saying nothing new. Sorting makes the set's rendering canonical.
+ *
+ * The code is kept in parentheses: the sentence is for reading, the code is what
+ * you grep for and what appears in `expectedWarnings` when you acknowledge it.
+ */
+export function describeWarnings(
+  warnings: ReadonlyArray<{ code?: string; message?: string }>,
+): string {
+  return warnings
+    .map((w) => {
+      const code = w.code ?? "unknown";
+      const message = (w.message ?? "").trim();
+      // No message is a fact about the warning, not a reason to invent one.
+      return message ? `${message} (${code})` : code;
+    })
+    .sort((a, b) => a.localeCompare(b))
+    .join(" · ");
 }
 
 /**
