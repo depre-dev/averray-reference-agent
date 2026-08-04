@@ -2,8 +2,10 @@ import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
   cp as copyPath,
+  lstat as lstatPath,
   mkdir as mkdirPath,
   readFile as readFilePath,
+  readlink as readLinkPath,
   realpath as resolveRealPath,
   rename as renamePath,
   rm as removePath,
@@ -69,14 +71,16 @@ export interface WorkspacePrepDeps {
 interface FileStatus {
   isDirectory(): boolean;
   isFile(): boolean;
+  isSymbolicLink(): boolean;
 }
 
 interface DependencyCopyOptions {
   recursive: true;
-  dereference: true;
+  dereference: false;
+  verbatimSymlinks: true;
   force: false;
   errorOnExist: true;
-  filter(source: string): Promise<boolean>;
+  filter(source: string, destination: string): Promise<boolean>;
 }
 
 export interface DependencySeedDeps {
@@ -87,7 +91,9 @@ export interface DependencySeedDeps {
     options: DependencyCopyOptions,
   ): Promise<void>;
   stat(target: string): Promise<FileStatus>;
+  lstat(target: string): Promise<FileStatus>;
   readFile(target: string): Promise<Buffer>;
+  readlink(target: string): Promise<string>;
   realpath(target: string): Promise<string>;
   rename(source: string, destination: string): Promise<void>;
   rm(target: string): Promise<void>;
@@ -264,16 +270,18 @@ export async function seedWorkspaceDependencies(
   try {
     await resolved.cp(cachedNodeModulesReal, staging, {
       recursive: true,
-      dereference: true,
+      dereference: false,
+      verbatimSymlinks: true,
       force: false,
       errorOnExist: true,
       filter: async (source) => {
-        const sourceReal = await resolved.realpath(source);
-        assertContainedOrEqual(
+        await assertDependencyCopySource({
+          resolved,
+          source,
           cachedNodeModulesReal,
-          sourceReal,
-          "dependency_seed_failed",
-        );
+          workspaceRoot,
+          targetNodeModules: target,
+        });
         return true;
       },
     });
@@ -335,13 +343,65 @@ function dependencySeedDeps(
       await copyPath(source, destination, options);
     }),
     stat: deps.stat ?? statPath,
+    lstat: deps.lstat ?? lstatPath,
     readFile: deps.readFile ?? readFilePath,
+    readlink: deps.readlink ?? readLinkPath,
     realpath: deps.realpath ?? resolveRealPath,
     rename: deps.rename ?? renamePath,
     rm: deps.rm ?? (async (target) => {
       await removePath(target, { recursive: true, force: true });
     }),
   };
+}
+
+async function assertDependencyCopySource({
+  resolved,
+  source,
+  cachedNodeModulesReal,
+  workspaceRoot,
+  targetNodeModules,
+}: {
+  resolved: DependencySeedDeps;
+  source: string;
+  cachedNodeModulesReal: string;
+  workspaceRoot: string;
+  targetNodeModules: string;
+}): Promise<void> {
+  const sourcePath = path.resolve(source);
+  assertContainedOrEqual(
+    cachedNodeModulesReal,
+    sourcePath,
+    "dependency_seed_failed",
+  );
+  const sourceStatus = await resolved.lstat(sourcePath);
+  if (!sourceStatus.isSymbolicLink()) {
+    const sourceReal = await resolved.realpath(sourcePath);
+    assertContainedOrEqual(
+      cachedNodeModulesReal,
+      sourceReal,
+      "dependency_seed_failed",
+    );
+    return;
+  }
+
+  const declaredTarget = await resolved.readlink(sourcePath);
+  if (path.isAbsolute(declaredTarget)) {
+    throw dependencyError(
+      "dependency_seed_failed",
+      "Dependency cache symlink target escaped the prepared workspace",
+    );
+  }
+  const relativeSource = path.relative(cachedNodeModulesReal, sourcePath);
+  const destinationLink = path.join(targetNodeModules, relativeSource);
+  const destinationTarget = path.resolve(
+    path.dirname(destinationLink),
+    declaredTarget,
+  );
+  assertContainedOrEqual(
+    workspaceRoot,
+    destinationTarget,
+    "dependency_seed_failed",
+  );
 }
 
 function deriveContainedWorkspacePath(task: AgentTaskV1): string {

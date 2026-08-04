@@ -3,7 +3,9 @@ import { readFileSync } from "node:fs";
 import {
   mkdir,
   mkdtemp,
+  lstat,
   readFile,
+  readlink,
   rm as removePath,
   stat,
   symlink,
@@ -325,6 +327,48 @@ describe("offline workspace dependency seeding", () => {
     )).resolves.toBe("export const seeded = true;\n");
   });
 
+  it("preserves an npm workspace package link as a symlink into the prepared workspace", async () => {
+    const fixture = await populatedSeedFixture();
+    const declaredTarget = "../../packages/mcp-common";
+    await Promise.all([
+      mkdir(path.join(fixture.workspace, "packages/mcp-common"), {
+        recursive: true,
+      }),
+      mkdir(path.join(fixture.cacheNodeModules, "@avg"), {
+        recursive: true,
+      }),
+    ]);
+    await writeFile(
+      path.join(fixture.workspace, "packages/mcp-common/package.json"),
+      '{"name":"@avg/mcp-common"}\n',
+    );
+    await symlink(
+      declaredTarget,
+      path.join(fixture.cacheNodeModules, "@avg/mcp-common"),
+    );
+
+    await expect(seedWorkspaceDependencies(
+      agentTaskFixture(),
+      fixture.workspace,
+      {
+        environment: {
+          HARNESS_DISPATCH_DEP_CACHE_DIR: fixture.cacheRoot,
+        },
+      },
+    )).resolves.toBe("seeded");
+
+    const seededLink = path.join(
+      fixture.workspace,
+      "node_modules/@avg/mcp-common",
+    );
+    expect((await lstat(seededLink)).isSymbolicLink()).toBe(true);
+    await expect(readlink(seededLink)).resolves.toBe(declaredTarget);
+    await expect(readFile(
+      path.join(seededLink, "package.json"),
+      "utf8",
+    )).resolves.toBe('{"name":"@avg/mcp-common"}\n');
+  });
+
   it("refuses a missing exact lockfile cache as stale without copying or networking", async () => {
     const { workspace, cacheRoot } = await emptySeedFixture();
     await writeFile(
@@ -374,12 +418,52 @@ describe("offline workspace dependency seeding", () => {
     expect(error.reason).toBe("dependency_cache_missing");
   });
 
-  it("rejects a cached symlink that resolves outside node_modules", async () => {
+  it("rejects a cached symlink with an absolute target outside both roots", async () => {
     const fixture = await populatedSeedFixture();
-    const external = path.join(fixture.root, "outside.js");
+    const externalRoot = await mkdtemp(
+      path.join(tmpdir(), "harness-dep-absolute-escape-"),
+    );
+    temporaryRoots.push(externalRoot);
+    const external = path.join(externalRoot, "outside.js");
     await writeFile(external, "do not copy\n");
     await symlink(
       external,
+      path.join(fixture.cacheNodeModules, "escape.js"),
+    );
+
+    const error = await capturedWorkspacePrepError(
+      seedWorkspaceDependencies(agentTaskFixture(), fixture.workspace, {
+        environment: {
+          HARNESS_DISPATCH_DEP_CACHE_DIR: fixture.cacheRoot,
+        },
+      }),
+    );
+
+    expect(error.reason).toBe("dependency_seed_failed");
+    await expect(
+      stat(path.join(fixture.workspace, "node_modules")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects a cached symlink whose relative target escapes the workspace", async () => {
+    const fixture = await populatedSeedFixture();
+    const externalRoot = await mkdtemp(
+      path.join(tmpdir(), "harness-dep-relative-escape-"),
+    );
+    temporaryRoots.push(externalRoot);
+    const external = path.join(externalRoot, "outside.js");
+    await writeFile(external, "do not copy\n");
+    const destinationLink = path.join(
+      fixture.workspace,
+      "node_modules/escape.js",
+    );
+    const declaredTarget = path.relative(
+      path.dirname(destinationLink),
+      external,
+    );
+    expect(declaredTarget).toMatch(/^\.\.[/\\]/u);
+    await symlink(
+      declaredTarget,
       path.join(fixture.cacheNodeModules, "escape.js"),
     );
 
