@@ -303,6 +303,7 @@ export const OPS_FIXTURE_NOMINAL: ProductHealth = {
       postage: { text: "1.51 DOT · 15,100,000,000 raw · committed postage, no withdraw path", tone: "ok" as const },
       requests: { text: "no requests in flight", tone: "ok" as const },
       overdueRequestId: null,
+      subject: { text: "subject bank-xcm-v2.1 — matches the deployment manifest", tone: "ok" as const },
       tone: "degraded" as const,
     },
   },

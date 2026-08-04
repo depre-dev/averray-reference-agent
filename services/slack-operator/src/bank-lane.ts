@@ -16,6 +16,7 @@
 import {
   PLANCK_PER_DOT,
   POSTAGE_FLOOR_DOT,
+  bankSubjectIsCurrent,
   isKnownPhase,
   type BankFeed,
   type BankRequest,
@@ -39,6 +40,14 @@ export interface BankLaneView {
   requests: BankLine;
   /** Names the request driving a degraded verdict, or null. */
   overdueRequestId: string | null;
+  /**
+   * WHAT these readings are about, rendered above them.
+   *
+   * Hoisted to the top of the lane rather than tucked beside a tile, because it
+   * qualifies every number below it. A reader who takes in the float and stops
+   * has still read the wrong thing.
+   */
+  subject: BankLine;
   /** The lane's contribution to the ops verdict. */
   tone: BankTone;
 }
@@ -168,15 +177,37 @@ export function bankLaneView(input: {
     staleAfterMs: stale,
   });
 
-  const float = amount(feed.float, 6, "USDC", nowMs, stale);
-  const postage = postageLine(feed.postage, nowMs, stale, input.postageFloorDot ?? POSTAGE_FLOOR_DOT);
-  const requests = requestLine(feed.requests, nowMs, stale);
+  const subject = subjectLine(feed);
+  const staleSubject = subject.tone === "red";
+
+  // On a stale subject every value below is a real reading of the wrong
+  // address, so none of them may render `ok`. Their numbers are kept — the
+  // retired account's dust is a real balance somebody has to reconcile — but a
+  // green tile would say "the bank is fine" about an account the bank left.
+  const demote = (line: BankLine): BankLine =>
+    staleSubject && line.tone === "ok" ? { ...line, tone: "degraded" } : line;
+
+  const float = demote(amount(feed.float, 6, "USDC", nowMs, stale));
+  const postage = demote(postageLine(feed.postage, nowMs, stale, input.postageFloorDot ?? POSTAGE_FLOOR_DOT));
+  const requests = demote(requestLine(feed.requests, nowMs, stale));
   const overdue = feed.requests.items.find((r) => r.overdue) ?? null;
 
   // The lane's verdict. An overdue request or an unusable position read are the
   // two states worth a degraded pillar — the rest is display.
+  //
+  // A stale subject is RED, above both. An overdue request costs money while
+  // you watch it; a stale subject means you are not watching at all, and the
+  // empty request table proves the point — it read "no requests in flight" as
+  // an all-clear while a real one sat staged on the live wrapper.
+  // An UNDECLARED subject deliberately does NOT move this. It is stated on the
+  // lane and left there: until the producer ships the field it is true of every
+  // healthy lane, so degrading on it would light the strip permanently amber
+  // for "the other service has not been upgraded yet" — the panel nobody reads,
+  // which is the failure this board keeps deleting. Position-unverified earns
+  // its degrade because it is temporary and resolves on the next dust cycle;
+  // a missing producer capability does not.
   const tone: BankTone =
-    overdue || postage.tone === "red"
+    staleSubject || overdue || postage.tone === "red"
       ? "red"
       : position.status === "unverified" ||
           float.tone === "degraded" ||
@@ -185,7 +216,43 @@ export function bankLaneView(input: {
         ? "degraded"
         : "ok";
 
-  return { position, float, postage, requests, overdueRequestId: overdue?.id ?? null, tone };
+  return { position, float, postage, requests, subject, overdueRequestId: overdue?.id ?? null, tone };
+}
+
+/**
+ * What generation these readings describe.
+ *
+ * Silence is NOT agreement. A producer that does not declare its subject gets
+ * an explicit "cannot confirm" rather than a blank, because the morning this
+ * check exists for looked exactly like a lane with nothing to say — every tile
+ * fresh, sourced and green, about a wrapper that had been retired hours
+ * earlier. Same rule as the payout cross-check's `not-configured`: an
+ * instrument that cannot see says so.
+ */
+function subjectLine(feed: BankFeed): BankLine {
+  const subject = feed.subject ?? null;
+  if (!subject) {
+    return {
+      text: "subject not declared by the feed — cannot confirm which wrapper generation these read",
+      tone: "awaiting",
+    };
+  }
+  if (!bankSubjectIsCurrent(subject)) {
+    // Both addresses in full. Shortened, two generations of the same deploy
+    // script can share a prefix and a suffix, and the one line whose entire job
+    // is telling them apart would be the line that hid the difference.
+    return {
+      text:
+        `STALE SUBJECT — these read ${subject.derivedFrom}, ` +
+        `the manifest declares ${subject.declared}${subject.label ? ` (${subject.label})` : ""}. ` +
+        "Every value below is a real reading of the retired generation.",
+      tone: "red",
+    };
+  }
+  return {
+    text: `subject ${subject.label ?? shortSource(subject.declared)} — matches the deployment manifest`,
+    tone: "ok",
+  };
 }
 
 /**

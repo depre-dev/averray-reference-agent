@@ -51,6 +51,16 @@ export function BankLane({ bank }: BankLaneProps) {
         ) : null}
       </div>
 
+      {/* WHAT these readings are about, above every number rather than beside
+          one. On 2026-08-04 this lane showed four fresh, correctly-sourced,
+          green tiles describing a wrapper retired that morning; a reader who
+          took in the float and stopped had still read the wrong thing. */}
+      {lane.subject ? (
+        <p className="ops-bank-subject" data-tone={lane.subject.tone} data-testid="ops-bank-subject">
+          {lane.subject.text}
+        </p>
+      ) : null}
+
       <dl className="ops-bank-rows">
         {/* POSITION carries a status word rather than only a number, because
             "unverified" is a real state here: a zero from a read path that has

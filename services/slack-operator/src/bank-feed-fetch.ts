@@ -21,7 +21,7 @@
 // and the board stays quiet. Only a CONFIGURED feed that fails is a problem
 // worth a line on screen.
 
-import type { BankFeed, BankRequest, BankRequests, SourcedRead } from "./bank-feed.js";
+import type { BankFeed, BankRequest, BankRequests, BankSubject, SourcedRead } from "./bank-feed.js";
 
 export interface BankFeedRead {
   feed?: BankFeed;
@@ -74,6 +74,7 @@ export function normalizeBankFeed(body: unknown): BankFeedRead {
   if ("reason" in requests) return requests;
 
   const calibration = calibrationRecord(b.calibration);
+  const subject = subjectRecord(b.subject);
   return {
     feed: {
       position: position.read,
@@ -81,7 +82,32 @@ export function normalizeBankFeed(body: unknown): BankFeedRead {
       postage: postage.read,
       requests: requests.requests,
       ...(calibration ? { calibration } : {}),
+      ...(subject ? { subject } : {}),
     },
+  };
+}
+
+/**
+ * A malformed subject is dropped, never guessed at.
+ *
+ * Dropping it costs the lane's visible "cannot confirm which generation" line,
+ * and it self-corrects on the next good read. Inventing either half would be
+ * worse in both directions: a fabricated match is exactly the confident green
+ * about an abandoned account this field exists to prevent, and a fabricated
+ * mismatch is a RED that stops a lane which is actually fine.
+ *
+ * Both halves are required together — a subject that names only what it read,
+ * with nothing to compare against, cannot answer the one question it is for.
+ */
+function subjectRecord(raw: unknown): BankSubject | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const s = raw as Record<string, unknown>;
+  if (typeof s.derivedFrom !== "string" || !s.derivedFrom.trim()) return undefined;
+  if (typeof s.declared !== "string" || !s.declared.trim()) return undefined;
+  return {
+    derivedFrom: s.derivedFrom,
+    declared: s.declared,
+    ...(typeof s.label === "string" && s.label ? { label: s.label } : {}),
   };
 }
 

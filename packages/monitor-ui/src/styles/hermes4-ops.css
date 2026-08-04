@@ -927,6 +927,24 @@ body,
   font-size: calc(11 * var(--ops-u));
   color: var(--tone, var(--h4-act));
 }
+/* WHAT the values below describe. Above the rows because it qualifies all of
+   them: on a stale subject every number underneath is a real reading of the
+   wrong address, and a reader who takes in the float and stops has still read
+   the wrong thing. */
+.ops-bank-subject {
+  margin: 0 0 calc(6 * var(--ops-u));
+  font-family: var(--h4-font-mono);
+  font-size: calc(10 * var(--ops-u));
+  line-height: 1.45;
+  color: var(--tone, var(--h4-tel));
+}
+/* A retired generation is the one state that invalidates the entire lane, so it
+   gets a rule of its own and not only a colour. The border does NOT scale —
+   same rule as every other hairline on this board. */
+.ops-bank-subject[data-tone="red"] {
+  padding-left: calc(8 * var(--ops-u));
+  border-left: 2px solid var(--h4-act);
+}
 .ops-bank-rows {
   display: grid;
   gap: calc(2 * var(--ops-u));
