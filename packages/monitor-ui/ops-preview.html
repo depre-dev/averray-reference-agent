@@ -6,12 +6,17 @@
     <title>Ops board — preview</title>
     <!-- Dev-only harness for iterating the Ops surface against fixtures. Not a
          Vite build input, so it never ships in the prod bundle. Canvas bg matches
-         --h4-canvas so there's no flash before the stylesheet loads. -->
+         --h4-canvas so there's no flash before the stylesheet loads.
+
+         Kept byte-identical to index.html's host chain ON PURPOSE — including
+         `min-height` rather than `height` (see the note there). A preview that
+         sizes its document differently from production is a preview that lies
+         about the layout, which is the one thing it exists not to do. -->
     <style>
       html,
       body,
       #root {
-        height: 100%;
+        min-height: 100%;
       }
       body {
         margin: 0;
