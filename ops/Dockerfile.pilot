@@ -9,9 +9,10 @@
 # Do not add anything here without re-running the ceremony. In particular:
 #   - no credentials, tokens, or SSH keys;
 #   - no agent CLIs or anything that can actuate GitHub, Averray, or a wallet;
-#   - no application node_modules — Harness bind-mounts the prepared task
-#     checkout over /workspace, which shadows image-baked contents, and the
-#     dispatcher seeds lockfile-matched dependencies host-side (§1.4).
+#   - dependencies come from the exact task-family lockfile used as this build's
+#     context and live at /node_modules, outside the /workspace bind mount;
+#   - npm workspace links are rebound to /workspace so verification observes
+#     the run's code, never the temporary source used to build the image.
 #
 # Build and record the digest (the ceremony pins by digest, never by tag):
 #
@@ -35,6 +36,25 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends git ca-certificates \
   && git config --system --add safe.directory /workspace \
   && rm -rf /var/lib/apt/lists/*
+
+# Build this image with the approved fixture checkout as its context. Keeping
+# dependencies at /node_modules makes them available to the self-contained Git
+# workspace that Harness provisions beneath /workspace; ignored host files are
+# never copied into that run workspace. npm's workspace links initially target
+# the build context, so rewrite only those links to the live bind mount and then
+# remove the build-context source tree.
+WORKDIR /opt/toolchain
+COPY package.json package-lock.json ./
+COPY packages ./packages
+COPY services ./services
+RUN npm ci --ignore-scripts \
+  && node -e 'const fs=require("node:fs"),path=require("node:path");for(const root of ["packages","services"]){for(const entry of fs.readdirSync(root)){const packagePath=root+"/"+entry+"/package.json";if(!fs.existsSync(packagePath))continue;const name=JSON.parse(fs.readFileSync(packagePath,"utf8")).name;if(!name)continue;const link="node_modules/"+name;fs.mkdirSync(path.dirname(link),{recursive:true});fs.rmSync(link,{force:true,recursive:true});fs.symlinkSync("/workspace/"+root+"/"+entry,link,"dir");}}' \
+  && ln -s /opt/toolchain/node_modules /node_modules \
+  && /node_modules/.bin/tsc --version \
+  && /node_modules/.bin/vitest --version \
+  && rm -rf packages services package.json package-lock.json
+
+ENV PATH="/node_modules/.bin:${PATH}"
 
 # No USER directive: Harness starts this sandbox as the image's default root
 # user so it can write a bind-mounted workspace across both desktop and Linux
