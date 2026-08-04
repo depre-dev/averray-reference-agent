@@ -20,7 +20,7 @@ _int2_bringup() {
 
   [ -d "$CEREMONY_ROOT" ] \
     || { die "ceremony root is absent: $CEREMONY_ROOT"; return 1; }
-  [ -d "$REFERENCE_CHECKOUT/.git" ] \
+  [ -e "$REFERENCE_CHECKOUT/.git" ] \
     || { die "reference checkout is not a Git checkout"; return 1; }
   [ -x "$HARNESS_BIN" ] \
     || { die "Harness executable is absent: $HARNESS_BIN"; return 1; }

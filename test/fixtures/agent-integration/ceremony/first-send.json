@@ -1,0 +1,41 @@
+{
+  "workItemId": "firstsend-20260804-001",
+  "correlationId": "firstsend-20260804-001",
+  "taskKind": "lint_format",
+  "title": "Record that this repository received the first supervised send",
+  "objective": "Append one concise line to docs/NOTES.md stating that this repository is the target of the first supervised pull-request send, preserving the surrounding text and clean formatting.",
+  "whyNow": "The INT-3 gate requires one verified handoff to open exactly one pull request against a real repository.",
+  "requestedBy": {
+    "type": "operator",
+    "id": "pilot-operator"
+  },
+  "repository": {
+    "nameWithOwner": "depre-dev/averray-send-test",
+    "baseRevision": "f649d3c442d552d0a7ea7b31af566c2b7071353e",
+    "allowedPaths": [
+      "docs/**"
+    ],
+    "forbiddenPaths": [
+      ".github/**",
+      "scripts/**"
+    ]
+  },
+  "profile": "coding-change-pilot",
+  "acceptanceCriteria": [
+    {
+      "id": "format-command",
+      "type": "command",
+      "command": "test -n \"$(git diff --numstat)\" && git diff --check",
+      "required": true
+    }
+  ],
+  "budget": {
+    "elapsedSeconds": 60,
+    "modelTokens": 8000,
+    "toolCalls": 30,
+    "estimatedUsdMicros": null
+  },
+  "deadline": "2027-12-31T23:59:59.000Z",
+  "riskTier": "low",
+  "selectionReason": "One appended line in a tracked allowlisted file is bounded, reversible, and produces a verifier-visible diff without requiring node_modules."
+}

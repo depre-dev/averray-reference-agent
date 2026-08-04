@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const FIXTURES = new Set([
+  "first-send",
   "docs-fix",
   "add-unit-test",
   "small-refactor",

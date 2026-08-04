@@ -1,0 +1,2 @@
+{"tool_calls":[{"id":"firstsend-append","name":"shell_run","arguments":{"command":"printf '%b' '\\nThis repository received the first supervised pull-request send.\\n' >> docs/NOTES.md"}}],"usage":{"input_tokens":2,"output_tokens":1,"requests":1},"finish_reason":"tool_call"}
+{"text":"Appended one line recording the first supervised send.","usage":{"input_tokens":2,"output_tokens":2,"requests":1},"finish_reason":"stop"}
