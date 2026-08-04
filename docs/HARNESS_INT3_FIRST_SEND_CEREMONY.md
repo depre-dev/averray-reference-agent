@@ -59,6 +59,15 @@ That is the mistake the refusal exists to catch.
 
 ## Step 0 — build, and prove the build
 
+**Every command in this document runs from the repository root.** Both shells,
+every step. A fresh terminal opens in your home directory, where the first
+command fails with `Cannot find module '/Users/you/scripts/ops/…'` — which looks
+like a missing script and is only a missing `cd`.
+
+```bash
+cd /path/to/averray-reference-agent
+```
+
 Both scripts import from the workspace packages' `dist/`. Build before anything
 else:
 
