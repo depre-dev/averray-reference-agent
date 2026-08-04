@@ -18,6 +18,7 @@ import {
   INT2_EXPECTED_PATH,
   INT2_SECTION3_CRITERION,
   expectationsForCase,
+  verificationFromReport,
   verifySection3Preflight,
   verifyScriptedPairPreflight,
 } from "../../scripts/ceremony/int2-evidence.mjs";
@@ -136,6 +137,36 @@ function runReaper(call: string, environment: NodeJS.ProcessEnv = {}): string {
 }
 
 describe("committed INT-2 ceremony mechanics", () => {
+  it("uses the sealed verification report when event details are out of line", () => {
+    expect(verificationFromReport({
+      passed: true,
+      verdict: "completed",
+      required_failed: [],
+      optional_failed: [],
+      check_results: [{
+        id: "unit-test-command",
+        type: "command",
+        required: true,
+        passed: true,
+        reason: "exit_0",
+        detail: "full command evidence",
+      }],
+    })).toEqual({
+      passed: true,
+      verdict: "completed",
+      requiredFailed: [],
+      optionalFailed: [],
+      details: [{
+        id: "unit-test-command",
+        type: "command",
+        required: true,
+        passed: true,
+        reason: "exit_0",
+        detail: "full command evidence",
+      }],
+    });
+  });
+
   it("keeps all six operator scripts parseable and on the shared evidence definition", async () => {
     const contents = await Promise.all(
       OPERATOR_SCRIPTS.map(async (name) => {
@@ -233,9 +264,13 @@ describe("committed INT-2 ceremony mechanics", () => {
     expect(shellSuite).toContain('test "$_int2_executed" = "14"');
     expect(workflow).toContain("executed-count.txt')\" = \"14\"");
     expect(shellSuite).toContain(
-      'export HARNESS_DISPATCH_DEP_CACHE_DIR="$_int2_dep_cache"',
+      '-t "$_int2_image_tag" "$_int2_dep_source"',
     );
-    expect(shellSuite).toContain("build-dispatch-dep-cache.mjs");
+    expect(shellSuite).toContain("INT2_PILOT_ENVIRONMENT_VERIFIED");
+    expect(shellSuite).not.toContain("build-dispatch-dep-cache.mjs");
+    expect(integrationSuite).toContain(
+      "preflight_command: \"npm run typecheck && npm exec --offline -- vitest --version\"",
+    );
   });
 
   // verifyScriptedPairPreflight runs two full `git clone --local
@@ -451,7 +486,7 @@ describe("committed INT-2 ceremony mechanics", () => {
           "int2-checkout-test",
           CHECKOUT_HELPER,
           path.join(temporary, "agent-harness"),
-          "f010c993b0adfe55899b84a60777b0a4331fd972",
+          "73133efd5e193c4d6f8bb8ecd159e5e862616aea",
           log,
         ],
         {
@@ -506,7 +541,7 @@ describe("committed INT-2 ceremony mechanics", () => {
         "int2-checkout-test",
         CHECKOUT_HELPER,
         checkout,
-        "f010c993b0adfe55899b84a60777b0a4331fd972",
+        "73133efd5e193c4d6f8bb8ecd159e5e862616aea",
         bootstrapLog,
       ],
       {
@@ -587,7 +622,7 @@ describe("committed INT-2 ceremony mechanics", () => {
     expect(dockerfile).not.toMatch(
       /safe\.directory\s+(?:"|')?\*(?:"|')?/u,
     );
-    expect(suite).toContain("INT2_PILOT_GIT_OWNERSHIP_FAILED");
+    expect(suite).toContain("INT2_PILOT_ENVIRONMENT_FAILED");
     expect(suite).toContain("INT2_PILOT_GIT_OWNERSHIP_VERIFIED");
     expect(suite).toContain(
       'git config --system --get-all safe.directory',

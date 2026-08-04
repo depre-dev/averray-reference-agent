@@ -31,9 +31,9 @@ export HARNESS_CHECKOUT="$CEREMONY_ROOT/agent-harness"
 export REFERENCE_CHECKOUT="/absolute/path/to/averray-reference-agent"
 
 git clone https://github.com/averray-agent/agent-harness.git "$HARNESS_CHECKOUT"
-git -C "$HARNESS_CHECKOUT" checkout --detach f010c99
+git -C "$HARNESS_CHECKOUT" checkout --detach 73133ef
 test "$(git -C "$HARNESS_CHECKOUT" rev-parse HEAD)" = \
-  "f010c993b0adfe55899b84a60777b0a4331fd972"
+  "73133efd5e193c4d6f8bb8ecd159e5e862616aea"
 test -z "$(git -C "$HARNESS_CHECKOUT" status --porcelain)"
 
 cd "$HARNESS_CHECKOUT"
@@ -127,17 +127,29 @@ docker exec int2-reference-postgres \
 
 ### 1.3 Create and pin the pilot profile
 
-Build or select a locally available, immutable pilot image that contains only
-the runtime tools needed by these fixtures: Node 22 and Git. Do not bake the
-reference agent's `node_modules` into `/workspace`: Harness bind-mounts the
-prepared task checkout there, which shadows image-baked workspace contents.
-The host-side cache flow in §1.4 seeds exact lockfile-matched dependencies
-before the offline run starts. Keep the image build recipe and clean source
-revision in the evidence bundle. It must contain no credentials. Do not use a
-floating tag in the evidence ceremony:
+Build a locally available, immutable pilot image from the exact fixture
+revision. Harness bind-mounts the self-contained run checkout at `/workspace`,
+so the image stores lockfile-matched dependencies at `/node_modules` and binds
+npm workspace-package links back to the live `/workspace` source. It does not
+copy ignored host files into the run checkout. Keep the image build recipe and
+clean source revision in the evidence bundle. It must contain no credentials.
+Do not use a floating tag in the evidence ceremony:
 
 ```sh
-export PILOT_IMAGE="reference-agent-pilot@sha256:<operator-recorded-digest>"
+export PILOT_SOURCE_REVISION="8b94278578913b7cd7aa1acb276db48613090c7b"
+export PILOT_DEP_CHECKOUT="$CEREMONY_ROOT/reference-agent-dependency-source"
+git clone --local --no-hardlinks \
+  "$REFERENCE_CHECKOUT" "$PILOT_DEP_CHECKOUT"
+git -C "$PILOT_DEP_CHECKOUT" checkout --detach "$PILOT_SOURCE_REVISION"
+test "$(git -C "$PILOT_DEP_CHECKOUT" rev-parse HEAD)" = \
+  "$PILOT_SOURCE_REVISION"
+test -z "$(git -C "$PILOT_DEP_CHECKOUT" status --porcelain)"
+
+docker build -f "$REFERENCE_CHECKOUT/ops/Dockerfile.pilot" \
+  -t reference-agent-pilot:ceremony "$PILOT_DEP_CHECKOUT"
+export PILOT_IMAGE="$(
+  docker image inspect --format '{{.Id}}' reference-agent-pilot:ceremony
+)"
 docker image inspect "$PILOT_IMAGE" > /dev/null
 
 export HARNESS_PROFILES_ROOT="$CEREMONY_ROOT/profiles"
@@ -171,6 +183,7 @@ capabilities:
   - artifact.get
 verification:
   baseline_command: null
+  preflight_command: "npm run typecheck && npm exec --offline -- vitest --version"
   protected_paths: []
 strategies:
   - direct_execution
@@ -231,51 +244,29 @@ hash.
 `HARNESS_DISPATCH_READ_TIMEOUT_MS` is bounded to 1–30 seconds. Keep the
 15-second pilot default when the Harness CLI crosses a container boundary.
 
-The `lint-format` fixture uses only
-`test -n "$(git diff --numstat)" && git diff --check`, so it can run with
-`HARNESS_DISPATCH_DEP_CACHE_DIR` unset; leave it unset for that fixture. The
-`docs-fix`, `add-unit-test`, and `small-refactor` fixtures execute `npm`
-verification and require the exact offline cache. For one of those fixtures,
-set the cache directory and populate it once from a clean checkout of the
-fixture revision:
+Leave `HARNESS_DISPATCH_DEP_CACHE_DIR` unset for every ceremony fixture. A
+dispatcher-side cache can seed the approved source checkout, but Harness then
+creates a clean self-contained Git workspace; ignored `node_modules` do not
+cross that clone boundary. The pilot image is therefore the authority for the
+exact offline verification toolchain. Prove both binaries resolve inside an
+isolated mounted checkout before any run:
 
 ```sh
-export HARNESS_DISPATCH_DEP_CACHE_DIR="$CEREMONY_ROOT/dispatch-dependency-cache"
-mkdir -p "$HARNESS_DISPATCH_DEP_CACHE_DIR"
-export PILOT_SOURCE_REVISION="8b94278578913b7cd7aa1acb276db48613090c7b"
-export PILOT_DEP_CHECKOUT="$CEREMONY_ROOT/reference-agent-dependency-source"
-
-for fixture in docs-fix add-unit-test small-refactor lint-format lint-format-green lint-format-red; do
-  grep -F \
-    "\"baseRevision\": \"$PILOT_SOURCE_REVISION\"" \
-    "$REFERENCE_CHECKOUT/test/fixtures/agent-integration/ceremony/$fixture.json" \
-    > /dev/null
-done
-
-git clone --local --no-hardlinks \
-  "$REFERENCE_CHECKOUT" "$PILOT_DEP_CHECKOUT"
-git -C "$PILOT_DEP_CHECKOUT" checkout --detach "$PILOT_SOURCE_REVISION"
-test "$(git -C "$PILOT_DEP_CHECKOUT" rev-parse HEAD)" = \
-  "$PILOT_SOURCE_REVISION"
-test -z "$(git -C "$PILOT_DEP_CHECKOUT" status --porcelain)"
-
-cd "$REFERENCE_CHECKOUT"
-node scripts/ops/build-dispatch-dep-cache.mjs \
-  --checkout "$PILOT_DEP_CHECKOUT" \
-  --cache-root "$HARNESS_DISPATCH_DEP_CACHE_DIR" \
-  > "$CEREMONY_ROOT/evidence/dependency-cache.json"
+unset HARNESS_DISPATCH_DEP_CACHE_DIR
+docker run --rm --network none \
+  --volume "$PILOT_DEP_CHECKOUT:/workspace" \
+  --workdir /workspace \
+  "$PILOT_IMAGE" /bin/sh -lc \
+  'npm exec --offline -- tsc --version && npm exec --offline -- vitest --version' \
+  > "$CEREMONY_ROOT/evidence/pilot-toolchain.txt"
 ```
 
-The builder copies the clean checkout to a temporary host directory, runs
-`npm ci` there, then atomically publishes
-`<cache-root>/<package-lock-sha256>/{node_modules,manifest.json}`. This is the
-only dependency-cache population step allowed to use network access. Re-running
-it for an already valid exact hash leaves that cache entry untouched. The
-dispatcher never runs `npm`, never falls back to another cache entry, and
-copies dependencies only after it has verified the prepared Git revision.
-Harness still runs with `--network none`. If the lockfile hash is absent or the
-cache is incomplete/stale, dispatch stops before submit and records one
-operator-visible alert.
+Image construction is the only dependency-install step allowed network access.
+Every Harness run remains `--network none`. The profile preflight records the
+prepared environment result in `EnvironmentPrepared`; a missing binary must
+produce a non-zero `baseline_failures` count and stop before model execution.
+The normal task-family runs must record zero baseline failures before their
+ordinary command criteria run again after the scripted change.
 
 Start the local monitor in a dedicated terminal for projection snapshots. It
 has no Slack token, and every routine/mutation flag remains off:

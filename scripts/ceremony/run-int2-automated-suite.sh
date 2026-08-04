@@ -25,7 +25,6 @@ _int2_run_containers_before="$_int2_root/run-containers-before.txt"
 _int2_workspaces_before="$_int2_root/workspaces-before.txt"
 _int2_workspace_root="${INT2_WORKSPACE_ROOT:-$HOME/.agent-runtime/environments}"
 _int2_dep_source="$_int2_root/dependency-source"
-_int2_dep_cache="$_int2_root/dependency-cache"
 
 # shellcheck source=scripts/ceremony/lib/int2-reap.sh
 source "$_int2_repo/scripts/ceremony/lib/int2-reap.sh"
@@ -83,11 +82,11 @@ for _int2_command in docker git node npm uv; do
 done
 mkdir -p "$_int2_evidence"
 printf '%s\n' \
-  "INT2_SUITE_BOOTSTRAP_STARTED pin=f010c993b0adfe55899b84a60777b0a4331fd972" \
+  "INT2_SUITE_BOOTSTRAP_STARTED pin=73133efd5e193c4d6f8bb8ecd159e5e862616aea" \
   > "$_int2_bootstrap_log"
 
 export HARNESS_CHECKOUT="${HARNESS_CHECKOUT:-$_int2_root/agent-harness}"
-_int2_pin="f010c993b0adfe55899b84a60777b0a4331fd972"
+_int2_pin="73133efd5e193c4d6f8bb8ecd159e5e862616aea"
 # shellcheck source=scripts/ceremony/lib/int2-harness-checkout.sh
 source "$_int2_repo/scripts/ceremony/lib/int2-harness-checkout.sh"
 int2_checkout_harness "$HARNESS_CHECKOUT" "$_int2_pin" "$_int2_bootstrap_log"
@@ -220,9 +219,29 @@ for _int2_migration in "$_int2_repo"/ops/migrations/*.sql; do
       --set ON_ERROR_STOP=1 -q < "$_int2_migration" >/dev/null
 done
 
+# The task-family fixtures are pinned to an older repository revision whose
+# package-lock differs from current main. The pilot image must carry the exact
+# offline toolchain for that immutable base; dependencies from current main
+# would make the environment probe pass against a different dependency graph.
+_int2_fixture_base="$(
+  node --input-type=module -e '
+    import { readFileSync } from "node:fs";
+    const fixture = JSON.parse(readFileSync(process.argv[1], "utf8"));
+    process.stdout.write(fixture.repository.baseRevision);
+  ' "$_int2_repo/test/fixtures/agent-integration/ceremony/add-unit-test.json"
+)"
+git clone --quiet --local --no-hardlinks "$_int2_repo" "$_int2_dep_source"
+git -C "$_int2_dep_source" checkout --quiet --detach "$_int2_fixture_base"
+test "$(git -C "$_int2_dep_source" rev-parse HEAD)" = "$_int2_fixture_base" \
+  || {
+    echo "INT2_TOOLCHAIN_BASE_MISMATCH: image source is not at the fixture base" \
+      | tee -a "$_int2_bootstrap_log" >&2
+    exit 27
+  }
+
 _int2_image_tag="reference-agent-pilot:int2-${_int2_suffix}"
 docker build --quiet -f "$_int2_repo/ops/Dockerfile.pilot" \
-  -t "$_int2_image_tag" "$_int2_repo" >/dev/null
+  -t "$_int2_image_tag" "$_int2_dep_source" >/dev/null
 export INT2_PILOT_IMAGE="$(
   docker image inspect --format '{{.Id}}' "$_int2_image_tag"
 )"
@@ -243,47 +262,17 @@ docker run --rm --network none \
   --workdir /workspace \
   "$INT2_PILOT_IMAGE" \
   /bin/sh -lc \
-    'test "$(git config --system --get-all safe.directory)" = "/workspace" && git diff --check' \
+    'test "$(git config --system --get-all safe.directory)" = "/workspace" && git diff --check && npm exec --offline -- tsc --version && npm exec --offline -- vitest --version' \
   >> "$_int2_bootstrap_log" 2>&1 \
   || {
-    echo "INT2_PILOT_GIT_OWNERSHIP_FAILED: pilot cannot run Git in the mounted workspace" \
+    echo "INT2_PILOT_ENVIRONMENT_FAILED: pilot cannot run Git and the pinned toolchain in the mounted workspace" \
       | tee -a "$_int2_bootstrap_log" >&2
     exit 26
   }
 printf '%s\n' "INT2_PILOT_GIT_OWNERSHIP_VERIFIED" \
   >> "$_int2_bootstrap_log"
-
-# The task-family fixtures are pinned to an older repository revision whose
-# package-lock differs from current main. Build the exact lockfile-keyed cache
-# from that immutable base: using current main here would correctly produce a
-# dependency_cache_stale refusal instead of exercising the seeded path.
-_int2_fixture_base="$(
-  node --input-type=module -e '
-    import { readFileSync } from "node:fs";
-    const fixture = JSON.parse(readFileSync(process.argv[1], "utf8"));
-    process.stdout.write(fixture.repository.baseRevision);
-  ' "$_int2_repo/test/fixtures/agent-integration/ceremony/add-unit-test.json"
-)"
-git clone --quiet --local --no-hardlinks "$_int2_repo" "$_int2_dep_source"
-git -C "$_int2_dep_source" checkout --quiet --detach "$_int2_fixture_base"
-test "$(git -C "$_int2_dep_source" rev-parse HEAD)" = "$_int2_fixture_base" \
-  || {
-    echo "INT2_DEP_CACHE_BASE_MISMATCH: dependency source is not at the fixture base" \
-      | tee -a "$_int2_bootstrap_log" >&2
-    exit 27
-  }
-node "$_int2_repo/scripts/ops/build-dispatch-dep-cache.mjs" \
-  --checkout "$_int2_dep_source" \
-  --cache-root "$_int2_dep_cache" \
-  >> "$_int2_bootstrap_log" \
-  || {
-    echo "INT2_DEP_CACHE_BUILD_FAILED: exact fixture dependency cache was not built" \
-      | tee -a "$_int2_bootstrap_log" >&2
-    exit 28
-  }
-export HARNESS_DISPATCH_DEP_CACHE_DIR="$_int2_dep_cache"
 printf '%s\n' \
-  "INT2_DEP_CACHE_READY base=$_int2_fixture_base" \
+  "INT2_PILOT_ENVIRONMENT_VERIFIED base=$_int2_fixture_base" \
   >> "$_int2_bootstrap_log"
 
 export INT2_SUITE_REQUIRED=1

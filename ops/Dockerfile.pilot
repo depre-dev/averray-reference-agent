@@ -16,7 +16,8 @@
 #
 # Build and record the digest (the ceremony pins by digest, never by tag):
 #
-#   docker build -f ops/Dockerfile.pilot -t reference-agent-pilot:ceremony .
+#   docker build -f "$REFERENCE_CHECKOUT/ops/Dockerfile.pilot" \
+#     -t reference-agent-pilot:ceremony "$PILOT_DEP_CHECKOUT"
 #   docker images --digests | grep reference-agent-pilot
 #
 # A locally built image has no registry digest until it is pushed. For a local

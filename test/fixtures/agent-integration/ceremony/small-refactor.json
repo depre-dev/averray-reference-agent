@@ -1,5 +1,5 @@
 {
-  "_comment": "npm test is stricter than no_new_failures because the suite is green at the pinned base: every test must pass, rather than permitting failures already present at baseline. baseline_comparison is unavailable for this Node repository on the pinned pytest-only kernel.",
+  "_comment": "npm test -- --no-cache runs the complete green suite without adding Vitest timing-cache output to the task patch. It is stricter than no_new_failures because every test must pass; baseline_comparison remains pytest-specific.",
   "workItemId": "ceremony-small-refactor-001",
   "correlationId": "ceremony-small-refactor-001",
   "taskKind": "small_refactor",
@@ -35,7 +35,7 @@
     {
       "id": "refactor-test-command",
       "type": "command",
-      "command": "npm test",
+      "command": "npm test -- --no-cache",
       "required": true
     },
     {

@@ -56,7 +56,6 @@ const REQUIRED_ENVIRONMENT = [
   "HARNESS_TEST_DATABASE_URL",
   "HARNESS_BIN",
   "HARNESS_CHECKOUT",
-  "HARNESS_DISPATCH_DEP_CACHE_DIR",
   "INT2_PILOT_IMAGE",
 ] as const;
 const missingEnvironment = REQUIRED_ENVIRONMENT.filter(
@@ -76,8 +75,6 @@ const FIXTURE_ROOT = path.join(
   REPOSITORY_ROOT,
   "test/fixtures/agent-integration/ceremony",
 );
-const DEPENDENCY_CACHE_ROOT =
-  process.env.HARNESS_DISPATCH_DEP_CACHE_DIR?.trim() ?? "";
 const EXPECTED_CASE_COUNT = 14;
 const TEST_TIMEOUT_MS = 240_000;
 const TERMINAL_WAIT_MS = 180_000;
@@ -109,6 +106,7 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
     case: "add-unit-test" | "docs-fix" | "small-refactor";
     lifecycle: string;
     verificationVerdict: string;
+    environmentBaselineFailures: number;
     criteria: Array<{
       id: string;
       passed: boolean;
@@ -510,12 +508,11 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
       script: "docs-fix.jsonl",
       lifecycle: "handoff_ready",
       expectedPath: "docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md",
-      seedDependencies: true,
     });
     await recordTaskFamilyResult("docs-fix", evidence);
   }, TEST_TIMEOUT_MS);
 
-  it("executes the add-unit-test family through seeded npm dependencies", async () => {
+  it("executes the add-unit-test family through the pinned offline toolchain", async () => {
     executedCases += 1;
     const evidence = await runScriptedTerminalCase({
       caseName: "add-unit-test",
@@ -523,7 +520,6 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
       script: "add-unit-test.jsonl",
       lifecycle: "handoff_ready",
       expectedPath: "test/unit/canonical-json-array-order.test.ts",
-      seedDependencies: true,
     });
     await recordTaskFamilyResult("add-unit-test", evidence);
   }, TEST_TIMEOUT_MS);
@@ -536,7 +532,6 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
       script: "small-refactor.jsonl",
       lifecycle: "handoff_ready",
       expectedPath: "test/unit/agent-integration-contracts.test.ts",
-      seedDependencies: true,
     });
     await recordTaskFamilyResult("small-refactor", evidence);
   }, TEST_TIMEOUT_MS);
@@ -607,7 +602,6 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
     preserveProfile = false,
     reconcileAfterHarnessTerminal = false,
     expectedPath = INT2_EXPECTED_PATH,
-    seedDependencies = false,
   }: {
     caseName:
       | "add-unit-test"
@@ -637,7 +631,6 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
     preserveProfile?: boolean;
     reconcileAfterHarnessTerminal?: boolean;
     expectedPath?: string;
-    seedDependencies?: boolean;
   }): Promise<any> {
     if (!preserveProfile) {
       await writePilotProfile(INT2_PILOT_CAPABILITIES);
@@ -645,9 +638,6 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
     await stageModelScript(script);
     const workItemId = nextWorkItem(caseName);
     const approval = await proposeAndApprove(fixture, workItemId);
-    if (seedDependencies) {
-      process.env.HARNESS_DISPATCH_DEP_CACHE_DIR = DEPENDENCY_CACHE_ROOT;
-    }
     const worker = await startWorker();
     const dispatcher = createDispatcher();
     try {
@@ -671,7 +661,6 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
     } finally {
       await dispatcher.shutdown();
       await stopWorker(worker);
-      delete process.env.HARNESS_DISPATCH_DEP_CACHE_DIR;
     }
     return collectEvidence(
       caseName,
@@ -732,10 +721,18 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
       result.rows[0]?.elapsed_seconds,
     );
     expect(Number.isFinite(verificationElapsedSeconds)).toBe(true);
+    const environmentPrepared = evidence.events.find(
+      (event: any) => event.type === "EnvironmentPrepared",
+    );
+    expect(environmentPrepared?.payload?.baseline_failures).toBe(0);
+    expect(environmentPrepared?.payload?.baseline_failure_ids).toEqual([]);
     const recorded = {
       case: caseName,
       lifecycle: String(evidence.task.lifecycle),
       verificationVerdict: String(evidence.verification.verdict),
+      environmentBaselineFailures: Number(
+        environmentPrepared.payload.baseline_failures,
+      ),
       criteria: evidence.verification.details.map((detail: any) => ({
         id: String(detail.id),
         passed: detail.passed === true,
@@ -914,6 +911,7 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
       ...capabilities.map((capability) => `  - ${capability}`),
       "verification:",
       "  baseline_command: null",
+      '  preflight_command: "npm run typecheck && npm exec --offline -- vitest --version"',
       "  protected_paths: []",
       "strategies:",
       "  - direct_execution",

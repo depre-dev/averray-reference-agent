@@ -16,7 +16,7 @@ import { pathToFileURL } from "node:url";
 import { Pool } from "pg";
 
 export const INT2_HARNESS_PIN =
-  "f010c993b0adfe55899b84a60777b0a4331fd972";
+  "73133efd5e193c4d6f8bb8ecd159e5e862616aea";
 export const INT2_EXPECTED_PATH =
   "docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md";
 export const INT2_SECTION3_CRITERION =
@@ -50,10 +50,8 @@ const NEGATIVE_TOOL_COMMAND =
   "printf '%b' '\\nINT-2 negative-path proof line with trailing whitespace.   \\n' >> docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md";
 const DOCS_FIX_TOOL_COMMAND =
   "printf '%b' '\\nThe supervised task-family ceremony records the exact search result at its pinned base.\\n' >> docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md";
-const ADD_UNIT_TEST_TOOL_COMMAND =
-  "printf '%b' 'import { describe, expect, it } from \\\"vitest\\\";\\n\\nimport { canonicalJson } from \\\"../../packages/mcp-common/src/canonical-json.js\\\";\\n\\ndescribe(\\\"canonicalJson array order\\\", () => {\\n  it(\\\"preserves array order while sorting nested object keys\\\", () => {\\n    expect(canonicalJson([{ b: 2, a: 1 }, \\\"tail\\\"])).toBe(\\n      JSON.stringify([{ a: 1, b: 2 }, \\\"tail\\\"]),\\n    );\\n  });\\n});\\n' > test/unit/canonical-json-array-order.test.ts && npm run typecheck";
-const SMALL_REFACTOR_TOOL_COMMAND =
-  "node -e 'const fs=require(\\\"node:fs\\\");const p=\\\"test/unit/agent-integration-contracts.test.ts\\\";let s=fs.readFileSync(p,\\\"utf8\\\");const calls=(s.match(/fixtureRecord\\\\(\\\"/g)||[]).length;const oldTail=\\\"  ) as unknown;\\\\n}\\\\n\\\\nfunction fixtureRecord(name: string): Record<string, unknown> {\\\\n  return fixture(name) as Record<string, unknown>;\\\\n}\\\\n\\\";if(calls!==8||!s.includes(\\\"function fixture(name: string): unknown {\\\")||!s.includes(oldTail))throw new Error(\\\"unexpected fixture helper shape\\\");s=s.replaceAll(\\\"fixtureRecord(\\\\\\\"\\\",\\\"fixture<Record<string, unknown>>(\\\\\\\"\\\").replace(\\\"function fixture(name: string): unknown {\\\",\\\"function fixture<T = unknown>(name: string): T {\\\").replace(oldTail,\\\"  ) as T;\\\\n}\\\\n\\\");if((s.match(/function fixture<T = unknown>/g)||[]).length!==1||s.includes(\\\"fixtureRecord\\\"))throw new Error(\\\"fixture helper refactor did not apply\\\");fs.writeFileSync(p,s);'";
+const ADD_UNIT_TEST_TOOL_COMMAND = String.raw`printf '%b' 'import { describe, expect, it } from "vitest";\n\nimport { canonicalJson } from "../../packages/mcp-common/src/canonical-json.js";\n\ndescribe("canonicalJson array order", () => {\n  it("preserves array order while sorting nested object keys", () => {\n    expect(canonicalJson([{ b: 2, a: 1 }, "tail"])).toBe(\n      JSON.stringify([{ a: 1, b: 2 }, "tail"]),\n    );\n  });\n});\n' > test/unit/canonical-json-array-order.test.ts && npm run typecheck`;
+const SMALL_REFACTOR_TOOL_COMMAND = String.raw`node -e 'const fs=require("node:fs");const p="test/unit/agent-integration-contracts.test.ts";let s=fs.readFileSync(p,"utf8");const calls=(s.match(/fixtureRecord\("/g)||[]).length;const oldTail="  ) as unknown;\n}\n\nfunction fixtureRecord(name: string): Record<string, unknown> {\n  return fixture(name) as Record<string, unknown>;\n}\n";if(calls!==8||!s.includes("function fixture(name: string): unknown {")||!s.includes(oldTail))throw new Error("unexpected fixture helper shape");s=s.replaceAll("fixtureRecord(\"","fixture<Record<string, unknown>>(\"").replace("function fixture(name: string): unknown {","function fixture<T = unknown>(name: string): T {").replace(oldTail,"  ) as T;\n}\n");if((s.match(/function fixture<T = unknown>/g)||[]).length!==1||s.includes("fixtureRecord"))throw new Error("fixture helper refactor did not apply");fs.writeFileSync(p,s);'`;
 const SECTION3_CORRECT_TOOL_COMMAND =
   "printf '%b' '\\nA paid real-model ceremony requires a three-case acceptance pre-flight before credentials are exported.\\n' >> docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md";
 const SECTION3_INCORRECT_TOOL_COMMAND =
@@ -359,7 +357,7 @@ const CASE_EXPECTATIONS = Object.freeze({
       Object.freeze({
         id: "unit-test-command",
         type: "command",
-        command: "npm test",
+        command: "npm test -- --no-cache",
         required: true,
       }),
       Object.freeze({
@@ -427,7 +425,7 @@ const CASE_EXPECTATIONS = Object.freeze({
       Object.freeze({
         id: "refactor-test-command",
         type: "command",
-        command: "npm test",
+        command: "npm test -- --no-cache",
         required: true,
       }),
       Object.freeze({
@@ -832,7 +830,13 @@ export async function collectInt2Evidence({
         expectedPath,
       })
     : null;
-  const verification = verificationFromEvents(events);
+  const verification = deliverables.verification_report
+    ? await readVerificationReport({
+        harnessBin,
+        harnessDatabaseUrl,
+        reportRef: deliverables.verification_report,
+      })
+    : verificationFromEvents(events);
   const alerts = alertsPath
     ? await readDispatchAlerts(alertsPath, workItemId)
     : [];
@@ -1755,6 +1759,37 @@ function verificationFromEvents(events) {
     requiredFailed: event.payload?.required_failed,
     optionalFailed: event.payload?.optional_failed,
   };
+}
+
+export function verificationFromReport(report) {
+  return {
+    verdict: report?.verdict,
+    passed: report?.passed,
+    details: report?.check_results,
+    requiredFailed: report?.required_failed,
+    optionalFailed: report?.optional_failed,
+  };
+}
+
+async function readVerificationReport({
+  harnessBin,
+  harnessDatabaseUrl,
+  reportRef,
+}) {
+  const temporary = await mkdtemp(path.join(tmpdir(), "int2-verification-"));
+  const reportPath = path.join(temporary, "verification-report.json");
+  try {
+    await harnessRead(
+      harnessBin,
+      ["artifacts", "get", reportRef, "--out", reportPath],
+      { HARNESS_DATABASE_URL: harnessDatabaseUrl },
+    );
+    return verificationFromReport(
+      JSON.parse(await readFile(reportPath, "utf8")),
+    );
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
 }
 
 function parseHarnessEvents(text) {
