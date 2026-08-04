@@ -11,6 +11,19 @@ commit this document lands on.
 is not. Expect to stop at a step and fix something. Stopping is the intended
 outcome of a first run, not a failure of it.
 
+What *has* been executed against the real scripts, on 2026-08-04:
+
+| checked | result |
+|---|---|
+| builder refuses a token in its environment | `INT3D_TOKEN_ENVIRONMENT_REFUSED`, exit **65** as documented |
+| builder refuses missing flags | `INT3D_USAGE`, exit **64** as documented |
+| builder refuses a `token` key nested in the authorization file | `INT3D_AUTHORIZATION_CONTAINS_TOKEN`, exit **67** as documented |
+| that refusal does not echo the offending value | sentinel nested three deep, **0 occurrences** in output |
+
+Nothing past that. Everything from Step 2 onward — the store read, the Harness
+read, reconstruction, and the whole of shell B — is unexercised outside its
+tests.
+
 Read `HARNESS_INT3B_CREDENTIAL_RUNBOOK.md` first. It owns the credential
 boundary; this document owns the sequence and does not restate it.
 
@@ -43,6 +56,38 @@ So the ceremony runs in two terminals, and the split is the point:
 
 If you find yourself exporting the token in shell A to make something work, stop.
 That is the mistake the refusal exists to catch.
+
+## Step 0 — build, and prove the build
+
+Both scripts import from the workspace packages' `dist/`. Build before anything
+else:
+
+```bash
+npm run typecheck
+```
+
+**If that fails on a clean checkout** with errors like `Module '"@avg/mcp-common"'
+has no exported member 'query'`, the incremental build state is stale — not the
+code. `tsc -b` reads `.tsbuildinfo`, concludes a package is current, and leaves
+`dist/` partially emitted. The symptom downstream is an `ERR_MODULE_NOT_FOUND`
+naming a file that plainly exists in `src/`. This happened on a clean `main` on
+2026-08-04; CI never sees it because CI always builds from scratch.
+
+```bash
+npx tsc -b --clean packages/* services/*
+find . -maxdepth 3 -name "*.tsbuildinfo" -not -path "./node_modules/*" -delete
+npm run typecheck
+```
+
+Then prove the toolchain actually works, using a refusal that costs nothing:
+
+```bash
+node scripts/ops/int3d-build-packet.mjs
+```
+
+Expect `INT3D_USAGE` and exit **64**. A module-resolution stack trace instead
+means the build is still wrong, and you want to know that now rather than in
+shell B with a live token.
 
 ## Step 1 — the authorization file
 
