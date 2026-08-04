@@ -3336,6 +3336,9 @@ function startOperatorRoutines() {
   // a redeploy must not page the operator about states that have not changed.
   let prevProbes = new Map<string, ProbeResult>();
   let postedProbeKeys = new Set<string>();
+  // Consecutive ticks each reason class has held. Threaded exactly like the two
+  // above so a flapping warning never accumulates the hold it needs to speak.
+  let probeStreaks = new Map<string, number>();
   let taskHealthRunning = false;
   const anomalyConfig = loadAnomalyConfig();
   const dispatchPerDayCap = Number(process.env.HERMES_DISPATCH_PER_DAY_MAX) || 10;
@@ -3831,11 +3834,13 @@ function startOperatorRoutines() {
         current: result.evaluation.probes,
         posted: postedProbeKeys,
         muted: getServerAlertMuteUntilMs() > Date.now(),
+        streaks: probeStreaks,
       });
       // State advances even while muted, so unmuting does not replay an edge
       // that happened hours ago.
       prevProbes = transitions.next;
       postedProbeKeys = transitions.keys;
+      probeStreaks = transitions.streaks;
       if (transitions.alerts.length > 0) {
         const buzzForProbes = readBuzzConfig();
         for (const alert of transitions.alerts) {
