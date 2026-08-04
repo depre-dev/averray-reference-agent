@@ -201,6 +201,36 @@ describe("an overdue request is the stuck-pending alarm, named", () => {
     expect(v.requests.text).toBe("no requests in flight");
   });
 
+  test("terminal failure renders the five-line reconciliation and artifact label", () => {
+    const v = bankLaneView({
+      feed: feed({
+        requests: {
+          items: [req({
+            phase: "terminal",
+            status: "failed",
+            reconciliation: {
+              stagedRaw: "150000",
+              leg1TransferFeeRaw: "525",
+              trappedWriteOff3Raw: "17932",
+              remoteRecoverableRaw: "131543",
+              unexplainedRaw: "0",
+              artifactLabel: "v2.1 accounting artifact, known-unrecoverable",
+            },
+          })],
+          readAtMs: NOW,
+        },
+      }),
+      nowMs: NOW,
+    })!;
+    expect(v.requests.text).toContain("150000 staged");
+    expect(v.requests.text).toContain("17932 trapped write-off #3");
+    expect(v.requests.text).toContain("131543 recoverable");
+    expect(v.requests.text).toContain("0 unexplained");
+    expect(v.requests.text).toContain("v2.1 accounting artifact, known-unrecoverable");
+    expect(v.requests.text).not.toContain("recoveryAssetsOutstanding");
+    expect(v.requests.tone).toBe("degraded");
+  });
+
   test("overdue is the OBSERVER's judgement — never recomputed from the age", () => {
     // Two services deriving one deadline eventually disagree, and then there
     // are two answers to a question that must have one.

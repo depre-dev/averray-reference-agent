@@ -70,6 +70,20 @@ export interface BankRequest {
   ageSeconds: number;
   /** Past its observer deadline. THE stuck-pending alarm. */
   overdue: boolean;
+  /** Producer-owned terminal status; pending for in-flight rows. */
+  status?: string;
+  /**
+   * Presentation-safe terminal accounting. The producer deliberately omits
+   * raw contract recovery slots that are known accounting artifacts.
+   */
+  reconciliation?: {
+    stagedRaw: string;
+    leg1TransferFeeRaw: string;
+    trappedWriteOff3Raw: string;
+    remoteRecoverableRaw: string;
+    unexplainedRaw: string;
+    artifactLabel: string;
+  };
 }
 
 /** The observer's vocabulary as of today. Not exhaustive by construction. */
