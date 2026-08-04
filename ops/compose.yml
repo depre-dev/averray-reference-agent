@@ -593,6 +593,12 @@ services:
       # Unset by default, and absent means the lane does not render AT ALL —
       # not a row of "awaiting" tiles and not a complaint about its own
       # absence. Only a configured feed that fails is worth a line on screen.
+      #
+      # SETTING THIS IS HALF THE WIRE. The host in it resolves only on the
+      # platform stack's own network, which this project joins via
+      # ops/compose.bank-feed.yml — added automatically by ops/deploy-monitor.sh
+      # when that network exists. Deploy by hand without that -f and the URL is
+      # configured, unreachable, and says so on the board.
       PRODUCT_HEALTH_BANK_FEED_URL: ${PRODUCT_HEALTH_BANK_FEED_URL:-}
       # Gas attribution — what the signer's burn went ON, by operation.
       #

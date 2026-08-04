@@ -71,6 +71,7 @@ If you touched `ops/`, the `Dockerfile`, or compose files, also validate what CI
 
 ```bash
 docker compose --env-file ops/.env.example -f ops/compose.yml -f ops/compose.prod.yml config
+docker compose --env-file ops/.env.example -f ops/compose.yml -f ops/compose.prod.yml -f ops/compose.bank-feed.yml config
 ```
 
 **Golden path for a task:** branch from fresh `origin/main` → make the change →
@@ -99,7 +100,7 @@ that SSH in to invoke Hermes. Don't edit the platform repo from here.
 | `services/slack-operator/` | Serves the `/monitor` board, the Codex task queue + runner, testbed mission runner |
 | `services/skills-observer/` | Sidecar ingesting Hermes skill files |
 | `services/test-wallet-signer/` | T3 test-wallet signer sidecar; mints cached API/browser sessions without exposing keys to agents |
-| `ops/` | Docker Compose stack (`compose.yml`, `compose.prod.yml`, `compose.command-center.yml`, `compose.cloudflare-access.yml`), migrations |
+| `ops/` | Docker Compose stack (`compose.yml`, `compose.prod.yml`, `compose.command-center.yml`, `compose.cloudflare-access.yml`, `compose.bank-feed.yml`), migrations |
 | `hermes/` | Hermes config (`hermes.yaml`, `policy.yaml`) + trace plugin |
 | `test/unit/` | Vitest suites (alongside `*.test.ts(x)` colocated in packages) |
 | `test/integration/` | Postgres and supervised-dispatch integration suites; slow external prerequisites are explicit and fail-required in their CI jobs |

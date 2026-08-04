@@ -113,6 +113,30 @@ COMPOSE=(docker compose -p "$PROJECT" --env-file .env.prod
   -f ops/compose.command-center.yml
   -f ops/compose.cloudflare-access.yml)
 
+# THE BANK LANE'S NETWORK — attached only when it is really there.
+#
+# ops/compose.bank-feed.yml joins slack-operator to the platform stack's
+# private network so the board can read the backend's read-only Bank feed. It
+# declares that network `external: true`, which Compose treats as a hard
+# precondition: if it is absent, EVERY service in this project refuses to
+# start, this one included.
+#
+# That is the wrong trade for a display. The board is how you find out the
+# platform is down; it must not be unable to boot for the same reason. So the
+# overlay goes in only when the network exists, and its absence costs one line
+# of text on the board instead of the monitor. Same call as the skills sync
+# below, and the same one #657 made for the Hermes health gate.
+BANK_FEED_NETWORK=agent-mainnet-internal
+if docker network inspect "$BANK_FEED_NETWORK" >/dev/null 2>&1; then
+  COMPOSE+=(-f ops/compose.bank-feed.yml)
+else
+  echo "note: docker network ${BANK_FEED_NETWORK} not found — deploying WITHOUT"
+  echo "      the Bank lane's network attachment. The lane will report its feed"
+  echo "      unreachable; everything else deploys normally. Re-run this script"
+  echo "      once the platform stack is up to reattach it."
+  echo
+fi
+
 # The volume the MCP servers actually run from, project-prefixed as Docker
 # names it. See the bundle-consumer restart at the end of this script.
 BUNDLE_VOLUME="${PROJECT}_avg-app"
