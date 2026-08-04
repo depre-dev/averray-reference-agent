@@ -303,6 +303,18 @@ function requestLine(requests: BankRequests, nowMs: number, staleAfterMs: number
   const unknown = requests.items.filter((r) => !isKnownPhase(r.phase));
   const live = requests.items.filter((r) => r.phase !== "terminal");
   if (live.length === 0) {
+    const terminal = requests.items.find((request) => request.phase === "terminal" && request.reconciliation);
+    if (terminal?.reconciliation) {
+      const r = terminal.reconciliation;
+      return {
+        text:
+          `TERMINAL ${String(terminal.status ?? "recorded").toUpperCase()} · ${terminal.id} · ` +
+          `${r.stagedRaw} staged − ${r.leg1TransferFeeRaw} leg-1 fee − ` +
+          `${r.trappedWriteOff3Raw} trapped write-off #3 = ${r.remoteRecoverableRaw} recoverable · ` +
+          `${r.unexplainedRaw} unexplained · ${r.artifactLabel}`,
+        tone: "degraded",
+      };
+    }
     return { text: "no requests in flight", tone: "ok" };
   }
   const overdue = live.filter((r) => r.overdue);

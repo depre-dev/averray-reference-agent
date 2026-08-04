@@ -150,6 +150,7 @@ function requestsBlock(raw: unknown): { requests: BankRequests } | { reason: str
     if (typeof e.ageSeconds !== "number" || typeof e.overdue !== "boolean") {
       return { reason: `bank feed request ${e.id} needs numeric ageSeconds and boolean overdue` };
     }
+    const reconciliation = terminalReconciliation(e.reconciliation);
     items.push({
       id: e.id,
       kind: typeof e.kind === "string" ? e.kind : "unknown",
@@ -158,6 +159,8 @@ function requestsBlock(raw: unknown): { requests: BankRequests } | { reason: str
       phase: e.phase,
       ageSeconds: e.ageSeconds,
       overdue: e.overdue,
+      ...(typeof e.status === "string" ? { status: e.status } : {}),
+      ...(reconciliation ? { reconciliation } : {}),
     });
   }
   return {
@@ -166,6 +169,28 @@ function requestsBlock(raw: unknown): { requests: BankRequests } | { reason: str
       readAtMs: (r.readAtMs as number | null) ?? null,
       ...(typeof r.lastError === "string" ? { lastError: r.lastError } : {}),
     },
+  };
+}
+
+function terminalReconciliation(raw: unknown): BankRequest["reconciliation"] | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  const keys = [
+    "stagedRaw",
+    "leg1TransferFeeRaw",
+    "trappedWriteOff3Raw",
+    "remoteRecoverableRaw",
+    "unexplainedRaw",
+  ] as const;
+  if (keys.some((key) => typeof r[key] !== "string" || !/^\d+$/.test(r[key]))) return undefined;
+  if (typeof r.artifactLabel !== "string" || !r.artifactLabel.trim()) return undefined;
+  return {
+    stagedRaw: r.stagedRaw as string,
+    leg1TransferFeeRaw: r.leg1TransferFeeRaw as string,
+    trappedWriteOff3Raw: r.trappedWriteOff3Raw as string,
+    remoteRecoverableRaw: r.remoteRecoverableRaw as string,
+    unexplainedRaw: r.unexplainedRaw as string,
+    artifactLabel: r.artifactLabel,
   };
 }
 
