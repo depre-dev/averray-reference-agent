@@ -113,6 +113,49 @@ means the installation has authority the ceremony did not approve.
 
 ## Step 2 — build the packet (shell A, no token)
 
+### What Step 2 needs to exist first
+
+A live dispatcher database with a `handoff_ready` task, and a Harness run the
+`harness` CLI can still read. Neither survives a teardown, so if the ceremony
+environment is gone this step is not "one command" — it is a bring-up.
+
+That bring-up is already written: **`HARNESS_INT2_CEREMONY_RUNBOOK.md` §1**
+(disposable Postgres pair, pinned Harness checkout, pilot profile, worker), then
+**§2.6**, which produces exactly what this step consumes — a verified green
+handoff that is complete and unactuated. Do not improvise a shorter path; §1.1
+already carries the traps, including why `CEREMONY_ROOT` must not be a
+`mktemp -d` under `/var/folders`.
+
+Once that is standing, the four path arguments are:
+
+| flag | what it must point at |
+|---|---|
+| `--repository-root` | a **local Git checkout of the target repository** — the one the PR will open against. Not the ceremony root, not the run workspace. The port pins `owner/name` and the base ref against it. |
+| `--base-ref` | the base branch, e.g. `main` |
+| `--patch-artifact-root` | a **content-addressed directory**: one file per artifact, named by its bare sha256 hex |
+| `--payload-artifact-root` | an empty directory for the payload this step writes |
+
+### The artifact root does not populate itself
+
+`--patch-artifact-root` is read as `path.join(root, digest)`, where `digest` is
+the artifact ref's `sha256` with the `sha256:` prefix removed, and the ref's URI
+must be exactly `artifact://sha256/<digest>`.
+
+The run's patch lives in Harness's own store, and **nothing in this repository
+mirrors it into that directory.** Export it yourself:
+
+```bash
+harness artifacts get artifact://sha256/<digest> --out "$PATCH_ROOT/<digest>"
+```
+
+The filename must be the bare digest with no prefix and no extension, or the read
+misses and the build refuses.
+
+> Verified from source, not from a run: the flag-to-port mapping, the on-disk
+> filename format, and the CLI's `--out`. The export step itself has not been
+> executed end to end. If it turns out an operator needs this every time, it
+> wants a packet rather than a paragraph.
+
 ```bash
 node scripts/ops/int3d-build-packet.mjs \
   --work-item <id> \
