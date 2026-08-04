@@ -7,12 +7,20 @@
     <!-- Full-viewport host chain: .hm-board is width/height:100% and
          collapses to a sliver unless #root/body/html give it a sized
          parent. The page canvas color matches --avy-bg so there is no
-         flash before the stylesheet loads. -->
+         flash before the stylesheet loads.
+
+         `min-height`, NOT `height`. A fixed `height: 100%` pinned the document
+         to the viewport, so when the board was taller than the window the
+         excess had nowhere to go AND could not be scrolled to — measured
+         2026-08-04 on a 923px screen, the footer sat at y=1206, unreachable.
+         That is why the payout-evidence panel rendered empty on a laptop.
+         This inline rule outranks the stylesheets, so fixing hermes4-ops.css
+         alone changed nothing; the two must agree. -->
     <style>
       html,
       body,
       #root {
-        height: 100%;
+        min-height: 100%;
       }
       body {
         margin: 0;

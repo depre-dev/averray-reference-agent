@@ -26,14 +26,39 @@
 html,
 body,
 #root {
-  height: 100%;
+  min-height: 100%;
 }
+
+/* ---- WHEN THE BOARD DOES NOT FIT, IT SCROLLS. IT DOES NOT HIDE. ----
+   This was `height: 100dvh; overflow: hidden`, which is right for the wall
+   display this board is designed for and silently destructive anywhere else.
+   The money band is the only `flex: 1` child, so it absorbed the entire
+   shortfall while its fixed siblings took what they liked. MEASURED on a
+   1512x923 laptop, 2026-08-04:
+
+     natural content   ~1089px      available   835px
+     .ops-solvency     needs 503    had 250     ← three balance rows gone
+     .ops-flow         needs 398    had 250     ← ALL payout evidence gone
+
+   So the board rendered a panel titled PAYOUT EVIDENCE — INDEPENDENT ON-CHAIN
+   PROOF containing no evidence, under a headline reading "money is moving and
+   proven on-chain". The proof was fetched, derived, tested and thrown away one
+   layer before an eye.
+
+   SCALING DOWN CANNOT FIX THIS, which is what the measurement settled: every
+   size is expressed in `--ops-u`, so shrinking it shrinks the container and the
+   contents together and the ratio never improves. Closing a 1089→835 gap needs
+   `--ops-u` near 0.77px — 10px labels at 7.7px. Illegible is not visible.
+
+   `min-height` + `overflow-y: auto` keeps the fixed canvas EXACTLY as designed
+   wherever the content fits (the wall display, where the footer still lands on
+   the bottom edge), and lets it scroll where it does not. Scrolling is honest;
+   clipping is not. */
 .hm-shell {
   display: flex;
   flex-direction: column;
-  height: 100dvh;
-  min-height: 0;
-  overflow: hidden;
+  min-height: 100dvh;
+  overflow-y: auto;
 }
 
 .ops-board {
@@ -227,10 +252,16 @@ body,
 }
 .ops-dot--sm { width: calc(7 * var(--ops-u)); height: calc(7 * var(--ops-u)); }
 
-/* ---- the money band ------------------------------------------- */
+/* ---- the money band -------------------------------------------
+   `flex: 1` alone made this the ONLY child that could give, so it took the
+   entire shortfall on any viewport shorter than the design: 250px of space for
+   503px of solvency rows and 398px of payout evidence. `flex-basis: auto` +
+   `flex-shrink: 0` means it asks for its content height first and the board
+   grows (and scrolls) instead of this band eating itself. It still GROWS to
+   fill a tall screen — that is the `flex-grow: 1`, and the reason the wall
+   display looks unchanged. */
 .ops-money {
-  flex: 1;
-  min-height: 0;
+  flex: 1 0 auto;
   display: flex;
   border: 1px solid var(--ops-rule);
 }
@@ -241,7 +272,6 @@ body,
   flex-direction: column;
   padding: calc(10 * var(--ops-u)) calc(16 * var(--ops-u));
   border-right: 1px solid var(--ops-rule);
-  overflow: hidden;
 }
 .ops-flow {
   flex: 1;
@@ -249,7 +279,6 @@ body,
   display: flex;
   flex-direction: column;
   padding: calc(10 * var(--ops-u)) calc(16 * var(--ops-u));
-  overflow: hidden;
 }
 
 .ops-panel-head {
