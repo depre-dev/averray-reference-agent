@@ -195,6 +195,27 @@ contract ABI: the artifact beats the description.
 
 ### 3.5.4 The opt-in was NECESSARY BUT NOT SUFFICIENT — verdict: WAIT
 
+> **⚠ CORRECTED 2026-08-04 — THE ROOT CAUSE BELOW IS WRONG. See
+> [HERMES_UPGRADE_v020.md §1](HERMES_UPGRADE_v020.md).**
+>
+> Both suspects were cleared by running the real config loader inside both
+> images with this repo's own `hermes/config/hermes.yaml` mounted:
+> `api_server` was always in `PORT_BINDING_PLATFORM_VALUES`, and `extra` always
+> resolved to `['host','key','port']` — **identically on v0.19.1 and v0.20.0**.
+> #75348 is about Baileys WhatsApp being *absent* from the allowlist and never
+> applied to us; #74505 concerns top-level YAML keys, while our key arrives via
+> env, which writes `extra` directly.
+>
+> The deciding check named below resolves to **present**, so the conclusion it
+> was meant to support does not follow. The failure is downstream of config, in
+> the adapter's `connect()` / bind.
+>
+> Left in place rather than deleted: it is an accurate record of what was
+> believed on 2026-07-31, and the black-box method is still worth reading. Only
+> the root cause and the "wait for upstream" conclusion are wrong — and a wrong
+> root cause left standing in a doc misdirects the next attempt, which this one
+> already did.
+
 With the `platforms:` block live and mounted (verified inside the container),
 `No messaging platforms enabled` **drops to 0** — the platform registers. But
 **8642 still never binds**, and the gateway log is silent: no error, no bind
