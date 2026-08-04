@@ -213,6 +213,8 @@ describe.sequential("INT-3c operator driver", () => {
 
     expect(exitCode).toBe(testCase.expectedExit());
     expect(output.stderr.text).toContain(testCase.expectedMessage);
+    expect(output.stderr.text).not.toContain(TOKEN_SENTINEL);
+    expect(output.stdout.text).not.toContain(TOKEN_SENTINEL);
     expect(fakeGitHub.remoteCalls).toBe(0);
     await expect(readFile(evidencePath, "utf8")).rejects.toMatchObject({
       code: "ENOENT",
