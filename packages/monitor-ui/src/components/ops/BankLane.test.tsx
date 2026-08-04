@@ -24,7 +24,7 @@ const lane = (over: Partial<NonNullable<BankBlock["lane"]>> = {}): BankBlock => 
       detail: "zero from aUSDC 0x2ec48840…acfa93, and this read path has never observed funds",
     },
     float: { text: "0.149412 USDC · 149,412 raw", tone: "ok" },
-    postage: { text: "1.51 DOT · committed postage, no withdraw path", tone: "ok" },
+    postage: { text: "0.2697 DOT · committed postage, no withdraw path", tone: "ok" },
     requests: { text: "no requests in flight", tone: "ok" },
     overdueRequestId: null,
     tone: "degraded",

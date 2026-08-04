@@ -288,22 +288,40 @@ const MAINNET_PROBES: ProductHealthProbe[] = [
 ];
 
 export const OPS_FIXTURE_NOMINAL: ProductHealth = {
-  // The lane as it stands TODAY: leg 1 executed, 149,412 raw of asset 22 live
-  // at the converted account, and the position still honestly unverified
-  // because leg 2 has not yet proven the aToken read path.
+  // The lane as it stands TODAY, on the v2.1 wrapper: leg 1 executed, 149,475
+  // raw of asset 22 live at the converted account, and the position still
+  // honestly unverified because leg 2 has not yet proven the aToken read path.
+  //
+  // Every figure here described the RETIRED v2.0 generation until 2026-08-04 —
+  // 1.51 DOT at the old wrapper image, 149,412 at the old converted account —
+  // under a comment claiming to be current. A fixture is documentation, and
+  // this one was a small copy of the exact defect the lane spent that day
+  // learning to detect.
   bank: {
     lane: {
       position: {
         status: "unverified" as const,
         raw: null,
         detail:
-          "zero from erc20:0x2ec48840…acfa93.balanceOf(0x98f0033e…fcb68e), and this read path has never observed funds — not yet evidence of an empty position",
+          "zero from erc20:0x2ec48840…acfa93.balanceOf(0x85663dfd…99f8f4), and this read path has never observed funds — not yet evidence of an empty position",
       },
-      float: { text: "0.149412 USDC · 149,412 raw", tone: "ok" as const },
-      postage: { text: "1.51 DOT · 15,100,000,000 raw · committed postage, no withdraw path", tone: "ok" as const },
+      float: { text: "0.149475 USDC · 149,475 raw", tone: "ok" as const },
+      // 0.3 DOT committed at the v2.1 arming, ~0.2697 after leg 1's delivery
+      // fees. A far thinner cushion over the 0.07 floor than v2.0's 1.51
+      // bought, which is the operationally interesting part of the repoint.
+      postage: { text: "0.2697 DOT · 2,697,000,000 raw · committed postage, no withdraw path", tone: "ok" as const },
       requests: { text: "no requests in flight", tone: "ok" as const },
       overdueRequestId: null,
-      subject: { text: "subject bank-xcm-v2.1 — matches the deployment manifest", tone: "ok" as const },
+      // The honest state: the producer does not emit `subject`. It was dropped
+      // from platform #932 rather than shipped weaker than specified — both
+      // sides rendered from `contracts.xcmWrapper` in one pass, so they agreed
+      // by construction and would have read green straight through the incident
+      // that motivated the field. A real discriminator (the armed bit over the
+      // append-only deployment history) is specced separately.
+      subject: {
+        text: "subject not declared by the feed — cannot confirm which wrapper generation these read",
+        tone: "awaiting" as const,
+      },
       tone: "degraded" as const,
     },
   },
