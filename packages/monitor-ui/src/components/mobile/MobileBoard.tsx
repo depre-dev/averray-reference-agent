@@ -108,6 +108,7 @@ export function MobileBoard({
       <div className="hm-ph-body">
         {breach ? <BreachPanel breach={breach} /> : <SolvencyPanel health={health} />}
         <FlowPanel health={health} emphasise={Boolean(breach)} nowMs={nowMs} />
+        <BankPanel bank={health.bank} />
       </div>
 
       <p className="hm-ph-scroll" aria-hidden>
@@ -370,6 +371,104 @@ function FlowPanel({ health, emphasise, nowMs }: { health: ProductHealth; emphas
       </div>
     </section>
   );
+}
+
+/**
+ * BANK — the second money path, on the screen you read when you are not at the
+ * desk.
+ *
+ * WHY THIS EXISTS. The phone board shipped without it. On 2026-08-04 the desk
+ * board showed this lane red with `1 OVERDUE · leg2-dispatched for 8.7h` and
+ * still aging, while the phone showed the same system as NOMINAL — "floors
+ * clear · money moving · proven on-chain" — and never mentioned the lane at
+ * all. Verified by searching the rendered text, not by looking: `OVERDUE` did
+ * not appear anywhere on the mobile surface. The one screen you check while
+ * away from the desk was the one that omitted the only thing that was wrong.
+ *
+ * EVERY STRING HERE IS DECIDED SERVER-SIDE, exactly as in the desktop lane.
+ * This picks layout and tone and nothing else. Re-deriving any of it would be
+ * a second opinion on money, and two opinions is how an operator learns to
+ * trust neither.
+ *
+ * ABSENT IS NOT BROKEN. No `bank` block means no feed was ever configured, and
+ * that renders nothing — a lane nobody wired must not occupy a phone screen to
+ * announce its own absence. Only a CONFIGURED feed that failed
+ * (`unavailable`) is worth a line.
+ *
+ * DETAIL ONLY WHEN NOT OK, which is the rule the probe rollups below already
+ * follow. A healthy lane is one quiet line; a lane that is degraded, red or
+ * unreadable opens its rows, because that is when the numbers are worth the
+ * vertical space on a 500px screen.
+ */
+function BankPanel({ bank }: { bank: ProductHealth["bank"] }) {
+  if (!bank) return null;
+  if (!bank.lane) {
+    return (
+      <p className="hm-ph-bank-absent" data-tone="awaiting" data-testid="mobile-bank-absent">
+        BANK — {bank.unavailable ?? "lane unavailable"}
+      </p>
+    );
+  }
+
+  const { lane } = bank;
+  const open = lane.tone !== "ok";
+  return (
+    <section className="hm-ph-bank" data-tone={lane.tone} data-testid="mobile-bank" aria-label="Bank — venue position">
+      <div className="hm-ph-sec">
+        <h2>BANK — HYDRATION USDC</h2>
+        {/* Hoisted above every row: an overdue request is the one state in this
+            lane where doing nothing costs money. */}
+        {lane.overdueRequestId ? (
+          <span className="hm-ph-bank-alarm" data-tone="red" data-testid="mobile-bank-alarm">
+            ⏳ OVERDUE
+          </span>
+        ) : null}
+      </div>
+
+      {/* WHAT the numbers are about, above the numbers. This lane once showed
+          four fresh, correctly-sourced, green tiles describing a wrapper
+          retired that morning — a reader who took in the float and stopped had
+          still read the wrong thing. */}
+      {lane.subject ? (
+        <p className="hm-ph-bank-subject" data-tone={lane.subject.tone} data-testid="mobile-bank-subject">
+          {lane.subject.text}
+        </p>
+      ) : null}
+
+      <p className="hm-ph-bank-requests" data-tone={lane.requests.tone} data-testid="mobile-bank-requests">
+        {lane.requests.text}
+      </p>
+
+      {open ? (
+        <dl className="hm-ph-facts" data-testid="mobile-bank-rows">
+          <dt>POSITION</dt>
+          <dd data-tone={bankPositionTone(lane.position?.status)}>
+            {lane.position
+              ? lane.position.status === "unverified"
+                ? `UNVERIFIED — ${lane.position.detail}`
+                : `${lane.position.raw} raw · ${lane.position.detail}`
+              : "not reported"}
+          </dd>
+          <dt>FLOAT</dt>
+          <dd data-tone={lane.float.tone}>{lane.float.text}</dd>
+          <dt>POSTAGE</dt>
+          <dd data-tone={lane.postage.tone}>{lane.postage.text}</dd>
+        </dl>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * `unverified` is warm grey, never coral — identical to the desktop lane.
+ *
+ * It means the instrument cannot vouch for itself, not that the money is gone.
+ * Paging on a blind instrument is the false red that teaches an operator to
+ * ignore the real one.
+ */
+function bankPositionTone(status: string | undefined): string {
+  if (status === "funded" || status === "empty") return "ok";
+  return "awaiting";
 }
 
 function incidentLine(health: ProductHealth, untrusted: boolean): string {
