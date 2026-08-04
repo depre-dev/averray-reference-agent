@@ -106,6 +106,53 @@ if [ -n "$TRACKED_DIRT" ] || [ -n "$SHIPPED_UNTRACKED" ]; then
   echo "WARNING: building from a DIRTY tree — self-freshness will report unknown."
 fi
 
+# DUPLICATE KEYS IN .env.prod — the LAST one silently wins.
+#
+# `docker compose --env-file` takes the last definition of a key, so a value
+# appended below an existing one shadows it, with no warning anywhere. On
+# 2026-08-04 five keys were duplicated on the live box, PRODUCT_HEALTH_RPC_URL
+# among them — the endpoint the payout evidence reads from and names on the
+# board. All five happened to resolve to the intended value. That was luck, not
+# a property: the same mechanism would as quietly shadow a good value with a
+# stale one. The earlier incident where a VALID setting got deleted because it
+# "was not in .env" came from this same blind spot.
+#
+# THREE TIERS, because a warning that fires on every deploy is one nobody
+# reads — the permanently-lit panel this project keeps deleting:
+#
+#   identical values         → cosmetic. Silent.
+#   blank first, real later  → the ordinary placeholder pattern: an empty key
+#                              from the template, filled in further down.
+#                              Silent, because it is how these files are built.
+#   two or more REAL values  → SHADOWED. The only tier worth saying out loud,
+#                              and it names the lines.
+#
+# Values are NEVER printed. These files hold provider keys and webhook URLs and
+# a deploy log is not where those belong; line numbers are enough to fix it.
+#
+# Advisory, like the skills sync and the bundle restart: a shadowed key is a
+# question for the operator, not a reason to refuse to deploy the board.
+warn_shadowed_env_keys() {
+  local file="$1" key lines real
+  [ -f "$file" ] || return 0
+  while read -r key; do
+    [ -n "$key" ] || continue
+    # Distinct NON-EMPTY values only. `grep .` drops the blanks, so the
+    # placeholder pattern never reaches the warning.
+    #
+    # `|| true` is load-bearing under this script's `set -euo pipefail`: a key
+    # duplicated with TWO BLANK values makes `grep .` match nothing, pipefail
+    # propagates its exit 1, and the deploy aborts. Caught by testing that exact
+    # shape — a guard that kills the deploy it guards is worse than no guard.
+    real="$(grep "^${key}=" "$file" | sed "s/^${key}=//" | grep . | sort -u | wc -l | tr -d ' ' || true)"
+    [ "${real:-0}" -ge 2 ] || continue
+    lines="$(grep -n "^${key}=" "$file" | cut -d: -f1 | tr '\n' ' ')"
+    echo "WARNING: ${key} has ${real} different values in ${file} (lines: ${lines% })" >&2
+    echo "         The LAST one wins. Confirm it is the one you intend." >&2
+  done < <(grep -oE '^[A-Za-z_][A-Za-z0-9_]*=' "$file" 2>/dev/null | tr -d '=' | sort | uniq -d)
+}
+warn_shadowed_env_keys .env.prod
+
 PROJECT=avg
 COMPOSE=(docker compose -p "$PROJECT" --env-file .env.prod
   -f ops/compose.yml
