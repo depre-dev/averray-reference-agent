@@ -228,10 +228,14 @@ describe("committed INT-2 ceremony mechanics", () => {
       expectNoCapabilityEvents: true,
     });
 
-    expect(integrationSuite).toContain("const EXPECTED_CASE_COUNT = 11;");
-    expect(shellSuite).toContain("INT2_CASES_STARTED expected=11");
-    expect(shellSuite).toContain('test "$_int2_executed" = "11"');
-    expect(workflow).toContain("executed-count.txt')\" = \"11\"");
+    expect(integrationSuite).toContain("const EXPECTED_CASE_COUNT = 14;");
+    expect(shellSuite).toContain("INT2_CASES_STARTED expected=14");
+    expect(shellSuite).toContain('test "$_int2_executed" = "14"');
+    expect(workflow).toContain("executed-count.txt')\" = \"14\"");
+    expect(shellSuite).toContain(
+      'export HARNESS_DISPATCH_DEP_CACHE_DIR="$_int2_dep_cache"',
+    );
+    expect(shellSuite).toContain("build-dispatch-dep-cache.mjs");
   });
 
   // verifyScriptedPairPreflight runs two full `git clone --local

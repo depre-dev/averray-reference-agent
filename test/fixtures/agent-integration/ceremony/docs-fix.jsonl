@@ -1,0 +1,2 @@
+{"tool_calls":[{"id":"int2-docs-fix","name":"shell_run","arguments":{"command":"printf '%b' '\\nThe supervised task-family ceremony records the exact search result at its pinned base.\\n' >> docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md"}}],"usage":{"input_tokens":2,"output_tokens":1,"requests":1},"finish_reason":"tool_call"}
+{"text":"Added one bounded supervised-ceremony clarification to the integration plan.","usage":{"input_tokens":2,"output_tokens":2,"requests":1},"finish_reason":"stop"}

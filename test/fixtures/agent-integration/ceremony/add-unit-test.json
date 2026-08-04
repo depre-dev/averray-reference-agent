@@ -1,4 +1,5 @@
 {
+  "_comment": "npm test is stricter than no_new_failures because the suite is green at the pinned base: every test must pass, rather than permitting failures already present at baseline. baseline_comparison is unavailable for this Node repository on the pinned pytest-only kernel.",
   "workItemId": "ceremony-add-unit-test-001",
   "correlationId": "ceremony-add-unit-test-001",
   "taskKind": "add_unit_test",
@@ -32,10 +33,13 @@
       "required": true
     },
     {
-      "id": "unit-test-baseline",
-      "type": "baseline_comparison",
-      "rule": "no_new_failures",
-      "baselineCommand": "npm test",
+      "id": "unit-test-artifact",
+      "type": "search",
+      "include": [
+        "test/unit/canonical-json-array-order.test.ts"
+      ],
+      "pattern": "preserves array order while sorting nested object keys",
+      "expectedMatches": 1,
       "required": true
     }
   ],
