@@ -155,12 +155,86 @@ check_mcp_tools() {
   echo "  CHECK 2 PASS: averray MCP connected, ${count} tools, averray_board_health present"
 }
 
+# CHECK 3 — can it COMPLETE a turn, not just accept one?
+#
+# CHECK 1 proves the Session API binds. It does not prove Hermes can answer,
+# and on 2026-08-04 that gap cost a day: the v0.20.0 upgrade passed CHECK 1 and
+# CHECK 2 at 09:20, was declared verified, and every question asked in Buzz
+# #Ops from 12:48 onward failed with `model "hermes-agent" not found`. Creating
+# a session is not completing one, and nothing here looked at the answer.
+#
+# THE MODEL NAME IS READ FROM THE SERVER, NOT HARDCODED. That is the whole
+# point. The regression was that the api_server's advertised VIRTUAL model name
+# stopped resolving to the configured model, so the exact string a client sends
+# is the string this check must send. Hardcoding `glm-5.2:cloud` here would
+# have sailed through the outage green, because the configured model was fine —
+# it was the advertised one that was broken.
+check_completion() {
+  local port key models advertised body content
+  port="$(grep '^HERMES_GATEWAY_PORT=' "$ENV_FILE" | tail -1 | sed 's/^HERMES_GATEWAY_PORT=//')"
+  port="${port:-8642}"
+  key="$(grep '^HERMES_GATEWAY_API_KEY=' "$ENV_FILE" | tail -1 | sed 's/^HERMES_GATEWAY_API_KEY=//')"
+  if [ -z "$key" ]; then
+    echo "  CHECK 3 SKIPPED: HERMES_GATEWAY_API_KEY is unset — cannot authenticate." >&2
+    return 1
+  fi
+
+  models="$(curl -s --max-time 10 "http://127.0.0.1:${port}/v1/models" \
+    -H "Authorization: Bearer ${key}" 2>/dev/null)" || true
+  advertised="$(printf '%s' "$models" \
+    | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+  if [ -z "$advertised" ]; then
+    echo "  CHECK 3 FAIL: GET /v1/models advertised no model id." >&2
+    return 1
+  fi
+
+  # A real turn against a real provider. 120s because this is a live model call
+  # with our full MCP tool surface in context, not a health ping.
+  body="$(curl -s --max-time 120 \
+    -X POST "http://127.0.0.1:${port}/v1/chat/completions" \
+    -H "Authorization: Bearer ${key}" \
+    -H 'Content-Type: application/json' \
+    -d "{\"model\":\"${advertised}\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with the single word: pong\"}],\"stream\":false}" \
+    2>/dev/null)" || true
+
+  # `\"` inside a JSON string value has to become something else BEFORE the
+  # extraction below, because `[^"]*` stops dead at the backslash-escaped quote.
+  # The message that matters here is literally `model \"hermes-agent\" not
+  # found`, so without this the check prints `model \` — a failure that names
+  # nothing, which is the exact trap CHECK 1's comment warns about. Caught by
+  # running the real 2026-08-04 payload through it.
+  unescape() { sed "s/\\\\\"/'/g"; }
+
+  # The provider's own error, surfaced verbatim. `model "X" not found` is the
+  # 2026-08-04 signature and naming it beats a bare status code.
+  if printf '%s' "$body" | grep -q '"error"'; then
+    echo "  CHECK 3 FAIL: completion with the advertised model '${advertised}' was rejected:" >&2
+    printf '%s' "$body" | unescape \
+      | sed -n 's/.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/    \1/p' | head -1 >&2
+    return 1
+  fi
+
+  # Assert on CONTENT. A 200 carrying an empty choices array is the same class
+  # of false pass as a 201 that never completed — it looks like an answer and
+  # is not one.
+  content="$(printf '%s' "$body" | unescape \
+    | sed -n 's/.*"content"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+  if [ -z "$content" ]; then
+    echo "  CHECK 3 FAIL: completion with '${advertised}' returned no content." >&2
+    printf '%s' "$body" | head -c 300 | sed 's/^/    /' >&2
+    echo >&2
+    return 1
+  fi
+  echo "  CHECK 3 PASS: completed a turn as '${advertised}' -> $(printf '%s' "$content" | head -c 40)"
+}
+
 run_checks() {
   echo
   echo "── checks ──────────────────────────────────────────────────────────"
   local failed=false
   check_session_api || failed=true
   check_mcp_tools || failed=true
+  check_completion || failed=true
   echo
   [ "$failed" = false ]
 }

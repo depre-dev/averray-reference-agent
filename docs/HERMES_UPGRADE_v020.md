@@ -10,7 +10,7 @@ shape — upstream diffed against **what we actually use**, not a feature tour.
 | Running | **v0.20.0** (`v2026.8.3`) since 2026-08-04 — was v0.18.0 (`v2026.7.1`) for a month |
 | Released | v0.20.0 shipped 2026-08-03; taken the next day |
 | Skipped | v0.19.1 — NO-GO on 2026-07-31, **on a diagnosis that was wrong** (§1) |
-| Verdict | **DONE — upgraded and verified 2026-08-04.** See §6 |
+| Verdict | **Upgraded 2026-08-04. Declared verified, WAS NOT** — it broke every answer for six hours (§7) |
 
 
 It is **v0.20.0**, not "2.0" — the project is still on a 0.x line.
@@ -138,7 +138,7 @@ ops/upgrade-hermes.sh --check-only  # run the checks against what is live now
 3. **Recreate only `hermes` + `hermes-gateway`**, with `--no-deps` — pulling
    deps would re-run `hermes-permissions` and its `chmod -R 0777 /opt/data`,
    re-opening the volume Hermes secures to 0700.
-4. **Two checks**, deliberately narrow because a check that tests everything is
+4. **Three checks**, deliberately narrow because a check that tests everything is
    a check nobody runs:
    - **Session API binds and answers** — `POST /api/sessions` returns 201.
      `/health` is *not* sufficient: on v0.19.1 the gateway reported healthy
@@ -148,6 +148,10 @@ ops/upgrade-hermes.sh --check-only  # run the checks against what is live now
      `averray_board_health`. Not a log grep: under lazy startup the boot log is
      silent on MCP whether the surface is healthy or dead (§6). Not `mcp list`
      either: that reports what is configured, and configured is not working.
+   - **A turn actually completes** — post to `/v1/chat/completions` using the
+     model id read from `GET /v1/models`, and assert non-empty content. Added
+     after v0.20.0 shipped six hours of 404s past the first two (§7). The first
+     check proves the API *accepts* work; only this one proves it *does* any.
 
 It does **not** roll back on its own. A failed check prints the exact revert
 commands and stops — humans own deploy, and auto-restoring a data volume is not
@@ -217,3 +221,83 @@ mitigation. **A real decision, not upgrade cleanup — tracked separately.**
 "you already have a local skill by this name — yours was kept", so the agent
 runs v0.18-era bundled skills under a v0.20.0 binary. `ops/averray-ops` is
 unaffected (bind-mounted from the repo, synced by `deploy-monitor.sh`).
+
+## 7. The regression this upgrade shipped, and the check that missed it
+
+**Symptom.** From 12:48 on 2026-08-04, every question asked in the Buzz `#Ops`
+channel came back:
+
+```
+API call failed after 3 retries: HTTP 404: model "hermes-agent" not found
+```
+
+Roughly six hours, on the control plane, while §6 recorded the upgrade as
+verified.
+
+**Root cause.** The `api_server` platform is OpenAI-compatible, so it advertises
+a model in `GET /v1/models` and clients send that id back on every request. With
+`model_name` unset it advertises the string `hermes-agent` — a **virtual** name
+Hermes is meant to recognise as its own and swap for the configured model before
+calling the provider. `gateway/platforms/api_server.py` still carries the intent:
+`_request_agent_overrides(body, virtual_model=self._model_name)`, and it only
+treats a request as a route when `model != self._model_name`.
+
+On v0.20.0 the swap stopped happening. The virtual name reached Ollama Cloud
+verbatim, and Ollama answered correctly — it has no such model.
+
+Everything else was healthy, which is why this took so long to find:
+
+| Suspected | Actual |
+|---|---|
+| Config wrong | `hermes config get model` → `glm-5.2:cloud`. Correct. |
+| `:cloud` suffix retired | All four names tested → **200**. Suffix is fine. |
+| `hermes-agent` a catalog fallback | 0 occurrences in `models_dev_cache.json`. |
+| api_server dead | `gateway_state.json` said `fatal` — **a stale corpse**; live `POST /api/sessions` → 201. |
+| The bundled `hermes-agent` skill | Name collision only. Unrelated. |
+
+The only wrong value in the entire system was the name on the wire.
+
+**Fix.** `hermes/config/hermes.yaml` now sets
+`platforms.api_server.model_name: glm-5.2:cloud`. This does not depend on
+upstream restoring the swap: whether or not the virtual name is resolved, the
+string clients send is now one the provider honours. The pass-through stops
+being a failure mode rather than merely being avoided.
+
+`test/unit/hermes-config.test.ts` reads the file and fails if `model_name` is
+absent, is `hermes-agent`, or drifts from `model.default`. Verified by breaking
+the config both ways and watching it go red — the config is a mounted artefact,
+so a test that reads it is the only thing that can guard it.
+
+### The check was wrong, and it was wrong in a way we had already been warned about
+
+CHECK 1 does `POST /api/sessions` → 201 and calls that proof. **Creating a
+session is not completing one.** It proved the API binds, which is genuinely the
+v0.19.1 failure it was written for, and then that pass got read as "the upgrade
+works". The answer path was never exercised. §6's own lesson about CHECK 2 —
+that a check has to *do the thing* rather than observe a proxy for it — applied
+here too and was not carried across.
+
+CHECK 3 now completes a real turn and asserts on content. Two properties matter:
+
+- **It sends the model id read from `GET /v1/models`, not a hardcoded name.**
+  That is the exact string a client sends. Hardcoding `glm-5.2:cloud` would have
+  passed green straight through this outage, because the *configured* model was
+  never the broken one.
+- **It asserts non-empty content**, because a 200 with empty `choices` is the
+  same class of false pass as a 201 that never completed.
+
+Both of its JSON extractions normalise `\"` first. Without that the failure line
+for this very incident renders as `model \` — a check that names nothing. Found
+by running the real payload through it, not by reading it.
+
+### Still open after this fix
+
+- **The auxiliary lane leaks to a paid fallback.** The gateway logs
+  `PAID lane engaged — OpenRouter fallback model 'google/gemini-3.6-flash' is
+  not a :free SKU and may incur real spend`, despite `auxiliary.background_review`
+  being pinned to ollama-cloud. Real money; needs its own pass.
+- **`terminal.backend: local` on a `0.0.0.0` listener.** The warning is real and
+  the docker backend is not the answer (no socket is mounted; granting one is
+  worse). Firewalling 8642 is. Unowned.
+- **Whether upstream intends the virtual-name swap to still work.** Worth an
+  issue; our fix is deliberately independent of the answer.
