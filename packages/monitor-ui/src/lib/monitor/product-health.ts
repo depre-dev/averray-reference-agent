@@ -254,6 +254,15 @@ export interface BankLaneView {
   postage: BankLine;
   requests: BankLine;
   overdueRequestId: string | null;
+  /**
+   * Which deployment generation every value below describes.
+   *
+   * Optional here and only here: a board deployed ahead of the monitor that
+   * renders it must not crash on a payload without the field. It is NOT
+   * optional in the view-model — the server always decides a subject line, and
+   * "cannot confirm" is one of its answers.
+   */
+  subject?: BankLine;
   tone: "ok" | "degraded" | "red" | "awaiting";
 }
 

@@ -59,6 +59,37 @@ describe("a lane nobody wired occupies no board", () => {
   });
 });
 
+describe("the subject sits above the numbers it qualifies", () => {
+  test("a stale subject renders, and carries its own red tone", () => {
+    // 2026-08-04: four fresh, correctly-sourced, green tiles describing a
+    // wrapper retired that morning. A reader who took in the float and stopped
+    // had still read the wrong thing, so this line goes ABOVE the rows.
+    const { getByTestId } = render(
+      <BankLane
+        bank={lane({
+          subject: { text: "STALE SUBJECT — these read 0x8d1a…, the manifest declares 0x2AF3…", tone: "red" },
+        })}
+      />,
+    );
+    const subject = getByTestId("ops-bank-subject");
+    expect(subject.textContent).toContain("STALE SUBJECT");
+    expect(subject.getAttribute("data-tone")).toBe("red");
+    // Document order, not merely presence: a warning below the numbers it
+    // invalidates is a warning the reader meets too late.
+    expect(subject.compareDocumentPosition(getByTestId("ops-bank-position"))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  test("a payload without the field still renders the lane", () => {
+    // Optional on the wire so a board deployed ahead of the monitor that fills
+    // it in does not crash on a payload that predates it.
+    const { queryByTestId, getByTestId } = render(<BankLane bank={lane()} />);
+    expect(queryByTestId("ops-bank-subject")).toBeNull();
+    expect(getByTestId("ops-bank-float")).toBeTruthy();
+  });
+});
+
 describe("the position tile states unverified rather than showing a zero", () => {
   test("an uncalibrated zero reads UNVERIFIED and stays warm grey", () => {
     const { getByTestId } = render(<BankLane bank={lane()} />);

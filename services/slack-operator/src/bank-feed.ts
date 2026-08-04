@@ -99,6 +99,46 @@ export interface BankRequests {
   lastError?: string | null;
 }
 
+/**
+ * WHICH DEPLOYMENT GENERATION THESE READINGS ARE ABOUT.
+ *
+ * On 2026-08-04 this lane's first live values were reads of a wrapper retired
+ * that same morning: float 149,412 at the RETIRED converted account while the
+ * live one held 149,475 with a request in flight, postage from the old wrapper
+ * image, and an empty request table because the observer had never seen the
+ * live wrapper. Every reading was fresh, correctly sourced and honestly
+ * rendered — and about the wrong subject. The redeploy never propagated to the
+ * feed's env or to the manifest.
+ *
+ * Nothing on this lane could have caught it. `readAtMs` guards staleness in
+ * TIME, `calibration` guards an unproven read path, shape validation guards
+ * network drift. None of them ask whether the address being read is still the
+ * one that matters — and a confident green tile about an abandoned account is a
+ * worse lie than any of the ones those guards prevent.
+ *
+ * The two fields come from DIFFERENT places on purpose: `derivedFrom` from the
+ * env the reads actually used, `declared` from the deployment manifest. A
+ * producer that computed both from one source would agree with itself forever,
+ * which is precisely the failure this exists to detect.
+ */
+export interface BankSubject {
+  /** The wrapper generation the feed's ENV targets belong to. */
+  derivedFrom: string;
+  /** The wrapper generation `deployments/<profile>.json` declares current. */
+  declared: string;
+  /** Human label for the declared generation, e.g. "bank-xcm-v2.1". */
+  label?: string | null;
+}
+
+/** Do the readings describe the generation the manifest says is live? */
+export function bankSubjectIsCurrent(subject: BankSubject): boolean {
+  // Case-insensitive: these are hex addresses, and EIP-55 checksum casing
+  // differs between a manifest written by a deploy script and an env var typed
+  // by a human. Casing is not a retarget, and reporting it as one would make
+  // this the false alarm it exists to avoid being.
+  return subject.derivedFrom.trim().toLowerCase() === subject.declared.trim().toLowerCase();
+}
+
 export interface BankFeed {
   /** aToken position — `balanceOf(truncate20(convertedAccount))`. */
   position: SourcedRead;
@@ -126,6 +166,14 @@ export interface BankFeed {
    * projecting after a restart.
    */
   calibration?: PositionCalibration | null;
+  /**
+   * Which generation these readings describe. See BankSubject.
+   *
+   * Optional because the producer may not send it yet. Absent is NOT treated as
+   * agreement — the lane says it cannot confirm the subject, which is the
+   * honest reading of silence and the exact thing whose absence cost a morning.
+   */
+  subject?: BankSubject | null;
 }
 
 /**
