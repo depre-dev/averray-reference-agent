@@ -43,29 +43,70 @@ than the append:
 A formatting append is the easiest case that exists: no imports, no compilation,
 no semantics. These three touch all of it.
 
-## 1. Deliverable D1 — settle the `search` semantics empirically
+## 1. Deliverable D1 — RESOLVED 2026-08-04
 
-`docs-fix` asks for `expectedMatches: 1`, pattern `supervised`, include
-`docs/**`. The kernel's implementation
-(`agent_runtime/verification/checks.py:150-176`) globs the include patterns over
-the workspace, sums **every regex match in every matching file's full text**, and
-passes only on exact equality.
+> Settled by running the pinned evaluator, as asked. **Cause 2 was correct**, and
+> both of my numbers were wrong.
 
-The current tree has **59 occurrences across 20 files** under `docs/`.
+```
+include docs/**        expected=1 actual=0  files=0    ← glob yields directories
+include docs/**/*.md   expected=1 actual=40 files=37   ← at the immutable base
+```
 
-So the criterion cannot pass as written, and there are two candidate reasons:
+`Path.glob("docs/**")` yields directories, which `is_file()` discards, so the
+count is `0` and no `expectedMatches` value could ever have passed with that
+include.
 
-1. the count is over the whole workspace, so `1` is simply the wrong number; or
-2. `Path.glob("docs/**")` yields directories rather than files, so the count is
-   `0` and `1` is unreachable for a different reason.
+My "59 across 20 files" was doubly wrong: measured on the current tree rather
+than the pinned task base, and with a glob that matches files rather than the
+one the fixture actually uses. The measurement that counts is the one taken at
+the base revision through the real evaluator.
 
-**Determine which by running it, not by reading.** The check reports
-`detail=expected=N actual=M files=K` — that string settles it. Then fix the
-fixture to match the real semantics, and say in the handback which of the two it
-was.
+**Change `docs-fix.json` to `include: ["docs/**/*.md"]` and
+`expectedMatches: 41`** — 40 at base, plus the one the script adds.
 
-Do not change the kernel. If the semantics turn out to be wrong rather than the
-fixture, stop and say so — that is a kernel packet and a different conversation.
+## 1a. Deliverable D4 SUPERSEDED — `baseline_comparison` cannot run here at all
+
+> Found by probing the compiler before writing anything. This is the real result
+> of the packet, and it is worth more than three green cases.
+
+```
+manifest=False
+code=invalid_baseline_command criterion=behavior
+message=baseline_command must invoke pytest
+```
+
+`agent_runtime/verification/checks.py:184-195` accepts only `pytest`,
+`pytest-*`, or `python -m pytest`, then **injects `--junitxml` and parses JUnit
+XML**. It is not pytest-only by convention; it is pytest-only by construction.
+
+`add-unit-test.json` and `small-refactor.json` both specify
+`baselineCommand: "npm test"`, so the pinned kernel refuses their contracts at
+compile time — correctly, and before dispatch. The criterion never executes, its
+elapsed time cannot be measured, and no model script could satisfy it.
+
+**So `baseline_comparison` is unavailable to this repository, in this language,
+with this kernel — while `packages/schemas` advertises it as a supported
+criterion type.** That gap is now recorded as its own issue. Two of the four task
+families chosen on 2026-07-25 were unbuildable from the day they were written,
+and nothing noticed because nothing wired them.
+
+### The decision, so this is not read as weakening
+
+`add-unit-test` and `small-refactor` are **redesigned, not softened**:
+
+- replace the `baseline_comparison` criterion with `type: command`,
+  `command: npm test`, `required: true`; and
+- add a `search` criterion that asserts the intended artefact exists — for
+  `add-unit-test`, the new test file; for `small-refactor`, the changed helper.
+
+`command: npm test` is **stricter** than `no_new_failures`, not weaker: it
+demands the whole suite pass, where the baseline rule would tolerate a failure
+that also failed at base. It is a fair substitute here only because the suite is
+green at base, and the fixture must say so in a comment rather than leave a
+reader to assume the baseline semantics survived.
+
+Do not reintroduce `baseline_comparison` anywhere. Do not change the kernel.
 
 ## 2. Deliverable D2 — a scripted model per family
 
@@ -89,15 +130,18 @@ have drifted apart before:
 
 The existing unit guard covering the count must be updated in the same commit.
 
-## 4. Deliverable D4 — the budget risk in `baseline_comparison`
+## 4. Deliverable D4 — the budget risk in running the suite
 
-`no_new_failures` runs `baselineCommand: npm test` and then the post-change run.
-That is the full suite — currently 2,600+ tests — **twice, inside the container**.
+*(Rewritten 2026-08-04. The original assumed `baseline_comparison` would run it
+twice; see §1a — it cannot run at all. The budget question survives, halved.)*
+
+Both redesigned fixtures now run `npm test` **once** inside the container, over a
+2,600-test suite.
 
 Measure it before assuming a budget. If the elapsed limit in either fixture is
-too small, report the measurement and propose a value; do not quietly raise a cap
-to make a case pass. The budget caps are a runaway ceiling, and moving one to fit
-an observation is how a ceiling stops meaning anything.
+too small, report the measurement and propose a value, but **leave the cap
+unchanged in the diff** and let me decide. The budget caps are a runaway ceiling,
+and moving one to fit an observation is how a ceiling stops meaning anything.
 
 ## 5. Deliverable D5 — report what breaks
 
@@ -138,6 +182,24 @@ anything touching the money rail, wallet, signer, claim or submission paths.
    buying.
 3. **No criterion is weakened, and no budget is raised, to produce green.** Both
    are the observation, not the obstacle.
+4. **`baseline_comparison` is replaced, not softened.** *(added 2026-08-04)* It
+   cannot execute against a Node repository on the pinned kernel at all. Its
+   substitute — `command: npm test` — is stricter, and the fixtures say so
+   rather than letting a reader assume the baseline semantics survived.
+5. **The packet was right to be unsatisfiable.** *(added 2026-08-04)* It was
+   written to find out what happens when the machine meets something harder than
+   a formatting append. It found two of the four chosen families unbuildable
+   from the day they were written, before a line of code was changed. Stopping
+   was the correct handback, and it is worth more than three green cases.
+
+### What this changes about the burn-in
+
+§21.2 wants ≥3 task families. With `baseline_comparison` unavailable, the three
+that remain reachable are `lint-format`, `docs-fix`, and the redesigned pair —
+all resting on `command` plus `search`. **No criterion type that compares against
+a baseline is available to this repository at all.** That is a real narrowing of
+what the burn-in can claim, and it should be stated when the burn-in is planned
+rather than discovered again there.
 
 ### Operator note
 
