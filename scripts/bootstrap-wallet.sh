@@ -20,7 +20,11 @@ const agentAccount = privateKeyToAccount(agentPrivateKey);
 const adminAccount = privateKeyToAccount(adminPrivateKey);
 const verifierAccount = privateKeyToAccount(verifierPrivateKey);
 
-console.log(`HERMES_IMAGE=nousresearch/hermes-agent:v2026.6.19`);
+// Held in lockstep with ops/.env.example by compose-env.test.ts. A bootstrap
+// that hands out a different pin than the example is a fresh install starting
+// on a version nobody is testing — which is exactly what happened while both
+// sat on v2026.6.19 and production ran v2026.7.1.
+console.log(`HERMES_IMAGE=nousresearch/hermes-agent:v2026.8.3`);
 console.log(`POSTGRES_USER=avg_agent`);
 console.log(`POSTGRES_PASSWORD=${randomUUID().replaceAll("-", "")}`);
 console.log(`POSTGRES_DB=avg_agent`);
