@@ -45,6 +45,18 @@ describe("a lane nobody wired occupies no board", () => {
     const { getByTestId } = render(<BankLane bank={{ unavailable: "bank feed unreachable — ECONNREFUSED" }} />);
     expect(getByTestId("ops-bank-absent").textContent).toContain("ECONNREFUSED");
   });
+
+  test("a switched-off feed lands here too — one grey line, and no coloured lane", () => {
+    // The live backend answers a disabled feed with a VALID payload whose four
+    // reads all carry `lastError: bank_lane_feed_disabled`. Rendered as a lane
+    // that was an amber BANK strip for a feature nobody had enabled; the server
+    // now collapses it to `unavailable`, and this is what that must look like.
+    const { getByTestId, queryByTestId } = render(
+      <BankLane bank={{ unavailable: "bank lane switched off at the source — BANK_LANE_FEED_ENABLED is not set" }} />,
+    );
+    expect(queryByTestId("ops-bank")).toBeNull(); // no lane ⇒ no lane tone
+    expect(getByTestId("ops-bank-absent").getAttribute("data-tone")).toBe("awaiting");
+  });
 });
 
 describe("the position tile states unverified rather than showing a zero", () => {

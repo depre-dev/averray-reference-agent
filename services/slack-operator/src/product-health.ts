@@ -40,7 +40,8 @@ import { bucketPayoutsByHour, isHistogramUnavailable, type PayoutHistogram } fro
 import { endpointHost, pinnedCompareRange, type CrossCheckView } from "./payout-crosscheck.js";
 import { burnBasisLabel, isBurnUnmeasurable, type MeasuredBurn } from "./gas-burn-rate.js";
 import { readBankFeed } from "./bank-feed-fetch.js";
-import { bankLaneView, BANK_FEED_ABSENT, type BankLaneView } from "./bank-lane.js";
+import { bankFeedIsDisabled } from "./bank-feed.js";
+import { bankLaneView, BANK_FEED_DISABLED, type BankLaneView } from "./bank-lane.js";
 import { createCrossCheckCache, type CrossCheckCache } from "./payout-crosscheck-cache.js";
 import { createGasSpendCache, type GasSpendCache, type GasSpendSnapshot, type GasUnreadable } from "./gas-spend-cache.js";
 import { alertProvenance, decideMoneyAlert } from "./money-alert.js";
@@ -2701,7 +2702,13 @@ export async function collectProductHealthProbes(
   // rather than forming its own — same rule as the ops verdict.
   const bankRead = await readBankFeed({ url: config.bankFeedUrl, fetchImpl });
   const bank: BankBlock | undefined = bankRead.feed
-    ? { lane: bankLaneView({ feed: bankRead.feed, nowMs: chainCtx.nowMs }) ?? undefined }
+    ? // A switched-off feed is a VALID payload full of read errors, shaped
+      // exactly like four broken instruments. Rendered as a lane it lit BANK
+      // amber for a feature nobody had enabled — so it collapses to the same
+      // one quiet line an absent feed gets, with its own sentence.
+      bankFeedIsDisabled(bankRead.feed)
+      ? { unavailable: BANK_FEED_DISABLED }
+      : { lane: bankLaneView({ feed: bankRead.feed, nowMs: chainCtx.nowMs }) ?? undefined }
     : bankRead.reason
       ? { unavailable: bankRead.reason }
       : undefined; // not configured — no lane at all, and no complaint
