@@ -913,7 +913,7 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
       "verification:",
       "  baseline_command: null",
       '  preflight_command: "npm run typecheck && /node_modules/.bin/vitest --version"',
-      "  command_timeout_seconds: 60",
+      "  command_timeout_seconds: 120",
       "  protected_paths: []",
       "strategies:",
       "  - direct_execution",

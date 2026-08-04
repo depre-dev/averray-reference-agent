@@ -268,6 +268,11 @@ produce a non-zero `baseline_failures` count and stop before model execution.
 The normal task-family runs must record zero baseline failures before their
 ordinary command criteria run again after the scripted change.
 
+The pilot profile gives command criteria up to the fixture's existing
+120-second elapsed budget. This is profile-scoped: the kernel's default remains
+30 seconds, and the complete `npm test -- --no-cache` criteria are not narrowed
+to make hosted runners pass.
+
 The Harness Docker provider configures the persistent container with the
 uid/gid that owns the mounted workspace, and refuses to reattach if that
 identity differs. This covers every later `docker exec`, preventing `tsc` and

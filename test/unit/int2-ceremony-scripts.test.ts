@@ -629,7 +629,7 @@ describe("committed INT-2 ceremony mechanics", () => {
     );
     expect(suite).toContain('--user "$(id -u):$(id -g)"');
     expect(suite).toContain("INT2_PILOT_ENVIRONMENT_FAILED");
-    expect(suiteTest).toContain('"  command_timeout_seconds: 60"');
+    expect(suiteTest).toContain('"  command_timeout_seconds: 120"');
     expect(suite).toContain("INT2_PILOT_WORKSPACE_OWNERSHIP_FAILED");
     expect(suite).toContain("INT2_PILOT_GIT_OWNERSHIP_VERIFIED");
     expect(suite).toContain("INT2_PILOT_WORKSPACE_OWNERSHIP_VERIFIED");
