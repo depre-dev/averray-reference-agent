@@ -30,11 +30,11 @@
 
 FROM node:22-bookworm-slim
 
-# git plus util-linux's setpriv only. ca-certificates is present for git's own
+# git only. ca-certificates is present for git's own
 # TLS verification, not for network access: the pilot profile is egress
 # deny_all and the Harness Docker provider runs the container with no network.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates util-linux \
+  && apt-get install -y --no-install-recommends git ca-certificates \
   && git config --system --add safe.directory /workspace \
   && rm -rf /var/lib/apt/lists/*
 
@@ -61,13 +61,11 @@ ENV NPM_CONFIG_CACHE="/tmp/pilot-npm-cache"
 RUN mkdir -p "$HOME" "$NPM_CONFIG_CACHE" \
   && chmod 1777 "$HOME" "$NPM_CONFIG_CACHE"
 
-# Docker bind mounts retain the runner's uid/gid on Linux. Execute each Harness
-# command as that mounted workspace owner so compilers cannot leave root-owned
-# outputs that the durable cleanup step cannot remove. Docker Desktop commonly
-# presents the mount as root-owned; in that case no uid transition is needed.
-# The system Git exception above still trusts only the fixed, network-disabled
-# sandbox mount point — never a wildcard.
-ENTRYPOINT ["/bin/sh", "-c", "uid=$(stat -c %u /workspace); gid=$(stat -c %g /workspace); if [ \"$uid:$gid\" = \"0:0\" ]; then exec \"$@\"; fi; exec setpriv --reuid \"$uid\" --regid \"$gid\" --clear-groups \"$@\"", "pilot-entrypoint"]
+# Harness configures the persistent container to run as the mounted workspace
+# owner's numeric uid/gid. The writable HOME and npm cache above let that
+# non-root identity use the pinned offline toolchain. The system Git exception
+# still trusts only the fixed, network-disabled sandbox mount point — never a
+# wildcard.
 
 WORKDIR /workspace
 CMD ["sleep", "infinity"]

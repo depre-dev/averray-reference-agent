@@ -31,9 +31,9 @@ export HARNESS_CHECKOUT="$CEREMONY_ROOT/agent-harness"
 export REFERENCE_CHECKOUT="/absolute/path/to/averray-reference-agent"
 
 git clone https://github.com/averray-agent/agent-harness.git "$HARNESS_CHECKOUT"
-git -C "$HARNESS_CHECKOUT" checkout --detach 73133ef
+git -C "$HARNESS_CHECKOUT" checkout --detach e21c831
 test "$(git -C "$HARNESS_CHECKOUT" rev-parse HEAD)" = \
-  "73133efd5e193c4d6f8bb8ecd159e5e862616aea"
+  "e21c831ddfa3d80c4c1113d42dae4eba7db67079"
 test -z "$(git -C "$HARNESS_CHECKOUT" status --porcelain)"
 
 cd "$HARNESS_CHECKOUT"
@@ -268,11 +268,12 @@ produce a non-zero `baseline_failures` count and stop before model execution.
 The normal task-family runs must record zero baseline failures before their
 ordinary command criteria run again after the scripted change.
 
-On Linux, the image entrypoint drops from root to the uid/gid that owns the
-mounted workspace before it invokes a command. This prevents `tsc` and other
-tools from leaving root-owned output that the durable cleanup step cannot
-remove. The automated bootstrap creates a nested output through the image and
-then removes it as the host user; it refuses with
+The Harness Docker provider configures the persistent container with the
+uid/gid that owns the mounted workspace, and refuses to reattach if that
+identity differs. This covers every later `docker exec`, preventing `tsc` and
+other tools from leaving root-owned output that the durable cleanup step cannot
+remove. The automated bootstrap mirrors that identity, creates a nested output,
+and then removes it as the host user; it refuses with
 `INT2_PILOT_WORKSPACE_OWNERSHIP_FAILED` before case 1 if that property is false.
 
 Start the local monitor in a dedicated terminal for projection snapshots. It

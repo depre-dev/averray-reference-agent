@@ -82,11 +82,11 @@ for _int2_command in docker git node npm uv; do
 done
 mkdir -p "$_int2_evidence"
 printf '%s\n' \
-  "INT2_SUITE_BOOTSTRAP_STARTED pin=73133efd5e193c4d6f8bb8ecd159e5e862616aea" \
+  "INT2_SUITE_BOOTSTRAP_STARTED pin=e21c831ddfa3d80c4c1113d42dae4eba7db67079" \
   > "$_int2_bootstrap_log"
 
 export HARNESS_CHECKOUT="${HARNESS_CHECKOUT:-$_int2_root/agent-harness}"
-_int2_pin="73133efd5e193c4d6f8bb8ecd159e5e862616aea"
+_int2_pin="e21c831ddfa3d80c4c1113d42dae4eba7db67079"
 # shellcheck source=scripts/ceremony/lib/int2-harness-checkout.sh
 source "$_int2_repo/scripts/ceremony/lib/int2-harness-checkout.sh"
 int2_checkout_harness "$HARNESS_CHECKOUT" "$_int2_pin" "$_int2_bootstrap_log"
@@ -258,6 +258,7 @@ git -C "$_int2_git_probe" \
   -c user.email=int2-suite.invalid \
   commit --quiet -m "INT-2 pilot Git ownership probe"
 docker run --rm --network none \
+  --user "$(id -u):$(id -g)" \
   --volume "$_int2_git_probe:/workspace" \
   --workdir /workspace \
   "$INT2_PILOT_IMAGE" \

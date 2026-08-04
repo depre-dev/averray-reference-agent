@@ -27,7 +27,7 @@ _int2_bringup() {
   [ -d "$CEREMONY_ROOT/profiles/coding-change-pilot" ] \
     || { die "pinned coding-change-pilot profile is absent"; return 1; }
 
-  _int2_pin="73133efd5e193c4d6f8bb8ecd159e5e862616aea"
+  _int2_pin="e21c831ddfa3d80c4c1113d42dae4eba7db67079"
   _int2_head="$(git -C "$HARNESS_CHECKOUT" rev-parse HEAD 2>/dev/null)" \
     || { die "cannot read Harness revision"; return 1; }
   if [ "$_int2_head" != "$_int2_pin" ]; then

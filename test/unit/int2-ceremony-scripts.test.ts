@@ -486,7 +486,7 @@ describe("committed INT-2 ceremony mechanics", () => {
           "int2-checkout-test",
           CHECKOUT_HELPER,
           path.join(temporary, "agent-harness"),
-          "73133efd5e193c4d6f8bb8ecd159e5e862616aea",
+          "e21c831ddfa3d80c4c1113d42dae4eba7db67079",
           log,
         ],
         {
@@ -541,7 +541,7 @@ describe("committed INT-2 ceremony mechanics", () => {
         "int2-checkout-test",
         CHECKOUT_HELPER,
         checkout,
-        "73133efd5e193c4d6f8bb8ecd159e5e862616aea",
+        "e21c831ddfa3d80c4c1113d42dae4eba7db67079",
         bootstrapLog,
       ],
       {
@@ -622,7 +622,7 @@ describe("committed INT-2 ceremony mechanics", () => {
     expect(dockerfile).not.toMatch(
       /safe\.directory\s+(?:"|')?\*(?:"|')?/u,
     );
-    expect(dockerfile).toContain("setpriv --reuid");
+    expect(suite).toContain('--user "$(id -u):$(id -g)"');
     expect(suite).toContain("INT2_PILOT_ENVIRONMENT_FAILED");
     expect(suite).toContain("INT2_PILOT_WORKSPACE_OWNERSHIP_FAILED");
     expect(suite).toContain("INT2_PILOT_GIT_OWNERSHIP_VERIFIED");
