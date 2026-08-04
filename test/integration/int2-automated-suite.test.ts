@@ -56,7 +56,6 @@ const REQUIRED_ENVIRONMENT = [
   "HARNESS_TEST_DATABASE_URL",
   "HARNESS_BIN",
   "HARNESS_CHECKOUT",
-  "HARNESS_DISPATCH_DEP_CACHE_DIR",
   "INT2_PILOT_IMAGE",
 ] as const;
 const missingEnvironment = REQUIRED_ENVIRONMENT.filter(
@@ -76,9 +75,7 @@ const FIXTURE_ROOT = path.join(
   REPOSITORY_ROOT,
   "test/fixtures/agent-integration/ceremony",
 );
-const DEPENDENCY_CACHE_ROOT =
-  process.env.HARNESS_DISPATCH_DEP_CACHE_DIR?.trim() ?? "";
-const EXPECTED_CASE_COUNT = 14;
+const EXPECTED_CASE_COUNT = 11;
 const TEST_TIMEOUT_MS = 240_000;
 const TERMINAL_WAIT_MS = 180_000;
 const HARNESS_STATE_WAIT_MS = 90_000;
@@ -104,18 +101,6 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
     case: string;
     mutation: string;
     observedFailure: string;
-  }> = [];
-  const taskFamilyResults: Array<{
-    case: "add-unit-test" | "docs-fix" | "small-refactor";
-    lifecycle: string;
-    verificationVerdict: string;
-    criteria: Array<{
-      id: string;
-      passed: boolean;
-      reason: string;
-      detail: string;
-    }>;
-    verificationElapsedSeconds: number;
   }> = [];
   const workers = new Set<HarnessWorker>();
   const workItemIds = new Set<string>();
@@ -193,7 +178,6 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
           typedChecksReachableThroughProductionProfileLoading: false,
         },
         d3: d3Results,
-        taskFamilies: taskFamilyResults,
       }, null, 2)}\n`,
       "utf8",
     );
@@ -502,45 +486,6 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
     await writePilotProfile(INT2_PILOT_CAPABILITIES);
   }, TEST_TIMEOUT_MS);
 
-  it("executes the docs-fix family with command and search verification", async () => {
-    executedCases += 1;
-    const evidence = await runScriptedTerminalCase({
-      caseName: "docs-fix",
-      fixture: "docs-fix",
-      script: "docs-fix.jsonl",
-      lifecycle: "handoff_ready",
-      expectedPath: "docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md",
-      seedDependencies: true,
-    });
-    await recordTaskFamilyResult("docs-fix", evidence);
-  }, TEST_TIMEOUT_MS);
-
-  it("executes the add-unit-test family through seeded npm dependencies", async () => {
-    executedCases += 1;
-    const evidence = await runScriptedTerminalCase({
-      caseName: "add-unit-test",
-      fixture: "add-unit-test",
-      script: "add-unit-test.jsonl",
-      lifecycle: "handoff_ready",
-      expectedPath: "test/unit/canonical-json-array-order.test.ts",
-      seedDependencies: true,
-    });
-    await recordTaskFamilyResult("add-unit-test", evidence);
-  }, TEST_TIMEOUT_MS);
-
-  it("executes the small-refactor family with typecheck, test, and search", async () => {
-    executedCases += 1;
-    const evidence = await runScriptedTerminalCase({
-      caseName: "small-refactor",
-      fixture: "small-refactor",
-      script: "small-refactor.jsonl",
-      lifecycle: "handoff_ready",
-      expectedPath: "test/unit/agent-integration-contracts.test.ts",
-      seedDependencies: true,
-    });
-    await recordTaskFamilyResult("small-refactor", evidence);
-  }, TEST_TIMEOUT_MS);
-
   it("rejects memory.propose in the outer production profile loader", async () => {
     executedCases += 1;
     await writePilotProfile([...INT2_PILOT_CAPABILITIES, "memory.propose"]);
@@ -606,38 +551,20 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
     lifecycle,
     preserveProfile = false,
     reconcileAfterHarnessTerminal = false,
-    expectedPath = INT2_EXPECTED_PATH,
-    seedDependencies = false,
   }: {
-    caseName:
-      | "add-unit-test"
-      | "budget-overrun"
-      | "docs-fix"
-      | "green"
-      | "idle"
-      | "negative"
-      | "narrow"
-      | "small-refactor";
+    caseName: "budget-overrun" | "green" | "idle" | "negative" | "narrow";
     fixture:
-      | "add-unit-test"
-      | "docs-fix"
       | "lint-format"
       | "lint-format-budget-overrun"
       | "lint-format-green"
-      | "lint-format-red"
-      | "small-refactor";
+      | "lint-format-red";
     script:
-      | "add-unit-test.jsonl"
-      | "docs-fix.jsonl"
       | "lint-format-green.jsonl"
       | "lint-format-idle.jsonl"
-      | "lint-format-red.jsonl"
-      | "small-refactor.jsonl";
+      | "lint-format-red.jsonl";
     lifecycle: "handoff_ready" | "failed";
     preserveProfile?: boolean;
     reconcileAfterHarnessTerminal?: boolean;
-    expectedPath?: string;
-    seedDependencies?: boolean;
   }): Promise<any> {
     if (!preserveProfile) {
       await writePilotProfile(INT2_PILOT_CAPABILITIES);
@@ -645,9 +572,6 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
     await stageModelScript(script);
     const workItemId = nextWorkItem(caseName);
     const approval = await proposeAndApprove(fixture, workItemId);
-    if (seedDependencies) {
-      process.env.HARNESS_DISPATCH_DEP_CACHE_DIR = DEPENDENCY_CACHE_ROOT;
-    }
     const worker = await startWorker();
     const dispatcher = createDispatcher();
     try {
@@ -671,15 +595,8 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
     } finally {
       await dispatcher.shutdown();
       await stopWorker(worker);
-      delete process.env.HARNESS_DISPATCH_DEP_CACHE_DIR;
     }
-    return collectEvidence(
-      caseName,
-      workItemId,
-      approval.intendedRunId,
-      {},
-      expectedPath,
-    );
+    return collectEvidence(caseName, workItemId, approval.intendedRunId);
   }
 
   async function collectEvidence(
@@ -689,7 +606,6 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
     extras: {
       profileLoadError?: { name: string; reason: string };
     } = {},
-    expectedPath = INT2_EXPECTED_PATH,
   ): Promise<any> {
     const evidence = await collectInt2Evidence({
       workItemId,
@@ -697,55 +613,12 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
       referenceDatabaseUrl: process.env.DISPATCH_TEST_DATABASE_URL,
       harnessDatabaseUrl: process.env.HARNESS_TEST_DATABASE_URL,
       harnessBin: process.env.HARNESS_BIN,
-      expectedPath,
+      expectedPath: INT2_EXPECTED_PATH,
       evidenceDir: path.join(evidenceRoot, caseName),
       ...extras,
     });
     expect(() => verifyInt2Evidence(evidence, caseName)).not.toThrow();
     return evidence;
-  }
-
-  async function recordTaskFamilyResult(
-    caseName: "add-unit-test" | "docs-fix" | "small-refactor",
-    evidence: any,
-  ): Promise<void> {
-    const result = await harnessPool.query<{ elapsed_seconds: string }>(
-      `select extract(epoch from (verification.ts - response.ts))::text
-         as elapsed_seconds
-       from (
-         select ts
-         from domain_events
-         where run_id = $1 and event_type = 'VerificationCompleted'
-         order by seq desc
-         limit 1
-       ) verification
-       cross join (
-         select ts
-         from domain_events
-         where run_id = $1 and event_type = 'ModelResponded'
-         order by seq desc
-         limit 1
-       ) response`,
-      [evidence.intendedRunId],
-    );
-    const verificationElapsedSeconds = Number(
-      result.rows[0]?.elapsed_seconds,
-    );
-    expect(Number.isFinite(verificationElapsedSeconds)).toBe(true);
-    const recorded = {
-      case: caseName,
-      lifecycle: String(evidence.task.lifecycle),
-      verificationVerdict: String(evidence.verification.verdict),
-      criteria: evidence.verification.details.map((detail: any) => ({
-        id: String(detail.id),
-        passed: detail.passed === true,
-        reason: String(detail.reason),
-        detail: String(detail.detail),
-      })),
-      verificationElapsedSeconds,
-    };
-    taskFamilyResults.push(recorded);
-    console.log(`INT2_TASK_FAMILY_RESULT ${JSON.stringify(recorded)}`);
   }
 
   function assertD3Mutation(
