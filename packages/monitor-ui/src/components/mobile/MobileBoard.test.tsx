@@ -340,3 +340,93 @@ describe("phone board — what you can act on, and what you would not be told", 
     expect(queryByTestId("mobile-pool-addr-reward_bank")).toBeNull();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// THE BANK LANE ON THE PHONE
+//
+// The regression these guard: on 2026-08-04 the desk board carried this lane
+// red — `1 OVERDUE · leg2-dispatched for 8.7h`, still aging — while the phone
+// reported the same system NOMINAL and never named it. Searching the rendered
+// mobile text for "OVERDUE" returned nothing. The screen read away from the
+// desk was the one omitting the only thing that was wrong.
+describe("phone board — the bank lane", () => {
+  const laneOf = (over: Partial<NonNullable<NonNullable<ProductHealth["bank"]>["lane"]>> = {}) => {
+    const base = OPS_FIXTURE_NOMINAL.bank!.lane!;
+    return { ...OPS_FIXTURE_NOMINAL, bank: { lane: { ...base, ...over } } } as ProductHealth;
+  };
+
+  test("the lane reaches the phone at all", () => {
+    const { getByTestId } = render(
+      <MobileBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    expect(getByTestId("mobile-bank")).toBeTruthy();
+  });
+
+  test("an overdue request is named on the phone, not only on the desk", () => {
+    // The whole point. Doing nothing here costs money, and this is the screen
+    // you are holding when you could still act.
+    const health = laneOf({
+      overdueRequestId: "0xb609f4d8…f57ecaac",
+      requests: { text: "1 OVERDUE · 0xb609f4d8…f57ecaac leg2-dispatched for 8.7h", tone: "red" },
+      tone: "red",
+    });
+    const { getByTestId } = render(<MobileBoard health={health} nowMs={fresh(health)} />);
+    expect(getByTestId("mobile-bank").getAttribute("data-tone")).toBe("red");
+    expect(getByTestId("mobile-bank-alarm").textContent).toContain("OVERDUE");
+    expect(getByTestId("mobile-bank-requests").textContent).toContain("8.7h");
+  });
+
+  test("the subject warning rides ABOVE the numbers it qualifies", () => {
+    // A reader who takes in the float and stops must not have read the wrong
+    // wrapper generation — the defect this lane exists to detect.
+    const { getByTestId } = render(
+      <MobileBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    const lane = getByTestId("mobile-bank");
+    const subject = getByTestId("mobile-bank-subject");
+    expect(subject.textContent).toContain("cannot confirm which wrapper generation");
+    const order = [...lane.querySelectorAll("[data-testid]")].map((el) => el.getAttribute("data-testid"));
+    expect(order.indexOf("mobile-bank-subject")).toBeLessThan(order.indexOf("mobile-bank-requests"));
+  });
+
+  test("a healthy lane stays one quiet line — detail only when not ok", () => {
+    // The rule the probe rollups already follow. Vertical space on a 500px
+    // screen is spent on what is wrong.
+    const health = laneOf({ tone: "ok", subject: { text: "reading v2.1", tone: "ok" } });
+    const { queryByTestId } = render(<MobileBoard health={health} nowMs={fresh(health)} />);
+    expect(queryByTestId("mobile-bank-rows")).toBeNull();
+  });
+
+  test("a lane that is NOT ok opens its rows", () => {
+    const { getByTestId } = render(
+      <MobileBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    // The fixture lane is `degraded` — an undeclared subject.
+    expect(getByTestId("mobile-bank-rows").textContent).toContain("UNVERIFIED");
+  });
+
+  test("an unverified position is warm grey, never coral", () => {
+    // It means the instrument cannot vouch for itself, not that money is gone.
+    // A false red here is what teaches an operator to ignore the real one.
+    const { getByTestId } = render(
+      <MobileBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    const position = getByTestId("mobile-bank-rows").querySelector("dd");
+    expect(position?.getAttribute("data-tone")).toBe("awaiting");
+  });
+
+  test("a lane nobody wired renders NOTHING — absent is not broken", () => {
+    // A feed that was never configured must not occupy a phone screen to
+    // announce its own absence.
+    const health: ProductHealth = { ...OPS_FIXTURE_NOMINAL, bank: undefined };
+    const { queryByTestId } = render(<MobileBoard health={health} nowMs={fresh(health)} />);
+    expect(queryByTestId("mobile-bank")).toBeNull();
+    expect(queryByTestId("mobile-bank-absent")).toBeNull();
+  });
+
+  test("a CONFIGURED feed that failed gets one line, and says why", () => {
+    const health: ProductHealth = { ...OPS_FIXTURE_NOMINAL, bank: { unavailable: "hydration read timed out" } };
+    const { getByTestId } = render(<MobileBoard health={health} nowMs={fresh(health)} />);
+    expect(getByTestId("mobile-bank-absent").textContent).toContain("hydration read timed out");
+  });
+});
