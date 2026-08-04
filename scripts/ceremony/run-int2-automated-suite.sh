@@ -24,6 +24,8 @@ _int2_run_containers_before="$_int2_root/run-containers-before.txt"
 # INT2_WORKSPACE_ROOT exists for the unit tests; operators never set it.
 _int2_workspaces_before="$_int2_root/workspaces-before.txt"
 _int2_workspace_root="${INT2_WORKSPACE_ROOT:-$HOME/.agent-runtime/environments}"
+_int2_dep_source="$_int2_root/dependency-source"
+_int2_dep_cache="$_int2_root/dependency-cache"
 
 # shellcheck source=scripts/ceremony/lib/int2-reap.sh
 source "$_int2_repo/scripts/ceremony/lib/int2-reap.sh"
@@ -251,6 +253,39 @@ docker run --rm --network none \
 printf '%s\n' "INT2_PILOT_GIT_OWNERSHIP_VERIFIED" \
   >> "$_int2_bootstrap_log"
 
+# The task-family fixtures are pinned to an older repository revision whose
+# package-lock differs from current main. Build the exact lockfile-keyed cache
+# from that immutable base: using current main here would correctly produce a
+# dependency_cache_stale refusal instead of exercising the seeded path.
+_int2_fixture_base="$(
+  node --input-type=module -e '
+    import { readFileSync } from "node:fs";
+    const fixture = JSON.parse(readFileSync(process.argv[1], "utf8"));
+    process.stdout.write(fixture.repository.baseRevision);
+  ' "$_int2_repo/test/fixtures/agent-integration/ceremony/add-unit-test.json"
+)"
+git clone --quiet --local --no-hardlinks "$_int2_repo" "$_int2_dep_source"
+git -C "$_int2_dep_source" checkout --quiet --detach "$_int2_fixture_base"
+test "$(git -C "$_int2_dep_source" rev-parse HEAD)" = "$_int2_fixture_base" \
+  || {
+    echo "INT2_DEP_CACHE_BASE_MISMATCH: dependency source is not at the fixture base" \
+      | tee -a "$_int2_bootstrap_log" >&2
+    exit 27
+  }
+node "$_int2_repo/scripts/ops/build-dispatch-dep-cache.mjs" \
+  --checkout "$_int2_dep_source" \
+  --cache-root "$_int2_dep_cache" \
+  >> "$_int2_bootstrap_log" \
+  || {
+    echo "INT2_DEP_CACHE_BUILD_FAILED: exact fixture dependency cache was not built" \
+      | tee -a "$_int2_bootstrap_log" >&2
+    exit 28
+  }
+export HARNESS_DISPATCH_DEP_CACHE_DIR="$_int2_dep_cache"
+printf '%s\n' \
+  "INT2_DEP_CACHE_READY base=$_int2_fixture_base" \
+  >> "$_int2_bootstrap_log"
+
 export INT2_SUITE_REQUIRED=1
 export INT2_REPOSITORY_ROOT="$_int2_repo"
 export INT2_SUITE_EVIDENCE_DIR="$_int2_evidence"
@@ -286,7 +321,7 @@ printf '%s\n' "INT2_WORKSPACE_SNAPSHOT spared=$(
   grep -c . "$_int2_workspaces_before" 2>/dev/null || echo 0
 )" >> "$_int2_bootstrap_log"
 
-printf '%s\n' "INT2_CASES_STARTED expected=11" >> "$_int2_bootstrap_log"
+printf '%s\n' "INT2_CASES_STARTED expected=14" >> "$_int2_bootstrap_log"
 (
   cd "$_int2_repo"
   npm run build
@@ -295,9 +330,9 @@ printf '%s\n' "INT2_CASES_STARTED expected=11" >> "$_int2_bootstrap_log"
 )
 
 _int2_executed="$(tr -d '[:space:]' < "$_int2_marker")"
-test "$_int2_executed" = "11" \
+test "$_int2_executed" = "14" \
   || {
-    echo "INT-2 suite executed $_int2_executed cases; expected 11" >&2
+    echo "INT-2 suite executed $_int2_executed cases; expected 14" >&2
     exit 1
   }
 _int2_elapsed="$(( $(date +%s) - _int2_started ))"
