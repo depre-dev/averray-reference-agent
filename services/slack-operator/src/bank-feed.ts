@@ -128,6 +128,43 @@ export interface BankFeed {
   calibration?: PositionCalibration | null;
 }
 
+/**
+ * The producer's own word for "this feature is switched off here".
+ *
+ * Emitted verbatim by the backend's `disabledFeed()` on every read when
+ * `BANK_LANE_FEED_ENABLED` is not set, alongside `raw: null` and
+ * `source: "unconfigured:<field>"`. Observed live on 2026-08-04.
+ */
+export const BANK_FEED_DISABLED_SENTINEL = "bank_lane_feed_disabled";
+
+/**
+ * Is this an ENTIRELY switched-off feed, rather than a working one with broken
+ * instruments?
+ *
+ * The distinction is the whole point. A disabled feed is a valid payload full
+ * of read errors, which is shaped exactly like four failed reads — and rendered
+ * as such it produced an amber BANK lane for a feature nobody had turned on.
+ * That is the permanently-lit panel this board keeps removing: a false amber
+ * teaches an operator to ignore the real one just as reliably as a false red.
+ *
+ * The test is deliberately strict, and the strictness runs toward showing more
+ * rather than less. A PARTIALLY disabled feed — which today's producer cannot
+ * emit, and which is therefore the interesting case if it ever appears — does
+ * NOT collapse: it keeps its rows and its honest degraded tone, because a feed
+ * that half-works is a fault and hiding it behind "switched off" would be the
+ * false green on the other side of the same mistake.
+ */
+export function bankFeedIsDisabled(feed: BankFeed): boolean {
+  const reads = [feed.position, feed.float, feed.postage];
+  // Every balance read reports the producer's sentinel — not merely "an error".
+  if (!reads.every((r) => r.lastError === BANK_FEED_DISABLED_SENTINEL)) return false;
+  // And the request table is not claiming to have read anything. Checked
+  // separately, and NOT by its lastError: the alarm tile is the one place where
+  // assuming the disabled shape would let real in-flight requests disappear
+  // behind a "switched off" line.
+  return feed.requests.readAtMs === null && feed.requests.items.length === 0;
+}
+
 /** DOT below which the postage account can no longer pay for an epoch. */
 export const POSTAGE_FLOOR_DOT = 0.07;
 

@@ -43,9 +43,22 @@ export interface BankLaneView {
   tone: BankTone;
 }
 
-/** Said once, quietly, when nothing is wired. Never four "awaiting" tiles. */
-export const BANK_FEED_ABSENT =
-  "bank lane not configured — no read-only observer feed for the wrapper";
+/**
+ * Said once, quietly, when the feed is reachable and switched off at the source.
+ *
+ * There is deliberately no matching constant for an ABSENT feed: nothing wired
+ * renders nothing at all, not a line about its own absence. (One existed, was
+ * never rendered, and its own doc comment claimed otherwise — removed with this
+ * change rather than left to mislead the next reader.)
+ *
+ * Switched-off is different, and gets a sentence, because someone configured
+ * PRODUCT_HEALTH_BANK_FEED_URL and is entitled to know why no lane appeared.
+ * It names the variable and the side it lives on, because "disabled" alone
+ * sends an operator to the wrong repo.
+ */
+export const BANK_FEED_DISABLED =
+  "bank lane switched off at the source — the backend's feed is reachable but " +
+  "BANK_LANE_FEED_ENABLED is not set";
 
 /**
  * A raw token amount as a human figure, or the honest reason there isn't one.
