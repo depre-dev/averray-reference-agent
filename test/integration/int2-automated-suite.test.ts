@@ -34,6 +34,7 @@ import {
   INT2_PILOT_CAPABILITIES,
   Int2EvidenceError,
   HALT_TOOL_COMMAND,
+  readInt2VerificationReport,
   verifyInt2Evidence,
   verifyScriptedPairPreflight,
 } from "../../scripts/ceremony/int2-evidence.mjs";
@@ -912,6 +913,7 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
       "verification:",
       "  baseline_command: null",
       '  preflight_command: "npm run typecheck && /node_modules/.bin/vitest --version"',
+      "  command_timeout_seconds: 60",
       "  protected_paths: []",
       "strategies:",
       "  - direct_execution",
@@ -1203,6 +1205,17 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
         [intendedRunId],
       ),
     ]);
+    const latestEvents = eventResult.rows.reverse();
+    const reportRef = latestEvents.find(
+      (event) => event.event_type === "RunCompleted",
+    )?.payload?.deliverables?.verification_report;
+    const verification = typeof reportRef === "string"
+      ? await readInt2VerificationReport({
+          harnessBin: process.env.HARNESS_BIN,
+          harnessDatabaseUrl: process.env.HARNESS_TEST_DATABASE_URL,
+          reportRef,
+        })
+      : null;
     const target = path.join(
       evidenceRoot,
       "diagnostics",
@@ -1219,7 +1232,8 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
         expectedLifecycle,
         lastLifecycle,
         harnessRun: runResult.rows[0] ?? null,
-        latestEvents: eventResult.rows.reverse(),
+        latestEvents,
+        verification,
         workerOutputTail: worker.outputTail(),
         dispatcherLogTail: loggerRecords.slice(-50),
       }, null, 2)}\n`,

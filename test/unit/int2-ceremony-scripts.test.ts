@@ -36,6 +36,10 @@ const AUTOMATED_SUITE = path.join(
   SCRIPT_ROOT,
   "run-int2-automated-suite.sh",
 );
+const AUTOMATED_SUITE_TEST = path.join(
+  ROOT,
+  "test/integration/int2-automated-suite.test.ts",
+);
 const REAP_HELPER = path.join(SCRIPT_ROOT, "lib/int2-reap.sh");
 const PILOT_DOCKERFILE = path.join(ROOT, "ops/Dockerfile.pilot");
 const OPERATOR_SCRIPTS = [
@@ -486,7 +490,7 @@ describe("committed INT-2 ceremony mechanics", () => {
           "int2-checkout-test",
           CHECKOUT_HELPER,
           path.join(temporary, "agent-harness"),
-          "e21c831ddfa3d80c4c1113d42dae4eba7db67079",
+          "3355f4906864b0f0e0fe5fd5eb5220172e174206",
           log,
         ],
         {
@@ -541,7 +545,7 @@ describe("committed INT-2 ceremony mechanics", () => {
         "int2-checkout-test",
         CHECKOUT_HELPER,
         checkout,
-        "e21c831ddfa3d80c4c1113d42dae4eba7db67079",
+        "3355f4906864b0f0e0fe5fd5eb5220172e174206",
         bootstrapLog,
       ],
       {
@@ -611,9 +615,10 @@ describe("committed INT-2 ceremony mechanics", () => {
   });
 
   it("trusts only the fixed workspace and proves sandbox outputs stay removable", async () => {
-    const [dockerfile, suite] = await Promise.all([
+    const [dockerfile, suite, suiteTest] = await Promise.all([
       readFile(PILOT_DOCKERFILE, "utf8"),
       readFile(AUTOMATED_SUITE, "utf8"),
+      readFile(AUTOMATED_SUITE_TEST, "utf8"),
     ]);
 
     expect(dockerfile).toContain(
@@ -624,6 +629,7 @@ describe("committed INT-2 ceremony mechanics", () => {
     );
     expect(suite).toContain('--user "$(id -u):$(id -g)"');
     expect(suite).toContain("INT2_PILOT_ENVIRONMENT_FAILED");
+    expect(suiteTest).toContain('"  command_timeout_seconds: 60"');
     expect(suite).toContain("INT2_PILOT_WORKSPACE_OWNERSHIP_FAILED");
     expect(suite).toContain("INT2_PILOT_GIT_OWNERSHIP_VERIFIED");
     expect(suite).toContain("INT2_PILOT_WORKSPACE_OWNERSHIP_VERIFIED");

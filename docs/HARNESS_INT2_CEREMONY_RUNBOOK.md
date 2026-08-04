@@ -31,9 +31,9 @@ export HARNESS_CHECKOUT="$CEREMONY_ROOT/agent-harness"
 export REFERENCE_CHECKOUT="/absolute/path/to/averray-reference-agent"
 
 git clone https://github.com/averray-agent/agent-harness.git "$HARNESS_CHECKOUT"
-git -C "$HARNESS_CHECKOUT" checkout --detach e21c831
+git -C "$HARNESS_CHECKOUT" checkout --detach 3355f49
 test "$(git -C "$HARNESS_CHECKOUT" rev-parse HEAD)" = \
-  "e21c831ddfa3d80c4c1113d42dae4eba7db67079"
+  "3355f4906864b0f0e0fe5fd5eb5220172e174206"
 test -z "$(git -C "$HARNESS_CHECKOUT" status --porcelain)"
 
 cd "$HARNESS_CHECKOUT"

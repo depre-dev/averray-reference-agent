@@ -16,7 +16,7 @@ import { pathToFileURL } from "node:url";
 import { Pool } from "pg";
 
 export const INT2_HARNESS_PIN =
-  "e21c831ddfa3d80c4c1113d42dae4eba7db67079";
+  "3355f4906864b0f0e0fe5fd5eb5220172e174206";
 export const INT2_EXPECTED_PATH =
   "docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md";
 export const INT2_SECTION3_CRITERION =
@@ -831,7 +831,7 @@ export async function collectInt2Evidence({
       })
     : null;
   const verification = deliverables.verification_report
-    ? await readVerificationReport({
+    ? await readInt2VerificationReport({
         harnessBin,
         harnessDatabaseUrl,
         reportRef: deliverables.verification_report,
@@ -1771,7 +1771,7 @@ export function verificationFromReport(report) {
   };
 }
 
-async function readVerificationReport({
+export async function readInt2VerificationReport({
   harnessBin,
   harnessDatabaseUrl,
   reportRef,

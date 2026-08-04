@@ -82,11 +82,11 @@ for _int2_command in docker git node npm uv; do
 done
 mkdir -p "$_int2_evidence"
 printf '%s\n' \
-  "INT2_SUITE_BOOTSTRAP_STARTED pin=e21c831ddfa3d80c4c1113d42dae4eba7db67079" \
+  "INT2_SUITE_BOOTSTRAP_STARTED pin=3355f4906864b0f0e0fe5fd5eb5220172e174206" \
   > "$_int2_bootstrap_log"
 
 export HARNESS_CHECKOUT="${HARNESS_CHECKOUT:-$_int2_root/agent-harness}"
-_int2_pin="e21c831ddfa3d80c4c1113d42dae4eba7db67079"
+_int2_pin="3355f4906864b0f0e0fe5fd5eb5220172e174206"
 # shellcheck source=scripts/ceremony/lib/int2-harness-checkout.sh
 source "$_int2_repo/scripts/ceremony/lib/int2-harness-checkout.sh"
 int2_checkout_harness "$HARNESS_CHECKOUT" "$_int2_pin" "$_int2_bootstrap_log"
