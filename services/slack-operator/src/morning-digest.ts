@@ -19,8 +19,17 @@
 //
 // The digest quotes the SAME strings the board renders — probe details decided
 // server-side, the shared deriveOpsVerdict headline — and composes zero
-// opinions of its own. Two verdict systems disagree eventually, and the first
+// judgments of its own. Two verdict systems disagree eventually, and the first
 // disagreement is the last time the operator believes either.
+//
+// This file writes the digest in sentences rather than caps-keyed telegraph
+// (operator feedback 2026-08-05, reading it on the phone: "more human … not
+// just some boring stats") — but "human" here is FRAMING. The opening counts
+// statuses the producers decided; the closing line maps mechanically from
+// (red, degraded, bank tone); every detail is quoted verbatim. The genuinely
+// conversational rendering — Hermes writing the same facts in his own words —
+// lives in digest-voice.ts behind a gate that falls back to this text, which
+// makes this the digest's floor: always present, never wrong.
 //
 // ── TIME IS LOCAL, AND FAIL-CLOSED ────────────────────────────────────────
 //
@@ -29,9 +38,12 @@
 // guessing — a digest at a wrong-guessed hour is the wrong-subject failure
 // wearing a clock. Late is honest: if the process was down at 08:00, the
 // digest fires on the first tick after it comes back, stamped with the time it
-// actually ran.
+// actually ran — and greetingFor() reads that stamp, so a 14:37 catch-up does
+// not open with "Good morning".
 //
 // Kept pure — no clock, no I/O — so every rule is testable without a relay.
+
+import { greetingFor, probeLabel, statusGlyph } from "./ops-voice.js";
 
 export interface DigestSchedule {
   enabled: boolean;
@@ -70,8 +82,16 @@ export function readDigestSchedule(env: NodeJS.ProcessEnv = process.env): Digest
   return { enabled: true, hour: Number(m[1]), minute: Number(m[2]), timeZone };
 }
 
-/** The local calendar date and minutes-since-midnight at `nowMs` in `timeZone`. */
-export function localStamp(nowMs: number, timeZone: string): { date: string; minutes: number; hhmm: string } {
+/**
+ * The local calendar date and minutes-since-midnight at `nowMs` in `timeZone`,
+ * plus the human forms of the same instant ("Wednesday", "6 Aug"). `date`
+ * stays strictly YYYY-MM-DD — it is the once-per-day dedupe identity and must
+ * never absorb formatting concerns.
+ */
+export function localStamp(
+  nowMs: number,
+  timeZone: string,
+): { date: string; minutes: number; hhmm: string; weekday: string; humanDate: string } {
   const fmt = new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",
@@ -85,10 +105,14 @@ export function localStamp(nowMs: number, timeZone: string): { date: string; min
   // Intl emits "24" for midnight in some ICU versions; normalise.
   const hour = Number(parts.hour) % 24;
   const minute = Number(parts.minute);
+  const human = new Intl.DateTimeFormat("en-GB", { timeZone, weekday: "long", day: "numeric", month: "short" });
+  const humanParts = Object.fromEntries(human.formatToParts(new Date(nowMs)).map((p) => [p.type, p.value]));
   return {
     date: `${parts.year}-${parts.month}-${parts.day}`,
     minutes: hour * 60 + minute,
     hhmm: `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`,
+    weekday: humanParts.weekday ?? "",
+    humanDate: humanParts.day && humanParts.month ? `${humanParts.day} ${humanParts.month}` : "",
   };
 }
 
@@ -104,14 +128,14 @@ export function digestDue(input: {
   nowMs: number;
   schedule: DigestSchedule;
   lastSentLocalDate: string | null;
-}): { due: boolean; localDate: string; localTime: string } {
+}): { due: boolean; localDate: string; localTime: string; weekday: string; humanDate: string } {
   const { schedule } = input;
   const stamp = localStamp(input.nowMs, schedule.timeZone);
   const due =
     schedule.enabled &&
     stamp.minutes >= schedule.hour * 60 + schedule.minute &&
     input.lastSentLocalDate !== stamp.date;
-  return { due, localDate: stamp.date, localTime: stamp.hhmm };
+  return { due, localDate: stamp.date, localTime: stamp.hhmm, weekday: stamp.weekday, humanDate: stamp.humanDate };
 }
 
 /** The probe shape the digest reads — the same one the board renders. */
@@ -124,6 +148,9 @@ export interface DigestProbe {
 export interface MorningDigestInput {
   localDate: string;
   localTime: string;
+  /** Human forms of the same instant; the ISO date stands in when absent. */
+  weekday?: string;
+  humanDate?: string;
   timeZone: string;
   network: string;
   /** deriveOpsVerdict output — headline is prose FOR humans; that is this. */
@@ -134,44 +161,100 @@ export interface MorningDigestInput {
 }
 
 const DIGEST_LINE_PROBES: readonly { key: string; name: string }[] = [
-  { key: "FLOW", name: "money_path" },
-  { key: "FLOORS", name: "signer_liquidity" },
-  { key: "CREDS", name: "credential_expiry" },
+  { key: "Money", name: "money_path" },
+  { key: "Floors", name: "signer_liquidity" },
+  { key: "Credentials", name: "credential_expiry" },
 ];
 
 /**
+ * The strings whose figures are load-bearing: the daily fact lines, every
+ * not-ok detail, and the bank line. digest-voice.ts extracts its must-survive
+ * tokens from exactly this list, so "which strings may Hermes not lose" has
+ * one definition, and it lives beside the layout that renders them.
+ */
+export function digestFactStrings(input: MorningDigestInput): string[] {
+  const byName = new Map(input.probes.map((p) => [p.name, p] as const));
+  const facts: string[] = [];
+  for (const { name } of DIGEST_LINE_PROBES) {
+    const probe = byName.get(name);
+    if (probe) facts.push(probe.detail);
+  }
+  for (const probe of input.probes) {
+    if (probe.status !== "ok") facts.push(probe.detail);
+  }
+  if (input.bankRequests) facts.push(input.bankRequests.text);
+  return facts;
+}
+
+/**
  * Compose the message. Every content string is a probe's own detail or the
- * shared verdict headline — this function chooses layout and nothing else.
+ * shared verdict headline — this function chooses layout and framing words,
+ * nothing else.
  *
+ *  · The first line is the lock screen: greeting + the status count, so the
+ *    notification preview alone says whether to reach for the phone.
  *  · A probe that is absent contributes NO line. Absence is not zero, and a
- *    "FLOW —" placeholder would claim a measurement nobody took.
- *  · Probes that are not ok get quoted in full under ATTENTION, because the
- *    alert hold may have (correctly) never announced a flapping one — the
- *    digest is the once-a-day complete picture.
+ *    "Money: —" placeholder would claim a measurement nobody took.
+ *  · Probes that are not ok get quoted in full under "Needs attention" (red
+ *    first), because the alert hold may have (correctly) never announced a
+ *    flapping one — the digest is the once-a-day complete picture.
  *  · The bank line appears only when a lane exists — the same absent-is-
  *    nothing rule the board and the phone follow.
+ *  · The closing line maps mechanically from (red, degraded, bank tone): who
+ *    is waiting on the operator, said plainly. Bank tone "awaiting" is an
+ *    instrument that cannot see, not a problem — it never summons anyone.
  */
 export function buildMorningDigest(input: MorningDigestInput): string {
   const byName = new Map(input.probes.map((p) => [p.name, p] as const));
-  const ok = input.probes.filter((p) => p.status === "ok").length;
-  const red = input.probes.filter((p) => p.status === "red").length;
+  const total = input.probes.length;
+  const attention = input.probes.filter((p) => p.status !== "ok");
+  const reds = attention.filter((p) => p.status === "red").length;
 
-  const lines: string[] = [];
-  lines.push(`MORNING DIGEST · ${input.localDate} ${input.localTime} ${input.timeZone} · AVERRAY ${input.network.toUpperCase()}`);
-  lines.push(input.verdictHeadline);
-  lines.push(`PROBES ${ok} ok / ${red} red of ${input.probes.length}`);
+  const greeting = greetingFor(input.localTime);
+  const where = `Averray ${input.network}`;
+  const opener =
+    total === 0
+      ? `${greeting} — no probes reporting on ${where}.`
+      : attention.length === 0
+        ? `${greeting} — all ${total} probes green on ${where}.`
+        : `${greeting} — ${attention.length} of ${total} probe${total === 1 ? "" : "s"} need${attention.length === 1 ? "s" : ""} attention on ${where}.`;
+
+  const stamp =
+    input.weekday && input.humanDate
+      ? `${input.weekday} ${input.humanDate}, ${input.localTime} (${input.timeZone})`
+      : `${input.localDate} ${input.localTime} (${input.timeZone})`;
+
+  const lines: string[] = [opener];
+  lines.push(`${stamp}. The board reads: "${input.verdictHeadline}"`);
+  lines.push("");
 
   for (const { key, name } of DIGEST_LINE_PROBES) {
     const probe = byName.get(name);
-    if (probe) lines.push(`${key} ${probe.detail}`);
+    if (probe) lines.push(`${key}: ${probe.detail}`);
+  }
+  if (input.bankRequests) lines.push(`Bank: ${input.bankRequests.text}`);
+
+  if (attention.length > 0) {
+    const redFirst = [...attention].sort(
+      (a, b) => (a.status === "red" ? 0 : 1) - (b.status === "red" ? 0 : 1),
+    );
+    lines.push("");
+    lines.push("Needs attention:");
+    for (const probe of redFirst) {
+      lines.push(`${statusGlyph(probe.status)} ${probeLabel(probe.name)} — ${probe.detail}`);
+    }
   }
 
-  if (input.bankRequests) lines.push(`BANK ${input.bankRequests.text}`);
-
-  const attention = input.probes.filter((p) => p.status !== "ok");
-  if (attention.length > 0) {
-    lines.push("ATTENTION");
-    for (const p of attention) lines.push(`  ${p.status === "red" ? "✗" : "⚠"} ${p.name}: ${p.detail}`);
+  const bankTone = input.bankRequests?.tone;
+  const needsNow = reds + (bankTone === "red" ? 1 : 0);
+  const worthALook = attention.length - reds + (bankTone === "degraded" ? 1 : 0);
+  lines.push("");
+  if (needsNow > 0) {
+    lines.push(needsNow === 1 ? "One item needs you now." : `${needsNow} items need you now.`);
+  } else if (worthALook > 0) {
+    lines.push("Worth a look when you're at the desk — nothing is on fire.");
+  } else {
+    lines.push("Nothing is waiting on you.");
   }
 
   return lines.join("\n");
