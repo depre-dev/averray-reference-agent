@@ -1,0 +1,82 @@
+--- a/test/unit/agent-integration-contracts.test.ts
++++ b/test/unit/agent-integration-contracts.test.ts
+@@ -35,16 +35,16 @@
+   });
+ 
+   it("rejects unknown versions and undeclared fields", () => {
+-    const task = fixtureRecord("agent-task-v1.json");
++    const task = fixture<Record<string, unknown>>("agent-task-v1.json");
+     expect(() => agentTaskV1Schema.parse({ ...task, schemaVersion: 2 })).toThrow();
+     expect(() => agentTaskV1Schema.parse({ ...task, undeclaredAuthority: true })).toThrow();
+ 
+-    const decision = fixtureRecord("hermes-decision-v2.json");
++    const decision = fixture<Record<string, unknown>>("hermes-decision-v2.json");
+     expect(() => parseHermesDecisionRecord({ ...decision, schemaVersion: 3 })).toThrow();
+   });
+ 
+   it("rejects inconsistent hashes, duplicate authority, and child delegation", () => {
+-    const task = fixtureRecord("agent-task-v1.json");
++    const task = fixture<Record<string, unknown>>("agent-task-v1.json");
+     expect(() => agentTaskV1Schema.parse({
+       ...task,
+       intent: {
+@@ -82,7 +82,7 @@
+   });
+ 
+   it("keeps request and approval authority out of executor and verifier roles", async () => {
+-    const task = fixtureRecord("agent-task-v1.json");
++    const task = fixture<Record<string, unknown>>("agent-task-v1.json");
+     expect(() => agentTaskV1Schema.parse({
+       ...task,
+       proposal: {
+@@ -234,7 +234,7 @@
+   });
+ 
+   it("never permits failed checks, rejected verification, or a non-verifier to open a PR", () => {
+-    const handoff = fixtureRecord("verified-handoff-v1.json");
++    const handoff = fixture<Record<string, unknown>>("verified-handoff-v1.json");
+     expect(() => verifiedHandoffV1Schema.parse({
+       ...handoff,
+       checks: [{
+@@ -264,7 +264,7 @@
+   it("binds an eligible handoff to the exact approved task, run, manifest, and verifier plan", async () => {
+     const task = await approvedTask();
+     const running = agentRunProjectionV1Schema.parse(fixture("agent-run-projection-v1.json"));
+-    const handoffFixture = fixtureRecord("verified-handoff-v1.json");
++    const handoffFixture = fixture<Record<string, unknown>>("verified-handoff-v1.json");
+     const handoffDecisionHash = (
+       (handoffFixture.verification as Record<string, unknown>).decisionHash
+     ) as string;
+@@ -347,13 +347,13 @@
+   });
+ 
+   it("rejects malformed legacy records instead of manufacturing missing identity", () => {
+-    const legacy = fixtureRecord("legacy-codex-task-v1.json");
++    const legacy = fixture<Record<string, unknown>>("legacy-codex-task-v1.json");
+     expect(() => parseLegacyCodexTask({ ...legacy, id: "" })).toThrow();
+     expect(() => parseLegacyCodexTask({ ...legacy, schemaVersion: 2 })).toThrow();
+   });
+ 
+   it("makes mutation truth explicit in V2 decisions", () => {
+-    const decision = fixtureRecord("hermes-decision-v2.json");
++    const decision = fixture<Record<string, unknown>>("hermes-decision-v2.json");
+     expect(() => hermesDecisionRecordV2Schema.parse({
+       ...decision,
+       effects: {
+@@ -391,14 +391,10 @@
+   });
+ }
+ 
+-function fixture(name: string): unknown {
++function fixture<T = unknown>(name: string): T {
+   return JSON.parse(
+     readFileSync(new URL(`../fixtures/agent-integration/${name}`, import.meta.url), "utf8"),
+-  ) as unknown;
+-}
+-
+-function fixtureRecord(name: string): Record<string, unknown> {
+-  return fixture(name) as Record<string, unknown>;
++  ) as T;
+ }
+ 
+ function hash(character: string): `sha256:${string}` {

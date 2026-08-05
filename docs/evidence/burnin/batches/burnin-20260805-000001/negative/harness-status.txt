@@ -1,0 +1,8 @@
+run_id=195e938e-668c-5fe5-981d-2d4d0e73a0f1
+state=learning_processed
+attempt=1
+outcome=failed
+outcome_reason=verification_failed
+egress_policy=deny_all []
+created_at=2026-08-05T20:59:13.426917+00:00
+updated_at=2026-08-05T20:59:35.147201+00:00
