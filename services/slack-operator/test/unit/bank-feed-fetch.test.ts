@@ -155,3 +155,37 @@ describe("a malformed calibration is dropped, never repaired", () => {
     expect(r.feed!.calibration!.provenRaw).toBe("100000");
   });
 });
+
+describe("the deadline field is accepted the moment the producer ships it", () => {
+  // bank-lane-feed.js computes `overdue` FROM deadlineAt and drops it; the
+  // one-field ask is out with Codex. This parser is ready for either spelling
+  // and requires neither — a feed without the field must keep parsing.
+  const withRequest = (extra: Record<string, unknown>) => ({
+    ...good,
+    requests: {
+      readAtMs: 1_785_900_000_000,
+      items: [{ id: "req-1", kind: "deposit", phase: "staged-on-chain", ageSeconds: 60, overdue: false, ...extra }],
+    },
+  });
+
+  test("epoch-ms is taken as-is", () => {
+    const r = normalizeBankFeed(withRequest({ deadlineAtMs: 1_785_940_000_000 }));
+    expect("feed" in r && r.feed.requests.items[0]?.deadlineAtMs).toBe(1_785_940_000_000);
+  });
+
+  test("an ISO string is parsed", () => {
+    const r = normalizeBankFeed(withRequest({ deadlineAt: "2026-08-05T08:37:12Z" }));
+    expect("feed" in r && r.feed.requests.items[0]?.deadlineAtMs).toBe(Date.parse("2026-08-05T08:37:12Z"));
+  });
+
+  test("absent stays absent — today's feed keeps parsing unchanged", () => {
+    const r = normalizeBankFeed(withRequest({}));
+    expect("feed" in r && r.feed.requests.items[0]).not.toHaveProperty("deadlineAtMs");
+  });
+
+  test("garbage is dropped, never an error and never a date", () => {
+    const r = normalizeBankFeed(withRequest({ deadlineAt: "not-a-date", deadlineAtMs: Number.NaN }));
+    expect("feed" in r).toBe(true);
+    expect("feed" in r && r.feed.requests.items[0]).not.toHaveProperty("deadlineAtMs");
+  });
+});

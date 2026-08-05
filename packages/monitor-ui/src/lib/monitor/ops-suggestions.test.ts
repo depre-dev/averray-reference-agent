@@ -224,7 +224,11 @@ describe("bank — an overdue venue request", () => {
     const s = opsSuggestions(withOverdue()).find((x) => x.id === "bank-overdue");
     expect(s).toBeTruthy();
     expect(s!.text).toContain("8.7h");
-    expect(s!.text).toContain("leg 2");
+    // No leg assertion: the first live overdue after the original wording
+    // shipped was a request that never dispatched ANY leg. The advice must not
+    // presuppose where it stopped — that is what the investigation determines.
+    expect(s!.text).toContain("Determine where it actually stopped");
+    expect(s!.text).not.toContain("leg 2");
   });
 
   test("its task INVESTIGATES and is explicit about not moving funds", () => {
