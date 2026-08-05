@@ -69,6 +69,20 @@ services:
     # `!reset` removes the upstream list rather than appending to it —
     # compose ≥ 2.24.4, which this bundle already requires.
     ports: !reset null
+    environment:
+      # Advertised in NIP-11 so Buzz Desktop discovers the open pairing relay
+      # (ops/buzz/compose.pairing.yml) at its OWN hostname. A dedicated
+      # hostname, not a path, on hard evidence (2026-08-05): the relay's
+      # NIP-42 check expects the BARE ORIGIN in the signed auth event
+      # ("Path is empty — clients put the bare WS origin in the relay tag",
+      # api/bridge.rs), while the desktop's legacy /pair fallback signs the URL
+      # WITH the path — "relay url mismatch", every time, for everyone. The
+      # legacy path convention cannot authenticate; the advertised-URL route
+      # matches by construction.
+      #
+      # Ignored by relay-v0.2.0 (the field landed later) — safe to deploy
+      # BEFORE the image upgrade; it activates when the upgrade lands.
+      BUZZ_PAIRING_RELAY_URL: wss://pair.averray.com
     mem_limit: 1g
     restart: unless-stopped
 
