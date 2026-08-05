@@ -67,6 +67,11 @@ INT-2 cases against the real dispatcher, disposable Postgres databases, the
 pinned Harness and Docker. Local `npm test` skips that slow tier unless its
 explicit environment is present; CI fails if the suite skips.
 
+The operator-run §9.1 burn-in battery reuses that same supervised machinery via
+`node scripts/ceremony/run-burnin-batch.mjs --evidence <dir>`. The evidence path
+is mandatory; eligible runs and the non-counting red sentinel append to
+`LEDGER.jsonl`, while `burnin-status.mjs` regenerates the measured summary.
+
 If you touched `ops/`, the `Dockerfile`, or compose files, also validate what CI validates:
 
 ```bash

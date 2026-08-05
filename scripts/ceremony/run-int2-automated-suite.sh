@@ -320,6 +320,34 @@ printf '%s\n' "INT2_WORKSPACE_SNAPSHOT spared=$(
   grep -c . "$_int2_workspaces_before" 2>/dev/null || echo 0
 )" >> "$_int2_bootstrap_log"
 
+# The operator-run burn-in battery uses this exact bootstrap, worker path, and
+# cleanup trap, then selects the five already-merged lifecycle cases it needs.
+# The default INT-2 gate below remains a fixed 14-case skip detector.
+if [ "${INT2_BURNIN_BATCH_MODE:-0}" = "1" ]; then
+  : "${INT2_BURNIN_WORK_ITEM_PREFIX:?INT2_BURNIN_WORK_ITEM_PREFIX is required}"
+  printf '%s\n' "BURNIN_CASES_STARTED expected=5" >> "$_int2_bootstrap_log"
+  (
+    cd "$_int2_repo"
+    npm run build
+    npx vitest run test/integration/int2-automated-suite.test.ts \
+      --reporter=verbose \
+      --testNamePattern='rejects the negative fixture on its merits with no handoff|produces one verified, unactuated green handoff|executes the docs-fix family with command and search verification|executes the add-unit-test family through the pinned offline toolchain|executes the small-refactor family with typecheck, test, and search'
+  )
+
+  _int2_executed="$(tr -d '[:space:]' < "$_int2_marker")"
+  test "$_int2_executed" = "5" \
+    || {
+      echo "Burn-in batch executed $_int2_executed cases; expected 5" >&2
+      exit 1
+    }
+  _int2_elapsed="$(( $(date +%s) - _int2_started ))"
+  printf '%s\n' "$_int2_elapsed" > "$_int2_evidence/wall-time-seconds.txt"
+  printf '%s\n' "BURNIN_CASES_COMPLETED executed=$_int2_executed elapsed=$_int2_elapsed" \
+    >> "$_int2_bootstrap_log"
+  echo "Burn-in batch: $_int2_executed cases executed in ${_int2_elapsed}s"
+  exit 0
+fi
+
 printf '%s\n' "INT2_CASES_STARTED expected=14" >> "$_int2_bootstrap_log"
 (
   cd "$_int2_repo"
