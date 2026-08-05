@@ -163,6 +163,34 @@ describe("the message quotes; it does not opine", () => {
     expect(text.endsWith("One item needs you now.")).toBe(true);
   });
 
+  test("the closing never out-calms the verdict — red verdict on green probes summons", () => {
+    // floor-breach / payout-shortfall derive from pools and payout evidence,
+    // not probes: every probe green and the verdict red is a REAL state.
+    const text = buildMorningDigest({ ...base, verdictReason: "floor-breach", verdictTone: "red" });
+    expect(text.split("\n")[0]).toBe("Good morning — all 4 probes green on Averray mainnet.");
+    expect(text.endsWith("The verdict line above needs you now.")).toBe(true);
+  });
+
+  test("non-nominal, non-red verdict on green probes points at the verdict", () => {
+    const text = buildMorningDigest({ ...base, verdictReason: "pool-draining", verdictTone: "degraded" });
+    expect(text.endsWith("The probes are green, but the verdict line above is the one to read.")).toBe(true);
+  });
+
+  test("'nothing is on fire' is only said when the verdict agrees", () => {
+    const text = buildMorningDigest({
+      ...base,
+      verdictReason: "pool-draining",
+      verdictTone: "degraded",
+      probes: [...probes, { name: "capabilities", status: "degraded", detail: "x staged" }],
+    });
+    expect(text.endsWith("Worth a look when you're at the desk — and read the verdict line above.")).toBe(true);
+  });
+
+  test("a nominal verdict keeps the calm closings", () => {
+    const text = buildMorningDigest({ ...base, verdictReason: "nominal", verdictTone: "ok" });
+    expect(text.endsWith("Nothing is waiting on you.")).toBe(true);
+  });
+
   test("bank tone 'awaiting' is a blind instrument, not a summons", () => {
     const text = buildMorningDigest({
       ...base,

@@ -57,6 +57,21 @@ describe("conversationalDigestViolation", () => {
     expect(conversationalDigestViolation(input({ redCount: 1 }), lying)).toBe("polarity");
   });
 
+  it("requires every attention item to be NAMED — numbers or not", () => {
+    // A red probe whose detail carries no digits would otherwise be droppable
+    // without tripping the fact gate.
+    const v = conversationalDigestViolation(input({ attentionLabels: ["Product API"] }), GOOD);
+    expect(v).toBe("attention_missing:Product API");
+  });
+
+  it("accepts the attention name case-insensitively inside flowing prose", () => {
+    const v = conversationalDigestViolation(
+      input({ attentionLabels: ["Product API"] }),
+      `${GOOD} Meanwhile the product API needs eyes.`,
+    );
+    expect(v).toBeNull();
+  });
+
   it("refuses empty and rambling drafts", () => {
     expect(conversationalDigestViolation(input(), "   ")).toBe("empty");
     expect(conversationalDigestViolation(input(), GOOD + " padding".repeat(300))).toBe("too_long");
