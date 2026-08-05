@@ -13,6 +13,7 @@
 // Percentages never lead here. 5% of 2 TB is comfort; 20% of 20 GB is about to
 // fail — so the absolute number is the status.
 
+import { OPS_GLOSS } from "../../lib/monitor/ops-gloss.js";
 import type { GasSpendView, PayoutEvidence, SolvencySnapshot } from "../../lib/monitor/product-health.js";
 import { splitPools, type PoolView } from "../../lib/monitor/ops-spec.js";
 import { gasPoolNote, gasUnreadableNote, payoutRunwayNote } from "../../lib/monitor/ops-spec.js";
@@ -93,7 +94,14 @@ export function SolvencyPanel({ solvency, gas, payout }: SolvencyPanelProps) {
                 data-tone={note.tone}
                 data-testid={`ops-pool-note-${view.pool.key}`}
               >
-                {noteKey ? <span className="ops-pool-note-key">{noteKey}</span> : null}
+                {noteKey ? (
+                  <span
+                    className="ops-pool-note-key"
+                    title={noteKey === "BURN" ? OPS_GLOSS.burn : noteKey === "RUNWAY" ? OPS_GLOSS.runway : undefined}
+                  >
+                    {noteKey}
+                  </span>
+                ) : null}
                 <span className="ops-pool-note-val">{note.text}</span>
               </p>
             ) : null}
@@ -171,7 +179,7 @@ function FlooredPool({ view }: { view: PoolView }) {
     <div className="ops-pool" data-tone={view.tone} data-testid={`ops-pool-${view.pool.key}`}>
       <div className="ops-pool-id">
         <span className="ops-pool-name">{view.pool.label}</span>
-        <span className="ops-pool-margin" data-tone={view.marginTone}>
+        <span className="ops-pool-margin" data-tone={view.marginTone} title={OPS_GLOSS.margin}>
           {view.margin}
         </span>
       </div>
@@ -184,6 +192,7 @@ function FlooredPool({ view }: { view: PoolView }) {
           aria-valuenow={view.pool.amount ?? undefined}
           aria-valuemin={0}
           aria-valuetext={`${view.amountLabel} ${view.unit}, ${view.margin}`}
+          title={OPS_GLOSS.floor}
         >
           <i className="ops-meter-fill" data-tone={view.tone} style={{ width: `${meter.fillPct}%` }} />
           <i className="ops-meter-floor" style={{ left: `${meter.floorPct}%` }} aria-hidden />

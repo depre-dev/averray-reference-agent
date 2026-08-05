@@ -360,3 +360,34 @@ describe("NEXT — what to do about it", () => {
     expect(getByTestId("ops-next").querySelector("button")).toBeNull();
   });
 });
+
+// The glosses reach the DOM, where a hover can find them. jsdom cannot hover,
+// but it can prove the title is attached — absence here is the exact way this
+// feature silently dies in a refactor.
+describe("glosses — the numbers explain themselves", () => {
+  test("the margin, the meter and the window-fit line each carry their gloss", () => {
+    const { getByTestId, container } = render(
+      <OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={OPS_FIXTURE_NOMINAL.at! + 2000} />,
+    );
+    const margin = container.querySelector(".ops-pool-margin");
+    expect(margin?.getAttribute("title")).toContain("Balance ÷ floor");
+    const meter = container.querySelector(".ops-meter");
+    expect(meter?.getAttribute("title")).toContain("settlement halts");
+    expect(getByTestId("ops-evidence-fit").getAttribute("title")).toContain("same 24h");
+  });
+
+  test("every rendered note key explains itself; RUNWAY answers the pool's question", () => {
+    // No fixture carries gas data, so BURN never renders here — it only exists
+    // live. Asserting it from a fixture would test the fixture, not the board;
+    // its gloss text is held to standard by ops-gloss.test.ts and it shares
+    // this exact keyed-lookup path with RUNWAY.
+    const { container } = render(<OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={OPS_FIXTURE_NOMINAL.at! + 2000} />);
+    const keys = [...container.querySelectorAll(".ops-pool-note-key")];
+    expect(keys.length).toBeGreaterThan(0);
+    for (const k of keys) {
+      expect(k.getAttribute("title"), `${k.textContent} lost its gloss`).toBeTruthy();
+    }
+    const runway = keys.find((k) => k.textContent === "RUNWAY");
+    expect(runway?.getAttribute("title")).toContain("still fund");
+  });
+});

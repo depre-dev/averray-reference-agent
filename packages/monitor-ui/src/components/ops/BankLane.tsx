@@ -20,6 +20,7 @@
 // tiles nor complain about its own absence. Only `unavailable` — a configured
 // feed that failed — is worth a line.
 
+import { OPS_GLOSS } from "../../lib/monitor/ops-gloss.js";
 import type { BankBlock } from "../../lib/monitor/product-health.js";
 
 export interface BankLaneProps {
@@ -67,7 +68,10 @@ export function BankLane({ bank }: BankLaneProps) {
             never seen funds is not evidence of an empty position. */}
         <div className="ops-bank-row" data-testid="ops-bank-position">
           <dt>POSITION</dt>
-          <dd data-tone={positionTone(lane.position?.status)}>
+          <dd
+            data-tone={positionTone(lane.position?.status)}
+            title={lane.position?.status === "unverified" ? OPS_GLOSS.positionUnverified : undefined}
+          >
             {lane.position
               ? lane.position.status === "unverified"
                 ? `UNVERIFIED — ${lane.position.detail}`
@@ -76,16 +80,26 @@ export function BankLane({ bank }: BankLaneProps) {
           </dd>
         </div>
         <Row label="FLOAT" line={lane.float} testId="ops-bank-float" />
-        <Row label="POSTAGE" line={lane.postage} testId="ops-bank-postage" />
+        <Row label="POSTAGE" line={lane.postage} testId="ops-bank-postage" title={OPS_GLOSS.postage} />
         <Row label="REQUESTS" line={lane.requests} testId="ops-bank-requests" />
       </dl>
     </section>
   );
 }
 
-function Row({ label, line, testId }: { label: string; line: { text: string; tone: string }; testId: string }) {
+function Row({
+  label,
+  line,
+  testId,
+  title,
+}: {
+  label: string;
+  line: { text: string; tone: string };
+  testId: string;
+  title?: string;
+}) {
   return (
-    <div className="ops-bank-row" data-testid={testId}>
+    <div className="ops-bank-row" data-testid={testId} title={title}>
       <dt>{label}</dt>
       <dd data-tone={line.tone}>{line.text}</dd>
     </div>
