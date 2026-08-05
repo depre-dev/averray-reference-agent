@@ -155,6 +155,17 @@ export interface MorningDigestInput {
   network: string;
   /** deriveOpsVerdict output — headline is prose FOR humans; that is this. */
   verdictHeadline: string;
+  /**
+   * The verdict CONTRACT fields beside the quotable headline. The closing
+   * line must never out-calm the verdict: floor-breach, payout-shortfall and
+   * pool-draining derive from pools and payout evidence, so they exist with
+   * every probe green — and "Nothing is waiting on you" under such a headline
+   * is exactly the contradiction the one-verdict rule forbids (found by
+   * truth-boundary review of #755). `reason` decides calm; `tone` (producer
+   * severity) decides urgency. Optional for old fixtures; absent means calm.
+   */
+  verdictReason?: string;
+  verdictTone?: string;
   probes: readonly DigestProbe[];
   /** The bank lane's server-decided requests line, when a lane exists at all. */
   bankRequests?: { text: string; tone: string } | null;
@@ -248,13 +259,25 @@ export function buildMorningDigest(input: MorningDigestInput): string {
   const bankTone = input.bankRequests?.tone;
   const needsNow = reds + (bankTone === "red" ? 1 : 0);
   const worthALook = attention.length - reds + (bankTone === "degraded" ? 1 : 0);
+  const verdictCalm = input.verdictReason === undefined || input.verdictReason === "nominal";
+  const verdictUrgent = input.verdictTone === "red";
   lines.push("");
-  if (needsNow > 0) {
+  if (verdictUrgent && needsNow === 0) {
+    // A red verdict with green probes (floor breach, payout shortfall) —
+    // the probes cannot summon the operator, so the verdict must.
+    lines.push("The verdict line above needs you now.");
+  } else if (needsNow > 0) {
     lines.push(needsNow === 1 ? "One item needs you now." : `${needsNow} items need you now.`);
   } else if (worthALook > 0) {
-    lines.push("Worth a look when you're at the desk — nothing is on fire.");
-  } else {
+    lines.push(
+      verdictCalm
+        ? "Worth a look when you're at the desk — nothing is on fire."
+        : "Worth a look when you're at the desk — and read the verdict line above.",
+    );
+  } else if (verdictCalm) {
     lines.push("Nothing is waiting on you.");
+  } else {
+    lines.push("The probes are green, but the verdict line above is the one to read.");
   }
 
   return lines.join("\n");

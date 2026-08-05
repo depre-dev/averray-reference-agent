@@ -17,6 +17,13 @@
 // The briefing is therefore never absent and never wrong; only sometimes less
 // charming.
 //
+// RESIDUAL, NAMED: the gate is necessary, not sufficient. It cannot detect
+// framing drift that keeps every figure — invented worry over a green board,
+// soothing sentence-shapes around a named red. The controls there are the
+// prompt's hard rules, temperature 0.4, and the operator seeing voice+reason
+// in the morning_digest_voice log line. If the prose ever reads wrong, unset
+// OLLAMA_API_KEY: the digest loses charm, never truth.
+//
 // Kept pure of transport: the caller injects a `request` function (bound to
 // requestHermesCompletion, the ONE LLM client), so every rule here runs in the
 // local unit suite with a stub.
@@ -32,6 +39,12 @@ export interface ConversationalDigestInput {
   facts: readonly string[];
   /** Red probe count — a red board must never read as green. */
   redCount: number;
+  /**
+   * Human labels of every not-ok item. Each must be NAMED in the prose —
+   * a red probe whose detail happens to carry no digits ("settlement
+   * stalled") would otherwise be droppable without tripping the fact gate.
+   */
+  attentionLabels?: readonly string[];
   request: (req: HermesCompletionRequest) => Promise<string | null>;
 }
 
@@ -60,7 +73,7 @@ const CLAIMS_ALL_GREEN = /all\s+(?:\d+\s+)?probes?\s+(?:are\s+)?green|all\s+gree
 
 /** Null when the candidate may ship; otherwise the named reason it may not. */
 export function conversationalDigestViolation(
-  input: Pick<ConversationalDigestInput, "verdictHeadline" | "facts" | "redCount">,
+  input: Pick<ConversationalDigestInput, "verdictHeadline" | "facts" | "redCount" | "attentionLabels">,
   candidate: string,
 ): string | null {
   const text = candidate.trim();
@@ -70,6 +83,9 @@ export function conversationalDigestViolation(
   if (!text.includes(input.verdictHeadline)) return "headline_missing";
   for (const token of digestFactTokens(input.facts)) {
     if (!text.includes(token)) return `fact_missing:${token}`;
+  }
+  for (const label of input.attentionLabels ?? []) {
+    if (!text.toLowerCase().includes(label.toLowerCase())) return `attention_missing:${label}`;
   }
   if (input.redCount > 0 && CLAIMS_ALL_GREEN.test(text)) return "polarity";
   return null;

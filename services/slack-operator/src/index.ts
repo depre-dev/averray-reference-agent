@@ -158,6 +158,7 @@ import { startBuzzInbound } from "./buzz-inbound-start.js";
 import { decideProbeTransitions } from "./probe-transitions.js";
 import { buildMorningDigest, digestDue, digestFactStrings, readDigestSchedule } from "./morning-digest.js";
 import { composeConversationalDigest } from "./digest-voice.js";
+import { probeLabel } from "./ops-voice.js";
 import { describeBuzzDelivery, recordBuzzDelivery, type BuzzDeliveryState } from "./buzz-delivery.js";
 import type { ProbeResult } from "./product-health.js";
 import { isBurnUnmeasurable, measuredGasBurn } from "./gas-burn-rate.js";
@@ -3922,7 +3923,7 @@ function startOperatorRoutines() {
       if (digestCheck.due && !(getServerAlertMuteUntilMs() > digestNowMs)) {
         // The SAME verdict inputs the /monitor/product-health endpoint uses —
         // one verdict system, quoted rather than re-derived.
-        const digestVerdictHeadline = deriveOpsVerdict({
+        const digestVerdict = deriveOpsVerdict({
           enabled: routineConfig.productHealth.enabled,
           checks: productHealthHistory.length,
           probes: result.evaluation.probes,
@@ -3931,7 +3932,7 @@ function startOperatorRoutines() {
           ...(productHealthSnapshotBlocks?.flow?.payout
             ? { payout: productHealthSnapshotBlocks.flow.payout }
             : {}),
-        }).headline;
+        });
         const digestInput = {
           localDate: digestCheck.localDate,
           localTime: digestCheck.localTime,
@@ -3940,7 +3941,9 @@ function startOperatorRoutines() {
           timeZone: morningDigestSchedule.timeZone,
           network:
             (process.env.WALLET_NETWORK ?? "").trim().toLowerCase() === "mainnet" ? "mainnet" : "testnet",
-          verdictHeadline: digestVerdictHeadline,
+          verdictHeadline: digestVerdict.headline,
+          verdictReason: digestVerdict.reason,
+          verdictTone: digestVerdict.tone,
           probes: result.evaluation.probes,
           bankRequests: productHealthSnapshotBlocks?.bank?.lane?.requests ?? null,
         };
@@ -3953,9 +3956,17 @@ function startOperatorRoutines() {
         if (digestLlmKey) {
           const composed = await composeConversationalDigest({
             plain: digestPlain,
-            verdictHeadline: digestVerdictHeadline,
+            verdictHeadline: digestVerdict.headline,
             facts: digestFactStrings(digestInput),
             redCount: result.evaluation.probes.filter((p) => p.status === "red").length,
+            attentionLabels: [
+              ...result.evaluation.probes
+                .filter((p) => p.status !== "ok")
+                .map((p) => probeLabel(p.name)),
+              ...(digestInput.bankRequests && ["red", "degraded"].includes(digestInput.bankRequests.tone)
+                ? ["Bank"]
+                : []),
+            ],
             request: (req) =>
               requestHermesCompletion(req, {
                 apiKey: digestLlmKey,
