@@ -20,6 +20,7 @@ function jwt(claims: Record<string, unknown>): string {
 
 const cred = (over: Partial<CredentialExpiry> = {}): CredentialExpiry => ({
   label: "ADMIN_JWT",
+  kind: "token",
   source: "jwt exp claim",
   expiresAtMs: NOW + 30 * DAY,
   ...over,
@@ -202,5 +203,44 @@ describe("collecting from artefacts, not from a list of dates", () => {
       readCert: okCert,
     });
     expect(got[0]!.label).toBe("TLS a.example");
+  });
+});
+
+describe("the verdict names its kinds — a count is not coverage", () => {
+  test("certs-only says NO TOKENS WATCHED, out loud", () => {
+    // The live board read "3 credentials, soonest expiry 37d" while
+    // PRODUCT_HEALTH_EXPIRY_JWT_ENV_KEYS was entirely unset: every credential
+    // was a TLS cert, and the line read as coverage of secrets nobody was
+    // watching. The gap has to be in the sentence, not in the operator's
+    // memory of what they configured.
+    const p = credentialExpiryProbe({
+      credentials: [
+        cred({ label: "TLS a.example", kind: "tls", expiresAtMs: NOW + 37 * DAY }),
+        cred({ label: "TLS b.example", kind: "tls", expiresAtMs: NOW + 60 * DAY }),
+        cred({ label: "TLS c.example", kind: "tls", expiresAtMs: NOW + 90 * DAY }),
+      ],
+      nowMs: NOW,
+    });
+    expect(p.status).toBe("ok");
+    expect(p.detail).toBe("3 TLS certs · no tokens watched, soonest expiry 37d");
+  });
+
+  test("a mixed set counts each kind by name", () => {
+    const p = credentialExpiryProbe({
+      credentials: [
+        cred({ label: "TLS a.example", kind: "tls", expiresAtMs: NOW + 60 * DAY }),
+        cred({ expiresAtMs: NOW + 45 * DAY }),
+      ],
+      nowMs: NOW,
+    });
+    expect(p.detail).toBe("1 TLS cert · 1 token, soonest expiry 45d");
+  });
+
+  test("tokens-only does not invent a cert clause", () => {
+    const p = credentialExpiryProbe({
+      credentials: [cred({ expiresAtMs: NOW + 20 * DAY }), cred({ label: "GATEWAY_KEY", expiresAtMs: NOW + 50 * DAY })],
+      nowMs: NOW,
+    });
+    expect(p.detail).toBe("2 tokens, soonest expiry 20d");
   });
 });

@@ -25,6 +25,14 @@ import { connect as tlsConnect } from "node:tls";
 export interface CredentialExpiry {
   /** Operator-facing name — what to go and rotate. */
   label: string;
+  /**
+   * What KIND of credential this is, so the verdict can say so. On 2026-08-05
+   * the board read "3 credentials, soonest expiry 37d" while the token list was
+   * entirely unconfigured — every one of the three was a TLS cert, and the line
+   * read as coverage of secrets nobody was watching. A count that does not name
+   * its kinds is a number that reads as more than it is.
+   */
+  kind: "tls" | "token";
   /** Where the reading came from, so a wrong answer is traceable. */
   source: string;
   /** Epoch ms of expiry, or null when the artefact does not declare one. */
@@ -172,7 +180,20 @@ export function credentialExpiryProbe(input: {
         .filter((c) => c.expiresAtMs !== null)
         .map((c) => daysUntil(c.expiresAtMs!, input.nowMs)),
     );
-    return { status, detail: `${input.credentials.length} credentials, soonest expiry ${soonest}d` };
+    // Name the KINDS, not just the count. "3 credentials" read as coverage of
+    // the secrets while the token list was entirely unconfigured — all three
+    // were TLS certs. "no tokens watched" is the honest gap, said out loud, so
+    // an operator can tell a green that covers their tokens from a green that
+    // never looked at them.
+    const certs = input.credentials.filter((c) => c.kind === "tls").length;
+    const tokens = input.credentials.length - certs;
+    const kinds = [
+      certs > 0 ? `${certs} TLS cert${certs === 1 ? "" : "s"}` : null,
+      tokens > 0 ? `${tokens} token${tokens === 1 ? "" : "s"}` : "no tokens watched",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    return { status, detail: `${kinds}, soonest expiry ${soonest}d` };
   }
   return { status, detail: headline.join(" · ") };
 }
@@ -238,6 +259,7 @@ export async function collectCredentialExpiries(input: {
     const r = await input.readCert(host);
     out.push({
       label: `TLS ${host}`,
+      kind: "tls",
       source: "leaf certificate notAfter",
       expiresAtMs: r.validToMs,
       ...(r.error ? { unreadable: r.error } : {}),
@@ -253,6 +275,7 @@ export async function collectCredentialExpiries(input: {
     const exp = jwtExpiryMs(raw);
     out.push({
       label: key,
+      kind: "token",
       source: "jwt exp claim",
       expiresAtMs: exp,
       // Non-JWT credentials (opaque GitHub PATs, webhook URLs) legitimately

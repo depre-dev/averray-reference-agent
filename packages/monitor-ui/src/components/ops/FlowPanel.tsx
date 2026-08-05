@@ -9,6 +9,7 @@
 // read a clean 9 → 9 → 9 while only 7 of those payouts ever landed on-chain,
 // and nothing else on this board can see the difference.
 
+import { OPS_GLOSS } from "../../lib/monitor/ops-gloss.js";
 import {
   EVIDENCE_KEY,
   flowFunnel,
@@ -73,13 +74,18 @@ export function FlowPanel({ flow, externalFunnel, lifecycle, nowMs }: FlowPanelP
           to anyone who does not already know better — including a future
           reader of a screenshot. */}
       {mix ? (
-        <p className="ops-volume-mix" data-tone={mix.tone} data-testid="ops-volume-mix">
+        <p
+          className="ops-volume-mix"
+          data-tone={mix.tone}
+          data-testid="ops-volume-mix"
+          title={mix.text.includes("beyond the ledger window") ? OPS_GLOSS.beyondWindow : undefined}
+        >
           {mix.text}
         </p>
       ) : null}
 
       {timing ? (
-        <p className="ops-lifecycle" data-tone={timing.tone} data-testid="ops-lifecycle">
+        <p className="ops-lifecycle" data-tone={timing.tone} data-testid="ops-lifecycle" title={OPS_GLOSS.selfPosted}>
           {timing.text}
         </p>
       ) : null}
@@ -111,7 +117,12 @@ export function FlowPanel({ flow, externalFunnel, lifecycle, nowMs }: FlowPanelP
                 present — this board once showed SHORTFALL −2 with no window
                 information at all, which is an accusation without the one
                 fact that decides whether to believe it. */}
-            <div className="ops-evidence-fit" data-tone={evidence.fit.tone} data-testid="ops-evidence-fit">
+            <div
+              className="ops-evidence-fit"
+              data-tone={evidence.fit.tone}
+              data-testid="ops-evidence-fit"
+              title={OPS_GLOSS.windowFit}
+            >
               {evidence.fit.text}
             </div>
           </div>
@@ -207,9 +218,9 @@ function Funnel({ funnel }: { funnel: FunnelView }) {
   return (
     <div className="ops-funnel">
       <Stage label="CLAIMED" value={funnel.claimed} />
-      <Gap label={`in-flight ${funnel.inflight} · normal WIP`} tone="awaiting" />
+      <Gap label={`in-flight ${funnel.inflight} · normal WIP`} tone="awaiting" title={OPS_GLOSS.inflight} />
       <Stage label="SUBMITTED" value={funnel.submitted} />
-      <Gap label={`backlog ${funnel.backlog} · real payout backlog`} tone={funnel.backlogTone} />
+      <Gap label={`backlog ${funnel.backlog} · real payout backlog`} tone={funnel.backlogTone} title={OPS_GLOSS.backlog} />
       <Stage label="SETTLED" value={funnel.settled} />
     </div>
   );
@@ -227,9 +238,9 @@ function Stage({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Gap({ label, tone }: { label: string; tone: string }) {
+function Gap({ label, tone, title }: { label: string; tone: string; title?: string }) {
   return (
-    <div className="ops-funnel-gap">
+    <div className="ops-funnel-gap" title={title}>
       <span className="ops-funnel-arrow" aria-hidden>
         <i />▸
       </span>
