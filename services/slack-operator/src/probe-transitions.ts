@@ -26,6 +26,7 @@
 // Kept pure — no clock, no I/O, no config — so every rule here is testable
 // without a relay or a heartbeat.
 
+import { probeLabel } from "./ops-voice.js";
 import type { ProbeResult, ProbeStatus } from "./product-health.js";
 
 export interface ProbeTransitionAlert {
@@ -134,11 +135,19 @@ export function reasonClass(probe: ProbeResult): string {
   return `${probe.name}:${probe.status}:${shape}`;
 }
 
-/** Human line for the channel. The probe's own words, prefixed so it is greppable. */
-function alertText(probe: ProbeResult, kind: "opened" | "recovered"): string {
-  return kind === "opened"
-    ? `⚠ ${probe.name}: ${probe.detail}`
-    : `✓ ${probe.name} recovered: ${probe.detail}`;
+/**
+ * Human line for the channel: the probe's human name, a plain-words verb for
+ * what changed, then the probe's own detail verbatim. The machine enum used to
+ * lead ("⚠ money_path: …") for grep-ability; operator feedback 2026-08-05 —
+ * these land on a phone now — outranked grep, and the reason-class `key`
+ * still carries the enum for anything programmatic.
+ */
+function alertText(probe: ProbeResult, kind: "opened" | "recovered", before?: ProbeStatus): string {
+  const label = probeLabel(probe.name);
+  if (kind === "recovered") return `✓ ${label} recovered — ${probe.detail}`;
+  if (probe.status === "red") return `✗ ${label} is red — ${probe.detail}`;
+  if (before === "red") return `⚠ ${label} eased to degraded — ${probe.detail}`;
+  return `⚠ ${label} degraded — ${probe.detail}`;
 }
 
 const isAlarm = (status: ProbeStatus): boolean => status === "degraded" || status === "red";
@@ -236,7 +245,7 @@ export function decideProbeTransitions(input: DecideProbeTransitionsInput): Prob
       keys.add(key);
       if (input.muted) continue;
 
-      alerts.push({ probe: probe.name, kind: "opened", from: before.status, to: probe.status, text: alertText(probe, "opened"), key });
+      alerts.push({ probe: probe.name, kind: "opened", from: before.status, to: probe.status, text: alertText(probe, "opened", before.status), key });
       continue;
     }
 

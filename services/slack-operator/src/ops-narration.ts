@@ -13,6 +13,8 @@
 // caller (index.ts checkProductHealth) supplies prev/curr, the probes, the
 // resolved network, current mute state, and the last successful narration time.
 
+import { probeLabel } from "./ops-voice.js";
+
 export type OpsStatus = "healthy" | "degraded" | "red" | "unknown";
 export type OpsNetwork = "testnet" | "mainnet" | "unknown";
 
@@ -45,19 +47,7 @@ export interface OpsNarrationDecision {
   suppressed?: "muted" | "cooldown";
 }
 
-const PROBE_LABELS: Record<string, string> = {
-  product_api: "Product API",
-  api_latency: "API latency",
-  chain_height: "Chain height",
-  capabilities: "Capabilities",
-  signer_liquidity: "Signer liquidity",
-  treasury_liquidity: "Treasury",
-  money_path: "Money path",
-};
-
-function label(name: string): string {
-  return PROBE_LABELS[name] ?? name.replace(/_/g, " ");
-}
+// Probe naming lives in ops-voice.ts — one map for every chat surface.
 
 function trim(detail: string, max = 160): string {
   const d = detail.trim();
@@ -102,7 +92,7 @@ export function decideOpsNarration(input: DecideOpsNarrationInput): OpsNarration
     return {
       post: true,
       edge,
-      text: `⚠ Ops — ${lead ? label(lead.name) : "a probe"} red${detail}${extra}. ${tone}`,
+      text: `⚠ Ops — ${lead ? probeLabel(lead.name) : "a probe"} red${detail}${extra}. ${tone}`,
     };
   }
 

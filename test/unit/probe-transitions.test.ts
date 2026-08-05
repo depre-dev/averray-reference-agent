@@ -60,7 +60,7 @@ describe("decideProbeTransitions", () => {
     });
     expect(r.alerts).toHaveLength(1);
     expect(r.alerts[0]).toMatchObject({ probe: "external_funnel", kind: "opened", from: "ok", to: "red" });
-    expect(r.alerts[0]?.text).toBe("⚠ external_funnel: rejected 0xaa4b… slashes in 9h");
+    expect(r.alerts[0]?.text).toBe("✗ External funnel is red — rejected 0xaa4b… slashes in 9h");
   });
 
   it("does NOT repeat while the same reason class persists", () => {
@@ -110,7 +110,7 @@ describe("decideProbeTransitions", () => {
     });
     expect(r.alerts).toHaveLength(1);
     expect(r.alerts[0]).toMatchObject({ kind: "recovered", from: "red", to: "ok" });
-    expect(r.alerts[0]?.text).toBe("✓ signer_liquidity recovered: gas 5.2 DOT");
+    expect(r.alerts[0]?.text).toBe("✓ Signer liquidity recovered — gas 5.2 DOT");
   });
 
   it("does not retain recovery keys — breaking twice is two events", () => {

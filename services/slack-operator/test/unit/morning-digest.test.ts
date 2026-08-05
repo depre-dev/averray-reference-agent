@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest";
 import {
   buildMorningDigest,
   digestDue,
+  digestFactStrings,
   localStamp,
   readDigestSchedule,
   type DigestProbe,
@@ -95,28 +96,40 @@ describe("the message quotes; it does not opine", () => {
     probes,
   };
 
-  test("a clean morning: header, verdict, counts, and the probes' own words", () => {
+  test("a clean morning: lock-screen opener, verdict quoted, the probes' own words", () => {
     const text = buildMorningDigest({ ...base, bankRequests: { text: "no requests in flight", tone: "ok" } });
-    expect(text).toContain("MORNING DIGEST · 2026-08-06 08:00 Europe/Zurich · AVERRAY MAINNET");
-    expect(text).toContain("money is moving and proven on-chain");
-    expect(text).toContain("PROBES 4 ok / 0 red of 4");
-    expect(text).toContain("FLOW settled24h 16 (0 stuck, 0 failed)");
-    expect(text).toContain("CREDS 3 TLS certs · no tokens watched");
-    expect(text).toContain("BANK no requests in flight");
-    expect(text).not.toContain("ATTENTION");
+    expect(text.split("\n")[0]).toBe("Good morning — all 4 probes green on Averray mainnet.");
+    expect(text).toContain('The board reads: "money is moving and proven on-chain"');
+    // No human stamp supplied → the ISO date stands in; nothing is invented.
+    expect(text).toContain("2026-08-06 08:00 (Europe/Zurich)");
+    expect(text).toContain("Money: settled24h 16 (0 stuck, 0 failed)");
+    expect(text).toContain("Credentials: 3 TLS certs · no tokens watched");
+    expect(text).toContain("Bank: no requests in flight");
+    expect(text).not.toContain("Needs attention");
+    expect(text.endsWith("Nothing is waiting on you.")).toBe(true);
+  });
+
+  test("the human stamp renders when the caller supplies it", () => {
+    const text = buildMorningDigest({ ...base, weekday: "Thursday", humanDate: "6 Aug" });
+    expect(text).toContain("Thursday 6 Aug, 08:00 (Europe/Zurich)");
+  });
+
+  test("greets by when it ACTUALLY fired — a late catch-up is not 'morning'", () => {
+    const text = buildMorningDigest({ ...base, localTime: "16:07" });
+    expect(text.startsWith("Good afternoon — ")).toBe(true);
   });
 
   test("an absent probe contributes NO line — absence is not zero", () => {
     const text = buildMorningDigest({ ...base, probes: probes.filter((p) => p.name !== "money_path") });
-    expect(text).not.toContain("FLOW");
+    expect(text).not.toContain("Money:");
   });
 
-  test("no bank lane, no BANK line — the rule every surface follows", () => {
+  test("no bank lane, no bank line — the rule every surface follows", () => {
     const text = buildMorningDigest({ ...base, bankRequests: null });
-    expect(text).not.toContain("BANK");
+    expect(text).not.toContain("Bank:");
   });
 
-  test("everything not-ok is quoted under ATTENTION — the hold may never have announced it", () => {
+  test("everything not-ok is quoted under 'Needs attention', red first — the hold may never have announced it", () => {
     const text = buildMorningDigest({
       ...base,
       probes: [
@@ -125,9 +138,64 @@ describe("the message quotes; it does not opine", () => {
         { name: "api_latency", status: "red", detail: "/health 4100ms" },
       ],
     });
-    expect(text).toContain("ATTENTION");
-    expect(text).toContain("⚠ capabilities: External posting is staged.");
-    expect(text).toContain("✗ api_latency: /health 4100ms");
-    expect(text).toContain("PROBES 4 ok / 1 red of 6");
+    expect(text.split("\n")[0]).toBe("Good morning — 2 of 6 probes need attention on Averray mainnet.");
+    expect(text).toContain("Needs attention:");
+    expect(text).toContain("⚠ Capabilities — External posting is staged.");
+    expect(text).toContain("✗ API latency — /health 4100ms");
+    expect(text.indexOf("✗ API latency")).toBeLessThan(text.indexOf("⚠ Capabilities"));
+    expect(text.endsWith("One item needs you now.")).toBe(true);
+  });
+
+  test("singular grammar when a lone probe wants eyes", () => {
+    const text = buildMorningDigest({
+      ...base,
+      probes: [{ name: "signer_liquidity", status: "degraded", detail: "gas ×1.1 — near floor" }],
+    });
+    expect(text.split("\n")[0]).toBe("Good morning — 1 of 1 probe needs attention on Averray mainnet.");
+    expect(text.endsWith("Worth a look when you're at the desk — nothing is on fire.")).toBe(true);
+  });
+
+  test("a red bank tone summons the operator even on a green board", () => {
+    const text = buildMorningDigest({
+      ...base,
+      bankRequests: { text: "1 OVERDUE — leg2-dispatched for 8.7h", tone: "red" },
+    });
+    expect(text.endsWith("One item needs you now.")).toBe(true);
+  });
+
+  test("bank tone 'awaiting' is a blind instrument, not a summons", () => {
+    const text = buildMorningDigest({
+      ...base,
+      bankRequests: { text: "aUSDC not read yet", tone: "awaiting" },
+    });
+    expect(text.endsWith("Nothing is waiting on you.")).toBe(true);
+  });
+});
+
+describe("digestDue carries the human stamp beside the dedupe date", () => {
+  test("weekday and short date come from the same instant, same zone", () => {
+    const d = digestDue({ nowMs: MORNING, schedule: enabled, lastSentLocalDate: null });
+    expect(d.weekday).toBe("Thursday");
+    expect(d.humanDate).toBe("6 Aug");
+  });
+});
+
+describe("digestFactStrings — the strings Hermes may not lose", () => {
+  test("fact lines, every not-ok detail, and the bank line", () => {
+    const facts = digestFactStrings({
+      localDate: "2026-08-06",
+      localTime: "08:00",
+      timeZone: ZURICH,
+      network: "mainnet",
+      verdictHeadline: "x",
+      probes: [
+        { name: "money_path", status: "ok", detail: "settled24h 16 (0 stuck, 0 failed)" },
+        { name: "product_api", status: "red", detail: "health check failing for 12m" },
+      ],
+      bankRequests: { text: "1 open request, staged on-chain", tone: "ok" },
+    });
+    expect(facts).toContain("settled24h 16 (0 stuck, 0 failed)");
+    expect(facts).toContain("health check failing for 12m");
+    expect(facts).toContain("1 open request, staged on-chain");
   });
 });

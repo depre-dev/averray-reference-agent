@@ -156,7 +156,8 @@ import { decideOpsNarration, type OpsStatus } from "./ops-narration.js";
 import { publishNarration, readBuzzConfig } from "./buzz-client.js";
 import { startBuzzInbound } from "./buzz-inbound-start.js";
 import { decideProbeTransitions } from "./probe-transitions.js";
-import { buildMorningDigest, digestDue, readDigestSchedule } from "./morning-digest.js";
+import { buildMorningDigest, digestDue, digestFactStrings, readDigestSchedule } from "./morning-digest.js";
+import { composeConversationalDigest } from "./digest-voice.js";
 import { describeBuzzDelivery, recordBuzzDelivery, type BuzzDeliveryState } from "./buzz-delivery.js";
 import type { ProbeResult } from "./product-health.js";
 import { isBurnUnmeasurable, measuredGasBurn } from "./gas-burn-rate.js";
@@ -3919,27 +3920,57 @@ function startOperatorRoutines() {
         lastSentLocalDate: morningDigestSentLocalDate ?? readMorningDigestState(),
       });
       if (digestCheck.due && !(getServerAlertMuteUntilMs() > digestNowMs)) {
-        const digestText = buildMorningDigest({
+        // The SAME verdict inputs the /monitor/product-health endpoint uses —
+        // one verdict system, quoted rather than re-derived.
+        const digestVerdictHeadline = deriveOpsVerdict({
+          enabled: routineConfig.productHealth.enabled,
+          checks: productHealthHistory.length,
+          probes: result.evaluation.probes,
+          pools: productHealthSnapshotBlocks?.solvency?.pools ?? [],
+          runway: productHealthSnapshotBlocks?.solvency?.runway ?? [],
+          ...(productHealthSnapshotBlocks?.flow?.payout
+            ? { payout: productHealthSnapshotBlocks.flow.payout }
+            : {}),
+        }).headline;
+        const digestInput = {
           localDate: digestCheck.localDate,
           localTime: digestCheck.localTime,
+          weekday: digestCheck.weekday,
+          humanDate: digestCheck.humanDate,
           timeZone: morningDigestSchedule.timeZone,
           network:
             (process.env.WALLET_NETWORK ?? "").trim().toLowerCase() === "mainnet" ? "mainnet" : "testnet",
-          // The SAME verdict inputs the /monitor/product-health endpoint uses —
-          // one verdict system, quoted rather than re-derived.
-          verdictHeadline: deriveOpsVerdict({
-            enabled: routineConfig.productHealth.enabled,
-            checks: productHealthHistory.length,
-            probes: result.evaluation.probes,
-            pools: productHealthSnapshotBlocks?.solvency?.pools ?? [],
-            runway: productHealthSnapshotBlocks?.solvency?.runway ?? [],
-            ...(productHealthSnapshotBlocks?.flow?.payout
-              ? { payout: productHealthSnapshotBlocks.flow.payout }
-              : {}),
-          }).headline,
+          verdictHeadline: digestVerdictHeadline,
           probes: result.evaluation.probes,
           bankRequests: productHealthSnapshotBlocks?.bank?.lane?.requests ?? null,
-        });
+        };
+        // The plain digest is both the fallback and Hermes's source text; the
+        // gate in digest-voice guarantees his prose carries every figure, so a
+        // model outage or a paraphrase slip degrades to plain, never to wrong.
+        const digestPlain = buildMorningDigest(digestInput);
+        let digestText = digestPlain;
+        const digestLlmKey = optionalEnv("OLLAMA_API_KEY");
+        if (digestLlmKey) {
+          const composed = await composeConversationalDigest({
+            plain: digestPlain,
+            verdictHeadline: digestVerdictHeadline,
+            facts: digestFactStrings(digestInput),
+            redCount: result.evaluation.probes.filter((p) => p.status === "red").length,
+            request: (req) =>
+              requestHermesCompletion(req, {
+                apiKey: digestLlmKey,
+                baseUrl: optionalEnv("OLLAMA_BASE_URL") ?? "https://ollama.com/v1",
+                // Scheduled, not interactive — it can afford to wait for a good
+                // draft where chat replies cannot.
+                timeoutMs: 25_000,
+              }),
+          });
+          digestText = composed.text;
+          logger.info(
+            { voice: composed.voice, ...(composed.reason ? { reason: composed.reason } : {}) },
+            "morning_digest_voice",
+          );
+        }
         const digestBuzz = readBuzzConfig();
         if (!digestBuzz.config) {
           // No relay configured: the local collaboration record IS the digest.
