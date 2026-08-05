@@ -42,21 +42,27 @@ COMPOSE=(docker compose -f "$BUZZ_DIR/compose.yml"
 # not break, each read from the LIVE system, never from a file.
 
 check_nip11() {
-  # The public NIP-11 is the relay's own statement of what it is. Post-upgrade
-  # it must (a) no longer claim 0.2.0 and (b) advertise the pairing relay.
+  # The public NIP-11 is the relay's own statement of what it is.
+  #
+  # The DISCRIMINATOR is pairing_relay_url: that field does not exist in
+  # relay-v0.2.0's code, so its presence proves the new build is serving. The
+  # crate VERSION is deliberately not tested — upstream bumps it only on
+  # releases, so a fresh :main build truthfully self-reports "0.2.0". The
+  # first version of this check keyed on that and called a successful upgrade
+  # failed (2026-08-05, live): the running digest matched the pin and the
+  # pairing field was present, but the version predicate short-circuited
+  # before the field that decides. A check that misnames the failure is worse
+  # than no check.
   local doc version pairing
   doc="$(curl -fsS -H 'Accept: application/nostr+json' https://buzz.averray.com --max-time 10)" || {
     echo "  CHECK 1 FAIL: NIP-11 unreachable via the tunnel." >&2; return 1; }
   version="$(printf '%s' "$doc" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version",""))')"
   pairing="$(printf '%s' "$doc" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("pairing_relay_url",""))')"
-  if [ "$version" = "0.2.0" ]; then
-    echo "  CHECK 1 FAIL: relay still reports version 0.2.0 — the pin did not take." >&2; return 1
-  fi
   if [ "$pairing" != "wss://pair.averray.com" ]; then
-    echo "  CHECK 1 FAIL: NIP-11 pairing_relay_url is '${pairing:-<absent>}', expected wss://pair.averray.com." >&2
+    echo "  CHECK 1 FAIL: NIP-11 pairing_relay_url is '${pairing:-<absent>}', expected wss://pair.averray.com — old build, or BUZZ_PAIRING_RELAY_URL not set." >&2
     return 1
   fi
-  echo "  CHECK 1 PASS: relay version ${version}, pairing_relay_url advertised"
+  echo "  CHECK 1 PASS: pairing_relay_url advertised (crate version ${version} — informational only)"
 }
 
 check_sidecar() {
