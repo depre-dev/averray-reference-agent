@@ -1,0 +1,126 @@
+# The pairing sidecar — the open door a membership relay needs for new devices.
+#
+# WHY THIS EXISTS. Buzz Desktop's Settings → Mobile pairing failed with
+# `WebSocket connection failed: HTTP error: 404 Not Found` (observed live,
+# 2026-08-05). The mechanism, from desktop/src-tauri/src/commands/pairing.rs:
+# a NIP-43 membership relay cannot admit an unpaired phone — it is not a member
+# yet — so the desktop looks for a DEDICATED OPEN PAIRING RELAY. Newer relay
+# code advertises one via NIP-11 `pairing_relay_url` (BUZZ_PAIRING_RELAY_URL);
+# our pinned relay-v0.2.0 predates that field, so the desktop falls back to the
+# legacy convention: `wss://<relay>/pair`. Nothing served /pair. Hence 404.
+#
+# This overlay serves it: a second relay in OPEN mode. Safe by protocol design —
+# NIP-AB explicitly assumes an UNTRUSTED transport (the identity secret rides
+# NIP-44-encrypted, confirmed by an out-of-band SAS code on both screens), so an
+# open relay is what the protocol expects, not a compromise. A relay upgrade to
+# :main would NOT remove this service; it would only advertise its address in
+# NIP-11 instead of relying on the /pair path convention.
+#
+# ── INVOCATION — the run.sh trap, third file edition ────────────────────────
+#   cd /srv/buzz/deploy/compose
+#   docker compose -f compose.yml \
+#     -f /srv/averray-reference-agent/ops/buzz/compose.averray.yml \
+#     -f /srv/averray-reference-agent/ops/buzz/compose.pairing.yml up -d
+# ALWAYS that exact form, never upstream's ./run.sh — see compose.averray.yml's
+# header for the two-parallel-stacks incident that rule comes from.
+#
+# ── ISOLATION IS THE WHOLE DESIGN ───────────────────────────────────────────
+# Own postgres, own redis, own volumes. An open relay wired to the production
+# database would let unauthenticated traffic write into the community store —
+# and shared service names across stacks is exactly how the main relay once
+# authenticated against the WRONG postgres (compose.averray.yml, REACHABILITY).
+# The sidecar's blast radius is a throwaway store nothing else reads.
+#
+# Same image reference as the main relay ON PURPOSE: whatever BUZZ_IMAGE pin
+# the stack's .env carries applies to both, so the pair can never drift apart.
+#
+# NO minio. The upstream relay env requires DATABASE_URL/REDIS_URL only; media
+# storage is not part of pairing traffic. If the image refuses to boot without
+# S3 config, that surfaces at the liveness probe below — add a throwaway bucket
+# then, with evidence, not preemptively.
+#
+# Operator provisions in /srv/buzz/deploy/compose/.env (never committed):
+#   PAIRING_POSTGRES_PASSWORD=<openssl rand -hex 24>
+#   PAIRING_REDIS_PASSWORD=<openssl rand -hex 24>
+#
+# ── AFTER `up -d`, IN ORDER ─────────────────────────────────────────────────
+# 1. Liveness, from inside the network (the box publishes no ports):
+#      docker run --rm --network buzz-prod_buzz-net curlimages/curl \
+#        -fsS http://relay-pairing:3000/_liveness
+# 2. THE PATH QUESTION — the one thing source reading could not settle: does
+#    the relay upgrade WebSockets on a non-root path? Cloudflare passes /pair
+#    through to the origin verbatim.
+#      docker run --rm --network buzz-prod_buzz-net curlimages/curl -si \
+#        http://relay-pairing:3000/pair \
+#        -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+#        -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+#        | head -1
+#    101 → proceed. 404 → the sidecar needs a path-stripping hop; stop and say so.
+# 3. Cloudflare Zero Trust → Networks → Tunnels → this tunnel → Public hostnames:
+#    ADD  hostname `buzz.averray.com`, path `pair*`, service
+#    `http://relay-pairing:3000` — ORDERED ABOVE the existing buzz.averray.com
+#    catch-all (rules match top-down; below it, it never fires).
+# 4. Desktop → Settings → Mobile → Try again. The QR should render.
+# 5. NEGATIVE CONTROL, so the door only opened where intended: the MAIN relay
+#    must still refuse an unauthenticated client exactly as before.
+#
+# Ceilings per the blast-radius rules in compose.averray.yml: this box has no
+# swap, and it runs the money monitor. ~900 MiB for the whole sidecar.
+services:
+  relay-pairing:
+    image: ${BUZZ_IMAGE:-ghcr.io/block/buzz:main}
+    environment:
+      BUZZ_BIND_ADDR: 0.0.0.0:3000
+      BUZZ_HEALTH_PORT: "8080"
+      # OPEN on purpose — the entire reason this service exists. Everything the
+      # phone sends here is NIP-44-encrypted pairing traffic; membership lives
+      # on the main relay, which is untouched by this file.
+      BUZZ_REQUIRE_AUTH_TOKEN: "false"
+      DATABASE_URL: postgres://buzz:${PAIRING_POSTGRES_PASSWORD:?set PAIRING_POSTGRES_PASSWORD in .env}@pairing-postgres:5432/buzz
+      REDIS_URL: redis://:${PAIRING_REDIS_PASSWORD:?set PAIRING_REDIS_PASSWORD in .env}@pairing-redis:6379
+      BUZZ_GIT_REPO_PATH: /data/git
+      # Fresh, empty, sidecar-only database: automatic migration is safe here
+      # in a way it deliberately is not on the production store.
+      BUZZ_AUTO_MIGRATE: "true"
+      RELAY_URL: wss://buzz.averray.com/pair
+    volumes:
+      - pairing-git-data:/data/git
+    depends_on:
+      pairing-postgres:
+        condition: service_healthy
+      pairing-redis:
+        condition: service_started
+    mem_limit: 512m
+    restart: unless-stopped
+    networks: [buzz-net]
+
+  pairing-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: buzz
+      POSTGRES_DB: buzz
+      POSTGRES_PASSWORD: ${PAIRING_POSTGRES_PASSWORD:?set PAIRING_POSTGRES_PASSWORD in .env}
+    volumes:
+      - pairing-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U buzz -d buzz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 256m
+    restart: unless-stopped
+    networks: [buzz-net]
+
+  pairing-redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "${PAIRING_REDIS_PASSWORD:?set PAIRING_REDIS_PASSWORD in .env}"]
+    mem_limit: 128m
+    restart: unless-stopped
+    networks: [buzz-net]
+
+volumes:
+  pairing-postgres-data:
+  pairing-git-data:
+
+networks:
+  buzz-net:
