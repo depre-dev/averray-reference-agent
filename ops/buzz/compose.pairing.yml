@@ -47,19 +47,23 @@
 # 1. Liveness, from inside the network (the box publishes no ports):
 #      docker run --rm --network buzz-prod_buzz-net curlimages/curl \
 #        -fsS http://relay-pairing:3000/_liveness
-# 2. THE PATH QUESTION — the one thing source reading could not settle: does
-#    the relay upgrade WebSockets on a non-root path? Cloudflare passes /pair
-#    through to the origin verbatim.
+# 2. THE PATH QUESTION — SETTLED 2026-08-05, live probe: the relay returns
+#    404 for a WebSocket upgrade on /pair; it serves ws at ROOT only. That is
+#    why `pairing-path-proxy` exists below: Cloudflare public-hostname rules
+#    route but never rewrite, so the /pair prefix the desktop's legacy
+#    convention sends must be stripped in-network. Caddy's handle_path does
+#    exactly that, and proxies WebSocket upgrades natively. Verify the hop:
 #      docker run --rm --network buzz-prod_buzz-net curlimages/curl -si \
-#        http://relay-pairing:3000/pair \
+#        http://pairing-path-proxy:80/pair \
 #        -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
 #        -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
 #        | head -1
-#    101 → proceed. 404 → the sidecar needs a path-stripping hop; stop and say so.
+#    Expect 101. (The same probe against relay-pairing:3000/pair still 404s —
+#    that is the relay being consistent, not the hop failing.)
 # 3. Cloudflare Zero Trust → Networks → Tunnels → this tunnel → Public hostnames:
 #    ADD  hostname `buzz.averray.com`, path `pair*`, service
-#    `http://relay-pairing:3000` — ORDERED ABOVE the existing buzz.averray.com
-#    catch-all (rules match top-down; below it, it never fires).
+#    `http://pairing-path-proxy:80` — ORDERED ABOVE the existing
+#    buzz.averray.com catch-all (rules match top-down; below it, it never fires).
 # 4. Desktop → Settings → Mobile → Try again. The QR should render.
 # 5. NEGATIVE CONTROL, so the door only opened where intended: the MAIN relay
 #    must still refuse an unauthenticated client exactly as before.
@@ -111,12 +115,39 @@ services:
     restart: unless-stopped
     networks: [buzz-net]
 
+  # The path-stripper. The desktop's legacy convention dials
+  # wss://<relay>/pair; the relay (probed live) upgrades WebSockets at root
+  # only; Cloudflare routes paths but never rewrites them. This 15 MB hop
+  # closes that three-way mismatch: handle_path strips the /pair prefix and
+  # forwards the upgraded socket to the sidecar's root. Config rides inline via
+  # compose `configs.content` (supported ≥ 2.23; this bundle already requires
+  # ≥ 2.24.4) so no file lands outside the repo.
+  pairing-path-proxy:
+    image: caddy:2-alpine
+    configs:
+      - source: pairing_caddyfile
+        target: /etc/caddy/Caddyfile
+    mem_limit: 64m
+    restart: unless-stopped
+    networks: [buzz-net]
+
   pairing-redis:
     image: redis:7-alpine
     command: ["redis-server", "--requirepass", "${PAIRING_REDIS_PASSWORD:?set PAIRING_REDIS_PASSWORD in .env}"]
     mem_limit: 128m
     restart: unless-stopped
     networks: [buzz-net]
+
+configs:
+  pairing_caddyfile:
+    content: |
+      :80 {
+        handle_path /pair* {
+          reverse_proxy relay-pairing:3000
+        }
+        # Anything not under /pair has no business here.
+        respond 404
+      }
 
 volumes:
   pairing-postgres-data:
