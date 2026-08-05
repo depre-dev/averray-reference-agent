@@ -964,6 +964,37 @@ services:
       - harness-dispatch-workspaces:/var/lib/harness-dispatcher
     networks: [avg-internal]
 
+  # INT-4a external Harness watchdog. It is deliberately outside both the
+  # dispatcher and Hermes: a dispatcher crash or a stopped conversational
+  # stack must not remove the process responsible for reporting that outage.
+  # Slack remains disabled until the operator provisions the one webhook env.
+  harness-watchdog:
+    init: true
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.node
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+        GIT_DIRTY: ${GIT_DIRTY:-false}
+    image: ${AVERRAY_IMAGE:-avg-node-runtime}
+    restart: unless-stopped
+    command: ["node", "services/harness-watchdog/dist/index.js"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      HARNESS_DATABASE_URL: ${HARNESS_DATABASE_URL:-}
+      HARNESS_DISPATCH_HEARTBEAT_PATH: ${HARNESS_DISPATCH_HEARTBEAT_PATH:-/data/harness-dispatcher-heartbeat.json}
+      HARNESS_DISPATCH_ALERTS_PATH: ${HARNESS_DISPATCH_ALERTS_PATH:-/data/harness-dispatch-alerts.jsonl}
+      WATCHDOG_HEARTBEAT_PATH: ${WATCHDOG_HEARTBEAT_PATH:-/data/harness-watchdog-heartbeat.json}
+      WATCHDOG_STATUS_PATH: ${WATCHDOG_STATUS_PATH:-/data/harness-watchdog-status.json}
+      WATCHDOG_POLL_INTERVAL_MS: ${WATCHDOG_POLL_INTERVAL_MS:-15000}
+      WATCHDOG_DISPATCHER_STALE_MS: ${WATCHDOG_DISPATCHER_STALE_MS:-90000}
+      WATCHDOG_HARNESS_SOURCE_STALE_MS: ${WATCHDOG_HARNESS_SOURCE_STALE_MS:-900000}
+      WATCHDOG_DATABASE_TIMEOUT_MS: ${WATCHDOG_DATABASE_TIMEOUT_MS:-5000}
+      WATCHDOG_SLACK_WEBHOOK_URL: ${WATCHDOG_SLACK_WEBHOOK_URL:-}
+    volumes:
+      - avg-data:/data
+    networks: [avg-internal]
+
   # Claude task runner (O2). Mirrors codex-task-runner; claims approved
   # agent="claude" tasks. The startup route gate (claude-worker-auth) refuses
   # to claim on a billing-route mismatch. Disabled by default; the operator

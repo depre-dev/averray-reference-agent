@@ -1,0 +1,122 @@
+services:
+  reference-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: int4a
+      POSTGRES_PASSWORD: int4a-reference-sentinel
+      POSTGRES_DB: reference
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U int4a -d reference"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+    volumes:
+      - reference-db:/var/lib/postgresql/data
+
+  harness-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: int4a
+      POSTGRES_PASSWORD: int4a-harness-sentinel
+      POSTGRES_DB: harness
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U int4a -d harness"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+    volumes:
+      - harness-db:/var/lib/postgresql/data
+
+  reference-migrate:
+    image: postgres:16-alpine
+    depends_on:
+      reference-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://int4a:int4a-reference-sentinel@reference-db:5432/reference
+    volumes:
+      - ../../ops/migrations:/migrations:ro
+      - ../../ops/migrate.sh:/migrate.sh:ro
+    entrypoint: ["/bin/sh", "/migrate.sh"]
+
+  harness-migrate:
+    image: postgres:16-alpine
+    depends_on:
+      harness-db:
+        condition: service_healthy
+    environment:
+      PGURL: postgres://int4a:int4a-harness-sentinel@harness-db:5432/harness
+    volumes:
+      - ../../test/fixtures/agent-integration/ceremony/int4a-harness-schema.sql:/schema.sql:ro
+    command: ["sh", "-c", "psql $$PGURL -v ON_ERROR_STOP=1 -f /schema.sql"]
+
+  fake-slack:
+    image: node:22-bookworm-slim
+    working_dir: /workspace
+    command: ["node", "scripts/ceremony/int4a-fake-slack.mjs"]
+    environment:
+      INT4A_FAKE_SLACK_DELIVERIES_PATH: /evidence/slack-deliveries.jsonl
+    volumes:
+      - ../..:/workspace:ro
+      - evidence:/evidence
+
+  hermes:
+    image: node:22-bookworm-slim
+    command: ["node", "-e", "setInterval(() => {}, 60000)"]
+
+  slack-operator:
+    image: node:22-bookworm-slim
+    command: ["node", "-e", "setInterval(() => {}, 60000)"]
+
+  dispatcher:
+    image: node:22-bookworm-slim
+    working_dir: /workspace
+    depends_on:
+      reference-migrate:
+        condition: service_completed_successfully
+      harness-migrate:
+        condition: service_completed_successfully
+    command: ["node", "services/harness-dispatcher/dist/index.js"]
+    environment:
+      DATABASE_URL: postgres://int4a:int4a-reference-sentinel@reference-db:5432/reference
+      HARNESS_DATABASE_URL: postgres://int4a:int4a-harness-sentinel@harness-db:5432/harness
+      HARNESS_DISPATCH_ENABLED: "false"
+      HARNESS_DISPATCH_POLL_INTERVAL_MS: "5000"
+      HARNESS_DISPATCH_HEARTBEAT_PATH: /data/dispatcher-heartbeat.json
+      HARNESS_DISPATCH_ALERTS_PATH: /data/dispatch-alerts.jsonl
+    volumes:
+      - ../..:/workspace:ro
+      - runtime-data:/data
+
+  watchdog:
+    image: node:22-bookworm-slim
+    working_dir: /workspace
+    depends_on:
+      reference-migrate:
+        condition: service_completed_successfully
+      harness-migrate:
+        condition: service_completed_successfully
+      fake-slack:
+        condition: service_started
+    command: ["node", "services/harness-watchdog/dist/index.js"]
+    environment:
+      DATABASE_URL: postgres://int4a:int4a-reference-sentinel@reference-db:5432/reference
+      HARNESS_DATABASE_URL: postgres://int4a:int4a-harness-sentinel@harness-db:5432/harness
+      HARNESS_DISPATCH_HEARTBEAT_PATH: /data/dispatcher-heartbeat.json
+      HARNESS_DISPATCH_ALERTS_PATH: /data/dispatch-alerts.jsonl
+      WATCHDOG_HEARTBEAT_PATH: /data/watchdog-heartbeat.json
+      WATCHDOG_STATUS_PATH: /data/watchdog-status.json
+      WATCHDOG_POLL_INTERVAL_MS: "200"
+      WATCHDOG_DISPATCHER_STALE_MS: ${INT4A_DRILL_DISPATCHER_STALE_MS:-1000}
+      WATCHDOG_HARNESS_SOURCE_STALE_MS: "1000"
+      WATCHDOG_DATABASE_TIMEOUT_MS: "500"
+      WATCHDOG_SLACK_WEBHOOK_URL: ${INT4A_DRILL_SLACK_URL:-http://fake-slack:8080/hook}
+    volumes:
+      - ../..:/workspace:ro
+      - runtime-data:/data
+
+volumes:
+  reference-db:
+  harness-db:
+  runtime-data:
+  evidence:
