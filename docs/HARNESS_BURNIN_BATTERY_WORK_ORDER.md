@@ -147,6 +147,15 @@ for now; automation is a later decision).
    ledger-backed, incident-free items — not 14 days since someone remembers
    starting.
 
+### Where it runs
+
+**Local machine only, never the VPS.** The battery reuses the INT-2 ceremony
+machinery — disposable databases, pinned kernel, pilot image — and the standing
+rule since the first failed ceremony (plan F1) is that this infrastructure never
+stands beside production. The VPS host does not even carry node; that is not an
+installation gap to fix, it is the boundary working. *(Added 2026-08-05 after
+the first attempted batch was pointed at the VPS.)*
+
 ### Operator note
 
 Your only recurring action is one command per batch. The first batch's evidence

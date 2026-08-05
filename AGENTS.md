@@ -71,6 +71,10 @@ The operator-run §9.1 burn-in battery reuses that same supervised machinery via
 `node scripts/ceremony/run-burnin-batch.mjs --evidence <dir>`. The evidence path
 is mandatory; eligible runs and the non-counting red sentinel append to
 `LEDGER.jsonl`, while `burnin-status.mjs` regenerates the measured summary.
+Run it on a LOCAL machine only — never on the VPS. The battery stands up the
+same disposable ceremony infrastructure as the INT-2 suite, and the standing
+rule since the first failed ceremony is that this never runs beside production;
+the VPS dispatch profile stays dormant.
 
 If you touched `ops/`, the `Dockerfile`, or compose files, also validate what CI validates:
 
