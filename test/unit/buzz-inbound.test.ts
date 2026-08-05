@@ -199,6 +199,16 @@ describe("the prompt", () => {
   it("forbids taking action", () => {
     expect(buildInboundPrompt("x").toLowerCase()).toContain("do not take actions");
   });
+
+  it("sets the colleague register without loosening the facts", () => {
+    // Operator feedback 2026-08-05: answers read like a readout ("Board
+    // verdict: nominal. All 9 probes green…"). The register rule and the
+    // facts rule travel in the same sentence so neither is quotable alone.
+    const prompt = buildInboundPrompt("x");
+    expect(prompt).toContain("like a colleague, not a readout");
+    expect(prompt).toContain("never the facts");
+    expect(prompt).toContain("never present the state as better or worse");
+  });
 });
 
 describe("formatting the reply", () => {
