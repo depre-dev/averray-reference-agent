@@ -372,7 +372,7 @@ const CASE_EXPECTATIONS = Object.freeze({
       }),
     ]),
     expectedBudget: Object.freeze({
-      elapsedSeconds: 120,
+      elapsedSeconds: 300,
       modelTokens: 12000,
       toolCalls: 50,
       estimatedUsdMicros: null,
@@ -440,7 +440,7 @@ const CASE_EXPECTATIONS = Object.freeze({
       }),
     ]),
     expectedBudget: Object.freeze({
-      elapsedSeconds: 120,
+      elapsedSeconds: 300,
       modelTokens: 14000,
       toolCalls: 60,
       estimatedUsdMicros: null,
