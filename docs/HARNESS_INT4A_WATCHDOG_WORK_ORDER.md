@@ -36,37 +36,58 @@ Structural independence, asserted the way INT-3a asserted its import surface: a
 test reads the watchdog's imports and refuses anything from
 `services/slack-operator` or Hermes-facing modules.
 
-## 2. Deliverable D2 — two sinks, one independence guarantee
+## 2. Deliverable D2 — Slack sink now; Buzz deferred to its own packet
+
+> **Amended 2026-08-05, sixth stop.** The original D2 said to POST to the Buzz
+> relay "with its auth token from `WATCHDOG_BUZZ_TOKEN`". The implementer
+> checked the actual protocol before building: Buzz's relay accepts **signed
+> Nostr events** (`POST /events`, NIP-98 HTTP auth). A bearer token cannot
+> produce a signature — I specified a mechanism from memory of our deployment
+> without verifying the protocol it speaks. The spec was wrong; the stop was
+> right.
+>
+> Because the independence guarantee was deliberately placed on Slack alone,
+> deferring Buzz changes nothing about this packet's acceptance. Buzz becomes
+> **INT-4a.1** (§2.1) with a real mechanism instead of a hand-waved token.
 
 - **Slack**: a plain incoming-webhook POST. URL from `WATCHDOG_SLACK_WEBHOOK_URL`.
   No Hermes, no slack-operator code, no shared client.
-- **Buzz**: POST to the **existing closed relay** with its auth token from
-  `WATCHDOG_BUZZ_TOKEN`. The relay is the only Buzz path — the bundled Hermes
-  Buzz platform stays off, per standing operator rule.
+- **Buzz**: not in this packet. The sink interface must leave room for a second
+  forwarder (a list of sinks, not a hardcoded pair), but no Buzz code, no Buzz
+  credential, no Nostr dependency lands here.
 
-Rules that make dual-sink honest:
+### 2.1 INT-4a.1 — the Buzz sink, properly (follow-up packet, not this one)
 
-- The local JSONL file is written **first** and is the source of truth; both
-  sinks are forward-only and best-effort.
-- One sink failing must never block or delay the other.
+The honest mechanism in Buzz's own model: the watchdog gets its **own Nostr
+identity** and posts alert events to the closed relay as a first-class member —
+membership *is* the allowlist, and alerts become events in the control plane.
+That requires an operator decision (does the watchdog get an identity, and who
+holds its key?), a signing dependency, and channel metadata. Each is a real
+choice, none belongs smuggled into 4a. Drafted only after this packet lands.
+
+Rules that make the sink layer honest:
+
+- The local JSONL file is written **first** and is the source of truth; every
+  sink is forward-only and best-effort.
+- One sink failing must never block or delay another.
 - **The independence property rides on Slack alone**: §11's drill is "Hermes
-  unavailable → external alerts remain active." Buzz is additive comfort, not
-  the load-bearing path, and the drill records its behavior honestly either way.
+  unavailable → external alerts remain active." Any future sink (INT-4a.1's
+  Buzz included) is additive, never the load-bearing path.
 - Redaction guard on forwarded bodies: alert payloads pass a deny-list scrub
   (token/key/secret/authorization patterns) before leaving the machine. With a
   sentinel test, demonstrated failing, INT-3c style.
 
-Both env vars are operator-provisioned, never committed, never logged. Absent
-env → that sink is `disabled` in the watchdog's own status, stated plainly —
+The env var is operator-provisioned, never committed, never logged. Absent
+env → the sink is `disabled` in the watchdog's own status, stated plainly —
 not silently skipped.
 
 ## 3. Deliverable D3 — the drills, red then green
 
 | drill | inject | required green |
 |---|---|---|
-| dispatcher killed | `kill` the dispatcher mid-idle | staleness alert within threshold, delivered to file + both sinks |
+| dispatcher killed | `kill` the dispatcher mid-idle | staleness alert within threshold, delivered to file + Slack |
 | Harness DB down | stop the harness Postgres container | unreachability alert; watchdog itself stays up |
-| **Hermes unavailable** | stop every Hermes/slack-operator container, then run both drills above | **Slack delivery still fires.** Buzz behavior recorded as observed |
+| **Hermes unavailable** | stop every Hermes/slack-operator container, then run both drills above | **Slack delivery still fires** |
 
 Mutation proofs, each seen red:
 
@@ -105,13 +126,15 @@ operator runbook, and the runbook section ships in this packet.
 
 Auto-remediation of anything (INT-4b+) · quarantines (4b) · lease semantics
 (4c) · the burn-in battery (separate order) · `rubric` · money rail · real
-repositories · credentials beyond the two operator-provisioned sink env vars.
+repositories · credentials beyond the one operator-provisioned sink env var ·
+any Buzz/Nostr code or credential (INT-4a.1).
 
 ## 8. Decisions
 
-1. **Dual sinks, single independence guarantee.** Slack is the §11 witness;
-   Buzz is welcomed but never required for the drill to pass. (Operator,
-   2026-08-05.)
+1. **Dual sinks remain the goal; Slack ships first.** Slack is the §11
+   witness. Buzz moved to INT-4a.1 when the relay's real protocol (signed Nostr
+   events, NIP-98) surfaced — an additive sink that needs a new credential class
+   is its own packet, not a footnote. (Operator amendment, 2026-08-05.)
 2. **File first, forward best-effort.** The JSONL is the record; sinks are
    delivery. A sink outage loses no evidence.
 3. **Idle source-age does not alert.** An alert channel that cries on quiet
@@ -121,6 +144,6 @@ repositories · credentials beyond the two operator-provisioned sink env vars.
 
 ### Operator note
 
-You provision two env values when the packet lands: the Slack incoming-webhook
-URL and the Buzz relay token, both into the watchdog's environment only. Nothing
-else in this packet needs you.
+You provision one env value when the packet lands: the Slack incoming-webhook
+URL, into the watchdog's environment only. The Buzz identity decision comes
+with INT-4a.1, not now. Nothing else in this packet needs you.

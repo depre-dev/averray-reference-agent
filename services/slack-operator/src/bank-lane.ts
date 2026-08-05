@@ -22,6 +22,7 @@ import {
   type BankRequest,
   type BankRequests,
   type SourcedRead,
+  awaitsOperator,
 } from "./bank-feed.js";
 import { decidePositionDisplay, type PositionView } from "./position-display.js";
 
@@ -329,12 +330,14 @@ function requestLine(requests: BankRequests, nowMs: number, staleAfterMs: number
   if (overdue.length > 0) {
     const lead = overdue.reduce((a, b) => (b.ageSeconds > a.ageSeconds ? b : a));
     return {
-      text: `${overdue.length} OVERDUE · ${lead.id} ${lead.phase} ${describeAge(lead)}`,
+      text: `${overdue.length} OVERDUE · ${lead.id} ${lead.phase} ${describeAge(lead)}${describeDeadline(lead, nowMs)}`,
       tone: "red",
     };
   }
   const lead = live.reduce((a, b) => (b.ageSeconds > a.ageSeconds ? b : a));
-  const base = `${live.length} in flight · oldest ${lead.id} ${lead.phase} ${describeAge(lead)}`;
+  const base =
+    `${live.length} in flight · oldest ${lead.id} ${lead.phase} ${describeAge(lead)}` +
+    `${describeDeadline(lead, nowMs)}${awaitsOperator(lead.phase) ? " · awaiting operator dispatch" : ""}`;
   if (unknown.length > 0) {
     // Verbatim, so the value is searchable against the observer's own source.
     const u = unknown[0]!;
@@ -356,6 +359,26 @@ function requestLine(requests: BankRequests, nowMs: number, staleAfterMs: number
  */
 function describeAge(request: BankRequest): string {
   return request.phase === "timing-unknown" ? "· age unknown" : `for ${formatAge(request.ageSeconds)}`;
+}
+
+/**
+ * The request's own clock, when the feed sends it — and NOTHING when it does
+ * not.
+ *
+ * Age is the wrong clock, proven live: on 2026-08-05 a staged request read
+ * "in flight 11.2h", calm, while 19 minutes remained to its on-chain dispatch
+ * deadline. It lapsed. The deadline was always the operative number, computed
+ * by the feed and never emitted; this renders it the moment the producer
+ * ships the field. No monitor-side threshold, no tone change — `overdue` stays
+ * the producer's own judgement (the rule at the top of requestLine), and this
+ * only SHOWS the clock that judgement runs on.
+ */
+function describeDeadline(request: BankRequest, nowMs: number): string {
+  const at = request.deadlineAtMs;
+  if (typeof at !== "number" || !Number.isFinite(at)) return "";
+  const remaining = at - nowMs;
+  if (remaining >= 0) return ` · deadline in ${formatAge(Math.round(remaining / 1000))}`;
+  return ` · deadline lapsed ${formatAge(Math.round(-remaining / 1000))} ago`;
 }
 
 function formatAge(seconds: number): string {

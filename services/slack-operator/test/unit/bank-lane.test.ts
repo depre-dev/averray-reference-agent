@@ -153,12 +153,15 @@ describe("an unrecognised phase is surfaced, never dropped", () => {
     // The observer owns this vocabulary and may extend it. A request in a phase
     // this board has never heard of is the most unusual one in the table, which
     // makes hiding it exactly backwards.
+    // "recovery-pending" used to be the specimen here; it is DOCUMENTED
+    // vocabulary now (feed-synthesized, per Codex's 2026-08-05 contract
+    // answer), so the specimen must be a genuine stranger.
     const v = bankLaneView({
-      feed: feed({ requests: { items: [req({ id: "req-77", phase: "recovery-pending" })], readAtMs: NOW } }),
+      feed: feed({ requests: { items: [req({ id: "req-77", phase: "phase-from-the-future" })], readAtMs: NOW } }),
       nowMs: NOW,
     })!;
     expect(v.requests.text).toContain("1 in flight");
-    expect(v.requests.text).toContain('UNRECOGNISED PHASE "recovery-pending"');
+    expect(v.requests.text).toContain('UNRECOGNISED PHASE "phase-from-the-future"');
     expect(v.requests.text).toContain("req-77");
     expect(v.requests.tone).toBe("degraded");
   });
@@ -243,5 +246,95 @@ describe("an overdue request is the stuck-pending alarm, named", () => {
     })!;
     expect(ancientButNotOverdue.requests.tone).toBe("ok");
     expect(ancientButNotOverdue.overdueRequestId).toBeNull();
+  });
+});
+
+// ── THE v2.2 CONTRACT, LEARNED THE EXPENSIVE WAY ──────────────────────────
+//
+// On 2026-08-05 a staged v2.2 request read `1 in flight · staged-on-chain-
+// backfill for 11.2h`, calm, while its on-chain dispatch deadline ran down.
+// It needed an OPERATOR to dispatch it; nobody knew; it lapsed with 19 minutes
+// of warning available and none rendered. Codex's contract answer settled the
+// semantics these tests pin.
+describe("the documented v2.2 vocabulary is recognised", () => {
+  test("staged-on-chain-backfill no longer trips the stranger flag", () => {
+    const v = bankLaneView({
+      feed: feed({ requests: { items: [req({ phase: "staged-on-chain-backfill" })], readAtMs: NOW } }),
+      nowMs: NOW,
+    })!;
+    expect(v.requests.text).not.toContain("UNRECOGNISED");
+  });
+
+  test("the first v2.2 dispatch phase will not cry wolf either", () => {
+    // "Merely adding this one label will fail again at the first v2.2
+    // dispatch" — Codex, answering why there is no closed enum. The whole
+    // documented set is in, so the flag is reserved for genuine strangers.
+    for (const phase of ["registered", "staged-on-chain", "leg-0-dispatched-on-chain", "leg-3-dispatched-on-chain", "scope-unknown", "snapshot-invalid"]) {
+      const v = bankLaneView({
+        feed: feed({ requests: { items: [req({ phase })], readAtMs: NOW } }),
+        nowMs: NOW,
+      })!;
+      expect(v.requests.text, phase).not.toContain("UNRECOGNISED");
+    }
+  });
+});
+
+describe("a staged request names who it is waiting for", () => {
+  test("staged phases carry 'awaiting operator dispatch'", () => {
+    // The producer's contract: staged requests do not dispatch autonomously —
+    // an operator must act. A calm "in flight" hid exactly that.
+    const v = bankLaneView({
+      feed: feed({ requests: { items: [req({ phase: "staged-on-chain-backfill" })], readAtMs: NOW } }),
+      nowMs: NOW,
+    })!;
+    expect(v.requests.text).toContain("awaiting operator dispatch");
+  });
+
+  test("autonomous phases do not claim to wait on anyone", () => {
+    const v = bankLaneView({
+      feed: feed({ requests: { items: [req({ phase: "leg-1-dispatched-on-chain" })], readAtMs: NOW } }),
+      nowMs: NOW,
+    })!;
+    expect(v.requests.text).not.toContain("awaiting operator");
+  });
+});
+
+describe("the deadline clock renders when the feed sends it — and never otherwise", () => {
+  test("a future deadline is shown as time remaining", () => {
+    const v = bankLaneView({
+      feed: feed({
+        requests: {
+          items: [req({ phase: "staged-on-chain-backfill", deadlineAtMs: NOW + 19 * 60_000 })],
+          readAtMs: NOW,
+        },
+      }),
+      nowMs: NOW,
+    })!;
+    expect(v.requests.text).toContain("deadline in 19m");
+  });
+
+  test("an overdue request shows how long ago its deadline lapsed", () => {
+    const v = bankLaneView({
+      feed: feed({
+        requests: {
+          items: [req({ phase: "staged-on-chain-backfill", overdue: true, deadlineAtMs: NOW - 2 * 3_600_000 })],
+          readAtMs: NOW,
+        },
+      }),
+      nowMs: NOW,
+    })!;
+    expect(v.requests.tone).toBe("red");
+    // formatAge renders hours with one decimal ("2.0h") — same as the age.
+    expect(v.requests.text).toContain("deadline lapsed 2.0h ago");
+  });
+
+  test("no field, no clock — a deadline nobody sent is not displayed", () => {
+    // The producer computes overdue FROM deadlineAt but does not emit it yet.
+    // Until it ships, rendering any deadline would be inventing one.
+    const v = bankLaneView({
+      feed: feed({ requests: { items: [req({ phase: "leg2-dispatched" })], readAtMs: NOW } }),
+      nowMs: NOW,
+    })!;
+    expect(v.requests.text).not.toContain("deadline");
   });
 });
