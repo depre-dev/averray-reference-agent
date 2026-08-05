@@ -1,4 +1,5 @@
 {
+  "_comment": "npm test -- --no-cache runs the complete green suite without adding Vitest timing-cache output to the task patch. It is stricter than no_new_failures because every test must pass; baseline_comparison remains pytest-specific.",
   "workItemId": "ceremony-small-refactor-001",
   "correlationId": "ceremony-small-refactor-001",
   "taskKind": "small_refactor",
@@ -32,10 +33,19 @@
       "required": true
     },
     {
-      "id": "refactor-baseline",
-      "type": "baseline_comparison",
-      "rule": "no_new_failures",
-      "baselineCommand": "npm test",
+      "id": "refactor-test-command",
+      "type": "command",
+      "command": "npm test -- --no-cache",
+      "required": true
+    },
+    {
+      "id": "refactor-artifact",
+      "type": "search",
+      "include": [
+        "test/unit/agent-integration-contracts.test.ts"
+      ],
+      "pattern": "function fixture<T = unknown>",
+      "expectedMatches": 1,
       "required": true
     }
   ],

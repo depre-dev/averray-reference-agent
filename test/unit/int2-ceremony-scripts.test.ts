@@ -18,6 +18,7 @@ import {
   INT2_EXPECTED_PATH,
   INT2_SECTION3_CRITERION,
   expectationsForCase,
+  verificationFromReport,
   verifySection3Preflight,
   verifyScriptedPairPreflight,
 } from "../../scripts/ceremony/int2-evidence.mjs";
@@ -34,6 +35,10 @@ const CHECKOUT_HELPER = path.join(
 const AUTOMATED_SUITE = path.join(
   SCRIPT_ROOT,
   "run-int2-automated-suite.sh",
+);
+const AUTOMATED_SUITE_TEST = path.join(
+  ROOT,
+  "test/integration/int2-automated-suite.test.ts",
 );
 const REAP_HELPER = path.join(SCRIPT_ROOT, "lib/int2-reap.sh");
 const PILOT_DOCKERFILE = path.join(ROOT, "ops/Dockerfile.pilot");
@@ -136,6 +141,36 @@ function runReaper(call: string, environment: NodeJS.ProcessEnv = {}): string {
 }
 
 describe("committed INT-2 ceremony mechanics", () => {
+  it("uses the sealed verification report when event details are out of line", () => {
+    expect(verificationFromReport({
+      passed: true,
+      verdict: "completed",
+      required_failed: [],
+      optional_failed: [],
+      check_results: [{
+        id: "unit-test-command",
+        type: "command",
+        required: true,
+        passed: true,
+        reason: "exit_0",
+        detail: "full command evidence",
+      }],
+    })).toEqual({
+      passed: true,
+      verdict: "completed",
+      requiredFailed: [],
+      optionalFailed: [],
+      details: [{
+        id: "unit-test-command",
+        type: "command",
+        required: true,
+        passed: true,
+        reason: "exit_0",
+        detail: "full command evidence",
+      }],
+    });
+  });
+
   it("keeps all six operator scripts parseable and on the shared evidence definition", async () => {
     const contents = await Promise.all(
       OPERATOR_SCRIPTS.map(async (name) => {
@@ -228,10 +263,18 @@ describe("committed INT-2 ceremony mechanics", () => {
       expectNoCapabilityEvents: true,
     });
 
-    expect(integrationSuite).toContain("const EXPECTED_CASE_COUNT = 11;");
-    expect(shellSuite).toContain("INT2_CASES_STARTED expected=11");
-    expect(shellSuite).toContain('test "$_int2_executed" = "11"');
-    expect(workflow).toContain("executed-count.txt')\" = \"11\"");
+    expect(integrationSuite).toContain("const EXPECTED_CASE_COUNT = 14;");
+    expect(shellSuite).toContain("INT2_CASES_STARTED expected=14");
+    expect(shellSuite).toContain('test "$_int2_executed" = "14"');
+    expect(workflow).toContain("executed-count.txt')\" = \"14\"");
+    expect(shellSuite).toContain(
+      '-t "$_int2_image_tag" "$_int2_dep_source"',
+    );
+    expect(shellSuite).toContain("INT2_PILOT_ENVIRONMENT_VERIFIED");
+    expect(shellSuite).not.toContain("build-dispatch-dep-cache.mjs");
+    expect(integrationSuite).toContain(
+      "preflight_command: \"npm run typecheck && /node_modules/.bin/vitest --version\"",
+    );
   });
 
   // verifyScriptedPairPreflight runs two full `git clone --local
@@ -447,7 +490,7 @@ describe("committed INT-2 ceremony mechanics", () => {
           "int2-checkout-test",
           CHECKOUT_HELPER,
           path.join(temporary, "agent-harness"),
-          "f010c993b0adfe55899b84a60777b0a4331fd972",
+          "3355f4906864b0f0e0fe5fd5eb5220172e174206",
           log,
         ],
         {
@@ -502,7 +545,7 @@ describe("committed INT-2 ceremony mechanics", () => {
         "int2-checkout-test",
         CHECKOUT_HELPER,
         checkout,
-        "f010c993b0adfe55899b84a60777b0a4331fd972",
+        "3355f4906864b0f0e0fe5fd5eb5220172e174206",
         bootstrapLog,
       ],
       {
@@ -571,10 +614,11 @@ describe("committed INT-2 ceremony mechanics", () => {
     );
   });
 
-  it("trusts only the fixed sandbox workspace and probes Git before running cases", async () => {
-    const [dockerfile, suite] = await Promise.all([
+  it("trusts only the fixed workspace and proves sandbox outputs stay removable", async () => {
+    const [dockerfile, suite, suiteTest] = await Promise.all([
       readFile(PILOT_DOCKERFILE, "utf8"),
       readFile(AUTOMATED_SUITE, "utf8"),
+      readFile(AUTOMATED_SUITE_TEST, "utf8"),
     ]);
 
     expect(dockerfile).toContain(
@@ -583,8 +627,12 @@ describe("committed INT-2 ceremony mechanics", () => {
     expect(dockerfile).not.toMatch(
       /safe\.directory\s+(?:"|')?\*(?:"|')?/u,
     );
-    expect(suite).toContain("INT2_PILOT_GIT_OWNERSHIP_FAILED");
+    expect(suite).toContain('--user "$(id -u):$(id -g)"');
+    expect(suite).toContain("INT2_PILOT_ENVIRONMENT_FAILED");
+    expect(suiteTest).toContain('"  command_timeout_seconds: 120"');
+    expect(suite).toContain("INT2_PILOT_WORKSPACE_OWNERSHIP_FAILED");
     expect(suite).toContain("INT2_PILOT_GIT_OWNERSHIP_VERIFIED");
+    expect(suite).toContain("INT2_PILOT_WORKSPACE_OWNERSHIP_VERIFIED");
     expect(suite).toContain(
       'git config --system --get-all safe.directory',
     );

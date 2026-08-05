@@ -1,4 +1,5 @@
 {
+  "_comment": "npm test -- --no-cache runs the complete green suite without adding Vitest timing-cache output to the task patch. It is stricter than no_new_failures because every test must pass; baseline_comparison remains pytest-specific.",
   "workItemId": "ceremony-add-unit-test-001",
   "correlationId": "ceremony-add-unit-test-001",
   "taskKind": "add_unit_test",
@@ -28,14 +29,17 @@
     {
       "id": "unit-test-command",
       "type": "command",
-      "command": "npm test",
+      "command": "npm test -- --no-cache",
       "required": true
     },
     {
-      "id": "unit-test-baseline",
-      "type": "baseline_comparison",
-      "rule": "no_new_failures",
-      "baselineCommand": "npm test",
+      "id": "unit-test-artifact",
+      "type": "search",
+      "include": [
+        "test/unit/canonical-json-array-order.test.ts"
+      ],
+      "pattern": "preserves array order while sorting nested object keys",
+      "expectedMatches": 1,
       "required": true
     }
   ],

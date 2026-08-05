@@ -24,6 +24,7 @@ _int2_run_containers_before="$_int2_root/run-containers-before.txt"
 # INT2_WORKSPACE_ROOT exists for the unit tests; operators never set it.
 _int2_workspaces_before="$_int2_root/workspaces-before.txt"
 _int2_workspace_root="${INT2_WORKSPACE_ROOT:-$HOME/.agent-runtime/environments}"
+_int2_dep_source="$_int2_root/dependency-source"
 
 # shellcheck source=scripts/ceremony/lib/int2-reap.sh
 source "$_int2_repo/scripts/ceremony/lib/int2-reap.sh"
@@ -81,11 +82,11 @@ for _int2_command in docker git node npm uv; do
 done
 mkdir -p "$_int2_evidence"
 printf '%s\n' \
-  "INT2_SUITE_BOOTSTRAP_STARTED pin=f010c993b0adfe55899b84a60777b0a4331fd972" \
+  "INT2_SUITE_BOOTSTRAP_STARTED pin=3355f4906864b0f0e0fe5fd5eb5220172e174206" \
   > "$_int2_bootstrap_log"
 
 export HARNESS_CHECKOUT="${HARNESS_CHECKOUT:-$_int2_root/agent-harness}"
-_int2_pin="f010c993b0adfe55899b84a60777b0a4331fd972"
+_int2_pin="3355f4906864b0f0e0fe5fd5eb5220172e174206"
 # shellcheck source=scripts/ceremony/lib/int2-harness-checkout.sh
 source "$_int2_repo/scripts/ceremony/lib/int2-harness-checkout.sh"
 int2_checkout_harness "$HARNESS_CHECKOUT" "$_int2_pin" "$_int2_bootstrap_log"
@@ -218,9 +219,29 @@ for _int2_migration in "$_int2_repo"/ops/migrations/*.sql; do
       --set ON_ERROR_STOP=1 -q < "$_int2_migration" >/dev/null
 done
 
+# The task-family fixtures are pinned to an older repository revision whose
+# package-lock differs from current main. The pilot image must carry the exact
+# offline toolchain for that immutable base; dependencies from current main
+# would make the environment probe pass against a different dependency graph.
+_int2_fixture_base="$(
+  node --input-type=module -e '
+    import { readFileSync } from "node:fs";
+    const fixture = JSON.parse(readFileSync(process.argv[1], "utf8"));
+    process.stdout.write(fixture.repository.baseRevision);
+  ' "$_int2_repo/test/fixtures/agent-integration/ceremony/add-unit-test.json"
+)"
+git clone --quiet --local --no-hardlinks "$_int2_repo" "$_int2_dep_source"
+git -C "$_int2_dep_source" checkout --quiet --detach "$_int2_fixture_base"
+test "$(git -C "$_int2_dep_source" rev-parse HEAD)" = "$_int2_fixture_base" \
+  || {
+    echo "INT2_TOOLCHAIN_BASE_MISMATCH: image source is not at the fixture base" \
+      | tee -a "$_int2_bootstrap_log" >&2
+    exit 27
+  }
+
 _int2_image_tag="reference-agent-pilot:int2-${_int2_suffix}"
 docker build --quiet -f "$_int2_repo/ops/Dockerfile.pilot" \
-  -t "$_int2_image_tag" "$_int2_repo" >/dev/null
+  -t "$_int2_image_tag" "$_int2_dep_source" >/dev/null
 export INT2_PILOT_IMAGE="$(
   docker image inspect --format '{{.Id}}' "$_int2_image_tag"
 )"
@@ -237,18 +258,31 @@ git -C "$_int2_git_probe" \
   -c user.email=int2-suite.invalid \
   commit --quiet -m "INT-2 pilot Git ownership probe"
 docker run --rm --network none \
+  --user "$(id -u):$(id -g)" \
   --volume "$_int2_git_probe:/workspace" \
   --workdir /workspace \
   "$INT2_PILOT_IMAGE" \
   /bin/sh -lc \
-    'test "$(git config --system --get-all safe.directory)" = "/workspace" && git diff --check' \
+    'test "$(git config --system --get-all safe.directory)" = "/workspace" && git diff --check && /node_modules/.bin/tsc --version && /node_modules/.bin/vitest --version && mkdir -p .int2-owner-probe/nested && touch .int2-owner-probe/nested/compiled.js' \
   >> "$_int2_bootstrap_log" 2>&1 \
   || {
-    echo "INT2_PILOT_GIT_OWNERSHIP_FAILED: pilot cannot run Git in the mounted workspace" \
+    echo "INT2_PILOT_ENVIRONMENT_FAILED: pilot cannot run Git and the pinned toolchain in the mounted workspace" \
       | tee -a "$_int2_bootstrap_log" >&2
     exit 26
   }
+_int2_owner_probe="$_int2_git_probe/.int2-owner-probe"
+if ! chmod -R u+w "$_int2_owner_probe" 2>/dev/null \
+  || ! rm -rf "$_int2_owner_probe" 2>/dev/null; then
+  echo "INT2_PILOT_WORKSPACE_OWNERSHIP_FAILED: pilot outputs are not removable by the workspace owner" \
+    | tee -a "$_int2_bootstrap_log" >&2
+  exit 29
+fi
 printf '%s\n' "INT2_PILOT_GIT_OWNERSHIP_VERIFIED" \
+  >> "$_int2_bootstrap_log"
+printf '%s\n' "INT2_PILOT_WORKSPACE_OWNERSHIP_VERIFIED" \
+  >> "$_int2_bootstrap_log"
+printf '%s\n' \
+  "INT2_PILOT_ENVIRONMENT_VERIFIED base=$_int2_fixture_base" \
   >> "$_int2_bootstrap_log"
 
 export INT2_SUITE_REQUIRED=1
@@ -286,7 +320,7 @@ printf '%s\n' "INT2_WORKSPACE_SNAPSHOT spared=$(
   grep -c . "$_int2_workspaces_before" 2>/dev/null || echo 0
 )" >> "$_int2_bootstrap_log"
 
-printf '%s\n' "INT2_CASES_STARTED expected=11" >> "$_int2_bootstrap_log"
+printf '%s\n' "INT2_CASES_STARTED expected=14" >> "$_int2_bootstrap_log"
 (
   cd "$_int2_repo"
   npm run build
@@ -295,9 +329,9 @@ printf '%s\n' "INT2_CASES_STARTED expected=11" >> "$_int2_bootstrap_log"
 )
 
 _int2_executed="$(tr -d '[:space:]' < "$_int2_marker")"
-test "$_int2_executed" = "11" \
+test "$_int2_executed" = "14" \
   || {
-    echo "INT-2 suite executed $_int2_executed cases; expected 11" >&2
+    echo "INT-2 suite executed $_int2_executed cases; expected 14" >&2
     exit 1
   }
 _int2_elapsed="$(( $(date +%s) - _int2_started ))"
