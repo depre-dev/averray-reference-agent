@@ -472,6 +472,13 @@ services:
       BUZZ_AGENT_SECRET_KEY: ${BUZZ_AGENT_SECRET_KEY:-}
       BUZZ_OWNER_AUTH_TAG: ${BUZZ_OWNER_AUTH_TAG:-}
       BUZZ_OPS_CHANNEL_ID: ${BUZZ_OPS_CHANNEL_ID:-}
+      # ── Morning digest ── one scheduled #Ops message at a LOCAL time, then
+      # quiet. Off by default; armed deliberately like every flag here. An
+      # invalid time or zone DISABLES it with a named problem in the logs —
+      # never a guessed hour.
+      BUZZ_MORNING_DIGEST: ${BUZZ_MORNING_DIGEST:-}
+      BUZZ_DIGEST_TIME: ${BUZZ_DIGEST_TIME:-08:00}
+      BUZZ_DIGEST_TZ: ${BUZZ_DIGEST_TZ:-Europe/Zurich}
       # Buzz INBOUND — answering questions in #Ops. Default OFF, and separate
       # from the four above on purpose: publishing narration is safe, while
       # listening hands an LLM turn to whatever is typed in the channel.

@@ -1,6 +1,7 @@
 import http from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import path from "node:path";
+import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { readFile } from "node:fs/promises";
 import { addressFromPrivateKey, logger, optionalEnv, query } from "@avg/mcp-common";
@@ -155,6 +156,7 @@ import { decideOpsNarration, type OpsStatus } from "./ops-narration.js";
 import { publishNarration, readBuzzConfig } from "./buzz-client.js";
 import { startBuzzInbound } from "./buzz-inbound-start.js";
 import { decideProbeTransitions } from "./probe-transitions.js";
+import { buildMorningDigest, digestDue, readDigestSchedule } from "./morning-digest.js";
 import { describeBuzzDelivery, recordBuzzDelivery, type BuzzDeliveryState } from "./buzz-delivery.js";
 import type { ProbeResult } from "./product-health.js";
 import { isBurnUnmeasurable, measuredGasBurn } from "./gas-burn-rate.js";
@@ -309,6 +311,38 @@ const PRODUCT_HEALTH_INCIDENT_MAX = 200;
 let productHealthChainAdvance: ChainAdvance | undefined;
 // Structured snapshot blocks (chain id / network / solvency / flow) for the Ops board.
 let productHealthSnapshotBlocks: ProductHealthSnapshotBlocks | undefined;
+
+// ── MORNING DIGEST state ──────────────────────────────────────────────────
+// The persisted fact is the local DATE of the last digest — "today's digest
+// exists" — so restarts around the send window neither double-post nor skip.
+// Same /data convention as autonomy-mode.
+const morningDigestSchedule = readDigestSchedule();
+let morningDigestProblemLogged = false;
+const MORNING_DIGEST_STATE_PATH =
+  process.env.BUZZ_DIGEST_STATE_PATH ?? "/data/morning-digest.json";
+function readMorningDigestState(): string | null {
+  try {
+    const raw = JSON.parse(fs.readFileSync(MORNING_DIGEST_STATE_PATH, "utf8")) as {
+      lastSentLocalDate?: string;
+    };
+    return typeof raw.lastSentLocalDate === "string" ? raw.lastSentLocalDate : null;
+  } catch {
+    // Missing or unreadable state reads as "never sent" — the worst outcome is
+    // one extra digest, which beats a machinery failure silencing it forever.
+    return null;
+  }
+}
+function writeMorningDigestState(lastSentLocalDate: string): void {
+  try {
+    fs.mkdirSync(path.dirname(MORNING_DIGEST_STATE_PATH), { recursive: true });
+    fs.writeFileSync(MORNING_DIGEST_STATE_PATH, `${JSON.stringify({ lastSentLocalDate }, null, 2)}\n`);
+  } catch (err) {
+    // A failed write means tomorrow's dedupe rests on process memory alone;
+    // say so rather than discover it as a duplicate.
+    logger.warn({ err, path: MORNING_DIGEST_STATE_PATH }, "morning_digest_state_write_failed");
+  }
+}
+let morningDigestSentLocalDate: string | null = null;
 // Buzz delivery outcomes. Module scope so the endpoint can report it without
 // the heartbeat having to thread it through — and in memory on purpose: after a
 // restart the honest answer is "nothing delivered yet", not a stale success.
@@ -3865,6 +3899,75 @@ function startOperatorRoutines() {
               { probe: alert.probe, kind: alert.kind, reason: delivery.reason, detail: delivery.detail },
               "probe_transition_publish_failed",
             );
+          }
+        }
+      }
+      // ── THE MORNING DIGEST ──────────────────────────────────────────────
+      // One message at the operator's chosen local time: the same verdict the
+      // board renders, the probes' own detail lines, and everything currently
+      // not-ok — which the alert hold may have (correctly) never announced.
+      // Muted skips WITHOUT marking sent, so the day's digest arrives on
+      // unmute rather than silently not existing.
+      if (morningDigestSchedule.problem && !morningDigestProblemLogged) {
+        morningDigestProblemLogged = true;
+        logger.warn({ problem: morningDigestSchedule.problem }, "morning_digest_misconfigured");
+      }
+      const digestNowMs = Date.now();
+      const digestCheck = digestDue({
+        nowMs: digestNowMs,
+        schedule: morningDigestSchedule,
+        lastSentLocalDate: morningDigestSentLocalDate ?? readMorningDigestState(),
+      });
+      if (digestCheck.due && !(getServerAlertMuteUntilMs() > digestNowMs)) {
+        const digestText = buildMorningDigest({
+          localDate: digestCheck.localDate,
+          localTime: digestCheck.localTime,
+          timeZone: morningDigestSchedule.timeZone,
+          network:
+            (process.env.WALLET_NETWORK ?? "").trim().toLowerCase() === "mainnet" ? "mainnet" : "testnet",
+          // The SAME verdict inputs the /monitor/product-health endpoint uses —
+          // one verdict system, quoted rather than re-derived.
+          verdictHeadline: deriveOpsVerdict({
+            enabled: routineConfig.productHealth.enabled,
+            checks: productHealthHistory.length,
+            probes: result.evaluation.probes,
+            pools: productHealthSnapshotBlocks?.solvency?.pools ?? [],
+            runway: productHealthSnapshotBlocks?.solvency?.runway ?? [],
+            ...(productHealthSnapshotBlocks?.flow?.payout
+              ? { payout: productHealthSnapshotBlocks.flow.payout }
+              : {}),
+          }).headline,
+          probes: result.evaluation.probes,
+          bankRequests: productHealthSnapshotBlocks?.bank?.lane?.requests ?? null,
+        });
+        const digestBuzz = readBuzzConfig();
+        if (!digestBuzz.config) {
+          // No relay configured: the local collaboration record IS the digest.
+          recordCollaborationMessage({ author: "hermes", text: digestText, kind: "chat" });
+          morningDigestSentLocalDate = digestCheck.localDate;
+          writeMorningDigestState(digestCheck.localDate);
+          logger.info({ localDate: digestCheck.localDate }, "morning_digest_recorded_undelivered");
+        } else {
+          const delivery = await publishNarration(digestBuzz.config, digestText);
+          buzzDeliveryState = recordBuzzDelivery(buzzDeliveryState, {
+            ok: delivery.ok,
+            reason: delivery.reason,
+            detail: delivery.detail,
+            atMs: Date.now(),
+          });
+          if (delivery.ok) {
+            recordCollaborationMessage({ author: "hermes", text: digestText, kind: "chat" });
+            morningDigestSentLocalDate = digestCheck.localDate;
+            writeMorningDigestState(digestCheck.localDate);
+            logger.info(
+              { localDate: digestCheck.localDate, eventId: delivery.eventId },
+              "morning_digest_published",
+            );
+          } else {
+            // NOT marked sent: retried on the next tick until the relay
+            // answers. A Buzz outage at 08:00 delays the digest; it does not
+            // delete it.
+            logger.warn({ reason: delivery.reason, detail: delivery.detail }, "morning_digest_publish_failed");
           }
         }
       }
