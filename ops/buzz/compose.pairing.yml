@@ -42,6 +42,7 @@
 # Operator provisions in /srv/buzz/deploy/compose/.env (never committed):
 #   PAIRING_POSTGRES_PASSWORD=<openssl rand -hex 24>
 #   PAIRING_REDIS_PASSWORD=<openssl rand -hex 24>
+#   PAIRING_RELAY_PRIVATE_KEY=<openssl rand -hex 32>
 #
 # ── AFTER `up -d`, IN ORDER ─────────────────────────────────────────────────
 # 1. Liveness, from inside the network (the box publishes no ports):
@@ -79,6 +80,18 @@ services:
       DATABASE_URL: postgres://buzz:${PAIRING_POSTGRES_PASSWORD:?set PAIRING_POSTGRES_PASSWORD in .env}@pairing-postgres:5432/buzz
       REDIS_URL: redis://:${PAIRING_REDIS_PASSWORD:?set PAIRING_REDIS_PASSWORD in .env}@pairing-redis:6379
       BUZZ_GIT_REPO_PATH: /data/git
+      # The no-minio bet, settled by evidence on first boot (2026-08-05): the
+      # relay runs a git object-store conformance probe at startup and exits
+      # when S3 is absent — `git conformance probe failed: s3 backend error …
+      # http://localhost:9000/buzz-media/…`. Pairing traffic never touches git
+      # or media storage, so the probe is disabled rather than the sidecar
+      # gaining a throwaway object store to satisfy it.
+      BUZZ_GIT_CONFORMANCE_PROBE: "false"
+      # With auth off the image falls back to a hardcoded dev keypair whose
+      # private key is PUBLICLY KNOWN (the secp256k1 generator scalar, pubkey
+      # 79be667e…). Pairing does not trust relay-signed content, but a public
+      # endpoint must not run an identity anyone on earth can forge.
+      BUZZ_RELAY_PRIVATE_KEY: ${PAIRING_RELAY_PRIVATE_KEY:?set PAIRING_RELAY_PRIVATE_KEY in .env}
       # Fresh, empty, sidecar-only database: automatic migration is safe here
       # in a way it deliberately is not on the production store.
       BUZZ_AUTO_MIGRATE: "true"
