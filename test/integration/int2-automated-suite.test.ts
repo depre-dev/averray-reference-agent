@@ -825,7 +825,22 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
   }
 
   function nextWorkItem(caseName: string): string {
-    const value = `${suitePrefix}-${caseName}`;
+    const burninPrefix = process.env.INT2_BURNIN_WORK_ITEM_PREFIX?.trim();
+    const burninFamily = {
+      "add-unit-test": "add-unit-test",
+      "docs-fix": "docs-fix",
+      green: "lint-format",
+      negative: "lint-format-red",
+      "small-refactor": "small-refactor",
+    }[caseName];
+    if (burninPrefix && !burninFamily) {
+      throw new Error(
+        `INT-2 case ${caseName} is not part of the burn-in battery`,
+      );
+    }
+    const value = burninPrefix
+      ? `${burninPrefix}-${burninFamily}`
+      : `${suitePrefix}-${caseName}`;
     workItemIds.add(value);
     return value;
   }

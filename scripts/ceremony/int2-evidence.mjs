@@ -748,6 +748,7 @@ export async function collectInt2Evidence({
       outboxRows,
       decisionRows,
       runRows,
+      metricRows,
     ] = await Promise.all([
       referencePool.query(
         `select task
@@ -778,11 +779,20 @@ export async function collectInt2Evidence({
         [workItemId],
       ),
       harnessPool.query(
-        `select run_id, state, outcome, outcome_reason, attempt, task, manifest
+        `select run_id, state, outcome, outcome_reason, attempt, task, manifest,
+                created_at, updated_at
          from runs
          where task->'metadata'->'labels'->>'averray_work_item_id' = $1
          order by created_at, run_id`,
         [workItemId],
+      ),
+      harnessPool.query(
+        `select event_type, payload, ts
+         from domain_events
+         where run_id = $1
+           and event_type in ('ModelResponded', 'VerificationCompleted')
+         order by seq`,
+        [intendedRunId],
       ),
     ]);
     raw = {
@@ -791,6 +801,7 @@ export async function collectInt2Evidence({
       outbox: outboxRows.rows,
       decisions: decisionRows.rows.map((row) => row.record),
       runs: runRows.rows.map(normalizeRunRow),
+      metrics: metricsFromRows(runRows.rows, metricRows.rows, intendedRunId),
     };
   } finally {
     await Promise.allSettled([
@@ -858,6 +869,7 @@ export async function collectInt2Evidence({
     events,
     deliverables,
     verification,
+    metrics: raw.metrics,
     patch,
     exit128Present: /(?:exit_128|exit 128|exit_code["']?\s*:\s*128)/iu
       .test(eventsText),
@@ -1846,7 +1858,54 @@ function normalizeRunRow(row) {
     task: row.task,
     manifest: row.manifest,
     workspacePath: row.task?.spec?.context?.workspace?.path,
+    createdAt: timestampString(row.created_at),
+    updatedAt: timestampString(row.updated_at),
   };
+}
+
+function metricsFromRows(runRows, eventRows, intendedRunId) {
+  const run = runRows.find((row) => row.run_id === intendedRunId);
+  if (!run) return null;
+  const createdAt = Date.parse(timestampString(run.created_at));
+  const updatedAt = Date.parse(timestampString(run.updated_at));
+  let modelTokens = 0;
+  let modelUsageComplete = true;
+  let latestModelResponse;
+  let verificationCompleted;
+  for (const row of eventRows) {
+    const timestamp = Date.parse(timestampString(row.ts));
+    if (row.event_type === "ModelResponded") {
+      latestModelResponse = timestamp;
+      const input = row.payload?.usage?.input_tokens;
+      const output = row.payload?.usage?.output_tokens;
+      if (!Number.isSafeInteger(input) || !Number.isSafeInteger(output)) {
+        modelUsageComplete = false;
+      } else {
+        modelTokens += input + output;
+      }
+    }
+    if (row.event_type === "VerificationCompleted") {
+      verificationCompleted = timestamp;
+    }
+  }
+  return {
+    observedAt: Number.isFinite(updatedAt)
+      ? new Date(updatedAt).toISOString()
+      : null,
+    elapsedSeconds: Number.isFinite(createdAt) && Number.isFinite(updatedAt)
+      ? Math.max(0, (updatedAt - createdAt) / 1_000)
+      : null,
+    verificationSeconds:
+      Number.isFinite(latestModelResponse)
+        && Number.isFinite(verificationCompleted)
+        ? Math.max(0, (verificationCompleted - latestModelResponse) / 1_000)
+        : null,
+    modelTokens: modelUsageComplete ? modelTokens : null,
+  };
+}
+
+function timestampString(value) {
+  return value instanceof Date ? value.toISOString() : String(value);
 }
 
 function countDecisions(decisions) {
