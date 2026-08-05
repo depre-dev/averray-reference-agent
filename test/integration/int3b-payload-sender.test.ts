@@ -63,7 +63,7 @@ import {
 const execFileAsync = promisify(execFile);
 const PINNED_REPOSITORY = "depre-dev/averray-reference-agent";
 const OTHER_REPOSITORY = "depre-dev/another-repository";
-const EXPECTED_CASE_COUNT = 27;
+const EXPECTED_CASE_COUNT = 29;
 const ZERO_HASH = `sha256:${"0".repeat(64)}` as const;
 const A_HASH = `sha256:${"a".repeat(64)}` as const;
 const B_HASH = `sha256:${"b".repeat(64)}` as const;
@@ -102,6 +102,8 @@ type Int3bCase =
   | "base-moved-after-construction"
   | "halt-after-construction"
   | "existing-pr-adopted"
+  | "two-prs-on-derived-head"
+  | "foreign-pr-on-derived-head"
   | "crash-after-create"
   | "credential-scope-too-wide";
 
@@ -361,6 +363,69 @@ describe.sequential("INT-3b pull-request sending ceremony", () => {
       },
       "exactly_one_pr",
       "change the adopted remote PR count from one to two",
+    );
+  });
+
+  it("refuses two pull requests on the derived head instead of guessing", async () => {
+    const actuation = await createActuation();
+    const fakeGitHub = new FakeGitHubClient(baseRevision);
+    fakeGitHub.pullRequests.push(remotePullRequest(actuation, 41));
+    fakeGitHub.pullRequests.push(remotePullRequest(actuation, 42));
+    const refusal = await captureSendRefusal(
+      actuation,
+      senderDeps(fakeGitHub),
+    );
+    expect(refusal.reason).toBe("head_conflict");
+    expect(refusal.message).toContain("More than one pull request");
+    expect(fakeGitHub.createCalls).toBe(0);
+    const evidence: CeremonyEvidence = {
+      case: "two-prs-on-derived-head",
+      outcome: "refused",
+      refusalReason: refusal.reason,
+      refusalMessage: refusal.message,
+      remoteCalls: fakeGitHub.remoteCalls,
+      createCalls: fakeGitHub.createCalls,
+      pullRequestCount: fakeGitHub.pullRequests.length,
+    };
+    recordAndMutate(
+      evidence,
+      (mutated) => {
+        mutated.refusalReason = "pull_request_identity_mismatch";
+      },
+      "refusal_reason:head_conflict",
+      "replace the ambiguous-head head_conflict refusal",
+    );
+  });
+
+  it("refuses a lone head pull request that belongs to a different payload", async () => {
+    const actuation = await createActuation();
+    const fakeGitHub = new FakeGitHubClient(baseRevision);
+    const stranger = remotePullRequest(actuation, 41);
+    stranger.title = "An unrelated change squatting on the derived head";
+    fakeGitHub.pullRequests.push(stranger);
+    const refusal = await captureSendRefusal(
+      actuation,
+      senderDeps(fakeGitHub),
+    );
+    expect(refusal.reason).toBe("head_conflict");
+    expect(refusal.message).toContain("belongs to a different payload");
+    expect(fakeGitHub.createCalls).toBe(0);
+    const evidence: CeremonyEvidence = {
+      case: "foreign-pr-on-derived-head",
+      outcome: "refused",
+      refusalReason: refusal.reason,
+      refusalMessage: refusal.message,
+      remoteCalls: fakeGitHub.remoteCalls,
+      createCalls: fakeGitHub.createCalls,
+      pullRequestCount: fakeGitHub.pullRequests.length,
+    };
+    recordAndMutate(
+      evidence,
+      (mutated) => {
+        mutated.refusalReason = "pull_request_identity_mismatch";
+      },
+      "refusal_reason:head_conflict",
+      "replace the foreign-head head_conflict refusal",
     );
   });
 
@@ -868,6 +933,28 @@ function verifyInt3bEvidence(evidence: CeremonyEvidence): void {
     requireEvidence(evidence.outcome === "adopted", "existing_adopted");
     requireEvidence(evidence.pullRequestCount === 1, "exactly_one_pr");
     requireEvidence(evidence.createCalls === 0, "adoption_no_create");
+  }
+  if (evidence.case === "two-prs-on-derived-head") {
+    requireEvidence(evidence.outcome === "refused", "head_conflict_refused");
+    requireEvidence(
+      evidence.refusalReason === "head_conflict",
+      "refusal_reason:head_conflict",
+    );
+    requireEvidence(evidence.createCalls === 0, "head_conflict_no_create");
+    requireEvidence(evidence.pullRequestCount === 2, "two_prs_present");
+  }
+  if (evidence.case === "foreign-pr-on-derived-head") {
+    requireEvidence(evidence.outcome === "refused", "head_conflict_refused");
+    requireEvidence(
+      evidence.refusalReason === "head_conflict",
+      "refusal_reason:head_conflict",
+    );
+    requireEvidence(
+      evidence.refusalMessage?.includes("different payload") === true,
+      "foreign_payload_named",
+    );
+    requireEvidence(evidence.createCalls === 0, "head_conflict_no_create");
+    requireEvidence(evidence.pullRequestCount === 1, "one_foreign_pr");
   }
   if (evidence.case === "crash-after-create") {
     requireEvidence(
