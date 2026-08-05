@@ -159,6 +159,15 @@ function requestsBlock(raw: unknown): { requests: BankRequests } | { reason: str
       phase: e.phase,
       ageSeconds: e.ageSeconds,
       overdue: e.overdue,
+      // Tolerant on purpose: the producer computes overdue FROM deadlineAt but
+      // does not emit it per-row yet. Accept epoch-ms or ISO the moment it
+      // ships; until then the renderer shows no deadline rather than a made-up
+      // one. Never required — a feed without the field must keep parsing.
+      ...(typeof e.deadlineAtMs === "number" && Number.isFinite(e.deadlineAtMs)
+        ? { deadlineAtMs: e.deadlineAtMs }
+        : typeof e.deadlineAt === "string" && Number.isFinite(Date.parse(e.deadlineAt))
+          ? { deadlineAtMs: Date.parse(e.deadlineAt) }
+          : {}),
       ...(typeof e.status === "string" ? { status: e.status } : {}),
       ...(reconciliation ? { reconciliation } : {}),
     });

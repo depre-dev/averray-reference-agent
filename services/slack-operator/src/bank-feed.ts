@@ -70,6 +70,16 @@ export interface BankRequest {
   ageSeconds: number;
   /** Past its observer deadline. THE stuck-pending alarm. */
   overdue: boolean;
+  /**
+   * The request's own on-chain dispatch deadline, epoch ms — the clock
+   * `overdue` is computed against, which the producer does not yet emit
+   * per-row (bank-lane-feed.js computes and drops it). Optional so this board
+   * lights up the moment the field ships and renders nothing until then: a
+   * deadline nobody sent must not be displayed, and 2026-08-05 proved age is
+   * the WRONG clock — a staged request read "in flight 11.2h", calm, while
+   * 19 minutes remained to its deadline.
+   */
+  deadlineAtMs?: number | null;
   /** Producer-owned terminal status; pending for in-flight rows. */
   status?: string;
   /**
@@ -89,13 +99,59 @@ export interface BankRequest {
   };
 }
 
-/** The observer's vocabulary as of today. Not exhaustive by construction. */
+/**
+ * The observer's vocabulary as of today. Not exhaustive by construction —
+ * `normalizeRequestPhase` on the producer accepts ANY non-empty string, and
+ * Codex confirmed (2026-08-05) there is no closed enum and no exported
+ * constant to consume. This list is the documented production set from that
+ * answer: emitters in mcp-server/src/services/xcm-balance-observer.js, feed
+ * synthesis in bank-lane-feed.js, v2.2 phases introduced by platform PR #944.
+ *
+ * The UNRECOGNISED-PHASE flag over this list earned its keep the hard way:
+ * on 2026-08-05 it fired on `staged-on-chain-backfill`, the question it forced
+ * surfaced a staged request 19 minutes from its dispatch deadline, and the
+ * deadline lapsed before anyone could act. The flag is for genuine strangers;
+ * it must not cry wolf on every phase the producer already documents.
+ */
 export const KNOWN_PHASES = [
+  // observer lifecycle (v2.2, PR #944)
+  "registered",
+  "staged-on-chain",
+  "staged-on-chain-backfill",
+  "leg-0-dispatched-on-chain",
+  "leg-1-dispatched-on-chain",
+  "leg-2-dispatched-on-chain",
+  "leg-3-dispatched-on-chain",
+  // legacy observer lifecycle (v2.0/v2.1)
   "leg1-dispatched",
   "leg2-dispatched",
+  // shared tail
   "pending-finalize",
+  "scope-unknown",
   "terminal",
+  // synthesized by the feed itself, never by the observer
+  "timing-unknown",
+  "recovery-pending",
+  "snapshot-invalid",
 ] as const;
+
+/**
+ * Phases whose next step is an ADMIN ACTION, per the producer's contract
+ * (Codex, 2026-08-05): "It does not dispatch autonomously. An operator must
+ * invoke the admin dispatch path; no scheduled job performs that signing
+ * action." A staged request reads calm — "1 in flight" — while a dispatch
+ * deadline runs down; on 2026-08-05 one lapsed exactly that way. Naming the
+ * waiting party is the difference between watching and waiting.
+ */
+export const OPERATOR_ACTION_PHASES = [
+  "registered",
+  "staged-on-chain",
+  "staged-on-chain-backfill",
+] as const;
+
+export function awaitsOperator(phase: string): boolean {
+  return (OPERATOR_ACTION_PHASES as readonly string[]).includes(phase);
+}
 
 export function isKnownPhase(phase: string): boolean {
   return (KNOWN_PHASES as readonly string[]).includes(phase);

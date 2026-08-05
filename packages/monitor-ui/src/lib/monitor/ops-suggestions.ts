@@ -141,12 +141,16 @@ export function opsSuggestions(health: ProductHealth | undefined): OpsSuggestion
   const overdueRequestId = health.bank?.lane?.overdueRequestId ?? null;
   if (overdueRequestId) {
     const requests = health.bank?.lane?.requests?.text ?? "an overdue request";
+    // Phase-agnostic on purpose. The first wording said "check whether leg 2
+    // landed" — and the first live overdue after it shipped was a request that
+    // never dispatched ANY leg (staged, deadline lapsed, 2026-08-05).
+    // Asserting a leg is the wrong-subject failure inside the advice itself.
     out.push({
       id: "bank-overdue",
       tone: "warn",
-      text: `Bank request overdue — ${requests}. Check whether leg 2 landed on the destination chain.`,
+      text: `Bank request overdue — ${requests}. Determine where it actually stopped.`,
       task: proposeTask(
-        `A Hydration bank request is overdue: "${requests}". Do NOT move funds — INVESTIGATE ONLY. Trace the leg-2 dispatch for request ${overdueRequestId} on both chains, determine whether it landed, stalled, or failed, and draft the exact recovery steps for the operator to review.`,
+        `A Hydration bank request is overdue: "${requests}". Do NOT move funds — INVESTIGATE ONLY. Read request ${overdueRequestId}'s actual on-chain state on both chains — it may have lapsed before any dispatch, stalled mid-leg, or failed after one — and draft the exact next steps (re-stage, dispatch, or reclaim per the wrapper contract) for the operator to review.`,
       ),
     });
   }
