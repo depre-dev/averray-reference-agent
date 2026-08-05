@@ -61,11 +61,15 @@
 #        | head -1
 #    Expect 101. (The same probe against relay-pairing:3000/pair still 404s —
 #    that is the relay being consistent, not the hop failing.)
-# 3. Cloudflare Zero Trust → Networks → Tunnels → this tunnel → Public hostnames:
-#    ADD  hostname `buzz.averray.com`, path `pair*`, service
-#    `http://pairing-path-proxy:80` — ORDERED ABOVE the existing
-#    buzz.averray.com catch-all (rules match top-down; below it, it never fires).
-# 4. Desktop → Settings → Mobile → Try again. The QR should render.
+# 3. ROUTES — the pairing relay lives at its OWN hostname now:
+#    Cloudflare → Tunnels & Mesh → this tunnel → Published application routes:
+#    ADD  hostname `pair.averray.com`, path `*`, service
+#    `http://relay-pairing:3000`. No path rule, no ordering subtlety.
+#    The old `buzz.averray.com pair*` route and the pairing-path-proxy service
+#    are LEGACY: the desktop only dials /pair when NIP-11 lacks
+#    pairing_relay_url (i.e. pre-upgrade). Keep both until the upgraded
+#    desktop flow is verified, then delete the route and the proxy service.
+# 4. Desktop → Settings → Mobile → Try again. The QR should render AND STAY.
 # 5. NEGATIVE CONTROL, so the door only opened where intended: the MAIN relay
 #    must still refuse an unauthenticated client exactly as before.
 #
@@ -99,7 +103,14 @@ services:
       # Fresh, empty, sidecar-only database: automatic migration is safe here
       # in a way it deliberately is not on the production store.
       BUZZ_AUTO_MIGRATE: "true"
-      RELAY_URL: wss://buzz.averray.com/pair
+      # The sidecar's OWN hostname — this string is load-bearing three ways:
+      # the boot ensures a community for its host, the NIP-42 check derives its
+      # expected auth URL from the tenant that host selects, and the desktop
+      # dials exactly what NIP-11 advertises. All three must agree, and with a
+      # dedicated hostname they agree by construction. The earlier
+      # wss://buzz.averray.com/pair value could never pass NIP-42: the desktop
+      # signs what it dials, and the relay strips no paths.
+      RELAY_URL: wss://pair.averray.com
     volumes:
       - pairing-git-data:/data/git
     depends_on:
