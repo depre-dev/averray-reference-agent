@@ -20,26 +20,18 @@ import {
 } from "vitest";
 
 import {
-  getAgentTask,
   listAgentTasks,
   listDispatchableAgentTasks,
   putAgentTask,
 } from "../../packages/averray-mcp/src/agent-task-store.js";
 import {
-  acquireNextExpiredDispatchClaim,
   acquireDispatchLease,
   claimDispatch,
   deriveIntendedRunId,
   getDispatchClaim,
-  getNextExpiredDispatchClaim,
-  recordDispatchClaimProgress,
   releaseDispatchLease,
   renewDispatchLease,
 } from "../../packages/averray-mcp/src/dispatch-claim.js";
-import {
-  countInflightHarnessRuns,
-  transitionDispatchBackpressure,
-} from "../../packages/averray-mcp/src/dispatch-backpressure.js";
 import {
   getActiveDispatchQuarantine,
   listRunBindingAuditRows,
@@ -143,25 +135,9 @@ RUN("INT-4c exact-main D0", () => {
     const reconcileDeps: ReconcileRunDeps = {
       now: () => now,
       isHalted: () => false,
-      activePolicyIdentity: {
-        version: task.approval.policyVersion,
-        hash: task.approval.policyHash,
-      },
       listTasks: () => listAgentTasks({ executorKind: "harness", limit: 1_000 }, deps()),
       saveTask: (candidate) => putAgentTask(candidate, deps()),
       getRunBinding: (workItemId) => getRunBinding(workItemId, deps()),
-      getPolicyDrift: async () => undefined,
-      transitionPolicyDrift: async (input) => ({
-        state: {
-          workItemId: input.workItemId,
-          taskVersion: input.taskVersion,
-          active: input.active,
-          approvedPolicy: input.approvedPolicy,
-          activePolicy: input.activePolicy,
-          changedAt: now.toISOString(),
-        },
-        notify: input.active,
-      }),
       getActiveQuarantine: (workItemId, taskVersion) =>
         getActiveDispatchQuarantine(workItemId, taskVersion, deps()),
       markQuarantine: (input) => markDispatchQuarantine(input, deps()),
@@ -361,12 +337,6 @@ function dispatchDeps(
     now: () => NOW,
     dispatcherId: "d0-backpressure",
     leaseTtlSeconds: 30,
-    claimTtlMs: 600_000,
-    maxInflight: 1,
-    activePolicyIdentity: {
-      version: "dispatch-policy-v1",
-      hash: `sha256:${"c".repeat(64)}`,
-    },
     isDispatchEnabled: () => true,
     isHalted: () => false,
     listDispatchable: () => listDispatchableAgentTasks(deps()),
@@ -375,12 +345,6 @@ function dispatchDeps(
     renewLease: (input) => renewDispatchLease(input, deps()),
     releaseLease: (holder) => releaseDispatchLease(holder, deps()),
     claimDispatch: (input) => claimDispatch(input, deps()),
-    getTask: (workItemId, taskVersion) => getAgentTask(workItemId, taskVersion, deps()),
-    getNextExpiredClaim: () => getNextExpiredDispatchClaim(deps()),
-    acquireNextExpiredClaim: (input) => acquireNextExpiredDispatchClaim(input, deps()),
-    recordClaimProgress: (input) => recordDispatchClaimProgress(input, deps()),
-    countInflight: () => countInflightHarnessRuns(deps()),
-    transitionBackpressure: (input) => transitionDispatchBackpressure(input, deps()),
     getRunBinding: (workItemId) => getRunBinding(workItemId, deps()),
     bindRun: (input) => bindRunToWorkItem(input, deps()),
     loadProfileManifest: async (profileId) => ({
