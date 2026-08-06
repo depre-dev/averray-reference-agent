@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   assertAgentRunProjectionWithinTask,
   assertVerifiedHandoffMatchesTaskAndRun,
@@ -17,6 +19,12 @@ import {
 import {
   deriveIntendedRunId,
 } from "@avg/averray-mcp/dispatch-claim";
+import {
+  findBindingIntegrityViolations,
+  type DispatchQuarantine,
+  type MarkDispatchQuarantineInput,
+  type RunBindingAuditRow,
+} from "@avg/averray-mcp/dispatch-quarantine";
 import {
   buildHermesDecisionRecordV2,
 } from "@avg/averray-mcp/decision-records";
@@ -90,12 +98,23 @@ export interface ReconcileRunDeps {
   listTasks(): Promise<AgentTaskV1[]>;
   saveTask(task: AgentTaskV1): Promise<unknown>;
   getRunBinding(workItemId: string): Promise<RunBinding | undefined>;
+  getActiveQuarantine(
+    workItemId: string,
+    taskVersion: number,
+  ): Promise<DispatchQuarantine | undefined>;
+  markQuarantine(input: MarkDispatchQuarantineInput): Promise<{
+    marker: DispatchQuarantine;
+    activated: boolean;
+  }>;
+  listBindingAuditRows(): Promise<RunBindingAuditRow[]>;
   bindRun(input: BindRunInput): Promise<unknown>;
   readPort: HarnessReadPort;
   controlPort: Pick<HarnessControlPort, "cancel">;
   recordDecision(record: HermesDecisionRecordV2): Promise<unknown>;
   alertSink: AlertSink;
   logger?: ReconcileLogger;
+  poisonThreshold: number;
+  poisonFailures: PoisonFailureTracker;
   projectRun?: (
     binding: HarnessProjectionBinding,
     read: HarnessRunReadSnapshot,
@@ -113,6 +132,7 @@ export interface ReconcileResult {
     | "run_missing"
     | "awaiting_manifest"
     | "read_degraded"
+    | "quarantined"
     | "refused"
     | "handoff_ready";
   previousLifecycle: AgentTaskLifecycle;
@@ -121,6 +141,55 @@ export interface ReconcileResult {
   reason?: string;
   projection?: AgentRunProjectionV1;
   handoff?: VerifiedHandoffV1;
+}
+
+export interface PoisonFailureObservation {
+  fingerprint: string;
+  cycleCount: number;
+  counted: boolean;
+}
+
+export interface PoisonFailureTracker {
+  record(
+    workItemId: string,
+    taskVersion: number,
+    error: unknown,
+    options: { transient: boolean; now: Date },
+  ): PoisonFailureObservation;
+  reset(workItemId: string, taskVersion: number): void;
+}
+
+export function createPoisonFailureTracker(options: {
+  countTransientFailures?: boolean;
+  includeTimestampInFingerprint?: boolean;
+} = {}): PoisonFailureTracker {
+  const failures = new Map<string, { fingerprint: string; cycleCount: number }>();
+  return {
+    record(workItemId, taskVersion, error, observation) {
+      const key = taskKey(workItemId, taskVersion);
+      if (observation.transient && options.countTransientFailures !== true) {
+        failures.delete(key);
+        return {
+          fingerprint: poisonFingerprint(error),
+          cycleCount: 0,
+          counted: false,
+        };
+      }
+      const base = poisonFingerprint(error);
+      const fingerprint = options.includeTimestampInFingerprint === true
+        ? `${base}:${observation.now.toISOString()}`
+        : base;
+      const previous = failures.get(key);
+      const cycleCount = previous?.fingerprint === fingerprint
+        ? previous.cycleCount + 1
+        : 1;
+      failures.set(key, { fingerprint, cycleCount });
+      return { fingerprint, cycleCount, counted: true };
+    },
+    reset(workItemId, taskVersion) {
+      failures.delete(taskKey(workItemId, taskVersion));
+    },
+  };
 }
 
 export interface PullRequestActuationDecisionInput {
@@ -183,8 +252,15 @@ export async function reconcileDispatchedRuns(
   const tasks = (await deps.listTasks()).filter(
     haltedAtStart ? isHaltCandidate : isReconcileCandidate,
   );
+  const integrityMarkers = await quarantineBindingIntegrityViolations(deps);
   const results: ReconcileResult[] = [];
   for (const task of tasks) {
+    const marker = integrityMarkers.get(taskKey(task.workItemId, task.taskVersion))
+      ?? await deps.getActiveQuarantine(task.workItemId, task.taskVersion);
+    if (marker) {
+      results.push(quarantinedResult(task, marker));
+      continue;
+    }
     if (deps.isHalted()) {
       results.push(await cancelTaskForHalt(deps, task));
       continue;
@@ -415,8 +491,9 @@ async function reconcileTask(
         reason: "dispatching_run_not_found",
       });
     }
-    return degradedRead(deps, task, error);
+    return observePoisonFailure(deps, task, harnessRunId, error);
   }
+  deps.poisonFailures.reset(task.workItemId, task.taskVersion);
 
   const projectionBinding = buildProjectionBinding(
     task,
@@ -439,6 +516,10 @@ async function reconcileTask(
       read,
       { now: deps.now() },
     );
+  } catch (error) {
+    return observePoisonFailure(deps, task, harnessRunId, error);
+  }
+  try {
     assertAgentRunProjectionWithinTask(task, projection);
   } catch (error) {
     if (
@@ -649,6 +730,123 @@ async function reconcileTask(
     healthy: true,
     projection,
   });
+}
+
+async function quarantineBindingIntegrityViolations(
+  deps: ReconcileRunDeps,
+): Promise<Map<string, DispatchQuarantine>> {
+  const grouped = new Map<string, ReturnType<typeof findBindingIntegrityViolations>>();
+  for (const violation of findBindingIntegrityViolations(
+    await deps.listBindingAuditRows(),
+  )) {
+    const key = taskKey(violation.workItemId, violation.taskVersion);
+    const entries = grouped.get(key) ?? [];
+    entries.push(violation);
+    grouped.set(key, entries);
+  }
+  const markers = new Map<string, DispatchQuarantine>();
+  for (const [key, violations] of grouped) {
+    const first = violations[0]!;
+    const detail = violations.map(bindingViolationDetail).sort().join("; ");
+    const { marker, activated } = await deps.markQuarantine({
+      workItemId: first.workItemId,
+      taskVersion: first.taskVersion,
+      reason: "binding_integrity",
+      fingerprint: stableFingerprint("binding_integrity", detail),
+      cycleCount: 1,
+    });
+    markers.set(key, marker);
+    if (activated) {
+      await deps.alertSink({
+        severity: "critical",
+        code: "binding_integrity_quarantined",
+        workItemId: marker.workItemId,
+        taskVersion: marker.taskVersion,
+        harnessRunId: first.harnessRunId,
+        message:
+          `Harness run binding integrity failed and the work item was quarantined: ${detail}.`,
+        at: deps.now().toISOString(),
+      });
+    }
+  }
+  return markers;
+}
+
+async function observePoisonFailure(
+  deps: ReconcileRunDeps,
+  task: AgentTaskV1,
+  harnessRunId: string,
+  error: unknown,
+): Promise<ReconcileResult> {
+  const observation = deps.poisonFailures.record(
+    task.workItemId,
+    task.taskVersion,
+    error,
+    { transient: isTransientReadFailure(error), now: deps.now() },
+  );
+  if (!observation.counted || observation.cycleCount < deps.poisonThreshold) {
+    return degradedRead(deps, task, error);
+  }
+  const { marker, activated } = await deps.markQuarantine({
+    workItemId: task.workItemId,
+    taskVersion: task.taskVersion,
+    reason: "poison_read",
+    fingerprint: observation.fingerprint,
+    cycleCount: observation.cycleCount,
+  });
+  if (activated) {
+    await emitTaskAlert(deps, task, {
+      severity: "critical",
+      code: "poison_read_quarantined",
+      harnessRunId,
+      message:
+        `Harness run read was quarantined after ${marker.cycleCount} consecutive cycles with fingerprint ${marker.fingerprint}.`,
+    });
+  }
+  return quarantinedResult(task, marker);
+}
+
+function quarantinedResult(
+  task: AgentTaskV1,
+  marker: DispatchQuarantine,
+): ReconcileResult {
+  return result(task, {
+    outcome: "quarantined",
+    healthy: false,
+    reason:
+      `dispatch_quarantined reason=${marker.reason} fingerprint=${marker.fingerprint} cycles=${marker.cycleCount}`,
+  });
+}
+
+function bindingViolationDetail(
+  violation: ReturnType<typeof findBindingIntegrityViolations>[number],
+): string {
+  if (violation.kind === "run_id_mismatch") {
+    return `work_item=${violation.workItemId}@${violation.taskVersion} actual_run_id=${violation.harnessRunId} intended_run_id=${violation.intendedRunId ?? "missing_approval_hash"}`;
+  }
+  return `work_item=${violation.workItemId}@${violation.taskVersion} run_id=${violation.harnessRunId} conflicts_with=${violation.conflictingWorkItemId}@${violation.conflictingTaskVersion}`;
+}
+
+function poisonFingerprint(error: unknown): string {
+  const errorClass = error instanceof Error ? error.name : "UnknownError";
+  const message = safeErrorMessage(error)
+    .replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b/gu, "<timestamp>")
+    .replace(/\b(?:cycle|attempt|retry|counter)\s*[=:]?\s*\d+\b/giu, "counter=<counter>");
+  return stableFingerprint(errorClass, message);
+}
+
+function stableFingerprint(errorClass: string, message: string): string {
+  return `sha256:${createHash("sha256")
+    .update(`${errorClass}\0${message}`, "utf8")
+    .digest("hex")}`;
+}
+
+function taskKey(workItemId: string, taskVersion: number): string {
+  return `${workItemId}\0${taskVersion}`;
+}
+
+function isTransientReadFailure(error: unknown): boolean {
+  return asHarnessReadError(error)?.retryable === true;
 }
 
 interface ForceCancelOptions {
@@ -1374,13 +1572,15 @@ function isRunMissing(error: unknown): boolean {
 
 function asHarnessReadError(
   error: unknown,
-): Pick<HarnessReadError, "code" | "message"> | undefined {
+): Pick<HarnessReadError, "code" | "message" | "retryable"> | undefined {
   if (error instanceof HarnessReadError) return error;
   if (
     error instanceof Error
     && error.name === "HarnessReadError"
     && "code" in error
     && typeof error.code === "string"
+    && "retryable" in error
+    && typeof error.retryable === "boolean"
   ) {
     return error as HarnessReadError;
   }

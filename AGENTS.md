@@ -76,6 +76,15 @@ same disposable ceremony infrastructure as the INT-2 suite, and the standing
 rule since the first failed ceremony is that this never runs beside production;
 the VPS dispatch profile stays dormant.
 
+INT-4b adds detection-only quarantine boundaries. The dispatcher marks stable
+poison reads and binding-integrity violations durably, then guards the work item
+before reading its binding again; it never auto-cancels or auto-clears. Only the
+operator-confirmed `harness-pilot unquarantine` verb clears a marker. The
+standalone watchdog independently detects binding divergence and both orphan
+classes through its own read-only SQL and never writes task state or performs
+remediation. See
+[docs/HARNESS_INT4B_QUARANTINE_RUNBOOK.md](docs/HARNESS_INT4B_QUARANTINE_RUNBOOK.md).
+
 If you touched `ops/`, the `Dockerfile`, or compose files, also validate what CI validates:
 
 ```bash

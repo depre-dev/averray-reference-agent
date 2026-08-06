@@ -73,6 +73,10 @@
       "types": "./dist/dispatch-claim.d.ts",
       "import": "./dist/dispatch-claim.js"
     },
+    "./dispatch-quarantine": {
+      "types": "./dist/dispatch-quarantine.d.ts",
+      "import": "./dist/dispatch-quarantine.js"
+    },
     "./run-binding-outbox": {
       "types": "./dist/run-binding-outbox.d.ts",
       "import": "./dist/run-binding-outbox.js"

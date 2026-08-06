@@ -1,10 +1,31 @@
 import { Pool } from "pg";
 
-import type { HarnessSourceState, WatchdogDatabaseProbes } from "./watchdog.js";
+import type {
+  HarnessRunInventoryRow,
+  HarnessSourceState,
+  ReferenceBindingInventoryRow,
+  WatchdogDatabaseProbes,
+} from "./watchdog.js";
 
 interface HarnessSourceRow {
   live_run: boolean;
   newest_event_at: Date | string | null;
+}
+
+interface ReferenceBindingRow {
+  work_item_id: string;
+  harness_run_id: string;
+  bound_at: Date | string;
+  task_version: number;
+  approved_task_hash: string | null;
+  lifecycle: string;
+  task_updated_at: Date | string;
+}
+
+interface HarnessRunRow {
+  run_id: string;
+  outcome: string | null;
+  updated_at: Date | string;
 }
 
 export interface ProductionWatchdogDatabaseProbes extends WatchdogDatabaseProbes {
@@ -58,6 +79,50 @@ export function createPostgresWatchdogProbes(options: {
         newestEventAt: parseTimestamp(row?.newest_event_at),
       };
     },
+    async readReferenceBindings(): Promise<ReferenceBindingInventoryRow[]> {
+      if (!referencePool) throw new DatabaseProbeConfigurationError("reference");
+      const result = await referencePool.query<ReferenceBindingRow>(
+        `select
+           binding.work_item_id,
+           binding.harness_run_id,
+           binding.bound_at,
+           task.task_version,
+           task.approved_task_hash,
+           task.lifecycle,
+           task.updated_at as task_updated_at
+         from agent_task_run_outbox binding
+         join lateral (
+           select task_version, approved_task_hash, lifecycle, updated_at
+           from agent_tasks
+           where work_item_id = binding.work_item_id
+           order by task_version desc
+           limit 1
+         ) task on true
+         order by binding.work_item_id asc`,
+      );
+      return result.rows.map((row) => ({
+        workItemId: row.work_item_id,
+        taskVersion: row.task_version,
+        approvedTaskHash: row.approved_task_hash,
+        harnessRunId: row.harness_run_id,
+        lifecycle: row.lifecycle,
+        boundAt: timestamp(row.bound_at),
+        taskUpdatedAt: timestamp(row.task_updated_at),
+      }));
+    },
+    async readHarnessRuns(): Promise<HarnessRunInventoryRow[]> {
+      if (!harnessPool) throw new DatabaseProbeConfigurationError("harness");
+      const result = await harnessPool.query<HarnessRunRow>(
+        `select run_id, outcome, updated_at
+         from runs
+         order by run_id asc`,
+      );
+      return result.rows.map((row) => ({
+        runId: row.run_id,
+        terminal: row.outcome !== null,
+        updatedAt: timestamp(row.updated_at),
+      }));
+    },
     async close(): Promise<void> {
       await Promise.all([
         referencePool?.end(),
@@ -78,4 +143,8 @@ function parseTimestamp(value: Date | string | null | undefined): Date | null {
   if (value === null || value === undefined) return null;
   const parsed = value instanceof Date ? value : new Date(value);
   return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+function timestamp(value: Date | string): string {
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
