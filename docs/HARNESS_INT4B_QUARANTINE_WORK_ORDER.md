@@ -15,11 +15,21 @@
 Three silences, each demonstrated against current `main` before building, each
 seeding a ledger row:
 
-1. **Poison read.** Tamper a bound run's stored state in a disposable Harness DB
-   so projection fails validation. Record that reconciliation retries it every
-   cycle, forever — `unhealthyCount` steady, no escalation, no quarantine, the
-   same log line each loop. (The `awaiting_manifest` loop watched during the
-   first send is the benign cousin; the drill needs the malformed one.)
+1. **Poison read.** *(Amended 2026-08-06, seventh stop — my premise was wrong
+   for one of two failure classes, found by recording against exact main.)*
+   There are two classes and only one is silent:
+   - **Read failures** (`HarnessReadError` before projection — malformed status,
+     store read errors): these DO retry every cycle forever, `unhealthyCount`
+     steady, no escalation, no quarantine. The silence is real; record it with
+     the liveness proof. D1 quarantines this class.
+   - **Projection/containment failures** are ALREADY fail-closed on main
+     (`reconcile-run.ts:443-471`): a terminal projection with no resolvable
+     outcome refuses with a critical `terminal_projection_unresolved`; anything
+     else force-cancels with `lifecycle: "blocked"` and a critical
+     `containment_expansion` alert. Not silent, not looping, already parked for
+     operator review. No D1 change applies; recording a "silence" here would be
+     false. One nit filed separately: plain data corruption receives the
+     authority-expansion message, which overstates what happened.
 2. **Conflicting binding.** In a disposable reference DB, tamper a binding row so
    `harness_run_id` no longer equals the hash-derived intended run id. Record
    that nothing anywhere notices.
