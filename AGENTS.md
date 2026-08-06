@@ -85,6 +85,15 @@ classes through its own read-only SQL and never writes task state or performs
 remediation. See
 [docs/HARNESS_INT4B_QUARANTINE_RUNBOOK.md](docs/HARNESS_INT4B_QUARANTINE_RUNBOOK.md).
 
+INT-4c gives per-work-item dispatch claims a progress-renewed expiry and exactly
+one takeover generation. Recovery always reuses the immutable derived run id;
+an expired generation 2 blocks with a critical alert rather than submitting a
+third time. It also introduces the first in-flight Harness bound, reported as
+`backpressure` in pilot status with one warn alert per transition. Fault
+injection is drill-only, requires the exact enable fence, and must never be
+configured in a normal dispatcher environment. See
+[docs/HARNESS_INT4C_LEASE_TAKEOVER_RUNBOOK.md](docs/HARNESS_INT4C_LEASE_TAKEOVER_RUNBOOK.md).
+
 If you touched `ops/`, the `Dockerfile`, or compose files, also validate what CI validates:
 
 ```bash

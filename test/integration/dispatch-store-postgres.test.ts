@@ -15,13 +15,21 @@ import {
 } from "vitest";
 
 import {
+  acquireNextExpiredDispatchClaim,
   acquireDispatchLease,
   claimDispatch,
   deriveIntendedRunId,
+  getNextExpiredDispatchClaim,
+  recordDispatchClaimProgress,
   releaseDispatchLease,
   renewDispatchLease,
   type DispatchStoreQuery,
 } from "../../packages/averray-mcp/src/dispatch-claim.js";
+import {
+  countInflightHarnessRuns,
+  getDispatchBackpressure,
+  transitionDispatchBackpressure,
+} from "../../packages/averray-mcp/src/dispatch-backpressure.js";
 import {
   buildHermesDecisionRecordV2,
 } from "../../packages/averray-mcp/src/decision-records.js";
@@ -74,9 +82,11 @@ describe.skipIf(!DATABASE_URL)("INT-2e dispatch stores against Postgres", () => 
   });
 
   beforeEach(async () => {
+    await pool.query("delete from harness_dispatch_backpressure");
     await pool.query("delete from hermes_decision_records");
     await pool.query("delete from agent_task_run_outbox");
     await pool.query("delete from agent_task_dispatch_claims");
+    await pool.query("delete from agent_tasks");
     await pool.query("delete from dispatch_lease");
   });
 
@@ -142,6 +152,8 @@ describe.skipIf(!DATABASE_URL)("INT-2e dispatch stores against Postgres", () => 
       taskVersion: 1,
       approvedTaskHash: HASH,
       intendedRunId,
+      holder: "dispatcher-a",
+      leaseTtlMs: 1_000,
     };
 
     await expect(
@@ -170,6 +182,105 @@ describe.skipIf(!DATABASE_URL)("INT-2e dispatch stores against Postgres", () => 
       [input.workItemId, input.taskVersion],
     );
     expect(result.rows[0]?.count).toBe("1");
+  });
+
+  it("takes over expired claims once and exhausts generation two", async () => {
+    await insertTask(pool, "pg-expiry", "dispatching");
+    const intendedRunId = deriveIntendedRunId("pg-expiry", 1, HASH);
+    await claimDispatch({
+      workItemId: "pg-expiry",
+      taskVersion: 1,
+      approvedTaskHash: HASH,
+      intendedRunId,
+      holder: "dispatcher-a",
+      leaseTtlMs: 50,
+    }, { query: dispatchQuery });
+    await delay(75);
+
+    await expect(getNextExpiredDispatchClaim({ query: dispatchQuery })).resolves.toMatchObject({
+      intendedRunId,
+      claimGeneration: 1,
+    });
+    const retry = await acquireNextExpiredDispatchClaim({
+      holder: "dispatcher-b",
+      leaseTtlMs: 50,
+    }, { query: dispatchQuery });
+    expect(retry).toMatchObject({
+      intendedRunId,
+      claimGeneration: 2,
+      claimState: "claimed",
+      claimHolder: "dispatcher-b",
+    });
+    await recordDispatchClaimProgress({
+      workItemId: "pg-expiry",
+      taskVersion: 1,
+      holder: "dispatcher-b",
+      claimGeneration: 2,
+      progress: "submitted",
+      leaseTtlMs: 50,
+    }, { query: dispatchQuery });
+    await delay(75);
+    await expect(acquireNextExpiredDispatchClaim({
+      holder: "dispatcher-c",
+      leaseTtlMs: 50,
+    }, { query: dispatchQuery })).resolves.toMatchObject({
+      claimGeneration: 2,
+      claimState: "exhausted",
+      claimHolder: "dispatcher-c",
+    });
+
+    await insertTask(pool, "pg-exhaust", "dispatching");
+    await claimDispatch({
+      workItemId: "pg-exhaust",
+      taskVersion: 1,
+      approvedTaskHash: HASH,
+      intendedRunId: deriveIntendedRunId("pg-exhaust", 1, HASH),
+      holder: "dispatcher-a",
+      leaseTtlMs: 50,
+    }, { query: dispatchQuery });
+    await delay(75);
+    await acquireNextExpiredDispatchClaim({
+      holder: "dispatcher-b",
+      leaseTtlMs: 50,
+    }, { query: dispatchQuery });
+    await delay(75);
+    await expect(acquireNextExpiredDispatchClaim({
+      holder: "dispatcher-c",
+      leaseTtlMs: 50,
+    }, { query: dispatchQuery })).resolves.toMatchObject({
+      claimGeneration: 2,
+      claimState: "exhausted",
+    });
+  });
+
+  it("counts non-terminal bindings and persists only backpressure transitions", async () => {
+    await insertTask(pool, "pg-running", "running");
+    await bindRunToWorkItem({
+      workItemId: "pg-running",
+      harnessRunId: RUN_ID,
+    }, { query: dispatchQuery });
+    await expect(countInflightHarnessRuns({ query: dispatchQuery })).resolves.toBe(1);
+
+    await expect(transitionDispatchBackpressure({
+      active: true,
+      observedInflight: 1,
+      maxInflight: 1,
+    }, { query: dispatchQuery })).resolves.toMatchObject({ changed: true });
+    await expect(transitionDispatchBackpressure({
+      active: true,
+      observedInflight: 1,
+      maxInflight: 1,
+    }, { query: dispatchQuery })).resolves.toMatchObject({ changed: false });
+    await expect(transitionDispatchBackpressure({
+      active: false,
+      observedInflight: 0,
+      maxInflight: 1,
+    }, { query: dispatchQuery })).resolves.toMatchObject({ changed: true });
+    await expect(getDispatchBackpressure({ query: dispatchQuery })).resolves.toMatchObject({
+      active: false,
+      observedInflight: 0,
+      maxInflight: 1,
+    });
   });
 
   it("keeps run binding immutable while allowing a late manifest fill-in", async () => {
@@ -287,4 +398,18 @@ function decisionInput(reason: string) {
     },
     generatedAt: "2026-07-24T12:00:00.000Z",
   };
+}
+
+async function insertTask(
+  pool: Pool,
+  workItemId: string,
+  lifecycle: string,
+): Promise<void> {
+  await pool.query(
+    `insert into agent_tasks (
+       work_item_id, task_version, correlation_id, lifecycle, executor_kind,
+       approved_task_hash, deadline, updated_at, task
+     ) values ($1, 1, $1, $2, 'harness', $3, now() + interval '1 hour', now(), '{}'::jsonb)`,
+    [workItemId, lifecycle, HASH],
+  );
 }

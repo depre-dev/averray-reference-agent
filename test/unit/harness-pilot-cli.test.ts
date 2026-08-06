@@ -259,6 +259,12 @@ describe("Harness pilot CLI", () => {
         },
         generatedAt: "2026-07-25T12:00:00.000Z",
       }]),
+      getDispatchBackpressure: vi.fn(async () => ({
+        active: true,
+        observedInflight: 1,
+        maxInflight: 1,
+        changedAt: "2026-07-25T11:59:00.000Z",
+      })),
       readTextFile: vi.fn(async (target: string) => {
         if (target.endsWith("heartbeat.json")) {
           return JSON.stringify({
@@ -309,6 +315,12 @@ describe("Harness pilot CLI", () => {
       dispatcherHeartbeat: {
         status: "idle",
         lastOutcome: "refused",
+      },
+      dispatcherBackpressure: {
+        observed: true,
+        active: true,
+        observedInflight: 1,
+        maxInflight: 1,
       },
       submissionAttemptedByCli: false,
     });
@@ -412,6 +424,7 @@ function pilotServices(overrides: Record<string, unknown> = {}) {
     listDispatchQuarantines: vi.fn(async () => []),
     clearDispatchQuarantine: vi.fn(async () => undefined),
     listHermesDecisions: vi.fn(async () => []),
+    getDispatchBackpressure: vi.fn(async () => undefined),
     workspacePathForTask: vi.fn(
       (workItemId: string, taskVersion: number) =>
         `/var/lib/harness-dispatcher/workspaces/${workItemId}-v${taskVersion}`,
