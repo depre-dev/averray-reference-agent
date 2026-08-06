@@ -11,6 +11,7 @@ import type {
   OpsIncident,
   HealthHistory,
   ProbeStatus,
+  ProbeReading,
 } from "./product-health.js";
 import { OPS_PILLARS, OPS_PILLAR_LABELS, probePillar } from "./product-health.js";
 
@@ -29,11 +30,13 @@ export type OpsTone = "ok" | "degraded" | "red" | "awaiting";
 // on both sides (the service carried a comment reading "mirrors the frontend's
 // awaiting regex", which is a drift bug waiting to happen). Re-exported here so
 // existing frontend imports keep working.
-import { isAcknowledgedProbe, isAwaitingProbe } from "@avg/schemas/ops-verdict";
-export { isAcknowledgedProbe, isAwaitingProbe };
+import { isAcknowledgedProbe, isAwaitingProbe, isUnknownReadingProbe } from "@avg/schemas/ops-verdict";
+export { isAcknowledgedProbe, isAwaitingProbe, isUnknownReadingProbe };
 
-/** Resolve a probe to its ops tone (awaiting overrides a bare degraded). */
-export function probeOpsTone(probe: { status: ProbeStatus; detail: string }): OpsTone {
+/** Resolve a probe to its ops tone (awaiting overrides a bare degraded; a probe
+ *  with no reading is grey too — telemetry we could not take, not a fault we
+ *  observed). `isAwaitingProbe` covers both, and leaves `red` alone. */
+export function probeOpsTone(probe: { status: ProbeStatus; detail: string; reading?: ProbeReading }): OpsTone {
   return isAwaitingProbe(probe) ? "awaiting" : probe.status;
 }
 

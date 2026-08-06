@@ -43,6 +43,8 @@
 //
 // Kept pure — no clock, no I/O — so every rule is testable without a relay.
 
+import { isUnknownReadingProbe } from "@avg/schemas";
+
 import { greetingFor, probeLabel, statusGlyph } from "./ops-voice.js";
 
 export interface DigestSchedule {
@@ -142,6 +144,8 @@ export function digestDue(input: {
 export interface DigestProbe {
   name: string;
   status: string;
+  /** "unknown" ⇒ the probe took no reading at all. Absent ⇒ observed. */
+  reading?: string;
   detail: string;
 }
 
@@ -218,7 +222,16 @@ export function digestFactStrings(input: MorningDigestInput): string[] {
 export function buildMorningDigest(input: MorningDigestInput): string {
   const byName = new Map(input.probes.map((p) => [p.name, p] as const));
   const total = input.probes.length;
-  const attention = input.probes.filter((p) => p.status !== "ok");
+  // A probe that took NO READING is not a probe needing attention — it is an
+  // instrument that could not see. Counting them together turned one container
+  // DNS failure into "4 of 9 probes need attention" on 2026-08-06: four
+  // findings about a product nobody had managed to ask.
+  //
+  // They are still named, on their own line, because an unreadable instrument
+  // is exactly the thing the operator must know about before trusting the rest
+  // of the digest. Excluded from the count, never from the message.
+  const unreadable = input.probes.filter(isUnknownReadingProbe);
+  const attention = input.probes.filter((p) => p.status !== "ok" && !isUnknownReadingProbe(p));
   const reds = attention.filter((p) => p.status === "red").length;
 
   const greeting = greetingFor(input.localTime);
@@ -227,7 +240,9 @@ export function buildMorningDigest(input: MorningDigestInput): string {
     total === 0
       ? `${greeting} — no probes reporting on ${where}.`
       : attention.length === 0
-        ? `${greeting} — all ${total} probes green on ${where}.`
+        ? unreadable.length > 0
+          ? `${greeting} — ${total - unreadable.length} of ${total} probes green on ${where}; ${unreadable.length} could not be read.`
+          : `${greeting} — all ${total} probes green on ${where}.`
         : `${greeting} — ${attention.length} of ${total} probe${total === 1 ? "" : "s"} need${attention.length === 1 ? "s" : ""} attention on ${where}.`;
 
   const stamp =
@@ -253,6 +268,16 @@ export function buildMorningDigest(input: MorningDigestInput): string {
     lines.push("Needs attention:");
     for (const probe of redFirst) {
       lines.push(`${statusGlyph(probe.status)} ${probeLabel(probe.name)} — ${probe.detail}`);
+    }
+  }
+
+  // Its own heading, deliberately not "Needs attention". Nothing here is a
+  // finding about the product; the finding is that we could not look.
+  if (unreadable.length > 0) {
+    lines.push("");
+    lines.push("Could not be read (no evidence either way):");
+    for (const probe of unreadable) {
+      lines.push(`· ${probeLabel(probe.name)} — ${probe.detail}`);
     }
   }
 

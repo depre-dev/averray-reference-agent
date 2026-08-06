@@ -227,3 +227,69 @@ describe("digestFactStrings — the strings Hermes may not lose", () => {
     expect(facts).toContain("1 open request, staged on-chain");
   });
 });
+
+// ── The digest during a blind window ────────────────────────────────────────
+//
+// A container DNS failure straddling the send time used to open with "4 of 9
+// probes need attention" and list four findings — about a product none of those
+// four probes had managed to ask. One network fault, four accusations.
+describe("probes that took no reading are separated from probes needing attention", () => {
+  const unreadable = (name: string, subject: string): DigestProbe => ({
+    name,
+    status: "degraded",
+    reading: "unknown",
+    detail: `${subject} unknown — product /health not readable from here — DNS resolution failed (ENOTFOUND)`,
+  });
+
+  const base = {
+    localDate: "2026-08-06",
+    localTime: "08:00",
+    timeZone: ZURICH,
+    network: "mainnet",
+    verdictHeadline: "MONEY PATH UNKNOWN +3",
+    probes: [
+      { name: "signer_liquidity", status: "ok", detail: "gas 7.2018 DOT, reward bank 10.20 USDC" },
+      { name: "credential_expiry", status: "ok", detail: "3 TLS certs · no tokens watched, soonest expiry 37d" },
+      unreadable("money_path", "settlement state"),
+      unreadable("chain_height", "chain height"),
+    ] as DigestProbe[],
+  };
+
+  test("does not count them as needing attention", () => {
+    const text = buildMorningDigest(base);
+    expect(text).not.toContain("need attention");
+    expect(text.split("\n")[0]).toBe("Good morning — 2 of 4 probes green on Averray mainnet; 2 could not be read.");
+  });
+
+  test("names them anyway, under their own heading", () => {
+    // Excluded from the count, never from the message: an instrument that
+    // cannot see is the first thing the operator needs to know.
+    const text = buildMorningDigest(base);
+    expect(text).toContain("Could not be read (no evidence either way):");
+    expect(text).toContain("· Money path — settlement state unknown");
+    expect(text).toContain("ENOTFOUND");
+    expect(text).not.toContain("Needs attention");
+  });
+
+  test("an observed degradation still needs attention alongside them", () => {
+    const text = buildMorningDigest({
+      ...base,
+      probes: [...base.probes, { name: "disk_headroom", status: "degraded", detail: "4.1GB free" }],
+    });
+    expect(text.split("\n")[0]).toContain("1 of 5 probes needs attention");
+    expect(text).toContain("Needs attention:");
+    expect(text).toContain("Disk headroom — 4.1GB free");
+    expect(text).toContain("Could not be read (no evidence either way):");
+  });
+
+  test("a red we could not read is still a red — it is not filtered away", () => {
+    const text = buildMorningDigest({
+      ...base,
+      probes: [
+        { name: "product_api", status: "red", reading: "unknown", detail: "probe cannot reach https://api.averray.com/health — DNS resolution failed (ENOTFOUND) · 3 consecutive checks" },
+      ],
+    });
+    expect(text).toContain("Needs attention:");
+    expect(text).toContain("Product API — probe cannot reach");
+  });
+});

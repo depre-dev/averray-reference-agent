@@ -96,14 +96,27 @@ export function opsBannerData(health: ProductHealth, nowMs: number): BannerData 
   if (reds.length > 0) {
     const lead = reds[0];
     const extra = reds.length > 1 ? ` +${reds.length - 1}` : "";
+    // A red we could not READ is page-worthy unreachability, not a settlement
+    // finding. This banner is the largest sentence on the board, and on
+    // 2026-08-06 it is the one that told an operator the product was down while
+    // it was serving 200s. It must also agree with `verdict.headline`, which now
+    // says UNREACHABLE — two derivations contradicting each other on one screen
+    // is worse than either being wrong alone.
+    const unreadable = lead.reading === "unknown";
     return {
       tone: "degraded",
       eyebrow,
-      headline: `${probeLabel(lead.name)} red${extra} — ${shortDetail(lead.detail)}`,
-      sub: mainnet ? "Settlement-affecting — on-call is paged." : "On mainnet this pages; on testnet it does not.",
+      headline: unreadable
+        ? `${probeLabel(lead.name)} unreachable from the monitor${extra} — ${shortDetail(lead.detail)}`
+        : `${probeLabel(lead.name)} red${extra} — ${shortDetail(lead.detail)}`,
+      sub: unreadable
+        ? "The probe cannot reach it — whether the product is affected is unknown."
+        : mainnet
+          ? "Settlement-affecting — on-call is paged."
+          : "On mainnet this pages; on testnet it does not.",
       primaryActionId: undefined,
       mostUrgentReasons: [
-        { label: "page-worthy", tone: "risk" },
+        { label: unreadable ? "unreachable" : "page-worthy", tone: "risk" },
         ...(net ? ([{ label: net, tone: "neutral" }] as const) : []),
       ],
     };

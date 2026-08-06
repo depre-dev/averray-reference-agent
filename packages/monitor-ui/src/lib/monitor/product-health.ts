@@ -12,10 +12,16 @@ import type { OpsVerdict } from "@avg/schemas/ops-verdict";
 export type ProbeStatus = "ok" | "degraded" | "red";
 export type ProductHealthStatus = "healthy" | "degraded" | "red" | "unknown";
 
+/** Whether the probe observed its subject at all. Absent ⇒ observed. The
+ *  service owns this contract (@avg/schemas/ops-verdict); the board renders it.
+ *  `"unknown"` is grey — no reading is not a finding about the subject. */
+export type ProbeReading = "observed" | "unknown";
+
 export interface ProductHealthProbe {
   name: string;
   status: ProbeStatus;
   detail: string;
+  reading?: ProbeReading;
   /** Per-check statuses, oldest → newest (feeds the sparkline). */
   sparkline: ProbeStatus[];
 }

@@ -506,6 +506,14 @@ services:
       PRODUCT_HEALTH_API_PATH: ${PRODUCT_HEALTH_API_PATH:-/health}
       PRODUCT_HEALTH_CHAIN_MAX_STALE_SECONDS: ${PRODUCT_HEALTH_CHAIN_MAX_STALE_SECONDS:-600}
       PRODUCT_HEALTH_HALT_SEVERITY: ${PRODUCT_HEALTH_HALT_SEVERITY:-auto}
+      # Consecutive cycles the /health TRANSPORT must fail (DNS, connect, TLS —
+      # no HTTP response at all) before product_api reds. On 2026-08-06 the
+      # container's resolver died for five minutes and paged on-call about a
+      # product that was serving 200s from outside the whole time. Below this
+      # count the probe reports "unreachable from here, product state unknown"
+      # and stays quiet; at it, it pages — whichever side of the wire is broken.
+      # At the default 2-minute cadence, 3 is ~4-6 minutes of sustained failure.
+      PRODUCT_HEALTH_TRANSPORT_FAIL_THRESHOLD: ${PRODUCT_HEALTH_TRANSPORT_FAIL_THRESHOLD:-3}
       # 0-based word index of `rejectedAt` in the EscrowCore job struct, for the
       # external_funnel probe's dispute-window countdown. Defaults to 17, which
       # was CALIBRATED against the chain rather than taken from an ABI: word[17]

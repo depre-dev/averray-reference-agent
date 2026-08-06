@@ -66,9 +66,24 @@ export function opsSuggestions(health: ProductHealth | undefined): OpsSuggestion
   // worker can help, or a PREPARE-only task for anything touching funds (compute +
   // draft, never a transfer). Ordered most-actionable first.
 
-  // 1. Product API down — the product itself is failing its health check.
+  // 1. Product API — two different incidents wearing the same `red`.
+  //
+  // A red we could not READ is not the product failing its health check; it is
+  // us failing to ask. Drafting the "down" task for it hands a worker an
+  // instruction to tail the product's logs and roll back a deploy over a fault
+  // that is on our side of the wire — which is what 2026-08-06 would have
+  // produced, on top of paging on-call about a product serving 200s.
   const api = live("product_api");
-  if (api && api.status === "red") {
+  if (api && api.status === "red" && api.reading === "unknown") {
+    out.push({
+      id: "product-api-unreachable",
+      tone: "act",
+      text: `Product API unreachable from the monitor — ${api.detail}.`,
+      task: proposeTask(
+        `The monitor cannot reach the live product API: "${api.detail}". This is a REACHABILITY fault as observed from the monitor's container, not an established product outage — establish which it is BEFORE touching the product. Curl /health from outside the container and from another network; check the monitor container's DNS resolution and egress; only if the product is genuinely unreachable from everywhere should you investigate the product itself. Do not roll back a deploy on this evidence alone.`,
+      ),
+    });
+  } else if (api && api.status === "red") {
     out.push({
       id: "product-api-down",
       tone: "act",

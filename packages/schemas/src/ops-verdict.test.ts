@@ -4,6 +4,7 @@ import {
   deriveOpsVerdict,
   isAcknowledgedProbe,
   isAwaitingProbe,
+  isUnknownReadingProbe,
   payoutGap,
   probeCensus,
   type VerdictInput,
@@ -206,6 +207,76 @@ describe("deriveOpsVerdict — the hierarchy", () => {
     ];
     const reasons = cases.map((c) => deriveOpsVerdict(c).reason);
     expect(new Set(reasons).size).toBe(cases.length);
+  });
+});
+
+// ── A probe with no READING ────────────────────────────────────────────────
+//
+// 2026-08-06: container DNS failed for five minutes. The four probes that read
+// out of the product's /health had no reading of anything, and the board turned
+// that into "Product API is red" plus three corroborating degradations — a
+// unanimous verdict on a product that was serving 200s throughout.
+describe("unknown readings", () => {
+  const unknown = (over: Partial<VerdictProbe> = {}): VerdictProbe =>
+    probe({
+      name: "money_path",
+      status: "degraded",
+      reading: "unknown",
+      detail: "settlement state unknown, not stalled — product /health not readable from here — DNS resolution failed (ENOTFOUND)",
+      ...over,
+    });
+
+  test("is grey, not amber — no reading is not a finding", () => {
+    expect(isAwaitingProbe(unknown())).toBe(true);
+    expect(isUnknownReadingProbe(unknown())).toBe(true);
+  });
+
+  test("cannot take the DEGRADED headline", () => {
+    const v = deriveOpsVerdict(input({ probes: [probe(), unknown()] }));
+    expect(v.reason).not.toBe("probe-degraded");
+  });
+
+  test("but is never laundered into NOMINAL either", () => {
+    // The mirror-image failure, and the easier one to ship by accident: grey out
+    // the probes that could not read, and the rest of the board is green.
+    const v = deriveOpsVerdict(input({ probes: [probe(), unknown()] }));
+    expect(v.reason).toBe("probe-unknown");
+    expect(v.headline).toContain("UNKNOWN");
+    expect(v.tone).toBe("awaiting");
+  });
+
+  test("is counted in its own census bucket, apart from awaiting-data", () => {
+    // Different facts: awaiting means the product does not publish this yet,
+    // unknown means we could not read what it does publish.
+    const census = probeCensus([
+      probe(),
+      unknown(),
+      probe({ name: "capabilities", status: "degraded", detail: "not exposed by /health yet" }),
+    ]);
+    expect(census).toBe("1 ok / 1 awaiting data / 1 unknown / 0 red");
+  });
+
+  test("an observed degradation still outranks an unknown", () => {
+    // A fault you can see is more actionable than one you cannot.
+    const v = deriveOpsVerdict(input({
+      probes: [unknown(), probe({ name: "disk_headroom", status: "degraded", detail: "4.1GB free" })],
+    }));
+    expect(v.reason).toBe("probe-degraded");
+  });
+
+  test("a red with no reading is headlined UNREACHABLE, not RED", () => {
+    // Same alarm, truthfully named: what persisted is our inability to reach it.
+    const v = deriveOpsVerdict(input({
+      probes: [probe({ status: "red", reading: "unknown", detail: "probe cannot reach https://api.averray.com/health — DNS resolution failed (ENOTFOUND) · 3 consecutive checks" })],
+    }));
+    expect(v.reason).toBe("probe-red");
+    expect(v.headline).toBe("PRODUCT API UNREACHABLE");
+    expect(v.tone).toBe("red");
+  });
+
+  test("an ordinary red still says RED", () => {
+    const v = deriveOpsVerdict(input({ probes: [probe({ status: "red", detail: "→ HTTP 503" })] }));
+    expect(v.headline).toBe("PRODUCT API RED");
   });
 });
 

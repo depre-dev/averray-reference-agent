@@ -48,15 +48,51 @@ import { createGasSpendCache, type GasSpendCache, type GasSpendSnapshot, type Ga
 import { alertProvenance, decideMoneyAlert } from "./money-alert.js";
 import { decideSelfFreshness, fetchSelfCompare } from "./self-freshness.js";
 import type { SelfFreshness } from "./self-freshness.js";
+import {
+  classifyTransportFailure,
+  describeTransportFailure,
+  trackTransportFailure,
+  transportFailureIsPageWorthy,
+  DEFAULT_TRANSPORT_FAIL_THRESHOLD,
+  type TransportFailure,
+  type TransportFailureRun,
+} from "./probe-transport.js";
 import { isAwaitingProbe } from "@avg/schemas";
 
 export type ProbeStatus = "ok" | "degraded" | "red";
+
+/**
+ * Did the probe actually OBSERVE its subject?
+ *
+ * This is a second axis, deliberately separate from `status`. `status` says how
+ * bad it is; `reading` says whether we saw anything at all. Conflating them is
+ * what produced "Product API is red — fetch failed" during the 2026-08-06 DNS
+ * incident: the probe could not resolve the host from inside its own container
+ * and reported that as a verdict on the product, which was serving 200s
+ * throughout.
+ *
+ * `"unknown"` means the probe has NO reading of its subject. It is never
+ * evidence that the subject is degraded, and readers must render it grey.
+ *
+ * `status` is still populated alongside it — `degraded` while we hold, `red`
+ * once the fault has persisted long enough to page — so a reader that predates
+ * this field lands on amber-and-quiet rather than on a fake green.
+ */
+export type ProbeReading = "observed" | "unknown";
 
 export interface ProbeResult {
   /** Stable probe id, e.g. "product_api" | "chain_height" | "signer_liquidity". */
   name: string;
   status: ProbeStatus;
   detail: string;
+  /** Absent ⇒ "observed". Only ever set to "unknown", and only by a probe that
+   *  genuinely could not take a reading. See ProbeReading. */
+  reading?: ProbeReading;
+}
+
+/** The probe took no reading of its subject — grey, and never a claim about it. */
+export function isUnknownReading(probe: { reading?: ProbeReading }): boolean {
+  return probe.reading === "unknown";
 }
 
 export type ProductHealthStatus = "healthy" | "degraded" | "red";
@@ -129,8 +165,8 @@ export function probeSparkline(
  *  degradation. The classifier lives in @avg/schemas because the BOARD applies
  *  the same rule — it used to be copied here under a comment reading "mirrors
  *  the frontend's awaiting regex", which is a drift bug with a countdown on it. */
-function isAwaitingDetail(status: ProbeStatus, detail: string): boolean {
-  return isAwaitingProbe({ status, detail });
+function isAwaitingDetail(probe: ProbeResult): boolean {
+  return isAwaitingProbe(probe);
 }
 
 export interface ProductHealthIncident {
@@ -172,10 +208,15 @@ export interface ProductHealthHistoryBlock {
 
 /** Product reachability is deliberately independent from the overall monitor
  * status. RPC, GitHub, or balance-reader failures can degrade the monitor while
- * the product's own /health endpoint remains available. */
+ * the product's own /health endpoint remains available.
+ *
+ * A sample with no READING is indeterminate whatever its status — "we could not
+ * reach the host from this container" is not a downtime sample, and counting it
+ * as one would put our own DNS outage in the product's uptime figure. */
 function productAvailabilityTone(snapshot: ProductHealthSnapshot): ProbeStatus {
   const probe = snapshot.probes.find((p) => p.name === "product_api");
-  return probe?.status === "ok" || probe?.status === "red" ? probe.status : "degraded";
+  if (!probe || isUnknownReading(probe)) return "degraded";
+  return probe.status === "ok" || probe.status === "red" ? probe.status : "degraded";
 }
 
 /**
@@ -255,6 +296,11 @@ function isProductApiDependentFailure(
   if (!probe || !PRODUCT_API_DEPENDENT_PROBES.has(probe.name)) return false;
   const productApi = snapshot.probes.find((candidate) => candidate.name === "product_api");
   if (!productApi || productApi.status === "ok") return false;
+  // `reading` is the structural test and is preferred. The prose match stays
+  // for snapshots persisted before the field existed — history on disk outlives
+  // the code that wrote it, and dropping the fallback would silently reclassify
+  // every incident already in the log.
+  if (isUnknownReading(probe)) return true;
   return /product \/health not readable|no response after/i.test(probe.detail);
 }
 
@@ -281,7 +327,7 @@ function deriveIncidents(history: ReadonlyArray<ProductHealthSnapshot>): Product
       const bad =
         !!probe &&
         (probe.status === "red" ||
-          (probe.status === "degraded" && !isAwaitingDetail(probe.status, probe.detail)));
+          (probe.status === "degraded" && !isAwaitingDetail(probe)));
       if (bad) {
         if (startedAt === null) {
           startedAt = snap.at;
@@ -602,6 +648,10 @@ export interface ProductHealthConfig {
   /** Halt severity: "auto" (mainnet chainId → red, testnet → degraded) | "red" |
    *  "degraded". Env: PRODUCT_HEALTH_HALT_SEVERITY. */
   haltSeverity: string;
+  /** Consecutive cycles the /health transport must fail before product_api reds.
+   *  A one-off DNS blip is not an outage; five minutes of one needs a human.
+   *  Env: PRODUCT_HEALTH_TRANSPORT_FAIL_THRESHOLD. Default 3. */
+  transportFailThreshold?: number;
   /** 0-based word index of `rejectedAt` in the EscrowCore job struct.
    *  Defaults to the calibrated 17 — verified against the chain, not an ABI.
    *  See external-funnel.ts for the three confirmations. */
@@ -729,6 +779,10 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
     rpcUrl: env.PRODUCT_HEALTH_RPC_URL || networkEthRpc(env.WALLET_NETWORK),
     chainMaxStaleSeconds: num(env.PRODUCT_HEALTH_CHAIN_MAX_STALE_SECONDS, 600),
     haltSeverity: env.PRODUCT_HEALTH_HALT_SEVERITY || "auto",
+    transportFailThreshold: Math.max(
+      1,
+      num(env.PRODUCT_HEALTH_TRANSPORT_FAIL_THRESHOLD, DEFAULT_TRANSPORT_FAIL_THRESHOLD),
+    ),
     ...(env.PRODUCT_HEALTH_ESCROW_REJECTED_AT_WORD
       ? { escrowRejectedAtWord: Number(env.PRODUCT_HEALTH_ESCROW_REJECTED_AT_WORD) }
       : {}),
@@ -847,6 +901,12 @@ export interface ProductHealthFetch {
   url: string;
   body?: ProductHealthPayload;
   error?: string;
+  /**
+   * Set when the request died BELOW HTTP — no response ever arrived, so nothing
+   * here is evidence about the product. Carries the cause code (ENOTFOUND, …)
+   * dug out of undici's `cause` chain, which the outer "fetch failed" hides.
+   */
+  transport?: TransportFailure;
   /** Wall-clock ms for the /health GET round-trip. undefined when unconfigured. */
   latencyMs?: number;
 }
@@ -924,15 +984,120 @@ export async function fetchProductHealth(input: {
     }
     return { configured: true, reachable: true, httpOk: res.ok, status: res.status, url, body, latencyMs };
   } catch (err) {
-    return { configured: true, reachable: false, httpOk: false, status: 0, url, error: errMsg(err), latencyMs: Date.now() - startedAt };
+    // A throw here means no HTTP response arrived at all. Classify it so the
+    // probe can say WHICH layer failed and with what code, instead of relaying
+    // undici's uninformative outer "fetch failed".
+    const transport = classifyTransportFailure(err);
+    return {
+      configured: true,
+      reachable: false,
+      httpOk: false,
+      status: 0,
+      url,
+      error: errMsg(err),
+      transport,
+      latencyMs: Date.now() - startedAt,
+    };
   }
 }
 
-/** Is the Averray product API answering? REAL as soon as AVERRAY_API_BASE_URL is set. */
-export function deriveProductApiProbe(h: ProductHealthFetch): ProbeResult {
+/**
+ * The transport fault behind an unreadable /health, if there was one.
+ *
+ * `configured && !reachable` ALWAYS means no HTTP response arrived — that is
+ * what `reachable` records — so a fetch that failed without a classified error
+ * still resolves to a transport fault, just an unnamed one. Returning undefined
+ * there would quietly restore the old behaviour for exactly the callers that
+ * hand-build a fetch result.
+ */
+function transportFaultOf(h: ProductHealthFetch): TransportFailure | undefined {
+  if (!h.configured || h.reachable) return undefined;
+  return h.transport ?? { kind: "transport", code: "UNKNOWN", message: h.error ?? "fetch failed" };
+}
+
+/** "product /health not readable from here — DNS resolution failed (ENOTFOUND)" */
+function unreadableBecause(fault: TransportFailure): string {
+  return `product /health not readable from here — ${describeTransportFailure(fault)}`;
+}
+
+/**
+ * A dependent probe's reading when the one /health fetch they all share failed
+ * below HTTP.
+ *
+ * `unknown`, never `degraded`-as-a-verdict: chain height, capabilities,
+ * settlement counts and latency are all read OUT of that one response, so when
+ * it never arrives we hold no evidence about any of them. Saying "money path
+ * degraded" there is inventing a finding, and it was four of them at once on
+ * 2026-08-06.
+ *
+ * Phrasing follows external_funnel's "funnel state unknown, not empty", which
+ * has had this right all along: name the subject, say it is unknown, and say
+ * what it is NOT being claimed to be.
+ */
+function unknownDependent(name: string, subject: string, notClaim: string, fault: TransportFailure): ProbeResult {
+  return {
+    name,
+    // `degraded` is the compatibility floor for readers that predate `reading`
+    // — amber and quiet. Anything that understands `reading` renders grey.
+    status: "degraded",
+    reading: "unknown",
+    detail: `${subject} unknown, ${notClaim} — ${unreadableBecause(fault)}`,
+  };
+}
+
+/**
+ * Is the Averray product API answering? REAL as soon as AVERRAY_API_BASE_URL is set.
+ *
+ * ── TWO DIFFERENT CLAIMS ────────────────────────────────────────────────────
+ *
+ * An HTTP response — any HTTP response, including a 503 — is evidence about the
+ * product, and this probe reds on it immediately.
+ *
+ * No HTTP response is evidence about the PATH. The probe knows it could not
+ * reach the host from inside its own container; it does not know whether the
+ * product is up, and on 2026-08-06 it was (200s served from outside for the
+ * whole five-minute window in which this probe called it red).
+ *
+ * So a transport fault reports itself as what it is — unreachable from here,
+ * with the cause code — and holds `unknown` until it has failed
+ * `transportThreshold` consecutive cycles. Then it reds: not because we have
+ * learned the product is down, but because a fault that has persisted that long
+ * needs a human whichever side of the wire is broken. The claim stays honest at
+ * both ends; only the volume changes.
+ */
+export function deriveProductApiProbe(
+  h: ProductHealthFetch,
+  opts: {
+    /** Consecutive-failure run, threaded across ticks by the caller. */
+    transportRun?: TransportFailureRun;
+    /** Consecutive failing cycles before this pages. Default 3. */
+    transportThreshold?: number;
+  } = {},
+): ProbeResult {
   const name = "product_api";
   if (!h.configured) return { name, status: "degraded", detail: "AVERRAY_API_BASE_URL not configured" };
-  if (!h.reachable) return { name, status: "red", detail: `${h.url} unreachable: ${h.error ?? "fetch failed"}` };
+  const fault = transportFaultOf(h);
+  if (fault) {
+    const threshold = Math.max(1, opts.transportThreshold ?? DEFAULT_TRANSPORT_FAIL_THRESHOLD);
+    const run = opts.transportRun ?? { code: fault.code, consecutive: 1 };
+    const cause = describeTransportFailure(fault);
+    if (!transportFailureIsPageWorthy(run, threshold)) {
+      return {
+        name,
+        status: "degraded",
+        reading: "unknown",
+        detail: `probe cannot reach ${h.url} — ${cause} · check ${run.consecutive} of ${threshold} · product state unknown from here, not down`,
+      };
+    }
+    return {
+      name,
+      // RED, because it has persisted — but the reading is still unknown, so
+      // every renderer words it as unreachable rather than as a product verdict.
+      status: "red",
+      reading: "unknown",
+      detail: `probe cannot reach ${h.url} — ${cause} · ${run.consecutive} consecutive checks · unreachable from the monitor; whether the product is up is unknown from here`,
+    };
+  }
   if (!h.httpOk) return { name, status: "red", detail: `${h.url} → HTTP ${h.status}` };
   if (h.body?.serviceHealth?.ok === false) return { name, status: "red", detail: `${h.url} → service reports unhealthy` };
   const chainId = h.body?.auth?.chainId;
@@ -940,11 +1105,14 @@ export function deriveProductApiProbe(h: ProductHealthFetch): ProbeResult {
 }
 
 /** /health round-trip latency. Slow-but-reachable is degraded (working, just slow);
- *  ≥ redMs is red (effectively down). Unreachable / no sample → degraded (product_api
- *  carries the red for a hard outage). */
+ *  ≥ redMs is red (effectively down). No response at all → unknown: the elapsed
+ *  time before a DNS failure is not a latency measurement of anything, and
+ *  product_api carries the reachability claim. */
 export function deriveLatencyProbe(h: ProductHealthFetch, thresholds: { warnMs: number; redMs: number }): ProbeResult {
   const name = "api_latency";
   if (!h.configured) return { name, status: "degraded", detail: "AVERRAY_API_BASE_URL not configured" };
+  const fault = transportFaultOf(h);
+  if (fault) return unknownDependent(name, "round-trip latency", "not slow", fault);
   if (h.latencyMs === undefined) return { name, status: "degraded", detail: "no latency sample" };
   const ms = h.latencyMs;
   if (!h.reachable) return { name, status: "degraded", detail: `no response after ${ms}ms` };
@@ -971,6 +1139,8 @@ export function deriveMoneyPathProbe(
   },
 ): ProbeResult {
   const name = "money_path";
+  const fault = transportFaultOf(h);
+  if (fault) return unknownDependent(name, "settlement state", "not stalled", fault);
   if (!h.configured || !h.reachable || !h.httpOk) {
     return { name, status: "degraded", detail: "settlement status unavailable (product /health not readable)" };
   }
@@ -1054,6 +1224,8 @@ export function deriveCapabilityProbe(
   config: { requiredCapabilities: string[]; expectedWarnings: string[] },
 ): ProbeResult {
   const name = "capabilities";
+  const fault = transportFaultOf(h);
+  if (fault) return unknownDependent(name, "capability state", "not down", fault);
   if (!h.configured || !h.reachable || !h.httpOk) {
     return { name, status: "degraded", detail: "capability status unavailable (product /health not readable)" };
   }
@@ -1186,6 +1358,8 @@ export function deriveChainProbe(
   },
 ): ProbeResult {
   const name = "chain_height";
+  const fault = transportFaultOf(h);
+  if (fault) return unknownDependent(name, "chain height", "not halted", fault);
   if (!h.configured || !h.reachable || !h.httpOk) {
     return { name, status: "degraded", detail: "chain status unavailable (product /health not readable)" };
   }
@@ -2523,6 +2697,9 @@ export interface ProductHealthCollection {
   probes: ProbeResult[];
   /** Updated block-advance tracker — the caller persists it across ticks. */
   chainAdvance: ChainAdvance;
+  /** Updated /health transport-failure run; undefined once a read succeeds.
+   *  The caller persists it across ticks, same contract as `chainAdvance`. */
+  transportRun?: TransportFailureRun;
   /** Structured blocks for the Ops board (chain id / network / solvency / flow). */
   snapshot: ProductHealthSnapshotBlocks;
   /** GET /health round-trip latency (ms) — the caller records it on the history entry. */
@@ -2563,6 +2740,8 @@ export async function collectProductHealthProbes(
     advance?: ChainAdvance;
     nowMs: number;
     previousSubmittedNotSettled?: number | null;
+    /** Previous cycle's /health transport-failure run, for the retry hold. */
+    transportRun?: TransportFailureRun;
   } = { nowMs: 0 },
 ): Promise<ProductHealthCollection> {
   const h = await fetchProductHealth({
@@ -2570,6 +2749,9 @@ export async function collectProductHealthProbes(
     healthPath: config.apiHealthPath,
     fetchImpl,
   });
+  // Advance (or clear) the consecutive-failure run BEFORE the probes derive, so
+  // product_api sees this cycle counted. A successful read clears it outright.
+  const transportRun = trackTransportFailure(chainCtx.transportRun, transportFaultOf(h));
   const chainId = h.body?.auth?.chainId;
   const rewardBankLiquid = pickNum(h.body?.rewardBank?.liquid);
   const block = pickNum(h.body?.components?.blockchain?.blockNumber);
@@ -2865,7 +3047,10 @@ export async function collectProductHealthProbes(
 
   return {
     probes: [
-      deriveProductApiProbe(h),
+      deriveProductApiProbe(h, {
+        ...(transportRun ? { transportRun } : {}),
+        transportThreshold: config.transportFailThreshold,
+      }),
       deriveChainProbe(h, staleness),
       signer,
       deriveCapabilityProbe(h, {
@@ -2903,6 +3088,7 @@ export async function collectProductHealthProbes(
       externalFunnel.probe,
     ],
     chainAdvance,
+    ...(transportRun ? { transportRun } : {}),
     snapshot,
     latencyMs: h.latencyMs,
     rpcOk: signer.rpcOk,

@@ -230,3 +230,85 @@ describe("decideProbeTransitions", () => {
     expect([...first.keys]).toEqual([]);
   });
 });
+
+// ── Probes that took no reading ─────────────────────────────────────────────
+//
+// On 2026-08-06 one container DNS failure made five probes fail at once. Four
+// of them read out of the product's /health and so knew nothing at all — but
+// under the old rules each would have queued its own "degraded" alert about a
+// subject none of them had observed.
+describe("unknown readings", () => {
+  const unknown = (name: string, status: ProbeResult["status"] = "degraded"): ProbeResult => ({
+    name,
+    status,
+    reading: "unknown",
+    detail: "settlement state unknown, not stalled — product /health not readable from here — DNS resolution failed (ENOTFOUND)",
+  });
+
+  it("does not alert when a probe merely stops being able to read", () => {
+    const before = new Map([["money_path", p("money_path", "ok", "settled24h 42")]]);
+    const d = decide({ previous: before, current: [unknown("money_path")] });
+    expect(d.alerts).toEqual([]);
+  });
+
+  it("stays quiet for as long as the reading is missing", () => {
+    let state = decide({ previous: new Map([["money_path", p("money_path", "ok", "settled24h 42")]]), current: [unknown("money_path")] });
+    for (let tick = 0; tick < 5; tick += 1) {
+      state = decide({ previous: state.next, current: [unknown("money_path")], posted: state.keys, streaks: state.streaks });
+      expect(state.alerts).toEqual([]);
+    }
+  });
+
+  it("says nothing on the way back either — there was no alarm to close", () => {
+    const blind = decide({ previous: new Map([["money_path", p("money_path", "ok", "settled24h 42")]]), current: [unknown("money_path")] });
+    const back = decide({
+      previous: blind.next,
+      current: [p("money_path", "ok", "settled24h 42")],
+      posted: blind.keys,
+      streaks: blind.streaks,
+    });
+    expect(back.alerts).toEqual([]);
+  });
+
+  it("DOES alert when the probe itself reds on sustained unreachability", () => {
+    // The hold is product_api's to decide; once it reds, this must page.
+    const before = new Map([["product_api", unknown("product_api")]]);
+    const red: ProbeResult = {
+      name: "product_api",
+      status: "red",
+      reading: "unknown",
+      detail: "probe cannot reach https://api.averray.com/health — DNS resolution failed (ENOTFOUND) · 3 consecutive checks · unreachable from the monitor; whether the product is up is unknown from here",
+    };
+    const d = decide({ previous: before, current: [red] });
+    expect(d.alerts).toHaveLength(1);
+    // …worded as unreachability, not as a verdict on the product. The line that
+    // actually reached a phone on 2026-08-06 was "Product API is red".
+    expect(d.alerts[0]?.text).toContain("unreachable from the monitor");
+    expect(d.alerts[0]?.text).not.toContain("is red");
+    expect(d.alerts[0]?.text).toContain("ENOTFOUND");
+  });
+
+  it("closes an unreachability alert with 'readable again', not 'recovered'", () => {
+    const red: ProbeResult = { name: "product_api", status: "red", reading: "unknown", detail: "probe cannot reach … · 3 consecutive checks" };
+    const opened = decide({ previous: new Map([["product_api", unknown("product_api")]]), current: [red] });
+    const back = decide({
+      previous: opened.next,
+      current: [p("product_api", "ok", "https://api.averray.com/health → 200 · chain 420420419")],
+      posted: opened.keys,
+      streaks: opened.streaks,
+    });
+    expect(back.alerts).toHaveLength(1);
+    // We never established the product was unwell, so it did not "recover".
+    expect(back.alerts[0]?.text).toContain("readable again");
+    expect(back.alerts[0]?.text).not.toContain("recovered");
+  });
+
+  it("an observed degradation still alerts normally", () => {
+    // The guard must key on the reading, not on the status.
+    const before = new Map([["money_path", p("money_path", "ok", "settled24h 42")]]);
+    const observed = p("money_path", "red", "6 jobs stuck (submitted, unsettled ≥ 5)");
+    const d = decide({ previous: before, current: [observed] });
+    expect(d.alerts).toHaveLength(1);
+    expect(d.alerts[0]?.text).toContain("is red");
+  });
+});

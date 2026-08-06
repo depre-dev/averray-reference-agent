@@ -41,6 +41,7 @@ describe("compose environment wiring", () => {
     expect(env?.PRODUCT_HEALTH_ALERT_COOLDOWN_MINUTES).toBe("${PRODUCT_HEALTH_ALERT_COOLDOWN_MINUTES:-360}");
     expect(env?.PRODUCT_HEALTH_CHAIN_MAX_STALE_SECONDS).toBe("${PRODUCT_HEALTH_CHAIN_MAX_STALE_SECONDS:-600}");
     expect(env?.PRODUCT_HEALTH_HALT_SEVERITY).toBe("${PRODUCT_HEALTH_HALT_SEVERITY:-auto}");
+    expect(env?.PRODUCT_HEALTH_TRANSPORT_FAIL_THRESHOLD).toBe("${PRODUCT_HEALTH_TRANSPORT_FAIL_THRESHOLD:-3}");
     expect(env?.PRODUCT_HEALTH_MIN_GAS_NATIVE).toBe("${PRODUCT_HEALTH_MIN_GAS_NATIVE:-0}");
     expect(env?.PRODUCT_HEALTH_MIN_REWARD_BANK).toBe("${PRODUCT_HEALTH_MIN_REWARD_BANK:-0}");
     expect(env?.PRODUCT_HEALTH_MIN_TREASURY_RESERVE).toBe("${PRODUCT_HEALTH_MIN_TREASURY_RESERVE:-5}");
@@ -55,6 +56,9 @@ describe("compose environment wiring", () => {
 
     expect(calibration).toContain("PRODUCT_HEALTH_INTERVAL_MINUTES=5");
     expect(calibration).toContain("PRODUCT_HEALTH_ALERT_COOLDOWN_MINUTES=30");
+    // The transport hold counts CYCLES, so the slower mainnet cadence needs a
+    // smaller count to keep the same ~5-minute wall-clock hold.
+    expect(calibration).toContain("PRODUCT_HEALTH_TRANSPORT_FAIL_THRESHOLD=2");
     expect(calibration).toContain("PRODUCT_HEALTH_MIN_TREASURY_RESERVE=0");
     expect(calibration).toContain(
       "PRODUCT_HEALTH_TREASURY_RESERVE_ZERO_REASON=Mainnet payouts are funded from the signer reward bank; the treasury multisig intentionally holds no USDC float.",
