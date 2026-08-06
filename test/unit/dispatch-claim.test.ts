@@ -3,11 +3,14 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
+  acquireNextExpiredDispatchClaim,
   acquireDispatchLease,
   claimDispatch,
   deriveIntendedRunId,
   DispatchClaimError,
   getDispatchClaim,
+  getNextExpiredDispatchClaim,
+  recordDispatchClaimProgress,
   releaseDispatchLease,
   renewDispatchLease,
   type DispatchStoreQuery,
@@ -68,10 +71,13 @@ describe("INT-2e deterministic dispatch claims", () => {
       taskVersion: 1,
       approvedTaskHash: HASH,
       intendedRunId: deriveIntendedRunId("work-one", 1, HASH),
+      holder: "dispatcher-a",
+      leaseTtlMs: 1_000,
     };
 
     await expect(claimDispatch(input, { query: db.query })).resolves.toMatchObject({
       created: true,
+      acquired: true,
       claim: {
         workItemId: "work-one",
         taskVersion: 1,
@@ -82,6 +88,7 @@ describe("INT-2e deterministic dispatch claims", () => {
     });
     await expect(claimDispatch(input, { query: db.query })).resolves.toMatchObject({
       created: false,
+      acquired: false,
       claim: { intendedRunId: input.intendedRunId },
     });
     await expect(getDispatchClaim("work-one", 1, { query: db.query }))
@@ -97,6 +104,8 @@ describe("INT-2e deterministic dispatch claims", () => {
       taskVersion: 1,
       approvedTaskHash: HASH,
       intendedRunId,
+      holder: "dispatcher-a",
+      leaseTtlMs: 1_000,
     };
     await claimDispatch(input, { query: db.query });
 
@@ -120,6 +129,77 @@ describe("INT-2e deterministic dispatch claims", () => {
       reason: "claim_conflict",
     });
     expect(db.claimCount).toBe(1);
+  });
+
+  it("expires once, advances only on progress, and exhausts without a third generation", async () => {
+    const db = new MemoryDispatchDatabase();
+    const intendedRunId = deriveIntendedRunId("work-one", 1, HASH);
+    await claimDispatch({
+      workItemId: "work-one",
+      taskVersion: 1,
+      approvedTaskHash: HASH,
+      intendedRunId,
+      holder: "dispatcher-a",
+      leaseTtlMs: 1_000,
+    }, { query: db.query });
+
+    db.advanceSeconds(2);
+    await expect(getNextExpiredDispatchClaim({ query: db.query })).resolves.toMatchObject({
+      claimGeneration: 1,
+      claimState: "claimed",
+    });
+    const retry = await acquireNextExpiredDispatchClaim({
+      holder: "dispatcher-b",
+      leaseTtlMs: 1_000,
+    }, { query: db.query });
+    expect(retry).toMatchObject({
+      claimGeneration: 2,
+      claimHolder: "dispatcher-b",
+      claimState: "claimed",
+    });
+    await expect(recordDispatchClaimProgress({
+      workItemId: "work-one",
+      taskVersion: 1,
+      holder: "dispatcher-b",
+      claimGeneration: 2,
+      progress: "submitted",
+      leaseTtlMs: 1_000,
+    }, { query: db.query })).resolves.toMatchObject({ claimState: "submitted" });
+
+    db.advanceSeconds(2);
+    await expect(acquireNextExpiredDispatchClaim({
+      holder: "dispatcher-c",
+      leaseTtlMs: 1_000,
+    }, { query: db.query })).resolves.toMatchObject({
+      claimGeneration: 2,
+      claimHolder: "dispatcher-c",
+      claimState: "exhausted",
+    });
+
+    const secondDb = new MemoryDispatchDatabase();
+    await claimDispatch({
+      workItemId: "work-two",
+      taskVersion: 1,
+      approvedTaskHash: HASH,
+      intendedRunId: deriveIntendedRunId("work-two", 1, HASH),
+      holder: "dispatcher-a",
+      leaseTtlMs: 1_000,
+    }, { query: secondDb.query });
+    secondDb.advanceSeconds(2);
+    await acquireNextExpiredDispatchClaim({
+      holder: "dispatcher-b",
+      leaseTtlMs: 1_000,
+    }, { query: secondDb.query });
+    secondDb.advanceSeconds(2);
+    const exhausted = await acquireNextExpiredDispatchClaim({
+      holder: "dispatcher-c",
+      leaseTtlMs: 1_000,
+    }, { query: secondDb.query });
+    expect(exhausted).toMatchObject({
+      claimGeneration: 2,
+      claimState: "exhausted",
+    });
+    expect(exhausted).not.toHaveProperty("leaseExpiresAt");
   });
 
   it("pins the additive migration and migration runner ordering", () => {
@@ -148,6 +228,17 @@ describe("INT-2e deterministic dispatch claims", () => {
     expect(migration).toMatch(/hermes_decision_records_work_item_id_idx/i);
     expect(runner.indexOf("002_agent_tasks.sql"))
       .toBeLessThan(runner.indexOf("003_dispatch_claims_outbox_decisions.sql"));
+    expect(runner.indexOf("004_dispatch_quarantines.sql"))
+      .toBeLessThan(runner.indexOf("005_dispatch_claim_expiry_backpressure.sql"));
+    const int4cMigration = readFileSync(
+      new URL(
+        "../../ops/migrations/005_dispatch_claim_expiry_backpressure.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    expect(int4cMigration).toMatch(/claim_generation/i);
+    expect(int4cMigration).toMatch(/harness_dispatch_backpressure/i);
   });
 });
 
@@ -163,6 +254,8 @@ interface MemoryClaimRow {
   approved_task_hash: string;
   intended_run_id: string;
   claim_state: string;
+  claim_holder: string | null;
+  claim_generation: number;
   claimed_at: string;
   lease_expires_at: string | null;
 }
@@ -221,13 +314,51 @@ class MemoryDispatchDatabase {
         approved_task_hash: String(values[2]),
         intended_run_id: String(values[3]),
         claim_state: "claimed",
+        claim_holder: String(values[4]),
+        claim_generation: 1,
         claimed_at: new Date(this.now).toISOString(),
-        lease_expires_at: null,
+        lease_expires_at: new Date(this.now + Number(values[5])).toISOString(),
       };
       const rowKey = claimKey(row.work_item_id, row.task_version);
       if (this.claims.has(rowKey)) return [];
       this.claims.set(rowKey, row);
       return [structuredClone(row) as T];
+    }
+    if (/with candidate as/i.test(text) && /update agent_task_dispatch_claims/i.test(text)) {
+      const row = [...this.claims.values()].find((candidate) =>
+        (candidate.claim_state === "claimed" || candidate.claim_state === "submitted")
+        && candidate.lease_expires_at !== null
+        && Date.parse(candidate.lease_expires_at) < this.now);
+      if (!row) return [];
+      if (row.claim_generation >= 2) {
+        row.claim_state = "exhausted";
+        row.lease_expires_at = null;
+      } else {
+        row.claim_generation = 2;
+        row.lease_expires_at = new Date(this.now + Number(values[1])).toISOString();
+      }
+      row.claim_holder = String(values[0]);
+      row.claimed_at = new Date(this.now).toISOString();
+      return [structuredClone(row) as T];
+    }
+    if (/update agent_task_dispatch_claims/i.test(text)) {
+      const row = this.claims.get(claimKey(String(values[0]), Number(values[1])));
+      if (
+        !row
+        || row.claim_holder !== String(values[2])
+        || row.claim_generation !== Number(values[3])
+        || row.claim_state === "exhausted"
+      ) return [];
+      row.claim_state = String(values[4]);
+      row.lease_expires_at = new Date(this.now + Number(values[5])).toISOString();
+      return [structuredClone(row) as T];
+    }
+    if (/join agent_tasks/i.test(text) && /lease_expires_at < now/i.test(text)) {
+      const row = [...this.claims.values()].find((candidate) =>
+        (candidate.claim_state === "claimed" || candidate.claim_state === "submitted")
+        && candidate.lease_expires_at !== null
+        && Date.parse(candidate.lease_expires_at) < this.now);
+      return row ? [structuredClone(row) as T] : [];
     }
     if (/from agent_task_dispatch_claims/i.test(text)) {
       const row = this.claims.get(claimKey(String(values[0]), Number(values[1])));

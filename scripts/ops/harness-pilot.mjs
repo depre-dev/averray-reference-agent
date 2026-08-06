@@ -329,7 +329,7 @@ export async function handleUnquarantine(command, context) {
 export async function handleStatus(command, context) {
   requireEnvironment(context.environment, ["DATABASE_URL"]);
   const services = await resolveServices(context);
-  const [tasks, quarantines, decisions, heartbeat, alerts] = await Promise.all([
+  const [tasks, quarantines, decisions, heartbeat, alerts, backpressure] = await Promise.all([
     services.listAgentTasks({
       ...(command.workItemId ? { workItemId: command.workItemId } : {}),
       limit: 1_000,
@@ -345,6 +345,9 @@ export async function handleStatus(command, context) {
     }),
     readHeartbeat(context.environment, services.readTextFile),
     readAlerts(context.environment, services.readTextFile),
+    services.getDispatchBackpressure
+      ? services.getDispatchBackpressure()
+      : Promise.resolve(undefined),
   ]);
 
   writeResult(context, {
@@ -373,6 +376,9 @@ export async function handleStatus(command, context) {
       };
     }),
     dispatcherHeartbeat: heartbeat,
+    dispatcherBackpressure: backpressure
+      ? { observed: true, ...backpressure }
+      : { observed: false, active: false },
     recentDecisions: decisions.map(decisionStatusView),
     alerts,
     submissionAttemptedByCli: false,
@@ -386,6 +392,7 @@ async function createDefaultServices(environment) {
     policy,
     workspace,
     dispatchClaim,
+    dispatchBackpressure,
     dispatchQuarantine,
     decisionStore,
     readPortModule,
@@ -399,6 +406,7 @@ async function createDefaultServices(environment) {
     import("../../packages/averray-mcp/dist/dispatch-policy.js"),
     import("../../packages/averray-mcp/dist/workspace-path.js"),
     import("../../packages/averray-mcp/dist/dispatch-claim.js"),
+    import("../../packages/averray-mcp/dist/dispatch-backpressure.js"),
     import("../../packages/averray-mcp/dist/dispatch-quarantine.js"),
     import("../../packages/averray-mcp/dist/decision-record-store.js"),
     import("../../packages/averray-mcp/dist/harness-read-port.js"),
@@ -457,6 +465,7 @@ async function createDefaultServices(environment) {
     listHermesDecisions: decisionStore.listHermesDecisions,
     workspacePathForTask: workspace.workspacePathForTask,
     deriveIntendedRunId: dispatchClaim.deriveIntendedRunId,
+    getDispatchBackpressure: dispatchBackpressure.getDispatchBackpressure,
     readTextFile: (target) => readFile(target, "utf8"),
     close: common.closePool,
   };

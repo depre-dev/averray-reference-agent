@@ -73,6 +73,10 @@
       "types": "./dist/dispatch-claim.d.ts",
       "import": "./dist/dispatch-claim.js"
     },
+    "./dispatch-backpressure": {
+      "types": "./dist/dispatch-backpressure.d.ts",
+      "import": "./dist/dispatch-backpressure.js"
+    },
     "./dispatch-quarantine": {
       "types": "./dist/dispatch-quarantine.d.ts",
       "import": "./dist/dispatch-quarantine.js"

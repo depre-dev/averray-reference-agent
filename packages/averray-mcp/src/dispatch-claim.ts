@@ -9,8 +9,21 @@ const CLAIM_COLUMNS = `
   approved_task_hash,
   intended_run_id,
   claim_state,
+  claim_holder,
+  claim_generation,
   claimed_at,
   lease_expires_at
+`;
+const QUALIFIED_CLAIM_COLUMNS = `
+  claims.work_item_id,
+  claims.task_version,
+  claims.approved_task_hash,
+  claims.intended_run_id,
+  claims.claim_state,
+  claims.claim_holder,
+  claims.claim_generation,
+  claims.claimed_at,
+  claims.lease_expires_at
 `;
 
 export type DispatchClaimErrorReason = "claim_conflict" | "binding_conflict";
@@ -39,7 +52,9 @@ export interface DispatchClaim {
   taskVersion: number;
   approvedTaskHash: string;
   intendedRunId: string;
-  claimState: string;
+  claimState: "claimed" | "submitted" | "bound" | "exhausted";
+  claimHolder?: string;
+  claimGeneration: number;
   claimedAt: string;
   leaseExpiresAt?: string;
 }
@@ -49,6 +64,17 @@ export interface ClaimDispatchInput {
   taskVersion: number;
   approvedTaskHash: string;
   intendedRunId: string;
+  holder: string;
+  leaseTtlMs: number;
+}
+
+export interface DispatchClaimProgressInput {
+  workItemId: string;
+  taskVersion: number;
+  holder: string;
+  claimGeneration: number;
+  progress: "submitted" | "bound";
+  leaseTtlMs: number;
 }
 
 interface DispatchClaimRow {
@@ -57,6 +83,8 @@ interface DispatchClaimRow {
   approved_task_hash: string;
   intended_run_id: string;
   claim_state: string;
+  claim_holder: string | null;
+  claim_generation: number;
   claimed_at: string | Date;
   lease_expires_at: string | Date | null;
 }
@@ -91,7 +119,7 @@ export async function acquireDispatchLease(
   deps: DispatchStoreDeps = {},
 ): Promise<boolean> {
   const holder = normalizedHolder(input.holder);
-  const ttlSeconds = normalizedTtl(input.ttlSeconds);
+  const ttlSeconds = normalizedTtl(input.ttlSeconds, "Dispatch lease TTL");
   const rows = await storeQuery(deps)<LeaseHolderRow>(
     `insert into dispatch_lease (lease_id, holder, acquired_at, expires_at)
      values ('global', $1, now(), now() + ($2 * interval '1 second'))
@@ -111,7 +139,7 @@ export async function renewDispatchLease(
   deps: DispatchStoreDeps = {},
 ): Promise<boolean> {
   const holder = normalizedHolder(input.holder);
-  const ttlSeconds = normalizedTtl(input.ttlSeconds);
+  const ttlSeconds = normalizedTtl(input.ttlSeconds, "Dispatch lease TTL");
   const rows = await storeQuery(deps)<LeaseHolderRow>(
     `update dispatch_lease
      set expires_at = now() + ($2 * interval '1 second')
@@ -141,7 +169,7 @@ export async function releaseDispatchLease(
 export async function claimDispatch(
   input: ClaimDispatchInput,
   deps: DispatchStoreDeps = {},
-): Promise<{ claim: DispatchClaim; created: boolean }> {
+): Promise<{ claim: DispatchClaim; created: boolean; acquired: boolean }> {
   assertClaimInput(input);
   const inserted = await storeQuery(deps)<DispatchClaimRow>(
     `insert into agent_task_dispatch_claims (
@@ -150,9 +178,12 @@ export async function claimDispatch(
        approved_task_hash,
        intended_run_id,
        claim_state,
+       claim_holder,
+       claim_generation,
        claimed_at,
        lease_expires_at
-     ) values ($1, $2, $3, $4::uuid, 'claimed', now(), null)
+     ) values ($1, $2, $3, $4::uuid, 'claimed', $5, 1, now(),
+       now() + ($6 * interval '1 millisecond'))
      on conflict (work_item_id, task_version) do nothing
      returning ${CLAIM_COLUMNS}`,
     [
@@ -160,13 +191,17 @@ export async function claimDispatch(
       input.taskVersion,
       input.approvedTaskHash,
       input.intendedRunId,
+      normalizedHolder(input.holder),
+      normalizedTtl(input.leaseTtlMs, "Dispatch claim TTL"),
     ],
   );
   if (inserted.length > 1) {
     throw new Error(`Dispatch claim insert returned ${inserted.length} rows`);
   }
 
-  const claim = await getDispatchClaim(input.workItemId, input.taskVersion, deps);
+  const claim = inserted[0]
+    ? parseDispatchClaimRow(inserted[0])
+    : await getDispatchClaim(input.workItemId, input.taskVersion, deps);
   if (!claim) {
     throw new Error(`Dispatch claim disappeared for ${input.workItemId}@${input.taskVersion}`);
   }
@@ -179,7 +214,11 @@ export async function claimDispatch(
       `Dispatch claim conflicts with the immutable binding for ${input.workItemId}@${input.taskVersion}`,
     );
   }
-  return { claim, created: inserted.length === 1 };
+  return {
+    claim,
+    created: inserted.length === 1,
+    acquired: inserted.length === 1,
+  };
 }
 
 export async function getDispatchClaim(
@@ -201,6 +240,108 @@ export async function getDispatchClaim(
   return parseDispatchClaimRow(rows[0]!);
 }
 
+export async function getNextExpiredDispatchClaim(
+  deps: DispatchStoreDeps = {},
+): Promise<DispatchClaim | undefined> {
+  const rows = await storeQuery(deps)<DispatchClaimRow>(
+    `select ${QUALIFIED_CLAIM_COLUMNS}
+     from agent_task_dispatch_claims claims
+     join agent_tasks tasks
+       on tasks.work_item_id = claims.work_item_id
+      and tasks.task_version = claims.task_version
+     where claims.claim_state in ('claimed', 'submitted')
+       and claims.lease_expires_at < now()
+       and tasks.lifecycle in ('approved', 'dispatching')
+     order by claims.lease_expires_at asc, claims.work_item_id asc
+     limit 1`,
+  );
+  return optionalSingleClaim(rows, "expired claim read");
+}
+
+export async function acquireNextExpiredDispatchClaim(
+  input: { holder: string; leaseTtlMs: number },
+  deps: DispatchStoreDeps = {},
+): Promise<DispatchClaim | undefined> {
+  const holder = normalizedHolder(input.holder);
+  const leaseTtlMs = normalizedTtl(input.leaseTtlMs, "Dispatch claim TTL");
+  const rows = await storeQuery(deps)<DispatchClaimRow>(
+    `with candidate as (
+       select claims.work_item_id, claims.task_version
+       from agent_task_dispatch_claims claims
+       join agent_tasks tasks
+         on tasks.work_item_id = claims.work_item_id
+        and tasks.task_version = claims.task_version
+       where claims.claim_state in ('claimed', 'submitted')
+         and claims.lease_expires_at < now()
+         and tasks.lifecycle in ('approved', 'dispatching')
+       order by claims.lease_expires_at asc, claims.work_item_id asc
+       for update of claims skip locked
+       limit 1
+     )
+     update agent_task_dispatch_claims claims
+     set claim_state = case
+           when claims.claim_generation >= 2
+             then 'exhausted'
+           else claims.claim_state
+         end,
+         claim_holder = $1,
+         claim_generation = case
+           when claims.claim_generation = 1
+             then 2
+           else claims.claim_generation
+         end,
+         claimed_at = now(),
+         lease_expires_at = case
+           when claims.claim_generation >= 2
+             then null
+           else now() + ($2 * interval '1 millisecond')
+         end
+     from candidate
+     where claims.work_item_id = candidate.work_item_id
+       and claims.task_version = candidate.task_version
+     returning ${QUALIFIED_CLAIM_COLUMNS}`,
+    [holder, leaseTtlMs],
+  );
+  return optionalSingleClaim(rows, "expired claim acquire");
+}
+
+export async function recordDispatchClaimProgress(
+  input: DispatchClaimProgressInput,
+  deps: DispatchStoreDeps = {},
+): Promise<DispatchClaim> {
+  const holder = normalizedHolder(input.holder);
+  const leaseTtlMs = normalizedTtl(input.leaseTtlMs, "Dispatch claim TTL");
+  if (!Number.isSafeInteger(input.claimGeneration) || input.claimGeneration < 1) {
+    throw new Error("Dispatch claim generation must be a positive safe integer");
+  }
+  const rows = await storeQuery(deps)<DispatchClaimRow>(
+    `update agent_task_dispatch_claims
+     set claim_state = $5,
+         lease_expires_at = now() + ($6 * interval '1 millisecond')
+     where work_item_id = $1
+       and task_version = $2
+       and claim_holder = $3
+       and claim_generation = $4
+       and claim_state <> 'exhausted'
+     returning ${CLAIM_COLUMNS}`,
+    [
+      input.workItemId,
+      input.taskVersion,
+      holder,
+      input.claimGeneration,
+      input.progress,
+      leaseTtlMs,
+    ],
+  );
+  if (rows.length !== 1) {
+    throw new DispatchClaimError(
+      "claim_conflict",
+      `Dispatch claim progress conflicts with the active generation for ${input.workItemId}@${input.taskVersion}`,
+    );
+  }
+  return parseDispatchClaimRow(rows[0]!);
+}
+
 function assertClaimInput(input: ClaimDispatchInput): void {
   if (!input.workItemId.trim()) {
     throw new Error("Dispatch claim work item id must not be empty");
@@ -216,6 +357,17 @@ function assertClaimInput(input: ClaimDispatchInput): void {
   }
 }
 
+function optionalSingleClaim(
+  rows: DispatchClaimRow[],
+  operation: string,
+): DispatchClaim | undefined {
+  if (rows.length === 0) return undefined;
+  if (rows.length !== 1) {
+    throw new Error(`Dispatch ${operation} returned ${rows.length} rows`);
+  }
+  return parseDispatchClaimRow(rows[0]!);
+}
+
 function parseDispatchClaimRow(row: DispatchClaimRow): DispatchClaim {
   if (!CANONICAL_UUID.test(row.intended_run_id)) {
     throw new Error("Stored dispatch claim has a non-canonical intended run id");
@@ -223,12 +375,25 @@ function parseDispatchClaimRow(row: DispatchClaimRow): DispatchClaim {
   if (!Number.isSafeInteger(row.task_version) || row.task_version < 1) {
     throw new Error("Stored dispatch claim has an invalid task version");
   }
+  if (!Number.isSafeInteger(row.claim_generation) || row.claim_generation < 1) {
+    throw new Error("Stored dispatch claim has an invalid generation");
+  }
+  if (
+    row.claim_state !== "claimed"
+    && row.claim_state !== "submitted"
+    && row.claim_state !== "bound"
+    && row.claim_state !== "exhausted"
+  ) {
+    throw new Error("Stored dispatch claim has an invalid state");
+  }
   return {
     workItemId: row.work_item_id,
     taskVersion: row.task_version,
     approvedTaskHash: row.approved_task_hash,
     intendedRunId: row.intended_run_id,
     claimState: row.claim_state,
+    ...(row.claim_holder ? { claimHolder: row.claim_holder } : {}),
+    claimGeneration: row.claim_generation,
     claimedAt: timestamp(row.claimed_at),
     ...(row.lease_expires_at
       ? { leaseExpiresAt: timestamp(row.lease_expires_at) }
@@ -242,11 +407,11 @@ function normalizedHolder(holder: string): string {
   return normalized;
 }
 
-function normalizedTtl(ttlSeconds: number): number {
-  if (!Number.isSafeInteger(ttlSeconds) || ttlSeconds < 1) {
-    throw new Error("Dispatch lease TTL must be a positive safe integer");
+function normalizedTtl(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${label} must be a positive safe integer`);
   }
-  return ttlSeconds;
+  return value;
 }
 
 function timestamp(value: string | Date): string {

@@ -126,6 +126,7 @@ describe("single-attempt Harness dispatch orchestration", () => {
       },
     } as AgentTaskV1;
     const deps = dispatchDeps(task);
+    vi.mocked(deps.countInflight).mockResolvedValue(1);
 
     await expect(runSingleDispatch(deps)).resolves.toMatchObject({
       outcome: "refused",
@@ -133,6 +134,7 @@ describe("single-attempt Harness dispatch orchestration", () => {
     });
 
     assertRefusal(deps, "approval_hash_mismatch");
+    expect(deps.countInflight).not.toHaveBeenCalled();
   });
 
   it("refuses an executor other than Harness before deriving or claiming", async () => {
@@ -532,6 +534,204 @@ describe("single-attempt Harness dispatch orchestration", () => {
     expect(deps.releaseLease).toHaveBeenCalledOnce();
   });
 
+  it("takes over one expired pre-submit claim with the same derived id at generation two", async () => {
+    const task = await approvedTask();
+    const deps = dispatchDeps(task);
+    const runId = intendedId(task);
+    vi.mocked(deps.getNextExpiredClaim).mockResolvedValue({
+      workItemId: task.workItemId,
+      taskVersion: task.taskVersion,
+      approvedTaskHash: task.approval.approvedTaskHash!,
+      intendedRunId: runId,
+      claimState: "claimed",
+      claimHolder: "dead-holder",
+      claimGeneration: 1,
+      claimedAt: NOW,
+      leaseExpiresAt: NOW,
+    });
+    vi.mocked(deps.acquireNextExpiredClaim).mockResolvedValue({
+      workItemId: task.workItemId,
+      taskVersion: task.taskVersion,
+      approvedTaskHash: task.approval.approvedTaskHash!,
+      intendedRunId: runId,
+      claimState: "claimed",
+      claimHolder: "dispatcher-one",
+      claimGeneration: 2,
+      claimedAt: NOW,
+      leaseExpiresAt: DEADLINE,
+    });
+
+    await expect(runSingleDispatch(deps)).resolves.toEqual({
+      outcome: "dispatched",
+      workItemId: task.workItemId,
+      taskVersion: task.taskVersion,
+      intendedRunId: runId,
+    });
+
+    expect(deps.claimDispatch).not.toHaveBeenCalled();
+    expect(deps.controlPort.submit).toHaveBeenCalledOnce();
+    expect(deps.controlPort.submit).toHaveBeenCalledWith(runId, expect.any(String));
+    expect(deps.recordClaimProgress).toHaveBeenCalledTimes(2);
+    expect(deps.recordClaimProgress).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ claimGeneration: 2, progress: "submitted" }),
+    );
+    expect(deps.recordClaimProgress).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ claimGeneration: 2, progress: "bound" }),
+    );
+  });
+
+  it("adopts an expired submitted claim by replaying the derived id and binds as the new holder", async () => {
+    const approved = await approvedTask();
+    const task = agentTaskV1Schema.parse({
+      ...approved,
+      lifecycle: "dispatching",
+      timestamps: {
+        ...approved.timestamps,
+        dispatchClaimedAt: NOW,
+        updatedAt: NOW,
+      },
+    });
+    const deps = dispatchDeps(task);
+    const runId = intendedId(task);
+    const preview = {
+      workItemId: task.workItemId,
+      taskVersion: task.taskVersion,
+      approvedTaskHash: task.approval.approvedTaskHash!,
+      intendedRunId: runId,
+      claimState: "submitted" as const,
+      claimHolder: "dead-holder",
+      claimGeneration: 1,
+      claimedAt: NOW,
+      leaseExpiresAt: NOW,
+    };
+    vi.mocked(deps.getNextExpiredClaim).mockResolvedValue(preview);
+    vi.mocked(deps.acquireNextExpiredClaim).mockResolvedValue({
+      ...preview,
+      claimHolder: "dispatcher-one",
+      claimGeneration: 2,
+      leaseExpiresAt: DEADLINE,
+    });
+
+    await expect(runSingleDispatch(deps)).resolves.toMatchObject({
+      outcome: "dispatched",
+      intendedRunId: runId,
+    });
+
+    expect(deps.controlPort.submit).toHaveBeenCalledOnce();
+    expect(deps.controlPort.submit).toHaveBeenCalledWith(runId, expect.any(String));
+    expect(deps.bindRun).toHaveBeenCalledOnce();
+    expect(deps.bindRun).toHaveBeenCalledWith({
+      workItemId: task.workItemId,
+      harnessRunId: runId,
+    });
+    expect(deps.recordClaimProgress).toHaveBeenCalledTimes(2);
+    expect(deps.recordClaimProgress).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ claimGeneration: 2, progress: "submitted" }),
+    );
+    expect(deps.recordClaimProgress).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ claimGeneration: 2, progress: "bound" }),
+    );
+    expect(savedTask(deps, 1)).toMatchObject({
+      lifecycle: "running",
+      bindings: { harnessRunId: runId },
+    });
+  });
+
+  it("blocks an exhausted generation with one critical alert and no third submit", async () => {
+    const approved = await approvedTask();
+    const task = agentTaskV1Schema.parse({
+      ...approved,
+      lifecycle: "dispatching",
+      timestamps: {
+        ...approved.timestamps,
+        dispatchClaimedAt: NOW,
+        updatedAt: NOW,
+      },
+    });
+    const deps = dispatchDeps(task);
+    const runId = intendedId(task);
+    const preview = {
+      workItemId: task.workItemId,
+      taskVersion: task.taskVersion,
+      approvedTaskHash: task.approval.approvedTaskHash!,
+      intendedRunId: runId,
+      claimState: "claimed" as const,
+      claimHolder: "retry-holder",
+      claimGeneration: 2,
+      claimedAt: NOW,
+      leaseExpiresAt: NOW,
+    };
+    vi.mocked(deps.getNextExpiredClaim).mockResolvedValue(preview);
+    vi.mocked(deps.acquireNextExpiredClaim).mockResolvedValue({
+      ...preview,
+      claimState: "exhausted",
+      claimHolder: "dispatcher-one",
+      leaseExpiresAt: undefined,
+    });
+
+    await expect(runSingleDispatch(deps)).resolves.toMatchObject({
+      outcome: "refused",
+      reason: "dispatch_retry_exhausted_generation_2",
+    });
+
+    expect(deps.controlPort.submit).not.toHaveBeenCalled();
+    expect(deps.bindRun).not.toHaveBeenCalled();
+    expect(savedTask(deps, 0).lifecycle).toBe("blocked");
+    expect(deps.alertSink).toHaveBeenCalledWith(expect.objectContaining({
+      severity: "critical",
+      code: "dispatch_retry_exhausted",
+      message: expect.stringContaining("generation 2"),
+    }));
+  });
+
+  it("records one warn transition while repeated backpressure remains active", async () => {
+    const task = await approvedTask();
+    const deps = dispatchDeps(task);
+    vi.mocked(deps.countInflight).mockResolvedValue(1);
+    vi.mocked(deps.transitionBackpressure)
+      .mockResolvedValueOnce({
+        state: {
+          active: true,
+          observedInflight: 1,
+          maxInflight: 1,
+          changedAt: NOW,
+        },
+        changed: true,
+      })
+      .mockResolvedValueOnce({
+        state: {
+          active: true,
+          observedInflight: 1,
+          maxInflight: 1,
+          changedAt: NOW,
+        },
+        changed: false,
+      });
+
+    await expect(runSingleDispatch(deps)).resolves.toMatchObject({
+      outcome: "refused",
+      reason: "backpressure",
+    });
+    await expect(runSingleDispatch(deps)).resolves.toMatchObject({
+      outcome: "refused",
+      reason: "backpressure",
+    });
+
+    expect(deps.saveTask).not.toHaveBeenCalled();
+    expect(deps.controlPort.submit).not.toHaveBeenCalled();
+    expect(deps.recordDecision).toHaveBeenCalledOnce();
+    expect(decisionRecords(deps)[0]?.proposal.why).toEqual(["backpressure"]);
+    expect(deps.alertSink).toHaveBeenCalledOnce();
+    expect(deps.alertSink).toHaveBeenCalledWith(expect.objectContaining({
+      severity: "warn",
+      code: "dispatch_backpressure",
+    }));
+  });
+
   it("releases the lease before propagating an unexpected dependency error", async () => {
     const task = await approvedTask();
     const deps = dispatchDeps(task);
@@ -553,14 +753,57 @@ function dispatchDeps(task: AgentTaskV1): DispatchDeps {
     now: vi.fn(() => new Date(NOW)),
     dispatcherId: "dispatcher-one",
     leaseTtlSeconds: 30,
+    claimTtlMs: 600_000,
+    maxInflight: 1,
     isDispatchEnabled: vi.fn(() => true),
     isHalted: vi.fn(() => false),
     listDispatchable: vi.fn(async () => [task]),
+    getTask: vi.fn(async (workItemId, taskVersion) =>
+      workItemId === task.workItemId && taskVersion === task.taskVersion
+        ? task
+        : undefined),
     saveTask: vi.fn(async () => undefined),
     acquireLease: vi.fn(async () => true),
     renewLease: vi.fn(async () => true),
     releaseLease: vi.fn(async () => true),
-    claimDispatch: vi.fn(async () => undefined),
+    claimDispatch: vi.fn(async (input) => ({
+      created: true,
+      acquired: true,
+      claim: {
+        workItemId: input.workItemId,
+        taskVersion: input.taskVersion,
+        approvedTaskHash: input.approvedTaskHash,
+        intendedRunId: input.intendedRunId,
+        claimState: "claimed" as const,
+        claimHolder: input.holder,
+        claimGeneration: 1,
+        claimedAt: NOW,
+        leaseExpiresAt: DEADLINE,
+      },
+    })),
+    getNextExpiredClaim: vi.fn(async () => undefined),
+    acquireNextExpiredClaim: vi.fn(async () => undefined),
+    recordClaimProgress: vi.fn(async (input) => ({
+      workItemId: input.workItemId,
+      taskVersion: input.taskVersion,
+      approvedTaskHash: task.approval.approvedTaskHash!,
+      intendedRunId: intendedId(task),
+      claimState: input.progress,
+      claimHolder: input.holder,
+      claimGeneration: input.claimGeneration,
+      claimedAt: NOW,
+      leaseExpiresAt: DEADLINE,
+    })),
+    countInflight: vi.fn(async () => 0),
+    transitionBackpressure: vi.fn(async (input) => ({
+      state: {
+        active: input.active,
+        observedInflight: input.observedInflight,
+        maxInflight: input.maxInflight,
+        changedAt: NOW,
+      },
+      changed: false,
+    })),
     getRunBinding: vi.fn(async () => undefined),
     bindRun: vi.fn(async () => undefined),
     loadProfileManifest: vi.fn(async () => profileFor(task)),
@@ -574,7 +817,7 @@ function dispatchDeps(task: AgentTaskV1): DispatchDeps {
     },
     recordDecision: vi.fn(async () => undefined),
     alertSink: vi.fn(async () => undefined),
-    logger: { warn: vi.fn() },
+    logger: { info: vi.fn(), warn: vi.fn() },
   };
 }
 

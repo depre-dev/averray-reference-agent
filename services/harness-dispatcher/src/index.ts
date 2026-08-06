@@ -4,13 +4,21 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  getAgentTask,
   listAgentTasks,
   listDispatchableAgentTasks,
   putAgentTask,
 } from "@avg/averray-mcp/agent-task-store";
 import {
+  countInflightHarnessRuns,
+  transitionDispatchBackpressure,
+} from "@avg/averray-mcp/dispatch-backpressure";
+import {
+  acquireNextExpiredDispatchClaim,
   acquireDispatchLease,
   claimDispatch,
+  getNextExpiredDispatchClaim,
+  recordDispatchClaimProgress,
   releaseDispatchLease,
   renewDispatchLease,
 } from "@avg/averray-mcp/dispatch-claim";
@@ -38,6 +46,7 @@ import {
 import {
   readHaltFile,
   runSingleDispatch,
+  type DispatchCrashPoint,
   type DispatchAttemptResult,
   type DispatchDeps,
 } from "./dispatch-attempt.js";
@@ -69,6 +78,17 @@ const MAX_READ_TIMEOUT_MS = 30_000;
 const DEFAULT_POISON_THRESHOLD = 5;
 const MIN_POISON_THRESHOLD = 1;
 const MAX_POISON_THRESHOLD = 100;
+const DEFAULT_CLAIM_TTL_MS = 600_000;
+const MIN_CLAIM_TTL_MS = 1_000;
+const MAX_CLAIM_TTL_MS = 86_400_000;
+const DEFAULT_MAX_INFLIGHT = 1;
+const MIN_MAX_INFLIGHT = 1;
+const MAX_MAX_INFLIGHT = 100;
+
+export interface DispatchFaultInjection {
+  enabled: true;
+  crashPoint: DispatchCrashPoint;
+}
 
 export type DispatcherHeartbeatStatus =
   | "disabled"
@@ -87,22 +107,27 @@ export interface DispatcherHeartbeat {
   cycleCount: number;
   reconciledCount: number;
   lastOutcome?: string;
+  faultInjection?: DispatchFaultInjection;
 }
 
 export interface DispatcherConfig {
   dispatcherId: string;
   pollIntervalMs: number;
   leaseTtlSeconds: number;
+  claimTtlMs: number;
+  maxInflight: number;
   readTimeoutMs: number;
   poisonThreshold: number;
   intentDir: string;
   heartbeatPath: string;
   harnessBin: string;
+  faultInjection?: DispatchFaultInjection;
 }
 
 export interface DispatcherLogger {
   info(fields: Record<string, unknown>, message: string): void;
   warn(fields: Record<string, unknown>, message: string): void;
+  error(fields: Record<string, unknown>, message: string): void;
 }
 
 export interface DispatcherScheduler {
@@ -157,6 +182,7 @@ export function parseDispatcherConfig(
         "harness-dispatcher-heartbeat.json",
       ),
   );
+  const faultInjection = parseFaultInjection(environment);
 
   return {
     dispatcherId,
@@ -171,6 +197,18 @@ export function parseDispatcherConfig(
       DEFAULT_LEASE_TTL_SECONDS,
       MIN_LEASE_TTL_SECONDS,
       MAX_LEASE_TTL_SECONDS,
+    ),
+    claimTtlMs: boundedInteger(
+      environment.HARNESS_DISPATCH_CLAIM_TTL_MS,
+      DEFAULT_CLAIM_TTL_MS,
+      MIN_CLAIM_TTL_MS,
+      MAX_CLAIM_TTL_MS,
+    ),
+    maxInflight: boundedInteger(
+      environment.HARNESS_DISPATCH_MAX_INFLIGHT,
+      DEFAULT_MAX_INFLIGHT,
+      MIN_MAX_INFLIGHT,
+      MAX_MAX_INFLIGHT,
     ),
     readTimeoutMs: boundedInteger(
       environment.HARNESS_DISPATCH_READ_TIMEOUT_MS,
@@ -187,6 +225,7 @@ export function parseDispatcherConfig(
     intentDir,
     heartbeatPath,
     harnessBin: environment.HARNESS_BIN?.trim() || "harness",
+    ...(faultInjection ? { faultInjection } : {}),
   };
 }
 
@@ -218,6 +257,9 @@ export function createDispatcherProcess(
       cycleCount,
       reconciledCount,
       ...(outcome ? { lastOutcome: outcome } : {}),
+      ...(config.faultInjection
+        ? { faultInjection: config.faultInjection }
+        : {}),
     });
   };
 
@@ -314,6 +356,11 @@ export function createDispatcherProcess(
   const start = (): void => {
     if (!stopped) return;
     stopped = false;
+    if (config.faultInjection) {
+      deps.logger.error({
+        crashPoint: config.faultInjection.crashPoint,
+      }, "Harness dispatcher fault injection is armed");
+    }
     void runLoopTick();
   };
 
@@ -425,14 +472,22 @@ export function createProductionDispatcher(
     now: () => new Date(),
     dispatcherId: config.dispatcherId,
     leaseTtlSeconds: config.leaseTtlSeconds,
+    claimTtlMs: config.claimTtlMs,
+    maxInflight: config.maxInflight,
     isDispatchEnabled: () => harnessDispatchEnabled(environment),
     isHalted: () => readHaltFile(environment),
     listDispatchable: listDispatchableAgentTasks,
+    getTask: getAgentTask,
     saveTask: putAgentTask,
     acquireLease: acquireDispatchLease,
     renewLease: renewDispatchLease,
     releaseLease: releaseDispatchLease,
     claimDispatch,
+    getNextExpiredClaim: getNextExpiredDispatchClaim,
+    acquireNextExpiredClaim: acquireNextExpiredDispatchClaim,
+    recordClaimProgress: recordDispatchClaimProgress,
+    countInflight: countInflightHarnessRuns,
+    transitionBackpressure: transitionDispatchBackpressure,
     getRunBinding,
     bindRun: bindRunToWorkItem,
     loadProfileManifest: (profileId) =>
@@ -453,7 +508,13 @@ export function createProductionDispatcher(
     controlPort,
     recordDecision: recordHermesDecision,
     alertSink,
+    ...(config.faultInjection
+      ? { maybeCrash: createFaultInjectionCrash(config.faultInjection) }
+      : {}),
     logger: {
+      info(object, message) {
+        logger.info(asLogFields(object), message);
+      },
       warn(object, message) {
         logger.warn(asLogFields(object), message);
       },
@@ -516,6 +577,34 @@ function boundedInteger(
   return Math.min(maximum, Math.max(minimum, Math.floor(parsed)));
 }
 
+function parseFaultInjection(
+  environment: Readonly<Record<string, string | undefined>>,
+): DispatchFaultInjection | undefined {
+  if (environment.HARNESS_DISPATCH_FAULT_INJECTION?.trim() !== "enabled") {
+    return undefined;
+  }
+  const crashPoint = environment.HARNESS_DISPATCH_CRASH_POINT?.trim();
+  if (
+    crashPoint !== "after-claim-before-submit"
+    && crashPoint !== "after-submit-before-binding"
+  ) {
+    throw new Error(
+      "HARNESS_DISPATCH_CRASH_POINT must name a supported point when fault injection is enabled",
+    );
+  }
+  return { enabled: true, crashPoint };
+}
+
+export function createFaultInjectionCrash(
+  faultInjection: DispatchFaultInjection,
+  terminate: (code: number) => never = (code) => process.exit(code),
+): NonNullable<DispatchDeps["maybeCrash"]> {
+  return (point) => {
+    if (point !== faultInjection.crashPoint) return;
+    terminate(86);
+  };
+}
+
 function heartbeatStatusForResult(
   result: DispatchAttemptResult,
 ): DispatcherHeartbeatStatus {
@@ -571,7 +660,7 @@ function logAttempt(
   };
   logger.info(fields, "Harness dispatch attempt completed");
   if (
-    result.outcome === "refused"
+    (result.outcome === "refused" && result.reason !== "backpressure")
     || result.outcome === "submit_failed"
   ) {
     logger.warn(fields, "Harness dispatch attempt requires attention");
@@ -616,6 +705,9 @@ const consoleDispatcherLogger: DispatcherLogger = {
   },
   warn(fields, message) {
     console.warn(`[harness-dispatcher] ${message}`, fields);
+  },
+  error(fields, message) {
+    console.error(`[harness-dispatcher] ${message}`, fields);
   },
 };
 

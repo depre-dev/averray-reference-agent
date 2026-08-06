@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createDispatcherProcess,
+  createFaultInjectionCrash,
   createIntentArtifactWriter,
   parseDispatcherConfig,
   type DispatcherConfig,
@@ -68,6 +69,8 @@ describe("Harness dispatcher process", () => {
       dispatcherId: "host-42",
       pollIntervalMs: 15_000,
       leaseTtlSeconds: 120,
+      claimTtlMs: 600_000,
+      maxInflight: 1,
       readTimeoutMs: 15_000,
       poisonThreshold: 5,
       intentDir: "/tmp/averray-reference-agent/harness-dispatch-intents",
@@ -83,6 +86,91 @@ describe("Harness dispatcher process", () => {
       pid: 42,
       tmpdir: "/tmp",
     }).readTimeoutMs).toBe(1_000);
+  });
+
+  it("honors both crash points only behind the explicit fence", () => {
+    expect(parseDispatcherConfig({
+      HARNESS_DISPATCH_CRASH_POINT: "after-claim-before-submit",
+    }, { hostname: "host", pid: 42, tmpdir: "/tmp" })).not.toHaveProperty(
+      "faultInjection",
+    );
+
+    for (const crashPoint of [
+      "after-claim-before-submit",
+      "after-submit-before-binding",
+    ] as const) {
+      expect(parseDispatcherConfig({
+        HARNESS_DISPATCH_FAULT_INJECTION: "enabled",
+        HARNESS_DISPATCH_CRASH_POINT: crashPoint,
+      }, { hostname: "host", pid: 42, tmpdir: "/tmp" })).toMatchObject({
+        faultInjection: { enabled: true, crashPoint },
+      });
+    }
+
+    expect(() => parseDispatcherConfig({
+      HARNESS_DISPATCH_FAULT_INJECTION: "enabled",
+      HARNESS_DISPATCH_CRASH_POINT: "unsupported",
+    }, { hostname: "host", pid: 42, tmpdir: "/tmp" })).toThrow(
+      "HARNESS_DISPATCH_CRASH_POINT",
+    );
+
+    const terminated = new Error("terminated by drill");
+    const terminate = vi.fn((_code: number): never => {
+      throw terminated;
+    });
+    const crash = createFaultInjectionCrash({
+      enabled: true,
+      crashPoint: "after-submit-before-binding",
+    }, terminate);
+    expect(() => crash("after-claim-before-submit")).not.toThrow();
+    expect(() => crash("after-submit-before-binding")).toThrow(terminated);
+    expect(terminate).toHaveBeenCalledWith(86);
+  });
+
+  it("logs an armed fault at error level and stamps only armed heartbeats", async () => {
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const armedHarness = processHarness({
+      logger,
+      scheduler: {
+        setTimeout: vi.fn(() => ({}) as NodeJS.Timeout),
+        clearTimeout: vi.fn(),
+      },
+    });
+    const armed = createDispatcherProcess({
+      ...dispatcherConfig(),
+      faultInjection: {
+        enabled: true,
+        crashPoint: "after-claim-before-submit",
+      },
+    }, armedHarness.deps);
+
+    armed.start();
+    await vi.waitFor(() => {
+      expect(armedHarness.deps.writeHeartbeat).toHaveBeenCalled();
+    });
+    expect(logger.error).toHaveBeenCalledWith(
+      { crashPoint: "after-claim-before-submit" },
+      "Harness dispatcher fault injection is armed",
+    );
+    expect(heartbeats(armedHarness.deps)).toContainEqual(
+      expect.objectContaining({
+        faultInjection: {
+          enabled: true,
+          crashPoint: "after-claim-before-submit",
+        },
+      }),
+    );
+    await armed.shutdown();
+
+    const normalHarness = processHarness();
+    await normalHarness.process.tick();
+    expect(heartbeats(normalHarness.deps)).not.toContainEqual(
+      expect.objectContaining({ faultInjection: expect.anything() }),
+    );
   });
 
   it("reports disabled honestly while the guarded attempt touches no store dependency", async () => {
@@ -343,6 +431,7 @@ function processHarness(
     logger: overrides.logger ?? {
       info: vi.fn(),
       warn: vi.fn(),
+      error: vi.fn(),
     },
     scheduler: overrides.scheduler ?? {
       setTimeout: vi.fn(() => {
@@ -362,6 +451,8 @@ function dispatcherConfig(): DispatcherConfig {
     dispatcherId: "dispatcher-one",
     pollIntervalMs: 15_000,
     leaseTtlSeconds: 120,
+    claimTtlMs: 600_000,
+    maxInflight: 1,
     readTimeoutMs: 15_000,
     poisonThreshold: 5,
     intentDir: "/tmp/harness-intents",
@@ -378,14 +469,34 @@ function dispatchAttemptDeps(
     now: vi.fn(() => NOW),
     dispatcherId: "dispatcher-one",
     leaseTtlSeconds: 120,
+    claimTtlMs: 600_000,
+    maxInflight: 1,
     isDispatchEnabled: vi.fn(() => enabled),
     isHalted: vi.fn(() => halted),
     listDispatchable: vi.fn(async () => []),
+    getTask: vi.fn(async () => undefined),
     saveTask: vi.fn(async () => undefined),
     acquireLease: vi.fn(async () => true),
     renewLease: vi.fn(async () => true),
     releaseLease: vi.fn(async () => true),
-    claimDispatch: vi.fn(async () => undefined),
+    claimDispatch: vi.fn(async () => {
+      throw new Error("unexpected claim");
+    }),
+    getNextExpiredClaim: vi.fn(async () => undefined),
+    acquireNextExpiredClaim: vi.fn(async () => undefined),
+    recordClaimProgress: vi.fn(async () => {
+      throw new Error("unexpected claim progress");
+    }),
+    countInflight: vi.fn(async () => 0),
+    transitionBackpressure: vi.fn(async (input) => ({
+      state: {
+        active: input.active,
+        observedInflight: input.observedInflight,
+        maxInflight: input.maxInflight,
+        changedAt: NOW.toISOString(),
+      },
+      changed: false,
+    })),
     getRunBinding: vi.fn(async () => undefined),
     bindRun: vi.fn(async () => undefined),
     loadProfileManifest: vi.fn(async (profileId) => ({
