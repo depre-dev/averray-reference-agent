@@ -58,7 +58,8 @@ untouched — the queue may grow; execution is what is bounded.
 The takeover drills need a dispatcher that dies at a precise point. That wants
 a crash hook in production code, which is a truth hazard, so it is fenced:
 
-- `HARNESS_DISPATCH_CRASH_POINT` (e.g. `after-claim-before-submit`) is honored
+- `HARNESS_DISPATCH_CRASH_POINT` — two points, both fenced identically:
+  `after-claim-before-submit` and `after-submit-before-binding` — honored
   **only** when `HARNESS_DISPATCH_FAULT_INJECTION=enabled`;
 - when armed, the dispatcher logs it at startup at error level and stamps it
   into its heartbeat payload — a watching operator cannot miss it;
@@ -69,7 +70,8 @@ a crash hook in production code, which is a truth hazard, so it is fenced:
 
 | drill | inject | required green |
 |---|---|---|
-| crash before submit → takeover | two processes, holder crashes at `after-claim-before-submit` | second process steals the global lease after TTL, wins the expired claim, submits **the same run id**; Harness holds **one run, attempt 1**; one binding; task proceeds |
+| crash before submit → takeover | two processes, holder crashes at `after-claim-before-submit` | second process steals the global lease after TTL, wins the expired claim, submits **the same run id**; Harness holds **one run, attempt 1, whose id equals the derivation**; one binding; task proceeds |
+| crash after submit, before binding → takeover | holder crashes at `after-submit-before-binding` | takeover finds the run already in Harness by its derived id, **adopts it — never submits a second**; one run, one binding (§11's second drill, the takeover variant of the proven same-process restart) |
 | no takeover while alive | holder healthy and renewing | second process never acquires across ≥3 TTL windows |
 | restart-resume (existing behavior) | kill after submit, restart | the already-proven exactly-once path still holds with claim expiry in place |
 | bounded retry exhausts | crash the retry attempt too | task `blocked`, critical alert, **no third submit attempt** |
@@ -80,9 +82,16 @@ Mutation proofs, each seen red then restored:
 - disable renewal in the healthy holder → the *no-takeover-while-alive* drill
   must fail — a takeover under a live dispatcher is the disaster case, and the
   drill must be able to see one
-- make the retry path mint a fresh uuid instead of the derived id → the
-  takeover drill must fail **by counting runs in the Harness store**, not by
-  inspecting dispatcher intentions — two runs is the signature
+- make the retry path mint a fresh uuid instead of the derived id → applied to
+  **both** takeover drills, with **different signatures**, and both must red:
+  in the after-submit drill, **run count reaches two** in the Harness store —
+  the duplicate-execution disaster itself; in the before-submit drill, the
+  count stays one but **the run's id no longer equals the derivation** — the
+  correlation break. *(Amended 2026-08-06, ninth stop: the original text
+  demanded two-runs from the before-submit path, where a crash leaves Harness
+  at zero runs and a fresh-uuid retry creates one either way — nothing exists
+  to duplicate. The implementer proved this by exhaustion against exact main
+  and stopped rather than weaken the drill to pass a wrong spec.)*
 - remove the retry bound → the exhaustion drill must fail
 - remove the alert-transition dedup → the backpressure drill must fail on
   alert count
