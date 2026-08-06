@@ -81,6 +81,23 @@ describe("the subject sits above the numbers it qualifies", () => {
     );
   });
 
+  test("an administratively paused subject stays visible and calm", () => {
+    const { getByTestId } = render(
+      <BankLane
+        bank={lane({
+          tone: "paused",
+          subject: {
+            text: "lane administratively paused (configured generation v2.2.1) — reason: administratively_paused",
+            tone: "paused",
+          },
+        })}
+      />,
+    );
+    expect(getByTestId("ops-bank").getAttribute("data-tone")).toBe("paused");
+    expect(getByTestId("ops-bank-subject").textContent).toContain("configured generation v2.2.1");
+    expect(getByTestId("ops-bank-subject").getAttribute("data-tone")).toBe("paused");
+  });
+
   test("a payload without the field still renders the lane", () => {
     // Optional on the wire so a board deployed ahead of the monitor that fills
     // it in does not crash on a payload that predates it.

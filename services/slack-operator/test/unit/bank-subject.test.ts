@@ -20,6 +20,22 @@ import { normalizeBankFeed } from "../../src/bank-feed-fetch.js";
 const NOW = 1_785_900_000_000;
 const V21 = "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D";
 const V20 = "0x8d1a1De9F5C4C8b4C0eB1a3f2D9a7B6c5E4d3C2b";
+const V221 = "0xF20b35A3f85EC864127B551ce8A64446fC0ed2Bc";
+
+const evaluatedSubject = (over: Record<string, unknown> = {}) => ({
+  configuredWrapper: V221,
+  uniqueArmedWrapper: null,
+  matches: true,
+  status: "paused",
+  reason: "administratively_paused",
+  candidates: [
+    { version: "2.2", wrapper: V21, dispatchPaused: true, lastError: null },
+    { version: "2.2.1", wrapper: V221, dispatchPaused: true, lastError: null },
+  ],
+  readAtMs: NOW,
+  lastError: null,
+  ...over,
+});
 
 /** The retired generation's numbers, exactly as the board showed them. */
 const feed = (over: Partial<BankFeed> = {}): BankFeed => ({
@@ -29,6 +45,14 @@ const feed = (over: Partial<BankFeed> = {}): BankFeed => ({
   requests: { items: [], readAtMs: NOW - 30_000 },
   ...over,
 });
+
+const feedThroughNetwork = (subject: unknown): BankFeed => {
+  const base = feed();
+  const parsed = normalizeBankFeed({ ...base, subject });
+  expect(parsed.reason).toBeUndefined();
+  expect(parsed.feed?.subject).toBeDefined();
+  return parsed.feed!;
+};
 
 describe("the subject line is decided, never blank", () => {
   test("silence is NOT agreement — an undeclared subject says so out loud", () => {
@@ -70,6 +94,75 @@ describe("the subject line is decided, never blank", () => {
     expect(v.subject.tone).toBe("ok");
     expect(v.subject.text).toContain("bank-xcm-v2.1");
     expect(v.float.tone).toBe("ok");
+  });
+});
+
+describe("the producer's evaluated subject contract", () => {
+  const calibrated = {
+    provenAtMs: NOW - 86_400_000,
+    provenRaw: "100000",
+    provenSource: "erc20:0x2ec4…fa93.balanceOf(0x98f0…b68e)",
+  };
+
+  test("paused is a calm third state, with the configured generation and reason", () => {
+    const parsed = normalizeBankFeed({
+      position: feed().position,
+      float: feed().float,
+      postage: feed().postage,
+      requests: feed().requests,
+      calibration: calibrated,
+      subject: evaluatedSubject(),
+    });
+    expect(parsed.feed?.subject).toMatchObject({
+      status: "paused",
+      reason: "administratively_paused",
+      matches: true,
+      uniqueArmedWrapper: null,
+    });
+
+    const view = bankLaneView({ feed: parsed.feed!, nowMs: NOW })!;
+    expect(view.subject).toEqual({
+      text: "lane administratively paused (configured generation v2.2.1) — reason: administratively_paused",
+      tone: "paused",
+      status: "paused",
+      reason: "administratively_paused",
+    });
+    expect(view.tone).toBe("paused");
+  });
+
+  test("an unknown status survives verbatim and renders neutral with its reason", () => {
+    const view = bankLaneView({
+      feed: {
+        ...feedThroughNetwork(evaluatedSubject({ status: "future_custody_handoff", reason: "governance_window" })),
+        calibration: calibrated,
+      },
+      nowMs: NOW,
+    })!;
+    expect(view.subject.text).toContain("future_custody_handoff");
+    expect(view.subject.text).toContain("reason: governance_window");
+    expect(view.subject.tone).toBe("neutral");
+    expect(view.subject.status).toBe("future_custody_handoff");
+    expect(view.subject.reason).toBe("governance_window");
+    expect(view.tone).toBe("neutral");
+  });
+
+  test("a producer error passes through as red with its reason", () => {
+    const view = bankLaneView({
+      feed: {
+        ...feedThroughNetwork(evaluatedSubject({
+          status: "error",
+          matches: false,
+          reason: "multiple_armed_wrappers",
+          lastError: "multiple_armed_wrappers",
+        })),
+        calibration: calibrated,
+      },
+      nowMs: NOW,
+    })!;
+    expect(view.subject.text).toContain("lane error");
+    expect(view.subject.text).toContain("reason: multiple_armed_wrappers");
+    expect(view.subject.tone).toBe("red");
+    expect(view.tone).toBe("red");
   });
 });
 
@@ -167,7 +260,6 @@ describe("a malformed subject is dropped, never guessed at", () => {
 
   test("a good subject survives the network boundary intact", () => {
     const r = normalizeBankFeed({ ...payload, subject: { derivedFrom: V20, declared: V21, label: "bank-xcm-v2.1" } });
-    expect(r.feed!.subject!.derivedFrom).toBe(V20);
-    expect(r.feed!.subject!.label).toBe("bank-xcm-v2.1");
+    expect(r.feed!.subject).toMatchObject({ derivedFrom: V20, declared: V21, label: "bank-xcm-v2.1" });
   });
 });

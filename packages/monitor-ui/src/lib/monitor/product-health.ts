@@ -245,7 +245,9 @@ export interface CrossCheckView {
  */
 export interface BankLine {
   text: string;
-  tone: "ok" | "degraded" | "red" | "awaiting";
+  tone: "ok" | "degraded" | "red" | "awaiting" | "paused" | "neutral";
+  status?: string;
+  reason?: string | null;
 }
 
 export interface BankLaneView {
@@ -263,7 +265,7 @@ export interface BankLaneView {
    * "cannot confirm" is one of its answers.
    */
   subject?: BankLine;
-  tone: "ok" | "degraded" | "red" | "awaiting";
+  tone: "ok" | "degraded" | "red" | "awaiting" | "paused" | "neutral";
 }
 
 export interface BankBlock {

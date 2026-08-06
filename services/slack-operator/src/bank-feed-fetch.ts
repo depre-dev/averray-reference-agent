@@ -21,7 +21,14 @@
 // and the board stays quiet. Only a CONFIGURED feed that fails is a problem
 // worth a line on screen.
 
-import type { BankFeed, BankRequest, BankRequests, BankSubject, SourcedRead } from "./bank-feed.js";
+import type {
+  BankFeed,
+  BankRequest,
+  BankRequests,
+  BankSubject,
+  BankSubjectCandidate,
+  SourcedRead,
+} from "./bank-feed.js";
 
 export interface BankFeedRead {
   feed?: BankFeed;
@@ -96,18 +103,59 @@ export function normalizeBankFeed(body: unknown): BankFeedRead {
  * about an abandoned account this field exists to prevent, and a fabricated
  * mismatch is a RED that stops a lane which is actually fine.
  *
- * Both halves are required together — a subject that names only what it read,
- * with nothing to compare against, cannot answer the one question it is for.
+ * Both generations remain accepted during rollout. The current generation's
+ * `status` is OPEN vocabulary: structural validation protects the money
+ * subject while an unfamiliar status crosses intact and renders verbatim.
  */
 function subjectRecord(raw: unknown): BankSubject | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const s = raw as Record<string, unknown>;
-  if (typeof s.derivedFrom !== "string" || !s.derivedFrom.trim()) return undefined;
-  if (typeof s.declared !== "string" || !s.declared.trim()) return undefined;
+  if (typeof s.derivedFrom === "string" || typeof s.declared === "string") {
+    if (typeof s.derivedFrom !== "string" || !s.derivedFrom.trim()) return undefined;
+    if (typeof s.declared !== "string" || !s.declared.trim()) return undefined;
+    return {
+      derivedFrom: s.derivedFrom,
+      declared: s.declared,
+      ...(typeof s.label === "string" && s.label ? { label: s.label } : {}),
+    };
+  }
+
+  if (typeof s.configuredWrapper !== "string" || !s.configuredWrapper.trim()) return undefined;
+  if (typeof s.status !== "string" || !s.status.trim()) return undefined;
+  if (s.uniqueArmedWrapper !== null && typeof s.uniqueArmedWrapper !== "string") return undefined;
+  if (s.matches !== null && typeof s.matches !== "boolean") return undefined;
+  if (!Array.isArray(s.candidates)) return undefined;
+  if (s.readAtMs !== null && typeof s.readAtMs !== "number") return undefined;
+  if (s.reason !== null && typeof s.reason !== "string") return undefined;
+  if (s.lastError !== null && typeof s.lastError !== "string") return undefined;
+
+  const candidates: BankSubjectCandidate[] = [];
+  for (const rawCandidate of s.candidates) {
+    if (!rawCandidate || typeof rawCandidate !== "object") return undefined;
+    const candidate = rawCandidate as Record<string, unknown>;
+    if (typeof candidate.version !== "string" || !candidate.version.trim()) return undefined;
+    if (typeof candidate.wrapper !== "string" || !candidate.wrapper.trim()) return undefined;
+    if (candidate.dispatchPaused !== null && typeof candidate.dispatchPaused !== "boolean") return undefined;
+    if (candidate.lastError !== null && candidate.lastError !== undefined && typeof candidate.lastError !== "string") {
+      return undefined;
+    }
+    candidates.push({
+      version: candidate.version,
+      wrapper: candidate.wrapper,
+      dispatchPaused: candidate.dispatchPaused as boolean | null,
+      lastError: (candidate.lastError as string | null) ?? null,
+    });
+  }
+
   return {
-    derivedFrom: s.derivedFrom,
-    declared: s.declared,
-    ...(typeof s.label === "string" && s.label ? { label: s.label } : {}),
+    configuredWrapper: s.configuredWrapper,
+    uniqueArmedWrapper: (s.uniqueArmedWrapper as string | null) ?? null,
+    matches: (s.matches as boolean | null) ?? null,
+    status: s.status,
+    reason: (s.reason as string | null) ?? null,
+    candidates,
+    readAtMs: (s.readAtMs as number | null) ?? null,
+    lastError: (s.lastError as string | null) ?? null,
   };
 }
 
