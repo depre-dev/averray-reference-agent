@@ -12,6 +12,10 @@
     "./ops-verdict": {
       "types": "./dist/ops-verdict.d.ts",
       "import": "./dist/ops-verdict.js"
+    },
+    "./ops-next-step": {
+      "types": "./dist/ops-next-step.d.ts",
+      "import": "./dist/ops-next-step.js"
     }
   },
   "scripts": {

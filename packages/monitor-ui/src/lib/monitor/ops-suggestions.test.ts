@@ -16,6 +16,29 @@ describe("opsSuggestions", () => {
     expect(byId["money-stuck"].task?.repo).toContain("averray-reference-agent");
   });
 
+  test("the rendered text is EXACTLY what it was before the next-step map was shared", () => {
+    // These three strings now come from @avg/schemas/ops-next-step, which the
+    // pushed #Ops alerts read too — one source, two surfaces. Pinning them here
+    // is what makes that refactor provable: if the shared phrase changes, the
+    // board's wording changes with it, and this test says so out loud rather
+    // than letting the two drift into disagreeing about the same incident.
+    const health: ProductHealth = {
+      enabled: true,
+      at: 1,
+      status: "red",
+      checks: 10,
+      probes: [
+        { name: "signer_liquidity", status: "red", detail: "USDC 1.00 below floor 1.00", sparkline: [] },
+        { name: "treasury_liquidity", status: "red", detail: "reserve 2.00 USDC", sparkline: [] },
+        { name: "capabilities", status: "degraded", detail: "external posting staged", sparkline: [] },
+      ],
+    };
+    const byId = Object.fromEntries(opsSuggestions(health).map((s) => [s.id, s]));
+    expect(byId["signer-floor"].text).toBe("Reward bank below floor — top up before the next payout.");
+    expect(byId["treasury-floor"].text).toBe("Treasury reserve low — reserve 2.00 USDC. Refill (operator action).");
+    expect(byId["capabilities"].text).toBe("Capabilities — external posting staged. Check config.");
+  });
+
   test("live board → chain-frozen (informational); awaiting probes produce nothing", () => {
     const suggestions = opsSuggestions(OPS_FIXTURE_LIVE);
     const ids = suggestions.map((s) => s.id);

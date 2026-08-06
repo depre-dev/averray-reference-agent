@@ -16,6 +16,8 @@
 // specifics), so it works today without the structured solvency/flow blocks.
 // Awaiting-data probes never produce a suggestion (telemetry, not an incident).
 
+import { opsNextStep } from "@avg/schemas/ops-next-step";
+
 import type { ProductHealth } from "./product-health.js";
 import type { CreateTaskInput } from "./card-types.js";
 import { isAwaitingProbe } from "./ops-model.js";
@@ -39,6 +41,12 @@ function runwayEta(hoursToFloor: number): string {
   if (hoursToFloor <= 0) return "at floor";
   if (hoursToFloor < 48) return `~${Math.round(hoursToFloor)}h`;
   return `~${Math.round(hoursToFloor / 24)}d`;
+}
+
+/** Lowercase the first letter so a shared sentence can follow an em dash. */
+function lower(phrase: string | undefined): string {
+  if (!phrase) return "";
+  return phrase[0]!.toLowerCase() + phrase.slice(1);
 }
 
 export function opsSuggestions(health: ProductHealth | undefined): OpsSuggestion[] {
@@ -78,7 +86,7 @@ export function opsSuggestions(health: ProductHealth | undefined): OpsSuggestion
     out.push({
       id: "signer-floor",
       tone: signer.status === "red" ? "act" : "warn",
-      text: "Reward bank below floor — top up before the next payout.",
+      text: `Reward bank below floor — ${lower(opsNextStep("signer_liquidity"))}`,
       task: proposeTask(
         `Prepare a reward-bank top-up — do NOT move funds, PREPARE ONLY. The in-contract reward bank is at/below its floor: "${signer.detail}". Compute how much to add to restore a safe buffer (≈ 5× floor) and draft the exact brokered deposit steps/command for the operator to execute.`,
       ),
@@ -110,7 +118,7 @@ export function opsSuggestions(health: ProductHealth | undefined): OpsSuggestion
     out.push({
       id: "treasury-floor",
       tone: "act",
-      text: `Treasury reserve low — ${treasury.detail}. Refill (operator action).`,
+      text: `Treasury reserve low — ${treasury.detail}. ${opsNextStep("treasury_liquidity")}`,
       task: proposeTask(
         `Prepare a treasury refill — do NOT move funds, PREPARE ONLY. Treasury probe: "${treasury.detail}". Compute how much to move to restore a safe reserve and draft the exact steps for the operator to execute.`,
       ),
@@ -161,7 +169,7 @@ export function opsSuggestions(health: ProductHealth | undefined): OpsSuggestion
     out.push({
       id: "capabilities",
       tone: "warn",
-      text: `Capabilities — ${caps.detail}. Check config.`,
+      text: `Capabilities — ${caps.detail}. ${opsNextStep("capabilities")}`,
       task: proposeTask(
         `A product capability is degraded: "${caps.detail}". Identify which capability dropped and why (missing/expired cred, config, or upstream) and propose the config fix.`,
       ),

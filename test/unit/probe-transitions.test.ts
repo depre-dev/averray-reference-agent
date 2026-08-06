@@ -60,6 +60,7 @@ describe("decideProbeTransitions", () => {
     });
     expect(r.alerts).toHaveLength(1);
     expect(r.alerts[0]).toMatchObject({ probe: "external_funnel", kind: "opened", from: "ok", to: "red" });
+    // external_funnel has no considered next step, so nothing is appended.
     expect(r.alerts[0]?.text).toBe("✗ External funnel is red — rejected 0xaa4b… slashes in 9h");
   });
 
@@ -100,6 +101,36 @@ describe("decideProbeTransitions", () => {
       current: [p("x", "degraded", "b")],
     });
     expect(down.alerts).toHaveLength(1);
+  });
+
+  it("carries the next step on an OPENING alert, so a 3am page is actionable", () => {
+    // The board's co-pilot always knew what to do about a red money path; the
+    // pushed alert did not carry it, so the operator had to open a laptop to
+    // learn what the board already knew.
+    const r = decide({
+      previous: new Map([["money_path", p("money_path", "ok", "settled 14")]]),
+      current: [p("money_path", "red", "settlement stalled")],
+    });
+    expect(r.alerts[0]?.text).toBe(
+      "✗ Money path is red — settlement stalled · next: Trace the stuck settlements.",
+    );
+  });
+
+  it("appends NOTHING for a probe with no considered step", () => {
+    const r = decide({
+      previous: new Map([["external_funnel", p("external_funnel", "ok", "0 in window")]]),
+      current: [p("external_funnel", "red", "bond slashable now")],
+    });
+    expect(r.alerts[0]?.text).not.toContain("next:");
+  });
+
+  it("never appends a next step to a RECOVERY — it healed, nothing to do", () => {
+    const r = decide({
+      previous: new Map([["money_path", p("money_path", "red", "stalled")]]),
+      current: [p("money_path", "ok", "settled 14, backlog 0")],
+    });
+    expect(r.alerts[0]?.kind).toBe("recovered");
+    expect(r.alerts[0]?.text).not.toContain("next:");
   });
 
   it("posts one recovery when a probe returns to ok", () => {
