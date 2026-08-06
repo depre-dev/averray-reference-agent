@@ -125,7 +125,11 @@ export interface HermesBoardCardSnapshot {
  */
 export interface HermesProductHealthSnapshot {
   status: string;
-  probes: ReadonlyArray<{ name: string; status: string; detail: string }>;
+  /** `reading: "unknown"` marks a probe that took NO reading of its subject.
+   *  Carried structurally rather than left to the detail prose: asked "is the
+   *  money path degraded?", a model shown only `status: degraded` will answer
+   *  yes about a subject nobody managed to observe. */
+  probes: ReadonlyArray<{ name: string; status: string; reading?: string; detail: string }>;
 }
 
 export interface HermesBoardSnapshot {

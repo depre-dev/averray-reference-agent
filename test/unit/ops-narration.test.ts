@@ -56,23 +56,19 @@ describe("decideOpsNarration", () => {
     expect(d.suppressed).toBe("muted");
   });
 
-  it("uses the product-health cooldown to damp red/recovered narration thrash", () => {
+  it("uses the product-health cooldown to damp a REPEATED red", () => {
     const lastPostedAtMs = 1_000;
-    const recovered = decideOpsNarration({
-      prev: "red",
-      curr: "healthy",
-      probes: probes(),
+    const tooSoon = decideOpsNarration({
+      prev: "healthy",
+      curr: "red",
+      probes: probes({ money_path: "red" }),
       network: "mainnet",
       muted: false,
       lastPostedAtMs,
       nowMs: 2_000,
       cooldownMs: 60_000,
     });
-    expect(recovered).toMatchObject({
-      post: false,
-      edge: "recovered",
-      suppressed: "cooldown",
-    });
+    expect(tooSoon).toMatchObject({ post: false, edge: "red", suppressed: "cooldown" });
 
     const redAgain = decideOpsNarration({
       prev: "healthy",
@@ -86,5 +82,131 @@ describe("decideOpsNarration", () => {
     });
     expect(redAgain.post).toBe(true);
     expect(redAgain.edge).toBe("red");
+  });
+
+  // ── 2026-08-06 ────────────────────────────────────────────────────────────
+  // The red was announced, Buzz-published and paged. Five minutes later the
+  // probe recovered and the all-clear was dropped on the floor:
+  //   {"edge":"recovered","suppressed":"cooldown","msg":"ops_narration_suppressed"}
+  // The cooldown defaults to six hours, so this did not delay the recovery
+  // message — it deleted it. The last thing any human heard was a false alarm.
+  describe("an announced red is always closed", () => {
+    it("publishes the recovery INSIDE the cooldown window when the red was announced", () => {
+      const cooldownMs = 6 * 60 * 60 * 1000; // the shipped default
+      const red = decideOpsNarration({
+        prev: "healthy",
+        curr: "red",
+        probes: probes({ money_path: "red" }),
+        network: "mainnet",
+        muted: false,
+        lastPostedAtMs: 0,
+        nowMs: 1_000,
+        cooldownMs,
+      });
+      expect(red.post).toBe(true);
+      expect(red.redAnnounced).toBe(true);
+
+      // Recovery five minutes later — deep inside the six-hour cooldown.
+      const recovered = decideOpsNarration({
+        prev: "red",
+        curr: "healthy",
+        probes: probes(),
+        network: "mainnet",
+        muted: false,
+        lastPostedAtMs: 1_000,
+        nowMs: 1_000 + 5 * 60 * 1000,
+        cooldownMs,
+        redAnnounced: red.redAnnounced,
+      });
+      expect(recovered.post).toBe(true);
+      expect(recovered.suppressed).toBeUndefined();
+      expect(recovered.edge).toBe("recovered");
+      expect(recovered.text).toContain("Ops recovered");
+      // …and the incident is now closed, so nothing is left owed.
+      expect(recovered.redAnnounced).toBe(false);
+    });
+
+    it("stays quiet about a red it suppressed itself", () => {
+      const cooldownMs = 60_000;
+      const suppressedRed = decideOpsNarration({
+        prev: "healthy",
+        curr: "red",
+        probes: probes({ money_path: "red" }),
+        network: "mainnet",
+        muted: false,
+        lastPostedAtMs: 1_000,
+        nowMs: 2_000,
+        cooldownMs,
+      });
+      expect(suppressedRed).toMatchObject({ post: false, suppressed: "cooldown", redAnnounced: false });
+
+      const recovered = decideOpsNarration({
+        prev: "red",
+        curr: "healthy",
+        probes: probes(),
+        network: "mainnet",
+        muted: false,
+        lastPostedAtMs: 1_000,
+        nowMs: 3_000,
+        cooldownMs,
+        redAnnounced: suppressedRed.redAnnounced,
+      });
+      // An all-clear for an alarm nobody was given implies there was something
+      // to be clear of.
+      expect(recovered.post).toBe(false);
+      expect(recovered.suppressed).toBe("never-announced");
+    });
+
+    it("closes an incident inherited across a restart (no bookkeeping ≠ never announced)", () => {
+      // A fresh process booted into an ongoing red a previous one announced.
+      const recovered = decideOpsNarration({
+        prev: "red",
+        curr: "healthy",
+        probes: probes(),
+        network: "mainnet",
+        muted: false,
+        lastPostedAtMs: 1_000,
+        nowMs: 2_000,
+        cooldownMs: 60_000,
+        // redAnnounced deliberately absent
+      });
+      expect(recovered.post).toBe(true);
+    });
+
+    it("keeps the announced red open across ticks until something closes it", () => {
+      const stillRed = decideOpsNarration({
+        prev: "red",
+        curr: "red",
+        probes: probes({ money_path: "red" }),
+        network: "mainnet",
+        muted: false,
+        redAnnounced: true,
+      });
+      expect(stillRed.post).toBe(false);
+      expect(stillRed.redAnnounced).toBe(true);
+    });
+
+    it("mute silences both edges, and leaves no alarm owed", () => {
+      // Mute is an explicit operator action, not an automatic damper: it
+      // silences the opening red too, so nothing is left dangling.
+      const red = decideOpsNarration({
+        prev: "healthy",
+        curr: "red",
+        probes: probes({ money_path: "red" }),
+        network: "mainnet",
+        muted: true,
+      });
+      expect(red).toMatchObject({ post: false, suppressed: "muted", redAnnounced: false });
+
+      const recovered = decideOpsNarration({
+        prev: "red",
+        curr: "healthy",
+        probes: probes(),
+        network: "mainnet",
+        muted: true,
+        redAnnounced: red.redAnnounced,
+      });
+      expect(recovered).toMatchObject({ post: false, suppressed: "muted", redAnnounced: false });
+    });
   });
 });

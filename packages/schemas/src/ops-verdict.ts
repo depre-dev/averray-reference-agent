@@ -21,10 +21,24 @@
 export type VerdictStatus = "ok" | "degraded" | "red";
 export type VerdictTone = "ok" | "degraded" | "red" | "awaiting";
 
+/**
+ * Whether the probe OBSERVED its subject — a second axis, orthogonal to status.
+ *
+ * `"unknown"` means it took no reading at all (the transport failed before any
+ * response arrived). That is never evidence the subject is degraded, so an
+ * unknown reading is greyed and cannot take the verdict — up until the probe
+ * itself decides the fault has persisted long enough to red, which is a claim
+ * about REACHABILITY and is worded as one.
+ *
+ * Absent ⇒ observed. Producers that predate the field are unaffected.
+ */
+export type VerdictReading = "observed" | "unknown";
+
 export interface VerdictProbe {
   name: string;
   status: VerdictStatus;
   detail: string;
+  reading?: VerdictReading;
 }
 
 export interface VerdictPool {
@@ -81,6 +95,7 @@ export type VerdictReason =
   | "probe-red"
   | "payout-shortfall"
   | "probe-degraded"
+  | "probe-unknown"
   | "pool-draining"
   | "nominal";
 
@@ -124,8 +139,32 @@ const AWAITING_RE = /awaiting|not expose|not wired|not configured|unconfigured|n
  * required `degraded` all along. They are siblings and should never have
  * differed.
  */
-export function isAwaitingProbe(probe: { status: VerdictStatus; detail: string }): boolean {
+export function isAwaitingProbe(probe: { status: VerdictStatus; detail: string; reading?: VerdictReading }): boolean {
+  // A probe that took no reading is grey by DECLARATION, not by prose. That is
+  // the whole point of the second axis: the paragraph above is a list of ways
+  // the string-matching version got it wrong, and every one of them is a bug
+  // this branch cannot have.
+  //
+  // `red` is excluded for the same reason it always was — a page-worthy probe
+  // leads the verdict whatever else is true of it. A red WITH an unknown reading
+  // is not silently downgraded; it is worded as unreachability instead of as a
+  // verdict on the subject (see deriveOpsVerdict).
+  if (probe.reading === "unknown") return probe.status !== "red";
   return probe.status === "degraded" && AWAITING_RE.test(probe.detail);
+}
+
+/**
+ * A probe with no reading of its subject — grey, and never a finding about it.
+ *
+ * `status` is typed loosely on purpose. Several consumers (the morning digest
+ * among them) carry probes with a bare `string` status, and the alternative to
+ * accepting them is a second copy of this predicate living somewhere else. This
+ * file already documents where that road goes: the awaiting classifier was
+ * duplicated once under a comment reading "mirrors the frontend's regex", and
+ * the two drifted. One classifier, slightly loose, beats two that agree today.
+ */
+export function isUnknownReadingProbe(probe: { status: string; reading?: string }): boolean {
+  return probe.reading === "unknown" && probe.status !== "red";
 }
 
 // A degradation the operator has already triaged and declared expected. On
@@ -155,17 +194,24 @@ function unacknowledgedDegraded(probes: readonly VerdictProbe[]): VerdictProbe[]
   );
 }
 
-/** Acknowledged degradations are COUNTED and LABELLED, never dropped. */
+/** Acknowledged degradations are COUNTED and LABELLED, never dropped.
+ *
+ *  "Unknown" gets its own bucket rather than being folded into "awaiting data".
+ *  They are different facts — awaiting means the product does not publish this
+ *  yet, unknown means we could not read what it does publish — and a reader
+ *  deciding whether to trust the rest of the board needs to tell them apart. */
 export function probeCensus(probes: readonly VerdictProbe[]): string {
-  const awaiting = probes.filter(isAwaitingProbe).length;
+  const unknown = probes.filter(isUnknownReadingProbe).length;
+  const awaiting = probes.filter((p) => isAwaitingProbe(p) && !isUnknownReadingProbe(p)).length;
   const red = probes.filter((p) => p.status === "red").length;
   const acked = probes.filter((p) => isAcknowledgedProbe(p) && !isAwaitingProbe(p)).length;
   const degraded = unacknowledgedDegraded(probes).length;
-  const ok = probes.length - red - degraded - acked - awaiting;
+  const ok = probes.length - red - degraded - acked - awaiting - unknown;
   const parts = [`${ok} ok`];
   if (degraded > 0) parts.push(`${degraded} degraded`);
   if (acked > 0) parts.push(`${acked} degraded (acknowledged)`);
   if (awaiting > 0) parts.push(`${awaiting} awaiting data`);
+  if (unknown > 0) parts.push(`${unknown} unknown`);
   parts.push(`${red} red`);
   return parts.join(" / ");
 }
@@ -265,8 +311,13 @@ export function deriveOpsVerdict(input: VerdictInput): OpsVerdict {
   if (reds.length > 0) {
     const lead = reds[0]!;
     const extra = reds.length > 1 ? ` +${reds.length - 1}` : "";
+    // A red we could not READ is a red about the path, not about the subject.
+    // "PRODUCT API RED" over a container DNS failure is the false alarm that
+    // cost an operator five hours of believing the product was down on
+    // 2026-08-06; "PRODUCT API UNREACHABLE" is the same alarm, truthfully named.
+    const unreadable = lead.reading === "unknown";
     return {
-      headline: `${verdictProbeLabel(lead.name).toUpperCase()} RED${extra}`,
+      headline: `${verdictProbeLabel(lead.name).toUpperCase()} ${unreadable ? "UNREACHABLE" : "RED"}${extra}`,
       tone: "red",
       sub: `${lead.detail} · ${census}`,
       census,
@@ -296,6 +347,34 @@ export function deriveOpsVerdict(input: VerdictInput): OpsVerdict {
       sub: `${lead.detail} · ${census}`,
       census,
       reason: "probe-degraded",
+    };
+  }
+
+  // NOTHING READ IS NOT NOTHING WRONG.
+  //
+  // Ranked below observed degradations on purpose: a fault you can see is more
+  // actionable than one you cannot, and burying it under "we could not read
+  // four probes" would be its own kind of blindness.
+  //
+  // But it MUST outrank nominal. During the 2026-08-06 DNS failure the four
+  // /health-derived probes had no reading at all, and with them correctly
+  // greyed out the remaining probes were green — so without this branch the
+  // board would answer a blind monitor with "NOMINAL". That is the fake green
+  // this whole file exists to prevent, arrived at from the opposite direction.
+  //
+  // Tone is `awaiting`, not `degraded`: grey says "we do not know", amber would
+  // say "something is wrong with the product", and the entire point is that we
+  // have not established that.
+  const unknown = probes.filter(isUnknownReadingProbe);
+  if (unknown.length > 0) {
+    const lead = unknown[0]!;
+    const extra = unknown.length > 1 ? ` +${unknown.length - 1}` : "";
+    return {
+      headline: `${verdictProbeLabel(lead.name).toUpperCase()} UNKNOWN${extra}`,
+      tone: "awaiting",
+      sub: `${lead.detail} · ${census}`,
+      census,
+      reason: "probe-unknown",
     };
   }
 

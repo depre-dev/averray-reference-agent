@@ -156,3 +156,62 @@ describe("pillarStatuses", () => {
     expect(byLabel.Availability).toBe("ok");
   });
 });
+
+// ── The banner that got it wrong on 2026-08-06 ──────────────────────────────
+//
+// "Product API red — … / Settlement-affecting — on-call is paged." was the
+// largest sentence on the board for five hours, about a product that never
+// stopped serving 200s. The only thing established was that this container
+// could not resolve the host.
+describe("opsBannerData — a red the probe could not read", () => {
+  const unreachable = (over: Partial<ProductHealth> = {}): ProductHealth => ({
+    enabled: true,
+    at: FIXTURE_NOW,
+    status: "red",
+    checks: 10,
+    network: "mainnet",
+    probes: [
+      {
+        name: "product_api",
+        status: "red",
+        reading: "unknown",
+        detail: "probe cannot reach https://api.averray.com/health — DNS resolution failed (ENOTFOUND) · 3 consecutive checks",
+        sparkline: [],
+      },
+    ],
+    ...over,
+  });
+
+  test("says unreachable, not red", () => {
+    const b = opsBannerData(unreachable(), FIXTURE_NOW);
+    expect(b.headline).toContain("unreachable from the monitor");
+    expect(b.headline).not.toMatch(/\bred\b/);
+  });
+
+  test("does not claim settlement is affected", () => {
+    const b = opsBannerData(unreachable(), FIXTURE_NOW);
+    expect(b.sub).not.toContain("Settlement-affecting");
+    expect(b.sub).toContain("whether the product is affected is unknown");
+    expect((b.mostUrgentReasons ?? []).map((r) => r.label)).toEqual(["unreachable", "mainnet"]);
+  });
+
+  test("still carries the cause code, so it is diagnosable from the banner", () => {
+    expect(opsBannerData(unreachable(), FIXTURE_NOW).headline).toContain("ENOTFOUND");
+  });
+
+  test("agrees with the shared verdict headline rather than contradicting it", () => {
+    // deriveOpsVerdict says PRODUCT API UNREACHABLE. Two derivations disagreeing
+    // on one screen is worse than either being wrong alone.
+    const b = opsBannerData(unreachable(), FIXTURE_NOW);
+    expect(b.headline.toLowerCase()).toContain("unreachable");
+  });
+
+  test("an observed red still reads as page-worthy", () => {
+    const answered = unreachable({
+      probes: [{ name: "money_path", status: "red", detail: "6 jobs stuck (submitted, unsettled ≥ 5)", sparkline: [] }],
+    });
+    const b = opsBannerData(answered, FIXTURE_NOW);
+    expect(b.headline).toContain("red");
+    expect(b.sub).toContain("Settlement-affecting");
+  });
+});

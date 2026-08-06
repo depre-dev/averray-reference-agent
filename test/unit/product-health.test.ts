@@ -129,6 +129,14 @@ function throwingFetch(): typeof fetch {
   }) as unknown as typeof fetch;
 }
 
+/** What undici actually throws when the container's resolver is down. */
+function dnsFailingFetch(host = "api.averray.com"): typeof fetch {
+  return (async () => {
+    const inner = Object.assign(new Error(`getaddrinfo ENOTFOUND ${host}`), { code: "ENOTFOUND" });
+    throw Object.assign(new TypeError("fetch failed"), { cause: inner });
+  }) as unknown as typeof fetch;
+}
+
 const probe = (name: string, status: ProbeResult["status"], detail = ""): ProbeResult => ({ name, status, detail });
 
 // A realistic slice of the live Averray /health payload (testnet chainId 420420417).
@@ -157,6 +165,19 @@ const fetched = (body: ProductHealthPayload, over: Partial<ProductHealthFetch> =
   status: 200,
   url: "https://api.x/health",
   body,
+  ...over,
+});
+
+/** A /health read that died below HTTP — no response ever arrived. */
+const unreachable = (over: Partial<ProductHealthFetch> = {}): ProductHealthFetch => ({
+  configured: true,
+  reachable: false,
+  httpOk: false,
+  status: 0,
+  url: "https://api.x/health",
+  error: "fetch failed",
+  transport: { kind: "dns", code: "ENOTFOUND", message: "getaddrinfo ENOTFOUND api.x" },
+  latencyMs: 12,
   ...over,
 });
 
@@ -237,9 +258,60 @@ describe("deriveProductApiProbe", () => {
     expect(deriveProductApiProbe({ configured: false, reachable: false, httpOk: false, status: 0, url: "" }).status).toBe("degraded");
   });
 
-  it("red when unreachable", () => {
-    const r = deriveProductApiProbe({ configured: true, reachable: false, httpOk: false, status: 0, url: "https://api.x/health", error: "ENOTFOUND" });
+  // ── 2026-08-06: five minutes of container-local DNS failure, paged as an
+  // outage of a product that was serving 200s from outside the whole time. ──
+
+  it("holds unknown — not red — on the FIRST unreachable cycle", () => {
+    const r = deriveProductApiProbe(unreachable(), { transportRun: { code: "ENOTFOUND", consecutive: 1 } });
+    expect(r.status).not.toBe("red");
+    expect(r.reading).toBe("unknown");
+  });
+
+  it("names the cause code and the layer, never bare 'fetch failed'", () => {
+    const r = deriveProductApiProbe(unreachable(), { transportRun: { code: "ENOTFOUND", consecutive: 1 } });
+    expect(r.detail).toContain("ENOTFOUND");
+    expect(r.detail).toContain("DNS resolution failed");
+    expect(r.detail).not.toContain("fetch failed");
+  });
+
+  it("claims only what it knows: unreachable FROM HERE, product state unknown", () => {
+    const r = deriveProductApiProbe(unreachable(), { transportRun: { code: "ENOTFOUND", consecutive: 1 } });
+    expect(r.detail).toContain("probe cannot reach");
+    expect(r.detail).toContain("unknown from here");
+    // The claim it must never make on transport evidence alone.
+    expect(r.detail).not.toMatch(/\bis down\b|\bunavailable\b/);
+  });
+
+  it("reds once the fault has persisted for the threshold — still worded as unreachability", () => {
+    const r = deriveProductApiProbe(unreachable(), { transportRun: { code: "ENOTFOUND", consecutive: 3 } });
     expect(r.status).toBe("red");
+    // Red is the volume, not a new claim: the reading is still unknown, so every
+    // renderer words this as "unreachable", not as a verdict on the product.
+    expect(r.reading).toBe("unknown");
+    expect(r.detail).toContain("3 consecutive checks");
+    expect(r.detail).toContain("unreachable from the monitor");
+  });
+
+  it("respects a configured threshold", () => {
+    const at2 = { transportRun: { code: "ENOTFOUND", consecutive: 2 }, transportThreshold: 2 };
+    expect(deriveProductApiProbe(unreachable(), at2).status).toBe("red");
+    expect(deriveProductApiProbe(unreachable(), { ...at2, transportRun: { code: "ENOTFOUND", consecutive: 1 } }).status)
+      .toBe("degraded");
+  });
+
+  it("treats an unclassified unreachable as a transport fault too (never silently red on cycle 1)", () => {
+    // A caller that hand-builds the fetch result carries no `transport`. That is
+    // an absence of classification, not evidence the product answered.
+    const r = deriveProductApiProbe({ configured: true, reachable: false, httpOk: false, status: 0, url: "https://api.x/health", error: "boom" });
+    expect(r.status).toBe("degraded");
+    expect(r.reading).toBe("unknown");
+  });
+
+  it("an HTTP response is evidence about the PRODUCT — reds immediately, no hold", () => {
+    // The distinction the whole change rests on: 503 means it answered.
+    const r = deriveProductApiProbe(fetched(HEALTHY_BODY, { httpOk: false, status: 503 }));
+    expect(r.status).toBe("red");
+    expect(r.reading).toBeUndefined();
   });
 
   it("red on a non-2xx and on a self-reported unhealthy service", () => {
@@ -251,6 +323,53 @@ describe("deriveProductApiProbe", () => {
     const r = deriveProductApiProbe(fetched(HEALTHY_BODY));
     expect(r.status).toBe("ok");
     expect(r.detail).toContain("420420417");
+  });
+});
+
+describe("probes that read OUT of /health, when /health never arrived", () => {
+  // All four derive from the same one fetch. When it fails below HTTP they hold
+  // no evidence about their subjects — so on 2026-08-06 one DNS failure
+  // manufactured four simultaneous findings about a product nobody had reached.
+  const dependents = (): Array<[string, ProbeResult]> => [
+    ["chain_height", deriveChainProbe(unreachable())],
+    ["capabilities", deriveCapabilityProbe(unreachable(), { requiredCapabilities: ["blockchain"], expectedWarnings: [] })],
+    ["api_latency", deriveLatencyProbe(unreachable(), { warnMs: 2000, redMs: 8000 })],
+    ["money_path", deriveMoneyPathProbe(unreachable(), { maxStuck: 5, maxFailed24h: 3, maxStaleMinutes: 30, nowMs: 0 })],
+  ];
+
+  it("reads unknown, not degraded — no reading is not a finding", () => {
+    for (const [name, probe] of dependents()) {
+      expect(probe.reading, name).toBe("unknown");
+    }
+  });
+
+  it("never reds, however long the fault persists — product_api owns that claim", () => {
+    for (const [name, probe] of dependents()) {
+      expect(probe.status, name).not.toBe("red");
+    }
+  });
+
+  it("says the subject is unknown AND what it is not being claimed to be", () => {
+    // external_funnel's "funnel state unknown, not empty" is the model.
+    const byName = new Map(dependents());
+    expect(byName.get("money_path")!.detail).toContain("settlement state unknown, not stalled");
+    expect(byName.get("chain_height")!.detail).toContain("chain height unknown, not halted");
+    expect(byName.get("capabilities")!.detail).toContain("capability state unknown, not down");
+    expect(byName.get("api_latency")!.detail).toContain("round-trip latency unknown, not slow");
+  });
+
+  it("carries the cause code so the fault is diagnosable from the line alone", () => {
+    for (const [name, probe] of dependents()) {
+      expect(probe.detail, name).toContain("ENOTFOUND");
+    }
+  });
+
+  it("still reports a plain 503 as a degraded READING, not as unknown", () => {
+    // The product answered. That is evidence, and it must keep its old meaning.
+    const served503 = fetched(HEALTHY_BODY, { httpOk: false, status: 503 });
+    const money = deriveMoneyPathProbe(served503, { maxStuck: 5, maxFailed24h: 3, maxStaleMinutes: 30, nowMs: 0 });
+    expect(money.reading).toBeUndefined();
+    expect(money.detail).toContain("settlement status unavailable");
   });
 });
 
@@ -2095,5 +2214,83 @@ describe("a payout shortfall pages even with every probe green", () => {
     expect(lines[3]).toContain("api_latency");             // latency last
     expect(text).toContain("9 commits behind main");       // provenance
     expect(text).toContain("3 money-blocking signals");
+  });
+});
+
+// ── THE 2026-08-06 INCIDENT, END TO END ─────────────────────────────────────
+//
+// Container-local DNS failed 14:58:33–15:03:34 UTC. The product was never down;
+// 200s were served from outside throughout. What shipped to a human was
+// "Product API is red — https://api.averray.com/health unreachable: fetch
+// failed", and on-call was paged.
+//
+// This drives the real collector across cycles, because the hold only works if
+// the run state is actually threaded — a correct decision function wired to a
+// state that resets every tick reproduces the incident exactly.
+describe("a container DNS failure, cycle by cycle", () => {
+  const cycle = async (transportRun: Awaited<ReturnType<typeof collectProductHealthProbes>>["transportRun"]) =>
+    collectProductHealthProbes(cfg(), dnsFailingFetch(), {
+      nowMs: 10_000_000,
+      ...(transportRun ? { transportRun } : {}),
+    });
+
+  it("does not page on the first two cycles, and pages on the third", async () => {
+    const first = await cycle(undefined);
+    const api1 = first.probes.find((p) => p.name === "product_api")!;
+    expect(api1.status).not.toBe("red");
+    expect(api1.reading).toBe("unknown");
+    expect(first.transportRun).toEqual({ code: "ENOTFOUND", consecutive: 1 });
+
+    const second = await cycle(first.transportRun);
+    expect(second.probes.find((p) => p.name === "product_api")!.status).not.toBe("red");
+
+    const third = await cycle(second.transportRun);
+    const api3 = third.probes.find((p) => p.name === "product_api")!;
+    expect(api3.status).toBe("red");
+    expect(api3.detail).toContain("3 consecutive checks");
+  });
+
+  it("names ENOTFOUND rather than relaying undici's 'fetch failed'", async () => {
+    const { probes } = await cycle(undefined);
+    const api = probes.find((p) => p.name === "product_api")!;
+    expect(api.detail).toContain("ENOTFOUND");
+    expect(api.detail).not.toContain("fetch failed");
+  });
+
+  it("leaves every /health-derived probe UNKNOWN, not degraded", async () => {
+    const { probes } = await cycle(undefined);
+    const byName = new Map(probes.map((p) => [p.name, p] as const));
+    for (const name of ["chain_height", "capabilities", "api_latency", "money_path"]) {
+      expect(byName.get(name)!.reading, name).toBe("unknown");
+      expect(byName.get(name)!.status, name).not.toBe("red");
+    }
+  });
+
+  it("clears the run the instant a read succeeds", async () => {
+    const blind = await cycle(undefined);
+    const recovered = await collectProductHealthProbes(
+      cfg(),
+      combinedFetch({ healthBody: HEALTHY_BODY, chainIdHex: CHAIN_ID_HEX, blockTimestampHex: tsHex(10_000_000, 12), gasHex: "0xDE0B6B3A7640000", usdcHex: "0x989680" }),
+      { nowMs: 10_000_000, ...(blind.transportRun ? { transportRun: blind.transportRun } : {}) },
+    );
+    expect(recovered.transportRun).toBeUndefined();
+    const api = recovered.probes.find((p) => p.name === "product_api")!;
+    expect(api.status).toBe("ok");
+    expect(api.reading).toBeUndefined();
+  });
+
+  it("does not count our own blindness as product downtime", async () => {
+    // uptime% is over DETERMINATE product_api samples. A window in which we
+    // could not reach the host contains no evidence either way, and folding it
+    // in would publish our DNS outage as the product's availability figure.
+    const blind = await cycle(undefined);
+    const api = blind.probes.find((p) => p.name === "product_api")!;
+    const history = [
+      { at: 1_000, status: "healthy" as ProductHealthStatus, probes: [probe("product_api", "ok", "200")] },
+      { at: 2_000, status: "degraded" as ProductHealthStatus, probes: [api] },
+    ];
+    const derived = deriveProductHealthHistory(history, 3_000);
+    expect(derived.uptimePct24h).toBe(100);
+    expect(derived.uptimeSamples).toBe(1);
   });
 });

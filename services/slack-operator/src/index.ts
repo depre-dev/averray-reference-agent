@@ -195,6 +195,7 @@ import {
   type ProductHealthSnapshot,
   type ProductHealthSnapshotBlocks,
 } from "./product-health.js";
+import type { TransportFailureRun } from "./probe-transport.js";
 import { deriveOpsVerdict } from "@avg/schemas";
 import { appendIncidents, readIncidents, reconcileIncidents } from "./product-health-incidents.js";
 import {
@@ -311,6 +312,8 @@ let productHealthIncidentsHydrated = false;
 const PRODUCT_HEALTH_INCIDENT_MAX = 200;
 // Block-advance tracker so a frozen chain (static height) isn't read as green.
 let productHealthChainAdvance: ChainAdvance | undefined;
+// Consecutive /health transport failures, so one DNS blip cannot page on-call.
+let productHealthTransportRun: TransportFailureRun | undefined;
 // Structured snapshot blocks (chain id / network / solvency / flow) for the Ops board.
 let productHealthSnapshotBlocks: ProductHealthSnapshotBlocks | undefined;
 
@@ -849,6 +852,11 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
         name: p.name,
         status: p.status,
         detail: p.detail,
+        // Emitted only when it says something. An agent reading this endpoint
+        // must be able to tell "the money path is degraded" from "we could not
+        // read the money path" WITHOUT parsing the prose — that distinction is
+        // the whole reason the field exists.
+        ...(p.reading === "unknown" ? { reading: p.reading } : {}),
         sparkline: probeSparkline(productHealthHistory, p.name, 30),
       })),
       // Structured Ops-board blocks (chain id / network / solvency / flow),
@@ -1869,7 +1877,12 @@ function currentProductHealthForHermes(): HermesProductHealthSnapshot | undefine
   if (!last) return undefined;
   return {
     status: last.status ?? "unknown",
-    probes: (last.probes ?? []).map((p) => ({ name: p.name, status: p.status, detail: p.detail })),
+    probes: (last.probes ?? []).map((p) => ({
+      name: p.name,
+      status: p.status,
+      ...(p.reading === "unknown" ? { reading: p.reading } : {}),
+      detail: p.detail,
+    })),
   };
 }
 
@@ -3367,6 +3380,11 @@ function startOperatorRoutines() {
   // only on an edge across the red boundary (entered-red / recovered).
   let prevProductHealthStatus: OpsStatus = "unknown";
   let lastOpsNarrationPostedAtMs = 0;
+  // Is there an announced red still waiting on its all-clear? Threaded so a
+  // recovery can never be silenced by the cooldown that damps repeated reds.
+  // Starts undefined, not false: this process may have booted into an incident
+  // a previous one announced, and that alarm still deserves closing.
+  let opsNarrationRedAnnounced: boolean | undefined;
   // Per-probe edge detection. Held in memory on purpose: after a restart every
   // probe is "first sight" and says nothing, which is the correct behaviour —
   // a redeploy must not page the operator about states that have not changed.
@@ -3653,8 +3671,10 @@ function startOperatorRoutines() {
         nowMs: Date.now(),
         previousSubmittedNotSettled:
           productHealthSnapshotBlocks?.flow?.submittedNotSettled,
+        ...(productHealthTransportRun ? { transportRun: productHealthTransportRun } : {}),
       });
       productHealthChainAdvance = collection.chainAdvance;
+      productHealthTransportRun = collection.transportRun;
       productHealthSnapshotBlocks = collection.snapshot;
       // Decide + apply RPC auto-remediation from this cycle's read health. Pure
       // decision; the only effect is rotating which endpoint we read next tick
@@ -3814,8 +3834,10 @@ function startOperatorRoutines() {
         lastPostedAtMs: lastOpsNarrationPostedAtMs,
         nowMs: opsNarrationNowMs,
         cooldownMs: routineConfig.productHealth.cooldownMs,
+        ...(opsNarrationRedAnnounced === undefined ? {} : { redAnnounced: opsNarrationRedAnnounced }),
       });
       prevProductHealthStatus = result.status as OpsStatus;
+      opsNarrationRedAnnounced = opsNarration.redAnnounced;
       if (opsNarration.post && opsNarration.text) {
         try {
           recordCollaborationMessage({ author: "hermes", text: opsNarration.text, kind: "chat" });

@@ -144,9 +144,16 @@ export function reasonClass(probe: ProbeResult): string {
  * these land on a phone now — outranked grep, and the reason-class `key`
  * still carries the enum for anything programmatic.
  */
-function alertText(probe: ProbeResult, kind: "opened" | "recovered", before?: ProbeStatus): string {
+function alertText(probe: ProbeResult, kind: "opened" | "recovered", before?: ProbeResult): string {
   const label = probeLabel(probe.name);
-  if (kind === "recovered") return `✓ ${label} recovered — ${probe.detail}`;
+  if (kind === "recovered") {
+    // "recovered" claims the subject got better. When the alarm being closed was
+    // that we could not READ the subject, the honest verb is that it became
+    // readable again — we never established it was unwell in the first place.
+    return before?.reading === "unknown"
+      ? `✓ ${label} readable again — ${probe.detail}`
+      : `✓ ${label} recovered — ${probe.detail}`;
+  }
 
   // The next step rides ONLY on an opening alert. A recovery needs no advice,
   // and appending one would read as "it healed, now go do something".
@@ -156,12 +163,32 @@ function alertText(probe: ProbeResult, kind: "opened" | "recovered", before?: Pr
   const step = opsNextStep(probe.name);
   const next = step ? ` · next: ${step}` : "";
 
+  // A red with no reading is page-worthy UNREACHABILITY, not a verdict on the
+  // subject. "Product API is red — fetch failed" was the 2026-08-06 headline,
+  // and it was wrong twice: the product was up, and the actual fault (ENOTFOUND
+  // inside our own container) was nowhere in the sentence.
+  if (probe.status === "red" && probe.reading === "unknown") {
+    return `✗ ${label} unreachable from the monitor — ${probe.detail}${next}`;
+  }
   if (probe.status === "red") return `✗ ${label} is red — ${probe.detail}${next}`;
-  if (before === "red") return `⚠ ${label} eased to degraded — ${probe.detail}${next}`;
+  if (before?.status === "red") return `⚠ ${label} eased to degraded — ${probe.detail}${next}`;
   return `⚠ ${label} degraded — ${probe.detail}${next}`;
 }
 
-const isAlarm = (status: ProbeStatus): boolean => status === "degraded" || status === "red";
+/**
+ * Is this probe reporting something worth alerting on?
+ *
+ * A probe with no READING is not. It holds no evidence about its subject, so
+ * "money path degraded — settlement state unknown" is an alert about our own
+ * network, repeated once per dependent probe. On 2026-08-06 that would have
+ * been four of them for one DNS failure, on top of the false red.
+ *
+ * A red is always an alarm, unknown reading or not: by the time a probe reds on
+ * an unreadable subject it has decided the fault persisted long enough to need
+ * a human, and `alertText` words it as unreachability rather than as a verdict.
+ */
+const isAlarm = (probe: { status: ProbeStatus; reading?: ProbeResult["reading"] }): boolean =>
+  probe.status === "red" || (probe.status === "degraded" && probe.reading !== "unknown");
 
 /**
  * Decide which probes changed in a way worth saying out loud.
@@ -214,7 +241,7 @@ export function decideProbeTransitions(input: DecideProbeTransitionsInput): Prob
     // Production found this, not the tests: three deploys in one night produced
     // three duplicate money_path alerts, each one tick after a restart.
     if (!before) {
-      if (isAlarm(probe.status)) {
+      if (isAlarm(probe)) {
         // Marked ANNOUNCED on first sight, deliberately. An alarm that was
         // already burning when this process started is not news, and without
         // this it would simply re-earn its hold and page three ticks after every
@@ -226,11 +253,11 @@ export function decideProbeTransitions(input: DecideProbeTransitionsInput): Prob
       }
       continue;
     }
-    if (before.status === probe.status && !isAlarm(probe.status)) continue;
+    if (before.status === probe.status && !isAlarm(probe)) continue;
 
-    const recovered = !isAlarm(probe.status) && isAlarm(before.status);
+    const recovered = !isAlarm(probe) && isAlarm(before);
 
-    if (isAlarm(probe.status)) {
+    if (isAlarm(probe)) {
       const key = reasonClass(probe);
 
       // THE HOLD. A class that keeps flipping never accumulates a streak, so it
@@ -256,7 +283,7 @@ export function decideProbeTransitions(input: DecideProbeTransitionsInput): Prob
       keys.add(key);
       if (input.muted) continue;
 
-      alerts.push({ probe: probe.name, kind: "opened", from: before.status, to: probe.status, text: alertText(probe, "opened", before.status), key });
+      alerts.push({ probe: probe.name, kind: "opened", from: before.status, to: probe.status, text: alertText(probe, "opened", before), key });
       continue;
     }
 
@@ -284,7 +311,7 @@ export function decideProbeTransitions(input: DecideProbeTransitionsInput): Prob
       const heldBack = (input.streaks?.get(beforeClass) ?? Number.MAX_SAFE_INTEGER)
         < holdRequired(before.status, minDegradedTicks);
       if (!heldBack && !input.posted.has(key) && !input.muted) {
-        alerts.push({ probe: probe.name, kind: "recovered", from: before.status, to: probe.status, text: alertText(probe, "recovered"), key });
+        alerts.push({ probe: probe.name, kind: "recovered", from: before.status, to: probe.status, text: alertText(probe, "recovered", before), key });
       }
       // Recovery keys are NOT retained: the next time this probe breaks and
       // heals, that is genuinely new and must be sayable again.

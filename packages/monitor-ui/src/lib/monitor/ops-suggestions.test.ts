@@ -266,3 +266,62 @@ describe("bank — an overdue venue request", () => {
     expect(s).toBeUndefined();
   });
 });
+
+// ── A red the probe could not READ ──────────────────────────────────────────
+//
+// 2026-08-06: the monitor's container lost DNS for five minutes. The suggestion
+// drafted from that red would have told a worker to tail the product's logs and
+// roll back a deploy — over a fault on our own side of the wire, against a
+// product that was serving 200s throughout.
+describe("opsSuggestions — product_api unreachable", () => {
+  const unreachable: ProductHealth = {
+    enabled: true,
+    at: 1,
+    status: "red",
+    checks: 10,
+    probes: [
+      {
+        name: "product_api",
+        status: "red",
+        reading: "unknown",
+        detail: "probe cannot reach https://api.averray.com/health — DNS resolution failed (ENOTFOUND) · 3 consecutive checks · unreachable from the monitor; whether the product is up is unknown from here",
+        sparkline: [],
+      },
+    ],
+  };
+
+  test("does not claim the product is down", () => {
+    const byId = Object.fromEntries(opsSuggestions(unreachable).map((s) => [s.id, s]));
+    expect(byId["product-api-down"]).toBeUndefined();
+    expect(byId["product-api-unreachable"]).toBeTruthy();
+    expect(byId["product-api-unreachable"].text).toContain("unreachable from the monitor");
+  });
+
+  test("drafts a task that diagnoses the wire, and forbids a blind rollback", () => {
+    const suggestion = opsSuggestions(unreachable).find((s) => s.id === "product-api-unreachable")!;
+    expect(suggestion.task?.prompt).toContain("REACHABILITY fault");
+    expect(suggestion.task?.prompt).toContain("DNS resolution and egress");
+    expect(suggestion.task?.prompt).toContain("Do not roll back");
+  });
+
+  test("a product_api red that DID get a response still drafts the down task", () => {
+    const answered: ProductHealth = {
+      ...unreachable,
+      probes: [{ name: "product_api", status: "red", detail: "https://api.averray.com/health → HTTP 503", sparkline: [] }],
+    };
+    const byId = Object.fromEntries(opsSuggestions(answered).map((s) => [s.id, s]));
+    expect(byId["product-api-down"]).toBeTruthy();
+    expect(byId["product-api-unreachable"]).toBeUndefined();
+  });
+
+  test("dependent probes with no reading raise no suggestions at all", () => {
+    const blind: ProductHealth = {
+      ...unreachable,
+      probes: [
+        { name: "money_path", status: "degraded", reading: "unknown", detail: "settlement state unknown, not stalled — product /health not readable from here — DNS resolution failed (ENOTFOUND)", sparkline: [] },
+        { name: "api_latency", status: "degraded", reading: "unknown", detail: "round-trip latency unknown, not slow — product /health not readable from here — DNS resolution failed (ENOTFOUND)", sparkline: [] },
+      ],
+    };
+    expect(opsSuggestions(blind)).toEqual([]);
+  });
+});
