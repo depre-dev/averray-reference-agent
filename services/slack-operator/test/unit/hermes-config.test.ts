@@ -73,4 +73,17 @@ describe("the pieces that must not silently diverge", () => {
     expect(config.auxiliary?.background_review?.provider).toBe(config.model?.provider);
     expect(config.auxiliary?.background_review?.model).toBe(config.model?.default);
   });
+
+  test("the OpenRouter auxiliary fallback is structurally unsatisfiable", () => {
+    // The pair is the control, not either key alone: free_only makes the
+    // client skip any non-:free fallback, and the pinned model is DELIBERATELY
+    // the paid default so a future upstream :free default cannot re-open the
+    // lane and route aux content (channel text, board data) to a third-party
+    // free tier. Observed live before this: "PAID lane engaged" +
+    // "payment / credit error" on the gateway, 2026-08-04 → 06.
+    expect(config.auxiliary?.free_only).toBe(true);
+    const pinned = String(config.auxiliary?.openrouter_model ?? "");
+    expect(pinned.length).toBeGreaterThan(0);
+    expect(pinned.endsWith(":free")).toBe(false);
+  });
 });

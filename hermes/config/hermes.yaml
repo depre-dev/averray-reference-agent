@@ -6,10 +6,35 @@ model:
   api_key_env: OLLAMA_API_KEY
   default: glm-5.2:cloud
 
-# Pin v0.18's post-turn background-review fork to our own provider. Left unset
-# it defaults to "auto" and falls through the auxiliary chain to OpenRouter →
-# Nous Portal (no credit) → repeated credit-error log spam. Same model as above.
+# ── AUXILIARY SPEND CONTROL ────────────────────────────────────────────────
+# v0.20.0's auxiliary client serves ~30 internal callers (title_generator,
+# insights, conversation_compression, curator, cron classifiers, …) and falls
+# back through OpenRouter with a PAID default model (google/gemini-3.6-flash).
+# Observed live on the gateway through 2026-08-06: "PAID lane engaged … may
+# incur real spend", then "payment / credit error" on every attempt — an
+# unfunded paid lane that only spams today and would silently start billing
+# the day the OpenRouter account gains credit. Per-task pins do not scale:
+# the background_review pin below predates most of those callers, which is
+# exactly how this leak appeared. So the lane is closed structurally:
+#
+#   free_only: true   → the client SKIPS any OpenRouter fallback whose model
+#                       is not a :free SKU (auxiliary_client.py logs the skip
+#                       once instead of engaging).
+#   openrouter_model  → pinned to the PAID default ON PURPOSE. Combined with
+#                       free_only the OpenRouter fallback is unsatisfiable
+#                       even if a future version ships a :free default —
+#                       keeping aux content (channel text, board data) off
+#                       third-party free tiers, whose terms may allow
+#                       training on inputs.
+#
+# Aux tasks still ride ollama-cloud like everything else; when that hiccups
+# they now fail a convenience instead of paying a stranger.
+# test/unit/hermes-config.test.ts enforces this pair.
 auxiliary:
+  free_only: true
+  openrouter_model: google/gemini-3.6-flash
+  # v0.18's post-turn background-review fork, pinned to our own provider.
+  # Left unset it defaults to "auto" and falls through the auxiliary chain.
   background_review:
     provider: ollama-cloud
     model: glm-5.2:cloud
