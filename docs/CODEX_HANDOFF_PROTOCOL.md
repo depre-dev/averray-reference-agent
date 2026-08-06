@@ -36,6 +36,27 @@ Every Codex-authored PR should include:
 
 Codex should not rely on green CI alone. The Hermes handoff is a separate release signal.
 
+## One attempt — what it binds, and what it does not
+
+"One work item, one approval, one attempt" binds the **supervised work-item
+path** and the **system under test**: a dispatched task gets one attempt; a
+failed drill against the product is preserved, not retried; a ceremony step
+that fails stops the ceremony.
+
+It does **not** bind the measurement instrument. When a probe, drill harness,
+or test fixture fails for a reason diagnosed as a defect in the instrument
+itself — a race in the probe's own sequencing, a wrong field name, a masked
+exit code — the correct move is: preserve the failed run's evidence, **commit
+the corrected instrument**, state the diagnosis in the handback, and run the
+corrected instrument. Both runs stay on the record. That is not "retry until
+green"; it is replacing a broken thermometer, and the session's own
+verify-the-probe discipline has always worked this way.
+
+The line that must not blur: if there is any doubt whether the failure is
+instrument or system-under-test, treat it as system-under-test and stop. An
+instrument diagnosis must name the specific defect and the specific fix —
+"flaky, reran" is never a diagnosis.
+
 ## Commit attribution and the head SHA
 
 Two rules, both cheap, both about making the record say who did what.
