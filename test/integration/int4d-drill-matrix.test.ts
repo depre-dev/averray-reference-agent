@@ -469,8 +469,11 @@ RUN("INT-4d full drill matrix", () => {
     await reconcileDispatchedRuns(deps);
     await reconcileDispatchedRuns(deps);
     await reconcileDispatchedRuns(deps);
-    expect(adapterSink.join(""), "INT4D_OVERSIZED_SENTINEL_REACHED_ADAPTER_SINK")
-      .not.toContain(SENTINEL);
+    const sentinelReachedAdapterSink = adapterSink.some((entry) => entry.includes(SENTINEL));
+    expect(
+      sentinelReachedAdapterSink,
+      "INT4D_OVERSIZED_SENTINEL_REACHED_ADAPTER_SINK",
+    ).toBe(false);
     expect(await getActiveDispatchQuarantine(task.workItemId, 1, refDeps()))
       .toMatchObject({ reason: "poison_read", cycleCount: 3 });
     const statusOutput: string[] = [];

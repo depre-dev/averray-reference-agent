@@ -52,3 +52,14 @@ correction runs the same pinned kernel support directly, waits for a durable
 replacement worker, and leaves the disposable store intact for the mandated
 effect count. Neither correction changes production behavior or an acceptance
 criterion.
+
+## Run 3 — mutation reached the sink; assertion output was unbounded
+
+The `disable-size-gate` mutation was applied and the malicious-output drill
+failed on `INT4D_OVERSIZED_SENTINEL_REACHED_ADAPTER_SINK`, but Vitest rendered
+the complete 300 KB synthetic payload in its assertion diff. The red therefore
+proved the path but produced unusable evidence output. The assertion is changed
+to compare the derived boolean `sentinelReachedAdapterSink`; it still fails only
+when the sentinel reaches the adapter sink, while its diagnostic is bounded to
+`true` versus `false`. This instrument-only correction is committed before the
+mutation is rerun.
