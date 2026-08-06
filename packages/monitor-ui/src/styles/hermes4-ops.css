@@ -103,6 +103,8 @@ body,
 .ops-board [data-tone="degraded"] { --tone: var(--h4-warn); }
 .ops-board [data-tone="red"]      { --tone: var(--h4-act); }
 .ops-board [data-tone="awaiting"] { --tone: var(--h4-tel); }
+.ops-board [data-tone="paused"],
+.ops-board [data-tone="neutral"]  { --tone: var(--h4-muted); }
 
 /* ---- meta line ------------------------------------------------ */
 .ops-meta {

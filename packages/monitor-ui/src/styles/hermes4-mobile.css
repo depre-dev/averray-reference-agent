@@ -23,6 +23,8 @@
 .hm-ph [data-tone="degraded"] { --tone: var(--h4-warn); }
 .hm-ph [data-tone="red"]      { --tone: var(--h4-act); }
 .hm-ph [data-tone="awaiting"] { --tone: var(--h4-tel); }
+.hm-ph [data-tone="paused"],
+.hm-ph [data-tone="neutral"]  { --tone: var(--h4-muted); }
 
 .hm-ph-bar {
   display: flex;

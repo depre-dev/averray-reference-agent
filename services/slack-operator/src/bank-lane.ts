@@ -17,6 +17,7 @@ import {
   PLANCK_PER_DOT,
   POSTAGE_FLOOR_DOT,
   bankSubjectIsCurrent,
+  isEvaluatedBankSubject,
   isKnownPhase,
   type BankFeed,
   type BankRequest,
@@ -26,11 +27,15 @@ import {
 } from "./bank-feed.js";
 import { decidePositionDisplay, type PositionView } from "./position-display.js";
 
-export type BankTone = "ok" | "degraded" | "red" | "awaiting";
+export type BankTone = "ok" | "degraded" | "red" | "awaiting" | "paused" | "neutral";
 
 export interface BankLine {
   text: string;
   tone: BankTone;
+  /** Machine-readable producer state when this is the subject line. */
+  status?: string;
+  /** Machine-readable producer reason when this is the subject line. */
+  reason?: string | null;
 }
 
 export interface BankLaneView {
@@ -215,7 +220,9 @@ export function bankLaneView(input: {
           postage.tone === "degraded" ||
           requests.tone === "degraded"
         ? "degraded"
-        : "ok";
+        : subject.tone === "paused" || subject.tone === "neutral"
+          ? subject.tone
+          : "ok";
 
   return { position, float, postage, requests, subject, overdueRequestId: overdue?.id ?? null, tone };
 }
@@ -238,6 +245,9 @@ function subjectLine(feed: BankFeed): BankLine {
       tone: "awaiting",
     };
   }
+  if (isEvaluatedBankSubject(subject)) {
+    return evaluatedSubjectLine(subject);
+  }
   if (!bankSubjectIsCurrent(subject)) {
     // Both addresses in full. Shortened, two generations of the same deploy
     // script can share a prefix and a suffix, and the one line whose entire job
@@ -254,6 +264,61 @@ function subjectLine(feed: BankFeed): BankLine {
     text: `subject ${subject.label ?? shortSource(subject.declared)} — matches the deployment manifest`,
     tone: "ok",
   };
+}
+
+function evaluatedSubjectLine(subject: Extract<BankFeed["subject"], { status: string }>): BankLine {
+  const generation = configuredGeneration(subject);
+  const context = `configured generation ${generation}`;
+  if (subject.status === "paused") {
+    return {
+      text: `lane administratively paused (${context}) — reason: ${subject.reason ?? "not supplied"}`,
+      tone: "paused",
+      status: subject.status,
+      reason: subject.reason,
+    };
+  }
+  if (subject.status === "error") {
+    return {
+      text: `lane error (${context}) — ${subjectDetail(subject)}`,
+      tone: "red",
+      status: subject.status,
+      reason: subject.reason,
+    };
+  }
+  if (subject.status === "ok" && subject.matches === true) {
+    return {
+      text: `lane active (${context}) — unique armed wrapper ${subject.uniqueArmedWrapper ?? "not reported"}`,
+      tone: "ok",
+      status: subject.status,
+      reason: subject.reason,
+    };
+  }
+
+  // Status vocabulary belongs to the producer and can grow independently.
+  // Show a stranger exactly as received. Neutral is neither an endorsement nor
+  // a failure, and most importantly it is never made invisible.
+  return {
+    text: `lane status ${subject.status} (${context}) — ${subjectDetail(subject)}`,
+    tone: "neutral",
+    status: subject.status,
+    reason: subject.reason,
+  };
+}
+
+function configuredGeneration(subject: Extract<BankFeed["subject"], { status: string }>): string {
+  const candidate = subject.candidates.find(
+    (entry) => entry.wrapper.trim().toLowerCase() === subject.configuredWrapper.trim().toLowerCase(),
+  );
+  if (!candidate) return shortSource(subject.configuredWrapper);
+  return candidate.version.startsWith("v") ? candidate.version : `v${candidate.version}`;
+}
+
+function subjectDetail(subject: Extract<BankFeed["subject"], { status: string }>): string {
+  const details = [
+    subject.reason ? `reason: ${subject.reason}` : null,
+    subject.lastError && subject.lastError !== subject.reason ? `last error: ${subject.lastError}` : null,
+  ].filter(Boolean);
+  return details.length > 0 ? details.join(" · ") : "reason: not supplied";
 }
 
 /**

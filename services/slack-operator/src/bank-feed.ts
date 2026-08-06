@@ -194,7 +194,7 @@ export interface BankRequests {
  * producer that computed both from one source would agree with itself forever,
  * which is precisely the failure this exists to detect.
  */
-export interface BankSubject {
+export interface LegacyBankSubject {
   /** The wrapper generation the feed's ENV targets belong to. */
   derivedFrom: string;
   /** The wrapper generation `deployments/<profile>.json` declares current. */
@@ -203,8 +203,47 @@ export interface BankSubject {
   label?: string | null;
 }
 
+/** One wrapper generation observed by the producer's sole-armed check. */
+export interface BankSubjectCandidate {
+  version: string;
+  wrapper: string;
+  /** null means the producer could not read the pause bit. */
+  dispatchPaused: boolean | null;
+  lastError: string | null;
+}
+
+/**
+ * The producer's current subject contract.
+ *
+ * `status` deliberately remains a string. The producer and consumer deploy on
+ * different clocks; dropping a future status would turn an honest new state
+ * into the old, false "subject not declared" line. Rendering owns the known
+ * statuses and shows every stranger verbatim in a neutral tone.
+ */
+export interface EvaluatedBankSubject {
+  configuredWrapper: string;
+  uniqueArmedWrapper: string | null;
+  matches: boolean | null;
+  status: string;
+  reason: string | null;
+  candidates: BankSubjectCandidate[];
+  readAtMs: number | null;
+  lastError: string | null;
+}
+
+/** Rollback-safe across the producer's old and current subject contracts. */
+export type BankSubject = LegacyBankSubject | EvaluatedBankSubject;
+
+export function isLegacyBankSubject(subject: BankSubject): subject is LegacyBankSubject {
+  return "derivedFrom" in subject;
+}
+
+export function isEvaluatedBankSubject(subject: BankSubject): subject is EvaluatedBankSubject {
+  return "status" in subject;
+}
+
 /** Do the readings describe the generation the manifest says is live? */
-export function bankSubjectIsCurrent(subject: BankSubject): boolean {
+export function bankSubjectIsCurrent(subject: LegacyBankSubject): boolean {
   // Case-insensitive: these are hex addresses, and EIP-55 checksum casing
   // differs between a manifest written by a deploy script and an env var typed
   // by a human. Casing is not a retarget, and reporting it as one would make
