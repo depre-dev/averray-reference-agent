@@ -10,8 +10,10 @@
 
 ## Census at order time (verified against main)
 
-15 `proven` · 5 `mechanism-only` · 2 `absent`. The seven non-proven rows
-resolve as:
+13 `proven` · 7 `mechanism-only` · 2 `absent` *(corrected 2026-08-06,
+eleventh stop: the original said 15/5/2 — my arithmetic error against my own
+printed table, caught by the implementer's mandated re-census)*. The nine
+non-proven rows resolve as:
 
 **Drillable now (D2):** Duplicate webhook/event · Harness worker killed
 mid-run · Board unavailable · Policy changes after approval ·
@@ -52,7 +54,7 @@ kernel / watchdog / operator-ceremony), confirmed by the operator at merge.
 | duplicate/out-of-order event | replay the same run reads/events repeatedly and out of order into reconciliation | projection idempotent and monotonic; one binding, one lifecycle transition per real change; no duplicate decisions or alerts |
 | worker killed mid-run | `kill -9` the real Harness worker after a durable step; restart it | run resumes or reconciles to a terminal state; **no duplicate protected effect** (capability calls not re-executed twice — count them); watchdog alerted the gap |
 | board unavailable | stop every board/UI consumer during a live run | execution continues durably; on restart, projections replay **without any control mutation** (zero writes from the read path, asserted) |
-| policy change after approval | change the active policy hash after approval, before dispatch | pre-submit refusal naming the hash mismatch; the already-running manifest stays immutable and is flagged for review, not cancelled |
+| policy change after approval | change the active policy identity after approval, before dispatch | pre-submit refusal `policy_drift` naming both hashes; a bound run whose approval predates the change is flagged for review (warn + status), never cancelled |
 | malicious/oversized event | feed an oversized payload carrying a secret-shaped string through the read path | 4b quarantine parks it; the sentinel never reaches an alert sink (scrub) or the status output; the watchdog and pilot status stay available throughout |
 
 Mutation proofs, each seen red then restored, at the executed seam:
@@ -67,6 +69,30 @@ Mutation proofs, each seen red then restored, at the executed seam:
 - skip the policy-hash recheck at dispatch → the policy drill must fail
 - disable the oversized-payload size gate → the malicious-event drill must
   fail on sink content
+
+### 2.1 The active-policy seam — authorized (amended 2026-08-06)
+
+The policy drill exposed the deeper defect: the approval payload records
+`policyVersion`/`policyHash` and **nothing anywhere compares them against an
+active policy** — a recorded-but-never-checked field, the exact class this
+stage exists to remove. The drill's D0 must record that silence explicitly.
+
+The seam, scoped tightly:
+
+- the dispatcher reads the **active policy identity** — version and hash
+  strings only, from `HARNESS_DISPATCH_ACTIVE_POLICY_VERSION` /
+  `HARNESS_DISPATCH_ACTIVE_POLICY_HASH`. Identity comparison only: no policy
+  file loading, parsing, or interpretation lands in this packet;
+- **pre-submit**: active hash ≠ task's approved `policyHash` → refusal with
+  reason `policy_drift`, naming both hashes. Fail-closed;
+- **post-binding**: reconciliation flags (one warn alert on transition + a
+  visible status field) any bound run whose approval predates a differing
+  active identity. Flag, never cancel — the running manifest is immutable and
+  the operator decides;
+- **required at enablement**: `HARNESS_DISPATCH_ENABLED=true` without both
+  env values is a startup refusal. A disabled dispatcher needs neither. The
+  suite and ceremony bring-ups export them; the env templates gain them with
+  comments. No silent "check disabled" mode exists.
 
 ## 3. Deliverable D3 — the deferrals, written like they'll be read in anger
 
