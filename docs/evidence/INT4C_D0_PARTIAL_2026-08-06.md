@@ -24,6 +24,11 @@ The backpressure probe stored one non-terminal bound task, then presented a
 second approved task. Exact main dispatched the second task and emitted neither
 a decision reason nor an alert named `backpressure`.
 
+`active_bound=1` describes the probe's intended occupancy, not a pre-existing
+dispatcher limit. Exact main has no in-flight bound at any level; D2 will
+introduce the bound rather than name an existing one. The eventual drill-ledger
+row must preserve that distinction.
+
 ## Required global-lease proof did not complete
 
 The two-child-process probe failed before it could establish its required
@@ -46,9 +51,27 @@ contender could acquire the empty global lease before the intended holder's
 identity was observed. This is a probe ordering race; it is not evidence for or
 against the production lease mechanism.
 
-The probe was corrected locally to wait until `d0-holder` was visible in
-`dispatch_lease` before spawning `d0-contender`. It was not rerun: the packet's
-standing one-attempt/stop-on-failure rule prohibited treating a repaired probe
-as the original D0 attempt. No D1–D7 implementation was started. The global
-dead-holder takeover and live-holder negative therefore remain unproven by this
-packet.
+The probe was corrected to wait until `d0-holder` was visible in
+`dispatch_lease` before spawning `d0-contender`. The correction was committed as
+`5b0f570ca6ed8df63d2e979645138b6b9e405561` before execution.
+
+## Adjudicated corrected-instrument run
+
+The operator classified the concurrent-start race as an instrument defect and
+authorized one run of only the corrected two-process baseline. The two other D0
+cases were skipped rather than rerun:
+
+```text
+INT4C_D0_MAIN_SHA=4164549b146ec87e57d093a926588ea82e17b3e6
+INT4C_D0_PROBE_SHA=5b0f570ca6ed8df63d2e979645138b6b9e405561
+INT4C_D0_DATABASE_LIVE container=int4c-d0-86634-1786008850803
+INT4C_D0_LEASE_LIVE holder=d0-holder contender=d0-contender ttl_windows=3 contender_acquired=false holder_pid=86760 contender_pid=86767
+INT4C_D0_LEASE_TAKEOVER dead_holder=d0-holder new_holder=d0-contender fired=true identities_visible=d0-holder,d0-contender
+Test Files  1 passed (1)
+Tests  1 passed | 2 skipped (3)
+```
+
+This proves both halves of the corrected inventory on exact main: a renewing
+holder is not stolen from across three TTL windows, and the existing global
+lease is acquired by the second real process after the dead holder's expiry.
+No D1–D7 implementation had begun when either D0 run was recorded.
