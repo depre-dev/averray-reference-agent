@@ -26,6 +26,8 @@
 // Kept pure — no clock, no I/O, no config — so every rule here is testable
 // without a relay or a heartbeat.
 
+import { opsNextStep } from "@avg/schemas";
+
 import { probeLabel } from "./ops-voice.js";
 import type { ProbeResult, ProbeStatus } from "./product-health.js";
 
@@ -145,9 +147,18 @@ export function reasonClass(probe: ProbeResult): string {
 function alertText(probe: ProbeResult, kind: "opened" | "recovered", before?: ProbeStatus): string {
   const label = probeLabel(probe.name);
   if (kind === "recovered") return `✓ ${label} recovered — ${probe.detail}`;
-  if (probe.status === "red") return `✗ ${label} is red — ${probe.detail}`;
-  if (before === "red") return `⚠ ${label} eased to degraded — ${probe.detail}`;
-  return `⚠ ${label} degraded — ${probe.detail}`;
+
+  // The next step rides ONLY on an opening alert. A recovery needs no advice,
+  // and appending one would read as "it healed, now go do something".
+  // opsNextStep returns undefined for any probe we have not thought through;
+  // that appends nothing rather than inventing a plausible-sounding action
+  // (@avg/schemas/ops-next-step explains why absence is the safe default).
+  const step = opsNextStep(probe.name);
+  const next = step ? ` · next: ${step}` : "";
+
+  if (probe.status === "red") return `✗ ${label} is red — ${probe.detail}${next}`;
+  if (before === "red") return `⚠ ${label} eased to degraded — ${probe.detail}${next}`;
+  return `⚠ ${label} degraded — ${probe.detail}${next}`;
 }
 
 const isAlarm = (status: ProbeStatus): boolean => status === "degraded" || status === "red";
