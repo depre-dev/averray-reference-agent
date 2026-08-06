@@ -8,12 +8,18 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
+import {
+  findBindingIntegrityViolations,
+  type RunBindingAuditRow,
+} from "@avg/averray-mcp/dispatch-quarantine";
+
 import type { AlertForwarder, WatchdogSinkState } from "./forwarders.js";
 
 const DEFAULT_POLL_INTERVAL_MS = 15_000;
 const DEFAULT_DISPATCHER_STALE_MS = 90_000;
 const DEFAULT_HARNESS_SOURCE_STALE_MS = 15 * 60_000;
 const DEFAULT_DATABASE_TIMEOUT_MS = 5_000;
+const DEFAULT_ORPHAN_AGE_MS = 10 * 60_000;
 const DEFAULT_HEARTBEAT_PATH = "/data/harness-watchdog-heartbeat.json";
 const DEFAULT_STATUS_PATH = "/data/harness-watchdog-status.json";
 const DEFAULT_DISPATCHER_HEARTBEAT_PATH = "/data/harness-dispatcher-heartbeat.json";
@@ -24,6 +30,7 @@ export interface WatchdogConfig {
   dispatcherStaleMs: number;
   harnessSourceStaleMs: number;
   databaseTimeoutMs: number;
+  orphanAgeMs: number;
   heartbeatPath: string;
   statusPath: string;
   dispatcherHeartbeatPath: string;
@@ -38,6 +45,31 @@ export interface HarnessSourceState {
 export interface WatchdogDatabaseProbes {
   probeReferenceDatabase(): Promise<void>;
   probeHarnessDatabase(): Promise<HarnessSourceState>;
+  readReferenceBindings(): Promise<ReferenceBindingInventoryRow[]>;
+  readHarnessRuns(): Promise<HarnessRunInventoryRow[]>;
+}
+
+export interface ReferenceBindingInventoryRow extends Omit<
+  RunBindingAuditRow,
+  "approvedTaskHash"
+> {
+  approvedTaskHash: string | null;
+  lifecycle: string;
+  boundAt: string;
+  taskUpdatedAt: string;
+}
+
+export interface HarnessRunInventoryRow {
+  runId: string;
+  terminal: boolean;
+  updatedAt: string;
+}
+
+export interface WatchdogDetection {
+  key: string;
+  severity: "warn" | "critical";
+  code: string;
+  message: string;
 }
 
 export interface WatchdogLogger {
@@ -55,6 +87,7 @@ export interface WatchdogDeps extends WatchdogDatabaseProbes {
   now(): Date;
   logger: WatchdogLogger;
   scheduler: WatchdogScheduler;
+  detectOrphans?: typeof detectOrphans;
 }
 
 export interface WatchdogProcess {
@@ -78,6 +111,7 @@ export interface WatchdogStatus {
     dispatcherStaleMs: number;
     harnessSourceStaleMs: number;
     databaseTimeoutMs: number;
+    orphanAgeMs: number;
     pollIntervalMs: number;
   };
 }
@@ -116,6 +150,10 @@ export function parseWatchdogConfig(
       environment.WATCHDOG_DATABASE_TIMEOUT_MS,
       DEFAULT_DATABASE_TIMEOUT_MS,
     ),
+    orphanAgeMs: positiveInteger(
+      environment.WATCHDOG_ORPHAN_AGE_MS,
+      DEFAULT_ORPHAN_AGE_MS,
+    ),
     heartbeatPath: path.resolve(
       environment.WATCHDOG_HEARTBEAT_PATH?.trim() || DEFAULT_HEARTBEAT_PATH,
     ),
@@ -146,26 +184,45 @@ export function createWatchdogProcess(
   const startedAt = deps.now();
 
   const appendDetection = async (
-    code: string,
+    issueKey: string,
     active: boolean,
-    alert: { severity: "warn" | "critical"; message: string },
+    alert: {
+      severity: "warn" | "critical";
+      code?: string;
+      message: string;
+    },
   ): Promise<void> => {
     if (!active) {
-      activeIssues.delete(code);
+      activeIssues.delete(issueKey);
       return;
     }
-    if (activeIssues.has(code)) return;
+    if (activeIssues.has(issueKey)) return;
     const record: WatchdogAlert = {
       schemaVersion: 1,
       kind: "harness_watchdog_alert",
       severity: alert.severity,
-      code,
+      code: alert.code ?? issueKey,
       message: alert.message,
       at: deps.now().toISOString(),
     };
     await mkdir(path.dirname(config.alertsPath), { recursive: true });
     await appendFile(config.alertsPath, `${JSON.stringify(record)}\n`, "utf8");
-    activeIssues.add(code);
+    activeIssues.add(issueKey);
+  };
+
+  const syncDetectionGroup = async (
+    prefix: string,
+    detections: WatchdogDetection[],
+  ): Promise<void> => {
+    const observed = new Set(detections.map(({ key }) => key));
+    for (const existing of [...activeIssues]) {
+      if (existing.startsWith(prefix) && !observed.has(existing)) {
+        activeIssues.delete(existing);
+      }
+    }
+    for (const detection of detections) {
+      await appendDetection(detection.key, true, detection);
+    }
   };
 
   const probeDatabases = async (): Promise<void> => {
@@ -233,6 +290,34 @@ export function createWatchdogProcess(
     );
   };
 
+  const probeBindingIntegrityAndOrphans = async (): Promise<void> => {
+    let bindings: ReferenceBindingInventoryRow[];
+    let runs: HarnessRunInventoryRow[];
+    try {
+      [bindings, runs] = await Promise.all([
+        deps.readReferenceBindings(),
+        deps.readHarnessRuns(),
+      ]);
+    } catch {
+      // A probe outage is not evidence that an existing issue cleared. Keep
+      // the dedupe state so recovery cannot replay the same alert as new.
+      return;
+    }
+    await syncDetectionGroup(
+      "watchdog_binding_integrity:",
+      bindingIntegrityDetections(bindings),
+    );
+    await syncDetectionGroup(
+      "watchdog_orphan:",
+      (deps.detectOrphans ?? detectOrphans)(
+        bindings,
+        runs,
+        deps.now(),
+        config.orphanAgeMs,
+      ),
+    );
+  };
+
   const initializeTail = async (): Promise<void> => {
     if (tailState) return;
     const size = await stat(config.alertsPath)
@@ -295,6 +380,7 @@ export function createWatchdogProcess(
         dispatcherStaleMs: config.dispatcherStaleMs,
         harnessSourceStaleMs: config.harnessSourceStaleMs,
         databaseTimeoutMs: config.databaseTimeoutMs,
+        orphanAgeMs: config.orphanAgeMs,
         pollIntervalMs: config.pollIntervalMs,
       },
     };
@@ -317,6 +403,7 @@ export function createWatchdogProcess(
     await Promise.all([
       probeDatabases(),
       probeDispatcherHeartbeat(),
+      probeBindingIntegrityAndOrphans(),
     ]);
     await forwardNewAlerts();
     return writeObservability();
@@ -384,6 +471,83 @@ export async function readDispatcherHeartbeatTimestamp(
   }
 }
 
+export function bindingIntegrityDetections(
+  bindings: readonly ReferenceBindingInventoryRow[],
+): WatchdogDetection[] {
+  const rows: RunBindingAuditRow[] = bindings.map((binding) => ({
+    workItemId: binding.workItemId,
+    taskVersion: binding.taskVersion,
+    ...(binding.approvedTaskHash
+      ? { approvedTaskHash: binding.approvedTaskHash }
+      : {}),
+    harnessRunId: binding.harnessRunId,
+  }));
+  return findBindingIntegrityViolations(rows).map((violation) => {
+    if (violation.kind === "run_id_mismatch") {
+      return {
+        key:
+          `watchdog_binding_integrity:mismatch:${violation.workItemId}@${violation.taskVersion}`,
+        severity: "critical",
+        code: "watchdog_binding_integrity_violation",
+        message:
+          `Harness binding mismatch for ${violation.workItemId}@${violation.taskVersion}: actual run id ${violation.harnessRunId}; intended run id ${violation.intendedRunId ?? "unavailable because the approval hash is absent"}.`,
+      };
+    }
+    return {
+      key:
+        `watchdog_binding_integrity:duplicate:${violation.workItemId}@${violation.taskVersion}`,
+      severity: "critical",
+      code: "watchdog_binding_integrity_violation",
+      message:
+        `Harness run id ${violation.harnessRunId} is shared by ${violation.workItemId}@${violation.taskVersion} and ${violation.conflictingWorkItemId}@${violation.conflictingTaskVersion}.`,
+    };
+  });
+}
+
+export function detectOrphans(
+  bindings: readonly ReferenceBindingInventoryRow[],
+  runs: readonly HarnessRunInventoryRow[],
+  now: Date,
+  orphanAgeMs: number,
+): WatchdogDetection[] {
+  const byRunId = new Map(runs.map((run) => [run.runId, run] as const));
+  const terminalTasks = new Set(["handoff_ready", "failed", "cancelled"]);
+  const detections: WatchdogDetection[] = [];
+  for (const binding of bindings) {
+    const run = byRunId.get(binding.harnessRunId);
+    if (
+      !terminalTasks.has(binding.lifecycle)
+      && run === undefined
+      && ageMs(now, binding.boundAt) >= orphanAgeMs
+    ) {
+      detections.push({
+        key:
+          `watchdog_orphan:task_without_run:${binding.workItemId}@${binding.taskVersion}`,
+        severity: "warn",
+        code: "watchdog_task_run_orphan",
+        message:
+          `Non-terminal task ${binding.workItemId}@${binding.taskVersion} is bound to absent Harness run ${binding.harnessRunId}.`,
+      });
+    }
+    if (
+      terminalTasks.has(binding.lifecycle)
+      && run !== undefined
+      && !run.terminal
+      && ageMs(now, binding.taskUpdatedAt) >= orphanAgeMs
+    ) {
+      detections.push({
+        key:
+          `watchdog_orphan:run_with_terminal_task:${binding.harnessRunId}`,
+        severity: "warn",
+        code: "watchdog_harness_run_orphan",
+        message:
+          `Non-terminal Harness run ${binding.harnessRunId} remains bound to terminal task ${binding.workItemId}@${binding.taskVersion}.`,
+      });
+    }
+  }
+  return detections;
+}
+
 async function readAlertTail(
   target: string,
   previous: AlertTailState,
@@ -426,6 +590,11 @@ function positiveInteger(input: string | undefined, fallback: number): number {
   const parsed = Number(input);
   if (!Number.isSafeInteger(parsed) || parsed <= 0) return fallback;
   return parsed;
+}
+
+function ageMs(now: Date, timestamp: string): number {
+  const parsed = Date.parse(timestamp);
+  return Number.isFinite(parsed) ? Math.max(0, now.getTime() - parsed) : 0;
 }
 
 function errorName(error: unknown): string {

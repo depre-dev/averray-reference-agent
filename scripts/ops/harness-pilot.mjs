@@ -104,6 +104,29 @@ export function parsePilotArgs(argv) {
           : {}),
       };
     }
+    case "unquarantine": {
+      const options = parseOptions(rest, {
+        values: ["work-item", "version", "operator"],
+        booleans: ["confirm"],
+      });
+      return {
+        command,
+        workItemId: nonEmpty(
+          requiredOption(options, "work-item"),
+          "--work-item",
+        ),
+        taskVersion: positiveInteger(
+          requiredOption(options, "version"),
+          "--version",
+        ),
+        actorType: "operator",
+        operatorId: nonEmpty(
+          requiredOption(options, "operator"),
+          "--operator",
+        ),
+        confirm: options.confirm === true,
+      };
+    }
     case "status": {
       const options = parseOptions(rest, {
         values: ["work-item"],
@@ -166,6 +189,9 @@ export async function executePilotCommand(command, context) {
       return;
     case "cancel":
       await handleCancel(command, context);
+      return;
+    case "unquarantine":
+      await handleUnquarantine(command, context);
       return;
     case "status":
       await handleStatus(command, context);
@@ -278,12 +304,39 @@ export async function handleCancel(command, context) {
   });
 }
 
+export async function handleUnquarantine(command, context) {
+  assertConfirmedOperatorCommand(command, "un-quarantine");
+  requireEnvironment(context.environment, ["DATABASE_URL"]);
+  const services = await resolveServices(context);
+  const marker = await services.clearDispatchQuarantine({
+    workItemId: command.workItemId,
+    taskVersion: command.taskVersion,
+    operatorId: command.operatorId,
+  });
+  if (!marker) {
+    throw new PilotCliError("un-quarantine refused: no active marker exists");
+  }
+  writeResult(context, {
+    operation: "unquarantine",
+    workItemId: marker.workItemId,
+    taskVersion: marker.taskVersion,
+    clearedAt: marker.clearedAt,
+    clearedBy: marker.clearedBy,
+    submissionAttemptedByCli: false,
+  });
+}
+
 export async function handleStatus(command, context) {
   requireEnvironment(context.environment, ["DATABASE_URL"]);
   const services = await resolveServices(context);
-  const [tasks, decisions, heartbeat, alerts] = await Promise.all([
+  const [tasks, quarantines, decisions, heartbeat, alerts] = await Promise.all([
     services.listAgentTasks({
       ...(command.workItemId ? { workItemId: command.workItemId } : {}),
+      limit: 1_000,
+    }),
+    services.listDispatchQuarantines({
+      ...(command.workItemId ? { workItemId: command.workItemId } : {}),
+      activeOnly: true,
       limit: 1_000,
     }),
     services.listHermesDecisions({
@@ -297,14 +350,28 @@ export async function handleStatus(command, context) {
   writeResult(context, {
     operation: "status",
     readOnly: true,
-    tasks: tasks.map((task) => ({
-      workItemId: task.workItemId,
-      taskVersion: task.taskVersion,
-      lifecycle: task.lifecycle,
-      bindings: {
-        harnessRunId: task.bindings?.harnessRunId ?? null,
-      },
-    })),
+    tasks: tasks.map((task) => {
+      const quarantine = quarantines.find((marker) =>
+        marker.workItemId === task.workItemId
+        && marker.taskVersion === task.taskVersion);
+      return {
+        workItemId: task.workItemId,
+        taskVersion: task.taskVersion,
+        lifecycle: task.lifecycle,
+        bindings: {
+          harnessRunId: task.bindings?.harnessRunId ?? null,
+        },
+        quarantine: quarantine
+          ? {
+              active: true,
+              reason: quarantine.reason,
+              fingerprint: quarantine.fingerprint,
+              cycleCount: quarantine.cycleCount,
+              quarantinedAt: quarantine.quarantinedAt,
+            }
+          : { active: false },
+      };
+    }),
     dispatcherHeartbeat: heartbeat,
     recentDecisions: decisions.map(decisionStatusView),
     alerts,
@@ -319,6 +386,7 @@ async function createDefaultServices(environment) {
     policy,
     workspace,
     dispatchClaim,
+    dispatchQuarantine,
     decisionStore,
     readPortModule,
     cancellation,
@@ -331,6 +399,7 @@ async function createDefaultServices(environment) {
     import("../../packages/averray-mcp/dist/dispatch-policy.js"),
     import("../../packages/averray-mcp/dist/workspace-path.js"),
     import("../../packages/averray-mcp/dist/dispatch-claim.js"),
+    import("../../packages/averray-mcp/dist/dispatch-quarantine.js"),
     import("../../packages/averray-mcp/dist/decision-record-store.js"),
     import("../../packages/averray-mcp/dist/harness-read-port.js"),
     import("../../services/harness-dispatcher/dist/cancel-task.js"),
@@ -383,6 +452,8 @@ async function createDefaultServices(environment) {
       return { task, harnessAcknowledged };
     },
     listAgentTasks: taskStore.listAgentTasks,
+    listDispatchQuarantines: dispatchQuarantine.listDispatchQuarantines,
+    clearDispatchQuarantine: dispatchQuarantine.clearDispatchQuarantine,
     listHermesDecisions: decisionStore.listHermesDecisions,
     workspacePathForTask: workspace.workspacePathForTask,
     deriveIntendedRunId: dispatchClaim.deriveIntendedRunId,
@@ -504,6 +575,9 @@ async function readHeartbeat(environment, readTextFile) {
       status: safeScalar(value.status),
       lastOutcome: safeScalar(value.lastOutcome),
       updatedAt: safeScalar(value.updatedAt),
+      cycleCount: Number.isSafeInteger(value.cycleCount)
+        ? value.cycleCount
+        : null,
       reconciledCount: Number.isSafeInteger(value.reconciledCount)
         ? value.reconciledCount
         : null,
@@ -620,9 +694,10 @@ Human-operated supervised-pilot commands:
   approve --work-item <id> --version <n> --operator <id> --confirm
   cancel  --work-item <id> --version <n> --operator <id> --confirm
           [--reason <text>]
+  unquarantine --work-item <id> --version <n> --operator <id> --confirm
   status  [--work-item <id>]
 
-Propose never approves. Approve and cancel refuse without the exact --confirm
+Propose never approves. Approve, cancel, and unquarantine refuse without the exact --confirm
 flag. This CLI never submits a Harness run and never opens a pull request.`;
 }
 

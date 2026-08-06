@@ -43,6 +43,7 @@ describe("Harness dispatcher process", () => {
       HARNESS_DISPATCH_POLL_INTERVAL_MS: "1",
       HARNESS_DISPATCH_LEASE_TTL_SECONDS: "9999",
       HARNESS_DISPATCH_READ_TIMEOUT_MS: "999999",
+      HARNESS_DISPATCH_POISON_THRESHOLD: "9999",
       HARNESS_DISPATCH_INTENT_DIR: "./intents",
       HARNESS_DISPATCH_HEARTBEAT_PATH: "./heartbeat.json",
       HARNESS_BIN: "/opt/harness/bin/harness",
@@ -55,6 +56,7 @@ describe("Harness dispatcher process", () => {
       pollIntervalMs: 5_000,
       leaseTtlSeconds: 900,
       readTimeoutMs: 30_000,
+      poisonThreshold: 100,
       harnessBin: "/opt/harness/bin/harness",
     });
 
@@ -67,6 +69,7 @@ describe("Harness dispatcher process", () => {
       pollIntervalMs: 15_000,
       leaseTtlSeconds: 120,
       readTimeoutMs: 15_000,
+      poisonThreshold: 5,
       intentDir: "/tmp/averray-reference-agent/harness-dispatch-intents",
       heartbeatPath:
         "/tmp/averray-reference-agent/harness-dispatcher-heartbeat.json",
@@ -106,6 +109,10 @@ describe("Harness dispatcher process", () => {
     expect(heartbeats(harness.deps)).not.toContainEqual(
       expect.objectContaining({ status: "dispatching" }),
     );
+    expect(heartbeats(harness.deps).at(-1)).toMatchObject({ cycleCount: 1 });
+
+    await harness.process.tick();
+    expect(heartbeats(harness.deps).at(-1)).toMatchObject({ cycleCount: 2 });
 
     await harness.process.shutdown();
     expect(harness.deps.releaseLease).not.toHaveBeenCalled();
@@ -356,6 +363,7 @@ function dispatcherConfig(): DispatcherConfig {
     pollIntervalMs: 15_000,
     leaseTtlSeconds: 120,
     readTimeoutMs: 15_000,
+    poisonThreshold: 5,
     intentDir: "/tmp/harness-intents",
     heartbeatPath: "/tmp/harness-heartbeat.json",
     harnessBin: "harness",

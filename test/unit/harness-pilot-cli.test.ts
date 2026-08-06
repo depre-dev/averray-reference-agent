@@ -172,11 +172,80 @@ describe("Harness pilot CLI", () => {
     expect(services.cancelAgentTask).not.toHaveBeenCalled();
   });
 
+  it("refuses un-quarantine without confirmation and clears only as an operator", async () => {
+    const errors: string[] = [];
+    const output: string[] = [];
+    const marker = {
+      workItemId: "ceremony-docs-001",
+      taskVersion: 1,
+      reason: "poison_read",
+      fingerprint: `sha256:${"c".repeat(64)}`,
+      cycleCount: 5,
+      quarantinedAt: "2026-08-06T12:00:00.000Z",
+      clearedAt: "2026-08-06T12:05:00.000Z",
+      clearedBy: "pilot-operator",
+    };
+    const services = pilotServices({
+      clearDispatchQuarantine: vi.fn(async () => marker),
+    });
+
+    await expect(runPilotCli([
+      "unquarantine",
+      "--work-item",
+      marker.workItemId,
+      "--version",
+      "1",
+      "--operator",
+      "pilot-operator",
+    ], {
+      environment: { DATABASE_URL: "postgresql://pilot.invalid/reference" },
+      services,
+      errorOutput: (line: string) => errors.push(line),
+    })).resolves.toBe(1);
+    expect(errors.join("")).toContain("exact --confirm flag");
+    expect(services.clearDispatchQuarantine).not.toHaveBeenCalled();
+
+    await expect(runPilotCli([
+      "unquarantine",
+      "--work-item",
+      marker.workItemId,
+      "--version",
+      "1",
+      "--operator",
+      "pilot-operator",
+      "--confirm",
+    ], {
+      environment: { DATABASE_URL: "postgresql://pilot.invalid/reference" },
+      services,
+      output: (line: string) => output.push(line),
+    })).resolves.toBe(0);
+    expect(services.clearDispatchQuarantine).toHaveBeenCalledWith({
+      workItemId: marker.workItemId,
+      taskVersion: 1,
+      operatorId: "pilot-operator",
+    });
+    expect(JSON.parse(output.join(""))).toMatchObject({
+      operation: "unquarantine",
+      workItemId: marker.workItemId,
+      taskVersion: 1,
+      clearedBy: "pilot-operator",
+      submissionAttemptedByCli: false,
+    });
+  });
+
   it("keeps status read-only and redacts DSNs, tokens, and secret-looking values", async () => {
     const output: string[] = [];
     const proposed = proposedTask("ceremony-status-001");
     const services = pilotServices({
       listAgentTasks: vi.fn(async () => [proposed]),
+      listDispatchQuarantines: vi.fn(async () => [{
+        workItemId: proposed.workItemId,
+        taskVersion: 1,
+        reason: "poison_read",
+        fingerprint: `sha256:${"c".repeat(64)}`,
+        cycleCount: 5,
+        quarantinedAt: "2026-08-06T12:00:00.000Z",
+      }]),
       listHermesDecisions: vi.fn(async () => [{
         decisionId: "decision-one",
         correlationId: proposed.correlationId,
@@ -229,6 +298,14 @@ describe("Harness pilot CLI", () => {
     expect(JSON.parse(rendered)).toMatchObject({
       operation: "status",
       readOnly: true,
+      tasks: [{
+        workItemId: proposed.workItemId,
+        quarantine: {
+          active: true,
+          reason: "poison_read",
+          cycleCount: 5,
+        },
+      }],
       dispatcherHeartbeat: {
         status: "idle",
         lastOutcome: "refused",
@@ -332,6 +409,8 @@ function pilotServices(overrides: Record<string, unknown> = {}) {
       harnessAcknowledged: true,
     })),
     listAgentTasks: vi.fn(async () => []),
+    listDispatchQuarantines: vi.fn(async () => []),
+    clearDispatchQuarantine: vi.fn(async () => undefined),
     listHermesDecisions: vi.fn(async () => []),
     workspacePathForTask: vi.fn(
       (workItemId: string, taskVersion: number) =>

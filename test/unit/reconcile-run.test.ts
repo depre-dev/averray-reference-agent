@@ -25,6 +25,7 @@ import {
   type DispatcherProcessDeps,
 } from "../../services/harness-dispatcher/src/index.js";
 import {
+  createPoisonFailureTracker,
   reconcileDispatchedRuns,
   type ReconcileResult,
   type ReconcileRunDeps,
@@ -1011,6 +1012,17 @@ function reconcileDeps(
       runManifestHash: MANIFEST_HASH,
       boundAt: "2026-07-25T12:06:00.000Z",
     })),
+    getActiveQuarantine:
+      overrides.getActiveQuarantine ?? vi.fn(async () => undefined),
+    markQuarantine: overrides.markQuarantine ?? vi.fn(async (input) => ({
+      marker: {
+        ...input,
+        quarantinedAt: NOW.toISOString(),
+      },
+      activated: true,
+    })),
+    listBindingAuditRows:
+      overrides.listBindingAuditRows ?? vi.fn(async () => []),
     bindRun: overrides.bindRun ?? vi.fn(async () => undefined),
     readPort: overrides.readPort ?? {
       readRun: vi.fn(async () => read),
@@ -1025,6 +1037,9 @@ function reconcileDeps(
     logger: overrides.logger ?? {
       warn: vi.fn(),
     },
+    poisonThreshold: overrides.poisonThreshold ?? 5,
+    poisonFailures:
+      overrides.poisonFailures ?? createPoisonFailureTracker(),
     ...(overrides.projectRun
       ? { projectRun: overrides.projectRun }
       : {}),
@@ -1407,6 +1422,7 @@ function dispatcherConfig(): DispatcherConfig {
     pollIntervalMs: 15_000,
     leaseTtlSeconds: 120,
     readTimeoutMs: 15_000,
+    poisonThreshold: 5,
     intentDir: "/tmp/harness-intents",
     heartbeatPath: "/tmp/harness-heartbeat.json",
     harnessBin: "harness",

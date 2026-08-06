@@ -15,6 +15,11 @@ import {
   renewDispatchLease,
 } from "@avg/averray-mcp/dispatch-claim";
 import {
+  getActiveDispatchQuarantine,
+  listRunBindingAuditRows,
+  markDispatchQuarantine,
+} from "@avg/averray-mcp/dispatch-quarantine";
+import {
   recordHermesDecision,
 } from "@avg/averray-mcp/decision-record-store";
 import {
@@ -42,6 +47,7 @@ import {
 } from "./harness-control-port.js";
 import { loadProfileManifest } from "./profile-manifest.js";
 import {
+  createPoisonFailureTracker,
   reconcileDispatchedRuns,
   type ReconcileResult,
   type ReconcileRunDeps,
@@ -60,6 +66,9 @@ const MAX_LEASE_TTL_SECONDS = 900;
 const DEFAULT_READ_TIMEOUT_MS = 15_000;
 const MIN_READ_TIMEOUT_MS = 1_000;
 const MAX_READ_TIMEOUT_MS = 30_000;
+const DEFAULT_POISON_THRESHOLD = 5;
+const MIN_POISON_THRESHOLD = 1;
+const MAX_POISON_THRESHOLD = 100;
 
 export type DispatcherHeartbeatStatus =
   | "disabled"
@@ -75,6 +84,7 @@ export interface DispatcherHeartbeat {
   status: DispatcherHeartbeatStatus;
   message: string;
   updatedAt: string;
+  cycleCount: number;
   reconciledCount: number;
   lastOutcome?: string;
 }
@@ -84,6 +94,7 @@ export interface DispatcherConfig {
   pollIntervalMs: number;
   leaseTtlSeconds: number;
   readTimeoutMs: number;
+  poisonThreshold: number;
   intentDir: string;
   heartbeatPath: string;
   harnessBin: string;
@@ -167,6 +178,12 @@ export function parseDispatcherConfig(
       MIN_READ_TIMEOUT_MS,
       MAX_READ_TIMEOUT_MS,
     ),
+    poisonThreshold: boundedInteger(
+      environment.HARNESS_DISPATCH_POISON_THRESHOLD,
+      DEFAULT_POISON_THRESHOLD,
+      MIN_POISON_THRESHOLD,
+      MAX_POISON_THRESHOLD,
+    ),
     intentDir,
     heartbeatPath,
     harnessBin: environment.HARNESS_BIN?.trim() || "harness",
@@ -183,6 +200,7 @@ export function createDispatcherProcess(
   let shutdownPromise: Promise<void> | undefined;
   let lastOutcome: string | undefined;
   let lastReconciledCount = 0;
+  let cycleCount = 0;
 
   const heartbeat = async (
     status: DispatcherHeartbeatStatus,
@@ -197,6 +215,7 @@ export function createDispatcherProcess(
       status,
       message,
       updatedAt: deps.now().toISOString(),
+      cycleCount,
       reconciledCount,
       ...(outcome ? { lastOutcome: outcome } : {}),
     });
@@ -219,6 +238,7 @@ export function createDispatcherProcess(
   };
 
   const performTick = async (): Promise<DispatcherTickResult> => {
+    cycleCount += 1;
     try {
       const enabled = deps.isDispatchEnabled();
       const halted = deps.isHalted();
@@ -448,6 +468,9 @@ export function createProductionDispatcher(
     }),
     saveTask: putAgentTask,
     getRunBinding,
+    getActiveQuarantine: getActiveDispatchQuarantine,
+    markQuarantine: markDispatchQuarantine,
+    listBindingAuditRows: listRunBindingAuditRows,
     bindRun: bindRunToWorkItem,
     readPort: createHarnessCliReadPort({
       command: config.harnessBin,
@@ -456,6 +479,8 @@ export function createProductionDispatcher(
     controlPort,
     recordDecision: recordHermesDecision,
     alertSink,
+    poisonThreshold: config.poisonThreshold,
+    poisonFailures: createPoisonFailureTracker(),
     logger: {
       warn(fields, message) {
         logger.warn(fields, message);

@@ -11,7 +11,9 @@ import {
   type WatchdogFetch,
 } from "../../services/harness-watchdog/src/forwarders.js";
 import {
+  bindingIntegrityDetections,
   createWatchdogProcess,
+  detectOrphans,
   parseWatchdogConfig,
   type HarnessSourceState,
   type WatchdogConfig,
@@ -34,6 +36,7 @@ describe("the standalone Harness watchdog", () => {
       dispatcherStaleMs: 90_000,
       harnessSourceStaleMs: 900_000,
       databaseTimeoutMs: 5_000,
+      orphanAgeMs: 600_000,
       dispatcherHeartbeatPath: "/data/harness-dispatcher-heartbeat.json",
       alertsPath: "/data/harness-dispatch-alerts.jsonl",
       heartbeatPath: "/data/harness-watchdog-heartbeat.json",
@@ -133,6 +136,71 @@ describe("the standalone Harness watchdog", () => {
     source = { ...source, liveRun: true };
     expect((await harness.process.tick()).activeIssues)
       .toContain("watchdog_harness_source_stale");
+  });
+
+  it("detects binding divergence and both age-gated orphan classes", () => {
+    const now = new Date("2026-08-06T12:00:00.000Z");
+    const old = "2026-08-06T10:00:00.000Z";
+    const fresh = "2026-08-06T11:59:30.000Z";
+    const hash = `sha256:${"a".repeat(64)}`;
+    const bindings = [
+      {
+        workItemId: "wrong-binding",
+        taskVersion: 1,
+        approvedTaskHash: hash,
+        harnessRunId: "00000000-0000-5000-8000-000000000099",
+        lifecycle: "running",
+        boundAt: old,
+        taskUpdatedAt: old,
+      },
+      {
+        workItemId: "missing-run",
+        taskVersion: 1,
+        approvedTaskHash: null,
+        harnessRunId: "11111111-1111-5111-8111-111111111111",
+        lifecycle: "running",
+        boundAt: old,
+        taskUpdatedAt: old,
+      },
+      {
+        workItemId: "terminal-task",
+        taskVersion: 1,
+        approvedTaskHash: null,
+        harnessRunId: "22222222-2222-5222-8222-222222222222",
+        lifecycle: "failed",
+        boundAt: old,
+        taskUpdatedAt: old,
+      },
+      {
+        workItemId: "fresh-missing",
+        taskVersion: 1,
+        approvedTaskHash: null,
+        harnessRunId: "33333333-3333-5333-8333-333333333333",
+        lifecycle: "running",
+        boundAt: fresh,
+        taskUpdatedAt: fresh,
+      },
+    ];
+
+    const integrity = bindingIntegrityDetections(bindings);
+    expect(integrity).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        severity: "critical",
+        code: "watchdog_binding_integrity_violation",
+      }),
+    ]));
+    expect(JSON.stringify(integrity)).toContain(bindings[0]!.harnessRunId);
+
+    const orphans = detectOrphans(bindings, [{
+      runId: bindings[2]!.harnessRunId,
+      terminal: false,
+      updatedAt: old,
+    }], now, 60_000);
+    expect(orphans.map(({ code }) => code)).toEqual(expect.arrayContaining([
+      "watchdog_task_run_orphan",
+      "watchdog_harness_run_orphan",
+    ]));
+    expect(JSON.stringify(orphans)).not.toContain("fresh-missing");
   });
 
   it("keeps later forwarders live when one sink fails", async () => {
@@ -253,6 +321,7 @@ async function createHarness(options: {
     dispatcherStaleMs: options.dispatcherStaleMs ?? 90_000,
     harnessSourceStaleMs: options.harnessSourceStaleMs ?? 900_000,
     databaseTimeoutMs: 5_000,
+    orphanAgeMs: 600_000,
     alertsPath: path.join(root, "alerts.jsonl"),
     dispatcherHeartbeatPath: path.join(root, "dispatcher-heartbeat.json"),
     heartbeatPath: path.join(root, "watchdog-heartbeat.json"),
@@ -270,6 +339,8 @@ async function createHarness(options: {
       liveRun: false,
       newestEventAt: null,
     })),
+    readReferenceBindings: async () => [],
+    readHarnessRuns: async () => [],
     logger: { info: vi.fn(), warn: vi.fn() },
     scheduler: {
       setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
