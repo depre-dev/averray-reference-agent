@@ -1,0 +1,226 @@
+[
+  {
+    "id": "dispatcher-crash-before-submit",
+    "title": "Dispatcher crash before submit",
+    "source": "cited-ci",
+    "detection": "Expired generation-1 claim is detected on the next dispatcher cycle, bounded by the configured claim TTL.",
+    "containment": "The immutable derived run id and generation fence prevent an unfenced retry.",
+    "recovery": "A second holder acquires generation 2 and submits exactly one attempt-1 run.",
+    "auditRefs": [{"path":"test/integration/int4c-lease-takeover.test.ts","caseName":"takes over after-claim-before-submit with one derived Harness run"}],
+    "owner": "dispatcher operator"
+  },
+  {
+    "id": "dispatcher-crash-after-submit",
+    "title": "Dispatcher crash after submit before binding write",
+    "source": "cited-ci",
+    "detection": "The expired submitted claim is observed on the next dispatcher cycle after its TTL.",
+    "containment": "The derived run id makes the retry an idempotent lookup rather than a second run.",
+    "recovery": "The contender adopts the attempt-1 run and writes the missing immutable binding.",
+    "auditRefs": [{"path":"test/integration/int4c-lease-takeover.test.ts","caseName":"takes over after-submit-before-binding by adopting one existing run"}],
+    "owner": "dispatcher operator"
+  },
+  {
+    "id": "duplicate-event",
+    "title": "Duplicate webhook/event",
+    "source": "executed",
+    "detection": "Repeated and out-of-order reads are compared against durable task and decision state in the same reconciliation batch.",
+    "containment": "Projection remains monotonic and decision persistence remains idempotent.",
+    "recovery": "Replay converges to one binding, one lifecycle transition, one handoff decision, and no alert.",
+    "auditRefs": [{"path":"test/integration/int4d-drill-matrix.test.ts","caseName":"replays duplicate and out-of-order events without duplicate control effects"}],
+    "owner": "dispatcher operator"
+  },
+  {
+    "id": "harness-unavailable",
+    "title": "Harness/DBOS unavailable",
+    "source": "cited-ci",
+    "detection": "The independent watchdog probes the Harness Postgres boundary each cycle.",
+    "containment": "The watchdog remains outside the dispatcher and Hermes failure domains.",
+    "recovery": "Operator restores the Harness data source; forwarding resumes without dispatcher mutation.",
+    "auditRefs": [{"path":"test/unit/harness-watchdog.test.ts","caseName":"alerts on either unreachable Postgres boundary without stopping itself"}],
+    "owner": "watchdog"
+  },
+  {
+    "id": "worker-killed",
+    "title": "Harness worker killed mid-run",
+    "source": "executed",
+    "detection": "A durable capability completion is observed before SIGKILL and the watchdog reports the source gap on its next thresholded cycle.",
+    "containment": "DBOS resumes the same run and the Harness event store must contain one CapabilityCompleted row per invocation id.",
+    "recovery": "A replacement worker drives the original run to a terminal outcome.",
+    "auditRefs": [{"path":"test/integration/int4d-drill-matrix.test.ts","caseName":"kills and restarts the pinned Harness worker without duplicating a protected effect"}],
+    "owner": "kernel"
+  },
+  {
+    "id": "board-unavailable",
+    "title": "Board unavailable",
+    "source": "executed",
+    "detection": "The dispatcher advances durable state while no board consumer is running; the board replay is fingerprinted against every control table.",
+    "containment": "The board path has read-only dependencies and no control authority.",
+    "recovery": "Restarted projection reads the terminal task and performs zero store writes.",
+    "auditRefs": [{"path":"test/integration/int4d-drill-matrix.test.ts","caseName":"keeps execution durable through board outage and replays with zero writes"}],
+    "owner": "operator-ceremony"
+  },
+  {
+    "id": "policy-change",
+    "title": "Policy changes after approval",
+    "source": "executed",
+    "detection": "The active version/hash identity is compared before submit and on each reconciliation of a bound run.",
+    "containment": "Pre-submit work is blocked; bound immutable work is warned and never cancelled.",
+    "recovery": "Operator reviews the visible drift status and proposes a new approved task version when required.",
+    "auditRefs": [{"path":"test/integration/int4d-drill-matrix.test.ts","caseName":"refuses pre-submit policy drift and flags a bound run without cancelling"}],
+    "owner": "dispatcher operator"
+  },
+  {
+    "id": "approval-hash-mismatch",
+    "title": "Approval/task hash mismatch",
+    "source": "cited-ci",
+    "detection": "The approval payload hash is recomputed before any claim or submit.",
+    "containment": "The task is blocked before Harness receives authority.",
+    "recovery": "Operator creates and approves a correct immutable task version.",
+    "auditRefs": [{"path":"test/integration/int2-automated-suite.test.ts","caseName":"refuses an approval-hash mismatch before claim or submit"}],
+    "owner": "dispatcher operator"
+  },
+  {
+    "id": "capability-expansion",
+    "title": "Capability expansion",
+    "source": "cited-ci",
+    "detection": "Typed attenuation compares the requested grants with the pinned profile before submit.",
+    "containment": "Any undeclared or delegating capability blocks dispatch.",
+    "recovery": "Operator narrows the task/profile and approves a new version.",
+    "auditRefs": [{"path":"test/integration/int2-automated-suite.test.ts","caseName":"accepts a seven-capability profile with strictly narrower authority"},{"path":"test/integration/int2-automated-suite.test.ts","caseName":"rejects memory.propose in the outer production profile loader"}],
+    "owner": "dispatcher operator"
+  },
+  {
+    "id": "budget-deadline",
+    "title": "Budget/deadline exhaustion",
+    "source": "cited-ci",
+    "detection": "Projection compares measured elapsed time, tokens, and calls with the approved limits every reconciliation.",
+    "containment": "Live overruns are cancelled; already-terminal verified work preserves its truthful result with an overrun warning.",
+    "recovery": "Operator reviews the named dimension and decides whether a new task version is justified.",
+    "auditRefs": [{"path":"test/integration/int2-automated-suite.test.ts","caseName":"preserves a verified terminal handoff after a measured token overrun"},{"path":"test/unit/reconcile-run.test.ts","caseName":"D4: cancels and fails a live budget-exhausted run with one alert"}],
+    "owner": "dispatcher operator"
+  },
+  {
+    "id": "global-halt",
+    "title": "Global HALT during run",
+    "source": "cited-ci",
+    "detection": "HALT is checked before dispatch and before each active-run reconciliation.",
+    "containment": "The live run is cancelled and no handoff is created.",
+    "recovery": "Only the operator removes HALT and authorizes later work.",
+    "auditRefs": [{"path":"test/integration/int2-automated-suite.test.ts","caseName":"HALT cancels a bound live run and never creates a handoff"}],
+    "owner": "operator-ceremony"
+  },
+  {
+    "id": "verifier-outage",
+    "title": "Verifier outage",
+    "source": "deferred",
+    "detection": "The current deterministic verifier is in-process with the worker, so no separately unavailable verifier boundary exists to detect.",
+    "containment": "Missing or invalid verification already prevents a verified handoff, but that is not an outage drill.",
+    "recovery": "The future separately wired judge must define retry and operator escalation without treating absence as acceptance.",
+    "auditRefs": [{"path":"test/unit/reconcile-run.test.ts","caseName":"marks completed-but-unverified work failed without a handoff"}],
+    "owner": "operator-ceremony",
+    "deferred": {"date":"2026-08-06","prerequisite":"rubric review / separate LLM-judge packet","reason":"A separate verifier outage cannot be injected honestly because the deterministic verifier runs in-process with the worker. The existing invalid-handoff refusal proves containment only; it does not prove detection or recovery for a boundary that is not wired."}
+  },
+  {
+    "id": "verification-timeout",
+    "title": "Verification timeout",
+    "source": "cited-ci",
+    "detection": "Bounded command execution converts a missed verifier deadline into a typed timeout.",
+    "containment": "The timeout remains a retryable failure and never becomes acceptance.",
+    "recovery": "The operator reviews the timed-out run before any new task version.",
+    "auditRefs": [{"path":"test/unit/harness-control-port.test.ts","caseName":"preserves retryable timeout failures"}],
+    "owner": "kernel"
+  },
+  {
+    "id": "verifier-rejects",
+    "title": "Verifier rejects output",
+    "source": "cited-ci",
+    "detection": "The independent verification report records required failed criteria.",
+    "containment": "The task fails with zero handoff decisions.",
+    "recovery": "Operator inspects evidence and decides whether to approve a new task version.",
+    "auditRefs": [{"path":"test/integration/int2-automated-suite.test.ts","caseName":"rejects the negative fixture on its merits with no handoff"}],
+    "owner": "operator-ceremony"
+  },
+  {
+    "id": "malicious-oversized",
+    "title": "Malicious/oversized event",
+    "source": "executed",
+    "detection": "The bounded Harness read port rejects oversized output and stable poison fingerprints reach quarantine at the configured cycle threshold.",
+    "containment": "The binding is durably quarantined and secret-shaped content is absent from alerts and pilot status.",
+    "recovery": "The watchdog and read-only pilot remain available while the operator inspects and explicitly clears the marker.",
+    "auditRefs": [{"path":"test/integration/int4d-drill-matrix.test.ts","caseName":"quarantines oversized secret-shaped output without leaking to sinks"}],
+    "owner": "watchdog"
+  },
+  {
+    "id": "conflicting-binding",
+    "title": "Conflicting run binding",
+    "source": "cited-ci",
+    "detection": "Dispatcher and independent watchdog derive the intended id and compare it with durable bindings.",
+    "containment": "The work item receives a durable quarantine marker and critical alert.",
+    "recovery": "Operator resolves the binding and explicitly unquarantines the task.",
+    "auditRefs": [{"path":"test/integration/int4b-quarantine.test.ts","caseName":"marks a conflicting binding while the independent watchdog alerts"}],
+    "owner": "watchdog"
+  },
+  {
+    "id": "pr-head-change",
+    "title": "PR head changes after handoff",
+    "source": "cited-ci",
+    "detection": "The sender rechecks live base/head identity immediately before actuation.",
+    "containment": "Drift refuses instead of rebasing or sending a mismatched payload.",
+    "recovery": "Operator rebuilds a new payload from a newly approved task when appropriate.",
+    "auditRefs": [{"path":"test/integration/int3b-payload-sender.test.ts","caseName":"refuses base drift introduced after payload construction"}],
+    "owner": "actuation operator"
+  },
+  {
+    "id": "pr-api-failure",
+    "title": "PR API failure",
+    "source": "cited-ci",
+    "detection": "Remote state is queried by derived head before every create/retry.",
+    "containment": "A crash after create can leave at most one PR.",
+    "recovery": "Retry adopts the existing exact payload and converges.",
+    "auditRefs": [{"path":"test/integration/int3b-payload-sender.test.ts","caseName":"converges after a crash following remote creation"}],
+    "owner": "actuation operator"
+  },
+  {
+    "id": "averray-outage",
+    "title": "Averray control-plane outage",
+    "source": "deferred",
+    "detection": "No Averray control-plane call exists on the supervised Harness dispatch path today, so there is no live boundary to make unavailable.",
+    "containment": "The current path cannot mutate the absent boundary; that absence is not outage containment evidence.",
+    "recovery": "The packet that wires the economic control-plane seam must add bounded detection, refusal, and operator recovery.",
+    "auditRefs": [],
+    "owner": "operator-ceremony",
+    "deferred": {"date":"2026-08-06","prerequisite":"economic-seam integration packet","reason":"An outage drill would be fake while Harness dispatch makes no Averray control-plane call. The future packet that introduces that authority inherits the disposable outage drill before the seam can be enabled."}
+  },
+  {
+    "id": "settlement-replay",
+    "title": "Settlement replay",
+    "source": "deferred",
+    "detection": "Settlement is not wired to Harness dispatch, so no integration replay can currently be observed here.",
+    "containment": "Averray-side idempotency mechanisms exist outside this integration, but they are context rather than this drill's evidence.",
+    "recovery": "The economic-seam packet must replay the same settlement intent against the real integrated store and prove one effect.",
+    "auditRefs": [{"path":"docs/HARNESS_INT4_CHARTER.md"}],
+    "owner": "operator-ceremony",
+    "deferred": {"date":"2026-08-06","prerequisite":"economic-seam integration packet","reason":"The integration has no settlement submission path to replay. External idempotency evidence does not prove this repository's future binding, so the wiring packet inherits an exactly-once replay drill."}
+  },
+  {
+    "id": "direct-fallback",
+    "title": "Direct fallback after Harness failure",
+    "source": "deferred",
+    "detection": "Direct fallback is an operator policy decision and no automatic fallback seam is enabled.",
+    "containment": "The current system fails closed instead of silently expanding authority to a direct agent.",
+    "recovery": "INT-5's fallback-retirement ceremony must decide and evidence any explicit successor path.",
+    "auditRefs": [],
+    "owner": "operator-ceremony",
+    "deferred": {"date":"2026-08-06","prerequisite":"INT-5 fallback-retirement ceremony","reason":"There is deliberately no automatic direct fallback to inject. A drill before the operator's INT-5 decision would invent authority that the system does not possess."}
+  },
+  {
+    "id": "hermes-unavailable",
+    "title": "Hermes unavailable",
+    "source": "cited-ci",
+    "detection": "The standalone watchdog continues source probes and direct forwarding while Hermes-facing containers are absent.",
+    "containment": "No watchdog import or credential depends on Hermes or slack-operator.",
+    "recovery": "Hermes may restart independently; watchdog alert delivery never waits for it.",
+    "auditRefs": [{"path":"test/unit/harness-watchdog.test.ts","caseName":"has no slack-operator or Hermes-facing import"},{"path":"docs/evidence/INT4A_WATCHDOG_DRILLS_2026-08-05.md"}],
+    "owner": "watchdog"
+  }
+]

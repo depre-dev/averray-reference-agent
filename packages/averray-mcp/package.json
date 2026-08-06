@@ -77,6 +77,10 @@
       "types": "./dist/dispatch-backpressure.d.ts",
       "import": "./dist/dispatch-backpressure.js"
     },
+    "./dispatch-policy-drift": {
+      "types": "./dist/dispatch-policy-drift.d.ts",
+      "import": "./dist/dispatch-policy-drift.js"
+    },
     "./dispatch-quarantine": {
       "types": "./dist/dispatch-quarantine.d.ts",
       "import": "./dist/dispatch-quarantine.js"

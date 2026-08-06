@@ -21,6 +21,9 @@ import {
   type DispatchBackpressureState,
 } from "@avg/averray-mcp/dispatch-backpressure";
 import {
+  type DispatchPolicyIdentity,
+} from "@avg/averray-mcp/dispatch-policy-drift";
+import {
   buildHermesDecisionRecordV2,
 } from "@avg/averray-mcp/decision-records";
 import {
@@ -59,6 +62,7 @@ export interface DispatchDeps {
   leaseTtlSeconds: number;
   claimTtlMs: number;
   maxInflight: number;
+  activePolicyIdentity: DispatchPolicyIdentity | undefined;
   isDispatchEnabled(): boolean;
   isHalted(): boolean;
   listDispatchable(): Promise<AgentTaskV1[]>;
@@ -136,6 +140,7 @@ export async function runSingleDispatch(
   deps: DispatchDeps,
 ): Promise<DispatchAttemptResult> {
   if (!deps.isDispatchEnabled()) return { outcome: "disabled" };
+  requireActivePolicyIdentity(deps);
   if (deps.isHalted()) return { outcome: "halted" };
 
   const leaseAcquired = await deps.acquireLease({
@@ -197,6 +202,9 @@ export async function runSingleDispatch(
     }
     if (!await agentTaskApprovalHashMatches(task)) {
       return refuseBeforeIdentity(deps, task, "approval_hash_mismatch");
+    }
+    if (taskPolicyDrifted(task, requireActivePolicyIdentity(deps))) {
+      return refuseBeforeIdentity(deps, task, "policy_drift");
     }
     if (!(Date.parse(task.deadline) > deps.now().getTime())) {
       return refuseBeforeIdentity(deps, task, "deadline_expired");
@@ -505,6 +513,9 @@ async function validateTask(
     return "not_approved";
   }
   if (!await agentTaskApprovalHashMatches(task)) return "approval_hash_mismatch";
+  if (taskPolicyDrifted(task, requireActivePolicyIdentity(deps))) {
+    return "policy_drift";
+  }
   if (!allowDispatching && !(Date.parse(task.deadline) > deps.now().getTime())) {
     return "deadline_expired";
   }
@@ -623,15 +634,25 @@ async function blockAndRecordRefusal(
   };
   await deps.saveTask(blockedTask);
   await deps.recordDecision(
-    buildDispatchDecision(blockedTask, "dispatch_refusal", reason, deps.now()),
+    buildDispatchDecision(
+      blockedTask,
+      "dispatch_refusal",
+      refusalDecisionReason(deps, task, reason),
+      deps.now(),
+    ),
   );
+  const policyAlert = reason === "policy_drift"
+    ? policyDriftAlert(task, requireActivePolicyIdentity(deps))
+    : undefined;
   await deps.alertSink({
-    severity: alert?.severity ?? "warn",
-    code: alert?.code ?? "dispatch_refusal",
+    severity: alert?.severity ?? policyAlert?.severity ?? "warn",
+    code: alert?.code ?? policyAlert?.code ?? "dispatch_refusal",
     workItemId: task.workItemId,
     taskVersion: task.taskVersion,
     ...(intendedRunId ? { harnessRunId: intendedRunId } : {}),
-    message: alert?.message ?? `Harness dispatch was refused: ${reason}.`,
+    message: alert?.message
+      ?? policyAlert?.message
+      ?? `Harness dispatch was refused: ${reason}.`,
     at: deps.now().toISOString(),
   });
   deps.logger?.warn({
@@ -640,6 +661,46 @@ async function blockAndRecordRefusal(
     ...(intendedRunId ? { intendedRunId } : {}),
     reason,
   }, "Harness dispatch refused");
+}
+
+function taskPolicyDrifted(
+  task: AgentTaskV1,
+  activePolicy: DispatchPolicyIdentity,
+): boolean {
+  return task.approval.policyVersion !== activePolicy.version
+    || task.approval.policyHash !== activePolicy.hash;
+}
+
+function refusalDecisionReason(
+  deps: DispatchDeps,
+  task: AgentTaskV1,
+  reason: string,
+): string {
+  if (reason !== "policy_drift") return reason;
+  return `policy_drift approved_policy_hash=${task.approval.policyHash} active_policy_hash=${requireActivePolicyIdentity(deps).hash}`;
+}
+
+function requireActivePolicyIdentity(
+  deps: DispatchDeps,
+): DispatchPolicyIdentity {
+  if (!deps.activePolicyIdentity) {
+    throw new Error(
+      "Harness dispatch active policy identity is required while dispatch is enabled",
+    );
+  }
+  return deps.activePolicyIdentity;
+}
+
+function policyDriftAlert(
+  task: AgentTaskV1,
+  activePolicy: DispatchPolicyIdentity,
+): RefusalAlert {
+  return {
+    severity: "warn",
+    code: "policy_drift",
+    message:
+      `Harness dispatch policy drift: approved ${task.approval.policyVersion} ${task.approval.policyHash}; active ${activePolicy.version} ${activePolicy.hash}.`,
+  };
 }
 
 interface RefusalAlert {

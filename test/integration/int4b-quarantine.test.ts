@@ -397,9 +397,22 @@ function dispatcherHarness(options: {
   const deps: ReconcileRunDeps = {
     now: () => now,
     isHalted: () => false,
+    activePolicyIdentity: undefined,
     listTasks: () => listAgentTasks({ executorKind: "harness", limit: 1_000 }, refDeps()),
     saveTask: (task) => putAgentTask(task, refDeps()),
     getRunBinding: (workItemId) => getRunBinding(workItemId, refDeps()),
+    getPolicyDrift: async () => undefined,
+    transitionPolicyDrift: async (input) => ({
+      state: {
+        workItemId: input.workItemId,
+        taskVersion: input.taskVersion,
+        active: input.active,
+        approvedPolicy: input.approvedPolicy,
+        activePolicy: input.activePolicy,
+        changedAt: now.toISOString(),
+      },
+      notify: input.active,
+    }),
     getActiveQuarantine: (workItemId, taskVersion) =>
       getActiveDispatchQuarantine(workItemId, taskVersion, refDeps()),
     markQuarantine: options.skipMarkerWrite

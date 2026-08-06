@@ -265,6 +265,20 @@ describe("Harness pilot CLI", () => {
         maxInflight: 1,
         changedAt: "2026-07-25T11:59:00.000Z",
       })),
+      listDispatchPolicyDrifts: vi.fn(async () => [{
+        workItemId: proposed.workItemId,
+        taskVersion: 1,
+        active: true,
+        approvedPolicy: {
+          version: "dispatch-policy-v1",
+          hash: HASH,
+        },
+        activePolicy: {
+          version: "dispatch-policy-v2",
+          hash: `sha256:${"d".repeat(64)}`,
+        },
+        changedAt: "2026-07-25T11:59:30.000Z",
+      }]),
       readTextFile: vi.fn(async (target: string) => {
         if (target.endsWith("heartbeat.json")) {
           return JSON.stringify({
@@ -310,6 +324,12 @@ describe("Harness pilot CLI", () => {
           active: true,
           reason: "poison_read",
           cycleCount: 5,
+        },
+        policyDrift: {
+          observed: true,
+          active: true,
+          approvedPolicyVersion: "dispatch-policy-v1",
+          activePolicyVersion: "dispatch-policy-v2",
         },
       }],
       dispatcherHeartbeat: {
@@ -425,6 +445,7 @@ function pilotServices(overrides: Record<string, unknown> = {}) {
     clearDispatchQuarantine: vi.fn(async () => undefined),
     listHermesDecisions: vi.fn(async () => []),
     getDispatchBackpressure: vi.fn(async () => undefined),
+    listDispatchPolicyDrifts: vi.fn(async () => []),
     workspacePathForTask: vi.fn(
       (workItemId: string, taskVersion: number) =>
         `/var/lib/harness-dispatcher/workspaces/${workItemId}-v${taskVersion}`,
