@@ -28,6 +28,12 @@ import {
 
 import { runPilotCli } from "../../scripts/ops/harness-pilot.mjs";
 import {
+  dispatchPolicyIdentity,
+} from "../../packages/averray-mcp/src/agent-task-proposal.js";
+import {
+  loadDispatchPolicyConfig,
+} from "../../packages/averray-mcp/src/dispatch-policy.js";
+import {
   collectInt2Evidence,
   INT2_EXPECTED_PATH,
   INT2_HARNESS_PIN,
@@ -146,6 +152,13 @@ describe.skipIf(!ready)("INT-2 automated supervised-dispatch suite", () => {
     await prepareLocalGitRemote();
     await writePilotProfile(INT2_PILOT_CAPABILITIES);
     installProcessEnvironment();
+    const activePolicy = await dispatchPolicyIdentity(
+      loadDispatchPolicyConfig(process.env),
+      "dispatch-policy-v1",
+    );
+    process.env.HARNESS_DISPATCH_ACTIVE_POLICY_VERSION =
+      activePolicy.policyVersion;
+    process.env.HARNESS_DISPATCH_ACTIVE_POLICY_HASH = activePolicy.policyHash;
 
     referencePool = new Pool({
       connectionString: process.env.DISPATCH_TEST_DATABASE_URL,

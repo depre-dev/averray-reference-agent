@@ -329,7 +329,15 @@ export async function handleUnquarantine(command, context) {
 export async function handleStatus(command, context) {
   requireEnvironment(context.environment, ["DATABASE_URL"]);
   const services = await resolveServices(context);
-  const [tasks, quarantines, decisions, heartbeat, alerts, backpressure] = await Promise.all([
+  const [
+    tasks,
+    quarantines,
+    decisions,
+    heartbeat,
+    alerts,
+    backpressure,
+    policyDrifts,
+  ] = await Promise.all([
     services.listAgentTasks({
       ...(command.workItemId ? { workItemId: command.workItemId } : {}),
       limit: 1_000,
@@ -348,6 +356,12 @@ export async function handleStatus(command, context) {
     services.getDispatchBackpressure
       ? services.getDispatchBackpressure()
       : Promise.resolve(undefined),
+    services.listDispatchPolicyDrifts
+      ? services.listDispatchPolicyDrifts({
+          ...(command.workItemId ? { workItemId: command.workItemId } : {}),
+          limit: 1_000,
+        })
+      : Promise.resolve([]),
   ]);
 
   writeResult(context, {
@@ -355,6 +369,9 @@ export async function handleStatus(command, context) {
     readOnly: true,
     tasks: tasks.map((task) => {
       const quarantine = quarantines.find((marker) =>
+        marker.workItemId === task.workItemId
+        && marker.taskVersion === task.taskVersion);
+      const policyDrift = policyDrifts.find((marker) =>
         marker.workItemId === task.workItemId
         && marker.taskVersion === task.taskVersion);
       return {
@@ -373,6 +390,17 @@ export async function handleStatus(command, context) {
               quarantinedAt: quarantine.quarantinedAt,
             }
           : { active: false },
+        policyDrift: policyDrift
+          ? {
+              observed: true,
+              active: policyDrift.active,
+              approvedPolicyVersion: policyDrift.approvedPolicy.version,
+              approvedPolicyHash: policyDrift.approvedPolicy.hash,
+              activePolicyVersion: policyDrift.activePolicy.version,
+              activePolicyHash: policyDrift.activePolicy.hash,
+              changedAt: policyDrift.changedAt,
+            }
+          : { observed: false, active: false },
       };
     }),
     dispatcherHeartbeat: heartbeat,
@@ -393,6 +421,7 @@ async function createDefaultServices(environment) {
     workspace,
     dispatchClaim,
     dispatchBackpressure,
+    dispatchPolicyDrift,
     dispatchQuarantine,
     decisionStore,
     readPortModule,
@@ -407,6 +436,7 @@ async function createDefaultServices(environment) {
     import("../../packages/averray-mcp/dist/workspace-path.js"),
     import("../../packages/averray-mcp/dist/dispatch-claim.js"),
     import("../../packages/averray-mcp/dist/dispatch-backpressure.js"),
+    import("../../packages/averray-mcp/dist/dispatch-policy-drift.js"),
     import("../../packages/averray-mcp/dist/dispatch-quarantine.js"),
     import("../../packages/averray-mcp/dist/decision-record-store.js"),
     import("../../packages/averray-mcp/dist/harness-read-port.js"),
@@ -466,6 +496,7 @@ async function createDefaultServices(environment) {
     workspacePathForTask: workspace.workspacePathForTask,
     deriveIntendedRunId: dispatchClaim.deriveIntendedRunId,
     getDispatchBackpressure: dispatchBackpressure.getDispatchBackpressure,
+    listDispatchPolicyDrifts: dispatchPolicyDrift.listDispatchPolicyDrifts,
     readTextFile: (target) => readFile(target, "utf8"),
     close: common.closePool,
   };

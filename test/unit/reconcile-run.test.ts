@@ -95,6 +95,67 @@ afterAll(async () => {
 });
 
 describe("dispatched Harness run reconciliation", () => {
+  it("flags a bound policy drift once without cancelling or changing lifecycle", async () => {
+    const task = await runningTask();
+    const read = snapshot("executing");
+    const deps = reconcileDeps(task, read, {
+      activePolicyIdentity: {
+        version: "dispatch-policy-v2",
+        hash: `sha256:${"e".repeat(64)}`,
+      },
+    });
+    vi.mocked(deps.transitionPolicyDrift).mockResolvedValueOnce({
+      state: {
+        workItemId: task.workItemId,
+        taskVersion: task.taskVersion,
+        active: true,
+        approvedPolicy: {
+          version: task.approval.policyVersion,
+          hash: task.approval.policyHash,
+        },
+        activePolicy: deps.activePolicyIdentity!,
+        changedAt: NOW.toISOString(),
+      },
+      notify: true,
+    }).mockResolvedValueOnce({
+      state: {
+        workItemId: task.workItemId,
+        taskVersion: task.taskVersion,
+        active: true,
+        approvedPolicy: {
+          version: task.approval.policyVersion,
+          hash: task.approval.policyHash,
+        },
+        activePolicy: deps.activePolicyIdentity!,
+        changedAt: NOW.toISOString(),
+      },
+      notify: false,
+    });
+
+    const [first] = await reconcileDispatchedRuns(deps);
+    const [second] = await reconcileDispatchedRuns(deps);
+
+    expect(first).toMatchObject({
+      outcome: "unchanged",
+      lifecycle: "running",
+      healthy: false,
+      reason: "policy_drift",
+    });
+    expect(second).toMatchObject({ reason: "policy_drift" });
+    expect(deps.readPort.readRun).not.toHaveBeenCalled();
+    expect(deps.controlPort.cancel).not.toHaveBeenCalled();
+    expect(deps.saveTask).not.toHaveBeenCalled();
+    expect(deps.recordDecision).toHaveBeenCalledOnce();
+    expect(deps.alertSink).toHaveBeenCalledOnce();
+    expect(vi.mocked(deps.alertSink).mock.calls[0]?.[0]).toMatchObject({
+      severity: "warn",
+      code: "policy_drift",
+    });
+    const message = vi.mocked(deps.alertSink).mock.calls[0]?.[0].message ?? "";
+    expect(message).toContain(task.approval.policyHash);
+    expect(message).toContain(deps.activePolicyIdentity!.hash);
+  });
+
   it.each([
     ["accepted", "running"],
     ["contract_compiled", "running"],
@@ -1003,6 +1064,10 @@ function reconcileDeps(
   return {
     now: overrides.now ?? vi.fn(() => NOW),
     isHalted: overrides.isHalted ?? vi.fn(() => false),
+    activePolicyIdentity: overrides.activePolicyIdentity ?? {
+      version: task.approval.policyVersion,
+      hash: task.approval.policyHash,
+    },
     listTasks: overrides.listTasks ?? vi.fn(async () => [task]),
     saveTask: overrides.saveTask ?? vi.fn(async () => undefined),
     getRunBinding: overrides.getRunBinding ?? vi.fn(async () => ({
@@ -1012,6 +1077,20 @@ function reconcileDeps(
       runManifestHash: MANIFEST_HASH,
       boundAt: "2026-07-25T12:06:00.000Z",
     })),
+    getPolicyDrift:
+      overrides.getPolicyDrift ?? vi.fn(async () => undefined),
+    transitionPolicyDrift:
+      overrides.transitionPolicyDrift ?? vi.fn(async (input) => ({
+        state: {
+          workItemId: input.workItemId,
+          taskVersion: input.taskVersion,
+          active: input.active,
+          approvedPolicy: input.approvedPolicy,
+          activePolicy: input.activePolicy,
+          changedAt: NOW.toISOString(),
+        },
+        notify: input.active,
+      })),
     getActiveQuarantine:
       overrides.getActiveQuarantine ?? vi.fn(async () => undefined),
     markQuarantine: overrides.markQuarantine ?? vi.fn(async (input) => ({

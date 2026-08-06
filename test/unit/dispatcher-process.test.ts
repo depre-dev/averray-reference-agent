@@ -38,6 +38,33 @@ import {
 const NOW = new Date("2026-07-25T12:00:00.000Z");
 
 describe("Harness dispatcher process", () => {
+  it("requires a complete active policy identity when dispatch authority is enabled", () => {
+    const runtime = { hostname: "host", pid: 42, tmpdir: "/tmp" };
+    expect(() => parseDispatcherConfig({
+      HARNESS_DISPATCH_ENABLED: "true",
+    }, runtime)).toThrow(
+      "HARNESS_DISPATCH_ACTIVE_POLICY_VERSION and HARNESS_DISPATCH_ACTIVE_POLICY_HASH",
+    );
+    expect(() => parseDispatcherConfig({
+      HARNESS_DISPATCH_ENABLED: "true",
+      HARNESS_DISPATCH_ACTIVE_POLICY_VERSION: "dispatch-policy-v1",
+      HARNESS_DISPATCH_ACTIVE_POLICY_HASH: "not-a-hash",
+    }, runtime)).toThrow("canonical sha256 digest");
+    expect(parseDispatcherConfig({
+      HARNESS_DISPATCH_ENABLED: "true",
+      HARNESS_DISPATCH_ACTIVE_POLICY_VERSION: "dispatch-policy-v1",
+      HARNESS_DISPATCH_ACTIVE_POLICY_HASH: `sha256:${"a".repeat(64)}`,
+    }, runtime)).toMatchObject({
+      activePolicyIdentity: {
+        version: "dispatch-policy-v1",
+        hash: `sha256:${"a".repeat(64)}`,
+      },
+    });
+    expect(parseDispatcherConfig({}, runtime)).not.toHaveProperty(
+      "activePolicyIdentity",
+    );
+  });
+
   it("parses startup config once with bounded polling, lease, and read timeout values", () => {
     expect(parseDispatcherConfig({
       HARNESS_DISPATCHER_ID: "dispatcher-one",
@@ -471,6 +498,10 @@ function dispatchAttemptDeps(
     leaseTtlSeconds: 120,
     claimTtlMs: 600_000,
     maxInflight: 1,
+    activePolicyIdentity: {
+      version: "dispatch-policy-v1",
+      hash: `sha256:${"c".repeat(64)}`,
+    },
     isDispatchEnabled: vi.fn(() => enabled),
     isHalted: vi.fn(() => halted),
     listDispatchable: vi.fn(async () => []),

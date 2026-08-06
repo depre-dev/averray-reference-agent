@@ -378,6 +378,8 @@ terminal:
 
 ```sh
 cd "$REFERENCE_CHECKOUT"
+test -n "$HARNESS_DISPATCH_ACTIVE_POLICY_VERSION"
+test -n "$HARNESS_DISPATCH_ACTIVE_POLICY_HASH"
 export HARNESS_DISPATCH_ENABLED=true
 node services/harness-dispatcher/dist/index.js
 ```

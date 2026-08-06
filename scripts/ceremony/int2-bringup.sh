@@ -145,6 +145,18 @@ _int2_bringup() {
   export HALT_FILE="$CEREMONY_ROOT/HALT"
   export POLICY_CONFIG_PATH="$REFERENCE_CHECKOUT/hermes/config/policy.yaml"
   export HERMES_DISPATCH_ALLOWED_REPOS="depre-dev/averray-reference-agent"
+  export HARNESS_DISPATCH_ACTIVE_POLICY_VERSION="dispatch-policy-v1"
+  export HARNESS_DISPATCH_ACTIVE_POLICY_HASH="$(
+    cd "$REFERENCE_CHECKOUT" && node --input-type=module -e '
+      const proposal = await import("./packages/averray-mcp/dist/agent-task-proposal.js");
+      const policy = await import("./packages/averray-mcp/dist/dispatch-policy.js");
+      const identity = await proposal.dispatchPolicyIdentity(
+        policy.loadDispatchPolicyConfig(process.env),
+        "dispatch-policy-v1",
+      );
+      process.stdout.write(identity.policyHash);
+    '
+  )" || { die "cannot derive the active dispatch policy identity"; return 1; }
   export HARNESS_DISPATCH_ENABLED=false
   unset HARNESS_DISPATCH_DEP_CACHE_DIR
   ok "ceremony environment exported; dispatch remains disabled"

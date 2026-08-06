@@ -137,6 +137,47 @@ describe("single-attempt Harness dispatch orchestration", () => {
     expect(deps.countInflight).not.toHaveBeenCalled();
   });
 
+  it("refuses active policy drift before claim or submit and names both hashes", async () => {
+    const task = await approvedTask();
+    const deps = dispatchDeps(task);
+    deps.activePolicyIdentity = {
+      version: "dispatch-policy-v2",
+      hash: OTHER_HASH,
+    };
+
+    await expect(runSingleDispatch(deps)).resolves.toMatchObject({
+      outcome: "refused",
+      reason: "policy_drift",
+    });
+
+    assertRefusal(
+      deps,
+      `policy_drift approved_policy_hash=${task.approval.policyHash} active_policy_hash=${OTHER_HASH}`,
+      {
+      severity: "warn",
+      code: "policy_drift",
+      },
+    );
+    expect(deps.claimDispatch).not.toHaveBeenCalled();
+    expect(deps.controlPort.submit).not.toHaveBeenCalled();
+    expect(vi.mocked(deps.alertSink).mock.calls[0]?.[0].message).toContain(
+      task.approval.policyHash,
+    );
+    expect(vi.mocked(deps.alertSink).mock.calls[0]?.[0].message).toContain(
+      OTHER_HASH,
+    );
+  });
+
+  it("fails closed if enabled dispatch has no active policy identity", async () => {
+    const deps = dispatchDeps(await approvedTask());
+    deps.activePolicyIdentity = undefined;
+
+    await expect(runSingleDispatch(deps)).rejects.toThrow(
+      "active policy identity is required",
+    );
+    expect(deps.acquireLease).not.toHaveBeenCalled();
+  });
+
   it("refuses an executor other than Harness before deriving or claiming", async () => {
     const task = await reapprove({
       ...await approvedTask(),
@@ -755,6 +796,10 @@ function dispatchDeps(task: AgentTaskV1): DispatchDeps {
     leaseTtlSeconds: 30,
     claimTtlMs: 600_000,
     maxInflight: 1,
+    activePolicyIdentity: {
+      version: task.approval.policyVersion,
+      hash: task.approval.policyHash,
+    },
     isDispatchEnabled: vi.fn(() => true),
     isHalted: vi.fn(() => false),
     listDispatchable: vi.fn(async () => [task]),

@@ -20,6 +20,10 @@ import {
   deriveIntendedRunId,
 } from "@avg/averray-mcp/dispatch-claim";
 import {
+  type DispatchPolicyDriftState,
+  type DispatchPolicyIdentity,
+} from "@avg/averray-mcp/dispatch-policy-drift";
+import {
   findBindingIntegrityViolations,
   type DispatchQuarantine,
   type MarkDispatchQuarantineInput,
@@ -95,9 +99,21 @@ export interface ReconcileLogger {
 export interface ReconcileRunDeps {
   now(): Date;
   isHalted(): boolean;
+  activePolicyIdentity: DispatchPolicyIdentity | undefined;
   listTasks(): Promise<AgentTaskV1[]>;
   saveTask(task: AgentTaskV1): Promise<unknown>;
   getRunBinding(workItemId: string): Promise<RunBinding | undefined>;
+  getPolicyDrift(
+    workItemId: string,
+    taskVersion: number,
+  ): Promise<DispatchPolicyDriftState | undefined>;
+  transitionPolicyDrift(input: {
+    workItemId: string;
+    taskVersion: number;
+    active: boolean;
+    approvedPolicy: DispatchPolicyIdentity;
+    activePolicy: DispatchPolicyIdentity;
+  }): Promise<{ state: DispatchPolicyDriftState; notify: boolean }>;
   getActiveQuarantine(
     workItemId: string,
     taskVersion: number,
@@ -465,6 +481,8 @@ async function reconcileTask(
       "Harness run reconciliation has no immutable run binding",
     );
   }
+  const policyDrift = await observeBoundPolicyDrift(deps, task, harnessRunId);
+  if (policyDrift) return policyDrift;
   if (deps.now().getTime() > Date.parse(task.deadline)) {
     return forceCancelTask(deps, task, harnessRunId, {
       lifecycle: "failed",
@@ -729,6 +747,61 @@ async function reconcileTask(
     lifecycle: nextLifecycle,
     healthy: true,
     projection,
+  });
+}
+
+async function observeBoundPolicyDrift(
+  deps: ReconcileRunDeps,
+  task: AgentTaskV1,
+  harnessRunId: string,
+): Promise<ReconcileResult | undefined> {
+  const activePolicy = deps.activePolicyIdentity;
+  if (!activePolicy) return undefined;
+  const approvedPolicy = {
+    version: task.approval.policyVersion,
+    hash: task.approval.policyHash,
+  };
+  const active = approvedPolicy.version !== activePolicy.version
+    || approvedPolicy.hash !== activePolicy.hash;
+  if (!active) {
+    const previous = await deps.getPolicyDrift(task.workItemId, task.taskVersion);
+    if (previous?.active) {
+      await deps.transitionPolicyDrift({
+        workItemId: task.workItemId,
+        taskVersion: task.taskVersion,
+        active: false,
+        approvedPolicy,
+        activePolicy,
+      });
+    }
+    return undefined;
+  }
+
+  const transition = await deps.transitionPolicyDrift({
+    workItemId: task.workItemId,
+    taskVersion: task.taskVersion,
+    active: true,
+    approvedPolicy,
+    activePolicy,
+  });
+  const reason =
+    `policy_drift approved_policy_hash=${approvedPolicy.hash} active_policy_hash=${activePolicy.hash}`;
+  if (transition.notify) {
+    await deps.recordDecision(
+      buildReconcileDecision(task, "anomaly_pause", reason, deps.now()),
+    );
+    await emitTaskAlert(deps, task, {
+      severity: "warn",
+      code: "policy_drift",
+      harnessRunId,
+      message:
+        `Bound Harness run policy drift: approved ${approvedPolicy.version} ${approvedPolicy.hash}; active ${activePolicy.version} ${activePolicy.hash}. The run was flagged for operator review and was not cancelled.`,
+    });
+  }
+  return result(task, {
+    outcome: "unchanged",
+    healthy: false,
+    reason: "policy_drift",
   });
 }
 

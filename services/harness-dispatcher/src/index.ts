@@ -14,6 +14,11 @@ import {
   transitionDispatchBackpressure,
 } from "@avg/averray-mcp/dispatch-backpressure";
 import {
+  getDispatchPolicyDrift,
+  transitionDispatchPolicyDrift,
+  type DispatchPolicyIdentity,
+} from "@avg/averray-mcp/dispatch-policy-drift";
+import {
   acquireNextExpiredDispatchClaim,
   acquireDispatchLease,
   claimDispatch,
@@ -121,6 +126,7 @@ export interface DispatcherConfig {
   intentDir: string;
   heartbeatPath: string;
   harnessBin: string;
+  activePolicyIdentity?: DispatchPolicyIdentity;
   faultInjection?: DispatchFaultInjection;
 }
 
@@ -183,6 +189,10 @@ export function parseDispatcherConfig(
       ),
   );
   const faultInjection = parseFaultInjection(environment);
+  const activePolicyIdentity = parseActivePolicyIdentity(
+    environment,
+    harnessDispatchEnabled(environment),
+  );
 
   return {
     dispatcherId,
@@ -225,6 +235,7 @@ export function parseDispatcherConfig(
     intentDir,
     heartbeatPath,
     harnessBin: environment.HARNESS_BIN?.trim() || "harness",
+    ...(activePolicyIdentity ? { activePolicyIdentity } : {}),
     ...(faultInjection ? { faultInjection } : {}),
   };
 }
@@ -474,6 +485,7 @@ export function createProductionDispatcher(
     leaseTtlSeconds: config.leaseTtlSeconds,
     claimTtlMs: config.claimTtlMs,
     maxInflight: config.maxInflight,
+    activePolicyIdentity: config.activePolicyIdentity,
     isDispatchEnabled: () => harnessDispatchEnabled(environment),
     isHalted: () => readHaltFile(environment),
     listDispatchable: listDispatchableAgentTasks,
@@ -523,12 +535,15 @@ export function createProductionDispatcher(
   const reconcileDeps: ReconcileRunDeps = {
     now: dispatchDeps.now,
     isHalted: dispatchDeps.isHalted,
+    activePolicyIdentity: config.activePolicyIdentity,
     listTasks: () => listAgentTasks({
       executorKind: "harness",
       limit: 1_000,
     }),
     saveTask: putAgentTask,
     getRunBinding,
+    getPolicyDrift: getDispatchPolicyDrift,
+    transitionPolicyDrift: transitionDispatchPolicyDrift,
     getActiveQuarantine: getActiveDispatchQuarantine,
     markQuarantine: markDispatchQuarantine,
     listBindingAuditRows: listRunBindingAuditRows,
@@ -563,6 +578,26 @@ export function createProductionDispatcher(
       clearTimeout: (handle) => clearTimeout(handle),
     },
   });
+}
+
+export function parseActivePolicyIdentity(
+  environment: Readonly<Record<string, string | undefined>>,
+  required: boolean,
+): DispatchPolicyIdentity | undefined {
+  const version = environment.HARNESS_DISPATCH_ACTIVE_POLICY_VERSION?.trim();
+  const hash = environment.HARNESS_DISPATCH_ACTIVE_POLICY_HASH?.trim();
+  if (!version && !hash && !required) return undefined;
+  if (!version || !hash) {
+    throw new Error(
+      "HARNESS_DISPATCH_ACTIVE_POLICY_VERSION and HARNESS_DISPATCH_ACTIVE_POLICY_HASH are both required when Harness dispatch is enabled",
+    );
+  }
+  if (!/^sha256:[a-f0-9]{64}$/u.test(hash)) {
+    throw new Error(
+      "HARNESS_DISPATCH_ACTIVE_POLICY_HASH must be a canonical sha256 digest",
+    );
+  }
+  return { version, hash };
 }
 
 function boundedInteger(
