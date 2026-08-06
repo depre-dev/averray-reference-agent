@@ -104,6 +104,7 @@ if (MUTATION && !ALLOWED_MUTATIONS.has(MUTATION)) {
 
 const NOW = new Date("2026-08-06T12:00:00.000Z");
 const OLD = "2026-08-06T11:00:00.000Z";
+const READ_CREATED = "2026-08-06T11:59:00.000Z";
 const DEADLINE = "2027-08-06T12:00:00.000Z";
 const MANIFEST_HASH = `sha256:${"d".repeat(64)}`;
 const MANIFEST_REF = {
@@ -257,18 +258,23 @@ RUN("INT-4d full drill matrix", () => {
       "uv",
       [
         "run",
-        "pytest",
-        "-q",
-        "-s",
-        "tests/acceptance/test_durability.py::test_seeded_chaos_kills_preserve_exactly_once_invariants",
+        "python",
+        path.join(
+          process.cwd(),
+          "test/fixtures/agent-integration/int4d-worker-kill-probe.py",
+        ),
       ],
       {
         cwd: HARNESS_CHECKOUT,
         env: {
           ...process.env,
           HARNESS_TEST_DATABASE_URL: HARNESS_URL,
-          HARNESS_ACCEPTANCE_CHAOS_CYCLES: "1",
-          HARNESS_ACCEPTANCE_CHAOS_SEED: "9009",
+          PYTHONPATH: HARNESS_CHECKOUT,
+          INT4D_MODEL_SCRIPT: path.join(
+            process.cwd(),
+            "test/fixtures/agent-integration/int4d-worker-kill-model.jsonl",
+          ),
+          INT4D_ARTIFACT_ROOT: path.join(scratchRoot, "worker-artifacts"),
         },
         encoding: "utf8",
         timeout: 120_000,
@@ -747,7 +753,7 @@ function activeRead(runId: string): HarnessRunReadSnapshot {
       state: "executing",
       attempt: 1,
       egressPolicy: "deny",
-      createdAt: OLD,
+      createdAt: READ_CREATED,
       updatedAt: NOW.toISOString(),
     },
     events: [],
@@ -772,7 +778,7 @@ function terminalRead(runId: string): HarnessRunReadSnapshot {
       attempt: 1,
       outcome: "completed",
       egressPolicy: "deny",
-      createdAt: OLD,
+      createdAt: READ_CREATED,
       updatedAt: NOW.toISOString(),
     },
     events: [
