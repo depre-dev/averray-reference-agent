@@ -190,6 +190,7 @@ RUN("INT-4c lease takeover and backpressure drills", () => {
       await waitForLeaseHolder("live-holder", 5_000);
       contender = spawnLease("live-contender", "contender");
       await delay(3_200);
+      expectMutationApplied(holder.output, "disable-renewal");
       const row = await leaseRow();
       expect(row.holder, "INT4C_LIVE_HOLDER_WAS_STOLEN").toBe("live-holder");
       expect(contender.output).not.toContain("holder=live-contender acquired=true");
@@ -233,6 +234,7 @@ RUN("INT-4c lease takeover and backpressure drills", () => {
     await waitForClaimExpiry(task);
     const third = spawnDispatcher("retry-holder-three", undefined, MUTATION);
     await waitForExit(third.child, 8_000);
+    expectMutationApplied(third.output, "remove-retry-bound");
 
     const stored = await getAgentTask(task.workItemId, 1, refDeps());
     const claim = await getDispatchClaim(task.workItemId, 1, refDeps());
@@ -260,6 +262,10 @@ RUN("INT-4c lease takeover and backpressure drills", () => {
     expect((await waitForExit(first.child, 8_000)).code).toBe(0);
     const second = spawnDispatcher("backpressure-two", undefined, MUTATION);
     expect((await waitForExit(second.child, 8_000)).code).toBe(0);
+    expectMutationApplied(
+      `${first.output}\n${second.output}`,
+      "alert-dedup",
+    );
 
     const decisions = await listHermesDecisions({
       workItemId: queued.workItemId,
@@ -472,6 +478,14 @@ function spawnLease(holder: string, mode: "holder" | "contender") {
     record.output += String(chunk);
   });
   return record;
+}
+
+function expectMutationApplied(output: string, name: string): void {
+  if (MUTATION !== name) return;
+  const marker = `INT4C_MUTATION_APPLIED=${name}`;
+  expect(output, `requested mutation did not reach its seam: ${name}`)
+    .toContain(marker);
+  print(marker);
 }
 
 async function expectFaultStamp(

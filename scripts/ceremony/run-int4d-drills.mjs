@@ -4,6 +4,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  assertKnownMutation,
+  assertMutationApplied,
+} from "./lib/int4-mutation-contract.mjs";
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const pin = "3355f4906864b0f0e0fe5fd5eb5220172e174206";
 const suffix = `${process.pid}-${Date.now()}`;
@@ -11,6 +16,14 @@ const reference = `int4d-reference-${suffix}`;
 const harness = `int4d-harness-${suffix}`;
 const mutation = argument("--mutation");
 const filter = argument("--filter");
+const validMutations = [
+  "non-idempotent-projection",
+  "duplicate-worker-effect",
+  "board-replay-write",
+  "skip-policy-recheck",
+  "disable-size-gate",
+];
+assertKnownMutation("INT4D", mutation, validMutations);
 const scratch = mkdtempSync(path.join(tmpdir(), "int4d-runner-"));
 const suppliedCheckout = process.env.HARNESS_CHECKOUT?.trim();
 const harnessCheckout = suppliedCheckout || path.join(scratch, "agent-harness");
@@ -53,8 +66,10 @@ try {
       timeout: 240_000,
     },
   );
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
   process.stdout.write(result.stdout ?? "");
   process.stderr.write(result.stderr ?? "");
+  assertMutationApplied("INT4D", mutation, output);
   process.exitCode = result.status ?? 1;
 } finally {
   removeDatabase(reference);

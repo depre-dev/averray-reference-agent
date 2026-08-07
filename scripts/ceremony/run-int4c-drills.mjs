@@ -2,12 +2,23 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  assertKnownMutation,
+  assertMutationApplied,
+} from "./lib/int4-mutation-contract.mjs";
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const suffix = `${process.pid}-${Date.now()}`;
 const reference = `int4c-reference-${suffix}`;
 const harness = `int4c-harness-${suffix}`;
 const mutation = argument("--mutation");
 const filter = argument("--filter");
+const validMutations = [
+  "disable-renewal",
+  "remove-retry-bound",
+  "alert-dedup",
+];
+assertKnownMutation("INT4C", mutation, validMutations);
 
 try {
   startDatabase(reference, "reference_int4c");
@@ -41,8 +52,10 @@ try {
       encoding: "utf8",
     },
   );
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
   process.stdout.write(result.stdout ?? "");
   process.stderr.write(result.stderr ?? "");
+  assertMutationApplied("INT4C", mutation, output);
   process.exitCode = result.status ?? 1;
 } finally {
   removeDatabase(reference);
