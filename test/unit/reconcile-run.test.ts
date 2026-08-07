@@ -412,6 +412,43 @@ describe("dispatched Harness run reconciliation", () => {
     );
   });
 
+  it("cancels and blocks a malformed projection as projection_invalid", async () => {
+    const task = await runningTask();
+    const read = snapshot("executing");
+    const malformedRead = {
+      ...read,
+      status: {
+        ...read.status,
+        attempt: -1,
+      },
+    } as HarnessRunReadSnapshot;
+    const deps = reconcileDeps(task, malformedRead);
+
+    const [reconciled] = await reconcileDispatchedRuns(deps);
+
+    expect(reconciled).toMatchObject({
+      outcome: "advanced",
+      lifecycle: "blocked",
+      healthy: false,
+      reason: expect.stringContaining("projection_invalid"),
+    });
+    expect(savedTasks(deps).at(-1)?.lifecycle).toBe("blocked");
+    expect(recordedDecisions(deps).at(-1)).toMatchObject({
+      decisionType: "dispatch_refusal",
+      next: { owner: "operator" },
+    });
+    expect(deps.controlPort.cancel).toHaveBeenCalledWith(RUN_ID);
+    expect(deps.alertSink).toHaveBeenCalledOnce();
+    expect(deps.alertSink).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: "projection_invalid",
+        severity: "critical",
+        message:
+          "Harness projection could not be read or validated; the run was cancelled and blocked.",
+      }),
+    );
+  });
+
   it("cancels and fails an overdue non-terminal task with one alert", async () => {
     const task = agentTaskV1Schema.parse({
       ...await runningTask(),

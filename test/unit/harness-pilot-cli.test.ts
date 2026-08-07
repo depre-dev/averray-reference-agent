@@ -291,7 +291,7 @@ describe("Harness pilot CLI", () => {
         }
         return `${JSON.stringify({
           severity: "critical",
-          code: "pilot_alert",
+          code: "projection_invalid",
           message: "Bearer alert-token and password=alert-secret",
           at: "2026-07-25T12:00:00.000Z",
         })}\n`;
@@ -342,6 +342,10 @@ describe("Harness pilot CLI", () => {
         observedInflight: 1,
         maxInflight: 1,
       },
+      alerts: [{
+        severity: "critical",
+        code: "projection_invalid",
+      }],
       submissionAttemptedByCli: false,
     });
     expect(rendered).not.toContain("postgresql://");

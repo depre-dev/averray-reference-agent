@@ -93,9 +93,9 @@ describe("the standalone Harness watchdog", () => {
     });
     await harness.process.tick();
     const source = {
-      severity: "warn",
-      code: "dispatcher_source_alert",
-      message: "source record",
+      severity: "critical",
+      code: "projection_invalid",
+      message: "Harness projection could not be read or validated.",
       at: "2026-08-05T10:00:01.000Z",
     };
     await writeFile(harness.config.alertsPath, `${JSON.stringify(source)}\n`, "utf8");
