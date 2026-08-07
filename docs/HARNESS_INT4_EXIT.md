@@ -30,6 +30,11 @@ Arithmetic: **18 proven-or-executed + 4 deferred = 22 total §11 rows**.
 
 ## Operator sign-off
 
-- Owner assignments confirmed by: ____________________
-- Evidence reviewed by: ____________________
-- INT-4 accepted at: ____________________
+- Owner assignments confirmed by: Pascal Kuriger (operator)
+- Evidence reviewed by: Pascal Kuriger (operator)
+- INT-4 accepted at: 2026-08-07
+
+Accepted with the four deferrals above understood as real, current limits of
+this integration — not as drills postponed for convenience. Each names the
+packet that inherits it, and no seam they cover may be enabled until its drill
+runs.
