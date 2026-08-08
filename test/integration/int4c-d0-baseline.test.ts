@@ -127,6 +127,8 @@ RUN("INT-4c exact-main D0", () => {
       taskVersion: task.taskVersion,
       approvedTaskHash: task.approval.approvedTaskHash!,
       intendedRunId: runId,
+      holder: "d0-orphaned-holder",
+      leaseTtlMs: 30_000,
     }, deps());
 
     const heartbeats: DispatcherHeartbeat[] = [];
@@ -338,6 +340,10 @@ function dispatchDeps(
     dispatcherId: "d0-backpressure",
     leaseTtlSeconds: 30,
     isDispatchEnabled: () => true,
+    activePolicyIdentity: {
+      version: fixture.approval.policyVersion!,
+      hash: fixture.approval.policyHash!,
+    },
     isHalted: () => false,
     listDispatchable: () => listDispatchableAgentTasks(deps()),
     saveTask: (task) => putAgentTask(task, deps()),

@@ -195,8 +195,8 @@ jobs:
 
       - name: Build drill package imports
         # npm ci has no lifecycle build. The drill children import the
-        # workspace package through exports that point at dist/.
-        run: npx tsc -b packages/averray-mcp
+        # workspace packages and dispatcher through exports that point at dist/.
+        run: npm run build
 
       - name: Run INT-4 mechanism drill
         if: ${{ !matrix.needs_harness }}
