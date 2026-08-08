@@ -2,9 +2,12 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { prepareVitestExecution } from "./lib/int4-vitest-execution.mjs";
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const container = `int4c-d0-${process.pid}-${Date.now()}`;
 const leaseOnly = process.argv.includes("--lease-only");
+const vitestExecution = prepareVitestExecution("INT4C_D0");
 
 try {
   const started = docker([
@@ -21,7 +24,8 @@ try {
   console.info(`INT4C_D0_PROBE_SHA=${git(["rev-parse", "HEAD"]).stdout.trim()}`);
   console.info(`INT4C_D0_DATABASE_LIVE container=${container}`);
   const args = [
-    "vitest", "run", "test/integration/int4c-d0-baseline.test.ts", "--reporter=verbose",
+    "vitest", "run", "test/integration/int4c-d0-baseline.test.ts",
+    ...vitestExecution.reporterArgs,
     ...(leaseOnly
       ? ["-t", "records dead-holder takeover and the live-holder negative with two processes"]
       : []),
@@ -37,9 +41,11 @@ try {
   });
   process.stdout.write(result.stdout ?? "");
   process.stderr.write(result.stderr ?? "");
+  vitestExecution.assert(result.status);
   process.exitCode = result.status ?? 1;
 } finally {
   docker(["rm", "--force", container], true);
+  vitestExecution.cleanup();
 }
 
 function waitForDatabase() {

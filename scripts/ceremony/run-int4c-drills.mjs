@@ -6,6 +6,7 @@ import {
   assertKnownMutation,
   assertMutationApplied,
 } from "./lib/int4-mutation-contract.mjs";
+import { prepareVitestExecution } from "./lib/int4-vitest-execution.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const suffix = `${process.pid}-${Date.now()}`;
@@ -19,6 +20,7 @@ const validMutations = [
   "alert-dedup",
 ];
 assertKnownMutation("INT4C", mutation, validMutations);
+const vitestExecution = prepareVitestExecution("INT4C");
 
 try {
   startDatabase(reference, "reference_int4c");
@@ -35,7 +37,7 @@ try {
       "vitest",
       "run",
       "test/integration/int4c-lease-takeover.test.ts",
-      "--reporter=verbose",
+      ...vitestExecution.reporterArgs,
       ...(filter ? ["-t", filter] : []),
     ],
     {
@@ -56,10 +58,12 @@ try {
   process.stdout.write(result.stdout ?? "");
   process.stderr.write(result.stderr ?? "");
   assertMutationApplied("INT4C", mutation, output);
+  vitestExecution.assert(result.status);
   process.exitCode = result.status ?? 1;
 } finally {
   removeDatabase(reference);
   removeDatabase(harness);
+  vitestExecution.cleanup();
 }
 
 function startDatabase(name, database) {
