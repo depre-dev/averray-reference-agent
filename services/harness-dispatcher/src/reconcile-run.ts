@@ -33,6 +33,7 @@ import {
   buildHermesDecisionRecordV2,
 } from "@avg/averray-mcp/decision-records";
 import {
+  HarnessProjectionError,
   projectHarnessRun,
   type HarnessProjectionBinding,
 } from "@avg/averray-mcp/harness-run-projection";
@@ -535,6 +536,23 @@ async function reconcileTask(
       { now: deps.now() },
     );
   } catch (error) {
+    if (
+      error instanceof HarnessProjectionError
+      && error.code === "projection_invalid"
+    ) {
+      return forceCancelTask(deps, task, harnessRunId, {
+        lifecycle: "blocked",
+        decisionType: "dispatch_refusal",
+        reason: `projection_invalid: ${safeErrorMessage(error)}`,
+        alert: {
+          severity: "critical",
+          code: "projection_invalid",
+          message:
+            "Harness projection could not be read or validated; the run was cancelled and blocked.",
+        },
+        outboxBinding,
+      });
+    }
     return observePoisonFailure(deps, task, harnessRunId, error);
   }
   try {
