@@ -155,10 +155,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # INT-4c D0 is a completed pre-implementation baseline, not a current
-        # mechanism drill. Preserve its truthful local guard, but do not run
-        # the fossil against current main. See
-        # docs/evidence/INT4C_D0_PARTIAL_2026-08-06.md and issue #790.
+        # INT-4c D0 was retired per #790. Its durable record remains in
+        # docs/evidence/INT4C_D0_PARTIAL_2026-08-06.md.
         include:
           - id: int4b
             runner: scripts/ceremony/run-int4b-drills.mjs

@@ -6,7 +6,6 @@ const SCRIPT = "scripts/ceremony/drill-int4-runner-execution.mjs";
 const SUITES = [
   ["INT4B", 5],
   ["INT4C", 6],
-  ["INT4C_D0", 3],
   ["INT4D", 6],
 ] as const;
 
