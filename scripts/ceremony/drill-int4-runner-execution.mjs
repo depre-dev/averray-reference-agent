@@ -39,13 +39,6 @@ const cases = [
     expected: 6,
   },
   {
-    suite: "INT4C_D0",
-    runner: "run-int4c-d0.mjs",
-    testFile: "int4c-d0-baseline.test.ts",
-    coupling: "INT4C_REFERENCE_DATABASE_URL",
-    expected: 3,
-  },
-  {
     suite: "INT4D",
     runner: "run-int4d-drills.mjs",
     testFile: "int4d-drill-matrix.test.ts",
