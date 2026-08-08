@@ -280,6 +280,46 @@ export interface BankBlock {
   unavailable?: string;
 }
 
+export const ARRIVAL_STAGES = [
+  "reached",
+  "browsed",
+  "evaluated",
+  "identified",
+  "authenticated",
+  "claimed",
+  "submitted",
+] as const;
+
+export type ArrivalStage = (typeof ARRIVAL_STAGES)[number];
+
+export interface ArrivalClient {
+  key: string;
+  name: string | null;
+  version: string | null;
+  era: string | null;
+  firstSeenMs: number;
+  lastSeenMs: number;
+  furthestStage: ArrivalStage;
+  calls: number;
+  tools: Record<string, number>;
+}
+
+export interface ArrivalsSnapshot {
+  schemaVersion: "averray.arrivals.v1";
+  generatedAtMs?: number;
+  observingSinceMs?: number;
+  funnel: Record<ArrivalStage, number>;
+  distinct: {
+    declared: number;
+    anonymous: number;
+    furthest: ArrivalStage;
+  };
+  clients: ArrivalClient[];
+}
+
+/** A reading and a failure are mutually exclusive; neither becomes zero. */
+export type ArrivalsBlock = ArrivalsSnapshot | { unavailable: string };
+
 /** One hour of chain, counting back from the head at read time. */
 export interface HourSlice {
   /** 1 = the most recent hour, ascending into the past. */
@@ -415,6 +455,8 @@ export interface ProductHealth {
    * not render at all, and says nothing. Only `unavailable` is a fault.
    */
   bank?: BankBlock;
+  /** Public MCP-front-door arrivals, or why that feed could not be read. */
+  arrivals?: ArrivalsBlock;
   remediation?: RemediationStatus;
   /** #Ops delivery health — see BuzzDeliveryView. */
   buzz?: BuzzDeliveryView;

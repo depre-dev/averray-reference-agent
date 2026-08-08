@@ -56,6 +56,14 @@ describe("OpsBoard — the honest empty states", () => {
     expect(within(flow).getAllByText("—").length).toBeGreaterThan(0);
     expect(within(flow).queryByText("0")).toBeNull();
   });
+
+  test("an absent arrivals feed is wired as an explicit non-reading, not an empty funnel", () => {
+    const { getByTestId, queryAllByTestId } = render(
+      <OpsBoard health={OPS_FIXTURE_LIVE} nowMs={fresh(OPS_FIXTURE_LIVE)} />,
+    );
+    expect(getByTestId("ops-arrivals-unreachable").textContent).toContain("UNREACHABLE");
+    expect(queryAllByTestId(/^ops-arrival-stage-/)).toHaveLength(0);
+  });
 });
 
 describe("OpsBoard — the banner must not argue with the trust panel", () => {

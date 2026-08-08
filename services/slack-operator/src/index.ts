@@ -198,6 +198,7 @@ import {
 import type { TransportFailureRun } from "./probe-transport.js";
 import { deriveOpsVerdict } from "@avg/schemas";
 import { appendIncidents, readIncidents, reconcileIncidents } from "./product-health-incidents.js";
+import { readArrivalsFeed } from "./arrivals-feed.js";
 import {
   loadRemediationConfig,
   decideRpcRemediation,
@@ -900,6 +901,15 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
         return { buzzInbound: { phase: state.phase, detail: state.detail, failures: state.failures } };
       })(),
       ...(productHealthSnapshotBlocks ?? {}),
+      // Absence must never look like an empty funnel. Before the first
+      // heartbeat (or while the heartbeat is deliberately off), publish the
+      // missing read explicitly; after a heartbeat the sampled feed block
+      // above replaces this marker with either data or its concrete failure.
+      arrivals: productHealthSnapshotBlocks?.arrivals ?? {
+        unavailable: routineConfig.productHealth.enabled
+          ? "arrivals feed unreachable — awaiting the first product-health read"
+          : "arrivals feed unreachable — product-health heartbeat is disabled",
+      },
       // History-derived Trends + Incidents (uptime% / latency / balance series +
       // incident episodes) from the rolling buffer. Always present — the series
       // are honestly short and uptimePct24h is null until a check lands in-window.
@@ -3666,16 +3676,21 @@ function startOperatorRoutines() {
       const activeRpc = remediationConfig.endpoints[rpcRemediationState.activeIndex] ?? phConfig.rpcUrl;
       // One /health fetch feeds product_api + chain_height; the block-advance tracker
       // persists across ticks to catch a frozen chain. Balances come from direct RPC.
-      const collection = await collectProductHealthProbes({ ...phConfig, signerAddress, rpcUrl: activeRpc }, fetch, {
-        advance: productHealthChainAdvance,
-        nowMs: Date.now(),
-        previousSubmittedNotSettled:
-          productHealthSnapshotBlocks?.flow?.submittedNotSettled,
-        ...(productHealthTransportRun ? { transportRun: productHealthTransportRun } : {}),
-      });
+      const [collection, arrivals] = await Promise.all([
+        collectProductHealthProbes({ ...phConfig, signerAddress, rpcUrl: activeRpc }, fetch, {
+          advance: productHealthChainAdvance,
+          nowMs: Date.now(),
+          previousSubmittedNotSettled:
+            productHealthSnapshotBlocks?.flow?.submittedNotSettled,
+          ...(productHealthTransportRun ? { transportRun: productHealthTransportRun } : {}),
+        }),
+        // Same public platform, separate contract. Read beside the heartbeat so
+        // one slow arrivals response does not serialize every money-path probe.
+        readArrivalsFeed({ baseUrl: phConfig.apiBaseUrl, fetchImpl: fetch }),
+      ]);
       productHealthChainAdvance = collection.chainAdvance;
       productHealthTransportRun = collection.transportRun;
-      productHealthSnapshotBlocks = collection.snapshot;
+      productHealthSnapshotBlocks = { ...collection.snapshot, arrivals };
       // Decide + apply RPC auto-remediation from this cycle's read health. Pure
       // decision; the only effect is rotating which endpoint we read next tick
       // (state.activeIndex) + dispatching an audit (failover) or page (escalate).
