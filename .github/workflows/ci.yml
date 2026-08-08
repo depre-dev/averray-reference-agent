@@ -155,6 +155,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # INT-4c D0 is a completed pre-implementation baseline, not a current
+        # mechanism drill. Preserve its truthful local guard, but do not run
+        # the fossil against current main. See
+        # docs/evidence/INT4C_D0_PARTIAL_2026-08-06.md and issue #790.
         include:
           - id: int4b
             runner: scripts/ceremony/run-int4b-drills.mjs
@@ -163,10 +167,6 @@ jobs:
           - id: int4c
             runner: scripts/ceremony/run-int4c-drills.mjs
             expected: 6
-            needs_harness: false
-          - id: int4c-d0
-            runner: scripts/ceremony/run-int4c-d0.mjs
-            expected: 3
             needs_harness: false
           - id: int4d
             runner: scripts/ceremony/run-int4d-drills.mjs
