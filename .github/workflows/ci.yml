@@ -147,3 +147,78 @@ jobs:
           name: int2-supervised-dispatch-evidence
           path: ${{ runner.temp }}/int2-suite-evidence
           if-no-files-found: error
+
+  int4-mechanism-drills:
+    name: INT-4 mechanism drill (${{ matrix.id }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # INT-4c D0 is a completed pre-implementation baseline, not a current
+        # mechanism drill. Preserve its truthful local guard, but do not run
+        # the fossil against current main. See
+        # docs/evidence/INT4C_D0_PARTIAL_2026-08-06.md and issue #790.
+        include:
+          - id: int4b
+            runner: scripts/ceremony/run-int4b-drills.mjs
+            expected: 5
+            needs_harness: false
+          - id: int4c
+            runner: scripts/ceremony/run-int4c-drills.mjs
+            expected: 6
+            needs_harness: false
+          - id: int4d
+            runner: scripts/ceremony/run-int4d-drills.mjs
+            expected: 6
+            needs_harness: true
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup uv
+        if: matrix.needs_harness
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install reference dependencies
+        run: npm ci
+
+      - name: Build drill package imports
+        # npm ci has no lifecycle build. The drill children import the
+        # workspace packages and dispatcher through exports that point at dist/.
+        run: npm run build
+
+      - name: Run INT-4 mechanism drill
+        if: ${{ !matrix.needs_harness }}
+        env:
+          INT4_DRILL_EVIDENCE_DIR: ${{ runner.temp }}/int4-${{ matrix.id }}-evidence
+        run: node ${{ matrix.runner }}
+
+      - name: Run INT-4 mechanism drill with pinned Harness
+        if: matrix.needs_harness
+        env:
+          INT2_HARNESS_DEPLOY_KEY: ${{ secrets.INT2_HARNESS_DEPLOY_KEY }}
+          INT4_DRILL_EVIDENCE_DIR: ${{ runner.temp }}/int4-${{ matrix.id }}-evidence
+        run: node ${{ matrix.runner }}
+
+      - name: Prove the drill suite did not skip
+        if: always()
+        run: test "$(tr -d '[:space:]' < '${{ runner.temp }}/int4-${{ matrix.id }}-evidence/executed-count.txt')" = "${{ matrix.expected }}"
+
+      - name: Upload INT-4 drill evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: int4-${{ matrix.id }}-drill-evidence
+          path: ${{ runner.temp }}/int4-${{ matrix.id }}-evidence
+          if-no-files-found: error

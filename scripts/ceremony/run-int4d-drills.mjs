@@ -8,6 +8,7 @@ import {
   assertKnownMutation,
   assertMutationApplied,
 } from "./lib/int4-mutation-contract.mjs";
+import { prepareVitestExecution } from "./lib/int4-vitest-execution.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const pin = "3355f4906864b0f0e0fe5fd5eb5220172e174206";
@@ -24,6 +25,7 @@ const validMutations = [
   "disable-size-gate",
 ];
 assertKnownMutation("INT4D", mutation, validMutations);
+const vitestExecution = prepareVitestExecution("INT4D");
 const scratch = mkdtempSync(path.join(tmpdir(), "int4d-runner-"));
 const suppliedCheckout = process.env.HARNESS_CHECKOUT?.trim();
 const harnessCheckout = suppliedCheckout || path.join(scratch, "agent-harness");
@@ -47,7 +49,7 @@ try {
       "vitest",
       "run",
       "test/integration/int4d-drill-matrix.test.ts",
-      "--reporter=verbose",
+      ...vitestExecution.reporterArgs,
       ...(filter ? ["-t", filter] : []),
     ],
     {
@@ -70,11 +72,13 @@ try {
   process.stdout.write(result.stdout ?? "");
   process.stderr.write(result.stderr ?? "");
   assertMutationApplied("INT4D", mutation, output);
+  vitestExecution.assert(result.status);
   process.exitCode = result.status ?? 1;
 } finally {
   removeDatabase(reference);
   removeDatabase(harness);
   rmSync(scratch, { recursive: true, force: true });
+  vitestExecution.cleanup();
 }
 
 function prepareHarnessCheckout() {
