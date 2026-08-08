@@ -89,6 +89,14 @@ const transitionBackpressure = async (input) => {
   return result;
 };
 
+function requireEnv(name) {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`INT4C drill child requires ${name} to be set by the parent`);
+  }
+  return value;
+}
+
 const dispatchDeps = {
   now: () => new Date(),
   dispatcherId,
@@ -96,6 +104,14 @@ const dispatchDeps = {
   claimTtlMs,
   maxInflight: Number(process.env.HARNESS_DISPATCH_MAX_INFLIGHT ?? "1"),
   isDispatchEnabled: () => true,
+  // INT-4d requires an active policy identity whenever dispatch is enabled.
+  // The parent passes the fixture's identity: no default here, because a
+  // wrong-but-plausible default refuses every task with policy_drift, which
+  // reads as a real drift finding rather than a misconfigured drill.
+  activePolicyIdentity: {
+    version: requireEnv("INT4C_ACTIVE_POLICY_VERSION"),
+    hash: requireEnv("INT4C_ACTIVE_POLICY_HASH"),
+  },
   isHalted: () => false,
   listDispatchable: listDispatchableAgentTasks,
   getTask: getAgentTask,
@@ -192,7 +208,10 @@ dispatcher = createDispatcherProcess({
       }
       return result;
     } catch (error) {
-      process.stdout.write(`INT4C_CHILD_ATTEMPT_ERROR dispatcher=${dispatcherId} name=${error instanceof Error ? error.name : "UnknownError"}\n`);
+      const detail = error instanceof Error
+        ? `${error.name}: ${error.message}${error.stack ? `\n${error.stack.split("\n").slice(1, 4).join("\n")}` : ""}`
+        : `UnknownError: ${String(error)}`;
+      process.stdout.write(`INT4C_CHILD_ATTEMPT_ERROR dispatcher=${dispatcherId} ${detail.replace(/\n/gu, " | ")}\n`);
       setTimeout(() => void finish(), 0);
       throw error;
     }
