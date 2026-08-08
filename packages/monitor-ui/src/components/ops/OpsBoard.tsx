@@ -25,6 +25,7 @@ import { FlowPanel } from "./FlowPanel.js";
 import { PillarStrip } from "./PillarStrip.js";
 import { SolvencyPanel } from "./SolvencyPanel.js";
 import { BankLane } from "./BankLane.js";
+import { ArrivalsPanel } from "./ArrivalsPanel.js";
 
 export interface OpsBoardProps {
   health: ProductHealth;
@@ -119,6 +120,8 @@ export function OpsBoard({
           <SolvencyPanel solvency={health.solvency} gas={health.gas} payout={health.flow?.payout} />
           <FlowPanel flow={health.flow} externalFunnel={health.externalFunnel} lifecycle={health.lifecycle} nowMs={nowMs} />
         </div>
+
+        <ArrivalsPanel arrivals={health.arrivals} />
 
         {/* The treasury's own money path, under the one that pays workers.
             Renders nothing at all when no feed is configured. */}

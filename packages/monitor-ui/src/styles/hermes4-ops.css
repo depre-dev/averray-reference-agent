@@ -921,6 +921,107 @@ body,
 }
 .ops-pillar-trend > span { min-width: 0; }
 
+/* ---- ARRIVALS ---------------------------------------------------
+   Public MCP-front-door funnel. The seven bars keep the producer's
+   reached→submitted order and exact counts; no stage is inferred here.
+   A failed read occupies the same named panel and says UNREACHABLE,
+   because seven quiet zeroes would falsely claim nobody arrived. */
+.ops-arrivals {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(calc(260 * var(--ops-u)), 1fr);
+  gap: calc(8 * var(--ops-u)) calc(18 * var(--ops-u));
+  padding: calc(9 * var(--ops-u)) calc(14 * var(--ops-u));
+  border: 1px solid var(--ops-rule);
+}
+.ops-arrivals > .ops-panel-head,
+.ops-arrivals-unreachable {
+  grid-column: 1 / -1;
+}
+.ops-arrivals-funnel {
+  display: grid;
+  gap: calc(4 * var(--ops-u));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ops-arrivals-funnel li {
+  display: grid;
+  grid-template-columns: calc(104 * var(--ops-u)) 1fr calc(48 * var(--ops-u));
+  gap: calc(10 * var(--ops-u));
+  align-items: center;
+  min-width: 0;
+  font-family: var(--h4-font-mono);
+  font-size: calc(10 * var(--ops-u));
+}
+.ops-arrivals-stage {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--h4-muted);
+}
+.ops-arrivals-track {
+  height: calc(7 * var(--ops-u));
+  overflow: hidden;
+  border: 1px solid var(--ops-hair);
+  background: var(--h4-paper-sunken);
+}
+.ops-arrivals-track i {
+  display: block;
+  height: 100%;
+  background: var(--h4-ink-2);
+}
+.ops-arrivals-funnel strong {
+  text-align: right;
+  font-size: calc(11 * var(--ops-u));
+  color: var(--h4-ink);
+}
+.ops-arrivals-summary {
+  display: grid;
+  align-content: stretch;
+  gap: calc(8 * var(--ops-u));
+  padding-left: calc(16 * var(--ops-u));
+  border-left: 1px solid var(--ops-hair);
+}
+.ops-arrivals-distinct {
+  display: flex;
+  justify-content: space-between;
+  gap: calc(12 * var(--ops-u));
+  font-family: var(--h4-font-mono);
+  font-size: calc(10 * var(--ops-u));
+  color: var(--h4-muted);
+}
+.ops-arrivals-distinct strong {
+  margin-left: calc(4 * var(--ops-u));
+  font-size: calc(13 * var(--ops-u));
+  color: var(--h4-ink);
+}
+.ops-arrivals-furthest {
+  display: grid;
+  align-content: end;
+  gap: calc(4 * var(--ops-u));
+  font-family: var(--h4-font-mono);
+}
+.ops-arrivals-furthest span {
+  font-size: calc(9 * var(--ops-u));
+  letter-spacing: 0.08em;
+  color: var(--h4-muted);
+}
+.ops-arrivals-furthest strong {
+  font-family: var(--h4-font-display);
+  font-size: calc(24 * var(--ops-u));
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--h4-tel);
+}
+.ops-arrivals-furthest[data-advanced="yes"] strong { color: var(--h4-ok); }
+.ops-arrivals-unreachable {
+  margin: 0;
+  font-family: var(--h4-font-mono);
+  font-size: calc(11 * var(--ops-u));
+  color: var(--tone, var(--h4-tel));
+}
+.ops-arrivals-unreachable strong { letter-spacing: 0.08em; }
+
 /* ---- BANK lane -------------------------------------------------
    A second money path beside the funnel's. Compact by design: four
    facts, one line each, label column aligned so the eye can drop
@@ -1082,6 +1183,14 @@ body,
     width: auto;
     border-right: 0;
     border-bottom: 1px solid var(--ops-rule);
+  }
+  .ops-arrivals { grid-template-columns: 1fr; }
+  .ops-arrivals > .ops-panel-head,
+  .ops-arrivals-unreachable { grid-column: auto; }
+  .ops-arrivals-summary {
+    padding: calc(8 * var(--ops-u)) 0 0;
+    border-left: 0;
+    border-top: 1px solid var(--ops-hair);
   }
   .ops-pillars { grid-template-columns: repeat(2, 1fr); }
   .ops-pillar:nth-child(3) { border-left: 0; }

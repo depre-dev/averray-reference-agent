@@ -40,6 +40,7 @@ import { bucketPayoutsByHour, isHistogramUnavailable, type PayoutHistogram } fro
 import { endpointHost, pinnedCompareRange, type CrossCheckView } from "./payout-crosscheck.js";
 import { burnBasisLabel, isBurnUnmeasurable, type MeasuredBurn } from "./gas-burn-rate.js";
 import { readBankFeed } from "./bank-feed-fetch.js";
+import type { ArrivalsBlock } from "./arrivals-feed.js";
 import { collectCredentialExpiries, credentialExpiryProbe, tlsCertReader } from "./credential-expiry.js";
 import { bankFeedIsDisabled } from "./bank-feed.js";
 import { bankLaneView, BANK_FEED_DISABLED, type BankLaneView } from "./bank-lane.js";
@@ -2675,6 +2676,12 @@ export interface ProductHealthSnapshotBlocks {
    * a CONFIGURED feed that failed, which is worth saying out loud.
    */
   bank?: BankBlock;
+  /**
+   * Public MCP-front-door arrivals, or the explicit reason the feed could not
+   * be read. The heartbeat always supplies one side; optional only for stored
+   * snapshots and older monitor builds.
+   */
+  arrivals?: ArrivalsBlock;
 }
 
 export interface BankBlock {
