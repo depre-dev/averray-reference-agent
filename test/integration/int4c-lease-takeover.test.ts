@@ -6,6 +6,7 @@ import {
 import {
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
 } from "node:fs/promises";
@@ -54,7 +55,10 @@ const MUTATION = process.env.INT4C_MUTATION?.trim();
 const PRINT_EVIDENCE = process.env.INT4C_PRINT_EVIDENCE === "1";
 const CLAIM_TTL_MS = 250;
 const OLD = "2026-08-06T10:00:00.000Z";
-const DEADLINE = "2026-08-07T12:00:00.000Z";
+// Relative, not absolute: a hardcoded wall-clock deadline silently expires and
+// takes the whole drill suite with it — this one died on 2026-08-07 and every
+// run after it refused with deadline_expired regardless of the code under test.
+const DEADLINE = new Date(Date.now() + 86_400_000).toISOString();
 const PLACEHOLDER_HASH = `sha256:${"f".repeat(64)}`;
 const CAPABILITIES: PilotProfileManifest["capabilities"] = [
   { id: "fs.read_file", effectClass: "none", delegable: false },
@@ -81,15 +85,18 @@ RUN("INT-4c lease takeover and backpressure drills", () => {
       "utf8",
     )));
     scratchRoot = await mkdtemp(path.join(tmpdir(), "int4c-drill-"));
-    for (const migration of [
-      "001_init.sql",
-      "002_agent_tasks.sql",
-      "003_dispatch_claims_outbox_decisions.sql",
-      "004_dispatch_quarantines.sql",
-      "005_dispatch_claim_expiry_backpressure.sql",
-    ]) {
+    // Read the directory rather than hardcoding a list: a hand-maintained list
+    // silently falls behind (006_dispatch_policy_drift.sql was added by INT-4d
+    // and never landed here, reddening this drill with a missing-relation error
+    // that looked nothing like its cause).
+    const migrationsDir = new URL("../../ops/migrations/", import.meta.url);
+    const migrations = (await readdir(migrationsDir))
+      .filter((name) => name.endsWith(".sql"))
+      .sort();
+    expect(migrations.length, "no migrations found").toBeGreaterThan(0);
+    for (const migration of migrations) {
       await referencePool.query(await readFile(
-        new URL(`../../ops/migrations/${migration}`, import.meta.url),
+        new URL(migration, migrationsDir),
         "utf8",
       ));
     }
@@ -436,6 +443,10 @@ function spawnDispatcher(
       HARNESS_DISPATCH_MAX_INFLIGHT: "1",
       HARNESS_DISPATCH_ALERTS_PATH: alertsPath(),
       HARNESS_DISPATCH_HEARTBEAT_PATH: heartbeatPath,
+      // Derive the child's active policy identity from the same fixture the
+      // tasks are built from, so the two can never silently disagree.
+      INT4C_ACTIVE_POLICY_VERSION: fixture.approval.policyVersion!,
+      INT4C_ACTIVE_POLICY_HASH: fixture.approval.policyHash!,
       ...(crashPoint
         ? {
             HARNESS_DISPATCH_FAULT_INJECTION: "enabled",
