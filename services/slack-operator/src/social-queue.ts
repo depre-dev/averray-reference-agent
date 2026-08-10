@@ -57,16 +57,34 @@ export async function readSocialQueue({
   fetchImpl?: typeof globalThis.fetch;
   timeoutMs?: number;
 } = {}): Promise<SocialQueue> {
+  // Armed deliberately, like the digest itself — and for the same reason. Off
+  // by default means an unconfigured deployment stays quiet instead of
+  // complaining about a feature nobody switched on.
+  const flag = (env.SOCIAL_QUEUE_ENABLED ?? "").trim().toLowerCase();
+  if (!["1", "true", "yes", "on"].includes(flag)) {
+    return { state: "off", drafts: [], problem: "SOCIAL_QUEUE_ENABLED is not set" };
+  }
+
   const repo = (env.SOCIAL_QUEUE_REPO ?? DEFAULT_QUEUE_REPO).trim();
-  if (!repo || env.SOCIAL_QUEUE_ENABLED === "0") {
-    return { state: "off", drafts: [], problem: "social queue not enabled" };
+  if (!repo) {
+    return { state: "unreadable", drafts: [], problem: "SOCIAL_QUEUE_REPO is empty" };
   }
 
   const token = resolveGithubTokenForRepo(repo, env);
   if (!token) {
-    // Not configured is not the same as empty, and it is not the same as
-    // broken. Say which.
-    return { state: "off", drafts: [], problem: `no GitHub token resolves for ${repo}` };
+    // Once armed, a missing token is a BROKEN queue, not an absent one.
+    //
+    // This matters more than it looks: the queue lives in a different GitHub
+    // owner (`averray-agent`) from this repo (`depre-dev`), so the plain
+    // GITHUB_TOKEN may not reach it and GITHUB_OWNER_TOKENS must carry an entry.
+    // Reporting that as "off" would print no line at all, and a missing token
+    // would be indistinguishable from an empty queue — a draft could sit unseen
+    // for weeks while every morning said nothing was waiting.
+    return {
+      state: "unreadable",
+      drafts: [],
+      problem: `no GitHub token resolves for ${repo} — check GITHUB_OWNER_TOKENS`,
+    };
   }
 
   const url = `${GITHUB_API}/repos/${repo}/issues?labels=${QUEUE_LABEL}&state=open&sort=created&direction=asc&per_page=20`;

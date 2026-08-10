@@ -479,6 +479,13 @@ services:
       BUZZ_MORNING_DIGEST: ${BUZZ_MORNING_DIGEST:-}
       BUZZ_DIGEST_TIME: ${BUZZ_DIGEST_TIME:-08:00}
       BUZZ_DIGEST_TZ: ${BUZZ_DIGEST_TZ:-Europe/Zurich}
+      # The social draft queue carried in that digest. Off by default, armed
+      # deliberately. Once armed, a missing token reports as UNREADABLE rather
+      # than off: the queue lives under a different GitHub owner
+      # (averray-agent) than this repo, so GITHUB_OWNER_TOKENS must carry an
+      # entry for it or a waiting draft would be invisible.
+      SOCIAL_QUEUE_ENABLED: ${SOCIAL_QUEUE_ENABLED:-}
+      SOCIAL_QUEUE_REPO: ${SOCIAL_QUEUE_REPO:-averray-agent/agent}
       # Buzz INBOUND — answering questions in #Ops. Default OFF, and separate
       # from the four above on purpose: publishing narration is safe, while
       # listening hands an LLM turn to whatever is typed in the channel.
