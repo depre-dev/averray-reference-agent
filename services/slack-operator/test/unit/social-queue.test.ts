@@ -9,7 +9,7 @@ import {
   readSocialQueue,
 } from "../../src/social-queue.js";
 
-const ENV = { GITHUB_TOKEN: "t" } as NodeJS.ProcessEnv;
+const ENV = { SOCIAL_QUEUE_ENABLED: "1", GITHUB_TOKEN: "t" } as NodeJS.ProcessEnv;
 
 function issue(number: number, title: string, extra: Record<string, unknown> = {}) {
   return {
@@ -50,11 +50,47 @@ describe("reading the queue", () => {
     expect((await readSocialQueue({ env: ENV, fetchImpl })).drafts).toEqual([]);
   });
 
-  test("no token means off — not empty, and not broken", async () => {
+  test("unarmed is off — an unconfigured deployment stays quiet", async () => {
     const queue = await readSocialQueue({ env: {} as NodeJS.ProcessEnv, fetchImpl: respond([]) });
 
     expect(queue.state).toBe("off");
-    expect(queue.problem).toContain("no GitHub token");
+    expect(queue.problem).toContain("SOCIAL_QUEUE_ENABLED");
+  });
+
+  test("ARMED but untokened is UNREADABLE, never off", async () => {
+    // The queue lives under a different GitHub owner than this repo, so the
+    // plain GITHUB_TOKEN may not reach it. Reporting that as "off" prints no
+    // line, and a missing token becomes indistinguishable from an empty queue —
+    // a draft could sit unseen for weeks while every morning said nothing was
+    // waiting.
+    const queue = await readSocialQueue({
+      env: { SOCIAL_QUEUE_ENABLED: "1" } as NodeJS.ProcessEnv,
+      fetchImpl: respond([]),
+    });
+
+    expect(queue.state).toBe("unreadable");
+    expect(queue.problem).toContain("GITHUB_OWNER_TOKENS");
+  });
+
+  test("an armed queue with no token still produces a visible line", () => {
+    const line = buildSocialQueueLine({
+      state: "unreadable",
+      drafts: [],
+      problem: "no GitHub token resolves for averray-agent/agent — check GITHUB_OWNER_TOKENS",
+    });
+
+    expect(line).not.toBeNull();
+    expect(line?.tone).toBe("degraded");
+  });
+
+  test("the arming flag accepts the same words as the digest flag", async () => {
+    for (const flag of ["1", "true", "yes", "on", "ON", "True"]) {
+      const queue = await readSocialQueue({
+        env: { SOCIAL_QUEUE_ENABLED: flag, GITHUB_TOKEN: "t" } as NodeJS.ProcessEnv,
+        fetchImpl: respond([]),
+      });
+      expect(queue.state, `flag "${flag}" should arm the queue`).toBe("live");
+    }
   });
 
   test("a non-200 is unreadable, never an empty queue", async () => {
