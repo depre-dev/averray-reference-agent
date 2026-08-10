@@ -40,6 +40,10 @@ const AUTOMATED_SUITE_TEST = path.join(
   ROOT,
   "test/integration/int2-automated-suite.test.ts",
 );
+const INT2E_STORE_RUNNER = path.join(
+  SCRIPT_ROOT,
+  "run-int2e-dispatch-store.mjs",
+);
 const REAP_HELPER = path.join(SCRIPT_ROOT, "lib/int2-reap.sh");
 const PILOT_DOCKERFILE = path.join(ROOT, "ops/Dockerfile.pilot");
 const OPERATOR_SCRIPTS = [
@@ -228,8 +232,8 @@ describe("committed INT-2 ceremony mechanics", () => {
     expect(suite).not.toMatch(/pg_isready -U postgres -d \S+ >\/dev\/null$/m);
   });
 
-  it("keeps the idle model text-only and all three suite counts at ten", async () => {
-    const [idleScript, integrationSuite, shellSuite, workflow] =
+  it("keeps the idle model text-only and both required suite counts distinct", async () => {
+    const [idleScript, integrationSuite, shellSuite, storeRunner, workflow] =
       await Promise.all([
         readFile(
           path.join(
@@ -243,6 +247,7 @@ describe("committed INT-2 ceremony mechanics", () => {
           "utf8",
         ),
         readFile(AUTOMATED_SUITE, "utf8"),
+        readFile(INT2E_STORE_RUNNER, "utf8"),
         readFile(path.join(ROOT, ".github/workflows/ci.yml"), "utf8"),
       ]);
     const turns = idleScript.trimEnd().split("\n").map((line) =>
@@ -267,6 +272,22 @@ describe("committed INT-2 ceremony mechanics", () => {
     expect(shellSuite).toContain("INT2_CASES_STARTED expected=14");
     expect(shellSuite).toContain('test "$_int2_executed" = "14"');
     expect(workflow).toContain("executed-count.txt')\" = \"14\"");
+    expect(shellSuite).toContain("INT2E_TESTS_STARTED expected=6");
+    expect(shellSuite).toContain('test "$_int2e_executed" = "6"');
+    expect(shellSuite).toContain("run-int2e-dispatch-store.mjs");
+    expect(storeRunner).toContain(
+      "test/integration/dispatch-store-postgres.test.ts",
+    );
+    expect(storeRunner).toContain(
+      "delete childEnvironment.DISPATCH_TEST_DATABASE_URL",
+    );
+    expect(storeRunner).toContain(
+      "childEnvironment.DISPATCH_TEST_DATABASE_URL = databaseUrl",
+    );
+    expect(workflow).toContain(
+      "int2e-dispatch-store-evidence/executed-count.txt')\" = \"6\"",
+    );
+    expect(workflow).toContain("name: int2e-dispatch-store-evidence");
     expect(shellSuite).toContain(
       '-t "$_int2_image_tag" "$_int2_dep_source"',
     );

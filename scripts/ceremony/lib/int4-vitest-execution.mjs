@@ -9,13 +9,15 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-const EVIDENCE_ENV = "INT4_DRILL_EVIDENCE_DIR";
+const DEFAULT_EVIDENCE_ENV = "INT4_DRILL_EVIDENCE_DIR";
 
 export function prepareVitestExecution(
   suite,
   environment = process.env,
+  evidenceEnvironment = DEFAULT_EVIDENCE_ENV,
+  executionName = "DRILLS",
 ) {
-  const configuredEvidence = environment[EVIDENCE_ENV]?.trim();
+  const configuredEvidence = environment[evidenceEnvironment]?.trim();
   const temporary = !configuredEvidence;
   const evidenceDir = configuredEvidence
     ? path.resolve(configuredEvidence)
@@ -36,6 +38,7 @@ export function prepareVitestExecution(
         childStatus,
         reportPath,
         evidenceDir,
+        executionName,
       });
     },
     cleanup() {
@@ -49,6 +52,7 @@ export function assertVitestExecution({
   childStatus,
   reportPath,
   evidenceDir,
+  executionName = "DRILLS",
 }) {
   const status = childStatus ?? 1;
   if (!existsSync(reportPath)) {
@@ -86,17 +90,17 @@ export function assertVitestExecution({
   if (status !== 0) return { passed, failed, skipped, executed, total };
   if (skipped > 0) {
     throw new Error(
-      `${suite}_DRILLS_SKIPPED passed=${passed} skipped=${skipped} total=${total}`,
+      `${suite}_${executionName}_SKIPPED passed=${passed} skipped=${skipped} total=${total}`,
     );
   }
   if (passed < 1) {
     throw new Error(
-      `${suite}_DRILLS_NOT_EXECUTED passed=${passed} skipped=${skipped} total=${total}`,
+      `${suite}_${executionName}_NOT_EXECUTED passed=${passed} skipped=${skipped} total=${total}`,
     );
   }
 
   console.info(
-    `${suite}_DRILLS_EXECUTED passed=${passed} skipped=${skipped} failed=${failed} total=${total}`,
+    `${suite}_${executionName}_EXECUTED passed=${passed} skipped=${skipped} failed=${failed} total=${total}`,
   );
   return { passed, failed, skipped, executed, total };
 }
