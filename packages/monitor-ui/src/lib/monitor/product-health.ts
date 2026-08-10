@@ -297,6 +297,8 @@ export interface ArrivalClient {
   name: string | null;
   version: string | null;
   era: string | null;
+  /** Declared as one of ours. Unmarked callers are external on purpose. */
+  self: boolean;
   firstSeenMs: number;
   lastSeenMs: number;
   furthestStage: ArrivalStage;
@@ -308,11 +310,21 @@ export interface ArrivalsSnapshot {
   schemaVersion: "averray.arrivals.v1";
   generatedAtMs?: number;
   observingSinceMs?: number;
+  /**
+   * Every call, our own canaries and probes included. Never a headline on its
+   * own: a self-marked probe read as an arrival manufactures demand evidence.
+   */
   funnel: Record<ArrivalStage, number>;
+  /** The subset outsiders drove — the only count that reads as demand. */
+  funnelExternal: Record<ArrivalStage, number>;
+  /** Our own probes, kept because confirming they ran is worth something. */
+  funnelSelf: Record<ArrivalStage, number>;
   distinct: {
     declared: number;
     anonymous: number;
+    self: number;
     furthest: ArrivalStage;
+    furthestExternal: ArrivalStage;
   };
   clients: ArrivalClient[];
 }

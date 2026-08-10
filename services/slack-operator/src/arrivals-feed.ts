@@ -5,6 +5,13 @@
 // the result. Nothing crossing that network boundary is trusted implicitly:
 // malformed or unreachable data becomes an explicit `unavailable` block,
 // never an empty funnel that could be mistaken for "nobody arrived".
+//
+// `funnel` is every call the platform saw, our own canaries and probes
+// included. `funnelExternal` is the subset outsiders drove, and it is the only
+// one a headline may render — a self-marked probe counted as an arrival
+// manufactures demand evidence. Both are required: a platform that cannot
+// supply the split cannot answer the question this panel asks, so the block
+// becomes unavailable rather than falling back to the inflated total.
 
 export const ARRIVALS_SCHEMA_VERSION = "averray.arrivals.v1";
 export const ARRIVAL_STAGES = [
@@ -24,6 +31,8 @@ export interface ArrivalClient {
   name: string | null;
   version: string | null;
   era: string | null;
+  /** Declared as one of ours. Unmarked callers are external on purpose. */
+  self: boolean;
   firstSeenMs: number;
   lastSeenMs: number;
   furthestStage: ArrivalStage;
@@ -35,11 +44,18 @@ export interface ArrivalsSnapshot {
   schemaVersion: typeof ARRIVALS_SCHEMA_VERSION;
   generatedAtMs?: number;
   observingSinceMs?: number;
+  /** Every call, ours included. Never a headline on its own. */
   funnel: Record<ArrivalStage, number>;
+  /** The subset outsiders drove — the only count that reads as demand. */
+  funnelExternal: Record<ArrivalStage, number>;
+  /** Our own probes, kept because confirming they ran is worth something. */
+  funnelSelf: Record<ArrivalStage, number>;
   distinct: {
     declared: number;
     anonymous: number;
+    self: number;
     furthest: ArrivalStage;
+    furthestExternal: ArrivalStage;
   };
   clients: ArrivalClient[];
 }
@@ -100,6 +116,23 @@ export function normalizeArrivalsFeed(body: unknown): ArrivalsBlock {
 
   const funnel = stageCounts(value.funnel, "funnel");
   if ("unavailable" in funnel) return funnel;
+  const funnelExternal = stageCounts(value.funnelExternal, "funnelExternal");
+  if ("unavailable" in funnelExternal) return funnelExternal;
+  const funnelSelf = stageCounts(value.funnelSelf, "funnelSelf");
+  if ("unavailable" in funnelSelf) return funnelSelf;
+
+  // External and self are subsets of the total, so neither can exceed it and
+  // together they cannot either. A producer that says otherwise is describing
+  // a funnel we do not understand, and the safe reading of a funnel we do not
+  // understand is none at all.
+  const incoherent = ARRIVAL_STAGES.find(
+    (stage) => funnelExternal.counts[stage] + funnelSelf.counts[stage] > funnel.counts[stage],
+  );
+  if (incoherent) {
+    return {
+      unavailable: `arrivals feed unreadable — ${incoherent} external plus self exceeds the total`,
+    };
+  }
 
   if (!value.distinct || typeof value.distinct !== "object") {
     return { unavailable: "arrivals feed unreadable — distinct is missing" };
@@ -107,9 +140,14 @@ export function normalizeArrivalsFeed(body: unknown): ArrivalsBlock {
   const distinctValue = value.distinct as Record<string, unknown>;
   const declared = count(distinctValue.declared);
   const anonymous = count(distinctValue.anonymous);
+  const self = count(distinctValue.self);
   const furthest = arrivalStage(distinctValue.furthest);
-  if (declared === undefined || anonymous === undefined || furthest === undefined) {
-    return { unavailable: "arrivals feed unreadable — distinct counts or furthest stage are invalid" };
+  const furthestExternal = arrivalStage(distinctValue.furthestExternal);
+  if (
+    declared === undefined || anonymous === undefined || self === undefined ||
+    furthest === undefined || furthestExternal === undefined
+  ) {
+    return { unavailable: "arrivals feed unreadable — distinct counts or furthest stages are invalid" };
   }
 
   if (!Array.isArray(value.clients)) {
@@ -127,7 +165,9 @@ export function normalizeArrivalsFeed(body: unknown): ArrivalsBlock {
     ...(generatedAtMs === undefined ? {} : { generatedAtMs }),
     ...(observingSinceMs === undefined ? {} : { observingSinceMs }),
     funnel: funnel.counts,
-    distinct: { declared, anonymous, furthest },
+    funnelExternal: funnelExternal.counts,
+    funnelSelf: funnelSelf.counts,
+    distinct: { declared, anonymous, self, furthest, furthestExternal },
     clients,
   };
 }
@@ -161,6 +201,10 @@ function normalizeClient(raw: unknown): { client: ArrivalClient } | { unavailabl
   if (
     typeof value.key !== "string" || !value.key.trim() ||
     !nullableString(value.name) || !nullableString(value.version) || !nullableString(value.era) ||
+    // Not coerced: a missing mark is a producer we cannot read, whereas
+    // treating it as false would silently promote our own probe to an
+    // outsider. Absent is not the same as external here.
+    typeof value.self !== "boolean" ||
     firstSeenMs === undefined || lastSeenMs === undefined || calls === undefined ||
     furthestStage === undefined || tools === undefined
   ) {
@@ -172,6 +216,7 @@ function normalizeClient(raw: unknown): { client: ArrivalClient } | { unavailabl
       name: value.name,
       version: value.version,
       era: value.era,
+      self: value.self,
       firstSeenMs,
       lastSeenMs,
       furthestStage,
