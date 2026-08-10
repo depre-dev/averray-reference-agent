@@ -184,6 +184,20 @@ export interface MorningDigestInput {
    * which is how that count stops being believed.
    */
   socialSignal?: { text: string; tone: string } | null;
+  /**
+   * Drafts the sweep queued overnight, from social-queue.ts. A to-do list, not
+   * a health reading.
+   *
+   * Like the public-record line, its tone never enters the operational tally —
+   * a post worth writing is not an incident, and inflating "needs you now" with
+   * one is how that count stops being believed.
+   *
+   * Unlike that line, it DOES bear on the closing sentence. Listing three
+   * waiting drafts and then signing off "Nothing is waiting on you" is exactly
+   * the self-contradiction the one-verdict rule forbids — the same shape
+   * truth-boundary review caught in #755. See the closing block below.
+   */
+  socialQueue?: { text: string; tone: string; count: number } | null;
 }
 
 const DIGEST_LINE_PROBES: readonly { key: string; name: string }[] = [
@@ -213,6 +227,9 @@ export function digestFactStrings(input: MorningDigestInput): string[] {
   // degraded form ("could not read the public record") must survive a
   // rephrasing, or the digest reads as complete when it was not.
   if (input.socialSignal) facts.push(input.socialSignal.text);
+  // The unreadable form especially must survive a rephrasing: losing it would
+  // make the digest read as complete while a queued post sat invisible.
+  if (input.socialQueue) facts.push(input.socialQueue.text);
   return facts;
 }
 
@@ -275,6 +292,7 @@ export function buildMorningDigest(input: MorningDigestInput): string {
   }
   if (input.bankRequests) lines.push(`Bank: ${input.bankRequests.text}`);
   if (input.socialSignal) lines.push(`Public record: ${input.socialSignal.text}`);
+  if (input.socialQueue) lines.push(`Drafts: ${input.socialQueue.text}`);
 
   if (attention.length > 0) {
     const redFirst = [...attention].sort(
@@ -316,7 +334,21 @@ export function buildMorningDigest(input: MorningDigestInput): string {
         : "Worth a look when you're at the desk — and read the verdict line above.",
     );
   } else if (verdictCalm) {
-    lines.push("Nothing is waiting on you.");
+    // The only branch that claims nothing is outstanding, so the only one the
+    // draft queue can contradict. Operationally calm and "nothing waiting" are
+    // not the same sentence once a queue exists.
+    if (input.socialQueue?.tone === "degraded") {
+      lines.push("Nothing operational is waiting on you — but the draft queue could not be read.");
+    } else if ((input.socialQueue?.count ?? 0) > 0) {
+      const count = input.socialQueue?.count ?? 0;
+      lines.push(
+        count === 1
+          ? "Nothing operational is waiting on you — one draft to write when you have a minute."
+          : `Nothing operational is waiting on you — ${count} drafts to write when you have a minute.`,
+      );
+    } else {
+      lines.push("Nothing is waiting on you.");
+    }
   } else {
     lines.push("The probes are green, but the verdict line above is the one to read.");
   }

@@ -158,6 +158,7 @@ import { startBuzzInbound } from "./buzz-inbound-start.js";
 import { decideProbeTransitions } from "./probe-transitions.js";
 import { buildMorningDigest, digestDue, digestFactStrings, readDigestSchedule } from "./morning-digest.js";
 import { readSocialSignal } from "./social-signal.js";
+import { buildSocialQueueLine, readSocialQueue } from "./social-queue.js";
 import { composeConversationalDigest } from "./digest-voice.js";
 import { probeLabel } from "./ops-voice.js";
 import { describeBuzzDelivery, recordBuzzDelivery, type BuzzDeliveryState } from "./buzz-delivery.js";
@@ -3971,6 +3972,11 @@ function startOperatorRoutines() {
             ? { payout: productHealthSnapshotBlocks.flow.payout }
             : {}),
         });
+        const readQueuedDraftsLine = async () => {
+          const queue = await readSocialQueue();
+          const line = buildSocialQueueLine(queue);
+          return line ? { ...line, count: queue.drafts.length } : null;
+        };
         const digestInput = {
           localDate: digestCheck.localDate,
           localTime: digestCheck.localTime,
@@ -3988,6 +3994,10 @@ function startOperatorRoutines() {
           // unreachable endpoint returns a degraded line, so a transparency
           // outage costs one sentence rather than the whole digest.
           socialSignal: await readSocialSignal(),
+          // Drafts the sweep queued overnight. Never throws: an unreachable
+          // GitHub yields a "could not be read" line, so a queue outage costs
+          // one sentence rather than the digest.
+          socialQueue: await readQueuedDraftsLine(),
         };
         // The plain digest is both the fallback and Hermes's source text; the
         // gate in digest-voice guarantees his prose carries every figure, so a
