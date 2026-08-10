@@ -128,16 +128,18 @@ describe("normalizeArrivalsFeed", () => {
     expect("unavailable" in result && result.unavailable).toContain("client entry has invalid fields");
   });
 
-  // External and self are subsets of the total. A producer claiming more
-  // outsiders than calls is describing a funnel we cannot interpret, and the
-  // safe reading of a funnel we cannot interpret is none at all.
+  // External, self and ambiguous are disjoint subsets of the total. A producer
+  // claiming more outsiders than calls is describing a funnel we cannot
+  // interpret, and the safe reading of a funnel we cannot interpret is none.
   test("a split that exceeds its own total is refused", () => {
     const result = normalizeArrivalsFeed({
       ...good,
       funnelExternal: { ...good.funnelExternal, browsed: good.funnel.browsed + 1 },
     });
 
-    expect("unavailable" in result && result.unavailable).toContain("browsed external plus self exceeds");
+    expect("unavailable" in result && result.unavailable).toContain(
+      "browsed external plus self plus ambiguous exceeds",
+    );
   });
 
   test("the producer's own unavailable state stays unavailable, not seven zeroes", () => {
@@ -166,5 +168,117 @@ describe("normalizeArrivalsFeed", () => {
   test("a schema drift is visible by version", () => {
     const result = normalizeArrivalsFeed({ ...good, schemaVersion: "averray.arrivals.v2" });
     expect("unavailable" in result && result.unavailable).toContain("schemaVersion averray.arrivals.v1");
+  });
+});
+
+// AMBIGUOUS — traffic under a client name the platform itself uses. Our Claude
+// session and a stranger's both declare `Anthropic/ClaudeAI`, so the funnel
+// structurally cannot separate them and neither side may be claimed.
+describe("normalizeArrivalsFeed — the ambiguous bucket", () => {
+  const withAmbiguous = {
+    ...good,
+    funnelAmbiguous: {
+      reached: 0,
+      browsed: 3,
+      evaluated: 0,
+      identified: 0,
+      authenticated: 0,
+      claimed: 0,
+      submitted: 0,
+    },
+    // The base fixture spends its whole `browsed` total on external and self,
+    // so the third bucket needs room in the total to be coherent at all.
+    funnel: { ...good.funnel, browsed: 15 },
+    distinct: { ...good.distinct, ambiguous: 1, furthestAmbiguous: "browsed" },
+  };
+
+  test("the third bucket is carried through when the platform reports it", () => {
+    const result = normalizeArrivalsFeed(withAmbiguous);
+
+    expect("funnelAmbiguous" in result && result.funnelAmbiguous).toEqual(withAmbiguous.funnelAmbiguous);
+    expect("distinct" in result && result.distinct.ambiguous).toBe(1);
+    expect("distinct" in result && result.distinct.furthestAmbiguous).toBe("browsed");
+  });
+
+  // Unlike the external split, absence here is not a producer we cannot read —
+  // it is one deployed before the bucket existed, whose `funnelExternal` is the
+  // number this panel has always rendered. Blanking the board over a
+  // deploy-order skew would be strictly worse than showing it.
+  test("a platform without the bucket still reads, it does not blank the board", () => {
+    const result = normalizeArrivalsFeed(good);
+
+    expect("unavailable" in result).toBe(false);
+    expect("funnelExternal" in result && result.funnelExternal).toEqual(good.funnelExternal);
+  });
+
+  // Absent and zero are different claims. Zero-filling would have the board
+  // state that no unattributable traffic arrived, which nobody measured.
+  test("an absent bucket stays absent rather than becoming a zero reading", () => {
+    const result = normalizeArrivalsFeed(good);
+
+    expect("funnelAmbiguous" in result).toBe(false);
+    expect("distinct" in result && "ambiguous" in result.distinct).toBe(false);
+    expect("distinct" in result && "furthestAmbiguous" in result.distinct).toBe(false);
+  });
+
+  test("optional does not mean unchecked — a malformed bucket is still refused", () => {
+    const result = normalizeArrivalsFeed({
+      ...withAmbiguous,
+      funnelAmbiguous: { ...withAmbiguous.funnelAmbiguous, browsed: "3" },
+    });
+
+    expect("unavailable" in result && result.unavailable).toContain("funnelAmbiguous.browsed");
+  });
+
+  test("a malformed distinct ambiguous figure is refused", () => {
+    const result = normalizeArrivalsFeed({
+      ...withAmbiguous,
+      distinct: { ...withAmbiguous.distinct, furthestAmbiguous: "loitering" },
+    });
+
+    expect("unavailable" in result && result.unavailable).toContain("distinct ambiguous figures");
+  });
+
+  // The invariant this bucket had to be added to. All three are subsets of the
+  // total, so together they still cannot exceed it.
+  test("the three buckets together may not exceed the total", () => {
+    const result = normalizeArrivalsFeed({
+      ...withAmbiguous,
+      funnelAmbiguous: { ...withAmbiguous.funnelAmbiguous, browsed: good.funnel.browsed },
+    });
+
+    expect("unavailable" in result && result.unavailable).toContain(
+      "browsed external plus self plus ambiguous exceeds",
+    );
+  });
+
+  // An INEQUALITY on purpose: calls counted before the platform split its
+  // funnel restore into the total alone, so the parts legitimately fall short.
+  // Requiring them to add up would reject every producer with real history.
+  test("buckets falling short of the total is history, not incoherence", () => {
+    const result = normalizeArrivalsFeed({
+      ...withAmbiguous,
+      funnel: { ...good.funnel, browsed: good.funnel.browsed + 40 },
+    });
+
+    expect("unavailable" in result).toBe(false);
+  });
+
+  test("a client may carry the ambiguous mark, and need not", () => {
+    const [client] = good.clients;
+    const marked = normalizeArrivalsFeed({
+      ...withAmbiguous,
+      clients: [{ ...client, ambiguous: true }],
+    });
+    expect("clients" in marked && marked.clients[0].ambiguous).toBe(true);
+
+    const unmarked = normalizeArrivalsFeed(good);
+    expect("clients" in unmarked && "ambiguous" in unmarked.clients[0]).toBe(false);
+
+    const malformed = normalizeArrivalsFeed({
+      ...withAmbiguous,
+      clients: [{ ...client, ambiguous: "yes" }],
+    });
+    expect("unavailable" in malformed && malformed.unavailable).toContain("client entry has invalid fields");
   });
 });
