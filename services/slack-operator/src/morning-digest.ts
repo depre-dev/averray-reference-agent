@@ -173,6 +173,17 @@ export interface MorningDigestInput {
   probes: readonly DigestProbe[];
   /** The bank lane's server-decided requests line, when a lane exists at all. */
   bankRequests?: { text: string; tone: string } | null;
+  /**
+   * The public-record line from social-signal.ts, when configured. Decided
+   * there, composed here — like the bank line.
+   *
+   * Its tone is deliberately NOT counted toward "needs you now" or "worth a
+   * look": a post worth writing is not an operational finding, and a social
+   * reading that could not be taken says nothing about the product. Both would
+   * inflate the urgency count with something the operator cannot act on at 7am,
+   * which is how that count stops being believed.
+   */
+  socialSignal?: { text: string; tone: string } | null;
 }
 
 const DIGEST_LINE_PROBES: readonly { key: string; name: string }[] = [
@@ -198,6 +209,10 @@ export function digestFactStrings(input: MorningDigestInput): string[] {
     if (probe.status !== "ok") facts.push(probe.detail);
   }
   if (input.bankRequests) facts.push(input.bankRequests.text);
+  // Included for the same reason as the bank line, and one of its own: the
+  // degraded form ("could not read the public record") must survive a
+  // rephrasing, or the digest reads as complete when it was not.
+  if (input.socialSignal) facts.push(input.socialSignal.text);
   return facts;
 }
 
@@ -259,6 +274,7 @@ export function buildMorningDigest(input: MorningDigestInput): string {
     if (probe) lines.push(`${key}: ${probe.detail}`);
   }
   if (input.bankRequests) lines.push(`Bank: ${input.bankRequests.text}`);
+  if (input.socialSignal) lines.push(`Public record: ${input.socialSignal.text}`);
 
   if (attention.length > 0) {
     const redFirst = [...attention].sort(
