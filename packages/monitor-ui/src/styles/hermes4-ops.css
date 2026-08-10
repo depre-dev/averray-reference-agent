@@ -946,7 +946,9 @@ body,
 }
 .ops-arrivals-funnel li {
   display: grid;
-  grid-template-columns: calc(104 * var(--ops-u)) 1fr calc(48 * var(--ops-u));
+  /* Fourth column is ours, counted apart. It holds its width even when empty
+     so the external figures stay on one line down the panel. */
+  grid-template-columns: calc(104 * var(--ops-u)) 1fr calc(48 * var(--ops-u)) calc(38 * var(--ops-u));
   gap: calc(10 * var(--ops-u));
   align-items: center;
   min-width: 0;
@@ -973,6 +975,13 @@ body,
   text-align: right;
   font-size: calc(11 * var(--ops-u));
   color: var(--h4-ink);
+}
+/* Ours. Muted and smaller than the external figure beside it, because the
+   entire point of the split is that this number is not evidence of demand. */
+.ops-arrivals-self {
+  text-align: right;
+  font-size: calc(9 * var(--ops-u));
+  color: var(--h4-muted);
 }
 .ops-arrivals-summary {
   display: grid;
@@ -1021,6 +1030,23 @@ body,
   color: var(--tone, var(--h4-tel));
 }
 .ops-arrivals-unreachable strong { letter-spacing: 0.08em; }
+/* Pre-split history: real calls whose actor was never recorded. Named rather
+   than folded into either column, because the furthest-stage figures come
+   from the client table and DO remember it — without this line the two read
+   as a contradiction. Full width, below both, and absent when the count is 0. */
+.ops-arrivals-unattributed {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding-top: calc(6 * var(--ops-u));
+  border-top: 1px solid var(--ops-hair);
+  font-family: var(--h4-font-mono);
+  font-size: calc(9 * var(--ops-u));
+  color: var(--h4-muted);
+}
+.ops-arrivals-unattributed strong {
+  letter-spacing: 0.08em;
+  color: var(--tone, var(--h4-tel));
+}
 
 /* ---- BANK lane -------------------------------------------------
    A second money path beside the funnel's. Compact by design: four
@@ -1186,6 +1212,7 @@ body,
   }
   .ops-arrivals { grid-template-columns: 1fr; }
   .ops-arrivals > .ops-panel-head,
+  .ops-arrivals-unattributed,
   .ops-arrivals-unreachable { grid-column: auto; }
   .ops-arrivals-summary {
     padding: calc(8 * var(--ops-u)) 0 0;
