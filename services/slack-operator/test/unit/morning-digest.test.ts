@@ -164,6 +164,78 @@ describe("the message quotes; it does not opine", () => {
     expect(text.endsWith("Nothing is waiting on you.")).toBe(true);
   });
 
+  test("queued drafts are listed", () => {
+    const text = buildMorningDigest({
+      ...base,
+      socialQueue: { text: "2 drafts waiting — #4 a; #5 b", tone: "ok", count: 2 },
+    });
+    expect(text).toContain("Drafts: 2 drafts waiting — #4 a; #5 b");
+  });
+
+  test("an empty queue contributes NO line and the sign-off stays flat", () => {
+    const text = buildMorningDigest({ ...base, socialQueue: null });
+    expect(text).not.toContain("Drafts:");
+    expect(text.endsWith("Nothing is waiting on you.")).toBe(true);
+  });
+
+  test("the sign-off never says nothing is waiting while drafts are listed", () => {
+    // Listing three waiting drafts and then signing off "Nothing is waiting on
+    // you" is the same self-contradiction #755 caught between the closing line
+    // and the verdict.
+    const text = buildMorningDigest({
+      ...base,
+      socialQueue: { text: "3 drafts waiting — #4 a; #5 b; #6 c", tone: "ok", count: 3 },
+    });
+    expect(text).not.toContain("Nothing is waiting on you.");
+    expect(text.endsWith("Nothing operational is waiting on you — 3 drafts to write when you have a minute.")).toBe(true);
+  });
+
+  test("one draft reads as one in the sign-off", () => {
+    const text = buildMorningDigest({
+      ...base,
+      socialQueue: { text: "1 draft waiting — #4 a", tone: "ok", count: 1 },
+    });
+    expect(text.endsWith("Nothing operational is waiting on you — one draft to write when you have a minute.")).toBe(true);
+  });
+
+  test("an unreadable queue is admitted in the sign-off, not smoothed over", () => {
+    const text = buildMorningDigest({
+      ...base,
+      socialQueue: { text: "draft queue unreadable (HTTP 502) — a post may be waiting unseen", tone: "degraded", count: 0 },
+    });
+    expect(text).not.toContain("Nothing is waiting on you.");
+    expect(text.endsWith("Nothing operational is waiting on you — but the draft queue could not be read.")).toBe(true);
+  });
+
+  test("drafts never inflate the operational tally", () => {
+    // A post worth writing is not an incident. If it counted, a quiet morning
+    // with three queued drafts would read as three items needing attention.
+    const text = buildMorningDigest({
+      ...base,
+      socialQueue: { text: "3 drafts waiting", tone: "ok", count: 3 },
+    });
+    expect(text).not.toContain("items need you now");
+    expect(text).not.toContain("Worth a look");
+  });
+
+  test("a real incident still outranks the draft queue in the sign-off", () => {
+    const text = buildMorningDigest({
+      ...base,
+      probes: [...probes, { name: "money_path", status: "red", detail: "settlement stalled" }],
+      socialQueue: { text: "3 drafts waiting", tone: "ok", count: 3 },
+    });
+    expect(text).toMatch(/needs? you now/);
+    expect(text).not.toContain("drafts to write");
+  });
+
+  test("the queue line is a must-survive fact for the rephraser", () => {
+    const facts = digestFactStrings({
+      ...base,
+      socialQueue: { text: "draft queue unreadable (HTTP 502) — a post may be waiting unseen", tone: "degraded", count: 0 },
+    });
+    expect(facts).toContain("draft queue unreadable (HTTP 502) — a post may be waiting unseen");
+  });
+
   test("the public-record line is a must-survive fact for the rephraser", () => {
     const facts = digestFactStrings({
       ...base,

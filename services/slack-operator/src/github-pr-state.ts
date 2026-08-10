@@ -1036,7 +1036,14 @@ function normalize(value: string | undefined): string {
   return String(value ?? "").trim().toLowerCase().replace(/[-\s]+/g, "_");
 }
 
-function resolveGithubTokenForRepo(repo: string, env: NodeJS.ProcessEnv): string | undefined {
+/**
+ * Which token reads which repo, in one place.
+ *
+ * Exported so cross-repo readers — the social queue reads `averray-agent/agent`
+ * from here — share this resolution instead of growing a second one. "Which
+ * token for which owner" is exactly the rule that drifts once it exists twice.
+ */
+export function resolveGithubTokenForRepo(repo: string, env: NodeJS.ProcessEnv): string | undefined {
   const [owner, name] = repo.split("/");
   if (!owner || !name) return env.GITHUB_TOKEN?.trim() || undefined;
   const repoToken = parseTokenMap(env.GITHUB_REPO_TOKENS).get(`${owner}/${name}`);
