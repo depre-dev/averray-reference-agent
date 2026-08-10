@@ -129,6 +129,49 @@ describe("the message quotes; it does not opine", () => {
     expect(text).not.toContain("Bank:");
   });
 
+  test("the public-record line is quoted verbatim when supplied", () => {
+    const text = buildMorningDigest({
+      ...base,
+      socialSignal: { text: "142 settled, no external agents in 24h", tone: "ok" },
+    });
+    expect(text).toContain("Public record: 142 settled, no external agents in 24h");
+  });
+
+  test("no public-record reading, no line — same rule as the bank lane", () => {
+    const text = buildMorningDigest({ ...base, socialSignal: null });
+    expect(text).not.toContain("Public record:");
+  });
+
+  test("a degraded public-record line does NOT summon the operator", () => {
+    // A social reading we could not take says nothing about the product. If it
+    // counted toward the urgency tally, a transparency blip would read as an
+    // operational finding at 7am — and the tally stops being believed.
+    const text = buildMorningDigest({
+      ...base,
+      socialSignal: { text: "public record unreachable — no figures either way", tone: "degraded" },
+    });
+    expect(text).toContain("Public record: public record unreachable");
+    expect(text.endsWith("Nothing is waiting on you.")).toBe(true);
+    expect(text).not.toContain("needs you now");
+    expect(text).not.toContain("Worth a look");
+  });
+
+  test("even a red-toned public-record line never inflates the count", () => {
+    const text = buildMorningDigest({
+      ...base,
+      socialSignal: { text: "something loud", tone: "red" },
+    });
+    expect(text.endsWith("Nothing is waiting on you.")).toBe(true);
+  });
+
+  test("the public-record line is a must-survive fact for the rephraser", () => {
+    const facts = digestFactStrings({
+      ...base,
+      socialSignal: { text: "public record unreachable — no figures either way", tone: "degraded" },
+    });
+    expect(facts).toContain("public record unreachable — no figures either way");
+  });
+
   test("everything not-ok is quoted under 'Needs attention', red first — the hold may never have announced it", () => {
     const text = buildMorningDigest({
       ...base,

@@ -157,6 +157,7 @@ import { publishNarration, readBuzzConfig } from "./buzz-client.js";
 import { startBuzzInbound } from "./buzz-inbound-start.js";
 import { decideProbeTransitions } from "./probe-transitions.js";
 import { buildMorningDigest, digestDue, digestFactStrings, readDigestSchedule } from "./morning-digest.js";
+import { readSocialSignal } from "./social-signal.js";
 import { composeConversationalDigest } from "./digest-voice.js";
 import { probeLabel } from "./ops-voice.js";
 import { describeBuzzDelivery, recordBuzzDelivery, type BuzzDeliveryState } from "./buzz-delivery.js";
@@ -3968,6 +3969,10 @@ function startOperatorRoutines() {
           verdictTone: digestVerdict.tone,
           probes: result.evaluation.probes,
           bankRequests: productHealthSnapshotBlocks?.bank?.lane?.requests ?? null,
+          // Read at compose time from the public record. Never throws: an
+          // unreachable endpoint returns a degraded line, so a transparency
+          // outage costs one sentence rather than the whole digest.
+          socialSignal: await readSocialSignal(),
         };
         // The plain digest is both the fallback and Hermes's source text; the
         // gate in digest-voice guarantees his prose carries every figure, so a
