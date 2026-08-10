@@ -10,6 +10,7 @@ _int2_harness_db="int2-suite-harness-${_int2_suffix}"
 _int2_reference_db="int2-suite-reference-${_int2_suffix}"
 _int2_evidence="${INT2_SUITE_EVIDENCE_DIR:-$_int2_root/evidence}"
 _int2_marker="$_int2_evidence/executed-count.txt"
+_int2e_evidence="${INT2E_SUITE_EVIDENCE_DIR:-$_int2_evidence/int2e-dispatch-store}"
 _int2_bootstrap_log="$_int2_evidence/bootstrap.log"
 _int2_started="$(date +%s)"
 _int2_docker_shared_root="${HOME:?}/.agent-runtime"
@@ -81,6 +82,7 @@ for _int2_command in docker git node npm uv; do
     || { echo "INT-2 suite requires $_int2_command" >&2; exit 2; }
 done
 mkdir -p "$_int2_evidence"
+mkdir -p "$_int2e_evidence"
 printf '%s\n' \
   "INT2_SUITE_BOOTSTRAP_STARTED pin=3355f4906864b0f0e0fe5fd5eb5220172e174206" \
   > "$_int2_bootstrap_log"
@@ -362,8 +364,23 @@ test "$_int2_executed" = "14" \
     echo "INT-2 suite executed $_int2_executed cases; expected 14" >&2
     exit 1
   }
+
+printf '%s\n' "INT2E_TESTS_STARTED expected=6" >> "$_int2_bootstrap_log"
+(
+  cd "$_int2_repo"
+  export INT2E_SUITE_EVIDENCE_DIR="$_int2e_evidence"
+  node scripts/ceremony/run-int2e-dispatch-store.mjs
+)
+_int2e_executed="$(tr -d '[:space:]' < "$_int2e_evidence/executed-count.txt")"
+test "$_int2e_executed" = "6" \
+  || {
+    echo "INT-2e store suite executed $_int2e_executed tests; expected 6" >&2
+    exit 1
+  }
+printf '%s\n' "INT2E_TESTS_COMPLETED executed=$_int2e_executed" \
+  >> "$_int2_bootstrap_log"
 _int2_elapsed="$(( $(date +%s) - _int2_started ))"
 printf '%s\n' "$_int2_elapsed" > "$_int2_evidence/wall-time-seconds.txt"
 printf '%s\n' "INT2_CASES_COMPLETED executed=$_int2_executed elapsed=$_int2_elapsed" \
   >> "$_int2_bootstrap_log"
-echo "INT-2 automated suite: $_int2_executed cases executed in ${_int2_elapsed}s"
+echo "INT-2 automated suite: $_int2_executed cases and $_int2e_executed INT-2e tests executed in ${_int2_elapsed}s"

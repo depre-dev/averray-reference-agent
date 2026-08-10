@@ -134,11 +134,16 @@ jobs:
         env:
           INT2_HARNESS_DEPLOY_KEY: ${{ secrets.INT2_HARNESS_DEPLOY_KEY }}
           INT2_SUITE_EVIDENCE_DIR: ${{ runner.temp }}/int2-suite-evidence
+          INT2E_SUITE_EVIDENCE_DIR: ${{ runner.temp }}/int2e-dispatch-store-evidence
         run: scripts/ceremony/run-int2-automated-suite.sh
 
       - name: Prove the suite did not skip
         if: always()
         run: test "$(tr -d '[:space:]' < '${{ runner.temp }}/int2-suite-evidence/executed-count.txt')" = "14"
+
+      - name: Prove the INT-2e store suite did not skip
+        if: always()
+        run: test "$(tr -d '[:space:]' < '${{ runner.temp }}/int2e-dispatch-store-evidence/executed-count.txt')" = "6"
 
       - name: Upload INT-2 evidence
         if: always()
@@ -146,6 +151,14 @@ jobs:
         with:
           name: int2-supervised-dispatch-evidence
           path: ${{ runner.temp }}/int2-suite-evidence
+          if-no-files-found: error
+
+      - name: Upload INT-2e store evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: int2e-dispatch-store-evidence
+          path: ${{ runner.temp }}/int2e-dispatch-store-evidence
           if-no-files-found: error
 
   int4-mechanism-drills:
