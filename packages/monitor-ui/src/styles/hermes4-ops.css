@@ -946,9 +946,12 @@ body,
 }
 .ops-arrivals-funnel li {
   display: grid;
-  /* Fourth column is ours, counted apart. It holds its width even when empty
-     so the external figures stay on one line down the panel. */
-  grid-template-columns: calc(104 * var(--ops-u)) 1fr calc(48 * var(--ops-u)) calc(38 * var(--ops-u));
+  /* Fourth column is ours and the fifth is the unclaimable, both counted
+     apart. They hold their width even when empty so the external figures stay
+     on one line down the panel. */
+  grid-template-columns:
+    calc(104 * var(--ops-u)) 1fr calc(48 * var(--ops-u)) calc(38 * var(--ops-u))
+    calc(38 * var(--ops-u));
   gap: calc(10 * var(--ops-u));
   align-items: center;
   min-width: 0;
@@ -982,6 +985,14 @@ body,
   text-align: right;
   font-size: calc(9 * var(--ops-u));
   color: var(--h4-muted);
+}
+/* The unclaimable. Styled like ours rather than like the external figure: it
+   is emphatically not evidence of demand, but unlike ours it is not evidence
+   of nothing either, so it keeps the tone colour rather than plain muted. */
+.ops-arrivals-ambiguous {
+  text-align: right;
+  font-size: calc(9 * var(--ops-u));
+  color: var(--h4-tel);
 }
 .ops-arrivals-summary {
   display: grid;
@@ -1023,6 +1034,19 @@ body,
   color: var(--h4-tel);
 }
 .ops-arrivals-furthest[data-advanced="yes"] strong { color: var(--h4-ok); }
+/* Beside the headline stage, never replacing it. Small, because "possibly an
+   outsider" must not read with the weight of "an outsider". */
+.ops-arrivals-furthest-ambiguous {
+  display: block;
+  font-size: calc(9 * var(--ops-u));
+  color: var(--h4-muted);
+}
+.ops-arrivals-furthest-ambiguous strong {
+  font-family: var(--h4-font-mono);
+  font-size: calc(10 * var(--ops-u));
+  letter-spacing: 0.04em;
+  color: var(--h4-tel);
+}
 .ops-arrivals-unreachable {
   margin: 0;
   font-family: var(--h4-font-mono);
@@ -1046,6 +1070,22 @@ body,
 .ops-arrivals-unattributed strong {
   letter-spacing: 0.08em;
   color: var(--tone, var(--h4-tel));
+}
+/* Why a number an operator watched go DOWN is the more honest one. Full width
+   below both columns, and present only when the platform reports the bucket. */
+.ops-arrivals-ambiguous-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding-top: calc(6 * var(--ops-u));
+  border-top: 1px solid var(--ops-hair);
+  font-family: var(--h4-font-mono);
+  font-size: calc(9 * var(--ops-u));
+  line-height: 1.5;
+  color: var(--h4-muted);
+}
+.ops-arrivals-ambiguous-note strong {
+  letter-spacing: 0.08em;
+  color: var(--h4-tel);
 }
 
 /* ---- BANK lane -------------------------------------------------

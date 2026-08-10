@@ -12,6 +12,15 @@
 // manufactures demand evidence. Both are required: a platform that cannot
 // supply the split cannot answer the question this panel asks, so the block
 // becomes unavailable rather than falling back to the inflated total.
+//
+// `funnelAmbiguous` is traffic under a client name the platform ITSELF uses —
+// our Claude session and a stranger's both declare `Anthropic/ClaudeAI`, so
+// neither side can be claimed. It is OPTIONAL, and that is not the same laxity
+// as above: a platform without it is one deployed before the bucket existed,
+// and its `funnelExternal` is the number this panel has always rendered.
+// Blanking the board over a deploy-order skew would be worse than showing it.
+// Absent therefore stays ABSENT rather than becoming zero — a zero here is a
+// measurement, and in that case we have not made one.
 
 export const ARRIVALS_SCHEMA_VERSION = "averray.arrivals.v1";
 export const ARRIVAL_STAGES = [
@@ -33,6 +42,8 @@ export interface ArrivalClient {
   era: string | null;
   /** Declared as one of ours. Unmarked callers are external on purpose. */
   self: boolean;
+  /** Declared under a name we also use, so neither side can be claimed. */
+  ambiguous?: boolean;
   firstSeenMs: number;
   lastSeenMs: number;
   furthestStage: ArrivalStage;
@@ -50,12 +61,19 @@ export interface ArrivalsSnapshot {
   funnelExternal: Record<ArrivalStage, number>;
   /** Our own probes, kept because confirming they ran is worth something. */
   funnelSelf: Record<ArrivalStage, number>;
+  /**
+   * Traffic we cannot attribute either way. Absent from a platform deployed
+   * before the bucket existed — absent, never zero.
+   */
+  funnelAmbiguous?: Record<ArrivalStage, number>;
   distinct: {
     declared: number;
     anonymous: number;
     self: number;
+    ambiguous?: number;
     furthest: ArrivalStage;
     furthestExternal: ArrivalStage;
+    furthestAmbiguous?: ArrivalStage;
   };
   clients: ArrivalClient[];
 }
@@ -120,17 +138,31 @@ export function normalizeArrivalsFeed(body: unknown): ArrivalsBlock {
   if ("unavailable" in funnelExternal) return funnelExternal;
   const funnelSelf = stageCounts(value.funnelSelf, "funnelSelf");
   if ("unavailable" in funnelSelf) return funnelSelf;
+  // Optional, but malformed-when-present is still a producer we cannot read.
+  const funnelAmbiguous =
+    value.funnelAmbiguous === undefined
+      ? undefined
+      : stageCounts(value.funnelAmbiguous, "funnelAmbiguous");
+  if (funnelAmbiguous && "unavailable" in funnelAmbiguous) return funnelAmbiguous;
+  const ambiguousCounts = funnelAmbiguous && "counts" in funnelAmbiguous ? funnelAmbiguous.counts : undefined;
 
-  // External and self are subsets of the total, so neither can exceed it and
-  // together they cannot either. A producer that says otherwise is describing
-  // a funnel we do not understand, and the safe reading of a funnel we do not
-  // understand is none at all.
+  // External, self and ambiguous are disjoint subsets of the total, so no one
+  // of them can exceed it and together they cannot either. A producer that
+  // says otherwise is describing a funnel we do not understand, and the safe
+  // reading of a funnel we do not understand is none at all.
+  //
+  // The check is an INEQUALITY, not an equality: calls the platform counted
+  // before it split the funnel restore into the total alone, so the parts
+  // legitimately fall short of the whole. Requiring them to add up would
+  // reject every producer carrying real pre-split history.
   const incoherent = ARRIVAL_STAGES.find(
-    (stage) => funnelExternal.counts[stage] + funnelSelf.counts[stage] > funnel.counts[stage],
+    (stage) =>
+      funnelExternal.counts[stage] + funnelSelf.counts[stage] + (ambiguousCounts?.[stage] ?? 0) >
+      funnel.counts[stage],
   );
   if (incoherent) {
     return {
-      unavailable: `arrivals feed unreadable — ${incoherent} external plus self exceeds the total`,
+      unavailable: `arrivals feed unreadable — ${incoherent} external plus self plus ambiguous exceeds the total`,
     };
   }
 
@@ -148,6 +180,15 @@ export function normalizeArrivalsFeed(body: unknown): ArrivalsBlock {
     furthest === undefined || furthestExternal === undefined
   ) {
     return { unavailable: "arrivals feed unreadable — distinct counts or furthest stages are invalid" };
+  }
+  const ambiguous = distinctValue.ambiguous === undefined ? undefined : count(distinctValue.ambiguous);
+  const furthestAmbiguous =
+    distinctValue.furthestAmbiguous === undefined ? undefined : arrivalStage(distinctValue.furthestAmbiguous);
+  if (
+    (distinctValue.ambiguous !== undefined && ambiguous === undefined) ||
+    (distinctValue.furthestAmbiguous !== undefined && furthestAmbiguous === undefined)
+  ) {
+    return { unavailable: "arrivals feed unreadable — distinct ambiguous figures are invalid" };
   }
 
   if (!Array.isArray(value.clients)) {
@@ -167,7 +208,17 @@ export function normalizeArrivalsFeed(body: unknown): ArrivalsBlock {
     funnel: funnel.counts,
     funnelExternal: funnelExternal.counts,
     funnelSelf: funnelSelf.counts,
-    distinct: { declared, anonymous, self, furthest, furthestExternal },
+    // Omitted, not zero-filled, when the producer did not supply it.
+    ...(ambiguousCounts === undefined ? {} : { funnelAmbiguous: ambiguousCounts }),
+    distinct: {
+      declared,
+      anonymous,
+      self,
+      ...(ambiguous === undefined ? {} : { ambiguous }),
+      furthest,
+      furthestExternal,
+      ...(furthestAmbiguous === undefined ? {} : { furthestAmbiguous }),
+    },
     clients,
   };
 }
@@ -205,6 +256,9 @@ function normalizeClient(raw: unknown): { client: ArrivalClient } | { unavailabl
     // treating it as false would silently promote our own probe to an
     // outsider. Absent is not the same as external here.
     typeof value.self !== "boolean" ||
+    // The ambiguous mark IS allowed to be absent — an older producer has no
+    // opinion to report — but a present one must be a real boolean.
+    (value.ambiguous !== undefined && typeof value.ambiguous !== "boolean") ||
     firstSeenMs === undefined || lastSeenMs === undefined || calls === undefined ||
     furthestStage === undefined || tools === undefined
   ) {
@@ -217,6 +271,7 @@ function normalizeClient(raw: unknown): { client: ArrivalClient } | { unavailabl
       version: value.version,
       era: value.era,
       self: value.self,
+      ...(value.ambiguous === undefined ? {} : { ambiguous: value.ambiguous }),
       firstSeenMs,
       lastSeenMs,
       furthestStage,

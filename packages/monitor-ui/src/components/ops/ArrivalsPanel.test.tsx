@@ -167,3 +167,98 @@ describe("ArrivalsPanel", () => {
     expect(getByTestId("ops-arrivals-unreachable").textContent).toContain("feed not present");
   });
 });
+
+// UNCLAIMABLE — traffic under a client name we use ourselves. Our own Claude
+// session and a stranger's both declare `Anthropic/ClaudeAI`, so no rule over
+// that name can separate them. Observed live on 2026-08-10, when the operator
+// inspecting the front door through Claude was counted as outside interest.
+describe("ArrivalsPanel — traffic that can be claimed by neither side", () => {
+  const withAmbiguous: ArrivalsSnapshot = {
+    ...arrivals,
+    funnelAmbiguous: {
+      reached: 0, browsed: 3, evaluated: 0, identified: 0, authenticated: 0, claimed: 0, submitted: 0,
+    },
+    funnel: { ...arrivals.funnel, browsed: 19 },
+    distinct: { ...arrivals.distinct, ambiguous: 1, furthestAmbiguous: "browsed" },
+  };
+
+  test("is shown beside the external figure, never inside it", () => {
+    const { getByTestId } = render(<ArrivalsPanel arrivals={withAmbiguous} />);
+
+    // The headline is unmoved by traffic we cannot attribute.
+    expect(getByTestId("ops-arrival-stage-browsed").querySelector("strong")?.textContent).toBe("10");
+    expect(getByTestId("ops-arrival-ambiguous-browsed").textContent).toBe("?3");
+    expect(getByTestId("ops-arrivals-distinct-ambiguous").textContent).toContain("UNCLAIMABLE 1");
+  });
+
+  // The defect this change closes. `unattributed` is computed by subtraction,
+  // so before the third bucket was subtracted too, every unclaimable call was
+  // rendered under a line stating it predated the external/self split. The
+  // number was real and the explanation printed beside it was false.
+  test("is not mislabelled as history that predates the split", () => {
+    const { queryByTestId } = render(<ArrivalsPanel arrivals={withAmbiguous} />);
+
+    expect(queryByTestId("ops-arrivals-unattributed")).toBeNull();
+  });
+
+  // Both kinds at once: genuinely pre-split calls still have to be named, and
+  // the unclaimable ones must not be counted into that explanation.
+  test("real pre-split history is still named, and counts only itself", () => {
+    const { getByTestId } = render(
+      <ArrivalsPanel arrivals={{ ...withAmbiguous, funnel: { ...withAmbiguous.funnel, reached: 33 } }} />,
+    );
+
+    // 33 reached − 20 external − 8 ours − 0 unclaimable = 5, and nothing more.
+    expect(getByTestId("ops-arrivals-unattributed").textContent).toContain("5 calls");
+    expect(getByTestId("ops-arrivals-unattributed").textContent).toContain("predate the");
+  });
+
+  test("the furthest an outsider reached is not borrowed from an unclaimable client", () => {
+    const { getByTestId } = render(
+      <ArrivalsPanel
+        arrivals={{
+          ...withAmbiguous,
+          distinct: { ...withAmbiguous.distinct, furthestExternal: "reached", furthestAmbiguous: "claimed" },
+        }}
+      />,
+    );
+
+    expect(getByTestId("ops-arrivals-furthest").getAttribute("data-advanced")).toBe("no");
+    // Reported alongside, because it may well have been an outsider.
+    expect(getByTestId("ops-arrivals-furthest-ambiguous").textContent).toContain("claimed");
+  });
+
+  test("the panel explains why the external figure is narrower than it was", () => {
+    const { getByTestId } = render(<ArrivalsPanel arrivals={withAmbiguous} />);
+
+    expect(getByTestId("ops-arrivals-ambiguous-note").textContent).toContain("client name we use ourselves");
+  });
+
+  // A platform deployed before the bucket existed reports nothing here. That
+  // is not a measurement of zero, so the panel makes no claim at all — and
+  // renders exactly as it did before, rather than blanking on a deploy skew.
+  test("a platform that does not report the bucket renders as it always did", () => {
+    const { queryByTestId, getByTestId } = render(<ArrivalsPanel arrivals={arrivals} />);
+
+    expect(queryByTestId("ops-arrival-ambiguous-browsed")).toBeNull();
+    expect(queryByTestId("ops-arrivals-distinct-ambiguous")).toBeNull();
+    expect(queryByTestId("ops-arrivals-furthest-ambiguous")).toBeNull();
+    expect(queryByTestId("ops-arrivals-ambiguous-note")).toBeNull();
+    expect(getByTestId("ops-arrival-stage-browsed").querySelector("strong")?.textContent).toBe("10");
+  });
+
+  // Reported-and-zero is a real finding: nobody arrived under a shared name.
+  // It keeps the column, unlike absent, which keeps nothing.
+  test("a reported zero still counts as a reading", () => {
+    const zeroed = Object.fromEntries(ARRIVAL_STAGES.map((stage) => [stage, 0])) as typeof arrivals.funnel;
+    const { getByTestId } = render(
+      <ArrivalsPanel
+        arrivals={{ ...arrivals, funnelAmbiguous: zeroed, distinct: { ...arrivals.distinct, ambiguous: 0 } }}
+      />,
+    );
+
+    expect(getByTestId("ops-arrival-ambiguous-browsed").textContent).toBe("");
+    expect(getByTestId("ops-arrivals-distinct-ambiguous").textContent).toContain("UNCLAIMABLE 0");
+    expect(getByTestId("ops-arrivals-ambiguous-note")).toBeTruthy();
+  });
+});

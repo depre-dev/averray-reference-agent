@@ -299,6 +299,8 @@ export interface ArrivalClient {
   era: string | null;
   /** Declared as one of ours. Unmarked callers are external on purpose. */
   self: boolean;
+  /** Declared under a name we also use, so neither side can be claimed. */
+  ambiguous?: boolean;
   firstSeenMs: number;
   lastSeenMs: number;
   furthestStage: ArrivalStage;
@@ -319,12 +321,21 @@ export interface ArrivalsSnapshot {
   funnelExternal: Record<ArrivalStage, number>;
   /** Our own probes, kept because confirming they ran is worth something. */
   funnelSelf: Record<ArrivalStage, number>;
+  /**
+   * Traffic under a client name WE also present — our Claude session and a
+   * stranger's declare the same thing, so neither side can be claimed.
+   * Absent from a platform deployed before the bucket existed: absent, never
+   * zero, because a zero here would be a measurement we did not make.
+   */
+  funnelAmbiguous?: Record<ArrivalStage, number>;
   distinct: {
     declared: number;
     anonymous: number;
     self: number;
+    ambiguous?: number;
     furthest: ArrivalStage;
     furthestExternal: ArrivalStage;
+    furthestAmbiguous?: ArrivalStage;
   };
   clients: ArrivalClient[];
 }
