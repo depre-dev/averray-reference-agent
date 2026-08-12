@@ -284,6 +284,72 @@ export interface BankBlock {
   unavailable?: string;
 }
 
+/** Exact token quantity from the pool endpoint. Strings preserve base-unit precision. */
+export interface DepositPoolAmount {
+  raw: string;
+  decimals?: number;
+}
+
+export type DepositPoolFlowKind =
+  | "deposit"
+  | "withdraw"
+  | "redeem_requested"
+  | "redeem_fulfilled"
+  | "operator_principal_contributed"
+  | "venue_loss_written_off";
+
+export interface DepositPoolFlow {
+  kind: DepositPoolFlowKind;
+  blockNumber?: number;
+  transactionHash?: string;
+  logIndex?: number;
+  assets?: DepositPoolAmount;
+  sharesRaw?: string;
+  requestId?: string;
+  tier?: string;
+  unlockAt?: string;
+}
+
+export interface DepositPoolSnapshot {
+  schemaVersion: 1;
+  available: true;
+  pool?: string;
+  asset?: string;
+  block?: { number?: number; hash?: string; timestamp?: number };
+  pricingModel?: string;
+  totalAssets?: DepositPoolAmount;
+  totalShares?: DepositPoolAmount;
+  sharePrice?: DepositPoolAmount;
+  buffer?: DepositPoolAmount;
+  deployed?: DepositPoolAmount;
+  reconciled?: boolean;
+  caps?: {
+    totalAssetCap?: DepositPoolAmount;
+    perAgentAssetCap?: DepositPoolAmount;
+    headroom?: DepositPoolAmount;
+    utilizationBps?: number;
+  };
+  yieldStatus?: "not_yet_earning" | "earning";
+  yieldStatusText?: string;
+  flows?: {
+    status: "ok" | "unavailable";
+    depositorCount?: number;
+    depositorCountModel?: string;
+    pendingUnfulfilledRedemptionShares?: DepositPoolAmount;
+    pendingUnfulfilledRedemptionAssets?: DepositPoolAmount;
+    recent: DepositPoolFlow[];
+    sharePriceQualifyingEvents?: DepositPoolFlow[];
+    window?: { fromBlock?: number; toBlock?: number; maxBlocks?: number; recentLimit?: number };
+    lastError?: string;
+  };
+}
+
+/** Missing producer and impossible producer state remain visually distinct. */
+export type DepositPoolBlock =
+  | { snapshot: DepositPoolSnapshot }
+  | { unavailable: string }
+  | { fault: string };
+
 export const ARRIVAL_STAGES = [
   "reached",
   "browsed",
@@ -507,6 +573,8 @@ export interface ProductHealth {
    * not render at all, and says nothing. Only `unavailable` is a fault.
    */
   bank?: BankBlock;
+  /** Always explicit on Packet 5b monitors; absent only on older snapshots. */
+  depositPool?: DepositPoolBlock;
   /** Public MCP-front-door arrivals, or why that feed could not be read. */
   arrivals?: ArrivalsBlock;
   remediation?: RemediationStatus;

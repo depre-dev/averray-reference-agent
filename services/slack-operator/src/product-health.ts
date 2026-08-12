@@ -41,12 +41,20 @@ import { endpointHost, pinnedCompareRange, type CrossCheckView } from "./payout-
 import { burnBasisLabel, isBurnUnmeasurable, type MeasuredBurn } from "./gas-burn-rate.js";
 import { readBankFeed } from "./bank-feed-fetch.js";
 import type { ArrivalsBlock } from "./arrivals-feed.js";
+import type { DepositPoolBlock } from "./deposit-pool-feed.js";
 import { collectCredentialExpiries, credentialExpiryProbe, tlsCertReader } from "./credential-expiry.js";
 import { bankFeedIsDisabled } from "./bank-feed.js";
 import { bankLaneView, BANK_FEED_DISABLED, type BankLaneView } from "./bank-lane.js";
 import { createCrossCheckCache, type CrossCheckCache } from "./payout-crosscheck-cache.js";
 import { createGasSpendCache, type GasSpendCache, type GasSpendSnapshot, type GasUnreadable } from "./gas-spend-cache.js";
-import { alertProvenance, decideMoneyAlert } from "./money-alert.js";
+import {
+  alertProvenance,
+  decideDepositPoolAlerts,
+  decideMoneyAlert,
+  initialDepositPoolAlertState,
+  type DepositPoolAlertDecision,
+  type DepositPoolAlertState,
+} from "./money-alert.js";
 import { decideSelfFreshness, fetchSelfCompare } from "./self-freshness.js";
 import type { SelfFreshness } from "./self-freshness.js";
 import {
@@ -2704,6 +2712,8 @@ export interface ProductHealthSnapshotBlocks {
    * snapshots and older monitor builds.
    */
   arrivals?: ArrivalsBlock;
+  /** Bank-pillar depositor pool, explicit even when its platform endpoint is unavailable. */
+  depositPool?: DepositPoolBlock;
 }
 
 export interface BankBlock {
@@ -3185,6 +3195,7 @@ export function buildProductHealthAlert(
   evaluation: ProductHealthEvaluation,
   boardUrl: string,
   snapshot?: ProductHealthSnapshotBlocks,
+  poolAlerts?: Pick<DepositPoolAlertDecision, "criticalLines" | "positiveLines">,
 ): AlertPayload {
   // Money first. A red api_latency and a red money_path used to render
   // identically, so the thing that costs money could sit below the thing that
@@ -3194,13 +3205,19 @@ export function buildProductHealthAlert(
   );
   const money = decideMoneyAlert(snapshot);
   const probeLines = ordered.map((p) => `• 🔴 ${p.name}: ${p.detail}`);
-  const lines = [...money.lines, ...probeLines];
-  const count = evaluation.redProbes.length + money.lines.length;
-  const head =
-    count === 1 ? "1 money-blocking signal" : `${count} money-blocking signals`;
+  const criticalLines = poolAlerts?.criticalLines ?? [];
+  const positiveLines = poolAlerts?.positiveLines ?? [];
+  const lines = [...criticalLines, ...money.lines, ...probeLines, ...positiveLines];
+  const criticalCount = evaluation.redProbes.length + money.lines.length + criticalLines.length;
+  const count = criticalCount + positiveLines.length;
+  const head = criticalCount === 0 && positiveLines.length > 0
+    ? "first deposit observed"
+    : criticalCount === 1
+      ? "1 money-blocking signal"
+      : `${criticalCount} money-blocking signals`;
   const provenance = alertProvenance(snapshot);
   const text = [
-    `:rotating_light: Averray product health — ${head}`,
+    `${criticalCount === 0 ? ":tada:" : ":rotating_light:"} Averray product health — ${head}`,
     ...lines,
     `Inspect: ${boardUrl}`,
     ...(provenance ? [provenance] : []),
@@ -3214,10 +3231,12 @@ export interface ProductHealthAlertState {
   /** The red-set key at the previous red episode ("" when last clear). */
   lastRedKey: string;
   lastAlertAtMs: number;
+  /** Optional for stored/manual pre-pool state; initialized on first pool read. */
+  depositPool?: DepositPoolAlertState;
 }
 
 export function initialProductHealthAlertState(): ProductHealthAlertState {
-  return { lastRedKey: "", lastAlertAtMs: 0 };
+  return { lastRedKey: "", lastAlertAtMs: 0, depositPool: initialDepositPoolAlertState() };
 }
 
 /**
@@ -3232,23 +3251,61 @@ export function decideProductHealthAlert(input: {
   cooldownMs: number;
   /** Snapshot blocks, so a money signal that is not a probe can still page. */
   snapshot?: ProductHealthSnapshotBlocks;
-}): { alert: boolean; state: ProductHealthAlertState } {
+}): {
+  alert: boolean;
+  state: ProductHealthAlertState;
+  poolAlerts?: DepositPoolAlertDecision;
+} {
   const money = decideMoneyAlert(input.snapshot);
+  const poolBlock = input.snapshot?.depositPool;
+  const poolAlerts = poolBlock && "snapshot" in poolBlock
+    ? decideDepositPoolAlerts({
+        current: poolBlock.snapshot,
+        state: input.state.depositPool ?? initialDepositPoolAlertState(),
+      })
+    : undefined;
   // A payout shortfall is not a probe, so it never reached this gate: the
   // system could see "14 settled, 2 confirmed" and stay silent. Fold it in so
   // it pages on its own, and so a CHANGE in the gap re-pages.
-  const key = [redProbeKey(input.evaluation), money.key].filter(Boolean).join("|");
-  const worthPaging = input.evaluation.status === "red" || money.key !== "";
-  if (!worthPaging || key === "") {
-    return { alert: false, state: { lastRedKey: "", lastAlertAtMs: input.state.lastAlertAtMs } };
+  const key = [redProbeKey(input.evaluation), money.key, poolAlerts?.criticalKey].filter(Boolean).join("|");
+  const positiveEdge = Boolean(poolAlerts?.positiveKey);
+  const worthPaging = input.evaluation.status === "red" || money.key !== "" ||
+    Boolean(poolAlerts?.criticalKey) || positiveEdge;
+  const nextPoolState = poolAlerts?.state ?? input.state.depositPool;
+  if (!worthPaging || (key === "" && !positiveEdge)) {
+    return {
+      alert: false,
+      state: {
+        lastRedKey: "",
+        lastAlertAtMs: input.state.lastAlertAtMs,
+        ...(nextPoolState ? { depositPool: nextPoolState } : {}),
+      },
+      ...(poolAlerts ? { poolAlerts } : {}),
+    };
   }
-  const changed = key !== input.state.lastRedKey;
+  const changed = positiveEdge || key !== input.state.lastRedKey;
   const cooldownElapsed =
     input.cooldownMs > 0 && input.nowMs - input.state.lastAlertAtMs >= input.cooldownMs;
   if (changed || cooldownElapsed) {
-    return { alert: true, state: { lastRedKey: key, lastAlertAtMs: input.nowMs } };
+    return {
+      alert: true,
+      state: {
+        lastRedKey: key,
+        lastAlertAtMs: input.nowMs,
+        ...(nextPoolState ? { depositPool: nextPoolState } : {}),
+      },
+      ...(poolAlerts ? { poolAlerts } : {}),
+    };
   }
-  return { alert: false, state: { ...input.state, lastRedKey: key } };
+  return {
+    alert: false,
+    state: {
+      ...input.state,
+      lastRedKey: key,
+      ...(nextPoolState ? { depositPool: nextPoolState } : {}),
+    },
+    ...(poolAlerts ? { poolAlerts } : {}),
+  };
 }
 
 // ── Orchestrator (effect-injected; index.ts wires real probes + Slack channel) ──
@@ -3279,7 +3336,7 @@ export async function runProductHealthOnce(deps: ProductHealthDeps): Promise<Pro
   const probes = await deps.runProbes();
   const evaluation = evaluateProductHealth(probes);
   const snapshot = deps.getSnapshot?.();
-  const { alert, state } = decideProductHealthAlert({
+  const { alert, state, poolAlerts } = decideProductHealthAlert({
     evaluation,
     state: deps.getAlertState(),
     nowMs: deps.nowMs(),
@@ -3289,7 +3346,7 @@ export async function runProductHealthOnce(deps: ProductHealthDeps): Promise<Pro
   deps.setAlertState(state);
   let alerted = false;
   if (alert) {
-    await deps.alert(buildProductHealthAlert(evaluation, deps.boardUrl, snapshot));
+    await deps.alert(buildProductHealthAlert(evaluation, deps.boardUrl, snapshot, poolAlerts));
     alerted = true;
   }
   return { status: evaluation.status, evaluation, alerted };

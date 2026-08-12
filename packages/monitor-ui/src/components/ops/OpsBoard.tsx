@@ -26,6 +26,7 @@ import { PillarStrip } from "./PillarStrip.js";
 import { SolvencyPanel } from "./SolvencyPanel.js";
 import { BankLane } from "./BankLane.js";
 import { ArrivalsPanel } from "./ArrivalsPanel.js";
+import { DepositPoolTile } from "./DepositPoolTile.js";
 
 export interface OpsBoardProps {
   health: ProductHealth;
@@ -126,6 +127,11 @@ export function OpsBoard({
         {/* The treasury's own money path, under the one that pays workers.
             Renders nothing at all when no feed is configured. */}
         <BankLane bank={health.bank} />
+
+        {/* The shared depositor pool is a Bank-pillar instrument, but unlike
+            the treasury venue lane it is always explicit: pre-5a is
+            UNAVAILABLE, never an absent/empty pool. */}
+        <DepositPoolTile pool={health.depositPool} />
 
         <PillarStrip probes={health.probes} history={health.history} />
 

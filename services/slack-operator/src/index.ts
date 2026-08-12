@@ -201,6 +201,7 @@ import type { TransportFailureRun } from "./probe-transport.js";
 import { deriveOpsVerdict } from "@avg/schemas";
 import { appendIncidents, readIncidents, reconcileIncidents } from "./product-health-incidents.js";
 import { readArrivalsFeed } from "./arrivals-feed.js";
+import { depositPoolUrlFromBankFeed, readDepositPoolFeed } from "./deposit-pool-feed.js";
 import {
   loadRemediationConfig,
   decideRpcRemediation,
@@ -911,6 +912,14 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
         unavailable: routineConfig.productHealth.enabled
           ? "arrivals feed unreachable — awaiting the first product-health read"
           : "arrivals feed unreachable — product-health heartbeat is disabled",
+      },
+      // Packet 5b is intentionally deployable before the platform endpoint.
+      // Always state the missing reading: omission and a born-empty pool must
+      // never collapse into the same visual state.
+      depositPool: productHealthSnapshotBlocks?.depositPool ?? {
+        unavailable: routineConfig.productHealth.enabled
+          ? "deposit pool unreachable — awaiting the first product-health read"
+          : "deposit pool unreachable — product-health heartbeat is disabled",
       },
       // History-derived Trends + Incidents (uptime% / latency / balance series +
       // incident episodes) from the rolling buffer. Always present — the series
@@ -3678,7 +3687,7 @@ function startOperatorRoutines() {
       const activeRpc = remediationConfig.endpoints[rpcRemediationState.activeIndex] ?? phConfig.rpcUrl;
       // One /health fetch feeds product_api + chain_height; the block-advance tracker
       // persists across ticks to catch a frozen chain. Balances come from direct RPC.
-      const [collection, arrivals] = await Promise.all([
+      const [collection, arrivals, depositPool] = await Promise.all([
         collectProductHealthProbes({ ...phConfig, signerAddress, rpcUrl: activeRpc }, fetch, {
           advance: productHealthChainAdvance,
           nowMs: Date.now(),
@@ -3689,10 +3698,17 @@ function startOperatorRoutines() {
         // Same public platform, separate contract. Read beside the heartbeat so
         // one slow arrivals response does not serialize every money-path probe.
         readArrivalsFeed({ baseUrl: phConfig.apiBaseUrl, fetchImpl: fetch }),
+        // Same platform, independent endpoint and failure boundary. A pre-5a
+        // 404 becomes an explicit UNAVAILABLE pool tile without affecting the
+        // rest of the heartbeat.
+        readDepositPoolFeed({
+          url: depositPoolUrlFromBankFeed(phConfig.bankFeedUrl),
+          fetchImpl: fetch,
+        }),
       ]);
       productHealthChainAdvance = collection.chainAdvance;
       productHealthTransportRun = collection.transportRun;
-      productHealthSnapshotBlocks = { ...collection.snapshot, arrivals };
+      productHealthSnapshotBlocks = { ...collection.snapshot, arrivals, depositPool };
       // Decide + apply RPC auto-remediation from this cycle's read health. Pure
       // decision; the only effect is rotating which endpoint we read next tick
       // (state.activeIndex) + dispatching an audit (failover) or page (escalate).
@@ -3724,7 +3740,7 @@ function startOperatorRoutines() {
         runProbes: async () => collection.probes,
         // Money signals that are not probes (payout evidence) + the monitor's
         // own version reach the alert path through here.
-        getSnapshot: () => collection.snapshot,
+        getSnapshot: () => productHealthSnapshotBlocks,
         alert: (payload) => alertChannel.dispatch(payload),
         boardUrl:
           optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor") ??
