@@ -1238,6 +1238,105 @@ body,
   color: var(--tone, var(--h4-tel));
 }
 
+/* ---- BANK / deposit pool ---------------------------------------
+   Unlike the venue lane above, this instrument always occupies its slot:
+   a pre-endpoint deploy says UNAVAILABLE so nobody can read missing data as
+   an empty pool. Real zeroes use the normal ink plus the born-empty badge. */
+.ops-deposit-pool {
+  display: flex;
+  flex-direction: column;
+  gap: calc(8 * var(--ops-u));
+  padding: calc(10 * var(--ops-u)) calc(14 * var(--ops-u));
+  border: 1px solid var(--ops-rule);
+}
+.ops-deposit-pool[data-tone="red"] { border-color: var(--h4-act); }
+.ops-deposit-pool[data-tone="awaiting"] { border-color: var(--h4-tel); }
+.ops-deposit-pool-head,
+.ops-deposit-pool-flow-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: calc(12 * var(--ops-u));
+}
+.ops-deposit-pool-head h2 {
+  margin: 0;
+  font-family: var(--h4-font-display);
+  font-size: calc(12.5 * var(--ops-u));
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--h4-ink);
+}
+.ops-deposit-pool-head > span,
+.ops-deposit-pool-flow-head {
+  font-family: var(--h4-font-mono);
+  font-size: calc(9 * var(--ops-u));
+  letter-spacing: 0.1em;
+  color: var(--h4-tel);
+}
+.ops-deposit-pool-born-empty {
+  color: var(--h4-ok);
+}
+.ops-deposit-pool-state {
+  margin: 0;
+  padding: calc(8 * var(--ops-u)) 0;
+  font-family: var(--h4-font-mono);
+  font-size: calc(11 * var(--ops-u));
+  line-height: 1.45;
+  color: var(--tone, var(--h4-tel));
+}
+.ops-deposit-pool-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: calc(12 * var(--ops-u));
+  margin: 0;
+}
+.ops-deposit-pool-grid > div {
+  min-width: 0;
+  padding-top: calc(6 * var(--ops-u));
+  border-top: 1px solid var(--ops-hair);
+}
+.ops-deposit-pool-grid dt,
+.ops-deposit-pool-flow-head > span:first-child {
+  font-family: var(--h4-font-mono);
+  font-size: calc(9 * var(--ops-u));
+  letter-spacing: 0.12em;
+  color: var(--h4-tel);
+}
+.ops-deposit-pool-grid dd {
+  margin: calc(3 * var(--ops-u)) 0 0;
+  font-family: var(--h4-font-mono);
+  font-size: calc(12 * var(--ops-u));
+  line-height: 1.4;
+  color: var(--h4-ink-2);
+}
+.ops-deposit-pool-grid small {
+  display: block;
+  margin-top: calc(2 * var(--ops-u));
+  font-size: calc(9.5 * var(--ops-u));
+  color: var(--h4-tel);
+}
+.ops-deposit-pool-flows {
+  padding-top: calc(7 * var(--ops-u));
+  border-top: 1px solid var(--ops-hair);
+  font-family: var(--h4-font-mono);
+  font-size: calc(10 * var(--ops-u));
+  color: var(--tone, var(--h4-ink-2));
+}
+.ops-deposit-pool-flows p { margin: calc(6 * var(--ops-u)) 0 0; }
+.ops-deposit-pool-flows ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: calc(3 * var(--ops-u)) calc(16 * var(--ops-u));
+  margin: calc(6 * var(--ops-u)) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (max-width: 760px) {
+  .ops-deposit-pool-grid { grid-template-columns: 1fr 1fr; }
+  .ops-deposit-pool-flows ul { grid-template-columns: 1fr; }
+}
+
 /* ---- per-job economics -------------------------------------------
    What one job costs and earns, on one line between the probes and
    the footer. Also shipped unstyled; also monospace now, because it

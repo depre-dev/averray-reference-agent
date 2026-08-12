@@ -37,6 +37,7 @@ import {
   type BreachCard,
 } from "../../lib/monitor/phone-spec.js";
 import { disputeClockLine, lifecycleNote } from "../../lib/monitor/ops-spec.js";
+import { DepositPoolTile } from "../ops/DepositPoolTile.js";
 
 export interface MobileBoardProps {
   health?: ProductHealth;
@@ -109,6 +110,7 @@ export function MobileBoard({
         {breach ? <BreachPanel breach={breach} /> : <SolvencyPanel health={health} />}
         <FlowPanel health={health} emphasise={Boolean(breach)} nowMs={nowMs} />
         <BankPanel bank={health.bank} />
+        <DepositPoolTile pool={health.depositPool} />
       </div>
 
       <p className="hm-ph-scroll" aria-hidden>
