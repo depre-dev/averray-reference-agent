@@ -155,6 +155,8 @@ export interface MoneyPathSnapshot {
   /** Current submissions not yet settled; sustained nonzero is a backlog. */
   submittedNotSettled?: number | null;
   settled24h?: number | null;
+  paidSettled24h?: number | null;
+  zeroPaySettled24h?: number | null;
   stuck?: number | null;
   failed24h?: number | null;
   /** Epoch ms of the settlement snapshot. */
@@ -166,11 +168,11 @@ export interface MoneyPathSnapshot {
 /**
  * Evidence that rewards were actually PAID, not merely marked settled.
  *
- * The funnel counts above are job-state rows from the product's own database —
- * "9 rows say settled". That is not proof any money moved. `payout` counts
- * `ReservationSettled` logs straight off the chain, so the two numbers come
- * from independent sources and THE DISCREPANCY IS THE SIGNAL. The board renders
- * them side by side and shows the contradiction rather than averaging it away.
+ * `paidSettled24h` is the product ledger's payment-expected terminal count; it
+ * is not proof any money moved. `payout` counts `ReservationSettled` logs
+ * straight off the chain, so the two numbers come from independent sources and
+ * THE DISCREPANCY IS THE SIGNAL. Deliberate zero-pay terminals remain visible
+ * beside the comparison and never enter it.
  *
  * The three statuses are NOT a severity ramp, and the UI must never draw them
  * as one:
@@ -187,8 +189,10 @@ export interface PayoutEvidence {
   confirmedCount: number | null;
   /** Summed USDC actually transferred; null = unverified. */
   confirmedUsdc: number | null;
-  /** The product's own settled count, for the comparison. */
+  /** The product's payout-expected settled count, for the comparison. */
   settledCount: number | null;
+  /** Deliberate zero-pay terminals; displayed but never subtracted from proof. */
+  zeroPayCount?: number | null;
   /** Blocks scanned. The window is approximate — the verdict allows for it. */
   windowBlocks: number | null;
   /** Does the block window actually span the period being compared? */

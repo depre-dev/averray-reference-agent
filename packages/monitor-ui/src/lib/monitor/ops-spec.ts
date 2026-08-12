@@ -578,10 +578,7 @@ export function payoutView(payout: PayoutEvidence | undefined): EvidenceView {
       : `${payout.confirmedCount} payout${payout.confirmedCount === 1 ? "" : "s"} confirmed on-chain${
           payout.confirmedUsdc == null ? "" : ` · ${formatAmount(payout.confirmedUsdc)} USDC`
         }${feeNote(payout)}`;
-  const ledgerLine =
-    payout.settledCount == null
-      ? "settled count unavailable"
-      : `${payout.settledCount} marked settled by the monitor`;
+  const ledgerLine = payoutExpectationLine(payout);
   const fit = windowFitLine(payout);
 
   // ── A DISAGREEMENT OUTRANKS BOTH VERDICTS ────────────────────────────────
@@ -615,7 +612,7 @@ export function payoutView(payout: PayoutEvidence | undefined): EvidenceView {
       tone: "red",
       line1: chainLine,
       line2: ledgerLine,
-      delta: `${gap.replace("−", "")} settled jobs have no on-chain proof — money did not move`,
+      delta: `${gap.replace("−", "")} jobs expected payment but have no on-chain proof — money did not move`,
       fit,
       emphasised: true,
     };
@@ -646,6 +643,15 @@ export function payoutView(payout: PayoutEvidence | undefined): EvidenceView {
   };
 }
 
+function payoutExpectationLine(payout: PayoutEvidence): string {
+  if (payout.settledCount == null) return "payment-expected settlement count unavailable";
+  if (payout.zeroPayCount == null) {
+    return `${payout.settledCount} expected payment · zero-pay settlement count unavailable`;
+  }
+  const totalSettled = payout.settledCount + payout.zeroPayCount;
+  return `${totalSettled} settled — ${payout.settledCount} expected payment · ${payout.zeroPayCount} settled with zero payout (rejected)`;
+}
+
 /**
  * What CONFIRMED actually means, given the numbers printed beside it.
  *
@@ -672,7 +678,7 @@ function confirmedDelta(payout: PayoutEvidence): string {
   const gap = settledCount - confirmedCount;
   if (gap === 0) return "proof matches ledger — no gap";
   if (gap > 0) {
-    return `${gap} settled job${gap === 1 ? "" : "s"} not yet proven on-chain — inside the boundary tolerance, not a shortfall`;
+    return `${gap} payment-expected job${gap === 1 ? "" : "s"} not yet proven on-chain — inside the boundary tolerance, not a shortfall`;
   }
   // More proof than ledger: normal at a window edge, where the chain read
   // reaches back slightly further than the 24h settled count.
@@ -1050,10 +1056,11 @@ export function lifecycleNote(
  *
  * ── IT RECONCILES, OR IT SAYS IT DOESN'T ──────────────────────────────────
  *
- * The parts must sum to the ledger's settled count. They come from different
- * instruments — the split is read from the CHAIN (a fee-bearing settlement is
- * an external bounty; a fee-waived one is Averray's own), the total from the
- * product's own ledger — so they can disagree, and the difference is real
+ * The chain-classified parts must sum to the ledger's payment-expected count.
+ * Deliberate zero-pay terminals are a separate visible part of the total. The
+ * split is read from the CHAIN (a fee-bearing settlement is an external bounty;
+ * a fee-waived one is Averray's own), while the expected/zero-pay counts come
+ * from the product ledger — so they can disagree, and the difference is real
  * information rather than a rounding nuisance.
  *
  * A job the chain read did not see is `unclassified`. It is never folded into
@@ -1072,8 +1079,10 @@ export function lifecycleNote(
  */
 export function volumeMixNote(input: {
   lifecycle: LifecycleView | undefined;
-  /** The product's own settled count — the total the parts must reconcile to. */
+  /** The product's payout-expected settled count — the classified parts reconcile to this. */
   settledCount: number | null | undefined;
+  /** Deliberate zero-pay terminals, visible but excluded from unclassified paid work. */
+  zeroPayCount?: number | null | undefined;
   /**
    * Gap treated as the expected window-edge artifact rather than a fault.
    *
@@ -1093,17 +1102,20 @@ export function volumeMixNote(input: {
   const self = lifecycle.selfPosted.count;
   const external = lifecycle.external.count;
   const classified = self + external;
-  if (classified === 0 && !input.settledCount) return null;
+  const zeroPay = input.zeroPayCount ?? 0;
+  if (classified === 0 && !input.settledCount && zeroPay === 0) return null;
 
-  const total = input.settledCount ?? classified;
+  const paidTotal = input.settledCount ?? classified;
+  const total = paidTotal + zeroPay;
   const parts = [
     // Spelled out rather than "self-posted": the whole point of the line is
     // that a reader who knows nothing about the system cannot mistake it.
     `${self} posted by Averray`,
     `${external} external`,
   ];
+  if (zeroPay > 0) parts.push(`${zeroPay} settled with zero payout (rejected)`);
 
-  const gap = total - classified;
+  const gap = paidTotal - classified;
   const tolerance = input.edgeTolerance ?? 1;
   let tone: OpsTone = "awaiting";
   if (gap > 0) {

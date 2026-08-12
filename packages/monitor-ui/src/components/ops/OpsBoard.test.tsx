@@ -178,7 +178,8 @@ describe("OpsBoard — payout evidence", () => {
     const evidence = getByTestId("ops-evidence");
     expect(getByTestId("ops-evidence-status").textContent).toBe("CONFIRMED");
     expect(evidence.textContent).toContain("14 payouts confirmed on-chain");
-    expect(evidence.textContent).toContain("14 marked settled");
+    expect(evidence.textContent).toContain("14 expected payment");
+    expect(evidence.textContent).toContain("zero-pay settlement count unavailable");
     expect(evidence.getAttribute("data-emphasis")).toBe("off");
   });
 
@@ -191,7 +192,7 @@ describe("OpsBoard — payout evidence", () => {
     expect(within(flow).getAllByText("9").length).toBe(3); // claimed / submitted / settled
     expect(getByTestId("ops-evidence-status").textContent).toBe("SHORTFALL −2");
     expect(getByTestId("ops-evidence").textContent).toContain(
-      "2 settled jobs have no on-chain proof",
+      "2 jobs expected payment but have no on-chain proof",
     );
     expect(flow.textContent).toContain("evidence below disagrees");
   });

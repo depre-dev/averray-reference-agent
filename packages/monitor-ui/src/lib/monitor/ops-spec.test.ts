@@ -383,6 +383,24 @@ describe("volumeMixNote — self-generated volume must not read as demand", () =
     expect(volumeMixNote({ lifecycle: lifecycle(18, 0), settledCount: 18 })!.tone).toBe("awaiting");
   });
 
+  test("zero-pay rejections stay visible without becoming unclassified paid work", () => {
+    const v = volumeMixNote({
+      lifecycle: lifecycle(12, 0),
+      settledCount: 12,
+      zeroPayCount: 5,
+    })!;
+
+    expect(v.text).toBe("17 settled — 12 posted by Averray · 0 external · 5 settled with zero payout (rejected)");
+    expect(v.text).not.toContain("unclassified");
+    expect(v.tone).toBe("awaiting");
+  });
+
+  test("a pre-split backend invents neither zero-pay volume nor an alarm", () => {
+    const v = volumeMixNote({ lifecycle: lifecycle(12, 0), settledCount: null })!;
+    expect(v.text).toBe("12 settled — 12 posted by Averray · 0 external");
+    expect(v.tone).toBe("awaiting");
+  });
+
   test("no lifecycle, no line — rather than a line claiming zero of everything", () => {
     expect(volumeMixNote({ lifecycle: undefined, settledCount: 18 })).toBeNull();
   });
@@ -475,7 +493,7 @@ describe("CONFIRMED says what it actually confirmed", () => {
     // with 15 and 16 on the row above it.
     const view = payoutView({ ...base, confirmedCount: 15, settledCount: 16 });
     expect(view.delta).not.toContain("no gap");
-    expect(view.delta).toContain("1 settled job not yet proven on-chain");
+    expect(view.delta).toContain("1 payment-expected job not yet proven on-chain");
     expect(view.delta).toContain("not a shortfall");
     // Still sage, still unemphasised: the tolerance exists because a job on the
     // window edge is expected, and paging for it would be a false red.
@@ -562,15 +580,18 @@ describe("payoutView — instrument broken vs money broken", () => {
     const view = payoutView({
       status: "shortfall",
       detail: "",
-      confirmedCount: 12,
+      confirmedCount: 9,
       confirmedUsdc: 1.44,
-      settledCount: 14,
+      settledCount: 12,
+      zeroPayCount: 5,
       windowBlocks: 43200,
     });
     expect(view.tone).toBe("red");
     expect(view.emphasised).toBe(true);
-    expect(view.status).toBe("SHORTFALL −2");
-    expect(view.delta).toMatch(/2 settled jobs have no on-chain proof/);
+    expect(view.status).toBe("SHORTFALL −3");
+    expect(view.line2).toContain("17 settled — 12 expected payment");
+    expect(view.line2).toContain("5 settled with zero payout (rejected)");
+    expect(view.delta).toMatch(/3 jobs expected payment but have no on-chain proof/);
   });
 
   test("no payout block at all is unverified, never confirmed", () => {
@@ -583,13 +604,15 @@ describe("payoutView — instrument broken vs money broken", () => {
     const view = payoutView({
       status: "confirmed",
       detail: "",
-      confirmedCount: 14,
+      confirmedCount: 12,
       confirmedUsdc: 1.7,
-      settledCount: 14,
+      settledCount: 12,
+      zeroPayCount: 5,
       windowBlocks: 43200,
     });
-    expect(view.line1).toContain("14 payouts confirmed on-chain");
-    expect(view.line2).toContain("14 marked settled");
+    expect(view.line1).toContain("12 payouts confirmed on-chain");
+    expect(view.line2).toContain("17 settled — 12 expected payment");
+    expect(view.line2).toContain("5 settled with zero payout (rejected)");
   });
 });
 
