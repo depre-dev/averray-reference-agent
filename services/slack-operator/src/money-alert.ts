@@ -1,8 +1,9 @@
 // What is worth waking you for, and what the page is allowed to claim.
 //
 // Product-health alerting is probe-driven: `evaluateProductHealth` collects the
-// RED probes and those page. That already covers a pool under its floor, a
-// halted chain and a degraded money path — they are probes, so they alert.
+// RED probes and those page. A reward-bank floor breach is also pinned here as
+// an explicit money condition: the authoritative structured balance + floor
+// must page even if the surrounding probe taxonomy changes.
 //
 // One money signal is NOT a probe and therefore could never page: payout
 // evidence lives in the snapshot's `flow.payout` block. So the system could
@@ -33,26 +34,53 @@ export interface MoneyAlert {
 }
 
 /**
- * The money-blocking facts that no probe covers. PURE.
+ * The money-blocking facts allowed to page from structured snapshot evidence,
+ * independently of probe classification. PURE.
  *
- * Today that is exactly one: a payout shortfall. Pools, chain halt and money
- * path are already red probes and already page — repeating them here would
- * double-send, and two pages for one fact is its own kind of noise.
+ * Today these are a payout shortfall and an observed reward-bank floor breach.
+ * The latter deliberately repeats a probe-backed fact at the money boundary:
+ * payouts hard-stop when that pool empties, so future probe refactors must not
+ * silently remove its page. This remains alert-only; it never moves funds.
  */
 export function decideMoneyAlert(snapshot?: ProductHealthSnapshotBlocks): MoneyAlert {
-  const payout = snapshot?.flow?.payout;
-  if (!payout || payout.status !== "shortfall") {
-    // "unverified" deliberately lands here: it is not evidence of lost money.
-    return { lines: [], key: "" };
+  const lines: string[] = [];
+  const keys: string[] = [];
+
+  const rewardBank = snapshot?.solvency?.pools.find((pool) => pool.key === "reward_bank");
+  const liquid = rewardBank?.amount;
+  const floor = rewardBank?.floor;
+  if (
+    typeof liquid === "number"
+    && Number.isFinite(liquid)
+    && typeof floor === "number"
+    && Number.isFinite(floor)
+    && floor > 0
+    && liquid < floor
+  ) {
+    lines.push(
+      `• 🏦 reward bank floor breached: ${liquid.toFixed(2)} USDC liquid < ${floor.toFixed(2)} USDC floor — operator top-up required; no automatic refill`,
+    );
+    // The crossing is the event. Do not re-page on every payout while the bank
+    // remains below the same floor; the existing cooldown owns reminders.
+    keys.push(`reward-bank:below:${floor}`);
   }
-  const settled = payout.settledCount ?? null;
-  const confirmed = payout.confirmedCount ?? null;
-  const gap = settled !== null && confirmed !== null ? settled - confirmed : null;
-  return {
-    lines: [`• 💸 payout shortfall: ${payout.detail}`],
+
+  const payout = snapshot?.flow?.payout;
+  if (payout?.status === "shortfall") {
+    const settled = payout.settledCount ?? null;
+    const confirmed = payout.confirmedCount ?? null;
+    const gap = settled !== null && confirmed !== null ? settled - confirmed : null;
+    lines.push(`• 💸 payout shortfall: ${payout.detail}`);
     // Key on the SIZE of the gap, not the raw detail string: the detail carries
     // USDC totals that drift every cycle and would re-page on noise alone.
-    key: `payout:${gap ?? "unknown"}`,
+    keys.push(`payout:${gap ?? "unknown"}`);
+  }
+
+  // "unverified" deliberately contributes nothing: it is not evidence of lost
+  // money. The same absent-not-zero rule applies to an unreadable bank or floor.
+  return {
+    lines,
+    key: keys.join("|"),
   };
 }
 
