@@ -2198,6 +2198,30 @@ describe("a payout shortfall pages even with every probe green", () => {
     expect(r.alert).toBe(false);
   });
 
+  it("a reward-bank floor breach reaches the page gate even with every probe green", () => {
+    const r = decideProductHealthAlert({
+      evaluation: green,
+      state: initialProductHealthAlertState(),
+      nowMs: 1_000,
+      cooldownMs: 60_000,
+      snapshot: {
+        chainId: 420420419,
+        solvency: {
+          pools: [{
+            key: "reward_bank",
+            label: "Reward bank",
+            amount: 0.32,
+            unit: "USDC",
+            floor: 2,
+            status: "red",
+          }],
+        },
+      },
+    });
+    expect(r.alert).toBe(true);
+    expect(r.state.lastRedKey).toBe("reward-bank:below:2");
+  });
+
   it("the page leads with money and stamps the monitor version", () => {
     const mixed = evaluateProductHealth([
       { name: "api_latency", status: "red", detail: "2100ms" },

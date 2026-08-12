@@ -3,10 +3,27 @@ import { describe, expect, it } from "vitest";
 import { alertProvenance, decideMoneyAlert } from "../../services/slack-operator/src/money-alert.js";
 import type { ProductHealthSnapshotBlocks } from "../../services/slack-operator/src/product-health.js";
 
-function snap(payout?: Record<string, unknown>, self?: Record<string, unknown>): ProductHealthSnapshotBlocks {
+function snap(
+  payout?: Record<string, unknown>,
+  self?: Record<string, unknown>,
+  rewardBank?: { amount: number | null; floor?: number | null },
+): ProductHealthSnapshotBlocks {
   return {
     chainId: 420420419,
     ...(self ? { self: self as never } : {}),
+    ...(rewardBank
+      ? {
+          solvency: {
+            pools: [{
+              key: "reward_bank",
+              label: "Reward bank",
+              unit: "USDC",
+              status: "red",
+              ...rewardBank,
+            }],
+          },
+        }
+      : {}),
     ...(payout
       ? { flow: { settled24h: 14, payout: payout as never } }
       : {}),
@@ -67,6 +84,41 @@ describe("decideMoneyAlert", () => {
     const r = decideMoneyAlert(snap({ status: "shortfall", detail: "d", settledCount: null, confirmedCount: null }));
     expect(r.lines).toHaveLength(1);
     expect(r.key).toBe("payout:unknown");
+  });
+
+  it("pages when the authoritative reward-bank liquid balance breaches its floor", () => {
+    const r = decideMoneyAlert(snap(undefined, undefined, { amount: 0.32, floor: 2 }));
+    expect(r.lines).toEqual([
+      "• 🏦 reward bank floor breached: 0.32 USDC liquid < 2.00 USDC floor — operator top-up required; no automatic refill",
+    ]);
+    expect(r.key).toBe("reward-bank:below:2");
+  });
+
+  it("does not page at the floor, without a floor, or when liquid is unreadable", () => {
+    expect(decideMoneyAlert(snap(undefined, undefined, { amount: 2, floor: 2 })))
+      .toEqual({ lines: [], key: "" });
+    expect(decideMoneyAlert(snap(undefined, undefined, { amount: 0.32, floor: null })))
+      .toEqual({ lines: [], key: "" });
+    expect(decideMoneyAlert(snap(undefined, undefined, { amount: null, floor: 2 })))
+      .toEqual({ lines: [], key: "" });
+  });
+
+  it("keeps the floor-breach key stable as liquid drains, while a floor change re-pages", () => {
+    const first = decideMoneyAlert(snap(undefined, undefined, { amount: 0.32, floor: 2 }));
+    const lower = decideMoneyAlert(snap(undefined, undefined, { amount: 0.12, floor: 2 }));
+    const newFloor = decideMoneyAlert(snap(undefined, undefined, { amount: 0.12, floor: 3 }));
+    expect(lower.key).toBe(first.key);
+    expect(newFloor.key).not.toBe(first.key);
+  });
+
+  it("combines simultaneous reward-bank and payout failures into one money page", () => {
+    const r = decideMoneyAlert(snap(
+      { status: "shortfall", detail: "2 payouts missing", settledCount: 14, confirmedCount: 12 },
+      undefined,
+      { amount: 0.32, floor: 2 },
+    ));
+    expect(r.lines).toHaveLength(2);
+    expect(r.key).toBe("reward-bank:below:2|payout:2");
   });
 });
 
