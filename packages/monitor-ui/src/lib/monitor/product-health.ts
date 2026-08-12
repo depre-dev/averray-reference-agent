@@ -296,6 +296,24 @@ export const ARRIVAL_STAGES = [
 
 export type ArrivalStage = (typeof ARRIVAL_STAGES)[number];
 
+export interface ArrivalAttributionCounts {
+  siwe_wallet: number;
+  client_name: number;
+  ip_only: number;
+}
+
+export interface ArrivalAttributionSourceTotals {
+  mcp: ArrivalAttributionCounts;
+  http: ArrivalAttributionCounts;
+}
+
+export interface HttpArrivalCutover {
+  atMs: number;
+  at: string;
+  backfilled: boolean;
+  note: string;
+}
+
 export interface ArrivalClient {
   key: string;
   name: string | null;
@@ -332,6 +350,13 @@ export interface ArrivalsSnapshot {
    * zero, because a zero here would be a measurement we did not make.
    */
   funnelAmbiguous?: Record<ArrivalStage, number>;
+  /** The separately measured HTTP front door; absent on older producers. */
+  funnelHttp?: Record<ArrivalStage, number>;
+  funnelHttpExternal?: Record<ArrivalStage, number>;
+  funnelHttpSelf?: Record<ArrivalStage, number>;
+  funnelHttpAmbiguous?: Record<ArrivalStage, number>;
+  attributionSourceTotals?: ArrivalAttributionSourceTotals;
+  httpCutover?: HttpArrivalCutover;
   distinct: {
     declared: number;
     anonymous: number;

@@ -922,13 +922,13 @@ body,
 .ops-pillar-trend > span { min-width: 0; }
 
 /* ---- ARRIVALS ---------------------------------------------------
-   Public MCP-front-door funnel. The seven bars keep the producer's
-   reached→submitted order and exact counts; no stage is inferred here.
+   Independent public MCP and HTTP funnels. The seven bars keep each
+   producer series' reached→submitted order; no stage is inferred here.
    A failed read occupies the same named panel and says UNREACHABLE,
    because seven quiet zeroes would falsely claim nobody arrived. */
 .ops-arrivals {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(calc(260 * var(--ops-u)), 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: calc(8 * var(--ops-u)) calc(18 * var(--ops-u));
   padding: calc(9 * var(--ops-u)) calc(14 * var(--ops-u));
   border: 1px solid var(--ops-rule);
@@ -936,6 +936,32 @@ body,
 .ops-arrivals > .ops-panel-head,
 .ops-arrivals-unreachable {
   grid-column: 1 / -1;
+}
+.ops-arrivals-doors {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: calc(18 * var(--ops-u));
+}
+.ops-arrivals-door {
+  display: grid;
+  align-content: start;
+  gap: calc(8 * var(--ops-u));
+  min-width: 0;
+}
+.ops-arrivals-door + .ops-arrivals-door {
+  padding-left: calc(18 * var(--ops-u));
+  border-left: 1px solid var(--ops-rule);
+}
+.ops-arrivals-door-title {
+  margin: 0;
+  padding-bottom: calc(6 * var(--ops-u));
+  border-bottom: 1px solid var(--ops-hair);
+  font-family: var(--h4-font-display);
+  font-size: calc(16 * var(--ops-u));
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--h4-ink);
 }
 .ops-arrivals-funnel {
   display: grid;
@@ -998,8 +1024,8 @@ body,
   display: grid;
   align-content: stretch;
   gap: calc(8 * var(--ops-u));
-  padding-left: calc(16 * var(--ops-u));
-  border-left: 1px solid var(--ops-hair);
+  padding-top: calc(8 * var(--ops-u));
+  border-top: 1px solid var(--ops-hair);
 }
 .ops-arrivals-distinct {
   display: flex;
@@ -1085,6 +1111,42 @@ body,
 }
 .ops-arrivals-ambiguous-note strong {
   letter-spacing: 0.08em;
+  color: var(--h4-tel);
+}
+.ops-arrivals-http-summary {
+  display: grid;
+  gap: calc(8 * var(--ops-u));
+  padding-top: calc(8 * var(--ops-u));
+  border-top: 1px solid var(--ops-hair);
+}
+.ops-arrivals-http-measured {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: calc(12 * var(--ops-u));
+  margin: 0;
+  font-family: var(--h4-font-mono);
+  color: var(--h4-muted);
+}
+.ops-arrivals-http-measured span {
+  font-size: calc(9 * var(--ops-u));
+  letter-spacing: 0.08em;
+}
+.ops-arrivals-http-measured strong {
+  font-size: calc(22 * var(--ops-u));
+  color: var(--h4-ok);
+}
+.ops-arrivals-http-cutover {
+  padding-top: calc(8 * var(--ops-u));
+  border-top: 1px solid var(--ops-hair);
+  font-family: var(--h4-font-mono);
+  font-size: calc(9 * var(--ops-u));
+  line-height: 1.5;
+  color: var(--h4-muted);
+}
+.ops-arrivals-http-cutover p { margin: 0; }
+.ops-arrivals-http-cutover p + p {
+  margin-top: calc(5 * var(--ops-u));
   color: var(--h4-tel);
 }
 
@@ -1251,14 +1313,15 @@ body,
     border-bottom: 1px solid var(--ops-rule);
   }
   .ops-arrivals { grid-template-columns: 1fr; }
+  .ops-arrivals-doors { grid-template-columns: 1fr; }
+  .ops-arrivals-door + .ops-arrivals-door {
+    padding: calc(14 * var(--ops-u)) 0 0;
+    border-left: 0;
+    border-top: 1px solid var(--ops-rule);
+  }
   .ops-arrivals > .ops-panel-head,
   .ops-arrivals-unattributed,
   .ops-arrivals-unreachable { grid-column: auto; }
-  .ops-arrivals-summary {
-    padding: calc(8 * var(--ops-u)) 0 0;
-    border-left: 0;
-    border-top: 1px solid var(--ops-hair);
-  }
   .ops-pillars { grid-template-columns: repeat(2, 1fr); }
   .ops-pillar:nth-child(3) { border-left: 0; }
   .ops-foot { flex-wrap: wrap; }

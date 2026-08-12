@@ -57,6 +57,31 @@ const good = {
   }],
 };
 
+const httpFields = {
+  funnelHttp: {
+    reached: 40, browsed: 20, evaluated: 12, identified: 8, authenticated: 6, claimed: 4, submitted: 3,
+  },
+  funnelHttpExternal: {
+    reached: 31, browsed: 15, evaluated: 9, identified: 5, authenticated: 4, claimed: 3, submitted: 2,
+  },
+  funnelHttpSelf: {
+    reached: 2, browsed: 1, evaluated: 1, identified: 1, authenticated: 1, claimed: 1, submitted: 1,
+  },
+  funnelHttpAmbiguous: {
+    reached: 1, browsed: 1, evaluated: 0, identified: 0, authenticated: 0, claimed: 0, submitted: 0,
+  },
+  attributionSourceTotals: {
+    mcp: { siwe_wallet: 3, client_name: 9, ip_only: 12 },
+    http: { siwe_wallet: 17, client_name: 6, ip_only: 41 },
+  },
+  httpCutover: {
+    atMs: 1_786_200_000_000,
+    at: "2026-08-09T01:20:00.000Z",
+    backfilled: false,
+    note: "HTTP arrivals are measured from this cut-over only; earlier HTTP traffic was not backfilled.",
+  },
+};
+
 describe("readArrivalsFeed", () => {
   test("reads the public platform route from the configured API base", async () => {
     let requested = "";
@@ -168,6 +193,47 @@ describe("normalizeArrivalsFeed", () => {
   test("a schema drift is visible by version", () => {
     const result = normalizeArrivalsFeed({ ...good, schemaVersion: "averray.arrivals.v2" });
     expect("unavailable" in result && result.unavailable).toContain("schemaVersion averray.arrivals.v1");
+  });
+});
+
+describe("normalizeArrivalsFeed — HTTP front door", () => {
+  test("round-trips all six optional HTTP observations without changing their producer names", () => {
+    const result = normalizeArrivalsFeed({ ...good, ...httpFields });
+
+    expect("unavailable" in result).toBe(false);
+    if ("unavailable" in result) return;
+    expect(result.funnelHttp).toEqual(httpFields.funnelHttp);
+    expect(result.funnelHttpExternal).toEqual(httpFields.funnelHttpExternal);
+    expect(result.funnelHttpSelf).toEqual(httpFields.funnelHttpSelf);
+    expect(result.funnelHttpAmbiguous).toEqual(httpFields.funnelHttpAmbiguous);
+    expect(result.attributionSourceTotals).toEqual(httpFields.attributionSourceTotals);
+    expect(result.httpCutover).toEqual(httpFields.httpCutover);
+  });
+
+  test("a pre-cut-over producer keeps every HTTP observation absent, never zero-filled", () => {
+    const result = normalizeArrivalsFeed(good);
+
+    expect("unavailable" in result).toBe(false);
+    expect("funnelHttp" in result).toBe(false);
+    expect("funnelHttpExternal" in result).toBe(false);
+    expect("funnelHttpSelf" in result).toBe(false);
+    expect("funnelHttpAmbiguous" in result).toBe(false);
+    expect("attributionSourceTotals" in result).toBe(false);
+    expect("httpCutover" in result).toBe(false);
+  });
+
+  test("checks the HTTP split against the HTTP total, not the smaller MCP total", () => {
+    const coherent = normalizeArrivalsFeed({ ...good, ...httpFields });
+    expect("unavailable" in coherent).toBe(false);
+
+    const incoherent = normalizeArrivalsFeed({
+      ...good,
+      ...httpFields,
+      funnelHttpExternal: { ...httpFields.funnelHttpExternal, claimed: 5 },
+    });
+    expect("unavailable" in incoherent && incoherent.unavailable).toContain(
+      "funnelHttp.claimed external plus self plus ambiguous exceeds the HTTP total",
+    );
   });
 });
 

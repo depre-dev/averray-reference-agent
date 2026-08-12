@@ -51,6 +51,32 @@ const arrivals: ArrivalsSnapshot = {
   clients: [],
 };
 
+const arrivalsWithHttp: ArrivalsSnapshot = {
+  ...arrivals,
+  funnelHttp: {
+    reached: 13, browsed: 8, evaluated: 5, identified: 3, authenticated: 2, claimed: 1, submitted: 1,
+  },
+  funnelHttpExternal: {
+    reached: 7, browsed: 4, evaluated: 2, identified: 1, authenticated: 1, claimed: 1, submitted: 1,
+  },
+  funnelHttpSelf: {
+    reached: 2, browsed: 2, evaluated: 1, identified: 1, authenticated: 1, claimed: 0, submitted: 0,
+  },
+  funnelHttpAmbiguous: {
+    reached: 1, browsed: 1, evaluated: 1, identified: 0, authenticated: 0, claimed: 0, submitted: 0,
+  },
+  attributionSourceTotals: {
+    mcp: { siwe_wallet: 3, client_name: 4, ip_only: 9 },
+    http: { siwe_wallet: 17, client_name: 6, ip_only: 41 },
+  },
+  httpCutover: {
+    atMs: 1_786_200_000_000,
+    at: "2026-08-09T01:20:00.000Z",
+    backfilled: false,
+    note: "HTTP arrivals are measured from this cut-over only; earlier HTTP traffic was not backfilled.",
+  },
+};
+
 describe("ArrivalsPanel", () => {
   // The headline is what an outsider did. Our own probes reach the same door
   // and were once added to these bars, which is how this panel came to say
@@ -165,6 +191,54 @@ describe("ArrivalsPanel", () => {
   test("an older product-health payload is also a named non-reading", () => {
     const { getByTestId } = render(<ArrivalsPanel arrivals={undefined} />);
     expect(getByTestId("ops-arrivals-unreachable").textContent).toContain("feed not present");
+  });
+
+  test("a pre-cut-over snapshot renders MCP normally and makes no HTTP zero claim", () => {
+    const { getByTestId, queryByTestId, queryAllByTestId } = render(<ArrivalsPanel arrivals={arrivals} />);
+
+    expect(getByTestId("ops-arrival-stage-browsed").querySelector("strong")?.textContent).toBe("10");
+    expect(queryByTestId("ops-arrivals-unreachable")).toBeNull();
+    expect(queryByTestId("ops-arrivals-door-http")).toBeNull();
+    expect(queryAllByTestId(/^ops-arrival-http-stage-/)).toHaveLength(0);
+  });
+});
+
+describe("ArrivalsPanel — independent HTTP front door", () => {
+  test("shows the measured HTTP series beside MCP without a combined headline", () => {
+    const { getByTestId, queryByText } = render(<ArrivalsPanel arrivals={arrivalsWithHttp} />);
+
+    expect(getByTestId("ops-arrivals-door-mcp")).toBeTruthy();
+    expect(getByTestId("ops-arrivals-door-http")).toBeTruthy();
+    expect(getByTestId("ops-arrival-stage-reached").querySelector("strong")?.textContent).toBe("20");
+    expect(getByTestId("ops-arrival-http-stage-reached").querySelector("strong")?.textContent).toBe("7");
+    expect(getByTestId("ops-arrival-http-self-browsed").textContent).toBe("+2");
+    expect(getByTestId("ops-arrival-http-ambiguous-browsed").textContent).toBe("?1");
+    expect(queryByText(/combined/i)).toBeNull();
+    expect(getByTestId("ops-arrivals").textContent).not.toContain("27");
+  });
+
+  test("promotes SIWE wallet attribution rather than the inferred IP count", () => {
+    const { getByTestId } = render(<ArrivalsPanel arrivals={arrivalsWithHttp} />);
+    const measured = getByTestId("ops-arrivals-http-measured");
+
+    expect(measured.textContent).toContain("MEASURED (SIWE WALLET)");
+    expect(measured.querySelector("strong")?.textContent).toBe("17");
+    expect(measured.textContent).not.toContain("41");
+  });
+
+  test("renders the producer's cut-over note verbatim and names recovered blindness", () => {
+    const { getByTestId } = render(<ArrivalsPanel arrivals={arrivalsWithHttp} />);
+    const cutover = getByTestId("ops-arrivals-http-cutover");
+
+    expect(cutover.querySelectorAll("p")[0]?.textContent).toBe(arrivalsWithHttp.httpCutover?.note);
+    expect(cutover.textContent).toContain("a larger number here is recovered blindness, not growth.");
+  });
+
+  test("keeps the existing furthest-stage reading on the MCP distinct shape", () => {
+    const { getByTestId } = render(<ArrivalsPanel arrivals={arrivalsWithHttp} />);
+
+    expect(getByTestId("ops-arrivals-furthest").textContent).toContain("authenticated");
+    expect(getByTestId("ops-arrivals-furthest").textContent).not.toContain("submitted");
   });
 });
 
