@@ -1024,6 +1024,8 @@ describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", ()
             claimedNotSubmitted: 2,
             submittedNotSettled: 1,
             settled24h: 37,
+            paidSettled24h: 32,
+            zeroPaySettled24h: 5,
             stuck: 1,
             failed24h: 0,
             asOf: "2026-07-05T00:00:00.000Z",
@@ -1045,6 +1047,8 @@ describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", ()
     expect(snapshot.flow?.claimedNotSubmitted).toBe(2);
     expect(snapshot.flow?.submittedNotSettled).toBe(1);
     expect(snapshot.flow?.settled24h).toBe(37);
+    expect(snapshot.flow?.paidSettled24h).toBe(32);
+    expect(snapshot.flow?.zeroPaySettled24h).toBe(5);
     expect(snapshot.flow?.stuck).toBe(1);
   });
 
@@ -1745,12 +1749,12 @@ describe("decidePayoutEvidence (pure verdict)", () => {
     expect(r.detail).toContain("4.20 USDC");
   });
 
-  it("SHORTFALL when jobs are marked settled but the money never moved", () => {
+  it("SHORTFALL when payment-expected jobs have no payout proof", () => {
     // The failure nothing else on the board can see today.
     const r = decidePayoutEvidence({ ...base, confirmedCount: 9, confirmedUsdc: 2.7, settledCount: 13 });
     expect(r.status).toBe("shortfall");
-    expect(r.detail).toContain("13 jobs marked settled");
-    expect(r.detail).toContain("4 unaccounted for");
+    expect(r.detail).toContain("13 expected payment");
+    expect(r.detail).toContain("4 jobs were approved");
     expect(r.detail).toContain("investigate");
   });
 
@@ -1775,10 +1779,38 @@ describe("decidePayoutEvidence (pure verdict)", () => {
     expect(r.confirmedCount).toBeNull(); // never 0 — 0 would read as "nothing paid"
   });
 
-  it("reports real evidence even with nothing to compare against", () => {
+  it("falls back to UNVERIFIED when the backend lacks paidSettled24h", () => {
     const r = decidePayoutEvidence({ ...base, confirmedCount: 3, confirmedUsdc: 1.5, settledCount: null });
+    expect(r.status).toBe("unverified");
+    expect(r.detail).toContain("payment-expected settlement count unavailable");
+  });
+
+  it("displays zero-pay terminals but never subtracts them from payout proof", () => {
+    const r = decidePayoutEvidence({
+      ...base,
+      confirmedCount: 12,
+      confirmedUsdc: 3,
+      settledCount: 12,
+      zeroPayCount: 5,
+    });
+
     expect(r.status).toBe("confirmed");
-    expect(r.detail).toContain("no settled count to compare");
+    expect(r.detail).toContain("17 settled — 12 expected payment");
+    expect(r.detail).toContain("5 settled with zero payout (rejected)");
+  });
+
+  it("counts a real shortfall from payment-expected jobs only", () => {
+    const r = decidePayoutEvidence({
+      ...base,
+      confirmedCount: 9,
+      confirmedUsdc: 2.25,
+      settledCount: 12,
+      zeroPayCount: 5,
+    });
+
+    expect(r.status).toBe("shortfall");
+    expect(r.detail).toContain("3 jobs were approved");
+    expect(r.detail).not.toContain("8 jobs were approved");
   });
 });
 
@@ -2034,7 +2066,7 @@ describe("decidePayoutEvidence — a 100% miss is a broken filter, not lost mone
   it("but ONE observed transfer proves the filter works — then a shortfall is trustworthy", () => {
     const r = decidePayoutEvidence({ ...base, confirmedCount: 1, confirmedUsdc: 0.3, settledCount: 12 });
     expect(r.status).toBe("shortfall");
-    expect(r.detail).toContain("11 unaccounted for");
+    expect(r.detail).toContain("11 jobs were approved");
   });
 
   it("zero settled AND zero confirmed is a quiet period, not an alarm", () => {

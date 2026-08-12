@@ -43,10 +43,14 @@ export function FlowPanel({ flow, externalFunnel, lifecycle, nowMs }: FlowPanelP
   const clock = disputeClockLine(externalFunnel, nowMs ?? Date.now());
   // How long the funnel above actually takes, split by who posted the work.
   const timing = lifecycleNote(lifecycle);
-  // Reconciled against the LEDGER's settled count, not against itself — the
-  // split is read from the chain and the total from the product, and where
-  // they disagree that gap is the information.
-  const mix = volumeMixNote({ lifecycle, settledCount: flow?.settled24h ?? null });
+  // Reconcile chain-classified paid work only against payment-expected
+  // settlements. Deliberate zero-pay terminals stay visible but can never
+  // masquerade as unclassified paid work.
+  const mix = volumeMixNote({
+    lifecycle,
+    settledCount: flow?.paidSettled24h ?? null,
+    zeroPayCount: flow?.zeroPaySettled24h ?? null,
+  });
   const funnel = flowFunnel(flow);
   const evidence = payoutView(flow?.payout);
   const provenance = payoutProvenanceLine(flow?.payout);

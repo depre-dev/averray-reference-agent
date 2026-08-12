@@ -869,6 +869,8 @@ export interface ProductHealthPayload {
     claimedNotSubmitted?: number;
     submittedNotSettled?: number;
     settled24h?: number;
+    paidSettled24h?: number;
+    zeroPaySettled24h?: number;
     stuck?: number;
     failed24h?: number;
     asOf?: string;
@@ -1478,7 +1480,7 @@ async function ethRpc(
  * recipient is checked here, and fees are reported separately rather than
  * folded into the payout total.
  */
-/** settled24h is a rolling 24h count, so that is what the window must span. */
+/** paidSettled24h is a rolling 24h count, so that is what the window must span. */
 const PAYOUT_COMPARISON_HOURS = 24;
 /** Blocks sampled to measure block time — long enough to smooth jitter. */
 const PAYOUT_BLOCK_TIME_SAMPLE = 2000;
@@ -1502,13 +1504,11 @@ function dataWord(data: unknown, index: number): string | undefined {
  * The payout verdict. PURE — the tolerance reasoning is the delicate part, so
  * it's testable without a chain.
  *
- * The two counts come from different clocks: `settled24h` is the product's
- * rolling 24h, the log read is an approximate block window. A small mismatch is
- * a boundary artifact, not a lost payout, so a shortfall inside `tolerance` is
- * still "confirmed" — crying wolf on an off-by-one would train the operator to
- * ignore the one that matters. A material shortfall is reported honestly but
- * NOT as red: the window really is approximate, and "investigate" is the true
- * instruction, not "settlement is down".
+ * The two counts come from different clocks: `paidSettled24h` is the product's
+ * rolling 24h payment-expected count, while the log read is an approximate
+ * block window. A small mismatch is a boundary artifact, not a lost payout, so
+ * a shortfall inside `tolerance` is still "confirmed" — crying wolf on an
+ * off-by-one would train the operator to ignore the one that matters.
  */
 /** How far the real span may drift from the target before we distrust it. */
 const WINDOW_FIT_TOLERANCE = 0.2;
@@ -1636,7 +1636,10 @@ async function blockTimestamp(rpcUrl: string, block: number, fetchImpl: typeof f
 export function decidePayoutEvidence(input: {
   confirmedCount: number | null;
   confirmedUsdc: number | null;
+  /** Terminal sessions for which payment is expected. */
   settledCount: number | null;
+  /** Terminal sessions which intentionally released no worker payout. */
+  zeroPayCount?: number | null;
   windowBlocks: number | null;
   tolerance: number;
   unverifiedReason?: string;
@@ -1647,6 +1650,7 @@ export function decidePayoutEvidence(input: {
     confirmedCount: input.confirmedCount,
     confirmedUsdc: input.confirmedUsdc,
     settledCount: input.settledCount,
+    zeroPayCount: input.zeroPayCount ?? null,
     windowBlocks: input.windowBlocks,
     ...(input.window ? { window: input.window } : {}),
   };
@@ -1661,9 +1665,16 @@ export function decidePayoutEvidence(input: {
     input.confirmedUsdc !== null ? ` (${input.confirmedUsdc.toFixed(2)} USDC)` : ""
   }`;
   if (input.settledCount === null) {
-    // Real evidence, nothing to compare it against — say exactly that.
-    return { ...base, status: "confirmed", detail: `${paid} · no settled count to compare` };
+    // An older backend cannot distinguish payment-expected terminals from
+    // deliberate zero-pay rejections. Never fall back to the old total-terminal
+    // arithmetic: the independent read remains real, but the comparison is not.
+    return {
+      ...base,
+      status: "unverified",
+      detail: `${paid} · payment-expected settlement count unavailable`,
+    };
   }
+  const ledger = payoutExpectationDetail(input.settledCount, input.zeroPayCount);
   // A 100% miss is overwhelmingly a MISCONFIGURED FILTER, not 100% payout
   // failure: point this at the wrong address or topic and you observe exactly
   // zero events, which is indistinguishable from total failure. That is not
@@ -1679,7 +1690,7 @@ export function decidePayoutEvidence(input: {
     return {
       ...base,
       status: "unverified",
-      detail: `no payout events found on the configured payout contract while ${input.settledCount} job${input.settledCount === 1 ? " is" : "s are"} marked settled — check the contract address and event topic before suspecting the payouts`,
+      detail: `no payout events found on the configured payout contract while ${ledger} — check the contract address and event topic before suspecting the payouts`,
     };
   }
   const shortfall = input.settledCount - input.confirmedCount;
@@ -1700,10 +1711,18 @@ export function decidePayoutEvidence(input: {
     return {
       ...base,
       status: "shortfall",
-      detail: `${input.settledCount} jobs marked settled but only ${paid} — ${shortfall} unaccounted for; windows are approximate, investigate`,
+      detail: `${paid} · ${ledger} · ${shortfall} job${shortfall === 1 ? " was" : "s were"} approved and released value on our ledger with no on-chain proof; windows are approximate, investigate`,
     };
   }
-  return { ...base, status: "confirmed", detail: `${paid} · ${input.settledCount} marked settled` };
+  return { ...base, status: "confirmed", detail: `${paid} · ${ledger}` };
+}
+
+function payoutExpectationDetail(paidSettledCount: number, zeroPayCount: number | null | undefined): string {
+  if (zeroPayCount === null || zeroPayCount === undefined) {
+    return `${paidSettledCount} expected payment · zero-pay settlement count unavailable`;
+  }
+  const totalSettledCount = paidSettledCount + zeroPayCount;
+  return `${totalSettledCount} settled — ${paidSettledCount} expected payment · ${zeroPayCount} settled with zero payout (rejected)`;
 }
 
 /**
@@ -2452,6 +2471,8 @@ export interface MoneyPathData {
   claimedNotSubmitted?: number | null;
   submittedNotSettled?: number | null;
   settled24h?: number | null;
+  paidSettled24h?: number | null;
+  zeroPaySettled24h?: number | null;
   stuck?: number | null;
   failed24h?: number | null;
   asOf?: number | null;
@@ -2462,12 +2483,11 @@ export interface MoneyPathData {
 /**
  * Evidence that rewards were actually PAID, not merely marked settled.
  *
- * `settled24h` and friends are job-state counts from the product's own
- * database — "13 rows say settled". That is not proof any money moved. This
- * reads USDC Transfer logs FROM the signer straight off the chain, so the two
- * numbers come from independent sources, and THE DISCREPANCY IS THE SIGNAL:
- * matching → genuinely paid; fewer transfers than settled jobs → jobs marked
- * settled that never paid, which nothing else on the board can currently see.
+ * `paidSettled24h` is the product ledger's count of terminal sessions expected
+ * to pay. That is not proof any money moved. This reads settlement logs straight
+ * off the chain, so the two numbers come from independent sources, and THE
+ * DISCREPANCY IS THE SIGNAL. `zeroPaySettled24h` is carried alongside for
+ * visibility and never enters the subtraction.
  *
  * `confirmedCount: null` means UNVERIFIED (disabled, unconfigured, or the log
  * read failed). It never falls back to inferring payment from job state.
@@ -2479,8 +2499,10 @@ export interface PayoutEvidence {
   confirmedCount: number | null;
   /** Summed USDC actually transferred; null = unverified. */
   confirmedUsdc: number | null;
-  /** The product's own settled count, for the comparison. */
+  /** The product's payout-expected settled count, for the comparison. */
   settledCount: number | null;
+  /** Deliberate zero-pay terminals; displayed but never subtracted from proof. */
+  zeroPayCount?: number | null;
   /** Blocks scanned. The window is approximate — the verdict allows for it. */
   windowBlocks: number | null;
   /** Does the block window actually span what it is compared against? */
@@ -2891,7 +2913,8 @@ export async function collectProductHealthProbes(
     decidePayoutEvidence({
       confirmedCount: payoutRead.count,
       confirmedUsdc: payoutRead.usdc,
-      settledCount: settlement?.settled24h ?? null,
+      settledCount: settlement?.paidSettled24h ?? null,
+      zeroPayCount: settlement?.zeroPaySettled24h ?? null,
       windowBlocks: payoutRead.windowBlocks,
       tolerance: config.payoutTolerance,
       ...(payoutRead.reason ? { unverifiedReason: payoutRead.reason } : {}),
@@ -3043,6 +3066,8 @@ export async function collectProductHealthProbes(
             claimedNotSubmitted: settlement.claimedNotSubmitted ?? null,
             submittedNotSettled: settlement.submittedNotSettled ?? null,
             settled24h: settlement.settled24h ?? null,
+            paidSettled24h: settlement.paidSettled24h ?? null,
+            zeroPaySettled24h: settlement.zeroPaySettled24h ?? null,
             stuck: settlement.stuck ?? null,
             failed24h: settlement.failed24h ?? null,
             asOf: parseHealthAsOf(settlement.asOf),

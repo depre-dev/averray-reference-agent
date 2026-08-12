@@ -52,7 +52,9 @@ export interface VerdictPool {
 export interface VerdictPayout {
   status: "confirmed" | "shortfall" | "unverified";
   confirmedCount: number | null;
+  /** Payment-expected terminals only; zero-pay terminals never enter the gap. */
   settledCount: number | null;
+  zeroPayCount?: number | null;
 }
 
 /**

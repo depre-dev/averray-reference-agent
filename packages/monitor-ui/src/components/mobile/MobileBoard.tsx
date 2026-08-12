@@ -314,7 +314,11 @@ function FlowPanel({ health, emphasise, nowMs }: { health: ProductHealth; emphas
   const funnel = flowFunnel(health.flow);
   const evidence = payoutView(health.flow?.payout);
   const timing = lifecycleNote(health.lifecycle);
-  const mix = volumeMixNote({ lifecycle: health.lifecycle, settledCount: health.flow?.settled24h ?? null });
+  const mix = volumeMixNote({
+    lifecycle: health.lifecycle,
+    settledCount: health.flow?.paidSettled24h ?? null,
+    zeroPayCount: health.flow?.zeroPaySettled24h ?? null,
+  });
   const clock = disputeClockLine(health.externalFunnel, nowMs);
   return (
     <section
