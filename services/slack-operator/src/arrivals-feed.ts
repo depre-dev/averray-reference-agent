@@ -35,6 +35,24 @@ export const ARRIVAL_STAGES = [
 
 export type ArrivalStage = (typeof ARRIVAL_STAGES)[number];
 
+export interface ArrivalAttributionCounts {
+  siwe_wallet: number;
+  client_name: number;
+  ip_only: number;
+}
+
+export interface ArrivalAttributionSourceTotals {
+  mcp: ArrivalAttributionCounts;
+  http: ArrivalAttributionCounts;
+}
+
+export interface HttpArrivalCutover {
+  atMs: number;
+  at: string;
+  backfilled: boolean;
+  note: string;
+}
+
 export interface ArrivalClient {
   key: string;
   name: string | null;
@@ -66,6 +84,13 @@ export interface ArrivalsSnapshot {
    * before the bucket existed — absent, never zero.
    */
   funnelAmbiguous?: Record<ArrivalStage, number>;
+  /** HTTP is a separate front door; every field is absent on older producers. */
+  funnelHttp?: Record<ArrivalStage, number>;
+  funnelHttpExternal?: Record<ArrivalStage, number>;
+  funnelHttpSelf?: Record<ArrivalStage, number>;
+  funnelHttpAmbiguous?: Record<ArrivalStage, number>;
+  attributionSourceTotals?: ArrivalAttributionSourceTotals;
+  httpCutover?: HttpArrivalCutover;
   distinct: {
     declared: number;
     anonymous: number;
@@ -146,6 +171,29 @@ export function normalizeArrivalsFeed(body: unknown): ArrivalsBlock {
   if (funnelAmbiguous && "unavailable" in funnelAmbiguous) return funnelAmbiguous;
   const ambiguousCounts = funnelAmbiguous && "counts" in funnelAmbiguous ? funnelAmbiguous.counts : undefined;
 
+  // HTTP arrived later and remains optional across the independent platform
+  // and board deploys. Present fields are real observations; absent fields
+  // stay absent instead of being rewritten as zeroes.
+  const funnelHttp = optionalStageCounts(value.funnelHttp, "funnelHttp");
+  if (funnelHttp && "unavailable" in funnelHttp) return funnelHttp;
+  const funnelHttpExternal = optionalStageCounts(value.funnelHttpExternal, "funnelHttpExternal");
+  if (funnelHttpExternal && "unavailable" in funnelHttpExternal) return funnelHttpExternal;
+  const funnelHttpSelf = optionalStageCounts(value.funnelHttpSelf, "funnelHttpSelf");
+  if (funnelHttpSelf && "unavailable" in funnelHttpSelf) return funnelHttpSelf;
+  const funnelHttpAmbiguous = optionalStageCounts(value.funnelHttpAmbiguous, "funnelHttpAmbiguous");
+  if (funnelHttpAmbiguous && "unavailable" in funnelHttpAmbiguous) return funnelHttpAmbiguous;
+  const httpCounts = funnelHttp && "counts" in funnelHttp ? funnelHttp.counts : undefined;
+  const httpExternalCounts =
+    funnelHttpExternal && "counts" in funnelHttpExternal ? funnelHttpExternal.counts : undefined;
+  const httpSelfCounts = funnelHttpSelf && "counts" in funnelHttpSelf ? funnelHttpSelf.counts : undefined;
+  const httpAmbiguousCounts =
+    funnelHttpAmbiguous && "counts" in funnelHttpAmbiguous ? funnelHttpAmbiguous.counts : undefined;
+
+  const attributionSourceTotals = normalizeAttributionSourceTotals(value.attributionSourceTotals);
+  if (attributionSourceTotals && "unavailable" in attributionSourceTotals) return attributionSourceTotals;
+  const httpCutover = normalizeHttpCutover(value.httpCutover);
+  if (httpCutover && "unavailable" in httpCutover) return httpCutover;
+
   // External, self and ambiguous are disjoint subsets of the total, so no one
   // of them can exceed it and together they cannot either. A producer that
   // says otherwise is describing a funnel we do not understand, and the safe
@@ -163,6 +211,22 @@ export function normalizeArrivalsFeed(body: unknown): ArrivalsBlock {
   if (incoherent) {
     return {
       unavailable: `arrivals feed unreadable — ${incoherent} external plus self plus ambiguous exceeds the total`,
+    };
+  }
+
+  // This is deliberately a second coherence check. HTTP is not part of the
+  // MCP `funnel`, and comparing or summing the two doors would invent a
+  // combined series that the producer does not report.
+  const incoherentHttp = httpCounts && ARRIVAL_STAGES.find(
+    (stage) =>
+      (httpExternalCounts?.[stage] ?? 0) +
+        (httpSelfCounts?.[stage] ?? 0) +
+        (httpAmbiguousCounts?.[stage] ?? 0) >
+      httpCounts[stage],
+  );
+  if (incoherentHttp) {
+    return {
+      unavailable: `arrivals feed unreadable — funnelHttp.${incoherentHttp} external plus self plus ambiguous exceeds the HTTP total`,
     };
   }
 
@@ -210,6 +274,14 @@ export function normalizeArrivalsFeed(body: unknown): ArrivalsBlock {
     funnelSelf: funnelSelf.counts,
     // Omitted, not zero-filled, when the producer did not supply it.
     ...(ambiguousCounts === undefined ? {} : { funnelAmbiguous: ambiguousCounts }),
+    ...(httpCounts === undefined ? {} : { funnelHttp: httpCounts }),
+    ...(httpExternalCounts === undefined ? {} : { funnelHttpExternal: httpExternalCounts }),
+    ...(httpSelfCounts === undefined ? {} : { funnelHttpSelf: httpSelfCounts }),
+    ...(httpAmbiguousCounts === undefined ? {} : { funnelHttpAmbiguous: httpAmbiguousCounts }),
+    ...(attributionSourceTotals && "value" in attributionSourceTotals
+      ? { attributionSourceTotals: attributionSourceTotals.value }
+      : {}),
+    ...(httpCutover && "value" in httpCutover ? { httpCutover: httpCutover.value } : {}),
     distinct: {
       declared,
       anonymous,
@@ -237,6 +309,68 @@ function stageCounts(
     return { unavailable: `arrivals feed unreadable — ${field}.${invalid[0]} is invalid` };
   }
   return { counts: Object.fromEntries(entries) as Record<ArrivalStage, number> };
+}
+
+function optionalStageCounts(
+  raw: unknown,
+  field: string,
+): { counts: Record<ArrivalStage, number> } | { unavailable: string } | undefined {
+  return raw === undefined ? undefined : stageCounts(raw, field);
+}
+
+function normalizeAttributionSourceTotals(
+  raw: unknown,
+): { value: ArrivalAttributionSourceTotals } | { unavailable: string } | undefined {
+  if (raw === undefined) return undefined;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { unavailable: "arrivals feed unreadable — attributionSourceTotals is invalid" };
+  }
+  const value = raw as Record<string, unknown>;
+  const mcp = attributionCounts(value.mcp, "mcp");
+  if ("unavailable" in mcp) return mcp;
+  const http = attributionCounts(value.http, "http");
+  if ("unavailable" in http) return http;
+  return { value: { mcp: mcp.counts, http: http.counts } };
+}
+
+function attributionCounts(
+  raw: unknown,
+  door: string,
+): { counts: ArrivalAttributionCounts } | { unavailable: string } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { unavailable: `arrivals feed unreadable — attributionSourceTotals.${door} is invalid` };
+  }
+  const value = raw as Record<string, unknown>;
+  const siwe_wallet = count(value.siwe_wallet);
+  const client_name = count(value.client_name);
+  const ip_only = count(value.ip_only);
+  if (siwe_wallet === undefined || client_name === undefined || ip_only === undefined) {
+    return { unavailable: `arrivals feed unreadable — attributionSourceTotals.${door} counts are invalid` };
+  }
+  return { counts: { siwe_wallet, client_name, ip_only } };
+}
+
+function normalizeHttpCutover(
+  raw: unknown,
+): { value: HttpArrivalCutover } | { unavailable: string } | undefined {
+  if (raw === undefined) return undefined;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { unavailable: "arrivals feed unreadable — httpCutover is invalid" };
+  }
+  const value = raw as Record<string, unknown>;
+  const atMs = count(value.atMs);
+  if (
+    atMs === undefined ||
+    typeof value.at !== "string" ||
+    !value.at.trim() ||
+    Number.isNaN(Date.parse(value.at)) ||
+    typeof value.backfilled !== "boolean" ||
+    typeof value.note !== "string" ||
+    !value.note.trim()
+  ) {
+    return { unavailable: "arrivals feed unreadable — httpCutover fields are invalid" };
+  }
+  return { value: { atMs, at: value.at, backfilled: value.backfilled, note: value.note } };
 }
 
 function normalizeClient(raw: unknown): { client: ArrivalClient } | { unavailable: string } {
