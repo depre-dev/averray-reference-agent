@@ -60,6 +60,14 @@ export const OPS_GLOSS = {
   windowFit:
     "Whether the chain was read over at least the same 24h the settlement ledger is counted over. A shorter read window could miss real payouts and report a false shortfall — this line is the guard against comparing unlike windows.",
 
+  /** The MCP column heading in ARRIVALS. */
+  doorMcp:
+    "The agent front door: the MCP endpoint an AI agent connects to in order to discover, claim and submit jobs. Counted per distinct client.",
+
+  /** The HTTP API column heading in ARRIVALS. */
+  doorHttp:
+    "The web front door: the plain HTTP API. Counted per call, not per client, and only since its cut-over — earlier traffic was never backfilled, which is why the two columns must not be added together.",
+
   /** The bank lane's POSTAGE row. */
   postage:
     "DOT committed to pay XCM delivery fees for the bank lane's transfers. Spendable only as postage — there is no withdraw path back to the treasury.",

@@ -437,44 +437,79 @@ function furthestReached(funnel: Record<string, number> | undefined): ArrivalSta
   return furthest;
 }
 
+/** What a stage MEANS, in the words an operator would use. */
+const STAGE_DID: Record<ArrivalStage, string> = {
+  reached: "arrived but went no further",
+  browsed: "browsed jobs",
+  evaluated: "sized up a job",
+  identified: "identified itself",
+  authenticated: "signed in",
+  claimed: "claimed a job",
+  submitted: "submitted work",
+};
+
 /**
- * Arrivals in one line: how far strangers actually got.
+ * Arrivals in one line: did anyone from outside show up, what did they do,
+ * and how far did they get.
  *
- * ── WHY THE DOORS STAY APART ──────────────────────────────────────────────
+ * ── WHY THE DOORS ARE COMBINED, AND WHY ON THIS AXIS ──────────────────────
  *
- * There are two front doors (MCP and HTTP) measured independently, and a
- * merged "outsiders reached X" would be the flattening this board exists to
- * refuse — the two series have different cutovers and different meanings, and
- * one door doing well would hide the other doing nothing.
+ * The first version named the two front doors (MCP and HTTP) and reported each
+ * separately. The operator's verdict, 2026-08-06: the transport names mean
+ * nothing to the person reading, who only wants to know whether somebody came
+ * and how far they got.
  *
- * A door with no external series is NOT MEASURED, never zero. A door measured
- * with nobody through it says "none yet", which is a real observation.
+ * But the doors CANNOT be combined by adding. The board's own footnote records
+ * that HTTP arrivals are counted only from a cutover and earlier traffic was
+ * never backfilled, so the two series cover different spans of time. Summing
+ * them would be arithmetic across unlike windows — the same class of error as
+ * comparing a 24h chain read against a 25h ledger.
  *
- * The AMBIGUOUS bucket is deliberately excluded from both: traffic under a
- * client name we also use ourselves cannot be claimed as outside demand
- * without manufacturing it, and cannot be claimed as ours without erasing a
- * real stranger. The desktop shows it as its own column; the phone simply
- * does not count it as demand.
+ * FURTHEST-STAGE is the axis that survives the merge. "The furthest anybody
+ * got" is well-defined however long each door has been watched: a stranger who
+ * claimed a job did so whether or not the other door's history is complete.
+ *
+ * ── WHAT AN UNWATCHED DOOR DOES TO THE SENTENCE ───────────────────────────
+ *
+ * "Nobody came" is only sayable about doors we actually watched. When a door
+ * has no external series the line says so, because a confident "nobody yet"
+ * over an unmeasured door is a claim we did not earn.
  */
 export function phoneArrivals(arrivals: ProductHealth["arrivals"]): PhoneLane | null {
   if (!arrivals) return null;
   if ("unavailable" in arrivals) {
-    return { line: `ARRIVALS — ${arrivals.unavailable}`, tone: "awaiting", unreadable: true };
+    return { line: `OUTSIDERS — ${arrivals.unavailable}`, tone: "awaiting", unreadable: true };
   }
 
-  const door = (external: Record<string, number> | undefined, name: string): string => {
-    if (!external) return `${name} not measured`;
-    const furthest = furthestReached(external);
-    return furthest ? `${name} → ${furthest}` : `${name} none yet`;
-  };
+  // The AMBIGUOUS bucket is in neither door's series on purpose: traffic under
+  // a client name we also use ourselves cannot be called outside demand
+  // without manufacturing it, nor ours without erasing a real stranger.
+  const doors = [arrivals.funnelExternal, arrivals.funnelHttpExternal];
+  const measured = doors.filter((d): d is Record<string, number> => d !== undefined);
+  const unmeasured = doors.length - measured.length;
 
-  const line = [
-    door(arrivals.funnelExternal, "MCP"),
-    door(arrivals.funnelHttpExternal, "HTTP"),
-  ].join(" · ");
+  if (measured.length === 0) {
+    return { line: "OUTSIDERS — not measured", tone: "awaiting", unreadable: true };
+  }
+
+  // The furthest stage ANY door saw. Max, never sum — see above.
+  let furthest: ArrivalStage | null = null;
+  for (const door of measured) {
+    const reached = furthestReached(door);
+    if (reached && (furthest === null || ARRIVAL_STAGES.indexOf(reached) > ARRIVAL_STAGES.indexOf(furthest))) {
+      furthest = reached;
+    }
+  }
+
+  const caveat = unmeasured > 0 ? " · one door not measured" : "";
+  const line = furthest
+    ? `OUTSIDERS — someone ${STAGE_DID[furthest]}${caveat}`
+    : unmeasured > 0
+      ? "OUTSIDERS — nobody yet on the doors we measure"
+      : "OUTSIDERS — nobody from outside yet";
 
   // Never red, never degraded. Nobody arriving is a demand fact, not a fault —
   // colouring it as a problem would put a business outcome in the same visual
   // language as a broken money path.
-  return { line: `OUTSIDERS ${line}`, tone: "ok" };
+  return { line, tone: "ok" };
 }

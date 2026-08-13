@@ -466,7 +466,7 @@ describe("phone board — deposit pool and arrivals lanes", () => {
     expect(queryByTestId("ops-deposit-pool-cap")).toBeNull();
   });
 
-  test("arrivals reach the phone, with the two front doors kept apart", () => {
+  test("arrivals reach the phone as ONE plain answer — no transport names", () => {
     const health = withBlocks({
       arrivals: {
         schemaVersion: "averray.arrivals.v1",
@@ -475,9 +475,13 @@ describe("phone board — deposit pool and arrivals lanes", () => {
       },
     } as Partial<ProductHealth>);
     const { getByTestId } = render(<MobileBoard health={health} nowMs={fresh(health)} />);
-    expect(getByTestId("mobile-arrivals").textContent).toBe(
-      "OUTSIDERS MCP → browsed · HTTP → submitted",
-    );
+    // Operator, 2026-08-06: "whats MCP and HTTP… I only need to know if
+    // someone came, what they did and how far." The doors combine on
+    // FURTHEST-STAGE, which is well-defined even though the two series cover
+    // different spans; adding their counts would not be.
+    const lane = getByTestId("mobile-arrivals");
+    expect(lane.textContent).toBe("OUTSIDERS — someone submitted work");
+    expect(lane.textContent).not.toMatch(/MCP|HTTP/);
   });
 
   test("a producer that never reported either block renders NOTHING", () => {

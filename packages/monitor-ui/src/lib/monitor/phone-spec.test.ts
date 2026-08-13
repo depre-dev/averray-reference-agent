@@ -46,51 +46,71 @@ describe("phonePool — the deposit pool in one line", () => {
   });
 });
 
-describe("phoneArrivals — how far strangers got", () => {
+describe("phoneArrivals — did anyone come, what did they do, how far", () => {
   const arrivals = (over: Record<string, unknown> = {}) =>
     ({ schemaVersion: "averray.arrivals.v1", ...over }) as unknown as ProductHealth["arrivals"];
-
-  it("keeps the two front doors APART — a merge would hide one door doing nothing", () => {
-    const lane = phoneArrivals(arrivals({
-      funnelExternal: { reached: 12, browsed: 3, evaluated: 0, identified: 0, authenticated: 0, claimed: 0, submitted: 0 },
-      funnelHttpExternal: { reached: 90, browsed: 40, evaluated: 20, identified: 5, authenticated: 5, claimed: 2, submitted: 1 },
-    }));
-    expect(lane?.line).toBe("OUTSIDERS MCP → browsed · HTTP → submitted");
+  const stages = (over: Partial<Record<string, number>> = {}) => ({
+    reached: 0, browsed: 0, evaluated: 0, identified: 0,
+    authenticated: 0, claimed: 0, submitted: 0, ...over,
   });
 
-  it("an unmeasured door is NOT MEASURED, never zero", () => {
-    // funnelHttpExternal is absent on producers that predate the HTTP split.
+  it("answers in plain words — no transport names", () => {
+    // Operator, 2026-08-06: "whats MCP and HTTP… I only need to know if
+    // someone came, what they did and how far."
     const lane = phoneArrivals(arrivals({
-      funnelExternal: { reached: 5, browsed: 0, evaluated: 0, identified: 0, authenticated: 0, claimed: 0, submitted: 0 },
+      funnelExternal: stages({ reached: 9, browsed: 2 }),
+      funnelHttpExternal: stages({ reached: 40, browsed: 20, claimed: 1 }),
     }));
-    expect(lane?.line).toContain("HTTP not measured");
+    expect(lane?.line).toBe("OUTSIDERS — someone claimed a job");
+    expect(lane?.line).not.toMatch(/MCP|HTTP/);
   });
 
-  it("a measured door nobody came through says 'none yet' — a real observation", () => {
+  it("takes the FURTHEST across doors, never the sum", () => {
+    // The doors cover different spans — HTTP is counted only from a cutover —
+    // so adding them would be arithmetic across unlike windows. Furthest-stage
+    // is well-defined however long each door has been watched.
     const lane = phoneArrivals(arrivals({
-      funnelExternal: { reached: 0, browsed: 0, evaluated: 0, identified: 0, authenticated: 0, claimed: 0, submitted: 0 },
-      funnelHttpExternal: { reached: 0, browsed: 0, evaluated: 0, identified: 0, authenticated: 0, claimed: 0, submitted: 0 },
+      funnelExternal: stages({ reached: 1, submitted: 1 }),
+      funnelHttpExternal: stages({ reached: 5000, browsed: 4000 }),
     }));
-    expect(lane?.line).toBe("OUTSIDERS MCP none yet · HTTP none yet");
+    expect(lane?.line).toBe("OUTSIDERS — someone submitted work");
+  });
+
+  it("says nobody ONLY about doors it actually watched", () => {
+    const lane = phoneArrivals(arrivals({ funnelExternal: stages() }));
+    expect(lane?.line).toBe("OUTSIDERS — nobody yet on the doors we measure");
+  });
+
+  it("both doors watched and empty is a real, plainly stated observation", () => {
+    const lane = phoneArrivals(arrivals({
+      funnelExternal: stages(),
+      funnelHttpExternal: stages(),
+    }));
+    expect(lane?.line).toBe("OUTSIDERS — nobody from outside yet");
+  });
+
+  it("flags an unwatched door even when somebody did arrive", () => {
+    const lane = phoneArrivals(arrivals({ funnelExternal: stages({ reached: 3, browsed: 1 }) }));
+    expect(lane?.line).toBe("OUTSIDERS — someone browsed jobs · one door not measured");
+  });
+
+  it("no external series at all ⇒ not measured, never 'nobody'", () => {
+    const lane = phoneArrivals(arrivals({}));
+    expect(lane).toMatchObject({ tone: "awaiting", unreadable: true });
+    expect(lane?.line).toBe("OUTSIDERS — not measured");
   });
 
   it("NEVER counts the ambiguous bucket as outside demand", () => {
-    // Traffic under a client name we also use: claiming it as demand
-    // manufactures it, claiming it as ours erases a possible stranger.
     const lane = phoneArrivals(arrivals({
-      funnelExternal: { reached: 0, browsed: 0, evaluated: 0, identified: 0, authenticated: 0, claimed: 0, submitted: 0 },
-      funnelAmbiguous: { reached: 99, browsed: 99, evaluated: 99, identified: 99, authenticated: 99, claimed: 99, submitted: 99 },
-      funnelHttpExternal: { reached: 0, browsed: 0, evaluated: 0, identified: 0, authenticated: 0, claimed: 0, submitted: 0 },
+      funnelExternal: stages(),
+      funnelHttpExternal: stages(),
+      funnelAmbiguous: stages({ reached: 99, submitted: 99 }),
     }));
-    expect(lane?.line).toBe("OUTSIDERS MCP none yet · HTTP none yet");
+    expect(lane?.line).toBe("OUTSIDERS — nobody from outside yet");
   });
 
   it("nobody arriving is never coloured as a fault", () => {
-    // Demand is a business outcome; painting it red would put it in the same
-    // visual language as a broken money path.
-    const lane = phoneArrivals(arrivals({
-      funnelExternal: { reached: 0, browsed: 0, evaluated: 0, identified: 0, authenticated: 0, claimed: 0, submitted: 0 },
-    }));
+    const lane = phoneArrivals(arrivals({ funnelExternal: stages(), funnelHttpExternal: stages() }));
     expect(lane?.tone).toBe("ok");
   });
 

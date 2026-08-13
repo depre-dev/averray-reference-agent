@@ -22,6 +22,7 @@
 // The column is absent, not zero, against a platform deployed before the
 // bucket existed. Zero is a measurement; absent is not.
 
+import { OPS_GLOSS } from "../../lib/monitor/ops-gloss.js";
 import {
   ARRIVAL_STAGES,
   type ArrivalsBlock,
@@ -97,7 +98,7 @@ export function ArrivalsPanel({ arrivals }: ArrivalsPanelProps) {
 
       <div className="ops-arrivals-doors">
         <section className="ops-arrivals-door" aria-label="MCP arrivals" data-testid="ops-arrivals-door-mcp">
-          <h3 className="ops-arrivals-door-title">MCP</h3>
+          <h3 className="ops-arrivals-door-title" title={OPS_GLOSS.doorMcp}>MCP</h3>
           <ol className="ops-arrivals-funnel" aria-label="MCP arrival funnel, reached through submitted">
             {ARRIVAL_STAGES.map((stage) => {
               const value = arrivals.funnelExternal[stage];
@@ -189,7 +190,7 @@ export function ArrivalsPanel({ arrivals }: ArrivalsPanelProps) {
 
         {hasHttpReading ? (
           <section className="ops-arrivals-door" aria-label="HTTP API arrivals" data-testid="ops-arrivals-door-http">
-            <h3 className="ops-arrivals-door-title">HTTP API</h3>
+            <h3 className="ops-arrivals-door-title" title={OPS_GLOSS.doorHttp}>HTTP API</h3>
             {arrivals.funnelHttpExternal ? (
               <ol className="ops-arrivals-funnel" aria-label="HTTP API arrival funnel, reached through submitted">
                 {ARRIVAL_STAGES.map((stage) => {
