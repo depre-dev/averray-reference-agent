@@ -1147,3 +1147,33 @@ export function formatSeconds(seconds: number | null): string {
   }
   return `${Math.round(h / 24)}d`;
 }
+
+/**
+ * Render a pool amount from its exact base-unit string.
+ *
+ * Lifted out of DepositPoolTile so the PHONE renders the same number the same
+ * way. Two surfaces formatting the same money with two functions is the drift
+ * this layer exists to prevent — and the phone lane and the desktop tile now
+ * quote one another's figures by construction.
+ *
+ * `decimals` absent ⇒ the raw base-unit string, labelled `raw`. Scaling by a
+ * guessed exponent would silently move a decimal point on a money value.
+ */
+export function formatPoolAmount(
+  amount: { raw: string; decimals?: number } | undefined,
+  unit: string,
+): string {
+  if (!amount) return `— ${unit}`;
+  if (amount.decimals === undefined) return `${groupRaw(amount.raw)} raw`;
+  const negative = amount.raw.startsWith("-");
+  const digits = negative ? amount.raw.slice(1) : amount.raw;
+  const padded = digits.padStart(amount.decimals + 1, "0");
+  const split = padded.length - amount.decimals;
+  const whole = padded.slice(0, split);
+  const fraction = padded.slice(split).replace(/0+$/, "");
+  return `${negative ? "-" : ""}${groupRaw(whole)}${fraction ? `.${fraction}` : ""} ${unit}`;
+}
+
+function groupRaw(raw: string): string {
+  return raw.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}

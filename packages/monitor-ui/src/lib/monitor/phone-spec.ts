@@ -16,10 +16,11 @@
 // come from ops-spec / @avg/schemas so the two surfaces cannot disagree about
 // what is wrong — which was the whole reason the verdict moved server-side.
 
-import type { HealthHistory, ProductHealth, SolvencyPool } from "./product-health.js";
+import { ARRIVAL_STAGES } from "./product-health.js";
+import type { HealthHistory, ProductHealth, SolvencyPool , ArrivalStage } from "./product-health.js";
 import { deriveOpsVerdict, verdictProbeLabel } from "@avg/schemas/ops-verdict";
 import { formatAgo, formatAmount, formatDuration, groupProbesByPillar, probeOpsTone, type OpsTone } from "./ops-model.js";
-import { poolMeter, shortEndpoint, staleAfterMs, type MeterView } from "./ops-spec.js";
+import { formatPoolAmount, poolMeter, shortEndpoint, staleAfterMs, type MeterView } from "./ops-spec.js";
 
 // ── the verdict field ───────────────────────────────────────────────────────
 
@@ -368,4 +369,147 @@ function summarise(total: number, tones: OpsTone[]): string {
   if (degraded > 0) return `${degraded} degraded`;
   if (awaiting > 0) return `${count("ok")} ok · ${awaiting} awaiting`;
   return `${total}/${total} ok`;
+}
+
+// ── DEPOSIT POOL AND ARRIVALS, CUT TO PHONE SIZE ───────────────────────────
+//
+// Both facts arrived on the desktop board as full panels — six pool facts in a
+// grid, and a two-column arrivals funnel of seven stages each. The phone was
+// rendering the desktop pool tile verbatim (its own `ops-deposit-pool-*` CSS
+// and all) and no arrivals at all, which is the one thing this module exists to
+// prevent: a screen whose rule is "anything below the fold has to have earned
+// it" cannot inherit a desktop grid unchanged.
+//
+// So each becomes ONE line, and expands only when it has something to ask for.
+
+export interface PhoneLane {
+  /** The line to render. Always present — absence is expressed IN the words. */
+  line: string;
+  tone: "ok" | "degraded" | "red" | "awaiting";
+  /** Set when the reading itself failed, so the caller can fence it. */
+  unreadable?: boolean;
+}
+
+/**
+ * The deposit pool in one line.
+ *
+ * An empty pool is NOT a fault: this one was born empty and its zeroes are
+ * measured, which the desktop says with a `BORN EMPTY · ZEROES ARE MEASURED`
+ * kicker. On a phone there is no room for the kicker, so the line must not
+ * imply alarm — an empty, readable pool is `ok` and says so plainly.
+ *
+ * `unavailable` (no producer) and `fault` (producer contradicted itself) stay
+ * distinct, because "we cannot see the pool" and "the pool reported nonsense"
+ * call for different operator moves.
+ */
+export function phonePool(pool: ProductHealth["depositPool"]): PhoneLane | null {
+  if (!pool) return null;
+  if ("unavailable" in pool) {
+    return { line: `POOL — ${pool.unavailable}`, tone: "awaiting", unreadable: true };
+  }
+  if ("fault" in pool) {
+    return { line: `POOL FAULT — ${pool.fault}`, tone: "red", unreadable: true };
+  }
+
+  const snap = pool.snapshot;
+  // Same formatter the desktop tile uses — see formatPoolAmount in ops-spec.
+  const deposits = snap.totalAssets ? formatPoolAmount(snap.totalAssets, "USDC") : null;
+  const depositors = snap.flows?.depositorCount;
+  const earning = snap.yieldStatus === "earning";
+
+  const parts: string[] = [];
+  // Absent is not zero: a pool whose amount did not come through says so
+  // rather than rendering "0 USDC", which reads as a measured empty pool.
+  parts.push(deposits ? `${deposits} in` : "amount not reported");
+  if (depositors != null) parts.push(`${depositors} depositor${depositors === 1 ? "" : "s"}`);
+  parts.push(earning ? "earning" : "not yet earning");
+
+  return { line: `POOL ${parts.join(" · ")}`, tone: "ok" };
+}
+
+/** The last stage with a nonzero count, or null when the series is empty. */
+function furthestReached(funnel: Record<string, number> | undefined): ArrivalStage | null {
+  if (!funnel) return null;
+  let furthest: ArrivalStage | null = null;
+  for (const stage of ARRIVAL_STAGES) {
+    if ((funnel[stage] ?? 0) > 0) furthest = stage;
+  }
+  return furthest;
+}
+
+/** What a stage MEANS, in the words an operator would use. */
+const STAGE_DID: Record<ArrivalStage, string> = {
+  reached: "arrived but went no further",
+  browsed: "browsed jobs",
+  evaluated: "sized up a job",
+  identified: "identified itself",
+  authenticated: "signed in",
+  claimed: "claimed a job",
+  submitted: "submitted work",
+};
+
+/**
+ * Arrivals in one line: did anyone from outside show up, what did they do,
+ * and how far did they get.
+ *
+ * ── WHY THE DOORS ARE COMBINED, AND WHY ON THIS AXIS ──────────────────────
+ *
+ * The first version named the two front doors (MCP and HTTP) and reported each
+ * separately. The operator's verdict, 2026-08-06: the transport names mean
+ * nothing to the person reading, who only wants to know whether somebody came
+ * and how far they got.
+ *
+ * But the doors CANNOT be combined by adding. The board's own footnote records
+ * that HTTP arrivals are counted only from a cutover and earlier traffic was
+ * never backfilled, so the two series cover different spans of time. Summing
+ * them would be arithmetic across unlike windows — the same class of error as
+ * comparing a 24h chain read against a 25h ledger.
+ *
+ * FURTHEST-STAGE is the axis that survives the merge. "The furthest anybody
+ * got" is well-defined however long each door has been watched: a stranger who
+ * claimed a job did so whether or not the other door's history is complete.
+ *
+ * ── WHAT AN UNWATCHED DOOR DOES TO THE SENTENCE ───────────────────────────
+ *
+ * "Nobody came" is only sayable about doors we actually watched. When a door
+ * has no external series the line says so, because a confident "nobody yet"
+ * over an unmeasured door is a claim we did not earn.
+ */
+export function phoneArrivals(arrivals: ProductHealth["arrivals"]): PhoneLane | null {
+  if (!arrivals) return null;
+  if ("unavailable" in arrivals) {
+    return { line: `OUTSIDERS — ${arrivals.unavailable}`, tone: "awaiting", unreadable: true };
+  }
+
+  // The AMBIGUOUS bucket is in neither door's series on purpose: traffic under
+  // a client name we also use ourselves cannot be called outside demand
+  // without manufacturing it, nor ours without erasing a real stranger.
+  const doors = [arrivals.funnelExternal, arrivals.funnelHttpExternal];
+  const measured = doors.filter((d): d is Record<string, number> => d !== undefined);
+  const unmeasured = doors.length - measured.length;
+
+  if (measured.length === 0) {
+    return { line: "OUTSIDERS — not measured", tone: "awaiting", unreadable: true };
+  }
+
+  // The furthest stage ANY door saw. Max, never sum — see above.
+  let furthest: ArrivalStage | null = null;
+  for (const door of measured) {
+    const reached = furthestReached(door);
+    if (reached && (furthest === null || ARRIVAL_STAGES.indexOf(reached) > ARRIVAL_STAGES.indexOf(furthest))) {
+      furthest = reached;
+    }
+  }
+
+  const caveat = unmeasured > 0 ? " · one door not measured" : "";
+  const line = furthest
+    ? `OUTSIDERS — someone ${STAGE_DID[furthest]}${caveat}`
+    : unmeasured > 0
+      ? "OUTSIDERS — nobody yet on the doors we measure"
+      : "OUTSIDERS — nobody from outside yet";
+
+  // Never red, never degraded. Nobody arriving is a demand fact, not a fault —
+  // colouring it as a problem would put a business outcome in the same visual
+  // language as a broken money path.
+  return { line, tone: "ok" };
 }

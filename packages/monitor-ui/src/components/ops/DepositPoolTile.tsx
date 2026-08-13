@@ -14,6 +14,8 @@ import type {
   DepositPoolFlow,
 } from "../../lib/monitor/product-health.js";
 
+import { formatPoolAmount } from "../../lib/monitor/ops-spec.js";
+
 export function DepositPoolTile({ pool }: { pool: DepositPoolBlock | undefined }) {
   if (!pool || "unavailable" in pool) {
     const reason = pool && "unavailable" in pool
@@ -55,26 +57,26 @@ export function DepositPoolTile({ pool }: { pool: DepositPoolBlock | undefined }
 
       <dl className="ops-deposit-pool-grid">
         <Fact label="DEPOSITS" testId="ops-deposit-pool-deposits">
-          {formatAmount(snapshot.totalAssets, "USDC")}
+          {formatPoolAmount(snapshot.totalAssets, "USDC")}
         </Fact>
         <Fact label="BUFFER / DEPLOYED" testId="ops-deposit-pool-allocation">
-          {formatAmount(snapshot.buffer, "USDC")} buffer · {formatAmount(snapshot.deployed, "USDC")} deployed
+          {formatPoolAmount(snapshot.buffer, "USDC")} buffer · {formatPoolAmount(snapshot.deployed, "USDC")} deployed
         </Fact>
         <Fact label="SHARE PRICE" testId="ops-deposit-pool-share-price">
-          {formatAmount(snapshot.sharePrice, "USDC/share")}
+          {formatPoolAmount(snapshot.sharePrice, "USDC/share")}
           <small>{snapshot.pricingModel ?? "pricing model not reported"}</small>
         </Fact>
         <Fact label="CAP" testId="ops-deposit-pool-cap">
           {formatBps(snapshot.caps?.utilizationBps)} utilized
           <small>
-            {formatAmount(snapshot.caps?.headroom, "USDC")} headroom
-            {snapshot.caps?.totalAssetCap ? ` of ${formatAmount(snapshot.caps.totalAssetCap, "USDC")}` : ""}
+            {formatPoolAmount(snapshot.caps?.headroom, "USDC")} headroom
+            {snapshot.caps?.totalAssetCap ? ` of ${formatPoolAmount(snapshot.caps.totalAssetCap, "USDC")}` : ""}
           </small>
         </Fact>
         <Fact label="DEPOSITORS" testId="ops-deposit-pool-depositors">
           {snapshot.flows?.depositorCount ?? "—"}
           <small>
-            {formatAmount(snapshot.flows?.pendingUnfulfilledRedemptionAssets, "USDC")} pending redemption
+            {formatPoolAmount(snapshot.flows?.pendingUnfulfilledRedemptionAssets, "USDC")} pending redemption
           </small>
         </Fact>
         <Fact label="YIELD" testId="ops-deposit-pool-yield">
@@ -139,21 +141,7 @@ function Fact({
   );
 }
 
-function formatAmount(amount: DepositPoolAmount | undefined, unit: string): string {
-  if (!amount) return `— ${unit}`;
-  if (amount.decimals === undefined) return `${groupRaw(amount.raw)} raw`;
-  const negative = amount.raw.startsWith("-");
-  const digits = negative ? amount.raw.slice(1) : amount.raw;
-  const padded = digits.padStart(amount.decimals + 1, "0");
-  const split = padded.length - amount.decimals;
-  const whole = padded.slice(0, split);
-  const fraction = padded.slice(split).replace(/0+$/, "");
-  return `${negative ? "-" : ""}${groupRaw(whole)}${fraction ? `.${fraction}` : ""} ${unit}`;
-}
 
-function groupRaw(raw: string): string {
-  return raw.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-}
 
 function formatBps(bps: number | undefined): string {
   if (bps === undefined) return "—";
@@ -175,7 +163,7 @@ function flowLine(flow: DepositPoolFlow): string {
     operator_principal_contributed: "PRINCIPAL CONTRIBUTED",
     venue_loss_written_off: "LOSS WRITTEN OFF",
   } as Record<DepositPoolFlow["kind"], string>)[flow.kind];
-  const assets = flow.assets ? ` · ${formatAmount(flow.assets, "USDC")}` : "";
+  const assets = flow.assets ? ` · ${formatPoolAmount(flow.assets, "USDC")}` : "";
   const block = flow.blockNumber === undefined ? "" : ` · block ${flow.blockNumber.toLocaleString("en-US")}`;
   return `${label}${assets}${block}`;
 }

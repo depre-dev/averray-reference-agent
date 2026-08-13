@@ -37,7 +37,7 @@ import {
   type BreachCard,
 } from "../../lib/monitor/phone-spec.js";
 import { disputeClockLine, lifecycleNote } from "../../lib/monitor/ops-spec.js";
-import { DepositPoolTile } from "../ops/DepositPoolTile.js";
+import { phoneArrivals, phonePool, type PhoneLane } from "../../lib/monitor/phone-spec.js";
 
 export interface MobileBoardProps {
   health?: ProductHealth;
@@ -110,7 +110,8 @@ export function MobileBoard({
         {breach ? <BreachPanel breach={breach} /> : <SolvencyPanel health={health} />}
         <FlowPanel health={health} emphasise={Boolean(breach)} nowMs={nowMs} />
         <BankPanel bank={health.bank} />
-        <DepositPoolTile pool={health.depositPool} />
+        <LanePanel lane={phonePool(health.depositPool)} testId="mobile-pool" label="Deposit pool" />
+        <LanePanel lane={phoneArrivals(health.arrivals)} testId="mobile-arrivals" label="Arrivals — outside demand" />
       </div>
 
       <p className="hm-ph-scroll" aria-hidden>
@@ -406,6 +407,44 @@ function FlowPanel({ health, emphasise, nowMs }: { health: ProductHealth; emphas
  * unreadable opens its rows, because that is when the numbers are worth the
  * vertical space on a 500px screen.
  */
+/**
+ * One-line lanes: the deposit pool and the arrivals funnel, each cut to a
+ * single sentence by phone-spec.
+ *
+ * The phone rendered the DESKTOP deposit-pool tile before this — a six-fact
+ * grid carrying its own `ops-deposit-pool-*` styling into a screen whose rule
+ * is that anything below the fold has to have earned it. Arrivals was not here
+ * at all. Both now answer their question in one line and take one row.
+ *
+ * `unreadable` marks a failed READING rather than a bad value, and is fenced
+ * the same way the rest of this board fences unknowns: the words say so and the
+ * tone is awaiting-grey, never the red reserved for the money path.
+ */
+function LanePanel({
+  lane,
+  testId,
+  label,
+}: {
+  lane: PhoneLane | null;
+  testId: string;
+  label: string;
+}) {
+  // Absent producer ⇒ no row. A placeholder would claim a measurement that was
+  // never taken, which is the one thing this board may not do.
+  if (!lane) return null;
+  return (
+    <p
+      className="hm-ph-lane"
+      data-tone={lane.tone}
+      data-unreadable={lane.unreadable ? "yes" : "no"}
+      data-testid={testId}
+      aria-label={label}
+    >
+      {lane.line}
+    </p>
+  );
+}
+
 function BankPanel({ bank }: { bank: ProductHealth["bank"] }) {
   if (!bank) return null;
   if (!bank.lane) {

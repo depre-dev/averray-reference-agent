@@ -569,3 +569,26 @@
 .hm-ph-bank-subject[data-tone="red"],
 .hm-ph-bank-requests[data-tone="red"] { color: var(--h4-act); }
 .hm-ph-bank-absent { padding: 0 16px; }
+
+/* One-line lanes (deposit pool, arrivals).
+
+   These replaced a desktop grid that had been dropped into the phone body, so
+   the styling is deliberately the plainest thing on the screen: one mono line
+   at body weight, the same size as the bank lines it sits beneath. A lane that
+   drew the eye harder than the meters above it would invert the hierarchy the
+   whole board is built on — money first, demand and pool second. */
+.hm-ph-lane {
+  margin: 0;
+  padding: 0 16px;
+  font-family: var(--h4-font-mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  color: var(--h4-muted);
+}
+.hm-ph-lane[data-tone="degraded"] { color: var(--h4-warn); }
+.hm-ph-lane[data-tone="red"] { color: var(--h4-act); }
+/* A failed reading is grey, never coral: the instrument is blind, which is not
+   the same as the money being wrong. Same rule the bank lane's UNVERIFIED
+   position follows. */
+.hm-ph-lane[data-unreadable="yes"] { color: var(--h4-muted); font-style: italic; }

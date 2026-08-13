@@ -430,3 +430,74 @@ describe("phone board — the bank lane", () => {
     expect(getByTestId("mobile-bank-absent").textContent).toContain("hydration read timed out");
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// THE NEW LANES ON THE PHONE — DEPOSIT POOL AND ARRIVALS
+//
+// Same shape of regression as the bank lane above: the desk board grew two
+// panels and the phone did not follow. The pool arrived as the DESKTOP tile
+// rendered verbatim (its own `ops-deposit-pool-*` grid, six facts, inside a
+// screen whose rule is that anything below the fold has to have earned it),
+// and arrivals never reached the phone at all.
+describe("phone board — deposit pool and arrivals lanes", () => {
+  const withBlocks = (over: Partial<ProductHealth>): ProductHealth =>
+    ({ ...OPS_FIXTURE_NOMINAL, ...over }) as ProductHealth;
+
+  test("the pool is ONE line on the phone, not the desktop grid", () => {
+    const health = withBlocks({
+      depositPool: {
+        snapshot: {
+          schemaVersion: 1,
+          available: true,
+          totalAssets: { raw: "10000000", decimals: 6 },
+          flows: { status: "ok", depositorCount: 0 },
+          yieldStatus: "not_yet_earning",
+        },
+      },
+    } as Partial<ProductHealth>);
+    const { getByTestId, queryByTestId } = render(
+      <MobileBoard health={health} nowMs={fresh(health)} />,
+    );
+    expect(getByTestId("mobile-pool").textContent).toBe(
+      "POOL 10 USDC in · 0 depositors · not yet earning",
+    );
+    // The desktop tile's own fact grid must not be on this screen.
+    expect(queryByTestId("ops-deposit-pool-share-price")).toBeNull();
+    expect(queryByTestId("ops-deposit-pool-cap")).toBeNull();
+  });
+
+  test("arrivals reach the phone as ONE plain answer — no transport names", () => {
+    const health = withBlocks({
+      arrivals: {
+        schemaVersion: "averray.arrivals.v1",
+        funnelExternal: { reached: 9, browsed: 2, evaluated: 0, identified: 0, authenticated: 0, claimed: 0, submitted: 0 },
+        funnelHttpExternal: { reached: 40, browsed: 20, evaluated: 8, identified: 3, authenticated: 3, claimed: 1, submitted: 1 },
+      },
+    } as Partial<ProductHealth>);
+    const { getByTestId } = render(<MobileBoard health={health} nowMs={fresh(health)} />);
+    // Operator, 2026-08-06: "whats MCP and HTTP… I only need to know if
+    // someone came, what they did and how far." The doors combine on
+    // FURTHEST-STAGE, which is well-defined even though the two series cover
+    // different spans; adding their counts would not be.
+    const lane = getByTestId("mobile-arrivals");
+    expect(lane.textContent).toBe("OUTSIDERS — someone submitted work");
+    expect(lane.textContent).not.toMatch(/MCP|HTTP/);
+  });
+
+  test("a producer that never reported either block renders NOTHING", () => {
+    // Absent is not zero, and a placeholder row would claim a measurement
+    // nobody took — the same rule the bank lane follows.
+    const health = withBlocks({ depositPool: undefined, arrivals: undefined });
+    const { queryByTestId } = render(<MobileBoard health={health} nowMs={fresh(health)} />);
+    expect(queryByTestId("mobile-pool")).toBeNull();
+    expect(queryByTestId("mobile-arrivals")).toBeNull();
+  });
+
+  test("an unreadable pool is fenced grey, never the red kept for the money path", () => {
+    const health = withBlocks({ depositPool: { unavailable: "no producer" } } as Partial<ProductHealth>);
+    const { getByTestId } = render(<MobileBoard health={health} nowMs={fresh(health)} />);
+    const lane = getByTestId("mobile-pool");
+    expect(lane.getAttribute("data-tone")).toBe("awaiting");
+    expect(lane.getAttribute("data-unreadable")).toBe("yes");
+  });
+});
