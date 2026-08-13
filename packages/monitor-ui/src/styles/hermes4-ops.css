@@ -265,6 +265,7 @@ body,
 .ops-money {
   flex: 1 0 auto;
   display: flex;
+  flex-wrap: wrap;
   border: 1px solid var(--ops-rule);
 }
 .ops-solvency {
@@ -929,8 +930,8 @@ body,
 .ops-arrivals {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: calc(8 * var(--ops-u)) calc(18 * var(--ops-u));
-  padding: calc(9 * var(--ops-u)) calc(14 * var(--ops-u));
+  gap: calc(5 * var(--ops-u)) calc(18 * var(--ops-u));
+  padding: calc(7 * var(--ops-u)) calc(14 * var(--ops-u));
   border: 1px solid var(--ops-rule);
 }
 .ops-arrivals > .ops-panel-head,
@@ -946,7 +947,7 @@ body,
 .ops-arrivals-door {
   display: grid;
   align-content: start;
-  gap: calc(8 * var(--ops-u));
+  gap: calc(4 * var(--ops-u));
   min-width: 0;
 }
 .ops-arrivals-door + .ops-arrivals-door {
@@ -955,7 +956,7 @@ body,
 }
 .ops-arrivals-door-title {
   margin: 0;
-  padding-bottom: calc(6 * var(--ops-u));
+  padding-bottom: calc(3 * var(--ops-u));
   border-bottom: 1px solid var(--ops-hair);
   font-family: var(--h4-font-display);
   font-size: calc(16 * var(--ops-u));
@@ -965,7 +966,7 @@ body,
 }
 .ops-arrivals-funnel {
   display: grid;
-  gap: calc(4 * var(--ops-u));
+  gap: calc(2 * var(--ops-u));
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1023,8 +1024,8 @@ body,
 .ops-arrivals-summary {
   display: grid;
   align-content: stretch;
-  gap: calc(8 * var(--ops-u));
-  padding-top: calc(8 * var(--ops-u));
+  gap: calc(4 * var(--ops-u));
+  padding-top: calc(4 * var(--ops-u));
   border-top: 1px solid var(--ops-hair);
 }
 .ops-arrivals-distinct {
@@ -1115,8 +1116,8 @@ body,
 }
 .ops-arrivals-http-summary {
   display: grid;
-  gap: calc(8 * var(--ops-u));
-  padding-top: calc(8 * var(--ops-u));
+  gap: calc(4 * var(--ops-u));
+  padding-top: calc(4 * var(--ops-u));
   border-top: 1px solid var(--ops-hair);
 }
 .ops-arrivals-http-measured {
@@ -1137,7 +1138,7 @@ body,
   color: var(--h4-ok);
 }
 .ops-arrivals-http-cutover {
-  padding-top: calc(8 * var(--ops-u));
+  padding-top: calc(4 * var(--ops-u));
   border-top: 1px solid var(--ops-hair);
   font-family: var(--h4-font-mono);
   font-size: calc(9 * var(--ops-u));
@@ -1146,9 +1147,39 @@ body,
 }
 .ops-arrivals-http-cutover p { margin: 0; }
 .ops-arrivals-http-cutover p + p {
-  margin-top: calc(5 * var(--ops-u));
+  margin-top: calc(2 * var(--ops-u));
   color: var(--h4-tel);
 }
+
+/* ---- BANK group ------------------------------------------------
+   One frame asserts one treasury subject, not one instrument. The venue and
+   depositor pool therefore keep separate cells, tones and absence rules, with
+   no shared total or status allowed to span the columns. */
+.ops-bank-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid var(--ops-rule);
+}
+.ops-bank-group > h2 {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: calc(8 * var(--ops-u)) calc(14 * var(--ops-u));
+  border-bottom: 1px solid var(--ops-rule);
+  font-family: var(--h4-font-display);
+  font-weight: 600;
+  font-size: calc(15 * var(--ops-u));
+  letter-spacing: 0.1em;
+  color: var(--h4-ink);
+}
+.ops-bank-group > .ops-bank,
+.ops-bank-group > .ops-bank-absent {
+  grid-column: 1;
+  border-right: 1px solid var(--ops-rule);
+}
+.ops-bank-group > .ops-bank-absent {
+  padding: calc(10 * var(--ops-u)) calc(14 * var(--ops-u));
+}
+.ops-bank-group > .ops-deposit-pool { grid-column: 2; }
 
 /* ---- BANK lane -------------------------------------------------
    A second money path beside the funnel's. Compact by design: four
@@ -1163,9 +1194,8 @@ body,
   flex-direction: column;
   gap: calc(4 * var(--ops-u));
   padding: calc(8 * var(--ops-u)) calc(14 * var(--ops-u));
-  border: 1px solid var(--ops-rule);
+  border: 0;
 }
-.ops-bank[data-tone="red"] { border-color: var(--h4-act); }
 .ops-bank-head {
   display: flex;
   align-items: baseline;
@@ -1247,10 +1277,8 @@ body,
   flex-direction: column;
   gap: calc(8 * var(--ops-u));
   padding: calc(10 * var(--ops-u)) calc(14 * var(--ops-u));
-  border: 1px solid var(--ops-rule);
+  border: 0;
 }
-.ops-deposit-pool[data-tone="red"] { border-color: var(--h4-act); }
-.ops-deposit-pool[data-tone="awaiting"] { border-color: var(--h4-tel); }
 .ops-deposit-pool-head,
 .ops-deposit-pool-flow-head {
   display: flex;
@@ -1258,7 +1286,7 @@ body,
   justify-content: space-between;
   gap: calc(12 * var(--ops-u));
 }
-.ops-deposit-pool-head h2 {
+.ops-deposit-pool-head h3 {
   margin: 0;
   font-family: var(--h4-font-display);
   font-size: calc(12.5 * var(--ops-u));
@@ -1286,7 +1314,7 @@ body,
 }
 .ops-deposit-pool-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: calc(12 * var(--ops-u));
   margin: 0;
 }
@@ -1338,11 +1366,13 @@ body,
 }
 
 /* ---- per-job economics -------------------------------------------
-   What one job costs and earns, on one line between the probes and
-   the footer. Also shipped unstyled; also monospace now, because it
-   is three numbers and numbers on this board are monospace.        */
+   What one job costs and earns closes the worker-money frame. It keeps its
+   own row and tone rather than being folded into either instrument above. */
 .ops-economics {
-  padding: calc(4 * var(--ops-u)) 0;
+  flex: 0 0 100%;
+  box-sizing: border-box;
+  padding: calc(7 * var(--ops-u)) calc(16 * var(--ops-u));
+  border-top: 1px dashed var(--ops-rule);
   font-family: var(--h4-font-mono);
   font-size: calc(12 * var(--ops-u));
   letter-spacing: 0.02em;
@@ -1406,6 +1436,7 @@ body,
   .ops-verdict-row { flex-direction: column; }
   .ops-trust { width: auto; }
   .ops-money { flex-direction: column; }
+  .ops-money > .ops-economics { flex-basis: auto; }
   .ops-solvency {
     width: auto;
     border-right: 0;

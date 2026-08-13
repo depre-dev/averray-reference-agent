@@ -3,8 +3,11 @@
 //   meta line      what you are looking at, and when it last refreshed
 //   stale banner   only when the data is untrustworthy (hatched, overrides all)
 //   VERDICT        the one oversized element · TRUST panel beside it
-//   SOLVENCY       pools vs floors      │  FLOW  funnel + welded payout evidence
+//   WORKER MONEY   SOLVENCY │ FLOW + proof, closed by per-job economics
+//   BANK           venue position │ deposit pool, separate instruments
 //   PILLARS        the 8 probes, grouped, with their details
+//   NEXT           what to do; the fault line below which nothing is red
+//   OUTSIDE        both public arrival doors, condensed but not combined
 //   footer         incidents · LLM spend · "refresh is the only control"
 //
 // Size follows priority, not chronology: the verdict is the only thing sized to
@@ -120,33 +123,36 @@ export function OpsBoard({
         <div className="ops-money">
           <SolvencyPanel solvency={health.solvency} gas={health.gas} payout={health.flow?.payout} />
           <FlowPanel flow={health.flow} externalFunnel={health.externalFunnel} lifecycle={health.lifecycle} nowMs={nowMs} />
+
+          {/* Per-job economics closes the worker-payment band because it
+              describes that path. It keeps its own line and tone and refuses
+              to become either a funnel count or a probe. */}
+          {(() => {
+            const e = economicsLine({ payout: health.flow?.payout, gas: health.gas });
+            return e ? (
+              <div className="ops-economics" data-tone={e.tone} title={e.title}>
+                {e.text}
+              </div>
+            ) : null;
+          })()}
         </div>
 
-        <ArrivalsPanel arrivals={health.arrivals} />
-
-        {/* The treasury's own money path, under the one that pays workers.
-            Renders nothing at all when no feed is configured. */}
-        <BankLane bank={health.bank} />
-
-        {/* The shared depositor pool is a Bank-pillar instrument, but unlike
-            the treasury venue lane it is always explicit: pre-5a is
-            UNAVAILABLE, never an absent/empty pool. */}
-        <DepositPoolTile pool={health.depositPool} />
+        {/* One frame asserts one treasury subject, never one instrument: venue
+            and pool keep separate tones, absence rules and figures, and no
+            total is allowed to span their unlike windows. */}
+        <section
+          className="ops-bank-group"
+          aria-labelledby="ops-bank-group-title"
+          data-testid="ops-bank-group"
+        >
+          <h2 id="ops-bank-group-title">BANK</h2>
+          {/* The venue renders nothing when it was never wired; the pool stays
+              explicit because its unavailable state is itself a reading. */}
+          <BankLane bank={health.bank} />
+          <DepositPoolTile pool={health.depositPool} />
+        </section>
 
         <PillarStrip probes={health.probes} history={health.history} />
-
-        {/* Only the per-job economics keeps a row of its own. Gas and payout
-            runway now sit under the pools they describe, and the dispute clock
-            in the flow panel — each fact beside its subject rather than in a
-            strip of prose at the bottom that nobody could read. */}
-        {(() => {
-          const e = economicsLine({ payout: health.flow?.payout, gas: health.gas });
-          return e ? (
-            <div className="ops-economics" data-tone={e.tone} title={e.title}>
-              {e.text}
-            </div>
-          ) : null;
-        })()}
 
         {/* ── NEXT ────────────────────────────────────────────────────────
             The board says WHAT is wrong in eleven places and never once said
@@ -180,6 +186,11 @@ export function OpsBoard({
             </div>
           );
         })()}
+
+        {/* The fault line is structural: demand belongs after everything that
+            can page the operator. Both independent doors remain visible, and
+            moving them refuses to recast a business outcome as a money fault. */}
+        <ArrivalsPanel arrivals={health.arrivals} />
 
         <div className="ops-foot">
           <span>INCIDENTS — {incidentSummary(health, nowMs)}</span>

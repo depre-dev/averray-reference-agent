@@ -168,12 +168,13 @@ describe("phone board — the alert landing", () => {
     expect(getByTestId("mobile-breach").textContent).toContain("unknown");
   });
 
-  test("the breach card replaces the pool list — it does not sit under it", () => {
-    const { queryByTestId } = render(
+  test("the breach owns the lead slot without hiding the solvency check-in", () => {
+    const { getByTestId } = render(
       <MobileBoard health={OPS_FIXTURE_STRESS} streamDegraded nowMs={STRESS_NOW} />,
     );
-    expect(queryByTestId("mobile-breach")).toBeTruthy();
-    expect(queryByTestId("mobile-solvency")).toBeNull();
+    const breach = getByTestId("mobile-breach");
+    const solvency = getByTestId("mobile-solvency");
+    expect(breach.compareDocumentPosition(solvency)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   test("the clean funnel and the shortfall proof stay in one card", () => {
@@ -374,6 +375,30 @@ describe("phone board — the bank lane", () => {
     expect(getByTestId("mobile-bank").getAttribute("data-tone")).toBe("red");
     expect(getByTestId("mobile-bank-alarm").textContent).toContain("OVERDUE");
     expect(getByTestId("mobile-bank-requests").textContent).toContain("8.7h");
+  });
+
+  test("promoting an overdue bank group leaves the verdict byte-identical", () => {
+    // Promotion changes reading order only. Comparing both orderings makes the
+    // identity check non-vacuous and refuses to let the lead slot become a
+    // second verdict now or during a later refactor.
+    const unpromoted = laneOf();
+    const first = render(<MobileBoard health={unpromoted} nowMs={fresh(unpromoted)} />);
+    const verdictBefore = first.getByTestId("mobile-verdict").textContent;
+    expect(
+      first.getByTestId("mobile-flow").compareDocumentPosition(first.getByTestId("mobile-bank-group")),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    first.unmount();
+
+    const promoted = laneOf({
+      overdueRequestId: "0xb609f4d8…f57ecaac",
+      requests: { text: "1 OVERDUE · 0xb609f4d8…f57ecaac leg2-dispatched for 8.7h", tone: "red" },
+      tone: "red",
+    });
+    const second = render(<MobileBoard health={promoted} nowMs={fresh(promoted)} />);
+    expect(
+      second.getByTestId("mobile-bank-group").compareDocumentPosition(second.getByTestId("mobile-solvency")),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(second.getByTestId("mobile-verdict").textContent).toBe(verdictBefore);
   });
 
   test("the subject warning rides ABOVE the numbers it qualifies", () => {

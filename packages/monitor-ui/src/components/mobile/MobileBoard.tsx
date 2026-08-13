@@ -4,11 +4,11 @@
 //   stale band     hatched, only when the reading is not confirmable
 //   VERDICT        a solid filled field — the only filled surface in the product
 //   trust strip    desktop's 4-row panel, welded under the verdict as one line
-//   ── then ONE of ──
-//   alert landing  the breach, then the funnel + its on-chain proof
-//   check-in       floored meters, then the funnel + its on-chain proof
+//   lead slot      a breach, an overdue bank group, or nothing
+//   worker money   floored meters, then the funnel + its on-chain proof
+//   bank           venue position + the deposit-pool line in one frame
 //   ── fold ──
-//   probes         4 one-line rollups; a detail line only when not ok
+//   probes/outside 4 rollups plus the arrivals line; detail only when not ok
 //
 // Two reasons to open this: an unprompted check-in, or landing from a Buzz
 // alert. The check-in has to be answerable by shape and colour alone, before a
@@ -72,6 +72,12 @@ export function MobileBoard({
   const trust = phoneTrust({ health, streamDegraded, streamStatus, nowMs });
   const untrusted = isUntrusted({ health, streamDegraded, nowMs });
   const breach = breachCard({ health, streamDegraded, nowMs });
+  const poolLane = phonePool(health.depositPool);
+  // Promotion ranks an existing server-decided panel; it does not create a
+  // second verdict. A breached floor remains first because its inaction cost
+  // outranks an overdue request, and the bank group otherwise keeps its fixed
+  // post-flow position.
+  const promoteBank = !breach && Boolean(health.bank?.lane?.overdueRequestId);
 
   return (
     <div className="hm-ph" data-testid="mobile-board" data-untrusted={untrusted ? "yes" : "no"}>
@@ -107,11 +113,14 @@ export function MobileBoard({
       </div>
 
       <div className="hm-ph-body">
-        {breach ? <BreachPanel breach={breach} /> : <SolvencyPanel health={health} />}
+        {breach ? (
+          <BreachPanel breach={breach} />
+        ) : promoteBank ? (
+          <BankPanel bank={health.bank} pool={poolLane} />
+        ) : null}
+        <SolvencyPanel health={health} />
         <FlowPanel health={health} emphasise={Boolean(breach)} nowMs={nowMs} />
-        <BankPanel bank={health.bank} />
-        <LanePanel lane={phonePool(health.depositPool)} testId="mobile-pool" label="Deposit pool" />
-        <LanePanel lane={phoneArrivals(health.arrivals)} testId="mobile-arrivals" label="Arrivals — outside demand" />
+        {promoteBank ? null : <BankPanel bank={health.bank} pool={poolLane} />}
       </div>
 
       <p className="hm-ph-scroll" aria-hidden>
@@ -135,6 +144,15 @@ export function MobileBoard({
             ) : null}
           </div>
         ))}
+        {/* Arrivals is below the fold with the machine register, never inside
+            BANK: demand is not money and cannot borrow a money fault's rank or
+            colour. Its producer-decided one-line cut remains unchanged. */}
+        <LanePanel
+          lane={phoneArrivals(health.arrivals)}
+          testId="mobile-arrivals"
+          label="Arrivals — outside demand"
+          placement="below"
+        />
         <div className="hm-ph-foot">
           <span>INCIDENTS — {incidentLine(health, untrusted)}</span>
           <span>{buildLine(health)}</span>
@@ -424,17 +442,19 @@ function LanePanel({
   lane,
   testId,
   label,
+  placement,
 }: {
   lane: PhoneLane | null;
   testId: string;
   label: string;
+  placement: "bank" | "below";
 }) {
   // Absent producer ⇒ no row. A placeholder would claim a measurement that was
   // never taken, which is the one thing this board may not do.
   if (!lane) return null;
   return (
     <p
-      className="hm-ph-lane"
+      className={`hm-ph-lane hm-ph-lane--${placement}`}
       data-tone={lane.tone}
       data-unreadable={lane.unreadable ? "yes" : "no"}
       data-testid={testId}
@@ -445,60 +465,89 @@ function LanePanel({
   );
 }
 
-function BankPanel({ bank }: { bank: ProductHealth["bank"] }) {
-  if (!bank) return null;
-  if (!bank.lane) {
-    return (
-      <p className="hm-ph-bank-absent" data-tone="awaiting" data-testid="mobile-bank-absent">
-        BANK — {bank.unavailable ?? "lane unavailable"}
-      </p>
-    );
-  }
-
-  const { lane } = bank;
-  const open = lane.tone !== "ok";
+function BankPanel({ bank, pool }: { bank: ProductHealth["bank"]; pool: PhoneLane | null }) {
+  // The group exists when either instrument reported. An absent venue still
+  // contributes no row; it never turns the pool into evidence that a venue was
+  // configured, and the pool likewise cannot lend the venue its tone.
+  if (!bank && !pool) return null;
+  const lane = bank?.lane;
+  const open = lane?.tone !== "ok";
   return (
-    <section className="hm-ph-bank" data-tone={lane.tone} data-testid="mobile-bank" aria-label="Bank — venue position">
+    <section
+      className="hm-ph-bank"
+      data-testid="mobile-bank-group"
+      aria-labelledby="mobile-bank-group-title"
+    >
       <div className="hm-ph-sec">
-        <h2>BANK — HYDRATION USDC</h2>
+        <h2 id="mobile-bank-group-title">BANK</h2>
         {/* Hoisted above every row: an overdue request is the one state in this
             lane where doing nothing costs money. */}
-        {lane.overdueRequestId ? (
+        {lane?.overdueRequestId ? (
           <span className="hm-ph-bank-alarm" data-tone="red" data-testid="mobile-bank-alarm">
             ⏳ OVERDUE
           </span>
         ) : null}
       </div>
 
-      {/* WHAT the numbers are about, above the numbers. This lane once showed
-          four fresh, correctly-sourced, green tiles describing a wrapper
-          retired that morning — a reader who took in the float and stopped had
-          still read the wrong thing. */}
-      {lane.subject ? (
-        <p className="hm-ph-bank-subject" data-tone={lane.subject.tone} data-testid="mobile-bank-subject">
-          {lane.subject.text}
-        </p>
+      {lane ? (
+        <section
+          className="hm-ph-bank-instrument"
+          data-tone={lane.tone}
+          data-testid="mobile-bank"
+          aria-labelledby="mobile-bank-venue-title"
+        >
+          <h3 className="hm-ph-bank-instrument-title" id="mobile-bank-venue-title">
+            HYDRATION USDC
+          </h3>
+
+          {/* WHAT the numbers are about, above the numbers. This lane once
+              showed fresh readings for a retired wrapper; grouping must not
+              reorder the subject below any number it qualifies. */}
+          {lane.subject ? (
+            <p className="hm-ph-bank-subject" data-tone={lane.subject.tone} data-testid="mobile-bank-subject">
+              {lane.subject.text}
+            </p>
+          ) : null}
+
+          <p className="hm-ph-bank-requests" data-tone={lane.requests.tone} data-testid="mobile-bank-requests">
+            {lane.requests.text}
+          </p>
+
+          {open ? (
+            <dl className="hm-ph-facts" data-testid="mobile-bank-rows">
+              <dt>POSITION</dt>
+              <dd data-tone={bankPositionTone(lane.position?.status)}>
+                {lane.position
+                  ? lane.position.status === "unverified"
+                    ? `UNVERIFIED — ${lane.position.detail}`
+                    : `${lane.position.raw} raw · ${lane.position.detail}`
+                  : "not reported"}
+              </dd>
+              <dt>FLOAT</dt>
+              <dd data-tone={lane.float.tone}>{lane.float.text}</dd>
+              <dt>POSTAGE</dt>
+              <dd data-tone={lane.postage.tone}>{lane.postage.text}</dd>
+            </dl>
+          ) : null}
+        </section>
+      ) : bank ? (
+        <section className="hm-ph-bank-instrument" aria-labelledby="mobile-bank-venue-title">
+          <h3 className="hm-ph-bank-instrument-title" id="mobile-bank-venue-title">
+            HYDRATION USDC
+          </h3>
+          <p className="hm-ph-bank-absent" data-tone="awaiting" data-testid="mobile-bank-absent">
+            {bank.unavailable ?? "lane unavailable"}
+          </p>
+        </section>
       ) : null}
 
-      <p className="hm-ph-bank-requests" data-tone={lane.requests.tone} data-testid="mobile-bank-requests">
-        {lane.requests.text}
-      </p>
-
-      {open ? (
-        <dl className="hm-ph-facts" data-testid="mobile-bank-rows">
-          <dt>POSITION</dt>
-          <dd data-tone={bankPositionTone(lane.position?.status)}>
-            {lane.position
-              ? lane.position.status === "unverified"
-                ? `UNVERIFIED — ${lane.position.detail}`
-                : `${lane.position.raw} raw · ${lane.position.detail}`
-              : "not reported"}
-          </dd>
-          <dt>FLOAT</dt>
-          <dd data-tone={lane.float.tone}>{lane.float.text}</dd>
-          <dt>POSTAGE</dt>
-          <dd data-tone={lane.postage.tone}>{lane.postage.text}</dd>
-        </dl>
+      {pool ? (
+        <section className="hm-ph-bank-instrument" aria-labelledby="mobile-bank-pool-title">
+          <h3 className="hm-ph-bank-instrument-title" id="mobile-bank-pool-title">
+            DEPOSIT POOL
+          </h3>
+          <LanePanel lane={pool} testId="mobile-pool" label="Deposit pool" placement="bank" />
+        </section>
       ) : null}
     </section>
   );

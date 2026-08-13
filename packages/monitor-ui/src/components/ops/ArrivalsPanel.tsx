@@ -21,6 +21,10 @@
 //
 // The column is absent, not zero, against a platform deployed before the
 // bucket existed. Zero is a measurement; absent is not.
+//
+// This panel sits below NEXT at compact weight. Only row density changes there:
+// both doors, every series and every caveat remain because condensing a subject
+// must never become combining unlike windows or dropping attribution.
 
 import { OPS_GLOSS } from "../../lib/monitor/ops-gloss.js";
 import {

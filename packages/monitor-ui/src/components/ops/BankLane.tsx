@@ -2,8 +2,8 @@
 //
 // A second money path, next to the one the FLOW panel watches. That one pays
 // workers; this one parks the treasury's own USDC at Hydration and brings it
-// home. It has its own instruments and its own ways of lying, so it gets its
-// own strip rather than being folded into SOLVENCY.
+// home. It shares a BANK frame with the deposit pool because both describe the
+// treasury, but keeps its own tone and rows because they are not one instrument.
 //
 // ── THE LINES ARE DECIDED SERVER-SIDE ─────────────────────────────────────
 //
@@ -41,7 +41,7 @@ export function BankLane({ bank }: BankLaneProps) {
   return (
     <section className="ops-bank" data-tone={lane.tone} aria-label="Bank — venue position" data-testid="ops-bank">
       <div className="ops-bank-head">
-        <h2 className="ops-bank-title">BANK — HYDRATION USDC</h2>
+        <h3 className="ops-bank-title">HYDRATION USDC</h3>
         {/* The alarm, hoisted so it is legible before any row is read. An
             overdue request is the one state here where doing nothing costs
             money, exactly like the dispute clock in FLOW. */}

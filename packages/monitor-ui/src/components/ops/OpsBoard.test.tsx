@@ -13,6 +13,7 @@ import { OpsBoard } from "./OpsBoard.js";
 import {
   OPS_FIXTURE_LIVE,
   OPS_FIXTURE_NOMINAL,
+  OPS_FIXTURE_RED,
   OPS_FIXTURE_STRESS,
   OPS_FIXTURE_UNVERIFIED,
   FIXTURE_NOW,
@@ -367,6 +368,29 @@ describe("NEXT — what to do about it", () => {
     // break the promise one line below: "refresh is the only control".
     const { getByTestId } = render(<OpsBoard health={OPS_FIXTURE_STRESS} nowMs={OPS_FIXTURE_STRESS.at! + 2000} />);
     expect(getByTestId("ops-next").querySelector("button")).toBeNull();
+  });
+
+  test("nothing at or below NEXT is ever red in either incident fixture", () => {
+    // NEXT is the board's fault line. This guard asserts a positional colour
+    // vocabulary and refuses to let outside demand or the durable log borrow
+    // the money path's alarm tone merely because an incident is active.
+    for (const health of [OPS_FIXTURE_RED, OPS_FIXTURE_STRESS]) {
+      const { getByTestId, unmount } = render(
+        <OpsBoard health={health} nowMs={health.at! + 2_000} />,
+      );
+      const next = getByTestId("ops-next");
+      const arrivals = getByTestId("ops-arrivals");
+      expect(next.compareDocumentPosition(arrivals)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      const content = next.parentElement!;
+      const bands = Array.from(content.children).slice(Array.from(content.children).indexOf(next));
+      const red = bands.flatMap((band) => [
+        ...(band.matches('[data-tone="red"]') ? [band] : []),
+        ...Array.from(band.querySelectorAll('[data-tone="red"]')),
+      ]);
+
+      expect(red).toHaveLength(0);
+      unmount();
+    }
   });
 });
 

@@ -118,7 +118,7 @@ export function DepositPoolTile({ pool }: { pool: DepositPoolBlock | undefined }
 function Header({ right }: { right?: React.ReactNode }) {
   return (
     <div className="ops-deposit-pool-head">
-      <h2>BANK — DEPOSIT POOL</h2>
+      <h3>DEPOSIT POOL</h3>
       {right ? <span>{right}</span> : null}
     </div>
   );
