@@ -16,10 +16,11 @@
 // come from ops-spec / @avg/schemas so the two surfaces cannot disagree about
 // what is wrong — which was the whole reason the verdict moved server-side.
 
-import type { HealthHistory, ProductHealth, SolvencyPool } from "./product-health.js";
+import { ARRIVAL_STAGES } from "./product-health.js";
+import type { HealthHistory, ProductHealth, SolvencyPool , ArrivalStage } from "./product-health.js";
 import { deriveOpsVerdict, verdictProbeLabel } from "@avg/schemas/ops-verdict";
 import { formatAgo, formatAmount, formatDuration, groupProbesByPillar, probeOpsTone, type OpsTone } from "./ops-model.js";
-import { poolMeter, shortEndpoint, staleAfterMs, type MeterView } from "./ops-spec.js";
+import { formatPoolAmount, poolMeter, shortEndpoint, staleAfterMs, type MeterView } from "./ops-spec.js";
 
 // ── the verdict field ───────────────────────────────────────────────────────
 
@@ -368,4 +369,112 @@ function summarise(total: number, tones: OpsTone[]): string {
   if (degraded > 0) return `${degraded} degraded`;
   if (awaiting > 0) return `${count("ok")} ok · ${awaiting} awaiting`;
   return `${total}/${total} ok`;
+}
+
+// ── DEPOSIT POOL AND ARRIVALS, CUT TO PHONE SIZE ───────────────────────────
+//
+// Both facts arrived on the desktop board as full panels — six pool facts in a
+// grid, and a two-column arrivals funnel of seven stages each. The phone was
+// rendering the desktop pool tile verbatim (its own `ops-deposit-pool-*` CSS
+// and all) and no arrivals at all, which is the one thing this module exists to
+// prevent: a screen whose rule is "anything below the fold has to have earned
+// it" cannot inherit a desktop grid unchanged.
+//
+// So each becomes ONE line, and expands only when it has something to ask for.
+
+export interface PhoneLane {
+  /** The line to render. Always present — absence is expressed IN the words. */
+  line: string;
+  tone: "ok" | "degraded" | "red" | "awaiting";
+  /** Set when the reading itself failed, so the caller can fence it. */
+  unreadable?: boolean;
+}
+
+/**
+ * The deposit pool in one line.
+ *
+ * An empty pool is NOT a fault: this one was born empty and its zeroes are
+ * measured, which the desktop says with a `BORN EMPTY · ZEROES ARE MEASURED`
+ * kicker. On a phone there is no room for the kicker, so the line must not
+ * imply alarm — an empty, readable pool is `ok` and says so plainly.
+ *
+ * `unavailable` (no producer) and `fault` (producer contradicted itself) stay
+ * distinct, because "we cannot see the pool" and "the pool reported nonsense"
+ * call for different operator moves.
+ */
+export function phonePool(pool: ProductHealth["depositPool"]): PhoneLane | null {
+  if (!pool) return null;
+  if ("unavailable" in pool) {
+    return { line: `POOL — ${pool.unavailable}`, tone: "awaiting", unreadable: true };
+  }
+  if ("fault" in pool) {
+    return { line: `POOL FAULT — ${pool.fault}`, tone: "red", unreadable: true };
+  }
+
+  const snap = pool.snapshot;
+  // Same formatter the desktop tile uses — see formatPoolAmount in ops-spec.
+  const deposits = snap.totalAssets ? formatPoolAmount(snap.totalAssets, "USDC") : null;
+  const depositors = snap.flows?.depositorCount;
+  const earning = snap.yieldStatus === "earning";
+
+  const parts: string[] = [];
+  // Absent is not zero: a pool whose amount did not come through says so
+  // rather than rendering "0 USDC", which reads as a measured empty pool.
+  parts.push(deposits ? `${deposits} in` : "amount not reported");
+  if (depositors != null) parts.push(`${depositors} depositor${depositors === 1 ? "" : "s"}`);
+  parts.push(earning ? "earning" : "not yet earning");
+
+  return { line: `POOL ${parts.join(" · ")}`, tone: "ok" };
+}
+
+/** The last stage with a nonzero count, or null when the series is empty. */
+function furthestReached(funnel: Record<string, number> | undefined): ArrivalStage | null {
+  if (!funnel) return null;
+  let furthest: ArrivalStage | null = null;
+  for (const stage of ARRIVAL_STAGES) {
+    if ((funnel[stage] ?? 0) > 0) furthest = stage;
+  }
+  return furthest;
+}
+
+/**
+ * Arrivals in one line: how far strangers actually got.
+ *
+ * ── WHY THE DOORS STAY APART ──────────────────────────────────────────────
+ *
+ * There are two front doors (MCP and HTTP) measured independently, and a
+ * merged "outsiders reached X" would be the flattening this board exists to
+ * refuse — the two series have different cutovers and different meanings, and
+ * one door doing well would hide the other doing nothing.
+ *
+ * A door with no external series is NOT MEASURED, never zero. A door measured
+ * with nobody through it says "none yet", which is a real observation.
+ *
+ * The AMBIGUOUS bucket is deliberately excluded from both: traffic under a
+ * client name we also use ourselves cannot be claimed as outside demand
+ * without manufacturing it, and cannot be claimed as ours without erasing a
+ * real stranger. The desktop shows it as its own column; the phone simply
+ * does not count it as demand.
+ */
+export function phoneArrivals(arrivals: ProductHealth["arrivals"]): PhoneLane | null {
+  if (!arrivals) return null;
+  if ("unavailable" in arrivals) {
+    return { line: `ARRIVALS — ${arrivals.unavailable}`, tone: "awaiting", unreadable: true };
+  }
+
+  const door = (external: Record<string, number> | undefined, name: string): string => {
+    if (!external) return `${name} not measured`;
+    const furthest = furthestReached(external);
+    return furthest ? `${name} → ${furthest}` : `${name} none yet`;
+  };
+
+  const line = [
+    door(arrivals.funnelExternal, "MCP"),
+    door(arrivals.funnelHttpExternal, "HTTP"),
+  ].join(" · ");
+
+  // Never red, never degraded. Nobody arriving is a demand fact, not a fault —
+  // colouring it as a problem would put a business outcome in the same visual
+  // language as a broken money path.
+  return { line: `OUTSIDERS ${line}`, tone: "ok" };
 }
