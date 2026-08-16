@@ -1151,6 +1151,188 @@ body,
   color: var(--h4-tel);
 }
 
+/* Verdict-first arrivals projection. The older selectors above remain for
+   deploy-skew snapshots, but the shared-registry view deliberately has no bar
+   chart: its pre-identity counters sample different instrumentation points. */
+.ops-arrivals-verdict,
+.ops-arrivals-secondary,
+.ops-arrivals-evidence {
+  grid-column: 1 / -1;
+}
+.ops-arrivals-verdict {
+  padding: calc(9 * var(--ops-u)) calc(12 * var(--ops-u));
+  border: 1px solid var(--ops-rule);
+  border-left: 3px solid var(--h4-ok);
+  background: var(--h4-paper-sunken);
+}
+.ops-arrivals-block-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: calc(12 * var(--ops-u));
+  padding-bottom: calc(5 * var(--ops-u));
+  border-bottom: 1px solid var(--ops-hair);
+}
+.ops-arrivals-block-head h3,
+.ops-arrivals-evidence summary,
+.ops-arrivals-door h3 {
+  margin: 0;
+  font-family: var(--h4-font-display);
+  font-size: calc(14 * var(--ops-u));
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  color: var(--h4-ink);
+}
+.ops-arrivals-block-head span {
+  font-family: var(--h4-font-mono);
+  font-size: calc(9 * var(--ops-u));
+  color: var(--h4-muted);
+}
+.ops-arrivals-verdict-lines {
+  display: grid;
+  gap: calc(3 * var(--ops-u));
+  margin: calc(6 * var(--ops-u)) 0 0;
+}
+.ops-arrivals-verdict-lines > div {
+  display: grid;
+  grid-template-columns: calc(106 * var(--ops-u)) minmax(0, 1fr);
+  align-items: baseline;
+  gap: calc(12 * var(--ops-u));
+}
+.ops-arrivals-verdict-lines dt,
+.ops-arrivals-verdict-lines dd { margin: 0; }
+.ops-arrivals-verdict-lines dt {
+  font-family: var(--h4-font-mono);
+  font-size: calc(9 * var(--ops-u));
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--h4-muted);
+}
+.ops-arrivals-verdict-lines dd {
+  font-family: var(--h4-font-mono);
+  font-size: calc(12 * var(--ops-u));
+  color: var(--h4-ink);
+}
+.ops-arrivals-verdict-lines > div:first-child dd {
+  font-family: var(--h4-font-display);
+  font-size: calc(18 * var(--ops-u));
+  font-weight: 650;
+  letter-spacing: 0.025em;
+}
+.ops-arrivals-pair,
+.ops-arrivals-figure {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: calc(5 * var(--ops-u));
+}
+.ops-window-badge {
+  display: inline-block;
+  padding: calc(1 * var(--ops-u)) calc(4 * var(--ops-u));
+  border: 1px solid var(--ops-hair);
+  font-family: var(--h4-font-mono);
+  font-size: calc(7.5 * var(--ops-u));
+  font-weight: 500;
+  line-height: 1.25;
+  letter-spacing: 0.06em;
+  color: var(--h4-muted);
+  background: var(--h4-paper);
+}
+.ops-arrivals-secondary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: calc(10 * var(--ops-u));
+}
+.ops-arrivals-owned,
+.ops-arrivals-unknown {
+  padding: calc(8 * var(--ops-u)) calc(10 * var(--ops-u));
+  border: 1px solid var(--ops-hair);
+}
+.ops-arrivals-figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(6 * var(--ops-u)) calc(14 * var(--ops-u));
+  padding-top: calc(7 * var(--ops-u));
+  font-family: var(--h4-font-mono);
+  font-size: calc(10 * var(--ops-u));
+  color: var(--h4-ink-2);
+}
+.ops-arrivals-unknown .ops-arrivals-figures { color: var(--h4-tel); }
+.ops-arrivals-evidence {
+  padding-top: calc(5 * var(--ops-u));
+  border-top: 1px solid var(--ops-hair);
+}
+.ops-arrivals-evidence summary {
+  cursor: pointer;
+  font-size: calc(11 * var(--ops-u));
+  color: var(--h4-muted);
+}
+.ops-arrivals-evidence > p {
+  margin: calc(6 * var(--ops-u)) 0;
+  font-family: var(--h4-font-mono);
+  font-size: calc(9 * var(--ops-u));
+  line-height: 1.45;
+  color: var(--h4-muted);
+}
+.ops-arrivals-door-tables {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: calc(14 * var(--ops-u));
+}
+.ops-arrivals-door,
+.ops-arrivals-door + .ops-arrivals-door {
+  display: block;
+  padding: calc(8 * var(--ops-u));
+  border: 1px solid var(--ops-hair);
+}
+.ops-arrivals-door-since {
+  margin: calc(3 * var(--ops-u)) 0 calc(6 * var(--ops-u));
+  font-family: var(--h4-font-mono);
+  font-size: calc(8 * var(--ops-u));
+  color: var(--h4-muted);
+}
+.ops-arrivals-table {
+  display: grid;
+  font-family: var(--h4-font-mono);
+  font-size: calc(8.5 * var(--ops-u));
+}
+.ops-arrivals-table-head,
+.ops-arrivals-table-row {
+  display: grid;
+  grid-template-columns: minmax(calc(150 * var(--ops-u)), 1fr) repeat(3, minmax(calc(64 * var(--ops-u)), auto));
+  gap: calc(7 * var(--ops-u));
+  align-items: center;
+  padding: calc(4 * var(--ops-u)) 0;
+  border-bottom: 1px solid var(--ops-hair);
+}
+.ops-arrivals-table-head {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--h4-muted);
+}
+.ops-arrivals-table-head span:not(:first-child) { text-align: right; }
+.ops-arrivals-table-row > span:first-child {
+  display: grid;
+  gap: calc(1 * var(--ops-u));
+}
+.ops-arrivals-table-row > span:first-child strong {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--h4-ink);
+}
+.ops-arrivals-table-row > span:first-child small {
+  color: var(--h4-muted);
+}
+.ops-arrivals-table-row > .ops-arrivals-figure {
+  justify-content: flex-end;
+  color: var(--h4-ink-2);
+}
+.ops-arrivals-cutover {
+  padding-top: calc(5 * var(--ops-u));
+  border-top: 1px solid var(--ops-hair);
+  color: var(--h4-tel) !important;
+}
+
 /* ---- BANK group ------------------------------------------------
    One frame asserts one treasury subject, not one instrument. The venue and
    depositor pool therefore keep separate cells, tones and absence rules, with
@@ -1363,6 +1545,12 @@ body,
 @media (max-width: 760px) {
   .ops-deposit-pool-grid { grid-template-columns: 1fr 1fr; }
   .ops-deposit-pool-flows ul { grid-template-columns: 1fr; }
+  .ops-arrivals-verdict-lines > div { grid-template-columns: 1fr; gap: calc(2 * var(--ops-u)); }
+  .ops-arrivals-table-head,
+  .ops-arrivals-table-row {
+    grid-template-columns: minmax(calc(120 * var(--ops-u)), 1fr) repeat(3, minmax(calc(48 * var(--ops-u)), auto));
+    gap: calc(4 * var(--ops-u));
+  }
 }
 
 /* ---- per-job economics -------------------------------------------
@@ -1444,6 +1632,8 @@ body,
   }
   .ops-arrivals { grid-template-columns: 1fr; }
   .ops-arrivals-doors { grid-template-columns: 1fr; }
+  .ops-arrivals-secondary,
+  .ops-arrivals-door-tables { grid-template-columns: 1fr; }
   .ops-arrivals-door + .ops-arrivals-door {
     padding: calc(14 * var(--ops-u)) 0 0;
     border-left: 0;

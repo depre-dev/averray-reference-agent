@@ -65,6 +65,42 @@ describe("phoneArrivals — did anyone come, what did they do, how far", () => {
     expect(lane?.line).not.toMatch(/MCP|HTTP/);
   });
 
+  it("prefers the registry-backed settled history over shallower legacy call counters", () => {
+    const lane = phoneArrivals(arrivals({
+      funnelExternal: stages({ reached: 9 }),
+      funnelHttpExternal: stages({ reached: 40 }),
+      operatorView: {
+        version: "averray.arrivals.operator.v1",
+        generatedAtMs: Date.parse("2026-08-16T12:00:00.000Z"),
+        outsiders: {
+          furthestEver: {
+            window: "all-time", stage: "settled", atMs: Date.parse("2026-08-11T08:00:00.000Z"),
+            door: "http", agents: 1, payouts: 42, payoutWindow: "12h",
+          },
+          lastActivity: {
+            window: "all-time", atMs: Date.parse("2026-08-11T08:00:00.000Z"), stage: "settled", door: "http",
+          },
+          week: { window: "7d", identified: 0, worked: 0 },
+          postedWork: { window: "all-time", status: "never", count: 0, firstAtMs: null },
+        },
+        ours: {
+          day: {
+            window: "24h", agents: 0, canaryRuns: 0, acceptanceRuns: 0,
+            adminConsoleAgents: 0, operatorAgents: 0,
+          },
+        },
+        unknown: { window: "all-time", sharedClientNames: 0, preSplitCalls: 0 },
+        doors: {
+          mcp: { window: "all-time", sinceMs: null, rows: [] },
+          http: { window: "all-time", sinceMs: null, rows: [] },
+        },
+      },
+    }));
+
+    expect(lane?.line).toBe("OUTSIDERS — someone settled work · last activity 5d ago");
+    expect(lane?.line).not.toMatch(/MCP|HTTP/);
+  });
+
   it("takes the FURTHEST across doors, never the sum", () => {
     // The doors cover different spans — HTTP is counted only from a cutover —
     // so adding them would be arithmetic across unlike windows. Furthest-stage

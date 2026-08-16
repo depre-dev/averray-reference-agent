@@ -481,6 +481,19 @@ export function phoneArrivals(arrivals: ProductHealth["arrivals"]): PhoneLane | 
     return { line: `OUTSIDERS — ${arrivals.unavailable}`, tone: "awaiting", unreadable: true };
   }
 
+  // Prefer the registry-backed cross-door journey. The legacy call funnels
+  // remain below only for deploy skew; they cannot express settlement history
+  // or separate per-run canaries from outsiders as completely as this view.
+  if (arrivals.operatorView && !("unavailable" in arrivals.operatorView)) {
+    const { furthestEver, lastActivity } = arrivals.operatorView.outsiders;
+    if (!furthestEver) return { line: "OUTSIDERS — no identified outsider yet", tone: "ok" };
+    const did = furthestEver.stage === "settled" ? "settled work" : STAGE_DID[furthestEver.stage];
+    const recency = lastActivity
+      ? ` · last activity ${formatAgo(lastActivity.atMs, arrivals.operatorView.generatedAtMs)}`
+      : "";
+    return { line: `OUTSIDERS — someone ${did}${recency}`, tone: "ok" };
+  }
+
   // The AMBIGUOUS bucket is in neither door's series on purpose: traffic under
   // a client name we also use ourselves cannot be called outside demand
   // without manufacturing it, nor ours without erasing a real stranger.
