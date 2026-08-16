@@ -361,6 +361,59 @@ export const ARRIVAL_STAGES = [
 ] as const;
 
 export type ArrivalStage = (typeof ARRIVAL_STAGES)[number];
+export type ArrivalJourneyStage = ArrivalStage | "settled";
+
+export interface ArrivalOperatorStageReading {
+  window: "all-time";
+  stage: ArrivalJourneyStage;
+  atMs: number | null;
+  door: string;
+  agents: number;
+  payouts?: number;
+  payoutWindow?: "12h";
+  payoutSpanMs?: number;
+}
+
+export interface ArrivalOperatorDoorRow {
+  stage: ArrivalStage;
+  unit: "calls" | "agents";
+  instrumentation: string;
+  outsider: number;
+  ours: number;
+  unknown: number;
+}
+
+export interface ArrivalOperatorView {
+  version: "averray.arrivals.operator.v1";
+  generatedAtMs: number;
+  outsiders: {
+    furthestEver: ArrivalOperatorStageReading | null;
+    lastActivity: { window: "all-time"; atMs: number; stage: ArrivalJourneyStage; door: string } | null;
+    week: { window: "7d"; identified: number; worked: number };
+    postedWork: {
+      window: "all-time";
+      status: "never" | "observed" | "unknown";
+      count: number | null;
+      firstAtMs: number | null;
+    };
+  };
+  ours: {
+    day: {
+      window: "24h";
+      agents: number;
+      canaryRuns: number;
+      acceptanceRuns: number;
+      adminConsoleAgents: number;
+      operatorAgents: number;
+    };
+  };
+  unknown: { window: "all-time"; sharedClientNames: number; preSplitCalls: number };
+  doors: Record<"mcp" | "http", {
+    window: "all-time";
+    sinceMs: number | null;
+    rows: ArrivalOperatorDoorRow[];
+  }>;
+}
 
 export interface ArrivalAttributionCounts {
   siwe_wallet: number;
@@ -382,6 +435,7 @@ export interface HttpArrivalCutover {
 
 export interface ArrivalClient {
   key: string;
+  wallet?: string | null;
   name: string | null;
   version: string | null;
   era: string | null;
@@ -433,6 +487,8 @@ export interface ArrivalsSnapshot {
     furthestAmbiguous?: ArrivalStage;
   };
   clients: ArrivalClient[];
+  /** Verdict-first projection derived by the shared self-identity registry. */
+  operatorView?: ArrivalOperatorView | { unavailable: string };
 }
 
 /** A reading and a failure are mutually exclusive; neither becomes zero. */
