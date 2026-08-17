@@ -1159,6 +1159,30 @@ export function formatSeconds(seconds: number | null): string {
  * `decimals` absent ⇒ the raw base-unit string, labelled `raw`. Scaling by a
  * guessed exponent would silently move a decimal point on a money value.
  */
+/**
+ * The deposit pool's cap meter — the one bounded scale on the BANK side.
+ *
+ * Same rule as the solvency meters: a bar is only honest against a scale that
+ * does not move with the value. The configured cap IS such a scale, so
+ * utilisation can be drawn against it. Either half missing → no bar at all —
+ * a meter against a guessed cap would be the auto-fitted two-thirds-full
+ * failure this board removed from the pools.
+ */
+export function capMeterView(
+  caps: { totalAssetCap?: { raw: string; decimals?: number }; utilizationBps?: number } | undefined,
+): { fillPct: number; over: boolean; title: string } | null {
+  if (!caps || typeof caps.utilizationBps !== "number" || !caps.totalAssetCap) return null;
+  const pct = caps.utilizationBps / 100;
+  return {
+    fillPct: Math.max(0, Math.min(100, pct)),
+    // Past the cap (it can be lowered under the current assets) the bar pegs —
+    // and says so, exactly like a pool meter past its top rung. A pegged bar
+    // that looks merely full conflates "at cap" with "over cap".
+    over: pct > 100,
+    title: `${pct.toFixed(2)}% of the ${formatPoolAmount(caps.totalAssetCap, "USDC")} cap — scale is the cap, fixed`,
+  };
+}
+
 export function formatPoolAmount(
   amount: { raw: string; decimals?: number } | undefined,
   unit: string,

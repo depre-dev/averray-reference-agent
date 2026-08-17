@@ -14,7 +14,7 @@ import type {
   DepositPoolFlow,
 } from "../../lib/monitor/product-health.js";
 
-import { formatPoolAmount } from "../../lib/monitor/ops-spec.js";
+import { capMeterView, formatPoolAmount } from "../../lib/monitor/ops-spec.js";
 
 export function DepositPoolTile({ pool }: { pool: DepositPoolBlock | undefined }) {
   if (!pool || "unavailable" in pool) {
@@ -68,6 +68,33 @@ export function DepositPoolTile({ pool }: { pool: DepositPoolBlock | undefined }
         </Fact>
         <Fact label="CAP" testId="ops-deposit-pool-cap">
           {formatBps(snapshot.caps?.utilizationBps)} utilized
+          {/* The one bounded scale on this side of the board: fill = utilisation
+              against the CONFIGURED cap, which is fixed the way a floor is.
+              No cap or no utilisation figure → no bar (never an auto-fit). */}
+          {(() => {
+            const meter = capMeterView(snapshot.caps);
+            return meter ? (
+              <span
+                className="ops-cap-meter"
+                role="meter"
+                aria-valuenow={meter.fillPct}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="Deposit pool utilisation against its configured cap"
+                title={meter.title}
+                data-over={meter.over ? "yes" : "no"}
+                data-testid="ops-deposit-pool-cap-meter"
+              >
+                {/* No fill element at exactly zero — the CSS keeps a tiny
+                    fill visible for any real utilisation, and that floor
+                    must never fabricate one where the reading is 0. */}
+                {meter.fillPct > 0 ? <i style={{ width: `${meter.fillPct}%` }} /> : null}
+                {/* Utilisation past the cap: the bar is pegged and marks it,
+                    so "at cap" and "over cap" cannot render alike. */}
+                {meter.over ? <b aria-hidden /> : null}
+              </span>
+            ) : null;
+          })()}
           <small>
             {formatPoolAmount(snapshot.caps?.headroom, "USDC")} headroom
             {snapshot.caps?.totalAssetCap ? ` of ${formatPoolAmount(snapshot.caps.totalAssetCap, "USDC")}` : ""}

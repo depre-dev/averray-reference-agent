@@ -106,6 +106,31 @@ body,
 .ops-board [data-tone="paused"],
 .ops-board [data-tone="neutral"]  { --tone: var(--h4-muted); }
 
+/* ---- panel edge rails ------------------------------------------
+   Each money panel wears its own worst-of-contents tone on its left
+   edge — the roll-up a pillar's head dot already does, made legible
+   from across the room. A SEPARATE attribute (data-rail) so a rail
+   never recolours the text inside its panel the way --tone would.
+
+   Healthy is the quiet soft-line sage: an edge that shouts green all
+   day is decoration, and decoration teaches the eye to skip the edge
+   on the day it turns coral. Rails are box-shadows, not borders, so
+   they move no layout and stay real pixels at every viewport. */
+.ops-board [data-rail="ok"]       { --rail: var(--h4-ok-line); }
+.ops-board [data-rail="degraded"] { --rail: var(--h4-warn); }
+.ops-board [data-rail="red"]      { --rail: var(--h4-act); }
+.ops-board [data-rail="awaiting"] { --rail: var(--h4-tel-soft); }
+.ops-solvency,
+.ops-flow { box-shadow: inset 3px 0 0 var(--rail, transparent); }
+/* The BANK tiles already carry an honest section tone — the rail keys off it. */
+:is(.ops-bank, .ops-deposit-pool)[data-tone="ok"]       { --rail: var(--h4-ok-line); }
+:is(.ops-bank, .ops-deposit-pool)[data-tone="degraded"] { --rail: var(--h4-warn); }
+:is(.ops-bank, .ops-deposit-pool)[data-tone="red"]      { --rail: var(--h4-act); }
+:is(.ops-bank, .ops-deposit-pool)[data-tone="awaiting"],
+:is(.ops-bank, .ops-deposit-pool)[data-tone="paused"]   { --rail: var(--h4-tel-soft); }
+.ops-bank,
+.ops-deposit-pool { box-shadow: inset 3px 0 0 var(--rail, transparent); }
+
 /* ---- meta line ------------------------------------------------ */
 .ops-meta {
   display: flex;
@@ -206,6 +231,34 @@ body,
   font-size: calc(13 * var(--ops-u));
   line-height: 1.45;
   color: var(--tone, var(--h4-muted));
+}
+
+/* ---- the census, as marks --------------------------------------
+   One cell per probe under the verdict — the same "10 ok / 0 red"
+   the subline says in words, readable at wall distance. Severity is
+   encoded TWICE, tone and height, because amber vs coral is exactly
+   the pair deutan vision loses; a hollow cell is a probe with no
+   reading (never a small green). Baseline-anchored so ok cells sit
+   low and a red one towers. */
+.ops-census {
+  display: flex;
+  align-items: flex-end;
+  gap: calc(4 * var(--ops-u));
+  height: calc(15 * var(--ops-u));
+  margin-top: calc(9 * var(--ops-u));
+}
+.ops-census i {
+  width: calc(19 * var(--ops-u));
+  height: 42%;
+  background: var(--tone, var(--h4-tel));
+}
+.ops-census i[data-tone="degraded"] { height: 72%; }
+.ops-census i[data-tone="red"]      { height: 100%; }
+.ops-census i[data-tone="awaiting"] {
+  height: 42%;
+  background: transparent;
+  border: 1px solid var(--h4-tel);
+  box-sizing: border-box;
 }
 
 .ops-trust {
@@ -612,6 +665,20 @@ body,
   white-space: nowrap;
   color: var(--tone, var(--h4-muted));
 }
+/* "Gaps between stages are the signal" — the panel says so, then draws the
+   gaps as the smallest thing on it. When a gap chip carries a real tone the
+   connector it annotates takes the same colour and the chip firms up, so a
+   backlog is visible at the distance the stage numerals are. A quiet gap
+   stays quiet: the emphasis exists only when the signal does. */
+.ops-funnel-gap:has(> .ops-funnel-gap-label[data-tone="degraded"]) .ops-funnel-arrow { color: var(--h4-warn); }
+.ops-funnel-gap:has(> .ops-funnel-gap-label[data-tone="degraded"]) .ops-funnel-arrow i { background: var(--h4-warn-line); }
+.ops-funnel-gap:has(> .ops-funnel-gap-label[data-tone="red"]) .ops-funnel-arrow { color: var(--h4-act); }
+.ops-funnel-gap:has(> .ops-funnel-gap-label[data-tone="red"]) .ops-funnel-arrow i { background: var(--h4-act-line); }
+.ops-funnel-gap-label[data-tone="degraded"],
+.ops-funnel-gap-label[data-tone="red"] {
+  border-color: var(--tone);
+  font-weight: 600;
+}
 
 /* ---- the two lines under the panel head -------------------------
    Shipped in #686/#687 with no rules of their own, so they inherited
@@ -843,9 +910,12 @@ body,
 }
 
 /* ---- pillars ---------------------------------------------------- */
+/* Four probe domains plus the durable incident log — the "why" and the
+   "when" of the same question, one band. The log column is narrower:
+   it holds three compact episodes, not a fifth probe family. */
 .ops-pillars {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 0.78fr);
   padding: calc(10 * var(--ops-u)) calc(16 * var(--ops-u));
   border: 1px solid var(--ops-rule);
 }
@@ -901,6 +971,81 @@ body,
 .ops-probe-detail[data-tone="red"]      { color: var(--h4-act); }
 .ops-probe-detail[data-tone="degraded"] { color: var(--h4-warn); }
 .ops-probe-detail[data-tone="awaiting"] { color: var(--h4-tel); }
+
+/* ---- per-check status strips (OpsSpark) -------------------------
+   Each probe's last checks, oldest → newest, riding the row's right
+   edge. Severity is tone AND height — the same double encoding as
+   the census, for the same deutan reason. A pad cell (fewer checks
+   than bins) is hollow: an unmade check must never draw as a pass. */
+.ops-spark {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: calc(2 * var(--ops-u));
+  height: calc(11 * var(--ops-u));
+  flex: none;
+  margin-left: auto;
+  align-self: center;
+  padding-left: calc(8 * var(--ops-u));
+}
+.ops-spark-cell {
+  width: calc(5 * var(--ops-u));
+  height: 42%;
+  background: var(--h4-ok);
+}
+.ops-spark-cell--degraded { height: 72%; background: var(--h4-warn); }
+.ops-spark-cell--red      { height: 100%; background: var(--h4-act); }
+.ops-spark-cell--empty {
+  height: 100%;
+  background: transparent;
+  border: 1px solid var(--h4-line-2);
+  box-sizing: border-box;
+}
+
+/* ---- the durable incident log ----------------------------------
+   A LIST, deliberately not a timeline: a timeline's empty stretches
+   would claim "watched and healthy" over hours the monitor may not
+   have been running, and nothing in the payload backs that. Rows are
+   facts with their own clocks — probe, severity, duration, ended. */
+.ops-incident-rows {
+  display: grid;
+  gap: calc(7 * var(--ops-u));
+  margin-top: calc(9 * var(--ops-u));
+}
+.ops-incident {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: calc(8 * var(--ops-u));
+  row-gap: calc(1 * var(--ops-u));
+  align-items: baseline;
+}
+.ops-incident .ops-dot { position: relative; top: calc(-1 * var(--ops-u)); }
+.ops-incident-probe {
+  font-family: var(--h4-font-mono);
+  font-size: calc(11 * var(--ops-u));
+  color: var(--h4-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ops-incident-when {
+  grid-column: 2;
+  font-family: var(--h4-font-mono);
+  font-size: calc(9.5 * var(--ops-u));
+  color: var(--tone, var(--h4-muted));
+}
+.ops-incident-absent {
+  margin: calc(9 * var(--ops-u)) 0 0;
+  font-family: var(--h4-font-mono);
+  font-size: calc(10 * var(--ops-u));
+  line-height: 1.45;
+  color: var(--h4-tel);
+}
+.ops-incident-more {
+  margin: calc(7 * var(--ops-u)) 0 0;
+  font-family: var(--h4-font-mono);
+  font-size: calc(9 * var(--ops-u));
+  color: var(--h4-muted);
+}
 .ops-pillar-trend {
   display: flex;
   align-items: center;
@@ -1159,10 +1304,14 @@ body,
 .ops-arrivals-evidence {
   grid-column: 1 / -1;
 }
+/* The OUTSIDERS edge was a permanent 3px sage rail — a health colour on a
+   panel that reports demand, lit regardless of what the panel said. Green
+   that cannot go out is decoration wearing a status colour; the edge is now
+   neutral and tone stays with the readings themselves. */
 .ops-arrivals-verdict {
   padding: calc(9 * var(--ops-u)) calc(12 * var(--ops-u));
   border: 1px solid var(--ops-rule);
-  border-left: 3px solid var(--h4-ok);
+  border-left: 3px solid var(--h4-line-strong);
   background: var(--h4-paper-sunken);
 }
 .ops-arrivals-block-head {
@@ -1178,9 +1327,9 @@ body,
 .ops-arrivals-door h3 {
   margin: 0;
   font-family: var(--h4-font-display);
-  font-size: calc(14 * var(--ops-u));
-  font-weight: 650;
-  letter-spacing: 0.08em;
+  font-size: calc(13.5 * var(--ops-u));
+  font-weight: 600;
+  letter-spacing: 0.09em;
   color: var(--h4-ink);
 }
 .ops-arrivals-block-head span {
@@ -1327,6 +1476,16 @@ body,
   justify-content: flex-end;
   color: var(--h4-ink-2);
 }
+/* Inside the door tables every cell shares the table's own window, already
+   stated once beside "observed since". The per-cell badge stays (it is the
+   claim, and tests pin it) but drops to a whisper so forty repetitions of
+   ALL-TIME stop competing with the counts they qualify. */
+.ops-arrivals-table-row .ops-window-badge {
+  padding-inline: 0;
+  border-color: transparent;
+  background: none;
+  opacity: 0.55;
+}
 .ops-arrivals-cutover {
   padding-top: calc(5 * var(--ops-u));
   border-top: 1px solid var(--ops-hair);
@@ -1383,12 +1542,16 @@ body,
   align-items: baseline;
   gap: calc(12 * var(--ops-u));
 }
+/* One sub-head scale across the board: the BANK tiles and the ARRIVALS
+   blocks are the same rank of heading and used to be three slightly
+   different sizes — enough to read as three different designs, not
+   enough to mean anything. */
 .ops-bank-title {
   margin: 0;
   font-family: var(--h4-font-display);
   font-weight: 600;
-  font-size: calc(12.5 * var(--ops-u));
-  letter-spacing: 0.1em;
+  font-size: calc(13.5 * var(--ops-u));
+  letter-spacing: 0.09em;
   color: var(--h4-ink);
 }
 /* Hoisted so the one state that costs money while ignored is legible
@@ -1471,9 +1634,9 @@ body,
 .ops-deposit-pool-head h3 {
   margin: 0;
   font-family: var(--h4-font-display);
-  font-size: calc(12.5 * var(--ops-u));
+  font-size: calc(13.5 * var(--ops-u));
   font-weight: 600;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.09em;
   color: var(--h4-ink);
 }
 .ops-deposit-pool-head > span,
@@ -1525,6 +1688,32 @@ body,
   font-size: calc(9.5 * var(--ops-u));
   color: var(--h4-tel);
 }
+/* The pool's one bounded meter — the same grammar as the solvency bars:
+   a fixed scale (the configured cap) and a fill that drains or grows
+   against it. Rendered only when both halves are real; a near-empty bar
+   over a 2% utilisation is the truth, not a rendering problem. */
+.ops-cap-meter {
+  display: block;
+  position: relative;
+  height: calc(7 * var(--ops-u));
+  margin-top: calc(4 * var(--ops-u));
+  border: 1px solid var(--ops-hair);
+  background: var(--h4-paper-sunken);
+}
+.ops-cap-meter i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  min-width: 2px;
+  background: var(--h4-ok);
+}
+/* Past the cap the bar pegs and says so — the same warm end-cap the pool
+   meters use past their top rung. "At cap" and "over cap" must not look alike. */
+.ops-cap-meter b {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: calc(5 * var(--ops-u));
+  background: var(--h4-warn);
+}
 .ops-deposit-pool-flows {
   padding-top: calc(7 * var(--ops-u));
   border-top: 1px solid var(--ops-hair);
@@ -1561,10 +1750,11 @@ body,
   box-sizing: border-box;
   padding: calc(7 * var(--ops-u)) calc(16 * var(--ops-u));
   border-top: 1px dashed var(--ops-rule);
+  background: var(--h4-paper-veil);
   font-family: var(--h4-font-mono);
-  font-size: calc(12 * var(--ops-u));
+  font-size: calc(12.5 * var(--ops-u));
   letter-spacing: 0.02em;
-  color: var(--tone, var(--h4-ink-2));
+  color: var(--tone, var(--h4-ink));
 }
 
 /* ---- footer ------------------------------------------------------
@@ -1644,6 +1834,15 @@ body,
   .ops-arrivals-unreachable { grid-column: auto; }
   .ops-pillars { grid-template-columns: repeat(2, 1fr); }
   .ops-pillar:nth-child(3) { border-left: 0; }
+  /* Fifth column: on the two-column layout the incident log takes a full row
+     under the pillars rather than squeezing one column thin. */
+  .ops-pillar--incidents {
+    grid-column: 1 / -1;
+    margin-top: calc(8 * var(--ops-u));
+    padding-top: calc(8 * var(--ops-u));
+    border-left: 0;
+    border-top: 1px dashed var(--ops-hair);
+  }
   .ops-foot { flex-wrap: wrap; }
 }
 

@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   DATA_STALE_FALLBACK_MS,
   EVIDENCE_KEY,
+  capMeterView,
   crossCheckLine,
   payoutProvenanceLine,
   METER_RUNGS,
@@ -865,5 +866,35 @@ describe("trustRows", () => {
       nowMs: health.at! + 3 * 60_000,
     });
     expect(rows.find((r) => r.key === "DATA AGE")!.tone).toBe("ok");
+  });
+});
+
+describe("capMeterView — a bar only against a real fixed scale", () => {
+  const CAP = { raw: "1000000000", decimals: 6 };
+
+  test("cap + utilisation draw a bounded fill", () => {
+    const view = capMeterView({ totalAssetCap: CAP, utilizationBps: 204 })!;
+    expect(view.fillPct).toBeCloseTo(2.04);
+    expect(view.title).toContain("2.04%");
+    expect(view.title).toContain("1,000 USDC");
+  });
+
+  test("no cap → no bar, however precise the utilisation", () => {
+    // A meter against a guessed scale is the auto-fitted two-thirds-full
+    // failure the solvency panel already removed.
+    expect(capMeterView({ utilizationBps: 204 })).toBeNull();
+  });
+
+  test("no utilisation reading → no bar", () => {
+    expect(capMeterView({ totalAssetCap: CAP })).toBeNull();
+    expect(capMeterView(undefined)).toBeNull();
+  });
+
+  test("fill clamps to the scale — a breached cap pegs at 100 AND says over", () => {
+    const view = capMeterView({ totalAssetCap: CAP, utilizationBps: 12_000 })!;
+    expect(view.fillPct).toBe(100);
+    // "At cap" and "over cap" are different facts; the peg alone conflates them.
+    expect(view.over).toBe(true);
+    expect(capMeterView({ totalAssetCap: CAP, utilizationBps: 10_000 })!.over).toBe(false);
   });
 });

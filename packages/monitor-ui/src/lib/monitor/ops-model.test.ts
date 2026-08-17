@@ -8,6 +8,9 @@ import {
   hasFlowData,
   solvencyRows,
   incidentRows,
+  recentIncidents,
+  trendSpanLabel,
+  worstOpsTone,
   formatAmount,
   formatDuration,
 } from "./ops-model.js";
@@ -160,6 +163,90 @@ describe("incidentRows", () => {
 
   test("undefined history yields no rows", () => {
     expect(incidentRows(undefined, FIXTURE_NOW)).toEqual([]);
+  });
+});
+
+describe("worstOpsTone — one severity order for every roll-up", () => {
+  test("red outranks everything", () => {
+    expect(worstOpsTone(["ok", "awaiting", "degraded", "red"])).toBe("red");
+  });
+  test("awaiting outranks ok — a telemetry gap is not a pass", () => {
+    expect(worstOpsTone(["ok", "awaiting", "ok"])).toBe("awaiting");
+  });
+  test("an empty list is ok — nothing observed wrong", () => {
+    expect(worstOpsTone([])).toBe("ok");
+  });
+});
+
+describe("recentIncidents — absent is not empty", () => {
+  test("no incident log at all returns null, never an empty view", () => {
+    // An older build that reports no log must render "not reported" — a clean
+    // record would be a claim the payload never made.
+    expect(recentIncidents(undefined, FIXTURE_NOW)).toBeNull();
+    expect(recentIncidents({}, FIXTURE_NOW)).toBeNull();
+  });
+
+  test("an empty log is a view with no rows — watched, nothing recorded", () => {
+    expect(recentIncidents({ incidents: [] }, FIXTURE_NOW)).toEqual({ rows: [], more: 0 });
+  });
+
+  test("caps the rows and counts the remainder instead of hiding it", () => {
+    const view = recentIncidents(
+      {
+        incidents: Array.from({ length: 5 }, (_, i) => ({
+          id: `inc-${i}`,
+          probe: "capabilities",
+          severity: "degraded" as const,
+          startedAt: FIXTURE_NOW - (i + 1) * 3_600_000,
+          endedAt: FIXTURE_NOW - (i + 1) * 3_600_000 + 600_000,
+        })),
+      },
+      FIXTURE_NOW,
+      3,
+    )!;
+    expect(view.rows).toHaveLength(3);
+    expect(view.more).toBe(2);
+    // Newest first — the top row is the most recent episode.
+    expect(view.rows[0]!.id).toBe("inc-0");
+  });
+
+  test("an ongoing episode keeps running against the injected clock", () => {
+    const view = recentIncidents(
+      {
+        incidents: [
+          { id: "live", probe: "money_path", severity: "red", startedAt: FIXTURE_NOW - 14 * 60_000, endedAt: null },
+        ],
+      },
+      FIXTURE_NOW,
+    )!;
+    expect(view.rows[0]!.ongoing).toBe(true);
+    expect(view.rows[0]!.durationLabel).toBe("14m");
+  });
+});
+
+describe("trendSpanLabel — the caption states what was measured", () => {
+  const HOUR = 3_600_000;
+  test("a covered 24h window is labelled 24h", () => {
+    expect(trendSpanLabel({ uptimeSpanMs: 24 * HOUR, uptimeWindowMs: 24 * HOUR })).toBe("24h");
+  });
+
+  test("check jitter within 5% still counts as the window", () => {
+    expect(trendSpanLabel({ uptimeSpanMs: 23.2 * HOUR, uptimeWindowMs: 24 * HOUR })).toBe("24h");
+  });
+
+  test("a short buffer names its measured span, not the window", () => {
+    // The post-deploy case: the in-memory ring buffer spans minutes while the
+    // caption used to claim a day.
+    expect(trendSpanLabel({ uptimeSpanMs: 34 * 60_000, uptimeWindowMs: 24 * HOUR })).toBe("over 34m");
+  });
+
+  test("a known span with no reported window is still stated as a span", () => {
+    expect(trendSpanLabel({ uptimeSpanMs: 90 * 60_000 })).toBe("over 1h 30m");
+  });
+
+  test("nothing known says so instead of implying coverage", () => {
+    expect(trendSpanLabel(undefined)).toBe("span unknown");
+    expect(trendSpanLabel({ uptimeSpanMs: 0 })).toBe("span unknown");
   });
 });
 

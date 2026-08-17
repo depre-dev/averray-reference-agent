@@ -138,6 +138,61 @@ export function incidentRows(history: HealthHistory | undefined, nowMs: number):
     });
 }
 
+/** Severity order for roll-ups. Shared so every "worst of" on the board ranks
+ *  the same way — a pillar head and a panel rail must never disagree. */
+export const OPS_TONE_RANK: Record<OpsTone, number> = { red: 3, degraded: 2, awaiting: 1, ok: 0 };
+
+/** The worst tone in a list; an empty list is `ok` (nothing observed wrong). */
+export function worstOpsTone(tones: readonly OpsTone[]): OpsTone {
+  return tones.reduce<OpsTone>((acc, t) => (OPS_TONE_RANK[t] > OPS_TONE_RANK[acc] ? t : acc), "ok");
+}
+
+export interface RecentIncidentsView {
+  /** Newest first, capped for a narrow column. */
+  rows: IncidentRow[];
+  /** Episodes beyond the cap, still inside the durable window. Never hidden silently. */
+  more: number;
+}
+
+/**
+ * The durable log's newest episodes, sized for the INCIDENTS column.
+ *
+ * `null` means the build reports no incident log AT ALL — absent is not empty,
+ * and the column must say "not reported" rather than implying a clean record.
+ * An empty array is the opposite fact: the log exists and holds nothing.
+ */
+export function recentIncidents(
+  history: HealthHistory | undefined,
+  nowMs: number,
+  max = 3,
+): RecentIncidentsView | null {
+  if (!history?.incidents) return null;
+  const rows = incidentRows(history, nowMs);
+  return { rows: rows.slice(0, max), more: Math.max(0, rows.length - max) };
+}
+
+/**
+ * The span qualifier for a history sparkline ("24h" · "over 34m" · "span unknown").
+ *
+ * The latency trend was captioned "latency 24h" unconditionally, while the ring
+ * buffer behind it lives in memory: right after a deploy those samples span
+ * minutes, and the caption claimed a day. Uptime already states its measured
+ * span (same buffer, same lesson) — this applies the identical ≥95%-of-window
+ * rule to the series caption, so both labels degrade together.
+ */
+export function trendSpanLabel(history: HealthHistory | undefined): string {
+  const span = history?.uptimeSpanMs;
+  if (typeof span !== "number" || span <= 0) return "span unknown";
+  const window = history?.uptimeWindowMs;
+  if (typeof window === "number" && window > 0 && span >= window * 0.95) {
+    // Covered: label the window itself. Whole hours read as hours ("24h"),
+    // anything else falls back to the coarse duration label.
+    const hours = window / 3_600_000;
+    return hours < 48 && Number.isInteger(hours) ? `${hours}h` : formatDuration(window);
+  }
+  return `over ${formatDuration(span)}`;
+}
+
 /** Compact money/amount label: 4.99k, 1.20M, 2.00. */
 export function formatAmount(n: number): string {
   const abs = Math.abs(n);
