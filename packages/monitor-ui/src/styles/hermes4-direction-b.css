@@ -1,0 +1,463 @@
+/* =========================================================
+   DIRECTION B — the midnight wall.
+   The design pass the operator chose (claude.ai/design → Averray
+   Design System → "Ops board redesign"). It is a SURFACE layer, not
+   a second design system: every status colour still comes from the
+   --h4 family, every size still scales with --ops-u, and no rule
+   here changes what a number says — only the ground it sits on and
+   the shape it sits in.
+
+   THREE THINGS THIS LAYER OWNS
+     1. the deep-ink ground + the panel family that sits on it
+     2. the verdict SLAB and the light frosted trust console
+     3. the KPI strip, and the rounded chrome the kit calls for
+
+   WHAT IT DELIBERATELY DOES NOT TOUCH
+     · tone tokens (--h4-ok / --h4-warn / --h4-act / --h4-tel) — a
+       redesign that re-tunes severity colours is a redesign of the
+       verdict, and the verdict is decided in one place;
+     · the floor tick's 2px width, hairline weights, and every
+       font-size expressed in --ops-u — the scaling contract from
+       ops-scaling.test.ts holds across this file too;
+     · any string. Nothing here adds, hides or softens a fact.
+
+   Loaded LAST in main.tsx and ops-preview.tsx so its additive rules
+   win over hermes4-ops.css and hermes4-mobile.css.
+   ========================================================= */
+
+/* ---- the ground -------------------------------------------------
+   Both boards are re-based onto the deep surface by redefining the
+   tokens they already read. Redefining rather than re-declaring is
+   the point: a panel that never mentioned a colour still lands on
+   the new ground, so this file cannot drift from the ones it skins. */
+.ops-board,
+.hm-ph {
+  --h4-surface:      #0e1114;
+  --h4-canvas:       #0b0e10;
+  --h4-paper:        #161a1e;
+  --h4-paper-sunken: #12161a;
+  --h4-paper-veil:   rgba(22, 26, 30, 0.86);
+
+  --h4-ink:   #f2efe7;
+  --h4-ink-2: #d7d3c9;
+  --h4-muted: #98a09a;
+  --h4-faint: #6d746f;
+
+  --h4-line:        rgba(242, 239, 231, 0.14);
+  --h4-line-2:      rgba(242, 239, 231, 0.07);
+  --h4-line-strong: rgba(242, 239, 231, 0.24);
+
+  /* Sage and amber lifted for the dark ground — the SAME roles, at the
+     luminance this surface needs. Coral is unchanged: it is already the
+     loudest thing on either ground, and moving it would move the alarm. */
+  --h4-ok:      #7fc99e;
+  --h4-ok-text: #8fd7ae;
+  --h4-ok-soft: rgba(127, 201, 158, 0.16);
+  --h4-ok-line: rgba(127, 201, 158, 0.42);
+
+  --h4-warn:      #e8b36b;
+  --h4-warn-text: #eabd7d;
+  --h4-warn-soft: rgba(232, 179, 107, 0.16);
+  --h4-warn-line: rgba(232, 179, 107, 0.42);
+
+  --h4-tel:      #98a09a;
+  --h4-tel-soft: rgba(152, 160, 154, 0.16);
+  --h4-tel-chip: #1e2429;
+
+  /* The kit's radius scale: 8 for chips, 10 for cards, 14 for panels,
+     22 for the hero slab, 999 for pills. */
+  --b-r-chip: 8px;
+  --b-r-card: 10px;
+  --b-r-panel: 14px;
+  --b-r-slab: 22px;
+  --b-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+.ops-board {
+  --ops-hair: rgba(242, 239, 231, 0.08);
+  --ops-rule: rgba(242, 239, 231, 0.14);
+  gap: calc(14 * var(--ops-u));
+  padding: calc(18 * var(--ops-u)) calc(26 * var(--ops-u)) calc(16 * var(--ops-u));
+}
+.ops-content { gap: calc(14 * var(--ops-u)); }
+
+/* ---- brand bar --------------------------------------------------
+   The meta line becomes a brand row: the kit's dark mark, the product
+   name, and the same network / chain / read-only string it always
+   carried. Nothing new is claimed — the words are unchanged. */
+.ops-meta {
+  align-items: center;
+  gap: calc(14 * var(--ops-u));
+  font-size: calc(11 * var(--ops-u));
+}
+.ops-brand {
+  display: flex;
+  align-items: center;
+  gap: calc(10 * var(--ops-u));
+}
+.ops-brand-mark {
+  width: calc(30 * var(--ops-u));
+  height: calc(30 * var(--ops-u));
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: var(--b-r-chip);
+  background: var(--h4-ink);
+  color: #0e1114;
+  font-family: var(--h4-font-display);
+  font-weight: 700;
+  font-size: calc(16 * var(--ops-u));
+}
+.ops-brand-name {
+  font-family: var(--h4-font-display);
+  font-weight: 700;
+  font-size: calc(16 * var(--ops-u));
+  line-height: 1.1;
+  color: var(--h4-ink);
+}
+.ops-brand-sub {
+  font-family: var(--h4-font-display);
+  font-size: calc(9.5 * var(--ops-u));
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--h4-ok);
+}
+.ops-meta > span:first-of-type { color: var(--h4-muted); }
+
+/* ---- the verdict slab -------------------------------------------
+   The one oversized element gets the kit's hero treatment: deep slab,
+   sage radial, masked grid, 22px radius. The verdict TEXT is untouched
+   — same string, same tone token, same testid. */
+.ops-verdict-row {
+  position: relative;
+  overflow: hidden;
+  gap: calc(28 * var(--ops-u));
+  padding: calc(26 * var(--ops-u)) calc(30 * var(--ops-u)) calc(24 * var(--ops-u));
+  border-radius: var(--b-r-slab);
+  border: 1px solid var(--h4-line-2);
+  background:
+    radial-gradient(120% 160% at 12% -20%, rgba(127, 201, 158, 0.16), transparent 55%),
+    linear-gradient(100deg, #0c1013 0%, #10201b 62%, #0e1114 100%);
+  box-shadow: var(--b-shadow);
+}
+/* The wash follows the verdict's own tone. Same colour family as the
+   headline, at slab strength — never a new severity, and never louder
+   than the word it sits behind. */
+.ops-verdict-row[data-verdict="degraded"] {
+  background:
+    radial-gradient(120% 160% at 12% -20%, rgba(232, 179, 107, 0.16), transparent 55%),
+    linear-gradient(100deg, #0c1013 0%, #1d1811 62%, #0e1114 100%);
+}
+.ops-verdict-row[data-verdict="red"] {
+  background:
+    radial-gradient(120% 160% at 12% -20%, rgba(232, 134, 94, 0.20), transparent 55%),
+    linear-gradient(100deg, #0c1013 0%, #201410 62%, #0e1114 100%);
+  border-color: rgba(232, 134, 94, 0.35);
+}
+.ops-verdict-row[data-verdict="awaiting"] {
+  background:
+    radial-gradient(120% 160% at 12% -20%, rgba(152, 160, 154, 0.12), transparent 55%),
+    linear-gradient(100deg, #0c1013 0%, #14181b 62%, #0e1114 100%);
+}
+.ops-verdict-row::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(242, 239, 231, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(242, 239, 231, 0.05) 1px, transparent 1px);
+  background-size: calc(56 * var(--ops-u)) calc(56 * var(--ops-u));
+  -webkit-mask-image: radial-gradient(90% 90% at 28% 18%, #000 30%, transparent 75%);
+  mask-image: radial-gradient(90% 90% at 28% 18%, #000 30%, transparent 75%);
+}
+.ops-verdict-row > * { position: relative; }
+.ops-verdict-kicker { color: var(--tone, var(--h4-muted)); }
+.ops-verdict-sub { color: var(--tone, var(--h4-ink-2)); }
+.ops-census { margin-top: calc(14 * var(--ops-u)); }
+.ops-census i { border-radius: 2px; }
+
+/* ---- the trust console ------------------------------------------
+   The kit's floating console window: a LIGHT card over the dark slab,
+   with the three-dot window bar. It keeps its own light-side ink —
+   inheriting the wall's cream would put white text on cream. */
+.ops-trust {
+  align-self: center;
+  border: 0;
+  border-radius: var(--b-r-panel);
+  padding: calc(14 * var(--ops-u)) calc(16 * var(--ops-u));
+  background: rgba(255, 253, 247, 0.94);
+  box-shadow: 0 calc(16 * var(--ops-u)) calc(42 * var(--ops-u)) rgba(0, 0, 0, 0.42);
+  --h4-ink: #111315;
+  --h4-ink-2: #1c211f;
+  --h4-muted: #5f655f;
+  /* Sage and amber return to their LIGHT-side values inside this card:
+     the dark-ground steps are too pale on cream. Same roles, right
+     luminance for the surface they land on. */
+  --h4-ok: #1e6642;
+  --h4-warn: #a76122;
+  --h4-tel: #7c837d;
+  color: #111315;
+}
+/* THE ALARM MUST NOT BE THE QUIETEST THING ON THE CARD.
+   Coral is tuned for the deep ground; on cream it measures 2.58:1 — under
+   the 3:1 floor — while sage reads 6.80 and amber 4.72 on the same card. The
+   row that renders in it is STREAM · DISCONNECTED, which invalidates every
+   number on the board, so it was the one fact this console rendered faintest.
+   A deeper step of the SAME role, scoped to this light card: --h4-act is
+   untouched everywhere else, and the alarm keeps its colour identity while
+   becoming the most legible row again (5.42:1). */
+.ops-trust [data-tone="red"] { --tone: #a83a1c; }
+/* The window bar names what the console answers. Decorative dots only —
+   the kit's motif, explicitly not a status system. */
+.ops-trust::before {
+  content: "";
+  display: block;
+  width: calc(38 * var(--ops-u));
+  height: calc(8 * var(--ops-u));
+  margin-bottom: calc(10 * var(--ops-u));
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at calc(4 * var(--ops-u)) 50%, #8ee0b4 0 calc(4 * var(--ops-u)), transparent 0),
+    radial-gradient(circle at calc(19 * var(--ops-u)) 50%, #d8e8ff 0 calc(4 * var(--ops-u)), transparent 0),
+    radial-gradient(circle at calc(34 * var(--ops-u)) 50%, #f5dfc6 0 calc(4 * var(--ops-u)), transparent 0);
+}
+.ops-trust-key { color: #5f655f; }
+
+/* ---- the KPI strip ----------------------------------------------
+   Four cards, the kit's dashboard pattern. Every figure is derived by
+   boardKpis() from the SAME view-models the panels below use — the
+   strip is a second reading of one number, never a second opinion. */
+.ops-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: calc(12 * var(--ops-u));
+}
+.ops-kpi {
+  display: grid;
+  gap: calc(5 * var(--ops-u));
+  align-content: start;
+  min-width: 0;
+  padding: calc(13 * var(--ops-u)) calc(15 * var(--ops-u));
+  border: 1px solid var(--ops-rule);
+  border-radius: var(--b-r-card);
+  background: var(--h4-paper);
+  box-shadow: var(--b-shadow);
+}
+.ops-kpi-lbl {
+  font-family: var(--h4-font-display);
+  font-size: calc(10 * var(--ops-u));
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--h4-muted);
+}
+.ops-kpi-val {
+  display: flex;
+  align-items: baseline;
+  gap: calc(6 * var(--ops-u));
+  font-family: var(--h4-font-display);
+  font-weight: 700;
+  font-size: clamp(24px, 2.1vw, calc(36 * var(--ops-u)));
+  line-height: 1;
+  color: var(--tone, var(--h4-ink));
+}
+.ops-kpi-unit {
+  font-family: var(--h4-font-display);
+  font-size: calc(13 * var(--ops-u));
+  font-weight: 600;
+  color: var(--h4-muted);
+}
+.ops-kpi-sub {
+  font-family: var(--h4-font-mono);
+  font-size: calc(10.5 * var(--ops-u));
+  line-height: 1.45;
+  color: var(--tone, var(--h4-muted));
+}
+
+/* ---- panels -----------------------------------------------------
+   One card family: paper ground, hairline, 14px radius, one soft
+   shadow. The money band stops being a single bordered box and becomes
+   two cards, which is what lets the eye separate them at wall range. */
+.ops-money {
+  border: 0;
+  gap: calc(14 * var(--ops-u));
+  background: none;
+}
+.ops-solvency,
+.ops-flow,
+.ops-bank-group,
+.ops-pillars,
+.ops-arrivals {
+  border: 1px solid var(--ops-rule);
+  border-radius: var(--b-r-panel);
+  background: var(--h4-paper);
+  box-shadow: var(--b-shadow);
+}
+.ops-solvency {
+  width: calc(46% - (7 * var(--ops-u)));
+  border-right: 1px solid var(--ops-rule);
+  padding: calc(12 * var(--ops-u)) calc(18 * var(--ops-u)) calc(4 * var(--ops-u));
+}
+.ops-flow { padding: calc(12 * var(--ops-u)) calc(18 * var(--ops-u)); }
+.ops-panel-head {
+  padding-bottom: calc(9 * var(--ops-u));
+  border-bottom: 1px solid var(--ops-hair);
+}
+.ops-panel-title { font-size: calc(15 * var(--ops-u)); letter-spacing: 0.05em; }
+/* Panel titles are sentence case in the kit; the markup keeps its
+   uppercase strings, so the casing is applied here rather than by
+   rewriting eleven headings. */
+.ops-panel-title,
+.ops-bank-group > h2 { text-transform: capitalize; }
+.ops-chip { border-radius: 999px; border-style: solid; }
+
+/* Rounded meters, and a rounded fill inside them. The floor tick stays
+   a hard 2px rectangle: it marks a threshold, and a rounded threshold
+   is a fuzzier one. */
+.ops-meter { border-radius: 999px; background: #1e2429; }
+.ops-meter-fill { border-radius: 999px; }
+.ops-pool { border-bottom-style: solid; border-bottom-color: var(--ops-hair); }
+.ops-pool-note--keyed .ops-pool-note-key { color: var(--h4-ok); }
+
+/* The evidence block gets the kit's washed card. Its emphasis rule is
+   untouched — only a real shortfall takes the coral frame. */
+.ops-evidence {
+  border-radius: var(--b-r-card);
+  border-color: var(--h4-ok-line);
+  background: var(--h4-ok-soft);
+}
+.ops-evidence[data-emphasis="on"] {
+  border-color: var(--h4-act);
+  background: rgba(232, 134, 94, 0.10);
+}
+.ops-byhour-bar { border-radius: 3px 3px 0 0; }
+/* Per-job economics closes the money band. With the band no longer a single
+   box, this line needs its own card or it reads as text dropped on the page
+   ground — it is a fact about the two panels above, not a caption. */
+.ops-economics {
+  border: 1px solid var(--ops-rule);
+  border-top: 1px solid var(--ops-rule);
+  border-radius: var(--b-r-card);
+  background: var(--h4-paper);
+  box-shadow: var(--b-shadow);
+}
+
+/* BANK — two cards inside one frame, as the group already asserts. */
+.ops-bank-group { overflow: hidden; }
+.ops-bank-group > h2 { border-bottom: 1px solid var(--ops-hair); }
+.ops-bank,
+.ops-deposit-pool { box-shadow: none; }
+.ops-deposit-pool-grid > div { border-top-color: var(--ops-hair); }
+.ops-cap-meter { border-radius: 999px; background: #1e2429; }
+.ops-cap-meter i { border-radius: 999px; }
+
+/* Pills — the kit's 999px chip, for the states that are genuinely
+   badges rather than sentences. */
+.ops-deposit-pool-born-empty,
+.ops-bank-alarm {
+  padding: calc(2 * var(--ops-u)) calc(10 * var(--ops-u));
+  border-radius: 999px;
+  background: var(--h4-ok-soft);
+  color: var(--h4-ok);
+}
+.ops-bank-alarm { background: rgba(232, 134, 94, 0.16); color: var(--h4-act); }
+
+/* Probe band + incidents: same card family, tighter rules. */
+.ops-pillars { padding: calc(12 * var(--ops-u)) calc(14 * var(--ops-u)); }
+.ops-pillar + .ops-pillar { border-left-color: var(--ops-hair); }
+.ops-spark-cell { border-radius: 1px; }
+
+/* NEXT — the one instruction strip. Amber wash, rounded, because it is
+   the only element on the board that asks for an action. */
+.ops-next {
+  padding: calc(9 * var(--ops-u)) calc(16 * var(--ops-u));
+  border: 1px solid var(--h4-warn-line);
+  border-radius: var(--b-r-card);
+  background: var(--h4-warn-soft);
+}
+.ops-next-key { color: var(--h4-warn); }
+
+.ops-arrivals { padding: calc(10 * var(--ops-u)) calc(16 * var(--ops-u)) calc(14 * var(--ops-u)); }
+.ops-arrivals-verdict { border-radius: var(--b-r-card); background: var(--h4-paper-sunken); }
+.ops-kpi, .ops-akpi { min-width: 0; }
+.ops-foot { padding-top: calc(2 * var(--ops-u)); }
+
+/* Stale banner keeps its hatching — it must never look like a panel. */
+.ops-stale { border-radius: var(--b-r-card); }
+
+/* ---- narrow / split screen -------------------------------------- */
+@media (max-width: 1240px) {
+  .ops-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ops-verdict-row { padding: calc(22 * var(--ops-u)) calc(22 * var(--ops-u)); }
+  .ops-solvency { width: auto; border-right: 1px solid var(--ops-rule); }
+}
+
+/* =========================================================
+   THE PHONE, on the same ground.
+   The phone board keeps every rule that makes it a phone board — the
+   filled verdict field, full contrast when untrusted, one-line lanes —
+   and takes the deep surface, the card family and the radii.
+   ========================================================= */
+.hm-ph {
+  --ph-hair: rgba(242, 239, 231, 0.08);
+  --ph-rule: rgba(242, 239, 231, 0.16);
+  background: var(--h4-canvas);
+}
+.hm-ph-bar { color: var(--h4-muted); }
+/* The verdict stays the only FILLED surface in the product — that is the
+   phone's whole legibility argument. It gains the slab's radius and sits
+   as a card rather than a full-bleed band. */
+.hm-ph-verdict {
+  margin: 8px 12px 0;
+  border-radius: 18px;
+  color: #0e1114;
+}
+.hm-ph-trust {
+  margin: 8px 12px 0;
+  border-radius: 999px;
+  border: 1px solid var(--ph-rule);
+  background: var(--h4-paper);
+}
+/* `.hm-ph-card` is the phone's one card class (a bordered box with an
+   optional <header>); `.hm-ph-sec` is a bare heading row and stays bare.
+   Cards take the panel radius and the paper ground so the screen reads
+   as a stack of objects rather than one long ruled sheet. */
+.hm-ph-card {
+  border-radius: var(--b-r-panel);
+  border-color: var(--ph-rule);
+  background: var(--h4-paper);
+  overflow: hidden;
+}
+.hm-ph-card > header { border-bottom-style: solid; border-bottom-color: var(--ph-hair); }
+.hm-ph-card--red { border-color: var(--h4-act); }
+.hm-ph-meter,
+.hm-ph-meter--sm { border-radius: 999px; background: #1e2429; }
+.hm-ph-meter i { border-radius: 999px; }
+.hm-ph-sq { border-radius: 2px; }
+.hm-ph-stale { border-radius: var(--b-r-card); margin: 8px 12px 0; }
+.hm-ph-empty { border-radius: var(--b-r-panel); background: var(--h4-paper); }
+/* The pool rows sit under a bare heading rather than inside a card — the
+   phone's own structure. On this ground that reads as "unfinished" beside
+   the flow and bank cards, so each pool becomes its own card: the phone's
+   money rows are the thing most often read one-handed in a hurry, and a
+   card edge is what separates two balances at that speed. */
+.hm-ph-pool {
+  padding: 10px 12px;
+  border: 1px solid var(--ph-hair);
+  border-radius: var(--b-r-card);
+  background: var(--h4-paper);
+}
+[data-testid="mobile-solvency"] { display: grid; gap: 8px; }
+
+/* Below the fold: the rollups are individually bordered, so the band itself
+   keeps the page ground and each rollup becomes a card. The fold stays a
+   break in reading order, not a break in the design. */
+.hm-ph-pillar {
+  border-radius: var(--b-r-card);
+  border-color: var(--ph-hair);
+  background: var(--h4-paper);
+}
+.hm-ph-below { border-top-color: var(--ph-rule); }
+.hm-ph-foot { color: var(--h4-muted); }

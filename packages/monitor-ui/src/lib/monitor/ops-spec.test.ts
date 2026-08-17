@@ -3,9 +3,12 @@ import { describe, expect, test } from "vitest";
 import {
   DATA_STALE_FALLBACK_MS,
   EVIDENCE_KEY,
+  boardKpis,
   capMeterView,
   crossCheckLine,
   payoutProvenanceLine,
+  payoutRunwayNote,
+  payoutsRemaining,
   METER_RUNGS,
   shortEndpoint,
   staleAfterMs,
@@ -20,7 +23,7 @@ import {
   volumeMixNote,
 } from "./ops-spec.js";
 import type { ProductHealth, SolvencyPool } from "./product-health.js";
-import { OPS_FIXTURE_NOMINAL, OPS_FIXTURE_STRESS } from "./ops-fixtures.js";
+import { OPS_FIXTURE_NOMINAL, OPS_FIXTURE_STRESS, OPS_FIXTURE_UNVERIFIED } from "./ops-fixtures.js";
 
 const NOW = 1_751_500_000_000;
 
@@ -866,6 +869,66 @@ describe("trustRows", () => {
       nowMs: health.at! + 3 * 60_000,
     });
     expect(rows.find((r) => r.key === "DATA AGE")!.tone).toBe("ok");
+  });
+});
+
+describe("boardKpis — a second reading, never a second opinion", () => {
+  test("the strip quotes the panels' own numbers", () => {
+    const kpis = boardKpis(OPS_FIXTURE_NOMINAL);
+    const by = Object.fromEntries(kpis.map((k) => [k.key, k]));
+    // Same settled count as the funnel, same confirmed count as the evidence.
+    expect(by.settled!.value).toBe(String(OPS_FIXTURE_NOMINAL.flow!.settled24h));
+    expect(by.proven!.value).toBe(String(OPS_FIXTURE_NOMINAL.flow!.payout!.confirmedCount));
+    expect(by.proven!.tone).toBe("ok");
+    expect(by.gas!.value).toBe("2.69");
+    expect(by.gas!.unit).toBe("DOT");
+  });
+
+  test("a shortfall reaches the strip — the tone is the evidence's own", () => {
+    const kpis = boardKpis(OPS_FIXTURE_STRESS);
+    const proven = kpis.find((k) => k.key === "proven")!;
+    expect(proven.value).toBe("12");
+    expect(proven.tone).toBe("red");
+    expect(proven.sub).toContain("shortfall");
+  });
+
+  test("an unreported figure is a dash with its reason, never a zero", () => {
+    const bare: ProductHealth = { ...OPS_FIXTURE_NOMINAL, flow: undefined, solvency: undefined };
+    const kpis = boardKpis(bare);
+    for (const k of kpis) {
+      expect(k.value).toBe("—");
+      expect(k.sub.length).toBeGreaterThan(0);
+    }
+    expect(kpis.find((k) => k.key === "settled")!.sub).toContain("no settlement counts");
+  });
+
+  test("the runway KPI and the pool footnote run ONE projection", () => {
+    // The KPI briefly parsed the footnote's sentence with a regex — a figure
+    // that changes meaning the day the wording does. Both now read
+    // payoutsRemaining(), so they cannot disagree.
+    const pool = OPS_FIXTURE_NOMINAL.solvency!.pools.find((p) => p.key === "reward_bank")!;
+    const projection = payoutsRemaining({ pool, payout: OPS_FIXTURE_NOMINAL.flow!.payout });
+    expect(projection?.status).toBe("ok");
+    const kpi = boardKpis(OPS_FIXTURE_NOMINAL).find((k) => k.key === "runway")!;
+    expect(kpi.value).toBe(`≈${(projection as { payouts: number }).payouts}`);
+    // …and the footnote quotes the same number in its own sentence.
+    const note = payoutRunwayNote({ pool, payout: OPS_FIXTURE_NOMINAL.flow!.payout })!;
+    expect(note.text).toContain(`≈ ${(projection as { payouts: number }).payouts} more payout`);
+  });
+
+  test("a below-floor bank is a dash and the reason, never a projection", () => {
+    const kpi = boardKpis(OPS_FIXTURE_STRESS).find((k) => k.key === "runway")!;
+    expect(kpi.value).toBe("—");
+    expect(kpi.sub).toContain("BELOW FLOOR");
+    expect(kpi.tone).toBe("red");
+  });
+
+  test("a blind chain read is grey in the strip too, not coral", () => {
+    // UNVERIFIED means the instrument is broken, not the money — the strip
+    // must not escalate it into the alarm the shortfall gets.
+    const proven = boardKpis(OPS_FIXTURE_UNVERIFIED).find((k) => k.key === "proven")!;
+    expect(proven.value).toBe("—");
+    expect(proven.tone).toBe("awaiting");
   });
 });
 

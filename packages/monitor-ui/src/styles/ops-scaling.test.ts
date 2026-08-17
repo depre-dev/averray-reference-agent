@@ -24,6 +24,17 @@ const CSS = readFileSync(fileURLToPath(new URL("./hermes4-ops.css", import.meta.
 /** Declarations, minus comments — comments discuss px sizes and are not rules. */
 const RULES = CSS.replace(/\/\*[\s\S]*?\*\//g, "");
 
+/**
+ * The Direction B surface layer is held to the SAME scaling contract.
+ *
+ * It is a second stylesheet over the same board, which is exactly how the
+ * original defect returned once already: a new file gets a hard-coded 13px,
+ * looks right on the laptop it was written on, and freezes on the wall. A
+ * layer that skins the board must scale with it.
+ */
+const DIRECTION_B = readFileSync(fileURLToPath(new URL("./hermes4-direction-b.css", import.meta.url)), "utf8")
+  .replace(/\/\*[\s\S]*?\*\//g, "");
+
 describe("--ops-u — the scaled pixel", () => {
   test("resolves to exactly 1px below 1920, so 1440x900 is untouched", () => {
     // The regression floor. Every `calc(N * var(--ops-u))` is N real pixels
@@ -53,6 +64,33 @@ describe("--ops-u — the scaled pixel", () => {
     const cap = /font-size:\s*clamp\(38px,\s*4\.1vw,\s*(\d+)px\)/.exec(RULES);
     expect(cap).not.toBeNull();
     expect(Number(cap![1])).toBeGreaterThanOrEqual(140);
+  });
+});
+
+describe("the Direction B layer obeys the same contract", () => {
+  test("every font-size scales, except the KPI figure's own curve", () => {
+    // The KPI value is sized by viewport like the verdict is: it is meant to
+    // be read across the room, one tier below the verdict itself.
+    const fixed = [...DIRECTION_B.matchAll(/font-size:\s*([^;]+);/g)]
+      .map((m) => m[1]!.trim())
+      .filter((v) => !v.includes("var(--ops-u)"))
+      .filter((v) => !/^clamp\(24px,\s*2\.1vw,\s*calc\(36 \* var\(--ops-u\)\)\)$/.test(v))
+      .filter((v) => v !== "inherit");
+    expect(fixed, "a fixed font-size freezes at 4K — express it in var(--ops-u)").toEqual([]);
+  });
+
+  test("no border in the layer is expressed in the scaled unit", () => {
+    const scaledBorders = [...DIRECTION_B.matchAll(/border[a-z-]*:\s*([^;]+);/g)]
+      .map((m) => m[1]!)
+      .filter((v) => v.includes("--ops-u"));
+    expect(scaledBorders, "borders stay at real pixels").toEqual([]);
+  });
+
+  test("it re-grounds the board without re-toning severity", () => {
+    // Surface tokens are its job. Re-tuning what red MEANS is not: the verdict
+    // is decided in one place and the alarm colour belongs to it.
+    expect(DIRECTION_B).toMatch(/--h4-surface:/);
+    expect(DIRECTION_B, "coral is the alarm — this layer must not move it").not.toMatch(/--h4-act:/);
   });
 });
 

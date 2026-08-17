@@ -18,6 +18,7 @@ import "./styles/hermes4-tokens.css";
 import "./styles/hermes4-shell.css";
 import "./styles/hermes4-ops.css";
 import "./styles/hermes4-mobile.css";
+import "./styles/hermes4-direction-b.css";
 
 import { OpsBoard } from "./components/ops/OpsBoard.js";
 import { MobileBoard } from "./components/mobile/MobileBoard.js";

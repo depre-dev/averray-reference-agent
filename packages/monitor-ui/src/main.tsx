@@ -39,6 +39,11 @@ import "./styles/hermes4-ops.css";
 // Mobile surface: the dedicated phone board. Scoped to `.hm-mb-*` and only
 // mounted below MOBILE_MAX_WIDTH, so it never touches the desktop surfaces.
 import "./styles/hermes4-mobile.css";
+// DIRECTION B: the midnight-wall surface pass (docs + design project card
+// "Ops board redesign"). Loaded LAST so its additive rules win over both the
+// ops and mobile sheets; it redefines the surface tokens they already read
+// rather than re-declaring their components.
+import "./styles/hermes4-direction-b.css";
 
 const rootEl = document.getElementById("root");
 if (!rootEl) {
