@@ -623,4 +623,96 @@ export const OPS_FIXTURE_ARRIVALS: ArrivalsSnapshot = {
       },
     },
   },
+  // THE NAMED-IDENTITY REGISTRY, shaped like the live one on 2026-08-17.
+  //
+  // Three real cases, because the panel exists to tell them apart:
+  //   · a wallet that walked the gold path to `submitted` — demand
+  //   · a client that browsed and stopped — interest
+  //   · an unattributed caller that made 127 requests in 18 seconds asking
+  //     for /wp-login.php and /.env. It is an outsider by every count on
+  //     this board, and it is emphatically not demand. Only the routes say so.
+  //
+  // Route names and shapes are transcribed from the live producer; the wallet
+  // is a real observed outsider, truncated in the same way the board shows it.
+  agents: [
+    {
+      key: "wallet:0x191c000000000000000000000000000000003b0e",
+      wallet: "0x191c000000000000000000000000000000003b0e",
+      name: "averray-reference-agent",
+      version: "0.4",
+      era: "modern",
+      self: false,
+      firstSeenMs: FIXTURE_NOW - 3 * DAY,
+      lastSeenMs: FIXTURE_NOW - 7 * MIN,
+      furthestStage: "submitted",
+      calls: 310,
+      tools: {
+        "GET /jobs/preflight": 35,
+        "POST /auth/nonce": 39,
+        "POST /jobs/claim": 11,
+        "POST /jobs/submit": 11,
+      },
+      doors: ["http"],
+    },
+    {
+      key: "client:mcpbeat@0.1",
+      name: "mcpbeat",
+      version: "0.1",
+      era: "legacy",
+      self: false,
+      firstSeenMs: FIXTURE_NOW - 6 * DAY,
+      lastSeenMs: FIXTURE_NOW - 4 * HOUR,
+      furthestStage: "browsed",
+      calls: 828,
+      tools: { listJobs: 812, getPlatformCapabilities: 16 },
+      doors: ["mcp"],
+    },
+    {
+      key: "anon:7eba341801e4",
+      name: null,
+      version: null,
+      era: "legacy",
+      self: false,
+      firstSeenMs: FIXTURE_NOW - 51 * MIN,
+      lastSeenMs: FIXTURE_NOW - 51 * MIN,
+      furthestStage: "reached",
+      calls: 127,
+      tools: {
+        "GET /wp-login.php": 1,
+        "GET /.env": 1,
+        "GET /wp-content/plugins/hellopress/wp_filemanager.php": 1,
+        "GET /vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php": 1,
+      },
+      doors: ["http"],
+    },
+    // One of ours, and one unclaimable — present so the filter is exercised:
+    // neither may ever appear in the roster or the presence line.
+    {
+      key: "client:averray-canary@1.0",
+      name: "averray-canary",
+      version: "1.0",
+      era: "modern",
+      self: true,
+      firstSeenMs: FIXTURE_NOW - 9 * DAY,
+      lastSeenMs: FIXTURE_NOW - 12 * MIN,
+      furthestStage: "settled",
+      calls: 44,
+      tools: { "POST /jobs/claim": 2 },
+      doors: ["http"],
+    },
+    {
+      key: "client:Anthropic-ClaudeAI",
+      name: "Anthropic/ClaudeAI",
+      version: null,
+      era: "modern",
+      self: false,
+      ambiguous: true,
+      firstSeenMs: FIXTURE_NOW - 2 * DAY,
+      lastSeenMs: FIXTURE_NOW - 30 * MIN,
+      furthestStage: "evaluated",
+      calls: 18,
+      tools: { listJobs: 18 },
+      doors: ["mcp"],
+    },
+  ],
 };

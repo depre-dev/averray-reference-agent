@@ -12,11 +12,17 @@
 // so would make canaries look like demand and compare unlike instrumentation.
 
 import { formatAgo } from "../../lib/monitor/ops-model.js";
-import { doorJourneys } from "../../lib/monitor/arrivals-view.js";
+import {
+  doorJourneys,
+  outsiderRoster,
+  type OutsiderBand,
+  type OutsiderRow,
+} from "../../lib/monitor/arrivals-view.js";
 import type {
   ArrivalOperatorView,
   ArrivalOperatorDoorRow,
   ArrivalsBlock,
+  ArrivalsSnapshot,
 } from "../../lib/monitor/product-health.js";
 
 export interface ArrivalsPanelProps {
@@ -116,6 +122,8 @@ export function ArrivalsPanel({ arrivals }: ArrivalsPanelProps) {
 
         <JourneyPanel view={operatorView} />
       </section>
+
+      <Roster arrivals={arrivals} generatedAtMs={generatedAtMs} />
 
       <div className="ops-arrivals-secondary">
         <section className="ops-arrivals-owned" data-testid="ops-arrivals-ours">
@@ -277,6 +285,116 @@ function JourneyPanel({ view }: { view: ArrivalOperatorView }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+const BAND_LABEL: Record<OutsiderBand, string> = {
+  worked: "WORKED",
+  engaged: "LOOKED",
+  knocked: "KNOCKED",
+};
+
+/**
+ * WHO SHOWED UP — the named identities, deepest first.
+ *
+ * The counts above answer "how many"; this answers "who, and what did they
+ * actually do" — the only question on this panel an operator can learn from.
+ * Every row carries the routes it called, because that is what separates an
+ * outsider walking the gold path from a scanner asking for /wp-login.php, and
+ * no count can tell them apart.
+ *
+ * ── IT SAYS WHAT IT IS ────────────────────────────────────────────────────
+ *
+ * The registry names what it could attribute; the door tables count distinct
+ * wallets. They do not agree (live: a handful named against 164 counted), so
+ * the header says "the ones we can name" rather than letting a short list
+ * quietly contradict the number above it.
+ */
+function Roster({ arrivals, generatedAtMs }: { arrivals: ArrivalsSnapshot; generatedAtMs: number }) {
+  const roster = outsiderRoster(arrivals);
+  // Absent registry vs unreadable registry vs nobody named — three different
+  // facts, three different lines. None of them is an empty list.
+  if (!roster) {
+    return (
+      <section className="ops-roster" data-testid="ops-arrivals-roster">
+        <div className="ops-arrivals-block-head">
+          <h3>WHO SHOWED UP</h3>
+          <span>named identities · what they called</span>
+        </div>
+        <p className="ops-roster-absent" data-testid="ops-arrivals-roster-absent">
+          {arrivals.agentsUnreadable
+            ? `IDENTITY REGISTRY UNREADABLE — ${arrivals.agentsUnreadable}`
+            : "identity registry not reported by this producer — the counts above are all that was measured"}
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="ops-roster" data-testid="ops-arrivals-roster">
+      <div className="ops-arrivals-block-head">
+        <h3>WHO SHOWED UP</h3>
+        <span>the ones we can name · a subset of the counts above</span>
+      </div>
+
+      <div className="ops-roster-bands" data-testid="ops-roster-bands">
+        {(["worked", "engaged", "knocked"] as const).map((band) => (
+          <span className="ops-roster-band" key={band} data-band={band}>
+            <b>{roster.counts[band]}</b>
+            {BAND_LABEL[band]}
+          </span>
+        ))}
+      </div>
+
+      {roster.rows.length === 0 ? (
+        <p className="ops-roster-absent" data-testid="ops-arrivals-roster-empty">
+          no outsider identity in the registry — ours and unclaimable are counted apart
+        </p>
+      ) : (
+        <div className="ops-roster-rows">
+          {roster.rows.map((row) => (
+            <RosterRow key={row.key} row={row} generatedAtMs={generatedAtMs} />
+          ))}
+        </div>
+      )}
+      {roster.more > 0 ? (
+        <p className="ops-roster-more" data-testid="ops-arrivals-roster-more">
+          +{roster.more} more named in the registry
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function RosterRow({ row, generatedAtMs }: { row: OutsiderRow; generatedAtMs: number }) {
+  return (
+    <div className="ops-roster-row" data-band={row.band} data-testid={`ops-roster-${row.key}`}>
+      <span className="ops-roster-depth" data-band={row.band}>
+        {row.furthestStage}
+      </span>
+      <span className="ops-roster-who">
+        <b>{row.label}</b>
+        <small>
+          {row.doors.length > 0 ? `${row.doors.join(" + ").toUpperCase()} · ` : ""}
+          {row.calls} call{row.calls === 1 ? "" : "s"} · last {formatAgo(row.lastSeenMs, generatedAtMs)}
+        </small>
+      </span>
+      {/* What they actually called. Verbatim, never characterised — a request
+          for /wp-login.php on a service that has no WordPress is evidence, and
+          it reads better as itself than as any label this board could invent. */}
+      <span className="ops-roster-routes">
+        {row.routesUnrecorded ? (
+          <em>no routes recorded for this identity</em>
+        ) : (
+          row.topRoutes.map((r) => (
+            <span className="ops-roster-route" key={r.route} title={`${r.route} — ${r.calls} calls`}>
+              {r.route}
+              <i>{r.calls}</i>
+            </span>
+          ))
+        )}
+      </span>
     </div>
   );
 }

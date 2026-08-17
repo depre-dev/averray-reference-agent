@@ -489,6 +489,43 @@ export interface ArrivalsSnapshot {
   clients: ArrivalClient[];
   /** Verdict-first projection derived by the shared self-identity registry. */
   operatorView?: ArrivalOperatorView | { unavailable: string };
+  /**
+   * The named-identity registry (see `ArrivalAgent`). Absent on a producer
+   * that does not emit it; `agentsUnreadable` when it was there and could not
+   * be parsed — a finding, never rendered as "nobody arrived".
+   */
+  agents?: ArrivalAgent[];
+  agentsUnreadable?: string;
+}
+
+/**
+ * ONE NAMED IDENTITY, across both doors — who arrived, how deep, and what
+ * they actually called.
+ *
+ * This is the only per-identity evidence on the board. It is what separates
+ * an outsider walking the gold path from a scanner asking for `/wp-login.php`,
+ * which no counter can do.
+ *
+ * SCOPED, NEVER AN ENUMERATION: the registry names what it could attribute,
+ * while the door tables count distinct wallets, and the two do not agree. Any
+ * surface rendering these rows must say which it is showing.
+ */
+export interface ArrivalAgent {
+  key: string;
+  wallet?: string | null;
+  name: string | null;
+  version: string | null;
+  era: string | null;
+  self: boolean;
+  ambiguous?: boolean;
+  firstSeenMs: number;
+  lastSeenMs: number;
+  /** `settled` is reachable here and is NOT one of ARRIVAL_STAGES. */
+  furthestStage: string;
+  calls: number;
+  /** Route or tool name → call count. Empty when nothing was recorded. */
+  tools: Record<string, number>;
+  doors?: string[];
 }
 
 /** A reading and a failure are mutually exclusive; neither becomes zero. */
