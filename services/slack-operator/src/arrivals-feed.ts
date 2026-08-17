@@ -91,6 +91,13 @@ export interface ArrivalsSnapshot {
   funnelHttpAmbiguous?: Record<ArrivalStage, number>;
   attributionSourceTotals?: ArrivalAttributionSourceTotals;
   httpCutover?: HttpArrivalCutover;
+  /**
+   * The producer's verdict-first operator view (outsiders/ours/unknown with
+   * furthest-ever and posted-work). Carried through opaquely: the panel owns
+   * its shape, including the {unavailable} form. Absent from producers that
+   * predate it — absent, never fabricated.
+   */
+  operatorView?: Record<string, unknown>;
   distinct: {
     declared: number;
     anonymous: number;
@@ -282,6 +289,12 @@ export function normalizeArrivalsFeed(body: unknown): ArrivalsBlock {
       ? { attributionSourceTotals: attributionSourceTotals.value }
       : {}),
     ...(httpCutover && "value" in httpCutover ? { httpCutover: httpCutover.value } : {}),
+    // Pass the producer's operator view through untouched; the panel owns its
+    // shape. Dropping it here is what turned the live verdict band into
+    // "projection not present" while the backend was emitting it all along.
+    ...(value.operatorView && typeof value.operatorView === "object" && !Array.isArray(value.operatorView)
+      ? { operatorView: value.operatorView as Record<string, unknown> }
+      : {}),
     distinct: {
       declared,
       anonymous,

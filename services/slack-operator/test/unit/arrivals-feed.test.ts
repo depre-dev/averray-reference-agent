@@ -133,6 +133,23 @@ describe("normalizeArrivalsFeed", () => {
     expect("clients" in result && result.clients).toEqual(good.clients);
   });
 
+  // The seam this file guards: the producer's operator view must survive
+  // normalization byte-for-byte, or the live verdict band renders "projection
+  // not present" while the backend emits it — the 2026-08-17 defect.
+  test("passes the producer's operatorView through untouched", () => {
+    const operatorView = {
+      generatedAtMs: 1755400000000,
+      outsiders: { furthestEver: { stage: "settled" }, postedWork: { status: "never" } },
+    };
+    const result = normalizeArrivalsFeed({ ...good, operatorView });
+    expect("operatorView" in result && result.operatorView).toEqual(operatorView);
+  });
+
+  test("a producer without an operator view stays absent, never fabricated", () => {
+    const result = normalizeArrivalsFeed(good);
+    expect("operatorView" in result).toBe(false);
+  });
+
   // A producer too old to split the funnel cannot answer "did an OUTSIDER
   // browse?". Reading `funnel` in its place would answer a different question
   // with the same confident number, which is the defect this contract exists
