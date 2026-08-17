@@ -23,6 +23,7 @@ import type { MonitorBoard } from "../../lib/monitor/board-cache.js";
 import type { ProductHealth } from "../../lib/monitor/product-health.js";
 import { formatAgo, incidentRows, probeOpsTone } from "../../lib/monitor/ops-model.js";
 import { boardKpis, economicsLine } from "../../lib/monitor/ops-spec.js";
+import { outsiderPresence, type OutsiderBand } from "../../lib/monitor/arrivals-view.js";
 import { opsVerdict, staleAfterMs, trustRows } from "../../lib/monitor/ops-spec.js";
 import { FlowPanel } from "./FlowPanel.js";
 import { PillarStrip } from "./PillarStrip.js";
@@ -177,6 +178,23 @@ export function OpsBoard({
           ))}
         </div>
 
+        {/* ── OUTSIDE ──────────────────────────────────────────────────
+            Someone who is not us is at the door, and how far in they got.
+
+            THE FAULT LINE STILL HOLDS. The full ARRIVALS panel stays below
+            everything that can page an operator — demand is a business
+            outcome and must never be recast as a money fault. What sits here
+            is a PRESENCE line, and it is deliberately built out of the
+            board's neutral ink rather than its status palette: it cannot be
+            mistaken for a probe, because nothing on it is ever sage or coral.
+
+            It earns the position because it is the one thing on this board
+            nobody else reports. Every panel above answers "is our money
+            safe"; this answers "is anyone out there", and an outsider who
+            reached `submitted` while the operator was looking at gas is the
+            single most consequential thing that can happen on a quiet day. */}
+        <OutsidePresence arrivals={health.arrivals} nowMs={nowMs} />
+
         <div className="ops-money">
           <SolvencyPanel solvency={health.solvency} gas={health.gas} payout={health.flow?.payout} />
           <FlowPanel flow={health.flow} externalFunnel={health.externalFunnel} lifecycle={health.lifecycle} nowMs={nowMs} />
@@ -255,6 +273,60 @@ export function OpsBoard({
           <span>refresh is the only control · everything else is read-only</span>
         </div>
       </div>
+    </div>
+  );
+}
+
+const PRESENCE_COPY: Record<OutsiderBand, { verb: string; note: string }> = {
+  worked: { verb: "worked", note: "an outsider claimed or submitted — this is demand" },
+  engaged: { verb: "looked around", note: "reached us and got as far as identifying" },
+  knocked: { verb: "knocked", note: "reached the door and went no further" },
+};
+
+/**
+ * OUTSIDE — the presence line.
+ *
+ * Renders nothing at all when the producer sends no registry: this strip is
+ * an addition, and a board that predates it must not grow a permanent "not
+ * reported" bar across its top band. The ARRIVALS panel below says so in its
+ * own words, which is the right place for that sentence.
+ */
+function OutsidePresence({ arrivals, nowMs }: { arrivals: ProductHealth["arrivals"]; nowMs: number }) {
+  const presence = outsiderPresence(arrivals, nowMs);
+  if (!presence || presence.band == null) return null;
+  const copy = PRESENCE_COPY[presence.band];
+
+  return (
+    <div className="ops-outside" data-band={presence.band} data-live={presence.live ? "yes" : "no"} data-testid="ops-outside">
+      <span className="ops-outside-key">OUTSIDE</span>
+      {/* The pulse marks RECENT, not healthy — it is ink, like everything
+          else on this line, and it stops when the activity stops. */}
+      <i className="ops-outside-pulse" aria-hidden />
+      <span className="ops-outside-lead">
+        deepest: someone <b>{copy.verb}</b>
+      </span>
+      {/* The counts are the registry's whole observation window, not today.
+          "1 worked" with no window stated reads as this morning, and the
+          registry has never meant that. */}
+      <span className="ops-outside-counts">
+        {(["worked", "engaged", "knocked"] as const)
+          .filter((b) => presence.counts[b] > 0)
+          .map((b) => `${presence.counts[b]} ${PRESENCE_COPY[b].verb}`)
+          .join(" · ")}
+        <small>
+          {presence.observingSinceMs == null
+            ? " since observing began"
+            : ` since ${new Date(presence.observingSinceMs).toISOString().slice(0, 10)}`}
+        </small>
+      </span>
+      {/* Aged against the PRODUCER's clock, the same one the roster below
+          uses — two clocks put two ages for one event on one screen. */}
+      <span className="ops-outside-when">
+        {presence.lastSeenMs == null
+          ? "no activity time reported"
+          : `last ${formatAgo(presence.lastSeenMs, presence.asOfMs)}`}
+      </span>
+      <span className="ops-outside-note">{copy.note}</span>
     </div>
   );
 }

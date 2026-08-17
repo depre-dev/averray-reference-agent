@@ -395,6 +395,202 @@
 }
 
 /* =========================================================
+   OUTSIDE — presence, and the roster it summarises.
+
+   The one band on this board that is NOT about our money. It is
+   built from neutral ink on purpose: sage would read as "healthy"
+   and coral as "page someone", and an outsider arriving is neither.
+   Depth is carried by WEIGHT and a left rule, not by status hue —
+   which also means it stays legible to anyone who cannot separate
+   the status colours at all.
+   ========================================================= */
+.ops-outside {
+  display: flex;
+  align-items: baseline;
+  gap: calc(12 * var(--ops-u));
+  flex-wrap: wrap;
+  padding: calc(9 * var(--ops-u)) calc(16 * var(--ops-u));
+  border: 1px solid var(--ops-rule);
+  border-left: 3px solid var(--h4-ink-2);
+  border-radius: var(--b-r-card);
+  background: var(--h4-paper);
+  font-family: var(--h4-font-mono);
+  font-size: calc(11.5 * var(--ops-u));
+  color: var(--h4-ink-2);
+}
+/* Depth as weight: a knock is a hairline, work is the full ink rule. */
+.ops-outside[data-band="knocked"] { border-left-color: var(--h4-faint); }
+.ops-outside[data-band="engaged"] { border-left-color: var(--h4-muted); }
+.ops-outside[data-band="worked"]  { border-left-color: var(--h4-ink); }
+.ops-outside-key {
+  font-family: var(--h4-font-display);
+  font-size: calc(10 * var(--ops-u));
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  color: var(--h4-muted);
+}
+/* Recent, not healthy. Ink, and it stops when the activity does. */
+.ops-outside-pulse {
+  width: calc(7 * var(--ops-u));
+  height: calc(7 * var(--ops-u));
+  flex: none;
+  border-radius: 50%;
+  background: var(--h4-faint);
+}
+.ops-outside[data-live="yes"] .ops-outside-pulse {
+  background: var(--h4-ink);
+  animation: ops-outside-pulse 2.6s ease-in-out infinite;
+}
+@keyframes ops-outside-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.35; transform: scale(0.72); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ops-outside[data-live="yes"] .ops-outside-pulse { animation: none; }
+}
+/* A FROZEN READING MUST NOT ANIMATE.
+   Everything below the stale banner dims, but a pulsing dot goes on reading
+   as "happening now" at 72% opacity — animation is the one property dimming
+   does not soften. While the board is untrusted the pulse stops and drops to
+   the faint step, so the strip says what the rest of the screen says. */
+.ops-content[data-dim="yes"] .ops-outside-pulse {
+  animation: none;
+  background: var(--h4-faint);
+}
+.ops-outside-lead { color: var(--h4-ink); }
+.ops-outside-lead b {
+  font-family: var(--h4-font-display);
+  font-size: calc(15 * var(--ops-u));
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.ops-outside[data-band="worked"] .ops-outside-lead b { font-size: calc(18 * var(--ops-u)); }
+.ops-outside-counts { color: var(--h4-muted); }
+.ops-outside-when { color: var(--h4-muted); }
+.ops-outside-note {
+  margin-left: auto;
+  font-size: calc(10 * var(--ops-u));
+  color: var(--h4-tel);
+}
+
+/* ---- the roster ------------------------------------------------- */
+.ops-roster {
+  grid-column: 1 / -1;
+  padding-top: calc(9 * var(--ops-u));
+  border-top: 1px solid var(--ops-hair);
+}
+.ops-roster-bands {
+  display: flex;
+  gap: calc(8 * var(--ops-u));
+  margin: calc(8 * var(--ops-u)) 0 calc(4 * var(--ops-u));
+}
+.ops-roster-band {
+  display: inline-flex;
+  align-items: baseline;
+  gap: calc(6 * var(--ops-u));
+  padding: calc(3 * var(--ops-u)) calc(11 * var(--ops-u));
+  border: 1px solid var(--ops-hair);
+  border-radius: 999px;
+  background: var(--h4-tel-chip);
+  font-family: var(--h4-font-display);
+  font-size: calc(9.5 * var(--ops-u));
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--h4-muted);
+}
+.ops-roster-band b {
+  font-family: var(--h4-font-mono);
+  font-size: calc(13 * var(--ops-u));
+  font-weight: 700;
+  color: var(--h4-ink-2);
+}
+.ops-roster-band[data-band="worked"] { border-color: var(--h4-line-strong); color: var(--h4-ink); }
+.ops-roster-band[data-band="worked"] b { color: var(--h4-ink); }
+
+.ops-roster-rows { display: grid; gap: calc(4 * var(--ops-u)); }
+.ops-roster-row {
+  display: grid;
+  grid-template-columns: calc(96 * var(--ops-u)) minmax(0, 1.1fr) minmax(0, 2fr);
+  gap: calc(12 * var(--ops-u));
+  align-items: baseline;
+  padding: calc(6 * var(--ops-u)) calc(10 * var(--ops-u));
+  border-left: 2px solid var(--h4-faint);
+  border-radius: 0 var(--b-r-chip) var(--b-r-chip) 0;
+  background: var(--h4-paper-sunken);
+}
+.ops-roster-row[data-band="engaged"] { border-left-color: var(--h4-muted); }
+.ops-roster-row[data-band="worked"] { border-left-color: var(--h4-ink); background: var(--h4-tel-chip); }
+.ops-roster-depth {
+  font-family: var(--h4-font-display);
+  font-size: calc(10 * var(--ops-u));
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--h4-muted);
+}
+.ops-roster-row[data-band="worked"] .ops-roster-depth { color: var(--h4-ink); }
+.ops-roster-who { min-width: 0; }
+.ops-roster-who b {
+  display: block;
+  font-family: var(--h4-font-mono);
+  font-size: calc(11.5 * var(--ops-u));
+  font-weight: 600;
+  color: var(--h4-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ops-roster-who small {
+  font-family: var(--h4-font-mono);
+  font-size: calc(9 * var(--ops-u));
+  color: var(--h4-muted);
+}
+/* The routes, verbatim. This is the evidence — it is not characterised
+   anywhere, because a request for /wp-login.php reads better as itself
+   than as any label this board could invent for it. */
+.ops-roster-routes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(4 * var(--ops-u));
+  min-width: 0;
+}
+.ops-roster-route {
+  display: inline-flex;
+  align-items: baseline;
+  gap: calc(5 * var(--ops-u));
+  max-width: 100%;
+  padding: calc(1 * var(--ops-u)) calc(7 * var(--ops-u));
+  border: 1px solid var(--ops-hair);
+  border-radius: var(--b-r-chip);
+  font-family: var(--h4-font-mono);
+  font-size: calc(9.5 * var(--ops-u));
+  color: var(--h4-ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ops-roster-route i { font-style: normal; color: var(--h4-muted); }
+.ops-roster-routes em {
+  font-family: var(--h4-font-mono);
+  font-size: calc(9.5 * var(--ops-u));
+  font-style: normal;
+  color: var(--h4-tel);
+}
+.ops-roster-absent,
+.ops-roster-more {
+  margin: calc(8 * var(--ops-u)) 0 0;
+  font-family: var(--h4-font-mono);
+  font-size: calc(10 * var(--ops-u));
+  line-height: 1.45;
+  color: var(--h4-tel);
+}
+
+@media (max-width: 1240px) {
+  .ops-roster-row { grid-template-columns: calc(84 * var(--ops-u)) minmax(0, 1fr); }
+  .ops-roster-routes { grid-column: 1 / -1; }
+}
+
+/* =========================================================
    THE PHONE, on the same ground.
    The phone board keeps every rule that makes it a phone board — the
    filled verdict field, full contrast when untrusted, one-line lanes —
@@ -413,6 +609,24 @@
   margin: 8px 12px 0;
   border-radius: 18px;
   color: #0e1114;
+}
+/* The square punched out of the verdict field was the one element on this
+   screen with no meaning — a solid block of the page ground, sitting inside
+   a rounded card. It becomes the kit's brand mark, the same chip the desktop
+   top bar wears, so the phone's loudest surface carries the same anchor. */
+.hm-ph-verdict-head i {
+  display: grid;
+  place-items: center;
+  border-radius: var(--b-r-chip);
+  background: #0e1114;
+}
+.hm-ph-verdict-head i::after {
+  content: "A";
+  font-family: var(--h4-font-display);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0;
+  color: var(--h4-ink);
 }
 .hm-ph-trust {
   margin: 8px 12px 0;

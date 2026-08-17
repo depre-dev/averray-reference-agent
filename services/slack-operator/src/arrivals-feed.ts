@@ -69,6 +69,46 @@ export interface ArrivalClient {
   tools: Record<string, number>;
 }
 
+/**
+ * ONE NAMED IDENTITY, across both doors.
+ *
+ * The platform has emitted this registry all along and this normalizer threw
+ * it away — the return object below is a fixed allowlist, so `agents` fell off
+ * the edge of it in silence. What was lost is the only per-identity evidence
+ * the board can get: WHO arrived, HOW DEEP they went, and WHICH routes they
+ * called. Live, that is the difference between an outsider walking the gold
+ * path (`/auth/nonce` → `/jobs/claim` → `/jobs/submit`) and a scanner asking
+ * for `/wp-login.php` — two facts no counter can tell apart, and the second is
+ * one an operator very much wants to see.
+ *
+ * SCOPED, NEVER AN ENUMERATION. This registry names what it can attribute; the
+ * door tables count distinct wallets. The two do not agree and are not meant
+ * to (live: 7 wallet-keyed outsiders here against 164 counted at `identified`).
+ * The board must therefore render this as "the ones we can name", never as
+ * "the outsiders" — a roster that contradicts the counts beside it is worse
+ * than no roster.
+ */
+export interface ArrivalAgent {
+  key: string;
+  /** Present only when the identity resolved to a wallet. */
+  wallet?: string | null;
+  name: string | null;
+  version: string | null;
+  era: string | null;
+  self: boolean;
+  ambiguous?: boolean;
+  firstSeenMs: number;
+  lastSeenMs: number;
+  /** `settled` is reachable here and is NOT one of ARRIVAL_STAGES. */
+  furthestStage: string;
+  calls: number;
+  /** Route or tool name → call count. Empty when nothing was recorded. */
+  tools: Record<string, number>;
+  /** Which front doors this identity was seen at. */
+  doors?: string[];
+  attributionSources?: ArrivalAttributionCounts;
+}
+
 export interface ArrivalsSnapshot {
   schemaVersion: typeof ARRIVALS_SCHEMA_VERSION;
   generatedAtMs?: number;
@@ -108,6 +148,21 @@ export interface ArrivalsSnapshot {
     furthestAmbiguous?: ArrivalStage;
   };
   clients: ArrivalClient[];
+  /**
+   * The named-identity registry — see ArrivalAgent.
+   *
+   * THREE STATES, kept apart on purpose. Absent means the producer does not
+   * emit it (older platform). An array means we read it. `agentsUnreadable`
+   * means it was there and we could not parse it — which is a finding, not an
+   * absence, and must not render as "nobody arrived".
+   *
+   * A malformed entry here does NOT take the whole arrivals block down the way
+   * a malformed client does: this registry is an addition to a panel that
+   * already worked without it, and failing the funnel closed over a new
+   * optional field would be a worse trade than reporting the field unreadable.
+   */
+  agents?: ArrivalAgent[];
+  agentsUnreadable?: string;
 }
 
 /** The platform snapshot verbatim, or why there is no reading. */
@@ -305,7 +360,67 @@ export function normalizeArrivalsFeed(body: unknown): ArrivalsBlock {
       ...(furthestAmbiguous === undefined ? {} : { furthestAmbiguous }),
     },
     clients,
+    ...normalizeAgents(value.agents),
   };
+}
+
+/**
+ * The named-identity registry, or the reason there isn't one.
+ *
+ * Absent → `{}`, so an older producer simply has no field. Present but not an
+ * array, or holding an entry we cannot read → `agentsUnreadable`, because "we
+ * could not parse the roster" and "nobody arrived" must never render alike.
+ * `self` is required for the same reason it is on a client: coercing a missing
+ * mark would silently promote our own probe into an outsider.
+ */
+function normalizeAgents(
+  raw: unknown,
+): { agents: ArrivalAgent[] } | { agentsUnreadable: string } | Record<string, never> {
+  if (raw === undefined || raw === null) return {};
+  if (!Array.isArray(raw)) {
+    return { agentsUnreadable: "identity registry unreadable — agents is not an array" };
+  }
+  const agents: ArrivalAgent[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") {
+      return { agentsUnreadable: "identity registry unreadable — an entry is not an object" };
+    }
+    const value = entry as Record<string, unknown>;
+    const firstSeenMs = count(value.firstSeenMs);
+    const lastSeenMs = count(value.lastSeenMs);
+    const calls = count(value.calls);
+    const tools = toolCounts(value.tools);
+    if (
+      typeof value.key !== "string" || !value.key.trim() ||
+      !nullableString(value.name) || !nullableString(value.version) || !nullableString(value.era) ||
+      typeof value.self !== "boolean" ||
+      (value.ambiguous !== undefined && typeof value.ambiguous !== "boolean") ||
+      typeof value.furthestStage !== "string" || !value.furthestStage.trim() ||
+      firstSeenMs === undefined || lastSeenMs === undefined || calls === undefined ||
+      tools === undefined
+    ) {
+      return { agentsUnreadable: "identity registry unreadable — an entry has invalid fields" };
+    }
+    const doors = Array.isArray(value.doors)
+      ? value.doors.filter((d): d is string => typeof d === "string")
+      : undefined;
+    agents.push({
+      key: value.key,
+      ...(value.wallet === undefined ? {} : { wallet: nullableString(value.wallet) ? (value.wallet as string | null) : null }),
+      name: value.name,
+      version: value.version,
+      era: value.era,
+      self: value.self,
+      ...(value.ambiguous === undefined ? {} : { ambiguous: value.ambiguous }),
+      firstSeenMs,
+      lastSeenMs,
+      furthestStage: value.furthestStage,
+      calls,
+      tools,
+      ...(doors === undefined ? {} : { doors }),
+    });
+  }
+  return { agents };
 }
 
 function stageCounts(
