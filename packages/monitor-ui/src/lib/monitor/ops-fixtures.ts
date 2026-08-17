@@ -9,6 +9,9 @@
 //   OPS_FIXTURE_RED        a mainnet page-worthy incident → soft-banner / auto-flip
 
 import type {
+  ArrivalOperatorDoorRow,
+  ArrivalStage,
+  ArrivalsSnapshot,
   ProductHealth,
   ProductHealthProbe,
   ProbeStatus,
@@ -511,6 +514,113 @@ export const OPS_FIXTURE_UNVERIFIED: ProductHealth = {
       settledCount: 14,
       windowBlocks: null,
       window: { status: "unknown", detail: "block time not sampled", blockSeconds: null, spanHours: null },
+    },
+  },
+};
+
+// ── ARRIVALS, shaped like the live board on 2026-08-17 ──────────────────────
+//
+// Counts transcribed from the production operator view that day (doors,
+// records and windows included), so the preview exercises the OUTSIDERS
+// visualization with realistic asymmetry: an HTTP door with ~160 wallets and
+// an MCP door with one. The legacy pre-registry counters are DERIVED from the
+// MCP door rows (external = outsider, self = ours) rather than invented — the
+// panel renders `operatorView` and never reads them when it is present.
+//
+// NOT spread into the base fixtures: the phone-board tests compose their own
+// arrivals blocks over OPS_FIXTURE_NOMINAL and assert exact lane text; the
+// preview harness merges this in itself.
+
+const ARRIVAL_STAGE_LIST = [
+  "reached",
+  "browsed",
+  "evaluated",
+  "identified",
+  "authenticated",
+  "claimed",
+  "submitted",
+] as const;
+
+function doorRows(
+  counts: Record<(typeof ARRIVAL_STAGE_LIST)[number], [number, number, number]>,
+): ArrivalOperatorDoorRow[] {
+  return ARRIVAL_STAGE_LIST.map((stage, index) => ({
+    stage,
+    unit: index < 3 ? ("calls" as const) : ("agents" as const),
+    instrumentation:
+      index < 3 ? `${stage} route/tool calls` : "distinct SIWE wallets reaching at least this stage",
+    outsider: counts[stage][0],
+    ours: counts[stage][1],
+    unknown: counts[stage][2],
+  }));
+}
+
+const MCP_DOOR_ROWS = doorRows({
+  reached: [2362, 0, 511],
+  browsed: [16, 0, 7],
+  evaluated: [0, 0, 0],
+  identified: [1, 0, 0],
+  authenticated: [1, 0, 0],
+  claimed: [1, 0, 0],
+  submitted: [0, 0, 0],
+});
+
+const stageRecord = (pick: (row: ArrivalOperatorDoorRow) => number): Record<ArrivalStage, number> =>
+  Object.fromEntries(MCP_DOOR_ROWS.map((row) => [row.stage, pick(row)])) as Record<ArrivalStage, number>;
+
+export const OPS_FIXTURE_ARRIVALS: ArrivalsSnapshot = {
+  schemaVersion: "averray.arrivals.v1",
+  generatedAtMs: FIXTURE_NOW - 1 * MIN,
+  observingSinceMs: FIXTURE_NOW - 9 * DAY,
+  // Legacy MCP-scoped counters, derived from the door table above.
+  funnel: stageRecord((r) => r.outsider + r.ours + r.unknown),
+  funnelExternal: stageRecord((r) => r.outsider),
+  funnelSelf: stageRecord((r) => r.ours),
+  distinct: { declared: 1, anonymous: 0, self: 0, furthest: "claimed", furthestExternal: "claimed" },
+  clients: [],
+  httpCutover: {
+    atMs: FIXTURE_NOW - 6 * DAY,
+    at: new Date(FIXTURE_NOW - 6 * DAY).toISOString(),
+    backfilled: false,
+    note: "HTTP arrivals are measured from this cut-over only; earlier HTTP traffic was not backfilled.",
+  },
+  operatorView: {
+    version: "averray.arrivals.operator.v1",
+    generatedAtMs: FIXTURE_NOW - 1 * MIN,
+    outsiders: {
+      furthestEver: {
+        window: "all-time",
+        stage: "settled",
+        atMs: FIXTURE_NOW - 6 * DAY,
+        door: "http",
+        agents: 1,
+        payouts: 52,
+        payoutWindow: "12h",
+        payoutSpanMs: 12 * HOUR,
+      },
+      lastActivity: { window: "all-time", atMs: FIXTURE_NOW - 3 * MIN, stage: "authenticated", door: "http" },
+      week: { window: "7d", identified: 18, worked: 16 },
+      postedWork: { window: "all-time", status: "observed", count: 3, firstAtMs: FIXTURE_NOW - 17 * DAY },
+    },
+    ours: {
+      day: { window: "24h", agents: 4, canaryRuns: 2, acceptanceRuns: 0, adminConsoleAgents: 1, operatorAgents: 1 },
+    },
+    unknown: { window: "all-time", sharedClientNames: 1, preSplitCalls: 455 },
+    doors: {
+      mcp: { window: "all-time", sinceMs: FIXTURE_NOW - 9 * DAY, rows: MCP_DOOR_ROWS },
+      http: {
+        window: "all-time",
+        sinceMs: FIXTURE_NOW - 6 * DAY,
+        rows: doorRows({
+          reached: [15_431, 829, 0],
+          browsed: [431, 2074, 0],
+          evaluated: [1973, 133, 0],
+          identified: [164, 35, 0],
+          authenticated: [164, 35, 0],
+          claimed: [162, 34, 0],
+          submitted: [162, 34, 0],
+        }),
+      },
     },
   },
 };

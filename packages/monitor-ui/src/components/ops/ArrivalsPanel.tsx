@@ -5,9 +5,15 @@
 // so would make canaries look like demand and compare unlike instrumentation.
 
 import { formatAgo } from "../../lib/monitor/ops-model.js";
+import {
+  RECENCY_BANDS,
+  doorLadders,
+  recencyBand,
+  weekPair,
+} from "../../lib/monitor/arrivals-view.js";
 import type {
-  ArrivalOperatorDoorRow,
   ArrivalOperatorView,
+  ArrivalOperatorDoorRow,
   ArrivalsBlock,
 } from "../../lib/monitor/product-health.js";
 
@@ -42,34 +48,44 @@ export function ArrivalsPanel({ arrivals }: ArrivalsPanelProps) {
           <h3>OUTSIDERS</h3>
           <span>the only demand signal</span>
         </div>
-        <dl className="ops-arrivals-verdict-lines">
-          <VerdictLine label="furthest ever" testId="ops-arrivals-furthest-ever">
-            <Figure window={outsiders.furthestEver?.window ?? "all-time"} testId="ops-arrivals-figure-furthest">
-              {formatFurthest(outsiders.furthestEver)}
-            </Figure>
-          </VerdictLine>
-          <VerdictLine label="last activity" testId="ops-arrivals-last-activity">
-            <Figure window={outsiders.lastActivity?.window ?? "all-time"} testId="ops-arrivals-figure-last">
-              {formatLastActivity(outsiders.lastActivity, generatedAtMs)}
-            </Figure>
-          </VerdictLine>
-          <VerdictLine label="this week" testId="ops-arrivals-this-week">
-            <span className="ops-arrivals-pair">
-              <Figure window={outsiders.week.window} testId="ops-arrivals-figure-week-identified">
-                {outsiders.week.identified} identified
+        {/* Two halves of one answer: the verdict lines (records and windows,
+            in words) and the wallet-journey ladders (the same instrumentation
+            as marks). The ladders draw ONLY the wallet-unit rows — the
+            pre-identity call counters stay un-charted in the DOORS drawer,
+            where their unlike instruments are labelled. */}
+        <div className="ops-arrivals-verdict-body">
+          <dl className="ops-arrivals-verdict-lines">
+            <VerdictLine label="furthest ever" testId="ops-arrivals-furthest-ever">
+              <Figure window={outsiders.furthestEver?.window ?? "all-time"} testId="ops-arrivals-figure-furthest">
+                {formatFurthest(outsiders.furthestEver)}
               </Figure>
-              <span aria-hidden>·</span>
-              <Figure window={outsiders.week.window} testId="ops-arrivals-figure-week-worked">
-                {outsiders.week.worked} worked
+            </VerdictLine>
+            <VerdictLine label="last activity" testId="ops-arrivals-last-activity">
+              <Figure window={outsiders.lastActivity?.window ?? "all-time"} testId="ops-arrivals-figure-last">
+                {formatLastActivity(outsiders.lastActivity, generatedAtMs)}
               </Figure>
-            </span>
-          </VerdictLine>
-          <VerdictLine label="posted work" testId="ops-arrivals-posted-work">
-            <Figure window={outsiders.postedWork.window} testId="ops-arrivals-figure-posted">
-              {formatPostedWork(outsiders.postedWork)}
-            </Figure>
-          </VerdictLine>
-        </dl>
+              <RecencyStrip atMs={outsiders.lastActivity?.atMs ?? null} generatedAtMs={generatedAtMs} />
+            </VerdictLine>
+            <VerdictLine label="this week" testId="ops-arrivals-this-week">
+              <span className="ops-arrivals-pair">
+                <Figure window={outsiders.week.window} testId="ops-arrivals-figure-week-identified">
+                  {outsiders.week.identified} identified
+                </Figure>
+                <span aria-hidden>·</span>
+                <Figure window={outsiders.week.window} testId="ops-arrivals-figure-week-worked">
+                  {outsiders.week.worked} worked
+                </Figure>
+              </span>
+              <WeekBars week={outsiders.week} />
+            </VerdictLine>
+            <VerdictLine label="posted work" testId="ops-arrivals-posted-work">
+              <Figure window={outsiders.postedWork.window} testId="ops-arrivals-figure-posted">
+                {formatPostedWork(outsiders.postedWork)}
+              </Figure>
+            </VerdictLine>
+          </dl>
+          <JourneyLadders view={operatorView} />
+        </div>
       </section>
 
       <div className="ops-arrivals-secondary">
@@ -149,6 +165,103 @@ function VerdictLine({ label, testId, children }: { label: string; testId: strin
       <dt>{label}</dt>
       <dd>{children}</dd>
     </div>
+  );
+}
+
+/**
+ * The wallet-journey ladders — one per door, never summed, never compared.
+ *
+ * Only rows the producer declared in the `agents` unit are drawn: distinct
+ * SIWE wallets reaching AT LEAST each stage, which is monotonic by
+ * construction and therefore honest as bars. Each door fills against its OWN
+ * busiest stage, so a 1-wallet MCP door and a 160-wallet HTTP door are both
+ * legible without the widths implying a comparison the windows cannot support.
+ */
+function JourneyLadders({ view }: { view: ArrivalOperatorView }) {
+  const doors = doorLadders(view);
+  return (
+    <div className="ops-arrivals-journey" data-testid="ops-arrivals-journey">
+      <div className="ops-arrivals-journey-head">
+        <h4>WALLET JOURNEY</h4>
+        <span>wallets reaching at least each stage · each door on its own scale · doors never sum</span>
+      </div>
+      <div className="ops-arrivals-journey-doors">
+        {doors.map((door) => (
+          <div className="ops-ladder" key={door.door} data-testid={`ops-arrivals-ladder-${door.door}`}>
+            <div className="ops-ladder-head">
+              <span className="ops-ladder-door">{door.label}</span>
+              <span className="ops-ladder-since">since {formatDate(door.sinceMs)}</span>
+              <WindowBadge window={door.window} />
+            </div>
+            {door.stages.length === 0 ? (
+              <p className="ops-ladder-absent">no wallet-stage rows reported for this door</p>
+            ) : (
+              door.stages.map((s) => (
+                <div
+                  className="ops-ladder-row"
+                  key={s.stage}
+                  data-testid={`ops-arrivals-ladder-${door.door}-${s.stage}`}
+                >
+                  <span className="ops-ladder-stage">{s.stage}</span>
+                  <span className="ops-ladder-track" aria-hidden>
+                    {/* Zero draws NO fill — the min-width that keeps one wallet
+                        visible must never invent one. */}
+                    {s.fillPct > 0 ? <i style={{ width: `${s.fillPct}%` }} /> : null}
+                  </span>
+                  <span className="ops-ladder-count">{s.count}</span>
+                </div>
+              ))
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Where in fixed time bands the last outsider activity sits. The bands are
+ * rungs (1h / 24h / 7d), not a linear axis, and the clock is the snapshot's
+ * own. No activity ever → nothing: an empty strip still looks like a reading.
+ */
+function RecencyStrip({ atMs, generatedAtMs }: { atMs: number | null; generatedAtMs: number }) {
+  const band = recencyBand(atMs, generatedAtMs);
+  if (!band) return null;
+  return (
+    <span
+      className="ops-recency"
+      role="img"
+      aria-label={`last outsider activity falls in the ${band} band`}
+      data-band={band}
+      data-testid="ops-arrivals-recency"
+    >
+      {RECENCY_BANDS.map((b) => (
+        <i key={b.key} data-active={b.key === band ? "yes" : "no"}>
+          {b.label}
+        </i>
+      ))}
+    </span>
+  );
+}
+
+/**
+ * The 7d identified/worked counts as two bars on ONE shared scale — beside
+ * the words that carry the exact numbers. Not nested: nothing in the payload
+ * proves worked ⊆ identified, so neither bar contains the other.
+ */
+function WeekBars({ week }: { week: { identified: number; worked: number } }) {
+  const pair = weekPair(week);
+  if (!pair) return null;
+  return (
+    <span className="ops-weekpair" data-testid="ops-arrivals-weekpair" aria-hidden>
+      {/* A zero count gets no bar at all — the words beside carry the zero. */}
+      {pair.identified.fillPct > 0 ? (
+        <i data-kind="identified" title={`${pair.identified.count} identified (7d)`} style={{ width: `${pair.identified.fillPct}%` }} />
+      ) : null}
+      {pair.worked.fillPct > 0 ? (
+        <i data-kind="worked" title={`${pair.worked.count} worked (7d)`} style={{ width: `${pair.worked.fillPct}%` }} />
+      ) : null}
+    </span>
   );
 }
 

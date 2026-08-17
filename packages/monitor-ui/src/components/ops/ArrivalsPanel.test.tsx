@@ -166,6 +166,51 @@ describe("ArrivalsPanel — verdict first", () => {
     expect(getByTestId("ops-arrivals-http-cutover").textContent).toBe(CUTOVER_NOTE);
   });
 
+  test("the wallet-journey ladders draw only the wallet-unit rows, per door", () => {
+    const { getByTestId, queryByTestId } = render(<ArrivalsPanel arrivals={snapshot()} />);
+
+    // The HTTP door's wallet rows become bars with their counts…
+    const identified = getByTestId("ops-arrivals-ladder-http-identified");
+    expect(identified.textContent).toContain("identified");
+    expect(identified.textContent).toContain("3");
+    expect(identified.querySelector(".ops-ladder-track i")).not.toBeNull();
+    // …the 1730-call evaluated counter must NOT have become a ladder row.
+    expect(queryByTestId("ops-arrivals-ladder-http-evaluated")).toBeNull();
+    expect(queryByTestId("ops-arrivals-ladder-http-reached")).toBeNull();
+
+    // A zero-wallet stage keeps its row and its 0, but draws no fill.
+    const mcpIdentified = getByTestId("ops-arrivals-ladder-mcp-identified");
+    expect(mcpIdentified.textContent).toContain("0");
+    expect(mcpIdentified.querySelector(".ops-ladder-track i")).toBeNull();
+  });
+
+  test("the recency strip marks one fixed band from the snapshot clock", () => {
+    const { getByTestId } = render(<ArrivalsPanel arrivals={snapshot()} />);
+    // HISTORICAL_AT is 5 days before GENERATED_AT → the <7d band.
+    const strip = getByTestId("ops-arrivals-recency");
+    expect(strip.getAttribute("data-band")).toBe("7d");
+    expect(strip.querySelectorAll('[data-active="yes"]').length).toBe(1);
+  });
+
+  test("no outsider activity ever → no recency strip at all", () => {
+    const none = snapshot();
+    if (none.operatorView && !("unavailable" in none.operatorView)) {
+      none.operatorView.outsiders.lastActivity = null;
+    }
+    const { queryByTestId, getByTestId } = render(<ArrivalsPanel arrivals={none} />);
+    expect(queryByTestId("ops-arrivals-recency")).toBeNull();
+    expect(getByTestId("ops-arrivals-last-activity").textContent).toContain("NO IDENTIFIED OUTSIDER ACTIVITY YET");
+  });
+
+  test("a zero week draws no bars — the words carry the zero", () => {
+    const quiet = snapshot();
+    if (quiet.operatorView && !("unavailable" in quiet.operatorView)) {
+      quiet.operatorView.outsiders.week = { window: "7d", identified: 0, worked: 0 };
+    }
+    const { queryByTestId } = render(<ArrivalsPanel arrivals={quiet} />);
+    expect(queryByTestId("ops-arrivals-weekpair")).toBeNull();
+  });
+
   test("an older producer is a named missing verdict, never a reconstructed zero", () => {
     const older = snapshot({ operatorView: undefined });
     const { getByTestId, queryByTestId } = render(<ArrivalsPanel arrivals={older} />);

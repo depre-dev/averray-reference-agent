@@ -1387,6 +1387,141 @@ body,
   color: var(--h4-muted);
   background: var(--h4-paper);
 }
+
+/* ---- OUTSIDERS — words beside marks ------------------------------
+   Left: the verdict lines (records, in words, with their windows).
+   Right: the wallet-journey ladders — the same instrumentation as
+   marks. Only wallet-unit rows are drawn ("at least this stage" is
+   monotonic, which is what makes bars honest); the pre-identity call
+   counters stay un-charted in the DOORS drawer. Fills are ink, not
+   sage: a count is not a verdict. */
+.ops-arrivals-verdict-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(calc(320 * var(--ops-u)), 42%);
+  gap: calc(6 * var(--ops-u)) calc(26 * var(--ops-u));
+  align-items: start;
+  margin-top: calc(6 * var(--ops-u));
+}
+.ops-arrivals-verdict-body > .ops-arrivals-verdict-lines { margin-top: 0; }
+.ops-arrivals-journey { min-width: 0; }
+.ops-arrivals-journey-head {
+  display: flex;
+  align-items: baseline;
+  gap: calc(10 * var(--ops-u));
+  flex-wrap: wrap;
+}
+.ops-arrivals-journey-head h4 {
+  margin: 0;
+  font-family: var(--h4-font-mono);
+  font-size: calc(9.5 * var(--ops-u));
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--h4-muted);
+}
+.ops-arrivals-journey-head span {
+  font-family: var(--h4-font-mono);
+  font-size: calc(8.5 * var(--ops-u));
+  color: var(--h4-tel);
+}
+.ops-arrivals-journey-doors {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: calc(16 * var(--ops-u));
+  margin-top: calc(6 * var(--ops-u));
+}
+.ops-ladder { min-width: 0; }
+.ops-ladder-head {
+  display: flex;
+  align-items: baseline;
+  gap: calc(8 * var(--ops-u));
+  padding-bottom: calc(3 * var(--ops-u));
+  border-bottom: 1px solid var(--ops-hair);
+}
+.ops-ladder-door {
+  font-family: var(--h4-font-display);
+  font-size: calc(11.5 * var(--ops-u));
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--h4-ink);
+}
+.ops-ladder-since {
+  margin-left: auto;
+  font-family: var(--h4-font-mono);
+  font-size: calc(8.5 * var(--ops-u));
+  color: var(--h4-muted);
+}
+.ops-ladder-row {
+  display: grid;
+  grid-template-columns: calc(84 * var(--ops-u)) minmax(0, 1fr) calc(30 * var(--ops-u));
+  gap: calc(8 * var(--ops-u));
+  align-items: center;
+  padding: calc(3 * var(--ops-u)) 0;
+}
+.ops-ladder-stage {
+  font-family: var(--h4-font-mono);
+  font-size: calc(8.5 * var(--ops-u));
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--h4-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ops-ladder-track {
+  position: relative;
+  height: calc(7 * var(--ops-u));
+  border: 1px solid var(--ops-hair);
+  background: var(--h4-paper-sunken);
+}
+.ops-ladder-track i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--h4-ink-2);
+}
+.ops-ladder-count {
+  font-family: var(--h4-font-mono);
+  font-size: calc(10.5 * var(--ops-u));
+  text-align: right;
+  color: var(--h4-ink);
+}
+.ops-ladder-absent {
+  margin: calc(6 * var(--ops-u)) 0 0;
+  font-family: var(--h4-font-mono);
+  font-size: calc(9 * var(--ops-u));
+  color: var(--h4-tel);
+}
+
+/* Recency rungs — fixed bands, the snapshot's own clock. The active band is
+   inked, the rest stay hairline: one marker on a scale that never moves. */
+.ops-recency {
+  display: inline-flex;
+  gap: calc(3 * var(--ops-u));
+  margin-top: calc(5 * var(--ops-u));
+}
+.ops-recency i {
+  padding: calc(1 * var(--ops-u)) calc(7 * var(--ops-u));
+  border: 1px solid var(--ops-hair);
+  font-family: var(--h4-font-mono);
+  font-size: calc(8 * var(--ops-u));
+  font-style: normal;
+  letter-spacing: 0.06em;
+  color: var(--h4-muted);
+}
+.ops-recency i[data-active="yes"] {
+  border-color: var(--h4-line-strong);
+  background: var(--h4-tel-chip);
+  color: var(--h4-ink);
+}
+
+/* The 7d pair — two bars, one shared scale, deliberately NOT nested. */
+.ops-weekpair {
+  display: grid;
+  gap: calc(2 * var(--ops-u));
+  margin-top: calc(5 * var(--ops-u));
+  max-width: calc(260 * var(--ops-u));
+}
+.ops-weekpair i { display: block; height: calc(5 * var(--ops-u)); background: var(--h4-ink-2); }
+.ops-weekpair i[data-kind="worked"] { opacity: 0.68; }
 .ops-arrivals-secondary {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1832,6 +1967,7 @@ body,
   .ops-arrivals > .ops-panel-head,
   .ops-arrivals-unattributed,
   .ops-arrivals-unreachable { grid-column: auto; }
+  .ops-arrivals-verdict-body { grid-template-columns: minmax(0, 1fr); }
   .ops-pillars { grid-template-columns: repeat(2, 1fr); }
   .ops-pillar:nth-child(3) { border-left: 0; }
   /* Fifth column: on the two-column layout the incident log takes a full row
