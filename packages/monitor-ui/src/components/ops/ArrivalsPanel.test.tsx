@@ -107,7 +107,10 @@ describe("ArrivalsPanel — verdict first", () => {
     const { getByTestId } = render(<ArrivalsPanel arrivals={snapshot()} />);
     const furthest = getByTestId("ops-arrivals-furthest-ever");
 
-    expect(furthest.textContent).toContain("SETTLED · 42 payouts in 12h · 2026-08-11 (HTTP)");
+    // KPI form: the record is the display value, the provenance is the mono
+    // sub-line — every fact from the feed still on the card, plus its window.
+    expect(furthest.textContent).toContain("SETTLED");
+    expect(furthest.textContent).toContain("42 payouts in 12h · 2026-08-11 (HTTP)");
     expect(furthest.textContent).toContain("ALL-TIME");
     expect(getByTestId("ops-arrivals-last-activity").textContent).toContain("5d ago");
   });
@@ -164,6 +167,32 @@ describe("ArrivalsPanel — verdict first", () => {
     expect(getByTestId("ops-arrivals-unknown").textContent).toContain("shared client names 1");
     expect(getByTestId("ops-arrivals-unknown").textContent).toContain("pre-split calls 455");
     expect(getByTestId("ops-arrivals-http-cutover").textContent).toBe(CUTOVER_NOTE);
+  });
+
+  test("the wallet journey draws only the wallet-unit rows, per door", () => {
+    const { getByTestId, queryByTestId } = render(<ArrivalsPanel arrivals={snapshot()} />);
+
+    // The HTTP door's wallet rows become cells with a fill and their count…
+    const identified = getByTestId("ops-arrivals-journey-http-identified");
+    expect(identified.textContent).toContain("3");
+    expect(identified.querySelector(".ops-journey-fill i")).not.toBeNull();
+    // …the 1730-call evaluated counter must NOT have become a journey row.
+    expect(queryByTestId("ops-arrivals-journey-evaluated")).toBeNull();
+    expect(queryByTestId("ops-arrivals-journey-reached")).toBeNull();
+
+    // A zero-wallet stage keeps its cell and its 0, but draws no fill.
+    const mcpIdentified = getByTestId("ops-arrivals-journey-mcp-identified");
+    expect(mcpIdentified.textContent).toContain("0");
+    expect(mcpIdentified.querySelector(".ops-journey-fill i")).toBeNull();
+  });
+
+  test("no outsider activity ever stays a named absence on the KPI card", () => {
+    const none = snapshot();
+    if (none.operatorView && !("unavailable" in none.operatorView)) {
+      none.operatorView.outsiders.lastActivity = null;
+    }
+    const { getByTestId } = render(<ArrivalsPanel arrivals={none} />);
+    expect(getByTestId("ops-arrivals-last-activity").textContent).toContain("NO IDENTIFIED OUTSIDER ACTIVITY YET");
   });
 
   test("an older producer is a named missing verdict, never a reconstructed zero", () => {

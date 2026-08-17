@@ -884,24 +884,54 @@ export function gasUnreadableNote(reason: string): { text: string; tone: OpsTone
  * pipeline pauses while a payout count stays true. The balance and floor are on
  * the meter directly above and are deliberately not repeated.
  */
+/**
+ * How many more payouts the reward bank funds — the projection itself.
+ *
+ * Split out so the pool's footnote and the KPI strip run the SAME arithmetic
+ * instead of one of them reading the other's sentence. The KPI briefly parsed
+ * the rendered note with a regex, which is a number that silently changes
+ * meaning the day the wording does: exactly the class of drift this module's
+ * "decide it once" rule exists to prevent.
+ *
+ *   null            → no balance to project from
+ *   below-floor     → the pool cannot fund anything
+ *   no-average      → nothing settled to average over; NOT "zero payouts left"
+ */
+export type RunwayProjection =
+  | { status: "below-floor" }
+  | { status: "no-average" }
+  | { status: "ok"; payouts: number; average: number };
+
+export function payoutsRemaining(input: {
+  pool: SolvencyPool | undefined;
+  payout: PayoutEvidence | undefined;
+}): RunwayProjection | null {
+  const { pool, payout } = input;
+  if (!pool || pool.amount == null) return null;
+
+  const usable = pool.amount - (pool.floor ?? 0);
+  if (usable <= 0) return { status: "below-floor" };
+
+  const count = payout?.confirmedCount ?? 0;
+  const total = payout?.confirmedUsdc ?? null;
+  if (count <= 0 || total == null || total <= 0) return { status: "no-average" };
+
+  const average = total / count;
+  return { status: "ok", payouts: Math.floor(usable / average), average };
+}
+
 export function payoutRunwayNote(input: {
   pool: SolvencyPool | undefined;
   payout: PayoutEvidence | undefined;
   runwayNote?: string | null | undefined;
 }): { text: string; tone: OpsTone } | null {
-  const { pool, payout } = input;
-  if (!pool || pool.amount == null) return null;
-
-  const usable = pool.amount - (pool.floor ?? 0);
-  if (usable <= 0) return { text: "BELOW FLOOR — payouts will fail", tone: "red" };
-
-  const count = payout?.confirmedCount ?? 0;
-  const total = payout?.confirmedUsdc ?? null;
-  if (count <= 0 || total == null || total <= 0) {
+  const projection = payoutsRemaining(input);
+  if (!projection) return null;
+  if (projection.status === "below-floor") return { text: "BELOW FLOOR — payouts will fail", tone: "red" };
+  if (projection.status === "no-average") {
     return { text: "no payout average yet — cannot project", tone: "awaiting" };
   }
-  const average = total / count;
-  const payouts = Math.floor(usable / average);
+  const { payouts, average } = projection;
   const note = input.runwayNote ? ` · ${input.runwayNote}` : "";
   return {
     text: `≈ ${payouts} more payout${payouts === 1 ? "" : "s"} at ${average.toFixed(3)} avg${note}`,
@@ -1159,6 +1189,124 @@ export function formatSeconds(seconds: number | null): string {
  * `decimals` absent ⇒ the raw base-unit string, labelled `raw`. Scaling by a
  * guessed exponent would silently move a decimal point on a money value.
  */
+// ── the KPI strip (Direction B) ─────────────────────────────────────────────
+
+export interface KpiView {
+  key: string;
+  label: string;
+  /** The figure, or "—" when it was not reported. Never a fabricated zero. */
+  value: string;
+  /** Unit or noun beside the figure ("payouts", "DOT"); absent when none. */
+  unit?: string;
+  /** One line of context, already decided. */
+  sub: string;
+  /** Tones the SUB line only — the figure stays ink, because a count is not
+   *  a verdict and the verdict is upstairs. */
+  tone: OpsTone;
+}
+
+/**
+ * The four numbers an operator checks first, as cards.
+ *
+ * ── IT IS A SECOND READING, NEVER A SECOND OPINION ───────────────────────
+ *
+ * Every figure here is taken from the view-model the panel below already
+ * renders — `flowFunnel`, `payoutView`, `payoutRunwayNote`, the runway
+ * projection — so the strip cannot drift from the board it summarises. A KPI
+ * that recomputed its own settled count would eventually disagree with the
+ * funnel two hundred pixels underneath it, and the operator would have no way
+ * to tell which one was lying.
+ *
+ * Absence stays absence: a figure the payload did not report renders "—" with
+ * the reason in its sub-line, never 0. The reason a strip like this is
+ * dangerous is precisely that a big confident numeral reads as measured.
+ */
+export function boardKpis(health: ProductHealth, gas?: GasSpendView | undefined): KpiView[] {
+  const funnel = flowFunnel(health.flow);
+  const evidence = payoutView(health.flow?.payout);
+  const payout = health.flow?.payout;
+  const pools = health.solvency?.pools ?? [];
+  const rewardPool = pools.find((p) => p.key === "reward_bank");
+  const gasPool = pools.find((p) => p.key === "signer_gas");
+  const gasRunway = (health.solvency?.runway ?? []).find((r) => r.key === "signer_gas");
+
+  // 1. SETTLED — the funnel's own terminal count, with its tails.
+  const settledSub =
+    health.flow == null
+      ? "no settlement counts reported"
+      : [
+          `${funnel.stuck} stuck`,
+          `${funnel.failed} failed`,
+          health.lifecycle?.externalPct == null ? null : `${health.lifecycle.externalPct}% external`,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+
+  // 2. PROVEN — the independent chain read. Its tone is the evidence tone, so
+  //    a shortfall or a blind instrument is visible in the strip, not only in
+  //    the panel below.
+  const proven: KpiView = {
+    key: "proven",
+    label: "Proven on-chain",
+    value: payout?.confirmedCount == null ? "—" : String(payout.confirmedCount),
+    ...(payout?.confirmedCount == null ? {} : { unit: payout.confirmedCount === 1 ? "payout" : "payouts" }),
+    sub:
+      payout?.confirmedCount == null
+        ? evidence.delta
+        : `${payout.confirmedUsdc == null ? "amount unreadable" : `${formatAmount(payout.confirmedUsdc)} USDC`} · ${evidence.status.toLowerCase()}`,
+    tone: evidence.tone,
+  };
+
+  // 3. RUNWAY — payouts remaining, the same projection the reward-bank note
+  //    makes. Reusing it keeps one arithmetic on screen.
+  const projection = payoutsRemaining({ pool: rewardPool, payout });
+  const runwayNote = payoutRunwayNote({ pool: rewardPool, payout, runwayNote: health.solvency?.runwayNote });
+  const runway: KpiView = {
+    key: "runway",
+    label: "Reward runway",
+    value: projection?.status === "ok" ? `≈${projection.payouts}` : "—",
+    ...(projection?.status === "ok" ? { unit: projection.payouts === 1 ? "payout" : "payouts" } : {}),
+    sub:
+      projection == null
+        ? "reward bank balance not reported"
+        : projection.status === "ok"
+          ? `${formatAmount(rewardPool!.amount!)} ${rewardPool!.unit} in the bank`
+          : (runwayNote?.text ?? "cannot project"),
+    tone: runwayNote?.tone ?? "awaiting",
+  };
+
+  // 4. GAS — the pool that stops settlement when it empties, with its
+  //    time-to-floor when the server could estimate one.
+  const gasSub =
+    gasRunway?.estimable && gasRunway.hoursToFloor != null
+      ? `≈${Math.round(gasRunway.hoursToFloor)}h to floor at the measured burn`
+      : gas?.perSettlement != null
+        ? `${gas.perSettlement.toFixed(3)} DOT per settlement`
+        : gasPool?.floor == null
+          ? "no floor declared"
+          : `floor ${formatAmount(gasPool.floor)} ${gasPool.unit}`;
+
+  return [
+    {
+      key: "settled",
+      label: "Settled · 24h",
+      value: funnel.settled,
+      sub: settledSub,
+      tone: funnel.tone,
+    },
+    proven,
+    runway,
+    {
+      key: "gas",
+      label: "Signer gas",
+      value: gasPool?.amount == null ? "—" : formatAmount(gasPool.amount),
+      ...(gasPool?.amount == null ? {} : { unit: gasPool.unit }),
+      sub: gasSub,
+      tone: gasRunway?.status ?? (gasPool?.amount == null ? "awaiting" : gasPool.status),
+    },
+  ];
+}
+
 /**
  * The deposit pool's cap meter — the one bounded scale on the BANK side.
  *

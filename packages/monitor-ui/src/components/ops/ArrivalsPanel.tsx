@@ -1,13 +1,21 @@
 // ARRIVALS — the operator verdict first, raw transport counters second.
 //
+// Visual grammar per the Averray design system's operator kit (the design
+// project's SKILL.md): records render as KPI cards — uppercase display
+// eyebrow, one large display value, mono sub-line; instrumentation renders as
+// a table; OURS / UNKNOWN counts are status pills; identifiers stay mono.
+// Translated onto the board's --h4 tokens so every color profile keeps
+// working.
+//
 // The backend owns identity joins, historical payout evidence, and windows.
 // This component never recovers a verdict from the legacy call funnels: doing
 // so would make canaries look like demand and compare unlike instrumentation.
 
 import { formatAgo } from "../../lib/monitor/ops-model.js";
+import { doorJourneys } from "../../lib/monitor/arrivals-view.js";
 import type {
-  ArrivalOperatorDoorRow,
   ArrivalOperatorView,
+  ArrivalOperatorDoorRow,
   ArrivalsBlock,
 } from "../../lib/monitor/product-health.js";
 
@@ -30,6 +38,8 @@ export function ArrivalsPanel({ arrivals }: ArrivalsPanelProps) {
   }
 
   const { outsiders, ours, unknown, generatedAtMs } = operatorView;
+  const furthest = outsiders.furthestEver;
+  const last = outsiders.lastActivity;
   return (
     <section className="ops-arrivals" aria-label="Arrivals — who is actually showing up" data-testid="ops-arrivals">
       <header className="ops-panel-head">
@@ -42,34 +52,69 @@ export function ArrivalsPanel({ arrivals }: ArrivalsPanelProps) {
           <h3>OUTSIDERS</h3>
           <span>the only demand signal</span>
         </div>
-        <dl className="ops-arrivals-verdict-lines">
-          <VerdictLine label="furthest ever" testId="ops-arrivals-furthest-ever">
-            <Figure window={outsiders.furthestEver?.window ?? "all-time"} testId="ops-arrivals-figure-furthest">
-              {formatFurthest(outsiders.furthestEver)}
-            </Figure>
-          </VerdictLine>
-          <VerdictLine label="last activity" testId="ops-arrivals-last-activity">
-            <Figure window={outsiders.lastActivity?.window ?? "all-time"} testId="ops-arrivals-figure-last">
-              {formatLastActivity(outsiders.lastActivity, generatedAtMs)}
-            </Figure>
-          </VerdictLine>
-          <VerdictLine label="this week" testId="ops-arrivals-this-week">
-            <span className="ops-arrivals-pair">
-              <Figure window={outsiders.week.window} testId="ops-arrivals-figure-week-identified">
-                {outsiders.week.identified} identified
+
+        {/* The four records, as KPI cards. The value is the record; the mono
+            sub-line is its provenance (count, date, door); the window badge
+            rides every figure, exactly as before. */}
+        <div className="ops-arrivals-kpis">
+          <Kpi label="FURTHEST EVER" testId="ops-arrivals-furthest-ever">
+            {furthest ? (
+              <>
+                <span className="ops-kpi-val">{furthest.stage.toUpperCase()}</span>
+                <Figure window={furthest.window} testId="ops-arrivals-figure-furthest">
+                  {furthestSub(furthest)}
+                </Figure>
+              </>
+            ) : (
+              <Figure window="all-time" testId="ops-arrivals-figure-furthest">
+                NO IDENTIFIED OUTSIDER YET
               </Figure>
-              <span aria-hidden>·</span>
-              <Figure window={outsiders.week.window} testId="ops-arrivals-figure-week-worked">
-                {outsiders.week.worked} worked
+            )}
+          </Kpi>
+
+          <Kpi label="LAST ACTIVITY" testId="ops-arrivals-last-activity">
+            {last ? (
+              <>
+                <span className="ops-kpi-val">{formatAgo(last.atMs, generatedAtMs)}</span>
+                <Figure window={last.window} testId="ops-arrivals-figure-last">
+                  {last.stage} ({last.door.toUpperCase()})
+                </Figure>
+              </>
+            ) : (
+              <Figure window="all-time" testId="ops-arrivals-figure-last">
+                NO IDENTIFIED OUTSIDER ACTIVITY YET
               </Figure>
-            </span>
-          </VerdictLine>
-          <VerdictLine label="posted work" testId="ops-arrivals-posted-work">
-            <Figure window={outsiders.postedWork.window} testId="ops-arrivals-figure-posted">
-              {formatPostedWork(outsiders.postedWork)}
+            )}
+          </Kpi>
+
+          <Kpi label="THIS WEEK" testId="ops-arrivals-this-week">
+            <Figure window={outsiders.week.window} testId="ops-arrivals-figure-week-identified">
+              <span className="ops-kpi-val">{outsiders.week.identified}</span> identified
             </Figure>
-          </VerdictLine>
-        </dl>
+            <Figure window={outsiders.week.window} testId="ops-arrivals-figure-week-worked">
+              {outsiders.week.worked} worked
+            </Figure>
+          </Kpi>
+
+          <Kpi label="POSTED WORK" testId="ops-arrivals-posted-work">
+            {outsiders.postedWork.status === "observed" ? (
+              <>
+                <span className="ops-kpi-val">
+                  {outsiders.postedWork.count ?? 0} <span className="ops-kpi-word">POSTED</span>
+                </span>
+                <Figure window={outsiders.postedWork.window} testId="ops-arrivals-figure-posted">
+                  FIRST {formatDate(outsiders.postedWork.firstAtMs)}
+                </Figure>
+              </>
+            ) : (
+              <Figure window={outsiders.postedWork.window} testId="ops-arrivals-figure-posted">
+                {outsiders.postedWork.status === "never" ? "NEVER — THE OPEN GATE" : "UNKNOWN — JOB CATALOGUE UNREADABLE"}
+              </Figure>
+            )}
+          </Kpi>
+        </div>
+
+        <JourneyPanel view={operatorView} />
       </section>
 
       <div className="ops-arrivals-secondary">
@@ -143,11 +188,95 @@ function Unavailable({ reason, label = "UNREACHABLE" }: { reason: string; label?
   );
 }
 
-function VerdictLine({ label, testId, children }: { label: string; testId: string; children: React.ReactNode }) {
+/** One record card: uppercase eyebrow, then whatever the record renders. */
+function Kpi({ label, testId, children }: { label: string; testId: string; children: React.ReactNode }) {
   return (
-    <div data-testid={testId}>
-      <dt>{label}</dt>
-      <dd>{children}</dd>
+    <div className="ops-kpi" data-testid={testId}>
+      <span className="ops-kpi-lbl">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+/** The furthest-ever provenance sub-line: burst, date, door. */
+function furthestSub(reading: NonNullable<ArrivalOperatorView["outsiders"]["furthestEver"]>): string {
+  const burst =
+    reading.payouts === undefined ? "" : `${reading.payouts} payouts in ${reading.payoutWindow ?? "the measured burst"} · `;
+  return `${burst}${formatDate(reading.atMs)} (${reading.door.toUpperCase()})`;
+}
+
+/**
+ * The wallet journey, as the kit's table pattern — one row per wallet stage,
+ * one column per door.
+ *
+ * Only rows the producer declared in the `agents` unit are drawn: distinct
+ * SIWE wallets reaching AT LEAST each stage, monotonic by construction, which
+ * is what makes the fill behind each count honest. Each door fills against
+ * its OWN busiest stage — a 1-wallet MCP door and a 160-wallet HTTP door are
+ * both legible without the widths implying a comparison the windows cannot
+ * support. The pre-identity call counters stay un-charted in the DOORS drawer.
+ */
+function JourneyPanel({ view }: { view: ArrivalOperatorView }) {
+  const doors = doorJourneys(view);
+  // Row spine: every wallet stage any door reported, in producer order.
+  const stageOrder = doors.flatMap((d) => d.stages.map((s) => s.stage)).filter((s, i, all) => all.indexOf(s) === i);
+
+  return (
+    <div className="ops-journey" data-testid="ops-arrivals-journey">
+      <div className="ops-journey-head">
+        <h4>WALLET JOURNEY</h4>
+        <span>wallets reaching at least each stage · each door on its own scale · doors never sum</span>
+      </div>
+      {stageOrder.length === 0 ? (
+        <p className="ops-journey-absent" data-testid="ops-arrivals-journey-absent">
+          no wallet-stage rows reported by either door
+        </p>
+      ) : (
+        <div className="ops-journey-grid" role="table" aria-label="Outsider wallets by stage, per door">
+          <div className="ops-journey-row ops-journey-row--head" role="row">
+            <span role="columnheader" className="ops-journey-stage-head">
+              stage
+            </span>
+            {doors.map((door) => (
+              <span role="columnheader" className="ops-journey-door" key={door.door}>
+                {door.label}
+                <small>since {formatDate(door.sinceMs)}</small>
+                <WindowBadge window={door.window} />
+              </span>
+            ))}
+          </div>
+          {stageOrder.map((stage) => (
+            <div className="ops-journey-row" role="row" key={stage} data-testid={`ops-arrivals-journey-${stage}`}>
+              <span role="cell" className="ops-journey-stage">
+                {stage}
+              </span>
+              {doors.map((door) => {
+                const reading = door.stages.find((s) => s.stage === stage);
+                return (
+                  <span
+                    role="cell"
+                    className="ops-journey-cell"
+                    key={door.door}
+                    data-testid={`ops-arrivals-journey-${door.door}-${stage}`}
+                  >
+                    {/* A stage this door never reported is a dash, not a zero. */}
+                    {reading ? (
+                      <>
+                        <span className="ops-journey-fill" aria-hidden>
+                          {reading.fillPct > 0 ? <i style={{ width: `${reading.fillPct}%` }} /> : null}
+                        </span>
+                        <b>{reading.count}</b>
+                      </>
+                    ) : (
+                      <b className="ops-journey-none">—</b>
+                    )}
+                  </span>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -200,28 +329,6 @@ function DoorRow({ door, row, window }: { door: "mcp" | "http"; row: ArrivalOper
       ))}
     </div>
   );
-}
-
-function formatFurthest(reading: ArrivalOperatorView["outsiders"]["furthestEver"]): string {
-  if (!reading) return "NO IDENTIFIED OUTSIDER YET";
-  const payout = reading.payouts === undefined
-    ? ""
-    : ` · ${reading.payouts} payouts in ${reading.payoutWindow ?? "the measured burst"}`;
-  return `${reading.stage.toUpperCase()}${payout} · ${formatDate(reading.atMs)} (${reading.door.toUpperCase()})`;
-}
-
-function formatLastActivity(
-  reading: ArrivalOperatorView["outsiders"]["lastActivity"],
-  generatedAtMs: number,
-): string {
-  if (!reading) return "NO IDENTIFIED OUTSIDER ACTIVITY YET";
-  return `${formatAgo(reading.atMs, generatedAtMs)} · ${reading.stage} (${reading.door.toUpperCase()})`;
-}
-
-function formatPostedWork(reading: ArrivalOperatorView["outsiders"]["postedWork"]): string {
-  if (reading.status === "never") return "NEVER — THE OPEN GATE";
-  if (reading.status === "unknown") return "UNKNOWN — JOB CATALOGUE UNREADABLE";
-  return `${reading.count ?? 0} POSTED · FIRST ${formatDate(reading.firstAtMs)}`;
 }
 
 function formatDate(atMs: number | null): string {

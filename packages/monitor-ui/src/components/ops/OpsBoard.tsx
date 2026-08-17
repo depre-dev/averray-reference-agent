@@ -22,7 +22,7 @@ import { opsSuggestions } from "../../lib/monitor/ops-suggestions.js";
 import type { MonitorBoard } from "../../lib/monitor/board-cache.js";
 import type { ProductHealth } from "../../lib/monitor/product-health.js";
 import { formatAgo, incidentRows, probeOpsTone } from "../../lib/monitor/ops-model.js";
-import { economicsLine } from "../../lib/monitor/ops-spec.js";
+import { boardKpis, economicsLine } from "../../lib/monitor/ops-spec.js";
 import { opsVerdict, staleAfterMs, trustRows } from "../../lib/monitor/ops-spec.js";
 import { FlowPanel } from "./FlowPanel.js";
 import { PillarStrip } from "./PillarStrip.js";
@@ -62,6 +62,16 @@ export function OpsBoard({
   return (
     <div className="ops-board" data-testid="ops-board" data-untrusted={untrusted ? "yes" : "no"}>
       <div className="ops-meta">
+        {/* The brand row. The mark and name are chrome; the string beside them
+            is the same network / chain / read-only line the board always
+            carried, unchanged. */}
+        <span className="ops-brand">
+          <span className="ops-brand-mark" aria-hidden>A</span>
+          <span>
+            <span className="ops-brand-name">Hermes</span>
+            <span className="ops-brand-sub">Averray ops</span>
+          </span>
+        </span>
         <span>{metaLine(health)}</span>
         <span>
           {health.at == null
@@ -94,7 +104,11 @@ export function OpsBoard({
       {/* Everything below dims while untrusted: stale data must LOOK stale, not
           merely be labelled stale somewhere above it. */}
       <div className="ops-content" data-dim={untrusted ? "yes" : "no"}>
-        <div className="ops-verdict-row">
+        {/* The slab's own wash follows the verdict it carries — a coral
+            headline over a sage-tinted ground is a mixed signal at exactly
+            the distance this element exists to be read from. It is the SAME
+            tone the headline already uses; nothing new is decided here. */}
+        <div className="ops-verdict-row" data-verdict={verdict.verdictTone}>
           <div className="ops-verdict">
             <div className="ops-verdict-kicker" data-tone={verdict.kickerTone}>
               {verdict.kicker}
@@ -140,6 +154,27 @@ export function OpsBoard({
               </div>
             ))}
           </div>
+        </div>
+
+        {/* ── KPI STRIP ────────────────────────────────────────────────
+            The four figures an operator checks first, sized to be read
+            before any panel is. Every one is quoted from the view-model
+            the panel below renders (`boardKpis`), so the strip is a
+            second READING and never a second opinion — and an
+            unreported figure is a dash with its reason, not a zero. */}
+        <div className="ops-kpis" data-testid="ops-kpis">
+          {boardKpis(health, health.gas).map((kpi) => (
+            <div className="ops-kpi" key={kpi.key} data-testid={`ops-kpi-${kpi.key}`}>
+              <span className="ops-kpi-lbl">{kpi.label}</span>
+              <span className="ops-kpi-val">
+                {kpi.value}
+                {kpi.unit ? <span className="ops-kpi-unit">{kpi.unit}</span> : null}
+              </span>
+              <span className="ops-kpi-sub" data-tone={kpi.tone}>
+                {kpi.sub}
+              </span>
+            </div>
+          ))}
         </div>
 
         <div className="ops-money">

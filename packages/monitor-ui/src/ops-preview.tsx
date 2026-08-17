@@ -18,10 +18,12 @@ import "./styles/hermes4-tokens.css";
 import "./styles/hermes4-shell.css";
 import "./styles/hermes4-ops.css";
 import "./styles/hermes4-mobile.css";
+import "./styles/hermes4-direction-b.css";
 
 import { OpsBoard } from "./components/ops/OpsBoard.js";
 import { MobileBoard } from "./components/mobile/MobileBoard.js";
 import {
+  OPS_FIXTURE_ARRIVALS,
   OPS_FIXTURE_NOMINAL,
   OPS_FIXTURE_STRESS,
   OPS_FIXTURE_UNVERIFIED,
@@ -29,10 +31,17 @@ import {
   FIXTURE_NOW,
 } from "./lib/monitor/ops-fixtures.js";
 
+// The arrivals block is merged HERE rather than baked into the base fixtures:
+// the phone-board tests compose their own arrivals over OPS_FIXTURE_NOMINAL
+// and assert exact lane text, so the base fixtures stay arrivals-free while
+// the preview still exercises the OUTSIDERS visualization. LIVE keeps no
+// arrivals on purpose — that is the UNREACHABLE state.
+const withArrivals = (health: typeof OPS_FIXTURE_NOMINAL) => ({ ...health, arrivals: OPS_FIXTURE_ARRIVALS });
+
 const FIXTURES = {
-  nominal: { label: "FIG. 1 — Nominal", health: OPS_FIXTURE_NOMINAL, degraded: false },
-  stress: { label: "FIG. 2 — Stress", health: OPS_FIXTURE_STRESS, degraded: true },
-  unverified: { label: "Blind instrument", health: OPS_FIXTURE_UNVERIFIED, degraded: false },
+  nominal: { label: "FIG. 1 — Nominal", health: withArrivals(OPS_FIXTURE_NOMINAL), degraded: false },
+  stress: { label: "FIG. 2 — Stress", health: withArrivals(OPS_FIXTURE_STRESS), degraded: true },
+  unverified: { label: "Blind instrument", health: withArrivals(OPS_FIXTURE_UNVERIFIED), degraded: false },
   awaiting: { label: "Awaiting blocks", health: OPS_FIXTURE_LIVE, degraded: false },
 } as const;
 type FixtureKey = keyof typeof FIXTURES;
