@@ -362,14 +362,10 @@ function requestLine(requests: BankRequests, nowMs: number, staleAfterMs: number
     return { text: `request table is ${mins}m old — in-flight state not current`, tone: "degraded" };
   }
 
-  // An unrecognized phase is NOT dropped and NOT treated as terminal. The
-  // observer owns this vocabulary and may extend it; a request in a phase this
-  // board has never heard of is the most unusual one in the table, which makes
-  // hiding it exactly backwards.
-  const unknown = requests.items.filter((r) => !isKnownPhase(r.phase));
-  const live = requests.items.filter((r) => r.phase !== "terminal");
+  const unknown = requests.items.filter((r) => requestDisposition(r) === "unrecognised");
+  const live = requests.items.filter((r) => requestDisposition(r) !== "terminal");
   if (live.length === 0) {
-    const terminal = requests.items.find((request) => request.phase === "terminal" && request.reconciliation);
+    const terminal = requests.items.find((request) => requestDisposition(request) === "terminal" && request.reconciliation);
     if (terminal?.reconciliation) {
       const r = terminal.reconciliation;
       const final = r.actualTreasuryReturnRaw !== undefined &&
@@ -386,6 +382,16 @@ function requestLine(requests: BankRequests, nowMs: number, staleAfterMs: number
             `${r.stagedRaw} staged − ${r.leg1TransferFeeRaw} leg-1 fee − ` +
             `${r.trappedWriteOff3Raw} trapped write-off #3 = ${r.remoteRecoverableRaw} recoverable · ` +
             `${r.unexplainedRaw} unexplained · ${r.artifactLabel}`,
+        tone: "degraded",
+      };
+    }
+    const failures = requests.items.filter((request) => terminalFailureReason(request) !== null);
+    if (failures.length > 0) {
+      const lead = failures[0]!;
+      return {
+        text:
+          `${failures.length} CLOSED ${String(lead.status ?? lead.phase).toUpperCase()} · ${lead.id} · ` +
+          `${terminalFailureReason(lead)}`,
         tone: "degraded",
       };
     }
@@ -406,9 +412,28 @@ function requestLine(requests: BankRequests, nowMs: number, staleAfterMs: number
   if (unknown.length > 0) {
     // Verbatim, so the value is searchable against the observer's own source.
     const u = unknown[0]!;
-    return { text: `${base} · UNRECOGNISED PHASE "${u.phase}" on ${u.id}`, tone: "degraded" };
+    return { text: `${base} · unrecognised — investigate: phase "${u.phase}" on ${u.id}`, tone: "degraded" };
   }
   return { text: base, tone: "ok" };
+}
+
+export function requestDisposition(request: BankRequest): "pending" | "terminal" | "unrecognised" {
+  const phase = request.phase.trim().toLowerCase();
+  const status = String(request.status ?? "pending").trim().toLowerCase();
+  if (phase === "terminal" || phase === "finalize-error") return "terminal";
+  if (!isKnownPhase(phase)) return "unrecognised";
+  if (["failed", "error", "cancelled", "rejected"].includes(status)) return "terminal";
+  return "pending";
+}
+
+function terminalFailureReason(request: BankRequest): string | null {
+  const phase = request.phase.trim().toLowerCase();
+  const status = String(request.status ?? "").trim().toLowerCase();
+  const failed = phase === "finalize-error" || ["failed", "error", "cancelled", "rejected"].includes(status);
+  if (!failed) return null;
+  return request.reason?.trim()
+    || request.finalization?.lastError?.trim()
+    || `terminal ${status || phase} without a supplied reason`;
 }
 
 /**

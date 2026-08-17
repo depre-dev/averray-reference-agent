@@ -10,6 +10,7 @@ import {
   deriveLatencyProbe,
   deriveMoneyPathProbe,
   probeTreasuryLiquidity,
+  posterFeeAttributionFromTransparency,
   trackChainAdvance,
   chainHaltStatus,
   probeSignerLiquidity,
@@ -889,6 +890,7 @@ describe("probeTreasuryLiquidity (direct RPC + /health rewardBank)", () => {
     const r = await probeTreasuryLiquidity({
       ...base,
       rewardBankLiquid: 100,
+      posterFeeAttribution: { external: 0.29, operatorSelfPaid: 0.1, total: 0.39, status: "fresh" },
       fetchImpl: revenueFetch({
         usdcHex: "0x989680",
         treasury: "0x01E6eed856e989201F4FF6346E18EAb7e46C874C",
@@ -900,6 +902,41 @@ describe("probeTreasuryLiquidity (direct RPC + /health rewardBank)", () => {
     expect(revenue?.amount).toBe(0.005);
     expect(revenue?.informational).toBe(true);
     expect(revenue?.status).toBe("ok"); // informational, never pages
+    expect(revenue?.label).toBe("Protocol revenue — poster fees + gas retention");
+    expect(revenue?.note).toContain("external poster fees: 0.29 USDC");
+    expect(revenue?.note).toContain("of which operator-self-paid: 0.10 USDC");
+  });
+
+  it("keeps operator-self-paid fixed when an external poster settlement moves the external line", () => {
+    const snapshot = (external: string) => ({
+      schemaVersion: "averray.transparency.v1",
+      flow: {
+        posterFeesAllTime: {
+          external: { value: external, status: "fresh" },
+          operatorSelfPaid: { value: "0.10", status: "fresh" },
+          total: { value: String(Number(external) + 0.1), status: "fresh" },
+        },
+      },
+    });
+    const before = posterFeeAttributionFromTransparency(snapshot("0.29"));
+    const after = posterFeeAttributionFromTransparency(snapshot("0.34"));
+
+    expect(before?.operatorSelfPaid).toBe(0.1);
+    expect(after?.operatorSelfPaid).toBe(before?.operatorSelfPaid);
+    expect(after?.external).toBe(0.34);
+  });
+
+  it("never turns an absent self-paid attribution into zero", () => {
+    expect(posterFeeAttributionFromTransparency({
+      schemaVersion: "averray.transparency.v1",
+      flow: {
+        posterFeesAllTime: {
+          external: { value: "0.29", status: "fresh" },
+          operatorSelfPaid: { value: null, status: "fresh" },
+          total: { value: "0.39", status: "fresh" },
+        },
+      },
+    })).toBeUndefined();
   });
 
   it("omits protocol_revenue rather than faking a zero when the treasury read fails", async () => {

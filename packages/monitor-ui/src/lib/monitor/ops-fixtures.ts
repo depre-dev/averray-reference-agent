@@ -264,16 +264,16 @@ const MAINNET_POOLS: SolvencyPool[] = [
     addressLabel: "EscrowCore",
   },
   {
-    key: "revenue",
-    label: "Protocol revenue",
-    amount: 0.01,
+    key: "protocol_revenue",
+    label: "Protocol revenue — poster fees + gas retention",
+    amount: 0.39,
     unit: "USDC",
     status: "ok",
-    note: "5% poster-side fee · held under the 2-of-3 treasury multisig",
-      address: "0x01e6eed856e989201f4ff6346e18eab7e46c874c",
+    note: "external poster fees: 0.29 USDC · of which operator-self-paid: 0.10 USDC",
+    address: "0x01e6eed856e989201f4ff6346e18eab7e46c874c",
     addressSs58: "13VefHVLFhdvis2hA75gVSrAR6psiRqaqBzFPdwxW6GG6aJ",
     addressLabel: "treasury multisig",
-},
+  },
 ];
 
 const MAINNET_PROBES: ProductHealthProbe[] = [
