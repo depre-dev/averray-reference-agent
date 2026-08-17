@@ -2285,6 +2285,66 @@ export async function probeSignerLiquidity(input: {
   }
 }
 
+export interface PosterFeeAttribution {
+  external: number;
+  operatorSelfPaid: number;
+  total: number;
+  status: string;
+}
+
+export function posterFeeAttributionFromTransparency(snapshot: unknown): PosterFeeAttribution | undefined {
+  if (!snapshot || typeof snapshot !== "object") return undefined;
+  const root = snapshot as Record<string, unknown>;
+  if (root.schemaVersion !== "averray.transparency.v1") return undefined;
+  const flow = root.flow && typeof root.flow === "object" ? root.flow as Record<string, unknown> : {};
+  const fees = flow.posterFeesAllTime && typeof flow.posterFeesAllTime === "object"
+    ? flow.posterFeesAllTime as Record<string, unknown>
+    : {};
+  const read = (key: string): { value: number; status: string } | undefined => {
+    const raw = fees[key];
+    if (!raw || typeof raw !== "object") return undefined;
+    const field = raw as Record<string, unknown>;
+    if (field.value === null || field.value === undefined) return undefined;
+    const value = Number(field.value);
+    const status = typeof field.status === "string" ? field.status : "unknown";
+    return Number.isFinite(value) && status !== "unknown" ? { value, status } : undefined;
+  };
+  const external = read("external");
+  const operatorSelfPaid = read("operatorSelfPaid");
+  const total = read("total");
+  if (!external || !operatorSelfPaid || !total) return undefined;
+  return {
+    external: external.value,
+    operatorSelfPaid: operatorSelfPaid.value,
+    total: total.value,
+    status: [external.status, operatorSelfPaid.status, total.status].every((status) => status === "fresh")
+      ? "fresh"
+      : "stale",
+  };
+}
+
+export async function readPosterFeeAttribution(input: {
+  baseUrl?: string;
+  fetchImpl: typeof fetch;
+  timeoutMs?: number;
+}): Promise<PosterFeeAttribution | undefined> {
+  if (!input.baseUrl) return undefined;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), input.timeoutMs ?? 5_000);
+  try {
+    const response = await input.fetchImpl(`${input.baseUrl.replace(/\/+$/u, "")}/transparency`, {
+      headers: { accept: "application/json" },
+      signal: controller.signal,
+    });
+    if (!response.ok) return undefined;
+    return posterFeeAttributionFromTransparency(await response.json());
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Treasury / reward-pool headroom: USDC balanceOf(AAC / escrow / reserve) via direct
  *  RPC + the reward bank (rewardBank.liquid the product computes on /health). Floors
  *  page (red); escrow is informational (in-flight, fluctuates). Addresses absent (the
@@ -2299,6 +2359,7 @@ export async function probeTreasuryLiquidity(input: {
   minAac: number;
   rpcUrl?: string;
   fetchImpl: typeof fetch;
+  posterFeeAttribution?: PosterFeeAttribution;
 }): Promise<ProbeResult & { pools?: SolvencyPoolData[] }> {
   const name = "treasury_liquidity";
   const a = input.addresses;
@@ -2403,10 +2464,9 @@ export async function probeTreasuryLiquidity(input: {
       });
     }
 
-    // Protocol revenue — the 5% poster-side fee accrued in the treasury
-    // multisig's position. Internal ops metric (Hermes-only); informational, no
-    // floor. Omitted entirely if unreadable — never shown as a fake zero, since
-    // a zero here is a real "no fees yet" statement.
+    // Protocol revenue is the treasury AAC's liquid position: poster fees PLUS
+    // retained gas. The public transparency read supplies the independently
+    // classified poster-fee breakout; it never replaces this on-chain total.
     const protocolRevenue = await readProtocolRevenueUsdc({
       rpcUrl: input.rpcUrl,
       escrowCore: a.escrowCore,
@@ -2418,12 +2478,16 @@ export async function probeTreasuryLiquidity(input: {
     if (protocolRevenue !== undefined) {
       pools.push({
         key: "protocol_revenue",
-        label: "Protocol revenue (fees)",
+        label: "Protocol revenue — poster fees + gas retention",
         amount: protocolRevenue.usdc,
         unit: "USDC",
         status: "ok",
         informational: true,
-        note: "5% poster-side fee, held under the 2-of-3 treasury",
+        note: input.posterFeeAttribution
+          ? `external poster fees: ${input.posterFeeAttribution.external.toFixed(2)} USDC · ` +
+            `of which operator-self-paid: ${input.posterFeeAttribution.operatorSelfPaid.toFixed(2)} USDC` +
+            `${input.posterFeeAttribution.status === "fresh" ? "" : ` (${input.posterFeeAttribution.status})`}`
+          : "of which operator-self-paid: attribution unavailable — total still includes poster fees + gas retention",
         address: protocolRevenue.treasuryAccount,
         addressLabel: "treasury multisig",
       });
@@ -2809,16 +2873,19 @@ export async function collectProductHealthProbes(
     haltStatus: chainHaltStatus(chainId, config.haltSeverity),
     blockAgeSec,
   };
-  const signer = await probeSignerLiquidity({
-    rpcUrl: config.rpcUrl,
-    signerAddress: config.signerAddress,
-    rewardBankLiquid,
-    minGasNative: config.minGasNative,
-    minRewardBank: config.minRewardBank,
-    // Balances are only trusted from an RPC on the product's own chain.
-    expectedChainId: chainId,
-    fetchImpl,
-  });
+  const [signer, posterFeeAttribution] = await Promise.all([
+    probeSignerLiquidity({
+      rpcUrl: config.rpcUrl,
+      signerAddress: config.signerAddress,
+      rewardBankLiquid,
+      minGasNative: config.minGasNative,
+      minRewardBank: config.minRewardBank,
+      // Balances are only trusted from an RPC on the product's own chain.
+      expectedChainId: chainId,
+      fetchImpl,
+    }),
+    readPosterFeeAttribution({ baseUrl: config.apiBaseUrl, fetchImpl }),
+  ]);
   const treasury = await probeTreasuryLiquidity({
     addresses: h.body?.addresses,
     rewardBankLiquid,
@@ -2829,6 +2896,7 @@ export async function collectProductHealthProbes(
     minAac: config.minAac,
     rpcUrl: config.rpcUrl,
     fetchImpl,
+    ...(posterFeeAttribution ? { posterFeeAttribution } : {}),
   });
   // signer_liquidity and treasury_liquidity intentionally share the same
   // /health reward-bank position. Keep one board row while retaining both

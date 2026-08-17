@@ -316,7 +316,11 @@ function SolvencyPanel({ health }: { health: ProductHealth }) {
         <p className="hm-ph-unfloored" data-testid="mobile-unfloored">
           no floor, no meter —{" "}
           {unfloored
-            .map((v) => `${v.pool.label.toLowerCase()} ${v.amountLabel}${v.pool.note ? " (intentional)" : ""}`)
+            .map((v) => {
+              const base = `${v.pool.label.toLowerCase()} ${v.amountLabel}`;
+              if (v.pool.key === "protocol_revenue" && v.pool.note) return `${base} (${v.pool.note})`;
+              return `${base}${v.pool.note ? " (intentional)" : ""}`;
+            })
             .join(" · ")}
         </p>
       ) : null}

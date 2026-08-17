@@ -161,7 +161,7 @@ describe("an unrecognised phase is surfaced, never dropped", () => {
       nowMs: NOW,
     })!;
     expect(v.requests.text).toContain("1 in flight");
-    expect(v.requests.text).toContain('UNRECOGNISED PHASE "phase-from-the-future"');
+    expect(v.requests.text).toContain('unrecognised — investigate: phase "phase-from-the-future"');
     expect(v.requests.text).toContain("req-77");
     expect(v.requests.tone).toBe("degraded");
   });
@@ -202,6 +202,42 @@ describe("an overdue request is the stuck-pending alarm, named", () => {
   test("terminal requests are not in flight", () => {
     const v = bankLaneView({ feed: feed({ requests: { items: [req({ phase: "terminal" })], readAtMs: NOW } }), nowMs: NOW })!;
     expect(v.requests.text).toBe("no requests in flight");
+  });
+
+  test("the five 2026-08-14 finalize-error recalls render closed with their failure reason", () => {
+    const items = Array.from({ length: 5 }, (_, index) => req({
+      id: `recall-2026-08-14-${index + 1}`,
+      phase: "finalize-error",
+      status: "error",
+      finalization: {
+        status: "error",
+        attemptCount: 1,
+        lastError: "FAILED: XCM destination rejected the recall",
+        lastTriedAt: null,
+        nextAttemptAt: null,
+      },
+    }));
+    const v = bankLaneView({ feed: feed({ requests: { items, readAtMs: NOW } }), nowMs: NOW })!;
+
+    expect(v.requests.text).toContain("5 CLOSED ERROR");
+    expect(v.requests.text).toContain("XCM destination rejected the recall");
+    expect(v.requests.text).not.toContain("in flight");
+    expect(v.requests.text).not.toContain("pending");
+  });
+
+  test("FAILED is terminal while a genuinely pending request remains pending", () => {
+    const failed = bankLaneView({
+      feed: feed({ requests: { items: [req({ phase: "pending-finalize", status: "FAILED", reason: "remote failed" })], readAtMs: NOW } }),
+      nowMs: NOW,
+    })!;
+    const pending = bankLaneView({
+      feed: feed({ requests: { items: [req({ phase: "pending-finalize", status: "pending" })], readAtMs: NOW } }),
+      nowMs: NOW,
+    })!;
+
+    expect(failed.requests.text).toContain("1 CLOSED FAILED");
+    expect(failed.requests.text).toContain("remote failed");
+    expect(pending.requests.text).toContain("1 in flight");
   });
 
   test("terminal failure renders the five-line reconciliation and artifact label", () => {
@@ -262,7 +298,7 @@ describe("the documented v2.2 vocabulary is recognised", () => {
       feed: feed({ requests: { items: [req({ phase: "staged-on-chain-backfill" })], readAtMs: NOW } }),
       nowMs: NOW,
     })!;
-    expect(v.requests.text).not.toContain("UNRECOGNISED");
+    expect(v.requests.text).not.toContain("unrecognised");
   });
 
   test("the first v2.2 dispatch phase will not cry wolf either", () => {
@@ -274,7 +310,7 @@ describe("the documented v2.2 vocabulary is recognised", () => {
         feed: feed({ requests: { items: [req({ phase })], readAtMs: NOW } }),
         nowMs: NOW,
       })!;
-      expect(v.requests.text, phase).not.toContain("UNRECOGNISED");
+      expect(v.requests.text, phase).not.toContain("unrecognised");
     }
   });
 });

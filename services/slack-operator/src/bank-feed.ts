@@ -59,7 +59,7 @@ export interface BankRequest {
   /**
    * The observer's state machine value, DELIBERATELY not a closed union.
    *
-   * The four known phases are listed in `KNOWN_PHASES`, but the observer owns
+   * The known phases are listed in `KNOWN_PHASES`, but the observer owns
    * this vocabulary and may extend it — `recovery-pending` is plausible given
    * the recovery bucket. A board that hard-failed or silently dropped an
    * unrecognized phase would hide precisely the unusual request, which is the
@@ -82,6 +82,16 @@ export interface BankRequest {
   deadlineAtMs?: number | null;
   /** Producer-owned terminal status; pending for in-flight rows. */
   status?: string;
+  /** Presentation-safe reason for a terminal failure, when the producer has one. */
+  reason?: string;
+  /** Failed finalization detail from the producer's durable retry record. */
+  finalization?: {
+    status: "error" | "pending";
+    attemptCount: number;
+    lastError: string | null;
+    lastTriedAt: string | null;
+    nextAttemptAt: string | null;
+  };
   /**
    * Presentation-safe terminal accounting. The producer deliberately omits
    * raw contract recovery slots that are known accounting artifacts.
@@ -127,6 +137,7 @@ export const KNOWN_PHASES = [
   "leg2-dispatched",
   // shared tail
   "pending-finalize",
+  "finalize-error",
   "scope-unknown",
   "terminal",
   // synthesized by the feed itself, never by the observer

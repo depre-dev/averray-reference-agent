@@ -67,6 +67,15 @@ describe("phone board — the check-in", () => {
     expect(getByTestId("mobile-unfloored").textContent).toContain("99.00");
   });
 
+  test("protocol revenue discloses gas retention and operator-self-paid fees on the phone board", () => {
+    const { getByTestId } = render(
+      <MobileBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    const text = getByTestId("mobile-unfloored").textContent ?? "";
+    expect(text).toContain("protocol revenue — poster fees + gas retention");
+    expect(text).toContain("of which operator-self-paid: 0.10 USDC");
+  });
+
   test("an unreadable balance is '—', never 0", () => {
     const pools: SolvencyPool[] = [
       { key: "bank", label: "Reward bank", amount: null, unit: "USDC", floor: 2, status: "ok" },

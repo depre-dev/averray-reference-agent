@@ -121,6 +121,38 @@ describe("nothing that crossed the network is trusted", () => {
     });
     expect(r.feed!.requests.items[0]!.reconciliation).not.toHaveProperty("rawRecoveryAssetsOutstandingRaw");
   });
+
+  test("finalize-error reason crosses the boundary for the closed row", () => {
+    const r = normalizeBankFeed({
+      ...good,
+      requests: {
+        items: [{
+          id: "req-failed",
+          kind: "withdraw",
+          phase: "finalize-error",
+          status: "error",
+          ageSeconds: 100,
+          overdue: false,
+          finalization: {
+            status: "error",
+            attemptCount: 2,
+            lastError: "FAILED: remote execution rejected",
+            lastTriedAt: "2026-08-14T10:00:00.000Z",
+            nextAttemptAt: null,
+          },
+        }],
+        readAtMs: 1,
+      },
+    });
+
+    expect(r.feed!.requests.items[0]!.finalization).toEqual({
+      status: "error",
+      attemptCount: 2,
+      lastError: "FAILED: remote execution rejected",
+      lastTriedAt: "2026-08-14T10:00:00.000Z",
+      nextAttemptAt: null,
+    });
+  });
 });
 
 describe("a malformed calibration is dropped, never repaired", () => {

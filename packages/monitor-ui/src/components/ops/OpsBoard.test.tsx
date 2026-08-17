@@ -163,6 +163,16 @@ describe("OpsBoard — solvency meters", () => {
     expect(reserve.textContent).toContain("intentionally unfunded");
   });
 
+  test("protocol revenue names gas retention and discloses operator-self-paid fees", () => {
+    const { getByTestId } = render(
+      <OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    const revenue = getByTestId("ops-pool-protocol_revenue");
+    expect(revenue.textContent).toContain("Protocol revenue — poster fees + gas retention");
+    expect(revenue.textContent).toContain("external poster fees: 0.29 USDC");
+    expect(revenue.textContent).toContain("of which operator-self-paid: 0.10 USDC");
+  });
+
   test("a breached floor is coral and states the absolute shortfall", () => {
     const { getByTestId } = render(<OpsBoard health={OPS_FIXTURE_STRESS} nowMs={FIXTURE_NOW} />);
     const bank = getByTestId("ops-pool-reward_bank");

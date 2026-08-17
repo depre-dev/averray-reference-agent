@@ -199,6 +199,7 @@ function requestsBlock(raw: unknown): { requests: BankRequests } | { reason: str
       return { reason: `bank feed request ${e.id} needs numeric ageSeconds and boolean overdue` };
     }
     const reconciliation = terminalReconciliation(e.reconciliation);
+    const finalization = requestFinalization(e.finalization);
     items.push({
       id: e.id,
       kind: typeof e.kind === "string" ? e.kind : "unknown",
@@ -217,6 +218,8 @@ function requestsBlock(raw: unknown): { requests: BankRequests } | { reason: str
           ? { deadlineAtMs: Date.parse(e.deadlineAt) }
           : {}),
       ...(typeof e.status === "string" ? { status: e.status } : {}),
+      ...(typeof e.reason === "string" && e.reason.trim() ? { reason: e.reason.trim() } : {}),
+      ...(finalization ? { finalization } : {}),
       ...(reconciliation ? { reconciliation } : {}),
     });
   }
@@ -226,6 +229,20 @@ function requestsBlock(raw: unknown): { requests: BankRequests } | { reason: str
       readAtMs: (r.readAtMs as number | null) ?? null,
       ...(typeof r.lastError === "string" ? { lastError: r.lastError } : {}),
     },
+  };
+}
+
+function requestFinalization(raw: unknown): BankRequest["finalization"] | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  if (r.status !== "error" && r.status !== "pending") return undefined;
+  const attemptCount = Number(r.attemptCount);
+  return {
+    status: r.status,
+    attemptCount: Number.isSafeInteger(attemptCount) && attemptCount >= 0 ? attemptCount : 0,
+    lastError: typeof r.lastError === "string" ? r.lastError : null,
+    lastTriedAt: typeof r.lastTriedAt === "string" ? r.lastTriedAt : null,
+    nextAttemptAt: typeof r.nextAttemptAt === "string" ? r.nextAttemptAt : null,
   };
 }
 
