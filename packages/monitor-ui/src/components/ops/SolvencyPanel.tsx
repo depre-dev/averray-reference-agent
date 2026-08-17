@@ -17,7 +17,7 @@ import { OPS_GLOSS } from "../../lib/monitor/ops-gloss.js";
 import type { GasSpendView, PayoutEvidence, SolvencySnapshot } from "../../lib/monitor/product-health.js";
 import { splitPools, type PoolView } from "../../lib/monitor/ops-spec.js";
 import { gasPoolNote, gasUnreadableNote, payoutRunwayNote } from "../../lib/monitor/ops-spec.js";
-import type { OpsTone } from "../../lib/monitor/ops-model.js";
+import { worstOpsTone, type OpsTone } from "../../lib/monitor/ops-model.js";
 
 export interface SolvencyPanelProps {
   solvency: SolvencySnapshot | undefined;
@@ -57,9 +57,17 @@ const POOL_NOTE_KEY: Readonly<Record<string, string>> = {
 export function SolvencyPanel({ solvency, gas, payout }: SolvencyPanelProps) {
   const pools = solvency?.pools ?? [];
   const { floored, unfloored } = splitPools(pools);
+  // The panel's edge rail — the worst tone among its own rows, the same
+  // roll-up rule as a pillar's head dot. Peripheral state, no new claim.
+  const rail = worstOpsTone([...floored, ...unfloored].map((v) => v.tone));
 
   return (
-    <section className="ops-solvency" aria-label="Solvency — pools versus floors" data-testid="ops-solvency">
+    <section
+      className="ops-solvency"
+      aria-label="Solvency — pools versus floors"
+      data-testid="ops-solvency"
+      data-rail={pools.length === 0 ? "awaiting" : rail}
+    >
       <header className="ops-panel-head">
         <h2 className="ops-panel-title">SOLVENCY — POOLS VS FLOORS</h2>
         <span className="ops-panel-note">absolute balances · fixed scales · floor = tick</span>

@@ -350,6 +350,37 @@ export const OPS_FIXTURE_NOMINAL: ProductHealth = {
   // Configured and delivering — the state after the first real narration lands.
   buzz: { status: "ok", detail: "delivered 4m ago" },
   solvency: { pools: MAINNET_POOLS },
+  // The live pool as of 2026-08-17: funded by the operator, no outside
+  // depositors yet, 2% of the cap used. Gives the preview the populated tile
+  // (and its cap meter) instead of a permanent UNAVAILABLE.
+  depositPool: {
+    snapshot: {
+      schemaVersion: 1,
+      available: true,
+      pricingModel: "principal-cost-basis",
+      totalAssets: { raw: "20446982", decimals: 6 },
+      totalShares: { raw: "20501328", decimals: 6 },
+      sharePrice: { raw: "997349", decimals: 6 },
+      buffer: { raw: "15446982", decimals: 6 },
+      deployed: { raw: "5000000", decimals: 6 },
+      reconciled: true,
+      caps: {
+        totalAssetCap: { raw: "1000000000", decimals: 6 },
+        headroom: { raw: "979553018", decimals: 6 },
+        utilizationBps: 204,
+      },
+      yieldStatus: "earning",
+      yieldStatusText:
+        "Pool capital is deployed to the configured venue; yield is recognized only when returned to pool accounting.",
+      flows: {
+        status: "ok",
+        depositorCount: 0,
+        pendingUnfulfilledRedemptionAssets: { raw: "0", decimals: 6 },
+        recent: [],
+        window: { fromBlock: 19_573_403, toBlock: 19_575_402, maxBlocks: 2_000, recentLimit: 8 },
+      },
+    },
+  },
   flow: {
     claimed24h: 9,
     submitted24h: 9,

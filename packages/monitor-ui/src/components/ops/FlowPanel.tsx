@@ -27,6 +27,7 @@ import {
   volumeMixNote,
 } from "../../lib/monitor/ops-spec.js";
 import type { ExternalFunnelView, LifecycleView } from "../../lib/monitor/product-health.js";
+import { worstOpsTone, type OpsTone } from "../../lib/monitor/ops-model.js";
 
 export interface FlowPanelProps {
   flow: MoneyPathSnapshot | undefined;
@@ -55,9 +56,18 @@ export function FlowPanel({ flow, externalFunnel, lifecycle, nowMs }: FlowPanelP
   const evidence = payoutView(flow?.payout);
   const provenance = payoutProvenanceLine(flow?.payout);
   const cross = crossCheckLine(flow?.payout, nowMs ?? Date.now());
+  // Edge rail: the worst of the panel's own conclusions. `awaiting` evidence
+  // keeps the rail grey on purpose — an unverified instrument is a fact about
+  // this panel, and a sage edge over it would out-claim the evidence block.
+  const rail = worstOpsTone([funnel.tone, evidence.tone, ...(clock ? [clock.tone] : [])] as OpsTone[]);
 
   return (
-    <section className="ops-flow" aria-label="Flow — money path over 24 hours" data-testid="ops-flow">
+    <section
+      className="ops-flow"
+      aria-label="Flow — money path over 24 hours"
+      data-testid="ops-flow"
+      data-rail={rail}
+    >
       <header className="ops-panel-head">
         <h2 className="ops-panel-title">FLOW — MONEY PATH · 24 H</h2>
         <span className="ops-chip" data-tone={funnel.stuck !== "0" && funnel.stuck !== "—" ? "degraded" : "awaiting"}>

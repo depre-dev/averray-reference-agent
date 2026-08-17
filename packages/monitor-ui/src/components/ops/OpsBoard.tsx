@@ -21,7 +21,7 @@
 import { opsSuggestions } from "../../lib/monitor/ops-suggestions.js";
 import type { MonitorBoard } from "../../lib/monitor/board-cache.js";
 import type { ProductHealth } from "../../lib/monitor/product-health.js";
-import { formatAgo, incidentRows } from "../../lib/monitor/ops-model.js";
+import { formatAgo, incidentRows, probeOpsTone } from "../../lib/monitor/ops-model.js";
 import { economicsLine } from "../../lib/monitor/ops-spec.js";
 import { opsVerdict, staleAfterMs, trustRows } from "../../lib/monitor/ops-spec.js";
 import { FlowPanel } from "./FlowPanel.js";
@@ -105,6 +105,28 @@ export function OpsBoard({
             <p className="ops-verdict-sub" data-tone={verdict.subTone}>
               {verdict.sub}
             </p>
+            {/* The census, as marks: one cell per probe, severity carried by
+                BOTH colour and height (amber and coral are near-identical to
+                deutan vision, so colour alone must never be the split). The
+                words above stay the record; this row is the same fact made
+                legible from across a room. Absent probes draw nothing —
+                an empty strip would read as "no probes are red". */}
+            {health.probes.length > 0 ? (
+              <div
+                className="ops-census"
+                data-testid="ops-census"
+                role="img"
+                aria-label={`probe census: ${verdict.sub}`}
+              >
+                {health.probes.map((p) => (
+                  <i
+                    key={p.name}
+                    data-tone={probeOpsTone(p)}
+                    title={`${p.name} — ${p.status}`}
+                  />
+                ))}
+              </div>
+            ) : null}
           </div>
 
           <div className="ops-trust" data-testid="ops-trust">
@@ -152,7 +174,7 @@ export function OpsBoard({
           <DepositPoolTile pool={health.depositPool} />
         </section>
 
-        <PillarStrip probes={health.probes} history={health.history} />
+        <PillarStrip probes={health.probes} history={health.history} nowMs={nowMs} />
 
         {/* ── NEXT ────────────────────────────────────────────────────────
             The board says WHAT is wrong in eleven places and never once said
@@ -236,6 +258,9 @@ function metaLine(health: ProductHealth): string {
 
 /** Ongoing incidents lead; an empty durable log says so rather than "all clear". */
 function incidentSummary(health: ProductHealth, nowMs: number): string {
+  // Absent is not empty: a build that reports no log at all must not read as a
+  // clean record. The INCIDENTS column makes the same distinction.
+  if (!health.history?.incidents) return "durable log not reported by this build";
   const rows = incidentRows(health.history, nowMs);
   if (rows.length === 0) return "none recorded in this window";
   const ongoing = rows.filter((r) => r.ongoing);

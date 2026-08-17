@@ -1,26 +1,42 @@
-// The four pillars — the "why is it wrong, specifically" band.
+// The four pillars — the "why is it wrong, specifically" band — plus the
+// durable incident log beside them.
 //
 // Every probe the monitor runs, grouped by the operational domain it belongs
-// to, each with its one-line detail verbatim from the probe. This is the third
-// question the board answers, so it sits below the verdict and the money and
-// gets one compact row rather than the wide sparse table it used to be.
+// to, each with its one-line detail verbatim from the probe AND its last few
+// checks as a strip — the server has always sent the per-check history, and
+// until now the desktop drew none of it. "Flapping for an hour" and "went
+// amber one check ago" are different situations that used to render the same.
 //
 // Awaiting-data probes draw warm grey and are counted separately in the
 // roll-up. They are a telemetry gap, not a degradation — folding them into the
 // amber count is how a board acquires a permanently-lit warning.
+//
+// The INCIDENTS column is the same priority answered in time: which probe
+// broke, when, for how long. It renders the durable log's newest episodes and
+// distinguishes an absent log (older build — says "not reported") from an
+// empty one (watched, nothing recorded) — absent is never a clean record.
 
 import type { ProductHealthProbe, HealthHistory } from "../../lib/monitor/product-health.js";
-import { formatDuration, groupProbesByPillar, probeOpsTone, type OpsTone } from "../../lib/monitor/ops-model.js";
-import { LineSpark } from "./OpsSparks.js";
+import {
+  formatAgo,
+  formatDuration,
+  groupProbesByPillar,
+  probeOpsTone,
+  recentIncidents,
+  trendSpanLabel,
+  worstOpsTone,
+  type OpsTone,
+} from "../../lib/monitor/ops-model.js";
+import { LineSpark, OpsSpark } from "./OpsSparks.js";
 
 export interface PillarStripProps {
   probes: ProductHealthProbe[];
   history: HealthHistory | undefined;
+  /** Injected clock — incident ages and durations must be deterministic to test. */
+  nowMs?: number;
 }
 
-const TONE_RANK: Record<OpsTone, number> = { red: 3, degraded: 2, awaiting: 1, ok: 0 };
-
-export function PillarStrip({ probes, history }: PillarStripProps) {
+export function PillarStrip({ probes, history, nowMs = Date.now() }: PillarStripProps) {
   const groups = groupProbesByPillar(probes);
   if (groups.length === 0) {
     return (
@@ -34,7 +50,7 @@ export function PillarStrip({ probes, history }: PillarStripProps) {
     <section className="ops-pillars" aria-label="Probes by pillar" data-testid="ops-pillars">
       {groups.map((group) => {
         const tones = group.probes.map(probeOpsTone);
-        const worst = tones.reduce<OpsTone>((acc, t) => (TONE_RANK[t] > TONE_RANK[acc] ? t : acc), "ok");
+        const worst = worstOpsTone(tones);
         return (
           <div className="ops-pillar" key={group.pillar} data-testid={`ops-pillar-${group.pillar}`}>
             <div className="ops-pillar-head">
@@ -50,6 +66,10 @@ export function PillarStrip({ probes, history }: PillarStripProps) {
                   <span className="ops-probe-detail" data-tone={probeOpsTone(probe)}>
                     {probe.detail}
                   </span>
+                  {/* The probe's own recent checks, oldest → newest. Severity is
+                      encoded twice — tone AND cell height — because amber vs
+                      coral is exactly the pair colour-blind vision loses. */}
+                  {probe.sparkline?.length ? <OpsSpark series={probe.sparkline} bins={8} /> : null}
                 </div>
               ))}
             </div>
@@ -57,6 +77,7 @@ export function PillarStrip({ probes, history }: PillarStripProps) {
           </div>
         );
       })}
+      <IncidentsColumn history={history} nowMs={nowMs} />
     </section>
   );
 }
@@ -112,29 +133,99 @@ function uptimeText(history: HealthHistory | undefined): string {
 }
 
 /**
- * The one trend that earns space on this board: 24h latency + uptime. Both stay
+ * The one trend that earns space on this board: latency + uptime. Both stay
  * honestly absent until the ring buffer has enough samples — a line drawn
  * through two points is a fabricated trend, so it reads "awaiting history"
  * instead of drawing a flat zero.
+ *
+ * The caption carries the MEASURED span (`trendSpanLabel`), not a hard-coded
+ * "24h": the same buffer that makes the uptime figure state its span makes
+ * this label state its own.
  */
 function AvailabilityTrend({ history }: { history: HealthHistory | undefined }) {
   const series = history?.latencySeriesMs ?? [];
   const samples = series.filter((n): n is number => typeof n === "number");
   const uptimeLabel = uptimeText(history);
+  const spanLabel = trendSpanLabel(history);
 
   if (samples.length < 2) {
     return (
       <p className="ops-pillar-trend" data-tone="awaiting" data-testid="ops-trend-awaiting">
-        ◔ latency 24h — awaiting history · {uptimeLabel}
+        ◔ latency — awaiting history · {uptimeLabel}
       </p>
     );
   }
   return (
     <p className="ops-pillar-trend" data-testid="ops-trend">
-      <LineSpark values={series} tone="ok" width={96} height={20} ariaLabel="API latency, last 24 hours" />
+      <LineSpark values={series} tone="ok" width={96} height={20} ariaLabel={`API latency, ${spanLabel}`} />
       <span>
-        latency 24h · {Math.round(samples[samples.length - 1]!)} ms now · {uptimeLabel}
+        latency {spanLabel} · {Math.round(samples[samples.length - 1]!)} ms now · {uptimeLabel}
       </span>
     </p>
+  );
+}
+
+/**
+ * The durable log, beside the probes it explains.
+ *
+ * The board carried up to 200 incident records and rendered ONE line of them —
+ * a count in the footer. Which probe, when, how long: that is the diagnosis
+ * data an operator scans for after the verdict, and it was fetched, stored and
+ * never drawn. A LIST, deliberately not a timeline: a timeline's empty stretches
+ * would claim "observed and healthy" over hours the monitor may not have been
+ * watching, and no field in the payload backs that claim.
+ */
+function IncidentsColumn({ history, nowMs }: { history: HealthHistory | undefined; nowMs: number }) {
+  const view = recentIncidents(history, nowMs, 3);
+  // Head dot: worst severity among ONGOING episodes only. Ended episodes are
+  // history — a column glowing amber for last week teaches the eye to skip it.
+  const headTone: OpsTone =
+    view == null ? "awaiting" : worstOpsTone(view.rows.filter((r) => r.ongoing).map((r) => r.severity));
+
+  return (
+    <div className="ops-pillar ops-pillar--incidents" data-testid="ops-incidents">
+      <div className="ops-pillar-head">
+        <i className="ops-dot" data-tone={headTone} aria-hidden />
+        <span className="ops-pillar-name">INCIDENTS</span>
+        <span className="ops-pillar-rollup">durable log</span>
+      </div>
+      {view == null ? (
+        <p className="ops-incident-absent" data-testid="ops-incidents-absent">
+          incident log not reported by this build
+        </p>
+      ) : view.rows.length === 0 ? (
+        <p className="ops-incident-absent" data-testid="ops-incidents-empty">
+          no episodes in this window
+        </p>
+      ) : (
+        <>
+          <div className="ops-incident-rows">
+            {view.rows.map((r) => (
+              <div
+                className="ops-incident"
+                key={r.id}
+                data-tone={r.severity}
+                data-ongoing={r.ongoing ? "yes" : "no"}
+                data-testid={`ops-incident-${r.id}`}
+                title={r.note}
+              >
+                <i className="ops-dot ops-dot--sm" data-tone={r.severity} aria-hidden />
+                <span className="ops-incident-probe">{r.probe}</span>
+                <span className="ops-incident-when" data-tone={r.ongoing ? r.severity : "awaiting"}>
+                  {r.ongoing
+                    ? `ONGOING · ${r.durationLabel}`
+                    : `${r.durationLabel} · ended ${formatAgo(r.endedAt ?? r.startedAt, nowMs)}`}
+                </span>
+              </div>
+            ))}
+          </div>
+          {view.more > 0 ? (
+            <p className="ops-incident-more" data-testid="ops-incidents-more">
+              +{view.more} more in the window
+            </p>
+          ) : null}
+        </>
+      )}
+    </div>
   );
 }

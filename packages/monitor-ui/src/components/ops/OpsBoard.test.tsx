@@ -264,6 +264,16 @@ describe("OpsBoard — pillars and footer", () => {
     expect(container.querySelector(".ops-foot")?.textContent).toContain("none recorded");
   });
 
+  test("an ABSENT incident log is 'not reported', never a clean record", () => {
+    // The footer used to collapse absent and empty into "none recorded" — a
+    // clean-record claim over a log the build never reported.
+    const health = { ...OPS_FIXTURE_NOMINAL, history: undefined };
+    const { container } = render(<OpsBoard health={health} nowMs={fresh(health)} />);
+    const foot = container.querySelector(".ops-foot")?.textContent ?? "";
+    expect(foot).toContain("durable log not reported");
+    expect(foot).not.toContain("none recorded");
+  });
+
   // Demoted from the tallest column on the board to one footer line.
   test("LLM spend is a single footer line, and admits what it excludes", () => {
     const { container } = render(
@@ -350,6 +360,62 @@ describe("OpsBoard — pillars and footer", () => {
       <OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
     );
     expect(getAllByTestId(/^ops-pool-[a-z_]+$/).length).toBe(6);
+  });
+});
+
+describe("OpsBoard — the census as marks", () => {
+  test("one mark per probe, tone carried, under the verdict", () => {
+    const { getByTestId } = render(
+      <OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    const census = getByTestId("ops-census");
+    const cells = census.querySelectorAll("i");
+    expect(cells.length).toBe(OPS_FIXTURE_NOMINAL.probes.length);
+    // The degraded capability probe reaches its cell as a degraded mark.
+    const tones = [...cells].map((c) => c.getAttribute("data-tone"));
+    expect(tones).toContain("degraded");
+    expect(tones.filter((t) => t === "ok").length).toBeGreaterThan(0);
+  });
+
+  test("no probes → no strip: an empty census would read as 'none are red'", () => {
+    const { queryByTestId } = render(
+      <OpsBoard health={{ ...OPS_FIXTURE_NOMINAL, probes: [] }} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    expect(queryByTestId("ops-census")).toBeNull();
+  });
+});
+
+describe("OpsBoard — per-check strips and the durable log", () => {
+  test("every probe row carries its own check strip", () => {
+    const { getByTestId } = render(
+      <OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    const strips = getByTestId("ops-pillars").querySelectorAll(".ops-spark");
+    expect(strips.length).toBe(OPS_FIXTURE_NOMINAL.probes.length);
+  });
+
+  test("an empty durable log says so — watched, nothing recorded", () => {
+    // NOMINAL carries `incidents: []`, which is a measurement, not a gap.
+    const { getByTestId } = render(
+      <OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
+    );
+    expect(getByTestId("ops-incidents-empty").textContent).toContain("no episodes");
+  });
+
+  test("an absent log reads 'not reported', never as a clean record", () => {
+    const health = { ...OPS_FIXTURE_NOMINAL, history: undefined };
+    const { getByTestId } = render(<OpsBoard health={health} nowMs={fresh(health)} />);
+    expect(getByTestId("ops-incidents-absent").textContent).toContain("not reported");
+  });
+
+  test("an ongoing episode is named, with its probe and a running duration", () => {
+    const { getByTestId } = render(
+      <OpsBoard health={OPS_FIXTURE_STRESS} nowMs={OPS_FIXTURE_STRESS.at! + 2_000} />,
+    );
+    const row = getByTestId("ops-incident-reward-bank-floor");
+    expect(row.textContent).toContain("signer_liquidity");
+    expect(row.textContent).toContain("ONGOING");
+    expect(row.getAttribute("data-tone")).toBe("red");
   });
 });
 

@@ -48,6 +48,47 @@ describe("DepositPoolTile truth states", () => {
     expect(getByTestId("ops-deposit-pool-flow-window").textContent).toContain("blocks 100–101");
   });
 
+  test("the cap meter draws only against the configured cap, and zero draws no fill", () => {
+    const snapshot = {
+      schemaVersion: 1 as const,
+      available: true as const,
+      totalAssets: amount("20446982"),
+      caps: { totalAssetCap: amount("1000000000"), headroom: amount("979553018"), utilizationBps: 204 },
+    };
+    const { getByTestId, rerender, queryByTestId } = render(<DepositPoolTile pool={{ snapshot }} />);
+    const meter = getByTestId("ops-deposit-pool-cap-meter");
+    expect(meter.querySelector("i")).not.toBeNull();
+    expect(meter.querySelector("i")!.style.width).toBe("2.04%");
+
+    // Zero utilisation keeps the track and drops the fill — the CSS floor that
+    // keeps a real 0.1% visible must never fabricate a sliver at exactly 0.
+    rerender(
+      <DepositPoolTile
+        pool={{ snapshot: { ...snapshot, caps: { ...snapshot.caps, utilizationBps: 0 } } }}
+      />,
+    );
+    expect(getByTestId("ops-deposit-pool-cap-meter").querySelector("i")).toBeNull();
+
+    // No configured cap → no bar at all: a meter needs a real fixed scale.
+    rerender(
+      <DepositPoolTile
+        pool={{ snapshot: { ...snapshot, caps: { utilizationBps: 204 } } }}
+      />,
+    );
+    expect(queryByTestId("ops-deposit-pool-cap-meter")).toBeNull();
+
+    // Over the cap the pegged bar carries the over marker — "at cap" and
+    // "over cap" must not render alike.
+    rerender(
+      <DepositPoolTile
+        pool={{ snapshot: { ...snapshot, caps: { ...snapshot.caps, utilizationBps: 12_000 } } }}
+      />,
+    );
+    const pegged = getByTestId("ops-deposit-pool-cap-meter");
+    expect(pegged.getAttribute("data-over")).toBe("yes");
+    expect(pegged.querySelector("b")).not.toBeNull();
+  });
+
   test("a missing pre-5a endpoint renders UNAVAILABLE, visually distinct from zero", () => {
     const { getByTestId, queryByTestId } = render(
       <DepositPoolTile pool={{ unavailable: "deposit pool unreachable — platform returned HTTP 404" }} />,
