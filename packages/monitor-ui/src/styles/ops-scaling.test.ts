@@ -32,8 +32,25 @@ const RULES = CSS.replace(/\/\*[\s\S]*?\*\//g, "");
  * looks right on the laptop it was written on, and freezes on the wall. A
  * layer that skins the board must scale with it.
  */
-const DIRECTION_B = readFileSync(fileURLToPath(new URL("./hermes4-direction-b.css", import.meta.url)), "utf8")
-  .replace(/\/\*[\s\S]*?\*\//g, "");
+const DIRECTION_B_FILE = readFileSync(fileURLToPath(new URL("./hermes4-direction-b.css", import.meta.url)), "utf8");
+const DIRECTION_B = DIRECTION_B_FILE.replace(/\/\*[\s\S]*?\*\//g, "");
+
+/**
+ * The layer skins TWO surfaces with two different sizing systems, and the
+ * split is load-bearing rather than stylistic: `--ops-u` is declared on
+ * `.ops-board`, so a phone rule written in it resolves to NOTHING. The board
+ * half must scale; the phone half must not reference the scaled unit at all.
+ *
+ * The file marks the boundary with the phone banner, so the test reads the
+ * same divider a human does.
+ */
+const PHONE_MARKER = "THE PHONE, on the same ground";
+const [BOARD_HALF, PHONE_HALF] = (() => {
+  const at = DIRECTION_B_FILE.indexOf(PHONE_MARKER);
+  expect(at, "the phone section's banner is the boundary this test reads").toBeGreaterThan(0);
+  const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "");
+  return [strip(DIRECTION_B_FILE.slice(0, at)), strip(DIRECTION_B_FILE.slice(at))];
+})();
 
 describe("--ops-u — the scaled pixel", () => {
   test("resolves to exactly 1px below 1920, so 1440x900 is untouched", () => {
@@ -68,15 +85,23 @@ describe("--ops-u — the scaled pixel", () => {
 });
 
 describe("the Direction B layer obeys the same contract", () => {
-  test("every font-size scales, except the KPI figure's own curve", () => {
+  test("every board font-size scales, except the KPI figure's own curve", () => {
     // The KPI value is sized by viewport like the verdict is: it is meant to
     // be read across the room, one tier below the verdict itself.
-    const fixed = [...DIRECTION_B.matchAll(/font-size:\s*([^;]+);/g)]
+    const fixed = [...BOARD_HALF.matchAll(/font-size:\s*([^;]+);/g)]
       .map((m) => m[1]!.trim())
       .filter((v) => !v.includes("var(--ops-u)"))
       .filter((v) => !/^clamp\(24px,\s*2\.1vw,\s*calc\(36 \* var\(--ops-u\)\)\)$/.test(v))
       .filter((v) => v !== "inherit");
     expect(fixed, "a fixed font-size freezes at 4K — express it in var(--ops-u)").toEqual([]);
+  });
+
+  test("the phone half never reaches for the board's scaled unit", () => {
+    // `--ops-u` is declared on `.ops-board`. A phone rule written in it does
+    // not fall back — it resolves to nothing, and the size silently vanishes.
+    // The phone is a fixed 390px surface and sizes in real px, exactly as
+    // hermes4-mobile.css already does.
+    expect(PHONE_HALF, "the phone has no --ops-u to read").not.toMatch(/--ops-u/);
   });
 
   test("no border in the layer is expressed in the scaled unit", () => {

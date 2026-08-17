@@ -414,6 +414,24 @@
   border-radius: 18px;
   color: #0e1114;
 }
+/* The square punched out of the verdict field was the one element on this
+   screen with no meaning — a solid block of the page ground, sitting inside
+   a rounded card. It becomes the kit's brand mark, the same chip the desktop
+   top bar wears, so the phone's loudest surface carries the same anchor. */
+.hm-ph-verdict-head i {
+  display: grid;
+  place-items: center;
+  border-radius: var(--b-r-chip);
+  background: #0e1114;
+}
+.hm-ph-verdict-head i::after {
+  content: "A";
+  font-family: var(--h4-font-display);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0;
+  color: var(--h4-ink);
+}
 .hm-ph-trust {
   margin: 8px 12px 0;
   border-radius: 999px;
