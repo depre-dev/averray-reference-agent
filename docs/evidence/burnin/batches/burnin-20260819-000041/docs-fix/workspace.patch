@@ -1,0 +1,8 @@
+--- a/docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md
++++ b/docs/HARNESS_INT2_SUPERVISED_DISPATCH_PLAN.md
+@@ -700,3 +700,5 @@
+ - Harness TaskIntent/RunManifest/RunState: `contracts/task.py` (TaskIntent 171-179; budgets `PositiveInt`); `contracts/run.py` (RunManifest 250-282; RunState 15-38; TRANSITIONS 72-117). Grant/policy: `contracts/policy.py:10-23`. Capabilities/idempotency: `contracts/capabilities.py`. Events (19 types; ArtifactCreated metadata-only): `contracts/events.py:15-36`. Verification gate: `verification/acceptance.py`. Pin: `pyproject.toml`; SHA `2f60cab`.
+ - Averray worker (separate driver): `Polkadot/worker/src/{job-adapter,harness-driver,submission}.js`; `worker/profiles/averray-worker/profile.yaml`; `worker/HANDOFF.md`.
+ - Master plan: `docs/HARNESS_INTEGRATION_PLAN.md` (INT-2 893-916; 12-step flow 698-726; authority 219-242; migration 779-786; burn-in 794-801; OQ3 1072-1078).
++
++The supervised task-family ceremony records the exact search result at its pinned base.
