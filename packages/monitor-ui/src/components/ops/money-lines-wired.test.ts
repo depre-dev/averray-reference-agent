@@ -91,12 +91,17 @@ describe("every money line is actually rendered", () => {
  * guard above exists for, one level up.
  */
 describe("every ops panel is mounted by the board", () => {
-  for (const panel of ["SolvencyPanel", "FlowPanel", "BankLane", "PillarStrip"] as const) {
+  for (const panel of ["SolvencyPanel", "FlowPanel", "BankLane", "PillarStrip", "AdminDemandPanel"] as const) {
     it(`OpsBoard mounts <${panel}>`, () => {
       const opsBoard = fs.readFileSync(path.join(dir, "OpsBoard.tsx"), "utf8");
       expect(opsBoard, `${panel} exists and is tested but the board never renders it`).toContain(`<${panel}`);
     });
   }
+
+  it("the shipped SPA still imports the ops stylesheet", () => {
+    const main = fs.readFileSync(path.join(dir, "..", "..", "main.tsx"), "utf8");
+    expect(main).toContain('import "./styles/hermes4-ops.css"');
+  });
 });
 
 /**
