@@ -1667,6 +1667,240 @@ body,
   color: var(--h4-tel) !important;
 }
 
+/* ---- ARRIVALS & JOURNEYS — prospective admin reads -----------------
+   Pre-auth is aggregate-only and post-SIWE is wallet-bound. These rows sit
+   below the fault line: they describe demand and progression, never health.
+   Client colours are categorical ink, not green/red verdict tones. */
+.ops-admin-demand {
+  display: grid;
+  gap: calc(7 * var(--ops-u));
+  padding: calc(8 * var(--ops-u)) calc(14 * var(--ops-u));
+  border: 1px solid var(--ops-rule);
+}
+.ops-admin-demand-head,
+.ops-demand-subhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: calc(12 * var(--ops-u));
+}
+.ops-admin-demand-head > span {
+  display: flex;
+  align-items: baseline;
+  gap: calc(9 * var(--ops-u));
+  flex-wrap: wrap;
+}
+.ops-admin-demand-head strong,
+.ops-demand-subhead h4 {
+  margin: 0;
+  font-family: var(--h4-font-display);
+  font-size: calc(13.5 * var(--ops-u));
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  color: var(--h4-ink);
+}
+.ops-admin-demand-head small,
+.ops-demand-subhead span,
+.ops-demand-cutover {
+  font-family: var(--h4-font-mono);
+  font-size: calc(8.5 * var(--ops-u));
+  color: var(--h4-muted);
+}
+.ops-demand-window {
+  display: flex;
+  align-items: center;
+  gap: calc(5 * var(--ops-u));
+  font-family: var(--h4-font-mono);
+  font-size: calc(8.5 * var(--ops-u));
+  color: var(--h4-muted);
+}
+.ops-demand-window select {
+  padding: calc(3 * var(--ops-u)) calc(7 * var(--ops-u));
+  border: 1px solid var(--ops-hair);
+  border-radius: 6px;
+  color: var(--h4-ink-2);
+  background: var(--h4-paper-sunken);
+  font: inherit;
+}
+.ops-demand-window select:focus-visible {
+  outline: 2px solid var(--h4-ink-2);
+  outline-offset: 2px;
+}
+.ops-demand-cutover {
+  margin: 0;
+  padding-bottom: calc(5 * var(--ops-u));
+  border-bottom: 1px solid var(--ops-hair);
+  color: var(--h4-tel);
+}
+.ops-demand-status,
+.ops-demand-unavailable,
+.ops-demand-empty {
+  margin: 0;
+  padding: calc(8 * var(--ops-u)) calc(10 * var(--ops-u));
+  border: 1px solid var(--ops-hair);
+  background: var(--h4-paper-sunken);
+  font-family: var(--h4-font-mono);
+  font-size: calc(9.5 * var(--ops-u));
+  color: var(--h4-tel);
+}
+.ops-demand-unavailable {
+  display: grid;
+  gap: calc(3 * var(--ops-u));
+}
+.ops-demand-unavailable strong { letter-spacing: 0.07em; }
+.ops-admin-demand-grid {
+  display: grid;
+  gap: calc(10 * var(--ops-u));
+}
+.ops-demand-timeline,
+.ops-demand-journeys {
+  display: grid;
+  gap: calc(6 * var(--ops-u));
+  padding: calc(9 * var(--ops-u)) calc(11 * var(--ops-u));
+  border: 1px solid var(--ops-hair);
+  border-radius: 10px;
+  background: var(--h4-paper-sunken);
+}
+.ops-demand-subhead {
+  padding-bottom: calc(5 * var(--ops-u));
+  border-bottom: 1px solid var(--ops-hair);
+}
+.ops-demand-subhead h4 { font-size: calc(11 * var(--ops-u)); }
+.ops-demand-strips {
+  display: grid;
+  gap: calc(5 * var(--ops-u));
+}
+.ops-demand-strip {
+  display: grid;
+  grid-template-columns: calc(112 * var(--ops-u)) minmax(0, 1fr);
+  align-items: center;
+  gap: calc(8 * var(--ops-u));
+  min-width: 0;
+}
+.ops-demand-strip-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: calc(5 * var(--ops-u));
+  font-family: var(--h4-font-mono);
+  font-size: calc(8 * var(--ops-u));
+  color: var(--h4-muted);
+}
+.ops-demand-strip-label b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.ops-demand-strip-label small { color: var(--h4-ink-2); }
+.ops-demand-bars {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(2px, 1fr);
+  align-items: end;
+  gap: 1px;
+  height: calc(28 * var(--ops-u));
+  border-bottom: 1px solid var(--ops-hair);
+}
+.ops-demand-bar {
+  display: flex;
+  align-items: end;
+  height: 100%;
+  min-width: 0;
+}
+.ops-demand-bar-stack {
+  display: flex;
+  flex-direction: column-reverse;
+  width: 100%;
+  min-height: 1px;
+  overflow: hidden;
+}
+.ops-demand-bar-stack > i,
+.ops-demand-legend i {
+  display: block;
+  background: var(--h4-faint);
+}
+.ops-demand-bar-stack > i[data-client="claude"], .ops-demand-legend [data-client="claude"] i { background: var(--h4-ag-claude); }
+.ops-demand-bar-stack > i[data-client="cursor"], .ops-demand-legend [data-client="cursor"] i { background: #8a6bb5; }
+.ops-demand-bar-stack > i[data-client="codex"], .ops-demand-legend [data-client="codex"] i { background: var(--h4-ag-codex); }
+.ops-demand-bar-stack > i[data-client="browser"], .ops-demand-legend [data-client="browser"] i { background: #8d7862; }
+.ops-demand-bar-stack > i[data-client="mcp_bridge"], .ops-demand-legend [data-client="mcp_bridge"] i { background: #4f7693; }
+.ops-demand-bar-stack > i[data-client="directory"], .ops-demand-legend [data-client="directory"] i { background: #9a6c65; }
+.ops-demand-bar-stack > i[data-client="other_declared"], .ops-demand-legend [data-client="other_declared"] i { background: var(--h4-ag-test); }
+.ops-demand-bar-stack > i[data-client="unidentified"], .ops-demand-legend [data-client="unidentified"] i { background: var(--h4-faint); }
+.ops-demand-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(4 * var(--ops-u)) calc(9 * var(--ops-u));
+  font-family: var(--h4-font-mono);
+  font-size: calc(7.5 * var(--ops-u));
+  color: var(--h4-muted);
+}
+.ops-demand-legend span { display: inline-flex; align-items: center; gap: calc(3 * var(--ops-u)); }
+.ops-demand-legend i { width: calc(7 * var(--ops-u)); height: calc(7 * var(--ops-u)); }
+.ops-demand-journey-list { display: grid; gap: calc(4 * var(--ops-u)); }
+.ops-demand-journey {
+  border: 1px solid var(--ops-hair);
+  background: var(--h4-paper);
+}
+.ops-demand-journey summary {
+  display: grid;
+  grid-template-columns: calc(126 * var(--ops-u)) calc(82 * var(--ops-u)) calc(64 * var(--ops-u)) minmax(0, 1fr);
+  align-items: center;
+  gap: calc(8 * var(--ops-u));
+  padding: calc(6 * var(--ops-u)) calc(8 * var(--ops-u));
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--h4-font-mono);
+  font-size: calc(8.5 * var(--ops-u));
+}
+.ops-demand-journey summary::-webkit-details-marker { display: none; }
+.ops-demand-wallet { color: var(--h4-ink); }
+.ops-demand-classification {
+  justify-self: start;
+  padding: calc(1 * var(--ops-u)) calc(5 * var(--ops-u));
+  border: 1px solid var(--ops-hair);
+  border-radius: 999px;
+  color: var(--h4-muted);
+}
+.ops-demand-journey[data-classification="external"] .ops-demand-classification { color: var(--h4-ink-2); }
+.ops-demand-journey-depth,
+.ops-demand-journey-last { color: var(--h4-muted); }
+.ops-demand-journey-last { justify-self: end; }
+.ops-demand-events {
+  display: grid;
+  gap: calc(3 * var(--ops-u));
+  margin: 0;
+  padding: calc(6 * var(--ops-u)) calc(8 * var(--ops-u)) calc(8 * var(--ops-u));
+  border-top: 1px solid var(--ops-hair);
+  list-style: none;
+}
+.ops-demand-events li {
+  display: grid;
+  grid-template-columns: calc(106 * var(--ops-u)) calc(138 * var(--ops-u)) calc(120 * var(--ops-u)) minmax(0, 1fr);
+  align-items: baseline;
+  gap: calc(8 * var(--ops-u));
+  font-family: var(--h4-font-mono);
+  font-size: calc(8 * var(--ops-u));
+  color: var(--h4-muted);
+}
+.ops-demand-event-chip {
+  padding: calc(2 * var(--ops-u)) calc(5 * var(--ops-u));
+  border: 1px solid var(--ops-hair);
+  color: var(--h4-ink-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ops-demand-event-time { display: flex; justify-content: space-between; gap: calc(4 * var(--ops-u)); }
+.ops-demand-event-time b { color: var(--h4-ink-2); font-weight: 500; }
+.ops-demand-event-source,
+.ops-demand-events code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ops-demand-events code { color: var(--h4-tel); font: inherit; }
+
 /* ---- BANK group ------------------------------------------------
    One frame asserts one treasury subject, not one instrument. The venue and
    depositor pool therefore keep separate cells, tones and absence rules, with
@@ -1915,6 +2149,19 @@ body,
     grid-template-columns: minmax(calc(120 * var(--ops-u)), 1fr) repeat(3, minmax(calc(48 * var(--ops-u)), auto));
     gap: calc(4 * var(--ops-u));
   }
+  .ops-admin-demand-head,
+  .ops-demand-subhead { align-items: flex-start; flex-direction: column; }
+  .ops-demand-strip { grid-template-columns: calc(88 * var(--ops-u)) minmax(0, 1fr); }
+  .ops-demand-journey summary {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .ops-demand-journey-depth { display: none; }
+  .ops-demand-journey-last { grid-column: 1 / -1; justify-self: start; }
+  .ops-demand-events li {
+    grid-template-columns: minmax(calc(92 * var(--ops-u)), auto) minmax(0, 1fr);
+  }
+  .ops-demand-event-source,
+  .ops-demand-events code { grid-column: 2; }
 }
 
 /* ---- per-job economics -------------------------------------------
@@ -2025,7 +2272,7 @@ body,
 /* ---- NEXT — what to do about it ----------------------------------------
    The board named eleven things that were wrong and never once said what to
    do. This strip is the answer, and it sits directly above the footer that
-   promises "refresh is the only control" — deliberately: it TELLS, it does not
+   promises there are no operational controls here — deliberately: it TELLS, it does not
    ACT. The suggestions carry an approvable task; this surface renders only
    their sentence. */
 .ops-next {

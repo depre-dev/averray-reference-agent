@@ -16,6 +16,7 @@ import type { MonitorBoard } from "../lib/monitor/board-cache.js";
 import type { ProductHealth } from "../lib/monitor/product-health.js";
 import type { StreamStatus } from "../lib/monitor/live-stream.js";
 import { useProductHealth } from "../hooks/useProductHealth.js";
+import { useAdminDemand } from "../hooks/useAdminDemand.js";
 import { useIsMobileViewport } from "../lib/monitor/use-mobile-viewport.js";
 import { MobileBoard } from "./mobile/MobileBoard.js";
 import { OpsBoard } from "./ops/OpsBoard.js";
@@ -30,9 +31,10 @@ export interface BoardViewProps {
 }
 
 export function BoardView({ board, status, onRefresh, health }: BoardViewProps) {
-  const polled = useProductHealth({ enabled: health === undefined });
-  const productHealth = health ?? polled.health;
   const isMobileViewport = useIsMobileViewport();
+  const polled = useProductHealth({ enabled: health === undefined });
+  const demand = useAdminDemand({ enabled: health === undefined && !isMobileViewport });
+  const productHealth = health ?? polled.health;
 
   // A stream we cannot trust must not render as a calm board — the fake-green
   // rule applied to the transport itself. <OpsBoard> takes this as an input
@@ -86,6 +88,11 @@ export function BoardView({ board, status, onRefresh, health }: BoardViewProps) 
         streamStatus={status}
         streamDegraded={degraded}
         onRefresh={onRefresh}
+        adminDemand={demand.feed}
+        adminDemandWindow={demand.window}
+        adminDemandLoading={demand.isLoading}
+        adminDemandError={demand.error}
+        onAdminDemandWindowChange={demand.setWindow}
       />
     </div>
   );

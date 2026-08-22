@@ -4,7 +4,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { readFile } from "node:fs/promises";
-import { addressFromPrivateKey, logger, optionalEnv, query } from "@avg/mcp-common";
+import { addressFromPrivateKey, logger, optionalEnv, query, siweLogin } from "@avg/mcp-common";
 import { createDefaultWorkflowDeps } from "@avg/averray-mcp/default-workflow-runtime";
 import { invokeAgentTask } from "@avg/averray-mcp/agent-invocation";
 import { getHandoffMonitor, recordHandoffEvent } from "@avg/averray-mcp/handoff-events";
@@ -201,6 +201,11 @@ import type { TransportFailureRun } from "./probe-transport.js";
 import { deriveOpsVerdict } from "@avg/schemas";
 import { appendIncidents, readIncidents, reconcileIncidents } from "./product-health-incidents.js";
 import { readArrivalsFeed } from "./arrivals-feed.js";
+import {
+  AdminDemandSessionCache,
+  readAdminDemandFeed,
+  type AdminDemandWindow,
+} from "./admin-demand-feed.js";
 import { depositPoolUrlFromBankFeed, readDepositPoolFeed } from "./deposit-pool-feed.js";
 import {
   loadRemediationConfig,
@@ -371,6 +376,8 @@ function deriveProductHealthSigner(): string | undefined {
   }
 }
 const monitorConfig = parseMonitorConfig(process.env);
+const adminDemandApiBaseUrl = optionalEnv("AVERRAY_API_BASE_URL", "https://api.averray.com");
+const adminDemandSession = new AdminDemandSessionCache(() => siweLogin(adminDemandApiBaseUrl));
 const missionSpawnRoles = parseMissionSpawnRoles(process.env);
 // The Vite-built redesigned monitor SPA, served as the default board at
 // /monitor. At runtime index.js lives in services/slack-operator/dist, so
@@ -935,6 +942,35 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       // omitted by JSON when the routine hasn't run a cycle yet).
       remediation: productHealthRemediation,
     });
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/monitor/admin-demand") {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    const requestedWindow = url.searchParams.get("window") ?? "48h";
+    if (requestedWindow !== "48h" && requestedWindow !== "30d") {
+      writeJson(response, 400, { error: "invalid_window", allowed: ["48h", "30d"] });
+      return;
+    }
+    const requestedLimit = Number.parseInt(url.searchParams.get("limit") ?? "25", 10);
+    if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 100) {
+      writeJson(response, 400, { error: "invalid_limit", min: 1, max: 100 });
+      return;
+    }
+    const feed = await readAdminDemandFeed({
+      baseUrl: adminDemandApiBaseUrl,
+      window: requestedWindow as AdminDemandWindow,
+      limit: requestedLimit,
+      getSession: () => adminDemandSession.get(),
+    });
+    response.setHeader("cache-control", "private, no-store");
+    writeJson(response, 200, feed);
     return;
   }
   if (request.method === "GET" && url.pathname === "/monitor/decision-records") {

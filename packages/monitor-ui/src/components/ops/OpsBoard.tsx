@@ -8,19 +8,21 @@
 //   PILLARS        the 8 probes, grouped, with their details
 //   NEXT           what to do; the fault line below which nothing is red
 //   OUTSIDE        both public arrival doors, condensed but not combined
-//   footer         incidents · LLM spend · "refresh is the only control"
+//   footer         incidents · LLM spend · read-only boundary
 //
 // Size follows priority, not chronology: the verdict is the only thing sized to
 // be read across a room, the money owns the middle band, the probe details sit
 // under it, and the least urgent number on the board — LLM spend — is one line
 // in the footer rather than the tall column it used to be.
 //
-// There are no controls here beyond Refresh. Commands and discussion live in
+// There are no operational controls here beyond Refresh. The arrivals window
+// selector changes only the read projection; commands and discussion live in
 // Buzz (docs/OPS_ONLY_PIVOT.md).
 
 import { opsSuggestions } from "../../lib/monitor/ops-suggestions.js";
 import type { MonitorBoard } from "../../lib/monitor/board-cache.js";
 import type { ProductHealth } from "../../lib/monitor/product-health.js";
+import type { AdminDemandFeed, AdminDemandWindow } from "../../lib/monitor/admin-demand.js";
 import { formatAgo, incidentRows, probeOpsTone } from "../../lib/monitor/ops-model.js";
 import { boardKpis, economicsLine } from "../../lib/monitor/ops-spec.js";
 import { outsiderPresence, type OutsiderBand } from "../../lib/monitor/arrivals-view.js";
@@ -30,6 +32,7 @@ import { PillarStrip } from "./PillarStrip.js";
 import { SolvencyPanel } from "./SolvencyPanel.js";
 import { BankLane } from "./BankLane.js";
 import { ArrivalsPanel } from "./ArrivalsPanel.js";
+import { AdminDemandPanel } from "./AdminDemandPanel.js";
 import { DepositPoolTile } from "./DepositPoolTile.js";
 
 export interface OpsBoardProps {
@@ -42,6 +45,11 @@ export interface OpsBoardProps {
   onRefresh?: (() => void) | undefined;
   /** Injected clock so every age label is deterministic to test. */
   nowMs?: number;
+  adminDemand?: AdminDemandFeed;
+  adminDemandWindow?: AdminDemandWindow;
+  adminDemandLoading?: boolean;
+  adminDemandError?: unknown;
+  onAdminDemandWindowChange?: (window: AdminDemandWindow) => void;
 }
 
 export function OpsBoard({
@@ -51,6 +59,11 @@ export function OpsBoard({
   streamDegraded = false,
   onRefresh,
   nowMs = Date.now(),
+  adminDemand,
+  adminDemandWindow = "48h",
+  adminDemandLoading = false,
+  adminDemandError,
+  onAdminDemandWindowChange = () => undefined,
 }: OpsBoardProps) {
   const verdict = opsVerdict({ health, streamDegraded, nowMs });
   const trust = trustRows({ health, streamDegraded, streamStatus, streamAt: board?.at, nowMs });
@@ -239,8 +252,7 @@ export function OpsBoard({
             words it had already written.
 
             TEXT ONLY. Each suggestion carries a `task` the operator could
-            approve, and this board is read-only by design — "refresh is the
-            only control" is one line below. Rendering the button here would
+            approve, and this board is read-only by design. Rendering the button here would
             break that promise; the sentence is the whole value anyway.
 
             NOTHING WHEN THERE IS NOTHING. An all-clear board shows no NEXT
@@ -266,11 +278,18 @@ export function OpsBoard({
             can page the operator. Both independent doors remain visible, and
             moving them refuses to recast a business outcome as a money fault. */}
         <ArrivalsPanel arrivals={health.arrivals} />
+        <AdminDemandPanel
+          feed={adminDemand}
+          window={adminDemandWindow}
+          isLoading={adminDemandLoading}
+          error={adminDemandError}
+          onWindowChange={onAdminDemandWindowChange}
+        />
 
         <div className="ops-foot">
           <span>INCIDENTS — {incidentSummary(health, nowMs)}</span>
           <span>{llmSummary(board)}</span>
-          <span>refresh is the only control · everything else is read-only</span>
+          <span>refresh is the only operational control · window selects a read</span>
         </div>
       </div>
     </div>
