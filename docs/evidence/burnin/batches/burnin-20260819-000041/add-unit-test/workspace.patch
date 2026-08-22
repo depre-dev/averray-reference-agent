@@ -1,0 +1,14 @@
+--- /dev/null
++++ b/test/unit/canonical-json-array-order.test.ts
+@@ -0,0 +1,11 @@
++import { describe, expect, it } from "vitest";
++
++import { canonicalJson } from "../../packages/mcp-common/src/canonical-json.js";
++
++describe("canonicalJson array order", () => {
++  it("preserves array order while sorting nested object keys", () => {
++    expect(canonicalJson([{ b: 2, a: 1 }, "tail"])).toBe(
++      JSON.stringify([{ a: 1, b: 2 }, "tail"]),
++    );
++  });
++});
