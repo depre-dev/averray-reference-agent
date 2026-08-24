@@ -94,7 +94,7 @@ export function AdminDemandPanel({
 
 function TimelineView({ timeline }: { timeline: AdminDemandFeed["timeline"] }) {
   if (isUnavailable(timeline)) {
-    return <UnavailableBlock label="ARRIVAL TIMELINE" reason={timeline.unavailable} testId="ops-demand-timeline-unavailable" />;
+    return <UnavailableBlock label="ARRIVAL TIMELINE" reading={timeline} testId="ops-demand-timeline-unavailable" />;
   }
 
   const presentClasses = CLIENT_SOFTWARE_CLASSES.filter((clientClass) =>
@@ -165,7 +165,7 @@ function SurfaceStrip({ surface, timeline }: { surface: ArrivalSurface; timeline
 
 function JourneyList({ journeys }: { journeys: AdminDemandFeed["journeys"] }) {
   if (isUnavailable(journeys)) {
-    return <UnavailableBlock label="WORKER JOURNEYS" reason={journeys.unavailable} testId="ops-demand-journeys-unavailable" />;
+    return <UnavailableBlock label="WORKER JOURNEYS" reading={journeys} testId="ops-demand-journeys-unavailable" />;
   }
   return (
     <section className="ops-demand-journeys" data-testid="ops-demand-journeys">
@@ -211,11 +211,19 @@ function JourneyRow({ journey }: { journey: WorkerJourney }) {
   );
 }
 
-function UnavailableBlock({ label, reason, testId }: { label: string; reason: string; testId: string }) {
+function UnavailableBlock({
+  label,
+  reading,
+  testId,
+}: {
+  label: string;
+  reading: Extract<AdminDemandFeed["timeline"], { unavailable: string }>;
+  testId: string;
+}) {
   return (
-    <section className="ops-demand-unavailable" data-testid={testId}>
-      <strong>{label} UNAVAILABLE</strong>
-      <span>{reason}</span>
+    <section className="ops-demand-unavailable" data-testid={testId} data-feed-state={reading.state ?? "unavailable"}>
+      <strong>{label} {reading.state === "unauthorized" ? "UNAUTHORIZED" : "UNAVAILABLE"}</strong>
+      <span>{reading.unavailable}</span>
     </section>
   );
 }

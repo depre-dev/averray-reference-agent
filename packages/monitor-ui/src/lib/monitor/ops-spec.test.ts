@@ -24,6 +24,7 @@ import {
 } from "./ops-spec.js";
 import type { ProductHealth, SolvencyPool } from "./product-health.js";
 import { OPS_FIXTURE_NOMINAL, OPS_FIXTURE_STRESS, OPS_FIXTURE_UNVERIFIED } from "./ops-fixtures.js";
+import { OVERNIGHT_LEDGER_LIVE } from "./overnight-ledger-fixtures.js";
 
 const NOW = 1_751_500_000_000;
 
@@ -902,25 +903,20 @@ describe("boardKpis — a second reading, never a second opinion", () => {
     expect(kpis.find((k) => k.key === "settled")!.sub).toContain("no settlement counts");
   });
 
-  test("the runway KPI and the pool footnote run ONE projection", () => {
-    // The KPI briefly parsed the footnote's sentence with a regex — a figure
-    // that changes meaning the day the wording does. Both now read
-    // payoutsRemaining(), so they cannot disagree.
-    const pool = OPS_FIXTURE_NOMINAL.solvency!.pools.find((p) => p.key === "reward_bank")!;
-    const projection = payoutsRemaining({ pool, payout: OPS_FIXTURE_NOMINAL.flow!.payout });
-    expect(projection?.status).toBe("ok");
-    const kpi = boardKpis(OPS_FIXTURE_NOMINAL).find((k) => k.key === "runway")!;
-    expect(kpi.value).toBe(`≈${(projection as { payouts: number }).payouts}`);
-    // …and the footnote quotes the same number in its own sentence.
-    const note = payoutRunwayNote({ pool, payout: OPS_FIXTURE_NOMINAL.flow!.payout })!;
-    expect(note.text).toContain(`≈ ${(projection as { payouts: number }).payouts} more payout`);
+  test("the runway KPI quotes the overnight ledger liquid-only split", () => {
+    const kpi = boardKpis(OPS_FIXTURE_NOMINAL, undefined, OVERNIGHT_LEDGER_LIVE).find((k) => k.key === "runway")!;
+    expect(kpi.value).toBe("6.6");
+    expect(kpi.unit).toBe("d");
+    expect(kpi.sub).toContain("3.3 USDC liquid");
+    expect(kpi.sub).toContain("+ 1.2 reserved");
   });
 
-  test("a below-floor bank is a dash and the reason, never a projection", () => {
+  test("an unavailable ledger is a dash and never falls back to the old combined-balance arithmetic", () => {
     const kpi = boardKpis(OPS_FIXTURE_STRESS).find((k) => k.key === "runway")!;
     expect(kpi.value).toBe("—");
-    expect(kpi.sub).toContain("BELOW FLOOR");
-    expect(kpi.tone).toBe("red");
+    expect(kpi.sub).toContain("overnight ledger read not supplied");
+    expect(kpi.sub).not.toContain("BELOW FLOOR");
+    expect(kpi.tone).toBe("awaiting");
   });
 
   test("a blind chain read is grey in the strip too, not coral", () => {

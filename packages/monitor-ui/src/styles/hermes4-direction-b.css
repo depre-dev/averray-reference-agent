@@ -369,16 +369,6 @@
 .ops-pillar + .ops-pillar { border-left-color: var(--ops-hair); }
 .ops-spark-cell { border-radius: 1px; }
 
-/* NEXT — the one instruction strip. Amber wash, rounded, because it is
-   the only element on the board that asks for an action. */
-.ops-next {
-  padding: calc(9 * var(--ops-u)) calc(16 * var(--ops-u));
-  border: 1px solid var(--h4-warn-line);
-  border-radius: var(--b-r-card);
-  background: var(--h4-warn-soft);
-}
-.ops-next-key { color: var(--h4-warn); }
-
 .ops-arrivals { padding: calc(10 * var(--ops-u)) calc(16 * var(--ops-u)) calc(14 * var(--ops-u)); }
 .ops-arrivals-verdict { border-radius: var(--b-r-card); background: var(--h4-paper-sunken); }
 .ops-kpi, .ops-akpi { min-width: 0; }

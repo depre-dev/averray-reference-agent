@@ -64,7 +64,10 @@ describe("admin arrivals and journeys feed", () => {
       getSession: async () => ({ token: "not-admin" }),
       fetchImpl: fetchImpl as typeof fetch,
     });
-    expect(feed.timeline).toEqual({ unavailable: "arrivals timeline returned HTTP 403" });
+    expect(feed.timeline).toEqual({
+      state: "unauthorized",
+      unavailable: "feed unauthorized — monitor token lacks ops:view",
+    });
     expect(feed.journeys).toEqual(JOURNEYS);
   });
 

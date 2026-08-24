@@ -114,7 +114,7 @@ export function FlowPanel({ flow, externalFunnel, lifecycle, nowMs }: FlowPanelP
 
       <SettledByHour payout={flow?.payout} />
 
-      <div className="ops-evidence" data-emphasis={evidence.emphasised ? "on" : "off"} data-testid="ops-evidence">
+      <div id="payout-evidence" className="ops-evidence" data-emphasis={evidence.emphasised ? "on" : "off"} data-testid="ops-evidence">
         <div className="ops-evidence-head">
           <h3>PAYOUT EVIDENCE — INDEPENDENT ON-CHAIN PROOF</h3>
           <span>↑ corroborates the funnel above</span>

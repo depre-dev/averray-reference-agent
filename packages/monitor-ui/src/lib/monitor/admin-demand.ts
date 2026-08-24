@@ -23,6 +23,7 @@ export type AdminDemandWindow = "48h" | "30d";
 
 export interface AdminDemandUnavailable {
   unavailable: string;
+  state?: "unauthorized" | "unavailable";
 }
 
 export interface ArrivalTimelineCount {
@@ -155,7 +156,7 @@ export function parseAdminDemandFeed(value: unknown): AdminDemandFeed {
 }
 
 function parseTimelineOrUnavailable(value: unknown): ArrivalTimeline | AdminDemandUnavailable {
-  if (isUnavailable(value)) return value;
+  if (isUnavailable(value)) return parseUnavailable(value);
   if (!isRecord(value) || value.schemaVersion !== "averray.admin.arrivals.timeline.v1") {
     throw new Error("arrival timeline is missing or malformed");
   }
@@ -218,7 +219,7 @@ function parseTimelineCount(value: unknown, bucketIndex: number, countIndex: num
 }
 
 function parseJourneysOrUnavailable(value: unknown): WorkerJourneys | AdminDemandUnavailable {
-  if (isUnavailable(value)) return value;
+  if (isUnavailable(value)) return parseUnavailable(value);
   if (!isRecord(value) || value.schemaVersion !== "averray.admin.worker-journeys.v1" || !Array.isArray(value.journeys)) {
     throw new Error("worker journeys are missing or malformed");
   }
@@ -244,6 +245,13 @@ function parseJourneysOrUnavailable(value: unknown): WorkerJourneys | AdminDeman
     limit: nonNegativeNumber(value.limit, "journeys.limit"),
     ...(typeof value.wallet === "string" ? { wallet: value.wallet } : {}),
     journeys: value.journeys.map((journey, index) => parseJourney(journey, index)),
+  };
+}
+
+function parseUnavailable(value: AdminDemandUnavailable): AdminDemandUnavailable {
+  return {
+    unavailable: value.unavailable,
+    ...(value.state === "unauthorized" || value.state === "unavailable" ? { state: value.state } : {}),
   };
 }
 

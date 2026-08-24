@@ -30,11 +30,20 @@ const phone = fs.readFileSync(path.join(dir, "..", "mobile", "MobileBoard.tsx"),
  * that a failing build.
  */
 describe("every money line is actually rendered", () => {
-  for (const fn of MONEY_LINE_RENDERERS) {
+  // S-3 retires payoutRunwayNote on the desktop: that helper derives from the
+  // old combined bank balance, while the Overnight Ledger supplies the
+  // liquid-only runway and liquid|reserved split from one reading.
+  for (const fn of MONEY_LINE_RENDERERS.filter((name) => name !== "payoutRunwayNote")) {
     it(`OpsBoard calls ${fn}`, () => {
       expect(board, `${fn} is exported and tested but no component calls it`).toContain(`${fn}(`);
     });
   }
+
+  it("desktop S-3 replaces payoutRunwayNote with the liquid-only Overnight Ledger row", () => {
+    expect(board).not.toContain("payoutRunwayNote(");
+    expect(board).toContain("RewardBankSplitRow");
+    expect(board).toContain("rewardBankSplit");
+  });
 
   for (const fn of ["lifecycleNote", "disputeClockLine"] as const) {
     it(`the PHONE board also calls ${fn}`, () => {

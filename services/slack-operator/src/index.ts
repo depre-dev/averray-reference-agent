@@ -203,9 +203,14 @@ import { appendIncidents, readIncidents, reconcileIncidents } from "./product-he
 import { readArrivalsFeed } from "./arrivals-feed.js";
 import {
   AdminDemandSessionCache,
+  createAdminReadSessionProvider,
   readAdminDemandFeed,
   type AdminDemandWindow,
 } from "./admin-demand-feed.js";
+import {
+  readOvernightLedgerFeed,
+  type OvernightLedgerWindow,
+} from "./overnight-ledger-feed.js";
 import { depositPoolUrlFromBankFeed, readDepositPoolFeed } from "./deposit-pool-feed.js";
 import {
   loadRemediationConfig,
@@ -378,6 +383,10 @@ function deriveProductHealthSigner(): string | undefined {
 const monitorConfig = parseMonitorConfig(process.env);
 const adminDemandApiBaseUrl = optionalEnv("AVERRAY_API_BASE_URL", "https://api.averray.com");
 const adminDemandSession = new AdminDemandSessionCache(() => siweLogin(adminDemandApiBaseUrl));
+const getAdminReadSession = createAdminReadSessionProvider({
+  staticToken: process.env.AVERRAY_OPS_TOKEN,
+  getSiweSession: () => adminDemandSession.get(),
+});
 const missionSpawnRoles = parseMissionSpawnRoles(process.env);
 // The Vite-built redesigned monitor SPA, served as the default board at
 // /monitor. At runtime index.js lives in services/slack-operator/dist, so
@@ -967,7 +976,30 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       baseUrl: adminDemandApiBaseUrl,
       window: requestedWindow as AdminDemandWindow,
       limit: requestedLimit,
-      getSession: () => adminDemandSession.get(),
+      getSession: getAdminReadSession,
+    });
+    response.setHeader("cache-control", "private, no-store");
+    writeJson(response, 200, feed);
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/monitor/overnight-ledger") {
+    if (!monitorConfig.enabled) {
+      writeJson(response, 404, { error: "monitor_disabled" });
+      return;
+    }
+    if (!isMonitorAuthorized(monitorConfig, request.headers, url)) {
+      writeJson(response, 401, { error: "monitor_unauthorized" });
+      return;
+    }
+    const requestedWindow = url.searchParams.get("window") ?? "24h";
+    if (requestedWindow !== "12h" && requestedWindow !== "24h" && requestedWindow !== "48h") {
+      writeJson(response, 400, { error: "invalid_window", allowed: ["12h", "24h", "48h"] });
+      return;
+    }
+    const feed = await readOvernightLedgerFeed({
+      baseUrl: adminDemandApiBaseUrl,
+      window: requestedWindow as OvernightLedgerWindow,
+      getSession: getAdminReadSession,
     });
     response.setHeader("cache-control", "private, no-store");
     writeJson(response, 200, feed);

@@ -6,7 +6,6 @@
 //   WORKER MONEY   SOLVENCY │ FLOW + proof, closed by per-job economics
 //   BANK           venue position │ deposit pool, separate instruments
 //   PILLARS        the 8 probes, grouped, with their details
-//   NEXT           what to do; the fault line below which nothing is red
 //   OUTSIDE        both public arrival doors, condensed but not combined
 //   footer         incidents · LLM spend · read-only boundary
 //
@@ -19,10 +18,15 @@
 // selector changes only the read projection; commands and discussion live in
 // Buzz (docs/OPS_ONLY_PIVOT.md).
 
-import { opsSuggestions } from "../../lib/monitor/ops-suggestions.js";
 import type { MonitorBoard } from "../../lib/monitor/board-cache.js";
 import type { ProductHealth } from "../../lib/monitor/product-health.js";
 import type { AdminDemandFeed, AdminDemandWindow } from "../../lib/monitor/admin-demand.js";
+import type {
+  OvernightLedgerPayload,
+  OvernightWindow,
+  RemoteFeedReading,
+  TopupDestinationsPayload,
+} from "../../lib/monitor/overnight-ledger.js";
 import { formatAgo, incidentRows, probeOpsTone } from "../../lib/monitor/ops-model.js";
 import { boardKpis, economicsLine } from "../../lib/monitor/ops-spec.js";
 import { outsiderPresence, type OutsiderBand } from "../../lib/monitor/arrivals-view.js";
@@ -34,6 +38,12 @@ import { BankLane } from "./BankLane.js";
 import { ArrivalsPanel } from "./ArrivalsPanel.js";
 import { AdminDemandPanel } from "./AdminDemandPanel.js";
 import { DepositPoolTile } from "./DepositPoolTile.js";
+import {
+  EventsLane,
+  MoneyMovementPanel,
+  OvernightDigest,
+  RetentionWaiversPanel,
+} from "./OvernightLedgerPanels.js";
 
 export interface OpsBoardProps {
   health: ProductHealth;
@@ -50,6 +60,10 @@ export interface OpsBoardProps {
   adminDemandLoading?: boolean;
   adminDemandError?: unknown;
   onAdminDemandWindowChange?: (window: AdminDemandWindow) => void;
+  overnightLedger?: RemoteFeedReading<OvernightLedgerPayload>;
+  topupDestinations?: RemoteFeedReading<TopupDestinationsPayload>;
+  overnightWindow?: OvernightWindow;
+  onOvernightWindowChange?: (window: OvernightWindow) => void;
 }
 
 export function OpsBoard({
@@ -64,6 +78,10 @@ export function OpsBoard({
   adminDemandLoading = false,
   adminDemandError,
   onAdminDemandWindowChange = () => undefined,
+  overnightLedger = { state: "unavailable", reason: "feed unavailable — overnight ledger read not supplied" },
+  topupDestinations = { state: "unavailable", reason: "feed unavailable — top-up destination read not supplied" },
+  overnightWindow = "24h",
+  onOvernightWindowChange = () => undefined,
 }: OpsBoardProps) {
   const verdict = opsVerdict({ health, streamDegraded, nowMs });
   const trust = trustRows({ health, streamDegraded, streamStatus, streamAt: board?.at, nowMs });
@@ -177,7 +195,7 @@ export function OpsBoard({
             second READING and never a second opinion — and an
             unreported figure is a dash with its reason, not a zero. */}
         <div className="ops-kpis" data-testid="ops-kpis">
-          {boardKpis(health, health.gas).map((kpi) => (
+          {boardKpis(health, health.gas, overnightLedger).map((kpi) => (
             <div className="ops-kpi" key={kpi.key} data-testid={`ops-kpi-${kpi.key}`}>
               <span className="ops-kpi-lbl">{kpi.label}</span>
               <span className="ops-kpi-val">
@@ -190,6 +208,12 @@ export function OpsBoard({
             </div>
           ))}
         </div>
+
+        <OvernightDigest
+          reading={overnightLedger}
+          window={overnightWindow}
+          onWindowChange={onOvernightWindowChange}
+        />
 
         {/* ── OUTSIDE ──────────────────────────────────────────────────
             Someone who is not us is at the door, and how far in they got.
@@ -209,7 +233,14 @@ export function OpsBoard({
         <OutsidePresence arrivals={health.arrivals} nowMs={nowMs} />
 
         <div className="ops-money">
-          <SolvencyPanel solvency={health.solvency} gas={health.gas} payout={health.flow?.payout} />
+          <SolvencyPanel
+            solvency={health.solvency}
+            gas={health.gas}
+            payout={health.flow?.payout}
+            overnightLedger={overnightLedger}
+            topupDestinations={topupDestinations}
+            overnightWindow={overnightWindow}
+          />
           <FlowPanel flow={health.flow} externalFunnel={health.externalFunnel} lifecycle={health.lifecycle} nowMs={nowMs} />
 
           {/* Per-job economics closes the worker-payment band because it
@@ -223,6 +254,12 @@ export function OpsBoard({
               </div>
             ) : null;
           })()}
+        </div>
+
+        <div className="ops-overnight-grid" data-testid="ops-overnight-grid">
+          <MoneyMovementPanel reading={overnightLedger} window={overnightWindow} />
+          <RetentionWaiversPanel reading={overnightLedger} window={overnightWindow} />
+          <EventsLane reading={overnightLedger} window={overnightWindow} />
         </div>
 
         {/* One frame asserts one treasury subject, never one instrument: venue
@@ -242,42 +279,10 @@ export function OpsBoard({
 
         <PillarStrip probes={health.probes} history={health.history} nowMs={nowMs} />
 
-        {/* ── NEXT ────────────────────────────────────────────────────────
-            The board says WHAT is wrong in eleven places and never once said
-            what to DO. `opsSuggestions` has derived probe-cited, pre-drafted
-            remediations for eight incident types since 2026-07; until now it
-            was imported by NOTHING — it was wired to the co-pilot board the
-            ops-only pivot replaced, and the content simply stopped reaching a
-            person. The fourth instance in one day of this system discarding
-            words it had already written.
-
-            TEXT ONLY. Each suggestion carries a `task` the operator could
-            approve, and this board is read-only by design. Rendering the button here would
-            break that promise; the sentence is the whole value anyway.
-
-            NOTHING WHEN THERE IS NOTHING. An all-clear board shows no NEXT
-            strip rather than a reassuring empty box. */}
-        {(() => {
-          const next = opsSuggestions(health).slice(0, 3);
-          if (next.length === 0) return null;
-          return (
-            <div className="ops-next" data-testid="ops-next">
-              <span className="ops-next-key">NEXT</span>
-              <ul>
-                {next.map((s) => (
-                  <li key={s.id} data-tone={s.tone} data-testid={`ops-next-${s.id}`}>
-                    {s.text}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          );
-        })()}
-
         {/* The fault line is structural: demand belongs after everything that
             can page the operator. Both independent doors remain visible, and
             moving them refuses to recast a business outcome as a money fault. */}
-        <ArrivalsPanel arrivals={health.arrivals} />
+        <ArrivalsPanel arrivals={health.arrivals} workers={overnightLedger} />
         <AdminDemandPanel
           feed={adminDemand}
           window={adminDemandWindow}

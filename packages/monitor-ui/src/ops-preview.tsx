@@ -30,6 +30,12 @@ import {
   OPS_FIXTURE_LIVE,
   FIXTURE_NOW,
 } from "./lib/monitor/ops-fixtures.js";
+import {
+  OVERNIGHT_LEDGER_LIVE,
+  OVERNIGHT_LEDGER_UNAUTHORIZED,
+  OVERNIGHT_LEDGER_UNAVAILABLE,
+  TOPUP_DESTINATIONS_FIXTURE,
+} from "./lib/monitor/overnight-ledger-fixtures.js";
 
 // The arrivals block is merged HERE rather than baked into the base fixtures:
 // the phone-board tests compose their own arrivals over OPS_FIXTURE_NOMINAL
@@ -39,10 +45,48 @@ import {
 const withArrivals = (health: typeof OPS_FIXTURE_NOMINAL) => ({ ...health, arrivals: OPS_FIXTURE_ARRIVALS });
 
 const FIXTURES = {
-  nominal: { label: "FIG. 1 — Nominal", health: withArrivals(OPS_FIXTURE_NOMINAL), degraded: false },
-  stress: { label: "FIG. 2 — Stress", health: withArrivals(OPS_FIXTURE_STRESS), degraded: true },
-  unverified: { label: "Blind instrument", health: withArrivals(OPS_FIXTURE_UNVERIFIED), degraded: false },
-  awaiting: { label: "Awaiting blocks", health: OPS_FIXTURE_LIVE, degraded: false },
+  nominal: {
+    label: "FIG. 1 — Unauthorized ledger",
+    health: withArrivals(OPS_FIXTURE_NOMINAL),
+    degraded: false,
+    ledger: OVERNIGHT_LEDGER_UNAUTHORIZED,
+    topups: OVERNIGHT_LEDGER_UNAUTHORIZED,
+  },
+  ledger: {
+    label: "FIG. 2 — Ledger fixture",
+    health: withArrivals(OPS_FIXTURE_NOMINAL),
+    degraded: false,
+    ledger: OVERNIGHT_LEDGER_LIVE,
+    topups: TOPUP_DESTINATIONS_FIXTURE,
+  },
+  unavailable: {
+    label: "FIG. 3 — Unavailable ledger",
+    health: withArrivals(OPS_FIXTURE_NOMINAL),
+    degraded: false,
+    ledger: OVERNIGHT_LEDGER_UNAVAILABLE,
+    topups: OVERNIGHT_LEDGER_UNAVAILABLE,
+  },
+  stress: {
+    label: "FIG. 4 — Stress",
+    health: withArrivals(OPS_FIXTURE_STRESS),
+    degraded: true,
+    ledger: OVERNIGHT_LEDGER_UNAVAILABLE,
+    topups: OVERNIGHT_LEDGER_UNAVAILABLE,
+  },
+  unverified: {
+    label: "Blind instrument",
+    health: withArrivals(OPS_FIXTURE_UNVERIFIED),
+    degraded: false,
+    ledger: OVERNIGHT_LEDGER_UNAVAILABLE,
+    topups: OVERNIGHT_LEDGER_UNAVAILABLE,
+  },
+  awaiting: {
+    label: "Awaiting blocks",
+    health: OPS_FIXTURE_LIVE,
+    degraded: false,
+    ledger: OVERNIGHT_LEDGER_UNAVAILABLE,
+    topups: OVERNIGHT_LEDGER_UNAVAILABLE,
+  },
 } as const;
 type FixtureKey = keyof typeof FIXTURES;
 
@@ -111,6 +155,8 @@ function Harness() {
         streamDegraded={active.degraded}
         streamStatus={active.degraded ? "reconnecting" : "open"}
         nowMs={FIXTURE_NOW}
+        overnightLedger={active.ledger}
+        topupDestinations={active.topups}
       />
       )}
     </div>
