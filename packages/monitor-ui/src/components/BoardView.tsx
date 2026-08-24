@@ -17,6 +17,7 @@ import type { ProductHealth } from "../lib/monitor/product-health.js";
 import type { StreamStatus } from "../lib/monitor/live-stream.js";
 import { useProductHealth } from "../hooks/useProductHealth.js";
 import { useAdminDemand } from "../hooks/useAdminDemand.js";
+import { useOvernightLedger } from "../hooks/useOvernightLedger.js";
 import { useIsMobileViewport } from "../lib/monitor/use-mobile-viewport.js";
 import { MobileBoard } from "./mobile/MobileBoard.js";
 import { OpsBoard } from "./ops/OpsBoard.js";
@@ -34,6 +35,7 @@ export function BoardView({ board, status, onRefresh, health }: BoardViewProps) 
   const isMobileViewport = useIsMobileViewport();
   const polled = useProductHealth({ enabled: health === undefined });
   const demand = useAdminDemand({ enabled: health === undefined && !isMobileViewport });
+  const overnight = useOvernightLedger({ enabled: health === undefined && !isMobileViewport });
   const productHealth = health ?? polled.health;
 
   // A stream we cannot trust must not render as a calm board — the fake-green
@@ -93,6 +95,10 @@ export function BoardView({ board, status, onRefresh, health }: BoardViewProps) 
         adminDemandLoading={demand.isLoading}
         adminDemandError={demand.error}
         onAdminDemandWindowChange={demand.setWindow}
+        overnightLedger={overnight.ledger}
+        topupDestinations={overnight.topupDestinations}
+        overnightWindow={overnight.window}
+        onOvernightWindowChange={overnight.setWindow}
       />
     </div>
   );

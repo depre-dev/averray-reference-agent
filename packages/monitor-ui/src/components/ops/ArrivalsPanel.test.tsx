@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, test } from "vitest";
 
 import {
@@ -11,6 +11,8 @@ import {
   type ArrivalsSnapshot,
 } from "../../lib/monitor/product-health.js";
 import { ArrivalsPanel } from "./ArrivalsPanel.js";
+import { OPS_FIXTURE_ARRIVALS } from "../../lib/monitor/ops-fixtures.js";
+import { OVERNIGHT_LEDGER_LIVE } from "../../lib/monitor/overnight-ledger-fixtures.js";
 
 afterEach(cleanup);
 
@@ -103,6 +105,31 @@ function snapshot(overrides: Partial<ArrivalsSnapshot> = {}): ArrivalsSnapshot {
 }
 
 describe("ArrivalsPanel — verdict first", () => {
+  test("replaces the old WORKED roster while LOOKED and KNOCKED keep named identity rows", () => {
+    const { getByTestId, queryByText } = render(
+      <ArrivalsPanel arrivals={OPS_FIXTURE_ARRIVALS} workers={OVERNIGHT_LEDGER_LIVE} />,
+    );
+
+    expect(getByTestId("ops-roster-tab-worked").getAttribute("aria-selected")).toBe("true");
+    expect(getByTestId("ops-workers").textContent).toContain("fixture-worker-alpha");
+    expect(queryByText("POST /jobs/submit")).toBeNull();
+
+    fireEvent.click(getByTestId("ops-roster-tab-engaged"));
+    expect(getByTestId("ops-roster-tab-engaged").getAttribute("aria-selected")).toBe("true");
+    expect(getByTestId("ops-arrivals-roster").querySelector('[data-band="engaged"]')).not.toBeNull();
+  });
+
+  test("keeps the WORKED ledger visible when the named-identity roster is unavailable", () => {
+    const arrivals = snapshot({ agents: undefined, agentsUnreadable: "registry timed out" });
+    const { getByTestId } = render(
+      <ArrivalsPanel arrivals={arrivals} workers={OVERNIGHT_LEDGER_LIVE} />,
+    );
+
+    expect(getByTestId("ops-workers").textContent).toContain("fixture-worker-alpha");
+    fireEvent.click(getByTestId("ops-roster-tab-engaged"));
+    expect(getByTestId("ops-arrivals-roster-absent").textContent).toContain("IDENTITY REGISTRY UNREADABLE");
+  });
+
   test("renders the historical furthest-ever payout burst from feed data", () => {
     const { getByTestId } = render(<ArrivalsPanel arrivals={snapshot()} />);
     const furthest = getByTestId("ops-arrivals-furthest-ever");

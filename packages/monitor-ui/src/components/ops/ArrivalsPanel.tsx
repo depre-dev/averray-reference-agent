@@ -11,6 +11,8 @@
 // This component never recovers a verdict from the legacy call funnels: doing
 // so would make canaries look like demand and compare unlike instrumentation.
 
+import { useState } from "react";
+
 import { formatAgo } from "../../lib/monitor/ops-model.js";
 import {
   doorJourneys,
@@ -24,12 +26,18 @@ import type {
   ArrivalsBlock,
   ArrivalsSnapshot,
 } from "../../lib/monitor/product-health.js";
+import type { OvernightLedgerPayload, RemoteFeedReading } from "../../lib/monitor/overnight-ledger.js";
+import { WorkersTable } from "./OvernightLedgerPanels.js";
 
 export interface ArrivalsPanelProps {
   arrivals: ArrivalsBlock | undefined;
+  workers?: RemoteFeedReading<OvernightLedgerPayload>;
 }
 
-export function ArrivalsPanel({ arrivals }: ArrivalsPanelProps) {
+export function ArrivalsPanel({
+  arrivals,
+  workers = { state: "unavailable", reason: "feed unavailable — overnight worker read not supplied" },
+}: ArrivalsPanelProps) {
   if (!arrivals || "unavailable" in arrivals) {
     return <Unavailable reason={arrivals?.unavailable ?? "feed not present in this product-health snapshot"} />;
   }
@@ -123,7 +131,7 @@ export function ArrivalsPanel({ arrivals }: ArrivalsPanelProps) {
         <JourneyPanel view={operatorView} />
       </section>
 
-      <Roster arrivals={arrivals} generatedAtMs={generatedAtMs} />
+      <Roster arrivals={arrivals} generatedAtMs={generatedAtMs} workers={workers} />
 
       <div className="ops-arrivals-secondary">
         <section className="ops-arrivals-owned" data-testid="ops-arrivals-ours">
@@ -311,56 +319,64 @@ const BAND_LABEL: Record<OutsiderBand, string> = {
  * the header says "the ones we can name" rather than letting a short list
  * quietly contradict the number above it.
  */
-function Roster({ arrivals, generatedAtMs }: { arrivals: ArrivalsSnapshot; generatedAtMs: number }) {
+function Roster({
+  arrivals,
+  generatedAtMs,
+  workers,
+}: {
+  arrivals: ArrivalsSnapshot;
+  generatedAtMs: number;
+  workers: RemoteFeedReading<OvernightLedgerPayload>;
+}) {
   const roster = outsiderRoster(arrivals);
-  // Absent registry vs unreadable registry vs nobody named — three different
-  // facts, three different lines. None of them is an empty list.
-  if (!roster) {
-    return (
-      <section className="ops-roster" data-testid="ops-arrivals-roster">
-        <div className="ops-arrivals-block-head">
-          <h3>WHO SHOWED UP</h3>
-          <span>named identities · what they called</span>
-        </div>
+  const [tab, setTab] = useState<"worked" | "engaged" | "knocked">("worked");
+  const namedRows = roster?.rows ?? [];
+
+  return (
+    <section className="ops-roster" data-testid="ops-arrivals-roster">
+      <div className="ops-arrivals-block-head">
+        <h3>WHO SHOWED UP{workers.state === "live" ? ` — ${workers.data.window.toUpperCase()}` : ""}</h3>
+        <span>{tab === "worked" ? "workers · sorted by net earned" : "the ones we can name · a subset of the counts above"}</span>
+      </div>
+
+      <div className="ops-roster-tabs" role="tablist" aria-label="Who showed up">
+        {(["engaged", "knocked", "worked"] as const).map((band) => (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === band}
+            className="ops-roster-tab"
+            key={band}
+            onClick={() => setTab(band)}
+            data-band={band}
+            data-testid={`ops-roster-tab-${band}`}
+          >
+            {BAND_LABEL[band]}
+            <b>{band === "worked" && workers.state === "live" ? workers.data.workers.totals.walletCount : roster?.counts[band] ?? "—"}</b>
+          </button>
+        ))}
+      </div>
+
+      {tab === "worked" ? <WorkersTable reading={workers} /> : !roster ? (
         <p className="ops-roster-absent" data-testid="ops-arrivals-roster-absent">
           {arrivals.agentsUnreadable
             ? `IDENTITY REGISTRY UNREADABLE — ${arrivals.agentsUnreadable}`
             : "identity registry not reported by this producer — the counts above are all that was measured"}
         </p>
-      </section>
-    );
-  }
-
-  return (
-    <section className="ops-roster" data-testid="ops-arrivals-roster">
-      <div className="ops-arrivals-block-head">
-        <h3>WHO SHOWED UP</h3>
-        <span>the ones we can name · a subset of the counts above</span>
-      </div>
-
-      <div className="ops-roster-bands" data-testid="ops-roster-bands">
-        {(["worked", "engaged", "knocked"] as const).map((band) => (
-          <span className="ops-roster-band" key={band} data-band={band}>
-            <b>{roster.counts[band]}</b>
-            {BAND_LABEL[band]}
-          </span>
-        ))}
-      </div>
-
-      {roster.rows.length === 0 ? (
+      ) : namedRows.filter((row) => row.band === tab).length === 0 ? (
         <p className="ops-roster-absent" data-testid="ops-arrivals-roster-empty">
-          no outsider identity in the registry — ours and unclaimable are counted apart
+          no named outsider in this band — ours and unclaimable are counted apart
         </p>
       ) : (
         <div className="ops-roster-rows">
-          {roster.rows.map((row) => (
+          {namedRows.filter((row) => row.band === tab).map((row) => (
             <RosterRow key={row.key} row={row} generatedAtMs={generatedAtMs} />
           ))}
         </div>
       )}
-      {roster.more > 0 ? (
+      {tab !== "worked" && (roster?.more ?? 0) > 0 ? (
         <p className="ops-roster-more" data-testid="ops-arrivals-roster-more">
-          +{roster.more} more named in the registry
+          +{roster?.more} more named in the registry
         </p>
       ) : null}
     </section>

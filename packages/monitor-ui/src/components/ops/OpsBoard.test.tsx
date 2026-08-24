@@ -13,11 +13,11 @@ import { OpsBoard } from "./OpsBoard.js";
 import {
   OPS_FIXTURE_LIVE,
   OPS_FIXTURE_NOMINAL,
-  OPS_FIXTURE_RED,
   OPS_FIXTURE_STRESS,
   OPS_FIXTURE_UNVERIFIED,
   FIXTURE_NOW,
 } from "../../lib/monitor/ops-fixtures.js";
+import { OVERNIGHT_LEDGER_LIVE, TOPUP_DESTINATIONS_FIXTURE } from "../../lib/monitor/overnight-ledger-fixtures.js";
 
 afterEach(cleanup);
 
@@ -419,54 +419,43 @@ describe("OpsBoard — per-check strips and the durable log", () => {
   });
 });
 
-// The board named what was wrong in eleven places and never said what to do.
-describe("NEXT — what to do about it", () => {
-  test("a board with something wrong says what to do next", () => {
-    const { getByTestId } = render(<OpsBoard health={OPS_FIXTURE_STRESS} nowMs={OPS_FIXTURE_STRESS.at! + 2000} />);
-    expect(getByTestId("ops-next").textContent).toContain("NEXT");
-  });
-
-  test("an all-clear board shows NO strip — not a reassuring empty box", () => {
-    // NOMINAL is not all-clear — it carries a degraded capability, so the
-    // strip correctly appears for it. A genuinely clean board has to be built.
-    const health = {
-      ...OPS_FIXTURE_NOMINAL,
-      bank: undefined,
-      probes: OPS_FIXTURE_NOMINAL.probes.map((p) => ({ ...p, status: "ok" as const })),
-      solvency: { ...OPS_FIXTURE_NOMINAL.solvency, runway: [] },
-    };
-    const { queryByTestId } = render(<OpsBoard health={health} nowMs={health.at! + 2000} />);
+describe("Overnight ledger supersessions", () => {
+  test("removes the NEXT strip and its markup instead of hiding it", () => {
+    const { queryByTestId, container } = render(
+      <OpsBoard health={OPS_FIXTURE_STRESS} nowMs={OPS_FIXTURE_STRESS.at! + 2_000} />,
+    );
     expect(queryByTestId("ops-next")).toBeNull();
+    expect(container.querySelector(".ops-next")).toBeNull();
   });
 
-  test("it TELLS, it does not ACT — no button reaches this read-only board", () => {
-    // Every suggestion carries an approvable task. Rendering it here would
-    // break the promise one line below: "refresh is the only control".
-    const { getByTestId } = render(<OpsBoard health={OPS_FIXTURE_STRESS} nowMs={OPS_FIXTURE_STRESS.at! + 2000} />);
-    expect(getByTestId("ops-next").querySelector("button")).toBeNull();
+  test("money movement anchors to the one existing payout evidence block", () => {
+    const { getByTestId, container } = render(
+      <OpsBoard
+        health={OPS_FIXTURE_NOMINAL}
+        nowMs={fresh(OPS_FIXTURE_NOMINAL)}
+        overnightLedger={OVERNIGHT_LEDGER_LIVE}
+      />,
+    );
+    expect(getByTestId("ops-money-movement").querySelector('a[href="#payout-evidence"]')).not.toBeNull();
+    expect(container.querySelectorAll("#payout-evidence")).toHaveLength(1);
   });
 
-  test("nothing at or below NEXT is ever red in either incident fixture", () => {
-    // NEXT is the board's fault line. This guard asserts a positional colour
-    // vocabulary and refuses to let outside demand or the durable log borrow
-    // the money path's alarm tone merely because an incident is active.
-    for (const health of [OPS_FIXTURE_RED, OPS_FIXTURE_STRESS]) {
-      const { getByTestId, unmount } = render(
-        <OpsBoard health={health} nowMs={health.at! + 2_000} />,
-      );
-      const next = getByTestId("ops-next");
-      const arrivals = getByTestId("ops-arrivals");
-      expect(next.compareDocumentPosition(arrivals)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-      const content = next.parentElement!;
-      const bands = Array.from(content.children).slice(Array.from(content.children).indexOf(next));
-      const red = bands.flatMap((band) => [
-        ...(band.matches('[data-tone="red"]') ? [band] : []),
-        ...Array.from(band.querySelectorAll('[data-tone="red"]')),
-      ]);
-
-      expect(red).toHaveLength(0);
-      unmount();
-    }
+  test("reward runway KPI and reward-bank row derive from the same liquid value", () => {
+    const { getByTestId } = render(
+      <OpsBoard
+        health={OPS_FIXTURE_NOMINAL}
+        nowMs={fresh(OPS_FIXTURE_NOMINAL)}
+        overnightLedger={OVERNIGHT_LEDGER_LIVE}
+        topupDestinations={TOPUP_DESTINATIONS_FIXTURE}
+      />,
+    );
+    expect(getByTestId("ops-kpi-runway").textContent).toContain("3.3 USDC liquid");
+    expect(getByTestId("ops-reward-bank-split").textContent).toContain("liquid 3.3");
+    expect(getByTestId("ops-kpi-runway").textContent).toContain("+ 1.2 reserved");
+    const rewardMeter = getByTestId("ops-pool-reward_bank").querySelector(".ops-meter");
+    expect(rewardMeter?.querySelectorAll('[data-part="liquid"]')).toHaveLength(1);
+    expect(rewardMeter?.querySelectorAll('[data-part="reserved"]')).toHaveLength(1);
+    expect(rewardMeter?.querySelectorAll(".ops-meter-fill")).toHaveLength(2);
   });
 });
 
@@ -485,18 +474,15 @@ describe("glosses — the numbers explain themselves", () => {
     expect(getByTestId("ops-evidence-fit").getAttribute("title")).toContain("same 24h");
   });
 
-  test("every rendered note key explains itself; RUNWAY answers the pool's question", () => {
-    // No fixture carries gas data, so BURN never renders here — it only exists
-    // live. Asserting it from a fixture would test the fixture, not the board;
-    // its gloss text is held to standard by ops-gloss.test.ts and it shares
-    // this exact keyed-lookup path with RUNWAY.
-    const { container } = render(<OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={OPS_FIXTURE_NOMINAL.at! + 2000} />);
-    const keys = [...container.querySelectorAll(".ops-pool-note-key")];
-    expect(keys.length).toBeGreaterThan(0);
-    for (const k of keys) {
-      expect(k.getAttribute("title"), `${k.textContent} lost its gloss`).toBeTruthy();
-    }
-    const runway = keys.find((k) => k.textContent === "RUNWAY");
-    expect(runway?.getAttribute("title")).toContain("still fund");
+  test("the reward row retires the old combined-balance RUNWAY note for the liquid-only split", () => {
+    const { container, getByTestId } = render(
+      <OpsBoard
+        health={OPS_FIXTURE_NOMINAL}
+        nowMs={OPS_FIXTURE_NOMINAL.at! + 2000}
+        overnightLedger={OVERNIGHT_LEDGER_LIVE}
+      />,
+    );
+    expect(container.querySelector('.ops-pool-note-key[title*="still fund"]')).toBeNull();
+    expect(getByTestId("ops-reward-bank-split").textContent).toContain("runway 6.6 d · liquid only");
   });
 });

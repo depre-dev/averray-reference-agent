@@ -29,6 +29,8 @@ import type {
 } from "./product-health.js";
 import { deriveOpsVerdict, payoutGap } from "@avg/schemas/ops-verdict";
 import { formatAgo, formatAmount, type OpsTone } from "./ops-model.js";
+import type { OvernightLedgerPayload, RemoteFeedReading } from "./overnight-ledger.js";
+import { moneyDisplay } from "./overnight-ledger.js";
 
 /**
  * When is a snapshot old enough to say so out loud?
@@ -1221,12 +1223,23 @@ export interface KpiView {
  * the reason in its sub-line, never 0. The reason a strip like this is
  * dangerous is precisely that a big confident numeral reads as measured.
  */
-export function boardKpis(health: ProductHealth, gas?: GasSpendView | undefined): KpiView[] {
+function formatRunwayDays(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return value >= 10 ? String(Math.round(value)) : value.toFixed(1);
+}
+
+export function boardKpis(
+  health: ProductHealth,
+  gas?: GasSpendView | undefined,
+  overnightLedger: RemoteFeedReading<OvernightLedgerPayload> = {
+    state: "unavailable",
+    reason: "feed unavailable — overnight ledger read not supplied",
+  },
+): KpiView[] {
   const funnel = flowFunnel(health.flow);
   const evidence = payoutView(health.flow?.payout);
   const payout = health.flow?.payout;
   const pools = health.solvency?.pools ?? [];
-  const rewardPool = pools.find((p) => p.key === "reward_bank");
   const gasPool = pools.find((p) => p.key === "signer_gas");
   const gasRunway = (health.solvency?.runway ?? []).find((r) => r.key === "signer_gas");
 
@@ -1257,23 +1270,27 @@ export function boardKpis(health: ProductHealth, gas?: GasSpendView | undefined)
     tone: evidence.tone,
   };
 
-  // 3. RUNWAY — payouts remaining, the same projection the reward-bank note
-  //    makes. Reusing it keeps one arithmetic on screen.
-  const projection = payoutsRemaining({ pool: rewardPool, payout });
-  const runwayNote = payoutRunwayNote({ pool: rewardPool, payout, runwayNote: health.solvency?.runwayNote });
-  const runway: KpiView = {
-    key: "runway",
-    label: "Reward runway",
-    value: projection?.status === "ok" ? `≈${projection.payouts}` : "—",
-    ...(projection?.status === "ok" ? { unit: projection.payouts === 1 ? "payout" : "payouts" } : {}),
-    sub:
-      projection == null
-        ? "reward bank balance not reported"
-        : projection.status === "ok"
-          ? `${formatAmount(rewardPool!.amount!)} ${rewardPool!.unit} in the bank`
-          : (runwayNote?.text ?? "cannot project"),
-    tone: runwayNote?.tone ?? "awaiting",
-  };
+  // 3. RUNWAY — the overnight ledger's cost-basis split is the authority.
+  //    The old projection used the health row's combined balance, which could
+  //    include reserved funds and therefore overstate what can fund the next
+  //    payout. The KPI and the reward-bank drop-in now quote the SAME liquid
+  //    field; unavailable remains a dash rather than falling back to old math.
+  const runway: KpiView = overnightLedger.state === "live"
+    ? {
+        key: "runway",
+        label: "Reward runway",
+        value: formatRunwayDays(overnightLedger.data.rewardBankSplit.runwayDays),
+        ...(overnightLedger.data.rewardBankSplit.runwayDays == null ? {} : { unit: "d" }),
+        sub: `${moneyDisplay(overnightLedger.data.rewardBankSplit.liquid)} USDC liquid · + ${moneyDisplay(overnightLedger.data.rewardBankSplit.reserved)} reserved`,
+        tone: "awaiting",
+      }
+    : {
+        key: "runway",
+        label: "Reward runway",
+        value: "—",
+        sub: overnightLedger.reason,
+        tone: "awaiting",
+      };
 
   // 4. GAS — the pool that stops settlement when it empties, with its
   //    time-to-floor when the server could estimate one.

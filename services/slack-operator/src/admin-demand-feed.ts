@@ -5,8 +5,20 @@ export interface AdminDemandAuthSession {
   expiresAt?: string;
 }
 
+export function createAdminReadSessionProvider(options: {
+  staticToken?: string;
+  getSiweSession: () => Promise<AdminDemandAuthSession>;
+}): () => Promise<AdminDemandAuthSession> {
+  const staticToken = options.staticToken?.trim();
+  if (staticToken) {
+    return async () => ({ token: staticToken });
+  }
+  return options.getSiweSession;
+}
+
 export interface AdminDemandUnavailable {
   unavailable: string;
+  state?: "unauthorized" | "unavailable";
 }
 
 export interface AdminDemandFeed {
@@ -109,10 +121,16 @@ async function readAdminJson(
         authorization: `Bearer ${token}`,
       },
     });
-    if (!response.ok) return { unavailable: `${label} returned HTTP ${response.status}` };
+    if (response.status === 403) {
+      return {
+        state: "unauthorized",
+        unavailable: "feed unauthorized — monitor token lacks ops:view",
+      };
+    }
+    if (!response.ok) return { state: "unavailable", unavailable: `${label} returned HTTP ${response.status}` };
     return await response.json();
   } catch (error) {
-    return { unavailable: `${label} unavailable: ${errorMessage(error)}` };
+    return { state: "unavailable", unavailable: `${label} unavailable: ${errorMessage(error)}` };
   }
 }
 
@@ -121,8 +139,8 @@ function unavailableFeed(window: AdminDemandWindow, generatedAt: string, reason:
     schemaVersion: "averray.monitor.arrivals-journeys.v1",
     generatedAt,
     window,
-    timeline: { unavailable: reason },
-    journeys: { unavailable: reason },
+    timeline: { state: "unavailable", unavailable: reason },
+    journeys: { state: "unavailable", unavailable: reason },
   };
 }
 

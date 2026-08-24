@@ -16,8 +16,16 @@
 import { OPS_GLOSS } from "../../lib/monitor/ops-gloss.js";
 import type { GasSpendView, PayoutEvidence, SolvencySnapshot } from "../../lib/monitor/product-health.js";
 import { splitPools, type PoolView } from "../../lib/monitor/ops-spec.js";
-import { gasPoolNote, gasUnreadableNote, payoutRunwayNote } from "../../lib/monitor/ops-spec.js";
+import { gasPoolNote, gasUnreadableNote } from "../../lib/monitor/ops-spec.js";
 import { worstOpsTone, type OpsTone } from "../../lib/monitor/ops-model.js";
+import type {
+  OvernightLedgerPayload,
+  OvernightWindow,
+  RemoteFeedReading,
+  RewardBankSplit,
+  TopupDestinationsPayload,
+} from "../../lib/monitor/overnight-ledger.js";
+import { RewardBankSplitRow, TopupBlock } from "./OvernightLedgerPanels.js";
 
 export interface SolvencyPanelProps {
   solvency: SolvencySnapshot | undefined;
@@ -25,6 +33,9 @@ export interface SolvencyPanelProps {
   gas?: GasSpendView | { unreadable: true; reason: string } | undefined;
   /** Payout evidence, for the reward bank's payouts-remaining footnote. */
   payout?: PayoutEvidence | undefined;
+  overnightLedger?: RemoteFeedReading<OvernightLedgerPayload>;
+  topupDestinations?: RemoteFeedReading<TopupDestinationsPayload>;
+  overnightWindow?: OvernightWindow;
 }
 
 /**
@@ -51,10 +62,15 @@ function gasNoteFor(
  */
 const POOL_NOTE_KEY: Readonly<Record<string, string>> = {
   signer_gas: "BURN",
-  reward_bank: "RUNWAY",
 };
 
-export function SolvencyPanel({ solvency, gas, payout }: SolvencyPanelProps) {
+export function SolvencyPanel({
+  solvency,
+  gas,
+  overnightLedger = { state: "unavailable", reason: "feed unavailable — overnight ledger read not supplied" },
+  topupDestinations = { state: "unavailable", reason: "feed unavailable — top-up destination read not supplied" },
+  overnightWindow = "24h",
+}: SolvencyPanelProps) {
   const pools = solvency?.pools ?? [];
   const { floored, unfloored } = splitPools(pools);
   // The panel's edge rail — the worst tone among its own rows, the same
@@ -83,19 +99,20 @@ export function SolvencyPanel({ solvency, gas, payout }: SolvencyPanelProps) {
         // Each pool's footnote answers what its meter cannot: the signer's is
         // what is draining it, the reward bank's is how many more payouts it
         // funds. Balance, floor and margin are on the meter and never repeated.
-        const note =
-          view.pool.key === "signer_gas"
-            ? gasNoteFor(gas)
-            : view.pool.key === "reward_bank"
-              ? payoutRunwayNote({ pool: view.pool, payout, runwayNote: solvency?.runwayNote })
-              : null;
+        const note = view.pool.key === "signer_gas" ? gasNoteFor(gas) : null;
         // The key names the question before the eye starts reading the answer.
         // Two pools' sub-facts answer two different questions and used to look
         // like one continuous grey paragraph running down the panel.
         const noteKey = POOL_NOTE_KEY[view.pool.key];
+        const rewardSplit = view.pool.key === "reward_bank" && overnightLedger.state === "live"
+          ? overnightLedger.data.rewardBankSplit
+          : undefined;
         return (
           <div key={view.pool.key}>
-            <FlooredPool view={view} />
+            <FlooredPool view={view} rewardSplit={rewardSplit} />
+            {view.pool.key === "reward_bank" ? (
+              <RewardBankSplitRow reading={overnightLedger} window={overnightWindow} showBar={false} />
+            ) : null}
             {note ? (
               <p
                 className={`ops-pool-note${noteKey ? " ops-pool-note--keyed" : ""}`}
@@ -105,13 +122,19 @@ export function SolvencyPanel({ solvency, gas, payout }: SolvencyPanelProps) {
                 {noteKey ? (
                   <span
                     className="ops-pool-note-key"
-                    title={noteKey === "BURN" ? OPS_GLOSS.burn : noteKey === "RUNWAY" ? OPS_GLOSS.runway : undefined}
+                    title={noteKey === "BURN" ? OPS_GLOSS.burn : undefined}
                   >
                     {noteKey}
                   </span>
                 ) : null}
                 <span className="ops-pool-note-val">{note.text}</span>
               </p>
+            ) : null}
+            {view.pool.key === "signer_gas" || view.pool.key === "reward_bank" ? (
+              <TopupBlock
+                account={view.pool.key === "signer_gas" ? "signerGas" : "rewardBank"}
+                reading={topupDestinations}
+              />
             ) : null}
           </div>
         );
@@ -176,12 +199,17 @@ function PoolAddress({ view }: { view: PoolView }) {
   );
 }
 
-function FlooredPool({ view }: { view: PoolView }) {
+function FlooredPool({ view, rewardSplit }: { view: PoolView; rewardSplit?: RewardBankSplit }) {
   const meter = view.meter;
   if (!meter) return null;
   // Keep the "0" origin label off the floor tick when they would collide.
   const showZero = meter.floorPct >= 18;
   const centreFloorLabel = meter.floorPct >= 15;
+  const liquid = Number(rewardSplit?.liquid.display ?? 0);
+  const reserved = Number(rewardSplit?.reserved.display ?? 0);
+  const splitTotal = Math.max(0, liquid + reserved);
+  const liquidWidth = rewardSplit && splitTotal > 0 ? meter.fillPct * liquid / splitTotal : 0;
+  const reservedWidth = rewardSplit && splitTotal > 0 ? meter.fillPct * reserved / splitTotal : 0;
 
   return (
     <div className="ops-pool" data-tone={view.tone} data-testid={`ops-pool-${view.pool.key}`}>
@@ -202,7 +230,22 @@ function FlooredPool({ view }: { view: PoolView }) {
           aria-valuetext={`${view.amountLabel} ${view.unit}, ${view.margin}`}
           title={OPS_GLOSS.floor}
         >
-          <i className="ops-meter-fill" data-tone={view.tone} style={{ width: `${meter.fillPct}%` }} />
+          {rewardSplit ? (
+            <>
+              <i
+                className="ops-meter-fill ops-meter-fill--liquid"
+                data-part="liquid"
+                style={{ width: `${liquidWidth}%` }}
+              />
+              <i
+                className="ops-meter-fill ops-meter-fill--reserved"
+                data-part="reserved"
+                style={{ left: `${liquidWidth}%`, width: `${reservedWidth}%` }}
+              />
+            </>
+          ) : (
+            <i className="ops-meter-fill" data-tone={view.tone} style={{ width: `${meter.fillPct}%` }} />
+          )}
           <i className="ops-meter-floor" style={{ left: `${meter.floorPct}%` }} aria-hidden />
           {meter.overScale ? <i className="ops-meter-over" aria-hidden /> : null}
         </div>
