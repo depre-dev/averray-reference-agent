@@ -9,15 +9,15 @@
 //
 // So this file is now just the seam: resolve health (polled, or injected by a
 // test), decide whether the transport is trustworthy, and hand both to the
-// board. Phone width routes to the separate mobile surface, which is designed
-// independently and is deliberately untouched here.
+// board. Below 1080 the same readings are arranged by the mobile triage shell;
+// at 1080 and above the desktop OpsBoard remains the exact rendering owner.
 
 import type { MonitorBoard } from "../lib/monitor/board-cache.js";
 import type { ProductHealth } from "../lib/monitor/product-health.js";
 import type { StreamStatus } from "../lib/monitor/live-stream.js";
 import { useProductHealth } from "../hooks/useProductHealth.js";
 import { useAdminDemand } from "../hooks/useAdminDemand.js";
-import { useOvernightLedger } from "../hooks/useOvernightLedger.js";
+import { useOvernightLedger, type OvernightLedgerState } from "../hooks/useOvernightLedger.js";
 import { useIsMobileViewport } from "../lib/monitor/use-mobile-viewport.js";
 import { MobileBoard } from "./mobile/MobileBoard.js";
 import { OpsBoard } from "./ops/OpsBoard.js";
@@ -29,13 +29,16 @@ export interface BoardViewProps {
   onRefresh?: () => void;
   /** Test seam: inject health instead of polling. */
   health?: ProductHealth;
+  /** Test/preview seam: inject the exact shared ledger reading and window. */
+  overnight?: OvernightLedgerState;
 }
 
-export function BoardView({ board, status, onRefresh, health }: BoardViewProps) {
+export function BoardView({ board, status, onRefresh, health, overnight: overnightOverride }: BoardViewProps) {
   const isMobileViewport = useIsMobileViewport();
   const polled = useProductHealth({ enabled: health === undefined });
   const demand = useAdminDemand({ enabled: health === undefined && !isMobileViewport });
-  const overnight = useOvernightLedger({ enabled: health === undefined && !isMobileViewport });
+  const overnightHook = useOvernightLedger({ enabled: health === undefined && overnightOverride === undefined });
+  const overnight = overnightOverride ?? overnightHook;
   const productHealth = health ?? polled.health;
 
   // A stream we cannot trust must not render as a calm board — the fake-green
@@ -49,7 +52,16 @@ export function BoardView({ board, status, onRefresh, health }: BoardViewProps) 
   // stream is alive, and it used to be handed health alone.
   if (isMobileViewport) {
     return (
-      <MobileBoard health={productHealth} streamStatus={status} streamDegraded={degraded} />
+      <MobileBoard
+        health={productHealth}
+        board={board}
+        streamStatus={status}
+        streamDegraded={degraded}
+        overnightLedger={overnight.ledger}
+        topupDestinations={overnight.topupDestinations}
+        overnightWindow={overnight.window}
+        onOvernightWindowChange={overnight.setWindow}
+      />
     );
   }
 
