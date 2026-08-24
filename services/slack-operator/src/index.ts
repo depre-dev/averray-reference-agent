@@ -4,7 +4,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { readFile } from "node:fs/promises";
-import { addressFromPrivateKey, logger, optionalEnv, query, siweLogin } from "@avg/mcp-common";
+import { addressFromPrivateKey, logger, optionalEnv, query, siweLogin, siweLoginWithPrivateKey } from "@avg/mcp-common";
 import { createDefaultWorkflowDeps } from "@avg/averray-mcp/default-workflow-runtime";
 import { invokeAgentTask } from "@avg/averray-mcp/agent-invocation";
 import { getHandoffMonitor, recordHandoffEvent } from "@avg/averray-mcp/handoff-events";
@@ -382,7 +382,18 @@ function deriveProductHealthSigner(): string | undefined {
 }
 const monitorConfig = parseMonitorConfig(process.env);
 const adminDemandApiBaseUrl = optionalEnv("AVERRAY_API_BASE_URL", "https://api.averray.com");
-const adminDemandSession = new AdminDemandSessionCache(() => siweLogin(adminDemandApiBaseUrl));
+// The board's admin reads authenticate as the dedicated monitor read wallet
+// when its key is present: a viewer-allowlisted identity that holds no funds
+// and signs no transaction, so a leak buys operator reads and nothing else.
+// Without the key we fall back to the reference agent's own SIWE session,
+// which is the pre-2026-08-24 behaviour (and lacks ops:view, so the panels
+// render their named unauthorized state rather than pretending).
+const monitorReadWalletKey = process.env.AVERRAY_OPS_WALLET_PRIVATE_KEY?.trim();
+const adminDemandSession = new AdminDemandSessionCache(() => (
+  monitorReadWalletKey
+    ? siweLoginWithPrivateKey(monitorReadWalletKey as `0x${string}`, { baseUrl: adminDemandApiBaseUrl })
+    : siweLogin(adminDemandApiBaseUrl)
+));
 const getAdminReadSession = createAdminReadSessionProvider({
   staticToken: process.env.AVERRAY_OPS_TOKEN,
   getSiweSession: () => adminDemandSession.get(),
