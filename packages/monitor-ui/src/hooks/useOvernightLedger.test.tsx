@@ -13,6 +13,7 @@ function unavailableFeed(window: OvernightWindow): OvernightLedgerFeed {
     window,
     ledger: { state: "unavailable", reason: "fixture ledger unavailable" },
     topupDestinations: { state: "unavailable", reason: "fixture top-ups unavailable" },
+    readIdentity: { state: "unavailable", reason: "fixture identity unavailable" },
   };
 }
 

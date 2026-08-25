@@ -1,5 +1,6 @@
 import type {
   MoneyAmount,
+  MonitorReadIdentity,
   OvernightLedgerPayload,
   RemoteFeedReading,
   TopupDestinationsPayload,
@@ -149,5 +150,14 @@ export const TOPUP_DESTINATIONS_FIXTURE: RemoteFeedReading<TopupDestinationsPayl
         followUpCommand: "fund-signer deposit",
       },
     },
+  },
+};
+
+export const READ_IDENTITY_FIXTURE: RemoteFeedReading<MonitorReadIdentity> = {
+  state: "live",
+  data: {
+    wallet: "0x062d000000000000000000000000000000002a8a",
+    scopes: ["admin:status", "ops:view"],
+    source: "static_token",
   },
 };

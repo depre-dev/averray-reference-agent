@@ -37,7 +37,9 @@ describe("overnight ledger admin reads", () => {
     const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
       seenAuthorization.push(new Headers(init?.headers).get("authorization") ?? "");
       const address = String(url);
-      const body = address.includes("topup-destinations")
+      const body = address.includes("auth/session")
+        ? { wallet: "0x062d000000000000000000000000000000002a8a", capabilities: ["ops:view", "admin:status"] }
+        : address.includes("topup-destinations")
         ? TOPUPS
         : address.includes("overnight-ledger")
           ? LEDGER
@@ -60,15 +62,24 @@ describe("overnight ledger admin reads", () => {
     })]);
 
     expect(login).not.toHaveBeenCalled();
-    expect(seenAuthorization).toEqual(Array(4).fill("Bearer ops-service-token"));
+    expect(seenAuthorization).toEqual(Array(5).fill("Bearer ops-service-token"));
     expect(feed.ledger.state).toBe("live");
     expect(feed.topupDestinations.state).toBe("live");
+    expect(feed.readIdentity).toEqual({
+      state: "live",
+      data: {
+        wallet: "0x062d000000000000000000000000000000002a8a",
+        scopes: ["admin:status", "ops:view"],
+        source: "static_token",
+      },
+    });
+    expect(JSON.stringify(feed)).not.toContain("ops-service-token");
   });
 
   it("falls back to the existing SIWE session when AVERRAY_OPS_TOKEN is unset", async () => {
     const login = vi.fn(async () => ({ token: "siwe-session" }));
     const getSession = createAdminReadSessionProvider({ staticToken: "", getSiweSession: login });
-    expect((await getSession()).token).toBe("siwe-session");
+    expect(await getSession()).toEqual({ token: "siwe-session", source: "siwe" });
     expect(login).toHaveBeenCalledTimes(1);
   });
 
@@ -85,6 +96,10 @@ describe("overnight ledger admin reads", () => {
       reason: "feed unauthorized — monitor token lacks ops:view",
     });
     expect(feed.topupDestinations).toEqual(feed.ledger);
+    expect(feed.readIdentity).toEqual({
+      state: "unauthorized",
+      reason: "read identity unauthorized — monitor token was not accepted",
+    });
   });
 
   it("keeps the monitor projection private and no-store", () => {

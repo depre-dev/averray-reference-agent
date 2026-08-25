@@ -5,6 +5,7 @@ import {
   feedStateCopy,
   moneyDisplay,
   signedMoneyDisplay,
+  type MonitorReadIdentity,
   type OvernightEvent,
   type OvernightLedgerPayload,
   type OvernightWindow,
@@ -13,13 +14,18 @@ import {
   type TopupDestinationsPayload,
 } from "../../lib/monitor/overnight-ledger.js";
 import {
+  deriveOpsActionItems,
   disputeClockLine,
   flowFunnel,
   lifecycleNote,
-  opsVerdict,
   payoutView,
+  readIdentityView,
+  statusVitalViews,
+  type OpsActionItem,
+  type StatusVitalView,
   volumeMixNote,
 } from "../../lib/monitor/ops-spec.js";
+import { phoneVerdict } from "../../lib/monitor/phone-spec.js";
 import type { ProductHealth } from "../../lib/monitor/product-health.js";
 
 export type MobileOpsScreen = "status" | "money" | "work" | "events";
@@ -34,16 +40,12 @@ export interface MobileBoardProps {
   nowMs?: number;
   overnightLedger?: RemoteFeedReading<OvernightLedgerPayload>;
   topupDestinations?: RemoteFeedReading<TopupDestinationsPayload>;
+  readIdentity?: RemoteFeedReading<MonitorReadIdentity>;
   overnightWindow?: OvernightWindow;
   onOvernightWindowChange?: (window: OvernightWindow) => void;
   initialScreen?: MobileOpsScreen;
   initialMoreOpen?: boolean;
 }
-
-const MR1_REASON = "MR-1 unavailable — status.verdict reason line is not published";
-const MR2_SIGNER_REASON = "MR-2 unavailable — signer gas has no per-tile state and reason";
-const MR3_REASON = "MR-3 unavailable — status.actionItems is not published";
-const MR4_REASON = "MR-4 unavailable — session.operator and sign-out endpoint are not published";
 
 const DEFAULT_LEDGER: RemoteFeedReading<OvernightLedgerPayload> = {
   state: "unavailable",
@@ -52,6 +54,10 @@ const DEFAULT_LEDGER: RemoteFeedReading<OvernightLedgerPayload> = {
 const DEFAULT_TOPUPS: RemoteFeedReading<TopupDestinationsPayload> = {
   state: "unavailable",
   reason: "feed unavailable — top-up destination read not supplied",
+};
+const DEFAULT_READ_IDENTITY: RemoteFeedReading<MonitorReadIdentity> = {
+  state: "unavailable",
+  reason: "read identity unavailable — feed not supplied",
 };
 
 export function MobileBoard({
@@ -62,6 +68,7 @@ export function MobileBoard({
   nowMs = Date.now(),
   overnightLedger = DEFAULT_LEDGER,
   topupDestinations = DEFAULT_TOPUPS,
+  readIdentity = DEFAULT_READ_IDENTITY,
   overnightWindow = "24h",
   onOvernightWindowChange = () => undefined,
   initialScreen = "status",
@@ -85,6 +92,7 @@ export function MobileBoard({
         <MoreSheet
           health={health}
           ledger={overnightLedger}
+          readIdentity={readIdentity}
           window={overnightWindow}
           onClose={() => setMoreOpen(false)}
         />
@@ -165,29 +173,44 @@ function StatusScreen({
   streamDegraded: boolean;
   nowMs: number;
 }) {
-  const vitals = statusVitals(ledger);
-  const verdict = health ? opsVerdict({ health, streamDegraded, nowMs }) : null;
+  const vitals = statusVitalViews({ health, ledger });
+  const verdict = health ? phoneVerdict({ health, streamDegraded, nowMs }) : null;
   const verdictState: RemoteFeedState = !health ? "loading" : streamDegraded ? "unavailable" : "live";
+  const partial = vitals.some((vital) => vital.state !== "live");
+  const actionReading: RemoteFeedReading<OpsActionItem[]> = !health
+    ? { state: "loading", reason: "action derivation loading — waiting for product health" } as const
+    : ledger.state !== "live"
+      ? { state: ledger.state, reason: ledger.reason }
+      : {
+          state: "live" as const,
+          data: deriveOpsActionItems({
+            verdict: { reason: verdict!.reason },
+            health,
+            ledger: ledger.data,
+          }),
+        };
 
   return (
     <div className="hm-mobile-screen" data-testid="mobile-status-screen">
-      <div className="hm-mobile-partial" data-testid="mobile-partial-view">
-        <StateChip state="unavailable" label="PARTIAL VIEW" />
-        <span>some readings are unavailable · no missing figure is drawn as zero</span>
-      </div>
+      {partial ? (
+        <div className="hm-mobile-partial" data-testid="mobile-partial-view">
+          <StateChip state="unavailable" label="PARTIAL VIEW" />
+          <span>some readings are unavailable · no missing figure is drawn as zero</span>
+        </div>
+      ) : null}
 
       <section className="hm-mobile-panel hm-mobile-verdict" data-feed-state={verdictState}>
         <PanelHeading title="OPERATOR VERDICT" state={verdictState} />
         {verdict ? (
           <>
-            <strong data-tone={verdict.verdictTone}>{verdict.verdict}</strong>
+            <strong data-tone={verdict.tone}>{verdict.headline}</strong>
             <span>{verdict.kicker}</span>
+            <p className="hm-mobile-verdict-reason">reason · {verdict.reason}</p>
             {streamDegraded ? <p>stream {streamStatus} — last observed verdict only</p> : null}
           </>
         ) : (
           <FeedState state="loading" reason="product health loading — waiting for the first read" />
         )}
-        <FeedState state="unavailable" reason={MR1_REASON} compact />
       </section>
 
       <section className="hm-mobile-vitals" aria-label="Status vitals">
@@ -196,63 +219,12 @@ function StatusScreen({
 
       <MobileDigest reading={ledger} />
 
-      <section className="hm-mobile-panel" data-testid="mobile-actions" data-feed-state="unavailable">
-        <PanelHeading title="ACT ON THIS" state="unavailable" />
-        <FeedState state="unavailable" reason={MR3_REASON} />
-      </section>
+      <MobileActions reading={actionReading} />
     </div>
   );
 }
 
-interface VitalView {
-  key: "settled" | "net-paid" | "runway" | "signer-gas";
-  label: string;
-  state: RemoteFeedState;
-  value?: string;
-  unit?: string;
-  detail: string;
-}
-
-function statusVitals(reading: RemoteFeedReading<OvernightLedgerPayload>): VitalView[] {
-  if (reading.state !== "live") {
-    const reason = feedStateCopy(reading);
-    return [
-      { key: "settled", label: "SETTLED", state: reading.state, detail: reason },
-      { key: "net-paid", label: "NET PAID", state: reading.state, detail: reason },
-      { key: "runway", label: "BANK RUNWAY", state: reading.state, detail: reason },
-      { key: "signer-gas", label: "SIGNER GAS", state: "unavailable", detail: MR2_SIGNER_REASON },
-    ];
-  }
-  const { digest, rewardBankSplit } = reading.data;
-  return [
-    {
-      key: "settled",
-      label: `SETTLED ${reading.data.window.toUpperCase()}`,
-      state: "live",
-      value: String(digest.settlementCount),
-      detail: `${digest.walletCount} ${digest.walletCount === 1 ? "wallet" : "wallets"}`,
-    },
-    {
-      key: "net-paid",
-      label: "NET PAID",
-      state: "live",
-      value: moneyDisplay(digest.paid),
-      unit: "USDC",
-      detail: `${moneyDisplay(digest.retained)} retained`,
-    },
-    {
-      key: "runway",
-      label: "BANK RUNWAY",
-      state: "live",
-      value: formatRunway(rewardBankSplit.runwayDays),
-      unit: "D",
-      detail: `liquid only · reserved ${signedMoneyDisplay(rewardBankSplit.reservedDelta)}`,
-    },
-    { key: "signer-gas", label: "SIGNER GAS", state: "unavailable", detail: MR2_SIGNER_REASON },
-  ];
-}
-
-function VitalTile({ vital }: { vital: VitalView }) {
+function VitalTile({ vital }: { vital: StatusVitalView }) {
   return (
     <article className="hm-mobile-vital" data-testid={`mobile-vital-${vital.key}`} data-feed-state={vital.state}>
       <span>{vital.label}</span>
@@ -265,6 +237,26 @@ function VitalTile({ vital }: { vital: VitalView }) {
       )}
       <p>{vital.detail}</p>
     </article>
+  );
+}
+
+function MobileActions({ reading }: { reading: RemoteFeedReading<OpsActionItem[]> }) {
+  return (
+    <section className="hm-mobile-panel" data-testid="mobile-actions" data-feed-state={reading.state}>
+      <PanelHeading title="ACT ON THIS" state={reading.state} />
+      {reading.state !== "live" ? <ReadingState reading={reading} /> : reading.data.length === 0 ? (
+        <p className="hm-mobile-actions-empty" data-testid="mobile-actions-empty">nothing needs you</p>
+      ) : (
+        <ol className="hm-mobile-actions-list">
+          {reading.data.map((item) => (
+            <li key={`${item.title}:${item.since}`} data-severity={item.severity}>
+              <i aria-hidden /><span><strong>{item.title}</strong><small>{item.detail}</small></span>
+              <time dateTime={item.since}>since {formatTime(item.since)}</time>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
   );
 }
 
@@ -538,22 +530,33 @@ function MobileEvent({ event }: { event: OvernightEvent }) {
 function MoreSheet({
   health,
   ledger,
+  readIdentity,
   window,
   onClose,
 }: {
   health?: ProductHealth;
   ledger: RemoteFeedReading<OvernightLedgerPayload>;
+  readIdentity: RemoteFeedReading<MonitorReadIdentity>;
   window: OvernightWindow;
   onClose: () => void;
 }) {
   const [gate, setGate] = useState<DesktopGate | null>(null);
+  const identity = readIdentityView(readIdentity);
   if (gate) return <DesktopGateCard gate={gate} onBack={() => setGate(null)} />;
   return (
     <main className="hm-mobile-more" data-testid="mobile-more-sheet">
       <header><span>MORE</span><button type="button" onClick={onClose}>close ×</button></header>
-      <section className="hm-mobile-panel" data-feed-state="unavailable">
-        <PanelHeading title="OPERATOR SESSION" state="unavailable" />
-        <FeedState state="unavailable" reason={MR4_REASON} />
+      <section className="hm-mobile-panel hm-mobile-read-identity" data-feed-state={identity.state}>
+        <PanelHeading title="READ IDENTITY" state={identity.state} />
+        {identity.state !== "live" ? <FeedState state={identity.state} reason={identity.detail} /> : (
+          <>
+            <p><span>READS AS</span><strong>{identity.wallet}</strong><small>{identity.source?.replaceAll("_", " ")}</small></p>
+            <ul>
+              {identity.scopes.map((scope) => <li key={scope.name}>{scope.name} <b>{scope.granted ? "✓" : "—"}</b></li>)}
+            </ul>
+            <p data-sufficient={identity.sufficient ? "yes" : "no"}>{identity.detail}</p>
+          </>
+        )}
         <p className="hm-mobile-window-readonly"><span>WINDOW · GOVERNS EVERY SCREEN</span><strong>{window.toUpperCase()}</strong></p>
       </section>
       <section className="hm-mobile-panel hm-mobile-more-list">
@@ -572,7 +575,6 @@ function MoreSheet({
           </button>
         ))}
       </section>
-      <button type="button" className="hm-mobile-signout" disabled title={MR4_REASON}>SIGN OUT UNAVAILABLE · MR-4</button>
       <small className="hm-mobile-breakpoints">mobile &lt; 768 · tablet ≤ 1079 · desktop board unchanged ≥ 1080</small>
     </main>
   );

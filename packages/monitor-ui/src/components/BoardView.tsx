@@ -59,6 +59,7 @@ export function BoardView({ board, status, onRefresh, health, overnight: overnig
         streamDegraded={degraded}
         overnightLedger={overnight.ledger}
         topupDestinations={overnight.topupDestinations}
+        readIdentity={overnight.readIdentity}
         overnightWindow={overnight.window}
         onOvernightWindowChange={overnight.setWindow}
       />
