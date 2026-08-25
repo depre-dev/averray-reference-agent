@@ -59,6 +59,10 @@ export interface CrossCheckView {
   status: CrossCheckStatus;
   /** One sentence, naming both endpoints and both counts when they differ. */
   detail: string;
+  /** Machine-readable attempt failure; statuses remain intentionally unchanged. */
+  reason?: "throttled";
+  /** Absolute retry time for a failed attempt, so the board can render a countdown. */
+  retryAtMs?: number;
   /** True when the last AGREEMENT is older than the budget, or never happened. */
   overdue: boolean;
   /** Epoch ms of the last agreement, for rendering its age. */
