@@ -124,7 +124,12 @@
 .hm-mobile-panel-head h2,
 .hm-mobile-more-list h2 {
   margin: 0;
-  font-size: 9px;
+  /* Explicit, not inherited: these headings were picking up --h4-muted
+     (4.48:1 on panel) and at 9px on a phone in daylight they were barely
+     legible. --h4-ink-2 is 10.78:1 and still reads as a label rather than
+     competing with the figures beneath it. */
+  color: var(--h4-ink-2);
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
