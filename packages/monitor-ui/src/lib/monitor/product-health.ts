@@ -240,6 +240,10 @@ export interface CrossCheckView {
   status: "agree" | "disagree" | "unavailable" | "not-configured" | "never-run";
   /** Names both endpoints and both counts when they differ. */
   detail: string;
+  /** Machine-readable attempt failure; statuses remain intentionally unchanged. */
+  reason?: "throttled";
+  /** Absolute retry time for a failed attempt. */
+  retryAtMs?: number;
   /** The last agreement is older than the budget — or never happened. */
   overdue: boolean;
   lastAgreedAtMs: number | null;

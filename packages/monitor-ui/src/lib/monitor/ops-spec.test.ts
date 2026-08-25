@@ -256,6 +256,17 @@ describe("crossCheckLine — a tick must never age silently", () => {
     expect(line.tone).toBe("awaiting");
   });
 
+  test("a throttled check names its retry countdown", () => {
+    const line = crossCheckLine(at({
+      status: "unavailable",
+      detail: "cross-check could not run — RPC endpoint throttled (HTTP 429)",
+      reason: "throttled",
+      retryAtMs: NOW + 31 * 60_000,
+    }), NOW)!;
+    expect(line.text).toBe("throttled — retrying in 31m");
+    expect(line.tone).toBe("awaiting");
+  });
+
   test("not configured is stated, not alarmed", () => {
     // A check nobody enabled is not a check that broke.
     const line = crossCheckLine(at({ status: "not-configured", detail: "no second endpoint configured" }), NOW)!;

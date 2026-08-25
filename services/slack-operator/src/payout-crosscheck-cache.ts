@@ -29,12 +29,14 @@ import {
 export interface CrossCheckCache {
   /** The current verdict. Never null — "never run" is itself a verdict. */
   read(): CrossCheckView;
-  /** Re-compare if the verdict has aged past the interval. Returns at once. */
+  /** Re-compare when success is due and any failure backoff has elapsed. Returns at once. */
   maybeRefresh(nowMs: number): void;
 }
 
 /** Weekly. Two providers that agree today will agree this afternoon. */
 export const DEFAULT_CROSSCHECK_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+/** A transient provider failure gets another chance in the same hour. */
+export const DEFAULT_CROSSCHECK_RETRY_INTERVAL_MS = 30 * 60 * 1000;
 
 export interface CrossCheckRun {
   primary: EndpointReading | null;
@@ -49,14 +51,39 @@ export function createCrossCheckCache(deps: {
   /** Performs both pinned reads. Injected so this is testable without a chain. */
   run: () => Promise<CrossCheckRun>;
   intervalMs?: number;
+  retryIntervalMs?: number;
   onError?: (message: string) => void;
 }): CrossCheckCache {
   const intervalMs = deps.intervalMs ?? DEFAULT_CROSSCHECK_INTERVAL_MS;
+  const retryIntervalMs = deps.retryIntervalMs ?? DEFAULT_CROSSCHECK_RETRY_INTERVAL_MS;
   let verdict: CrossCheckView = crossCheckNeverRun(deps.configured);
   // Survives failures on purpose — see the header.
   let lastAgreedAtMs: number | null = null;
-  let lastRunAtMs: number | null = null;
+  // A completed comparison (agree OR disagree) owns the long cadence. A failed
+  // attempt owns only the retry cadence; conflating these clocks stranded a
+  // transient 429 behind the seven-day interval.
+  let lastSuccessAtMs: number | null = null;
+  let lastAttemptAtMs: number | null = null;
+  let consecutiveFailures = 0;
   let running = false;
+
+  const retryDelayMs = (): number => {
+    const exponent = Math.min(Math.max(0, consecutiveFailures - 1), 52);
+    return Math.min(intervalMs, retryIntervalMs * 2 ** exponent);
+  };
+
+  const decorateFailure = (
+    next: CrossCheckView,
+    reason: string | null | undefined,
+    nowMs: number,
+  ): CrossCheckView => {
+    const throttled = /(?:\b429\b|throttl)/i.test(reason ?? "");
+    return {
+      ...next,
+      ...(throttled ? { reason: "throttled" as const } : {}),
+      retryAtMs: nowMs + retryDelayMs(),
+    };
+  };
 
   return {
     read: () => verdict,
@@ -64,12 +91,19 @@ export function createCrossCheckCache(deps: {
     maybeRefresh(nowMs) {
       if (!deps.configured) return;
       if (running) return;
-      if (lastRunAtMs !== null && nowMs - lastRunAtMs < intervalMs) return;
+      const successDue = lastSuccessAtMs === null || nowMs - lastSuccessAtMs >= intervalMs;
+      if (!successDue) return;
+      if (
+        consecutiveFailures > 0
+        && lastAttemptAtMs !== null
+        && nowMs - lastAttemptAtMs < retryDelayMs()
+      ) return;
       running = true;
+      lastAttemptAtMs = nowMs;
       void (async () => {
         try {
           const run = await deps.run();
-          verdict = decideCrossCheck({
+          const next = decideCrossCheck({
             configured: true,
             primary: run.primary,
             secondary: run.secondary,
@@ -78,22 +112,28 @@ export function createCrossCheckCache(deps: {
             lastAgreedAtMs,
             nowMs,
           });
-          if (verdict.status === "agree") lastAgreedAtMs = nowMs;
+          if (next.status === "agree" || next.status === "disagree") {
+            verdict = next;
+            lastSuccessAtMs = nowMs;
+            consecutiveFailures = 0;
+            if (next.status === "agree") lastAgreedAtMs = nowMs;
+          } else {
+            consecutiveFailures += 1;
+            verdict = decorateFailure(next, run.secondaryReason, nowMs);
+          }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          verdict = decideCrossCheck({
+          consecutiveFailures += 1;
+          verdict = decorateFailure(decideCrossCheck({
             configured: true,
             primary: null,
             secondary: null,
             secondaryReason: message,
             lastAgreedAtMs,
             nowMs,
-          });
+          }), message, nowMs);
           deps.onError?.(message);
         } finally {
-          // Set even on failure: a provider that is down must not be retried
-          // every heartbeat until it comes back.
-          lastRunAtMs = nowMs;
           running = false;
         }
       })();

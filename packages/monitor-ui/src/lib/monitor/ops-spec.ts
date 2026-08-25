@@ -1101,6 +1101,13 @@ export function crossCheckLine(
   }
   if (c.status === "disagree") return { text: c.detail, tone: "degraded" };
   if (c.status === "not-configured") return { text: c.detail, tone: "awaiting" };
+  if (c.reason === "throttled" && c.retryAtMs !== undefined) {
+    const retryMinutes = Math.max(0, Math.ceil((c.retryAtMs - nowMs) / 60_000));
+    return {
+      text: `throttled — retrying in ${retryMinutes}m${c.overdue ? " · CROSS-CHECK OVERDUE" : ""}`,
+      tone: c.overdue ? "degraded" : "awaiting",
+    };
+  }
   // unavailable / never-run: overdue is the part that decides the tone, because
   // a check that has been failing for a fortnight is a different fact from one
   // that failed this morning.
