@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   DATA_STALE_FALLBACK_MS,
   EVIDENCE_KEY,
+  deriveOpsActionItems,
   boardKpis,
   capMeterView,
   crossCheckLine,
@@ -955,5 +956,99 @@ describe("capMeterView — a bar only against a real fixed scale", () => {
     // "At cap" and "over cap" are different facts; the peg alone conflates them.
     expect(view.over).toBe(true);
     expect(capMeterView({ totalAssetCap: CAP, utilizationBps: 10_000 })!.over).toBe(false);
+  });
+});
+
+describe("deriveOpsActionItems — current facts without a second verdict", () => {
+  test("empty is a real answer when nothing currently needs the operator", () => {
+    const items = deriveOpsActionItems({
+      verdict: { reason: "nominal" },
+      health: OPS_FIXTURE_NOMINAL,
+      ledger: OVERNIGHT_LEDGER_LIVE.data,
+    });
+    expect(items).toEqual([]);
+  });
+
+  test("the lead verdict fact is not duplicated in ACT ON THIS", () => {
+    const health: ProductHealth = {
+      ...OPS_FIXTURE_NOMINAL,
+      probes: [
+        { name: "money_path", status: "red", detail: "verdict owns this exact fault", sparkline: ["red"] },
+        { name: "api_latency", status: "degraded", detail: "latency is currently 2400ms", sparkline: ["degraded"] },
+      ],
+    };
+    const items = deriveOpsActionItems({ verdict: { reason: "probe-red" }, health });
+    expect(items.map((item) => item.detail)).not.toContain("verdict owns this exact fault");
+    expect(items.map((item) => item.detail)).toContain("latency is currently 2400ms");
+
+    const floorOwner = OPS_FIXTURE_STRESS.probes.find((probe) => probe.name === "signer_liquidity")!;
+    const floorItems = deriveOpsActionItems({
+      verdict: { reason: "floor-breach" },
+      health: OPS_FIXTURE_STRESS,
+    });
+    expect(floorItems.map((item) => item.detail)).not.toContain(floorOwner.detail);
+  });
+
+  test("acknowledged and awaiting probes never become action items", () => {
+    const health: ProductHealth = {
+      ...OPS_FIXTURE_NOMINAL,
+      probes: [
+        { name: "capabilities", status: "degraded", detail: "3 warnings acknowledged", sparkline: ["degraded"] },
+        { name: "money_path", status: "degraded", detail: "awaiting product settlement data", sparkline: ["degraded"] },
+      ],
+    };
+    expect(deriveOpsActionItems({ verdict: { reason: "nominal" }, health })).toEqual([]);
+  });
+
+  test("only currently true warnings survive even when history contains an old fault", () => {
+    const health: ProductHealth = {
+      ...OPS_FIXTURE_NOMINAL,
+      probes: [{ name: "money_path", status: "ok", detail: "settlement healthy", sparkline: ["ok"] }],
+      history: {
+        incidents: [{
+          id: "old-money-path",
+          probe: "money_path",
+          severity: "red",
+          startedAt: NOW - 60_000,
+          endedAt: NOW - 30_000,
+          note: "resolved",
+        }],
+      },
+    };
+    expect(deriveOpsActionItems({ verdict: { reason: "nominal" }, health })).toEqual([]);
+  });
+
+  test("faults sort before warnings and equal severities sort oldest first", () => {
+    const health: ProductHealth = {
+      ...OPS_FIXTURE_NOMINAL,
+      probes: [
+        { name: "new_warning", status: "degraded", detail: "new warning detail", sparkline: ["degraded"] },
+        { name: "fault", status: "red", detail: "fault detail", sparkline: ["red"] },
+      ],
+    };
+    const ledger = {
+      ...OVERNIGHT_LEDGER_LIVE.data,
+      generatedAt: new Date(NOW - 10_000).toISOString(),
+      digest: { ...OVERNIGHT_LEDGER_LIVE.data.digest, warningsOpen: 1 },
+    };
+    const items = deriveOpsActionItems({ verdict: { reason: "floor-breach" }, health, ledger });
+    expect(items.map((item) => item.title)).toEqual(["fault red", "open warnings", "new warning degraded"]);
+  });
+
+  test("digest actions quote the currently-open counts", () => {
+    const ledger = {
+      ...OVERNIGHT_LEDGER_LIVE.data,
+      digest: {
+        ...OVERNIGHT_LEDGER_LIVE.data.digest,
+        stuckClaimCount: 2,
+        warningsOpen: 1,
+      },
+    };
+    const items = deriveOpsActionItems({
+      verdict: { reason: "nominal" },
+      health: OPS_FIXTURE_NOMINAL,
+      ledger,
+    });
+    expect(items.map((item) => item.detail)).toEqual(["1 warnings open", "2 claims stuck"]);
   });
 });

@@ -35,6 +35,7 @@ import {
   OVERNIGHT_LEDGER_FIXTURE,
   OVERNIGHT_LEDGER_UNAUTHORIZED,
   OVERNIGHT_LEDGER_UNAVAILABLE,
+  READ_IDENTITY_FIXTURE,
   TOPUP_DESTINATIONS_FIXTURE,
 } from "./lib/monitor/overnight-ledger-fixtures.js";
 import type {
@@ -56,6 +57,13 @@ const EMPTY_EVENTS_LEDGER: RemoteFeedReading<OvernightLedgerPayload> = {
     events: { items: [], totalCount: 0, returnedCount: 0, hasOlder: false },
   },
 };
+const ACTION_LEDGER: RemoteFeedReading<OvernightLedgerPayload> = {
+  state: "live",
+  data: {
+    ...OVERNIGHT_LEDGER_FIXTURE,
+    digest: { ...OVERNIGHT_LEDGER_FIXTURE.digest, warningsOpen: 1 },
+  },
+};
 
 const FIXTURES = {
   nominal: {
@@ -72,15 +80,22 @@ const FIXTURES = {
     ledger: OVERNIGHT_LEDGER_LIVE,
     topups: TOPUP_DESTINATIONS_FIXTURE,
   },
+  actions: {
+    label: "FIG. 3 — Current action",
+    health: withArrivals(OPS_FIXTURE_NOMINAL),
+    degraded: false,
+    ledger: ACTION_LEDGER,
+    topups: TOPUP_DESTINATIONS_FIXTURE,
+  },
   unavailable: {
-    label: "FIG. 3 — Unavailable ledger",
+    label: "FIG. 4 — Unavailable ledger",
     health: withArrivals(OPS_FIXTURE_NOMINAL),
     degraded: false,
     ledger: OVERNIGHT_LEDGER_UNAVAILABLE,
     topups: OVERNIGHT_LEDGER_UNAVAILABLE,
   },
   stress: {
-    label: "FIG. 4 — Stress",
+    label: "FIG. 5 — Stress",
     health: withArrivals(OPS_FIXTURE_STRESS),
     degraded: true,
     ledger: OVERNIGHT_LEDGER_UNAVAILABLE,
@@ -101,7 +116,7 @@ const FIXTURES = {
     topups: OVERNIGHT_LEDGER_UNAVAILABLE,
   },
   "events-empty": {
-    label: "FIG. 5 — Empty live events",
+    label: "FIG. 6 — Empty live events",
     health: withArrivals(OPS_FIXTURE_NOMINAL),
     degraded: false,
     ledger: EMPTY_EVENTS_LEDGER,
@@ -187,6 +202,7 @@ function Harness() {
             nowMs={FIXTURE_NOW}
             overnightLedger={active.ledger}
             topupDestinations={active.topups}
+            readIdentity={READ_IDENTITY_FIXTURE}
             overnightWindow={windowValue}
             onOvernightWindowChange={setWindowValue}
             initialScreen={initialDestination && initialDestination !== "more" ? initialDestination : "status"}

@@ -13,6 +13,7 @@ import {
   OVERNIGHT_LEDGER_FIXTURE,
   OVERNIGHT_LEDGER_LIVE,
   OVERNIGHT_LEDGER_UNAUTHORIZED,
+  READ_IDENTITY_FIXTURE,
   TOPUP_DESTINATIONS_FIXTURE,
 } from "../../lib/monitor/overnight-ledger-fixtures.js";
 import type { OvernightWindow, RemoteFeedReading } from "../../lib/monitor/overnight-ledger.js";
@@ -35,6 +36,21 @@ const overnightState = (window: OvernightWindow = "24h"): OvernightLedgerState =
 });
 
 describe("Hermes mobile triage — one truth", () => {
+  test("mobile renders the same shared verdict state as desktop and exposes its typed reason", () => {
+    const desktop = render(<OpsBoard health={OPS_FIXTURE_STRESS} nowMs={FIXTURE_NOW} />);
+    const mobile = render(
+      <MobileBoard
+        health={OPS_FIXTURE_STRESS}
+        nowMs={FIXTURE_NOW}
+        overnightLedger={OVERNIGHT_LEDGER_LIVE}
+      />,
+    );
+    const headline = desktop.getByTestId("ops-verdict").textContent;
+    expect(headline).toBeTruthy();
+    expect(within(mobile.container).getByText(headline!)).toBeTruthy();
+    expect(mobile.getByText("reason · floor-breach")).toBeTruthy();
+  });
+
   test("mobile and desktop agree on settled count, net paid, runway, and closing liquid for the same window fixture", () => {
     const desktop = render(
       <OpsBoard
@@ -128,10 +144,20 @@ describe("Hermes mobile triage — one truth", () => {
 });
 
 describe("Hermes mobile triage — state honesty", () => {
-  test("a degraded status renders PARTIAL VIEW, each reason, and no zero for a missing vital", () => {
+  test("a degraded status renders PARTIAL VIEW, the typed verdict reason, and no zero for a missing vital", () => {
+    const health = {
+      ...OPS_FIXTURE_STRESS,
+      solvency: {
+        ...OPS_FIXTURE_STRESS.solvency!,
+        pools: OPS_FIXTURE_STRESS.solvency!.pools.filter((pool) => pool.key !== "signer_gas"),
+      },
+      probes: OPS_FIXTURE_STRESS.probes.map((probe) => probe.name === "signer_liquidity"
+        ? { ...probe, detail: "balance read failed: fixture RPC timeout" }
+        : probe),
+    };
     const view = render(
       <MobileBoard
-        health={OPS_FIXTURE_STRESS}
+        health={health}
         streamDegraded
         streamStatus="reconnecting"
         nowMs={FIXTURE_NOW}
@@ -140,11 +166,11 @@ describe("Hermes mobile triage — state honesty", () => {
     );
     expect(view.getByTestId("mobile-partial-view").textContent).toContain("PARTIAL VIEW");
     const signer = view.getByTestId("mobile-vital-signer-gas");
-    expect(signer.textContent).toContain("MR-2 unavailable");
+    expect(signer.textContent).toContain("balance read failed: fixture RPC timeout");
     expect(within(signer).getByLabelText("SIGNER GAS unavailable").textContent).toBe("—");
     expect(signer.textContent).not.toContain("0");
-    expect(view.getByTestId("mobile-status-screen").textContent).toContain("MR-1 unavailable");
-    expect(view.getByTestId("mobile-actions").textContent).toContain("MR-3 unavailable");
+    expect(view.getByTestId("mobile-status-screen").textContent).toContain("reason · floor-breach");
+    expect(view.getByTestId("mobile-actions").textContent).toContain("feed unauthorized");
   });
 
   test("names live, loading, unauthorized, and unavailable feed states", () => {
@@ -177,16 +203,35 @@ describe("Hermes mobile triage — state honesty", () => {
     expect(view.getByTestId("mobile-events-empty").textContent).toContain("LIVE · 0 ROWS");
   });
 
-  test("renders every missing MR block as a named unavailable reading", () => {
+  test("renders the machine read identity with its scopes and never a sign-out control", () => {
     const view = render(
       <MobileBoard
         health={OPS_FIXTURE_NOMINAL}
         nowMs={FIXTURE_NOW}
         overnightLedger={OVERNIGHT_LEDGER_LIVE}
+        readIdentity={READ_IDENTITY_FIXTURE}
         initialMoreOpen
       />,
     );
-    expect(view.getByTestId("mobile-more-sheet").textContent).toContain("MR-4 unavailable");
+    const sheet = view.getByTestId("mobile-more-sheet");
+    expect(sheet.textContent).toContain("READ IDENTITY");
+    expect(sheet.textContent).toContain("0x062d…2a8a");
+    expect(sheet.textContent).toContain("ops:view ✓");
+    expect(sheet.textContent).toContain("admin:status ✓");
+    expect(sheet.textContent).toContain("sufficient for the board's read panels");
+    expect(within(sheet).queryByRole("button", { name: /sign out/i })).toBeNull();
+  });
+
+  test("a live empty action derivation says nothing needs you rather than unavailable", () => {
+    const view = render(
+      <MobileBoard
+        health={OPS_FIXTURE_NOMINAL}
+        nowMs={FIXTURE_NOW}
+        overnightLedger={OVERNIGHT_LEDGER_LIVE}
+      />,
+    );
+    expect(view.getByTestId("mobile-actions").getAttribute("data-feed-state")).toBe("live");
+    expect(view.getByTestId("mobile-actions-empty").textContent).toBe("nothing needs you");
   });
 });
 

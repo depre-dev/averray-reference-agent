@@ -13,6 +13,14 @@ export interface OvernightLedgerFeed {
   window: OvernightLedgerWindow;
   ledger: AdminFeedReading;
   topupDestinations: AdminFeedReading;
+  readIdentity: AdminFeedReading;
+}
+
+export interface MonitorReadIdentity {
+  wallet: string;
+  scopes: string[];
+  source: "static_token" | "siwe" | "session";
+  expiresAt?: string;
 }
 
 interface ReadOvernightLedgerFeedOptions {
@@ -37,7 +45,7 @@ export async function readOvernightLedgerFeed(options: ReadOvernightLedgerFeedOp
 
   const baseUrl = options.baseUrl.replace(/\/+$/u, "");
   const fetchImpl = options.fetchImpl ?? fetch;
-  const [ledger, topupDestinations] = await Promise.all([
+  const [ledger, topupDestinations, readIdentity] = await Promise.all([
     readAdminJson(
       `${baseUrl}/admin/ops/overnight-ledger?window=${encodeURIComponent(options.window)}`,
       session.token,
@@ -50,6 +58,7 @@ export async function readOvernightLedgerFeed(options: ReadOvernightLedgerFeedOp
       "top-up destinations",
       fetchImpl,
     ),
+    readMonitorIdentity(`${baseUrl}/auth/session`, session, fetchImpl),
   ]);
 
   return {
@@ -58,7 +67,44 @@ export async function readOvernightLedgerFeed(options: ReadOvernightLedgerFeedOp
     window: options.window,
     ledger,
     topupDestinations,
+    readIdentity,
   };
+}
+
+async function readMonitorIdentity(
+  url: string,
+  session: AdminDemandAuthSession,
+  fetchImpl: typeof fetch,
+): Promise<AdminFeedReading> {
+  try {
+    const response = await fetchImpl(url, {
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${session.token}`,
+      },
+    });
+    if (response.status === 401 || response.status === 403) {
+      return { state: "unauthorized", reason: "read identity unauthorized — monitor token was not accepted" };
+    }
+    if (!response.ok) {
+      return { state: "unavailable", reason: `read identity returned HTTP ${response.status}` };
+    }
+    const body = await response.json() as Record<string, unknown>;
+    const wallet = typeof body.wallet === "string" ? body.wallet : session.wallet;
+    const scopes = Array.isArray(body.capabilities)
+      ? body.capabilities.filter((scope): scope is string => typeof scope === "string")
+      : [];
+    if (!wallet) return { state: "unavailable", reason: "read identity response omitted wallet" };
+    const identity: MonitorReadIdentity = {
+      wallet,
+      scopes: [...new Set(scopes)].sort(),
+      source: session.source ?? "session",
+      ...(session.expiresAt ? { expiresAt: session.expiresAt } : {}),
+    };
+    return { state: "live", data: identity };
+  } catch (error) {
+    return { state: "unavailable", reason: `read identity unavailable — ${errorMessage(error)}` };
+  }
 }
 
 async function readAdminJson(
@@ -93,6 +139,7 @@ function unavailableFeed(
     window,
     ledger: { state: "unavailable", reason },
     topupDestinations: { state: "unavailable", reason },
+    readIdentity: { state: "unavailable", reason },
   };
 }
 

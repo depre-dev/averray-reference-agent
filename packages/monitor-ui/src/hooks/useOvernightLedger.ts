@@ -7,6 +7,7 @@ import {
   unavailableReading,
   type OvernightLedgerFeed,
   type OvernightLedgerPayload,
+  type MonitorReadIdentity,
   type OvernightWindow,
   type RemoteFeedReading,
   type TopupDestinationsPayload,
@@ -25,6 +26,8 @@ export interface UseOvernightLedgerOptions {
 export interface OvernightLedgerState {
   ledger: RemoteFeedReading<OvernightLedgerPayload>;
   topupDestinations: RemoteFeedReading<TopupDestinationsPayload>;
+  /** Optional only for injected pre-MR test seams; the live hook always supplies it. */
+  readIdentity?: RemoteFeedReading<MonitorReadIdentity>;
   window: OvernightWindow;
   setWindow: (window: OvernightWindow) => void;
   refresh: () => void;
@@ -64,6 +67,7 @@ export function useOvernightLedger(options: UseOvernightLedgerOptions = {}): Ove
   return {
     ledger: current?.ledger ?? fallback,
     topupDestinations: current?.topupDestinations ?? fallback,
+    readIdentity: current?.readIdentity ?? fallback,
     window,
     setWindow,
     refresh,

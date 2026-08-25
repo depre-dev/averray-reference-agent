@@ -229,6 +229,7 @@
   line-height: 1.45;
 }
 .hm-mobile-verdict > p { color: var(--h4-act-text); }
+.hm-mobile-verdict > .hm-mobile-verdict-reason { color: var(--h4-muted); font-weight: 700; letter-spacing: 0.04em; }
 .hm-mobile-verdict > .hm-mobile-feed-state { margin: 10px 12px 12px; }
 
 .hm-mobile-vitals {
@@ -283,6 +284,17 @@
 }
 .hm-mobile-digest-lines p:last-child { border-bottom: 0; }
 .hm-mobile-digest-lines i { color: var(--h4-ok-text); font-style: normal; }
+
+.hm-mobile-actions-empty { margin: 0; padding: 18px 12px; color: var(--h4-ok-text); font-size: 10px; }
+.hm-mobile-actions-list { margin: 0; padding: 0; list-style: none; }
+.hm-mobile-actions-list li { display: grid; grid-template-columns: 8px 1fr auto; gap: 8px; align-items: start; padding: 11px; border-bottom: 1px solid var(--h4-line-2); }
+.hm-mobile-actions-list li:last-child { border-bottom: 0; }
+.hm-mobile-actions-list li > i { width: 6px; height: 6px; margin-top: 3px; border-radius: 50%; background: var(--h4-warn); }
+.hm-mobile-actions-list li[data-severity="fault"] > i { background: var(--h4-act); }
+.hm-mobile-actions-list li > span { display: grid; gap: 4px; }
+.hm-mobile-actions-list strong { color: var(--h4-ink); font-size: 10px; font-weight: 600; text-transform: uppercase; }
+.hm-mobile-actions-list small,
+.hm-mobile-actions-list time { color: var(--h4-muted); font-size: 8px; line-height: 1.4; }
 
 .hm-mobile-money-ledger > div:not(.hm-mobile-match) {
   display: grid;
@@ -413,6 +425,14 @@
 .hm-mobile-gate > header button { min-height: 30px; border: 1px solid var(--h4-line); border-radius: var(--h4-r-sm); background: transparent; color: var(--h4-muted); font-size: 8px; cursor: pointer; }
 .hm-mobile-window-readonly { display: flex; justify-content: space-between; gap: 8px; margin: 0; padding: 11px; border-top: 1px solid var(--h4-line-2); color: var(--h4-muted); font-size: 8px; }
 .hm-mobile-window-readonly strong { color: var(--h4-ok-text); font-size: 10px; }
+.hm-mobile-read-identity > p:not(.hm-mobile-feed-state, .hm-mobile-window-readonly) { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; margin: 0; padding: 10px; color: var(--h4-muted); font-size: 8px; }
+.hm-mobile-read-identity > p > strong { color: var(--h4-ink); font-size: 11px; font-weight: 500; }
+.hm-mobile-read-identity > p > small { color: var(--h4-muted); font-size: 8px; }
+.hm-mobile-read-identity > ul { display: flex; gap: 6px; margin: 0; padding: 0 10px 10px; list-style: none; }
+.hm-mobile-read-identity > ul li { padding: 5px 7px; border: 1px solid var(--h4-line); border-radius: var(--h4-r-sm); color: var(--h4-ink-2); font-size: 8px; }
+.hm-mobile-read-identity > ul b { color: var(--h4-ok-text); }
+.hm-mobile-read-identity > p[data-sufficient="yes"] { display: block; padding-top: 0; color: var(--h4-ok-text); }
+.hm-mobile-read-identity > p[data-sufficient="no"] { display: block; padding-top: 0; color: var(--h4-act-text); }
 .hm-mobile-more-list h2 { padding: 9px 10px; border-bottom: 1px solid var(--h4-line-2); background: var(--h4-paper); }
 .hm-mobile-more-list > div,
 .hm-mobile-more-list > button { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 10px; box-sizing: border-box; padding: 11px 10px; border: 0; border-bottom: 1px solid var(--h4-line-2); background: transparent; color: var(--h4-ink); text-align: left; }
@@ -422,8 +442,6 @@
 .hm-mobile-more-list strong { font-size: 9px; letter-spacing: 0.06em; }
 .hm-mobile-more-list small { color: var(--h4-muted); font-size: 8px; line-height: 1.35; }
 .hm-mobile-more-list b { color: var(--h4-muted); font-size: 8px; font-weight: 500; }
-.hm-mobile-signout { min-height: 42px; border: 1px solid var(--h4-act-line); border-radius: var(--h4-r-sm); background: transparent; color: var(--h4-act-text); font-size: 9px; letter-spacing: 0.1em; }
-.hm-mobile-signout:disabled { opacity: 0.65; }
 .hm-mobile-breakpoints { color: var(--h4-muted); font-size: 8px; line-height: 1.5; }
 
 .hm-mobile-gate > section { display: grid; justify-items: center; gap: 11px; padding: 28px 18px; text-align: center; }

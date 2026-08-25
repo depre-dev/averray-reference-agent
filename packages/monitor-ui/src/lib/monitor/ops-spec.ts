@@ -24,13 +24,25 @@ import type {
   MoneyPathSnapshot,
   PayoutEvidence,
   ProductHealth,
+  ProductHealthProbe,
   SelfFreshness,
   SolvencyPool,
 } from "./product-health.js";
-import { deriveOpsVerdict, payoutGap } from "@avg/schemas/ops-verdict";
+import {
+  deriveOpsVerdict,
+  isAcknowledgedProbe,
+  isAwaitingProbe,
+  payoutGap,
+  type OpsVerdict,
+} from "@avg/schemas/ops-verdict";
 import { formatAgo, formatAmount, type OpsTone } from "./ops-model.js";
-import type { OvernightLedgerPayload, RemoteFeedReading } from "./overnight-ledger.js";
-import { moneyDisplay } from "./overnight-ledger.js";
+import type {
+  MonitorReadIdentity,
+  OvernightLedgerPayload,
+  RemoteFeedReading,
+  RemoteFeedState,
+} from "./overnight-ledger.js";
+import { moneyDisplay, signedMoneyDisplay } from "./overnight-ledger.js";
 
 /**
  * When is a snapshot old enough to say so out loud?
@@ -423,6 +435,281 @@ export function splitPools(pools: readonly SolvencyPool[]): {
     floored: views.filter((v) => v.meter !== null),
     unfloored: views.filter((v) => v.meter === null),
   };
+}
+
+// ── phone status — the same readings, cut into four tiles ──────────────────
+
+export interface StatusVitalView {
+  key: "settled" | "net-paid" | "runway" | "signer-gas";
+  label: string;
+  state: RemoteFeedState;
+  value?: string;
+  unit?: string;
+  detail: string;
+}
+
+/**
+ * The phone's four status tiles, derived outside the component.
+ *
+ * Ledger-backed tiles inherit the ledger read state. Signer gas is the exact
+ * `signer_gas` pool the desktop passes through `poolViews`: an observed zero is
+ * a live zero, while an absent/unreadable pool is unavailable and carries the
+ * signer probe's own reason. That distinction is why this cannot be a truthy
+ * check in JSX.
+ */
+export function statusVitalViews(input: {
+  health?: ProductHealth;
+  ledger: RemoteFeedReading<OvernightLedgerPayload>;
+}): StatusVitalView[] {
+  const { health, ledger } = input;
+  const ledgerVitals: StatusVitalView[] = ledger.state !== "live"
+    ? [
+        { key: "settled", label: "SETTLED", state: ledger.state, detail: feedReason(ledger) },
+        { key: "net-paid", label: "NET PAID", state: ledger.state, detail: feedReason(ledger) },
+        { key: "runway", label: "BANK RUNWAY", state: ledger.state, detail: feedReason(ledger) },
+      ]
+    : ledgerStatusVitals(ledger.data);
+  return [...ledgerVitals, signerGasVital(health)];
+}
+
+function ledgerStatusVitals(ledger: OvernightLedgerPayload): StatusVitalView[] {
+  const paid = ledger.digest.paid.display;
+  const runway = ledger.rewardBankSplit.runwayDays;
+  return [
+    {
+      key: "settled",
+      label: `SETTLED ${ledger.window.toUpperCase()}`,
+      state: "live",
+      value: String(ledger.digest.settlementCount),
+      detail: `${ledger.digest.walletCount} ${ledger.digest.walletCount === 1 ? "wallet" : "wallets"}`,
+    },
+    paid == null
+      ? {
+          key: "net-paid",
+          label: "NET PAID",
+          state: "unavailable",
+          detail: "net paid unavailable — ledger returned no amount",
+        }
+      : {
+          key: "net-paid",
+          label: "NET PAID",
+          state: "live",
+          value: moneyDisplay(ledger.digest.paid),
+          unit: "USDC",
+          detail: `${moneyDisplay(ledger.digest.retained)} retained`,
+        },
+    runway == null || !Number.isFinite(runway)
+      ? {
+          key: "runway",
+          label: "BANK RUNWAY",
+          state: "unavailable",
+          detail: "reward-bank runway unavailable — ledger returned no estimate",
+        }
+      : {
+          key: "runway",
+          label: "BANK RUNWAY",
+          state: "live",
+          value: runway >= 10 ? String(Math.round(runway)) : runway.toFixed(1),
+          unit: "D",
+          detail: `liquid only · reserved ${signedMoneyDisplay(ledger.rewardBankSplit.reservedDelta)}`,
+        },
+  ];
+}
+
+function signerGasVital(health: ProductHealth | undefined): StatusVitalView {
+  if (!health) {
+    return {
+      key: "signer-gas",
+      label: "SIGNER GAS",
+      state: "loading",
+      detail: "signer gas loading — waiting for product health",
+    };
+  }
+  const pool = health.solvency?.pools.find((candidate) => candidate.key === "signer_gas");
+  const probeReason = health.probes.find((probe) => probe.name === "signer_liquidity")?.detail;
+  if (!pool) {
+    return {
+      key: "signer-gas",
+      label: "SIGNER GAS",
+      state: "unavailable",
+      detail: probeReason ?? "signer gas unavailable — no pool reading was returned",
+    };
+  }
+  const view = poolViews([pool])[0]!;
+  if (pool.amount == null) {
+    return {
+      key: "signer-gas",
+      label: "SIGNER GAS",
+      state: "unavailable",
+      detail: pool.note ?? probeReason ?? view.margin,
+    };
+  }
+  return {
+    key: "signer-gas",
+    label: "SIGNER GAS",
+    state: "live",
+    value: view.amountLabel,
+    unit: view.unit,
+    detail: view.margin,
+  };
+}
+
+function feedReason(reading: Exclude<RemoteFeedReading<unknown>, { state: "live" }>): string {
+  return reading.reason;
+}
+
+// ── phone actions — currently true facts, never a second verdict ───────────
+
+export interface OpsActionItem {
+  severity: "warn" | "fault";
+  title: string;
+  /** The source reason verbatim, without editorial urgency. */
+  detail: string;
+  /** ISO timestamp for ordering and display. */
+  since: string;
+  route?: string;
+}
+
+/**
+ * Derive the operator's current action list from facts already on the board.
+ *
+ * The verdict owns its lead fact, so that fact is deliberately removed here:
+ * ACT ON THIS must add information, not recreate the retired NEXT strip under
+ * a new heading. Acknowledged and awaiting probes use the shared classifiers
+ * that govern the verdict instead of a component-local approximation.
+ */
+export function deriveOpsActionItems(input: {
+  verdict: Pick<OpsVerdict, "reason">;
+  health: Pick<ProductHealth, "at" | "probes" | "flow" | "solvency">;
+  ledger?: OvernightLedgerPayload;
+}): OpsActionItem[] {
+  const { verdict, health, ledger } = input;
+  const leadProbe = verdictLeadProbe(verdict, health);
+  const observedAt = isoOrEpoch(health.at);
+  const items: OpsActionItem[] = health.probes
+    .filter((probe) => probe !== leadProbe)
+    .filter((probe) => probe.status === "red" || probe.status === "degraded")
+    .filter((probe) => !isAcknowledgedProbe(probe) && !isAwaitingProbe(probe))
+    .map((probe) => ({
+      severity: probe.status === "red" ? "fault" : "warn",
+      title: `${probe.name.replaceAll("_", " ")} ${probe.status}`,
+      detail: probe.detail,
+      since: observedAt,
+      route: "#probes",
+    }));
+
+  if (ledger) {
+    const since = isoOrEpoch(ledger.generatedAt);
+    const leadIsMoneyPath = leadProbe?.name === "money_path";
+    if (ledger.digest.stuckClaimCount > 0 && !leadIsMoneyPath) {
+      items.push({
+        severity: "warn",
+        title: "stuck claims",
+        detail: `${ledger.digest.stuckClaimCount} claims stuck`,
+        since,
+        route: "#flow",
+      });
+    }
+    if (ledger.digest.warningsOpen > 0) {
+      items.push({
+        severity: "warn",
+        title: "open warnings",
+        detail: `${ledger.digest.warningsOpen} warnings open`,
+        since,
+        route: "#events",
+      });
+    }
+    const verdictAlreadyNamesShortfall = verdict.reason === "payout-shortfall"
+      || health.flow?.payout?.status === "shortfall";
+    if (ledger.digest.ledgerMatchState === "SHORTFALL" && !verdictAlreadyNamesShortfall) {
+      items.push({
+        severity: "fault",
+        title: "ledger shortfall",
+        detail: `ledger ${ledger.digest.ledgerMatchState} (delta ${moneyDisplay(ledger.digest.ledgerDelta)})`,
+        since,
+        route: "#payout-evidence",
+      });
+    }
+  }
+
+  return items.sort((left, right) => {
+    const severity = Number(right.severity === "fault") - Number(left.severity === "fault");
+    return severity || Date.parse(left.since) - Date.parse(right.since) || left.title.localeCompare(right.title);
+  });
+}
+
+function verdictLeadProbe(
+  verdict: Pick<OpsVerdict, "reason">,
+  health: Pick<ProductHealth, "probes" | "solvency">,
+): ProductHealthProbe | undefined {
+  const { probes } = health;
+  if (verdict.reason === "floor-breach") {
+    const leadPool = health.solvency?.pools.find(
+      (pool) => pool.status === "red" && pool.amount != null && pool.floor != null && pool.floor > 0,
+    );
+    const probeName = leadPool?.key === "signer_gas" || leadPool?.key === "reward_bank"
+      ? "signer_liquidity"
+      : leadPool ? "treasury_liquidity" : undefined;
+    return probeName ? probes.find((probe) => probe.name === probeName) : undefined;
+  }
+  if (verdict.reason === "probe-red") return probes.find((probe) => probe.status === "red");
+  if (verdict.reason === "probe-degraded") {
+    return probes.find(
+      (probe) => probe.status === "degraded" && !isAcknowledgedProbe(probe) && !isAwaitingProbe(probe),
+    );
+  }
+  if (verdict.reason === "probe-unknown") return probes.find((probe) => probe.reading === "unknown");
+  return undefined;
+}
+
+function isoOrEpoch(value: number | string | null): string {
+  const parsed = typeof value === "number" ? value : Date.parse(value ?? "");
+  return new Date(Number.isFinite(parsed) ? parsed : 0).toISOString();
+}
+
+// ── read identity — machine auth explained without exposing credentials ────
+
+export const REQUIRED_BOARD_READ_SCOPES = ["ops:view", "admin:status"] as const;
+
+export interface ReadIdentityView {
+  state: RemoteFeedState;
+  wallet?: string;
+  source?: MonitorReadIdentity["source"];
+  scopes: Array<{ name: string; granted: boolean }>;
+  sufficient: boolean;
+  detail: string;
+  expiresAt?: string;
+}
+
+/** Project only the identity facts useful to the operator; credentials never enter this shape. */
+export function readIdentityView(reading: RemoteFeedReading<MonitorReadIdentity>): ReadIdentityView {
+  if (reading.state !== "live") {
+    return {
+      state: reading.state,
+      scopes: REQUIRED_BOARD_READ_SCOPES.map((name) => ({ name, granted: false })),
+      sufficient: false,
+      detail: reading.reason,
+    };
+  }
+  const held = new Set(reading.data.scopes);
+  const scopeNames = [...new Set([...held, ...REQUIRED_BOARD_READ_SCOPES])].sort();
+  const scopes = scopeNames.map((name) => ({ name, granted: held.has(name) }));
+  const sufficient = REQUIRED_BOARD_READ_SCOPES.every((scope) => held.has(scope));
+  return {
+    state: "live",
+    wallet: shortWallet(reading.data.wallet),
+    source: reading.data.source,
+    scopes,
+    sufficient,
+    detail: sufficient
+      ? "sufficient for the board's read panels"
+      : `missing ${scopes.filter((scope) => !scope.granted).map((scope) => scope.name).join(", ")}`,
+    ...(reading.data.expiresAt ? { expiresAt: reading.data.expiresAt } : {}),
+  };
+}
+
+function shortWallet(wallet: string): string {
+  return wallet.length > 14 ? `${wallet.slice(0, 6)}…${wallet.slice(-4)}` : wallet;
 }
 
 // ── 2b. flow + payout evidence ──────────────────────────────────────────────

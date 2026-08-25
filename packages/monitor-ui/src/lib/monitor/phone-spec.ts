@@ -18,7 +18,7 @@
 
 import { ARRIVAL_STAGES } from "./product-health.js";
 import type { HealthHistory, ProductHealth, SolvencyPool , ArrivalStage } from "./product-health.js";
-import { deriveOpsVerdict, verdictProbeLabel } from "@avg/schemas/ops-verdict";
+import { deriveOpsVerdict, verdictProbeLabel, type VerdictReason } from "@avg/schemas/ops-verdict";
 import { formatAgo, formatAmount, formatDuration, groupProbesByPillar, probeOpsTone, type OpsTone } from "./ops-model.js";
 import { formatPoolAmount, poolMeter, shortEndpoint, staleAfterMs, type MeterView } from "./ops-spec.js";
 
@@ -30,6 +30,8 @@ export interface PhoneVerdict {
   headline: string;
   sub: string;
   tone: OpsTone;
+  /** Typed cause from the shared verdict contract. Never inferred from prose. */
+  reason: VerdictReason;
   /** A long headline needs smaller type; the field is fixed-width, not the text. */
   compact: boolean;
 }
@@ -71,6 +73,7 @@ export function phoneVerdict(input: {
     headline: core.headline,
     sub: phoneSub(core.sub, core.reason, untrusted ? asOf : null),
     tone: core.tone,
+    reason: core.reason,
     // The field is a fixed width; a long headline gets smaller type rather than
     // a taller field, so the fold below it does not move around.
     compact: core.headline.length > 12,

@@ -152,12 +152,20 @@ export interface TopupDestinationsPayload {
   };
 }
 
+export interface MonitorReadIdentity {
+  wallet: string;
+  scopes: string[];
+  source: "static_token" | "siwe" | "session";
+  expiresAt?: string;
+}
+
 export interface OvernightLedgerFeed {
   schemaVersion: "averray.monitor.overnight-ledger.v1";
   generatedAt: string;
   window: OvernightWindow;
   ledger: Exclude<RemoteFeedReading<OvernightLedgerPayload>, { state: "loading" }>;
   topupDestinations: Exclude<RemoteFeedReading<TopupDestinationsPayload>, { state: "loading" }>;
+  readIdentity: Exclude<RemoteFeedReading<MonitorReadIdentity>, { state: "loading" }>;
 }
 
 export function parseOvernightLedgerFeed(value: unknown): OvernightLedgerFeed {
@@ -171,6 +179,7 @@ export function parseOvernightLedgerFeed(value: unknown): OvernightLedgerFeed {
     window: value.window,
     ledger: parseReading(value.ledger, parseLedgerPayload, "ledger"),
     topupDestinations: parseReading(value.topupDestinations, parseTopupsPayload, "topupDestinations"),
+    readIdentity: parseReading(value.readIdentity, parseReadIdentity, "readIdentity"),
   };
 }
 
@@ -234,6 +243,27 @@ function parseTopupsPayload(value: unknown): TopupDestinationsPayload {
     }
   }
   return value as unknown as TopupDestinationsPayload;
+}
+
+function parseReadIdentity(value: unknown): MonitorReadIdentity {
+  if (!isRecord(value) || typeof value.wallet !== "string" || !Array.isArray(value.scopes)) {
+    throw new Error("read identity is malformed");
+  }
+  if (value.source !== "static_token" && value.source !== "siwe" && value.source !== "session") {
+    throw new Error("read identity source is malformed");
+  }
+  if (!value.scopes.every((scope: unknown) => typeof scope === "string")) {
+    throw new Error("read identity scopes are malformed");
+  }
+  if (value.expiresAt !== undefined && typeof value.expiresAt !== "string") {
+    throw new Error("read identity expiry is malformed");
+  }
+  return {
+    wallet: value.wallet,
+    scopes: [...new Set(value.scopes as string[])].sort(),
+    source: value.source,
+    ...(value.expiresAt ? { expiresAt: value.expiresAt } : {}),
+  };
 }
 
 function trimMoney(value: string): string {

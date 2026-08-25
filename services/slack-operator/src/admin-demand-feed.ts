@@ -2,7 +2,9 @@ export type AdminDemandWindow = "48h" | "30d";
 
 export interface AdminDemandAuthSession {
   token: string;
+  wallet?: string;
   expiresAt?: string;
+  source?: "static_token" | "siwe";
 }
 
 export function createAdminReadSessionProvider(options: {
@@ -11,9 +13,9 @@ export function createAdminReadSessionProvider(options: {
 }): () => Promise<AdminDemandAuthSession> {
   const staticToken = options.staticToken?.trim();
   if (staticToken) {
-    return async () => ({ token: staticToken });
+    return async () => ({ token: staticToken, source: "static_token" });
   }
-  return options.getSiweSession;
+  return async () => ({ ...(await options.getSiweSession()), source: "siwe" });
 }
 
 export interface AdminDemandUnavailable {
