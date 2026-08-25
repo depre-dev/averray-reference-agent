@@ -1,593 +1,703 @@
-// The phone board — the same product as the desktop ops board, opposite medium.
-//
-//   status bar     what app this is, and that it is read-only
-//   stale band     hatched, only when the reading is not confirmable
-//   VERDICT        a solid filled field — the only filled surface in the product
-//   trust strip    desktop's 4-row panel, welded under the verdict as one line
-//   lead slot      a breach, an overdue bank group, or nothing
-//   worker money   floored meters, then the funnel + its on-chain proof
-//   bank           venue position + the deposit-pool line in one frame
-//   ── fold ──
-//   probes/outside 4 rollups plus the arrivals line; detail only when not ok
-//
-// Two reasons to open this: an unprompted check-in, or landing from a Buzz
-// alert. The check-in has to be answerable by shape and colour alone, before a
-// word is read. The alert landing has to answer what the notification could not
-// — how bad, since when, and whether it is still true.
-//
-// It is read-only, like every Hermes surface. No approve, no dismiss, no swipe
-// action. An earlier phone board offered Approve on a card that could not say
-// what it was approving; removing it was the fix, not softening it.
+import { useMemo, useState } from "react";
 
-import type { ProductHealth } from "../../lib/monitor/product-health.js";
-import { formatAgo, formatAmount } from "../../lib/monitor/ops-model.js";
+import type { MonitorBoard } from "../../lib/monitor/board-cache.js";
 import {
+  feedStateCopy,
+  moneyDisplay,
+  signedMoneyDisplay,
+  type OvernightEvent,
+  type OvernightLedgerPayload,
+  type OvernightWindow,
+  type RemoteFeedReading,
+  type RemoteFeedState,
+  type TopupDestinationsPayload,
+} from "../../lib/monitor/overnight-ledger.js";
+import {
+  disputeClockLine,
   flowFunnel,
-  payoutRunwayNote,
+  lifecycleNote,
+  opsVerdict,
   payoutView,
-  splitPools,
   volumeMixNote,
 } from "../../lib/monitor/ops-spec.js";
-import {
-  breachCard,
-  isUntrusted,
-  phoneTrust,
-  phoneVerdict,
-  pillarRollups,
-  type BreachCard,
-} from "../../lib/monitor/phone-spec.js";
-import { disputeClockLine, lifecycleNote } from "../../lib/monitor/ops-spec.js";
-import { phoneArrivals, phonePool, type PhoneLane } from "../../lib/monitor/phone-spec.js";
+import type { ProductHealth } from "../../lib/monitor/product-health.js";
+
+export type MobileOpsScreen = "status" | "money" | "work" | "events";
+type MobileDestination = MobileOpsScreen | "more";
+type EventFilter = "all" | "ok" | "warn" | "fault";
 
 export interface MobileBoardProps {
   health?: ProductHealth;
+  board?: MonitorBoard;
   streamStatus?: string;
   streamDegraded?: boolean;
   nowMs?: number;
+  overnightLedger?: RemoteFeedReading<OvernightLedgerPayload>;
+  topupDestinations?: RemoteFeedReading<TopupDestinationsPayload>;
+  overnightWindow?: OvernightWindow;
+  onOvernightWindowChange?: (window: OvernightWindow) => void;
+  initialScreen?: MobileOpsScreen;
+  initialMoreOpen?: boolean;
 }
+
+const MR1_REASON = "MR-1 unavailable — status.verdict reason line is not published";
+const MR2_SIGNER_REASON = "MR-2 unavailable — signer gas has no per-tile state and reason";
+const MR3_REASON = "MR-3 unavailable — status.actionItems is not published";
+const MR4_REASON = "MR-4 unavailable — session.operator and sign-out endpoint are not published";
+
+const DEFAULT_LEDGER: RemoteFeedReading<OvernightLedgerPayload> = {
+  state: "unavailable",
+  reason: "feed unavailable — overnight ledger read not supplied",
+};
+const DEFAULT_TOPUPS: RemoteFeedReading<TopupDestinationsPayload> = {
+  state: "unavailable",
+  reason: "feed unavailable — top-up destination read not supplied",
+};
 
 export function MobileBoard({
   health,
+  board,
   streamStatus = "open",
   streamDegraded = false,
   nowMs = Date.now(),
+  overnightLedger = DEFAULT_LEDGER,
+  topupDestinations = DEFAULT_TOPUPS,
+  overnightWindow = "24h",
+  onOvernightWindowChange = () => undefined,
+  initialScreen = "status",
+  initialMoreOpen = false,
 }: MobileBoardProps) {
-  if (!health) {
-    return (
-      <div className="hm-ph" data-testid="mobile-board">
-        <PhoneStatusBar />
-        <div className="hm-ph-empty" data-testid="mobile-loading">
-          <strong>{streamDegraded ? "Health unknown" : "Loading health…"}</strong>
-          <span>
-            {streamDegraded
-              ? "The live stream is down. Nothing on this screen is confirmed."
-              : "Polling the live product heartbeat."}
-          </span>
-        </div>
-      </div>
-    );
-  }
+  const [screen, setScreen] = useState<MobileOpsScreen>(initialScreen);
+  const [moreOpen, setMoreOpen] = useState(initialMoreOpen);
 
-  const verdict = phoneVerdict({ health, streamDegraded, nowMs });
-  const trust = phoneTrust({ health, streamDegraded, streamStatus, nowMs });
-  const untrusted = isUntrusted({ health, streamDegraded, nowMs });
-  const breach = breachCard({ health, streamDegraded, nowMs });
-  const poolLane = phonePool(health.depositPool);
-  // Promotion ranks an existing server-decided panel; it does not create a
-  // second verdict. A breached floor remains first because its inaction cost
-  // outranks an overdue request, and the bank group otherwise keeps its fixed
-  // post-flow position.
-  const promoteBank = !breach && Boolean(health.bank?.lane?.overdueRequestId);
+  const navigate = (destination: MobileDestination) => {
+    if (destination === "more") {
+      setMoreOpen(true);
+      return;
+    }
+    setScreen(destination);
+    setMoreOpen(false);
+  };
 
   return (
-    <div className="hm-ph" data-testid="mobile-board" data-untrusted={untrusted ? "yes" : "no"}>
-      <PhoneStatusBar />
-
-      {/* Deliberately NOT the desktop's 72% dim. This screen gets read outdoors,
-          and dimming every value is illegible in sunlight — so untrusted data
-          keeps full contrast and is fenced by a hatched band, a re-captioned
-          verdict, and explicit as-of times instead. */}
-      {untrusted ? (
-        <div className="hm-ph-stale" role="alert" data-testid="mobile-stale">
-          <strong>{streamDegraded ? "STREAM DOWN" : "DATA STALE"}</strong>
-          <span>
-            {health.at == null
-              ? "no confirmed reading yet"
-              : `everything below is as of ${new Date(health.at).toISOString().slice(11, 19)}Z — ${formatAgo(health.at, nowMs).replace(" ago", "")} old`}
-          </span>
-        </div>
-      ) : null}
-
-      <div className="hm-ph-verdict" data-tone={verdict.tone} data-testid="mobile-verdict">
-        <div className="hm-ph-verdict-head">
-          <i aria-hidden />
-          <span>{verdict.kicker}</span>
-        </div>
-        <h1 data-compact={verdict.compact ? "yes" : "no"}>{verdict.headline}</h1>
-        {verdict.sub ? <p>{verdict.sub}</p> : null}
-      </div>
-
-      <div className="hm-ph-trust" data-tone={trust.tone} data-testid="mobile-trust">
-        <i aria-hidden />
-        <span>{trust.line}</span>
-      </div>
-
-      <div className="hm-ph-body">
-        {breach ? (
-          <BreachPanel breach={breach} />
-        ) : promoteBank ? (
-          <BankPanel bank={health.bank} pool={poolLane} />
-        ) : null}
-        <SolvencyPanel health={health} />
-        <FlowPanel health={health} emphasise={Boolean(breach)} nowMs={nowMs} />
-        {promoteBank ? null : <BankPanel bank={health.bank} pool={poolLane} />}
-      </div>
-
-      <p className="hm-ph-scroll" aria-hidden>
-        ▾ SCROLL FOR PROBES · INCIDENTS
-      </p>
-
-      <div className="hm-ph-below">
-        <div className="hm-ph-sec">
-          <h2>PROBES — 4 PILLARS</h2>
-          <span>detail only when not ok</span>
-        </div>
-        {pillarRollups(health).map((row) => (
-          <div className="hm-ph-pillar" key={row.name} data-testid={`mobile-pillar-${row.name}`}>
-            <div>
-              <i className="hm-ph-dot" data-tone={row.tone} aria-hidden />
-              <strong>{row.name}</strong>
-              <span>{row.rollup}</span>
-            </div>
-            {row.detail ? (
-              <p data-tone={row.detailTone}>{row.detail}</p>
-            ) : null}
-          </div>
-        ))}
-        {/* Arrivals is below the fold with the machine register, never inside
-            BANK: demand is not money and cannot borrow a money fault's rank or
-            colour. Its producer-decided one-line cut remains unchanged. */}
-        <LanePanel
-          lane={phoneArrivals(health.arrivals)}
-          testId="mobile-arrivals"
-          label="Arrivals — outside demand"
-          placement="below"
+    <div className="hm-mobile-board" data-testid="mobile-board" data-screen={moreOpen ? "more" : screen}>
+      {moreOpen ? (
+        <MoreSheet
+          health={health}
+          ledger={overnightLedger}
+          window={overnightWindow}
+          onClose={() => setMoreOpen(false)}
         />
-        <div className="hm-ph-foot">
-          <span>INCIDENTS — {incidentLine(health, untrusted)}</span>
-          <span>{buildLine(health)}</span>
-        </div>
-      </div>
+      ) : (
+        <>
+          <MobileHeader screen={screen} window={overnightWindow} onWindowChange={onOvernightWindowChange} />
+          <main className="hm-mobile-main">
+            {screen === "status" ? (
+              <StatusScreen
+                health={health}
+                ledger={overnightLedger}
+                streamStatus={streamStatus}
+                streamDegraded={streamDegraded}
+                nowMs={nowMs}
+              />
+            ) : null}
+            {screen === "money" ? (
+              <MoneyScreen ledger={overnightLedger} topups={topupDestinations} window={overnightWindow} />
+            ) : null}
+            {screen === "work" ? (
+              <WorkScreen health={health} ledger={overnightLedger} window={overnightWindow} nowMs={nowMs} />
+            ) : null}
+            {screen === "events" ? <EventsScreen ledger={overnightLedger} window={overnightWindow} /> : null}
+          </main>
+        </>
+      )}
+      <BottomNavigation active={moreOpen ? "more" : screen} onNavigate={navigate} />
+      <span className="hm-mobile-board-clock" aria-hidden>{board?.at ? `snapshot ${board.at}` : "live monitor read"}</span>
     </div>
   );
 }
 
-function PhoneStatusBar() {
+function MobileHeader({
+  screen,
+  window,
+  onWindowChange,
+}: {
+  screen: MobileOpsScreen;
+  window: OvernightWindow;
+  onWindowChange: (window: OvernightWindow) => void;
+}) {
   return (
-    <div className="hm-ph-bar">
-      <span>HERMES</span>
-      <span>READ-ONLY — COMMANDS IN BUZZ</span>
+    <header className="hm-mobile-header">
+      <span className="hm-mobile-brand"><i aria-hidden />HERMES OPS</span>
+      <strong>{screen}</strong>
+      <WindowSelector value={window} onChange={onWindowChange} />
+    </header>
+  );
+}
+
+function WindowSelector({ value, onChange }: { value: OvernightWindow; onChange: (window: OvernightWindow) => void }) {
+  return (
+    <div className="hm-mobile-window" role="group" aria-label="Shared board window">
+      {(["12h", "24h", "48h"] as const).map((window) => (
+        <button
+          type="button"
+          key={window}
+          aria-pressed={window === value}
+          onClick={() => onChange(window)}
+        >
+          {window}
+        </button>
+      ))}
     </div>
   );
 }
 
-/**
- * The alert landing's lead. Answers the three things the push notification
- * already knowing "what" leaves open.
- */
-function BreachPanel({ breach }: { breach: BreachCard }) {
+function StatusScreen({
+  health,
+  ledger,
+  streamStatus,
+  streamDegraded,
+  nowMs,
+}: {
+  health?: ProductHealth;
+  ledger: RemoteFeedReading<OvernightLedgerPayload>;
+  streamStatus: string;
+  streamDegraded: boolean;
+  nowMs: number;
+}) {
+  const vitals = statusVitals(ledger);
+  const verdict = health ? opsVerdict({ health, streamDegraded, nowMs }) : null;
+  const verdictState: RemoteFeedState = !health ? "loading" : streamDegraded ? "unavailable" : "live";
+
   return (
-    <section className="hm-ph-card hm-ph-card--red" data-testid="mobile-breach">
-      <header>{breach.label.toUpperCase()} — THE BREACH</header>
-      <div className="hm-ph-breach">
-        <div className="hm-ph-breach-top">
-          <strong>{breach.amount}</strong>
-          <span className="hm-ph-unit">{breach.unit}</span>
-          <span className="hm-ph-short">
-            {breach.short}
-            <br />
-            {breach.floorLabel}
-          </span>
-        </div>
-
-        {/* Same meter grammar as the desktop: fixed floor-anchored scale, floor
-            as a tick. Below the floor the fill sits visibly LEFT of the tick. */}
-        <div className="hm-ph-meter">
-          <i className="fill" data-tone="red" style={{ width: `${breach.meter.fillPct}%` }} />
-          <i className="floor" style={{ left: `${breach.meter.floorPct}%` }} />
-        </div>
-        <div className="hm-ph-scale">
-          <span style={{ left: `${breach.meter.floorPct}%` }}>floor {breach.meter.floorLabel}</span>
-          <span className="at-end">{breach.meter.scaleLabel}</span>
-        </div>
-
-        <dl className="hm-ph-facts">
-          <dt>SINCE</dt>
-          <dd>{breach.since}</dd>
-          <dt>STILL TRUE?</dt>
-          <dd data-tone={breach.stillTrueTone}>{breach.stillTrue}</dd>
-          <dt>IF IT EMPTIES</dt>
-          <dd>{breach.consequence}</dd>
-          {/* The only ACTIONABLE thing on this screen. An alert that tells you
-              the signer is dry and makes you go find the address elsewhere has
-              stopped short of the point. Both encodings, because the wallet on
-              this phone may speak either — and converting one by hand is where
-              a wrong character costs real money.
-
-              Only ever present for a pool that IS a wallet; see TOP_UP_POOLS. */}
-          {breach.topUp ? (
-            <>
-              <dt>TOP UP</dt>
-              <dd className="hm-ph-topup" data-testid="mobile-breach-topup">
-                <span className="hm-ph-addr">{breach.topUp.evm}</span>
-                <span className="hm-ph-addr-tag">EVM</span>
-                {breach.topUp.ss58 ? (
-                  <>
-                    <span className="hm-ph-addr">{breach.topUp.ss58}</span>
-                    <span className="hm-ph-addr-tag">SS58 · same account</span>
-                  </>
-                ) : null}
-              </dd>
-            </>
-          ) : null}
-        </dl>
+    <div className="hm-mobile-screen" data-testid="mobile-status-screen">
+      <div className="hm-mobile-partial" data-testid="mobile-partial-view">
+        <StateChip state="unavailable" label="PARTIAL VIEW" />
+        <span>some readings are unavailable · no missing figure is drawn as zero</span>
       </div>
+
+      <section className="hm-mobile-panel hm-mobile-verdict" data-feed-state={verdictState}>
+        <PanelHeading title="OPERATOR VERDICT" state={verdictState} />
+        {verdict ? (
+          <>
+            <strong data-tone={verdict.verdictTone}>{verdict.verdict}</strong>
+            <span>{verdict.kicker}</span>
+            {streamDegraded ? <p>stream {streamStatus} — last observed verdict only</p> : null}
+          </>
+        ) : (
+          <FeedState state="loading" reason="product health loading — waiting for the first read" />
+        )}
+        <FeedState state="unavailable" reason={MR1_REASON} compact />
+      </section>
+
+      <section className="hm-mobile-vitals" aria-label="Status vitals">
+        {vitals.map((vital) => <VitalTile vital={vital} key={vital.key} />)}
+      </section>
+
+      <MobileDigest reading={ledger} />
+
+      <section className="hm-mobile-panel" data-testid="mobile-actions" data-feed-state="unavailable">
+        <PanelHeading title="ACT ON THIS" state="unavailable" />
+        <FeedState state="unavailable" reason={MR3_REASON} />
+      </section>
+    </div>
+  );
+}
+
+interface VitalView {
+  key: "settled" | "net-paid" | "runway" | "signer-gas";
+  label: string;
+  state: RemoteFeedState;
+  value?: string;
+  unit?: string;
+  detail: string;
+}
+
+function statusVitals(reading: RemoteFeedReading<OvernightLedgerPayload>): VitalView[] {
+  if (reading.state !== "live") {
+    const reason = feedStateCopy(reading);
+    return [
+      { key: "settled", label: "SETTLED", state: reading.state, detail: reason },
+      { key: "net-paid", label: "NET PAID", state: reading.state, detail: reason },
+      { key: "runway", label: "BANK RUNWAY", state: reading.state, detail: reason },
+      { key: "signer-gas", label: "SIGNER GAS", state: "unavailable", detail: MR2_SIGNER_REASON },
+    ];
+  }
+  const { digest, rewardBankSplit } = reading.data;
+  return [
+    {
+      key: "settled",
+      label: `SETTLED ${reading.data.window.toUpperCase()}`,
+      state: "live",
+      value: String(digest.settlementCount),
+      detail: `${digest.walletCount} ${digest.walletCount === 1 ? "wallet" : "wallets"}`,
+    },
+    {
+      key: "net-paid",
+      label: "NET PAID",
+      state: "live",
+      value: moneyDisplay(digest.paid),
+      unit: "USDC",
+      detail: `${moneyDisplay(digest.retained)} retained`,
+    },
+    {
+      key: "runway",
+      label: "BANK RUNWAY",
+      state: "live",
+      value: formatRunway(rewardBankSplit.runwayDays),
+      unit: "D",
+      detail: `liquid only · reserved ${signedMoneyDisplay(rewardBankSplit.reservedDelta)}`,
+    },
+    { key: "signer-gas", label: "SIGNER GAS", state: "unavailable", detail: MR2_SIGNER_REASON },
+  ];
+}
+
+function VitalTile({ vital }: { vital: VitalView }) {
+  return (
+    <article className="hm-mobile-vital" data-testid={`mobile-vital-${vital.key}`} data-feed-state={vital.state}>
+      <span>{vital.label}</span>
+      {vital.state === "live" ? (
+        <strong>
+          {vital.value}<small>{vital.unit}</small>
+        </strong>
+      ) : (
+        <strong aria-label={`${vital.label} unavailable`}>—</strong>
+      )}
+      <p>{vital.detail}</p>
+    </article>
+  );
+}
+
+function MobileDigest({ reading }: { reading: RemoteFeedReading<OvernightLedgerPayload> }) {
+  return (
+    <section className="hm-mobile-panel" data-testid="mobile-digest" data-feed-state={reading.state}>
+      <PanelHeading title="OVERNIGHT DIGEST" state={reading.state} />
+      {reading.state !== "live" ? <ReadingState reading={reading} /> : (
+        <div className="hm-mobile-digest-lines">
+          <p>
+            <i aria-hidden>›</i>
+            <span>
+               Last {reading.data.window}: {reading.data.digest.settlementCount} settlements by {reading.data.digest.walletCount} {reading.data.digest.walletCount === 1 ? "wallet" : "wallets"}
+              {" · "}{moneyDisplay(reading.data.digest.paid)} paid, {moneyDisplay(reading.data.digest.retained)} retained
+              {" · "}bank {moneyDisplay(reading.data.digest.bankOpen)} → {moneyDisplay(reading.data.digest.bankClose)}.
+            </span>
+          </p>
+          <p>
+            <i aria-hidden>›</i>
+            <span>
+              Ladder: {reading.data.digest.graduatedCount} graduated · {reading.data.digest.waiverWindowsExhausted} waiver windows exhausted
+              {" · "}{reading.data.digest.firstExternalPostings} first external postings.
+            </span>
+          </p>
+          <p>
+            <i aria-hidden>›</i>
+            <span>
+              {reading.data.digest.stuckClaimCount} claims stuck · {reading.data.digest.deployCount} deploys
+              {" · "}ledger {reading.data.digest.ledgerMatchState} (Δ {signedMoneyDisplay(reading.data.digest.ledgerDelta)}).
+            </span>
+          </p>
+        </div>
+      )}
     </section>
   );
 }
 
-/** Check-in: the three floored meters, then every unfloored pool on ONE line. */
-function SolvencyPanel({ health }: { health: ProductHealth }) {
-  const { floored, unfloored } = splitPools(health.solvency?.pools ?? []);
-  if (floored.length === 0 && unfloored.length === 0) {
-    return <p className="hm-ph-awaiting">awaiting balances — /health has not reported pools yet</p>;
-  }
+function MoneyScreen({
+  ledger,
+  topups,
+  window,
+}: {
+  ledger: RemoteFeedReading<OvernightLedgerPayload>;
+  topups: RemoteFeedReading<TopupDestinationsPayload>;
+  window: OvernightWindow;
+}) {
   return (
-    <section data-testid="mobile-solvency">
-      <div className="hm-ph-sec">
-        <h2>SOLVENCY — FLOORS</h2>
-        <span>absolute · floor = tick</span>
-      </div>
+    <div className="hm-mobile-screen" data-testid="mobile-money-screen">
+      <section className="hm-mobile-panel" data-testid="mobile-money-movement" data-feed-state={ledger.state}>
+        <PanelHeading title={`MONEY MOVEMENT — ${window.toUpperCase()}`} state={ledger.state} />
+        {ledger.state !== "live" ? <ReadingState reading={ledger} /> : <MobileMoneyMovement ledger={ledger.data} />}
+      </section>
 
-      {floored.map((view) => (
-        <div className="hm-ph-pool" key={view.pool.key} data-testid={`mobile-pool-${view.pool.key}`}>
-          <div className="hm-ph-pool-top">
-            <strong>{view.pool.label.toUpperCase()}</strong>
-            <span className="hm-ph-margin">{view.margin}</span>
-            <span className="hm-ph-amount" data-tone={view.tone}>
-              {view.amountLabel} <em>{view.unit}</em>
-            </span>
-          </div>
-          <div className="hm-ph-meter hm-ph-meter--sm">
-            <i className="fill" data-tone={view.tone} style={{ width: `${view.meter!.fillPct}%` }} />
-            <i className="floor" style={{ left: `${view.meter!.floorPct}%` }} />
-          </div>
-          {/* What the balance BUYS, not just what it is.
-              "12.89 USDC" is a level; "≈ 90 more payouts · signer gas ~3d to
-              floor" is a countdown, and a countdown is the one thing worth
-              waking up for. It was desktop-only, which is the wrong way round:
-              the desk is where you can already work it out. */}
-          {view.pool.key === "reward_bank"
-            ? (() => {
-                const runway = payoutRunwayNote({
-                  pool: view.pool,
-                  payout: health.flow?.payout,
-                  runwayNote: health.solvency?.runwayNote,
-                });
-                return runway ? (
-                  <p className="hm-ph-pool-note" data-tone={runway.tone} data-testid="mobile-runway">
-                    <b>RUNWAY</b> {runway.text}
-                  </p>
-                ) : null;
-              })()
-            : null}
-          {/* Under the balance, same as the desktop. STACKED rather than on one
-              line: 100 monospace glyphs do not fit 390px, and this board scrolls
-              — height is cheap here in a way it is not on the fixed desktop, so
-              the addresses can be legible instead of clever. */}
-          {/* Which encoding is which — and this matters MORE here than on the
-              desktop. The phone is where the address gets long-pressed and
-              pasted into a wallet, and the two forms are not interchangeable:
-              the hex is for an EVM wallet, the SS58 for a Substrate one. Two
-              unlabelled 40-character strings is the setup for pasting the
-              wrong one while standing somewhere with a phone in one hand. */}
-          {view.pool.address ? (
-            <div className="hm-ph-pool-addr" data-testid={`mobile-pool-addr-${view.pool.key}`}>
-              <span>
-                <b>EVM</b> {view.pool.address}
-              </span>
-              {view.pool.addressSs58 ? (
-                <span>
-                  <b>SS58</b> {view.pool.addressSs58}
-                </span>
-              ) : (
-                <em>SS58 unavailable</em>
-              )}
-              {view.pool.addressLabel ? <em>{view.pool.addressLabel}</em> : null}
-            </div>
-          ) : null}
+      <section className="hm-mobile-panel" data-testid="mobile-solvency" data-feed-state={ledger.state}>
+        <PanelHeading title="SOLVENCY" state={ledger.state} />
+        {ledger.state !== "live" ? <ReadingState reading={ledger} /> : <MobileRewardBank ledger={ledger.data} window={window} />}
+        <div className="hm-mobile-topups">
+          <MobileTopup account="signerGas" reading={topups} />
+          <MobileTopup account="rewardBank" reading={topups} />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function MobileMoneyMovement({ ledger }: { ledger: OvernightLedgerPayload }) {
+  const value = ledger.reconciliation;
+  const rows = [
+    ["opening", "OPENING LIQUID", moneyDisplay(value.openingLiquid), "window-open reward bank"],
+    ["payouts", "PAYOUTS OUT", value.payoutsOut.netUsdc.display == null ? "—" : `−${moneyDisplay(value.payoutsOut.netUsdc)}`, `${value.payoutsOut.count} settlements · ${value.payoutsOut.walletCount} ${value.payoutsOut.walletCount === 1 ? "wallet" : "wallets"}`],
+    ["retention", "RETENTION + FEES IN", signedMoneyDisplay(value.retentionFeesIn), "worker retention + poster protocol fees"],
+    ["reserved", "RESERVED Δ", signedMoneyDisplay(value.reservedDelta), "locked behind minted or claimed jobs"],
+    ["closing", "CLOSING LIQUID", moneyDisplay(value.closingLiquid), "window-close reward bank"],
+  ] as const;
+  return (
+    <div className="hm-mobile-money-ledger">
+      {rows.map(([key, label, amount, note]) => (
+        <div key={key} data-row={key}>
+          <i aria-hidden />
+          <span><strong>{label}</strong><small>{note}</small></span>
+          <b data-testid={key === "closing" ? "mobile-closing-liquid" : undefined}>{amount}</b>
         </div>
       ))}
-
-      {/* On desktop "a meter needs a scale" means these pools get no BAR. On a
-          phone the same rule costs them their rows: one grey line, because
-          vertical space here is the scarcest thing on the board. */}
-      {unfloored.length > 0 ? (
-        <p className="hm-ph-unfloored" data-testid="mobile-unfloored">
-          no floor, no meter —{" "}
-          {unfloored
-            .map((v) => {
-              const base = `${v.pool.label.toLowerCase()} ${v.amountLabel}`;
-              if (v.pool.key === "protocol_revenue" && v.pool.note) return `${base} (${v.pool.note})`;
-              return `${base}${v.pool.note ? " (intentional)" : ""}`;
-            })
-            .join(" · ")}
-        </p>
-      ) : null}
-    </section>
+      <div className="hm-mobile-match" data-match={value.match.toLowerCase()}>
+        <span><strong>{value.match}</strong>{value.match === "CONFIRMED" ? "ledger matches chain proof" : "ledger does not match chain proof"}</span>
+        <small>Δ {signedMoneyDisplay(value.delta)} · {value.proofTiedCount} proofs tied</small>
+      </div>
+    </div>
   );
 }
 
-/**
- * The funnel and its on-chain proof, in ONE bordered card.
- *
- * They are never split — not across the fold and not across the two screens.
- * The whole point of the evidence row is that it can contradict the funnel, and
- * a contradiction the operator has to scroll between is one they will miss.
- */
-function FlowPanel({ health, emphasise, nowMs }: { health: ProductHealth; emphasise: boolean; nowMs: number }) {
-  const funnel = flowFunnel(health.flow);
-  const evidence = payoutView(health.flow?.payout);
-  const timing = lifecycleNote(health.lifecycle);
-  const mix = volumeMixNote({
-    lifecycle: health.lifecycle,
-    settledCount: health.flow?.paidSettled24h ?? null,
-    zeroPayCount: health.flow?.zeroPaySettled24h ?? null,
-  });
-  const clock = disputeClockLine(health.externalFunnel, nowMs);
+function MobileRewardBank({ ledger, window }: { ledger: OvernightLedgerPayload; window: OvernightWindow }) {
+  const split = ledger.rewardBankSplit;
+  const liquid = Number(split.liquid.display ?? 0);
+  const reserved = Number(split.reserved.display ?? 0);
+  const total = Math.max(0, liquid + reserved);
+  const liquidPct = total > 0 ? (liquid / total) * 100 : 0;
+  const reservedPct = total > 0 ? (reserved / total) * 100 : 0;
   return (
-    <section
-      className={`hm-ph-card${evidence.emphasised || emphasise ? " hm-ph-card--red" : ""}`}
-      data-testid="mobile-flow"
-    >
-      <header>FLOW · 24 H + ON-CHAIN PROOF</header>
-      <div className="hm-ph-funnel">
-        <span className="hm-ph-funnel-counts">
-          {funnel.claimed} → {funnel.submitted} → <b>{funnel.settled}</b> settled
-        </span>
-        {funnel.backlog !== "0" && funnel.backlog !== "—" ? (
-          <span data-tone={funnel.backlogTone}>backlog {funnel.backlog}</span>
-        ) : null}
-        <span className="hm-ph-quiet">
-          stuck {funnel.stuck} · failed {funnel.failed}
-        </span>
-        {/* Who posted the work. Belongs on BOTH surfaces: the phone is the
-            screen most likely to be glanced at by someone who does not carry
-            the context, and self-posted volume reads as demand without it. */}
-        {mix ? (
-          <span data-tone={mix.tone} data-testid="mobile-volume-mix">
-            {mix.text}
-          </span>
-        ) : null}
-        {/* Same facts as the desktop flow panel: how long the funnel above
-            actually takes, split by who posted the work, plus the dispute clock
-            when a bond is counting down. The phone is where this is read when
-            away from the desk, so it must not be desktop-only. */}
-        {timing ? (
-          <span className="hm-ph-quiet" data-tone={timing.tone} data-testid="mobile-lifecycle">
-            {timing.text}
-          </span>
-        ) : null}
-        {clock ? (
-          <span data-tone={clock.tone} data-testid="mobile-dispute-clock">
-            ⏳ {clock.text}
-          </span>
-        ) : null}
+    <div className="hm-mobile-reward-bank">
+      <div>
+        <span><strong>REWARD BANK</strong><small>liquid-only runway</small></span>
+        <b><span data-testid="mobile-runway">{formatRunway(split.runwayDays)}</span> d</b>
       </div>
-      <div className="hm-ph-proof" data-testid="mobile-evidence">
-        <div>
-          <i className="hm-ph-sq" data-tone={evidence.tone} aria-hidden />
-          <strong data-tone={evidence.tone}>{evidence.status}</strong>
-          <span className="hm-ph-quiet">{evidence.line1}</span>
-        </div>
-        <p>{evidence.delta}</p>
-        {/* Whether to believe the line above. The phone is where a SHORTFALL is
-            read at 2am, away from any way to check it — which makes this the
-            surface that needs it most, not least. */}
-        <p className="hm-ph-fit" data-tone={evidence.fit.tone} data-testid="mobile-evidence-fit">
-          {evidence.fit.text}
-        </p>
+      <div className="hm-mobile-split" role="meter" aria-label="Reward bank liquid and reserved split" aria-valuenow={total}>
+        <i data-part="liquid" style={{ width: `${liquidPct}%` }} />
+        <i data-part="reserved" style={{ width: `${reservedPct}%` }} />
       </div>
-    </section>
+      <p>
+        <span><i data-part="liquid" />liquid <b>{moneyDisplay(split.liquid)}</b></span>
+        <span><i data-part="reserved" />reserved <b>{moneyDisplay(split.reserved)}</b></span>
+      </p>
+      <small>liquid {signedMoneyDisplay(split.liquidDelta)} · reserved {signedMoneyDisplay(split.reservedDelta)} · {window}</small>
+    </div>
   );
 }
 
-/**
- * BANK — the second money path, on the screen you read when you are not at the
- * desk.
- *
- * WHY THIS EXISTS. The phone board shipped without it. On 2026-08-04 the desk
- * board showed this lane red with `1 OVERDUE · leg2-dispatched for 8.7h` and
- * still aging, while the phone showed the same system as NOMINAL — "floors
- * clear · money moving · proven on-chain" — and never mentioned the lane at
- * all. Verified by searching the rendered text, not by looking: `OVERDUE` did
- * not appear anywhere on the mobile surface. The one screen you check while
- * away from the desk was the one that omitted the only thing that was wrong.
- *
- * EVERY STRING HERE IS DECIDED SERVER-SIDE, exactly as in the desktop lane.
- * This picks layout and tone and nothing else. Re-deriving any of it would be
- * a second opinion on money, and two opinions is how an operator learns to
- * trust neither.
- *
- * ABSENT IS NOT BROKEN. No `bank` block means no feed was ever configured, and
- * that renders nothing — a lane nobody wired must not occupy a phone screen to
- * announce its own absence. Only a CONFIGURED feed that failed
- * (`unavailable`) is worth a line.
- *
- * DETAIL ONLY WHEN NOT OK, which is the rule the probe rollups below already
- * follow. A healthy lane is one quiet line; a lane that is degraded, red or
- * unreadable opens its rows, because that is when the numbers are worth the
- * vertical space on a 500px screen.
- */
-/**
- * One-line lanes: the deposit pool and the arrivals funnel, each cut to a
- * single sentence by phone-spec.
- *
- * The phone rendered the DESKTOP deposit-pool tile before this — a six-fact
- * grid carrying its own `ops-deposit-pool-*` styling into a screen whose rule
- * is that anything below the fold has to have earned it. Arrivals was not here
- * at all. Both now answer their question in one line and take one row.
- *
- * `unreadable` marks a failed READING rather than a bad value, and is fenced
- * the same way the rest of this board fences unknowns: the words say so and the
- * tone is awaiting-grey, never the red reserved for the money path.
- */
-function LanePanel({
-  lane,
-  testId,
-  label,
-  placement,
+function MobileTopup({
+  account,
+  reading,
 }: {
-  lane: PhoneLane | null;
-  testId: string;
-  label: string;
-  placement: "bank" | "below";
+  account: "signerGas" | "rewardBank";
+  reading: RemoteFeedReading<TopupDestinationsPayload>;
 }) {
-  // Absent producer ⇒ no row. A placeholder would claim a measurement that was
-  // never taken, which is the one thing this board may not do.
-  if (!lane) return null;
+  const destination = reading.state === "live" ? reading.data.topupDestinations[account] : undefined;
   return (
-    <p
-      className={`hm-ph-lane hm-ph-lane--${placement}`}
-      data-tone={lane.tone}
-      data-unreadable={lane.unreadable ? "yes" : "no"}
-      data-testid={testId}
-      aria-label={label}
-    >
-      {lane.line}
+    <div className="hm-mobile-topup" data-testid={`mobile-topup-${account}`} data-feed-state={reading.state}>
+      <strong>{account === "signerGas" ? "SIGNER GAS TOP-UP" : "REWARD BANK TOP-UP"}</strong>
+      {!destination ? <ReadingState reading={reading} compact /> : (
+        <>
+          <div><b>SS58</b><code>{destination.ss58Address}</code><CopyButton value={destination.ss58Address} /></div>
+          <p>
+            send {destination.asset} · {destination.network}
+            {destination.exchangeNetworkLabel ? ` · exchange network “${destination.exchangeNetworkLabel}”` : ""}
+          </p>
+          <p>EVM routing is account-specific; this published destination is SS58.</p>
+          {destination.landsInEoa ? <p>lands in EOA · run <code>{destination.followUpCommand ?? "configured follow-up"}</code></p> : null}
+        </>
+      )}
+    </div>
+  );
+}
+
+function WorkScreen({
+  health,
+  ledger,
+  window,
+  nowMs,
+}: {
+  health?: ProductHealth;
+  ledger: RemoteFeedReading<OvernightLedgerPayload>;
+  window: OvernightWindow;
+  nowMs: number;
+}) {
+  const funnel = flowFunnel(health?.flow);
+  const evidence = payoutView(health?.flow?.payout);
+  const timing = lifecycleNote(health?.lifecycle);
+  const mix = volumeMixNote({
+    lifecycle: health?.lifecycle,
+    settledCount: health?.flow?.paidSettled24h ?? null,
+    zeroPayCount: health?.flow?.zeroPaySettled24h ?? null,
+  });
+  const clock = disputeClockLine(health?.externalFunnel, nowMs);
+  const funnelAvailable = Boolean(health?.flow) && window === "24h";
+  return (
+    <div className="hm-mobile-screen" data-testid="mobile-work-screen">
+      <section className="hm-mobile-panel" data-feed-state={funnelAvailable ? "live" : "unavailable"}>
+        <PanelHeading title={`MONEY PATH — ${window.toUpperCase()}`} state={funnelAvailable ? "live" : "unavailable"} />
+        {!funnelAvailable ? (
+          <FeedState
+            state="unavailable"
+            reason={window === "24h" ? "money path unavailable — product health has no flow reading" : `money path unavailable — product health publishes 24h only, not ${window}`}
+          />
+        ) : (
+          <div className="hm-mobile-funnel">
+            {(["claimed", "submitted", "settled"] as const).map((key) => (
+              <span key={key}><small>{key}</small><strong>{funnel[key]}</strong></span>
+            ))}
+            <p>in-flight {funnel.inflight} · backlog {funnel.backlog} · stuck {funnel.stuck}</p>
+            {mix ? <p data-tone={mix.tone}>{mix.text}</p> : null}
+            {timing ? <p data-tone={timing.tone}>{timing.text}</p> : null}
+            {clock ? <p data-tone={clock.tone}>⏳ {clock.text}</p> : null}
+            <div className="hm-mobile-proof" data-testid="mobile-evidence">
+              <p><strong data-tone={evidence.tone}>{evidence.status}</strong><span>{evidence.line1}</span></p>
+              <small>{evidence.delta}</small>
+              <small data-tone={evidence.fit.tone} data-testid="mobile-evidence-fit">{evidence.fit.text}</small>
+            </div>
+          </div>
+        )}
+      </section>
+      <MobileWorkers reading={ledger} />
+    </div>
+  );
+}
+
+function MobileWorkers({ reading }: { reading: RemoteFeedReading<OvernightLedgerPayload> }) {
+  return (
+    <section className="hm-mobile-panel hm-mobile-workers" data-testid="mobile-workers" data-feed-state={reading.state}>
+      <PanelHeading title={reading.state === "live" ? `WORKERS — ${reading.data.window.toUpperCase()}` : "WORKERS"} state={reading.state} />
+      {reading.state !== "live" ? <ReadingState reading={reading} /> : reading.data.workers.items.length === 0 ? (
+        <p className="hm-mobile-empty">no worker activity recorded in this window · feed is live</p>
+      ) : reading.data.workers.items.map((worker) => (
+        <article key={worker.wallet} className="hm-mobile-worker" data-testid="mobile-worker-row">
+          <header><strong>{shortIdentifier(worker.wallet)}</strong><b>{moneyDisplay(worker.netEarned)} <small>NET</small></b></header>
+          <p>{sessionSpan(worker.sessionStart, worker.sessionEnd, worker.sessionHours)} · gross {moneyDisplay(worker.grossEarned)} → net {moneyDisplay(worker.netEarned)}</p>
+          <div role="table" aria-label={`Worker ${shortIdentifier(worker.wallet)}`}>
+            <WorkerFact label="CLAIMS" value={String(worker.claims)} />
+            <WorkerFact label="APPR" value={String(worker.approved)} />
+            <WorkerFact label="REJ" value={String(worker.rejected)} />
+            <WorkerFact label="WAIVER" value={`${worker.waiverSlotsUsed}/${worker.waiverSlotsTotal}`} />
+            <WorkerFact label="TIER" value={tierText(worker.reputationTier, worker.tierEvents)} />
+            <WorkerFact label="RETENTION" value={moneyDisplay(worker.retentionPaid)} />
+          </div>
+          <footer><span>balance {moneyDisplay(worker.balanceNow)}</span><span>withdrawn {moneyDisplay(worker.withdrawnInWindow)}</span></footer>
+        </article>
+      ))}
+    </section>
+  );
+}
+
+function WorkerFact({ label, value }: { label: string; value: string }) {
+  return (
+    <span role="row"><b role="columnheader">{label}</b><small role="cell">{value}</small></span>
+  );
+}
+
+function EventsScreen({ ledger, window }: { ledger: RemoteFeedReading<OvernightLedgerPayload>; window: OvernightWindow }) {
+  const [filter, setFilter] = useState<EventFilter>("all");
+  const events = useMemo(() => {
+    if (ledger.state !== "live") return [];
+    if (filter === "all") return ledger.data.events.items;
+    return ledger.data.events.items.filter((event) => event.severity === filter);
+  }, [filter, ledger]);
+
+  return (
+    <div className="hm-mobile-screen" data-testid="mobile-events-screen">
+      <section className="hm-mobile-panel" data-feed-state={ledger.state}>
+        <PanelHeading title={`EVENTS — ${window.toUpperCase()}`} state={ledger.state} />
+        <div className="hm-mobile-event-filters" role="group" aria-label="Event severity">
+          {(["all", "ok", "warn", "fault"] as const).map((value) => (
+            <button type="button" key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}>{value}</button>
+          ))}
+        </div>
+        {ledger.state !== "live" ? <ReadingState reading={ledger} /> : events.length === 0 ? (
+          <div className="hm-mobile-empty hm-mobile-events-empty" data-testid="mobile-events-empty">
+            <strong>no events in this window.</strong>
+            <span>the feed is live and reachable — nothing matching {filter} was recorded in the last {window}.</span>
+            <StateChip state="live" label="LIVE · 0 ROWS" />
+          </div>
+        ) : (
+          <div className="hm-mobile-events">
+            {events.slice().reverse().map((event, index) => <MobileEvent event={event} key={`${event.timestamp}:${event.type}:${index}`} />)}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function MobileEvent({ event }: { event: OvernightEvent }) {
+  const tone = event.severity === "warn" ? "warn" : event.severity === "ok" ? "live" : "loading";
+  const detail = event.type.replaceAll("_", " ");
+  return (
+    <article className="hm-mobile-event" data-severity={tone}>
+      <i aria-hidden /><span><time dateTime={event.timestamp}>{formatTime(event.timestamp)}</time><strong>{detail}</strong></span>
+      {event.wallet ? <small>{shortIdentifier(event.wallet)}</small> : null}
+    </article>
+  );
+}
+
+function MoreSheet({
+  health,
+  ledger,
+  window,
+  onClose,
+}: {
+  health?: ProductHealth;
+  ledger: RemoteFeedReading<OvernightLedgerPayload>;
+  window: OvernightWindow;
+  onClose: () => void;
+}) {
+  const [gate, setGate] = useState<DesktopGate | null>(null);
+  if (gate) return <DesktopGateCard gate={gate} onBack={() => setGate(null)} />;
+  return (
+    <main className="hm-mobile-more" data-testid="mobile-more-sheet">
+      <header><span>MORE</span><button type="button" onClick={onClose}>close ×</button></header>
+      <section className="hm-mobile-panel" data-feed-state="unavailable">
+        <PanelHeading title="OPERATOR SESSION" state="unavailable" />
+        <FeedState state="unavailable" reason={MR4_REASON} />
+        <p className="hm-mobile-window-readonly"><span>WINDOW · GOVERNS EVERY SCREEN</span><strong>{window.toUpperCase()}</strong></p>
+      </section>
+      <section className="hm-mobile-panel hm-mobile-more-list">
+        <h2>ON MOBILE</h2>
+        <MoreRow label="PROBE GRID" detail={health ? `${health.probes.length} probes · failing cells only on phone` : "unavailable — product health not loaded"} />
+        <MoreRow label="ARRIVALS / DEMAND" detail={health?.arrivals ? "available from the shared product-health reading" : "unavailable — arrivals reading absent"} />
+        <MoreRow label="LLM SPEND" detail="available on desktop · secondary planning surface" />
+        <MoreRow label="RETENTION & WAIVERS" detail={ledger.state === "live" ? `${moneyDisplay(ledger.data.retention.charged)} charged · ${moneyDisplay(ledger.data.retention.waived)} waived` : feedStateCopy(ledger)} />
+        <MoreRow label="DEPOSIT POOL" detail={health?.depositPool ? "available from the shared product-health reading" : "unavailable — deposit-pool reading absent"} />
+      </section>
+      <section className="hm-mobile-panel hm-mobile-more-list">
+        <h2>DESKTOP ROUTES</h2>
+        {DESKTOP_GATES.map((item) => (
+          <button type="button" key={item.key} onClick={() => setGate(item)}>
+            <span><strong>{item.label}</strong><small>{item.shortReason}</small></span><b>DESKTOP ›</b>
+          </button>
+        ))}
+      </section>
+      <button type="button" className="hm-mobile-signout" disabled title={MR4_REASON}>SIGN OUT UNAVAILABLE · MR-4</button>
+      <small className="hm-mobile-breakpoints">mobile &lt; 768 · tablet ≤ 1079 · desktop board unchanged ≥ 1080</small>
+    </main>
+  );
+}
+
+function MoreRow({ label, detail }: { label: string; detail: string }) {
+  return <div><span><strong>{label}</strong><small>{detail}</small></span><b>›</b></div>;
+}
+
+interface DesktopGate {
+  key: "bank-lane" | "payout-evidence" | "probe-grid";
+  label: string;
+  reason: string;
+  shortReason: string;
+  hash: string;
+}
+
+const DESKTOP_GATES: DesktopGate[] = [
+  {
+    key: "bank-lane",
+    label: "BANK-LANE DETAIL",
+    shortReason: "wide multi-lane reconciliation",
+    reason: "bank-lane reconciliation compares several lanes side by side; column count, not text size, is the constraint",
+    hash: "#bank-lane",
+  },
+  {
+    key: "payout-evidence",
+    label: "PAYOUT EVIDENCE TABLE",
+    shortReason: "full proof rows",
+    reason: "proof hashes, amounts, and timestamps exceed a phone row before truncation destroys their purpose",
+    hash: "#payout-evidence",
+  },
+  {
+    key: "probe-grid",
+    label: "PROBE GRID (FULL)",
+    shortReason: "wide matrix",
+    reason: "a phone can show failing probes, but not the full matrix shape without turning it into a different reading",
+    hash: "#probes",
+  },
+];
+
+function DesktopGateCard({ gate, onBack }: { gate: DesktopGate; onBack: () => void }) {
+  const href = typeof window === "undefined" ? gate.hash : `${window.location.origin}${window.location.pathname}${gate.hash}`;
+  return (
+    <main className="hm-mobile-gate" data-testid={`mobile-gate-${gate.key}`}>
+      <header><button type="button" onClick={onBack}>‹ back</button><span>{gate.label}</span></header>
+      <section className="hm-mobile-panel">
+        <i aria-hidden />
+        <h1>this view is built for desktop</h1>
+        <p>{gate.reason}. It is not squeezed or partially rendered here on purpose.</p>
+        <CopyButton value={href} label="copy link for desktop" />
+        <small>opens on the board at ≥ 1080px</small>
+      </section>
+    </main>
+  );
+}
+
+function BottomNavigation({ active, onNavigate }: { active: MobileDestination; onNavigate: (destination: MobileDestination) => void }) {
+  return (
+    <nav className="hm-mobile-nav" aria-label="Mobile ops screens">
+      {(["status", "money", "work", "events", "more"] as const).map((item) => (
+        <button
+          type="button"
+          role={item === "more" ? undefined : "tab"}
+          key={item}
+          data-active={active === item ? "yes" : "no"}
+          onClick={() => onNavigate(item)}
+        >
+          <i aria-hidden>{item === "more" ? "☰" : ""}</i><span>{item}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+function PanelHeading({ title, state }: { title: string; state: RemoteFeedState }) {
+  return <header className="hm-mobile-panel-head"><h2>{title}</h2><StateChip state={state} /></header>;
+}
+
+function ReadingState({ reading, compact = false }: { reading: RemoteFeedReading<unknown>; compact?: boolean }) {
+  if (reading.state === "live") return null;
+  return <FeedState state={reading.state} reason={reading.reason} compact={compact} />;
+}
+
+function FeedState({ state, reason, compact = false }: { state: Exclude<RemoteFeedState, "live">; reason: string; compact?: boolean }) {
+  return (
+    <p className={`hm-mobile-feed-state${compact ? " hm-mobile-feed-state--compact" : ""}`} role="status" data-feed-state={state}>
+      <strong>{state.toUpperCase()}</strong><span>{reason}</span>
     </p>
   );
 }
 
-function BankPanel({ bank, pool }: { bank: ProductHealth["bank"]; pool: PhoneLane | null }) {
-  // The group exists when either instrument reported. An absent venue still
-  // contributes no row; it never turns the pool into evidence that a venue was
-  // configured, and the pool likewise cannot lend the venue its tone.
-  if (!bank && !pool) return null;
-  const lane = bank?.lane;
-  const open = lane?.tone !== "ok";
-  return (
-    <section
-      className="hm-ph-bank"
-      data-testid="mobile-bank-group"
-      aria-labelledby="mobile-bank-group-title"
-    >
-      <div className="hm-ph-sec">
-        <h2 id="mobile-bank-group-title">BANK</h2>
-        {/* Hoisted above every row: an overdue request is the one state in this
-            lane where doing nothing costs money. */}
-        {lane?.overdueRequestId ? (
-          <span className="hm-ph-bank-alarm" data-tone="red" data-testid="mobile-bank-alarm">
-            ⏳ OVERDUE
-          </span>
-        ) : null}
-      </div>
-
-      {lane ? (
-        <section
-          className="hm-ph-bank-instrument"
-          data-tone={lane.tone}
-          data-testid="mobile-bank"
-          aria-labelledby="mobile-bank-venue-title"
-        >
-          <h3 className="hm-ph-bank-instrument-title" id="mobile-bank-venue-title">
-            HYDRATION USDC
-          </h3>
-
-          {/* WHAT the numbers are about, above the numbers. This lane once
-              showed fresh readings for a retired wrapper; grouping must not
-              reorder the subject below any number it qualifies. */}
-          {lane.subject ? (
-            <p className="hm-ph-bank-subject" data-tone={lane.subject.tone} data-testid="mobile-bank-subject">
-              {lane.subject.text}
-            </p>
-          ) : null}
-
-          <p className="hm-ph-bank-requests" data-tone={lane.requests.tone} data-testid="mobile-bank-requests">
-            {lane.requests.text}
-          </p>
-
-          {open ? (
-            <dl className="hm-ph-facts" data-testid="mobile-bank-rows">
-              <dt>POSITION</dt>
-              <dd data-tone={bankPositionTone(lane.position?.status)}>
-                {lane.position
-                  ? lane.position.status === "unverified"
-                    ? `UNVERIFIED — ${lane.position.detail}`
-                    : `${lane.position.raw} raw · ${lane.position.detail}`
-                  : "not reported"}
-              </dd>
-              <dt>FLOAT</dt>
-              <dd data-tone={lane.float.tone}>{lane.float.text}</dd>
-              <dt>POSTAGE</dt>
-              <dd data-tone={lane.postage.tone}>{lane.postage.text}</dd>
-            </dl>
-          ) : null}
-        </section>
-      ) : bank ? (
-        <section className="hm-ph-bank-instrument" aria-labelledby="mobile-bank-venue-title">
-          <h3 className="hm-ph-bank-instrument-title" id="mobile-bank-venue-title">
-            HYDRATION USDC
-          </h3>
-          <p className="hm-ph-bank-absent" data-tone="awaiting" data-testid="mobile-bank-absent">
-            {bank.unavailable ?? "lane unavailable"}
-          </p>
-        </section>
-      ) : null}
-
-      {pool ? (
-        <section className="hm-ph-bank-instrument" aria-labelledby="mobile-bank-pool-title">
-          <h3 className="hm-ph-bank-instrument-title" id="mobile-bank-pool-title">
-            DEPOSIT POOL
-          </h3>
-          <LanePanel lane={pool} testId="mobile-pool" label="Deposit pool" placement="bank" />
-        </section>
-      ) : null}
-    </section>
-  );
+function StateChip({ state, label }: { state: RemoteFeedState; label?: string }) {
+  return <span className="hm-mobile-state-chip" data-feed-state={state}>{label ?? state}</span>;
 }
 
-/**
- * `unverified` is warm grey, never coral — identical to the desktop lane.
- *
- * It means the instrument cannot vouch for itself, not that the money is gone.
- * Paging on a blind instrument is the false red that teaches an operator to
- * ignore the real one.
- */
-function bankPositionTone(status: string | undefined): string {
-  if (status === "funded" || status === "empty") return "ok";
-  return "awaiting";
+function CopyButton({ value, label = "copy" }: { value: string; label?: string }) {
+  return <button type="button" className="hm-mobile-copy" onClick={() => void copyText(value)}>{label}</button>;
 }
 
-function incidentLine(health: ProductHealth, untrusted: boolean): string {
-  if (untrusted) return "log frozen while the stream is down";
-  const list = health.history?.incidents ?? [];
-  if (list.length === 0) return "none recorded";
-  const ongoing = list.filter((i) => i.endedAt == null);
-  return ongoing.length > 0 ? `${ongoing.length} ongoing` : `${list.length} in window`;
+function formatRunway(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return value >= 10 ? String(Math.round(value)) : value.toFixed(1);
 }
 
-function buildLine(health: ProductHealth): string {
-  const self = health.self;
-  if (!self) return "build unknown";
-  const sha = self.runningSha ? self.runningSha.slice(0, 8) : "sha ?";
-  return self.status === "current"
-    ? `build ${sha} · current`
-    : self.status === "behind"
-      ? `build ${sha} · ${self.behindBy ?? "?"} behind`
-      : `build ${sha} · unknown`;
+function shortIdentifier(value: string): string {
+  return value.length > 24 ? `${value.slice(0, 10)}…${value.slice(-8)}` : value;
 }
 
-// Kept for the existing money-card test surface; both are now derived from the
-// shared ops-spec pool split rather than a phone-local meter rule.
-export { formatAmount };
+function tierText(tier: string | null, events: Array<{ from?: string | null; to?: string | null }>): string {
+  const latest = events.at(-1);
+  if (latest?.from && latest.to) return `${latest.from} → ${latest.to}`;
+  return tier ?? "—";
+}
+
+function sessionSpan(start: string | null, end: string | null, hours: number): string {
+  if (!start || !end) return "session span unavailable";
+  return `${formatTime(start)} → ${formatTime(end)} · ${hours.toFixed(hours % 1 === 0 ? 0 : 1)}h`;
+}
+
+function formatTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toISOString().slice(11, 16);
+}
+
+async function copyText(value: string): Promise<void> {
+  if (typeof navigator !== "undefined" && navigator.clipboard) await navigator.clipboard.writeText(value);
+}

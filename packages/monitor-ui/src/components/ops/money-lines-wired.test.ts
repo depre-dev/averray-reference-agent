@@ -61,6 +61,8 @@ describe("every money line is actually rendered", () => {
    * exemption is a decision, so it gets written down next to the name.
    */
   const DESKTOP_ONLY: Record<string, string> = {
+    payoutRunwayNote:
+      "S-3 retires the old combined-bank runway on both responsive arrangements; mobile uses the same liquid-only Overnight Ledger row as desktop.",
     gasPoolNote: "gas burn is tuning information; the signer meter carries the 2am fact",
     settledByHourView:
       "24 bars is a shape you study, not a fact you act on — and 24 columns across 390px is a smear. The phone keeps the funnel counts and the proof, which are the actionable parts.",
@@ -83,6 +85,12 @@ describe("every money line is actually rendered", () => {
       }
     });
   }
+
+  it("mobile S-3 replaces payoutRunwayNote with the shared liquid-only Overnight Ledger row", () => {
+    expect(phone).not.toContain("payoutRunwayNote(");
+    expect(phone).toContain("MobileRewardBank");
+    expect(phone).toContain("rewardBankSplit");
+  });
 
   it("imports them from ops-spec rather than redefining them", () => {
     // A local reimplementation would satisfy the check above while drifting from

@@ -1,17 +1,18 @@
 import { useEffect, useState } from "react";
 
-/** Below this the board switches to the dedicated mobile surface. Chosen so a
- *  phone in portrait gets it and a tablet/laptop keeps the full board. */
-export const MOBILE_MAX_WIDTH = 720;
+/** Phone and compact-board breakpoints from PACKET_OPS_MOBILE_UI. */
+export const MOBILE_MAX_WIDTH = 767;
+export const COMPACT_MAX_WIDTH = 1079;
 
 /**
- * True when the viewport is phone-sized.
+ * True when the viewport uses the compact triage arrangement. Callers may
+ * still pass MOBILE_MAX_WIDTH when they need a phone-only query.
  *
  * SSR/test-safe: starts false and only flips in an effect, so anything without
  * `matchMedia` (jsdom without a stub, a server render) keeps the desktop board
  * — the mobile surface is strictly additive and never hijacks an existing view.
  */
-export function useIsMobileViewport(maxWidth: number = MOBILE_MAX_WIDTH): boolean {
+export function useIsMobileViewport(maxWidth: number = COMPACT_MAX_WIDTH): boolean {
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
