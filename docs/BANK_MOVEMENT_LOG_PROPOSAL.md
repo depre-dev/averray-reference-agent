@@ -27,8 +27,9 @@ block hash stays failed until it has been ingested. That path is already
 shipping. It is not the gap.
 
 The evidence event on a row is the chain event that produced it:
-`RequestQueued` for the request, and the leg-dispatch event for
-`lastDispatchTxHash`. The Polkadot Hub USDC precompile emits no `Transfer`
+`RequestQueued` for the request, and `RequestLegDispatched`
+(`contracts/interfaces/IXcmWrapperV22.sol` line 48; event-listener topic
+`xcm.request_leg_dispatched`) for `lastDispatchTxHash`. The Polkadot Hub USDC precompile emits no `Transfer`
 logs, so a movement log cannot be built by scanning ERC-20 `Transfer`
 events. There is nothing there to scan.
 
@@ -40,10 +41,11 @@ id, kind, phase, age, deadline, status, reason, finalization, and terminal
 reconciliation amounts.
 
 `requestFromWatch` (`bank-lane-feed.js` lines 499–560 in
-`averray-agent/agent`) is the projection that drops the hashes. The watch
-has `stagingTxHash` and `lastDispatchTxHash`. The feed object the monitor
-normalizes does not. That is why the board cannot show them. It is not
-because the observer failed to store them.
+`averray-agent/agent`) already projects `kind`, and `id` is the `requestId`.
+It leaves out `stagingTxHash`, `lastDispatchTxHash`, and
+`lastDispatchFeeAmountRaw`. The watch has those three. The feed object the
+monitor normalizes does not. That is why the board cannot show them. It is
+not because the observer failed to store them.
 
 ## The gap
 
@@ -53,17 +55,17 @@ backend change. This repo does not make it.
 ### (a) Project the stored hashes
 
 A separate pull request in `averray-agent/agent`, not opened here.
-`requestFromWatch` should copy the fields the watch already has onto each
-feed request:
+`requestFromWatch` should copy the three fields it still drops onto each
+feed request. `kind` and `requestId` (as `id`) are already there:
 
-- `kind` (`deposit` or `withdraw`, unchanged)
-- `requestId`
 - `stagingTxHash`
 - `lastDispatchTxHash`
 - `lastDispatchFeeAmountRaw`
 
 Name the evidence event beside the hash it came from: `RequestQueued` for
-the staging hash, and the leg-dispatch event for `lastDispatchTxHash`.
+the staging hash, and `RequestLegDispatched`
+(`contracts/interfaces/IXcmWrapperV22.sol` line 48; topic
+`xcm.request_leg_dispatched`) for `lastDispatchTxHash`.
 After that feed shape exists, the monitor change is render-only: show the
 hash that was served, and say when it was not. Do not reconstruct it from
 balance snapshots, Blockscout, or a second RPC walk.
