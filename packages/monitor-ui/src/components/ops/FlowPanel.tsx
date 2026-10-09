@@ -73,14 +73,12 @@ export function FlowPanel({ flow, externalFunnel, lifecycle, nowMs }: FlowPanelP
     >
       <header className="ops-panel-head">
         <h2 className="ops-panel-title">FLOW — MONEY PATH · 24 H</h2>
-        {reviews ? (
-          <ReviewChips reviews={reviews} />
-        ) : (
-          <span className="ops-chip" data-tone={funnel.stuck !== "0" && funnel.stuck !== "—" ? "degraded" : "awaiting"}>
+        {reviews ? <ReviewChips reviews={reviews} stuck={funnel.stuck} stuckTone={funnel.stuckTone} /> : (
+          <span className="ops-chip" data-tone={funnel.stuckTone} data-testid="ops-stuck">
             stuck {funnel.stuck}
           </span>
         )}
-        <span className="ops-chip" data-tone={funnel.failed !== "0" && funnel.failed !== "—" ? "red" : "awaiting"}>
+        <span className="ops-chip" data-tone={funnel.failedTone}>
           failed {funnel.failed}
         </span>
         <span className="ops-panel-note" data-tone={evidence.emphasised ? "degraded" : "awaiting"}>
@@ -235,13 +233,24 @@ function SettledByHour({ payout }: { payout: MoneyPathSnapshot["payout"] | undef
   );
 }
 
-function ReviewChips({ reviews }: { reviews: ReviewBucketsView }) {
+function ReviewChips({
+  reviews,
+  stuck,
+  stuckTone,
+}: {
+  reviews: ReviewBucketsView;
+  stuck: string;
+  stuckTone: OpsTone;
+}) {
   return (
     <span className="ops-review-buckets" data-testid="ops-review-buckets">
-      <span className="ops-chip" data-tone="ok" data-testid="ops-review-waiting">
+      <span className="ops-chip" data-tone={stuckTone} data-testid="ops-stuck">
+        stuck {stuck}
+      </span>
+      <span className="ops-chip" data-tone={reviews.waitingTone} data-testid="ops-review-waiting">
         waiting for merge {reviews.waitingForMerge}
       </span>
-      <span className="ops-chip" data-tone="ok" data-testid="ops-review-awaiting">
+      <span className="ops-chip" data-tone={reviews.awaitingTone} data-testid="ops-review-awaiting">
         awaiting review {reviews.awaitingHumanReview}
       </span>
       <span className="ops-chip" data-tone={reviews.tone} data-testid="ops-review-overdue">

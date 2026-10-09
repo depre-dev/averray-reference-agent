@@ -1073,28 +1073,60 @@ describe("review buckets — served, not recomputed", () => {
       awaitingHumanReview: 0,
       overdueReview: 0,
       submittedNotSettled: 8,
-      stuck: 8,
+      stuck: 0,
+      failed24h: 0,
+      maxStuck: 5,
+      maxFailed24h: 3,
+      maxOverdueReview: 5,
     };
     const reviews = reviewBuckets(flow)!;
     expect(reviews.waitingForMerge).toBe("8");
-    expect(reviews.awaitingHumanReview).toBe("0");
-    expect(reviews.overdueReview).toBe("0");
-    expect(reviews.tone).toBe("ok");
-    expect(flowFunnel(flow).tone).toBe("ok");
+    expect(reviews.waitingTone).toBe("awaiting");
+    expect(reviews.tone).toBe("awaiting");
+    expect(flowFunnel(flow).tone).not.toBe("ok");
     expect(flowFunnel(flow).backlogTone).toBe("ok");
+    expect(flowFunnel(flow).stuckTone).toBe("awaiting");
   });
 
-  test("overdueReview ambers below five and reds at five, and names served ids", () => {
-    expect(reviewBuckets({ waitingForMerge: 1, awaitingHumanReview: 2, overdueReview: 2 })!.tone).toBe("degraded");
+  test("stuck still reds on its own threshold, beside overdue review", () => {
+    const flow = {
+      waitingForMerge: 4,
+      awaitingHumanReview: 0,
+      overdueReview: 0,
+      stuck: 6,
+      maxStuck: 5,
+      maxOverdueReview: 5,
+    };
+    expect(flowFunnel(flow).stuckTone).toBe("red");
+    expect(reviewBuckets(flow)!.tone).toBe("awaiting");
+  });
+
+  test("overdueReview ambers below its served threshold and reds at it", () => {
+    expect(reviewBuckets({
+      waitingForMerge: 1, awaitingHumanReview: 2, overdueReview: 2, maxOverdueReview: 5,
+    })!.tone).toBe("degraded");
     const red = reviewBuckets({
       waitingForMerge: 0,
       awaitingHumanReview: 0,
       overdueReview: 5,
-      overdueReviewIds: ["418", "419"],
+      maxOverdueReview: 5,
+      overdueReviewIds: ["sess-a", "sess-b"],
     })!;
     expect(red.tone).toBe("red");
-    expect(red.ids).toBe("418, 419");
-    expect(flowFunnel({ overdueReview: 5, waitingForMerge: 9 }).tone).toBe("red");
+    expect(red.ids).toBe("session ids sess-a, sess-b");
+  });
+
+  test("a missing review bucket is not reported and is not green", () => {
+    const reviews = reviewBuckets({ waitingForMerge: 1, overdueReview: 0, maxOverdueReview: 5 })!;
+    expect(reviews.awaitingHumanReview).toBe("not reported");
+    expect(reviews.awaitingTone).toBe("degraded");
+    expect(reviews.awaitingHumanReview).not.toBe("0");
+  });
+
+  test("failed24h below the served red line is degraded, not red", () => {
+    const flow = { failed24h: 1, stuck: 0, maxFailed24h: 3, maxStuck: 5 };
+    expect(flowFunnel(flow).failedTone).toBe("degraded");
+    expect(flowFunnel(flow).tone).toBe("degraded");
   });
 
   test("an older payload with no buckets keeps the computed backlog tone", () => {

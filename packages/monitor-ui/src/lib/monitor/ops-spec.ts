@@ -724,21 +724,39 @@ export interface FunnelView {
   backlog: string;
   backlogTone: OpsTone;
   stuck: string;
+  stuckTone: OpsTone;
   failed: string;
+  failedTone: OpsTone;
   /** stuck/failed nonzero, or a backlog — the funnel is not clean. */
   tone: OpsTone;
 }
 
 const dash = (n: number | null | undefined): string => (typeof n === "number" ? String(n) : "—");
+const reported = (n: number | null | undefined): string => (typeof n === "number" ? String(n) : "not reported");
 
-/** Matches the probe's default PRODUCT_HEALTH_MAX_STUCK. Overdue reviews at or above this are red. */
-const OVERDUE_REVIEW_RED = 5;
+function worstTone(tones: OpsTone[]): OpsTone {
+  const rank: Record<OpsTone, number> = { ok: 0, awaiting: 1, degraded: 2, red: 3 };
+  return tones.reduce((acc, tone) => (rank[tone] > rank[acc] ? tone : acc), "ok");
+}
+
+function countTone(
+  value: number | null | undefined,
+  redAt: number | null | undefined,
+  missing: OpsTone = "awaiting",
+): OpsTone {
+  if (typeof value !== "number") return missing;
+  if (value <= 0) return "awaiting";
+  if (typeof redAt === "number" && redAt > 0 && value >= redAt) return "red";
+  return "degraded";
+}
 
 export interface ReviewBucketsView {
   waitingForMerge: string;
   awaitingHumanReview: string;
   overdueReview: string;
-  /** Amber or red only from overdueReview. Merge waits stay ok. */
+  waitingTone: OpsTone;
+  awaitingTone: OpsTone;
+  /** Amber or red from overdueReview. A missing field is degraded, never green. */
   tone: OpsTone;
   ids: string | null;
 }
@@ -754,16 +772,16 @@ export function reviewBuckets(flow: MoneyPathSnapshot | undefined): ReviewBucket
   const waiting = flow.waitingForMerge;
   const awaiting = flow.awaitingHumanReview;
   const overdue = flow.overdueReview;
-  if (typeof waiting !== "number" && typeof awaiting !== "number" && typeof overdue !== "number") return null;
-  const overdueN = typeof overdue === "number" ? overdue : 0;
-  const tone: OpsTone = overdueN >= OVERDUE_REVIEW_RED ? "red" : overdueN > 0 ? "degraded" : "ok";
+  if (waiting == null && awaiting == null && overdue == null) return null;
   const ids = flow.overdueReviewIds?.filter((id) => id.length > 0) ?? [];
   return {
-    waitingForMerge: dash(waiting),
-    awaitingHumanReview: dash(awaiting),
-    overdueReview: dash(overdue),
-    tone,
-    ids: ids.length > 0 ? ids.join(", ") : null,
+    waitingForMerge: reported(waiting),
+    awaitingHumanReview: reported(awaiting),
+    overdueReview: reported(overdue),
+    waitingTone: typeof waiting === "number" ? "awaiting" : "degraded",
+    awaitingTone: typeof awaiting === "number" ? "awaiting" : "degraded",
+    tone: countTone(overdue, flow.maxOverdueReview, "degraded"),
+    ids: ids.length > 0 ? `session ids ${ids.join(", ")}` : null,
   };
 }
 
@@ -781,14 +799,16 @@ export function flowFunnel(flow: MoneyPathSnapshot | undefined): FunnelView {
       : backlog > 0
         ? "degraded"
         : "ok";
-  const reviewTone: OpsTone = reviews?.tone ?? "ok";
+  const failedTone = countTone(failed, flow?.maxFailed24h);
+  const stuckTone = countTone(stuck, flow?.maxStuck);
+  const reviewTone: OpsTone = reviews
+    ? worstTone([reviews.tone, reviews.waitingTone, reviews.awaitingTone, stuckTone, failedTone])
+    : "ok";
   const tone: OpsTone = reviews
-    ? typeof failed === "number" && failed > 0
+    ? reviewTone === "ok" ? "awaiting" : reviewTone
+    : failedTone === "red"
       ? "red"
-      : reviewTone
-    : typeof failed === "number" && failed > 0
-      ? "red"
-      : (typeof stuck === "number" && stuck > 0) || backlogTone === "degraded"
+      : failedTone === "degraded" || (typeof stuck === "number" && stuck > 0) || backlogTone === "degraded"
         ? "degraded"
         : flow == null
           ? "awaiting"
@@ -801,7 +821,9 @@ export function flowFunnel(flow: MoneyPathSnapshot | undefined): FunnelView {
     backlog: dash(backlog),
     backlogTone,
     stuck: dash(stuck),
+    stuckTone,
     failed: dash(failed),
+    failedTone,
     tone,
   };
 }
@@ -1377,6 +1399,7 @@ export const MONEY_LINE_RENDERERS = [
   "volumeMixNote",
   "payoutProvenanceLine",
   "crossCheckLine",
+  "reviewBuckets",
 ] as const;
 
 /**

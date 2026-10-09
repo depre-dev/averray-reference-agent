@@ -17,6 +17,7 @@ import {
   deriveOpsActionItems,
   disputeClockLine,
   flowFunnel,
+  reviewBuckets,
   lifecycleNote,
   payoutView,
   readIdentityView,
@@ -412,6 +413,7 @@ function WorkScreen({
   nowMs: number;
 }) {
   const funnel = flowFunnel(health?.flow);
+  const reviews = reviewBuckets(health?.flow);
   const evidence = payoutView(health?.flow?.payout);
   const timing = lifecycleNote(health?.lifecycle);
   const mix = volumeMixNote({
@@ -436,6 +438,11 @@ function WorkScreen({
               <span key={key}><small>{key}</small><strong>{funnel[key]}</strong></span>
             ))}
             <p>in-flight {funnel.inflight} · backlog {funnel.backlog} · stuck {funnel.stuck}</p>
+            {reviews ? (
+              <p data-testid="mobile-review-buckets">
+                waiting for merge {reviews.waitingForMerge} · awaiting review {reviews.awaitingHumanReview} · overdue review {reviews.overdueReview}
+              </p>
+            ) : null}
             {mix ? <p data-tone={mix.tone}>{mix.text}</p> : null}
             {timing ? <p data-tone={timing.tone}>{timing.text}</p> : null}
             {clock ? <p data-tone={clock.tone}>⏳ {clock.text}</p> : null}
