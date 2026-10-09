@@ -327,6 +327,16 @@ describe("signer credentials from /health", () => {
     });
     expect(roles.status).toBe("red");
     expect(roles.detail).toContain("Roles Anywhere — certificate_expired_or_not_yet_valid");
+
+    const badge = describeSignerCredentials({
+      credentials: {
+        ...fresh,
+        badgeReceiptSigner: { kid: "badge-1", ok: false, reason: "badge_sign_failed" },
+      },
+      nowMs: NOW,
+    });
+    expect(badge.status).toBe("red");
+    expect(badge.detail).toContain("badge_sign_failed");
   });
 
   test("a missing credentials block is not a green TLS line", () => {
