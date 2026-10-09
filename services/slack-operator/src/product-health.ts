@@ -55,6 +55,11 @@ import {
   mergeCredentialReadings,
   tlsCertReader,
 } from "./credential-expiry.js";
+import {
+  createReceiptProbeCache,
+  runReceiptSignatureProbe,
+  type ReceiptProbeCache,
+} from "./receipt-signature-probe.js";
 import { bankFeedIsDisabled } from "./bank-feed.js";
 import { bankLaneView, BANK_FEED_DISABLED, type BankLaneView } from "./bank-lane.js";
 import { githubAuthorSurface, type GithubAuthorsSurface } from "./github-authors.js";
@@ -2314,6 +2319,31 @@ function payoutCrossCheck(input: {
   return crossCheckCache.read();
 }
 
+let receiptProbeCache: ReceiptProbeCache | null = null;
+let receiptProbeLatest: { apiBaseUrl: string; fetchImpl: typeof fetch } | null = null;
+
+/** Receipt signatures, on their own 30-minute cadence. The heartbeat never waits. */
+function receiptSignatureReading(input: {
+  apiBaseUrl?: string;
+  fetchImpl: typeof fetch;
+  nowMs: number;
+}): ProbeResult | null {
+  // The health suite shares one process and one fetch mock. A live probe
+  // started there would paint every later case red. Production does not set
+  // VITEST. Set PRODUCT_HEALTH_RECEIPT_PROBE=1 to force it inside tests.
+  if (process.env.VITEST && process.env.PRODUCT_HEALTH_RECEIPT_PROBE !== "1") return null;
+  receiptProbeLatest = {
+    apiBaseUrl: input.apiBaseUrl || "https://api.averray.com",
+    fetchImpl: input.fetchImpl,
+  };
+  receiptProbeCache ??= createReceiptProbeCache({
+    run: () => runReceiptSignatureProbe(receiptProbeLatest!),
+  });
+  receiptProbeCache.maybeRefresh(input.nowMs);
+  const view = receiptProbeCache.read();
+  return { name: "receipt_signature", status: view.status, detail: view.detail };
+}
+
 /** Test seam: forget the singleton so each test starts from no snapshot. */
 export function __resetGasAttributionForTests(): void {
   gasCache = null;
@@ -2321,6 +2351,8 @@ export function __resetGasAttributionForTests(): void {
   crossCheckCache = null;
   crossCheckConfigured = null;
   crossCheckLatest = null;
+  receiptProbeCache = null;
+  receiptProbeLatest = null;
 }
 
 /** Who receives the protocol fee, according to the contract that charges it.
@@ -3492,6 +3524,14 @@ export async function collectProductHealthProbes(
       }),
       treasury,
       externalFunnel.probe,
+      ...(() => {
+        const receipt = receiptSignatureReading({
+          ...(config.apiBaseUrl ? { apiBaseUrl: config.apiBaseUrl } : {}),
+          fetchImpl,
+          nowMs: chainCtx.nowMs,
+        });
+        return receipt ? [receipt] : [];
+      })(),
     ],
     chainAdvance,
     ...(transportRun ? { transportRun } : {}),
