@@ -595,12 +595,17 @@ export interface OpsIncident {
   id: string;
   /** Probe name that owns the episode. */
   probe: string;
+  /** Current severity. A check that has returned to amber paints amber. */
   severity: "degraded" | "red";
+  /** Worst severity recorded for the episode, kept after the ring forgets it. */
+  peakSeverity?: "degraded" | "red";
   /** Epoch ms. */
   startedAt: number;
   /** Epoch ms; null/undefined → ongoing. */
   endedAt?: number | null;
   note?: string;
+  /** Duplicate row from the one-time dedupe. Never rendered as an incident. */
+  suppressed?: boolean;
 }
 
 /**

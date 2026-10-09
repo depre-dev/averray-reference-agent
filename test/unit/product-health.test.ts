@@ -1483,9 +1483,27 @@ describe("deriveProductHealthHistory", () => {
     expect(inc[0]).toMatchObject({
       probe: "chain_height",
       severity: "red",
+      peakSeverity: "red",
       startedAt: now - 3 * HOUR,
       endedAt: null,
       note: "chain halted",
+    });
+  });
+
+  it("current severity is the latest sample; the peak stays red after it eases", () => {
+    const now = 100 * HOUR;
+    const history = [
+      snap(now - 3 * HOUR, "degraded", { probes: [probe("chain_height", "degraded", "slow")] }),
+      snap(now - 2 * HOUR, "red", { probes: [probe("chain_height", "red", "chain halted")] }),
+      snap(now - 1 * HOUR, "degraded", { probes: [probe("chain_height", "degraded", "catching up")] }),
+    ];
+    const inc = deriveProductHealthHistory(history, now).incidents;
+    expect(inc).toHaveLength(1);
+    expect(inc[0]).toMatchObject({
+      severity: "degraded",
+      peakSeverity: "red",
+      note: "catching up",
+      endedAt: null,
     });
   });
 

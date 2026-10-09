@@ -124,17 +124,33 @@ export interface IncidentRow extends OpsIncident {
   ongoing: boolean;
   durationMs: number;
   durationLabel: string;
+  /** Set when the episode peaked worse than its current severity. */
+  peakLabel: string | null;
+}
+
+function shownIncident(inc: OpsIncident): boolean {
+  if (inc.suppressed) return false;
+  // Rows the old dedupe closed at `now`. The duration was never observed.
+  if (inc.note?.includes("closed as a duplicate")) return false;
+  return true;
 }
 
 /** Incidents newest-first, with duration computed against `nowMs` for ongoing ones. */
 export function incidentRows(history: HealthHistory | undefined, nowMs: number): IncidentRow[] {
-  const list = history?.incidents ?? [];
+  const list = (history?.incidents ?? []).filter(shownIncident);
   return [...list]
     .sort((a, b) => b.startedAt - a.startedAt)
     .map((inc) => {
       const end = inc.endedAt ?? nowMs;
       const durationMs = Math.max(0, end - inc.startedAt);
-      return { ...inc, ongoing: inc.endedAt == null, durationMs, durationLabel: formatDuration(durationMs) };
+      const peakLabel = inc.peakSeverity === "red" && inc.severity !== "red" ? "peaked red" : null;
+      return {
+        ...inc,
+        ongoing: inc.endedAt == null,
+        durationMs,
+        durationLabel: formatDuration(durationMs),
+        peakLabel,
+      };
     });
 }
 
