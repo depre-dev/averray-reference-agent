@@ -9,6 +9,7 @@
 import { afterEach, describe, expect, test } from "vitest";
 import { cleanup, render, within } from "@testing-library/react";
 
+import { FlowPanel } from "./FlowPanel.js";
 import { OpsBoard } from "./OpsBoard.js";
 import {
   OPS_FIXTURE_LIVE,
@@ -382,6 +383,28 @@ describe("OpsBoard — the census as marks", () => {
       <OpsBoard health={{ ...OPS_FIXTURE_NOMINAL, probes: [] }} nowMs={fresh(OPS_FIXTURE_NOMINAL)} />,
     );
     expect(queryByTestId("ops-census")).toBeNull();
+  });
+});
+
+describe("review chips", () => {
+  test("the stuck chip sits in the review layout", () => {
+    const { getByTestId } = render(
+      <FlowPanel
+        flow={{
+          waitingForMerge: 1,
+          awaitingHumanReview: 0,
+          overdueReview: 0,
+          stuck: 2,
+          maxStuck: 5,
+          maxOverdueReview: 5,
+        }}
+        nowMs={1}
+      />,
+    );
+    const reviews = getByTestId("ops-review-buckets");
+    const stuck = getByTestId("ops-stuck");
+    expect(reviews.contains(stuck)).toBe(true);
+    expect(stuck.textContent).toContain("stuck 2");
   });
 });
 

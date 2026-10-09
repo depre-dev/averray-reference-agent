@@ -159,6 +159,16 @@ export interface MoneyPathSnapshot {
   zeroPaySettled24h?: number | null;
   stuck?: number | null;
   failed24h?: number | null;
+  /** Served by /health. A merge wait is normal work, not a stuck settlement. */
+  waitingForMerge?: number | null;
+  awaitingHumanReview?: number | null;
+  overdueReview?: number | null;
+  /** Session ids from warning github_pr_review_overdue. Not recomputed here. */
+  overdueReviewIds?: string[] | null;
+  /** Served thresholds. The panel does not hardcode the probe's red lines. */
+  maxStuck?: number | null;
+  maxFailed24h?: number | null;
+  maxOverdueReview?: number | null;
   /** Epoch ms of the settlement snapshot. */
   asOf?: number | null;
   /** Independent on-chain proof that the settled jobs actually PAID. */

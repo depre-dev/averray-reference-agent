@@ -750,6 +750,9 @@ export interface ProductHealthConfig {
    *  PRODUCT_HEALTH_MAX_STUCK / PRODUCT_HEALTH_MAX_FAILED_24H. */
   maxStuck: number;
   maxFailed24h: number;
+  /** money_path: red at ≥ this many overdue reviews. Separate from stuck.
+   *  Env PRODUCT_HEALTH_MAX_OVERDUE_REVIEW. Default 5. 0 disables the red arm. */
+  maxOverdueReview: number;
   /** Settlement counts older than this (minutes) ⇒ degraded (stale record). Env
    *  PRODUCT_HEALTH_SETTLEMENT_MAX_STALE_MINUTES. */
   settlementMaxStaleMinutes: number;
@@ -869,6 +872,7 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
     latencyRedMs: num(env.PRODUCT_HEALTH_LATENCY_RED_MS, 10000),
     maxStuck: num(env.PRODUCT_HEALTH_MAX_STUCK, 5),
     maxFailed24h: num(env.PRODUCT_HEALTH_MAX_FAILED_24H, 3),
+    maxOverdueReview: num(env.PRODUCT_HEALTH_MAX_OVERDUE_REVIEW, 5),
     settlementMaxStaleMinutes: num(env.PRODUCT_HEALTH_SETTLEMENT_MAX_STALE_MINUTES, 15),
     minRewardBank: num(env.PRODUCT_HEALTH_MIN_REWARD_BANK, 0),
     minTreasuryReserve: num(env.PRODUCT_HEALTH_MIN_TREASURY_RESERVE, 5),
@@ -910,7 +914,14 @@ export interface ProductHealthPayload {
     };
   };
   capabilityHealth?: Record<string, string>;
-  warnings?: Array<{ code?: string; severity?: string; message?: string }>;
+  warnings?: Array<{
+    code?: string;
+    severity?: string;
+    message?: string;
+    count?: number;
+    sessionIds?: Array<string | number>;
+    sessionId?: string | number;
+  }>;
   components?: {
     blockchain?: {
       ok?: boolean;
@@ -932,6 +943,10 @@ export interface ProductHealthPayload {
     zeroPaySettled24h?: number;
     stuck?: number;
     failed24h?: number;
+    /** Served review buckets. waitingForMerge is normal work, not a stuck job. */
+    waitingForMerge?: number;
+    awaitingHumanReview?: number;
+    overdueReview?: number;
     asOf?: string;
   };
   /** Contract addresses echoed from deployments/testnet.json (locked contract) so the
@@ -1183,6 +1198,55 @@ export function deriveLatencyProbe(h: ProductHealthFetch, thresholds: { warnMs: 
   return { name, status: "ok", detail: `/health ${ms}ms` };
 }
 
+/**
+ * The three review buckets /health already computed.
+ *
+ * Absent when the payload does not carry them — an older backend keeps the
+ * previous stuck/backlog reading. Present fields are rendered as served.
+ * waitingForMerge is never folded into stuck or into awaiting review.
+ */
+function overdueSessionIds(
+  warnings: ProductHealthPayload["warnings"],
+): string[] | null {
+  const warning = (warnings ?? []).find((item) => item.code === "github_pr_review_overdue");
+  if (!warning) return null;
+  const listed = Array.isArray(warning.sessionIds)
+    ? warning.sessionIds
+    : warning.sessionId !== undefined
+      ? [warning.sessionId]
+      : [];
+  const ids = listed.filter((id) => typeof id === "string" || typeof id === "number").map(String);
+  return ids.length > 0 ? ids : null;
+}
+
+function bucketText(label: string, value: number | undefined): string {
+  return value === undefined ? `${label} not reported` : `${label} ${value}`;
+}
+
+function servedReviewBuckets(h: ProductHealthFetch): {
+  waitingForMerge: number | undefined;
+  awaitingHumanReview: number | undefined;
+  overdueReview: number | undefined;
+  detail: string;
+  missing: boolean;
+} | null {
+  const s = h.body?.settlement;
+  if (!s) return null;
+  const waiting = pickNum(s.waitingForMerge);
+  const awaiting = pickNum(s.awaitingHumanReview);
+  const overdue = pickNum(s.overdueReview);
+  if (waiting === undefined && awaiting === undefined && overdue === undefined) return null;
+  const ids = overdueSessionIds(h.body?.warnings) ?? [];
+  const idNote = ids.length > 0 ? ` (session ids ${ids.join(", ")})` : "";
+  const missing = waiting === undefined || awaiting === undefined || overdue === undefined;
+  const detail = [
+    bucketText("waitingForMerge", waiting),
+    bucketText("awaitingHumanReview", awaiting),
+    `${bucketText("overdueReview", overdue)}${overdue === undefined ? "" : idNote}`,
+  ].join(" · ");
+  return { waitingForMerge: waiting, awaitingHumanReview: awaiting, overdueReview: overdue, detail, missing };
+}
+
 /** Money-path FLOW, from /health's settlement counts (the backend's Redis record).
  *  red on too many stuck (submitted-unsettled) jobs or settlement-EXECUTION failures
  *  in 24h; degraded on any below those, on stale counts, or before the product
@@ -1193,6 +1257,8 @@ export function deriveMoneyPathProbe(
   config: {
     maxStuck: number;
     maxFailed24h: number;
+    /** Red at this many overdue reviews. Defaults to 5. Separate from maxStuck. */
+    maxOverdueReview?: number;
     maxStaleMinutes: number;
     nowMs: number;
     /** Previous poll's current-state gauge. A positive value on both polls is
@@ -1242,6 +1308,32 @@ export function deriveMoneyPathProbe(
         detail: withGauges(`settlement counts stale — asOf ${formatDuration(ageMs)} ago`),
       };
     }
+  }
+  const review = servedReviewBuckets(h);
+  if (review) {
+    // stuck is its own bucket: submitted work with no review or merge
+    // disposition past stuckAfterMs. waitingForMerge is not that, and it does
+    // not move the tone. overdueReview has its own threshold.
+    const maxOverdue = config.maxOverdueReview ?? 5;
+    const overdue = review.overdueReview;
+    let status: ProbeResult["status"] = "ok";
+    const raise = (next: ProbeResult["status"]) => {
+      const rank = { ok: 0, degraded: 1, red: 2 };
+      if (rank[next] > rank[status]) status = next;
+    };
+    if (config.maxStuck > 0 && stuck >= config.maxStuck) raise("red");
+    else if (stuck > 0) raise("degraded");
+    if (config.maxFailed24h > 0 && failed >= config.maxFailed24h) raise("red");
+    else if (failed > 0) raise("degraded");
+    if (overdue === undefined || review.missing) raise("degraded");
+    else if (maxOverdue > 0 && overdue >= maxOverdue) raise("red");
+    else if (overdue > 0) raise("degraded");
+    const failedNote = failed > 0 ? ` · failed24h ${failed}` : "";
+    const stuckNote = stuck > 0 ? ` · stuck ${stuck}` : "";
+    const claimed = claimedNotSubmitted !== undefined && claimedNotSubmitted > 0
+      ? `; claimedNotSubmitted ${claimedNotSubmitted}`
+      : "";
+    return { name, status, detail: `${review.detail}${stuckNote}${failedNote}${claimed}` };
   }
   if (config.maxStuck > 0 && stuck >= config.maxStuck) {
     return {
@@ -2598,6 +2690,16 @@ export interface MoneyPathData {
   zeroPaySettled24h?: number | null;
   stuck?: number | null;
   failed24h?: number | null;
+  /** Served by /health. A merge wait is normal; it is not a stuck settlement. */
+  waitingForMerge?: number | null;
+  awaitingHumanReview?: number | null;
+  overdueReview?: number | null;
+  /** Session ids from warning github_pr_review_overdue, when the backend sent them. */
+  overdueReviewIds?: string[] | null;
+  /** Thresholds the panel uses, so it does not hardcode the probe's red lines. */
+  maxStuck?: number | null;
+  maxFailed24h?: number | null;
+  maxOverdueReview?: number | null;
   asOf?: number | null;
   /** Independent on-chain proof that the settled jobs actually PAID. */
   payout?: PayoutEvidence;
@@ -3210,6 +3312,13 @@ export async function collectProductHealthProbes(
             zeroPaySettled24h: settlement.zeroPaySettled24h ?? null,
             stuck: settlement.stuck ?? null,
             failed24h: settlement.failed24h ?? null,
+            waitingForMerge: settlement.waitingForMerge ?? null,
+            awaitingHumanReview: settlement.awaitingHumanReview ?? null,
+            overdueReview: settlement.overdueReview ?? null,
+            overdueReviewIds: overdueSessionIds(h.body?.warnings),
+            maxStuck: config.maxStuck,
+            maxFailed24h: config.maxFailed24h,
+            maxOverdueReview: config.maxOverdueReview,
             asOf: parseHealthAsOf(settlement.asOf),
             payout,
           },
@@ -3245,6 +3354,7 @@ export async function collectProductHealthProbes(
       deriveMoneyPathProbe(h, {
         maxStuck: config.maxStuck,
         maxFailed24h: config.maxFailed24h,
+        maxOverdueReview: config.maxOverdueReview,
         maxStaleMinutes: config.settlementMaxStaleMinutes,
         nowMs: chainCtx.nowMs,
         previousSubmittedNotSettled: chainCtx.previousSubmittedNotSettled,

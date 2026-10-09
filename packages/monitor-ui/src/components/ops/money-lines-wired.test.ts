@@ -30,6 +30,12 @@ const phone = fs.readFileSync(path.join(dir, "..", "mobile", "MobileBoard.tsx"),
  * that a failing build.
  */
 describe("every money line is actually rendered", () => {
+  it("reviewBuckets is a money-line renderer the phone calls", () => {
+    expect(MONEY_LINE_RENDERERS).toContain("reviewBuckets");
+    expect(phone).toContain("reviewBuckets(");
+    expect(phone).toContain("data-testid=\"mobile-review-buckets\"");
+  });
+
   // S-3 retires payoutRunwayNote on the desktop: that helper derives from the
   // old combined bank balance, while the Overnight Ledger supplies the
   // liquid-only runway and liquid|reserved split from one reading.

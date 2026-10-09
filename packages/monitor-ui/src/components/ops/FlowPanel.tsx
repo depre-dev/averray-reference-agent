@@ -14,7 +14,9 @@ import {
   EVIDENCE_KEY,
   flowFunnel,
   payoutView,
+  reviewBuckets,
   type FunnelView,
+  type ReviewBucketsView,
 } from "../../lib/monitor/ops-spec.js";
 import type { MoneyPathSnapshot } from "../../lib/monitor/product-health.js";
 import {
@@ -53,6 +55,7 @@ export function FlowPanel({ flow, externalFunnel, lifecycle, nowMs }: FlowPanelP
     zeroPayCount: flow?.zeroPaySettled24h ?? null,
   });
   const funnel = flowFunnel(flow);
+  const reviews = reviewBuckets(flow);
   const evidence = payoutView(flow?.payout);
   const provenance = payoutProvenanceLine(flow?.payout);
   const cross = crossCheckLine(flow?.payout, nowMs ?? Date.now());
@@ -70,10 +73,12 @@ export function FlowPanel({ flow, externalFunnel, lifecycle, nowMs }: FlowPanelP
     >
       <header className="ops-panel-head">
         <h2 className="ops-panel-title">FLOW — MONEY PATH · 24 H</h2>
-        <span className="ops-chip" data-tone={funnel.stuck !== "0" && funnel.stuck !== "—" ? "degraded" : "awaiting"}>
-          stuck {funnel.stuck}
-        </span>
-        <span className="ops-chip" data-tone={funnel.failed !== "0" && funnel.failed !== "—" ? "red" : "awaiting"}>
+        {reviews ? <ReviewChips reviews={reviews} stuck={funnel.stuck} stuckTone={funnel.stuckTone} /> : (
+          <span className="ops-chip" data-tone={funnel.stuckTone} data-testid="ops-stuck">
+            stuck {funnel.stuck}
+          </span>
+        )}
+        <span className="ops-chip" data-tone={funnel.failedTone}>
           failed {funnel.failed}
         </span>
         <span className="ops-panel-note" data-tone={evidence.emphasised ? "degraded" : "awaiting"}>
@@ -225,6 +230,34 @@ function SettledByHour({ payout }: { payout: MoneyPathSnapshot["payout"] | undef
         <span>now</span>
       </div>
     </div>
+  );
+}
+
+function ReviewChips({
+  reviews,
+  stuck,
+  stuckTone,
+}: {
+  reviews: ReviewBucketsView;
+  stuck: string;
+  stuckTone: OpsTone;
+}) {
+  return (
+    <span className="ops-review-buckets" data-testid="ops-review-buckets">
+      <span className="ops-chip" data-tone={stuckTone} data-testid="ops-stuck">
+        stuck {stuck}
+      </span>
+      <span className="ops-chip" data-tone={reviews.waitingTone} data-testid="ops-review-waiting">
+        waiting for merge {reviews.waitingForMerge}
+      </span>
+      <span className="ops-chip" data-tone={reviews.awaitingTone} data-testid="ops-review-awaiting">
+        awaiting review {reviews.awaitingHumanReview}
+      </span>
+      <span className="ops-chip" data-tone={reviews.tone} data-testid="ops-review-overdue">
+        overdue review {reviews.overdueReview}
+        {reviews.ids ? ` · ${reviews.ids}` : ""}
+      </span>
+    </span>
   );
 }
 
