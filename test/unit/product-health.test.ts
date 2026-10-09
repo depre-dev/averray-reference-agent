@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { crossCheckLine } from "../../packages/monitor-ui/src/lib/monitor/ops-spec.js";
+
 import {
   evaluateProductHealth,
   redProbeKey,
@@ -293,6 +295,31 @@ describe("cross-check cache rebuilds when configuration appears", () => {
       { nowMs: 2_000 },
     );
     expect(second.snapshot.flow?.payout?.crossCheck?.status).toBe("never-run");
+  });
+
+  it("a later rpcEndpoints host that matches the cross-check, ignoring case and slashes, is not independent", async () => {
+    __resetGasAttributionForTests();
+    const healthBody = {
+      ...HEALTHY_BODY,
+      addresses: { agentAccountCore: "0xaac" },
+      settlement: { settled24h: 1, stuck: 0, failed24h: 0, asOf: "2026-07-05T00:00:00.000Z" },
+    };
+    const collected = await collectProductHealthProbes(
+      cfg({
+        payoutEvidenceEnabled: true,
+        rpcEndpoints: ["https://primary.example/rpc", "https://ETH-RPC.polkadot.io/extra/"],
+        payoutCrossCheckRpcUrl: "https://eth-rpc.polkadot.io/",
+      }),
+      combinedFetch({ healthBody }),
+      { nowMs: 3_000 },
+    );
+    const crossCheck = collected.snapshot.flow?.payout?.crossCheck;
+    expect(crossCheck?.status).toBe("not-independent");
+    expect(crossCheck?.lastAgreedAtMs).toBeNull();
+    expect(crossCheck?.detail).toContain("eth-rpc.polkadot.io");
+    const line = crossCheckLine(collected.snapshot.flow?.payout, 3_000);
+    expect(line?.text ?? "").not.toContain("✓");
+    expect(line?.tone).toBe("degraded");
   });
 });
 
