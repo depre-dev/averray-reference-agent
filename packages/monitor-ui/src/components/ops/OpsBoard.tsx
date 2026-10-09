@@ -32,6 +32,7 @@ import { boardKpis, economicsLine } from "../../lib/monitor/ops-spec.js";
 import { outsiderPresence, type OutsiderBand } from "../../lib/monitor/arrivals-view.js";
 import { opsVerdict, staleAfterMs, trustRows } from "../../lib/monitor/ops-spec.js";
 import { FlowPanel } from "./FlowPanel.js";
+import { GithubAuthorsPanel } from "./GithubAuthorsPanel.js";
 import { PillarStrip } from "./PillarStrip.js";
 import { SolvencyPanel } from "./SolvencyPanel.js";
 import { BankLane } from "./BankLane.js";
@@ -242,6 +243,7 @@ export function OpsBoard({
             overnightWindow={overnightWindow}
           />
           <FlowPanel flow={health.flow} externalFunnel={health.externalFunnel} lifecycle={health.lifecycle} nowMs={nowMs} />
+          <GithubAuthorsPanel surface={health.githubAuthors} />
 
           {/* Per-job economics closes the worker-payment band because it
               describes that path. It keeps its own line and tone and refuses
