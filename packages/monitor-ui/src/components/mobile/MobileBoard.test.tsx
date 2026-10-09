@@ -36,6 +36,29 @@ const overnightState = (window: OvernightWindow = "24h"): OvernightLedgerState =
 });
 
 describe("Hermes mobile triage — one truth", () => {
+  test("the work screen shows the served review line", () => {
+    const health = {
+      ...OPS_FIXTURE_NOMINAL,
+      flow: {
+        ...OPS_FIXTURE_NOMINAL.flow,
+        waitingForMerge: 4,
+        awaitingHumanReview: 1,
+        overdueReview: 2,
+        maxOverdueReview: 5,
+      },
+    };
+    const view = render(
+      <MobileBoard
+        health={health}
+        nowMs={FIXTURE_NOW}
+        overnightLedger={OVERNIGHT_LEDGER_LIVE}
+      />,
+    );
+    fireEvent.click(view.getByRole("tab", { name: "work" }));
+    expect(view.getByTestId("mobile-review-buckets").textContent).toContain("waiting for merge 4");
+    expect(view.getByTestId("mobile-review-buckets").textContent).toContain("overdue review 2");
+  });
+
   test("mobile renders the same shared verdict state as desktop and exposes its typed reason", () => {
     const desktop = render(<OpsBoard health={OPS_FIXTURE_STRESS} nowMs={FIXTURE_NOW} />);
     const mobile = render(

@@ -1116,6 +1116,27 @@ describe("review buckets — served, not recomputed", () => {
     expect(red.ids).toBe("session ids sess-a, sess-b");
   });
 
+  test("a non-default served threshold reds overdue review below 5", () => {
+    // A UI that hardcodes 5 would call 3 amber. The served threshold is 2.
+    expect(reviewBuckets({
+      waitingForMerge: 0,
+      awaitingHumanReview: 0,
+      overdueReview: 3,
+      maxOverdueReview: 2,
+    })!.tone).toBe("red");
+  });
+
+  test("a missing overdueReview renders not reported", () => {
+    const reviews = reviewBuckets({
+      waitingForMerge: 1,
+      awaitingHumanReview: 0,
+      maxOverdueReview: 5,
+    })!;
+    expect(reviews.overdueReview).toBe("not reported");
+    expect(reviews.tone).toBe("degraded");
+    expect(reviews.overdueReview).not.toBe("0");
+  });
+
   test("a missing review bucket is not reported and is not green", () => {
     const reviews = reviewBuckets({ waitingForMerge: 1, overdueReview: 0, maxOverdueReview: 5 })!;
     expect(reviews.awaitingHumanReview).toBe("not reported");

@@ -3320,6 +3320,7 @@ export async function collectProductHealthProbes(
       deriveMoneyPathProbe(h, {
         maxStuck: config.maxStuck,
         maxFailed24h: config.maxFailed24h,
+        maxOverdueReview: config.maxOverdueReview,
         maxStaleMinutes: config.settlementMaxStaleMinutes,
         nowMs: chainCtx.nowMs,
         previousSubmittedNotSettled: chainCtx.previousSubmittedNotSettled,

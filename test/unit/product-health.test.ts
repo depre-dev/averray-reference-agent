@@ -1180,6 +1180,28 @@ describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", ()
     expect(red.status).toBe("red");
   });
 
+  it("the collected probe uses the served overdue threshold, not a hardcoded 5", async () => {
+    const { probes } = await collectProductHealthProbes(
+      cfg({ maxOverdueReview: 2 }),
+      combinedFetch({
+        healthBody: {
+          ...HEALTHY_BODY,
+          settlement: {
+            waitingForMerge: 0,
+            awaitingHumanReview: 0,
+            overdueReview: 3,
+            stuck: 0,
+            failed24h: 0,
+            settled24h: 1,
+            asOf: new Date(1_000).toISOString(),
+          },
+        },
+      }),
+      { nowMs: 1_000 },
+    );
+    expect(probes.find((p) => p.name === "money_path")?.status).toBe("red");
+  });
+
   it("degrades the collected money-path probe when the submitted backlog repeats", async () => {
     const { probes } = await collectProductHealthProbes(
       cfg(),
