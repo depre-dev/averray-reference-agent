@@ -1131,6 +1131,42 @@ describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", ()
     ).toMatchObject({ status: "ok", detail: "settled24h 2 (0 stuck, 0 failed)" });
   });
 
+  it("reads served review buckets and does not count a merge wait as stuck", () => {
+    const base = { maxStuck: 5, maxFailed24h: 3, maxStaleMinutes: 15, nowMs: 0 };
+    const body = (
+      settlement: Record<string, number>,
+      warnings?: Array<{ code: string; count?: number; ids?: string[] }>,
+    ) => fetched({ ...HEALTHY_BODY, settlement, ...(warnings ? { warnings } : {}) });
+
+    const waiting = deriveMoneyPathProbe(
+      body({ waitingForMerge: 8, awaitingHumanReview: 0, overdueReview: 0, submittedNotSettled: 8, stuck: 8 }),
+      { ...base, previousSubmittedNotSettled: 8 },
+    );
+    expect(waiting.status).toBe("ok");
+    expect(waiting.detail).toContain("waitingForMerge 8");
+    expect(waiting.detail).toContain("awaitingHumanReview 0");
+    expect(waiting.detail).toContain("overdueReview 0");
+    expect(waiting.detail).not.toContain("stuck");
+    expect(waiting.detail).not.toContain("submittedNotSettled");
+
+    const amber = deriveMoneyPathProbe(
+      body(
+        { waitingForMerge: 3, awaitingHumanReview: 1, overdueReview: 2 },
+        [{ code: "github_pr_review_overdue", count: 2, ids: ["418", "419"] }],
+      ),
+      base,
+    );
+    expect(amber.status).toBe("degraded");
+    expect(amber.detail).toContain("overdueReview 2 (418, 419)");
+    expect(amber.detail).not.toContain("awaiting review");
+
+    const red = deriveMoneyPathProbe(
+      body({ waitingForMerge: 0, awaitingHumanReview: 0, overdueReview: 5 }),
+      base,
+    );
+    expect(red.status).toBe("red");
+  });
+
   it("degrades the collected money-path probe when the submitted backlog repeats", async () => {
     const { probes } = await collectProductHealthProbes(
       cfg(),

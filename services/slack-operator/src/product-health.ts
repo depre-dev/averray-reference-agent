@@ -880,7 +880,7 @@ export interface ProductHealthPayload {
   auth?: { chainId?: number };
   serviceHealth?: { ok?: boolean };
   capabilityHealth?: Record<string, string>;
-  warnings?: Array<{ code?: string; severity?: string; message?: string }>;
+  warnings?: Array<{ code?: string; severity?: string; message?: string; count?: number; ids?: Array<string | number> }>;
   components?: {
     blockchain?: {
       ok?: boolean;
@@ -902,6 +902,10 @@ export interface ProductHealthPayload {
     zeroPaySettled24h?: number;
     stuck?: number;
     failed24h?: number;
+    /** Served review buckets. waitingForMerge is normal work, not a stuck job. */
+    waitingForMerge?: number;
+    awaitingHumanReview?: number;
+    overdueReview?: number;
     asOf?: string;
   };
   /** Contract addresses echoed from deployments/testnet.json (locked contract) so the
@@ -1153,6 +1157,40 @@ export function deriveLatencyProbe(h: ProductHealthFetch, thresholds: { warnMs: 
   return { name, status: "ok", detail: `/health ${ms}ms` };
 }
 
+/**
+ * The three review buckets /health already computed.
+ *
+ * Absent when the payload does not carry them — an older backend keeps the
+ * previous stuck/backlog reading. Present fields are rendered as served.
+ * waitingForMerge is never folded into stuck or into awaiting review.
+ */
+function overdueReviewIds(
+  warnings: ProductHealthPayload["warnings"],
+): string[] | null {
+  const warning = (warnings ?? []).find((item) => item.code === "github_pr_review_overdue");
+  if (!warning || !Array.isArray(warning.ids)) return null;
+  const ids = warning.ids.filter((id) => typeof id === "string" || typeof id === "number").map(String);
+  return ids.length > 0 ? ids : null;
+}
+
+function servedReviewBuckets(h: ProductHealthFetch): { overdueReview: number; detail: string } | null {
+  const s = h.body?.settlement;
+  if (!s) return null;
+  const waiting = pickNum(s.waitingForMerge);
+  const awaiting = pickNum(s.awaitingHumanReview);
+  const overdue = pickNum(s.overdueReview);
+  if (waiting === undefined && awaiting === undefined && overdue === undefined) return null;
+  const overdueReview = overdue ?? 0;
+  const ids = overdueReviewIds(h.body?.warnings) ?? [];
+  const idNote = ids.length > 0 ? ` (${ids.join(", ")})` : "";
+  const detail = [
+    `waitingForMerge ${waiting ?? 0}`,
+    `awaitingHumanReview ${awaiting ?? 0}`,
+    `overdueReview ${overdueReview}${idNote}`,
+  ].join(" · ");
+  return { overdueReview, detail };
+}
+
 /** Money-path FLOW, from /health's settlement counts (the backend's Redis record).
  *  red on too many stuck (submitted-unsettled) jobs or settlement-EXECUTION failures
  *  in 24h; degraded on any below those, on stale counts, or before the product
@@ -1212,6 +1250,25 @@ export function deriveMoneyPathProbe(
         detail: withGauges(`settlement counts stale — asOf ${formatDuration(ageMs)} ago`),
       };
     }
+  }
+  const review = servedReviewBuckets(h);
+  if (review) {
+    // The backend already split the queue. waitingForMerge is normal and must
+    // not be re-counted as stuck or as awaiting review. Tone comes only from
+    // overdueReview. Execution failures stay a separate red — they are not a
+    // review bucket.
+    if (config.maxFailed24h > 0 && failed >= config.maxFailed24h) {
+      return {
+        name,
+        status: "red",
+        detail: `${review.detail} · ${failed} settlement failures in 24h (≥ ${config.maxFailed24h})`,
+      };
+    }
+    if (config.maxStuck > 0 && review.overdueReview >= config.maxStuck) {
+      return { name, status: "red", detail: review.detail };
+    }
+    if (review.overdueReview > 0) return { name, status: "degraded", detail: review.detail };
+    return { name, status: "ok", detail: review.detail };
   }
   if (config.maxStuck > 0 && stuck >= config.maxStuck) {
     return {
@@ -2568,6 +2625,12 @@ export interface MoneyPathData {
   zeroPaySettled24h?: number | null;
   stuck?: number | null;
   failed24h?: number | null;
+  /** Served by /health. A merge wait is normal; it is not a stuck settlement. */
+  waitingForMerge?: number | null;
+  awaitingHumanReview?: number | null;
+  overdueReview?: number | null;
+  /** PR ids from warning github_pr_review_overdue, when the backend sent them. */
+  overdueReviewIds?: string[] | null;
   asOf?: number | null;
   /** Independent on-chain proof that the settled jobs actually PAID. */
   payout?: PayoutEvidence;
@@ -3169,6 +3232,10 @@ export async function collectProductHealthProbes(
             zeroPaySettled24h: settlement.zeroPaySettled24h ?? null,
             stuck: settlement.stuck ?? null,
             failed24h: settlement.failed24h ?? null,
+            waitingForMerge: settlement.waitingForMerge ?? null,
+            awaitingHumanReview: settlement.awaitingHumanReview ?? null,
+            overdueReview: settlement.overdueReview ?? null,
+            overdueReviewIds: overdueReviewIds(h.body?.warnings),
             asOf: parseHealthAsOf(settlement.asOf),
             payout,
           },

@@ -731,14 +731,62 @@ export interface FunnelView {
 
 const dash = (n: number | null | undefined): string => (typeof n === "number" ? String(n) : "—");
 
+/** Matches the probe's default PRODUCT_HEALTH_MAX_STUCK. Overdue reviews at or above this are red. */
+const OVERDUE_REVIEW_RED = 5;
+
+export interface ReviewBucketsView {
+  waitingForMerge: string;
+  awaitingHumanReview: string;
+  overdueReview: string;
+  /** Amber or red only from overdueReview. Merge waits stay ok. */
+  tone: OpsTone;
+  ids: string | null;
+}
+
+/**
+ * The three settlement buckets /health already computed.
+ *
+ * Null when this payload does not carry them. waitingForMerge is not stuck
+ * and is not awaiting review. The tone ignores both of those counts.
+ */
+export function reviewBuckets(flow: MoneyPathSnapshot | undefined): ReviewBucketsView | null {
+  if (!flow) return null;
+  const waiting = flow.waitingForMerge;
+  const awaiting = flow.awaitingHumanReview;
+  const overdue = flow.overdueReview;
+  if (typeof waiting !== "number" && typeof awaiting !== "number" && typeof overdue !== "number") return null;
+  const overdueN = typeof overdue === "number" ? overdue : 0;
+  const tone: OpsTone = overdueN >= OVERDUE_REVIEW_RED ? "red" : overdueN > 0 ? "degraded" : "ok";
+  const ids = flow.overdueReviewIds?.filter((id) => id.length > 0) ?? [];
+  return {
+    waitingForMerge: dash(waiting),
+    awaitingHumanReview: dash(awaiting),
+    overdueReview: dash(overdue),
+    tone,
+    ids: ids.length > 0 ? ids.join(", ") : null,
+  };
+}
+
 export function flowFunnel(flow: MoneyPathSnapshot | undefined): FunnelView {
+  const reviews = reviewBuckets(flow);
   const backlog = flow?.submittedNotSettled;
   const stuck = flow?.stuck;
   const failed = flow?.failed24h;
-  const backlogTone: OpsTone =
-    typeof backlog !== "number" ? "awaiting" : backlog > 0 ? "degraded" : "ok";
-  const tone: OpsTone =
-    typeof failed === "number" && failed > 0
+  // When the backend served the review buckets, submittedNotSettled is not a
+  // backlog we computed, and a merge wait inside it must not amber the panel.
+  const backlogTone: OpsTone = reviews
+    ? "ok"
+    : typeof backlog !== "number"
+      ? "awaiting"
+      : backlog > 0
+        ? "degraded"
+        : "ok";
+  const reviewTone: OpsTone = reviews?.tone ?? "ok";
+  const tone: OpsTone = reviews
+    ? typeof failed === "number" && failed > 0
+      ? "red"
+      : reviewTone
+    : typeof failed === "number" && failed > 0
       ? "red"
       : (typeof stuck === "number" && stuck > 0) || backlogTone === "degraded"
         ? "degraded"

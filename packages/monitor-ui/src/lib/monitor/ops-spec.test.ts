@@ -16,6 +16,8 @@ import {
   opsVerdict,
   askHermesRow,
   payoutView,
+  flowFunnel,
+  reviewBuckets,
   poolMeter,
   settledByHourReason,
   settledByHourView,
@@ -1061,5 +1063,42 @@ describe("deriveOpsActionItems — current facts without a second verdict", () =
       ledger,
     });
     expect(items.map((item) => item.detail)).toEqual(["1 warnings open", "2 claims stuck"]);
+  });
+});
+
+describe("review buckets — served, not recomputed", () => {
+  test("a merge wait is not stuck and does not amber the funnel", () => {
+    const flow = {
+      waitingForMerge: 8,
+      awaitingHumanReview: 0,
+      overdueReview: 0,
+      submittedNotSettled: 8,
+      stuck: 8,
+    };
+    const reviews = reviewBuckets(flow)!;
+    expect(reviews.waitingForMerge).toBe("8");
+    expect(reviews.awaitingHumanReview).toBe("0");
+    expect(reviews.overdueReview).toBe("0");
+    expect(reviews.tone).toBe("ok");
+    expect(flowFunnel(flow).tone).toBe("ok");
+    expect(flowFunnel(flow).backlogTone).toBe("ok");
+  });
+
+  test("overdueReview ambers below five and reds at five, and names served ids", () => {
+    expect(reviewBuckets({ waitingForMerge: 1, awaitingHumanReview: 2, overdueReview: 2 })!.tone).toBe("degraded");
+    const red = reviewBuckets({
+      waitingForMerge: 0,
+      awaitingHumanReview: 0,
+      overdueReview: 5,
+      overdueReviewIds: ["418", "419"],
+    })!;
+    expect(red.tone).toBe("red");
+    expect(red.ids).toBe("418, 419");
+    expect(flowFunnel({ overdueReview: 5, waitingForMerge: 9 }).tone).toBe("red");
+  });
+
+  test("an older payload with no buckets keeps the computed backlog tone", () => {
+    expect(reviewBuckets({ submittedNotSettled: 3, stuck: 1 })).toBeNull();
+    expect(flowFunnel({ submittedNotSettled: 3, stuck: 1 }).tone).toBe("degraded");
   });
 });
