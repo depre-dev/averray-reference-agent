@@ -286,3 +286,120 @@ export async function collectCredentialExpiries(input: {
 
   return out;
 }
+
+/** Warn this long before Roles Anywhere notAfter. */
+export const ROLES_ANYWHERE_WARN_MS = EXPIRY_WARN_MS;
+
+/** KMS lastSignAt older than this is stale when settlements happened in the window. */
+export const KMS_SIGN_STALE_MS = 48 * 60 * 60 * 1000;
+
+export interface HealthSignerCredentials {
+  rolesAnywhere?: { notAfter?: string | number | null };
+  badgeReceiptSigner?: { kid?: string | null; ok?: boolean | null };
+  kms?: { lastSignAt?: string | number | null };
+}
+
+export interface SignerCredentialReading {
+  status: "ok" | "degraded" | "red";
+  detail: string;
+}
+
+function epochMs(value: string | number | null | undefined): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value < 1e12 ? value * 1000 : value;
+  if (typeof value !== "string" || !value.trim()) return null;
+  if (/^\d+(\.\d+)?$/.test(value.trim())) {
+    const asNum = Number(value);
+    return asNum < 1e12 ? asNum * 1000 : asNum;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function ageLabel(ms: number): string {
+  const hours = Math.max(0, Math.round(ms / (60 * 60 * 1000)));
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
+/**
+ * /health.serviceHealth.components.credentials, as served.
+ *
+ * TLS expiry is a different artefact. This only renders the three signer
+ * facts the backend already computed. Null when the block is absent — an
+ * older /health is not a missing credential.
+ */
+export function describeSignerCredentials(input: {
+  credentials: HealthSignerCredentials | null | undefined;
+  nowMs: number;
+  /** True when settlements happened inside the KMS staleness window. */
+  settlementsInWindow: boolean;
+}): SignerCredentialReading | null {
+  const credentials = input.credentials;
+  if (!credentials) return null;
+
+  const lines: Array<{ text: string; tone: ExpiryTone }> = [];
+
+  const notAfter = epochMs(credentials.rolesAnywhere?.notAfter);
+  if (!credentials.rolesAnywhere || notAfter === null) {
+    lines.push({ text: "Roles Anywhere — notAfter not reported", tone: "degraded" });
+  } else {
+    const remaining = notAfter - input.nowMs;
+    const days = daysUntil(notAfter, input.nowMs);
+    if (remaining <= 0) {
+      lines.push({ text: `Roles Anywhere — EXPIRED ${Math.abs(days)}d ago`, tone: "red" });
+    } else if (remaining <= ROLES_ANYWHERE_WARN_MS) {
+      lines.push({ text: `Roles Anywhere — expires in ${days}d`, tone: "degraded" });
+    } else {
+      lines.push({ text: `Roles Anywhere — ${days}d left`, tone: "ok" });
+    }
+  }
+
+  const signer = credentials.badgeReceiptSigner;
+  const kid = typeof signer?.kid === "string" && signer.kid.trim() ? signer.kid.trim() : null;
+  if (!signer || signer.ok == null) {
+    lines.push({
+      text: `badge receipt signer ${kid ? `kid ${kid} ` : ""}ok not reported`,
+      tone: "degraded",
+    });
+  } else if (signer.ok === false) {
+    lines.push({
+      text: `badge receipt signer ${kid ? `kid ${kid} ` : ""}not ok`,
+      tone: "red",
+    });
+  } else {
+    lines.push({
+      text: `badge receipt signer kid ${kid ?? "not reported"} ok`,
+      tone: kid ? "ok" : "degraded",
+    });
+  }
+
+  const lastSignAt = epochMs(credentials.kms?.lastSignAt);
+  if (lastSignAt === null) {
+    lines.push({
+      text: input.settlementsInWindow
+        ? "kms lastSignAt not reported — settlements happened in the last 48h"
+        : "kms lastSignAt not reported",
+      tone: input.settlementsInWindow ? "degraded" : "ok",
+    });
+  } else {
+    const age = input.nowMs - lastSignAt;
+    const stale = age > KMS_SIGN_STALE_MS;
+    if (stale && input.settlementsInWindow) {
+      lines.push({
+        text: `kms last sign ${ageLabel(age)} — settlements happened in that window`,
+        tone: "degraded",
+      });
+    } else if (stale) {
+      lines.push({ text: `kms last sign ${ageLabel(age)} — no settlements in that window`, tone: "ok" });
+    } else {
+      lines.push({ text: `kms last sign ${ageLabel(age)}`, tone: "ok" });
+    }
+  }
+
+  const rank: Record<ExpiryTone, number> = { ok: 0, awaiting: 1, degraded: 2, red: 3 };
+  const worst = lines.reduce((acc, line) => (rank[line.tone] > rank[acc] ? line.tone : acc), "ok" as ExpiryTone);
+  const status = worst === "red" ? "red" : worst === "ok" ? "ok" : "degraded";
+  const lead = lines.filter((line) => line.tone !== "ok");
+  const rest = lines.filter((line) => line.tone === "ok");
+  return { status, detail: [...lead, ...rest].map((line) => line.text).join(" · ") };
+}

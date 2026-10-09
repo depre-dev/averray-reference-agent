@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   credentialExpiryProbe,
   daysUntil,
+  describeSignerCredentials,
   expiryLine,
   jwtExpiryMs,
   type CredentialExpiry,
@@ -242,5 +243,65 @@ describe("the verdict names its kinds — a count is not coverage", () => {
       nowMs: NOW,
     });
     expect(p.detail).toBe("2 tokens, soonest expiry 20d");
+  });
+});
+
+describe("signer credentials from /health", () => {
+  const fresh = {
+    rolesAnywhere: { notAfter: new Date(NOW + 40 * DAY).toISOString() },
+    badgeReceiptSigner: { kid: "badge-2026", ok: true },
+    kms: { lastSignAt: new Date(NOW - 2 * 60 * 60 * 1000).toISOString() },
+  };
+
+  test("renders kid, notAfter, and a recent last sign", () => {
+    const reading = describeSignerCredentials({ credentials: fresh, nowMs: NOW, settlementsInWindow: true })!;
+    expect(reading.status).toBe("ok");
+    expect(reading.detail).toContain("Roles Anywhere — 40d left");
+    expect(reading.detail).toContain("badge receipt signer kid badge-2026 ok");
+    expect(reading.detail).toContain("kms last sign 2h ago");
+  });
+
+  test("warns 14 days before Roles Anywhere expiry", () => {
+    const reading = describeSignerCredentials({
+      credentials: { ...fresh, rolesAnywhere: { notAfter: new Date(NOW + 10 * DAY).toISOString() } },
+      nowMs: NOW,
+      settlementsInWindow: false,
+    })!;
+    expect(reading.status).toBe("degraded");
+    expect(reading.detail).toContain("Roles Anywhere — expires in 10d");
+  });
+
+  test("warns when kms lastSignAt is older than 48h and settlements happened", () => {
+    const reading = describeSignerCredentials({
+      credentials: { ...fresh, kms: { lastSignAt: new Date(NOW - 50 * 60 * 60 * 1000).toISOString() } },
+      nowMs: NOW,
+      settlementsInWindow: true,
+    })!;
+    expect(reading.status).toBe("degraded");
+    expect(reading.detail).toContain("settlements happened in that window");
+  });
+
+  test("does not warn on a stale kms sign when nothing settled in the window", () => {
+    const reading = describeSignerCredentials({
+      credentials: { ...fresh, kms: { lastSignAt: new Date(NOW - 50 * 60 * 60 * 1000).toISOString() } },
+      nowMs: NOW,
+      settlementsInWindow: false,
+    })!;
+    expect(reading.status).toBe("ok");
+    expect(reading.detail).toContain("no settlements in that window");
+  });
+
+  test("reds a badge receipt signer that is not ok", () => {
+    const reading = describeSignerCredentials({
+      credentials: { ...fresh, badgeReceiptSigner: { kid: "badge-2026", ok: false } },
+      nowMs: NOW,
+      settlementsInWindow: false,
+    })!;
+    expect(reading.status).toBe("red");
+    expect(reading.detail).toContain("badge receipt signer kid badge-2026 not ok");
+  });
+
+  test("an absent credentials block is not a fault", () => {
+    expect(describeSignerCredentials({ credentials: undefined, nowMs: NOW, settlementsInWindow: true })).toBeNull();
   });
 });

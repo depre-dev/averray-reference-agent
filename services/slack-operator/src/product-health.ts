@@ -42,7 +42,12 @@ import { burnBasisLabel, isBurnUnmeasurable, type MeasuredBurn } from "./gas-bur
 import { readBankFeed } from "./bank-feed-fetch.js";
 import type { ArrivalsBlock } from "./arrivals-feed.js";
 import type { DepositPoolBlock } from "./deposit-pool-feed.js";
-import { collectCredentialExpiries, credentialExpiryProbe, tlsCertReader } from "./credential-expiry.js";
+import {
+  collectCredentialExpiries,
+  credentialExpiryProbe,
+  describeSignerCredentials,
+  tlsCertReader,
+} from "./credential-expiry.js";
 import { bankFeedIsDisabled } from "./bank-feed.js";
 import { bankLaneView, BANK_FEED_DISABLED, type BankLaneView } from "./bank-lane.js";
 import { createCrossCheckCache, type CrossCheckCache } from "./payout-crosscheck-cache.js";
@@ -878,7 +883,16 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
 export interface ProductHealthPayload {
   status?: string;
   auth?: { chainId?: number };
-  serviceHealth?: { ok?: boolean };
+  serviceHealth?: {
+    ok?: boolean;
+    components?: {
+      credentials?: {
+        rolesAnywhere?: { notAfter?: string | number | null };
+        badgeReceiptSigner?: { kid?: string | null; ok?: boolean | null };
+        kms?: { lastSignAt?: string | number | null };
+      };
+    };
+  };
   capabilityHealth?: Record<string, string>;
   warnings?: Array<{ code?: string; severity?: string; message?: string }>;
   components?: {
@@ -2857,6 +2871,23 @@ export async function chainBlockAge(input: {
   }
 }
 
+function mergeCredentialProbe(
+  tls: { status: "ok" | "degraded" | "red"; detail: string } | null,
+  signer: { status: "ok" | "degraded" | "red"; detail: string } | null,
+): ProbeResult | null {
+  if (!tls && !signer) return null;
+  const rank = { ok: 0, degraded: 1, red: 2 } as const;
+  const status = !tls
+    ? signer!.status
+    : !signer
+      ? tls.status
+      : rank[tls.status] >= rank[signer.status]
+        ? tls.status
+        : signer.status;
+  const detail = [signer?.detail, tls?.detail].filter(Boolean).join(" · ");
+  return { name: "credential_expiry", status, detail };
+}
+
 export async function collectProductHealthProbes(
   config: ProductHealthConfig,
   fetchImpl: typeof fetch = fetch,
@@ -3077,7 +3108,18 @@ export async function collectProductHealthProbes(
           jwtEnvKeys,
           readCert: tlsCertReader(),
         })
-      : null; // nothing configured ⇒ no probe at all, not a probe with nothing to say
+      : null; // nothing configured ⇒ no TLS probe, not a probe with nothing to say
+  const settled24h = pickNum(h.body?.settlement?.settled24h) ?? 0;
+  const paidSettled24h = pickNum(h.body?.settlement?.paidSettled24h) ?? 0;
+  const signerCredentials = describeSignerCredentials({
+    credentials: h.body?.serviceHealth?.components?.credentials,
+    nowMs: chainCtx.nowMs,
+    settlementsInWindow: settled24h > 0 || paidSettled24h > 0,
+  });
+  const tlsCredentialProbe = credentialExpiries
+    ? credentialExpiryProbe({ credentials: credentialExpiries, nowMs: chainCtx.nowMs })
+    : null;
+  const credentialProbe = mergeCredentialProbe(tlsCredentialProbe, signerCredentials);
 
   const bankRead = await readBankFeed({ url: config.bankFeedUrl, fetchImpl });
   const bank: BankBlock | undefined = bankRead.feed
@@ -3200,14 +3242,7 @@ export async function collectProductHealthProbes(
       // A credential that expires on a Thursday is an outage scheduled in
       // advance, and no other probe would see it coming: chain, money, API and
       // self-freshness all read green right up to the moment it lapses.
-      ...(credentialExpiries
-        ? [
-            {
-              name: "credential_expiry",
-              ...credentialExpiryProbe({ credentials: credentialExpiries, nowMs: chainCtx.nowMs }),
-            },
-          ]
-        : []),
+      ...(credentialProbe ? [credentialProbe] : []),
       deriveMoneyPathProbe(h, {
         maxStuck: config.maxStuck,
         maxFailed24h: config.maxFailed24h,
