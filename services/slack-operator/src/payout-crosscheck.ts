@@ -53,7 +53,12 @@ export type CrossCheckStatus =
   /** No second endpoint is configured. Nobody asked for this; not a fault. */
   | "not-configured"
   /** Configured, but no comparison has completed yet. */
-  | "never-run";
+  | "never-run"
+  /**
+   * Both sides are the same host. Counts may match and still prove nothing:
+   * one provider agreeing with itself is not a cross-check.
+   */
+  | "not-independent";
 
 export interface CrossCheckView {
   status: CrossCheckStatus;
@@ -86,6 +91,10 @@ export function decideCrossCheck(input: {
   primaryReason?: string | null;
   /** The pinned range both endpoints were asked about. */
   range?: { fromBlock: number; toBlock: number } | null;
+  /** The URL that actually answered for the primary side, when known. */
+  primaryUrl?: string | null;
+  /** The configured second provider URL. */
+  secondaryUrl?: string | null;
   lastAgreedAtMs: number | null;
   nowMs: number;
   overdueAfterMs?: number;
@@ -129,6 +138,17 @@ export function decideCrossCheck(input: {
       detail: `cross-check could not run — ${why}`,
       overdue: agedOut,
       lastAgreedAtMs: input.lastAgreedAtMs,
+    };
+  }
+
+  const sharedHost = sameProviderHost(input.primaryUrl, input.secondaryUrl);
+  if (sharedHost) {
+    // Same host, two URLs. Do not record an agreement and do not paint a tick.
+    return {
+      status: "not-independent",
+      detail: `not independent — cross-check source equals the primary (${sharedHost})`,
+      overdue: false,
+      lastAgreedAtMs: null,
     };
   }
 
@@ -200,6 +220,56 @@ export function pinnedCompareRange(input: {
  * one onto a screen (or into a screenshot, or a Buzz message) is a credential
  * leak. The host is the whole of what the provenance line needs to say.
  */
+/**
+ * Hostname only, lowercased. Scheme, port, path and a trailing slash do not
+ * make two URLs different providers.
+ */
+export function normHost(url: string | null | undefined): string | null {
+  const raw = (url ?? "").trim();
+  if (!raw) return null;
+  try {
+    return new URL(raw).hostname.toLowerCase() || null;
+  } catch {
+    return null;
+  }
+}
+
+/** The shared hostname when both URLs name the same provider, else null. */
+export function sameProviderHost(
+  primaryUrl: string | null | undefined,
+  secondaryUrl: string | null | undefined,
+): string | null {
+  const primary = normHost(primaryUrl);
+  const secondary = normHost(secondaryUrl);
+  if (!primary || !secondary || primary !== secondary) return null;
+  return primary;
+}
+
+/**
+ * Config-time independence. The cross-check is not a second provider when its
+ * host is any entry in the ordered RPC list, not only the one that answered.
+ */
+export function crossCheckEndpointConflict(
+  endpoints: readonly string[],
+  crossCheckUrl: string | null | undefined,
+): string | null {
+  const cross = normHost(crossCheckUrl);
+  if (!cross) return null;
+  for (const url of endpoints) {
+    if (normHost(url) === cross) return cross;
+  }
+  return null;
+}
+
+export function notIndependentView(host: string): CrossCheckView {
+  return {
+    status: "not-independent",
+    detail: `not independent — cross-check source equals the primary (${host})`,
+    overdue: false,
+    lastAgreedAtMs: null,
+  };
+}
+
 export function endpointHost(url: string | null | undefined): string | null {
   const raw = (url ?? "").trim();
   if (!raw) return null;

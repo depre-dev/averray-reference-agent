@@ -261,10 +261,10 @@ GIT_SHA="$GIT_SHA" GIT_DIRTY="$GIT_DIRTY" "${COMPOSE[@]}" up -d --build "$SERVIC
 if docker network inspect "$BANK_FEED_NETWORK" >/dev/null 2>&1; then
   ATTACHED_CID="$(docker ps -q \
     --filter "label=com.docker.compose.project=${PROJECT}" \
-    --filter "label=com.docker.compose.service=${SERVICE}" | head -n 1 || true)"
+    --filter "label=com.docker.compose.service=slack-operator" | head -n 1 || true)"
   if [ -n "${ATTACHED_CID}" ]; then
     if ! docker inspect -f '{{json .NetworkSettings.Networks}}' "$ATTACHED_CID" | grep -q "\"${BANK_FEED_NETWORK}\""; then
-      echo "WARNING: ${SERVICE} is not attached to ${BANK_FEED_NETWORK} while that network exists." >&2
+      echo "WARNING: slack-operator is not attached to ${BANK_FEED_NETWORK} while that network exists." >&2
       echo "         Redeploy with ops/deploy-monitor.sh so ops/compose.bank-feed.yml is included." >&2
     fi
   fi

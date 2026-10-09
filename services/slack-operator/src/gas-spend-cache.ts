@@ -59,6 +59,19 @@ export interface GasUnreadable {
   at: number;
 }
 
+/** The feature flag is off. Neutral, not a failed read. */
+export interface GasDisabled {
+  disabled: true;
+  reason: string;
+}
+
+/** A refresh is in flight and no snapshot exists yet. Not a failed read. */
+export interface GasInProgress {
+  inProgress: true;
+  reason: string;
+  at: number;
+}
+
 export function isGasUnreadable(v: GasSpendSnapshot | GasUnreadable | null): v is GasUnreadable {
   return v !== null && (v as GasUnreadable).unreadable === true;
 }
@@ -68,7 +81,7 @@ export interface GasSpendCache {
    * The current snapshot, or — when no read has ever succeeded — the reason
    * why. Null only before the first attempt has finished.
    */
-  read(nowMs: number): GasSpendSnapshot | GasUnreadable | null;
+  read(nowMs: number): GasSpendSnapshot | GasUnreadable | GasInProgress | null;
   /**
    * Refresh if the snapshot has aged out. Returns immediately; the work happens
    * in the background. Safe to call every heartbeat.
@@ -109,7 +122,7 @@ export function createGasSpendCache(deps: {
       // A read that is still in flight is not the same as a feature that was
       // never started. Null here used to survive a hung RPC forever.
       if (running) {
-        return { unreadable: true, reason: "gas read in progress — no figure yet", at: startedAt ?? nowMs };
+        return { inProgress: true, reason: "gas read in progress — no figure yet", at: startedAt ?? nowMs };
       }
       return null;
     },

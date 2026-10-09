@@ -239,7 +239,7 @@ export interface PayoutEvidence {
 
 /** Does a second provider see the same payouts? */
 export interface CrossCheckView {
-  status: "agree" | "disagree" | "unavailable" | "not-configured" | "never-run";
+  status: "agree" | "disagree" | "unavailable" | "not-configured" | "never-run" | "not-independent";
   /** Names both endpoints and both counts when they differ. */
   detail: string;
   /** Machine-readable attempt failure; statuses remain intentionally unchanged. */
@@ -705,7 +705,10 @@ export interface ProductHealth {
    * not-yet-measured. Read on its own cadence (a pass is ~174 RPC calls), so it
    * carries its own age.
    */
-  gas?: GasSpendView;
+  gas?: GasSpendView
+    | { unreadable: true; reason: string }
+    | { inProgress: true; reason: string }
+    | { disabled: true; reason: string };
   /**
    * External-job funnel counts, structured — the numbers behind the probe's
    * prose. `rejected_window_running` is the one that matters: while it is

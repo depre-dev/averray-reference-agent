@@ -29,7 +29,7 @@ describe("not wired is not broken", () => {
       }) as never,
     });
     expect(r.reason).toBe(
-      "bank feed network not attached — redeploy the monitor with ops/deploy-monitor.sh",
+      "bank feed host does not resolve — monitor not on agent-mainnet-internal, or agent-mainnet-backend is down",
     );
     expect(r.reason).not.toContain("fetch failed");
   });

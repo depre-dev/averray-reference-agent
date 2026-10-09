@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   evaluateProductHealth,
@@ -22,6 +22,8 @@ import {
   resolvePayoutLookback,
   withFeeSplit,
   collectProductHealthProbes,
+  __resetGasAttributionForTests,
+  readGasAttributionCache,
   chainBlockAge,
   decideProductHealthAlert,
   runProductHealthOnce,
@@ -205,6 +207,93 @@ const cfg = (over: Partial<ProductHealthConfig> = {}): ProductHealthConfig => ({
   minTreasuryReserve: 5,
   minAac: 0,
   ...over,
+});
+
+describe("gas attribution notes", () => {
+  const rpc = (async () => ({ ok: true, status: 200, json: async () => ({ result: "0x10" }) })) as typeof fetch;
+
+  it("says the feature is off, rather than omitting the line", async () => {
+    __resetGasAttributionForTests();
+    const reading = await readGasAttributionCache({
+      config: cfg({ gasAttributionEnabled: false }),
+      settledCount: null,
+      fetchImpl: rpc,
+      nowMs: 1,
+    });
+    expect(reading).toEqual({
+      disabled: true,
+      reason: "gas attribution off (PRODUCT_HEALTH_GAS_ATTRIBUTION_ENABLED)",
+    });
+  });
+
+  it("names not configured when the read has never succeeded", async () => {
+    __resetGasAttributionForTests();
+    const reading = await readGasAttributionCache({
+      config: cfg({ gasAttributionEnabled: true, rpcUrl: undefined, rpcEndpoints: [], signerAddress: undefined }),
+      settledCount: null,
+      fetchImpl: rpc,
+      nowMs: 1,
+    });
+    expect(reading).toMatchObject({
+      unreadable: true,
+      reason: expect.stringContaining("gas attribution not configured"),
+    });
+  });
+
+  it("keeps the last snapshot, with its age, when /health drops the contracts", async () => {
+    __resetGasAttributionForTests();
+    const fetchImpl = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const method = rpcMethod(init ?? {});
+      const result = method === "eth_getLogs" ? [] : "0x10";
+      return { ok: true, status: 200, json: async () => ({ result }) } as unknown as Response;
+    }) as typeof fetch;
+    const config = cfg({
+      gasAttributionEnabled: true,
+      rpcEndpoints: ["https://eth-rpc.polkadot.io/"],
+      payoutLookbackBlocks: 100,
+      gasRefreshMs: 60_000,
+    });
+    await readGasAttributionCache({
+      config, settledCount: 1, escrowCore: "0xesc", agentAccountCore: "0xaac", fetchImpl, nowMs: 1_000,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const snap = await readGasAttributionCache({
+      config, settledCount: 1, escrowCore: "0xesc", agentAccountCore: "0xaac", fetchImpl, nowMs: 1_000,
+    });
+    expect(snap).toHaveProperty("totalDot");
+    const kept = await readGasAttributionCache({
+      config, settledCount: 1, fetchImpl, nowMs: 5_000,
+    });
+    expect(kept).toMatchObject({ ageMs: 4_000 });
+    expect(kept).not.toHaveProperty("unreadable");
+  });
+});
+
+describe("cross-check cache rebuilds when configuration appears", () => {
+  it("leaves never-run behind once a second endpoint is configured", async () => {
+    __resetGasAttributionForTests();
+    const healthBody = {
+      ...HEALTHY_BODY,
+      addresses: { agentAccountCore: "0xaac" },
+      settlement: { settled24h: 1, stuck: 0, failed24h: 0, asOf: "2026-07-05T00:00:00.000Z" },
+    };
+    const first = await collectProductHealthProbes(
+      cfg({ payoutEvidenceEnabled: true, payoutCrossCheckRpcUrl: "" }),
+      combinedFetch({ healthBody }),
+      { nowMs: 1_000 },
+    );
+    expect(first.snapshot.flow?.payout?.crossCheck?.status).toBe("not-configured");
+    const second = await collectProductHealthProbes(
+      cfg({
+        payoutEvidenceEnabled: true,
+        payoutCrossCheckRpcUrl: "https://other.example/rpc",
+        rpcEndpoints: ["https://primary.example/rpc"],
+      }),
+      combinedFetch({ healthBody }),
+      { nowMs: 2_000 },
+    );
+    expect(second.snapshot.flow?.payout?.crossCheck?.status).toBe("never-run");
+  });
 });
 
 describe("evaluateProductHealth", () => {
@@ -698,6 +787,37 @@ describe("probeSignerLiquidity (direct RPC)", () => {
     const r = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: "0xabc", rewardBankLiquid: undefined, ...floors, fetchImpl: balances("0xDE0B6B3A7640000", "0x989680") });
     expect(r.status).toBe("degraded");
     expect(r.detail).toContain("reward bank unreadable");
+  });
+
+  it("a never-resolving host moves to the next host within 8s", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = (async (url: RequestInfo | URL, init?: RequestInit) => {
+        if (String(url).includes("hung.example")) {
+          return await new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              reject(Object.assign(new Error("The operation was aborted"), { name: "AbortError", code: "ABORT_ERR" }));
+            });
+          });
+        }
+        const method = rpcMethod(init ?? {});
+        const result = method === "eth_getBalance" ? "0xDE0B6B3A7640000" : "0x989680";
+        return { ok: true, status: 200, json: async () => ({ result }) } as unknown as Response;
+      }) as unknown as typeof fetch;
+      const pending = probeSignerLiquidity({
+        rpcEndpoints: ["https://hung.example/rpc", "https://eth-rpc.polkadot.io/"],
+        signerAddress: "0xabc",
+        rewardBankLiquid: 10,
+        ...floors,
+        fetchImpl,
+      });
+      await vi.advanceTimersByTimeAsync(8_000);
+      const r = await pending;
+      expect(r.rpcOk).toBe(true);
+      expect(r.detail).toContain("via eth-rpc.polkadot.io");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a failing primary yields the balance from the next listed host, and names that host", async () => {

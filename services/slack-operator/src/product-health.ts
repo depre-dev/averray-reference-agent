@@ -37,7 +37,13 @@ import { readGasSpend } from "./gas-spend-read.js";
 import { readJobLifecycle } from "./job-lifecycle-read.js";
 import { summarizeLifecycle, type LifecycleSummary } from "./job-lifecycle.js";
 import { bucketPayoutsByHour, isHistogramUnavailable, type PayoutHistogram } from "./payout-histogram.js";
-import { endpointHost, pinnedCompareRange, type CrossCheckView } from "./payout-crosscheck.js";
+import {
+  crossCheckEndpointConflict,
+  endpointHost,
+  notIndependentView,
+  pinnedCompareRange,
+  type CrossCheckView,
+} from "./payout-crosscheck.js";
 import { burnBasisLabel, isBurnUnmeasurable, type MeasuredBurn } from "./gas-burn-rate.js";
 import { readBankFeed } from "./bank-feed-fetch.js";
 import type { ArrivalsBlock } from "./arrivals-feed.js";
@@ -46,7 +52,14 @@ import { collectCredentialExpiries, credentialExpiryProbe, tlsCertReader } from 
 import { bankFeedIsDisabled } from "./bank-feed.js";
 import { bankLaneView, BANK_FEED_DISABLED, type BankLaneView } from "./bank-lane.js";
 import { createCrossCheckCache, type CrossCheckCache } from "./payout-crosscheck-cache.js";
-import { createGasSpendCache, type GasSpendCache, type GasSpendSnapshot, type GasUnreadable } from "./gas-spend-cache.js";
+import {
+  createGasSpendCache,
+  type GasDisabled,
+  type GasInProgress,
+  type GasSpendCache,
+  type GasSpendSnapshot,
+  type GasUnreadable,
+} from "./gas-spend-cache.js";
 import {
   alertProvenance,
   decideDepositPoolAlerts,
@@ -68,7 +81,6 @@ import {
   type TransportFailureRun,
 } from "./probe-transport.js";
 import { fetchWithTimeout, orderedRpcEndpoints, readChainWithFailover } from "./rpc-endpoints.js";
-import { observeBankNetworkAttachment } from "./bank-network.js";
 import { isAwaitingProbe } from "@avg/schemas";
 
 export type ProbeStatus = "ok" | "degraded" | "red";
@@ -1990,7 +2002,7 @@ export async function readGasAttributionCache(input: {
   agentAccountCore?: string;
   fetchImpl: typeof fetch;
   nowMs: number;
-}): Promise<GasSpendSnapshot | GasUnreadable | null> {
+}): Promise<GasSpendSnapshot | GasUnreadable | GasInProgress | GasDisabled | null> {
   return gasAttribution(input);
 }
 
@@ -2018,9 +2030,11 @@ function gasAttribution(input: {
   agentAccountCore?: string;
   fetchImpl: typeof fetch;
   nowMs: number;
-}): GasSpendSnapshot | GasUnreadable | null {
+}): GasSpendSnapshot | GasUnreadable | GasInProgress | GasDisabled | null {
   const { config } = input;
-  if (!config.gasAttributionEnabled) return null;
+  if (!config.gasAttributionEnabled) {
+    return { disabled: true, reason: "gas attribution off (PRODUCT_HEALTH_GAS_ATTRIBUTION_ENABLED)" };
+  }
   const contracts = [input.escrowCore, input.agentAccountCore].filter(
     (a): a is string => typeof a === "string" && a.length > 0,
   );
@@ -2030,6 +2044,8 @@ function gasAttribution(input: {
   if (!config.signerAddress) missing.push("no signer address");
   if (contracts.length === 0) missing.push("no contract addresses from /health");
   if (missing.length > 0) {
+    const cached = gasCache?.read(input.nowMs);
+    if (cached && "totalDot" in cached) return cached;
     return {
       unreadable: true,
       reason: `gas attribution not configured — ${missing.join(", ")}`,
@@ -2109,9 +2125,12 @@ function payoutCrossCheck(input: {
     ...(input.chainId !== undefined ? { chainId: input.chainId } : {}),
     fetchImpl: input.fetchImpl,
   };
+  const endpointsNow = rpcEndpointsOf(config);
   const configured = Boolean(
-    config.payoutCrossCheckRpcUrl && rpcEndpointsOf(config).length > 0 && input.sourceAddress && config.usdcAddress,
+    config.payoutCrossCheckRpcUrl && endpointsNow.length > 0 && input.sourceAddress && config.usdcAddress,
   );
+  const conflict = crossCheckEndpointConflict(endpointsNow, config.payoutCrossCheckRpcUrl);
+  if (configured && conflict) return notIndependentView(conflict);
   if (!crossCheckCache || crossCheckConfigured !== configured) {
     crossCheckConfigured = configured;
     crossCheckCache = createCrossCheckCache({
@@ -2158,6 +2177,8 @@ function payoutCrossCheck(input: {
             ? { host: primaryRead.attempt.host, count: primaryRead.attempt.value.count }
             : null,
           secondary: { host: endpointHost(secondUrl) ?? "secondary", count: secondary.count },
+          ...(primaryRead.ok ? { primaryUrl: primaryRead.attempt.url } : {}),
+          secondaryUrl: secondUrl,
           ...(primaryRead.ok ? {} : { primaryReason: primaryRead.detail }),
           ...(secondary.reason ? { secondaryReason: secondary.reason } : {}),
           range,
@@ -2295,7 +2316,12 @@ export async function probeSignerLiquidity(input: {
   if (listed.length > 0) {
     let last: ProbeResult & { pools?: SolvencyPoolData[]; rpcOk?: boolean } | undefined;
     for (const url of listed) {
-      const result = await probeSignerLiquidity({ ...input, rpcUrl: url, rpcEndpoints: undefined });
+      const result = await probeSignerLiquidity({
+        ...input,
+        rpcUrl: url,
+        rpcEndpoints: undefined,
+        fetchImpl: fetchWithTimeout(input.fetchImpl),
+      });
       if (result.rpcOk !== false) return result;
       last = result;
     }
@@ -2881,7 +2907,7 @@ export interface ProductHealthSnapshotBlocks {
    * measurement of actual consumption on the board and fell back to fitting a
    * slope through balances. Declared now because the projection reads it.
    */
-  gas?: GasSpendSnapshot | GasUnreadable;
+  gas?: GasSpendSnapshot | GasUnreadable | GasInProgress | GasDisabled;
   /**
    * The Bank lane, or the reason it cannot be shown.
    *
@@ -3179,10 +3205,7 @@ export async function collectProductHealthProbes(
         })
       : null; // nothing configured ⇒ no probe at all, not a probe with nothing to say
 
-  const [bankRead, bankNetwork] = await Promise.all([
-    readBankFeed({ url: config.bankFeedUrl, fetchImpl }),
-    observeBankNetworkAttachment(),
-  ]);
+  const bankRead = await readBankFeed({ url: config.bankFeedUrl, fetchImpl });
   const bank: BankBlock | undefined = bankRead.feed
     ? // A switched-off feed is a VALID payload full of read errors, shaped
       // exactly like four broken instruments. Rendered as a lane it lit BANK
@@ -3310,9 +3333,6 @@ export async function collectProductHealthProbes(
               ...credentialExpiryProbe({ credentials: credentialExpiries, nowMs: chainCtx.nowMs }),
             },
           ]
-        : []),
-      ...(bankNetwork.detail
-        ? [{ name: "bank_network", status: "degraded" as const, detail: bankNetwork.detail }]
         : []),
       deriveMoneyPathProbe(h, {
         maxStuck: config.maxStuck,

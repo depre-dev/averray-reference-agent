@@ -3892,7 +3892,7 @@ function startOperatorRoutines() {
         // refusal falls through to the slope with the basis said out loud.
         const gasBurn = (() => {
           const g = productHealthSnapshotBlocks?.gas;
-          if (!g || "unreadable" in g) return undefined;
+          if (!g || "unreadable" in g || "disabled" in g || "inProgress" in g) return undefined;
           const rate = measuredGasBurn({
             totalDot: g.totalDot,
             blocksScanned: g.blocksScanned,

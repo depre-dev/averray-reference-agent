@@ -21,7 +21,8 @@
 // and the board stays quiet. Only a CONFIGURED feed that fails is a problem
 // worth a line on screen.
 
-import { BANK_FEED_NETWORK_DETACHED } from "./bank-network.js";
+export const BANK_FEED_DNS =
+  "bank feed host does not resolve — monitor not on agent-mainnet-internal, or agent-mainnet-backend is down";
 import type {
   BankFeed,
   BankRequest,
@@ -60,7 +61,7 @@ export async function readBankFeed(input: {
     // this container is not on that network — a redeploy attaches it. Any
     // other transport fault still names the cause code and the host.
     if (classifyTransportFailure(error).kind === "dns") {
-      return { reason: BANK_FEED_NETWORK_DETACHED };
+      return { reason: BANK_FEED_DNS };
     }
     return { reason: `bank feed unreachable — ${describeFeedError(error, input.url)}` };
   } finally {

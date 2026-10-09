@@ -267,6 +267,17 @@ describe("crossCheckLine — a tick must never age silently", () => {
     expect(line.tone).toBe("awaiting");
   });
 
+  test("the same host is not a tick", () => {
+    const line = crossCheckLine(at({
+      status: "not-independent",
+      detail: "not independent — cross-check source equals the primary (eth-rpc.polkadot.io)",
+      lastAgreedAtMs: null,
+    }), NOW)!;
+    expect(line.text).not.toContain("✓");
+    expect(line.text).toContain("not independent");
+    expect(line.tone).toBe("degraded");
+  });
+
   test("not configured is stated, not alarmed", () => {
     // A check nobody enabled is not a check that broke.
     const line = crossCheckLine(at({ status: "not-configured", detail: "no second endpoint configured" }), NOW)!;

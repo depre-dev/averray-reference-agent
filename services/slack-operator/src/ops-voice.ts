@@ -23,7 +23,6 @@ export const PROBE_LABELS: Record<string, string> = {
   money_path: "Money path",
   credential_expiry: "Credentials",
   external_funnel: "External funnel",
-  bank_network: "Bank network",
 };
 
 /** Human name for a probe; an unknown name degrades to readable, not to enum. */

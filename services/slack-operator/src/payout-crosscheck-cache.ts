@@ -44,6 +44,8 @@ export interface CrossCheckRun {
   secondary: EndpointReading | null;
   secondaryReason?: string | null;
   primaryReason?: string | null;
+  primaryUrl?: string | null;
+  secondaryUrl?: string | null;
   range?: { fromBlock: number; toBlock: number } | null;
 }
 
@@ -111,11 +113,17 @@ export function createCrossCheckCache(deps: {
             secondary: run.secondary,
             ...(run.secondaryReason ? { secondaryReason: run.secondaryReason } : {}),
             ...(run.primaryReason ? { primaryReason: run.primaryReason } : {}),
+            ...(run.primaryUrl ? { primaryUrl: run.primaryUrl } : {}),
+            ...(run.secondaryUrl ? { secondaryUrl: run.secondaryUrl } : {}),
             ...(run.range ? { range: run.range } : {}),
             lastAgreedAtMs,
             nowMs,
           });
-          if (next.status === "agree" || next.status === "disagree") {
+          if (next.status === "not-independent") {
+            verdict = next;
+            lastSuccessAtMs = nowMs;
+            consecutiveFailures = 0;
+          } else if (next.status === "agree" || next.status === "disagree") {
             verdict = next;
             lastSuccessAtMs = nowMs;
             consecutiveFailures = 0;
