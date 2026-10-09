@@ -37,7 +37,13 @@ import { readGasSpend } from "./gas-spend-read.js";
 import { readJobLifecycle } from "./job-lifecycle-read.js";
 import { summarizeLifecycle, type LifecycleSummary } from "./job-lifecycle.js";
 import { bucketPayoutsByHour, isHistogramUnavailable, type PayoutHistogram } from "./payout-histogram.js";
-import { endpointHost, pinnedCompareRange, type CrossCheckView } from "./payout-crosscheck.js";
+import {
+  crossCheckEndpointConflict,
+  endpointHost,
+  notIndependentView,
+  pinnedCompareRange,
+  type CrossCheckView,
+} from "./payout-crosscheck.js";
 import { burnBasisLabel, isBurnUnmeasurable, type MeasuredBurn } from "./gas-burn-rate.js";
 import { readBankFeed } from "./bank-feed-fetch.js";
 import type { ArrivalsBlock } from "./arrivals-feed.js";
@@ -53,7 +59,14 @@ import { bankFeedIsDisabled } from "./bank-feed.js";
 import { bankLaneView, BANK_FEED_DISABLED, type BankLaneView } from "./bank-lane.js";
 import { githubAuthorSurface, type GithubAuthorsSurface } from "./github-authors.js";
 import { createCrossCheckCache, type CrossCheckCache } from "./payout-crosscheck-cache.js";
-import { createGasSpendCache, type GasSpendCache, type GasSpendSnapshot, type GasUnreadable } from "./gas-spend-cache.js";
+import {
+  createGasSpendCache,
+  type GasDisabled,
+  type GasInProgress,
+  type GasSpendCache,
+  type GasSpendSnapshot,
+  type GasUnreadable,
+} from "./gas-spend-cache.js";
 import {
   alertProvenance,
   decideDepositPoolAlerts,
@@ -66,6 +79,7 @@ import { decideSelfFreshness, fetchSelfCompare } from "./self-freshness.js";
 import type { SelfFreshness } from "./self-freshness.js";
 import {
   classifyTransportFailure,
+  describeFeedError,
   describeTransportFailure,
   trackTransportFailure,
   transportFailureIsPageWorthy,
@@ -73,6 +87,7 @@ import {
   type TransportFailure,
   type TransportFailureRun,
 } from "./probe-transport.js";
+import { fetchWithTimeout, orderedRpcEndpoints, readChainWithFailover } from "./rpc-endpoints.js";
 import { isAwaitingProbe } from "@avg/schemas";
 
 export type ProbeStatus = "ok" | "degraded" | "red";
@@ -679,6 +694,10 @@ export interface ProductHealthConfig {
   /** Direct eth-RPC for the signer-balance probe (PRODUCT_HEALTH_RPC_URL, else the
    *  per-network default). Chain HEIGHT no longer needs it — that reads /health. */
   rpcUrl?: string;
+  /** PRODUCT_HEALTH_RPC_BACKUPS, in order, after the primary. */
+  rpcBackups?: string[];
+  /** Primary then backups, deduped. Chain reads walk this list and name the host that answered. */
+  rpcEndpoints?: string[];
   /** chain_height freshness window (seconds): block height static for longer than
    *  this ⇒ "not advancing". 0 disables. Env: PRODUCT_HEALTH_CHAIN_MAX_STALE_SECONDS. */
   chainMaxStaleSeconds: number;
@@ -813,10 +832,14 @@ export function chainHaltStatus(chainId: number | undefined, override: string | 
 
 export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): ProductHealthConfig {
   const base = env.AVERRAY_API_BASE_URL;
+  const rpcUrl = env.PRODUCT_HEALTH_RPC_URL || networkEthRpc(env.WALLET_NETWORK);
+  const rpcBackups = (env.PRODUCT_HEALTH_RPC_BACKUPS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   return {
     apiBaseUrl: base ? trimTrailingSlash(base) : undefined,
     apiHealthPath: env.PRODUCT_HEALTH_API_PATH || "/health",
-    rpcUrl: env.PRODUCT_HEALTH_RPC_URL || networkEthRpc(env.WALLET_NETWORK),
+    rpcUrl,
+    rpcBackups,
+    rpcEndpoints: orderedRpcEndpoints(rpcUrl, rpcBackups),
     chainMaxStaleSeconds: num(env.PRODUCT_HEALTH_CHAIN_MAX_STALE_SECONDS, 600),
     haltSeverity: env.PRODUCT_HEALTH_HALT_SEVERITY || "auto",
     transportFailThreshold: Math.max(
@@ -2065,7 +2088,7 @@ export async function readPayoutTransfers(input: {
   } catch (error) {
     // Rate limit, capped range, dead endpoint — all unverified, never "0 paid".
     return noPayoutRead(
-      `payout evidence unverified — log read failed (${error instanceof Error ? error.message : String(error)})`,
+      `payout evidence unverified — log read failed (${describeFeedError(error, input.rpcUrl)})`,
     );
   }
 }
@@ -2102,7 +2125,7 @@ export async function readGasAttributionCache(input: {
   agentAccountCore?: string;
   fetchImpl: typeof fetch;
   nowMs: number;
-}): Promise<GasSpendSnapshot | GasUnreadable | null> {
+}): Promise<GasSpendSnapshot | GasUnreadable | GasInProgress | GasDisabled | null> {
   return gasAttribution(input);
 }
 
@@ -2130,24 +2153,50 @@ function gasAttribution(input: {
   agentAccountCore?: string;
   fetchImpl: typeof fetch;
   nowMs: number;
-}): GasSpendSnapshot | GasUnreadable | null {
+}): GasSpendSnapshot | GasUnreadable | GasInProgress | GasDisabled | null {
   const { config } = input;
-  if (!config.gasAttributionEnabled) return null;
+  if (!config.gasAttributionEnabled) {
+    return { disabled: true, reason: "gas attribution off (PRODUCT_HEALTH_GAS_ATTRIBUTION_ENABLED)" };
+  }
   const contracts = [input.escrowCore, input.agentAccountCore].filter(
     (a): a is string => typeof a === "string" && a.length > 0,
   );
-  if (contracts.length === 0 || !config.rpcUrl || !config.signerAddress) return null;
+  const endpoints = rpcEndpointsOf(config);
+  const missing: string[] = [];
+  if (endpoints.length === 0) missing.push("no RPC URL");
+  if (!config.signerAddress) missing.push("no signer address");
+  if (contracts.length === 0) missing.push("no contract addresses from /health");
+  if (missing.length > 0) {
+    const cached = gasCache?.read(input.nowMs);
+    if (cached && "totalDot" in cached) return cached;
+    return {
+      unreadable: true,
+      reason: `gas attribution not configured — ${missing.join(", ")}`,
+      at: input.nowMs,
+    };
+  }
 
   gasSettledCount = input.settledCount;
+  const signerAddress = config.signerAddress!;
   gasCache ??= createGasSpendCache({
-    read: () =>
-      readGasSpend({
-        rpcUrl: config.rpcUrl,
-        contracts,
-        signerAddress: config.signerAddress,
-        lookbackBlocks: config.payoutLookbackBlocks,
-        fetchImpl: input.fetchImpl,
-      }),
+    read: async () => {
+      const attempt = await readChainWithFailover({
+        endpoints,
+        read: (url) =>
+          readGasSpend({
+            rpcUrl: url,
+            contracts,
+            signerAddress,
+            lookbackBlocks: config.payoutLookbackBlocks,
+            fetchImpl: fetchWithTimeout(input.fetchImpl),
+          }),
+        reject: (result) => result.reason ?? null,
+      });
+      if (!attempt.ok) {
+        return { txs: [], otherSenders: [], truncated: false, blocksScanned: 0, reason: attempt.detail };
+      }
+      return { ...attempt.attempt.value, rpcHost: attempt.attempt.host };
+    },
     settledCount: () => gasSettledCount,
     labels: ESCROW_V2_SELECTORS,
     refreshMs: config.gasRefreshMs,
@@ -2163,14 +2212,27 @@ function gasAttribution(input: {
 }
 
 let crossCheckCache: CrossCheckCache | null = null;
+let crossCheckConfigured: boolean | null = null;
+/** Latest call, so a cache created on an earlier tick still reads the current config. */
+let crossCheckLatest: {
+  config: ProductHealthConfig;
+  sourceAddress?: string;
+  chainId?: number;
+  fetchImpl: typeof fetch;
+} | null = null;
 
 /**
  * Ask a SECOND provider the same pinned question, weekly.
  *
- * Both reads use one range, computed once from the primary's head and ending
- * `SAFE_HEAD_LAG_BLOCKS` behind it. Letting each provider resolve its own
- * `latest` would compare two different questions and disagree most times it
- * ran — see payout-crosscheck.ts.
+ * Both reads use one range, computed once from the answering host's head and
+ * ending `SAFE_HEAD_LAG_BLOCKS` behind it. Letting each provider resolve its
+ * own `latest` would compare two different questions and disagree most times
+ * it ran — see payout-crosscheck.ts.
+ *
+ * The primary side walks PRODUCT_HEALTH_RPC_URL then PRODUCT_HEALTH_RPC_BACKUPS.
+ * The host that returns a count is the one named on the panel. A cache created
+ * before the source address arrived must not stay "never configured" forever,
+ * so the cache is rebuilt when that flag flips.
  */
 function payoutCrossCheck(input: {
   config: ProductHealthConfig;
@@ -2180,46 +2242,74 @@ function payoutCrossCheck(input: {
   nowMs: number;
 }): CrossCheckView {
   const { config } = input;
+  crossCheckLatest = {
+    config,
+    ...(input.sourceAddress ? { sourceAddress: input.sourceAddress } : {}),
+    ...(input.chainId !== undefined ? { chainId: input.chainId } : {}),
+    fetchImpl: input.fetchImpl,
+  };
+  const endpointsNow = rpcEndpointsOf(config);
   const configured = Boolean(
-    config.payoutCrossCheckRpcUrl && config.rpcUrl && input.sourceAddress && config.usdcAddress,
+    config.payoutCrossCheckRpcUrl && endpointsNow.length > 0 && input.sourceAddress && config.usdcAddress,
   );
-  crossCheckCache ??= createCrossCheckCache({
-    configured,
-    run: async () => {
-      // Re-checked inside the closure rather than trusted from `configured`:
-      // this cache is a module singleton and outlives any one call's type
-      // narrowing, so this is the guard that actually holds at run time.
-      const primaryUrl = config.rpcUrl;
-      const secondUrl = config.payoutCrossCheckRpcUrl;
-      const source = input.sourceAddress;
-      if (!primaryUrl || !secondUrl || !source) {
-        return { primary: null, secondary: null, secondaryReason: "cross-check lost its configuration between runs" };
-      }
-      const latest = Number(BigInt(await ethRpc(primaryUrl, "eth_blockNumber", [], input.fetchImpl)));
-      const range = pinnedCompareRange({ latestBlock: latest, lookbackBlocks: config.payoutLookbackBlocks });
-      if (!range) return { primary: null, secondary: null, secondaryReason: "chain too short to compare behind the head" };
-      const shared = {
-        sourceAddress: source,
-        usdcAddress: config.usdcAddress,
-        usdcDecimals: config.usdcDecimals,
-        lookbackBlocks: config.payoutLookbackBlocks,
-        ...(input.chainId !== undefined ? { expectedChainId: input.chainId } : {}),
-        range,
-        fetchImpl: input.fetchImpl,
-      };
-      const [primary, secondary] = await Promise.all([
-        readPayoutTransfers({ ...shared, rpcUrl: primaryUrl }),
-        readPayoutTransfers({ ...shared, rpcUrl: secondUrl }),
-      ]);
-      return {
-        primary: { host: endpointHost(primaryUrl) ?? "primary", count: primary.count },
-        secondary: { host: endpointHost(secondUrl) ?? "secondary", count: secondary.count },
-        ...(secondary.reason ? { secondaryReason: secondary.reason } : {}),
-        range,
-      };
-    },
-    onError: () => {},
-  });
+  const conflict = crossCheckEndpointConflict(endpointsNow, config.payoutCrossCheckRpcUrl);
+  if (configured && conflict) return notIndependentView(conflict);
+  if (!crossCheckCache || crossCheckConfigured !== configured) {
+    crossCheckConfigured = configured;
+    crossCheckCache = createCrossCheckCache({
+      configured,
+      run: async () => {
+        const latest = crossCheckLatest;
+        const current = latest?.config;
+        const secondUrl = current?.payoutCrossCheckRpcUrl;
+        const source = latest?.sourceAddress;
+        const endpoints = current ? rpcEndpointsOf(current) : [];
+        if (!current || !secondUrl || !source || !current.usdcAddress || endpoints.length === 0) {
+          return { primary: null, secondary: null, secondaryReason: "cross-check lost its configuration between runs" };
+        }
+        const fetchImpl = fetchWithTimeout(latest.fetchImpl);
+        const head = await readChainWithFailover({
+          endpoints,
+          read: async (url) => Number(BigInt(await ethRpc(url, "eth_blockNumber", [], fetchImpl))),
+          reject: (block) => (Number.isFinite(block) && block > 0 ? null : "eth_blockNumber returned no head"),
+        });
+        if (!head.ok) {
+          return { primary: null, secondary: null, primaryReason: head.detail };
+        }
+        const range = pinnedCompareRange({ latestBlock: head.attempt.value, lookbackBlocks: current.payoutLookbackBlocks });
+        if (!range) return { primary: null, secondary: null, secondaryReason: "chain too short to compare behind the head" };
+        const shared = {
+          sourceAddress: source,
+          usdcAddress: current.usdcAddress,
+          usdcDecimals: current.usdcDecimals,
+          lookbackBlocks: current.payoutLookbackBlocks,
+          ...(latest.chainId !== undefined ? { expectedChainId: latest.chainId } : {}),
+          range,
+          fetchImpl,
+        };
+        const [primaryRead, secondary] = await Promise.all([
+          readChainWithFailover({
+            endpoints,
+            read: (url) => readPayoutTransfers({ ...shared, rpcUrl: url }),
+            reject: (read) => (read.count == null ? (read.reason ?? "no payout count") : null),
+          }),
+          readPayoutTransfers({ ...shared, rpcUrl: secondUrl }),
+        ]);
+        return {
+          primary: primaryRead.ok
+            ? { host: primaryRead.attempt.host, count: primaryRead.attempt.value.count }
+            : null,
+          secondary: { host: endpointHost(secondUrl) ?? "secondary", count: secondary.count },
+          ...(primaryRead.ok ? { primaryUrl: primaryRead.attempt.url } : {}),
+          secondaryUrl: secondUrl,
+          ...(primaryRead.ok ? {} : { primaryReason: primaryRead.detail }),
+          ...(secondary.reason ? { secondaryReason: secondary.reason } : {}),
+          range,
+        };
+      },
+      onError: () => {},
+    });
+  }
   crossCheckCache.maybeRefresh(input.nowMs);
   return crossCheckCache.read();
 }
@@ -2228,6 +2318,9 @@ function payoutCrossCheck(input: {
 export function __resetGasAttributionForTests(): void {
   gasCache = null;
   gasSettledCount = null;
+  crossCheckCache = null;
+  crossCheckConfigured = null;
+  crossCheckLatest = null;
 }
 
 /** Who receives the protocol fee, according to the contract that charges it.
@@ -2316,6 +2409,11 @@ function nativeGasSymbol(chainId: number | undefined): string {
     : NATIVE_GAS_SYMBOL_BY_CHAIN_ID.get(chainId) ?? "native";
 }
 
+function rpcEndpointsOf(config: ProductHealthConfig): string[] {
+  if (config.rpcEndpoints && config.rpcEndpoints.length > 0) return config.rpcEndpoints;
+  return orderedRpcEndpoints(config.rpcUrl, config.rpcBackups ?? []);
+}
+
 /** Signer solvency: native wallet gas + the in-contract reward bank.
  *
  * USDC intentionally lives in AgentAccountCore.positions[signer][USDC].liquid
@@ -2326,6 +2424,8 @@ function nativeGasSymbol(chainId: number | undefined): string {
  */
 export async function probeSignerLiquidity(input: {
   rpcUrl?: string;
+  /** Ordered list. When set, a failing host yields the next one, and the host that answered is named. */
+  rpcEndpoints?: string[];
   signerAddress?: string;
   rewardBankLiquid?: number;
   minGasNative: number;
@@ -2335,6 +2435,25 @@ export async function probeSignerLiquidity(input: {
   expectedChainId?: number;
   fetchImpl: typeof fetch;
 }): Promise<ProbeResult & { pools?: SolvencyPoolData[]; rpcOk?: boolean }> {
+  const listed = (input.rpcEndpoints ?? []).map((url) => url.trim()).filter(Boolean);
+  if (listed.length > 0) {
+    let last: ProbeResult & { pools?: SolvencyPoolData[]; rpcOk?: boolean } | undefined;
+    for (const url of listed) {
+      const result = await probeSignerLiquidity({
+        ...input,
+        rpcUrl: url,
+        rpcEndpoints: undefined,
+        fetchImpl: fetchWithTimeout(input.fetchImpl),
+      });
+      if (result.rpcOk !== false) return result;
+      last = result;
+    }
+    return last ?? {
+      name: "signer_liquidity",
+      status: "degraded",
+      detail: "PRODUCT_HEALTH_RPC_URL not set (no built-in default outside testnet)",
+    };
+  }
   if (!input.rpcUrl || !input.signerAddress) {
     // Name the missing piece: at a network cutover this is the difference between
     // "monitor is fine" and "solvency has been unmonitored since the flip".
@@ -2415,17 +2534,23 @@ export async function probeSignerLiquidity(input: {
       });
     }
 
+    const host = endpointHost(input.rpcUrl);
     return {
       name: "signer_liquidity",
       status: red ? "red" : degraded ? "degraded" : "ok",
-      detail: parts.join(", "),
+      detail: host ? `${parts.join(", ")} · via ${host}` : parts.join(", "),
       pools,
       rpcOk: true,
     };
   } catch (err) {
     // The direct RPC read itself failed (timeout / 1006 / bad endpoint) — distinct
     // from a low balance. rpcOk:false is the auto-remediation failover signal.
-    return { name: "signer_liquidity", status: "degraded", detail: `balance read failed: ${errMsg(err)}`, rpcOk: false };
+    return {
+      name: "signer_liquidity",
+      status: "degraded",
+      detail: `balance read failed: ${describeFeedError(err, input.rpcUrl)}`,
+      rpcOk: false,
+    };
   }
 }
 
@@ -2915,7 +3040,7 @@ export interface ProductHealthSnapshotBlocks {
    * measurement of actual consumption on the board and fell back to fitting a
    * slope through balances. Declared now because the projection reads it.
    */
-  gas?: GasSpendSnapshot | GasUnreadable;
+  gas?: GasSpendSnapshot | GasUnreadable | GasInProgress | GasDisabled;
   /**
    * The Bank lane, or the reason it cannot be shown.
    *
@@ -3032,6 +3157,7 @@ export async function collectProductHealthProbes(
   const [signer, posterFeeAttribution] = await Promise.all([
     probeSignerLiquidity({
       rpcUrl: config.rpcUrl,
+      rpcEndpoints: rpcEndpointsOf(config),
       signerAddress: config.signerAddress,
       rewardBankLiquid,
       minGasNative: config.minGasNative,

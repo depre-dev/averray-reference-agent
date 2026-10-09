@@ -107,6 +107,23 @@ describe("a failed refresh degrades to visibly-old, never to zero", () => {
   });
 });
 
+describe("a read still in flight is not a failure", () => {
+  it("reports in progress instead of unreadable", async () => {
+    let release: (value: GasReadResult) => void = () => {};
+    const cache = createGasSpendCache({
+      read: () => new Promise((resolve) => { release = resolve; }),
+      settledCount: () => 1,
+    });
+    cache.maybeRefresh(0);
+    const mid = cache.read(0);
+    expect(mid).toMatchObject({ inProgress: true, reason: "gas read in progress — no figure yet" });
+    expect(mid).not.toHaveProperty("unreadable");
+    release(ok([]));
+    await settle();
+    expect(cache.read(0)).not.toHaveProperty("inProgress");
+  });
+});
+
 describe("what it carries through", () => {
   it("passes labels and the settlement count into the summary", async () => {
     const cache = createGasSpendCache({

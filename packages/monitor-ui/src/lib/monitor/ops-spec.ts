@@ -1171,6 +1171,7 @@ export function crossCheckLine(
   }
   if (c.status === "disagree") return { text: c.detail, tone: "degraded" };
   if (c.status === "not-configured") return { text: c.detail, tone: "awaiting" };
+  if (c.status === "not-independent") return { text: c.detail, tone: "degraded" };
   if (c.reason === "throttled" && c.retryAtMs !== undefined) {
     const retryMinutes = Math.max(0, Math.ceil((c.retryAtMs - nowMs) / 60_000));
     return {
@@ -1222,6 +1223,7 @@ export function gasPoolNote(gas: GasSpendView | undefined): { text: string; tone
   if (gas.txCount === 0) return { text: "no signer transactions in the window", tone: "awaiting" };
 
   const parts = [`${gas.totalDot.toFixed(3)} DOT burned`];
+  if (gas.rpcHost) parts.push(`via ${gas.rpcHost}`);
   if (gas.perSettlement != null) parts.push(`${gas.perSettlement.toFixed(3)} per settlement`);
   const top = gas.buckets[0];
   if (top) parts.push(`${top.label} ${top.sharePct.toFixed(0)}%`);
@@ -1241,6 +1243,11 @@ export function gasPoolNote(gas: GasSpendView | undefined): { text: string; tone
 /** The unreadable case, so a failed read is a sentence rather than an absence. */
 export function gasUnreadableNote(reason: string): { text: string; tone: OpsTone } {
   return { text: `gas unreadable — ${reason}`, tone: "degraded" };
+}
+
+/** Neutral states: the feature is off, or the first read has not finished. */
+export function gasNeutralNote(text: string): { text: string; tone: OpsTone } {
+  return { text, tone: "awaiting" };
 }
 
 /**

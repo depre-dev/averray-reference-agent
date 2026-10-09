@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   classifyTransportFailure,
+  describeFeedError,
   describeTransportFailure,
   trackTransportFailure,
   transportFailureIsPageWorthy,
@@ -47,6 +48,23 @@ describe("classifyTransportFailure", () => {
     const err = new Error("round and round") as Error & { cause?: unknown };
     err.cause = err;
     expect(classifyTransportFailure(err).message).toBe("round and round");
+  });
+
+  it("names ENOTFOUND and the host instead of undici's fetch failed", () => {
+    const err = undiciFetchFailure("ENOTFOUND", "getaddrinfo ENOTFOUND eth-rpc.polkadot.io");
+    expect(describeFeedError(err, "https://eth-rpc.polkadot.io/")).toBe("ENOTFOUND eth-rpc.polkadot.io");
+    expect(describeFeedError(err, "https://eth-rpc.polkadot.io/")).not.toContain("fetch failed");
+  });
+
+  it("names ECONNREFUSED and ETIMEDOUT with the host", () => {
+    expect(describeFeedError(
+      undiciFetchFailure("ECONNREFUSED", "connect ECONNREFUSED 10.0.0.1:443"),
+      "http://agent-mainnet-backend:8787/monitor/bank-feed",
+    )).toBe("ECONNREFUSED agent-mainnet-backend:8787");
+    expect(describeFeedError(
+      undiciFetchFailure("ETIMEDOUT", "connect ETIMEDOUT"),
+      "https://eth-rpc.polkadot.io/",
+    )).toBe("ETIMEDOUT eth-rpc.polkadot.io");
   });
 
   it("names the layer and the code, for reading and for grepping", () => {

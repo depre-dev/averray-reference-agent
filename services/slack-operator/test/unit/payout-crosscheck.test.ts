@@ -3,9 +3,11 @@ import { describe, expect, test } from "vitest";
 import {
   CROSSCHECK_OVERDUE_MS,
   SAFE_HEAD_LAG_BLOCKS,
+  crossCheckEndpointConflict,
   crossCheckNeverRun,
   decideCrossCheck,
   endpointHost,
+  normHost,
   pinnedCompareRange,
 } from "../../src/payout-crosscheck.js";
 
@@ -133,6 +135,36 @@ describe("pinnedCompareRange — compare behind the head", () => {
 
   test("a chain too shallow for the margin yields no range rather than a bad one", () => {
     expect(pinnedCompareRange({ latestBlock: 50, lookbackBlocks: 40_000 })).toBeNull();
+  });
+});
+
+describe("not-independent — one host agreeing with itself is not a cross-check", () => {
+  test("the same host with case and trailing-slash variants is not an agreement", () => {
+    expect(normHost("https://eth-rpc.polkadot.io/")).toBe("eth-rpc.polkadot.io");
+    expect(normHost("http://ETH-RPC.POLKADOT.IO:443/mainnet")).toBe("eth-rpc.polkadot.io");
+    const v = decideCrossCheck({
+      ...base,
+      primary: { host: "eth-rpc.polkadot.io", count: 18 },
+      secondary: { host: "ETH-RPC.POLKADOT.IO", count: 18 },
+      primaryUrl: "https://eth-rpc.polkadot.io/",
+      secondaryUrl: "http://ETH-RPC.POLKADOT.IO:443/mainnet",
+    });
+    expect(v.status).toBe("not-independent");
+    expect(v.status).not.toBe("agree");
+    expect(v.detail).toBe("not independent — cross-check source equals the primary (eth-rpc.polkadot.io)");
+    expect(v.lastAgreedAtMs).toBeNull();
+    expect(v.detail).not.toContain("✓");
+  });
+
+  test("config time rejects every listed endpoint that shares the cross-check host", () => {
+    expect(crossCheckEndpointConflict(
+      ["https://eth-rpc.polkadot.io/", "https://backup.example/rpc"],
+      "http://ETH-RPC.POLKADOT.IO/",
+    )).toBe("eth-rpc.polkadot.io");
+    expect(crossCheckEndpointConflict(
+      ["https://backup.example/rpc"],
+      "https://eth-rpc.polkadot.io/",
+    )).toBeNull();
   });
 });
 

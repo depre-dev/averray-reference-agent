@@ -25,6 +25,7 @@ import {
   type CrossCheckView,
   type EndpointReading,
 } from "./payout-crosscheck.js";
+import { describeFeedError } from "./probe-transport.js";
 
 export interface CrossCheckCache {
   /** The current verdict. Never null — "never run" is itself a verdict. */
@@ -42,6 +43,9 @@ export interface CrossCheckRun {
   primary: EndpointReading | null;
   secondary: EndpointReading | null;
   secondaryReason?: string | null;
+  primaryReason?: string | null;
+  primaryUrl?: string | null;
+  secondaryUrl?: string | null;
   range?: { fromBlock: number; toBlock: number } | null;
 }
 
@@ -108,11 +112,18 @@ export function createCrossCheckCache(deps: {
             primary: run.primary,
             secondary: run.secondary,
             ...(run.secondaryReason ? { secondaryReason: run.secondaryReason } : {}),
+            ...(run.primaryReason ? { primaryReason: run.primaryReason } : {}),
+            ...(run.primaryUrl ? { primaryUrl: run.primaryUrl } : {}),
+            ...(run.secondaryUrl ? { secondaryUrl: run.secondaryUrl } : {}),
             ...(run.range ? { range: run.range } : {}),
             lastAgreedAtMs,
             nowMs,
           });
-          if (next.status === "agree" || next.status === "disagree") {
+          if (next.status === "not-independent") {
+            verdict = next;
+            lastSuccessAtMs = nowMs;
+            consecutiveFailures = 0;
+          } else if (next.status === "agree" || next.status === "disagree") {
             verdict = next;
             lastSuccessAtMs = nowMs;
             consecutiveFailures = 0;
@@ -122,7 +133,7 @@ export function createCrossCheckCache(deps: {
             verdict = decorateFailure(next, run.secondaryReason, nowMs);
           }
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message = describeFeedError(error);
           consecutiveFailures += 1;
           verdict = decorateFailure(decideCrossCheck({
             configured: true,

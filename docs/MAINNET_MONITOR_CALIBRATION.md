@@ -15,9 +15,13 @@ selected implicitly.
   come from the signer reward-bank position in AgentAccountCore, so the
   treasury reserve floor is `0` with a mandatory, operator-visible reason.
 - The monitor samples every five minutes rather than every two minutes.
-- The official `services.polkadothub-rpc.com/mainnet` endpoint is the primary
-  monitor RPC. The former `eth-rpc.polkadot.io` primary remains a same-chain
-  backup, and read-only RPC auto-remediation is enabled.
+- The primary monitor RPC is `https://eth-rpc.polkadot.io/`. Backups are empty.
+  `services.polkadothub-rpc.com/mainnet` no longer answers and must not be
+  restored. Blockscout's eth-rpc is not a monitor backup: the monitor shares
+  the VPS IP with the backend, and Blockscout's 500 requests per 15 minutes
+  per IP are reserved for the backend. Read-only RPC auto-remediation stays
+  enabled and has nothing to rotate to until an operator adds a same-chain
+  backup that is not Blockscout.
 - Health-transition narration observes the same thirty-minute cooldown as
   product-health alerts. Probe state remains live on the board during cooldown.
 - GitHub monitor enrichment gets five seconds. A bad credential must still be

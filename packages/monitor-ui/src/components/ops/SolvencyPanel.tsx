@@ -16,7 +16,7 @@
 import { OPS_GLOSS } from "../../lib/monitor/ops-gloss.js";
 import type { GasSpendView, PayoutEvidence, SolvencySnapshot } from "../../lib/monitor/product-health.js";
 import { splitPools, type PoolView } from "../../lib/monitor/ops-spec.js";
-import { gasPoolNote, gasUnreadableNote } from "../../lib/monitor/ops-spec.js";
+import { gasNeutralNote, gasPoolNote, gasUnreadableNote } from "../../lib/monitor/ops-spec.js";
 import { worstOpsTone, type OpsTone } from "../../lib/monitor/ops-model.js";
 import type {
   OvernightLedgerPayload,
@@ -30,7 +30,11 @@ import { RewardBankSplitRow, TopupBlock } from "./OvernightLedgerPanels.js";
 export interface SolvencyPanelProps {
   solvency: SolvencySnapshot | undefined;
   /** Gas attribution, for the signer pool's footnote. */
-  gas?: GasSpendView | { unreadable: true; reason: string } | undefined;
+  gas?: GasSpendView
+    | { unreadable: true; reason: string }
+    | { inProgress: true; reason: string }
+    | { disabled: true; reason: string }
+    | undefined;
   /** Payout evidence, for the reward bank's payouts-remaining footnote. */
   payout?: PayoutEvidence | undefined;
   overnightLedger?: RemoteFeedReading<OvernightLedgerPayload>;
@@ -45,9 +49,11 @@ export interface SolvencyPanelProps {
  * a failed read look identical on screen, and only one of them is actionable.
  */
 function gasNoteFor(
-  gas: GasSpendView | { unreadable: true; reason: string } | undefined,
+  gas: SolvencyPanelProps["gas"],
 ): { text: string; tone: OpsTone } | null {
   if (!gas) return null;
+  if ("disabled" in gas) return gasNeutralNote(gas.reason);
+  if ("inProgress" in gas) return gasNeutralNote(gas.reason);
   if ("unreadable" in gas) return gasUnreadableNote(gas.reason);
   return gasPoolNote(gas);
 }

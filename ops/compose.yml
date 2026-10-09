@@ -694,8 +694,10 @@ services:
       # liveness alone, so a leftover other-network endpoint would be rotated onto;
       # the chain guard then refuses its balances rather than trusting them. Empty
       # is honest — a dead or wrong-chain backup is worse than none.
-      # Mainnet has two official HTTP endpoints. Keep their ordering in the
-      # mainnet-only calibration overlay; never make either a testnet default.
+      # Mainnet calibration leaves this empty. Do not add Blockscout's eth-rpc:
+      # the monitor shares the VPS IP with the backend, and Blockscout's 500
+      # requests per 15 minutes per IP are reserved for the backend. The dead
+      # services.polkadothub-rpc.com host must not be put back.
       PRODUCT_HEALTH_RPC_BACKUPS: ${PRODUCT_HEALTH_RPC_BACKUPS:-}
       OPS_AUTOREMEDIATE_FAIL_THRESHOLD: ${OPS_AUTOREMEDIATE_FAIL_THRESHOLD:-2}
       OPS_AUTOREMEDIATE_MAX_ATTEMPTS: ${OPS_AUTOREMEDIATE_MAX_ATTEMPTS:-3}

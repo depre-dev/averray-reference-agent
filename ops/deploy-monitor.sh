@@ -253,6 +253,23 @@ echo "deploying ${SERVICE} at ${GIT_SHA:0:8}$([ "$GIT_DIRTY" = true ] && echo ' 
 # services defined in other files, and it would take them down.
 GIT_SHA="$GIT_SHA" GIT_DIRTY="$GIT_DIRTY" "${COMPOSE[@]}" up -d --build "$SERVICE"
 
+# Advisory, like the shadowed-key warning above. The overlay is added only when
+# the network exists at the start of this script. A network that appears later,
+# or a container recreated without ops/compose.bank-feed.yml, leaves
+# slack-operator off agent-mainnet-internal while that network is up. The bank
+# feed then fails DNS. This does not refuse the deploy.
+if docker network inspect "$BANK_FEED_NETWORK" >/dev/null 2>&1; then
+  ATTACHED_CID="$(docker ps -q \
+    --filter "label=com.docker.compose.project=${PROJECT}" \
+    --filter "label=com.docker.compose.service=slack-operator" | head -n 1 || true)"
+  if [ -n "${ATTACHED_CID}" ]; then
+    if ! docker inspect -f '{{json .NetworkSettings.Networks}}' "$ATTACHED_CID" | grep -q "\"${BANK_FEED_NETWORK}\""; then
+      echo "WARNING: slack-operator is not attached to ${BANK_FEED_NETWORK} while that network exists." >&2
+      echo "         Redeploy with ops/deploy-monitor.sh so ops/compose.bank-feed.yml is included." >&2
+    fi
+  fi
+fi
+
 # RESTART WHATEVER RUNS FROM THE BUNDLE.
 #
 # The MCP servers are not in anyone's image: they live in the avg-app volume,

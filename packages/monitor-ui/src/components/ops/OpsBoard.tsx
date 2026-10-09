@@ -19,7 +19,7 @@
 // Buzz (docs/OPS_ONLY_PIVOT.md).
 
 import type { MonitorBoard } from "../../lib/monitor/board-cache.js";
-import type { ProductHealth } from "../../lib/monitor/product-health.js";
+import type { GasSpendView, ProductHealth } from "../../lib/monitor/product-health.js";
 import type { AdminDemandFeed, AdminDemandWindow } from "../../lib/monitor/admin-demand.js";
 import type {
   OvernightLedgerPayload,
@@ -65,6 +65,10 @@ export interface OpsBoardProps {
   topupDestinations?: RemoteFeedReading<TopupDestinationsPayload>;
   overnightWindow?: OvernightWindow;
   onOvernightWindowChange?: (window: OvernightWindow) => void;
+}
+
+function spendableGas(gas: ProductHealth["gas"]): GasSpendView | undefined {
+  return gas && "totalDot" in gas ? gas : undefined;
 }
 
 export function OpsBoard({
@@ -196,7 +200,7 @@ export function OpsBoard({
             second READING and never a second opinion — and an
             unreported figure is a dash with its reason, not a zero. */}
         <div className="ops-kpis" data-testid="ops-kpis">
-          {boardKpis(health, health.gas, overnightLedger).map((kpi) => (
+          {boardKpis(health, spendableGas(health.gas), overnightLedger).map((kpi) => (
             <div className="ops-kpi" key={kpi.key} data-testid={`ops-kpi-${kpi.key}`}>
               <span className="ops-kpi-lbl">{kpi.label}</span>
               <span className="ops-kpi-val">
@@ -249,7 +253,7 @@ export function OpsBoard({
               describes that path. It keeps its own line and tone and refuses
               to become either a funnel count or a probe. */}
           {(() => {
-            const e = economicsLine({ payout: health.flow?.payout, gas: health.gas });
+            const e = economicsLine({ payout: health.flow?.payout, gas: spendableGas(health.gas) });
             return e ? (
               <div className="ops-economics" data-tone={e.tone} title={e.title}>
                 {e.text}

@@ -21,6 +21,8 @@
 // and the board stays quiet. Only a CONFIGURED feed that fails is a problem
 // worth a line on screen.
 
+export const BANK_FEED_DNS =
+  "bank feed host does not resolve — monitor not on agent-mainnet-internal, or agent-mainnet-backend is down";
 import type {
   BankFeed,
   BankRequest,
@@ -29,6 +31,7 @@ import type {
   BankSubjectCandidate,
   SourcedRead,
 } from "./bank-feed.js";
+import { classifyTransportFailure, describeFeedError } from "./probe-transport.js";
 
 export interface BankFeedRead {
   feed?: BankFeed;
@@ -54,8 +57,13 @@ export async function readBankFeed(input: {
     const body: unknown = await res.json();
     return normalizeBankFeed(body);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { reason: `bank feed unreachable — ${message}` };
+    // The bank host is a name on agent-mainnet-internal. DNS failure means
+    // this container is not on that network — a redeploy attaches it. Any
+    // other transport fault still names the cause code and the host.
+    if (classifyTransportFailure(error).kind === "dns") {
+      return { reason: BANK_FEED_DNS };
+    }
+    return { reason: `bank feed unreachable — ${describeFeedError(error, input.url)}` };
   } finally {
     clearTimeout(timer);
   }

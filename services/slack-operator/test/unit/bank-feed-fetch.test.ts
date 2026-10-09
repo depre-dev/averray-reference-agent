@@ -20,6 +20,20 @@ describe("not wired is not broken", () => {
       });
   });
 
+  test("a DNS failure says the bank network is not attached", async () => {
+    const inner = Object.assign(new Error("getaddrinfo ENOTFOUND agent-mainnet-backend"), { code: "ENOTFOUND" });
+    const r = await readBankFeed({
+      url: "http://agent-mainnet-backend:8787/monitor/bank-feed",
+      fetchImpl: (async () => {
+        throw Object.assign(new TypeError("fetch failed"), { cause: inner });
+      }) as never,
+    });
+    expect(r.reason).toBe(
+      "bank feed host does not resolve — monitor not on agent-mainnet-internal, or agent-mainnet-backend is down",
+    );
+    expect(r.reason).not.toContain("fetch failed");
+  });
+
   test("a CONFIGURED feed that fails gets a reason", async () => {
     const r = await readBankFeed({
       url: "http://backend:8787/monitor/bank-feed",
