@@ -136,7 +136,9 @@ describe("reconcileIncidents (pure)", () => {
   });
 
   it("orders newest first and caps at the limit", () => {
-    const persisted = Array.from({ length: 5 }, (_, i) => incident({ id: `i${i}`, startedAt: i * 100 }));
+    const persisted = Array.from({ length: 5 }, (_, i) =>
+      incident({ id: `i${i}`, probe: `probe_${i}`, startedAt: i * 100, endedAt: i * 100 + 1 }),
+    );
     const r = reconcileIncidents({ persisted, derived: [], limit: 3 });
     expect(r.merged.map((i) => i.startedAt)).toEqual([400, 300, 200]);
   });
@@ -148,6 +150,105 @@ describe("reconcileIncidents (pure)", () => {
       limit: 50,
     });
     expect(r.writes).toHaveLength(1);
+  });
+});
+
+describe("one open incident per check", () => {
+  const now = 10_000;
+
+  it("opens one episode when a check first degrades", () => {
+    const opened = incident({ id: "capabilities-1000", probe: "capabilities", startedAt: 1000, endedAt: null });
+    const r = reconcileIncidents({
+      persisted: [],
+      derived: [opened],
+      limit: 50,
+      nowMs: now,
+      currentProbeStatus: new Map([["capabilities", "degraded"]]),
+    });
+    expect(r.merged.filter((i) => i.endedAt == null)).toEqual([opened]);
+  });
+
+  it("a repeat probe does not open a second episode", () => {
+    const original = incident({
+      id: "capabilities-1000",
+      probe: "capabilities",
+      startedAt: 1000,
+      endedAt: null,
+      note: "first",
+    });
+    // The ring slid: same check, still degraded, new derived id and later start.
+    const repeat = incident({
+      id: "capabilities-4000",
+      probe: "capabilities",
+      startedAt: 4000,
+      endedAt: null,
+      note: "still degraded",
+    });
+    const r = reconcileIncidents({
+      persisted: [original],
+      derived: [repeat],
+      limit: 50,
+      nowMs: now,
+      currentProbeStatus: new Map([["capabilities", "degraded"]]),
+    });
+    const ongoing = r.merged.filter((i) => i.endedAt == null);
+    expect(ongoing).toHaveLength(1);
+    expect(ongoing[0]).toMatchObject({ id: "capabilities-1000", startedAt: 1000, note: "still degraded" });
+  });
+
+  it("recovery closes the open episode", () => {
+    const original = incident({ id: "money_path-1000", probe: "money_path", startedAt: 1000, endedAt: null });
+    const recovered = incident({
+      id: "money_path-4000",
+      probe: "money_path",
+      startedAt: 4000,
+      endedAt: 8000,
+      note: "recovered",
+    });
+    const r = reconcileIncidents({
+      persisted: [original],
+      derived: [recovered],
+      limit: 50,
+      nowMs: now,
+      currentProbeStatus: new Map([["money_path", "ok"]]),
+    });
+    expect(r.merged.filter((i) => i.endedAt == null)).toHaveLength(0);
+    expect(r.merged[0]).toMatchObject({ id: "money_path-1000", startedAt: 1000, endedAt: 8000 });
+  });
+
+  it("ongoing count equals the number of distinct degraded checks", () => {
+    const persisted = [
+      incident({ id: "capabilities-1", probe: "capabilities", startedAt: 1 }),
+      incident({ id: "capabilities-2", probe: "capabilities", startedAt: 2 }),
+      incident({ id: "money_path-1", probe: "money_path", startedAt: 1 }),
+      incident({ id: "money_path-9", probe: "money_path", startedAt: 9 }),
+    ];
+    const r = reconcileIncidents({
+      persisted,
+      derived: [
+        incident({ id: "capabilities-50", probe: "capabilities", startedAt: 50, note: "capabilities still down" }),
+        incident({ id: "money_path-50", probe: "money_path", startedAt: 50, note: "money path still down" }),
+      ],
+      limit: 50,
+      nowMs: now,
+      currentProbeStatus: new Map([
+        ["capabilities", "degraded"],
+        ["money_path", "degraded"],
+      ]),
+    });
+    const ongoing = r.merged.filter((i) => i.endedAt == null);
+    expect(ongoing.map((i) => i.probe).sort()).toEqual(["capabilities", "money_path"]);
+    expect(ongoing).toHaveLength(2);
+  });
+
+  it("keeps the open episode when closed history would fill the cap", () => {
+    const open = incident({ id: "capabilities-1", probe: "capabilities", startedAt: 1, endedAt: null });
+    const closed = Array.from({ length: 4 }, (_, i) =>
+      incident({ id: `old-${i}`, probe: `old_${i}`, startedAt: 1000 + i, endedAt: 2000 + i }),
+    );
+    const r = reconcileIncidents({ persisted: [open, ...closed], derived: [], limit: 2, nowMs: now });
+    expect(r.merged[0]).toMatchObject({ id: "capabilities-1", endedAt: null });
+    expect(r.merged).toHaveLength(2);
   });
 });
 

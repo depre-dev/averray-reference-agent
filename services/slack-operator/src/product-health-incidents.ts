@@ -36,6 +36,46 @@ export function incidentLogPath(env: NodeJS.ProcessEnv = process.env): string {
  * Returns the full merged view (newest first, capped) plus only the records
  * that actually need writing, so a steady state writes nothing.
  */
+/**
+ * One open episode per probe.
+ *
+ * The sample ring forgets the original start, so each slide derived a new id
+ * for the same still-degraded check. The old open record stayed open because
+ * the probe was not ok. That is how the board reached "200 ongoing" with
+ * capabilities and money_path repeated. A repeat adopts the open episode's
+ * id and start. A later episode, after a recovery inside this buffer, is a
+ * new incident.
+ */
+function adoptOpenEpisodes(
+  persisted: readonly ProductHealthIncident[],
+  derived: readonly ProductHealthIncident[],
+): ProductHealthIncident[] {
+  const openByProbe = earliestOpenByProbe(persisted);
+  const earliestDerivedId = new Map<string, string>();
+  for (const incident of [...derived].sort((a, b) => a.startedAt - b.startedAt)) {
+    if (!earliestDerivedId.has(incident.probe)) earliestDerivedId.set(incident.probe, incident.id);
+  }
+  return derived.map((incident) => {
+    const open = openByProbe.get(incident.probe);
+    if (!open) return incident;
+    if (earliestDerivedId.get(incident.probe) !== incident.id) return incident;
+    if (incident.startedAt < open.startedAt) return incident;
+    return { ...incident, id: open.id, startedAt: open.startedAt };
+  });
+}
+
+function earliestOpenByProbe(
+  incidents: readonly ProductHealthIncident[],
+): Map<string, ProductHealthIncident> {
+  const map = new Map<string, ProductHealthIncident>();
+  for (const incident of incidents) {
+    if (incident.endedAt != null) continue;
+    const prev = map.get(incident.probe);
+    if (!prev || incident.startedAt < prev.startedAt) map.set(incident.probe, incident);
+  }
+  return map;
+}
+
 export function reconcileIncidents(input: {
   persisted: readonly ProductHealthIncident[];
   derived: readonly ProductHealthIncident[];
@@ -46,12 +86,13 @@ export function reconcileIncidents(input: {
   /** Clock for the recovery stamp; injected so the close is deterministic. */
   nowMs?: number;
 }): { merged: ProductHealthIncident[]; writes: ProductHealthIncident[] } {
+  const derivedInput = adoptOpenEpisodes(input.persisted, input.derived);
   const byId = new Map<string, ProductHealthIncident>();
   for (const incident of input.persisted) byId.set(incident.id, incident);
 
   const writes: ProductHealthIncident[] = [];
-  const derivedIds = new Set(input.derived.map((i) => i.id));
-  for (const incident of input.derived) {
+  const derivedIds = new Set(derivedInput.map((i) => i.id));
+  for (const incident of derivedInput) {
     const existing = byId.get(incident.id);
     // New incident, or one that changed state (usually open → closed). Comparing
     // the whole record also catches a note that sharpened as the run went on.
@@ -97,8 +138,32 @@ export function reconcileIncidents(input: {
     }
   }
 
+  // Extra open rows for a check that already has an open episode. The earliest
+  // start is the one that is still true; the rest are the ring-slide duplicates.
+  const keptOpen = earliestOpenByProbe([...byId.values()]);
+  const closedAt = input.nowMs ?? Date.now();
+  for (const incident of byId.values()) {
+    if (incident.endedAt != null) continue;
+    const kept = keptOpen.get(incident.probe);
+    if (!kept || kept.id === incident.id) continue;
+    const closed: ProductHealthIncident = {
+      ...incident,
+      endedAt: closedAt,
+      note: `${incident.note ? `${incident.note} · ` : ""}closed as a duplicate of the open ${incident.probe} episode`,
+    };
+    writes.push(closed);
+    byId.set(closed.id, closed);
+  }
+
   const merged = [...byId.values()]
-    .sort((a, b) => b.startedAt - a.startedAt)
+    .sort((a, b) => {
+      // Open episodes stay inside the cap. They have the earliest start, so a
+      // newest-first slice would drop the live one once history fills the limit.
+      const aOpen = a.endedAt == null ? 1 : 0;
+      const bOpen = b.endedAt == null ? 1 : 0;
+      if (aOpen !== bOpen) return bOpen - aOpen;
+      return b.startedAt - a.startedAt;
+    })
     .slice(0, input.limit);
   return { merged, writes };
 }
