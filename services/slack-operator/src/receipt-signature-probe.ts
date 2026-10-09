@@ -1,11 +1,13 @@
 // Receipt signature probe — a regression guard for the served badge documents.
 //
-// Every 30 minutes the monitor fetches GET /badges?limit=5, then two per-id
-// receipts, and verifies each served document against
-// /.well-known/badge-receipt-jwks.json. The canonicalization is the published
-// RFC 8785 subset: object keys sorted by UTF-16 code units, array order kept,
-// no whitespace. The detached ES256 JWS covers everything except the root
-// `signature`. Any failure is red.
+// Every 30 minutes the monitor fetches GET /badges?limit=5, then the per-id
+// documents at /badges/<sessionId> and /receipts/<receiptId>, and verifies each
+// served document against /.well-known/badge-receipt-jwks.json. The key is the
+// document's own signature.kid. The canonicalization is the published RFC 8785
+// subset: object keys sorted by UTF-16 code units, array order kept, no
+// whitespace. The detached ES256 JWS covers everything except the root
+// `signature`. A served document that fails verification is red. A fetch we
+// could not complete (unreachable, 5xx, 404, timeout) is "could not check".
 //
 // The signer and the KMS key stay in the backend. This probe only reads public
 // documents and the published JWKS.
@@ -15,8 +17,8 @@ import { createPublicKey, createVerify, type JsonWebKey as CryptoJsonWebKey } fr
 import { classifyTransportFailure, describeTransportFailure } from "./probe-transport.js";
 
 export const RECEIPT_PROBE_INTERVAL_MS = 30 * 60 * 1000;
+export const RECEIPT_FETCH_TIMEOUT_MS = 8_000;
 export const BADGE_RECEIPT_JWKS_PATH = "/.well-known/badge-receipt-jwks.json";
-export const BADGE_RECEIPT_KID = "badge-1";
 export const BADGE_RECEIPT_TYP = "averray-badge-receipt+jws";
 export const RECEIPT_LIST_LIMIT = 5;
 export const RECEIPT_DETAIL_COUNT = 2;
@@ -84,10 +86,11 @@ interface Jwk {
   use?: string;
 }
 
-function isBadgeJwk(value: unknown): value is Jwk {
+function isSigningJwk(value: unknown): value is Jwk {
   if (!value || typeof value !== "object") return false;
   const key = value as Jwk;
-  return key.kid === BADGE_RECEIPT_KID
+  return typeof key.kid === "string"
+    && key.kid.length > 0
     && key.kty === "EC"
     && key.crv === "P-256"
     && key.alg === "ES256"
@@ -96,17 +99,24 @@ function isBadgeJwk(value: unknown): value is Jwk {
     && (key.use === undefined || key.use === "sig");
 }
 
+function signingKeys(jwks: unknown): Jwk[] {
+  if (isSigningJwk(jwks)) return [jwks];
+  const keys = jwks && typeof jwks === "object" ? (jwks as { keys?: unknown }).keys : undefined;
+  if (!Array.isArray(keys)) throw new Error("published JWKS has no keys");
+  return keys.filter(isSigningJwk);
+}
+
 /**
  * Verify one served document against an already-loaded JWKS key.
  * Throws a reason string's Error when the document does not verify.
  */
-export function verifyServedReceipt(document: Record<string, unknown>, jwk: Jwk): void {
+export function verifyServedReceipt(document: Record<string, unknown>, jwks: unknown): void {
   const signature = document.signature;
   if (!signature || typeof signature !== "object" || Array.isArray(signature)) {
     throw new Error("served receipt has no signature");
   }
   const sig = signature as Record<string, unknown>;
-  if (sig.alg !== "ES256" || sig.kid !== BADGE_RECEIPT_KID || typeof sig.sig !== "string" || typeof sig.signedAt !== "string") {
+  if (sig.alg !== "ES256" || typeof sig.kid !== "string" || !sig.kid || typeof sig.sig !== "string" || typeof sig.signedAt !== "string") {
     throw new Error("receipt signature metadata is malformed or uses an unsupported key");
   }
   const segments = sig.sig.split(".");
@@ -117,17 +127,18 @@ export function verifyServedReceipt(document: Record<string, unknown>, jwk: Jwk)
   } catch {
     throw new Error("receipt protected header is not JSON");
   }
-  const keys = Object.keys(protectedHeader).sort();
+  const headerKeys = Object.keys(protectedHeader).sort();
   if (
-    keys.join(",") !== "alg,kid,signedAt,typ"
+    headerKeys.join(",") !== "alg,kid,signedAt,typ"
     || protectedHeader.alg !== "ES256"
-    || protectedHeader.kid !== BADGE_RECEIPT_KID
+    || protectedHeader.kid !== sig.kid
     || protectedHeader.typ !== BADGE_RECEIPT_TYP
     || protectedHeader.signedAt !== sig.signedAt
-    || !isBadgeJwk(jwk)
   ) {
     throw new Error("protected header does not integrity-bind alg, kid, typ, and signedAt");
   }
+  const jwk = signingKeys(jwks).find((key) => key.kid === sig.kid);
+  if (!jwk) throw new Error(`unknown kid ${sig.kid}`);
   const payloadB64 = canonicalBadgeReceiptBytes(document).toString("base64url");
   const verifier = createVerify("SHA256");
   verifier.update(`${segments[0]}.${payloadB64}`, "utf8");
@@ -140,20 +151,36 @@ export function verifyServedReceipt(document: Record<string, unknown>, jwk: Jwk)
   if (!ok) throw new Error("signature does not match the canonical receipt document");
 }
 
-function sessionIdOf(item: unknown): string | null {
+function textField(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function nestedId(item: unknown, key: "sessionId" | "receiptId"): string | null {
   if (!item || typeof item !== "object") return null;
   const record = item as Record<string, unknown>;
+  const direct = textField(record, key);
+  if (direct) return direct;
   const document = record.document;
-  if (document && typeof document === "object") {
+  if (document && typeof document === "object" && !Array.isArray(document)) {
     const doc = document as Record<string, unknown>;
-    if (typeof doc.sessionId === "string" && doc.sessionId) return doc.sessionId;
+    const fromDoc = textField(doc, key);
+    if (fromDoc) return fromDoc;
     const averray = doc.averray;
-    if (averray && typeof averray === "object" && typeof (averray as { sessionId?: unknown }).sessionId === "string") {
-      const id = (averray as { sessionId: string }).sessionId;
-      if (id) return id;
+    if (averray && typeof averray === "object" && !Array.isArray(averray)) {
+      const fromAverray = textField(averray as Record<string, unknown>, key);
+      if (fromAverray) return fromAverray;
     }
   }
-  return typeof record.sessionId === "string" && record.sessionId ? record.sessionId : null;
+  return null;
+}
+
+function sessionIdOf(item: unknown): string | null {
+  return nestedId(item, "sessionId");
+}
+
+function receiptIdOf(item: unknown): string | null {
+  return nestedId(item, "receiptId");
 }
 
 function servedDocument(body: unknown): Record<string, unknown> | null {
@@ -168,22 +195,40 @@ function servedDocument(body: unknown): Record<string, unknown> | null {
   return record;
 }
 
-async function readJson(fetchImpl: typeof fetch, url: string): Promise<unknown> {
-  const response = await fetchImpl(url, { headers: { accept: "application/json" } });
-  if (!response.ok) throw new Error(`${url} → HTTP ${response.status}`);
-  return response.json();
+async function readJson(fetchImpl: typeof fetch, url: string, timeoutMs: number): Promise<unknown> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(url, { headers: { accept: "application/json" }, signal: controller.signal });
+    if (!response.ok) throw new Error(`${url} → HTTP ${response.status}`);
+    return response.json();
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`${url} timed out`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
-function badgeJwk(jwks: unknown): Jwk {
-  const keys = jwks && typeof jwks === "object" ? (jwks as { keys?: unknown }).keys : undefined;
-  const match = Array.isArray(keys) ? keys.find((key) => isBadgeJwk(key)) : undefined;
-  if (!match || !isBadgeJwk(match)) throw new Error(`published JWKS does not contain the expected ${BADGE_RECEIPT_KID} P-256 key`);
-  return match;
-}
-
-export function decideReceiptProbe(input: { checked: number; ids: number; failures: string[] }): Omit<ReceiptProbeView, "at"> {
+export function decideReceiptProbe(input: {
+  checked: number;
+  ids: number;
+  failures: string[];
+  unchecked?: string[];
+}): Omit<ReceiptProbeView, "at"> {
+  // Red only when a document we actually received fails verification.
   if (input.failures.length > 0) {
     return { status: "red", detail: input.failures.slice(0, 3).join(" · "), checked: input.checked };
+  }
+  const unchecked = input.unchecked ?? [];
+  if (unchecked.length > 0) {
+    return {
+      status: "degraded",
+      detail: `could not check — ${unchecked.slice(0, 3).join(" · ")}`,
+      checked: input.checked,
+    };
   }
   if (input.ids < RECEIPT_DETAIL_COUNT || input.checked < RECEIPT_DETAIL_COUNT) {
     return {
@@ -194,61 +239,91 @@ export function decideReceiptProbe(input: { checked: number; ids: number; failur
   }
   return {
     status: "ok",
-    detail: `verified ${input.checked} served receipt documents against ${BADGE_RECEIPT_KID}`,
+    detail: `verified ${input.checked} served receipt documents against the served JWKS`,
     checked: input.checked,
   };
 }
 
+/** Empty means the probe has no base URL. Never substitute a production host. */
+export function receiptApiBase(apiBaseUrl: string | undefined): string | null {
+  const trimmed = apiBaseUrl?.trim().replace(/\/+$/, "") ?? "";
+  return trimmed || null;
+}
+
+export function receiptProbeDetail(view: Pick<ReceiptProbeView, "detail" | "at">, nowMs: number): string {
+  if (view.at == null) return view.detail;
+  const seconds = Math.max(0, Math.round((nowMs - view.at) / 1000));
+  const age = seconds < 90 ? `${seconds}s ago` : `${Math.round(seconds / 60)}m ago`;
+  return `${view.detail} · ${age}`;
+}
+
 /** Fetch the list, two per-id receipts, and verify every served document. */
+function couldNotCheck(reason: string): Omit<ReceiptProbeView, "at"> {
+  return { status: "degraded", detail: `could not check — ${reason}`, checked: 0 };
+}
+
 export async function runReceiptSignatureProbe(input: {
   apiBaseUrl: string;
   fetchImpl: typeof fetch;
+  timeoutMs?: number;
 }): Promise<Omit<ReceiptProbeView, "at">> {
-  const base = input.apiBaseUrl.replace(/\/+$/, "");
+  const base = receiptApiBase(input.apiBaseUrl);
+  if (!base) return { status: "degraded", detail: "not configured", checked: 0 };
+  const timeoutMs = input.timeoutMs ?? RECEIPT_FETCH_TIMEOUT_MS;
   try {
-    const jwk = badgeJwk(await readJson(input.fetchImpl, `${base}${BADGE_RECEIPT_JWKS_PATH}`));
-    const list = await readJson(input.fetchImpl, `${base}/badges?limit=${RECEIPT_LIST_LIMIT}`);
+    const jwks = await readJson(input.fetchImpl, `${base}${BADGE_RECEIPT_JWKS_PATH}`, timeoutMs);
+    const keys = signingKeys(jwks);
+    if (keys.length === 0) return couldNotCheck("published JWKS has no signing keys");
+    const list = await readJson(input.fetchImpl, `${base}/badges?limit=${RECEIPT_LIST_LIMIT}`, timeoutMs);
     const items = list && typeof list === "object" && Array.isArray((list as { items?: unknown }).items)
       ? (list as { items: unknown[] }).items
       : [];
-    const chosen: Array<{ id: string; listed: Record<string, unknown> | null }> = [];
+    const chosen: Array<{ sessionId: string | null; receiptId: string | null; listed: Record<string, unknown> | null }> = [];
     for (const item of items) {
-      const id = sessionIdOf(item);
-      if (!id || chosen.some((row) => row.id === id)) continue;
+      const sessionId = sessionIdOf(item);
+      const receiptId = receiptIdOf(item);
+      if (!sessionId && !receiptId) continue;
+      if (chosen.some((row) => row.sessionId === sessionId && row.receiptId === receiptId)) continue;
       const listed = item && typeof item === "object" ? servedDocument(item) : null;
-      chosen.push({ id, listed });
+      chosen.push({ sessionId, receiptId, listed });
       if (chosen.length === RECEIPT_DETAIL_COUNT) break;
     }
     const failures: string[] = [];
+    const unchecked: string[] = [];
     let checked = 0;
     const check = (label: string, document: Record<string, unknown> | null) => {
       if (!document) {
-        failures.push(`${label} served no receipt document`);
+        unchecked.push(`${label} served no receipt document`);
         return;
       }
       checked += 1;
       try {
-        verifyServedReceipt(document, jwk);
+        verifyServedReceipt(document, { keys });
       } catch (error) {
         failures.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
       }
     };
-    for (const row of chosen) {
-      if (row.listed) check(`list ${row.id}`, row.listed);
+    const fetchOne = async (label: string, url: string) => {
       try {
-        const detail = await readJson(input.fetchImpl, `${base}/badges/${encodeURIComponent(row.id)}`);
-        check(`badges/${row.id}`, servedDocument(detail));
+        const detail = await readJson(input.fetchImpl, url, timeoutMs);
+        check(label, servedDocument(detail));
       } catch (error) {
-        failures.push(`badges/${row.id}: ${error instanceof Error ? error.message : String(error)}`);
+        unchecked.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
       }
+    };
+    for (const row of chosen) {
+      const labelId = row.sessionId ?? row.receiptId ?? "item";
+      if (row.listed) check(`list ${labelId}`, row.listed);
+      if (row.sessionId) await fetchOne(`badges/${row.sessionId}`, `${base}/badges/${encodeURIComponent(row.sessionId)}`);
+      if (row.receiptId) await fetchOne(`receipts/${row.receiptId}`, `${base}/receipts/${encodeURIComponent(row.receiptId)}`);
     }
-    return decideReceiptProbe({ checked, ids: chosen.length, failures });
+    return decideReceiptProbe({ checked, ids: chosen.length, failures, unchecked });
   } catch (error) {
     const transport = classifyTransportFailure(error);
     const reason = transport.code === "UNKNOWN"
       ? (error instanceof Error ? error.message : String(error))
       : describeTransportFailure(transport);
-    return { status: "red", detail: `receipt signature probe failed — ${reason}`, checked: 0 };
+    return couldNotCheck(reason);
   }
 }
 
@@ -284,8 +359,8 @@ export function createReceiptProbeCache(deps: {
           lastRunAt = nowMs;
         } catch (error) {
           view = {
-            status: "red",
-            detail: `receipt signature probe failed — ${error instanceof Error ? error.message : String(error)}`,
+            status: "degraded",
+            detail: `could not check — ${error instanceof Error ? error.message : String(error)}`,
             checked: 0,
             at: nowMs,
           };
