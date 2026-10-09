@@ -164,6 +164,29 @@ describe("incidentRows", () => {
   test("undefined history yields no rows", () => {
     expect(incidentRows(undefined, FIXTURE_NOW)).toEqual([]);
   });
+
+  test("a suppressed duplicate and a dedupe-closed phantom are not incidents", () => {
+    const rows = incidentRows(
+      {
+        incidents: [
+          { id: "real", probe: "money_path", severity: "degraded", peakSeverity: "red", startedAt: FIXTURE_NOW - 4_000, endedAt: null },
+          { id: "dup", probe: "money_path", severity: "degraded", startedAt: FIXTURE_NOW - 3_000, endedAt: null, suppressed: true },
+          {
+            id: "phantom",
+            probe: "capabilities",
+            severity: "degraded",
+            startedAt: FIXTURE_NOW - 86_400_000,
+            endedAt: FIXTURE_NOW,
+            note: "closed as a duplicate of the open capabilities episode",
+          },
+        ],
+      },
+      FIXTURE_NOW,
+    );
+    expect(rows.map((row) => row.id)).toEqual(["real"]);
+    expect(rows[0]?.peakLabel).toBe("peaked red");
+    expect(rows[0]?.severity).toBe("degraded");
+  });
 });
 
 describe("worstOpsTone — one severity order for every roll-up", () => {

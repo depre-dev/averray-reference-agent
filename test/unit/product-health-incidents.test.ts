@@ -241,6 +241,95 @@ describe("one open incident per check", () => {
     expect(ongoing).toHaveLength(2);
   });
 
+  it("one closed episode whose start slides from tick 5 through 40 stays one row", () => {
+    // The ring forgets the original start, so each later tick derived a new id
+    // with the same recovery instant. That minted 35 closed rows for one episode.
+    let persisted = [
+      incident({
+        id: "money_path-5",
+        probe: "money_path",
+        severity: "degraded",
+        startedAt: 5,
+        endedAt: 40,
+        note: "recovered",
+      }),
+    ];
+    for (let start = 6; start <= 40; start += 1) {
+      const derived = incident({
+        id: `money_path-${start}`,
+        probe: "money_path",
+        severity: "degraded",
+        startedAt: start,
+        endedAt: 40,
+        note: "recovered",
+      });
+      const r = reconcileIncidents({ persisted, derived: [derived], limit: 200, nowMs: 100 });
+      persisted = r.merged;
+      expect(r.writes.filter((row) => row.id !== "money_path-5")).toEqual([]);
+    }
+    expect(persisted.filter((row) => row.probe === "money_path")).toEqual([
+      expect.objectContaining({ id: "money_path-5", startedAt: 5, endedAt: 40 }),
+    ]);
+  });
+
+  it("drops duplicate opens instead of closing them at now", () => {
+    const persisted = [
+      incident({ id: "capabilities-1", probe: "capabilities", startedAt: 1, note: "first" }),
+      incident({ id: "capabilities-2", probe: "capabilities", startedAt: 2, note: "dup" }),
+      incident({ id: "capabilities-3", probe: "capabilities", startedAt: 3, note: "dup" }),
+    ];
+    const r = reconcileIncidents({
+      persisted,
+      derived: [incident({ id: "capabilities-50", probe: "capabilities", startedAt: 50, note: "still" })],
+      limit: 50,
+      nowMs: 10_000,
+      currentProbeStatus: new Map([["capabilities", "degraded"]]),
+    });
+    expect(r.merged.map((row) => row.id)).toEqual(["capabilities-1"]);
+    expect(r.merged.some((row) => row.endedAt === 10_000)).toBe(false);
+    const dropped = r.writes.filter((row) => row.suppressed);
+    expect(dropped.map((row) => row.id).sort()).toEqual(["capabilities-2", "capabilities-3"]);
+    expect(dropped.every((row) => row.endedAt == null)).toBe(true);
+  });
+
+  it("keeps a red peak after the ring has only the current amber reading", () => {
+    const persisted = [
+      incident({
+        id: "money_path-5",
+        probe: "money_path",
+        severity: "red",
+        peakSeverity: "red",
+        startedAt: 5,
+        endedAt: null,
+      }),
+    ];
+    const r = reconcileIncidents({
+      persisted,
+      derived: [
+        incident({
+          id: "money_path-80",
+          probe: "money_path",
+          severity: "degraded",
+          peakSeverity: "degraded",
+          startedAt: 80,
+          endedAt: null,
+          note: "eased",
+        }),
+      ],
+      limit: 50,
+      nowMs: 100,
+      currentProbeStatus: new Map([["money_path", "degraded"]]),
+    });
+    expect(r.merged).toHaveLength(1);
+    expect(r.merged[0]).toMatchObject({
+      id: "money_path-5",
+      startedAt: 5,
+      severity: "degraded",
+      peakSeverity: "red",
+      note: "eased",
+    });
+  });
+
   it("keeps the open episode when closed history would fill the cap", () => {
     const open = incident({ id: "capabilities-1", probe: "capabilities", startedAt: 1, endedAt: null });
     const closed = Array.from({ length: 4 }, (_, i) =>
@@ -253,6 +342,20 @@ describe("one open incident per check", () => {
 });
 
 describe("incident log I/O", () => {
+  it("round-trips a peak and a suppressed duplicate", async () => {
+    const path = await tmpLog();
+    await appendIncidents(
+      [
+        incident({ id: "kept", peakSeverity: "red", severity: "degraded" }),
+        incident({ id: "dup", suppressed: true, note: "dropped duplicate of the open api_latency episode" }),
+      ],
+      { path },
+    );
+    const read = await readIncidents(path);
+    expect(read.find((row) => row.id === "kept")).toMatchObject({ peakSeverity: "red", severity: "degraded" });
+    expect(read.find((row) => row.id === "dup")?.suppressed).toBe(true);
+  });
+
   it("round-trips, and a later record for an id supersedes the earlier one", async () => {
     const path = await tmpLog();
     await appendIncidents([incident()], { path });

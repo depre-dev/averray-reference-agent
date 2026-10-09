@@ -37,31 +37,42 @@ export function incidentLogPath(env: NodeJS.ProcessEnv = process.env): string {
  * that actually need writing, so a steady state writes nothing.
  */
 /**
- * One open episode per probe.
+ * One episode per probe and recovery.
  *
  * The sample ring forgets the original start, so each slide derived a new id
- * for the same still-degraded check. The old open record stayed open because
- * the probe was not ok. That is how the board reached "200 ongoing" with
- * capabilities and money_path repeated. A repeat adopts the open episode's
- * id and start. A later episode, after a recovery inside this buffer, is a
- * new incident.
+ * (`${probe}-${startedAt}`) for the same check. An open repeat adopts the open
+ * record. A closed repeat — the start slid, the recovery timestamp did not —
+ * adopts the persisted record with the same probe and endedAt. Without that,
+ * one episode over ticks 5–40 wrote a new closed row on every tick.
  */
-function adoptOpenEpisodes(
+function adoptPersistedEpisodes(
   persisted: readonly ProductHealthIncident[],
   derived: readonly ProductHealthIncident[],
 ): ProductHealthIncident[] {
   const openByProbe = earliestOpenByProbe(persisted);
+  const closedByEpisode = earliestClosedByProbeEndedAt(persisted);
   const earliestDerivedId = new Map<string, string>();
   for (const incident of [...derived].sort((a, b) => a.startedAt - b.startedAt)) {
     if (!earliestDerivedId.has(incident.probe)) earliestDerivedId.set(incident.probe, incident.id);
   }
   return derived.map((incident) => {
     const open = openByProbe.get(incident.probe);
-    if (!open) return incident;
-    if (earliestDerivedId.get(incident.probe) !== incident.id) return incident;
-    if (incident.startedAt < open.startedAt) return incident;
-    return { ...incident, id: open.id, startedAt: open.startedAt };
+    if (
+      open &&
+      earliestDerivedId.get(incident.probe) === incident.id &&
+      incident.startedAt >= open.startedAt
+    ) {
+      return { ...incident, id: open.id, startedAt: open.startedAt };
+    }
+    if (incident.endedAt == null) return incident;
+    const closed = closedByEpisode.get(`${incident.probe}:${incident.endedAt}`);
+    if (!closed || incident.startedAt < closed.startedAt) return incident;
+    return { ...incident, id: closed.id, startedAt: closed.startedAt };
   });
+}
+
+function visible(incident: ProductHealthIncident): boolean {
+  return incident.suppressed !== true;
 }
 
 function earliestOpenByProbe(
@@ -69,11 +80,59 @@ function earliestOpenByProbe(
 ): Map<string, ProductHealthIncident> {
   const map = new Map<string, ProductHealthIncident>();
   for (const incident of incidents) {
-    if (incident.endedAt != null) continue;
+    if (!visible(incident) || incident.endedAt != null) continue;
     const prev = map.get(incident.probe);
     if (!prev || incident.startedAt < prev.startedAt) map.set(incident.probe, incident);
   }
   return map;
+}
+
+/** Same probe and same recovery instant → the same closed episode. */
+function earliestClosedByProbeEndedAt(
+  incidents: readonly ProductHealthIncident[],
+): Map<string, ProductHealthIncident> {
+  const map = new Map<string, ProductHealthIncident>();
+  for (const incident of incidents) {
+    if (!visible(incident) || incident.endedAt == null) continue;
+    const key = `${incident.probe}:${incident.endedAt}`;
+    const prev = map.get(key);
+    if (!prev || incident.startedAt < prev.startedAt) map.set(key, incident);
+  }
+  return map;
+}
+
+function worseSeverity(
+  a: "degraded" | "red" | undefined,
+  b: "degraded" | "red" | undefined,
+): "degraded" | "red" {
+  return a === "red" || b === "red" ? "red" : "degraded";
+}
+
+/** Peak is the worse of what was already stored and what this ring still sees.
+ *  A peak that is only the current severity is left off the record, so a
+ *  steady red row stays identical to the derived one. The previous severity
+ *  still counts: when the reading eases, that red becomes the stored peak. */
+function withDurablePeak(
+  existing: ProductHealthIncident | undefined,
+  incident: ProductHealthIncident,
+): ProductHealthIncident {
+  const peakSeverity = worseSeverity(
+    existing?.peakSeverity ?? existing?.severity,
+    incident.peakSeverity ?? incident.severity,
+  );
+  if (peakSeverity === incident.severity && !existing?.peakSeverity) {
+    const { peakSeverity: _omit, ...rest } = incident;
+    return rest;
+  }
+  return { ...incident, peakSeverity };
+}
+
+function dropDuplicate(incident: ProductHealthIncident, reason: string): ProductHealthIncident {
+  return {
+    ...incident,
+    suppressed: true,
+    note: `${incident.note ? `${incident.note} · ` : ""}${reason}`,
+  };
 }
 
 export function reconcileIncidents(input: {
@@ -86,7 +145,7 @@ export function reconcileIncidents(input: {
   /** Clock for the recovery stamp; injected so the close is deterministic. */
   nowMs?: number;
 }): { merged: ProductHealthIncident[]; writes: ProductHealthIncident[] } {
-  const derivedInput = adoptOpenEpisodes(input.persisted, input.derived);
+  const derivedInput = adoptPersistedEpisodes(input.persisted, input.derived);
   const byId = new Map<string, ProductHealthIncident>();
   for (const incident of input.persisted) byId.set(incident.id, incident);
 
@@ -94,12 +153,37 @@ export function reconcileIncidents(input: {
   const derivedIds = new Set(derivedInput.map((i) => i.id));
   for (const incident of derivedInput) {
     const existing = byId.get(incident.id);
+    const next = withDurablePeak(existing, incident);
     // New incident, or one that changed state (usually open → closed). Comparing
     // the whole record also catches a note that sharpened as the run went on.
-    if (!existing || !sameIncident(existing, incident)) {
-      writes.push(incident);
-      byId.set(incident.id, incident);
+    if (!existing || !sameIncident(existing, next)) {
+      writes.push(next);
+      byId.set(next.id, next);
     }
+  }
+
+  // Extra open rows for a check that already has an open episode. Drop them
+  // before any close, so they never receive a made-up endedAt of `now`.
+  const keptOpen = earliestOpenByProbe([...byId.values()]);
+  for (const incident of byId.values()) {
+    if (!visible(incident) || incident.endedAt != null) continue;
+    const kept = keptOpen.get(incident.probe);
+    if (!kept || kept.id === incident.id) continue;
+    const dropped = dropDuplicate(incident, `dropped duplicate of the open ${incident.probe} episode`);
+    writes.push(dropped);
+    byId.set(dropped.id, dropped);
+  }
+
+  // Closed twins: the ring slid the start forward but the recovery instant is
+  // the same episode. Keep the earliest start; drop the rest.
+  const keptClosed = earliestClosedByProbeEndedAt([...byId.values()]);
+  for (const incident of byId.values()) {
+    if (!visible(incident) || incident.endedAt == null) continue;
+    const kept = keptClosed.get(`${incident.probe}:${incident.endedAt}`);
+    if (!kept || kept.id === incident.id) continue;
+    const dropped = dropDuplicate(incident, `dropped duplicate of the closed ${incident.probe} episode`);
+    writes.push(dropped);
+    byId.set(dropped.id, dropped);
   }
 
   // ORPHANS — an episode that was open when the process restarted.
@@ -123,7 +207,7 @@ export function reconcileIncidents(input: {
   if (status) {
     const closedAt = input.nowMs ?? Date.now();
     for (const incident of byId.values()) {
-      if (incident.endedAt != null) continue;
+      if (!visible(incident) || incident.endedAt != null) continue;
       if (derivedIds.has(incident.id)) continue; // this buffer still sees it
       // Not ok, or a probe we have no reading for at all → leave it open. An
       // incident must never be closed by absence of evidence.
@@ -138,24 +222,7 @@ export function reconcileIncidents(input: {
     }
   }
 
-  // Extra open rows for a check that already has an open episode. The earliest
-  // start is the one that is still true; the rest are the ring-slide duplicates.
-  const keptOpen = earliestOpenByProbe([...byId.values()]);
-  const closedAt = input.nowMs ?? Date.now();
-  for (const incident of byId.values()) {
-    if (incident.endedAt != null) continue;
-    const kept = keptOpen.get(incident.probe);
-    if (!kept || kept.id === incident.id) continue;
-    const closed: ProductHealthIncident = {
-      ...incident,
-      endedAt: closedAt,
-      note: `${incident.note ? `${incident.note} · ` : ""}closed as a duplicate of the open ${incident.probe} episode`,
-    };
-    writes.push(closed);
-    byId.set(closed.id, closed);
-  }
-
-  const merged = [...byId.values()]
+  const merged = [...byId.values()].filter(visible)
     .sort((a, b) => {
       // Open episodes stay inside the cap. They have the earliest start, so a
       // newest-first slice would drop the live one once history fills the limit.
@@ -171,9 +238,11 @@ export function reconcileIncidents(input: {
 function sameIncident(a: ProductHealthIncident, b: ProductHealthIncident): boolean {
   return (
     a.severity === b.severity &&
+    (a.peakSeverity ?? a.severity) === (b.peakSeverity ?? b.severity) &&
     a.startedAt === b.startedAt &&
     (a.endedAt ?? null) === (b.endedAt ?? null) &&
-    (a.note ?? "") === (b.note ?? "")
+    (a.note ?? "") === (b.note ?? "") &&
+    (a.suppressed === true) === (b.suppressed === true)
   );
 }
 
@@ -222,13 +291,17 @@ function parseIncidentLine(line: string): ProductHealthIncident | undefined {
     const startedAt = typeof record.startedAt === "number" && Number.isFinite(record.startedAt) ? record.startedAt : undefined;
     if (!id || !probe || !severity || startedAt === undefined) return undefined;
     const endedAt = typeof record.endedAt === "number" && Number.isFinite(record.endedAt) ? record.endedAt : null;
+    const peakSeverity =
+      record.peakSeverity === "red" || record.peakSeverity === "degraded" ? record.peakSeverity : undefined;
     return {
       id,
       probe,
       severity,
+      ...(peakSeverity ? { peakSeverity } : {}),
       startedAt,
       endedAt,
       ...(typeof record.note === "string" && record.note ? { note: record.note } : {}),
+      ...(record.suppressed === true ? { suppressed: true } : {}),
     };
   } catch {
     return undefined;

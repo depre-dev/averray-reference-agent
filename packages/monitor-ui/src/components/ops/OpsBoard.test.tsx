@@ -417,6 +417,30 @@ describe("OpsBoard — per-check strips and the durable log", () => {
     expect(row.textContent).toContain("ONGOING");
     expect(row.getAttribute("data-tone")).toBe("red");
   });
+
+  test("an eased episode paints its current severity and names the peak", () => {
+    const health = {
+      ...OPS_FIXTURE_STRESS,
+      history: {
+        ...OPS_FIXTURE_STRESS.history,
+        incidents: [
+          {
+            id: "eased",
+            probe: "money_path",
+            severity: "degraded" as const,
+            peakSeverity: "red" as const,
+            startedAt: OPS_FIXTURE_STRESS.at! - 60_000,
+            endedAt: null,
+            note: "eased to amber",
+          },
+        ],
+      },
+    };
+    const { getByTestId } = render(<OpsBoard health={health} nowMs={OPS_FIXTURE_STRESS.at! + 2_000} />);
+    const row = getByTestId("ops-incident-eased");
+    expect(row.getAttribute("data-tone")).toBe("degraded");
+    expect(row.textContent).toContain("peaked red");
+  });
 });
 
 describe("Overnight ledger supersessions", () => {

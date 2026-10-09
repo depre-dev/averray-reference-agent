@@ -215,6 +215,7 @@ function IncidentsColumn({ history, nowMs }: { history: HealthHistory | undefine
                   {r.ongoing
                     ? `ONGOING · ${r.durationLabel}`
                     : `${r.durationLabel} · ended ${formatAgo(r.endedAt ?? r.startedAt, nowMs)}`}
+                  {r.peakLabel ? ` · ${r.peakLabel}` : ""}
                 </span>
               </div>
             ))}

@@ -181,13 +181,20 @@ function isAwaitingDetail(probe: ProbeResult): boolean {
 export interface ProductHealthIncident {
   id: string;
   probe: string;
+  /** Severity of the latest bad sample. The board paints this, so a check that
+   *  has fallen back to amber must not keep glowing red. */
   severity: "degraded" | "red";
+  /** Worst severity seen for this episode. Kept after the red sample leaves
+   *  the ring, which is only about five hours long. */
+  peakSeverity?: "degraded" | "red";
   /** Epoch ms of the first check in the run. */
   startedAt: number;
   /** Epoch ms of recovery; null → still ongoing. */
   endedAt?: number | null;
   /** The probe's detail at the tail of the run — the incident description. */
   note?: string;
+  /** A duplicate row dropped by the one-time dedupe. Not an incident. */
+  suppressed?: boolean;
 }
 
 export interface ProductHealthHistoryBlock {
@@ -327,7 +334,20 @@ function deriveIncidents(history: ReadonlyArray<ProductHealthSnapshot>): Product
   for (const name of names) {
     let startedAt: number | null = null;
     let severity: "degraded" | "red" = "degraded";
+    let peakSeverity: "degraded" | "red" = "degraded";
     let note = "";
+    const push = (endedAt: number | null) => {
+      incidents.push({
+        id: `${name}-${startedAt}`,
+        probe: name,
+        severity,
+        peakSeverity,
+        startedAt: startedAt!,
+        endedAt,
+        note,
+      });
+      startedAt = null;
+    };
     for (const snap of history) {
       const probe = snap.probes.find((p) => p.name === name);
       // Do not treat root-cause suppression as recovery for a pre-existing
@@ -338,20 +358,21 @@ function deriveIncidents(history: ReadonlyArray<ProductHealthSnapshot>): Product
         (probe.status === "red" ||
           (probe.status === "degraded" && !isAwaitingDetail(probe)));
       if (bad) {
+        const sampleSeverity = probe!.status === "red" ? "red" : "degraded";
         if (startedAt === null) {
           startedAt = snap.at;
-          severity = "degraded";
+          peakSeverity = sampleSeverity;
+        } else if (sampleSeverity === "red") {
+          peakSeverity = "red";
         }
-        if (probe!.status === "red") severity = "red";
+        // Current reading, not the worst sample still sitting in the ring.
+        severity = sampleSeverity;
         note = probe!.detail;
       } else if (startedAt !== null) {
-        incidents.push({ id: `${name}-${startedAt}`, probe: name, severity, startedAt, endedAt: snap.at, note });
-        startedAt = null;
+        push(snap.at);
       }
     }
-    if (startedAt !== null) {
-      incidents.push({ id: `${name}-${startedAt}`, probe: name, severity, startedAt, endedAt: null, note });
-    }
+    if (startedAt !== null) push(null);
   }
   return incidents.sort((a, b) => b.startedAt - a.startedAt).slice(0, 12);
 }
