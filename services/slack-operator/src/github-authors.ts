@@ -35,7 +35,7 @@ export interface GithubAuthorsBlock {
   authors: GithubAuthorRow[];
 }
 
-export type GithubAuthorsUnavailable = "unauthorised" | "timeout" | "missing";
+export type GithubAuthorsUnavailable = "unauthorised" | "timeout" | "missing" | "unreachable";
 
 export interface GithubAuthorsSurface {
   /** The served warning, or null when this payload did not include it. */
@@ -134,7 +134,10 @@ export function githubAuthorSurface(input: {
 
 interface AuthorCache {
   surface: GithubAuthorsSurface;
+  /** When the retained block was read. */
   at: number;
+  /** When /admin/status was last attempted, including a hung or failed read. */
+  attemptedAt: number;
 }
 
 let authorCache: AuthorCache | null = null;
@@ -169,8 +172,20 @@ function abortAsTimeout(signal: AbortSignal): Promise<never> {
 
 function remember(surface: GithubAuthorsSurface, nowMs: number): GithubAuthorsSurface {
   const next = aged(surface, nowMs, nowMs);
-  authorCache = { surface: next, at: nowMs };
+  authorCache = { surface: next, at: nowMs, attemptedAt: nowMs };
   return next;
+}
+
+/** A failed attempt still starts the five-minute gap, and keeps any block we have. */
+function noteAttempt(nowMs: number, unavailable: GithubAuthorsUnavailable): GithubAuthorsSurface {
+  if (authorCache?.surface.block) {
+    const surface = { ...authorCache.surface, unavailable, stale: true };
+    authorCache = { surface, at: authorCache.at, attemptedAt: nowMs };
+    return aged(surface, authorCache.at, nowMs);
+  }
+  const surface: GithubAuthorsSurface = { warning: null, block: null, unavailable, at: nowMs, ageMs: 0 };
+  authorCache = { surface, at: nowMs, attemptedAt: nowMs };
+  return surface;
 }
 
 export async function readAdminGithubAuthors(input: {
@@ -184,15 +199,17 @@ export async function readAdminGithubAuthors(input: {
 }): Promise<GithubAuthorsSurface> {
   const nowMs = input.nowMs ?? Date.now();
   const interval = input.minIntervalMs ?? GITHUB_AUTHORS_POLL_MS;
-  if (authorCache && nowMs - authorCache.at < interval) {
+  if (authorCache && nowMs - authorCache.attemptedAt < interval) {
     return aged(authorCache.surface, authorCache.at, nowMs);
   }
 
   const timeoutMs = input.timeoutMs ?? GITHUB_AUTHORS_TIMEOUT_MS;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let stage: "session" | "fetch" = "session";
   try {
     const session = await Promise.race([input.getSession(), abortAsTimeout(controller.signal)]);
+    stage = "fetch";
     const base = (input.baseUrl ?? "https://api.averray.com").replace(/\/+$/, "");
     const response = await input.fetchImpl(`${base}/admin/status`, {
       headers: { accept: "application/json", authorization: `Bearer ${session.token}` },
@@ -207,11 +224,14 @@ export async function readAdminGithubAuthors(input: {
     const surface = githubAuthorSurface({ adminStatus: await response.json() });
     if (!surface.block) return remember({ ...surface, unavailable: "missing" }, nowMs);
     return remember(surface, nowMs);
-  } catch {
-    if (authorCache?.surface.block) {
-      return aged(authorCache.surface, authorCache.at, nowMs, { unavailable: "timeout", stale: true });
-    }
-    return { warning: null, block: null, unavailable: "timeout", at: nowMs, ageMs: 0 };
+  } catch (error) {
+    const aborted = controller.signal.aborted || (error instanceof Error && error.name === "AbortError");
+    const unavailable: GithubAuthorsUnavailable = aborted
+      ? "timeout"
+      : stage === "session"
+        ? "unauthorised"
+        : "unreachable";
+    return noteAttempt(nowMs, unavailable);
   } finally {
     clearTimeout(timer);
   }

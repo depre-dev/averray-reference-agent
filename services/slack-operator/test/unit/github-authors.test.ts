@@ -155,6 +155,57 @@ describe("readAdminGithubAuthors", () => {
     expect(second.ageMs).toBe(19_000);
   });
 
+  it("a hung route is not fetched again inside five minutes, and the block stays", async () => {
+    let calls = 0;
+    const hung = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+      calls += 1;
+      await new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          const error = new Error("aborted");
+          error.name = "AbortError";
+          reject(error);
+        });
+      });
+      return { ok: false, status: 500, json: async () => ({}) };
+    }) as typeof fetch;
+    const input = {
+      baseUrl: "https://api.example",
+      getSession: async () => ({ token: "t" }),
+      fetchImpl: hung,
+      timeoutMs: 20,
+      minIntervalMs: 5 * 60 * 1000,
+    };
+    const ok = (async () => ({ ok: true, status: 200, json: async () => blockBody })) as typeof fetch;
+    await readAdminGithubAuthors({ ...input, fetchImpl: ok, nowMs: 0, minIntervalMs: 0 });
+    const first = await readAdminGithubAuthors({ ...input, nowMs: 6 * 60_000 });
+    const second = await readAdminGithubAuthors({ ...input, nowMs: 7 * 60_000 });
+    expect(calls).toBe(1);
+    expect(first.block?.distinctAuthors).toBe(2);
+    expect(second.block?.distinctAuthors).toBe(2);
+    expect(second.unavailable).toBe("timeout");
+  });
+
+  it("a SIWE session failure is unauthorised and a network error is unreachable", async () => {
+    const session = await readAdminGithubAuthors({
+      baseUrl: "https://api.example",
+      getSession: async () => { throw new Error("siwe rejected"); },
+      fetchImpl: (async () => { throw new Error("should not fetch"); }) as typeof fetch,
+      nowMs: 1_000,
+      minIntervalMs: 0,
+    });
+    expect(session.unavailable).toBe("unauthorised");
+
+    __resetGithubAuthorsForTests();
+    const network = await readAdminGithubAuthors({
+      baseUrl: "https://api.example",
+      getSession: async () => ({ token: "t" }),
+      fetchImpl: (async () => { throw new Error("getaddrinfo ENOTFOUND"); }) as typeof fetch,
+      nowMs: 2_000,
+      minIntervalMs: 0,
+    });
+    expect(network.unavailable).toBe("unreachable");
+  });
+
   it("an unauthorised read is not a block of zeros", async () => {
     const surface = await readAdminGithubAuthors({
       baseUrl: "https://api.example",

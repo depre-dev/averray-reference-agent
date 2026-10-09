@@ -10,6 +10,7 @@ function ageLabel(ageMs: number): string {
 function unavailableReason(reason: GithubAuthorsSurface["unavailable"]): string {
   if (reason === "unauthorised") return "unauthorised";
   if (reason === "timeout") return "timeout";
+  if (reason === "unreachable") return "unreachable";
   return "missing block";
 }
 

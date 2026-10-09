@@ -682,7 +682,7 @@ export interface GithubAuthorsSurface {
     unattributedSessions: number | null;
     authors: GithubAuthorRow[];
   } | null;
-  unavailable?: "unauthorised" | "timeout" | "missing" | null;
+  unavailable?: "unauthorised" | "timeout" | "missing" | "unreachable" | null;
   at?: number | null;
   ageMs?: number | null;
   stale?: boolean;
