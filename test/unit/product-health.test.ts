@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { crossCheckLine } from "../../packages/monitor-ui/src/lib/monitor/ops-spec.js";
 
@@ -320,6 +320,45 @@ describe("cross-check cache rebuilds when configuration appears", () => {
     const line = crossCheckLine(collected.snapshot.flow?.payout, 3_000);
     expect(line?.text ?? "").not.toContain("✓");
     expect(line?.tone).toBe("degraded");
+  });
+});
+
+describe("receipt signature wiring", () => {
+  const previous = process.env.RECEIPT_SIGNATURE_PROBE_IN_TEST;
+
+  afterEach(() => {
+    if (previous === undefined) delete process.env.RECEIPT_SIGNATURE_PROBE_IN_TEST;
+    else process.env.RECEIPT_SIGNATURE_PROBE_IN_TEST = previous;
+    __resetGasAttributionForTests();
+  });
+
+  it("is present, not configured without a base URL, and ages a completed view", async () => {
+    process.env.RECEIPT_SIGNATURE_PROBE_IN_TEST = "1";
+    __resetGasAttributionForTests();
+    const missing = await collectProductHealthProbes(
+      cfg({ apiBaseUrl: undefined }),
+      combinedFetch({ healthBody: HEALTHY_BODY }),
+      { nowMs: 1_000 },
+    );
+    const absent = missing.probes.find((probe) => probe.name === "receipt_signature");
+    expect(absent?.status).toBe("degraded");
+    expect(absent?.detail).toBe("not configured");
+
+    __resetGasAttributionForTests();
+    await collectProductHealthProbes(
+      cfg({ apiBaseUrl: "https://api.example" }),
+      combinedFetch({ healthBody: HEALTHY_BODY }),
+      { nowMs: 2_000 },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const completed = await collectProductHealthProbes(
+      cfg({ apiBaseUrl: "https://api.example" }),
+      combinedFetch({ healthBody: HEALTHY_BODY }),
+      { nowMs: 5_000 },
+    );
+    const probe = completed.probes.find((row) => row.name === "receipt_signature");
+    expect(probe).toBeDefined();
+    expect(probe?.detail).toMatch(/· \d+s ago/);
   });
 });
 

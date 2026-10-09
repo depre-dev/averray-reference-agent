@@ -165,6 +165,51 @@ describe("runReceiptSignatureProbe", () => {
     expect(result.detail).toContain("timed out");
   });
 
+  it("a stalled response body times out as could not check", async () => {
+    const fetchImpl = (async (_url: RequestInfo | URL, init?: RequestInit) => ({
+      ok: true,
+      status: 200,
+      json: () => new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          const error = new Error("aborted");
+          error.name = "AbortError";
+          reject(error);
+        });
+      }),
+    })) as typeof fetch;
+    const result = await runReceiptSignatureProbe({
+      apiBaseUrl: "https://api.example",
+      fetchImpl,
+      timeoutMs: 20,
+    });
+    expect(result.status).toBe("degraded");
+    expect(result.detail).toMatch(/could not check — .*timed out/);
+  });
+
+  it("uses two different sessions when one session lists two receipts", async () => {
+    const urls: string[] = [];
+    const item = (sessionId: string, receiptId: string) => ({
+      schemaVersion: "averray.badge-list-item.v1",
+      document: { sessionId, receiptId },
+    });
+    await runReceiptSignatureProbe({
+      apiBaseUrl: "https://api.example",
+      fetchImpl: (async (url: RequestInfo | URL) => {
+        const href = String(url);
+        urls.push(href);
+        const body = href.endsWith("/.well-known/badge-receipt-jwks.json")
+          ? { keys: [published] }
+          : href.includes("/badges?limit=5")
+            ? { items: [item("job-a", "r1"), item("job-a", "r2"), item("job-b", "r3")] }
+            : {};
+        return { ok: true, status: 200, json: async () => body };
+      }) as typeof fetch,
+    });
+    const badges = urls.filter((url) => url.includes("/badges/") && !url.includes("limit"));
+    expect(badges.filter((url) => url.includes("job-a"))).toHaveLength(1);
+    expect(badges.some((url) => url.includes("job-b"))).toBe(true);
+  });
+
   it("reds an unknown kid and accepts a rotation onto badge-2", async () => {
     const unknown = signed({ schemaVersion: "averray.work-receipt.v1", sessionId: "job-9:0xabc", worker: "0xabc" }, "badge-9");
     const missed = await runReceiptSignatureProbe({

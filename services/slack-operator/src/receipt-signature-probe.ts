@@ -201,7 +201,9 @@ async function readJson(fetchImpl: typeof fetch, url: string, timeoutMs: number)
   try {
     const response = await fetchImpl(url, { headers: { accept: "application/json" }, signal: controller.signal });
     if (!response.ok) throw new Error(`${url} → HTTP ${response.status}`);
-    return response.json();
+    // Await the body before the timer is cleared. Returning the promise lets
+    // finally run first, so a stall after the headers never aborts.
+    return await response.json();
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw new Error(`${url} timed out`);
@@ -283,7 +285,9 @@ export async function runReceiptSignatureProbe(input: {
       const sessionId = sessionIdOf(item);
       const receiptId = receiptIdOf(item);
       if (!sessionId && !receiptId) continue;
-      if (chosen.some((row) => row.sessionId === sessionId && row.receiptId === receiptId)) continue;
+      // Two receipts for one session must not use both per-id slots.
+      if (sessionId && chosen.some((row) => row.sessionId === sessionId)) continue;
+      if (!sessionId && chosen.some((row) => row.receiptId === receiptId)) continue;
       const listed = item && typeof item === "object" ? servedDocument(item) : null;
       chosen.push({ sessionId, receiptId, listed });
       if (chosen.length === RECEIPT_DETAIL_COUNT) break;
