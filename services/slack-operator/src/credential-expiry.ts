@@ -290,13 +290,21 @@ export async function collectCredentialExpiries(input: {
 /** Warn this long before Roles Anywhere notAfter. */
 export const ROLES_ANYWHERE_WARN_MS = EXPIRY_WARN_MS;
 
-/** KMS lastSignAt older than this is stale when settlements happened in the window. */
-export const KMS_SIGN_STALE_MS = 48 * 60 * 60 * 1000;
+/** One credential component as /health serves it. `state: "unused"` is what a
+ *  restart looks like: lastSignAt lives in memory and comes back empty. */
+export interface HealthCredentialComponent {
+  ok?: boolean | null;
+  state?: string | null;
+  reason?: string | null;
+  notAfter?: string | number | null;
+  kid?: string | null;
+  lastSignAt?: string | number | null;
+}
 
 export interface HealthSignerCredentials {
-  rolesAnywhere?: { notAfter?: string | number | null };
-  badgeReceiptSigner?: { kid?: string | null; ok?: boolean | null };
-  kms?: { lastSignAt?: string | number | null };
+  rolesAnywhere?: HealthCredentialComponent;
+  badgeReceiptSigner?: HealthCredentialComponent;
+  kms?: HealthCredentialComponent;
 }
 
 export interface SignerCredentialReading {
@@ -321,85 +329,111 @@ function ageLabel(ms: number): string {
   return `${Math.round(hours / 24)}d ago`;
 }
 
+function componentReason(component: HealthCredentialComponent | undefined): string | null {
+  const reason = component?.reason;
+  return typeof reason === "string" && reason.trim() ? reason.trim() : null;
+}
+
+/** Restart clears the in-memory last sign. That is unused, not a stale signer. */
+function isUnusedState(component: HealthCredentialComponent | undefined): boolean {
+  if (!component || component.ok === false) return false;
+  return String(component.state ?? "").trim().toLowerCase() === "unused";
+}
+
+function rolesAnywhereLine(
+  component: HealthCredentialComponent | undefined,
+  nowMs: number,
+): { text: string; tone: ExpiryTone } {
+  if (component?.ok === false) {
+    return { text: `Roles Anywhere — ${componentReason(component) ?? "not ok"}`, tone: "red" };
+  }
+  const notAfter = epochMs(component?.notAfter);
+  if (notAfter === null) {
+    return { text: "Roles Anywhere — notAfter not reported", tone: "degraded" };
+  }
+  const remaining = notAfter - nowMs;
+  const days = daysUntil(notAfter, nowMs);
+  if (remaining <= 0) {
+    const ago = Math.abs(days);
+    return { text: ago === 0 ? "Roles Anywhere — EXPIRED" : `Roles Anywhere — EXPIRED ${ago}d ago`, tone: "red" };
+  }
+  if (remaining <= ROLES_ANYWHERE_WARN_MS) {
+    return { text: `Roles Anywhere — expires in ${days}d`, tone: "degraded" };
+  }
+  return { text: `Roles Anywhere — ${days}d left`, tone: "ok" };
+}
+
+function badgeSignerLine(component: HealthCredentialComponent | undefined): { text: string; tone: ExpiryTone } {
+  const kid = typeof component?.kid === "string" && component.kid.trim() ? component.kid.trim() : null;
+  const label = kid ? `badge receipt signer kid ${kid}` : "badge receipt signer";
+  if (component?.ok === false) {
+    return { text: `${label} — ${componentReason(component) ?? "not ok"}`, tone: "red" };
+  }
+  if (isUnusedState(component)) {
+    return { text: `${label} — not used since backend start`, tone: "ok" };
+  }
+  if (!component || component.ok == null) {
+    return { text: `${label} — ok not reported`, tone: "degraded" };
+  }
+  return { text: `${label} ok`, tone: kid ? "ok" : "degraded" };
+}
+
+function kmsLine(
+  component: HealthCredentialComponent | undefined,
+  nowMs: number,
+): { text: string; tone: ExpiryTone } {
+  if (component?.ok === false) {
+    return { text: `kms — ${componentReason(component) ?? "not ok"}`, tone: "red" };
+  }
+  if (isUnusedState(component)) {
+    return { text: "kms — not used since backend start", tone: "ok" };
+  }
+  const lastSignAt = epochMs(component?.lastSignAt);
+  if (lastSignAt === null) return { text: "kms last sign not reported", tone: "degraded" };
+  return { text: `kms last sign ${ageLabel(nowMs - lastSignAt)}`, tone: "ok" };
+}
+
 /**
  * /health.serviceHealth.components.credentials, as served.
  *
- * TLS expiry is a different artefact. This only renders the three signer
- * facts the backend already computed. Null when the block is absent — an
- * older /health is not a missing credential.
+ * TLS expiry is a different artefact. This renders the three signer facts the
+ * backend already computed: Roles Anywhere notAfter, and each component's own
+ * ok / state / reason. A missing block is "credentials not reported" — it must
+ * not disappear behind a green TLS line.
  */
 export function describeSignerCredentials(input: {
   credentials: HealthSignerCredentials | null | undefined;
   nowMs: number;
-  /** True when settlements happened inside the KMS staleness window. */
-  settlementsInWindow: boolean;
-}): SignerCredentialReading | null {
+}): SignerCredentialReading {
   const credentials = input.credentials;
-  if (!credentials) return null;
+  if (credentials == null) return { status: "degraded", detail: "credentials not reported" };
 
-  const lines: Array<{ text: string; tone: ExpiryTone }> = [];
-
-  const notAfter = epochMs(credentials.rolesAnywhere?.notAfter);
-  if (!credentials.rolesAnywhere || notAfter === null) {
-    lines.push({ text: "Roles Anywhere — notAfter not reported", tone: "degraded" });
-  } else {
-    const remaining = notAfter - input.nowMs;
-    const days = daysUntil(notAfter, input.nowMs);
-    if (remaining <= 0) {
-      lines.push({ text: `Roles Anywhere — EXPIRED ${Math.abs(days)}d ago`, tone: "red" });
-    } else if (remaining <= ROLES_ANYWHERE_WARN_MS) {
-      lines.push({ text: `Roles Anywhere — expires in ${days}d`, tone: "degraded" });
-    } else {
-      lines.push({ text: `Roles Anywhere — ${days}d left`, tone: "ok" });
-    }
-  }
-
-  const signer = credentials.badgeReceiptSigner;
-  const kid = typeof signer?.kid === "string" && signer.kid.trim() ? signer.kid.trim() : null;
-  if (!signer || signer.ok == null) {
-    lines.push({
-      text: `badge receipt signer ${kid ? `kid ${kid} ` : ""}ok not reported`,
-      tone: "degraded",
-    });
-  } else if (signer.ok === false) {
-    lines.push({
-      text: `badge receipt signer ${kid ? `kid ${kid} ` : ""}not ok`,
-      tone: "red",
-    });
-  } else {
-    lines.push({
-      text: `badge receipt signer kid ${kid ?? "not reported"} ok`,
-      tone: kid ? "ok" : "degraded",
-    });
-  }
-
-  const lastSignAt = epochMs(credentials.kms?.lastSignAt);
-  if (lastSignAt === null) {
-    lines.push({
-      text: input.settlementsInWindow
-        ? "kms lastSignAt not reported — settlements happened in the last 48h"
-        : "kms lastSignAt not reported",
-      tone: input.settlementsInWindow ? "degraded" : "ok",
-    });
-  } else {
-    const age = input.nowMs - lastSignAt;
-    const stale = age > KMS_SIGN_STALE_MS;
-    if (stale && input.settlementsInWindow) {
-      lines.push({
-        text: `kms last sign ${ageLabel(age)} — settlements happened in that window`,
-        tone: "degraded",
-      });
-    } else if (stale) {
-      lines.push({ text: `kms last sign ${ageLabel(age)} — no settlements in that window`, tone: "ok" });
-    } else {
-      lines.push({ text: `kms last sign ${ageLabel(age)}`, tone: "ok" });
-    }
-  }
-
+  const lines = [
+    rolesAnywhereLine(credentials.rolesAnywhere, input.nowMs),
+    badgeSignerLine(credentials.badgeReceiptSigner),
+    kmsLine(credentials.kms, input.nowMs),
+  ];
   const rank: Record<ExpiryTone, number> = { ok: 0, awaiting: 1, degraded: 2, red: 3 };
   const worst = lines.reduce((acc, line) => (rank[line.tone] > rank[acc] ? line.tone : acc), "ok" as ExpiryTone);
   const status = worst === "red" ? "red" : worst === "ok" ? "ok" : "degraded";
   const lead = lines.filter((line) => line.tone !== "ok");
   const rest = lines.filter((line) => line.tone === "ok");
   return { status, detail: [...lead, ...rest].map((line) => line.text).join(" · ") };
+}
+
+/** Signer facts lead. A green TLS reading must not hide a missing credentials block. */
+export function mergeCredentialReadings(
+  tls: SignerCredentialReading | null,
+  signer: SignerCredentialReading | null,
+): SignerCredentialReading | null {
+  if (!tls && !signer) return null;
+  const rank = { ok: 0, degraded: 1, red: 2 } as const;
+  const status = !tls
+    ? signer!.status
+    : !signer
+      ? tls.status
+      : rank[tls.status] >= rank[signer.status]
+        ? tls.status
+        : signer.status;
+  return { status, detail: [signer?.detail, tls?.detail].filter(Boolean).join(" · ") };
 }

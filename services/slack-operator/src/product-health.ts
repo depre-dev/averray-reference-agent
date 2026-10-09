@@ -46,6 +46,7 @@ import {
   collectCredentialExpiries,
   credentialExpiryProbe,
   describeSignerCredentials,
+  mergeCredentialReadings,
   tlsCertReader,
 } from "./credential-expiry.js";
 import { bankFeedIsDisabled } from "./bank-feed.js";
@@ -887,9 +888,24 @@ export interface ProductHealthPayload {
     ok?: boolean;
     components?: {
       credentials?: {
-        rolesAnywhere?: { notAfter?: string | number | null };
-        badgeReceiptSigner?: { kid?: string | null; ok?: boolean | null };
-        kms?: { lastSignAt?: string | number | null };
+        rolesAnywhere?: {
+          ok?: boolean | null;
+          state?: string | null;
+          reason?: string | null;
+          notAfter?: string | number | null;
+        };
+        badgeReceiptSigner?: {
+          ok?: boolean | null;
+          state?: string | null;
+          reason?: string | null;
+          kid?: string | null;
+        };
+        kms?: {
+          ok?: boolean | null;
+          state?: string | null;
+          reason?: string | null;
+          lastSignAt?: string | number | null;
+        };
       };
     };
   };
@@ -2871,23 +2887,6 @@ export async function chainBlockAge(input: {
   }
 }
 
-function mergeCredentialProbe(
-  tls: { status: "ok" | "degraded" | "red"; detail: string } | null,
-  signer: { status: "ok" | "degraded" | "red"; detail: string } | null,
-): ProbeResult | null {
-  if (!tls && !signer) return null;
-  const rank = { ok: 0, degraded: 1, red: 2 } as const;
-  const status = !tls
-    ? signer!.status
-    : !signer
-      ? tls.status
-      : rank[tls.status] >= rank[signer.status]
-        ? tls.status
-        : signer.status;
-  const detail = [signer?.detail, tls?.detail].filter(Boolean).join(" · ");
-  return { name: "credential_expiry", status, detail };
-}
-
 export async function collectProductHealthProbes(
   config: ProductHealthConfig,
   fetchImpl: typeof fetch = fetch,
@@ -3109,17 +3108,17 @@ export async function collectProductHealthProbes(
           readCert: tlsCertReader(),
         })
       : null; // nothing configured ⇒ no TLS probe, not a probe with nothing to say
-  const settled24h = pickNum(h.body?.settlement?.settled24h) ?? 0;
-  const paidSettled24h = pickNum(h.body?.settlement?.paidSettled24h) ?? 0;
   const signerCredentials = describeSignerCredentials({
     credentials: h.body?.serviceHealth?.components?.credentials,
     nowMs: chainCtx.nowMs,
-    settlementsInWindow: settled24h > 0 || paidSettled24h > 0,
   });
   const tlsCredentialProbe = credentialExpiries
     ? credentialExpiryProbe({ credentials: credentialExpiries, nowMs: chainCtx.nowMs })
     : null;
-  const credentialProbe = mergeCredentialProbe(tlsCredentialProbe, signerCredentials);
+  const credentialReading = mergeCredentialReadings(tlsCredentialProbe, signerCredentials);
+  const credentialProbe = credentialReading
+    ? { name: "credential_expiry" as const, status: credentialReading.status, detail: credentialReading.detail }
+    : null;
 
   const bankRead = await readBankFeed({ url: config.bankFeedUrl, fetchImpl });
   const bank: BankBlock | undefined = bankRead.feed
