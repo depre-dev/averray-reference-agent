@@ -700,6 +700,34 @@ describe("probeSignerLiquidity (direct RPC)", () => {
     expect(r.detail).toContain("reward bank unreadable");
   });
 
+  it("a failing primary yields the balance from the next listed host, and names that host", async () => {
+    const fetchImpl = (async (url: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const target = String(url);
+      if (target.includes("polkadothub")) {
+        const inner = Object.assign(new Error("getaddrinfo ENOTFOUND services.polkadothub-rpc.com"), { code: "ENOTFOUND" });
+        throw Object.assign(new TypeError("fetch failed"), { cause: inner });
+      }
+      const method = rpcMethod(init ?? {});
+      const result = method === "eth_getBalance" ? "0xDE0B6B3A7640000" : "0x989680";
+      return { ok: true, status: 200, json: async () => ({ result }) } as unknown as Response;
+    }) as unknown as typeof fetch;
+    const r = await probeSignerLiquidity({
+      rpcEndpoints: [
+        "https://services.polkadothub-rpc.com/mainnet/",
+        "https://eth-rpc.polkadot.io/",
+      ],
+      signerAddress: "0xabc",
+      rewardBankLiquid: 10,
+      ...floors,
+      fetchImpl,
+    });
+    expect(r.status).toBe("ok");
+    expect(r.rpcOk).toBe(true);
+    expect(r.detail).toContain("via eth-rpc.polkadot.io");
+    expect(r.detail).not.toContain("fetch failed");
+    expect(r.detail).not.toContain("polkadothub");
+  });
+
   it("degraded when the balance read fails", async () => {
     const r = await probeSignerLiquidity({ rpcUrl: "http://rpc", signerAddress: "0xabc", rewardBankLiquid: 10, ...floors, fetchImpl: throwingFetch() });
     expect(r.status).toBe("degraded");

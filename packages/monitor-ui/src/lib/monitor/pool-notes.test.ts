@@ -16,6 +16,11 @@ const payout: PayoutEvidence = {
 };
 
 describe("gasPoolNote — what the meter above cannot say", () => {
+  test("names the RPC host that served the burn, when the read recorded one", () => {
+    const n = gasPoolNote({ ...gas, rpcHost: "eth-rpc.polkadot.io" })!;
+    expect(n.text).toContain("via eth-rpc.polkadot.io");
+  });
+
   test("answers what is draining the pool, without repeating the balance", () => {
     // The pool row already shows amount, floor and margin. Repeating them was
     // most of what made the old strip unreadable.

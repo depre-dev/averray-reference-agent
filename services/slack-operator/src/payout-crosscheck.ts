@@ -82,6 +82,8 @@ export function decideCrossCheck(input: {
   secondary: EndpointReading | null;
   /** Why the secondary read failed, when it did. */
   secondaryReason?: string | null;
+  /** Why the primary read produced no count, when it did not. */
+  primaryReason?: string | null;
   /** The pinned range both endpoints were asked about. */
   range?: { fromBlock: number; toBlock: number } | null;
   lastAgreedAtMs: number | null;
@@ -121,9 +123,10 @@ export function decideCrossCheck(input: {
   }
 
   if (input.primary?.count == null) {
+    const why = input.primaryReason ?? "the primary read produced no count to compare";
     return {
       status: "unavailable",
-      detail: "cross-check could not run — the primary read produced no count to compare",
+      detail: `cross-check could not run — ${why}`,
       overdue: agedOut,
       lastAgreedAtMs: input.lastAgreedAtMs,
     };

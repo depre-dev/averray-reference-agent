@@ -26,6 +26,7 @@
 // would summarise to "0 DOT spent" — which reads as free rather than unknown.
 
 import type { GasTx } from "./gas-spend.js";
+import { describeFeedError, hostFromUrl } from "./probe-transport.js";
 
 export interface GasReadResult {
   /** Transactions sent BY the signer. Empty with a reason on failure. */
@@ -44,6 +45,8 @@ export interface GasReadResult {
   blocksScanned: number;
   /** Set when nothing could be read. Never accompanied by a zero total. */
   reason?: string;
+  /** Host that served this read. Absent when the read failed. */
+  rpcHost?: string;
 }
 
 /** Enough for a busy day at the observed ~87/day, with headroom. */
@@ -151,9 +154,10 @@ export async function readGasSpend(input: {
         .sort((a, b) => b.count - a.count),
       truncated,
       blocksScanned: head - fromBlock,
+      ...(hostFromUrl(input.rpcUrl) ? { rpcHost: hostFromUrl(input.rpcUrl)! } : {}),
     };
   } catch (error) {
     // Rate limit, capped range, dead endpoint — all unknown, never "0 DOT".
-    return unreadable(`gas attribution unreadable — ${error instanceof Error ? error.message : String(error)}`);
+    return unreadable(`gas attribution unreadable — ${describeFeedError(error, input.rpcUrl)}`);
   }
 }

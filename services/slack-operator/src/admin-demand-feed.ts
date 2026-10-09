@@ -1,3 +1,5 @@
+import { describeFeedError } from "./probe-transport.js";
+
 export type AdminDemandWindow = "48h" | "30d";
 
 export interface AdminDemandAuthSession {
@@ -170,5 +172,5 @@ function readCollectionSince(value: unknown): string | undefined {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return describeFeedError(error);
 }

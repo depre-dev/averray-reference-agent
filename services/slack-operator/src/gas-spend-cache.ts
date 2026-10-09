@@ -40,6 +40,8 @@ export interface GasSpendSnapshot extends GasSpend {
   otherSenders: Array<{ address: string; count: number }>;
   /** Present when the last refresh failed. The figures are the PREVIOUS ones. */
   staleReason?: string;
+  /** Host that served this snapshot. */
+  rpcHost?: string;
 }
 
 /**
@@ -95,6 +97,7 @@ export function createGasSpendCache(deps: {
   // stacks passes, and each is 174 RPC calls against an endpoint that
   // rate-limits by answering 404.
   let running = false;
+  let startedAt: number | null = null;
 
   return {
     read(nowMs) {
@@ -103,6 +106,11 @@ export function createGasSpendCache(deps: {
       // line" and "gas could not be read" are different facts and only one of
       // them is actionable.
       if (firstError) return { unreadable: true, reason: firstError.reason, at: firstError.at };
+      // A read that is still in flight is not the same as a feature that was
+      // never started. Null here used to survive a hung RPC forever.
+      if (running) {
+        return { unreadable: true, reason: "gas read in progress — no figure yet", at: startedAt ?? nowMs };
+      }
       return null;
     },
 
@@ -110,6 +118,7 @@ export function createGasSpendCache(deps: {
       if (running) return;
       if (snapshot && nowMs - snapshot.at < refreshMs) return;
       running = true;
+      startedAt = nowMs;
       void (async () => {
         try {
           const result = await deps.read();
@@ -133,6 +142,7 @@ export function createGasSpendCache(deps: {
             blocksScanned: result.blocksScanned,
             truncated: result.truncated,
             otherSenders: result.otherSenders,
+            ...(result.rpcHost ? { rpcHost: result.rpcHost } : {}),
           };
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);

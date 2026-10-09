@@ -1,4 +1,5 @@
 import type { AdminDemandAuthSession } from "./admin-demand-feed.js";
+import { describeFeedError } from "./probe-transport.js";
 
 export type OvernightLedgerWindow = "12h" | "24h" | "48h";
 
@@ -144,5 +145,5 @@ function unavailableFeed(
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return describeFeedError(error);
 }

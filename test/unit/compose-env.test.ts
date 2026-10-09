@@ -63,8 +63,10 @@ describe("compose environment wiring", () => {
     expect(calibration).toContain(
       "PRODUCT_HEALTH_TREASURY_RESERVE_ZERO_REASON=Mainnet payouts are funded from the signer reward bank; the treasury multisig intentionally holds no USDC float.",
     );
-    expect(calibration).toContain("PRODUCT_HEALTH_RPC_URL=https://services.polkadothub-rpc.com/mainnet/");
-    expect(calibration).toContain("PRODUCT_HEALTH_RPC_BACKUPS=https://eth-rpc.polkadot.io/");
+    expect(calibration).toMatch(/^PRODUCT_HEALTH_RPC_URL=https:\/\/eth-rpc\.polkadot\.io\/$/m);
+    expect(calibration).toMatch(/^PRODUCT_HEALTH_RPC_BACKUPS=$/m);
+    expect(calibration).not.toMatch(/^PRODUCT_HEALTH_RPC_(URL|BACKUPS)=.*polkadothub-rpc\.com/m);
+    expect(calibration).toContain("Blockscout");
     expect(calibration).toContain("OPS_AUTOREMEDIATE_ENABLED=true");
     expect(calibration).toContain("GITHUB_MONITOR_ENRICH_TIMEOUT_MS=5000");
   });

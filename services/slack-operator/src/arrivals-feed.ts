@@ -22,6 +22,8 @@
 // Absent therefore stays ABSENT rather than becoming zero — a zero here is a
 // measurement, and in that case we have not made one.
 
+import { describeFeedError } from "./probe-transport.js";
+
 export const ARRIVALS_SCHEMA_VERSION = "averray.arrivals.v1";
 export const ARRIVAL_STAGES = [
   "reached",
@@ -183,16 +185,15 @@ export async function readArrivalsFeed(input: {
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), input.timeoutMs ?? ARRIVALS_FEED_TIMEOUT_MS);
+  const url = new URL("/monitor/arrivals", `${baseUrl.replace(/\/+$/, "")}/`).toString();
   try {
-    const url = new URL("/monitor/arrivals", `${baseUrl.replace(/\/+$/, "")}/`).toString();
     const response = await input.fetchImpl(url, { signal: controller.signal });
     if (!response.ok) {
       return { unavailable: `arrivals feed unreachable — platform returned HTTP ${response.status}` };
     }
     return normalizeArrivalsFeed(await response.json());
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { unavailable: `arrivals feed unreachable — ${message}` };
+    return { unavailable: `arrivals feed unreachable — ${describeFeedError(error, url)}` };
   } finally {
     clearTimeout(timer);
   }

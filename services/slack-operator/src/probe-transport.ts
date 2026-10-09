@@ -124,6 +124,56 @@ export function classifyTransportFailure(err: unknown): TransportFailure {
   return { kind: kindFor(resolved, message), code: resolved, message };
 }
 
+const NAMED_FEED_CODES = new Set(["ENOTFOUND", "ECONNREFUSED", "ETIMEDOUT"]);
+
+/** Host only, never the path or query. Provider URLs carry keys. */
+export function hostFromUrl(url: string | undefined): string | null {
+  const raw = (url ?? "").trim();
+  if (!raw) return null;
+  try {
+    return new URL(raw).host || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The code a feed should print, when the failure is one an operator can act on.
+ *
+ * Undici's outer message is "fetch failed". The code lives on `error.cause`.
+ * Aborting our own timeout is reported as ETIMEDOUT: that is what happened,
+ * and ABORT_ERR does not tell anyone which limit fired.
+ */
+export function namedFeedCode(failure: TransportFailure): string | null {
+  if (NAMED_FEED_CODES.has(failure.code)) return failure.code;
+  if (failure.kind === "dns") return failure.code === "UNKNOWN" ? "ENOTFOUND" : failure.code;
+  if (failure.kind === "timeout" || failure.code === "ABORT_ERR" || /abort/i.test(failure.message)) {
+    return failure.code === "UNKNOWN" || failure.code === "ABORT_ERR" ? "ETIMEDOUT" : failure.code;
+  }
+  if (failure.kind === "connect") {
+    if (failure.code !== "UNKNOWN") return failure.code;
+    if (/ECONNREFUSED/i.test(failure.message)) return "ECONNREFUSED";
+  }
+  return null;
+}
+
+/**
+ * Feed error text: the cause code and the host, never undici's "fetch failed".
+ *
+ * "ENOTFOUND eth-rpc.polkadot.io" — the code is what you grep for, the host is
+ * which name failed. A message that is already specific ("HTTP 503") is kept.
+ */
+export function describeFeedError(error: unknown, url?: string): string {
+  const failure = classifyTransportFailure(error);
+  const host = hostFromUrl(url);
+  const code = namedFeedCode(failure);
+  if (code) return host ? `${code} ${host}` : code;
+  const message = failure.message && failure.message !== "fetch failed" ? failure.message : "";
+  if (message && host) return `${message} (${host})`;
+  if (message) return message;
+  return host ? `transport failed ${host}` : "transport failed";
+}
+
 /** Human phrasing for the fault, cause code included. "DNS resolution failed
  *  (ENOTFOUND)" — the kind is for reading, the code is what you grep for. */
 export function describeTransportFailure(failure: TransportFailure): string {

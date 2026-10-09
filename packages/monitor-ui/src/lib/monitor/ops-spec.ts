@@ -1152,6 +1152,7 @@ export function gasPoolNote(gas: GasSpendView | undefined): { text: string; tone
   if (gas.txCount === 0) return { text: "no signer transactions in the window", tone: "awaiting" };
 
   const parts = [`${gas.totalDot.toFixed(3)} DOT burned`];
+  if (gas.rpcHost) parts.push(`via ${gas.rpcHost}`);
   if (gas.perSettlement != null) parts.push(`${gas.perSettlement.toFixed(3)} per settlement`);
   const top = gas.buckets[0];
   if (top) parts.push(`${top.label} ${top.sharePct.toFixed(0)}%`);

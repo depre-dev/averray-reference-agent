@@ -9,6 +9,8 @@
 // A log-read failure is narrower: it degrades `flows` while retaining the live
 // balances, because losing history cannot make the current pool unreadable.
 
+import { describeFeedError } from "./probe-transport.js";
+
 export const DEPOSIT_POOL_SCHEMA_VERSION = 1;
 export const DEPOSIT_POOL_FEED_TIMEOUT_MS = 4000;
 
@@ -124,8 +126,7 @@ export async function readDepositPoolFeed(input: {
     }
     return normalizeDepositPoolFeed(await response.json());
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { unavailable: `deposit pool unreachable — ${message}` };
+    return { unavailable: `deposit pool unreachable — ${describeFeedError(error, url)}` };
   } finally {
     clearTimeout(timer);
   }

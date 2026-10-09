@@ -105,6 +105,8 @@ export interface GasSpendView {
   otherSenders: Array<{ address: string; count: number }>;
   /** Set when the last refresh failed; the figures are the previous ones. */
   staleReason?: string;
+  /** Host that served this read. */
+  rpcHost?: string;
 }
 
 /** Can the #Ops channel receive anything? Instrument health, not product health. */
