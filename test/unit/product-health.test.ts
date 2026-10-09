@@ -957,8 +957,9 @@ describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", ()
       combinedFetch({ healthBody: HEALTHY_BODY, chainIdHex: CHAIN_ID_HEX, blockTimestampHex: tsHex(10_000_000, 12), gasHex: "0xDE0B6B3A7640000", usdcHex: "0x989680" }),
       { nowMs: 10_000_000 },
     );
-    expect(probes.map((p) => p.name)).toEqual(["product_api", "chain_height", "signer_liquidity", "capabilities", "api_latency", "disk_headroom", "money_path", "treasury_liquidity", "external_funnel"]);
-    expect(probes.map((p) => p.status)).toEqual(["ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok"]);
+    expect(probes.map((p) => p.name)).toEqual(["product_api", "chain_height", "signer_liquidity", "capabilities", "api_latency", "disk_headroom", "credential_expiry", "money_path", "treasury_liquidity", "external_funnel"]);
+    expect(probes.map((p) => p.status)).toEqual(["ok", "ok", "ok", "ok", "ok", "ok", "degraded", "ok", "ok", "ok"]);
+    expect(probes.find((p) => p.name === "credential_expiry")?.detail).toBe("credentials not reported");
     expect(probes[2]?.detail).toContain("reward bank 100.00 USDC");
   });
 
@@ -972,7 +973,8 @@ describe("collectProductHealthProbes (hybrid: /health chain + RPC balances)", ()
     // disk_headroom can see. Its own unreadable→degraded path is covered in
     // disk-headroom.test.ts.
     const configDependent = probes.filter((p) => p.name !== "disk_headroom");
-    expect(configDependent.map((p) => p.status)).toEqual(["degraded", "degraded", "degraded", "degraded", "degraded", "degraded", "degraded", "degraded"]);
+    expect(configDependent.map((p) => p.status)).toEqual(["degraded", "degraded", "degraded", "degraded", "degraded", "degraded", "degraded", "degraded", "degraded"]);
+    expect(probes.find((p) => p.name === "credential_expiry")?.detail).toBe("credentials not reported");
     expect(probes.find((p) => p.name === "disk_headroom")).toBeDefined();
   });
 
