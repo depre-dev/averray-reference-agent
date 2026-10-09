@@ -286,3 +286,154 @@ export async function collectCredentialExpiries(input: {
 
   return out;
 }
+
+/** Warn this long before Roles Anywhere notAfter. */
+export const ROLES_ANYWHERE_WARN_MS = EXPIRY_WARN_MS;
+
+/** One credential component as /health serves it. `state: "unused"` is what a
+ *  restart looks like: lastSignAt lives in memory and comes back empty. */
+export interface HealthCredentialComponent {
+  ok?: boolean | null;
+  state?: string | null;
+  reason?: string | null;
+  notAfter?: string | number | null;
+  kid?: string | null;
+  lastSignAt?: string | number | null;
+}
+
+export interface HealthSignerCredentials {
+  rolesAnywhere?: HealthCredentialComponent;
+  badgeReceiptSigner?: HealthCredentialComponent;
+  kms?: HealthCredentialComponent;
+}
+
+export interface SignerCredentialReading {
+  status: "ok" | "degraded" | "red";
+  detail: string;
+}
+
+function epochMs(value: string | number | null | undefined): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value < 1e12 ? value * 1000 : value;
+  if (typeof value !== "string" || !value.trim()) return null;
+  if (/^\d+(\.\d+)?$/.test(value.trim())) {
+    const asNum = Number(value);
+    return asNum < 1e12 ? asNum * 1000 : asNum;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function ageLabel(ms: number): string {
+  const hours = Math.max(0, Math.round(ms / (60 * 60 * 1000)));
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
+function componentReason(component: HealthCredentialComponent | undefined): string | null {
+  const reason = component?.reason;
+  return typeof reason === "string" && reason.trim() ? reason.trim() : null;
+}
+
+/** Restart clears the in-memory last sign. That is unused, not a stale signer. */
+function isUnusedState(component: HealthCredentialComponent | undefined): boolean {
+  if (!component || component.ok === false) return false;
+  return String(component.state ?? "").trim().toLowerCase() === "unused";
+}
+
+function rolesAnywhereLine(
+  component: HealthCredentialComponent | undefined,
+  nowMs: number,
+): { text: string; tone: ExpiryTone } {
+  if (component?.ok === false) {
+    return { text: `Roles Anywhere — ${componentReason(component) ?? "not ok"}`, tone: "red" };
+  }
+  const notAfter = epochMs(component?.notAfter);
+  if (notAfter === null) {
+    return { text: "Roles Anywhere — notAfter not reported", tone: "degraded" };
+  }
+  const remaining = notAfter - nowMs;
+  const days = daysUntil(notAfter, nowMs);
+  if (remaining <= 0) {
+    const ago = Math.abs(days);
+    return { text: ago === 0 ? "Roles Anywhere — EXPIRED" : `Roles Anywhere — EXPIRED ${ago}d ago`, tone: "red" };
+  }
+  if (remaining <= ROLES_ANYWHERE_WARN_MS) {
+    return { text: `Roles Anywhere — expires in ${days}d`, tone: "degraded" };
+  }
+  return { text: `Roles Anywhere — ${days}d left`, tone: "ok" };
+}
+
+function badgeSignerLine(component: HealthCredentialComponent | undefined): { text: string; tone: ExpiryTone } {
+  const kid = typeof component?.kid === "string" && component.kid.trim() ? component.kid.trim() : null;
+  const label = kid ? `badge receipt signer kid ${kid}` : "badge receipt signer";
+  if (component?.ok === false) {
+    return { text: `${label} — ${componentReason(component) ?? "not ok"}`, tone: "red" };
+  }
+  if (isUnusedState(component)) {
+    return { text: `${label} — not used since backend start`, tone: "ok" };
+  }
+  if (!component || component.ok == null) {
+    return { text: `${label} — ok not reported`, tone: "degraded" };
+  }
+  return { text: `${label} ok`, tone: kid ? "ok" : "degraded" };
+}
+
+function kmsLine(
+  component: HealthCredentialComponent | undefined,
+  nowMs: number,
+): { text: string; tone: ExpiryTone } {
+  if (component?.ok === false) {
+    return { text: `kms — ${componentReason(component) ?? "not ok"}`, tone: "red" };
+  }
+  if (isUnusedState(component)) {
+    return { text: "kms — not used since backend start", tone: "ok" };
+  }
+  const lastSignAt = epochMs(component?.lastSignAt);
+  if (lastSignAt === null) return { text: "kms last sign not reported", tone: "degraded" };
+  return { text: `kms last sign ${ageLabel(nowMs - lastSignAt)}`, tone: "ok" };
+}
+
+/**
+ * /health.serviceHealth.components.credentials, as served.
+ *
+ * TLS expiry is a different artefact. This renders the three signer facts the
+ * backend already computed: Roles Anywhere notAfter, and each component's own
+ * ok / state / reason. A missing block is "credentials not reported" — it must
+ * not disappear behind a green TLS line.
+ */
+export function describeSignerCredentials(input: {
+  credentials: HealthSignerCredentials | null | undefined;
+  nowMs: number;
+}): SignerCredentialReading {
+  const credentials = input.credentials;
+  if (credentials == null) return { status: "degraded", detail: "credentials not reported" };
+
+  const lines = [
+    rolesAnywhereLine(credentials.rolesAnywhere, input.nowMs),
+    badgeSignerLine(credentials.badgeReceiptSigner),
+    kmsLine(credentials.kms, input.nowMs),
+  ];
+  const rank: Record<ExpiryTone, number> = { ok: 0, awaiting: 1, degraded: 2, red: 3 };
+  const worst = lines.reduce((acc, line) => (rank[line.tone] > rank[acc] ? line.tone : acc), "ok" as ExpiryTone);
+  const status = worst === "red" ? "red" : worst === "ok" ? "ok" : "degraded";
+  const lead = lines.filter((line) => line.tone !== "ok");
+  const rest = lines.filter((line) => line.tone === "ok");
+  return { status, detail: [...lead, ...rest].map((line) => line.text).join(" · ") };
+}
+
+/** Signer facts lead. A green TLS reading must not hide a missing credentials block. */
+export function mergeCredentialReadings(
+  tls: SignerCredentialReading | null,
+  signer: SignerCredentialReading | null,
+): SignerCredentialReading | null {
+  if (!tls && !signer) return null;
+  const rank = { ok: 0, degraded: 1, red: 2 } as const;
+  const status = !tls
+    ? signer!.status
+    : !signer
+      ? tls.status
+      : rank[tls.status] >= rank[signer.status]
+        ? tls.status
+        : signer.status;
+  return { status, detail: [signer?.detail, tls?.detail].filter(Boolean).join(" · ") };
+}

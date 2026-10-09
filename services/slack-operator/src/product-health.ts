@@ -42,7 +42,13 @@ import { burnBasisLabel, isBurnUnmeasurable, type MeasuredBurn } from "./gas-bur
 import { readBankFeed } from "./bank-feed-fetch.js";
 import type { ArrivalsBlock } from "./arrivals-feed.js";
 import type { DepositPoolBlock } from "./deposit-pool-feed.js";
-import { collectCredentialExpiries, credentialExpiryProbe, tlsCertReader } from "./credential-expiry.js";
+import {
+  collectCredentialExpiries,
+  credentialExpiryProbe,
+  describeSignerCredentials,
+  mergeCredentialReadings,
+  tlsCertReader,
+} from "./credential-expiry.js";
 import { bankFeedIsDisabled } from "./bank-feed.js";
 import { bankLaneView, BANK_FEED_DISABLED, type BankLaneView } from "./bank-lane.js";
 import { createCrossCheckCache, type CrossCheckCache } from "./payout-crosscheck-cache.js";
@@ -878,7 +884,31 @@ export function loadProductHealthConfig(env: NodeJS.ProcessEnv = process.env): P
 export interface ProductHealthPayload {
   status?: string;
   auth?: { chainId?: number };
-  serviceHealth?: { ok?: boolean };
+  serviceHealth?: {
+    ok?: boolean;
+    components?: {
+      credentials?: {
+        rolesAnywhere?: {
+          ok?: boolean | null;
+          state?: string | null;
+          reason?: string | null;
+          notAfter?: string | number | null;
+        };
+        badgeReceiptSigner?: {
+          ok?: boolean | null;
+          state?: string | null;
+          reason?: string | null;
+          kid?: string | null;
+        };
+        kms?: {
+          ok?: boolean | null;
+          state?: string | null;
+          reason?: string | null;
+          lastSignAt?: string | number | null;
+        };
+      };
+    };
+  };
   capabilityHealth?: Record<string, string>;
   warnings?: Array<{ code?: string; severity?: string; message?: string }>;
   components?: {
@@ -3077,7 +3107,18 @@ export async function collectProductHealthProbes(
           jwtEnvKeys,
           readCert: tlsCertReader(),
         })
-      : null; // nothing configured ⇒ no probe at all, not a probe with nothing to say
+      : null; // nothing configured ⇒ no TLS probe, not a probe with nothing to say
+  const signerCredentials = describeSignerCredentials({
+    credentials: h.body?.serviceHealth?.components?.credentials,
+    nowMs: chainCtx.nowMs,
+  });
+  const tlsCredentialProbe = credentialExpiries
+    ? credentialExpiryProbe({ credentials: credentialExpiries, nowMs: chainCtx.nowMs })
+    : null;
+  const credentialReading = mergeCredentialReadings(tlsCredentialProbe, signerCredentials);
+  const credentialProbe = credentialReading
+    ? { name: "credential_expiry" as const, status: credentialReading.status, detail: credentialReading.detail }
+    : null;
 
   const bankRead = await readBankFeed({ url: config.bankFeedUrl, fetchImpl });
   const bank: BankBlock | undefined = bankRead.feed
@@ -3200,14 +3241,7 @@ export async function collectProductHealthProbes(
       // A credential that expires on a Thursday is an outage scheduled in
       // advance, and no other probe would see it coming: chain, money, API and
       // self-freshness all read green right up to the moment it lapses.
-      ...(credentialExpiries
-        ? [
-            {
-              name: "credential_expiry",
-              ...credentialExpiryProbe({ credentials: credentialExpiries, nowMs: chainCtx.nowMs }),
-            },
-          ]
-        : []),
+      ...(credentialProbe ? [credentialProbe] : []),
       deriveMoneyPathProbe(h, {
         maxStuck: config.maxStuck,
         maxFailed24h: config.maxFailed24h,
