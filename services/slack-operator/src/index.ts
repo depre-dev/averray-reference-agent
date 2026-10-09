@@ -212,6 +212,7 @@ import {
   type OvernightLedgerWindow,
 } from "./overnight-ledger-feed.js";
 import { depositPoolUrlFromBankFeed, readDepositPoolFeed } from "./deposit-pool-feed.js";
+import { readAdminGithubAuthors } from "./github-authors.js";
 import {
   loadRemediationConfig,
   decideRpcRemediation,
@@ -3788,6 +3789,22 @@ function startOperatorRoutines() {
       productHealthChainAdvance = collection.chainAdvance;
       productHealthTransportRun = collection.transportRun;
       productHealthSnapshotBlocks = { ...collection.snapshot, arrivals, depositPool };
+      try {
+        const adminAuthors = await readAdminGithubAuthors({
+          ...(phConfig.apiBaseUrl ? { baseUrl: phConfig.apiBaseUrl } : {}),
+          getSession: getAdminReadSession,
+          fetchImpl: fetch,
+        });
+        if (adminAuthors.block || adminAuthors.warning) {
+          const servedWarning = productHealthSnapshotBlocks.githubAuthors?.warning ?? adminAuthors.warning;
+          productHealthSnapshotBlocks = {
+            ...productHealthSnapshotBlocks,
+            githubAuthors: { warning: servedWarning, block: adminAuthors.block ?? productHealthSnapshotBlocks.githubAuthors?.block ?? null },
+          };
+        }
+      } catch (error) {
+        logger.warn({ err: error }, "github_authors_read_skipped");
+      }
       // Decide + apply RPC auto-remediation from this cycle's read health. Pure
       // decision; the only effect is rotating which endpoint we read next tick
       // (state.activeIndex) + dispatching an audit (failover) or page (escalate).

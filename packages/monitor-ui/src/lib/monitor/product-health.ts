@@ -652,6 +652,37 @@ export interface ChainTick {
   freshSeconds?: number;
 }
 
+export interface GithubAuthorWarning {
+  code: "github_author_concentration";
+  severity: string | null;
+  message: string | null;
+  openClaims: number | null;
+  totalOpenClaims: number | null;
+  distinctWallets: number | null;
+}
+
+export interface GithubAuthorRow {
+  author: string;
+  openClaims: number | null;
+  submitted: number | null;
+  awaitingHumanReview: number | null;
+  settled7d: number | null;
+  settled30d: number | null;
+  distinctWallets: number | null;
+  usdcPaid: string | null;
+}
+
+export interface GithubAuthorsSurface {
+  warning: GithubAuthorWarning | null;
+  block: {
+    distinctAuthors: number | null;
+    distinctWallets: number | null;
+    unattributedClaims: number | null;
+    unattributedSessions: number | null;
+    authors: GithubAuthorRow[];
+  } | null;
+}
+
 export interface ProductHealth {
   /** false = the heartbeat routine is off (honest "monitoring off", not a green). */
   enabled: boolean;
@@ -679,6 +710,8 @@ export interface ProductHealth {
   depositPool?: DepositPoolBlock;
   /** Public MCP-front-door arrivals, or why that feed could not be read. */
   arrivals?: ArrivalsBlock;
+  /** Served GitHub author concentration warning and the admin authors block. */
+  githubAuthors?: GithubAuthorsSurface;
   remediation?: RemediationStatus;
   /** #Ops delivery health — see BuzzDeliveryView. */
   buzz?: BuzzDeliveryView;

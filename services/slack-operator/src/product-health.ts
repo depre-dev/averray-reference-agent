@@ -45,6 +45,7 @@ import type { DepositPoolBlock } from "./deposit-pool-feed.js";
 import { collectCredentialExpiries, credentialExpiryProbe, tlsCertReader } from "./credential-expiry.js";
 import { bankFeedIsDisabled } from "./bank-feed.js";
 import { bankLaneView, BANK_FEED_DISABLED, type BankLaneView } from "./bank-lane.js";
+import { githubAuthorSurface, type GithubAuthorsSurface } from "./github-authors.js";
 import { createCrossCheckCache, type CrossCheckCache } from "./payout-crosscheck-cache.js";
 import { createGasSpendCache, type GasSpendCache, type GasSpendSnapshot, type GasUnreadable } from "./gas-spend-cache.js";
 import {
@@ -2799,6 +2800,8 @@ export interface ProductHealthSnapshotBlocks {
   arrivals?: ArrivalsBlock;
   /** Bank-pillar depositor pool, explicit even when its platform endpoint is unavailable. */
   depositPool?: DepositPoolBlock;
+  /** Served GitHub author warning and, when present, the admin authors block. */
+  githubAuthors?: GithubAuthorsSurface;
 }
 
 export interface BankBlock {
@@ -3092,8 +3095,10 @@ export async function collectProductHealthProbes(
       ? { unavailable: bankRead.reason }
       : undefined; // not configured — no lane at all, and no complaint
 
+  const githubAuthors = githubAuthorSurface({ warnings: h.body?.warnings });
   const snapshot: ProductHealthSnapshotBlocks = {
     chainId: chainId ?? null,
+    ...(githubAuthors.warning || githubAuthors.block ? { githubAuthors } : {}),
     ...(selfFreshness.selfFreshness ? { self: selfFreshness.selfFreshness } : {}),
     network: resolveProductHealthNetwork(chainId),
     ...(bank ? { bank } : {}),
