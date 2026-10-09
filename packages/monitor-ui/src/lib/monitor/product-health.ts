@@ -670,6 +670,7 @@ export interface GithubAuthorRow {
   settled30d: number | null;
   distinctWallets: number | null;
   usdcPaid: string | null;
+  missingPayoutEvidence?: string | null;
 }
 
 export interface GithubAuthorsSurface {
@@ -681,6 +682,10 @@ export interface GithubAuthorsSurface {
     unattributedSessions: number | null;
     authors: GithubAuthorRow[];
   } | null;
+  unavailable?: "unauthorised" | "timeout" | "missing" | null;
+  at?: number | null;
+  ageMs?: number | null;
+  stale?: boolean;
 }
 
 export interface ProductHealth {

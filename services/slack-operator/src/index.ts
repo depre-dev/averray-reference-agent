@@ -3767,7 +3767,7 @@ function startOperatorRoutines() {
       const activeRpc = remediationConfig.endpoints[rpcRemediationState.activeIndex] ?? phConfig.rpcUrl;
       // One /health fetch feeds product_api + chain_height; the block-advance tracker
       // persists across ticks to catch a frozen chain. Balances come from direct RPC.
-      const [collection, arrivals, depositPool] = await Promise.all([
+      const [collection, arrivals, depositPool, adminAuthors] = await Promise.all([
         collectProductHealthProbes({ ...phConfig, signerAddress, rpcUrl: activeRpc }, fetch, {
           advance: productHealthChainAdvance,
           nowMs: Date.now(),
@@ -3785,26 +3785,30 @@ function startOperatorRoutines() {
           url: depositPoolUrlFromBankFeed(phConfig.bankFeedUrl),
           fetchImpl: fetch,
         }),
-      ]);
-      productHealthChainAdvance = collection.chainAdvance;
-      productHealthTransportRun = collection.transportRun;
-      productHealthSnapshotBlocks = { ...collection.snapshot, arrivals, depositPool };
-      try {
-        const adminAuthors = await readAdminGithubAuthors({
+        // /admin/status is the heaviest admin route. Same tick as the other
+        // feeds, with its own timeout, and no more often than every 5 minutes.
+        readAdminGithubAuthors({
           ...(phConfig.apiBaseUrl ? { baseUrl: phConfig.apiBaseUrl } : {}),
           getSession: getAdminReadSession,
           fetchImpl: fetch,
-        });
-        if (adminAuthors.block || adminAuthors.warning) {
-          const servedWarning = productHealthSnapshotBlocks.githubAuthors?.warning ?? adminAuthors.warning;
-          productHealthSnapshotBlocks = {
-            ...productHealthSnapshotBlocks,
-            githubAuthors: { warning: servedWarning, block: adminAuthors.block ?? productHealthSnapshotBlocks.githubAuthors?.block ?? null },
-          };
-        }
-      } catch (error) {
-        logger.warn({ err: error }, "github_authors_read_skipped");
-      }
+        }),
+      ]);
+      productHealthChainAdvance = collection.chainAdvance;
+      productHealthTransportRun = collection.transportRun;
+      const servedWarning = collection.snapshot.githubAuthors?.warning ?? adminAuthors.warning;
+      productHealthSnapshotBlocks = {
+        ...collection.snapshot,
+        arrivals,
+        depositPool,
+        githubAuthors: {
+          warning: servedWarning,
+          block: adminAuthors.block,
+          unavailable: adminAuthors.unavailable ?? (adminAuthors.block ? null : "missing"),
+          at: adminAuthors.at ?? null,
+          ageMs: adminAuthors.ageMs ?? null,
+          ...(adminAuthors.stale ? { stale: true } : {}),
+        },
+      };
       // Decide + apply RPC auto-remediation from this cycle's read health. Pure
       // decision; the only effect is rotating which endpoint we read next tick
       // (state.activeIndex) + dispatching an audit (failover) or page (escalate).

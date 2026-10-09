@@ -23,6 +23,8 @@ export interface GithubAuthorRow {
   settled30d: number | null;
   distinctWallets: number | null;
   usdcPaid: string | null;
+  /** Why paid is absent. A missing amount is not zero. */
+  missingPayoutEvidence: string | null;
 }
 
 export interface GithubAuthorsBlock {
@@ -33,12 +35,26 @@ export interface GithubAuthorsBlock {
   authors: GithubAuthorRow[];
 }
 
+export type GithubAuthorsUnavailable = "unauthorised" | "timeout" | "missing";
+
 export interface GithubAuthorsSurface {
   /** The served warning, or null when this payload did not include it. */
   warning: GithubAuthorWarning | null;
   /** The admin block, or null when this payload did not include it. */
   block: GithubAuthorsBlock | null;
+  /** Why there is no fresh block. A timeout may still carry the previous block. */
+  unavailable?: GithubAuthorsUnavailable | null;
+  /** Epoch ms of the block in this view. */
+  at?: number | null;
+  /** Age of that block. Set when the view is retained after a timeout. */
+  ageMs?: number | null;
+  /** True when `block` is an earlier read kept because this poll did not finish. */
+  stale?: boolean;
 }
+
+/** /admin/status is the heaviest admin route. Do not poll it faster than this. */
+export const GITHUB_AUTHORS_POLL_MS = 5 * 60 * 1000;
+export const GITHUB_AUTHORS_TIMEOUT_MS = 8_000;
 
 function num(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -89,40 +105,114 @@ export function githubAuthorsBlock(value: unknown): GithubAuthorsBlock | null {
         settled30d: num(row.settled30d),
         distinctWallets: num(row.distinctWallets),
         usdcPaid: amount,
+        missingPayoutEvidence:
+          typeof row.missingPayoutEvidence === "string" && row.missingPayoutEvidence.trim()
+            ? row.missingPayoutEvidence.trim()
+            : null,
       }];
     }),
   };
 }
 
-/** Copy the warning and the admin block. Neither count is derived here. */
+/** Copy the warning and the admin block. Neither count is derived here.
+ *  The admin status body is not the block: only `githubAuthors` is. */
 export function githubAuthorSurface(input: {
   warnings?: readonly unknown[] | null;
   adminStatus?: unknown;
 }): GithubAuthorsSurface {
-  const admin = record(input.adminStatus);
-  const blockSource = admin && "githubAuthors" in admin ? admin.githubAuthors : input.adminStatus;
-  const block = githubAuthorsBlock(blockSource);
   const fromHealth = concentrationWarning(input.warnings);
-  const fromAdmin = concentrationWarning(record(blockSource)?.warnings as unknown[] | undefined);
+  const admin = record(input.adminStatus);
+  if (!admin) return { warning: fromHealth, block: null };
+  if (!("githubAuthors" in admin) || admin.githubAuthors == null) {
+    return { warning: fromHealth, block: null, unavailable: "missing" };
+  }
+  const block = githubAuthorsBlock(admin.githubAuthors);
+  if (!block) return { warning: fromHealth, block: null, unavailable: "missing" };
+  const fromAdmin = concentrationWarning(record(admin.githubAuthors)?.warnings as unknown[] | undefined);
   return { warning: fromHealth ?? fromAdmin, block };
+}
+
+interface AuthorCache {
+  surface: GithubAuthorsSurface;
+  at: number;
+}
+
+let authorCache: AuthorCache | null = null;
+
+export function __resetGithubAuthorsForTests(): void {
+  authorCache = null;
+}
+
+function aged(
+  surface: GithubAuthorsSurface,
+  at: number,
+  nowMs: number,
+  extra: Partial<GithubAuthorsSurface> = {},
+): GithubAuthorsSurface {
+  return { ...surface, ...extra, at, ageMs: Math.max(0, nowMs - at) };
+}
+
+function abortAsTimeout(signal: AbortSignal): Promise<never> {
+  return new Promise((_resolve, reject) => {
+    const fail = () => {
+      const error = new Error("timed out");
+      error.name = "AbortError";
+      reject(error);
+    };
+    if (signal.aborted) {
+      fail();
+      return;
+    }
+    signal.addEventListener("abort", fail, { once: true });
+  });
+}
+
+function remember(surface: GithubAuthorsSurface, nowMs: number): GithubAuthorsSurface {
+  const next = aged(surface, nowMs, nowMs);
+  authorCache = { surface: next, at: nowMs };
+  return next;
 }
 
 export async function readAdminGithubAuthors(input: {
   baseUrl?: string;
   getSession: () => Promise<{ token: string }>;
   fetchImpl: typeof fetch;
+  nowMs?: number;
+  timeoutMs?: number;
+  /** Tests inject a shorter gap. Production polls no faster than five minutes. */
+  minIntervalMs?: number;
 }): Promise<GithubAuthorsSurface> {
-  const base = (input.baseUrl ?? "https://api.averray.com").replace(/\/+$/, "");
+  const nowMs = input.nowMs ?? Date.now();
+  const interval = input.minIntervalMs ?? GITHUB_AUTHORS_POLL_MS;
+  if (authorCache && nowMs - authorCache.at < interval) {
+    return aged(authorCache.surface, authorCache.at, nowMs);
+  }
+
+  const timeoutMs = input.timeoutMs ?? GITHUB_AUTHORS_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const session = await input.getSession();
+    const session = await Promise.race([input.getSession(), abortAsTimeout(controller.signal)]);
+    const base = (input.baseUrl ?? "https://api.averray.com").replace(/\/+$/, "");
     const response = await input.fetchImpl(`${base}/admin/status`, {
       headers: { accept: "application/json", authorization: `Bearer ${session.token}` },
+      signal: controller.signal,
     });
-    if (!response.ok) {
-      return { warning: null, block: null };
+    if (response.status === 401 || response.status === 403) {
+      return remember({ warning: null, block: null, unavailable: "unauthorised" }, nowMs);
     }
-    return githubAuthorSurface({ adminStatus: await response.json() });
+    if (!response.ok) {
+      return remember({ warning: null, block: null, unavailable: "missing" }, nowMs);
+    }
+    const surface = githubAuthorSurface({ adminStatus: await response.json() });
+    if (!surface.block) return remember({ ...surface, unavailable: "missing" }, nowMs);
+    return remember(surface, nowMs);
   } catch {
-    return { warning: null, block: null };
+    if (authorCache?.surface.block) {
+      return aged(authorCache.surface, authorCache.at, nowMs, { unavailable: "timeout", stale: true });
+    }
+    return { warning: null, block: null, unavailable: "timeout", at: nowMs, ageMs: 0 };
+  } finally {
+    clearTimeout(timer);
   }
 }
