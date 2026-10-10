@@ -15,6 +15,7 @@ import { useState } from "react";
 
 import { formatAgo } from "../../lib/monitor/ops-model.js";
 import {
+  arrivalErrorView,
   doorJourneys,
   outsiderRoster,
   type OutsiderBand,
@@ -171,6 +172,8 @@ export function ArrivalsPanel({
         </section>
       </div>
 
+      <ErrorResponses arrivals={arrivals} />
+
       <details className="ops-arrivals-evidence" data-testid="ops-arrivals-evidence">
         <summary>DOORS — RAW INSTRUMENTATION</summary>
         <p>
@@ -187,6 +190,46 @@ export function ArrivalsPanel({
           </p>
         ) : null}
       </details>
+    </section>
+  );
+}
+
+function ErrorResponses({ arrivals }: { arrivals: ArrivalsSnapshot }) {
+  const view = arrivalErrorView(arrivals.errorsByStage, arrivals.errorsByStageUnreadable);
+  return (
+    <section className="ops-arrival-errors" data-testid="ops-arrival-errors" aria-label="Error responses by stage">
+      <div className="ops-arrivals-block-head">
+        <h3>ERROR RESPONSES BY STAGE</h3>
+        <span>not a count of who stopped</span>
+      </div>
+      <p className="ops-arrival-errors-measures" data-testid="ops-arrival-errors-measures">
+        {view.unreadable ?? view.measures ?? "not reported"}
+      </p>
+      {view.windows.map((window) => (
+        <div key={window.key} className="ops-arrival-errors-window" data-testid={`ops-arrival-errors-${window.key}`}>
+          <strong>{window.label}</strong>
+          {window.covered ? (
+            window.lines.length === 0 ? (
+              <span>measured · no error responses</span>
+            ) : (
+              <ul>
+                {window.lines.map((line) => (
+                  <li key={`${line.door}-${line.actor}-${line.stage}`} data-actor={line.actor}>
+                    <span className="ops-arrival-errors-who">{line.door} · {line.actor} · {line.stage}</span>
+                    <span className="ops-arrival-errors-codes">
+                      {line.codes.length === 0
+                        ? "none"
+                        : line.codes.map((code) => `${code.code} ${code.count}`).join(" · ")}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )
+          ) : (
+            <span data-testid={`ops-arrival-errors-${window.key}-absent`}>not reported</span>
+          )}
+        </div>
+      ))}
     </section>
   );
 }

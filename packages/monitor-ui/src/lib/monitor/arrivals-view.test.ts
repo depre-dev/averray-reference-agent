@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { doorJourneys } from "./arrivals-view.js";
+import { arrivalErrorView, doorJourneys } from "./arrivals-view.js";
 import type { ArrivalOperatorView } from "./product-health.js";
 
 const NOW = Date.parse("2026-08-16T12:00:00.000Z");
@@ -221,5 +221,47 @@ describe("outsiderPresence — the top-band signal", () => {
     const p = outsiderPresence(onlySelf, NOW_P)!;
     expect(p.band).toBeNull();
     expect(p.counts).toEqual({ worked: 0, engaged: 0, knocked: 0 });
+  });
+});
+
+describe("arrivalErrorView", () => {
+  test("a missing stage and an uncovered window stay not reported, not zero", () => {
+    const view = arrivalErrorView({
+      absentMeans: "not reported",
+      measures: "error responses by stage; one pre-auth request = one visit",
+      collectionSinceMs: 10,
+      sinceCutover: {
+        mcp: {
+          external: { browsed: { rate_limited: 2 } },
+          unclassified: { reached: { "-32700": 1 } },
+        },
+      },
+      "24h": "not reported",
+    });
+    const day = view.windows.find((window) => window.key === "24h")!;
+    const week = view.windows.find((window) => window.key === "7d")!;
+    const cutover = view.windows.find((window) => window.key === "sinceCutover")!;
+    expect(day.covered).toBe(false);
+    expect(day.label).toBe("24h");
+    expect(week.covered).toBe(false);
+    expect(cutover.label).toBe("since cutover");
+    expect(cutover.lines.map((line) => line.stage)).toEqual(["browsed", "reached"]);
+    expect(cutover.lines.find((line) => line.actor === "external" && line.stage === "reached")).toBeUndefined();
+    expect(cutover.lines.some((line) => line.codes.some((code) => code.count === 0))).toBe(false);
+  });
+
+  test("unclassified is its own line and is not added to external", () => {
+    const view = arrivalErrorView({
+      absentMeans: "not reported",
+      collectionSinceMs: 10,
+      sinceCutover: {
+        mcp: { unclassified: { reached: { "-32700": 1 } } },
+      },
+    });
+    const cutover = view.windows.find((window) => window.key === "sinceCutover")!;
+    expect(cutover.lines).toEqual([
+      { door: "mcp", actor: "unclassified", stage: "reached", codes: [{ code: "-32700", count: 1 }] },
+    ]);
+    expect(cutover.lines.some((line) => line.actor === "external")).toBe(false);
   });
 });

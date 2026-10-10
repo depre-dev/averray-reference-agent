@@ -222,6 +222,30 @@ describe("ArrivalsPanel — verdict first", () => {
     expect(getByTestId("ops-arrivals-last-activity").textContent).toContain("NO IDENTIFIED OUTSIDER ACTIVITY YET");
   });
 
+  test("error responses show not reported for an uncovered window and keep unclassified apart", () => {
+    const arrivals = snapshot({
+      errorsByStage: {
+        absentMeans: "not reported",
+        measures: "error responses by stage; one pre-auth request = one visit",
+        collectionSinceMs: 10,
+        sinceCutover: {
+          mcp: { unclassified: { reached: { "-32700": 1 } } },
+        },
+        "24h": "not reported",
+      },
+    });
+    const { getByTestId } = render(<ArrivalsPanel arrivals={arrivals} />);
+    const errors = getByTestId("ops-arrival-errors");
+    expect(getByTestId("ops-arrival-errors-measures").textContent).toContain("one pre-auth request = one visit");
+    expect(getByTestId("ops-arrival-errors-sinceCutover").textContent).toContain("since cutover");
+    expect(getByTestId("ops-arrival-errors-sinceCutover").textContent).toContain("unclassified");
+    expect(getByTestId("ops-arrival-errors-sinceCutover").textContent).toContain("-32700 1");
+    expect(getByTestId("ops-arrival-errors-sinceCutover").textContent).not.toContain("external");
+    expect(getByTestId("ops-arrival-errors-24h-absent").textContent).toBe("not reported");
+    expect(getByTestId("ops-arrival-errors-7d-absent").textContent).toBe("not reported");
+    expect(errors.textContent).not.toMatch(/unclassified 0|external 0/);
+  });
+
   test("an older producer is a named missing verdict, never a reconstructed zero", () => {
     const older = snapshot({ operatorView: undefined });
     const { getByTestId, queryByTestId } = render(<ArrivalsPanel arrivals={older} />);

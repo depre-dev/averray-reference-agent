@@ -623,6 +623,22 @@ export const OPS_FIXTURE_ARRIVALS: ArrivalsSnapshot = {
       },
     },
   },
+  errorsByStage: {
+    absentMeans: "not reported",
+    measures: "error responses by stage; one pre-auth request = one visit",
+    collectionSinceMs: FIXTURE_NOW - 2 * DAY,
+    sinceCutover: {
+      mcp: {
+        external: { browsed: { rate_limited: 2 } },
+        unclassified: { reached: { "-32700": 1 } },
+      },
+      http: {
+        external: { evaluated: { "429:rate_limited": 4 } },
+      },
+    },
+    "24h": "not reported",
+    "7d": "not reported",
+  },
   // THE NAMED-IDENTITY REGISTRY, shaped like the live one on 2026-08-17.
   //
   // Three real cases, because the panel exists to tell them apart:

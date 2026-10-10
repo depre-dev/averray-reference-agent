@@ -14,7 +14,17 @@
 //   · the two doors carry different windows and different cut-overs, so each
 //     door scales to its OWN maximum and nothing ever sums or compares them.
 
-import type { ArrivalAgent, ArrivalOperatorView, ArrivalsBlock } from "./product-health.js";
+import type {
+  ArrivalAgent,
+  ArrivalErrorActor,
+  ArrivalErrorDoor,
+  ArrivalErrorWindowKey,
+  ArrivalErrorsByStage,
+  ArrivalOperatorView,
+  ArrivalStage,
+  ArrivalsBlock,
+} from "./product-health.js";
+import { ARRIVAL_ERROR_ACTORS, ARRIVAL_ERROR_NOT_REPORTED, ARRIVAL_ERROR_WINDOWS, ARRIVAL_STAGES } from "./product-health.js";
 
 export interface JourneyStageView {
   stage: string;
@@ -244,5 +254,72 @@ export function outsiderPresence(
     asOfMs,
     live: lastSeenMs != null && asOfMs - lastSeenMs <= liveWindowMs,
     observingSinceMs: arrivals.observingSinceMs ?? null,
+  };
+}
+
+export interface ArrivalErrorLine {
+  door: ArrivalErrorDoor;
+  actor: ArrivalErrorActor;
+  stage: ArrivalStage;
+  /** Empty when the stage was measured and no error response was counted. */
+  codes: Array<{ code: string; count: number }>;
+}
+
+export interface ArrivalErrorWindowView {
+  key: ArrivalErrorWindowKey;
+  /** `sinceCutover` is never labelled 24h or 7d. */
+  label: string;
+  covered: boolean;
+  lines: ArrivalErrorLine[];
+}
+
+export interface ArrivalErrorView {
+  measures: string | null;
+  unreadable: string | null;
+  windows: ArrivalErrorWindowView[];
+}
+
+const ERROR_WINDOW_LABEL: Record<ArrivalErrorWindowKey, string> = {
+  sinceCutover: "since cutover",
+  "24h": "24h",
+  "7d": "7d",
+};
+
+/**
+ * Rows for the error-response block.
+ *
+ * A missing window, door, actor, or stage is left out. It is not drawn as 0.
+ * `unclassified` stays its own actor and is never added to `external`.
+ */
+export function arrivalErrorView(errors: ArrivalErrorsByStage | undefined, unreadable?: string): ArrivalErrorView {
+  return {
+    measures: errors?.measures ?? null,
+    unreadable: unreadable ?? errors?.unavailable ?? null,
+    windows: ARRIVAL_ERROR_WINDOWS.map((key) => {
+      const window = errors?.[key];
+      if (!window || window === ARRIVAL_ERROR_NOT_REPORTED) {
+        return { key, label: ERROR_WINDOW_LABEL[key], covered: false, lines: [] };
+      }
+      const lines: ArrivalErrorLine[] = [];
+      for (const door of ["mcp", "http"] as const) {
+        const actors = window[door];
+        if (!actors) continue;
+        for (const actor of ARRIVAL_ERROR_ACTORS) {
+          const stages = actors[actor];
+          if (!stages) continue;
+          for (const stage of ARRIVAL_STAGES) {
+            const codes = stages[stage];
+            if (!codes) continue;
+            lines.push({
+              door,
+              actor,
+              stage,
+              codes: Object.entries(codes).map(([code, count]) => ({ code, count })),
+            });
+          }
+        }
+      }
+      return { key, label: ERROR_WINDOW_LABEL[key], covered: true, lines };
+    }),
   };
 }
