@@ -55,6 +55,13 @@ import {
   mergeCredentialReadings,
   tlsCertReader,
 } from "./credential-expiry.js";
+import {
+  createReceiptProbeCache,
+  receiptApiBase,
+  receiptProbeDetail,
+  runReceiptSignatureProbe,
+  type ReceiptProbeCache,
+} from "./receipt-signature-probe.js";
 import { bankFeedIsDisabled } from "./bank-feed.js";
 import { bankLaneView, BANK_FEED_DISABLED, type BankLaneView } from "./bank-lane.js";
 import { githubAuthorSurface, type GithubAuthorsSurface } from "./github-authors.js";
@@ -2314,6 +2321,30 @@ function payoutCrossCheck(input: {
   return crossCheckCache.read();
 }
 
+let receiptProbeCache: ReceiptProbeCache | null = null;
+let receiptProbeLatest: { apiBaseUrl: string; fetchImpl: typeof fetch } | null = null;
+
+/** Receipt signatures, on their own 30-minute cadence. The heartbeat never waits. */
+function receiptSignatureReading(input: {
+  apiBaseUrl?: string;
+  fetchImpl: typeof fetch;
+  nowMs: number;
+}): ProbeResult | null {
+  // The health suite shares one process and one fetch mock. A live probe
+  // started there would paint every later case. Production does not set
+  // VITEST. Set RECEIPT_SIGNATURE_PROBE_IN_TEST=1 to force it inside tests.
+  if (process.env.VITEST && process.env.RECEIPT_SIGNATURE_PROBE_IN_TEST !== "1") return null;
+  const apiBaseUrl = receiptApiBase(input.apiBaseUrl);
+  if (!apiBaseUrl) return { name: "receipt_signature", status: "degraded", detail: "not configured" };
+  receiptProbeLatest = { apiBaseUrl, fetchImpl: input.fetchImpl };
+  receiptProbeCache ??= createReceiptProbeCache({
+    run: () => runReceiptSignatureProbe(receiptProbeLatest!),
+  });
+  receiptProbeCache.maybeRefresh(input.nowMs);
+  const view = receiptProbeCache.read();
+  return { name: "receipt_signature", status: view.status, detail: receiptProbeDetail(view, input.nowMs) };
+}
+
 /** Test seam: forget the singleton so each test starts from no snapshot. */
 export function __resetGasAttributionForTests(): void {
   gasCache = null;
@@ -2321,6 +2352,8 @@ export function __resetGasAttributionForTests(): void {
   crossCheckCache = null;
   crossCheckConfigured = null;
   crossCheckLatest = null;
+  receiptProbeCache = null;
+  receiptProbeLatest = null;
 }
 
 /** Who receives the protocol fee, according to the contract that charges it.
@@ -3492,6 +3525,14 @@ export async function collectProductHealthProbes(
       }),
       treasury,
       externalFunnel.probe,
+      ...(() => {
+        const receipt = receiptSignatureReading({
+          ...(config.apiBaseUrl ? { apiBaseUrl: config.apiBaseUrl } : {}),
+          fetchImpl,
+          nowMs: chainCtx.nowMs,
+        });
+        return receipt ? [receipt] : [];
+      })(),
     ],
     chainAdvance,
     ...(transportRun ? { transportRun } : {}),

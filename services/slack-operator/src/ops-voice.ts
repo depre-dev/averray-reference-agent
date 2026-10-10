@@ -22,6 +22,7 @@ export const PROBE_LABELS: Record<string, string> = {
   treasury_liquidity: "Treasury",
   money_path: "Money path",
   credential_expiry: "Credentials",
+  receipt_signature: "Receipt signatures",
   external_funnel: "External funnel",
 };
 
