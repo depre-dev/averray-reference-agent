@@ -309,6 +309,9 @@ services:
       D4_ALERT_BRIDGE_COOLDOWN_MINUTES: ${D4_ALERT_BRIDGE_COOLDOWN_MINUTES:-30}
       D4_ALERT_QUIET_HOURS: ${D4_ALERT_QUIET_HOURS:-}
       D4_ALERT_QUIET_TZ_OFFSET_MIN: ${D4_ALERT_QUIET_TZ_OFFSET_MIN:-0}
+      # First-external arrival alerts. Off until the operator opts in. Uses the
+      # same Slack webhook, mute, and quiet hours as the D4 bridge.
+      ARRIVAL_ALERTS_SLACK_ENABLED: ${ARRIVAL_ALERTS_SLACK_ENABLED:-0}
       SLACK_OPERATOR_MONITOR_URL: ${SLACK_OPERATOR_MONITOR_URL:-https://monitor.averray.com/monitor}
       # D3 — tiered anomaly auto-pause (the autopilot fail-safe). Off by default;
       # the operator enables it BEFORE turning on autopilot. A soft trip suspends

@@ -10,7 +10,7 @@ import {
   type ArrivalOperatorDoorRow,
   type ArrivalsSnapshot,
 } from "../../lib/monitor/product-health.js";
-import { ArrivalsPanel } from "./ArrivalsPanel.js";
+import { ArrivalAlertsStatus, ArrivalsPanel } from "./ArrivalsPanel.js";
 import { OPS_FIXTURE_ARRIVALS } from "../../lib/monitor/ops-fixtures.js";
 import { OVERNIGHT_LEDGER_LIVE } from "../../lib/monitor/overnight-ledger-fixtures.js";
 
@@ -244,6 +244,40 @@ describe("ArrivalsPanel — verdict first", () => {
     expect(getByTestId("ops-arrival-errors-24h-absent").textContent).toBe("not reported");
     expect(getByTestId("ops-arrival-errors-7d-absent").textContent).toBe("not reported");
     expect(errors.textContent).not.toMatch(/unclassified 0|external 0/);
+  });
+
+  test("arrival alert status names a dead poll and does not invent counts", () => {
+    const { getByTestId, queryByTestId, rerender } = render(
+      <ArrivalAlertsStatus status={{
+        paging: "on",
+        unavailable: "unauthorised",
+        stale: false,
+        readyCount: null,
+        pendingCount: null,
+        held: null,
+      }}
+      />,
+    );
+    expect(getByTestId("ops-arrival-alerts-status").textContent).toContain("unauthorised");
+    expect(getByTestId("ops-arrival-alerts-status").textContent).toContain("counts not reported");
+    expect(getByTestId("ops-arrival-alerts-status").textContent).not.toContain("0 ready");
+
+    rerender(
+      <ArrivalAlertsStatus status={{
+        paging: "off",
+        unavailable: null,
+        stale: false,
+        readyCount: 2,
+        pendingCount: 1,
+        held: "mute",
+      }}
+      />,
+    );
+    expect(getByTestId("ops-arrival-alerts-status").textContent).toContain("paging off");
+    expect(getByTestId("ops-arrival-alerts-status").textContent).toContain("2 ready · 1 pending");
+    expect(getByTestId("ops-arrival-alerts-status").textContent).toContain("held mute");
+    rerender(<ArrivalAlertsStatus status={undefined} />);
+    expect(queryByTestId("ops-arrival-alerts-status")).toBeNull();
   });
 
   test("an older producer is a named missing verdict, never a reconstructed zero", () => {

@@ -26,6 +26,7 @@
 // known reset happens), a mainnet halt is `red` (settlement down = page).
 
 import type { AlertPayload } from "./alert-bridge.js";
+import type { ArrivalAlertsBoardStatus } from "./arrival-alerts.js";
 
 // ── Probe result model ──────────────────────────────────────────────
 
@@ -3092,6 +3093,8 @@ export interface ProductHealthSnapshotBlocks {
   depositPool?: DepositPoolBlock;
   /** Served GitHub author warning and, when present, the admin authors block. */
   githubAuthors?: GithubAuthorsSurface;
+  /** Operator arrival-alert poll. Counts stay null until a read succeeds. */
+  arrivalAlerts?: ArrivalAlertsBoardStatus;
 }
 
 export interface BankBlock {

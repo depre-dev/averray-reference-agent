@@ -730,6 +730,15 @@ export interface GithubAuthorsSurface {
   stale?: boolean;
 }
 
+export interface ArrivalAlertsBoardStatus {
+  paging: "on" | "off";
+  unavailable: "unauthorised" | "timeout" | "missing" | "unreachable" | null;
+  stale: boolean;
+  readyCount: number | null;
+  pendingCount: number | null;
+  held: "mute" | "quiet-hours" | null;
+}
+
 export interface ProductHealth {
   /** false = the heartbeat routine is off (honest "monitoring off", not a green). */
   enabled: boolean;
@@ -759,6 +768,8 @@ export interface ProductHealth {
   arrivals?: ArrivalsBlock;
   /** Served GitHub author concentration warning and the admin authors block. */
   githubAuthors?: GithubAuthorsSurface;
+  /** Arrival-alert poll. Counts are null until a read has succeeded. */
+  arrivalAlerts?: ArrivalAlertsBoardStatus;
   remediation?: RemediationStatus;
   /** #Ops delivery health — see BuzzDeliveryView. */
   buzz?: BuzzDeliveryView;
