@@ -1,22 +1,35 @@
 // First-external arrival alerts. The platform records them and does not send.
 // GET /admin/arrivals/alerts (admin:status + ops:view) returns pending and
-// ready. This poller sends only ready alerts through the existing Slack alert
-// bridge, and it dedupes on the alert id.
+// ready. This module reads that route and, when paging is enabled, sends
+// ready alerts through the Slack alert channel.
 //
-// A summary id is `suppressed_firsts:<window start>:<count>`. The count is
-// part of the id, so a new distinct count is a new id and sends an update.
-// Pending alerts are never sent. A failed poll keeps the last reading and
-// waits out the same gap as a successful one, the way the GitHub authors
-// poll does.
+// Deduped on the alert id. A summary id is
+// `suppressed_firsts:<window start>:<count>`, so a new distinct count is a
+// new id and sends an update. Pending is never sent. The first successful
+// read after process start seeds the sent-ids from the ready list and sends
+// nothing — a restart must not page the backend's retained history. Later
+// polls send at most ARRIVAL_ALERTS_MAX_SENDS_PER_POLL new alerts.
+//
+// Mute and quiet hours hold a new alert without marking it sent. A failed
+// poll keeps the last reading, logs once per failure state, and does not send.
 
-import type { AlertPayload } from "./alert-bridge.js";
+import { logger } from "@avg/mcp-common";
+
+import {
+  inQuietHours,
+  type AlertPayload,
+  type QuietHours,
+} from "./alert-bridge.js";
 
 export const ARRIVAL_ALERTS_SCHEMA = "averray.arrival-alerts.v1";
 export const ARRIVAL_ALERTS_POLL_MS = 5 * 60 * 1000;
 export const ARRIVAL_ALERTS_TIMEOUT_MS = 8_000;
+export const ARRIVAL_ALERTS_SLACK_TIMEOUT_MS = 4_000;
+export const ARRIVAL_ALERTS_MAX_SENDS_PER_POLL = 5;
 const SENT_ID_CAP = 500;
 
 export type ArrivalAlertsUnavailable = "unauthorised" | "timeout" | "missing" | "unreachable";
+export type ArrivalAlertHold = "mute" | "quiet-hours";
 
 export interface ArrivalAlert {
   id: string;
@@ -39,19 +52,46 @@ export interface ArrivalAlertsReading {
   ageMs?: number | null;
 }
 
+/** Board-facing poll status. Counts are null until a read has succeeded. */
+export interface ArrivalAlertsBoardStatus {
+  paging: "on" | "off";
+  unavailable: ArrivalAlertsUnavailable | null;
+  stale: boolean;
+  readyCount: number | null;
+  pendingCount: number | null;
+  held: ArrivalAlertHold | null;
+}
+
 interface AlertsCache {
   reading: ArrivalAlertsReading;
   attemptedAt: number;
 }
 
 let cache: AlertsCache | null = null;
+let seeded = false;
 const sentIds = new Set<string>();
 const sentOrder: string[] = [];
+let lastLoggedUnavailable: ArrivalAlertsUnavailable | null = null;
+let lastLoggedHold: ArrivalAlertHold | "clear" | null = null;
 
 export function __resetArrivalAlertsForTests(): void {
   cache = null;
+  seeded = false;
   sentIds.clear();
   sentOrder.length = 0;
+  lastLoggedUnavailable = null;
+  lastLoggedHold = null;
+}
+
+/** Paging is opt-in. Unset, empty, and anything other than 1/true/yes stay off. */
+export function arrivalAlertsSlackEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = (env.ARRIVAL_ALERTS_SLACK_ENABLED ?? "").trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes";
+}
+
+/** Slack mrkdwn: &, <, and > are special. Everything else is literal text. */
+export function slackMrkdwnEscape(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -105,7 +145,16 @@ function aged(reading: ArrivalAlertsReading, at: number, nowMs: number): Arrival
   return { ...reading, at, ageMs: at === 0 ? 0 : Math.max(0, nowMs - at) };
 }
 
+function logUnavailable(next: ArrivalAlertsUnavailable | null): void {
+  if (lastLoggedUnavailable === next) return;
+  const previous = lastLoggedUnavailable;
+  lastLoggedUnavailable = next;
+  if (next) logger.warn({ unavailable: next }, "arrival_alerts_poll_failed");
+  else if (previous) logger.info("arrival_alerts_poll_recovered");
+}
+
 function noteAttempt(nowMs: number, unavailable: ArrivalAlertsUnavailable): ArrivalAlertsReading {
+  logUnavailable(unavailable);
   if (cache) {
     const reading = { ...cache.reading, unavailable, stale: true };
     cache = { reading, attemptedAt: nowMs };
@@ -131,30 +180,72 @@ function abortAsTimeout(signal: AbortSignal): Promise<never> {
   });
 }
 
-export function arrivalAlertPayload(alert: ArrivalAlert, boardUrl: string, baseUrl: string): AlertPayload {
-  const platform = baseUrl.replace(/\/+$/, "");
-  const href = alert.href?.startsWith("/") ? `${platform}${alert.href}` : boardUrl;
+/**
+ * Same mute and quiet-hours gate as the D4 bridge. A hold does not mark the
+ * alert sent, so it pages once the suppression lifts.
+ */
+export function arrivalAlertHold(input: {
+  nowMs: number;
+  nowMinuteOfDay: number;
+  muteUntilMs?: number;
+  quietHours?: QuietHours;
+}): ArrivalAlertHold | null {
+  if (input.muteUntilMs !== undefined && input.nowMs < input.muteUntilMs) return "mute";
+  if (inQuietHours(input.nowMinuteOfDay, input.quietHours)) return "quiet-hours";
+  return null;
+}
+
+/**
+ * Text for Slack. Attacker-controlled fields are escaped and never placed
+ * inside `<url|label>` link syntax. The only URL is the operator's board.
+ */
+export function arrivalAlertPayload(alert: ArrivalAlert, boardUrl: string): AlertPayload {
   const count = alert.suppressedCount == null ? "" : ` · ${alert.suppressedCount} distinct`;
+  const kind = slackMrkdwnEscape(alert.kind);
+  const subject = slackMrkdwnEscape(alert.subject);
+  const id = slackMrkdwnEscape(alert.id);
   const text = [
-    `:rotating_light: Hermes — arrival ${alert.kind}`,
-    `${alert.subject}${count}`,
-    alert.id,
-    href,
+    `:rotating_light: Hermes — arrival ${kind}`,
+    `${subject}${count}`,
+    id,
+    boardUrl,
   ].join("\n");
   return {
     count: 1,
-    items: [{ id: alert.id, title: `${alert.kind}: ${alert.subject}` }],
-    boardUrl: href,
+    items: [{ id: alert.id, title: `${kind}: ${subject}` }],
+    boardUrl,
     text,
   };
 }
 
-export async function pollArrivalAlerts(input: {
+export function arrivalAlertsBoardStatus(
+  reading: ArrivalAlertsReading,
+  paging: boolean,
+  held: ArrivalAlertHold | null,
+): ArrivalAlertsBoardStatus {
+  const counted = reading.unavailable == null || reading.stale === true;
+  return {
+    paging: paging ? "on" : "off",
+    unavailable: reading.unavailable ?? null,
+    stale: reading.stale === true,
+    readyCount: counted ? reading.ready.length : null,
+    pendingCount: counted ? reading.pending.length : null,
+    held,
+  };
+}
+
+function seedHistory(ready: readonly ArrivalAlert[]): void {
+  if (seeded) return;
+  for (const alert of ready) {
+    if (alert.status === "ready") rememberSent(alert);
+  }
+  seeded = true;
+}
+
+export async function readArrivalAlerts(input: {
   baseUrl?: string;
   getSession: () => Promise<{ token: string }>;
   fetchImpl: typeof fetch;
-  alert: (payload: AlertPayload) => Promise<boolean>;
-  boardUrl?: string;
   nowMs?: number;
   timeoutMs?: number;
   minIntervalMs?: number;
@@ -192,11 +283,8 @@ export async function pollArrivalAlerts(input: {
       });
     const ready = parsed.filter((alert) => alert.status === "ready");
     const pending = parsed.filter((alert) => alert.status === "pending");
-    const boardUrl = input.boardUrl ?? "https://monitor.averray.com/monitor";
-    for (const alert of readyToSend(parsed)) {
-      const sent = await input.alert(arrivalAlertPayload(alert, boardUrl, baseUrl));
-      if (sent) rememberSent(alert);
-    }
+    seedHistory(ready);
+    logUnavailable(null);
     const reading: ArrivalAlertsReading = { ready, pending, unavailable: null, stale: false, at: nowMs, ageMs: 0 };
     cache = { reading, attemptedAt: nowMs };
     return reading;
@@ -211,4 +299,71 @@ export async function pollArrivalAlerts(input: {
   } finally {
     clearTimeout(timer);
   }
+}
+
+export async function deliverArrivalAlerts(input: {
+  alert: (payload: AlertPayload) => Promise<boolean>;
+  boardUrl: string;
+  nowMs?: number;
+  nowMinuteOfDay?: number;
+  muteUntilMs?: number;
+  quietHours?: QuietHours;
+  maxSends?: number;
+}): Promise<{ sent: number; held: ArrivalAlertHold | null }> {
+  const nowMs = input.nowMs ?? Date.now();
+  const held = arrivalAlertHold({
+    nowMs,
+    nowMinuteOfDay: input.nowMinuteOfDay ?? 0,
+    ...(input.muteUntilMs !== undefined ? { muteUntilMs: input.muteUntilMs } : {}),
+    ...(input.quietHours ? { quietHours: input.quietHours } : {}),
+  });
+  if (held) {
+    if (lastLoggedHold !== held) {
+      lastLoggedHold = held;
+      logger.info({ held }, "arrival_alerts_held");
+    }
+    return { sent: 0, held };
+  }
+  if (lastLoggedHold && lastLoggedHold !== "clear") lastLoggedHold = "clear";
+  if (cache?.reading.unavailable) return { sent: 0, held: null };
+  const cap = input.maxSends ?? ARRIVAL_ALERTS_MAX_SENDS_PER_POLL;
+  let sent = 0;
+  for (const alert of readyToSend(cache?.reading.ready ?? [])) {
+    if (sent >= cap) break;
+    const ok = await input.alert(arrivalAlertPayload(alert, input.boardUrl));
+    if (!ok) break;
+    rememberSent(alert);
+    sent += 1;
+  }
+  return { sent, held: null };
+}
+
+/** Read, then deliver. Tests and any caller that wants both in one step. */
+export async function pollArrivalAlerts(input: {
+  baseUrl?: string;
+  getSession: () => Promise<{ token: string }>;
+  fetchImpl: typeof fetch;
+  alert: (payload: AlertPayload) => Promise<boolean>;
+  boardUrl?: string;
+  nowMs?: number;
+  nowMinuteOfDay?: number;
+  muteUntilMs?: number;
+  quietHours?: QuietHours;
+  timeoutMs?: number;
+  minIntervalMs?: number;
+  maxSends?: number;
+}): Promise<ArrivalAlertsReading> {
+  const reading = await readArrivalAlerts(input);
+  if (!reading.unavailable) {
+    await deliverArrivalAlerts({
+      alert: input.alert,
+      boardUrl: input.boardUrl ?? "https://monitor.averray.com/monitor",
+      ...(input.nowMs !== undefined ? { nowMs: input.nowMs } : {}),
+      ...(input.nowMinuteOfDay !== undefined ? { nowMinuteOfDay: input.nowMinuteOfDay } : {}),
+      ...(input.muteUntilMs !== undefined ? { muteUntilMs: input.muteUntilMs } : {}),
+      ...(input.quietHours ? { quietHours: input.quietHours } : {}),
+      ...(input.maxSends !== undefined ? { maxSends: input.maxSends } : {}),
+    });
+  }
+  return reading;
 }

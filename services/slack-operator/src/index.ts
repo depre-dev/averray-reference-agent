@@ -213,7 +213,14 @@ import {
 } from "./overnight-ledger-feed.js";
 import { depositPoolUrlFromBankFeed, readDepositPoolFeed } from "./deposit-pool-feed.js";
 import { readAdminGithubAuthors } from "./github-authors.js";
-import { pollArrivalAlerts } from "./arrival-alerts.js";
+import {
+  ARRIVAL_ALERTS_SLACK_TIMEOUT_MS,
+  arrivalAlertsBoardStatus,
+  arrivalAlertsSlackEnabled,
+  arrivalAlertHold,
+  deliverArrivalAlerts,
+  readArrivalAlerts,
+} from "./arrival-alerts.js";
 import {
   loadRemediationConfig,
   decideRpcRemediation,
@@ -3472,6 +3479,7 @@ function startOperatorRoutines() {
   let alertBridgeRunning = false;
   let alertBridgeState: AlertBridgeState = initialAlertBridgeState();
   const alertChannel: AlertChannel = slackAlertChannel();
+  const arrivalAlertChannel: AlertChannel = slackAlertChannel(undefined, { timeoutMs: ARRIVAL_ALERTS_SLACK_TIMEOUT_MS });
   let anomalyPauseRunning = false;
   let productHealthRunning = false;
   let productHealthAlertState = initialProductHealthAlertState();
@@ -3768,7 +3776,8 @@ function startOperatorRoutines() {
       const activeRpc = remediationConfig.endpoints[rpcRemediationState.activeIndex] ?? phConfig.rpcUrl;
       // One /health fetch feeds product_api + chain_height; the block-advance tracker
       // persists across ticks to catch a frozen chain. Balances come from direct RPC.
-      const [collection, arrivals, depositPool, adminAuthors] = await Promise.all([
+      const arrivalPaging = arrivalAlertsSlackEnabled();
+      const [collection, arrivals, depositPool, adminAuthors, arrivalAlerts] = await Promise.all([
         collectProductHealthProbes({ ...phConfig, signerAddress, rpcUrl: activeRpc }, fetch, {
           advance: productHealthChainAdvance,
           nowMs: Date.now(),
@@ -3793,17 +3802,11 @@ function startOperatorRoutines() {
           getSession: getAdminReadSession,
           fetchImpl: fetch,
         }),
-        // Operator-only. Ready alerts page through the same Slack channel.
-        // Pending stays on the platform. A failed poll keeps the last reading
-        // and does not send.
-        pollArrivalAlerts({
+        // Read only. Slack is posted after this tick, and only when paging is on.
+        readArrivalAlerts({
           ...(phConfig.apiBaseUrl ? { baseUrl: phConfig.apiBaseUrl } : {}),
           getSession: getAdminReadSession,
           fetchImpl: fetch,
-          alert: (payload) => alertChannel.dispatch(payload),
-          boardUrl:
-            optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor") ??
-            "https://monitor.averray.com/monitor",
         }),
       ]);
       productHealthChainAdvance = collection.chainAdvance;
@@ -3821,7 +3824,32 @@ function startOperatorRoutines() {
           ageMs: adminAuthors.ageMs ?? null,
           ...(adminAuthors.stale ? { stale: true } : {}),
         },
+        arrivalAlerts: arrivalAlertsBoardStatus(
+          arrivalAlerts,
+          arrivalPaging,
+          arrivalAlertHold({
+            nowMs: Date.now(),
+            nowMinuteOfDay: minuteOfDayForOffset(Date.now(), routineConfig.alertBridge.quietHoursTzOffsetMin),
+            ...(getServerAlertMuteUntilMs() > 0 ? { muteUntilMs: getServerAlertMuteUntilMs() } : {}),
+            ...(routineConfig.alertBridge.quietHours ? { quietHours: routineConfig.alertBridge.quietHours } : {}),
+          }),
+        ),
       };
+      // After the probe read. Slack is not inside the Promise.all above, and
+      // the arrival channel aborts its own fetch. Mute and quiet hours hold
+      // the alert without marking it sent.
+      if (arrivalPaging && !arrivalAlerts.unavailable) {
+        const boardUrl = optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor")
+          ?? "https://monitor.averray.com/monitor";
+        await deliverArrivalAlerts({
+          alert: (payload) => arrivalAlertChannel.dispatch(payload),
+          boardUrl,
+          nowMs: Date.now(),
+          nowMinuteOfDay: minuteOfDayForOffset(Date.now(), routineConfig.alertBridge.quietHoursTzOffsetMin),
+          ...(getServerAlertMuteUntilMs() > 0 ? { muteUntilMs: getServerAlertMuteUntilMs() } : {}),
+          ...(routineConfig.alertBridge.quietHours ? { quietHours: routineConfig.alertBridge.quietHours } : {}),
+        });
+      }
       // Decide + apply RPC auto-remediation from this cycle's read health. Pure
       // decision; the only effect is rotating which endpoint we read next tick
       // (state.activeIndex) + dispatching an audit (failover) or page (escalate).

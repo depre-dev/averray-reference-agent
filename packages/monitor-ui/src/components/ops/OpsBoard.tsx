@@ -36,7 +36,7 @@ import { GithubAuthorsPanel } from "./GithubAuthorsPanel.js";
 import { PillarStrip } from "./PillarStrip.js";
 import { SolvencyPanel } from "./SolvencyPanel.js";
 import { BankLane } from "./BankLane.js";
-import { ArrivalsPanel } from "./ArrivalsPanel.js";
+import { ArrivalAlertsStatus, ArrivalsPanel } from "./ArrivalsPanel.js";
 import { AdminDemandPanel } from "./AdminDemandPanel.js";
 import { DepositPoolTile } from "./DepositPoolTile.js";
 import {
@@ -289,6 +289,7 @@ export function OpsBoard({
             can page the operator. Both independent doors remain visible, and
             moving them refuses to recast a business outcome as a money fault. */}
         <ArrivalsPanel arrivals={health.arrivals} workers={overnightLedger} />
+        <ArrivalAlertsStatus status={health.arrivalAlerts} />
         <AdminDemandPanel
           feed={adminDemand}
           window={adminDemandWindow}

@@ -165,22 +165,31 @@ export function buildAlertPayload(payloadItems: AlertItem[], totalCount: number,
  * No-op + no crash when the webhook is unset. A push adapter implements the
  * same AlertChannel interface later — the routine never changes.
  */
-export function slackAlertChannel(webhookUrl: string | undefined = optionalEnv("SLACK_WEBHOOK_URL")): AlertChannel {
+export function slackAlertChannel(
+  webhookUrl: string | undefined = optionalEnv("SLACK_WEBHOOK_URL"),
+  options?: { timeoutMs?: number },
+): AlertChannel {
   return {
     name: "slack",
     async dispatch(payload: AlertPayload): Promise<boolean> {
       if (!webhookUrl) return false;
+      const timeoutMs = options?.timeoutMs;
+      const controller = timeoutMs ? new AbortController() : undefined;
+      const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
       try {
         const res = await fetch(webhookUrl, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ text: payload.text }),
+          ...(controller ? { signal: controller.signal } : {}),
         });
         if (!res.ok) logger.warn({ status: res.status }, "d4_alert_bridge_slack_post_failed");
         return res.ok;
       } catch (error) {
         logger.warn({ err: error }, "d4_alert_bridge_slack_post_failed");
         return false;
+      } finally {
+        if (timer) clearTimeout(timer);
       }
     },
   };
