@@ -22,7 +22,7 @@ import {
   formatDuration,
   groupProbesByPillar,
   probeOpsTone,
-  recentIncidents,
+  incidentColumn,
   trendSpanLabel,
   worstOpsTone,
   type OpsTone,
@@ -175,55 +175,106 @@ function AvailabilityTrend({ history }: { history: HealthHistory | undefined }) 
  * would claim "observed and healthy" over hours the monitor may not have been
  * watching, and no field in the payload backs that claim.
  */
+function IncidentLine({
+  id,
+  tone,
+  ongoing,
+  probe,
+  when,
+  title,
+}: {
+  id: string;
+  tone: OpsTone;
+  ongoing: boolean;
+  probe: string;
+  when: string;
+  title?: string;
+}) {
+  return (
+    <div
+      className="ops-incident"
+      key={id}
+      data-tone={tone}
+      data-ongoing={ongoing ? "yes" : "no"}
+      data-testid={`ops-incident-${id}`}
+      title={title}
+    >
+      <i className="ops-dot ops-dot--sm" data-tone={tone} aria-hidden />
+      <span className="ops-incident-probe">{probe}</span>
+      <span className="ops-incident-when" data-tone={ongoing ? tone : "awaiting"}>
+        {when}
+      </span>
+    </div>
+  );
+}
+
 function IncidentsColumn({ history, nowMs }: { history: HealthHistory | undefined; nowMs: number }) {
-  const view = recentIncidents(history, nowMs, 3);
+  const view = incidentColumn(history, nowMs);
   // Head dot: worst severity among ONGOING episodes only. Ended episodes are
   // history — a column glowing amber for last week teaches the eye to skip it.
   const headTone: OpsTone =
-    view == null ? "awaiting" : worstOpsTone(view.rows.filter((r) => r.ongoing).map((r) => r.severity));
+    view == null ? "awaiting" : worstOpsTone(view.ongoing.map((row) => row.severity));
 
   return (
     <div className="ops-pillar ops-pillar--incidents" data-testid="ops-incidents">
       <div className="ops-pillar-head">
         <i className="ops-dot" data-tone={headTone} aria-hidden />
         <span className="ops-pillar-name">INCIDENTS</span>
-        <span className="ops-pillar-rollup">durable log</span>
+        <span className="ops-pillar-rollup">{view == null ? "durable log" : `${view.total} in window`}</span>
       </div>
       {view == null ? (
         <p className="ops-incident-absent" data-testid="ops-incidents-absent">
           incident log not reported by this build
         </p>
-      ) : view.rows.length === 0 ? (
+      ) : view.total === 0 ? (
         <p className="ops-incident-absent" data-testid="ops-incidents-empty">
           no episodes in this window
         </p>
       ) : (
         <>
           <div className="ops-incident-rows">
-            {view.rows.map((r) => (
-              <div
-                className="ops-incident"
-                key={r.id}
-                data-tone={r.severity}
-                data-ongoing={r.ongoing ? "yes" : "no"}
-                data-testid={`ops-incident-${r.id}`}
-                title={r.note}
-              >
-                <i className="ops-dot ops-dot--sm" data-tone={r.severity} aria-hidden />
-                <span className="ops-incident-probe">{r.probe}</span>
-                <span className="ops-incident-when" data-tone={r.ongoing ? r.severity : "awaiting"}>
-                  {r.ongoing
-                    ? `ONGOING · ${r.durationLabel}`
-                    : `${r.durationLabel} · ended ${formatAgo(r.endedAt ?? r.startedAt, nowMs)}`}
-                  {r.peakLabel ? ` · ${r.peakLabel}` : ""}
-                </span>
-              </div>
+            {view.ongoing.map((row) => (
+              <IncidentLine
+                key={row.id}
+                id={row.id}
+                tone={row.severity}
+                ongoing
+                probe={row.probe}
+                title={row.note}
+                when={`ONGOING · ${row.durationLabel}${row.peakLabel ? ` · ${row.peakLabel}` : ""}`}
+              />
+            ))}
+            {view.groups.map((group) => (
+              <IncidentLine
+                key={`group-${group.probe}`}
+                id={`group-${group.probe}`}
+                tone="degraded"
+                ongoing={false}
+                probe={group.probe}
+                when={`${group.count} episode${group.count === 1 ? "" : "s"} · median ${group.medianLabel} · last ended ${group.lastEndedLabel}`}
+              />
             ))}
           </div>
-          {view.more > 0 ? (
-            <p className="ops-incident-more" data-testid="ops-incidents-more">
-              +{view.more} more in the window
-            </p>
+          <p className="ops-incident-more" data-testid="ops-incidents-more">
+            {view.total} {view.total === 1 ? "episode" : "episodes"} in the window
+          </p>
+          {view.closed > 0 ? (
+          <details className="ops-incident-all" data-testid="ops-incidents-all">
+            <summary>all {view.closed} closed episodes</summary>
+            <div className="ops-incident-rows">
+              {view.ungrouped.map((row) => (
+                <IncidentLine
+                  key={row.id}
+                  id={row.id}
+                  tone={row.severity}
+                  ongoing={false}
+                  probe={row.probe}
+                  title={row.note}
+                  when={`${row.durationLabel} · ended ${formatAgo(row.endedAt ?? row.startedAt, nowMs)}`}
+                />
+              ))}
+            </div>
+          </details>
           ) : null}
         </>
       )}
