@@ -22,6 +22,7 @@ import {
   type OutsiderRow,
 } from "../../lib/monitor/arrivals-view.js";
 import type {
+  ArrivalAlertsBoardStatus,
   ArrivalOperatorView,
   ArrivalOperatorDoorRow,
   ArrivalsBlock,
@@ -29,6 +30,27 @@ import type {
 } from "../../lib/monitor/product-health.js";
 import type { OvernightLedgerPayload, RemoteFeedReading } from "../../lib/monitor/overnight-ledger.js";
 import { WorkersTable } from "./OvernightLedgerPanels.js";
+
+/** Poll health for GET /admin/arrivals/alerts. Absent on older snapshots. */
+export function ArrivalAlertsStatus({ status }: { status: ArrivalAlertsBoardStatus | undefined }) {
+  if (!status) return null;
+  const counts = status.readyCount == null || status.pendingCount == null
+    ? "counts not reported"
+    : `${status.readyCount} ready · ${status.pendingCount} pending`;
+  const parts = [
+    "arrival alerts",
+    status.paging === "off" ? "paging off" : "paging on",
+    status.unavailable ?? "live",
+    status.stale ? "stale" : null,
+    status.held ? `held ${status.held}` : null,
+    counts,
+  ].filter((part): part is string => part != null);
+  return (
+    <p className="ops-arrival-alerts-status" data-testid="ops-arrival-alerts-status">
+      {parts.join(" · ")}
+    </p>
+  );
+}
 
 export interface ArrivalsPanelProps {
   arrivals: ArrivalsBlock | undefined;
