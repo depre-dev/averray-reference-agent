@@ -204,8 +204,11 @@ import { appendIncidents, readIncidents, reconcileIncidents } from "./product-he
 import {
   PROBE_DEADLINE_MS,
   ProductHealthTickGate,
+  closeOpenStuckTickIncidents,
   decideMonitorRefreshAlert,
   monitorRefreshAlertText,
+  productHealthRefreshSuppressed,
+  runGuardedProductHealthTick,
   runWithDeadline,
 } from "./product-health-tick.js";
 import { readArrivalsFeed } from "./arrivals-feed.js";
@@ -228,6 +231,7 @@ import {
   arrivalAlertsSlackEnabled,
   arrivalAlertHold,
   deliverArrivalAlerts,
+  noteArrivalAlertDelivered,
   readArrivalAlerts,
 } from "./arrival-alerts.js";
 import {
@@ -387,8 +391,10 @@ let buzzDeliveryState: BuzzDeliveryState = {};
 let productHealthRemediation: RemediationStatus | undefined;
 /** When this process armed the heartbeat. A first tick that never finishes still has an anchor. */
 let productHealthHeartbeatStartedAt: number | null = null;
-/** `sinceMs` of the freeze we already paged for. Null re-arms the next episode. */
-let monitorRefreshPagedForMs: number | null = null;
+/** True after this freeze episode has paged. A late completion does not clear it. */
+let monitorRefreshPaged = false;
+/** Completion before the one currently in history. Used to tell a slip from a recovery. */
+let monitorRefreshPreviousCompletedAt: number | null = null;
 const productHealthGate = new ProductHealthTickGate({
   intervalMs: () => routineConfig.productHealth.intervalMs,
   now: () => Date.now(),
@@ -3519,7 +3525,13 @@ function startOperatorRoutines() {
   let alertBridgeRunning = false;
   let alertBridgeState: AlertBridgeState = initialAlertBridgeState();
   const alertChannel: AlertChannel = slackAlertChannel(undefined, { timeoutMs: ARRIVAL_ALERTS_SLACK_TIMEOUT_MS });
-  const arrivalAlertChannel: AlertChannel = slackAlertChannel(undefined, { timeoutMs: ARRIVAL_ALERTS_SLACK_TIMEOUT_MS });
+  const arrivalAlertChannel: AlertChannel = slackAlertChannel(undefined, {
+    timeoutMs: ARRIVAL_ALERTS_SLACK_TIMEOUT_MS,
+    onLateSuccess: (payload) => {
+      const id = payload.items[0]?.id;
+      if (id) noteArrivalAlertDelivered(id);
+    },
+  });
   let anomalyPauseRunning = false;
   let productHealthAlertState = initialProductHealthAlertState();
   let runwayAlertState = initialRunwayAlertState();
@@ -3806,20 +3818,27 @@ function startOperatorRoutines() {
     const refreshBoardUrl =
       optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor") ??
       "https://monitor.averray.com/monitor";
-    const refreshDecision = decideMonitorRefreshAlert({
-      enabled: true,
-      lastCompletedAtMs: productHealthHistory[productHealthHistory.length - 1]?.at ?? null,
-      heartbeatStartedAtMs: productHealthHeartbeatStartedAt,
-      nowMs: Date.now(),
-      checkIntervalMs: routineConfig.productHealth.intervalMs,
-      pagedForMs: monitorRefreshPagedForMs,
-      muted: getServerAlertMuteUntilMs() > Date.now(),
+    const refreshNowMs = Date.now();
+    const refreshSuppression = productHealthRefreshSuppressed({
+      muteUntilMs: getServerAlertMuteUntilMs(),
+      nowMs: refreshNowMs,
       quiet: inQuietHours(
-        minuteOfDayForOffset(Date.now(), routineConfig.alertBridge.quietHoursTzOffsetMin),
+        minuteOfDayForOffset(refreshNowMs, routineConfig.alertBridge.quietHoursTzOffsetMin),
         routineConfig.alertBridge.quietHours,
       ),
     });
-    monitorRefreshPagedForMs = refreshDecision.pagedForMs;
+    const refreshDecision = decideMonitorRefreshAlert({
+      enabled: true,
+      lastCompletedAtMs: productHealthHistory[productHealthHistory.length - 1]?.at ?? null,
+      previousCompletedAtMs: monitorRefreshPreviousCompletedAt,
+      heartbeatStartedAtMs: productHealthHeartbeatStartedAt,
+      nowMs: refreshNowMs,
+      checkIntervalMs: routineConfig.productHealth.intervalMs,
+      paged: monitorRefreshPaged,
+      muted: refreshSuppression.muted,
+      quiet: refreshSuppression.quiet,
+    });
+    monitorRefreshPaged = refreshDecision.paged;
     if (refreshDecision.page && refreshDecision.sinceMs != null) {
       const sinceMs = refreshDecision.sinceMs;
       // Not awaited: a hung webhook must not become the next frozen tick.
@@ -3836,10 +3855,7 @@ function startOperatorRoutines() {
         (error: unknown) => logger.warn({ err: error, sinceMs }, "product_health_refresh_alert_failed"),
       );
     }
-    const ticket = productHealthGate.tryBegin();
-    if (!ticket) return;
-    const generation = ticket.generation;
-    const live = () => productHealthGate.isCurrent(generation);
+    await runGuardedProductHealthTick(productHealthGate, async (ctx) => {
     try {
       const phConfig = loadProductHealthConfig();
       // Signer address for the balance probe: PRODUCT_HEALTH_SIGNER_ADDRESS or derived
@@ -3920,7 +3936,7 @@ function startOperatorRoutines() {
           }),
         }),
       ]);
-      if (!live()) return;
+      if (!ctx.live()) return;
       productHealthChainAdvance = collection.chainAdvance;
       productHealthTransportRun = collection.transportRun;
       const servedWarning = collection.snapshot.githubAuthors?.warning ?? adminAuthors.warning;
@@ -3948,11 +3964,12 @@ function startOperatorRoutines() {
           Boolean(optionalEnv("SLACK_WEBHOOK_URL")),
         ),
       };
+      ctx.markPublished();
       // The snapshot above is what the board serves. Slack happens after that
       // publish and is not awaited: five serial posts were ~20s on a slow
       // webhook, long enough to hold the tick. The delivery has its own bound
       // and sends only this reading, never a later stale cache.
-      if (live() && arrivalPaging && !arrivalAlerts.unavailable && !arrivalAlerts.stale) {
+      if (ctx.live() && arrivalPaging && !arrivalAlerts.unavailable && !arrivalAlerts.stale) {
         const boardUrl = optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor")
           ?? "https://monitor.averray.com/monitor";
         const arrivalNow = Date.now();
@@ -3989,8 +4006,10 @@ function startOperatorRoutines() {
         optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor") ??
           "https://monitor.averray.com/monitor",
       );
-      if (remediationAlert) await alertChannel.dispatch(remediationAlert);
-      if (!live()) return;
+      if (remediationAlert) {
+        await ctx.post("remediationAlert", () => alertChannel.dispatch(remediationAlert), false);
+      }
+      if (!ctx.live()) return;
       if (remediation.outcome.kind === "failover" || remediation.outcome.kind === "escalate") {
         lastRemediationReason = remediation.outcome.reason;
       } else if (remediation.outcome.kind === "resolved") {
@@ -4002,7 +4021,7 @@ function startOperatorRoutines() {
         state: rpcRemediationState,
         lastReason: lastRemediationReason,
       });
-      const result = await runProductHealthOnce({
+      const result = await ctx.post("runProductHealthOnce", () => runProductHealthOnce({
         runProbes: async () => collection.probes,
         // Money signals that are not probes (payout evidence) + the monitor's
         // own version reach the alert path through here.
@@ -4014,12 +4033,12 @@ function startOperatorRoutines() {
         nowMs: () => Date.now(),
         getAlertState: () => productHealthAlertState,
         setAlertState: (s) => {
-          if (!live()) return;
+          if (!ctx.live()) return;
           productHealthAlertState = s;
         },
         cooldownMs: routineConfig.productHealth.cooldownMs,
-      });
-      if (!live()) return;
+      }), null);
+      if (!result || !ctx.live()) return;
       // Enrich each entry with the samples the Trends zone graphs + the runway
       // projection reads: the /health round-trip latency and the reward bank / gas
       // balances (from the solvency block).
@@ -4028,6 +4047,7 @@ function startOperatorRoutines() {
       // sample is the in-contract reward bank, never signer wallet USDC.
       const signerUsdcSample = signerPools.find((p) => p.key === "reward_bank")?.amount ?? null;
       const signerGasSample = signerPools.find((p) => p.key === "signer_gas")?.amount ?? null;
+      monitorRefreshPreviousCompletedAt = productHealthHistory[productHealthHistory.length - 1]?.at ?? null;
       productHealthHistory = appendHistory(
         productHealthHistory,
         {
@@ -4046,7 +4066,11 @@ function startOperatorRoutines() {
       // /health spike was detected, shown, and then unrecoverable ~5h later.
       try {
         if (!productHealthIncidentsHydrated) {
-          const persisted = await readIncidents();
+          const persisted = await ctx.post("readIncidents", () => readIncidents(), null);
+          if (!persisted) {
+            // Timed out. Leave hydration false so the next tick retries, and
+            // still fall through to close any stuck incident already in memory.
+          } else {
           const byId = new Map(persisted.map((incident) => [incident.id, incident]));
           // A stuck-tick incident may already be in memory and not on disk yet.
           for (const incident of productHealthIncidents) {
@@ -4054,8 +4078,9 @@ function startOperatorRoutines() {
           }
           productHealthIncidents = [...byId.values()];
           productHealthIncidentsHydrated = true;
+          }
         }
-        if (!live()) return;
+        if (!ctx.live()) return;
         const derived = deriveProductHealthHistory(productHealthHistory, Date.now()).incidents;
         const reconciled = reconcileIncidents({
           persisted: productHealthIncidents,
@@ -4071,20 +4096,11 @@ function startOperatorRoutines() {
           ),
         });
         productHealthIncidents = reconciled.merged;
-        await appendIncidents(reconciled.writes);
-        if (!live()) return;
-        const stuckClosedAt = Date.now();
-        const stuckCloses = productHealthIncidents.flatMap((incident) => {
-          if (incident.probe !== "product_health_tick" || incident.endedAt != null) return [];
-          return [{ ...incident, endedAt: stuckClosedAt }];
-        });
-        if (stuckCloses.length > 0) {
-          const closedIds = new Set(stuckCloses.map((incident) => incident.id));
-          productHealthIncidents = productHealthIncidents.map((incident) =>
-            closedIds.has(incident.id) ? stuckCloses.find((closed) => closed.id === incident.id) ?? incident : incident,
-          );
-          await appendIncidents(stuckCloses);
-        }
+        await ctx.post("appendIncidents", () => appendIncidents(reconciled.writes), undefined);
+        if (!ctx.live()) return;
+        const stuckClosed = closeOpenStuckTickIncidents(productHealthIncidents, Date.now());
+        productHealthIncidents = stuckClosed.incidents;
+        await ctx.post("appendStuckIncidents", () => appendIncidents(stuckClosed.writes), undefined);
       } catch (error) {
         // Incident memory is forensics, not a probe — a write failure must never
         // take down the health tick that the alert bridge depends on.
@@ -4131,14 +4147,18 @@ function startOperatorRoutines() {
         });
         runwayAlertState = runwayDecision.state;
         if (runwayDecision.alert) {
-          await alertChannel.dispatch(
-            buildRunwayAlertPayload(
-              runway,
-              optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor") ??
-                "https://monitor.averray.com/monitor",
+          await ctx.post(
+            "runwayAlert",
+            () => alertChannel.dispatch(
+              buildRunwayAlertPayload(
+                runway,
+                optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor") ??
+                  "https://monitor.averray.com/monitor",
+              ),
             ),
+            false,
           );
-          if (!live()) return;
+          if (!ctx.live()) return;
         }
       }
       // Slice 3: proactive ops narration — Hermes posts a co-pilot turn on a
@@ -4180,8 +4200,12 @@ function startOperatorRoutines() {
         // the heartbeat is exactly how a monitor dies of a notification channel.
         const buzz = readBuzzConfig();
         if (buzz.config) {
-          const delivery = await publishNarration(buzz.config, opsNarration.text);
-          if (!live()) return;
+          const delivery = await ctx.post(
+            "opsNarration",
+            () => publishNarration(buzz.config, opsNarration.text ?? ""),
+            { ok: false, reason: "timeout", detail: "timed out after 20s" },
+          );
+          if (!ctx.live()) return;
           buzzDeliveryState = recordBuzzDelivery(buzzDeliveryState, {
             ok: delivery.ok,
             reason: delivery.reason,
@@ -4229,8 +4253,12 @@ function startOperatorRoutines() {
             logger.info({ probe: alert.probe, kind: alert.kind }, "probe_transition_undelivered");
             continue;
           }
-          const delivery = await publishNarration(buzzForProbes.config, alert.text);
-          if (!live()) return;
+          const delivery = await ctx.post(
+            "probeTransition",
+            () => publishNarration(buzzForProbes.config, alert.text),
+            { ok: false, reason: "timeout", detail: "timed out after 20s" },
+          );
+          if (!ctx.live()) return;
           buzzDeliveryState = recordBuzzDelivery(buzzDeliveryState, {
             ok: delivery.ok,
             reason: delivery.reason,
@@ -4280,10 +4308,20 @@ function startOperatorRoutines() {
             : {}),
         });
         const readQueuedDraftsLine = async () => {
-          const queue = await readSocialQueue();
+          const queue = await ctx.post("readSocialQueue", () => readSocialQueue(), {
+            state: "unreadable" as const,
+            drafts: [],
+            problem: "timed out after 20s",
+          });
           const line = buildSocialQueueLine(queue);
           return line ? { ...line, count: queue.drafts.length } : null;
         };
+        const digestSocialSignal = await ctx.post("readSocialSignal", () => readSocialSignal(), {
+          text: "public record timed out after 20s — no figures either way",
+          tone: "degraded" as const,
+        });
+        const digestSocialQueue = await readQueuedDraftsLine();
+        if (!ctx.live()) return;
         const digestInput = {
           localDate: digestCheck.localDate,
           localTime: digestCheck.localTime,
@@ -4300,13 +4338,12 @@ function startOperatorRoutines() {
           // Read at compose time from the public record. Never throws: an
           // unreachable endpoint returns a degraded line, so a transparency
           // outage costs one sentence rather than the whole digest.
-          socialSignal: await readSocialSignal(),
+          socialSignal: digestSocialSignal,
           // Drafts the sweep queued overnight. Never throws: an unreachable
           // GitHub yields a "could not be read" line, so a queue outage costs
           // one sentence rather than the digest.
-          socialQueue: await readQueuedDraftsLine(),
+          socialQueue: digestSocialQueue,
         };
-        if (!live()) return;
         // The plain digest is both the fallback and Hermes's source text; the
         // gate in digest-voice guarantees his prose carries every figure, so a
         // model outage or a paraphrase slip degrades to plain, never to wrong.
@@ -4314,8 +4351,8 @@ function startOperatorRoutines() {
         let digestText = digestPlain;
         const digestLlmKey = optionalEnv("OLLAMA_API_KEY");
         if (digestLlmKey) {
-          if (!live()) return;
-          const composed = await composeConversationalDigest({
+          if (!ctx.live()) return;
+          const composed = await ctx.post("composeDigest", () => composeConversationalDigest({
             plain: digestPlain,
             verdictHeadline: digestVerdict.headline,
             facts: digestFactStrings(digestInput),
@@ -4336,12 +4373,16 @@ function startOperatorRoutines() {
                 // draft where chat replies cannot.
                 timeoutMs: 25_000,
               }),
-          });
-          digestText = composed.text;
-          logger.info(
-            { voice: composed.voice, ...(composed.reason ? { reason: composed.reason } : {}) },
-            "morning_digest_voice",
-          );
+          }), null);
+          if (composed) {
+            digestText = composed.text;
+            logger.info(
+              { voice: composed.voice, ...(composed.reason ? { reason: composed.reason } : {}) },
+              "morning_digest_voice",
+            );
+          } else {
+            logger.warn("morning_digest_voice_timed_out");
+          }
         }
         const digestBuzz = readBuzzConfig();
         if (!digestBuzz.config) {
@@ -4351,8 +4392,12 @@ function startOperatorRoutines() {
           writeMorningDigestState(digestCheck.localDate);
           logger.info({ localDate: digestCheck.localDate }, "morning_digest_recorded_undelivered");
         } else {
-          const delivery = await publishNarration(digestBuzz.config, digestText);
-          if (!live()) return;
+          const delivery = await ctx.post(
+            "digestPublish",
+            () => publishNarration(digestBuzz.config, digestText),
+            { ok: false, reason: "timeout", detail: "timed out after 20s" },
+          );
+          if (!ctx.live()) return;
           buzzDeliveryState = recordBuzzDelivery(buzzDeliveryState, {
             ok: delivery.ok,
             reason: delivery.reason,
@@ -4383,9 +4428,8 @@ function startOperatorRoutines() {
       }
     } catch (error) {
       logger.error({ err: error }, "product_health_probe_failed");
-    } finally {
-      productHealthGate.settle(generation);
     }
+    });
   };
 
   // O5 — task health self-management. Reconciles the durable JSON queue after

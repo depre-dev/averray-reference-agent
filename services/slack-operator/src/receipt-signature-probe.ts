@@ -370,8 +370,9 @@ export function createReceiptProbeCache(deps: {
       const attempt = beginAttempt(attemptTimeoutMs, () => {
         running = false;
         view = { status: "degraded", detail: timeoutDetail, checked: 0, at: nowMs };
-        // Do not stamp lastRunAt. The slot is free so the next heartbeat can
-        // try again; a hung promise must not also consume the 30-minute cadence.
+        // Stamp the attempt. Leaving lastRunAt null retries on every heartbeat
+        // and leaks another hung promise each time. The interval owns the retry.
+        lastRunAt = nowMs;
       });
       void (async () => {
         try {

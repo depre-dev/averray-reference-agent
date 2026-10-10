@@ -15,8 +15,6 @@
 
 import { logger, optionalEnv } from "@avg/mcp-common";
 
-import { raceDeadline } from "./inflight-attempt.js";
-
 export interface AlertItem {
   id: string;
   title: string;
@@ -172,11 +170,15 @@ export const SLACK_ALERT_TIMEOUT_MS = 4_000;
  *
  * The timeout is the default, not an opt-in. Aborting the fetch is not enough:
  * a fetch that ignores the signal never settles, and that is how a page holds
- * the product-health tick. `raceDeadline` resolves the wait either way.
+ * the product-health tick. The wait races a timer, and a late 2xx is still recorded.
  */
 export function slackAlertChannel(
   webhookUrl: string | undefined = optionalEnv("SLACK_WEBHOOK_URL"),
-  options?: { timeoutMs?: number },
+  options?: {
+    timeoutMs?: number;
+    /** Fired if the POST succeeds after the timeout already returned false. */
+    onLateSuccess?: (payload: AlertPayload) => void;
+  },
 ): AlertChannel {
   return {
     name: "slack",
@@ -184,21 +186,35 @@ export function slackAlertChannel(
       if (!webhookUrl) return false;
       const timeoutMs = options?.timeoutMs ?? SLACK_ALERT_TIMEOUT_MS;
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const work = fetch(webhookUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: payload.text }),
+        signal: controller.signal,
+      });
+      const timeout = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          const error = new Error("timed out");
+          error.name = "AbortError";
+          reject(error);
+        }, timeoutMs);
+      });
       try {
-        const res = await raceDeadline(fetch(webhookUrl, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ text: payload.text }),
-          signal: controller.signal,
-        }), timeoutMs);
+        const res = await Promise.race([work, timeout]);
         if (!res.ok) logger.warn({ status: res.status }, "d4_alert_bridge_slack_post_failed");
         return res.ok;
       } catch (error) {
+        // The race returned. The POST may still complete; record that so a
+        // late 2xx is not paged again. The caller does not wait for it.
+        void work.then((res) => {
+          if (res.ok) options?.onLateSuccess?.(payload);
+        }, () => undefined);
         logger.warn({ err: error }, "d4_alert_bridge_slack_post_failed");
         return false;
       } finally {
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
       }
     },
   };

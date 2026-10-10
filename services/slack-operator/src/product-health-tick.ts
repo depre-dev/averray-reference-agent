@@ -95,8 +95,16 @@ export async function runWithDeadline<T>(input: {
   }
 }
 
-export function stuckTickNote(sinceMs: number, pending: readonly string[]): string {
-  const names = pending.length > 0 ? [...pending].sort().join(", ") : "unknown";
+export function stuckTickNote(
+  sinceMs: number,
+  pending: readonly string[],
+  published = false,
+): string {
+  const names = pending.length > 0
+    ? [...pending].sort().join(", ")
+    : published
+      ? "after publish"
+      : "unknown";
   const since = new Date(sinceMs).toISOString();
   return `product-health tick stuck since ${since} in ${names}`;
 }
@@ -120,6 +128,7 @@ export class ProductHealthTickGate implements ProbePending {
   private generation = 0;
   private settledGeneration = 0;
   private startedAt = 0;
+  private published = false;
   private readonly pending = new Map<string, number>();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private lastCompletedAtMs: number | null = null;
@@ -139,6 +148,7 @@ export class ProductHealthTickGate implements ProbePending {
     this.running = true;
     this.generation += 1;
     this.pending.clear();
+    this.published = false;
     this.startedAt = this.deps.now();
     this.arm(this.generation);
     return { generation: this.generation };
@@ -147,6 +157,11 @@ export class ProductHealthTickGate implements ProbePending {
   /** True only for the tick that is still the latest one started. */
   isCurrent(generation: number): boolean {
     return generation === this.generation;
+  }
+
+  /** Snapshot is what the board serves. Later awaits are "after publish". */
+  markPublished(): void {
+    this.published = true;
   }
 
   /**
@@ -203,7 +218,7 @@ export class ProductHealthTickGate implements ProbePending {
       this.deps.onStuck({
         sinceMs: this.startedAt,
         pending,
-        note: stuckTickNote(this.startedAt, pending),
+        note: stuckTickNote(this.startedAt, pending, this.published),
       });
     }, waitMs);
   }
@@ -215,31 +230,121 @@ export class ProductHealthTickGate implements ProbePending {
 }
 
 export interface MonitorRefreshAlertInput extends MonitorRefreshClock {
-  /** Repeat interval of an unchanged episode. The caller stores `pagedForMs`. */
-  pagedForMs: number | null;
+  /** True once this freeze episode has already paged. Stays true across a late completion. */
+  paged: boolean;
+  /**
+   * The completion before `lastCompletedAtMs`. A gap of two intervals means that
+   * latest completion was itself late, so the episode is not over.
+   */
+  previousCompletedAtMs?: number | null;
   muted: boolean;
   quiet: boolean;
 }
 
+/** Mute and quiet hours for the refresh page. A false mute here is a second page. */
+export function productHealthRefreshSuppressed(input: {
+  muteUntilMs: number;
+  nowMs: number;
+  quiet: boolean;
+}): { muted: boolean; quiet: boolean } {
+  return {
+    muted: input.muteUntilMs > input.nowMs,
+    quiet: input.quiet,
+  };
+}
+
+function completionWasOnTime(input: MonitorRefreshAlertInput): boolean {
+  const previous = input.previousCompletedAtMs;
+  const last = input.lastCompletedAtMs;
+  const interval = input.checkIntervalMs;
+  if (previous == null || last == null) return true;
+  if (typeof interval !== "number" || !Number.isFinite(interval) || interval <= 0) return true;
+  return last - previous < interval * MONITOR_REFRESH_MULTIPLE;
+}
+
 /**
- * Page once per freeze. Mute and quiet hours suppress the send and do not
- * consume the episode, so the page still goes out when the suppression lifts.
- * A completed tick (no longer overdue) re-arms the next freeze.
+ * Page once per freeze episode. Mute and quiet hours suppress the send and do
+ * not consume the episode. A late completion — the tick that finally finished
+ * was already two intervals behind — does not re-arm the page. Only an on-time
+ * completion ends the episode.
  */
 export function decideMonitorRefreshAlert(input: MonitorRefreshAlertInput): {
   page: boolean;
   sinceMs: number | null;
-  pagedForMs: number | null;
+  paged: boolean;
 } {
   const overdue = monitorRefreshOverdue(input);
-  if (!overdue) return { page: false, sinceMs: null, pagedForMs: null };
+  if (!overdue) {
+    return {
+      page: false,
+      sinceMs: null,
+      paged: completionWasOnTime(input) ? false : input.paged,
+    };
+  }
   if (input.muted || input.quiet) {
-    return { page: false, sinceMs: overdue.sinceMs, pagedForMs: input.pagedForMs };
+    return { page: false, sinceMs: overdue.sinceMs, paged: input.paged };
   }
-  if (input.pagedForMs === overdue.sinceMs) {
-    return { page: false, sinceMs: overdue.sinceMs, pagedForMs: input.pagedForMs };
+  if (input.paged) {
+    return { page: false, sinceMs: overdue.sinceMs, paged: true };
   }
-  return { page: true, sinceMs: overdue.sinceMs, pagedForMs: overdue.sinceMs };
+  return { page: true, sinceMs: overdue.sinceMs, paged: true };
+}
+
+export interface GuardedTickContext {
+  generation: number;
+  /** Production generation check. A late tick must not publish. */
+  live: () => boolean;
+  markPublished: () => void;
+  /** Deadline + pending name `post_publish:<name>` for an await after the snapshot is served. */
+  post: <T>(name: string, run: () => Promise<T>, fallback: T) => Promise<T>;
+}
+
+/**
+ * The production tick wrapper. `live` is `gate.isCurrent`. Index must not
+ * keep a second copy: a test that flips `isCurrent` to always-true has to
+ * fail here, because that is the check that published a stale snapshot.
+ */
+export async function runGuardedProductHealthTick(
+  gate: ProductHealthTickGate,
+  run: (ctx: GuardedTickContext) => Promise<void>,
+): Promise<void> {
+  const ticket = gate.tryBegin();
+  if (!ticket) return;
+  const generation = ticket.generation;
+  const live = () => gate.isCurrent(generation);
+  try {
+    await run({
+      generation,
+      live,
+      markPublished: () => gate.markPublished(),
+      post: (name, work, fallback) => {
+        if (!live()) return Promise.resolve(fallback);
+        return runWithDeadline({
+          name: `post_publish:${name}`,
+          pending: gate,
+          run: work,
+          onTimeout: () => fallback,
+        });
+      },
+    });
+  } finally {
+    gate.settle(generation);
+  }
+}
+
+/** Close open "product_health_tick" incidents. A no-op here leaves the board red. */
+export function closeOpenStuckTickIncidents<T extends { probe: string; endedAt?: number | null }>(
+  incidents: readonly T[],
+  nowMs: number,
+): { incidents: T[]; writes: T[] } {
+  const writes: T[] = [];
+  const next = incidents.map((incident) => {
+    if (incident.probe !== "product_health_tick" || incident.endedAt != null) return incident;
+    const closed = { ...incident, endedAt: nowMs };
+    writes.push(closed);
+    return closed;
+  });
+  return { incidents: next, writes };
 }
 
 export function monitorRefreshAlertText(sinceMs: number, boardUrl: string): string {

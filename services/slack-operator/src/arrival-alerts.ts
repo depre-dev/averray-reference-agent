@@ -109,7 +109,10 @@ export function slackMrkdwnEscape(value: string): string {
  * attacker-controlled field, including `kind`, before mrkdwn escaping.
  */
 export function defangUntrustedUrl(value: string): string {
-  return value.replace(/:\/\//g, ":\u2044\u2044");
+  const slashed = value.replace(/:\/\//g, ":\u2044\u2044");
+  // Slack also autolinks a bare domain. Bracket the dots. The board URL is
+  // not passed through here.
+  return slashed.replace(/\b((?:[a-z0-9-]+\.)+[a-z]{2,})\b/gi, (host) => host.replace(/\./g, "[.]"));
 }
 
 function slackField(value: string): string {
@@ -152,9 +155,9 @@ export function readyToSend(alerts: readonly ArrivalAlert[]): ArrivalAlert[] {
   return alerts.filter((alert) => alert.status === "ready" && !sentIds.has(dedupeKey(alert)));
 }
 
-function rememberSent(alert: ArrivalAlert): void {
-  const id = dedupeKey(alert);
-  if (sentIds.has(id)) return;
+function rememberSent(alert: Pick<ArrivalAlert, "id">): void {
+  const id = alert.id;
+  if (!id || sentIds.has(id)) return;
   sentIds.add(id);
   sentOrder.push(id);
   while (sentOrder.length > SENT_ID_CAP) {
@@ -267,6 +270,11 @@ export function arrivalAlertsBoardStatus(
     pendingCount: counted ? reading.pending.length : null,
     held,
   };
+}
+
+/** A Slack POST that finishes after the 4s race still counts as sent. */
+export function noteArrivalAlertDelivered(id: string): void {
+  rememberSent({ id });
 }
 
 function seedHistory(ready: readonly ArrivalAlert[]): void {

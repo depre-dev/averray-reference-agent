@@ -75,7 +75,7 @@ describe("arrival alert text", () => {
       kind: "external_client_first",
       subject: INJECTION,
     }), "https://monitor.example/monitor");
-    expect(payload.text).toContain("&lt;!channel&gt; &lt;https:\u2044\u2044evil.example|board&gt;@1");
+    expect(payload.text).toContain("&lt;!channel&gt; &lt;https:\u2044\u2044evil[.]example|board&gt;@1");
     expect(payload.text).not.toContain("<!channel>");
     expect(payload.text).not.toContain("<https://");
     expect(payload.boardUrl).toBe("https://monitor.example/monitor");
@@ -94,7 +94,7 @@ describe("arrival alert text", () => {
       kind: INJECTION,
       subject: "plain-wallet",
     }), "https://monitor.example/monitor");
-    expect(payload.text).toContain("arrival &lt;!channel&gt; &lt;https:\u2044\u2044evil.example|board&gt;@1");
+    expect(payload.text).toContain("arrival &lt;!channel&gt; &lt;https:\u2044\u2044evil[.]example|board&gt;@1");
     expect(payload.text).not.toContain("<!channel>");
     expect(payload.text).not.toContain("<https://");
     const withoutBoard = payload.text.replaceAll("https://monitor.example/monitor", "");
@@ -109,9 +109,18 @@ describe("arrival alert text", () => {
     }), "https://monitor.example/monitor");
     const withoutBoard = payload.text.replaceAll("https://monitor.example/monitor", "");
     expect(withoutBoard).not.toContain("://");
-    expect(payload.text).toContain("https:\u2044\u2044evil.example/phish");
+    expect(payload.text).toContain("https:\u2044\u2044evil[.]example/phish");
     expect(payload.text.split("\n")).not.toContain("external_wallet_first:0xabc");
     expect(payload.items[0]?.id).toBe("external_wallet_first:0xabc");
+  });
+
+  it("defangs a bare domain Slack would autolink", () => {
+    const payload = arrivalAlertPayload(alert({
+      kind: "external_wallet_first",
+      subject: "opened from evil.com today",
+    }), "https://monitor.example/monitor");
+    expect(payload.text).toContain("evil[.]com");
+    expect(payload.text).not.toContain("evil.com");
   });
 });
 
@@ -478,6 +487,35 @@ describe("arrival slack fetch", () => {
       await vi.advanceTimersByTimeAsync(30);
       expect(settled).toBe(true);
       await expect(pending).resolves.toBe(false);
+    } finally {
+      globalThis.fetch = original;
+      vi.useRealTimers();
+    }
+  });
+
+  it("records a Slack POST that succeeds after the timeout", async () => {
+    vi.useFakeTimers();
+    const original = globalThis.fetch;
+    let finish: (value: Response) => void = () => {};
+    const late: string[] = [];
+    globalThis.fetch = (() => new Promise<Response>((resolve) => { finish = resolve; })) as typeof fetch;
+    try {
+      const pending = slackAlertChannel("https://hooks.example/slack", {
+        timeoutMs: 30,
+        onLateSuccess: (payload) => late.push(payload.items[0]?.id ?? ""),
+      }).dispatch({
+        count: 1,
+        items: [{ id: "external_wallet_first:0xlate", title: "late" }],
+        boardUrl: "https://monitor.example/monitor",
+        text: "hello",
+      });
+      await vi.advanceTimersByTimeAsync(30);
+      await expect(pending).resolves.toBe(false);
+      expect(late).toEqual([]);
+      finish(new Response("ok", { status: 200 }));
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+      expect(late).toEqual(["external_wallet_first:0xlate"]);
     } finally {
       globalThis.fetch = original;
       vi.useRealTimers();
