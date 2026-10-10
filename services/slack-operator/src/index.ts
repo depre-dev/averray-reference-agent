@@ -213,6 +213,7 @@ import {
 } from "./overnight-ledger-feed.js";
 import { depositPoolUrlFromBankFeed, readDepositPoolFeed } from "./deposit-pool-feed.js";
 import { readAdminGithubAuthors } from "./github-authors.js";
+import { pollArrivalAlerts } from "./arrival-alerts.js";
 import {
   loadRemediationConfig,
   decideRpcRemediation,
@@ -3791,6 +3792,18 @@ function startOperatorRoutines() {
           ...(phConfig.apiBaseUrl ? { baseUrl: phConfig.apiBaseUrl } : {}),
           getSession: getAdminReadSession,
           fetchImpl: fetch,
+        }),
+        // Operator-only. Ready alerts page through the same Slack channel.
+        // Pending stays on the platform. A failed poll keeps the last reading
+        // and does not send.
+        pollArrivalAlerts({
+          ...(phConfig.apiBaseUrl ? { baseUrl: phConfig.apiBaseUrl } : {}),
+          getSession: getAdminReadSession,
+          fetchImpl: fetch,
+          alert: (payload) => alertChannel.dispatch(payload),
+          boardUrl:
+            optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor") ??
+            "https://monitor.averray.com/monitor",
         }),
       ]);
       productHealthChainAdvance = collection.chainAdvance;
