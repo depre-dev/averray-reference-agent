@@ -165,6 +165,45 @@ export interface ArrivalsSnapshot {
    */
   agents?: ArrivalAgent[];
   agentsUnreadable?: string;
+  /**
+   * Error responses by the stage of the request. Additive on
+   * `averray.arrivals.v1`. Absent when the producer did not send it — absent,
+   * never a zero-filled window. A window whose value is the string
+   * `"not reported"` has not covered that span. `unclassified` is protocol
+   * garbage and is never part of `external`.
+   */
+  errorsByStage?: ArrivalErrorsByStage;
+  /** Present when the field was sent and could not be read. The funnel still stands. */
+  errorsByStageUnreadable?: string;
+}
+
+export const ARRIVAL_ERROR_NOT_REPORTED = "not reported";
+export const ARRIVAL_ERROR_ACTORS = ["external", "self", "ambiguous", "unclassified"] as const;
+export const ARRIVAL_ERROR_DOORS = ["mcp", "http"] as const;
+export const ARRIVAL_ERROR_WINDOWS = ["sinceCutover", "24h", "7d"] as const;
+
+export type ArrivalErrorActor = (typeof ARRIVAL_ERROR_ACTORS)[number];
+export type ArrivalErrorDoor = (typeof ARRIVAL_ERROR_DOORS)[number];
+export type ArrivalErrorWindowKey = (typeof ARRIVAL_ERROR_WINDOWS)[number];
+
+/** Codes counted at one stage. An empty object was measured and had no errors. */
+export type ArrivalErrorCodes = Record<string, number>;
+/** Only stages the producer sent. A missing stage is not zero. */
+export type ArrivalErrorStages = Partial<Record<ArrivalStage, ArrivalErrorCodes>>;
+/** Only actors the producer sent. `unclassified` is its own key. */
+export type ArrivalErrorActors = Partial<Record<ArrivalErrorActor, ArrivalErrorStages>>;
+export type ArrivalErrorDoors = Partial<Record<ArrivalErrorDoor, ArrivalErrorActors>>;
+export type ArrivalErrorWindow = ArrivalErrorDoors | typeof ARRIVAL_ERROR_NOT_REPORTED;
+
+export interface ArrivalErrorsByStage {
+  absentMeans: typeof ARRIVAL_ERROR_NOT_REPORTED;
+  /** Producer sentence. Absent when the payload did not include one. */
+  measures?: string;
+  collectionSinceMs: number | null;
+  sinceCutover?: ArrivalErrorWindow;
+  "24h"?: ArrivalErrorWindow;
+  "7d"?: ArrivalErrorWindow;
+  unavailable?: string;
 }
 
 /** The platform snapshot verbatim, or why there is no reading. */
@@ -362,7 +401,122 @@ export function normalizeArrivalsFeed(body: unknown): ArrivalsBlock {
     },
     clients,
     ...normalizeAgents(value.agents),
+    ...normalizeErrorsByStage(value.errorsByStage),
   };
+}
+
+/**
+ * Carry `errorsByStage` only when the producer sent it.
+ *
+ * Missing windows, doors, actors, and stages stay missing. They are not
+ * rewritten as 0, and `unclassified` is not added into `external`. A malformed
+ * field is reported beside the funnel; it does not take the arrivals block down.
+ */
+export function normalizeErrorsByStage(
+  raw: unknown,
+): { errorsByStage: ArrivalErrorsByStage } | { errorsByStageUnreadable: string } | Record<string, never> {
+  if (raw === undefined) return {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { errorsByStageUnreadable: "errorsByStage unreadable — not an object" };
+  }
+  const value = raw as Record<string, unknown>;
+  if (value.absentMeans !== undefined && value.absentMeans !== ARRIVAL_ERROR_NOT_REPORTED) {
+    return { errorsByStageUnreadable: "errorsByStage unreadable — absentMeans is not \"not reported\"" };
+  }
+  if (value.collectionSinceMs !== null && value.collectionSinceMs !== undefined && count(value.collectionSinceMs) === undefined) {
+    return { errorsByStageUnreadable: "errorsByStage unreadable — collectionSinceMs is invalid" };
+  }
+  const windows: Partial<Record<ArrivalErrorWindowKey, ArrivalErrorWindow>> = {};
+  for (const key of ARRIVAL_ERROR_WINDOWS) {
+    if (!(key in value)) continue;
+    const parsed = parseErrorWindow(value[key]);
+    if ("unreadable" in parsed) return { errorsByStageUnreadable: parsed.unreadable };
+    windows[key] = parsed.window;
+  }
+  const measures = typeof value.measures === "string" && value.measures.trim() ? value.measures.trim() : undefined;
+  const unavailable = typeof value.unavailable === "string" && value.unavailable.trim()
+    ? value.unavailable.trim()
+    : undefined;
+  return {
+    errorsByStage: {
+      absentMeans: ARRIVAL_ERROR_NOT_REPORTED,
+      ...(measures === undefined ? {} : { measures }),
+      collectionSinceMs: value.collectionSinceMs === null || value.collectionSinceMs === undefined
+        ? null
+        : count(value.collectionSinceMs)!,
+      ...windows,
+      ...(unavailable === undefined ? {} : { unavailable }),
+    },
+  };
+}
+
+function parseErrorWindow(
+  raw: unknown,
+): { window: ArrivalErrorWindow } | { unreadable: string } {
+  if (raw === ARRIVAL_ERROR_NOT_REPORTED) return { window: ARRIVAL_ERROR_NOT_REPORTED };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { unreadable: "errorsByStage unreadable — a window is neither covered nor \"not reported\"" };
+  }
+  const value = raw as Record<string, unknown>;
+  const doors: ArrivalErrorDoors = {};
+  for (const door of ARRIVAL_ERROR_DOORS) {
+    if (!(door in value)) continue;
+    const actors = parseErrorActors(value[door]);
+    if ("unreadable" in actors) return actors;
+    doors[door] = actors.actors;
+  }
+  return { window: doors };
+}
+
+function parseErrorActors(
+  raw: unknown,
+): { actors: ArrivalErrorActors } | { unreadable: string } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { unreadable: "errorsByStage unreadable — an actor block is not an object" };
+  }
+  const value = raw as Record<string, unknown>;
+  const actors: ArrivalErrorActors = {};
+  for (const actor of ARRIVAL_ERROR_ACTORS) {
+    if (!(actor in value)) continue;
+    const stages = parseErrorStages(value[actor]);
+    if ("unreadable" in stages) return stages;
+    actors[actor] = stages.stages;
+  }
+  return { actors };
+}
+
+function parseErrorStages(
+  raw: unknown,
+): { stages: ArrivalErrorStages } | { unreadable: string } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { unreadable: "errorsByStage unreadable — a stage block is not an object" };
+  }
+  const value = raw as Record<string, unknown>;
+  const stages: ArrivalErrorStages = {};
+  for (const stage of ARRIVAL_STAGES) {
+    if (!(stage in value)) continue;
+    const codes = parseErrorCodes(value[stage]);
+    if ("unreadable" in codes) return codes;
+    stages[stage] = codes.codes;
+  }
+  return { stages };
+}
+
+function parseErrorCodes(
+  raw: unknown,
+): { codes: ArrivalErrorCodes } | { unreadable: string } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { unreadable: "errorsByStage unreadable — a code block is not an object" };
+  }
+  const codes: ArrivalErrorCodes = {};
+  for (const [code, rawCount] of Object.entries(raw as Record<string, unknown>)) {
+    const parsed = count(rawCount);
+    if (!code || parsed === undefined || parsed === 0) {
+      return { unreadable: "errorsByStage unreadable — a code count is not a positive integer" };
+    }
+    codes[code] = parsed;
+  }
+  return { codes };
 }
 
 /**

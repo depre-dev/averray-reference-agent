@@ -364,4 +364,65 @@ describe("normalizeArrivalsFeed — the ambiguous bucket", () => {
     });
     expect("unavailable" in malformed && malformed.unavailable).toContain("client entry has invalid fields");
   });
+
+  test("absence of errorsByStage is not an object of zeroes", () => {
+    const result = normalizeArrivalsFeed(good);
+    expect("errorsByStage" in result).toBe(false);
+  });
+
+  test("errorsByStage keeps a missing stage and an uncovered window absent, not zero", () => {
+    const result = normalizeArrivalsFeed({
+      ...good,
+      errorsByStage: {
+        absentMeans: "not reported",
+        measures: "error responses by stage; one pre-auth request = one visit",
+        collectionSinceMs: 10,
+        sinceCutover: {
+          mcp: {
+            external: { browsed: { rate_limited: 2 } },
+            unclassified: { reached: { "-32700": 1 } },
+          },
+        },
+        "24h": "not reported",
+      },
+    });
+    expect("funnel" in result).toBe(true);
+    if (!("errorsByStage" in result) || !result.errorsByStage) throw new Error("errorsByStage dropped");
+    const errors = result.errorsByStage;
+    expect(errors["24h"]).toBe("not reported");
+    expect(errors["7d"]).toBeUndefined();
+    const mcp = typeof errors.sinceCutover === "object" ? errors.sinceCutover.mcp : undefined;
+    expect(mcp?.external?.browsed).toEqual({ rate_limited: 2 });
+    expect(mcp?.external?.reached).toBeUndefined();
+    expect(mcp?.self).toBeUndefined();
+    expect(mcp?.ambiguous).toBeUndefined();
+    expect(mcp?.unclassified?.browsed).toBeUndefined();
+  });
+
+  test("unclassified is carried on its own and is not folded into external", () => {
+    const result = normalizeArrivalsFeed({
+      ...good,
+      errorsByStage: {
+        absentMeans: "not reported",
+        collectionSinceMs: 10,
+        sinceCutover: {
+          mcp: { unclassified: { reached: { "-32700": 1 } } },
+        },
+      },
+    });
+    if (!("errorsByStage" in result) || !result.errorsByStage) throw new Error("errorsByStage dropped");
+    const mcp = typeof result.errorsByStage.sinceCutover === "object"
+      ? result.errorsByStage.sinceCutover.mcp
+      : undefined;
+    expect(mcp?.unclassified?.reached).toEqual({ "-32700": 1 });
+    expect(mcp?.external).toBeUndefined();
+    expect(JSON.stringify(mcp?.external ?? {})).not.toContain("-32700");
+  });
+
+  test("a malformed errorsByStage does not take the arrivals block down", () => {
+    const result = normalizeArrivalsFeed({ ...good, errorsByStage: [] });
+    expect("funnel" in result).toBe(true);
+    expect("errorsByStage" in result).toBe(false);
+    expect("errorsByStageUnreadable" in result && result.errorsByStageUnreadable).toContain("unreadable");
+  });
 });

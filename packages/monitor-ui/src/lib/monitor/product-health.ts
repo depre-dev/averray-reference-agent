@@ -512,6 +512,36 @@ export interface ArrivalsSnapshot {
    */
   agents?: ArrivalAgent[];
   agentsUnreadable?: string;
+  /**
+   * Error responses by stage, as served. Absent means the producer did not
+   * send the field. A window of `"not reported"` is not a zero. `unclassified`
+   * is protocol garbage and is not an outsider count.
+   */
+  errorsByStage?: ArrivalErrorsByStage;
+  errorsByStageUnreadable?: string;
+}
+
+export const ARRIVAL_ERROR_NOT_REPORTED = "not reported";
+export const ARRIVAL_ERROR_ACTORS = ["external", "self", "ambiguous", "unclassified"] as const;
+export const ARRIVAL_ERROR_WINDOWS = ["sinceCutover", "24h", "7d"] as const;
+
+export type ArrivalErrorActor = (typeof ARRIVAL_ERROR_ACTORS)[number];
+export type ArrivalErrorDoor = "mcp" | "http";
+export type ArrivalErrorWindowKey = (typeof ARRIVAL_ERROR_WINDOWS)[number];
+export type ArrivalErrorCodes = Record<string, number>;
+export type ArrivalErrorStages = Partial<Record<ArrivalStage, ArrivalErrorCodes>>;
+export type ArrivalErrorActors = Partial<Record<ArrivalErrorActor, ArrivalErrorStages>>;
+export type ArrivalErrorDoors = Partial<Record<ArrivalErrorDoor, ArrivalErrorActors>>;
+export type ArrivalErrorWindow = ArrivalErrorDoors | typeof ARRIVAL_ERROR_NOT_REPORTED;
+
+export interface ArrivalErrorsByStage {
+  absentMeans: typeof ARRIVAL_ERROR_NOT_REPORTED;
+  measures?: string;
+  collectionSinceMs: number | null;
+  sinceCutover?: ArrivalErrorWindow;
+  "24h"?: ArrivalErrorWindow;
+  "7d"?: ArrivalErrorWindow;
+  unavailable?: string;
 }
 
 /**
