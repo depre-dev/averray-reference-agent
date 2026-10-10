@@ -32,7 +32,9 @@ import {
   deriveOpsVerdict,
   isAcknowledgedProbe,
   isAwaitingProbe,
+  monitorRefreshOverdue,
   payoutGap,
+  withMonitorRefresh,
   type OpsVerdict,
 } from "@avg/schemas/ops-verdict";
 import { formatAgo, formatAmount, type OpsTone } from "./ops-model.js";
@@ -146,14 +148,32 @@ export function opsVerdict(input: {
 }): VerdictView {
   const { health, streamDegraded, nowMs } = input;
 
-  const core = deriveOpsVerdict({
+  const core = withMonitorRefresh(deriveOpsVerdict({
     enabled: health.enabled,
     checks: health.checks,
     probes: health.probes,
     pools: health.solvency?.pools ?? [],
     runway: health.solvency?.runway ?? [],
     ...(health.flow?.payout ? { payout: health.flow.payout } : {}),
+  }), {
+    enabled: health.enabled,
+    lastCompletedAtMs: health.at,
+    heartbeatStartedAtMs: health.heartbeatStartedAt ?? null,
+    nowMs,
+    checkIntervalMs: health.checkIntervalMs ?? null,
   });
+  // A frozen heartbeat is the verdict. A soft "data stale" kicker over the
+  // last product headline is how the 2026-10-10 freeze stayed quiet for hours.
+  if (core.reason === "monitor-not-refreshing") {
+    return {
+      kicker: "MONITOR NOT REFRESHING",
+      kickerTone: "red",
+      verdict: core.headline,
+      verdictTone: "red",
+      sub: core.sub,
+      subTone: "red",
+    };
+  }
   // A red/degraded verdict tones its own subline; a calm one leaves the
   // subline warm grey so the counts read as context, not as reassurance.
   const subTone: OpsTone = core.tone === "ok" ? "awaiting" : core.tone;
@@ -234,7 +254,14 @@ export function trustRows(input: {
     rows.push({ key: "DATA AGE", value: "no check yet", tone: "awaiting" });
   } else {
     const ageMs = Math.max(0, nowMs - health.at);
-    const stale = ageMs > staleAfterMs(health);
+    const refreshOverdue = monitorRefreshOverdue({
+      enabled: health.enabled,
+      lastCompletedAtMs: health.at,
+      heartbeatStartedAtMs: health.heartbeatStartedAt ?? null,
+      nowMs,
+      checkIntervalMs: health.checkIntervalMs ?? null,
+    });
+    const stale = refreshOverdue != null || ageMs > staleAfterMs(health);
     rows.push({
       key: "DATA AGE",
       value: `${formatAgo(health.at, nowMs)} — ${stale ? "STALE" : "fresh"}`,

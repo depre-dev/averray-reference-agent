@@ -31,6 +31,7 @@ import type {
   BankSubjectCandidate,
   SourcedRead,
 } from "./bank-feed.js";
+import { raceDeadline } from "./inflight-attempt.js";
 import { classifyTransportFailure, describeFeedError } from "./probe-transport.js";
 
 export interface BankFeedRead {
@@ -49,12 +50,15 @@ export async function readBankFeed(input: {
   timeoutMs?: number;
 }): Promise<BankFeedRead> {
   if (!input.url) return {}; // not wired — not a fault, and not a lane
+  const timeoutMs = input.timeoutMs ?? BANK_FEED_TIMEOUT_MS;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), input.timeoutMs ?? BANK_FEED_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await input.fetchImpl(input.url, { signal: controller.signal });
+    // raceDeadline settles even when fetch ignores the abort signal, so a
+    // shared caller cannot wait forever on a promise that holds no socket.
+    const res = await raceDeadline(input.fetchImpl(input.url, { signal: controller.signal }), timeoutMs);
     if (!res.ok) return { reason: `bank feed returned HTTP ${res.status}` };
-    const body: unknown = await res.json();
+    const body: unknown = await raceDeadline(res.json(), timeoutMs);
     return normalizeBankFeed(body);
   } catch (error) {
     // The bank host is a name on agent-mainnet-internal. DNS failure means

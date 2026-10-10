@@ -60,11 +60,12 @@ describe("Hermes mobile triage — one truth", () => {
   });
 
   test("mobile renders the same shared verdict state as desktop and exposes its typed reason", () => {
-    const desktop = render(<OpsBoard health={OPS_FIXTURE_STRESS} nowMs={FIXTURE_NOW} />);
+    const fresh = OPS_FIXTURE_STRESS.at! + 2_000;
+    const desktop = render(<OpsBoard health={OPS_FIXTURE_STRESS} nowMs={fresh} />);
     const mobile = render(
       <MobileBoard
         health={OPS_FIXTURE_STRESS}
-        nowMs={FIXTURE_NOW}
+        nowMs={fresh}
         overnightLedger={OVERNIGHT_LEDGER_LIVE}
       />,
     );
@@ -183,7 +184,7 @@ describe("Hermes mobile triage — state honesty", () => {
         health={health}
         streamDegraded
         streamStatus="reconnecting"
-        nowMs={FIXTURE_NOW}
+        nowMs={health.at! + 2_000}
         overnightLedger={OVERNIGHT_LEDGER_UNAUTHORIZED}
       />,
     );

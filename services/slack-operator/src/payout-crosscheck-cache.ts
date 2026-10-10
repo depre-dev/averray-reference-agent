@@ -19,6 +19,7 @@
 // broken — otherwise a check that stopped working reads the same as one that
 // keeps passing.
 
+import { beginAttempt } from "./inflight-attempt.js";
 import {
   crossCheckNeverRun,
   decideCrossCheck,
@@ -38,6 +39,11 @@ export interface CrossCheckCache {
 export const DEFAULT_CROSSCHECK_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 /** A transient provider failure gets another chance in the same hour. */
 export const DEFAULT_CROSSCHECK_RETRY_INTERVAL_MS = 30 * 60 * 1000;
+/**
+ * One comparison is a handful of RPC calls. Past this the slot frees even if
+ * the run promise never settles, and the late result is ignored.
+ */
+export const CROSSCHECK_ATTEMPT_TIMEOUT_MS = 60_000;
 
 export interface CrossCheckRun {
   primary: EndpointReading | null;
@@ -56,10 +62,13 @@ export function createCrossCheckCache(deps: {
   run: () => Promise<CrossCheckRun>;
   intervalMs?: number;
   retryIntervalMs?: number;
+  /** Frees the in-flight slot even if `run` never settles. */
+  attemptTimeoutMs?: number;
   onError?: (message: string) => void;
 }): CrossCheckCache {
   const intervalMs = deps.intervalMs ?? DEFAULT_CROSSCHECK_INTERVAL_MS;
   const retryIntervalMs = deps.retryIntervalMs ?? DEFAULT_CROSSCHECK_RETRY_INTERVAL_MS;
+  const attemptTimeoutMs = deps.attemptTimeoutMs ?? CROSSCHECK_ATTEMPT_TIMEOUT_MS;
   let verdict: CrossCheckView = crossCheckNeverRun(deps.configured);
   // Survives failures on purpose — see the header.
   let lastAgreedAtMs: number | null = null;
@@ -104,9 +113,24 @@ export function createCrossCheckCache(deps: {
       ) return;
       running = true;
       lastAttemptAtMs = nowMs;
+      const timeoutDetail = `timed out after ${Math.max(1, Math.round(attemptTimeoutMs / 1000))}s`;
+      const attempt = beginAttempt(attemptTimeoutMs, () => {
+        running = false;
+        consecutiveFailures += 1;
+        verdict = decorateFailure(decideCrossCheck({
+          configured: true,
+          primary: null,
+          secondary: null,
+          secondaryReason: timeoutDetail,
+          lastAgreedAtMs,
+          nowMs,
+        }), timeoutDetail, nowMs);
+        deps.onError?.(timeoutDetail);
+      });
       void (async () => {
         try {
           const run = await deps.run();
+          if (!attempt.current()) return;
           const next = decideCrossCheck({
             configured: true,
             primary: run.primary,
@@ -133,6 +157,7 @@ export function createCrossCheckCache(deps: {
             verdict = decorateFailure(next, run.secondaryReason, nowMs);
           }
         } catch (error) {
+          if (!attempt.current()) return;
           const message = describeFeedError(error);
           consecutiveFailures += 1;
           verdict = decorateFailure(decideCrossCheck({
@@ -145,7 +170,10 @@ export function createCrossCheckCache(deps: {
           }), message, nowMs);
           deps.onError?.(message);
         } finally {
-          running = false;
+          if (attempt.current()) {
+            attempt.finish();
+            running = false;
+          }
         }
       })();
     },

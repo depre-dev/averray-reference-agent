@@ -14,10 +14,17 @@
 
 import { createPublicKey, createVerify, type JsonWebKey as CryptoJsonWebKey } from "node:crypto";
 
+import { beginAttempt } from "./inflight-attempt.js";
 import { classifyTransportFailure, describeTransportFailure } from "./probe-transport.js";
 
 export const RECEIPT_PROBE_INTERVAL_MS = 30 * 60 * 1000;
 export const RECEIPT_FETCH_TIMEOUT_MS = 8_000;
+/**
+ * The probe fetches a JWKS, a list, and two documents, each with its own 8s
+ * fetch timeout. This is the ceiling for the whole pass: past it the in-flight
+ * flag clears even if `run` never settles, and the late result is dropped.
+ */
+export const RECEIPT_ATTEMPT_TIMEOUT_MS = 60_000;
 export const BADGE_RECEIPT_JWKS_PATH = "/.well-known/badge-receipt-jwks.json";
 export const BADGE_RECEIPT_TYP = "averray-badge-receipt+jws";
 export const RECEIPT_LIST_LIMIT = 5;
@@ -339,8 +346,11 @@ export interface ReceiptProbeCache {
 export function createReceiptProbeCache(deps: {
   run: () => Promise<Omit<ReceiptProbeView, "at">>;
   intervalMs?: number;
+  /** Frees the in-flight slot even if `run` never settles. */
+  attemptTimeoutMs?: number;
 }): ReceiptProbeCache {
   const intervalMs = deps.intervalMs ?? RECEIPT_PROBE_INTERVAL_MS;
+  const attemptTimeoutMs = deps.attemptTimeoutMs ?? RECEIPT_ATTEMPT_TIMEOUT_MS;
   let view: ReceiptProbeView = {
     status: "degraded",
     detail: "receipt signature probe has not completed",
@@ -356,12 +366,21 @@ export function createReceiptProbeCache(deps: {
       if (running) return;
       if (lastRunAt !== null && nowMs - lastRunAt < intervalMs) return;
       running = true;
+      const timeoutDetail = `could not check — timed out after ${Math.max(1, Math.round(attemptTimeoutMs / 1000))}s`;
+      const attempt = beginAttempt(attemptTimeoutMs, () => {
+        running = false;
+        view = { status: "degraded", detail: timeoutDetail, checked: 0, at: nowMs };
+        // Do not stamp lastRunAt. The slot is free so the next heartbeat can
+        // try again; a hung promise must not also consume the 30-minute cadence.
+      });
       void (async () => {
         try {
           const next = await deps.run();
+          if (!attempt.current()) return;
           view = { ...next, at: nowMs };
           lastRunAt = nowMs;
         } catch (error) {
+          if (!attempt.current()) return;
           view = {
             status: "degraded",
             detail: `could not check — ${error instanceof Error ? error.message : String(error)}`,
@@ -370,7 +389,10 @@ export function createReceiptProbeCache(deps: {
           };
           lastRunAt = nowMs;
         } finally {
-          running = false;
+          if (attempt.current()) {
+            attempt.finish();
+            running = false;
+          }
         }
       })();
     },

@@ -31,7 +31,7 @@ import type { ArrivalAlertsBoardStatus } from "./arrival-alerts.js";
 // ── Probe result model ──────────────────────────────────────────────
 
 import { decideDiskHeadroom, readDiskUsage } from "./disk-headroom.js";
-import { probeExternalFunnel, type BucketSummary, type FunnelBucket } from "./external-funnel.js";
+import { decideExternalFunnel, probeExternalFunnel, type BucketSummary, type FunnelBucket } from "./external-funnel.js";
 import { h160ToSs58 } from "./hub-address.js";
 import { ESCROW_V2_SELECTORS } from "./escrow-selectors.js";
 import { readGasSpend } from "./gas-spend-read.js";
@@ -96,6 +96,13 @@ import {
   type TransportFailureRun,
 } from "./probe-transport.js";
 import { fetchWithTimeout, orderedRpcEndpoints, readChainWithFailover } from "./rpc-endpoints.js";
+import {
+  PROBE_DEADLINE_MS,
+  probeTimeoutDetail,
+  runWithDeadline,
+  type ProbeLog,
+  type ProbePending,
+} from "./product-health-tick.js";
 import { isAwaitingProbe } from "@avg/schemas";
 
 export type ProbeStatus = "ok" | "degraded" | "red";
@@ -3162,13 +3169,44 @@ export async function collectProductHealthProbes(
     previousSubmittedNotSettled?: number | null;
     /** Previous cycle's /health transport-failure run, for the retry hold. */
     transportRun?: TransportFailureRun;
+    /** Per-probe ceiling. Defaults to 20s so a promise that never settles cannot freeze the tick. */
+    deadlineMs?: number;
+    pending?: ProbePending;
+    log?: ProbeLog;
   } = { nowMs: 0 },
 ): Promise<ProductHealthCollection> {
-  const h = await fetchProductHealth({
-    baseUrl: config.apiBaseUrl,
-    healthPath: config.apiHealthPath,
-    fetchImpl,
-  });
+  const deadlineMs = chainCtx.deadlineMs ?? PROBE_DEADLINE_MS;
+  const bound = <T>(name: string, run: () => Promise<T>, onTimeout: (detail: string) => T): Promise<T> =>
+    runWithDeadline({
+      name,
+      run,
+      onTimeout,
+      deadlineMs,
+      ...(chainCtx.pending ? { pending: chainCtx.pending } : {}),
+      ...(chainCtx.log ? { log: chainCtx.log } : {}),
+    });
+  let healthTimedOut = false;
+  const h = await bound(
+    "product_api",
+    () => fetchProductHealth({
+      baseUrl: config.apiBaseUrl,
+      healthPath: config.apiHealthPath,
+      fetchImpl,
+    }),
+    (detail) => {
+      healthTimedOut = true;
+      return {
+        configured: Boolean(config.apiBaseUrl),
+        reachable: false,
+        httpOk: false,
+        status: 0,
+        url: config.apiBaseUrl ? joinUrl(config.apiBaseUrl, config.apiHealthPath) : "",
+        error: detail,
+        transport: { kind: "timeout" as const, code: "ETIMEDOUT", message: detail },
+        latencyMs: deadlineMs,
+      };
+    },
+  );
   // Advance (or clear) the consecutive-failure run BEFORE the probes derive, so
   // product_api sees this cycle counted. A successful read clears it outright.
   const transportRun = trackTransportFailure(chainCtx.transportRun, transportFaultOf(h));
@@ -3178,12 +3216,16 @@ export async function collectProductHealthProbes(
   const chainAdvance = trackChainAdvance(chainCtx.advance, block, chainCtx.nowMs);
   // Absolute block age from the (chain-matched) settlement RPC — no startup blind
   // window; falls back to the cross-poll tracker when the RPC is absent/mismatched.
-  const blockAgeSec = await chainBlockAge({
-    rpcUrl: config.rpcUrl,
-    expectedChainId: chainId,
-    nowMs: chainCtx.nowMs,
-    fetchImpl,
-  });
+  const blockAgeSec = await bound(
+    "chain_block_age",
+    () => chainBlockAge({
+      rpcUrl: config.rpcUrl,
+      expectedChainId: chainId,
+      nowMs: chainCtx.nowMs,
+      fetchImpl,
+    }),
+    () => undefined,
+  );
   const staleness = {
     staticForMs: chainCtx.nowMs - chainAdvance.lastAdvanceAtMs,
     maxStaleSeconds: config.chainMaxStaleSeconds,
@@ -3191,20 +3233,30 @@ export async function collectProductHealthProbes(
     blockAgeSec,
   };
   const [signer, posterFeeAttribution] = await Promise.all([
-    probeSignerLiquidity({
-      rpcUrl: config.rpcUrl,
-      rpcEndpoints: rpcEndpointsOf(config),
-      signerAddress: config.signerAddress,
-      rewardBankLiquid,
-      minGasNative: config.minGasNative,
-      minRewardBank: config.minRewardBank,
-      // Balances are only trusted from an RPC on the product's own chain.
-      expectedChainId: chainId,
-      fetchImpl,
-    }),
-    readPosterFeeAttribution({ baseUrl: config.apiBaseUrl, fetchImpl }),
+    bound(
+      "signer_liquidity",
+      () => probeSignerLiquidity({
+        rpcUrl: config.rpcUrl,
+        rpcEndpoints: rpcEndpointsOf(config),
+        signerAddress: config.signerAddress,
+        rewardBankLiquid,
+        minGasNative: config.minGasNative,
+        minRewardBank: config.minRewardBank,
+        // Balances are only trusted from an RPC on the product's own chain.
+        expectedChainId: chainId,
+        fetchImpl,
+      }),
+      (detail) => ({ name: "signer_liquidity", status: "degraded" as const, detail }),
+    ),
+    bound(
+      "poster_fee_attribution",
+      () => readPosterFeeAttribution({ baseUrl: config.apiBaseUrl, fetchImpl }),
+      () => undefined,
+    ),
   ]);
-  const treasury = await probeTreasuryLiquidity({
+  const treasury = await bound(
+    "treasury_liquidity",
+    () => probeTreasuryLiquidity({
     addresses: h.body?.addresses,
     rewardBankLiquid,
     usdcDecimals: config.usdcDecimals,
@@ -3215,7 +3267,9 @@ export async function collectProductHealthProbes(
     rpcUrl: config.rpcUrl,
     fetchImpl,
     ...(posterFeeAttribution ? { posterFeeAttribution } : {}),
-  });
+  }),
+    (detail) => ({ name: "treasury_liquidity", status: "degraded" as const, detail }),
+  );
   // signer_liquidity and treasury_liquidity intentionally share the same
   // /health reward-bank position. Keep one board row while retaining both
   // independently actionable probes. The direct /health row is added last so
@@ -3258,17 +3312,25 @@ export async function collectProductHealthProbes(
   // Ask the contract who receives its fee, so fee credits can be told apart
   // from payouts. Both are the SAME event; only the recipient differs.
   const feeRecipient = config.payoutEvidenceEnabled
-    ? await readFeeRecipient({
-        rpcUrl: config.rpcUrl,
-        escrowCore: h.body?.addresses?.escrowCore,
-        fetchImpl,
-      })
+    ? await bound(
+        "fee_recipient",
+        () => readFeeRecipient({
+          rpcUrl: config.rpcUrl,
+          escrowCore: h.body?.addresses?.escrowCore,
+          fetchImpl,
+        }),
+        () => null,
+      )
     : null;
   // Measure BEFORE reading logs, so the window is sized by the chain's real
   // rate rather than merely checked against it afterwards. One sample serves
   // both the sizing and the fit report.
   const blockSeconds = config.payoutEvidenceEnabled
-    ? await measureBlockSeconds({ rpcUrl: config.rpcUrl, sampleBlocks: PAYOUT_BLOCK_TIME_SAMPLE, fetchImpl })
+    ? await bound(
+        "block_seconds",
+        () => measureBlockSeconds({ rpcUrl: config.rpcUrl, sampleBlocks: PAYOUT_BLOCK_TIME_SAMPLE, fetchImpl }),
+        () => null,
+      )
     : null;
   const lookback = resolvePayoutLookback({
     blockSeconds,
@@ -3279,7 +3341,7 @@ export async function collectProductHealthProbes(
   // inline copy of this expression is how the two silently drift apart.
   const payoutSource = config.payoutSourceAddress || h.body?.addresses?.agentAccountCore;
   const payoutRead = config.payoutEvidenceEnabled
-    ? await readPayoutTransfers({
+    ? await bound("payout_transfers", () => readPayoutTransfers({
         rpcUrl: config.rpcUrl,
         // USDC leaves AgentAccountCore, not the signer EOA — the reward bank is
         // an in-contract position and the signer only sends the tx (#558).
@@ -3290,7 +3352,7 @@ export async function collectProductHealthProbes(
         expectedChainId: chainId,
         ...(feeRecipient ? { feeRecipientAddress: feeRecipient } : {}),
         fetchImpl,
-      })
+      }), (detail) => noPayoutRead(detail))
     : noPayoutRead("payout evidence off (set PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED=true)");
   // Check the INSTRUMENT against the chain, not against an assumption. The
   // lookback is compared to settled24h, so it has to actually span 24h at the
@@ -3331,7 +3393,9 @@ export async function collectProductHealthProbes(
   );
   // The monitor's own version. Degraded-safe: any failure is "unknown", which
   // must never render as up to date.
-  const selfFreshness = await deriveSelfFreshnessProbe({
+  const selfFreshness = await bound(
+    "self_freshness",
+    () => deriveSelfFreshnessProbe({
     ...(config.selfRepo ? { repo: config.selfRepo } : {}),
     ...(config.selfSha ? { runningSha: config.selfSha } : {}),
     ...(config.selfDirty ? { dirty: true } : {}),
@@ -3339,12 +3403,23 @@ export async function collectProductHealthProbes(
     ...(config.githubApiBaseUrl ? { baseUrl: config.githubApiBaseUrl } : {}),
     nowMs: chainCtx.nowMs,
     fetchImpl,
-  });
+  }),
+    (detail) => ({
+      selfFreshness: decideSelfFreshness({
+        runningSha: config.selfSha ?? null,
+        compare: null,
+        unknownReason: detail,
+        nowMs: chainCtx.nowMs,
+      }),
+    }),
+  );
   // The external poster door. The only probe watching a TIME-FUSED obligation:
   // a rejected job's dispute window runs down toward a bond slash whether or not
   // anyone is looking. Degraded-safe — an unreadable catalog reports unknown,
   // never an empty funnel.
-  const externalFunnel = await probeExternalFunnel({
+  const externalFunnel = await bound(
+    "external_funnel",
+    () => probeExternalFunnel({
     ...(config.apiBaseUrl ? { apiBaseUrl: config.apiBaseUrl } : {}),
     ...(config.rpcUrl ? { rpcUrl: config.rpcUrl } : {}),
     ...(h.body?.addresses?.escrowCore ? { escrowCore: h.body.addresses.escrowCore } : {}),
@@ -3352,7 +3427,15 @@ export async function collectProductHealthProbes(
     nowMs: chainCtx.nowMs,
     haltStatus: chainHaltStatus(chainId, config.haltSeverity),
     fetchImpl,
-  });
+  }),
+    (detail) => decideExternalFunnel({
+      rows: null,
+      disputeWindowSeconds: null,
+      nowMs: chainCtx.nowMs,
+      haltStatus: chainHaltStatus(chainId, config.haltSeverity),
+      fetchError: detail,
+    }),
+  );
   // The Bank lane. The view is decided HERE so the board renders one answer
   // rather than forming its own — same rule as the ops verdict.
   // Credential expiries, OBSERVED from the artefacts (cert notAfter, JWT exp).
@@ -3368,12 +3451,16 @@ export async function collectProductHealthProbes(
   const jwtEnvKeys = config.expiryJwtEnvKeys ?? [];
   const credentialExpiries =
     certHosts.length > 0 || jwtEnvKeys.length > 0
-      ? await collectCredentialExpiries({
-          certHosts,
-          env: process.env,
-          jwtEnvKeys,
-          readCert: tlsCertReader(),
-        })
+      ? await bound(
+          "credential_expiry",
+          () => collectCredentialExpiries({
+            certHosts,
+            env: process.env,
+            jwtEnvKeys,
+            readCert: tlsCertReader(),
+          }),
+          () => null,
+        )
       : null; // nothing configured ⇒ no TLS probe, not a probe with nothing to say
   const signerCredentials = describeSignerCredentials({
     credentials: h.body?.serviceHealth?.components?.credentials,
@@ -3387,7 +3474,11 @@ export async function collectProductHealthProbes(
     ? { name: "credential_expiry" as const, status: credentialReading.status, detail: credentialReading.detail }
     : null;
 
-  const bankRead = await readBankFeed({ url: config.bankFeedUrl, fetchImpl });
+  const bankRead = await bound(
+    "bank_feed",
+    () => readBankFeed({ url: config.bankFeedUrl, fetchImpl }),
+    (detail) => ({ reason: detail }),
+  );
   const bank: BankBlock | undefined = bankRead.feed
     ? // A switched-off feed is a VALID payload full of read errors, shaped
       // exactly like four broken instruments. Rendered as a lane it lit BANK
@@ -3432,14 +3523,18 @@ export async function collectProductHealthProbes(
     ...(await (async () => {
       // Two log sweeps, no receipts — cheap enough for the heartbeat, unlike gas
       // attribution which needs a receipt per transaction.
-      const read = await readJobLifecycle({
-        rpcUrl: config.rpcUrl,
-        escrowCore: h.body?.addresses?.escrowCore,
-        agentAccountCore: h.body?.addresses?.agentAccountCore,
-        ...(feeRecipient ? { feeRecipient } : {}),
-        lookbackBlocks: lookback.blocks,
-        fetchImpl,
-      });
+      const read = await bound(
+        "job_lifecycle",
+        () => readJobLifecycle({
+          rpcUrl: config.rpcUrl,
+          escrowCore: h.body?.addresses?.escrowCore,
+          agentAccountCore: h.body?.addresses?.agentAccountCore,
+          ...(feeRecipient ? { feeRecipient } : {}),
+          lookbackBlocks: lookback.blocks,
+          fetchImpl,
+        }),
+        (detail) => ({ jobs: [], unmeasurable: 0, reason: detail }),
+      );
       if (read.reason) return {};
       const summary = summarizeLifecycle({
         jobs: read.jobs,
@@ -3495,10 +3590,12 @@ export async function collectProductHealthProbes(
 
   return {
     probes: [
-      deriveProductApiProbe(h, {
-        ...(transportRun ? { transportRun } : {}),
-        transportThreshold: config.transportFailThreshold,
-      }),
+      healthTimedOut
+        ? { name: "product_api", status: "degraded" as const, detail: probeTimeoutDetail(deadlineMs) }
+        : deriveProductApiProbe(h, {
+            ...(transportRun ? { transportRun } : {}),
+            transportThreshold: config.transportFailThreshold,
+          }),
       deriveChainProbe(h, staleness),
       signer,
       deriveCapabilityProbe(h, {

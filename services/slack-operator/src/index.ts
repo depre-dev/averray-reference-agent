@@ -77,6 +77,7 @@ import {
   setServerAlertMute,
   clearServerAlertMute,
   minuteOfDayForOffset,
+  inQuietHours,
   type AlertBridgeState,
   type AlertChannel,
   type AlertItem,
@@ -198,8 +199,15 @@ import {
   type ProductHealthSnapshotBlocks,
 } from "./product-health.js";
 import type { TransportFailureRun } from "./probe-transport.js";
-import { deriveOpsVerdict } from "@avg/schemas";
+import { deriveOpsVerdict, withMonitorRefresh } from "@avg/schemas";
 import { appendIncidents, readIncidents, reconcileIncidents } from "./product-health-incidents.js";
+import {
+  PROBE_DEADLINE_MS,
+  ProductHealthTickGate,
+  decideMonitorRefreshAlert,
+  monitorRefreshAlertText,
+  runWithDeadline,
+} from "./product-health-tick.js";
 import { readArrivalsFeed } from "./arrivals-feed.js";
 import {
   AdminDemandSessionCache,
@@ -376,6 +384,30 @@ let morningDigestSentLocalDate: string | null = null;
 // restart the honest answer is "nothing delivered yet", not a stale success.
 let buzzDeliveryState: BuzzDeliveryState = {};
 let productHealthRemediation: RemediationStatus | undefined;
+/** When this process armed the heartbeat. A first tick that never finishes still has an anchor. */
+let productHealthHeartbeatStartedAt: number | null = null;
+/** `sinceMs` of the freeze we already paged for. Null re-arms the next episode. */
+let monitorRefreshPagedForMs: number | null = null;
+const productHealthGate = new ProductHealthTickGate({
+  intervalMs: () => routineConfig.productHealth.intervalMs,
+  now: () => Date.now(),
+  onStuck: (event) => {
+    const incident: ProductHealthIncident = {
+      id: `product_health_tick-${event.sinceMs}`,
+      probe: "product_health_tick",
+      severity: "red",
+      startedAt: event.sinceMs,
+      endedAt: null,
+      note: event.note,
+    };
+    const existing = productHealthIncidents.find((row) => row.id === incident.id);
+    if (!existing) productHealthIncidents = [incident, ...productHealthIncidents];
+    logger.error({ pending: event.pending, sinceMs: event.sinceMs }, "product_health_tick_stuck");
+    void appendIncidents(existing ? [] : [incident]).catch((error) => {
+      logger.warn({ err: error }, "product_health_tick_stuck_log_failed");
+    });
+  },
+});
 
 /** The settlement signer's address, derived from the key the monitor already holds
  *  (AGENT_WALLET_PRIVATE_KEY) so signer_liquidity needs no duplicated config. A
@@ -843,6 +875,7 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       // exists when the routine isn't running.
       enabled: routineConfig.productHealth.enabled,
       at: last?.at ?? null,
+      heartbeatStartedAt: productHealthHeartbeatStartedAt,
       status: last?.status ?? "unknown",
       checks: productHealthHistory.length,
       // How often this endpoint is expected to update.
@@ -871,14 +904,14 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
       // returning nothing.
       //
       // `reason` is the machine contract (floor-breach | probe-red |
-      // payout-shortfall | probe-degraded | nominal | no-data | not-watching).
-      // `headline` is prose for a human and may be reworded — never match on it.
+      // payout-shortfall | probe-degraded | nominal | no-data | not-watching |
+      // monitor-not-refreshing). `headline` is prose — never match on it.
       //
-      // Deliberately absent: staleness. How old this snapshot is is a property
-      // of the READER, not of the product, so each consumer judges it against
-      // `at` (the board relabels the verdict "last known state" when its own
-      // stream is down).
-      verdict: deriveOpsVerdict({
+      // Product-data age is still the reader's judgement, except one case this
+      // process knows and the reader cannot invent: the heartbeat itself has
+      // not finished a tick for 2× the cadence. That is `monitor-not-refreshing`,
+      // red, not a soft stale label. The board applies the same function.
+      verdict: withMonitorRefresh(deriveOpsVerdict({
         enabled: routineConfig.productHealth.enabled,
         checks: productHealthHistory.length,
         probes: last?.probes ?? [],
@@ -887,6 +920,12 @@ async function handleHttpRequest(request: http.IncomingMessage, response: http.S
         ...(productHealthSnapshotBlocks?.flow?.payout
           ? { payout: productHealthSnapshotBlocks.flow.payout }
           : {}),
+      }), {
+        enabled: routineConfig.productHealth.enabled,
+        lastCompletedAtMs: last?.at ?? null,
+        heartbeatStartedAtMs: productHealthHeartbeatStartedAt,
+        nowMs: Date.now(),
+        checkIntervalMs: routineConfig.productHealth.intervalMs,
       }),
       probes: (last?.probes ?? []).map((p) => ({
         name: p.name,
@@ -3481,7 +3520,6 @@ function startOperatorRoutines() {
   const alertChannel: AlertChannel = slackAlertChannel();
   const arrivalAlertChannel: AlertChannel = slackAlertChannel(undefined, { timeoutMs: ARRIVAL_ALERTS_SLACK_TIMEOUT_MS });
   let anomalyPauseRunning = false;
-  let productHealthRunning = false;
   let productHealthAlertState = initialProductHealthAlertState();
   let runwayAlertState = initialRunwayAlertState();
   let rpcRemediationState = initialRpcRemediationState();
@@ -3762,8 +3800,45 @@ function startOperatorRoutines() {
   // probe it fires the same D4 alert bridge. Degraded-safe: an unconfigured probe
   // reports `degraded` (no alert) — only a configured, failing probe pages.
   const checkProductHealth = async () => {
-    if (productHealthRunning || !routineConfig.productHealth.enabled) return;
-    productHealthRunning = true;
+    if (!routineConfig.productHealth.enabled) return;
+    if (productHealthHeartbeatStartedAt == null) productHealthHeartbeatStartedAt = Date.now();
+    const refreshBoardUrl =
+      optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor") ??
+      "https://monitor.averray.com/monitor";
+    const refreshDecision = decideMonitorRefreshAlert({
+      enabled: true,
+      lastCompletedAtMs: productHealthHistory[productHealthHistory.length - 1]?.at ?? null,
+      heartbeatStartedAtMs: productHealthHeartbeatStartedAt,
+      nowMs: Date.now(),
+      checkIntervalMs: routineConfig.productHealth.intervalMs,
+      pagedForMs: monitorRefreshPagedForMs,
+      muted: getServerAlertMuteUntilMs() > Date.now(),
+      quiet: inQuietHours(
+        minuteOfDayForOffset(Date.now(), routineConfig.alertBridge.quietHoursTzOffsetMin),
+        routineConfig.alertBridge.quietHours,
+      ),
+    });
+    monitorRefreshPagedForMs = refreshDecision.pagedForMs;
+    if (refreshDecision.page && refreshDecision.sinceMs != null) {
+      const sinceMs = refreshDecision.sinceMs;
+      // Not awaited: a hung webhook must not become the next frozen tick.
+      // The episode is already marked paged, so this fires once.
+      void alertChannel.dispatch({
+        count: 1,
+        items: [],
+        boardUrl: refreshBoardUrl,
+        text: monitorRefreshAlertText(sinceMs, refreshBoardUrl),
+      }).then(
+        (sent) => {
+          if (!sent) logger.warn({ sinceMs }, "product_health_refresh_alert_not_sent");
+        },
+        (error: unknown) => logger.warn({ err: error, sinceMs }, "product_health_refresh_alert_failed"),
+      );
+    }
+    const ticket = productHealthGate.tryBegin();
+    if (!ticket) return;
+    const generation = ticket.generation;
+    const live = () => productHealthGate.isCurrent(generation);
     try {
       const phConfig = loadProductHealthConfig();
       // Signer address for the balance probe: PRODUCT_HEALTH_SIGNER_ADDRESS or derived
@@ -3784,23 +3859,44 @@ function startOperatorRoutines() {
           previousSubmittedNotSettled:
             productHealthSnapshotBlocks?.flow?.submittedNotSettled,
           ...(productHealthTransportRun ? { transportRun: productHealthTransportRun } : {}),
+          deadlineMs: PROBE_DEADLINE_MS,
+          pending: productHealthGate,
+          log: logger,
         }),
         // Same public platform, separate contract. Read beside the heartbeat so
         // one slow arrivals response does not serialize every money-path probe.
-        readArrivalsFeed({ baseUrl: phConfig.apiBaseUrl, fetchImpl: fetch }),
+        runWithDeadline({
+          name: "arrivals",
+          pending: productHealthGate,
+          log: logger,
+          run: () => readArrivalsFeed({ baseUrl: phConfig.apiBaseUrl, fetchImpl: fetch }),
+          onTimeout: (detail) => ({ unavailable: `arrivals feed ${detail}` }),
+        }),
         // Same platform, independent endpoint and failure boundary. A pre-5a
         // 404 becomes an explicit UNAVAILABLE pool tile without affecting the
         // rest of the heartbeat.
-        readDepositPoolFeed({
-          url: depositPoolUrlFromBankFeed(phConfig.bankFeedUrl),
-          fetchImpl: fetch,
+        runWithDeadline({
+          name: "deposit_pool",
+          pending: productHealthGate,
+          log: logger,
+          run: () => readDepositPoolFeed({
+            url: depositPoolUrlFromBankFeed(phConfig.bankFeedUrl),
+            fetchImpl: fetch,
+          }),
+          onTimeout: (detail) => ({ unavailable: `deposit pool ${detail}` }),
         }),
         // /admin/status is the heaviest admin route. Same tick as the other
         // feeds, with its own timeout, and no more often than every 5 minutes.
-        readAdminGithubAuthors({
-          ...(phConfig.apiBaseUrl ? { baseUrl: phConfig.apiBaseUrl } : {}),
-          getSession: getAdminReadSession,
-          fetchImpl: fetch,
+        runWithDeadline({
+          name: "github_authors",
+          pending: productHealthGate,
+          log: logger,
+          run: () => readAdminGithubAuthors({
+            ...(phConfig.apiBaseUrl ? { baseUrl: phConfig.apiBaseUrl } : {}),
+            getSession: getAdminReadSession,
+            fetchImpl: fetch,
+          }),
+          onTimeout: () => ({ warning: null, block: null, unavailable: "timeout" as const }),
         }),
         // Read only. Slack is posted after this tick, and only when paging is on.
         readArrivalAlerts({
@@ -3809,6 +3905,7 @@ function startOperatorRoutines() {
           fetchImpl: fetch,
         }),
       ]);
+      if (!live()) return;
       productHealthChainAdvance = collection.chainAdvance;
       productHealthTransportRun = collection.transportRun;
       const servedWarning = collection.snapshot.githubAuthors?.warning ?? adminAuthors.warning;
@@ -3866,6 +3963,7 @@ function startOperatorRoutines() {
           "https://monitor.averray.com/monitor",
       );
       if (remediationAlert) await alertChannel.dispatch(remediationAlert);
+      if (!live()) return;
       if (remediation.outcome.kind === "failover" || remediation.outcome.kind === "escalate") {
         lastRemediationReason = remediation.outcome.reason;
       } else if (remediation.outcome.kind === "resolved") {
@@ -3889,10 +3987,12 @@ function startOperatorRoutines() {
         nowMs: () => Date.now(),
         getAlertState: () => productHealthAlertState,
         setAlertState: (s) => {
+          if (!live()) return;
           productHealthAlertState = s;
         },
         cooldownMs: routineConfig.productHealth.cooldownMs,
       });
+      if (!live()) return;
       // Enrich each entry with the samples the Trends zone graphs + the runway
       // projection reads: the /health round-trip latency and the reward bank / gas
       // balances (from the solvency block).
@@ -3919,9 +4019,16 @@ function startOperatorRoutines() {
       // /health spike was detected, shown, and then unrecoverable ~5h later.
       try {
         if (!productHealthIncidentsHydrated) {
-          productHealthIncidents = await readIncidents();
+          const persisted = await readIncidents();
+          const byId = new Map(persisted.map((incident) => [incident.id, incident]));
+          // A stuck-tick incident may already be in memory and not on disk yet.
+          for (const incident of productHealthIncidents) {
+            if (!byId.has(incident.id)) byId.set(incident.id, incident);
+          }
+          productHealthIncidents = [...byId.values()];
           productHealthIncidentsHydrated = true;
         }
+        if (!live()) return;
         const derived = deriveProductHealthHistory(productHealthHistory, Date.now()).incidents;
         const reconciled = reconcileIncidents({
           persisted: productHealthIncidents,
@@ -3938,6 +4045,19 @@ function startOperatorRoutines() {
         });
         productHealthIncidents = reconciled.merged;
         await appendIncidents(reconciled.writes);
+        if (!live()) return;
+        const stuckClosedAt = Date.now();
+        const stuckCloses = productHealthIncidents.flatMap((incident) => {
+          if (incident.probe !== "product_health_tick" || incident.endedAt != null) return [];
+          return [{ ...incident, endedAt: stuckClosedAt }];
+        });
+        if (stuckCloses.length > 0) {
+          const closedIds = new Set(stuckCloses.map((incident) => incident.id));
+          productHealthIncidents = productHealthIncidents.map((incident) =>
+            closedIds.has(incident.id) ? stuckCloses.find((closed) => closed.id === incident.id) ?? incident : incident,
+          );
+          await appendIncidents(stuckCloses);
+        }
       } catch (error) {
         // Incident memory is forensics, not a probe — a write failure must never
         // take down the health tick that the alert bridge depends on.
@@ -3991,6 +4111,7 @@ function startOperatorRoutines() {
                 "https://monitor.averray.com/monitor",
             ),
           );
+          if (!live()) return;
         }
       }
       // Slice 3: proactive ops narration — Hermes posts a co-pilot turn on a
@@ -4033,6 +4154,7 @@ function startOperatorRoutines() {
         const buzz = readBuzzConfig();
         if (buzz.config) {
           const delivery = await publishNarration(buzz.config, opsNarration.text);
+          if (!live()) return;
           buzzDeliveryState = recordBuzzDelivery(buzzDeliveryState, {
             ok: delivery.ok,
             reason: delivery.reason,
@@ -4081,6 +4203,7 @@ function startOperatorRoutines() {
             continue;
           }
           const delivery = await publishNarration(buzzForProbes.config, alert.text);
+          if (!live()) return;
           buzzDeliveryState = recordBuzzDelivery(buzzDeliveryState, {
             ok: delivery.ok,
             reason: delivery.reason,
@@ -4156,6 +4279,7 @@ function startOperatorRoutines() {
           // one sentence rather than the digest.
           socialQueue: await readQueuedDraftsLine(),
         };
+        if (!live()) return;
         // The plain digest is both the fallback and Hermes's source text; the
         // gate in digest-voice guarantees his prose carries every figure, so a
         // model outage or a paraphrase slip degrades to plain, never to wrong.
@@ -4163,6 +4287,7 @@ function startOperatorRoutines() {
         let digestText = digestPlain;
         const digestLlmKey = optionalEnv("OLLAMA_API_KEY");
         if (digestLlmKey) {
+          if (!live()) return;
           const composed = await composeConversationalDigest({
             plain: digestPlain,
             verdictHeadline: digestVerdict.headline,
@@ -4200,6 +4325,7 @@ function startOperatorRoutines() {
           logger.info({ localDate: digestCheck.localDate }, "morning_digest_recorded_undelivered");
         } else {
           const delivery = await publishNarration(digestBuzz.config, digestText);
+          if (!live()) return;
           buzzDeliveryState = recordBuzzDelivery(buzzDeliveryState, {
             ok: delivery.ok,
             reason: delivery.reason,
@@ -4231,7 +4357,7 @@ function startOperatorRoutines() {
     } catch (error) {
       logger.error({ err: error }, "product_health_probe_failed");
     } finally {
-      productHealthRunning = false;
+      productHealthGate.settle(generation);
     }
   };
 

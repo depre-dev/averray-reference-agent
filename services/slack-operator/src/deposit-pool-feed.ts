@@ -9,6 +9,7 @@
 // A log-read failure is narrower: it degrades `flows` while retaining the live
 // balances, because losing history cannot make the current pool unreadable.
 
+import { raceDeadline } from "./inflight-attempt.js";
 import { describeFeedError } from "./probe-transport.js";
 
 export const DEPOSIT_POOL_SCHEMA_VERSION = 1;
@@ -117,14 +118,15 @@ export async function readDepositPoolFeed(input: {
   if (!url) {
     return { unavailable: "deposit pool unreachable — internal Bank feed URL is not configured" };
   }
+  const timeoutMs = input.timeoutMs ?? DEPOSIT_POOL_FEED_TIMEOUT_MS;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), input.timeoutMs ?? DEPOSIT_POOL_FEED_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await input.fetchImpl(url, { signal: controller.signal });
+    const response = await raceDeadline(input.fetchImpl(url, { signal: controller.signal }), timeoutMs);
     if (!response.ok) {
       return { unavailable: `deposit pool unreachable — platform returned HTTP ${response.status}` };
     }
-    return normalizeDepositPoolFeed(await response.json());
+    return normalizeDepositPoolFeed(await raceDeadline(response.json(), timeoutMs));
   } catch (error) {
     return { unavailable: `deposit pool unreachable — ${describeFeedError(error, url)}` };
   } finally {

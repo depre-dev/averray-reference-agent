@@ -22,6 +22,7 @@
 // Absent therefore stays ABSENT rather than becoming zero — a zero here is a
 // measurement, and in that case we have not made one.
 
+import { raceDeadline } from "./inflight-attempt.js";
 import { describeFeedError } from "./probe-transport.js";
 
 export const ARRIVALS_SCHEMA_VERSION = "averray.arrivals.v1";
@@ -222,15 +223,16 @@ export async function readArrivalsFeed(input: {
     return { unavailable: "arrivals feed unreachable — platform API base URL is not configured" };
   }
 
+  const timeoutMs = input.timeoutMs ?? ARRIVALS_FEED_TIMEOUT_MS;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), input.timeoutMs ?? ARRIVALS_FEED_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   const url = new URL("/monitor/arrivals", `${baseUrl.replace(/\/+$/, "")}/`).toString();
   try {
-    const response = await input.fetchImpl(url, { signal: controller.signal });
+    const response = await raceDeadline(input.fetchImpl(url, { signal: controller.signal }), timeoutMs);
     if (!response.ok) {
       return { unavailable: `arrivals feed unreachable — platform returned HTTP ${response.status}` };
     }
-    return normalizeArrivalsFeed(await response.json());
+    return normalizeArrivalsFeed(await raceDeadline(response.json(), timeoutMs));
   } catch (error) {
     return { unavailable: `arrivals feed unreachable — ${describeFeedError(error, url)}` };
   } finally {
