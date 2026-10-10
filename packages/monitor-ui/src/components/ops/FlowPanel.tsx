@@ -11,7 +11,7 @@
 
 import { OPS_GLOSS } from "../../lib/monitor/ops-gloss.js";
 import {
-  EVIDENCE_KEY,
+  evidenceLegend,
   flowFunnel,
   payoutView,
   reviewBuckets,
@@ -167,9 +167,9 @@ export function FlowPanel({ flow, externalFunnel, lifecycle, nowMs }: FlowPanelP
         {/* Permanent key. "we cannot see" and "we can see, and it is short" are
             different facts, and the operator should never have to remember
             which colour meant which. */}
-        <div className="ops-evidence-key">
-          {EVIDENCE_KEY.map((entry) => (
-            <span key={entry.text}>
+        <div className="ops-evidence-key" data-testid="ops-evidence-key">
+          {evidenceLegend(evidence.status).map((entry) => (
+            <span key={entry.text} data-active={entry.active ? "yes" : "no"}>
               <i data-tone={entry.tone} aria-hidden />
               {entry.text}
             </span>
@@ -253,7 +253,12 @@ function ReviewChips({
       <span className="ops-chip" data-tone={reviews.awaitingTone} data-testid="ops-review-awaiting">
         awaiting review {reviews.awaitingHumanReview}
       </span>
-      <span className="ops-chip" data-tone={reviews.tone} data-testid="ops-review-overdue">
+      <span
+        className="ops-chip"
+        data-tone={reviews.tone}
+        data-testid="ops-review-overdue"
+        title={reviews.idsFull ?? undefined}
+      >
         overdue review {reviews.overdueReview}
         {reviews.ids ? ` · ${reviews.ids}` : ""}
       </span>

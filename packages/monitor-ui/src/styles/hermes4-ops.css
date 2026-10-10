@@ -272,7 +272,7 @@ body,
 }
 .ops-trust-row {
   display: grid;
-  grid-template-columns: calc(96 * var(--ops-u)) 1fr;
+  grid-template-columns: calc(96 * var(--ops-u)) minmax(0, 1fr);
   gap: calc(10 * var(--ops-u));
   align-items: baseline;
 }
@@ -319,22 +319,26 @@ body,
   flex: 1 0 auto;
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
   border: 1px solid var(--ops-rule);
+  min-width: 0;
 }
 .ops-solvency {
   width: 46%;
   flex: none;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   padding: calc(10 * var(--ops-u)) calc(16 * var(--ops-u));
   border-right: 1px solid var(--ops-rule);
 }
 .ops-flow {
-  flex: 1;
+  flex: 1 1 calc(320 * var(--ops-u));
   min-width: 0;
   display: flex;
   flex-direction: column;
   padding: calc(10 * var(--ops-u)) calc(16 * var(--ops-u));
+  overflow-wrap: anywhere;
 }
 
 .ops-panel-head {
@@ -342,6 +346,7 @@ body,
   align-items: baseline;
   gap: calc(10 * var(--ops-u));
   flex-wrap: wrap;
+  min-width: 0;
 }
 .ops-panel-title {
   margin: 0;
@@ -352,17 +357,30 @@ body,
   color: var(--h4-ink);
 }
 .ops-panel-note {
-  margin-left: auto;
+  flex: 1 0 100%;
+  margin-left: 0;
   font-family: var(--h4-font-mono);
   font-size: calc(10 * var(--ops-u));
+  overflow-wrap: anywhere;
   color: var(--tone, var(--h4-muted));
 }
+.ops-review-buckets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(6 * var(--ops-u));
+  min-width: 0;
+  max-width: 100%;
+}
 .ops-chip {
+  display: inline-block;
+  flex: 0 1 auto;
   padding: calc(2 * var(--ops-u)) calc(8 * var(--ops-u));
   border: 1px dashed var(--ops-rule);
   font-family: var(--h4-font-mono);
   font-size: calc(10 * var(--ops-u));
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: break-word;
+  max-width: 100%;
   color: var(--tone, var(--h4-muted));
 }
 .ops-awaiting {
@@ -377,10 +395,11 @@ body,
    through to .ops-pool--unfloored, which has no bar at all.     */
 .ops-pool {
   display: grid;
+  min-width: 0;
   grid-template-columns:
-    minmax(calc(120 * var(--ops-u)), calc(168 * var(--ops-u)))
-    1fr
-    minmax(calc(120 * var(--ops-u)), calc(176 * var(--ops-u)));
+    minmax(0, max-content)
+    minmax(0, 1fr)
+    minmax(0, max-content);
   gap: calc(16 * var(--ops-u));
   align-items: center;
   /* 8px -> 6px. Each pool now carries an address line, and the board has no
@@ -487,13 +506,26 @@ body,
   background: var(--ops-hair);
 }
 .ops-pool--unfloored {
-  align-items: baseline;
+  align-items: start;
+  grid-template-columns: minmax(0, 1fr) max-content;
   padding: calc(4 * var(--ops-u)) 0;
   border-bottom: 0;
 }
 .ops-pool--unfloored .ops-pool-name {
+  grid-column: 1;
+  grid-row: 1;
   font-size: calc(12.5 * var(--ops-u));
   color: var(--h4-ink-2);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.ops-pool--unfloored .ops-pool-note {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+.ops-pool--unfloored .ops-pool-amount {
+  grid-column: 2;
+  grid-row: 1;
 }
 .ops-pool-note {
   font-family: var(--h4-font-mono);
@@ -534,7 +566,9 @@ body,
 .ops-pool-addr {
   grid-column: 1 / -1;
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
+  min-width: 0;
   gap: calc(6 * var(--ops-u));
   /* .ops-pool sets gap:16px, which applies between grid ROWS too — so this
      cancellation has to scale with that gap or the address drifts off the
@@ -551,7 +585,8 @@ body,
   user-select: all;
   color: var(--h4-ink-2);
   opacity: 0.78;
-  white-space: nowrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .ops-pool-addr-hex--ss58 {
   opacity: 0.6;
@@ -609,17 +644,18 @@ body,
 .ops-funnel {
   display: flex;
   align-items: center;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
   min-height: 0;
-  max-height: calc(150 * var(--ops-u));
+  min-width: 0;
   margin-top: calc(10 * var(--ops-u));
-  padding: 0 calc(8 * var(--ops-u));
+  padding: 0;
 }
 .ops-funnel-stage {
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-width: calc(96 * var(--ops-u));
+  min-width: 0;
 }
 .ops-funnel-label {
   font-family: var(--h4-font-mono);
@@ -664,7 +700,9 @@ body,
   border: 1px solid var(--ops-rule);
   font-family: var(--h4-font-mono);
   font-size: calc(10 * var(--ops-u));
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: break-word;
+  text-align: center;
   color: var(--tone, var(--h4-muted));
 }
 /* "Gaps between stages are the signal" — the panel says so, then draws the
@@ -819,7 +857,9 @@ body,
 .ops-evidence-head {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: calc(12 * var(--ops-u));
+  min-width: 0;
   padding: calc(8 * var(--ops-u)) calc(14 * var(--ops-u));
   border-bottom: 1px dashed var(--ops-rule);
 }
@@ -837,17 +877,20 @@ body,
   color: var(--h4-muted);
 }
 .ops-evidence-body {
-  display: flex;
-  align-items: center;
-  gap: calc(24 * var(--ops-u));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: calc(16 * var(--ops-u));
+  min-width: 0;
   padding: calc(10 * var(--ops-u)) calc(14 * var(--ops-u));
 }
 .ops-evidence-status {
-  min-width: calc(210 * var(--ops-u));
+  min-width: 0;
   font-family: var(--h4-font-display);
   font-weight: 600;
-  font-size: clamp(22px, 2vw, calc(32 * var(--ops-u)));
+  font-size: clamp(calc(16 * var(--ops-u)), 1.6vw, calc(22 * var(--ops-u)));
   letter-spacing: 0.02em;
+  overflow-wrap: anywhere;
   color: var(--tone, var(--h4-ink));
 }
 .ops-evidence-lines {
@@ -864,11 +907,12 @@ body,
   color: var(--tone, var(--h4-tel));
 }
 .ops-evidence-delta {
-  margin-left: auto;
-  max-width: calc(280 * var(--ops-u));
-  text-align: right;
+  grid-column: 1 / -1;
+  max-width: none;
+  text-align: left;
   font-family: var(--h4-font-mono);
   font-size: calc(12 * var(--ops-u));
+  overflow-wrap: anywhere;
   color: var(--tone, var(--h4-muted));
 }
 /* Provenance. Deliberately the quietest thing in the panel: it answers
@@ -900,10 +944,14 @@ body,
   display: inline-flex;
   align-items: center;
   gap: calc(6 * var(--ops-u));
+  min-width: 0;
   font-family: var(--h4-font-mono);
   font-size: calc(10 * var(--ops-u));
+  overflow-wrap: anywhere;
   color: var(--h4-muted);
 }
+.ops-evidence-key span[data-active="no"] { opacity: 0.4; }
+.ops-evidence-key span[data-active="yes"] { opacity: 1; color: var(--h4-ink); font-weight: 600; }
 .ops-evidence-key i {
   width: calc(8 * var(--ops-u));
   height: calc(8 * var(--ops-u));
@@ -951,9 +999,10 @@ body,
   margin-top: calc(9 * var(--ops-u));
 }
 .ops-probe {
-  display: flex;
-  gap: calc(8 * var(--ops-u));
-  align-items: baseline;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  gap: calc(4 * var(--ops-u)) calc(8 * var(--ops-u));
+  align-items: start;
   min-width: 0;
 }
 .ops-probe .ops-dot { position: relative; top: calc(-1 * var(--ops-u)); }
@@ -964,10 +1013,12 @@ body,
   color: var(--h4-ink);
 }
 .ops-probe-detail {
+  grid-column: 1 / -1;
   font-family: var(--h4-font-mono);
   font-size: calc(10.5 * var(--ops-u));
   line-height: 1.4;
   min-width: 0;
+  overflow-wrap: break-word;
   color: var(--h4-ink-2);
 }
 .ops-probe-detail[data-tone="red"]      { color: var(--h4-act); }
@@ -987,6 +1038,8 @@ body,
   flex: none;
   margin-left: auto;
   align-self: center;
+  grid-column: 4;
+  grid-row: 1;
   padding-left: calc(8 * var(--ops-u));
 }
 .ops-spark-cell {
@@ -1015,26 +1068,36 @@ body,
 }
 .ops-incident {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
   column-gap: calc(8 * var(--ops-u));
   row-gap: calc(1 * var(--ops-u));
-  align-items: baseline;
+  align-items: start;
+  min-width: 0;
 }
 .ops-incident .ops-dot { position: relative; top: calc(-1 * var(--ops-u)); }
 .ops-incident-probe {
+  min-width: 0;
   font-family: var(--h4-font-mono);
   font-size: calc(11 * var(--ops-u));
   color: var(--h4-ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .ops-incident-when {
   grid-column: 2;
+  min-width: 0;
   font-family: var(--h4-font-mono);
   font-size: calc(9.5 * var(--ops-u));
+  overflow-wrap: anywhere;
   color: var(--tone, var(--h4-muted));
 }
+.ops-incident-all {
+  margin-top: calc(8 * var(--ops-u));
+  font-family: var(--h4-font-mono);
+  font-size: calc(10 * var(--ops-u));
+  color: var(--h4-ink-2);
+}
+.ops-incident-all summary { cursor: pointer; }
+.ops-incident-all:not([open]) > :not(summary) { display: none; }
 .ops-incident-absent {
   margin: calc(9 * var(--ops-u)) 0 0;
   font-family: var(--h4-font-mono);
@@ -1124,7 +1187,7 @@ body,
      apart. They hold their width even when empty so the external figures stay
      on one line down the panel. */
   grid-template-columns:
-    calc(104 * var(--ops-u)) 1fr calc(48 * var(--ops-u)) calc(38 * var(--ops-u))
+    calc(104 * var(--ops-u)) minmax(0, 1fr) calc(48 * var(--ops-u)) calc(38 * var(--ops-u))
     calc(38 * var(--ops-u));
   gap: calc(10 * var(--ops-u));
   align-items: center;
@@ -1998,7 +2061,7 @@ body,
 }
 .ops-bank-row {
   display: grid;
-  grid-template-columns: calc(72 * var(--ops-u)) 1fr;
+  grid-template-columns: calc(72 * var(--ops-u)) minmax(0, 1fr);
   gap: calc(10 * var(--ops-u));
   align-items: baseline;
 }
@@ -2143,9 +2206,27 @@ body,
 }
 
 @media (max-width: 760px) {
-  .ops-deposit-pool-grid { grid-template-columns: 1fr 1fr; }
-  .ops-deposit-pool-flows ul { grid-template-columns: 1fr; }
-  .ops-arrivals-verdict-lines > div { grid-template-columns: 1fr; gap: calc(2 * var(--ops-u)); }
+  /* Three stages plus two gap captions do not fit a phone row. Stack them
+     so a caption wraps on spaces instead of slicing a word. */
+  .ops-funnel { flex-direction: column; align-items: stretch; }
+  .ops-funnel-stage {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: baseline;
+    width: 100%;
+  }
+  .ops-funnel-gap {
+    flex-direction: row;
+    align-items: center;
+    width: 100%;
+    margin-top: 0;
+    padding: calc(4 * var(--ops-u)) 0;
+  }
+  .ops-funnel-arrow { width: calc(28 * var(--ops-u)); flex: none; }
+  .ops-funnel-gap-label { flex: 1; min-width: 0; text-align: left; }
+  .ops-deposit-pool-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .ops-deposit-pool-flows ul { grid-template-columns: minmax(0, 1fr); }
+  .ops-arrivals-verdict-lines > div { grid-template-columns: minmax(0, 1fr); gap: calc(2 * var(--ops-u)); }
   .ops-arrivals-table-head,
   .ops-arrivals-table-row {
     grid-template-columns: minmax(calc(120 * var(--ops-u)), 1fr) repeat(3, minmax(calc(48 * var(--ops-u)), auto));
@@ -2164,6 +2245,37 @@ body,
   }
   .ops-demand-event-source,
   .ops-demand-events code { grid-column: 2; }
+}
+
+.ops-github-authors {
+  flex: 1 0 100%;
+  align-self: stretch;
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: calc(10 * var(--ops-u)) calc(16 * var(--ops-u));
+  border-top: 1px solid var(--ops-rule);
+}
+.ops-github-authors .ops-panel-note { white-space: normal; }
+.ops-authors-scroll { max-width: 100%; overflow-x: auto; }
+.ops-github-authors table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-family: var(--h4-font-mono);
+  font-size: calc(11 * var(--ops-u));
+}
+.ops-github-authors th,
+.ops-github-authors td {
+  padding: calc(4 * var(--ops-u)) calc(8 * var(--ops-u)) calc(4 * var(--ops-u)) 0;
+  text-align: left;
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+.ops-github-authors thead th {
+  font-size: calc(10 * var(--ops-u));
+  letter-spacing: 0.06em;
+  color: var(--h4-muted);
 }
 
 /* ---- per-job economics -------------------------------------------
@@ -2239,15 +2351,18 @@ body,
   .ops-trust { width: auto; }
   .ops-money { flex-direction: column; }
   .ops-money > .ops-economics { flex-basis: auto; }
+  .ops-solvency,
+  .ops-flow {
+    width: 100%;
+  }
   .ops-solvency {
-    width: auto;
     border-right: 0;
     border-bottom: 1px solid var(--ops-rule);
   }
-  .ops-arrivals { grid-template-columns: 1fr; }
-  .ops-arrivals-doors { grid-template-columns: 1fr; }
+  .ops-arrivals { grid-template-columns: minmax(0, 1fr); }
+  .ops-arrivals-doors { grid-template-columns: minmax(0, 1fr); }
   .ops-arrivals-secondary,
-  .ops-arrivals-door-tables { grid-template-columns: 1fr; }
+  .ops-arrivals-door-tables { grid-template-columns: minmax(0, 1fr); }
   .ops-arrivals-door + .ops-arrivals-door {
     padding: calc(14 * var(--ops-u)) 0 0;
     border-left: 0;
@@ -2257,7 +2372,7 @@ body,
   .ops-arrivals-unattributed,
   .ops-arrivals-unreachable { grid-column: auto; }
   .ops-arrivals-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ops-pillars { grid-template-columns: repeat(2, 1fr); }
+  .ops-pillars { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ops-pillar:nth-child(3) { border-left: 0; }
   /* Fifth column: on the two-column layout the incident log takes a full row
      under the pillars rather than squeezing one column thin. */
@@ -2328,7 +2443,7 @@ body,
 }
 .ops-digest-lines p {
   display: grid;
-  grid-template-columns: calc(12 * var(--ops-u)) 1fr auto;
+  grid-template-columns: calc(12 * var(--ops-u)) minmax(0, 1fr) auto;
   gap: calc(8 * var(--ops-u));
   align-items: baseline;
   margin: 0;
@@ -2360,7 +2475,7 @@ body,
 .ops-money-ledger { padding: 0 calc(12 * var(--ops-u)) calc(10 * var(--ops-u)); }
 .ops-money-ledger-row {
   display: grid;
-  grid-template-columns: calc(12 * var(--ops-u)) 1fr auto;
+  grid-template-columns: calc(12 * var(--ops-u)) minmax(0, 1fr) auto;
   gap: calc(9 * var(--ops-u));
   align-items: center;
   padding: calc(10 * var(--ops-u)) 0;
@@ -2397,7 +2512,7 @@ body,
 .ops-money-match a { color: var(--h4-tel); }
 .ops-money-match > small { color: var(--h4-muted); }
 .ops-retention-body { font-family: var(--h4-font-mono); }
-.ops-retention-pair { display: grid; grid-template-columns: 1fr 1fr; }
+.ops-retention-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .ops-retention-pair > span {
   display: grid;
   gap: calc(6 * var(--ops-u));
@@ -2433,7 +2548,7 @@ body,
 .ops-event-list { font-family: var(--h4-font-mono); }
 .ops-event-row {
   display: grid;
-  grid-template-columns: calc(12 * var(--ops-u)) 1fr;
+  grid-template-columns: calc(12 * var(--ops-u)) minmax(0, 1fr);
   gap: calc(7 * var(--ops-u));
   padding: calc(9 * var(--ops-u)) calc(12 * var(--ops-u));
   border-bottom: 1px solid var(--ops-hair);
@@ -2507,6 +2622,6 @@ body,
 .ops-topup p { margin: calc(6 * var(--ops-u)) 0 0; color: var(--h4-muted); font-size: calc(9 * var(--ops-u)); line-height: 1.5; }
 
 @media (max-width: 1240px) {
-  .ops-overnight-grid { grid-template-columns: 1fr 1fr; }
+  .ops-overnight-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .ops-ledger-events { grid-column: 1 / -1; }
 }

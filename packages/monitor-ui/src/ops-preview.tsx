@@ -28,6 +28,7 @@ import {
   OPS_FIXTURE_STRESS,
   OPS_FIXTURE_UNVERIFIED,
   OPS_FIXTURE_LIVE,
+  OPS_FIXTURE_CROWDED,
   FIXTURE_NOW,
 } from "./lib/monitor/ops-fixtures.js";
 import {
@@ -107,6 +108,13 @@ const FIXTURES = {
     degraded: false,
     ledger: OVERNIGHT_LEDGER_UNAVAILABLE,
     topups: OVERNIGHT_LEDGER_UNAVAILABLE,
+  },
+  crowded: {
+    label: "Long strings — 200 incidents",
+    health: withArrivals(OPS_FIXTURE_CROWDED),
+    degraded: false,
+    ledger: OVERNIGHT_LEDGER_LIVE,
+    topups: TOPUP_DESTINATIONS_FIXTURE,
   },
   awaiting: {
     label: "Awaiting blocks",

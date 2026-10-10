@@ -716,3 +716,136 @@ export const OPS_FIXTURE_ARRIVALS: ArrivalsSnapshot = {
     },
   ],
 };
+
+const CROWDED_CLOSED: Record<string, number> = {
+  capabilities: 94,
+  api_latency: 75,
+  signer_liquidity: 9,
+  treasury_liquidity: 6,
+  product_api: 5,
+  external_funnel: 4,
+  credential_expiry: 3,
+  receipt_signature: 1,
+  money_path: 1,
+};
+
+function crowdedIncidents(): OpsIncident[] {
+  const closed: OpsIncident[] = [];
+  let step = 0;
+  for (const [probe, count] of Object.entries(CROWDED_CLOSED)) {
+    const duration = probe === "capabilities" ? 15 * MIN : probe === "api_latency" ? 5 * MIN : 8 * MIN;
+    for (let index = 0; index < count; index += 1) {
+      const endedAt = FIXTURE_NOW - (step + 1) * HOUR;
+      closed.push({
+        id: `${probe}-closed-${index}`,
+        probe,
+        severity: "degraded",
+        startedAt: endedAt - duration,
+        endedAt,
+        note: `${probe} closed episode ${index}`,
+      });
+      step += 1;
+    }
+  }
+  return [
+    {
+      id: "capabilities-open",
+      probe: "capabilities",
+      severity: "degraded",
+      startedAt: FIXTURE_NOW - 20 * MIN,
+      endedAt: null,
+      note: "capabilities still degraded",
+    },
+    {
+      id: "money_path-open",
+      probe: "money_path",
+      severity: "red",
+      startedAt: FIXTURE_NOW - 40 * MIN,
+      endedAt: null,
+      note: "money path still red",
+    },
+    ...closed,
+  ];
+}
+
+const LONG_SESSION = "quanta#179:0x08e1abcd1234567890abcdefb77E";
+
+/** Today's long strings: overdue session id, credential and receipt details, a not-independent cross-check, six authors, 200 incidents. */
+export const OPS_FIXTURE_CROWDED: ProductHealth = {
+  ...OPS_FIXTURE_NOMINAL,
+  probes: [
+    ...OPS_FIXTURE_NOMINAL.probes.filter((probe) => probe.name !== "money_path"),
+    {
+      name: "money_path",
+      status: "degraded",
+      detail: `waitingForMerge 4 · awaitingHumanReview 1 · overdueReview 2 (session ids ${LONG_SESSION}) · backlog 16 · real payout backlog · stuck 2`,
+      sparkline: spark("degraded"),
+    },
+    {
+      name: "credential_expiry",
+      status: "degraded",
+      detail: "Roles Anywhere — expires in 13d · badge receipt signer kid badge-1 — not used since backend start · kms — not used since backend start · 3 TLS certs · no tokens watched, soonest expiry 37d",
+      sparkline: spark("degraded"),
+    },
+    {
+      name: "receipt_signature",
+      status: "degraded",
+      detail: "could not check — https://api.example/.well-known/badge-receipt-jwks.json timed out · verified 0 served receipt documents against the served JWKS · 45s ago",
+      sparkline: spark("degraded"),
+    },
+  ],
+  flow: {
+    ...OPS_FIXTURE_NOMINAL.flow,
+    waitingForMerge: 4,
+    awaitingHumanReview: 1,
+    overdueReview: 2,
+    overdueReviewIds: [LONG_SESSION, "sess-b"],
+    stuck: 2,
+    submittedNotSettled: 16,
+    maxOverdueReview: 5,
+    maxStuck: 5,
+    payout: OPS_FIXTURE_NOMINAL.flow?.payout
+      ? {
+          ...OPS_FIXTURE_NOMINAL.flow.payout,
+          crossCheck: {
+            status: "not-independent",
+            detail: "not independent — cross-check source equals the primary (eth-rpc.polkadot.io)",
+            overdue: false,
+            lastAgreedAtMs: null,
+          },
+        }
+      : undefined,
+  },
+  githubAuthors: {
+    warning: null,
+    block: {
+      distinctAuthors: 7,
+      distinctWallets: 9,
+      unattributedClaims: 2,
+      unattributedSessions: 1,
+      authors: [
+        "quantacode-operator-very-long-login",
+        "averray-worker-beta-0x08e1abcd1234567890abcdefb77E",
+        "claude-branch-worker",
+        "codex-settlement",
+        "docs-specialist",
+        "security-reviewer",
+        "test-writer-suite",
+      ].map((author, index) => ({
+        author,
+        openClaims: index,
+        submitted: index + 1,
+        awaitingHumanReview: 0,
+        settled7d: 1,
+        settled30d: 3,
+        distinctWallets: 1,
+        usdcPaid: index === 0 ? null : "1.25",
+        missingPayoutEvidence: index === 0 ? "no payout evidence on the claim" : null,
+      })),
+    },
+  },
+  history: {
+    ...OPS_FIXTURE_NOMINAL.history,
+    incidents: crowdedIncidents(),
+  },
+};
