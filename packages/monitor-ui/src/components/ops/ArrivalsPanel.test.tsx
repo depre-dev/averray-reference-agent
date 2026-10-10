@@ -276,6 +276,22 @@ describe("ArrivalsPanel — verdict first", () => {
     expect(getByTestId("ops-arrival-alerts-status").textContent).toContain("paging off");
     expect(getByTestId("ops-arrival-alerts-status").textContent).toContain("2 ready · 1 pending");
     expect(getByTestId("ops-arrival-alerts-status").textContent).toContain("held mute");
+
+    rerender(
+      <ArrivalAlertsStatus status={{
+        paging: "on",
+        pagingDetail: "paging on, but no Slack webhook configured",
+        unavailable: null,
+        stale: false,
+        readyCount: 0,
+        pendingCount: 0,
+        held: null,
+      }}
+      />,
+    );
+    const noWebhook = getByTestId("ops-arrival-alerts-status").textContent ?? "";
+    expect(noWebhook).toContain("paging on, but no Slack webhook configured");
+    expect(noWebhook.split(" · ")[1]).toBe("paging on, but no Slack webhook configured");
     rerender(<ArrivalAlertsStatus status={undefined} />);
     expect(queryByTestId("ops-arrival-alerts-status")).toBeNull();
   });

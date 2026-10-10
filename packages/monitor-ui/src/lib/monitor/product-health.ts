@@ -732,6 +732,8 @@ export interface GithubAuthorsSurface {
 
 export interface ArrivalAlertsBoardStatus {
   paging: "on" | "off";
+  /** Set when "paging on" would hide that Slack has no webhook. */
+  pagingDetail?: string | null;
   unavailable: "unauthorised" | "timeout" | "missing" | "unreachable" | null;
   stale: boolean;
   readyCount: number | null;

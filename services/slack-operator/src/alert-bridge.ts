@@ -15,6 +15,8 @@
 
 import { logger, optionalEnv } from "@avg/mcp-common";
 
+import { raceDeadline } from "./inflight-attempt.js";
+
 export interface AlertItem {
   id: string;
   title: string;
@@ -160,10 +162,17 @@ export function buildAlertPayload(payloadItems: AlertItem[], totalCount: number,
 
 // ── Slack channel adapter (the one channel today) ───────────────────
 
+/** Bound for every Slack POST this process makes. A slow webhook must not freeze a tick. */
+export const SLACK_ALERT_TIMEOUT_MS = 4_000;
+
 /**
  * Slack via SLACK_WEBHOOK_URL (the Slack mobile app gives phone push for free).
  * No-op + no crash when the webhook is unset. A push adapter implements the
  * same AlertChannel interface later — the routine never changes.
+ *
+ * The timeout is the default, not an opt-in. Aborting the fetch is not enough:
+ * a fetch that ignores the signal never settles, and that is how a page holds
+ * the product-health tick. `raceDeadline` resolves the wait either way.
  */
 export function slackAlertChannel(
   webhookUrl: string | undefined = optionalEnv("SLACK_WEBHOOK_URL"),
@@ -173,23 +182,23 @@ export function slackAlertChannel(
     name: "slack",
     async dispatch(payload: AlertPayload): Promise<boolean> {
       if (!webhookUrl) return false;
-      const timeoutMs = options?.timeoutMs;
-      const controller = timeoutMs ? new AbortController() : undefined;
-      const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
+      const timeoutMs = options?.timeoutMs ?? SLACK_ALERT_TIMEOUT_MS;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const res = await fetch(webhookUrl, {
+        const res = await raceDeadline(fetch(webhookUrl, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ text: payload.text }),
-          ...(controller ? { signal: controller.signal } : {}),
-        });
+          signal: controller.signal,
+        }), timeoutMs);
         if (!res.ok) logger.warn({ status: res.status }, "d4_alert_bridge_slack_post_failed");
         return res.ok;
       } catch (error) {
         logger.warn({ err: error }, "d4_alert_bridge_slack_post_failed");
         return false;
       } finally {
-        if (timer) clearTimeout(timer);
+        clearTimeout(timer);
       }
     },
   };

@@ -222,6 +222,7 @@ import {
 import { depositPoolUrlFromBankFeed, readDepositPoolFeed } from "./deposit-pool-feed.js";
 import { readAdminGithubAuthors } from "./github-authors.js";
 import {
+  ARRIVAL_ALERTS_MAX_SENDS_PER_POLL,
   ARRIVAL_ALERTS_SLACK_TIMEOUT_MS,
   arrivalAlertsBoardStatus,
   arrivalAlertsSlackEnabled,
@@ -3517,7 +3518,7 @@ function startOperatorRoutines() {
   let stalePrAlertsRunning = false;
   let alertBridgeRunning = false;
   let alertBridgeState: AlertBridgeState = initialAlertBridgeState();
-  const alertChannel: AlertChannel = slackAlertChannel();
+  const alertChannel: AlertChannel = slackAlertChannel(undefined, { timeoutMs: ARRIVAL_ALERTS_SLACK_TIMEOUT_MS });
   const arrivalAlertChannel: AlertChannel = slackAlertChannel(undefined, { timeoutMs: ARRIVAL_ALERTS_SLACK_TIMEOUT_MS });
   let anomalyPauseRunning = false;
   let productHealthAlertState = initialProductHealthAlertState();
@@ -3898,11 +3899,25 @@ function startOperatorRoutines() {
           }),
           onTimeout: () => ({ warning: null, block: null, unavailable: "timeout" as const }),
         }),
-        // Read only. Slack is posted after this tick, and only when paging is on.
-        readArrivalAlerts({
-          ...(phConfig.apiBaseUrl ? { baseUrl: phConfig.apiBaseUrl } : {}),
-          getSession: getAdminReadSession,
-          fetchImpl: fetch,
+        // Same deadline as every other awaited feed. A hung admin route must
+        // not pin the running flag.
+        runWithDeadline({
+          name: "arrival_alerts",
+          pending: productHealthGate,
+          log: logger,
+          run: () => readArrivalAlerts({
+            ...(phConfig.apiBaseUrl ? { baseUrl: phConfig.apiBaseUrl } : {}),
+            getSession: getAdminReadSession,
+            fetchImpl: fetch,
+          }),
+          onTimeout: () => ({
+            ready: [],
+            pending: [],
+            unavailable: "timeout" as const,
+            stale: false,
+            at: Date.now(),
+            ageMs: 0,
+          }),
         }),
       ]);
       if (!live()) return;
@@ -3930,21 +3945,33 @@ function startOperatorRoutines() {
             ...(getServerAlertMuteUntilMs() > 0 ? { muteUntilMs: getServerAlertMuteUntilMs() } : {}),
             ...(routineConfig.alertBridge.quietHours ? { quietHours: routineConfig.alertBridge.quietHours } : {}),
           }),
+          Boolean(optionalEnv("SLACK_WEBHOOK_URL")),
         ),
       };
-      // After the probe read. Slack is not inside the Promise.all above, and
-      // the arrival channel aborts its own fetch. Mute and quiet hours hold
-      // the alert without marking it sent.
-      if (arrivalPaging && !arrivalAlerts.unavailable) {
+      // The snapshot above is what the board serves. Slack happens after that
+      // publish and is not awaited: five serial posts were ~20s on a slow
+      // webhook, long enough to hold the tick. The delivery has its own bound
+      // and sends only this reading, never a later stale cache.
+      if (live() && arrivalPaging && !arrivalAlerts.unavailable && !arrivalAlerts.stale) {
         const boardUrl = optionalEnv("SLACK_OPERATOR_MONITOR_URL", "https://monitor.averray.com/monitor")
           ?? "https://monitor.averray.com/monitor";
-        await deliverArrivalAlerts({
-          alert: (payload) => arrivalAlertChannel.dispatch(payload),
-          boardUrl,
-          nowMs: Date.now(),
-          nowMinuteOfDay: minuteOfDayForOffset(Date.now(), routineConfig.alertBridge.quietHoursTzOffsetMin),
-          ...(getServerAlertMuteUntilMs() > 0 ? { muteUntilMs: getServerAlertMuteUntilMs() } : {}),
-          ...(routineConfig.alertBridge.quietHours ? { quietHours: routineConfig.alertBridge.quietHours } : {}),
+        const arrivalNow = Date.now();
+        void runWithDeadline({
+          name: "arrival_alert_delivery",
+          log: logger,
+          deadlineMs: ARRIVAL_ALERTS_SLACK_TIMEOUT_MS * ARRIVAL_ALERTS_MAX_SENDS_PER_POLL,
+          run: () => deliverArrivalAlerts({
+            reading: arrivalAlerts,
+            alert: (payload) => arrivalAlertChannel.dispatch(payload),
+            boardUrl,
+            nowMs: arrivalNow,
+            nowMinuteOfDay: minuteOfDayForOffset(arrivalNow, routineConfig.alertBridge.quietHoursTzOffsetMin),
+            ...(getServerAlertMuteUntilMs() > 0 ? { muteUntilMs: getServerAlertMuteUntilMs() } : {}),
+            ...(routineConfig.alertBridge.quietHours ? { quietHours: routineConfig.alertBridge.quietHours } : {}),
+          }),
+          onTimeout: () => ({ sent: 0, held: null }),
+        }).catch((error: unknown) => {
+          logger.warn({ err: error }, "arrival_alerts_delivery_failed");
         });
       }
       // Decide + apply RPC auto-remediation from this cycle's read health. Pure

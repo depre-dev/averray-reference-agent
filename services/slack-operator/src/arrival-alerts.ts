@@ -16,15 +16,19 @@
 import { logger } from "@avg/mcp-common";
 
 import {
+  SLACK_ALERT_TIMEOUT_MS,
   inQuietHours,
   type AlertPayload,
   type QuietHours,
 } from "./alert-bridge.js";
+import { raceDeadline } from "./inflight-attempt.js";
 
 export const ARRIVAL_ALERTS_SCHEMA = "averray.arrival-alerts.v1";
 export const ARRIVAL_ALERTS_POLL_MS = 5 * 60 * 1000;
 export const ARRIVAL_ALERTS_TIMEOUT_MS = 8_000;
-export const ARRIVAL_ALERTS_SLACK_TIMEOUT_MS = 4_000;
+export const ARRIVAL_ALERTS_SLACK_TIMEOUT_MS = SLACK_ALERT_TIMEOUT_MS;
+/** Board copy when paging is armed and Slack has nowhere to go. */
+export const ARRIVAL_PAGING_NO_WEBHOOK = "paging on, but no Slack webhook configured";
 export const ARRIVAL_ALERTS_MAX_SENDS_PER_POLL = 5;
 const SENT_ID_CAP = 500;
 
@@ -55,6 +59,8 @@ export interface ArrivalAlertsReading {
 /** Board-facing poll status. Counts are null until a read has succeeded. */
 export interface ArrivalAlertsBoardStatus {
   paging: "on" | "off";
+  /** Replaces the short "paging on" line when that line would be a lie. */
+  pagingDetail: string | null;
   unavailable: ArrivalAlertsUnavailable | null;
   stale: boolean;
   readyCount: number | null;
@@ -69,6 +75,8 @@ interface AlertsCache {
 
 let cache: AlertsCache | null = null;
 let seeded = false;
+/** A timed-out read must not write over a newer poll. */
+let readGeneration = 0;
 const sentIds = new Set<string>();
 const sentOrder: string[] = [];
 let lastLoggedUnavailable: ArrivalAlertsUnavailable | null = null;
@@ -77,6 +85,7 @@ let lastLoggedHold: ArrivalAlertHold | "clear" | null = null;
 export function __resetArrivalAlertsForTests(): void {
   cache = null;
   seeded = false;
+  readGeneration = 0;
   sentIds.clear();
   sentOrder.length = 0;
   lastLoggedUnavailable = null;
@@ -92,6 +101,19 @@ export function arrivalAlertsSlackEnabled(env: NodeJS.ProcessEnv = process.env):
 /** Slack mrkdwn: &, <, and > are special. Everything else is literal text. */
 export function slackMrkdwnEscape(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
+ * Slack autolinks `http://` even when it is not `<url|label>` syntax.
+ * Fraction slashes stay readable and are not a URL. Applied to every
+ * attacker-controlled field, including `kind`, before mrkdwn escaping.
+ */
+export function defangUntrustedUrl(value: string): string {
+  return value.replace(/:\/\//g, ":\u2044\u2044");
+}
+
+function slackField(value: string): string {
+  return slackMrkdwnEscape(defangUntrustedUrl(value));
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -153,7 +175,18 @@ function logUnavailable(next: ArrivalAlertsUnavailable | null): void {
   else if (previous) logger.info("arrival_alerts_poll_recovered");
 }
 
-function noteAttempt(nowMs: number, unavailable: ArrivalAlertsUnavailable): ArrivalAlertsReading {
+function noteAttempt(
+  nowMs: number,
+  unavailable: ArrivalAlertsUnavailable,
+  owns: () => boolean,
+): ArrivalAlertsReading {
+  // A failed read must not seed. Seeding here would treat the failure as the
+  // restart baseline and the next success would page the retained history.
+  if (!owns()) {
+    return cache
+      ? aged(cache.reading, cache.reading.at ?? nowMs, nowMs)
+      : { ready: [], pending: [], unavailable, stale: false, at: nowMs, ageMs: 0 };
+  }
   logUnavailable(unavailable);
   if (cache) {
     const reading = { ...cache.reading, unavailable, stale: true };
@@ -201,13 +234,13 @@ export function arrivalAlertHold(input: {
  */
 export function arrivalAlertPayload(alert: ArrivalAlert, boardUrl: string): AlertPayload {
   const count = alert.suppressedCount == null ? "" : ` · ${alert.suppressedCount} distinct`;
-  const kind = slackMrkdwnEscape(alert.kind);
-  const subject = slackMrkdwnEscape(alert.subject);
-  const id = slackMrkdwnEscape(alert.id);
+  const kind = slackField(alert.kind);
+  const subject = slackField(alert.subject);
+  // The id is already the dedupe key on `items` and is usually kind + subject.
+  // A second line of it adds nothing and is another place an attacker URL can sit.
   const text = [
     `:rotating_light: Hermes — arrival ${kind}`,
     `${subject}${count}`,
-    id,
     boardUrl,
   ].join("\n");
   return {
@@ -222,10 +255,12 @@ export function arrivalAlertsBoardStatus(
   reading: ArrivalAlertsReading,
   paging: boolean,
   held: ArrivalAlertHold | null,
+  webhookConfigured: boolean,
 ): ArrivalAlertsBoardStatus {
   const counted = reading.unavailable == null || reading.stale === true;
   return {
     paging: paging ? "on" : "off",
+    pagingDetail: paging && !webhookConfigured ? ARRIVAL_PAGING_NO_WEBHOOK : null,
     unavailable: reading.unavailable ?? null,
     stale: reading.stale === true,
     readyCount: counted ? reading.ready.length : null,
@@ -257,7 +292,9 @@ export async function readArrivalAlerts(input: {
   }
 
   const baseUrl = input.baseUrl?.trim();
-  if (!baseUrl) return noteAttempt(nowMs, "unreachable");
+  const generation = ++readGeneration;
+  const owns = () => generation === readGeneration;
+  if (!baseUrl) return noteAttempt(nowMs, "unreachable", owns);
 
   const timeoutMs = input.timeoutMs ?? ARRIVAL_ALERTS_TIMEOUT_MS;
   const controller = new AbortController();
@@ -266,15 +303,15 @@ export async function readArrivalAlerts(input: {
   try {
     const session = await Promise.race([input.getSession(), abortAsTimeout(controller.signal)]);
     stage = "fetch";
-    const response = await input.fetchImpl(`${baseUrl.replace(/\/+$/, "")}/admin/arrivals/alerts`, {
+    const response = await raceDeadline(input.fetchImpl(`${baseUrl.replace(/\/+$/, "")}/admin/arrivals/alerts`, {
       headers: { accept: "application/json", authorization: `Bearer ${session.token}` },
       signal: controller.signal,
-    });
-    if (response.status === 401 || response.status === 403) return noteAttempt(nowMs, "unauthorised");
-    if (!response.ok) return noteAttempt(nowMs, "missing");
-    const body = record(await response.json());
+    }), timeoutMs);
+    if (response.status === 401 || response.status === 403) return noteAttempt(nowMs, "unauthorised", owns);
+    if (!response.ok) return noteAttempt(nowMs, "missing", owns);
+    const body = record(await raceDeadline(response.json(), timeoutMs));
     if (!body || body.schemaVersion !== ARRIVAL_ALERTS_SCHEMA || typeof body.unavailable === "string") {
-      return noteAttempt(nowMs, "missing");
+      return noteAttempt(nowMs, "missing", owns);
     }
     const parsed = [...(Array.isArray(body.ready) ? body.ready : []), ...(Array.isArray(body.pending) ? body.pending : [])]
       .flatMap((item) => {
@@ -283,6 +320,11 @@ export async function readArrivalAlerts(input: {
       });
     const ready = parsed.filter((alert) => alert.status === "ready");
     const pending = parsed.filter((alert) => alert.status === "pending");
+    if (!owns()) {
+      return cache
+        ? aged(cache.reading, cache.reading.at ?? nowMs, nowMs)
+        : { ready, pending, unavailable: null, stale: false, at: nowMs, ageMs: 0 };
+    }
     seedHistory(ready);
     logUnavailable(null);
     const reading: ArrivalAlertsReading = { ready, pending, unavailable: null, stale: false, at: nowMs, ageMs: 0 };
@@ -295,7 +337,7 @@ export async function readArrivalAlerts(input: {
       : stage === "session"
         ? "unauthorised"
         : "unreachable";
-    return noteAttempt(nowMs, unavailable);
+    return noteAttempt(nowMs, unavailable, owns);
   } finally {
     clearTimeout(timer);
   }
@@ -304,6 +346,8 @@ export async function readArrivalAlerts(input: {
 export async function deliverArrivalAlerts(input: {
   alert: (payload: AlertPayload) => Promise<boolean>;
   boardUrl: string;
+  /** The reading this delivery may send. Defaults to the cache, which a failed poll marks stale. */
+  reading?: ArrivalAlertsReading;
   nowMs?: number;
   nowMinuteOfDay?: number;
   muteUntilMs?: number;
@@ -325,10 +369,13 @@ export async function deliverArrivalAlerts(input: {
     return { sent: 0, held };
   }
   if (lastLoggedHold && lastLoggedHold !== "clear") lastLoggedHold = "clear";
-  if (cache?.reading.unavailable) return { sent: 0, held: null };
+  const reading = input.reading ?? cache?.reading;
+  // A failed poll keeps the previous ready list and marks it stale. Sending
+  // from that list pages alerts we did not just observe.
+  if (!reading || reading.stale || reading.unavailable) return { sent: 0, held: null };
   const cap = input.maxSends ?? ARRIVAL_ALERTS_MAX_SENDS_PER_POLL;
   let sent = 0;
-  for (const alert of readyToSend(cache?.reading.ready ?? [])) {
+  for (const alert of readyToSend(reading.ready)) {
     if (sent >= cap) break;
     const ok = await input.alert(arrivalAlertPayload(alert, input.boardUrl));
     if (!ok) break;
@@ -354,8 +401,9 @@ export async function pollArrivalAlerts(input: {
   maxSends?: number;
 }): Promise<ArrivalAlertsReading> {
   const reading = await readArrivalAlerts(input);
-  if (!reading.unavailable) {
+  if (!reading.unavailable && !reading.stale) {
     await deliverArrivalAlerts({
+      reading,
       alert: input.alert,
       boardUrl: input.boardUrl ?? "https://monitor.averray.com/monitor",
       ...(input.nowMs !== undefined ? { nowMs: input.nowMs } : {}),

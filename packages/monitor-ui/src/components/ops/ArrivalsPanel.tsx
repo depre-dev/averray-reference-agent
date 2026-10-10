@@ -39,7 +39,8 @@ export function ArrivalAlertsStatus({ status }: { status: ArrivalAlertsBoardStat
     : `${status.readyCount} ready · ${status.pendingCount} pending`;
   const parts = [
     "arrival alerts",
-    status.paging === "off" ? "paging off" : "paging on",
+    status.pagingDetail?.trim()
+      || (status.paging === "off" ? "paging off" : "paging on"),
     status.unavailable ?? "live",
     status.stale ? "stale" : null,
     status.held ? `held ${status.held}` : null,
