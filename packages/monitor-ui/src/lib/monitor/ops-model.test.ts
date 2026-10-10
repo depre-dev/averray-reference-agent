@@ -7,8 +7,10 @@ import {
   funnelSteps,
   hasFlowData,
   solvencyRows,
+  incidentColumn,
   incidentRows,
   recentIncidents,
+  shortLabel,
   trendSpanLabel,
   worstOpsTone,
   formatAmount,
@@ -165,14 +167,14 @@ describe("incidentRows", () => {
     expect(incidentRows(undefined, FIXTURE_NOW)).toEqual([]);
   });
 
-  test("a suppressed duplicate and a dedupe-closed phantom are not incidents", () => {
+  test("a suppressed row is hidden; a note is not a filter", () => {
     const rows = incidentRows(
       {
         incidents: [
           { id: "real", probe: "money_path", severity: "degraded", peakSeverity: "red", startedAt: FIXTURE_NOW - 4_000, endedAt: null },
           { id: "dup", probe: "money_path", severity: "degraded", startedAt: FIXTURE_NOW - 3_000, endedAt: null, suppressed: true },
           {
-            id: "phantom",
+            id: "noted",
             probe: "capabilities",
             severity: "degraded",
             startedAt: FIXTURE_NOW - 86_400_000,
@@ -183,9 +185,44 @@ describe("incidentRows", () => {
       },
       FIXTURE_NOW,
     );
-    expect(rows.map((row) => row.id)).toEqual(["real"]);
+    expect(rows.map((row) => row.id)).toEqual(["real", "noted"]);
     expect(rows[0]?.peakLabel).toBe("peaked red");
     expect(rows[0]?.severity).toBe("degraded");
+  });
+});
+
+describe("incidentColumn — closed episodes group by probe", () => {
+  const MIN = 60_000;
+  test("ongoing stays individual and closed capabilities share one line", () => {
+    const column = incidentColumn(
+      {
+        incidents: [
+          { id: "cap-open", probe: "capabilities", severity: "degraded", startedAt: FIXTURE_NOW - 10 * MIN, endedAt: null },
+          { id: "cap-a", probe: "capabilities", severity: "degraded", startedAt: Date.UTC(2026, 9, 8, 12) - 10 * MIN, endedAt: Date.UTC(2026, 9, 8, 12) },
+          { id: "cap-b", probe: "capabilities", severity: "degraded", startedAt: Date.UTC(2026, 9, 7, 12) - 15 * MIN, endedAt: Date.UTC(2026, 9, 7, 12) },
+          { id: "cap-c", probe: "capabilities", severity: "degraded", startedAt: Date.UTC(2026, 9, 6, 12) - 20 * MIN, endedAt: Date.UTC(2026, 9, 6, 12) },
+          { id: "lat", probe: "api_latency", severity: "degraded", startedAt: FIXTURE_NOW - 5 * MIN, endedAt: FIXTURE_NOW - MIN },
+        ],
+      },
+      FIXTURE_NOW,
+    )!;
+    expect(column.total).toBe(5);
+    expect(column.ongoing.map((row) => row.id)).toEqual(["cap-open"]);
+    const capabilities = column.groups.find((group) => group.probe === "capabilities")!;
+    expect(capabilities.count).toBe(3);
+    expect(capabilities.medianLabel).toBe("15m");
+    expect(capabilities.lastEndedLabel).toBe("10-08");
+    expect(column.closed).toBe(column.ungrouped.length);
+    expect(column.groups.reduce((sum, group) => sum + group.count, 0)).toBe(column.closed);
+  });
+});
+
+describe("shortLabel", () => {
+  test("keeps a name and shortens a long address", () => {
+    expect(shortLabel("quanta#179:0x08e1abcd1234567890abcdefb77E")).toBe("quanta#179 · 0x08e1…b77E");
+  });
+  test("leaves a short id alone", () => {
+    expect(shortLabel("sess-a")).toBe("sess-a");
   });
 });
 

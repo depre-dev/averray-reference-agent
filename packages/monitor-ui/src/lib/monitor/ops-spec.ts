@@ -35,7 +35,7 @@ import {
   payoutGap,
   type OpsVerdict,
 } from "@avg/schemas/ops-verdict";
-import { formatAgo, formatAmount, type OpsTone } from "./ops-model.js";
+import { formatAgo, formatAmount, shortLabel, type OpsTone } from "./ops-model.js";
 import type {
   MonitorReadIdentity,
   OvernightLedgerPayload,
@@ -758,7 +758,9 @@ export interface ReviewBucketsView {
   awaitingTone: OpsTone;
   /** Amber or red from overdueReview. A missing field is degraded, never green. */
   tone: OpsTone;
+  /** Short labels. The raw ids live on `idsFull` for the title attribute. */
   ids: string | null;
+  idsFull: string | null;
 }
 
 /**
@@ -781,8 +783,26 @@ export function reviewBuckets(flow: MoneyPathSnapshot | undefined): ReviewBucket
     waitingTone: typeof waiting === "number" ? "awaiting" : "degraded",
     awaitingTone: typeof awaiting === "number" ? "awaiting" : "degraded",
     tone: countTone(overdue, flow.maxOverdueReview, "degraded"),
-    ids: ids.length > 0 ? `session ids ${ids.join(", ")}` : null,
+    ids: ids.length > 0 ? `session ids ${ids.map(shortLabel).join(", ")}` : null,
+    idsFull: ids.length > 0 ? ids.join(", ") : null,
   };
+}
+
+/** Legend stays complete. Only the state this reading is in is lit. */
+export function evidenceLegend(status: string): { tone: OpsTone; text: string; active: boolean }[] {
+  const key = status.startsWith("SHORTFALL")
+    ? "SHORTFALL"
+    : status.startsWith("UNVERIFIED")
+      ? "UNVERIFIED"
+      : status.includes("DISAGREE")
+        ? "ENDPOINTS"
+        : status.startsWith("CONFIRMED")
+          ? "CONFIRMED"
+          : "";
+  return EVIDENCE_KEY.map((entry) => ({
+    ...entry,
+    active: key.length > 0 && entry.text.startsWith(key),
+  }));
 }
 
 export function flowFunnel(flow: MoneyPathSnapshot | undefined): FunnelView {

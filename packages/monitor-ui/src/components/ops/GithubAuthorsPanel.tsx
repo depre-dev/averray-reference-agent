@@ -1,4 +1,5 @@
 import type { GithubAuthorsSurface } from "../../lib/monitor/product-health.js";
+import { shortLabel } from "../../lib/monitor/ops-model.js";
 
 const reported = (value: number | null | undefined): string => (typeof value === "number" ? String(value) : "not reported");
 
@@ -49,6 +50,7 @@ export function GithubAuthorsPanel({ surface }: { surface: GithubAuthorsSurface 
           <p data-testid="ops-github-author-totals">
             {reported(block.distinctAuthors)} authors · {reported(block.distinctWallets)} wallets · {reported(block.unattributedClaims)} open claims without author evidence
           </p>
+          <div className="ops-authors-scroll">
           <table>
             <thead>
               <tr>
@@ -63,7 +65,7 @@ export function GithubAuthorsPanel({ surface }: { surface: GithubAuthorsSurface 
             <tbody>
               {block.authors.map((row) => (
                 <tr key={row.author} data-testid={`ops-github-author-${row.author}`}>
-                  <th>{row.author}</th>
+                  <th title={row.author}>{shortLabel(row.author)}</th>
                   <td>{reported(row.openClaims)}</td>
                   <td>{reported(row.submitted)}</td>
                   <td>{reported(row.awaitingHumanReview)}</td>
@@ -73,6 +75,7 @@ export function GithubAuthorsPanel({ surface }: { surface: GithubAuthorsSurface 
               ))}
             </tbody>
           </table>
+          </div>
         </>
       ) : null}
     </section>

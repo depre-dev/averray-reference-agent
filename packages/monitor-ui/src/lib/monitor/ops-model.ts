@@ -129,10 +129,26 @@ export interface IncidentRow extends OpsIncident {
 }
 
 function shownIncident(inc: OpsIncident): boolean {
-  if (inc.suppressed) return false;
-  // Rows the old dedupe closed at `now`. The duration was never observed.
-  if (inc.note?.includes("closed as a duplicate")) return false;
-  return true;
+  return inc.suppressed !== true;
+}
+
+/**
+ * A readable stand-in for a long id. The full value stays in a title attribute.
+ *
+ * `quanta#179:0x08e1abcd…b77E` becomes `quanta#179 · 0x08e1…b77E`. A short id
+ * is returned unchanged.
+ */
+export function shortLabel(value: string): string {
+  const trimmed = value.trim();
+  const hex = /0x[0-9a-fA-F]{8,}/.exec(trimmed);
+  if (hex && hex[0].length > 12) {
+    const full = hex[0];
+    const short = `${full.slice(0, 6)}…${full.slice(-4)}`;
+    const prefix = trimmed.slice(0, hex.index).replace(/[\s:·|,-]+$/u, "").trim();
+    return prefix ? `${prefix} · ${short}` : short;
+  }
+  if (trimmed.length <= 28) return trimmed;
+  return `${trimmed.slice(0, 14)}…${trimmed.slice(-6)}`;
 }
 
 /** Incidents newest-first, with duration computed against `nowMs` for ongoing ones. */
@@ -161,6 +177,78 @@ export const OPS_TONE_RANK: Record<OpsTone, number> = { red: 3, degraded: 2, awa
 /** The worst tone in a list; an empty list is `ok` (nothing observed wrong). */
 export function worstOpsTone(tones: readonly OpsTone[]): OpsTone {
   return tones.reduce<OpsTone>((acc, t) => (OPS_TONE_RANK[t] > OPS_TONE_RANK[acc] ? t : acc), "ok");
+}
+
+export interface ClosedIncidentGroup {
+  probe: string;
+  /** Closed episodes of this probe. The count is the group's size, not a sample. */
+  count: number;
+  medianDurationMs: number;
+  medianLabel: string;
+  lastEndedAt: number;
+  /** Month-day, UTC, so the label does not depend on the reader's timezone. */
+  lastEndedLabel: string;
+}
+
+export interface IncidentColumnView {
+  /** Still-open episodes, listed one by one. */
+  ongoing: IncidentRow[];
+  /** Every closed episode, grouped by probe. Counts sum to `closed`. */
+  groups: ClosedIncidentGroup[];
+  /** Every episode that is not suppressed. Never smaller than what was recorded. */
+  total: number;
+  closed: number;
+  /** The closed episodes themselves, newest first, for the ungrouped list. */
+  ungrouped: IncidentRow[];
+}
+
+function median(values: readonly number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) return sorted[mid]!;
+  return Math.round((sorted[mid - 1]! + sorted[mid]!) / 2);
+}
+
+function monthDay(ms: number): string {
+  const date = new Date(ms);
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${month}-${day}`;
+}
+
+/**
+ * Ongoing episodes stay individual. Closed ones collapse to one line per probe
+ * so a 200-row window is readable, without dropping a single episode from the
+ * count or from the ungrouped list.
+ */
+export function incidentColumn(history: HealthHistory | undefined, nowMs: number): IncidentColumnView | null {
+  if (!history?.incidents) return null;
+  const rows = incidentRows(history, nowMs);
+  const ongoing = rows.filter((row) => row.ongoing);
+  const ungrouped = rows.filter((row) => !row.ongoing);
+  const byProbe = new Map<string, IncidentRow[]>();
+  for (const row of ungrouped) {
+    const list = byProbe.get(row.probe) ?? [];
+    list.push(row);
+    byProbe.set(row.probe, list);
+  }
+  const groups = [...byProbe.entries()]
+    .map(([probe, episodes]) => {
+      const durations = episodes.map((episode) => episode.durationMs);
+      const lastEndedAt = Math.max(...episodes.map((episode) => episode.endedAt ?? episode.startedAt));
+      const medianDurationMs = median(durations);
+      return {
+        probe,
+        count: episodes.length,
+        medianDurationMs,
+        medianLabel: formatDuration(medianDurationMs),
+        lastEndedAt,
+        lastEndedLabel: monthDay(lastEndedAt),
+      };
+    })
+    .sort((a, b) => b.count - a.count || a.probe.localeCompare(b.probe));
+  return { ongoing, groups, total: rows.length, closed: ungrouped.length, ungrouped };
 }
 
 export interface RecentIncidentsView {
