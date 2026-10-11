@@ -2440,6 +2440,12 @@ body,
   .ops-foot { flex-wrap: wrap; }
 }
 
+@media (max-width: 760px) {
+  .ops-pillars { grid-template-columns: minmax(0, 1fr); }
+  .ops-pillar + .ops-pillar { border-left: 0; border-top: 1px dashed var(--ops-hair); }
+  .ops-pillar--incidents { grid-column: auto; }
+}
+
 /* ---- overnight ledger --------------------------------------------------
    Additive, desktop-only operator reads. Every surface carries its own feed
    state so a 403 or failed read cannot collapse into a persuasive row of

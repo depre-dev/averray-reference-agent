@@ -23,6 +23,7 @@ import {
   groupProbesByPillar,
   probeOpsTone,
   incidentColumn,
+  shortenEmbeddedIds,
   trendSpanLabel,
   worstOpsTone,
   type OpsTone,
@@ -59,19 +60,26 @@ export function PillarStrip({ probes, history, nowMs = Date.now() }: PillarStrip
               <span className="ops-pillar-rollup">{rollup(tones)}</span>
             </div>
             <div className="ops-pillar-probes">
-              {group.probes.map((probe) => (
+              {group.probes.map((probe) => {
+                const detail = shortenEmbeddedIds(probe.detail);
+                return (
                 <div className="ops-probe" key={probe.name}>
                   <i className="ops-dot ops-dot--sm" data-tone={probeOpsTone(probe)} aria-hidden />
                   <span className="ops-probe-id">{probe.name}</span>
-                  <span className="ops-probe-detail" data-tone={probeOpsTone(probe)}>
-                    {probe.detail}
+                  <span
+                    className="ops-probe-detail"
+                    data-tone={probeOpsTone(probe)}
+                    title={detail === probe.detail ? undefined : probe.detail}
+                  >
+                    {detail}
                   </span>
                   {/* The probe's own recent checks, oldest → newest. Severity is
                       encoded twice — tone AND cell height — because amber vs
                       coral is exactly the pair colour-blind vision loses. */}
                   {probe.sparkline?.length ? <OpsSpark series={probe.sparkline} bins={8} /> : null}
                 </div>
-              ))}
+                );
+              })}
             </div>
             {group.pillar === "availability" ? <AvailabilityTrend history={history} /> : null}
           </div>
@@ -248,10 +256,10 @@ function IncidentsColumn({ history, nowMs }: { history: HealthHistory | undefine
               <IncidentLine
                 key={`group-${group.probe}`}
                 id={`group-${group.probe}`}
-                tone="degraded"
+                tone={group.tone}
                 ongoing={false}
                 probe={group.probe}
-                when={`${group.count} episode${group.count === 1 ? "" : "s"} · median ${group.medianLabel} · last ended ${group.lastEndedLabel}`}
+                when={`${group.count} episode${group.count === 1 ? "" : "s"} · median ${group.medianLabel} · last ended ${group.lastEndedLabel}${group.peakedRed ? " · peaked red" : ""}`}
               />
             ))}
           </div>
@@ -270,7 +278,7 @@ function IncidentsColumn({ history, nowMs }: { history: HealthHistory | undefine
                   ongoing={false}
                   probe={row.probe}
                   title={row.note}
-                  when={`${row.durationLabel} · ended ${formatAgo(row.endedAt ?? row.startedAt, nowMs)}`}
+                  when={`${row.durationLabel} · ended ${formatAgo(row.endedAt ?? row.startedAt, nowMs)}${row.peakLabel ? ` · ${row.peakLabel}` : ""}`}
                 />
               ))}
             </div>

@@ -1087,11 +1087,14 @@ describe("deriveOpsActionItems — current facts without a second verdict", () =
 });
 
 describe("evidence legend", () => {
-  test("CONFIRMED lights only the confirmed entry", () => {
-    const legend = evidenceLegend("CONFIRMED");
-    expect(legend.filter((entry) => entry.active).map((entry) => entry.text)).toEqual([
-      "CONFIRMED — proof matches the ledger",
-    ]);
+  test.each([
+    ["CONFIRMED", "CONFIRMED — proof matches the ledger"],
+    ["SHORTFALL −2", "SHORTFALL — proof missing: money broken"],
+    ["UNVERIFIED", "UNVERIFIED — chain unreadable: instrument broken, not money"],
+    ["ENDPOINTS DISAGREE", "ENDPOINTS DISAGREE — two providers, two answers: proof suspended"],
+  ])("%s lights only its own entry", (status, lit) => {
+    const legend = evidenceLegend(status);
+    expect(legend.filter((entry) => entry.active).map((entry) => entry.text)).toEqual([lit]);
     expect(legend).toHaveLength(EVIDENCE_KEY.length);
   });
 });

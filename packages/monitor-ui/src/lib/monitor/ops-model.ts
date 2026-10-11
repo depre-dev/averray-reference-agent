@@ -151,6 +151,17 @@ export function shortLabel(value: string): string {
   return `${trimmed.slice(0, 14)}…${trimmed.slice(-6)}`;
 }
 
+/**
+ * Shorten session ids embedded in a probe detail sentence.
+ *
+ * The money-path detail is one string from the producer (`session ids quanta#179:0x…`).
+ * Each long id is replaced with `shortLabel`; the rest of the sentence stays.
+ * The caller keeps the original string on the title attribute.
+ */
+export function shortenEmbeddedIds(text: string): string {
+  return text.replace(/[^\s,()]*0x[0-9a-fA-F]{11,}/g, (token) => shortLabel(token));
+}
+
 /** Incidents newest-first, with duration computed against `nowMs` for ongoing ones. */
 export function incidentRows(history: HealthHistory | undefined, nowMs: number): IncidentRow[] {
   const list = (history?.incidents ?? []).filter(shownIncident);
@@ -183,6 +194,10 @@ export interface ClosedIncidentGroup {
   probe: string;
   /** Closed episodes of this probe. The count is the group's size, not a sample. */
   count: number;
+  /** Worst severity among the episodes. A red episode must not paint as degraded. */
+  tone: OpsTone;
+  /** An episode peaked red and then eased. The group says so. */
+  peakedRed: boolean;
   medianDurationMs: number;
   medianLabel: string;
   lastEndedAt: number;
@@ -241,6 +256,8 @@ export function incidentColumn(history: HealthHistory | undefined, nowMs: number
       return {
         probe,
         count: episodes.length,
+        tone: worstOpsTone(episodes.map((episode) => episode.severity)),
+        peakedRed: episodes.some((episode) => episode.peakLabel != null),
         medianDurationMs,
         medianLabel: formatDuration(medianDurationMs),
         lastEndedAt,
@@ -249,30 +266,6 @@ export function incidentColumn(history: HealthHistory | undefined, nowMs: number
     })
     .sort((a, b) => b.count - a.count || a.probe.localeCompare(b.probe));
   return { ongoing, groups, total: rows.length, closed: ungrouped.length, ungrouped };
-}
-
-export interface RecentIncidentsView {
-  /** Newest first, capped for a narrow column. */
-  rows: IncidentRow[];
-  /** Episodes beyond the cap, still inside the durable window. Never hidden silently. */
-  more: number;
-}
-
-/**
- * The durable log's newest episodes, sized for the INCIDENTS column.
- *
- * `null` means the build reports no incident log AT ALL — absent is not empty,
- * and the column must say "not reported" rather than implying a clean record.
- * An empty array is the opposite fact: the log exists and holds nothing.
- */
-export function recentIncidents(
-  history: HealthHistory | undefined,
-  nowMs: number,
-  max = 3,
-): RecentIncidentsView | null {
-  if (!history?.incidents) return null;
-  const rows = incidentRows(history, nowMs);
-  return { rows: rows.slice(0, max), more: Math.max(0, rows.length - max) };
 }
 
 /**

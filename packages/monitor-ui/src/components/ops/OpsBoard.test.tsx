@@ -406,6 +406,89 @@ describe("review chips", () => {
     expect(reviews.contains(stuck)).toBe(true);
     expect(stuck.textContent).toContain("stuck 2");
   });
+
+  test("the overdue chip keeps the raw session id on its title", () => {
+    const raw = "quanta#179:0x08e1abcd1234567890abcdefb77E";
+    const { getByTestId } = render(
+      <FlowPanel
+        flow={{
+          waitingForMerge: 0,
+          awaitingHumanReview: 0,
+          overdueReview: 1,
+          overdueReviewIds: [raw],
+          stuck: 0,
+          maxStuck: 5,
+          maxOverdueReview: 5,
+        }}
+        nowMs={1}
+      />,
+    );
+    const chip = getByTestId("ops-review-overdue");
+    expect(chip.textContent).toContain("quanta#179 · 0x08e1…b77E");
+    expect(chip.textContent).not.toContain(raw);
+    expect(chip.getAttribute("title")).toBe(raw);
+  });
+});
+
+describe("evidence legend on the panel", () => {
+  function lit(view: HTMLElement): string[] {
+    return [...view.querySelectorAll("[data-testid=ops-evidence-key] span")]
+      .filter((node) => node.getAttribute("data-active") === "yes")
+      .map((node) => node.textContent ?? "");
+  }
+
+  test("SHORTFALL, UNVERIFIED and ENDPOINTS DISAGREE each light only themselves", () => {
+    const shortfall = render(
+      <FlowPanel
+        flow={{
+          payout: {
+            status: "shortfall",
+            detail: "gap",
+            confirmedCount: 1,
+            confirmedUsdc: 1,
+            settledCount: 3,
+            windowBlocks: 10,
+          },
+        }}
+        nowMs={1}
+      />,
+    );
+    expect(lit(shortfall.getByTestId("ops-evidence-key"))).toEqual([
+      "SHORTFALL — proof missing: money broken",
+    ]);
+    shortfall.unmount();
+
+    const unverified = render(<FlowPanel flow={{}} nowMs={1} />);
+    expect(lit(unverified.getByTestId("ops-evidence-key"))).toEqual([
+      "UNVERIFIED — chain unreadable: instrument broken, not money",
+    ]);
+    unverified.unmount();
+
+    const disagree = render(
+      <FlowPanel
+        flow={{
+          payout: {
+            status: "confirmed",
+            detail: "ok",
+            confirmedCount: 2,
+            confirmedUsdc: 1,
+            settledCount: 2,
+            windowBlocks: 10,
+            crossCheck: {
+              status: "disagree",
+              detail: "two answers",
+              overdue: false,
+              lastAgreedAtMs: null,
+            },
+          },
+        }}
+        nowMs={1}
+      />,
+    );
+    expect(lit(disagree.getByTestId("ops-evidence-key"))).toEqual([
+      "ENDPOINTS DISAGREE — two providers, two answers: proof suspended",
+    ]);
+  });
 });
 
 describe("OpsBoard — per-check strips and the durable log", () => {
