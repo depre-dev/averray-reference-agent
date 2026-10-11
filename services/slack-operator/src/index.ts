@@ -153,12 +153,9 @@ import {
   resolveHermesSessionConfig,
   type HermesProductHealthSnapshot,
 } from "./monitor-hermes-voice.js";
-import { decideOpsNarration, type OpsStatus } from "./ops-narration.js";
 import { publishNarration, readBuzzConfig } from "./buzz-client.js";
 import { startBuzzInbound } from "./buzz-inbound-start.js";
-import { decideProbeTransitions } from "./probe-transitions.js";
 import { buildMorningDigest, digestDue, digestFactStrings, readDigestSchedule } from "./morning-digest.js";
-import { readSocialSignal } from "./social-signal.js";
 import { buildSocialQueueLine, readSocialQueue } from "./social-queue.js";
 import { composeConversationalDigest } from "./digest-voice.js";
 import { probeLabel } from "./ops-voice.js";
@@ -184,7 +181,6 @@ import { runFailureAnalysisOnce } from "./failure-analysis-routine.js";
 import {
   appendHistory,
   buildRunwayAlertPayload,
-  collectProductHealthProbes,
   decideRunwayAlert,
   deriveLiquidityRunway,
   deriveProductHealthHistory,
@@ -192,7 +188,6 @@ import {
   initialRunwayAlertState,
   loadProductHealthConfig,
   probeSparkline,
-  runProductHealthOnce,
   type ChainAdvance,
   type ProductHealthIncident,
   type ProductHealthSnapshot,
@@ -200,7 +195,7 @@ import {
 } from "./product-health.js";
 import type { TransportFailureRun } from "./probe-transport.js";
 import { deriveOpsVerdict, withMonitorRefresh } from "@avg/schemas";
-import { appendIncidents, readIncidents, reconcileIncidents } from "./product-health-incidents.js";
+import { appendIncidents } from "./product-health-incidents.js";
 import {
   createProductHealthSlackChannels,
   runProductHealthCheck,
@@ -209,7 +204,6 @@ import {
 import {
   ProductHealthTickGate,
 } from "./product-health-tick.js";
-import { readArrivalsFeed } from "./arrivals-feed.js";
 import {
   AdminDemandSessionCache,
   createAdminReadSessionProvider,
@@ -228,9 +222,7 @@ import {
   arrivalAlertsBoardStatus,
   arrivalAlertsSlackEnabled,
   arrivalAlertHold,
-  deliverArrivalAlerts,
   noteArrivalAlertDelivered,
-  readArrivalAlerts,
 } from "./arrival-alerts.js";
 import {
   loadRemediationConfig,
