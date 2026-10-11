@@ -61,8 +61,14 @@ describe("PillarStrip incidents and probe ids", () => {
     expect(order[0]).toBe("yes");
     expect(order.filter((flag) => flag === "no").length).toBe(groupCount);
     expect(getByTestId("ops-incident-group-p0").getAttribute("data-tone")).toBe("red");
+    expect(getByTestId("ops-incident-g-p0").getAttribute("data-tone")).toBe("red");
     expect(getByTestId("ops-incident-group-receipt_signature").textContent).toContain("peaked red");
+    expect(column.querySelector(".ops-pillar-rollup")?.textContent).toBe(`${incidents.length} in window`);
     expect(getByTestId("ops-incidents-more").textContent).toBe(`${incidents.length} episodes in the window`);
+    const groupIds = [...primary.querySelectorAll(":scope > .ops-incident")]
+      .filter((row) => row.getAttribute("data-ongoing") === "no")
+      .map((row) => row.getAttribute("data-testid"));
+    expect(groupIds[0]).toBe("ops-incident-group-api_latency");
     const disclosure = getByTestId("ops-incidents-all");
     expect(disclosure.querySelector("summary")?.textContent).toBe(`all ${closedCount} closed episodes`);
     expect(disclosure.querySelectorAll(".ops-incident")).toHaveLength(closedCount);

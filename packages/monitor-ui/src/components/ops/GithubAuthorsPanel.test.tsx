@@ -47,6 +47,38 @@ describe("GithubAuthorsPanel", () => {
     expect(note.getAttribute("data-tone")).toBe("degraded");
   });
 
+  test("a long author is shortened in the cell and the raw name stays on the title", () => {
+    const author = "averray-worker-beta-0x08e1abcd1234567890abcdefb77E";
+    const view = render(
+      <GithubAuthorsPanel
+        surface={{
+          warning: null,
+          block: {
+            distinctAuthors: 1,
+            distinctWallets: 1,
+            unattributedClaims: 0,
+            unattributedSessions: 0,
+            authors: [{
+              author,
+              openClaims: 1,
+              submitted: 0,
+              awaitingHumanReview: 0,
+              settled7d: 0,
+              settled30d: 0,
+              distinctWallets: 1,
+              usdcPaid: "1.25",
+              missingPayoutEvidence: null,
+            }],
+          },
+        }}
+      />,
+    );
+    const cell = view.getByTestId(`ops-github-author-${author}`).querySelector("th");
+    expect(cell?.textContent).toBe("averray-worker-beta · 0x08e1…b77E");
+    expect(cell?.textContent).not.toContain("0x08e1abcd1234567890abcdefb77E");
+    expect(cell?.getAttribute("title")).toBe(author);
+  });
+
   test("a real zero still renders as zero", () => {
     const view = render(
       <GithubAuthorsPanel

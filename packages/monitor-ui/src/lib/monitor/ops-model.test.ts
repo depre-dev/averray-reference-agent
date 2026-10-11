@@ -167,14 +167,14 @@ describe("incidentRows", () => {
     expect(incidentRows(undefined, FIXTURE_NOW)).toEqual([]);
   });
 
-  test("a suppressed row is hidden; a note is not a filter", () => {
+  test("a suppressed duplicate and a dedupe-closed phantom are not incidents", () => {
     const rows = incidentRows(
       {
         incidents: [
           { id: "real", probe: "money_path", severity: "degraded", peakSeverity: "red", startedAt: FIXTURE_NOW - 4_000, endedAt: null },
           { id: "dup", probe: "money_path", severity: "degraded", startedAt: FIXTURE_NOW - 3_000, endedAt: null, suppressed: true },
           {
-            id: "noted",
+            id: "phantom",
             probe: "capabilities",
             severity: "degraded",
             startedAt: FIXTURE_NOW - 86_400_000,
@@ -185,7 +185,7 @@ describe("incidentRows", () => {
       },
       FIXTURE_NOW,
     );
-    expect(rows.map((row) => row.id)).toEqual(["real", "noted"]);
+    expect(rows.map((row) => row.id)).toEqual(["real"]);
     expect(rows[0]?.peakLabel).toBe("peaked red");
     expect(rows[0]?.severity).toBe("degraded");
   });

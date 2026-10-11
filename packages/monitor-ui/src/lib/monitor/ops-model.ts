@@ -129,7 +129,10 @@ export interface IncidentRow extends OpsIncident {
 }
 
 function shownIncident(inc: OpsIncident): boolean {
-  return inc.suppressed !== true;
+  if (inc.suppressed) return false;
+  // Rows the old dedupe closed at `now`. The duration was never observed.
+  if (inc.note?.includes("closed as a duplicate")) return false;
+  return true;
 }
 
 /**
