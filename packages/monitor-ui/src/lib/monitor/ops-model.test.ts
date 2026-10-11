@@ -7,8 +7,10 @@ import {
   funnelSteps,
   hasFlowData,
   solvencyRows,
+  incidentColumn,
   incidentRows,
-  recentIncidents,
+  shortenEmbeddedIds,
+  shortLabel,
   trendSpanLabel,
   worstOpsTone,
   formatAmount,
@@ -189,6 +191,74 @@ describe("incidentRows", () => {
   });
 });
 
+describe("incidentColumn — closed episodes group by probe", () => {
+  const MIN = 60_000;
+  test("ongoing stays individual and closed capabilities share one line", () => {
+    const column = incidentColumn(
+      {
+        incidents: [
+          { id: "cap-open", probe: "capabilities", severity: "degraded", startedAt: FIXTURE_NOW - 10 * MIN, endedAt: null },
+          { id: "cap-a", probe: "capabilities", severity: "degraded", startedAt: Date.UTC(2026, 9, 8, 12) - 10 * MIN, endedAt: Date.UTC(2026, 9, 8, 12) },
+          { id: "cap-b", probe: "capabilities", severity: "degraded", startedAt: Date.UTC(2026, 9, 7, 12) - 15 * MIN, endedAt: Date.UTC(2026, 9, 7, 12) },
+          { id: "cap-c", probe: "capabilities", severity: "degraded", startedAt: Date.UTC(2026, 9, 6, 12) - 20 * MIN, endedAt: Date.UTC(2026, 9, 6, 12) },
+          { id: "lat", probe: "api_latency", severity: "degraded", startedAt: FIXTURE_NOW - 5 * MIN, endedAt: FIXTURE_NOW - MIN },
+        ],
+      },
+      FIXTURE_NOW,
+    )!;
+    expect(column.total).toBe(5);
+    expect(column.ongoing.map((row) => row.id)).toEqual(["cap-open"]);
+    const capabilities = column.groups.find((group) => group.probe === "capabilities")!;
+    expect(capabilities.count).toBe(3);
+    expect(capabilities.tone).toBe("degraded");
+    expect(capabilities.peakedRed).toBe(false);
+    expect(capabilities.medianLabel).toBe("15m");
+    expect(capabilities.lastEndedLabel).toBe("10-08");
+    expect(column.closed).toBe(column.ungrouped.length);
+    expect(column.groups.reduce((sum, group) => sum + group.count, 0)).toBe(column.closed);
+  });
+
+  test("a closed group takes the worst episode, and an eased red is peaked red", () => {
+    const column = incidentColumn(
+      {
+        incidents: [
+          { id: "red", probe: "money_path", severity: "red", startedAt: FIXTURE_NOW - 20 * MIN, endedAt: FIXTURE_NOW - 10 * MIN },
+          {
+            id: "eased",
+            probe: "capabilities",
+            severity: "degraded",
+            peakSeverity: "red",
+            startedAt: FIXTURE_NOW - 30 * MIN,
+            endedAt: FIXTURE_NOW - 15 * MIN,
+          },
+        ],
+      },
+      FIXTURE_NOW,
+    )!;
+    expect(column.groups.find((group) => group.probe === "money_path")?.tone).toBe("red");
+    const eased = column.groups.find((group) => group.probe === "capabilities");
+    expect(eased?.tone).toBe("degraded");
+    expect(eased?.peakedRed).toBe(true);
+    expect(column.ungrouped.find((row) => row.id === "eased")?.peakLabel).toBe("peaked red");
+  });
+});
+
+describe("shortLabel", () => {
+  test("keeps a name and shortens a long address", () => {
+    expect(shortLabel("quanta#179:0x08e1abcd1234567890abcdefb77E")).toBe("quanta#179 · 0x08e1…b77E");
+  });
+  test("leaves a short id alone", () => {
+    expect(shortLabel("sess-a")).toBe("sess-a");
+  });
+
+  test("shortens a session id inside a probe sentence and keeps the rest", () => {
+    const raw = "overdueReview 2 (session ids quanta#179:0x08e1abcd1234567890abcdefb77E) · backlog 16";
+    const shown = shortenEmbeddedIds(raw);
+    expect(shown).toBe("overdueReview 2 (session ids quanta#179 · 0x08e1…b77E) · backlog 16");
+    expect(shown).not.toContain("0x08e1abcd1234567890abcdefb77E");
+  });
+});
+
 describe("worstOpsTone — one severity order for every roll-up", () => {
   test("red outranks everything", () => {
     expect(worstOpsTone(["ok", "awaiting", "degraded", "red"])).toBe("red");
@@ -198,52 +268,6 @@ describe("worstOpsTone — one severity order for every roll-up", () => {
   });
   test("an empty list is ok — nothing observed wrong", () => {
     expect(worstOpsTone([])).toBe("ok");
-  });
-});
-
-describe("recentIncidents — absent is not empty", () => {
-  test("no incident log at all returns null, never an empty view", () => {
-    // An older build that reports no log must render "not reported" — a clean
-    // record would be a claim the payload never made.
-    expect(recentIncidents(undefined, FIXTURE_NOW)).toBeNull();
-    expect(recentIncidents({}, FIXTURE_NOW)).toBeNull();
-  });
-
-  test("an empty log is a view with no rows — watched, nothing recorded", () => {
-    expect(recentIncidents({ incidents: [] }, FIXTURE_NOW)).toEqual({ rows: [], more: 0 });
-  });
-
-  test("caps the rows and counts the remainder instead of hiding it", () => {
-    const view = recentIncidents(
-      {
-        incidents: Array.from({ length: 5 }, (_, i) => ({
-          id: `inc-${i}`,
-          probe: "capabilities",
-          severity: "degraded" as const,
-          startedAt: FIXTURE_NOW - (i + 1) * 3_600_000,
-          endedAt: FIXTURE_NOW - (i + 1) * 3_600_000 + 600_000,
-        })),
-      },
-      FIXTURE_NOW,
-      3,
-    )!;
-    expect(view.rows).toHaveLength(3);
-    expect(view.more).toBe(2);
-    // Newest first — the top row is the most recent episode.
-    expect(view.rows[0]!.id).toBe("inc-0");
-  });
-
-  test("an ongoing episode keeps running against the injected clock", () => {
-    const view = recentIncidents(
-      {
-        incidents: [
-          { id: "live", probe: "money_path", severity: "red", startedAt: FIXTURE_NOW - 14 * 60_000, endedAt: null },
-        ],
-      },
-      FIXTURE_NOW,
-    )!;
-    expect(view.rows[0]!.ongoing).toBe(true);
-    expect(view.rows[0]!.durationLabel).toBe("14m");
   });
 });
 

@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   DATA_STALE_FALLBACK_MS,
+  evidenceLegend,
   EVIDENCE_KEY,
   deriveOpsActionItems,
   boardKpis,
@@ -1085,6 +1086,19 @@ describe("deriveOpsActionItems — current facts without a second verdict", () =
   });
 });
 
+describe("evidence legend", () => {
+  test.each([
+    ["CONFIRMED", "CONFIRMED — proof matches the ledger"],
+    ["SHORTFALL −2", "SHORTFALL — proof missing: money broken"],
+    ["UNVERIFIED", "UNVERIFIED — chain unreadable: instrument broken, not money"],
+    ["ENDPOINTS DISAGREE", "ENDPOINTS DISAGREE — two providers, two answers: proof suspended"],
+  ])("%s lights only its own entry", (status, lit) => {
+    const legend = evidenceLegend(status);
+    expect(legend.filter((entry) => entry.active).map((entry) => entry.text)).toEqual([lit]);
+    expect(legend).toHaveLength(EVIDENCE_KEY.length);
+  });
+});
+
 describe("review buckets — served, not recomputed", () => {
   test("a merge wait is not stuck and does not amber the funnel", () => {
     const flow = {
@@ -1133,6 +1147,21 @@ describe("review buckets — served, not recomputed", () => {
     })!;
     expect(red.tone).toBe("red");
     expect(red.ids).toBe("session ids sess-a, sess-b");
+    expect(red.idsFull).toBe("sess-a, sess-b");
+  });
+
+  test("a long overdue session id is shortened and the raw id stays on idsFull", () => {
+    const raw = "quanta#179:0x08e1abcd1234567890abcdefb77E";
+    const reviews = reviewBuckets({
+      waitingForMerge: 0,
+      awaitingHumanReview: 0,
+      overdueReview: 1,
+      maxOverdueReview: 5,
+      overdueReviewIds: [raw],
+    })!;
+    expect(reviews.ids).toBe("session ids quanta#179 · 0x08e1…b77E");
+    expect(reviews.ids).not.toContain(raw);
+    expect(reviews.idsFull).toBe(raw);
   });
 
   test("a non-default served threshold reds overdue review below 5", () => {
