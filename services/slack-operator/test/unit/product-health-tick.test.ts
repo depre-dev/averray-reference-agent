@@ -852,6 +852,191 @@ describe("product health tick behaviour", () => {
     await pending;
     expect(publishes).toBe(1);
   });
+
+  it("an abandoned tick that resumes after the next tick does not rewrite shared state", async () => {
+    const messages: string[] = [];
+    let healthCalls = 0;
+    let appends = 0;
+    let releaseStuck: () => void = () => {};
+    const { state, run } = harness({
+      intervalMs: 5_000,
+      fetchImpl: (async (url: RequestInfo | URL, init?: RequestInit) => {
+        if ((init?.method ?? "GET") === "GET" && String(url).includes("/health")) {
+          healthCalls += 1;
+          const first = healthCalls === 1;
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              status: "ok",
+              serviceHealth: { ok: !first },
+              rewardBank: { liquid: first ? 1 : 100 },
+            }),
+          } as unknown as Response;
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as unknown as Response;
+      }) as typeof fetch,
+      readIncidents: async () => [],
+      appendIncidents: () => {
+        appends += 1;
+        if (appends === 2) return new Promise<void>((resolve) => { releaseStuck = resolve; });
+        return Promise.resolve();
+      },
+      recordCollaboration: ((input: { text?: string }) => {
+        messages.push(input.text ?? "");
+        return { id: String(messages.length) };
+      }) as never,
+    });
+    state.prevProductHealthStatus = "healthy";
+    const abandoned = run();
+    for (let step = 0; step < 10; step += 1) {
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+      vi.advanceTimersByTime(1_000);
+    }
+    await run();
+    const snap = () => ({
+      runway: JSON.stringify(state.runwayAlertState),
+      status: state.prevProductHealthStatus,
+      redAnnounced: state.opsNarrationRedAnnounced ?? null,
+      probes: [...state.prevProbes.entries()].map(([name, probe]) => `${name}:${probe.status}:${probe.detail}`).sort(),
+      keys: [...state.postedProbeKeys].sort(),
+      streaks: [...state.probeStreaks.entries()].sort(),
+      messages: [...messages],
+      history: state.history.map((row) => row.at),
+      incidents: state.incidents.map((row) => ({ id: row.id, endedAt: row.endedAt ?? null })),
+    });
+    const afterNext = snap();
+    releaseStuck();
+    for (let i = 0; i < 30; i += 1) await Promise.resolve();
+    await abandoned;
+    expect(snap()).toEqual(afterNext);
+  });
+
+  it("a fully hung digest tick finishes inside the post-publish budget without calling Hermes", async () => {
+    let composeCalls = 0;
+    const { run, settled } = harness({
+      env: {
+        PRODUCT_HEALTH_RPC_URL: "https://rpc.example",
+        PRODUCT_HEALTH_PAYOUT_EVIDENCE_ENABLED: "true",
+        PRODUCT_HEALTH_PAYOUT_SOURCE_ADDRESS: "0x0000000000000000000000000000000000000002",
+        PRODUCT_HEALTH_USDC_ADDRESS: "0x0000000000000000000000000000000000000001",
+        PRODUCT_HEALTH_SIGNER_ADDRESS: "0xabc",
+        BUZZ_MORNING_DIGEST: "1",
+        BUZZ_DIGEST_TIME: "00:00",
+        BUZZ_DIGEST_TZ: "UTC",
+        OLLAMA_API_KEY: "test-key",
+      },
+      fetchImpl: (() => new Promise<Response>(() => {})) as typeof fetch,
+      alertChannel: {
+        name: "slack",
+        dispatch: () => new Promise(() => {}),
+      },
+      readIncidents: () => new Promise(() => {}),
+      appendIncidents: () => new Promise(() => {}),
+      readSocialQueue: () => new Promise(() => {}),
+      readSocialSignal: () => new Promise(() => {}),
+      requestCompletion: () => {
+        composeCalls += 1;
+        return new Promise(() => {});
+      },
+      readBuzzConfig: () => ({
+        config: { relayUrl: "https://buzz.example", agentSecretKeyHex: "aa", authTag: ["ops"], channelId: "c" },
+      }),
+      publishNarration: () => new Promise(() => {}),
+    });
+    const pending = run();
+    await vi.advanceTimersByTimeAsync(140_000);
+    expect(settled()).toBe(true);
+    await pending;
+    expect(composeCalls).toBe(0);
+  });
+
+  it("records an arrival Slack POST that succeeds after the channel timeout", async () => {
+    vi.useFakeTimers();
+    const delivered: string[] = [];
+    const { arrivalAlertChannel } = createProductHealthSlackChannels({
+      webhookUrl: "https://hooks.example/slack",
+      onRefreshDelivered: () => {},
+      onArrivalDelivered: (id) => delivered.push(id),
+    });
+    const original = globalThis.fetch;
+    let finish: (value: Response) => void = () => {};
+    globalThis.fetch = (() => new Promise<Response>((resolve) => { finish = resolve; })) as typeof fetch;
+    try {
+      const pending = arrivalAlertChannel.dispatch({
+        count: 1,
+        items: [{ id: "external_wallet_first:0xlate", title: "late" }],
+        boardUrl: "https://monitor.example/monitor",
+        text: "opened",
+      });
+      await vi.advanceTimersByTimeAsync(4_000);
+      await expect(pending).resolves.toBe(false);
+      expect(delivered).toEqual([]);
+      finish(new Response("ok", { status: 200 }));
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+      expect(delivered).toEqual(["external_wallet_first:0xlate"]);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("pages again after an on-time recovery releases the latch", async () => {
+    const pages: string[] = [];
+    const alertChannel: AlertChannel = {
+      name: "slack",
+      dispatch: async (payload) => {
+        pages.push(payload.text);
+        return true;
+      },
+    };
+    const intervalMs = 60_000;
+    const { state, run } = harness({ alertChannel, intervalMs });
+    const anchor = Date.now() - intervalMs * 3;
+    state.history = [{ at: anchor, status: "degraded", probes: [] }];
+    state.heartbeatStartedAt = anchor;
+    await run();
+    expect(pages.filter((text) => text.includes("monitor not refreshing"))).toHaveLength(1);
+    const recoveredAt = Date.now();
+    state.previousCompletedAt = recoveredAt - intervalMs;
+    state.history = [{ at: recoveredAt, status: "degraded", probes: [] }];
+    state.refreshPaged = true;
+    await vi.advanceTimersByTimeAsync(1_000);
+    await run();
+    expect(state.refreshPaged).toBe(false);
+    await vi.advanceTimersByTimeAsync(intervalMs * 2);
+    await run();
+    expect(pages.filter((text) => text.includes("monitor not refreshing"))).toHaveLength(2);
+  });
+
+  it("does not send a second refresh page while the first POST is in flight", async () => {
+    let calls = 0;
+    const alertChannel: AlertChannel = {
+      name: "slack",
+      dispatch: () => {
+        calls += 1;
+        return new Promise(() => {});
+      },
+    };
+    const intervalMs = 60_000;
+    const { state, run } = harness({
+      alertChannel,
+      intervalMs,
+      fetchImpl: (() => new Promise<Response>(() => {})) as typeof fetch,
+    });
+    const anchor = Date.now() - intervalMs * 3;
+    state.history = [{ at: anchor, status: "degraded", probes: [] }];
+    state.heartbeatStartedAt = anchor;
+    const first = run();
+    await Promise.resolve();
+    expect(calls).toBe(1);
+    expect(state.refreshPageInFlight).toBe(true);
+    const second = run();
+    await Promise.resolve();
+    expect(calls).toBe(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await Promise.allSettled([first, second]);
+  });
 });
 
 describe("monitor refresh alert", () => {
