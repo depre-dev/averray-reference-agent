@@ -55,6 +55,7 @@ import {
   describeSignerCredentials,
   mergeCredentialReadings,
   tlsCertReader,
+  type CertReader,
 } from "./credential-expiry.js";
 import {
   createReceiptProbeCache,
@@ -98,7 +99,6 @@ import {
 import { fetchWithTimeout, orderedRpcEndpoints, readChainWithFailover } from "./rpc-endpoints.js";
 import {
   PROBE_DEADLINE_MS,
-  probeTimeoutDetail,
   runWithDeadline,
   type ProbeLog,
   type ProbePending,
@@ -3173,6 +3173,8 @@ export async function collectProductHealthProbes(
     deadlineMs?: number;
     pending?: ProbePending;
     log?: ProbeLog;
+    /** Test seam. Production uses the TLS reader, which settles on its own timer. */
+    readCert?: CertReader;
   } = { nowMs: 0 },
 ): Promise<ProductHealthCollection> {
   const deadlineMs = chainCtx.deadlineMs ?? PROBE_DEADLINE_MS;
@@ -3185,12 +3187,12 @@ export async function collectProductHealthProbes(
       ...(chainCtx.pending ? { pending: chainCtx.pending } : {}),
       ...(chainCtx.log ? { log: chainCtx.log } : {}),
     });
-  let healthTimedOut = false;
-  // Wave 1 runs with /health. These four do not read the health body.
-  // Worst case is one deadline, not four.
+  // Wave 1 runs with /health. None of these read the health body.
+  // block_seconds is here for the same reason: it only needs the RPC.
+  // Worst case is one deadline, not one per step.
   const certHosts = config.certHosts ?? [];
   const jwtEnvKeys = config.expiryJwtEnvKeys ?? [];
-  const [h, bankRead, selfFreshness, posterFeeAttribution, credentialExpiries] = await Promise.all([
+  const [h, bankRead, selfFreshness, posterFeeAttribution, credentialExpiries, blockSeconds] = await Promise.all([
     bound(
       "product_api",
       () => fetchProductHealth({
@@ -3198,19 +3200,18 @@ export async function collectProductHealthProbes(
         healthPath: config.apiHealthPath,
         fetchImpl,
       }),
-      (detail) => {
-        healthTimedOut = true;
-        return {
-          configured: Boolean(config.apiBaseUrl),
-          reachable: false,
-          httpOk: false,
-          status: 0,
-          url: config.apiBaseUrl ? joinUrl(config.apiBaseUrl, config.apiHealthPath) : "",
-          error: detail,
-          transport: { kind: "timeout" as const, code: "ETIMEDOUT", message: detail },
-          latencyMs: deadlineMs,
-        };
-      },
+      (detail) => ({
+        // A hang is a transport fault. deriveProductApiProbe counts it with
+        // every other unreachable read and reds on the third consecutive one.
+        configured: Boolean(config.apiBaseUrl),
+        reachable: false,
+        httpOk: false,
+        status: 0,
+        url: config.apiBaseUrl ? joinUrl(config.apiBaseUrl, config.apiHealthPath) : "",
+        error: detail,
+        transport: { kind: "timeout" as const, code: "ETIMEDOUT", message: detail },
+        latencyMs: deadlineMs,
+      }),
     ),
     bound(
       "bank_feed",
@@ -3249,8 +3250,15 @@ export async function collectProductHealthProbes(
             certHosts,
             env: process.env,
             jwtEnvKeys,
-            readCert: tlsCertReader(),
+            readCert: chainCtx.readCert ?? tlsCertReader(),
           }),
+          () => null,
+        )
+      : Promise.resolve(null),
+    config.payoutEvidenceEnabled
+      ? bound(
+          "block_seconds",
+          () => measureBlockSeconds({ rpcUrl: config.rpcUrl, sampleBlocks: PAYOUT_BLOCK_TIME_SAMPLE, fetchImpl }),
           () => null,
         )
       : Promise.resolve(null),
@@ -3264,11 +3272,10 @@ export async function collectProductHealthProbes(
   const chainAdvance = trackChainAdvance(chainCtx.advance, block, chainCtx.nowMs);
   // Absolute block age from the (chain-matched) settlement RPC — no startup blind
   // window; falls back to the cross-poll tracker when the RPC is absent/mismatched.
-  // Wave 2. Needs the /health body. poster-fee attribution already finished
-  // in wave 1, so treasury does not add another serial deadline.
-  // fee_recipient and block_seconds are in this wave because payout and
-  // job_lifecycle (wave 3) need both. They do not need each other.
-  const [blockAgeSec, signer, treasury, externalFunnel, feeRecipient, blockSeconds] = await Promise.all([
+  // Wave 2. Needs the /health body. poster-fee attribution and block_seconds
+  // already finished in wave 1. fee_recipient is here because payout and
+  // job_lifecycle (wave 3) need it. The other reads in this wave do not.
+  const [blockAgeSec, signer, treasury, externalFunnel, feeRecipient] = await Promise.all([
     bound(
       "chain_block_age",
       () => chainBlockAge({
@@ -3336,13 +3343,6 @@ export async function collectProductHealthProbes(
             escrowCore: h.body?.addresses?.escrowCore,
             fetchImpl,
           }),
-          () => null,
-        )
-      : Promise.resolve(null),
-    config.payoutEvidenceEnabled
-      ? bound(
-          "block_seconds",
-          () => measureBlockSeconds({ rpcUrl: config.rpcUrl, sampleBlocks: PAYOUT_BLOCK_TIME_SAMPLE, fetchImpl }),
           () => null,
         )
       : Promise.resolve(null),
@@ -3578,12 +3578,10 @@ export async function collectProductHealthProbes(
 
   return {
     probes: [
-      healthTimedOut
-        ? { name: "product_api", status: "degraded" as const, detail: probeTimeoutDetail(deadlineMs) }
-        : deriveProductApiProbe(h, {
-            ...(transportRun ? { transportRun } : {}),
-            transportThreshold: config.transportFailThreshold,
-          }),
+      deriveProductApiProbe(h, {
+        ...(transportRun ? { transportRun } : {}),
+        transportThreshold: config.transportFailThreshold,
+      }),
       deriveChainProbe(h, staleness),
       signer,
       deriveCapabilityProbe(h, {

@@ -23,6 +23,11 @@ import {
 
 export const PROBE_DEADLINE_MS = 20_000;
 export const SLOW_PROBE_WARN_MS = 10_000;
+/**
+ * Ceiling for every await after the snapshot is published, added together.
+ * A digest tick whose post steps each hang must not reach the 2-interval watchdog.
+ */
+export const POST_PUBLISH_BUDGET_MS = 60_000;
 
 export function probeTimeoutDetail(deadlineMs: number): string {
   const seconds = Math.max(1, Math.round(deadlineMs / 1000));
@@ -132,6 +137,7 @@ export class ProductHealthTickGate implements ProbePending {
   private readonly pending = new Map<string, number>();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private lastCompletedAtMs: number | null = null;
+  private postSpentMs = 0;
 
   constructor(private readonly deps: {
     intervalMs: () => number;
@@ -149,6 +155,7 @@ export class ProductHealthTickGate implements ProbePending {
     this.generation += 1;
     this.pending.clear();
     this.published = false;
+    this.postSpentMs = 0;
     this.startedAt = this.deps.now();
     this.arm(this.generation);
     return { generation: this.generation };
@@ -206,6 +213,21 @@ export class ProductHealthTickGate implements ProbePending {
 
   pendingNames(): string[] {
     return [...this.pending.keys()].sort();
+  }
+
+  /** Time already spent in post-publish awaits for the current generation. */
+  postSpent(): number {
+    return this.postSpentMs;
+  }
+
+  notePostSpent(generation: number, ms: number): void {
+    if (generation !== this.generation) return;
+    if (!Number.isFinite(ms) || ms <= 0) return;
+    this.postSpentMs += ms;
+  }
+
+  now(): number {
+    return this.deps.now();
   }
 
   private arm(generation: number): void {
@@ -318,12 +340,18 @@ export async function runGuardedProductHealthTick(
       live,
       markPublished: () => gate.markPublished(),
       post: (name, work, fallback) => {
+        // An abandoned tick must not start another await, and a digest whose
+        // earlier post steps already used the budget must not keep going.
         if (!live()) return Promise.resolve(fallback);
+        if (gate.postSpent() >= POST_PUBLISH_BUDGET_MS) return Promise.resolve(fallback);
+        const started = gate.now();
         return runWithDeadline({
           name: `post_publish:${name}`,
           pending: gate,
           run: work,
           onTimeout: () => fallback,
+        }).finally(() => {
+          gate.notePostSpent(generation, gate.now() - started);
         });
       },
     });
