@@ -99,7 +99,8 @@ export type VerdictReason =
   | "probe-degraded"
   | "probe-unknown"
   | "pool-draining"
-  | "nominal";
+  | "nominal"
+  | "monitor-not-refreshing";
 
 export interface OpsVerdict {
   /** The one line, sized on the board to be read across a room. */
@@ -426,5 +427,58 @@ export function deriveOpsVerdict(input: VerdictInput): OpsVerdict {
       .join(" · "),
     census,
     reason: "nominal",
+  };
+}
+
+/**
+ * How many check intervals may pass with no completed product-health tick
+ * before the monitor itself is the incident.
+ *
+ * This is the monitor's clock, not the product's. A snapshot older than this
+ * is not "data stale" — the heartbeat stopped finishing, and the board must
+ * say so in red. Two intervals: one missed check is late, two is a freeze.
+ */
+export const MONITOR_REFRESH_MULTIPLE = 2;
+
+export interface MonitorRefreshClock {
+  enabled: boolean;
+  /** Epoch ms of the last tick that finished. Null when none has. */
+  lastCompletedAtMs: number | null | undefined;
+  /**
+   * Epoch ms when this process armed the heartbeat. Used only when no tick
+   * has ever completed, so a first tick that hangs still becomes visible.
+   */
+  heartbeatStartedAtMs?: number | null;
+  nowMs: number;
+  checkIntervalMs: number | null | undefined;
+}
+
+/** The freeze anchor, or null when the heartbeat is still inside its budget. */
+export function monitorRefreshOverdue(input: MonitorRefreshClock): { sinceMs: number } | null {
+  if (!input.enabled) return null;
+  const interval = input.checkIntervalMs;
+  if (typeof interval !== "number" || !Number.isFinite(interval) || interval <= 0) return null;
+  const anchor = input.lastCompletedAtMs ?? input.heartbeatStartedAtMs ?? null;
+  if (anchor == null || !Number.isFinite(anchor)) return null;
+  if (input.nowMs - anchor < interval * MONITOR_REFRESH_MULTIPLE) return null;
+  return { sinceMs: anchor };
+}
+
+/**
+ * Replace the product verdict when the monitor itself has stopped refreshing.
+ *
+ * The product verdict is about the last snapshot. Serving it under a soft
+ * "stale" label is how a five-hour freeze on 2026-10-10 looked like a poll
+ * hiccup. The headline names the monitor and the time of the last finish.
+ */
+export function withMonitorRefresh(core: OpsVerdict, input: MonitorRefreshClock): OpsVerdict {
+  const overdue = monitorRefreshOverdue(input);
+  if (!overdue) return core;
+  return {
+    headline: `monitor not refreshing since ${new Date(overdue.sinceMs).toISOString()}`,
+    tone: "red",
+    sub: "no product-health check has finished — the numbers below are not being refreshed",
+    census: core.census,
+    reason: "monitor-not-refreshing",
   };
 }

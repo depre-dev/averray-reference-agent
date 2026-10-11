@@ -655,7 +655,7 @@ describe("opsVerdict", () => {
   });
 
   test("a breached floor outranks everything and names the pool", () => {
-    const v = opsVerdict({ health: OPS_FIXTURE_STRESS, streamDegraded: true, nowMs: NOW });
+    const v = opsVerdict({ health: OPS_FIXTURE_STRESS, streamDegraded: true, nowMs: OPS_FIXTURE_STRESS.at! + 2_000 });
     expect(v.verdict).toContain("REWARD BANK BELOW FLOOR");
     expect(v.verdictTone).toBe("red");
   });
@@ -670,10 +670,15 @@ describe("opsVerdict", () => {
     expect(v.verdict).toBe("NOMINAL");
   });
 
-  test("stale data alone is enough to relabel, even on an open stream", () => {
+  test("two missed intervals turn the verdict red — not a soft stale label", () => {
     const health = { ...OPS_FIXTURE_NOMINAL, checkIntervalMs: 2 * 60_000 };
-    const v = opsVerdict({ health, streamDegraded: false, nowMs: health.at! + 6 * 60_000 });
-    expect(v.kicker).toContain("DATA STALE");
+    const since = health.at!;
+    const v = opsVerdict({ health, streamDegraded: false, nowMs: since + 2 * health.checkIntervalMs! });
+    expect(v.verdictTone).toBe("red");
+    expect(v.verdict).toBe(`monitor not refreshing since ${new Date(since).toISOString()}`);
+    expect(v.verdict.toLowerCase()).not.toContain("stale");
+    expect(v.kicker).toBe("MONITOR NOT REFRESHING");
+    expect(v.kicker).not.toContain("DATA STALE");
   });
 
   // THE FALSE RED, PINNED. The threshold was a flat 3 minutes against a
@@ -688,17 +693,20 @@ describe("opsVerdict", () => {
     expect(v.kicker).not.toContain("STALE");
   });
 
-  test("the threshold follows the reported cadence rather than a constant", () => {
+  test("the refresh verdict follows the reported cadence rather than a constant", () => {
     const slow = { ...OPS_FIXTURE_NOMINAL, checkIntervalMs: 10 * 60_000 };
-    // 20 minutes is two intervals on a 10-minute cadence — still not stale…
+    // Just under two intervals on a 10-minute cadence is still a product verdict.
     expect(
-      opsVerdict({ health: slow, streamDegraded: false, nowMs: slow.at! + 20 * 60_000 }).kicker,
+      opsVerdict({ health: slow, streamDegraded: false, nowMs: slow.at! + 2 * slow.checkIntervalMs - 1 }).kicker,
     ).toContain("OPERATOR VERDICT");
-    // …while the same age on a 2-minute cadence is long past it.
+    // Two intervals on that cadence is the monitor, not the product.
+    expect(
+      opsVerdict({ health: slow, streamDegraded: false, nowMs: slow.at! + 2 * slow.checkIntervalMs }).verdict,
+    ).toContain("monitor not refreshing since");
     const fast = { ...OPS_FIXTURE_NOMINAL, checkIntervalMs: 2 * 60_000 };
     expect(
-      opsVerdict({ health: fast, streamDegraded: false, nowMs: fast.at! + 20 * 60_000 }).kicker,
-    ).toContain("DATA STALE");
+      opsVerdict({ health: fast, streamDegraded: false, nowMs: fast.at! + 20 * 60_000 }).verdictTone,
+    ).toBe("red");
   });
 
   // A too-tight guess is what produced the false alarm, so an unknown cadence

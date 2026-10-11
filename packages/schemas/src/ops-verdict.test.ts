@@ -7,6 +7,7 @@ import {
   isUnknownReadingProbe,
   payoutGap,
   probeCensus,
+  withMonitorRefresh,
   type VerdictInput,
   type VerdictProbe,
 } from "./ops-verdict.js";
@@ -288,5 +289,51 @@ describe("payoutGap", () => {
   test("says so when it cannot compare, instead of implying zero", () => {
     expect(payoutGap({ status: "unverified", confirmedCount: null, settledCount: 14 })).toBe("gap unknown");
     expect(payoutGap(undefined)).toBe("gap unknown");
+  });
+});
+
+describe("withMonitorRefresh", () => {
+  const since = Date.parse("2026-10-10T16:55:50.000Z");
+  const interval = 5 * 60_000;
+  const nominal = () => deriveOpsVerdict({
+    enabled: true,
+    checks: 3,
+    probes: [{ name: "product_api", status: "ok", detail: "200" }],
+  });
+
+  test("no completed tick for two intervals is red, and the headline is not a stale label", () => {
+    const verdict = withMonitorRefresh(nominal(), {
+      enabled: true,
+      lastCompletedAtMs: since,
+      nowMs: since + interval * 2,
+      checkIntervalMs: interval,
+    });
+    expect(verdict.tone).toBe("red");
+    expect(verdict.reason).toBe("monitor-not-refreshing");
+    expect(verdict.headline).toBe("monitor not refreshing since 2026-10-10T16:55:50.000Z");
+    expect(verdict.headline.toLowerCase()).not.toContain("stale");
+  });
+
+  test("a heartbeat that never completed still turns red after two intervals", () => {
+    const started = Date.parse("2026-10-10T17:00:50.000Z");
+    const verdict = withMonitorRefresh(deriveOpsVerdict({ enabled: true, checks: 0, probes: [] }), {
+      enabled: true,
+      lastCompletedAtMs: null,
+      heartbeatStartedAtMs: started,
+      nowMs: started + interval * 2,
+      checkIntervalMs: interval,
+    });
+    expect(verdict.tone).toBe("red");
+    expect(verdict.headline).toBe(`monitor not refreshing since ${new Date(started).toISOString()}`);
+  });
+
+  test("one interval late keeps the product verdict", () => {
+    const verdict = withMonitorRefresh(nominal(), {
+      enabled: true,
+      lastCompletedAtMs: since,
+      nowMs: since + interval,
+      checkIntervalMs: interval,
+    });
+    expect(verdict.reason).toBe("nominal");
   });
 });

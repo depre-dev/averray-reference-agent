@@ -24,6 +24,7 @@
 // the previous snapshot in place with its age still climbing, so a broken
 // reader degrades into visibly-old data rather than into a fabricated zero.
 
+import { beginAttempt } from "./inflight-attempt.js";
 import { summarizeGasSpend, type GasSpend } from "./gas-spend.js";
 import type { GasReadResult } from "./gas-spend-read.js";
 
@@ -92,6 +93,13 @@ export interface GasSpendCache {
 /** Long enough that the RPC cost is negligible; short enough to be useful. */
 export const DEFAULT_GAS_REFRESH_MS = 30 * 60 * 1000;
 
+/**
+ * Ceiling for one background pass. A real scan is ~174 RPC calls and finishes
+ * well inside this; a promise that never settles must still free `running`
+ * so the next pass can start. Distinct from the 30-minute refresh cadence.
+ */
+export const GAS_ATTEMPT_TIMEOUT_MS = 10 * 60 * 1000;
+
 export function createGasSpendCache(deps: {
   /** Performs the read. Injected so the cache is testable without a chain. */
   read: () => Promise<GasReadResult>;
@@ -99,9 +107,12 @@ export function createGasSpendCache(deps: {
   settledCount: () => number | null;
   labels?: Readonly<Record<string, string>>;
   refreshMs?: number;
+  /** Frees the in-flight slot even if `read` never settles. */
+  attemptTimeoutMs?: number;
   onError?: (message: string) => void;
 }): GasSpendCache {
   const refreshMs = deps.refreshMs ?? DEFAULT_GAS_REFRESH_MS;
+  const attemptTimeoutMs = deps.attemptTimeoutMs ?? GAS_ATTEMPT_TIMEOUT_MS;
   let snapshot: GasSpendSnapshot | null = null;
   // Kept separately: a failure BEFORE any success has no snapshot to attach to,
   // and dropping it is what made the whole feature silent in production.
@@ -132,9 +143,17 @@ export function createGasSpendCache(deps: {
       if (snapshot && nowMs - snapshot.at < refreshMs) return;
       running = true;
       startedAt = nowMs;
+      const timeoutDetail = `timed out after ${Math.max(1, Math.round(attemptTimeoutMs / 1000))}s`;
+      const attempt = beginAttempt(attemptTimeoutMs, () => {
+        running = false;
+        if (snapshot) snapshot = { ...snapshot, staleReason: timeoutDetail };
+        else firstError = { reason: timeoutDetail, at: nowMs };
+        deps.onError?.(timeoutDetail);
+      });
       void (async () => {
         try {
           const result = await deps.read();
+          if (!attempt.current()) return;
           if (result.reason) {
             // Keep the previous figures and say why they stopped moving. An
             // unreadable chain is not zero spend.
@@ -158,12 +177,16 @@ export function createGasSpendCache(deps: {
             ...(result.rpcHost ? { rpcHost: result.rpcHost } : {}),
           };
         } catch (error) {
+          if (!attempt.current()) return;
           const message = error instanceof Error ? error.message : String(error);
           if (snapshot) snapshot = { ...snapshot, staleReason: message };
           else firstError = { reason: message, at: nowMs };
           deps.onError?.(message);
         } finally {
-          running = false;
+          if (attempt.current()) {
+            attempt.finish();
+            running = false;
+          }
         }
       })();
     },

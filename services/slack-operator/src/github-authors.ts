@@ -1,3 +1,5 @@
+import { raceDeadline } from "./inflight-attempt.js";
+
 // GitHub author visibility, rendered as served.
 //
 // `github_author_concentration` is a warning the backend already computed.
@@ -141,9 +143,12 @@ interface AuthorCache {
 }
 
 let authorCache: AuthorCache | null = null;
+/** Bumped on every real fetch so a timed-out call cannot remember() over a newer one. */
+let authorGeneration = 0;
 
 export function __resetGithubAuthorsForTests(): void {
   authorCache = null;
+  authorGeneration = 0;
 }
 
 function aged(
@@ -204,6 +209,15 @@ export async function readAdminGithubAuthors(input: {
   }
 
   const timeoutMs = input.timeoutMs ?? GITHUB_AUTHORS_TIMEOUT_MS;
+  const generation = ++authorGeneration;
+  const kept = (): GithubAuthorsSurface =>
+    authorCache
+      ? aged(authorCache.surface, authorCache.at, nowMs)
+      : { warning: null, block: null, unavailable: "timeout", at: nowMs, ageMs: 0 };
+  const write = (produce: () => GithubAuthorsSurface): GithubAuthorsSurface => {
+    if (generation !== authorGeneration) return kept();
+    return produce();
+  };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let stage: "session" | "fetch" = "session";
@@ -211,19 +225,20 @@ export async function readAdminGithubAuthors(input: {
     const session = await Promise.race([input.getSession(), abortAsTimeout(controller.signal)]);
     stage = "fetch";
     const base = (input.baseUrl ?? "https://api.averray.com").replace(/\/+$/, "");
-    const response = await input.fetchImpl(`${base}/admin/status`, {
+    const response = await raceDeadline(input.fetchImpl(`${base}/admin/status`, {
       headers: { accept: "application/json", authorization: `Bearer ${session.token}` },
       signal: controller.signal,
-    });
+    }), timeoutMs);
     if (response.status === 401 || response.status === 403) {
-      return remember({ warning: null, block: null, unavailable: "unauthorised" }, nowMs);
+      return write(() => remember({ warning: null, block: null, unavailable: "unauthorised" }, nowMs));
     }
     if (!response.ok) {
-      return remember({ warning: null, block: null, unavailable: "missing" }, nowMs);
+      return write(() => remember({ warning: null, block: null, unavailable: "missing" }, nowMs));
     }
-    const surface = githubAuthorSurface({ adminStatus: await response.json() });
-    if (!surface.block) return remember({ ...surface, unavailable: "missing" }, nowMs);
-    return remember(surface, nowMs);
+    const body = await raceDeadline(response.json(), timeoutMs);
+    const surface = githubAuthorSurface({ adminStatus: body });
+    if (!surface.block) return write(() => remember({ ...surface, unavailable: "missing" }, nowMs));
+    return write(() => remember(surface, nowMs));
   } catch (error) {
     const aborted = controller.signal.aborted || (error instanceof Error && error.name === "AbortError");
     const unavailable: GithubAuthorsUnavailable = aborted
@@ -231,7 +246,7 @@ export async function readAdminGithubAuthors(input: {
       : stage === "session"
         ? "unauthorised"
         : "unreachable";
-    return noteAttempt(nowMs, unavailable);
+    return write(() => noteAttempt(nowMs, unavailable));
   } finally {
     clearTimeout(timer);
   }

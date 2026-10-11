@@ -18,7 +18,7 @@
 
 import { ARRIVAL_STAGES } from "./product-health.js";
 import type { HealthHistory, ProductHealth, SolvencyPool , ArrivalStage } from "./product-health.js";
-import { deriveOpsVerdict, verdictProbeLabel, type VerdictReason } from "@avg/schemas/ops-verdict";
+import { deriveOpsVerdict, verdictProbeLabel, withMonitorRefresh, type VerdictReason } from "@avg/schemas/ops-verdict";
 import { formatAgo, formatAmount, formatDuration, groupProbesByPillar, probeOpsTone, type OpsTone } from "./ops-model.js";
 import { formatPoolAmount, poolMeter, shortEndpoint, staleAfterMs, type MeterView } from "./ops-spec.js";
 
@@ -53,14 +53,30 @@ export function phoneVerdict(input: {
   nowMs: number;
 }): PhoneVerdict {
   const { health, streamDegraded, nowMs } = input;
-  const core = deriveOpsVerdict({
+  const core = withMonitorRefresh(deriveOpsVerdict({
     enabled: health.enabled,
     checks: health.checks,
     probes: health.probes,
     pools: health.solvency?.pools ?? [],
     runway: health.solvency?.runway ?? [],
     ...(health.flow?.payout ? { payout: health.flow.payout } : {}),
+  }), {
+    enabled: health.enabled,
+    lastCompletedAtMs: health.at,
+    heartbeatStartedAtMs: health.heartbeatStartedAt ?? null,
+    nowMs,
+    checkIntervalMs: health.checkIntervalMs ?? null,
   });
+  if (core.reason === "monitor-not-refreshing") {
+    return {
+      kicker: "MONITOR NOT REFRESHING",
+      headline: core.headline,
+      sub: core.sub,
+      tone: "red",
+      reason: core.reason,
+      compact: true,
+    };
+  }
 
   const untrusted = isUntrusted({ health, streamDegraded, nowMs });
   const asOf = health.at == null ? null : clockOf(health.at);

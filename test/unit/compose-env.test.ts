@@ -154,6 +154,24 @@ describe("compose environment wiring", () => {
     expect(envExample).toContain("HERMES_ROUTER_DEFAULT_REPO=");
   });
 
+  it("forwards every ARRIVAL_* environment read into slack-operator", () => {
+    const compose = parse(readText("../../ops/compose.yml")) as {
+      services?: Record<string, { environment?: Record<string, string> }>;
+    };
+    const env = compose.services?.["slack-operator"]?.environment;
+    const source = readText("../../services/slack-operator/src/arrival-alerts.ts");
+    const controls = new Set(
+      [...source.matchAll(/(?:env|process\.env)\.([A-Z0-9_]+)/g)].map((match) => match[1] ?? ""),
+    );
+    const arrival = [...controls].filter((name) => name.startsWith("ARRIVAL_"));
+    expect(arrival.length).toBeGreaterThan(0);
+    for (const control of arrival) {
+      expect(env, `${control} is read in source but missing from Compose`).toHaveProperty(control);
+    }
+    expect(env?.ARRIVAL_ALERTS_SLACK_ENABLED).toBe("${ARRIVAL_ALERTS_SLACK_ENABLED:-0}");
+    expect(readText("../../ops/.env.example")).toContain("ARRIVAL_ALERTS_SLACK_ENABLED=0");
+  });
+
   it("passes observable bounded Claude branch-worker defaults into Claude-family runners", () => {
     const compose = parse(readText("../../ops/compose.yml")) as {
       services?: Record<string, { environment?: Record<string, string> }>;

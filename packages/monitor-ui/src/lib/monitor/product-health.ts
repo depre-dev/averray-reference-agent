@@ -732,6 +732,8 @@ export interface GithubAuthorsSurface {
 
 export interface ArrivalAlertsBoardStatus {
   paging: "on" | "off";
+  /** Set when "paging on" would hide that Slack has no webhook. */
+  pagingDetail?: string | null;
   unavailable: "unauthorised" | "timeout" | "missing" | "unreachable" | null;
   stale: boolean;
   readyCount: number | null;
@@ -744,6 +746,11 @@ export interface ProductHealth {
   enabled: boolean;
   /** Epoch ms of the last check, or null if none yet. */
   at: number | null;
+  /**
+   * Epoch ms when this process armed the heartbeat. Lets the board turn red
+   * when the first tick never finishes. Absent on older payloads.
+   */
+  heartbeatStartedAt?: number | null;
   status: ProductHealthStatus;
   checks: number;
   /** How often the heartbeat is expected to update this payload. Absent on
