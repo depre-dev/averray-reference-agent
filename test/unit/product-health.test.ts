@@ -2636,8 +2636,40 @@ describe("a payout shortfall pages even with every probe green", () => {
       "http://board",
       { chainId: 420420419, bankMoves: { state: "unavailable", text: "not reported" } } as never,
     ).text;
-    expect(missing).toContain("Recent bank moves: not reported");
+    expect(missing).not.toContain("Recent bank moves");
     expect(missing).not.toMatch(/\b0 moves\b/);
+  });
+
+  it("a non-money page does not quote bank moves, and a repeat quotes only newer lines", () => {
+    const line =
+      "+1.00 reserved · job pr-quanta-js-quanta-212 (git-patch-tests-v1) · 0x2e3c…91 regular (5 jobs, 3 settled, 1 rejected, 1 open, since Sep 28) · MCP, client \"claude-code\", stage claimed · claim expires 14:20Z, payout on merge";
+    const newer = "-1.00 settled · job pr-quanta-js-quanta-212 (git-patch-tests-v1) · 0x2e3c…91 regular (5 jobs, 3 settled, 1 rejected, 1 open, since Sep 28) · MCP, client \"claude-code\", stage settled · payout on merge";
+    const moves = {
+      state: "live" as const,
+      incomplete: false,
+      moves: [
+        { id: "settle", at: "2026-10-13T15:00:00.000Z", line: newer },
+        { id: "reserve", at: "2026-10-13T14:00:00.000Z", line },
+      ],
+    };
+    const latency = buildProductHealthAlert(
+      evaluateProductHealth([{ name: "api_latency", status: "red", detail: "2100ms" }]),
+      "http://board",
+      { chainId: 420420419, bankMoves: moves } as never,
+    ).text;
+    expect(latency).not.toContain(line);
+    expect(latency).not.toContain("Recent bank moves");
+
+    const previous = Date.parse("2026-10-13T14:30:00.000Z");
+    const repeat = buildProductHealthAlert(
+      evaluateProductHealth([{ name: "signer_liquidity", status: "red", detail: "reward bank below floor" }]),
+      "http://board",
+      { chainId: 420420419, bankMoves: moves } as never,
+      undefined,
+      previous,
+    ).text;
+    expect(repeat).toContain(newer);
+    expect(repeat).not.toContain(line);
   });
 });
 

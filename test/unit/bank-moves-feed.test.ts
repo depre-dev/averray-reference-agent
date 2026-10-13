@@ -3,8 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 import {
   BANK_MOVES_NOT_REPORTED,
   bankChangeText,
+  bankMovesLineMode,
   openBankMovesCursor,
+  projectBankMovesReading,
   readBankMoves,
+  redactBankMoveLine,
   type BankMovesCursorState,
 } from "../../services/slack-operator/src/bank-moves-feed.js";
 
@@ -135,6 +138,89 @@ describe("bank move admin reads", () => {
       ],
     });
     expect(bankChangeText(second.reading)?.[1]).toBe(EXAMPLE_LINE);
+  });
+
+  it("a quiet tick's nextCursor of 'not reported' is not the next since", async () => {
+    const calls: string[] = [];
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      calls.push(String(url));
+      if (calls.length % 2 === 1) {
+        return jsonResponse(page({
+          moves: [],
+          returnedCount: 0,
+          nextCursor: "not reported",
+          hasMore: false,
+        }));
+      }
+      return jsonResponse(page());
+    }) as typeof fetch;
+    const session = async () => ({ token: "ops-service-token" });
+
+    const quiet = await readBankMoves({
+      baseUrl: "https://api.example.test",
+      cursor: { cursor: "kept-move", openedAt: "2026-10-12T14:00:00.000Z" },
+      getSession: session,
+      fetchImpl,
+    });
+    expect(quiet.cursor.cursor).toBe("kept-move");
+    expect(calls[0]).toContain("since=kept-move");
+
+    const normal = await readBankMoves({
+      baseUrl: "https://api.example.test",
+      cursor: quiet.cursor,
+      accumulated: quiet.accumulated,
+      getSession: session,
+      fetchImpl,
+    });
+    expect(calls[1]).toContain("since=kept-move");
+    expect(normal.cursor.cursor).toBe("reserve");
+    expect(normal.reading).toMatchObject({
+      state: "live",
+      moves: [{ id: "reserve", at: "2026-10-13T14:00:00.000Z", line: EXAMPLE_LINE }],
+    });
+
+    const opened = openBankMovesCursor(NOW, { cursor: "not reported", openedAt: "2026-10-12T14:00:00.000Z" });
+    expect(opened.cursor).toBeNull();
+    const quietWindow = await readBankMoves({
+      baseUrl: "https://api.example.test",
+      cursor: opened,
+      getSession: session,
+      fetchImpl,
+    });
+    expect(quietWindow.cursor.cursor).toBeNull();
+    expect(calls[2]).toContain("since=2026-10-12T14%3A00%3A00.000Z");
+    const afterWindow = await readBankMoves({
+      baseUrl: "https://api.example.test",
+      cursor: quietWindow.cursor,
+      getSession: session,
+      fetchImpl,
+    });
+    expect(calls[3]).toContain("since=2026-10-12T14%3A00%3A00.000Z");
+    expect(afterWindow.cursor.cursor).toBe("reserve");
+    for (const href of calls) expect(href).not.toContain("not%20reported");
+    expect(JSON.stringify(quiet.cursor)).not.toContain("not reported");
+  });
+
+  it("redaction keeps amount, job, and tag, and the default is the full line", () => {
+    const redacted = "+1.00 reserved · job pr-quanta-js-quanta-212 (git-patch-tests-v1) · regular";
+    expect(redactBankMoveLine(EXAMPLE_LINE)).toBe(redacted);
+    expect(redacted).not.toContain("0x2e3c");
+    expect(redacted).not.toContain("5 jobs");
+    expect(redacted).not.toContain("claude-code");
+    expect(redactBankMoveLine(
+      "-1.00 settled · job not reported · 0x062d…8a self · not reported · not reported",
+    )).toBe("-1.00 settled · job not reported · self");
+    expect(redactBankMoveLine("not a move line")).toBe("not reported");
+    expect(bankMovesLineMode({})).toBe("full");
+    expect(bankMovesLineMode({ BANK_MOVES_LINE: "redacted" })).toBe("redacted");
+    expect(bankMovesLineMode({ BANK_MOVES_LINE: "full" })).toBe("full");
+    const reading = {
+      state: "live" as const,
+      incomplete: false,
+      moves: [{ id: "reserve", at: "2026-10-13T14:00:00.000Z", line: EXAMPLE_LINE }],
+    };
+    expect(projectBankMovesReading(reading, "full").moves[0]?.line).toBe(EXAMPLE_LINE);
+    expect(projectBankMovesReading(reading, "redacted").moves[0]?.line).toBe(redacted);
   });
 
   it.each([404, 403, 401])("HTTP %s is not reported and is not an empty success", async (status) => {

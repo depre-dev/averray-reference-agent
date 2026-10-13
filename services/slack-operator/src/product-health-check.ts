@@ -27,7 +27,9 @@ import {
 import { readArrivalsFeed } from "./arrivals-feed.js";
 import {
   bankChangeText,
+  bankMovesLineMode,
   openBankMovesCursor,
+  projectBankMovesReading,
   readBankMoves,
   unavailableBankMoves,
   type BankMoveLine,
@@ -436,7 +438,7 @@ async function runTickBody(input: {
   const servedWarning = collection.snapshot.githubAuthors?.warning ?? adminAuthors.warning;
   state.snapshot = {
     ...collection.snapshot,
-    bankMoves: bankMoves.reading,
+    bankMoves: projectBankMovesReading(bankMoves.reading, bankMovesLineMode(env)),
     arrivals,
     depositPool,
     githubAuthors: {

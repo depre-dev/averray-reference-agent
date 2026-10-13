@@ -20,6 +20,18 @@ export const BANK_MOVES_QUOTE_LIMIT = 8;
 /** First poll looks back a day. Later polls continue from the cursor. */
 export const BANK_MOVES_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * How a move is quoted on the board, in Slack, and on `/monitor/product-health`.
+ *
+ * `full` (the default) is the backend `line` unchanged.
+ * `redacted` keeps amount, job, and wallet tag, and drops the wallet history,
+ * arrival, and next clauses. Set `BANK_MOVES_LINE=redacted` to switch. Any
+ * other value, including unset, stays `full`.
+ */
+export type BankMovesLineMode = "full" | "redacted";
+
+const WALLET_TAGS = ["first arrival", "returning", "regular", "ambiguous", "self"] as const;
+
 const FORBIDDEN_NETWORK_KEY = /^(ip|asn|geo|latitude|longitude|city|country|region)$/i;
 
 export interface BankMoveLine {
@@ -46,13 +58,52 @@ export interface BankMovesPollResult {
   accumulated: BankMoveLine[];
 }
 
+/**
+ * A cursor is a move id. The unmeasured sentinel, a blank, and null are not
+ * ids. A quiet backend tick currently returns `nextCursor: "not reported"`;
+ * sending that back as `since` replays old moves.
+ */
+export function usableBankMovesCursor(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === BANK_MOVES_NOT_REPORTED) return null;
+  return trimmed;
+}
+
+export function bankMovesLineMode(env: NodeJS.ProcessEnv = process.env): BankMovesLineMode {
+  return (env.BANK_MOVES_LINE ?? "").trim().toLowerCase() === "redacted" ? "redacted" : "full";
+}
+
+/** Amount, job clause, and tag. Anything we cannot parse stays the sentinel. */
+export function redactBankMoveLine(line: string): string {
+  const parts = line.split(" · ");
+  const amount = parts[0]?.trim() ?? "";
+  const job = parts[1]?.trim() ?? "";
+  const tag = parts.length >= 3 ? tagFromWallet(parts[2] ?? "") : null;
+  if (!amount || !job || !tag) return BANK_MOVES_NOT_REPORTED;
+  return `${amount} · ${job} · ${tag}`;
+}
+
+export function projectBankMoveLine(line: string, mode: BankMovesLineMode): string {
+  return mode === "redacted" ? redactBankMoveLine(line) : line;
+}
+
+export function projectBankMovesReading(reading: BankMovesReading, mode: BankMovesLineMode): BankMovesReading {
+  if (mode === "full" || reading.state !== "live") return reading;
+  return {
+    ...reading,
+    moves: reading.moves.map((move) => ({ ...move, line: projectBankMoveLine(move.line, mode) })),
+  };
+}
+
 export function openBankMovesCursor(
   nowMs: number,
   previous?: BankMovesCursorState | null,
 ): BankMovesCursorState {
-  if (previous?.openedAt) return { cursor: previous.cursor, openedAt: previous.openedAt };
+  const cursor = usableBankMovesCursor(previous?.cursor);
+  if (previous?.openedAt) return { cursor, openedAt: previous.openedAt };
   return {
-    cursor: previous?.cursor ?? null,
+    cursor,
     openedAt: new Date(nowMs - BANK_MOVES_LOOKBACK_MS).toISOString(),
   };
 }
@@ -89,6 +140,38 @@ export function bankChangeText(reading: BankMovesReading | undefined): string[] 
   return lines;
 }
 
+const BANK_ALERT_PROBES = new Set(["money_path", "signer_liquidity", "treasury_liquidity"]);
+
+/**
+ * Move lines for a product-health page.
+ *
+ * Only money and bank pages carry them. A latency or chain page does not.
+ * Only moves strictly newer than the previous page are included, so a cooldown
+ * repeat does not paste the same eight lines again. No newer line means no
+ * section at all — not a zero and not the sentinel.
+ */
+export function bankMovesAlertLines(input: {
+  reading: BankMovesReading | undefined;
+  redProbeNames: readonly string[];
+  moneyKey: string;
+  poolCritical: boolean;
+  previousAlertAtMs: number;
+}): string[] | null {
+  const moneyOrBank = input.moneyKey !== ""
+    || input.poolCritical
+    || input.redProbeNames.some((name) => BANK_ALERT_PROBES.has(name));
+  if (!moneyOrBank || !input.reading || input.reading.state !== "live") return null;
+  const newer = input.reading.moves.filter((move) => {
+    const at = Date.parse(move.at);
+    return Number.isFinite(at) && at > input.previousAlertAtMs;
+  });
+  if (newer.length === 0) return null;
+  const quoted = newer.slice(0, BANK_MOVES_QUOTE_LIMIT).map((move) => move.line);
+  const lines = ["Recent bank moves:", ...quoted];
+  if (newer.length > BANK_MOVES_QUOTE_LIMIT) lines.push("remainder not reported");
+  return lines;
+}
+
 export async function readBankMoves(input: {
   baseUrl: string | undefined;
   getSession: () => Promise<{ token: string }>;
@@ -121,10 +204,11 @@ export async function readBankMoves(input: {
   const fetchImpl = input.fetchImpl ?? fetch;
   const base = baseUrl.replace(/\/+$/u, "");
 
-  let since = input.cursor.cursor ?? input.cursor.openedAt;
+  const heldCursor = usableBankMovesCursor(input.cursor.cursor);
+  let since = heldCursor ?? input.cursor.openedAt;
   const incoming: BankMoveLine[] = [];
   let incomplete = false;
-  let cursor = input.cursor.cursor;
+  let cursor = heldCursor;
   let pages = 0;
 
   while (pages < maxPages) {
@@ -220,9 +304,7 @@ function parsePage(body: unknown): ParsedPage | "fail" {
   const historyIncomplete = !history || history.complete !== true || history.eventLogBounded === true;
   const gap = body.gap === true;
   const hasMore = body.hasMore === true;
-  const nextCursor = typeof body.nextCursor === "string" && body.nextCursor.length > 0
-    ? body.nextCursor
-    : null;
+  const nextCursor = usableBankMovesCursor(typeof body.nextCursor === "string" ? body.nextCursor : null);
   return {
     moves,
     hasMore,
@@ -264,6 +346,17 @@ function hasForbiddenNetworkKey(value: unknown, depth = 0): boolean {
     if (hasForbiddenNetworkKey(child, depth + 1)) return true;
   }
   return false;
+}
+
+function tagFromWallet(segment: string): string | null {
+  const addressed = segment.match(/0x[0-9a-fA-F]{4}…[0-9a-fA-F]{2}\s+(.+)$/u);
+  const rest = addressed?.[1]?.trim() ?? "";
+  for (const tag of WALLET_TAGS) {
+    if (rest === tag || rest.startsWith(`${tag} `) || rest.startsWith(`${tag}(`) || rest.startsWith(`${tag},`)) {
+      return tag;
+    }
+  }
+  return null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
