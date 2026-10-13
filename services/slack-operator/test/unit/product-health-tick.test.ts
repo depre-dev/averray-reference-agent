@@ -541,7 +541,13 @@ describe("product health tick behaviour", () => {
         if ((init?.method ?? "GET") === "GET" && href.includes("/health")) {
           return { ok: true, status: 200, json: async () => ({ status: "ok", serviceHealth: { ok: true } }) } as unknown as Response;
         }
-        if (href.includes("/monitor/arrivals") || href.includes("/admin/arrivals/alerts") || href.includes("/monitor/deposit-pool") || href.includes("/admin/status")) {
+        if (
+          href.includes("/monitor/arrivals")
+          || href.includes("/admin/arrivals/alerts")
+          || href.includes("/monitor/deposit-pool")
+          || href.includes("/admin/status")
+          || href.includes("/admin/ops/bank-moves")
+        ) {
           return await new Promise<Response>(() => {});
         }
         return { ok: false, status: 404, json: async () => ({}) } as unknown as Response;
@@ -556,6 +562,7 @@ describe("product health tick behaviour", () => {
     await pending;
     expect(fetched.state.snapshot?.arrivals).toMatchObject({ unavailable: "arrivals feed timed out after 20s" });
     expect(fetched.state.snapshot?.arrivalAlerts?.unavailable).toBe("timeout");
+    expect(fetched.state.snapshot?.bankMoves).toEqual({ state: "unavailable", text: "not reported" });
     expect(fetched.state.history.length).toBeGreaterThan(0);
     expect(fetched.gate.pendingNames()).toEqual([]);
   });

@@ -2139,6 +2139,52 @@ body,
   color: var(--tone, var(--h4-tel));
 }
 
+/* Recent attributed moves. Full width under both instruments so a long
+   backend line wraps inside the group instead of painting across the pool.
+   The sentence is not reformatted; overflow-wrap is what keeps it in the cell. */
+.ops-bank-moves {
+  grid-column: 1 / -1;
+  min-width: 0;
+  border-top: 1px solid var(--ops-rule);
+  padding: calc(8 * var(--ops-u)) calc(14 * var(--ops-u)) calc(10 * var(--ops-u));
+}
+.ops-bank-moves-title {
+  margin: 0 0 calc(6 * var(--ops-u));
+  font-family: var(--h4-font-display);
+  font-weight: 600;
+  font-size: calc(13.5 * var(--ops-u));
+  letter-spacing: 0.09em;
+  color: var(--h4-ink);
+}
+.ops-bank-moves-list {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6 * var(--ops-u));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+.ops-bank-move {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  font-family: var(--h4-font-mono);
+  font-size: calc(11 * var(--ops-u));
+  line-height: 1.45;
+  color: var(--h4-ink-2);
+}
+.ops-bank-moves-status {
+  margin: calc(4 * var(--ops-u)) 0 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--h4-font-mono);
+  font-size: calc(11 * var(--ops-u));
+  line-height: 1.45;
+  color: var(--h4-tel);
+}
+
 /* ---- BANK / deposit pool ---------------------------------------
    Unlike the venue lane above, this instrument always occupies its slot:
    a pre-endpoint deploy says UNAVAILABLE so nobody can read missing data as

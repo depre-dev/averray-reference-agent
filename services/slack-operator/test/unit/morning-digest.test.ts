@@ -129,6 +129,18 @@ describe("the message quotes; it does not opine", () => {
     expect(text).not.toContain("Bank:");
   });
 
+  test("bank-move lines are quoted verbatim and a failed read is not a zero", () => {
+    const line =
+      "+1.00 reserved · job pr-quanta-js-quanta-212 (git-patch-tests-v1) · 0x2e3c…91 regular (5 jobs, 3 settled, 1 rejected, 1 open, since Sep 28) · MCP, client \"claude-code\", stage claimed · claim expires 14:20Z, payout on merge";
+    const text = buildMorningDigest({ ...base, bankMoveLines: ["Recent bank moves:", line] });
+    expect(text).toContain(line);
+    expect(text).not.toMatch(/\b0 moves\b/);
+    const missing = buildMorningDigest({ ...base, bankMoveLines: ["Recent bank moves: not reported"] });
+    expect(missing).toContain("Recent bank moves: not reported");
+    expect(missing).not.toMatch(/\b0 moves\b/);
+    expect(missing.endsWith("Nothing is waiting on you.")).toBe(true);
+  });
+
   test("the public-record line is quoted verbatim when supplied", () => {
     const text = buildMorningDigest({
       ...base,

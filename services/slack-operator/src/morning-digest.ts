@@ -174,6 +174,13 @@ export interface MorningDigestInput {
   /** The bank lane's server-decided requests line, when a lane exists at all. */
   bankRequests?: { text: string; tone: string } | null;
   /**
+   * Attributed bank-move sentences. The heading is ours; every line after it
+   * is the backend's `line`. Absent on digests built before this read existed.
+   * A failed read is the single sentinel, and it does not change who the
+   * closing line says is waiting — an unread feed is not an incident.
+   */
+  bankMoveLines?: readonly string[];
+  /**
    * The public-record line from social-signal.ts, when configured. Decided
    * there, composed here — like the bank line.
    *
@@ -223,6 +230,9 @@ export function digestFactStrings(input: MorningDigestInput): string[] {
     if (probe.status !== "ok") facts.push(probe.detail);
   }
   if (input.bankRequests) facts.push(input.bankRequests.text);
+  if (input.bankMoveLines) {
+    for (const line of input.bankMoveLines) facts.push(line);
+  }
   // Included for the same reason as the bank line, and one of its own: the
   // degraded form ("could not read the public record") must survive a
   // rephrasing, or the digest reads as complete when it was not.
@@ -291,6 +301,9 @@ export function buildMorningDigest(input: MorningDigestInput): string {
     if (probe) lines.push(`${key}: ${probe.detail}`);
   }
   if (input.bankRequests) lines.push(`Bank: ${input.bankRequests.text}`);
+  if (input.bankMoveLines) {
+    for (const line of input.bankMoveLines) lines.push(line);
+  }
   if (input.socialSignal) lines.push(`Public record: ${input.socialSignal.text}`);
   if (input.socialQueue) lines.push(`Drafts: ${input.socialQueue.text}`);
 

@@ -2613,6 +2613,32 @@ describe("a payout shortfall pages even with every probe green", () => {
     expect(text).toContain("9 commits behind main");       // provenance
     expect(text).toContain("3 money-blocking signals");
   });
+
+  it("a money page quotes attributed bank-move lines and does not invent a zero", () => {
+    const line =
+      "+1.00 reserved · job pr-quanta-js-quanta-212 (git-patch-tests-v1) · 0x2e3c…91 regular (5 jobs, 3 settled, 1 rejected, 1 open, since Sep 28) · MCP, client \"claude-code\", stage claimed · claim expires 14:20Z, payout on merge";
+    const text = buildProductHealthAlert(
+      evaluateProductHealth([{ name: "signer_liquidity", status: "red", detail: "reward bank below floor" }]),
+      "http://board",
+      {
+        chainId: 420420419,
+        bankMoves: {
+          state: "live",
+          incomplete: false,
+          moves: [{ id: "reserve", at: "2026-10-13T14:00:00.000Z", line }],
+        },
+      } as never,
+    ).text;
+    expect(text).toContain(line);
+    expect(text).not.toMatch(/\b0 moves\b/);
+    const missing = buildProductHealthAlert(
+      evaluateProductHealth([{ name: "signer_liquidity", status: "red", detail: "reward bank below floor" }]),
+      "http://board",
+      { chainId: 420420419, bankMoves: { state: "unavailable", text: "not reported" } } as never,
+    ).text;
+    expect(missing).toContain("Recent bank moves: not reported");
+    expect(missing).not.toMatch(/\b0 moves\b/);
+  });
 });
 
 // ── THE 2026-08-06 INCIDENT, END TO END ─────────────────────────────────────

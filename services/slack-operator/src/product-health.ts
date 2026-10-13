@@ -66,6 +66,7 @@ import {
 } from "./receipt-signature-probe.js";
 import { bankFeedIsDisabled } from "./bank-feed.js";
 import { bankLaneView, BANK_FEED_DISABLED, type BankLaneView } from "./bank-lane.js";
+import { bankChangeText, type BankMovesReading } from "./bank-moves-feed.js";
 import { githubAuthorSurface, type GithubAuthorsSurface } from "./github-authors.js";
 import { createCrossCheckCache, type CrossCheckCache } from "./payout-crosscheck-cache.js";
 import {
@@ -3091,6 +3092,12 @@ export interface ProductHealthSnapshotBlocks {
    */
   bank?: BankBlock;
   /**
+   * Attributed reward-bank moves. Absent only on snapshots from a monitor that
+   * predates the read. `unavailable` is the sentinel `not reported`, never an
+   * empty list standing in for a failed read.
+   */
+  bankMoves?: BankMovesReading;
+  /**
    * Public MCP-front-door arrivals, or the explicit reason the feed could not
    * be read. The heartbeat always supplies one side; optional only for stored
    * snapshots and older monitor builds.
@@ -3698,7 +3705,14 @@ export function buildProductHealthAlert(
   const probeLines = ordered.map((p) => `• 🔴 ${p.name}: ${p.detail}`);
   const criticalLines = poolAlerts?.criticalLines ?? [];
   const positiveLines = poolAlerts?.positiveLines ?? [];
-  const lines = [...criticalLines, ...money.lines, ...probeLines, ...positiveLines];
+  const bankChange = bankChangeText(snapshot?.bankMoves);
+  const lines = [
+    ...criticalLines,
+    ...money.lines,
+    ...probeLines,
+    ...positiveLines,
+    ...(bankChange ?? []),
+  ];
   const criticalCount = evaluation.redProbes.length + money.lines.length + criticalLines.length;
   const count = criticalCount + positiveLines.length;
   const head = criticalCount === 0 && positiveLines.length > 0

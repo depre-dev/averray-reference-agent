@@ -36,6 +36,7 @@ import { GithubAuthorsPanel } from "./GithubAuthorsPanel.js";
 import { PillarStrip } from "./PillarStrip.js";
 import { SolvencyPanel } from "./SolvencyPanel.js";
 import { BankLane } from "./BankLane.js";
+import { BankMovesList } from "./BankMovesList.js";
 import { ArrivalAlertsStatus, ArrivalsPanel } from "./ArrivalsPanel.js";
 import { AdminDemandPanel } from "./AdminDemandPanel.js";
 import { DepositPoolTile } from "./DepositPoolTile.js";
@@ -281,6 +282,7 @@ export function OpsBoard({
               explicit because its unavailable state is itself a reading. */}
           <BankLane bank={health.bank} />
           <DepositPoolTile pool={health.depositPool} />
+          <BankMovesList reading={health.bankMoves} />
         </section>
 
         <PillarStrip probes={health.probes} history={health.history} nowMs={nowMs} />
