@@ -253,6 +253,49 @@ describe("bank move admin reads", () => {
     expect(JSON.stringify(result.reading)).not.toContain("2026-09-01");
   });
 
+  it("drops an old move that arrives fresh when the cursor is null and openedAt is still the original window", async () => {
+    const openedThen = openBankMovesCursor(Date.parse("2026-09-01T10:20:00.000Z"));
+    const kept = openBankMovesCursor(NOW, openedThen);
+    expect(kept.cursor).toBeNull();
+    expect(kept.openedAt).toBe("2026-08-31T10:20:00.000Z");
+
+    const staleLine =
+      "+1.00 reserved · job old (git-patch-tests-v1) · 0x2e3c…91 regular (5 jobs, 3 settled, 1 rejected, 1 open, since Aug 1) · MCP, client \"claude-code\", stage claimed · claim expires 10:20Z, payout on merge, human review pending";
+    const calls: string[] = [];
+    const result = await readBankMoves({
+      baseUrl: "https://api.example.test",
+      nowMs: NOW,
+      cursor: kept,
+      accumulated: [],
+      getSession: async () => ({ token: "ops-service-token" }),
+      fetchImpl: vi.fn(async (url: string | URL | Request) => {
+        calls.push(String(url));
+        return jsonResponse(page({
+          moves: [
+            { id: "old", at: "2026-09-01T10:20:00.000Z", line: staleLine },
+            { id: "reserve", at: "2026-10-13T14:00:00.000Z", line: EXAMPLE_LINE },
+          ],
+          returnedCount: 2,
+          nextCursor: null,
+          hasMore: false,
+        }));
+      }) as typeof fetch,
+    });
+
+    expect(calls[0]).toContain(`since=${encodeURIComponent(kept.openedAt)}`);
+    expect(result.cursor).toEqual({ cursor: null, openedAt: kept.openedAt });
+    expect(result.accumulated).toEqual([
+      { id: "reserve", at: "2026-10-13T14:00:00.000Z", line: EXAMPLE_LINE },
+    ]);
+    expect(result.reading).toEqual({
+      state: "live",
+      incomplete: false,
+      moves: [{ id: "reserve", at: "2026-10-13T14:00:00.000Z", line: EXAMPLE_LINE }],
+    });
+    expect(JSON.stringify(result)).not.toContain(staleLine);
+    expect(JSON.stringify(result)).not.toContain("2026-09-01");
+  });
+
   it("surfaces an incomplete history instead of a finished window", async () => {
     const session = async () => ({ token: "ops-service-token" });
     const emptyHistory = await readBankMoves({
