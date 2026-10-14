@@ -281,6 +281,8 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       AVERRAY_API_BASE_URL: ${AVERRAY_API_BASE_URL}
       AVERRAY_OPS_TOKEN: ${AVERRAY_OPS_TOKEN:-}
+      # full (default) quotes the backend bank-move line. redacted keeps amount, job, and tag.
+      BANK_MOVES_LINE: ${BANK_MOVES_LINE:-}
       AVERRAY_OPS_WALLET_PRIVATE_KEY: ${AVERRAY_OPS_WALLET_PRIVATE_KEY:-}
       AGENT_WALLET_PRIVATE_KEY: ${AGENT_WALLET_PRIVATE_KEY}
       HALT_FILE: ${HALT_FILE:-/data/HALT}

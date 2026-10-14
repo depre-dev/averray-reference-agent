@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { crossCheckLine } from "../../packages/monitor-ui/src/lib/monitor/ops-spec.js";
+import { defangUntrustedUrl, slackMrkdwnEscape } from "../../services/slack-operator/src/arrival-alerts.js";
 
 import {
   evaluateProductHealth,
@@ -2612,6 +2613,86 @@ describe("a payout shortfall pages even with every probe green", () => {
     expect(lines[3]).toContain("api_latency");             // latency last
     expect(text).toContain("9 commits behind main");       // provenance
     expect(text).toContain("3 money-blocking signals");
+  });
+
+  it("a money page quotes attributed bank-move lines and does not invent a zero", () => {
+    const line =
+      "+1.00 reserved · job pr-quanta-js-quanta-212 (git-patch-tests-v1) · 0x2e3c…91 regular (5 jobs, 3 settled, 1 rejected, 1 open, since Sep 28) · MCP, client \"claude-code\", stage claimed · claim expires 14:20Z, payout on merge";
+    const text = buildProductHealthAlert(
+      evaluateProductHealth([{ name: "signer_liquidity", status: "red", detail: "reward bank below floor" }]),
+      "http://board",
+      {
+        chainId: 420420419,
+        bankMoves: {
+          state: "live",
+          incomplete: false,
+          moves: [{ id: "reserve", at: "2026-10-13T14:00:00.000Z", line }],
+        },
+      } as never,
+    ).text;
+    expect(text).toContain(line);
+    expect(text).not.toMatch(/\b0 moves\b/);
+    const missing = buildProductHealthAlert(
+      evaluateProductHealth([{ name: "signer_liquidity", status: "red", detail: "reward bank below floor" }]),
+      "http://board",
+      { chainId: 420420419, bankMoves: { state: "unavailable", text: "not reported" } } as never,
+    ).text;
+    expect(missing).not.toContain("Recent bank moves");
+    expect(missing).not.toMatch(/\b0 moves\b/);
+  });
+
+  it("a non-money page does not quote bank moves, and a repeat quotes only newer lines", () => {
+    const line =
+      "+1.00 reserved · job pr-quanta-js-quanta-212 (git-patch-tests-v1) · 0x2e3c…91 regular (5 jobs, 3 settled, 1 rejected, 1 open, since Sep 28) · MCP, client \"claude-code\", stage claimed · claim expires 14:20Z, payout on merge";
+    const newer = "-1.00 settled · job pr-quanta-js-quanta-212 (git-patch-tests-v1) · 0x2e3c…91 regular (5 jobs, 3 settled, 1 rejected, 1 open, since Sep 28) · MCP, client \"claude-code\", stage settled · payout on merge";
+    const moves = {
+      state: "live" as const,
+      incomplete: false,
+      moves: [
+        { id: "settle", at: "2026-10-13T15:00:00.000Z", line: newer },
+        { id: "reserve", at: "2026-10-13T14:00:00.000Z", line },
+      ],
+    };
+    const latency = buildProductHealthAlert(
+      evaluateProductHealth([{ name: "api_latency", status: "red", detail: "2100ms" }]),
+      "http://board",
+      { chainId: 420420419, bankMoves: moves } as never,
+    ).text;
+    expect(latency).not.toContain(line);
+    expect(latency).not.toContain("Recent bank moves");
+
+    const previous = Date.parse("2026-10-13T14:30:00.000Z");
+    const repeat = buildProductHealthAlert(
+      evaluateProductHealth([{ name: "signer_liquidity", status: "red", detail: "reward bank below floor" }]),
+      "http://board",
+      { chainId: 420420419, bankMoves: moves } as never,
+      undefined,
+      previous,
+    ).text;
+    expect(repeat).toContain(newer);
+    expect(repeat).not.toContain(line);
+  });
+
+  it("escapes a worker client name before the Slack text is posted", () => {
+    const payload = "<!channel> <https://evil.example|top up bank>";
+    const line = `+1.00 reserved · job pr-quanta-js-quanta-212 · MCP, client "${payload}", stage claimed`;
+    const text = buildProductHealthAlert(
+      evaluateProductHealth([{ name: "signer_liquidity", status: "red", detail: "reward bank below floor" }]),
+      "http://board",
+      {
+        chainId: 420420419,
+        bankMoves: {
+          state: "live",
+          incomplete: false,
+          moves: [{ id: "reserve", at: "2026-10-13T14:00:00.000Z", line }],
+        },
+      } as never,
+    ).text;
+    const quoted = slackMrkdwnEscape(defangUntrustedUrl(`2026-10-13 14:00Z · ${line}`));
+    expect(text).toContain(quoted);
+    expect(text).not.toContain(payload);
+    expect(text).not.toContain("<!channel>");
+    expect(text).not.toContain("<https://evil.example|top up bank>");
   });
 });
 

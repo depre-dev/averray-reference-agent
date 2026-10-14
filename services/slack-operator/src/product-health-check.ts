@@ -25,6 +25,16 @@ import {
   type QuietHours,
 } from "./alert-bridge.js";
 import { readArrivalsFeed } from "./arrivals-feed.js";
+import {
+  bankChangeText,
+  bankMovesLineMode,
+  openBankMovesCursor,
+  projectBankMovesReading,
+  readBankMoves,
+  unavailableBankMoves,
+  type BankMoveLine,
+  type BankMovesCursorState,
+} from "./bank-moves-feed.js";
 import { recordBuzzDelivery, type BuzzDeliveryState } from "./buzz-delivery.js";
 import { publishNarration, readBuzzConfig, type BuzzConfig } from "./buzz-client.js";
 import { depositPoolUrlFromBankFeed, readDepositPoolFeed } from "./deposit-pool-feed.js";
@@ -152,6 +162,10 @@ export interface ProductHealthCheckState {
   buzzDeliveryState: BuzzDeliveryState;
   morningDigestProblemLogged: boolean;
   morningDigestSentLocalDate: string | null;
+  /** Exclusive cursor for GET /admin/ops/bank-moves. Absent until the first tick. */
+  bankMovesCursor?: BankMovesCursorState;
+  /** Lines already accepted. A failed poll does not publish these as current. */
+  bankMovesAccumulated?: BankMoveLine[];
 }
 
 export function createProductHealthCheckState(): ProductHealthCheckState {
@@ -339,7 +353,10 @@ async function runTickBody(input: {
   const activeRpc = remediationConfig.endpoints[state.rpcRemediationState.activeIndex] ?? phConfig.rpcUrl;
   const arrivalPaging = arrivalAlertsSlackEnabled(env);
   const readerTimeout = { timeoutMs: FEED_READER_BACKSTOP_MS };
-  const [collection, arrivals, depositPool, adminAuthors, arrivalAlerts] = await Promise.all([
+  const bankMovesCursor = openBankMovesCursor(Date.now(), state.bankMovesCursor);
+  state.bankMovesCursor = bankMovesCursor;
+  const bankMovesAccumulated = state.bankMovesAccumulated ?? [];
+  const [collection, arrivals, depositPool, adminAuthors, arrivalAlerts, bankMoves] = await Promise.all([
     collectProductHealthProbes({ ...phConfig, signerAddress, rpcUrl: activeRpc }, fetchImpl, {
       ...(state.chainAdvance ? { advance: state.chainAdvance } : {}),
       nowMs: Date.now(),
@@ -398,13 +415,31 @@ async function runTickBody(input: {
         ageMs: 0,
       }),
     }),
+    runWithDeadline({
+      name: "bank_moves",
+      pending: deps.gate,
+      log,
+      run: () => readBankMoves({
+        baseUrl: phConfig.apiBaseUrl,
+        getSession,
+        fetchImpl,
+        cursor: bankMovesCursor,
+        accumulated: bankMovesAccumulated,
+        nowMs: Date.now(),
+        ...readerTimeout,
+      }),
+      onTimeout: () => unavailableBankMoves(bankMovesCursor, bankMovesAccumulated),
+    }),
   ]);
   if (!ctx.live()) return;
   state.chainAdvance = collection.chainAdvance;
   state.transportRun = collection.transportRun;
+  state.bankMovesCursor = bankMoves.cursor;
+  state.bankMovesAccumulated = bankMoves.accumulated;
   const servedWarning = collection.snapshot.githubAuthors?.warning ?? adminAuthors.warning;
   state.snapshot = {
     ...collection.snapshot,
+    bankMoves: projectBankMovesReading(bankMoves.reading, bankMovesLineMode(env)),
     arrivals,
     depositPool,
     githubAuthors: {
@@ -719,6 +754,7 @@ async function runTickBody(input: {
       verdictTone: digestVerdict.tone,
       probes: result.evaluation.probes,
       bankRequests: state.snapshot?.bank?.lane?.requests ?? null,
+      bankMoveLines: bankChangeText(state.snapshot?.bankMoves) ?? undefined,
       socialSignal: digestSocialSignal,
       socialQueue: digestSocialQueue,
     };

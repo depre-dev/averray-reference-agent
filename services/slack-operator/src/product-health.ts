@@ -66,6 +66,7 @@ import {
 } from "./receipt-signature-probe.js";
 import { bankFeedIsDisabled } from "./bank-feed.js";
 import { bankLaneView, BANK_FEED_DISABLED, type BankLaneView } from "./bank-lane.js";
+import { bankMovesAlertLines, type BankMovesReading } from "./bank-moves-feed.js";
 import { githubAuthorSurface, type GithubAuthorsSurface } from "./github-authors.js";
 import { createCrossCheckCache, type CrossCheckCache } from "./payout-crosscheck-cache.js";
 import {
@@ -3091,6 +3092,12 @@ export interface ProductHealthSnapshotBlocks {
    */
   bank?: BankBlock;
   /**
+   * Attributed reward-bank moves. Absent only on snapshots from a monitor that
+   * predates the read. `unavailable` is the sentinel `not reported`, never an
+   * empty list standing in for a failed read.
+   */
+  bankMoves?: BankMovesReading;
+  /**
    * Public MCP-front-door arrivals, or the explicit reason the feed could not
    * be read. The heartbeat always supplies one side; optional only for stored
    * snapshots and older monitor builds.
@@ -3687,6 +3694,7 @@ export function buildProductHealthAlert(
   boardUrl: string,
   snapshot?: ProductHealthSnapshotBlocks,
   poolAlerts?: Pick<DepositPoolAlertDecision, "criticalLines" | "positiveLines">,
+  previousAlertAtMs = 0,
 ): AlertPayload {
   // Money first. A red api_latency and a red money_path used to render
   // identically, so the thing that costs money could sit below the thing that
@@ -3698,7 +3706,20 @@ export function buildProductHealthAlert(
   const probeLines = ordered.map((p) => `• 🔴 ${p.name}: ${p.detail}`);
   const criticalLines = poolAlerts?.criticalLines ?? [];
   const positiveLines = poolAlerts?.positiveLines ?? [];
-  const lines = [...criticalLines, ...money.lines, ...probeLines, ...positiveLines];
+  const bankChange = bankMovesAlertLines({
+    reading: snapshot?.bankMoves,
+    redProbeNames: evaluation.redProbes.map((probe) => probe.name),
+    moneyKey: money.key,
+    poolCritical: (poolAlerts?.criticalLines.length ?? 0) > 0,
+    previousAlertAtMs,
+  });
+  const lines = [
+    ...criticalLines,
+    ...money.lines,
+    ...probeLines,
+    ...positiveLines,
+    ...(bankChange ?? []),
+  ];
   const criticalCount = evaluation.redProbes.length + money.lines.length + criticalLines.length;
   const count = criticalCount + positiveLines.length;
   const head = criticalCount === 0 && positiveLines.length > 0
@@ -3827,6 +3848,7 @@ export async function runProductHealthOnce(deps: ProductHealthDeps): Promise<Pro
   const probes = await deps.runProbes();
   const evaluation = evaluateProductHealth(probes);
   const snapshot = deps.getSnapshot?.();
+  const previousAlertAtMs = deps.getAlertState().lastAlertAtMs;
   const { alert, state, poolAlerts } = decideProductHealthAlert({
     evaluation,
     state: deps.getAlertState(),
@@ -3837,7 +3859,13 @@ export async function runProductHealthOnce(deps: ProductHealthDeps): Promise<Pro
   deps.setAlertState(state);
   let alerted = false;
   if (alert) {
-    await deps.alert(buildProductHealthAlert(evaluation, deps.boardUrl, snapshot, poolAlerts));
+    await deps.alert(buildProductHealthAlert(
+      evaluation,
+      deps.boardUrl,
+      snapshot,
+      poolAlerts,
+      previousAlertAtMs,
+    ));
     alerted = true;
   }
   return { status: evaluation.status, evaluation, alerted };

@@ -8,6 +8,7 @@
 //   OPS_FIXTURE_POPULATED  every block wired → the full filled look
 //   OPS_FIXTURE_RED        a mainnet page-worthy incident → soft-banner / auto-flip
 
+import { BANK_MOVE_EXAMPLE_LINE } from "./bank-moves.js";
 import type {
   ArrivalOperatorDoorRow,
   ArrivalStage,
@@ -328,6 +329,15 @@ export const OPS_FIXTURE_NOMINAL: ProductHealth = {
       tone: "degraded" as const,
     },
   },
+  bankMoves: {
+    state: "live" as const,
+    incomplete: false,
+    moves: [{
+      id: "reserve",
+      at: "2026-10-13T14:00:00.000Z",
+      line: BANK_MOVE_EXAMPLE_LINE,
+    }],
+  },
   enabled: true,
   at: FIXTURE_NOW - 2_000,
   status: "degraded",
@@ -496,6 +506,28 @@ export const OPS_FIXTURE_STRESS: ProductHealth = {
       },
     },
   },
+  bankMoves: {
+    state: "live" as const,
+    incomplete: true,
+    moves: [
+      {
+        id: "stress-long",
+        at: "2026-10-13T15:00:00.000Z",
+        line:
+          "+1.00 reserved · job pr-quanta-js-quanta-212-with-an-extremely-long-unbroken-identifier-that-must-wrap-inside-the-bank-panel-and-not-paint-over-the-deposit-pool (git-patch-tests-v1) · 0x2e3c…91 regular (5 jobs, 3 settled, 1 rejected, 1 open, since Sep 28) · MCP, client \"claude-code\", stage claimed · claim expires 14:20Z, payout on merge",
+      },
+      {
+        id: "reserve",
+        at: "2026-10-13T14:00:00.000Z",
+        line: BANK_MOVE_EXAMPLE_LINE,
+      },
+      {
+        id: "refund",
+        at: "2026-10-13T13:00:00.000Z",
+        line: "-1.00 refunded · job not reported · 0x062d…8a self · REST, client \"averray-cli\", stage not reported · human review pending",
+      },
+    ],
+  },
 };
 
 /**
@@ -516,6 +548,7 @@ export const OPS_FIXTURE_UNVERIFIED: ProductHealth = {
       window: { status: "unknown", detail: "block time not sampled", blockSeconds: null, spanHours: null },
     },
   },
+  bankMoves: { state: "unavailable" as const, text: "not reported" as const },
 };
 
 // ── ARRIVALS, shaped like the live board on 2026-08-17 ──────────────────────

@@ -8,6 +8,7 @@
 // placeholders whenever a field is absent, so nothing is ever fake-green.
 
 import type { OpsVerdict } from "@avg/schemas/ops-verdict";
+import type { BankMovesReading } from "./bank-moves.js";
 
 export type ProbeStatus = "ok" | "degraded" | "red";
 export type ProductHealthStatus = "healthy" | "degraded" | "red" | "unknown";
@@ -769,6 +770,12 @@ export interface ProductHealth {
    * not render at all, and says nothing. Only `unavailable` is a fault.
    */
   bank?: BankBlock;
+  /**
+   * Attributed reward-bank moves from GET /admin/ops/bank-moves.
+   * Absent on a monitor that has not taken the read yet — the panel still
+   * says `not reported`, never an empty success.
+   */
+  bankMoves?: BankMovesReading;
   /** Always explicit on Packet 5b monitors; absent only on older snapshots. */
   depositPool?: DepositPoolBlock;
   /** Public MCP-front-door arrivals, or why that feed could not be read. */
