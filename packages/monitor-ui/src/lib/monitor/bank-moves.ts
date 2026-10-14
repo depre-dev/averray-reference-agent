@@ -26,6 +26,19 @@ export type BankMovesView =
   | { kind: "none" }
   | { kind: "lines"; lines: BankMoveLine[]; withheld: number; incomplete: boolean };
 
+/** Same UTC stamp the digest prints. The backend line is not rewritten. */
+export function bankMoveStamp(at: string): string {
+  const parsed = Date.parse(at);
+  if (!Number.isFinite(parsed)) return "time not reported";
+  const date = new Date(parsed);
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const hour = String(date.getUTCHours()).padStart(2, "0");
+  const minute = String(date.getUTCMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day} ${hour}:${minute}Z`;
+}
+
 /** Newest first, bounded. An incomplete empty read stays `not reported`. */
 export function bankMovesView(reading: BankMovesReading | undefined): BankMovesView {
   if (!reading || reading.state !== "live") return { kind: "not-reported" };

@@ -425,6 +425,7 @@ async function runTickBody(input: {
         fetchImpl,
         cursor: bankMovesCursor,
         accumulated: bankMovesAccumulated,
+        nowMs: Date.now(),
         ...readerTimeout,
       }),
       onTimeout: () => unavailableBankMoves(bankMovesCursor, bankMovesAccumulated),

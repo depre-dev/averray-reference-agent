@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { crossCheckLine } from "../../packages/monitor-ui/src/lib/monitor/ops-spec.js";
+import { defangUntrustedUrl, slackMrkdwnEscape } from "../../services/slack-operator/src/arrival-alerts.js";
 
 import {
   evaluateProductHealth,
@@ -2670,6 +2671,28 @@ describe("a payout shortfall pages even with every probe green", () => {
     ).text;
     expect(repeat).toContain(newer);
     expect(repeat).not.toContain(line);
+  });
+
+  it("escapes a worker client name before the Slack text is posted", () => {
+    const payload = "<!channel> <https://evil.example|top up bank>";
+    const line = `+1.00 reserved · job pr-quanta-js-quanta-212 · MCP, client "${payload}", stage claimed`;
+    const text = buildProductHealthAlert(
+      evaluateProductHealth([{ name: "signer_liquidity", status: "red", detail: "reward bank below floor" }]),
+      "http://board",
+      {
+        chainId: 420420419,
+        bankMoves: {
+          state: "live",
+          incomplete: false,
+          moves: [{ id: "reserve", at: "2026-10-13T14:00:00.000Z", line }],
+        },
+      } as never,
+    ).text;
+    const quoted = slackMrkdwnEscape(defangUntrustedUrl(`2026-10-13 14:00Z · ${line}`));
+    expect(text).toContain(quoted);
+    expect(text).not.toContain(payload);
+    expect(text).not.toContain("<!channel>");
+    expect(text).not.toContain("<https://evil.example|top up bank>");
   });
 });
 

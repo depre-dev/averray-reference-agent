@@ -9,6 +9,7 @@
 // A missing route, a 403, a timeout, a schema miss, or a payload that claims
 // network identifiers is `not reported`. That is never rendered as zero moves.
 
+import { defangUntrustedUrl, slackMrkdwnEscape } from "./arrival-alerts.js";
 import { raceDeadline } from "./inflight-attempt.js";
 
 export const BANK_MOVES_SCHEMA = "averray.admin.bank-moves.v1";
@@ -59,9 +60,9 @@ export interface BankMovesPollResult {
 }
 
 /**
- * A cursor is a move id. The unmeasured sentinel, a blank, and null are not
- * ids. A quiet backend tick currently returns `nextCursor: "not reported"`;
- * sending that back as `since` replays old moves.
+ * A cursor is a move id. Blank and null are not ids. #1492 returns null on a
+ * quiet tick. An older build returned the sentinel "not reported"; sending
+ * either back as `since` replays old moves, so both stay off the next request.
  */
 export function usableBankMovesCursor(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null;
@@ -119,12 +120,31 @@ export function unavailableBankMoves(
   };
 }
 
+/** UTC stamp for a move. The backend line stays intact beside it. */
+export function bankMoveStamp(at: string): string {
+  const parsed = Date.parse(at);
+  if (!Number.isFinite(parsed)) return "time not reported";
+  const date = new Date(parsed);
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const hour = String(date.getUTCHours()).padStart(2, "0");
+  const minute = String(date.getUTCMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day} ${hour}:${minute}Z`;
+}
+
+export function stampedBankMoveLine(move: BankMoveLine): string {
+  return `${bankMoveStamp(move.at)} · ${move.line}`;
+}
+
 /**
- * Sentences for the morning digest and any money page already being sent.
+ * Sentences for the morning digest.
  *
- * Null when this monitor has no reading yet (older snapshots). A failed read
- * is the sentinel, not an empty list. Lines after the heading are the
- * backend's own text.
+ * Null when this monitor has no reading yet. A failed read, and an empty
+ * incomplete read, are the sentinel. A complete empty window says so without
+ * a count. Each quoted row is the move's UTC time and then the backend line.
+ * These rows are not Slack-escaped: the Buzz digest and the LLM composer
+ * receive them as written.
  */
 export function bankChangeText(reading: BankMovesReading | undefined): string[] | null {
   if (!reading) return null;
@@ -132,7 +152,7 @@ export function bankChangeText(reading: BankMovesReading | undefined): string[] 
     return ["Recent bank moves: not reported"];
   }
   if (reading.moves.length === 0) return ["Recent bank moves: none in window"];
-  const quoted = reading.moves.slice(0, BANK_MOVES_QUOTE_LIMIT).map((move) => move.line);
+  const quoted = reading.moves.slice(0, BANK_MOVES_QUOTE_LIMIT).map(stampedBankMoveLine);
   const lines = ["Recent bank moves:", ...quoted];
   if (reading.incomplete || reading.moves.length > BANK_MOVES_QUOTE_LIMIT) {
     lines.push("remainder not reported");
@@ -166,7 +186,10 @@ export function bankMovesAlertLines(input: {
     return Number.isFinite(at) && at > input.previousAlertAtMs;
   });
   if (newer.length === 0) return null;
-  const quoted = newer.slice(0, BANK_MOVES_QUOTE_LIMIT).map((move) => move.line);
+  // Slack posts this text raw. Escape every quoted line. The digest path does not.
+  const quoted = newer.slice(0, BANK_MOVES_QUOTE_LIMIT).map((move) =>
+    slackMrkdwnEscape(defangUntrustedUrl(stampedBankMoveLine(move))),
+  );
   const lines = ["Recent bank moves:", ...quoted];
   if (newer.length > BANK_MOVES_QUOTE_LIMIT) lines.push("remainder not reported");
   return lines;
@@ -178,12 +201,15 @@ export async function readBankMoves(input: {
   fetchImpl?: typeof fetch;
   cursor: BankMovesCursorState;
   accumulated?: readonly BankMoveLine[];
+  /** Drops accumulated lines older than the lookback. Defaults to the clock. */
+  nowMs?: number;
   timeoutMs?: number;
   limit?: number;
   maxPages?: number;
   retain?: number;
 }): Promise<BankMovesPollResult> {
-  const accumulated = input.accumulated?.slice() ?? [];
+  const nowMs = input.nowMs ?? Date.now();
+  const accumulated = withinLookback(input.accumulated ?? [], nowMs);
   const fail = () => unavailableBankMoves(input.cursor, accumulated);
   const baseUrl = input.baseUrl?.trim();
   if (!baseUrl) return fail();
@@ -233,7 +259,7 @@ export async function readBankMoves(input: {
     if (pages >= maxPages) incomplete = true;
   }
 
-  const merged = mergeMoves(accumulated, incoming, retain);
+  const merged = withinLookback(mergeMoves(accumulated, incoming, retain), nowMs);
   const nextCursor = { cursor, openedAt: input.cursor.openedAt };
   if (merged.length === 0 && incomplete) {
     return {
@@ -322,6 +348,14 @@ function parseMove(value: unknown): BankMoveLine | null {
   if (typeof at !== "string" || Number.isNaN(Date.parse(at))) return null;
   if (typeof line !== "string" || line.length === 0) return null;
   return { id, at, line };
+}
+
+function withinLookback(moves: readonly BankMoveLine[], nowMs: number): BankMoveLine[] {
+  const cutoff = nowMs - BANK_MOVES_LOOKBACK_MS;
+  return moves.filter((move) => {
+    const at = Date.parse(move.at);
+    return Number.isFinite(at) && at >= cutoff;
+  });
 }
 
 function mergeMoves(

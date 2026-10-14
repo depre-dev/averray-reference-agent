@@ -2166,14 +2166,24 @@ body,
   min-width: 0;
 }
 .ops-bank-move {
+  display: flex;
+  flex-direction: column;
+  gap: calc(2 * var(--ops-u));
   min-width: 0;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  white-space: normal;
   font-family: var(--h4-font-mono);
   font-size: calc(11 * var(--ops-u));
   line-height: 1.45;
   color: var(--h4-ink-2);
+}
+.ops-bank-move time {
+  font: inherit;
+  color: var(--h4-tel);
+}
+.ops-bank-move-line {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
 }
 .ops-bank-moves-status {
   margin: calc(4 * var(--ops-u)) 0 0;

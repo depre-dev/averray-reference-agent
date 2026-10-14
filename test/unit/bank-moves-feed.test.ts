@@ -54,6 +54,7 @@ describe("bank move admin reads", () => {
     const seen: Array<{ url: string; authorization: string }> = [];
     const result = await readBankMoves({
       baseUrl: "https://api.example.test/",
+      nowMs: NOW,
       cursor: cursor(),
       getSession: async () => ({ token: "ops-service-token" }),
       fetchImpl: vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
@@ -78,7 +79,7 @@ describe("bank move admin reads", () => {
     expect(JSON.stringify(result)).not.toContain("0x2e3c000000000000000000000000000000000091");
     expect(bankChangeText(result.reading)).toEqual([
       "Recent bank moves:",
-      EXAMPLE_LINE,
+      `2026-10-13 14:00Z · ${EXAMPLE_LINE}`,
     ]);
   });
 
@@ -107,6 +108,7 @@ describe("bank move admin reads", () => {
 
     const first = await readBankMoves({
       baseUrl: "https://api.example.test",
+      nowMs: NOW,
       cursor: cursor(),
       getSession: async () => ({ token: "ops-service-token" }),
       fetchImpl,
@@ -117,6 +119,7 @@ describe("bank move admin reads", () => {
 
     const second = await readBankMoves({
       baseUrl: "https://api.example.test",
+      nowMs: NOW,
       cursor: first.cursor,
       accumulated: first.accumulated,
       getSession: async () => ({ token: "ops-service-token" }),
@@ -137,7 +140,7 @@ describe("bank move admin reads", () => {
         },
       ],
     });
-    expect(bankChangeText(second.reading)?.[1]).toBe(EXAMPLE_LINE);
+    expect(bankChangeText(second.reading)?.[1]).toBe(`2026-10-13 14:00Z · ${EXAMPLE_LINE}`);
   });
 
   it("a quiet tick's nextCursor of 'not reported' is not the next since", async () => {
@@ -158,6 +161,7 @@ describe("bank move admin reads", () => {
 
     const quiet = await readBankMoves({
       baseUrl: "https://api.example.test",
+      nowMs: NOW,
       cursor: { cursor: "kept-move", openedAt: "2026-10-12T14:00:00.000Z" },
       getSession: session,
       fetchImpl,
@@ -167,6 +171,7 @@ describe("bank move admin reads", () => {
 
     const normal = await readBankMoves({
       baseUrl: "https://api.example.test",
+      nowMs: NOW,
       cursor: quiet.cursor,
       accumulated: quiet.accumulated,
       getSession: session,
@@ -183,6 +188,7 @@ describe("bank move admin reads", () => {
     expect(opened.cursor).toBeNull();
     const quietWindow = await readBankMoves({
       baseUrl: "https://api.example.test",
+      nowMs: NOW,
       cursor: opened,
       getSession: session,
       fetchImpl,
@@ -191,6 +197,7 @@ describe("bank move admin reads", () => {
     expect(calls[2]).toContain("since=2026-10-12T14%3A00%3A00.000Z");
     const afterWindow = await readBankMoves({
       baseUrl: "https://api.example.test",
+      nowMs: NOW,
       cursor: quietWindow.cursor,
       getSession: session,
       fetchImpl,
@@ -223,10 +230,76 @@ describe("bank move admin reads", () => {
     expect(projectBankMovesReading(reading, "redacted").moves[0]?.line).toBe(redacted);
   });
 
+  it("drops a line older than the lookback instead of calling it recent", async () => {
+    const staleLine =
+      "+1.00 reserved · job old (git-patch-tests-v1) · 0x2e3c…91 regular (5 jobs, 3 settled, 1 rejected, 1 open, since Aug 1) · MCP, client \"claude-code\", stage claimed · claim expires 10:20Z, payout on merge, human review pending";
+    const result = await readBankMoves({
+      baseUrl: "https://api.example.test",
+      nowMs: NOW,
+      cursor: { cursor: "old", openedAt: "2026-09-01T00:00:00.000Z" },
+      accumulated: [{ id: "old", at: "2026-09-01T10:20:00.000Z", line: staleLine }],
+      getSession: async () => ({ token: "ops-service-token" }),
+      fetchImpl: vi.fn(async () => jsonResponse(page({
+        moves: [],
+        returnedCount: 0,
+        nextCursor: null,
+        hasMore: false,
+      }))) as typeof fetch,
+    });
+    expect(result.accumulated).toEqual([]);
+    expect(result.reading).toEqual({ state: "live", moves: [], incomplete: false });
+    expect(bankChangeText(result.reading)).toEqual(["Recent bank moves: none in window"]);
+    expect(JSON.stringify(result.reading)).not.toContain("claim expires 10:20Z");
+    expect(JSON.stringify(result.reading)).not.toContain("2026-09-01");
+  });
+
+  it("surfaces an incomplete history instead of a finished window", async () => {
+    const session = async () => ({ token: "ops-service-token" });
+    const emptyHistory = await readBankMoves({
+      baseUrl: "https://api.example.test",
+      nowMs: NOW,
+      cursor: cursor(),
+      getSession: session,
+      fetchImpl: vi.fn(async () => jsonResponse(page({
+        moves: [],
+        returnedCount: 0,
+        nextCursor: null,
+        history: { complete: false, eventLogBounded: false },
+      }))) as typeof fetch,
+    });
+    expect(emptyHistory.reading).toEqual({ state: "unavailable", text: "not reported" });
+    expect(bankChangeText(emptyHistory.reading)).toEqual(["Recent bank moves: not reported"]);
+
+    const bounded = await readBankMoves({
+      baseUrl: "https://api.example.test",
+      nowMs: NOW,
+      cursor: cursor(),
+      getSession: session,
+      fetchImpl: vi.fn(async () => jsonResponse(page({
+        history: { complete: true, eventLogBounded: true },
+      }))) as typeof fetch,
+    });
+    expect(bounded.reading).toMatchObject({ state: "live", incomplete: true });
+    expect(bankChangeText(bounded.reading)).toContain("remainder not reported");
+    expect(bankChangeText(bounded.reading)?.[1]).toBe(`2026-10-13 14:00Z · ${EXAMPLE_LINE}`);
+
+    const partial = await readBankMoves({
+      baseUrl: "https://api.example.test",
+      nowMs: NOW,
+      cursor: cursor(),
+      getSession: session,
+      fetchImpl: vi.fn(async () => jsonResponse(page({
+        history: { complete: false, eventLogBounded: false },
+      }))) as typeof fetch,
+    });
+    expect(partial.reading).toMatchObject({ state: "live", incomplete: true });
+  });
+
   it.each([404, 403, 401])("HTTP %s is not reported and is not an empty success", async (status) => {
     const previous = [{ id: "kept", at: "2026-10-13T12:00:00.000Z", line: EXAMPLE_LINE }];
     const result = await readBankMoves({
       baseUrl: "https://api.example.test",
+      nowMs: NOW,
       cursor: { cursor: "kept", openedAt: "2026-10-12T14:00:00.000Z" },
       accumulated: previous,
       getSession: async () => ({ token: "ops-service-token" }),
@@ -243,6 +316,7 @@ describe("bank move admin reads", () => {
   it("a timeout is not reported", async () => {
     const result = await readBankMoves({
       baseUrl: "https://api.example.test",
+      nowMs: NOW,
       cursor: cursor(),
       getSession: async () => ({ token: "ops-service-token" }),
       timeoutMs: 20,
@@ -254,6 +328,7 @@ describe("bank move admin reads", () => {
   it("a network-identifier payload is refused", async () => {
     const result = await readBankMoves({
       baseUrl: "https://api.example.test",
+      nowMs: NOW,
       cursor: cursor(),
       getSession: async () => ({ token: "ops-service-token" }),
       fetchImpl: vi.fn(async () => jsonResponse(page({
@@ -268,6 +343,7 @@ describe("bank move admin reads", () => {
   it("an ip field on a move is refused without quoting the line", async () => {
     const result = await readBankMoves({
       baseUrl: "https://api.example.test",
+      nowMs: NOW,
       cursor: cursor(),
       getSession: async () => ({ token: "ops-service-token" }),
       fetchImpl: vi.fn(async () => jsonResponse(page({
@@ -287,6 +363,7 @@ describe("bank move admin reads", () => {
   it("an unresolved bank account is not reported, even when moves were attached", async () => {
     const result = await readBankMoves({
       baseUrl: "https://api.example.test",
+      nowMs: NOW,
       cursor: cursor(),
       getSession: async () => ({ token: "ops-service-token" }),
       fetchImpl: vi.fn(async () => jsonResponse(page({
@@ -300,6 +377,7 @@ describe("bank move admin reads", () => {
   it("a measured empty window is not a zero", async () => {
     const result = await readBankMoves({
       baseUrl: "https://api.example.test",
+      nowMs: NOW,
       cursor: cursor(),
       getSession: async () => ({ token: "ops-service-token" }),
       fetchImpl: vi.fn(async () => jsonResponse(page({
@@ -316,6 +394,7 @@ describe("bank move admin reads", () => {
   it("a gap with no lines stays not reported", async () => {
     const result = await readBankMoves({
       baseUrl: "https://api.example.test",
+      nowMs: NOW,
       cursor: cursor(),
       getSession: async () => ({ token: "ops-service-token" }),
       fetchImpl: vi.fn(async () => jsonResponse(page({ moves: [], gap: true, returnedCount: 0 }))) as typeof fetch,

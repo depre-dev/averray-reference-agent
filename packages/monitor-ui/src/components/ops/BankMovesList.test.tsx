@@ -36,12 +36,16 @@ describe("recent bank moves quote the backend line", () => {
         }}
       />,
     );
-    const lines = getAllByTestId("ops-bank-move").map((node) => node.textContent);
+    const lines = getAllByTestId("ops-bank-move-line").map((node) => node.textContent);
     expect(lines[0]).toBe(BANK_MOVE_EXAMPLE_LINE);
     expect(lines[0]).toMatchInlineSnapshot(
       `"+1.00 reserved · job pr-quanta-js-quanta-212 (git-patch-tests-v1) · 0x2e3c…91 regular (5 jobs, 3 settled, 1 rejected, 1 open, since Sep 28) · MCP, client "claude-code", stage claimed · claim expires 14:20Z, payout on merge"`,
     );
     expect(lines[1]).toBe(older.line);
+    expect(getAllByTestId("ops-bank-move-time").map((node) => node.textContent)).toEqual([
+      "2026-10-13 14:00Z",
+      "2026-10-13 13:00Z",
+    ]);
   });
 
   test("a missing or failed read says not reported and never looks like zero", () => {
@@ -54,6 +58,15 @@ describe("recent bank moves quote the backend line", () => {
     const failed = render(<BankMovesList reading={{ state: "unavailable", text: "not reported" }} />);
     expect(failed.getByTestId("ops-bank-moves-status").textContent).toBe("not reported");
     expect(failed.getByTestId("ops-bank-moves").textContent).not.toMatch(/0 moves|empty/i);
+  });
+
+  test("an empty incomplete read is not reported", () => {
+    const { getByTestId, queryByTestId } = render(
+      <BankMovesList reading={{ state: "live", incomplete: true, moves: [] }} />,
+    );
+    expect(getByTestId("ops-bank-moves-status").textContent).toBe("not reported");
+    expect(queryByTestId("ops-bank-move")).toBeNull();
+    expect(getByTestId("ops-bank-moves").textContent).not.toContain("none");
   });
 
   test("a measured empty window is not a zero and not the failure sentinel", () => {
@@ -74,7 +87,7 @@ describe("recent bank moves quote the backend line", () => {
     const { getAllByTestId, getByTestId } = render(
       <BankMovesList reading={{ state: "live", incomplete: false, moves }} />,
     );
-    const rendered = getAllByTestId("ops-bank-move");
+    const rendered = getAllByTestId("ops-bank-move-line");
     expect(rendered).toHaveLength(BANK_MOVES_VISIBLE_LIMIT);
     expect(rendered[0]?.textContent).toContain(`job ${BANK_MOVES_VISIBLE_LIMIT + 1}`);
     expect(getByTestId("ops-bank-moves-withheld").textContent).toBe("2 older moves withheld");
@@ -99,6 +112,7 @@ describe("the venue lane keeps its rows when moves are unreadable", () => {
       <OpsBoard health={OPS_FIXTURE_NOMINAL} nowMs={(OPS_FIXTURE_NOMINAL.at ?? FIXTURE_NOW) + 2_000} />,
     );
     expect(getByTestId("ops-bank-requests").textContent).toContain("no requests in flight");
-    expect(getAllByTestId("ops-bank-move").map((node) => node.textContent)).toContain(BANK_MOVE_EXAMPLE_LINE);
+    expect(getAllByTestId("ops-bank-move-line").map((node) => node.textContent)).toContain(BANK_MOVE_EXAMPLE_LINE);
+    expect(getAllByTestId("ops-bank-move-time")[0]?.textContent).toBe("2026-10-13 14:00Z");
   });
 });

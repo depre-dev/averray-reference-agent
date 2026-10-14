@@ -4,7 +4,7 @@
 // either of those: a lane that was never wired still renders nothing, and a
 // failed move read says `not reported` instead of borrowing the lane's rows.
 
-import { bankMovesView, type BankMovesReading } from "../../lib/monitor/bank-moves.js";
+import { bankMoveStamp, bankMovesView, type BankMovesReading } from "../../lib/monitor/bank-moves.js";
 
 export function BankMovesList({ reading }: { reading: BankMovesReading | undefined }) {
   const view = bankMovesView(reading);
@@ -23,7 +23,10 @@ export function BankMovesList({ reading }: { reading: BankMovesReading | undefin
       ) : (
         <ol className="ops-bank-moves-list">
           {view.lines.map((move) => (
-            <li key={move.id} className="ops-bank-move" data-testid="ops-bank-move">{move.line}</li>
+            <li key={move.id} className="ops-bank-move" data-testid="ops-bank-move">
+              <time dateTime={move.at} data-testid="ops-bank-move-time">{bankMoveStamp(move.at)}</time>
+              <span className="ops-bank-move-line" data-testid="ops-bank-move-line">{move.line}</span>
+            </li>
           ))}
         </ol>
       )}
