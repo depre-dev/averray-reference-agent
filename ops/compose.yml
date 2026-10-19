@@ -1,5 +1,13 @@
+# json-file log cap shared by every service in this file (anchors do not cross files).
+x-logging: &json-file-log-cap
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
+    logging: *json-file-log-cap
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -16,6 +24,7 @@ services:
       retries: 10
 
   migrate:
+    logging: *json-file-log-cap
     image: postgres:16-alpine
     depends_on:
       postgres:
@@ -29,6 +38,7 @@ services:
     networks: [avg-internal]
 
   hermes-permissions:
+    logging: *json-file-log-cap
     image: alpine:3.20
     depends_on:
       migrate:
@@ -68,6 +78,7 @@ services:
   # So the copy stamps its own identity, and ops/deploy-monitor.sh restarts
   # every consumer whose stamp it changed. See .mcp-bundle-id below.
   mcp-bundle:
+    logging: *json-file-log-cap
     build:
       context: ..
       dockerfile: ops/Dockerfile.node
@@ -120,6 +131,7 @@ services:
     networks: [avg-internal]
 
   mcp-env:
+    logging: *json-file-log-cap
     image: alpine:3.20
     depends_on:
       hermes-permissions:
@@ -174,6 +186,7 @@ services:
   # It never deletes: Hermes writes its own skills into this volume at runtime
   # and mirroring the repo would destroy them.
   skills-sync:
+    logging: *json-file-log-cap
     build:
       context: ..
       dockerfile: ops/Dockerfile.node
@@ -205,6 +218,7 @@ services:
     networks: [avg-internal]
 
   skills-observer:
+    logging: *json-file-log-cap
     build:
       context: ..
       dockerfile: ops/Dockerfile.node
@@ -257,6 +271,7 @@ services:
     networks: [avg-internal]
 
   slack-operator:
+    logging: *json-file-log-cap
     build:
       context: ..
       dockerfile: ops/Dockerfile.node
@@ -741,6 +756,7 @@ services:
       - "127.0.0.1:${SLACK_OPERATOR_HTTP_PORT:-8790}:${SLACK_OPERATOR_HTTP_PORT:-8790}"
 
   testbed-mission-runner:
+    logging: *json-file-log-cap
     init: true
     build:
       context: ..
@@ -851,6 +867,7 @@ services:
     networks: [avg-internal]
 
   test-wallet-signer:
+    logging: *json-file-log-cap
     build:
       context: ..
       dockerfile: ops/Dockerfile.node
@@ -895,6 +912,7 @@ services:
       - "127.0.0.1:${TEST_WALLET_SIGNER_PORT:-8791}:${TEST_WALLET_SIGNER_PORT:-8791}"
 
   codex-task-runner:
+    logging: *json-file-log-cap
     init: true
     build:
       context: ..
@@ -947,6 +965,7 @@ services:
   # excludes this service unless the operator selects profile "dispatch", and
   # the independent runtime authority flag remains false unless explicitly set.
   harness-dispatcher:
+    logging: *json-file-log-cap
     init: true
     build:
       context: ..
@@ -1001,6 +1020,7 @@ services:
   # stack must not remove the process responsible for reporting that outage.
   # Slack remains disabled until the operator provisions the one webhook env.
   harness-watchdog:
+    logging: *json-file-log-cap
     init: true
     build:
       context: ..
@@ -1035,6 +1055,7 @@ services:
   # lands, and provisions the auth secrets in .env.prod. For SUB billing,
   # leave ANTHROPIC_API_KEY UNSET (an empty value is treated as absent).
   claude-task-runner:
+    logging: *json-file-log-cap
     init: true
     build:
       context: ..
@@ -1109,6 +1130,7 @@ services:
   # the claude-runner's flag). The worker still refuses every task until
   # CLAUDE_BRANCH_WORKER_ALLOWED_REPOS is populated.
   test-writer-task-runner:
+    logging: *json-file-log-cap
     init: true
     build:
       context: ..
@@ -1178,6 +1200,7 @@ services:
   # SECURITY_TASK_RUNNER_ENABLED=1 are both set. High-risk findings remain
   # proposes-only/escalate in the role prompt; merge/deploy are human-gated.
   security-task-runner:
+    logging: *json-file-log-cap
     init: true
     build:
       context: ..
@@ -1238,6 +1261,7 @@ services:
   # C3 docs specialist runner — same off-by-default Claude-family runner
   # pattern, pinned to agent=="docs" and isolated by the per-agent claim filter.
   docs-task-runner:
+    logging: *json-file-log-cap
     init: true
     build:
       context: ..
@@ -1296,6 +1320,7 @@ services:
     networks: [avg-internal]
 
   hermes:
+    logging: *json-file-log-cap
     image: ${HERMES_IMAGE}
     restart: unless-stopped
     depends_on:

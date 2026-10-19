@@ -10,8 +10,17 @@
 # - Optional monitor service URL: http://slack-operator:8790
 # - Access apps: self-hosted, same hostnames, allow only explicit operator
 #   emails.
+
+# json-file log cap shared by every service in this file (anchors do not cross files).
+x-logging: &json-file-log-cap
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   cloudflared:
+    logging: *json-file-log-cap
     image: ${CLOUDFLARED_IMAGE:-cloudflare/cloudflared:latest}
     profiles: ["command-center"]
     restart: unless-stopped
