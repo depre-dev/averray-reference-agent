@@ -1,3 +1,11 @@
+# json-file log cap shared by every service in this file (anchors do not cross files).
+x-logging: &json-file-log-cap
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
+    logging: *json-file-log-cap
     ports: []
